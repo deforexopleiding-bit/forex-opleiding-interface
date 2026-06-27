@@ -810,10 +810,23 @@ let _takenAssignedByMe  = [];
 // Wordt gebruikt voor de KPI 'Mijn taken' en voor het highlighten van
 // eigen reacties in de thread.
 let currentUserId = null;
+// Volledige naam (fallback email) — gebruikt om self-assigned taken een
+// zichtbaar 'Toegewezen aan: <jij>' te geven in de UI voordat een re-fetch
+// terug is met de server-naam.
+let currentUserName = '';
 // UI-hint of de huidige user super_admin is. Server doet de echte check
 // (api/taken.js isSuperAdmin); deze flag verbergt enkel knoppen die de
 // huidige user toch zou worden geweigerd.
 let currentIsSuperAdmin = false;
+
+// "Toegewezen door mij" telt alleen taken die aan een ánder zijn
+// gedelegeerd. Self-assigned taken (creator == assignee) horen in
+// 'Mijn taken' en mogen hier dus NIET worden meegeteld.
+function assignedByOthersOnly(arr) {
+  if (!Array.isArray(arr)) return [];
+  if (!currentUserId) return arr.slice();
+  return arr.filter((t) => t && t.assignedToId && t.assignedToId !== currentUserId);
+}
 
 // Bepaalt of de huidige user een taak mag bewerken/verwijderen.
 // Server-side identieke regel: maker OF super_admin (manager NIET).
@@ -867,7 +880,11 @@ async function loadTaken() {
     console.warn('[taken] loadTaken failed:', e?.message || e);
   }
   // Board toont de actieve scope; KPI's gebruiken beide sets onafhankelijk.
-  taken = (currentScope === 'assigned_by_me') ? _takenAssignedByMe : _takenMine;
+  // 'Toegewezen door mij' board = alleen aan een ánder gedelegeerd
+  // (self-assigned hoort in 'Mijn taken').
+  taken = (currentScope === 'assigned_by_me')
+    ? assignedByOthersOnly(_takenAssignedByMe)
+    : _takenMine;
   render();
 }
 async function loadTakenFromSupabase() {
@@ -1023,7 +1040,11 @@ function setScope(s) {
   document.getElementById('tabScopeMine').classList.toggle('active', s === 'mine');
   document.getElementById('tabScopeAssignedBy').classList.toggle('active', s === 'assigned_by_me');
   // Wissel board-data uit lokale sets — geen extra fetch nodig.
-  taken = (s === 'assigned_by_me') ? _takenAssignedByMe : _takenMine;
+  // 'Toegewezen door mij' = alleen taken aan een ander; self-taken zien we
+  // in 'Mijn taken'.
+  taken = (s === 'assigned_by_me')
+    ? assignedByOthersOnly(_takenAssignedByMe)
+    : _takenMine;
   render();
 }
 
@@ -1166,7 +1187,9 @@ function updateStats() {
       afgerondDezeWeek++;
     }
   }
-  for (const t of _takenAssignedByMe) {
+  // 'Toegewezen door mij' telt alleen taken die je aan een ánder gaf;
+  // self-assigned hoort in 'Mijn open taken' (geen dubbele telling).
+  for (const t of assignedByOthersOnly(_takenAssignedByMe)) {
     if (t.status !== 'done') toegewezenDoorMij++;
   }
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
@@ -1301,7 +1324,7 @@ function closeNieuweTaak() {
   document.getElementById('overlayNieuw').classList.remove('open');
 }
 
-function saveNieuweTaak() {
+async function saveNieuweTaak() {
   const titel = document.getElementById('fTitel').value.trim();
   if (!titel) { document.getElementById('fTitel').focus(); return; }
 
@@ -1311,9 +1334,9 @@ function saveNieuweTaak() {
 
   // Assignee komt uit fToegewezen = profiles.id (cross-rol). Server zet 'm
   // op assigned_to_id via toRow(task.assignedToId).
-  const assignedToId = document.getElementById('fToegewezen').value || '';
+  let assignedToId = document.getElementById('fToegewezen').value || '';
   const assignedSel  = document.getElementById('fToegewezen');
-  const assignedToName = assignedToId
+  let assignedToName = assignedToId
     ? (assignedSel.options[assignedSel.selectedIndex]?.textContent || '').split('  ·  ')[0].trim()
     : '';
 
@@ -1333,6 +1356,13 @@ function saveNieuweTaak() {
       t.deadline       = document.getElementById('fDeadline').value;
     }
   } else {
+    // Self-default: zonder gekozen assignee gaat de taak naar de maker zelf.
+    // Zo komt 'ie correct in 'Mijn open taken' i.p.v. een ongeadresseerde
+    // lijst, en de modal toont meteen "Toegewezen aan: <jij>".
+    if (!assignedToId && currentUserId) {
+      assignedToId   = currentUserId;
+      assignedToName = currentUserName || '';
+    }
     taken.push({
       id:             crypto.randomUUID(),
       titel,
@@ -1341,6 +1371,10 @@ function saveNieuweTaak() {
       categorie:      document.getElementById('fCategorie').value,
       assignedToId:   assignedToId,
       assignedToName: assignedToName,
+      // Lokale push krijgt vast de creator-velden (server zet ze ook). Zo
+      // werkt canEditTask() direct, vóór de re-fetch terug is.
+      createdById:    currentUserId || '',
+      createdByName:  currentUserName || '',
       deadline:       document.getElementById('fDeadline').value,
       emailId,
       emailSubject,
@@ -1353,8 +1387,18 @@ function saveNieuweTaak() {
 
   save('taken_lijst', taken);
   const savedTaak = editMode ? taakById(detailId) : taken[taken.length - 1];
-  if (savedTaak) syncTaakToSupabase(savedTaak);
   closeNieuweTaak();
+  if (savedTaak) {
+    const ok = await syncTaakToSupabase(savedTaak);
+    if (ok) {
+      // Server-truth ophalen: enricht createdByName/assignedToName en
+      // herstelt scope-buckets (mine vs assigned_by_me). Zonder dit zou
+      // 'Toegewezen door' leeg blijven en zou een nieuwe taak in de
+      // verkeerde tab kunnen verschijnen.
+      await loadTaken();
+      return;
+    }
+  }
   render();
 }
 
@@ -1591,7 +1635,9 @@ async function deleteTaak() {
   taken = taken.filter(t => t.id !== id);
   save('taken_lijst', taken);
   closeDetail();
-  render();
+  // Server-truth voor beide scopes ophalen (mine + assigned_by_me)
+  // zodat KPI's en buckets meteen kloppen.
+  await loadTaken();
 }
 
 // ════════════════════════════════════════════════════
@@ -1667,6 +1713,9 @@ async function init() {
   const profile = await window.AuthShared.requireAuth();
   if (!profile) return;
   currentUserId = profile.id || null;
+  // Voor self-assigned default in saveNieuweTaak en createdByName-fallback
+  // voordat de re-fetch terug is met server-enrichment.
+  currentUserName = profile.full_name || profile.email || '';
   // UI-hint: super_admin via primaire rol OF user_roles union (zelfde
   // bron als RBAC-permissions in de browser). Server-side dekt isSuperAdmin().
   currentIsSuperAdmin = (profile.role === 'super_admin');
