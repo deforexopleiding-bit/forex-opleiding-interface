@@ -567,16 +567,16 @@
   <!-- Stats -->
   <div class="stats-grid">
     <div class="stat-card">
-      <div class="stat-label">Totaal open</div>
-      <div class="stat-val cyan" id="statTotaal">0</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Mijn taken</div>
+      <div class="stat-label">Mijn open taken</div>
       <div class="stat-val violet" id="statMijn">0</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Vervallen</div>
       <div class="stat-val red" id="statVervallen">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Toegewezen door mij</div>
+      <div class="stat-val cyan" id="statToegewezenDoorMij">0</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Afgerond deze week</div>
@@ -595,9 +595,12 @@
     </select>
     <select class="filter-select" id="filterCat" onchange="render()">
       <option value="">Alle categorieën</option>
-      <option value="E-mail">E-mail</option>
-      <option value="Factuur">Factuur</option>
+      <option value="Sales">Sales</option>
+      <option value="Onboarding">Onboarding</option>
+      <option value="Mentoring">Mentoring</option>
+      <option value="Finance">Finance</option>
       <option value="Klant">Klant</option>
+      <option value="Marketing">Marketing</option>
       <option value="Intern">Intern</option>
       <option value="Overige">Overige</option>
     </select>
@@ -677,11 +680,14 @@
       <div class="form-group">
         <label class="form-label">Categorie</label>
         <select class="form-select" id="fCategorie">
-          <option value="Overige">Overige</option>
-          <option value="E-mail">E-mail</option>
-          <option value="Factuur">Factuur</option>
+          <option value="Sales">Sales</option>
+          <option value="Onboarding">Onboarding</option>
+          <option value="Mentoring">Mentoring</option>
+          <option value="Finance">Finance</option>
           <option value="Klant">Klant</option>
+          <option value="Marketing">Marketing</option>
           <option value="Intern">Intern</option>
+          <option value="Overige">Overige</option>
         </select>
       </div>
     </div>
@@ -769,7 +775,20 @@
 // ════════════════════════════════════════════════════
 
 const PRIO_ORDER = { Urgent: 4, Hoog: 3, Normaal: 2, Laag: 1 };
-const CAT_ICONS  = { 'E-mail': '✉', Factuur: '🧾', Klant: '🤝', Intern: '⚙', Overige: '📌' };
+const CAT_ICONS  = {
+  Sales:       '💼',
+  Onboarding:  '🧭',
+  Mentoring:   '🎓',
+  Finance:     '💶',
+  Klant:       '🤝',
+  Marketing:   '📣',
+  Intern:      '⚙',
+  Overige:     '📌',
+  // Legacy keys — oudere taken kunnen nog 'E-mail' of 'Factuur' bevatten.
+  'E-mail':    '✉',
+  Factuur:     '🧾',
+};
+const CAT_OPTIONS = ['Sales', 'Onboarding', 'Mentoring', 'Finance', 'Klant', 'Marketing', 'Intern', 'Overige'];
 
 let taken     = load('taken_lijst') || [];
 let collegas  = load('taken_collegas') || defaultCollegas();
@@ -781,6 +800,11 @@ let editMode  = false; // true = modal is editing existing task
 // Server-side scope: 'mine' = aan mij toegewezen; 'assigned_by_me' = door
 // mij aangemaakt. Vervangt de oude #userSelect-flow. Sticky via localStorage.
 let currentScope = (load('taken_scope') === 'assigned_by_me') ? 'assigned_by_me' : 'mine';
+
+// Beide scopes worden bij elke fetch geladen zodat KPI's altijd kloppen,
+// ongeacht welke tab actief is. Board rendert uit de actieve set.
+let _takenMine          = [];
+let _takenAssignedByMe  = [];
 
 // auth.users.id van de ingelogde user — gezet in init() na requireAuth.
 // Wordt gebruikt voor de KPI 'Mijn taken' en voor het highlighten van
@@ -810,12 +834,28 @@ function save(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
 
 // ── Supabase sync ────────────────────────────────────────────────────────────
 // Server-side scoped GET; user.id is hard server-side, scope-param wisselt
-// alleen tussen 'mine' en 'assigned_by_me'.
+// alleen tussen 'mine' en 'assigned_by_me'. We laden BEIDE scopes parallel
+// zodat de KPI's altijd kloppen (mine + assigned_by_me) ongeacht de actieve
+// tab. Geen extra fetch bij tab-wissel — daar volstaat render().
 async function loadTaken() {
-  const res = await window.AgentShared.apiFetch('/api/taken?scope=' + encodeURIComponent(currentScope));
-  if (!res.ok) return;
-  const d = await res.json();
-  taken = Array.isArray(d?.taken) ? d.taken : [];
+  try {
+    const [rMine, rAssBy] = await Promise.all([
+      window.AgentShared.apiFetch('/api/taken?scope=mine'),
+      window.AgentShared.apiFetch('/api/taken?scope=assigned_by_me'),
+    ]);
+    if (rMine.ok) {
+      const d = await rMine.json();
+      _takenMine = (Array.isArray(d?.taken) ? d.taken : []).map(fromRow);
+    }
+    if (rAssBy.ok) {
+      const d = await rAssBy.json();
+      _takenAssignedByMe = (Array.isArray(d?.taken) ? d.taken : []).map(fromRow);
+    }
+  } catch (e) {
+    console.warn('[taken] loadTaken failed:', e?.message || e);
+  }
+  // Board toont de actieve scope; KPI's gebruiken beide sets onafhankelijk.
+  taken = (currentScope === 'assigned_by_me') ? _takenAssignedByMe : _takenMine;
   render();
 }
 async function loadTakenFromSupabase() {
@@ -865,6 +905,13 @@ function fromRow(r) {
     // assigned_to_name (full_name fallback email) via taken.js GET-enrichment.
     assignedToId:   r.assigned_to_id   || '',
     assignedToName: r.assigned_to_name || '',
+    // Multi-assignee array (taken_assignees-join). Fallback voor oudere
+    // taken waar de assignee alleen daar staat (assigned_to_id leeg).
+    // Shape: [{ assignee_id, assignee_name }]
+    assignees:      Array.isArray(r.assignees) ? r.assignees : [],
+    // Creator (server enrich: created_by + name).
+    createdById:    r.created_by      || '',
+    createdByName:  r.created_by_name || '',
     deadline:       r.deadline       || '',
     emailId:        r.email_id       || '',
     emailSubject:   r.email_subject  || '',
@@ -932,6 +979,7 @@ function fmtDate(iso) {
 
 // Server-side scope wisselen. 'mine' = taken aan mij toegewezen;
 // 'assigned_by_me' = taken die ik heb aangemaakt voor anderen.
+// Geen refetch bij wissel — we hebben beide sets al geladen.
 function setScope(s) {
   if (s !== 'mine' && s !== 'assigned_by_me') s = 'mine';
   if (currentScope === s) return;
@@ -940,8 +988,9 @@ function setScope(s) {
   // Update tab-knop visueel.
   document.getElementById('tabScopeMine').classList.toggle('active', s === 'mine');
   document.getElementById('tabScopeAssignedBy').classList.toggle('active', s === 'assigned_by_me');
-  // Herlaad taken met nieuwe scope.
-  loadTaken().catch((e) => console.warn('[taken] loadTaken', e?.message || e));
+  // Wissel board-data uit lokale sets — geen extra fetch nodig.
+  taken = (s === 'assigned_by_me') ? _takenAssignedByMe : _takenMine;
+  render();
 }
 
 // Backward-compat stub: oude code roept deze nog hier en daar aan; we negeren
@@ -1038,7 +1087,10 @@ function taskCard(t) {
   }
 
   // Assignee chip: avatar-initialen + naam uit server-veld assignedToName.
-  const assigneeName = t.assignedToName || '';
+  // Fallback voor oudere taken: gebruik eerste entry uit multi-assignee-array.
+  const assigneeName = t.assignedToName
+    || (Array.isArray(t.assignees) && t.assignees[0]?.assignee_name)
+    || '';
   const avatar = assigneeName
     ? `<div class="collega-avatar" title="${escHtml(assigneeName)}" style="background:linear-gradient(135deg,#0ea5e9,#6366f1);color:#fff">${escHtml(initials(assigneeName))}</div>`
     : '';
@@ -1068,23 +1120,26 @@ function taskCard(t) {
 }
 
 function updateStats() {
-  const nu = new Date();
   const bow = startOfWeek();
-  let totaal = 0, mijn = 0, vervallen = 0, afgerond = 0;
-  taken.forEach(t => {
+  // KPI's berekenen we onafhankelijk van de actieve tab — gebruik altijd
+  // de volle sets _takenMine + _takenAssignedByMe.
+  let mijnOpen = 0, vervallen = 0, toegewezenDoorMij = 0, afgerondDezeWeek = 0;
+  for (const t of _takenMine) {
     if (t.status !== 'done') {
-      totaal++;
-      // 'Mijn taken'-teller telt taken die aan de ingelogde user toegewezen zijn.
-      if (currentUserId && t.assignedToId === currentUserId) mijn++;
+      mijnOpen++;
       if (isOverdue(t)) vervallen++;
-    } else {
-      if (t.afgerondOp && new Date(t.afgerondOp) >= bow) afgerond++;
+    } else if (t.afgerondOp && new Date(t.afgerondOp) >= bow) {
+      afgerondDezeWeek++;
     }
-  });
-  document.getElementById('statTotaal').textContent   = totaal;
-  document.getElementById('statMijn').textContent     = mijn;
-  document.getElementById('statVervallen').textContent = vervallen;
-  document.getElementById('statAfgerond').textContent = afgerond;
+  }
+  for (const t of _takenAssignedByMe) {
+    if (t.status !== 'done') toegewezenDoorMij++;
+  }
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  set('statMijn',              mijnOpen);
+  set('statVervallen',         vervallen);
+  set('statToegewezenDoorMij', toegewezenDoorMij);
+  set('statAfgerond',          afgerondDezeWeek);
 }
 
 function escHtml(s) {
@@ -1262,11 +1317,18 @@ function openDetail(id) {
   document.getElementById('detailOmschrijving').textContent = t.omschrijving || '';
 
   // meta
-  const assigneeLabel = t.assignedToName || '—';
+  // Fallback voor oudere taken: server vult assigned_to_name pas in als
+  // assigned_to_id gezet is. Als die leeg is maar er staat wel een rij in
+  // taken_assignees, pakken we de eerste daaruit zodat het veld niet leeg blijft.
+  const assigneeLabel = t.assignedToName
+    || (Array.isArray(t.assignees) && t.assignees[0]?.assignee_name)
+    || '—';
+  const creatorLabel = t.createdByName || '—';
   document.getElementById('detailMeta').innerHTML = `
     <div class="detail-meta-item"><div class="detail-meta-label">Prioriteit</div><div class="detail-meta-val">${t.prioriteit}</div></div>
     <div class="detail-meta-item"><div class="detail-meta-label">Categorie</div><div class="detail-meta-val">${CAT_ICONS[t.categorie]||''} ${t.categorie}</div></div>
     <div class="detail-meta-item"><div class="detail-meta-label">Toegewezen aan</div><div class="detail-meta-val">${escHtml(assigneeLabel)}</div></div>
+    <div class="detail-meta-item"><div class="detail-meta-label">Toegewezen door</div><div class="detail-meta-val">${escHtml(creatorLabel)}</div></div>
     <div class="detail-meta-item"><div class="detail-meta-label">Deadline</div><div class="detail-meta-val"${isOverdue(t) ? ' style="color:var(--red)"' : ''}>${fmtDate(t.deadline)}</div></div>
     <div class="detail-meta-item"><div class="detail-meta-label">Aangemaakt</div><div class="detail-meta-val">${fmtDate(t.aangemaakt)}</div></div>
     ${t.afgerondOp ? `<div class="detail-meta-item"><div class="detail-meta-label">Afgerond</div><div class="detail-meta-val" style="color:var(--green)">${fmtDate(t.afgerondOp)}</div></div>` : ''}
