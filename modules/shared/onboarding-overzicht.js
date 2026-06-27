@@ -411,16 +411,100 @@
       </div>`;
   }
 
+  // Portal-kebab — één <div> op document.body met position:fixed; flip-up
+  // als er onderaan geen ruimte is; sluit op outside-click / scroll
+  // (capture, dus ook scroll-containers) / Escape / resize.
+  let _actMenu = null;
+  function ensureKebabStyles() {
+    if (document.getElementById('ob-kebab-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'ob-kebab-styles';
+    s.textContent = `
+      .ob-kebab{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;
+        border:1px solid var(--border,#e2e8f0);border-radius:7px;background:var(--bg-elev,#fff);
+        color:var(--text-dim,#475569);cursor:pointer;font-size:16px;line-height:1;}
+      .ob-kebab:hover{background:var(--bg-elev,#f1f5f9);}
+      .ob-act-menu{position:fixed;z-index:9999;min-width:178px;background:var(--bg,#fff);
+        border:1px solid var(--border,#e2e8f0);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.16);
+        padding:5px;display:none;}
+      .ob-act-menu.open{display:block;}
+      .ob-act-menu button{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:transparent;
+        border:none;border-radius:7px;padding:9px 11px;font-size:13.5px;color:var(--text,#0f172a);cursor:pointer;
+        white-space:nowrap;}
+      .ob-act-menu button:hover{background:var(--bg-elev,#f1f5f9);}
+      .ob-act-menu button.danger{color:#b91c1c;}
+      .ob-act-menu button.danger:hover{background:rgba(220,38,38,.07);}
+      .ob-act-menu .ti{font-size:16px;flex:0 0 auto;}`;
+    document.head.appendChild(s);
+  }
+  function closeActMenu() {
+    if (!_actMenu) return;
+    _actMenu.classList.remove('open');
+    if (_actMenu._kebab) { _actMenu._kebab.setAttribute('aria-expanded', 'false'); _actMenu._kebab = null; }
+  }
+  function ensureActMenu() {
+    if (_actMenu) return _actMenu;
+    ensureKebabStyles();
+    _actMenu = document.createElement('div');
+    _actMenu.className = 'ob-act-menu';
+    _actMenu.setAttribute('role', 'menu');
+    document.body.appendChild(_actMenu);
+    document.addEventListener('mousedown', (e) => {
+      if (!_actMenu.classList.contains('open')) return;
+      if (_actMenu.contains(e.target)) return;
+      if (e.target.closest && e.target.closest('.ob-kebab')) return;
+      closeActMenu();
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeActMenu(); });
+    window.addEventListener('scroll', closeActMenu, true); // capture → ook scroll-containers
+    window.addEventListener('resize', closeActMenu);
+    return _actMenu;
+  }
+  function openKebabMenu(k) {
+    const menu = ensureActMenu();
+    if (menu.classList.contains('open') && menu._kebab === k) { closeActMenu(); return; }
+    const id = k.dataset.id, token = k.dataset.token || '', archived = k.dataset.archived === '1';
+    const archItem = archived
+      ? `<button type="button" data-act="restore"><i class="ti ti-archive-off"></i>Herstellen</button>`
+      : `<button type="button" data-act="archive" class="danger"><i class="ti ti-archive"></i>Archiveer</button>`;
+    menu.innerHTML =
+      `<button type="button" data-act="copy"><i class="ti ti-copy"></i>Link kopiëren</button>` +
+      `<button type="button" data-act="view"><i class="ti ti-eye"></i>Bekijk</button>` +
+      archItem;
+    menu.querySelectorAll('button').forEach((mb) => {
+      mb.addEventListener('click', () => {
+        const act = mb.dataset.act;
+        closeActMenu();
+        if (act === 'copy')    return copyLink(token, k);
+        if (act === 'view')    return openDetail(id);
+        if (act === 'archive') return doArchive(id, 'archive');
+        if (act === 'restore') return doArchive(id, 'restore');
+      });
+    });
+    // Eerst tonen (voor offsetWidth/Height), dan positioneren.
+    menu.classList.add('open');
+    const rect = k.getBoundingClientRect();
+    const mw = menu.offsetWidth || 178, mh = menu.offsetHeight || 130, pad = 8;
+    let left = rect.right - mw;                 // rechts uitlijnen op de kebab
+    if (left + mw > window.innerWidth - pad) left = window.innerWidth - pad - mw;
+    if (left < pad) left = pad;
+    let top = rect.bottom + 6;                  // standaard onder de kebab
+    if (top + mh > window.innerHeight - pad) top = rect.top - mh - 6; // anders erboven
+    if (top < pad) top = pad;
+    menu.style.left = left + 'px';
+    menu.style.top  = top + 'px';
+    menu._kebab = k;
+    k.setAttribute('aria-expanded', 'true');
+  }
+
   function actionsCellHtml(r) {
     const isArchived = (r.status === 'gearchiveerd');
-    const archBtn = isArchived
-      ? `<button type="button" class="ob-act" data-act="restore" data-id="${esc(r.id)}"><i class="ti ti-archive-off"></i>Herstellen</button>`
-      : `<button type="button" class="ob-act danger" data-act="archive" data-id="${esc(r.id)}"><i class="ti ti-archive"></i>Archiveer</button>`;
     return `
       <div class="ob-row-actions" style="justify-content:flex-end">
-        <button type="button" class="ob-act" data-act="copy" data-token="${esc(r.token || '')}"><i class="ti ti-copy"></i>Link</button>
-        <button type="button" class="ob-act primary" data-act="view" data-id="${esc(r.id)}"><i class="ti ti-eye"></i>Bekijk</button>
-        ${archBtn}
+        <button type="button" class="ob-kebab" aria-label="Acties" aria-haspopup="true" aria-expanded="false"
+          data-id="${esc(r.id)}" data-token="${esc(r.token || '')}" data-archived="${isArchived ? '1' : '0'}">
+          <i class="ti ti-dots-vertical"></i>
+        </button>
       </div>`;
   }
 
@@ -459,15 +543,10 @@
       });
     });
 
-    // Action-knoppen.
-    document.querySelectorAll('.ob-act').forEach((b) => {
-      b.addEventListener('click', () => {
-        const act = b.dataset.act;
-        if (act === 'copy')    return copyLink(b.dataset.token, b);
-        if (act === 'view')    return openDetail(b.dataset.id);
-        if (act === 'archive') return doArchive(b.dataset.id, 'archive');
-        if (act === 'restore') return doArchive(b.dataset.id, 'restore');
-      });
+    // Kebab — opent het portal-menu; alle acties (copy/view/archive/restore)
+    // worden vanuit het menu zelf aan copyLink/openDetail/doArchive gerouteerd.
+    document.querySelectorAll('.ob-kebab').forEach((k) => {
+      k.addEventListener('click', (e) => { e.stopPropagation(); openKebabMenu(k); });
     });
   }
 
