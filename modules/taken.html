@@ -364,6 +364,20 @@
     }
     .overlay.open { display: flex; }
 
+    /* Tab-active-state voor de scope-switcher (Mijn taken / Toegewezen door mij). */
+    .tk-tab-btn {
+      background: transparent !important;
+      color: var(--text-dim) !important;
+      border: 1px solid transparent !important;
+      transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+    }
+    .tk-tab-btn:hover { color: var(--text) !important; }
+    .tk-tab-btn.active {
+      background: var(--brand-primary, #093d54) !important;
+      color: #fff !important;
+      border-color: var(--brand-primary, #093d54) !important;
+      box-shadow: 0 1px 0 rgba(0,0,0,0.04);
+    }
     .modal {
       background: var(--bg-elev);
       border: 1px solid var(--border-strong);
@@ -543,10 +557,6 @@
         <button type="button" class="btn btn-ghost tk-tab-btn" id="tabScopeAssignedBy"
                 style="padding:6px 10px;font-size:12px" onclick="setScope('assigned_by_me')">Toegewezen door mij</button>
       </div>
-      <button class="btn btn-ghost" id="takenCollegaBtn" onclick="openCollega()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        Collega's
-      </button>
       <button class="btn" id="takenNieuwBtn" onclick="openNieuweTaak()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         Nieuwe taak
@@ -576,9 +586,6 @@
 
   <!-- Filters -->
   <div class="filters-bar">
-    <select class="filter-select" id="filterCollega" onchange="render()">
-      <option value="">Alle collega's</option>
-    </select>
     <select class="filter-select" id="filterPrio" onchange="render()">
       <option value="">Alle prioriteiten</option>
       <option value="Urgent">Urgent</option>
@@ -750,21 +757,8 @@
   </div>
 </div>
 
-<!-- ══ Modal: Collega-beheer ══ -->
-<div class="overlay" id="overlayCollega" onclick="overlayClick(event,'overlayCollega')">
-  <div class="modal" onclick="event.stopPropagation()">
-    <div class="modal-header">
-      <div class="modal-title">Collega's beheren</div>
-      <button class="modal-close" onclick="closeCollega()">×</button>
-    </div>
-    <div class="collega-list" id="collegaList"></div>
-    <button class="btn btn-ghost" style="width:100%" onclick="addCollega()">+ Collega toevoegen</button>
-    <div class="form-actions">
-      <button class="btn btn-ghost" onclick="closeCollega()">Annuleren</button>
-      <button class="btn" onclick="saveCollegas()">Opslaan</button>
-    </div>
-  </div>
-</div>
+<!-- Collega-beheer-modal verwijderd — assignee komt nu uit /api/profiles-list
+     en hangt af van auth.users / profiles. Geen lokale beheerde lijst meer. -->
 
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
@@ -787,6 +781,11 @@ let editMode  = false; // true = modal is editing existing task
 // Server-side scope: 'mine' = aan mij toegewezen; 'assigned_by_me' = door
 // mij aangemaakt. Vervangt de oude #userSelect-flow. Sticky via localStorage.
 let currentScope = (load('taken_scope') === 'assigned_by_me') ? 'assigned_by_me' : 'mine';
+
+// auth.users.id van de ingelogde user — gezet in init() na requireAuth.
+// Wordt gebruikt voor de KPI 'Mijn taken' en voor het highlighten van
+// eigen reacties in de thread.
+let currentUserId = null;
 
 // Cross-rol assignee-bron uit /api/profiles-list (alle actieve gebruikers).
 let _profilesList = null;
@@ -856,19 +855,23 @@ async function loadTakenFromSupabase() {
 
 function fromRow(r) {
   return {
-    id:            r.id,
-    titel:         r.titel          || '',
-    omschrijving:  r.omschrijving   || '',
-    prioriteit:    r.prioriteit     || 'Normaal',
-    categorie:     r.categorie      || 'Overige',
-    toegewezenAan: r.toegewezen_aan || '',
-    deadline:      r.deadline       || '',
-    emailId:       r.email_id       || '',
-    emailSubject:  r.email_subject  || '',
-    status:        r.status         || 'todo',
-    notities:      r.notities       || '',
-    aangemaakt:    r.aangemaakt     || r.updated_at,
-    afgerondOp:    r.afgerond_op    || null
+    id:             r.id,
+    titel:          r.titel          || '',
+    omschrijving:   r.omschrijving   || '',
+    prioriteit:     r.prioriteit     || 'Normaal',
+    categorie:      r.categorie      || 'Overige',
+    // User-based assignee (vervangt legacy 'toegewezenAan' = collega-naam).
+    // Server geeft assigned_to_id (profiles.id = auth.users.id) +
+    // assigned_to_name (full_name fallback email) via taken.js GET-enrichment.
+    assignedToId:   r.assigned_to_id   || '',
+    assignedToName: r.assigned_to_name || '',
+    deadline:       r.deadline       || '',
+    emailId:        r.email_id       || '',
+    emailSubject:   r.email_subject  || '',
+    status:         r.status         || 'todo',
+    notities:       r.notities       || '',
+    aangemaakt:     r.aangemaakt     || r.updated_at,
+    afgerondOp:     r.afgerond_op    || null
   };
 }
 
@@ -894,7 +897,10 @@ function defaultCollegas() {
   ];
 }
 
-function collegaById(id) { return collegas.find(c => c.id === id); }
+// Legacy: voorheen lokale collega's via localStorage. Behoud lege stub —
+// niets in de huidige flow hangt er nog van af, maar er kunnen externe
+// callers (RBAC/agents) zijn die deze naam roepen.
+function collegaById(/* id */) { return null; }
 function taakById(id)     { return taken.find(t => t.id === id); }
 
 function initials(naam) {
@@ -960,40 +966,22 @@ async function populeerToegewezenDropdownProfiles() {
   });
   if (prevVal) sel.value = prevVal;
 }
-function populeerToegewezenDropdown() {
-  const sel = document.getElementById('fToegewezen');
-  sel.innerHTML = '<option value="">— Niemand —</option>';
-  collegas.filter(c => c.naam).forEach(c => {
-    const o = document.createElement('option');
-    o.value = c.id; o.textContent = c.naam;
-    sel.appendChild(o);
-  });
-}
-
-function populeerFilterCollega() {
-  const sel = document.getElementById('filterCollega');
-  const cur = sel.value;
-  sel.innerHTML = '<option value="">Alle collega\'s</option>';
-  collegas.filter(c => c.naam).forEach(c => {
-    const o = document.createElement('option');
-    o.value = c.naam; o.textContent = c.naam;
-    if (c.naam === cur) o.selected = true;
-    sel.appendChild(o);
-  });
-}
+// Legacy collega-dropdowns zijn verwijderd (vervangen door
+// populeerToegewezenDropdownProfiles op /api/profiles-list). Behoud lege
+// stubs zodat oude inline-callers niet exploderen.
+function populeerToegewezenDropdown() { /* no-op — legacy collega-systeem weg */ }
+function populeerFilterCollega()      { /* no-op — #filterCollega weg */ }
 
 // ════════════════════════════════════════════════════
 // Render
 // ════════════════════════════════════════════════════
 
 function filteredTaken() {
-  const fc = document.getElementById('filterCollega').value;
   const fp = document.getElementById('filterPrio').value;
   const fcat = document.getElementById('filterCat').value;
   const sort = document.getElementById('sortBy').value;
 
   let list = taken.filter(t => {
-    if (fc && (collegaById(t.toegewezenAan)?.naam || t.toegewezenAan) !== fc) return false;
     if (fp && t.prioriteit !== fp) return false;
     if (fcat && t.categorie !== fcat) return false;
     return true;
@@ -1041,7 +1029,6 @@ function render() {
 }
 
 function taskCard(t) {
-  const c = collegaById(t.toegewezenAan);
   const od = isOverdue(t);
   const prioClass = t.prioriteit ? t.prioriteit.toLowerCase() : 'normaal';
 
@@ -1050,8 +1037,13 @@ function taskCard(t) {
     emailRef = `<div class="task-email-ref">✉ ${escHtml(t.emailSubject || t.emailId)}</div>`;
   }
 
-  const avatar = c
-    ? `<div class="collega-avatar" style="background:${c.kleur}">${initials(c.naam)}</div>`
+  // Assignee chip: avatar-initialen + naam uit server-veld assignedToName.
+  const assigneeName = t.assignedToName || '';
+  const avatar = assigneeName
+    ? `<div class="collega-avatar" title="${escHtml(assigneeName)}" style="background:linear-gradient(135deg,#0ea5e9,#6366f1);color:#fff">${escHtml(initials(assigneeName))}</div>`
+    : '';
+  const assigneeChip = assigneeName
+    ? `<span class="task-assignee" style="font-size:11.5px;color:var(--text-dim);margin-left:6px">${escHtml(assigneeName)}</span>`
     : '';
 
   const overdueBadge = od ? '<span class="overdue-badge">VERLOPEN</span>' : '';
@@ -1069,7 +1061,7 @@ function taskCard(t) {
         ${emailRef}
       </div>
       <div class="task-footer">
-        ${avatar}
+        ${avatar}${assigneeChip}
         ${overdueBadge}
       </div>
     </div>`;
@@ -1082,7 +1074,8 @@ function updateStats() {
   taken.forEach(t => {
     if (t.status !== 'done') {
       totaal++;
-      if (t.toegewezenAan === huidig) mijn++;
+      // 'Mijn taken'-teller telt taken die aan de ingelogde user toegewezen zijn.
+      if (currentUserId && t.assignedToId === currentUserId) mijn++;
       if (isOverdue(t)) vervallen++;
     } else {
       if (t.afgerondOp && new Date(t.afgerondOp) >= bow) afgerond++;
@@ -1138,7 +1131,7 @@ function openNieuweTaak(prefill = {}) {
   const selC = document.getElementById('fCategorie');
   selC.value = prefill.categorie || 'Overige';
   const selT = document.getElementById('fToegewezen');
-  selT.value = prefill.toegewezenAan || huidig || '';
+  selT.value = prefill.assignedToId || '';
 
   const emailGroup = document.getElementById('emailRefGroup');
   if (prefill.emailId) {
@@ -1171,7 +1164,7 @@ function openEditTaak(id) {
   populeerToegewezenDropdownProfiles().catch((e) => console.warn('[taken] profiles dropdown', e?.message || e));
   document.getElementById('fPrioriteit').value  = t.prioriteit || 'Normaal';
   document.getElementById('fCategorie').value   = t.categorie || 'Overige';
-  document.getElementById('fToegewezen').value  = t.toegewezenAan || '';
+  document.getElementById('fToegewezen').value  = t.assignedToId || '';
 
   const emailGroup = document.getElementById('emailRefGroup');
   if (t.emailId) {
@@ -1198,25 +1191,35 @@ function saveNieuweTaak() {
   const emailId = emailEl.dataset.emailId || '';
   const emailSubject = emailEl.dataset.emailSubject || '';
 
+  // Assignee komt uit fToegewezen = profiles.id (cross-rol). Server zet 'm
+  // op assigned_to_id via toRow(task.assignedToId).
+  const assignedToId = document.getElementById('fToegewezen').value || '';
+  const assignedSel  = document.getElementById('fToegewezen');
+  const assignedToName = assignedToId
+    ? (assignedSel.options[assignedSel.selectedIndex]?.textContent || '').split('  ·  ')[0].trim()
+    : '';
+
   if (editMode && detailId) {
     const t = taakById(detailId);
     if (t) {
-      t.titel         = titel;
-      t.omschrijving  = document.getElementById('fOmschrijving').value.trim();
-      t.prioriteit    = document.getElementById('fPrioriteit').value;
-      t.categorie     = document.getElementById('fCategorie').value;
-      t.toegewezenAan = document.getElementById('fToegewezen').value;
-      t.deadline      = document.getElementById('fDeadline').value;
+      t.titel          = titel;
+      t.omschrijving   = document.getElementById('fOmschrijving').value.trim();
+      t.prioriteit     = document.getElementById('fPrioriteit').value;
+      t.categorie      = document.getElementById('fCategorie').value;
+      t.assignedToId   = assignedToId;
+      t.assignedToName = assignedToName;
+      t.deadline       = document.getElementById('fDeadline').value;
     }
   } else {
     taken.push({
-      id:            crypto.randomUUID(),
+      id:             crypto.randomUUID(),
       titel,
-      omschrijving:  document.getElementById('fOmschrijving').value.trim(),
-      prioriteit:    document.getElementById('fPrioriteit').value,
-      categorie:     document.getElementById('fCategorie').value,
-      toegewezenAan: document.getElementById('fToegewezen').value,
-      deadline:      document.getElementById('fDeadline').value,
+      omschrijving:   document.getElementById('fOmschrijving').value.trim(),
+      prioriteit:     document.getElementById('fPrioriteit').value,
+      categorie:      document.getElementById('fCategorie').value,
+      assignedToId:   assignedToId,
+      assignedToName: assignedToName,
+      deadline:       document.getElementById('fDeadline').value,
       emailId,
       emailSubject,
       status:        'todo',
@@ -1259,11 +1262,11 @@ function openDetail(id) {
   document.getElementById('detailOmschrijving').textContent = t.omschrijving || '';
 
   // meta
-  const c = collegaById(t.toegewezenAan);
+  const assigneeLabel = t.assignedToName || '—';
   document.getElementById('detailMeta').innerHTML = `
     <div class="detail-meta-item"><div class="detail-meta-label">Prioriteit</div><div class="detail-meta-val">${t.prioriteit}</div></div>
     <div class="detail-meta-item"><div class="detail-meta-label">Categorie</div><div class="detail-meta-val">${CAT_ICONS[t.categorie]||''} ${t.categorie}</div></div>
-    <div class="detail-meta-item"><div class="detail-meta-label">Toegewezen aan</div><div class="detail-meta-val">${c ? c.naam : '—'}</div></div>
+    <div class="detail-meta-item"><div class="detail-meta-label">Toegewezen aan</div><div class="detail-meta-val">${escHtml(assigneeLabel)}</div></div>
     <div class="detail-meta-item"><div class="detail-meta-label">Deadline</div><div class="detail-meta-val"${isOverdue(t) ? ' style="color:var(--red)"' : ''}>${fmtDate(t.deadline)}</div></div>
     <div class="detail-meta-item"><div class="detail-meta-label">Aangemaakt</div><div class="detail-meta-val">${fmtDate(t.aangemaakt)}</div></div>
     ${t.afgerondOp ? `<div class="detail-meta-item"><div class="detail-meta-label">Afgerond</div><div class="detail-meta-val" style="color:var(--green)">${fmtDate(t.afgerondOp)}</div></div>` : ''}
@@ -1392,52 +1395,16 @@ function deleteTaak() {
 // Modal: Collega-beheer
 // ════════════════════════════════════════════════════
 
-let tempCollegas = [];
-
-function openCollega() {
-  tempCollegas = collegas.map(c => ({ ...c }));
-  renderCollegaList();
-  document.getElementById('overlayCollega').classList.add('open');
-}
-
-function closeCollega() {
-  document.getElementById('overlayCollega').classList.remove('open');
-}
-
-function renderCollegaList() {
-  const list = document.getElementById('collegaList');
-  list.innerHTML = tempCollegas.map((c, i) => `
-    <div class="collega-row" id="crow-${i}">
-      <div class="collega-avatar" style="background:${c.kleur}" id="cavatar-${i}">${initials(c.naam)}</div>
-      <input class="collega-name-input" type="text" value="${escHtml(c.naam)}" placeholder="Naam collega"
-             oninput="tempCollegas[${i}].naam=this.value; document.getElementById('cavatar-${i}').textContent=initials(this.value)" />
-      <input class="color-picker" type="color" value="${c.kleur}"
-             oninput="tempCollegas[${i}].kleur=this.value; document.getElementById('cavatar-${i}').style.background=this.value" />
-      <button class="collega-del" onclick="removeCollega(${i})">×</button>
-    </div>
-  `).join('');
-}
-
-function addCollega() {
-  tempCollegas.push({ id: crypto.randomUUID(), naam: '', kleur: '#22d3ee' });
-  renderCollegaList();
-}
-
-function removeCollega(i) {
-  tempCollegas.splice(i, 1);
-  renderCollegaList();
-}
-
-function saveCollegas() {
-  collegas = tempCollegas.filter(c => c.naam.trim());
-  save('taken_collegas', collegas);
-  if (!collegas.find(c => c.id === huidig)) {
-    huidig = collegas[0]?.id || '';
-    save('taken_huidige_gebruiker', huidig);
-  }
-  closeCollega();
-  render();
-}
+// Legacy collega-beheer (lokale lijst in localStorage) is verwijderd.
+// Assignee komt nu uit /api/profiles-list (cross-rol). Behoud no-op stubs
+// zodat eventuele resterende callers (RBAC-gating, agent-scripts) niet
+// op een undefined-error klappen.
+function openCollega()        { /* no-op */ }
+function closeCollega()       { /* no-op */ }
+function renderCollegaList()  { /* no-op */ }
+function addCollega()         { /* no-op */ }
+function removeCollega()      { /* no-op */ }
+function saveCollegas()       { /* no-op */ }
 
 // ════════════════════════════════════════════════════
 // Overlay click-outside
@@ -1496,6 +1463,7 @@ async function init() {
   await window._authSharedReady;
   const profile = await window.AuthShared.requireAuth();
   if (!profile) return;
+  currentUserId = profile.id || null;
   // adminNavLink wordt nu centraal door sidebar.js gegate (RBAC-voorbereiding)
   // Ensure all collegas have ids
   collegas = collegas.map(c => ({ id: c.id || crypto.randomUUID(), naam: c.naam || '', kleur: c.kleur || '#22d3ee' }));
@@ -1525,7 +1493,7 @@ init();
   var RULES = [
     ['#takenNieuwBtn', 'taken.task.create'],
     ['#takenSaveNieuwBtn', 'taken.task.create'],
-    ['#takenCollegaBtn', 'taken.collega.manage'],
+    // #takenCollegaBtn is verwijderd; gate-rule weg.
     ['#takenEditBtn', 'taken.task.edit'],
     ['#takenSaveDetailBtn', 'taken.task.edit'],
     ['#takenDeleteBtn', 'taken.task.delete'],
