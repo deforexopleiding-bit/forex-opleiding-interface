@@ -73,6 +73,11 @@ export default async function handler(req, res) {
       .limit(1000);
     if (statusFilter) query = query.in('status', statusFilter);
     if (!isAdmin)     query = query.eq('mentor_user_id', user.id); // mentor: hard self-filter
+    // Optioneel: filter per student (admin én mentor — voor mentor irrelevant
+    // want self-scope is al hard, maar geen reden om het te verbieden).
+    const bubbleStudentFilter = typeof req.query?.bubble_student_id === 'string'
+      ? req.query.bubble_student_id.trim() : '';
+    if (bubbleStudentFilter) query = query.eq('bubble_student_id', bubbleStudentFilter);
 
     const { data: signals, error } = await query;
     if (error) throw new Error('signals fetch: ' + error.message);
