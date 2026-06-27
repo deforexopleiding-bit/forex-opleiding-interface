@@ -535,9 +535,13 @@
       </div>
     </div>
     <div class="header-actions">
-      <div class="user-badge">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-        <select id="userSelect" onchange="setHuidigeGebruiker(this.value)"></select>
+      <!-- Tab-switcher: scope serverside (mine / assigned_by_me).
+           Geen user-picker meer — taken altijd op de ingelogde user. -->
+      <div class="user-badge" style="padding:4px;gap:2px">
+        <button type="button" class="btn btn-ghost tk-tab-btn active" id="tabScopeMine"
+                style="padding:6px 10px;font-size:12px" onclick="setScope('mine')">Mijn taken</button>
+        <button type="button" class="btn btn-ghost tk-tab-btn" id="tabScopeAssignedBy"
+                style="padding:6px 10px;font-size:12px" onclick="setScope('assigned_by_me')">Toegewezen door mij</button>
       </div>
       <button class="btn btn-ghost" id="takenCollegaBtn" onclick="openCollega()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -719,6 +723,18 @@
     <div class="notities-label">Notities</div>
     <textarea class="form-textarea" id="detailNotities" placeholder="Voeg notities toe…" style="margin-bottom:0"></textarea>
 
+    <!-- Reactie-thread (lazy, GET/POST /api/taken-comments) -->
+    <div class="notities-label" style="margin-top:16px">Reacties</div>
+    <div id="detailComments" style="border:1px solid var(--border);border-radius:8px;background:var(--bg);max-height:220px;overflow:auto;padding:8px 10px;font-size:13px;color:var(--text);margin-bottom:8px">
+      <div style="color:var(--text-faint);font-size:12px;padding:4px 0">Laden…</div>
+    </div>
+    <div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:6px">
+      <textarea id="detailCommentInput" rows="2" maxlength="2000"
+                placeholder="Reageer…"
+                style="flex:1;padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg-elev);font-family:inherit;font-size:13px;color:var(--text);resize:vertical;min-height:38px"></textarea>
+      <button type="button" class="btn" id="detailCommentSendBtn" onclick="postDetailComment()" style="padding:8px 12px">Versturen</button>
+    </div>
+
     <div class="detail-actions">
       <button class="btn btn-ghost" id="takenEditBtn" onclick="editTaakFromDetail()">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -768,15 +784,44 @@ let dragId    = null;
 let detailId  = null;
 let editMode  = false; // true = modal is editing existing task
 
+// Server-side scope: 'mine' = aan mij toegewezen; 'assigned_by_me' = door
+// mij aangemaakt. Vervangt de oude #userSelect-flow. Sticky via localStorage.
+let currentScope = (load('taken_scope') === 'assigned_by_me') ? 'assigned_by_me' : 'mine';
+
+// Cross-rol assignee-bron uit /api/profiles-list (alle actieve gebruikers).
+let _profilesList = null;
+async function ensureProfilesList() {
+  if (Array.isArray(_profilesList)) return _profilesList;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/profiles-list');
+    if (!r.ok) throw new Error('profiles-list HTTP ' + r.status);
+    const d = await r.json();
+    _profilesList = Array.isArray(d?.members) ? d.members : [];
+  } catch (e) {
+    console.warn('[taken] profiles-list fetch faalde:', e?.message || e);
+    _profilesList = [];
+  }
+  return _profilesList;
+}
+
 function load(key) {
   try { return JSON.parse(localStorage.getItem(key)); } catch { return null; }
 }
 function save(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
 
 // ── Supabase sync ────────────────────────────────────────────────────────────
+// Server-side scoped GET; user.id is hard server-side, scope-param wisselt
+// alleen tussen 'mine' en 'assigned_by_me'.
+async function loadTaken() {
+  const res = await window.AgentShared.apiFetch('/api/taken?scope=' + encodeURIComponent(currentScope));
+  if (!res.ok) return;
+  const d = await res.json();
+  taken = Array.isArray(d?.taken) ? d.taken : [];
+  render();
+}
 async function loadTakenFromSupabase() {
   try {
-    const res = await window.AgentShared.apiFetch('/api/taken');
+    const res = await window.AgentShared.apiFetch('/api/taken?scope=' + encodeURIComponent(currentScope));
     if (!res.ok) return;
     const { taken: rows } = await res.json();
 
@@ -879,23 +924,42 @@ function fmtDate(iso) {
 // Gebruiker
 // ════════════════════════════════════════════════════
 
-function setHuidigeGebruiker(id) {
-  huidig = id;
-  save('taken_huidige_gebruiker', id);
-  render();
+// Server-side scope wisselen. 'mine' = taken aan mij toegewezen;
+// 'assigned_by_me' = taken die ik heb aangemaakt voor anderen.
+function setScope(s) {
+  if (s !== 'mine' && s !== 'assigned_by_me') s = 'mine';
+  if (currentScope === s) return;
+  currentScope = s;
+  try { save('taken_scope', s); } catch (_) {}
+  // Update tab-knop visueel.
+  document.getElementById('tabScopeMine').classList.toggle('active', s === 'mine');
+  document.getElementById('tabScopeAssignedBy').classList.toggle('active', s === 'assigned_by_me');
+  // Herlaad taken met nieuwe scope.
+  loadTaken().catch((e) => console.warn('[taken] loadTaken', e?.message || e));
 }
 
-function populeerUserSelect() {
-  const sel = document.getElementById('userSelect');
-  sel.innerHTML = '';
-  collegas.filter(c => c.naam).forEach(c => {
+// Backward-compat stub: oude code roept deze nog hier en daar aan; we negeren
+// hem (we tonen geen user-picker meer — scope vervangt huidige-gebruiker).
+function setHuidigeGebruiker(/* id */) { /* no-op sinds Takenbeheer-userbased */ }
+function populeerUserSelect()           { /* no-op — userSelect is verwijderd */ }
+
+async function populeerToegewezenDropdownProfiles() {
+  // Cross-rol assignee-picker uit /api/profiles-list (alle actieve gebruikers).
+  // Zet assigned_to_id naar profiles.id zodat de creator-rol los staat van
+  // de assignee-rol; geen lokale collegas-restrictie meer.
+  const sel = document.getElementById('fToegewezen');
+  if (!sel) return;
+  const prevVal = sel.value || '';
+  sel.innerHTML = '<option value="">— Niemand —</option>';
+  const list = await ensureProfilesList();
+  list.forEach((p) => {
     const o = document.createElement('option');
-    o.value = c.id; o.textContent = c.naam;
-    if (c.id === huidig) o.selected = true;
+    o.value = p.id;
+    o.textContent = (p.full_name || p.email || p.id) + (p.role ? '  ·  ' + p.role : '');
     sel.appendChild(o);
   });
+  if (prevVal) sel.value = prevVal;
 }
-
 function populeerToegewezenDropdown() {
   const sel = document.getElementById('fToegewezen');
   sel.innerHTML = '<option value="">— Niemand —</option>';
@@ -1068,6 +1132,7 @@ function openNieuweTaak(prefill = {}) {
   document.getElementById('fDeadline').value       = prefill.deadline || '';
 
   populeerToegewezenDropdown();
+  populeerToegewezenDropdownProfiles().catch((e) => console.warn('[taken] profiles dropdown', e?.message || e));
   const selP = document.getElementById('fPrioriteit');
   selP.value = prefill.prioriteit || 'Normaal';
   const selC = document.getElementById('fCategorie');
@@ -1103,6 +1168,7 @@ function openEditTaak(id) {
   document.getElementById('fDeadline').value     = t.deadline || '';
 
   populeerToegewezenDropdown();
+  populeerToegewezenDropdownProfiles().catch((e) => console.warn('[taken] profiles dropdown', e?.message || e));
   document.getElementById('fPrioriteit').value  = t.prioriteit || 'Normaal';
   document.getElementById('fCategorie').value   = t.categorie || 'Overige';
   document.getElementById('fToegewezen').value  = t.toegewezenAan || '';
@@ -1204,7 +1270,76 @@ function openDetail(id) {
   `;
 
   document.getElementById('detailNotities').value = t.notities || '';
+  // Reactie-thread (lazy fetch). Toon "Laden…" tot de fetch klaar is.
+  const cbox = document.getElementById('detailComments');
+  if (cbox) cbox.innerHTML = '<div style="color:var(--text-faint);font-size:12px;padding:4px 0">Laden…</div>';
+  const cinp = document.getElementById('detailCommentInput');
+  if (cinp) cinp.value = '';
+  loadDetailComments(id).catch((e) => console.warn('[taken] comments load', e?.message || e));
   document.getElementById('overlayDetail').classList.add('open');
+}
+
+// ── Reactie-thread (taken_comments) ─────────────────────────────────────
+let _commentsBusy = false;
+async function loadDetailComments(taskId) {
+  const cbox = document.getElementById('detailComments');
+  if (!cbox || !taskId) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/taken-comments?task_id=' + encodeURIComponent(taskId));
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      cbox.innerHTML = '<div style="color:var(--red);font-size:12px">Reacties laden mislukt: ' + escHtml(d?.error || ('HTTP ' + r.status)) + '</div>';
+      return;
+    }
+    const d = await r.json().catch(() => ({}));
+    const list = Array.isArray(d?.comments) ? d.comments : [];
+    if (list.length === 0) {
+      cbox.innerHTML = '<div style="color:var(--text-faint);font-size:12px;padding:4px 0">Nog geen reacties.</div>';
+      return;
+    }
+    // Identify own comments — we hebben de huidige user via auth-shared.
+    const myId = (window.AuthShared && (await window.AuthShared.getUser())?.id) || null;
+    cbox.innerHTML = list.map((c) => {
+      const dt = c.created_at ? new Date(c.created_at) : null;
+      const dtStr = dt ? dt.toLocaleString('nl-NL', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+      const isMe = (myId && c.user_id === myId);
+      const bg   = isMe ? 'rgba(34,197,94,0.10)' : 'var(--bg-elev)';
+      const author = escHtml(c.author_name || c.user_id || 'Onbekend');
+      return '<div style="margin-bottom:8px;padding:6px 8px;border-radius:6px;background:' + bg + '">' +
+               '<div style="font-size:11.5px;color:var(--text-dim);margin-bottom:2px"><strong>' + author + '</strong> · ' + escHtml(dtStr) + '</div>' +
+               '<div style="white-space:pre-wrap;color:var(--text)">' + escHtml(c.body || '') + '</div>' +
+             '</div>';
+    }).join('');
+    cbox.scrollTop = cbox.scrollHeight;
+  } catch (e) {
+    cbox.innerHTML = '<div style="color:var(--red);font-size:12px">Fout: ' + escHtml(e?.message || e) + '</div>';
+  }
+}
+async function postDetailComment() {
+  if (_commentsBusy || !detailId) return;
+  const inp = document.getElementById('detailCommentInput');
+  const btn = document.getElementById('detailCommentSendBtn');
+  const text = (inp.value || '').trim();
+  if (!text) return;
+  _commentsBusy = true; btn.disabled = true;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/taken-comments', {
+      method  : 'POST',
+      headers : { 'Content-Type': 'application/json' },
+      body    : JSON.stringify({ task_id: detailId, body: text }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      alert(d?.error || ('Reactie versturen mislukt (HTTP ' + r.status + ')'));
+      return;
+    }
+    inp.value = '';
+    await loadDetailComments(detailId);
+  } catch (e) {
+    alert('Reactie versturen mislukt: ' + (e?.message || e));
+  } finally {
+    _commentsBusy = false; btn.disabled = false;
+  }
 }
 
 function closeDetail() {
@@ -1366,12 +1501,20 @@ async function init() {
   collegas = collegas.map(c => ({ id: c.id || crypto.randomUUID(), naam: c.naam || '', kleur: c.kleur || '#22d3ee' }));
   if (!huidig && collegas.length) huidig = collegas[0].id;
   window.AgentShared?.renderUserSection(profile);
+  // Zet tab-knoppen actief volgens persistente scope.
+  const tMine = document.getElementById('tabScopeMine');
+  const tAssBy = document.getElementById('tabScopeAssignedBy');
+  if (tMine && tAssBy) {
+    tMine.classList.toggle('active', currentScope === 'mine');
+    tAssBy.classList.toggle('active', currentScope === 'assigned_by_me');
+  }
   render();
   handleUrlParams();
   if (!localStorage.getItem('db_migrated_v1')) {
     fetch('/api/db-migrate').then(r => { if (r.ok) localStorage.setItem('db_migrated_v1', '1'); }).catch(() => {});
   }
-  loadTakenFromSupabase(); // herstel vanuit Supabase als localStorage leeg is
+  // Server-side scoped fetch — vervangt loadTakenFromSupabase().
+  loadTaken().catch((e) => console.warn('[taken] loadTaken init', e?.message || e));
 }
 
 init();

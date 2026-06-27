@@ -49,14 +49,60 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     try {
-      const { data, error } = await supabase
-        .from('taken_items')
-        .select('id,titel,omschrijving,prioriteit,categorie,assigned_to_id,deadline,email_id,email_subject,status,notities,aangemaakt,afgerond_op,updated_at,created_by,created_by_agent')
-        .order('aangemaakt', { ascending: false })
-        .limit(500);
-      if (error) throw error;
+      // ── Server-side scoping ─────────────────────────────────────────────
+      // scope='mine'           → assigned_to_id=user.id OF taken_assignees.assignee_id=user.id
+      // scope='assigned_by_me' → created_by=user.id
+      // Hard op user.id; geen client-param die een andere user kan kiezen.
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const userId = authUser?.id || null;
+      if (!userId) return res.status(401).json({ error: 'Niet geauthenticeerd' });
 
-      const rows = data || [];
+      const scopeRaw = typeof req.query?.scope === 'string' ? req.query.scope.trim() : '';
+      const scope = (scopeRaw === 'assigned_by_me') ? 'assigned_by_me' : 'mine';
+
+      let rows = [];
+      if (scope === 'assigned_by_me') {
+        const { data, error } = await supabaseAdmin
+          .from('taken_items')
+          .select('id,titel,omschrijving,prioriteit,categorie,assigned_to_id,deadline,email_id,email_subject,status,notities,aangemaakt,afgerond_op,updated_at,created_by,created_by_agent')
+          .eq('created_by', userId)
+          .order('aangemaakt', { ascending: false })
+          .limit(500);
+        if (error) throw error;
+        rows = data || [];
+      } else {
+        // 'mine' — dual-pad (zoals taken-badge). Union via Map om dubbeltellingen
+        // te voorkomen.
+        const [directRes, joinRes] = await Promise.all([
+          supabaseAdmin.from('taken_items')
+            .select('id,titel,omschrijving,prioriteit,categorie,assigned_to_id,deadline,email_id,email_subject,status,notities,aangemaakt,afgerond_op,updated_at,created_by,created_by_agent')
+            .eq('assigned_to_id', userId)
+            .order('aangemaakt', { ascending: false })
+            .limit(500),
+          supabaseAdmin.from('taken_assignees')
+            .select('task_id')
+            .eq('assignee_id', userId),
+        ]);
+        if (directRes.error) throw directRes.error;
+        if (joinRes.error)   throw joinRes.error;
+
+        const map = new Map();
+        for (const r of (directRes.data || [])) if (r?.id) map.set(r.id, r);
+
+        const joinTaskIds = (joinRes.data || []).map((r) => r.task_id).filter(Boolean);
+        if (joinTaskIds.length > 0) {
+          const { data: joinTasks, error: jErr } = await supabaseAdmin
+            .from('taken_items')
+            .select('id,titel,omschrijving,prioriteit,categorie,assigned_to_id,deadline,email_id,email_subject,status,notities,aangemaakt,afgerond_op,updated_at,created_by,created_by_agent')
+            .in('id', joinTaskIds);
+          if (jErr) throw jErr;
+          for (const r of (joinTasks || [])) {
+            if (r?.id && !map.has(r.id)) map.set(r.id, r);
+          }
+        }
+        rows = Array.from(map.values())
+          .sort((a, b) => (a.aangemaakt < b.aangemaakt ? 1 : (a.aangemaakt > b.aangemaakt ? -1 : 0)));
+      }
 
       // Assignees-array per taak via taken_assignees.
       const taskIds = rows.map(r => r.id);
