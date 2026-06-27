@@ -1446,11 +1446,22 @@
     const payLine = (M > 0)
       ? `<span class="badge badge-green" style="font-size:11.5px">💶 ${M} betaald · klaar voor de eerste call</span>`
       : `<span class="badge badge-amber" style="font-size:11.5px" title="Plan gerust; controleer de betaling vóór de call plaatsvindt.">⏳ Nog niet betaald — plan de eerste call alvast (check betaling vóór de call)</span>`;
+    // Telt studenten waarvan de start ≤ 14 dagen vooruit is (en niet in het
+    // verleden). Toont een aparte regel zodat de mentor in één oogopslag ziet
+    // hoeveel studenten op korte termijn een eerste call nodig hebben.
+    const S = list.filter((s) => {
+      const d = _daysUntilStart(s.start_date);
+      return d != null && d >= 0 && d <= 14;
+    }).length;
+    const soonLine = (S > 0)
+      ? `<span class="badge badge-amber" style="font-size:11.5px" title="Plan deze studenten zo snel mogelijk in voor hun eerste call.">🔔 ${S} student${S === 1 ? '' : 'en'} start${S === 1 ? '' : 'en'} binnenkort (≤14 dagen) — plan ${S === 1 ? 'de' : 'hun'} eerste call</span>`
+      : '';
     el.innerHTML = `
       <div class="dash-status-bar" style="background:var(--bg-elev);border:1px solid var(--border);color:var(--text)">
         <i class="ti ti-user-plus" style="color:var(--text-dim)"></i>
         <span>Je hebt <strong>${N}</strong> toekomstige student${N === 1 ? '' : 'en'}.</span>
         ${payLine}
+        ${soonLine}
         <button type="button" id="dashFutureGoBtn"
                 style="margin-left:auto;padding:6px 12px;font-size:12.5px;font-weight:600;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer;font-family:inherit">
           Bekijken
@@ -1471,6 +1482,30 @@
     }).join(' · ');
   }
 
+  // Hele-dagen tussen vandaag (middernacht) en start_date (middernacht).
+  // Returnt null bij invalide / null input zodat callers ".isFinite"-checks
+  // kunnen overslaan.
+  function _daysUntilStart(startDate) {
+    if (!startDate) return null;
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    const s = new Date(String(startDate).slice(0, 10) + 'T00:00:00');
+    if (!Number.isFinite(s.getTime())) return null;
+    return Math.round((s.getTime() - t.getTime()) / 86400000);
+  }
+
+  // "Plan de eerste call — start <relatief>"-badge. Toont 'vandaag'/'morgen'
+  // bij 0/1, anders "over X dagen".
+  function _futureStartBadge(days) {
+    let when;
+    if (days === 0)      when = 'vandaag';
+    else if (days === 1) when = 'morgen';
+    else                 when = 'over ' + days + ' dag' + (days === 1 ? '' : 'en');
+    return '<span class="badge badge-amber" style="font-size:11.5px"'
+      + ' title="Start ' + when + ' — plan alvast de eerste call (check betaling vóór de call).">'
+      + '📞 Plan de eerste call — start ' + when + ' · neem contact op</span>';
+  }
+
   function _renderFutureStudents(students) {
     const wrap = document.getElementById('futureStudentsWrap');
     if (!wrap) return;
@@ -1479,15 +1514,37 @@
       wrap.innerHTML = `<div class="empty-state"><i class="ti ti-user-question"></i>Je hebt nog geen toekomstige studenten toegewezen gekregen.</div>`;
       return;
     }
-    wrap.innerHTML = list.map((s) => {
+    // Sortering: studenten met 0 ≤ dagen ≤ 14 vooraan (soonest eerst),
+    // daarna de rest (gesorteerd op start_date als die er is, dan op naam).
+    const sorted = list.slice().sort((a, b) => {
+      const da = _daysUntilStart(a.start_date);
+      const db = _daysUntilStart(b.start_date);
+      const aSoon = (da != null && da >= 0 && da <= 14);
+      const bSoon = (db != null && db >= 0 && db <= 14);
+      if (aSoon && !bSoon) return -1;
+      if (!aSoon && bSoon) return 1;
+      if (aSoon && bSoon)  return da - db;
+      // Beide niet-soon: stabiel op start_date asc, dan naam.
+      const ad = a.start_date ? String(a.start_date) : '9999-99-99';
+      const bd = b.start_date ? String(b.start_date) : '9999-99-99';
+      if (ad !== bd) return ad < bd ? -1 : 1;
+      return String(a.customer_name || '').localeCompare(String(b.customer_name || ''));
+    });
+    wrap.innerHTML = sorted.map((s) => {
       const completed = (s.status === 'afgerond' && s.completed_at)
         ? `<div class="student-meta" style="margin-top:4px">Afgerond op ${esc(fmtDateNL(s.completed_at))}</div>`
         : '';
       const avShort = _shortAvailability(s.availability);
       const avLine  = `<div class="student-meta" style="margin-top:4px"><strong style="color:var(--text-dim)">Beschikbaarheid:</strong> ${avShort ? esc(avShort) : '<span style="color:var(--text-faint)">—</span>'}</div>`;
       const startLine = `<div class="student-meta" style="margin-top:4px"><strong style="color:var(--text-dim)">Startdatum:</strong> ${s.start_date ? esc(fmtDateNL(s.start_date)) : '<span style="color:var(--text-faint)">— niet ingesteld</span>'}</div>`;
+      const days = _daysUntilStart(s.start_date);
+      const soon = (days != null && days >= 0 && days <= 14);
+      const cardStyle = soon
+        ? 'cursor:default;border:1px solid rgba(245,158,11,0.45);background:linear-gradient(180deg, rgba(245,158,11,0.07), rgba(245,158,11,0.02))'
+        : 'cursor:default';
+      const startBadge = soon ? _futureStartBadge(days) : '';
       return `
-        <div class="student-card" style="cursor:default">
+        <div class="student-card" style="${cardStyle}">
           <div class="student-head" style="cursor:default;grid-template-columns:1fr auto">
             <div>
               <div class="student-name">${esc(s.customer_name || '—')}</div>
@@ -1497,6 +1554,7 @@
               ${completed}
             </div>
             <div class="student-stat" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
+              ${startBadge}
               ${_futurePaidBadge(!!s.paid)}
               ${_futureStatusBadge(s.status)}
             </div>
