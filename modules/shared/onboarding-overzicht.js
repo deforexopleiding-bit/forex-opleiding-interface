@@ -425,6 +425,7 @@
         cursor:pointer;font-size:18px;line-height:1;transition:background .12s ease,color .12s ease;}
       .ob-kebab:hover{background:var(--bg-elev,#f1f5f9);color:var(--text,#0f172a);}
       .ob-kebab:focus-visible{outline:2px solid var(--brand-azure,#1e6cd6);outline-offset:1px;}
+      .ob-kebab-dots{font-size:20px;line-height:1;font-weight:700;display:block;transform:translateY(-1px);}
       .ob-act-menu{position:fixed;z-index:9999;min-width:178px;background:var(--bg,#fff);
         border:1px solid var(--border,#e2e8f0);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.16);
         padding:5px;display:none;}
@@ -504,7 +505,7 @@
       <div class="ob-row-actions" style="justify-content:flex-end">
         <button type="button" class="ob-kebab" aria-label="Acties" aria-haspopup="true" aria-expanded="false"
           data-id="${esc(r.id)}" data-token="${esc(r.token || '')}" data-archived="${isArchived ? '1' : '0'}">
-          <i class="ti ti-dots-vertical"></i>
+          <span class="ob-kebab-dots" aria-hidden="true">&#8942;</span>
         </button>
       </div>`;
   }
