@@ -2017,7 +2017,6 @@
     { key: 'onboarding.mentor',            label: 'Toegewezen mentor',             category: 'onboarding', example: 'Dave de Jong' },
     { key: 'onboarding.status',            label: 'Onboarding-status',             category: 'onboarding', example: 'aangemeld' },
     { key: 'onboarding.bubble_gebruikersnaam', label: 'Bubble gebruikersnaam (klant-email)', category: 'onboarding', example: 'klant@example.com' },
-    { key: 'onboarding.bubble_wachtwoord',     label: 'Bubble wachtwoord (tijdelijk)',       category: 'onboarding', example: 'Aw9!Xq2p' },
     // datum
     { key: 'datum.vandaag',     label: 'Datum vandaag', category: 'datum', example: '09-06-2026' },
     { key: 'datum.deze_maand',  label: 'Deze maand',    category: 'datum', example: 'juni 2026' },
