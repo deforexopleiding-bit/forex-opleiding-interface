@@ -96,3 +96,92 @@ export async function getMentorStudentEmails(effectiveUserId) {
   }
   return { linked: true, emails: Array.from(set) };
 }
+
+/**
+ * Fetcht ALLE Bubble 'user'-rijen met role=student ORG-BREED (zonder
+ * mentor_user-constraint). Voor admin-readers (overzicht over alle
+ * mentoren). bubbleList paginiert intern via z'n cursor-loop; we
+ * vragen de maximale cap (2000) op zodat we 1 round-trip-equivalent
+ * krijgen voor het hele studentenbestand.
+ *
+ * @returns {Promise<Array<object>>}
+ */
+export async function fetchAllBubbleStudents() {
+  const constraints = [
+    { key: 'role_option_os___roles', constraint_type: 'equals', value: 'student' },
+  ];
+  const { results } = await bubbleList('user', constraints, { limit: 2000 });
+  return Array.isArray(results) ? results : [];
+}
+
+// ── Bubble row → API-shape ────────────────────────────────────────────────
+// Lift uit mentor-my-students. Defensieve readers voor Bubble's suffix-
+// conventie (key_text / key_number / key_option_os___name) met bare-name
+// als fallback voor pre-conventie data.
+
+function _readFirst(u, keys) {
+  if (!u) return undefined;
+  for (const k of keys) if (u[k] !== undefined) return u[k];
+  return undefined;
+}
+function _pickOption(v) {
+  if (v == null) return null;
+  if (typeof v === 'string') return v.trim() || null;
+  if (typeof v === 'object') {
+    const d = v.display || v.text || v.value || null;
+    return d ? String(d).trim() || null : null;
+  }
+  return null;
+}
+function _num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Mapt één raw Bubble user-rij naar de student-shape die zowel
+ * mentor-my-students als students-overview gebruiken.
+ *
+ * Naast de bestaande velden returnt deze ook `mentor_bubble_user_id`
+ * (uit `mentor_user`) zodat de overview-endpoint per-student de mentor
+ * kan resolven. Single source of truth voor "wat is een student-row".
+ *
+ * @returns { bubble_student_id, name, email, program, membership,
+ *            onboarding_status, calls_1on1_done, calls_1on1_total,
+ *            group_done, group_total, no_shows, mentor_bubble_user_id }
+ */
+export function mapBubbleStudentRow(u) {
+  const { name, email } = bubbleUserDisplay(u);
+  const program          = _pickOption(_readFirst(u, ['learning_type_option_os___learning_type', 'learning type']));
+  const onboardingStatus = _pickOption(_readFirst(u, ['onboarding_status_option_os___onboarding_status', 'Onboarding Status']));
+  const membership       = _pickOption(_readFirst(u, ['membership_option_os___membership', 'membership']));
+  const callsDone   = _num(_readFirst(u, ['1_call_completed_number',   '1_call_completed']));
+  const callsTotal  = _num(_readFirst(u, ['1_call_alpha_total_number', '1_call_total_number', '1_call_delta_total_number', '1_call_alpha_total']));
+  const groupDone   = _num(_readFirst(u, ['group_call_completed_number', 'group_call_completed']));
+  const groupTotal  = _num(_readFirst(u, ['group_call_total_number',     'group_call_total']));
+  const noShows     = _num(_readFirst(u, ['no_show_count_number',       'no show count']));
+  // mentor_user is in Bubble een User-link; we lezen de bare-name primary
+  // met defensieve fallback op de suffix-vorm. Null als de student geen
+  // mentor heeft.
+  const mentorBubbleId = (() => {
+    const raw = _readFirst(u, ['mentor_user', 'mentor_user_user']);
+    if (raw == null) return null;
+    if (typeof raw === 'string') return raw.trim() || null;
+    if (typeof raw === 'object' && raw._id) return String(raw._id) || null;
+    return null;
+  })();
+  return {
+    bubble_student_id     : String(u?._id || ''),
+    name,
+    email,
+    program,
+    membership,
+    onboarding_status     : onboardingStatus,
+    calls_1on1_done       : callsDone,
+    calls_1on1_total      : callsTotal,
+    group_done            : groupDone,
+    group_total           : groupTotal,
+    no_shows              : noShows,
+    mentor_bubble_user_id : mentorBubbleId,
+  };
+}

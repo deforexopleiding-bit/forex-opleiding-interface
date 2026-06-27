@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <title>Alle studenten — Forex Opleiding</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css" />
+  <style>
+    .so-wrap { padding: 18px 22px 60px; max-width: 1500px; margin: 0 auto; }
+    .so-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom: 16px; flex-wrap: wrap; }
+    .so-header h1 { font-size: 19px; margin: 0; display:flex; align-items:center; gap:8px; }
+    .so-actions { display:flex; gap:8px; flex-wrap: wrap; }
+    .so-btn { padding:7px 12px; font-size:12.5px; font-weight:600; border:1px solid var(--border); border-radius:7px; background:var(--bg); color:var(--text); cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:6px; }
+    .so-btn:hover { background:var(--bg-elev); }
+    .so-btn.primary { background:var(--brand-primary,#093d54); color:#fff; border-color:transparent; }
+
+    .so-kpis { display:grid; grid-template-columns: repeat(5, 1fr); gap:10px; margin-bottom: 14px; }
+    .so-kpi  { padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:var(--bg-elev); }
+    .so-kpi-label { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; }
+    .so-kpi-value { font-size:20px; font-weight:700; color:var(--text); margin-top:2px; }
+
+    .so-filters { display:grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap:8px; margin-bottom: 10px; }
+    .so-filters input, .so-filters select { width:100%; padding:7px 9px; border:1px solid var(--border); border-radius:7px; background:var(--bg); font-family:inherit; font-size:12.5px; color: var(--text); }
+    .so-toggles { display:flex; gap:8px; flex-wrap: wrap; margin-bottom: 14px; }
+    .so-toggle { padding:5px 10px; font-size:11.5px; font-weight:600; border:1px solid var(--border); border-radius:999px; background:var(--bg-elev); color:var(--text-dim); cursor:pointer; }
+    .so-toggle.active { background:rgba(9,61,84,0.12); color:var(--brand-primary,#093d54); border-color:var(--brand-primary,#093d54); }
+
+    .so-table-wrap { border:1px solid var(--border); border-radius:10px; overflow:hidden; background:var(--bg-elev); }
+    table.so-table { width:100%; border-collapse: collapse; font-size: 12.5px; }
+    .so-table thead th { padding: 9px 10px; text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:0.04em; color: var(--text-dim); background:var(--bg); border-bottom:1px solid var(--border); cursor: pointer; user-select:none; white-space: nowrap; }
+    .so-table thead th .so-sort { opacity: 0.5; margin-left: 3px; }
+    .so-table thead th.sort-asc .so-sort, .so-table thead th.sort-desc .so-sort { opacity: 1; }
+    .so-table tbody td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    .so-table tbody tr { cursor: pointer; }
+    .so-table tbody tr:hover td { background:var(--bg); }
+    .so-name  { font-weight: 600; color: var(--text); }
+    .so-email { color: var(--text-dim); font-size: 11.5px; }
+    .so-prog  { display:inline-block; padding:1px 6px; border-radius:999px; background: rgba(59,130,246,0.14); color:#1d4ed8; font-size: 10.5px; font-weight: 600; }
+    .so-mentor-none { color: var(--text-faint); font-style: italic; }
+    .so-badge { display:inline-block; padding:1px 7px; border-radius:999px; font-size: 10.5px; font-weight: 600; }
+    .so-badge.open       { background: var(--bg); color: var(--text-dim); border:1px solid var(--border); }
+    .so-badge.op_schema  { background: rgba(34,197,94,0.16); color: #15803d; }
+    .so-badge.aandacht   { background: rgba(245,158,11,0.18); color: #b45309; }
+    .so-badge.risico     { background: rgba(220,38,38,0.16); color: #991b1b; }
+    .so-badge.niet_actief{ background: var(--bg); color: var(--text-faint); border:1px solid var(--border); }
+    .so-overdue { display:inline-block; padding:1px 7px; border-radius:999px; background: rgba(220,38,38,0.16); color: #991b1b; font-size: 10.5px; font-weight: 600; }
+    .so-noshow  { color:#b45309; font-weight: 600; }
+
+    .so-empty, .so-error { padding: 28px 14px; text-align:center; color: var(--text-dim); font-size: 13px; }
+    .so-skel { display:inline-block; width:50px; height:10px; border-radius:5px; background:linear-gradient(90deg, var(--bg) 25%, var(--bg-elev) 50%, var(--bg) 75%); background-size: 200% 100%; animation: so-skel 1.2s infinite; }
+    @keyframes so-skel { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app">
+  <div class="so-wrap">
+    <div class="so-header">
+      <h1><i class="ti ti-school"></i> Alle studenten</h1>
+      <div class="so-actions">
+        <button id="soExportBtn" class="so-btn" type="button"><i class="ti ti-download"></i> CSV-export</button>
+        <button id="soReloadBtn" class="so-btn primary" type="button"><i class="ti ti-refresh"></i> Vernieuwen</button>
+      </div>
+    </div>
+
+    <!-- KPI-strip -->
+    <div class="so-kpis">
+      <div class="so-kpi"><div class="so-kpi-label">Totaal</div><div class="so-kpi-value" id="kpiTotal"><span class="so-skel"></span></div></div>
+      <div class="so-kpi"><div class="so-kpi-label">Zonder mentor</div><div class="so-kpi-value" id="kpiNoMentor"><span class="so-skel"></span></div></div>
+      <div class="so-kpi"><div class="so-kpi-label">Met te late facturen</div><div class="so-kpi-value" id="kpiOverdue"><span class="so-skel"></span></div></div>
+      <div class="so-kpi"><div class="so-kpi-label">Niet beoordeeld (mnd)</div><div class="so-kpi-value" id="kpiOpen"><span class="so-skel"></span></div></div>
+      <div class="so-kpi"><div class="so-kpi-label">Met no-shows</div><div class="so-kpi-value" id="kpiNoshow"><span class="so-skel"></span></div></div>
+    </div>
+
+    <!-- Filters -->
+    <div class="so-filters">
+      <input id="filtSearch"  placeholder="Zoek naam of e-mail…" autocomplete="off" />
+      <select id="filtMentor"><option value="">Mentor — alle</option></select>
+      <select id="filtProgram"><option value="">Programma — alle</option></select>
+      <select id="filtOnboard"><option value="">Onboarding-status — alle</option></select>
+    </div>
+    <div class="so-toggles">
+      <button type="button" class="so-toggle" data-tgl="overdue">Te late facturen</button>
+      <button type="button" class="so-toggle" data-tgl="open">Niet beoordeeld</button>
+      <button type="button" class="so-toggle" data-tgl="noshow">Met no-shows</button>
+      <button type="button" class="so-toggle" data-tgl="noment">Zonder mentor</button>
+    </div>
+
+    <!-- Tabel -->
+    <div class="so-table-wrap">
+      <table class="so-table">
+        <thead>
+          <tr id="soThead">
+            <th data-sort="name">Naam <span class="so-sort">↕</span></th>
+            <th data-sort="email">E-mail <span class="so-sort">↕</span></th>
+            <th data-sort="program">Programma <span class="so-sort">↕</span></th>
+            <th data-sort="mentor_name">Mentor <span class="so-sort">↕</span></th>
+            <th data-sort="calls">Voortgang <span class="so-sort">↕</span></th>
+            <th data-sort="assessment_status">Beoordeling <span class="so-sort">↕</span></th>
+            <th data-sort="no_shows">No-shows <span class="so-sort">↕</span></th>
+            <th data-sort="overdue_count">Te late facturen <span class="so-sort">↕</span></th>
+          </tr>
+        </thead>
+        <tbody id="soTbody">
+          <tr><td colspan="8" class="so-empty">Studenten laden…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+<script>
+'use strict';
+
+const state = {
+  rows : [],          // alle studenten (raw uit endpoint)
+  view : [],          // gefilterd + gesorteerd
+  sort : { key: 'name', dir: 'asc' },
+  toggles : { overdue:false, open:false, noshow:false, noment:false },
+};
+
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function lc(s)  { return String(s == null ? '' : s).trim().toLowerCase(); }
+
+function assessLabel(s) {
+  if (s === 'op_schema')  return 'Op schema';
+  if (s === 'aandacht')   return 'Aandacht';
+  if (s === 'risico')     return 'Risico';
+  if (s === 'niet_actief')return 'Niet actief';
+  return 'Open';
+}
+
+function renderKPIs() {
+  const r = state.rows;
+  document.getElementById('kpiTotal').textContent     = r.length;
+  document.getElementById('kpiNoMentor').textContent  = r.filter((x) => !x.mentor_user_id).length;
+  document.getElementById('kpiOverdue').textContent   = r.filter((x) => (x.overdue_count || 0) > 0).length;
+  document.getElementById('kpiOpen').textContent      = r.filter((x) => (x.assessment_status || 'open') === 'open').length;
+  document.getElementById('kpiNoshow').textContent    = r.filter((x) => (x.no_shows || 0) > 0).length;
+}
+
+function populateFilters() {
+  const m = new Map(), p = new Set(), o = new Set();
+  for (const r of state.rows) {
+    if (r.mentor_name) m.set(r.mentor_name, true);
+    if (r.program)     p.add(r.program);
+    if (r.onboarding_status) o.add(r.onboarding_status);
+  }
+  const fm = document.getElementById('filtMentor');
+  const fp = document.getElementById('filtProgram');
+  const fo = document.getElementById('filtOnboard');
+  fm.innerHTML = '<option value="">Mentor — alle</option><option value="__none__">Mentor — geen</option>'
+    + Array.from(m.keys()).sort().map((x) => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+  fp.innerHTML = '<option value="">Programma — alle</option>'
+    + Array.from(p).sort().map((x) => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+  fo.innerHTML = '<option value="">Onboarding-status — alle</option>'
+    + Array.from(o).sort().map((x) => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+}
+
+function applyFilters() {
+  const q   = lc(document.getElementById('filtSearch').value || '');
+  const fM  = document.getElementById('filtMentor').value || '';
+  const fP  = document.getElementById('filtProgram').value || '';
+  const fO  = document.getElementById('filtOnboard').value || '';
+  const t   = state.toggles;
+  state.view = state.rows.filter((r) => {
+    if (q) {
+      const hay = (lc(r.name) + ' ' + lc(r.email));
+      if (!hay.includes(q)) return false;
+    }
+    if (fM) {
+      if (fM === '__none__') { if (r.mentor_user_id) return false; }
+      else if (r.mentor_name !== fM) return false;
+    }
+    if (fP && r.program !== fP) return false;
+    if (fO && r.onboarding_status !== fO) return false;
+    if (t.overdue && !((r.overdue_count || 0) > 0)) return false;
+    if (t.open    && (r.assessment_status || 'open') !== 'open') return false;
+    if (t.noshow  && !((r.no_shows || 0) > 0)) return false;
+    if (t.noment  && r.mentor_user_id) return false;
+    return true;
+  });
+  applySort();
+}
+
+function applySort() {
+  const { key, dir } = state.sort;
+  const mul = (dir === 'asc') ? 1 : -1;
+  const get = (r) => {
+    if (key === 'name')              return lc(r.name);
+    if (key === 'email')             return lc(r.email);
+    if (key === 'program')           return lc(r.program);
+    if (key === 'mentor_name')       return lc(r.mentor_name || '');
+    if (key === 'calls')             return (Number(r.calls_1on1_done) || 0);
+    if (key === 'assessment_status') return r.assessment_status || 'open';
+    if (key === 'no_shows')          return Number(r.no_shows) || 0;
+    if (key === 'overdue_count')     return Number(r.overdue_count) || 0;
+    return '';
+  };
+  state.view.sort((a, b) => {
+    const av = get(a), bv = get(b);
+    if (av < bv) return -1 * mul;
+    if (av > bv) return  1 * mul;
+    return 0;
+  });
+  renderTable();
+}
+
+function renderTable() {
+  const tbody = document.getElementById('soTbody');
+  if (state.view.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="so-empty">Geen studenten gevonden met deze filters.</td></tr>';
+    updateSortIndicators();
+    return;
+  }
+  tbody.innerHTML = state.view.map((r) => {
+    const href = '/modules/mentor-dashboard.html#student=' + encodeURIComponent(r.bubble_student_id || '');
+    const callsTotal = Number(r.calls_1on1_total) || 0;
+    const callsDone  = Number(r.calls_1on1_done)  || 0;
+    const noShows    = Number(r.no_shows) || 0;
+    const overdue    = Number(r.overdue_count) || 0;
+    const assess     = r.assessment_status || 'open';
+    return '<tr data-href="' + esc(href) + '">' +
+      '<td><div class="so-name">' + esc(r.name || '—') + '</div></td>' +
+      '<td><div class="so-email">' + esc(r.email || '—') + '</div></td>' +
+      '<td>' + (r.program ? '<span class="so-prog">' + esc(r.program) + '</span>' : '—') + '</td>' +
+      '<td>' + (r.mentor_name ? esc(r.mentor_name) : '<span class="so-mentor-none">geen mentor</span>') + '</td>' +
+      '<td>' + (callsTotal > 0 ? (callsDone + '/' + callsTotal) : '—') + '</td>' +
+      '<td><span class="so-badge ' + esc(assess) + '">' + esc(assessLabel(assess)) + '</span></td>' +
+      '<td>' + (noShows > 0 ? '<span class="so-noshow">' + noShows + '</span>' : noShows) + '</td>' +
+      '<td>' + (overdue > 0 ? '<span class="so-overdue">' + overdue + '</span>' : '0') + '</td>' +
+      '</tr>';
+  }).join('');
+  // Click → open student
+  tbody.querySelectorAll('tr[data-href]').forEach((tr) => {
+    tr.addEventListener('click', () => { window.location.href = tr.dataset.href; });
+  });
+  updateSortIndicators();
+}
+
+function updateSortIndicators() {
+  document.querySelectorAll('#soThead th').forEach((th) => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    const sp = th.querySelector('.so-sort');
+    if (th.dataset.sort === state.sort.key) {
+      th.classList.add(state.sort.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+      if (sp) sp.textContent = state.sort.dir === 'asc' ? '↑' : '↓';
+    } else if (sp) {
+      sp.textContent = '↕';
+    }
+  });
+}
+
+function wireSort() {
+  document.querySelectorAll('#soThead th[data-sort]').forEach((th) => {
+    th.addEventListener('click', () => {
+      const k = th.dataset.sort;
+      if (state.sort.key === k) state.sort.dir = (state.sort.dir === 'asc') ? 'desc' : 'asc';
+      else { state.sort.key = k; state.sort.dir = 'asc'; }
+      applySort();
+    });
+  });
+}
+
+function wireFilters() {
+  document.getElementById('filtSearch') .addEventListener('input',  applyFilters);
+  document.getElementById('filtMentor') .addEventListener('change', applyFilters);
+  document.getElementById('filtProgram').addEventListener('change', applyFilters);
+  document.getElementById('filtOnboard').addEventListener('change', applyFilters);
+  document.querySelectorAll('.so-toggle[data-tgl]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const k = b.dataset.tgl;
+      state.toggles[k] = !state.toggles[k];
+      b.classList.toggle('active', state.toggles[k]);
+      applyFilters();
+    });
+  });
+}
+
+function exportCsv() {
+  const headers = ['name','email','program','membership','onboarding_status','mentor_name','onboarding_id','calls_1on1_done','calls_1on1_total','no_shows','assessment_status','overdue_count'];
+  const escape = (v) => {
+    const s = (v == null) ? '' : String(v);
+    if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  };
+  const lines = [headers.join(',')];
+  for (const r of state.view) lines.push(headers.map((h) => escape(r[h])).join(','));
+  const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'studenten-overzicht.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+async function loadData() {
+  const tbody = document.getElementById('soTbody');
+  tbody.innerHTML = '<tr><td colspan="8" class="so-empty">Studenten laden…</td></tr>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/students-overview');
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || 'students fetch failed');
+    state.rows = Array.isArray(d?.students) ? d.students : [];
+    renderKPIs();
+    populateFilters();
+    applyFilters();
+  } catch (e) {
+    console.error('[students-overview]', e?.message || e);
+    tbody.innerHTML = '<tr><td colspan="8" class="so-error">Laden mislukt: ' + esc(e?.message || e) + '</td></tr>';
+  }
+}
+
+(async () => {
+  await window._authSharedReady;
+  const profile = await window.AuthShared?.requireAuth();
+  if (!profile) return;
+  if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
+
+  // Page-gate students.all.view; anders terug naar /index.html (laat de
+  // role-bounce daar de juiste landing kiezen). Server-side gate op het
+  // endpoint blijft autoritatief.
+  try {
+    if (window.RBAC?.ensurePermissionsLoaded) {
+      await window.RBAC.ensurePermissionsLoaded();
+      if (!window.RBAC.canSync || !window.RBAC.canSync('students.all.view')) {
+        window.location.replace('/index.html');
+        return;
+      }
+    }
+  } catch (e) { /* fail-open op page-gate; endpoint blokt alsnog */ }
+
+  wireSort();
+  wireFilters();
+  document.getElementById('soExportBtn').addEventListener('click', exportCsv);
+  document.getElementById('soReloadBtn').addEventListener('click', loadData);
+  loadData();
+})();
+</script>
+</body>
+</html>
