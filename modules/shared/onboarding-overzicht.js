@@ -251,6 +251,7 @@
             <th>Mentor</th>
             <th>Voortgang</th>
             <th>Aangemeld</th>
+            <th>Startdatum</th>
             <th>Bubble</th>
             <th style="text-align:right">Acties</th>
           </tr>
@@ -394,6 +395,7 @@
         <td>${mentorCellHtml(r)}</td>
         <td>${esc(progressLabel(r))}</td>
         <td>${esc(fmtDateNL(r.created_at))}</td>
+        <td>${r.start_date ? esc(fmtDateNL(r.start_date)) : '<span style="color:var(--text-faint)">— niet ingesteld</span>'}</td>
         <td>${bubbleBadgeHtml(r)}</td>
         <td style="text-align:right">${actionsCellHtml(r)}</td>
       </tr>`;
