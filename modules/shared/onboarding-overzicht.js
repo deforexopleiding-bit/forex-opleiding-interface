@@ -80,6 +80,14 @@
           '<div style="font-size:12.5px;font-weight:600;color:var(--text)">Gesprekken</div>' +
           '<button type="button" class="refresh-btn" id="oiInboxRefresh" title="Vernieuwen" style="padding:4px 8px;font-size:12px"><i class="ti ti-refresh"></i></button>' +
         '</div>' +
+        '<div id="oiListSourceBar" style="display:flex;padding:6px 10px 0;gap:4px">' +
+          '<div role="tablist" style="display:inline-flex;width:100%;background:var(--bg-elev,#f1f5f9);border:1px solid var(--border);border-radius:8px;padding:2px;gap:2px">' +
+            '<button type="button" id="oiSrcBtnWa" data-oi-src="wa" style="flex:1;border:none;background:var(--bg,#fff);color:var(--text);padding:6px 10px;font-size:12.5px;font-weight:600;border-radius:6px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06)"><i class="ti ti-brand-whatsapp"></i> Gesprekken</button>' +
+            '<button type="button" id="oiSrcBtnEmail" data-oi-src="email" style="flex:1;border:none;background:transparent;color:var(--text-dim);padding:6px 10px;font-size:12.5px;font-weight:600;border-radius:6px;cursor:pointer;position:relative"><i class="ti ti-mail"></i> E-mail' +
+              '<span id="oiListEmailBadge" style="display:none;margin-left:6px;min-width:17px;height:17px;line-height:17px;padding:0 5px;border-radius:9px;background:#dc2626;color:#fff;font-size:10px;font-weight:700;text-align:center;vertical-align:middle">0</span>' +
+            '</button>' +
+          '</div>' +
+        '</div>' +
         '<div id="oiInboxList" class="oi-list-body"><div class="oi-skel-row"></div><div class="oi-skel-row"></div></div>' +
       '</aside>' +
       '<section id="oiThreadPane" class="oi-thread-pane">' +
@@ -978,6 +986,9 @@
           if (paneList)  paneList.style.display  = 'none';
           if (paneInbox) paneInbox.style.display = '';
           loadOnboardingInbox();
+          // Fire-and-forget: vul de e-mail-badge naast de schakelaar zonder de
+          // WhatsApp-lijst te blokkeren. Eén IMAP-call op de achtergrond.
+          _loadOiEmailSendersBadgeOnly();
         } else {
           if (paneInbox) paneInbox.style.display = 'none';
           if (paneList)  paneList.style.display  = '';
@@ -1072,6 +1083,11 @@
     emailItems:          [],
     emailWarning:        null,
     emailCustomerEmail:  '',
+    // Lijst-source (Fase 2 e-mailers): kies tussen WhatsApp-conversaties en
+    // de afzender-lijst uit /api/inbox-email-senders-list.
+    listSource:          'wa',  // 'wa' | 'email'
+    emailSenders:        [],
+    emailSendersLoaded:  false,
   };
   const _oiTplState = { items: [], filter: '', loaded: false, sendingFor: null };
 
@@ -1342,6 +1358,14 @@
     if (sugg)        sugg.style.display        = '';
     if (footer)      footer.style.display      = '';
     if (reply)       reply.style.display       = 'none';
+    // Bij open vanuit een e-mail-afzenderview zijn deze WhatsApp-only
+    // elementen verborgen — opnieuw tonen voor de WA-flow.
+    const modeBar     = document.getElementById('oiThreadModeBar');
+    const windowBadge = document.getElementById('oiThreadWindowBadge');
+    const ctxStrip    = document.getElementById('oiCustomerStrip');
+    if (modeBar)     modeBar.style.display     = '';
+    if (windowBadge) windowBadge.style.display = '';
+    if (ctxStrip)    ctxStrip.style.display    = '';
   }
 
   function _switchOiMode(next) {
@@ -1868,9 +1892,186 @@
     }
   }
 
+  // ── Lijst-source toggle (WhatsApp-gesprekken | E-mailafzenders) ─────
+  // Schakelt het LINKER paneel om. WhatsApp-flow blijft volledig functioneel;
+  // E-mail-bron toont afzenders uit /api/inbox-email-senders-list (Fase 1).
+  // Klik op een afzender opent de read-only thread rechts via _openOiEmailSender.
+  function _oiSetSrcButtonActive(btn, active) {
+    if (!btn) return;
+    btn.style.background = active ? 'var(--bg,#fff)' : 'transparent';
+    btn.style.color      = active ? 'var(--text)'   : 'var(--text-dim)';
+    btn.style.boxShadow  = active ? '0 1px 2px rgba(0,0,0,.06)' : 'none';
+  }
+
+  function _oiSwitchListSource(next) {
+    if (next !== 'wa' && next !== 'email') return;
+    if (next === _oiState.listSource) return;
+    _oiState.listSource = next;
+    _oiSetSrcButtonActive(document.getElementById('oiSrcBtnWa'),    next === 'wa');
+    _oiSetSrcButtonActive(document.getElementById('oiSrcBtnEmail'), next === 'email');
+    _oiShowListView();
+    if (next === 'wa') {
+      loadOnboardingInbox();
+    } else {
+      _loadOiEmailSenders();
+    }
+  }
+
+  function _oiUpdateListEmailBadge(n) {
+    const badge = document.getElementById('oiListEmailBadge');
+    if (!badge) return;
+    if (Number(n) > 0) {
+      badge.textContent  = String(n);
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
+  async function _loadOiEmailSenders() {
+    const list = document.getElementById('oiInboxList');
+    if (!list) return;
+    list.innerHTML = '<div class="oi-skel-row"></div><div class="oi-skel-row"></div>';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-email-senders-list?module=onboarding');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        list.innerHTML = '<div class="empty-state" style="color:#b91c1c;font-size:13px;padding:16px">Fout: ' + esc(d?.error || ('HTTP ' + r.status)) + '</div>';
+        return;
+      }
+      const items = Array.isArray(d.items) ? d.items : [];
+      _oiState.emailSenders        = items;
+      _oiState.emailSendersLoaded  = true;
+      _oiUpdateListEmailBadge(d.unread_total || 0);
+      if (items.length === 0) {
+        list.innerHTML = '<div class="empty-state" style="padding:24px;text-align:center">'
+          + '<i class="ti ti-mail-off" style="font-size:24px;color:var(--text-faint)"></i>'
+          + '<div style="font-size:14px;font-weight:600;margin-top:6px">Nog geen e-mails op onboarding@</div>'
+          + '<div style="font-size:12.5px;color:var(--text-dim);margin-top:4px">' + esc(d.warning || 'Nieuwe inbound mails verschijnen hier.') + '</div>'
+          + '</div>';
+        return;
+      }
+      list.innerHTML = items.map((it) => {
+        const nameLabel = it.name || it.email || '(onbekend)';
+        const preview   = (it.last_subject || '').slice(0, 80);
+        const timeShort = it.last_date ? esc(fmtDateNL(it.last_date)) : '';
+        const unread    = Number(it.unread_count) || 0;
+        const unreadBadge = unread > 0
+          ? '<span class="oi-conv-handoff" title="' + unread + ' ongelezen">' + unread + ' ongelezen</span>'
+          : '';
+        return ''
+          + '<div class="oi-conv-row" data-oi-email-row="1"'
+          + ' data-email="' + esc(it.email || '') + '"'
+          + ' data-customer-id="' + esc(it.customer_id || '') + '"'
+          + ' data-name="' + esc(nameLabel) + '">'
+          +   '<div class="oi-conv-avatar">' + esc(_oiAvatarInitial(nameLabel)) + '</div>'
+          +   '<div class="oi-conv-body">'
+          +     '<div class="oi-conv-toprow">'
+          +       '<div class="oi-conv-name">' + esc(nameLabel) + '</div>'
+          +       '<div class="oi-conv-time">' + timeShort + '</div>'
+          +     '</div>'
+          +     '<div class="oi-conv-preview">' + esc(preview || it.email || '—') + '</div>'
+          +     (unreadBadge ? '<div class="oi-conv-meta">' + unreadBadge + '</div>' : '')
+          +   '</div>'
+          + '</div>';
+      }).join('');
+      list.querySelectorAll('.oi-conv-row[data-oi-email-row="1"]').forEach((row) => {
+        row.addEventListener('click', () => _openOiEmailSender({
+          email:      row.dataset.email || '',
+          customerId: row.dataset.customerId || '',
+          name:       row.dataset.name || '',
+        }));
+      });
+    } catch (e) {
+      list.innerHTML = '<div class="empty-state" style="color:#b91c1c;font-size:13px;padding:16px">Fout: ' + esc(e?.message || e) + '</div>';
+    }
+  }
+
+  // Lichte achtergrond-fetch alleen voor het badge-getal; gebruikt hetzelfde
+  // endpoint maar negeert de items-lijst. Geen UI-blocking, geen IMAP-call
+  // op de 60s-timer.
+  async function _loadOiEmailSendersBadgeOnly() {
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-email-senders-list?module=onboarding');
+      if (!r.ok) return;
+      const d = await r.json().catch(() => ({}));
+      _oiUpdateListEmailBadge(d.unread_total || 0);
+    } catch (_e) { /* stille no-op */ }
+  }
+
+  async function _openOiEmailSender({ email, customerId, name }) {
+    if (!email) return;
+    _oiShowThreadView();
+    document.querySelectorAll('#oiInboxList .oi-conv-row.active').forEach((el) => el.classList.remove('active'));
+    const safeEmail = String(email).replace(/"/g, '');
+    const newRow = document.querySelector('#oiInboxList .oi-conv-row[data-email="' + safeEmail + '"]');
+    if (newRow) newRow.classList.add('active');
+
+    document.getElementById('oiThreadName').textContent  = name || email;
+    document.getElementById('oiThreadPhone').textContent = email;
+
+    // WhatsApp-only UI verbergen voor de e-mail-afzenderview.
+    const hideIds = ['oiThreadModeBar', 'oiThreadMessages', 'oiSuggestionPanel', 'oiThreadFooter', 'oiCustomerStrip', 'oiThreadWindowBadge'];
+    for (const id of hideIds) {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    }
+
+    const emailThread = document.getElementById('oiEmailThread');
+    if (emailThread) {
+      emailThread.style.display = 'block';
+      emailThread.innerHTML = '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">Laden…</div>';
+    }
+
+    // Reageren-knop (gated op RBAC + aanwezig e-mailadres).
+    const reply = document.getElementById('oiEmailReplyBtn');
+    const canReplyLink = !!(window.RBAC && window.RBAC.canSync && window.RBAC.canSync('onboarding.inbox.reply_link'));
+    if (reply) {
+      reply.style.display = canReplyLink ? '' : 'none';
+      reply.onclick = canReplyLink ? () => {
+        const url = '/modules/email.html?reply_to=' + encodeURIComponent(email) +
+                    '&mailbox=' + encodeURIComponent('onboarding@deforexopleiding.nl');
+        window.open(url, '_blank');
+      } : null;
+    }
+
+    // Thread ophalen via bestaande endpoint: customer_id-pad indien gekoppeld,
+    // anders email-pad (Fase 1 backend-uitbreiding).
+    const qs = customerId
+      ? ('customer_id=' + encodeURIComponent(customerId))
+      : ('email='       + encodeURIComponent(email));
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-emails-list?module=onboarding&' + qs);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        if (emailThread) emailThread.innerHTML = '<div style="color:#b91c1c;font-size:12px;padding:14px">'
+          + (r.status === 403 ? 'Geen toegang tot e-mail.' : 'Fout: ' + esc(d?.error || ('HTTP ' + r.status))) + '</div>';
+        return;
+      }
+      _oiState.emailItems         = Array.isArray(d.items) ? d.items : [];
+      _oiState.emailWarning       = d.warning || null;
+      _oiState.emailCustomerEmail = d.customer_email || email;
+      _oiState.emailLoaded        = true;
+      _renderOiEmailThread();
+    } catch (e) {
+      if (emailThread) emailThread.innerHTML = '<div style="color:#b91c1c;font-size:12px;padding:14px">Fout: ' + esc(e?.message || e) + '</div>';
+    }
+  }
+
   function wireOnboardingInbox() {
     const refreshBtn = document.getElementById('oiInboxRefresh');
-    if (refreshBtn) refreshBtn.addEventListener('click', loadOnboardingInbox);
+    if (refreshBtn) refreshBtn.addEventListener('click', () => {
+      if (_oiState.listSource === 'email') {
+        _loadOiEmailSenders();
+      } else {
+        loadOnboardingInbox();
+        _loadOiEmailSendersBadgeOnly();
+      }
+    });
+    const srcWa = document.getElementById('oiSrcBtnWa');
+    if (srcWa) srcWa.addEventListener('click', () => _oiSwitchListSource('wa'));
+    const srcEm = document.getElementById('oiSrcBtnEmail');
+    if (srcEm) srcEm.addEventListener('click', () => _oiSwitchListSource('email'));
     const backBtn = document.getElementById('oiThreadBack');
     if (backBtn) backBtn.addEventListener('click', _oiShowListView);
     const askBtn = document.getElementById('oiAskMilaBtn');
