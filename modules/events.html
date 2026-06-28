@@ -716,6 +716,7 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
                 <div id="evThreadPhone" style="font-size:11.5px;color:var(--text-faint)">—</div>
               </div>
               <span id="evThreadWindowBadge" style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:.04em">—</span>
+              <button type="button" id="evEmailReplyBtn" style="display:none;margin-left:8px;padding:5px 11px;font-size:12px;font-weight:600;background:var(--brand-deep,#093d54);color:#fff;border:none;border-radius:7px;cursor:pointer" title="Open mailmodule om te reageren"><i class="ti ti-mail-forward"></i> Reageren</button>
             </div>
 
             <!-- STAP 6d — klant-context-strip (gevuld door _renderEvCustomerStrip). -->
@@ -723,15 +724,27 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
             <!-- Aanmelding (event_attendee) — persistente koppeling parallel aan klant-koppeling. -->
             <div id="evAttendeeStrip" class="evx-ctx-strip" style="display:none"></div>
 
+            <!-- Mode-toggle WhatsApp | E-mail. Default WA; E-mail enabled als
+                 conv.attendee_id of customer_id gezet is. -->
+            <div id="evThreadModeBar" style="display:flex;gap:4px;padding:8px 14px 0;align-items:center">
+              <div id="evModeToggle" role="tablist" aria-label="Bron" style="display:inline-flex;background:var(--bg-elev,#f1f5f9);border:1px solid var(--border);border-radius:8px;padding:2px;gap:2px">
+                <button type="button" role="tab" aria-selected="true" id="evModeBtnWa"    data-ev-mode="wa"    style="border:none;background:var(--bg,#fff);color:var(--text);padding:5px 12px;font-size:12px;font-weight:600;border-radius:6px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06)">WhatsApp</button>
+                <button type="button" role="tab" aria-selected="false" id="evModeBtnEmail" data-ev-mode="email" style="border:none;background:transparent;color:var(--text-dim);padding:5px 12px;font-size:12px;font-weight:600;border-radius:6px;cursor:pointer" disabled title="Geen aanmelding/klant gekoppeld">E-mail</button>
+              </div>
+            </div>
+
             <div id="evThreadMessages" class="evx-thread-messages">
               <div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">Laden…</div>
             </div>
+
+            <!-- E-mail-thread (read-only, gevuld door _renderEvEmailThread). -->
+            <div id="evEmailThread" style="display:none;flex:1;min-height:0;overflow:auto;padding:8px 14px 14px"></div>
 
             <!-- Simone suggestion-paneel -->
             <div id="evSimoneSuggestionPanel" style="padding:0 14px"></div>
 
             <!-- Composer -->
-            <div class="evx-thread-footer">
+            <div id="evThreadFooter" class="evx-thread-footer">
               <div style="display:flex;gap:8px;align-items:flex-start">
                 <button class="btn-primary" id="evAskSimoneBtn" type="button" style="background:#7c3aed;white-space:nowrap" title="Vraag Simone om een suggestie">
                   <i class="ti ti-sparkles"></i> Vraag Simone
@@ -1033,6 +1046,14 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
 
   const inboxRefresh = document.getElementById('evInboxRefresh');
   if (inboxRefresh) inboxRefresh.addEventListener('click', () => loadEventsInbox());
+
+  // Mode-toggle WhatsApp | E-mail. Klik op disabled-knop wordt door de
+  // browser geblokkeerd; _evSwitchMode heeft daarnaast nog een fail-safe
+  // op _evState.conv.attendee_id || .customer_id.
+  const evWaBtn = document.getElementById('evModeBtnWa');
+  if (evWaBtn) evWaBtn.addEventListener('click', () => _evSwitchMode('wa'));
+  const evEmBtn = document.getElementById('evModeBtnEmail');
+  if (evEmBtn) evEmBtn.addEventListener('click', () => _evSwitchMode('email'));
 
   // STAP 6c — Template-picker wiring
   const tplBtn = document.getElementById('evComposeTemplateBtn');
@@ -3570,7 +3591,16 @@ function _evInstallInboxManualBadgeInterval() {
 }
 
 // ── Fase 2 stap 2c: events thread + Simone interactie ────────────────────────
-const _evState = { convId: null, conv: null, canSendText: false, suggestion: null, editingSuggestionId: null };
+const _evState = {
+  convId: null, conv: null, canSendText: false,
+  suggestion: null, editingSuggestionId: null,
+  // Mode-toggle WhatsApp | E-mail (mirror van #485's _oi*-pattern).
+  mode: 'wa',           // 'wa' | 'email'
+  emailLoaded: false,   // één-shot cache per geopende conv
+  emailItems: [],
+  emailWarning: null,
+  emailCustomerEmail: '',
+};
 
 // STAP 6a: persistent twee-paneel — beide panes staan altijd in de DOM.
 // _evShowThreadView toont de content-area + verbergt het empty-state.
@@ -3766,6 +3796,8 @@ async function openEventsConv({ id, phone, displayName, customer }) {
     // STAP 6d: klant-context-strip + event-context (read-only afgeleid).
     _renderEvCustomerStrip(_evState.conv);
     _renderEvAttendeeStrip(_evState.conv);
+    // Reset mode-toggle per geopende conv.
+    _evResetMode();
     // Refresh list-tab badges (unread reset)
     loadEventsInbox();
     // Laatste PROPOSED suggestie tonen
@@ -3831,6 +3863,166 @@ function _applyEvComposeState() {
     if (sendBtn) { sendBtn.disabled = true; sendBtn.title = '24h-window verlopen'; }
     if (hint) hint.textContent = '24h-window verlopen sinds laatste inbound — vrije tekst niet meer toegestaan.';
   }
+}
+
+// ── Mode-toggle WhatsApp | E-mail (read-only e-mail-thread) ────────────────
+// Mirror van #485's _oi*-pattern op de evx-shell. WhatsApp-pad ongemoeid.
+function _evResetMode() {
+  _evState.mode               = 'wa';
+  _evState.emailLoaded        = false;
+  _evState.emailItems         = [];
+  _evState.emailWarning       = null;
+  _evState.emailCustomerEmail = '';
+  const wa    = document.getElementById('evModeBtnWa');
+  const em    = document.getElementById('evModeBtnEmail');
+  const reply = document.getElementById('evEmailReplyBtn');
+  const emailThread = document.getElementById('evEmailThread');
+  const waThread    = document.getElementById('evThreadMessages');
+  const sugg        = document.getElementById('evSimoneSuggestionPanel');
+  const footer      = document.getElementById('evThreadFooter');
+  const hasContact = !!(_evState.conv && (_evState.conv.attendee_id || _evState.conv.customer_id));
+  if (em) {
+    em.disabled = !hasContact;
+    em.title    = hasContact ? '' : 'Geen aanmelding/klant gekoppeld';
+    em.style.color = 'var(--text-dim)';
+    em.style.background = 'transparent';
+    em.style.boxShadow = 'none';
+    em.setAttribute('aria-selected', 'false');
+  }
+  if (wa) {
+    wa.style.color = 'var(--text)';
+    wa.style.background = 'var(--bg,#fff)';
+    wa.style.boxShadow = '0 1px 2px rgba(0,0,0,.06)';
+    wa.setAttribute('aria-selected', 'true');
+  }
+  if (emailThread) emailThread.style.display = 'none';
+  if (waThread)    waThread.style.display    = '';
+  if (sugg)        sugg.style.display        = '';
+  if (footer)      footer.style.display      = '';
+  if (reply)       reply.style.display       = 'none';
+}
+
+function _evSwitchMode(next) {
+  if (next !== 'wa' && next !== 'email') return;
+  if (next === 'email' && !(_evState.conv && (_evState.conv.attendee_id || _evState.conv.customer_id))) return;
+  if (_evState.mode === next) return;
+  _evState.mode = next;
+  const wa    = document.getElementById('evModeBtnWa');
+  const em    = document.getElementById('evModeBtnEmail');
+  const reply = document.getElementById('evEmailReplyBtn');
+  const emailThread = document.getElementById('evEmailThread');
+  const waThread    = document.getElementById('evThreadMessages');
+  const sugg        = document.getElementById('evSimoneSuggestionPanel');
+  const footer      = document.getElementById('evThreadFooter');
+  const setActive = (btn, active) => {
+    if (!btn) return;
+    btn.style.color      = active ? 'var(--text)' : 'var(--text-dim)';
+    btn.style.background = active ? 'var(--bg,#fff)' : 'transparent';
+    btn.style.boxShadow  = active ? '0 1px 2px rgba(0,0,0,.06)' : 'none';
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  };
+  setActive(wa, next === 'wa');
+  setActive(em, next === 'email');
+  if (next === 'wa') {
+    if (emailThread) emailThread.style.display = 'none';
+    if (waThread)    waThread.style.display    = '';
+    if (sugg)        sugg.style.display        = '';
+    if (footer)      footer.style.display      = '';
+    if (reply)       reply.style.display       = 'none';
+  } else {
+    if (waThread)    waThread.style.display    = 'none';
+    if (sugg)        sugg.style.display        = 'none';
+    if (footer)      footer.style.display      = 'none';
+    if (emailThread) emailThread.style.display = 'block';
+    const canReplyLink = !!(window.RBAC && window.RBAC.canSync && window.RBAC.canSync('events.inbox.reply_link'));
+    if (reply) reply.style.display = canReplyLink ? '' : 'none';
+    _loadEvEmailThread();
+  }
+}
+
+async function _loadEvEmailThread() {
+  const wrap = document.getElementById('evEmailThread');
+  if (!wrap) return;
+  if (_evState.emailLoaded) {
+    _renderEvEmailThread();
+    return;
+  }
+  wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">E-mails laden…</div>';
+  // Attendee-first; fallback op customer_id. PR #487 ondersteunt beide
+  // query-params op de events-tak.
+  const attendeeId = _evState.conv?.attendee_id || null;
+  const customerId = _evState.conv?.customer_id || null;
+  let qs = null;
+  if (attendeeId) qs = 'attendee_id=' + encodeURIComponent(attendeeId);
+  else if (customerId) qs = 'customer_id=' + encodeURIComponent(customerId);
+  if (!qs) {
+    wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">Geen aanmelding/klant gekoppeld.</div>';
+    return;
+  }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/inbox-emails-list?' + qs + '&module=events');
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      wrap.innerHTML = '<div style="color:#ef4444;font-size:12px;padding:14px">Fout: ' + esc(d?.error || ('HTTP ' + r.status)) + '</div>';
+      return;
+    }
+    _evState.emailLoaded        = true;
+    _evState.emailItems         = Array.isArray(d.items) ? d.items : [];
+    _evState.emailWarning       = d.warning || null;
+    _evState.emailCustomerEmail = d.customer_email || '';
+    _renderEvEmailThread();
+  } catch (e) {
+    wrap.innerHTML = '<div style="color:#ef4444;font-size:12px;padding:14px">Fout: ' + esc(e?.message || e) + '</div>';
+  }
+}
+
+function _renderEvEmailThread() {
+  const wrap = document.getElementById('evEmailThread');
+  if (!wrap) return;
+  const items   = _evState.emailItems || [];
+  const warning = _evState.emailWarning;
+  // Reageren-knop wire (idempotent).
+  const reply = document.getElementById('evEmailReplyBtn');
+  if (reply) {
+    reply.onclick = () => {
+      const to = _evState.emailCustomerEmail || '';
+      if (!to) return;
+      const url = '/modules/email.html?reply_to=' + encodeURIComponent(to) +
+                  '&mailbox=' + encodeURIComponent('events@deforexopleiding.nl');
+      window.open(url, '_blank');
+    };
+  }
+  if (items.length === 0) {
+    let html = '<div style="color:var(--text-faint);font-size:12.5px;text-align:center;padding:24px">Nog geen e-mails voor deze aanmelding/klant.</div>';
+    if (warning) {
+      html += '<div style="color:var(--text-dim);font-size:11px;text-align:center;padding:4px 14px 12px">' + esc(warning) + '</div>';
+    }
+    wrap.innerHTML = html;
+    return;
+  }
+  // Spiegelt _renderEvThread (events-stijl): inbound=links+bg-elev-2,
+  // outbound=rechts+#093d54/wit. Tijd via fmtDate (events-conventie).
+  const bubbleHtml = items.map((m) => {
+    const inbound = m.direction === 'inbound';
+    const align   = inbound ? 'flex-start' : 'flex-end';
+    const bg      = inbound ? 'var(--bg-elev-2)' : '#093d54';
+    const color   = inbound ? 'var(--text)' : '#ffffff';
+    const time    = m.date ? fmtDate(m.date) : '';
+    const subj    = m.subject || '(geen onderwerp)';
+    const preview = m.preview || '';
+    return '<div style="display:flex;justify-content:' + align + ';margin-bottom:8px">'
+      + '<div style="max-width:78%;background:' + bg + ';color:' + color + ';padding:8px 11px;border-radius:10px;font-size:13px;line-height:1.4">'
+      +   '<div style="font-weight:700;font-size:12.5px;margin-bottom:3px">' + esc(subj) + '</div>'
+      +   (preview ? '<div style="white-space:pre-wrap;word-wrap:break-word;font-size:12.5px">' + esc(preview) + '</div>' : '')
+      +   '<div style="font-size:10px;opacity:0.65;margin-top:3px;text-align:right">' + esc(time) + '</div>'
+      + '</div></div>';
+  }).join('');
+  let html = bubbleHtml;
+  if (warning) {
+    html += '<div style="color:var(--text-dim);font-size:11px;text-align:center;padding:6px 14px 0">' + esc(warning) + '</div>';
+  }
+  wrap.innerHTML = html;
+  wrap.scrollTop = wrap.scrollHeight;
 }
 
 async function loadLatestEventsSuggestion(convId) {
