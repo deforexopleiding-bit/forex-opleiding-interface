@@ -70,6 +70,7 @@ export function buildConditionState(onboarding, traject, extras) {
     wizard_not_started:  !isWizardStarted(onboarding),
     wizard_completed:    onboarding && onboarding.status === 'afgerond',
     no_inbound:          !!(extras && extras.no_inbound === true),
+    invoice_unpaid:      !!(extras && extras.invoice_unpaid === true),
     traject_is_1op1:       trajectType === '1op1',
     traject_is_membership: trajectType === 'membership',
   };
@@ -80,6 +81,7 @@ export function evaluateCondition(check, state) {
     case 'wizard_not_started':     return state.wizard_not_started === true;
     case 'wizard_completed':       return state.wizard_completed === true;
     case 'no_inbound':              return state.no_inbound === true;
+    case 'invoice_unpaid':         return state.invoice_unpaid === true;
     case 'traject_is_1op1':         return state.traject_is_1op1 === true;
     case 'traject_is_membership':   return state.traject_is_membership === true;
     default:                        return true;
@@ -202,7 +204,7 @@ async function loadCandidatesForAutomation(auto, now) {
 
   let q = supabaseAdmin
     .from('onboardings')
-    .select('id, status, created_at, completed_at, automation_enabled, archived_at')
+    .select('id, status, created_at, completed_at, automation_enabled, archived_at, customer_id')
     .eq('automation_enabled', true)
     // Fase 3b — test-onboardings (is_test=true) krijgen hun runs direct
     // ingeschoten door /api/onboarding-automation-test. De candidate-poll
@@ -245,6 +247,24 @@ async function loadCandidatesForAutomation(auto, now) {
     q = q
       .eq('status', 'aangemeld')
       .lte('created_at', cutoff);
+    if (newOnly) q = q.gte('created_at', auto.enabled_at);
+  } else if (auto.trigger_type === 'on_first_call_in') {
+    const cfg = auto.trigger_config || {};
+    const days = Number(cfg.days_before_call);
+    if (!Number.isFinite(days) || days < 0) return [];
+    const target   = new Date(now); target.setDate(target.getDate() + days);
+    const dayStart = new Date(target); dayStart.setHours(0, 0, 0, 0);
+    const dayEnd   = new Date(target); dayEnd.setHours(23, 59, 59, 999);
+    const { data: dls, error: dErr } = await supabaseAdmin
+      .from('deals')
+      .select('customer_id')
+      .not('first_call_at', 'is', null)
+      .gte('first_call_at', dayStart.toISOString())
+      .lte('first_call_at', dayEnd.toISOString());
+    if (dErr) throw new Error('first_call deals: ' + dErr.message);
+    const custIds = [...new Set((dls || []).map((d) => d.customer_id).filter(Boolean))];
+    if (!custIds.length) return [];
+    q = q.in('customer_id', custIds);
     if (newOnly) q = q.gte('created_at', auto.enabled_at);
   } else {
     return [];
@@ -422,6 +442,22 @@ async function loadInboundContext(onboarding) {
   }
 }
 
+async function loadInvoiceUnpaidContext(onboarding) {
+  try {
+    if (!onboarding?.customer_id) return { invoice_unpaid: false }; // niet bepaalbaar → niet vuren
+    const { data: paid } = await supabaseAdmin
+      .from('invoices')
+      .select('id')
+      .eq('customer_id', onboarding.customer_id)
+      .eq('status', 'paid')
+      .limit(1)
+      .maybeSingle();
+    return { invoice_unpaid: !paid };
+  } catch {
+    return { invoice_unpaid: false };
+  }
+}
+
 export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_000 } = {}) {
   const startMs = Date.now();
   const nowIso = now.toISOString();
@@ -470,7 +506,8 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
       }
 
       const inboundCtx = await loadInboundContext(onboarding);
-      const conditionState = buildConditionState(onboarding, traject, inboundCtx);
+      const invoiceCtx = await loadInvoiceUnpaidContext(onboarding);
+      const conditionState = buildConditionState(onboarding, traject, { ...inboundCtx, ...invoiceCtx });
 
       const deps = {
         isStepDone: async (idx) => {
