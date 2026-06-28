@@ -113,6 +113,20 @@
 
     <div id="tab1on1" class="tab-panel" hidden>
       <div id="oneOnOneWarning"></div>
+      <div id="oneOnOneRangeBar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+        <div role="tablist" style="display:inline-flex;background:var(--bg-elev,#f1f5f9);border:1px solid var(--border);border-radius:8px;padding:2px;gap:2px">
+          <button type="button" class="ms-range-btn" data-range="day"     style="border:none;background:transparent;color:var(--text-dim);padding:6px 12px;font-size:12.5px;font-weight:600;border-radius:6px;cursor:pointer">Dag</button>
+          <button type="button" class="ms-range-btn" data-range="week"    style="border:none;background:transparent;color:var(--text-dim);padding:6px 12px;font-size:12.5px;font-weight:600;border-radius:6px;cursor:pointer">Week</button>
+          <button type="button" class="ms-range-btn" data-range="month"   style="border:none;background:var(--bg,#fff);color:var(--text);padding:6px 12px;font-size:12.5px;font-weight:600;border-radius:6px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06)">Maand</button>
+          <button type="button" class="ms-range-btn" data-range="custom"  style="border:none;background:transparent;color:var(--text-dim);padding:6px 12px;font-size:12.5px;font-weight:600;border-radius:6px;cursor:pointer">Aangepast</button>
+        </div>
+        <span id="msCustomRange" style="display:none;gap:6px;align-items:center;font-size:12.5px;color:var(--text-dim)">
+          <span>Van</span>
+          <input type="date" id="msCustomFrom" style="padding:5px 8px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:inherit" />
+          <span>Tot</span>
+          <input type="date" id="msCustomTo" style="padding:5px 8px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:inherit" />
+        </span>
+      </div>
       <div class="section">
         <h2><i class="ti ti-calendar-plus"></i> Gepland</h2>
         <div id="plannedWrap"><div class="empty-state"><i class="ti ti-clock"></i>Laden…</div></div>
@@ -120,6 +134,7 @@
       <div class="section">
         <h2><i class="ti ti-calendar-check"></i> Afgerond</h2>
         <div id="completedWrap"><div class="empty-state"><i class="ti ti-clock"></i>Laden…</div></div>
+        <div id="completedTotals" style="margin-top:8px;font-size:12.5px;color:var(--text-dim)"></div>
       </div>
     </div>
   </div>
@@ -162,10 +177,18 @@
 
   // ── Tab-wiring ────────────────────────────────────────────────────────
   const _state = {
-    studentsLoaded: false,
-    futureLoaded:   false,
-    oneOnOneLoaded: false,
-    students:       [], // raw lijst voor client-side search
+    studentsLoaded:    false,
+    futureLoaded:      false,
+    oneOnOneLoaded:    false,
+    students:          [], // raw lijst voor client-side search
+    // 1-op-1 tab — volledige fetch-resultaten bewaren zodat herfilteren
+    // (range-toggle) zonder refetch werkt. session_number/_total komen al
+    // ge-resolved van de server; client filtert puur op starts_at.
+    oneOnOnePlanned:   [],
+    oneOnOneCompleted: [],
+    dateRange:         'month',  // 'day' | 'week' | 'month' | 'custom'
+    customFrom:        '',       // 'YYYY-MM-DD'
+    customTo:          '',       // 'YYYY-MM-DD'
   };
 
   function activateTab(name) {
@@ -448,6 +471,80 @@
       </table>`;
   }
 
+  // ── 1-op-1 date-range filter (frontend-only) ──────────────────────────
+  // Returnt [fromMs, toMs] in lokale tijd; lege custom-velden = open eind.
+  function _dateRangeBounds() {
+    const now  = new Date();
+    const y    = now.getFullYear();
+    const mIdx = now.getMonth();
+    const d    = now.getDate();
+    const start = (yy, mm, dd) => new Date(yy, mm, dd, 0, 0, 0, 0).getTime();
+    const end   = (yy, mm, dd) => new Date(yy, mm, dd, 23, 59, 59, 999).getTime();
+    const range = _state.dateRange;
+    if (range === 'day') {
+      return [start(y, mIdx, d), end(y, mIdx, d)];
+    }
+    if (range === 'week') {
+      // ISO-week: maandag = startdag.
+      const day = now.getDay(); // 0=zo, 1=ma, …, 6=za
+      const diffToMon = (day === 0 ? -6 : 1 - day);
+      const mon = new Date(y, mIdx, d + diffToMon);
+      const sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6);
+      return [
+        start(mon.getFullYear(), mon.getMonth(), mon.getDate()),
+        end(sun.getFullYear(),   sun.getMonth(),   sun.getDate()),
+      ];
+    }
+    if (range === 'custom') {
+      const m = String(_state.customFrom || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      const M = String(_state.customTo   || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      const fromMs = m ? start(+m[1], +m[2] - 1, +m[3]) : -Infinity;
+      const toMs   = M ? end(+M[1],   +M[2] - 1, +M[3]) :  Infinity;
+      return [fromMs, toMs];
+    }
+    // default: month — 1e t/m laatste dag van de huidige maand.
+    const lastDay = new Date(y, mIdx + 1, 0).getDate();
+    return [start(y, mIdx, 1), end(y, mIdx, lastDay)];
+  }
+
+  function _applyDateRange() {
+    const [fromMs, toMs] = _dateRangeBounds();
+    const within = (s) => {
+      const t = s && s.starts_at ? new Date(s.starts_at).getTime() : NaN;
+      return Number.isFinite(t) && t >= fromMs && t <= toMs;
+    };
+    const planned   = (_state.oneOnOnePlanned   || []).filter(within);
+    const completed = (_state.oneOnOneCompleted || []).filter(within);
+    _renderPlanned(planned);
+    _renderCompleted(completed);
+    const totalEl = document.getElementById('completedTotals');
+    if (totalEl) {
+      const n   = completed.length;
+      const sum = completed.reduce((acc, s) => acc + (Number(s.amount) || 0), 0);
+      totalEl.textContent = n > 0
+        ? (n + ' sessie' + (n === 1 ? '' : 's') + ' · ' + fmtEUR(sum))
+        : '';
+    }
+  }
+
+  function _setRangeBtnActive(btn, active) {
+    if (!btn) return;
+    btn.style.background = active ? 'var(--bg,#fff)' : 'transparent';
+    btn.style.color      = active ? 'var(--text)'   : 'var(--text-dim)';
+    btn.style.boxShadow  = active ? '0 1px 2px rgba(0,0,0,.06)' : 'none';
+  }
+
+  function _selectDateRange(next) {
+    if (!['day', 'week', 'month', 'custom'].includes(next)) return;
+    _state.dateRange = next;
+    document.querySelectorAll('#oneOnOneRangeBar .ms-range-btn').forEach((b) => {
+      _setRangeBtnActive(b, b.dataset.range === next);
+    });
+    const custom = document.getElementById('msCustomRange');
+    if (custom) custom.style.display = (next === 'custom') ? 'inline-flex' : 'none';
+    _applyDateRange();
+  }
+
   async function load1on1Sessions() {
     _state.oneOnOneLoaded = true;
     const apiFetch = window.AgentShared?.apiFetch;
@@ -456,9 +553,11 @@
     const planned   = document.getElementById('plannedWrap');
     const completed = document.getElementById('completedWrap');
     const warnEl    = document.getElementById('oneOnOneWarning');
+    const totalEl   = document.getElementById('completedTotals');
     if (planned)   planned.innerHTML   = `<div style="color:var(--text-faint);font-size:12.5px;padding:14px;text-align:center">Laden…</div>`;
     if (completed) completed.innerHTML = `<div style="color:var(--text-faint);font-size:12.5px;padding:14px;text-align:center">Laden…</div>`;
     if (warnEl)    warnEl.innerHTML    = '';
+    if (totalEl)   totalEl.textContent = '';
     try {
       const r = await apiFetch('/api/mentor-1on1-sessions');
       const d = await r.json();
@@ -466,8 +565,9 @@
       if (d.warning && warnEl) {
         warnEl.innerHTML = `<div class="warning-bar"><i class="ti ti-alert-triangle"></i> ${esc(d.warning)}</div>`;
       }
-      _renderPlanned(d.planned);
-      _renderCompleted(d.completed);
+      _state.oneOnOnePlanned   = Array.isArray(d.planned)   ? d.planned   : [];
+      _state.oneOnOneCompleted = Array.isArray(d.completed) ? d.completed : [];
+      _applyDateRange();
     } catch (e) {
       console.error('[mentor-students] 1on1:', e?.message || e);
       setError('plannedWrap',   '1-op-1 ophalen mislukt: ' + (e?.message || e));
@@ -507,6 +607,21 @@
     // Zoekbalk client-side filter.
     const search = document.getElementById('msSearch');
     if (search) search.addEventListener('input', () => _applyStudentFilter(search.value));
+
+    // 1-op-1 date-range wiring (frontend-only).
+    document.querySelectorAll('#oneOnOneRangeBar .ms-range-btn').forEach((b) => {
+      b.addEventListener('click', () => _selectDateRange(b.dataset.range));
+    });
+    const fromInput = document.getElementById('msCustomFrom');
+    const toInput   = document.getElementById('msCustomTo');
+    if (fromInput) fromInput.addEventListener('change', () => {
+      _state.customFrom = fromInput.value || '';
+      if (_state.dateRange === 'custom') _applyDateRange();
+    });
+    if (toInput) toInput.addEventListener('change', () => {
+      _state.customTo = toInput.value || '';
+      if (_state.dateRange === 'custom') _applyDateRange();
+    });
 
     // Default tab.
     activateTab('studenten');
