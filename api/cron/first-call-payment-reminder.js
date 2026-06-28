@@ -190,12 +190,15 @@ export default async function handler(req, res) {
         }
         if (!onboarding?.id) { result.skipped++; continue; }
 
-        // Betaalcheck: bestaat er een betaalde factuur? → klant heeft betaald → niets sturen.
+        // Betaalcheck: heeft de klant ERGENS een betaling gedaan (volledig óf
+        // aanbetaling/deelbetaling)? → dan starten ze gewoon → geen reminder.
+        // Aanbetalingen zetten een factuur op status='partially_paid' met
+        // amount_paid > 0; alleen .eq('status','paid') zou die missen.
         const { data: paidInv, error: paidErr } = await supabaseAdmin
           .from('invoices')
           .select('id')
           .eq('customer_id', cust.id)
-          .eq('status', 'paid')
+          .gt('amount_paid', 0)
           .limit(1)
           .maybeSingle();
         if (paidErr) {
