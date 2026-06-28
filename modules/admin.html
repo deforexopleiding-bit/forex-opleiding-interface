@@ -483,9 +483,15 @@
          (anti-lockout) en heeft daarom geen verberg-toggle. -->
     <div id="tab-menu-manager" class="admin-tab-panel" style="display:none">
       <div class="section-card">
-        <div class="section-header">
+        <div class="section-header" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <span>Menu beheer</span>
-          <button class="btn btn-sm btn-primary" type="button" id="menuMgrSaveBtn" onclick="saveMenuManager()" disabled>
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-dim);font-weight:500">
+            Rol:
+            <select id="menuMgrRoleSelect" style="padding:5px 8px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:inherit">
+              <option value="">Standaard (alle rollen)</option>
+            </select>
+          </label>
+          <button class="btn btn-sm btn-primary" type="button" id="menuMgrSaveBtn" onclick="saveMenuManager()" disabled style="margin-left:auto">
             <i class="ti ti-device-floppy"></i> Opslaan
           </button>
         </div>
@@ -495,6 +501,7 @@
           autoritatief: een zichtbaar item toont alleen voor wie er recht op heeft. De
           <strong>Admin</strong>-knop kan nooit verborgen worden zodat deze beheerpagina bereikbaar blijft.
           Wijzigingen zijn pas zichtbaar na herladen van de pagina.
+          <div id="menuMgrRoleHelp" style="margin-top:6px;color:var(--text)">Je bewerkt de menu-volgorde voor: <strong>Standaard (alle rollen)</strong>.</div>
         </div>
         <div id="menuMgrBanner" style="display:none;margin:0 14px 12px;padding:8px 12px;border-radius:8px;font-size:12.5px"></div>
         <div id="menuMgrList" style="padding:0 14px 14px">
@@ -1024,7 +1031,7 @@ function switchAdminTab(name) {
   }
   // Menu beheer: lazy load + eenmalig wiren. Idempotent zodat re-open de
   // huidige (mogelijk dirty) draft niet weggooit.
-  if (name === 'menu-manager') loadMenuManager();
+  if (name === 'menu-manager') { _menuMgrInitRoleSelect(); loadMenuManager(); }
   // WhatsApp Templates + Connection init VERHUISD: zie
   // modules/shared/finance-instellingen.js (Finance > Instellingen).
   // Assessment-vragen + Simone-config VERHUISD naar Events → Instellingen;
@@ -3573,6 +3580,8 @@ let _menuMgrItems = null;   // [{ key, visible }] in huidige UI-volgorde
 let _menuMgrDirty = false;
 let _menuMgrLoaded = false;
 let _menuMgrSaving = false;
+let _menuMgrRole   = '';     // '' = globale standaard; anders 'super_admin' | 'manager' | …
+let _menuMgrLoadedRole = null; // welke rol is geladen — voor de re-load-check bij rolwissel
 
 function _menuMgrLabel(key) {
   const def = MENU_ITEM_DEFS.find(d => d.key === key);
@@ -3624,22 +3633,39 @@ function _menuMgrMergeDefaultsAndConfig(config) {
 }
 
 async function loadMenuManager() {
-  if (_menuMgrLoaded) return; // bestaande draft niet wegmieteren
+  // Skip alleen als al geladen voor DEZELFDE rol. Bij rolwissel mag re-load.
+  if (_menuMgrLoaded && _menuMgrLoadedRole === _menuMgrRole) return;
   _menuMgrShowBanner('', null);
   try {
+    const settingsKey = _menuMgrRole ? ('sidebar_layout:' + _menuMgrRole) : 'sidebar_layout';
     let config = null;
     try {
-      const r = await window.AgentShared.apiFetch('/api/app-settings?key=sidebar_layout');
+      const r = await window.AgentShared.apiFetch('/api/app-settings?key=' + encodeURIComponent(settingsKey));
       if (r.ok) {
         const d = await r.json();
         config = d && d.value;
       }
-      // 404 = nog niet geconfigureerd; default-volgorde uit ITEM_DEFS wordt gebruikt.
+      // 404 = nog niet geconfigureerd voor deze rol.
     } catch (e) {
       console.warn('[menu-manager] layout fetch faalde, gebruik defaults:', e?.message || e);
     }
+    // Fallback: bij een rol-specifieke load zonder eigen config halen we de
+    // globale 'sidebar_layout' op als basis — zo start een nieuwe rol vanaf
+    // de standaard-volgorde i.p.v. blanco.
+    if (_menuMgrRole && (!config || !Array.isArray(config.items) || config.items.length === 0)) {
+      try {
+        const rGlobal = await window.AgentShared.apiFetch('/api/app-settings?key=sidebar_layout');
+        if (rGlobal.ok) {
+          const dGlobal = await rGlobal.json();
+          if (dGlobal && dGlobal.value && Array.isArray(dGlobal.value.items) && dGlobal.value.items.length > 0) {
+            config = dGlobal.value;
+          }
+        }
+      } catch (e) { /* val verder terug op pure defaults */ }
+    }
     _menuMgrItems = _menuMgrMergeDefaultsAndConfig(config);
     _menuMgrLoaded = true;
+    _menuMgrLoadedRole = _menuMgrRole;
     _menuMgrDirty = false;
     const saveBtn = document.getElementById('menuMgrSaveBtn');
     if (saveBtn) saveBtn.disabled = true;
@@ -3648,6 +3674,44 @@ async function loadMenuManager() {
     console.error('[menu-manager] load', e?.message || e);
     _menuMgrShowBanner('Laden mislukt: ' + (e?.message || e), 'error');
   }
+}
+
+// Vult de rol-select met RBAC_ROLES + 'Standaard'-optie en wired de
+// onchange-handler. Idempotent. Wordt aangeroepen vanuit init() na
+// RBAC-laden zodat RBAC_ROLES gegarandeerd bekend is.
+function _menuMgrInitRoleSelect() {
+  const sel = document.getElementById('menuMgrRoleSelect');
+  if (!sel || sel.dataset.inited === '1') return;
+  // Bestaande "Standaard"-optie behouden; voeg overige rollen toe.
+  RBAC_ROLES.forEach((r) => {
+    if (!r || !r.key) return;
+    const opt = document.createElement('option');
+    opt.value = r.key;
+    opt.textContent = r.label || r.key;
+    sel.appendChild(opt);
+  });
+  sel.value = _menuMgrRole;
+  sel.addEventListener('change', () => {
+    const next = sel.value || '';
+    if (next === _menuMgrRole) return;
+    if (_menuMgrDirty) {
+      const ok = window.confirm('Niet-opgeslagen wijzigingen. Wisselen zonder opslaan?');
+      if (!ok) { sel.value = _menuMgrRole; return; }
+    }
+    _menuMgrRole = next;
+    _menuMgrLoaded = false; // forceer re-load voor de nieuwe rol
+    _menuMgrLoadedRole = null;
+    _menuMgrDirty = false;
+    const help = document.getElementById('menuMgrRoleHelp');
+    if (help) {
+      const label = _menuMgrRole
+        ? esc((RBAC_ROLES.find((r) => r.key === _menuMgrRole) || {}).label || _menuMgrRole)
+        : 'Standaard (alle rollen)';
+      help.innerHTML = 'Je bewerkt de menu-volgorde voor: <strong>' + label + '</strong>.';
+    }
+    loadMenuManager();
+  });
+  sel.dataset.inited = '1';
 }
 
 function renderMenuManager() {
@@ -3750,6 +3814,9 @@ async function saveMenuManager() {
         visible: MENU_LOCKED_KEYS.has(it.key) ? true : it.visible !== false,
       })),
     };
+    // Leeg = globale standaard; backward-compatible: oude clients zonder
+    // role-field landen via dezelfde endpoint-tak op 'sidebar_layout'.
+    if (_menuMgrRole) payload.role = _menuMgrRole;
     const r = await window.AgentShared.apiFetch('/api/sidebar-layout-save', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },

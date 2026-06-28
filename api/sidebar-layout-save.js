@@ -1,6 +1,15 @@
 // api/sidebar-layout-save.js
 //
-// POST → schrijft de sidebar-layout config naar app_settings.sidebar_layout.
+// POST → schrijft de sidebar-layout config naar app_settings.
+//
+// Per-rol layouts:
+//   - Body.role afwezig / leeg / 'default' → key = 'sidebar_layout' (globale
+//     standaard; bestaand gedrag, backward-compatible).
+//   - Body.role ∈ ALLOWED_ROLES              → key = 'sidebar_layout:<role>'.
+//   - Andere body.role waarde                → 400.
+// Sidebar.js leest de hoogste-rol-layout van de ingelogde user (precedence:
+// super_admin > manager > sales > mentor > marketing > administratie) en valt
+// fail-open terug op 'sidebar_layout' bij ontbreken.
 //
 // Gate: requirePermission('admin.sidebar') ÓF super_admin-rol.
 //   - super_admin (bypass-rol, perms='*') mag altijd schrijven.
@@ -8,11 +17,13 @@
 //   - Endpoint is autoritatief; sidebar.js is fail-open op de lees-kant maar
 //     vertrouwt op deze gate voor schrijf-veiligheid.
 //
-// Reads via /api/app-settings?key=sidebar_layout (al-aanwezige GET, elke
-// ingelogde user). Geen aparte read-endpoint nodig.
+// Reads via /api/app-settings?key=sidebar_layout(:role) (al-aanwezige GET,
+// elke ingelogde user). Geen aparte read-endpoint nodig.
 //
 // Body:
 //   {
+//     role?: 'default' | 'super_admin' | 'manager' | 'sales' | 'mentor'
+//                      | 'marketing'   | 'administratie',
 //     items: [
 //       { key: 'dashboard', visible: true  },
 //       { key: 'email',     visible: false },
@@ -35,6 +46,7 @@ import { getClientIp } from './_lib/audit-customer.js';
 
 const MAX_ITEMS = 64;
 const MAX_KEY_LEN = 64;
+const ALLOWED_ROLES = ['super_admin', 'manager', 'sales', 'mentor', 'marketing', 'administratie'];
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -60,6 +72,17 @@ export default async function handler(req, res) {
 
   // ── Validatie ───────────────────────────────────────────────────────────
   const body = req.body || {};
+  // Per-rol layout-key resolutie (leeg/'default' = globale standaard, backward-
+  // compatible). Onbekende rol-string → 400.
+  const rawRole = typeof body.role === 'string' ? body.role.trim() : '';
+  let settingsKey;
+  if (!rawRole || rawRole === 'default') {
+    settingsKey = 'sidebar_layout';
+  } else if (ALLOWED_ROLES.includes(rawRole)) {
+    settingsKey = 'sidebar_layout:' + rawRole;
+  } else {
+    return res.status(400).json({ error: 'onbekende role' });
+  }
   const items = Array.isArray(body.items) ? body.items : null;
   if (!items) return res.status(400).json({ error: 'items: array vereist' });
   if (items.length > MAX_ITEMS) return res.status(400).json({ error: `Max ${MAX_ITEMS} items` });
@@ -90,10 +113,10 @@ export default async function handler(req, res) {
     const { data: existing } = await supabaseAdmin
       .from('app_settings')
       .select('key')
-      .eq('key', 'sidebar_layout')
+      .eq('key', settingsKey)
       .maybeSingle();
     const row = {
-      key: 'sidebar_layout',
+      key: settingsKey,
       value,
       updated_by_user_id: user.id,
     };
@@ -101,7 +124,7 @@ export default async function handler(req, res) {
       const { error } = await supabaseAdmin
         .from('app_settings')
         .update(row)
-        .eq('key', 'sidebar_layout');
+        .eq('key', settingsKey);
       if (error) throw new Error(error.message);
     } else {
       const { error } = await supabaseAdmin
@@ -114,16 +137,16 @@ export default async function handler(req, res) {
     try {
       await supabaseAdmin.from('audit_log').insert({
         user_id:     user.id,
-        action:      'app_settings.sidebar_layout.update',
+        action:      'app_settings.' + settingsKey + '.update',
         entity_type: 'app_setting',
         entity_id:   null,
         after_json:  value,
-        reason_text: `Sidebar-layout bijgewerkt (${normalized.length} items)`,
+        reason_text: `Sidebar-layout bijgewerkt (${normalized.length} items, key=${settingsKey})`,
         ip_address:  getClientIp(req),
       });
     } catch (e) { console.error('[sidebar-layout-save] audit', e?.message || e); }
 
-    return res.status(200).json({ success: true, items: normalized.length });
+    return res.status(200).json({ success: true, items: normalized.length, key: settingsKey });
   } catch (e) {
     console.error('[sidebar-layout-save]', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });
