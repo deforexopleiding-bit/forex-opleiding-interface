@@ -265,6 +265,7 @@ const TRIGGER_LABELS = {
   on_wizard_completed:         'Wizard afgerond',
   time_after_signup:           'Tijd na aanmelden',
   on_wizard_not_started_after: 'Wizard niet gestart na…',
+  on_first_call_in:            'Vóór eerste call',
 };
 const ENROLL_LABELS = {
   new_only:          'Alleen nieuwe',
@@ -274,6 +275,7 @@ const COND_CHECK_LABELS = {
   wizard_not_started:    'Wizard niet gestart',
   wizard_completed:      'Wizard afgerond',
   no_inbound:            'Heeft niet gereageerd',
+  invoice_unpaid:        'Factuur onbetaald',
   traject_is_1op1:       'Traject is 1-op-1',
   traject_is_membership: 'Traject is membership',
 };
@@ -370,6 +372,12 @@ function summarizeTrigger(a) {
     if (days > 0)  parts.push(days + ' ' + (days  === 1 ? 'dag'  : 'dagen'));
     if (hours > 0) parts.push(hours + ' ' + (hours === 1 ? 'uur' : 'uur'));
     const tijd = parts.length ? parts.join(' + ') : '—';
+    return (TRIGGER_LABELS[a.trigger_type] || a.trigger_type) + ': ' + tijd;
+  }
+  if (a.trigger_type === 'on_first_call_in') {
+    const d = Number(cfg.days_before_call);
+    const dn = Number.isFinite(d) ? d : 0;
+    const tijd = dn + ' ' + (dn === 1 ? 'dag' : 'dagen');
     return (TRIGGER_LABELS[a.trigger_type] || a.trigger_type) + ': ' + tijd;
   }
   return TRIGGER_LABELS[a.trigger_type] || a.trigger_type;
@@ -558,6 +566,7 @@ function renderEditor() {
             <option value="on_wizard_completed"         ${a.trigger_type === 'on_wizard_completed'   ? 'selected' : ''}>Wizard afgerond</option>
             <option value="time_after_signup"           ${a.trigger_type === 'time_after_signup'     ? 'selected' : ''}>Tijd na aanmelden</option>
             <option value="on_wizard_not_started_after" ${a.trigger_type === 'on_wizard_not_started_after' ? 'selected' : ''}>Wizard niet gestart na…</option>
+            <option value="on_first_call_in" ${a.trigger_type === 'on_first_call_in' ? 'selected' : ''}>Vóór eerste call…</option>
           </select>
         </div>
         <div id="fTriggerExtra"></div>
@@ -605,6 +614,10 @@ function renderEditor() {
         && !(Number(a.trigger_config?.hours_after_signup) > 0 || Number(a.trigger_config?.days_after_signup) > 0)) {
       a.trigger_config = { days_after_signup: 1 };
     }
+    if (a.trigger_type === 'on_first_call_in'
+        && !(Number.isFinite(Number(a.trigger_config?.days_before_call)))) {
+      a.trigger_config = { days_before_call: 1 };
+    }
     if (a.trigger_type === 'on_onboarding_created' || a.trigger_type === 'on_wizard_completed') {
       a.trigger_config = {};
     }
@@ -620,6 +633,21 @@ function renderEditor() {
 function renderTriggerExtra() {
   const a = state.editing;
   const host = document.getElementById('fTriggerExtra');
+  if (a.trigger_type === 'on_first_call_in') {
+    const d = Number(a.trigger_config?.days_before_call);
+    const val = Number.isFinite(d) ? d : 1;
+    host.innerHTML = `
+      <div class="form-field">
+        <label>Dagen vóór de eerste call</label>
+        <input type="number" id="fDaysBeforeCall" min="0" step="1" value="${val}" />
+      </div>`;
+    function syncFC() {
+      const v = Math.max(0, Math.floor(Number(document.getElementById('fDaysBeforeCall')?.value) || 0));
+      a.trigger_config = { days_before_call: v };
+    }
+    document.getElementById('fDaysBeforeCall').addEventListener('input', syncFC);
+    return;
+  }
   if (a.trigger_type !== 'time_after_signup' && a.trigger_type !== 'on_wizard_not_started_after') {
     host.innerHTML = '';
     return;
@@ -949,6 +977,9 @@ function readAndValidateEditor() {
     if (d > 0) cfg.days_after_signup  = d;
     if (h > 0) cfg.hours_after_signup = h;
     a.trigger_config = cfg;
+  } else if (a.trigger_type === 'on_first_call_in') {
+    const d = Math.max(0, Math.floor(Number(document.getElementById('fDaysBeforeCall')?.value) || 0));
+    a.trigger_config = { days_before_call: d };
   } else {
     a.trigger_config = {};
   }
