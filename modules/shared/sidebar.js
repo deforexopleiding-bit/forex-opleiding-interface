@@ -47,6 +47,9 @@
     'onboarding-admin': '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/>',
     // lucide "graduation-cap" — onderscheid van events (calendar) en agents (avatar).
     'mentor-dashboard': '<path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>',
+    // lucide "users" — Studenten-pagina voor de mentor-rol (Fase A2). Eigen sidebar-entry
+    // naast mentor-dashboard; mentor-dashboard blijft in deze fase intact.
+    'mentor-students': '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
     // lucide "users-shield" — admin per-mentor meekijken; eenvoudige user+shield.
     'mentor-detail': '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 16l3 1.5V21l-3 1.5-3-1.5v-3.5z"/>',
     // lucide "receipt" — payout-rapport admin (finance/strateeg).
@@ -102,6 +105,9 @@
           // mentor.module.access (zie MODULE_FEATURE_MAP). Voor andere rollen
           // verbergt applyModuleGating de link.
           navLink('mentor-dashboard', '/modules/mentor-dashboard.html', 'Mentor-dashboard') +
+          // Studenten-pagina (Fase A2) — aparte hub voor de mentor met Mijn studenten,
+          // Toekomstige studenten, en 1-op-1 sessies. Page-gate: mentor.module.access.
+          navLink('mentor-students', '/modules/mentor-students.html', 'Studenten') +
           // Mentoren beheer — consolidatie van Mentor-overzicht / Payout-rapporten /
           // Certificaten (admin). De drie pagina's blijven bestaan via directe URL,
           // maar de sidebar toont alleen nog dit ene item. Zichtbaarheid: zodra de
@@ -477,6 +483,7 @@
     // Mentor-dashboard PR-1 — sidebar-link + page-gating via mentor.module.access.
     // Endpoint-gate (mentor-my-events/-calendar) doet dezelfde check; deze is voor UX.
     'mentor-dashboard': 'mentor.module.access',
+    'mentor-students': 'mentor.module.access',
     // Mentor-detail PR-4 — admin per-mentor meekijken. Manager+ rollen krijgen
     // mentor.admin.view via de role_permissions grant; mentors zelf niet.
     'mentor-detail': 'mentor.admin.view',
