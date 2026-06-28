@@ -669,6 +669,24 @@
       const answersJson = (o.answers && typeof o.answers === 'object')
         ? JSON.stringify(o.answers, null, 2)
         : null;
+      // E-mailsectie in de Bekijk-modal: read-only thread + Reageren-link.
+      // Mail-only studenten (zonder WhatsApp-conversatie) zijn anders niet
+      // bereikbaar vanuit de detail-view. Hergebruikt /api/inbox-emails-list
+      // + bestaande RBAC-keys (onboarding.inbox.view / .reply_link).
+      const canViewEmail  = !!(window.RBAC?.canSync?.('onboarding.inbox.view'));
+      const canReplyEmail = !!(window.RBAC?.canSync?.('onboarding.inbox.reply_link'));
+      const obCustId = o.customer_id || '';
+      let emailSection = '';
+      if (canViewEmail && obCustId) {
+        emailSection =
+          '<h3 style="margin-top:18px">E-mailgesprek</h3>'
+        + '<div id="obEmailThread" style="max-height:320px;overflow-y:auto;padding:4px 2px">'
+        +   '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">E-mails laden…</div>'
+        + '</div>'
+        + ((canReplyEmail && o.email)
+            ? '<div style="margin-top:8px;text-align:right"><button type="button" id="obEmailReplyBtn" style="padding:7px 14px;border:0;border-radius:8px;background:#093d54;color:#fff;font-weight:600;font-size:13px;cursor:pointer">Reageren</button></div>'
+            : '');
+      }
       bd.innerHTML = `
         <dl>
           <dt>Klant</dt>            <dd>${esc(o.customer_name || '—')}</dd>
@@ -717,7 +735,8 @@
         <h3>Vragenlijst-antwoorden</h3>
         ${answersJson
           ? `<pre>${esc(answersJson)}</pre>`
-          : `<div class="empty-state"><i class="ti ti-clipboard-off"></i>Nog geen antwoorden — wizard nog niet gestart of nog niet ingevuld.</div>`}`;
+          : `<div class="empty-state"><i class="ti ti-clipboard-off"></i>Nog geen antwoorden — wizard nog niet gestart of nog niet ingevuld.</div>`}
+        ${emailSection}`;
       // Bubble-retry knop wiren (alleen aanwezig als onboarding niet-provisioned).
       const retryBtn = document.getElementById('bubbleRetryBtn');
       if (retryBtn) {
@@ -733,6 +752,10 @@
           const alreadySent = inviteBtn.dataset.alreadySent === '1';
           doSendInvite(inviteBtn.dataset.id || '', inviteBtn, { force: alreadySent });
         });
+      }
+      // E-mailthread laden als de sectie gerenderd is.
+      if (canViewEmail && obCustId) {
+        _loadObEmailThread(obCustId, o.email || '');
       }
     } catch (e) {
       bd.innerHTML = `<div class="empty-state" style="color:#b91c1c">Ophalen mislukt: ${esc(e?.message || e)}</div>`;
@@ -1359,6 +1382,65 @@
       if (reply) reply.style.display = canReplyLink ? '' : 'none';
       _loadOiEmailThread();
     }
+  }
+
+  // ── Bekijk-modal e-mailthread ────────────────────────────────────────
+  // Onafhankelijk van de inbox-tab (_oiState). Hergebruikt
+  // /api/inbox-emails-list + dezelfde bubbel-stijl. Wordt 1× geladen per
+  // modal-open (geen cache nodig — modal sluit en heropent is een nieuwe
+  // call).
+  async function _loadObEmailThread(customerId, email) {
+    const wrap = document.getElementById('obEmailThread');
+    if (!wrap) return;
+    const reply = document.getElementById('obEmailReplyBtn');
+    if (reply && email) {
+      reply.onclick = () => {
+        const url = '/modules/email.html?reply_to=' + encodeURIComponent(email) +
+                    '&mailbox=' + encodeURIComponent('onboarding@deforexopleiding.nl');
+        window.open(url, '_blank');
+      };
+    }
+    try {
+      const r = await window.AgentShared.apiFetch(
+        '/api/inbox-emails-list?customer_id=' + encodeURIComponent(customerId) + '&module=onboarding'
+      );
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:18px">'
+          + (r.status === 403 ? 'Geen toegang tot e-mail.' : 'Fout: ' + esc(d?.error || ('HTTP ' + r.status))) + '</div>';
+        return;
+      }
+      _renderObEmailThread(wrap, Array.isArray(d.items) ? d.items : [], d.warning || null);
+    } catch (e) {
+      wrap.innerHTML = '<div style="color:#b91c1c;font-size:12px;padding:14px">Fout: ' + esc(e?.message || e) + '</div>';
+    }
+  }
+
+  function _renderObEmailThread(wrap, items, warning) {
+    if (!items.length) {
+      let html = '<div style="color:var(--text-faint);font-size:12.5px;text-align:center;padding:24px">Nog geen e-mails voor deze student.</div>';
+      if (warning) html += '<div style="color:var(--text-dim);font-size:11px;text-align:center;padding:4px 14px 12px">' + esc(warning) + '</div>';
+      wrap.innerHTML = html; return;
+    }
+    const bubbleHtml = items.map((m) => {
+      const inbound = m.direction === 'inbound';
+      const align = inbound ? 'flex-start' : 'flex-end';
+      const bg    = inbound ? 'var(--bg-elev)' : '#093d54';
+      const color = inbound ? 'var(--text)' : '#ffffff';
+      const time  = m.date ? fmtDateTimeNL(m.date) : '';
+      const subj  = m.subject || '(geen onderwerp)';
+      const preview = m.preview || '';
+      return '<div style="display:flex;justify-content:' + align + ';margin-bottom:8px">'
+        + '<div style="max-width:78%;background:' + bg + ';color:' + color + ';padding:8px 11px;border-radius:10px;font-size:13px;line-height:1.4">'
+        +   '<div style="font-weight:700;font-size:12.5px;margin-bottom:3px">' + esc(subj) + '</div>'
+        +   (preview ? '<div style="white-space:pre-wrap;word-wrap:break-word;font-size:12.5px">' + esc(preview) + '</div>' : '')
+        +   '<div style="font-size:10px;opacity:0.65;margin-top:3px;text-align:right">' + esc(time) + '</div>'
+        + '</div></div>';
+    }).join('');
+    let html = bubbleHtml;
+    if (warning) html += '<div style="color:var(--text-dim);font-size:11px;text-align:center;padding:6px 14px 0">' + esc(warning) + '</div>';
+    wrap.innerHTML = html;
+    wrap.scrollTop = wrap.scrollHeight;
   }
 
   async function _loadOiEmailThread() {
