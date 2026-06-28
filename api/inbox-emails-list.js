@@ -134,9 +134,10 @@ export default async function handler(req, res) {
   // Validatie.
   const customerId = typeof req.query?.customer_id === 'string' ? req.query.customer_id.trim() : '';
   const attendeeId = typeof req.query?.attendee_id === 'string' ? req.query.attendee_id.trim() : '';
-  // Nieuw: `email`-param voor de onboarding-tak. Maakt thread-ophaal mogelijk
-  // voor mailers ZONDER klant-koppeling (mail-only studenten / leads). Wordt
-  // genormaliseerd zodat alle downstream-vergelijkingen op lowercase werken.
+  // `email`-param: maakt thread-ophaal mogelijk voor mailers ZONDER klant- of
+  // attendee-koppeling (mail-only studenten / leads / event-mailers zonder
+  // attendee-rij). Genormaliseerd zodat alle downstream-vergelijkingen op
+  // lowercase werken. Werkt in beide modules: onboarding en events.
   const emailParam = typeof req.query?.email === 'string' ? req.query.email.trim().toLowerCase() : '';
   const moduleKey  = typeof req.query?.module === 'string' ? req.query.module.trim().toLowerCase() : '';
   const acct = MODULE_ACCOUNTS[moduleKey];
@@ -148,10 +149,10 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'customer_id of email vereist voor onboarding' });
     }
   } else {
-    // Events-pad: customer_id OF attendee_id volstaat — events-conversaties
-    // hangen aan een attendee, niet altijd aan een (gekoppelde) klant.
-    if (!UUID_RE.test(customerId) && !UUID_RE.test(attendeeId)) {
-      return res.status(400).json({ error: 'customer_id of attendee_id (uuid) vereist voor events' });
+    // Events-pad: customer_id OF attendee_id OF email volstaat — events-mailers
+    // hangen niet altijd aan een (gekoppelde) attendee/klant.
+    if (!UUID_RE.test(customerId) && !UUID_RE.test(attendeeId) && !emailParam) {
+      return res.status(400).json({ error: 'customer_id, attendee_id of email vereist voor events' });
     }
   }
 
@@ -190,7 +191,9 @@ export default async function handler(req, res) {
       customerEmail = emailParam;
     }
   } else {
-    // events — attendee-first.
+    // events — attendee-first, dan customer, dan email-param als directe sleutel.
+    // Geen scope op events; requirePermission('events.inbox.view') hierboven
+    // is de enige poort.
     if (UUID_RE.test(attendeeId)) {
       const { data: att, error: attErr } = await supabaseAdmin
         .from('event_attendees')
@@ -208,6 +211,11 @@ export default async function handler(req, res) {
         .maybeSingle();
       if (custErr) return res.status(500).json({ error: 'customer lookup: ' + custErr.message });
       if (customer?.email) customerEmail = String(customer.email).trim().toLowerCase();
+    }
+    if (!customerEmail && emailParam) {
+      // Mail-only pad (event-mailer zonder attendee/klant): adres direct
+      // gebruiken als thread-sleutel.
+      customerEmail = emailParam;
     }
   }
   if (!customerEmail) {
