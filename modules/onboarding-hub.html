@@ -449,6 +449,25 @@
   async function bootstrap() {
     const ok = await pageGate();
     if (!ok) return;
+    // UI-laag: verberg tab-knoppen waarvoor de permissie ontbreekt. De
+    // bestaande mount-gate (mountWizardIfNeeded / mountAutomationsIfNeeded)
+    // + server-side checks blijven autoritatief; dit is alleen om mentors
+    // niet te confronteren met tabs waar ze geen toegang toe hebben.
+    if (!window.RBAC || !window.RBAC.canSync('onboarding.wizard.edit')) {
+      document.querySelector('.ob-sectie-tab[data-sectie="wizard"]')?.style.setProperty('display', 'none');
+    }
+    if (!window.RBAC || !window.RBAC.canSync('onboarding.automation.view')) {
+      document.querySelector('.ob-sectie-tab[data-sectie="automations"]')?.style.setProperty('display', 'none');
+    }
+    // Veiligheids-fallback: mocht de actieve sectie tóch wizard/automations
+    // zijn (deep-link) terwijl die verborgen is → val terug op Overzicht.
+    const activeTab = document.querySelector('#obSectieNav .ob-sectie-tab.active');
+    if (activeTab && activeTab.style.display === 'none') {
+      document.querySelectorAll('#obSectieNav .ob-sectie-tab').forEach((b) => b.classList.remove('active'));
+      document.querySelectorAll('.ob-sectie[data-sectie]').forEach((s) => s.classList.remove('active'));
+      document.querySelector('.ob-sectie-tab[data-sectie="overzicht"]')?.classList.add('active');
+      document.getElementById('ob-sectie-overzicht')?.classList.add('active');
+    }
     wireSectieNav();
     wireOverzichtStats();
     const overviewHost = document.getElementById('ob-overzicht-host');
