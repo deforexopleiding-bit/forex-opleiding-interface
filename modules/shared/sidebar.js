@@ -73,10 +73,6 @@
       svg(mod) + label + '</a>';
   }
 
-  function concept(key, label) {
-    return '<div class="nav-item nav-concept">' + svg(key) + label + '<span class="nav-soon">Binnenkort</span></div>';
-  }
-
   function buildSidebarHtml() {
     return '' +
       '<nav class="sidebar">' +
@@ -84,6 +80,8 @@
           '<img src="/img/logo-dark.png"  alt="De Forex Opleiding" class="logo-dark">' +
           '<img src="/img/logo-light.png" alt="De Forex Opleiding" class="logo-light">' +
         '</div>' +
+        '<div class="sidebar-clock"><span class="sidebar-clock-date" id="sbClockDate"></span>' +
+        '<span class="sidebar-clock-time" id="sbClockTime"></span></div>' +
         '<div class="sidebar-nav">' +
           navLink('dashboard', '/index.html', 'Dashboard') +
           // 'Klanten' verwijderd: klantenlijst leeft nu in Sales > tab Klanten.
@@ -147,9 +145,6 @@
             svg('admin') + 'Admin' +
             '<span class="nav-badge" id="navApprovalsBadge" data-target="/modules/open-acties.html?status=PENDING" title="Open acties"></span>' +
           '</a>' +
-          '<div class="nav-section">Binnenkort</div>' +
-          concept('whatsapp', 'WhatsApp Bot') +
-          concept('contracten', 'Contracten') +
         '</div>' +
         '<div class="sidebar-footer">' +
           '<div class="footer-user"></div>' +
@@ -669,10 +664,9 @@
     });
 
     // 2) Volgorde toepassen: re-attach in config-volgorde.
-    //    Items die niet in de config staan (nieuwe modules, of de
-    //    "Binnenkort"-sectie + concepts) behouden hun originele positie
-    //    door eerst de config-items naar de top te schuiven; daarna laat
-    //    de DOM de niet-genoemde items op hun relatieve plek.
+    //    Items die niet in de config staan (nieuwe modules) behouden hun
+    //    originele positie door eerst de config-items naar de top te schuiven;
+    //    daarna laat de DOM de niet-genoemde items op hun relatieve plek.
     var insertAnchor = nav.firstChild;
     layout.items.forEach(function (cfg) {
       if (!cfg || typeof cfg.key !== 'string') return;
@@ -839,6 +833,33 @@
     window.dispatchEvent(new CustomEvent('sidebar:mounted'));
     // Globale "Nieuwe taak"-knop: gegate op taken.task.create binnen quick-task.js.
     loadQuickTask();
+    // Klok onder het logo: NL handmatig zodat we geen tijdzone-roundtrip nodig
+    // hebben. Idempotent — als de markup ontbreekt (oude pagina-cache) skippen
+    // we stil. Eénmalig per mount geïnstalleerd; clear bij beforeunload zodat
+    // er geen interval-leak ontstaat bij SPA-style navigatie.
+    startSidebarClock();
+  }
+
+  var SB_CLOCK_DAYS   = ['zondag','maandag','dinsdag','woensdag','donderdag','vrijdag','zaterdag'];
+  var SB_CLOCK_MONTHS = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'];
+
+  function _sbClockTick() {
+    var dateEl = document.getElementById('sbClockDate');
+    var timeEl = document.getElementById('sbClockTime');
+    if (!dateEl || !timeEl) return;
+    var d = new Date();
+    var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
+    dateEl.textContent = SB_CLOCK_DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + SB_CLOCK_MONTHS[d.getMonth()];
+    timeEl.textContent = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+  }
+
+  function startSidebarClock() {
+    if (window._sbClockTimer) return; // idempotent
+    _sbClockTick();
+    window._sbClockTimer = setInterval(_sbClockTick, 1000);
+    window.addEventListener('beforeunload', function () {
+      if (window._sbClockTimer) { clearInterval(window._sbClockTimer); window._sbClockTimer = null; }
+    });
   }
 
   // Expose refresh-trigger voor externe modules (tickets-detail.html na PATCH).

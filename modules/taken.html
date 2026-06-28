@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -77,83 +78,8 @@
       margin-bottom: 24px;
     }
     .header-left { display: flex; align-items: center; gap: 14px; }
-    /* ── Sidebar ── */
-    .sidebar {
-      position: fixed; top: 0; left: 0; bottom: 0;
-      width: 220px; z-index: 200;
-      background: var(--bg-elev);
-      border-right: 1px solid var(--border);
-      display: flex; flex-direction: column;
-      padding: 20px 12px 16px;
-      gap: 4px;
-    }
-    .sidebar-logo {
-      display: flex; align-items: center; justify-content: center;
-      padding: 14px 16px;
-      border-bottom: 1px solid var(--border);
-    }
-    .sidebar-logo img { max-height: 40px; width: auto; max-width: 160px; object-fit: contain; display: block; }
-    .sidebar-logo .logo-dark  { display: block; }
-    .sidebar-logo .logo-light { display: none; }
-    [data-theme="dark"] .sidebar-logo .logo-dark  { display: none; }
-    [data-theme="dark"] .sidebar-logo .logo-light { display: block; }
-    .nav-item {
-      display: flex; align-items: center; gap: 10px;
-      padding: 9px 10px;
-      border-radius: 8px;
-      text-decoration: none;
-      color: var(--text-dim);
-      font-size: 13px; font-weight: 500;
-      transition: background .15s, color .15s;
-      position: relative;
-    }
-    .nav-item:hover { background: var(--nav-item-hover); color: var(--text); }
-    .nav-item.active { background: var(--nav-item-active); color: var(--nav-item-active-text); }
-    .nav-item.concept { opacity: 0.45; pointer-events: none; }
-    .nav-item.nav-concept { color: var(--text-faint); cursor: default; opacity: .65; }
-    /* Sidebar SVG-icons: shared sidebar.js rendert <svg class="nav-icon"> zonder
-       inline width/height; size komt normaal uit modules/shared/agent-shared.css.
-       taken.html laadt die CSS niet, dus zonder onderstaande regel renderen
-       browsers het SVG op default (~300px) en wordt de hele sidebar verstoord. */
-    .nav-item svg, .nav-icon { width: 15px; height: 15px; flex-shrink: 0; }
-    .nav-badge {
-      margin-left: auto;
-      background: var(--red);
-      color: #fff;
-      font-size: 10px; font-weight: 700;
-      padding: 1px 5px;
-      border-radius: 8px;
-      line-height: 1.6;
-    }
-    .nav-badge:empty { display: none; }
-    .nav-soon { margin-left: auto; font-size: 9px; font-weight: 600; color: var(--text-faint); background: var(--nav-item-hover); border-radius: 4px; padding: 1px 5px; }
-    .nav-section {
-      font-size: 10px; font-weight: 600;
-      color: var(--text-faint);
-      text-transform: uppercase; letter-spacing: .06em;
-      padding: 12px 10px 4px;
-    }
-    .sidebar-spacer { flex: 1; }
-    .sidebar-user {
-      display: flex; align-items: center; gap: 10px;
-      padding: 10px;
-      border-top: 1px solid var(--border);
-      margin-top: 8px;
-    }
-    .sidebar-avatar {
-      width: 30px; height: 30px;
-      border-radius: 50%;
-      background: var(--accent-grad);
-      display: grid; place-items: center;
-      font-size: 11px; font-weight: 700;
-      color: #fff; flex-shrink: 0;
-    }
-    .sidebar-footer { flex-shrink: 0; padding: 8px 8px 14px; border-top: 1px solid var(--border); }
-    .footer-user { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; color: var(--text-dim); font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s; }
-    .footer-user:hover { background: var(--nav-item-hover); color: var(--text); }
-    .footer-avatar { width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%; background: var(--accent-grad); display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #fff; }
-    .sidebar-user-info { font-size: 12px; font-weight: 600; }
-    .sidebar-user-role { font-size: 11px; color: var(--text-dim); font-weight: 400; }
+    /* Sidebar-componentstijl wordt geleverd door modules/shared/agent-shared.css
+       (Pearl-restyle). Per-pagina duplicaten zijn verwijderd. */
 
     .logo-mark {
       width: 40px; height: 40px;
