@@ -34,6 +34,7 @@
 import { ImapFlow } from 'imapflow';
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { getOnboardingScope, getMentorCustomerIds } from './_lib/onboardingScope.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -141,6 +142,24 @@ export default async function handler(req, res) {
   // RBAC fail-closed.
   if (!(await requirePermission(req, acct.permKey))) {
     return res.status(403).json({ error: `Geen rechten (${acct.permKey})` });
+  }
+
+  // Scope-enforcement (alleen onboarding-pad — events heeft geen mentor-
+  // scope, identiek aan api/inbox-conversations-list.js dat events/finance
+  // overslaat). Mentor met onboarding.view_own mag alleen mail van klanten
+  // binnen z'n eigen toegewezen onboardings ophalen; admins/super_admin
+  // (seesAll) blijven ongemoeid. Fail-closed: lege/onmatched lijst → 403.
+  if (moduleKey === 'onboarding') {
+    const scope = await getOnboardingScope(req);
+    if (!scope.seesAll) {
+      if (!scope.seesOwn) {
+        return res.status(403).json({ error: 'Geen onboarding-scope' });
+      }
+      const allowed = await getMentorCustomerIds(scope.userId);
+      if (!allowed.map(String).includes(String(customerId))) {
+        return res.status(403).json({ error: 'Klant buiten je scope' });
+      }
+    }
   }
 
   // Klant → email.
