@@ -96,11 +96,19 @@
               '<div id="oiThreadPhone" style="font-size:11.5px;color:var(--text-faint)">—</div>' +
             '</div>' +
             '<span id="oiThreadWindowBadge" style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:.04em">—</span>' +
+            '<button type="button" id="oiEmailReplyBtn" style="display:none;margin-left:8px;padding:5px 11px;font-size:12px;font-weight:600;background:var(--brand-deep,#093d54);color:#fff;border:none;border-radius:7px;cursor:pointer" title="Open mailmodule om te reageren"><i class="ti ti-mail-forward"></i> Reageren</button>' +
           '</div>' +
           '<div id="oiCustomerStrip" class="oi-ctx-strip" style="display:none"></div>' +
+          '<div id="oiThreadModeBar" style="display:flex;gap:4px;padding:8px 14px 0;align-items:center">' +
+            '<div id="oiModeToggle" role="tablist" aria-label="Bron" style="display:inline-flex;background:var(--bg-elev,#f1f5f9);border:1px solid var(--border);border-radius:8px;padding:2px;gap:2px">' +
+              '<button type="button" role="tab" aria-selected="true" id="oiModeBtnWa"    data-oi-mode="wa"    style="border:none;background:var(--bg,#fff);color:var(--text);padding:5px 12px;font-size:12px;font-weight:600;border-radius:6px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06)">WhatsApp</button>' +
+              '<button type="button" role="tab" aria-selected="false" id="oiModeBtnEmail" data-oi-mode="email" style="border:none;background:transparent;color:var(--text-dim);padding:5px 12px;font-size:12px;font-weight:600;border-radius:6px;cursor:pointer" disabled title="Klant niet gekoppeld">E-mail</button>' +
+            '</div>' +
+          '</div>' +
           '<div id="oiThreadMessages" class="oi-thread-messages"><div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">Laden…</div></div>' +
+          '<div id="oiEmailThread" style="display:none;flex:1;min-height:0;overflow:auto;padding:8px 14px 14px"></div>' +
           '<div id="oiSuggestionPanel" style="padding:0 14px"></div>' +
-          '<div class="oi-thread-footer">' +
+          '<div id="oiThreadFooter" class="oi-thread-footer">' +
             '<div style="display:flex;gap:8px;align-items:flex-start">' +
               '<button type="button" class="refresh-btn" id="oiAskMilaBtn" style="background:#d97706;color:#fff;white-space:nowrap" title="Vraag Mila om een suggestie"><i class="ti ti-sparkles"></i> Vraag Mila</button>' +
               '<button type="button" class="refresh-btn" id="oiTemplateBtn" title="Verstuur een goedgekeurde Meta-template" style="padding:6px 10px"><i class="ti ti-template"></i></button>' +
@@ -1034,6 +1042,11 @@
     canSendText:         false,
     suggestion:          null,
     editingSuggestionId: null,
+    mode:                'wa',  // 'wa' | 'email' — segmented control boven thread
+    emailLoaded:         false, // cache: één fetch per geopende conv
+    emailItems:          [],
+    emailWarning:        null,
+    emailCustomerEmail:  '',
   };
   const _oiTplState = { items: [], filter: '', loaded: false, sendingFor: null };
 
@@ -1203,6 +1216,7 @@
       _oiState.canSendText = !!(d.conversation && d.conversation.can_send_text);
       _renderOiThread(d.items || []);
       _applyOiComposeState();
+      _oiResetMode();
       // Context-strip via /api/inbox-conversation-context (klant + tel + matches).
       _loadOiCustomerStrip(id);
       // Refresh lijst (badge + active-state).
@@ -1263,6 +1277,166 @@
       if (sendBtn) { sendBtn.disabled = true; sendBtn.title = '24h-venster verlopen'; }
       if (hint) hint.textContent = '24h-venster verlopen sinds laatste inbound — vrije tekst niet meer toegestaan.';
     }
+  }
+
+  // ── E-mail-modus (read-only) ────────────────────────────────────────────
+  // Reset per geopende conv: zet mode → 'wa', sync toggle-knoppen + enabled-
+  // state (E-mail alleen klikbaar als de conv aan een klant gekoppeld is),
+  // en verberg de e-mail-thread/Reageren-knop. _switchOiMode handelt daarna
+  // klikken op de toggle af.
+  function _oiResetMode() {
+    _oiState.mode               = 'wa';
+    _oiState.emailLoaded        = false;
+    _oiState.emailItems         = [];
+    _oiState.emailWarning       = null;
+    _oiState.emailCustomerEmail = '';
+    const wa    = document.getElementById('oiModeBtnWa');
+    const em    = document.getElementById('oiModeBtnEmail');
+    const reply = document.getElementById('oiEmailReplyBtn');
+    const emailThread = document.getElementById('oiEmailThread');
+    const waThread    = document.getElementById('oiThreadMessages');
+    const sugg        = document.getElementById('oiSuggestionPanel');
+    const footer      = document.getElementById('oiThreadFooter');
+    const hasCustomer = !!(_oiState.conv && _oiState.conv.customer_id);
+    if (em) {
+      em.disabled = !hasCustomer;
+      em.title    = hasCustomer ? '' : 'Klant niet gekoppeld';
+      em.style.color = 'var(--text-dim)';
+      em.style.background = 'transparent';
+      em.style.boxShadow = 'none';
+      em.setAttribute('aria-selected', 'false');
+    }
+    if (wa) {
+      wa.style.color = 'var(--text)';
+      wa.style.background = 'var(--bg,#fff)';
+      wa.style.boxShadow = '0 1px 2px rgba(0,0,0,.06)';
+      wa.setAttribute('aria-selected', 'true');
+    }
+    if (emailThread) emailThread.style.display = 'none';
+    if (waThread)    waThread.style.display    = '';
+    if (sugg)        sugg.style.display        = '';
+    if (footer)      footer.style.display      = '';
+    if (reply)       reply.style.display       = 'none';
+  }
+
+  function _switchOiMode(next) {
+    if (next !== 'wa' && next !== 'email') return;
+    if (next === 'email' && !(_oiState.conv && _oiState.conv.customer_id)) return;
+    if (_oiState.mode === next) return;
+    _oiState.mode = next;
+    const wa    = document.getElementById('oiModeBtnWa');
+    const em    = document.getElementById('oiModeBtnEmail');
+    const reply = document.getElementById('oiEmailReplyBtn');
+    const emailThread = document.getElementById('oiEmailThread');
+    const waThread    = document.getElementById('oiThreadMessages');
+    const sugg        = document.getElementById('oiSuggestionPanel');
+    const footer      = document.getElementById('oiThreadFooter');
+    const setActive = (btn, active) => {
+      if (!btn) return;
+      btn.style.color      = active ? 'var(--text)' : 'var(--text-dim)';
+      btn.style.background = active ? 'var(--bg,#fff)' : 'transparent';
+      btn.style.boxShadow  = active ? '0 1px 2px rgba(0,0,0,.06)' : 'none';
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    };
+    setActive(wa, next === 'wa');
+    setActive(em, next === 'email');
+    if (next === 'wa') {
+      if (emailThread) emailThread.style.display = 'none';
+      if (waThread)    waThread.style.display    = '';
+      if (sugg)        sugg.style.display        = '';
+      if (footer)      footer.style.display      = '';
+      if (reply)       reply.style.display       = 'none';
+      // canSendText-state was al toegepast bij open; niets te herstellen.
+    } else {
+      if (waThread)    waThread.style.display    = 'none';
+      if (sugg)        sugg.style.display        = 'none';
+      if (footer)      footer.style.display      = 'none';
+      if (emailThread) emailThread.style.display = 'block';
+      // Reageren-knop alleen als RBAC-key aanwezig.
+      const canReplyLink = !!(window.RBAC && window.RBAC.canSync && window.RBAC.canSync('onboarding.inbox.reply_link'));
+      if (reply) reply.style.display = canReplyLink ? '' : 'none';
+      _loadOiEmailThread();
+    }
+  }
+
+  async function _loadOiEmailThread() {
+    const wrap = document.getElementById('oiEmailThread');
+    if (!wrap) return;
+    if (_oiState.emailLoaded) {
+      _renderOiEmailThread();
+      return;
+    }
+    wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">E-mails laden…</div>';
+    const customerId = _oiState.conv?.customer_id;
+    if (!customerId) {
+      wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">Klant niet gekoppeld — geen e-mails op te halen.</div>';
+      return;
+    }
+    try {
+      const r = await window.AgentShared.apiFetch(
+        '/api/inbox-emails-list?customer_id=' + encodeURIComponent(customerId) + '&module=onboarding'
+      );
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        wrap.innerHTML = '<div style="color:#b91c1c;font-size:12px;padding:14px">Fout: ' + esc(d?.error || ('HTTP ' + r.status)) + '</div>';
+        return;
+      }
+      _oiState.emailLoaded        = true;
+      _oiState.emailItems         = Array.isArray(d.items) ? d.items : [];
+      _oiState.emailWarning       = d.warning || null;
+      _oiState.emailCustomerEmail = d.customer_email || '';
+      _renderOiEmailThread();
+    } catch (e) {
+      wrap.innerHTML = '<div style="color:#b91c1c;font-size:12px;padding:14px">Fout: ' + esc(e?.message || e) + '</div>';
+    }
+  }
+
+  function _renderOiEmailThread() {
+    const wrap = document.getElementById('oiEmailThread');
+    if (!wrap) return;
+    const items = _oiState.emailItems || [];
+    const warning = _oiState.emailWarning;
+    // Reageren-knop wire (idempotent).
+    const reply = document.getElementById('oiEmailReplyBtn');
+    if (reply) {
+      reply.onclick = () => {
+        const to = _oiState.emailCustomerEmail || '';
+        if (!to) return;
+        const url = '/modules/email.html?reply_to=' + encodeURIComponent(to) +
+                    '&mailbox=' + encodeURIComponent('onboarding@deforexopleiding.nl');
+        window.open(url, '_blank');
+      };
+    }
+    if (items.length === 0) {
+      let html = '<div style="color:var(--text-faint);font-size:12.5px;text-align:center;padding:24px">Nog geen e-mails voor deze klant.</div>';
+      if (warning) {
+        html += '<div style="color:var(--text-dim);font-size:11px;text-align:center;padding:4px 14px 12px">' + esc(warning) + '</div>';
+      }
+      wrap.innerHTML = html;
+      return;
+    }
+    // Spiegelt _renderOiThread: inbound=links/bg-elev, outbound=rechts/accent.
+    const bubbleHtml = items.map((m) => {
+      const inbound = m.direction === 'inbound';
+      const align   = inbound ? 'flex-start' : 'flex-end';
+      const bg      = inbound ? 'var(--bg-elev)' : '#093d54';
+      const color   = inbound ? 'var(--text)' : '#ffffff';
+      const time    = m.date ? fmtDateTimeNL(m.date) : '';
+      const subj    = m.subject || '(geen onderwerp)';
+      const preview = m.preview || '';
+      return '<div style="display:flex;justify-content:' + align + ';margin-bottom:8px">'
+        + '<div style="max-width:78%;background:' + bg + ';color:' + color + ';padding:8px 11px;border-radius:10px;font-size:13px;line-height:1.4">'
+        +   '<div style="font-weight:700;font-size:12.5px;margin-bottom:3px">' + esc(subj) + '</div>'
+        +   (preview ? '<div style="white-space:pre-wrap;word-wrap:break-word;font-size:12.5px">' + esc(preview) + '</div>' : '')
+        +   '<div style="font-size:10px;opacity:0.65;margin-top:3px;text-align:right">' + esc(time) + '</div>'
+        + '</div></div>';
+    }).join('');
+    let html = bubbleHtml;
+    if (warning) {
+      html += '<div style="color:var(--text-dim);font-size:11px;text-align:center;padding:6px 14px 0">' + esc(warning) + '</div>';
+    }
+    wrap.innerHTML = html;
+    wrap.scrollTop = wrap.scrollHeight;
   }
 
   async function _loadOiCustomerStrip(convId) {
@@ -1621,6 +1795,13 @@
     if (sendBtn) sendBtn.addEventListener('click', sendOiComposeText);
     const tplBtn = document.getElementById('oiTemplateBtn');
     if (tplBtn) tplBtn.addEventListener('click', openOiTemplatePicker);
+    // Mode-toggle (WhatsApp | E-mail). Klik op disabled-knop wordt door de
+    // browser geblokkeerd; _switchOiMode heeft daarnaast nog een fail-safe
+    // op _oiState.conv.customer_id.
+    const waBtn = document.getElementById('oiModeBtnWa');
+    if (waBtn) waBtn.addEventListener('click', () => _switchOiMode('wa'));
+    const emBtn = document.getElementById('oiModeBtnEmail');
+    if (emBtn) emBtn.addEventListener('click', () => _switchOiMode('email'));
     const tplClose = document.getElementById('oiTemplateClose');
     if (tplClose) tplClose.addEventListener('click', closeOiTemplatePicker);
     const tplSearch = document.getElementById('oiTemplateSearch');
