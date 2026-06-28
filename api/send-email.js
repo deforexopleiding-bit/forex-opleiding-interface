@@ -8,6 +8,8 @@ const SMTP_ACCOUNTS = {
   'info@deforexopleiding.nl':          'IMAP_PASS_INFO',
   'partners@deforexopleiding.nl':      'IMAP_PASS_PARTNERS',
   'administratie@deforexopleiding.nl': 'IMAP_PASS_ADMINISTRATIE',
+  'onboarding@deforexopleiding.nl':    'IMAP_PASS_ONBOARDING',
+  'events@deforexopleiding.nl':        'IMAP_PASS_EVENTS',
 };
 
 const SMTP_HOST = 'smtp.strato.com';
