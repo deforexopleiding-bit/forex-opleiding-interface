@@ -128,13 +128,37 @@
         </span>
       </div>
       <div class="section">
-        <h2><i class="ti ti-calendar-plus"></i> Gepland</h2>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+          <h2 style="margin:0"><i class="ti ti-calendar-plus"></i> Gepland</h2>
+          <div style="display:inline-flex;gap:6px;align-items:center;font-size:12px;color:var(--text-dim)">
+            <span>Toon:</span>
+            <div role="tablist" style="display:inline-flex;background:var(--bg-elev,#f1f5f9);border:1px solid var(--border);border-radius:7px;padding:2px;gap:2px">
+              <button type="button" class="ms-limit-btn" data-target="planned" data-limit="25"  style="border:none;background:var(--bg,#fff);color:var(--text);padding:4px 10px;font-size:11.5px;font-weight:600;border-radius:5px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06)">25</button>
+              <button type="button" class="ms-limit-btn" data-target="planned" data-limit="50"  style="border:none;background:transparent;color:var(--text-dim);padding:4px 10px;font-size:11.5px;font-weight:600;border-radius:5px;cursor:pointer">50</button>
+              <button type="button" class="ms-limit-btn" data-target="planned" data-limit="100" style="border:none;background:transparent;color:var(--text-dim);padding:4px 10px;font-size:11.5px;font-weight:600;border-radius:5px;cursor:pointer">100</button>
+              <button type="button" class="ms-limit-btn" data-target="planned" data-limit="500" style="border:none;background:transparent;color:var(--text-dim);padding:4px 10px;font-size:11.5px;font-weight:600;border-radius:5px;cursor:pointer">500</button>
+            </div>
+          </div>
+        </div>
         <div id="plannedWrap"><div class="empty-state"><i class="ti ti-clock"></i>Laden…</div></div>
+        <div id="plannedShown" style="margin-top:6px;font-size:11.5px;color:var(--text-faint)"></div>
       </div>
       <div class="section">
-        <h2><i class="ti ti-calendar-check"></i> Afgerond</h2>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+          <h2 style="margin:0"><i class="ti ti-calendar-check"></i> Afgerond</h2>
+          <div style="display:inline-flex;gap:6px;align-items:center;font-size:12px;color:var(--text-dim)">
+            <span>Toon:</span>
+            <div role="tablist" style="display:inline-flex;background:var(--bg-elev,#f1f5f9);border:1px solid var(--border);border-radius:7px;padding:2px;gap:2px">
+              <button type="button" class="ms-limit-btn" data-target="completed" data-limit="25"  style="border:none;background:var(--bg,#fff);color:var(--text);padding:4px 10px;font-size:11.5px;font-weight:600;border-radius:5px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06)">25</button>
+              <button type="button" class="ms-limit-btn" data-target="completed" data-limit="50"  style="border:none;background:transparent;color:var(--text-dim);padding:4px 10px;font-size:11.5px;font-weight:600;border-radius:5px;cursor:pointer">50</button>
+              <button type="button" class="ms-limit-btn" data-target="completed" data-limit="100" style="border:none;background:transparent;color:var(--text-dim);padding:4px 10px;font-size:11.5px;font-weight:600;border-radius:5px;cursor:pointer">100</button>
+              <button type="button" class="ms-limit-btn" data-target="completed" data-limit="500" style="border:none;background:transparent;color:var(--text-dim);padding:4px 10px;font-size:11.5px;font-weight:600;border-radius:5px;cursor:pointer">500</button>
+            </div>
+          </div>
+        </div>
         <div id="completedWrap"><div class="empty-state"><i class="ti ti-clock"></i>Laden…</div></div>
-        <div id="completedTotals" style="margin-top:8px;font-size:12.5px;color:var(--text-dim)"></div>
+        <div id="completedShown" style="margin-top:6px;font-size:11.5px;color:var(--text-faint)"></div>
+        <div id="completedTotals" style="margin-top:4px;font-size:12.5px;color:var(--text-dim)"></div>
       </div>
     </div>
   </div>
@@ -189,6 +213,10 @@
     dateRange:         'month',  // 'day' | 'week' | 'month' | 'custom'
     customFrom:        '',       // 'YYYY-MM-DD'
     customTo:          '',       // 'YYYY-MM-DD'
+    // Per-lijst weergave-limiet (puur visueel; periode-totaal blijft op
+    // de volledige gefilterde set gebaseerd).
+    plannedLimit:      25,
+    completedLimit:    25,
   };
 
   function activateTab(name) {
@@ -515,8 +543,27 @@
     };
     const planned   = (_state.oneOnOnePlanned   || []).filter(within);
     const completed = (_state.oneOnOneCompleted || []).filter(within);
-    _renderPlanned(planned);
-    _renderCompleted(completed);
+
+    // Per-lijst weergave-limiet snijdt NA de date-range-filter; de tellingen
+    // én het periode-totaal blijven op de volledige gefilterde set gebaseerd.
+    const plannedSlice   = planned.slice(0,   _state.plannedLimit);
+    const completedSlice = completed.slice(0, _state.completedLimit);
+    _renderPlanned(plannedSlice);
+    _renderCompleted(completedSlice);
+
+    const plannedShown   = document.getElementById('plannedShown');
+    const completedShown = document.getElementById('completedShown');
+    if (plannedShown) {
+      plannedShown.textContent = planned.length > 0
+        ? ('Toont ' + plannedSlice.length + ' van ' + planned.length)
+        : '';
+    }
+    if (completedShown) {
+      completedShown.textContent = completed.length > 0
+        ? ('Toont ' + completedSlice.length + ' van ' + completed.length)
+        : '';
+    }
+
     const totalEl = document.getElementById('completedTotals');
     if (totalEl) {
       const n   = completed.length;
@@ -532,6 +579,18 @@
     btn.style.background = active ? 'var(--bg,#fff)' : 'transparent';
     btn.style.color      = active ? 'var(--text)'   : 'var(--text-dim)';
     btn.style.boxShadow  = active ? '0 1px 2px rgba(0,0,0,.06)' : 'none';
+  }
+
+  function _selectLimit(target, next) {
+    const n = Number(next);
+    if (!Number.isFinite(n) || n <= 0) return;
+    if (target !== 'planned' && target !== 'completed') return;
+    if (target === 'planned')   _state.plannedLimit   = n;
+    if (target === 'completed') _state.completedLimit = n;
+    document.querySelectorAll('#tab1on1 .ms-limit-btn[data-target="' + target + '"]').forEach((b) => {
+      _setRangeBtnActive(b, Number(b.dataset.limit) === n);
+    });
+    _applyDateRange();
   }
 
   function _selectDateRange(next) {
@@ -611,6 +670,10 @@
     // 1-op-1 date-range wiring (frontend-only).
     document.querySelectorAll('#oneOnOneRangeBar .ms-range-btn').forEach((b) => {
       b.addEventListener('click', () => _selectDateRange(b.dataset.range));
+    });
+    // Per-lijst weergave-limiet wiring.
+    document.querySelectorAll('#tab1on1 .ms-limit-btn').forEach((b) => {
+      b.addEventListener('click', () => _selectLimit(b.dataset.target, b.dataset.limit));
     });
     const fromInput = document.getElementById('msCustomFrom');
     const toInput   = document.getElementById('msCustomTo');
