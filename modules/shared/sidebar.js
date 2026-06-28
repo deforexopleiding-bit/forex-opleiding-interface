@@ -594,15 +594,52 @@
   // RBAC = nog steeds verborgen). Fail-open: 404 / fetch-fout → niets doen
   // en laat default-volgorde + alles-zichtbaar staan. De 'admin'-entry
   // wordt nooit verborgen (anti-lockout) en kan niet uit de DOM raken.
+  // Hoogste rol wint: layout per rol staat onder 'sidebar_layout:<role>';
+  // ontbrekend / leeg → val fail-open terug op de globale 'sidebar_layout'.
+  var ROLE_PRECEDENCE = ['super_admin', 'manager', 'sales', 'mentor', 'marketing', 'administratie'];
+
   async function applySidebarLayout() {
     var nav, items, layout;
     try {
       if (!window.AgentShared || typeof window.AgentShared.apiFetch !== 'function') return;
-      var res = await window.AgentShared.apiFetch('/api/app-settings?key=sidebar_layout');
-      if (!res.ok) return; // 404/500 → fail-open
-      var data = await res.json();
-      layout = data && data.value;
-      if (!layout || !Array.isArray(layout.items) || layout.items.length === 0) return;
+
+      // Resolve de hoogste rol uit RBAC. Bij elke fout / geen rollen → null,
+      // dan val terug op de globale layout.
+      var highest = null;
+      try {
+        if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
+          await window.RBAC.ensurePermissionsLoaded();
+        }
+        var roles = (window.RBAC && typeof window.RBAC.getUserRoles === 'function')
+          ? (window.RBAC.getUserRoles() || [])
+          : [];
+        for (var i = 0; i < ROLE_PRECEDENCE.length; i++) {
+          if (roles.indexOf(ROLE_PRECEDENCE[i]) >= 0) { highest = ROLE_PRECEDENCE[i]; break; }
+        }
+      } catch (e) { highest = null; }
+
+      // 1) Probeer eerst de rol-specifieke layout.
+      if (highest) {
+        try {
+          var rRole = await window.AgentShared.apiFetch('/api/app-settings?key=' + encodeURIComponent('sidebar_layout:' + highest));
+          if (rRole && rRole.ok) {
+            var dRole = await rRole.json();
+            var lRole = dRole && dRole.value;
+            if (lRole && Array.isArray(lRole.items) && lRole.items.length > 0) {
+              layout = lRole;
+            }
+          }
+        } catch (e) { /* fail-open naar globale layout */ }
+      }
+
+      // 2) Geen rol-layout → globale standaard.
+      if (!layout) {
+        var res = await window.AgentShared.apiFetch('/api/app-settings?key=sidebar_layout');
+        if (!res.ok) return; // 404/500 → fail-open
+        var data = await res.json();
+        layout = data && data.value;
+        if (!layout || !Array.isArray(layout.items) || layout.items.length === 0) return;
+      }
     } catch (e) {
       return; // network/JSON error → fail-open
     }
