@@ -134,10 +134,21 @@ export default async function handler(req, res) {
 
   // Validatie.
   const customerId = typeof req.query?.customer_id === 'string' ? req.query.customer_id.trim() : '';
+  const attendeeId = typeof req.query?.attendee_id === 'string' ? req.query.attendee_id.trim() : '';
   const moduleKey  = typeof req.query?.module === 'string' ? req.query.module.trim().toLowerCase() : '';
-  if (!UUID_RE.test(customerId)) return res.status(400).json({ error: 'customer_id (uuid) vereist' });
   const acct = MODULE_ACCOUNTS[moduleKey];
   if (!acct) return res.status(400).json({ error: "module moet 'onboarding' of 'events' zijn" });
+  if (moduleKey === 'onboarding') {
+    // Onboarding-pad: customer_id verplicht (gedrag ongewijzigd); attendee_id wordt
+    // genegeerd. Onboarding-gesprekken zijn altijd aan een klant gekoppeld.
+    if (!UUID_RE.test(customerId)) return res.status(400).json({ error: 'customer_id (uuid) vereist' });
+  } else {
+    // Events-pad: customer_id OF attendee_id volstaat — events-conversaties
+    // hangen aan een attendee, niet altijd aan een (gekoppelde) klant.
+    if (!UUID_RE.test(customerId) && !UUID_RE.test(attendeeId)) {
+      return res.status(400).json({ error: 'customer_id of attendee_id (uuid) vereist voor events' });
+    }
+  }
 
   // RBAC fail-closed.
   if (!(await requirePermission(req, acct.permKey))) {
@@ -162,15 +173,44 @@ export default async function handler(req, res) {
     }
   }
 
-  // Klant → email.
-  const { data: customer, error: custErr } = await supabaseAdmin
-    .from('customers')
-    .select('id, email')
-    .eq('id', customerId)
-    .maybeSingle();
-  if (custErr) return res.status(500).json({ error: 'customer lookup: ' + custErr.message });
-  if (!customer) return res.status(404).json({ error: 'Klant niet gevonden' });
-  const customerEmail = customer.email ? String(customer.email).trim().toLowerCase() : '';
+  // E-mail-resolutie (module-bewust).
+  //   onboarding → customers.email via customer_id (ongewijzigd).
+  //   events     → event_attendees.email via attendee_id; fallback op
+  //                customers.email via customer_id; geen rij/email → 200
+  //                met lege thread (fail-soft).
+  // De variabele customerEmail blijft de IMAP-search voeden (geen rename
+  // nodig — semantisch is het 'het e-mailadres van de tegenpartij').
+  let customerEmail = '';
+  if (moduleKey === 'onboarding') {
+    const { data: customer, error: custErr } = await supabaseAdmin
+      .from('customers')
+      .select('id, email')
+      .eq('id', customerId)
+      .maybeSingle();
+    if (custErr) return res.status(500).json({ error: 'customer lookup: ' + custErr.message });
+    if (!customer) return res.status(404).json({ error: 'Klant niet gevonden' });
+    customerEmail = customer.email ? String(customer.email).trim().toLowerCase() : '';
+  } else {
+    // events — attendee-first.
+    if (UUID_RE.test(attendeeId)) {
+      const { data: att, error: attErr } = await supabaseAdmin
+        .from('event_attendees')
+        .select('id, email')
+        .eq('id', attendeeId)
+        .maybeSingle();
+      if (attErr) return res.status(500).json({ error: 'attendee lookup: ' + attErr.message });
+      if (att?.email) customerEmail = String(att.email).trim().toLowerCase();
+    }
+    if (!customerEmail && UUID_RE.test(customerId)) {
+      const { data: customer, error: custErr } = await supabaseAdmin
+        .from('customers')
+        .select('id, email')
+        .eq('id', customerId)
+        .maybeSingle();
+      if (custErr) return res.status(500).json({ error: 'customer lookup: ' + custErr.message });
+      if (customer?.email) customerEmail = String(customer.email).trim().toLowerCase();
+    }
+  }
   if (!customerEmail) {
     return res.status(200).json({ customer_email: '', items: [], count: 0 });
   }
