@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mentor-dashboard · De Forex Opleiding</title>
+  <title>Financiën · De Forex Opleiding</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -124,16 +124,14 @@
 <div class="app">
   <div class="page-header">
     <div>
-      <h1>Mentor-dashboard</h1>
-      <p>Jouw events, jouw bonussen, jouw kalender.</p>
+      <h1>Financiën</h1>
+      <p>Jouw bonussen, coaching en uitbetalingen.</p>
     </div>
   </div>
 
   <div class="tab-strip" role="tablist">
     <button class="tab-btn active" data-tab="dashboard"   type="button">Dashboard</button>
     <button class="tab-btn"        data-tab="verdiensten" type="button">Verdiensten</button>
-    <button class="tab-btn"        data-tab="studenten"   type="button">Mijn studenten</button>
-    <button class="tab-btn"        data-tab="toekomst"    type="button">Toekomstige studenten</button>
   </div>
 
   <!-- Tab: Dashboard (landing) -->
@@ -151,16 +149,6 @@
     <!-- Stat-kaarten — auto-fit grid die zich aan het scherm aanpast. -->
     <div id="dashStatGrid" class="dash-stat-grid">
       <div class="empty-state" style="grid-column:1/-1"><span class="skeleton" style="width:160px"></span></div>
-    </div>
-
-    <div class="section">
-      <h2><i class="ti ti-calendar-event"></i> Komende sessies</h2>
-      <div id="calendarWrap"></div>
-    </div>
-
-    <div class="section">
-      <h2><i class="ti ti-user-plus"></i> Toekomstige studenten</h2>
-      <div id="dashFutureSummary"><div class="empty-state"><span class="skeleton" style="width:160px"></span></div></div>
     </div>
   </div>
 
@@ -229,25 +217,9 @@
     </div>
   </div>
 
-  <!-- Tab: Mijn studenten (PR2b) -->
-  <div id="tabStudenten" class="tab-panel" hidden>
-    <div class="section">
-      <h2><i class="ti ti-users"></i> Mijn studenten</h2>
-      <div id="studentsWrap"></div>
-    </div>
-  </div>
-
-  <!-- Tab: Toekomstige studenten — voedt zich uit /api/mentor-future-students-self
-       (onboardings die aan deze mentor zijn toegewezen en niet gearchiveerd zijn). -->
-  <div id="tabToekomst" class="tab-panel" hidden>
-    <div class="section">
-      <h2><i class="ti ti-user-plus"></i> Toekomstige studenten</h2>
-      <p style="font-size:12.5px;color:var(--text-dim);margin:-4px 0 10px">
-        Aangemelde studenten die nog niet in jouw vaste begeleiding zitten. <strong>Plan de eerste call ~2 weken vóór de startdatum in — controleer de betaling vóór de call plaatsvindt.</strong>
-      </p>
-      <div id="futureStudentsWrap"><div class="empty-state"><i class="ti ti-clock"></i>Laden…</div></div>
-    </div>
-  </div>
+  <!-- Mijn studenten / Toekomstige studenten / Komende sessies zijn verhuisd
+       naar /modules/mentor-students.html (Fase A2). Deze pagina is nu de
+       Financiën-hub: Dashboard-landing + Verdiensten-tabs. -->
 </div>
 
 <script src="/modules/shared/supabase-client.js"></script>
@@ -300,25 +272,6 @@
       .join(' ');
   }
 
-  function renderCalendar(events) {
-    const wrap = document.getElementById('calendarWrap');
-    if (!Array.isArray(events) || events.length === 0) {
-      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-calendar-off"></i>Geen komende sessies gepland.</div>`;
-      return;
-    }
-    const rows = events.map((e) => `
-      <tr>
-        <td>${esc(e.title || '—')}</td>
-        <td>${fmtDateTimeNL(e.starts_at)}</td>
-        <td>${e.was_present ? '<span class="badge badge-green">Aanwezig</span>' : '<span class="badge badge-grey">—</span>'}</td>
-      </tr>`).join('');
-    wrap.innerHTML = `
-      <table class="data-table">
-        <thead><tr><th>Event</th><th>Datum + tijd</th><th>Status</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>`;
-  }
-
   function renderMyEvents(events) {
     const wrap = document.getElementById('myEventsWrap');
     if (!Array.isArray(events) || events.length === 0) {
@@ -360,14 +313,10 @@
     });
     document.getElementById('tabDashboard').hidden    = (name !== 'dashboard');
     document.getElementById('tabVerdiensten').hidden  = (name !== 'verdiensten');
-    document.getElementById('tabStudenten').hidden    = (name !== 'studenten');
-    document.getElementById('tabToekomst').hidden     = (name !== 'toekomst');
     // Dashboard-landing lazy laden bij eerste opening.
     if (name === 'dashboard'   && !_vState.landingLoaded)   loadOverviewDashboard();
     // Verdiensten-tab opent op "overzicht" — dashboard lazy-laden zodra de tab actief wordt.
     if (name === 'verdiensten' && !_vState.dashboardLoaded) loadDashboard();
-    if (name === 'studenten'   && !_vState.studentsLoaded)  loadStudents();
-    if (name === 'toekomst'    && !_vState.futureLoaded)    loadFutureStudents();
   }
 
   function activateSubtab(name) {
@@ -853,8 +802,9 @@
   // mentor_user_id → onboardings.customer_id; UI doet alleen lookup.
   const _overdueByEmail = new Map();
   // ── Student-signals (Gemeld-badge + Melden-knop) ────────────────────────
-  // Map bubble_student_id -> first active signal. Eén fetch in loadStudents()
-  // (Promise.all); UI in renderStudents via _signalBadgeHtml.
+  // Map bubble_student_id -> first active signal. Helper blijft staan voor
+  // herbruik op de Studenten-pagina (Fase A2+); de fetch wordt sinds Fase B
+  // niet meer vanuit deze Financiën-pagina aangeroepen.
   const _signalsByStudent = new Map();
   async function loadSignalsMap() {
     _signalsByStudent.clear();
@@ -1372,38 +1322,6 @@
     `;
   }
 
-  async function loadStudents() {
-    _vState.studentsLoaded = true;
-    const apiFetch = window.AgentShared?.apiFetch;
-    if (typeof apiFetch !== 'function') {
-      setError('studentsWrap', 'apiFetch niet beschikbaar.');
-      return;
-    }
-    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
-    const wrap = document.getElementById('studentsWrap');
-    if (wrap) wrap.innerHTML = `<div style="color:var(--text-faint);font-size:12.5px;padding:14px;text-align:center">Studenten laden…</div>`;
-    try {
-      // Parallel: studenten + funded-certs + assessments. _fundedCerts /
-      // _assessments zijn leeg als hun fetch faalt; render valt terug op
-      // upload-knop respectievelijk "Open" badge.
-      const [r, _f, _a, _o, _s] = await Promise.all([
-        apiFetch('/api/mentor-my-students'),
-        loadFundedCertsMap(),
-        loadAssessmentsMap(),
-        loadOverdueMap(),
-        loadSignalsMap(),
-      ]);
-      const d = await r.json();
-      if (!r.ok) throw new Error(d?.error || 'students fetch failed');
-      _lastStudentsList = Array.isArray(d?.students) ? d.students : [];
-      renderStudents(d);
-      _refreshAssessmentBar();
-    } catch (e) {
-      console.error('[mentor-dashboard] students:', e?.message || e);
-      setError('studentsWrap', 'Studenten ophalen mislukt: ' + (e?.message || e));
-    }
-  }
-
   // ── F0.4 Toekomstige studenten (onboardings) ────────────────────────────
   // Voedt zich uit /api/mentor-future-students-self. Status-mapping en
   // paid-poort zijn UX-laag bovenop de raw rows van het endpoint.
@@ -1423,52 +1341,6 @@
     return paid
       ? '<span class="badge badge-green" title="Betaling is binnen — je mag een eerste call inplannen.">💶 Betaald · eerste call mag</span>'
       : '<span class="badge badge-amber" title="Plan gerust; controleer de betaling vóór de call plaatsvindt.">⏳ Nog niet betaald · plan de eerste call alvast (check betaling vóór de call)</span>';
-  }
-
-  // Mini-overzicht op de Dashboard-landing. Wordt aangeroepen door
-  // loadOverviewDashboard met de raw response van /api/mentor-future-students-self
-  // (of null bij netwerk-/auth-fout → fail-soft, geen sectie-content).
-  function _renderFutureSummary(future) {
-    const el = document.getElementById('dashFutureSummary');
-    if (!el) return;
-    if (!future || !Array.isArray(future.students)) {
-      // Fail-soft: toon onopvallend lege ruimte; geen alarmstaat.
-      el.innerHTML = '';
-      return;
-    }
-    const list = future.students;
-    const N = list.length;
-    if (N === 0) {
-      el.innerHTML = `<div class="empty-state"><i class="ti ti-user-question"></i>Nog geen toekomstige studenten toegewezen.</div>`;
-      return;
-    }
-    const M = list.filter((s) => !!s.paid).length;
-    const payLine = (M > 0)
-      ? `<span class="badge badge-green" style="font-size:11.5px">💶 ${M} betaald · klaar voor de eerste call</span>`
-      : `<span class="badge badge-amber" style="font-size:11.5px" title="Plan gerust; controleer de betaling vóór de call plaatsvindt.">⏳ Nog niet betaald — plan de eerste call alvast (check betaling vóór de call)</span>`;
-    // Telt studenten waarvan de start ≤ 14 dagen vooruit is (en niet in het
-    // verleden). Toont een aparte regel zodat de mentor in één oogopslag ziet
-    // hoeveel studenten op korte termijn een eerste call nodig hebben.
-    const S = list.filter((s) => {
-      const d = _daysUntilStart(s.start_date);
-      return d != null && d >= 0 && d <= 14;
-    }).length;
-    const soonLine = (S > 0)
-      ? `<span class="badge badge-amber" style="font-size:11.5px" title="Plan deze studenten zo snel mogelijk in voor hun eerste call.">🔔 ${S} student${S === 1 ? '' : 'en'} start${S === 1 ? '' : 'en'} binnenkort (≤14 dagen) — plan ${S === 1 ? 'de' : 'hun'} eerste call</span>`
-      : '';
-    el.innerHTML = `
-      <div class="dash-status-bar" style="background:var(--bg-elev);border:1px solid var(--border);color:var(--text)">
-        <i class="ti ti-user-plus" style="color:var(--text-dim)"></i>
-        <span>Je hebt <strong>${N}</strong> toekomstige student${N === 1 ? '' : 'en'}.</span>
-        ${payLine}
-        ${soonLine}
-        <button type="button" id="dashFutureGoBtn"
-                style="margin-left:auto;padding:6px 12px;font-size:12.5px;font-weight:600;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer;font-family:inherit">
-          Bekijken
-        </button>
-      </div>`;
-    const btn = document.getElementById('dashFutureGoBtn');
-    if (btn) btn.addEventListener('click', () => { activateTab('toekomst'); });
   }
 
   // Compacte beschikbaarheid-rendering: "Ma: Ochtend, Avond · Wo: Middag".
@@ -1561,31 +1433,6 @@
           </div>
         </div>`;
     }).join('');
-  }
-
-  async function loadFutureStudents() {
-    _vState.futureLoaded = true;
-    const apiFetch = window.AgentShared?.apiFetch;
-    if (typeof apiFetch !== 'function') {
-      setError('futureStudentsWrap', 'apiFetch niet beschikbaar.');
-      return;
-    }
-    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
-    const wrap = document.getElementById('futureStudentsWrap');
-    if (wrap) wrap.innerHTML = `<div style="color:var(--text-faint);font-size:12.5px;padding:14px;text-align:center">Toekomstige studenten laden…</div>`;
-    try {
-      const r = await apiFetch('/api/mentor-future-students-self');
-      let d = null;
-      try { d = await r.json(); } catch {}
-      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
-      _renderFutureStudents(Array.isArray(d?.students) ? d.students : []);
-    } catch (e) {
-      console.error('[mentor-dashboard] future-students:', e?.message || e);
-      setError('futureStudentsWrap', 'Toekomstige studenten ophalen mislukt: ' + (e?.message || e));
-      // Allow retry op volgende tab-opening — vlag resetten zodat lazy-loader
-      // het opnieuw mag proberen na bv. een netwerk-onderbreking.
-      _vState.futureLoaded = false;
-    }
   }
 
   // ── Coaching-verdiensten v1 ──────────────────────────────────────────────
@@ -2125,7 +1972,8 @@
         Naar studenten
       </button>`;
     const btn = document.getElementById('dashAssessmentBarBtn');
-    if (btn) btn.addEventListener('click', () => { activateTab('studenten'); });
+    // Studenten-tab is verhuisd naar /modules/mentor-students.html (Fase A2).
+    if (btn) btn.addEventListener('click', () => { window.location.href = '/modules/mentor-students.html'; });
   }
 
   // Verversen na save in de student-kaart — gebruik laatst-bekende students-list.
@@ -2152,7 +2000,6 @@
     const apiFetch = window.AgentShared?.apiFetch;
     if (typeof apiFetch !== 'function') {
       setError('dashStatGrid', 'apiFetch niet beschikbaar.');
-      setError('calendarWrap', 'apiFetch niet beschikbaar.');
       return;
     }
     try { if (window._authSharedReady) await window._authSharedReady; } catch {}
@@ -2165,13 +2012,11 @@
       apiFetch(`/api/mentor-coaching-earnings?from=${encodeURIComponent(month.first)}&to=${encodeURIComponent(month.last)}`),
       apiFetch(`/api/mentor-coaching-earnings?from=${encodeURIComponent(ytd.first)}&to=${encodeURIComponent(ytd.last)}`),
       apiFetch('/api/mentor-my-students'),
-      apiFetch('/api/mentor-my-calendar'),
       apiFetch('/api/mentor-payouts-list-self'),
       apiFetch(`/api/mentor-travel-days-self?period_month=${encodeURIComponent(month.first.slice(0,7))}`),
       loadAssessmentsMap(),
-      apiFetch('/api/mentor-future-students-self'),
     ];
-    const [bonusR, coachMonthR, coachYtdR, studentsR, calendarR, payoutsR, travelR, _assessR, futureR] =
+    const [bonusR, coachMonthR, coachYtdR, studentsR, payoutsR, travelR, _assessR] =
       await Promise.allSettled(tasks);
 
     async function jsonOk(settled) {
@@ -2185,22 +2030,17 @@
     const coachMonth = await jsonOk(coachMonthR);
     const coachYtd   = await jsonOk(coachYtdR);
     const students   = await jsonOk(studentsR);
-    const calendar   = await jsonOk(calendarR);
     const payouts    = await jsonOk(payoutsR);
     const travel     = await jsonOk(travelR);
-    const future     = await jsonOk(futureR);
 
     _renderStatusBar(payouts?.payouts || []);
     // Reiskosten-reminder (fire-and-forget; doet zelf venster-check + fetch).
     _renderTravelReminder(travel);
-    // Beoordelingen-balk: gebruik students-list uit dezelfde fetch zodat we
-    // niet hoeven te wachten op de studenten-tab. Cache 'm voor save-refresh.
+    // Beoordelingen-balk: students-list uit dezelfde fetch (totaal-stat én
+    // assessment-bar-noemer). Cache voor save-refresh.
     const _studentsArr = Array.isArray(students?.students) ? students.students : [];
     _lastStudentsList = _studentsArr;
     _renderAssessmentReminderBar(_studentsArr);
-    // Toekomstige studenten — mini-overzicht op de Dashboard-landing.
-    // jsonOk → null bij 401/403/netwerkfout → fail-soft (geen sectie tonen).
-    _renderFutureSummary(future);
 
     const bonusTotals     = bonus?.totals || {};
     const bonusEarnedYTD  = Number(bonusTotals.earned_total) || 0;
@@ -2235,10 +2075,6 @@
       });
     }
     _renderStatGrid(stats);
-
-    // Komende sessies — hergebruikt renderCalendar uit oude Grootboek-flow.
-    if (calendar) renderCalendar(calendar.events || []);
-    else setError('calendarWrap', 'Kalender ophalen mislukt.');
   }
 
   // Student-signals: mount modal eenmalig + delegated click-handler op de
