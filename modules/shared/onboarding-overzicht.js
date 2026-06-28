@@ -672,6 +672,8 @@
       bd.innerHTML = `
         <dl>
           <dt>Klant</dt>            <dd>${esc(o.customer_name || '—')}</dd>
+          <dt>E-mail</dt>           <dd>${o.email ? '<a href="mailto:' + esc(o.email) + '">' + esc(o.email) + '</a>' : '<span style="color:var(--text-faint)">—</span>'}</dd>
+          <dt>Telefoon</dt>         <dd>${o.phone ? '<a href="tel:' + esc(o.phone) + '">' + esc(o.phone) + '</a>' : '<span style="color:var(--text-faint)">—</span>'}</dd>
           <dt>Traject</dt>          <dd>${esc(o.traject_label || '—')}${o.traject_type ? ' <span class="ob-badge paid-no">' + esc(o.traject_type) + '</span>' : ''}${o.calls != null ? ' · ' + o.calls + ' call' + (o.calls===1?'':'s') : ''}${o.duur_maanden != null ? ' · ' + o.duur_maanden + ' mnd' : ''}</dd>
           <dt>Status</dt>           <dd>${statusBadgeHtml(o.status)}</dd>
           <dt>Betaling</dt>         <dd>${paidBadgeHtml(!!o.paid)}</dd>

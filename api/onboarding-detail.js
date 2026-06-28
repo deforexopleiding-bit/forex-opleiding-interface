@@ -132,6 +132,24 @@ export default async function handler(req, res) {
       paid = !!inv;
     }
 
+    // Klant-contact: e-mail + telefoon voor mailto/tel-links in de
+    // detail-modal. Fail-soft — lookup-fout mag de detail niet breken.
+    let custEmail = null;
+    let custPhone = null;
+    if (row.customer_id) {
+      try {
+        const { data: cust } = await supabaseAdmin
+          .from('customers')
+          .select('email, phone')
+          .eq('id', row.customer_id)
+          .maybeSingle();
+        custEmail = cust?.email || null;
+        custPhone = cust?.phone || null;
+      } catch (e) {
+        console.warn('[onboarding-detail] customer contact fetch:', e?.message || e);
+      }
+    }
+
     // GEPUBLICEERDE wizard-structuur 1× per request laden voor twee
     // afgeleide velden:
     //   - waiver: consent_key uit het EERSTE blok met is_waiver=true.
@@ -194,6 +212,8 @@ export default async function handler(req, res) {
         id             : row.id,
         customer_id    : row.customer_id,
         customer_name  : row.customer_name || null,
+        email          : custEmail,
+        phone          : custPhone,
         traject_id     : row.traject_id,
         traject_label  : t?.label         || null,
         traject_type   : t?.type          || null,
