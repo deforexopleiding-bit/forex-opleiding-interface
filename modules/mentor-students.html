@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Studenten · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1280px; }
+    .page-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px; gap: 12px; flex-wrap: wrap; }
+    .page-header h1 { font-size: 22px; font-weight: 700; color: var(--text); }
+    .page-header p { font-size: 13px; color: var(--text-dim); }
+    @media (max-width: 880px) { .app { margin-left: 0; padding: 14px; } }
+
+    .section { margin-bottom: 28px; }
+    .section h2 { font-size: 15px; font-weight: 700; margin-bottom: 10px; color: var(--text); display: flex; align-items: center; gap: 8px; }
+    .section h2 i { color: var(--text-dim); }
+
+    .data-table { width: 100%; border-collapse: collapse; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .data-table th, .data-table td { padding: 10px 12px; text-align: left; font-size: 13px; border-bottom: 1px solid var(--border); }
+    .data-table th { background: rgba(0,0,0,0.02); font-weight: 600; color: var(--text-dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .data-table tr:last-child td { border-bottom: 0; }
+    .data-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .data-table th.num { text-align: right; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+    .badge-green  { background: rgba(34,197,94,0.13);  color: #15803d; }
+    .badge-amber  { background: rgba(245,158,11,0.16); color: #b45309; }
+    .badge-grey   { background: rgba(100,116,139,0.18); color: #475569; }
+    .badge-blue   { background: rgba(20,115,214,0.16); color: #1160bd; }
+    .badge-red    { background: rgba(220,38,38,0.13);  color: #b91c1c; }
+
+    .empty-state { background: var(--bg-elev); border: 1px dashed var(--border); border-radius: 10px; padding: 24px 16px; text-align: center; font-size: 13px; color: var(--text-dim); }
+    .empty-state i { font-size: 26px; display: block; margin-bottom: 6px; opacity: 0.6; }
+
+    .skeleton { display: inline-block; width: 80px; height: 16px; background: linear-gradient(90deg, rgba(0,0,0,0.05), rgba(0,0,0,0.10), rgba(0,0,0,0.05)); border-radius: 4px; animation: sk 1.2s infinite; }
+    @keyframes sk { 0% { background-position: 0% 0; } 100% { background-position: 200% 0; } }
+
+    .tab-strip { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 18px; flex-wrap: wrap; }
+    .tab-btn { background: transparent; border: 0; padding: 10px 14px; font-size: 13.5px; font-weight: 600; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--text); border-bottom-color: var(--accent, #6366f1); }
+
+    .student-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
+    .student-head { display: grid; grid-template-columns: 1fr auto auto; gap: 14px; align-items: center; padding: 12px 14px; }
+    .student-name { font-size: 14px; font-weight: 600; }
+    .student-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+    .student-stat { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .student-stat strong { color: var(--text); font-weight: 700; }
+    @media (max-width: 880px) {
+      .student-head { grid-template-columns: 1fr auto; }
+      .student-stat { display: none; }
+      .student-stat:first-of-type { display: inline; }
+    }
+
+    .search-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
+    .search-bar input[type="search"] {
+      flex: 1; max-width: 360px;
+      padding: 8px 12px; font-size: 13.5px;
+      border: 1px solid var(--border); border-radius: 8px;
+      background: var(--bg); color: var(--text);
+      font-family: inherit;
+    }
+    .search-bar input[type="search"]:focus { outline: 2px solid rgba(99,102,241,0.35); border-color: var(--accent, #6366f1); }
+    .warning-bar {
+      background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.30);
+      color: #b45309; padding: 8px 12px; border-radius: 8px;
+      font-size: 12.5px; margin-bottom: 12px;
+    }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app">
+  <div class="page-header">
+    <div>
+      <h1>Studenten</h1>
+      <p>Mijn studenten, toekomstige studenten en 1-op-1 sessies in één overzicht.</p>
+    </div>
+  </div>
+
+  <div id="msContent">
+    <div class="tab-strip" role="tablist">
+      <button class="tab-btn active" data-tab="studenten" type="button">Mijn studenten</button>
+      <button class="tab-btn"        data-tab="toekomst"  type="button">Toekomstige studenten</button>
+      <button class="tab-btn"        data-tab="1on1"      type="button">1-op-1 sessies</button>
+    </div>
+
+    <div id="tabStudenten" class="tab-panel">
+      <div class="search-bar">
+        <input type="search" id="msSearch" placeholder="Zoek op naam…" autocomplete="off" />
+      </div>
+      <div id="studentsWrap"><div class="empty-state"><i class="ti ti-clock"></i>Laden…</div></div>
+    </div>
+
+    <div id="tabToekomst" class="tab-panel" hidden>
+      <div class="section">
+        <p style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">
+          Aangemelde studenten die nog niet in jouw vaste begeleiding zitten. <strong>Plan de eerste call ~2 weken vóór de startdatum in — controleer de betaling vóór de call plaatsvindt.</strong>
+        </p>
+        <div id="futureStudentsWrap"><div class="empty-state"><i class="ti ti-clock"></i>Laden…</div></div>
+      </div>
+    </div>
+
+    <div id="tab1on1" class="tab-panel" hidden>
+      <div id="oneOnOneWarning"></div>
+      <div class="section">
+        <h2><i class="ti ti-calendar-plus"></i> Gepland</h2>
+        <div id="plannedWrap"><div class="empty-state"><i class="ti ti-clock"></i>Laden…</div></div>
+      </div>
+      <div class="section">
+        <h2><i class="ti ti-calendar-check"></i> Afgerond</h2>
+        <div id="completedWrap"><div class="empty-state"><i class="ti ti-clock"></i>Laden…</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const fmtEUR = (n) => {
+    const v = Number(n) || 0;
+    return v.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  const fmtDateNL = (iso) => {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch { return iso; }
+  };
+  const fmtDateTimeNL = (iso) => {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch { return iso; }
+  };
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+  function setError(elId, msg) {
+    const el = document.getElementById(elId);
+    if (el) el.innerHTML =
+      `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i>${esc(msg)}</div>`;
+  }
+
+  // ── Tab-wiring ────────────────────────────────────────────────────────
+  const _state = {
+    studentsLoaded: false,
+    futureLoaded:   false,
+    oneOnOneLoaded: false,
+    students:       [], // raw lijst voor client-side search
+  };
+
+  function activateTab(name) {
+    document.querySelectorAll('#msContent .tab-btn').forEach((b) => {
+      b.classList.toggle('active', b.dataset.tab === name);
+    });
+    document.getElementById('tabStudenten').hidden = (name !== 'studenten');
+    document.getElementById('tabToekomst').hidden  = (name !== 'toekomst');
+    document.getElementById('tab1on1').hidden      = (name !== '1on1');
+    if (name === 'studenten' && !_state.studentsLoaded) loadStudents();
+    if (name === 'toekomst'  && !_state.futureLoaded)   loadFutureStudents();
+    if (name === '1on1'      && !_state.oneOnOneLoaded) load1on1Sessions();
+  }
+
+  // ── Overdue map (factuur-badge per email) ─────────────────────────────
+  const _overdueByEmail = new Map();
+  async function loadOverdueMap() {
+    _overdueByEmail.clear();
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/mentor-students-invoice-status');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'overdue fetch failed');
+      const byEmail = (d && typeof d.byEmail === 'object' && d.byEmail) ? d.byEmail : {};
+      for (const [email, count] of Object.entries(byEmail)) {
+        const n = Number(count) || 0;
+        if (n > 0) _overdueByEmail.set(String(email).toLowerCase(), n);
+      }
+    } catch (e) {
+      console.warn('[mentor-students] overdue:', e?.message || e);
+    }
+  }
+  function _overdueBadgeHtml(email) {
+    const e = String(email || '').trim().toLowerCase();
+    if (!e) return '';
+    const n = _overdueByEmail.get(e) || 0;
+    if (n <= 0) return '';
+    const label = (n === 1) ? '1 factuur te laat' : (n + ' facturen te laat');
+    return `<span class="badge" style="background:rgba(220,38,38,0.16);color:#991b1b">${label}</span>`;
+  }
+
+  // ── Mijn studenten ────────────────────────────────────────────────────
+  function renderStudents(payload) {
+    const wrap = document.getElementById('studentsWrap');
+    if (!wrap) return;
+    if (!payload || payload.linked === false) {
+      wrap.innerHTML = `
+        <div class="empty-state">
+          <i class="ti ti-link-off"></i>
+          Je account is nog niet gekoppeld aan een bubble-mentor — vraag een admin om de koppeling te leggen via Admin > Integraties > Mentor↔Bubble.
+        </div>`;
+      return;
+    }
+    const list = Array.isArray(payload.students) ? payload.students : [];
+    _state.students = list;
+    _applyStudentFilter('');
+  }
+
+  function _applyStudentFilter(q) {
+    const wrap = document.getElementById('studentsWrap');
+    if (!wrap) return;
+    const needle = String(q || '').trim().toLowerCase();
+    const list = (_state.students || []).filter((s) => {
+      if (!needle) return true;
+      return String(s.name || '').toLowerCase().includes(needle);
+    });
+    if (list.length === 0) {
+      wrap.innerHTML = needle
+        ? `<div class="empty-state"><i class="ti ti-search-off"></i>Geen studenten gevonden voor "${esc(needle)}".</div>`
+        : `<div class="empty-state"><i class="ti ti-users-off"></i>Geen studenten gevonden onder jouw mentorschap.</div>`;
+      return;
+    }
+    wrap.innerHTML = list.map((s) => {
+      const name      = esc(s.name || s.email || '(geen naam)');
+      const email     = esc(s.email || '');
+      const program   = s.program ? `<span class="badge badge-blue">${esc(s.program)}</span>` : '';
+      const onboard   = s.onboarding_status ? `<span class="badge badge-amber">${esc(s.onboarding_status)}</span>` : '';
+      const overdue   = _overdueBadgeHtml(s.email);
+      const callsTotal  = Number(s.calls_1on1_total) || 0;
+      const callsDone   = Number(s.calls_1on1_done) || 0;
+      const noShows     = Number(s.no_shows) || 0;
+      return `
+        <div class="student-card">
+          <div class="student-head">
+            <div>
+              <div class="student-name">${name} ${program} ${onboard} ${overdue}</div>
+              <div class="student-meta">${email}</div>
+            </div>
+            <div class="student-stat" title="1-op-1-calls voltooid / totaal"><strong>${callsDone}/${callsTotal || '—'}</strong> 1-op-1</div>
+            <div class="student-stat" title="No-shows"><i class="ti ti-alert-triangle" style="color:${noShows > 0 ? '#b45309' : 'var(--text-faint)'}"></i> ${noShows}</div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  async function loadStudents() {
+    _state.studentsLoaded = true;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') { setError('studentsWrap', 'apiFetch niet beschikbaar.'); return; }
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+    const wrap = document.getElementById('studentsWrap');
+    if (wrap) wrap.innerHTML = `<div style="color:var(--text-faint);font-size:12.5px;padding:14px;text-align:center">Studenten laden…</div>`;
+    try {
+      const [r, _o] = await Promise.all([
+        apiFetch('/api/mentor-my-students'),
+        loadOverdueMap(),
+      ]);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'students fetch failed');
+      renderStudents(d);
+    } catch (e) {
+      console.error('[mentor-students] students:', e?.message || e);
+      setError('studentsWrap', 'Studenten ophalen mislukt: ' + (e?.message || e));
+      _state.studentsLoaded = false;
+    }
+  }
+
+  // ── Toekomstige studenten ─────────────────────────────────────────────
+  const _FUTURE_STATUS = {
+    aangemeld : { label: 'Aangemeld',           cls: 'badge-blue'  },
+    bezig     : { label: 'Onboarding bezig',    cls: 'badge-amber' },
+    afgerond  : { label: 'Onboarding afgerond', cls: 'badge-green' },
+  };
+  function _futureStatusBadge(st) {
+    const s = _FUTURE_STATUS[st];
+    if (!s) return `<span class="badge badge-grey">${esc(st || '—')}</span>`;
+    return `<span class="badge ${s.cls}">${esc(s.label)}</span>`;
+  }
+  function _futurePaidBadge(paid) {
+    return paid
+      ? '<span class="badge badge-green" title="Betaling is binnen — je mag een eerste call inplannen.">💶 Betaald · eerste call mag</span>'
+      : '<span class="badge badge-amber" title="Plan gerust; controleer de betaling vóór de call plaatsvindt.">⏳ Nog niet betaald · plan de eerste call alvast (check betaling vóór de call)</span>';
+  }
+  function _daysUntilStart(start) {
+    if (!start) return null;
+    const today = new Date(); today.setHours(0,0,0,0);
+    const sd = new Date(start); sd.setHours(0,0,0,0);
+    const diff = Math.round((sd - today) / (24 * 60 * 60 * 1000));
+    return Number.isFinite(diff) ? diff : null;
+  }
+  function _futureStartBadge(days) {
+    let when;
+    if (days === 0)      when = 'vandaag';
+    else if (days === 1) when = 'morgen';
+    else                 when = 'over ' + days + ' dag' + (days === 1 ? '' : 'en');
+    return '<span class="badge badge-amber" style="font-size:11.5px"'
+      + ' title="Start ' + when + ' — plan alvast de eerste call (check betaling vóór de call).">'
+      + '📞 Plan de eerste call — start ' + when + ' · neem contact op</span>';
+  }
+  function _shortAvailability(av) {
+    if (!av || typeof av !== 'object') return '';
+    const parts = [];
+    if (Array.isArray(av.days)   && av.days.length)   parts.push(av.days.join(', '));
+    if (Array.isArray(av.blocks) && av.blocks.length) parts.push(av.blocks.join(', '));
+    return parts.join(' · ');
+  }
+  function _renderFutureStudents(students) {
+    const wrap = document.getElementById('futureStudentsWrap');
+    if (!wrap) return;
+    const list = Array.isArray(students) ? students : [];
+    if (list.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-user-question"></i>Je hebt nog geen toekomstige studenten toegewezen gekregen.</div>`;
+      return;
+    }
+    const sorted = list.slice().sort((a, b) => {
+      const da = _daysUntilStart(a.start_date);
+      const db = _daysUntilStart(b.start_date);
+      const aSoon = (da != null && da >= 0 && da <= 14);
+      const bSoon = (db != null && db >= 0 && db <= 14);
+      if (aSoon && !bSoon) return -1;
+      if (!aSoon && bSoon) return 1;
+      if (aSoon && bSoon)  return da - db;
+      const ad = a.start_date ? String(a.start_date) : '9999-99-99';
+      const bd = b.start_date ? String(b.start_date) : '9999-99-99';
+      if (ad !== bd) return ad < bd ? -1 : 1;
+      return String(a.customer_name || '').localeCompare(String(b.customer_name || ''));
+    });
+    wrap.innerHTML = sorted.map((s) => {
+      const completed = (s.status === 'afgerond' && s.completed_at)
+        ? `<div class="student-meta" style="margin-top:4px">Afgerond op ${esc(fmtDateNL(s.completed_at))}</div>`
+        : '';
+      const avShort = _shortAvailability(s.availability);
+      const avLine  = `<div class="student-meta" style="margin-top:4px"><strong style="color:var(--text-dim)">Beschikbaarheid:</strong> ${avShort ? esc(avShort) : '<span style="color:var(--text-faint)">—</span>'}</div>`;
+      const startLine = `<div class="student-meta" style="margin-top:4px"><strong style="color:var(--text-dim)">Startdatum:</strong> ${s.start_date ? esc(fmtDateNL(s.start_date)) : '<span style="color:var(--text-faint)">— niet ingesteld</span>'}</div>`;
+      const days = _daysUntilStart(s.start_date);
+      const soon = (days != null && days >= 0 && days <= 14);
+      const cardStyle = soon
+        ? 'border:1px solid rgba(245,158,11,0.45);background:linear-gradient(180deg, rgba(245,158,11,0.07), rgba(245,158,11,0.02))'
+        : '';
+      const startBadge = soon ? _futureStartBadge(days) : '';
+      return `
+        <div class="student-card" style="${cardStyle}">
+          <div class="student-head" style="grid-template-columns:1fr auto">
+            <div>
+              <div class="student-name">${esc(s.customer_name || '—')}</div>
+              <div class="student-meta">${esc(s.traject_label || '—')}</div>
+              ${avLine}
+              ${startLine}
+              ${completed}
+            </div>
+            <div class="student-stat" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
+              ${startBadge}
+              ${_futurePaidBadge(!!s.paid)}
+              ${_futureStatusBadge(s.status)}
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  async function loadFutureStudents() {
+    _state.futureLoaded = true;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') { setError('futureStudentsWrap', 'apiFetch niet beschikbaar.'); return; }
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+    const wrap = document.getElementById('futureStudentsWrap');
+    if (wrap) wrap.innerHTML = `<div style="color:var(--text-faint);font-size:12.5px;padding:14px;text-align:center">Toekomstige studenten laden…</div>`;
+    try {
+      const r = await apiFetch('/api/mentor-future-students-self');
+      let d = null;
+      try { d = await r.json(); } catch {}
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      _renderFutureStudents(Array.isArray(d?.students) ? d.students : []);
+    } catch (e) {
+      console.error('[mentor-students] future:', e?.message || e);
+      setError('futureStudentsWrap', 'Toekomstige studenten ophalen mislukt: ' + (e?.message || e));
+      _state.futureLoaded = false;
+    }
+  }
+
+  // ── 1-op-1 sessies ────────────────────────────────────────────────────
+  function _renderPlanned(planned) {
+    const wrap = document.getElementById('plannedWrap');
+    if (!wrap) return;
+    const list = Array.isArray(planned) ? planned : [];
+    if (list.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-calendar-off"></i>Geen geplande 1-op-1 sessies.</div>`;
+      return;
+    }
+    const rows = list.map((s) => `<tr><td>${esc(fmtDateTimeNL(s.starts_at))}</td></tr>`).join('');
+    wrap.innerHTML = `
+      <table class="data-table">
+        <thead><tr><th>Datum + tijd</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  function _renderCompleted(completed) {
+    const wrap = document.getElementById('completedWrap');
+    if (!wrap) return;
+    const list = Array.isArray(completed) ? completed : [];
+    if (list.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-calendar-off"></i>Geen afgeronde 1-op-1 sessies (laatste ~180 dagen).</div>`;
+      return;
+    }
+    const rows = list.map((s) => `
+      <tr>
+        <td>${esc(fmtDateTimeNL(s.starts_at))}</td>
+        <td class="num">${fmtEUR(Number(s.amount) || 0)}</td>
+      </tr>`).join('');
+    wrap.innerHTML = `
+      <table class="data-table">
+        <thead><tr><th>Datum + tijd</th><th class="num">Verdiensten</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  async function load1on1Sessions() {
+    _state.oneOnOneLoaded = true;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') { setError('plannedWrap', 'apiFetch niet beschikbaar.'); return; }
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+    const planned   = document.getElementById('plannedWrap');
+    const completed = document.getElementById('completedWrap');
+    const warnEl    = document.getElementById('oneOnOneWarning');
+    if (planned)   planned.innerHTML   = `<div style="color:var(--text-faint);font-size:12.5px;padding:14px;text-align:center">Laden…</div>`;
+    if (completed) completed.innerHTML = `<div style="color:var(--text-faint);font-size:12.5px;padding:14px;text-align:center">Laden…</div>`;
+    if (warnEl)    warnEl.innerHTML    = '';
+    try {
+      const r = await apiFetch('/api/mentor-1on1-sessions');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      if (d.warning && warnEl) {
+        warnEl.innerHTML = `<div class="warning-bar"><i class="ti ti-alert-triangle"></i> ${esc(d.warning)}</div>`;
+      }
+      _renderPlanned(d.planned);
+      _renderCompleted(d.completed);
+    } catch (e) {
+      console.error('[mentor-students] 1on1:', e?.message || e);
+      setError('plannedWrap',   '1-op-1 ophalen mislukt: ' + (e?.message || e));
+      setError('completedWrap', '1-op-1 ophalen mislukt: ' + (e?.message || e));
+      _state.oneOnOneLoaded = false;
+    }
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────────
+  async function init() {
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+    if (window.AuthShared && typeof window.AuthShared.requireAuth === 'function') {
+      const profile = await window.AuthShared.requireAuth();
+      if (!profile) return;
+    }
+    // Page-gate (defense-in-depth, GEEN redirect — vermijdt loop met
+    // index.html, conform de fix in #491).
+    try {
+      if (window.RBAC?.ensurePermissionsLoaded) {
+        await window.RBAC.ensurePermissionsLoaded();
+        if (!window.RBAC.canSync || !window.RBAC.canSync('mentor.module.access')) {
+          const app = document.getElementById('msContent');
+          if (app) app.innerHTML =
+            '<div style="max-width:480px;margin:48px auto;text-align:center;padding:32px;border:1px solid var(--border);border-radius:14px;background:var(--bg-elev)">'
+            + '<h2 style="margin:0 0 10px;font-size:18px;color:var(--text)">Geen toegang tot Studenten</h2>'
+            + '<p style="margin:0;color:var(--text-dim);font-size:14px">Je account heeft hier momenteel geen rechten voor. Neem contact op met een beheerder.</p>'
+            + '</div>';
+          return;
+        }
+      }
+    } catch (e) { /* fail-open */ }
+
+    // Tab-wiring.
+    document.querySelectorAll('#msContent .tab-btn').forEach((b) => {
+      b.addEventListener('click', () => activateTab(b.dataset.tab));
+    });
+    // Zoekbalk client-side filter.
+    const search = document.getElementById('msSearch');
+    if (search) search.addEventListener('input', () => _applyStudentFilter(search.value));
+
+    // Default tab.
+    activateTab('studenten');
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+})();
+</script>
+</body>
+</html>
