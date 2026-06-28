@@ -991,6 +991,7 @@ const RBAC_ROLES = [
 ];
 
 let rbacMatrix = {};          // { role: { feature_key: bool } }
+let rbacLoadedSnapshot = {};  // deep-copy van rbacMatrix direct na load — diff-basis bij save
 let rbacActiveModule = 'email';
 let rbacDirty = false;
 let rbacLoaded = false;
@@ -1034,11 +1035,26 @@ async function loadPermissionsMatrix() {
   rbacMatrix = {};
   RBAC_ROLES.forEach(r => { if (!r.auto) rbacMatrix[r.key] = {}; });
   try {
-    const { data, error } = await window.supabase.from('role_permissions').select('role, feature_key, allowed');
-    if (error) throw error;
-    (data || []).forEach(row => {
-      if (rbacMatrix[row.role]) rbacMatrix[row.role][row.feature_key] = row.allowed === true;
-    });
+    // Paginatie: PostgREST default-limit (1000) overslaan zodat we ALLE
+    // rijen krijgen. Anders mist de matrix cellen → savePermissions zou
+    // bij oude implementatie die cellen als false uploaden en bestaande
+    // true-rechten platslaan.
+    const PAGE = 1000;
+    let from = 0;
+    while (true) {
+      const { data, error } = await window.supabase
+        .from('role_permissions')
+        .select('role, feature_key, allowed')
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      const rows = data || [];
+      rows.forEach(row => {
+        if (rbacMatrix[row.role]) rbacMatrix[row.role][row.feature_key] = row.allowed === true;
+      });
+      if (rows.length < PAGE) break;
+      from += PAGE;
+    }
+    rbacLoadedSnapshot = JSON.parse(JSON.stringify(rbacMatrix));
     rbacLoaded = true;
     renderModuleList();
     renderMatrix();
@@ -1120,20 +1136,32 @@ async function savePermissions() {
   btn.disabled = true; btn.textContent = 'Opslaan…';
   try {
     const now = new Date().toISOString();
+    // Diff-save: alleen cellen waarvan de waarde t.o.v. de load-snapshot is
+    // veranderd worden weggeschreven. Niet-geladen of ongewijzigde cellen
+    // raken NOOIT meer de database — kan dus geen bestaand recht meer
+    // platslaan.
     const ups = [];
     RBAC_ROLES.filter(r => !r.auto).forEach(r => {
       FEATURE_REGISTRY.forEach(m => m.features.forEach(f => {
+        const cur  = !!(rbacMatrix[r.key]         && rbacMatrix[r.key][f.key]);
+        const prev = !!(rbacLoadedSnapshot[r.key] && rbacLoadedSnapshot[r.key][f.key]);
+        if (cur === prev) return;
         ups.push({
           role: r.key, feature_key: f.key,
-          allowed: !!(rbacMatrix[r.key] && rbacMatrix[r.key][f.key]),
+          allowed: cur,
           updated_at: now, updated_by: currentProfile?.id || null,
         });
       }));
     });
+    if (ups.length === 0) {
+      window.AgentShared?.showToast('Geen wijzigingen', 'info');
+      return;
+    }
     const { error } = await window.supabase.from('role_permissions').upsert(ups, { onConflict: 'role,feature_key' });
     if (error) throw error;
+    rbacLoadedSnapshot = JSON.parse(JSON.stringify(rbacMatrix));
     rbacDirty = false;
-    window.AgentShared?.showToast('Rechten opgeslagen (' + ups.length + ' cellen)', 'success');
+    window.AgentShared?.showToast('Rechten opgeslagen (' + ups.length + ' wijziging' + (ups.length === 1 ? '' : 'en') + ')', 'success');
   } catch (e) {
     window.AgentShared?.showToast('Opslaan mislukt: ' + e.message, 'error');
   } finally {
