@@ -1127,7 +1127,22 @@
       if (window.RBAC?.ensurePermissionsLoaded) {
         await window.RBAC.ensurePermissionsLoaded();
         if (!window.RBAC.canSync || !window.RBAC.canSync('mentor.module.access')) {
-          window.location.replace('/index.html');
+          // GEEN redirect — anders kan index.html ↔ mentor-home.html in een
+          // oneindige loop belanden (index stuurt mentor-rol naar mentor-home,
+          // mentor-home stuurde terug naar index, etc.). Inline melding +
+          // expliciete uitlog-knop.
+          const app = document.getElementById('appContent');
+          if (app) app.innerHTML =
+            '<div style="max-width:480px;margin:64px auto;text-align:center;padding:32px;border:1px solid var(--border);border-radius:14px;background:var(--bg-elev)">'
+            + '<h2 style="margin:0 0 10px;font-size:18px;color:var(--text)">Geen toegang tot het mentor-dashboard</h2>'
+            + '<p style="margin:0 0 18px;color:var(--text-dim);font-size:14px">Je account heeft hier momenteel geen rechten voor. Neem contact op met een beheerder.</p>'
+            + '<button type="button" id="mhNoAccessLogout" style="padding:9px 18px;border:0;border-radius:8px;background:#093d54;color:#fff;font-weight:600;cursor:pointer">Uitloggen</button>'
+            + '</div>';
+          const lo = document.getElementById('mhNoAccessLogout');
+          if (lo) lo.addEventListener('click', async () => {
+            try { await window.supabase?.auth?.signOut(); } catch (_) {}
+            window.location.replace('/login.html');
+          });
           return;
         }
       }
