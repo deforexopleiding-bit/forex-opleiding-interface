@@ -36,9 +36,13 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { bubbleList } from './_lib/bubble.js';
 import { RATE_1ON1 } from './_lib/coaching-earnings.js';
+import { getMentorStudents } from './_lib/mentorStudents.js';
 
 const FETCH_CAP = 3000;
-const LOOKBACK_DAYS = 180;
+// Voor session-numbering moeten ALLE 1-op-1 sessies van een student meekomen
+// (Alpha is begrensd ~24 sessies). We pakken 2024-01-01 als harde ondergrens —
+// breed genoeg om historische sessies te dekken zonder onbegrensde fetches.
+const LOOKBACK_FROM_ISO = '2024-01-01T00:00:00Z';
 
 function asBool(v) {
   if (v === true || v === false) return v;
@@ -116,12 +120,28 @@ export default async function handler(req, res) {
     }
     const bubbleUserId = tm.bubble_user_id;
 
-    // Window: lookback ~180d t/m ver in de toekomst. Bubble's date-constraints
-    // zijn strikt, dus we stretchen de randen vergelijkbaar met
+    // Student-map opbouwen (bubble_student_id → { name, calls_1on1_total }).
+    // Voor nummering en weergave. Fail-soft: bij Bubble-fout doorlopen we
+    // zonder namen — de sessie-lijst valt terug op '—' en geen totaal.
+    const studentMap = new Map();
+    try {
+      const { students } = await getMentorStudents(user.id);
+      for (const s of (students || [])) {
+        if (!s || !s.bubble_student_id) continue;
+        studentMap.set(String(s.bubble_student_id), {
+          name:              s.name || null,
+          calls_1on1_total:  Number.isFinite(s.calls_1on1_total) ? Number(s.calls_1on1_total) : null,
+        });
+      }
+    } catch (e) {
+      console.warn('[mentor-1on1-sessions] getMentorStudents faalde, lijst zonder namen:', e?.message || e);
+    }
+
+    // Window: vanaf 2024-01-01 t/m +365d. Bubble's date-constraints zijn
+    // strikt, dus we stretchen de randen vergelijkbaar met
     // coaching-earnings.js (greater-than/less-than).
-    const now = Date.now();
-    const fromMs = now - (LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
-    const toMs   = now + (365 * 24 * 60 * 60 * 1000);
+    const fromMs = new Date(LOOKBACK_FROM_ISO).getTime();
+    const toMs   = Date.now() + (365 * 24 * 60 * 60 * 1000);
     const fromIsoStrict = new Date(fromMs - 1).toISOString();
     const toIsoStrict   = new Date(toMs + 1).toISOString();
     const dateConstraints = [
@@ -157,8 +177,10 @@ export default async function handler(req, res) {
       }
     }
 
-    const planned = [];
-    const completed = [];
+    // Pre-pass: verzamel alle gekwalificeerde sessies (afgerond + geplande
+    // toekomst) met hun member_user, zodat we daarna per student kunnen
+    // nummeren (oplopend op starts_at).
+    const qualified = []; // { id, starts_at, isoMs, done, member_user }
     const nowMs = Date.now();
     for (const s of rows) {
       const cb = readFirst(s, ['Created By', 'created_by']);
@@ -175,10 +197,52 @@ export default async function handler(req, res) {
       if (!Number.isFinite(startMs)) continue;
 
       const done = asBool(readFirst(s, ['isdone_boolean', 'isDone']));
-      if (done) {
-        completed.push({ id, starts_at: iso, amount: RATE_1ON1 });
-      } else if (startMs >= nowMs) {
-        planned.push({ id, starts_at: iso });
+      // planned-criterium identiek aan voorheen (toekomstige niet-afgeronde);
+      // afgeronde sessies tellen sowieso mee in de nummering.
+      if (!done && startMs < nowMs) continue;
+
+      const memberRaw = readFirst(s, ['member_user']);
+      const member_user = (memberRaw && String(memberRaw).trim()) ? String(memberRaw).trim() : null;
+
+      qualified.push({ id, starts_at: iso, startMs, done, member_user });
+    }
+
+    // Nummering per student: groepeer op member_user, sorteer asc op starts_at,
+    // index+1 = session_number. Sessies zonder member_user krijgen geen nummer
+    // (die kunnen niet aan een student worden toegerekend).
+    const sessionNumber = new Map(); // session-id → number
+    {
+      const byStudent = new Map();
+      for (const q of qualified) {
+        if (!q.member_user) continue;
+        if (!byStudent.has(q.member_user)) byStudent.set(q.member_user, []);
+        byStudent.get(q.member_user).push(q);
+      }
+      for (const list of byStudent.values()) {
+        list.sort((a, b) => a.startMs - b.startMs);
+        list.forEach((q, idx) => { sessionNumber.set(q.id, idx + 1); });
+      }
+    }
+
+    const planned = [];
+    const completed = [];
+    for (const q of qualified) {
+      const meta = q.member_user ? studentMap.get(q.member_user) : null;
+      const student_name   = meta?.name || '—';
+      const session_total  = meta?.calls_1on1_total ?? null;
+      const session_number = q.member_user ? (sessionNumber.get(q.id) ?? null) : null;
+      const base = {
+        id:             q.id,
+        starts_at:      q.starts_at,
+        student_name,
+        member_user:    q.member_user,
+        session_number,
+        session_total,
+      };
+      if (q.done) {
+        completed.push({ ...base, amount: RATE_1ON1 });
+      } else {
+        planned.push(base);
       }
     }
 
