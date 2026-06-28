@@ -687,8 +687,17 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
         <!-- LEFT: lijst-pane -->
         <aside id="evInboxListPane" class="evx-list-pane">
           <div class="evx-list-header">
-            <div style="font-size:12.5px;font-weight:600;color:var(--text)">Gesprekken</div>
+            <div style="font-size:12.5px;font-weight:600;color:var(--text)">Inbox</div>
             <button class="sr-iconbtn" id="evInboxRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+          </div>
+          <!-- Lijst-source toggle: WhatsApp-gesprekken | E-mailers. E-mail-knop
+               wordt verborgen wanneer events.inbox.view ontbreekt; de balk
+               gedraagt zich dan als alleen-Gesprekken. -->
+          <div id="evListSourceBar" style="display:flex;padding:6px 10px 0;gap:4px">
+            <div role="tablist" style="display:inline-flex;width:100%;background:var(--bg-elev,#f1f5f9);border:1px solid var(--border);border-radius:8px;padding:2px;gap:2px">
+              <button type="button" id="evSrcBtnWa" data-ev-src="wa" style="flex:1;border:none;background:var(--bg,#fff);color:var(--text);padding:6px 10px;font-size:12.5px;font-weight:600;border-radius:6px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06)"><i class="ti ti-brand-whatsapp"></i> Gesprekken</button>
+              <button type="button" id="evSrcBtnEmail" data-ev-src="email" style="flex:1;border:none;background:transparent;color:var(--text-dim);padding:6px 10px;font-size:12.5px;font-weight:600;border-radius:6px;cursor:pointer;position:relative"><i class="ti ti-mail"></i> E-mail<span id="evListEmailBadge" style="display:none;margin-left:6px;min-width:17px;height:17px;line-height:17px;padding:0 5px;border-radius:9px;background:#dc2626;color:#fff;font-size:10px;font-weight:700;text-align:center;vertical-align:middle">0</span></button>
+            </div>
           </div>
           <div id="eventsInboxList" class="evx-list-body">
             <div class="skel-row"></div>
@@ -999,6 +1008,14 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
     } else if (which === 'inbox') {
       paneInbox.style.display = '';
       loadEventsInbox();
+      // Fire-and-forget: vul het e-mailers-badge naast de schakelaar zonder de
+      // WhatsApp-lijst te blokkeren. Knop zelf is RBAC-gegate hieronder.
+      const canEvEmail = !!(window.RBAC && window.RBAC.canSync && window.RBAC.canSync('events.inbox.view'));
+      const srcBar = document.getElementById('evListSourceBar');
+      const srcEmBtn = document.getElementById('evSrcBtnEmail');
+      if (srcEmBtn) srcEmBtn.style.display = canEvEmail ? '' : 'none';
+      if (srcBar)   srcBar.style.display   = canEvEmail ? 'flex' : 'none';
+      if (canEvEmail) _loadEvEmailSendersBadgeOnly();
       // Realtime: lijst-kanaal + 30s backstop-poll. Berichten-kanaal volgt
       // pas wanneer een specifieke conversatie open gaat (openEventsConv).
       _evSubscribeConversations();
@@ -1045,7 +1062,19 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
   })();
 
   const inboxRefresh = document.getElementById('evInboxRefresh');
-  if (inboxRefresh) inboxRefresh.addEventListener('click', () => loadEventsInbox());
+  if (inboxRefresh) inboxRefresh.addEventListener('click', () => {
+    if (_evState.listSource === 'email') {
+      _loadEvEmailSenders();
+    } else {
+      loadEventsInbox();
+      _loadEvEmailSendersBadgeOnly();
+    }
+  });
+  // Lijst-source toggle: WhatsApp | E-mail (Optie B).
+  const evSrcWa = document.getElementById('evSrcBtnWa');
+  if (evSrcWa) evSrcWa.addEventListener('click', () => _evSwitchListSource('wa'));
+  const evSrcEm = document.getElementById('evSrcBtnEmail');
+  if (evSrcEm) evSrcEm.addEventListener('click', () => _evSwitchListSource('email'));
 
   // Mode-toggle WhatsApp | E-mail. Klik op disabled-knop wordt door de
   // browser geblokkeerd; _evSwitchMode heeft daarnaast nog een fail-safe
@@ -3600,6 +3629,11 @@ const _evState = {
   emailItems: [],
   emailWarning: null,
   emailCustomerEmail: '',
+  // Lijst-source toggle (Fase 2 Optie B). 'wa' = WhatsApp-conversaties,
+  // 'email' = afzenders uit /api/inbox-email-senders-list?module=events.
+  listSource: 'wa',
+  emailSenders: [],
+  emailSendersLoaded: false,
 };
 
 // STAP 6a: persistent twee-paneel — beide panes staan altijd in de DOM.
@@ -3867,6 +3901,168 @@ function _applyEvComposeState() {
 
 // ── Mode-toggle WhatsApp | E-mail (read-only e-mail-thread) ────────────────
 // Mirror van #485's _oi*-pattern op de evx-shell. WhatsApp-pad ongemoeid.
+// ── Lijst-source toggle (Optie B): WhatsApp | E-mail-afzenders ─────────────
+// Mirror van het _oi*-pattern in modules/shared/onboarding-overzicht.js.
+// Knop-actief-stijl is consistent met de per-gesprek mode-toggle (Bg + shadow).
+function _evSetSrcBtnActive(btn, active) {
+  if (!btn) return;
+  btn.style.background = active ? 'var(--bg,#fff)' : 'transparent';
+  btn.style.color      = active ? 'var(--text)'   : 'var(--text-dim)';
+  btn.style.boxShadow  = active ? '0 1px 2px rgba(0,0,0,.06)' : 'none';
+}
+
+function _evUpdateListEmailBadge(n) {
+  const badge = document.getElementById('evListEmailBadge');
+  if (!badge) return;
+  if (Number(n) > 0) {
+    badge.textContent  = String(n);
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function _evSwitchListSource(next) {
+  if (next !== 'wa' && next !== 'email') return;
+  if (next === _evState.listSource) return;
+  _evState.listSource = next;
+  _evSetSrcBtnActive(document.getElementById('evSrcBtnWa'),    next === 'wa');
+  _evSetSrcBtnActive(document.getElementById('evSrcBtnEmail'), next === 'email');
+  if (next === 'wa') {
+    loadEventsInbox();
+  } else {
+    _loadEvEmailSenders();
+  }
+}
+
+async function _loadEvEmailSenders() {
+  const list = document.getElementById('eventsInboxList');
+  if (!list) return;
+  list.innerHTML = '<div class="skel-row"></div><div class="skel-row"></div>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/inbox-email-senders-list?module=events');
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      list.innerHTML = '<div class="empty-state"><div style="color:#b91c1c;font-size:13px">Fout: ' + esc(d?.error || ('HTTP ' + r.status)) + '</div></div>';
+      return;
+    }
+    const items = Array.isArray(d.items) ? d.items : [];
+    _evState.emailSenders        = items;
+    _evState.emailSendersLoaded  = true;
+    _evUpdateListEmailBadge(d.unread_total || 0);
+    if (items.length === 0) {
+      list.innerHTML = '<div class="empty-state" style="padding:24px;text-align:center">'
+        + '<div class="empty-icon"><i class="ti ti-mail-off"></i></div>'
+        + '<div style="font-size:14px;font-weight:600;margin-top:6px">Nog geen e-mails op events@</div>'
+        + '<div style="font-size:12.5px;color:var(--text-dim);margin-top:4px">' + esc(d.warning || 'Nieuwe inbound mails verschijnen hier.') + '</div>'
+        + '</div>';
+      return;
+    }
+    list.innerHTML = items.map((it) => {
+      const nameLabel  = it.name || it.email || '(onbekend)';
+      const initial    = (String(nameLabel).match(/[A-Za-z0-9]/) || ['?'])[0].toUpperCase();
+      const preview    = (it.last_subject || '').slice(0, 80);
+      const timeShort  = it.last_date ? esc(fmtDate(it.last_date)) : '';
+      const unread     = Number(it.unread_count) || 0;
+      const unreadHtml = unread > 0 ? `<span class="evx-conv-unread">${esc(String(unread))}</span>` : '';
+      const safeEmail  = esc(it.email || '');
+      const attendeeAttr = it.attendee_id ? ` data-attendee-id="${esc(it.attendee_id)}"` : '';
+      const attendeeAttrName = it.attendee_name ? ` data-attendee-name="${esc(it.attendee_name)}"` : '';
+      const attIcon = it.attendee_id
+        ? `<i class="ti ti-ticket" title="Gekoppeld aan aanmelding" style="color:#0a2f63;font-size:13px;margin-right:4px;flex-shrink:0"></i>`
+        : '';
+      return `
+        <div class="evx-conv-row" data-ev-email-row="1" data-email="${safeEmail}"${attendeeAttr}${attendeeAttrName} data-name="${esc(nameLabel)}">
+          <div class="evx-conv-avatar">${esc(initial)}</div>
+          <div class="evx-conv-body">
+            <div class="evx-conv-toprow">
+              <div class="evx-conv-name">${attIcon}${esc(nameLabel)}</div>
+              <div class="evx-conv-time">${timeShort}</div>
+            </div>
+            <div class="evx-conv-preview">${esc(preview || it.email || '—')}</div>
+            ${unreadHtml ? `<div class="evx-conv-meta">${unreadHtml}</div>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+    list.querySelectorAll('.evx-conv-row[data-ev-email-row="1"]').forEach((row) => {
+      row.addEventListener('click', () => _openEvEmailSender({
+        email:         row.dataset.email || '',
+        attendee_id:   row.dataset.attendeeId || null,
+        attendee_name: row.dataset.attendeeName || '',
+        name:          row.dataset.name || '',
+      }));
+    });
+  } catch (e) {
+    list.innerHTML = '<div class="empty-state"><div style="color:#b91c1c;font-size:13px">Fout: ' + esc(e?.message || e) + '</div></div>';
+  }
+}
+
+// Lichte achtergrond-fetch voor het badge-getal; gebruikt hetzelfde endpoint
+// maar negeert de items-lijst. Niet aan de 60s-timer gehangen — eenmalige
+// fetch ná initial load + bij refresh-klik.
+async function _loadEvEmailSendersBadgeOnly() {
+  try {
+    const r = await window.AgentShared.apiFetch('/api/inbox-email-senders-list?module=events');
+    if (!r.ok) return;
+    const d = await r.json().catch(() => ({}));
+    _evUpdateListEmailBadge(d.unread_total || 0);
+  } catch (_e) { /* stille no-op */ }
+}
+
+async function _openEvEmailSender(sender) {
+  if (!sender || !sender.email) return;
+  // Pseudo-conv voor mail-only afzender. Geen WhatsApp-conv-id; we openen alleen
+  // de thread-pane en vullen _evState.conv zo dat _loadEvEmailThread werkt.
+  _evState.convId            = null;
+  _evState.conv              = {
+    attendee_id:  sender.attendee_id || null,
+    customer_id:  null,
+    email:        sender.email,
+    display_name: sender.attendee_name || sender.name || sender.email,
+  };
+  _evState.canSendText        = false;
+  _evState.suggestion         = null;
+  _evState.editingSuggestionId = null;
+  _evState.emailLoaded        = false;
+  _evState.emailItems         = [];
+  _evState.emailWarning       = null;
+  _evState.emailCustomerEmail = sender.email;
+  _evState.mode               = 'email';
+
+  _evShowThreadView();
+  document.querySelectorAll('#eventsInboxList .evx-conv-row.active').forEach((el) => el.classList.remove('active'));
+  const safeEmail = String(sender.email).replace(/"/g, '');
+  const newRow = document.querySelector('#eventsInboxList .evx-conv-row[data-email="' + safeEmail + '"]');
+  if (newRow) newRow.classList.add('active');
+
+  const nameEl  = document.getElementById('evThreadName');
+  const phoneEl = document.getElementById('evThreadPhone');
+  if (nameEl)  nameEl.textContent  = _evState.conv.display_name || sender.email;
+  if (phoneEl) phoneEl.textContent = sender.email;
+
+  // WhatsApp-only UI verbergen — mode-bar slaat nergens op voor een mail-only
+  // afzender; suggestiepaneel + footer + WA-thread + strips ook.
+  for (const id of ['evThreadModeBar', 'evThreadMessages', 'evSimoneSuggestionPanel',
+                    'evThreadFooter', 'evCustomerStrip', 'evAttendeeStrip',
+                    'evThreadWindowBadge']) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  }
+  const emailThread = document.getElementById('evEmailThread');
+  if (emailThread) {
+    emailThread.style.display = 'block';
+    emailThread.innerHTML = '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">E-mails laden…</div>';
+  }
+  // Reply-knop gated op events.inbox.reply_link (zoals in de bestaande
+  // per-conv mode-toggle).
+  const reply = document.getElementById('evEmailReplyBtn');
+  const canReplyLink = !!(window.RBAC && window.RBAC.canSync && window.RBAC.canSync('events.inbox.reply_link'));
+  if (reply) reply.style.display = canReplyLink ? '' : 'none';
+
+  _loadEvEmailThread();
+}
+
 function _evResetMode() {
   _evState.mode               = 'wa';
   _evState.emailLoaded        = false;
@@ -3900,6 +4096,13 @@ function _evResetMode() {
   if (sugg)        sugg.style.display        = '';
   if (footer)      footer.style.display      = '';
   if (reply)       reply.style.display       = 'none';
+  // Bij open vanuit een e-mail-afzenderview (#evListSourceBar='email') zijn de
+  // WhatsApp-only elementen verborgen. Bij heropen van een WA-conv zetten we
+  // ze actief terug aan zodat de gesprek-flow weer compleet is.
+  const modeBar     = document.getElementById('evThreadModeBar');
+  const windowBadge = document.getElementById('evThreadWindowBadge');
+  if (modeBar)     modeBar.style.display     = 'flex';
+  if (windowBadge) windowBadge.style.display = '';
 }
 
 function _evSwitchMode(next) {
@@ -3948,15 +4151,17 @@ async function _loadEvEmailThread() {
     return;
   }
   wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">E-mails laden…</div>';
-  // Attendee-first; fallback op customer_id. PR #487 ondersteunt beide
-  // query-params op de events-tak.
+  // Attendee-first; fallback op customer_id; daarna op email (PR #504 ondersteunt
+  // het email-pad op de events-tak voor mail-only afzenders).
   const attendeeId = _evState.conv?.attendee_id || null;
   const customerId = _evState.conv?.customer_id || null;
+  const emailKey   = _evState.conv?.email || null;
   let qs = null;
-  if (attendeeId) qs = 'attendee_id=' + encodeURIComponent(attendeeId);
-  else if (customerId) qs = 'customer_id=' + encodeURIComponent(customerId);
+  if (attendeeId)        qs = 'attendee_id=' + encodeURIComponent(attendeeId);
+  else if (customerId)   qs = 'customer_id=' + encodeURIComponent(customerId);
+  else if (emailKey)     qs = 'email='       + encodeURIComponent(emailKey);
   if (!qs) {
-    wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">Geen aanmelding/klant gekoppeld.</div>';
+    wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">Geen aanmelding/klant/e-mailadres beschikbaar.</div>';
     return;
   }
   try {
