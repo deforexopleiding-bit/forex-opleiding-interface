@@ -45,8 +45,10 @@
     // lucide "user-plus" — onboarding-hub-entry (sidebar gebruikt de sleutel
     // 'onboarding-admin'; zonder eigen icon-mapping bleef de regel iconloos).
     'onboarding-admin': '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/>',
-    // lucide "graduation-cap" — onderscheid van events (calendar) en agents (avatar).
-    'mentor-dashboard': '<path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>',
+    // lucide "wallet" — Financiën-pagina (mentor); voorheen graduation-cap toen
+    // deze entry nog 'Mentor-dashboard' heette. Studenten-icoon zit nu op de
+    // aparte 'mentor-students'-entry.
+    'mentor-dashboard': '<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>',
     // lucide "users" — Studenten-pagina voor de mentor-rol (Fase A2). Eigen sidebar-entry
     // naast mentor-dashboard; mentor-dashboard blijft in deze fase intact.
     'mentor-students': '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
@@ -104,7 +106,7 @@
           // Mentor-dashboard PR-1 — self-service voor mentor-rol; gated via
           // mentor.module.access (zie MODULE_FEATURE_MAP). Voor andere rollen
           // verbergt applyModuleGating de link.
-          navLink('mentor-dashboard', '/modules/mentor-dashboard.html', 'Mentor-dashboard') +
+          navLink('mentor-dashboard', '/modules/mentor-dashboard.html', 'Financiën') +
           // Studenten-pagina (Fase A2) — aparte hub voor de mentor met Mijn studenten,
           // Toekomstige studenten, en 1-op-1 sessies. Page-gate: mentor.module.access.
           navLink('mentor-students', '/modules/mentor-students.html', 'Studenten') +

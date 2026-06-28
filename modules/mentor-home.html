@@ -255,7 +255,7 @@
       <div class="mh-card">
         <div class="mh-card-head">
           <div class="mh-card-title"><i class="ti ti-users"></i> Mijn studenten</div>
-          <a href="/modules/mentor-dashboard.html#students" style="font-size:11.5px;color:var(--brand-primary,#093d54);text-decoration:none">Alles bekijken &rarr;</a>
+          <a href="/modules/mentor-students.html" style="font-size:11.5px;color:var(--brand-primary,#093d54);text-decoration:none">Alles bekijken &rarr;</a>
         </div>
         <div id="mhStudents" class="mh-student-list"><span class="mh-skel"></span><span class="mh-skel" style="width:75%"></span></div>
       </div>
@@ -567,7 +567,9 @@
       else if (s.no_shows > 0)               { badgeCls = 'waiting'; badgeTxt = 'No-show ' + s.no_shows; }
       else if (status && /actief|live|onboarded/i.test(status)) { badgeCls = 'ok'; }
       const sid = s.bubble_student_id || '';
-      const url = '/modules/mentor-dashboard.html#student=' + encodeURIComponent(sid);
+      // Studenten-tab is verhuisd naar /modules/mentor-students.html (Fase A2);
+      // de #student=-anchor bestaat daar niet, dus we openen op Mijn studenten.
+      const url = '/modules/mentor-students.html';
       const emailLc = String(s.email || '').trim().toLowerCase();
       return '<a href="' + esc(url) + '" class="mh-student-card" data-student-id="' + esc(sid) + '" data-student-email="' + esc(emailLc) + '" data-student-name="' + esc(s.name || s.email || '') + '" style="text-decoration:none">' +
                '<div>' +
