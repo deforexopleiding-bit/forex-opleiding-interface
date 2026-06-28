@@ -398,6 +398,13 @@
   }
 
   // ── 1-op-1 sessies ────────────────────────────────────────────────────
+  function _sessionLabel(s) {
+    const n = (s && Number.isFinite(Number(s.session_number))) ? Number(s.session_number) : null;
+    if (n == null) return '—';
+    const total = (s && Number.isFinite(Number(s.session_total))) ? Number(s.session_total) : null;
+    return total ? (n + '/' + total) : String(n);
+  }
+
   function _renderPlanned(planned) {
     const wrap = document.getElementById('plannedWrap');
     if (!wrap) return;
@@ -406,10 +413,15 @@
       wrap.innerHTML = `<div class="empty-state"><i class="ti ti-calendar-off"></i>Geen geplande 1-op-1 sessies.</div>`;
       return;
     }
-    const rows = list.map((s) => `<tr><td>${esc(fmtDateTimeNL(s.starts_at))}</td></tr>`).join('');
+    const rows = list.map((s) => `
+      <tr>
+        <td>${esc(s.student_name || '—')}</td>
+        <td>${esc(_sessionLabel(s))}</td>
+        <td>${esc(fmtDateTimeNL(s.starts_at))}</td>
+      </tr>`).join('');
     wrap.innerHTML = `
       <table class="data-table">
-        <thead><tr><th>Datum + tijd</th></tr></thead>
+        <thead><tr><th>Student</th><th>Sessie</th><th>Datum + tijd</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
   }
@@ -419,17 +431,19 @@
     if (!wrap) return;
     const list = Array.isArray(completed) ? completed : [];
     if (list.length === 0) {
-      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-calendar-off"></i>Geen afgeronde 1-op-1 sessies (laatste ~180 dagen).</div>`;
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-calendar-off"></i>Geen afgeronde 1-op-1 sessies.</div>`;
       return;
     }
     const rows = list.map((s) => `
       <tr>
+        <td>${esc(s.student_name || '—')}</td>
+        <td>${esc(_sessionLabel(s))}</td>
         <td>${esc(fmtDateTimeNL(s.starts_at))}</td>
         <td class="num">${fmtEUR(Number(s.amount) || 0)}</td>
       </tr>`).join('');
     wrap.innerHTML = `
       <table class="data-table">
-        <thead><tr><th>Datum + tijd</th><th class="num">Verdiensten</th></tr></thead>
+        <thead><tr><th>Student</th><th>Sessie</th><th>Datum + tijd</th><th class="num">Verdiensten</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
   }
