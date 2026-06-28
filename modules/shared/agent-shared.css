@@ -141,9 +141,12 @@ body::before {
 }
 
 /* ── Sidebar (Pearl) ── */
-.sidebar { position:fixed; top:0; left:0; bottom:0; width:var(--sidebar-w); background:var(--sidebar-bg); border-right:1px solid var(--sidebar-border); display:flex; flex-direction:column; z-index:200; overflow-y:auto; }
-.sidebar-logo { display:flex; align-items:center; justify-content:center; padding:16px; border-bottom:1px solid var(--sidebar-border); flex-shrink:0; }
-.sidebar-logo img { max-height:40px; width:auto; max-width:160px; object-fit:contain; display:block; }
+/* Transparante backdrop zodat body (--bg) + body::before-glow ononderbroken
+   doorlopen onder de sidebar én de content. Alleen de hairline border-right
+   markeert de kolom-grens. Mobile (overlay) zet 'm hieronder weer opaak. */
+.sidebar { position:fixed; top:0; left:0; bottom:0; width:var(--sidebar-w); background:transparent; border-right:1px solid var(--sidebar-border); display:flex; flex-direction:column; z-index:200; overflow-y:auto; }
+.sidebar-logo { display:flex; align-items:center; justify-content:flex-start; padding:16px; border-bottom:1px solid var(--sidebar-border); flex-shrink:0; }
+.sidebar-logo img { max-height:52px; width:auto; max-width:180px; object-fit:contain; display:block; }
 .sidebar-logo .logo-dark  { display:block; }
 .sidebar-logo .logo-light { display:none; }
 [data-theme="dark"] .sidebar-logo .logo-dark  { display:none; }
@@ -240,7 +243,10 @@ body::before {
 
 /* ── Responsive ── */
 @media(max-width:680px) {
-  .sidebar { transform:translateX(-100%); }
+  /* Mobiele sidebar wordt een overlay BOVEN de content. Daar moet de
+     achtergrond opaak zijn — anders schemert de pagina-content erdoorheen
+     als de sidebar weer in beeld wordt gezet. */
+  .sidebar { transform:translateX(-100%); background:var(--bg); }
   .main { margin-left:0; }
 }
 
