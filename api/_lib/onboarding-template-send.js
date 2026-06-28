@@ -35,6 +35,7 @@ import { sendTemplate, MetaNotConfiguredError } from './meta-whatsapp.js';
 import { buildMetaVariablesFromMapping } from './template-variables.js';
 import { upsertOutboundConversation } from './conv-upsert.js';
 import { getModuleContextByPhoneNumberId } from './module-context.js';
+import { ensureInvoicePaymentLink } from './invoice-payment-link.js';
 
 const MAX_VAR_VALUE = 1000;
 
@@ -161,7 +162,40 @@ export async function sendOnboardingTemplateGeneric({
     if (extraOnboardingCtx && typeof extraOnboardingCtx === 'object') {
       Object.assign(onboardingCtx, extraOnboardingCtx);
     }
-    const ctx = { customer, onboarding: onboardingCtx, moduleContext };
+
+    // Invoice-context: alleen laden als het template een factuur.*-variabele
+    // (of een klant-invoice-aggregatie) gebruikt — anders geen extra query/TL-call.
+    let invoice = null;
+    let openInvoices = [];
+    const needsInvoice = bodyMapping && typeof bodyMapping === 'object' &&
+      Object.values(bodyMapping).some((v) => typeof v === 'string' &&
+        (v.startsWith('factuur.') || v === 'klant.factuur_lijst' || v === 'klant.totaal_open' || v === 'klant.aantal_open'));
+    if (needsInvoice) {
+      try {
+        const { data: invs, error: invErr } = await supabaseAdmin
+          .from('invoices')
+          .select('id, tl_invoice_id, invoice_number, status, amount_total, amount_paid, credited_amount, due_date, issue_date, payment_url')
+          .eq('customer_id', ob.customer_id)
+          .in('status', ['open', 'partially_paid', 'overdue'])
+          .order('due_date', { ascending: true });
+        if (!invErr) {
+          openInvoices = invs || [];
+          invoice = openInvoices[0] || null;
+          if (invoice?.id) {
+            try {
+              const linkRes = await ensureInvoicePaymentLink(invoice.id);
+              if (linkRes?.payment_url) invoice.payment_url = linkRes.payment_url;
+            } catch (e) {
+              console.error('[onboarding-template-send] payment-link:', e?.message || e);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[onboarding-template-send] invoice-context:', e?.message || e);
+      }
+    }
+
+    const ctx = { customer, onboarding: onboardingCtx, moduleContext, invoice, openInvoices };
     let resolved = {};
     if (bodyMapping && typeof bodyMapping === 'object' && Object.keys(bodyMapping).length > 0) {
       try {
