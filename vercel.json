@@ -103,6 +103,10 @@
     {
       "path": "/api/cron/future-call-reminder",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/first-call-payment-reminder",
+      "schedule": "0 * * * *"
     }
   ],
   "headers": [
