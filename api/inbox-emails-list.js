@@ -135,13 +135,19 @@ export default async function handler(req, res) {
   // Validatie.
   const customerId = typeof req.query?.customer_id === 'string' ? req.query.customer_id.trim() : '';
   const attendeeId = typeof req.query?.attendee_id === 'string' ? req.query.attendee_id.trim() : '';
+  // Nieuw: `email`-param voor de onboarding-tak. Maakt thread-ophaal mogelijk
+  // voor mailers ZONDER klant-koppeling (mail-only studenten / leads). Wordt
+  // genormaliseerd zodat alle downstream-vergelijkingen op lowercase werken.
+  const emailParam = typeof req.query?.email === 'string' ? req.query.email.trim().toLowerCase() : '';
   const moduleKey  = typeof req.query?.module === 'string' ? req.query.module.trim().toLowerCase() : '';
   const acct = MODULE_ACCOUNTS[moduleKey];
   if (!acct) return res.status(400).json({ error: "module moet 'onboarding' of 'events' zijn" });
   if (moduleKey === 'onboarding') {
-    // Onboarding-pad: customer_id verplicht (gedrag ongewijzigd); attendee_id wordt
-    // genegeerd. Onboarding-gesprekken zijn altijd aan een klant gekoppeld.
-    if (!UUID_RE.test(customerId)) return res.status(400).json({ error: 'customer_id (uuid) vereist' });
+    // Onboarding-pad: customer_id OF email is voldoende. Beide leeg → 400.
+    // attendee_id wordt genegeerd (events-only).
+    if (!UUID_RE.test(customerId) && !emailParam) {
+      return res.status(400).json({ error: 'customer_id of email vereist voor onboarding' });
+    }
   } else {
     // Events-pad: customer_id OF attendee_id volstaat — events-conversaties
     // hangen aan een attendee, niet altijd aan een (gekoppelde) klant.
@@ -160,14 +166,31 @@ export default async function handler(req, res) {
   // overslaat). Mentor met onboarding.view_own mag alleen mail van klanten
   // binnen z'n eigen toegewezen onboardings ophalen; admins/super_admin
   // (seesAll) blijven ongemoeid. Fail-closed: lege/onmatched lijst → 403.
+  //
+  // Email-only pad (geen customer_id, alleen email): voor mentor-scope eisen
+  // we dat het opgegeven adres exact één klant matched ÉN dat die klant in
+  // mentor.getMentorCustomerIds zit. Onbekend adres (geen customer_id match)
+  // → 403 voor mentor; unscoped → toegestaan.
   if (moduleKey === 'onboarding') {
     const scope = await getOnboardingScope(req);
     if (!scope.seesAll) {
       if (!scope.seesOwn) {
         return res.status(403).json({ error: 'Geen onboarding-scope' });
       }
-      const allowed = await getMentorCustomerIds(scope.userId);
-      if (!allowed.map(String).includes(String(customerId))) {
+      const allowed = (await getMentorCustomerIds(scope.userId)).map(String);
+      let effectiveCustomerId = UUID_RE.test(customerId) ? String(customerId) : null;
+      if (!effectiveCustomerId && emailParam) {
+        const { data: cust, error: custLookupErr } = await supabaseAdmin
+          .from('customers')
+          .select('id')
+          .eq('email', emailParam)
+          .maybeSingle();
+        if (custLookupErr) {
+          console.error('[inbox-emails-list] scope email-lookup:', custLookupErr.message);
+        }
+        if (cust?.id) effectiveCustomerId = String(cust.id);
+      }
+      if (!effectiveCustomerId || !allowed.includes(effectiveCustomerId)) {
         return res.status(403).json({ error: 'Klant buiten je scope' });
       }
     }
@@ -182,14 +205,21 @@ export default async function handler(req, res) {
   // nodig — semantisch is het 'het e-mailadres van de tegenpartij').
   let customerEmail = '';
   if (moduleKey === 'onboarding') {
-    const { data: customer, error: custErr } = await supabaseAdmin
-      .from('customers')
-      .select('id, email')
-      .eq('id', customerId)
-      .maybeSingle();
-    if (custErr) return res.status(500).json({ error: 'customer lookup: ' + custErr.message });
-    if (!customer) return res.status(404).json({ error: 'Klant niet gevonden' });
-    customerEmail = customer.email ? String(customer.email).trim().toLowerCase() : '';
+    if (UUID_RE.test(customerId)) {
+      const { data: customer, error: custErr } = await supabaseAdmin
+        .from('customers')
+        .select('id, email')
+        .eq('id', customerId)
+        .maybeSingle();
+      if (custErr) return res.status(500).json({ error: 'customer lookup: ' + custErr.message });
+      if (!customer) return res.status(404).json({ error: 'Klant niet gevonden' });
+      customerEmail = customer.email ? String(customer.email).trim().toLowerCase() : '';
+    } else if (emailParam) {
+      // Email-only pad (mail-only student/lead): gebruik het opgegeven adres
+      // rechtstreeks als thread-sleutel. Scope-check is hierboven al voldaan
+      // voor mentors; admins/super_admin krijgen elk adres.
+      customerEmail = emailParam;
+    }
   } else {
     // events — attendee-first.
     if (UUID_RE.test(attendeeId)) {
