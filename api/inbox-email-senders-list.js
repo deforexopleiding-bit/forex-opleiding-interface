@@ -13,14 +13,11 @@
 // RBAC (fail-closed):
 //   onboarding.inbox.view
 //
-// Scope (fail-closed, mirror van inbox-emails-list.js onboarding-tak):
-//   - seesAll (onboarding.admin / super_admin)        → alle afzenders.
-//   - seesOwn (mentor view_own)                       → alleen afzenders die
-//                                                       matchen op een klant
-//                                                       in getMentorCustomerIds.
-//                                                       Onbekende of niet-eigen
-//                                                       afzenders → weggelaten.
-//   - geen van beide                                  → 403.
+// Scope (gedeelde inbox):
+//   Iedereen met onboarding.inbox.view ziet ALLE afzenders. Geen
+//   customer-scope op de e-mail-kant — onboarding@ is een gedeelde mailbox
+//   waar mentors en admins samen op werken. De WhatsApp-tak houdt z'n
+//   eigen scope; alleen e-mail is openbaar binnen de RBAC-set.
 //
 // IMAP (hergebruikt patroon van api/emails.js fetchMailbox):
 //   - Host/port via process.env.IMAP_HOST / IMAP_PORT (default 993).
@@ -33,12 +30,11 @@
 //
 // Fail-soft: IMAP-fout / mailbox-fout → 200 met { items:[], total:0,
 // unread_total:0, module:'onboarding', warning }.
-// Strikt fail-closed op auth + RBAC + scope (geen IMAP-call zonder rechten).
+// Strikt fail-closed op auth + RBAC (geen IMAP-call zonder rechten).
 
 import { ImapFlow } from 'imapflow';
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { getOnboardingScope, getMentorCustomerIds } from './_lib/onboardingScope.js';
 import { customerDisplayName } from './_lib/customer-name.js';
 
 const ONBOARDING_USER     = 'onboarding@deforexopleiding.nl';
@@ -71,22 +67,11 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "module moet 'onboarding' zijn" });
   }
 
-  // RBAC fail-closed.
+  // RBAC fail-closed. Geen extra customer-scope: onboarding@ is een
+  // gedeelde mailbox, iedereen met onboarding.inbox.view ziet alle
+  // afzenders.
   if (!(await requirePermission(req, ONBOARDING_PERM_KEY))) {
     return res.status(403).json({ error: `Geen rechten (${ONBOARDING_PERM_KEY})` });
-  }
-
-  // Scope-resolutie. Mentors (view_own zonder admin) krijgen verderop een
-  // hard customer-id-filter; admins/super_admin (seesAll) zien alle
-  // afzenders. Geen van beide → 403.
-  const scope = await getOnboardingScope(req);
-  if (!scope.seesAll && !scope.seesOwn) {
-    return res.status(403).json({ error: 'Geen onboarding-scope (onboarding.admin of onboarding.view_own vereist)' });
-  }
-  let mentorAllowedIds = null;
-  if (!scope.seesAll) {
-    const allowed = await getMentorCustomerIds(scope.userId);
-    mentorAllowedIds = new Set((allowed || []).map(String));
   }
 
   // IMAP-config.
@@ -200,20 +185,13 @@ export default async function handler(req, res) {
     }
   }
 
-  // Items bouwen + scope-filter toepassen. Voor mentor-scope: een afzender
-  // komt UITSLUITEND in de lijst als z'n e-mail matcht op een klant in
-  // mentorAllowedIds (fail-closed: onbekende afzenders weglaten). Unscoped
-  // (seesAll): alle afzenders, met klant-velden indien gematcht.
+  // Items bouwen. Gedeelde inbox → geen extra filter; elke afzender komt
+  // erin, met klant-velden indien gematcht (puur cosmetisch voor de naam).
   const items = [];
   let unread_total = 0;
   for (const entry of senders.values()) {
     const cust   = emailToCustomer.get(entry.email) || null;
     const custId = cust?.id || null;
-
-    if (!scope.seesAll) {
-      if (!custId) continue;
-      if (!mentorAllowedIds.has(String(custId))) continue;
-    }
 
     const custName = cust ? customerDisplayName(cust, '') : '';
     const displayName =
