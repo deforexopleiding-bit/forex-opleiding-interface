@@ -9,6 +9,8 @@ const ACCOUNTS = [
   { mailbox: 'info',          user: 'info@deforexopleiding.nl',          passEnv: 'IMAP_PASS_INFO' },
   { mailbox: 'partners',      user: 'partners@deforexopleiding.nl',      passEnv: 'IMAP_PASS_PARTNERS' },
   { mailbox: 'administratie', user: 'administratie@deforexopleiding.nl', passEnv: 'IMAP_PASS_ADMINISTRATIE' },
+  { mailbox: 'onboarding',    user: 'onboarding@deforexopleiding.nl',    passEnv: 'IMAP_PASS_ONBOARDING' },
+  { mailbox: 'events',        user: 'events@deforexopleiding.nl',        passEnv: 'IMAP_PASS_EVENTS' },
 ];
 
 // Maximaal te verwerken mails bij eerste sync (lastUid=0) om timeout te voorkomen
