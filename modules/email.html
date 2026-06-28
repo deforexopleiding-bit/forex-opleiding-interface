@@ -5843,6 +5843,121 @@
     render();
   }
 
+  // ── Deep-link compose modal (Aanpak A) ──────────────────────────────────
+  // Standalone "Nieuwe e-mail"-modal, NIET de inline reply-card. Wordt
+  // getriggerd door ?reply_to=<email>&mailbox=<from>(&subject=…) — bv. de
+  // Reageren-knop in de onboarding-inbox. Geen uid/email_id; eigen state.
+  // Hergebruikt de bestaande reply-meta-grid CSS-classes voor consistentie.
+  let _composeBusy = false;
+  function openComposeModal({ from, to, subject }) {
+    if (document.getElementById('dlComposeOverlay')) return; // idempotent
+    const fromVal = MAILBOXES.includes(from) ? from : MAILBOXES[0];
+    const overlay = document.createElement('div');
+    overlay.id = 'dlComposeOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px';
+    const opts = MAILBOXES.map((m) => '<option value="' + escapeHtml(m) + '"' + (m === fromVal ? ' selected' : '') + '>' + escapeHtml(m) + '</option>').join('');
+    overlay.innerHTML =
+      '<div role="dialog" aria-modal="true" aria-labelledby="dlComposeTitle" '
+        + 'style="background:var(--bg-elev,#fff);color:var(--text,#0f172a);border:1px solid var(--border,#e5e7eb);border-radius:14px;width:100%;max-width:640px;padding:20px 22px;box-shadow:0 12px 40px rgba(0,0,0,.25)">'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'
+          + '<div id="dlComposeTitle" style="font:700 16px Inter,system-ui,sans-serif">Nieuwe e-mail</div>'
+          + '<button type="button" id="dlComposeClose" aria-label="Sluiten" style="background:transparent;border:0;font-size:22px;line-height:1;color:var(--text-dim,#475569);cursor:pointer">×</button>'
+        + '</div>'
+        + '<div class="reply-meta-grid">'
+          + '<div class="reply-meta-row">'
+            + '<span class="reply-meta-label">Van:</span>'
+            + '<select class="reply-meta-select" id="dlComposeFrom">' + opts + '</select>'
+          + '</div>'
+          + '<div class="reply-meta-row">'
+            + '<span class="reply-meta-label">Aan:</span>'
+            + '<input class="reply-meta-input" type="text" id="dlComposeTo" value="' + escapeHtml(to || '') + '" placeholder="ontvanger@domein.nl">'
+          + '</div>'
+          + '<div class="reply-meta-row">'
+            + '<span class="reply-meta-label">Onderwerp:</span>'
+            + '<input class="reply-meta-input" type="text" id="dlComposeSubj" style="flex:1" value="' + escapeHtml(subject || '') + '" placeholder="Onderwerp">'
+          + '</div>'
+        + '</div>'
+        + '<textarea id="dlComposeBody" rows="9" placeholder="Typ je bericht…" '
+          + 'style="width:100%;margin-top:10px;padding:10px 12px;border:1px solid var(--border,#e5e7eb);border-radius:8px;background:var(--bg-elev,#fff);color:var(--text,#0f172a);font:400 13.5px Inter,system-ui,sans-serif;resize:vertical;min-height:140px;font-family:inherit"></textarea>'
+        + '<div id="dlComposeError" style="display:none;margin-top:8px;padding:7px 10px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.35);border-radius:7px;font-size:12.5px;color:#b91c1c"></div>'
+        + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">'
+          + '<button type="button" id="dlComposeCancel" style="padding:8px 14px;border:1px solid var(--border,#e5e7eb);border-radius:8px;background:transparent;color:var(--text,#0f172a);cursor:pointer;font:600 13px Inter,system-ui,sans-serif">Annuleren</button>'
+          + '<button type="button" id="dlComposeSend" style="padding:8px 18px;border:0;border-radius:8px;background:#1a5773;color:#fff;cursor:pointer;font:600 13px Inter,system-ui,sans-serif">Verstuur</button>'
+        + '</div>'
+      + '</div>';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeComposeModal(); });
+    document.body.appendChild(overlay);
+    document.getElementById('dlComposeClose').addEventListener('click', closeComposeModal);
+    document.getElementById('dlComposeCancel').addEventListener('click', closeComposeModal);
+    document.getElementById('dlComposeSend').addEventListener('click', sendComposeModal);
+    document.addEventListener('keydown', _dlComposeEsc);
+    // Focus naar body als To al ingevuld is, anders naar To.
+    setTimeout(() => {
+      const toEl = document.getElementById('dlComposeTo');
+      const bodyEl = document.getElementById('dlComposeBody');
+      if (toEl && toEl.value) { if (bodyEl) bodyEl.focus(); }
+      else if (toEl) toEl.focus();
+    }, 30);
+    // Strip ?reply_to/&mailbox uit URL zodat refresh de modal niet heropent.
+    try {
+      const u = new URL(location.href);
+      let changed = false;
+      ['reply_to', 'mailbox', 'subject'].forEach((k) => {
+        if (u.searchParams.has(k)) { u.searchParams.delete(k); changed = true; }
+      });
+      if (changed) history.replaceState({}, '', u.pathname + (u.searchParams.toString() ? '?' + u.searchParams.toString() : '') + u.hash);
+    } catch (_) { /* fail-soft */ }
+  }
+  function closeComposeModal() {
+    const ov = document.getElementById('dlComposeOverlay');
+    if (ov) ov.remove();
+    document.removeEventListener('keydown', _dlComposeEsc);
+  }
+  function _dlComposeEsc(e) {
+    if (e.key === 'Escape') closeComposeModal();
+  }
+  async function sendComposeModal() {
+    if (_composeBusy) return;
+    const fromMailbox = document.getElementById('dlComposeFrom').value;
+    const toAddr      = (document.getElementById('dlComposeTo').value || '').trim();
+    const subject     = (document.getElementById('dlComposeSubj').value || '').trim();
+    const body        = (document.getElementById('dlComposeBody').value || '').trim();
+    const errEl = document.getElementById('dlComposeError');
+    const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = ''; } };
+    if (errEl) errEl.style.display = 'none';
+    if (!toAddr)    return showErr('Vul een ontvanger in (Aan).');
+    if (!body)      return showErr('Bericht kan niet leeg zijn.');
+    const sendBtn = document.getElementById('dlComposeSend');
+    _composeBusy = true;
+    if (sendBtn) { sendBtn.disabled = true; sendBtn.style.opacity = '0.6'; sendBtn.textContent = 'Versturen…'; }
+    try {
+      const payload = {
+        from_mailbox: fromMailbox,
+        to:           toAddr,
+        subject:      subject || '(geen onderwerp)',
+        text:         appendSignature(body),
+        html:         buildMailHtml(body),
+      };
+      const res = await window.AgentShared.apiFetch('/api/send-email', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showErr(data?.error || ('HTTP ' + res.status));
+        return;
+      }
+      closeComposeModal();
+      showToast('Verzonden');
+    } catch (e) {
+      showErr('Verstuurfout: ' + (e?.message || e));
+    } finally {
+      _composeBusy = false;
+      if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = ''; sendBtn.textContent = 'Verstuur'; }
+    }
+  }
+
   async function init() {
     await window._authSharedReady;
     const profile = await window.AuthShared.requireAuth();
@@ -5880,6 +5995,19 @@
     updateUndoButton();
     loadEmails();
     applyRbacGating(); // RBAC fail-open gating (verbergt knoppen/tabs zonder permission)
+
+    // Deep-link "Nieuwe e-mail" — opent een standalone compose-modal als de
+    // URL params reply_to + mailbox bevat. Gebruikt door bv. de Reageren-knop
+    // in de onboarding-inbox. Bestaande reply-flow blijft ongemoeid.
+    try {
+      const sp = new URLSearchParams(location.search);
+      const dlTo   = sp.get('reply_to');
+      const dlFrom = sp.get('mailbox');
+      const dlSubj = sp.get('subject') || '';
+      if (dlTo && dlFrom) {
+        openComposeModal({ from: dlFrom, to: dlTo, subject: dlSubj });
+      }
+    } catch (_) { /* fail-soft */ }
   }
 
   init();
