@@ -684,6 +684,59 @@
   </div>
 </div>
 
+<!-- Gebruiker bewerken (super_admin only — server-side autoritatief). -->
+<div class="modal-overlay hidden" id="editUserModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:520px">
+    <div class="modal-header">
+      <div class="modal-title">Gebruiker bewerken</div>
+      <button class="modal-close" onclick="closeEditUserModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="euUserId" />
+      <input type="hidden" id="euTeamMemberId" />
+      <input type="hidden" id="euInitialBubbleId" />
+      <div class="form-group">
+        <label class="form-label">Volledige naam</label>
+        <input type="text" id="euFullName" class="form-input" autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">E-mailadres</label>
+        <input type="email" id="euEmail" class="form-input" autocomplete="off" />
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Let op: dit is hun inlog-adres.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Nieuw wachtwoord</label>
+        <div style="display:flex;gap:8px;align-items:stretch">
+          <input type="text" id="euPassword" class="form-input" placeholder="Leeg = ongewijzigd" autocomplete="new-password" />
+          <button type="button" class="btn" onclick="euGeneratePassword()" style="padding:8px 12px">Genereer</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Minimaal 8 tekens. Wordt nergens gelogd.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Telefoonnummer</label>
+        <input type="tel" id="euPhone" class="form-input" autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Account-status</label>
+        <select id="euIsActive" class="form-input">
+          <option value="true">Actief</option>
+          <option value="false">Geblokkeerd</option>
+        </select>
+      </div>
+      <div class="form-group" id="euBubbleRow" style="display:none">
+        <label class="form-label">Mentor &harr; Bubble-koppeling</label>
+        <input type="text" id="euBubbleId" class="form-input" placeholder="bubble_user_id (leeg = ontkoppelen)" autocomplete="off" />
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Alleen voor mentors met een team_members-rij.</div>
+      </div>
+      <div class="form-error hidden" id="euError"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeEditUserModal()">Annuleren</button>
+      <button class="btn btn-primary" onclick="submitEditUser()" id="euSaveBtn">Opslaan</button>
+    </div>
+  </div>
+</div>
+
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
   <script src="/modules/shared/theme-shared.js"></script>
@@ -2067,6 +2120,10 @@ function closeMentorBubblePicker() {
   _mb.activeRowId = null;
 }
 
+// Cache van de laatst-geladen users-lijst; gebruikt door openEditUserModal om
+// de form-velden te pre-vullen zonder een extra GET.
+let _adminUsersCache = [];
+
 async function loadUsers() {
   const wrap = document.getElementById('usersTableWrap');
   wrap.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px">Laden…</div>';
@@ -2076,6 +2133,7 @@ async function loadUsers() {
     if (data.error) throw new Error(data.error);
 
     const users = data.users || [];
+    _adminUsersCache = users;
     document.getElementById('userCountBadge').textContent = users.length;
 
     // Stats
@@ -2134,10 +2192,12 @@ async function loadUsers() {
           ${u.id === currentProfile?.id
             ? `<span style="color:var(--text-faint);font-size:12px">Jij</span>`
             : isActive
-              ? `<button class="action-btn" onclick="resendInvite('${esc(u.email)}')">&#8634; Opnieuw uitnodigen</button>
+              ? `${currentProfile?.role === 'super_admin' ? `<button class="action-btn" onclick="openEditUserModal('${u.id}')" title="Bewerk e-mail/wachtwoord/telefoon/naam/status"><i class="ti ti-edit"></i> Bewerken</button>` : ''}
+                 <button class="action-btn" onclick="resendInvite('${esc(u.email)}')">&#8634; Opnieuw uitnodigen</button>
                  ${canImpersonateClient(u) ? `<button class="action-btn impersonate-btn" onclick="impersonateUser('${u.id}', '${esc(u.full_name || u.email)}')" title="Login als deze gebruiker"><i class="ti ti-user-check"></i> Login als</button>` : ''}
                  <button class="action-btn" onclick="deactivateUser('${u.id}', '${esc(u.email)}')">Deactiveer</button>`
-              : `<button class="action-btn" onclick="reactivateUser('${u.id}')">Heractiveer</button>`}
+              : `${currentProfile?.role === 'super_admin' ? `<button class="action-btn" onclick="openEditUserModal('${u.id}')" title="Bewerk e-mail/wachtwoord/telefoon/naam/status"><i class="ti ti-edit"></i> Bewerken</button>` : ''}
+                 <button class="action-btn" onclick="reactivateUser('${u.id}')">Heractiveer</button>`}
         </td>
       </tr>`;
     }).join('');
@@ -2392,6 +2452,118 @@ function openInviteModal() {
 
 function closeInviteModal() {
   document.getElementById('inviteModal').classList.add('hidden');
+}
+
+// ── Gebruiker bewerken (super_admin) ────────────────────────────────────
+// UI-laag is gemakszuchtig: de echte gate zit op api/admin-users.js PATCH
+// (super_admin-only voor email/password/phone). Niet-super_admin krijgt geen
+// knop te zien (loadUsers verbergt 'm); een bypass via DevTools wordt
+// server-side alsnog geweigerd met 403.
+
+function _euShowError(msg) {
+  const el = document.getElementById('euError');
+  if (!el) return;
+  if (msg) { el.textContent = msg; el.classList.remove('hidden'); }
+  else     { el.textContent = ''; el.classList.add('hidden'); }
+}
+
+function openEditUserModal(userId) {
+  const u = (_adminUsersCache || []).find((x) => x && x.id === userId);
+  if (!u) { alert('Gebruiker niet gevonden — herlaad de lijst.'); return; }
+
+  document.getElementById('euUserId').value          = u.id;
+  document.getElementById('euTeamMemberId').value    = u.team_member_id || '';
+  document.getElementById('euInitialBubbleId').value = u.bubble_user_id || '';
+  document.getElementById('euFullName').value        = u.full_name || '';
+  document.getElementById('euEmail').value           = u.email || '';
+  document.getElementById('euPassword').value        = '';
+  document.getElementById('euPhone').value           = u.phone || '';
+  document.getElementById('euIsActive').value        = u.is_active ? 'true' : 'false';
+
+  // Bubble-rij alleen tonen als deze user een team_members-rij heeft.
+  const bubbleRow = document.getElementById('euBubbleRow');
+  if (u.team_member_id) {
+    document.getElementById('euBubbleId').value = u.bubble_user_id || '';
+    bubbleRow.style.display = '';
+  } else {
+    document.getElementById('euBubbleId').value = '';
+    bubbleRow.style.display = 'none';
+  }
+  _euShowError('');
+  document.getElementById('euSaveBtn').disabled = false;
+  document.getElementById('editUserModal').classList.remove('hidden');
+  document.getElementById('euFullName').focus();
+}
+
+function closeEditUserModal() {
+  document.getElementById('editUserModal').classList.add('hidden');
+  document.getElementById('euPassword').value = ''; // niet in DOM laten staan
+}
+
+// Sterk wachtwoord — gebruikt crypto.getRandomValues, 16 tekens uit een
+// gemixte alfabet-set. Voldoet altijd aan de server-minimum (≥8).
+function euGeneratePassword() {
+  const alpha = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%&*';
+  const bytes = new Uint8Array(16);
+  (window.crypto || window.msCrypto).getRandomValues(bytes);
+  let out = '';
+  for (let i = 0; i < bytes.length; i++) out += alpha[bytes[i] % alpha.length];
+  document.getElementById('euPassword').value = out;
+}
+
+async function submitEditUser() {
+  const userId         = document.getElementById('euUserId').value;
+  const teamMemberId   = document.getElementById('euTeamMemberId').value || '';
+  const initialBubble  = document.getElementById('euInitialBubbleId').value || '';
+  const fullName       = document.getElementById('euFullName').value.trim();
+  const email          = document.getElementById('euEmail').value.trim();
+  const password       = document.getElementById('euPassword').value; // GEEN trim
+  const phone          = document.getElementById('euPhone').value.trim();
+  const isActiveStr    = document.getElementById('euIsActive').value;
+  const newBubbleRaw   = document.getElementById('euBubbleId').value.trim();
+
+  if (!userId) { _euShowError('Geen userId.'); return; }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    _euShowError('Ongeldig e-mailadres.'); return;
+  }
+  if (password && password.length < 8) {
+    _euShowError('Wachtwoord moet minimaal 8 tekens hebben.'); return;
+  }
+
+  // Build PATCH-body: alleen velden meesturen die super_admin-only kunnen zijn
+  // (email/password/phone) zodat de server-side gate triggert + full_name/is_active mee.
+  const body = {
+    full_name: fullName,
+    email:     email,
+    phone:     phone === '' ? '' : phone,
+    is_active: (isActiveStr === 'true'),
+  };
+  if (password) body.password = password;
+
+  const saveBtn = document.getElementById('euSaveBtn');
+  saveBtn.disabled = true;
+  _euShowError('');
+
+  try {
+    const r = await apiRequest('PATCH', '/api/admin-users?id=' + encodeURIComponent(userId), body);
+    if (r && r.error) throw new Error(r.error);
+
+    // Bubble-koppeling apart: alleen verzenden als gewijzigd ÉN er is een team_member_id.
+    if (teamMemberId && newBubbleRaw !== initialBubble) {
+      const linkBody = {
+        team_member_id: teamMemberId,
+        bubble_user_id: newBubbleRaw === '' ? null : newBubbleRaw,
+      };
+      const lr = await apiRequest('POST', '/api/mentor-bubble-link', linkBody);
+      if (lr && lr.error) throw new Error('Bubble-koppeling: ' + lr.error);
+    }
+
+    closeEditUserModal();
+    await loadUsers();
+  } catch (e) {
+    _euShowError(e?.message || String(e));
+    saveBtn.disabled = false;
+  }
 }
 
 async function submitInvite() {

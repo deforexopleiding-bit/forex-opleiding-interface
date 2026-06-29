@@ -180,10 +180,30 @@ export default async function handler(req, res) {
     const { data: roleRows } = await supabaseAdmin.from('user_roles').select('user_id, role');
     const rolesByUser = {};
     (roleRows || []).forEach((r) => { (rolesByUser[r.user_id] ||= []).push(r.role); });
-    const withRoles = (users || []).map((u) => ({
-      ...u,
-      all_roles: rolesByUser[u.id] || (u.role ? [u.role] : []),
-    }));
+
+    // Team-member-koppeling per user: nodig voor de Bewerken-modal (mentor↔Bubble).
+    // Eén query, geen N+1. Onbestaand → team_member_id + bubble_user_id blijven null.
+    const userIds = (users || []).map((u) => u.id).filter(Boolean);
+    const tmByUser = {};
+    if (userIds.length > 0) {
+      const { data: tmRows } = await supabaseAdmin
+        .from('team_members')
+        .select('id, user_id, bubble_user_id')
+        .in('user_id', userIds);
+      (tmRows || []).forEach((t) => {
+        if (t && t.user_id && !tmByUser[t.user_id]) tmByUser[t.user_id] = t;
+      });
+    }
+
+    const withRoles = (users || []).map((u) => {
+      const tm = tmByUser[u.id] || null;
+      return {
+        ...u,
+        all_roles:      rolesByUser[u.id] || (u.role ? [u.role] : []),
+        team_member_id: tm ? tm.id : null,
+        bubble_user_id: tm ? (tm.bubble_user_id || null) : null,
+      };
+    });
 
     return res.status(200).json({ users: withRoles });
   }
@@ -328,7 +348,7 @@ export default async function handler(req, res) {
     const userId = req.query.id;
     if (!userId) return res.status(400).json({ error: 'Query parameter ?id is verplicht.' });
 
-    const { role, is_active, full_name, add_role, remove_role } = req.body || {};
+    const { role, is_active, full_name, add_role, remove_role, email, password, phone } = req.body || {};
 
     // ── Multi-role beheer via user_roles (alleen super_admin) ─────────────────
     if (add_role !== undefined || remove_role !== undefined) {
@@ -366,6 +386,117 @@ export default async function handler(req, res) {
       const { error: syncErr } = await supabaseAdmin.from('profiles').update({ role: primary }).eq('id', userId);
       if (syncErr) console.error('[admin-users] profiles.role sync mislukt (soft):', syncErr.message);
       return res.status(200).json({ message: 'Rollen bijgewerkt.', roles: roleNames, primary_role: primary });
+    }
+
+    // ── Bewerken-modal (super_admin-only) ───────────────────────────────────
+    // Wordt getriggerd zodra de body één van { email, password, phone } bevat.
+    // Server-side gate is autoritatief — UI-knop voor niet-super_admin is enkel
+    // cosmetisch. In dezelfde call mogen ook full_name + is_active worden gezet.
+    const sensitiveIntent = (email !== undefined) || (password !== undefined) || (phone !== undefined);
+    if (sensitiveIntent) {
+      if (admin.profile.role !== 'super_admin') {
+        return res.status(403).json({ error: 'Alleen super_admin kan deze velden bewerken (e-mail/wachtwoord/telefoon).' });
+      }
+
+      // changes → profiles-velden (auth-velden gaan via auth.admin separaat).
+      // Het rauwe `password` belandt NOOIT in changes of audit-payload.
+      const changes = {};
+      const auditFields = [];
+
+      // E-mail: valideer formaat + sync via auth.admin (canonieke bron) + profiles.email.
+      if (email !== undefined) {
+        const normalized = String(email || '').trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
+          return res.status(400).json({ error: 'Ongeldig e-mailadres.' });
+        }
+        const { error: authErr } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+          email:         normalized,
+          email_confirm: true,
+        });
+        if (authErr) {
+          await logAudit({
+            action:        'update_user_email',
+            payload:       { target_id: userId, admin_email: admin.profile.email },
+            status:        'error',
+            error_message: authErr.message,
+            triggered_by:  admin.profile.email,
+          });
+          return res.status(400).json({ error: authErr.message });
+        }
+        changes.email = normalized;
+        auditFields.push('email');
+      }
+
+      // Wachtwoord: min 8 tekens. NOOIT loggen of in response terugzetten.
+      if (password !== undefined) {
+        const pw = String(password || '');
+        if (pw.length < 8) {
+          return res.status(400).json({ error: 'Wachtwoord moet minimaal 8 tekens hebben.' });
+        }
+        const { error: pwErr } = await supabaseAdmin.auth.admin.updateUserById(userId, { password: pw });
+        if (pwErr) {
+          await logAudit({
+            action:        'update_user_password',
+            payload:       { target_id: userId, admin_email: admin.profile.email },
+            status:        'error',
+            error_message: pwErr.message,
+            triggered_by:  admin.profile.email,
+          });
+          return res.status(400).json({ error: pwErr.message });
+        }
+        auditFields.push('password');
+        // Geen profiles-mutatie voor password — alleen auth.users (gehasht).
+      }
+
+      // Telefoon: trim + null-sentinel voor leeg.
+      if (phone !== undefined) {
+        const trimmed = String(phone || '').trim();
+        changes.phone = trimmed === '' ? null : trimmed;
+        auditFields.push('phone');
+      }
+
+      // Optioneel: full_name + is_active in dezelfde super_admin-call.
+      if (full_name !== undefined) { changes.full_name = full_name; auditFields.push('full_name'); }
+      if (is_active !== undefined) { changes.is_active = is_active; auditFields.push('is_active'); }
+
+      if (Object.keys(changes).length > 0) {
+        changes.updated_at = new Date().toISOString();
+        const { error: upErr } = await supabaseAdmin
+          .from('profiles')
+          .update(changes)
+          .eq('id', userId);
+        if (upErr) {
+          await logAudit({
+            action:        'update_user',
+            payload:       { target_id: userId, admin_email: admin.profile.email, fields: auditFields },
+            status:        'error',
+            error_message: upErr.message,
+            triggered_by:  admin.profile.email,
+          });
+          return res.status(500).json({ error: upErr.message });
+        }
+      }
+
+      // Audit per gewijzigd veld. Wachtwoord krijgt een eigen action zonder waarde.
+      for (const field of auditFields) {
+        if (field === 'password') {
+          await logAudit({
+            action:       'update_user_password',
+            payload:      { target_id: userId, admin_email: admin.profile.email, field: 'password' },
+            triggered_by: admin.profile.email,
+          });
+        } else {
+          const safePayload = { target_id: userId, admin_email: admin.profile.email, field };
+          if (field in changes) safePayload.new_value = changes[field];
+          await logAudit({
+            action:       'update_user_' + field,
+            payload:      safePayload,
+            triggered_by: admin.profile.email,
+          });
+        }
+      }
+
+      return res.status(200).json({ message: 'Gebruiker bijgewerkt.', fields: auditFields });
     }
 
     const updates = {};
