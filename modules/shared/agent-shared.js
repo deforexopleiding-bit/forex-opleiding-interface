@@ -299,11 +299,17 @@
     const target = document.querySelector('.user-section, .footer-user');
     if (!target) return;
 
-    // Haal profiel op als niet meegegeven
-    if (!profile && window.AuthShared) {
+    // Haal profiel op als niet meegegeven. EERST wachten op _authSharedReady
+    // (async IIFE in supabase-client.js die window.AuthShared mount); pas daarna
+    // de AuthShared-check + getProfile. Voorheen stond de AuthShared-check vóór
+    // de await, waardoor een vroege oproep (sidebar.js mount-volgorde) de fetch
+    // oversloeg en de footer kort "Inloggen" flashte tot een page refresh.
+    if (!profile) {
       try {
         if (window._authSharedReady) await window._authSharedReady;
-        profile = await window.AuthShared.getProfile();
+        if (window.AuthShared && window.AuthShared.getProfile) {
+          profile = await window.AuthShared.getProfile();
+        }
       } catch {}
     }
 
