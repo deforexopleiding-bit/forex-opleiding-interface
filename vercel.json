@@ -57,6 +57,10 @@
       "schedule": "0 6 * * *"
     },
     {
+      "path": "/api/cron-cancellation-cleanup",
+      "schedule": "30 2 * * *"
+    },
+    {
       "path": "/api/joost-outbound-scheduler",
       "schedule": "30 8,11,14,17 * * 1-5"
     },
