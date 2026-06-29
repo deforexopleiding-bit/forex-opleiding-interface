@@ -64,6 +64,8 @@ export default async function handler(req, res) {
                status, start_date, created_at,
                bubble_user_id, mentor_intake_status,
                intake_handled_at, intake_handled_by`)
+      // Gearchiveerd valt buiten dit overzicht; 'geannuleerd' blijft zichtbaar
+      // (optie B: terminal rank 10 + gedimd, niet uit de lijst).
       .neq('status', 'gearchiveerd')
       .eq('is_test', false)
       .order('created_at', { ascending: false })
@@ -194,9 +196,14 @@ export default async function handler(req, res) {
         );
         handled = Number.isFinite(handledMs) && handledMs >= latestActivityMs;
       }
+      // Cancelled = terminal status 'geannuleerd' uit api/onboarding-cancel.js
+      // (Fase 4a). Effective rank 10 = onder gestart=9 en afgehandeld=8 → valt
+      // helemaal onderaan in de toekomst-lijst (visueel gedimd in de UI).
+      const cancelled = String(r.status || '').toLowerCase() === 'geannuleerd';
       // Effective rank — afgehandelde rijen vallen uit de "problemen bovenaan"
       // groep (rank 0-3) en komen op tier 8 (boven gestart=9, onder rest).
-      const effRank = handled ? 8 : baseRank;
+      // Geannuleerd → rank 10 (onderaan; terminal).
+      const effRank = cancelled ? 10 : (handled ? 8 : baseRank);
 
       return {
         onboarding_id:        r.id,
@@ -212,6 +219,7 @@ export default async function handler(req, res) {
         intake_rank:          effRank,
         intake_rank_base:     baseRank,
         handled,
+        cancelled,
         intake_handled_at:    handledAtIso,
         intake_handled_by:    r.intake_handled_by || null,
         days_since_update:    daysSince,

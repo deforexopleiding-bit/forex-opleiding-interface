@@ -212,6 +212,7 @@
           <button type="button" class="so-toggle" data-fu-filt="wil_later">Wil later</button>
           <button type="button" class="so-toggle" data-fu-filt="stale">Geen update &gt;7 dagen</button>
           <button type="button" class="so-toggle" data-fu-filt="handled">Afgehandeld</button>
+          <button type="button" class="so-toggle" data-fu-filt="cancelled">Geannuleerd</button>
         </div>
         <span id="fuCountInfo" style="margin-left:auto"></span>
       </div>
@@ -1111,8 +1112,9 @@ function fuUpdateTabCount() {
 function fuApplyFilter(rows) {
   const f = state.futureFilter;
   if (f === 'all') return rows;
-  if (f === 'stale')   return rows.filter((r) => Number(r.days_since_update) > 7 || r.days_since_update == null);
-  if (f === 'handled') return rows.filter((r) => !!r.handled);
+  if (f === 'stale')     return rows.filter((r) => Number(r.days_since_update) > 7 || r.days_since_update == null);
+  if (f === 'handled')   return rows.filter((r) => !!r.handled);
+  if (f === 'cancelled') return rows.filter((r) => !!r.cancelled);
   return rows.filter((r) => r.intake_status === f);
 }
 
@@ -1182,14 +1184,20 @@ function renderFutureTable() {
               + (ago ? '<div style="color:var(--text-faint);font-size:11.5px">' + ago + '</div>' : '')
               + note;
     }
-    const rowStyle = r.handled ? ' style="opacity:0.55"' : '';
-    const handledTag = r.handled ? ' <span class="so-badge" style="background:rgba(100,116,139,0.18);color:#475569" title="Afgehandeld — vervalt zodra er nieuwe activiteit is.">Afgehandeld</span>' : '';
+    // Cancelled rijen zijn terminal (rank 10) — sterker gedimd dan handled
+    // (opacity 0.45). Status-cel toont 'Geannuleerd'-pill i.p.v. intake-status.
+    const dim = r.cancelled ? 0.45 : (r.handled ? 0.55 : 1);
+    const rowStyle = (dim < 1) ? (' style="opacity:' + dim + '"') : '';
+    const handledTag = (r.handled && !r.cancelled) ? ' <span class="so-badge" style="background:rgba(100,116,139,0.18);color:#475569" title="Afgehandeld — vervalt zodra er nieuwe activiteit is.">Afgehandeld</span>' : '';
+    const statusCell = r.cancelled
+      ? '<span class="so-badge" style="background:rgba(220,38,38,0.16);color:#7f1d1d;border:1px solid rgba(220,38,38,0.35)" title="Volledig geannuleerd via onboarding-cancel">Geannuleerd</span>'
+      : fuStatusPill(r.intake_status || 'nog_te_benaderen');
     return '<tr data-fu-id="' + esc(r.onboarding_id) + '"' + rowStyle + '>' +
       '<td><div class="so-name">' + esc(r.customer_name || '—') + handledTag + '</div></td>' +
       '<td>' + (r.mentor_name ? esc(r.mentor_name) : '<span class="so-mentor-none">geen mentor</span>') + '</td>' +
       '<td>' + startCell + '</td>' +
       '<td>' + paidCell + '</td>' +
-      '<td>' + fuStatusPill(r.intake_status || 'nog_te_benaderen') + '</td>' +
+      '<td>' + statusCell + '</td>' +
       '<td>' + updCell + '</td>' +
     '</tr>';
   }).join('');

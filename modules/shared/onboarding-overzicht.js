@@ -706,6 +706,24 @@
     '</div>';
   }
 
+  // ── Fase 4b — Cancel-knop rol-gate (manager/super_admin only) ──────────
+  // De backend (api/onboarding-cancel.js) is seesAll (admin/manager/super_admin),
+  // de UI is strikter: alleen manager + super_admin krijgen de knop. We
+  // cachen de profile-role na de eerste lookup.
+  let _profileRoleCache = null;
+  async function _getProfileRoleOnce() {
+    if (_profileRoleCache !== null) return _profileRoleCache;
+    try {
+      const p = await (window.AuthShared?.getProfile?.() || Promise.resolve(null));
+      _profileRoleCache = String(p?.role || '').toLowerCase() || '';
+    } catch (e) { _profileRoleCache = ''; }
+    return _profileRoleCache;
+  }
+  function _canCancelOnboardingSync() {
+    const role = _profileRoleCache;
+    return role === 'manager' || role === 'super_admin';
+  }
+
   // ── Fase 3 — Admin-acties block in detail-modal ─────────────────────────
   function _renderAdminActionsBlock(o) {
     const id = esc(String(o.id || ''));
@@ -714,6 +732,28 @@
     const archived = !!o.archived_at;
     const archiveBtnLabel = archived ? 'Herstellen uit archief' : 'Archiveren';
     const archiveBtnAction = archived ? 'restore' : 'archive';
+    const cancelled = !!o.cancelled;
+    const canCancel = _canCancelOnboardingSync();
+    // Cancel-sectie: drie staten.
+    //   1) Al gecancelled → toon read-only record (datum/wie/reden/€-snapshot/per-stap)
+    //   2) Mag annuleren (manager/super_admin) en NIET gecancelled → toon knop
+    //   3) Anders → niets tonen
+    let cancelHtml = '';
+    if (cancelled) {
+      cancelHtml = _renderCancellationRecordHtml(o.cancellation || null);
+    } else if (canCancel) {
+      cancelHtml = `
+        <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
+          <div style="font-size:11.5px;color:#b91c1c;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px"><i class="ti ti-alert-triangle"></i> Annulering (onomkeerbaar)</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button type="button" id="adCancelBtn" data-id="${id}"
+              style="padding:6px 12px;border:1px solid #b91c1c;background:#fee2e2;color:#7f1d1d;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12.5px;font-weight:600">
+              <i class="ti ti-user-x"></i> Student annuleren
+            </button>
+            <span style="font-size:11.5px;color:var(--text-faint)">Crediteert facturen, stopt abonnement, sluit Bubble-toegang.</span>
+          </div>
+        </div>`;
+    }
     return `
       <div style="border:1px solid var(--border);border-radius:8px;background:var(--bg-elev);padding:12px;display:grid;gap:12px">
         <div>
@@ -756,6 +796,48 @@
             <button type="button" class="ob-act ${archived ? '' : ''}" id="adArchiveBtn" data-id="${id}" data-action="${archiveBtnAction}" style="padding:5px 11px"><i class="ti ti-${archived ? 'archive-off' : 'archive'}"></i> ${esc(archiveBtnLabel)}</button>
             <span id="adArchiveStatus" style="font-size:11.5px;color:var(--text-faint)"></span>
           </div>
+        </div>
+        ${cancelHtml}
+      </div>`;
+  }
+
+  // Read-only weergave van het cancellation-record. Toont datum, reden,
+  // omzet-snapshot en per-stap-status uit steps-jsonb (a-g).
+  function _renderCancellationRecordHtml(c) {
+    if (!c) {
+      return `
+        <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
+          <div style="font-size:11.5px;color:#b91c1c;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px"><i class="ti ti-user-x"></i> Geannuleerd</div>
+          <div style="color:var(--text-faint);font-size:12px">Deze onboarding is geannuleerd, maar er is geen audit-record gevonden in onboarding_cancellations.</div>
+        </div>`;
+    }
+    const steps = c.steps || {};
+    const stepRows = [
+      { key: 'invoices_credit',           label: 'Facturen gecrediteerd' },
+      { key: 'subscriptions_deactivate',  label: 'Abonnement(en) gestopt' },
+      { key: 'offertes_cancel',           label: 'Offerte(s) geannuleerd' },
+      { key: 'bubble_membership_end',     label: 'Bubble-toegang beëindigd' },
+      { key: 'onboarding_status',         label: 'Status op geannuleerd' },
+      { key: 'cancellation_record',       label: 'Audit-record geschreven' },
+      { key: 'notify_mentor',             label: 'Mentor genotificeerd' },
+    ];
+    const fmtEur = (n) => 'EUR ' + (Number(n) || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtDate = (iso) => iso ? new Date(iso).toLocaleString('nl-NL', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+    return `
+      <div style="border-top:1px solid #fecaca;padding-top:10px;margin-top:4px;background:rgba(254,226,226,0.18);padding:12px;border-radius:8px">
+        <div style="font-size:11.5px;color:#b91c1c;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px"><i class="ti ti-user-x"></i> Geannuleerd op ${esc(fmtDate(c.cancelled_at))}</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:4px"><strong>Reden:</strong> ${esc(c.reason || '—')}</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px"><strong>Gederfde abonnement-omzet (snapshot):</strong> ${esc(fmtEur(c.subscription_value || 0))}</div>
+        <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin:4px 0 2px">Per-stap-resultaat</div>
+        <div style="display:grid;gap:2px">
+          ${stepRows.map((sr) => {
+            const s = steps[sr.key];
+            const ok = !!(s && s.ok);
+            const icon = ok ? '<i class="ti ti-check" style="color:#15803d"></i>' : '<i class="ti ti-x" style="color:#b91c1c"></i>';
+            const extra = (s && s.error) ? ' <span style="color:#b91c1c;font-size:11px">— ' + esc(String(s.error).slice(0, 200)) + '</span>' : '';
+            const skipped = (s && s.skipped) ? ' <span style="color:var(--text-faint);font-size:11px">(overgeslagen)</span>' : '';
+            return '<div style="font-size:12.5px">' + icon + ' ' + esc(sr.label) + skipped + extra + '</div>';
+          }).join('')}
         </div>
       </div>`;
   }
@@ -886,6 +968,14 @@
       });
     }
 
+    // 6) Annuleren (Fase 4b) — alleen aanwezig in DOM voor manager/super_admin.
+    const cancelBtn = document.getElementById('adCancelBtn');
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', () => {
+        _openCancelPreview(cancelBtn.dataset.id || '');
+      });
+    }
+
     // 5) Archiveren / herstellen
     const arBtn = document.getElementById('adArchiveBtn');
     if (arBtn) {
@@ -912,6 +1002,212 @@
     }
   }
 
+  // ── Fase 4b — Cancel-flow (preview → bevestiging → execute) ────────────
+  // Verplichte waarschuwingstekst — letterlijk en prominent.
+  const CANCEL_WARNING_TEXT = 'Overleg deze stap met je manager, heb je dit gedaan? Klik dan op akkoord als je zeker weet dat je deze student volledig uit het gehele systeem wilt verwijderen! Deze stap kan niet ongedaan worden gemaakt.';
+
+  function _cancelFmtEur(n) {
+    return 'EUR ' + (Number(n) || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function _ensureCancelModal() {
+    let el = document.getElementById('obCancelModal');
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = 'obCancelModal';
+    el.setAttribute('hidden', '');
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px';
+    el.innerHTML = `
+      <div style="max-width:640px;width:100%;max-height:90vh;overflow-y:auto;background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.3)">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border)">
+          <div style="font-weight:700;font-size:15px;color:#b91c1c"><i class="ti ti-user-x"></i> Student annuleren</div>
+          <button type="button" id="obCancelClose" style="background:transparent;border:none;font-size:18px;cursor:pointer;color:var(--text-dim)">&times;</button>
+        </div>
+        <div id="obCancelBody" style="padding:16px 18px"></div>
+      </div>`;
+    document.body.appendChild(el);
+    el.addEventListener('click', (ev) => { if (ev.target === el) _closeCancelModal(); });
+    el.querySelector('#obCancelClose').addEventListener('click', _closeCancelModal);
+    return el;
+  }
+  function _openCancelModal() {
+    const el = _ensureCancelModal();
+    el.removeAttribute('hidden');
+  }
+  function _closeCancelModal() {
+    const el = document.getElementById('obCancelModal');
+    if (el) el.setAttribute('hidden', '');
+  }
+
+  async function _openCancelPreview(onboardingId) {
+    if (!onboardingId) return;
+    _openCancelModal();
+    const body = document.getElementById('obCancelBody');
+    if (!body) return;
+    body.innerHTML = '<div style="padding:18px;text-align:center;color:var(--text-faint)">Preview ophalen…</div>';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/onboarding-cancel', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ onboarding_id: onboardingId, preview: true }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      if (d.already_cancelled) {
+        body.innerHTML = '<div style="padding:18px;color:var(--text-dim)">Deze student is al geannuleerd. Sluit dit venster.</div>'
+          + '<div style="padding:0 18px 14px;text-align:right"><button type="button" id="obCancelDoneBtn" class="ob-act">Sluiten</button></div>';
+        document.getElementById('obCancelDoneBtn').addEventListener('click', _closeCancelModal);
+        return;
+      }
+      _renderCancelPreviewModal(d, onboardingId);
+    } catch (e) {
+      body.innerHTML = '<div style="padding:18px;color:#b91c1c">Preview mislukt: ' + esc(e?.message || e) + '</div>';
+    }
+  }
+
+  function _renderCancelPreviewModal(p, onboardingId) {
+    const body = document.getElementById('obCancelBody');
+    if (!body) return;
+    const inv  = Array.isArray(p.invoices) ? p.invoices : [];
+    const subs = Array.isArray(p.subscriptions) ? p.subscriptions : [];
+    const offs = Array.isArray(p.offertes) ? p.offertes : [];
+    const invHtml = inv.length === 0
+      ? '<div style="font-size:12px;color:var(--text-faint)">Geen open facturen om te crediteren.</div>'
+      : '<ul style="margin:4px 0 0;padding-left:18px;font-size:12.5px">' + inv.map((i) =>
+          '<li>' + esc(i.invoice_number || '(geen nr)') + ' — ' + esc(_cancelFmtEur(i.amount_total)) + ' (' + esc(i.status || '') + ')</li>'
+        ).join('') + '</ul>';
+    const subHtml = subs.length === 0
+      ? '<div style="font-size:12px;color:var(--text-faint)">Geen actieve abonnementen.</div>'
+      : '<ul style="margin:4px 0 0;padding-left:18px;font-size:12.5px">' + subs.map((s) =>
+          '<li>' + esc(s.description || '(zonder omschrijving)') + ' — ' + esc(_cancelFmtEur(s.amount_incl)) + ' per termijn</li>'
+        ).join('') + '</ul>';
+    const offHtml = offs.length === 0
+      ? '<div style="font-size:12px;color:var(--text-faint)">Geen open offertes.</div>'
+      : '<ul style="margin:4px 0 0;padding-left:18px;font-size:12.5px">' + offs.map((o) =>
+          '<li>' + esc(o.tl_quotation_reference || o.tl_quotation_id || o.id) + '</li>'
+        ).join('') + '</ul>';
+    body.innerHTML = `
+      <div style="font-size:13px;color:var(--text);margin-bottom:10px"><strong>${esc(p.customer_name || 'Deze student')}</strong> wordt geannuleerd.</div>
+      <div style="display:grid;gap:10px">
+        <div>
+          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px">Facturen — worden gecrediteerd in TeamLeader</div>
+          ${invHtml}
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px">Abonnement(en) — TL deactivate + lokaal cancelled · totaal per termijn ${esc(_cancelFmtEur(p.subscription_value || 0))}</div>
+          ${subHtml}
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px">Offerte(s) — geannuleerd en gearchiveerd</div>
+          ${offHtml}
+        </div>
+        <div style="font-size:12.5px;color:var(--text)">
+          <i class="ti ti-brand-bubble"></i> <strong>Bubble-toegang wordt per gisteren beëindigd</strong> (membership_end_date_date + login uit).
+        </div>
+      </div>
+      <div style="margin-top:14px">
+        <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Reden <span style="color:#b91c1c">*</span></div>
+        <textarea id="obCancelReason" rows="2" placeholder="Bijv. klant heeft schriftelijk geannuleerd vanwege ziekte." style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:12.5px;resize:vertical"></textarea>
+      </div>
+      <div style="margin-top:14px;padding:12px;border:1px solid #fecaca;background:rgba(254,226,226,0.35);border-radius:8px;color:#7f1d1d;font-size:13px;font-weight:600;line-height:1.5" id="obCancelWarning">
+        ${esc(CANCEL_WARNING_TEXT)}
+      </div>
+      <div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px;align-items:center">
+        <span id="obCancelStatus" style="font-size:11.5px;color:var(--text-faint);margin-right:auto"></span>
+        <button type="button" id="obCancelCancelBtn" class="ob-act">Annuleren</button>
+        <button type="button" id="obCancelAccordBtn" data-id="${esc(onboardingId)}" disabled
+          style="padding:7px 14px;border-radius:6px;border:1px solid #b91c1c;background:#fecaca;color:#7f1d1d;cursor:not-allowed;font-family:inherit;font-size:13px;font-weight:700;opacity:0.55">
+          Akkoord
+        </button>
+      </div>`;
+    document.getElementById('obCancelCancelBtn').addEventListener('click', _closeCancelModal);
+    const reasonEl = document.getElementById('obCancelReason');
+    const accordBtn = document.getElementById('obCancelAccordBtn');
+    const updateAccord = () => {
+      const ok = String(reasonEl.value || '').trim().length > 0;
+      accordBtn.disabled = !ok;
+      accordBtn.style.cursor = ok ? 'pointer' : 'not-allowed';
+      accordBtn.style.opacity = ok ? '1' : '0.55';
+      accordBtn.style.background = ok ? '#dc2626' : '#fecaca';
+      accordBtn.style.color = ok ? '#fff' : '#7f1d1d';
+    };
+    reasonEl.addEventListener('input', updateAccord);
+    accordBtn.addEventListener('click', () => {
+      const reason = String(reasonEl.value || '').trim();
+      if (!reason) return;
+      _executeCancel(onboardingId, reason);
+    });
+  }
+
+  async function _executeCancel(onboardingId, reason) {
+    const body = document.getElementById('obCancelBody');
+    const status = document.getElementById('obCancelStatus');
+    const accordBtn = document.getElementById('obCancelAccordBtn');
+    if (accordBtn) accordBtn.disabled = true;
+    if (status) status.textContent = 'Bezig met annuleren…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/onboarding-cancel', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ onboarding_id: onboardingId, reason, confirm: true }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      if (d.already_cancelled) {
+        body.innerHTML = '<div style="padding:18px;color:var(--text-dim)">Was al geannuleerd — geen dubbele actie uitgevoerd.</div>'
+          + '<div style="padding:0 18px 14px;text-align:right"><button type="button" id="obCancelDoneBtn" class="ob-act">Sluiten</button></div>';
+        document.getElementById('obCancelDoneBtn').addEventListener('click', () => { _closeCancelModal(); openDetail(onboardingId); });
+        return;
+      }
+      _renderCancelResultModal(d, onboardingId);
+    } catch (e) {
+      if (status) { status.style.color = '#b91c1c'; status.textContent = 'Mislukt: ' + (e?.message || e); }
+      if (accordBtn) accordBtn.disabled = false;
+    }
+  }
+
+  function _renderCancelResultModal(d, onboardingId) {
+    const body = document.getElementById('obCancelBody');
+    if (!body) return;
+    const steps = d.steps || {};
+    const stepRows = [
+      { key: 'invoices_credit',          label: 'Facturen gecrediteerd' },
+      { key: 'subscriptions_deactivate', label: 'Abonnement(en) gestopt' },
+      { key: 'offertes_cancel',          label: 'Offerte(s) geannuleerd' },
+      { key: 'bubble_membership_end',    label: 'Bubble-toegang beëindigd' },
+      { key: 'onboarding_status',        label: 'Status op geannuleerd' },
+      { key: 'cancellation_record',      label: 'Audit-record geschreven' },
+      { key: 'notify_mentor',            label: 'Mentor genotificeerd' },
+    ];
+    body.innerHTML = `
+      <div style="font-size:13px;color:var(--text);margin-bottom:10px"><strong>Annulering uitgevoerd.</strong> Per-stap-resultaat:</div>
+      <div style="display:grid;gap:4px;margin-bottom:14px">
+        ${stepRows.map((sr) => {
+          const s = steps[sr.key];
+          const ok = !!(s && s.ok);
+          const icon = ok ? '<i class="ti ti-check" style="color:#15803d"></i>' : '<i class="ti ti-x" style="color:#b91c1c"></i>';
+          const extra = (s && s.error) ? ' <span style="color:#b91c1c;font-size:11px">— ' + esc(String(s.error).slice(0, 200)) + '</span>' : '';
+          const skipped = (s && s.skipped) ? ' <span style="color:var(--text-faint);font-size:11px">(overgeslagen)</span>' : '';
+          // Detail per regel (sub-results) — alleen wanneer een sub gefaald is, tonen we de eerste fout.
+          let subDetail = '';
+          if (s && Array.isArray(s.results)) {
+            const failed = s.results.filter((rr) => !rr.ok);
+            if (failed.length > 0) {
+              subDetail = '<div style="margin-left:20px;font-size:11.5px;color:#b91c1c">' + failed.length + ' deelactie(s) gefaald — check de audit-log.</div>';
+            }
+          }
+          return '<div style="font-size:12.5px">' + icon + ' ' + esc(sr.label) + skipped + extra + '</div>' + subDetail;
+        }).join('')}
+      </div>
+      <div style="text-align:right">
+        <button type="button" id="obCancelDoneBtn" class="ob-act primary">Sluiten</button>
+      </div>`;
+    document.getElementById('obCancelDoneBtn').addEventListener('click', () => {
+      _closeCancelModal();
+      openDetail(onboardingId);
+    });
+  }
+
   async function openDetail(id) {
     if (!id) return;
     const m  = document.getElementById('obDetailModal');
@@ -919,6 +1215,10 @@
     m.removeAttribute('hidden');
     m.classList.add('open');
     bd.innerHTML = `<div class="empty-state"><span class="skeleton" style="width:160px"></span></div>`;
+    // Profile-role cache vullen voordat we het admin-acties-block renderen,
+    // zodat _canCancelOnboardingSync() betrouwbaar is. Fail-soft: bij geen
+    // profile is de cancel-knop sowieso verborgen.
+    await _getProfileRoleOnce();
     try {
       const r = await window.AgentShared.apiFetch('/api/onboarding-detail?id=' + encodeURIComponent(id));
       let d = null; try { d = await r.json(); } catch {}
