@@ -292,8 +292,12 @@
   const _signalsByStudent = new Map(); // bubble_student_id → active signal
   const _nextCallByStudent = new Map(); // member_user → eerstvolgende starts_at (ISO)
   const _noshowByStudent   = new Map(); // member_user → laatste-no-show ISO
+  const _completedByMember = new Map(); // member_user → vroegste-completed starts_at (ISO)
   const _stDetailCache    = new Map(); // bubble_student_id → mentor-student-detail payload
   const _openCardId       = { sid: null };
+  // Toekomst-tab state: cache op onboarding_id en uitgeklapte kaart.
+  const _futureById       = new Map(); // onboarding_id → student-record (laatste server-snapshot)
+  const _futureOpenId     = { id: null };
 
   const _FUNDED_MAX_BYTES = 10 * 1024 * 1024;
   const _FUNDED_ACCEPT    = '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png';
@@ -421,6 +425,7 @@
   async function loadOneOnOneMaps() {
     _nextCallByStudent.clear();
     _noshowByStudent.clear();
+    _completedByMember.clear();
     const apiFetch = window.AgentShared?.apiFetch;
     if (typeof apiFetch !== 'function') return;
     try {
@@ -437,6 +442,17 @@
         if (!Number.isFinite(t) || t < nowMs) continue;
         const prev = _nextCallByStudent.get(mu);
         if (!prev || t < new Date(prev).getTime()) _nextCallByStudent.set(mu, p.starts_at);
+      }
+      // Afgeronde sessies per student: vroegste completed.starts_at (de eerste
+      // call die heeft plaatsgevonden → "Gestart"-signaal voor de toekomst-tab).
+      const completed = Array.isArray(d.completed) ? d.completed : [];
+      for (const c of completed) {
+        const mu = c.member_user;
+        if (!mu) continue;
+        const t = new Date(c.starts_at).getTime();
+        if (!Number.isFinite(t)) continue;
+        const prev = _completedByMember.get(mu);
+        if (!prev || t < new Date(prev).getTime()) _completedByMember.set(mu, c.starts_at);
       }
       // No-shows by student.
       const nsBy = (d && typeof d.noshow_by_student === 'object' && d.noshow_by_student) ? d.noshow_by_student : {};
@@ -1046,10 +1062,18 @@
     if (!s) return `<span class="badge badge-grey">${esc(st || '—')}</span>`;
     return `<span class="badge ${s.cls}">${esc(s.label)}</span>`;
   }
-  function _futurePaidBadge(paid) {
-    return paid
-      ? '<span class="badge badge-green" title="Betaling is binnen — je mag een eerste call inplannen.">💶 Betaald · eerste call mag</span>'
-      : '<span class="badge badge-amber" title="Plan gerust; controleer de betaling vóór de call plaatsvindt.">⏳ Nog niet betaald · plan de eerste call alvast (check betaling vóór de call)</span>';
+  // soon = startdatum binnen ~14 dagen. Alleen dan tonen we de "plan de
+  // eerste call alvast"-aansporing op de paid-badge — ver weg toont de badge
+  // enkel de rustige betaalstatus. De urgentie-toon van _futureStartBadge
+  // blijft daarnaast onveranderd.
+  function _futurePaidBadge(paid, soon) {
+    if (paid) {
+      return '<span class="badge badge-green" title="Betaling is binnen.">💶 Betaald</span>';
+    }
+    if (soon) {
+      return '<span class="badge badge-amber" title="Plan gerust; controleer de betaling vóór de call plaatsvindt.">⏳ Nog niet betaald · plan de eerste call alvast (check betaling vóór de call)</span>';
+    }
+    return '<span class="badge badge-amber" title="Betaling staat nog open.">⏳ Nog niet betaald</span>';
   }
   function _daysUntilStart(start) {
     if (!start) return null;
@@ -1074,10 +1098,148 @@
     if (Array.isArray(av.blocks) && av.blocks.length) parts.push(av.blocks.join(', '));
     return parts.join(' · ');
   }
+  // ── Intake-statusmodel (afgeleid, prioriteit hoog→laag) ───────────────
+  // 1) gestart            — er bestaat een AFGERONDE 1-op-1 voor deze bubble_user_id.
+  // 2) wil_niet           — mentor_intake_status==='wil_niet'.
+  // 3) no_show            — er is een no-show voor deze bubble_user_id (uit
+  //                         _noshowByStudent) ÉN geen afgeronde 1-op-1 daarna.
+  //                         "Gestart" wint van no_show, dus de "geen afgeronde
+  //                         call na no-show"-regel klopt vanzelf: zodra er een
+  //                         completed-sessie is valt de check eerder bij gestart.
+  //                         AUTO — niet handmatig instelbaar.
+  // 4) geen_gehoor        — mentor_intake_status==='geen_gehoor'.
+  // 5) wil_later          — mentor_intake_status==='wil_later'.
+  // 6) call_ingepland     — er bestaat een GEPLANDE (toekomstige) 1-op-1.
+  // 7) nog_te_benaderen   — default.
+  //
+  // Vier middelste statussen zijn HANDMATIG instelbaar door de mentor;
+  // 'gestart', 'no_show' en 'call_ingepland' worden afgeleid uit de 1-op-1
+  // data en zijn dus read-only in de UI.
+  const _INTAKE_MANUAL = ['nog_te_benaderen','geen_gehoor','wil_later','wil_niet'];
+  const _INTAKE_META = {
+    gestart:           { label: 'Gestart',            cls: 'badge-green', auto: true  },
+    wil_niet:          { label: 'Wil niet starten',   cls: 'badge-red',   auto: false },
+    no_show:           { label: 'No-show',            cls: 'badge-red',   auto: true  },
+    geen_gehoor:       { label: 'Geen gehoor',        cls: 'badge-amber', auto: false },
+    wil_later:         { label: 'Wil later starten',  cls: 'badge-amber', auto: false },
+    call_ingepland:    { label: 'Call ingepland',     cls: 'badge-blue',  auto: true  },
+    nog_te_benaderen:  { label: 'Nog te benaderen',   cls: 'badge-grey',  auto: false },
+  };
+
+  function _futureIntakeState(s) {
+    const bu = s.bubble_user_id ? String(s.bubble_user_id) : null;
+    if (bu && _completedByMember.has(bu))      return 'gestart';
+    const ms = s.mentor_intake_status || null;
+    if (ms === 'wil_niet')                     return 'wil_niet';
+    if (bu && _noshowByStudent.has(bu))        return 'no_show';   // auto, na wil_niet
+    if (ms === 'geen_gehoor')                  return 'geen_gehoor';
+    if (ms === 'wil_later')                    return 'wil_later';
+    if (bu && _nextCallByStudent.has(bu))      return 'call_ingepland';
+    return 'nog_te_benaderen';
+  }
+
+  function _intakePillHtml(key) {
+    const m = _INTAKE_META[key] || _INTAKE_META.nog_te_benaderen;
+    return `<span class="badge ${m.cls}">${esc(m.label)}</span>`;
+  }
+
+  // ── Tijdlijn: stored updates + synth 1-op-1 events + assigned ─────────
+  function _buildFutureTimeline(s) {
+    const events = [];
+    if (s.created_at) {
+      events.push({ at: s.created_at, kind: 'assigned', label: 'Toegewezen aan jou' });
+    }
+    const bu = s.bubble_user_id ? String(s.bubble_user_id) : null;
+    if (bu) {
+      const planned = _nextCallByStudent.get(bu);
+      if (planned) events.push({ at: planned, kind: 'call_scheduled', label: 'Call ingepland' });
+      const started = _completedByMember.get(bu);
+      if (started) events.push({ at: started, kind: 'call_started', label: 'Eerste call gestart' });
+      const ns = _noshowByStudent.get(bu);
+      if (ns) events.push({ at: ns, kind: 'no_show', label: 'No-show' });
+    }
+    for (const u of (Array.isArray(s.updates) ? s.updates : [])) {
+      if (u.kind === 'status' && u.status && _INTAKE_META[u.status]) {
+        events.push({ at: u.created_at, kind: 'status', label: 'Status: ' + _INTAKE_META[u.status].label, note: u.note || '' });
+      } else if (u.kind === 'note' && u.note) {
+        events.push({ at: u.created_at, kind: 'note', label: 'Notitie', note: u.note });
+      }
+    }
+    events.sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
+    if (events.length === 0) return '<div style="color:var(--text-faint);font-size:12.5px">Geen activiteit.</div>';
+    return events.map((e) => {
+      const when = e.at ? esc(fmtDateTimeNL(e.at)) : '—';
+      const note = e.note ? `<div style="margin-top:2px;color:var(--text-dim);font-size:12px;white-space:pre-wrap">${esc(e.note)}</div>` : '';
+      return `
+        <div style="display:grid;grid-template-columns:130px 1fr;gap:8px;padding:6px 0;border-top:1px solid var(--border)">
+          <div style="font-size:11.5px;color:var(--text-faint)">${when}</div>
+          <div><div style="font-size:12.5px;color:var(--text)">${esc(e.label)}</div>${note}</div>
+        </div>`;
+    }).join('');
+  }
+
+  function _renderFutureCardBody(s) {
+    const key = _futureIntakeState(s);
+    const bu  = s.bubble_user_id ? String(s.bubble_user_id) : null;
+    const plannedIso = bu ? _nextCallByStudent.get(bu) : null;
+    const plannedLine = plannedIso
+      ? `<div style="font-size:12.5px;color:var(--text)">${esc(fmtDateTimeNL(plannedIso))}</div>`
+      : `<div style="font-size:12.5px;color:var(--text-faint)">— nog niets ingepland</div>`;
+    // Status-selector: alleen de handmatige statussen zijn klikbaar.
+    // 'gestart' en 'call_ingepland' tonen we als read-only state-pill als ze
+    // de huidige afleiding zijn (en blijven dus niet selecteerbaar — die
+    // worden namelijk afgeleid uit 1-op-1 sessies, niet handmatig gezet).
+    const manualBtns = _INTAKE_MANUAL.map((k) => {
+      const m = _INTAKE_META[k];
+      const isCurrent = (key === k);
+      const style = isCurrent
+        ? 'background:var(--text);color:var(--bg);border-color:var(--text)'
+        : '';
+      return `<button type="button" class="btn"
+        data-fut-set-status="${esc(k)}"
+        style="padding:5px 9px;font-size:12px;${style}">${esc(m.label)}</button>`;
+    }).join(' ');
+    // Auto-status pad (gestart / no_show / call_ingepland) toont een read-only
+    // uitleg-regel; alleen de 4 handmatige knoppen blijven klikbaar in de strip.
+    const isAuto = !!(_INTAKE_META[key] && _INTAKE_META[key].auto);
+    const autoNote = isAuto
+      ? `<div style="font-size:11.5px;color:var(--text-faint);margin-top:4px">Huidige status "<strong>${esc(_INTAKE_META[key].label)}</strong>" is automatisch afgeleid uit de 1-op-1 sessies — kies hierboven een handmatige status om dat over te schrijven.</div>`
+      : '';
+    const noteId = 'futNote-' + esc(String(s.onboarding_id));
+    return `
+      <div style="padding:12px;border-top:1px solid var(--border);display:grid;gap:12px">
+        <div>
+          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Status</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">${manualBtns}</div>
+          ${autoNote}
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Geplande call</div>
+          ${plannedLine}
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Notitie</div>
+          <textarea id="${noteId}" rows="2" placeholder="Voeg een notitie toe…"
+            style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:12.5px;resize:vertical"></textarea>
+          <div style="margin-top:6px;display:flex;justify-content:flex-end">
+            <button type="button" class="btn" data-fut-save-note style="padding:5px 11px;font-size:12px">Opslaan</button>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Tijdlijn</div>
+          <div data-fut-timeline>${_buildFutureTimeline(s)}</div>
+        </div>
+      </div>`;
+  }
+
   function _renderFutureStudents(students) {
     const wrap = document.getElementById('futureStudentsWrap');
     if (!wrap) return;
     const list = Array.isArray(students) ? students : [];
+    _futureById.clear();
+    for (const s of list) {
+      if (s && s.onboarding_id) _futureById.set(String(s.onboarding_id), s);
+    }
     if (list.length === 0) {
       wrap.innerHTML = `<div class="empty-state"><i class="ti ti-user-question"></i>Je hebt nog geen toekomstige studenten toegewezen gekregen.</div>`;
       return;
@@ -1095,37 +1257,126 @@
       if (ad !== bd) return ad < bd ? -1 : 1;
       return String(a.customer_name || '').localeCompare(String(b.customer_name || ''));
     });
-    wrap.innerHTML = sorted.map((s) => {
-      const completed = (s.status === 'afgerond' && s.completed_at)
-        ? `<div class="student-meta" style="margin-top:4px">Afgerond op ${esc(fmtDateNL(s.completed_at))}</div>`
-        : '';
-      const avShort = _shortAvailability(s.availability);
-      const avLine  = `<div class="student-meta" style="margin-top:4px"><strong style="color:var(--text-dim)">Beschikbaarheid:</strong> ${avShort ? esc(avShort) : '<span style="color:var(--text-faint)">—</span>'}</div>`;
-      const startLine = `<div class="student-meta" style="margin-top:4px"><strong style="color:var(--text-dim)">Startdatum:</strong> ${s.start_date ? esc(fmtDateNL(s.start_date)) : '<span style="color:var(--text-faint)">— niet ingesteld</span>'}</div>`;
-      const days = _daysUntilStart(s.start_date);
-      const soon = (days != null && days >= 0 && days <= 14);
-      const cardStyle = soon
-        ? 'border:1px solid rgba(245,158,11,0.45);background:linear-gradient(180deg, rgba(245,158,11,0.07), rgba(245,158,11,0.02))'
-        : '';
-      const startBadge = soon ? _futureStartBadge(days) : '';
-      return `
-        <div class="student-card" style="${cardStyle}">
-          <div class="student-head" style="grid-template-columns:1fr auto">
-            <div>
-              <div class="student-name">${esc(s.customer_name || '—')}</div>
-              <div class="student-meta">${esc(s.traject_label || '—')}</div>
-              ${avLine}
-              ${startLine}
-              ${completed}
-            </div>
-            <div class="student-stat" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
-              ${startBadge}
-              ${_futurePaidBadge(!!s.paid)}
-              ${_futureStatusBadge(s.status)}
-            </div>
+    wrap.innerHTML = sorted.map((s) => _futureCardHtml(s)).join('');
+    _wireFutureCards(wrap);
+  }
+
+  function _futureCardHtml(s) {
+    const days = _daysUntilStart(s.start_date);
+    const soon = (days != null && days >= 0 && days <= 14);
+    const cardStyle = soon
+      ? 'border:1px solid rgba(245,158,11,0.45);background:linear-gradient(180deg, rgba(245,158,11,0.07), rgba(245,158,11,0.02))'
+      : '';
+    const startBadge = soon ? _futureStartBadge(days) : '';
+    const intakeKey  = _futureIntakeState(s);
+    const isOpen     = (_futureOpenId.id === String(s.onboarding_id));
+    const startLine  = s.start_date
+      ? `<div class="student-meta" style="margin-top:4px"><strong style="color:var(--text-dim)">Startdatum:</strong> ${esc(fmtDateNL(s.start_date))}${days != null && days >= 0 ? ' · over ' + days + ' dag' + (days === 1 ? '' : 'en') : ''}</div>`
+      : `<div class="student-meta" style="margin-top:4px"><strong style="color:var(--text-dim)">Startdatum:</strong> <span style="color:var(--text-faint)">— niet ingesteld</span></div>`;
+    const body = isOpen ? _renderFutureCardBody(s) : '';
+    const chevron = isOpen ? 'ti-chevron-up' : 'ti-chevron-down';
+    return `
+      <div class="student-card" data-fut-card="${esc(String(s.onboarding_id))}" style="${cardStyle}">
+        <div class="student-head" data-fut-toggle="${esc(String(s.onboarding_id))}" style="grid-template-columns:1fr auto;cursor:pointer">
+          <div>
+            <div class="student-name">${esc(s.customer_name || '—')}</div>
+            <div class="student-meta">${esc(s.traject_label || '—')}</div>
+            ${startLine}
           </div>
-        </div>`;
-    }).join('');
+          <div class="student-stat" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
+            ${startBadge}
+            ${_futurePaidBadge(!!s.paid, soon)}
+            ${_intakePillHtml(intakeKey)}
+            <i class="ti ${chevron}" style="color:var(--text-faint);font-size:16px"></i>
+          </div>
+        </div>
+        ${body}
+      </div>`;
+  }
+
+  function _wireFutureCards(wrap) {
+    wrap.querySelectorAll('[data-fut-toggle]').forEach((el) => {
+      el.addEventListener('click', (ev) => {
+        // Klikken in body (status-buttons, textarea, opslaan) mag de card niet inklappen.
+        if (ev.target.closest('[data-fut-set-status],[data-fut-save-note],textarea,button')) return;
+        const id = el.getAttribute('data-fut-toggle');
+        _futureOpenId.id = (_futureOpenId.id === id) ? null : id;
+        _rerenderFutureList();
+      });
+    });
+    wrap.querySelectorAll('[data-fut-set-status]').forEach((btn) => {
+      btn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        const cardEl = btn.closest('[data-fut-card]');
+        if (!cardEl) return;
+        const id  = cardEl.getAttribute('data-fut-card');
+        const st  = btn.getAttribute('data-fut-set-status');
+        await _futureSubmit(id, { status: st });
+      });
+    });
+    wrap.querySelectorAll('[data-fut-save-note]').forEach((btn) => {
+      btn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        const cardEl = btn.closest('[data-fut-card]');
+        if (!cardEl) return;
+        const id = cardEl.getAttribute('data-fut-card');
+        const ta = cardEl.querySelector('textarea[id^="futNote-"]');
+        const note = String(ta?.value || '').trim();
+        if (!note) { _futureFlash(cardEl, 'Notitie is leeg.', true); return; }
+        await _futureSubmit(id, { note });
+        if (ta) ta.value = '';
+      });
+    });
+  }
+
+  function _rerenderFutureList() {
+    const list = Array.from(_futureById.values());
+    _renderFutureStudents(list);
+  }
+
+  function _futureFlash(cardEl, msg, isError) {
+    const color = isError ? '#b91c1c' : 'var(--text-dim)';
+    const box = document.createElement('div');
+    box.style.cssText = `padding:6px 12px;font-size:12px;color:${color}`;
+    box.textContent = msg;
+    cardEl.appendChild(box);
+    setTimeout(() => { try { box.remove(); } catch {} }, 2500);
+  }
+
+  async function _futureSubmit(onboardingId, payload) {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    const cardEl = document.querySelector(`[data-fut-card="${onboardingId}"]`);
+    try {
+      const r = await apiFetch('/api/mentor-future-student-update', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ onboarding_id: onboardingId, ...payload }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      // Lokaal cache bijwerken — geen volledige reload nodig.
+      const cached = _futureById.get(String(onboardingId));
+      if (cached) {
+        if (payload.status) cached.mentor_intake_status = payload.status;
+        const u = d.update || null;
+        if (u) {
+          cached.updates = Array.isArray(cached.updates) ? cached.updates.slice() : [];
+          cached.updates.push({
+            kind:       u.kind || null,
+            status:     u.status || null,
+            note:       u.note || null,
+            created_at: u.created_at || null,
+            created_by: u.created_by || null,
+          });
+        }
+      }
+      _rerenderFutureList();
+      if (cardEl) _futureFlash(document.querySelector(`[data-fut-card="${onboardingId}"]`) || cardEl, 'Opgeslagen.', false);
+    } catch (e) {
+      console.error('[mentor-students] future-update:', e?.message || e);
+      if (cardEl) _futureFlash(cardEl, 'Opslaan mislukt: ' + (e?.message || e), true);
+    }
   }
 
   async function loadFutureStudents() {
@@ -1136,7 +1387,14 @@
     const wrap = document.getElementById('futureStudentsWrap');
     if (wrap) wrap.innerHTML = `<div style="color:var(--text-faint);font-size:12.5px;padding:14px;text-align:center">Toekomstige studenten laden…</div>`;
     try {
-      const r = await apiFetch('/api/mentor-future-students-self');
+      // 1-op-1 maps parallel inladen — _completedByMember + _nextCallByStudent
+      // sturen de afgeleide intake-statussen 'gestart' en 'call_ingepland' aan.
+      // Op de Mijn-studenten-tab worden ze óók geladen; hier doen we het zelf
+      // zodat de toekomst-tab zelfstandig accuraat is bij eerste open.
+      const [r] = await Promise.all([
+        apiFetch('/api/mentor-future-students-self'),
+        loadOneOnOneMaps(),
+      ]);
       let d = null;
       try { d = await r.json(); } catch {}
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
