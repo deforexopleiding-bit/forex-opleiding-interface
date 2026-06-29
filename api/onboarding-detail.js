@@ -255,6 +255,35 @@ export default async function handler(req, res) {
       }
     }
 
+    // Annulering-record (Fase 4b). Eén-op-één met onboarding (orchestrator
+    // schrijft één rij per execute). Meest recente wint als er ooit meerdere
+    // belanden (already_cancelled-guard maakt dat zeldzaam, maar select-limit-1
+    // is defensief). Fail-soft.
+    let cancellation = null;
+    try {
+      const { data: cr, error: crErr } = await supabaseAdmin
+        .from('onboarding_cancellations')
+        .select('id, cancelled_by, reason, subscription_value, steps, created_at')
+        .eq('onboarding_id', row.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (crErr) {
+        console.warn('[onboarding-detail] cancellation fetch:', crErr.message);
+      } else if (cr) {
+        cancellation = {
+          id:                 cr.id,
+          cancelled_at:       cr.created_at,
+          cancelled_by:       cr.cancelled_by || null,
+          reason:             cr.reason || null,
+          subscription_value: cr.subscription_value || null,
+          steps:              cr.steps || null,
+        };
+      }
+    } catch (e) {
+      console.warn('[onboarding-detail] cancellation exception:', e?.message || e);
+    }
+
     // Mentor-update tijdlijn (Fase 2 admin read-only weergave). Asc op
     // created_at zodat de frontend rechtstreeks chronologisch kan tonen.
     let mentorUpdates = [];
@@ -326,6 +355,8 @@ export default async function handler(req, res) {
         last_noshow_at            : last_noshow_at || null,
         intake_handled_at         : row.intake_handled_at || null,
         intake_handled_by         : row.intake_handled_by || null,
+        cancelled                 : String(row.status || '').toLowerCase() === 'geannuleerd',
+        cancellation              : cancellation,
         // Afgehandeld is NIET permanent — pas geldig als er sinds
         // intake_handled_at geen nieuwere activiteit (mentor-update / no-show
         // / completed-call) is. PLANNED call telt NIET (toekomst-gedateerd).
