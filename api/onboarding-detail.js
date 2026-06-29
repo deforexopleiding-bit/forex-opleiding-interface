@@ -92,6 +92,7 @@ export default async function handler(req, res) {
                invite_sent_at,
                credentials_email_sent_at, credentials_wa_sent_at,
                mentor_intake_status,
+               intake_handled_at, intake_handled_by,
                traject:onboarding_trajecten(label, type, calls, duur_maanden)`)
       .eq('id', id)
       .maybeSingle();
@@ -323,6 +324,29 @@ export default async function handler(req, res) {
         planned_call_at           : planned_call_at || null,
         last_completed_at         : last_completed_at || null,
         last_noshow_at            : last_noshow_at || null,
+        intake_handled_at         : row.intake_handled_at || null,
+        intake_handled_by         : row.intake_handled_by || null,
+        // Afgehandeld is NIET permanent — pas geldig als er sinds
+        // intake_handled_at geen nieuwere activiteit (mentor-update / no-show
+        // / completed-call) is. PLANNED call telt NIET (toekomst-gedateerd).
+        handled                   : (function () {
+          if (!row.intake_handled_at) return false;
+          const handledMs = new Date(row.intake_handled_at).getTime();
+          let latest = 0;
+          for (const u of mentorUpdates) {
+            const t = u.created_at ? new Date(u.created_at).getTime() : 0;
+            if (t > latest) latest = t;
+          }
+          if (last_noshow_at) {
+            const t = new Date(last_noshow_at).getTime();
+            if (t > latest) latest = t;
+          }
+          if (last_completed_at) {
+            const t = new Date(last_completed_at).getTime();
+            if (t > latest) latest = t;
+          }
+          return Number.isFinite(handledMs) && handledMs >= latest;
+        })(),
       },
     });
   } catch (e) {

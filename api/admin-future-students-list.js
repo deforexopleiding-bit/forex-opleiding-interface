@@ -62,7 +62,8 @@ export default async function handler(req, res) {
       .from('onboardings')
       .select(`id, customer_id, customer_name, mentor_user_id,
                status, start_date, created_at,
-               bubble_user_id, mentor_intake_status`)
+               bubble_user_id, mentor_intake_status,
+               intake_handled_at, intake_handled_by`)
       .neq('status', 'gearchiveerd')
       .eq('is_test', false)
       .order('created_at', { ascending: false })
@@ -157,6 +158,11 @@ export default async function handler(req, res) {
     }));
 
     // ── 6) Output bouwen ──────────────────────────────────────────────────
+    // Fase 3b: `handled` is afgeleid, NIET permanent. Een onboarding telt als
+    // afgehandeld zolang er sinds intake_handled_at GEEN nieuwere activiteit
+    // is op de student (mentor-update / no-show / completed-call). PLANNED
+    // calls tellen NIET — die zijn toekomst-gedateerd en zouden anders direct
+    // de afhandeling weer opheffen.
     const nowMs = Date.now();
     const future = list.map((r) => {
       const ooo = r.mentor_user_id ? oneOnOneByMentor.get(r.mentor_user_id) : null;
@@ -171,9 +177,26 @@ export default async function handler(req, res) {
         hasNoshow:            !!noshowIso,
         hasFutureCall:        !!plannedIso,
       });
-      const rank = intakeStatusRank(intake);
+      const baseRank = intakeStatusRank(intake);
       const last = lastUpdateByOnb.get(r.id) || null;
       const daysSince = last ? daysBetween(last.at, nowMs) : null;
+
+      // Afgehandeld-check: handle_at moet niet null zijn EN er moet GEEN
+      // latere activiteit zijn (max van updates/no-show/completed).
+      let handled = false;
+      const handledAtIso = r.intake_handled_at || null;
+      if (handledAtIso) {
+        const handledMs = new Date(handledAtIso).getTime();
+        const latestActivityMs = Math.max(
+          last && last.at ? new Date(last.at).getTime() : 0,
+          noshowIso       ? new Date(noshowIso).getTime() : 0,
+          doneIso         ? new Date(doneIso).getTime()   : 0,
+        );
+        handled = Number.isFinite(handledMs) && handledMs >= latestActivityMs;
+      }
+      // Effective rank — afgehandelde rijen vallen uit de "problemen bovenaan"
+      // groep (rank 0-3) en komen op tier 8 (boven gestart=9, onder rest).
+      const effRank = handled ? 8 : baseRank;
 
       return {
         onboarding_id:        r.id,
@@ -186,14 +209,18 @@ export default async function handler(req, res) {
         mentor_intake_status: r.mentor_intake_status || null,
         created_at:           r.created_at,
         intake_status:        intake,
-        intake_rank:          rank,
+        intake_rank:          effRank,
+        intake_rank_base:     baseRank,
+        handled,
+        intake_handled_at:    handledAtIso,
+        intake_handled_by:    r.intake_handled_by || null,
         days_since_update:    daysSince,
         last_update:          last,
         planned_call_at:      plannedIso,
       };
     });
 
-    // Default sort: rank asc → start_date asc (dichtstbij eerst) → customer_name.
+    // Default sort: effective rank asc → start_date asc → customer_name.
     future.sort((a, b) => {
       if (a.intake_rank !== b.intake_rank) return a.intake_rank - b.intake_rank;
       const ad = a.start_date || '9999-99-99';
