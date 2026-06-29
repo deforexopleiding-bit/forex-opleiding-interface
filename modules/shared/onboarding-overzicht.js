@@ -658,6 +658,54 @@
     });
   }
 
+  // ── Intake-status pill + tijdlijn (Fase 2 admin read-only) ──────────────
+  // Mirror van _INTAKE_META in modules/mentor-students.html. Houd labels en
+  // kleuren synchroon; key-set komt uit api/_lib/intake-status.js.
+  const _INTAKE_META_RO = {
+    gestart:           { label: 'Gestart',            cls: 'paid-yes'  },
+    wil_niet:          { label: 'Wil niet starten',   cls: 'paid-no'   },
+    no_show:           { label: 'No-show',            cls: 'paid-no'   },
+    geen_gehoor:       { label: 'Geen gehoor',        cls: 'paid-no'   },
+    wil_later:         { label: 'Wil later starten',  cls: 'paid-no'   },
+    call_ingepland:    { label: 'Call ingepland',     cls: 'paid-yes'  },
+    nog_te_benaderen:  { label: 'Nog te benaderen',   cls: ''          },
+  };
+  function _intakePillHtml(key) {
+    const m = _INTAKE_META_RO[key] || _INTAKE_META_RO.nog_te_benaderen;
+    return '<span class="ob-badge ' + m.cls + '">' + esc(m.label) + '</span>';
+  }
+  function _renderMentorTimeline(o) {
+    const events = [];
+    if (o.created_at) {
+      events.push({ at: o.created_at, label: 'Toegewezen', note: '' });
+    }
+    if (o.planned_call_at)   events.push({ at: o.planned_call_at,   label: 'Call ingepland',     note: '' });
+    if (o.last_completed_at) events.push({ at: o.last_completed_at, label: 'Eerste call gestart', note: '' });
+    if (o.last_noshow_at)    events.push({ at: o.last_noshow_at,    label: 'No-show',            note: '' });
+    const ups = Array.isArray(o.mentor_updates) ? o.mentor_updates : [];
+    for (const u of ups) {
+      if (u.kind === 'status' && u.status && _INTAKE_META_RO[u.status]) {
+        events.push({ at: u.created_at, label: 'Status: ' + _INTAKE_META_RO[u.status].label, note: u.note || '' });
+      } else if (u.kind === 'note' && u.note) {
+        events.push({ at: u.created_at, label: 'Notitie', note: u.note });
+      }
+    }
+    events.sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
+    if (events.length === 0) {
+      return '<div class="empty-state"><i class="ti ti-clock-off"></i>Nog geen mentor-activiteit.</div>';
+    }
+    return '<div style="border:1px solid var(--border);border-radius:8px;background:var(--bg-elev);padding:4px 12px">' +
+      events.map((e) => {
+        const when = e.at ? esc(fmtDateTimeNL(e.at)) : '—';
+        const note = e.note ? '<div style="margin-top:2px;color:var(--text-dim);font-size:12px;white-space:pre-wrap">' + esc(e.note) + '</div>' : '';
+        return '<div style="display:grid;grid-template-columns:170px 1fr;gap:8px;padding:7px 0;border-top:1px solid var(--border)">' +
+          '<div style="font-size:11.5px;color:var(--text-faint)">' + when + '</div>' +
+          '<div><div style="font-size:12.5px;color:var(--text)">' + esc(e.label) + '</div>' + note + '</div>' +
+        '</div>';
+      }).join('') +
+    '</div>';
+  }
+
   async function openDetail(id) {
     if (!id) return;
     const m  = document.getElementById('obDetailModal');
@@ -706,6 +754,7 @@
           <dt>Bedenktijd</dt>       <dd>${bedenktijdBadge(o.bedenktijd || null, o.waiver || null)}</dd>
           <dt>Beschikbaarheid</dt>  <dd>${renderAvailabilityFull(o.availability || null)}</dd>
           <dt>Mentor</dt>           <dd>${esc(o.mentor_name || (o.mentor_user_id || '—'))}</dd>
+          <dt>Intake-status</dt>    <dd>${_intakePillHtml(o.intake_status || o.mentor_intake_status || 'nog_te_benaderen')}${o.planned_call_at ? ' <span style="color:var(--text-faint);font-size:12px">· geplande call ' + esc(fmtDateTimeNL(o.planned_call_at)) + '</span>' : ''}</dd>
           <dt>Wizard-stap</dt>      <dd>${esc(o.current_step || '—')}</dd>
           <dt>Aangemeld</dt>        <dd>${esc(fmtDateTimeNL(o.created_at))}</dd>
           <dt>Startdatum</dt>       <dd>${o.start_date ? esc(fmtDateNL(o.start_date)) : '<span style="color:var(--text-faint)">— niet ingesteld (basis = nu)</span>'}</dd>
@@ -740,6 +789,8 @@
           </dd>
           ${link ? `<dt>Persoonlijke link</dt><dd style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all">${esc(link)}</dd>` : ''}
         </dl>
+        <h3>Mentor-tijdlijn</h3>
+        ${_renderMentorTimeline(o)}
         <h3>Vragenlijst-antwoorden</h3>
         ${answersJson
           ? `<pre>${esc(answersJson)}</pre>`
@@ -1058,7 +1109,18 @@
     // Trajecten + mentoren parallel — beide fail-soft.
     await Promise.all([ensureTrajectenLoaded(), ensureMentorsLoaded()]);
 
-    loadList();
+    await loadList();
+
+    // Fase 2: deep-link naar detail-modal via ?open=<uuid>. Wordt gebruikt
+    // door students-overview "Toekomstige studenten"-tab om vanuit een
+    // rij-klik direct in deze detail-view te landen.
+    try {
+      const params = new URLSearchParams(location.search);
+      const openId = params.get('open');
+      if (openId && /^[0-9a-f-]{36}$/i.test(openId)) {
+        openDetail(openId);
+      }
+    } catch (e) { console.warn('[onboarding-overzicht] open-param:', e?.message || e); }
   }
 
   // ────────────────────────────────────────────────────────────────────────
@@ -2128,5 +2190,6 @@
   window.OnboardingOverzicht = {
     __loaded: true,
     mount,
+    openDetail,
   };
 })();
