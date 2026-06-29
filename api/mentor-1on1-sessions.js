@@ -179,8 +179,11 @@ export default async function handler(req, res) {
 
     // Pre-pass: verzamel alle gekwalificeerde sessies (afgerond + geplande
     // toekomst) met hun member_user, zodat we daarna per student kunnen
-    // nummeren (oplopend op starts_at).
+    // nummeren (oplopend op starts_at). Tegelijk verzamelen we per student
+    // de meest recente no-show-datum (voor status-flags in de UI; planned/
+    // completed-shape blijft ongewijzigd).
     const qualified = []; // { id, starts_at, isoMs, done, member_user }
+    const noshowByStudent = new Map(); // member_user → laatste-noshow-iso
     const nowMs = Date.now();
     for (const s of rows) {
       const cb = readFirst(s, ['Created By', 'created_by']);
@@ -197,12 +200,21 @@ export default async function handler(req, res) {
       if (!Number.isFinite(startMs)) continue;
 
       const done = asBool(readFirst(s, ['isdone_boolean', 'isDone']));
+      const noshow = asBool(readFirst(s, ['noshow_boolean', 'NoShow']));
+      const memberRaw = readFirst(s, ['member_user']);
+      const member_user = (memberRaw && String(memberRaw).trim()) ? String(memberRaw).trim() : null;
+
+      // No-show tracking — apart van qualified, zodat de bestaande planned/
+      // completed-shape ongemoeid blijft. Alleen sessies met een gekoppelde
+      // student kunnen worden toegerekend.
+      if (noshow && member_user) {
+        const prev = noshowByStudent.get(member_user);
+        if (!prev || iso > prev) noshowByStudent.set(member_user, iso);
+      }
+
       // planned-criterium identiek aan voorheen (toekomstige niet-afgeronde);
       // afgeronde sessies tellen sowieso mee in de nummering.
       if (!done && startMs < nowMs) continue;
-
-      const memberRaw = readFirst(s, ['member_user']);
-      const member_user = (memberRaw && String(memberRaw).trim()) ? String(memberRaw).trim() : null;
 
       qualified.push({ id, starts_at: iso, startMs, done, member_user });
     }
@@ -249,12 +261,17 @@ export default async function handler(req, res) {
     planned.sort((a, b)   => String(a.starts_at).localeCompare(String(b.starts_at)));
     completed.sort((a, b) => String(b.starts_at).localeCompare(String(a.starts_at)));
 
+    // Plain-object weergave van noshow_by_student voor JSON-serialisatie.
+    const noshow_by_student = {};
+    for (const [k, v] of noshowByStudent.entries()) noshow_by_student[k] = v;
+
     const payload = {
       planned,
       completed,
       rate:     RATE_1ON1,
       currency: 'EUR',
       counts:   { planned: planned.length, completed: completed.length },
+      noshow_by_student,
     };
     if (warning) payload.warning = warning;
     return res.status(200).json(payload);
