@@ -425,6 +425,22 @@ export default async function handler(req, res) {
         }
         changes.email = normalized;
         auditFields.push('email');
+
+        // Sync team_members.email (alleen als er een rij hangt aan deze user).
+        // Identity-koppeling blijft op user_id; dit houdt de team-member-email
+        // in sync zodat mentor-lijsten dezelfde mail tonen na de wijziging.
+        // Fail-soft: een sync-fout breekt de e-mail-wijziging niet.
+        try {
+          const { error: tmSyncErr } = await supabaseAdmin
+            .from('team_members')
+            .update({ email: normalized })
+            .eq('user_id', userId);
+          if (tmSyncErr) {
+            console.warn('[admin-users] team_members.email sync (soft):', tmSyncErr.message);
+          }
+        } catch (e) {
+          console.warn('[admin-users] team_members.email sync exception (soft):', e?.message || e);
+        }
       }
 
       // Wachtwoord: min 8 tekens. NOOIT loggen of in response terugzetten.
