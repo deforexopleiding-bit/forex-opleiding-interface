@@ -81,7 +81,7 @@
     .stu-act-btn:hover { background: var(--bg-elev-2, rgba(0,0,0,0.04)); }
     .stu-act-btn.primary { background: #0a2f63; color: #fff; border-color: #0a2f63; }
     .stu-act-btn.primary:hover { background: #093d54; }
-    .stu-act-btn .due-badge { font-size: 10.5px; padding: 1px 6px; border-radius: 8px; background: rgba(245,158,11,0.18); color: #92400e; font-weight: 700; }
+    .stu-act-btn .due-badge { font-size: 10.5px; padding: 1px 6px; border-radius: 8px; background: #fbbf24; color: #422006; font-weight: 700; }
     .stu-act-spacer { flex: 1; }
     .stu-act-link { font-size: 12px; color: var(--accent-violet, #6d28d9); text-decoration: none; font-weight: 600; }
     .stu-act-link:hover { text-decoration: underline; }
@@ -307,10 +307,18 @@
     } catch { return iso; }
   }
 
+  // Beoordelen-functionaliteit gaat pas live vanaf juli 2026. Vóór die datum
+  // tonen we GEEN beoordeel-icoon en GEEN "nog X dagen"-badge.
+  const ASSESS_ACTIVE_FROM = new Date(2026, 6, 1); // 1 juli 2026 (maand-index 6 = juli)
+
   // Beoordelen-venster: laatste 7 dagen van de huidige maand. Triggert het
   // amber clipboard-icoon én een "nog X dagen"-badge op de Beoordelen-knop.
+  // Gegate op ASSESS_ACTIVE_FROM zodat we vóór juli 2026 niets activeren.
   function _assessWindowState() {
     const now = new Date();
+    if (now.getTime() < ASSESS_ACTIVE_FROM.getTime()) {
+      return { inWindow: false, daysLeft: 0 };
+    }
     const last = new Date(now.getFullYear(), now.getMonth() + 1, 0); // laatste dag
     const daysLeft = Math.ceil((last.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
     return { inWindow: daysLeft <= 7 && daysLeft >= 0, daysLeft };

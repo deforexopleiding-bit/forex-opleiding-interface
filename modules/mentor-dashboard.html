@@ -1397,6 +1397,11 @@
     bar.innerHTML = '';
   }
 
+  // Beoordelen-functionaliteit gaat pas live vanaf juli 2026. Vóór die datum
+  // verbergen we de reminder-balk helemaal (zelfde gate als
+  // mentor-students.html `_assessWindowState`).
+  const ASSESS_ACTIVE_FROM = new Date(2026, 6, 1); // 1 juli 2026
+
   // Beoordelingen-reminder: amber balk "X van Y gedaan" als X<Y voor deze maand.
   // Y = aantal studenten (uit _lastStudentsList of een meegegeven students-list).
   // X = aantal _assessments-rows (server returnt alleen huidige-maand rijen).
@@ -1405,6 +1410,9 @@
     if (!el) return;
     el.hidden = true;
     el.innerHTML = '';
+
+    // Pre-launch gate: vóór 1 juli 2026 geen reminder tonen.
+    if (Date.now() < ASSESS_ACTIVE_FROM.getTime()) return;
 
     const list = Array.isArray(studentsList)
       ? studentsList
