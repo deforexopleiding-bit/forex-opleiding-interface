@@ -242,22 +242,67 @@
     if (c) c.innerHTML = `<span class="skeleton" style="width:120px"></span>`;
   }
 
+  // Client-side intake-filter — werkt op de geladen _rows (zonder extra
+  // server-call).
+  let _intakeFilter = 'all'; // 'all' | 'nog_geen_mentor' | 'problems' | 'handled' | 'cancelled'
+  function _applyIntakeFilter(rows) {
+    const f = _intakeFilter;
+    if (f === 'all') return rows;
+    if (f === 'nog_geen_mentor') return rows.filter((r) => r.intake_status === 'nog_geen_mentor');
+    if (f === 'handled')         return rows.filter((r) => !!r.handled);
+    if (f === 'cancelled')       return rows.filter((r) => !!r.cancelled);
+    if (f === 'problems') {
+      const PROB = new Set(['wil_niet', 'no_show', 'geen_gehoor', 'wil_later']);
+      return rows.filter((r) => PROB.has(r.intake_status) && !r.handled && !r.cancelled);
+    }
+    return rows;
+  }
+  function _countTeBehandelen(rows) {
+    const PROB = new Set(['wil_niet', 'no_show', 'geen_gehoor', 'wil_later', 'nog_geen_mentor']);
+    return rows.filter((r) => PROB.has(r.intake_status) && !r.handled && !r.cancelled).length;
+  }
+
   function renderTable() {
     const wrap = document.getElementById('tableWrap');
     if (!wrap) return;
-    setCounter(_rows.length);
+    const filtered = _applyIntakeFilter(_rows);
+    setCounter(filtered.length);
 
-    if (_rows.length === 0) {
-      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-inbox-off"></i>Geen onboardings voor deze selectie.</div>`;
+    // Pijplijn-filter chips + 'te behandelen'-teller bovenaan.
+    const teller = _countTeBehandelen(_rows);
+    const tellerBadge = teller > 0
+      ? `<span style="background:rgba(220,38,38,0.15);color:#7f1d1d;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;margin-left:8px">${teller} te behandelen</span>`
+      : '';
+    const chipBtn = (key, label) => {
+      const active = (_intakeFilter === key);
+      const style = active
+        ? 'background:var(--text);color:var(--bg);border-color:var(--text)'
+        : 'background:var(--bg-elev);color:var(--text-dim);border-color:var(--border)';
+      return `<button type="button" data-intake-filter="${key}" style="padding:4px 10px;border:1px solid;border-radius:999px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit;${style}">${label}</button>`;
+    };
+    const chipsRow = `
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+        ${chipBtn('all', 'Alles')}
+        ${chipBtn('nog_geen_mentor', 'Nog geen mentor')}
+        ${chipBtn('problems', 'Te behandelen')}
+        ${chipBtn('handled', 'Afgehandeld')}
+        ${chipBtn('cancelled', 'Geannuleerd')}
+        ${tellerBadge}
+      </div>`;
+
+    if (filtered.length === 0) {
+      wrap.innerHTML = chipsRow + `<div class="empty-state"><i class="ti ti-inbox-off"></i>Geen onboardings voor deze selectie.</div>`;
+      _wireIntakeChips();
       return;
     }
 
-    const body = _rows.map((r) => rowHtml(r)).join('');
-    wrap.innerHTML = `
+    const body = filtered.map((r) => rowHtml(r)).join('');
+    wrap.innerHTML = chipsRow + `
       <table class="data-table">
         <thead>
           <tr>
             <th>Klant</th>
+            <th>Pijplijn</th>
             <th>Traject</th>
             <th>Status</th>
             <th>Betaling</th>
@@ -275,6 +320,15 @@
       </table>`;
 
     wireRowHandlers();
+    _wireIntakeChips();
+  }
+  function _wireIntakeChips() {
+    document.querySelectorAll('[data-intake-filter]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        _intakeFilter = btn.getAttribute('data-intake-filter') || 'all';
+        renderTable();
+      });
+    });
   }
 
   function trajectLabelHtml(r) {
@@ -527,9 +581,13 @@
   }
 
   function rowHtml(r) {
+    const intakeKey = r.intake_status || 'nog_te_benaderen';
+    const rowOpacity = r.cancelled ? 0.5 : (r.handled ? 0.7 : 1);
+    const rowStyle = (rowOpacity < 1) ? ` style="opacity:${rowOpacity}"` : '';
     return `
-      <tr data-row-id="${esc(r.id)}">
+      <tr data-row-id="${esc(r.id)}"${rowStyle}>
         <td><div style="font-weight:600">${esc(r.customer_name || '—')}</div></td>
+        <td>${_intakePillHtml(intakeKey)}</td>
         <td>${trajectLabelHtml(r)}</td>
         <td>${statusBadgeHtml(r.status)}</td>
         <td>${paidBadgeHtml(!!r.paid)}</td>
@@ -662,6 +720,7 @@
   // Mirror van _INTAKE_META in modules/mentor-students.html. Houd labels en
   // kleuren synchroon; key-set komt uit api/_lib/intake-status.js.
   const _INTAKE_META_RO = {
+    nog_geen_mentor:   { label: 'Nog geen mentor',    cls: 'paid-no'   },
     gestart:           { label: 'Gestart',            cls: 'paid-yes'  },
     wil_niet:          { label: 'Wil niet starten',   cls: 'paid-no'   },
     no_show:           { label: 'No-show',            cls: 'paid-no'   },
@@ -1578,12 +1637,25 @@
       if (_qSearch)      qs.set('q',              _qSearch);
       if (_trajectId)    qs.set('traject_id',     _trajectId);
       if (_mentorFilter) qs.set('mentor_user_id', _mentorFilter);
-      const r = await apiFetch('/api/onboardings-admin-list?' + qs.toString());
+      // Fase A: instroom-pijplijn — switcht van /api/onboardings-admin-list
+      // naar /api/admin-future-students-list (incl. no-mentor + intake-status).
+      // Legacy endpoint blijft bestaan voor modules/onboarding-admin.html.
+      const r = await apiFetch('/api/admin-future-students-list?' + qs.toString());
       let d = null; try { d = await r.json(); } catch {}
       if (r.status === 401) { renderError('Niet (meer) ingelogd — log opnieuw in.'); return; }
       if (r.status === 403) { renderError('Geen rechten (onboarding.admin).');       return; }
       if (!r.ok)            { renderError('Ophalen mislukt: ' + (d?.error || ('HTTP ' + r.status))); return; }
-      _rows = Array.isArray(d?.rows) ? d.rows : [];
+      const raw = Array.isArray(d?.rows) ? d.rows : (Array.isArray(d?.future) ? d.future : []);
+      // Default sort: intake_rank asc (problemen + nog_geen_mentor bovenaan).
+      _rows = raw.slice().sort((a, b) => {
+        const ra = (a.intake_rank != null) ? a.intake_rank : 99;
+        const rb = (b.intake_rank != null) ? b.intake_rank : 99;
+        if (ra !== rb) return ra - rb;
+        const da = a.start_date || '9999-99-99';
+        const db = b.start_date || '9999-99-99';
+        if (da !== db) return da < db ? -1 : 1;
+        return String(a.customer_name || '').localeCompare(String(b.customer_name || ''), 'nl');
+      });
       renderTable();
     } catch (e) {
       console.error('[onboarding-admin] list:', e?.message || e);
