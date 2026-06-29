@@ -93,6 +93,12 @@
       .student-meta { font-size: 11px; gap: 8px; }
     }
 
+    .sort-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+    .sort-label { font-size: 12px; color: var(--text-dim); font-weight: 600; }
+    .sort-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; font-size: 12.5px; font-weight: 600; border: 1px solid var(--border); border-radius: 16px; background: var(--bg); color: var(--text-dim); cursor: pointer; font-family: inherit; transition: background .15s, color .15s, border-color .15s; }
+    .sort-chip:hover { color: var(--text); }
+    .sort-chip.active { background: #093d54; color: #fff; border-color: #093d54; }
+    .sort-chip .sort-arrow { font-size: 10px; opacity: 0.85; }
     .search-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
     .search-bar input[type="search"] {
       flex: 1; max-width: 360px;
@@ -130,6 +136,15 @@
     <div id="tabStudenten" class="tab-panel">
       <div class="search-bar">
         <input type="search" id="msSearch" placeholder="Zoek op naam…" autocomplete="off" />
+      </div>
+      <div class="sort-bar" id="msSortBar">
+        <span class="sort-label">Sorteer:</span>
+        <button type="button" class="sort-chip active" data-sort-key="status">Status<span class="sort-arrow">↑</span></button>
+        <button type="button" class="sort-chip"        data-sort-key="name">Naam</button>
+        <button type="button" class="sort-chip"        data-sort-key="progress">Voortgang</button>
+        <button type="button" class="sort-chip"        data-sort-key="noshows">No-shows</button>
+        <button type="button" class="sort-chip"        data-sort-key="nextcall">Volgende call</button>
+        <button type="button" class="sort-chip"        data-sort-key="overdue">Te late facturen</button>
       </div>
       <div id="studentsWrap"><div class="empty-state"><i class="ti ti-clock"></i>Laden…</div></div>
     </div>
@@ -250,6 +265,8 @@
     // de volledige gefilterde set gebaseerd).
     plannedLimit:      25,
     completedLimit:    25,
+    // Mijn studenten — sort-state. Default: status oplopend (urgent eerst).
+    sort: { key: 'status', dir: 'asc' },
   };
 
   function activateTab(name) {
@@ -446,6 +463,76 @@
     _applyStudentFilter('');
   }
 
+  // Sort-rank per status-key voor urgent-first volgorde (asc).
+  const _STATUS_RANK = { overdue: 0, noshow: 1, nocall: 2, ok: 3 };
+
+  function _compareStudents(a, b, key, dir) {
+    const factor = dir === 'desc' ? -1 : 1;
+    switch (key) {
+      case 'status': {
+        const ra = _STATUS_RANK[_studentStatus(a).key] ?? 9;
+        const rb = _STATUS_RANK[_studentStatus(b).key] ?? 9;
+        if (ra !== rb) return factor * (ra - rb);
+        return String(a.name || '').localeCompare(String(b.name || ''), 'nl');
+      }
+      case 'name':
+        return factor * String(a.name || '').localeCompare(String(b.name || ''), 'nl');
+      case 'progress':
+        return factor * ((Number(a.calls_1on1_done) || 0) - (Number(b.calls_1on1_done) || 0));
+      case 'noshows':
+        return factor * ((Number(a.no_shows) || 0) - (Number(b.no_shows) || 0));
+      case 'nextcall': {
+        // Studenten zónder geplande call: ALTIJD onderaan (ongeacht dir).
+        const sa = String(a.bubble_student_id || '');
+        const sb = String(b.bubble_student_id || '');
+        const ta = _nextCallByStudent.get(sa);
+        const tb = _nextCallByStudent.get(sb);
+        if (ta && !tb) return -1;
+        if (!ta && tb) return 1;
+        if (!ta && !tb) return String(a.name || '').localeCompare(String(b.name || ''), 'nl');
+        return factor * (new Date(ta).getTime() - new Date(tb).getTime());
+      }
+      case 'overdue': {
+        const ea = String(a.email || '').toLowerCase();
+        const eb = String(b.email || '').toLowerCase();
+        const oa = ea ? (_overdueByEmail.get(ea) || 0) : 0;
+        const ob = eb ? (_overdueByEmail.get(eb) || 0) : 0;
+        return factor * (oa - ob);
+      }
+    }
+    return 0;
+  }
+
+  function _renderSortChips() {
+    document.querySelectorAll('#msSortBar .sort-chip').forEach((btn) => {
+      const isActive = btn.dataset.sortKey === _state.sort.key;
+      btn.classList.toggle('active', isActive);
+      // Pijl alleen op actieve chip; anders verbergen.
+      let arrow = btn.querySelector('.sort-arrow');
+      if (isActive) {
+        if (!arrow) {
+          arrow = document.createElement('span');
+          arrow.className = 'sort-arrow';
+          btn.appendChild(arrow);
+        }
+        arrow.textContent = _state.sort.dir === 'desc' ? '↓' : '↑';
+      } else if (arrow) {
+        arrow.remove();
+      }
+    });
+  }
+
+  function _onSortChipClick(key) {
+    if (_state.sort.key === key) {
+      _state.sort.dir = _state.sort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      _state.sort.key = key;
+      _state.sort.dir = 'asc';
+    }
+    _renderSortChips();
+    _applyStudentFilter(document.getElementById('msSearch')?.value || '');
+  }
+
   function _applyStudentFilter(q) {
     const wrap = document.getElementById('studentsWrap');
     if (!wrap) return;
@@ -460,8 +547,11 @@
         : `<div class="empty-state"><i class="ti ti-users-off"></i>Geen studenten gevonden onder jouw mentorschap.</div>`;
       return;
     }
+    // Sort-state toepassen vóór render. Status-default is asc → urgent eerst.
+    const { key, dir } = _state.sort;
+    const sorted = list.slice().sort((a, b) => _compareStudents(a, b, key, dir));
     const aw = _assessWindowState();
-    wrap.innerHTML = list.map((s) => _studentCardHtml(s, aw)).join('');
+    wrap.innerHTML = sorted.map((s) => _studentCardHtml(s, aw)).join('');
     _wireStudentRows(wrap);
   }
 
@@ -1276,6 +1366,10 @@
     // Zoekbalk client-side filter.
     const search = document.getElementById('msSearch');
     if (search) search.addEventListener('input', () => _applyStudentFilter(search.value));
+    // Mijn studenten — sort-bar wiring (chip-klik = key wisselen, herklik = dir flip).
+    document.querySelectorAll('#msSortBar .sort-chip').forEach((btn) => {
+      btn.addEventListener('click', () => _onSortChipClick(btn.dataset.sortKey));
+    });
 
     // 1-op-1 date-range wiring (frontend-only).
     document.querySelectorAll('#oneOnOneRangeBar .ms-range-btn').forEach((b) => {
