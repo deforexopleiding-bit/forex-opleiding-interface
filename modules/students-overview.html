@@ -1189,10 +1189,12 @@ async function loadFutureStudents() {
 function fuUpdateTabCount() {
   const el = document.getElementById('soTabFutureCount');
   if (!el) return;
-  // Tel "problemen" = de 4 problematische statussen.
+  // "Te behandelen" = de 4 problematische intake-statussen, ONDER UITSLUITING
+  // van rijen die al zijn afgehandeld of geannuleerd. Manager ziet hier dus
+  // het aantal cases dat z'n aandacht NU nodig heeft.
+  const PROBLEM = new Set(['wil_niet', 'geen_gehoor', 'no_show', 'wil_later']);
   const n = (state.futureRows || []).filter((r) =>
-    r.intake_status === 'wil_niet' || r.intake_status === 'no_show' ||
-    r.intake_status === 'geen_gehoor' || r.intake_status === 'wil_later'
+    PROBLEM.has(r.intake_status) && !r.handled && !r.cancelled
   ).length;
   if (n > 0) { el.textContent = String(n); el.style.display = ''; }
   else       { el.style.display = 'none'; }

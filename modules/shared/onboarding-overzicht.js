@@ -725,7 +725,43 @@
   }
 
   // ── Fase 3 — Admin-acties block in detail-modal ─────────────────────────
+  // Knop-stijl-tokens voor het manager-acties-blok. Eén injectie per page-
+  // load (idempotent via id-guard). Drie hiërarchieën:
+  //   .oa-btn-primary   — gevuld brand, witte tekst (versturen)
+  //   .oa-btn-secondary — neutraal, bg-elev + border (afgehandeld/opslaan/archief)
+  //   .oa-btn-destructive — rood (annuleren)
+  // Veld-namen .oa-section / .oa-section-label voor consistente labels.
+  function _ensureAdminActionsStyles() {
+    if (document.getElementById('obAdminActionsStyles')) return;
+    const css = `
+      .oa-card { border:1px solid var(--border); border-radius:10px; background:var(--bg-elev); padding:14px; display:grid; gap:14px; }
+      .oa-section-label { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; font-weight:600; }
+      .oa-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+      .oa-status { font-size:11.5px; color:var(--text-faint); }
+      .oa-btn { display:inline-flex; align-items:center; gap:6px; padding:7px 12px; border-radius:7px; font:inherit; font-size:12.5px; font-weight:600; cursor:pointer; line-height:1.2; border:1px solid transparent; transition:background .12s, color .12s, border-color .12s, box-shadow .12s; }
+      .oa-btn:disabled { cursor:not-allowed; opacity:0.55; }
+      .oa-btn:focus-visible { outline:none; box-shadow:0 0 0 2px rgba(13,148,136,0.35); }
+      .oa-btn .ti { font-size:14px; }
+      .oa-btn-primary { background:var(--brand-azure, var(--brand-primary, #0d9488)); color:#fff; border-color:var(--brand-azure, var(--brand-primary, #0d9488)); }
+      .oa-btn-primary:hover:not(:disabled) { filter:brightness(0.92); }
+      .oa-btn-secondary { background:var(--bg-elev); color:var(--text); border-color:var(--border); }
+      .oa-btn-secondary:hover:not(:disabled) { background:var(--bg); border-color:var(--text-faint); }
+      .oa-btn-destructive { background:#fff; color:#b91c1c; border-color:#b91c1c; }
+      .oa-btn-destructive:hover:not(:disabled) { background:#dc2626; color:#fff; border-color:#dc2626; }
+      .oa-input, .oa-textarea, .oa-select { padding:7px 9px; border:1px solid var(--border); border-radius:7px; background:var(--bg); color:var(--text); font:inherit; font-size:12.5px; }
+      .oa-textarea { width:100%; resize:vertical; }
+      .oa-select { min-width:220px; }
+      .oa-cancel-block { border-top:1px dashed #fecaca; padding-top:12px; margin-top:4px; }
+      .oa-cancel-warning { font-size:11px; color:#b91c1c; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; font-weight:700; }
+    `;
+    const el = document.createElement('style');
+    el.id = 'obAdminActionsStyles';
+    el.textContent = css;
+    document.head.appendChild(el);
+  }
+
   function _renderAdminActionsBlock(o) {
+    _ensureAdminActionsStyles();
     const id = esc(String(o.id || ''));
     const handled = !!o.handled;
     const startVal = o.start_date ? String(o.start_date).slice(0, 10) : '';
@@ -743,58 +779,57 @@
       cancelHtml = _renderCancellationRecordHtml(o.cancellation || null);
     } else if (canCancel) {
       cancelHtml = `
-        <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
-          <div style="font-size:11.5px;color:#b91c1c;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px"><i class="ti ti-alert-triangle"></i> Annulering (onomkeerbaar)</div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <button type="button" id="adCancelBtn" data-id="${id}"
-              style="padding:6px 12px;border:1px solid #b91c1c;background:#fee2e2;color:#7f1d1d;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12.5px;font-weight:600">
+        <div class="oa-cancel-block">
+          <div class="oa-cancel-warning"><i class="ti ti-alert-triangle"></i> Annulering — onomkeerbaar</div>
+          <div class="oa-row">
+            <button type="button" class="oa-btn oa-btn-destructive" id="adCancelBtn" data-id="${id}">
               <i class="ti ti-user-x"></i> Student annuleren
             </button>
-            <span style="font-size:11.5px;color:var(--text-faint)">Crediteert facturen, stopt abonnement, sluit Bubble-toegang.</span>
+            <span class="oa-status">Crediteert facturen, stopt abonnement, sluit Bubble-toegang.</span>
           </div>
         </div>`;
     }
     return `
-      <div style="border:1px solid var(--border);border-radius:8px;background:var(--bg-elev);padding:12px;display:grid;gap:12px">
+      <div class="oa-card">
         <div>
-          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Notitie / instructie aan mentor</div>
-          <textarea id="adNoteBox" data-id="${id}" rows="2" placeholder="Bijv. Bel deze klant deze week en regel een 1-op-1." style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:12.5px;resize:vertical"></textarea>
-          <div style="margin-top:6px;display:flex;justify-content:flex-end;gap:8px;align-items:center">
-            <span id="adNoteStatus" style="font-size:11.5px;color:var(--text-faint)"></span>
-            <button type="button" class="ob-act primary" id="adNoteSendBtn" data-id="${id}" style="padding:5px 11px">
+          <div class="oa-section-label">Notitie / instructie aan mentor</div>
+          <textarea id="adNoteBox" data-id="${id}" rows="2" placeholder="Bijv. Bel deze klant deze week en regel een 1-op-1." class="oa-textarea"></textarea>
+          <div style="margin-top:8px;display:flex;justify-content:flex-end;gap:8px;align-items:center">
+            <span id="adNoteStatus" class="oa-status"></span>
+            <button type="button" class="oa-btn oa-btn-primary" id="adNoteSendBtn" data-id="${id}">
               <i class="ti ti-message-circle"></i> Versturen naar mentor
             </button>
           </div>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <button type="button" class="ob-act ${handled ? '' : 'primary'}" id="adResolveBtn" data-id="${id}" data-handled="${handled ? '1' : '0'}" style="padding:5px 11px">
+        <div class="oa-row">
+          <button type="button" class="oa-btn oa-btn-secondary" id="adResolveBtn" data-id="${id}" data-handled="${handled ? '1' : '0'}">
             <i class="ti ti-${handled ? 'arrow-back-up' : 'check'}"></i> ${handled ? 'Heropenen' : 'Markeer afgehandeld'}
           </button>
-          <span id="adResolveStatus" style="font-size:11.5px;color:var(--text-faint)"></span>
+          <span id="adResolveStatus" class="oa-status"></span>
         </div>
         <div>
-          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Startdatum</div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input type="date" id="adStartDate" data-id="${id}" value="${esc(startVal)}" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:12.5px">
-            <button type="button" class="ob-act" id="adStartBtn" data-id="${id}" style="padding:5px 11px"><i class="ti ti-calendar-event"></i> Opslaan</button>
-            <span id="adStartStatus" style="font-size:11.5px;color:var(--text-faint)"></span>
+          <div class="oa-section-label">Startdatum</div>
+          <div class="oa-row">
+            <input type="date" id="adStartDate" data-id="${id}" value="${esc(startVal)}" class="oa-input">
+            <button type="button" class="oa-btn oa-btn-secondary" id="adStartBtn" data-id="${id}"><i class="ti ti-calendar-event"></i> Opslaan</button>
+            <span id="adStartStatus" class="oa-status"></span>
           </div>
         </div>
         <div>
-          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Mentor herverdelen</div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <select id="adMentorSel" data-id="${id}" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:12.5px;min-width:220px">
+          <div class="oa-section-label">Mentor herverdelen</div>
+          <div class="oa-row">
+            <select id="adMentorSel" data-id="${id}" class="oa-select">
               <option value="">— Laden…</option>
             </select>
-            <button type="button" class="ob-act" id="adMentorBtn" data-id="${id}" data-current="${esc(o.mentor_user_id || '')}" style="padding:5px 11px"><i class="ti ti-user-check"></i> Opslaan</button>
-            <span id="adMentorStatus" style="font-size:11.5px;color:var(--text-faint)"></span>
+            <button type="button" class="oa-btn oa-btn-secondary" id="adMentorBtn" data-id="${id}" data-current="${esc(o.mentor_user_id || '')}"><i class="ti ti-user-check"></i> Opslaan</button>
+            <span id="adMentorStatus" class="oa-status"></span>
           </div>
         </div>
         <div>
-          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Archief</div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <button type="button" class="ob-act ${archived ? '' : ''}" id="adArchiveBtn" data-id="${id}" data-action="${archiveBtnAction}" style="padding:5px 11px"><i class="ti ti-${archived ? 'archive-off' : 'archive'}"></i> ${esc(archiveBtnLabel)}</button>
-            <span id="adArchiveStatus" style="font-size:11.5px;color:var(--text-faint)"></span>
+          <div class="oa-section-label">Archief</div>
+          <div class="oa-row">
+            <button type="button" class="oa-btn oa-btn-secondary" id="adArchiveBtn" data-id="${id}" data-action="${archiveBtnAction}"><i class="ti ti-${archived ? 'archive-off' : 'archive'}"></i> ${esc(archiveBtnLabel)}</button>
+            <span id="adArchiveStatus" class="oa-status"></span>
           </div>
         </div>
         ${cancelHtml}
