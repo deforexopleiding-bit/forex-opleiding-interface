@@ -723,6 +723,15 @@
           <option value="false">Geblokkeerd</option>
         </select>
       </div>
+      <div class="form-group" id="euMentorEnsureRow" style="display:none">
+        <label class="form-label">Mentor-profiel</label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button type="button" class="btn" id="euMentorEnsureBtn" onclick="euCreateMentorProfile()" style="padding:8px 12px">
+            <i class="ti ti-user-plus"></i> Mentor-profiel aanmaken
+          </button>
+          <span style="font-size:11.5px;color:var(--text-dim)" id="euMentorEnsureMsg">Deze user heeft de mentor-rol maar nog geen team_members-rij — pas dan verschijnt de Mentor↔Bubble-koppeling.</span>
+        </div>
+      </div>
       <div class="form-group" id="euBubbleRow" style="display:none">
         <label class="form-label">Mentor &harr; Bubble-koppeling</label>
         <input type="text" id="euBubbleId" class="form-input" placeholder="bubble_user_id (leeg = ontkoppelen)" autocomplete="off" />
@@ -2489,6 +2498,16 @@ function openEditUserModal(userId) {
     document.getElementById('euBubbleId').value = '';
     bubbleRow.style.display = 'none';
   }
+  // Mentor-profiel-ensure: zichtbaar als user de mentor-rol heeft maar nog
+  // GEEN team_members-rij. Verberg zodra team_member_id gezet is.
+  const ensureRow = document.getElementById('euMentorEnsureRow');
+  const allRoles  = Array.isArray(u.all_roles) ? u.all_roles : (u.role ? [u.role] : []);
+  const isMentor  = allRoles.indexOf('mentor') !== -1 || u.role === 'mentor';
+  if (ensureRow) {
+    ensureRow.style.display = (isMentor && !u.team_member_id) ? '' : 'none';
+    const btn = document.getElementById('euMentorEnsureBtn');
+    if (btn) btn.disabled = false;
+  }
   _euShowError('');
   document.getElementById('euSaveBtn').disabled = false;
   document.getElementById('editUserModal').classList.remove('hidden');
@@ -2509,6 +2528,36 @@ function euGeneratePassword() {
   let out = '';
   for (let i = 0; i < bytes.length; i++) out += alpha[bytes[i] % alpha.length];
   document.getElementById('euPassword').value = out;
+}
+
+// Mentor-profiel aanmaken: idempotente team_members-rij voor een user die
+// de mentor-rol heeft maar nog géén team_members-koppeling. Server gate is
+// super_admin-only; deze knop is UI-zijde óók verborgen voor lagere rollen
+// via renderUsers + openEditUserModal.
+async function euCreateMentorProfile() {
+  const userId = document.getElementById('euUserId').value;
+  if (!userId) { _euShowError('Geen userId.'); return; }
+
+  const btn   = document.getElementById('euMentorEnsureBtn');
+  const msgEl = document.getElementById('euMentorEnsureMsg');
+  if (btn) btn.disabled = true;
+  if (msgEl) msgEl.textContent = 'Mentor-profiel aanmaken…';
+  _euShowError('');
+
+  try {
+    const r = await apiRequest('POST', '/api/team-member-ensure', { user_id: userId });
+    if (r && r.error) throw new Error(r.error);
+
+    // Sluit + herlaad lijst → heropen modal voor dezelfde user, zodat de
+    // Mentor↔Bubble-koppeling-rij nu zichtbaar wordt (team_member_id is gezet).
+    closeEditUserModal();
+    await loadUsers();
+    openEditUserModal(userId);
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    if (msgEl) msgEl.textContent = 'Deze user heeft de mentor-rol maar nog geen team_members-rij — pas dan verschijnt de Mentor↔Bubble-koppeling.';
+    _euShowError(e?.message || String(e));
+  }
 }
 
 async function submitEditUser() {
