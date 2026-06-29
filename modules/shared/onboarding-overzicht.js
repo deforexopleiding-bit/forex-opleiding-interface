@@ -849,7 +849,12 @@
     el.textContent = msg || '';
   }
 
-  function _wireAdminActions(o) {
+  function _wireAdminActions(o, refresh) {
+    // `refresh` is een callback die na elke geslaagde actie wordt aangeroepen
+    // om de host (modal of drawer) z'n inhoud te laten herladen. Default valt
+    // terug op openDetail(o.id) zodat de bestaande modal-flow ongewijzigd blijft.
+    const doRefresh = (typeof refresh === 'function') ? refresh : (() => openDetail(o.id));
+
     // 1) Notitie versturen
     const noteBtn = document.getElementById('adNoteSendBtn');
     if (noteBtn) {
@@ -869,7 +874,7 @@
           if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
           if (box) box.value = '';
           _setStatus('adNoteStatus', d.notification_id ? 'Verstuurd én melding bij mentor.' : 'Verstuurd (geen mentor toegewezen).', false);
-          openDetail(id); // herlaad detail + tijdlijn
+          doRefresh();
         } catch (e) {
           _setStatus('adNoteStatus', 'Mislukt: ' + (e?.message || e), true);
           noteBtn.disabled = false;
@@ -892,7 +897,7 @@
           });
           const d = await r.json().catch(() => ({}));
           if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
-          openDetail(id);
+          doRefresh();
         } catch (e) {
           _setStatus('adResolveStatus', 'Mislukt: ' + (e?.message || e), true);
           resBtn.disabled = false;
@@ -918,7 +923,7 @@
           const d = await r.json().catch(() => ({}));
           if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
           _setStatus('adStartStatus', 'Opgeslagen.', false);
-          openDetail(id);
+          doRefresh();
         } catch (e) {
           _setStatus('adStartStatus', 'Mislukt: ' + (e?.message || e), true);
           sdBtn.disabled = false;
@@ -960,7 +965,7 @@
           const d = await r.json().catch(() => ({}));
           if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
           _setStatus('adMentorStatus', 'Opgeslagen.', false);
-          openDetail(id);
+          doRefresh();
         } catch (e) {
           _setStatus('adMentorStatus', 'Mislukt: ' + (e?.message || e), true);
           mBtn.disabled = false;
@@ -972,7 +977,7 @@
     const cancelBtn = document.getElementById('adCancelBtn');
     if (cancelBtn) {
       cancelBtn.addEventListener('click', () => {
-        _openCancelPreview(cancelBtn.dataset.id || '');
+        _openCancelPreview(cancelBtn.dataset.id || '', doRefresh);
       });
     }
 
@@ -993,7 +998,7 @@
           const d = await r.json().catch(() => ({}));
           if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
           _setStatus('adArchiveStatus', act === 'archive' ? 'Gearchiveerd.' : 'Hersteld.', false);
-          openDetail(id);
+          doRefresh();
         } catch (e) {
           _setStatus('adArchiveStatus', 'Mislukt: ' + (e?.message || e), true);
           arBtn.disabled = false;
@@ -1039,8 +1044,11 @@
     if (el) el.setAttribute('hidden', '');
   }
 
-  async function _openCancelPreview(onboardingId) {
+  async function _openCancelPreview(onboardingId, refresh) {
     if (!onboardingId) return;
+    // refresh-callback wordt doorgegeven aan de result-modal zodat na sluiten
+    // de juiste host (modal of drawer) z'n inhoud herlaadt.
+    const doRefresh = (typeof refresh === 'function') ? refresh : (() => openDetail(onboardingId));
     _openCancelModal();
     const body = document.getElementById('obCancelBody');
     if (!body) return;
@@ -1056,16 +1064,16 @@
       if (d.already_cancelled) {
         body.innerHTML = '<div style="padding:18px;color:var(--text-dim)">Deze student is al geannuleerd. Sluit dit venster.</div>'
           + '<div style="padding:0 18px 14px;text-align:right"><button type="button" id="obCancelDoneBtn" class="ob-act">Sluiten</button></div>';
-        document.getElementById('obCancelDoneBtn').addEventListener('click', _closeCancelModal);
+        document.getElementById('obCancelDoneBtn').addEventListener('click', () => { _closeCancelModal(); doRefresh(); });
         return;
       }
-      _renderCancelPreviewModal(d, onboardingId);
+      _renderCancelPreviewModal(d, onboardingId, doRefresh);
     } catch (e) {
       body.innerHTML = '<div style="padding:18px;color:#b91c1c">Preview mislukt: ' + esc(e?.message || e) + '</div>';
     }
   }
 
-  function _renderCancelPreviewModal(p, onboardingId) {
+  function _renderCancelPreviewModal(p, onboardingId, doRefresh) {
     const body = document.getElementById('obCancelBody');
     if (!body) return;
     const inv  = Array.isArray(p.invoices) ? p.invoices : [];
@@ -1135,11 +1143,11 @@
     accordBtn.addEventListener('click', () => {
       const reason = String(reasonEl.value || '').trim();
       if (!reason) return;
-      _executeCancel(onboardingId, reason);
+      _executeCancel(onboardingId, reason, doRefresh);
     });
   }
 
-  async function _executeCancel(onboardingId, reason) {
+  async function _executeCancel(onboardingId, reason, doRefresh) {
     const body = document.getElementById('obCancelBody');
     const status = document.getElementById('obCancelStatus');
     const accordBtn = document.getElementById('obCancelAccordBtn');
@@ -1156,17 +1164,17 @@
       if (d.already_cancelled) {
         body.innerHTML = '<div style="padding:18px;color:var(--text-dim)">Was al geannuleerd — geen dubbele actie uitgevoerd.</div>'
           + '<div style="padding:0 18px 14px;text-align:right"><button type="button" id="obCancelDoneBtn" class="ob-act">Sluiten</button></div>';
-        document.getElementById('obCancelDoneBtn').addEventListener('click', () => { _closeCancelModal(); openDetail(onboardingId); });
+        document.getElementById('obCancelDoneBtn').addEventListener('click', () => { _closeCancelModal(); doRefresh(); });
         return;
       }
-      _renderCancelResultModal(d, onboardingId);
+      _renderCancelResultModal(d, onboardingId, doRefresh);
     } catch (e) {
       if (status) { status.style.color = '#b91c1c'; status.textContent = 'Mislukt: ' + (e?.message || e); }
       if (accordBtn) accordBtn.disabled = false;
     }
   }
 
-  function _renderCancelResultModal(d, onboardingId) {
+  function _renderCancelResultModal(d, onboardingId, doRefresh) {
     const body = document.getElementById('obCancelBody');
     if (!body) return;
     const steps = d.steps || {};
@@ -1204,8 +1212,65 @@
       </div>`;
     document.getElementById('obCancelDoneBtn').addEventListener('click', () => {
       _closeCancelModal();
-      openDetail(onboardingId);
+      if (typeof doRefresh === 'function') doRefresh();
+      else openDetail(onboardingId);
     });
+  }
+
+  // ── Publieke mountActions — herbruikbare acties + tijdlijn ──────────────
+  // Mount het intake-pill + manager-acties-blok + mentor-tijdlijn in een
+  // willekeurige host-container (bv. een drawer-body). Identieke endpoints,
+  // identieke rol-gating (manager/super_admin alleen voor cancel) als in de
+  // detail-modal. opts.onChange wordt aangeroepen na elke geslaagde actie
+  // zodat de host (lijst, kaart, …) zichzelf kan herladen.
+  //
+  // opts:
+  //   onChange : () => void   — optioneel; callback na succesvolle actie.
+  //   compact  : boolean      — toon kop met student-naam + mentor (default true).
+  async function mountActions(host, onboardingId, opts) {
+    if (!host || !onboardingId) return;
+    opts = opts || {};
+    const onChange = (typeof opts.onChange === 'function') ? opts.onChange : (() => {});
+    const compact  = (opts.compact !== false);
+
+    // Rol cache vullen vóór render, zodat _canCancelOnboardingSync() betrouwbaar
+    // de cancel-knop laat verschijnen (of niet).
+    await _getProfileRoleOnce();
+
+    async function render() {
+      host.innerHTML = '<div style="padding:18px;text-align:center;color:var(--text-faint)">Laden…</div>';
+      try {
+        const r = await window.AgentShared.apiFetch('/api/onboarding-detail?id=' + encodeURIComponent(onboardingId));
+        if (r.status === 401) { host.innerHTML = '<div style="padding:18px;color:#b91c1c">Niet (meer) ingelogd.</div>'; return; }
+        if (r.status === 403) { host.innerHTML = '<div style="padding:18px;color:#b91c1c">Geen rechten (onboarding.admin).</div>'; return; }
+        if (r.status === 404) { host.innerHTML = '<div style="padding:18px;color:var(--text-faint)">Onboarding niet gevonden.</div>'; return; }
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { host.innerHTML = '<div style="padding:18px;color:#b91c1c">Ophalen mislukt: ' + esc(d?.error || ('HTTP ' + r.status)) + '</div>'; return; }
+        const o = d?.onboarding || {};
+
+        const headerHtml = compact ? `
+          <div style="margin-bottom:12px">
+            <div style="font-size:16px;font-weight:700;color:var(--text)">${esc(o.customer_name || '—')}</div>
+            <div style="font-size:12px;color:var(--text-dim);margin-top:2px">
+              <strong>Mentor:</strong> ${esc(o.mentor_name || (o.mentor_user_id || '— niet toegewezen'))}
+              ${o.start_date ? '<span style="color:var(--text-faint);margin:0 6px">·</span><strong>Startdatum:</strong> ' + esc(fmtDateNL(o.start_date)) : ''}
+            </div>
+            <div style="margin-top:6px">${_intakePillHtml(o.intake_status || o.mentor_intake_status || 'nog_te_benaderen')}${o.planned_call_at ? ' <span style="color:var(--text-faint);font-size:11.5px">· geplande call ' + esc(fmtDateTimeNL(o.planned_call_at)) + '</span>' : ''}</div>
+          </div>` : '';
+
+        host.innerHTML = `
+          ${headerHtml}
+          <h3 style="margin:8px 0 4px;font-size:13px;color:var(--text)">Mentor-acties</h3>
+          ${_renderAdminActionsBlock(o)}
+          <h3 style="margin:14px 0 4px;font-size:13px;color:var(--text)">Mentor-tijdlijn</h3>
+          ${_renderMentorTimeline(o)}
+        `;
+        _wireAdminActions(o, () => { render(); onChange(); });
+      } catch (e) {
+        host.innerHTML = '<div style="padding:18px;color:#b91c1c">Ophalen mislukt: ' + esc(e?.message || e) + '</div>';
+      }
+    }
+    await render();
   }
 
   async function openDetail(id) {
@@ -1295,10 +1360,7 @@
           </dd>
           ${link ? `<dt>Persoonlijke link</dt><dd style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all">${esc(link)}</dd>` : ''}
         </dl>
-        <h3>Mentor-acties</h3>
-        ${_renderAdminActionsBlock(o)}
-        <h3>Mentor-tijdlijn</h3>
-        ${_renderMentorTimeline(o)}
+        <div id="obDetailActionsHost"></div>
         <h3>Vragenlijst-antwoorden</h3>
         ${answersJson
           ? `<pre>${esc(answersJson)}</pre>`
@@ -1320,10 +1382,16 @@
           doSendInvite(inviteBtn.dataset.id || '', inviteBtn, { force: alreadySent });
         });
       }
-      // Mentor-acties wiren (notitie / afgehandeld-toggle / startdatum /
-      // herverdelen / archiveren). Hergebruikt bestaande assign-picker
-      // (zelfde mechaniek als mentor-kolom in de hoofdlijst).
-      _wireAdminActions(o);
+      // Mentor-acties + tijdlijn worden nu via de publieke mountActions
+      // gerenderd — één codepad voor modal én drawer. compact:false omdat
+      // de modal zelf al een eigen <dl>-kop heeft (klant/mentor/startdatum).
+      const actionsHost = document.getElementById('obDetailActionsHost');
+      if (actionsHost) {
+        mountActions(actionsHost, id, {
+          onChange: () => openDetail(id),
+          compact:  false,
+        });
+      }
       // E-mailthread laden als de sectie gerenderd is.
       if (canViewEmail && obCustId) {
         _loadObEmailThread(obCustId, o.email || '');
@@ -2703,5 +2771,6 @@
     __loaded: true,
     mount,
     openDetail,
+    mountActions,
   };
 })();
