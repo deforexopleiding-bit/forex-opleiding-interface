@@ -50,15 +50,47 @@
     .tab-btn.active { color: var(--text); border-bottom-color: var(--accent, #6366f1); }
 
     .student-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
-    .student-head { display: grid; grid-template-columns: 1fr auto auto; gap: 14px; align-items: center; padding: 12px 14px; }
-    .student-name { font-size: 14px; font-weight: 600; }
-    .student-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
-    .student-stat { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .student-stat strong { color: var(--text); font-weight: 700; }
+    .student-head { display: grid; grid-template-columns: auto 1fr auto auto auto; gap: 12px; align-items: center; padding: 12px 14px; cursor: pointer; user-select: none; }
+    .student-head:hover { background: rgba(99,102,241,0.04); }
+    .student-card.open .student-head { border-bottom: 1px solid var(--border); }
+    .student-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--accent-grad, linear-gradient(135deg, #093d54 0%, #688b9b 100%)); display: grid; place-items: center; font-size: 12px; font-weight: 800; color: #fff; flex-shrink: 0; }
+    .student-name { font-size: 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .student-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 4px; display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .student-meta i { font-size: 13px; opacity: 0.7; margin-right: 3px; }
+    .student-meta .meta-overdue { color: #b91c1c; font-weight: 600; }
+    .student-meta .meta-warning { color: #b45309; font-weight: 500; }
+    .student-status-pill { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 12px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+    .student-status-pill i { font-size: 13px; }
+    .ss-pill-green { background: rgba(34,197,94,0.13); color: #15803d; }
+    .ss-pill-amber { background: rgba(245,158,11,0.16); color: #b45309; }
+    .ss-pill-red   { background: rgba(220,38,38,0.13); color: #b91c1c; }
+    .student-flag { color: #b91c1c; font-size: 14px; }
+    .assess-icon-btn { background: transparent; border: 0; cursor: pointer; padding: 4px; border-radius: 6px; color: #b45309; display: inline-flex; align-items: center; }
+    .assess-icon-btn:hover { background: rgba(245,158,11,0.12); }
+    .student-caret { color: var(--text-faint); transition: transform .15s; }
+    .student-card.open .student-caret { transform: rotate(90deg); }
+    .student-body { display: none; padding: 14px 16px 16px; background: var(--bg); }
+    .student-card.open .student-body { display: block; }
+    .student-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 14px; }
+    .student-stat-cell { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+    .student-stat-cell .ssc-label { font-size: 11px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; display: flex; align-items: center; gap: 5px; }
+    .student-stat-cell .ssc-label i { font-size: 13px; }
+    .student-stat-cell .ssc-value { font-size: 15px; font-weight: 700; margin-top: 4px; color: var(--text); font-variant-numeric: tabular-nums; }
+    .student-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .stu-act-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; font-size: 12.5px; font-weight: 600; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text); cursor: pointer; font-family: inherit; transition: background .15s, border-color .15s; }
+    .stu-act-btn:hover { background: var(--bg-elev-2, rgba(0,0,0,0.04)); }
+    .stu-act-btn.primary { background: #0a2f63; color: #fff; border-color: #0a2f63; }
+    .stu-act-btn.primary:hover { background: #093d54; }
+    .stu-act-btn .due-badge { font-size: 10.5px; padding: 1px 6px; border-radius: 8px; background: rgba(245,158,11,0.18); color: #92400e; font-weight: 700; }
+    .stu-act-spacer { flex: 1; }
+    .stu-act-link { font-size: 12px; color: var(--accent-violet, #6d28d9); text-decoration: none; font-weight: 600; }
+    .stu-act-link:hover { text-decoration: underline; }
+    .stu-assess-form { display: none; margin-top: 12px; padding: 12px 14px; background: rgba(10,47,99,0.04); border: 1px solid var(--border); border-radius: 8px; }
+    .stu-assess-form.open { display: block; }
+    .funded-status-msg { font-size: 11.5px; color: var(--text-faint); margin-left: 4px; }
     @media (max-width: 880px) {
-      .student-head { grid-template-columns: 1fr auto; }
-      .student-stat { display: none; }
-      .student-stat:first-of-type { display: inline; }
+      .student-head { grid-template-columns: auto 1fr auto auto; gap: 8px; }
+      .student-meta { font-size: 11px; gap: 8px; }
     }
 
     .search-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
@@ -167,6 +199,7 @@
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
 <script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/student-signals.js"></script>
 <script src="/modules/shared/permissions.js"></script>
 <script src="/modules/shared/sidebar.js"></script>
 <script>
@@ -231,8 +264,82 @@
     if (name === '1on1'      && !_state.oneOnOneLoaded) load1on1Sessions();
   }
 
-  // ── Overdue map (factuur-badge per email) ─────────────────────────────
-  const _overdueByEmail = new Map();
+  // ── Mijn studenten ────────────────────────────────────────────────────
+  // Subsystemen geporteerd uit mentor-dashboard.html (zelfde API's): overdue
+  // facturen, assessments, funded-certs (Supabase Storage 'funded-certificates'),
+  // student-signals (modal via window.StudentSignals). 1-op-1 toekomst- en
+  // no-show-data uit /api/mentor-1on1-sessions.
+  const _overdueByEmail   = new Map(); // lowercased email → aantal te-late facturen
+  const _assessments      = new Map(); // bubble_student_id → assessment-rij
+  const _fundedCerts      = new Map(); // bubble_student_id → cert-rij
+  const _signalsByStudent = new Map(); // bubble_student_id → active signal
+  const _nextCallByStudent = new Map(); // member_user → eerstvolgende starts_at (ISO)
+  const _noshowByStudent   = new Map(); // member_user → laatste-no-show ISO
+  const _stDetailCache    = new Map(); // bubble_student_id → mentor-student-detail payload
+  const _openCardId       = { sid: null };
+
+  const _FUNDED_MAX_BYTES = 10 * 1024 * 1024;
+  const _FUNDED_ACCEPT    = '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png';
+  const _FUNDED_BUCKET    = 'funded-certificates';
+
+  function _fmtFundedMonth(ymd) {
+    if (!ymd) return '';
+    const m = String(ymd).match(/^(\d{4})-(\d{2})/);
+    if (!m) return esc(String(ymd));
+    const months = ['', 'jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+    const idx = parseInt(m[2], 10);
+    return `${months[idx] || m[2]} ${m[1]}`;
+  }
+  function _safeFilename(name) {
+    return String(name || '').replace(/[^A-Za-z0-9._-]/g, '_').replace(/_+/g, '_').slice(0, 120) || 'cert';
+  }
+
+  function _avatarInitial(s) {
+    const txt = String(s || '?').trim();
+    return (txt.match(/[A-Za-z0-9]/) || ['?'])[0].toUpperCase();
+  }
+
+  function _shortDateTime(iso) {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    } catch { return iso; }
+  }
+
+  // Beoordelen-venster: laatste 7 dagen van de huidige maand. Triggert het
+  // amber clipboard-icoon én een "nog X dagen"-badge op de Beoordelen-knop.
+  function _assessWindowState() {
+    const now = new Date();
+    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0); // laatste dag
+    const daysLeft = Math.ceil((last.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+    return { inWindow: daysLeft <= 7 && daysLeft >= 0, daysLeft };
+  }
+
+  // ── Status per student ────────────────────────────────────────────────
+  // Prioriteit: overdue (rood) > recent no-show (rood) > geen call (oranje) > in orde (groen).
+  function _studentStatus(s) {
+    const email = String(s.email || '').trim().toLowerCase();
+    const overdueN = email ? (_overdueByEmail.get(email) || 0) : 0;
+    if (overdueN > 0) {
+      return { key: 'overdue', label: 'Betaalachterstand', cls: 'ss-pill-red', icon: 'ti-receipt' };
+    }
+    const sid = String(s.bubble_student_id || '');
+    const lastNoshowIso = sid ? _noshowByStudent.get(sid) : null;
+    if (lastNoshowIso) {
+      const days = (Date.now() - new Date(lastNoshowIso).getTime()) / (24 * 60 * 60 * 1000);
+      if (days >= 0 && days < 30) {
+        return { key: 'noshow', label: 'No-show recent', cls: 'ss-pill-red', icon: 'ti-alert-triangle' };
+      }
+    }
+    const nextIso = sid ? _nextCallByStudent.get(sid) : null;
+    if (!nextIso) {
+      return { key: 'nocall', label: 'Geen call ingepland', cls: 'ss-pill-amber', icon: 'ti-calendar-off' };
+    }
+    return { key: 'ok', label: 'In orde', cls: 'ss-pill-green', icon: 'ti-check' };
+  }
+
+  // ── Loaders (parallel) ────────────────────────────────────────────────
   async function loadOverdueMap() {
     _overdueByEmail.clear();
     const apiFetch = window.AgentShared?.apiFetch;
@@ -246,20 +353,75 @@
         const n = Number(count) || 0;
         if (n > 0) _overdueByEmail.set(String(email).toLowerCase(), n);
       }
-    } catch (e) {
-      console.warn('[mentor-students] overdue:', e?.message || e);
-    }
-  }
-  function _overdueBadgeHtml(email) {
-    const e = String(email || '').trim().toLowerCase();
-    if (!e) return '';
-    const n = _overdueByEmail.get(e) || 0;
-    if (n <= 0) return '';
-    const label = (n === 1) ? '1 factuur te laat' : (n + ' facturen te laat');
-    return `<span class="badge" style="background:rgba(220,38,38,0.16);color:#991b1b">${label}</span>`;
+    } catch (e) { console.warn('[mentor-students] overdue:', e?.message || e); }
   }
 
-  // ── Mijn studenten ────────────────────────────────────────────────────
+  async function loadAssessmentsMap() {
+    _assessments.clear();
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/mentor-assessments-self');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'assessments fetch failed');
+      for (const a of (d.assessments || [])) {
+        if (a && a.student_id) _assessments.set(String(a.student_id), a);
+      }
+    } catch (e) { console.warn('[mentor-students] assessments:', e?.message || e); }
+  }
+
+  async function loadFundedCertsMap() {
+    _fundedCerts.clear();
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/mentor-funded-certs-self');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'funded-certs fetch failed');
+      for (const c of (d.certs || [])) {
+        if (c && c.student_id) _fundedCerts.set(String(c.student_id), c);
+      }
+    } catch (e) { console.warn('[mentor-students] funded-certs:', e?.message || e); }
+  }
+
+  async function loadSignalsMap() {
+    _signalsByStudent.clear();
+    if (!window.StudentSignals) return;
+    try {
+      const m = await window.StudentSignals.fetchActiveSignals();
+      for (const [k, v] of m.entries()) _signalsByStudent.set(String(k), v);
+    } catch (e) { console.warn('[mentor-students] signals:', e?.message || e); }
+  }
+
+  async function loadOneOnOneMaps() {
+    _nextCallByStudent.clear();
+    _noshowByStudent.clear();
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/mentor-1on1-sessions');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || '1on1 fetch failed');
+      // Volgende call per student: vroegste toekomstige planned-sessie.
+      const nowMs = Date.now();
+      const planned = Array.isArray(d.planned) ? d.planned : [];
+      for (const p of planned) {
+        const mu = p.member_user;
+        if (!mu) continue;
+        const t = new Date(p.starts_at).getTime();
+        if (!Number.isFinite(t) || t < nowMs) continue;
+        const prev = _nextCallByStudent.get(mu);
+        if (!prev || t < new Date(prev).getTime()) _nextCallByStudent.set(mu, p.starts_at);
+      }
+      // No-shows by student.
+      const nsBy = (d && typeof d.noshow_by_student === 'object' && d.noshow_by_student) ? d.noshow_by_student : {};
+      for (const [mu, iso] of Object.entries(nsBy)) {
+        if (mu && iso) _noshowByStudent.set(String(mu), String(iso));
+      }
+    } catch (e) { console.warn('[mentor-students] 1on1:', e?.message || e); }
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────
   function renderStudents(payload) {
     const wrap = document.getElementById('studentsWrap');
     if (!wrap) return;
@@ -290,29 +452,459 @@
         : `<div class="empty-state"><i class="ti ti-users-off"></i>Geen studenten gevonden onder jouw mentorschap.</div>`;
       return;
     }
-    wrap.innerHTML = list.map((s) => {
-      const name      = esc(s.name || s.email || '(geen naam)');
-      const email     = esc(s.email || '');
-      const program   = s.program ? `<span class="badge badge-blue">${esc(s.program)}</span>` : '';
-      const onboard   = s.onboarding_status ? `<span class="badge badge-amber">${esc(s.onboarding_status)}</span>` : '';
-      const overdue   = _overdueBadgeHtml(s.email);
-      const callsTotal  = Number(s.calls_1on1_total) || 0;
-      const callsDone   = Number(s.calls_1on1_done) || 0;
-      const noShows     = Number(s.no_shows) || 0;
-      return `
-        <div class="student-card">
-          <div class="student-head">
-            <div>
-              <div class="student-name">${name} ${program} ${onboard} ${overdue}</div>
-              <div class="student-meta">${email}</div>
-            </div>
-            <div class="student-stat" title="1-op-1-calls voltooid / totaal"><strong>${callsDone}/${callsTotal || '—'}</strong> 1-op-1</div>
-            <div class="student-stat" title="No-shows"><i class="ti ti-alert-triangle" style="color:${noShows > 0 ? '#b45309' : 'var(--text-faint)'}"></i> ${noShows}</div>
-          </div>
-        </div>`;
-    }).join('');
+    const aw = _assessWindowState();
+    wrap.innerHTML = list.map((s) => _studentCardHtml(s, aw)).join('');
+    _wireStudentRows(wrap);
   }
 
+  function _studentCardHtml(s, aw) {
+    const sid       = String(s.bubble_student_id || '');
+    const sidAttr   = esc(sid);
+    const name      = esc(s.name || s.email || '(geen naam)');
+    const rawName   = String(s.name || s.email || '');
+    const email     = String(s.email || '').toLowerCase();
+    const program   = s.program ? `<span class="badge badge-blue">${esc(s.program)}</span>` : '';
+    const callsTot  = Number(s.calls_1on1_total) || 0;
+    const callsDone = Number(s.calls_1on1_done) || 0;
+    const noShows   = Number(s.no_shows) || 0;
+    const overdueN  = email ? (_overdueByEmail.get(email) || 0) : 0;
+    const nextIso   = _nextCallByStudent.get(sid) || null;
+    const status    = _studentStatus(s);
+    const hasSignal = _signalsByStudent.has(sid);
+    const flagHtml  = hasSignal ? '<i class="ti ti-flag-filled student-flag" title="Actief signaal"></i>' : '';
+    const a         = _assessments.get(sid);
+    const assessOpen = aw.inWindow && (!a || (a.status !== 'op_schema' && a.status !== 'aandacht' && a.status !== 'risico' && a.status !== 'niet_actief'));
+    // Bovenstaande: amber clipboard ALLEEN als er nog geen assessment voor deze maand is.
+    const needsAssess = aw.inWindow && !a;
+    const assessIconHtml = needsAssess
+      ? `<button type="button" class="assess-icon-btn" data-stu-assess="${sidAttr}" title="Beoordeling nodig (laatste 7 dagen)"><i class="ti ti-clipboard-list"></i></button>`
+      : '';
+    // Meta-regel iconen
+    const callsLbl = callsTot ? `${callsDone}/${callsTot}` : `${callsDone}`;
+    const nextLbl  = nextIso
+      ? `<span><i class="ti ti-calendar"></i>${esc(_shortDateTime(nextIso))}</span>`
+      : `<span class="meta-warning"><i class="ti ti-calendar-off"></i>geen call</span>`;
+    const noshowLbl = `<span><i class="ti ti-alert-triangle"></i>${noShows} no-show${noShows === 1 ? '' : 's'}</span>`;
+    const overdueLbl = overdueN > 0
+      ? `<span class="meta-overdue"><i class="ti ti-receipt"></i>${overdueN} ${overdueN === 1 ? 'factuur' : 'facturen'} te laat</span>`
+      : '';
+
+    return `
+      <div class="student-card" data-stu-card="${sidAttr}" data-stu-name="${esc(rawName)}" data-stu-email="${esc(s.email || '')}">
+        <div class="student-head" data-stu-toggle="${sidAttr}">
+          <div class="student-avatar">${esc(_avatarInitial(rawName))}</div>
+          <div>
+            <div class="student-name">${name} ${program} ${flagHtml}</div>
+            <div class="student-meta">
+              <span><i class="ti ti-phone"></i>${callsLbl}</span>
+              ${nextLbl}
+              ${noshowLbl}
+              ${overdueLbl}
+            </div>
+          </div>
+          <span class="student-status-pill ${status.cls}"><i class="ti ${status.icon}"></i>${esc(status.label)}</span>
+          ${assessIconHtml}
+          <i class="ti ti-chevron-right student-caret"></i>
+        </div>
+        <div class="student-body" data-stu-body="${sidAttr}">
+          ${_studentBodyHtml(s, aw)}
+        </div>
+      </div>`;
+  }
+
+  function _studentBodyHtml(s, aw) {
+    const sid       = String(s.bubble_student_id || '');
+    const sidAttr   = esc(sid);
+    const callsTot  = Number(s.calls_1on1_total) || 0;
+    const callsDone = Number(s.calls_1on1_done) || 0;
+    const noShows   = Number(s.no_shows) || 0;
+    const email     = String(s.email || '').toLowerCase();
+    const overdueN  = email ? (_overdueByEmail.get(email) || 0) : 0;
+    const nextIso   = _nextCallByStudent.get(sid) || null;
+    const cert      = _fundedCerts.get(sid) || null;
+    const sig       = _signalsByStudent.get(sid) || null;
+    const a         = _assessments.get(sid) || null;
+    const assessDue = aw.inWindow && !a;
+    const assessLabel = a ? 'Beoordeling bijwerken' : 'Beoordelen';
+    const assessBadge = assessDue ? `<span class="due-badge">nog ${aw.daysLeft} dag${aw.daysLeft === 1 ? '' : 'en'}</span>` : '';
+
+    const certLabel = cert ? '✓ Certificaat actief' : 'Certificaat uploaden';
+    const certCls   = cert ? '' : 'primary';
+    const certTitle = cert ? ('Geüpload — ' + _fmtFundedMonth(cert.funded_month || '')) : 'Upload certificaat (PDF/JPG/PNG ≤10MB)';
+
+    const signalLabel = sig ? 'Signaal bekijken' : 'Signaal melden';
+
+    return `
+      <div class="student-stats-grid">
+        <div class="student-stat-cell">
+          <div class="ssc-label"><i class="ti ti-phone"></i> 1-op-1</div>
+          <div class="ssc-value">${callsDone} / ${callsTot || '—'}</div>
+        </div>
+        <div class="student-stat-cell">
+          <div class="ssc-label"><i class="ti ti-alert-triangle"></i> No-shows</div>
+          <div class="ssc-value">${noShows}</div>
+        </div>
+        <div class="student-stat-cell">
+          <div class="ssc-label"><i class="ti ti-receipt"></i> Open facturen</div>
+          <div class="ssc-value">${overdueN}</div>
+        </div>
+        <div class="student-stat-cell">
+          <div class="ssc-label"><i class="ti ti-calendar"></i> Volgende call</div>
+          <div class="ssc-value">${nextIso ? esc(_shortDateTime(nextIso)) : 'Geen'}</div>
+        </div>
+      </div>
+
+      <div class="student-actions">
+        <button type="button" class="stu-act-btn primary" data-stu-action="assess" data-stu-id="${sidAttr}">
+          <i class="ti ti-clipboard-list"></i>${esc(assessLabel)}${assessBadge}
+        </button>
+        <button type="button" class="stu-act-btn ${certCls}" data-stu-action="cert" data-stu-id="${sidAttr}" title="${certTitle}">
+          <i class="ti ti-certificate"></i>${esc(certLabel)}
+        </button>
+        <input type="file" class="stu-funded-file" data-stu-id="${sidAttr}" accept="${_FUNDED_ACCEPT}" hidden />
+        <span class="funded-status-msg" data-stu-funded-status="${sidAttr}"></span>
+        <button type="button" class="stu-act-btn" data-stu-action="signal" data-stu-id="${sidAttr}">
+          <i class="ti ${sig ? 'ti-flag-filled' : 'ti-flag'}" style="${sig ? 'color:#b91c1c' : ''}"></i>${esc(signalLabel)}
+        </button>
+        <div class="stu-act-spacer"></div>
+        <a href="#" class="stu-act-link" data-stu-action="detail" data-stu-id="${sidAttr}">Student openen →</a>
+      </div>
+
+      <div class="stu-assess-form" data-stu-assess-form="${sidAttr}"></div>
+      <div class="stu-detail-body" data-stu-detail-body="${sidAttr}" style="display:none;margin-top:14px"></div>`;
+  }
+
+  function _wireStudentRows(wrap) {
+    // Toggle uitklap (één tegelijk open).
+    wrap.querySelectorAll('.student-head[data-stu-toggle]').forEach((head) => {
+      head.addEventListener('click', (ev) => {
+        // Skip toggle als de klik uit het amber assess-icoon of de body komt
+        // (body krijgt eigen handlers en mag niet collapsen bij sub-clicks).
+        if (ev.target.closest('.assess-icon-btn')) return;
+        const sid = head.dataset.stuToggle;
+        _toggleStudentCard(sid);
+      });
+    });
+    // Amber clipboard in header → opent direct het assess-form van die kaart.
+    wrap.querySelectorAll('[data-stu-assess]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const sid = btn.dataset.stuAssess;
+        _toggleStudentCard(sid, true);
+        setTimeout(() => _openAssessForm(sid), 0);
+      });
+    });
+    // Action-buttons in uitklap.
+    wrap.querySelectorAll('.stu-act-btn, .stu-act-link').forEach((el) => {
+      el.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (el.tagName === 'A') ev.preventDefault();
+        const sid = el.dataset.stuId;
+        const action = el.dataset.stuAction;
+        if (action === 'assess')      _openAssessForm(sid);
+        else if (action === 'cert')   _triggerFundedUpload(sid);
+        else if (action === 'signal') _openSignalModal(sid);
+        else if (action === 'detail') _loadStudentDetail(sid);
+      });
+    });
+    // Funded file-inputs.
+    wrap.querySelectorAll('input.stu-funded-file').forEach((input) => {
+      input.addEventListener('change', async () => {
+        const sid = input.dataset.stuId;
+        const file = input.files && input.files[0];
+        if (!file) return;
+        const card = wrap.querySelector('.student-card[data-stu-card="' + sid.replace(/"/g, '') + '"]');
+        const name = card?.dataset.stuName || '';
+        await _uploadFundedCert(sid, name, file);
+        input.value = '';
+      });
+    });
+  }
+
+  function _toggleStudentCard(sid, forceOpen) {
+    const card = document.querySelector('.student-card[data-stu-card="' + sid.replace(/"/g, '') + '"]');
+    if (!card) return;
+    const willOpen = forceOpen ? true : !card.classList.contains('open');
+    // Close anderen.
+    document.querySelectorAll('.student-card.open').forEach((c) => c.classList.remove('open'));
+    if (willOpen) {
+      card.classList.add('open');
+      _openCardId.sid = sid;
+    } else {
+      _openCardId.sid = null;
+    }
+  }
+
+  // ── Assessment-form (inline) ──────────────────────────────────────────
+  function _openAssessForm(sid) {
+    const card = document.querySelector('.student-card[data-stu-card="' + sid.replace(/"/g, '') + '"]');
+    if (!card) return;
+    const form = card.querySelector('[data-stu-assess-form="' + sid.replace(/"/g, '') + '"]');
+    if (!form) return;
+    if (form.classList.contains('open')) {
+      form.classList.remove('open');
+      form.innerHTML = '';
+      return;
+    }
+    form.classList.add('open');
+    const a = _assessments.get(String(sid)) || null;
+    const studentName = card.dataset.stuName || '';
+    const status = a?.status || 'op_schema';
+    const score  = (a && a.score != null) ? Number(a.score) : '';
+    const activeYes = a ? !!a.active_tasks_done : true;
+    const note   = a?.note || '';
+    const hideDetails = (status === 'niet_actief');
+    form.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:10px">
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-dim);font-weight:600">
+          Status
+          <select class="assess-status" data-student-id="${esc(sid)}"
+                  style="padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-family:inherit">
+            <option value="op_schema"  ${status==='op_schema'  ? 'selected':''}>Op schema</option>
+            <option value="aandacht"   ${status==='aandacht'   ? 'selected':''}>Aandacht nodig</option>
+            <option value="risico"     ${status==='risico'     ? 'selected':''}>Risico op uitval</option>
+            <option value="niet_actief"${status==='niet_actief'? 'selected':''}>Student niet actief (geen beoordeling)</option>
+          </select>
+        </label>
+        <label class="assess-score-wrap" style="display:${hideDetails?'none':'flex'};flex-direction:column;gap:4px;font-size:12px;color:var(--text-dim);font-weight:600">
+          Cijfer (1–10)
+          <input type="number" class="assess-score" min="1" max="10" step="1" value="${score===''?'':esc(String(score))}"
+                 style="padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-family:inherit"/>
+        </label>
+        <label class="assess-active-wrap" style="display:${hideDetails?'none':'flex'};flex-direction:column;gap:4px;font-size:12px;color:var(--text-dim);font-weight:600">
+          Actief &amp; taken gedaan
+          <select class="assess-active"
+                  style="padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-family:inherit">
+            <option value="yes" ${activeYes ? 'selected' : ''}>Ja</option>
+            <option value="no"  ${!activeYes ? 'selected' : ''}>Nee</option>
+          </select>
+        </label>
+      </div>
+      <label class="assess-note-wrap" style="display:${hideDetails?'none':'block'};margin-bottom:10px">
+        <div style="font-size:12px;color:var(--text-dim);font-weight:600;margin-bottom:4px">Notitie</div>
+        <textarea class="assess-note" rows="2"
+                  style="width:100%;padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-family:inherit;resize:vertical">${esc(note)}</textarea>
+      </label>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <button type="button" class="assess-save-btn"
+                style="padding:7px 14px;font-size:13px;font-weight:600;border:0;border-radius:7px;background:#0a2f63;color:#fff;cursor:pointer;font-family:inherit">
+          Opslaan
+        </button>
+        <button type="button" class="assess-cancel-btn"
+                style="padding:7px 12px;font-size:13px;font-weight:600;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer;font-family:inherit">
+          Annuleren
+        </button>
+        <span class="assess-status-msg" style="font-size:11.5px;color:var(--text-faint)"></span>
+      </div>`;
+
+    const statusEl = form.querySelector('.assess-status');
+    statusEl.addEventListener('change', () => {
+      const hide = (statusEl.value === 'niet_actief');
+      form.querySelectorAll('.assess-score-wrap, .assess-active-wrap').forEach((el) => {
+        el.style.display = hide ? 'none' : 'flex';
+      });
+      const noteWrap = form.querySelector('.assess-note-wrap');
+      if (noteWrap) noteWrap.style.display = hide ? 'none' : 'block';
+    });
+    form.querySelector('.assess-cancel-btn').addEventListener('click', () => {
+      form.classList.remove('open');
+      form.innerHTML = '';
+    });
+    form.querySelector('.assess-save-btn').addEventListener('click', () =>
+      _saveAssessment(sid, studentName, form)
+    );
+  }
+
+  async function _saveAssessment(sid, studentName, form) {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    const status = form.querySelector('.assess-status')?.value || '';
+    const msg = form.querySelector('.assess-status-msg');
+
+    const body = { student_id: sid, student_name: studentName || '', status };
+    if (status !== 'niet_actief') {
+      const scoreNum = Number(form.querySelector('.assess-score')?.value);
+      if (!Number.isFinite(scoreNum) || !Number.isInteger(scoreNum) || scoreNum < 1 || scoreNum > 10) {
+        if (msg) { msg.style.color = '#b91c1c'; msg.textContent = 'Cijfer moet 1–10 zijn.'; }
+        return;
+      }
+      body.score = scoreNum;
+      body.active_tasks_done = (form.querySelector('.assess-active')?.value === 'yes');
+      const noteVal = form.querySelector('.assess-note')?.value || '';
+      body.note = noteVal.trim() || null;
+    }
+    const btn = form.querySelector('.assess-save-btn');
+    if (btn) btn.disabled = true;
+    if (msg) { msg.style.color = 'var(--text-faint)'; msg.textContent = 'Opslaan…'; }
+    try {
+      const r = await apiFetch('/api/mentor-assessment-save', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'opslaan faalde');
+      _assessments.set(String(sid), d.assessment);
+      if (msg) { msg.style.color = '#15803d'; msg.textContent = '✓ Opgeslagen.'; }
+      // Re-render zodat status-pill + amber clipboard meekomen.
+      setTimeout(() => { _applyStudentFilter(document.getElementById('msSearch')?.value || ''); _toggleStudentCard(sid, true); }, 600);
+    } catch (e) {
+      if (msg) { msg.style.color = '#b91c1c'; msg.textContent = 'Fout: ' + (e?.message || e); }
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  // ── Funded-cert upload ────────────────────────────────────────────────
+  function _triggerFundedUpload(sid) {
+    const card = document.querySelector('.student-card[data-stu-card="' + sid.replace(/"/g, '') + '"]');
+    if (!card) return;
+    const input = card.querySelector('input.stu-funded-file[data-stu-id="' + sid.replace(/"/g, '') + '"]');
+    if (input) input.click();
+  }
+  function _setFundedStatusMsg(sid, html, tone) {
+    const el = document.querySelector('[data-stu-funded-status="' + sid.replace(/"/g, '') + '"]');
+    if (!el) return;
+    el.style.color = tone === 'err' ? '#b91c1c' : tone === 'ok' ? '#15803d' : 'var(--text-faint)';
+    el.innerHTML = html || '';
+  }
+  async function _uploadFundedCert(studentId, studentName, file) {
+    const allowed = ['application/pdf', 'image/jpeg', 'image/png'];
+    const nameLower = (file.name || '').toLowerCase();
+    const allowedExt = /\.(pdf|jpe?g|png)$/i.test(nameLower);
+    if (file.type && !allowed.includes(file.type) && !allowedExt) {
+      _setFundedStatusMsg(studentId, 'Type niet toegestaan — PDF/JPG/PNG.', 'err');
+      return;
+    }
+    if (file.size > _FUNDED_MAX_BYTES) {
+      _setFundedStatusMsg(studentId, 'Bestand > 10MB.', 'err');
+      return;
+    }
+    _setFundedStatusMsg(studentId, 'Uploaden…', 'info');
+    let uid = null;
+    try {
+      if (window._authSharedReady) await window._authSharedReady;
+      const session = window.AuthShared && (await window.AuthShared.getSession());
+      uid = session?.user?.id || null;
+    } catch (e) { /* uid blijft null */ }
+    if (!uid) { _setFundedStatusMsg(studentId, 'Sessie niet beschikbaar — log opnieuw in.', 'err'); return; }
+
+    const safe = _safeFilename(file.name || 'cert');
+    const filePath = `${uid}/${studentId}/${Date.now()}_${safe}`;
+    try {
+      if (!window.supabase || !window.supabase.storage) throw new Error('Supabase-client niet beschikbaar');
+      const { error: upErr } = await window.supabase.storage
+        .from(_FUNDED_BUCKET)
+        .upload(filePath, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+      if (upErr) throw new Error(upErr.message || 'upload faalde');
+    } catch (e) {
+      console.error('[funded-upload] storage:', e?.message || e);
+      _setFundedStatusMsg(studentId, 'Upload mislukt: ' + esc(e?.message || e), 'err');
+      return;
+    }
+    try {
+      const apiFetch = window.AgentShared?.apiFetch;
+      if (typeof apiFetch !== 'function') throw new Error('apiFetch niet beschikbaar');
+      const r = await apiFetch('/api/mentor-funded-cert-save', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ student_id: studentId, student_name: studentName || '', file_path: filePath, file_name: file.name || safe }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'save faalde');
+      _fundedCerts.set(String(studentId), {
+        student_id      : studentId,
+        student_name    : studentName || null,
+        funded_month    : d.funded_month,
+        file_name       : file.name || safe,
+        last_uploaded_at: new Date().toISOString(),
+      });
+      if (d.newly_claimed) {
+        _setFundedStatusMsg(studentId, '€100-bonus geactiveerd.', 'ok');
+      } else {
+        _setFundedStatusMsg(studentId, 'Bestand bijgewerkt.', 'ok');
+      }
+      setTimeout(() => {
+        _applyStudentFilter(document.getElementById('msSearch')?.value || '');
+        _toggleStudentCard(studentId, true);
+      }, 800);
+    } catch (e) {
+      console.error('[funded-upload] save:', e?.message || e);
+      _setFundedStatusMsg(studentId, 'Opslaan mislukt: ' + esc(e?.message || e), 'err');
+    }
+  }
+
+  // ── Signaal modal (window.StudentSignals) ─────────────────────────────
+  function _openSignalModal(sid) {
+    const card = document.querySelector('.student-card[data-stu-card="' + sid.replace(/"/g, '') + '"]');
+    if (!card || !window.StudentSignals) return;
+    const name  = card.dataset.stuName || '';
+    const email = card.dataset.stuEmail || '';
+    window.StudentSignals.openCreate(
+      { bubble_student_id: sid, name: name, email: email },
+      (signal) => {
+        _signalsByStudent.set(String(signal.bubble_student_id), signal);
+        _applyStudentFilter(document.getElementById('msSearch')?.value || '');
+        _toggleStudentCard(sid, true);
+      }
+    );
+  }
+
+  // ── Student-detail (uitgeklapt body) ──────────────────────────────────
+  async function _loadStudentDetail(sid) {
+    const card = document.querySelector('.student-card[data-stu-card="' + sid.replace(/"/g, '') + '"]');
+    if (!card) return;
+    const body = card.querySelector('[data-stu-detail-body="' + sid.replace(/"/g, '') + '"]');
+    if (!body) return;
+    if (body.style.display !== 'none') { body.style.display = 'none'; body.innerHTML = ''; return; }
+    body.style.display = 'block';
+    if (_stDetailCache.has(sid)) { _renderStudentDetail(body, _stDetailCache.get(sid)); return; }
+    body.innerHTML = `<div style="color:var(--text-faint);font-size:12.5px;padding:10px;text-align:center">Laden…</div>`;
+    try {
+      const apiFetch = window.AgentShared?.apiFetch;
+      const r = await apiFetch('/api/mentor-student-detail?student_id=' + encodeURIComponent(sid));
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'detail fetch failed');
+      _stDetailCache.set(sid, d);
+      _renderStudentDetail(body, d);
+    } catch (e) {
+      console.error('[mentor-students] student-detail:', e?.message || e);
+      body.innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i>${esc(e?.message || 'Detail ophalen mislukt')}</div>`;
+    }
+  }
+  function _renderStudentDetail(body, d) {
+    const progress = (d && Number.isFinite(Number(d.progress))) ? Math.max(0, Math.min(100, Number(d.progress))) : null;
+    const sessions = Array.isArray(d?.sessions) ? d.sessions : [];
+    const tasks    = Array.isArray(d?.tasks) ? d.tasks : [];
+    const sessionsHtml = sessions.length === 0
+      ? `<div style="color:var(--text-faint);font-size:12.5px;padding:8px 0">Geen 1-op-1-sessies vastgelegd.</div>`
+      : `<table class="data-table" style="margin-top:6px"><thead><tr><th>Datum</th><th>Agenda</th><th>Stage</th><th>Status</th></tr></thead><tbody>${
+          sessions.slice(0, 25).map((s) => {
+            const badge = s.no_show ? '<span class="badge badge-amber">No-show</span>'
+              : (s.is_done ? '<span class="badge badge-green">Voltooid</span>' : '<span class="badge badge-grey">Gepland</span>');
+            return `<tr><td>${esc(fmtDateNL(s.date))}</td><td>${esc(s.agenda || '—')}</td><td>${esc(s.stage || '—')}</td><td>${badge}</td></tr>`;
+          }).join('')
+        }</tbody></table>`;
+    const tasksHtml = tasks.length === 0
+      ? `<div style="color:var(--text-faint);font-size:12.5px;padding:8px 0">Geen taken gevonden.</div>`
+      : `<div style="margin-top:6px">${tasks.map((t) => {
+          const items = (t.items && t.items.length) ? `<div style="margin-top:2px;color:var(--text-dim);font-size:11.5px">${esc(t.items.join(' · '))}</div>` : '';
+          return `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px dashed var(--border);font-size:12.5px"><div style="flex:1"><strong>${esc(t.type_of_task || 'Taak')}</strong>${items}</div><span style="font-size:11px;color:var(--text-faint);font-variant-numeric:tabular-nums">${Math.round(Number(t.progress) || 0)}%</span></div>`;
+        }).join('')}</div>`;
+    body.innerHTML = `
+      <div style="margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-dim)">
+          <span>Traject-voortgang</span>
+          <span style="margin-left:auto;font-variant-numeric:tabular-nums">${progress == null ? '—' : (progress + '%')}</span>
+        </div>
+        <div style="width:100%;height:8px;background:var(--bg-elev-2,rgba(100,116,139,0.18));border-radius:4px;overflow:hidden;margin-top:4px"><div style="height:100%;background:linear-gradient(90deg,#093d54,#688b9b);width:${progress == null ? 0 : progress}%"></div></div>
+      </div>
+      <h3 style="font-size:13px;font-weight:700;margin:12px 0 4px;color:var(--text)"><i class="ti ti-calendar"></i> 1-op-1 sessies</h3>
+      ${sessionsHtml}
+      <h3 style="font-size:13px;font-weight:700;margin:14px 0 4px;color:var(--text)"><i class="ti ti-list-check"></i> Taken</h3>
+      ${tasksHtml}`;
+  }
+
+  // ── Initial load ──────────────────────────────────────────────────────
   async function loadStudents() {
     _state.studentsLoaded = true;
     const apiFetch = window.AgentShared?.apiFetch;
@@ -321,9 +913,13 @@
     const wrap = document.getElementById('studentsWrap');
     if (wrap) wrap.innerHTML = `<div style="color:var(--text-faint);font-size:12.5px;padding:14px;text-align:center">Studenten laden…</div>`;
     try {
-      const [r, _o] = await Promise.all([
+      const [r] = await Promise.all([
         apiFetch('/api/mentor-my-students'),
         loadOverdueMap(),
+        loadAssessmentsMap(),
+        loadFundedCertsMap(),
+        loadSignalsMap(),
+        loadOneOnOneMaps(),
       ]);
       const d = await r.json();
       if (!r.ok) throw new Error(d?.error || 'students fetch failed');
@@ -333,6 +929,12 @@
       setError('studentsWrap', 'Studenten ophalen mislukt: ' + (e?.message || e));
       _state.studentsLoaded = false;
     }
+  }
+
+  // Signal-modal eenmalig mounten (idempotent) zodanig dat _openSignalModal
+  // direct kan open-clicken zonder mount-race.
+  if (window.StudentSignals && typeof window.StudentSignals.ensureModalMounted === 'function') {
+    try { window.StudentSignals.ensureModalMounted(); } catch (e) { console.warn('[mentor-students] signal modal:', e?.message || e); }
   }
 
   // ── Toekomstige studenten ─────────────────────────────────────────────
