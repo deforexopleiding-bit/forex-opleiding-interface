@@ -1101,32 +1101,40 @@
   // ── Intake-statusmodel (afgeleid, prioriteit hoog→laag) ───────────────
   // 1) gestart            — er bestaat een AFGERONDE 1-op-1 voor deze bubble_user_id.
   // 2) wil_niet           — mentor_intake_status==='wil_niet'.
-  // 3) wil_later          — mentor_intake_status==='wil_later'.
+  // 3) no_show            — er is een no-show voor deze bubble_user_id (uit
+  //                         _noshowByStudent) ÉN geen afgeronde 1-op-1 daarna.
+  //                         "Gestart" wint van no_show, dus de "geen afgeronde
+  //                         call na no-show"-regel klopt vanzelf: zodra er een
+  //                         completed-sessie is valt de check eerder bij gestart.
+  //                         AUTO — niet handmatig instelbaar.
   // 4) geen_gehoor        — mentor_intake_status==='geen_gehoor'.
-  // 5) call_ingepland     — er bestaat een GEPLANDE (toekomstige) 1-op-1.
-  // 6) nog_te_benaderen   — default.
+  // 5) wil_later          — mentor_intake_status==='wil_later'.
+  // 6) call_ingepland     — er bestaat een GEPLANDE (toekomstige) 1-op-1.
+  // 7) nog_te_benaderen   — default.
   //
-  // De vier middelste statussen zijn HANDMATIG instelbaar door de mentor;
-  // 'gestart' en 'call_ingepland' worden afgeleid uit de 1-op-1 data en zijn
-  // dus read-only in de UI.
+  // Vier middelste statussen zijn HANDMATIG instelbaar door de mentor;
+  // 'gestart', 'no_show' en 'call_ingepland' worden afgeleid uit de 1-op-1
+  // data en zijn dus read-only in de UI.
   const _INTAKE_MANUAL = ['nog_te_benaderen','geen_gehoor','wil_later','wil_niet'];
   const _INTAKE_META = {
-    gestart:           { label: 'Gestart',            cls: 'badge-green', auto: true },
+    gestart:           { label: 'Gestart',            cls: 'badge-green', auto: true  },
     wil_niet:          { label: 'Wil niet starten',   cls: 'badge-red',   auto: false },
-    wil_later:         { label: 'Wil later starten',  cls: 'badge-amber', auto: false },
+    no_show:           { label: 'No-show',            cls: 'badge-red',   auto: true  },
     geen_gehoor:       { label: 'Geen gehoor',        cls: 'badge-amber', auto: false },
-    call_ingepland:    { label: 'Call ingepland',     cls: 'badge-blue',  auto: true },
+    wil_later:         { label: 'Wil later starten',  cls: 'badge-amber', auto: false },
+    call_ingepland:    { label: 'Call ingepland',     cls: 'badge-blue',  auto: true  },
     nog_te_benaderen:  { label: 'Nog te benaderen',   cls: 'badge-grey',  auto: false },
   };
 
   function _futureIntakeState(s) {
     const bu = s.bubble_user_id ? String(s.bubble_user_id) : null;
-    if (bu && _completedByMember.has(bu))     return 'gestart';
+    if (bu && _completedByMember.has(bu))      return 'gestart';
     const ms = s.mentor_intake_status || null;
-    if (ms === 'wil_niet')   return 'wil_niet';
-    if (ms === 'wil_later')  return 'wil_later';
-    if (ms === 'geen_gehoor') return 'geen_gehoor';
-    if (bu && _nextCallByStudent.has(bu))     return 'call_ingepland';
+    if (ms === 'wil_niet')                     return 'wil_niet';
+    if (bu && _noshowByStudent.has(bu))        return 'no_show';   // auto, na wil_niet
+    if (ms === 'geen_gehoor')                  return 'geen_gehoor';
+    if (ms === 'wil_later')                    return 'wil_later';
+    if (bu && _nextCallByStudent.has(bu))      return 'call_ingepland';
     return 'nog_te_benaderen';
   }
 
@@ -1147,6 +1155,8 @@
       if (planned) events.push({ at: planned, kind: 'call_scheduled', label: 'Call ingepland' });
       const started = _completedByMember.get(bu);
       if (started) events.push({ at: started, kind: 'call_started', label: 'Eerste call gestart' });
+      const ns = _noshowByStudent.get(bu);
+      if (ns) events.push({ at: ns, kind: 'no_show', label: 'No-show' });
     }
     for (const u of (Array.isArray(s.updates) ? s.updates : [])) {
       if (u.kind === 'status' && u.status && _INTAKE_META[u.status]) {
@@ -1189,7 +1199,10 @@
         data-fut-set-status="${esc(k)}"
         style="padding:5px 9px;font-size:12px;${style}">${esc(m.label)}</button>`;
     }).join(' ');
-    const autoNote = (key === 'gestart' || key === 'call_ingepland')
+    // Auto-status pad (gestart / no_show / call_ingepland) toont een read-only
+    // uitleg-regel; alleen de 4 handmatige knoppen blijven klikbaar in de strip.
+    const isAuto = !!(_INTAKE_META[key] && _INTAKE_META[key].auto);
+    const autoNote = isAuto
       ? `<div style="font-size:11.5px;color:var(--text-faint);margin-top:4px">Huidige status "<strong>${esc(_INTAKE_META[key].label)}</strong>" is automatisch afgeleid uit de 1-op-1 sessies — kies hierboven een handmatige status om dat over te schrijven.</div>`
       : '';
     const noteId = 'futNote-' + esc(String(s.onboarding_id));
