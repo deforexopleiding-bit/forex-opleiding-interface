@@ -706,6 +706,212 @@
     '</div>';
   }
 
+  // ── Fase 3 — Admin-acties block in detail-modal ─────────────────────────
+  function _renderAdminActionsBlock(o) {
+    const id = esc(String(o.id || ''));
+    const handled = !!o.handled;
+    const startVal = o.start_date ? String(o.start_date).slice(0, 10) : '';
+    const archived = !!o.archived_at;
+    const archiveBtnLabel = archived ? 'Herstellen uit archief' : 'Archiveren';
+    const archiveBtnAction = archived ? 'restore' : 'archive';
+    return `
+      <div style="border:1px solid var(--border);border-radius:8px;background:var(--bg-elev);padding:12px;display:grid;gap:12px">
+        <div>
+          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Notitie / instructie aan mentor</div>
+          <textarea id="adNoteBox" data-id="${id}" rows="2" placeholder="Bijv. Bel deze klant deze week en regel een 1-op-1." style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:12.5px;resize:vertical"></textarea>
+          <div style="margin-top:6px;display:flex;justify-content:flex-end;gap:8px;align-items:center">
+            <span id="adNoteStatus" style="font-size:11.5px;color:var(--text-faint)"></span>
+            <button type="button" class="ob-act primary" id="adNoteSendBtn" data-id="${id}" style="padding:5px 11px">
+              <i class="ti ti-message-circle"></i> Versturen naar mentor
+            </button>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button type="button" class="ob-act ${handled ? '' : 'primary'}" id="adResolveBtn" data-id="${id}" data-handled="${handled ? '1' : '0'}" style="padding:5px 11px">
+            <i class="ti ti-${handled ? 'arrow-back-up' : 'check'}"></i> ${handled ? 'Heropenen' : 'Markeer afgehandeld'}
+          </button>
+          <span id="adResolveStatus" style="font-size:11.5px;color:var(--text-faint)"></span>
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Startdatum</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input type="date" id="adStartDate" data-id="${id}" value="${esc(startVal)}" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:12.5px">
+            <button type="button" class="ob-act" id="adStartBtn" data-id="${id}" style="padding:5px 11px"><i class="ti ti-calendar-event"></i> Opslaan</button>
+            <span id="adStartStatus" style="font-size:11.5px;color:var(--text-faint)"></span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Mentor herverdelen</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="adMentorSel" data-id="${id}" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:12.5px;min-width:220px">
+              <option value="">— Laden…</option>
+            </select>
+            <button type="button" class="ob-act" id="adMentorBtn" data-id="${id}" data-current="${esc(o.mentor_user_id || '')}" style="padding:5px 11px"><i class="ti ti-user-check"></i> Opslaan</button>
+            <span id="adMentorStatus" style="font-size:11.5px;color:var(--text-faint)"></span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Archief</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button type="button" class="ob-act ${archived ? '' : ''}" id="adArchiveBtn" data-id="${id}" data-action="${archiveBtnAction}" style="padding:5px 11px"><i class="ti ti-${archived ? 'archive-off' : 'archive'}"></i> ${esc(archiveBtnLabel)}</button>
+            <span id="adArchiveStatus" style="font-size:11.5px;color:var(--text-faint)"></span>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function _setStatus(elId, msg, isError) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.style.color = isError ? '#b91c1c' : 'var(--text-dim)';
+    el.textContent = msg || '';
+  }
+
+  function _wireAdminActions(o) {
+    // 1) Notitie versturen
+    const noteBtn = document.getElementById('adNoteSendBtn');
+    if (noteBtn) {
+      noteBtn.addEventListener('click', async () => {
+        const id   = noteBtn.dataset.id || '';
+        const box  = document.getElementById('adNoteBox');
+        const text = String(box?.value || '').trim();
+        if (!text) { _setStatus('adNoteStatus', 'Notitie is leeg.', true); return; }
+        noteBtn.disabled = true;
+        _setStatus('adNoteStatus', 'Versturen…', false);
+        try {
+          const r = await window.AgentShared.apiFetch('/api/admin-onboarding-note', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ onboarding_id: id, note: text }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+          if (box) box.value = '';
+          _setStatus('adNoteStatus', d.notification_id ? 'Verstuurd én melding bij mentor.' : 'Verstuurd (geen mentor toegewezen).', false);
+          openDetail(id); // herlaad detail + tijdlijn
+        } catch (e) {
+          _setStatus('adNoteStatus', 'Mislukt: ' + (e?.message || e), true);
+          noteBtn.disabled = false;
+        }
+      });
+    }
+
+    // 2) Markeer afgehandeld / Heropenen
+    const resBtn = document.getElementById('adResolveBtn');
+    if (resBtn) {
+      resBtn.addEventListener('click', async () => {
+        const id = resBtn.dataset.id || '';
+        const wasHandled = resBtn.dataset.handled === '1';
+        resBtn.disabled = true;
+        _setStatus('adResolveStatus', 'Opslaan…', false);
+        try {
+          const r = await window.AgentShared.apiFetch('/api/admin-onboarding-resolve', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ onboarding_id: id, handled: !wasHandled }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+          openDetail(id);
+        } catch (e) {
+          _setStatus('adResolveStatus', 'Mislukt: ' + (e?.message || e), true);
+          resBtn.disabled = false;
+        }
+      });
+    }
+
+    // 3) Startdatum
+    const sdBtn = document.getElementById('adStartBtn');
+    if (sdBtn) {
+      sdBtn.addEventListener('click', async () => {
+        const id  = sdBtn.dataset.id || '';
+        const inp = document.getElementById('adStartDate');
+        const val = String(inp?.value || '').trim();
+        if (!val) { _setStatus('adStartStatus', 'Kies een datum.', true); return; }
+        sdBtn.disabled = true;
+        _setStatus('adStartStatus', 'Opslaan…', false);
+        try {
+          const r = await window.AgentShared.apiFetch('/api/admin-onboarding-start-date', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ onboarding_id: id, start_date: val }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+          _setStatus('adStartStatus', 'Opgeslagen.', false);
+          openDetail(id);
+        } catch (e) {
+          _setStatus('adStartStatus', 'Mislukt: ' + (e?.message || e), true);
+          sdBtn.disabled = false;
+        }
+      });
+    }
+
+    // 4) Herverdelen — mentor-keuze populeren via /api/mentor-admin-list
+    const sel = document.getElementById('adMentorSel');
+    if (sel) {
+      (async () => {
+        try {
+          const r = await window.AgentShared.apiFetch('/api/mentor-admin-list');
+          const d = await r.json().catch(() => ({}));
+          const mentors = Array.isArray(d?.mentors) ? d.mentors : [];
+          const cur = (o.mentor_user_id || '');
+          sel.innerHTML = '<option value="">— Geen mentor</option>' +
+            mentors.map((m) => '<option value="' + esc(m.user_id) + '"' + (m.user_id === cur ? ' selected' : '') + '>' + esc(m.name || m.email || m.user_id) + '</option>').join('');
+        } catch (e) {
+          sel.innerHTML = '<option value="">— Mentoren niet beschikbaar</option>';
+        }
+      })();
+    }
+    const mBtn = document.getElementById('adMentorBtn');
+    if (mBtn) {
+      mBtn.addEventListener('click', async () => {
+        const id  = mBtn.dataset.id || '';
+        const cur = mBtn.dataset.current || '';
+        const sel2 = document.getElementById('adMentorSel');
+        const next = String(sel2?.value || '');
+        if (next === cur) { _setStatus('adMentorStatus', 'Geen wijziging.', false); return; }
+        mBtn.disabled = true;
+        _setStatus('adMentorStatus', 'Opslaan…', false);
+        try {
+          const r = await window.AgentShared.apiFetch('/api/onboarding-assign-mentor', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ onboarding_id: id, mentor_user_id: next || null }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+          _setStatus('adMentorStatus', 'Opgeslagen.', false);
+          openDetail(id);
+        } catch (e) {
+          _setStatus('adMentorStatus', 'Mislukt: ' + (e?.message || e), true);
+          mBtn.disabled = false;
+        }
+      });
+    }
+
+    // 5) Archiveren / herstellen
+    const arBtn = document.getElementById('adArchiveBtn');
+    if (arBtn) {
+      arBtn.addEventListener('click', async () => {
+        const id  = arBtn.dataset.id || '';
+        const act = arBtn.dataset.action || 'archive';
+        if (act === 'archive' && !window.confirm('Weet je zeker dat je deze onboarding wilt archiveren? Mentor verliest toegang.')) return;
+        arBtn.disabled = true;
+        _setStatus('adArchiveStatus', 'Opslaan…', false);
+        try {
+          const r = await window.AgentShared.apiFetch('/api/onboarding-archive', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ onboarding_id: id, action: act }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+          _setStatus('adArchiveStatus', act === 'archive' ? 'Gearchiveerd.' : 'Hersteld.', false);
+          openDetail(id);
+        } catch (e) {
+          _setStatus('adArchiveStatus', 'Mislukt: ' + (e?.message || e), true);
+          arBtn.disabled = false;
+        }
+      });
+    }
+  }
+
   async function openDetail(id) {
     if (!id) return;
     const m  = document.getElementById('obDetailModal');
@@ -789,6 +995,8 @@
           </dd>
           ${link ? `<dt>Persoonlijke link</dt><dd style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all">${esc(link)}</dd>` : ''}
         </dl>
+        <h3>Mentor-acties</h3>
+        ${_renderAdminActionsBlock(o)}
         <h3>Mentor-tijdlijn</h3>
         ${_renderMentorTimeline(o)}
         <h3>Vragenlijst-antwoorden</h3>
@@ -812,6 +1020,10 @@
           doSendInvite(inviteBtn.dataset.id || '', inviteBtn, { force: alreadySent });
         });
       }
+      // Mentor-acties wiren (notitie / afgehandeld-toggle / startdatum /
+      // herverdelen / archiveren). Hergebruikt bestaande assign-picker
+      // (zelfde mechaniek als mentor-kolom in de hoofdlijst).
+      _wireAdminActions(o);
       // E-mailthread laden als de sectie gerenderd is.
       if (canViewEmail && obCustId) {
         _loadObEmailThread(obCustId, o.email || '');

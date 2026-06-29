@@ -124,6 +124,23 @@
       <h1>Studenten</h1>
       <p>Mijn studenten, toekomstige studenten en 1-op-1 sessies in één overzicht.</p>
     </div>
+    <div style="position:relative">
+      <button id="msNotifBtn" type="button" title="Meldingen"
+        style="position:relative;background:transparent;border:1px solid var(--border);border-radius:8px;padding:8px 12px;cursor:pointer;color:var(--text);display:inline-flex;align-items:center;gap:6px;font-family:inherit">
+        <i class="ti ti-bell"></i>
+        <span id="msNotifCount" style="display:none;background:#dc2626;color:#fff;border-radius:999px;padding:1px 7px;font-size:11px;font-weight:700;line-height:1.4">0</span>
+      </button>
+      <div id="msNotifPanel" hidden
+        style="position:absolute;right:0;top:calc(100% + 6px);width:380px;max-height:520px;overflow-y:auto;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.18);z-index:50">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--border)">
+          <div style="font-weight:600;font-size:13px">Meldingen</div>
+          <button id="msNotifMarkAll" type="button" style="background:transparent;border:none;color:var(--text-dim);font-size:12px;cursor:pointer;font-family:inherit">Alles gelezen</button>
+        </div>
+        <div id="msNotifList" style="padding:4px 0">
+          <div style="padding:14px;color:var(--text-faint);font-size:12.5px;text-align:center">Laden…</div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div id="msContent">
@@ -298,6 +315,10 @@
   // Toekomst-tab state: cache op onboarding_id en uitgeklapte kaart.
   const _futureById       = new Map(); // onboarding_id → student-record (laatste server-snapshot)
   const _futureOpenId     = { id: null };
+  // Fase 3a — Meldingen (mentor self-only).
+  let   _notifications = [];           // raw lijst /api/mentor-notifications-list
+  const _unreadByOnb        = new Map(); // onboarding_id → count
+  const _unreadByBubbleUser = new Map(); // onboarding_bubble_user_id → count
 
   const _FUNDED_MAX_BYTES = 10 * 1024 * 1024;
   const _FUNDED_ACCEPT    = '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png';
@@ -608,7 +629,7 @@
         <div class="student-head" data-stu-toggle="${sidAttr}">
           <div class="student-avatar">${esc(_avatarInitial(rawName))}</div>
           <div>
-            <div class="student-name">${name} ${program} ${flagHtml}</div>
+            <div class="student-name">${name} ${program} ${flagHtml}${_unreadAdminBadgeForBubble(sid)}</div>
             <div class="student-meta">
               <span><i class="ti ti-phone"></i>${callsLbl}</span>
               ${nextLbl}
@@ -1279,7 +1300,7 @@
       <div class="student-card" data-fut-card="${esc(String(s.onboarding_id))}" style="${cardStyle}">
         <div class="student-head" data-fut-toggle="${esc(String(s.onboarding_id))}" style="grid-template-columns:1fr auto;cursor:pointer">
           <div>
-            <div class="student-name">${esc(s.customer_name || '—')}</div>
+            <div class="student-name">${esc(s.customer_name || '—')}${_unreadAdminBadgeForOnb(String(s.onboarding_id || ''))}</div>
             <div class="student-meta">${esc(s.traject_label || '—')}</div>
             ${startLine}
           </div>
@@ -1648,8 +1669,148 @@
       if (_state.dateRange === 'custom') _applyDateRange();
     });
 
+    // Fase 3a — Meldingen-paneel wiring + initial load.
+    _wireNotificationsPanel();
+    loadNotifications();
+
     // Default tab.
     activateTab('studenten');
+  }
+
+  // ── Fase 3a — Meldingen ─────────────────────────────────────────────────
+  function _unreadAdminBadgeForOnb(onbId) {
+    if (!onbId) return '';
+    const n = _unreadByOnb.get(onbId) || 0;
+    if (n <= 0) return '';
+    return ' <span class="badge" style="background:#dc2626;color:#fff;padding:1px 7px;border-radius:999px;font-size:10.5px;font-weight:700" title="Ongelezen update van management">●</span>';
+  }
+  function _unreadAdminBadgeForBubble(bubbleId) {
+    if (!bubbleId) return '';
+    const n = _unreadByBubbleUser.get(String(bubbleId)) || 0;
+    if (n <= 0) return '';
+    return ' <span class="badge" style="background:#dc2626;color:#fff;padding:1px 7px;border-radius:999px;font-size:10.5px;font-weight:700" title="Ongelezen update van management">●</span>';
+  }
+  function _wireNotificationsPanel() {
+    const btn   = document.getElementById('msNotifBtn');
+    const panel = document.getElementById('msNotifPanel');
+    const all   = document.getElementById('msNotifMarkAll');
+    if (btn && panel) {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        panel.hidden = !panel.hidden;
+      });
+      document.addEventListener('click', (ev) => {
+        if (panel.hidden) return;
+        if (ev.target === btn || btn.contains(ev.target) || panel.contains(ev.target)) return;
+        panel.hidden = true;
+      });
+    }
+    if (all) all.addEventListener('click', () => _markAllRead());
+  }
+  async function loadNotifications() {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/mentor-notifications-list');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      _notifications = Array.isArray(d?.notifications) ? d.notifications : [];
+      _unreadByOnb.clear();
+      _unreadByBubbleUser.clear();
+      for (const n of _notifications) {
+        if (n.read_at != null) continue;
+        // Alleen 'admin_note' levert een per-student-badge in de tabs;
+        // assigned_to_you / reassigned_away / start_date_changed verschijnen
+        // wel in het meldingen-paneel maar niet als rij-badge.
+        if (n.kind !== 'admin_note') continue;
+        if (n.onboarding_id) {
+          _unreadByOnb.set(n.onboarding_id, (_unreadByOnb.get(n.onboarding_id) || 0) + 1);
+        }
+        if (n.onboarding_bubble_user_id) {
+          const k = String(n.onboarding_bubble_user_id);
+          _unreadByBubbleUser.set(k, (_unreadByBubbleUser.get(k) || 0) + 1);
+        }
+      }
+      _renderNotifications(Number(d?.unread_count) || 0);
+      // Rerenders zodat badges direct verschijnen.
+      try { _rerenderFutureList(); } catch {}
+      try {
+        if (typeof _applyStudentFilter === 'function') {
+          _applyStudentFilter(document.getElementById('msSearch')?.value || '');
+        }
+      } catch {}
+    } catch (e) {
+      console.warn('[mentor-students] notifications:', e?.message || e);
+    }
+  }
+  function _renderNotifications(unreadCount) {
+    const cntEl = document.getElementById('msNotifCount');
+    const list  = document.getElementById('msNotifList');
+    if (cntEl) {
+      if (unreadCount > 0) { cntEl.textContent = String(unreadCount); cntEl.style.display = ''; }
+      else                 { cntEl.style.display = 'none'; }
+    }
+    if (!list) return;
+    if (_notifications.length === 0) {
+      list.innerHTML = '<div style="padding:14px;color:var(--text-faint);font-size:12.5px;text-align:center">Geen meldingen.</div>';
+      return;
+    }
+    list.innerHTML = _notifications.map((n) => {
+      const unread = (n.read_at == null);
+      const bg = unread ? 'background:rgba(13,148,136,0.06)' : '';
+      const ago = n.created_at ? esc(_shortDateTime(n.created_at)) : '';
+      const stud = n.onboarding_customer_name ? '<div style="font-size:11.5px;color:var(--text-faint)">' + esc(n.onboarding_customer_name) + '</div>' : '';
+      const body = n.body ? '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;white-space:pre-wrap">' + esc(n.body) + '</div>' : '';
+      const readBtn = unread
+        ? '<button type="button" data-mark-read="' + esc(n.id) + '" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--text-dim);cursor:pointer;font-family:inherit">Gelezen</button>'
+        : '';
+      return '<div style="padding:10px 12px;border-bottom:1px solid var(--border);' + bg + '">'
+        + '<div style="display:flex;align-items:start;justify-content:space-between;gap:8px">'
+        +   '<div style="flex:1;min-width:0">'
+        +     '<div style="font-size:12.5px;font-weight:600;color:var(--text)">' + esc(n.title || n.kind) + '</div>'
+        +     stud
+        +     body
+        +     '<div style="font-size:11px;color:var(--text-faint);margin-top:4px">' + ago + '</div>'
+        +   '</div>'
+        +   readBtn
+        + '</div>'
+      + '</div>';
+    }).join('');
+    list.querySelectorAll('[data-mark-read]').forEach((btn) => {
+      btn.addEventListener('click', () => _markRead(btn.getAttribute('data-mark-read')));
+    });
+  }
+  async function _markRead(id) {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (!id || typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/mentor-notification-mark-read', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      await loadNotifications();
+    } catch (e) {
+      console.warn('[mentor-students] mark-read:', e?.message || e);
+    }
+  }
+  async function _markAllRead() {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    const ids = (_notifications || []).filter((n) => n.read_at == null).map((n) => n.id);
+    if (ids.length === 0) return;
+    try {
+      const r = await apiFetch('/api/mentor-notification-mark-read', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      await loadNotifications();
+    } catch (e) {
+      console.warn('[mentor-students] mark-all-read:', e?.message || e);
+    }
   }
 
   document.addEventListener('DOMContentLoaded', init);

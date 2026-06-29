@@ -211,6 +211,7 @@
           <button type="button" class="so-toggle" data-fu-filt="geen_gehoor">Geen gehoor</button>
           <button type="button" class="so-toggle" data-fu-filt="wil_later">Wil later</button>
           <button type="button" class="so-toggle" data-fu-filt="stale">Geen update &gt;7 dagen</button>
+          <button type="button" class="so-toggle" data-fu-filt="handled">Afgehandeld</button>
         </div>
         <span id="fuCountInfo" style="margin-left:auto"></span>
       </div>
@@ -1110,7 +1111,8 @@ function fuUpdateTabCount() {
 function fuApplyFilter(rows) {
   const f = state.futureFilter;
   if (f === 'all') return rows;
-  if (f === 'stale') return rows.filter((r) => Number(r.days_since_update) > 7 || r.days_since_update == null);
+  if (f === 'stale')   return rows.filter((r) => Number(r.days_since_update) > 7 || r.days_since_update == null);
+  if (f === 'handled') return rows.filter((r) => !!r.handled);
   return rows.filter((r) => r.intake_status === f);
 }
 
@@ -1180,8 +1182,10 @@ function renderFutureTable() {
               + (ago ? '<div style="color:var(--text-faint);font-size:11.5px">' + ago + '</div>' : '')
               + note;
     }
-    return '<tr data-fu-id="' + esc(r.onboarding_id) + '">' +
-      '<td><div class="so-name">' + esc(r.customer_name || '—') + '</div></td>' +
+    const rowStyle = r.handled ? ' style="opacity:0.55"' : '';
+    const handledTag = r.handled ? ' <span class="so-badge" style="background:rgba(100,116,139,0.18);color:#475569" title="Afgehandeld — vervalt zodra er nieuwe activiteit is.">Afgehandeld</span>' : '';
+    return '<tr data-fu-id="' + esc(r.onboarding_id) + '"' + rowStyle + '>' +
+      '<td><div class="so-name">' + esc(r.customer_name || '—') + handledTag + '</div></td>' +
       '<td>' + (r.mentor_name ? esc(r.mentor_name) : '<span class="so-mentor-none">geen mentor</span>') + '</td>' +
       '<td>' + startCell + '</td>' +
       '<td>' + paidCell + '</td>' +
