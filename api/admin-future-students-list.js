@@ -1,25 +1,29 @@
 // api/admin-future-students-list.js
 //
-// GET — Admin/manager-overzicht van ALLE toekomstige studenten over alle
-// mentoren, met afgeleide intake-status (Fase 1-prioriteit) + laatste update +
-// problemen-bovenaan-rank. Geen schemawijziging.
+// GET — Admin/manager-instroom-overzicht van ÁLLE onboardings (Fase A van
+// instroom-pijplijn). Bevat de hele trechter: nog-geen-mentor → nog te
+// benaderen → intake-statussen → gestart → geannuleerd/gearchiveerd.
 //
 // Permission-gate: gelijk aan onboardings-admin-list.js. Een seesOwn-only
 // gebruiker (mentor) krijgt 403 — die heeft z'n eigen toekomst-tab al in
 // mentor-students.html. Alleen seesAll mag dit endpoint zien.
 //
+// Query params (allemaal optioneel):
+//   ?scope=active|archived   default 'active' (status != 'gearchiveerd')
+//   ?q=<string>              ilike op customer_name
+//   ?mentor_user_id=<uuid>   exacte mentor-filter (of 'none' voor no-mentor)
+//   ?traject_id=<uuid>       exacte traject-filter
+//
 // 1-op-1 status-afleiding wordt per UNIEKE mentor één keer uit Bubble gehaald
 // (niet per student) en gedeeld via api/_lib/bubble-1on1.js — exact dezelfde
 // classificatie als api/mentor-1on1-sessions.js.
 //
-// Response 200: { future: [ {
-//   onboarding_id, customer_name, mentor_user_id, mentor_name,
-//   start_date, paid, bubble_user_id, mentor_intake_status,
-//   created_at,
-//   intake_status, intake_rank, days_since_update,
-//   last_update: { kind, status, note, at } | null,
-//   planned_call_at,                   // ISO of null
-// } ] }
+// Bedenktijd + waiver: gebatchte deals-lookup per uniek customer_id (mirror
+// van onboardings-admin-list.js). Wizard-structuur 1× per request.
+//
+// Response 200: { future, rows, ... }
+//   Beide arrays bevatten dezelfde rij-shape; `rows` is een alias voor
+//   backward-compat met de hub (onboarding-overzicht.js loadList).
 //
 // Sort default: rank asc (problemen bovenaan), tie-break op start_date asc
 // (dichtstbijzijnde eerst), daarna customer_name.
@@ -28,12 +32,41 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
 import { fetchOneOnOneForMentor } from './_lib/bubble-1on1.js';
 import { deriveIntakeStatus, intakeStatusRank } from './_lib/intake-status.js';
+import {
+  findWaiverConsentKey,
+  findAvailabilityBlock,
+  buildAvailabilityView,
+} from './_lib/onboarding-wizard-default.js';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function escapeIlike(s) {
+  return String(s).replace(/[\\%_]/g, (m) => '\\' + m);
+}
 
 function daysBetween(fromIso, toMs) {
   if (!fromIso) return null;
   const t = new Date(fromIso).getTime();
   if (!Number.isFinite(t)) return null;
   return Math.floor((toMs - t) / (24 * 60 * 60 * 1000));
+}
+
+// Identiek aan computeBedenktijd in onboardings-admin-list.js — kleine
+// helper, niet de moeite om naar _lib te extraheren tot er een derde
+// gebruiker komt.
+function computeBedenktijd(waiver, offerteOp) {
+  const vervaltOp = offerteOp ? new Date(new Date(offerteOp).getTime() + 14 * 24 * 60 * 60 * 1000).toISOString() : null;
+  const waived = !!(waiver && waiver.agreed);
+  if (waived && offerteOp) {
+    return { status:'vervallen', reason:'afstand',    waived_at:(waiver.at||null), offerte_op:offerteOp, vervalt_op:vervaltOp };
+  }
+  if (offerteOp && new Date().toISOString() > vervaltOp) {
+    return { status:'vervallen', reason:'verstreken', waived_at:null,              offerte_op:offerteOp, vervalt_op:vervaltOp };
+  }
+  if (offerteOp) {
+    return { status:'lopend',    reason:null,         waived_at:null,              offerte_op:offerteOp, vervalt_op:vervaltOp };
+  }
+  return   { status:'onbekend',  reason:null,         waived_at:(waived?waiver.at:null), offerte_op:null,  vervalt_op:null };
 }
 
 export default async function handler(req, res) {
@@ -56,24 +89,50 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Geen rechten (onboarding.admin vereist).' });
   }
 
+  // Query params (allemaal optioneel — backward-compat met onboardings-admin-list).
+  const scopeRaw = typeof req.query?.scope === 'string' ? req.query.scope.trim().toLowerCase() : '';
+  const scope = (scopeRaw === 'archived') ? 'archived' : 'active';
+  const qRaw  = typeof req.query?.q === 'string' ? req.query.q.trim() : '';
+  const mentorFilter  = typeof req.query?.mentor_user_id === 'string' ? req.query.mentor_user_id.trim() : '';
+  const trajectFilter = typeof req.query?.traject_id === 'string' ? req.query.traject_id.trim() : '';
+  // 'none' = expliciet filteren op onboardings zonder mentor (de no-mentor-tier).
+  const wantNoMentor = (mentorFilter.toLowerCase() === 'none');
+  if (mentorFilter && !wantNoMentor && !UUID_RE.test(mentorFilter)) {
+    return res.status(400).json({ error: 'mentor_user_id (uuid of "none") ongeldig' });
+  }
+  if (trajectFilter && !UUID_RE.test(trajectFilter)) {
+    return res.status(400).json({ error: 'traject_id (uuid) ongeldig' });
+  }
+
   try {
-    // ── 1) Onboardings ophalen (niet-gearchiveerd, niet-test) ────────────
-    const { data: rows, error: rowErr } = await supabaseAdmin
+    // ── 1) Onboardings ophalen ───────────────────────────────────────────
+    // Default scope 'active' = niet-gearchiveerd; 'archived' = expliciet
+    // gearchiveerd. 'geannuleerd' valt in beide gevallen niet onder
+    // gearchiveerd (terminal rank 10 + gedimd in actief).
+    let q = supabaseAdmin
       .from('onboardings')
-      .select(`id, customer_id, customer_name, mentor_user_id,
-               status, start_date, created_at,
+      .select(`id, customer_id, customer_name, traject_id, mentor_user_id,
+               status, current_step, answers,
+               start_date, created_at,
+               started_at, completed_at, assigned_at, archived_at, token,
+               bubble_provisioned, bubble_provisioned_at, bubble_provision_error,
                bubble_user_id, mentor_intake_status,
-               intake_handled_at, intake_handled_by`)
-      // Gearchiveerd valt buiten dit overzicht; 'geannuleerd' blijft zichtbaar
-      // (optie B: terminal rank 10 + gedimd, niet uit de lijst).
-      .neq('status', 'gearchiveerd')
+               intake_handled_at, intake_handled_by,
+               traject:onboarding_trajecten(label, type, calls, duur_maanden)`)
       .eq('is_test', false)
       .order('created_at', { ascending: false })
       .limit(2000);
+    if (scope === 'archived') q = q.eq('status', 'gearchiveerd');
+    else                       q = q.neq('status', 'gearchiveerd');
+    if (wantNoMentor)          q = q.is('mentor_user_id', null);
+    else if (mentorFilter)     q = q.eq('mentor_user_id', mentorFilter);
+    if (trajectFilter)         q = q.eq('traject_id',     trajectFilter);
+    if (qRaw)                  q = q.ilike('customer_name', `%${escapeIlike(qRaw)}%`);
+    const { data: rows, error: rowErr } = await q;
     if (rowErr) throw new Error('onboardings fetch: ' + rowErr.message);
     const list = rows || [];
     if (list.length === 0) {
-      return res.status(200).json({ future: [] });
+      return res.status(200).json({ future: [], rows: [] });
     }
 
     // ── 2) Mentor-naam + bubble_user_id per uniek mentor_user_id ─────────
@@ -135,6 +194,48 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── 4b) Wizard-structuur 1× — voor waiverKey + availabilityBlock ─────
+    let waiverKey         = null;
+    let availabilityBlock = null;
+    try {
+      const { data: wiz, error: wizErr } = await supabaseAdmin
+        .from('onboarding_wizard')
+        .select('published_structure')
+        .eq('id', 1)
+        .maybeSingle();
+      if (wizErr) {
+        console.warn('[admin-future-students-list] wizard fetch:', wizErr.message);
+      } else {
+        const pub = wiz?.published_structure;
+        waiverKey         = findWaiverConsentKey(pub);
+        availabilityBlock = findAvailabilityBlock(pub);
+      }
+    } catch (e) {
+      console.warn('[admin-future-students-list] wizard exception:', e?.message || e);
+    }
+
+    // ── 4c) Deals-lookup per uniek customer_id — voor bedenktijd ─────────
+    const dealByCust = {};
+    if (customerIds.length > 0) {
+      try {
+        const { data: dls, error: dlErr } = await supabaseAdmin
+          .from('deals')
+          .select('customer_id, tl_quotation_accepted_at, tl_quotation_signed_at')
+          .in('customer_id', customerIds)
+          .not('tl_quotation_accepted_at', 'is', null)
+          .order('tl_quotation_accepted_at', { ascending: false });
+        if (dlErr) {
+          console.warn('[admin-future-students-list] deals fetch:', dlErr.message);
+        } else {
+          for (const d of (dls || [])) {
+            if (d?.customer_id && !dealByCust[d.customer_id]) dealByCust[d.customer_id] = d;
+          }
+        }
+      } catch (e) {
+        console.warn('[admin-future-students-list] deals exception:', e?.message || e);
+      }
+    }
+
     // ── 5) 1-op-1 fetchen — één call per UNIEKE mentor (niet per student) ─
     // Per mentor → fetchOneOnOneForMentor levert 3 Maps. We bewaren ze in
     // een Map<mentor_user_id, { next, done, ns }> en gebruiken ze hieronder
@@ -165,6 +266,7 @@ export default async function handler(req, res) {
     // is op de student (mentor-update / no-show / completed-call). PLANNED
     // calls tellen NIET — die zijn toekomst-gedateerd en zouden anders direct
     // de afhandeling weer opheffen.
+    const nowIso = new Date().toISOString();
     const nowMs = Date.now();
     const future = list.map((r) => {
       const ooo = r.mentor_user_id ? oneOnOneByMentor.get(r.mentor_user_id) : null;
@@ -175,6 +277,7 @@ export default async function handler(req, res) {
 
       const intake = deriveIntakeStatus({
         hasCompletedSession:  !!doneIso,
+        hasMentor:            !!r.mentor_user_id,
         mentor_intake_status: r.mentor_intake_status || null,
         hasNoshow:            !!noshowIso,
         hasFutureCall:        !!plannedIso,
@@ -198,23 +301,59 @@ export default async function handler(req, res) {
       }
       // Cancelled = terminal status 'geannuleerd' uit api/onboarding-cancel.js
       // (Fase 4a). Effective rank 10 = onder gestart=9 en afgehandeld=8 → valt
-      // helemaal onderaan in de toekomst-lijst (visueel gedimd in de UI).
+      // helemaal onderaan in de lijst (visueel gedimd in de UI).
       const cancelled = String(r.status || '').toLowerCase() === 'geannuleerd';
-      // Effective rank — afgehandelde rijen vallen uit de "problemen bovenaan"
-      // groep (rank 0-3) en komen op tier 8 (boven gestart=9, onder rest).
-      // Geannuleerd → rank 10 (onderaan; terminal).
+      // Effective rank — afgehandeld→8, geannuleerd→10, anders intake-rank
+      // (waar nog_geen_mentor=-1 al bovenaan komt).
       const effRank = cancelled ? 10 : (handled ? 8 : baseRank);
 
+      // Hub-velden: traject + waiver + bedenktijd + availability + bubble.
+      const t = r.traject || null;
+      const ans = (r.answers && typeof r.answers === 'object') ? r.answers : {};
+      const waiver = waiverKey
+        ? { agreed: ans[waiverKey] === true, at: ans[waiverKey + '_at'] || null }
+        : null;
+      const availability = availabilityBlock ? buildAvailabilityView(availabilityBlock, ans) : null;
+      const dealRow = r.customer_id ? (dealByCust[r.customer_id] || null) : null;
+      const offerteOp = dealRow ? (dealRow.tl_quotation_signed_at || dealRow.tl_quotation_accepted_at || null) : null;
+      const bedenktijd = computeBedenktijd(waiver, offerteOp);
+
       return {
+        // Identifiers — beide vormen voor backward-compat:
+        id:                   r.id,
         onboarding_id:        r.id,
+        customer_id:          r.customer_id,
         customer_name:        r.customer_name || null,
+        // Traject + voortgang:
+        traject_id:           r.traject_id,
+        traject_label:        t?.label || null,
+        traject_type:         t?.type  || null,
+        calls:                t?.calls || null,
+        current_step:         r.current_step || null,
+        // Mentor:
         mentor_user_id:       r.mentor_user_id || null,
         mentor_name:          r.mentor_user_id ? (mentorNameByUid.get(r.mentor_user_id) || null) : null,
+        // Onboarding-status + datums:
+        status:               r.status,
         start_date:           r.start_date || null,
-        paid:                 paidSet.has(r.customer_id),
-        bubble_user_id:       bu,
-        mentor_intake_status: r.mentor_intake_status || null,
         created_at:           r.created_at,
+        started_at:           r.started_at,
+        completed_at:         r.completed_at,
+        assigned_at:          r.assigned_at,
+        archived_at:          r.archived_at,
+        token:                r.token,
+        // Betaling + bedenktijd + beschikbaarheid:
+        paid:                 paidSet.has(r.customer_id),
+        waiver,
+        bedenktijd,
+        availability,
+        // Bubble-provisioning:
+        bubble_provisioned:    r.bubble_provisioned === true,
+        bubble_provisioned_at: r.bubble_provisioned_at || null,
+        bubble_provision_error: r.bubble_provision_error || null,
+        bubble_user_id:        bu,
+        // Intake (Fase 1+ + Fase A nog_geen_mentor):
+        mentor_intake_status: r.mentor_intake_status || null,
         intake_status:        intake,
         intake_rank:          effRank,
         intake_rank_base:     baseRank,
@@ -237,7 +376,10 @@ export default async function handler(req, res) {
       return String(a.customer_name || '').localeCompare(String(b.customer_name || ''), 'nl');
     });
 
-    const payload = { future };
+    // `rows` is een alias voor backward-compat met de hub
+    // (onboarding-overzicht.js loadList leest `d.rows`); `future` blijft
+    // voor consumenten die op de Fase 2-naam aanhaken.
+    const payload = { future, rows: future };
     if (bubbleWarnings.length > 0) payload.bubble_warnings = bubbleWarnings;
     return res.status(200).json(payload);
   } catch (e) {

@@ -145,7 +145,6 @@
     <!-- B2 + F2 — Tab-switcher (Studenten | Aandachtspunten | Archief) -->
     <div class="so-tabs" id="soTabs">
       <button type="button" class="so-tab active" data-pane="students"><i class="ti ti-users"></i> Studenten</button>
-      <button type="button" class="so-tab" data-pane="future"><i class="ti ti-user-question"></i> Toekomstige studenten <span class="so-tab-count" id="soTabFutureCount" style="display:none">0</span></button>
       <button type="button" class="so-tab" data-pane="signals"><i class="ti ti-flag"></i> Aandachtspunten <span class="so-tab-count" id="soTabSignalsCount" style="display:none">0</span></button>
       <button type="button" class="so-tab" data-pane="archive"><i class="ti ti-archive"></i> Archief <span class="so-tab-count" id="soTabArchiveCount" style="background:var(--bg-elev);color:var(--text-dim);border:1px solid var(--border);display:none">0</span></button>
     </div>
@@ -200,53 +199,6 @@
     </div>
 
     </div><!-- /Pane: Studenten -->
-
-    <!-- Pane: Toekomstige studenten (Fase 2 admin/manager-overzicht) -->
-    <div class="so-pane" id="soPaneFuture">
-      <!-- Fase 4c — annuleringen-stats (alleen manager/super_admin). Lazy-load. -->
-      <div id="fuCancStatsCard" hidden style="border:1px solid var(--border);background:var(--bg-elev);border-radius:10px;padding:12px;margin-bottom:12px">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
-          <div style="font-size:12.5px;color:var(--text)">
-            <i class="ti ti-user-x" style="color:#b91c1c"></i>
-            <strong>Annuleringen:</strong> <span id="fuCancCount">&mdash;</span>
-            <span style="color:var(--text-faint);margin:0 6px">·</span>
-            <strong>Gemiste omzet:</strong> <span id="fuCancValue">&mdash;</span>
-          </div>
-          <button type="button" id="fuCancToggleRecent" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:3px 9px;font-size:11.5px;color:var(--text-dim);cursor:pointer;font-family:inherit">Toon recent</button>
-        </div>
-        <div id="fuCancRecentWrap" hidden style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;display:grid;gap:4px"></div>
-      </div>
-      <div class="so-status-strip">
-        <div style="display:flex;gap:6px;flex-wrap:wrap" id="fuFilterChips">
-          <button type="button" class="so-toggle active" data-fu-filt="all">Alles</button>
-          <button type="button" class="so-toggle" data-fu-filt="wil_niet">Wil niet</button>
-          <button type="button" class="so-toggle" data-fu-filt="no_show">No-show</button>
-          <button type="button" class="so-toggle" data-fu-filt="geen_gehoor">Geen gehoor</button>
-          <button type="button" class="so-toggle" data-fu-filt="wil_later">Wil later</button>
-          <button type="button" class="so-toggle" data-fu-filt="stale">Geen update &gt;7 dagen</button>
-          <button type="button" class="so-toggle" data-fu-filt="handled">Afgehandeld</button>
-          <button type="button" class="so-toggle" data-fu-filt="cancelled">Geannuleerd</button>
-        </div>
-        <span id="fuCountInfo" style="margin-left:auto"></span>
-      </div>
-      <div class="so-table-wrap">
-        <table class="so-table">
-          <thead>
-            <tr id="fuThead">
-              <th data-fu-sort="name">Student <span class="so-sort">↕</span></th>
-              <th data-fu-sort="mentor">Mentor <span class="so-sort">↕</span></th>
-              <th data-fu-sort="start">Startdatum <span class="so-sort">↕</span></th>
-              <th data-fu-sort="paid">Betaald <span class="so-sort">↕</span></th>
-              <th data-fu-sort="status">Intake-status <span class="so-sort">↕</span></th>
-              <th data-fu-sort="update">Laatste update <span class="so-sort">↕</span></th>
-            </tr>
-          </thead>
-          <tbody id="fuTbody">
-            <tr><td colspan="6" class="so-empty">Toekomstige studenten laden…</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
 
     <!-- Pane: Archief (F2) -->
     <div class="so-pane" id="soPaneArchive">
@@ -421,27 +373,10 @@
 </div>
 <div id="soToast" class="so-toast"></div>
 
-<!-- Fase 5 — Drawer voor toekomst-tab manager-acties.
-     Esc / overlay-klik / X sluiten. Lijst blijft links zichtbaar. -->
-<!-- Beginstaat verborgen via inline display:none. Inline display:flex op de
-     drawer overrulet anders het hidden-attribuut — vandaar nu style.display
-     als enige zichtbaarheid-toggle in open/closeFutureDrawer. -->
-<div id="fuDrawerOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.42);z-index:998;display:none"></div>
-<aside id="fuDrawer" role="dialog" aria-labelledby="fuDrawerTitle" aria-modal="true"
-  style="position:fixed;top:0;right:0;height:100vh;width:440px;max-width:95vw;background:var(--bg-elev);border-left:1px solid var(--border);box-shadow:-8px 0 24px rgba(0,0,0,0.18);z-index:999;display:none;flex-direction:column">
-  <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border)">
-    <div id="fuDrawerTitle" style="font-weight:700;font-size:14px;color:var(--text)">Student</div>
-    <button type="button" id="fuDrawerClose" aria-label="Sluiten" style="background:transparent;border:none;font-size:20px;color:var(--text-dim);cursor:pointer;line-height:1">&times;</button>
-  </div>
-  <div id="fuDrawerBody" style="flex:1;overflow-y:auto;padding:14px 16px"></div>
-</aside>
-
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
 <script src="/modules/shared/permissions.js"></script>
 <script src="/modules/shared/sidebar.js"></script>
-<!-- Drawer-toekomst (Fase 5): mountActions exposeert manager-acties + tijdlijn -->
-<script src="/modules/shared/onboarding-overzicht.js?v=20260702"></script>
 <script>
 'use strict';
 
@@ -479,12 +414,6 @@ const state = {
   sdCurrentRow     : null,      // huidige rij in modal
   sdActiveTab      : 'persoonlijk',
   sdCache          : new Map(), // bubble_student_id -> { persoonlijk?, financieel?, calls?, beoordelingen?, signals? }
-  // Fase 2 — Toekomstige studenten (admin/manager-overzicht)
-  futureRows       : [],         // raw uit /api/admin-future-students-list (incl. server-rank)
-  futureLoaded     : false,
-  futureLoadFail   : false,
-  futureFilter     : 'all',      // 'all' | 'wil_niet' | 'no_show' | 'geen_gehoor' | 'wil_later' | 'stale'
-  futureSort       : { key: 'rank', dir: 'asc' }, // 'rank' (default) | 'name' | 'mentor' | 'start' | 'paid' | 'status' | 'update'
 };
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -918,8 +847,6 @@ async function loadData() {
   // B2 — Tab-switcher + Aandachtspunten
   wireTabs();
   wireSignalsHandlers();
-  wireFutureControls(); // Fase 2 — Toekomstige studenten
-  wireFutureDrawer();   // Drawer voor manager-acties (open vanuit rij-klik)
   loadSignals(); // achtergrond, vult ook de tab-teller
 
   // D — Beoordelingshistorie (admin-only). Page-gate stond al, hier
@@ -1065,307 +992,8 @@ function switchPane(p) {
   document.querySelectorAll('.so-pane').forEach((el) => {
     el.classList.toggle('active', el.id === ('soPane' + p[0].toUpperCase() + p.slice(1)));
   });
-  if (p === 'future' && !state.futureLoaded && !state.futureLoadFail) {
-    loadFutureStudents();
-    loadCancellationStats(); // Fase 4c — lazy bij eerste tab-open
-  }
 }
 
-/* ── Fase 4c — Annuleringen-stats (alleen manager/super_admin) ────────── */
-async function loadCancellationStats() {
-  // Rol-check eerst: stats-card alleen tonen aan manager/super_admin
-  // (UI-strikter dan endpoint dat seesAll accepteert; admin krijgt 'm
-  // hier dus NIET te zien om consistent te zijn met de cancel-knop rol-gate).
-  let role = '';
-  try {
-    const p = await (window.AuthShared?.getProfile?.() || Promise.resolve(null));
-    role = String(p?.role || '').toLowerCase();
-  } catch {}
-  if (role !== 'manager' && role !== 'super_admin') return;
-  const card = document.getElementById('fuCancStatsCard');
-  if (!card) return;
-  try {
-    const r = await window.AgentShared.apiFetch('/api/admin-cancellations-stats');
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      console.warn('[students-overview] canc-stats:', d?.error || r.status);
-      return;
-    }
-    const total = Number(d?.total_count) || 0;
-    const value = Number(d?.total_value) || 0;
-    document.getElementById('fuCancCount').textContent = String(total);
-    document.getElementById('fuCancValue').textContent = 'EUR ' + value.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    card.hidden = false;
-    // Recent-lijst uitklappen via toggle-knop.
-    const recent = Array.isArray(d?.recent) ? d.recent : [];
-    const recentWrap = document.getElementById('fuCancRecentWrap');
-    const toggleBtn  = document.getElementById('fuCancToggleRecent');
-    if (recentWrap && toggleBtn) {
-      const renderRecent = () => {
-        if (recent.length === 0) {
-          recentWrap.innerHTML = '<div style="font-size:12px;color:var(--text-faint)">Geen recente annuleringen.</div>';
-          return;
-        }
-        recentWrap.innerHTML = recent.map((r) => {
-          const when = r.cancelled_at ? new Date(r.cancelled_at).toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' }) : '—';
-          const val  = (r.subscription_value != null) ? 'EUR ' + Number(r.subscription_value).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
-          const reason = r.reason ? ' · ' + esc(String(r.reason).slice(0, 120)) : '';
-          return '<div style="font-size:12px;color:var(--text-dim)">'
-            + '<span style="color:var(--text)">' + esc(r.customer_name || '(onbekend)') + '</span>'
-            + ' <span style="color:var(--text-faint)">' + esc(when) + '</span>'
-            + ' <span style="color:var(--text-faint)">' + esc(val) + '</span>'
-            + reason
-            + '</div>';
-        }).join('');
-      };
-      toggleBtn.addEventListener('click', () => {
-        if (recentWrap.hidden) { renderRecent(); recentWrap.hidden = false; toggleBtn.textContent = 'Verberg recent'; }
-        else                   { recentWrap.hidden = true; toggleBtn.textContent = 'Toon recent'; }
-      });
-    }
-  } catch (e) {
-    console.warn('[students-overview] canc-stats exception:', e?.message || e);
-  }
-}
-
-/* ── Fase 2 — Toekomstige studenten (admin/manager-overzicht) ─────────── */
-const FU_INTAKE_META = {
-  gestart:           { label: 'Gestart',            cls: 'paid-yes' },
-  wil_niet:          { label: 'Wil niet starten',   cls: 'paid-no'  },
-  no_show:           { label: 'No-show',            cls: 'paid-no'  },
-  geen_gehoor:       { label: 'Geen gehoor',        cls: 'paid-no'  },
-  wil_later:         { label: 'Wil later starten',  cls: 'paid-no'  },
-  call_ingepland:    { label: 'Call ingepland',     cls: 'paid-yes' },
-  nog_te_benaderen:  { label: 'Nog te benaderen',   cls: ''         },
-};
-
-function fuStatusPill(key) {
-  const m = FU_INTAKE_META[key] || FU_INTAKE_META.nog_te_benaderen;
-  return '<span class="so-badge ' + m.cls + '">' + esc(m.label) + '</span>';
-}
-
-function fuDaysUntilStart(iso) {
-  if (!iso) return null;
-  const today = new Date(); today.setHours(0,0,0,0);
-  const sd = new Date(iso); sd.setHours(0,0,0,0);
-  const diff = Math.round((sd - today) / (24*60*60*1000));
-  return Number.isFinite(diff) ? diff : null;
-}
-
-function fuFmtDateNL(iso) {
-  if (!iso) return '—';
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' });
-  } catch { return iso; }
-}
-
-async function loadFutureStudents() {
-  state.futureLoaded   = true;
-  state.futureLoadFail = false;
-  const tbody = document.getElementById('fuTbody');
-  if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="6" class="so-empty">Toekomstige studenten laden…</td></tr>';
-  try {
-    const r = await window.AgentShared.apiFetch('/api/admin-future-students-list');
-    const d = await r.json().catch(() => ({}));
-    if (r.status === 403) {
-      tbody.innerHTML = '<tr><td colspan="6" class="so-empty">Geen rechten — alleen admin/manager ziet dit overzicht.</td></tr>';
-      state.futureLoadFail = true;
-      return;
-    }
-    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
-    state.futureRows = Array.isArray(d?.future) ? d.future : [];
-    fuUpdateTabCount();
-    renderFutureTable();
-  } catch (e) {
-    console.error('[students-overview] future:', e?.message || e);
-    state.futureLoadFail = true;
-    state.futureLoaded   = false;
-    tbody.innerHTML = '<tr><td colspan="6" class="so-empty" style="color:#b91c1c">Ophalen mislukt: ' + esc(e?.message || e) + '</td></tr>';
-  }
-}
-
-function fuUpdateTabCount() {
-  const el = document.getElementById('soTabFutureCount');
-  if (!el) return;
-  // "Te behandelen" = de 4 problematische intake-statussen, ONDER UITSLUITING
-  // van rijen die al zijn afgehandeld of geannuleerd. Manager ziet hier dus
-  // het aantal cases dat z'n aandacht NU nodig heeft.
-  const PROBLEM = new Set(['wil_niet', 'geen_gehoor', 'no_show', 'wil_later']);
-  const n = (state.futureRows || []).filter((r) =>
-    PROBLEM.has(r.intake_status) && !r.handled && !r.cancelled
-  ).length;
-  if (n > 0) { el.textContent = String(n); el.style.display = ''; }
-  else       { el.style.display = 'none'; }
-}
-
-function fuApplyFilter(rows) {
-  const f = state.futureFilter;
-  if (f === 'all') return rows;
-  if (f === 'stale')     return rows.filter((r) => Number(r.days_since_update) > 7 || r.days_since_update == null);
-  if (f === 'handled')   return rows.filter((r) => !!r.handled);
-  if (f === 'cancelled') return rows.filter((r) => !!r.cancelled);
-  return rows.filter((r) => r.intake_status === f);
-}
-
-function fuApplySort(rows) {
-  const { key, dir } = state.futureSort;
-  const factor = dir === 'desc' ? -1 : 1;
-  const sorted = rows.slice();
-  sorted.sort((a, b) => {
-    switch (key) {
-      case 'name':   return factor * String(a.customer_name || '').localeCompare(String(b.customer_name || ''), 'nl');
-      case 'mentor': return factor * String(a.mentor_name || '').localeCompare(String(b.mentor_name || ''), 'nl');
-      case 'start': {
-        const ad = a.start_date || '9999-99-99';
-        const bd = b.start_date || '9999-99-99';
-        return ad === bd ? 0 : (ad < bd ? -1 * factor : 1 * factor);
-      }
-      case 'paid':   return factor * ((b.paid ? 1 : 0) - (a.paid ? 1 : 0));
-      case 'status': return factor * ((a.intake_rank ?? 99) - (b.intake_rank ?? 99));
-      case 'update': {
-        const av = a.days_since_update == null ?  9999 : a.days_since_update;
-        const bv = b.days_since_update == null ?  9999 : b.days_since_update;
-        return factor * (bv - av); // recent (klein getal) → onderaan default
-      }
-      case 'rank':
-      default: {
-        if (a.intake_rank !== b.intake_rank) return factor * (a.intake_rank - b.intake_rank);
-        const ad = a.start_date || '9999-99-99';
-        const bd = b.start_date || '9999-99-99';
-        if (ad !== bd) return ad < bd ? -1 : 1;
-        return String(a.customer_name || '').localeCompare(String(b.customer_name || ''), 'nl');
-      }
-    }
-  });
-  return sorted;
-}
-
-function renderFutureTable() {
-  const tbody = document.getElementById('fuTbody');
-  const info  = document.getElementById('fuCountInfo');
-  if (!tbody) return;
-  const rows = fuApplyFilter(state.futureRows || []);
-  const sorted = fuApplySort(rows);
-  if (info) info.textContent = sorted.length + ' / ' + (state.futureRows || []).length + ' toekomstige studenten';
-  if (sorted.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="so-empty">Geen toekomstige studenten in deze view.</td></tr>';
-    return;
-  }
-  tbody.innerHTML = sorted.map((r) => {
-    const days = fuDaysUntilStart(r.start_date);
-    const startCell = r.start_date
-      ? esc(fuFmtDateNL(r.start_date)) + (days != null && days >= 0 ? ' <span style="color:var(--text-faint);font-size:11.5px">· over ' + days + ' dag' + (days === 1 ? '' : 'en') + '</span>' : '')
-      : '<span style="color:var(--text-faint)">—</span>';
-    const paidCell = r.paid
-      ? '<span class="so-badge paid-yes">Betaald</span>'
-      : '<span class="so-badge paid-no">Nog niet</span>';
-    const last = r.last_update;
-    let updCell = '<span style="color:var(--text-faint)">—</span>';
-    if (last) {
-      const lab = last.kind === 'status' && last.status && FU_INTAKE_META[last.status]
-        ? 'Status: ' + FU_INTAKE_META[last.status].label
-        : (last.kind === 'note' ? 'Notitie' : (last.kind || '—'));
-      const ago = r.days_since_update != null
-        ? (r.days_since_update === 0 ? 'vandaag' : (r.days_since_update + ' dag' + (r.days_since_update === 1 ? '' : 'en') + ' geleden'))
-        : '';
-      const note = last.note ? '<div style="color:var(--text-dim);font-size:11.5px;margin-top:2px;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis">' + esc(last.note) + '</div>' : '';
-      updCell = '<div>' + esc(lab) + '</div>'
-              + (ago ? '<div style="color:var(--text-faint);font-size:11.5px">' + ago + '</div>' : '')
-              + note;
-    }
-    // Cancelled rijen zijn terminal (rank 10) — sterker gedimd dan handled
-    // (opacity 0.45). Status-cel toont 'Geannuleerd'-pill i.p.v. intake-status.
-    const dim = r.cancelled ? 0.45 : (r.handled ? 0.55 : 1);
-    const rowStyle = (dim < 1) ? (' style="opacity:' + dim + '"') : '';
-    const handledTag = (r.handled && !r.cancelled) ? ' <span class="so-badge" style="background:rgba(100,116,139,0.18);color:#475569" title="Afgehandeld — vervalt zodra er nieuwe activiteit is.">Afgehandeld</span>' : '';
-    const statusCell = r.cancelled
-      ? '<span class="so-badge" style="background:rgba(220,38,38,0.16);color:#7f1d1d;border:1px solid rgba(220,38,38,0.35)" title="Volledig geannuleerd via onboarding-cancel">Geannuleerd</span>'
-      : fuStatusPill(r.intake_status || 'nog_te_benaderen');
-    return '<tr data-fu-id="' + esc(r.onboarding_id) + '"' + rowStyle + '>' +
-      '<td><div class="so-name">' + esc(r.customer_name || '—') + handledTag + '</div></td>' +
-      '<td>' + (r.mentor_name ? esc(r.mentor_name) : '<span class="so-mentor-none">geen mentor</span>') + '</td>' +
-      '<td>' + startCell + '</td>' +
-      '<td>' + paidCell + '</td>' +
-      '<td>' + statusCell + '</td>' +
-      '<td>' + updCell + '</td>' +
-    '</tr>';
-  }).join('');
-  tbody.querySelectorAll('tr[data-fu-id]').forEach((tr) => {
-    tr.addEventListener('click', () => {
-      const id = tr.getAttribute('data-fu-id');
-      if (id) openFutureDrawer(id);
-    });
-  });
-}
-
-/* ── Drawer-toekomst (verhuizing van manager-acties uit detail-modal) ── */
-function openFutureDrawer(onboardingId) {
-  const drawer  = document.getElementById('fuDrawer');
-  const overlay = document.getElementById('fuDrawerOverlay');
-  const body    = document.getElementById('fuDrawerBody');
-  const titleEl = document.getElementById('fuDrawerTitle');
-  if (!drawer || !overlay || !body) return;
-  // Voor-vul titel uit cache zodat we niet leeg openen tijdens de fetch.
-  const cached = (state.futureRows || []).find((r) => r.onboarding_id === onboardingId);
-  if (titleEl) titleEl.textContent = cached ? (cached.customer_name || 'Student') : 'Student';
-  // Display via style.display (zie comment bij drawer-HTML: inline display:flex
-  // op de drawer overrulet anders het hidden-attribuut).
-  overlay.style.display = 'block';
-  drawer.style.display  = 'flex';
-  body.innerHTML = '<div style="padding:18px;text-align:center;color:var(--text-faint)">Laden…</div>';
-  // mountActions doet de fetch + render + handlers. onChange = lijst herladen,
-  // zodat na bv. afgehandeld of annuleren de rij meteen ververst in de tabel.
-  if (window.OnboardingOverzicht && typeof window.OnboardingOverzicht.mountActions === 'function') {
-    window.OnboardingOverzicht.mountActions(body, onboardingId, {
-      onChange: () => { loadFutureStudents(); },
-      compact:  true,
-    });
-  } else {
-    body.innerHTML = '<div style="padding:18px;color:#b91c1c">window.OnboardingOverzicht.mountActions niet beschikbaar.</div>';
-  }
-}
-function closeFutureDrawer() {
-  const drawer  = document.getElementById('fuDrawer');
-  const overlay = document.getElementById('fuDrawerOverlay');
-  if (drawer)  drawer.style.display  = 'none';
-  if (overlay) overlay.style.display = 'none';
-}
-function wireFutureDrawer() {
-  const drawer  = document.getElementById('fuDrawer');
-  const overlay = document.getElementById('fuDrawerOverlay');
-  const closeBtn = document.getElementById('fuDrawerClose');
-  if (closeBtn) closeBtn.addEventListener('click', closeFutureDrawer);
-  if (overlay)  overlay.addEventListener('click', closeFutureDrawer);
-  document.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape' && drawer && drawer.style.display !== 'none') closeFutureDrawer();
-  });
-}
-
-function wireFutureControls() {
-  document.querySelectorAll('#fuFilterChips [data-fu-filt]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      state.futureFilter = btn.getAttribute('data-fu-filt') || 'all';
-      document.querySelectorAll('#fuFilterChips [data-fu-filt]').forEach((b) => {
-        b.classList.toggle('active', b === btn);
-      });
-      renderFutureTable();
-    });
-  });
-  document.querySelectorAll('#fuThead [data-fu-sort]').forEach((th) => {
-    th.addEventListener('click', () => {
-      const k = th.getAttribute('data-fu-sort');
-      if (state.futureSort.key === k) {
-        state.futureSort.dir = state.futureSort.dir === 'asc' ? 'desc' : 'asc';
-      } else {
-        state.futureSort.key = k;
-        state.futureSort.dir = 'asc';
-      }
-      renderFutureTable();
-    });
-  });
-}
 
 /* ── F2 — Archief tab ──────────────────────────────────────────────────── */
 function updateArchiveTabCount() {
