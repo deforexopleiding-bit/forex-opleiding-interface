@@ -145,6 +145,7 @@
     <!-- B2 + F2 — Tab-switcher (Studenten | Aandachtspunten | Archief) -->
     <div class="so-tabs" id="soTabs">
       <button type="button" class="so-tab active" data-pane="students"><i class="ti ti-users"></i> Studenten</button>
+      <button type="button" class="so-tab" data-pane="future"><i class="ti ti-user-question"></i> Toekomstige studenten <span class="so-tab-count" id="soTabFutureCount" style="display:none">0</span></button>
       <button type="button" class="so-tab" data-pane="signals"><i class="ti ti-flag"></i> Aandachtspunten <span class="so-tab-count" id="soTabSignalsCount" style="display:none">0</span></button>
       <button type="button" class="so-tab" data-pane="archive"><i class="ti ti-archive"></i> Archief <span class="so-tab-count" id="soTabArchiveCount" style="background:var(--bg-elev);color:var(--text-dim);border:1px solid var(--border);display:none">0</span></button>
     </div>
@@ -199,6 +200,38 @@
     </div>
 
     </div><!-- /Pane: Studenten -->
+
+    <!-- Pane: Toekomstige studenten (Fase 2 admin/manager-overzicht) -->
+    <div class="so-pane" id="soPaneFuture">
+      <div class="so-status-strip">
+        <div style="display:flex;gap:6px;flex-wrap:wrap" id="fuFilterChips">
+          <button type="button" class="so-toggle active" data-fu-filt="all">Alles</button>
+          <button type="button" class="so-toggle" data-fu-filt="wil_niet">Wil niet</button>
+          <button type="button" class="so-toggle" data-fu-filt="no_show">No-show</button>
+          <button type="button" class="so-toggle" data-fu-filt="geen_gehoor">Geen gehoor</button>
+          <button type="button" class="so-toggle" data-fu-filt="wil_later">Wil later</button>
+          <button type="button" class="so-toggle" data-fu-filt="stale">Geen update &gt;7 dagen</button>
+        </div>
+        <span id="fuCountInfo" style="margin-left:auto"></span>
+      </div>
+      <div class="so-table-wrap">
+        <table class="so-table">
+          <thead>
+            <tr id="fuThead">
+              <th data-fu-sort="name">Student <span class="so-sort">↕</span></th>
+              <th data-fu-sort="mentor">Mentor <span class="so-sort">↕</span></th>
+              <th data-fu-sort="start">Startdatum <span class="so-sort">↕</span></th>
+              <th data-fu-sort="paid">Betaald <span class="so-sort">↕</span></th>
+              <th data-fu-sort="status">Intake-status <span class="so-sort">↕</span></th>
+              <th data-fu-sort="update">Laatste update <span class="so-sort">↕</span></th>
+            </tr>
+          </thead>
+          <tbody id="fuTbody">
+            <tr><td colspan="6" class="so-empty">Toekomstige studenten laden…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
 
     <!-- Pane: Archief (F2) -->
     <div class="so-pane" id="soPaneArchive">
@@ -414,6 +447,12 @@ const state = {
   sdCurrentRow     : null,      // huidige rij in modal
   sdActiveTab      : 'persoonlijk',
   sdCache          : new Map(), // bubble_student_id -> { persoonlijk?, financieel?, calls?, beoordelingen?, signals? }
+  // Fase 2 — Toekomstige studenten (admin/manager-overzicht)
+  futureRows       : [],         // raw uit /api/admin-future-students-list (incl. server-rank)
+  futureLoaded     : false,
+  futureLoadFail   : false,
+  futureFilter     : 'all',      // 'all' | 'wil_niet' | 'no_show' | 'geen_gehoor' | 'wil_later' | 'stale'
+  futureSort       : { key: 'rank', dir: 'asc' }, // 'rank' (default) | 'name' | 'mentor' | 'start' | 'paid' | 'status' | 'update'
 };
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -847,6 +886,7 @@ async function loadData() {
   // B2 — Tab-switcher + Aandachtspunten
   wireTabs();
   wireSignalsHandlers();
+  wireFutureControls(); // Fase 2 — Toekomstige studenten
   loadSignals(); // achtergrond, vult ook de tab-teller
 
   // D — Beoordelingshistorie (admin-only). Page-gate stond al, hier
@@ -991,6 +1031,193 @@ function switchPane(p) {
   });
   document.querySelectorAll('.so-pane').forEach((el) => {
     el.classList.toggle('active', el.id === ('soPane' + p[0].toUpperCase() + p.slice(1)));
+  });
+  if (p === 'future' && !state.futureLoaded && !state.futureLoadFail) {
+    loadFutureStudents();
+  }
+}
+
+/* ── Fase 2 — Toekomstige studenten (admin/manager-overzicht) ─────────── */
+const FU_INTAKE_META = {
+  gestart:           { label: 'Gestart',            cls: 'paid-yes' },
+  wil_niet:          { label: 'Wil niet starten',   cls: 'paid-no'  },
+  no_show:           { label: 'No-show',            cls: 'paid-no'  },
+  geen_gehoor:       { label: 'Geen gehoor',        cls: 'paid-no'  },
+  wil_later:         { label: 'Wil later starten',  cls: 'paid-no'  },
+  call_ingepland:    { label: 'Call ingepland',     cls: 'paid-yes' },
+  nog_te_benaderen:  { label: 'Nog te benaderen',   cls: ''         },
+};
+
+function fuStatusPill(key) {
+  const m = FU_INTAKE_META[key] || FU_INTAKE_META.nog_te_benaderen;
+  return '<span class="so-badge ' + m.cls + '">' + esc(m.label) + '</span>';
+}
+
+function fuDaysUntilStart(iso) {
+  if (!iso) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const sd = new Date(iso); sd.setHours(0,0,0,0);
+  const diff = Math.round((sd - today) / (24*60*60*1000));
+  return Number.isFinite(diff) ? diff : null;
+}
+
+function fuFmtDateNL(iso) {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' });
+  } catch { return iso; }
+}
+
+async function loadFutureStudents() {
+  state.futureLoaded   = true;
+  state.futureLoadFail = false;
+  const tbody = document.getElementById('fuTbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="6" class="so-empty">Toekomstige studenten laden…</td></tr>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/admin-future-students-list');
+    const d = await r.json().catch(() => ({}));
+    if (r.status === 403) {
+      tbody.innerHTML = '<tr><td colspan="6" class="so-empty">Geen rechten — alleen admin/manager ziet dit overzicht.</td></tr>';
+      state.futureLoadFail = true;
+      return;
+    }
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    state.futureRows = Array.isArray(d?.future) ? d.future : [];
+    fuUpdateTabCount();
+    renderFutureTable();
+  } catch (e) {
+    console.error('[students-overview] future:', e?.message || e);
+    state.futureLoadFail = true;
+    state.futureLoaded   = false;
+    tbody.innerHTML = '<tr><td colspan="6" class="so-empty" style="color:#b91c1c">Ophalen mislukt: ' + esc(e?.message || e) + '</td></tr>';
+  }
+}
+
+function fuUpdateTabCount() {
+  const el = document.getElementById('soTabFutureCount');
+  if (!el) return;
+  // Tel "problemen" = de 4 problematische statussen.
+  const n = (state.futureRows || []).filter((r) =>
+    r.intake_status === 'wil_niet' || r.intake_status === 'no_show' ||
+    r.intake_status === 'geen_gehoor' || r.intake_status === 'wil_later'
+  ).length;
+  if (n > 0) { el.textContent = String(n); el.style.display = ''; }
+  else       { el.style.display = 'none'; }
+}
+
+function fuApplyFilter(rows) {
+  const f = state.futureFilter;
+  if (f === 'all') return rows;
+  if (f === 'stale') return rows.filter((r) => Number(r.days_since_update) > 7 || r.days_since_update == null);
+  return rows.filter((r) => r.intake_status === f);
+}
+
+function fuApplySort(rows) {
+  const { key, dir } = state.futureSort;
+  const factor = dir === 'desc' ? -1 : 1;
+  const sorted = rows.slice();
+  sorted.sort((a, b) => {
+    switch (key) {
+      case 'name':   return factor * String(a.customer_name || '').localeCompare(String(b.customer_name || ''), 'nl');
+      case 'mentor': return factor * String(a.mentor_name || '').localeCompare(String(b.mentor_name || ''), 'nl');
+      case 'start': {
+        const ad = a.start_date || '9999-99-99';
+        const bd = b.start_date || '9999-99-99';
+        return ad === bd ? 0 : (ad < bd ? -1 * factor : 1 * factor);
+      }
+      case 'paid':   return factor * ((b.paid ? 1 : 0) - (a.paid ? 1 : 0));
+      case 'status': return factor * ((a.intake_rank ?? 99) - (b.intake_rank ?? 99));
+      case 'update': {
+        const av = a.days_since_update == null ?  9999 : a.days_since_update;
+        const bv = b.days_since_update == null ?  9999 : b.days_since_update;
+        return factor * (bv - av); // recent (klein getal) → onderaan default
+      }
+      case 'rank':
+      default: {
+        if (a.intake_rank !== b.intake_rank) return factor * (a.intake_rank - b.intake_rank);
+        const ad = a.start_date || '9999-99-99';
+        const bd = b.start_date || '9999-99-99';
+        if (ad !== bd) return ad < bd ? -1 : 1;
+        return String(a.customer_name || '').localeCompare(String(b.customer_name || ''), 'nl');
+      }
+    }
+  });
+  return sorted;
+}
+
+function renderFutureTable() {
+  const tbody = document.getElementById('fuTbody');
+  const info  = document.getElementById('fuCountInfo');
+  if (!tbody) return;
+  const rows = fuApplyFilter(state.futureRows || []);
+  const sorted = fuApplySort(rows);
+  if (info) info.textContent = sorted.length + ' / ' + (state.futureRows || []).length + ' toekomstige studenten';
+  if (sorted.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="so-empty">Geen toekomstige studenten in deze view.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = sorted.map((r) => {
+    const days = fuDaysUntilStart(r.start_date);
+    const startCell = r.start_date
+      ? esc(fuFmtDateNL(r.start_date)) + (days != null && days >= 0 ? ' <span style="color:var(--text-faint);font-size:11.5px">· over ' + days + ' dag' + (days === 1 ? '' : 'en') + '</span>' : '')
+      : '<span style="color:var(--text-faint)">—</span>';
+    const paidCell = r.paid
+      ? '<span class="so-badge paid-yes">Betaald</span>'
+      : '<span class="so-badge paid-no">Nog niet</span>';
+    const last = r.last_update;
+    let updCell = '<span style="color:var(--text-faint)">—</span>';
+    if (last) {
+      const lab = last.kind === 'status' && last.status && FU_INTAKE_META[last.status]
+        ? 'Status: ' + FU_INTAKE_META[last.status].label
+        : (last.kind === 'note' ? 'Notitie' : (last.kind || '—'));
+      const ago = r.days_since_update != null
+        ? (r.days_since_update === 0 ? 'vandaag' : (r.days_since_update + ' dag' + (r.days_since_update === 1 ? '' : 'en') + ' geleden'))
+        : '';
+      const note = last.note ? '<div style="color:var(--text-dim);font-size:11.5px;margin-top:2px;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis">' + esc(last.note) + '</div>' : '';
+      updCell = '<div>' + esc(lab) + '</div>'
+              + (ago ? '<div style="color:var(--text-faint);font-size:11.5px">' + ago + '</div>' : '')
+              + note;
+    }
+    return '<tr data-fu-id="' + esc(r.onboarding_id) + '">' +
+      '<td><div class="so-name">' + esc(r.customer_name || '—') + '</div></td>' +
+      '<td>' + (r.mentor_name ? esc(r.mentor_name) : '<span class="so-mentor-none">geen mentor</span>') + '</td>' +
+      '<td>' + startCell + '</td>' +
+      '<td>' + paidCell + '</td>' +
+      '<td>' + fuStatusPill(r.intake_status || 'nog_te_benaderen') + '</td>' +
+      '<td>' + updCell + '</td>' +
+    '</tr>';
+  }).join('');
+  tbody.querySelectorAll('tr[data-fu-id]').forEach((tr) => {
+    tr.addEventListener('click', () => {
+      const id = tr.getAttribute('data-fu-id');
+      if (id) location.href = '/modules/onboarding-hub.html?open=' + encodeURIComponent(id);
+    });
+  });
+}
+
+function wireFutureControls() {
+  document.querySelectorAll('#fuFilterChips [data-fu-filt]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.futureFilter = btn.getAttribute('data-fu-filt') || 'all';
+      document.querySelectorAll('#fuFilterChips [data-fu-filt]').forEach((b) => {
+        b.classList.toggle('active', b === btn);
+      });
+      renderFutureTable();
+    });
+  });
+  document.querySelectorAll('#fuThead [data-fu-sort]').forEach((th) => {
+    th.addEventListener('click', () => {
+      const k = th.getAttribute('data-fu-sort');
+      if (state.futureSort.key === k) {
+        state.futureSort.dir = state.futureSort.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        state.futureSort.key = k;
+        state.futureSort.dir = 'asc';
+      }
+      renderFutureTable();
+    });
   });
 }
 

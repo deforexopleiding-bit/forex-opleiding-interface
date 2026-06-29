@@ -91,6 +91,7 @@ export default async function handler(req, res) {
                bubble_provisioned, bubble_provisioned_at, bubble_provision_error, bubble_user_id,
                invite_sent_at,
                credentials_email_sent_at, credentials_wa_sent_at,
+               mentor_intake_status,
                traject:onboarding_trajecten(label, type, calls, duur_maanden)`)
       .eq('id', id)
       .maybeSingle();
@@ -205,6 +206,79 @@ export default async function handler(req, res) {
     }
     const bedenktijd = computeBedenktijd(waiver, offerteOp);
 
+    // Intake-status afleiding (Fase 2 read-only). Pakt bubble_user_id van de
+    // toegewezen mentor + bubble_user_id van de student → 1-op-1 maps → past
+    // de Fase-1 prioriteit toe (gedeelde helper). Fail-soft: Bubble-fout
+    // betekent dat we terugvallen op enkel het handmatige veld + null voor
+    // de afgeleide auto-statussen.
+    let intake_status      = null;
+    let planned_call_at    = null;
+    let last_completed_at  = null;
+    let last_noshow_at     = null;
+    if (row.mentor_user_id) {
+      try {
+        const { data: mtm } = await supabaseAdmin
+          .from('team_members')
+          .select('bubble_user_id, is_active')
+          .eq('user_id', row.mentor_user_id)
+          .eq('is_active', true)
+          .maybeSingle();
+        const mentorBubble = mtm?.bubble_user_id ? String(mtm.bubble_user_id).trim() : null;
+        if (mentorBubble && row.bubble_user_id) {
+          const { fetchOneOnOneForMentor } = await import('./_lib/bubble-1on1.js');
+          const ooo = await fetchOneOnOneForMentor(mentorBubble);
+          const bu  = String(row.bubble_user_id);
+          planned_call_at   = ooo.nextPlannedByMember.get(bu)       || null;
+          last_completed_at = ooo.earliestCompletedByMember.get(bu) || null;
+          last_noshow_at    = ooo.lastNoshowByMember.get(bu)        || null;
+        }
+        const { deriveIntakeStatus } = await import('./_lib/intake-status.js');
+        intake_status = deriveIntakeStatus({
+          hasCompletedSession:  !!last_completed_at,
+          mentor_intake_status: row.mentor_intake_status || null,
+          hasNoshow:            !!last_noshow_at,
+          hasFutureCall:        !!planned_call_at,
+        });
+      } catch (e) {
+        console.warn('[onboarding-detail] intake-status derive:', e?.message || e);
+        // Fail-soft: alleen handmatige status of nog_te_benaderen.
+        try {
+          const { deriveIntakeStatus } = await import('./_lib/intake-status.js');
+          intake_status = deriveIntakeStatus({
+            hasCompletedSession:  false,
+            mentor_intake_status: row.mentor_intake_status || null,
+            hasNoshow:            false,
+            hasFutureCall:        false,
+          });
+        } catch (_) {}
+      }
+    }
+
+    // Mentor-update tijdlijn (Fase 2 admin read-only weergave). Asc op
+    // created_at zodat de frontend rechtstreeks chronologisch kan tonen.
+    let mentorUpdates = [];
+    try {
+      const { data: ups, error: upErr } = await supabaseAdmin
+        .from('onboarding_mentor_updates')
+        .select('kind, status, note, created_at, created_by')
+        .eq('onboarding_id', row.id)
+        .order('created_at', { ascending: true })
+        .limit(500);
+      if (upErr) {
+        console.warn('[onboarding-detail] mentor_updates fetch:', upErr.message);
+      } else {
+        mentorUpdates = (ups || []).map((u) => ({
+          kind:       u.kind || null,
+          status:     u.status || null,
+          note:       u.note || null,
+          created_at: u.created_at || null,
+          created_by: u.created_by || null,
+        }));
+      }
+    } catch (e) {
+      console.warn('[onboarding-detail] mentor_updates exception:', e?.message || e);
+    }
+
     const t = row.traject || null;
     return res.status(200).json({
       ok: true,
@@ -243,6 +317,12 @@ export default async function handler(req, res) {
         invite_sent_at            : row.invite_sent_at || null,
         credentials_email_sent_at : row.credentials_email_sent_at || null,
         credentials_wa_sent_at    : row.credentials_wa_sent_at || null,
+        mentor_intake_status      : row.mentor_intake_status || null,
+        mentor_updates            : mentorUpdates,
+        intake_status             : intake_status || null,
+        planned_call_at           : planned_call_at || null,
+        last_completed_at         : last_completed_at || null,
+        last_noshow_at            : last_noshow_at || null,
       },
     });
   } catch (e) {
