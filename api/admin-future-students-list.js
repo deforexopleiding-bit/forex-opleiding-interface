@@ -33,7 +33,6 @@ import { getOnboardingScope } from './_lib/onboardingScope.js';
 import { fetchOneOnOneForMentor } from './_lib/bubble-1on1.js';
 import { deriveIntakeStatus, intakeStatusRank } from './_lib/intake-status.js';
 import {
-  findWaiverConsentKey,
   findAvailabilityBlock,
   buildAvailabilityView,
 } from './_lib/onboarding-wizard-default.js';
@@ -42,6 +41,22 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 function escapeIlike(s) {
   return String(s).replace(/[\\%_]/g, (m) => '\\' + m);
+}
+
+// Spiegel van findWaiverConsentKey in api/onboardings-admin-list.js en
+// api/onboarding-detail.js — niet geëxporteerd uit _lib, hier inline om
+// dezelfde shape te leveren zonder die endpoints te wijzigen.
+function findWaiverConsentKey(structure) {
+  if (!structure || typeof structure !== 'object') return null;
+  const pages = Array.isArray(structure.pages) ? structure.pages : [];
+  for (const p of pages) {
+    for (const b of (p?.blocks || [])) {
+      if (!b || !b.is_waiver) continue;
+      if (b.type === 'file_download' && b.consent_key) return b.consent_key;
+      if (b.type === 'consent'       && b.key)         return b.key;
+    }
+  }
+  return null;
 }
 
 function daysBetween(fromIso, toMs) {
