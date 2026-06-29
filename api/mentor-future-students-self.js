@@ -10,7 +10,9 @@
 //   { ok:true, students:[ {
 //       onboarding_id, customer_name, traject_label,
 //       status, current_step, paid,
-//       started_at, completed_at
+//       started_at, completed_at,
+//       bubble_user_id, mentor_intake_status,
+//       updates:[{ kind, status, note, created_at, created_by }]
 //   } ] }  // sort: created_at desc
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
@@ -41,6 +43,7 @@ export default async function handler(req, res) {
       .select(`id, customer_id, customer_name, status, current_step,
                answers,
                started_at, completed_at, created_at, start_date,
+               bubble_user_id, mentor_intake_status,
                traject:onboarding_trajecten(label)`)
       .eq('mentor_user_id', user.id)
       .neq('status', 'gearchiveerd')
@@ -48,6 +51,33 @@ export default async function handler(req, res) {
       .limit(500);
     if (rowErr) throw new Error('onboardings fetch: ' + rowErr.message);
     const list = rows || [];
+
+    // Tijdlijn per onboarding — één batched query, geen N+1. Sort ascending zodat
+    // de frontend ze chronologisch kan tonen (oudst eerst) en synth-events
+    // (call ingepland / call gestart) er gewoon tussengevoegd kunnen worden.
+    const updatesByOnb = new Map();
+    const obIds = list.map((r) => r.id).filter(Boolean);
+    if (obIds.length > 0) {
+      const { data: ups, error: upErr } = await supabaseAdmin
+        .from('onboarding_mentor_updates')
+        .select('onboarding_id, kind, status, note, created_at, created_by')
+        .in('onboarding_id', obIds)
+        .order('created_at', { ascending: true })
+        .limit(10000);
+      if (upErr) throw new Error('mentor_updates fetch: ' + upErr.message);
+      for (const u of (ups || [])) {
+        const key = u.onboarding_id;
+        if (!key) continue;
+        if (!updatesByOnb.has(key)) updatesByOnb.set(key, []);
+        updatesByOnb.get(key).push({
+          kind:       u.kind || null,
+          status:     u.status || null,
+          note:       u.note || null,
+          created_at: u.created_at || null,
+          created_by: u.created_by || null,
+        });
+      }
+    }
 
     // Paid-vlag per unieke customer_id — zelfde pattern als onboardings-admin-list.
     const customerIds = Array.from(new Set(list.map((r) => r.customer_id).filter(Boolean)));
@@ -89,16 +119,20 @@ export default async function handler(req, res) {
       const ans = (r.answers && typeof r.answers === 'object') ? r.answers : {};
       const availability = availabilityBlock ? buildAvailabilityView(availabilityBlock, ans) : null;
       return {
-        onboarding_id : r.id,
-        customer_name : r.customer_name || null,
-        traject_label : r.traject?.label || null,
-        status        : r.status,
-        current_step  : r.current_step || null,
-        paid          : paidSet.has(r.customer_id),
+        onboarding_id        : r.id,
+        customer_name        : r.customer_name || null,
+        traject_label        : r.traject?.label || null,
+        status               : r.status,
+        current_step         : r.current_step || null,
+        paid                 : paidSet.has(r.customer_id),
         availability,
-        started_at    : r.started_at,
-        completed_at  : r.completed_at,
-        start_date    : r.start_date || null,
+        started_at           : r.started_at,
+        completed_at         : r.completed_at,
+        start_date           : r.start_date || null,
+        created_at           : r.created_at || null,
+        bubble_user_id       : r.bubble_user_id || null,
+        mentor_intake_status : r.mentor_intake_status || null,
+        updates              : updatesByOnb.get(r.id) || [],
       };
     });
 
