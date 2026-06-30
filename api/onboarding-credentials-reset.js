@@ -6,7 +6,11 @@
 // Bubble-fouten + e-mail-fouten worden afgevangen en als clean
 // { ok:false, error } teruggegeven, niet als 500.
 //
-// Permission: onboarding.admin (zelfde gate als provision-retry).
+// Permission:
+//   - onboarding.admin (seesAll) → mag elke onboarding (bestaand gedrag).
+//   - onboarding.view_own (mentor, seesOwn) → alleen z'n eigen toegewezen
+//     onboarding (extra ownership-check op onboarding.mentor_user_id).
+//   - rest → 403.
 //
 // Body:
 //   { onboarding_id (uuid) }
@@ -25,10 +29,10 @@
 //   credentials_email_sent_at niét.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
-import { requirePermission } from './_lib/requirePermission.js';
 import { bubbleWorkflow } from './_lib/bubble.js';
 import { extractTempPasswordFromWf } from './_lib/onboarding-provision.js';
 import { sendCredentialsEmail } from './_lib/onboarding-credentials.js';
+import { getOnboardingScope } from './_lib/onboardingScope.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -43,8 +47,13 @@ export default async function handler(req, res) {
   const supabase = createUserClient(req);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  if (!(await requirePermission(req, 'onboarding.admin'))) {
-    return res.status(403).json({ error: 'Geen rechten (onboarding.admin)' });
+
+  // Coarse gate: alleen onboarding.admin (seesAll) of onboarding.view_own
+  // (mentor, seesOwn) mag deze endpoint überhaupt aanroepen. De fijne
+  // ownership-check op mentor_user_id volgt na de onboarding-lookup.
+  const scope = await getOnboardingScope(req);
+  if (!scope.seesAll && !scope.seesOwn) {
+    return res.status(403).json({ error: 'Geen rechten (onboarding.admin of onboarding.view_own)' });
   }
 
   const body = (req.body && typeof req.body === 'object') ? req.body : null;
@@ -61,7 +70,7 @@ export default async function handler(req, res) {
   try {
     const { data: ob, error: obErr } = await supabaseAdmin
       .from('onboardings')
-      .select('id, customer_id, bubble_user_id, bubble_provisioned')
+      .select('id, customer_id, mentor_user_id, bubble_user_id, bubble_provisioned')
       .eq('id', onboardingId)
       .maybeSingle();
     if (obErr) throw new Error('onboarding lookup: ' + obErr.message);
@@ -80,6 +89,13 @@ export default async function handler(req, res) {
   } catch (e) {
     console.error('[onboarding-credentials-reset] lookup:', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });
+  }
+
+  // 1b) Ownership-check (fijn): een mentor zonder seesAll mag uitsluitend
+  //     z'n eigen toegewezen onboarding resetten. seesAll (onboarding.admin
+  //     / super_admin) → mag elke onboarding (bestaand gedrag).
+  if (!scope.seesAll && onboarding.mentor_user_id !== scope.userId) {
+    return res.status(403).json({ error: 'Onboarding is niet aan jou toegewezen.' });
   }
 
   // 2) Pre-conditie: alleen voor reeds-geprovisioneerde accounts.
@@ -103,6 +119,7 @@ export default async function handler(req, res) {
   try {
     wfRaw = await bubbleWorkflow('reset_student_password', {
       user_id: onboarding.bubble_user_id,
+      email:   customer.email,
     });
   } catch (e) {
     console.warn('[onboarding-credentials-reset] Bubble workflow faalde:', e?.message || e);
