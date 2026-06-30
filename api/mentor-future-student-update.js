@@ -4,10 +4,13 @@
 // een onboarding die aan HEM/HAAR is toegewezen. Voor "Toekomstige studenten"
 // in mentor-students.html (toekomst-tab).
 //
-// Body: { onboarding_id: uuid, status?: enum, note?: string }
+// Body: { onboarding_id: uuid, status?: enum|null, note?: string }
 //
 //   status (optioneel) ∈ { nog_te_benaderen, geen_gehoor, wil_later, wil_niet }
 //     → update onboardings.mentor_intake_status + insert log-rij (kind:'status').
+//   status === null      → expliciet wissen (terug naar auto-afleiding).
+//     → mentor_intake_status = null + log-rij (kind:'status', status=null,
+//       note='Handmatige status gewist').
 //   note (optioneel zónder status, verplicht als er geen status is)
 //     → insert log-rij (kind:'note').
 //
@@ -54,17 +57,23 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'onboarding_id (uuid) is verplicht.' });
   }
 
-  const hasStatus = Object.prototype.hasOwnProperty.call(body, 'status') && body.status != null;
-  const status    = hasStatus ? String(body.status).trim() : null;
-  if (hasStatus && !ALLOWED_STATUS.has(status)) {
-    return res.status(400).json({ error: 'Ongeldige status. Toegestaan: ' + Array.from(ALLOWED_STATUS).join(', ') });
+  // status kan 3 vormen aannemen:
+  //   - niet aanwezig (key ontbreekt) → notitie-only pad
+  //   - whitelist-string             → set status
+  //   - expliciet null               → CLEAR (terug naar auto-afleiding)
+  const statusKeyGiven = Object.prototype.hasOwnProperty.call(body, 'status');
+  const isClear        = statusKeyGiven && body.status === null;
+  const hasStatusValue = statusKeyGiven && body.status != null;
+  const status         = hasStatusValue ? String(body.status).trim() : null;
+  if (hasStatusValue && !ALLOWED_STATUS.has(status)) {
+    return res.status(400).json({ error: 'Ongeldige status. Toegestaan: ' + Array.from(ALLOWED_STATUS).join(', ') + ', null' });
   }
 
   const noteRaw = (body.note == null) ? '' : String(body.note).trim();
   const note    = noteRaw.length > 0 ? noteRaw.slice(0, 2000) : null;
 
-  if (!status && !note) {
-    return res.status(400).json({ error: 'Geef minstens status óf note mee.' });
+  if (!status && !isClear && !note) {
+    return res.status(400).json({ error: 'Geef minstens status, status:null (clear) óf note mee.' });
   }
 
   try {
@@ -80,23 +89,29 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: 'Deze onboarding is niet aan jou toegewezen.' });
     }
 
-    // 1) Status zetten (indien meegegeven) → onboardings.mentor_intake_status.
-    if (status) {
+    // 1) Status zetten of WISSEN → onboardings.mentor_intake_status.
+    //    Bij isClear schrijven we expliciet null zodat de intake-afleiding
+    //    terugvalt op de auto-status (gestart / no_show / call_ingepland)
+    //    of nog_te_benaderen.
+    if (status || isClear) {
       const { error: updErr } = await supabaseAdmin
         .from('onboardings')
-        .update({ mentor_intake_status: status })
+        .update({ mentor_intake_status: status || null })
         .eq('id', onboardingId);
       if (updErr) throw new Error('intake-status update: ' + updErr.message);
     }
 
     // 2) Log-rij in onboarding_mentor_updates.
     //    - status meegegeven → kind:'status' (note optioneel meegestuurd).
+    //    - status wissen     → kind:'status', status=null, note='Handmatige
+    //                          status gewist' (tenzij caller eigen note gaf).
     //    - alleen note       → kind:'note'.
+    const logNote = note || (isClear ? 'Handmatige status gewist' : null);
     const logRow = {
       onboarding_id: onboardingId,
-      kind:          status ? 'status' : 'note',
+      kind:          (status || isClear) ? 'status' : 'note',
       status:        status || null,
-      note:          note   || null,
+      note:          logNote,
       created_by:    user.id,
     };
     const { data: inserted, error: logErr } = await supabaseAdmin
