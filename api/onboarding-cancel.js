@@ -128,7 +128,7 @@ async function gatherContext(onboardingId) {
   if (customerId) {
     const { data, error } = await supabaseAdmin
       .from('deals')
-      .select('id, tl_deal_id, tl_quotation_id, tl_quotation_reference, archived_at')
+      .select('id, tl_deal_id, tl_quotation_id, quote_reference, archived_at')
       .eq('customer_id', customerId)
       .is('archived_at', null)
       .limit(200);
@@ -210,7 +210,7 @@ export default async function handler(req, res) {
           id:                     d.id,
           tl_deal_id:             d.tl_deal_id,
           tl_quotation_id:        d.tl_quotation_id,
-          tl_quotation_reference: d.tl_quotation_reference,
+          tl_quotation_reference: d.quote_reference,
         })),
       });
     }
