@@ -8,7 +8,8 @@
   <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
   <style>
     body { background: var(--bg); color: var(--text); }
-    .app { max-width: 1400px; margin: 24px auto 60px; padding: 0 24px; }
+    .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1280px; }
+    @media (max-width: 880px) { .app { margin-left: 0; padding: 14px; } }
     .page-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:24px; }
     .page-header h1 { font-size: 22px; font-weight: 700; color: var(--text); }
     .page-header p  { font-size: 13px; color: var(--text-dim); }
