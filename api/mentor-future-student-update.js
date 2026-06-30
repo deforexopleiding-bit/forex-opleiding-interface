@@ -78,9 +78,11 @@ export default async function handler(req, res) {
 
   try {
     // Ownership-gate: alleen de toegewezen mentor mag deze rij bewerken.
+    // customer_name wordt mee-opgehaald voor de manager-melding bij
+    // probleem-statussen (zie blok onderaan na de log-insert).
     const { data: ob, error: obErr } = await supabaseAdmin
       .from('onboardings')
-      .select('id, mentor_user_id')
+      .select('id, mentor_user_id, customer_name')
       .eq('id', onboardingId)
       .maybeSingle();
     if (obErr) throw new Error('onboarding fetch: ' + obErr.message);
@@ -120,6 +122,37 @@ export default async function handler(req, res) {
       .select('kind, status, note, created_at, created_by')
       .single();
     if (logErr) throw new Error('mentor_update log insert: ' + logErr.message);
+
+    // 3) Manager-melding bij PROBLEEM-statussen (geen_gehoor / wil_niet /
+    //    wil_later). NIET bij nog_te_benaderen of status-clear (null).
+    //    FAIL-SOFT: een falende insert mag de mentor-update niet breken.
+    const PROBLEM_STATUSES = new Set(['geen_gehoor', 'wil_niet', 'wil_later']);
+    const STATUS_LABEL = {
+      geen_gehoor: 'Geen gehoor',
+      wil_niet:    'Wil niet starten',
+      wil_later:   'Wil later starten',
+    };
+    if (status && PROBLEM_STATUSES.has(status)) {
+      try {
+        const { error: mnErr } = await supabaseAdmin
+          .from('manager_notifications')
+          .insert({
+            onboarding_id:  onboardingId,
+            kind:           'mentor_status',
+            status,
+            customer_name:  ob.customer_name || null,
+            mentor_user_id: user.id,
+            title:          'Mentor-update: ' + (STATUS_LABEL[status] || status),
+            body:           note || null,
+            created_by:     user.id,
+          });
+        if (mnErr) {
+          console.warn('[mentor-future-student-update] manager_notifications insert (soft):', mnErr.message);
+        }
+      } catch (e) {
+        console.warn('[mentor-future-student-update] manager_notifications exception (soft):', e?.message || e);
+      }
+    }
 
     return res.status(200).json({ ok: true, update: inserted });
   } catch (e) {
