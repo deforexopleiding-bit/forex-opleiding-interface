@@ -8,26 +8,54 @@
   <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
   <style>
     body { background: var(--bg); color: var(--text); }
-    .app { max-width: 1200px; margin: 24px auto 60px; padding: 0 24px; }
-    .page-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:28px; }
+    .app { max-width: 1400px; margin: 24px auto 60px; padding: 0 24px; }
+    .page-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:24px; }
     .page-header h1 { font-size: 22px; font-weight: 700; color: var(--text); }
     .page-header p  { font-size: 13px; color: var(--text-dim); }
     .empty-state { padding:24px; border:1px dashed var(--border); border-radius:10px; text-align:center; color:var(--text-faint); font-size:13px; display:flex; align-items:center; justify-content:center; gap:8px; }
-    .student-card { border:1px solid var(--border); border-radius:10px; background:var(--bg-elev); margin-bottom:10px; overflow:hidden; }
-    .student-head { display:grid; align-items:center; gap:12px; padding:12px 14px; }
-    .student-name { font-weight:700; color:var(--text); font-size:14px; }
-    .student-meta { font-size:12.5px; color:var(--text-dim); }
-    .student-stat { font-size:12.5px; }
-    .badge       { display:inline-block; padding:2px 9px; border-radius:999px; font-size:11px; font-weight:700; }
+    .badge       { display:inline-block; padding:2px 10px; border-radius:999px; font-size:11px; font-weight:700; line-height:1.4; white-space:nowrap; }
     .badge-green { background:rgba(34,197,94,0.16); color:#15803d; }
     .badge-amber { background:rgba(245,158,11,0.18); color:#92400e; }
     .badge-red   { background:rgba(220,38,38,0.16); color:#7f1d1d; }
     .badge-blue  { background:rgba(59,130,246,0.16); color:#1e3a8a; }
     .badge-grey  { background:rgba(100,116,139,0.18); color:#475569; }
-    .btn { background:var(--bg-elev); border:1px solid var(--border); border-radius:6px; cursor:pointer; color:var(--text); font:inherit; font-size:12.5px; }
     .filter-row { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; align-items:center; }
     .filter-chip { padding:5px 12px; border:1px solid var(--border); border-radius:999px; background:var(--bg-elev); color:var(--text-dim); font-size:12px; font-weight:600; cursor:pointer; font-family:inherit; }
     .filter-chip.active { background:var(--text); color:var(--bg); border-color:var(--text); }
+    /* Tabel */
+    .mo-table-wrap { border:1px solid var(--border); border-radius:10px; overflow:auto; background:var(--bg-elev); }
+    table.mo-table { width:100%; border-collapse: collapse; font-size: 12.5px; }
+    .mo-table thead th { padding: 10px 12px; text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:0.04em; color: var(--text-dim); background:var(--bg); border-bottom:1px solid var(--border); white-space: nowrap; font-weight:700; }
+    .mo-table tbody td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    .mo-table tbody tr { cursor: pointer; }
+    .mo-table tbody tr:hover td { background:var(--bg); }
+    .mo-name { font-weight:600; color:var(--text); }
+    .mo-sub  { font-size:11.5px; color:var(--text-faint); }
+    .ico-ok   { color:#15803d; }
+    .ico-bad  { color:#b91c1c; }
+    .ico-mute { color:var(--text-faint); }
+    /* Modal */
+    .mo-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1000; display:none; align-items:flex-start; justify-content:center; padding:32px 16px; overflow-y:auto; }
+    .mo-modal-overlay.open { display:flex; }
+    .mo-modal { width:100%; max-width:780px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; box-shadow:0 12px 32px rgba(0,0,0,0.35); }
+    .mo-modal-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 18px; border-bottom:1px solid var(--border); }
+    .mo-modal-title { font-size:16px; font-weight:700; color:var(--text); }
+    .mo-modal-body { padding:16px 18px 20px; }
+    .mo-section { margin-bottom:14px; padding:12px 14px; border:1px solid var(--border); border-radius:10px; background:var(--bg); }
+    .mo-section-h { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.05em; font-weight:700; margin-bottom:8px; }
+    .mo-dl { display:grid; grid-template-columns:140px 1fr; gap:6px 12px; font-size:13px; }
+    .mo-dl dt { color:var(--text-dim); }
+    .mo-dl dd { color:var(--text); }
+    .mo-btn { display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border-radius:7px; font:inherit; font-size:12.5px; font-weight:600; cursor:pointer; border:1px solid var(--border); background:var(--bg-elev); color:var(--text); }
+    .mo-btn:hover:not(:disabled) { background:var(--bg); }
+    .mo-btn:disabled { cursor:not-allowed; opacity:0.55; }
+    .mo-btn-active { background:var(--text); color:var(--bg); border-color:var(--text); }
+    .mo-status-btns { display:flex; gap:6px; flex-wrap:wrap; }
+    .mo-clear-btn { padding:5px 9px; font-size:11px; }
+    .mo-progress-bar { width:100%; height:8px; background:var(--bg-elev); border-radius:999px; overflow:hidden; border:1px solid var(--border); }
+    .mo-progress-fill { height:100%; background:#0d9488; }
+    .mo-tooltip { position:relative; cursor:help; }
+    .mo-textarea { width:100%; padding:7px 9px; border:1px solid var(--border); border-radius:7px; background:var(--bg-elev); color:var(--text); font:inherit; font-size:12.5px; resize:vertical; }
   </style>
 </head>
 <body>
@@ -37,7 +65,7 @@
   <div class="page-header">
     <div>
       <h1>Onboarding</h1>
-      <p>Jouw toegewezen instroom-studenten — zet je intake-status, plaats notities, volg de tijdlijn.</p>
+      <p>Jouw toegewezen instroom-studenten — klik op een rij voor de volledige detail-popup.</p>
     </div>
     <div style="position:relative">
       <button id="msNotifBtn" type="button" title="Meldingen"
@@ -70,7 +98,22 @@
     <span id="moCountInfo" style="margin-left:auto;font-size:12.5px;color:var(--text-faint)"></span>
   </div>
 
-  <div id="futureStudentsWrap"><div class="empty-state"><i class="ti ti-clock"></i>Laden…</div></div>
+  <div id="moTableWrap"><div class="empty-state"><i class="ti ti-clock"></i>Laden…</div></div>
+</div>
+
+<!-- Detail-popup -->
+<div id="moModalOverlay" class="mo-modal-overlay">
+  <div class="mo-modal" role="dialog" aria-modal="true" aria-labelledby="moModalTitle">
+    <div class="mo-modal-head">
+      <div style="display:flex;align-items:center;gap:10px;min-width:0">
+        <div id="moModalTitle" class="mo-modal-title">Student</div>
+        <span id="moModalStatusPill"></span>
+      </div>
+      <button type="button" id="moModalClose" aria-label="Sluiten"
+        style="background:transparent;border:none;font-size:20px;color:var(--text-dim);cursor:pointer;line-height:1">&times;</button>
+    </div>
+    <div class="mo-modal-body" id="moModalBody"></div>
+  </div>
 </div>
 
 <script src="/modules/shared/supabase-client.js"></script>
@@ -112,20 +155,14 @@
   }
 
   // ── State ──────────────────────────────────────────────────────────────
-  // SELF-scoped: alle data komt van /api/mentor-future-students-self + de
-  // mentor-eigen 1-op-1 maps. Geen no-mentor-pad, geen manager-acties.
   const _nextCallByStudent = new Map();
   const _noshowByStudent   = new Map();
   const _completedByMember = new Map();
-  const _futureById        = new Map();
-  const _futureOpenId      = { id: null };
+  const _byId              = new Map(); // onboarding_id → student-record
   let   _filter            = 'all';
-
-  // Notifications (mentor self-only)
-  let   _notifications        = [];
-  const _unreadByOnb          = new Map();
-  // _unreadByBubbleUser blijft hier ongebruikt (mijn-studenten leeft op
-  // mentor-students.html). We declareren 'm niet om verwarring te vermijden.
+  let   _notifications     = [];
+  const _unreadByOnb       = new Map();
+  let   _openId            = null;      // onboarding_id van open popup
 
   // ── 1-op-1 maps (auto-statussen: gestart / call_ingepland / no_show) ──
   async function loadOneOnOneMaps() {
@@ -164,36 +201,7 @@
     } catch (e) { console.warn('[mentor-onboarding] 1on1:', e?.message || e); }
   }
 
-  // ── Paid badge — gated on soon (≤14 dagen) ─────────────────────────────
-  function _futurePaidBadge(paid, soon) {
-    if (paid) {
-      return '<span class="badge badge-green" title="Betaling is binnen.">💶 Betaald</span>';
-    }
-    if (soon) {
-      return '<span class="badge badge-amber" title="Plan gerust; controleer de betaling vóór de call plaatsvindt.">⏳ Nog niet betaald · plan de eerste call alvast (check betaling vóór de call)</span>';
-    }
-    return '<span class="badge badge-amber" title="Betaling staat nog open.">⏳ Nog niet betaald</span>';
-  }
-  function _daysUntilStart(start) {
-    if (!start) return null;
-    const today = new Date(); today.setHours(0,0,0,0);
-    const sd = new Date(start); sd.setHours(0,0,0,0);
-    const diff = Math.round((sd - today) / (24 * 60 * 60 * 1000));
-    return Number.isFinite(diff) ? diff : null;
-  }
-  function _futureStartBadge(days) {
-    let when;
-    if (days === 0)      when = 'vandaag';
-    else if (days === 1) when = 'morgen';
-    else                 when = 'over ' + days + ' dag' + (days === 1 ? '' : 'en');
-    return '<span class="badge badge-amber" style="font-size:11.5px"'
-      + ' title="Start ' + when + ' — plan alvast de eerste call (check betaling vóór de call).">'
-      + '📞 Plan de eerste call — start ' + when + ' · neem contact op</span>';
-  }
-
-  // ── Intake-statusmodel (mirror van Fase 1 — identieke prioriteit) ─────
-  // Mentor heeft altijd een toegewezen onboarding (self-scoped) → geen
-  // 'nog_geen_mentor'-key hier. Default-sort is problemen-bovenaan.
+  // ── Intake-statusmodel ────────────────────────────────────────────────
   const _INTAKE_MANUAL = ['nog_te_benaderen','geen_gehoor','wil_later','wil_niet'];
   const _INTAKE_META = {
     gestart:           { label: 'Gestart',            cls: 'badge-green', auto: true  },
@@ -204,12 +212,11 @@
     call_ingepland:    { label: 'Call ingepland',     cls: 'badge-blue',  auto: true  },
     nog_te_benaderen:  { label: 'Nog te benaderen',   cls: 'badge-grey',  auto: false },
   };
-  // Server-rank mirror — problemen-bovenaan default.
   const _RANK = {
     wil_niet: 0, no_show: 1, geen_gehoor: 2, wil_later: 3,
     nog_te_benaderen: 4, call_ingepland: 5, gestart: 9,
   };
-  function _futureIntakeState(s) {
+  function _intakeState(s) {
     const bu = s.bubble_user_id ? String(s.bubble_user_id) : null;
     if (bu && _completedByMember.has(bu))      return 'gestart';
     const ms = s.mentor_intake_status || null;
@@ -225,26 +232,166 @@
     return `<span class="badge ${m.cls}">${esc(m.label)}</span>`;
   }
 
-  // ── Tijdlijn (stored updates + synth events + assigned) ───────────────
-  function _buildFutureTimeline(s) {
-    const events = [];
-    if (s.created_at) {
-      events.push({ at: s.created_at, kind: 'assigned', label: 'Toegewezen aan jou' });
+  // ── Cell helpers ──────────────────────────────────────────────────────
+  function _trajectCell(s) {
+    const lbl = s.traject_label || '—';
+    const parts = [];
+    if (s.traject_calls != null) parts.push(s.traject_calls + ' 1-op-1');
+    if (s.traject_duur_maanden != null) parts.push(s.traject_duur_maanden + ' mnd');
+    const sub = parts.length ? ('<div class="mo-sub">' + esc(parts.join(' · ')) + '</div>') : '';
+    return '<div>' + esc(lbl) + '</div>' + sub;
+  }
+  function _paidCell(paid) {
+    return paid
+      ? '<i class="ti ti-check ico-ok" title="Betaald"></i>'
+      : '<i class="ti ti-x ico-bad" title="Nog niet betaald"></i>';
+  }
+  function _bubbleCell(s) {
+    if (s.bubble_provisioned) {
+      return '<i class="ti ti-circle-check-filled ico-ok" title="Bubble-account aangemaakt' + (s.bubble_provisioned_at ? ' op ' + esc(fmtDateNL(s.bubble_provisioned_at)) : '') + '"></i>';
     }
+    if (s.bubble_provision_error) {
+      return '<i class="ti ti-alert-triangle-filled ico-bad" title="Bubble-aanmaak mislukt: ' + esc(String(s.bubble_provision_error).slice(0, 120)) + '"></i>';
+    }
+    return '<i class="ti ti-circle-dashed ico-mute" title="Bubble nog niet aangemaakt"></i>';
+  }
+  function _bedenktijdCell(bt) {
+    if (!bt || bt.status === 'onbekend') return '<span class="ico-mute">—</span>';
+    const dt = bt.vervalt_op ? esc(fmtDateNL(bt.vervalt_op)) : '—';
+    if (bt.status === 'vervallen') {
+      // groen vinkje = vervallen (klant kan niet meer terug)
+      return '<i class="ti ti-check ico-ok" title="Vervallen (' + esc(bt.reason || '') + ')"></i> <span style="font-size:11.5px;color:var(--text-dim)">' + dt + '</span>';
+    }
+    // rood kruisje = nog NIET vervallen (klant kan nog terugkomen)
+    return '<i class="ti ti-x ico-bad" title="Nog niet vervallen"></i> <span style="font-size:11.5px;color:var(--text-dim)">' + dt + '</span>';
+  }
+  function _wizardCell(s) {
+    const tot = s.total_steps || null;
+    const cs  = s.current_step || null;
+    if (!tot && !cs) return '<span class="ico-mute">—</span>';
+    if (!tot) return esc(cs || '—');
+    // current_step is een string-label van de huidige pagina; vertaal naar 1-based index als mogelijk.
+    const idx = (s.current_step_index != null && Number.isFinite(s.current_step_index)) ? Number(s.current_step_index) : null;
+    if (idx != null) return idx + '/' + tot;
+    return cs ? (esc(cs) + ' <span class="mo-sub">van ' + tot + '</span>') : ('— van ' + tot);
+  }
+  function _availSummary(av) {
+    if (!av || typeof av !== 'object') return '';
+    const parts = [];
+    if (Array.isArray(av.days) && av.days.length) parts.push('Dagen: ' + av.days.join(', '));
+    if (Array.isArray(av.blocks) && av.blocks.length) parts.push('Dagdelen: ' + av.blocks.join(', '));
+    return parts.join(' · ');
+  }
+  function _availCell(av) {
+    const summary = _availSummary(av);
+    if (!summary) return '<span class="ico-mute">—</span>';
+    return '<i class="ti ti-calendar ico-mute mo-tooltip" title="' + esc(summary) + '"></i>';
+  }
+  function _unreadDotHtml(onbId) {
+    if (!onbId) return '';
+    const n = _unreadByOnb.get(onbId) || 0;
+    if (n <= 0) return '';
+    return ' <span class="badge" style="background:#dc2626;color:#fff;padding:1px 7px;border-radius:999px;font-size:10.5px" title="Ongelezen update van management">●</span>';
+  }
+
+  // ── Filter / sort / render tabel ──────────────────────────────────────
+  function _applyFilter(list) {
+    if (_filter === 'all') return list;
+    if (_filter === 'problems') {
+      const PROB = new Set(['wil_niet','no_show','geen_gehoor','wil_later']);
+      return list.filter((s) => PROB.has(_intakeState(s)));
+    }
+    return list.filter((s) => _intakeState(s) === _filter);
+  }
+
+  function _renderTable(students) {
+    const wrap = document.getElementById('moTableWrap');
+    if (!wrap) return;
+    const list = Array.isArray(students) ? students : [];
+    _byId.clear();
+    for (const s of list) {
+      if (s && s.onboarding_id) _byId.set(String(s.onboarding_id), s);
+    }
+    const filtered = _applyFilter(list);
+    const info = document.getElementById('moCountInfo');
+    if (info) info.textContent = filtered.length + ' / ' + list.length + ' studenten';
+    if (filtered.length === 0) {
+      wrap.innerHTML = list.length === 0
+        ? `<div class="empty-state"><i class="ti ti-user-question"></i>Je hebt nog geen toegewezen studenten.</div>`
+        : `<div class="empty-state"><i class="ti ti-filter-off"></i>Geen studenten in deze filter.</div>`;
+      return;
+    }
+    // Sort: startdatum asc; zonder start_date onderaan.
+    const sorted = filtered.slice().sort((a, b) => {
+      const ad = a.start_date ? String(a.start_date) : '';
+      const bd = b.start_date ? String(b.start_date) : '';
+      if (ad && !bd) return -1;
+      if (!ad && bd) return 1;
+      if (ad !== bd) return ad < bd ? -1 : 1;
+      return String(a.customer_name || '').localeCompare(String(b.customer_name || ''));
+    });
+    const body = sorted.map((s) => {
+      const onbId  = esc(String(s.onboarding_id || ''));
+      const intake = _intakeState(s);
+      return `
+        <tr data-mo-id="${onbId}">
+          <td><div class="mo-name">${esc(s.customer_name || '—')}${_unreadDotHtml(s.onboarding_id)}</div></td>
+          <td>${_intakePillHtml(intake)}</td>
+          <td>${_trajectCell(s)}</td>
+          <td>${s.start_date ? esc(fmtDateNL(s.start_date)) : '<span class="ico-mute">—</span>'}</td>
+          <td>${_paidCell(!!s.paid)}</td>
+          <td>${_bubbleCell(s)}</td>
+          <td>${_bedenktijdCell(s.bedenktijd || null)}</td>
+          <td>${_wizardCell(s)}</td>
+          <td>${_availCell(s.availability)}</td>
+          <td style="text-align:right;color:var(--text-faint)"><i class="ti ti-chevron-right"></i></td>
+        </tr>`;
+    }).join('');
+    wrap.innerHTML = `
+      <div class="mo-table-wrap">
+        <table class="mo-table">
+          <thead>
+            <tr>
+              <th>Klant</th>
+              <th>Status</th>
+              <th>Traject</th>
+              <th>Start</th>
+              <th>Betaald</th>
+              <th>Bubble</th>
+              <th>Bedenktijd</th>
+              <th>Wizard</th>
+              <th>Beschikb.</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>`;
+    wrap.querySelectorAll('tr[data-mo-id]').forEach((tr) => {
+      tr.addEventListener('click', () => openModal(tr.getAttribute('data-mo-id')));
+    });
+  }
+
+  // ── Tijdlijn ──────────────────────────────────────────────────────────
+  function _buildTimeline(s) {
+    const events = [];
+    if (s.created_at) events.push({ at: s.created_at, label: 'Toegewezen aan jou' });
     const bu = s.bubble_user_id ? String(s.bubble_user_id) : null;
     if (bu) {
       const planned = _nextCallByStudent.get(bu);
-      if (planned) events.push({ at: planned, kind: 'call_scheduled', label: 'Call ingepland' });
+      if (planned) events.push({ at: planned, label: 'Call ingepland' });
       const started = _completedByMember.get(bu);
-      if (started) events.push({ at: started, kind: 'call_started', label: 'Eerste call gestart' });
+      if (started) events.push({ at: started, label: 'Eerste call gestart' });
       const ns = _noshowByStudent.get(bu);
-      if (ns) events.push({ at: ns, kind: 'no_show', label: 'No-show' });
+      if (ns) events.push({ at: ns, label: 'No-show' });
     }
     for (const u of (Array.isArray(s.updates) ? s.updates : [])) {
       if (u.kind === 'status' && u.status && _INTAKE_META[u.status]) {
-        events.push({ at: u.created_at, kind: 'status', label: 'Status: ' + _INTAKE_META[u.status].label, note: u.note || '' });
+        events.push({ at: u.created_at, label: 'Status: ' + _INTAKE_META[u.status].label, note: u.note || '' });
+      } else if (u.kind === 'status' && !u.status) {
+        events.push({ at: u.created_at, label: 'Status gewist', note: u.note || '' });
       } else if (u.kind === 'note' && u.note) {
-        events.push({ at: u.created_at, kind: 'note', label: 'Notitie', note: u.note });
+        events.push({ at: u.created_at, label: 'Notitie', note: u.note });
       }
     }
     events.sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
@@ -253,200 +400,234 @@
       const when = e.at ? esc(fmtDateTimeNL(e.at)) : '—';
       const note = e.note ? `<div style="margin-top:2px;color:var(--text-dim);font-size:12px;white-space:pre-wrap">${esc(e.note)}</div>` : '';
       return `
-        <div style="display:grid;grid-template-columns:130px 1fr;gap:8px;padding:6px 0;border-top:1px solid var(--border)">
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:8px;padding:6px 0;border-top:1px solid var(--border)">
           <div style="font-size:11.5px;color:var(--text-faint)">${when}</div>
           <div><div style="font-size:12.5px;color:var(--text)">${esc(e.label)}</div>${note}</div>
         </div>`;
     }).join('');
   }
 
-  // ── Card-body (status-selector + planned call + notitie + tijdlijn) ───
-  function _renderFutureCardBody(s) {
-    const key = _futureIntakeState(s);
-    const bu  = s.bubble_user_id ? String(s.bubble_user_id) : null;
-    const plannedIso = bu ? _nextCallByStudent.get(bu) : null;
-    const plannedLine = plannedIso
-      ? `<div style="font-size:12.5px;color:var(--text)">${esc(fmtDateTimeNL(plannedIso))}</div>`
-      : `<div style="font-size:12.5px;color:var(--text-faint)">— nog niets ingepland</div>`;
+  // ── Modal ─────────────────────────────────────────────────────────────
+  function openModal(onbId) {
+    const s = _byId.get(String(onbId));
+    if (!s) return;
+    _openId = String(onbId);
+    const overlay = document.getElementById('moModalOverlay');
+    const title   = document.getElementById('moModalTitle');
+    const pill    = document.getElementById('moModalStatusPill');
+    const body    = document.getElementById('moModalBody');
+    if (title) title.textContent = s.customer_name || 'Student';
+    if (pill)  pill.innerHTML = _intakePillHtml(_intakeState(s));
+    if (body)  body.innerHTML = _renderModalBody(s);
+    if (overlay) overlay.classList.add('open');
+    _wireModalHandlers(s);
+  }
+  function closeModal() {
+    _openId = null;
+    const overlay = document.getElementById('moModalOverlay');
+    if (overlay) overlay.classList.remove('open');
+  }
+  function _refreshModal() {
+    if (!_openId) return;
+    const s = _byId.get(_openId);
+    if (!s) return;
+    const body = document.getElementById('moModalBody');
+    const pill = document.getElementById('moModalStatusPill');
+    if (pill)  pill.innerHTML = _intakePillHtml(_intakeState(s));
+    if (body)  body.innerHTML = _renderModalBody(s);
+    _wireModalHandlers(s);
+  }
+
+  function _renderModalBody(s) {
+    const intake = _intakeState(s);
+    const manualSet = String(s.mentor_intake_status || '');
+    // Contact
+    const tel = s.customer_phone
+      ? '<a href="tel:' + esc(s.customer_phone) + '">' + esc(s.customer_phone) + '</a>'
+      : '<span class="ico-mute">—</span>';
+    const em = s.customer_email
+      ? '<a href="mailto:' + esc(s.customer_email) + '">' + esc(s.customer_email) + '</a>'
+      : '<span class="ico-mute">—</span>';
+
+    // Bubble-account
+    let bubbleLine = '';
+    if (s.bubble_provisioned) {
+      bubbleLine = '<i class="ti ti-circle-check-filled ico-ok"></i> Aangemaakt'
+        + (s.bubble_provisioned_at ? ' op ' + esc(fmtDateNL(s.bubble_provisioned_at)) : '');
+    } else if (s.bubble_provision_error) {
+      bubbleLine = '<i class="ti ti-alert-triangle-filled ico-bad"></i> Mislukt — '
+        + '<span style="color:var(--text-dim);font-size:12px">' + esc(String(s.bubble_provision_error).slice(0, 200)) + '</span>';
+    } else {
+      bubbleLine = '<i class="ti ti-circle-dashed ico-mute"></i> Nog niet aangemaakt';
+    }
+    const credsLine = s.credentials_email_sent_at
+      ? 'Inloggegevens-mail verzonden op ' + esc(fmtDateNL(s.credentials_email_sent_at))
+      : 'Inloggegevens-mail nog niet verzonden';
+    // Resend-credentials: HISTORISCH ENDPOINT VERWIJDERD (zie PR-body /
+    // Lessons Learned). tempPassword wordt nooit gepersist. Daarom hier
+    // alleen status tonen + uitleg-knop met disabled state.
+    const credsHelp = '<button type="button" class="mo-btn" disabled title="Het mailen van nieuwe inloggegevens vereist het minten van een nieuw temp_password via een Bubble-workflow die nog niet bestaat. Vraag een admin om dit op te zetten."><i class="ti ti-mail"></i> Inloggegevens opnieuw sturen</button>';
+
+    // Instroom-blok
+    const trajectLabel = s.traject_label ? esc(s.traject_label) : '—';
+    const looptijd = (s.traject_duur_maanden != null)
+      ? (s.traject_duur_maanden + ' mnd' + (s.traject_calls != null ? ' · ' + s.traject_calls + ' 1-op-1' : ''))
+      : (s.traject_calls != null ? s.traject_calls + ' 1-op-1' : '—');
+    const bt = s.bedenktijd || null;
+    const btLine = bt && bt.status !== 'onbekend'
+      ? ((bt.status === 'vervallen'
+            ? '<i class="ti ti-check ico-ok"></i> Vervallen'
+            : '<i class="ti ti-x ico-bad"></i> Nog niet vervallen')
+          + (bt.vervalt_op ? ' · ' + esc(fmtDateNL(bt.vervalt_op)) : ''))
+      : '<span class="ico-mute">—</span>';
+
+    // Wizard
+    const tot = s.total_steps || null;
+    const cs  = s.current_step || null;
+    const pct = (tot && s.current_step_index != null)
+      ? Math.min(100, Math.round((Number(s.current_step_index) / tot) * 100))
+      : 0;
+    const wizText = tot
+      ? ('Stap ' + (s.current_step_index != null ? s.current_step_index : '?') + ' van ' + tot + (cs ? ' (' + esc(cs) + ')' : ''))
+      : (cs ? esc(cs) : 'Onbekend');
+
+    // Vragenlijst-status
+    const ans = s.answers || {};
+    const ansFilled = ans && typeof ans === 'object' ? Object.keys(ans).length : 0;
+    const wizardLink = s.token ? '/modules/onboarding.html?t=' + encodeURIComponent(s.token) : null;
+    const qLine = ansFilled > 0
+      ? ansFilled + ' antwoorden ingevuld'
+      : 'Nog geen antwoorden';
+
+    // Beschikbaarheid (volledig)
+    const av = s.availability || null;
+    const avLine = av
+      ? ((Array.isArray(av.days)   && av.days.length   ? '<div><strong>Dagen:</strong> ' + esc(av.days.join(', '))   + '</div>' : '')
+       + (Array.isArray(av.blocks) && av.blocks.length ? '<div><strong>Dagdelen:</strong> ' + esc(av.blocks.join(', ')) + '</div>' : '')
+       || '<span class="ico-mute">—</span>')
+      : '<span class="ico-mute">—</span>';
+
+    // Status-block
     const manualBtns = _INTAKE_MANUAL.map((k) => {
       const m = _INTAKE_META[k];
-      const isCurrent = (key === k);
-      const style = isCurrent
-        ? 'background:var(--text);color:var(--bg);border-color:var(--text)'
-        : '';
-      return `<button type="button" class="btn"
-        data-fut-set-status="${esc(k)}"
-        style="padding:5px 9px;font-size:12px;${style}">${esc(m.label)}</button>`;
+      const isCurrent = (manualSet === k);
+      const cls = isCurrent ? 'mo-btn mo-btn-active' : 'mo-btn';
+      return `<button type="button" class="${cls}" data-mo-set="${esc(k)}">${esc(m.label)}</button>`;
     }).join(' ');
-    const isAuto = !!(_INTAKE_META[key] && _INTAKE_META[key].auto);
+    const clearBtn = manualSet
+      ? `<button type="button" class="mo-btn mo-clear-btn" data-mo-clear="1" title="Zet terug naar automatisch"><i class="ti ti-x"></i> Wissen</button>`
+      : '';
+    const isAuto = (intake !== manualSet) && _INTAKE_META[intake] && _INTAKE_META[intake].auto;
     const autoNote = isAuto
-      ? `<div style="font-size:11.5px;color:var(--text-faint);margin-top:4px">Huidige status "<strong>${esc(_INTAKE_META[key].label)}</strong>" is automatisch afgeleid uit de 1-op-1 sessies — kies hierboven een handmatige status om dat over te schrijven.</div>`
+      ? `<div style="font-size:11.5px;color:var(--text-faint);margin-top:6px">Auto-status "<strong>${esc(_INTAKE_META[intake].label)}</strong>" — afgeleid uit de 1-op-1 sessies. Kies hierboven een handmatige status om dat te overschrijven.</div>`
       : '';
-    const noteId = 'futNote-' + esc(String(s.onboarding_id));
+
     return `
-      <div style="padding:12px;border-top:1px solid var(--border);display:grid;gap:12px">
-        <div>
-          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Status</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap">${manualBtns}</div>
-          ${autoNote}
-        </div>
-        <div>
-          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Geplande call</div>
-          ${plannedLine}
-        </div>
-        <div>
-          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Notitie</div>
-          <textarea id="${noteId}" rows="2" placeholder="Voeg een notitie toe…"
-            style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:12.5px;resize:vertical"></textarea>
+      <div class="mo-section">
+        <div class="mo-section-h">Contact</div>
+        <dl class="mo-dl">
+          <dt>Telefoon</dt><dd>${tel}</dd>
+          <dt>E-mail</dt><dd>${em}</dd>
+        </dl>
+      </div>
+
+      <div class="mo-section">
+        <div class="mo-section-h">Bubble-account</div>
+        <div style="font-size:13px;margin-bottom:8px">${bubbleLine}</div>
+        <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:8px">${credsLine}</div>
+        ${credsHelp}
+      </div>
+
+      <div class="mo-section">
+        <div class="mo-section-h">Instroom</div>
+        <dl class="mo-dl">
+          <dt>Traject</dt><dd>${trajectLabel}</dd>
+          <dt>Looptijd</dt><dd>${esc(looptijd)}</dd>
+          <dt>Startdatum</dt><dd>${s.start_date ? esc(fmtDateNL(s.start_date)) : '<span class="ico-mute">— niet ingesteld</span>'}</dd>
+          <dt>Betaald</dt><dd>${s.paid ? '<i class="ti ti-check ico-ok"></i> Ja' : '<i class="ti ti-x ico-bad"></i> Nog niet'}</dd>
+          <dt>Bedenktijd</dt><dd>${btLine}</dd>
+        </dl>
+      </div>
+
+      <div class="mo-section">
+        <div class="mo-section-h">Wizard-voortgang</div>
+        <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:6px">${wizText}</div>
+        <div class="mo-progress-bar"><div class="mo-progress-fill" style="width:${pct}%"></div></div>
+      </div>
+
+      <div class="mo-section">
+        <div class="mo-section-h">Vragenlijst</div>
+        <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:6px">${esc(qLine)}</div>
+        ${wizardLink ? '<a href="' + esc(wizardLink) + '" target="_blank" rel="noopener" style="font-size:12px">Open volledige vragenlijst <i class="ti ti-external-link"></i></a>' : ''}
+      </div>
+
+      <div class="mo-section">
+        <div class="mo-section-h">Beschikbaarheid</div>
+        <div style="font-size:13px;display:grid;gap:2px">${avLine}</div>
+      </div>
+
+      <div class="mo-section">
+        <div class="mo-section-h">Status zetten</div>
+        <div class="mo-status-btns">${manualBtns} ${clearBtn}</div>
+        ${autoNote}
+        <div style="margin-top:12px">
+          <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Notitie</div>
+          <textarea id="moNote" rows="2" placeholder="Voeg een notitie toe…" class="mo-textarea"></textarea>
           <div style="margin-top:6px;display:flex;justify-content:flex-end">
-            <button type="button" class="btn" data-fut-save-note style="padding:5px 11px;font-size:12px">Opslaan</button>
+            <button type="button" class="mo-btn" data-mo-save-note><i class="ti ti-message-circle"></i> Opslaan</button>
           </div>
         </div>
-        <div>
-          <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Tijdlijn</div>
-          <div data-fut-timeline>${_buildFutureTimeline(s)}</div>
-        </div>
-      </div>`;
+      </div>
+
+      <div class="mo-section">
+        <div class="mo-section-h">Tijdlijn</div>
+        ${_buildTimeline(s)}
+      </div>
+    `;
   }
 
-  // ── Filter + sort + render ────────────────────────────────────────────
-  function _applyFilter(list) {
-    if (_filter === 'all') return list;
-    if (_filter === 'problems') {
-      const PROB = new Set(['wil_niet','no_show','geen_gehoor','wil_later']);
-      return list.filter((s) => PROB.has(_futureIntakeState(s)));
-    }
-    return list.filter((s) => _futureIntakeState(s) === _filter);
-  }
-
-  function _renderFutureStudents(students) {
-    const wrap = document.getElementById('futureStudentsWrap');
-    if (!wrap) return;
-    const list = Array.isArray(students) ? students : [];
-    _futureById.clear();
-    for (const s of list) {
-      if (s && s.onboarding_id) _futureById.set(String(s.onboarding_id), s);
-    }
-    const filtered = _applyFilter(list);
-    const info = document.getElementById('moCountInfo');
-    if (info) info.textContent = filtered.length + ' / ' + list.length + ' studenten';
-    if (filtered.length === 0) {
-      wrap.innerHTML = list.length === 0
-        ? `<div class="empty-state"><i class="ti ti-user-question"></i>Je hebt nog geen toekomstige studenten toegewezen gekregen.</div>`
-        : `<div class="empty-state"><i class="ti ti-filter-off"></i>Geen studenten in deze filter.</div>`;
-      return;
-    }
-    // Default-sort: problemen-bovenaan (intake_rank asc); tie-break op
-    // start_date asc en daarna naam.
-    const sorted = filtered.slice().sort((a, b) => {
-      const ra = _RANK[_futureIntakeState(a)] ?? 99;
-      const rb = _RANK[_futureIntakeState(b)] ?? 99;
-      if (ra !== rb) return ra - rb;
-      const ad = a.start_date ? String(a.start_date) : '9999-99-99';
-      const bd = b.start_date ? String(b.start_date) : '9999-99-99';
-      if (ad !== bd) return ad < bd ? -1 : 1;
-      return String(a.customer_name || '').localeCompare(String(b.customer_name || ''));
-    });
-    wrap.innerHTML = sorted.map((s) => _futureCardHtml(s)).join('');
-    _wireFutureCards(wrap);
-  }
-
-  function _futureCardHtml(s) {
-    const days = _daysUntilStart(s.start_date);
-    const soon = (days != null && days >= 0 && days <= 14);
-    const cardStyle = soon
-      ? 'border:1px solid rgba(245,158,11,0.45);background:linear-gradient(180deg, rgba(245,158,11,0.07), rgba(245,158,11,0.02))'
-      : '';
-    const startBadge = soon ? _futureStartBadge(days) : '';
-    const intakeKey  = _futureIntakeState(s);
-    const isOpen     = (_futureOpenId.id === String(s.onboarding_id));
-    const startLine  = s.start_date
-      ? `<div class="student-meta" style="margin-top:4px"><strong style="color:var(--text-dim)">Startdatum:</strong> ${esc(fmtDateNL(s.start_date))}${days != null && days >= 0 ? ' · over ' + days + ' dag' + (days === 1 ? '' : 'en') : ''}</div>`
-      : `<div class="student-meta" style="margin-top:4px"><strong style="color:var(--text-dim)">Startdatum:</strong> <span style="color:var(--text-faint)">— niet ingesteld</span></div>`;
-    const body = isOpen ? _renderFutureCardBody(s) : '';
-    const chevron = isOpen ? 'ti-chevron-up' : 'ti-chevron-down';
-    return `
-      <div class="student-card" data-fut-card="${esc(String(s.onboarding_id))}" style="${cardStyle}">
-        <div class="student-head" data-fut-toggle="${esc(String(s.onboarding_id))}" style="grid-template-columns:1fr auto;cursor:pointer">
-          <div>
-            <div class="student-name">${esc(s.customer_name || '—')}${_unreadAdminBadgeForOnb(String(s.onboarding_id || ''))}</div>
-            <div class="student-meta">${esc(s.traject_label || '—')}</div>
-            ${startLine}
-          </div>
-          <div class="student-stat" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
-            ${startBadge}
-            ${_futurePaidBadge(!!s.paid, soon)}
-            ${_intakePillHtml(intakeKey)}
-            <i class="ti ${chevron}" style="color:var(--text-faint);font-size:16px"></i>
-          </div>
-        </div>
-        ${body}
-      </div>`;
-  }
-
-  function _wireFutureCards(wrap) {
-    wrap.querySelectorAll('[data-fut-toggle]').forEach((el) => {
-      el.addEventListener('click', (ev) => {
-        if (ev.target.closest('[data-fut-set-status],[data-fut-save-note],textarea,button')) return;
-        const id = el.getAttribute('data-fut-toggle');
-        _futureOpenId.id = (_futureOpenId.id === id) ? null : id;
-        _rerenderFutureList();
+  function _wireModalHandlers(s) {
+    document.querySelectorAll('[data-mo-set]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const st = btn.getAttribute('data-mo-set');
+        await _submit({ status: st });
       });
     });
-    wrap.querySelectorAll('[data-fut-set-status]').forEach((btn) => {
-      btn.addEventListener('click', async (ev) => {
-        ev.stopPropagation();
-        const cardEl = btn.closest('[data-fut-card]');
-        if (!cardEl) return;
-        const id  = cardEl.getAttribute('data-fut-card');
-        const st  = btn.getAttribute('data-fut-set-status');
-        await _futureSubmit(id, { status: st });
+    const clearBtn = document.querySelector('[data-mo-clear]');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', async () => {
+        await _submit({ status: null });
       });
-    });
-    wrap.querySelectorAll('[data-fut-save-note]').forEach((btn) => {
-      btn.addEventListener('click', async (ev) => {
-        ev.stopPropagation();
-        const cardEl = btn.closest('[data-fut-card]');
-        if (!cardEl) return;
-        const id = cardEl.getAttribute('data-fut-card');
-        const ta = cardEl.querySelector('textarea[id^="futNote-"]');
+    }
+    const saveNote = document.querySelector('[data-mo-save-note]');
+    if (saveNote) {
+      saveNote.addEventListener('click', async () => {
+        const ta = document.getElementById('moNote');
         const note = String(ta?.value || '').trim();
-        if (!note) { _futureFlash(cardEl, 'Notitie is leeg.', true); return; }
-        await _futureSubmit(id, { note });
+        if (!note) return;
+        await _submit({ note });
         if (ta) ta.value = '';
       });
-    });
+    }
   }
 
-  function _rerenderFutureList() {
-    const list = Array.from(_futureById.values());
-    _renderFutureStudents(list);
-  }
-
-  function _futureFlash(cardEl, msg, isError) {
-    const color = isError ? '#b91c1c' : 'var(--text-dim)';
-    const box = document.createElement('div');
-    box.style.cssText = `padding:6px 12px;font-size:12px;color:${color}`;
-    box.textContent = msg;
-    cardEl.appendChild(box);
-    setTimeout(() => { try { box.remove(); } catch {} }, 2500);
-  }
-
-  async function _futureSubmit(onboardingId, payload) {
+  async function _submit(payload) {
     const apiFetch = window.AgentShared?.apiFetch;
-    if (typeof apiFetch !== 'function') return;
-    const cardEl = document.querySelector(`[data-fut-card="${onboardingId}"]`);
+    if (typeof apiFetch !== 'function' || !_openId) return;
     try {
       const r = await apiFetch('/api/mentor-future-student-update', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ onboarding_id: onboardingId, ...payload }),
+        body:    JSON.stringify({ onboarding_id: _openId, ...payload }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
-      const cached = _futureById.get(String(onboardingId));
+      const cached = _byId.get(_openId);
       if (cached) {
-        if (payload.status) cached.mentor_intake_status = payload.status;
+        // status:'foo' / status:null / undef (notitie-only)
+        if (Object.prototype.hasOwnProperty.call(payload, 'status')) {
+          cached.mentor_intake_status = payload.status;
+        }
         const u = d.update || null;
         if (u) {
           cached.updates = Array.isArray(cached.updates) ? cached.updates.slice() : [];
@@ -459,20 +640,20 @@
           });
         }
       }
-      _rerenderFutureList();
-      if (cardEl) _futureFlash(document.querySelector(`[data-fut-card="${onboardingId}"]`) || cardEl, 'Opgeslagen.', false);
+      _refreshModal();
+      _renderTable(Array.from(_byId.values())); // lijst-pill volgt mee
     } catch (e) {
       console.error('[mentor-onboarding] submit:', e?.message || e);
-      if (cardEl) _futureFlash(cardEl, 'Opslaan mislukt: ' + (e?.message || e), true);
+      alert('Opslaan mislukt: ' + (e?.message || e));
     }
   }
 
-  // ── Loader ─────────────────────────────────────────────────────────────
-  async function loadFutureStudents() {
+  // ── Loader ────────────────────────────────────────────────────────────
+  async function loadStudents() {
     const apiFetch = window.AgentShared?.apiFetch;
-    if (typeof apiFetch !== 'function') { setError('futureStudentsWrap', 'apiFetch niet beschikbaar.'); return; }
+    if (typeof apiFetch !== 'function') { setError('moTableWrap', 'apiFetch niet beschikbaar.'); return; }
     try { if (window._authSharedReady) await window._authSharedReady; } catch {}
-    const wrap = document.getElementById('futureStudentsWrap');
+    const wrap = document.getElementById('moTableWrap');
     if (wrap) wrap.innerHTML = `<div style="color:var(--text-faint);font-size:12.5px;padding:14px;text-align:center">Studenten laden…</div>`;
     try {
       const [r] = await Promise.all([
@@ -482,20 +663,14 @@
       let d = null;
       try { d = await r.json(); } catch {}
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
-      _renderFutureStudents(Array.isArray(d?.students) ? d.students : []);
+      _renderTable(Array.isArray(d?.students) ? d.students : []);
     } catch (e) {
-      console.error('[mentor-onboarding] future:', e?.message || e);
-      setError('futureStudentsWrap', 'Studenten ophalen mislukt: ' + (e?.message || e));
+      console.error('[mentor-onboarding] load:', e?.message || e);
+      setError('moTableWrap', 'Studenten ophalen mislukt: ' + (e?.message || e));
     }
   }
 
-  // ── Meldingen (mentor self-only) ──────────────────────────────────────
-  function _unreadAdminBadgeForOnb(onbId) {
-    if (!onbId) return '';
-    const n = _unreadByOnb.get(onbId) || 0;
-    if (n <= 0) return '';
-    return ' <span class="badge" style="background:#dc2626;color:#fff;padding:1px 7px;border-radius:999px;font-size:10.5px;font-weight:700" title="Ongelezen update van management">●</span>';
-  }
+  // ── Meldingen ─────────────────────────────────────────────────────────
   function _wireNotificationsPanel() {
     const btn   = document.getElementById('msNotifBtn');
     const panel = document.getElementById('msNotifPanel');
@@ -530,7 +705,8 @@
         }
       }
       _renderNotifications(Number(d?.unread_count) || 0);
-      try { _rerenderFutureList(); } catch {}
+      // Rerender tabel zodat per-rij dot meeschakelt.
+      try { _renderTable(Array.from(_byId.values())); } catch {}
     } catch (e) {
       console.warn('[mentor-onboarding] notifications:', e?.message || e);
     }
@@ -605,14 +781,13 @@
     }
   }
 
-  // ── Init ───────────────────────────────────────────────────────────────
+  // ── Init ──────────────────────────────────────────────────────────────
   async function init() {
     try { if (window._authSharedReady) await window._authSharedReady; } catch {}
     if (window.AuthShared && typeof window.AuthShared.requireAuth === 'function') {
       const profile = await window.AuthShared.requireAuth();
       if (!profile) return;
     }
-    // Page-gate (defense-in-depth, geen redirect — voorkomt loop).
     try {
       if (window.RBAC?.ensurePermissionsLoaded) {
         await window.RBAC.ensurePermissionsLoaded();
@@ -628,20 +803,31 @@
       }
     } catch (e) { /* fail-open */ }
 
-    // Filter-chips wiring
+    // Filter-chips
     document.querySelectorAll('#moFilterRow [data-mo-filt]').forEach((btn) => {
       btn.addEventListener('click', () => {
         _filter = btn.getAttribute('data-mo-filt') || 'all';
         document.querySelectorAll('#moFilterRow [data-mo-filt]').forEach((b) => {
           b.classList.toggle('active', b === btn);
         });
-        _rerenderFutureList();
+        _renderTable(Array.from(_byId.values()));
       });
+    });
+
+    // Modal close
+    const closeBtn = document.getElementById('moModalClose');
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    const overlay = document.getElementById('moModalOverlay');
+    if (overlay) overlay.addEventListener('click', (ev) => {
+      if (ev.target === overlay) closeModal();
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && overlay && overlay.classList.contains('open')) closeModal();
     });
 
     _wireNotificationsPanel();
     loadNotifications();
-    loadFutureStudents();
+    loadStudents();
   }
 
   document.addEventListener('DOMContentLoaded', init);
