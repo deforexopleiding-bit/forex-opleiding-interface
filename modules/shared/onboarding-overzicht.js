@@ -1511,7 +1511,7 @@
                 ? '<span style="background:rgba(34,197,94,0.14);color:#15803d;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">✓ E-mail verstuurd</span> <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.credentials_email_sent_at)) + '</span>'
                 : '<span style="background:rgba(100,116,139,0.18);color:#475569;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">— E-mail nog niet verstuurd</span>'}
               ${o.bubble_provisioned
-                ? '<div style="margin-top:6px"><button type="button" class="ob-act" disabled title="Het mailen van nieuwe inloggegevens vereist het minten van een nieuw temp_password via een Bubble-workflow die nog niet bestaat. Bij MISLUKT account gebruik je hierboven &quot;Bubble opnieuw aanmaken&quot; (die maakt + mailt)."><i class="ti ti-mail"></i> Inloggegevens opnieuw sturen</button><div style="margin-top:4px;font-size:11.5px;color:var(--text-faint)">Wachtwoord wordt niet bewaard; reset-link volgt later. Bij MISLUKT account is de actie hierboven &quot;Bubble opnieuw aanmaken&quot; (die maakt + mailt).</div></div>'
+                ? '<div style="margin-top:6px"><button type="button" class="ob-act" id="credsResetBtn" data-id="' + esc(o.id) + '" title="Genereer een nieuw tijdelijk wachtwoord in Bubble en mail het opnieuw naar de student"><i class="ti ti-mail"></i> Inloggegevens opnieuw sturen</button> <span id="credsResetStatus" style="margin-left:8px;font-size:12.5px;color:var(--text-dim)"></span><div style="margin-top:4px;font-size:11.5px;color:var(--text-faint)">Reset het wachtwoord via Bubble en stuurt direct een nieuwe welkomstmail. Wachtwoord wordt niet bewaard.</div></div>'
                 : ''}
             </dd>
             <dt>WhatsApp-uitnodiging</dt><dd>
@@ -1564,6 +1564,22 @@
       if (retryBtn) {
         retryBtn.addEventListener('click', () => {
           doProvisionRetry(retryBtn.dataset.id || '', retryBtn);
+        });
+      }
+      // Credentials-reset knop wiren (alleen aanwezig als bubble_provisioned).
+      // POST → /api/onboarding-credentials-reset; serverside gegate op
+      // onboarding.admin. Voor MISLUKT accounts toont de pagina daar
+      // 'Bubble opnieuw aanmaken' i.p.v. deze knop.
+      const credsBtn = document.getElementById('credsResetBtn');
+      if (credsBtn) {
+        credsBtn.addEventListener('click', () => {
+          const obId = credsBtn.dataset.id || '';
+          const email = (o && o.email) ? o.email : '';
+          const ok = confirm(
+            'Nieuw wachtwoord genereren en mailen naar ' + (email || 'de student') + '?'
+          );
+          if (!ok) return;
+          doCredentialsReset(obId, credsBtn);
         });
       }
       // Invite-knop wiren (altijd aanwezig; tekst+force-flag verschillen
@@ -1648,6 +1664,61 @@
       if (btn) btn.disabled = false;
     } catch (e) {
       console.error('[onboarding-admin] retry:', e?.message || e);
+      if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Onverwachte fout: ' + (e?.message || e); }
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  // ── Credentials-reset (Bubble + e-mail) ─────────────────────────────
+  // Roept /api/onboarding-credentials-reset aan voor één onboarding. Endpoint
+  // is fail-soft: 200 met { ok, sent?, error? }. Mirror van doProvisionRetry
+  // qua status/UX. Geen wachtwoord in client/UI — alleen succes/foutmelding.
+  async function doCredentialsReset(onboardingId, btn) {
+    if (!onboardingId) return;
+    const status = document.getElementById('credsResetStatus');
+    if (btn) btn.disabled = true;
+    if (status) {
+      status.style.color = 'var(--text-dim)';
+      status.textContent = 'Bezig met reset + mailen…';
+    }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/onboarding-credentials-reset', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ onboarding_id: onboardingId }),
+      });
+      let d = null; try { d = await r.json(); } catch {}
+      if (r.status === 401) {
+        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Niet (meer) ingelogd.'; }
+        if (btn) btn.disabled = false;
+        return;
+      }
+      if (r.status === 403) {
+        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Geen rechten (onboarding.admin).'; }
+        if (btn) btn.disabled = false;
+        return;
+      }
+      if (!r.ok) {
+        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Mislukt: ' + (d?.error || ('HTTP ' + r.status)); }
+        if (btn) btn.disabled = false;
+        return;
+      }
+      if (d && d.ok === true && d.sent === true) {
+        if (status) {
+          status.style.color = '#15803d';
+          status.textContent = '✓ Mail verstuurd';
+        }
+        toast('Inloggegevens opnieuw verstuurd', 'success');
+        loadList();
+        setTimeout(() => { openDetail(onboardingId); }, 250);
+        return;
+      }
+      const errMsg = (d?.error || 'Onbekende fout');
+      if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Mislukt: ' + errMsg; }
+      toast('Credentials-reset mislukt: ' + errMsg, 'error');
+      if (btn) btn.disabled = false;
+    } catch (e) {
+      console.error('[onboarding-admin] credentials-reset:', e?.message || e);
       if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Onverwachte fout: ' + (e?.message || e); }
       if (btn) btn.disabled = false;
     }
