@@ -2090,6 +2090,15 @@
         }
       }
     } catch (e) { console.warn('[mentor-onboarding] inbox-tab gate:', e?.message || e); }
+
+    // Deep-link: /modules/mentor-onboarding.html#inbox vanaf mentor-home
+    // "Wacht op antwoord"-todo schakelt direct naar de Inbox-tab — mits
+    // de tab daadwerkelijk zichtbaar is (onboarding.inbox.view). Anders
+    // blijven we op Studenten, geen fout.
+    const _inboxBtn = document.getElementById('moInboxTabBtn');
+    if (location.hash === '#inbox' && _inboxBtn && !_inboxBtn.hidden) {
+      _switchPageTab('inbox');
+    }
   }
 
   document.addEventListener('DOMContentLoaded', init);
