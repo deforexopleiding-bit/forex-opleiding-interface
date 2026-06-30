@@ -178,7 +178,16 @@ export default async function handler(req, res) {
     }
 
     // Module-conditioned permission check — row is autoritatief.
-    const permKey = current.module === 'events' ? 'events.simone.use' : 'finance.joost.use';
+    // Map identiek aan PERM_BY_MODULE in api/joost-suggestions-recent.js
+    // zodat onboarding-Mila-suggesties op 'onboarding.mila.use' gate'n
+    // (eerder viel 'm terug op finance.joost.use, wat 403'de bij
+    // Negeren/Gebruiken vanuit de onboarding-inbox).
+    const PERM_BY_MODULE = {
+      finance:    'finance.joost.use',
+      events:     'events.simone.use',
+      onboarding: 'onboarding.mila.use',
+    };
+    const permKey = PERM_BY_MODULE[current.module] || 'finance.joost.use';
     if (!(await requirePermission(req, permKey))) {
       return res.status(403).json({ error: 'Geen rechten (' + permKey + ')' });
     }
