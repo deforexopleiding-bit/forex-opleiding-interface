@@ -511,6 +511,12 @@
     // 'onboarding-automations' (onboarding.automation.view) zijn samen met
     // hun nav-entries verwijderd — ze hadden geen externe consumers.
     'onboarding-admin': 'onboarding.admin',
+    // currentModule() voor /modules/onboarding-hub.html returneert 'onboarding-hub'
+    // (basename van het pad), niet 'onboarding-admin' (de sidebar-key). Zonder
+    // deze mapping vuurde blockPageAccess() niet voor mentors die de hub-URL
+    // direct intypten — die zagen 'm gewoon openen en kregen pas een lijst-403.
+    // Defense-in-depth: hub heeft dezelfde page-gate als de nav-link.
+    'onboarding-hub': 'onboarding.admin',
     'finance': 'finance.module.access',
     // Open Acties (F1 finance-taken) is verhuisd naar Finance > Wanbetalers > Open Acties
     // sub-tab — geen eigen sidebar-link meer. Badge hangt nu op de Finance nav-item zelf.
@@ -560,12 +566,17 @@
         var okM = perms.has('mentor.admin.view') || perms.has('mentor.payout.manage') || perms.has('mentor.funded.admin') || perms.has('mentor.assessments.admin');
         if (!okM) link.style.display = 'none';
       } else if (modKey === 'onboarding-admin') {
-        // Fase 2a: Onboarding-hub-entry zichtbaar voor onboarding.admin
-        // (manager/super_admin) ÉN voor onboarding.view_own (mentor ziet
+        // Fase B: mentor heeft een eigen 'mentor-onboarding'-nav (zie hierboven)
+        // met self-scoped data uit mentor-future-students-self. De manager-hub
+        // is admin-only — verwijder daarom de onboarding.view_own-OR. Zonder
+        // dit zag de mentor twee Onboarding-items én een lijst-403 bij het
+        // openen (admin-future-students-list is seesAll).
+        //
+        // (Oude tekst — Fase 2a zichtbaar voor onboarding.view_own ook —
         // alleen eigen studenten, server-side scoped). De hub-pagina zelf
         // gate't met dezelfde OR-check; alle admin-acties blijven gegate
         // op hun eigen feature_keys (server-side autoritatief).
-        var okOnb = perms.has('onboarding.admin') || perms.has('onboarding.view_own');
+        var okOnb = perms.has('onboarding.admin');
         if (!okOnb) link.style.display = 'none';
       } else if (!perms.has(MODULE_FEATURE_MAP[modKey])) {
         link.style.display = 'none';
