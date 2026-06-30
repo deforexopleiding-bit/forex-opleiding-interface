@@ -51,6 +51,23 @@
       '<h1>Onboarding-overzicht</h1>' +
       '<p>Overzicht van alle aangemelde onboardings — mentor-toewijzing, archief en wizard-status.</p>' +
     '</div>' +
+    // Manager-bel — meldingen van mentoren bij probleem-statussen.
+    // Gedeeld postvak; markeer als gelezen geldt voor alle managers.
+    '<div style="position:relative">' +
+      '<button id="mnNotifBtn" type="button" title="Meldingen" style="position:relative;background:transparent;border:1px solid var(--border);border-radius:8px;padding:8px 12px;cursor:pointer;color:var(--text);display:inline-flex;align-items:center;gap:6px;font-family:inherit">' +
+        '<i class="ti ti-bell"></i>' +
+        '<span id="mnNotifCount" style="display:none;background:#dc2626;color:#fff;border-radius:999px;padding:1px 7px;font-size:11px;font-weight:700;line-height:1.4">0</span>' +
+      '</button>' +
+      '<div id="mnNotifPanel" hidden style="position:absolute;right:0;top:calc(100% + 6px);width:420px;max-height:540px;overflow-y:auto;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.18);z-index:50">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--border)">' +
+          '<div style="font-weight:600;font-size:13px">Mentor-meldingen</div>' +
+          '<button id="mnNotifMarkAll" type="button" style="background:transparent;border:none;color:var(--text-dim);font-size:12px;cursor:pointer;font-family:inherit">Alles gelezen</button>' +
+        '</div>' +
+        '<div id="mnNotifList" style="padding:4px 0">' +
+          '<div style="padding:14px;color:var(--text-faint);font-size:12.5px;text-align:center">Laden…</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
   '</div>' +
   '<div class="ob-tabs" role="tablist">' +
     '<button type="button" class="ob-tab active" data-scope="active"   id="tab-active">Actief</button>' +
@@ -1798,6 +1815,10 @@
 
     await loadList();
 
+    // Manager-bel (PR mentor-status → manager-notification).
+    _wireManagerBell();
+    loadManagerNotifications();
+
     // Fase 2: deep-link naar detail-modal via ?open=<uuid>. Wordt gebruikt
     // door students-overview "Toekomstige studenten"-tab om vanuit een
     // rij-klik direct in deze detail-view te landen.
@@ -2861,6 +2882,139 @@
   // ──────────────────────────────────────────────────────────────────────────
   // Public mount() — vervangt de DOMContentLoaded-trigger uit de oorspronkelijke
   // standalone-pagina. Idempotent: re-mount op dezelfde host doet niets.
+  // ── Manager-bel (mentor-status → manager-notification) ──────────────────
+  let _mnNotifs = [];
+  function _shortDateTime(iso) {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    } catch { return iso; }
+  }
+  const _MN_STATUS_LABEL = {
+    geen_gehoor: 'Geen gehoor',
+    wil_niet:    'Wil niet starten',
+    wil_later:   'Wil later starten',
+  };
+  function _wireManagerBell() {
+    const btn   = document.getElementById('mnNotifBtn');
+    const panel = document.getElementById('mnNotifPanel');
+    const all   = document.getElementById('mnNotifMarkAll');
+    if (btn && panel) {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        panel.hidden = !panel.hidden;
+      });
+      document.addEventListener('click', (ev) => {
+        if (panel.hidden) return;
+        if (ev.target === btn || btn.contains(ev.target) || panel.contains(ev.target)) return;
+        panel.hidden = true;
+      });
+    }
+    if (all) all.addEventListener('click', () => _markAllManagerRead());
+  }
+  async function loadManagerNotifications() {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/manager-notifications-list');
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 403) {
+        // Geen seesAll → hide the bell completely (admin/manager only).
+        const btn = document.getElementById('mnNotifBtn');
+        if (btn) btn.style.display = 'none';
+        return;
+      }
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      _mnNotifs = Array.isArray(d?.notifications) ? d.notifications : [];
+      _renderManagerNotifications(Number(d?.unread_count) || 0);
+    } catch (e) {
+      console.warn('[onboarding-overzicht] manager-notifications:', e?.message || e);
+    }
+  }
+  function _renderManagerNotifications(unreadCount) {
+    const cntEl = document.getElementById('mnNotifCount');
+    const list  = document.getElementById('mnNotifList');
+    if (cntEl) {
+      if (unreadCount > 0) { cntEl.textContent = String(unreadCount); cntEl.style.display = ''; }
+      else                 { cntEl.style.display = 'none'; }
+    }
+    if (!list) return;
+    if (_mnNotifs.length === 0) {
+      list.innerHTML = '<div style="padding:14px;color:var(--text-faint);font-size:12.5px;text-align:center">Geen meldingen.</div>';
+      return;
+    }
+    list.innerHTML = _mnNotifs.map((n) => {
+      const unread = (n.read_at == null);
+      const bg = unread ? 'background:rgba(220,38,38,0.06)' : '';
+      const ago = n.created_at ? esc(_shortDateTime(n.created_at)) : '';
+      const stLabel = n.status ? esc(_MN_STATUS_LABEL[n.status] || n.status) : '';
+      const stPill = stLabel
+        ? '<span class="ob-badge paid-no" style="margin-left:6px">' + stLabel + '</span>'
+        : '';
+      const mentor = n.mentor_name ? ('<span style="color:var(--text-faint)"> · door ' + esc(n.mentor_name) + '</span>') : '';
+      const customer = n.customer_name ? esc(n.customer_name) : '(student)';
+      const body = n.body ? '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;white-space:pre-wrap">' + esc(n.body) + '</div>' : '';
+      const onbId = esc(String(n.onboarding_id || ''));
+      const readBtn = unread
+        ? '<button type="button" data-mn-read="' + esc(n.id) + '" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--text-dim);cursor:pointer;font-family:inherit">Gelezen</button>'
+        : '';
+      return '<div style="padding:10px 12px;border-bottom:1px solid var(--border);' + bg + '">'
+        + '<div style="display:flex;align-items:start;justify-content:space-between;gap:8px">'
+        +   '<div style="flex:1;min-width:0">'
+        +     '<div style="font-size:12.5px"><strong>' + customer + '</strong>' + stPill + mentor + '</div>'
+        +     body
+        +     '<div style="font-size:11px;color:var(--text-faint);margin-top:4px">' + ago + '</div>'
+        +     '<a href="#" data-mn-open="' + onbId + '" style="font-size:11.5px">Open detail →</a>'
+        +   '</div>'
+        +   readBtn
+        + '</div>'
+      + '</div>';
+    }).join('');
+    list.querySelectorAll('[data-mn-read]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => { ev.stopPropagation(); _markManagerRead(btn.getAttribute('data-mn-read')); });
+    });
+    list.querySelectorAll('[data-mn-open]').forEach((a) => {
+      a.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        const onbId = a.getAttribute('data-mn-open');
+        const panel = document.getElementById('mnNotifPanel');
+        if (panel) panel.hidden = true;
+        if (onbId) openDetail(onbId);
+      });
+    });
+  }
+  async function _markManagerRead(id) {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (!id || typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/manager-notification-mark-read', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      await loadManagerNotifications();
+    } catch (e) {
+      console.warn('[onboarding-overzicht] mn-mark-read:', e?.message || e);
+    }
+  }
+  async function _markAllManagerRead() {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/manager-notification-mark-read', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: 'all' }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      await loadManagerNotifications();
+    } catch (e) {
+      console.warn('[onboarding-overzicht] mn-mark-all-read:', e?.message || e);
+    }
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
   function mount(opts) {
     const o = opts || {};
