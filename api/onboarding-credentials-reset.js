@@ -118,8 +118,10 @@ export default async function handler(req, res) {
   let wfRaw = null;
   try {
     wfRaw = await bubbleWorkflow('reset_student_password', {
-      user_id: onboarding.bubble_user_id,
-      email:   customer.email,
+      user_id:    onboarding.bubble_user_id,
+      email:      customer.email,
+      first_name: customer.first_name || '',
+      last_name:  customer.last_name  || '',
     });
   } catch (e) {
     console.warn('[onboarding-credentials-reset] Bubble workflow faalde:', e?.message || e);
