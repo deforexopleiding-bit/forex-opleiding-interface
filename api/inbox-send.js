@@ -23,7 +23,11 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { checkOnboardingConvAccess } from './_lib/onboardingScope.js';
+// NOTE: Fase 2b per-mentor-ACL (checkOnboardingConvAccess) op de
+// onboarding-tak is bewust uitgezet: de onboarding-inbox is gedeeld voor
+// iedereen met onboarding.inbox.send. De module-permissie-cascade
+// hieronder (events.simone.use / onboarding.inbox.send / finance.inbox.send)
+// blijft de enige gate per conv-module.
 import { getClientIp } from './_lib/audit-customer.js';
 import { sendText, sendTemplate, getConfigStatus, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 
@@ -122,16 +126,12 @@ export default async function handler(req, res) {
     if (!conv) return res.status(404).json({ error: 'Conversation niet gevonden' });
     if (!conv.phone_number) return res.status(400).json({ error: 'Conversation heeft geen phone_number' });
 
-    // Fase 2b: voor onboarding-convs → mentor mag alleen z'n eigen students
-    // antwoorden. Hook skipt voor seesAll en voor finance/events-convs.
-    // VEILIGHEID: deze guard zit VÓÓR het versturen van de boodschap zelf,
-    // zodat geen Meta-call kan plaatsvinden voor een conv die niet van
-    // deze mentor is.
-    const acl = await checkOnboardingConvAccess(req, {
-      phoneNumberId: conv.phone_number_id,
-      customerId:    conv.customer_id,
-    });
-    if (!acl.ok) return res.status(acl.status).json({ error: acl.error });
+    // Onboarding-inbox is GEDEELD: de eerdere Fase 2b per-mentor-ACL
+    // (checkOnboardingConvAccess) op deze tak is uitgezet. Elke caller met
+    // onboarding.inbox.send mag op elke onboarding-conv antwoorden. De
+    // module-permissie-cascade hieronder (events.simone.use /
+    // onboarding.inbox.send / finance.inbox.send afgeleid uit
+    // whatsapp_module_config) is de enige toegangscheck per conv-module.
 
     // Refined module-permission check: derive de module van deze conv via
     // conv.phone_number_id -> whatsapp_module_config. Voorkomt dat een gebruiker

@@ -29,7 +29,11 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { getOnboardingScope, getMentorCustomerIds } from './_lib/onboardingScope.js';
+// NOTE: Fase 2b mentor-scoping op de onboarding-tak is bewust uitgezet:
+// per ontwerp is de onboarding-inbox gedeeld voor iedereen met
+// onboarding.inbox.view (alle mentoren zien elkaars studenten-convs).
+// getOnboardingScope / getMentorCustomerIds zijn daarom niet meer nodig
+// in dit endpoint. De permission-gate (regel ~40) blijft staan.
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
@@ -100,34 +104,12 @@ export default async function handler(req, res) {
       });
     }
 
-    // Fase 2b: mentor-scoping op de onboarding-tak. seesAll (onboarding.admin /
-    // super_admin) → bestaand gedrag (geen extra filter). !seesAll &&
-    // module='onboarding' → harde filter customer_id IN (mentor's onboardings).
-    // Voor module='finance'/'events' GEEN scope-check — die takken zijn al
-    // gegate via hun eigen finance.inbox.view / events.inbox.view. Geen extra
-    // DB-call voor finance/events callers. mentorCustomerIds is fail-closed
-    // (lege array bij fout → 0 rows). Lege array → in('customer_id', []) =
-    // empty result set, geen lek mogelijk.
-    if (moduleRaw === 'onboarding') {
-      const scope = await getOnboardingScope(req);
-      if (!scope.seesAll) {
-        // Een view_own-only-user MOET seesOwn hebben (anders had de bestaande
-        // OR-gate 'm al doorgelaten via onboarding.inbox.view zonder
-        // view_own; we honoreren dat ze de inbox mogen zien, maar SCOPEN
-        // naar 0 zonder seesOwn — strikter is veiliger).
-        if (!scope.seesOwn) {
-          return res.status(200).json({ items: [], total: 0, configured: true, module: moduleRaw });
-        }
-        const mentorCustomerIds = await getMentorCustomerIds(scope.userId);
-        if (mentorCustomerIds.length === 0) {
-          return res.status(200).json({ items: [], total: 0, configured: true, module: moduleRaw });
-        }
-        // PostgREST: .in(...) wordt na de andere .eq() toegevoegd; volgorde
-        // van builder-calls maakt voor het resultaat niet uit (alle worden
-        // AND-gecombineerd).
-        var mentorCustomerScope = mentorCustomerIds;
-      }
-    }
+    // Onboarding-inbox is GEDEELD: iedereen met onboarding.inbox.view ziet
+    // alle onboarding-convs. De eerdere Fase 2b per-mentor-filter
+    // (getMentorCustomerIds) is bewust uitgezet — alle mentoren werken in
+    // één gedeeld postvak en kunnen elkaars studenten-gesprekken zien.
+    // Finance- en events-takken zijn ongewijzigd: die houden hun eigen
+    // module-permissie (finance.inbox.view / events.inbox.view) als gate.
 
     let query = supabaseAdmin
       .from('whatsapp_conversations')
@@ -144,10 +126,6 @@ export default async function handler(req, res) {
       .not('phone_number', 'ilike', '+99999%')
       .order('last_message_at', { ascending: false, nullsFirst: false })
       .range(offset, offset + limit - 1);
-
-    if (typeof mentorCustomerScope !== 'undefined') {
-      query = query.in('customer_id', mentorCustomerScope);
-    }
 
     if (search) {
       const like = '%' + search.replace(/[%_]/g, m => '\\' + m) + '%';
