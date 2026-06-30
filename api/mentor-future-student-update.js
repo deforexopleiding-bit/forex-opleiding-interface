@@ -4,7 +4,7 @@
 // een onboarding die aan HEM/HAAR is toegewezen. Voor "Toekomstige studenten"
 // in mentor-students.html (toekomst-tab).
 //
-// Body: { onboarding_id: uuid, status?: enum|null, note?: string }
+// Body: { onboarding_id: uuid, status?: enum|null, note?: string, start_date?: 'YYYY-MM-DD' }
 //
 //   status (optioneel) ∈ { nog_te_benaderen, geen_gehoor, wil_later, wil_niet }
 //     → update onboardings.mentor_intake_status + insert log-rij (kind:'status').
@@ -13,6 +13,9 @@
 //       note='Handmatige status gewist').
 //   note (optioneel zónder status, verplicht als er geen status is)
 //     → insert log-rij (kind:'note').
+//   start_date (optioneel, YYYY-MM-DD)
+//     → update onboardings.start_date + log-rij + fail-soft manager_notification
+//       (kind:'mentor_startdate'). Zelfde ownership-gate.
 //
 // Gate (mentor.module.access) + OWNERSHIP-check: onboarding.mentor_user_id
 // MOET gelijk zijn aan de ingelogde user-id, anders 403. Auto-statussen
@@ -25,6 +28,15 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// YYYY-MM-DD (Postgres date kolom) — spiegel admin-onboarding-start-date.js.
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function fmtDateNL(ymd) {
+  if (!ymd) return '—';
+  try {
+    const d = new Date(ymd + 'T00:00:00Z');
+    return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
+  } catch { return ymd; }
+}
 
 // Handmatige intake-statussen — exact deze whitelist. Auto-status-keys
 // ("call_ingepland", "gestart") worden bewust geweigerd: die zijn afgeleid.
@@ -72,8 +84,22 @@ export default async function handler(req, res) {
   const noteRaw = (body.note == null) ? '' : String(body.note).trim();
   const note    = noteRaw.length > 0 ? noteRaw.slice(0, 2000) : null;
 
-  if (!status && !isClear && !note) {
-    return res.status(400).json({ error: 'Geef minstens status, status:null (clear) óf note mee.' });
+  // start_date — optioneel. YYYY-MM-DD; trim eventuele tijds-suffix.
+  let startDateRaw = typeof body.start_date === 'string' ? body.start_date.trim() : '';
+  if (startDateRaw.length > 10) startDateRaw = startDateRaw.slice(0, 10);
+  const hasStartDate = startDateRaw.length > 0;
+  if (hasStartDate) {
+    if (!DATE_RE.test(startDateRaw)) {
+      return res.status(400).json({ error: 'start_date (YYYY-MM-DD) ongeldig.' });
+    }
+    const parsed = new Date(startDateRaw + 'T00:00:00Z');
+    if (Number.isNaN(parsed.getTime()) || parsed.getUTCFullYear() < 1900 || parsed.getUTCFullYear() > 2100) {
+      return res.status(400).json({ error: 'start_date buiten verwacht bereik.' });
+    }
+  }
+
+  if (!status && !isClear && !note && !hasStartDate) {
+    return res.status(400).json({ error: 'Geef minstens status, status:null (clear), note óf start_date mee.' });
   }
 
   try {
@@ -103,25 +129,32 @@ export default async function handler(req, res) {
       if (updErr) throw new Error('intake-status update: ' + updErr.message);
     }
 
-    // 2) Log-rij in onboarding_mentor_updates.
+    // 2) Log-rij in onboarding_mentor_updates voor het status/note-pad.
+    //    Alleen inserten als er daadwerkelijk status/isClear/note in deze
+    //    call zit — een pure start_date-call valt door en krijgt zijn eigen
+    //    log-rij in stap 4.
     //    - status meegegeven → kind:'status' (note optioneel meegestuurd).
     //    - status wissen     → kind:'status', status=null, note='Handmatige
     //                          status gewist' (tenzij caller eigen note gaf).
     //    - alleen note       → kind:'note'.
-    const logNote = note || (isClear ? 'Handmatige status gewist' : null);
-    const logRow = {
-      onboarding_id: onboardingId,
-      kind:          (status || isClear) ? 'status' : 'note',
-      status:        status || null,
-      note:          logNote,
-      created_by:    user.id,
-    };
-    const { data: inserted, error: logErr } = await supabaseAdmin
-      .from('onboarding_mentor_updates')
-      .insert(logRow)
-      .select('kind, status, note, created_at, created_by')
-      .single();
-    if (logErr) throw new Error('mentor_update log insert: ' + logErr.message);
+    let inserted = null;
+    if (status || isClear || note) {
+      const logNote = note || (isClear ? 'Handmatige status gewist' : null);
+      const logRow = {
+        onboarding_id: onboardingId,
+        kind:          (status || isClear) ? 'status' : 'note',
+        status:        status || null,
+        note:          logNote,
+        created_by:    user.id,
+      };
+      const { data: ins, error: logErr } = await supabaseAdmin
+        .from('onboarding_mentor_updates')
+        .insert(logRow)
+        .select('kind, status, note, created_at, created_by')
+        .single();
+      if (logErr) throw new Error('mentor_update log insert: ' + logErr.message);
+      inserted = ins;
+    }
 
     // 3) Manager-melding bij PROBLEEM-statussen (geen_gehoor / wil_niet /
     //    wil_later). NIET bij nog_te_benaderen of status-clear (null).
@@ -154,7 +187,64 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ ok: true, update: inserted });
+    // 4) Startdatum-pad — mentor wijzigt onboardings.start_date voor zijn
+    //    eigen student. Ownership-gate is hierboven al geverifieerd
+    //    (ob.mentor_user_id === user.id). FAIL-SOFT manager-melding zodat
+    //    een geblokkeerde insert op manager_notifications het slagen van
+    //    de start_date-update niet teniet doet.
+    let startDateUpdate = null;
+    if (hasStartDate) {
+      const { error: sdErr } = await supabaseAdmin
+        .from('onboardings')
+        .update({ start_date: startDateRaw })
+        .eq('id', onboardingId);
+      if (sdErr) throw new Error('start_date update: ' + sdErr.message);
+
+      const nlDate = fmtDateNL(startDateRaw);
+      const sdLogRow = {
+        onboarding_id: onboardingId,
+        kind:          'note',
+        status:        null,
+        note:          'Startdatum gewijzigd naar ' + nlDate,
+        created_by:    user.id,
+      };
+      const { data: sdIns, error: sdLogErr } = await supabaseAdmin
+        .from('onboarding_mentor_updates')
+        .insert(sdLogRow)
+        .select('kind, status, note, created_at, created_by')
+        .single();
+      if (sdLogErr) throw new Error('mentor_update start_date log insert: ' + sdLogErr.message);
+      startDateUpdate = sdIns;
+
+      try {
+        const { error: mnErr } = await supabaseAdmin
+          .from('manager_notifications')
+          .insert({
+            onboarding_id:  onboardingId,
+            kind:           'mentor_startdate',
+            status:         null,
+            customer_name:  ob.customer_name || null,
+            mentor_user_id: user.id,
+            title:          'Mentor wijzigde startdatum',
+            body:           'Nieuwe startdatum: ' + nlDate,
+            created_by:     user.id,
+          });
+        if (mnErr) {
+          console.warn('[mentor-future-student-update] manager_notifications start_date insert (soft):', mnErr.message);
+        }
+      } catch (e) {
+        console.warn('[mentor-future-student-update] manager_notifications start_date exception (soft):', e?.message || e);
+      }
+    }
+
+    // Backwards-compat: response.update blijft het status/note-log-record
+    // (of null bij pure start_date-call). Plus aparte start_date-velden.
+    return res.status(200).json({
+      ok: true,
+      update: inserted,
+      start_date: hasStartDate ? startDateRaw : null,
+      start_date_update: startDateUpdate,
+    });
   } catch (e) {
     console.error('[mentor-future-student-update]', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });
