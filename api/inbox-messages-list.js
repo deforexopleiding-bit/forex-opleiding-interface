@@ -19,7 +19,10 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { checkOnboardingConvAccess } from './_lib/onboardingScope.js';
+// NOTE: Fase 2b per-mentor-ACL (checkOnboardingConvAccess) is bewust
+// uitgezet: de onboarding-inbox is gedeeld voor iedereen met
+// onboarding.inbox.view. De OR-permissie-gate (regel ~45) blokkeert
+// callers zonder die perm.
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -76,14 +79,11 @@ export default async function handler(req, res) {
     if (convErr) throw new Error('conversation lookup: ' + convErr.message);
     if (!conv) return res.status(404).json({ error: 'Conversation niet gevonden' });
 
-    // Fase 2b: voor onboarding-convs → mentor mag alleen z'n eigen. Hook
-    // skipt direct voor seesAll (onboarding.admin / super_admin) en voor
-    // niet-onboarding-convs (finance/events). Zie checkOnboardingConvAccess.
-    const acl = await checkOnboardingConvAccess(req, {
-      phoneNumberId: conv.phone_number_id,
-      customerId:    conv.customer_id,
-    });
-    if (!acl.ok) return res.status(acl.status).json({ error: acl.error });
+    // Onboarding-inbox is GEDEELD: de eerdere Fase 2b per-mentor-ACL via
+    // checkOnboardingConvAccess is uitgezet. Elke caller met
+    // onboarding.inbox.view (of finance/events-inbox.view voor die takken)
+    // mag deze conversatie inzien. De permissie-gate hierboven is de enige
+    // toegangscheck.
 
     // Messages — oudste eerst voor chronologische chat-weergave
     const { data: msgs, error: msgErr, count } = await supabaseAdmin
