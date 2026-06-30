@@ -71,6 +71,69 @@
     .mo-qa-q { font-size:12px; font-weight:700; color:var(--text); margin-bottom:2px; }
     .mo-qa-a { font-size:13px; color:var(--text); white-space:pre-wrap; word-break:break-word; }
     .mo-qa-a.empty { color:var(--text-faint); }
+    /* Page-level tabs (Studenten / Inbox) — zelfde patroon als detail-tabs */
+    .mo-page-tabs { display:flex; gap:0; border-bottom:1px solid var(--border); margin:0 0 18px; }
+    .mo-page-tab { appearance:none; background:transparent; border:none; border-bottom:2px solid transparent; color:var(--text-dim); cursor:pointer; font:inherit; font-size:14px; font-weight:600; padding:10px 16px; line-height:1; display:inline-flex; align-items:center; gap:6px; }
+    .mo-page-tab.active { color:var(--text); border-bottom-color: var(--brand-deep, #093d54); }
+    .mo-page-tab:hover:not(.active) { color:var(--text); }
+    .mo-page-pane[hidden] { display:none; }
+    .mo-tab-badge { display:inline-block; min-width:18px; padding:1px 6px; border-radius:999px; background:#dc2626; color:#fff; font-size:11px; font-weight:700; text-align:center; }
+    .mo-tab-badge[hidden] { display:none; }
+    /* Mentor-inbox shell (2-paneel) */
+    .mi-shell { display:grid; grid-template-columns: 320px 1fr; gap:14px; height: 640px; max-height: calc(100vh - 220px); border:1px solid var(--border); border-radius:10px; background:var(--bg-elev); overflow:hidden; }
+    @media (max-width: 880px) { .mi-shell { grid-template-columns: 1fr; height: auto; } }
+    .mi-list-pane { border-right:1px solid var(--border); display:flex; flex-direction:column; min-height:0; }
+    .mi-list-head { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid var(--border); gap:8px; }
+    .mi-list-head h3 { margin:0; font-size:13.5px; font-weight:700; color:var(--text); }
+    .mi-refresh { background:transparent; border:1px solid var(--border); border-radius:6px; padding:4px 8px; font-size:12px; cursor:pointer; color:var(--text-dim); font-family:inherit; }
+    .mi-list-body { flex:1; min-height:0; overflow-y:auto; padding:4px 0; }
+    .mi-conv-row { display:grid; grid-template-columns: 36px 1fr; gap:10px; padding:9px 12px; cursor:pointer; border-left:3px solid transparent; }
+    .mi-conv-row:hover { background:var(--bg); }
+    .mi-conv-row.active { background:var(--bg); border-left-color: var(--brand-deep, #093d54); }
+    .mi-conv-avatar { width:36px; height:36px; border-radius:50%; background:var(--bg); display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:700; color:var(--text-dim); }
+    .mi-conv-top { display:flex; align-items:center; gap:6px; justify-content:space-between; }
+    .mi-conv-name { font-size:13px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; min-width:0; }
+    .mi-conv-time { font-size:10.5px; color:var(--text-faint); white-space:nowrap; }
+    .mi-conv-preview { font-size:11.5px; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:1px; }
+    .mi-24h-dot { width:7px; height:7px; border-radius:50%; display:inline-block; vertical-align:middle; margin-left:4px; }
+    .mi-24h-dot.open { background:#059669; }
+    .mi-24h-dot.closed { background:#f59e0b; }
+    .mi-conv-unread { display:inline-block; padding:0 6px; border-radius:999px; background:#dc2626; color:#fff; font-size:10px; font-weight:700; margin-left:4px; }
+    .mi-thread-pane { display:flex; flex-direction:column; min-height:0; }
+    .mi-thread-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; flex:1; color:var(--text-faint); font-size:13px; gap:8px; padding:40px; text-align:center; }
+    .mi-thread-head { display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); }
+    .mi-thread-name { font-size:14px; font-weight:700; color:var(--text); }
+    .mi-thread-phone { font-size:11.5px; color:var(--text-faint); }
+    .mi-thread-window { font-size:10.5px; font-weight:700; padding:3px 8px; border-radius:10px; text-transform:uppercase; letter-spacing:.04em; margin-left:auto; }
+    .mi-thread-messages { flex:1; min-height:0; overflow-y:auto; padding:12px 14px; display:flex; flex-direction:column; gap:6px; background:var(--bg); }
+    .mi-msg-row { display:flex; }
+    .mi-msg-bubble { max-width:70%; padding:7px 11px; border-radius:10px; font-size:13px; line-height:1.4; }
+    .mi-msg-row.in  { justify-content:flex-start; }
+    .mi-msg-row.in  .mi-msg-bubble { background:var(--bg-elev); color:var(--text); }
+    .mi-msg-row.out { justify-content:flex-end; }
+    .mi-msg-row.out .mi-msg-bubble { background:#093d54; color:#fff; }
+    .mi-msg-time { font-size:10px; opacity:.65; margin-top:3px; text-align:right; }
+    .mi-footer { border-top:1px solid var(--border); padding:10px 14px; background:var(--bg-elev); }
+    .mi-toolbar { display:flex; gap:6px; margin-bottom:6px; }
+    .mi-toolbar-btn { background:transparent; border:1px solid var(--border); border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer; color:var(--text-dim); font-family:inherit; display:inline-flex; align-items:center; gap:4px; }
+    .mi-toolbar-btn:hover:not(:disabled) { background:var(--bg); color:var(--text); }
+    .mi-toolbar-btn:disabled { opacity:.55; cursor:not-allowed; }
+    .mi-compose-row { display:flex; gap:8px; align-items:flex-end; }
+    .mi-textarea { flex:1; padding:7px 9px; border:1px solid var(--border); border-radius:7px; background:var(--bg); color:var(--text); font:inherit; font-size:13px; resize:vertical; min-height:36px; max-height:120px; }
+    .mi-textarea:disabled { background:var(--bg-elev); color:var(--text-faint); cursor:not-allowed; }
+    .mi-send-btn { background:var(--brand-deep, #093d54); color:#fff; border:none; border-radius:7px; padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:6px; }
+    .mi-send-btn:disabled { opacity:.55; cursor:not-allowed; }
+    .mi-hint { font-size:11px; color:var(--text-faint); margin-top:4px; }
+    /* Template-picker overlay */
+    .mi-tpl-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1100; display:none; align-items:flex-start; justify-content:center; padding:32px 16px; overflow-y:auto; }
+    .mi-tpl-overlay.open { display:flex; }
+    .mi-tpl-panel { width:100%; max-width:640px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; max-height:80vh; display:flex; flex-direction:column; }
+    .mi-tpl-head { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); }
+    .mi-tpl-list { padding:8px; overflow-y:auto; flex:1; }
+    .mi-tpl-item { padding:10px 12px; border:1px solid var(--border); border-radius:8px; margin-bottom:6px; cursor:pointer; background:var(--bg); }
+    .mi-tpl-item:hover { background:var(--bg-elev); border-color: var(--brand-deep, #093d54); }
+    .mi-tpl-name { font-weight:600; font-size:13px; color:var(--text); }
+    .mi-tpl-body { font-size:12px; color:var(--text-dim); margin-top:3px; white-space:pre-wrap; }
   </style>
 </head>
 <body>
@@ -101,19 +164,75 @@
     </div>
   </div>
 
-  <div class="filter-row" id="moFilterRow">
-    <button type="button" class="filter-chip active" data-mo-filt="all">Alles</button>
-    <button type="button" class="filter-chip" data-mo-filt="problems">Te behandelen</button>
-    <button type="button" class="filter-chip" data-mo-filt="wil_niet">Wil niet</button>
-    <button type="button" class="filter-chip" data-mo-filt="no_show">No-show</button>
-    <button type="button" class="filter-chip" data-mo-filt="geen_gehoor">Geen gehoor</button>
-    <button type="button" class="filter-chip" data-mo-filt="wil_later">Wil later</button>
-    <button type="button" class="filter-chip" data-mo-filt="call_ingepland">Call ingepland</button>
-    <button type="button" class="filter-chip" data-mo-filt="gestart">Gestart</button>
-    <span id="moCountInfo" style="margin-left:auto;font-size:12.5px;color:var(--text-faint)"></span>
+  <div class="mo-page-tabs" role="tablist">
+    <button type="button" class="mo-page-tab active" data-mo-page-tab="students" role="tab"><i class="ti ti-users"></i> Studenten</button>
+    <button type="button" class="mo-page-tab" data-mo-page-tab="inbox" id="moInboxTabBtn" role="tab" hidden><i class="ti ti-mail"></i> Inbox <span class="mo-tab-badge" id="moInboxBadge" hidden>0</span></button>
   </div>
 
-  <div id="moTableWrap"><div class="empty-state"><i class="ti ti-clock"></i>Laden…</div></div>
+  <div class="mo-page-pane" data-mo-page-pane="students">
+    <div class="filter-row" id="moFilterRow">
+      <button type="button" class="filter-chip active" data-mo-filt="all">Alles</button>
+      <button type="button" class="filter-chip" data-mo-filt="problems">Te behandelen</button>
+      <button type="button" class="filter-chip" data-mo-filt="wil_niet">Wil niet</button>
+      <button type="button" class="filter-chip" data-mo-filt="no_show">No-show</button>
+      <button type="button" class="filter-chip" data-mo-filt="geen_gehoor">Geen gehoor</button>
+      <button type="button" class="filter-chip" data-mo-filt="wil_later">Wil later</button>
+      <button type="button" class="filter-chip" data-mo-filt="call_ingepland">Call ingepland</button>
+      <button type="button" class="filter-chip" data-mo-filt="gestart">Gestart</button>
+      <span id="moCountInfo" style="margin-left:auto;font-size:12.5px;color:var(--text-faint)"></span>
+    </div>
+
+    <div id="moTableWrap"><div class="empty-state"><i class="ti ti-clock"></i>Laden…</div></div>
+  </div>
+
+  <div class="mo-page-pane" data-mo-page-pane="inbox" hidden>
+    <div class="mi-shell">
+      <aside class="mi-list-pane">
+        <div class="mi-list-head">
+          <h3>Gesprekken</h3>
+          <button type="button" class="mi-refresh" data-mi-refresh title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+        </div>
+        <div id="miConvList" class="mi-list-body"><div style="padding:14px;color:var(--text-faint);font-size:12.5px;text-align:center">Laden…</div></div>
+      </aside>
+      <section class="mi-thread-pane">
+        <div id="miThreadEmpty" class="mi-thread-empty">
+          <i class="ti ti-message-circle" style="font-size:32px;opacity:.5"></i>
+          <div>Kies een gesprek links om de berichten te zien.</div>
+        </div>
+        <div id="miThreadContent" hidden style="display:flex;flex-direction:column;flex:1;min-height:0">
+          <div class="mi-thread-head">
+            <div style="flex:1;min-width:0">
+              <div id="miThreadName" class="mi-thread-name">—</div>
+              <div id="miThreadPhone" class="mi-thread-phone">—</div>
+            </div>
+            <span id="miThreadWindow" class="mi-thread-window">—</span>
+          </div>
+          <div id="miThreadMessages" class="mi-thread-messages"></div>
+          <div class="mi-footer">
+            <div class="mi-toolbar">
+              <button type="button" class="mi-toolbar-btn" data-mi-templates><i class="ti ti-template"></i> Template</button>
+            </div>
+            <div class="mi-compose-row">
+              <textarea id="miReplyText" class="mi-textarea" rows="1" placeholder="Typ een bericht…"></textarea>
+              <button type="button" class="mi-send-btn" data-mi-send><i class="ti ti-send"></i> Versturen</button>
+            </div>
+            <div id="miThreadHint" class="mi-hint"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<!-- Template-picker overlay -->
+<div id="miTplOverlay" class="mi-tpl-overlay">
+  <div class="mi-tpl-panel">
+    <div class="mi-tpl-head">
+      <strong>Kies een template</strong>
+      <button type="button" id="miTplClose" aria-label="Sluiten" style="background:transparent;border:none;font-size:20px;color:var(--text-dim);cursor:pointer;line-height:1">&times;</button>
+    </div>
+    <div id="miTplList" class="mi-tpl-list">Laden…</div>
+  </div>
 </div>
 
 <!-- Detail-popup -->
@@ -178,6 +297,18 @@
   let   _notifications     = [];
   const _unreadByOnb       = new Map();
   let   _openId            = null;      // onboarding_id van open popup
+
+  // Inbox-state (mentor-gescopet via /api/inbox-conversations-list?module=onboarding).
+  // Server-side scoping (seesOwn -> getMentorCustomerIds) doet de filtering;
+  // we vertrouwen het endpoint en doen hier geen eigen klant-check.
+  const _miState = {
+    convs:        [],
+    convId:       null,
+    canSendText:  false,
+    conv:         null,
+    inboxLoaded:  false,
+    badgeTimer:   null,
+  };
 
   // ── 1-op-1 maps (auto-statussen: gestart / call_ingepland / no_show) ──
   async function loadOneOnOneMaps() {
@@ -883,6 +1014,317 @@
     }
   }
 
+  // ── Mentor-inbox (page-tab "Inbox") ───────────────────────────────────
+  // Server-side mentor-scoping: /api/inbox-conversations-list?module=onboarding
+  // gebruikt getMentorCustomerIds (seesOwn). Wij vertrouwen het endpoint —
+  // geen eigen klant-filtering hier.
+  function _miAvatar(name) {
+    const m = String(name || '?').trim().match(/[A-Za-z0-9]/);
+    return (m ? m[0] : '?').toUpperCase();
+  }
+  function _miSetBadge(n) {
+    const btn   = document.getElementById('moInboxTabBtn');
+    const badge = document.getElementById('moInboxBadge');
+    if (!badge || !btn) return;
+    if (n > 0) { badge.textContent = String(n); badge.hidden = false; }
+    else       { badge.hidden = true; }
+  }
+
+  async function _miLoadConversations(opts) {
+    opts = opts || {};
+    const list = document.getElementById('miConvList');
+    if (!list) return;
+    if (!opts.silent) {
+      list.innerHTML = '<div style="padding:14px;color:var(--text-faint);font-size:12.5px;text-align:center">Laden…</div>';
+    }
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/inbox-conversations-list?module=onboarding&limit=100');
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        list.innerHTML = '<div style="padding:14px;color:#b91c1c;font-size:12.5px">Fout: ' + esc(j?.error || ('HTTP ' + r.status)) + '</div>';
+        return;
+      }
+      if (j.configured === false) {
+        list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-faint);font-size:12.5px">'
+          + '<i class="ti ti-plug-connected-x" style="font-size:24px;display:block;margin-bottom:6px"></i>'
+          + 'Onboarding-lijn nog niet geconfigureerd.'
+          + '</div>';
+        _miSetBadge(0);
+        return;
+      }
+      const items = Array.isArray(j.items) ? j.items : [];
+      _miState.convs = items;
+      // Badge = aantal conversaties met ongelezen inbound (zelfde proxy
+      // als de manager-inbox).
+      let n = 0;
+      for (const it of items) if (Number(it && it.unread_count) > 0) n++;
+      _miSetBadge(n);
+      if (items.length === 0) {
+        list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-faint);font-size:12.5px">'
+          + '<i class="ti ti-inbox" style="font-size:24px;display:block;margin-bottom:6px"></i>'
+          + 'Nog geen gesprekken met jouw studenten.'
+          + '</div>';
+        return;
+      }
+      const activeId = _miState.convId || null;
+      list.innerHTML = items.map((it) => {
+        const name      = it.customer_name || it.display_name || it.phone_number || '(geen naam)';
+        const preview   = (it.last_message_preview || '').slice(0, 60);
+        const time      = it.last_message_at ? fmtDateNL(it.last_message_at) : '';
+        const isActive  = activeId && it.id === activeId ? ' active' : '';
+        const dotCls    = it.can_send_text ? 'open' : 'closed';
+        const dotTitle  = it.can_send_text ? '24h-venster open' : '24h-venster verlopen — alleen template';
+        const unread    = Number(it.unread_count) > 0 ? '<span class="mi-conv-unread" title="Ongelezen">' + esc(String(it.unread_count)) + '</span>' : '';
+        return '<div class="mi-conv-row' + isActive + '" data-mi-conv-id="' + esc(it.id) + '"'
+          + ' data-mi-name="' + esc(name) + '"'
+          + ' data-mi-phone="' + esc(it.phone_number || '') + '">'
+          +   '<div class="mi-conv-avatar">' + esc(_miAvatar(name)) + '</div>'
+          +   '<div>'
+          +     '<div class="mi-conv-top">'
+          +       '<span class="mi-conv-name">' + esc(name) + '</span>'
+          +       '<span class="mi-conv-time">' + esc(time) + '</span>'
+          +     '</div>'
+          +     '<div class="mi-conv-preview">' + esc(preview || it.phone_number || '—')
+          +       '<span class="mi-24h-dot ' + dotCls + '" title="' + esc(dotTitle) + '"></span>'
+          +       unread
+          +     '</div>'
+          +   '</div>'
+          + '</div>';
+      }).join('');
+      list.querySelectorAll('.mi-conv-row[data-mi-conv-id]').forEach((row) => {
+        row.addEventListener('click', () => {
+          _miSelectConv({
+            id:    row.getAttribute('data-mi-conv-id'),
+            name:  row.getAttribute('data-mi-name')  || '',
+            phone: row.getAttribute('data-mi-phone') || '',
+          });
+        });
+      });
+    } catch (e) {
+      list.innerHTML = '<div style="padding:14px;color:#b91c1c;font-size:12.5px">Fout: ' + esc(e?.message || e) + '</div>';
+    }
+  }
+
+  async function _miSelectConv({ id, name, phone }) {
+    if (!id) return;
+    _miState.convId      = id;
+    _miState.conv        = null;
+    _miState.canSendText = false;
+    const empty = document.getElementById('miThreadEmpty');
+    const cont  = document.getElementById('miThreadContent');
+    if (empty) empty.style.display = 'none';
+    if (cont)  { cont.hidden = false; cont.style.display = 'flex'; }
+    document.querySelectorAll('#miConvList .mi-conv-row.active').forEach((el) => el.classList.remove('active'));
+    const newRow = document.querySelector('#miConvList .mi-conv-row[data-mi-conv-id="' + id.replace(/"/g, '\\"') + '"]');
+    if (newRow) newRow.classList.add('active');
+
+    const nameEl  = document.getElementById('miThreadName');
+    const phoneEl = document.getElementById('miThreadPhone');
+    if (nameEl)  nameEl.textContent  = name  || phone || 'Onbekend';
+    if (phoneEl) phoneEl.textContent = phone || '—';
+    const wbadge = document.getElementById('miThreadWindow');
+    if (wbadge) { wbadge.textContent = '…'; wbadge.style.background = 'var(--bg-elev)'; wbadge.style.color = 'var(--text-dim)'; }
+    const wrap = document.getElementById('miThreadMessages');
+    if (wrap) wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12.5px;text-align:center;padding:20px">Laden…</div>';
+    const ta   = document.getElementById('miReplyText');
+    const hint = document.getElementById('miThreadHint');
+    if (ta)   ta.value = '';
+    if (hint) hint.textContent = '';
+
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const params = new URLSearchParams({ conversation_id: id, limit: '200', mark_as_read: 'true' });
+      const r = await apiFetch('/api/inbox-messages-list?' + params.toString());
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        if (wrap) wrap.innerHTML = '<div style="color:#b91c1c;font-size:12.5px;padding:14px">Fout: ' + esc(d?.error || ('HTTP ' + r.status)) + '</div>';
+        return;
+      }
+      _miState.conv        = d.conversation || null;
+      _miState.canSendText = !!(d.conversation && d.conversation.can_send_text);
+      _miRenderThread(d.items || []);
+      _miApplyComposeState();
+      _miLoadConversations({ silent: true }); // badge + active-state refresh
+    } catch (e) {
+      if (wrap) wrap.innerHTML = '<div style="color:#b91c1c;font-size:12.5px;padding:14px">Fout: ' + esc(e?.message || e) + '</div>';
+    }
+  }
+
+  function _miRenderThread(items) {
+    const wrap = document.getElementById('miThreadMessages');
+    if (!wrap) return;
+    if (!items || items.length === 0) {
+      wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12.5px;text-align:center;padding:20px">Nog geen berichten in deze conversatie.</div>';
+    } else {
+      wrap.innerHTML = items.map((m) => {
+        const inbound = (m.direction === 'in');
+        const time    = m.created_at ? fmtDateTimeNL(m.created_at) : '';
+        const body    = String(m.body || (m.template_name ? '[template:' + m.template_name + ']' : '[media]'));
+        return '<div class="mi-msg-row ' + (inbound ? 'in' : 'out') + '">'
+          + '<div class="mi-msg-bubble">'
+          +   '<div style="white-space:pre-wrap;word-wrap:break-word">' + esc(body) + '</div>'
+          +   '<div class="mi-msg-time">' + esc(time) + '</div>'
+          + '</div></div>';
+      }).join('');
+    }
+    wrap.scrollTop = wrap.scrollHeight;
+    const badge = document.getElementById('miThreadWindow');
+    if (!badge) return;
+    if (_miState.canSendText) {
+      badge.textContent = '24h open';
+      badge.style.background = 'rgba(5,150,105,0.15)';
+      badge.style.color = '#059669';
+      badge.title = 'Servicewindow open — vrije tekst toegestaan';
+    } else {
+      badge.textContent = '24h verlopen';
+      badge.style.background = 'rgba(245,158,11,0.18)';
+      badge.style.color = '#b45309';
+      badge.title = 'Servicewindow verlopen — alleen templates';
+    }
+  }
+
+  function _miApplyComposeState() {
+    const ta      = document.getElementById('miReplyText');
+    const sendBtn = document.querySelector('[data-mi-send]');
+    const hint    = document.getElementById('miThreadHint');
+    if (_miState.canSendText) {
+      if (ta)      { ta.disabled = false; ta.placeholder = 'Typ een bericht…'; }
+      if (sendBtn) sendBtn.disabled = false;
+      if (hint)    hint.textContent = '';
+    } else {
+      if (ta)      { ta.disabled = true; ta.placeholder = '24h-venster verlopen — alleen templates'; }
+      if (sendBtn) sendBtn.disabled = true;
+      if (hint)    hint.textContent = '24h-venster verlopen sinds laatste inbound — gebruik een template.';
+    }
+  }
+
+  async function _miSendText() {
+    if (!_miState.convId || !_miState.canSendText) return;
+    const ta = document.getElementById('miReplyText');
+    const body = String(ta?.value || '').trim();
+    if (!body) return;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    const sendBtn = document.querySelector('[data-mi-send]');
+    if (sendBtn) sendBtn.disabled = true;
+    try {
+      const r = await apiFetch('/api/inbox-send', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ conversation_id: _miState.convId, body }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      if (ta) ta.value = '';
+      await _miSelectConv({
+        id:    _miState.convId,
+        name:  document.getElementById('miThreadName')?.textContent || '',
+        phone: document.getElementById('miThreadPhone')?.textContent || '',
+      });
+    } catch (e) {
+      alert('Versturen mislukt: ' + (e?.message || e));
+    } finally {
+      if (sendBtn) sendBtn.disabled = !_miState.canSendText;
+    }
+  }
+
+  async function _miOpenTemplates() {
+    if (!_miState.convId) return;
+    const overlay = document.getElementById('miTplOverlay');
+    const listEl  = document.getElementById('miTplList');
+    if (!overlay || !listEl) return;
+    overlay.classList.add('open');
+    listEl.innerHTML = '<div style="color:var(--text-faint);font-size:12.5px;padding:14px;text-align:center">Templates laden…</div>';
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/inbox-template-list?conversation_id=' + encodeURIComponent(_miState.convId));
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        listEl.innerHTML = '<div style="color:#b91c1c;font-size:12.5px;padding:14px">Fout: ' + esc(d?.error || ('HTTP ' + r.status)) + '</div>';
+        return;
+      }
+      const items = Array.isArray(d?.items) ? d.items : (Array.isArray(d?.templates) ? d.templates : []);
+      if (items.length === 0) {
+        listEl.innerHTML = '<div style="color:var(--text-faint);font-size:12.5px;padding:14px;text-align:center">Geen templates beschikbaar.</div>';
+        return;
+      }
+      listEl.innerHTML = items.map((t, i) => {
+        const name = t.display_name || t.name || ('template-' + i);
+        const preview = (t.body_preview || t.body || '').slice(0, 240);
+        return '<div class="mi-tpl-item" data-mi-tpl-name="' + esc(t.name || name) + '">'
+          + '<div class="mi-tpl-name">' + esc(name) + '</div>'
+          + (preview ? '<div class="mi-tpl-body">' + esc(preview) + '</div>' : '')
+          + '</div>';
+      }).join('');
+      listEl.querySelectorAll('.mi-tpl-item[data-mi-tpl-name]').forEach((el) => {
+        el.addEventListener('click', () => _miSendTemplate(el.getAttribute('data-mi-tpl-name')));
+      });
+    } catch (e) {
+      listEl.innerHTML = '<div style="color:#b91c1c;font-size:12.5px;padding:14px">Fout: ' + esc(e?.message || e) + '</div>';
+    }
+  }
+
+  async function _miSendTemplate(templateName) {
+    if (!_miState.convId || !templateName) return;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/inbox-send-template', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ conversation_id: _miState.convId, template_name: templateName }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      _miCloseTemplates();
+      await _miSelectConv({
+        id:    _miState.convId,
+        name:  document.getElementById('miThreadName')?.textContent || '',
+        phone: document.getElementById('miThreadPhone')?.textContent || '',
+      });
+    } catch (e) {
+      alert('Template versturen mislukt: ' + (e?.message || e));
+    }
+  }
+  function _miCloseTemplates() {
+    const overlay = document.getElementById('miTplOverlay');
+    if (overlay) overlay.classList.remove('open');
+  }
+
+  function _miWireInboxOnce() {
+    const refresh = document.querySelector('[data-mi-refresh]');
+    if (refresh) refresh.addEventListener('click', () => _miLoadConversations());
+    const sendBtn = document.querySelector('[data-mi-send]');
+    if (sendBtn) sendBtn.addEventListener('click', () => _miSendText());
+    const tplBtn = document.querySelector('[data-mi-templates]');
+    if (tplBtn) tplBtn.addEventListener('click', () => _miOpenTemplates());
+    const tplClose = document.getElementById('miTplClose');
+    if (tplClose) tplClose.addEventListener('click', () => _miCloseTemplates());
+    const overlay = document.getElementById('miTplOverlay');
+    if (overlay) overlay.addEventListener('click', (ev) => { if (ev.target === overlay) _miCloseTemplates(); });
+    const ta = document.getElementById('miReplyText');
+    if (ta) ta.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); _miSendText(); }
+    });
+  }
+
+  function _switchPageTab(key) {
+    document.querySelectorAll('.mo-page-tab[data-mo-page-tab]').forEach((b) => {
+      b.classList.toggle('active', b.getAttribute('data-mo-page-tab') === key);
+    });
+    document.querySelectorAll('.mo-page-pane[data-mo-page-pane]').forEach((p) => {
+      p.hidden = (p.getAttribute('data-mo-page-pane') !== key);
+    });
+    if (key === 'inbox' && !_miState.inboxLoaded) {
+      _miState.inboxLoaded = true;
+      _miLoadConversations();
+    }
+  }
+
   // ── Init ──────────────────────────────────────────────────────────────
   async function init() {
     try { if (window._authSharedReady) await window._authSharedReady; } catch {}
@@ -930,6 +1372,32 @@
     _wireNotificationsPanel();
     loadNotifications();
     loadStudents();
+
+    // Page-tab-switch (Studenten / Inbox). Inbox-tab is gated op
+    // onboarding.inbox.view — bij ontbreken (mentor zonder die perm)
+    // blijft de knop hidden en wordt er niets geladen. Server-side gate'n
+    // de endpoints sowieso (defense in depth).
+    document.querySelectorAll('.mo-page-tab[data-mo-page-tab]').forEach((b) => {
+      b.addEventListener('click', () => _switchPageTab(b.getAttribute('data-mo-page-tab') || 'students'));
+    });
+    try {
+      const canInbox = !!(window.RBAC?.canSync?.('onboarding.inbox.view'));
+      const tabBtn = document.getElementById('moInboxTabBtn');
+      if (tabBtn) tabBtn.hidden = !canInbox;
+      if (canInbox) {
+        _miWireInboxOnce();
+        // 60s badge-poll (alleen ongelezen-counter; lijst zelf wordt
+        // pas geladen bij eerste tab-klik). Spiegelt manager-inbox.
+        const tickBadge = () => _miLoadConversations({ silent: true }).catch(() => {});
+        tickBadge();
+        if (!_miState.badgeTimer) {
+          _miState.badgeTimer = setInterval(tickBadge, 60000);
+          window.addEventListener('beforeunload', () => {
+            if (_miState.badgeTimer) { clearInterval(_miState.badgeTimer); _miState.badgeTimer = null; }
+          });
+        }
+      }
+    } catch (e) { console.warn('[mentor-onboarding] inbox-tab gate:', e?.message || e); }
   }
 
   document.addEventListener('DOMContentLoaded', init);
