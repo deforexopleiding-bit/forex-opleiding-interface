@@ -241,10 +241,11 @@
           <div id="oiEmailThread" style="display:none;flex:1;min-height:0;overflow:auto;padding:8px 14px 14px"></div>
           <div id="oiSuggestionPanel" style="padding:0 14px"></div>
           <div id="oiThreadFooter" class="oi-thread-footer">
-            <div style="display:flex;gap:8px;align-items:flex-start">
+            <textarea id="oiComposeTextarea" placeholder="Typ een vrij bericht…" style="display:block;width:100%;box-sizing:border-box;min-height:62px;max-height:140px;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);resize:vertical"></textarea>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
               <button type="button" class="refresh-btn" id="oiAskMilaBtn" style="background:#d97706;color:#fff;white-space:nowrap" title="Vraag Mila om een suggestie"><i class="ti ti-sparkles"></i> Vraag Mila</button>
               <button type="button" class="refresh-btn" id="oiTemplateBtn" title="Verstuur een goedgekeurde Meta-template" style="padding:6px 10px"><i class="ti ti-template"></i></button>
-              <textarea id="oiComposeTextarea" placeholder="Typ een vrij bericht…" style="flex:1;min-height:62px;max-height:140px;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);resize:vertical"></textarea>
+              <div style="flex:1"></div>
               <button type="button" class="refresh-btn" id="oiSendBtn" style="background:var(--brand-deep,#093d54);color:#fff" title="Versturen"><i class="ti ti-send"></i> Versturen</button>
             </div>
             <div id="oiThreadHint" style="font-size:11.5px;color:var(--text-faint);margin-top:4px"></div>
@@ -1471,6 +1472,47 @@
     }
     wrap.innerHTML = html;
     wrap.scrollTop = wrap.scrollHeight;
+    // \Seen-flag zetten voor inkomende mails + e-mail-badge verversen.
+    // Idempotent (reeds-gelezen blijft gelezen) en fail-soft (UI-state niet
+    // afhankelijk van succes).
+    _oiMarkInboundEmailsRead(items);
+  }
+
+  // Verzamel inbound mail-uids ('mailbox:uid'-vorm uit inbox-emails-list) en
+  // markeer ze als \Seen via /api/mark-read. Daarna de oi-tab-badge en
+  // afzender-lijst-badge verversen. Alleen INKOMENDE mails — WhatsApp
+  // (inbox-mark-read) en outbound staan los hiervan. Fail-soft.
+  async function _oiMarkInboundEmailsRead(items) {
+    if (!Array.isArray(items) || items.length === 0) return;
+    const byMailbox = new Map(); // mailbox -> [uid, uid, ...]
+    for (const m of items) {
+      if (!m || m.direction !== 'inbound') continue;
+      const raw = typeof m.uid === 'string' ? m.uid : null;
+      if (!raw) continue;
+      const idx = raw.indexOf(':');
+      if (idx <= 0 || idx === raw.length - 1) continue;
+      const mailbox = raw.slice(0, idx).trim();
+      const uid     = raw.slice(idx + 1).trim();
+      if (!mailbox || !uid) continue;
+      if (!byMailbox.has(mailbox)) byMailbox.set(mailbox, []);
+      byMailbox.get(mailbox).push(uid);
+    }
+    if (byMailbox.size === 0) return;
+    try {
+      for (const [mailbox, uids] of byMailbox.entries()) {
+        // Fire-and-forget per mailbox; één call zet alle uids tegelijk.
+        window.AgentShared.apiFetch('/api/mark-read', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ mailbox, uids, seen: true }),
+        }).catch(() => {});
+      }
+      // E-mail-badge verversen na een korte vertraging zodat de IMAP-server
+      // de wijziging heeft kunnen verwerken. Geen await — UI blijft snappy.
+      setTimeout(() => {
+        try { _loadOiEmailSendersBadgeOnly(); } catch (_e) {}
+      }, 600);
+    } catch (_e) { /* fail-soft */ }
   }
 
   async function _loadOiCustomerStrip(convId) {
