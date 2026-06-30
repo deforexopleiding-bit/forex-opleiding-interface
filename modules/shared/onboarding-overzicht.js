@@ -121,6 +121,7 @@
               '<div id="oiThreadPhone" style="font-size:11.5px;color:var(--text-faint)">—</div>' +
             '</div>' +
             '<span id="oiThreadWindowBadge" style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:.04em">—</span>' +
+            '<button type="button" id="oiEmailUnreadBtn" style="display:none;margin-left:8px;padding:5px 11px;font-size:12px;font-weight:600;background:transparent;color:var(--text-dim);border:1px solid var(--border);border-radius:7px;cursor:pointer" title="Markeer inkomende mails in deze thread weer als ongelezen"><i class="ti ti-mail-question"></i> Markeer als ongelezen</button>' +
             '<button type="button" id="oiEmailReplyBtn" style="display:none;margin-left:8px;padding:5px 11px;font-size:12px;font-weight:600;background:var(--brand-deep,#093d54);color:#fff;border:none;border-radius:7px;cursor:pointer" title="Open mailmodule om te reageren"><i class="ti ti-mail-forward"></i> Reageren</button>' +
           '</div>' +
           '<div id="oiCustomerStrip" class="oi-ctx-strip" style="display:none"></div>' +
@@ -2205,6 +2206,9 @@
     if (sugg)        sugg.style.display        = '';
     if (footer)      footer.style.display      = '';
     if (reply)       reply.style.display       = 'none';
+    const unreadBtn = document.getElementById('oiEmailUnreadBtn');
+    if (unreadBtn) unreadBtn.style.display = 'none';
+    _oiCurrentEmailItems = [];
     // Bij open vanuit een e-mail-afzenderview zijn deze WhatsApp-only
     // elementen verborgen — opnieuw tonen voor de WA-flow.
     const modeBar     = document.getElementById('oiThreadModeBar');
@@ -2242,6 +2246,8 @@
       if (sugg)        sugg.style.display        = '';
       if (footer)      footer.style.display      = '';
       if (reply)       reply.style.display       = 'none';
+      const unreadBtn = document.getElementById('oiEmailUnreadBtn');
+      if (unreadBtn) unreadBtn.style.display = 'none';
       // canSendText-state was al toegepast bij open; niets te herstellen.
     } else {
       if (waThread)    waThread.style.display    = 'none';
@@ -2362,6 +2368,15 @@
         window.open(url, '_blank');
       };
     }
+    // "Markeer als ongelezen"-knop: alleen tonen als er inkomende items zijn.
+    // Onthoud de huidige items voor de klik-handler.
+    _oiCurrentEmailItems = Array.isArray(items) ? items.slice() : [];
+    const inboundCount = _oiCurrentEmailItems.filter((m) => m && m.direction === 'inbound').length;
+    const unreadBtn = document.getElementById('oiEmailUnreadBtn');
+    if (unreadBtn) {
+      unreadBtn.style.display = inboundCount > 0 ? '' : 'none';
+      unreadBtn.disabled      = false;
+    }
     if (items.length === 0) {
       let html = '<div style="color:var(--text-faint);font-size:12.5px;text-align:center;padding:24px">Nog geen e-mails voor deze klant.</div>';
       if (warning) {
@@ -2398,11 +2413,19 @@
     _oiMarkInboundEmailsRead(items);
   }
 
+  // Onthoudt de items die nu in de e-mailthread staan, zodat
+  // "Markeer als ongelezen" weet welke uids 'ie weer op !seen moet zetten.
+  let _oiCurrentEmailItems = [];
+
   // Verzamel inbound mail-uids ('mailbox:uid'-vorm uit inbox-emails-list) en
   // markeer ze als \Seen via /api/mark-read. Daarna de oi-tab-badge en
   // afzender-lijst-badge verversen. Alleen INKOMENDE mails — WhatsApp
   // (inbox-mark-read) en outbound staan los hiervan. Fail-soft.
-  async function _oiMarkInboundEmailsRead(items) {
+  //
+  // `seen` (default true) bepaalt de actie: true → \Seen zetten (auto-read
+  // bij thread-open, #537); false → \Seen verwijderen (handmatige
+  // "Markeer als ongelezen"-knop).
+  async function _oiMarkInboundEmailsRead(items, seen = true) {
     if (!Array.isArray(items) || items.length === 0) return;
     const byMailbox = new Map(); // mailbox -> [uid, uid, ...]
     for (const m of items) {
@@ -2423,13 +2446,31 @@
         window.AgentShared.apiFetch('/api/mark-read', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ mailbox, uids, seen: true }),
+          body:    JSON.stringify({ mailbox, uids, seen: seen !== false }),
         }).catch(() => {});
       }
+      // Bij seen:false stijgt de teller weer; bij seen:true daalt 'ie.
       setTimeout(() => {
         try { _loadOiEmailSendersBadgeOnly(); } catch (_e) {}
       }, 600);
     } catch (_e) { /* fail-soft */ }
+  }
+
+  // Eenmalige wire-up van de "Markeer als ongelezen"-knop. Idempotent:
+  // wordt aangeroepen in wireOnboardingInbox().
+  function _oiWireEmailUnreadBtn() {
+    const btn = document.getElementById('oiEmailUnreadBtn');
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      if (!Array.isArray(_oiCurrentEmailItems) || _oiCurrentEmailItems.length === 0) return;
+      btn.disabled = true;
+      try {
+        await _oiMarkInboundEmailsRead(_oiCurrentEmailItems, false);
+        try { toast('Inkomende mails op ongelezen gezet', 'success'); } catch (_e) {}
+      } finally {
+        setTimeout(() => { try { btn.disabled = false; } catch (_e) {} }, 800);
+      }
+    });
   }
 
   async function _loadOiCustomerStrip(convId) {
@@ -2901,6 +2942,11 @@
       const el = document.getElementById(id);
       if (el) el.style.display = 'none';
     }
+    // Reset de unread-knop tot _renderOiEmailThread 'm weer op de juiste
+    // staat zet (display:'' bij inbound > 0, anders hidden).
+    const unreadBtn = document.getElementById('oiEmailUnreadBtn');
+    if (unreadBtn) unreadBtn.style.display = 'none';
+    _oiCurrentEmailItems = [];
 
     const emailThread = document.getElementById('oiEmailThread');
     if (emailThread) {
@@ -2953,6 +2999,8 @@
         _loadOiEmailSendersBadgeOnly();
       }
     });
+    // "Markeer als ongelezen"-knop op de e-mail-thread (zelfde header).
+    _oiWireEmailUnreadBtn();
     const srcWa = document.getElementById('oiSrcBtnWa');
     if (srcWa) srcWa.addEventListener('click', () => _oiSwitchListSource('wa'));
     const srcEm = document.getElementById('oiSrcBtnEmail');
