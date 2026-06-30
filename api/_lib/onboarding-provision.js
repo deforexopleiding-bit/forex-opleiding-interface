@@ -61,7 +61,9 @@ function extractUserIdFromWf(wfResponse) {
 // Idem voor het tijdelijke wachtwoord — Bubble-workflow stuurt 'm typisch
 // onder response.temp_password OF direct als temp_password. Returnt null
 // als beide ontbreken; in dat geval slaan we de credentials-mail/wa over.
-function extractTempPasswordFromWf(wfResponse) {
+// Geëxporteerd zodat api/onboarding-credentials-reset.js dezelfde extractie
+// kan gebruiken op de reset_student_password-workflow-respons.
+export function extractTempPasswordFromWf(wfResponse) {
   if (!wfResponse || typeof wfResponse !== 'object') return null;
   if (typeof wfResponse.temp_password === 'string' && wfResponse.temp_password.trim()) {
     return wfResponse.temp_password.trim();
