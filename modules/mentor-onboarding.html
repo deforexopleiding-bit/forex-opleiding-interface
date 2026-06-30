@@ -245,7 +245,7 @@
               <button type="button" class="refresh-btn" id="oiAskMilaBtn" style="background:#d97706;color:#fff;white-space:nowrap" title="Vraag Mila om een suggestie"><i class="ti ti-sparkles"></i> Vraag Mila</button>
               <button type="button" class="refresh-btn" id="oiTemplateBtn" title="Verstuur een goedgekeurde Meta-template" style="padding:6px 10px"><i class="ti ti-template"></i></button>
               <textarea id="oiComposeTextarea" placeholder="Typ een vrij bericht…" style="flex:1;min-height:62px;max-height:140px;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);resize:vertical"></textarea>
-              <button type="button" class="refresh-btn" id="oiSendBtn" style="background:var(--brand-deep);color:#fff" title="Versturen"><i class="ti ti-send"></i> Versturen</button>
+              <button type="button" class="refresh-btn" id="oiSendBtn" style="background:var(--brand-deep,#093d54);color:#fff" title="Versturen"><i class="ti ti-send"></i> Versturen</button>
             </div>
             <div id="oiThreadHint" style="font-size:11.5px;color:var(--text-faint);margin-top:4px"></div>
           </div>
@@ -1076,6 +1076,18 @@
     setTimeout(() => el.classList.remove('show'), 2400);
   }
 
+  // Mila-permissie-gate. Fail-open: als RBAC.canSync nog niet geladen is
+  // tijdens de eerste calls, laten we de aanroep door — de server-side
+  // RBAC blokkeert alsnog en geeft 403. Zo voorkomen we dat een race in
+  // de RBAC-laad de Mila-flow stil uitschakelt voor wel-bevoegde users.
+  function _canUseMila() {
+    try {
+      const fn = window.RBAC && window.RBAC.canSync;
+      if (typeof fn !== 'function') return true;
+      return !!fn('onboarding.mila.use');
+    } catch (_e) { return true; }
+  }
+
   function _oiAvatarInitial(s) {
     const txt = String(s || '?').trim();
     const m = txt.match(/[A-Za-z0-9]/);
@@ -1242,7 +1254,11 @@
       _oiResetMode();
       _loadOiCustomerStrip(id);
       loadOnboardingInbox();
-      _loadLatestMilaSuggestion(id);
+      // Mila-suggesties alleen ophalen als de user de perm heeft —
+      // anders krijgt 'ie de "Geen rechten (onboarding.mila.use)"-melding
+      // bij elke conv-open. _canUseMila() valt fail-open bij ontbrekend
+      // RBAC.canSync zodat we niet sturen in de RBAC-load-race.
+      if (_canUseMila()) _loadLatestMilaSuggestion(id);
     } catch (e) {
       document.getElementById('oiThreadMessages').innerHTML =
         '<div style="color:#b91c1c;font-size:12px;padding:14px">Fout: ' + esc(e?.message || e) + '</div>';
@@ -1968,8 +1984,16 @@
     if (srcEm) srcEm.addEventListener('click', () => _oiSwitchListSource('email'));
     const backBtn = document.getElementById('oiThreadBack');
     if (backBtn) backBtn.addEventListener('click', _oiShowListView);
+    // Mila-knop: alleen tonen + wiren als de user onboarding.mila.use heeft.
+    // Anders volledig verbergen — geen klik mogelijk, geen 403-popup.
     const askBtn = document.getElementById('oiAskMilaBtn');
-    if (askBtn) askBtn.addEventListener('click', askMila);
+    if (askBtn) {
+      if (_canUseMila()) {
+        askBtn.addEventListener('click', askMila);
+      } else {
+        askBtn.style.display = 'none';
+      }
+    }
     const sendBtn = document.getElementById('oiSendBtn');
     if (sendBtn) sendBtn.addEventListener('click', sendOiComposeText);
     const tplBtn = document.getElementById('oiTemplateBtn');
