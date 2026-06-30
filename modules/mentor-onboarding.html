@@ -677,14 +677,14 @@
     const credsLine = s.credentials_email_sent_at
       ? 'Inloggegevens-mail verzonden op ' + esc(fmtDateNL(s.credentials_email_sent_at))
       : 'Inloggegevens-mail nog niet verzonden';
-    // Resend-credentials: actief alleen voor reeds-geprovisioneerde
-    // Bubble-accounts. Endpoint /api/onboarding-credentials-reset gate't
-    // server-side op ownership (seesAll OR onboarding.mentor_user_id ===
-    // userId), dus we hoeven hier geen perm-check te doen. Niet-provisioned:
-    // disabled met dezelfde uitleg.
-    const credsHelp = s.bubble_provisioned
-      ? '<button type="button" class="mo-btn" data-mo-creds-reset title="Genereer een nieuw tijdelijk wachtwoord in Bubble en mail het opnieuw naar de student"><i class="ti ti-mail"></i> Inloggegevens opnieuw sturen</button> <span data-mo-creds-status style="margin-left:8px;font-size:12px;color:var(--text-faint)"></span>'
-      : '<button type="button" class="mo-btn" disabled title="Bubble-account is nog niet aangemaakt — er is geen account waarvoor een wachtwoord gereset kan worden."><i class="ti ti-mail"></i> Inloggegevens opnieuw sturen</button>';
+    // Resend-credentials: knop tijdelijk verborgen — Bubble-side
+    // reset_student_password-workflow nog niet betrouwbaar; we laten 'm
+    // bewust uit de UI tot dat opgelost is. Endpoint
+    // /api/onboarding-credentials-reset + ownership-gate blijven
+    // ongewijzigd zodat de knop later 1-op-1 terug kan. Wire-handler
+    // (_resetCredentials) staat hieronder nog wel, maar zonder render-
+    // target doet de querySelector een no-op.
+    const credsHelp = '';
 
     // Instroom-blok
     const trajectLabel = s.traject_label ? esc(s.traject_label) : '—';

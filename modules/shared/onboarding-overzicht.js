@@ -1510,9 +1510,13 @@
               ${o.credentials_email_sent_at
                 ? '<span style="background:rgba(34,197,94,0.14);color:#15803d;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">✓ E-mail verstuurd</span> <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.credentials_email_sent_at)) + '</span>'
                 : '<span style="background:rgba(100,116,139,0.18);color:#475569;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">— E-mail nog niet verstuurd</span>'}
-              ${o.bubble_provisioned
-                ? '<div style="margin-top:6px"><button type="button" class="ob-act" id="credsResetBtn" data-id="' + esc(o.id) + '" title="Genereer een nieuw tijdelijk wachtwoord in Bubble en mail het opnieuw naar de student"><i class="ti ti-mail"></i> Inloggegevens opnieuw sturen</button> <span id="credsResetStatus" style="margin-left:8px;font-size:12.5px;color:var(--text-dim)"></span><div style="margin-top:4px;font-size:11.5px;color:var(--text-faint)">Reset het wachtwoord via Bubble en stuurt direct een nieuwe welkomstmail. Wachtwoord wordt niet bewaard.</div></div>'
-                : ''}
+              ${''/* Resend-credentials-knop tijdelijk verborgen — Bubble
+                   reset_student_password-workflow nog niet betrouwbaar.
+                   Endpoint /api/onboarding-credentials-reset + RBAC-gate
+                   blijven ongewijzigd; doCredentialsReset-handler hieronder
+                   blijft als dode code zodat we de knop later 1-op-1 terug
+                   kunnen zetten. getElementById('credsResetBtn') return't
+                   null, wire-block is no-op. */}
             </dd>
             <dt>WhatsApp-uitnodiging</dt><dd>
               ${o.invite_sent_at
