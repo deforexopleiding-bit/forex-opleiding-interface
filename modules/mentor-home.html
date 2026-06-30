@@ -735,6 +735,19 @@
     renderTodo();
   }
 
+  // Beoordelen-venster: spiegel van mentor-students.html _assessWindowState.
+  // Feature is gegate op 1 juli 2026 én alleen actief in de laatste 7 dagen
+  // van de huidige maand — daarvoor en daarbuiten tonen we geen
+  // "Assessments beoordelen"-melding in de todo-lijst.
+  const ASSESS_ACTIVE_FROM = new Date(2026, 6, 1); // 1 juli 2026
+  function assessInWindow() {
+    const now = new Date();
+    if (now.getTime() < ASSESS_ACTIVE_FROM.getTime()) return false;
+    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0); // laatste dag vd maand
+    const daysLeft = Math.ceil((last.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+    return daysLeft <= 7 && daysLeft >= 0;
+  }
+
   function renderTodo() {
     const wrap = document.getElementById('mhTodo');
     if (!wrap) return;
@@ -748,9 +761,12 @@
     const assessmentsToDo = (total == null) ? null : Math.max(0, Number(total) - assessed);
     const waitingReplies  = Number(state.todoCounters.waitingReplies) || 0;
     const items = [];
-    if (assessmentsToDo != null && assessmentsToDo > 0) {
+    // Beoordelen-venster spiegelt mentor-students.html: feature is
+    // pas live vanaf 1 juli 2026 én alleen in de laatste 7 dagen van
+    // de maand. Vóór juli en buiten dat venster geen melding tonen.
+    if (assessmentsToDo != null && assessmentsToDo > 0 && assessInWindow()) {
       items.push({
-        href: '/modules/mentor-dashboard.html#assessments',
+        href: '/modules/mentor-students.html',
         icon: 'ti-clipboard-check',
         title: 'Assessments beoordelen',
         sub: assessmentsToDo + ' student(en) wachten op je beoordeling',
