@@ -621,15 +621,21 @@
 
   function wireRowHandlers() {
     // Mentor inline edit (alleen aanwezig als _canAssign && !blocked).
+    // KRITIEK: stopPropagation op de cel + select + Opslaan-knop zodat een
+    // klik in de mentor-dropdown NIET de hele rij triggert (row-click =
+    // openDetail). Anders kaapt de rij elke select-interactie.
     document.querySelectorAll('.ob-mentor-cell').forEach((cell) => {
+      cell.addEventListener('click', (e) => { e.stopPropagation(); });
       const sel = cell.querySelector('select');
       const btn = cell.querySelector('button.save-btn');
       if (!sel || !btn) return;
       const orig = cell.dataset.cur || '';
-      sel.addEventListener('change', () => {
+      sel.addEventListener('change', (e) => {
+        e.stopPropagation();
         btn.disabled = (sel.value === orig);
       });
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
         const rowId = cell.dataset.rowId;
         const newVal = sel.value;
         saveMentor(rowId, newVal || null, btn, cell);
@@ -640,6 +646,21 @@
     // worden vanuit het menu zelf aan copyLink/openDetail/doArchive gerouteerd.
     document.querySelectorAll('.ob-kebab').forEach((k) => {
       k.addEventListener('click', (e) => { e.stopPropagation(); openKebabMenu(k); });
+    });
+
+    // Hele rij klikbaar → openDetail. Interactieve elementen erin
+    // (mentor-cell, kebab, andere knoppen/links) doen e.stopPropagation()
+    // hierboven of in hun eigen handlers zodat de row-click niet wordt
+    // getriggerd. Kebab-route (act==='view') blijft ook werken.
+    document.querySelectorAll('tr[data-row-id]').forEach((tr) => {
+      tr.style.cursor = 'pointer';
+      tr.addEventListener('click', (e) => {
+        // Defensief: als de klik op een form-element of link/button
+        // binnen de rij viel, niet openen.
+        if (e.target && e.target.closest && e.target.closest('button, a, select, input, textarea, .ob-mentor-cell, .ob-kebab')) return;
+        const id = tr.getAttribute('data-row-id');
+        if (id) openDetail(id);
+      });
     });
   }
 
@@ -1425,58 +1446,117 @@
             ? '<div style="margin-top:8px;text-align:right"><button type="button" id="obEmailReplyBtn" style="padding:7px 14px;border:0;border-radius:8px;background:#093d54;color:#fff;font-weight:600;font-size:13px;cursor:pointer">Reageren</button></div>'
             : '');
       }
+      // Tab-refactor: 4 tabbladen — Overzicht / Account & Bubble / Vragenlijst /
+      // Tijdlijn. Alle bestaande <dt>/<dd>-velden, knoppen en handlers blijven
+      // bestaan, alleen herverdeeld over de juiste tab. mountActions wordt
+      // niet meer gebruikt voor de modal: we renderen het admin-actie-blok en
+      // de tijdlijn direct uit de al-opgehaalde `o`, zodat de Overzicht-tab de
+      // acties krijgt en de Tijdlijn-tab alleen de mentor-tijdlijn toont.
+      const actionsBlockHtml = _renderAdminActionsBlock(o);
+      const timelineHtml     = _renderMentorTimeline(o);
+      const wizardPct = (o.total_steps && o.current_step_index != null)
+        ? Math.min(100, Math.round((Number(o.current_step_index) / Number(o.total_steps)) * 100))
+        : 0;
       bd.innerHTML = `
-        <dl>
-          <dt>Klant</dt>            <dd>${esc(o.customer_name || '—')}</dd>
-          <dt>E-mail</dt>           <dd>${o.email ? '<a href="mailto:' + esc(o.email) + '">' + esc(o.email) + '</a>' : '<span style="color:var(--text-faint)">—</span>'}</dd>
-          <dt>Telefoon</dt>         <dd>${o.phone ? '<a href="tel:' + esc(o.phone) + '">' + esc(o.phone) + '</a>' : '<span style="color:var(--text-faint)">—</span>'}</dd>
-          <dt>Traject</dt>          <dd>${esc(o.traject_label || '—')}${o.traject_type ? ' <span class="ob-badge paid-no">' + esc(o.traject_type) + '</span>' : ''}${o.calls != null ? ' · ' + o.calls + ' call' + (o.calls===1?'':'s') : ''}${o.duur_maanden != null ? ' · ' + o.duur_maanden + ' mnd' : ''}</dd>
-          <dt>Status</dt>           <dd>${statusBadgeHtml(o.status)}</dd>
-          <dt>Betaling</dt>         <dd>${paidBadgeHtml(!!o.paid)}</dd>
-          <dt>Bedenktijd</dt>       <dd>${bedenktijdBadge(o.bedenktijd || null, o.waiver || null)}</dd>
-          <dt>Beschikbaarheid</dt>  <dd>${renderAvailabilityFull(o.availability || null)}</dd>
-          <dt>Mentor</dt>           <dd>${esc(o.mentor_name || (o.mentor_user_id || '—'))}</dd>
-          <dt>Intake-status</dt>    <dd>${_intakePillHtml(o.intake_status || o.mentor_intake_status || 'nog_te_benaderen')}${o.planned_call_at ? ' <span style="color:var(--text-faint);font-size:12px">· geplande call ' + esc(fmtDateTimeNL(o.planned_call_at)) + '</span>' : ''}</dd>
-          <dt>Wizard-stap</dt>      <dd>${esc(o.current_step || '—')}</dd>
-          <dt>Aangemeld</dt>        <dd>${esc(fmtDateTimeNL(o.created_at))}</dd>
-          <dt>Startdatum</dt>       <dd>${o.start_date ? esc(fmtDateNL(o.start_date)) : '<span style="color:var(--text-faint)">— niet ingesteld (basis = nu)</span>'}</dd>
-          <dt>Toegewezen</dt>       <dd>${esc(fmtDateTimeNL(o.assigned_at))}</dd>
-          <dt>Gestart</dt>          <dd>${esc(fmtDateTimeNL(o.started_at))}</dd>
-          <dt>Afgerond</dt>         <dd>${esc(fmtDateTimeNL(o.completed_at))}</dd>
-          <dt>Gearchiveerd</dt>     <dd>${esc(fmtDateTimeNL(o.archived_at))}</dd>
-          <dt>Bubble-status</dt>    <dd>${bubbleBadgeHtml(o)}${o.bubble_provisioned_at ? ' <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.bubble_provisioned_at)) + '</span>' : ''}</dd>
-          ${o.bubble_user_id        ? `<dt>Bubble user-id</dt><dd style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all">${esc(o.bubble_user_id)}</dd>` : ''}
-          ${o.bubble_provision_error ? `<dt>Bubble-fout</dt><dd style="color:#b91c1c;white-space:pre-wrap;font-size:12.5px">${esc(o.bubble_provision_error)}</dd>` : ''}
-          ${(!o.bubble_provisioned)
-            ? `<dt>Bubble-actie</dt><dd>
-                 <button type="button" class="ob-act primary" id="bubbleRetryBtn" data-id="${esc(o.id)}">
-                   <i class="ti ti-refresh"></i>Bubble opnieuw aanmaken
-                 </button>
-                 <span id="bubbleRetryStatus" style="margin-left:8px;font-size:12.5px;color:var(--text-dim)"></span>
-               </dd>`
-            : ''}
-          <dt>WhatsApp-uitnodiging</dt><dd>
-            ${o.invite_sent_at
-              ? '<span style="background:rgba(34,197,94,0.14);color:#15803d;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">✓ Verstuurd</span> <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.invite_sent_at)) + '</span>'
-              : '<span style="background:rgba(100,116,139,0.18);color:#475569;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">— Nog niet verstuurd</span>'}
-            <button type="button" class="ob-act primary" id="oiInviteSendBtn" data-id="${esc(o.id)}" data-already-sent="${o.invite_sent_at ? '1' : '0'}" style="margin-left:8px;background:#d97706;border-color:#d97706">
-              <i class="ti ti-send"></i> ${o.invite_sent_at ? 'Opnieuw versturen' : 'Stuur WhatsApp-uitnodiging'}
-            </button>
-            <span id="oiInviteSendStatus" style="margin-left:8px;font-size:12.5px;color:var(--text-dim)"></span>
-          </dd>
-          <dt>Inloggegevens</dt><dd>
-            ${o.credentials_email_sent_at
-              ? '<span style="background:rgba(34,197,94,0.14);color:#15803d;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">✓ E-mail verstuurd</span> <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.credentials_email_sent_at)) + '</span>'
-              : '<span style="background:rgba(100,116,139,0.18);color:#475569;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">— E-mail nog niet verstuurd</span>'}
-          </dd>
-          ${link ? `<dt>Persoonlijke link</dt><dd style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all">${esc(link)}</dd>` : ''}
-        </dl>
-        <div id="obDetailActionsHost"></div>
-        <h3>Vragenlijst-antwoorden</h3>
-        ${answersJson
-          ? `<pre>${esc(answersJson)}</pre>`
-          : `<div class="empty-state"><i class="ti ti-clipboard-off"></i>Nog geen antwoorden — wizard nog niet gestart of nog niet ingevuld.</div>`}
-        ${emailSection}`;
+        <div class="ob-modal-tabs" role="tablist" style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:14px">
+          <button type="button" class="ob-modal-tab active" data-mtab="overview" style="padding:8px 12px;background:transparent;border:none;border-bottom:2px solid var(--brand-deep,#093d54);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Overzicht</button>
+          <button type="button" class="ob-modal-tab"        data-mtab="account"  style="padding:8px 12px;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-dim);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Account &amp; Bubble</button>
+          <button type="button" class="ob-modal-tab"        data-mtab="form"     style="padding:8px 12px;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-dim);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Vragenlijst</button>
+          <button type="button" class="ob-modal-tab"        data-mtab="timeline" style="padding:8px 12px;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-dim);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Tijdlijn</button>
+        </div>
+
+        <!-- TAB 1: Overzicht -->
+        <div class="ob-modal-pane" data-mpane="overview">
+          <dl>
+            <dt>Klant</dt>            <dd>${esc(o.customer_name || '—')}</dd>
+            <dt>E-mail</dt>           <dd>${o.email ? '<a href="mailto:' + esc(o.email) + '">' + esc(o.email) + '</a>' : '<span style="color:var(--text-faint)">—</span>'}</dd>
+            <dt>Telefoon</dt>         <dd>${o.phone ? '<a href="tel:' + esc(o.phone) + '">' + esc(o.phone) + '</a>' : '<span style="color:var(--text-faint)">—</span>'}</dd>
+            <dt>Status</dt>           <dd>${statusBadgeHtml(o.status)}</dd>
+            <dt>Intake-status</dt>    <dd>${_intakePillHtml(o.intake_status || o.mentor_intake_status || 'nog_te_benaderen')}${o.planned_call_at ? ' <span style="color:var(--text-faint);font-size:12px">· geplande call ' + esc(fmtDateTimeNL(o.planned_call_at)) + '</span>' : ''}</dd>
+            <dt>Mentor</dt>           <dd>${esc(o.mentor_name || (o.mentor_user_id || '—'))}</dd>
+            <dt>Traject</dt>          <dd>${esc(o.traject_label || '—')}${o.traject_type ? ' <span class="ob-badge paid-no">' + esc(o.traject_type) + '</span>' : ''}${o.calls != null ? ' · ' + o.calls + ' call' + (o.calls===1?'':'s') : ''}${o.duur_maanden != null ? ' · ' + o.duur_maanden + ' mnd' : ''}</dd>
+            <dt>Aangemeld</dt>        <dd>${esc(fmtDateTimeNL(o.created_at))}</dd>
+            <dt>Startdatum</dt>       <dd>${o.start_date ? esc(fmtDateNL(o.start_date)) : '<span style="color:var(--text-faint)">— niet ingesteld (basis = nu)</span>'}</dd>
+            <dt>Toegewezen</dt>       <dd>${esc(fmtDateTimeNL(o.assigned_at))}</dd>
+            <dt>Gestart</dt>          <dd>${esc(fmtDateTimeNL(o.started_at))}</dd>
+            <dt>Afgerond</dt>         <dd>${esc(fmtDateTimeNL(o.completed_at))}</dd>
+            <dt>Gearchiveerd</dt>     <dd>${esc(fmtDateTimeNL(o.archived_at))}</dd>
+            <dt>Betaling</dt>         <dd>${paidBadgeHtml(!!o.paid)}</dd>
+            <dt>Bedenktijd</dt>       <dd>${bedenktijdBadge(o.bedenktijd || null, o.waiver || null)}</dd>
+          </dl>
+          <!-- Manager-acties (notitie / afgehandeld / startdatum / herverdelen)
+               + Annuleren als gevarenzone onderaan — _renderAdminActionsBlock
+               heeft de cancel-knop al onder een gescheiden border. -->
+          <div id="obDetailActionsHost">${actionsBlockHtml}</div>
+        </div>
+
+        <!-- TAB 2: Account & Bubble -->
+        <div class="ob-modal-pane" data-mpane="account" hidden>
+          <dl>
+            <dt>Bubble-status</dt>    <dd>${bubbleBadgeHtml(o)}${o.bubble_provisioned_at ? ' <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.bubble_provisioned_at)) + '</span>' : ''}</dd>
+            ${o.bubble_user_id        ? `<dt>Bubble user-id</dt><dd style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all">${esc(o.bubble_user_id)}</dd>` : ''}
+            ${o.bubble_provision_error ? `<dt>Bubble-fout</dt><dd style="color:#b91c1c;white-space:pre-wrap;font-size:12.5px">${esc(o.bubble_provision_error)}</dd>` : ''}
+            ${(!o.bubble_provisioned)
+              ? `<dt>Bubble-actie</dt><dd>
+                   <button type="button" class="ob-act primary" id="bubbleRetryBtn" data-id="${esc(o.id)}">
+                     <i class="ti ti-refresh"></i>Bubble opnieuw aanmaken
+                   </button>
+                   <span id="bubbleRetryStatus" style="margin-left:8px;font-size:12.5px;color:var(--text-dim)"></span>
+                 </dd>`
+              : ''}
+            <dt>Inloggegevens</dt><dd>
+              ${o.credentials_email_sent_at
+                ? '<span style="background:rgba(34,197,94,0.14);color:#15803d;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">✓ E-mail verstuurd</span> <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.credentials_email_sent_at)) + '</span>'
+                : '<span style="background:rgba(100,116,139,0.18);color:#475569;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">— E-mail nog niet verstuurd</span>'}
+              ${o.bubble_provisioned
+                ? '<div style="margin-top:6px"><button type="button" class="ob-act" disabled title="Het mailen van nieuwe inloggegevens vereist het minten van een nieuw temp_password via een Bubble-workflow die nog niet bestaat. Bij MISLUKT account gebruik je hierboven &quot;Bubble opnieuw aanmaken&quot; (die maakt + mailt)."><i class="ti ti-mail"></i> Inloggegevens opnieuw sturen</button><div style="margin-top:4px;font-size:11.5px;color:var(--text-faint)">Wachtwoord wordt niet bewaard; reset-link volgt later. Bij MISLUKT account is de actie hierboven &quot;Bubble opnieuw aanmaken&quot; (die maakt + mailt).</div></div>'
+                : ''}
+            </dd>
+            <dt>WhatsApp-uitnodiging</dt><dd>
+              ${o.invite_sent_at
+                ? '<span style="background:rgba(34,197,94,0.14);color:#15803d;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">✓ Verstuurd</span> <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.invite_sent_at)) + '</span>'
+                : '<span style="background:rgba(100,116,139,0.18);color:#475569;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">— Nog niet verstuurd</span>'}
+              <button type="button" class="ob-act primary" id="oiInviteSendBtn" data-id="${esc(o.id)}" data-already-sent="${o.invite_sent_at ? '1' : '0'}" style="margin-left:8px;background:#d97706;border-color:#d97706">
+                <i class="ti ti-send"></i> ${o.invite_sent_at ? 'Opnieuw versturen' : 'Stuur WhatsApp-uitnodiging'}
+              </button>
+              <span id="oiInviteSendStatus" style="margin-left:8px;font-size:12.5px;color:var(--text-dim)"></span>
+            </dd>
+            ${link ? `<dt>Persoonlijke link</dt><dd style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all">${esc(link)}</dd>` : ''}
+            <dt>Wizard-stap</dt>      <dd>${esc(o.current_step || '—')}${o.total_steps ? ' <span style="color:var(--text-faint);font-size:12px">· van ' + o.total_steps + '</span>' : ''}</dd>
+            ${o.total_steps ? `<dt>Voortgang</dt><dd><div style="width:100%;height:8px;background:var(--bg-elev);border-radius:999px;overflow:hidden;border:1px solid var(--border)"><div style="height:100%;background:#0d9488;width:${wizardPct}%"></div></div></dd>` : ''}
+          </dl>
+        </div>
+
+        <!-- TAB 3: Vragenlijst -->
+        <div class="ob-modal-pane" data-mpane="form" hidden>
+          <h3 style="margin-top:0">Beschikbaarheid</h3>
+          <div>${renderAvailabilityFull(o.availability || null)}</div>
+          <h3 style="margin-top:18px">Antwoorden</h3>
+          ${answersJson
+            ? `<pre>${esc(answersJson)}</pre>`
+            : `<div class="empty-state"><i class="ti ti-clipboard-off"></i>Nog geen antwoorden — wizard nog niet gestart of nog niet ingevuld.</div>`}
+          ${emailSection}
+        </div>
+
+        <!-- TAB 4: Tijdlijn -->
+        <div class="ob-modal-pane" data-mpane="timeline" hidden>
+          ${timelineHtml}
+        </div>`;
+      // Tab-switch (client-side show/hide).
+      bd.querySelectorAll('.ob-modal-tab').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const key = btn.getAttribute('data-mtab');
+          bd.querySelectorAll('.ob-modal-tab').forEach((b) => {
+            const active = (b === btn);
+            b.classList.toggle('active', active);
+            b.style.borderBottomColor = active ? 'var(--brand-deep, #093d54)' : 'transparent';
+            b.style.color = active ? 'var(--text)' : 'var(--text-dim)';
+          });
+          bd.querySelectorAll('.ob-modal-pane').forEach((p) => {
+            p.hidden = (p.getAttribute('data-mpane') !== key);
+          });
+        });
+      });
       // Bubble-retry knop wiren (alleen aanwezig als onboarding niet-provisioned).
       const retryBtn = document.getElementById('bubbleRetryBtn');
       if (retryBtn) {
@@ -1493,16 +1573,12 @@
           doSendInvite(inviteBtn.dataset.id || '', inviteBtn, { force: alreadySent });
         });
       }
-      // Mentor-acties + tijdlijn worden nu via de publieke mountActions
-      // gerenderd — één codepad voor modal én drawer. compact:false omdat
-      // de modal zelf al een eigen <dl>-kop heeft (klant/mentor/startdatum).
-      const actionsHost = document.getElementById('obDetailActionsHost');
-      if (actionsHost) {
-        mountActions(actionsHost, id, {
-          onChange: () => openDetail(id),
-          compact:  false,
-        });
-      }
+      // Mentor-acties zijn al gerenderd in de Overzicht-tab via
+      // _renderAdminActionsBlock(o). Wire de handlers nu rechtstreeks; de
+      // tijdlijn leeft in z'n eigen tab. mountActions wordt elders nog
+      // gebruikt (drawer in students-overview); dit codepad omzeilt 'm
+      // omdat de modal de detail-data al heeft.
+      _wireAdminActions(o, () => openDetail(id));
       // E-mailthread laden als de sectie gerenderd is.
       if (canViewEmail && obCustId) {
         _loadObEmailThread(obCustId, o.email || '');
