@@ -80,8 +80,27 @@
     return '' +
       '<nav class="sidebar">' +
         '<div class="sidebar-logo">' +
-          '<img src="/img/logo-dark.png"  alt="De Forex Opleiding" class="logo-dark">' +
-          '<img src="/img/logo-light.png" alt="De Forex Opleiding" class="logo-light">' +
+          '<div class="sidebar-logo-imgs">' +
+            '<img src="/img/logo-dark.png"  alt="De Forex Opleiding" class="logo-dark">' +
+            '<img src="/img/logo-light.png" alt="De Forex Opleiding" class="logo-light">' +
+          '</div>' +
+          '<button type="button" id="sbNotifBtn" class="sb-notif-btn" aria-label="Meldingen" aria-haspopup="true" aria-expanded="false">' +
+            '<i class="ti ti-bell"></i>' +
+            '<span id="sbNotifBadge" class="sb-notif-badge" hidden>0</span>' +
+          '</button>' +
+        '</div>' +
+        '<div id="sbNotifPanel" class="sb-notif-panel" hidden>' +
+          '<div class="sb-notif-head">' +
+            '<div class="sb-notif-title">Meldingen</div>' +
+            '<div class="sb-notif-filter" role="tablist">' +
+              '<button type="button" class="sb-notif-tab active" data-sb-filter="all">Alle</button>' +
+              '<button type="button" class="sb-notif-tab" data-sb-filter="unread">Ongelezen</button>' +
+            '</div>' +
+            '<button type="button" id="sbNotifMarkAll" class="sb-notif-mark-all">Alles gelezen</button>' +
+          '</div>' +
+          '<div id="sbNotifList" class="sb-notif-list">' +
+            '<div class="sb-notif-empty">Laden…</div>' +
+          '</div>' +
         '</div>' +
         '<div class="sidebar-clock"><span class="sidebar-clock-date" id="sbClockDate"></span>' +
         '<span class="sidebar-clock-time" id="sbClockTime"></span></div>' +
@@ -817,6 +836,288 @@
     }
   }
 
+  // ── Meldingen-bel + paneel (auth-only, ELKE rol) ─────────────────────
+  // Endpoints: GET /api/notifications-list(?filter=all|unread),
+  //            POST /api/notifications-mark-read ({id}|{ids}|{all:true}).
+  // Fail-soft: een falende fetch / ontbrekende tabel / Supabase-realtime
+  // die niet beschikbaar is mag NOOIT de sidebar of de pagina breken.
+  // We renderen dan stil een lege staat en zwijgen verder.
+  var _notifState = {
+    filter:    'all',
+    items:     [],
+    unread:    0,
+    channel:   null,
+    pollTimer: null,
+    userId:    null,
+  };
+
+  function _ensureNotifStyles() {
+    if (document.getElementById('sb-notif-styles')) return;
+    var st = document.createElement('style');
+    st.id = 'sb-notif-styles';
+    st.textContent =
+      '.sidebar-logo{display:flex;align-items:center;justify-content:space-between;gap:8px;position:relative;}' +
+      '.sidebar-logo-imgs{flex:1;min-width:0;}' +
+      '.sb-notif-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text-dim);cursor:pointer;font:inherit;flex-shrink:0;transition:background-color .12s,color .12s;}' +
+      '.sb-notif-btn:hover{background:var(--brand-primary-soft);color:var(--text);}' +
+      '.sb-notif-btn .ti{font-size:18px;line-height:1;}' +
+      '.sb-notif-badge{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;line-height:16px;padding:0 5px;border-radius:9px;background:#dc2626;color:#fff;font-size:10.5px;font-weight:700;text-align:center;border:1.5px solid var(--bg);box-sizing:border-box;}' +
+      '.sb-notif-badge[hidden]{display:none;}' +
+      '.sb-notif-panel{position:absolute;left:14px;right:14px;top:60px;max-height:520px;background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,0.22);z-index:1200;display:flex;flex-direction:column;overflow:hidden;}' +
+      '.sb-notif-panel[hidden]{display:none;}' +
+      '.sb-notif-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);flex-wrap:wrap;}' +
+      '.sb-notif-title{font-size:13px;font-weight:700;color:var(--text);margin-right:auto;}' +
+      '.sb-notif-filter{display:inline-flex;background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:2px;}' +
+      '.sb-notif-tab{appearance:none;background:transparent;border:none;color:var(--text-dim);cursor:pointer;font:inherit;font-size:11.5px;font-weight:600;padding:4px 9px;border-radius:5px;}' +
+      '.sb-notif-tab.active{background:var(--bg-elev);color:var(--text);box-shadow:0 1px 2px rgba(0,0,0,0.08);}' +
+      '.sb-notif-mark-all{appearance:none;background:transparent;border:none;color:var(--text-dim);cursor:pointer;font:inherit;font-size:11.5px;padding:4px 6px;}' +
+      '.sb-notif-mark-all:hover{color:var(--text);}' +
+      '.sb-notif-list{flex:1;overflow-y:auto;padding:4px 0;}' +
+      '.sb-notif-item{display:block;padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;text-decoration:none;color:inherit;transition:background-color .12s;}' +
+      '.sb-notif-item:hover{background:var(--brand-primary-soft);}' +
+      '.sb-notif-item.unread{background:rgba(220,38,38,0.04);}' +
+      '.sb-notif-item.unread:hover{background:rgba(220,38,38,0.08);}' +
+      '.sb-notif-row{display:flex;align-items:flex-start;gap:8px;}' +
+      '.sb-notif-dot{flex-shrink:0;width:8px;height:8px;border-radius:50%;background:#dc2626;margin-top:6px;}' +
+      '.sb-notif-item:not(.unread) .sb-notif-dot{visibility:hidden;}' +
+      '.sb-notif-body-wrap{flex:1;min-width:0;}' +
+      '.sb-notif-item-title{font-size:12.5px;color:var(--text);line-height:1.35;}' +
+      '.sb-notif-item.unread .sb-notif-item-title{font-weight:700;}' +
+      '.sb-notif-item-body{font-size:11.5px;color:var(--text-dim);margin-top:2px;line-height:1.4;word-break:break-word;}' +
+      '.sb-notif-item-time{font-size:10.5px;color:var(--text-faint);margin-top:3px;}' +
+      '.sb-notif-empty{padding:24px 14px;text-align:center;color:var(--text-faint);font-size:12.5px;}' +
+      '';
+    document.head.appendChild(st);
+  }
+
+  function _relTime(iso) {
+    if (!iso) return '';
+    var t = new Date(iso).getTime();
+    if (!Number.isFinite(t)) return '';
+    var diff = Math.max(0, Date.now() - t);
+    var sec  = Math.round(diff / 1000);
+    if (sec < 60)      return 'zojuist';
+    var min  = Math.round(sec / 60);
+    if (min < 60)      return min + ' min geleden';
+    var hr   = Math.round(min / 60);
+    if (hr  < 24)      return hr  + ' u geleden';
+    var d    = new Date(iso);
+    try {
+      return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short' });
+    } catch (_) { return iso; }
+  }
+
+  function _setNotifBadge(n) {
+    var badge = document.getElementById('sbNotifBadge');
+    if (!badge) return;
+    var v = Number(n) || 0;
+    if (v <= 0) { badge.hidden = true; return; }
+    badge.textContent = v > 99 ? '99+' : String(v);
+    badge.hidden = false;
+  }
+
+  function _renderNotifList(items, filter) {
+    var list = document.getElementById('sbNotifList');
+    if (!list) return;
+    var arr = Array.isArray(items) ? items : [];
+    if (arr.length === 0) {
+      list.innerHTML = '<div class="sb-notif-empty">' + (filter === 'unread' ? 'Geen ongelezen meldingen.' : 'Geen meldingen.') + '</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < arr.length; i++) {
+      var it = arr[i];
+      var unread = (it.read_at == null);
+      var hasLink = (it.link_url && typeof it.link_url === 'string' && it.link_url.trim() !== '');
+      html += '<a class="sb-notif-item' + (unread ? ' unread' : '') + '"'
+            + ' href="' + (hasLink ? _escAttr(it.link_url) : '#') + '"'
+            + ' data-sb-notif-id="' + _escAttr(it.id) + '"'
+            + ' data-sb-notif-link="' + _escAttr(hasLink ? it.link_url : '') + '"'
+            + '>'
+            +   '<div class="sb-notif-row">'
+            +     '<span class="sb-notif-dot"></span>'
+            +     '<div class="sb-notif-body-wrap">'
+            +       '<div class="sb-notif-item-title">' + _escHtml(it.title || '(geen titel)') + '</div>'
+            +       (it.body ? '<div class="sb-notif-item-body">' + _escHtml(String(it.body).slice(0, 240)) + '</div>' : '')
+            +       '<div class="sb-notif-item-time">' + _escHtml(_relTime(it.created_at)) + '</div>'
+            +     '</div>'
+            +   '</div>'
+            + '</a>';
+    }
+    list.innerHTML = html;
+    // Wire klik-handlers (we vangen click af om mark-read async te doen
+    // en optimistisch te updaten vóór navigatie).
+    var rows = list.querySelectorAll('.sb-notif-item[data-sb-notif-id]');
+    for (var j = 0; j < rows.length; j++) {
+      rows[j].addEventListener('click', function (ev) {
+        var node = ev.currentTarget;
+        var id   = node.getAttribute('data-sb-notif-id') || '';
+        var link = node.getAttribute('data-sb-notif-link') || '';
+        var wasUnread = node.classList.contains('unread');
+        if (!link) { ev.preventDefault(); }
+        if (id && wasUnread) {
+          // Optimistisch: badge -1 + visuele toggle vóór de fetch.
+          node.classList.remove('unread');
+          _notifState.unread = Math.max(0, _notifState.unread - 1);
+          _setNotifBadge(_notifState.unread);
+          _markNotifRead({ id: id });
+        }
+        if (link) {
+          // Volg de link — default <a>-gedrag. Geen preventDefault.
+        }
+      });
+    }
+  }
+
+  function _escHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+  function _escAttr(s) { return _escHtml(s); }
+
+  async function loadNotifs(filter) {
+    var apiFetch = window.AgentShared && window.AgentShared.apiFetch;
+    if (typeof apiFetch !== 'function') { _setNotifBadge(0); return; }
+    var f = (filter === 'unread') ? 'unread' : 'all';
+    _notifState.filter = f;
+    try {
+      var r = await apiFetch('/api/notifications-list?filter=' + encodeURIComponent(f));
+      if (!r.ok) { _setNotifBadge(0); _renderNotifList([], f); return; }
+      var d = await r.json().catch(function () { return {}; });
+      var items   = Array.isArray(d && d.notifications) ? d.notifications : [];
+      var unread  = Number(d && d.unread_count) || 0;
+      _notifState.items  = items;
+      _notifState.unread = unread;
+      _setNotifBadge(unread);
+      // Render alleen als het paneel open is (anders zonde van DOM-werk).
+      var panel = document.getElementById('sbNotifPanel');
+      if (panel && !panel.hidden) _renderNotifList(items, f);
+    } catch (_) {
+      // Stil — sidebar mag nooit breken op een falende fetch.
+      _setNotifBadge(0);
+    }
+  }
+
+  async function _markNotifRead(payload) {
+    var apiFetch = window.AgentShared && window.AgentShared.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      var r = await apiFetch('/api/notifications-mark-read', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload || {}),
+      });
+      if (!r.ok) return;
+      // Bij {all:true} of bulk: na de call de echte counts opnieuw ophalen.
+      if (payload && (payload.all === true || Array.isArray(payload.ids))) {
+        loadNotifs(_notifState.filter);
+      }
+    } catch (_) { /* stil */ }
+  }
+
+  function _toggleNotifPanel(open) {
+    var btn   = document.getElementById('sbNotifBtn');
+    var panel = document.getElementById('sbNotifPanel');
+    if (!btn || !panel) return;
+    var willOpen = (typeof open === 'boolean') ? open : panel.hidden;
+    panel.hidden = !willOpen;
+    btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    if (willOpen) {
+      // Bij openen herladen — geeft direct verse data + vult het lijst-DOM.
+      loadNotifs(_notifState.filter);
+    }
+  }
+
+  function _wireNotifPanel() {
+    var btn = document.getElementById('sbNotifBtn');
+    if (btn) {
+      btn.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        _toggleNotifPanel();
+      });
+    }
+    // Outside-click sluit het paneel.
+    document.addEventListener('click', function (ev) {
+      var panel = document.getElementById('sbNotifPanel');
+      if (!panel || panel.hidden) return;
+      var b = document.getElementById('sbNotifBtn');
+      if (b && (ev.target === b || b.contains(ev.target))) return;
+      if (panel.contains(ev.target)) return;
+      _toggleNotifPanel(false);
+    });
+    // Filter-knoppen.
+    var tabs = document.querySelectorAll('#sbNotifPanel .sb-notif-tab[data-sb-filter]');
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].addEventListener('click', function (ev) {
+        var f = ev.currentTarget.getAttribute('data-sb-filter') || 'all';
+        var all = document.querySelectorAll('#sbNotifPanel .sb-notif-tab[data-sb-filter]');
+        for (var k = 0; k < all.length; k++) {
+          all[k].classList.toggle('active', all[k] === ev.currentTarget);
+        }
+        loadNotifs(f);
+      });
+    }
+    // Alles-gelezen.
+    var mark = document.getElementById('sbNotifMarkAll');
+    if (mark) {
+      mark.addEventListener('click', function () {
+        _notifState.unread = 0;
+        _setNotifBadge(0);
+        _markNotifRead({ all: true });
+      });
+    }
+  }
+
+  function _startNotifPolling() {
+    if (window._sbNotifPollTimer) return;
+    window._sbNotifPollTimer = setInterval(function () {
+      // Alleen badge/unread verversen — zonder paneel open hoeven we de
+      // lijst-DOM niet bij te werken. loadNotifs vult beide.
+      loadNotifs(_notifState.filter);
+    }, 60000);
+    window.addEventListener('beforeunload', function () {
+      if (window._sbNotifPollTimer) { clearInterval(window._sbNotifPollTimer); window._sbNotifPollTimer = null; }
+    });
+  }
+
+  async function _startNotifRealtime() {
+    // Probeer Supabase-realtime; bij elke fout val terug op alleen poll.
+    try {
+      if (!window.supabase || !window.supabase.auth || typeof window.supabase.channel !== 'function') return;
+      var u = null;
+      try { u = (await window.supabase.auth.getUser())?.data?.user || null; } catch (_) {}
+      if (!u) return;
+      _notifState.userId = u.id;
+      var ch = window.supabase
+        .channel('notif-' + u.id)
+        .on('postgres_changes', {
+          event:  'INSERT',
+          schema: 'public',
+          table:  'notifications',
+          filter: 'user_id=eq.' + u.id,
+        }, function () {
+          // Verse counters/lijst ophalen — server is bron van waarheid.
+          loadNotifs(_notifState.filter);
+        })
+        .subscribe();
+      _notifState.channel = ch;
+    } catch (_) { /* stil — poll vangt het op */ }
+  }
+
+  async function initNotifications() {
+    try { if (window._authSharedReady) await window._authSharedReady; } catch (_) {}
+    // Alleen wiren als de DOM-haakjes bestaan (sidebar succesvol gemount).
+    if (!document.getElementById('sbNotifBtn')) return;
+    try { _ensureNotifStyles(); } catch (_) {}
+    try { _wireNotifPanel(); } catch (e) { console.warn('[sidebar-notif] wire:', e && e.message); }
+    // Initiële badge-fetch (paneel dicht → alleen unread-count toont).
+    loadNotifs('all');
+    // Realtime + poll — beide fail-soft.
+    _startNotifRealtime();
+    _startNotifPolling();
+  }
+
   function mountSidebar() {
     var mount = document.getElementById('sidebar-mount');
     if (!mount || mount.dataset.mounted === '1') return;
@@ -858,6 +1159,10 @@
     // we stil. Eénmalig per mount geïnstalleerd; clear bij beforeunload zodat
     // er geen interval-leak ontstaat bij SPA-style navigatie.
     startSidebarClock();
+    // Meldingen-bel — auth-only, voor elke ingelogde rol. Fail-soft:
+    // mag de sidebar nooit breken bij een fout. Wacht intern op
+    // _authSharedReady voor de eerste fetch.
+    try { initNotifications(); } catch (e) { console.warn('[sidebar-notif] init:', e && e.message); }
   }
 
   var SB_CLOCK_DAYS   = ['zondag','maandag','dinsdag','woensdag','donderdag','vrijdag','zaterdag'];
