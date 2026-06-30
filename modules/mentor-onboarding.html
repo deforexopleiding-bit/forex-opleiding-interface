@@ -460,6 +460,13 @@
     return '<i class="ti ti-x ico-bad" title="Nog niet vervallen"></i> <span style="font-size:11.5px;color:var(--text-dim)">' + dt + '</span>';
   }
   function _wizardCell(s) {
+    // Voltooid → toon expliciet "Afgerond" i.p.v. de laatst-bezochte stap.
+    // current_step blijft op de laatste pagina hangen (geen reset bij
+    // afronding), dus zonder deze guard kreeg je "6 van 7" op een
+    // succesvol afgeronde onboarding.
+    if (s.completed_at || s.status === 'afgerond') {
+      return '<span style="color:#16a34a;font-weight:600">Afgerond</span>';
+    }
     const tot = s.total_steps || null;
     const cs  = s.current_step || null;
     if (!tot && !cs) return '<span class="ico-mute">—</span>';
@@ -469,10 +476,24 @@
     if (idx != null) return idx + '/' + tot;
     return cs ? (esc(cs) + ' <span class="mo-sub">van ' + tot + '</span>') : ('— van ' + tot);
   }
+  // Formatteert availability.days. Backend levert per dag een object
+  // { label, dayparts:[…] } i.p.v. een string — av.days.join(', ') gaf
+  // daarom "[object Object]". Output bv: "Maandag (Ochtend, Avond), Donderdag (Avond)".
+  function _fmtAvailDays(days) {
+    return (Array.isArray(days) ? days : [])
+      .map(function (d) {
+        if (!d || typeof d !== 'object') return '';
+        var lbl = d.label || d.value || '';
+        var dp  = Array.isArray(d.dayparts) && d.dayparts.length ? ' (' + d.dayparts.join(', ') + ')' : '';
+        return lbl + dp;
+      })
+      .filter(Boolean)
+      .join(', ');
+  }
   function _availSummary(av) {
     if (!av || typeof av !== 'object') return '';
     const parts = [];
-    if (Array.isArray(av.days) && av.days.length) parts.push('Dagen: ' + av.days.join(', '));
+    if (Array.isArray(av.days) && av.days.length) parts.push('Dagen: ' + _fmtAvailDays(av.days));
     if (Array.isArray(av.blocks) && av.blocks.length) parts.push('Dagdelen: ' + av.blocks.join(', '));
     return parts.join(' · ');
   }
@@ -723,7 +744,7 @@
     // Beschikbaarheid (volledig)
     const avl = s.availability || null;
     const avLine = avl
-      ? ((Array.isArray(avl.days)   && avl.days.length   ? '<div><strong>Dagen:</strong> ' + esc(avl.days.join(', '))   + '</div>' : '')
+      ? ((Array.isArray(avl.days)   && avl.days.length   ? '<div><strong>Dagen:</strong> ' + esc(_fmtAvailDays(avl.days)) + '</div>' : '')
        + (Array.isArray(avl.blocks) && avl.blocks.length ? '<div><strong>Dagdelen:</strong> ' + esc(avl.blocks.join(', ')) + '</div>' : '')
        || '<span class="ico-mute">—</span>')
       : '<span class="ico-mute">—</span>';
