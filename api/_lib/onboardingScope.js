@@ -204,37 +204,30 @@ export async function isMentorOnly(req) {
  *   if (!acl.ok) return res.status(acl.status).json({ error: acl.error });
  *
  * Logica:
- *   - scope.seesAll (onboarding.admin / super_admin) → ALTIJD ok (bestaand
- *     gedrag, geen extra DB-call voor module-resolve).
+ *   - scope.seesAll (onboarding.admin / super_admin) → ok (bestaand gedrag,
+ *     geen extra DB-call voor module-resolve).
  *   - !seesAll:
  *       - resolveConversationModule(phoneNumberId).
  *       - module !== 'onboarding' → ok (conv hoort bij finance/events tak;
  *         daar is de bestaande view/send-gate van het endpoint
  *         autoritatief, scope-check niet relevant).
- *       - module === 'onboarding':
- *           - !seesOwn → 403 (alleen onboarding.view_own-houders mogen
- *             onboarding-convs zien zonder onboarding.admin).
- *           - !mentorOwnsCustomer(userId, customerId) → 403 (mentor mag
- *             alleen z'n eigen studenten).
- *
- * Fail-closed: een view_own-only-user zonder bekende customerId
- * (customerId=null) krijgt 403 op de onboarding-tak. Een unbekende
- * convModule (resolve faalde) wordt als "niet-onboarding" behandeld; het
- * onderliggende endpoint heeft 'm dan via z'n eigen gate moeten blokken.
+ *       - module === 'onboarding' → ok.
+ *         Onboarding-inbox is gedeeld (Jeffrey-beslissing): elke
+ *         onboarding.inbox.view-houder mag elke onboarding-conv.
+ *         Mentor-ownership is hier bewust verwijderd — de
+ *         onboarding.inbox.view/send-gate aan endpoint-kant blijft
+ *         autoritatief en blokkeert callers zonder die perm.
  *
  * @returns {Promise<{ok:true} | {ok:false, status:number, error:string}>}
  */
-export async function checkOnboardingConvAccess(req, { phoneNumberId, customerId }) {
+export async function checkOnboardingConvAccess(req, { phoneNumberId, customerId }) { // eslint-disable-line no-unused-vars
   const scope = await getOnboardingScope(req);
   if (scope.seesAll) return { ok: true };
   const convModule = await resolveConversationModule(phoneNumberId);
   if (convModule !== 'onboarding') return { ok: true };
-  if (!scope.seesOwn) {
-    return { ok: false, status: 403, error: 'Geen toegang tot onboarding-conversaties (onboarding.view_own vereist)' };
-  }
-  const owns = await mentorOwnsCustomer(scope.userId, customerId);
-  if (!owns) {
-    return { ok: false, status: 403, error: 'Geen toegang tot deze onboarding-conversatie' };
-  }
+  // Onboarding-inbox is gedeeld (Jeffrey-beslissing): elke
+  // onboarding.inbox.view-houder mag elke onboarding-conv. Mentor-
+  // ownership is hier bewust verwijderd. De aanroepende endpoints
+  // gate'n al op onboarding.inbox.view / onboarding.inbox.send.
   return { ok: true };
 }
