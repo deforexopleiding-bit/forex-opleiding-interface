@@ -42,6 +42,58 @@ function findWaiverConsentKey(structure) {
   }
   return null;
 }
+// Bouwt een leesbare vraag→antwoord-lijst uit de gepubliceerde wizard-
+// structuur. Per blok pakken we (label, value) waarbij value uit answers
+// komt op block.key of block.consent_key. Skipt blocks zonder bruikbare
+// key/label, lege antwoorden, of techn-only blocks (file_download zonder
+// answer-payload, layout-blocks). availability is een aparte sectie in
+// de UI — we leveren 'm hier dus NIET nog eens als regel.
+const SKIP_BLOCK_TYPES = new Set([
+  'availability', 'instructions', 'rich_text', 'heading', 'image',
+  'divider', 'spacer', 'video', 'pdf', 'card', 'page_break',
+]);
+function buildAnswersView(structure, answers) {
+  if (!structure || typeof structure !== 'object') return [];
+  if (!answers   || typeof answers   !== 'object') return [];
+  const pages = Array.isArray(structure.pages) ? structure.pages : [];
+  const out = [];
+  for (const p of pages) {
+    for (const b of (p?.blocks || [])) {
+      if (!b || (b.type && SKIP_BLOCK_TYPES.has(b.type))) continue;
+      const k = b.key || b.consent_key || null;
+      if (!k) continue;
+      // Label-fallback: title → label → question → text → key.
+      const labelRaw = b.title || b.label || b.question || b.text || k;
+      const label = String(labelRaw).trim();
+      if (!label) continue;
+      const v = answers[k];
+      if (v == null) continue;
+      if (typeof v === 'string' && v.trim() === '') continue;
+      if (Array.isArray(v) && v.length === 0) continue;
+      let display = '';
+      let isBool = false;
+      if (typeof v === 'boolean') {
+        display = v ? 'Ja' : 'Nee';
+        isBool = true;
+      } else if (Array.isArray(v)) {
+        display = v.map((x) => (x == null ? '' : String(x))).filter(Boolean).join(', ');
+      } else if (typeof v === 'object') {
+        try { display = JSON.stringify(v); } catch { display = ''; }
+      } else {
+        display = String(v);
+      }
+      if (!display) continue;
+      out.push({
+        key:    k,
+        label,
+        value:  display,
+        type:   b.type || null,
+        is_bool: isBool,
+      });
+    }
+  }
+  return out;
+}
 function computeBedenktijd(waiver, offerteOp) {
   const vervaltOp = offerteOp ? new Date(new Date(offerteOp).getTime() + 14 * 24 * 60 * 60 * 1000).toISOString() : null;
   const waived = !!(waiver && waiver.agreed);
@@ -138,6 +190,7 @@ export default async function handler(req, res) {
     let availabilityBlock = null;
     let waiverKey         = null;
     let totalSteps        = null; // voor wizard-voortgang in de popup
+    let publishedStructure = null; // voor buildAnswersView per row
     try {
       const { data: wiz, error: wizErr } = await supabaseAdmin
         .from('onboarding_wizard')
@@ -148,6 +201,7 @@ export default async function handler(req, res) {
         console.warn('[mentor-future-students-self] wizard config fetch:', wizErr.message);
       } else {
         const pub = wiz?.published_structure;
+        publishedStructure = pub || null;
         availabilityBlock = findAvailabilityBlock(pub);
         waiverKey         = findWaiverConsentKey(pub);
         const pages = Array.isArray(pub?.pages) ? pub.pages : [];
@@ -209,6 +263,7 @@ export default async function handler(req, res) {
       const dealRow = r.customer_id ? (dealByCust[r.customer_id] || null) : null;
       const offerteOp = dealRow ? (dealRow.tl_quotation_signed_at || dealRow.tl_quotation_accepted_at || null) : null;
       const bedenktijd = computeBedenktijd(waiver, offerteOp);
+      const answersView = publishedStructure ? buildAnswersView(publishedStructure, ans) : [];
       return {
         onboarding_id        : r.id,
         customer_name        : r.customer_name || null,
@@ -237,6 +292,7 @@ export default async function handler(req, res) {
         credentials_email_sent_at : r.credentials_email_sent_at || null,
         mentor_intake_status : r.mentor_intake_status || null,
         answers              : ans,
+        answers_view         : answersView,
         updates              : updatesByOnb.get(r.id) || [],
       };
     });

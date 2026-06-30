@@ -56,6 +56,20 @@
     .mo-progress-fill { height:100%; background:#0d9488; }
     .mo-tooltip { position:relative; cursor:help; }
     .mo-textarea { width:100%; padding:7px 9px; border:1px solid var(--border); border-radius:7px; background:var(--bg-elev); color:var(--text); font:inherit; font-size:12.5px; resize:vertical; }
+    /* Tabs in detail-popup (spiegel manager-popup PR #531) */
+    .mo-tabs { display:flex; gap:0; border-bottom:1px solid var(--border); margin:-4px -2px 14px; padding:0 2px; flex-wrap:wrap; }
+    .mo-tab { appearance:none; background:transparent; border:none; border-bottom:2px solid transparent; color:var(--text-dim); cursor:pointer; font:inherit; font-size:13px; font-weight:600; padding:9px 12px; line-height:1; }
+    .mo-tab.active { color:var(--text); border-bottom-color: var(--brand-deep, #093d54); }
+    .mo-tab:hover:not(.active) { color:var(--text); }
+    .mo-pane[hidden] { display:none; }
+    .mo-input-date { padding:6px 8px; border:1px solid var(--border); border-radius:7px; background:var(--bg-elev); color:var(--text); font:inherit; font-size:12.5px; }
+    /* Vragenlijst antwoorden-lijst */
+    .mo-qa { display:grid; gap:10px; }
+    .mo-qa-item { padding:8px 0; border-top:1px dashed var(--border); }
+    .mo-qa-item:first-child { border-top:none; padding-top:0; }
+    .mo-qa-q { font-size:12px; font-weight:700; color:var(--text); margin-bottom:2px; }
+    .mo-qa-a { font-size:13px; color:var(--text); white-space:pre-wrap; word-break:break-word; }
+    .mo-qa-a.empty { color:var(--text-faint); }
   </style>
 </head>
 <body>
@@ -438,6 +452,26 @@
     _wireModalHandlers(s);
   }
 
+  // Vragenlijst-antwoorden uit server-resolved `answers_view` (label+value
+  // per blok). Backend skipt al lege antwoorden / layout-blokken; hier
+  // doen we alleen de presentatie.
+  function _renderAnswersList(s) {
+    const av = Array.isArray(s.answers_view) ? s.answers_view : [];
+    if (av.length === 0) {
+      return '<div style="font-size:13px;color:var(--text-faint)">Nog geen antwoorden ingevuld.</div>';
+    }
+    const items = av.map((it) => {
+      const val = it && it.value != null ? String(it.value).trim() : '';
+      const cls = val ? 'mo-qa-a' : 'mo-qa-a empty';
+      const dis = val ? esc(val) : '—';
+      return '<div class="mo-qa-item">'
+        + '<div class="mo-qa-q">' + esc(it.label || it.key || '—') + '</div>'
+        + '<div class="' + cls + '">' + dis + '</div>'
+        + '</div>';
+    }).join('');
+    return '<div class="mo-qa">' + items + '</div>';
+  }
+
   function _renderModalBody(s) {
     const intake = _intakeState(s);
     const manualSet = String(s.mentor_intake_status || '');
@@ -491,23 +525,26 @@
       ? ('Stap ' + (s.current_step_index != null ? s.current_step_index : '?') + ' van ' + tot + (cs ? ' (' + esc(cs) + ')' : ''))
       : (cs ? esc(cs) : 'Onbekend');
 
-    // Vragenlijst-status
-    const ans = s.answers || {};
-    const ansFilled = ans && typeof ans === 'object' ? Object.keys(ans).length : 0;
-    const wizardLink = s.token ? '/modules/onboarding.html?t=' + encodeURIComponent(s.token) : null;
+    // Vragenlijst-indicator (x van n ingevuld). 'n' is het aantal
+    // antwoordbare blokken (server-side al gefilterd in answers_view) plus
+    // de blokken die nog leeg zijn (best-effort: backend skipt lege, dus
+    // n = filled hier — we tonen alleen "x ingevuld" als we de totalen
+    // niet weten).
+    const av = Array.isArray(s.answers_view) ? s.answers_view : [];
+    const ansFilled = av.length;
     const qLine = ansFilled > 0
       ? ansFilled + ' antwoorden ingevuld'
       : 'Nog geen antwoorden';
 
     // Beschikbaarheid (volledig)
-    const av = s.availability || null;
-    const avLine = av
-      ? ((Array.isArray(av.days)   && av.days.length   ? '<div><strong>Dagen:</strong> ' + esc(av.days.join(', '))   + '</div>' : '')
-       + (Array.isArray(av.blocks) && av.blocks.length ? '<div><strong>Dagdelen:</strong> ' + esc(av.blocks.join(', ')) + '</div>' : '')
+    const avl = s.availability || null;
+    const avLine = avl
+      ? ((Array.isArray(avl.days)   && avl.days.length   ? '<div><strong>Dagen:</strong> ' + esc(avl.days.join(', '))   + '</div>' : '')
+       + (Array.isArray(avl.blocks) && avl.blocks.length ? '<div><strong>Dagdelen:</strong> ' + esc(avl.blocks.join(', ')) + '</div>' : '')
        || '<span class="ico-mute">—</span>')
       : '<span class="ico-mute">—</span>';
 
-    // Status-block
+    // Status-block (4 status-knoppen + × wissen + auto-status-hint)
     const manualBtns = _INTAKE_MANUAL.map((k) => {
       const m = _INTAKE_META[k];
       const isCurrent = (manualSet === k);
@@ -522,20 +559,18 @@
       ? `<div style="font-size:11.5px;color:var(--text-faint);margin-top:6px">Auto-status "<strong>${esc(_INTAKE_META[intake].label)}</strong>" — afgeleid uit de 1-op-1 sessies. Kies hierboven een handmatige status om dat te overschrijven.</div>`
       : '';
 
-    return `
+    // Startdatum-veld (input + Opslaan-knop → mentor-future-student-update
+    // met body.start_date). Default-waarde: huidige start_date in YYYY-MM-DD.
+    const sdVal = s.start_date ? esc(String(s.start_date).slice(0, 10)) : '';
+
+    // ── 4 tabs (spiegel manager-popup PR #531) ───────────────────────────
+    const overviewPane = `
       <div class="mo-section">
         <div class="mo-section-h">Contact</div>
         <dl class="mo-dl">
           <dt>Telefoon</dt><dd>${tel}</dd>
           <dt>E-mail</dt><dd>${em}</dd>
         </dl>
-      </div>
-
-      <div class="mo-section">
-        <div class="mo-section-h">Bubble-account</div>
-        <div style="font-size:13px;margin-bottom:8px">${bubbleLine}</div>
-        <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:8px">${credsLine}</div>
-        ${credsHelp}
       </div>
 
       <div class="mo-section">
@@ -547,23 +582,6 @@
           <dt>Betaald</dt><dd>${s.paid ? '<i class="ti ti-check ico-ok"></i> Ja' : '<i class="ti ti-x ico-bad"></i> Nog niet'}</dd>
           <dt>Bedenktijd</dt><dd>${btLine}</dd>
         </dl>
-      </div>
-
-      <div class="mo-section">
-        <div class="mo-section-h">Wizard-voortgang</div>
-        <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:6px">${wizText}</div>
-        <div class="mo-progress-bar"><div class="mo-progress-fill" style="width:${pct}%"></div></div>
-      </div>
-
-      <div class="mo-section">
-        <div class="mo-section-h">Vragenlijst</div>
-        <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:6px">${esc(qLine)}</div>
-        ${wizardLink ? '<a href="' + esc(wizardLink) + '" target="_blank" rel="noopener" style="font-size:12px">Open volledige vragenlijst <i class="ti ti-external-link"></i></a>' : ''}
-      </div>
-
-      <div class="mo-section">
-        <div class="mo-section-h">Beschikbaarheid</div>
-        <div style="font-size:13px;display:grid;gap:2px">${avLine}</div>
       </div>
 
       <div class="mo-section">
@@ -580,13 +598,78 @@
       </div>
 
       <div class="mo-section">
+        <div class="mo-section-h">Startdatum wijzigen</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Pas de startdatum aan voor jouw toegewezen student. De manager krijgt een melding.</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="date" id="moStartDate" class="mo-input-date" value="${sdVal}" />
+          <button type="button" class="mo-btn" data-mo-save-startdate><i class="ti ti-calendar"></i> Opslaan</button>
+        </div>
+      </div>
+    `;
+
+    const accountPane = `
+      <div class="mo-section">
+        <div class="mo-section-h">Bubble-account</div>
+        <div style="font-size:13px;margin-bottom:8px">${bubbleLine}</div>
+        <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:8px">${credsLine}</div>
+        ${credsHelp}
+      </div>
+
+      <div class="mo-section">
+        <div class="mo-section-h">Wizard-voortgang</div>
+        <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:6px">${wizText}</div>
+        <div class="mo-progress-bar"><div class="mo-progress-fill" style="width:${pct}%"></div></div>
+      </div>
+    `;
+
+    const formPane = `
+      <div class="mo-section">
+        <div class="mo-section-h">Vragenlijst</div>
+        <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">${esc(qLine)}</div>
+        ${_renderAnswersList(s)}
+      </div>
+
+      <div class="mo-section">
+        <div class="mo-section-h">Beschikbaarheid</div>
+        <div style="font-size:13px;display:grid;gap:2px">${avLine}</div>
+      </div>
+    `;
+
+    const timelinePane = `
+      <div class="mo-section">
         <div class="mo-section-h">Tijdlijn</div>
         ${_buildTimeline(s)}
       </div>
     `;
+
+    return `
+      <div class="mo-tabs" role="tablist">
+        <button type="button" class="mo-tab active" data-mo-tab="overview"  role="tab">Overzicht</button>
+        <button type="button" class="mo-tab"        data-mo-tab="account"   role="tab">Account &amp; Bubble</button>
+        <button type="button" class="mo-tab"        data-mo-tab="form"      role="tab">Vragenlijst</button>
+        <button type="button" class="mo-tab"        data-mo-tab="timeline"  role="tab">Tijdlijn</button>
+      </div>
+      <div class="mo-pane" data-mo-pane="overview">${overviewPane}</div>
+      <div class="mo-pane" data-mo-pane="account"  hidden>${accountPane}</div>
+      <div class="mo-pane" data-mo-pane="form"     hidden>${formPane}</div>
+      <div class="mo-pane" data-mo-pane="timeline" hidden>${timelinePane}</div>
+    `;
   }
 
   function _wireModalHandlers(s) {
+    // Tab-switch (Overzicht / Account & Bubble / Vragenlijst / Tijdlijn)
+    document.querySelectorAll('.mo-tab[data-mo-tab]').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const key = tab.getAttribute('data-mo-tab');
+        document.querySelectorAll('.mo-tab[data-mo-tab]').forEach((b) => {
+          b.classList.toggle('active', b === tab);
+        });
+        document.querySelectorAll('.mo-pane[data-mo-pane]').forEach((p) => {
+          p.hidden = (p.getAttribute('data-mo-pane') !== key);
+        });
+      });
+    });
+
     document.querySelectorAll('[data-mo-set]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const st = btn.getAttribute('data-mo-set');
@@ -609,6 +692,16 @@
         if (ta) ta.value = '';
       });
     }
+    const saveSd = document.querySelector('[data-mo-save-startdate]');
+    if (saveSd) {
+      saveSd.addEventListener('click', async () => {
+        const inp = document.getElementById('moStartDate');
+        const raw = String(inp?.value || '').trim();
+        if (!raw) { alert('Vul een startdatum in.'); return; }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) { alert('Ongeldige datum (YYYY-MM-DD).'); return; }
+        await _submit({ start_date: raw });
+      });
+    }
   }
 
   async function _submit(payload) {
@@ -628,20 +721,28 @@
         if (Object.prototype.hasOwnProperty.call(payload, 'status')) {
           cached.mentor_intake_status = payload.status;
         }
-        const u = d.update || null;
-        if (u) {
+        if (Object.prototype.hasOwnProperty.call(payload, 'start_date') && d.start_date) {
+          cached.start_date = d.start_date;
+        }
+        // 2 mogelijke log-rijen: d.update (status/note) en d.start_date_update.
+        const newRows = [];
+        if (d.update) newRows.push(d.update);
+        if (d.start_date_update) newRows.push(d.start_date_update);
+        if (newRows.length > 0) {
           cached.updates = Array.isArray(cached.updates) ? cached.updates.slice() : [];
-          cached.updates.push({
-            kind:       u.kind || null,
-            status:     u.status || null,
-            note:       u.note || null,
-            created_at: u.created_at || null,
-            created_by: u.created_by || null,
-          });
+          for (const u of newRows) {
+            cached.updates.push({
+              kind:       u.kind || null,
+              status:     u.status || null,
+              note:       u.note || null,
+              created_at: u.created_at || null,
+              created_by: u.created_by || null,
+            });
+          }
         }
       }
       _refreshModal();
-      _renderTable(Array.from(_byId.values())); // lijst-pill volgt mee
+      _renderTable(Array.from(_byId.values())); // lijst-pill + startdatum volgen mee
     } catch (e) {
       console.error('[mentor-onboarding] submit:', e?.message || e);
       alert('Opslaan mislukt: ' + (e?.message || e));
