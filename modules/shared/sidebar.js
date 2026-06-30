@@ -171,6 +171,13 @@
             svg('admin') + 'Admin' +
             '<span class="nav-badge" id="navApprovalsBadge" data-target="/modules/open-acties.html?status=PENDING" title="Open acties"></span>' +
           '</a>' +
+          // Secret Area — verborgen by default; pas onthuld als
+          // GET /api/secret-area { allowed:true } voor deze user true is.
+          // Geen user_id / PIN in client-code; alleen de paint-state komt
+          // van de server. Zie applySecretAreaGating().
+          '<a class="nav-item" data-module="secret-area" id="secretAreaNavLink" href="/modules/secret-area.html" style="display:none">' +
+            '<i class="ti ti-lock-square"></i>Secret Area' +
+          '</a>' +
         '</div>' +
         '<div class="sidebar-footer">' +
           '<div class="footer-user"></div>' +
@@ -218,6 +225,24 @@
       var link = document.getElementById('adminNavLink');
       if (link) link.style.display = (profile && ADMIN_ROLES.indexOf(profile.role) !== -1) ? '' : 'none';
     } catch (e) { /* niet ingelogd → admin-link blijft verborgen */ }
+  }
+
+  // Secret Area — pure access-onthulling. De echte muur is server-side
+  // (api/secret-area.js + PIN-slot in de pagina); deze functie zorgt
+  // alleen dat de nav-link verborgen blijft voor iedereen behalve de
+  // eigenaar. Fail-closed: bij elke fout blijft de link verborgen.
+  async function applySecretAreaGating() {
+    try {
+      if (window._authSharedReady) await window._authSharedReady;
+      var link = document.getElementById('secretAreaNavLink');
+      if (!link) return;
+      var apiFetch = window.AgentShared && window.AgentShared.apiFetch;
+      if (typeof apiFetch !== 'function') return;
+      var r = await apiFetch('/api/secret-area');
+      if (!r.ok) return;
+      var d = await r.json().catch(function () { return {}; });
+      if (d && d.allowed === true) link.style.display = '';
+    } catch (_) { /* fail-closed: link blijft verborgen */ }
   }
 
   // Dashboard-link href op basis van PRIMAIRE rol (profiles.role) — single
@@ -1136,6 +1161,7 @@
     updateFinanceTasksBadge();
     startApprovalsBadgePolling();
     applyAdminGating();
+    applySecretAreaGating();
     applyDashboardRouting();
     // Footer (gebruiker + theme-toggle) via bestaande gedeelde helper.
     if (window.AgentShared && typeof window.AgentShared.renderUserSection === 'function') {
