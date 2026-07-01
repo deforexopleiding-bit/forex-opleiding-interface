@@ -549,7 +549,7 @@
               <th>Betaald</th>
               <th>Bubble</th>
               <th>Bedenktijd</th>
-              <th>Wizard</th>
+              <th>Onboarding</th>
               <th>Beschikb.</th>
               <th></th>
             </tr>
@@ -695,7 +695,7 @@
           + (bt.vervalt_op ? ' · ' + esc(fmtDateNL(bt.vervalt_op)) : ''))
       : '<span class="ico-mute">—</span>';
 
-    // Wizard
+    // Onboarding
     const tot = s.total_steps || null;
     const cs  = s.current_step || null;
     const pct = (tot && s.current_step_index != null)
@@ -796,7 +796,7 @@
       </div>
 
       <div class="mo-section">
-        <div class="mo-section-h">Wizard-voortgang</div>
+        <div class="mo-section-h">Onboarding-voortgang</div>
         <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:6px">${wizText}</div>
         <div class="mo-progress-bar"><div class="mo-progress-fill" style="width:${pct}%"></div></div>
       </div>
