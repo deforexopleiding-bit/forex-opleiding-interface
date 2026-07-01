@@ -393,6 +393,19 @@
     return '<span style="font-size:12.5px;line-height:1.5">' + parts.join(' · ') + '</span>';
   }
 
+  // Compacte tabel-cel — kalender-icoon met hover-tooltip (net als mentor-view).
+  // Spaart kolombreedte t.o.v. renderAvailabilityShort (inline tekst).
+  function renderAvailabilityIcon(av) {
+    if (!av || !Array.isArray(av.days) || av.days.length === 0) {
+      return '<span style="color:var(--text-faint)">—</span>';
+    }
+    const summary = av.days.map((d) => {
+      const dp = (d.dayparts || []).join(', ');
+      return _shortDayPrefix(d.label) + ': ' + dp;
+    }).join(' · ');
+    return '<i class="ti ti-calendar" title="' + esc(summary) + '" style="cursor:help;color:var(--text-dim);font-size:16px"></i>';
+  }
+
   // Volledige weergave voor de detail-modal — alle dagen + dagdelen
   // met de full labels uit de wizard-structuur.
   function renderAvailabilityFull(av) {
@@ -596,7 +609,7 @@
         <td>${statusBadgeHtml(r.status)}</td>
         <td>${paidBadgeHtml(!!r.paid)}</td>
         <td>${bedenktijdBadge(r.bedenktijd || null, r.waiver || null)}</td>
-        <td>${renderAvailabilityShort(r.availability || null)}</td>
+        <td>${renderAvailabilityIcon(r.availability || null)}</td>
         <td>${mentorCellHtml(r)}</td>
         <td>${esc(progressLabel(r))}</td>
         <td>${esc(fmtDateNL(r.created_at))}</td>
