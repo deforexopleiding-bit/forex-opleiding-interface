@@ -150,106 +150,132 @@ export default async function handler(req, res) {
       return res.status(200).json({ future: [], rows: [] });
     }
 
-    // ── 2) Mentor-naam + bubble_user_id per uniek mentor_user_id ─────────
-    const mentorIds = Array.from(new Set(list.map((r) => r.mentor_user_id).filter(Boolean)));
-    const mentorNameByUid   = new Map();
-    const mentorBubbleByUid = new Map();
-    if (mentorIds.length > 0) {
-      const { data: tmRows, error: tmErr } = await supabaseAdmin
-        .from('team_members')
-        .select('user_id, name, bubble_user_id, is_active')
-        .in('user_id', mentorIds);
-      if (tmErr) throw new Error('team_members fetch: ' + tmErr.message);
-      for (const r of (tmRows || [])) {
-        if (!r.user_id) continue;
-        if (r.name) mentorNameByUid.set(r.user_id, r.name);
-        if (r.bubble_user_id && r.is_active !== false) {
-          mentorBubbleByUid.set(r.user_id, String(r.bubble_user_id).trim());
-        }
-      }
-    }
-
-    // ── 3) Paid-vlag per uniek customer_id (zelfde pattern als admin-list)
+    // Input-sets voor de 5 afgeleide queries. Bouwen we één keer vóór de
+    // Promise.all zodat elk blok z'n eigen ids kan gebruiken.
+    const mentorIds   = Array.from(new Set(list.map((r) => r.mentor_user_id).filter(Boolean)));
     const customerIds = Array.from(new Set(list.map((r) => r.customer_id).filter(Boolean)));
-    const paidSet = new Set();
-    if (customerIds.length > 0) {
-      const { data: invs, error: invErr } = await supabaseAdmin
-        .from('invoices')
-        .select('customer_id')
-        .in('customer_id', customerIds)
-        .eq('status', 'paid')
-        .limit(5000);
-      if (invErr) throw new Error('invoices fetch: ' + invErr.message);
-      for (const r of (invs || [])) {
-        if (r.customer_id) paidSet.add(r.customer_id);
-      }
-    }
+    const obIds       = list.map((r) => r.id);
 
-    // ── 4) Mentor-updates: één batched query, meest recente per onboarding
-    const obIds = list.map((r) => r.id);
-    const lastUpdateByOnb = new Map();
-    if (obIds.length > 0) {
-      const { data: ups, error: upErr } = await supabaseAdmin
-        .from('onboarding_mentor_updates')
-        .select('onboarding_id, kind, status, note, created_at')
-        .in('onboarding_id', obIds)
-        .order('created_at', { ascending: false })
-        .limit(10000);
-      if (upErr) throw new Error('mentor_updates fetch: ' + upErr.message);
-      // Eerste hit per onboarding_id is de meest recente (we sorteerden desc).
-      for (const u of (ups || [])) {
-        const k = u.onboarding_id;
-        if (!k || lastUpdateByOnb.has(k)) continue;
-        lastUpdateByOnb.set(k, {
-          kind:   u.kind   || null,
-          status: u.status || null,
-          note:   u.note   || null,
-          at:     u.created_at || null,
-        });
-      }
-    }
-
-    // ── 4b) Wizard-structuur 1× — voor waiverKey + availabilityBlock ─────
-    let waiverKey         = null;
-    let availabilityBlock = null;
-    try {
-      const { data: wiz, error: wizErr } = await supabaseAdmin
-        .from('onboarding_wizard')
-        .select('published_structure')
-        .eq('id', 1)
-        .maybeSingle();
-      if (wizErr) {
-        console.warn('[admin-future-students-list] wizard fetch:', wizErr.message);
-      } else {
-        const pub = wiz?.published_structure;
-        waiverKey         = findWaiverConsentKey(pub);
-        availabilityBlock = findAvailabilityBlock(pub);
-      }
-    } catch (e) {
-      console.warn('[admin-future-students-list] wizard exception:', e?.message || e);
-    }
-
-    // ── 4c) Deals-lookup per uniek customer_id — voor bedenktijd ─────────
-    const dealByCust = {};
-    if (customerIds.length > 0) {
-      try {
-        const { data: dls, error: dlErr } = await supabaseAdmin
-          .from('deals')
-          .select('customer_id, tl_quotation_accepted_at, tl_quotation_signed_at')
-          .in('customer_id', customerIds)
-          .not('tl_quotation_accepted_at', 'is', null)
-          .order('tl_quotation_accepted_at', { ascending: false });
-        if (dlErr) {
-          console.warn('[admin-future-students-list] deals fetch:', dlErr.message);
-        } else {
-          for (const d of (dls || [])) {
-            if (d?.customer_id && !dealByCust[d.customer_id]) dealByCust[d.customer_id] = d;
+    // 5 afgeleide queries PARALLEL via Promise.all. Elk blok behoudt z'n
+    // eigen fail-soft/throw-gedrag identiek aan de sequentiële versie:
+    //   - team_members / invoices gooien op DB-fout (propageert naar 500).
+    //   - mentor_updates / wizard / deals zijn fail-soft (returnen empty).
+    const [
+      mentorMaps,
+      paidSet,
+      lastUpdateByOnb,
+      wizardMeta,
+      dealByCust,
+    ] = await Promise.all([
+      // ── 2) Mentor-naam + bubble_user_id per uniek mentor_user_id ────────
+      (async () => {
+        const nameMap   = new Map();
+        const bubbleMap = new Map();
+        if (mentorIds.length === 0) return { nameMap, bubbleMap };
+        const { data: tmRows, error: tmErr } = await supabaseAdmin
+          .from('team_members')
+          .select('user_id, name, bubble_user_id, is_active')
+          .in('user_id', mentorIds);
+        if (tmErr) throw new Error('team_members fetch: ' + tmErr.message);
+        for (const r of (tmRows || [])) {
+          if (!r.user_id) continue;
+          if (r.name) nameMap.set(r.user_id, r.name);
+          if (r.bubble_user_id && r.is_active !== false) {
+            bubbleMap.set(r.user_id, String(r.bubble_user_id).trim());
           }
         }
-      } catch (e) {
-        console.warn('[admin-future-students-list] deals exception:', e?.message || e);
-      }
-    }
+        return { nameMap, bubbleMap };
+      })(),
+      // ── 3) Paid-vlag per uniek customer_id ─────────────────────────────
+      (async () => {
+        const set = new Set();
+        if (customerIds.length === 0) return set;
+        const { data: invs, error: invErr } = await supabaseAdmin
+          .from('invoices')
+          .select('customer_id')
+          .in('customer_id', customerIds)
+          .eq('status', 'paid')
+          .limit(5000);
+        if (invErr) throw new Error('invoices fetch: ' + invErr.message);
+        for (const r of (invs || [])) {
+          if (r.customer_id) set.add(r.customer_id);
+        }
+        return set;
+      })(),
+      // ── 4) Mentor-updates: batched, meest recente per onboarding ───────
+      (async () => {
+        const map = new Map();
+        if (obIds.length === 0) return map;
+        const { data: ups, error: upErr } = await supabaseAdmin
+          .from('onboarding_mentor_updates')
+          .select('onboarding_id, kind, status, note, created_at')
+          .in('onboarding_id', obIds)
+          .order('created_at', { ascending: false })
+          .limit(10000);
+        if (upErr) throw new Error('mentor_updates fetch: ' + upErr.message);
+        for (const u of (ups || [])) {
+          const k = u.onboarding_id;
+          if (!k || map.has(k)) continue;
+          map.set(k, {
+            kind:   u.kind   || null,
+            status: u.status || null,
+            note:   u.note   || null,
+            at:     u.created_at || null,
+          });
+        }
+        return map;
+      })(),
+      // ── 4b) Wizard-structuur 1× — voor waiverKey + availabilityBlock ────
+      (async () => {
+        try {
+          const { data: wiz, error: wizErr } = await supabaseAdmin
+            .from('onboarding_wizard')
+            .select('published_structure')
+            .eq('id', 1)
+            .maybeSingle();
+          if (wizErr) {
+            console.warn('[admin-future-students-list] wizard fetch:', wizErr.message);
+            return { waiverKey: null, availabilityBlock: null };
+          }
+          const pub = wiz?.published_structure;
+          return {
+            waiverKey:         findWaiverConsentKey(pub),
+            availabilityBlock: findAvailabilityBlock(pub),
+          };
+        } catch (e) {
+          console.warn('[admin-future-students-list] wizard exception:', e?.message || e);
+          return { waiverKey: null, availabilityBlock: null };
+        }
+      })(),
+      // ── 4c) Deals-lookup per uniek customer_id — voor bedenktijd ───────
+      (async () => {
+        const obj = {};
+        if (customerIds.length === 0) return obj;
+        try {
+          const { data: dls, error: dlErr } = await supabaseAdmin
+            .from('deals')
+            .select('customer_id, tl_quotation_accepted_at, tl_quotation_signed_at')
+            .in('customer_id', customerIds)
+            .not('tl_quotation_accepted_at', 'is', null)
+            .order('tl_quotation_accepted_at', { ascending: false });
+          if (dlErr) {
+            console.warn('[admin-future-students-list] deals fetch:', dlErr.message);
+            return obj;
+          }
+          for (const d of (dls || [])) {
+            if (d?.customer_id && !obj[d.customer_id]) obj[d.customer_id] = d;
+          }
+          return obj;
+        } catch (e) {
+          console.warn('[admin-future-students-list] deals exception:', e?.message || e);
+          return obj;
+        }
+      })(),
+    ]);
+
+    const mentorNameByUid   = mentorMaps.nameMap;
+    const mentorBubbleByUid = mentorMaps.bubbleMap; // eslint-disable-line no-unused-vars
+    const { waiverKey, availabilityBlock } = wizardMeta;
 
     // ── 5) 1-op-1 fetchen — VERWIJDERD uit het kritieke pad ────────────────
     // De live Bubble-call fetchOneOnOneForMentor was seconden traag en
