@@ -13,6 +13,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { tlFetch } from './teamleader-token.js';
 import { releaseProportionalForPayment } from './mentor-ledger-engine.js';
+import { createNotification } from './notify.js';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -97,7 +98,7 @@ export async function registerPaymentInternal(opts) {
 
   // 1. Lees factuur.
   const { data: inv } = await supabaseAdmin.from('invoices')
-    .select('id, customer_id, tl_invoice_id, amount_total, amount_paid, status')
+    .select('id, customer_id, tl_invoice_id, amount_total, amount_paid, status, invoice_number')
     .eq('id', invoiceId).maybeSingle();
   if (!inv) throw new RegisterPaymentError('validation', 'Factuur niet gevonden');
   if (!inv.tl_invoice_id) throw new RegisterPaymentError('validation', 'Factuur heeft geen Teamleader-id');
@@ -210,6 +211,23 @@ export async function registerPaymentInternal(opts) {
     } catch (e) {
       console.error('[register-payment-internal] mentor-hook releaseProportionalForPayment:', e.message);
     }
+  }
+
+  // 5c. Fail-soft dual-write: alleen bij TRANSITIE naar 'paid' (was niet
+  // eerder 'paid') — voorkomt spam bij elke partial-registratie.
+  if (newStatus === 'paid' && String(inv.status || '').toLowerCase() !== 'paid') {
+    const bodyParts = [];
+    if (inv.invoice_number)                    bodyParts.push(inv.invoice_number);
+    if (Number.isFinite(Number(inv.amount_total))) bodyParts.push('€' + Number(inv.amount_total).toFixed(2));
+    createNotification({
+      toRole:     ['manager', 'super_admin'],
+      type:       'finance.invoice_paid',
+      title:      'Factuur betaald',
+      body:       bodyParts.length ? bodyParts.join(' · ') : null,
+      linkUrl:    '/modules/finance.html',
+      entityType: 'invoice',
+      entityId:   inv.id,
+    }).catch(() => {});
   }
 
   // 6. Audit (fail-soft).

@@ -17,6 +17,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { createNotification } from './_lib/notify.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -93,6 +94,38 @@ export default async function handler(req, res) {
       }
       throw new Error('mentor-insert: ' + error.message);
     }
+
+    // Fail-soft dual-write: mentor notificeren van nieuwe koppeling.
+    // Skip als added_by_user_id == mentor.user_id (mentor koppelde zichzelf).
+    try {
+      const { data: tmRow } = await supabaseAdmin
+        .from('team_members')
+        .select('user_id')
+        .eq('id', teamMemberId)
+        .maybeSingle();
+      const mentorUserId = tmRow && tmRow.user_id ? tmRow.user_id : null;
+      if (mentorUserId && mentorUserId !== (user?.id || null)) {
+        let eventTitle = null;
+        try {
+          const { data: ev } = await supabaseAdmin
+            .from('events')
+            .select('title')
+            .eq('id', eventId)
+            .maybeSingle();
+          eventTitle = ev?.title || null;
+        } catch (_) { /* fail-soft */ }
+        createNotification({
+          toUserId:   mentorUserId,
+          type:       'event.mentor_assigned',
+          title:      'Je bent gekoppeld aan een event',
+          body:       eventTitle,
+          linkUrl:    '/modules/events-detail.html?id=' + eventId,
+          entityType: 'event',
+          entityId:   eventId,
+          createdBy:  user?.id || null,
+        }).catch(() => {});
+      }
+    } catch (_) { /* fail-soft */ }
 
     return res.status(201).json({ mentor: row });
   } catch (e) {

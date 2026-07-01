@@ -16,6 +16,7 @@
 import { supabaseAdmin } from './supabase.js';
 import { cancelForCancelledQuote } from './_lib/mentor-ledger-engine.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
+import { createNotification } from './_lib/notify.js';
 
 export const config = { api: { bodyParser: false } };
 
@@ -84,6 +85,29 @@ export default async function handler(req, res) {
         }).eq('tl_deal_id', objectId);
         if (error) errorText = 'DB-update mislukt: ' + error.message;
         else { processedAt = now; verified = true; }
+
+        // Fail-soft dual-write: notify sales-eigenaar dat offerte geaccepteerd is.
+        try {
+          const { data: dealRow } = await supabaseAdmin
+            .from('deals')
+            .select('id, sales_user_id, customer_name, quote_reference')
+            .eq('tl_deal_id', objectId)
+            .maybeSingle();
+          if (dealRow && dealRow.sales_user_id) {
+            const bodyParts = [];
+            if (dealRow.customer_name)    bodyParts.push(dealRow.customer_name);
+            if (dealRow.quote_reference)  bodyParts.push(dealRow.quote_reference);
+            createNotification({
+              toUserId:   dealRow.sales_user_id,
+              type:       'sales.deal_accepted',
+              title:      'Offerte geaccepteerd',
+              body:       bodyParts.length ? bodyParts.join(' · ') : null,
+              linkUrl:    '/modules/sales.html',
+              entityType: 'deal',
+              entityId:   dealRow.id,
+            }).catch(() => {});
+          }
+        } catch (_) { /* fail-soft */ }
       } else {
         verified = false;
       }
@@ -91,12 +115,27 @@ export default async function handler(req, res) {
       // F5.1 mentor-hook: deal verloren → openstaande bonus-entries op deze
       // deal annuleren. Lookup tl_deal_id → deals.id, dan engine-call.
       const { data: dealRow } = await supabaseAdmin
-        .from('deals').select('id').eq('tl_deal_id', objectId).maybeSingle();
+        .from('deals').select('id, sales_user_id, customer_name, quote_reference').eq('tl_deal_id', objectId).maybeSingle();
       if (dealRow) {
         try {
           await cancelForCancelledQuote({ quoteId: dealRow.id });
         } catch (e) {
           console.error('[tl-webhook] mentor-hook cancelForCancelledQuote:', e.message);
+        }
+        // Fail-soft dual-write: notify sales-eigenaar dat offerte geweigerd is.
+        if (dealRow.sales_user_id) {
+          const bodyParts = [];
+          if (dealRow.customer_name)   bodyParts.push(dealRow.customer_name);
+          if (dealRow.quote_reference) bodyParts.push(dealRow.quote_reference);
+          createNotification({
+            toUserId:   dealRow.sales_user_id,
+            type:       'sales.deal_declined',
+            title:      'Offerte geweigerd',
+            body:       bodyParts.length ? bodyParts.join(' · ') : null,
+            linkUrl:    '/modules/sales.html',
+            entityType: 'deal',
+            entityId:   dealRow.id,
+          }).catch(() => {});
         }
       }
       processedAt = new Date().toISOString();
