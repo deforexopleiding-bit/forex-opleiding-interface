@@ -108,206 +108,226 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: 'Geen toegang tot deze onboarding' });
     }
 
-    // Mentor-naam ophalen indien toegewezen.
-    let mentorName = null;
-    if (row.mentor_user_id) {
-      const { data: tm, error: tmErr } = await supabaseAdmin
-        .from('team_members')
-        .select('name')
-        .eq('user_id', row.mentor_user_id)
-        .maybeSingle();
-      if (tmErr) throw new Error('team_member fetch: ' + tmErr.message);
-      mentorName = tm?.name || null;
-    }
-
-    // Paid-vlag: heeft de klant ≥1 invoice met status='paid'.
-    let paid = false;
-    if (row.customer_id) {
-      const { data: inv, error: invErr } = await supabaseAdmin
-        .from('invoices')
-        .select('id')
-        .eq('customer_id', row.customer_id)
-        .eq('status', 'paid')
-        .limit(1)
-        .maybeSingle();
-      if (invErr) throw new Error('invoices fetch: ' + invErr.message);
-      paid = !!inv;
-    }
-
-    // Klant-contact: e-mail + telefoon voor mailto/tel-links in de
-    // detail-modal. Fail-soft — lookup-fout mag de detail niet breken.
-    let custEmail = null;
-    let custPhone = null;
-    if (row.customer_id) {
-      try {
-        const { data: cust } = await supabaseAdmin
-          .from('customers')
-          .select('email, phone')
-          .eq('id', row.customer_id)
-          .maybeSingle();
-        custEmail = cust?.email || null;
-        custPhone = cust?.phone || null;
-      } catch (e) {
-        console.warn('[onboarding-detail] customer contact fetch:', e?.message || e);
-      }
-    }
-
-    // GEPUBLICEERDE wizard-structuur 1× per request laden voor twee
-    // afgeleide velden:
-    //   - waiver: consent_key uit het EERSTE blok met is_waiver=true.
-    //   - availability: het EERSTE blok van type 'availability',
-    //     gemapped naar label-vorm via buildAvailabilityView.
-    // Fail-soft: bij DB-glitch of geen gepubliceerde structuur →
-    // beide velden blijven null.
-    let waiver       = null;
-    let availability = null;
-    try {
-      const { data: wiz, error: wizErr } = await supabaseAdmin
-        .from('onboarding_wizard')
-        .select('published_structure')
-        .eq('id', 1)
-        .maybeSingle();
-      if (wizErr) {
-        console.warn('[onboarding-detail] wizard config fetch:', wizErr.message);
-      } else {
-        const pub = wiz?.published_structure;
-        const ans = (row.answers && typeof row.answers === 'object') ? row.answers : {};
-        const waiverKey = findWaiverConsentKey(pub);
-        if (waiverKey) {
-          waiver = {
-            agreed : ans[waiverKey] === true,
-            at     : ans[waiverKey + '_at'] || null,
-          };
-        }
-        const availabilityBlock = findAvailabilityBlock(pub);
-        availability = availabilityBlock ? buildAvailabilityView(availabilityBlock, ans) : null;
-      }
-    } catch (e) {
-      console.warn('[onboarding-detail] wizard config exception:', e?.message || e);
-    }
-
-    // Bedenktijd (trigger b): meest recente getekende/geaccepteerde offerte
-    // van deze klant. signed_at wint van accepted_at als beide gevuld zijn.
-    // Geen deal of geen accepted_at → offerteOp blijft null → bedenktijd
-    // status 'onbekend' (tenzij waiver al gezet → 'vervallen/afstand').
-    let offerteOp = null;
-    if (row.customer_id) {
-      try {
-        const { data: dl } = await supabaseAdmin
-          .from('deals')
-          .select('tl_quotation_accepted_at, tl_quotation_signed_at')
-          .eq('customer_id', row.customer_id)
-          .not('tl_quotation_accepted_at', 'is', null)
-          .order('tl_quotation_accepted_at', { ascending: false })
-          .limit(1).maybeSingle();
-        if (dl) offerteOp = dl.tl_quotation_signed_at || dl.tl_quotation_accepted_at || null;
-      } catch (e) {
-        console.warn('[onboarding-detail] offerte fetch:', e?.message || e);
-      }
-    }
-    const bedenktijd = computeBedenktijd(waiver, offerteOp);
-
-    // Intake-status afleiding (Fase 2 read-only). Pakt bubble_user_id van de
-    // toegewezen mentor + bubble_user_id van de student → 1-op-1 maps → past
-    // de Fase-1 prioriteit toe (gedeelde helper). Fail-soft: Bubble-fout
-    // betekent dat we terugvallen op enkel het handmatige veld + null voor
-    // de afgeleide auto-statussen.
-    let intake_status      = null;
-    let planned_call_at    = null;
-    let last_completed_at  = null;
-    let last_noshow_at     = null;
-    if (row.mentor_user_id) {
-      try {
-        const { data: mtm } = await supabaseAdmin
+    // Ná de hoofd-row + ownership-guard: alle afgeleide fetches (DB-queries +
+    // externe Bubble-call in de intake-keten) parallel via Promise.all zodat
+    // de traagste (Bubble) OVERLAPT met de rest i.p.v. na ze te wachten. Elk
+    // blok behoudt z'n eigen try/catch + fail-soft-gedrag; mentorName en paid
+    // gooien nog steeds bij DB-fout (identiek aan de oude sequentiële shape).
+    // Bedenktijd + handled worden pas berekend NA de Promise.all — die
+    // depended van de resultaten.
+    const [
+      mentorName,
+      paid,
+      contact,
+      wizard,
+      offerteOp,
+      intakeChain,
+      cancellation,
+      mentorUpdates,
+    ] = await Promise.all([
+      // 1) Mentor-naam ophalen indien toegewezen. Behoudt de throw-op-DB-fout
+      // uit de oude versie (propaageert naar 500 via outer catch).
+      (async () => {
+        if (!row.mentor_user_id) return null;
+        const { data: tm, error: tmErr } = await supabaseAdmin
           .from('team_members')
-          .select('bubble_user_id, is_active')
+          .select('name')
           .eq('user_id', row.mentor_user_id)
-          .eq('is_active', true)
           .maybeSingle();
-        const mentorBubble = mtm?.bubble_user_id ? String(mtm.bubble_user_id).trim() : null;
-        if (mentorBubble && row.bubble_user_id) {
-          const { fetchOneOnOneForMentor } = await import('./_lib/bubble-1on1.js');
-          const ooo = await fetchOneOnOneForMentor(mentorBubble);
-          const bu  = String(row.bubble_user_id);
-          planned_call_at   = ooo.nextPlannedByMember.get(bu)       || null;
-          last_completed_at = ooo.earliestCompletedByMember.get(bu) || null;
-          last_noshow_at    = ooo.lastNoshowByMember.get(bu)        || null;
-        }
-        const { deriveIntakeStatus } = await import('./_lib/intake-status.js');
-        intake_status = deriveIntakeStatus({
-          hasCompletedSession:  !!last_completed_at,
-          mentor_intake_status: row.mentor_intake_status || null,
-          hasNoshow:            !!last_noshow_at,
-          hasFutureCall:        !!planned_call_at,
-        });
-      } catch (e) {
-        console.warn('[onboarding-detail] intake-status derive:', e?.message || e);
-        // Fail-soft: alleen handmatige status of nog_te_benaderen.
+        if (tmErr) throw new Error('team_member fetch: ' + tmErr.message);
+        return tm?.name || null;
+      })(),
+      // 2) Paid-vlag: heeft de klant ≥1 invoice met status='paid'. Behoudt de
+      // throw-op-DB-fout uit de oude versie.
+      (async () => {
+        if (!row.customer_id) return false;
+        const { data: inv, error: invErr } = await supabaseAdmin
+          .from('invoices')
+          .select('id')
+          .eq('customer_id', row.customer_id)
+          .eq('status', 'paid')
+          .limit(1)
+          .maybeSingle();
+        if (invErr) throw new Error('invoices fetch: ' + invErr.message);
+        return !!inv;
+      })(),
+      // 3) Klant-contact: e-mail + telefoon voor mailto/tel-links. Fail-soft.
+      (async () => {
+        if (!row.customer_id) return { email: null, phone: null };
         try {
-          const { deriveIntakeStatus } = await import('./_lib/intake-status.js');
-          intake_status = deriveIntakeStatus({
-            hasCompletedSession:  false,
-            mentor_intake_status: row.mentor_intake_status || null,
-            hasNoshow:            false,
-            hasFutureCall:        false,
-          });
-        } catch (_) {}
-      }
-    }
-
-    // Annulering-record (Fase 4b). Eén-op-één met onboarding (orchestrator
-    // schrijft één rij per execute). Meest recente wint als er ooit meerdere
-    // belanden (already_cancelled-guard maakt dat zeldzaam, maar select-limit-1
-    // is defensief). Fail-soft.
-    let cancellation = null;
-    try {
-      const { data: cr, error: crErr } = await supabaseAdmin
-        .from('onboarding_cancellations')
-        .select('id, cancelled_by, reason, subscription_value, steps, created_at')
-        .eq('onboarding_id', row.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (crErr) {
-        console.warn('[onboarding-detail] cancellation fetch:', crErr.message);
-      } else if (cr) {
-        cancellation = {
-          id:                 cr.id,
-          cancelled_at:       cr.created_at,
-          cancelled_by:       cr.cancelled_by || null,
-          reason:             cr.reason || null,
-          subscription_value: cr.subscription_value || null,
-          steps:              cr.steps || null,
+          const { data: cust } = await supabaseAdmin
+            .from('customers')
+            .select('email, phone')
+            .eq('id', row.customer_id)
+            .maybeSingle();
+          return { email: cust?.email || null, phone: cust?.phone || null };
+        } catch (e) {
+          console.warn('[onboarding-detail] customer contact fetch:', e?.message || e);
+          return { email: null, phone: null };
+        }
+      })(),
+      // 4) GEPUBLICEERDE wizard-structuur → waiver + availability. Fail-soft.
+      (async () => {
+        try {
+          const { data: wiz, error: wizErr } = await supabaseAdmin
+            .from('onboarding_wizard')
+            .select('published_structure')
+            .eq('id', 1)
+            .maybeSingle();
+          if (wizErr) {
+            console.warn('[onboarding-detail] wizard config fetch:', wizErr.message);
+            return { waiver: null, availability: null };
+          }
+          const pub = wiz?.published_structure;
+          const ans = (row.answers && typeof row.answers === 'object') ? row.answers : {};
+          const waiverKey = findWaiverConsentKey(pub);
+          const waiver = waiverKey
+            ? { agreed: ans[waiverKey] === true, at: ans[waiverKey + '_at'] || null }
+            : null;
+          const availabilityBlock = findAvailabilityBlock(pub);
+          const availability = availabilityBlock ? buildAvailabilityView(availabilityBlock, ans) : null;
+          return { waiver, availability };
+        } catch (e) {
+          console.warn('[onboarding-detail] wizard config exception:', e?.message || e);
+          return { waiver: null, availability: null };
+        }
+      })(),
+      // 5) offerteOp (bedenktijd-input). Fail-soft.
+      (async () => {
+        if (!row.customer_id) return null;
+        try {
+          const { data: dl } = await supabaseAdmin
+            .from('deals')
+            .select('tl_quotation_accepted_at, tl_quotation_signed_at')
+            .eq('customer_id', row.customer_id)
+            .not('tl_quotation_accepted_at', 'is', null)
+            .order('tl_quotation_accepted_at', { ascending: false })
+            .limit(1).maybeSingle();
+          if (dl) return dl.tl_quotation_signed_at || dl.tl_quotation_accepted_at || null;
+          return null;
+        } catch (e) {
+          console.warn('[onboarding-detail] offerte fetch:', e?.message || e);
+          return null;
+        }
+      })(),
+      // 6) Intake-status afleiding — bevat de traagste externe Bubble-call
+      // (fetchOneOnOneForMentor). Draait binnen dezelfde Promise.all zodat 'ie
+      // OVERLAPT met de DB-queries. Fail-soft met dubbele fallback.
+      (async () => {
+        const empty = {
+          intake_status: null,
+          planned_call_at: null,
+          last_completed_at: null,
+          last_noshow_at: null,
         };
-      }
-    } catch (e) {
-      console.warn('[onboarding-detail] cancellation exception:', e?.message || e);
-    }
+        if (!row.mentor_user_id) return empty;
+        try {
+          const { data: mtm } = await supabaseAdmin
+            .from('team_members')
+            .select('bubble_user_id, is_active')
+            .eq('user_id', row.mentor_user_id)
+            .eq('is_active', true)
+            .maybeSingle();
+          const mentorBubble = mtm?.bubble_user_id ? String(mtm.bubble_user_id).trim() : null;
+          let planned_call_at = null;
+          let last_completed_at = null;
+          let last_noshow_at = null;
+          if (mentorBubble && row.bubble_user_id) {
+            const { fetchOneOnOneForMentor } = await import('./_lib/bubble-1on1.js');
+            const ooo = await fetchOneOnOneForMentor(mentorBubble);
+            const bu  = String(row.bubble_user_id);
+            planned_call_at   = ooo.nextPlannedByMember.get(bu)       || null;
+            last_completed_at = ooo.earliestCompletedByMember.get(bu) || null;
+            last_noshow_at    = ooo.lastNoshowByMember.get(bu)        || null;
+          }
+          const { deriveIntakeStatus } = await import('./_lib/intake-status.js');
+          const intake_status = deriveIntakeStatus({
+            hasCompletedSession:  !!last_completed_at,
+            mentor_intake_status: row.mentor_intake_status || null,
+            hasNoshow:            !!last_noshow_at,
+            hasFutureCall:        !!planned_call_at,
+          });
+          return { intake_status, planned_call_at, last_completed_at, last_noshow_at };
+        } catch (e) {
+          console.warn('[onboarding-detail] intake-status derive:', e?.message || e);
+          try {
+            const { deriveIntakeStatus } = await import('./_lib/intake-status.js');
+            return {
+              intake_status: deriveIntakeStatus({
+                hasCompletedSession:  false,
+                mentor_intake_status: row.mentor_intake_status || null,
+                hasNoshow:            false,
+                hasFutureCall:        false,
+              }),
+              planned_call_at: null,
+              last_completed_at: null,
+              last_noshow_at: null,
+            };
+          } catch (_) {
+            return empty;
+          }
+        }
+      })(),
+      // 7) Annulering-record (Fase 4b). Fail-soft.
+      (async () => {
+        try {
+          const { data: cr, error: crErr } = await supabaseAdmin
+            .from('onboarding_cancellations')
+            .select('id, cancelled_by, reason, subscription_value, steps, created_at')
+            .eq('onboarding_id', row.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (crErr) {
+            console.warn('[onboarding-detail] cancellation fetch:', crErr.message);
+            return null;
+          }
+          if (!cr) return null;
+          return {
+            id:                 cr.id,
+            cancelled_at:       cr.created_at,
+            cancelled_by:       cr.cancelled_by || null,
+            reason:             cr.reason || null,
+            subscription_value: cr.subscription_value || null,
+            steps:              cr.steps || null,
+          };
+        } catch (e) {
+          console.warn('[onboarding-detail] cancellation exception:', e?.message || e);
+          return null;
+        }
+      })(),
+      // 8) Mentor-update tijdlijn (Fase 2 admin read-only). Fail-soft.
+      (async () => {
+        try {
+          const { data: ups, error: upErr } = await supabaseAdmin
+            .from('onboarding_mentor_updates')
+            .select('kind, status, note, created_at, created_by')
+            .eq('onboarding_id', row.id)
+            .order('created_at', { ascending: true })
+            .limit(500);
+          if (upErr) {
+            console.warn('[onboarding-detail] mentor_updates fetch:', upErr.message);
+            return [];
+          }
+          return (ups || []).map((u) => ({
+            kind:       u.kind || null,
+            status:     u.status || null,
+            note:       u.note || null,
+            created_at: u.created_at || null,
+            created_by: u.created_by || null,
+          }));
+        } catch (e) {
+          console.warn('[onboarding-detail] mentor_updates exception:', e?.message || e);
+          return [];
+        }
+      })(),
+    ]);
 
-    // Mentor-update tijdlijn (Fase 2 admin read-only weergave). Asc op
-    // created_at zodat de frontend rechtstreeks chronologisch kan tonen.
-    let mentorUpdates = [];
-    try {
-      const { data: ups, error: upErr } = await supabaseAdmin
-        .from('onboarding_mentor_updates')
-        .select('kind, status, note, created_at, created_by')
-        .eq('onboarding_id', row.id)
-        .order('created_at', { ascending: true })
-        .limit(500);
-      if (upErr) {
-        console.warn('[onboarding-detail] mentor_updates fetch:', upErr.message);
-      } else {
-        mentorUpdates = (ups || []).map((u) => ({
-          kind:       u.kind || null,
-          status:     u.status || null,
-          note:       u.note || null,
-          created_at: u.created_at || null,
-          created_by: u.created_by || null,
-        }));
-      }
-    } catch (e) {
-      console.warn('[onboarding-detail] mentor_updates exception:', e?.message || e);
-    }
+    const custEmail = contact.email;
+    const custPhone = contact.phone;
+    const { waiver, availability } = wizard;
+    const { intake_status, planned_call_at, last_completed_at, last_noshow_at } = intakeChain;
+    const bedenktijd = computeBedenktijd(waiver, offerteOp);
 
     const t = row.traject || null;
     return res.status(200).json({

@@ -33,6 +33,12 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import {
+  CONFIRMED_STATUSES,
+  getConfirmedCount,
+  syncGastenlijstWebflow,
+  autoCloseIfFull,
+} from './_lib/event-registration.js';
 // Sinds opt-in herontwerp: 'send_invite' triggert nu automation_enabled i.p.v.
 // een one-shot invite. De sendEventAttendeeInvite-helper is dus niet meer nodig
 // hier (blijft beschikbaar voor andere callers zoals de move-flow).
@@ -89,7 +95,7 @@ export default async function handler(req, res) {
     // Event-existence + capacity-fetch
     const { data: ev, error: evErr } = await supabaseAdmin
       .from('events')
-      .select('id, capacity, status')
+      .select('id, capacity, status, signups_closed, webflow_item_id')
       .eq('id', eventId)
       .maybeSingle();
     if (evErr) throw new Error('event-lookup: ' + evErr.message);
@@ -211,6 +217,21 @@ export default async function handler(req, res) {
       });
     } catch (e) {
       console.error('[events-attendee-add audit]', e.message);
+    }
+
+    // Auto-close-check: bij een nieuwe rij in CONFIRMED_STATUSES kan de
+    // confirmed_count over capacity heen tikken. Hergebruikt de bestaande
+    // triplet (getConfirmedCount + syncGastenlijstWebflow + autoCloseIfFull);
+    // autoCloseIfFull is idempotent (guard op >=capacity && !signups_closed).
+    // Fail-soft — mag de attendee-insert NOOIT breken.
+    if (CONFIRMED_STATUSES.includes(status)) {
+      try {
+        const cnt = await getConfirmedCount(eventId);
+        await syncGastenlijstWebflow(ev, cnt);
+        await autoCloseIfFull(ev, cnt);
+      } catch (e) {
+        console.warn('[events-attendee-add] auto-close (soft):', e?.message || e);
+      }
     }
 
     // GEEN one-shot invite meer vanuit deze endpoint. send_invite=true zet

@@ -24,6 +24,12 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import {
+  CONFIRMED_STATUSES,
+  getConfirmedCount,
+  syncGastenlijstWebflow,
+  autoCloseIfFull,
+} from './_lib/event-registration.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_STATUS = ['aangemeld', 'aanwezig', 'no_show', 'sale', 'switched_to_other_event', 'geannuleerd'];
@@ -145,6 +151,31 @@ export default async function handler(req, res) {
       });
     } catch (e) {
       console.error('[events-attendee-status-change audit]', e.message);
+    }
+
+    // Auto-close-check: bij een transitie NAAR een CONFIRMED_STATUS kan de
+    // confirmed_count over capacity heen tikken. Alleen firen bij een echte
+    // in-transitie (before.status was NIET confirmed, newStatus WEL) — bij een
+    // uit-transitie zakt de count juist en is autoCloseIfFull een no-op.
+    // autoCloseIfFull is idempotent. Fail-soft — mag de status-change NOOIT
+    // breken.
+    const roseToConfirmed = CONFIRMED_STATUSES.includes(newStatus)
+                         && !CONFIRMED_STATUSES.includes(before.status);
+    if (roseToConfirmed) {
+      try {
+        const { data: ev } = await supabaseAdmin
+          .from('events')
+          .select('id, capacity, signups_closed, webflow_item_id')
+          .eq('id', row.event_id)
+          .maybeSingle();
+        if (ev) {
+          const cnt = await getConfirmedCount(row.event_id);
+          await syncGastenlijstWebflow(ev, cnt);
+          await autoCloseIfFull(ev, cnt);
+        }
+      } catch (e) {
+        console.warn('[events-attendee-status-change] auto-close (soft):', e?.message || e);
+      }
     }
 
     return res.status(200).json({ attendee: row });

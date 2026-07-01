@@ -43,6 +43,12 @@ import {
 } from './_lib/assessment-validation.js';
 import { score } from './_lib/assessment-scoring.js';
 import { getActiveQuestionnaire } from './_lib/assessment-questionnaires.js';
+import {
+  CONFIRMED_STATUSES,
+  getConfirmedCount,
+  syncGastenlijstWebflow,
+  autoCloseIfFull,
+} from './_lib/event-registration.js';
 
 export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
@@ -197,10 +203,17 @@ export default async function handler(req, res) {
     // overschrijven bij 'aangemeld' — operator-edits naar aanwezig/sale/etc
     // blijven gerespecteerd.
     const isIncomplete = scored.routing_result === 'incomplete';
+    // Set van event_id's waar minstens 1 rij hierdoor de confirmed_count laat
+    // stijgen (was: status IN CONFIRMED_STATUSES + assessment_response_id NULL;
+    // wordt: status IN CONFIRMED_STATUSES + assessment_response_id NON-NULL,
+    // wat de getConfirmedCount-guard voorheen uitsloot). Na de loop draaien we
+    // per uniek event_id de auto-close-triplet. Declared outside try zodat het
+    // ná het try-blok toegankelijk blijft.
+    const eventIdsToCheck = new Set();
     try {
       const { data: existing, error: lookupErr } = await supabaseAdmin
         .from('event_attendees')
-        .select('id, first_name, last_name, status')
+        .select('id, event_id, first_name, last_name, status')
         .ilike('email', email)
         .is('assessment_response_id', null);
       if (lookupErr) {
@@ -222,7 +235,8 @@ export default async function handler(req, res) {
           if (lnEmpty && lastName)  patch.last_name  = lastName;
           // Annuleer alleen rijen die nog op 'aangemeld' staan — operator-
           // edits (aanwezig / sale / no_show) blijven intact.
-          if (isIncomplete && att.status === 'aangemeld') {
+          const willBeCancelled = isIncomplete && att.status === 'aangemeld';
+          if (willBeCancelled) {
             patch.status = 'geannuleerd';
           }
           const { error: updErr } = await supabaseAdmin
@@ -231,11 +245,41 @@ export default async function handler(req, res) {
             .eq('id', att.id);
           if (updErr) {
             console.error('[assessment-submit] late-link update:', att.id, updErr.message);
+            continue;
+          }
+          // Rise-check: rij eindigt in CONFIRMED_STATUSES én was daar al vóór
+          // deze patch (dan miste 'ie enkel de assessment_response_id).
+          if (att.event_id
+              && !willBeCancelled
+              && CONFIRMED_STATUSES.includes(att.status)) {
+            eventIdsToCheck.add(att.event_id);
           }
         }
       }
     } catch (e) {
       console.error('[assessment-submit] late-link exception:', e?.message || e);
+    }
+
+    // Auto-close-check per uniek event waar de confirmed_count kan zijn
+    // gestegen door de late-koppeling. Hergebruikt de bestaande triplet
+    // (getConfirmedCount + syncGastenlijstWebflow + autoCloseIfFull);
+    // autoCloseIfFull is idempotent. Fail-soft — mag de submit NOOIT breken.
+    if (eventIdsToCheck.size > 0) {
+      for (const evId of eventIdsToCheck) {
+        try {
+          const { data: ev } = await supabaseAdmin
+            .from('events')
+            .select('id, capacity, signups_closed, webflow_item_id')
+            .eq('id', evId)
+            .maybeSingle();
+          if (!ev) continue;
+          const cnt = await getConfirmedCount(evId);
+          await syncGastenlijstWebflow(ev, cnt);
+          await autoCloseIfFull(ev, cnt);
+        } catch (e) {
+          console.warn('[assessment-submit] auto-close (soft):', evId, e?.message || e);
+        }
+      }
     }
 
     // Fail-soft dual-write: notify de mentor van de deelnemer (via

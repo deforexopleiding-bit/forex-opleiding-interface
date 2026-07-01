@@ -309,6 +309,7 @@
   let   _filter            = 'all';
   const _unreadByOnb       = new Map();
   let   _openId            = null;      // onboarding_id van open popup
+  let   _studentsLoaded    = false;     // pas na eerste geslaagde students-fetch true — voorkomt lege-staat-flash
 
   // Onboarding-inbox state — 1-op-1 port uit modules/shared/onboarding-overzicht.js.
   // Sinds PR #534 zijn alle inbox-endpoints gedeeld voor onboarding.inbox.view;
@@ -506,9 +507,16 @@
     const info = document.getElementById('moCountInfo');
     if (info) info.textContent = filtered.length + ' / ' + list.length + ' studenten';
     if (filtered.length === 0) {
-      wrap.innerHTML = list.length === 0
-        ? `<div class="empty-state"><i class="ti ti-user-question"></i>Je hebt nog geen toegewezen studenten.</div>`
-        : `<div class="empty-state"><i class="ti ti-filter-off"></i>Geen studenten in deze filter.</div>`;
+      if (list.length === 0 && !_studentsLoaded) {
+        // Race met loadAdminNoteDots() dat _renderTable met een lege _byId
+        // aanroept vóór loadStudents() klaar is — houd de laad-staat vast
+        // tot de echte students-fetch heeft geland.
+        wrap.innerHTML = `<div class="empty-state"><i class="ti ti-clock"></i>Studenten laden…</div>`;
+      } else {
+        wrap.innerHTML = list.length === 0
+          ? `<div class="empty-state"><i class="ti ti-user-question"></i>Je hebt nog geen toegewezen studenten.</div>`
+          : `<div class="empty-state"><i class="ti ti-filter-off"></i>Geen studenten in deze filter.</div>`;
+      }
       return;
     }
     // Sort: startdatum asc; zonder start_date onderaan.
@@ -1007,6 +1015,7 @@
       let d = null;
       try { d = await r.json(); } catch {}
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      _studentsLoaded = true;
       _renderTable(Array.isArray(d?.students) ? d.students : []);
     } catch (e) {
       console.error('[mentor-onboarding] load:', e?.message || e);
