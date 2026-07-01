@@ -40,9 +40,10 @@ const ALLOWED_MODELS     = new Set([
   'claude-opus-4-7',
   'claude-haiku-4-5-20251001',
 ]);
-const DEFAULT_MAX_TOKENS = 2200;
+const DEFAULT_MAX_TOKENS = 2500;
 const CONFIDENCE_VALUES  = new Set(['hoog', 'midden', 'laag']);
 const GRADE_VALUES       = new Set(['A+', 'B', 'C', 'n.v.t.']);
+const TF_VALUES          = new Set(['4H', '15M']);
 
 function extToMime(path) {
   const p = String(path || '').toLowerCase();
@@ -82,9 +83,27 @@ function safeParseJson(txt) {
   catch (_) { return null; }
 }
 
-function buildAnalysisPrompt({ strategy, tools, hasImage }) {
+// Multi-timeframe prompt: expliciete labels per beeld, zodat de vision-model
+// weet welk beeld welke TF is. haveH4/haveM15 sturen missing-instructies bij
+// als er maar één timeframe is aangeleverd.
+function buildAnalysisPrompt({ strategy, tools, haveH4, haveM15 }) {
   const lines = [];
-  lines.push('Rol: je bent een strikte prijs-actie-lezer die alleen dingen benoemt die je concreet in het beeld kunt aanwijzen.');
+  lines.push('Rol: je bent een strikte prijs-actie-lezer die alleen dingen benoemt die je concreet in de aangeleverde beelden kunt aanwijzen.');
+  lines.push('');
+  lines.push('BEELDEN');
+  if (haveH4 && haveM15) {
+    lines.push('- Beeld 1 = 4H context/bias (higher-timeframe richting, structuur, key levels).');
+    lines.push('- Beeld 2 = 15M uitvoering (entry-timeframe voor de daadwerkelijke setup).');
+    lines.push('Beoordeel de setup IN SAMENHANG: H4 bevestigt de richting/bias, 15M levert de entry (timing + trigger).');
+  } else if (haveH4) {
+    lines.push('- Beeld 1 = 4H context/bias.');
+    lines.push('- 15M-uitvoering is NIET aangeleverd. Redeneer over H4-bias en noem in "missing" dat 15M-timing/trigger ontbreekt om entry-kwaliteit te oordelen.');
+  } else if (haveM15) {
+    lines.push('- Beeld 1 = 15M uitvoering.');
+    lines.push('- 4H-context is NIET aangeleverd. Redeneer over 15M-entry en noem in "missing" dat H4-bias ontbreekt om de richting te bevestigen.');
+  } else {
+    lines.push('- (geen beelden beschikbaar; redeneer alleen op tekstuele context, best-effort)');
+  }
   lines.push('');
   lines.push('CONTEXT — de tools van de gebruiker (owner-scoped):');
   if (!tools.length) {
@@ -122,24 +141,23 @@ function buildAnalysisPrompt({ strategy, tools, hasImage }) {
   }
   lines.push('');
   lines.push('OPDRACHT');
-  lines.push(hasImage
-    ? 'Bekijk het chart-beeld en beantwoord in het Nederlands.'
-    : 'Er is geen afbeelding beschikbaar; redeneer op basis van de context alleen (best-effort).');
+  lines.push('Beantwoord in het Nederlands. Geef per detectie het bijhorende timeframe-label mee.');
   lines.push('');
   lines.push('Geef ALLEEN geldige JSON terug — geen inleiding, geen markdown-fences, geen commentaar. Schema:');
   lines.push('{');
   lines.push('  "detections": [');
   lines.push('    { "tool_name": string,          // exact-of-benaderend een van bovenstaande tools; anders eigen naam');
   lines.push('      "matches_tool_id": string|null,// UUID van een van de owner-tools als je een match ziet, anders null');
+  lines.push('      "timeframe": "4H"|"15M"|null, // in welk beeld je dit ziet; null als het niet duidelijk aan één TF hangt');
   lines.push('      "reason": string,              // 1-2 zinnen, Nederlands, benoem waar in het beeld');
   lines.push('      "confidence": "hoog"|"midden"|"laag" }');
   lines.push('  ],');
   lines.push('  "setup": {');
-  lines.push('    "valid": boolean,                // is dit een geldige setup binnen de strategie?');
+  lines.push('    "valid": boolean,                // is dit een geldige setup binnen de strategie (in samenhang)?');
   lines.push('    "model": string,                 // welk sub-model/naam (bv. "FMES 15m long"); anders "n.v.t."');
   lines.push('    "grade": "A+"|"B"|"C"|"n.v.t.", // grade op basis van hoeveel checklist-elementen kloppen');
-  lines.push('    "reason": string,                // 1-3 zinnen waarom (Nederlands)');
-  lines.push('    "missing": string[]              // wat mist er om A+ te halen (mag [] zijn)');
+  lines.push('    "reason": string,                // 1-3 zinnen waarom (Nederlands, benoem H4-bias én 15M-uitvoering waar van toepassing)');
+  lines.push('    "missing": string[]              // wat mist er om A+ te halen (incl. ontbrekende timeframe)');
   lines.push('  }');
   lines.push('}');
   lines.push('');
@@ -148,62 +166,111 @@ function buildAnalysisPrompt({ strategy, tools, hasImage }) {
   return lines.join('\n');
 }
 
+// Ingest één timeframe-block via de gedeelde helper. Retourneert
+// { image_path, source_url, source, error?, status? } zonder eigen fetch.
+async function ingestOneTimeframe({ block, ownerId, refId, tfLabel }) {
+  if (!block || typeof block !== 'object') return null;
+  const source = typeof block.source === 'string' ? block.source.trim() : '';
+  if (!['link', 'upload'].includes(source)) {
+    return { error: `${tfLabel}: source moet 'link' of 'upload' zijn`, status: 400 };
+  }
+  if (source === 'link') {
+    const tvUrl = typeof block.tvlink === 'string' ? block.tvlink.trim() : '';
+    if (!tvUrl) return { error: `${tfLabel}: tvlink vereist bij source=link`, status: 400 };
+    // Guards (regex, host-allowlist, manual redirect, timeout, MIME, size) leven
+    // in _lib/secretAreaImageIngest. Geen fetch hier.
+    const r = await ingestTradingViewUrl({
+      ownerId, kind: 'analysis', refId, tvUrl,
+      filenameHint: `chart-${tfLabel.toLowerCase()}`,
+    });
+    if (!r.image_path) {
+      return {
+        error:   `${tfLabel}: kon TradingView-snapshot niet ophalen`,
+        warning: r.warning || 'onbekend',
+        source_url: r.source_url || tvUrl,
+        status:  422,
+      };
+    }
+    return { image_path: r.image_path, source_url: r.source_url || tvUrl, source };
+  }
+  // Upload
+  const contentType = typeof block.content_type === 'string' ? block.content_type : '';
+  const dataB64     = typeof block.data_base64 === 'string' ? block.data_base64 : '';
+  const filenameHint = typeof block.filename === 'string' ? block.filename : `chart-${tfLabel.toLowerCase()}`;
+  if (!dataB64) return { error: `${tfLabel}: data_base64 vereist bij source=upload`, status: 400 };
+  const r = await ingestBase64({
+    ownerId, kind: 'analysis', refId,
+    contentType, dataBase64: dataB64, filenameHint,
+  });
+  if (!r.ok) return { error: `${tfLabel}: ${r.error}`, status: r.status || 500 };
+  return { image_path: r.image_path, source_url: null, source };
+}
+
 // ── Handlers ──────────────────────────────────────────────────────────────
 
 async function handleAnalyze(req, res, ctx) {
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const source     = typeof body.source === 'string' ? body.source.trim() : '';
   const strategyId = typeof body.strategy_id === 'string' && body.strategy_id.trim()
     ? body.strategy_id.trim() : null;
   const modelReq   = typeof body.model === 'string' ? body.model.trim() : '';
   const model      = modelReq && ALLOWED_MODELS.has(modelReq) ? modelReq : DEFAULT_MODEL;
 
-  if (!['link', 'upload'].includes(source)) {
-    return res.status(400).json({ error: "source moet 'link' of 'upload' zijn" });
-  }
   if (strategyId && !UUID_RE.test(strategyId)) {
     return res.status(400).json({ error: 'strategy_id ongeldig' });
   }
 
-  // Analyse-ref — een tijdelijk uuid als "refId" voor het storage-pad, zodat we
-  // het beeld kunnen uploaden vóór we de analyses-rij hebben.
-  const refId = crypto.randomUUID();
-
-  // ── 1) Beeld ingesten via de gedeelde helper (SSRF-guards intact) ──────
-  let image_path = null;
-  let source_url = null;
-  if (source === 'link') {
-    const tvUrl = typeof body.tvlink === 'string' ? body.tvlink.trim() : '';
-    if (!tvUrl) return res.status(400).json({ error: 'tvlink vereist bij source=link' });
-    const r = await ingestTradingViewUrl({
-      ownerId: ctx.userId, kind: 'analysis', refId, tvUrl, filenameHint: 'chart',
+  // ── 1) Server-side "minstens één"-validatie op de twee TF-blokken ─────
+  // De UI moet minstens één van h4/m15 aanleveren (met source+link/upload);
+  // hier is dit het gate voor kwaadwillige/lege calls.
+  const h4Block  = (body.h4  && typeof body.h4  === 'object') ? body.h4  : null;
+  const m15Block = (body.m15 && typeof body.m15 === 'object') ? body.m15 : null;
+  const hasH4Intent  = !!(h4Block  && typeof h4Block.source  === 'string' && h4Block.source.trim());
+  const hasM15Intent = !!(m15Block && typeof m15Block.source === 'string' && m15Block.source.trim());
+  if (!hasH4Intent && !hasM15Intent) {
+    return res.status(400).json({
+      error: 'Vul minstens één timeframe in (4H of 15M) — geef h4 en/of m15 met source+bron.',
     });
-    image_path = r.image_path || null;
-    source_url = r.source_url || tvUrl;
-    if (!image_path) {
-      // TV kon de afbeelding niet resolven — we willen NIET met een lege
-      // vision-call verder; retourneer nette 422 zodat UI om upload vraagt.
-      return res.status(422).json({
-        error:   'Kon TradingView-snapshot niet ophalen',
-        warning: r.warning || 'onbekend',
-        source_url,
-      });
-    }
-  } else {
-    // Upload-mode: verwacht { filename, content_type, data_base64 }
-    const contentType = typeof body.content_type === 'string' ? body.content_type : '';
-    const dataB64     = typeof body.data_base64 === 'string' ? body.data_base64 : '';
-    const filenameHint = typeof body.filename === 'string' ? body.filename : 'chart';
-    if (!dataB64) return res.status(400).json({ error: 'data_base64 vereist bij source=upload' });
-    const r = await ingestBase64({
-      ownerId: ctx.userId, kind: 'analysis', refId,
-      contentType, dataBase64: dataB64, filenameHint,
-    });
-    if (!r.ok) return res.status(r.status || 500).json({ error: r.error });
-    image_path = r.image_path;
   }
 
-  // ── 2) Context ophalen (owner-scoped) ──────────────────────────────────
+  // Analyse-ref — één tijdelijk uuid voor beide TF-storage-paden.
+  const refId = crypto.randomUUID();
+
+  // ── 2) Ingest per aangeleverde TF via de gedeelde helper ──────────────
+  // SSRF-guards (regex-allowlist, host-allowlist, manual-redirect, timeout,
+  // MIME/size) leven in _lib/secretAreaImageIngest — dit endpoint doet
+  // GEEN eigen fetch en verzwakt de guards niet.
+  let ingestH4  = null;
+  let ingestM15 = null;
+  if (hasH4Intent) {
+    ingestH4 = await ingestOneTimeframe({ block: h4Block, ownerId: ctx.userId, refId, tfLabel: '4H' });
+    if (ingestH4?.error) {
+      return res.status(ingestH4.status || 400).json({
+        error:      ingestH4.error,
+        warning:    ingestH4.warning,
+        source_url: ingestH4.source_url,
+        timeframe:  '4H',
+      });
+    }
+  }
+  if (hasM15Intent) {
+    ingestM15 = await ingestOneTimeframe({ block: m15Block, ownerId: ctx.userId, refId, tfLabel: '15M' });
+    if (ingestM15?.error) {
+      return res.status(ingestM15.status || 400).json({
+        error:      ingestM15.error,
+        warning:    ingestM15.warning,
+        source_url: ingestM15.source_url,
+        timeframe:  '15M',
+      });
+    }
+  }
+  const haveH4  = !!(ingestH4  && ingestH4.image_path);
+  const haveM15 = !!(ingestM15 && ingestM15.image_path);
+  if (!haveH4 && !haveM15) {
+    // Beide ingesten zijn stil gefaald (bv. TV-resolve gaf null zonder error).
+    return res.status(422).json({ error: 'Beide timeframes konden niet worden opgehaald.' });
+  }
+
+  // ── 3) Context ophalen (owner-scoped) ──────────────────────────────────
   const [{ data: toolsRaw }, { data: strategyRaw }] = await Promise.all([
     supabaseAdmin.from('sa_tools')
       .select('id, name, description, detection_rule')
@@ -217,7 +284,6 @@ async function handleAnalyze(req, res, ctx) {
   ]);
   const tools = Array.isArray(toolsRaw) ? toolsRaw : [];
 
-  // Extra: strategie-steps + condities (indien strategie meegegeven).
   let strategy = strategyRaw || null;
   if (strategy) {
     const [{ data: steps }, { data: conditions }] = await Promise.all([
@@ -236,15 +302,27 @@ async function handleAnalyze(req, res, ctx) {
     };
   }
 
-  // ── 3) Beeld downloaden voor vision-call ───────────────────────────────
-  const img = await downloadAsBase64(image_path);
-  const imageBlocks = img
-    ? [{ type: 'image', source: { type: 'base64', media_type: img.mime, data: img.base64 } }]
-    : [];
-  const promptText = buildAnalysisPrompt({ strategy, tools, hasImage: !!img });
-  const content = [{ type: 'text', text: promptText }, ...imageBlocks];
+  // ── 4) Beelden downloaden voor vision-call ────────────────────────────
+  const [imgH4, imgM15] = await Promise.all([
+    haveH4  ? downloadAsBase64(ingestH4.image_path)  : Promise.resolve(null),
+    haveM15 ? downloadAsBase64(ingestM15.image_path) : Promise.resolve(null),
+  ]);
 
-  // ── 4) Anthropic-call (zelfde pattern als secret-area-ai.js) ───────────
+  // Content-array: tekst-prompt eerst, dan per TF een tekst-label + image-block
+  // zodat Claude weet welk beeld welk timeframe is.
+  const content = [{ type: 'text', text: buildAnalysisPrompt({
+    strategy, tools, haveH4: !!imgH4, haveM15: !!imgM15,
+  }) }];
+  if (imgH4) {
+    content.push({ type: 'text', text: '--- Beeld 1: 4H context/bias ---' });
+    content.push({ type: 'image', source: { type: 'base64', media_type: imgH4.mime, data: imgH4.base64 } });
+  }
+  if (imgM15) {
+    content.push({ type: 'text', text: (imgH4 ? '--- Beeld 2: 15M uitvoering ---' : '--- Beeld 1: 15M uitvoering ---') });
+    content.push({ type: 'image', source: { type: 'base64', media_type: imgM15.mime, data: imgM15.base64 } });
+  }
+
+  // ── 5) Anthropic-call ─────────────────────────────────────────────────
   let apiResp;
   try {
     apiResp = await anthropicMessages({
@@ -287,36 +365,47 @@ async function handleAnalyze(req, res, ctx) {
     tool_name:  typeof d.tool_name === 'string' ? d.tool_name.trim() : '',
     tool_id:    (typeof d.matches_tool_id === 'string' && UUID_RE.test(d.matches_tool_id))
                   ? d.matches_tool_id : null,
+    timeframe:  TF_VALUES.has(d.timeframe) ? d.timeframe : null,
     reason:     typeof d.reason === 'string' ? d.reason.trim() : '',
     confidence: CONFIDENCE_VALUES.has(d.confidence) ? d.confidence : 'midden',
   })).filter((d) => d.tool_name || d.reason);
 
-  // Verifieer dat matches_tool_id echt van deze owner is — anders NULL.
   const validToolIds = new Set(tools.map((t) => t.id));
   detectionsIn.forEach((d) => {
     if (d.tool_id && !validToolIds.has(d.tool_id)) d.tool_id = null;
   });
 
-  // ── 5) Opslaan ─────────────────────────────────────────────────────────
+  // ── 6) Opslaan ─────────────────────────────────────────────────────────
+  // Nieuwe multi-TF-kolommen worden altijd geschreven. Legacy image_path /
+  // source_url worden ook gevuld (best-effort naar wat er beschikbaar is)
+  // zodat oude readers backward-compatible blijven werken. `source` reflecteert
+  // welke bron voor het eerste beschikbare beeld gebruikt is.
+  const primaryImage  = ingestH4?.image_path || ingestM15?.image_path || null;
+  const primarySource = ingestH4?.source     || ingestM15?.source     || 'upload';
+  const primarySrcUrl = ingestH4?.source_url || ingestM15?.source_url || null;
+
   const { data: analysisRow, error: aErr } = await supabaseAdmin.from('sa_chart_analyses')
     .insert({
-      owner_id:      ctx.userId,
-      image_path,
-      source_url,
-      source,
-      strategy_id:   strategy ? strategy.id : null,
-      setup_verdict: setupPayload,
-      grade:         setupPayload.grade,
-      ai_summary:    aiSummary,
+      owner_id:        ctx.userId,
+      image_path:      primaryImage,       // legacy — best-effort
+      source_url:      primarySrcUrl,      // legacy — best-effort
+      source:          primarySource,
+      image_path_h4:   ingestH4?.image_path  || null,
+      image_path_m15:  ingestM15?.image_path || null,
+      source_url_h4:   ingestH4?.source_url  || null,
+      source_url_m15:  ingestM15?.source_url || null,
+      strategy_id:     strategy ? strategy.id : null,
+      setup_verdict:   setupPayload,
+      grade:           setupPayload.grade,
+      ai_summary:      aiSummary,
     })
-    .select('id, owner_id, image_path, source_url, source, strategy_id, setup_verdict, grade, ai_summary, created_at')
+    .select('id, owner_id, image_path, source_url, source, image_path_h4, image_path_m15, source_url_h4, source_url_m15, strategy_id, setup_verdict, grade, ai_summary, created_at')
     .maybeSingle();
   if (aErr || !analysisRow) {
     console.error('[sa-analyze] insert analysis:', aErr?.message);
     return res.status(500).json({ error: 'Kon analyse niet opslaan', detail: aErr?.message });
   }
 
-  // Detecties bulk-insert (owner-gescoped).
   let detections = [];
   if (detectionsIn.length) {
     const rows = detectionsIn.map((d) => ({
@@ -324,13 +413,14 @@ async function handleAnalyze(req, res, ctx) {
       analysis_id: analysisRow.id,
       tool_id:     d.tool_id,
       tool_name:   d.tool_name,
+      timeframe:   d.timeframe,
       ai_reason:   d.reason,
       confidence:  d.confidence,
       status:      'pending',
     }));
     const { data: dRows, error: dErr } = await supabaseAdmin.from('sa_analysis_detections')
       .insert(rows)
-      .select('id, analysis_id, tool_id, tool_name, ai_reason, confidence, status, user_note, created_at');
+      .select('id, analysis_id, tool_id, tool_name, timeframe, ai_reason, confidence, status, user_note, created_at');
     if (dErr) {
       console.warn('[sa-analyze] insert detections:', dErr.message);
     } else {
@@ -379,24 +469,45 @@ async function handleConfirm(req, res, ctx) {
   }
 
   // Bij bevestiging + tool-match: sluit de loop terug naar tool-training.
+  // Voor multi-TF: kies het beeld dat bij het timeframe van de detectie
+  // hoort. Fallback: legacy image_path (backward-compat) of de andere TF.
   let example_created = null;
   if (status === 'confirmed' && detection.tool_id) {
     const { data: analysis } = await supabaseAdmin.from('sa_chart_analyses')
-      .select('image_path').eq('id', detection.analysis_id).eq('owner_id', ctx.userId).maybeSingle();
-    if (analysis?.image_path) {
+      .select('image_path, image_path_h4, image_path_m15')
+      .eq('id', detection.analysis_id).eq('owner_id', ctx.userId).maybeSingle();
+    let chosenPath = null;
+    if (analysis) {
+      if (detection.timeframe === '4H')  chosenPath = analysis.image_path_h4  || analysis.image_path || analysis.image_path_m15 || null;
+      else if (detection.timeframe === '15M') chosenPath = analysis.image_path_m15 || analysis.image_path || analysis.image_path_h4 || null;
+      else                                    chosenPath = analysis.image_path || analysis.image_path_h4 || analysis.image_path_m15 || null;
+    }
+    if (chosenPath) {
       const insertPayload = {
         owner_id:   ctx.userId,
         tool_id:    detection.tool_id,
         kind:       'ideal',
-        image_path: analysis.image_path,
+        image_path: chosenPath,
+        timeframe:  detection.timeframe || null,
         note:       userNote || detection.ai_reason || '',
       };
+      // `timeframe` op sa_tool_examples is optioneel — als de kolom niet bestaat,
+      // valt de insert terug op de andere velden. We laten Supabase de rest doen.
       const { data: exRow, error: exErr } = await supabaseAdmin.from('sa_tool_examples')
         .insert(insertPayload)
         .select('id')
         .maybeSingle();
       if (exErr) {
-        console.warn('[sa-analyze/confirm] example insert:', exErr.message);
+        // Fallback zonder timeframe (voor omgevingen waar die kolom nog niet bestaat).
+        if (/timeframe|column/i.test(exErr.message || '')) {
+          delete insertPayload.timeframe;
+          const { data: exRow2, error: exErr2 } = await supabaseAdmin.from('sa_tool_examples')
+            .insert(insertPayload).select('id').maybeSingle();
+          if (exErr2) console.warn('[sa-analyze/confirm] example insert (retry):', exErr2.message);
+          else example_created = exRow2?.id || null;
+        } else {
+          console.warn('[sa-analyze/confirm] example insert:', exErr.message);
+        }
       } else {
         example_created = exRow?.id || null;
       }
@@ -409,7 +520,7 @@ async function handleConfirm(req, res, ctx) {
 async function handleList(req, res, ctx) {
   // Recente analyses van de owner met detecties. Cap 20.
   const { data: analyses, error: aErr } = await supabaseAdmin.from('sa_chart_analyses')
-    .select('id, image_path, source_url, source, strategy_id, setup_verdict, grade, ai_summary, created_at')
+    .select('id, image_path, image_path_h4, image_path_m15, source_url, source_url_h4, source_url_m15, source, strategy_id, setup_verdict, grade, ai_summary, created_at')
     .eq('owner_id', ctx.userId)
     .order('created_at', { ascending: false })
     .limit(20);
@@ -421,7 +532,7 @@ async function handleList(req, res, ctx) {
   let detections = [];
   if (ids.length) {
     const { data: dRows, error: dErr } = await supabaseAdmin.from('sa_analysis_detections')
-      .select('id, analysis_id, tool_id, tool_name, ai_reason, confidence, status, user_note, created_at')
+      .select('id, analysis_id, tool_id, tool_name, timeframe, ai_reason, confidence, status, user_note, created_at')
       .eq('owner_id', ctx.userId)
       .in('analysis_id', ids);
     if (dErr) {
