@@ -934,8 +934,17 @@
 
       groupEl.appendChild(header);
       groupEl.appendChild(body);
-      if (insertBefore) nav.insertBefore(groupEl, insertBefore);
-      else nav.appendChild(groupEl);
+      // Guard: insertBefore-anchor kan door een vorige loop-iteratie zijn
+      // verplaatst naar een group-body (het eerste gegroepeerde item wordt
+      // kind van de eerste .nav-group-items). Dan is de node géén kind meer
+      // van `nav` en gooit insertBefore een NotFoundError. In dat geval
+      // appenden we; volgorde blijft correct omdat groepen sowieso ná de
+      // laatste ongegroepeerde nav-item horen.
+      if (insertBefore && insertBefore.parentNode === nav) {
+        nav.insertBefore(groupEl, insertBefore);
+      } else {
+        nav.appendChild(groupEl);
+      }
     });
   }
 
