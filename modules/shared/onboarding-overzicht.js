@@ -1372,7 +1372,7 @@
               <strong>Mentor:</strong> ${esc(o.mentor_name || (o.mentor_user_id || '— niet toegewezen'))}
               ${o.start_date ? '<span style="color:var(--text-faint);margin:0 6px">·</span><strong>Startdatum:</strong> ' + esc(fmtDateNL(o.start_date)) : ''}
             </div>
-            <div style="margin-top:6px">${_intakePillHtml(o.intake_status || o.mentor_intake_status || 'nog_te_benaderen')}${o.planned_call_at ? ' <span style="color:var(--text-faint);font-size:11.5px">· geplande call ' + esc(fmtDateTimeNL(o.planned_call_at)) + '</span>' : ''}</div>
+            <div id="obCompactIntake" style="margin-top:6px">${_intakePillHtml(o.intake_status || o.mentor_intake_status || 'nog_te_benaderen')}${o.planned_call_at ? ' <span style="color:var(--text-faint);font-size:11.5px">· geplande call ' + esc(fmtDateTimeNL(o.planned_call_at)) + '</span>' : ''}</div>
           </div>` : '';
 
         host.innerHTML = `
@@ -1383,6 +1383,8 @@
           ${_renderMentorTimeline(o)}
         `;
         _wireAdminActions(o, () => { render(); onChange(); });
+        // Lazy sidecar: patch de Bubble-afgeleide intake-velden na render.
+        _lazyPatchIntake('detail', onboardingId).catch(() => {});
       } catch (e) {
         host.innerHTML = '<div style="padding:18px;color:#b91c1c">Ophalen mislukt: ' + esc(e?.message || e) + '</div>';
       }
@@ -1457,7 +1459,7 @@
             <dt>E-mail</dt>           <dd>${o.email ? '<a href="mailto:' + esc(o.email) + '">' + esc(o.email) + '</a>' : '<span style="color:var(--text-faint)">—</span>'}</dd>
             <dt>Telefoon</dt>         <dd>${o.phone ? '<a href="tel:' + esc(o.phone) + '">' + esc(o.phone) + '</a>' : '<span style="color:var(--text-faint)">—</span>'}</dd>
             <dt>Status</dt>           <dd>${statusBadgeHtml(o.status)}</dd>
-            <dt>Intake-status</dt>    <dd>${_intakePillHtml(o.intake_status || o.mentor_intake_status || 'nog_te_benaderen')}${o.planned_call_at ? ' <span style="color:var(--text-faint);font-size:12px">· geplande call ' + esc(fmtDateTimeNL(o.planned_call_at)) + '</span>' : ''}</dd>
+            <dt>Intake-status</dt>    <dd id="obDetailIntakeDd">${_intakePillHtml(o.intake_status || o.mentor_intake_status || 'nog_te_benaderen')}${o.planned_call_at ? ' <span style="color:var(--text-faint);font-size:12px">· geplande call ' + esc(fmtDateTimeNL(o.planned_call_at)) + '</span>' : ''}</dd>
             <dt>Mentor</dt>           <dd>${esc(o.mentor_name || (o.mentor_user_id || '—'))}</dd>
             <dt>Traject</dt>          <dd>${esc(o.traject_label || '—')}${o.traject_type ? ' <span class="ob-badge paid-no">' + esc(o.traject_type) + '</span>' : ''}${o.calls != null ? ' · ' + o.calls + ' call' + (o.calls===1?'':'s') : ''}${o.duur_maanden != null ? ' · ' + o.duur_maanden + ' mnd' : ''}</dd>
             <dt>Aangemeld</dt>        <dd>${esc(fmtDateTimeNL(o.created_at))}</dd>
@@ -1588,6 +1590,8 @@
       if (canViewEmail && obCustId) {
         _loadObEmailThread(obCustId, o.email || '');
       }
+      // Lazy sidecar: patch de Bubble-afgeleide intake-velden na render.
+      _lazyPatchIntake('detail', id).catch(() => {});
     } catch (e) {
       bd.innerHTML = `<div class="empty-state" style="color:#b91c1c">Ophalen mislukt: ${esc(e?.message || e)}</div>`;
     }
@@ -1780,6 +1784,72 @@
   }
 
   // ── Fetch ─────────────────────────────────────────────────────────────
+  // Lazy sidecar patch: haalt de Bubble-afgeleide intake-velden op via
+  // /api/onboarding-intake-status en patcht ze in bestaande UI zonder de
+  // basisweergave te blokkeren. Sinds perf-refactor blokkeert admin-list +
+  // detail niet meer op de live Bubble-call — die fetchen we hier fire-and-
+  // forget nadat de eerste render zichtbaar is.
+  //
+  // Modes:
+  //   'list'    → verzamel ids uit _rows, merge intake-velden, re-render tabel.
+  //   'detail'  → verzamel 1 id, patch #obDetailIntakeDd + #obCompactIntake.
+  //
+  // Alles fail-soft: geen intake-data / netwerk-fout → basisweergave blijft.
+  async function _lazyPatchIntake(mode, id) {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    let ids = [];
+    if (mode === 'list') {
+      ids = (_rows || []).map((r) => r && (r.onboarding_id || r.id)).filter(Boolean);
+    } else if (mode === 'detail' && id) {
+      ids = [id];
+    }
+    if (ids.length === 0) return;
+    try {
+      const r = await apiFetch('/api/onboarding-intake-status', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ onboarding_ids: ids }),
+      });
+      if (!r.ok) return;
+      const d = await r.json().catch(() => ({}));
+      const items = Array.isArray(d?.items) ? d.items : [];
+      if (items.length === 0) return;
+      const byId = new Map(items.map((it) => [it.onboarding_id, it]));
+
+      if (mode === 'list') {
+        for (const row of _rows) {
+          const rowId = row && (row.onboarding_id || row.id);
+          const it = rowId ? byId.get(rowId) : null;
+          if (!it) continue;
+          if (it.intake_status)     row.intake_status     = it.intake_status;
+          if (it.planned_call_at)   row.planned_call_at   = it.planned_call_at;
+          if (it.last_completed_at) row.last_completed_at = it.last_completed_at;
+          if (it.last_noshow_at)    row.last_noshow_at    = it.last_noshow_at;
+        }
+        try { renderTable(); } catch (_) {}
+      } else if (mode === 'detail') {
+        const it = byId.get(id);
+        if (!it) return;
+        const pillHtml = _intakePillHtml(it.intake_status || 'nog_te_benaderen');
+        const note = it.planned_call_at
+          ? ' <span style="color:var(--text-faint);font-size:12px">· geplande call ' + esc(fmtDateTimeNL(it.planned_call_at)) + '</span>'
+          : '';
+        const dd = document.getElementById('obDetailIntakeDd');
+        if (dd) dd.innerHTML = pillHtml + note;
+        const compact = document.getElementById('obCompactIntake');
+        if (compact) {
+          const compactNote = it.planned_call_at
+            ? ' <span style="color:var(--text-faint);font-size:11.5px">· geplande call ' + esc(fmtDateTimeNL(it.planned_call_at)) + '</span>'
+            : '';
+          compact.innerHTML = pillHtml + compactNote;
+        }
+      }
+    } catch (e) {
+      console.warn('[onboarding-overzicht] intake-status lazy patch:', e?.message || e);
+    }
+  }
+
   async function loadList() {
     const apiFetch = window.AgentShared?.apiFetch;
     if (typeof apiFetch !== 'function') { renderError('apiFetch niet beschikbaar.'); return; }
@@ -1810,6 +1880,9 @@
         return String(a.customer_name || '').localeCompare(String(b.customer_name || ''), 'nl');
       });
       renderTable();
+      // Lazy sidecar: haal de dure Bubble-afgeleide intake-velden op en
+      // patch ze in de al-gerenderde rijen. Fire-and-forget.
+      _lazyPatchIntake('list').catch(() => {});
     } catch (e) {
       console.error('[onboarding-admin] list:', e?.message || e);
       renderError('Ophalen mislukt: ' + (e?.message || e));

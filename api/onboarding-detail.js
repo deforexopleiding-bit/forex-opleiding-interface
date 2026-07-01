@@ -210,64 +210,17 @@ export default async function handler(req, res) {
           return null;
         }
       })(),
-      // 6) Intake-status afleiding — bevat de traagste externe Bubble-call
-      // (fetchOneOnOneForMentor). Draait binnen dezelfde Promise.all zodat 'ie
-      // OVERLAPT met de DB-queries. Fail-soft met dubbele fallback.
-      (async () => {
-        const empty = {
-          intake_status: null,
-          planned_call_at: null,
-          last_completed_at: null,
-          last_noshow_at: null,
-        };
-        if (!row.mentor_user_id) return empty;
-        try {
-          const { data: mtm } = await supabaseAdmin
-            .from('team_members')
-            .select('bubble_user_id, is_active')
-            .eq('user_id', row.mentor_user_id)
-            .eq('is_active', true)
-            .maybeSingle();
-          const mentorBubble = mtm?.bubble_user_id ? String(mtm.bubble_user_id).trim() : null;
-          let planned_call_at = null;
-          let last_completed_at = null;
-          let last_noshow_at = null;
-          if (mentorBubble && row.bubble_user_id) {
-            const { fetchOneOnOneForMentor } = await import('./_lib/bubble-1on1.js');
-            const ooo = await fetchOneOnOneForMentor(mentorBubble);
-            const bu  = String(row.bubble_user_id);
-            planned_call_at   = ooo.nextPlannedByMember.get(bu)       || null;
-            last_completed_at = ooo.earliestCompletedByMember.get(bu) || null;
-            last_noshow_at    = ooo.lastNoshowByMember.get(bu)        || null;
-          }
-          const { deriveIntakeStatus } = await import('./_lib/intake-status.js');
-          const intake_status = deriveIntakeStatus({
-            hasCompletedSession:  !!last_completed_at,
-            mentor_intake_status: row.mentor_intake_status || null,
-            hasNoshow:            !!last_noshow_at,
-            hasFutureCall:        !!planned_call_at,
-          });
-          return { intake_status, planned_call_at, last_completed_at, last_noshow_at };
-        } catch (e) {
-          console.warn('[onboarding-detail] intake-status derive:', e?.message || e);
-          try {
-            const { deriveIntakeStatus } = await import('./_lib/intake-status.js');
-            return {
-              intake_status: deriveIntakeStatus({
-                hasCompletedSession:  false,
-                mentor_intake_status: row.mentor_intake_status || null,
-                hasNoshow:            false,
-                hasFutureCall:        false,
-              }),
-              planned_call_at: null,
-              last_completed_at: null,
-              last_noshow_at: null,
-            };
-          } catch (_) {
-            return empty;
-          }
-        }
-      })(),
+      // 6) Intake-status afleiding — de traagste externe Bubble-call
+      // (fetchOneOnOneForMentor) is VERWIJDERD uit het kritieke pad. De
+      // frontend haalt de Bubble-afgeleide velden lazy op via
+      // /api/onboarding-intake-status en patcht ze in de detail-modal.
+      // Basisrespons: velden = null. Zelfde keys als voorheen.
+      (async () => ({
+        intake_status:     null,
+        planned_call_at:   null,
+        last_completed_at: null,
+        last_noshow_at:    null,
+      }))(),
       // 7) Annulering-record (Fase 4b). Fail-soft.
       (async () => {
         try {

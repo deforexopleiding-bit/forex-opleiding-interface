@@ -30,7 +30,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
-import { fetchOneOnOneForMentor } from './_lib/bubble-1on1.js';
+// fetchOneOnOneForMentor verwijderd — lazy via /api/onboarding-intake-status.
 import { deriveIntakeStatus, intakeStatusRank } from './_lib/intake-status.js';
 import {
   findAvailabilityBlock,
@@ -251,29 +251,15 @@ export default async function handler(req, res) {
       }
     }
 
-    // ── 5) 1-op-1 fetchen — één call per UNIEKE mentor (niet per student) ─
-    // Per mentor → fetchOneOnOneForMentor levert 3 Maps. We bewaren ze in
-    // een Map<mentor_user_id, { next, done, ns }> en gebruiken ze hieronder
-    // bij de status-afleiding per onboarding.
-    const oneOnOneByMentor = new Map();
-    const bubbleWarnings = [];
-    await Promise.all(Array.from(mentorBubbleByUid.entries()).map(async ([uid, bubbleId]) => {
-      try {
-        const r = await fetchOneOnOneForMentor(bubbleId);
-        oneOnOneByMentor.set(uid, {
-          next: r.nextPlannedByMember,
-          done: r.earliestCompletedByMember,
-          ns:   r.lastNoshowByMember,
-        });
-        if (r.warning) bubbleWarnings.push({ mentor_user_id: uid, warning: r.warning });
-      } catch (e) {
-        // Eén falende mentor mag de hele lijst niet breken — die rijen
-        // krijgen gewoon 'nog_te_benaderen' tenzij er een handmatige status
-        // is. Loggen + doorgaan.
-        console.warn('[admin-future-students-list] 1on1 mentor fail:', uid, e?.message || e);
-        bubbleWarnings.push({ mentor_user_id: uid, warning: 'fetch-fail' });
-      }
-    }));
+    // ── 5) 1-op-1 fetchen — VERWIJDERD uit het kritieke pad ────────────────
+    // De live Bubble-call fetchOneOnOneForMentor was seconden traag en
+    // blokkeerde het volledige lijst-antwoord. Sinds de perf-refactor
+    // draait die logica in /api/onboarding-intake-status en wordt lazy
+    // opgehaald door de frontend na render. Deze endpoint returnt de auto-
+    // afgeleide intake-velden nu als null; de client patcht ze in.
+    //
+    // De handmatige mentor_intake_status blijft wél direct uit de DB
+    // komen (r.mentor_intake_status) en drijft de basissortering.
 
     // ── 6) Output bouwen ──────────────────────────────────────────────────
     // Fase 3b: `handled` is afgeleid, NIET permanent. Een onboarding telt als
@@ -284,34 +270,32 @@ export default async function handler(req, res) {
     const nowIso = new Date().toISOString();
     const nowMs = Date.now();
     const future = list.map((r) => {
-      const ooo = r.mentor_user_id ? oneOnOneByMentor.get(r.mentor_user_id) : null;
-      const bu  = r.bubble_user_id ? String(r.bubble_user_id) : null;
-      const plannedIso = (ooo && bu) ? (ooo.next.get(bu) || null) : null;
-      const doneIso    = (ooo && bu) ? (ooo.done.get(bu) || null) : null;
-      const noshowIso  = (ooo && bu) ? (ooo.ns.get(bu)   || null) : null;
-
+      const bu = r.bubble_user_id ? String(r.bubble_user_id) : null;
+      // Base intake gebruikt UITSLUITEND DB-signalen (handmatige status +
+      // hasMentor). De 3 Bubble-afgeleide signalen (doneIso/noshowIso/
+      // plannedIso) worden lazy opgehaald via /api/onboarding-intake-status
+      // en client-side ingepatcht.
       const intake = deriveIntakeStatus({
-        hasCompletedSession:  !!doneIso,
+        hasCompletedSession:  false,
         hasMentor:            !!r.mentor_user_id,
         mentor_intake_status: r.mentor_intake_status || null,
-        hasNoshow:            !!noshowIso,
-        hasFutureCall:        !!plannedIso,
+        hasNoshow:            false,
+        hasFutureCall:        false,
       });
       const baseRank = intakeStatusRank(intake);
       const last = lastUpdateByOnb.get(r.id) || null;
       const daysSince = last ? daysBetween(last.at, nowMs) : null;
 
       // Afgehandeld-check: handle_at moet niet null zijn EN er moet GEEN
-      // latere activiteit zijn (max van updates/no-show/completed).
+      // latere activiteit zijn (mentor-updates). NB: Bubble-afgeleide signalen
+      // (no-shows / completed calls) tellen hier initieel NIET mee — die
+      // komen lazy binnen via /api/onboarding-intake-status en de frontend
+      // kan `handled` daar op recomputen.
       let handled = false;
       const handledAtIso = r.intake_handled_at || null;
       if (handledAtIso) {
         const handledMs = new Date(handledAtIso).getTime();
-        const latestActivityMs = Math.max(
-          last && last.at ? new Date(last.at).getTime() : 0,
-          noshowIso       ? new Date(noshowIso).getTime() : 0,
-          doneIso         ? new Date(doneIso).getTime()   : 0,
-        );
+        const latestActivityMs = last && last.at ? new Date(last.at).getTime() : 0;
         handled = Number.isFinite(handledMs) && handledMs >= latestActivityMs;
       }
       // Cancelled = terminal status 'geannuleerd' uit api/onboarding-cancel.js
@@ -378,7 +362,10 @@ export default async function handler(req, res) {
         intake_handled_by:    r.intake_handled_by || null,
         days_since_update:    daysSince,
         last_update:          last,
-        planned_call_at:      plannedIso,
+        // Bubble-afgeleide velden verwijderd uit het kritieke pad — worden
+        // lazy nageladen via /api/onboarding-intake-status. Keys blijven
+        // bestaan zodat de frontend niet breekt.
+        planned_call_at:      null,
       };
     });
 
@@ -394,9 +381,8 @@ export default async function handler(req, res) {
     // `rows` is een alias voor backward-compat met de hub
     // (onboarding-overzicht.js loadList leest `d.rows`); `future` blijft
     // voor consumenten die op de Fase 2-naam aanhaken.
-    const payload = { future, rows: future };
-    if (bubbleWarnings.length > 0) payload.bubble_warnings = bubbleWarnings;
-    return res.status(200).json(payload);
+    // bubble_warnings verplaatst naar /api/onboarding-intake-status.
+    return res.status(200).json({ future, rows: future });
   } catch (e) {
     console.error('[admin-future-students-list]', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });
