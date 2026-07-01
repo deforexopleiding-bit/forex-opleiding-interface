@@ -28,6 +28,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { computeAndUpsertConcept } from './_lib/payout-generate-core.js';
+import { createNotification } from './_lib/notify.js';
 import { sendMail } from './_lib/email.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -230,6 +231,20 @@ export default async function handler(req, res) {
       emailSent   = !!result.sent;
       emailReason = result.sent ? null : (result.reason || 'onbekende reden');
     }
+
+    // Fail-soft dual-write naar unified notifications-tabel: fan-out
+    // naar management-rollen (helper dedupt user_ids).
+    const monthNLBody = fmtMonthNL(updated.period_month);
+    createNotification({
+      toRole:     ['manager', 'super_admin'],
+      type:       'payout.approved',
+      title:      'Payout goedgekeurd',
+      body:       (mentorName || 'Mentor') + ' — ' + monthNLBody,
+      linkUrl:    '/modules/mentor-payouts-admin.html',
+      entityType: 'payout',
+      entityId:   payoutId,
+      createdBy:  user.id,
+    }).catch(() => {});
 
     return res.status(200).json({
       ok          : true,

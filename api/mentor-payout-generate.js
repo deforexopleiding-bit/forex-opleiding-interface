@@ -18,6 +18,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { createNotification } from './_lib/notify.js';
 import {
   computeAndUpsertConcept,
   normalizeMonthStart,
@@ -95,6 +96,24 @@ export default async function handler(req, res) {
           mentor_user_id: mid,
           error         : e?.message || String(e),
         });
+      }
+    }
+
+    // Fail-soft dual-write naar unified notifications-tabel: één melding
+    // per succesvol gegenereerde payout-rij (skipt errors + rijen zonder
+    // payout_id). helper vangt alle fouten zelf af.
+    for (const r of results) {
+      if (r && r.mentor_user_id && r.payout_id && !r.error) {
+        createNotification({
+          toUserId:   r.mentor_user_id,
+          type:       'payout.report_ready',
+          title:      'Uitbetalingsrapport staat klaar',
+          body:       monthStart || null,
+          linkUrl:    '/modules/mentor-dashboard.html',
+          entityType: 'payout',
+          entityId:   r.payout_id,
+          createdBy:  user.id,
+        }).catch(() => {});
       }
     }
 

@@ -33,6 +33,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { createNotification } from './_lib/notify.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -96,6 +97,29 @@ export default async function handler(req, res) {
     } else if (Number.isFinite(Number(data))) {
       ledgerMarked = Number(data);
     }
+
+    // Fail-soft dual-write: mentor notificeren dat de uitbetaling is
+    // verwerkt. mentor_user_id ophalen uit de payout-rij; extra select
+    // is cheap en fail-soft (fout logt alleen).
+    try {
+      const { data: prow } = await supabaseAdmin
+        .from('mentor_payouts')
+        .select('mentor_user_id')
+        .eq('id', payoutId)
+        .maybeSingle();
+      if (prow && prow.mentor_user_id) {
+        createNotification({
+          toUserId:   prow.mentor_user_id,
+          type:       'payout.paid',
+          title:      'Uitbetaling gedaan',
+          body:       'Je uitbetaling is verwerkt',
+          linkUrl:    '/modules/mentor-dashboard.html',
+          entityType: 'payout',
+          entityId:   payoutId,
+          createdBy:  user.id,
+        }).catch(() => {});
+      }
+    } catch (_) { /* fail-soft */ }
 
     return res.status(200).json({
       ok            : true,

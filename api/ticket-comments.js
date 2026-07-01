@@ -4,6 +4,7 @@
 // DELETE ?id=<uuid>             → 204 (RLS dekt eigen-of-admin)
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
+import { createNotification } from './_lib/notify.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -54,6 +55,34 @@ async function handleCreate(req, res, supabase, user) {
   }
 
   const nameMap = await fetchProfileNames([data.author_id]);
+
+  // Fail-soft dual-write: notify ticket-eigenaar + assignee (skip zelf, dedup).
+  try {
+    const { data: ticket } = await supabaseAdmin
+      .from('tickets')
+      .select('id, title, created_by, assigned_to')
+      .eq('id', ticket_id)
+      .maybeSingle();
+    if (ticket) {
+      const recipients = new Set();
+      if (ticket.created_by)  recipients.add(ticket.created_by);
+      if (ticket.assigned_to) recipients.add(ticket.assigned_to);
+      recipients.delete(user.id);
+      for (const uid of recipients) {
+        createNotification({
+          toUserId:   uid,
+          type:       'ticket.replied',
+          title:      'Nieuwe reactie op ticket',
+          body:       ticket.title,
+          linkUrl:    '/modules/tickets-detail.html?id=' + ticket_id,
+          entityType: 'ticket',
+          entityId:   ticket_id,
+          createdBy:  user.id,
+        }).catch(() => {});
+      }
+    }
+  } catch (_) { /* fail-soft */ }
+
   return res.status(201).json({
     comment: { ...data, author_name: nameMap[data.author_id] || null },
   });

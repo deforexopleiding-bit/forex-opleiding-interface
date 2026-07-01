@@ -1,5 +1,6 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { createNotification } from './_lib/notify.js';
 
 function toUuidOrNull(id) {
   if (!id) return null;
@@ -242,6 +243,28 @@ export default async function handler(req, res) {
         };
         const { error: upErr } = await supabaseAdmin.from('taken_items').update(patch).eq('id', id);
         if (upErr) throw upErr;
+        // Fail-soft: als de taak op 'done' gezet wordt door iemand anders
+        // dan de maker, laat de maker het weten.
+        if (newStatus === 'done' && existing.created_by && existing.created_by !== userId) {
+          // Laad titel voor de body (extra select, fail-soft).
+          try {
+            const { data: t } = await supabaseAdmin
+              .from('taken_items')
+              .select('titel')
+              .eq('id', id)
+              .maybeSingle();
+            createNotification({
+              toUserId:   existing.created_by,
+              type:       'task.completed',
+              title:      'Taak afgerond',
+              body:       (t && t.titel) || null,
+              linkUrl:    '/modules/taken.html',
+              entityType: 'task',
+              entityId:   id,
+              createdBy:  userId,
+            }).catch(() => {});
+          } catch (_) { /* fail-soft */ }
+        }
         return res.status(200).json({ ok: true, status: newStatus });
       } catch (err) {
         console.error('[taken] status_change fout:', err.message);
@@ -348,6 +371,7 @@ export default async function handler(req, res) {
           .eq('id', row.id)
           .maybeSingle();
 
+        const wasNewTask = !existing;
         if (existing) {
           // EDIT — alleen creator OF super_admin.
           if (!(await permitAny(req, 'taken.task.edit', 'taken.task.create'))) {
@@ -386,6 +410,35 @@ export default async function handler(req, res) {
               throw error;
             }
           }
+        }
+        // Fail-soft dual-write: notificeer assignees bij een NIEUWE taak.
+        // Verzamel assigned_to_id + alle taken_assignees.assignee_id, dedup,
+        // skip de maker zelf.
+        if (wasNewTask) {
+          try {
+            const recipients = new Set();
+            if (row.assigned_to_id) recipients.add(row.assigned_to_id);
+            const { data: extra } = await supabaseAdmin
+              .from('taken_assignees')
+              .select('assignee_id')
+              .eq('task_id', row.id);
+            if (Array.isArray(extra)) {
+              for (const a of extra) if (a && a.assignee_id) recipients.add(a.assignee_id);
+            }
+            recipients.delete(userId);
+            for (const uid of recipients) {
+              createNotification({
+                toUserId:   uid,
+                type:       'task.assigned',
+                title:      'Nieuwe taak toegewezen',
+                body:       row.titel || null,
+                linkUrl:    '/modules/taken.html',
+                entityType: 'task',
+                entityId:   row.id,
+                createdBy:  userId,
+              }).catch(() => {});
+            }
+          } catch (_) { /* fail-soft */ }
         }
         return res.status(200).json({ ok: true });
       } catch (err) {

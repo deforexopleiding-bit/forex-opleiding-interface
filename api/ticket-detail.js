@@ -8,6 +8,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { createNotification } from './_lib/notify.js';
 
 const VALID_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
 
@@ -30,7 +31,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'GET')   return handleGet(res, supabase, id);
-  if (req.method === 'PATCH') return handlePatch(req, res, supabase, id);
+  if (req.method === 'PATCH') return handlePatch(req, res, supabase, id, user);
 }
 
 // ── GET ──────────────────────────────────────────────────────────────────────
@@ -107,7 +108,7 @@ async function handleGet(res, supabase, id) {
 
 // ── PATCH ────────────────────────────────────────────────────────────────────
 
-async function handlePatch(req, res, supabase, id) {
+async function handlePatch(req, res, supabase, id, user) {
   const body = req.body || {};
   const { status, assigned_to, title, description } = body;
 
@@ -169,6 +170,21 @@ async function handlePatch(req, res, supabase, id) {
   if (data.created_by)  ids.add(data.created_by);
   if (data.assigned_to) ids.add(data.assigned_to);
   const nameMap = await fetchProfileNames(Array.from(ids));
+
+  // Fail-soft dual-write: assigned_to gewijzigd naar een user (niet null,
+  // niet zelf) → notificeer de nieuwe assignee.
+  if (assigned_to !== undefined && assigned_to && user && assigned_to !== user.id) {
+    createNotification({
+      toUserId:   assigned_to,
+      type:       'ticket.assigned',
+      title:      'Ticket aan jou toegewezen',
+      body:       data.title,
+      linkUrl:    '/modules/tickets-detail.html?id=' + id,
+      entityType: 'ticket',
+      entityId:   id,
+      createdBy:  user.id,
+    }).catch(() => {});
+  }
 
   return res.status(200).json({
     ticket: {

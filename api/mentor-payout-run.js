@@ -27,6 +27,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { createNotification } from './_lib/notify.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -153,6 +154,18 @@ export default async function handler(req, res) {
       await supabaseAdmin.from('mentor_payouts').delete().eq('id', payoutRow.id).then(() => null).catch(() => null);
       throw new Error('entries update: ' + updErr.message);
     }
+
+    // Fail-soft dual-write: mentor notificeren over de uitbetaling.
+    createNotification({
+      toUserId:   mentorId,
+      type:       'payout.paid',
+      title:      'Uitbetaling gedaan',
+      body:       'Je uitbetaling is verwerkt',
+      linkUrl:    '/modules/mentor-dashboard.html',
+      entityType: 'payout',
+      entityId:   payoutRow.id,
+      createdBy:  user.id,
+    }).catch(() => {});
 
     return res.status(200).json({
       ok            : true,

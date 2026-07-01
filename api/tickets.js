@@ -15,6 +15,7 @@
 //        codebase, profiles RLS-state niet bevestigd → pragmatic enrich-pattern).
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
+import { createNotification } from './_lib/notify.js';
 
 const VALID_STATUSES   = ['open', 'in_progress', 'resolved', 'closed'];
 const VALID_TYPES      = ['bug', 'feature', 'question'];
@@ -170,6 +171,20 @@ async function handleCreate(req, res, supabase, user) {
     created_by_name:  nameMap[data.created_by] || null,
     assigned_to_name: null,
   };
+
+  // Fail-soft dual-write: fan-out naar triage-rollen (super_admin + manager).
+  // Helper dedupt user_ids; skippen van de maker zelf gebeurt hier optioneel
+  // (als 'ie in de rol zit krijgt 'ie anders een melding op eigen ticket).
+  createNotification({
+    toRole:     ['super_admin', 'manager'],
+    type:       'ticket.new',
+    title:      'Nieuw ticket',
+    body:       data.title,
+    linkUrl:    '/modules/tickets-detail.html?id=' + data.id,
+    entityType: 'ticket',
+    entityId:   data.id,
+    createdBy:  user.id,
+  }).catch(() => {});
 
   return res.status(201).json({ ticket });
 }
