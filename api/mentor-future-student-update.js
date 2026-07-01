@@ -167,28 +167,9 @@ export default async function handler(req, res) {
       wil_later:   'Wil later starten',
     };
     if (status && PROBLEM_STATUSES.has(status)) {
-      try {
-        const { error: mnErr } = await supabaseAdmin
-          .from('manager_notifications')
-          .insert({
-            onboarding_id:  onboardingId,
-            kind:           'mentor_status',
-            status,
-            customer_name:  ob.customer_name || null,
-            mentor_user_id: user.id,
-            title:          'Mentor-update: ' + (STATUS_LABEL[status] || status),
-            body:           note || null,
-            created_by:     user.id,
-          });
-        if (mnErr) {
-          console.warn('[mentor-future-student-update] manager_notifications insert (soft):', mnErr.message);
-        }
-      } catch (e) {
-        console.warn('[mentor-future-student-update] manager_notifications exception (soft):', e?.message || e);
-      }
-      // Dual-write naar unified notifications-tabel (fail-soft). Multi-rol
-      // fan-out naar zowel 'manager' als 'super_admin' — helper dedupt
-      // user_ids die beide rollen hebben zodat we niet dubbel schrijven.
+      // Notify management via unified notifications-systeem (fail-soft). Multi-rol
+      // fan-out naar zowel 'manager' als 'super_admin' — helper dedupt user_ids
+      // die beide rollen hebben zodat we niet dubbel schrijven.
       const custName = ob.customer_name || 'een student';
       createNotification({
         toRole:     ['manager', 'super_admin'],
@@ -204,9 +185,9 @@ export default async function handler(req, res) {
 
     // 4) Startdatum-pad — mentor wijzigt onboardings.start_date voor zijn
     //    eigen student. Ownership-gate is hierboven al geverifieerd
-    //    (ob.mentor_user_id === user.id). FAIL-SOFT manager-melding zodat
-    //    een geblokkeerde insert op manager_notifications het slagen van
-    //    de start_date-update niet teniet doet.
+    //    (ob.mentor_user_id === user.id). FAIL-SOFT manager-melding via
+    //    createNotification (fire-and-forget); mislukking mag de start_date-
+    //    update niet teniet doen.
     let startDateUpdate = null;
     if (hasStartDate) {
       const { error: sdErr } = await supabaseAdmin
@@ -231,27 +212,8 @@ export default async function handler(req, res) {
       if (sdLogErr) throw new Error('mentor_update start_date log insert: ' + sdLogErr.message);
       startDateUpdate = sdIns;
 
-      try {
-        const { error: mnErr } = await supabaseAdmin
-          .from('manager_notifications')
-          .insert({
-            onboarding_id:  onboardingId,
-            kind:           'mentor_startdate',
-            status:         null,
-            customer_name:  ob.customer_name || null,
-            mentor_user_id: user.id,
-            title:          'Mentor wijzigde startdatum',
-            body:           'Nieuwe startdatum: ' + nlDate,
-            created_by:     user.id,
-          });
-        if (mnErr) {
-          console.warn('[mentor-future-student-update] manager_notifications start_date insert (soft):', mnErr.message);
-        }
-      } catch (e) {
-        console.warn('[mentor-future-student-update] manager_notifications start_date exception (soft):', e?.message || e);
-      }
-      // Dual-write naar unified notifications-tabel (fail-soft) —
-      // startdatum-wijziging door mentor naar management.
+      // Notify management via unified notifications-systeem — startdatum-
+      // wijziging door mentor. Fail-soft.
       const custNameSd = ob.customer_name || 'een student';
       createNotification({
         toRole:     ['manager', 'super_admin'],

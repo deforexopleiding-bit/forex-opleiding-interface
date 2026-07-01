@@ -128,10 +128,9 @@ export default async function handler(req, res) {
 
     // 5) Fase 3b — reassign-notificaties. ALLEEN wanneer er daadwerkelijk
     // gewisseld is van mentor (oldMentor != nieuwe), én er was een vorige
-    // mentor: laat 'm weten dat de student is overgedragen. De oude mentor
-    // verliest toegang tot de onboarding zelf, maar ziet de melding wél in
-    // /api/mentor-notifications-list. Fail-soft op insert-fouten — de assign-
-    // wissel zelf is al doorgevoerd.
+    // mentor: laat 'm weten dat de student is overgedragen via het unified
+    // notifications-systeem. De oude mentor verliest toegang tot de
+    // onboarding zelf, maar ziet de melding wél in de sidebar-bel.
     const oldMentor = ob.mentor_user_id || null;
     const newMentor = updated.mentor_user_id || null;
     if (oldMentor && oldMentor !== newMentor) {
@@ -149,39 +148,20 @@ export default async function handler(req, res) {
         }
       }
       const custName = ob.customer_name || 'Een student';
-      try {
-        await supabaseAdmin
-          .from('mentor_notifications')
-          .insert({
-            mentor_user_id: oldMentor,
-            onboarding_id:  onboardingId,
-            kind:           'reassigned_away',
-            title:          'Student overgedragen',
-            body:           custName + ' is overgedragen aan ' + newMentorName + '.',
-            created_by:     user.id,
-          });
-      } catch (e) {
-        console.warn('[onboarding-assign-mentor] reassigned_away notif (soft):', e?.message || e);
-      }
+      createNotification({
+        toUserId:   oldMentor,
+        type:       'onboarding.reassigned_away',
+        title:      'Student overgedragen · ' + custName,
+        body:       custName + ' is overgedragen aan ' + newMentorName + '.',
+        linkUrl:    '/modules/mentor-onboarding.html',
+        entityType: 'onboarding',
+        entityId:   onboardingId,
+        createdBy:  user.id,
+      }).catch(() => {});
     }
     if (newMentor && newMentor !== oldMentor) {
       const custName = ob.customer_name || 'Een student';
-      try {
-        await supabaseAdmin
-          .from('mentor_notifications')
-          .insert({
-            mentor_user_id: newMentor,
-            onboarding_id:  onboardingId,
-            kind:           'assigned_to_you',
-            title:          'Nieuwe student toegewezen',
-            body:           custName + ' is aan jou toegewezen.',
-            created_by:     user.id,
-          });
-      } catch (e) {
-        console.warn('[onboarding-assign-mentor] assigned_to_you notif (soft):', e?.message || e);
-      }
-      // Dual-write naar unified notifications-tabel (fail-soft; helper
-      // vangt zelf alle fouten af). Zelfde inhoud, andere transport.
+      // Notify de nieuwe mentor via unified notifications-systeem (fail-soft).
       const trajectLabel = ob.traject?.label || null;
       const startDateNL  = (() => {
         if (typeof ob.start_date !== 'string') return null;

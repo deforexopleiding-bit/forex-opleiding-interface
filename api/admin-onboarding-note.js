@@ -5,9 +5,10 @@
 //   1) insert in onboarding_mentor_updates (kind:'note') → verschijnt in de
 //      gedeelde tijdlijn (mentor-students.html toekomst-tab + onboarding-
 //      overzicht detail-modal).
-//   2) als de onboarding een toegewezen mentor heeft → insert in
-//      mentor_notifications (kind:'admin_note', title:'Notitie van management',
-//      body:<note>) → mentor ziet 'm in z'n meldingen-paneel (Fase 3a-B).
+//   2) als de onboarding een toegewezen mentor heeft → notify via het unified
+//      notifications-systeem (createNotification, type:'onboarding.admin_note')
+//      → mentor ziet 'm in de sidebar-bel + krijgt een per-student-badge op
+//      de mentor-onboarding tabel.
 //      Geen mentor toegewezen → alleen de tijdlijn-notitie, geen melding.
 //
 // Permission-gate: seesAll (onboarding.admin) — identiek aan
@@ -17,8 +18,7 @@
 // Body: { onboarding_id: uuid, note: string }.
 // Note: getrimd, niet-leeg, max 2000 tekens.
 //
-// Response 200: { ok:true, update:{kind,note,created_at,created_by},
-//                 notification_id?: uuid|null }.
+// Response 200: { ok:true, update:{kind,note,created_at,created_by} }.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
@@ -78,33 +78,9 @@ export default async function handler(req, res) {
       .single();
     if (upErr) throw new Error('mentor_update insert: ' + upErr.message);
 
-    // 3) Mentor-notificatie (alleen als er een mentor is). Fail-soft:
-    // tijdlijn is al gevuld; als de notificatie-insert faalt, retourneren
-    // we toch 200 + notification_id=null met een warning in de log.
-    let notification_id = null;
+    // 3) Mentor-notificatie via unified notifications-systeem (fail-soft).
+    // Alleen als er een mentor is; geen mentor → alleen tijdlijn-notitie.
     if (ob.mentor_user_id) {
-      try {
-        const { data: notif, error: nErr } = await supabaseAdmin
-          .from('mentor_notifications')
-          .insert({
-            mentor_user_id: ob.mentor_user_id,
-            onboarding_id:  onboardingId,
-            kind:           'admin_note',
-            title:          'Notitie van management',
-            body:           note,
-            created_by:     user.id,
-          })
-          .select('id')
-          .single();
-        if (nErr) {
-          console.warn('[admin-onboarding-note] notification insert (soft):', nErr.message);
-        } else {
-          notification_id = notif?.id || null;
-        }
-      } catch (e) {
-        console.warn('[admin-onboarding-note] notification exception (soft):', e?.message || e);
-      }
-      // Dual-write naar unified notifications-tabel (fail-soft).
       createNotification({
         toUserId:   ob.mentor_user_id,
         type:       'onboarding.admin_note',
@@ -120,7 +96,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok:              true,
       update:          upd,
-      notification_id: notification_id,
+      mentor_notified: !!ob.mentor_user_id,
     });
   } catch (e) {
     console.error('[admin-onboarding-note]', e?.message || e);

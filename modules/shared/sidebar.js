@@ -890,7 +890,15 @@
       '.sb-notif-btn .ti{font-size:18px;line-height:1;}' +
       '.sb-notif-badge{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;line-height:16px;padding:0 5px;border-radius:9px;background:#dc2626;color:#fff;font-size:10.5px;font-weight:700;text-align:center;border:1.5px solid var(--bg);box-sizing:border-box;}' +
       '.sb-notif-badge[hidden]{display:none;}' +
-      '.sb-notif-panel{position:absolute;left:14px;top:60px;width:380px;max-width:92vw;max-height:520px;background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,0.22);z-index:1200;display:flex;flex-direction:column;overflow:hidden;}' +
+      /* position:fixed omdat .sidebar overflow-y:auto heeft — een          */
+      /* absolute-positioned kind zou geclipt worden door de sidebar-      */
+      /* scroll-box, ongeacht de z-index. Fixed t.o.v. viewport, net       */
+      /* rechts van de sidebar (var(--sidebar-w)), boven alles behalve de  */
+      /* mobiele overlay (z-index:10000). Bij de mobiele slide-out (< md)  */
+      /* zit de sidebar links-buiten viewport; het paneel blijft dan       */
+      /* zichtbaar links op left:calc(var(--sidebar-w)+8px) omdat de bel   */
+      /* daar sowieso onbereikbaar is tot de sidebar geopend wordt.        */
+      '.sb-notif-panel{position:fixed;left:calc(var(--sidebar-w, 220px) + 8px);top:14px;width:380px;max-width:92vw;max-height:520px;background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,0.22);z-index:10001;display:flex;flex-direction:column;overflow:hidden;}' +
       '.sb-notif-panel[hidden]{display:none;}' +
       '.sb-notif-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);flex-wrap:wrap;}' +
       '.sb-notif-title{font-size:13px;font-weight:700;color:var(--text);margin-right:auto;}' +

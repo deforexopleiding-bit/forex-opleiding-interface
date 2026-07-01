@@ -395,32 +395,18 @@ export default async function handler(req, res) {
       steps.cancellation_record = { ok: false, error: e?.message || String(e) };
     }
 
-    // g) Mentor-melding (fail-soft).
+    // g) Mentor- + management-melding via unified notifications-systeem
+    // (fail-soft). Alleen bij een geslaagde EXECUTE — de guard hierboven
+    // return't al voor already_cancelled/preview, dus we komen hier
+    // uitsluitend na een afgeronde annulering-cascade. Twee gescheiden
+    // fan-outs (mentor + management) omdat mentor mogelijk NIET in role=
+    // 'manager' zit.
     if (ctx.ob.mentor_user_id) {
-      try {
-        await supabaseAdmin
-          .from('mentor_notifications')
-          .insert({
-            mentor_user_id: ctx.ob.mentor_user_id,
-            onboarding_id:  onboardingId,
-            kind:           'cancelled',
-            title:          'Student geannuleerd',
-            body:           (ctx.ob.customer_name || 'De student') + ' is geannuleerd. Reden: ' + reason,
-            created_by:     user.id,
-          });
-        steps.notify_mentor = { ok: true };
-      } catch (e) {
-        steps.notify_mentor = { ok: false, error: e?.message || String(e) };
-      }
+      steps.notify_mentor = { ok: true };
     } else {
       steps.notify_mentor = { ok: true, skipped: true, reason: 'geen-mentor' };
     }
 
-    // Dual-write naar unified notifications-tabel (fail-soft). Alleen bij
-    // een geslaagde EXECUTE — de guard hierboven return't al voor
-    // already_cancelled/preview, dus we komen hier uitsluitend na een
-    // afgeronde annulering-cascade. Twee gescheiden fan-outs (mentor +
-    // management) omdat mentor mogelijk NIET in role='manager' zit.
     const custNameCancel = ctx.ob.customer_name || 'De student';
     if (ctx.ob.mentor_user_id) {
       createNotification({

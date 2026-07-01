@@ -93,30 +93,8 @@ export default async function handler(req, res) {
       .single();
     if (tlErr) throw new Error('mentor_update insert: ' + tlErr.message);
 
-    let notification_id = null;
+    // Mentor-notificatie via unified notifications-systeem (fail-soft).
     if (ob.mentor_user_id) {
-      try {
-        const { data: notif, error: nErr } = await supabaseAdmin
-          .from('mentor_notifications')
-          .insert({
-            mentor_user_id: ob.mentor_user_id,
-            onboarding_id:  onboardingId,
-            kind:           'start_date_changed',
-            title:          'Startdatum gewijzigd',
-            body:           'Nieuwe startdatum: ' + fmtDateNL(raw),
-            created_by:     user.id,
-          })
-          .select('id')
-          .single();
-        if (nErr) {
-          console.warn('[admin-onboarding-start-date] notification insert (soft):', nErr.message);
-        } else {
-          notification_id = notif?.id || null;
-        }
-      } catch (e) {
-        console.warn('[admin-onboarding-start-date] notification exception (soft):', e?.message || e);
-      }
-      // Dual-write naar unified notifications-tabel (fail-soft).
       createNotification({
         toUserId:   ob.mentor_user_id,
         type:       'onboarding.start_date_changed',
@@ -130,10 +108,9 @@ export default async function handler(req, res) {
     }
 
     return res.status(200).json({
-      ok:              true,
-      start_date:      upd.start_date,
-      update:          tlrow,
-      notification_id: notification_id,
+      ok:         true,
+      start_date: upd.start_date,
+      update:     tlrow,
     });
   } catch (e) {
     console.error('[admin-onboarding-start-date]', e?.message || e);
