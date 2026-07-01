@@ -1065,19 +1065,33 @@
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
       _notifications = Array.isArray(d?.notifications) ? d.notifications : [];
-      _unreadByOnb.clear();
-      for (const n of _notifications) {
-        if (n.read_at != null) continue;
-        if (n.kind !== 'admin_note') continue;
-        if (n.onboarding_id) {
-          _unreadByOnb.set(n.onboarding_id, (_unreadByOnb.get(n.onboarding_id) || 0) + 1);
-        }
-      }
       _renderNotifications(Number(d?.unread_count) || 0);
-      // Rerender tabel zodat per-rij dot meeschakelt.
-      try { _renderTable(Array.from(_byId.values())); } catch {}
     } catch (e) {
       console.warn('[mentor-onboarding] notifications:', e?.message || e);
+    }
+  }
+  // Per-student admin_note-dots lezen sinds PR6a uit het NIEUWE unified
+  // notifications-systeem (/api/notifications-list) i.p.v. de oude
+  // mentor-notifications-list. Filter: type='onboarding.admin_note' + !read_at;
+  // entity_id = onboarding_id (zie api/admin-onboarding-note.js createNotification-call).
+  async function loadAdminNoteDots() {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/notifications-list?type=onboarding.admin_note');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      const items = Array.isArray(d?.notifications) ? d.notifications : [];
+      _unreadByOnb.clear();
+      for (const n of items) {
+        if (n.read_at != null) continue;
+        if (n.type !== 'onboarding.admin_note') continue; // defense (server filter is authoritative)
+        const onbId = n.entity_id || null;
+        if (onbId) _unreadByOnb.set(onbId, (_unreadByOnb.get(onbId) || 0) + 1);
+      }
+      try { _renderTable(Array.from(_byId.values())); } catch {}
+    } catch (e) {
+      console.warn('[mentor-onboarding] admin-note dots:', e?.message || e);
     }
   }
   function _renderNotifications(unreadCount) {
@@ -1128,6 +1142,7 @@
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
       await loadNotifications();
+      loadAdminNoteDots();
     } catch (e) {
       console.warn('[mentor-onboarding] mark-read:', e?.message || e);
     }
@@ -1145,6 +1160,7 @@
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
       await loadNotifications();
+      loadAdminNoteDots();
     } catch (e) {
       console.warn('[mentor-onboarding] mark-all-read:', e?.message || e);
     }
@@ -2264,6 +2280,7 @@
 
     _wireNotificationsPanel();
     loadNotifications();
+    loadAdminNoteDots();
     loadStudents();
 
     // Page-tab-switch (Studenten / Inbox). Inbox-tab is gated op

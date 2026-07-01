@@ -1312,6 +1312,7 @@
     // Fase 3a — Meldingen-paneel wiring + initial load.
     _wireNotificationsPanel();
     loadNotifications();
+    loadAdminNoteBadges();
 
     // Default tab.
     activateTab('studenten');
@@ -1351,26 +1352,41 @@
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
       _notifications = Array.isArray(d?.notifications) ? d.notifications : [];
+      _renderNotifications(Number(d?.unread_count) || 0);
+    } catch (e) {
+      console.warn('[mentor-students] notifications:', e?.message || e);
+    }
+  }
+  // Per-student admin_note-badges lezen sinds PR6a uit het NIEUWE unified
+  // notifications-systeem (/api/notifications-list). Filter server-side op
+  // type='onboarding.admin_note'; server enrich't onboarding-rijen met
+  // onboarding_bubble_user_id zodat we die als map-key kunnen gebruiken
+  // (student cards zijn keyed op bubble_student_id).
+  async function loadAdminNoteBadges() {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/notifications-list?type=onboarding.admin_note');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      const items = Array.isArray(d?.notifications) ? d.notifications : [];
       _unreadByBubbleUser.clear();
-      for (const n of _notifications) {
+      for (const n of items) {
         if (n.read_at != null) continue;
-        // Alleen 'admin_note' levert een per-student-badge op de mijn-
-        // studenten-tab (via onboarding_bubble_user_id). Andere kinds
-        // verschijnen wel in het meldingen-paneel maar niet als rij-badge.
-        if (n.kind !== 'admin_note') continue;
-        if (n.onboarding_bubble_user_id) {
-          const k = String(n.onboarding_bubble_user_id);
+        if (n.type !== 'onboarding.admin_note') continue; // defense
+        const bid = n.onboarding_bubble_user_id;
+        if (bid) {
+          const k = String(bid);
           _unreadByBubbleUser.set(k, (_unreadByBubbleUser.get(k) || 0) + 1);
         }
       }
-      _renderNotifications(Number(d?.unread_count) || 0);
       try {
         if (typeof _applyStudentFilter === 'function') {
           _applyStudentFilter(document.getElementById('msSearch')?.value || '');
         }
       } catch {}
     } catch (e) {
-      console.warn('[mentor-students] notifications:', e?.message || e);
+      console.warn('[mentor-students] admin-note badges:', e?.message || e);
     }
   }
   function _renderNotifications(unreadCount) {
@@ -1421,6 +1437,7 @@
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
       await loadNotifications();
+      loadAdminNoteBadges();
     } catch (e) {
       console.warn('[mentor-students] mark-read:', e?.message || e);
     }
@@ -1438,6 +1455,7 @@
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
       await loadNotifications();
+      loadAdminNoteBadges();
     } catch (e) {
       console.warn('[mentor-students] mark-all-read:', e?.message || e);
     }
