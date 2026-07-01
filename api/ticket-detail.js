@@ -177,7 +177,7 @@ async function handlePatch(req, res, supabase, id, user) {
     createNotification({
       toUserId:   assigned_to,
       type:       'ticket.assigned',
-      title:      'Ticket aan jou toegewezen',
+      title:      'Ticket toegewezen' + (data.title ? (' · ' + data.title) : ''),
       body:       data.title,
       linkUrl:    '/modules/tickets-detail.html?id=' + id,
       entityType: 'ticket',

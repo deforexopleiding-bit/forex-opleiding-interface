@@ -120,7 +120,7 @@ export default async function handler(req, res) {
       createNotification({
         toUserId:   ob.mentor_user_id,
         type:       'onboarding.start_date_changed',
-        title:      'Startdatum gewijzigd',
+        title:      'Startdatum gewijzigd' + (ob.customer_name ? (' · ' + ob.customer_name) : ''),
         body:       'Nieuwe startdatum: ' + fmtDateNL(raw),
         linkUrl:    '/modules/mentor-onboarding.html',
         entityType: 'onboarding',

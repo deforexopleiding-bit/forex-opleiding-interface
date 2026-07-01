@@ -156,10 +156,16 @@ export default async function handler(req, res) {
     }
 
     // Fail-soft dual-write: mentor notificeren over de uitbetaling.
+    const NL_MONTHS_RUN = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'];
+    let periodNLRun = '';
+    if (typeof period.start === 'string') {
+      const m = period.start.match(/^(\d{4})-(\d{2})/);
+      if (m) periodNLRun = (NL_MONTHS_RUN[parseInt(m[2], 10) - 1] || m[2]) + ' ' + m[1];
+    }
     createNotification({
       toUserId:   mentorId,
       type:       'payout.paid',
-      title:      'Uitbetaling gedaan',
+      title:      'Uitbetaling gedaan' + (periodNLRun ? (' · ' + periodNLRun) : ''),
       body:       'Je uitbetaling is verwerkt',
       linkUrl:    '/modules/mentor-dashboard.html',
       entityType: 'payout',

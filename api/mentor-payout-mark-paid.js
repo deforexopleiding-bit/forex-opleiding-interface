@@ -104,14 +104,20 @@ export default async function handler(req, res) {
     try {
       const { data: prow } = await supabaseAdmin
         .from('mentor_payouts')
-        .select('mentor_user_id')
+        .select('mentor_user_id, period_month')
         .eq('id', payoutId)
         .maybeSingle();
       if (prow && prow.mentor_user_id) {
+        const NL_MONTHS_LOCAL = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'];
+        let periodNL = '';
+        if (typeof prow.period_month === 'string') {
+          const m = prow.period_month.match(/^(\d{4})-(\d{2})/);
+          if (m) periodNL = (NL_MONTHS_LOCAL[parseInt(m[2], 10) - 1] || m[2]) + ' ' + m[1];
+        }
         createNotification({
           toUserId:   prow.mentor_user_id,
           type:       'payout.paid',
-          title:      'Uitbetaling gedaan',
+          title:      'Uitbetaling gedaan' + (periodNL ? (' · ' + periodNL) : ''),
           body:       'Je uitbetaling is verwerkt',
           linkUrl:    '/modules/mentor-dashboard.html',
           entityType: 'payout',

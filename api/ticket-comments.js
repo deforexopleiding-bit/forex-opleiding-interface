@@ -72,7 +72,7 @@ async function handleCreate(req, res, supabase, user) {
         createNotification({
           toUserId:   uid,
           type:       'ticket.replied',
-          title:      'Nieuwe reactie op ticket',
+          title:      'Nieuwe reactie' + (ticket.title ? (' · ' + ticket.title) : ''),
           body:       ticket.title,
           linkUrl:    '/modules/tickets-detail.html?id=' + ticket_id,
           entityType: 'ticket',

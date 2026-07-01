@@ -102,13 +102,21 @@ export default async function handler(req, res) {
     // Fail-soft dual-write naar unified notifications-tabel: één melding
     // per succesvol gegenereerde payout-rij (skipt errors + rijen zonder
     // payout_id). helper vangt alle fouten zelf af.
+    const NL_MONTHS_LOCAL = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'];
+    function fmtMonthNLLocal(pm) {
+      if (typeof pm !== 'string') return '';
+      const m = pm.match(/^(\d{4})-(\d{2})/);
+      if (!m) return pm;
+      return (NL_MONTHS_LOCAL[parseInt(m[2], 10) - 1] || m[2]) + ' ' + m[1];
+    }
+    const periodNL = fmtMonthNLLocal(monthStart);
     for (const r of results) {
       if (r && r.mentor_user_id && r.payout_id && !r.error) {
         createNotification({
           toUserId:   r.mentor_user_id,
           type:       'payout.report_ready',
-          title:      'Uitbetalingsrapport staat klaar',
-          body:       monthStart || null,
+          title:      'Uitbetalingsrapport klaar' + (periodNL ? (' · ' + periodNL) : ''),
+          body:       periodNL || monthStart || null,
           linkUrl:    '/modules/mentor-dashboard.html',
           entityType: 'payout',
           entityId:   r.payout_id,

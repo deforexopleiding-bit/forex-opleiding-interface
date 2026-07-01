@@ -256,7 +256,7 @@ export default async function handler(req, res) {
             createNotification({
               toUserId:   existing.created_by,
               type:       'task.completed',
-              title:      'Taak afgerond',
+              title:      'Taak afgerond' + ((t && t.titel) ? (' · ' + t.titel) : ''),
               body:       (t && t.titel) || null,
               linkUrl:    '/modules/taken.html',
               entityType: 'task',
@@ -430,7 +430,7 @@ export default async function handler(req, res) {
               createNotification({
                 toUserId:   uid,
                 type:       'task.assigned',
-                title:      'Nieuwe taak toegewezen',
+                title:      'Nieuwe taak' + (row.titel ? (' · ' + row.titel) : ''),
                 body:       row.titel || null,
                 linkUrl:    '/modules/taken.html',
                 entityType: 'task',

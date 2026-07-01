@@ -911,7 +911,7 @@
       '.sb-notif-item-title{font-size:12.5px;color:var(--text);line-height:1.35;}' +
       '.sb-notif-item.unread .sb-notif-item-title{font-weight:700;}' +
       '.sb-notif-item-body{font-size:11.5px;color:var(--text-dim);margin-top:2px;line-height:1.4;word-break:break-word;}' +
-      '.sb-notif-item-time{font-size:10.5px;color:var(--text-faint);margin-top:3px;}' +
+      '.sb-notif-item-time{font-size:10.5px;color:var(--text-faint);margin-top:3px;opacity:0.75;font-weight:400;text-decoration:none;}' +
       '.sb-notif-empty{padding:24px 14px;text-align:center;color:var(--text-faint);font-size:12.5px;}' +
       '.sb-notif-more{display:block;width:100%;appearance:none;background:transparent;border:none;border-top:1px solid var(--border);color:var(--brand-primary);cursor:pointer;font:inherit;font-size:12px;font-weight:600;padding:10px 12px;text-align:center;}' +
       '.sb-notif-more:hover{background:var(--brand-primary-soft);}' +

@@ -193,7 +193,7 @@ export default async function handler(req, res) {
       createNotification({
         toRole:     ['manager', 'super_admin'],
         type:       'onboarding.mentor_update',
-        title:      'Mentor-update: ' + custName,
+        title:      'Mentor-update · ' + custName,
         body:       (STATUS_LABEL[status] || status) + (note ? ' — ' + note : ''),
         linkUrl:    '/modules/onboarding-hub.html',
         entityType: 'onboarding',
@@ -256,7 +256,7 @@ export default async function handler(req, res) {
       createNotification({
         toRole:     ['manager', 'super_admin'],
         type:       'onboarding.mentor_update',
-        title:      'Mentor-update: ' + custNameSd,
+        title:      'Mentor-update · ' + custNameSd,
         body:       'Startdatum gewijzigd naar ' + nlDate,
         linkUrl:    '/modules/onboarding-hub.html',
         entityType: 'onboarding',

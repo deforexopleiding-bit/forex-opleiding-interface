@@ -62,7 +62,7 @@ export default async function handler(req, res) {
     // aan de oude mentor (Fase 3b: zie blok onderaan).
     const { data: ob, error: obErr } = await supabaseAdmin
       .from('onboardings')
-      .select('id, status, bubble_user_id, mentor_user_id, customer_name')
+      .select('id, status, bubble_user_id, mentor_user_id, customer_name, start_date, traject:onboarding_trajecten(label)')
       .eq('id', onboardingId)
       .maybeSingle();
     if (obErr) throw new Error('onboarding lookup: ' + obErr.message);
@@ -182,11 +182,21 @@ export default async function handler(req, res) {
       }
       // Dual-write naar unified notifications-tabel (fail-soft; helper
       // vangt zelf alle fouten af). Zelfde inhoud, andere transport.
+      const trajectLabel = ob.traject?.label || null;
+      const startDateNL  = (() => {
+        if (typeof ob.start_date !== 'string') return null;
+        const m = ob.start_date.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (!m) return null;
+        return m[3] + '-' + m[2] + '-' + m[1];
+      })();
+      const bodyParts = [];
+      if (trajectLabel) bodyParts.push(trajectLabel);
+      if (startDateNL)  bodyParts.push('start ' + startDateNL);
       createNotification({
         toUserId:   newMentor,
         type:       'onboarding.new_student',
-        title:      'Nieuwe student toegewezen',
-        body:       custName,
+        title:      'Nieuwe student · ' + custName,
+        body:       bodyParts.length ? bodyParts.join(' · ') : custName,
         linkUrl:    '/modules/mentor-onboarding.html',
         entityType: 'onboarding',
         entityId:   onboardingId,

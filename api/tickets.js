@@ -178,7 +178,7 @@ async function handleCreate(req, res, supabase, user) {
   createNotification({
     toRole:     ['super_admin', 'manager'],
     type:       'ticket.new',
-    title:      'Nieuw ticket',
+    title:      'Nieuw ticket' + (data.title ? (' · ' + data.title) : ''),
     body:       data.title,
     linkUrl:    '/modules/tickets-detail.html?id=' + data.id,
     entityType: 'ticket',

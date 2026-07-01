@@ -426,7 +426,7 @@ export default async function handler(req, res) {
       createNotification({
         toUserId:   ctx.ob.mentor_user_id,
         type:       'onboarding.cancelled',
-        title:      'Student geannuleerd',
+        title:      'Student geannuleerd' + (ctx.ob.customer_name ? (' · ' + ctx.ob.customer_name) : ''),
         body:       custNameCancel,
         linkUrl:    '/modules/mentor-onboarding.html',
         entityType: 'onboarding',
@@ -437,7 +437,7 @@ export default async function handler(req, res) {
     createNotification({
       toRole:     ['manager', 'super_admin'],
       type:       'onboarding.cancelled',
-      title:      'Student geannuleerd',
+      title:      'Student geannuleerd' + (ctx.ob.customer_name ? (' · ' + ctx.ob.customer_name) : ''),
       body:       custNameCancel,
       linkUrl:    '/modules/onboarding-hub.html',
       entityType: 'onboarding',

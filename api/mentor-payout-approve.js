@@ -238,7 +238,7 @@ export default async function handler(req, res) {
     createNotification({
       toRole:     ['manager', 'super_admin'],
       type:       'payout.approved',
-      title:      'Payout goedgekeurd',
+      title:      'Payout goedgekeurd · ' + (mentorName || 'Mentor') + (monthNLBody ? (' (' + monthNLBody + ')') : ''),
       body:       (mentorName || 'Mentor') + ' — ' + monthNLBody,
       linkUrl:    '/modules/mentor-payouts-admin.html',
       entityType: 'payout',
