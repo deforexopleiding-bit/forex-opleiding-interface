@@ -26,6 +26,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { createNotification } from './_lib/notify.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // YYYY-MM-DD (Postgres date kolom) — spiegel admin-onboarding-start-date.js.
@@ -185,6 +186,20 @@ export default async function handler(req, res) {
       } catch (e) {
         console.warn('[mentor-future-student-update] manager_notifications exception (soft):', e?.message || e);
       }
+      // Dual-write naar unified notifications-tabel (fail-soft). Multi-rol
+      // fan-out naar zowel 'manager' als 'super_admin' — helper dedupt
+      // user_ids die beide rollen hebben zodat we niet dubbel schrijven.
+      const custName = ob.customer_name || 'een student';
+      createNotification({
+        toRole:     ['manager', 'super_admin'],
+        type:       'onboarding.mentor_update',
+        title:      'Mentor-update: ' + custName,
+        body:       (STATUS_LABEL[status] || status) + (note ? ' — ' + note : ''),
+        linkUrl:    '/modules/onboarding-hub.html',
+        entityType: 'onboarding',
+        entityId:   onboardingId,
+        createdBy:  user.id,
+      }).catch(() => {});
     }
 
     // 4) Startdatum-pad — mentor wijzigt onboardings.start_date voor zijn
@@ -235,6 +250,19 @@ export default async function handler(req, res) {
       } catch (e) {
         console.warn('[mentor-future-student-update] manager_notifications start_date exception (soft):', e?.message || e);
       }
+      // Dual-write naar unified notifications-tabel (fail-soft) —
+      // startdatum-wijziging door mentor naar management.
+      const custNameSd = ob.customer_name || 'een student';
+      createNotification({
+        toRole:     ['manager', 'super_admin'],
+        type:       'onboarding.mentor_update',
+        title:      'Mentor-update: ' + custNameSd,
+        body:       'Startdatum gewijzigd naar ' + nlDate,
+        linkUrl:    '/modules/onboarding-hub.html',
+        entityType: 'onboarding',
+        entityId:   onboardingId,
+        createdBy:  user.id,
+      }).catch(() => {});
     }
 
     // Backwards-compat: response.update blijft het status/note-log-record

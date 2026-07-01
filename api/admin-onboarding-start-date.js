@@ -13,6 +13,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
+import { createNotification } from './_lib/notify.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // YYYY-MM-DD (Postgres date kolom). Voor losse ISO-timestamps slicen we
@@ -115,6 +116,17 @@ export default async function handler(req, res) {
       } catch (e) {
         console.warn('[admin-onboarding-start-date] notification exception (soft):', e?.message || e);
       }
+      // Dual-write naar unified notifications-tabel (fail-soft).
+      createNotification({
+        toUserId:   ob.mentor_user_id,
+        type:       'onboarding.start_date_changed',
+        title:      'Startdatum gewijzigd',
+        body:       'Nieuwe startdatum: ' + fmtDateNL(raw),
+        linkUrl:    '/modules/mentor-onboarding.html',
+        entityType: 'onboarding',
+        entityId:   onboardingId,
+        createdBy:  user.id,
+      }).catch(() => {});
     }
 
     return res.status(200).json({

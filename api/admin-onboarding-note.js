@@ -22,6 +22,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
+import { createNotification } from './_lib/notify.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -103,6 +104,17 @@ export default async function handler(req, res) {
       } catch (e) {
         console.warn('[admin-onboarding-note] notification exception (soft):', e?.message || e);
       }
+      // Dual-write naar unified notifications-tabel (fail-soft).
+      createNotification({
+        toUserId:   ob.mentor_user_id,
+        type:       'onboarding.admin_note',
+        title:      'Notitie van management',
+        body:       note,
+        linkUrl:    '/modules/mentor-onboarding.html',
+        entityType: 'onboarding',
+        entityId:   onboardingId,
+        createdBy:  user.id,
+      }).catch(() => {});
     }
 
     return res.status(200).json({

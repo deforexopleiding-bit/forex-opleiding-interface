@@ -19,6 +19,7 @@
 // (GEEN Bubble-call — provisioning komt in Fase 2.)
 
 import { supabaseAdmin } from './supabase.js';
+import { createNotification } from './_lib/notify.js';
 import {
   DEFAULT_WIZARD_STRUCTURE,
   validateRequired,
@@ -45,7 +46,7 @@ export default async function handler(req, res) {
   try {
     const { data: ob, error: obErr } = await supabaseAdmin
       .from('onboardings')
-      .select('id, traject_id, status, answers, completed_at')
+      .select('id, traject_id, status, answers, completed_at, mentor_user_id, customer_name')
       .eq('token', token)
       .maybeSingle();
     if (obErr) {
@@ -135,6 +136,22 @@ export default async function handler(req, res) {
     ).catch((e) => {
       console.error('[onboarding-complete] automation enroll fail:', e?.message || e);
     });
+
+    // Dual-write naar unified notifications-tabel (fail-soft) — alleen bij
+    // de daadwerkelijke transitie naar 'afgerond' (idempotente al-afgerond-
+    // 200 hierboven return't al eerder). Mentor krijgt bericht dat de
+    // student de intake heeft afgerond.
+    if (ob.mentor_user_id) {
+      createNotification({
+        toUserId:   ob.mentor_user_id,
+        type:       'onboarding.intake_done',
+        title:      'Student heeft intake afgerond',
+        body:       ob.customer_name || null,
+        linkUrl:    '/modules/mentor-onboarding.html',
+        entityType: 'onboarding',
+        entityId:   ob.id,
+      }).catch(() => {});
+    }
 
     return res.status(200).json({ ok: true });
   } catch (e) {

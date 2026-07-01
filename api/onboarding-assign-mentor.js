@@ -18,6 +18,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { bubblePatch } from './_lib/bubble.js';
+import { createNotification } from './_lib/notify.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -179,6 +180,18 @@ export default async function handler(req, res) {
       } catch (e) {
         console.warn('[onboarding-assign-mentor] assigned_to_you notif (soft):', e?.message || e);
       }
+      // Dual-write naar unified notifications-tabel (fail-soft; helper
+      // vangt zelf alle fouten af). Zelfde inhoud, andere transport.
+      createNotification({
+        toUserId:   newMentor,
+        type:       'onboarding.new_student',
+        title:      'Nieuwe student toegewezen',
+        body:       custName,
+        linkUrl:    '/modules/mentor-onboarding.html',
+        entityType: 'onboarding',
+        entityId:   onboardingId,
+        createdBy:  user.id,
+      }).catch(() => {});
     }
 
     return res.status(200).json({

@@ -29,6 +29,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 import { bubblePatch } from './_lib/bubble.js';
+import { createNotification } from './_lib/notify.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -414,6 +415,35 @@ export default async function handler(req, res) {
     } else {
       steps.notify_mentor = { ok: true, skipped: true, reason: 'geen-mentor' };
     }
+
+    // Dual-write naar unified notifications-tabel (fail-soft). Alleen bij
+    // een geslaagde EXECUTE — de guard hierboven return't al voor
+    // already_cancelled/preview, dus we komen hier uitsluitend na een
+    // afgeronde annulering-cascade. Twee gescheiden fan-outs (mentor +
+    // management) omdat mentor mogelijk NIET in role='manager' zit.
+    const custNameCancel = ctx.ob.customer_name || 'De student';
+    if (ctx.ob.mentor_user_id) {
+      createNotification({
+        toUserId:   ctx.ob.mentor_user_id,
+        type:       'onboarding.cancelled',
+        title:      'Student geannuleerd',
+        body:       custNameCancel,
+        linkUrl:    '/modules/mentor-onboarding.html',
+        entityType: 'onboarding',
+        entityId:   onboardingId,
+        createdBy:  user.id,
+      }).catch(() => {});
+    }
+    createNotification({
+      toRole:     ['manager', 'super_admin'],
+      type:       'onboarding.cancelled',
+      title:      'Student geannuleerd',
+      body:       custNameCancel,
+      linkUrl:    '/modules/onboarding-hub.html',
+      entityType: 'onboarding',
+      entityId:   onboardingId,
+      createdBy:  user.id,
+    }).catch(() => {});
 
     return res.status(200).json({
       ok:              true,

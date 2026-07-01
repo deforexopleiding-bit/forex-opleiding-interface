@@ -13,7 +13,7 @@
 //
 // Gebruik:
 //   await createNotification({
-//     toUserId: someUserId,                  // OF toRole: 'manager'
+//     toUserId: someUserId,                  // OF toRole: 'manager' | ['manager','super_admin']
 //     type:     'mentor_status',
 //     title:    'Mentor-update: Geen gehoor',
 //     body:     'Optioneel',
@@ -24,6 +24,10 @@
 //     createdBy:  callerUserId,
 //     dedupWithinMs: 5 * 60 * 1000,          // optioneel
 //   });
+//
+// toRole kan een string of een array van strings zijn. Bij een array worden
+// user_ids van alle rollen samengevoegd en gededupt (Set) — een user met
+// meerdere rollen (bv. manager + super_admin) krijgt dus maar ÉÉN rij.
 //
 // Return: { ok: boolean, count: number }
 //   - count = aantal rijen daadwerkelijk geïnsert (excl. dedup-skips).
@@ -76,13 +80,19 @@ export async function createNotification(opts) {
     const prio = ALLOWED_PRIORITIES.has(priority) ? priority : 'normal';
 
     // Exact één van toUserId / toRole — niet beide, niet geen van beide.
-    const hasUser = !!(toUserId && typeof toUserId === 'string');
-    const hasRole = !!(toRole   && typeof toRole   === 'string');
+    // toRole kan een string of een array van strings zijn.
+    const hasUser  = !!(toUserId && typeof toUserId === 'string');
+    const roleList = Array.isArray(toRole)
+      ? toRole.filter((r) => typeof r === 'string' && r.trim()).map((r) => r.trim())
+      : (typeof toRole === 'string' && toRole.trim() ? [toRole.trim()] : []);
+    const hasRole = roleList.length > 0;
     if (hasUser === hasRole) {
       return { ok: false, count: 0, error: 'exact één van toUserId / toRole vereist' };
     }
 
-    // 1) Bepaal de ontvanger-lijst.
+    // 1) Bepaal de ontvanger-lijst. Multi-rol: query met .in('role', […])
+    //    en dedup de user_ids via een Set zodat een user met meerdere
+    //    rollen (bv. manager + super_admin) niet dubbel geraakt wordt.
     let recipients = [];
     if (hasUser) {
       recipients = [toUserId];
@@ -90,7 +100,7 @@ export async function createNotification(opts) {
       const { data: rows, error } = await supabaseAdmin
         .from('user_roles')
         .select('user_id')
-        .eq('role', toRole);
+        .in('role', roleList);
       if (error) {
         console.warn('[notify] user_roles fetch faalde:', error.message);
         return { ok: false, count: 0, error: error.message };
