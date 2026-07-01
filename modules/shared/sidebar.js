@@ -694,10 +694,18 @@
       // 2) Geen rol-layout → globale standaard.
       if (!layout) {
         var res = await window.AgentShared.apiFetch('/api/app-settings?key=sidebar_layout');
-        if (!res.ok) return; // 404/500 → fail-open
-        var data = await res.json();
-        layout = data && data.value;
-        if (!layout || !Array.isArray(layout.items) || layout.items.length === 0) return;
+        if (res.ok) {
+          var data = await res.json();
+          layout = data && data.value;
+        }
+      }
+      // Geen enkele layout: super_admin krijgt een SYNTHETISCHE layout op
+      // basis van DEFAULT_SUPERADMIN_GROUPS zodat de groepen-Fase-1-seed
+      // meteen zichtbaar is zonder saved config. Voor andere rollen: return
+      // (bestaand fail-open-gedrag).
+      if (!layout || !Array.isArray(layout.items) || layout.items.length === 0) {
+        if (highest !== 'super_admin') return;
+        layout = { items: [] };
       }
     } catch (e) {
       return; // network/JSON error → fail-open
@@ -738,6 +746,196 @@
       if (!el) return;
       nav.insertBefore(el, insertAnchor);
       insertAnchor = el.nextSibling;
+    });
+
+    // 3) Fase 1 — groepen renderen. Alleen als de config groep-velden bevat
+    //    (of we zitten in de super_admin-seed-tak hieronder). Ongegroepeerde
+    //    items blijven plat bovenaan; per unieke group (in volgorde van eerste
+    //    voorkomen) maken we een inklapbare sectie.
+    //
+    //    Backward-compat: als GEEN item een 'group' heeft, doen we niks →
+    //    bestaande layouts zonder groepen renderen identiek aan vroeger.
+    _applyGroupingIfAny(nav, items, layout, highest);
+  }
+
+  // Default seed-groepen voor super_admin: zodra super_admin nog geen
+  // group-config heeft (leeg of geen entries met 'group'), passen we deze
+  // hardcoded mapping toe zodat de sidebar meteen gegroepeerd verschijnt.
+  // Ongegroepeerde entries: dashboard.
+  var DEFAULT_SUPERADMIN_GROUPS = {
+    'onboarding-admin':    'Onboarding',
+    'mentor-onboarding':   'Onboarding',
+    'mentor-students':     'Onboarding',
+    'mentor-dashboard':    'Onboarding',
+    'students-overview':   'Onboarding',
+    'mentoren-beheer':     'Onboarding',
+    'sales':               'Sales & Events',
+    'finance':             'Sales & Events',
+    'events':              'Sales & Events',
+    'follow-up':           'Sales & Events',
+    'email':               'Klanten & Support',
+    'tickets':             'Klanten & Support',
+    'taken':               'Klanten & Support',
+    'lisa':                'Klanten & Support',
+    'agents':              'AI & Agents',
+    'agent-center':        'AI & Agents',
+    'control-center':      'AI & Agents',
+    'kennisbank':          'Kennis & Overig',
+    'meetings':            'Kennis & Overig',
+    'admin':               'Beheer',
+    'secret-area':         'Beheer',
+  };
+  var DEFAULT_SUPERADMIN_ORDER = [
+    'Onboarding', 'Sales & Events', 'Klanten & Support',
+    'AI & Agents', 'Kennis & Overig', 'Beheer',
+  ];
+
+  function _sbEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+
+  function _ensureGroupStyles() {
+    if (document.getElementById('sb-group-styles')) return;
+    var st = document.createElement('style');
+    st.id = 'sb-group-styles';
+    st.textContent =
+      '.nav-group{display:flex;flex-direction:column;margin:6px 0 2px;}' +
+      '.nav-group-header{appearance:none;background:transparent;border:none;color:var(--text-dim);' +
+        'font:inherit;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;' +
+        'padding:8px 14px 6px;display:flex;align-items:center;justify-content:space-between;gap:8px;' +
+        'cursor:pointer;width:100%;text-align:left;}' +
+      '.nav-group-header:hover{color:var(--text);}' +
+      '.nav-group-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
+      '.nav-group-chev{font-size:14px;transition:transform .15s ease;}' +
+      '.nav-group.open .nav-group-chev{transform:rotate(180deg);}' +
+      '.nav-group-items{display:flex;flex-direction:column;overflow:hidden;}' +
+      '.nav-group:not(.open) .nav-group-items{display:none;}' +
+      '';
+    document.head.appendChild(st);
+  }
+
+  function _applyGroupingIfAny(nav, itemMap, layout, highest) {
+    var isSuperAdmin = highest === 'super_admin';
+    var hasAnyGroupCfg = layout.items.some(function (c) {
+      return c && typeof c.group === 'string' && c.group.trim().length > 0;
+    });
+
+    // Effectieve key→group-map. Config wint; voor super_admin zonder config
+    // vullen we default-mapping in (per key waar de config niets over zegt).
+    var keyToGroup = {};
+    layout.items.forEach(function (cfg) {
+      if (!cfg || typeof cfg.key !== 'string') return;
+      var g = typeof cfg.group === 'string' ? cfg.group.trim() : '';
+      if (g) keyToGroup[cfg.key] = g;
+    });
+    if (isSuperAdmin && !hasAnyGroupCfg) {
+      // Seed: pas default-mapping toe op ALLE aanwezige nav-items in de DOM.
+      Object.keys(itemMap).forEach(function (k) {
+        if (DEFAULT_SUPERADMIN_GROUPS[k]) keyToGroup[k] = DEFAULT_SUPERADMIN_GROUPS[k];
+      });
+    }
+
+    // Geen enkele groep? → niks te doen (backward-compat).
+    var groupKeysPresent = Object.keys(keyToGroup);
+    if (groupKeysPresent.length === 0) return;
+
+    // Idempotent: verwijder eventueel oude .nav-group containers, en verplaats
+    // hun kinderen terug naar `nav`. Bewaart originele nav-items.
+    Array.prototype.forEach.call(nav.querySelectorAll('.nav-group'), function (g) {
+      var back = g.querySelectorAll('[data-module]');
+      Array.prototype.forEach.call(back, function (it) { nav.appendChild(it); });
+      if (g.parentNode) g.parentNode.removeChild(g);
+    });
+
+    // Actieve module (voor auto-open van de groep waar 'ie in zit).
+    var activeKey = null;
+    var activeEl = nav.querySelector('[data-module].active');
+    if (activeEl) activeKey = activeEl.getAttribute('data-module');
+
+    // Groeps-volgorde: eerste voorkomen in layout.items (of default-order voor
+    // seed). Groepen worden geplaatst NA de laatste ongegroepeerde nav-item.
+    var groupOrder = [];
+    var seen = {};
+    layout.items.forEach(function (cfg) {
+      if (!cfg || typeof cfg.key !== 'string') return;
+      var g = keyToGroup[cfg.key];
+      if (g && !seen[g]) { seen[g] = true; groupOrder.push(g); }
+    });
+    // Voeg default-order-groepen achteraan toe voor de super_admin-seed (voor
+    // items die niet in layout.items staan maar wel in de default-map zitten).
+    if (isSuperAdmin && !hasAnyGroupCfg) {
+      DEFAULT_SUPERADMIN_ORDER.forEach(function (g) {
+        if (!seen[g]) { seen[g] = true; groupOrder.push(g); }
+      });
+    }
+    if (groupOrder.length === 0) return;
+
+    _ensureGroupStyles();
+
+    // Insertion-point: na het laatste ongegroepeerde nav-item.
+    var insertBefore = null;
+    var kids = nav.children;
+    var lastUngroupedEl = null;
+    for (var i = 0; i < kids.length; i++) {
+      var kid = kids[i];
+      if (kid && kid.getAttribute && kid.getAttribute('data-module')) {
+        var mk = kid.getAttribute('data-module');
+        if (!keyToGroup[mk]) lastUngroupedEl = kid;
+      }
+    }
+    insertBefore = lastUngroupedEl ? lastUngroupedEl.nextSibling : nav.firstChild;
+
+    groupOrder.forEach(function (title) {
+      // Verzamel zichtbare nav-items voor deze groep, in huidige DOM-volgorde.
+      var visibleEls = [];
+      for (var j = 0; j < nav.children.length; j++) {
+        var el = nav.children[j];
+        if (!el || !el.getAttribute) continue;
+        var mk = el.getAttribute('data-module');
+        if (!mk) continue;
+        if (keyToGroup[mk] !== title) continue;
+        if (el.style && el.style.display === 'none') continue; // door layout of RBAC verborgen
+        visibleEls.push(el);
+      }
+      if (visibleEls.length === 0) return; // header verbergen bij lege groep
+
+      var groupEl = document.createElement('div');
+      groupEl.className = 'nav-group';
+      groupEl.setAttribute('data-group', title);
+
+      var header = document.createElement('button');
+      header.type = 'button';
+      header.className = 'nav-group-header';
+      header.innerHTML = '<span class="nav-group-title">' + _sbEsc(title) + '</span>' +
+                        '<i class="ti ti-chevron-down nav-group-chev"></i>';
+
+      var body = document.createElement('div');
+      body.className = 'nav-group-items';
+      visibleEls.forEach(function (el) { body.appendChild(el); });
+
+      // Open/dicht: eerst localStorage, anders open als actieve module in de
+      // groep zit, anders dicht.
+      var lsKey = 'sb_grp_' + title;
+      var storedRaw = null;
+      try { storedRaw = window.localStorage.getItem(lsKey); } catch (_) {}
+      var open;
+      if (storedRaw === '1') open = true;
+      else if (storedRaw === '0') open = false;
+      else open = !!(activeKey && keyToGroup[activeKey] === title);
+      groupEl.classList.toggle('open', !!open);
+
+      header.addEventListener('click', function () {
+        var nowOpen = !groupEl.classList.contains('open');
+        groupEl.classList.toggle('open', nowOpen);
+        try { window.localStorage.setItem(lsKey, nowOpen ? '1' : '0'); } catch (_) {}
+      });
+
+      groupEl.appendChild(header);
+      groupEl.appendChild(body);
+      if (insertBefore) nav.insertBefore(groupEl, insertBefore);
+      else nav.appendChild(groupEl);
     });
   }
 

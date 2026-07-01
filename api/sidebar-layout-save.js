@@ -26,14 +26,16 @@
 //                      | 'marketing'   | 'administratie',
 //     items: [
 //       { key: 'dashboard', visible: true  },
-//       { key: 'email',     visible: false },
+//       { key: 'email',     visible: false, group: 'Klanten & Support' },
 //       ...
 //     ]
 //   }
 //
 // Validatie:
 //   - items is array (verplicht, max 64 entries).
-//   - Per item: { key: string ≤ 64 chars, visible: boolean }.
+//   - Per item: { key: string ≤ 64 chars, visible: boolean, group?: string }.
+//     group is optioneel; als aanwezig moet het een string ≤ 48 chars zijn.
+//     Leeg/ontbrekend group = item is ongegroepeerd (plat gerenderd).
 //   - 'admin' wordt server-side ALTIJD op visible=true geforceerd (anti-
 //     lockout: zonder admin-link kan een super_admin/admin niet meer naar
 //     de manager om 'm weer aan te zetten).
@@ -46,6 +48,7 @@ import { getClientIp } from './_lib/audit-customer.js';
 
 const MAX_ITEMS = 64;
 const MAX_KEY_LEN = 64;
+const MAX_GROUP_LEN = 48;
 const ALLOWED_ROLES = ['super_admin', 'manager', 'sales', 'mentor', 'marketing', 'administratie'];
 
 export default async function handler(req, res) {
@@ -103,7 +106,19 @@ export default async function handler(req, res) {
     seen.add(key);
     // Admin-entry kan nooit verborgen worden (anti-lockout); forceer visible=true.
     const visible = key === 'admin' ? true : raw.visible !== false;
-    normalized.push({ key, visible });
+    // Optionele groepen (Fase 1). Aanwezig maar niet-string → 400. Leeg
+    // (na trim) = ongegroepeerd, dus dan slaan we het veld niet op.
+    let group = null;
+    if (raw.group !== undefined && raw.group !== null) {
+      if (typeof raw.group !== 'string') {
+        return res.status(400).json({ error: `Ongeldige item-group voor key ${key} (moet string zijn)` });
+      }
+      const g = raw.group.trim().slice(0, MAX_GROUP_LEN);
+      if (g) group = g;
+    }
+    const entry = { key, visible };
+    if (group) entry.group = group;
+    normalized.push(entry);
   }
 
   const value = { items: normalized };
