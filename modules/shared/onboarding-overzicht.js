@@ -300,26 +300,28 @@
 
     const body = filtered.map((r) => rowHtml(r)).join('');
     wrap.innerHTML = chipsRow + `
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Klant</th>
-            <th>Pijplijn</th>
-            <th>Traject</th>
-            <th>Status</th>
-            <th>Betaling</th>
-            <th>Bedenktijd</th>
-            <th>Beschikbaarheid</th>
-            <th>Mentor</th>
-            <th>Voortgang</th>
-            <th>Aangemeld</th>
-            <th>Startdatum</th>
-            <th>Bubble</th>
-            <th style="text-align:right">Acties</th>
-          </tr>
-        </thead>
-        <tbody>${body}</tbody>
-      </table>`;
+      <div style="width:100%;overflow-x:auto">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Klant</th>
+              <th>Pijplijn</th>
+              <th>Traject</th>
+              <th>Status</th>
+              <th>Betaling</th>
+              <th>Bedenktijd</th>
+              <th>Beschikbaarheid</th>
+              <th>Mentor</th>
+              <th>Voortgang</th>
+              <th>Aangemeld</th>
+              <th>Startdatum</th>
+              <th>Bubble</th>
+              <th style="text-align:right">Acties</th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>`;
 
     wireRowHandlers();
     _wireIntakeChips();
