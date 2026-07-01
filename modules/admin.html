@@ -90,6 +90,14 @@
     .mm-row.mm-dragging .mm-grip { cursor:grabbing; }
     .mm-label { flex:1; font-size:13.5px; font-weight:600; color:var(--text); }
     .mm-key { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; color:var(--text-faint); background:var(--bg); padding:2px 7px; border-radius:5px; }
+    .mm-group {
+      width:170px; padding:6px 8px; font:inherit; font-size:12.5px;
+      border:1px solid var(--border); border-radius:6px;
+      background:var(--bg); color:var(--text);
+    }
+    .mm-group:focus { outline:none; border-color:var(--brand-primary); box-shadow:0 0 0 3px rgba(59,130,246,0.15); }
+    .mm-group::placeholder { color:var(--text-faint); }
+    .mm-hint { font-size:12px; color:var(--text-dim); margin-top:10px; line-height:1.5; }
     .mm-status { font-size:11.5px; color:var(--text-dim); min-width:64px; text-align:right; }
     .mm-toggle {
       position:relative; width:38px; height:22px;
@@ -3803,7 +3811,36 @@ const MENU_ITEM_DEFS = [
 ];
 const MENU_LOCKED_KEYS = new Set(['admin']); // anti-lockout
 
-let _menuMgrItems = null;   // [{ key, visible }] in huidige UI-volgorde
+// Fase 2 — sidebar-groepen. Mirror van DEFAULT_SUPERADMIN_GROUPS in
+// modules/shared/sidebar.js. Als de super_admin nog geen group-config heeft,
+// pre-fillen we de editor met deze mapping zodat de UI matcht met wat de
+// live sidebar toont. Bewust een kleine duplicatie: sidebar.js is autoritatief;
+// een wijziging hier + daar synchroon houden.
+const MENU_MGR_DEFAULT_SUPERADMIN_GROUPS = {
+  'onboarding-admin':    'Onboarding',
+  'mentor-onboarding':   'Onboarding',
+  'mentor-students':     'Onboarding',
+  'mentor-dashboard':    'Onboarding',
+  'students-overview':   'Onboarding',
+  'mentoren-beheer':     'Onboarding',
+  'sales':               'Sales & Events',
+  'finance':             'Sales & Events',
+  'events':              'Sales & Events',
+  'follow-up':           'Sales & Events',
+  'email':               'Klanten & Support',
+  'tickets':             'Klanten & Support',
+  'taken':               'Klanten & Support',
+  'lisa':                'Klanten & Support',
+  'agents':              'AI & Agents',
+  'agent-center':        'AI & Agents',
+  'control-center':      'AI & Agents',
+  'kennisbank':          'Kennis & Overig',
+  'meetings':            'Kennis & Overig',
+  'admin':               'Beheer',
+  'secret-area':         'Beheer',
+};
+
+let _menuMgrItems = null;   // [{ key, visible, group? }] in huidige UI-volgorde
 let _menuMgrDirty = false;
 let _menuMgrLoaded = false;
 let _menuMgrSaving = false;
@@ -3844,17 +3881,32 @@ function _menuMgrMergeDefaultsAndConfig(config) {
   const seen = new Set();
   const out  = [];
   const configItems = (config && Array.isArray(config.items)) ? config.items : [];
+  let hasAnyGroupCfg = false;
   for (const c of configItems) {
     if (!c || typeof c.key !== 'string') continue;
     if (seen.has(c.key)) continue;
     seen.add(c.key);
     const locked = MENU_LOCKED_KEYS.has(c.key);
-    out.push({ key: c.key, visible: locked ? true : c.visible !== false });
+    const entry = { key: c.key, visible: locked ? true : c.visible !== false };
+    if (typeof c.group === 'string' && c.group.trim()) {
+      entry.group = c.group.trim();
+      hasAnyGroupCfg = true;
+    }
+    out.push(entry);
   }
   for (const def of MENU_ITEM_DEFS) {
     if (seen.has(def.key)) continue;
     seen.add(def.key);
     out.push({ key: def.key, visible: true });
+  }
+  // Fase 2 pre-fill: super_admin bewerkt en heeft nog geen group-config →
+  // seed de editor met dezelfde default-mapping die de sidebar gebruikt.
+  // Zo zien admin-UI en live sidebar dezelfde groepsstructuur.
+  if (_menuMgrRole === 'super_admin' && !hasAnyGroupCfg) {
+    for (const it of out) {
+      const g = MENU_MGR_DEFAULT_SUPERADMIN_GROUPS[it.key];
+      if (g) it.group = g;
+    }
   }
   return out;
 }
@@ -3948,6 +4000,17 @@ function renderMenuManager() {
     wrap.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:8px">Geen items.</div>';
     return;
   }
+  // Groep-namen die momenteel in gebruik zijn → gedeelde <datalist> voor
+  // autocomplete op elk group-input veld (bestaande groep kiezen of nieuwe
+  // typen). Live bijgewerkt in _menuMgrRefreshGroupList().
+  const groupNamesSet = new Set();
+  for (const it of _menuMgrItems) {
+    if (typeof it.group === 'string' && it.group.trim()) groupNamesSet.add(it.group.trim());
+  }
+  const groupOptions = Array.from(groupNamesSet).sort().map((g) =>
+    '<option value="' + esc(g) + '"></option>'
+  ).join('');
+
   const rows = _menuMgrItems.map((it, idx) => {
     const label  = _menuMgrLabel(it.key);
     const locked = MENU_LOCKED_KEYS.has(it.key);
@@ -3958,17 +4021,34 @@ function renderMenuManager() {
       : '<button type="button" class="mm-toggle ' + onCls + '" data-mm-toggle="' + idx + '" aria-label="' + (it.visible ? 'Verbergen' : 'Zichtbaar maken') + '"' + lockTip + '>' +
           '<span class="mm-toggle-ball"></span>' +
         '</button>';
+    const groupVal = typeof it.group === 'string' ? it.group : '';
     return ''
       + '<div class="mm-row" draggable="true" data-mm-idx="' + idx + '" data-mm-key="' + it.key + '">'
       +   '<span class="mm-grip" title="Sleep om volgorde te wijzigen"><i class="ti ti-grip-vertical"></i></span>'
       +   '<span class="mm-label">' + label + '</span>'
+      +   '<input type="text" class="mm-group" list="mmGroupList" data-mm-group="' + idx + '" placeholder="Groep (optioneel)" value="' + esc(groupVal) + '" maxlength="48" />'
       +   '<code class="mm-key">' + it.key + '</code>'
       +   '<span class="mm-status">' + (it.visible ? 'Zichtbaar' : 'Verborgen') + '</span>'
       +   toggle
       + '</div>';
   }).join('');
-  wrap.innerHTML = rows;
+  wrap.innerHTML =
+    '<datalist id="mmGroupList">' + groupOptions + '</datalist>'
+    + rows
+    + '<div class="mm-hint"><i class="ti ti-info-circle"></i> Items met dezelfde groepsnaam worden samen ingeklapt in de sidebar. De volgorde van de groepen volgt de itemvolgorde (sleep om te herordenen — zet items van dezelfde groep bij elkaar).</div>';
   _menuMgrWireRows();
+}
+
+function _menuMgrRefreshGroupList() {
+  const dl = document.getElementById('mmGroupList');
+  if (!dl) return;
+  const set = new Set();
+  for (const it of _menuMgrItems) {
+    if (typeof it.group === 'string' && it.group.trim()) set.add(it.group.trim());
+  }
+  dl.innerHTML = Array.from(set).sort().map((g) =>
+    '<option value="' + esc(g) + '"></option>'
+  ).join('');
 }
 
 function _menuMgrWireRows() {
@@ -3985,6 +4065,23 @@ function _menuMgrWireRows() {
       it.visible = !it.visible;
       _menuMgrMarkDirty();
       renderMenuManager();
+    });
+  });
+
+  // Group-input (Fase 2): update per keystroke → markeer dirty + refresh de
+  // gedeelde datalist zodra een nieuwe naam bijkomt. Geen re-render van rijen
+  // (anders verlies je cursor / typing-state). Empty = ongegroepeerd.
+  wrap.querySelectorAll('[data-mm-group]').forEach((inp) => {
+    inp.addEventListener('input', () => {
+      const idx = parseInt(inp.getAttribute('data-mm-group'), 10);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= _menuMgrItems.length) return;
+      const val = String(inp.value || '').slice(0, 48);
+      const trimmed = val.trim();
+      const it = _menuMgrItems[idx];
+      if (trimmed) it.group = trimmed;
+      else delete it.group;
+      _menuMgrMarkDirty();
+      _menuMgrRefreshGroupList();
     });
   });
 
@@ -4036,10 +4133,16 @@ async function saveMenuManager() {
   try {
     // Defense-in-depth: forceer admin=visible voor de send (server doet 't ook).
     const payload = {
-      items: _menuMgrItems.map((it) => ({
-        key: it.key,
-        visible: MENU_LOCKED_KEYS.has(it.key) ? true : it.visible !== false,
-      })),
+      items: _menuMgrItems.map((it) => {
+        const out = {
+          key: it.key,
+          visible: MENU_LOCKED_KEYS.has(it.key) ? true : it.visible !== false,
+        };
+        if (typeof it.group === 'string' && it.group.trim()) {
+          out.group = it.group.trim();
+        }
+        return out;
+      }),
     };
     // Leeg = globale standaard; backward-compatible: oude clients zonder
     // role-field landen via dezelfde endpoint-tak op 'sidebar_layout'.
