@@ -2522,21 +2522,8 @@ async function submitAttAdd() {
     let toastMsg = 'Aanwezige toegevoegd';
     let toastKind = 'success';
     if (sendInvite) {
-      const inv = respJson?.invite || null;
-      if (!inv) {
-        toastMsg = 'Toegevoegd, invite niet verstuurd';
-        toastKind = 'warning';
-      } else {
-        const waOk = !!inv?.whatsapp?.ok;
-        const mailOk = !!inv?.mail?.ok;
-        if (waOk && mailOk) toastMsg = 'Toegevoegd + uitnodiging (WhatsApp + e-mail) verstuurd';
-        else if (waOk)      toastMsg = 'Toegevoegd + uitnodiging via WhatsApp verstuurd';
-        else if (mailOk)    toastMsg = 'Toegevoegd + uitnodiging via e-mail verstuurd';
-        else {
-          toastMsg = 'Toegevoegd, maar uitnodiging mislukte';
-          toastKind = 'warning';
-        }
-      }
+      toastMsg  = 'Toegevoegd — automations geactiveerd (bevestiging & vragenlijst volgen automatisch)';
+      toastKind = 'success';
     }
     window.AgentShared?.showToast?.(toastMsg, toastKind);
     await loadEvent();
