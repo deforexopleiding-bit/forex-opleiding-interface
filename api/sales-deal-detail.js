@@ -4,6 +4,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { syncDealStatusFromTl } from './_lib/teamleader-deal-sync.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -21,8 +22,25 @@ export default async function handler(req, res) {
   if (!id) return res.status(400).json({ error: 'id vereist' });
 
   try {
-    const { data: deal } = await supabaseAdmin.from('deals').select('*').eq('id', id).maybeSingle();
+    let { data: deal } = await supabaseAdmin.from('deals').select('*').eq('id', id).maybeSingle();
     if (!deal) return res.status(404).json({ error: 'Deal niet gevonden' });
+
+    // Live TL-status pull bij openen — onafhankelijk van de webhook. Fail-soft.
+    // Zet quotation-velden op 'accepted' als TL de deal als 'won' bevestigt en
+    // wij nog niet 'accepted' zijn. Idempotent + veilig (raakt geen invoices/
+    // subscriptions/payments; geen TL-write). Bij .changed her-lezen we de
+    // deal-rij zodat de response de VERSE status bevat.
+    if (deal.tl_deal_id) {
+      try {
+        const syncRes = await syncDealStatusFromTl(deal);
+        if (syncRes.changed) {
+          const { data: refreshed } = await supabaseAdmin.from('deals').select('*').eq('id', id).maybeSingle();
+          if (refreshed) deal = refreshed;
+        }
+      } catch (e) {
+        console.warn('[sales-deal-detail] TL sync (soft):', e?.message || e);
+      }
+    }
 
     const { data: customer } = await supabaseAdmin.from('customers')
       .select('id, is_company, company_name, kvk_number, vat_number, first_name, last_name, email, phone, address_street, address_number, address_postal, address_city, onboarding_status, onboarding_sent_at, onboarding_completed_at')

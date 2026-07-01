@@ -72,6 +72,7 @@
     </div>
     <div class="actions">
       <button class="btn btn-ghost" id="refreshBtn" title="Ververs status">🔄 Vernieuwen</button>
+      <button class="btn btn-ghost" id="tlSyncBtn" title="Haal live status uit Teamleader">↻ Ververs vanuit Teamleader</button>
       <span class="actions" id="detailActions"></span>
     </div>
   </div>
@@ -151,6 +152,35 @@ async function init(){
     }
   } catch (e) { console.warn('[offerte-detail] RBAC load faalde:', e?.message || e); }
   document.getElementById('refreshBtn').addEventListener('click', () => { toast('Verversen…'); load(); });
+  // Expliciete live-pull uit Teamleader: eerst sync-status, dan detail herladen.
+  // sales-deal-detail syncet zelf al bij openen; deze knop is voor "ik weet dat
+  // er in TL iets is veranderd, haal het nu op". Fail-soft toast bij fout.
+  document.getElementById('tlSyncBtn').addEventListener('click', async () => {
+    if (!dealId) return;
+    const btn = document.getElementById('tlSyncBtn');
+    btn.disabled = true;
+    toast('TL-status ophalen…');
+    try {
+      const r = await window.AgentShared.apiFetch('/api/sales-deal-sync-status', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ deal_id: dealId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        toast('Sync mislukt: ' + (d?.error || ('HTTP ' + r.status)));
+      } else if (d?.updated > 0) {
+        toast('Status bijgewerkt uit Teamleader.');
+      } else {
+        toast('Status ongewijzigd.');
+      }
+    } catch (e) {
+      toast('Sync mislukt: ' + (e?.message || e));
+    } finally {
+      btn.disabled = false;
+      load();
+    }
+  });
   // Modal-handlers één keer wiren (modal-DOM is statisch).
   _wireObModal();
   if (!dealId){ document.getElementById('detailBody').innerHTML='<div class="sub">Geen offerte-id.</div>'; return; }

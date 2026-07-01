@@ -169,6 +169,7 @@
       <select class="sr-select" id="quotSeller"><option value="">Alle verkopers</option></select>
       <label class="sr-toggle"><input type="checkbox" id="quotMineToggle"> Alleen mijne</label>
       <button class="sr-iconbtn sr-spacer" id="quotRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+      <button class="sr-iconbtn" id="quotTlSync" title="Ververs alle statussen vanuit Teamleader"><i class="ti ti-cloud-download"></i></button>
     </div>
     <div class="sr-segments" id="quotSegments">
       <button class="sr-seg active" data-status="">Alle</button>
@@ -1056,6 +1057,37 @@ document.querySelectorAll('#quotSegments .sr-seg').forEach(seg => seg.addEventLi
 document.getElementById('quotEntity').addEventListener('change', () => renderQuotations());
 document.getElementById('quotSeller').addEventListener('change', () => renderQuotations());
 document.getElementById('quotRefresh').addEventListener('click', () => loadQuotations());
+// Ververs ALLE open offertes vanuit Teamleader (webhook-onafhankelijk).
+// POST /api/sales-deal-sync-status { all:true } → per-deal deals.info + veilige
+// smalle update. Toast met #bijgewerkt; daarna lijst herladen.
+document.getElementById('quotTlSync').addEventListener('click', async () => {
+  const btn = document.getElementById('quotTlSync');
+  btn.disabled = true;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/sales-deal-sync-status', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ all: true }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      window.AgentShared?.showToast?.('Sync mislukt: ' + (d?.error || ('HTTP ' + r.status)), 'error');
+    } else {
+      const n = Number(d?.updated) || 0;
+      const total = Number(d?.count) || 0;
+      window.AgentShared?.showToast?.(
+        n > 0 ? (n + ' offerte' + (n === 1 ? '' : 's') + ' bijgewerkt uit Teamleader')
+              : (total + ' offerte' + (total === 1 ? '' : 's') + ' gecontroleerd — geen wijzigingen'),
+        'success',
+      );
+    }
+  } catch (e) {
+    window.AgentShared?.showToast?.('Sync mislukt: ' + (e?.message || e), 'error');
+  } finally {
+    btn.disabled = false;
+    loadQuotations();
+  }
+});
 
 // Globale 3-dots menu-controller. Positioneert de pop via position:fixed
 // (getBoundingClientRect) zodat overflow:hidden van de tabel niet afsnijdt;
