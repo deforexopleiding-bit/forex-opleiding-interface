@@ -31,6 +31,7 @@
 // Response 500: database-fout
 
 import { supabaseAdmin } from './supabase.js';
+import { createNotification } from './_lib/notify.js';
 import {
   loadActiveQuestions,
   validateAnswers,
@@ -236,6 +237,60 @@ export default async function handler(req, res) {
     } catch (e) {
       console.error('[assessment-submit] late-link exception:', e?.message || e);
     }
+
+    // Fail-soft dual-write: notify de mentor van de deelnemer (via
+    // onboardings.mentor_user_id op de customer, indien er een klant-
+    // koppeling is via email). Anders fallback naar toRole:['manager'].
+    // Titel bevat deelnemer-naam; body event-context.
+    try {
+      const participantName = [firstName, lastName].filter(Boolean).join(' ') || email;
+      let mentorUserId = null;
+      if (eventId && email) {
+        try {
+          const { data: cust } = await supabaseAdmin
+            .from('customers')
+            .select('id')
+            .ilike('email', email)
+            .maybeSingle();
+          if (cust && cust.id) {
+            const { data: ob } = await supabaseAdmin
+              .from('onboardings')
+              .select('mentor_user_id')
+              .eq('customer_id', cust.id)
+              .not('mentor_user_id', 'is', null)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            mentorUserId = ob?.mentor_user_id || null;
+          }
+        } catch (_) { /* fail-soft */ }
+      }
+      let eventTitleA = null;
+      if (eventId) {
+        try {
+          const { data: ev } = await supabaseAdmin
+            .from('events')
+            .select('title')
+            .eq('id', eventId)
+            .maybeSingle();
+          eventTitleA = ev?.title || null;
+        } catch (_) { /* fail-soft */ }
+      }
+      const bodyText = eventTitleA ? (eventTitleA + ' · ' + email) : email;
+      const payload = {
+        type:       'event.assessment_submitted',
+        title:      'Vragenlijst ingevuld · ' + participantName,
+        body:       bodyText,
+        linkUrl:    eventId ? ('/modules/events-detail.html?id=' + eventId) : '/modules/events-detail.html',
+        entityType: 'event',
+        entityId:   eventId || null,
+      };
+      if (mentorUserId) {
+        createNotification({ toUserId: mentorUserId, ...payload }).catch(() => {});
+      } else {
+        createNotification({ toRole: ['manager'], ...payload }).catch(() => {});
+      }
+    } catch (_) { /* fail-soft */ }
 
     return res.status(200).json({
       ok            : true,

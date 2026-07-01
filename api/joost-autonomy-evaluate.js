@@ -51,6 +51,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getClientIp } from './_lib/audit-customer.js';
+import { createNotification } from './_lib/notify.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -450,6 +451,32 @@ export async function logAutonomyDecision({
   } catch (e) {
     console.error('[joost-autonomy-eval audit]', e && e.message);
   }
+  // Fail-soft dual-write: bij een echte escalatie (stop_action='escalation')
+  // in een PRODUCTIE-run (niet admin_dryrun) → notify management. Throttle
+  // 10 min per conversatie tegen back-to-back berichten.
+  try {
+    if (decision.stop_action === 'escalation' && triggered_by && triggered_by !== 'admin_dryrun' && conv_id) {
+      let convLabel = null;
+      try {
+        const { data: conv } = await admin
+          .from('whatsapp_conversations')
+          .select('display_name, phone_number')
+          .eq('id', conv_id)
+          .maybeSingle();
+        convLabel = conv?.display_name || conv?.phone_number || null;
+      } catch (_) { /* fail-soft */ }
+      createNotification({
+        toRole:        ['manager', 'super_admin'],
+        type:          'agent.escalation',
+        title:         'Agent-escalatie · ' + (convLabel || 'onbekende conversatie'),
+        body:          'Menselijke actie nodig',
+        linkUrl:       '/modules/finance.html',
+        entityType:    'conversation',
+        entityId:      conv_id,
+        dedupWithinMs: 10 * 60 * 1000,
+      }).catch(() => {});
+    }
+  } catch (_) { /* fail-soft */ }
 }
 
 // ---------------------------------------------------------------------------

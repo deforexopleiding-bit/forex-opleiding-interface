@@ -51,6 +51,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { computeDealTotals } from './_lib/deal-total.js';
+import { createNotification } from './_lib/notify.js';
 
 const UUID_RE   = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ATT_SET   = new Set(['aanwezig', 'no_show', 'afgemeld']);
@@ -527,6 +528,38 @@ export default async function handler(req, res) {
     } else if (presentMentorIds.length > 0) {
       summary.warnings.push('Geen mentoren met user_id — ledger overgeslagen');
     }
+
+    // Fail-soft dual-write: notify aanwezige mentoren met user_id. Dedup
+    // via Set + skip de uitvoerder (user.id). Extra events.title lookup
+    // voor een leesbare titel.
+    try {
+      let eventTitle = null;
+      try {
+        const { data: evTitle } = await supabaseAdmin
+          .from('events')
+          .select('title')
+          .eq('id', eventId)
+          .maybeSingle();
+        eventTitle = evTitle?.title || null;
+      } catch (_) { /* fail-soft */ }
+      const recipients = new Set();
+      for (const m of eligibleMentors) {
+        if (m.user_id) recipients.add(m.user_id);
+      }
+      recipients.delete(user.id);
+      for (const uid of recipients) {
+        createNotification({
+          toUserId:   uid,
+          type:       'event.completed',
+          title:      'Event afgerond · ' + (eventTitle || 'zonder titel'),
+          body:       'Bonussen berekend',
+          linkUrl:    '/modules/events-detail.html?id=' + eventId,
+          entityType: 'event',
+          entityId:   eventId,
+          createdBy:  user.id,
+        }).catch(() => {});
+      }
+    } catch (_) { /* fail-soft */ }
 
     return res.status(200).json({
       ok          : true,

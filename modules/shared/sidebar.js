@@ -874,7 +874,9 @@
     channel:   null,
     pollTimer: null,
     userId:    null,
+    expanded:  false,
   };
+  var _NOTIF_COLLAPSE_LIMIT = 6;
 
   function _ensureNotifStyles() {
     if (document.getElementById('sb-notif-styles')) return;
@@ -888,7 +890,7 @@
       '.sb-notif-btn .ti{font-size:18px;line-height:1;}' +
       '.sb-notif-badge{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;line-height:16px;padding:0 5px;border-radius:9px;background:#dc2626;color:#fff;font-size:10.5px;font-weight:700;text-align:center;border:1.5px solid var(--bg);box-sizing:border-box;}' +
       '.sb-notif-badge[hidden]{display:none;}' +
-      '.sb-notif-panel{position:absolute;left:14px;right:14px;top:60px;max-height:520px;background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,0.22);z-index:1200;display:flex;flex-direction:column;overflow:hidden;}' +
+      '.sb-notif-panel{position:absolute;left:14px;top:60px;width:380px;max-width:92vw;max-height:520px;background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,0.22);z-index:1200;display:flex;flex-direction:column;overflow:hidden;}' +
       '.sb-notif-panel[hidden]{display:none;}' +
       '.sb-notif-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);flex-wrap:wrap;}' +
       '.sb-notif-title{font-size:13px;font-weight:700;color:var(--text);margin-right:auto;}' +
@@ -911,6 +913,8 @@
       '.sb-notif-item-body{font-size:11.5px;color:var(--text-dim);margin-top:2px;line-height:1.4;word-break:break-word;}' +
       '.sb-notif-item-time{font-size:10.5px;color:var(--text-faint);margin-top:3px;}' +
       '.sb-notif-empty{padding:24px 14px;text-align:center;color:var(--text-faint);font-size:12.5px;}' +
+      '.sb-notif-more{display:block;width:100%;appearance:none;background:transparent;border:none;border-top:1px solid var(--border);color:var(--brand-primary);cursor:pointer;font:inherit;font-size:12px;font-weight:600;padding:10px 12px;text-align:center;}' +
+      '.sb-notif-more:hover{background:var(--brand-primary-soft);}' +
       '';
     document.head.appendChild(st);
   }
@@ -949,9 +953,12 @@
       list.innerHTML = '<div class="sb-notif-empty">' + (filter === 'unread' ? 'Geen ongelezen meldingen.' : 'Geen meldingen.') + '</div>';
       return;
     }
+    var expanded = _notifState.expanded === true;
+    var visible  = expanded ? arr : arr.slice(0, _NOTIF_COLLAPSE_LIMIT);
+    var remaining = Math.max(0, arr.length - visible.length);
     var html = '';
-    for (var i = 0; i < arr.length; i++) {
-      var it = arr[i];
+    for (var i = 0; i < visible.length; i++) {
+      var it = visible[i];
       var unread = (it.read_at == null);
       var hasLink = (it.link_url && typeof it.link_url === 'string' && it.link_url.trim() !== '');
       html += '<a class="sb-notif-item' + (unread ? ' unread' : '') + '"'
@@ -968,6 +975,12 @@
             +     '</div>'
             +   '</div>'
             + '</a>';
+    }
+    // "Meer bekijken" / "Minder" toggle onderaan de lijst.
+    if (!expanded && remaining > 0) {
+      html += '<button type="button" class="sb-notif-more" data-sb-notif-more="expand">Meer bekijken (' + remaining + ')</button>';
+    } else if (expanded && arr.length > _NOTIF_COLLAPSE_LIMIT) {
+      html += '<button type="button" class="sb-notif-more" data-sb-notif-more="collapse">Minder</button>';
     }
     list.innerHTML = html;
     // Wire klik-handlers (we vangen click af om mark-read async te doen
@@ -990,6 +1003,15 @@
         if (link) {
           // Volg de link — default <a>-gedrag. Geen preventDefault.
         }
+      });
+    }
+    var moreBtn = list.querySelector('.sb-notif-more[data-sb-notif-more]');
+    if (moreBtn) {
+      moreBtn.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        var mode = moreBtn.getAttribute('data-sb-notif-more');
+        _notifState.expanded = (mode === 'expand');
+        _renderNotifList(_notifState.items, _notifState.filter);
       });
     }
   }
@@ -1050,6 +1072,8 @@
     btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
     if (willOpen) {
       // Bij openen herladen — geeft direct verse data + vult het lijst-DOM.
+      // Reset expand-state zodat elke opening met de compacte view begint.
+      _notifState.expanded = false;
       loadNotifs(_notifState.filter);
     }
   }
@@ -1080,6 +1104,8 @@
         for (var k = 0; k < all.length; k++) {
           all[k].classList.toggle('active', all[k] === ev.currentTarget);
         }
+        // Filter-switch begint weer collapsed — nieuwe lijst, dus nieuwe scope.
+        _notifState.expanded = false;
         loadNotifs(f);
       });
     }

@@ -37,6 +37,7 @@ import { extractEmail, findCustomerByEmail } from './_lib/email-extractor.js';
 import { runJoostSuggest } from './_lib/joost-suggest-core.js';
 import { runSimoneSuggest } from './_lib/simone-suggest-core.js';
 import { runOnboardingSuggest } from './_lib/onboarding-agent-core.js';
+import { createNotification } from './_lib/notify.js';
 import { waitUntil } from '@vercel/functions';
 
 // Vercel-eis: bodyParser uit zodat we de raw body kunnen lezen voor HMAC.
@@ -1350,6 +1351,44 @@ export default async function handler(req, res) {
               const insRes = await insertInboundMessage(conv.id, msg);
               if (insRes.inserted) stats.msgs_new++;
               else                 stats.msgs_dup++;
+
+              // 2b. Fail-soft dual-write: notify mentor van deelnemer bij een
+              // NIEUW inbound bericht. Skip bij Meta-retry (duplicate). Skip
+              // als er geen mentor gekoppeld is (via onboardings). Throttle
+              // via dedupWithinMs 10min per conversatie tegen spam-bursts.
+              // Fail-soft: mag de webhook NOOIT vertragen/breken.
+              if (insRes.inserted && conv.customerId) {
+                try {
+                  const { data: ob } = await supabaseAdmin
+                    .from('onboardings')
+                    .select('mentor_user_id')
+                    .eq('customer_id', conv.customerId)
+                    .not('mentor_user_id', 'is', null)
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+                  const mentorUserId = ob?.mentor_user_id || null;
+                  if (mentorUserId) {
+                    const { data: custRow } = await supabaseAdmin
+                      .from('customers')
+                      .select('name')
+                      .eq('id', conv.customerId)
+                      .maybeSingle();
+                    const klantnaam = custRow?.name || (contact?.profile?.name || phoneE164Plus);
+                    const preview80 = String(insRes.body || '').trim().slice(0, 80);
+                    createNotification({
+                      toUserId:       mentorUserId,
+                      type:           'inbox.new_message',
+                      title:          'Nieuw bericht · ' + klantnaam,
+                      body:           preview80 || null,
+                      linkUrl:        '/modules/mentor-onboarding.html#inbox-deeplink',
+                      entityType:     'conversation',
+                      entityId:       conv.id,
+                      dedupWithinMs:  10 * 60 * 1000,
+                    }).catch(() => {});
+                  }
+                } catch (_) { /* fail-soft */ }
+              }
 
               // 3. Agent-flows: per-module reactive suggest + Joost intake
               //
