@@ -28,7 +28,7 @@ const ALLOWED_MODELS     = new Set([
   'claude-haiku-4-5-20251001',
 ]);
 
-function buildPrompt(strategy, tools, conditions, checklist) {
+function buildPrompt(strategy, tools, conditions, checklist, setupModels) {
   const lines = [];
   lines.push('Rol: je bent een quant-review-analyst voor discretionaire prijs-actie-strategieën.');
   lines.push('');
@@ -79,16 +79,46 @@ function buildPrompt(strategy, tools, conditions, checklist) {
   }
   lines.push('');
 
+  // Setup-modellen (eisen-laag). Per model: naam, min_confluence, vereist +
+  // confluentie-eisen. Deze eisen zijn autoritatief: de recognition_spec MOET
+  // ze per model expliciet uitspellen.
+  if (Array.isArray(setupModels) && setupModels.length) {
+    lines.push('DATA — SETUP-MODELLEN (eisen-laag; MOET expliciet in de recognition_spec verwerkt)');
+    setupModels.forEach((m) => {
+      lines.push('- MODEL "' + (m.name || '(zonder naam)') + '"  (min_confluence = ' + Number(m.min_confluence || 0) + ')');
+      const req  = (m.requirements || []).filter((r) => r.kind === 'vereist');
+      const conf = (m.requirements || []).filter((r) => r.kind === 'confluentie');
+      if (req.length) {
+        lines.push('  Vereist (moeten ALLEMAAL aanwezig zijn voor deze setup):');
+        req.forEach((r) => lines.push('  · ' + (r.label || '')));
+      }
+      if (conf.length) {
+        lines.push('  Confluentie (wegen mee tot min_confluence; weight tussen haakjes):');
+        conf.forEach((r) => lines.push('  · ' + (r.label || '') + ' (weight ' + Number(r.weight || 0) + ')'));
+      }
+    });
+    lines.push('');
+  }
+
   lines.push('OPDRACHT');
   lines.push('Smelt bovenstaande tot ÉÉN setup-herkenning. Antwoord in het Nederlands, strikt zo:');
   lines.push('');
-  lines.push('1. Setup in het kort (2–4 zinnen, concreet).');
-  lines.push('2. Herkenning-condities samengevoegd (geordende bullet-lijst met concrete drempels/');
-  lines.push('   candle-condities; verwijs waar nuttig naar de tool-namen).');
-  lines.push('3. Context-filters die meewegen (op basis van marktcondities; wanneer sla je over?).');
-  lines.push('4. Wat nog scherper moet (open vragen, ontbrekende definities, aanbevolen extra voorbeelden).');
+  if (Array.isArray(setupModels) && setupModels.length) {
+    lines.push('1. Overzicht: welke sub-modellen kent deze strategie? Per model 1 zin die de kern beschrijft.');
+    lines.push('2. Per model een blok met:');
+    lines.push('   a. Vereiste condities (uitgeschreven — verwijs naar tool-namen waar nuttig, geef concrete drempels/candle-condities).');
+    lines.push('   b. Confluentie-punten met hun weight en de min_confluence-drempel.');
+    lines.push('   c. Beslisregel expliciet: "Geldig = alle X vereisten aanwezig ÉN som(confluentie-weights die aanwezig zijn) >= " + de min_confluence.');
+    lines.push('3. Context-filters die meewegen (marktcondities; wanneer sla je een setup helemaal over?).');
+    lines.push('4. Wat nog scherper moet (open vragen, ontbrekende definities, aanbevolen extra voorbeelden).');
+  } else {
+    lines.push('1. Setup in het kort (2–4 zinnen, concreet).');
+    lines.push('2. Herkenning-condities samengevoegd (geordende bullet-lijst met concrete drempels/candle-condities; verwijs waar nuttig naar de tool-namen).');
+    lines.push('3. Context-filters die meewegen (op basis van marktcondities; wanneer sla je over?).');
+    lines.push('4. Wat nog scherper moet (open vragen, ontbrekende definities, aanbevolen extra voorbeelden).');
+  }
   lines.push('');
-  lines.push('Wees operationeel, geen theorie zonder toepassing. Verwerk expliciet elke conditie + elke checklist-item.');
+  lines.push('Wees operationeel, geen theorie zonder toepassing. Verwerk expliciet elke conditie + elke checklist-item, en (als er setup-modellen zijn) elke vereist/confluentie-eis per model.');
   return lines.join('\n');
 }
 
@@ -118,6 +148,7 @@ export default async function handler(req, res) {
       { data: checklist },
       { data: tools },
       { data: cond },
+      { data: setupModelsRaw },
     ] = await Promise.all([
       supabaseAdmin.from('sa_strategies')
         .select('*').eq('id', strategyId).eq('owner_id', ctx.userId).maybeSingle(),
@@ -136,14 +167,35 @@ export default async function handler(req, res) {
       supabaseAdmin.from('sa_conditions')
         .select('*').eq('owner_id', ctx.userId).eq('active', true)
         .or('scope.eq.global,strategy_id.eq.' + strategyId),
+      // Setup-modellen voor deze strategie (autoritatief voor de recognition_spec).
+      supabaseAdmin.from('sa_setup_models')
+        .select('id, name, min_confluence, position, active')
+        .eq('owner_id', ctx.userId).eq('strategy_id', strategyId).eq('active', true)
+        .order('position', { ascending: true }),
     ]);
     if (!strat) return res.status(404).json({ error: 'Strategie niet gevonden' });
+
+    // Requirements-per-model ophalen voor de geladen setup-models.
+    const setupModelIds = (setupModelsRaw || []).map((m) => m.id);
+    let setupReqs = [];
+    if (setupModelIds.length) {
+      const { data: reqs } = await supabaseAdmin.from('sa_setup_requirements')
+        .select('id, model_id, label, kind, weight, tool_id, position, active')
+        .eq('owner_id', ctx.userId).in('model_id', setupModelIds)
+        .order('position', { ascending: true });
+      setupReqs = (reqs || []).filter((r) => r.active !== false);
+    }
+    const setupModels = (setupModelsRaw || []).map((m) => ({
+      ...m,
+      requirements: setupReqs.filter((r) => r.model_id === m.id),
+    }));
 
     const promptText = buildPrompt(
       { ...strat, steps: steps || [] },
       tools || [],
       cond  || [],
       checklist || [],
+      setupModels,
     );
 
     let apiResp;

@@ -86,7 +86,7 @@ function safeParseJson(txt) {
 // Multi-timeframe prompt: expliciete labels per beeld, zodat de vision-model
 // weet welk beeld welke TF is. haveH4/haveM15 sturen missing-instructies bij
 // als er maar één timeframe is aangeleverd.
-function buildAnalysisPrompt({ strategy, tools, haveH4, haveM15 }) {
+function buildAnalysisPrompt({ strategy, tools, haveH4, haveM15, setupModels }) {
   const lines = [];
   lines.push('Rol: je bent een strikte prijs-actie-lezer die alleen dingen benoemt die je concreet in de aangeleverde beelden kunt aanwijzen.');
   lines.push('');
@@ -140,8 +140,31 @@ function buildAnalysisPrompt({ strategy, tools, haveH4, haveM15 }) {
     }
   }
   lines.push('');
+  // Setup-modellen (eisen-laag). Per model: naam, min_confluence en de eisen
+  // gesplitst in Vereist en Confluentie (met weight). AI moet zelf het best
+  // passende model kiezen en per eis expliciet met=true/false invullen.
+  if (Array.isArray(setupModels) && setupModels.length) {
+    lines.push('SETUP-MODELLEN — kies het best passende model en toets per eis of die aanwezig is:');
+    setupModels.forEach((m) => {
+      lines.push('- MODEL "' + (m.name || '(zonder naam)') + '"  (min_confluence = ' + Number(m.min_confluence || 0) + ')');
+      const req  = (m.requirements || []).filter((r) => r.kind === 'vereist');
+      const conf = (m.requirements || []).filter((r) => r.kind === 'confluentie');
+      if (req.length) {
+        lines.push('  Vereist (moeten ALLEMAAL aanwezig zijn):');
+        req.forEach((r) => lines.push('  · [' + r.id + '] ' + (r.label || '')));
+      }
+      if (conf.length) {
+        lines.push('  Confluentie (wegen mee tot min_confluence; weight tussen haakjes):');
+        conf.forEach((r) => lines.push('  · [' + r.id + '] ' + (r.label || '') + ' (weight ' + Number(r.weight || 0) + ')'));
+      }
+    });
+    lines.push('');
+  }
   lines.push('OPDRACHT');
   lines.push('Beantwoord in het Nederlands. Geef per detectie het bijhorende timeframe-label mee.');
+  if (Array.isArray(setupModels) && setupModels.length) {
+    lines.push('Kies expliciet EEN model (chosen_model = de exacte modelnaam uit bovenstaande lijst) en toets ELKE eis van dat model tegen wat je in de beelden/context ziet. Voor iedere eis: met=true als 1-op-1 aanwezig, anders false, plus een korte note (1 zin, Nederlands) waarom.');
+  }
   lines.push('');
   lines.push('Geef ALLEEN geldige JSON terug — geen inleiding, geen markdown-fences, geen commentaar. Schema:');
   lines.push('{');
@@ -153,9 +176,19 @@ function buildAnalysisPrompt({ strategy, tools, haveH4, haveM15 }) {
   lines.push('      "confidence": "hoog"|"midden"|"laag" }');
   lines.push('  ],');
   lines.push('  "setup": {');
-  lines.push('    "valid": boolean,                // is dit een geldige setup binnen de strategie (in samenhang)?');
-  lines.push('    "model": string,                 // welk sub-model/naam (bv. "FMES 15m long"); anders "n.v.t."');
-  lines.push('    "grade": "A+"|"B"|"C"|"n.v.t.", // grade op basis van hoeveel checklist-elementen kloppen');
+  lines.push('    "chosen_model": string,         // naam van het gekozen model uit SETUP-MODELLEN; "" als er geen definitie is');
+  lines.push('    "requirements": [');
+  lines.push('       { "id": string,               // exact het eis-id (uuid) uit SETUP-MODELLEN als daar match');
+  lines.push('         "label": string,            // fallback bij afwezig id');
+  lines.push('         "kind": "vereist"|"confluentie",');
+  lines.push('         "met": boolean,             // aanwezig in de beelden/context?');
+  lines.push('         "note": string }            // 1 zin waarom wel/niet');
+  lines.push('    ],');
+  lines.push('    "ai_valid": boolean,             // JOUW eigen oordeel (los van de rule-check)');
+  lines.push('    "ai_grade": "A+"|"B"|"C"|"n.v.t.", // JOUW eigen grade');
+  lines.push('    "valid": boolean,                // legacy — is dit een geldige setup binnen de strategie (in samenhang)?');
+  lines.push('    "model": string,                 // legacy — welk sub-model/naam (bv. "FMES 15m long"); anders "n.v.t."');
+  lines.push('    "grade": "A+"|"B"|"C"|"n.v.t.", // legacy — grade op basis van hoeveel checklist-elementen kloppen');
   lines.push('    "reason": string,                // 1-3 zinnen waarom (Nederlands, benoem H4-bias én 15M-uitvoering waar van toepassing)');
   lines.push('    "missing": string[]              // wat mist er om A+ te halen (incl. ontbrekende timeframe)');
   lines.push('  }');
@@ -285,8 +318,13 @@ async function handleAnalyze(req, res, ctx) {
   const tools = Array.isArray(toolsRaw) ? toolsRaw : [];
 
   let strategy = strategyRaw || null;
+  let setupModels = [];   // owner-gescoped: [ { id, name, min_confluence, requirements:[{id,label,kind,weight,tool_id}] } ]
   if (strategy) {
-    const [{ data: steps }, { data: conditions }] = await Promise.all([
+    const [
+      { data: steps },
+      { data: conditions },
+      { data: setupModelsRaw },
+    ] = await Promise.all([
       supabaseAdmin.from('sa_strategy_steps')
         .select('position, description').eq('strategy_id', strategy.id).eq('owner_id', ctx.userId)
         .order('position', { ascending: true }),
@@ -294,12 +332,30 @@ async function handleAnalyze(req, res, ctx) {
         .select('scope, ctype, label, active')
         .eq('owner_id', ctx.userId)
         .or(`scope.eq.global,strategy_id.eq.${strategy.id}`),
+      supabaseAdmin.from('sa_setup_models')
+        .select('id, name, min_confluence, position, active')
+        .eq('owner_id', ctx.userId).eq('strategy_id', strategy.id).eq('active', true)
+        .order('position', { ascending: true }),
     ]);
     strategy = {
       ...strategy,
       steps:      Array.isArray(steps) ? steps : [],
       conditions: Array.isArray(conditions) ? conditions.filter((c) => c.active !== false) : [],
     };
+    // Bijhorende requirements ophalen voor de geladen models.
+    const modelIds = (setupModelsRaw || []).map((m) => m.id);
+    let allReqs = [];
+    if (modelIds.length) {
+      const { data: reqs } = await supabaseAdmin.from('sa_setup_requirements')
+        .select('id, model_id, label, kind, weight, tool_id, position, active')
+        .eq('owner_id', ctx.userId).in('model_id', modelIds)
+        .order('position', { ascending: true });
+      allReqs = (reqs || []).filter((r) => r.active !== false);
+    }
+    setupModels = (setupModelsRaw || []).map((m) => ({
+      ...m,
+      requirements: allReqs.filter((r) => r.model_id === m.id),
+    }));
   }
 
   // ── 4) Beelden downloaden voor vision-call ────────────────────────────
@@ -311,7 +367,7 @@ async function handleAnalyze(req, res, ctx) {
   // Content-array: tekst-prompt eerst, dan per TF een tekst-label + image-block
   // zodat Claude weet welk beeld welk timeframe is.
   const content = [{ type: 'text', text: buildAnalysisPrompt({
-    strategy, tools, haveH4: !!imgH4, haveM15: !!imgM15,
+    strategy, tools, haveH4: !!imgH4, haveM15: !!imgM15, setupModels,
   }) }];
   if (imgH4) {
     content.push({ type: 'text', text: '--- Beeld 1: 4H context/bias ---' });
@@ -352,12 +408,81 @@ async function handleAnalyze(req, res, ctx) {
 
   // Normaliseer setup/detections.
   const setup = parsed.setup || {};
+
+  // Kies het model waartegen we regel-checken. Voorkeur: AI's chosen_model
+  // gematcht op naam (case-insensitive) tegen setupModels; anders eerste model.
+  const chosenNameRaw = typeof setup.chosen_model === 'string' ? setup.chosen_model.trim() : '';
+  const chosenModel = (setupModels || []).find(
+    (m) => chosenNameRaw && String(m.name || '').toLowerCase() === chosenNameRaw.toLowerCase()
+  ) || (setupModels && setupModels[0]) || null;
+
+  // Normaliseer AI's per-eis-checks. Match op eis-id als de AI die teruggeeft,
+  // anders op label (case-insensitive substring).
+  const aiRequirements = Array.isArray(setup.requirements) ? setup.requirements : [];
+  const requirementResults = chosenModel
+    ? (chosenModel.requirements || []).map((r) => {
+        const hit = aiRequirements.find((x) => {
+          if (typeof x?.id === 'string' && UUID_RE.test(x.id) && x.id === r.id) return true;
+          if (typeof x?.label === 'string' && r.label &&
+              String(x.label).toLowerCase().trim() === String(r.label).toLowerCase().trim()) return true;
+          return false;
+        });
+        return {
+          id:     r.id,
+          label:  r.label,
+          kind:   r.kind,
+          weight: Number(r.weight || 0),
+          met:    !!hit?.met,
+          note:   typeof hit?.note === 'string' ? hit.note.trim() : '',
+        };
+      })
+    : [];
+
+  // ── SERVER-SIDE REGEL-BEREKENING ──────────────────────────────────────
+  // Formule (simpel + uitlegbaar):
+  //   rule_required_ok = alle 'vereist'-eisen met=true
+  //   rule_conf_score  = som van weight over 'confluentie'-eisen met met=true
+  //   rule_valid       = rule_required_ok && rule_conf_score >= min_confluence
+  //   rule_grade:
+  //     - !rule_required_ok                                → 'C'
+  //     - required_ok && conf_score >= 1.5 * min_confluence → 'A+'
+  //     - required_ok && conf_score >= min_confluence      → 'B'
+  //     - anders                                            → 'C'  (net onder drempel)
+  //   Als er geen model is → rule_grade = 'n.v.t.'
+  const reqOnly  = requirementResults.filter((r) => r.kind === 'vereist');
+  const confOnly = requirementResults.filter((r) => r.kind === 'confluentie');
+  const ruleRequiredOk = reqOnly.length > 0 && reqOnly.every((r) => r.met === true);
+  const ruleConfScore  = confOnly.reduce((s, r) => (r.met ? s + Number(r.weight || 0) : s), 0);
+  const minConf        = chosenModel ? Number(chosenModel.min_confluence || 0) : 0;
+  let ruleGrade = 'n.v.t.';
+  let ruleValid = false;
+  if (chosenModel) {
+    if (!ruleRequiredOk)                                        ruleGrade = 'C';
+    else if (ruleConfScore >= 1.5 * minConf && ruleConfScore > 0) ruleGrade = 'A+';
+    else if (ruleConfScore >= minConf)                          ruleGrade = 'B';
+    else                                                        ruleGrade = 'C';
+    ruleValid = ruleRequiredOk && ruleConfScore >= minConf;
+  }
+
   const setupPayload = {
+    // Legacy velden (AI-oordeel) blijven staan voor backward-compat readers.
     valid:   !!setup.valid,
     model:   typeof setup.model  === 'string' ? setup.model.trim()  : 'n.v.t.',
     grade:   GRADE_VALUES.has(setup.grade) ? setup.grade : 'n.v.t.',
     reason:  typeof setup.reason === 'string' ? setup.reason.trim() : '',
     missing: Array.isArray(setup.missing) ? setup.missing.filter((x) => typeof x === 'string') : [],
+    // AI-oordeel (los).
+    ai_valid: typeof setup.ai_valid === 'boolean' ? setup.ai_valid : !!setup.valid,
+    ai_grade: GRADE_VALUES.has(setup.ai_grade) ? setup.ai_grade : (GRADE_VALUES.has(setup.grade) ? setup.grade : 'n.v.t.'),
+    // Nieuwe regel-uitkomst (server-side berekend).
+    chosen_model:     chosenModel ? chosenModel.name : (chosenNameRaw || null),
+    chosen_model_id:  chosenModel ? chosenModel.id   : null,
+    min_confluence:   minConf,
+    requirements:     requirementResults,   // per-eis met/note
+    rule_required_ok: ruleRequiredOk,
+    rule_conf_score:  Math.round(ruleConfScore * 100) / 100,
+    rule_valid:       ruleValid,
+    rule_grade:       ruleGrade,
   };
   const aiSummary = setupPayload.reason || '';
 
@@ -396,7 +521,12 @@ async function handleAnalyze(req, res, ctx) {
       source_url_m15:  ingestM15?.source_url || null,
       strategy_id:     strategy ? strategy.id : null,
       setup_verdict:   setupPayload,
-      grade:           setupPayload.grade,
+      // De canonical grade op de tabelrij is de REGEL-uitkomst (server-side
+      // berekend). Fallback op AI-grade als er geen model is voor deze
+      // strategie (chosen_model=null). Behoudt backward-compat readers.
+      grade:           setupPayload.rule_grade !== 'n.v.t.'
+                         ? setupPayload.rule_grade
+                         : setupPayload.ai_grade,
       ai_summary:      aiSummary,
     })
     .select('id, owner_id, image_path, source_url, source, image_path_h4, image_path_m15, source_url_h4, source_url_m15, strategy_id, setup_verdict, grade, ai_summary, created_at')
