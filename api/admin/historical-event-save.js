@@ -87,7 +87,11 @@ export default async function handler(req, res) {
       ends_at:                null,
       location:               location || null,
       capacity:               1,
-      status:                 'afgerond',
+      // events_status_check: draft|published|cancelled|archived.
+      // 'archived' past bij historisch/al-gebeurd + buiten de actieve
+      // events-lijst; is_historical=true (indien kolom bestaat) markeert
+      // het apart voor de events-complete-flow in 2b-2.
+      status:                 'archived',
       created_by_user_id:     admin.user.id,
       signups_closed:         false,
       signups_closed_at:      null,
