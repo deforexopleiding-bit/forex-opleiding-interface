@@ -450,7 +450,7 @@ function applyTabGates() {
   // staan; alleen Vandaag/Deze week + Wachten-op-subscription + Retentie
   // vallen weg omdat die team-breed of niet persoonlijk zijn.
   const showTeam = can('sales.tab.customers');
-  ['dashActivityBlock', 'dashPendingCard', 'dashRetentionStat'].forEach((id) => {
+  ['dashActivityBlock', 'dashPendingCard', 'dashRetentionStat', 'dashNextBanner'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.style.display = showTeam ? '' : 'none';
   });
@@ -1588,6 +1588,10 @@ async function loadDashboard() {
       dashSet('dashTodayLeads', d.today?.leads); dashSet('dashTodayEvents', d.today?.events); dashSet('dashTodayAppts', d.today?.appointments);
       dashSet('dashWeekLeads', d.week?.leads); dashSet('dashWeekEvents', d.week?.events); dashSet('dashWeekAppts', d.week?.appointments);
       dashSet('dashTomorrowAppts', d.appointments_tomorrow_count); dashSet('dashOpenFollowups', d.open_follow_ups);
+      // Volgende-afspraak-banner is team-content — sla vullen over voor mentor.
+      // De banner-DOM staat sowieso op display:none via applyTabGates; deze
+      // early-return voorkomt de onnodige innerHTML/render.
+      if (!can('sales.tab.customers')) return;
       const banner = document.getElementById('dashNextBanner'); const n = d.next_appointment;
       if (n) {
         const hhmm = new Date(n.scheduled_at).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
