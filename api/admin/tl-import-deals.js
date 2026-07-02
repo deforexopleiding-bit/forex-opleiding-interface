@@ -339,6 +339,13 @@ export default async function handler(req, res) {
             status:                      'active',
             start_date:                  (deal.created_at || new Date().toISOString()).slice(0, 10),
             total_amount:                totalAmount,
+            // Echte TL-aanmaakdatum op de rij zetten (i.p.v. DB-default now()),
+            // anders zou de offertes-lijst alle geïmporteerde deals op de
+            // import-datum tonen. Nemen we óók mee in de UPDATE-tak zodat een
+            // her-import met skip_existing=false reeds geïmporteerde rijen
+            // corrigeert. Historische won-datum (tl_quotation_accepted_at /
+            // _signed_at) blijft via deal.closed_at gevuld — ongewijzigd.
+            created_at:                  deal.created_at || new Date().toISOString(),
           };
           let dealRowId = existing?.id || null;
           if (existing) {
