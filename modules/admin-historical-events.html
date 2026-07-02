@@ -104,11 +104,14 @@ const state = {
 
 async function loadMentors() {
   try {
-    const r = await window.AgentShared.apiFetch('/api/team-members');
+    // Gebruik events-mentors-available (supabaseAdmin, gate op user_roles.role='mentor')
+    // i.p.v. /api/team-members (anon-client → leeg door RLS). Dat is dezelfde bron
+    // als de gewone events-afrond-flow. `id` = team_members.id, wat exact is wat
+    // historical-event-save als event_mentors.team_member_id inserteert.
+    const r = await window.AgentShared.apiFetch('/api/events-mentors-available');
     const d = await r.json();
-    // Filter op user-linked mentoren waar mogelijk; anders alle actieve leden.
-    state.mentors = (d.members || []).filter((m) => !m.type || String(m.type).toLowerCase() === 'mentor' || String(m.role || '').toLowerCase().includes('mentor'));
-    if (!state.mentors.length) state.mentors = d.members || [];
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    state.mentors = d.mentors || [];
     renderMentors();
   } catch (e) {
     document.getElementById('mntPicker').innerHTML = '<div class="msg err">Mentors laden mislukt: ' + esc(e.message) + '</div>';
