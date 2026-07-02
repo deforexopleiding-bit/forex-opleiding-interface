@@ -714,9 +714,14 @@
       return String(s.name || '').toLowerCase().includes(needle);
     });
     if (list.length === 0) {
-      wrap.innerHTML = needle
-        ? `<div class="empty-state"><i class="ti ti-search-off"></i>Geen studenten gevonden voor "${esc(needle)}".</div>`
-        : `<div class="empty-state"><i class="ti ti-users-off"></i>Geen studenten gevonden onder jouw mentorschap.</div>`;
+      if (needle) {
+        wrap.innerHTML = `<div class="empty-state"><i class="ti ti-search-off"></i>Geen studenten gevonden voor "${esc(needle)}".</div>`;
+      } else if (!_state.studentsLoaded) {
+        // Race-fix: fetch loopt nog → laad-staat i.p.v. "geen studenten".
+        wrap.innerHTML = `<div class="empty-state"><i class="ti ti-clock"></i>Studenten laden…</div>`;
+      } else {
+        wrap.innerHTML = `<div class="empty-state"><i class="ti ti-users-off"></i>Geen studenten gevonden onder jouw mentorschap.</div>`;
+      }
       return;
     }
     // Sort-state toepassen vóór render. Status-default is asc → urgent eerst.
@@ -1176,7 +1181,10 @@
 
   // ── Initial load ──────────────────────────────────────────────────────
   async function loadStudents() {
-    _state.studentsLoaded = true;
+    // studentsLoaded pas op true NA de succesvolle fetch — anders denkt
+    // _applyStudentFilter dat de lijst leeg is en toont 'ie "geen studenten"
+    // terwijl de fetch nog loopt (activateTab kan dat pad triggeren via
+    // een input-event op de zoekbalk).
     const apiFetch = window.AgentShared?.apiFetch;
     if (typeof apiFetch !== 'function') { setError('studentsWrap', 'apiFetch niet beschikbaar.'); return; }
     try { if (window._authSharedReady) await window._authSharedReady; } catch {}
@@ -1193,6 +1201,7 @@
       ]);
       const d = await r.json();
       if (!r.ok) throw new Error(d?.error || 'students fetch failed');
+      _state.studentsLoaded = true;
       renderStudents(d);
     } catch (e) {
       console.error('[mentor-students] students:', e?.message || e);
