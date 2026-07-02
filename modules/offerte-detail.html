@@ -136,6 +136,9 @@ const dealId = new URLSearchParams(location.search).get('id');
 // State voor de F0.2 onboarding-aanmeld-knop. Pas zichtbaar als de
 // gebruiker 'onboarding.create' heeft; server gate't sowieso.
 let _canCreateOnb = false;
+// Mentor mag getekende offertes wel bekijken maar NIET omzetten naar
+// abonnement — die knop hangt aan sales.tab.subscriptions.
+let _canManageSubs = false;
 // Snapshot van de huidige customer-context voor de modal (uit render()).
 let _obCtx = { customerId: null, customerName: '', startDate: null };
 
@@ -148,7 +151,8 @@ async function init(){
   try {
     if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
       await window.RBAC.ensurePermissionsLoaded();
-      _canCreateOnb = !!window.RBAC.canSync && window.RBAC.canSync('onboarding.create');
+      _canCreateOnb  = !!window.RBAC.canSync && window.RBAC.canSync('onboarding.create');
+      _canManageSubs = !!window.RBAC.canSync && window.RBAC.canSync('sales.tab.subscriptions');
     }
   } catch (e) { console.warn('[offerte-detail] RBAC load faalde:', e?.message || e); }
   document.getElementById('refreshBtn').addEventListener('click', () => { toast('Verversen…'); load(); });
@@ -287,9 +291,13 @@ function render(d){
     const obF0Btn = (_canCreateOnb && _obCtx.customerId)
       ? `<button class="btn" style="background:#0a2f63;color:#fff" onclick="openObModal()" type="button"><i class="ti ti-clipboard-plus"></i> Onboarding-traject aanmelden</button>`
       : '';
-    // Getekende offerte: alleen bekijken + omzetten + onboarding-actie. Bewerken
-    // is uitgezet (server-side blokkeert het ook — SALES_DEAL_SIGNED).
-    btns = `<a class="btn btn-success" href="/modules/subscription-wizard.html?deal_id=${esc(deal.id)}">Omzetten naar abonnement</a> ${obF0Btn} ${tlBtn}`;
+    // Getekende offerte: alleen bekijken + (optioneel) omzetten + onboarding-actie.
+    // Bewerken is uitgezet (server-side blokkeert het ook — SALES_DEAL_SIGNED).
+    // Omzetten-knop hangt aan sales.tab.subscriptions — mentor ziet 'm niet.
+    const convertBtn = _canManageSubs
+      ? `<a class="btn btn-success" href="/modules/subscription-wizard.html?deal_id=${esc(deal.id)}">Omzetten naar abonnement</a>`
+      : '';
+    btns = `${convertBtn} ${obF0Btn} ${tlBtn}`;
   } else if (st==='sent'){
     btns = `<button class="btn" onclick="doSend()">Opnieuw versturen</button> <button class="btn" style="background:#f59e0b;color:#fff" onclick="doMarkAccepted()">Markeer als getekend</button> <button class="btn btn-danger" onclick="doDelete()">Verwijderen</button> ${tlBtn}`;
   } else if (st==='draft'){

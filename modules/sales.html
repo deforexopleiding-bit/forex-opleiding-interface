@@ -187,7 +187,7 @@
     <div class="sr-filterstrip">
       <div class="sr-search"><input id="subSearch" type="search" placeholder="Zoek klant of omschrijving…" /></div>
       <label class="sr-toggle"><input type="checkbox" id="subMineToggle"> Alleen mijne</label>
-      <a class="sr-abtn success sr-spacer" href="/modules/subscription-wizard.html?mode=standalone">+ Nieuw abonnement (zonder offerte)</a>
+      <a id="newSubBtn" class="sr-abtn success sr-spacer" href="/modules/subscription-wizard.html?mode=standalone">+ Nieuw abonnement (zonder offerte)</a>
       <button class="sr-iconbtn" id="subRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
     </div>
     <div class="sr-segments" id="subSegments">
@@ -426,6 +426,11 @@ function applyTabGates() {
     btn.style.display = allowed ? '' : 'none';
     if (!allowed) btn.classList.remove('active');
   });
+  // Statische "+ Nieuw abonnement (zonder offerte)"-knop mag alleen zichtbaar
+  // zijn voor wie ook abonnementen mag beheren. Mentor met alleen offertes-
+  // rechten ziet 'm dus niet.
+  const newSubBtn = document.getElementById('newSubBtn');
+  if (newSubBtn) newSubBtn.style.display = can('sales.tab.subscriptions') ? '' : 'none';
 }
 function firstVisibleTabKey() {
   const btn = Array.from(document.querySelectorAll('.tab[data-tab]'))
@@ -813,7 +818,11 @@ function quotationActions(q) {
   const dots = `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer acties"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${items.join('')}</div></div>`;
   // primary actie per status
   let primary = '', showEye = false;
-  if (st === 'accepted' || st === 'signed') primary = `<a class="sr-abtn success" href="/modules/subscription-wizard.html?deal_id=${esc(q.deal_id)}">Omzetten naar abonnement</a>`;
+  // "Omzetten naar abonnement" alleen voor wie ook abonnementen mag beheren.
+  // Mentor met alleen offertes-rechten ziet 'm niet — getekende offerte valt
+  // dan terug op oog-icoon + TL-link (showEye=true).
+  if ((st === 'accepted' || st === 'signed') && can('sales.tab.subscriptions')) primary = `<a class="sr-abtn success" href="/modules/subscription-wizard.html?deal_id=${esc(q.deal_id)}">Omzetten naar abonnement</a>`;
+  else if (st === 'accepted' || st === 'signed') showEye = true;
   else if (st === 'sent') primary = `<button class="sr-abtn primary" data-send="${esc(q.deal_id)}">Opnieuw versturen</button>`;
   else if (st === 'failed') { primary = `<button class="sr-abtn warning" data-push="${esc(q.deal_id)}">Retry push</button>`; showEye = true; }
   else if (st === 'draft' && q.tl_quotation_id) { primary = `<button class="sr-abtn primary" data-send="${esc(q.deal_id)}">Versturen</button>`; showEye = true; }
@@ -1597,9 +1606,12 @@ async function loadDashboard() {
     if (cnt) cnt.textContent = d.count ? `(${d.count})` : '';
     const items = (d.items || []).slice(0, 5);
     if (!items.length) { wrap.innerHTML = '<div class="sr-empty">Geen openstaande subscriptions.</div>'; return; }
+    // Omzetten-knop alleen tonen als de user abonnementen mag beheren.
+    // Mentor ziet alleen de klant-regel zonder actie-knop.
+    const canConv = can('sales.tab.subscriptions');
     wrap.innerHTML = items.map(it => `<div class="sr-userline" style="justify-content:space-between;padding:8px 0;border-bottom:.5px solid var(--border)">
       <span class="sr-userline">${avatarHtml(it.customer_name)}<span>${esc(it.customer_name || '—')}</span></span>
-      <a class="sr-abtn success" href="/modules/subscription-wizard.html?deal_id=${encodeURIComponent(it.deal_id)}">Omzetten naar abonnement</a></div>`).join('');
+      ${canConv ? `<a class="sr-abtn success" href="/modules/subscription-wizard.html?deal_id=${encodeURIComponent(it.deal_id)}">Omzetten naar abonnement</a>` : ''}</div>`).join('');
   } catch (e) { wrap.innerHTML = '<div class="sr-empty">Laden mislukt.</div>'; }
 }
 // Avatar-helper (kleur op naam-hash) — gedeeld door alle tabs in latere fases.

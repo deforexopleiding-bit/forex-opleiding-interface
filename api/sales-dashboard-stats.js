@@ -28,7 +28,7 @@
 import { supabase, supabaseAdmin } from './supabase.js';
 import { computeMetrics } from './follow-up-metrics.js';
 
-const ALLOWED_ROLES = ['super_admin', 'admin', 'manager', 'sales'];
+const ALLOWED_ROLES = ['super_admin', 'admin', 'manager', 'sales', 'mentor'];
 const INACTIVE_STATUSES = ['cancelled', 'verplaatst', 'verwijderd'];
 
 export default async function handler(req, res) {
@@ -61,8 +61,9 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Toegang geweigerd', role: profile.role });
   }
 
-  // Sales rol → eigen scope; andere rollen → globaal
-  const ownerScope = profile.role === 'sales' ? user.id : null;
+  // Sales én mentor → eigen scope; admin/manager/super_admin → globaal.
+  // Mentor kan Sales-Dashboard krijgen via RBAC maar mag alleen eigen cijfers zien.
+  const ownerScope = (profile.role === 'sales' || profile.role === 'mentor') ? user.id : null;
 
   try {
     // Parallel fetch alle widget-data (7 queries, geen volgorde-afhankelijkheid).
