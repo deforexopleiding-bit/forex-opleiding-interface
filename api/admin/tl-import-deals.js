@@ -33,6 +33,11 @@ import { verifyAdmin, supabaseAdmin } from '../supabase.js';
 import { tlFetch, getActiveToken } from '../_lib/teamleader-token.js';
 import { getClientIp } from '../_lib/audit-customer.js';
 
+// Vercel Pro-plan: verhoog de function-timeout naar 300s zodat een grotere
+// deals-import niet in een generieke HTML-timeoutpagina eindigt. Bij fout
+// gedurende de run geeft de outer try/catch nog steeds JSON terug.
+export const config = { maxDuration: 300 };
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function tlCall(path, body, attempt = 0) {
@@ -113,6 +118,10 @@ export default async function handler(req, res) {
   };
   const details = [];
 
+  // has_more = we hebben TL-deals in de lijst die de cap overschreden hebben
+  // (idempotent: gebruiker kan runImport nogmaals draaien om verder te gaan).
+  let hasMore = false;
+
   try {
     // 1. Paginate TL deals.list.
     const tlDeals = [];
@@ -129,6 +138,9 @@ export default async function handler(req, res) {
       tlDeals.push(...batch);
       if (batch.length < 100) break;
     }
+    // Als we de cap raken en er waarschijnlijk nog TL-deals over zijn, markeer
+    // has_more zodat de UI een 'volgende batch'-knop kan tonen.
+    if (tlDeals.length > maxDeals) hasMore = true;
     const work = tlDeals.slice(0, maxDeals);
 
     // 2. Per deal.
@@ -382,9 +394,16 @@ export default async function handler(req, res) {
       });
     } catch (e) { console.error('[tl-import-deals] audit:', e.message); }
 
-    return res.status(200).json({ dry_run, totals, details });
+    return res.status(200).json({ dry_run, totals, details, has_more: hasMore });
   } catch (e) {
-    console.error('[tl-import-deals]', e.message);
-    return res.status(500).json({ error: e.message, totals, details });
+    // Alle fouten — óók onverwachte throws diep in de flow — landen hier als
+    // JSON, zodat de frontend nooit een HTML-timeoutpagina hoeft te parsen.
+    console.error('[tl-import-deals]', e?.message || e, e?.stack || '');
+    try {
+      return res.status(500).json({ error: e?.message || String(e), totals, details });
+    } catch (_) {
+      // Als zelfs de JSON-write faalt (bv. headers al gesend), val stil terug.
+      return;
+    }
   }
 }

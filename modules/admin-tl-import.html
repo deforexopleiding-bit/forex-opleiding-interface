@@ -78,6 +78,20 @@
 <script src="/modules/shared/theme-shared.js"></script>
 <script>
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+
+// Robuuste response-parser: Vercel serveert soms een HTML-foutpagina
+// (bv. bij function-timeout of 502). res.json() crasht dan met
+// "Unexpected token 'A'…". Lees eerst als tekst; probeer JSON.parse;
+// bij mislukking: gooi een leesbare error zodat de UI 'm netjes toont.
+async function readJsonOrThrow(res) {
+  const raw = await res.text();
+  try { return JSON.parse(raw); }
+  catch (_) {
+    const snippet = String(raw || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+    throw new Error(snippet || `HTTP ${res.status}`);
+  }
+}
+
 const history = [];
 let resultFilter = 'alle', lastDetails = [];
 let resultFilterDeals = 'alle', lastDetailsDeals = [];
@@ -95,7 +109,7 @@ async function runImport() {
   document.getElementById('cfgErr').textContent = '';
   try {
     const res = await window.AgentShared.apiFetch('/api/admin/tl-import-subscriptions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    const d = await res.json();
+    const d = await readJsonOrThrow(res);
     if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
     history.unshift({ at: new Date(), kind: 'subs', dry: d.dry_run, totals: d.totals });
     lastDetails = d.details || [];
@@ -116,7 +130,7 @@ async function runImportDeals() {
   document.getElementById('cfgErrDeals').textContent = '';
   try {
     const res = await window.AgentShared.apiFetch('/api/admin/tl-import-deals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    const d = await res.json();
+    const d = await readJsonOrThrow(res);
     if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
     history.unshift({ at: new Date(), kind: 'deals', dry: d.dry_run, totals: d.totals });
     lastDetailsDeals = d.details || [];
@@ -129,8 +143,12 @@ function renderResultDeals(d) {
   const box = document.getElementById('resultBoxDeals'); box.style.display = '';
   const t = d.totals || {};
   const kpi = (l, v, c) => `<div class="sr-stat"><div class="sr-stat-l">${l}</div><div class="sr-stat-v"${c ? ` style="color:${c}"` : ''}>${v}</div></div>`;
+  const moreHint = d.has_more
+    ? `<div class="sr-empty" style="background:rgba(245,158,11,.08);color:#b45309;border:1px solid rgba(245,158,11,.25);border-radius:8px;padding:10px 12px;margin-bottom:12px;text-align:left;font-size:12.5px"><i class="ti ti-repeat"></i> Er zijn nog meer TL-deals dan deze batch. Draai opnieuw met dezelfde instellingen om de volgende batch te importeren (idempotent — al-geïmporteerde deals worden overgeslagen).</div>`
+    : '';
   box.innerHTML = `<div class="sr-card">
     <div class="sr-card-h">Resultaat deals ${d.dry_run ? '<span class="sr-tag warning">Dry-run</span>' : '<span class="sr-tag green">Live</span>'}</div>
+    ${moreHint}
     <div class="sr-grid sr-grid-4" style="margin-bottom:14px">
       ${kpi('Deals verwerkt', t.deals_processed || 0)}
       ${kpi('Deals geïmporteerd', t.deals_imported || 0, '#059669')}

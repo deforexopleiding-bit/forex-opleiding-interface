@@ -13,6 +13,11 @@ import { verifyAdmin, supabaseAdmin } from '../supabase.js';
 import { tlFetch, getActiveToken } from '../_lib/teamleader-token.js';
 import { getClientIp } from '../_lib/audit-customer.js';
 
+// Vercel Pro-plan: verhoog de function-timeout naar 300s zodat een grotere
+// subs-import niet op een HTML-timeoutpagina eindigt. Bij fout gedurende de
+// run geeft de outer try/catch nog steeds JSON terug.
+export const config = { maxDuration: 300 };
+
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // TL-call met throttle + 429-backoff.
