@@ -142,15 +142,40 @@ export default async function handler(req, res) {
       const skipped  = uniq.filter((id) => !validIds.includes(id));
       if (skipped.length) warnings.push(`Overgeslagen mentor-ids (niet gevonden/inactief): ${skipped.join(', ')}`);
       if (validIds.length) {
-        const rows = validIds.map((tm) => ({
-          event_id:       eventId,
-          team_member_id: tm,
-          was_present:    true,
-        }));
-        const { data: mData, error: mErr } = await supabaseAdmin.from('event_mentors')
-          .insert(rows).select('id, team_member_id, was_present');
-        if (mErr) warnings.push('event_mentors insert: ' + mErr.message);
-        else      mentorsInserted = mData || [];
+        // event_mentors heeft samengestelde PK (event_id, team_member_id) en
+        // geen id-kolom. Reguliere insert (events-mentor-assign) zet
+        // event_id + team_member_id + added_by_user_id; added_at heeft
+        // default now(). Was_present zetten we HIER meteen op true (bij een
+        // historisch event weten we al wie er was — geen aparte pas nodig).
+        //
+        // Per-row insert i.p.v. bulk, met try/catch: bij 23505 (mentor al
+        // gekoppeld) → warning + skip; andere fout → warning + skip die ene.
+        // Zo blokkeert één conflict de andere mentoren niet.
+        for (const tm of validIds) {
+          const { data: mRow, error: mErr } = await supabaseAdmin.from('event_mentors')
+            .insert({
+              event_id:         eventId,
+              team_member_id:   tm,
+              was_present:      true,
+              added_by_user_id: admin.user.id,
+            })
+            .select('event_id, team_member_id, was_present, added_at, added_by_user_id')
+            .single();
+          if (mErr) {
+            if (mErr.code === '23505') {
+              // Al gekoppeld — zorg dat was_present=true wél gezet is (idempotent update).
+              const { error: upErr } = await supabaseAdmin.from('event_mentors')
+                .update({ was_present: true })
+                .eq('event_id', eventId).eq('team_member_id', tm);
+              if (upErr) warnings.push(`event_mentors update ${tm}: ${upErr.message}`);
+              warnings.push(`Mentor ${tm} was al gekoppeld — was_present bijgewerkt naar true`);
+            } else {
+              warnings.push(`event_mentors insert ${tm}: ${mErr.message}`);
+            }
+            continue;
+          }
+          mentorsInserted.push(mRow);
+        }
       }
     }
 
