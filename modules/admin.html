@@ -214,6 +214,7 @@
       <button class="admin-tab" data-tab="integraties" onclick="switchAdminTab('integraties')">Integraties</button>
       <button class="admin-tab" data-tab="approval-queue" data-view="approval-queue" id="approvalsTabBtn" onclick="switchAdminTab('approval-queue')" style="display:none">Approval-queue <span id="approvalsTabBadge" class="approvals-tab-badge hidden">0</span></button>
       <button class="admin-tab" data-tab="menu-manager" id="menuMgrTabBtn" onclick="switchAdminTab('menu-manager')" style="display:none">Menu beheer</button>
+      <button class="admin-tab" id="histEventsTabBtn" style="display:none" onclick="window.location.href='/modules/admin-historical-events.html'">Historische events</button>
       <!-- Joost (AI) tab VERHUISD naar Finance > Instellingen (Groep D, juni 2026). -->
       <!-- WhatsApp Connection + WhatsApp Templates VERHUISD naar Finance > Instellingen (PR-4, juni 2026). -->
     </div>
@@ -1284,6 +1285,10 @@ async function init() {
   if (currentProfile.role === 'super_admin') {
     const rb = document.getElementById('rechtenTabBtn');
     if (rb) rb.style.display = '';
+    // Historische events: super_admin-only, navigeert naar de aparte tool
+    // (in-page-panel niet nodig — de tool is een volledige aparte pagina).
+    const heb = document.getElementById('histEventsTabBtn');
+    if (heb) heb.style.display = '';
   }
 
   // WhatsApp Connection + WhatsApp Templates tabs VERHUISD naar
