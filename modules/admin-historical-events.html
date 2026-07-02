@@ -24,9 +24,20 @@
     .pill{display:inline-block;padding:1px 8px;border-radius:12px;font-size:10.5px;font-weight:700;background:var(--bg-elev-2,#f1f5f9);color:var(--text-dim)}
     .pill.g{background:rgba(37,199,155,.14);color:#059669}
     .pill.a{background:rgba(245,158,11,.14);color:#b45309}
+    .pill.r{background:rgba(220,38,38,.1);color:#b91c1c}
     .msg{font-size:12.5px;padding:8px 10px;border-radius:8px;margin-top:8px}
     .msg.err{background:rgba(220,38,38,.08);color:#b91c1c;border:1px solid rgba(220,38,38,.25)}
     .msg.ok{background:rgba(37,199,155,.08);color:#047857;border:1px solid rgba(37,199,155,.3)}
+    .msg.warn{background:rgba(245,158,11,.08);color:#b45309;border:1px solid rgba(245,158,11,.25)}
+    .preview-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
+    .preview-table th,.preview-table td{padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)}
+    .preview-table th{font-size:11px;color:var(--text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.02em}
+    .preview-table td.num{text-align:right;font-family:ui-monospace,monospace}
+    .preview-modal{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:flex-start;justify-content:center;z-index:9999;padding:40px 12px;overflow-y:auto}
+    .preview-modal.open{display:flex}
+    .preview-modal .box{background:var(--surface-card,#fff);border:1px solid var(--border);border-radius:12px;max-width:900px;width:100%;padding:20px 22px;box-shadow:0 20px 60px rgba(0,0,0,.15)}
+    .preview-modal .box h2{font-size:16px;margin-bottom:4px}
+    .preview-modal .box .close{float:right;background:none;border:0;color:var(--text-dim);font-size:20px;cursor:pointer;line-height:1;padding:0 4px}
   </style>
 </head>
 <body>
@@ -93,6 +104,29 @@
       <button class="sr-abtn primary" id="saveBtn" style="padding:10px 20px"><i class="ti ti-device-floppy"></i> Historisch event opslaan</button>
       <div id="msg" style="flex:1"></div>
     </div>
+
+    <!-- Bonus-acties: verschijnen na save (of bij ?event_id=... in URL) -->
+    <div class="sr-card" id="bonusPanel" style="display:none;margin-top:16px">
+      <div class="sr-card-h">Bonus + kosten-aftrek</div>
+      <div class="sub" style="font-size:12px;color:var(--text-dim);margin-bottom:10px">
+        Event-id: <span id="bpEventId" style="font-family:ui-monospace,monospace"></span>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="sr-abtn" id="previewBtn" style="padding:8px 14px"><i class="ti ti-calculator"></i> Bonus preview</button>
+        <button class="sr-abtn primary" id="commitBtn" style="padding:8px 14px"><i class="ti ti-lock"></i> Definitief boeken</button>
+      </div>
+      <div id="bonusMsg" style="margin-top:8px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Preview modal -->
+<div class="preview-modal" id="previewModal">
+  <div class="box">
+    <button class="close" id="previewClose">&times;</button>
+    <h2>Bonus-preview</h2>
+    <div class="sub" style="font-size:12px;color:var(--text-dim);margin-bottom:12px">Read-only — schrijft niets naar de ledger.</div>
+    <div id="previewBody"><div class="sub">Laden…</div></div>
   </div>
 </div>
 
@@ -111,6 +145,7 @@ const state = {
   dealsFound:   [],   // last search
   selectedDeals: new Set(),
   dealDetailsById: new Map(), // id → row (voor weergave in "selected"-samenvatting)
+  currentEventId: null, // gezet na save of bij ?event_id=... in URL
 };
 
 async function loadMentors() {
@@ -306,7 +341,7 @@ async function save() {
     if (!r.ok || d?.ok === false) throw new Error(d?.error || 'HTTP ' + r.status);
     let out = `<div class="msg ok"><b>Opgeslagen.</b> Event-id: ${esc(d.event_id)} · ${d.mentors?.length || 0} mentor(en) · ${d.expenses?.length || 0} uitgave(n) · ${d.attendees?.length || 0} aanwezige(n).</div>`;
     if (Array.isArray(d.warnings) && d.warnings.length) {
-      out += '<div class="msg" style="background:rgba(245,158,11,.08);color:#b45309;border:1px solid rgba(245,158,11,.25);margin-top:6px">' + d.warnings.map((w) => esc(w)).join('<br>') + '</div>';
+      out += '<div class="msg warn" style="margin-top:6px">' + d.warnings.map((w) => esc(w)).join('<br>') + '</div>';
     }
     msg.innerHTML = out;
     // Reset selecties (behalve mentoren, die blijven vaak gelijk voor volgende event).
@@ -314,10 +349,136 @@ async function save() {
     state.selectedDeals.clear(); renderDealResults(); renderSelectedDeals();
     document.getElementById('evTitle').value = '';
     document.getElementById('evLocation').value = '';
+    // Toon bonus-actiepaneel voor deze net-opgeslagen event.
+    setCurrentEvent(d.event_id);
   } catch (e) {
     msg.innerHTML = '<div class="msg err">Opslaan mislukt: ' + esc(e.message) + '</div>';
   }
   btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Historisch event opslaan';
+}
+
+// ── Bonus-actiepaneel: preview + commit ─────────────────────────────────
+function setCurrentEvent(eventId) {
+  state.currentEventId = eventId || null;
+  const panel = document.getElementById('bonusPanel');
+  const idSpan = document.getElementById('bpEventId');
+  if (!panel) return;
+  if (!eventId) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  if (idSpan) idSpan.textContent = eventId;
+  document.getElementById('bonusMsg').innerHTML = '';
+}
+
+async function runPreview() {
+  const eventId = state.currentEventId;
+  if (!eventId) return;
+  const modal = document.getElementById('previewModal');
+  const body  = document.getElementById('previewBody');
+  body.innerHTML = '<div class="sub">Laden…</div>';
+  modal.classList.add('open');
+  try {
+    const r = await window.AgentShared.apiFetch('/api/admin/historical-event-preview', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event_id: eventId }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d?.ok === false) throw new Error(d?.error || 'HTTP ' + r.status);
+    body.innerHTML = renderPreview(d);
+  } catch (e) {
+    body.innerHTML = '<div class="msg err">Preview mislukt: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderPreview(d) {
+  const parts = [];
+  parts.push(`<div class="sub" style="font-size:12px;color:var(--text-dim);margin-bottom:10px">
+    Event: <b>${esc(d.event_title || '—')}</b> · ${d.N} aanwezige mentor(en) met user_id
+  </div>`);
+
+  if (Array.isArray(d.warnings) && d.warnings.length) {
+    parts.push('<div class="msg warn" style="margin-bottom:10px">' + d.warnings.map((w) => esc(w)).join('<br>') + '</div>');
+  }
+
+  // Totalen
+  parts.push(`<div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:14px;font-size:13px">
+    <div><span class="sub" style="color:var(--text-dim)">Totaal bonus:</span> <b>${esc(eur(d.totals.bonus_total))}</b></div>
+    <div><span class="sub" style="color:var(--text-dim)">Totaal kosten-aandeel:</span> <b>${esc(eur(d.totals.expense_total))}</b></div>
+    <div><span class="sub" style="color:var(--text-dim)">Netto:</span> <b>${esc(eur(d.totals.netto))}</b></div>
+  </div>`);
+
+  // Per mentor
+  parts.push('<h3 style="font-size:13px;margin-bottom:4px">Per mentor</h3>');
+  if (!d.mentors.length) {
+    parts.push('<div class="sr-empty">Geen aanwezige mentoren.</div>');
+  } else {
+    parts.push('<table class="preview-table"><thead><tr>' +
+      '<th>Mentor</th><th class="num">Bonus</th><th class="num">Kosten-aandeel</th><th class="num">Netto</th><th>Status</th>' +
+      '</tr></thead><tbody>' +
+      d.mentors.map((m) => `<tr>
+        <td>${esc(m.name)}</td>
+        <td class="num">${esc(eur(m.bonus_total))}</td>
+        <td class="num">${esc(eur(m.expense_share_total))}</td>
+        <td class="num"><b>${esc(eur(m.netto))}</b></td>
+        <td>${m.eligible ? '<span class="pill g">ok</span>' : '<span class="pill r">geen user_id</span>'}</td>
+      </tr>`).join('') +
+      '</tbody></table>');
+  }
+
+  // Per deal
+  parts.push('<h3 style="font-size:13px;margin:14px 0 4px">Per deal</h3>');
+  if (!d.deals.length) {
+    parts.push('<div class="sr-empty">Geen aanwezige deelnemers gevonden.</div>');
+  } else {
+    parts.push('<table class="preview-table"><thead><tr>' +
+      '<th>Klant</th><th class="num">Grondslag (incl.)</th><th class="num">Per mentor</th><th>Facturen</th>' +
+      '</tr></thead><tbody>' +
+      d.deals.map((r) => `<tr>
+        <td>${esc(r.customer_name)}${r.skip_reason ? ' <span class="pill a">' + esc(r.skip_reason) + '</span>' : ''}</td>
+        <td class="num">${esc(eur(r.basis_incl))}</td>
+        <td class="num">${esc(eur(r.per_mentor))}</td>
+        <td>${r.has_paid_invoice ? '<span class="pill g">' + esc(r.invoice_status_summary) + '</span>' : '<span class="pill a">' + esc(r.invoice_status_summary) + '</span>'}</td>
+      </tr>`).join('') +
+      '</tbody></table>');
+  }
+
+  return parts.join('');
+}
+
+async function runCommit() {
+  const eventId = state.currentEventId;
+  if (!eventId) return;
+  const msg = document.getElementById('bonusMsg');
+  const ok = window.confirm(
+    'Definitief boeken?\n\n' +
+    'Dit maakt de bonus-entries aan (status=pending) en geeft vrijgaves per betaalde factuur. Idempotent — nogmaals klikken maakt geen dubbele entries.'
+  );
+  if (!ok) return;
+  msg.innerHTML = '<div class="sub">Bezig met boeken…</div>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/admin/historical-event-commit', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event_id: eventId }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d?.ok === false) throw new Error(d?.error || 'HTTP ' + r.status);
+    const s = d.summary || {};
+    let out = `<div class="msg ok"><b>Geboekt.</b><br>
+      Bonus-entries aangemaakt: <b>${Number(s.bonus_entries_created || 0)}</b> (totaal ${esc(eur(s.total_bonus_amount || 0))})<br>
+      Uitgave-entries aangemaakt: <b>${Number(s.expense_entries_created || 0)}</b> (totaal ${esc(eur(s.total_expense_amount || 0))})</div>`;
+    if (Array.isArray(s.warnings) && s.warnings.length) {
+      out += '<div class="msg warn" style="margin-top:6px">' + s.warnings.map((w) => esc(w)).join('<br>') + '</div>';
+    }
+    if (d.release?.deals?.length) {
+      const totalReleased = d.release.deals.reduce((n, r) => n + (Number(r.released) || 0), 0);
+      const withPaid      = d.release.deals.filter((r) => (Number(r.paid_invoices) || 0) > 0).length;
+      out += `<div class="msg" style="background:var(--bg-elev);border:1px solid var(--border);margin-top:6px;color:var(--text-dim)">
+        <b>Vrijgave (1e factuur betaald):</b> ${withPaid} deal(s) met betaalde factuur · ${totalReleased} ledger-vrijgave(s).
+      </div>`;
+    }
+    msg.innerHTML = out;
+  } catch (e) {
+    msg.innerHTML = '<div class="msg err">Commit mislukt: ' + esc(e.message) + '</div>';
+  }
 }
 
 (async () => {
@@ -336,6 +497,9 @@ async function save() {
     document.getElementById('dealSearch').value = prefillDealId;
     state.selectedDeals.add(prefillDealId);
   }
+  // Prefill event_id (uit query) → toon direct bonus-actiepaneel.
+  const prefillEventId = url.get('event_id');
+  if (prefillEventId) setCurrentEvent(prefillEventId);
 
   await loadMentors();
   renderExpenses();
@@ -345,6 +509,12 @@ async function save() {
   document.getElementById('dealSearchBtn').addEventListener('click', () => searchDeals());
   document.getElementById('dealSearch').addEventListener('keydown', (e) => { if (e.key === 'Enter') searchDeals(); });
   document.getElementById('saveBtn').addEventListener('click', () => save());
+  document.getElementById('previewBtn').addEventListener('click', () => runPreview());
+  document.getElementById('commitBtn').addEventListener('click', () => runCommit());
+  document.getElementById('previewClose').addEventListener('click', () => document.getElementById('previewModal').classList.remove('open'));
+  document.getElementById('previewModal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
+  });
 
   if (prefillDealId) searchDeals();
 })();
