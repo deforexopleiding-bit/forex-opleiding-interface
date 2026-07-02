@@ -28,20 +28,70 @@ export default async function handler(req, res) {
       .in('status', ['pending', 'earned', 'invoiced', 'paid']);
     const myBonusMonth = (myBonuses || []).reduce((s, b) => s + Number(b.amount || 0), 0);
 
-    // Mijn omzet deze maand: som total_amount van EIGEN deals die deze maand
-    // getekend/geaccepteerd zijn. Fail-soft → 0 bij fout of ontbrekende timestamps.
-    let myRevenueMonth = 0;
+    // Mijn omzet deze maand + aantal deze maand + hoogste all-time (accepted/signed).
+    // Fail-soft → 0/null bij fout of ontbrekende timestamps.
+    let myRevenueMonth   = 0;
+    let mySalesCountMonth = 0;
+    let myHighestDeal    = null;   // { amount, customer_name, quote_reference }
     try {
       const { data: signedDeals } = await supabaseAdmin.from('deals')
-        .select('total_amount, tl_quotation_status, tl_quotation_signed_at, tl_quotation_accepted_at')
+        .select('id, total_amount, quote_reference, customer_id, tl_quotation_status, tl_quotation_signed_at, tl_quotation_accepted_at')
         .eq('sales_user_id', user.id)
         .in('tl_quotation_status', ['accepted', 'signed']);
+      let highest = null;
       for (const d of signedDeals || []) {
         const ts = d.tl_quotation_signed_at || d.tl_quotation_accepted_at;
-        if (ts && ts >= monthStart) myRevenueMonth += Number(d.total_amount || 0);
+        if (ts && ts >= monthStart) {
+          myRevenueMonth   += Number(d.total_amount || 0);
+          mySalesCountMonth += 1;
+        }
+        const amt = Number(d.total_amount || 0);
+        if (amt > 0 && (!highest || amt > Number(highest.total_amount || 0))) highest = d;
+      }
+      if (highest) {
+        // Join customers voor de naam.
+        let cname = '';
+        if (highest.customer_id) {
+          const { data: c } = await supabaseAdmin.from('customers')
+            .select('is_company, company_name, first_name, last_name')
+            .eq('id', highest.customer_id).maybeSingle();
+          if (c) cname = c.is_company ? (c.company_name || '') : ((c.first_name || '') + ' ' + (c.last_name || '')).trim();
+        }
+        myHighestDeal = {
+          amount:          Math.round(Number(highest.total_amount || 0) * 100) / 100,
+          customer_name:   cname || '—',
+          quote_reference: highest.quote_reference || null,
+        };
       }
     } catch (e) {
-      console.warn('[sales-dashboard-metrics] my_revenue_month fail-soft:', e?.message || e);
+      console.warn('[sales-dashboard-metrics] revenue/count/highest fail-soft:', e?.message || e);
+    }
+
+    // Laatste 5 EIGEN offertes (nieuwste eerst).
+    let myRecentQuotations = [];
+    try {
+      const { data: recent } = await supabaseAdmin.from('deals')
+        .select('id, customer_id, total_amount, tl_quotation_status, created_at')
+        .eq('sales_user_id', user.id).is('archived_at', null)
+        .order('created_at', { ascending: false }).limit(5);
+      const custIds = [...new Set((recent || []).map(r => r.customer_id).filter(Boolean))];
+      const custMap = {};
+      if (custIds.length) {
+        const { data: cs } = await supabaseAdmin.from('customers')
+          .select('id, is_company, company_name, first_name, last_name').in('id', custIds);
+        for (const c of cs || []) {
+          custMap[c.id] = c.is_company ? (c.company_name || '') : ((c.first_name || '') + ' ' + (c.last_name || '')).trim();
+        }
+      }
+      myRecentQuotations = (recent || []).map(r => ({
+        id:            r.id,
+        customer_name: custMap[r.customer_id] || '—',
+        total_amount:  Math.round(Number(r.total_amount || 0) * 100) / 100,
+        status:        r.tl_quotation_status || null,
+        created_at:    r.created_at,
+      }));
+    } catch (e) {
+      console.warn('[sales-dashboard-metrics] my_recent_quotations fail-soft:', e?.message || e);
     }
 
     // Klanten in onboarding (verzonden).
@@ -65,6 +115,9 @@ export default async function handler(req, res) {
       my_open_quotations: myOpenQuotations,
       my_bonus_month: Math.round(myBonusMonth * 100) / 100,
       my_revenue_month: Math.round(myRevenueMonth * 100) / 100,
+      my_sales_count_month: mySalesCountMonth,
+      my_highest_deal: myHighestDeal,
+      my_recent_quotations: myRecentQuotations,
       onboarding_count: onboardingCount || 0,
       retention_count: retentionCount,
     });

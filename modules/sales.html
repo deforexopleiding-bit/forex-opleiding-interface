@@ -113,15 +113,21 @@
           <div class="sr-stat-v" id="dashRevenueMonth" style="font-size:26px">–</div>
           <div class="sr-stat-d">getekende offertes deze maand</div>
         </div>
+        <div class="sr-card" style="margin-top:12px">
+          <div class="sr-card-h"><i class="ti ti-list-details"></i> Laatste 5 offertes</div>
+          <div id="dashRecentQuotes"><div class="sr-empty">Laden…</div></div>
+        </div>
       </div>
       <!-- RECHTER KOLOM -->
       <div>
         <div class="sr-grid sr-grid-4" style="margin-bottom:12px">
           <a class="sr-stat sr-i-blue" href="/modules/sales.html?tab=offertes"><div class="sr-stat-l"><i class="ti ti-file-text"></i>Mijn open offertes</div><div class="sr-stat-v" id="dashMyQuotes">–</div><div class="sr-stat-d" id="dashMyQuotesD"></div></a>
+          <a class="sr-stat sr-i-blue" href="/modules/sales.html?tab=offertes"><div class="sr-stat-l"><i class="ti ti-trophy"></i>Sales deze maand</div><div class="sr-stat-v" id="dashSalesCount">–</div><div class="sr-stat-d">getekende deals</div></a>
           <a class="sr-stat sr-i-amber" href="/modules/sales.html?tab=rapporten"><div class="sr-stat-l"><i class="ti ti-coin"></i>Bonus deze maand</div><div class="sr-stat-v" id="dashMyBonus">–</div><div class="sr-stat-d">pending · uitkering 1e v/d maand</div></a>
-          <a class="sr-stat sr-i-pink" href="/modules/sales.html?tab=retentie"><div class="sr-stat-l"><i class="ti ti-refresh"></i>Retentie</div><div class="sr-stat-v" id="dashRetention">–</div><div class="sr-stat-d" id="dashRetentionD"></div></a>
+          <a class="sr-stat sr-i-pink" id="dashRetentionStat" href="/modules/sales.html?tab=retentie"><div class="sr-stat-l"><i class="ti ti-refresh"></i>Retentie</div><div class="sr-stat-v" id="dashRetention">–</div><div class="sr-stat-d" id="dashRetentionD"></div></a>
+          <a class="sr-stat sr-i-amber" href="/modules/sales.html?tab=offertes"><div class="sr-stat-l"><i class="ti ti-award"></i>Hoogste omzet-offerte</div><div class="sr-stat-v" id="dashHighestDeal" style="font-size:16px">–</div><div class="sr-stat-d" id="dashHighestDealD"></div></a>
         </div>
-        <div class="sr-grid sr-grid-2" style="margin-bottom:12px">
+        <div class="sr-grid sr-grid-2" id="dashActivityBlock" style="margin-bottom:12px">
           <div class="sr-card"><div class="sr-card-h">Vandaag</div>
             <div class="prop-row"><span class="prop-lbl"><i class="ti ti-user-plus"></i> Nieuwe leads</span><span class="prop-val" id="dashTodayLeads">–</span></div>
             <div class="prop-row"><span class="prop-lbl"><i class="ti ti-calendar-event"></i> Event-aanmeldingen</span><span class="prop-val" id="dashTodayEvents">–</span></div>
@@ -136,7 +142,7 @@
             <div class="prop-row"><span class="prop-lbl"><i class="ti ti-list-check"></i> Open follow-ups</span><span class="prop-val" id="dashOpenFollowups">–</span></div>
           </div>
         </div>
-        <div class="sr-card">
+        <div class="sr-card" id="dashPendingCard">
           <div class="sr-card-h"><i class="ti ti-clock-pause"></i> Wachten op subscription <span id="dashPendingCount" style="color:var(--text-faint)"></span></div>
           <div id="dashPending"><div class="sr-empty">Laden…</div></div>
         </div>
@@ -437,6 +443,15 @@ function applyTabGates() {
   // rechten ziet 'm dus niet.
   const newSubBtn = document.getElementById('newSubBtn');
   if (newSubBtn) newSubBtn.style.display = can('sales.tab.subscriptions') ? '' : 'none';
+  // Team-/beheer-blokken op het dashboard verbergen voor wie geen
+  // sales.tab.customers heeft (mentor). Persoonlijke stat-kaartjes blijven
+  // staan; alleen Vandaag/Deze week + Wachten-op-subscription + Retentie
+  // vallen weg omdat die team-breed of niet persoonlijk zijn.
+  const showTeam = can('sales.tab.customers');
+  ['dashActivityBlock', 'dashPendingCard', 'dashRetentionStat'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = showTeam ? '' : 'none';
+  });
 }
 function firstVisibleTabKey() {
   const btn = Array.from(document.querySelectorAll('.tab[data-tab]'))
@@ -1592,9 +1607,41 @@ async function loadDashboard() {
       const b = document.getElementById('dashMyBonus'); if (b) b.textContent = '€' + Number(d.my_bonus_month || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2 });
       const rev = document.getElementById('dashRevenueMonth');
       if (rev) rev.textContent = '€ ' + Number(d.my_revenue_month || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      // Persoonlijke extra-metrics (voor iedereen zinvol).
+      dashSet('dashSalesCount', d.my_sales_count_month);
+      const hi = document.getElementById('dashHighestDeal');
+      const hiD = document.getElementById('dashHighestDealD');
+      if (hi) {
+        if (d.my_highest_deal && Number(d.my_highest_deal.amount) > 0) {
+          hi.textContent = '€ ' + Number(d.my_highest_deal.amount).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          if (hiD) hiD.textContent = d.my_highest_deal.customer_name || '';
+        } else {
+          hi.textContent = '–';
+          if (hiD) hiD.textContent = '';
+        }
+      }
+      // Laatste 5 offertes.
+      const rec = document.getElementById('dashRecentQuotes');
+      if (rec) {
+        const items = Array.isArray(d.my_recent_quotations) ? d.my_recent_quotations : [];
+        if (!items.length) {
+          rec.innerHTML = '<div class="sr-empty">Nog geen offertes.</div>';
+        } else {
+          rec.innerHTML = items.map((q) => {
+            const eur = '€ ' + Number(q.total_amount || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const badge = (typeof quotationBadge === 'function') ? quotationBadge(q.status) : (q.status || '');
+            const dt = q.created_at ? new Date(q.created_at).toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
+            return '<a class="sr-userline" href="/modules/offerte-detail.html?id=' + esc(q.id) + '" style="justify-content:space-between;padding:8px 0;border-bottom:.5px solid var(--border);text-decoration:none;color:inherit">'
+              +   '<span class="sr-userline">' + avatarHtml(q.customer_name) + '<span>' + esc(q.customer_name || '—') + '<br><span class="sr-cellsub">' + esc(dt) + '</span></span></span>'
+              +   '<span style="display:flex;gap:8px;align-items:center"><span class="mono">' + esc(eur) + '</span>' + badge + '</span>'
+              + '</a>';
+          }).join('');
+        }
+      }
     }
   } catch {}
-  // 3. wachten op subscription
+  // 3. wachten op subscription — team-blok; sla over voor wie 'm niet ziet.
+  if (!can('sales.tab.customers')) return;
   const wrap = document.getElementById('dashPending'), cnt = document.getElementById('dashPendingCount');
   try {
     const res = await window.AgentShared.apiFetch('/api/sales-pending-subscriptions');
