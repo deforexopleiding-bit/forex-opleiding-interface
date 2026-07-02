@@ -732,7 +732,11 @@ let quotStatus = '';
 let quotSort = { key: 'date', dir: 'desc' };
 async function loadQuotations() {
   const params = new URLSearchParams();
-  if (document.getElementById('quotMineToggle').checked) params.set('owned_by_me', 'true');
+  // Mentor (en andere beperkte sales-rollen zonder 'sales.tab.customers')
+  // ziet ALLEEN eigen offertes — server dwingt sales_user_id === auth.uid()
+  // af via owned_by_me. Volledige sales/admin blijven de toggle vrij zetten.
+  const mustScopeToOwn = !can('sales.tab.customers');
+  if (mustScopeToOwn || document.getElementById('quotMineToggle').checked) params.set('owned_by_me', 'true');
   if (quotStatus) params.set('status', quotStatus);
   const s = document.getElementById('quotSearch').value.trim();
   if (s) params.set('search', s);
@@ -799,7 +803,10 @@ function quotationActions(q) {
   const tl = q.tl_quotation_id ? `<a class="sr-ibtn" href="https://focus.teamleader.eu/quotations/${esc(q.tl_quotation_id)}" target="_blank" title="Open in Teamleader"><i class="ti ti-external-link"></i></a>` : '';
   // 3-dots (status-afhankelijk)
   const items = [];
-  if (st !== 'sent') items.push(`<button class="sr-menu-item" onclick="editQuotation('${esc(q.deal_id)}', ${st === 'accepted' || st === 'signed'})"><i class="ti ti-edit"></i> Bewerken</button>`);
+  // Getekende offerte (accepted/signed) kan niet meer worden gewijzigd —
+  // server-side blokkeert het ook. 'Bewerken' verschijnt alleen bij niet-
+  // verzonden/niet-getekende statussen zodat een fout gecorrigeerd kan worden.
+  if (st !== 'sent' && st !== 'accepted' && st !== 'signed') items.push(`<button class="sr-menu-item" onclick="editQuotation('${esc(q.deal_id)}', false)"><i class="ti ti-edit"></i> Bewerken</button>`);
   if (['draft', 'sent', 'failed'].includes(st)) items.push(`<button class="sr-menu-item danger" data-delete="${esc(q.deal_id)}"><i class="ti ti-trash"></i> Verwijderen</button>`);
   items.push(`<button class="sr-menu-item" onclick="loadQuotations()"><i class="ti ti-refresh"></i> Status vernieuwen</button>`);
   if (q.tl_quotation_id) items.push(`<a class="sr-menu-item" href="https://focus.teamleader.eu/quotations/${esc(q.tl_quotation_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>`);

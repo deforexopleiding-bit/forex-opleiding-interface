@@ -287,7 +287,9 @@ function render(d){
     const obF0Btn = (_canCreateOnb && _obCtx.customerId)
       ? `<button class="btn" style="background:#0a2f63;color:#fff" onclick="openObModal()" type="button"><i class="ti ti-clipboard-plus"></i> Onboarding-traject aanmelden</button>`
       : '';
-    btns = `<a class="btn btn-success" href="/modules/subscription-wizard.html?deal_id=${esc(deal.id)}">Omzetten naar abonnement</a> ${obF0Btn} <button class="btn btn-ghost" onclick="editConfirm('${esc(deal.id)}')">Bewerken</button> ${tlBtn}`;
+    // Getekende offerte: alleen bekijken + omzetten + onboarding-actie. Bewerken
+    // is uitgezet (server-side blokkeert het ook — SALES_DEAL_SIGNED).
+    btns = `<a class="btn btn-success" href="/modules/subscription-wizard.html?deal_id=${esc(deal.id)}">Omzetten naar abonnement</a> ${obF0Btn} ${tlBtn}`;
   } else if (st==='sent'){
     btns = `<button class="btn" onclick="doSend()">Opnieuw versturen</button> <button class="btn" style="background:#f59e0b;color:#fff" onclick="doMarkAccepted()">Markeer als getekend</button> <button class="btn btn-danger" onclick="doDelete()">Verwijderen</button> ${tlBtn}`;
   } else if (st==='draft'){

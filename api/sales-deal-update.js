@@ -24,8 +24,34 @@ export default async function handler(req, res) {
   if (!deal_id) return res.status(400).json({ error: 'deal_id vereist' });
 
   try {
-    const { data: existing } = await supabaseAdmin.from('deals').select('id, tl_quotation_id').eq('id', deal_id).maybeSingle();
+    const { data: existing } = await supabaseAdmin.from('deals')
+      .select('id, tl_quotation_id, tl_quotation_status, sales_user_id')
+      .eq('id', deal_id).maybeSingle();
     if (!existing) return res.status(404).json({ error: 'Deal niet gevonden' });
+
+    // ── Business-rule guards ──────────────────────────────────────────────
+    // 1. Getekende offerte kan niet meer gewijzigd worden (behalve door
+    //    super_admin — noodklep). tl_quotation_status is de bron van waarheid.
+    // 2. Wie GEEN 'sales.tab.customers' heeft (bv. mentor met beperkte sales-
+    //    rechten) mag alleen z'n eigen deals bewerken.
+    const isSigned = ['accepted', 'signed'].includes(String(existing.tl_quotation_status || '').toLowerCase());
+    if (isSigned) {
+      const { data: profile } = await supabaseAdmin.from('profiles')
+        .select('role').eq('id', user.id).maybeSingle();
+      if (!profile || profile.role !== 'super_admin') {
+        return res.status(403).json({
+          error: 'Getekende offerte kan niet meer gewijzigd worden. Voor correcties: neem contact op met een super_admin.',
+          code:  'SALES_DEAL_SIGNED',
+        });
+      }
+    }
+    const hasFullSales = await requirePermission(req, 'sales.tab.customers');
+    if (!hasFullSales && String(existing.sales_user_id || '') !== String(user.id)) {
+      return res.status(403).json({
+        error: 'Je mag alleen je eigen offertes bewerken.',
+        code:  'SALES_DEAL_NOT_OWNER',
+      });
+    }
 
     // Department-validatie (indien gewijzigd).
     if (deal_data.tl_department_id) {
