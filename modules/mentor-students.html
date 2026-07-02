@@ -45,9 +45,29 @@
     @keyframes sk { 0% { background-position: 0% 0; } 100% { background-position: 200% 0; } }
 
     .tab-strip { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 18px; flex-wrap: wrap; }
-    .tab-btn { background: transparent; border: 0; padding: 10px 14px; font-size: 13.5px; font-weight: 600; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tab-btn { background: transparent; border: 0; padding: 10px 14px; font-size: 13.5px; font-weight: 600; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; position: relative; display: inline-flex; align-items: center; gap: 6px; }
     .tab-btn:hover { color: var(--text); }
     .tab-btn.active { color: var(--text); border-bottom-color: var(--accent, #6366f1); }
+    /* Rode teller-badge naast een tab-btn (open no-shows). Verborgen als 0/leeg. */
+    .ns-badge { display: none; min-width: 18px; height: 18px; padding: 0 6px; border-radius: 9px; background: #dc2626; color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+    .ns-badge.on { display: inline-block; }
+    /* Sub-tab strip binnen de No shows-tab. */
+    .sub-tab-strip { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+    .sub-tab-btn { background: transparent; border: 0; padding: 8px 12px; font-size: 12.5px; font-weight: 600; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; display: inline-flex; align-items: center; gap: 6px; }
+    .sub-tab-btn:hover { color: var(--text); }
+    .sub-tab-btn.active { color: var(--text); border-bottom-color: var(--accent, #6366f1); }
+    .sub-tab-btn .sub-count { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 10.5px; background: rgba(220,38,38,.12); color: #dc2626; border-radius: 8px; padding: 1px 6px; }
+    /* No-show-kaartjes. */
+    .ns-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 13px 15px; margin-bottom: 10px; }
+    .ns-card-h { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+    .ns-card-h b { font-size: 14px; font-weight: 700; }
+    .ns-card-h .ns-date { font-size: 11.5px; color: var(--text-dim); font-family: ui-monospace, monospace; }
+    .ns-card textarea { width: 100%; min-height: 68px; padding: 8px 10px; font-size: 13px; font-family: inherit; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text); resize: vertical; }
+    .ns-card .ns-actions { margin-top: 8px; display: flex; justify-content: flex-end; gap: 8px; }
+    .ns-card .ns-error { color: #dc2626; font-size: 12.5px; margin-top: 6px; min-height: 15px; }
+    .ns-done-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); margin-bottom: 8px; }
+    .ns-done-row .ns-done-reason { flex: 1; font-size: 13px; color: var(--text); white-space: pre-wrap; }
+    .ns-done-row .ns-done-meta { font-size: 11.5px; color: var(--text-dim); font-family: ui-monospace, monospace; text-align: right; white-space: nowrap; }
 
     .student-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
     .student-head { display: grid; grid-template-columns: auto 1fr auto auto auto; gap: 12px; align-items: center; padding: 12px 14px; cursor: pointer; user-select: none; }
@@ -130,6 +150,7 @@
     <div class="tab-strip" role="tablist">
       <button class="tab-btn active" data-tab="studenten" type="button">Mijn studenten</button>
       <button class="tab-btn"        data-tab="1on1"      type="button">1-op-1 sessies</button>
+      <button class="tab-btn"        data-tab="noshows"   type="button">No shows<span class="ns-badge" id="noshowTabCount"></span></button>
     </div>
 
     <div id="tabStudenten" class="tab-panel">
@@ -198,6 +219,15 @@
         <div id="completedTotals" style="margin-top:4px;font-size:12.5px;color:var(--text-dim)"></div>
       </div>
     </div>
+
+    <div id="tabNoshows" class="tab-panel" hidden>
+      <div class="sub-tab-strip" role="tablist">
+        <button class="sub-tab-btn active" data-noshow-sub="open" type="button">Te beoordelen<span class="sub-count" id="noshowSubCountOpen"></span></button>
+        <button class="sub-tab-btn"        data-noshow-sub="done" type="button">Afgerond</button>
+      </div>
+      <div id="noshowOpenWrap"  class="noshow-sub"><div class="empty-state"><i class="ti ti-clock"></i>Laden…</div></div>
+      <div id="noshowDoneWrap"  class="noshow-sub" hidden><div class="empty-state"><i class="ti ti-clock"></i>Laden…</div></div>
+    </div>
   </div>
 </div>
 
@@ -264,8 +294,147 @@
     });
     document.getElementById('tabStudenten').hidden = (name !== 'studenten');
     document.getElementById('tab1on1').hidden      = (name !== '1on1');
+    const nsEl = document.getElementById('tabNoshows');
+    if (nsEl) nsEl.hidden = (name !== 'noshows');
     if (name === 'studenten' && !_state.studentsLoaded) loadStudents();
     if (name === '1on1'      && !_state.oneOnOneLoaded) load1on1Sessions();
+    if (name === 'noshows'   && !_state.noshowsLoaded)  loadNoshows();
+  }
+
+  // ── No shows ──────────────────────────────────────────────────────────
+  // Hergebruikt /api/student-signals-list (mentor-scoped, self-filter server-
+  // side op mentor_user_id) en /api/student-signals-reason voor de reden-
+  // submit. Sub-state: 'open' (te beoordelen, geen reason_given_at) en 'done'
+  // (afgerond, reason_given_at gezet). Badge = aantal open no-shows.
+  const _noshows = { open: [], done: [], sub: 'open' };
+
+  function _renderNoshowBadge() {
+    const badge = document.getElementById('noshowTabCount');
+    const openN = _noshows.open.length;
+    if (badge) {
+      badge.textContent = openN > 0 ? String(openN) : '';
+      badge.classList.toggle('on', openN > 0);
+    }
+    const subC = document.getElementById('noshowSubCountOpen');
+    if (subC) subC.textContent = openN > 0 ? String(openN) : '';
+  }
+
+  function _renderNoshowOpen() {
+    const wrap = document.getElementById('noshowOpenWrap');
+    if (!wrap) return;
+    if (!_noshows.open.length) {
+      wrap.innerHTML = '<div class="empty-state">Geen openstaande no-shows 🎉</div>';
+      return;
+    }
+    wrap.innerHTML = _noshows.open.map((s) => (
+      '<div class="ns-card" data-signal-id="' + esc(s.id) + '">'
+      + '<div class="ns-card-h">'
+      +   '<b>' + esc(s.student_name || s.student_email || '(onbekende student)') + '</b>'
+      +   '<span class="ns-date">' + esc(fmtDateNL(s.created_at)) + '</span>'
+      + '</div>'
+      + '<label style="display:block;font-size:11.5px;color:var(--text-dim);margin-bottom:4px">Reden voor de no-show</label>'
+      + '<textarea data-ns-reason="' + esc(s.id) + '" placeholder="Waarom kwam de student niet opdagen?"></textarea>'
+      + '<div class="ns-actions"><button type="button" class="btn btn-primary" data-ns-save="' + esc(s.id) + '">Opslaan</button></div>'
+      + '<div class="ns-error" data-ns-err="' + esc(s.id) + '"></div>'
+      + '</div>'
+    )).join('');
+    wrap.querySelectorAll('[data-ns-save]').forEach((btn) => {
+      btn.addEventListener('click', () => _submitNoshowReason(btn.getAttribute('data-ns-save'), btn));
+    });
+  }
+
+  function _renderNoshowDone() {
+    const wrap = document.getElementById('noshowDoneWrap');
+    if (!wrap) return;
+    if (!_noshows.done.length) {
+      wrap.innerHTML = '<div class="empty-state">Nog geen beoordeelde no-shows.</div>';
+      return;
+    }
+    wrap.innerHTML = _noshows.done.map((s) => (
+      '<div class="ns-done-row">'
+      + '<div class="ns-done-reason"><b>' + esc(s.student_name || s.student_email || '(onbekende student)') + '</b>'
+      +   '<div style="margin-top:2px">' + esc(s.toelichting || '—') + '</div>'
+      + '</div>'
+      + '<div class="ns-done-meta">'
+      +   'no-show: ' + esc(fmtDateNL(s.created_at)) + '<br>'
+      +   'beoordeeld: ' + esc(fmtDateTimeNL(s.reason_given_at))
+      + '</div>'
+      + '</div>'
+    )).join('');
+  }
+
+  function _activateNoshowSub(sub) {
+    _noshows.sub = (sub === 'done') ? 'done' : 'open';
+    document.querySelectorAll('#tabNoshows .sub-tab-btn').forEach((b) => {
+      b.classList.toggle('active', b.getAttribute('data-noshow-sub') === _noshows.sub);
+    });
+    const openW = document.getElementById('noshowOpenWrap');
+    const doneW = document.getElementById('noshowDoneWrap');
+    if (openW) openW.hidden = _noshows.sub !== 'open';
+    if (doneW) doneW.hidden = _noshows.sub !== 'done';
+  }
+
+  async function loadNoshows() {
+    _state.noshowsLoaded = true;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    const openW = document.getElementById('noshowOpenWrap');
+    const doneW = document.getElementById('noshowDoneWrap');
+    try {
+      // status=all → we willen ook rijen die al reason_given_at hebben maar
+      // status='open' zijn (admin heeft nog niet afgehandeld).
+      const r = await apiFetch('/api/student-signals-list?status=all');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      const sigs = Array.isArray(d?.signals) ? d.signals : [];
+      const nsRows = sigs.filter((s) => s && s.type === 'no_show');
+      _noshows.open = nsRows.filter((s) => !s.reason_given_at)
+        .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+      _noshows.done = nsRows.filter((s) => !!s.reason_given_at)
+        .sort((a, b) => String(b.reason_given_at || '').localeCompare(String(a.reason_given_at || '')));
+      _renderNoshowOpen();
+      _renderNoshowDone();
+      _renderNoshowBadge();
+    } catch (e) {
+      _state.noshowsLoaded = false;
+      if (openW) openW.innerHTML = '<div class="empty-state">Laden mislukt: ' + esc(e.message || 'onbekend') + '</div>';
+      if (doneW) doneW.innerHTML = '<div class="empty-state">Laden mislukt.</div>';
+    }
+  }
+
+  async function _submitNoshowReason(signalId, btn) {
+    const ta  = document.querySelector('textarea[data-ns-reason="' + signalId + '"]');
+    const err = document.querySelector('[data-ns-err="' + signalId + '"]');
+    if (err) err.textContent = '';
+    const reason = ta ? String(ta.value || '').trim() : '';
+    if (!reason) {
+      if (err) err.textContent = 'Geef een reden op.';
+      return;
+    }
+    if (btn) btn.disabled = true;
+    const apiFetch = window.AgentShared?.apiFetch;
+    try {
+      const r = await apiFetch('/api/student-signals-reason', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body:   JSON.stringify({ signal_id: signalId, reason }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d?.ok === false) throw new Error(d?.error || 'HTTP ' + r.status);
+      // Verplaats item van open → done.
+      const idx = _noshows.open.findIndex((s) => s.id === signalId);
+      if (idx >= 0) {
+        const item = _noshows.open.splice(idx, 1)[0];
+        item.toelichting = reason;
+        item.reason_given_at = new Date().toISOString();
+        _noshows.done.unshift(item);
+      }
+      _renderNoshowOpen();
+      _renderNoshowDone();
+      _renderNoshowBadge();
+    } catch (e) {
+      if (err) err.textContent = 'Opslaan mislukt: ' + (e?.message || 'onbekend');
+      if (btn) btn.disabled = false;
+    }
   }
 
   // ── Mijn studenten ────────────────────────────────────────────────────
@@ -1294,8 +1463,22 @@
     // Per-student admin_note-badges initial load (PR6a — /api/notifications-list).
     loadAdminNoteBadges();
 
-    // Default tab.
-    activateTab('studenten');
+    // No-shows sub-tab wiring (open ↔ done).
+    document.querySelectorAll('#tabNoshows .sub-tab-btn').forEach((b) => {
+      b.addEventListener('click', () => _activateNoshowSub(b.getAttribute('data-noshow-sub')));
+    });
+    // Vroeg de badge-teller laden zodat de rode dot ook zichtbaar is als de
+    // user op een andere tab landt. Fail-soft — bij fout blijft de badge leeg.
+    loadNoshows();
+
+    // Default tab. ?tab=noshows opent direct de No shows-tab.
+    let initialTab = 'studenten';
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const q = String(p.get('tab') || '').trim();
+      if (q === 'noshows' || q === '1on1' || q === 'studenten') initialTab = q;
+    } catch (_) { /* fail-open */ }
+    activateTab(initialTab);
   }
 
   // ── Fase 3a — Meldingen ─────────────────────────────────────────────────

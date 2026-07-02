@@ -22,6 +22,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getMentorStudents } from './_lib/mentorStudents.js';
+import { createNotification } from './_lib/notify.js';
 
 const TYPES = new Set([
   'eerste_call', 'reageert_niet', 'niet_bereikbaar',
@@ -91,6 +92,29 @@ export default async function handler(req, res) {
       .select('id')
       .single();
     if (error) throw new Error('insert: ' + error.message);
+
+    // Bel-notificatie bij no_show (fail-soft). Triggert nu nog niet omdat
+    // 'no_show' niet in TYPES staat (die worden door cron/noshow-detect.js
+    // gemaakt en dáár is óók een createNotification-hook toegevoegd), maar
+    // de hook staat spec-conform klaar voor de dag dat handmatig-melden een
+    // extra type krijgt.
+    if (type === 'no_show' && user.id && data?.id) {
+      try {
+        await createNotification({
+          toUserId:      user.id,
+          type:          'student.noshow_review',
+          title:         'No-show — geef reden',
+          body:          (studentName || 'Student') + ' — geef de reden voor de no-show op',
+          linkUrl:       '/modules/mentor-students.html?tab=noshows',
+          entityType:    'student_signal',
+          entityId:      data.id,
+          priority:      'high',
+          dedupWithinMs: 24 * 60 * 60 * 1000,
+        });
+      } catch (nErr) {
+        console.warn('[student-signals-create] notify fail-soft:', nErr?.message || nErr);
+      }
+    }
 
     return res.status(201).json({ ok: true, id: data.id });
   } catch (e) {

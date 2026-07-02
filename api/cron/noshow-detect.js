@@ -18,6 +18,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { bubbleList, bubbleGet, bubbleUserDisplay } from '../_lib/bubble.js';
+import { createNotification } from '../_lib/notify.js';
 
 const SETTING_KEY     = 'noshow_detect_since';
 const FETCH_CAP       = 1000;
@@ -194,8 +195,8 @@ export default async function handler(req, res) {
           session_id        : sessionId,
           toelichting       : sd ? ('No-show op ' + fmtDateNl(sd)) : 'No-show',
         };
-        const { error: insErr } = await supabaseAdmin
-          .from('student_signals').insert(insertRow);
+        const { data: insRow, error: insErr } = await supabaseAdmin
+          .from('student_signals').insert(insertRow).select('id').maybeSingle();
         if (insErr) {
           if (insErr.code === '23505') {
             // Bestaat al via session_id-unique — geen fout.
@@ -206,6 +207,27 @@ export default async function handler(req, res) {
           }
         } else {
           result.inserted++;
+          // Bel-notificatie voor de mentor — fail-soft. 24u dedup op signal-id
+          // is niet zinvol (deze insertie IS het triggerpoint); we dedupen op
+          // (type, entity_id) binnen 24u zodat een handmatige her-run
+          // dezelfde bel niet nog eens laat rinkelen.
+          if (mentorUserId && insRow?.id) {
+            try {
+              await createNotification({
+                toUserId:      mentorUserId,
+                type:          'student.noshow_review',
+                title:         'No-show — geef reden',
+                body:          (studentName || 'Student') + ' — geef de reden voor de no-show op',
+                linkUrl:       '/modules/mentor-students.html?tab=noshows',
+                entityType:    'student_signal',
+                entityId:      insRow.id,
+                priority:      'high',
+                dedupWithinMs: 24 * 60 * 60 * 1000,
+              });
+            } catch (nErr) {
+              console.warn('[noshow-detect] notify fail-soft:', nErr?.message || nErr);
+            }
+          }
         }
 
         if (sdMs != null && sdMs > highestMs) highestMs = sdMs;
