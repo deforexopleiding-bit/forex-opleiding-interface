@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Historisch event · Admin · De Forex Opleiding</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+    .app{margin-left:220px;padding:24px 28px 60px;max-width:1100px}
+    .page-head{padding-bottom:14px;border-bottom:1px solid var(--border);margin-bottom:18px}
+    h1{font-size:22px;font-weight:800}
+    .sub{font-size:12.5px;color:var(--text-dim);margin-top:2px}
+    label.f{display:block;font-size:11.5px;font-weight:600;color:var(--text-dim);margin-bottom:4px}
+    .row{display:flex;gap:10px;align-items:center}
+    .row .grow{flex:1}
+    .exp-row,.mnt-row{display:flex;gap:8px;align-items:center;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elev);margin-bottom:6px}
+    .deal-row{display:flex;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elev);margin-bottom:6px;font-size:12.5px}
+    .deal-row.selected{background:rgba(37,199,155,.08);border-color:rgba(37,199,155,.35)}
+    .pill{display:inline-block;padding:1px 8px;border-radius:12px;font-size:10.5px;font-weight:700;background:var(--bg-elev-2,#f1f5f9);color:var(--text-dim)}
+    .pill.g{background:rgba(37,199,155,.14);color:#059669}
+    .pill.a{background:rgba(245,158,11,.14);color:#b45309}
+    .msg{font-size:12.5px;padding:8px 10px;border-radius:8px;margin-top:8px}
+    .msg.err{background:rgba(220,38,38,.08);color:#b91c1c;border:1px solid rgba(220,38,38,.25)}
+    .msg.ok{background:rgba(37,199,155,.08);color:#047857;border:1px solid rgba(37,199,155,.3)}
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="app">
+  <div class="page-head">
+    <h1>Historisch event vastleggen</h1>
+    <div class="sub">Terugwerkend een event, mentoren, kosten en gekoppelde deals invoeren. De 3%-bonus + kosten-aftrek loopt later via events-complete (fase 2b-2).</div>
+  </div>
+  <div id="gate" style="display:none"><div class="sr-empty">Geen toegang — alleen super_admin.</div></div>
+  <div id="main" style="display:none">
+
+    <!-- Event basis -->
+    <div class="sr-card" style="margin-bottom:14px">
+      <div class="sr-card-h">Event</div>
+      <label class="f">Naam</label>
+      <input class="sr-input" id="evTitle" placeholder="Bijv. Trader Weekend Maart 2025" style="width:100%" />
+      <div class="row" style="margin-top:10px;gap:12px">
+        <div class="grow"><label class="f">Datum (historisch)</label><input class="sr-input" id="evDate" type="datetime-local" style="width:100%" /></div>
+        <div class="grow"><label class="f">Locatie</label><input class="sr-input" id="evLocation" placeholder="Bijv. Van der Valk Vianen" style="width:100%" /></div>
+      </div>
+    </div>
+
+    <!-- Mentoren -->
+    <div class="sr-card" style="margin-bottom:14px">
+      <div class="sr-card-h">Aanwezige mentoren</div>
+      <div id="mntPicker" style="margin-bottom:8px"><div class="sr-empty">Laden…</div></div>
+      <div class="sub" style="color:var(--text-dim);font-size:11.5px">Aangevinkte mentoren worden op event_mentors.was_present = true gezet.</div>
+    </div>
+
+    <!-- Kosten -->
+    <div class="sr-card" style="margin-bottom:14px">
+      <div class="sr-card-h">Kosten</div>
+      <div id="expRows"></div>
+      <button class="sr-abtn" id="expAdd" style="margin-top:4px"><i class="ti ti-plus"></i> Regel toevoegen</button>
+      <div class="sub" style="color:var(--text-dim);font-size:11.5px;margin-top:8px">Deelbaar over aanwezige mentoren: laat leeg = door alle aanwezigen gedeeld (2b-2). Kies specifieke mentoren om afwijkende deling in te stellen.</div>
+    </div>
+
+    <!-- Deals-koppeling -->
+    <div class="sr-card" style="margin-bottom:14px">
+      <div class="sr-card-h">Deals koppelen (aanwezige klanten)</div>
+      <div class="row" style="gap:10px;margin-bottom:8px">
+        <div class="grow"><label class="f">Zoek</label><input class="sr-input" id="dealSearch" placeholder="Klantnaam, referentie of TL-deal-id" style="width:100%" /></div>
+        <div><label class="f">Datum vanaf</label><input class="sr-input" id="dealFrom" type="date" /></div>
+        <div><label class="f">Datum t/m</label><input class="sr-input" id="dealTo" type="date" /></div>
+        <div style="align-self:end"><button class="sr-abtn primary" id="dealSearchBtn" style="padding:8px 14px"><i class="ti ti-search"></i> Zoek</button></div>
+      </div>
+      <div id="dealResults"><div class="sub">Zoek deals om te koppelen.</div></div>
+    </div>
+
+    <!-- Actie -->
+    <div style="display:flex;gap:10px;align-items:center">
+      <button class="sr-abtn primary" id="saveBtn" style="padding:10px 20px"><i class="ti ti-device-floppy"></i> Historisch event opslaan</button>
+      <div id="msg" style="flex:1"></div>
+    </div>
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script>
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function eur(n){return (Number(n)||0).toLocaleString('nl-NL',{style:'currency',currency:'EUR',minimumFractionDigits:2,maximumFractionDigits:2})}
+function fmtDateNL(iso){if(!iso)return'—';try{const d=new Date(iso);return d.toLocaleDateString('nl-NL',{day:'2-digit',month:'2-digit',year:'numeric'})}catch{return iso}}
+
+const state = {
+  mentors:      [],   // [{id,name,role}]
+  selectedMnts: new Set(),
+  expenses:     [],   // in-memory rijen
+  dealsFound:   [],   // last search
+  selectedDeals: new Set(),
+  dealDetailsById: new Map(), // id → row (voor weergave in "selected"-samenvatting)
+};
+
+async function loadMentors() {
+  try {
+    const r = await window.AgentShared.apiFetch('/api/team-members');
+    const d = await r.json();
+    // Filter op user-linked mentoren waar mogelijk; anders alle actieve leden.
+    state.mentors = (d.members || []).filter((m) => !m.type || String(m.type).toLowerCase() === 'mentor' || String(m.role || '').toLowerCase().includes('mentor'));
+    if (!state.mentors.length) state.mentors = d.members || [];
+    renderMentors();
+  } catch (e) {
+    document.getElementById('mntPicker').innerHTML = '<div class="msg err">Mentors laden mislukt: ' + esc(e.message) + '</div>';
+  }
+}
+function renderMentors() {
+  const box = document.getElementById('mntPicker');
+  if (!state.mentors.length) { box.innerHTML = '<div class="sr-empty">Geen team-leden.</div>'; return; }
+  box.innerHTML = state.mentors.map((m) => {
+    const on = state.selectedMnts.has(m.id);
+    return `<label class="mnt-row" style="cursor:pointer">
+      <input type="checkbox" data-mnt="${esc(m.id)}"${on ? ' checked' : ''} style="margin-right:8px" />
+      <span style="flex:1"><b>${esc(m.name || '—')}</b><span class="sub" style="color:var(--text-dim);font-size:11.5px;margin-left:8px">${esc(m.role || m.type || '')}</span></span>
+    </label>`;
+  }).join('');
+  box.querySelectorAll('[data-mnt]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const id = cb.getAttribute('data-mnt');
+      if (cb.checked) state.selectedMnts.add(id); else state.selectedMnts.delete(id);
+    });
+  });
+}
+
+// ── Kosten ──────────────────────────────────────────────────────────────
+function addExpense(prefill) {
+  state.expenses.push({
+    amount:                 prefill?.amount || '',
+    vendor:                 prefill?.vendor || '',
+    spent_at:               prefill?.spent_at || '',
+    note:                   prefill?.note || '',
+    mentor_team_member_ids: [],
+  });
+  renderExpenses();
+}
+function renderExpenses() {
+  const box = document.getElementById('expRows');
+  if (!state.expenses.length) { box.innerHTML = '<div class="sub" style="color:var(--text-dim);font-size:12px;margin-bottom:6px">Nog geen kosten.</div>'; return; }
+  box.innerHTML = state.expenses.map((e, i) => `
+    <div class="exp-row">
+      <input class="sr-input" style="width:110px" placeholder="€ 0,00" type="number" step="0.01" min="0" data-exp="amount" data-i="${i}" value="${esc(e.amount)}" />
+      <input class="sr-input" style="flex:1" placeholder="Vendor (bv. Van der Valk)" data-exp="vendor" data-i="${i}" value="${esc(e.vendor)}" />
+      <input class="sr-input" style="width:150px" type="date" data-exp="spent_at" data-i="${i}" value="${esc(e.spent_at)}" />
+      <input class="sr-input" style="flex:1" placeholder="Notitie (optioneel)" data-exp="note" data-i="${i}" value="${esc(e.note)}" />
+      <button class="sr-ibtn" data-exp-del="${i}" title="Verwijderen"><i class="ti ti-trash" style="color:#dc2626"></i></button>
+    </div>
+  `).join('');
+  box.querySelectorAll('[data-exp]').forEach((el) => el.addEventListener('input', () => {
+    const i = Number(el.dataset.i); const f = el.dataset.exp;
+    if (state.expenses[i]) state.expenses[i][f] = el.value;
+  }));
+  box.querySelectorAll('[data-exp-del]').forEach((b) => b.addEventListener('click', () => {
+    state.expenses.splice(Number(b.dataset.expDel), 1); renderExpenses();
+  }));
+}
+
+// ── Deals-zoek ──────────────────────────────────────────────────────────
+async function searchDeals() {
+  const q    = document.getElementById('dealSearch').value.trim();
+  const from = document.getElementById('dealFrom').value;
+  const to   = document.getElementById('dealTo').value;
+  const box  = document.getElementById('dealResults');
+  box.innerHTML = '<div class="sub">Zoeken…</div>';
+  try {
+    const p = new URLSearchParams();
+    if (q)    p.set('q', q);
+    if (from) p.set('date_from', from);
+    if (to)   p.set('date_to', to);
+    p.set('limit', '100');
+    const r = await window.AgentShared.apiFetch('/api/admin/deals-search?' + p.toString());
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+    state.dealsFound = d.deals || [];
+    for (const dr of state.dealsFound) state.dealDetailsById.set(dr.id, dr);
+    renderDealResults();
+  } catch (e) {
+    box.innerHTML = '<div class="msg err">' + esc(e.message) + '</div>';
+  }
+}
+function renderDealResults() {
+  const box = document.getElementById('dealResults');
+  if (!state.dealsFound.length) { box.innerHTML = '<div class="sr-empty">Geen deals gevonden.</div>'; return; }
+  box.innerHTML = state.dealsFound.map((d) => {
+    const on = state.selectedDeals.has(d.id);
+    return `<div class="deal-row${on ? ' selected' : ''}">
+      <input type="checkbox" data-deal="${esc(d.id)}"${on ? ' checked' : ''} />
+      <div style="flex:1"><b>${esc(d.customer_name || '—')}</b>
+        <span class="sub" style="color:var(--text-dim);margin-left:8px">${esc(d.customer_email || '')}</span>
+        <div class="sub" style="color:var(--text-dim);font-size:11.5px;margin-top:2px">Ref: ${esc(d.quote_reference || '—')} · TL: ${esc((d.tl_deal_id||'').slice(0,12))} · ${esc(fmtDateNL(d.created_at))}</div>
+      </div>
+      <span class="pill ${d.tl_quotation_status === 'accepted' || d.tl_quotation_status === 'signed' ? 'g' : 'a'}">${esc(d.tl_quotation_status || '—')}</span>
+      <span style="font-family:ui-monospace,monospace">${esc(eur(d.total_amount))}</span>
+    </div>`;
+  }).join('');
+  box.querySelectorAll('[data-deal]').forEach((cb) => cb.addEventListener('change', () => {
+    const id = cb.getAttribute('data-deal');
+    if (cb.checked) state.selectedDeals.add(id); else state.selectedDeals.delete(id);
+    renderDealResults();
+  }));
+}
+
+// ── Opslaan ─────────────────────────────────────────────────────────────
+async function save() {
+  const msg = document.getElementById('msg'); msg.innerHTML = '';
+  const title    = document.getElementById('evTitle').value.trim();
+  const dateVal  = document.getElementById('evDate').value;
+  const location = document.getElementById('evLocation').value.trim();
+  if (!title)   { msg.innerHTML = '<div class="msg err">Naam vereist.</div>'; return; }
+  if (!dateVal) { msg.innerHTML = '<div class="msg err">Datum vereist.</div>'; return; }
+  const startsAtIso = new Date(dateVal).toISOString();
+
+  const payload = {
+    title,
+    starts_at: startsAtIso,
+    location:  location || null,
+    mentor_team_member_ids: [...state.selectedMnts],
+    expenses: state.expenses
+      .map((e) => ({
+        amount:                 Number(e.amount) || 0,
+        vendor:                 (e.vendor || '').trim() || null,
+        spent_at:               e.spent_at || null,
+        note:                   (e.note || '').trim() || null,
+        mentor_team_member_ids: e.mentor_team_member_ids || [],
+      }))
+      .filter((e) => e.amount > 0),
+    deal_ids: [...state.selectedDeals],
+  };
+  const btn = document.getElementById('saveBtn'); btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Opslaan…';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/admin/historical-event-save', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body:   JSON.stringify(payload),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d?.ok === false) throw new Error(d?.error || 'HTTP ' + r.status);
+    let out = `<div class="msg ok"><b>Opgeslagen.</b> Event-id: ${esc(d.event_id)} · ${d.mentors?.length || 0} mentor(en) · ${d.expenses?.length || 0} uitgave(n) · ${d.attendees?.length || 0} aanwezige(n).</div>`;
+    if (Array.isArray(d.warnings) && d.warnings.length) {
+      out += '<div class="msg" style="background:rgba(245,158,11,.08);color:#b45309;border:1px solid rgba(245,158,11,.25);margin-top:6px">' + d.warnings.map((w) => esc(w)).join('<br>') + '</div>';
+    }
+    msg.innerHTML = out;
+    // Reset selecties (behalve mentoren, die blijven vaak gelijk voor volgende event).
+    state.expenses = []; renderExpenses();
+    state.selectedDeals.clear(); renderDealResults();
+    document.getElementById('evTitle').value = '';
+    document.getElementById('evLocation').value = '';
+  } catch (e) {
+    msg.innerHTML = '<div class="msg err">Opslaan mislukt: ' + esc(e.message) + '</div>';
+  }
+  btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Historisch event opslaan';
+}
+
+(async () => {
+  await window._authSharedReady;
+  const profile = await window.AuthShared?.requireAuth(['super_admin']);
+  if (!profile) return;
+  if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
+  if (profile.role !== 'super_admin') { document.getElementById('gate').style.display = ''; return; }
+  document.getElementById('main').style.display = '';
+
+  // Prefill deal_id (uit query) → voeg 'm direct toe aan de selectie.
+  const url = new URLSearchParams(window.location.search);
+  const prefillDealId = url.get('deal_id');
+  if (prefillDealId) {
+    // Doe een gerichte zoek zodat het rijtje beschikbaar is voor visualisatie.
+    document.getElementById('dealSearch').value = prefillDealId;
+    state.selectedDeals.add(prefillDealId);
+  }
+
+  await loadMentors();
+  renderExpenses();
+
+  document.getElementById('expAdd').addEventListener('click', () => addExpense());
+  document.getElementById('dealSearchBtn').addEventListener('click', () => searchDeals());
+  document.getElementById('dealSearch').addEventListener('keydown', (e) => { if (e.key === 'Enter') searchDeals(); });
+  document.getElementById('saveBtn').addEventListener('click', () => save());
+
+  if (prefillDealId) searchDeals();
+})();
+</script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+</body>
+</html>

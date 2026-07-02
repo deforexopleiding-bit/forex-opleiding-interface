@@ -297,7 +297,12 @@ function render(d){
     const convertBtn = _canManageSubs
       ? `<a class="btn btn-success" href="/modules/subscription-wizard.html?deal_id=${esc(deal.id)}">Omzetten naar abonnement</a>`
       : '';
-    btns = `${convertBtn} ${obF0Btn} ${tlBtn}`;
+    // Historisch-event-koppeling: alleen voor sales-team-leden (proxy via
+    // _canManageSubs); de admin-pagina zelf gate't hard op super_admin.
+    const histEvBtn = _canManageSubs
+      ? `<a class="btn btn-ghost" href="/modules/admin-historical-events.html?deal_id=${esc(deal.id)}" title="Koppel deze deal aan een historisch event (2b-1)"><i class="ti ti-calendar-plus"></i> Koppel aan historisch event</a>`
+      : '';
+    btns = `${convertBtn} ${obF0Btn} ${histEvBtn} ${tlBtn}`;
   } else if (st==='sent'){
     btns = `<button class="btn" onclick="doSend()">Opnieuw versturen</button> <button class="btn" style="background:#f59e0b;color:#fff" onclick="doMarkAccepted()">Markeer als getekend</button> <button class="btn btn-danger" onclick="doDelete()">Verwijderen</button> ${tlBtn}`;
   } else if (st==='draft'){
