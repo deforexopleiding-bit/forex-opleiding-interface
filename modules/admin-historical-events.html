@@ -68,8 +68,15 @@
     <!-- Deals-koppeling -->
     <div class="sr-card" style="margin-bottom:14px">
       <div class="sr-card-h">Deals koppelen (aanwezige klanten)</div>
-      <div class="row" style="gap:10px;margin-bottom:8px">
-        <div class="grow"><label class="f">Zoek</label><input class="sr-input" id="dealSearch" placeholder="Klantnaam, referentie of TL-deal-id" style="width:100%" /></div>
+      <div class="row" style="gap:10px;margin-bottom:8px;flex-wrap:wrap">
+        <div class="grow" style="min-width:220px"><label class="f">Zoek</label><input class="sr-input" id="dealSearch" placeholder="Klantnaam, referentie of TL-deal-id" style="width:100%" /></div>
+        <div><label class="f">Status</label><select class="sr-select" id="dealStatus" style="min-width:180px">
+          <option value="">Alle</option>
+          <option value="accepted,signed">Getekend (accepted + signed)</option>
+          <option value="sent">Verzonden</option>
+          <option value="no_quotation">Zonder offerte</option>
+          <option value="declined">Afgewezen</option>
+        </select></div>
         <div><label class="f">Datum vanaf</label><input class="sr-input" id="dealFrom" type="date" /></div>
         <div><label class="f">Datum t/m</label><input class="sr-input" id="dealTo" type="date" /></div>
         <div style="align-self:end"><button class="sr-abtn primary" id="dealSearchBtn" style="padding:8px 14px"><i class="ti ti-search"></i> Zoek</button></div>
@@ -169,16 +176,18 @@ function renderExpenses() {
 
 // ── Deals-zoek ──────────────────────────────────────────────────────────
 async function searchDeals() {
-  const q    = document.getElementById('dealSearch').value.trim();
-  const from = document.getElementById('dealFrom').value;
-  const to   = document.getElementById('dealTo').value;
-  const box  = document.getElementById('dealResults');
+  const q      = document.getElementById('dealSearch').value.trim();
+  const from   = document.getElementById('dealFrom').value;
+  const to     = document.getElementById('dealTo').value;
+  const status = document.getElementById('dealStatus')?.value || '';
+  const box    = document.getElementById('dealResults');
   box.innerHTML = '<div class="sub">Zoeken…</div>';
   try {
     const p = new URLSearchParams();
-    if (q)    p.set('q', q);
-    if (from) p.set('date_from', from);
-    if (to)   p.set('date_to', to);
+    if (q)      p.set('q', q);
+    if (from)   p.set('date_from', from);
+    if (to)     p.set('date_to', to);
+    if (status) p.set('status', status);
     p.set('limit', '100');
     const r = await window.AgentShared.apiFetch('/api/admin/deals-search?' + p.toString());
     const d = await r.json();

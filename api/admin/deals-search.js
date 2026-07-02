@@ -24,14 +24,22 @@ export default async function handler(req, res) {
   const dateFrom  = isDate(req.query?.date_from) ? req.query.date_from : null;
   const dateTo    = isDate(req.query?.date_to)   ? req.query.date_to   : null;
   const limit     = Math.min(Math.max(Number(req.query?.limit) || 50, 1), 200);
+  // Optioneel status-filter: csv, bv. ?status=accepted,signed. Zonder param →
+  // GEEN filter (default). Voor historische attributie zijn álle backfill-
+  // deals interessant: TL zet 'sent' vaak nooit door naar 'won', en ook
+  // 'no_quotation' rijen (import van deals zonder quotation-id) horen erbij.
+  const statusRaw = typeof req.query?.status === 'string' ? req.query.status.trim() : '';
+  const statusList = statusRaw
+    ? statusRaw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+    : [];
 
   try {
     let query = supabaseAdmin.from('deals')
       .select('id, customer_id, total_amount, tl_deal_id, tl_quotation_id, tl_quotation_status, quote_reference, created_at')
       .not('tl_deal_id', 'is', null)
-      .in('tl_quotation_status', ['accepted', 'signed'])
       .order('created_at', { ascending: false })
       .limit(limit);
+    if (statusList.length) query = query.in('tl_quotation_status', statusList);
     if (dateFrom) query = query.gte('created_at', dateFrom + 'T00:00:00');
     if (dateTo)   query = query.lte('created_at', dateTo   + 'T23:59:59');
     if (q) {
