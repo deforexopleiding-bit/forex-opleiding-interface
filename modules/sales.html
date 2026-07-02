@@ -1588,21 +1588,23 @@ async function loadDashboard() {
       dashSet('dashTodayLeads', d.today?.leads); dashSet('dashTodayEvents', d.today?.events); dashSet('dashTodayAppts', d.today?.appointments);
       dashSet('dashWeekLeads', d.week?.leads); dashSet('dashWeekEvents', d.week?.events); dashSet('dashWeekAppts', d.week?.appointments);
       dashSet('dashTomorrowAppts', d.appointments_tomorrow_count); dashSet('dashOpenFollowups', d.open_follow_ups);
-      // Volgende-afspraak-banner is team-content — sla vullen over voor mentor.
-      // De banner-DOM staat sowieso op display:none via applyTabGates; deze
-      // early-return voorkomt de onnodige innerHTML/render.
-      if (!can('sales.tab.customers')) return;
-      const banner = document.getElementById('dashNextBanner'); const n = d.next_appointment;
-      if (n) {
-        const hhmm = new Date(n.scheduled_at).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
-        banner.innerHTML = `<div class="dash-hero">
-          <div class="dash-hero-lbl"><i class="ti ti-clock"></i> Volgende afspraak</div>
-          <div class="dash-hero-name">${esc(n.lead_name || '—')}</div>
-          <div class="sr-cellsub" style="margin:2px 0 8px">Intake-gesprek</div>
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12.5px"><span><i class="ti ti-calendar"></i> ${esc(hhmm)}</span><span class="sr-tag blue"><i class="ti ti-alarm"></i> ${esc(dashCountdown(n.scheduled_at))}</span></div>
-          <div style="display:flex;gap:6px"><button class="sr-abtn" style="background:#fff;color:var(--accent-cyan);border-color:transparent" onclick="toast('Start call — binnenkort')"><i class="ti ti-phone-call"></i> Start call</button>${n.customer_id ? `<a class="sr-ibtn" href="/modules/klanten.html?id=${esc(n.customer_id)}" title="Klant openen"><i class="ti ti-user"></i></a>` : ''}</div>
-        </div>`;
-      } else { banner.innerHTML = `<div class="dash-hero"><div class="dash-hero-lbl"><i class="ti ti-clock"></i> Volgende afspraak</div><div class="sr-next-empty" style="margin-top:6px">Geen geplande afspraken.</div></div>`; }
+      // Volgende-afspraak-banner is team-content — alleen renderen voor wie
+      // 'm ook mag zien. Mentor: banner-DOM staat op display:none via
+      // applyTabGates én we slaan de innerHTML-render over. GEEN return —
+      // metrics-fetch hieronder moet ook voor mentor doorlopen.
+      if (can('sales.tab.customers')) {
+        const banner = document.getElementById('dashNextBanner'); const n = d.next_appointment;
+        if (n) {
+          const hhmm = new Date(n.scheduled_at).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+          banner.innerHTML = `<div class="dash-hero">
+            <div class="dash-hero-lbl"><i class="ti ti-clock"></i> Volgende afspraak</div>
+            <div class="dash-hero-name">${esc(n.lead_name || '—')}</div>
+            <div class="sr-cellsub" style="margin:2px 0 8px">Intake-gesprek</div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12.5px"><span><i class="ti ti-calendar"></i> ${esc(hhmm)}</span><span class="sr-tag blue"><i class="ti ti-alarm"></i> ${esc(dashCountdown(n.scheduled_at))}</span></div>
+            <div style="display:flex;gap:6px"><button class="sr-abtn" style="background:#fff;color:var(--accent-cyan);border-color:transparent" onclick="toast('Start call — binnenkort')"><i class="ti ti-phone-call"></i> Start call</button>${n.customer_id ? `<a class="sr-ibtn" href="/modules/klanten.html?id=${esc(n.customer_id)}" title="Klant openen"><i class="ti ti-user"></i></a>` : ''}</div>
+          </div>`;
+        } else { banner.innerHTML = `<div class="dash-hero"><div class="dash-hero-lbl"><i class="ti ti-clock"></i> Volgende afspraak</div><div class="sr-next-empty" style="margin-top:6px">Geen geplande afspraken.</div></div>`; }
+      }
     }
   } catch {}
   // 2. metrics
