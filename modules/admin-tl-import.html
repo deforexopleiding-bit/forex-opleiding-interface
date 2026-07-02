@@ -25,13 +25,13 @@
 <div class="app">
   <div class="page-head">
     <h1>Teamleader Import</h1>
-    <div class="sub">Importeer actieve abonnementen + klanten uit Teamleader naar dit systeem.</div>
+    <div class="sub">Importeer actieve abonnementen én bestaande deals/offertes + klanten uit Teamleader naar dit systeem.</div>
   </div>
   <div id="gate" style="display:none"><div class="sr-empty">Geen toegang — alleen super_admin.</div></div>
   <div id="main" style="display:none">
-    <!-- Config -->
+    <!-- Config: Abonnementen -->
     <div class="sr-card" style="margin-bottom:14px">
-      <div class="sr-card-h">Configuratie</div>
+      <div class="sr-card-h">Abonnementen importeren</div>
       <div class="sr-grid sr-grid-2" style="gap:12px">
         <div><label class="cfg">Entiteit</label><select class="sr-select" id="cfgEntity" style="width:100%"><option value="">Alle entiteiten</option></select></div>
         <div><label class="cfg">Max aantal subs per run (max 500)</label><input class="sr-select" id="cfgLimit" type="number" min="1" max="500" value="5" style="width:100%" /></div>
@@ -41,9 +41,26 @@
       <div style="margin-top:14px"><button class="sr-abtn primary" id="startBtn" style="padding:8px 16px"><i class="ti ti-download"></i> Start import</button></div>
       <div id="cfgErr" style="color:#dc2626;font-size:12px;margin-top:8px"></div>
     </div>
-    <!-- Resultaat -->
+    <!-- Resultaat abonnementen -->
     <div id="resultBox" style="display:none"></div>
-    <!-- Geschiedenis (in-sessie) -->
+
+    <!-- Config: Deals/offertes (nieuw) -->
+    <div class="sr-card" style="margin-bottom:14px;margin-top:22px">
+      <div class="sr-card-h">Offertes / deals importeren</div>
+      <div class="sub" style="font-size:12px;color:var(--text-dim);margin-bottom:10px">Importeert bestaande TL-deals (won/open/lost) + hun offerte-regels naar de lokale <code>deals</code>-tabel. Klanten worden gematcht/aangemaakt op <code>tl_contact_id</code> of <code>tl_company_id</code>. Sales_user_id = jij (super_admin) — bonus loopt via events.</div>
+      <div class="sr-grid sr-grid-2" style="gap:12px">
+        <div><label class="cfg">Entiteit</label><select class="sr-select" id="cfgEntityDeals" style="width:100%"><option value="">Alle entiteiten</option></select></div>
+        <div><label class="cfg">Max aantal deals per run (max 500)</label><input class="sr-select" id="cfgLimitDeals" type="number" min="1" max="500" value="5" style="width:100%" /></div>
+      </div>
+      <label class="sr-toggle" style="margin-top:10px"><input type="checkbox" id="cfgSkipDeals" checked> Skip bestaande (idempotent op tl_deal_id)</label>
+      <label class="sr-toggle" style="margin-top:6px"><input type="checkbox" id="cfgDryDeals" checked> Dry-run (alleen tellen, niet schrijven)</label>
+      <div style="margin-top:14px"><button class="sr-abtn primary" id="startBtnDeals" style="padding:8px 16px"><i class="ti ti-file-invoice"></i> Start deals-import</button></div>
+      <div id="cfgErrDeals" style="color:#dc2626;font-size:12px;margin-top:8px"></div>
+    </div>
+    <!-- Resultaat deals -->
+    <div id="resultBoxDeals" style="display:none"></div>
+
+    <!-- Geschiedenis (in-sessie) — beide runs -->
     <div class="sr-card" style="margin-top:14px"><div class="sr-card-h">Geschiedenis (deze sessie)</div><div id="historyBox"><div class="sr-empty">Nog geen runs.</div></div></div>
   </div>
 </div>
@@ -51,7 +68,7 @@
 <div class="ov" id="confirmOv">
   <div class="sr-card" style="max-width:380px;width:90%">
     <h3 style="font-size:15px;margin-bottom:8px">⚠️ Live import bevestigen</h3>
-    <p style="font-size:12.5px;color:var(--text-dim);margin-bottom:14px">Dit importeert ECHT data naar productie (klanten + abonnementen). Weet je het zeker?</p>
+    <p id="cfgConfirmText" style="font-size:12.5px;color:var(--text-dim);margin-bottom:14px">Dit importeert ECHT data naar productie. Weet je het zeker?</p>
     <div style="display:flex;justify-content:flex-end;gap:8px"><button class="sr-abtn" id="cfgCancel">Annuleren</button><button class="sr-abtn warning" id="cfgConfirm">Ja, importeer</button></div>
   </div>
 </div>
@@ -63,6 +80,8 @@
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 const history = [];
 let resultFilter = 'alle', lastDetails = [];
+let resultFilterDeals = 'alle', lastDetailsDeals = [];
+let confirmKind = 'subs'; // welk type wordt bevestigd
 
 async function runImport() {
   const dry = document.getElementById('cfgDry').checked;
@@ -78,11 +97,65 @@ async function runImport() {
     const res = await window.AgentShared.apiFetch('/api/admin/tl-import-subscriptions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     const d = await res.json();
     if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
-    history.unshift({ at: new Date(), dry: d.dry_run, totals: d.totals });
+    history.unshift({ at: new Date(), kind: 'subs', dry: d.dry_run, totals: d.totals });
     lastDetails = d.details || [];
     renderResult(d); renderHistory();
   } catch (e) { document.getElementById('cfgErr').textContent = e.message; }
   btn.disabled = false; btn.innerHTML = '<i class="ti ti-download"></i> Start import';
+}
+
+async function runImportDeals() {
+  const dry = document.getElementById('cfgDryDeals').checked;
+  const payload = {
+    dry_run: dry,
+    department_id: document.getElementById('cfgEntityDeals').value || null,
+    limit: Number(document.getElementById('cfgLimitDeals').value) || 5,
+    skip_existing: document.getElementById('cfgSkipDeals').checked,
+  };
+  const btn = document.getElementById('startBtnDeals'); btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
+  document.getElementById('cfgErrDeals').textContent = '';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/admin/tl-import-deals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
+    history.unshift({ at: new Date(), kind: 'deals', dry: d.dry_run, totals: d.totals });
+    lastDetailsDeals = d.details || [];
+    renderResultDeals(d); renderHistory();
+  } catch (e) { document.getElementById('cfgErrDeals').textContent = e.message; }
+  btn.disabled = false; btn.innerHTML = '<i class="ti ti-file-invoice"></i> Start deals-import';
+}
+
+function renderResultDeals(d) {
+  const box = document.getElementById('resultBoxDeals'); box.style.display = '';
+  const t = d.totals || {};
+  const kpi = (l, v, c) => `<div class="sr-stat"><div class="sr-stat-l">${l}</div><div class="sr-stat-v"${c ? ` style="color:${c}"` : ''}>${v}</div></div>`;
+  box.innerHTML = `<div class="sr-card">
+    <div class="sr-card-h">Resultaat deals ${d.dry_run ? '<span class="sr-tag warning">Dry-run</span>' : '<span class="sr-tag green">Live</span>'}</div>
+    <div class="sr-grid sr-grid-4" style="margin-bottom:14px">
+      ${kpi('Deals verwerkt', t.deals_processed || 0)}
+      ${kpi('Deals geïmporteerd', t.deals_imported || 0, '#059669')}
+      ${kpi('Klanten geïmporteerd', t.customers_imported || 0, '#0891b2')}
+      ${kpi('Regels', t.line_items_imported || 0, '#7c3aed')}
+    </div>
+    <div class="sr-grid sr-grid-2" style="margin-bottom:14px">
+      ${kpi('Skipped', t.deals_skipped || 0, '#64748b')}
+      ${kpi('Errors', t.errors || 0, (t.errors > 0) ? '#dc2626' : '')}
+    </div>
+    <div class="sr-segments" id="resFilterDeals" style="margin-bottom:10px">
+      ${[['alle', 'Alle'], ['imported', 'Geïmporteerd'], ['skipped', 'Skipped'], ['error', 'Errors']].map(([k, l]) => `<button class="sr-seg${resultFilterDeals === k ? ' active' : ''}" data-f="${k}">${l}</button>`).join('')}
+    </div>
+    <div id="resTableDeals"></div>
+  </div>`;
+  renderResTableDeals();
+  document.querySelectorAll('#resFilterDeals .sr-seg').forEach(b => b.addEventListener('click', () => { resultFilterDeals = b.dataset.f; document.querySelectorAll('#resFilterDeals .sr-seg').forEach(x => x.classList.remove('active')); b.classList.add('active'); renderResTableDeals(); }));
+}
+
+function renderResTableDeals() {
+  const rows = lastDetailsDeals.filter(r => resultFilterDeals === 'alle' || r.action === resultFilterDeals);
+  const BADGE = { imported: 'green', skipped: 'gray', error: 'danger' };
+  document.getElementById('resTableDeals').innerHTML = rows.length ? `<div class="sr-tablewrap"><table class="sr-table">
+    <thead><tr><th>TL Deal ID</th><th>Klant</th><th>Type</th><th>Actie</th><th>Klant-actie</th><th>Fout / reden</th></tr></thead>
+    <tbody>${rows.map(r => `<tr><td><span class="sr-cellsub">${esc(String(r.tl_deal_id || '').slice(0, 12))}</span></td><td>${esc(r.customer_name || '—')}</td><td><span class="sr-cellsub">${esc(r.invoicee_type || '—')}</span></td><td><span class="sr-tag ${BADGE[r.action] || 'gray'}">${esc(r.action)}</span></td><td>${esc(r.customer_action || '—')}</td><td><span style="color:${r.error ? '#dc2626' : 'var(--text-dim)'};font-size:11px">${esc(r.error || r.reason || '')}</span></td></tr>`).join('')}</tbody></table></div>` : '<div class="sr-empty">Geen rijen.</div>';
 }
 function renderResult(d) {
   const box = document.getElementById('resultBox'); box.style.display = '';
@@ -112,7 +185,16 @@ function renderResTable() {
     <tbody>${rows.map(r => `<tr><td><span class="sr-cellsub">${esc(String(r.tl_sub_id).slice(0, 12))}</span></td><td>${esc(r.customer_name || '—')}</td><td><span class="sr-tag ${BADGE[r.action] || 'gray'}">${esc(r.action)}</span></td><td>${esc(r.customer_action || '—')}</td><td><span style="color:#dc2626;font-size:11px">${esc(r.error || '')}</span></td></tr>`).join('')}</tbody></table></div>` : '<div class="sr-empty">Geen rijen.</div>';
 }
 function renderHistory() {
-  document.getElementById('historyBox').innerHTML = history.length ? history.map(h => `<div class="feed-item"><span>${h.dry ? '<span class="sr-tag warning">dry</span>' : '<span class="sr-tag green">live</span>'} ${h.totals.subs_imported} subs · ${h.totals.customers_imported} klanten · ${h.totals.errors} errors</span><span class="feed-time">${h.at.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })}</span></div>`).join('') : '<div class="sr-empty">Nog geen runs.</div>';
+  document.getElementById('historyBox').innerHTML = history.length ? history.map(h => {
+    const drybadge = h.dry ? '<span class="sr-tag warning">dry</span>' : '<span class="sr-tag green">live</span>';
+    const kindbadge = h.kind === 'deals'
+      ? '<span class="sr-tag" style="background:rgba(124,58,237,.14);color:#7c3aed">deals</span>'
+      : '<span class="sr-tag" style="background:rgba(8,145,178,.14);color:#0891b2">subs</span>';
+    const summary = h.kind === 'deals'
+      ? `${h.totals.deals_imported || 0} deals · ${h.totals.customers_imported || 0} klanten · ${h.totals.line_items_imported || 0} regels · ${h.totals.errors || 0} errors`
+      : `${h.totals.subs_imported || 0} subs · ${h.totals.customers_imported || 0} klanten · ${h.totals.errors || 0} errors`;
+    return `<div class="feed-item"><span>${drybadge} ${kindbadge} ${esc(summary)}</span><span class="feed-time">${h.at.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })}</span></div>`;
+  }).join('') : '<div class="sr-empty">Nog geen runs.</div>';
 }
 
 (async () => {
@@ -122,15 +204,52 @@ function renderHistory() {
   if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
   if (profile.role !== 'super_admin') { document.getElementById('gate').style.display = ''; return; }
   document.getElementById('main').style.display = '';
-  // Entiteiten laden.
-  try { const r = await window.AgentShared.apiFetch('/api/company-entities'); const d = await r.json(); const sel = document.getElementById('cfgEntity'); for (const e of d.entities || []) { const o = document.createElement('option'); o.value = e.tl_department_id; o.textContent = e.label; sel.appendChild(o); } } catch {}
-  // Start-knop kleurt warning bij live.
-  const dry = document.getElementById('cfgDry'), btn = document.getElementById('startBtn');
-  const syncBtn = () => { btn.className = 'sr-abtn ' + (dry.checked ? 'primary' : 'warning'); };
-  dry.addEventListener('change', syncBtn); syncBtn();
-  btn.addEventListener('click', () => { if (dry.checked) runImport(); else document.getElementById('confirmOv').classList.add('show'); });
+  // Entiteiten laden — vul BEIDE dropdowns.
+  try {
+    const r = await window.AgentShared.apiFetch('/api/company-entities');
+    const d = await r.json();
+    const selSubs  = document.getElementById('cfgEntity');
+    const selDeals = document.getElementById('cfgEntityDeals');
+    for (const e of d.entities || []) {
+      for (const sel of [selSubs, selDeals]) {
+        const o = document.createElement('option');
+        o.value = e.tl_department_id; o.textContent = e.label;
+        sel.appendChild(o);
+      }
+    }
+  } catch {}
+
+  // Start-knoppen kleuren warning bij live. Confirm-modal wordt gedeeld —
+  // `confirmKind` bepaalt welke handler geroepen wordt op "Ja, importeer".
+  const dry     = document.getElementById('cfgDry');
+  const btn     = document.getElementById('startBtn');
+  const dryD    = document.getElementById('cfgDryDeals');
+  const btnD    = document.getElementById('startBtnDeals');
+  const syncBtn  = () => { btn.className  = 'sr-abtn ' + (dry.checked  ? 'primary' : 'warning'); };
+  const syncBtnD = () => { btnD.className = 'sr-abtn ' + (dryD.checked ? 'primary' : 'warning'); };
+  dry.addEventListener('change',  syncBtn);  syncBtn();
+  dryD.addEventListener('change', syncBtnD); syncBtnD();
+
+  const openConfirm = (kind, msg) => {
+    confirmKind = kind;
+    const t = document.getElementById('cfgConfirmText');
+    if (t) t.textContent = msg;
+    document.getElementById('confirmOv').classList.add('show');
+  };
+  btn.addEventListener('click', () => {
+    if (dry.checked) runImport();
+    else openConfirm('subs', 'Dit importeert ECHT data naar productie (klanten + abonnementen). Weet je het zeker?');
+  });
+  btnD.addEventListener('click', () => {
+    if (dryD.checked) runImportDeals();
+    else openConfirm('deals', 'Dit importeert ECHT data naar productie (klanten + deals + offerte-regels). Weet je het zeker?');
+  });
   document.getElementById('cfgCancel').addEventListener('click', () => document.getElementById('confirmOv').classList.remove('show'));
-  document.getElementById('cfgConfirm').addEventListener('click', () => { document.getElementById('confirmOv').classList.remove('show'); runImport(); });
+  document.getElementById('cfgConfirm').addEventListener('click', () => {
+    document.getElementById('confirmOv').classList.remove('show');
+    if (confirmKind === 'deals') runImportDeals();
+    else runImport();
+  });
 })();
 </script>
 <script src="/modules/shared/permissions.js"></script>
