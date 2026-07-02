@@ -140,32 +140,106 @@ export default async function handler(req, res) {
           totals.subs_skipped++; detail.action = 'skipped'; detail.customer_action = 'exists'; details.push(detail); continue;
         }
 
-        // b. Contact ophalen.
-        const contactId = sub.invoicee?.customer?.id || sub.invoicee?.id || null;
-        if (!contactId) { totals.errors++; detail.action = 'error'; detail.error = 'Geen invoicee-contact op sub'; details.push(detail); continue; }
-        const cr = await tlCall('/contacts.info', { id: contactId });
-        const cData = cr.ok ? (await cr.json()).data : null;
-        const cName = cData ? `${cData.first_name || ''} ${cData.last_name || ''}`.trim() : '(onbekend)';
+        // b. Invoicee ophalen — TL invoicee kan een CONTACT of een COMPANY zijn.
+        // Kies /contacts.info of /companies.info op basis van customer.type.
+        // Onbekend type → default naar 'contact' (backward-compat).
+        const invoiceeId    = sub.invoicee?.customer?.id || sub.invoicee?.id || null;
+        const invoiceeType  = String(sub.invoicee?.customer?.type || 'contact').toLowerCase() === 'company' ? 'company' : 'contact';
+        detail.invoicee_type = invoiceeType;
+        if (!invoiceeId) { totals.errors++; detail.action = 'error'; detail.error = 'Geen invoicee-id op sub'; details.push(detail); continue; }
+
+        const infoPath = invoiceeType === 'company' ? '/companies.info' : '/contacts.info';
+        const cr = await tlCall(infoPath, { id: invoiceeId });
+        let cData = null;
+        if (cr.ok) {
+          try { cData = (await cr.json())?.data || null; }
+          catch (_) { cData = null; }
+        }
+        if (!cData) {
+          const bodyTxt = await cr.text().catch(() => '');
+          let errMsg = `${invoiceeType}.info faalde (HTTP ${cr.status})`;
+          if (cr.status === 404) errMsg += ' — niet gevonden in TL';
+          else if (cr.status === 401 || cr.status === 403) errMsg += ' — geen TL-toegang';
+          if (bodyTxt) errMsg += ` :: ${bodyTxt.slice(0, 160)}`;
+          totals.errors++; detail.action = 'error'; detail.error = errMsg; details.push(detail); continue;
+        }
+
+        // c. Customer upsert. Voor contacts: match op tl_contact_id. Voor
+        //    companies: match op tl_company_id (bestaan onbekend — probe via
+        //    select; bij "column does not exist" krijgen we duidelijke error).
+        const cName = invoiceeType === 'company'
+          ? (cData.name || cData.company_name || '(onbekend bedrijf)')
+          : `${cData.first_name || ''} ${cData.last_name || ''}`.trim() || '(onbekend contact)';
         detail.customer_name = cName;
 
-        // c. Customer upsert (op tl_contact_id).
         let customerId = null;
-        const { data: existCust } = await supabaseAdmin.from('customers').select('id, tl_contact_id').eq('tl_contact_id', contactId).maybeSingle();
+        let existCust  = null;
+        if (invoiceeType === 'company') {
+          const { data, error: probeErr } = await supabaseAdmin
+            .from('customers').select('id, tl_company_id').eq('tl_company_id', invoiceeId).maybeSingle();
+          if (probeErr) {
+            const em = String(probeErr.message || '');
+            if (/column .*tl_company_id/i.test(em) || probeErr.code === '42703') {
+              totals.errors++; detail.action = 'error';
+              detail.error = 'customers.tl_company_id kolom ontbreekt — company-invoicees niet ondersteund tot migratie';
+              details.push(detail); continue;
+            }
+            throw new Error('customer lookup: ' + em);
+          }
+          existCust = data;
+        } else {
+          const { data } = await supabaseAdmin
+            .from('customers').select('id, tl_contact_id').eq('tl_contact_id', invoiceeId).maybeSingle();
+          existCust = data;
+        }
+
         if (existCust) { customerId = existCust.id; detail.customer_action = 'exists'; }
-        else if (cData) {
-          const addr = (Array.isArray(cData.addresses) ? cData.addresses : []); const a = (addr.find(x => x.type === 'primary') || addr[0] || {}).address || {};
-          const line1 = a.line_1 || ''; const mLine = line1.match(/^(.*?)\s+(\d+\s*[a-zA-Z]?)$/);
-          const custPayload = {
-            first_name: cData.first_name || null, last_name: cData.last_name || null,
-            email: cData.emails?.[0]?.email || null, phone: cData.telephones?.[0]?.number || null,
-            date_of_birth: cData.birthdate || null,
-            address_street: mLine ? mLine[1].trim() : (line1 || null), address_number: mLine ? mLine[2].replace(/\s/g, '') : null,
-            address_postal: a.postal_code || null, address_city: a.city || null,
-            tl_contact_id: contactId, imported_from_tl_at: new Date().toISOString(), created_by_user_id: admin.user.id,
-          };
-          if (!dry_run) { const { data: nc, error: ncErr } = await supabaseAdmin.from('customers').insert(custPayload).select('id').single(); if (ncErr) throw new Error('customer insert: ' + ncErr.message); customerId = nc.id; }
+        else {
+          let custPayload;
+          if (invoiceeType === 'company') {
+            // Company-adres kan in address of primary_address zitten; wees defensief.
+            const cAddr = cData.address || (Array.isArray(cData.addresses) ? (cData.addresses[0]?.address || cData.addresses[0]) : null) || {};
+            custPayload = {
+              is_company:      true,
+              company_name:    cName,
+              email:           cData.emails?.[0]?.email || null,
+              phone:           cData.telephones?.[0]?.number || null,
+              vat_number:      cData.vat_number || null,
+              address_street:  cAddr.line_1 || null,
+              address_postal:  cAddr.postal_code || null,
+              address_city:    cAddr.city || null,
+              tl_company_id:   invoiceeId,
+              imported_from_tl_at: new Date().toISOString(),
+              created_by_user_id:  admin.user.id,
+            };
+          } else {
+            const addr = (Array.isArray(cData.addresses) ? cData.addresses : []); const a = (addr.find(x => x.type === 'primary') || addr[0] || {}).address || {};
+            const line1 = a.line_1 || ''; const mLine = line1.match(/^(.*?)\s+(\d+\s*[a-zA-Z]?)$/);
+            custPayload = {
+              first_name: cData.first_name || null, last_name: cData.last_name || null,
+              email: cData.emails?.[0]?.email || null, phone: cData.telephones?.[0]?.number || null,
+              date_of_birth: cData.birthdate || null,
+              address_street: mLine ? mLine[1].trim() : (line1 || null), address_number: mLine ? mLine[2].replace(/\s/g, '') : null,
+              address_postal: a.postal_code || null, address_city: a.city || null,
+              tl_contact_id: invoiceeId, imported_from_tl_at: new Date().toISOString(), created_by_user_id: admin.user.id,
+            };
+          }
+          if (!dry_run) {
+            const { data: nc, error: ncErr } = await supabaseAdmin.from('customers').insert(custPayload).select('id').single();
+            if (ncErr) {
+              // Kolom-mismatch (bv. is_company, company_name, vat_number, tl_company_id):
+              // duidelijke melding in de detail-error i.p.v. stille crash.
+              const em = String(ncErr.message || '');
+              if (/column/i.test(em) || ncErr.code === '42703') {
+                totals.errors++; detail.action = 'error'; detail.error = `customer insert (${invoiceeType}): kolom-mismatch → ${em}`;
+                details.push(detail); continue;
+              }
+              throw new Error('customer insert: ' + em);
+            }
+            customerId = nc.id;
+          }
           totals.customers_imported++; detail.customer_action = 'created';
-        } else { totals.errors++; detail.action = 'error'; detail.error = 'contacts.info faalde'; details.push(detail); continue; }
+        }
 
         // d/e. Line items zitten ALLEEN in subscriptions.info (list geeft lege
         // grouped_lines — standaard TL-pattern). Haal de volledige sub op.
