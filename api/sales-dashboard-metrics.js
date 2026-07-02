@@ -28,6 +28,22 @@ export default async function handler(req, res) {
       .in('status', ['pending', 'earned', 'invoiced', 'paid']);
     const myBonusMonth = (myBonuses || []).reduce((s, b) => s + Number(b.amount || 0), 0);
 
+    // Mijn omzet deze maand: som total_amount van EIGEN deals die deze maand
+    // getekend/geaccepteerd zijn. Fail-soft → 0 bij fout of ontbrekende timestamps.
+    let myRevenueMonth = 0;
+    try {
+      const { data: signedDeals } = await supabaseAdmin.from('deals')
+        .select('total_amount, tl_quotation_status, tl_quotation_signed_at, tl_quotation_accepted_at')
+        .eq('sales_user_id', user.id)
+        .in('tl_quotation_status', ['accepted', 'signed']);
+      for (const d of signedDeals || []) {
+        const ts = d.tl_quotation_signed_at || d.tl_quotation_accepted_at;
+        if (ts && ts >= monthStart) myRevenueMonth += Number(d.total_amount || 0);
+      }
+    } catch (e) {
+      console.warn('[sales-dashboard-metrics] my_revenue_month fail-soft:', e?.message || e);
+    }
+
     // Klanten in onboarding (verzonden).
     const { count: onboardingCount } = await supabaseAdmin.from('customers')
       .select('id', { count: 'exact', head: true }).eq('onboarding_status', 'sent');
@@ -48,6 +64,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       my_open_quotations: myOpenQuotations,
       my_bonus_month: Math.round(myBonusMonth * 100) / 100,
+      my_revenue_month: Math.round(myRevenueMonth * 100) / 100,
       onboarding_count: onboardingCount || 0,
       retention_count: retentionCount,
     });

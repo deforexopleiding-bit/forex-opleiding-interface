@@ -109,8 +109,9 @@
       <div>
         <div id="dashNextBanner"></div>
         <div class="sr-card">
-          <div class="sr-card-h"><i class="ti ti-activity"></i> Activiteit</div>
-          <div id="dashFeed"><div class="sr-empty">—</div></div>
+          <div class="sr-card-h"><i class="ti ti-coin"></i> Omzet deze maand</div>
+          <div class="sr-stat-v" id="dashRevenueMonth" style="font-size:26px">–</div>
+          <div class="sr-stat-d">getekende offertes deze maand</div>
         </div>
       </div>
       <!-- RECHTER KOLOM -->
@@ -397,7 +398,12 @@ function toast(msg, kind) {
   el.textContent = msg; el.className = 'toast show ' + (kind || '');
   setTimeout(() => el.classList.remove('show'), 2200);
 }
-function can(key) { if (!state.perms) return true; if (state.perms.has('*')) return true; return state.perms.has(key); }
+// FAIL-CLOSED: als state.perms nog niet geladen is, geven we `false` terug.
+// De init awaitet RBAC.ensurePermissionsLoaded() vóór applyTabGates/render, dus
+// dit verbergt niets onterecht voor legitieme users — het sluit alleen het
+// race-gat waarin gegate knoppen kortstondig zichtbaar zouden zijn tijdens
+// een fresh load of hard-refresh.
+function can(key) { if (!state.perms) return false; if (state.perms.has('*')) return true; return state.perms.has(key); }
 
 /* ── Per-tab RBAC ──────────────────────────────────────────────────────────
    Mapping data-tab → feature_key. Tabs zonder mapping vallen niet onder de
@@ -1576,17 +1582,6 @@ async function loadDashboard() {
           <div style="display:flex;gap:6px"><button class="sr-abtn" style="background:#fff;color:var(--accent-cyan);border-color:transparent" onclick="toast('Start call — binnenkort')"><i class="ti ti-phone-call"></i> Start call</button>${n.customer_id ? `<a class="sr-ibtn" href="/modules/klanten.html?id=${esc(n.customer_id)}" title="Klant openen"><i class="ti ti-user"></i></a>` : ''}</div>
         </div>`;
       } else { banner.innerHTML = `<div class="dash-hero"><div class="dash-hero-lbl"><i class="ti ti-clock"></i> Volgende afspraak</div><div class="sr-next-empty" style="margin-top:6px">Geen geplande afspraken.</div></div>`; }
-      // Activiteit-feed (afgeleid uit de stats — geen aparte events-endpoint).
-      const feed = document.getElementById('dashFeed');
-      if (feed) {
-        const items = [
-          { c: '#059669', t: `${d.today?.leads ?? 0} nieuwe leads`, w: 'vandaag' },
-          { c: '#0891b2', t: `${d.today?.appointments ?? 0} afspraken`, w: 'vandaag' },
-          { c: '#f59e0b', t: `${d.open_follow_ups ?? 0} open follow-ups`, w: 'nu' },
-          { c: '#0891b2', t: `${d.week?.events ?? 0} event-aanmeldingen`, w: 'deze week' },
-        ];
-        feed.innerHTML = items.map(i => `<div class="feed-item"><span class="feed-dot" style="background:${i.c}"></span><span>${esc(i.t)}</span><span class="feed-time">${i.w}</span></div>`).join('');
-      }
     }
   } catch {}
   // 2. metrics
@@ -1595,6 +1590,8 @@ async function loadDashboard() {
     if (res.ok) { const d = await res.json();
       dashSet('dashMyQuotes', d.my_open_quotations); dashSet('dashOnboarding', d.onboarding_count); dashSet('dashRetention', d.retention_count);
       const b = document.getElementById('dashMyBonus'); if (b) b.textContent = '€' + Number(d.my_bonus_month || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2 });
+      const rev = document.getElementById('dashRevenueMonth');
+      if (rev) rev.textContent = '€ ' + Number(d.my_revenue_month || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
   } catch {}
   // 3. wachten op subscription
