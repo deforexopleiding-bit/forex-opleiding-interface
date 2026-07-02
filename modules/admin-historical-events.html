@@ -84,6 +84,10 @@
       <div id="dealResults"><div class="sub">Zoek deals om te koppelen.</div></div>
     </div>
 
+    <!-- Overzicht selectie -->
+    <div class="sr-card-h" style="margin-top:16px">Geselecteerde deals (<span id="selDealCount">0</span>)</div>
+    <div id="selectedDealsSummary" style="margin-bottom:12px"><div class="sr-empty">Nog geen deals geselecteerd.</div></div>
+
     <!-- Actie -->
     <div style="display:flex;gap:10px;align-items:center">
       <button class="sr-abtn primary" id="saveBtn" style="padding:10px 20px"><i class="ti ti-device-floppy"></i> Historisch event opslaan</button>
@@ -195,6 +199,7 @@ async function searchDeals() {
     state.dealsFound = d.deals || [];
     for (const dr of state.dealsFound) state.dealDetailsById.set(dr.id, dr);
     renderDealResults();
+    renderSelectedDeals();
   } catch (e) {
     box.innerHTML = '<div class="msg err">' + esc(e.message) + '</div>';
   }
@@ -217,6 +222,49 @@ function renderDealResults() {
   box.querySelectorAll('[data-deal]').forEach((cb) => cb.addEventListener('change', () => {
     const id = cb.getAttribute('data-deal');
     if (cb.checked) state.selectedDeals.add(id); else state.selectedDeals.delete(id);
+    renderDealResults();
+    renderSelectedDeals();
+  }));
+}
+
+// Overzicht van álle geselecteerde deals (ook die buiten de huidige zoek-
+// resultaten vallen). Details uit state.dealDetailsById; fail-soft als een
+// id niet cached is (dan tonen we alleen de id + "onbekend").
+function renderSelectedDeals() {
+  const box = document.getElementById('selectedDealsSummary');
+  const cnt = document.getElementById('selDealCount');
+  if (cnt) cnt.textContent = String(state.selectedDeals.size);
+  if (!box) return;
+  if (state.selectedDeals.size === 0) {
+    box.innerHTML = '<div class="sr-empty">Nog geen deals geselecteerd.</div>';
+    return;
+  }
+  const rows = [...state.selectedDeals].map((id) => {
+    const d = state.dealDetailsById.get(id);
+    if (!d) {
+      return `<div class="deal-row selected">
+        <div style="flex:1"><b>${esc(id)}</b>
+          <div class="sub" style="color:var(--text-dim);font-size:11.5px;margin-top:2px">Deal-details nog niet geladen — blijft geselecteerd</div>
+        </div>
+        <button class="sr-ibtn" data-desel="${esc(id)}" title="Verwijder uit selectie"><i class="ti ti-x" style="color:#dc2626"></i></button>
+      </div>`;
+    }
+    return `<div class="deal-row selected">
+      <div style="flex:1"><b>${esc(d.customer_name || '—')}</b>
+        <span class="sub" style="color:var(--text-dim);margin-left:8px">${esc(d.customer_email || '')}</span>
+        <div class="sub" style="color:var(--text-dim);font-size:11.5px;margin-top:2px">Ref: ${esc(d.quote_reference || '—')} · TL: ${esc((d.tl_deal_id||'').slice(0,12))} · ${esc(fmtDateNL(d.created_at))}</div>
+      </div>
+      <span class="pill ${d.tl_quotation_status === 'accepted' || d.tl_quotation_status === 'signed' ? 'g' : 'a'}">${esc(d.tl_quotation_status || '—')}</span>
+      <span style="font-family:ui-monospace,monospace">${esc(eur(d.total_amount))}</span>
+      <button class="sr-ibtn" data-desel="${esc(d.id)}" title="Verwijder uit selectie"><i class="ti ti-x" style="color:#dc2626"></i></button>
+    </div>`;
+  }).join('');
+  box.innerHTML = rows;
+  box.querySelectorAll('[data-desel]').forEach((btn) => btn.addEventListener('click', () => {
+    const id = btn.getAttribute('data-desel');
+    state.selectedDeals.delete(id);
+    renderSelectedDeals();
+    // Sync checkbox in zoekresultaten als 'ie zichtbaar is.
     renderDealResults();
   }));
 }
@@ -263,7 +311,7 @@ async function save() {
     msg.innerHTML = out;
     // Reset selecties (behalve mentoren, die blijven vaak gelijk voor volgende event).
     state.expenses = []; renderExpenses();
-    state.selectedDeals.clear(); renderDealResults();
+    state.selectedDeals.clear(); renderDealResults(); renderSelectedDeals();
     document.getElementById('evTitle').value = '';
     document.getElementById('evLocation').value = '';
   } catch (e) {
@@ -291,6 +339,7 @@ async function save() {
 
   await loadMentors();
   renderExpenses();
+  renderSelectedDeals();
 
   document.getElementById('expAdd').addEventListener('click', () => addExpense());
   document.getElementById('dealSearchBtn').addEventListener('click', () => searchDeals());

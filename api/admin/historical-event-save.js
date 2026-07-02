@@ -72,38 +72,51 @@ export default async function handler(req, res) {
 
   try {
     // ── 1. events-rij ────────────────────────────────────────────────────
-    // Probeer eerst met is_historical=true; fallback als de kolom niet bestaat.
+    // Vul de NOT-NULL-kolommen die de reguliere events-flow óók zet:
+    //   - capacity: DB is NOT NULL. Historisch event heeft geen inschrijf-
+    //     capaciteit maar 1 is >0 safe voor eventuele CHECK-constraint.
+    //   - signups_closed: historisch = dicht (fail-soft; retry zonder als de
+    //     kolom niet bestaat).
+    //   - is_historical: markeer indien de kolom bestaat (fail-soft).
+    //   - status='afgerond' + created_by_user_id blijven zoals eerder.
     const baseEventRow = {
       title,
       starts_at:          startsAt,
       ends_at:            null,
       location:           location || null,
+      capacity:           1,
       status:             'afgerond',
       created_by_user_id: admin.user.id,
     };
+    // Kandidaat-vlaggen: proberen eerst mét, bij column-error retry zonder.
+    const optionalFlags = { is_historical: true, signups_closed: true };
     let eventId = null;
     let eventRow = null;
     {
-      const { data, error } = await supabaseAdmin.from('events')
-        .insert({ ...baseEventRow, is_historical: true })
-        .select('id, title, starts_at, location, status, is_historical, created_at')
-        .single();
-      if (error) {
-        if (/column .*is_historical/i.test(String(error.message || '')) || error.code === '42703') {
-          // Kolom bestaat niet; retry zonder is_historical.
-          warnings.push('events.is_historical kolom ontbreekt — event opgeslagen zonder markering');
-          const { data: d2, error: e2 } = await supabaseAdmin.from('events')
-            .insert(baseEventRow)
-            .select('id, title, starts_at, location, status, created_at')
-            .single();
-          if (e2) throw new Error('event insert (retry): ' + e2.message);
-          eventRow = d2; eventId = d2.id;
-        } else {
-          throw new Error('event insert: ' + error.message);
+      // Poging 1: alle optionele vlaggen erbij.
+      let attempt = { ...baseEventRow, ...optionalFlags };
+      // Retry-loop: bij kolom-not-found strippen we die kolom en proberen opnieuw.
+      const maxRetries = Object.keys(optionalFlags).length + 1;
+      let lastErr = null;
+      for (let i = 0; i < maxRetries; i++) {
+        const { data, error } = await supabaseAdmin.from('events')
+          .insert(attempt)
+          .select('id, title, starts_at, location, status, capacity, created_at')
+          .single();
+        if (!error) { eventRow = data; eventId = data.id; break; }
+        lastErr = error;
+        // Match "column ... of relation events" / 42703 undefined_column.
+        const em = String(error.message || '');
+        const colMatch = em.match(/column "?([a-zA-Z_]+)"?/);
+        if (error.code === '42703' && colMatch && attempt[colMatch[1]] !== undefined && baseEventRow[colMatch[1]] === undefined) {
+          const drop = colMatch[1];
+          warnings.push(`events.${drop} kolom ontbreekt — event opgeslagen zonder die markering`);
+          delete attempt[drop];
+          continue;
         }
-      } else {
-        eventRow = data; eventId = data.id;
+        break; // andere fout → gooi hieronder.
       }
+      if (!eventId) throw new Error('event insert: ' + (lastErr?.message || 'onbekend'));
     }
 
     // ── 2. event_mentors (was_present=true per team_member_id) ────────────
