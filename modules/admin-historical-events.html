@@ -50,6 +50,15 @@
   <div id="gate" style="display:none"><div class="sr-empty">Geen toegang — alleen super_admin.</div></div>
   <div id="main" style="display:none">
 
+    <!-- Bestaande historische events -->
+    <div class="sr-card" style="margin-bottom:14px">
+      <div class="sr-card-h" style="display:flex;align-items:center;gap:10px">
+        <span>Bestaande historische events</span>
+        <button class="sr-ibtn" id="reloadListBtn" title="Herladen"><i class="ti ti-refresh"></i></button>
+      </div>
+      <div id="histList"><div class="sr-empty">Laden…</div></div>
+    </div>
+
     <!-- Event basis -->
     <div class="sr-card" style="margin-bottom:14px">
       <div class="sr-card-h">Event</div>
@@ -351,10 +360,55 @@ async function save() {
     document.getElementById('evLocation').value = '';
     // Toon bonus-actiepaneel voor deze net-opgeslagen event.
     setCurrentEvent(d.event_id);
+    // Ververs lijst zodat het nieuwe event verschijnt.
+    loadHistList();
   } catch (e) {
     msg.innerHTML = '<div class="msg err">Opslaan mislukt: ' + esc(e.message) + '</div>';
   }
   btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Historisch event opslaan';
+}
+
+// ── Bestaande historische events: lijst + openen ────────────────────────
+async function loadHistList() {
+  const box = document.getElementById('histList');
+  if (box && !box.innerHTML.trim()) box.innerHTML = '<div class="sr-empty">Laden…</div>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/admin/historical-events-list');
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+    renderHistList(d.events || []);
+  } catch (e) {
+    if (box) box.innerHTML = '<div class="msg err">Lijst laden mislukt: ' + esc(e.message) + '</div>';
+  }
+}
+function renderHistList(events) {
+  const box = document.getElementById('histList');
+  if (!box) return;
+  if (!events.length) { box.innerHTML = '<div class="sr-empty">Nog geen historische events.</div>'; return; }
+  box.innerHTML = events.map((e) => {
+    const isCurr = state.currentEventId === e.id;
+    const badge  = e.bonus_geboekt
+      ? '<span class="pill g">geboekt</span>'
+      : '<span class="pill a">nog niet geboekt</span>';
+    return `<div class="deal-row${isCurr ? ' selected' : ''}" style="align-items:center">
+      <div style="flex:1">
+        <b>${esc(e.title)}</b>
+        <span class="sub" style="color:var(--text-dim);margin-left:8px">${esc(fmtDateNL(e.starts_at))}</span>
+        <div class="sub" style="color:var(--text-dim);font-size:11.5px;margin-top:2px">
+          ${Number(e.deals) || 0} deal(s) · ${Number(e.mentoren) || 0} mentor(en) · kosten ${esc(eur(e.kosten))}
+        </div>
+      </div>
+      ${badge}
+      <button class="sr-abtn" data-open="${esc(e.id)}"><i class="ti ti-external-link"></i> Openen</button>
+    </div>`;
+  }).join('');
+  box.querySelectorAll('[data-open]').forEach((btn) => btn.addEventListener('click', () => {
+    const id = btn.getAttribute('data-open');
+    setCurrentEvent(id);
+    renderHistList(events); // re-render zodat 'selected' highlight klopt
+    const panel = document.getElementById('bonusPanel');
+    if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }));
 }
 
 // ── Bonus-actiepaneel: preview + commit ─────────────────────────────────
@@ -476,6 +530,8 @@ async function runCommit() {
       </div>`;
     }
     msg.innerHTML = out;
+    // Ververs lijst — 'geboekt'-badge kan geflipt zijn.
+    loadHistList();
   } catch (e) {
     msg.innerHTML = '<div class="msg err">Commit mislukt: ' + esc(e.message) + '</div>';
   }
@@ -504,6 +560,7 @@ async function runCommit() {
   await loadMentors();
   renderExpenses();
   renderSelectedDeals();
+  loadHistList();
 
   document.getElementById('expAdd').addEventListener('click', () => addExpense());
   document.getElementById('dealSearchBtn').addEventListener('click', () => searchDeals());
@@ -511,6 +568,7 @@ async function runCommit() {
   document.getElementById('saveBtn').addEventListener('click', () => save());
   document.getElementById('previewBtn').addEventListener('click', () => runPreview());
   document.getElementById('commitBtn').addEventListener('click', () => runCommit());
+  document.getElementById('reloadListBtn').addEventListener('click', () => loadHistList());
   document.getElementById('previewClose').addEventListener('click', () => document.getElementById('previewModal').classList.remove('open'));
   document.getElementById('previewModal').addEventListener('click', (e) => {
     if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
