@@ -105,8 +105,12 @@ export default async function handler(req, res) {
   if (!admin) return res.status(403).json({ error: 'Admin only' });
   if (admin.profile.role !== 'super_admin') return res.status(403).json({ error: 'Alleen super_admin mag importeren' });
 
-  const { dry_run = true, department_id = null, limit = 60, skip_existing = true } = req.body || {};
-  const maxDeals = Math.min(Number(limit) || 60, 500);
+  const { dry_run = true, department_id = null, limit = 60, skip_existing = true, offset = 0 } = req.body || {};
+  const maxDeals    = Math.min(Number(limit) || 60, 500);
+  const startOffset = Math.max(0, Number(offset) || 0);
+  // Absoluut plafond op het aantal TL-deals dat we OPHALEN uit deals.list —
+  // 5000 dekt onze historie ruim; verhoog als je account groter is.
+  const FETCH_CAP   = 5000;
 
   const tok = await getActiveToken();
   if (!tok) return res.status(400).json({ error: 'Geen actief Teamleader-token' });
@@ -122,10 +126,17 @@ export default async function handler(req, res) {
   // (idempotent: gebruiker kan runImport nogmaals draaien om verder te gaan).
   let hasMore = false;
 
+  // We houden bij hoeveel TL-deals de LAST-page qua omvang had — als 't <100
+  // was, weten we dat er niks meer achteraan komt (defintieve einde).
+  let listExhausted = false;
+
   try {
-    // 1. Paginate TL deals.list.
+    // 1. Paginate TL deals.list. Pak minimaal (offset + maxDeals) records
+    //    zodat we via slice(offset, offset + maxDeals) de juiste batch pakken.
+    //    FETCH_CAP is de bovengrens (5000) om oneindige lussen te voorkomen.
     const tlDeals = [];
-    for (let page = 1; tlDeals.length < maxDeals; page++) {
+    const targetCount = Math.min(FETCH_CAP, startOffset + maxDeals);
+    for (let page = 1; tlDeals.length < targetCount; page++) {
       const filter = {};
       if (department_id) filter.department_id = department_id;
       const r = await tlCall('/deals.list', { filter, page: { size: 100, number: page } });
@@ -136,12 +147,19 @@ export default async function handler(req, res) {
       const data = await r.json();
       const batch = data.data || [];
       tlDeals.push(...batch);
-      if (batch.length < 100) break;
+      if (batch.length < 100) { listExhausted = true; break; }
     }
-    // Als we de cap raken en er waarschijnlijk nog TL-deals over zijn, markeer
-    // has_more zodat de UI een 'volgende batch'-knop kan tonen.
-    if (tlDeals.length > maxDeals) hasMore = true;
-    const work = tlDeals.slice(0, maxDeals);
+
+    // 2. Slice op de gevraagde offset.
+    const work = tlDeals.slice(startOffset, startOffset + maxDeals);
+
+    // has_more:
+    //   - we hebben MEER TL-deals in de buffer dan startOffset+work.length, OF
+    //   - de list was nog niet uitgeput toen we stopten met pagineren.
+    // Zo weet de UI dat volgende run met offset=next_offset zin heeft.
+    const bufferHasMore = tlDeals.length > (startOffset + work.length);
+    hasMore = bufferHasMore || !listExhausted;
+    const nextOffset = startOffset + work.length;
 
     // 2. Per deal.
     for (const stub of work) {
@@ -401,7 +419,12 @@ export default async function handler(req, res) {
       });
     } catch (e) { console.error('[tl-import-deals] audit:', e.message); }
 
-    return res.status(200).json({ dry_run, totals, details, has_more: hasMore });
+    return res.status(200).json({
+      dry_run, totals, details,
+      has_more:    hasMore,
+      next_offset: nextOffset,
+      offset:      startOffset,
+    });
   } catch (e) {
     // Alle fouten — óók onverwachte throws diep in de flow — landen hier als
     // JSON, zodat de frontend nooit een HTML-timeoutpagina hoeft te parsen.

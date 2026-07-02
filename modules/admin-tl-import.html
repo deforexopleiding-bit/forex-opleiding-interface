@@ -120,22 +120,74 @@ async function runImport() {
 
 async function runImportDeals() {
   const dry = document.getElementById('cfgDryDeals').checked;
-  const payload = {
+  const basePayload = {
     dry_run: dry,
     department_id: document.getElementById('cfgEntityDeals').value || null,
     limit: Number(document.getElementById('cfgLimitDeals').value) || 5,
     skip_existing: document.getElementById('cfgSkipDeals').checked,
   };
-  const btn = document.getElementById('startBtnDeals'); btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
+  const btn = document.getElementById('startBtnDeals'); btn.disabled = true;
   document.getElementById('cfgErrDeals').textContent = '';
+
+  // Auto-batch: doorlopend batches ophalen zodat één klik álles importeert
+  // of corrigeert. Server-side offset-cursor drijft de loop; dry_run + skip
+  // blijven exact zoals in de UI ingesteld.
+  let offset = 0;
+  let batchIdx = 0;
+  let totalProcessed = 0;
+  const merged = {
+    dry_run: dry,
+    totals: {
+      deals_processed: 0, deals_imported: 0, deals_skipped: 0,
+      customers_imported: 0, line_items_imported: 0, errors: 0,
+    },
+    details: [],
+    has_more: false,
+    next_offset: 0,
+  };
+
+  const setBusy = (msg) => { btn.innerHTML = '<i class="ti ti-loader"></i> ' + esc(msg); };
+
   try {
-    const res = await window.AgentShared.apiFetch('/api/admin/tl-import-deals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    const d = await readJsonOrThrow(res);
-    if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
-    history.unshift({ at: new Date(), kind: 'deals', dry: d.dry_run, totals: d.totals });
-    lastDetailsDeals = d.details || [];
-    renderResultDeals(d); renderHistory();
-  } catch (e) { document.getElementById('cfgErrDeals').textContent = e.message; }
+    for (;;) {
+      batchIdx++;
+      setBusy(`Batch ${batchIdx} · verwerkt ${totalProcessed}…`);
+      const payload = { ...basePayload, offset };
+      const res = await window.AgentShared.apiFetch('/api/admin/tl-import-deals', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body:   JSON.stringify(payload),
+      });
+      const d = await readJsonOrThrow(res);
+      if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
+
+      // Merge totalen + details in de gecombineerde run.
+      const t = d.totals || {};
+      for (const k of Object.keys(merged.totals)) merged.totals[k] += Number(t[k] || 0);
+      if (Array.isArray(d.details) && d.details.length) merged.details.push(...d.details);
+      merged.has_more    = !!d.has_more;
+      merged.next_offset = Number(d.next_offset) || (offset + basePayload.limit);
+      totalProcessed = merged.totals.deals_processed;
+
+      // Stop-condities: server zegt klaar, óf we hebben deze batch niks meer
+      // toegevoegd (defensive — voorkomt oneindige lus als de server om welke
+      // reden dan ook next_offset niet vooruit zet).
+      if (!merged.has_more) break;
+      if (merged.next_offset <= offset) break;
+      offset = merged.next_offset;
+    }
+
+    history.unshift({ at: new Date(), kind: 'deals', dry: merged.dry_run, totals: merged.totals });
+    lastDetailsDeals = merged.details;
+    renderResultDeals(merged);
+    renderHistory();
+  } catch (e) {
+    // Toon wat er tot zover is verwerkt vóór de fout, zodat je weet waar je staat.
+    if (merged.totals.deals_processed > 0) {
+      lastDetailsDeals = merged.details;
+      renderResultDeals(merged);
+    }
+    document.getElementById('cfgErrDeals').textContent = e.message;
+  }
   btn.disabled = false; btn.innerHTML = '<i class="ti ti-file-invoice"></i> Start deals-import';
 }
 
