@@ -429,7 +429,14 @@
     if (!bt || bt.status === 'onbekend') return '<span class="ico-mute">—</span>';
     const dt = bt.vervalt_op ? esc(fmtDateNL(bt.vervalt_op)) : '—';
     if (bt.status === 'vervallen') {
-      // groen vinkje = vervallen (klant kan niet meer terug)
+      // groen vinkje = vervallen (klant kan niet meer terug).
+      // Bij reason='afstand' (klant deed via download afstand van de
+      // bedenktijd) is de 14-dagen-vervaldatum niet meer relevant → tekst
+      // "Afstand gedaan" i.p.v. datum. Bij reason='verstreken' blijft de
+      // datum zinvol (dán is de bedenktijd op die datum verlopen).
+      if (bt.reason === 'afstand') {
+        return '<i class="ti ti-check ico-ok" title="Afstand gedaan"></i> <span style="font-size:11.5px;color:var(--text-dim)">Afstand gedaan</span>';
+      }
       return '<i class="ti ti-check ico-ok" title="Vervallen (' + esc(bt.reason || '') + ')"></i> <span style="font-size:11.5px;color:var(--text-dim)">' + dt + '</span>';
     }
     // rood kruisje = nog NIET vervallen (klant kan nog terugkomen)
