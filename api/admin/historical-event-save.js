@@ -75,21 +75,29 @@ export default async function handler(req, res) {
     // Vul de NOT-NULL-kolommen die de reguliere events-flow óók zet:
     //   - capacity: DB is NOT NULL. Historisch event heeft geen inschrijf-
     //     capaciteit maar 1 is >0 safe voor eventuele CHECK-constraint.
-    //   - signups_closed: historisch = dicht (fail-soft; retry zonder als de
-    //     kolom niet bestaat).
-    //   - is_historical: markeer indien de kolom bestaat (fail-soft).
+    //   - signups_closed: CHECK-constraint events_signups_closed_consistency
+    //     eist (false + at NULL + reason NULL) OF (true + at IS NOT NULL +
+    //     reason IS NOT NULL). We kiezen false + beide NULL — historisch
+    //     event heeft geen inschrijf-status; met false is 'ie consistent.
+    //   - is_historical: markeer indien de kolom bestaat (fail-soft retry).
     //   - status='afgerond' + created_by_user_id blijven zoals eerder.
     const baseEventRow = {
       title,
-      starts_at:          startsAt,
-      ends_at:            null,
-      location:           location || null,
-      capacity:           1,
-      status:             'afgerond',
-      created_by_user_id: admin.user.id,
+      starts_at:              startsAt,
+      ends_at:                null,
+      location:               location || null,
+      capacity:               1,
+      status:                 'afgerond',
+      created_by_user_id:     admin.user.id,
+      signups_closed:         false,
+      signups_closed_at:      null,
+      signups_closed_reason:  null,
     };
     // Kandidaat-vlaggen: proberen eerst mét, bij column-error retry zonder.
-    const optionalFlags = { is_historical: true, signups_closed: true };
+    // signups_closed hoort NIET meer bij de optionele retry — die zit nu
+    // consistent (false+NULL+NULL) in baseEventRow. Alleen is_historical
+    // blijft optioneel (kan nog ontbreken in oudere schema's).
+    const optionalFlags = { is_historical: true };
     let eventId = null;
     let eventRow = null;
     {
