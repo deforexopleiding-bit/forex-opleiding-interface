@@ -86,7 +86,7 @@ export default async function handler(req, res) {
           parents_touched  : r.parents_touched,
           released_children: r.released_children,
           total_released   : r.total_released,
-          simulations      : (r.simulations || []).filter((s) => s.would_release || s.new_slice > 0),
+          simulations      : (r.simulations || []).filter((s) => s.would_release),
         });
         total_released    += r.total_released;
         released_children += r.released_children;
@@ -96,7 +96,7 @@ export default async function handler(req, res) {
           const key = s.mentor_user_id;
           if (!perMentor.has(key)) perMentor.set(key, { total_released: 0, released_children: 0 });
           const acc = perMentor.get(key);
-          acc.total_released    = Math.round((acc.total_released + Number(s.new_slice)) * 100) / 100;
+          acc.total_released    = Math.round((acc.total_released + Number(s.slice_amount)) * 100) / 100;
           acc.released_children += 1;
         }
       } catch (e) {

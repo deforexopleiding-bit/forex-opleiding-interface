@@ -265,45 +265,51 @@ export async function markOverdue({ customerId } = {}) {
 }
 
 /**
- * Proportionele vrijgave o.b.v. betaalde facturen (in tegenstelling tot
- * releaseProportionalForPayment die per PAYMENT-record werkt).
+ * Proportionele vrijgave o.b.v. BETAALDE TERMIJN-FACTUREN (Optie 1).
  *
- * Waarom nodig: historische bonussen (event-tool) hebben geen payment-
- * records, alleen `invoices.amount_paid`. Deze functie gebruikt exact
- * dezelfde matchlogica als mentor-bonus-overview:
- *   1. Primair: som(amount_paid) van invoices waar tl_subscription_id =
- *      subscription.teamleader_subscription_id (deals van deze klant).
- *   2. Fallback: som(amount_paid) van invoices waar customer_id = klant.
+ * Model: per-termijn 1/N met 1-maand-buffer op released_at.
  *
- * Per pending/gedeeltelijk-vrijgegeven parent-obligatie (parent_entry_id
- * IS NULL, status IN ('pending','wachten_op_betaling')):
- *   - basis         = parent.basis (sale-totaal, zoals bij aanmaak)
- *   - alloc         = min(basis, paidRemaining)  (FIFO over parents)
- *   - target_share  = alloc / basis
- *   - target_released = original_amount × target_share
- *   - current_released = original_amount − parent.amount
- *   - new_slice     = round2(target_released − current_released),
- *                     gecapt op parent.amount
+ *   paid_term_count = aantal volledig-betaalde termijn-facturen op de
+ *                     subscription van deze klant (amount_paid >=
+ *                     amount_total).
+ *   term_count      = subscriptions.term_count.
+ *   target_released = original_amount × (paid_term_count / term_count)
+ *   new_slice_totaal = target_released − current_released
  *
- * FIFO-toewijzing over meerdere parents/sales van dezelfde klant:
- * gesorteerd op created_at ascending. Bij typische historische
- * events (1 klant = 1 sale) is de FIFO no-op. Bij meerdere sales
- * krijgt de oudste sale eerst haar deel — voorkomt over-release.
+ * We splitsen die new_slice per termijn: elke betaalde termijn krijgt
+ * zijn eigen child (per_term_slice = original / term_count, met
+ * remainder-correctie op de laatste termijn). released_at van elk child
+ * is de 1e van de maand NA de paid_date van die termijn — zo valt de
+ * slice in de payout-run van de maand erna (payout selecteert op
+ * released_at).
  *
- * Idempotency: `idempotency_key = "${parent.id}:paidrel:${paidCents}"`
- * waar paidCents de toegewezen paid-allocatie in centen is. Herhaald
- * draaien met hetzelfde totaal-betaald → 23505 → skip. Bij méér betaald
- * → nieuwe key → nieuwe slice. Forward-only, geen clawback.
+ * Voorbeeld: John betaalt termijn 1 op 14 april → slice met
+ * released_at = 2024-05-01 → valt in mei-payout. 3/36 betaald =
+ * 3 slices, elk in de maand na hun eigen paid_date.
  *
- * `dryRun=true` berekent alles maar schrijft niets; returnt de simulaties
- * zodat een preview-UI kan tonen wat er zou gebeuren.
+ * Parent-scope: per parent zoeken we de subscription:
+ *   - primair via source_quote_id (deal-id) → subscription van dat deal
+ *   - fallback: nieuwste subscription op de klant.
+ *
+ * schema_unknown (geen sub of geen term_count > 0) → NIET vrijgeven,
+ * parent blijft 'pending'. Consistent met de KPI-uitsluiting in
+ * mentor-bonus-overview.
+ *
+ * Idempotency: `idempotency_key = "${parent.id}:paidrel-term:${termIdx}"`.
+ * Herhaald draaien met zelfde paid_term_count → dezelfde termIdx-set →
+ * 23505 skip. Meer betaalde termijnen → nieuwe termIdx → nieuwe slice(s).
+ * Forward-only, geen clawback.
+ *
+ * `dryRun=true` berekent alles maar schrijft niets. Bestaande children
+ * (matching idem-key) worden herkend zodat de preview NIET zegt dat een
+ * al-vrijgegeven termijn opnieuw vrijkomt.
  *
  * Returnt: {
  *   dry_run, customer_id, paid_total, last_paid_date, parents_touched,
  *   released_children, total_released, simulations: [
- *     { parent_id, mentor_user_id, basis, allocated_paid,
- *       original_amount, current_released, target_released,
- *       new_slice, would_release, idempotency_key? }
+ *     { parent_id, mentor_user_id, term_index, term_count,
+ *       paid_term_count, paid_date, released_at, slice_amount,
+ *       would_release, idempotency_key, skip_reason? }
  *   ]
  * }.
  */
@@ -311,44 +317,75 @@ export async function releaseProportionalForPaidInvoices({ customerId, dryRun = 
   if (!customerId) throw new Error('releaseProportionalForPaidInvoices: customerId vereist');
   const _r2 = (n) => Math.round(Number(n) * 100) / 100;
 
-  // ── 1) paidTotal + lastPaidDate ────────────────────────────────────────
-  // Zelfde matchvolgorde als mentor-bonus-overview: subscription-primair,
-  // customer-fallback.
-  let paidTotal = 0;
-  let lastPaidDate = null;
+  // 1e van de maand NA een YYYY-MM-DD als volledige ISO-timestamp
+  // (00:00:00.000Z). Zo valt de released_at netjes in de payout-run van
+  // die maand — payout selecteert op released_at.
+  function firstOfNextMonthTimestamp(dateStr) {
+    if (!dateStr) return null;
+    const d = new Date(String(dateStr).slice(0, 10) + 'T00:00:00Z');
+    if (isNaN(d.getTime())) return null;
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)).toISOString();
+  }
 
+  // ── 1) Subscriptions van deze klant (voor term_count + tl_sub_id) ──────
   const { data: dealsForCust } = await supabaseAdmin
     .from('deals').select('id').eq('customer_id', customerId);
   const dealIds = (dealsForCust || []).map((d) => d.id);
-  const tlSubIds = [];
+
+  let subsForCust = [];
   if (dealIds.length) {
     const { data: subs } = await supabaseAdmin
       .from('subscriptions')
-      .select('teamleader_subscription_id')
-      .in('deal_id', dealIds);
-    for (const s of subs || []) {
-      if (s?.teamleader_subscription_id) tlSubIds.push(s.teamleader_subscription_id);
-    }
+      .select('id, deal_id, teamleader_subscription_id, term_count, start_date')
+      .in('deal_id', dealIds)
+      .order('start_date', { ascending: false, nullsFirst: false });
+    subsForCust = subs || [];
   }
-  const uniqTlSubIds = [...new Set(tlSubIds)];
-  if (uniqTlSubIds.length) {
+
+  // ── 2) Volledig-betaalde termijn-facturen per subscription ─────────────
+  //    Alleen invoices op subscription-scope (via tl_subscription_id) tellen
+  //    als termijn. Klant-brede invoices zonder sub-koppeling behoren typisch
+  //    tot andere producten en gaan hier niet mee.
+  const tlSubIds = [...new Set(subsForCust.map((s) => s.teamleader_subscription_id).filter(Boolean))];
+  const paidTermsBySub = new Map(); // tl_sub_id → [{ paid_date }] gesorteerd asc
+
+  // Extra: paid_total + lastPaidDate (voor backward-compat report-veld;
+  // rekenkundig niet meer leidend voor de release-beslissing).
+  let paidTotal = 0;
+  let lastPaidDate = null;
+
+  if (tlSubIds.length) {
     const { data: invs } = await supabaseAdmin
       .from('invoices')
-      .select('amount_paid, paid_date')
-      .in('tl_subscription_id', uniqTlSubIds);
-    for (const inv of invs || []) {
-      paidTotal += Number(inv.amount_paid) || 0;
+      .select('tl_subscription_id, amount_paid, amount_total, paid_date, status')
+      .in('tl_subscription_id', tlSubIds);
+    for (const inv of (invs || [])) {
+      const paid  = Number(inv.amount_paid)  || 0;
+      const total = Number(inv.amount_total) || 0;
+      paidTotal += paid;
       if (inv.paid_date && (!lastPaidDate || inv.paid_date > lastPaidDate)) {
         lastPaidDate = inv.paid_date;
       }
+      if (total <= 0 || paid < total) continue; // niet volledig betaald → niet als termijn
+      if (!paidTermsBySub.has(inv.tl_subscription_id)) {
+        paidTermsBySub.set(inv.tl_subscription_id, []);
+      }
+      paidTermsBySub.get(inv.tl_subscription_id).push({
+        paid_date: inv.paid_date || null,
+      });
+    }
+    for (const arr of paidTermsBySub.values()) {
+      arr.sort((a, b) => (a.paid_date || '').localeCompare(b.paid_date || ''));
     }
   }
+  // Backup paid_total via customer als sub-route niks opleverde (voor
+  // backward-compat report-veld; termijn-detectie blijft aan de sub-kant).
   if (paidTotal <= 0) {
     const { data: invs } = await supabaseAdmin
       .from('invoices')
       .select('amount_paid, paid_date')
       .eq('customer_id', customerId);
-    for (const inv of invs || []) {
+    for (const inv of (invs || [])) {
       paidTotal += Number(inv.amount_paid) || 0;
       if (inv.paid_date && (!lastPaidDate || inv.paid_date > lastPaidDate)) {
         lastPaidDate = inv.paid_date;
@@ -357,7 +394,7 @@ export async function releaseProportionalForPaidInvoices({ customerId, dryRun = 
   }
   paidTotal = _r2(paidTotal);
 
-  // ── 2) Parent-obligaties selecteren ────────────────────────────────────
+  // ── 3) Parents ─────────────────────────────────────────────────────────
   const { data: parents, error: pErr } = await supabaseAdmin
     .from('mentor_ledger_entries')
     .select('id, mentor_user_id, team_member_id, event_id, attendee_id, customer_id, basis, amount, original_amount, source_invoice_id, source_quote_id, status, created_at')
@@ -368,35 +405,75 @@ export async function releaseProportionalForPaidInvoices({ customerId, dryRun = 
     .order('created_at', { ascending: true });
   if (pErr) throw new Error('releaseProportionalForPaidInvoices parents: ' + pErr.message);
 
-  const nowIso = new Date().toISOString();
+  // Bestaande children voor dedup in dry-run + idempotency-signaal.
+  // (Live-schrijfpad vangt 23505 al af; dry-run heeft geen 23505 dus we
+  // moeten hier expliciet checken.)
+  const parentIds = (parents || []).map((p) => p.id);
+  const existingIdemByParent = new Map(); // parent_id → Set<idem_key>
+  if (parentIds.length) {
+    const { data: kids } = await supabaseAdmin
+      .from('mentor_ledger_entries')
+      .select('parent_entry_id, idempotency_key')
+      .in('parent_entry_id', parentIds);
+    for (const k of (kids || [])) {
+      if (!k.parent_entry_id || !k.idempotency_key) continue;
+      if (!existingIdemByParent.has(k.parent_entry_id)) {
+        existingIdemByParent.set(k.parent_entry_id, new Set());
+      }
+      existingIdemByParent.get(k.parent_entry_id).add(k.idempotency_key);
+    }
+  }
+
   const simulations = [];
   const releasedIds = [];
-  let paidRemaining = paidTotal;
 
   for (const parent of parents || []) {
-    const basis = Number(parent.basis) || 0;
-    if (basis <= 0) {
+    // Vind subscription voor deze parent.
+    //   Route 1: source_quote_id (deal.id) → sub op dat deal.
+    //   Route 2 (fallback): nieuwste sub op de klant.
+    let sub = null;
+    if (parent.source_quote_id) {
+      sub = subsForCust.find((s) => s.deal_id === parent.source_quote_id) || null;
+    }
+    if (!sub) sub = subsForCust[0] || null;
+
+    const termCount = sub && Number.isFinite(Number(sub.term_count)) && Number(sub.term_count) > 0
+      ? Number(sub.term_count) : null;
+    const tlSubId = sub?.teamleader_subscription_id || null;
+
+    if (!termCount) {
+      // schema_unknown → parent blijft pending (KPI-consistent).
       simulations.push({
         parent_id: parent.id, mentor_user_id: parent.mentor_user_id, customer_id: parent.customer_id,
-        basis, allocated_paid: 0, original_amount: null, current_released: null,
-        target_released: 0, new_slice: 0, would_release: false, skip_reason: 'basis<=0',
+        term_index: null, term_count: null, paid_term_count: 0,
+        paid_date: null, released_at: null, slice_amount: 0,
+        would_release: false, skip_reason: 'schema_unknown',
       });
       continue;
     }
 
-    // FIFO: geef de oudste parent zoveel als hij nodig heeft, dan de volgende.
-    const alloc = Math.max(0, Math.min(basis, paidRemaining));
-    paidRemaining = Math.max(0, paidRemaining - alloc);
+    const paidTermsForSub = (tlSubId && paidTermsBySub.get(tlSubId)) || [];
+    const paidTermCount   = Math.min(termCount, paidTermsForSub.length);
 
-    // Snapshot original_amount bij eerste aanraking (net als in
-    // releaseProportionalForPayment — gebruikt om target-release te bepalen).
+    if (paidTermCount === 0) {
+      simulations.push({
+        parent_id: parent.id, mentor_user_id: parent.mentor_user_id, customer_id: parent.customer_id,
+        term_index: null, term_count: termCount, paid_term_count: 0,
+        paid_date: null, released_at: null, slice_amount: 0,
+        would_release: false, skip_reason: 'no_paid_terms',
+      });
+      continue;
+    }
+
+    // Snapshot original_amount bij eerste aanraking.
     let origAmount = parent.original_amount != null
       ? Number(parent.original_amount) : Number(parent.amount);
     if (!Number.isFinite(origAmount) || origAmount <= 0) {
       simulations.push({
         parent_id: parent.id, mentor_user_id: parent.mentor_user_id, customer_id: parent.customer_id,
-        basis, allocated_paid: alloc, original_amount: origAmount, current_released: null,
-        target_released: 0, new_slice: 0, would_release: false, skip_reason: 'origAmount<=0',
+        term_index: null, term_count: termCount, paid_term_count: paidTermCount,
+        paid_date: null, released_at: null, slice_amount: 0,
+        would_release: false, skip_reason: 'origAmount<=0',
       });
       continue;
     }
@@ -406,73 +483,95 @@ export async function releaseProportionalForPaidInvoices({ customerId, dryRun = 
         .update({ original_amount: origAmount })
         .eq('id', parent.id)
         .is('original_amount', null);
-      if (snapErr) throw new Error('paidrel snapshot: ' + snapErr.message);
+      if (snapErr) throw new Error('paidrel-term snapshot: ' + snapErr.message);
     }
 
-    const targetRatio    = alloc / basis;
-    const targetReleased = _r2(origAmount * targetRatio);
-    const currentReleased = _r2(origAmount - Number(parent.amount));
-    let newSlice = _r2(targetReleased - currentReleased);
-    if (newSlice > Number(parent.amount)) newSlice = _r2(Number(parent.amount));
+    const perTermSlice = _r2(origAmount / termCount);
+    const existingIdemForParent = existingIdemByParent.get(parent.id) || new Set();
 
-    const idem = `${parent.id}:paidrel:${Math.round(alloc * 100)}`;
+    // Itereer per termijn 1..paidTermCount. Bestaande termijn (idem in Set)
+    // wordt zowel in dry-run als live overgeslagen.
+    for (let termIdx = 1; termIdx <= paidTermCount; termIdx++) {
+      const paidDateStr = paidTermsForSub[termIdx - 1]?.paid_date || null;
+      const releasedAt  = firstOfNextMonthTimestamp(paidDateStr);
+      const idem        = `${parent.id}:paidrel-term:${termIdx}`;
 
-    if (newSlice <= 0) {
+      if (existingIdemForParent.has(idem)) {
+        // Al vrijgegeven in eerdere run — skip zonder simulatie-noise.
+        continue;
+      }
+
+      // Slice-bedrag met remainder-correctie op de laatste termijn zodat
+      // sum(slices) == origAmount ondanks rounding.
+      let sliceAmount;
+      if (termIdx === termCount) {
+        sliceAmount = _r2(origAmount - perTermSlice * (termCount - 1));
+      } else {
+        sliceAmount = perTermSlice;
+      }
+      // Cap op parent.amount voor safety (mocht handmatige transitie
+      // parent.amount al hebben verlaagd).
+      const parentAmount = Number(parent.amount) || 0;
+      if (sliceAmount > parentAmount) sliceAmount = _r2(parentAmount);
+      if (sliceAmount <= 0) {
+        simulations.push({
+          parent_id: parent.id, mentor_user_id: parent.mentor_user_id, customer_id: parent.customer_id,
+          term_index: termIdx, term_count: termCount, paid_term_count: paidTermCount,
+          paid_date: paidDateStr, released_at: releasedAt,
+          slice_amount: 0, would_release: false, idempotency_key: idem, skip_reason: 'slice<=0',
+        });
+        continue;
+      }
+
       simulations.push({
         parent_id: parent.id, mentor_user_id: parent.mentor_user_id, customer_id: parent.customer_id,
-        basis, allocated_paid: alloc, original_amount: origAmount,
-        current_released: currentReleased, target_released: targetReleased,
-        new_slice: 0, would_release: false, idempotency_key: idem,
+        term_index: termIdx, term_count: termCount, paid_term_count: paidTermCount,
+        paid_date: paidDateStr, released_at: releasedAt,
+        slice_amount: sliceAmount, would_release: true, idempotency_key: idem,
       });
-      continue;
+
+      if (dryRun) continue;
+
+      // ── Schrijfpad: child insert + parent.amount verlagen ────────────
+      const childRow = {
+        mentor_user_id : parent.mentor_user_id,
+        team_member_id : parent.team_member_id,
+        event_id       : parent.event_id,
+        entry_type     : 'bonus',
+        attendee_id    : parent.attendee_id,
+        customer_id    : parent.customer_id,
+        amount         : sliceAmount,
+        status         : 'vrijgegeven',
+        source_invoice_id: parent.source_invoice_id || null,
+        source_quote_id  : parent.source_quote_id  || null,
+        parent_entry_id  : parent.id,
+        released_at      : releasedAt,
+        idempotency_key  : idem,
+      };
+      const { data: inserted, error: cErr } = await supabaseAdmin
+        .from('mentor_ledger_entries')
+        .insert(childRow)
+        .select('id')
+        .maybeSingle();
+      if (cErr) {
+        if (cErr.code === '23505') continue; // race met parallel-run → skip
+        throw new Error('paidrel-term child insert: ' + cErr.message);
+      }
+      if (inserted?.id) releasedIds.push(inserted.id);
+
+      const newAmount = _r2(Math.max(0, parentAmount - sliceAmount));
+      const { error: uErr } = await supabaseAdmin
+        .from('mentor_ledger_entries')
+        .update({ amount: newAmount })
+        .eq('id', parent.id);
+      if (uErr) throw new Error('paidrel-term parent update: ' + uErr.message);
+      parent.amount = newAmount;
     }
-
-    simulations.push({
-      parent_id: parent.id, mentor_user_id: parent.mentor_user_id, customer_id: parent.customer_id,
-      basis, allocated_paid: alloc, original_amount: origAmount,
-      current_released: currentReleased, target_released: targetReleased,
-      new_slice: newSlice, would_release: true, idempotency_key: idem,
-    });
-
-    if (dryRun) continue;
-
-    // ── Schrijfpad: child insert + parent.amount verlagen ────────────────
-    const childRow = {
-      mentor_user_id : parent.mentor_user_id,
-      team_member_id : parent.team_member_id,
-      event_id       : parent.event_id,
-      entry_type     : 'bonus',
-      attendee_id    : parent.attendee_id,
-      customer_id    : parent.customer_id,
-      amount         : newSlice,
-      status         : 'vrijgegeven',
-      source_invoice_id: parent.source_invoice_id || null,
-      source_quote_id  : parent.source_quote_id  || null,
-      parent_entry_id  : parent.id,
-      released_at      : nowIso,
-      idempotency_key  : idem,
-    };
-    const { data: inserted, error: cErr } = await supabaseAdmin
-      .from('mentor_ledger_entries')
-      .insert(childRow)
-      .select('id')
-      .maybeSingle();
-    if (cErr) {
-      if (cErr.code === '23505') continue; // dubbele run bij ongewijzigd paid — skip
-      throw new Error('paidrel child insert: ' + cErr.message);
-    }
-    if (inserted?.id) releasedIds.push(inserted.id);
-
-    const newAmount = _r2(Number(parent.amount) - newSlice);
-    const { error: uErr } = await supabaseAdmin
-      .from('mentor_ledger_entries')
-      .update({ amount: newAmount })
-      .eq('id', parent.id);
-    if (uErr) throw new Error('paidrel parent update: ' + uErr.message);
-    parent.amount = newAmount;
   }
 
-  const total_released = _r2(simulations.filter((s) => s.would_release).reduce((sum, s) => sum + Number(s.new_slice), 0));
+  const total_released = _r2(
+    simulations.filter((s) => s.would_release).reduce((sum, s) => sum + Number(s.slice_amount), 0)
+  );
 
   return {
     dry_run          : !!dryRun,
