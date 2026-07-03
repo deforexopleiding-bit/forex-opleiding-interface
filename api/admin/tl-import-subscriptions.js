@@ -110,7 +110,7 @@ export default async function handler(req, res) {
   if (!tok) return res.status(400).json({ error: 'Geen actief Teamleader-token' });
 
   const taxMap = buildReverseTaxMap();
-  const totals = { subs_processed: 0, subs_imported: 0, subs_skipped: 0, customers_imported: 0, customers_updated: 0, errors: 0 };
+  const totals = { subs_processed: 0, subs_imported: 0, subs_updated: 0, subs_skipped: 0, customers_imported: 0, customers_updated: 0, errors: 0 };
   const details = [];
 
   try {
@@ -141,11 +141,38 @@ export default async function handler(req, res) {
       const detail = { tl_sub_id: sub.id, action: 'skipped', customer_action: 'exists', error: null };
       try {
         // a. Bestaat de sub al?
-        const { data: existing } = await supabaseAdmin.from('subscriptions').select('id, imported_from_tl_at').eq('teamleader_subscription_id', sub.id).maybeSingle();
+        const { data: existing } = await supabaseAdmin.from('subscriptions')
+          .select('id, imported_from_tl_at, start_date, status, end_date')
+          .eq('teamleader_subscription_id', sub.id).maybeSingle();
         if (existing) {
-          if (skip_existing) { totals.subs_skipped++; detail.action = 'skipped'; details.push(detail); continue; }
-          if (!dry_run) await supabaseAdmin.from('subscriptions').update({ imported_from_tl_at: new Date().toISOString() }).eq('id', existing.id);
-          totals.subs_skipped++; detail.action = 'skipped'; detail.customer_action = 'exists'; details.push(detail); continue;
+          if (skip_existing) {
+            totals.subs_skipped++; detail.action = 'skipped'; details.push(detail); continue;
+          }
+          // Update-pad: verse status + end_date uit TL, zodat active->
+          // deactivated wél lokaal doorkomt (churn-historie). Geen zware
+          // .info-call nodig — de list-payload bevat status en ends_on.
+          const tlStatusExisting  = String(sub.status || 'active').toLowerCase();
+          const localStatExisting = tlStatusExisting === 'active' ? 'active' : 'cancelled';
+          const patch = {
+            status             : localStatExisting,
+            imported_from_tl_at: new Date().toISOString(),
+          };
+          if (sub.ends_on) patch.end_date = sub.ends_on;
+          // start_date alleen zetten als hij nog leeg is (behoud historische waarde).
+          if (!existing.start_date && sub.starts_on) patch.start_date = sub.starts_on;
+          if (!dry_run) {
+            const { error: upErr } = await supabaseAdmin.from('subscriptions')
+              .update(patch).eq('id', existing.id);
+            if (upErr) throw new Error('subscription update: ' + upErr.message);
+          }
+          totals.subs_updated++;
+          detail.action          = 'updated';
+          detail.customer_action = 'exists';
+          detail.tl_status       = tlStatusExisting;
+          detail.local_status    = localStatExisting;
+          detail.patch           = patch;
+          details.push(detail);
+          continue;
         }
 
         // b. Invoicee ophalen — TL invoicee kan een CONTACT of een COMPANY zijn.
@@ -307,7 +334,7 @@ export default async function handler(req, res) {
     try {
       await supabaseAdmin.from('audit_log').insert({
         user_id: admin.user.id, action: dry_run ? 'tl_import.dry_run' : 'tl_import.run', entity_type: 'subscription', entity_id: null,
-        after_json: { totals, dry_run, department_id, limit: maxSubs }, reason_text: `TL-import (${dry_run ? 'dry-run' : 'live'}): ${totals.subs_imported} subs, ${totals.customers_imported} klanten, ${totals.errors} errors`, ip_address: getClientIp(req),
+        after_json: { totals, dry_run, department_id, limit: maxSubs }, reason_text: `TL-import (${dry_run ? 'dry-run' : 'live'}): ${totals.subs_imported} nieuw + ${totals.subs_updated} bijgewerkt, ${totals.customers_imported} klanten, ${totals.errors} errors`, ip_address: getClientIp(req),
       });
     } catch (e) { console.error('[tl-import] audit:', e.message); }
 

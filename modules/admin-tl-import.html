@@ -222,7 +222,7 @@ function renderResultDeals(d) {
 
 function renderResTableDeals() {
   const rows = lastDetailsDeals.filter(r => resultFilterDeals === 'alle' || r.action === resultFilterDeals);
-  const BADGE = { imported: 'green', skipped: 'gray', error: 'danger' };
+  const BADGE = { imported: 'green', updated: 'blue', skipped: 'gray', error: 'danger' };
   document.getElementById('resTableDeals').innerHTML = rows.length ? `<div class="sr-tablewrap"><table class="sr-table">
     <thead><tr><th>TL Deal ID</th><th>Klant</th><th>Type</th><th>Actie</th><th>Klant-actie</th><th>Fout / reden</th></tr></thead>
     <tbody>${rows.map(r => `<tr><td><span class="sr-cellsub">${esc(String(r.tl_deal_id || '').slice(0, 12))}</span></td><td>${esc(r.customer_name || '—')}</td><td><span class="sr-cellsub">${esc(r.invoicee_type || '—')}</span></td><td><span class="sr-tag ${BADGE[r.action] || 'gray'}">${esc(r.action)}</span></td><td>${esc(r.customer_action || '—')}</td><td><span style="color:${r.error ? '#dc2626' : 'var(--text-dim)'};font-size:11px">${esc(r.error || r.reason || '')}</span></td></tr>`).join('')}</tbody></table></div>` : '<div class="sr-empty">Geen rijen.</div>';
@@ -236,11 +236,11 @@ function renderResult(d) {
     <div class="sr-grid sr-grid-4" style="margin-bottom:14px">
       ${kpi('Subs verwerkt', t.subs_processed || 0)}
       ${kpi('Subs geïmporteerd', t.subs_imported || 0, '#059669')}
+      ${kpi('Subs bijgewerkt', t.subs_updated || 0, '#0891b2')}
       ${kpi('Klanten geïmporteerd', t.customers_imported || 0, '#0891b2')}
-      ${kpi('Errors', t.errors || 0, (t.errors > 0) ? '#dc2626' : '')}
     </div>
     <div class="sr-segments" id="resFilter" style="margin-bottom:10px">
-      ${[['alle', 'Alle'], ['imported', 'Geïmporteerd'], ['skipped', 'Skipped'], ['error', 'Errors']].map(([k, l]) => `<button class="sr-seg${resultFilter === k ? ' active' : ''}" data-f="${k}">${l}</button>`).join('')}
+      ${[['alle', 'Alle'], ['imported', 'Geïmporteerd'], ['updated', 'Bijgewerkt'], ['skipped', 'Skipped'], ['error', 'Errors']].map(([k, l]) => `<button class="sr-seg${resultFilter === k ? ' active' : ''}" data-f="${k}">${l}</button>`).join('')}
     </div>
     <div id="resTable"></div>
   </div>`;
@@ -249,7 +249,7 @@ function renderResult(d) {
 }
 function renderResTable() {
   const rows = lastDetails.filter(r => resultFilter === 'alle' || r.action === resultFilter);
-  const BADGE = { imported: 'green', skipped: 'gray', error: 'danger' };
+  const BADGE = { imported: 'green', updated: 'blue', skipped: 'gray', error: 'danger' };
   document.getElementById('resTable').innerHTML = rows.length ? `<div class="sr-tablewrap"><table class="sr-table">
     <thead><tr><th>TL Sub ID</th><th>Klant</th><th>Actie</th><th>Klant-actie</th><th>Fout</th></tr></thead>
     <tbody>${rows.map(r => `<tr><td><span class="sr-cellsub">${esc(String(r.tl_sub_id).slice(0, 12))}</span></td><td>${esc(r.customer_name || '—')}</td><td><span class="sr-tag ${BADGE[r.action] || 'gray'}">${esc(r.action)}</span></td><td>${esc(r.customer_action || '—')}</td><td><span style="color:#dc2626;font-size:11px">${esc(r.error || '')}</span></td></tr>`).join('')}</tbody></table></div>` : '<div class="sr-empty">Geen rijen.</div>';
@@ -262,7 +262,7 @@ function renderHistory() {
       : '<span class="sr-tag" style="background:rgba(8,145,178,.14);color:#0891b2">subs</span>';
     const summary = h.kind === 'deals'
       ? `${h.totals.deals_imported || 0} deals · ${h.totals.customers_imported || 0} klanten · ${h.totals.line_items_imported || 0} regels · ${h.totals.errors || 0} errors`
-      : `${h.totals.subs_imported || 0} subs · ${h.totals.customers_imported || 0} klanten · ${h.totals.errors || 0} errors`;
+      : `${h.totals.subs_imported || 0} nieuw · ${h.totals.subs_updated || 0} bijgewerkt · ${h.totals.customers_imported || 0} klanten · ${h.totals.errors || 0} errors`;
     return `<div class="feed-item"><span>${drybadge} ${kindbadge} ${esc(summary)}</span><span class="feed-time">${h.at.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })}</span></div>`;
   }).join('') : '<div class="sr-empty">Nog geen runs.</div>';
 }
