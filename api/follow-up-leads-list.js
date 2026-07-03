@@ -41,6 +41,18 @@ export default async function handler(req, res) {
   let limit = Number(q.limit) || 500;
   limit = Math.max(1, Math.min(1000, Math.floor(limit)));
 
+  // owner-filter (Fase D):
+  //   ?owner=me     → owner_id = user.id
+  //   ?owner=<uuid> → owner_id = <uuid>
+  //   ?owner=none   → owner_id IS NULL (niet toegewezen)
+  //   afwezig / all → geen filter
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const ownerQ = typeof q.owner === 'string' ? q.owner.trim() : '';
+  let ownerFilter = null;
+  if (ownerQ === 'me') ownerFilter = { kind: 'eq', value: user.id };
+  else if (ownerQ === 'none') ownerFilter = { kind: 'is_null' };
+  else if (UUID_RE.test(ownerQ)) ownerFilter = { kind: 'eq', value: ownerQ };
+
   try {
     const todayISO = new Date().toISOString().slice(0, 10);
     const nowISO   = new Date().toISOString();
@@ -55,6 +67,8 @@ export default async function handler(req, res) {
       } else if (view === 'open') {
         qq = qq.not('lead_status', 'in', '(verlengd,verloren)');
       }
+      if (ownerFilter?.kind === 'eq')      qq = qq.eq('owner_id', ownerFilter.value);
+      else if (ownerFilter?.kind === 'is_null') qq = qq.is('owner_id', null);
       return qq;
     };
 
@@ -74,6 +88,20 @@ export default async function handler(req, res) {
       throw new Error('leads fetch: ' + leadErr.message);
     }
 
+    // Verrijk elk lead met owner_name (profiles.full_name) via een IN-lookup.
+    const ownerIds = [...new Set((leads || []).map((l) => l.owner_id).filter(Boolean))];
+    const ownerNameById = {};
+    if (ownerIds.length) {
+      const { data: profs, error: pErr } = await supabaseAdmin
+        .from('profiles').select('id, full_name').in('id', ownerIds);
+      if (pErr) console.warn('[follow-up-leads-list] owners:', pErr.message);
+      for (const p of (profs || [])) ownerNameById[p.id] = p.full_name || null;
+    }
+    const enrichedLeads = (leads || []).map((l) => ({
+      ...l,
+      owner_name: l.owner_id ? (ownerNameById[l.owner_id] || null) : null,
+    }));
+
     // Counts per view — 4 goedkope head-count queries.
     const countBase = () => supabaseAdmin.from('follow_up_leads').select('id', { count: 'exact', head: true });
     const [
@@ -91,7 +119,7 @@ export default async function handler(req, res) {
     ]);
 
     return res.status(200).json({
-      leads: leads || [],
+      leads: enrichedLeads,
       counts: {
         alle    : cAlle || 0,
         open    : cOpen || 0,

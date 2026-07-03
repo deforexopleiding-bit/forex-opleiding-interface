@@ -1332,6 +1332,13 @@
             <option value="verloren">verloren</option>
           </select>
         </label>
+        <label>Eigenaar
+          <select id="leads-owner">
+            <option value="all">Alle</option>
+            <option value="me">Mijn leads</option>
+            <option value="none">Niet toegewezen</option>
+          </select>
+        </label>
         <button class="fu-lead-btn" id="leads-refresh"><i class="ti ti-refresh"></i> Vernieuwen</button>
       </div>
       <section class="fu-section" id="leads-main-section">
@@ -2695,16 +2702,63 @@
     }
 
     // ── Leads-tab (follow_up_leads / follow_up_lead_notes) ──────────────────
-    const _leadsState = { items: [], counts: null, loading: false };
+    const _leadsState = {
+      items: [], counts: null, loading: false,
+      me: null,           // { id, role } — de ingelogde user (voor 'Aan mij'-claim + rol-gate)
+      teamMembers: [],    // profiles met role in ('sales','manager','admin','super_admin')
+      teamLoaded: false,
+    };
+
+    async function _ensureMe() {
+      if (_leadsState.me) return _leadsState.me;
+      try {
+        const p = await window.AuthShared?.getProfile();
+        if (p) _leadsState.me = { id: p.id, role: String(p.role || '').toLowerCase() };
+      } catch (_) { /* fail-soft */ }
+      return _leadsState.me;
+    }
+
+    async function _ensureTeamMembers() {
+      if (_leadsState.teamLoaded) return _leadsState.teamMembers;
+      _leadsState.teamLoaded = true;
+      try {
+        const r = await window.AgentShared.apiFetch('/api/profiles-list');
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) return [];
+        const wanted = new Set(['sales', 'manager', 'admin', 'super_admin']);
+        _leadsState.teamMembers = (d.members || [])
+          .filter((m) => wanted.has(String(m.role || '').toLowerCase()))
+          .sort((a, b) => (a.full_name || a.email || '').localeCompare(b.full_name || b.email || ''));
+      } catch (_) { _leadsState.teamMembers = []; }
+      return _leadsState.teamMembers;
+    }
+
+    function _rebuildOwnerFilterOptions() {
+      const sel = document.getElementById('leads-owner');
+      if (!sel) return;
+      const cur = sel.value || 'all';
+      const opts = [
+        '<option value="all">Alle</option>',
+        '<option value="me">Mijn leads</option>',
+        '<option value="none">Niet toegewezen</option>',
+      ];
+      for (const m of _leadsState.teamMembers) {
+        opts.push(`<option value="${m.id}">${esc(m.full_name || m.email || m.id)}</option>`);
+      }
+      sel.innerHTML = opts.join('');
+      sel.value = cur;
+    }
 
     function _leadsRoute() {
       const source = document.getElementById('leads-source')?.value || 'retention';
       const view   = document.getElementById('leads-view')?.value   || 'open';
       const status = document.getElementById('leads-status')?.value || '';
+      const owner  = document.getElementById('leads-owner')?.value  || 'all';
       const p = new URLSearchParams();
       if (source && source !== 'all') p.set('source', source);
       if (view && view !== 'alle')    p.set('view', view);
       if (status)                     p.set('status', status);
+      if (owner && owner !== 'all')   p.set('owner', owner);
       return '/api/follow-up-leads-list' + (p.toString() ? '?' + p.toString() : '');
     }
 
@@ -2713,7 +2767,11 @@
       if (!listEl) return;
       if (_leadsState.loading) return;
       _leadsState.loading = true;
-      listEl.innerHTML = '<div class="fu-loading">Laden…</div>';
+      listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
+      // Team-leden + huidige gebruiker zijn nodig voor owner-select en
+      // rol-gate; blokkeer de leads-fetch er niet op (parallel).
+      _ensureMe();
+      _ensureTeamMembers().then(_rebuildOwnerFilterOptions).catch(() => {});
       try {
         const r = await window.AgentShared.apiFetch(_leadsRoute());
         const d = await r.json().catch(() => ({}));
@@ -2834,6 +2892,37 @@
       return (first + last).toUpperCase() || '?';
     }
 
+    function _renderOwnerControl(it) {
+      const me   = _leadsState.me;
+      const role = me?.role || '';
+      const isPrivileged = ['super_admin', 'manager', 'admin'].includes(role);
+      const isSales      = role === 'sales';
+      const isMine       = me && it.owner_id === me.id;
+      const members      = _leadsState.teamMembers || [];
+
+      // Weergavelabel: naam van eigenaar, of "Niet toegewezen".
+      const label = it.owner_name
+        ? `<span title="Eigenaar" style="font-size:11.5px;color:var(--text-secondary,rgba(255,255,255,.7));display:inline-flex;align-items:center;gap:4px"><i class="ti ti-user"></i>${esc(it.owner_name)}</span>`
+        : `<span title="Nog niet toegewezen" style="font-size:11.5px;color:var(--text-secondary,rgba(255,255,255,.55));display:inline-flex;align-items:center;gap:4px"><i class="ti ti-user-off"></i>Niet toegewezen</span>`;
+
+      // Manager/admin krijgen een select met alle team-leden + Niemand.
+      if (isPrivileged) {
+        const opts = ['<option value="">Niet toegewezen</option>']
+          .concat(members.map((m) => `<option value="${esc(m.id)}"${it.owner_id === m.id ? ' selected' : ''}>${esc(m.full_name || m.email || m.id)}</option>`));
+        return `<select class="fu-lead-inline" data-lead-owner="${esc(it.id)}" aria-label="Eigenaar" title="Eigenaar toewijzen">${opts.join('')}</select>`;
+      }
+      // Sales-user: alleen zelf claimen. Toon label + 'Aan mij'-knop indien
+      // niet al van hem zelf.
+      if (isSales) {
+        const claimBtn = isMine
+          ? ''
+          : `<button class="fu-lead-btn" data-lead-claim="${esc(it.id)}" title="Aan mij toewijzen" style="padding:4px 8px;font-size:11.5px"><i class="ti ti-hand-click"></i> Aan mij</button>`;
+        return `<span style="display:inline-flex;align-items:center;gap:6px">${label}${claimBtn}</span>`;
+      }
+      // Overige rollen: alleen weergave.
+      return label;
+    }
+
     function renderLeadCards(items) {
       const opts = ['nieuw','benaderd','niet_bereikbaar','terugbellen','verlengd','verloren'];
       return items.map((it) => {
@@ -2853,6 +2942,7 @@
         const statusSel = `<select class="fu-lead-inline" data-lead-status="${esc(it.id)}" aria-label="Status">${opts.map(o => `<option value="${o}"${o===it.lead_status ? ' selected' : ''}>${LEAD_STATUS_MAP[o]?.label || o}</option>`).join('')}</select>`;
         const dateInp = `<input type="date" class="fu-lead-inline" data-lead-date="${esc(it.id)}" value="${fmtDateLocal(it.terugbel_datum)}" aria-label="Terugbellen op">`;
         const noteBtn = `<button class="fu-lead-btn" data-lead-notes="${esc(it.id)}" data-lead-name="${esc(it.lead_name || '')}" title="Notitie toevoegen / bekijken"><i class="ti ti-notes"></i> Notitie</button>`;
+        const ownerCtl = _renderOwnerControl(it);
         return `<article class="fu-card">
           <div class="fu-card-header">
             <div class="fu-card-left">
@@ -2860,7 +2950,7 @@
               <div style="min-width:0">
                 <div class="fu-card-name">${nm} ${sourceBadge}</div>
                 ${metaParts ? `<div class="fu-card-meta fu-lead-card-meta">${metaParts}</div>` : ''}
-                ${lastContact ? `<div class="fu-card-meta" style="opacity:.8">${lastContact}</div>` : ''}
+                <div class="fu-card-meta" style="opacity:.85;margin-top:2px">${ownerCtl}${lastContact ? ` <span style="opacity:.7;margin-left:6px">· ${lastContact}</span>` : ''}</div>
               </div>
             </div>
             <div class="fu-card-right">
@@ -2882,6 +2972,21 @@
         await patchLead(inp.getAttribute('data-lead-date'), { terugbel_datum: v });
       }));
       root.querySelectorAll('[data-lead-notes]').forEach((btn) => btn.addEventListener('click', () => openLeadNotesModal(btn.getAttribute('data-lead-notes'), btn.getAttribute('data-lead-name') || '')));
+      // Owner-toewijzing: manager/admin krijgt een select met team-leden,
+      // sales krijgt een 'Aan mij'-claim-knop. Beide POSTen naar
+      // /api/follow-up-lead-update; het endpoint bewaakt rol-gate + validatie.
+      root.querySelectorAll('[data-lead-owner]').forEach((sel) => sel.addEventListener('change', async () => {
+        const leadId = sel.getAttribute('data-lead-owner');
+        const val    = sel.value ? sel.value : null;
+        await patchLead(leadId, { owner_id: val });
+      }));
+      root.querySelectorAll('[data-lead-claim]').forEach((btn) => btn.addEventListener('click', async () => {
+        const leadId = btn.getAttribute('data-lead-claim');
+        const me = await _ensureMe();
+        if (!me?.id) { alert('Kan huidige gebruiker niet resolven'); return; }
+        btn.disabled = true;
+        await patchLead(leadId, { owner_id: me.id });
+      }));
     }
 
     async function patchLead(leadId, patch) {
@@ -2981,7 +3086,7 @@
     // Filter/refresh listeners voor de leads-tab. Bind eenmalig zodra
     // DOMContentLoaded — safe want de switch loadt de tab lazy.
     document.addEventListener('DOMContentLoaded', () => {
-      ['leads-source', 'leads-view', 'leads-status'].forEach((id) => {
+      ['leads-source', 'leads-view', 'leads-status', 'leads-owner'].forEach((id) => {
         const el = document.getElementById(id);
         if (el) el.addEventListener('change', () => loadLeadsTab());
       });

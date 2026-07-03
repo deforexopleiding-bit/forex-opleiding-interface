@@ -48,10 +48,43 @@ export default async function handler(req, res) {
       patch.terugbel_datum = d.toISOString();
     }
   }
+  // owner_id-gating (Fase D):
+  //   super_admin / manager → mag ELKE toewijzing (incl. null=ontkoppelen).
+  //   sales                 → mag alleen aan zichzelf claimen; niet aan een
+  //                           ander en niet ontkoppelen.
+  //   overige rollen        → geen owner_id-mutatie toegestaan.
+  //   owner_id !== null wordt gevalideerd tegen een bestaand actief profiel.
   if (body.owner_id !== undefined) {
-    if (body.owner_id === null) patch.owner_id = null;
-    else if (typeof body.owner_id === 'string' && UUID_RE.test(body.owner_id)) patch.owner_id = body.owner_id;
-    else return res.status(400).json({ error: 'owner_id ongeldig' });
+    const { data: myProfile, error: mpErr } = await supabaseAdmin
+      .from('profiles').select('role, is_active').eq('id', user.id).maybeSingle();
+    if (mpErr) return res.status(500).json({ error: 'profile lookup: ' + mpErr.message });
+    const myRole = String(myProfile?.role || '').toLowerCase();
+    const isPrivileged = myRole === 'super_admin' || myRole === 'manager' || myRole === 'admin';
+    const isSales = myRole === 'sales';
+
+    if (body.owner_id === null) {
+      if (!isPrivileged) return res.status(403).json({ error: 'Ontkoppelen alleen door manager/admin' });
+      patch.owner_id = null;
+    } else if (typeof body.owner_id === 'string' && UUID_RE.test(body.owner_id)) {
+      const targetId = body.owner_id;
+      // Valideer target: bestaand + actief.
+      const { data: targetProfile, error: tpErr } = await supabaseAdmin
+        .from('profiles').select('id, is_active').eq('id', targetId).maybeSingle();
+      if (tpErr) return res.status(500).json({ error: 'owner lookup: ' + tpErr.message });
+      if (!targetProfile) return res.status(400).json({ error: 'owner_id: profiel niet gevonden' });
+      if (targetProfile.is_active === false) return res.status(400).json({ error: 'owner_id: profiel niet actief' });
+
+      if (isPrivileged) {
+        patch.owner_id = targetId;
+      } else if (isSales && targetId === user.id) {
+        // Self-claim door sales.
+        patch.owner_id = targetId;
+      } else {
+        return res.status(403).json({ error: 'Sales mag alleen aan zichzelf toewijzen; anderen door manager/admin' });
+      }
+    } else {
+      return res.status(400).json({ error: 'owner_id ongeldig' });
+    }
   }
 
   try {
