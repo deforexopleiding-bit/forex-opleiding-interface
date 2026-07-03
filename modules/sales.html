@@ -210,7 +210,7 @@
 
   <!-- ── Tab: Retentie ── -->
   <section class="tab-content" id="tab-retentie">
-    <div class="sub" id="retSubtitle" style="margin-bottom:12px">Klanten met een lopend/afgelopen abonnement vanaf 2026.</div>
+    <div class="sub" id="retSubtitle" style="margin-bottom:12px">Klanten waarvan het laatste abonnement is afgelopen of binnen 30 dagen afloopt (vanaf 2026-01-01).</div>
     <div class="sr-filterstrip">
       <div class="sr-search"><input id="retSearch" type="search" placeholder="Zoek klant…" /></div>
       <label class="sr-toggle"><input type="checkbox" id="retMineToggle"> Alleen mijne</label>
@@ -962,7 +962,7 @@ async function loadRetentie() {
     const urgent = retItems.filter(i => i.days_left >= 0 && i.days_left < 14).length;
     const marked = retItems.filter(i => i.retention_not_renewing).length;
     const sub = document.getElementById('retSubtitle');
-    if (sub) sub.textContent = `${retItems.length} klant(en) met laatste abonnement vanaf 2026 · ${urgent} urgent (<14 dgn)${retColsAvailable ? ` · ${marked} gemarkeerd 'niet-verlengen'` : ''}`;
+    if (sub) sub.textContent = `${retItems.length} klant(en) — laatste abo afgelopen of aflopend <30d (vanaf 2026) · ${urgent} urgent (<14 dgn)${retColsAvailable ? ` · ${marked} gemarkeerd 'niet-verlengen'` : ''}`;
     renderRetentie();
   } catch (e) { wrap.innerHTML = '<div class="sr-empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
 }

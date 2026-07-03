@@ -78,11 +78,17 @@ export default async function handler(req, res) {
 
     const now = Date.now();
     const horizon = now + 30 * 86400000;
-    // Retentie-window: alles met maxEnd vanaf 2026-01-01 (geen bovengrens).
-    // Voorheen `maxEnd <= now + 30d`; nu breed genoeg om de hele lijst voor
-    // 2026 door te werken. Sales-workflow: sorteren op end_date asc.
+    // Retentie-window: klanten met maxEnd tussen 2026-01-01 en (nu + 30d).
+    // - Ondergrens 2026-01-01: sales pakt sinds dit jaar alle afgelopen +
+    //   binnenkort-aflopende cases mee.
+    // - Bovengrens now+30d: klanten die verlengd zijn (nieuwe active sub met
+    //   latere end_date) vallen automatisch weg — dat is gewenst gedrag
+    //   (verlengd = uit de lijst).
     const WINDOW_FROM = '2026-01-01';
-    const groups = Object.values(byCust).filter((g) => g.maxEnd && g.maxEnd >= WINDOW_FROM);
+    const horizonIso  = new Date(horizon).toISOString().slice(0, 10);
+    const groups = Object.values(byCust).filter((g) =>
+      g.maxEnd && g.maxEnd >= WINDOW_FROM && g.maxEnd <= horizonIso
+    );
     if (!groups.length) return res.status(200).json({ items: [] });
 
     // 4) Joins: klant + entiteit + mentor + traject.
