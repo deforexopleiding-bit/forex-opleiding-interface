@@ -3056,6 +3056,11 @@
             btn.addEventListener('click', () => resolveEventFollowup(btn.dataset.evFuResolve, btn));
           });
         }
+        // 'Naar Follow-up' beschikbaar in beide status-views: ook een
+        // afgehandelde event-followup mag alsnog als lead in de hub landen.
+        listEl.querySelectorAll('[data-ev-fu-to-lead]').forEach((btn) => {
+          btn.addEventListener('click', () => pushEventFollowupToLead(btn.dataset.evFuToLead, btn));
+        });
       } catch (e) {
         console.error('[loadEventFollowups]', e);
         listEl.innerHTML = `<div class="fu-empty"><i class="ti ti-alert-circle" style="color:#f87171;font-size:16px" aria-hidden="true"></i>Laden mislukt: ${esc(e?.message || 'onbekende fout')}</div>`;
@@ -3078,6 +3083,11 @@
         ? `<button class="btn-primary" data-ev-fu-resolve="${esc(it.id)}" type="button" style="margin-top:8px"><i class="ti ti-check"></i> Afhandelen</button>`
         : `<div style="font-size:11.5px;color:var(--text-faint);margin-top:8px"><i class="ti ti-check"></i> Afgehandeld ${esc(fmtEvFuDateTime(it.handled_at))}</div>`;
 
+      const alreadyLead = it._lead_pushed === true;
+      const leadBtn = alreadyLead
+        ? `<span style="display:inline-flex;align-items:center;gap:4px;margin-top:8px;margin-left:8px;padding:4px 9px;border-radius:99px;background:rgba(34,197,94,.14);color:#15803d;font-size:11.5px;font-weight:600"><i class="ti ti-check"></i> Op follow-up</span>`
+        : `<button class="btn-secondary" type="button" data-ev-fu-to-lead="${esc(it.id)}" style="margin-top:8px;margin-left:8px;padding:6px 12px;font-size:12.5px;background:var(--surface-2,rgba(255,255,255,.06));border:1px solid var(--border,rgba(255,255,255,.12));color:var(--text-primary,#fff);border-radius:6px;cursor:pointer;font-family:inherit"><i class="ti ti-arrow-right"></i> Naar Follow-up</button>`;
+
       return `
         <div class="fu-card" style="padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--bg-elev);margin-bottom:10px">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
@@ -3096,9 +3106,53 @@
             ${it.follow_up_date ? `<span style="padding:3px 9px;border-radius:99px;background:rgba(245,158,11,0.18);color:#b45309;font-size:11.5px;font-weight:600"><i class="ti ti-calendar"></i> ${esc(fmtEvFuDate(it.follow_up_date))}</span>` : ''}
           </div>
 
-          ${handleBtn}
+          <div style="display:flex;flex-wrap:wrap;align-items:center">
+            ${handleBtn}
+            ${leadBtn}
+          </div>
         </div>
       `;
+    }
+
+    // Push een event-followup als lead in follow_up_leads (source='event').
+    // Best-effort: 'already:true' bij een bestaande open lead (dankzij de
+    // unique-index in Fase A1). Markeert de card in-memory als _lead_pushed
+    // zodat de knop na re-render als 'Op follow-up' verschijnt.
+    async function pushEventFollowupToLead(followupId, btn) {
+      if (!followupId) return;
+      const orig = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
+      try {
+        const token = await window.AuthShared.getAccessToken();
+        const res = await fetch('/api/event-followup-to-lead', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+          body: JSON.stringify({ followup_id: followupId }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || j?.ok !== true) {
+          if (j?.code === 'MIGRATION_REQUIRED') {
+            alert('Migratie vereist: follow_up_leads tabel ontbreekt');
+          } else {
+            alert('Naar Follow-up mislukt: ' + (j?.error || ('HTTP ' + res.status)));
+          }
+          btn.disabled = false;
+          btn.innerHTML = orig;
+          return;
+        }
+        // Update de card in-memory zodat volgende render de badge toont.
+        const item = (_eventFollowupsState.items || []).find((it) => it.id === followupId);
+        if (item) item._lead_pushed = true;
+        alert(j.already ? 'Staat al op follow-up' : 'Op follow-up gezet');
+        // Vervang alleen deze knop (goedkope re-render).
+        btn.outerHTML = '<span style="display:inline-flex;align-items:center;gap:4px;margin-top:8px;margin-left:8px;padding:4px 9px;border-radius:99px;background:rgba(34,197,94,.14);color:#15803d;font-size:11.5px;font-weight:600"><i class="ti ti-check"></i> Op follow-up</span>';
+      } catch (e) {
+        console.error('[pushEventFollowupToLead]', e);
+        alert('Naar Follow-up mislukt: ' + (e?.message || 'onbekende fout'));
+        btn.disabled = false;
+        btn.innerHTML = orig;
+      }
     }
 
     async function resolveEventFollowup(followupId, btn) {
