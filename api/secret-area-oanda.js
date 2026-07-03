@@ -89,6 +89,113 @@ function baseUrlForEnv(env) {
   return null; // onbekende / lege env → laat caller falen met 500 config-fout
 }
 
+// ── Multi-price watchlist (action=prices) ──────────────────────────────────
+const MAX_PRICES = 40;
+// Dag-open cache per instrument (in-memory, per UTC-dag). Dag-open verandert
+// maar 1× per dag, dus na warmup doet de frequente refresh alleen de ene
+// pricing-call. Bij cold start opnieuw warm.
+const _dayOpenCache = new Map();
+function _utcDayKey() { return new Date().toISOString().slice(0, 10); }
+
+async function _mapLimit(items, limit, fn) {
+  let i = 0;
+  const n = Math.max(1, Math.min(limit, items.length || 1));
+  const workers = new Array(n).fill(0).map(async () => {
+    while (i < items.length) { const idx = i++; await fn(items[idx], idx); }
+  });
+  await Promise.all(workers);
+}
+
+// Dag-open van vandaag = open van de laatste D-candle. price=M; token server-side.
+async function _fetchDayOpen(baseUrl, token, instrument) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const url = `${baseUrl}/v3/instruments/${encodeURIComponent(instrument)}/candles?granularity=D&count=1&price=M`;
+  try {
+    const r = await fetch(url, { method: 'GET', headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }, signal: controller.signal });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const candles = Array.isArray(j?.candles) ? j.candles : [];
+    const c = candles.length ? candles[candles.length - 1] : null;
+    const o = c?.mid?.o != null ? Number(c.mid.o) : null;
+    return Number.isFinite(o) ? o : null;
+  } catch (_) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Één OANDA pricing-call voor alle instrumenten + dag-verandering% t.o.v. de
+// dag-open. Verwacht token + baseUrl al gevalideerd door de caller.
+async function handlePrices(res, { token, baseUrl, instrumentsRaw }) {
+  const accountId = process.env.OANDA_ACCOUNT_ID || '';
+  if (!accountId) return res.status(500).json({ error: 'OANDA_ACCOUNT_ID ontbreekt (server-config)' });
+
+  // Instrument-lijst valideren tegen de allowlist (regex + XAU_USD).
+  const list = String(instrumentsRaw || '').split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
+  const uniq = [...new Set(list)].filter(isAllowedInstrument).slice(0, MAX_PRICES);
+  if (!uniq.length) return res.status(400).json({ error: 'geen geldige instruments (comma-separated, allowlist)' });
+
+  // 1) Eén pricing-call voor alle instrumenten.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const url = `${baseUrl}/v3/accounts/${encodeURIComponent(accountId)}/pricing`
+    + `?instruments=${uniq.map(encodeURIComponent).join('%2C')}`;
+  let payload;
+  try {
+    const upstream = await fetch(url, { method: 'GET', headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }, signal: controller.signal });
+    clearTimeout(timer);
+    if (!upstream.ok) {
+      let snip = ''; try { snip = String((await upstream.text()) || '').slice(0, 200); } catch (_) {}
+      console.error('[secret-area-oanda] pricing upstream', upstream.status);
+      return res.status(502).json({ error: 'OANDA pricing fout', status: upstream.status, detail: snip || null });
+    }
+    payload = await upstream.json();
+  } catch (e) {
+    clearTimeout(timer);
+    const msg = e?.name === 'AbortError' ? 'OANDA timeout' : 'OANDA netwerkfout';
+    console.error('[secret-area-oanda] pricing fetch fail:', msg);
+    return res.status(502).json({ error: msg, status: null });
+  }
+
+  const midByInstr = new Map();
+  for (const p of (Array.isArray(payload?.prices) ? payload.prices : [])) {
+    const bid = Number(p?.bids?.[0]?.price ?? p?.closeoutBid);
+    const ask = Number(p?.asks?.[0]?.price ?? p?.closeoutAsk);
+    let mid = null;
+    if (Number.isFinite(bid) && Number.isFinite(ask)) mid = (bid + ask) / 2;
+    else if (Number.isFinite(bid)) mid = bid;
+    else if (Number.isFinite(ask)) mid = ask;
+    if (p?.instrument && mid != null) midByInstr.set(p.instrument, mid);
+  }
+
+  // 2) Dag-open per instrument (cache per UTC-dag → alleen ontbrekende ophalen).
+  const dayKey = _utcDayKey();
+  const missing = uniq.filter((i) => {
+    const c = _dayOpenCache.get(i);
+    return !(c && c.day === dayKey && Number.isFinite(c.open));
+  });
+  await _mapLimit(missing, 5, async (instr) => {
+    const open = await _fetchDayOpen(baseUrl, token, instr);
+    if (Number.isFinite(open)) _dayOpenCache.set(instr, { day: dayKey, open });
+  });
+
+  const prices = uniq.map((instr) => {
+    const price = midByInstr.has(instr) ? midByInstr.get(instr) : null;
+    const dc = _dayOpenCache.get(instr);
+    const dayOpen = (dc && dc.day === dayKey) ? dc.open : null;
+    let changePct = null, direction = null;
+    if (price != null && Number.isFinite(dayOpen) && dayOpen !== 0) {
+      changePct = ((price - dayOpen) / dayOpen) * 100;
+      direction = changePct >= 0 ? 'up' : 'down';
+    }
+    return { instrument: instr, price, changePct, direction };
+  });
+
+  return res.status(200).json({ ok: true, count: prices.length, prices });
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -111,6 +218,13 @@ export default async function handler(req, res) {
 
   // 3) Query-validatie. STRIKT — geen vrije user-input naar externe URL.
   const q = req.query || {};
+
+  // 3a) Multi-price watchlist-actie: één pricing-call voor een lijst
+  //     instrumenten (owner-gated, allowlist, token server-side).
+  if (String(q.action || '') === 'prices') {
+    return handlePrices(res, { token, baseUrl, instrumentsRaw: q.instruments });
+  }
+
   const instrument = typeof q.instrument === 'string' && q.instrument.trim()
     ? q.instrument.trim().toUpperCase()
     : 'EUR_USD';
