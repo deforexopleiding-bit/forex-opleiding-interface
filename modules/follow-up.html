@@ -780,6 +780,95 @@
       margin-top: 20px;
     }
 
+    /* ── Leads-tab (fu-card design-taal) ──────────────────────────────── */
+    /* Filter-bar in dezelfde stijl als de bestaande segmented controls. */
+    .fu-lead-filterbar {
+      display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+      margin-bottom: 20px;
+    }
+    .fu-lead-filterbar label {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 12px; color: var(--text-secondary, rgba(255,255,255,0.7));
+    }
+    .fu-lead-filterbar select {
+      background: var(--surface-2, rgba(255,255,255,0.04));
+      border: 1px solid var(--border, rgba(255,255,255,0.12));
+      color: var(--text-primary, #fff);
+      padding: 6px 10px; border-radius: 6px; font-size: 13px; font-family: inherit;
+    }
+    .fu-lead-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 12px;
+      background: var(--surface-2, rgba(255,255,255,0.04));
+      border: 1px solid var(--border, rgba(255,255,255,0.12));
+      color: var(--text-primary, #fff);
+      border-radius: 6px; cursor: pointer; font-size: 13px; font-family: inherit;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .fu-lead-btn:hover { background: var(--surface-card-hover); }
+    .fu-lead-btn.primary {
+      background: var(--brand-primary, #093d54); border-color: var(--brand-primary, #093d54);
+      color: var(--text-inverse, #fff);
+    }
+    /* KPI-strook. Grid van kaarten met titel + waarde. */
+    .fu-lead-kpigrid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px; margin-bottom: 20px;
+    }
+    .fu-lead-kpi {
+      background: var(--surface-card); border: 1px solid var(--border-default);
+      border-radius: 10px; padding: 12px 14px;
+    }
+    .fu-lead-kpi-label {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+      color: var(--text-secondary, rgba(255,255,255,0.6));
+    }
+    .fu-lead-kpi-value {
+      font-size: 22px; font-weight: 600; margin-top: 4px;
+      color: var(--text-primary, #fff);
+    }
+    /* Lead-cards — bouwen op .fu-card. Eigen right-cluster met inputs. */
+    .fu-lead-card-meta a {
+      color: var(--text-secondary); text-decoration: none;
+    }
+    .fu-lead-card-meta a:hover { color: var(--text-primary); text-decoration: underline; }
+    .fu-lead-inline {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--surface-2, rgba(255,255,255,0.04));
+      border: 1px solid var(--border, rgba(255,255,255,0.12));
+      border-radius: 6px; padding: 4px 8px;
+      font-size: 12px; color: var(--text-primary, #fff);
+      font-family: inherit;
+    }
+    .fu-lead-inline:hover { border-color: var(--border-strong); }
+    /* Bron-badges (fu-card-badge-varianten). */
+    .fu-card-badge.source-retention { background: var(--color-info-soft);    color: var(--color-info-text); }
+    .fu-card-badge.source-event     { background: #ede9fe;                    color: #6d28d9; }
+    /* Sectie-label voor 'Vandaag terugbellen' / 'Te laat' — kleuraccent. */
+    .fu-lead-section-warning .fu-section-title { color: var(--color-warning-text, #b45309); }
+    .fu-lead-section-danger  .fu-section-title { color: var(--color-danger-text,  #b91c1c); }
+    /* Notitie-modal body. */
+    .fu-lead-note-input-row {
+      display: flex; gap: 8px; margin-bottom: 14px;
+    }
+    .fu-lead-note-list {
+      max-height: 60vh; overflow-y: auto;
+    }
+    .fu-lead-note-item {
+      padding: 10px 12px;
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      margin-bottom: 8px;
+      background: var(--surface-card);
+    }
+    .fu-lead-note-body { font-size: 13px; color: var(--text-primary); white-space: pre-wrap; }
+    .fu-lead-note-meta { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+    @media (max-width: 720px) {
+      /* Op mobiel: right-cluster wrap-t netjes onder. */
+      #panel-leads .fu-card-header { flex-wrap: wrap; }
+      #panel-leads .fu-card-right { width: 100%; justify-content: flex-start; margin-top: 8px; }
+    }
+
     /* ── Kalender-tab ───────────────────────────────────────────────── */
     .fu-kalender-header {
       display: flex;
@@ -1210,26 +1299,26 @@
     </div>
 
     <!-- Leads-tab panel (retentie/event-leads uit follow_up_leads) -->
-    <div class="fu-tab-panel" data-panel="leads">
-      <div id="leads-summary" style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px"></div>
-      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px">
-        <label style="font-size:12px;color:var(--text-dim)">Bron
-          <select id="leads-source" class="fu-select" style="margin-left:6px">
+    <div class="fu-tab-panel" data-panel="leads" id="panel-leads">
+      <div id="leads-summary" class="fu-lead-kpigrid"></div>
+      <div class="fu-lead-filterbar">
+        <label>Bron
+          <select id="leads-source">
             <option value="all">Alle</option>
             <option value="retention" selected>Retentie</option>
             <option value="event">Event</option>
           </select>
         </label>
-        <label style="font-size:12px;color:var(--text-dim)">Weergave
-          <select id="leads-view" class="fu-select" style="margin-left:6px">
+        <label>Weergave
+          <select id="leads-view">
             <option value="open" selected>Open (todo)</option>
             <option value="alle">Alle</option>
             <option value="vandaag">Vandaag terugbellen</option>
             <option value="te_laat">Te laat opgevolgd</option>
           </select>
         </label>
-        <label style="font-size:12px;color:var(--text-dim)">Status
-          <select id="leads-status" class="fu-select" style="margin-left:6px">
+        <label>Status
+          <select id="leads-status">
             <option value="">Alle</option>
             <option value="nieuw">nieuw</option>
             <option value="benaderd">benaderd</option>
@@ -1239,12 +1328,17 @@
             <option value="verloren">verloren</option>
           </select>
         </label>
-        <button class="fu-btn" id="leads-refresh"><i class="ti ti-refresh"></i> Vernieuwen</button>
+        <button class="fu-lead-btn" id="leads-refresh"><i class="ti ti-refresh"></i> Vernieuwen</button>
       </div>
-      <div id="leads-section-vandaag" style="margin-bottom:14px"></div>
-      <div id="leads-section-telaat" style="margin-bottom:14px"></div>
-      <div id="leads-main-title" style="font-size:13px;font-weight:600;color:var(--text-dim);margin-bottom:6px">Alle leads</div>
-      <div id="leads-list"><div class="fu-loading">Laden…</div></div>
+      <div id="leads-section-vandaag"></div>
+      <div id="leads-section-telaat"></div>
+      <section class="fu-section" id="leads-main-section">
+        <div class="fu-section-header">
+          <h2 class="fu-section-title">Alle leads</h2>
+          <span class="fu-section-count" id="leads-main-count"></span>
+        </div>
+        <div id="leads-list"><div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div></div>
+      </section>
     </div>
 
     <!-- Kalender-tab panel -->
@@ -2655,26 +2749,30 @@
         const items = d.leads || [];
         if (!items.length) { container.innerHTML = ''; return; }
         const isTelaat = viewKey === 'te_laat';
-        const title = isTelaat ? '⚠ Te laat opgevolgd' : '📞 Vandaag terugbellen';
-        const bg = isTelaat ? 'rgba(220,38,38,.06)' : 'rgba(245,158,11,.08)';
-        const border = isTelaat ? 'rgba(220,38,38,.28)' : 'rgba(245,158,11,.30)';
-        const color = isTelaat ? '#b91c1c' : '#b45309';
+        const sectionCls = isTelaat ? 'fu-lead-section-danger' : 'fu-lead-section-warning';
+        const iconCls    = isTelaat ? 'ti-alert-triangle' : 'ti-phone';
+        const title      = isTelaat ? 'Te laat opgevolgd' : 'Vandaag terugbellen';
         container.innerHTML =
-          `<div style="padding:10px 12px;border-radius:8px;background:${bg};border:1px solid ${border};margin-bottom:6px;color:${color};font-weight:600;font-size:13px">
-             ${title} <span style="font-weight:400;color:${color};margin-left:8px">${items.length} lead(s)</span>
-           </div>` +
-          renderLeadsTable(items);
-        wireLeadsTable(container);
+          `<section class="fu-section ${sectionCls}">
+             <div class="fu-section-header">
+               <h2 class="fu-section-title"><i class="ti ${iconCls}"></i> ${title}</h2>
+               <span class="fu-section-count">${items.length} lead${items.length === 1 ? '' : 's'}</span>
+             </div>
+             <div class="fu-lead-cards">${renderLeadCards(items)}</div>
+           </section>`;
+        wireLeadCards(container);
       } catch (_) { container.innerHTML = ''; }
     }
 
     function renderLeadsTab() {
       const listEl = document.getElementById('leads-list');
       const sumEl  = document.getElementById('leads-summary');
-      const tabCntEl = document.getElementById('tab-count-leads');
+      const tabCntEl  = document.getElementById('tab-count-leads');
+      const mainCntEl = document.getElementById('leads-main-count');
       const c = _leadsState.counts || {};
       if (sumEl) {
-        const kpi = (label, val, cls) => `<div class="fu-stat-tile ${cls || ''}" style="min-width:120px"><div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.03em">${esc(label)}</div><div style="font-size:22px;font-weight:700;margin-top:2px">${Number(val) || 0}</div></div>`;
+        const kpi = (label, val) =>
+          `<div class="fu-lead-kpi"><div class="fu-lead-kpi-label">${esc(label)}</div><div class="fu-lead-kpi-value">${Number(val) || 0}</div></div>`;
         sumEl.innerHTML =
           kpi('Alle', c.alle) +
           kpi('Open', c.open) +
@@ -2683,12 +2781,13 @@
       }
       if (tabCntEl) tabCntEl.textContent = String(c.open ?? c.alle ?? '—');
       const items = _leadsState.items || [];
+      if (mainCntEl) mainCntEl.textContent = items.length ? (items.length + ' lead' + (items.length === 1 ? '' : 's')) : '';
       if (!items.length) {
-        listEl.innerHTML = '<div class="fu-loading">Geen leads in deze selectie.</div>';
+        listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-inbox fu-empty-icon"></i>Geen leads in deze selectie.</div>';
         return;
       }
-      listEl.innerHTML = renderLeadsTable(items);
-      wireLeadsTable(listEl);
+      listEl.innerHTML = renderLeadCards(items);
+      wireLeadCards(listEl);
     }
 
     function fmtDateLocal(iso) {
@@ -2707,39 +2806,72 @@
       } catch { return iso; }
     }
 
-    function renderLeadsTable(items) {
-      const opts = ['nieuw','benaderd','niet_bereikbaar','terugbellen','verlengd','verloren'];
-      const rows = items.map((it) => {
-        const nm = esc(it.lead_name || '—');
-        const phRaw = String(it.lead_phone || '').replace(/\s+/g, '');
-        const ph = phRaw
-          ? `<a href="tel:${esc(phRaw)}" style="color:var(--text)">${esc(it.lead_phone)}</a>`
-          : '—';
-        const em = it.lead_email ? `<a href="mailto:${esc(it.lead_email)}" style="color:var(--text-dim)">${esc(it.lead_email)}</a>` : '—';
-        const sourceBadge = it.source === 'retention'
-          ? '<span class="fu-badge" style="background:rgba(20,115,214,.14);color:#1160bd">retentie</span>'
-          : it.source === 'event'
-            ? '<span class="fu-badge" style="background:rgba(139,92,246,.14);color:#7c3aed">event</span>'
-            : `<span class="fu-badge">${esc(it.source || '—')}</span>`;
-        const statusSel = `<select class="fu-select" data-lead-status="${esc(it.id)}" style="font-size:12px">${opts.map(o => `<option value="${o}"${o===it.lead_status ? ' selected' : ''}>${o}</option>`).join('')}</select>`;
-        const dateInp = `<input type="date" class="fu-input" data-lead-date="${esc(it.id)}" value="${fmtDateLocal(it.terugbel_datum)}" style="font-size:12px;padding:2px 6px">`;
-        const noteBtn = `<button class="fu-btn" data-lead-notes="${esc(it.id)}" data-lead-name="${esc(it.lead_name || '')}" style="padding:3px 8px;font-size:12px"><i class="ti ti-notes"></i> Notitie</button>`;
-        return `<tr>
-          <td><strong>${nm}</strong>${sourceBadge ? ' ' + sourceBadge : ''}</td>
-          <td>${ph}</td>
-          <td>${em}</td>
-          <td>${statusSel}</td>
-          <td>${dateInp}</td>
-          <td>${it.last_contact_at ? fmtDateNLShort(it.last_contact_at) : '—'}</td>
-          <td>${noteBtn}</td>
-        </tr>`;
-      }).join('');
-      return `<div style="overflow-x:auto"><table class="fu-table">
-        <thead><tr><th>Naam</th><th>Telefoon</th><th>E-mail</th><th>Status</th><th>Terugbellen</th><th>Laatste contact</th><th></th></tr></thead>
-        <tbody>${rows}</tbody></table></div>`;
+    // Lead-status → fu-card-avatar/-badge status-class + Nederlands label.
+    // Hergebruikt de bestaande status-* variants:
+    //   nieuw           → scheduled (info/blauw)
+    //   benaderd        → in-progress (warning/amber)
+    //   terugbellen     → scheduled (info/blauw)
+    //   niet_bereikbaar → default (neutral/grijs)
+    //   verlengd        → completed (success/groen)
+    //   verloren        → no-show (danger/rood)
+    const LEAD_STATUS_MAP = {
+      nieuw          : { cls: 'status-scheduled',    label: 'Nieuw' },
+      benaderd       : { cls: 'status-in-progress',  label: 'Benaderd' },
+      terugbellen    : { cls: 'status-scheduled',    label: 'Terugbellen' },
+      niet_bereikbaar: { cls: 'status-default',      label: 'Niet bereikbaar' },
+      verlengd       : { cls: 'status-completed',    label: 'Verlengd' },
+      verloren       : { cls: 'status-no-show',      label: 'Verloren' },
+    };
+
+    function _leadInitials(name) {
+      const n = String(name || '').trim();
+      if (!n) return '?';
+      const parts = n.split(/\s+/);
+      const first = parts[0]?.[0] || '';
+      const last  = parts.length > 1 ? parts[parts.length - 1][0] : '';
+      return (first + last).toUpperCase() || '?';
     }
 
-    function wireLeadsTable(root) {
+    function renderLeadCards(items) {
+      const opts = ['nieuw','benaderd','niet_bereikbaar','terugbellen','verlengd','verloren'];
+      return items.map((it) => {
+        const st = LEAD_STATUS_MAP[it.lead_status] || LEAD_STATUS_MAP.nieuw;
+        const initials = _leadInitials(it.lead_name);
+        const nm = esc(it.lead_name || '—');
+        const phRaw = String(it.lead_phone || '').replace(/\s+/g, '');
+        const phLink = phRaw ? `<a href="tel:${esc(phRaw)}"><i class="ti ti-phone"></i> ${esc(it.lead_phone)}</a>` : '';
+        const emLink = it.lead_email ? `<a href="mailto:${esc(it.lead_email)}"><i class="ti ti-mail"></i> ${esc(it.lead_email)}</a>` : '';
+        const metaParts = [phLink, emLink].filter(Boolean).join(' · ');
+        const lastContact = it.last_contact_at ? `Laatste contact: ${fmtDateNLShort(it.last_contact_at)}` : '';
+        const sourceBadge = it.source === 'retention'
+          ? '<span class="fu-card-badge source-retention">Retentie</span>'
+          : it.source === 'event'
+            ? '<span class="fu-card-badge source-event">Event</span>'
+            : `<span class="fu-card-badge status-default">${esc(it.source || '—')}</span>`;
+        const statusSel = `<select class="fu-lead-inline" data-lead-status="${esc(it.id)}" aria-label="Status">${opts.map(o => `<option value="${o}"${o===it.lead_status ? ' selected' : ''}>${LEAD_STATUS_MAP[o]?.label || o}</option>`).join('')}</select>`;
+        const dateInp = `<input type="date" class="fu-lead-inline" data-lead-date="${esc(it.id)}" value="${fmtDateLocal(it.terugbel_datum)}" aria-label="Terugbellen op">`;
+        const noteBtn = `<button class="fu-lead-btn" data-lead-notes="${esc(it.id)}" data-lead-name="${esc(it.lead_name || '')}" title="Notitie toevoegen / bekijken"><i class="ti ti-notes"></i> Notitie</button>`;
+        return `<article class="fu-card">
+          <div class="fu-card-header">
+            <div class="fu-card-left">
+              <div class="fu-card-avatar ${st.cls}" title="${esc(st.label)}">${esc(initials)}</div>
+              <div style="min-width:0">
+                <div class="fu-card-name">${nm} ${sourceBadge}</div>
+                ${metaParts ? `<div class="fu-card-meta fu-lead-card-meta">${metaParts}</div>` : ''}
+                ${lastContact ? `<div class="fu-card-meta" style="opacity:.8">${lastContact}</div>` : ''}
+              </div>
+            </div>
+            <div class="fu-card-right">
+              ${statusSel}
+              ${dateInp}
+              ${noteBtn}
+            </div>
+          </div>
+        </article>`;
+      }).join('');
+    }
+
+    function wireLeadCards(root) {
       root.querySelectorAll('[data-lead-status]').forEach((sel) => sel.addEventListener('change', async () => {
         await patchLead(sel.getAttribute('data-lead-status'), { lead_status: sel.value });
       }));
@@ -2767,47 +2899,59 @@
     }
 
     async function openLeadNotesModal(leadId, leadName) {
-      // Simpele modal (native prompts vermijden — inline overlay).
-      let modal = document.getElementById('lead-notes-modal');
-      if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'lead-notes-modal';
-        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px';
-        modal.innerHTML = `
-          <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;max-width:640px;width:100%;padding:18px;max-height:90vh;display:flex;flex-direction:column">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-              <div style="font-weight:700;font-size:15px" id="lnm-title">Notities</div>
-              <button id="lnm-close" class="fu-btn" style="padding:4px 10px">✕</button>
+      // Hergebruik de bestaande fu-modal-* structuur voor visuele consistentie
+      // met de andere modals in de module (backdrop / header / body / actions).
+      let backdrop = document.getElementById('lead-notes-modal');
+      if (!backdrop) {
+        backdrop = document.createElement('div');
+        backdrop.id = 'lead-notes-modal';
+        backdrop.className = 'fu-modal-backdrop';
+        backdrop.innerHTML = `
+          <div class="fu-modal" role="dialog" aria-modal="true">
+            <div class="fu-modal-header">
+              <h2 id="lnm-title">Notities</h2>
+              <button class="fu-modal-close" id="lnm-close" aria-label="Sluiten">&times;</button>
             </div>
-            <div style="display:flex;gap:8px;margin-bottom:10px">
-              <input id="lnm-input" class="fu-input" placeholder="Nieuwe notitie…" style="flex:1">
-              <button id="lnm-add" class="fu-btn primary">Toevoegen</button>
+            <div class="fu-modal-body">
+              <div class="fu-field">
+                <label class="fu-label" for="lnm-input">Nieuwe notitie</label>
+                <div class="fu-lead-note-input-row">
+                  <input id="lnm-input" class="fu-input" placeholder="Schrijf een notitie…" />
+                  <button id="lnm-add" class="fu-lead-btn primary">Toevoegen</button>
+                </div>
+              </div>
+              <div class="fu-field">
+                <label class="fu-label">Tijdlijn</label>
+                <div id="lnm-list" class="fu-lead-note-list"></div>
+              </div>
             </div>
-            <div id="lnm-list" style="overflow-y:auto;flex:1;font-size:13px"></div>
           </div>`;
-        document.body.appendChild(modal);
-        modal.querySelector('#lnm-close').addEventListener('click', () => modal.remove());
+        document.body.appendChild(backdrop);
+        const closeIt = () => backdrop.remove();
+        backdrop.querySelector('#lnm-close').addEventListener('click', closeIt);
+        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeIt(); });
       }
-      modal.querySelector('#lnm-title').textContent = 'Notities · ' + (leadName || '');
-      const listEl  = modal.querySelector('#lnm-list');
-      const input   = modal.querySelector('#lnm-input');
-      const addBtn  = modal.querySelector('#lnm-add');
+      backdrop.querySelector('#lnm-title').textContent = 'Notities · ' + (leadName || '');
+      const listEl  = backdrop.querySelector('#lnm-list');
+      const input   = backdrop.querySelector('#lnm-input');
+      const addBtn  = backdrop.querySelector('#lnm-add');
       input.value = '';
 
       const refresh = async () => {
-        listEl.innerHTML = '<div class="fu-loading">Laden…</div>';
+        listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
         try {
           const r = await window.AgentShared.apiFetch('/api/follow-up-lead-notes-list?lead_id=' + encodeURIComponent(leadId));
           const d = await r.json().catch(() => ({}));
           if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
           const notes = d.notes || [];
-          if (!notes.length) { listEl.innerHTML = '<div class="fu-loading">Nog geen notities.</div>'; return; }
-          listEl.innerHTML = notes.map((n) => `<div style="padding:8px 10px;border-bottom:1px solid var(--border)">
-              <div style="white-space:pre-wrap">${esc(n.note || '')}</div>
-              <div style="font-size:11px;color:var(--text-dim);margin-top:3px">${esc(n.author_name || '—')} · ${fmtDateNLShort(n.created_at)}</div>
+          if (!notes.length) { listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-note-off fu-empty-icon"></i>Nog geen notities.</div>'; return; }
+          listEl.innerHTML = notes.map((n) => `
+            <div class="fu-lead-note-item">
+              <div class="fu-lead-note-body">${esc(n.note || '')}</div>
+              <div class="fu-lead-note-meta">${esc(n.author_name || '—')} · ${fmtDateNLShort(n.created_at)}</div>
             </div>`).join('');
         } catch (e) {
-          listEl.innerHTML = '<div class="fu-loading" style="color:#b91c1c">Fout: ' + esc(e.message || '') + '</div>';
+          listEl.innerHTML = '<div class="fu-empty" style="color:var(--color-danger-text,#b91c1c)"><i class="ti ti-alert-circle fu-empty-icon"></i>Fout: ' + esc(e.message || '') + '</div>';
         }
       };
       addBtn.onclick = async () => {
