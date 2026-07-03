@@ -13,6 +13,25 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { customerDisplayName } from './_lib/customer-name.js';
 
+// PostgREST slikt lange IN-lijsten stil af op de URL-lengte-limiet.
+// chunkedIn splitst een grote ids-set in batches van 200 en concat't de
+// resultaten. `extra` is een optionele decorator voor de query (bv. andere
+// filters); die wordt per batch opnieuw toegepast.
+async function chunkedIn(table, column, ids, selectCols, extra) {
+  const out = [];
+  const uniq = [...new Set(ids)].filter(Boolean);
+  if (!uniq.length) return out;
+  const B = 200;
+  for (let i = 0; i < uniq.length; i += B) {
+    let q = supabaseAdmin.from(table).select(selectCols).in(column, uniq.slice(i, i + B));
+    if (typeof extra === 'function') q = extra(q);
+    const { data, error } = await q;
+    if (error) throw new Error(`${table} fetch: ${error.message}`);
+    if (data) out.push(...data);
+  }
+  return out;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -46,21 +65,18 @@ export default async function handler(req, res) {
     }
     if (!subs || !subs.length) return res.status(200).json({ items: [] });
 
-    // 2) Deals via de kleine dealIds-set (≤500) — géén IN-overflow.
+    // 2) Deals via chunked IN — dealIds kan tot ~1000 zijn sinds we ook
+    //    cancelled subs meenemen; PostgREST-URL-limiet halveren via batches
+    //    van 200 voorkomt de stille 500.
     const dealIds = [...new Set(subs.map((s) => s.deal_id).filter(Boolean))];
     let dealById = {};
     if (dealIds.length) {
-      let dq = supabaseAdmin.from('deals')
-        .select('id, customer_id, sales_user_id, traject_variant_id, tl_department_id, archived_at')
-        .in('id', dealIds)
-        .is('archived_at', null);
-      if (ownedByMe) dq = dq.eq('sales_user_id', user.id);
-      const { data: deals, error: dealErr } = await dq;
-      if (dealErr) {
-        console.error('[sales-retention] deals fetch:', dealErr.message);
-        return res.status(500).json({ error: 'deals fetch: ' + dealErr.message });
-      }
-      for (const d of (deals || [])) dealById[d.id] = d;
+      const deals = await chunkedIn(
+        'deals', 'id', dealIds,
+        'id, customer_id, sales_user_id, traject_variant_id, tl_department_id, archived_at',
+        (q) => (ownedByMe ? q.is('archived_at', null).eq('sales_user_id', user.id) : q.is('archived_at', null)),
+      );
+      for (const d of deals) dealById[d.id] = d;
     }
     if (!Object.keys(dealById).length) return res.status(200).json({ items: [] });
 
@@ -101,26 +117,24 @@ export default async function handler(req, res) {
     const custById = {};
     // Retention-vlag kolommen zijn optioneel — als de migratie nog niet
     // gedraaid heeft (42703), val terug op de core-select zonder de velden.
+    // Beide paden lopen via chunkedIn (200/batch) tegen IN-overflow.
     let retentionColsAvailable = true;
     if (custIds.length) {
-      const { data, error } = await supabaseAdmin.from('customers')
-        .select('id, is_company, company_name, first_name, last_name, email, mentor_user_id, retention_not_renewing, retention_marked_at, retention_marked_by')
-        .in('id', custIds);
-      if (error && error.code === '42703') {
-        retentionColsAvailable = false;
-        const { data: data2, error: err2 } = await supabaseAdmin.from('customers')
-          .select('id, is_company, company_name, first_name, last_name, email, mentor_user_id')
-          .in('id', custIds);
-        if (err2) {
-          console.error('[sales-retention] customers fetch (fallback):', err2.message);
-          return res.status(500).json({ error: 'customers fetch: ' + err2.message });
+      const richCols = 'id, is_company, company_name, first_name, last_name, email, mentor_user_id, retention_not_renewing, retention_marked_at, retention_marked_by';
+      const coreCols = 'id, is_company, company_name, first_name, last_name, email, mentor_user_id';
+      try {
+        const rows = await chunkedIn('customers', 'id', custIds, richCols);
+        for (const c of rows) custById[c.id] = c;
+      } catch (e) {
+        // Detecteer 42703 (kolom ontbreekt) via de eigen error-message van
+        // chunkedIn — die neemt de PostgREST-message over.
+        if (/42703|column .* does not exist|retention_/i.test(e.message || '')) {
+          retentionColsAvailable = false;
+          const rows2 = await chunkedIn('customers', 'id', custIds, coreCols);
+          for (const c of rows2) custById[c.id] = c;
+        } else {
+          throw e;
         }
-        for (const c of (data2 || [])) custById[c.id] = c;
-      } else if (error) {
-        console.error('[sales-retention] customers fetch:', error.message);
-        return res.status(500).json({ error: 'customers fetch: ' + error.message });
-      } else {
-        for (const c of (data || [])) custById[c.id] = c;
       }
     }
     const deptIds = [...new Set(groups.map((g) => g.maxDeal?.tl_department_id).filter(Boolean))];
