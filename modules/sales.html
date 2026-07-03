@@ -1006,18 +1006,25 @@ function renderRetentie() {
       const markBtn = notRen
         ? `<button class="sr-menu-item" data-ret-mark="${esc(it.customer_id)}" data-ret-mark-to="0"><i class="ti ti-refresh"></i> Toch verlengen</button>`
         : `<button class="sr-menu-item" data-ret-mark="${esc(it.customer_id)}" data-ret-mark-to="1"><i class="ti ti-circle-x"></i> Markeer 'Niet-verlengen'</button>`;
+      const onFu = it._on_followup === true;
+      const fuBtn = onFu
+        ? `<button class="sr-menu-item" disabled style="opacity:.55;cursor:default"><i class="ti ti-check"></i> Op follow-up</button>`
+        : `<button class="sr-menu-item" data-ret-fu="${esc(it.customer_id)}" data-ret-end="${esc(it.end_date || '')}" data-ret-status="${esc(it.last_sub_status || '')}"><i class="ti ti-arrow-right"></i> → Follow-up</button>`;
       const menu = [
         `<a class="sr-menu-item" href="/modules/klanten.html?id=${esc(it.customer_id)}"><i class="ti ti-user"></i> Klant-detail bekijken</a>`,
         markBtn,
-        `<button class="sr-menu-item" onclick="toast('Binnenkort beschikbaar')"><i class="ti ti-bell"></i> Aanmelden voor opvolging</button>`,
+        fuBtn,
       ];
       const dots = `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer acties"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${menu.join('')}</div></div>`;
       const caret = (n > 1) ? `<button class="sr-ibtn" data-ret-toggle="${i}" style="width:24px;height:24px;margin-right:4px"><i class="ti ti-chevron-right"></i></button>` : '<span style="display:inline-block;width:28px"></span>';
       const detail = (n && it.subs) ? `<tr class="ret-detail" id="ret-detail-${i}" hidden><td colspan="8" style="background:var(--bg-elev-2);padding-left:40px">
         <table style="width:100%;font-size:12px"><thead><tr><th style="text-align:left">Abonnement</th><th style="text-align:left">Start</th><th style="text-align:left">Eind</th></tr></thead>
         <tbody>${it.subs.map(s => `<tr><td>${esc(s.description || '—')}</td><td>${s.start_date ? fmtDateNL(s.start_date) : '—'}</td><td>${s.end_date ? fmtDateNL(s.end_date) : '—'}</td></tr>`).join('')}</tbody></table></td></tr>` : '';
+      const fuBadge = onFu
+        ? `<span class="sr-tag" style="margin-left:6px;background:rgba(34,197,94,.14);color:#15803d" title="Op follow-up gezet"><i class="ti ti-check"></i> Follow-up</span>`
+        : '';
       return `<tr${urgent ? ' style="background:rgba(220,38,38,.05)"' : (notRen ? ' style="opacity:.65"' : '')}>
-        <td><span style="display:flex;align-items:center">${caret}<a class="sr-userline" href="/modules/klanten.html?id=${esc(it.customer_id)}" style="text-decoration:none;color:inherit">${avatarHtml(it.customer_name)}<span><span class="sr-uname">${esc(it.customer_name)}${notRenBadge}</span><br><span class="sr-cellsub">${esc(it.customer_email || '—')}</span></span></a></span></td>
+        <td><span style="display:flex;align-items:center">${caret}<a class="sr-userline" href="/modules/klanten.html?id=${esc(it.customer_id)}" style="text-decoration:none;color:inherit">${avatarHtml(it.customer_name)}<span><span class="sr-uname">${esc(it.customer_name)}${notRenBadge}${fuBadge}</span><br><span class="sr-cellsub">${esc(it.customer_email || '—')}</span></span></a></span></td>
         <td>${entityTag(it.entity)}</td>
         <td>${esc(it.traject_label || '—')}</td>
         <td>${mentor}</td>
@@ -1049,6 +1056,28 @@ function renderRetentie() {
         it.retention_marked_by    = d.customer?.retention_marked_by || null;
       }
       toast(to ? 'Gemarkeerd als "Niet-verlengen"' : 'Markering opgeheven');
+      renderRetentie();
+    } catch (e) {
+      toast('Fout: ' + (e.message || 'onbekend'));
+    }
+  }));
+  wrap.querySelectorAll('[data-ret-fu]').forEach(btn => btn.addEventListener('click', async () => {
+    const cid = btn.getAttribute('data-ret-fu');
+    const end = btn.getAttribute('data-ret-end') || null;
+    const st  = btn.getAttribute('data-ret-status') || null;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/sales-retention-to-followup', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_id: cid, end_date: end, last_sub_status: st }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d?.ok !== true) {
+        if (d?.code === 'MIGRATION_REQUIRED') { toast('Migratie vereist: follow_up_leads tabel ontbreekt'); return; }
+        throw new Error(d?.error || 'HTTP ' + r.status);
+      }
+      const it = retItems.find(x => x.customer_id === cid);
+      if (it) it._on_followup = true;
+      toast(d.already ? 'Staat al op follow-up' : 'Op follow-up gezet');
       renderRetentie();
     } catch (e) {
       toast('Fout: ' + (e.message || 'onbekend'));
