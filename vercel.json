@@ -111,6 +111,10 @@
     {
       "path": "/api/cron/first-call-payment-reminder",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron-candles",
+      "schedule": "*/15 * * * *"
     }
   ],
   "headers": [
