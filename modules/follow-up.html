@@ -1012,6 +1012,11 @@
         <span>Event follow-ups</span>
         <span class="fu-tab-count" id="tab-count-event-followups">—</span>
       </button>
+      <button class="fu-tab" data-tab="leads" role="tab" aria-selected="false">
+        <i class="ti ti-user-plus" aria-hidden="true"></i>
+        <span>Leads</span>
+        <span class="fu-tab-count" id="tab-count-leads">—</span>
+      </button>
       <button class="fu-tab" data-tab="kalender" role="tab" aria-selected="false">
         <i class="ti ti-calendar" aria-hidden="true"></i>
         <span>Kalender</span>
@@ -1202,6 +1207,44 @@
           <div class="fu-loading">Laden…</div>
         </div>
       </div>
+    </div>
+
+    <!-- Leads-tab panel (retentie/event-leads uit follow_up_leads) -->
+    <div class="fu-tab-panel" data-panel="leads">
+      <div id="leads-summary" style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px"></div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px">
+        <label style="font-size:12px;color:var(--text-dim)">Bron
+          <select id="leads-source" class="fu-select" style="margin-left:6px">
+            <option value="all">Alle</option>
+            <option value="retention" selected>Retentie</option>
+            <option value="event">Event</option>
+          </select>
+        </label>
+        <label style="font-size:12px;color:var(--text-dim)">Weergave
+          <select id="leads-view" class="fu-select" style="margin-left:6px">
+            <option value="open" selected>Open (todo)</option>
+            <option value="alle">Alle</option>
+            <option value="vandaag">Vandaag terugbellen</option>
+            <option value="te_laat">Te laat opgevolgd</option>
+          </select>
+        </label>
+        <label style="font-size:12px;color:var(--text-dim)">Status
+          <select id="leads-status" class="fu-select" style="margin-left:6px">
+            <option value="">Alle</option>
+            <option value="nieuw">nieuw</option>
+            <option value="benaderd">benaderd</option>
+            <option value="niet_bereikbaar">niet_bereikbaar</option>
+            <option value="terugbellen">terugbellen</option>
+            <option value="verlengd">verlengd</option>
+            <option value="verloren">verloren</option>
+          </select>
+        </label>
+        <button class="fu-btn" id="leads-refresh"><i class="ti ti-refresh"></i> Vernieuwen</button>
+      </div>
+      <div id="leads-section-vandaag" style="margin-bottom:14px"></div>
+      <div id="leads-section-telaat" style="margin-bottom:14px"></div>
+      <div id="leads-main-title" style="font-size:13px;font-weight:600;color:var(--text-dim);margin-bottom:6px">Alle leads</div>
+      <div id="leads-list"><div class="fu-loading">Laden…</div></div>
     </div>
 
     <!-- Kalender-tab panel -->
@@ -2550,7 +2593,255 @@
       if (tabId === 'event-followups') {
         loadEventFollowups();
       }
+      if (tabId === 'leads') {
+        loadLeadsTab();
+      }
     }
+
+    // ── Leads-tab (follow_up_leads / follow_up_lead_notes) ──────────────────
+    const _leadsState = { items: [], counts: null, loading: false };
+
+    function _leadsRoute() {
+      const source = document.getElementById('leads-source')?.value || 'retention';
+      const view   = document.getElementById('leads-view')?.value   || 'open';
+      const status = document.getElementById('leads-status')?.value || '';
+      const p = new URLSearchParams();
+      if (source && source !== 'all') p.set('source', source);
+      if (view && view !== 'alle')    p.set('view', view);
+      if (status)                     p.set('status', status);
+      return '/api/follow-up-leads-list' + (p.toString() ? '?' + p.toString() : '');
+    }
+
+    async function loadLeadsTab() {
+      const listEl = document.getElementById('leads-list');
+      if (!listEl) return;
+      if (_leadsState.loading) return;
+      _leadsState.loading = true;
+      listEl.innerHTML = '<div class="fu-loading">Laden…</div>';
+      try {
+        const r = await window.AgentShared.apiFetch(_leadsRoute());
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          if (d?.code === 'MIGRATION_REQUIRED') {
+            listEl.innerHTML = '<div class="fu-loading" style="color:#b91c1c">Migratie vereist: tabel follow_up_leads ontbreekt in dit schema.</div>';
+            return;
+          }
+          throw new Error(d?.error || 'HTTP ' + r.status);
+        }
+        _leadsState.items  = d.leads || [];
+        _leadsState.counts = d.counts || null;
+        renderLeadsTab();
+        // Ook side-secties (vandaag/te_laat) apart ophalen zodat de main-lijst
+        // gescheiden blijft van de sub-secties.
+        loadLeadsSection('vandaag', document.getElementById('leads-section-vandaag'));
+        loadLeadsSection('te_laat', document.getElementById('leads-section-telaat'));
+      } catch (e) {
+        listEl.innerHTML = '<div class="fu-loading" style="color:#b91c1c">Laden mislukt: ' + esc(e.message || '') + '</div>';
+      } finally {
+        _leadsState.loading = false;
+      }
+    }
+
+    async function loadLeadsSection(viewKey, container) {
+      if (!container) return;
+      const source = document.getElementById('leads-source')?.value || 'retention';
+      const p = new URLSearchParams();
+      if (source && source !== 'all') p.set('source', source);
+      p.set('view', viewKey);
+      try {
+        const r = await window.AgentShared.apiFetch('/api/follow-up-leads-list?' + p.toString());
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || d?.code === 'MIGRATION_REQUIRED') { container.innerHTML = ''; return; }
+        const items = d.leads || [];
+        if (!items.length) { container.innerHTML = ''; return; }
+        const isTelaat = viewKey === 'te_laat';
+        const title = isTelaat ? '⚠ Te laat opgevolgd' : '📞 Vandaag terugbellen';
+        const bg = isTelaat ? 'rgba(220,38,38,.06)' : 'rgba(245,158,11,.08)';
+        const border = isTelaat ? 'rgba(220,38,38,.28)' : 'rgba(245,158,11,.30)';
+        const color = isTelaat ? '#b91c1c' : '#b45309';
+        container.innerHTML =
+          `<div style="padding:10px 12px;border-radius:8px;background:${bg};border:1px solid ${border};margin-bottom:6px;color:${color};font-weight:600;font-size:13px">
+             ${title} <span style="font-weight:400;color:${color};margin-left:8px">${items.length} lead(s)</span>
+           </div>` +
+          renderLeadsTable(items);
+        wireLeadsTable(container);
+      } catch (_) { container.innerHTML = ''; }
+    }
+
+    function renderLeadsTab() {
+      const listEl = document.getElementById('leads-list');
+      const sumEl  = document.getElementById('leads-summary');
+      const tabCntEl = document.getElementById('tab-count-leads');
+      const c = _leadsState.counts || {};
+      if (sumEl) {
+        const kpi = (label, val, cls) => `<div class="fu-stat-tile ${cls || ''}" style="min-width:120px"><div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.03em">${esc(label)}</div><div style="font-size:22px;font-weight:700;margin-top:2px">${Number(val) || 0}</div></div>`;
+        sumEl.innerHTML =
+          kpi('Alle', c.alle) +
+          kpi('Open', c.open) +
+          kpi('Vandaag', c.vandaag) +
+          kpi('Te laat', c.te_laat);
+      }
+      if (tabCntEl) tabCntEl.textContent = String(c.open ?? c.alle ?? '—');
+      const items = _leadsState.items || [];
+      if (!items.length) {
+        listEl.innerHTML = '<div class="fu-loading">Geen leads in deze selectie.</div>';
+        return;
+      }
+      listEl.innerHTML = renderLeadsTable(items);
+      wireLeadsTable(listEl);
+    }
+
+    function fmtDateLocal(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return '';
+      const y = d.getFullYear();
+      const m = String(d.getMonth()+1).padStart(2,'0');
+      const day = String(d.getDate()).padStart(2,'0');
+      return `${y}-${m}-${day}`;
+    }
+    function fmtDateNLShort(iso) {
+      if (!iso) return '—';
+      try {
+        return new Date(iso).toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' });
+      } catch { return iso; }
+    }
+
+    function renderLeadsTable(items) {
+      const opts = ['nieuw','benaderd','niet_bereikbaar','terugbellen','verlengd','verloren'];
+      const rows = items.map((it) => {
+        const nm = esc(it.lead_name || '—');
+        const phRaw = String(it.lead_phone || '').replace(/\s+/g, '');
+        const ph = phRaw
+          ? `<a href="tel:${esc(phRaw)}" style="color:var(--text)">${esc(it.lead_phone)}</a>`
+          : '—';
+        const em = it.lead_email ? `<a href="mailto:${esc(it.lead_email)}" style="color:var(--text-dim)">${esc(it.lead_email)}</a>` : '—';
+        const sourceBadge = it.source === 'retention'
+          ? '<span class="fu-badge" style="background:rgba(20,115,214,.14);color:#1160bd">retentie</span>'
+          : it.source === 'event'
+            ? '<span class="fu-badge" style="background:rgba(139,92,246,.14);color:#7c3aed">event</span>'
+            : `<span class="fu-badge">${esc(it.source || '—')}</span>`;
+        const statusSel = `<select class="fu-select" data-lead-status="${esc(it.id)}" style="font-size:12px">${opts.map(o => `<option value="${o}"${o===it.lead_status ? ' selected' : ''}>${o}</option>`).join('')}</select>`;
+        const dateInp = `<input type="date" class="fu-input" data-lead-date="${esc(it.id)}" value="${fmtDateLocal(it.terugbel_datum)}" style="font-size:12px;padding:2px 6px">`;
+        const noteBtn = `<button class="fu-btn" data-lead-notes="${esc(it.id)}" data-lead-name="${esc(it.lead_name || '')}" style="padding:3px 8px;font-size:12px"><i class="ti ti-notes"></i> Notitie</button>`;
+        return `<tr>
+          <td><strong>${nm}</strong>${sourceBadge ? ' ' + sourceBadge : ''}</td>
+          <td>${ph}</td>
+          <td>${em}</td>
+          <td>${statusSel}</td>
+          <td>${dateInp}</td>
+          <td>${it.last_contact_at ? fmtDateNLShort(it.last_contact_at) : '—'}</td>
+          <td>${noteBtn}</td>
+        </tr>`;
+      }).join('');
+      return `<div style="overflow-x:auto"><table class="fu-table">
+        <thead><tr><th>Naam</th><th>Telefoon</th><th>E-mail</th><th>Status</th><th>Terugbellen</th><th>Laatste contact</th><th></th></tr></thead>
+        <tbody>${rows}</tbody></table></div>`;
+    }
+
+    function wireLeadsTable(root) {
+      root.querySelectorAll('[data-lead-status]').forEach((sel) => sel.addEventListener('change', async () => {
+        await patchLead(sel.getAttribute('data-lead-status'), { lead_status: sel.value });
+      }));
+      root.querySelectorAll('[data-lead-date]').forEach((inp) => inp.addEventListener('change', async () => {
+        const v = inp.value ? new Date(inp.value + 'T09:00:00').toISOString() : null;
+        await patchLead(inp.getAttribute('data-lead-date'), { terugbel_datum: v });
+      }));
+      root.querySelectorAll('[data-lead-notes]').forEach((btn) => btn.addEventListener('click', () => openLeadNotesModal(btn.getAttribute('data-lead-notes'), btn.getAttribute('data-lead-name') || '')));
+    }
+
+    async function patchLead(leadId, patch) {
+      try {
+        const r = await window.AgentShared.apiFetch('/api/follow-up-lead-update', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lead_id: leadId, ...patch }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+        // Refresh de hele leads-tab zodat counts + sub-secties (Vandaag/Te laat)
+        // ook meebewegen na een status/datum-wijziging.
+        loadLeadsTab();
+      } catch (e) {
+        alert('Opslaan mislukt: ' + (e.message || 'onbekend'));
+      }
+    }
+
+    async function openLeadNotesModal(leadId, leadName) {
+      // Simpele modal (native prompts vermijden — inline overlay).
+      let modal = document.getElementById('lead-notes-modal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'lead-notes-modal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px';
+        modal.innerHTML = `
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;max-width:640px;width:100%;padding:18px;max-height:90vh;display:flex;flex-direction:column">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+              <div style="font-weight:700;font-size:15px" id="lnm-title">Notities</div>
+              <button id="lnm-close" class="fu-btn" style="padding:4px 10px">✕</button>
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:10px">
+              <input id="lnm-input" class="fu-input" placeholder="Nieuwe notitie…" style="flex:1">
+              <button id="lnm-add" class="fu-btn primary">Toevoegen</button>
+            </div>
+            <div id="lnm-list" style="overflow-y:auto;flex:1;font-size:13px"></div>
+          </div>`;
+        document.body.appendChild(modal);
+        modal.querySelector('#lnm-close').addEventListener('click', () => modal.remove());
+      }
+      modal.querySelector('#lnm-title').textContent = 'Notities · ' + (leadName || '');
+      const listEl  = modal.querySelector('#lnm-list');
+      const input   = modal.querySelector('#lnm-input');
+      const addBtn  = modal.querySelector('#lnm-add');
+      input.value = '';
+
+      const refresh = async () => {
+        listEl.innerHTML = '<div class="fu-loading">Laden…</div>';
+        try {
+          const r = await window.AgentShared.apiFetch('/api/follow-up-lead-notes-list?lead_id=' + encodeURIComponent(leadId));
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+          const notes = d.notes || [];
+          if (!notes.length) { listEl.innerHTML = '<div class="fu-loading">Nog geen notities.</div>'; return; }
+          listEl.innerHTML = notes.map((n) => `<div style="padding:8px 10px;border-bottom:1px solid var(--border)">
+              <div style="white-space:pre-wrap">${esc(n.note || '')}</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:3px">${esc(n.author_name || '—')} · ${fmtDateNLShort(n.created_at)}</div>
+            </div>`).join('');
+        } catch (e) {
+          listEl.innerHTML = '<div class="fu-loading" style="color:#b91c1c">Fout: ' + esc(e.message || '') + '</div>';
+        }
+      };
+      addBtn.onclick = async () => {
+        const note = (input.value || '').trim();
+        if (!note) return;
+        addBtn.disabled = true;
+        try {
+          const r = await window.AgentShared.apiFetch('/api/follow-up-lead-note-add', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lead_id: leadId, note }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+          input.value = '';
+          refresh();
+        } catch (e) {
+          alert('Opslaan mislukt: ' + (e.message || 'onbekend'));
+        } finally {
+          addBtn.disabled = false;
+        }
+      };
+      refresh();
+    }
+
+    // Filter/refresh listeners voor de leads-tab. Bind eenmalig zodra
+    // DOMContentLoaded — safe want de switch loadt de tab lazy.
+    document.addEventListener('DOMContentLoaded', () => {
+      ['leads-source', 'leads-view', 'leads-status'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', () => loadLeadsTab());
+      });
+      const rf = document.getElementById('leads-refresh');
+      if (rf) rf.addEventListener('click', () => loadLeadsTab());
+    });
 
     // ── PR Z: Event follow-ups tab ───────────────────────────────────────────
     let _eventFollowupsState = { status: 'open' };
