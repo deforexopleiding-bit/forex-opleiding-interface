@@ -250,10 +250,15 @@ export default async function handler(req, res) {
         }
       }
     }
+    // Overdue-map (klant-breed): factuur voorbij due_date + amount_paid < amount_total.
+    // We hangen 'em uit de customer-fetch (breder dan sub-primair) omdat de mentor
+    // achterstand op ELKE openstaande factuur van de klant wil zien.
+    const custOverdueMap = new Map(); // customer_id → { count, amount, invoice_ids Set }
+    const todayISO = new Date().toISOString().slice(0, 10);
     if (customerIds.length) {
       const { data: custInvs, error: custInvErr } = await supabaseAdmin
         .from('invoices')
-        .select('customer_id, amount_paid, status, paid_date')
+        .select('id, customer_id, amount_total, amount_paid, status, paid_date, due_date')
         .in('customer_id', customerIds);
       if (!custInvErr) {
         for (const inv of (custInvs || [])) {
@@ -265,6 +270,20 @@ export default async function handler(req, res) {
           acc.paid_total += Number(inv.amount_paid) || 0;
           if (inv.paid_date && (!acc.last_paid_date || inv.paid_date > acc.last_paid_date)) {
             acc.last_paid_date = inv.paid_date;
+          }
+          // Overdue: due_date < vandaag EN nog niet volledig betaald.
+          const total = Number(inv.amount_total) || 0;
+          const paid  = Number(inv.amount_paid)  || 0;
+          if (inv.due_date && inv.due_date < todayISO && paid < total) {
+            if (!custOverdueMap.has(inv.customer_id)) {
+              custOverdueMap.set(inv.customer_id, { count: 0, amount: 0, ids: new Set() });
+            }
+            const od = custOverdueMap.get(inv.customer_id);
+            if (!od.ids.has(inv.id)) {
+              od.ids.add(inv.id);
+              od.count += 1;
+              od.amount += Math.max(0, total - paid);
+            }
           }
         }
       }
@@ -429,6 +448,13 @@ export default async function handler(req, res) {
       if (nbPaid >= 1) {
         lastPaymentDate = invoice?.paid_date || lastPaidFromInvs || null;
       }
+      // Overdue (betalingsachterstand). Klant-breed omdat de mentor elke
+      // openstaande factuur op de klant wil zien, niet alleen degene die
+      // aan deze sale gekoppeld is.
+      const overdueAcc = r.customer_id ? custOverdueMap.get(r.customer_id) : null;
+      const overdueCount  = overdueAcc?.count  || 0;
+      const overdueAmount = round2(overdueAcc?.amount || 0);
+      const hasOverdue    = overdueCount > 0;
 
       // Groeperen onder event → sale (customer_id).
       const evKey = r.event_id || 'no-event';
@@ -458,6 +484,10 @@ export default async function handler(req, res) {
           paid_term_count    : nbPaid,
           first_invoice_paid : firstInvoicePaid,
           last_payment_date  : lastPaymentDate,
+          // Betalingsachterstand (klant-breed):
+          has_overdue        : hasOverdue,
+          overdue_count      : overdueCount,
+          overdue_amount     : overdueAmount,
           termijnen,
         });
       } else {

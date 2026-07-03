@@ -491,7 +491,7 @@
             <div>${esc(s.event_title || '—')}</div>
             <div style="font-size:11px;color:var(--text-faint)">${fmtDateNL(s.event_starts)}</div>
           </td>
-          <td>${statusBadge(s.status)}</td>
+          <td>${statusBadge(s.status)}${s.has_overdue ? ' <span class="badge badge-red" title="' + Number(s.overdue_count) + ' factu(u)r(en) te laat — €' + Number(s.overdue_amount).toFixed(2) + ' openstaand">Achterstand</span>' : ''}</td>
           <td>
             ${paidCount}/${termCount}
             <div class="progress-bar mini"><div style="width:${pct.toFixed(1)}%"></div></div>
@@ -507,7 +507,27 @@
 
     const pagerHtml = renderPager(start, end, total, pageCount, page);
 
-    wrap.innerHTML =
+    // Betalingsachterstand-teller (unieke klanten over ALLE rijen, niet
+    // alleen de huidige pagina) — zodat de mentor de totale scope ziet.
+    const overdueCustomers = new Set();
+    let overdueSum = 0;
+    for (const s of _bonusRowState.rows) {
+      if (s.has_overdue && s.customer_id) {
+        if (!overdueCustomers.has(s.customer_id)) {
+          overdueCustomers.add(s.customer_id);
+          overdueSum += Number(s.overdue_amount) || 0;
+        }
+      }
+    }
+    const overdueBanner = overdueCustomers.size > 0
+      ? `<div style="margin-bottom:10px;padding:10px 12px;border-radius:8px;background:rgba(220,38,38,0.08);border:1px solid rgba(220,38,38,0.28);color:#b91c1c;font-size:12.5px;font-weight:600">
+           <i class="ti ti-alert-triangle"></i>
+           ${overdueCustomers.size} klant(en) met betalingsachterstand
+           <span style="font-weight:400;color:#a11c1c;margin-left:6px">— €${overdueSum.toFixed(2)} openstaand</span>
+         </div>`
+      : '';
+
+    wrap.innerHTML = overdueBanner +
       '<table class="bonus-table"><thead>' +
       '<tr><th>Klant</th><th>Event</th><th>Status</th><th>Termijnen</th><th>Laatste betaling</th><th>1e factuur</th><th class="num">Bonus (jouw aandeel)</th><th></th></tr>' +
       '</thead><tbody>' + bodyRows + '</tbody></table>' + pagerHtml;
