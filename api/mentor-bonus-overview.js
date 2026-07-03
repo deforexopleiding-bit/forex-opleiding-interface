@@ -200,7 +200,7 @@ export default async function handler(req, res) {
       if (dealIds.length) {
         const { data: subs } = await supabaseAdmin
           .from('subscriptions')
-          .select('id, deal_id, amount, vat_percentage, term_count, start_date, billing_cycle, line_items, status')
+          .select('id, deal_id, amount, vat_percentage, term_count, start_date, billing_cycle, line_items, status, teamleader_subscription_id')
           .in('deal_id', dealIds)
           .order('start_date', { ascending: false });
         // Latest sub per deal wint.
@@ -215,6 +215,59 @@ export default async function handler(req, res) {
         .select('id, amount_total, amount_paid, status, paid_date')
         .in('id', invoiceIds);
       for (const v of invs || []) invoiceById.set(v.id, v);
+    }
+
+    // Aggregeer betaalde bedragen per subscription EN per customer voor
+    // nbPaid-detectie bij historische bonussen (source_invoice_id=NULL).
+    // Primair: subscription (via invoices.tl_subscription_id). Fallback:
+    // customer (breder, matcht ook subscriptions zonder TL-id).
+    const subPaidMap  = new Map(); // teamleader_subscription_id → { paid_total, last_paid_date }
+    const custPaidMap = new Map(); // customer_id                → { paid_total, last_paid_date }
+
+    // Verzamel alle bekende teamleader_subscription_ids uit subByDeal.
+    const tlSubIds = [];
+    for (const s of subByDeal.values()) {
+      if (s?.teamleader_subscription_id) tlSubIds.push(s.teamleader_subscription_id);
+    }
+    const uniqTlSubIds = [...new Set(tlSubIds)];
+
+    if (uniqTlSubIds.length) {
+      const { data: subInvs, error: subInvErr } = await supabaseAdmin
+        .from('invoices')
+        .select('tl_subscription_id, amount_paid, status, paid_date')
+        .in('tl_subscription_id', uniqTlSubIds);
+      if (!subInvErr) {
+        for (const inv of (subInvs || [])) {
+          if (!inv.tl_subscription_id) continue;
+          if (!subPaidMap.has(inv.tl_subscription_id)) {
+            subPaidMap.set(inv.tl_subscription_id, { paid_total: 0, last_paid_date: null });
+          }
+          const acc = subPaidMap.get(inv.tl_subscription_id);
+          acc.paid_total += Number(inv.amount_paid) || 0;
+          if (inv.paid_date && (!acc.last_paid_date || inv.paid_date > acc.last_paid_date)) {
+            acc.last_paid_date = inv.paid_date;
+          }
+        }
+      }
+    }
+    if (customerIds.length) {
+      const { data: custInvs, error: custInvErr } = await supabaseAdmin
+        .from('invoices')
+        .select('customer_id, amount_paid, status, paid_date')
+        .in('customer_id', customerIds);
+      if (!custInvErr) {
+        for (const inv of (custInvs || [])) {
+          if (!inv.customer_id) continue;
+          if (!custPaidMap.has(inv.customer_id)) {
+            custPaidMap.set(inv.customer_id, { paid_total: 0, last_paid_date: null });
+          }
+          const acc = custPaidMap.get(inv.customer_id);
+          acc.paid_total += Number(inv.amount_paid) || 0;
+          if (inv.paid_date && (!acc.last_paid_date || inv.paid_date > acc.last_paid_date)) {
+            acc.last_paid_date = inv.paid_date;
+          }
+        }
+      }
     }
 
     // 3) Per bonus-entry de termijnen projecteren.
@@ -279,15 +332,51 @@ export default async function handler(req, res) {
         perTermMentor = (mentorAmount * perTermInc) / basis;
       }
 
-      // Aantal betaalde termijnen uit invoice.amount_paid.
+      // Aantal betaalde termijnen — twee routes, we nemen het maximum:
+      //
+      //   (A) source_invoice_id-route (bestaand): invoice.amount_paid /
+      //       per_term_incl. Werkt voor normale sales waar de bonus-entry
+      //       een concrete invoice-koppeling heeft.
+      //
+      //   (B) klant/subscription-route (nieuw): totaal betaald bedrag op
+      //       de subscription (invoices.tl_subscription_id) of anders alle
+      //       facturen van de klant. Vangt HISTORISCHE bonussen (van het
+      //       event-tool) op waar source_invoice_id NULL is en de klant
+      //       toch al betaald heeft.
+      //
+      // Zonder schema (schemaUnknown) blijft de fallback: ledger-status
+      // 'uitbetaald' → 1, anders 0. Beide routes doen niks extra bij
+      // schemaUnknown / perTermInc<=0.
       const invoice  = invoiceById.get(r.source_invoice_id) || null;
       const paidAmt  = Number(invoice?.amount_paid) || 0;
+
+      // Route B: totaal betaald op subscription (primair) of customer (fallback).
+      let paidTotalFromInvs = 0;
+      let lastPaidFromInvs  = null;
+      {
+        const subKey  = sub?.teamleader_subscription_id || null;
+        const subAcc  = subKey ? subPaidMap.get(subKey) : null;
+        const custAcc = r.customer_id ? custPaidMap.get(r.customer_id) : null;
+        // Primair: subscription-facturen (als er iets betaald is).
+        // Fallback: customer-facturen — dekt bonussen waar de subscription
+        // geen TL-id heeft (of we alleen customer_id kennen).
+        if (subAcc && subAcc.paid_total > 0) {
+          paidTotalFromInvs = subAcc.paid_total;
+          lastPaidFromInvs  = subAcc.last_paid_date;
+        } else if (custAcc && custAcc.paid_total > 0) {
+          paidTotalFromInvs = custAcc.paid_total;
+          lastPaidFromInvs  = custAcc.last_paid_date;
+        }
+      }
+
       let nbPaid;
       if (schemaUnknown || perTermInc <= 0) {
         // Fallback: gebruik ledger-status — 'uitbetaald'=1, anders 0.
         nbPaid = r.status === 'uitbetaald' ? 1 : 0;
       } else {
-        nbPaid = Math.max(0, Math.min(termCount, Math.floor((paidAmt + 0.005) / perTermInc)));
+        const nbPaidA = Math.max(0, Math.min(termCount, Math.floor((paidAmt            + 0.005) / perTermInc)));
+        const nbPaidB = Math.max(0, Math.min(termCount, Math.floor((paidTotalFromInvs  + 0.005) / perTermInc)));
+        nbPaid = Math.max(nbPaidA, nbPaidB);
       }
 
       // KPI-earned + betaald_uit — schema-unknown entries niet meetellen.
@@ -332,9 +421,14 @@ export default async function handler(req, res) {
       else if (nbPaid >= 1)       saleStatus = 'actief';
       else                        saleStatus = 'wacht_1e_betaling';
 
-      // Extra afgeleide velden voor de UI.
+      // Extra afgeleide velden voor de UI. last_payment_date valt eerst
+      // terug op de source_invoice_id.paid_date; als die er niet is,
+      // pakken we de laatste betaaldatum uit de klant/subscription-route.
       const firstInvoicePaid = nbPaid >= 1;
-      const lastPaymentDate  = (nbPaid >= 1 && invoice?.paid_date) ? invoice.paid_date : null;
+      let lastPaymentDate = null;
+      if (nbPaid >= 1) {
+        lastPaymentDate = invoice?.paid_date || lastPaidFromInvs || null;
+      }
 
       // Groeperen onder event → sale (customer_id).
       const evKey = r.event_id || 'no-event';
