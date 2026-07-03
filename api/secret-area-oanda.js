@@ -1,16 +1,18 @@
 // api/secret-area-oanda.js
 //
-// Blok B / stap 1 — bewijs dat OANDA-candles ophaalbaar zijn. GEEN opslag,
-// GEEN meerdere paren tegelijk, GEEN retention. Alleen: fetch → schone shape.
+// Blok B / stap 2 — verbrede candle-fetch voor de chart-cockpit. Ondersteunt
+// alle liquide majors/crosses (regex ^[A-Z]{3}_[A-Z]{3}$) + XAU_USD (goud),
+// plus alle gangbare timeframes (M1..W). ?includeIncomplete=1 stuurt ook de
+// lopende candle mee zodat de UI hem live kan updaten.
 //
 // Owner-gated (Secret Area). Token blijft server-side; nooit gelogd, nooit
 // in een response geëchoed. SSRF-hygiëne: instrument + granularity worden
 // tegen een strikte allowlist gevalideerd voordat er een URL wordt gebouwd.
 //
 // Query:
-//   instrument         ^[A-Z]{3}_[A-Z]{3}$  (default 'EUR_USD')
-//   granularity        ∈ {'M15','H4'}       (default 'M15')
-//   count              1..500               (default 50)
+//   instrument         ^[A-Z]{3}_[A-Z]{3}$ of XAU_USD  (default 'EUR_USD')
+//   granularity        ∈ {'M1','M5','M15','M30','H1','H4','D','W'}  (default 'M15')
+//   count              1..500                          (default 50)
 //   includeIncomplete  '1' = ook lopende candle meesturen (default: nee)
 //
 // Response 200: { ok:true, instrument, granularity, count, candles:[
@@ -22,11 +24,18 @@
 
 import { requireOwner } from './_lib/secretArea.js';
 
-const INSTRUMENT_RE   = /^[A-Z]{3}_[A-Z]{3}$/;
-const ALLOWED_GRAN    = new Set(['M15', 'H4']);
-const DEFAULT_COUNT   = 50;
-const MAX_COUNT       = 500;
-const FETCH_TIMEOUT_MS = 8000;
+const INSTRUMENT_RE      = /^[A-Z]{3}_[A-Z]{3}$/;
+const EXTRA_INSTRUMENTS  = new Set(['XAU_USD']); // metaal — buiten FX-paar regex
+const ALLOWED_GRAN       = new Set(['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D', 'W']);
+const DEFAULT_COUNT      = 50;
+const MAX_COUNT          = 500;
+const FETCH_TIMEOUT_MS   = 8000;
+
+function isAllowedInstrument(instr) {
+  if (!instr || typeof instr !== 'string') return false;
+  if (EXTRA_INSTRUMENTS.has(instr)) return true;
+  return INSTRUMENT_RE.test(instr);
+}
 
 function baseUrlForEnv(env) {
   const v = String(env || '').trim().toLowerCase();
@@ -60,14 +69,14 @@ export default async function handler(req, res) {
   const instrument = typeof q.instrument === 'string' && q.instrument.trim()
     ? q.instrument.trim().toUpperCase()
     : 'EUR_USD';
-  if (!INSTRUMENT_RE.test(instrument)) {
-    return res.status(400).json({ error: 'instrument moet ^[A-Z]{3}_[A-Z]{3}$ zijn' });
+  if (!isAllowedInstrument(instrument)) {
+    return res.status(400).json({ error: 'instrument niet toegestaan (^[A-Z]{3}_[A-Z]{3}$ of XAU_USD)' });
   }
   const granularity = typeof q.granularity === 'string' && q.granularity.trim()
     ? q.granularity.trim().toUpperCase()
     : 'M15';
   if (!ALLOWED_GRAN.has(granularity)) {
-    return res.status(400).json({ error: 'granularity moet M15 of H4 zijn' });
+    return res.status(400).json({ error: 'granularity moet M1|M5|M15|M30|H1|H4|D|W zijn' });
   }
   let count = Number(q.count);
   if (!Number.isFinite(count) || count <= 0) count = DEFAULT_COUNT;
