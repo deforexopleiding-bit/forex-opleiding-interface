@@ -34,12 +34,20 @@ const THRESHOLDS = {
   DISPLACEMENT_AVG_WINDOW: 20,  // venster voor de gemiddelde range
   DISPLACEMENT_MAX_BARS: 6,     // max lengte van de displacement-leg (M15 bars)
   MSS_MAX_BARS:          8,     // MSS moet binnen zoveel bars na de sweep vallen
-  FIB_OTE:               0.71,  // OTE-retracementniveau
+  FIB_OTE:               0.71,  // OTE/entry-retracementniveau
+  FIB_TP1:              -0.27,  // TP1 = -0.27-extensie voorbij de 0 (impuls-extreme)
   FIB_TOLERANCE:         0.06,  // ± tolerantie als fractie van de leg-range
   FIB_MAX_BARS:          20,    // 0.71-tap moet binnen zoveel bars na MSS vallen
 };
 
+// Simulatie-parameters (backtest_run).
+const SIM = {
+  FILL_WINDOW:   20,   // M15-candles waarin de 0.71-limit gevuld moet worden
+  MAX_HOLD_BARS: 200,  // max houdduur per trade (M15) → daarna time-stop op close
+};
+
 const MAX_CANDIDATES   = 250;   // payload-cap; count meldt het echte totaal
+const MAX_TRADES_OUT   = 400;   // payload-cap voor de trade-lijst (metrics op alles)
 const DEFAULT_FROM_ISO = '2025-01-01T00:00:00Z';
 const DB_PAGE          = 1000;  // PostgREST default page-size
 const ALLOWED_INSTR    = new Set(['EUR_USD']); // deze PR: alleen EUR_USD
@@ -257,25 +265,31 @@ function detectMSS(m15, sweep, disp, pivots, bias, T) {
 }
 
 // ── Bouwsteen: 0.71-OTE-tap ────────────────────────────────────────────────
-// Fib op de impuls-leg: 0 = leg-begin, 1 = leg-eind. OTE-prijs = leg-eind
-// terug-retraced tot 0.71. We zoeken de eerste candle NA de MSS die dat niveau
-// (± tolerantie) raakt.
+// Fib-oriëntatie volgens de gebruikers-conventie: de fib wordt getrokken van
+//   1.0 = de SWING-EXTREME waar de impuls begon (bull: de LOW, = disp.fromPrice)
+//   0.0 = de SWEEP/IMPULS-EXTREME (bull: de HIGH, = disp.toPrice)
+// 0.71 ligt daartussen = de OTE/entry-zone; -0.27 is de EXTENSIE voorbij 0 en
+// dient als TP1. Prijs op fractie x = zero + x·(one − zero), met zero = het
+// 0-niveau (impuls-extreme) en one = het 1.0-niveau (swing-extreme). Zo klopt
+// het voor bull én bear zonder aparte takken.
+//
+// We zoeken de eerste candle NA de MSS die het 0.71-niveau (± tolerantie) raakt.
 function detectFibTap(m15, disp, mss, bias, T) {
-  const legLow = Math.min(disp.fromPrice, disp.toPrice);
-  const legHigh = Math.max(disp.fromPrice, disp.toPrice);
-  const legRange = legHigh - legLow;
+  const zero = disp.toPrice;    // 0.0 = impuls/sweep-extreme (bull: HIGH, bear: LOW)
+  const one  = disp.fromPrice;  // 1.0 = swing-extreme (bull: LOW, bear: HIGH)
+  const legRange = Math.abs(one - zero);
   if (legRange <= 0) return null;
   const tol = T.FIB_TOLERANCE * legRange;
-  const ote = (bias === 'bull')
-    ? legHigh - T.FIB_OTE * legRange   // bull: retrace omlaag naar 0.71
-    : legLow + T.FIB_OTE * legRange;   // bear: retrace omhoog naar 0.71
+  const fibPrice = (x) => zero + x * (one - zero);
+  const ote    = fibPrice(T.FIB_OTE);   // 0.71 = OTE/entry
+  const neg027 = fibPrice(T.FIB_TP1);   // -0.27 = TP1-extensie voorbij 0
   const start = Math.max(mss.index + 1, disp.toIndex + 1);
   const end = Math.min(m15.length - 1, start + T.FIB_MAX_BARS);
   for (let k = start; k <= end; k++) {
     if (m15[k].l <= ote + tol && m15[k].h >= ote - tol) {
       return {
         index: k, ts: m15[k].ts, price: ote,
-        level0Price: disp.fromPrice, level1Price: disp.toPrice, level071Price: ote,
+        level0Price: zero, level1Price: one, level071Price: ote, levelNeg027Price: neg027,
       };
     }
   }
@@ -311,7 +325,12 @@ function scanCandidates(h4, m15, T) {
       displacement: { fromTs: disp.fromTs, toTs: disp.toTs, fromPrice: disp.fromPrice, toPrice: disp.toPrice },
       mss: { ts: mss.ts, brokenLevel: mss.brokenLevel },
       impulse: { startTs: disp.fromTs, startPrice: disp.fromPrice, endTs: disp.toTs, endPrice: disp.toPrice },
-      fib: { level071Price: tap.level071Price, level0Price: tap.level0Price, level1Price: tap.level1Price },
+      fib: {
+        level1Price: tap.level1Price,       // 1.0 = swing-extreme (SL-kant)
+        level071Price: tap.level071Price,   // 0.71 = OTE/entry
+        level0Price: tap.level0Price,       // 0.0 = impuls/sweep-extreme
+        levelNeg027Price: tap.levelNeg027Price, // -0.27 = TP1-extensie
+      },
       entry: { price: tap.price },
       sl: { price: slPrice },
       matched: ['h4_bias', 'sweep', 'displacement', 'mss', 'fib071'],
@@ -320,6 +339,122 @@ function scanCandidates(h4, m15, T) {
     i = tap.index + 1;
   }
   return candidates;
+}
+
+// ── Resultaat-simulatie (backtest_run) ──────────────────────────────────────
+// Simuleert per kandidaat één trade, chronologisch, op de M15-candles ná de
+// setup. Herbruikt exact dezelfde kandidaat-detectie hierboven.
+//
+// EXIT-MODEL (bewust simpel + uitlegbaar):
+//   entry = 0.71 (limit, gevuld op de tap-candle).
+//   SL    = 1.0-niveau = de swing-extreme (invalidatie).
+//   TP    = -0.27-extensie (één volledige take-profit; geen partials/TP2 in
+//           deze stap — dat komt met de H4-protected-level-uitbreiding later).
+//   Vanaf de candle NÁ de fill lopen we vooruit: raakt de prijs eerst SL → LOSS,
+//   eerst TP → WIN. Raakt één candle beide (range omspant SL én TP) → LOSS
+//   (conservatief). Binnen MAX_HOLD_BARS geen van beide → time-stop op de close
+//   (kan kleine WIN/LOSS/BE zijn).
+//
+// POSITIEGROOTTE / RISK: risicobedrag = balance × riskPct/100; size =
+//   risicobedrag / |entry − SL|, zodat verlies bij SL exact het risicobedrag is.
+//   pnl = (exit − entry)·size (long) resp. (entry − exit)·size (short). De
+//   balance compound't: elke trade rekent zijn risk over de op-dat-moment
+//   geldende balance en telt de pnl erbij op.
+//
+// Vereenvoudiging (gedocumenteerd): trades worden op entry-tijd-volgorde
+// achter elkaar geboekt; overlappende open trades worden niet als gelijktijdig
+// kapitaal gemodelleerd. Wisselkoers-/lot-conversie wordt genegeerd (pnl in
+// account-eenheden = prijsafstand × size).
+function simulateTrades(m15, candidates, startBalance, riskPct) {
+  const idxByTs = new Map();
+  for (let i = 0; i < m15.length; i++) idxByTs.set(m15[i].ts, i);
+
+  let balance = startBalance;
+  let peak = startBalance, maxDD = 0;
+  let wins = 0, losses = 0, be = 0, nofill = 0;
+  let rSum = 0, rCount = 0, biggestWin = 0, biggestLoss = 0;
+  const trades = [];
+
+  for (const c of candidates) {
+    const fillIdx = idxByTs.get(c.ts);
+    const entry = Number(c.entry?.price);
+    const sl    = Number(c.sl?.price);
+    const tp    = Number(c.fib?.levelNeg027Price);
+    const isLong = c.direction === 'long';
+
+    // No-fill / ongeldig: registreer maar boek geen pnl. (In de praktijk ~0
+    // zolang de detectie de 0.71-tap al vereist; het pad bestaat voor wanneer
+    // we detectie en fill loskoppelen.)
+    if (fillIdx == null || ![entry, sl, tp].every(Number.isFinite) || entry === sl) {
+      nofill++;
+      trades.push({ ts: c.ts, direction: c.direction, entry, sl, tp, exit: null, r_multiple: null, pnl: 0, balance: Number(balance.toFixed(2)), outcome: 'NO-FILL', draw: c });
+      continue;
+    }
+
+    const R = Math.abs(entry - sl);
+    const riskAmount = balance * (riskPct / 100);
+    const size = riskAmount / R;
+
+    // Exit-scan vanaf de candle ná de fill.
+    let exitPrice = null, outcome = null;
+    const end = Math.min(m15.length - 1, fillIdx + SIM.MAX_HOLD_BARS);
+    for (let k = fillIdx + 1; k <= end; k++) {
+      const bar = m15[k];
+      const hitSL = isLong ? bar.l <= sl : bar.h >= sl;
+      const hitTP = isLong ? bar.h >= tp : bar.l <= tp;
+      if (hitSL) { exitPrice = sl; outcome = 'LOSS'; break; }   // SL-first bij ambiguïteit
+      if (hitTP) { exitPrice = tp; outcome = 'WIN'; break; }
+    }
+    if (exitPrice == null) { exitPrice = m15[end].c; outcome = 'TIME'; }
+
+    const pnl = (isLong ? (exitPrice - entry) : (entry - exitPrice)) * size;
+    const r = riskAmount ? pnl / riskAmount : 0;
+    balance += pnl;
+    if (balance > peak) peak = balance;
+    const dd = peak > 0 ? (peak - balance) / peak * 100 : 0;
+    if (dd > maxDD) maxDD = dd;
+
+    // Time-stop naar WIN/LOSS/BE herclassificeren op basis van r.
+    if (outcome === 'TIME') {
+      if (r > 0.05) { outcome = 'WIN'; wins++; }
+      else if (r < -0.05) { outcome = 'LOSS'; losses++; }
+      else { outcome = 'BE'; be++; }
+    } else if (outcome === 'WIN') wins++;
+    else if (outcome === 'LOSS') losses++;
+
+    rSum += r; rCount++;
+    if (pnl > biggestWin) biggestWin = pnl;
+    if (pnl < biggestLoss) biggestLoss = pnl;
+
+    trades.push({
+      ts: c.ts, direction: c.direction, entry, sl, tp,
+      exit: Number(exitPrice.toFixed(6)),
+      r_multiple: Number(r.toFixed(3)),
+      pnl: Number(pnl.toFixed(2)),
+      balance: Number(balance.toFixed(2)),
+      outcome,
+      draw: c,
+    });
+  }
+
+  const filled = wins + losses + be;
+  const winrate = filled ? (wins / filled * 100) : 0;
+  const avgRR = rCount ? (rSum / rCount) : 0;
+
+  return {
+    startBalance: Number(startBalance.toFixed(2)),
+    endBalance: Number(balance.toFixed(2)),
+    totaalRendementPct: Number(((balance - startBalance) / startBalance * 100).toFixed(2)),
+    aantalTrades: filled,
+    wins, losses, be, nofill,
+    winrate: Number(winrate.toFixed(1)),
+    avgRR: Number(avgRR.toFixed(2)),
+    grootsteWinst: Number(biggestWin.toFixed(2)),
+    grootsteVerlies: Number(biggestLoss.toFixed(2)),
+    maxDrawdownPct: Number(maxDD.toFixed(2)),
+    tradesTotal: trades.length,
+    trades: trades.slice(0, MAX_TRADES_OUT),
+  };
 }
 
 export default async function handler(req, res) {
@@ -374,6 +509,27 @@ export default async function handler(req, res) {
         returned: returned.length,
         capped: all.length > returned.length,
         candidates: returned,
+      });
+    }
+
+    if (action === 'backtest_run') {
+      let startBalance = Number(params.startBalance);
+      if (!Number.isFinite(startBalance) || startBalance <= 0) startBalance = 10000;
+      let riskPct = Number(params.riskPct);
+      if (!Number.isFinite(riskPct) || riskPct <= 0 || riskPct > 100) riskPct = 1;
+
+      const [h4, m15] = await Promise.all([
+        fetchCandles(instrument, 'H4', fromISO, toISO),
+        fetchCandles(instrument, 'M15', fromISO, toISO),
+      ]);
+      const candidates = scanCandidates(h4, m15, THRESHOLDS);
+      const result = simulateTrades(m15, candidates, startBalance, riskPct);
+      return res.status(200).json({
+        ok: true,
+        instrument,
+        period: { from: fromISO, to: toISO, h4_candles: h4.length, m15_candles: m15.length },
+        riskPct,
+        ...result,
       });
     }
 
