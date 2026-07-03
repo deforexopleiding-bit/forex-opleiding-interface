@@ -1301,6 +1301,10 @@
     <!-- Leads-tab panel (retentie/event-leads uit follow_up_leads) -->
     <div class="fu-tab-panel" data-panel="leads" id="panel-leads">
       <div id="leads-summary" class="fu-lead-kpigrid"></div>
+      <!-- Dagoverzicht bovenaan: het eerste wat je ziet is wat vandaag moet
+           gebeuren. Filters staan pas na de urgente secties. -->
+      <div id="leads-section-vandaag"></div>
+      <div id="leads-section-telaat"></div>
       <div class="fu-lead-filterbar">
         <label>Bron
           <select id="leads-source">
@@ -1330,8 +1334,6 @@
         </label>
         <button class="fu-lead-btn" id="leads-refresh"><i class="ti ti-refresh"></i> Vernieuwen</button>
       </div>
-      <div id="leads-section-vandaag"></div>
-      <div id="leads-section-telaat"></div>
       <section class="fu-section" id="leads-main-section">
         <div class="fu-section-header">
           <h2 class="fu-section-title">Alle leads</h2>

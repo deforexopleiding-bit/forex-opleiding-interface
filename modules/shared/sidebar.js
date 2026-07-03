@@ -118,7 +118,10 @@
           navLink('agent-center', '/modules/agent-center.html', 'Agent center') +
           navLink('meetings', '/modules/meetings.html', 'Vergaderruimte') +
           navLink('control-center', '/modules/control-center.html', 'Control Center') +
-          navLink('follow-up', '/modules/follow-up.html', 'Follow-up') +
+          '<a class="nav-item" data-module="follow-up" href="/modules/follow-up.html">' +
+            svg('follow-up') + 'Follow-up' +
+            '<span class="nav-badge" id="navFollowupBadge" title="Follow-up leads"></span>' +
+          '</a>' +
           navLink('sales', '/modules/sales.html', 'Sales') +
           navLink('events', '/modules/events.html', 'Events') +
           // PR-A — mentor-grootboek is verhuisd naar Events → Mentor-grootboek-tab.
@@ -286,6 +289,39 @@
     } catch (e) {
       console.warn('[sidebar.applyDashboardRouting]', e && e.message ? e.message : e);
       /* fail-open: laat default dashboard-link staan */
+    }
+  }
+
+  // Follow-up leads-badge (Fase B): telt vandaag + te_laat leads uit
+  // follow_up_leads. Rood accent bij te_laat > 0; anders neutraal.
+  // Tooltip: "X te laat · Y vandaag". Silent fail (geen badge bij fout of
+  // 403 voor rollen zonder follow-up-toegang). Zelfde polling-cadans als
+  // de andere nav-badges (via updateTakenBadge in de init).
+  async function updateFollowupBadge() {
+    var b = document.getElementById('navFollowupBadge');
+    if (!b) return;
+    try {
+      if (!window.AgentShared || typeof window.AgentShared.apiFetch !== 'function') return;
+      var res = await window.AgentShared.apiFetch('/api/follow-up-leads-badge');
+      if (!res.ok) { b.classList.remove('show'); b.classList.remove('urgent'); return; }
+      var data = await res.json();
+      var teLaat = Number(data.te_laat)  || 0;
+      var vandaag = Number(data.vandaag) || 0;
+      var total = teLaat + vandaag;
+      if (total > 0) {
+        b.textContent = String(total);
+        b.classList.add('show');
+        b.setAttribute('title', teLaat + ' te laat · ' + vandaag + ' vandaag');
+        if (teLaat > 0) b.classList.add('urgent'); else b.classList.remove('urgent');
+      } else {
+        b.textContent = '';
+        b.classList.remove('show');
+        b.classList.remove('urgent');
+        b.setAttribute('title', 'Follow-up leads');
+      }
+    } catch (e) {
+      b.classList.remove('show');
+      b.classList.remove('urgent');
     }
   }
 
@@ -1396,6 +1432,7 @@
     highlightActive();
     updateTakenBadge();
     updateTicketsBadge();
+    updateFollowupBadge();
     wireApprovalsBadgeClick();
     wireFinanceTasksBadgeClick();
     updateApprovalsBadge();
