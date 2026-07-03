@@ -99,21 +99,69 @@ let confirmKind = 'subs'; // welk type wordt bevestigd
 
 async function runImport() {
   const dry = document.getElementById('cfgDry').checked;
-  const payload = {
+  const basePayload = {
     dry_run: dry,
     department_id: document.getElementById('cfgEntity').value || null,
     limit: Number(document.getElementById('cfgLimit').value) || 5,
     skip_existing: document.getElementById('cfgSkip').checked,
   };
-  const btn = document.getElementById('startBtn'); btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
+  const btn = document.getElementById('startBtn'); btn.disabled = true;
   document.getElementById('cfgErr').textContent = '';
+
+  // Auto-batch: doorlopend batches ophalen tot has_more=false. Server-side
+  // offset-cursor drijft de loop; dry_run + skip_existing blijven zoals in de
+  // UI ingesteld. Idempotent op teamleader_subscription_id — het is safe om
+  // opnieuw te draaien als een batch faalt.
+  let offset = 0;
+  let batchIdx = 0;
+  let totalProcessed = 0;
+  const mergedStatusCounts = {};
+  const merged = {
+    dry_run: dry,
+    totals: {
+      subs_processed: 0, subs_imported: 0, subs_updated: 0, subs_skipped: 0,
+      customers_imported: 0, customers_updated: 0, errors: 0,
+    },
+    details: [],
+    has_more: false,
+    next_offset: 0,
+  };
+
+  const setBusy = (msg) => { btn.innerHTML = '<i class="ti ti-loader"></i> ' + esc(msg); };
+
   try {
-    const res = await window.AgentShared.apiFetch('/api/admin/tl-import-subscriptions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    const d = await readJsonOrThrow(res);
-    if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
-    history.unshift({ at: new Date(), kind: 'subs', dry: d.dry_run, totals: d.totals });
-    lastDetails = d.details || [];
-    renderResult(d); renderHistory();
+    for (;;) {
+      batchIdx++;
+      setBusy(`Batch ${batchIdx} · verwerkt ${totalProcessed}…`);
+      const payload = { ...basePayload, offset };
+      const res = await window.AgentShared.apiFetch('/api/admin/tl-import-subscriptions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body:   JSON.stringify(payload),
+      });
+      const d = await readJsonOrThrow(res);
+      if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
+
+      // Merge totalen + details.
+      const t = d.totals || {};
+      for (const k of Object.keys(merged.totals)) merged.totals[k] += Number(t[k] || 0);
+      // tl_status_counts merge over batches.
+      const bc = t.tl_status_counts || {};
+      for (const k of Object.keys(bc)) mergedStatusCounts[k] = (mergedStatusCounts[k] || 0) + Number(bc[k] || 0);
+      if (Array.isArray(d.details) && d.details.length) merged.details.push(...d.details);
+      merged.has_more    = !!d.has_more;
+      merged.next_offset = Number(d.next_offset) || (offset + basePayload.limit);
+      totalProcessed = merged.totals.subs_processed;
+
+      // Stop-condities.
+      if (!merged.has_more) break;
+      if (merged.next_offset <= offset) break;
+      offset = merged.next_offset;
+    }
+
+    merged.totals.tl_status_counts = mergedStatusCounts;
+    history.unshift({ at: new Date(), kind: 'subs', dry: merged.dry_run, totals: merged.totals });
+    lastDetails = merged.details;
+    renderResult(merged); renderHistory();
   } catch (e) { document.getElementById('cfgErr').textContent = e.message; }
   btn.disabled = false; btn.innerHTML = '<i class="ti ti-download"></i> Start import';
 }

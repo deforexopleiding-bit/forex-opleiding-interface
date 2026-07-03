@@ -103,8 +103,13 @@ export default async function handler(req, res) {
 
   // 3 TL-calls/sub (list-batch + subscriptions.info + contacts.info) à 200ms throttle
   // → ~60s bij ~80 subs. Default 80 (Vercel 60s-limit); idempotent → draai meerdere runs.
-  const { dry_run = true, department_id = null, limit = 80, skip_existing = true } = req.body || {};
-  const maxSubs = Math.min(Number(limit) || 80, 500);
+  // offset (default 0) laat de UI door de volledige TL-lijst batchen tot has_more=false.
+  const { dry_run = true, department_id = null, limit = 80, skip_existing = true, offset = 0 } = req.body || {};
+  const maxSubs   = Math.max(1, Number(limit) || 80);
+  const startAt   = Math.max(0, Number(offset) || 0);
+  // Harde cap op de TL-list-fetch zodat de function niet unbounded gaat pagineren.
+  // 5000 dekt de complete TL-set met marge; UI batcht per limit-window.
+  const FETCH_CAP = 5000;
 
   const tok = await getActiveToken();
   if (!tok) return res.status(400).json({ error: 'Geen actief Teamleader-token' });
@@ -124,7 +129,14 @@ export default async function handler(req, res) {
     //    praktijk alleen active op, dus we laten het filter weg en tellen zelf
     //    per-status (zie tl_status_counts) om zichtbaar te maken wat TL geeft.
     const tlSubs = [];
-    for (let page = 1; tlSubs.length < maxSubs; page++) {
+    // Pagineer tot minstens (offset + maxSubs) beschikbaar is, of tot TL leeg
+    // is. Cap FETCH_CAP als backstop tegen unbounded loops. TL-list is cheap
+    // (100/pagina), dus wat we ophalen boven maxSubs sturen we niet mee naar
+    // de zware .info-flow — we hebben ze alleen nodig om has_more/next_offset
+    // eerlijk terug te geven.
+    const needAtLeast = Math.min(FETCH_CAP, startAt + maxSubs + 1);
+    let listExhausted = false;
+    for (let page = 1; tlSubs.length < needAtLeast && tlSubs.length < FETCH_CAP; page++) {
       const filter = {};
       if (department_id) filter.department_id = department_id;
       const listBody = { page: { size: 100, number: page } };
@@ -134,9 +146,10 @@ export default async function handler(req, res) {
       const data = await r.json();
       const batch = data.data || [];
       tlSubs.push(...batch);
-      if (batch.length < 100) break; // laatste pagina
+      if (batch.length < 100) { listExhausted = true; break; }
     }
-    const work = tlSubs.slice(0, maxSubs);
+    // Window over de opgehaalde set: skip offset, neem maxSubs verder.
+    const work = tlSubs.slice(startAt, startAt + maxSubs);
 
     // Diagnose: tel welke ruwe TL-statussen we ontvangen (over ALLE opgehaalde
     // subs, niet alleen imported/updated). In dry-run zien we zo direct of TL
@@ -351,7 +364,21 @@ export default async function handler(req, res) {
       });
     } catch (e) { console.error('[tl-import] audit:', e.message); }
 
-    return res.status(200).json({ dry_run, totals, details });
+    // Voortgang voor auto-batch: has_more = er zijn nog niet-verwerkte subs
+    // (in de opgehaalde set OF TL had nog niet-opgevraagde pagina's).
+    const consumed   = startAt + work.length;
+    const has_more   = (tlSubs.length > consumed) || (!listExhausted && tlSubs.length >= FETCH_CAP);
+    const next_offset = consumed;
+    return res.status(200).json({
+      dry_run, totals, details,
+      offset       : startAt,
+      limit        : maxSubs,
+      fetched_count: tlSubs.length,
+      processed_count: work.length,
+      has_more,
+      next_offset,
+      list_exhausted: listExhausted,
+    });
   } catch (e) {
     console.error('[tl-import]', e.message);
     return res.status(500).json({ error: e.message, totals, details });
