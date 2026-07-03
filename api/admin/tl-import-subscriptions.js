@@ -118,10 +118,13 @@ export default async function handler(req, res) {
     const { data: prods } = await supabaseAdmin.from('products').select('id, tl_product_id');
     const prodByTl = {}; for (const p of prods || []) if (p.tl_product_id) prodByTl[p.tl_product_id] = p.id;
 
-    // 1. Paginate TL subscriptions.list (status=active).
+    // 1. Paginate TL subscriptions.list — actieve EN beëindigde/gedeactiveerde
+    //    subs, zodat de retentie-lijst ook historische churn ziet (afgelopen
+    //    abo's van eerdere maanden). TL v2 kent enum {'active','deactivated'};
+    //    beide expliciet meegeven zodat niks wordt weggefilterd.
     const tlSubs = [];
     for (let page = 1; tlSubs.length < maxSubs; page++) {
-      const filter = { status: ['active'] };
+      const filter = { status: ['active', 'deactivated'] };
       if (department_id) filter.department_id = department_id;
       const r = await tlCall('/subscriptions.list', { filter, page: { size: 100, number: page } });
       if (!r.ok) { const txt = await r.text().catch(() => ''); return res.status(502).json({ error: `TL subscriptions.list HTTP ${r.status}: ${txt.slice(0, 200)}`, totals }); }
@@ -267,6 +270,15 @@ export default async function handler(req, res) {
         // Eénmalig de ruwe grouped_lines-structuur loggen (verificatie veldnamen).
         if (!globalThis.__tlImportLoggedShape) { globalThis.__tlImportLoggedShape = true; detail.debug.raw_grouped_lines = full.grouped_lines; console.log('[tl-import] sample grouped_lines', JSON.stringify(full.grouped_lines)); }
         console.log('[tl-import] sub', sub.id, JSON.stringify({ ...detail.debug, raw_grouped_lines: undefined }));
+        // TL-status → lokale status. TL v2 gebruikt 'active' / 'deactivated'.
+        // 'deactivated' (of andere niet-actieve status) mapt naar onze
+        // 'cancelled' zodat de retentie-flow (die op status='active' filtert)
+        // de sub NIET meer als lopend meetelt. end_date komt uit TL's ends_on.
+        const tlStatus  = String(full.status || sub.status || 'active').toLowerCase();
+        const localStat = tlStatus === 'active' ? 'active' : 'cancelled';
+        detail.tl_status    = tlStatus;
+        detail.local_status = localStat;
+
         if (!dry_run) {
           const dept = full.department_id || sub.department_id || department_id || null;
           const starts = full.starts_on || sub.starts_on;
@@ -278,7 +290,7 @@ export default async function handler(req, res) {
           if (gdErr) throw new Error('ghost-deal insert: ' + gdErr.message);
           const { error: subErr } = await supabaseAdmin.from('subscriptions').insert({
             deal_id: gd.id, teamleader_subscription_id: sub.id, description: full.title || sub.title || 'Geïmporteerd uit TL',
-            status: 'active', start_date: starts || null, end_date: full.ends_on || sub.ends_on || null,
+            status: localStat, start_date: starts || null, end_date: full.ends_on || sub.ends_on || null,
             term_count: termCount, amount: totalExcl, vat_percentage: liRows[0]?.vat_percentage ?? 21,
             billing_cycle: billing, line_items: liRows, tl_department_id: dept,
             imported_from_tl_at: new Date().toISOString(),
