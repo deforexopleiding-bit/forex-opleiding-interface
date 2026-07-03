@@ -558,11 +558,12 @@ async function runCommit() {
     if (Array.isArray(s.warnings) && s.warnings.length) {
       out += '<div class="msg warn" style="margin-top:6px">' + s.warnings.map((w) => esc(w)).join('<br>') + '</div>';
     }
-    if (d.release?.deals?.length) {
-      const totalReleased = d.release.deals.reduce((n, r) => n + (Number(r.released) || 0), 0);
-      const withPaid      = d.release.deals.filter((r) => (Number(r.paid_invoices) || 0) > 0).length;
+    if (d.release?.customers?.length) {
+      const totalChildren = d.release.customers.reduce((n, r) => n + (Number(r.released_children) || 0), 0);
+      const totalReleased = d.release.customers.reduce((n, r) => n + (Number(r.total_released) || 0), 0);
+      const withRelease   = d.release.customers.filter((r) => (Number(r.released_children) || 0) > 0).length;
       out += `<div class="msg" style="background:var(--bg-elev);border:1px solid var(--border);margin-top:6px;color:var(--text-dim)">
-        <b>Vrijgave (1e factuur betaald):</b> ${withPaid} deal(s) met betaalde factuur · ${totalReleased} ledger-vrijgave(s).
+        <b>Proportionele vrijgave:</b> ${withRelease} klant(en) met release · ${totalChildren} slice(s) · totaal ${esc(eur(totalReleased))}.
       </div>`;
     }
     msg.innerHTML = out;

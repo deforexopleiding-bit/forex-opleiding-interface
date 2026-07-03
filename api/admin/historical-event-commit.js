@@ -15,7 +15,7 @@
 
 import { verifyAdmin, supabaseAdmin } from '../supabase.js';
 import { runEventsCompleteCore } from '../_lib/events-complete-core.js';
-import { releaseProportionalForPayment } from '../_lib/mentor-ledger-engine.js';
+import { releaseProportionalForPaidInvoices } from '../_lib/mentor-ledger-engine.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -149,84 +149,38 @@ export default async function handler(req, res) {
       }
     }
 
-    // ── 4. "1e factuur betaald"-regel: releaseProportionalForPayment ────────
-    //    Per aanwezige attendee met deal + customer: alle betaalde facturen
-    //    ophalen, per factuur alle payments ophalen, per payment de
-    //    proportionele slice vrijgeven. Fail-soft per deal — één deal-error
-    //    blokkeert de overige niet.
+    // ── 4. Proportionele bonus-release o.b.v. betaalde facturen ─────────────
+    //    Historische deals hebben zelden payment-records; alleen betaalde
+    //    facturen (amount_paid). releaseProportionalForPaidInvoices gebruikt
+    //    dezelfde matchlogica als mentor-bonus-overview (subscription →
+    //    invoices.tl_subscription_id, fallback customer) en spawnt
+    //    proportionele children op de pending parents. Idempotent op
+    //    (parent_id, alloc_paid_cents). Fail-soft per klant.
     const releaseReport = [];
     const { data: attendeesFull } = await supabaseAdmin
       .from('event_attendees')
-      .select('id, customer_id, deal_id, status')
+      .select('customer_id, status')
       .eq('event_id', eventId)
       .eq('status', 'aanwezig');
 
-    for (const a of (attendeesFull || [])) {
-      if (!a.customer_id) continue;
-      try {
-        // Zoek betaalde facturen. Primair filter op deal_id (nieuwer schema);
-        // fallback op customer_id als deal_id op de invoice NULL is.
-        let invoicesQuery = supabaseAdmin
-          .from('invoices')
-          .select('id, deal_id, customer_id, status, amount_total, amount_paid')
-          .eq('customer_id', a.customer_id)
-          .eq('status', 'paid');
-        if (a.deal_id) invoicesQuery = invoicesQuery.eq('deal_id', a.deal_id);
-        const { data: invs, error: invErr } = await invoicesQuery;
-        if (invErr) {
-          releaseReport.push({ attendee_id: a.id, deal_id: a.deal_id, ok: false, error: invErr.message });
-          continue;
-        }
-        if (!invs || invs.length === 0) {
-          releaseReport.push({ attendee_id: a.id, deal_id: a.deal_id, ok: true, paid_invoices: 0, released: 0 });
-          continue;
-        }
+    const uniqCustomerIds = [...new Set((attendeesFull || [])
+      .map((a) => a.customer_id).filter(Boolean))];
 
-        let totalReleased = 0;
-        for (const inv of invs) {
-          const invTotal = Number(inv.amount_total) || 0;
-          if (invTotal <= 0) continue;
-          const { data: pays, error: payErr } = await supabaseAdmin
-            .from('payments')
-            .select('id, amount, payment_date')
-            .eq('invoice_id', inv.id)
-            .order('payment_date', { ascending: true });
-          if (payErr) {
-            releaseReport.push({ attendee_id: a.id, deal_id: a.deal_id, invoice_id: inv.id, ok: false, error: payErr.message });
-            continue;
-          }
-          const payments = pays || [];
-          // fullyPaid: laatste payment triggert settle-childs voor evt. rest.
-          for (let i = 0; i < payments.length; i++) {
-            const p = payments[i];
-            const isLast   = i === payments.length - 1;
-            const payAmt   = Number(p.amount) || 0;
-            if (payAmt <= 0) continue;
-            try {
-              const r = await releaseProportionalForPayment({
-                customerId     : a.customer_id,
-                sourceInvoiceId: inv.id,
-                paymentId      : p.id,
-                paymentAmount  : payAmt,
-                invoiceTotal   : invTotal,
-                fullyPaid      : isLast, // status='paid' → laatste is final
-              });
-              totalReleased += Number(r?.released || 0);
-            } catch (e) {
-              releaseReport.push({ attendee_id: a.id, invoice_id: inv.id, payment_id: p.id, ok: false, error: e?.message || 'unknown' });
-            }
-          }
-        }
+    for (const cid of uniqCustomerIds) {
+      try {
+        const r = await releaseProportionalForPaidInvoices({ customerId: cid, dryRun: false });
         releaseReport.push({
-          attendee_id  : a.id,
-          deal_id      : a.deal_id,
-          ok           : true,
-          paid_invoices: invs.length,
-          released     : totalReleased,
+          customer_id      : cid,
+          ok               : true,
+          paid_total       : r.paid_total,
+          last_paid_date   : r.last_paid_date,
+          parents_touched  : r.parents_touched,
+          released_children: r.released_children,
+          total_released   : r.total_released,
         });
       } catch (e) {
-        console.error('[historical-event-commit] release-loop', a.id, e?.message || e);
-        releaseReport.push({ attendee_id: a.id, deal_id: a.deal_id, ok: false, error: e?.message || 'unknown' });
+        console.error('[historical-event-commit] release', cid, e?.message || e);
+        releaseReport.push({ customer_id: cid, ok: false, error: e?.message || 'unknown' });
       }
     }
 
@@ -235,7 +189,7 @@ export default async function handler(req, res) {
       event_id     : eventId,
       completed_at : coreResult.response.completed_at,
       summary      : coreSummary,
-      release      : { deals: releaseReport },
+      release      : { customers: releaseReport },
     });
   } catch (e) {
     console.error('[admin/historical-event-commit]', e?.message || e);
