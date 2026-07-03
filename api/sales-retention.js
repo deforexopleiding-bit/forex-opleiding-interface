@@ -90,8 +90,9 @@ export default async function handler(req, res) {
       const deal = dealById[s.deal_id];
       if (!deal?.customer_id) continue; // deal weggefilterd door owned_by_me of archived
       const cid = deal.customer_id;
-      const g = (byCust[cid] ||= { customer_id: cid, subs: [], maxEnd: null, maxDeal: null, lastStatus: null });
+      const g = (byCust[cid] ||= { customer_id: cid, subs: [], maxEnd: null, maxDeal: null, lastStatus: null, activeCount: 0 });
       g.subs.push({ description: s.description || '—', start_date: s.start_date, end_date: s.end_date, status: s.status });
+      if (s.status === 'active') g.activeCount++;
       if (!g.maxEnd || s.end_date > g.maxEnd) {
         g.maxEnd = s.end_date; g.maxDeal = deal; g.lastStatus = s.status;
       }
@@ -107,7 +108,13 @@ export default async function handler(req, res) {
     //   (verlengd = uit de lijst).
     const WINDOW_FROM = '2026-01-01';
     const horizonIso  = new Date(horizon).toISOString().slice(0, 10);
+    // Retentie-regel: een klant met ≥1 actief abonnement is niet gechurnd →
+    // uitsluiten, ongeacht een eventuele latere cancelled sub. Alleen
+    // klanten zonder active sub én met maxEnd (over de cancelled subs) in
+    // het window komen door. last_sub_status van de resterende groepen is
+    // per definitie 'cancelled'.
     const groups = Object.values(byCust).filter((g) =>
+      g.activeCount === 0 &&
       g.maxEnd && g.maxEnd >= WINDOW_FROM && g.maxEnd <= horizonIso
     );
     if (!groups.length) return res.status(200).json({ items: [] });
