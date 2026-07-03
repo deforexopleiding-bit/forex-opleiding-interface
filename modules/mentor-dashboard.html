@@ -1600,6 +1600,13 @@
     // Pre-launch gate: vóór 1 juli 2026 geen reminder tonen.
     if (Date.now() < ASSESS_ACTIVE_FROM.getTime()) return;
 
+    // Alleen tonen in de LAATSTE 7 DAGEN van de maand. Anders geen ruis
+    // aan het begin/midden van de maand ("0 van 38" op de 3e).
+    const _now = new Date();
+    const _lastDay = new Date(_now.getFullYear(), _now.getMonth() + 1, 0).getDate();
+    const daysUntilMonthEnd = _lastDay - _now.getDate();
+    if (daysUntilMonthEnd > 7) return;
+
     const list = Array.isArray(studentsList)
       ? studentsList
       : (Array.isArray(_lastStudentsList) ? _lastStudentsList : null);
