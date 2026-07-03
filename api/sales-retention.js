@@ -23,7 +23,10 @@ export default async function handler(req, res) {
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
   if (!(await requirePermission(req, 'sales.customer.view'))) return res.status(403).json({ error: 'Geen rechten' });
 
-  const ownedByMe = req.query?.owned_by_me === 'true';
+  const ownedByMe    = req.query?.owned_by_me === 'true';
+  // include_marked=0 verbergt reeds als 'Niet-verlengen' gemarkeerde klanten.
+  // Default (afwezig of !=0): tonen mét badge.
+  const includeMarked = String(req.query?.include_marked || '') !== '0';
 
   try {
     // 1) Actieve subs eerst (klein) — status='active' + end_date-scope.
@@ -75,23 +78,39 @@ export default async function handler(req, res) {
 
     const now = Date.now();
     const horizon = now + 30 * 86400000;
-    // Alleen klanten waarvan de LAATSTE actieve sub <= 30 dagen weg is (incl. reeds
-    // verlopen, voor de 'Verlopen'-pill). Klant met latere sub valt hier vanzelf weg.
-    const groups = Object.values(byCust).filter((g) => g.maxEnd && new Date(g.maxEnd).getTime() <= horizon);
+    // Retentie-window: alles met maxEnd vanaf 2026-01-01 (geen bovengrens).
+    // Voorheen `maxEnd <= now + 30d`; nu breed genoeg om de hele lijst voor
+    // 2026 door te werken. Sales-workflow: sorteren op end_date asc.
+    const WINDOW_FROM = '2026-01-01';
+    const groups = Object.values(byCust).filter((g) => g.maxEnd && g.maxEnd >= WINDOW_FROM);
     if (!groups.length) return res.status(200).json({ items: [] });
 
     // 4) Joins: klant + entiteit + mentor + traject.
     const custIds = [...new Set(groups.map((g) => g.customer_id))];
     const custById = {};
+    // Retention-vlag kolommen zijn optioneel — als de migratie nog niet
+    // gedraaid heeft (42703), val terug op de core-select zonder de velden.
+    let retentionColsAvailable = true;
     if (custIds.length) {
       const { data, error } = await supabaseAdmin.from('customers')
-        .select('id, is_company, company_name, first_name, last_name, email, mentor_user_id')
+        .select('id, is_company, company_name, first_name, last_name, email, mentor_user_id, retention_not_renewing, retention_marked_at, retention_marked_by')
         .in('id', custIds);
-      if (error) {
+      if (error && error.code === '42703') {
+        retentionColsAvailable = false;
+        const { data: data2, error: err2 } = await supabaseAdmin.from('customers')
+          .select('id, is_company, company_name, first_name, last_name, email, mentor_user_id')
+          .in('id', custIds);
+        if (err2) {
+          console.error('[sales-retention] customers fetch (fallback):', err2.message);
+          return res.status(500).json({ error: 'customers fetch: ' + err2.message });
+        }
+        for (const c of (data2 || [])) custById[c.id] = c;
+      } else if (error) {
         console.error('[sales-retention] customers fetch:', error.message);
         return res.status(500).json({ error: 'customers fetch: ' + error.message });
+      } else {
+        for (const c of (data || [])) custById[c.id] = c;
       }
-      for (const c of (data || [])) custById[c.id] = c;
     }
     const deptIds = [...new Set(groups.map((g) => g.maxDeal?.tl_department_id).filter(Boolean))];
     const entByTl = {};
@@ -138,7 +157,7 @@ export default async function handler(req, res) {
       for (const p of (data || [])) mentorById[p.id] = p.full_name;
     }
 
-    const items = groups.map((g) => {
+    let items = groups.map((g) => {
       const c    = custById[g.customer_id] || {};
       const dept = g.maxDeal?.tl_department_id || null;
       const vId  = g.maxDeal?.traject_variant_id || null;
@@ -153,10 +172,22 @@ export default async function handler(req, res) {
         days_left: Math.ceil((new Date(g.maxEnd).getTime() - now) / 86400000),
         active_subs_count: g.subs.length,
         subs: g.subs.sort((a, b) => String(a.end_date).localeCompare(String(b.end_date))),
+        // Handmatige 'Niet-verlengen'-markering (fail-soft: false/null als
+        // kolommen ontbreken in dit schema).
+        retention_not_renewing: c.retention_not_renewing === true,
+        retention_marked_at   : c.retention_marked_at || null,
+        retention_marked_by   : c.retention_marked_by || null,
       };
-    }).sort((a, b) => a.days_left - b.days_left);
+    });
+    // Optioneel: verberg reeds-gemarkeerde klanten.
+    if (!includeMarked) items = items.filter((i) => !i.retention_not_renewing);
+    // Sortering: end_date ascending (soonest eerst).
+    items.sort((a, b) => String(a.end_date || '').localeCompare(String(b.end_date || '')));
 
-    return res.status(200).json({ items });
+    return res.status(200).json({
+      items,
+      retention_columns_available: retentionColsAvailable,
+    });
   } catch (e) {
     console.error('[sales-retention]', e.message);
     return res.status(500).json({ error: e.message });

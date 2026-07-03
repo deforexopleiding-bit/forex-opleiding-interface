@@ -210,7 +210,7 @@
 
   <!-- ── Tab: Retentie ── -->
   <section class="tab-content" id="tab-retentie">
-    <div class="sub" id="retSubtitle" style="margin-bottom:12px">Trajecten die binnen 30 dagen aflopen.</div>
+    <div class="sub" id="retSubtitle" style="margin-bottom:12px">Klanten met een lopend/afgelopen abonnement vanaf 2026.</div>
     <div class="sr-filterstrip">
       <div class="sr-search"><input id="retSearch" type="search" placeholder="Zoek klant…" /></div>
       <label class="sr-toggle"><input type="checkbox" id="retMineToggle"> Alleen mijne</label>
@@ -221,6 +221,11 @@
       <button class="sr-seg danger" data-seg="urgent">Urgent &lt;14d</button>
       <button class="sr-seg warning" data-seg="soon">15-30 dgn</button>
       <button class="sr-seg danger" data-seg="verlopen">Verlopen</button>
+    </div>
+    <div class="sr-segments" id="retMarkSegments" style="margin-top:4px">
+      <button class="sr-seg active" data-marked="open">Open</button>
+      <button class="sr-seg" data-marked="not_renewing">Niet-verlengen</button>
+      <button class="sr-seg" data-marked="all">Alle</button>
     </div>
     <div id="retentieList"><div class="sr-empty">Laden…</div></div>
   </section>
@@ -940,20 +945,24 @@ document.getElementById('quotSearch').addEventListener('input', () => { clearTim
 document.getElementById('quotMineToggle').addEventListener('change', () => loadQuotations());
 
 // ── Retentie ──
-let retSeg = 'alle', retSort = { key: 'end', dir: 'asc' }, retItems = [];
+let retSeg = 'alle', retMarkedSeg = 'open', retSort = { key: 'end', dir: 'asc' }, retItems = [], retColsAvailable = true;
 async function loadRetentie() {
   const wrap = document.getElementById('retentieList');
   wrap.innerHTML = '<div class="sr-empty">Laden…</div>';
   const params = new URLSearchParams();
   if (document.getElementById('retMineToggle').checked) params.set('owned_by_me', 'true');
+  // include_marked=0 alleen als het segment 'open' actief is; anders alles ophalen
+  // en client-side filteren (voor wisselen zonder round-trip).
   try {
     const res = await window.AgentShared.apiFetch('/api/sales-retention?' + params);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     retItems = data.items || [];
+    retColsAvailable = data.retention_columns_available !== false;
     const urgent = retItems.filter(i => i.days_left >= 0 && i.days_left < 14).length;
+    const marked = retItems.filter(i => i.retention_not_renewing).length;
     const sub = document.getElementById('retSubtitle');
-    if (sub) sub.textContent = `${retItems.length} klant(en) waarvan het laatste abonnement binnen 30 dagen afloopt · ${urgent} urgent (<14 dgn)`;
+    if (sub) sub.textContent = `${retItems.length} klant(en) met laatste abonnement vanaf 2026 · ${urgent} urgent (<14 dgn)${retColsAvailable ? ` · ${marked} gemarkeerd 'niet-verlengen'` : ''}`;
     renderRetentie();
   } catch (e) { wrap.innerHTML = '<div class="sr-empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
 }
@@ -966,7 +975,13 @@ function totEindeBadge(d) {
 function renderRetentie() {
   const wrap = document.getElementById('retentieList');
   const q = (document.getElementById('retSearch').value || '').trim().toLowerCase();
-  let rows = retItems.filter(it => (!q || (it.customer_name || '').toLowerCase().includes(q)) && (retSeg === 'alle' || retBucket(it) === retSeg));
+  let rows = retItems.filter(it => {
+    if (q && !(it.customer_name || '').toLowerCase().includes(q)) return false;
+    if (retSeg !== 'alle' && retBucket(it) !== retSeg) return false;
+    if (retMarkedSeg === 'open'         && it.retention_not_renewing) return false;
+    if (retMarkedSeg === 'not_renewing' && !it.retention_not_renewing) return false;
+    return true;
+  });
   rows = rows.slice().sort((a, b) => String(a.end_date || '').localeCompare(String(b.end_date || '')) * (retSort.dir === 'asc' ? 1 : -1));
   if (!rows.length) { wrap.innerHTML = '<div class="sr-empty">Geen trajecten in deze selectie.</div>'; return; }
   const sc = retSort.dir === 'asc' ? 'sortable asc' : 'sortable desc';
@@ -974,12 +989,19 @@ function renderRetentie() {
     <thead><tr><th>Klant</th><th>Bedrijf</th><th>Traject</th><th>Mentor</th>
       <th class="${sc}" data-sort="end">Laatste eind</th><th>Tot einde</th><th class="center">Abo's</th><th></th></tr></thead>
     <tbody>${rows.map((it, i) => {
-      const urgent = it.days_left < 14;
+      const urgent = it.days_left < 14 && !it.retention_not_renewing;
       const n = it.active_subs_count || (it.subs ? it.subs.length : 0);
       const mentor = it.mentor_name ? `<span class="sr-userline">${avatarHtml(it.mentor_name, 'sm')}<span>${esc(it.mentor_name)}</span></span>` : '<span style="color:var(--text-faint);font-style:italic">Niet toegewezen</span>';
+      const notRen = it.retention_not_renewing;
+      const notRenBadge = notRen
+        ? `<span class="sr-tag gray" title="${it.retention_marked_at ? 'Gemarkeerd op ' + esc(fmtDateNL(it.retention_marked_at)) : 'Gemarkeerd'}" style="margin-left:6px"><i class="ti ti-circle-x"></i> Niet-verlengen</span>`
+        : '';
+      const markBtn = notRen
+        ? `<button class="sr-menu-item" data-ret-mark="${esc(it.customer_id)}" data-ret-mark-to="0"><i class="ti ti-refresh"></i> Toch verlengen</button>`
+        : `<button class="sr-menu-item" data-ret-mark="${esc(it.customer_id)}" data-ret-mark-to="1"><i class="ti ti-circle-x"></i> Markeer 'Niet-verlengen'</button>`;
       const menu = [
         `<a class="sr-menu-item" href="/modules/klanten.html?id=${esc(it.customer_id)}"><i class="ti ti-user"></i> Klant-detail bekijken</a>`,
-        `<button class="sr-menu-item" onclick="toast('Binnenkort beschikbaar')"><i class="ti ti-circle-x"></i> Markeer 'Niet verlengen'</button>`,
+        markBtn,
         `<button class="sr-menu-item" onclick="toast('Binnenkort beschikbaar')"><i class="ti ti-bell"></i> Aanmelden voor opvolging</button>`,
       ];
       const dots = `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer acties"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${menu.join('')}</div></div>`;
@@ -987,8 +1009,8 @@ function renderRetentie() {
       const detail = (n && it.subs) ? `<tr class="ret-detail" id="ret-detail-${i}" hidden><td colspan="8" style="background:var(--bg-elev-2);padding-left:40px">
         <table style="width:100%;font-size:12px"><thead><tr><th style="text-align:left">Abonnement</th><th style="text-align:left">Start</th><th style="text-align:left">Eind</th></tr></thead>
         <tbody>${it.subs.map(s => `<tr><td>${esc(s.description || '—')}</td><td>${s.start_date ? fmtDateNL(s.start_date) : '—'}</td><td>${s.end_date ? fmtDateNL(s.end_date) : '—'}</td></tr>`).join('')}</tbody></table></td></tr>` : '';
-      return `<tr${urgent ? ' style="background:rgba(220,38,38,.05)"' : ''}>
-        <td><span style="display:flex;align-items:center">${caret}<a class="sr-userline" href="/modules/klanten.html?id=${esc(it.customer_id)}" style="text-decoration:none;color:inherit">${avatarHtml(it.customer_name)}<span><span class="sr-uname">${esc(it.customer_name)}</span><br><span class="sr-cellsub">${esc(it.customer_email || '—')}</span></span></a></span></td>
+      return `<tr${urgent ? ' style="background:rgba(220,38,38,.05)"' : (notRen ? ' style="opacity:.65"' : '')}>
+        <td><span style="display:flex;align-items:center">${caret}<a class="sr-userline" href="/modules/klanten.html?id=${esc(it.customer_id)}" style="text-decoration:none;color:inherit">${avatarHtml(it.customer_name)}<span><span class="sr-uname">${esc(it.customer_name)}${notRenBadge}</span><br><span class="sr-cellsub">${esc(it.customer_email || '—')}</span></span></a></span></td>
         <td>${entityTag(it.entity)}</td>
         <td>${esc(it.traject_label || '—')}</td>
         <td>${mentor}</td>
@@ -1000,6 +1022,31 @@ function renderRetentie() {
     }).join('')}</tbody></table></div>`;
   wrap.querySelectorAll('[data-sort]').forEach(th => th.addEventListener('click', () => { retSort.dir = retSort.dir === 'asc' ? 'desc' : 'asc'; renderRetentie(); }));
   wrap.querySelectorAll('[data-ret-toggle]').forEach(btn => btn.addEventListener('click', () => { const r = document.getElementById('ret-detail-' + btn.dataset.retToggle); if (!r) return; r.hidden = !r.hidden; btn.querySelector('i').className = r.hidden ? 'ti ti-chevron-right' : 'ti ti-chevron-down'; }));
+  wrap.querySelectorAll('[data-ret-mark]').forEach(btn => btn.addEventListener('click', async () => {
+    const cid = btn.getAttribute('data-ret-mark');
+    const to  = btn.getAttribute('data-ret-mark-to') === '1';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/sales-retention-mark', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_id: cid, not_renewing: to }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        if (d?.code === 'MIGRATION_REQUIRED') { toast('Migratie vereist: customers.retention_not_renewing kolom ontbreekt'); return; }
+        throw new Error(d?.error || 'HTTP ' + r.status);
+      }
+      const it = retItems.find(x => x.customer_id === cid);
+      if (it) {
+        it.retention_not_renewing = !!d.customer?.retention_not_renewing;
+        it.retention_marked_at    = d.customer?.retention_marked_at || null;
+        it.retention_marked_by    = d.customer?.retention_marked_by || null;
+      }
+      toast(to ? 'Gemarkeerd als "Niet-verlengen"' : 'Markering opgeheven');
+      renderRetentie();
+    } catch (e) {
+      toast('Fout: ' + (e.message || 'onbekend'));
+    }
+  }));
 }
 document.getElementById('retMineToggle').addEventListener('change', () => loadRetentie());
 document.getElementById('retSearch').addEventListener('input', () => renderRetentie());
@@ -1007,6 +1054,10 @@ document.getElementById('retRefresh').addEventListener('click', () => loadRetent
 document.querySelectorAll('#retSegments .sr-seg').forEach(seg => seg.addEventListener('click', () => {
   document.querySelectorAll('#retSegments .sr-seg').forEach(x => x.classList.remove('active'));
   seg.classList.add('active'); retSeg = seg.dataset.seg; renderRetentie();
+}));
+document.querySelectorAll('#retMarkSegments .sr-seg').forEach(seg => seg.addEventListener('click', () => {
+  document.querySelectorAll('#retMarkSegments .sr-seg').forEach(x => x.classList.remove('active'));
+  seg.classList.add('active'); retMarkedSeg = seg.dataset.marked; renderRetentie();
 }));
 
 // ── Abonnementen ──
