@@ -400,6 +400,8 @@ function renderHistList(events) {
       </div>
       ${badge}
       <button class="sr-abtn" data-open="${esc(e.id)}"><i class="ti ti-external-link"></i> Openen</button>
+      <button class="sr-abtn" data-del="${esc(e.id)}" data-del-title="${esc(e.title)}" data-del-boekt="${e.bonus_geboekt ? '1' : '0'}"
+        style="color:#b91c1c;border-color:rgba(220,38,38,.35)"><i class="ti ti-trash"></i> Verwijderen</button>
     </div>`;
   }).join('');
   box.querySelectorAll('[data-open]').forEach((btn) => btn.addEventListener('click', () => {
@@ -409,6 +411,40 @@ function renderHistList(events) {
     const panel = document.getElementById('bonusPanel');
     if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }));
+  box.querySelectorAll('[data-del]').forEach((btn) => btn.addEventListener('click', () => {
+    const id      = btn.getAttribute('data-del');
+    const title   = btn.getAttribute('data-del-title') || '';
+    const boekt   = btn.getAttribute('data-del-boekt') === '1';
+    deleteHistEvent(id, title, boekt);
+  }));
+}
+
+async function deleteHistEvent(eventId, title, isBoekt) {
+  const t = title || '(zonder titel)';
+  const msg = isBoekt
+    ? 'Dit event is AL GEBOEKT.\n\n"' + t + '" verwijderen draait de bonus/kosten voor de mentoren terug (alle mentor_ledger_entries voor dit event worden verwijderd — óók reeds afgerekende).\n\nZeker weten? Deze actie is onomkeerbaar.'
+    : 'Verwijder "' + t + '" incl. attendees, mentoren en kosten?\n\nDit event heeft nog geen bonus-boeking, dus er wordt niks aan de mentor-ledger geraakt.\n\nDeze actie is onomkeerbaar.';
+  if (!window.confirm(msg)) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/admin/historical-event-delete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event_id: eventId, confirm: true }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d?.deleted !== true) throw new Error(d?.error || 'HTTP ' + r.status);
+    const parts = [];
+    parts.push('Event verwijderd.');
+    if (d.ledger_entries_removed) parts.push(d.ledger_entries_removed + ' ledger-entries teruggedraaid');
+    if (Array.isArray(d.warnings) && d.warnings.length) parts.push('let op: ' + d.warnings.join(' · '));
+    if (window.AgentShared?.showToast) window.AgentShared.showToast(parts.join(' — '), 'success');
+    else alert(parts.join('\n'));
+    // Als het huidige geopende event weggeknipt is → paneel dichttrekken.
+    if (state.currentEventId === eventId) setCurrentEvent(null);
+    loadHistList();
+  } catch (e) {
+    if (window.AgentShared?.showToast) window.AgentShared.showToast('Verwijderen mislukt: ' + (e.message || 'onbekend'), 'error');
+    else alert('Verwijderen mislukt: ' + (e.message || 'onbekend'));
+  }
 }
 
 // ── Bonus-actiepaneel: preview + commit ─────────────────────────────────
