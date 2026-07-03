@@ -29,17 +29,17 @@ export default async function handler(req, res) {
   const includeMarked = String(req.query?.include_marked || '') !== '0';
 
   try {
-    // 1) Actieve subs eerst (klein) — status='active' + end_date-scope.
-    //    We willen álle actieve subs met end_date binnen 30 dagen OF reeds
-    //    verlopen, zodat het per-klant MAX(end_date) bepalen correct is
-    //    (een klant met een latere-eindigende sub moet uitvallen). Daarom
-    //    filteren we hier NIET op end_date; dat gebeurt na de per-klant
-    //    aggregatie. Limit 500 blijft ruim boven de reële actieve-set.
+    // 1) Subs eerst — status IN ('active','cancelled') zodat we ook de
+    //    afgelopen abonnementen (churn) meenemen. Per klant bepalen we
+    //    hierna MAX(end_date) over ALLE subs: een klant met een verlenging
+    //    (nieuwere active sub in de toekomst) valt automatisch buiten het
+    //    window; een klant met alleen een cancelled sub in het window
+    //    verschijnt (churn-signaal). Limit 1000 dekt de gecombineerde set.
     const { data: subs, error: subErr } = await supabaseAdmin.from('subscriptions')
       .select('id, deal_id, end_date, start_date, description, status')
-      .eq('status', 'active')
+      .in('status', ['active', 'cancelled'])
       .order('end_date', { ascending: true, nullsFirst: false })
-      .limit(500);
+      .limit(1000);
     if (subErr) {
       console.error('[sales-retention] subs fetch:', subErr.message);
       return res.status(500).json({ error: 'subs fetch: ' + subErr.message });
@@ -64,16 +64,21 @@ export default async function handler(req, res) {
     }
     if (!Object.keys(dealById).length) return res.status(200).json({ items: [] });
 
-    // 3) Groepeer per klant; bepaal MAX(end_date) + verzamel subs.
+    // 3) Groepeer per klant; bepaal MAX(end_date) + verzamel subs. Bewaar
+    //    de status van de laatst-eindigende sub (last_sub_status) zodat de
+    //    UI onderscheid kan maken tussen 'afgelopen' (cancelled) en
+    //    'loopt af binnen 30d' (active).
     const byCust = {};
     for (const s of subs) {
       if (!s.end_date) continue;
       const deal = dealById[s.deal_id];
       if (!deal?.customer_id) continue; // deal weggefilterd door owned_by_me of archived
       const cid = deal.customer_id;
-      const g = (byCust[cid] ||= { customer_id: cid, subs: [], maxEnd: null, maxDeal: null });
-      g.subs.push({ description: s.description || '—', start_date: s.start_date, end_date: s.end_date });
-      if (!g.maxEnd || s.end_date > g.maxEnd) { g.maxEnd = s.end_date; g.maxDeal = deal; }
+      const g = (byCust[cid] ||= { customer_id: cid, subs: [], maxEnd: null, maxDeal: null, lastStatus: null });
+      g.subs.push({ description: s.description || '—', start_date: s.start_date, end_date: s.end_date, status: s.status });
+      if (!g.maxEnd || s.end_date > g.maxEnd) {
+        g.maxEnd = s.end_date; g.maxDeal = deal; g.lastStatus = s.status;
+      }
     }
 
     const now = Date.now();
@@ -167,6 +172,7 @@ export default async function handler(req, res) {
       const c    = custById[g.customer_id] || {};
       const dept = g.maxDeal?.tl_department_id || null;
       const vId  = g.maxDeal?.traject_variant_id || null;
+      const activeSubs = g.subs.filter((s) => s.status === 'active').length;
       return {
         customer_id: g.customer_id,
         customer_name: customerDisplayName(c, '—'),
@@ -176,7 +182,11 @@ export default async function handler(req, res) {
         traject_label: vId ? (variantLabel[vId] || null) : null,
         end_date: g.maxEnd,
         days_left: Math.ceil((new Date(g.maxEnd).getTime() - now) / 86400000),
-        active_subs_count: g.subs.length,
+        // Status van de laatst-eindigende sub: 'active' (loopt af) of
+        // 'cancelled' (al afgelopen). UI kan hiermee onderscheid tonen.
+        last_sub_status  : g.lastStatus || null,
+        active_subs_count: activeSubs,
+        total_subs_count : g.subs.length,
         subs: g.subs.sort((a, b) => String(a.end_date).localeCompare(String(b.end_date))),
         // Handmatige 'Niet-verlengen'-markering (fail-soft: false/null als
         // kolommen ontbreken in dit schema).
