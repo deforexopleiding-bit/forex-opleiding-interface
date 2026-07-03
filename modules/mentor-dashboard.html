@@ -108,6 +108,36 @@
     .student-card.open .student-body { display: block; }
     .progress-bar { width: 100%; height: 10px; background: var(--bg-elev-2, rgba(100,116,139,0.18)); border-radius: 5px; overflow: hidden; margin-top: 6px; }
     .progress-bar > div { height: 100%; background: linear-gradient(90deg, var(--accent, #6366f1), rgba(99,102,241,0.7)); transition: width .25s; }
+    .progress-bar.mini { width: 90px; height: 6px; margin-top: 3px; display: inline-block; vertical-align: middle; }
+
+    /* Bonus per klant — platte tabel met inklap-dropdown */
+    .bonus-table { width: 100%; border-collapse: collapse; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; font-size: 13px; }
+    .bonus-table th, .bonus-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    .bonus-table th { background: rgba(0,0,0,0.02); font-weight: 600; color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .bonus-table td.num, .bonus-table th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .bonus-row { cursor: pointer; }
+    .bonus-row:hover { background: rgba(99,102,241,0.04); }
+    .bonus-row.open { background: rgba(99,102,241,0.05); }
+    .bonus-caret { color: var(--text-faint); font-size: 14px; transition: transform .15s; display: inline-block; }
+    .bonus-row.open .bonus-caret { transform: rotate(90deg); }
+    .bonus-detail { display: none; background: rgba(10,47,99,0.025); }
+    .bonus-detail.open { display: table-row; }
+    .bonus-detail td { padding: 14px 18px; }
+    .bonus-term-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12.5px; }
+    .bonus-term-table th, .bonus-term-table td { padding: 6px 10px; text-align: left; border-bottom: 1px dashed var(--border); }
+    .bonus-term-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+    /* Paginering */
+    .pager { display: flex; align-items: center; gap: 6px; justify-content: flex-end; margin-top: 10px; font-size: 12.5px; }
+    .pager .info { color: var(--text-dim); margin-right: auto; }
+    .pager button { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; color: var(--text); }
+    .pager button:hover:not(:disabled) { background: rgba(99,102,241,0.08); }
+    .pager button.active { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); }
+    .pager button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Skeleton-rijen (laadstaat) */
+    .bonus-skeleton-row td { padding: 12px; }
+    .bonus-skeleton-row .skeleton { width: 100%; max-width: 180px; height: 12px; }
     .task-row { display: flex; gap: 8px; align-items: center; padding: 6px 0; font-size: 12.5px; border-bottom: 1px dashed var(--border); }
     .task-row:last-child { border-bottom: 0; }
     .task-progress { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -374,51 +404,185 @@
     wrap.innerHTML = `<div class="month-bars">${bars}</div>`;
   }
 
-  function renderEventBonus(perEvent) {
+  // ── Bonus per klant (platte tabel, paginering 25/pagina, inklap-detail) ──
+  const _bonusRowState = { rows: [], page: 1, pageSize: 25, open: new Set(), loading: false };
+
+  function statusBadge(status) {
+    switch (status) {
+      case 'actief':            return '<span class="badge badge-green">Actief</span>';
+      case 'wacht_1e_betaling': return '<span class="badge badge-amber">Wacht op 1e betaling</span>';
+      case 'voltooid':          return '<span class="badge badge-blue">Voltooid</span>';
+      case 'geen_abonnement':   return '<span class="badge badge-grey" title="Er is nog geen abonnement gekoppeld — bonus telt nog niet mee in de KPI\'s">Geen abonnement</span>';
+      case 'geannuleerd':       return '<span class="badge badge-red">Geannuleerd</span>';
+      default:                  return '<span class="badge badge-grey">' + esc(status || '—') + '</span>';
+    }
+  }
+
+  // Zet per_event om naar een platte rijen-array (event als kolom).
+  // Sortering: nieuwste event bovenaan, binnen event alfabetisch op klant.
+  function flattenPerEventToRows(perEvent) {
+    if (!Array.isArray(perEvent)) return [];
+    const out = [];
+    for (const ev of perEvent) {
+      for (const s of (ev.sales || [])) {
+        out.push({
+          event_id      : ev.event_id || null,
+          event_title   : ev.event_title || '—',
+          event_starts  : ev.starts_at || null,
+          ...s,
+        });
+      }
+    }
+    return out;
+  }
+
+  function renderBonusLoading() {
     const wrap = document.getElementById('eventBonusWrap');
-    if (!Array.isArray(perEvent) || perEvent.length === 0) {
-      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-coin-off"></i>Geen sales gevonden voor je events.</div>`;
+    if (!wrap) return;
+    const rows = Array.from({ length: 6 }).map(() =>
+      `<tr class="bonus-skeleton-row"><td colspan="8"><span class="skeleton"></span></td></tr>`
+    ).join('');
+    wrap.innerHTML =
+      '<table class="bonus-table"><thead>' +
+      '<tr><th>Klant</th><th>Event</th><th>Status</th><th>Termijnen</th><th>Laatste betaling</th><th>1e factuur</th><th class="num">Bonus (jouw aandeel)</th><th></th></tr>' +
+      '</thead><tbody>' + rows + '</tbody></table>';
+  }
+
+  function renderEventBonus(perEvent) {
+    _bonusRowState.rows = flattenPerEventToRows(perEvent);
+    _bonusRowState.open.clear();
+    _bonusRowState.page = 1;
+    _bonusRowState.loading = false;
+    renderBonusPage();
+  }
+
+  function renderBonusPage() {
+    const wrap = document.getElementById('eventBonusWrap');
+    if (!wrap) return;
+    const total = _bonusRowState.rows.length;
+    if (total === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-coin-off"></i>Nog geen bonus-rijen voor je events.</div>`;
       return;
     }
-    wrap.innerHTML = perEvent.map((ev) => {
-      const evHead = `
-        <div style="margin-top:18px;margin-bottom:6px;display:flex;align-items:baseline;gap:10px">
-          <strong style="font-size:14px">${esc(ev.event_title || '—')}</strong>
-          <span style="font-size:11.5px;color:var(--text-faint)">${fmtDateNL(ev.starts_at)}</span>
-        </div>`;
-      const sales = (ev.sales || []).map((s) => {
-        const schemaWarn = s.schema_unknown
-          ? '<span class="badge badge-amber" title="Geen volledig termijnschema bekend (open-ended sub of geen subscription) — projectie is voorlopig">Onbekend schema</span>'
-          : '';
-        const termRows = (s.termijnen || []).map((t) => {
-          const badge = t.status === 'betaald'
-            ? '<span class="badge badge-green">Betaald</span>'
-            : '<span class="badge badge-amber">Open</span>';
-          return `
-            <tr>
-              <td>${t.index}</td>
-              <td>${fmtDateNL(t.due_date)}</td>
-              <td class="num">${fmtEUR(t.amount)}</td>
-              <td>${badge}</td>
-            </tr>`;
-        }).join('');
-        return `
-          <div style="margin-bottom:14px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-elev)">
-            <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px">
-              <strong>${esc(s.customer_label || '—')}</strong>
-              ${schemaWarn}
-              <span style="margin-left:auto;font-size:11.5px;color:var(--text-dim)">
-                Sale: ${fmtEUR(s.sale_total_incl)} · jouw aandeel ${fmtEUR(s.mentor_share_total)} (${s.term_count}×)
-              </span>
-            </div>
-            <table class="data-table">
-              <thead><tr><th>#</th><th>Vervaldatum</th><th class="num">Bedrag</th><th>Status</th></tr></thead>
-              <tbody>${termRows}</tbody>
-            </table>
-          </div>`;
-      }).join('');
-      return evHead + sales;
+    const pageSize = _bonusRowState.pageSize;
+    const pageCount = Math.max(1, Math.ceil(total / pageSize));
+    if (_bonusRowState.page > pageCount) _bonusRowState.page = pageCount;
+    const page   = _bonusRowState.page;
+    const start  = (page - 1) * pageSize;
+    const end    = Math.min(start + pageSize, total);
+    const slice  = _bonusRowState.rows.slice(start, end);
+
+    const bodyRows = slice.map((s, idx) => {
+      const rowKey = 'r' + (start + idx);
+      const isOpen = _bonusRowState.open.has(rowKey);
+      const termCount = Number(s.term_count) || 0;
+      const paidCount = Number(s.paid_term_count) || 0;
+      const pct = termCount > 0 ? Math.max(0, Math.min(100, (paidCount / termCount) * 100)) : 0;
+      const firstBadge = s.first_invoice_paid
+        ? '<span class="badge badge-green">1e factuur betaald</span>'
+        : '<span class="badge badge-grey">Nog niet</span>';
+      const shareCell = s.schema_unknown
+        ? `${fmtEUR(s.mentor_share_total)} <span class="badge badge-grey" style="margin-left:4px" title="Nog niet meegeteld in KPI\'s tot er een abonnement is">nog niet in KPI</span>`
+        : fmtEUR(s.mentor_share_total);
+      const summary =
+        `<tr class="bonus-row${isOpen ? ' open' : ''}" data-row-key="${rowKey}">
+          <td><strong>${esc(s.customer_label || '—')}</strong></td>
+          <td>
+            <div>${esc(s.event_title || '—')}</div>
+            <div style="font-size:11px;color:var(--text-faint)">${fmtDateNL(s.event_starts)}</div>
+          </td>
+          <td>${statusBadge(s.status)}</td>
+          <td>
+            ${paidCount}/${termCount}
+            <div class="progress-bar mini"><div style="width:${pct.toFixed(1)}%"></div></div>
+          </td>
+          <td>${s.last_payment_date ? fmtDateNL(s.last_payment_date) : '—'}</td>
+          <td>${firstBadge}</td>
+          <td class="num">${shareCell}</td>
+          <td><span class="bonus-caret">▸</span></td>
+        </tr>`;
+      const detail = renderBonusDetailRow(s, rowKey, isOpen);
+      return summary + detail;
     }).join('');
+
+    const pagerHtml = renderPager(start, end, total, pageCount, page);
+
+    wrap.innerHTML =
+      '<table class="bonus-table"><thead>' +
+      '<tr><th>Klant</th><th>Event</th><th>Status</th><th>Termijnen</th><th>Laatste betaling</th><th>1e factuur</th><th class="num">Bonus (jouw aandeel)</th><th></th></tr>' +
+      '</thead><tbody>' + bodyRows + '</tbody></table>' + pagerHtml;
+
+    wrap.querySelectorAll('.bonus-row').forEach((tr) => {
+      tr.addEventListener('click', () => {
+        const key = tr.getAttribute('data-row-key');
+        if (_bonusRowState.open.has(key)) _bonusRowState.open.delete(key);
+        else _bonusRowState.open.add(key);
+        renderBonusPage();
+      });
+    });
+    wrap.querySelectorAll('[data-page]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const p = Number(btn.getAttribute('data-page'));
+        if (!Number.isFinite(p) || p < 1 || p > pageCount) return;
+        _bonusRowState.page = p;
+        renderBonusPage();
+      });
+    });
+  }
+
+  function renderBonusDetailRow(s, rowKey, isOpen) {
+    const termRows = (s.termijnen || []).map((t) => {
+      const badge = t.status === 'betaald'
+        ? '<span class="badge badge-green">Betaald</span>'
+        : '<span class="badge badge-amber">Open</span>';
+      return `<tr>
+        <td>${t.index}</td>
+        <td>${fmtDateNL(t.due_date)}</td>
+        <td class="num">${fmtEUR(t.amount)}</td>
+        <td>${badge}</td>
+      </tr>`;
+    }).join('');
+    const schemaLine = s.schema_unknown
+      ? '<div style="font-size:12px;color:#b45309;margin-bottom:8px"><i class="ti ti-alert-triangle"></i> Er is nog geen abonnement bekend voor deze klant — richt eerst een abonnement in voordat deze bonus meetelt in de KPI\'s.</div>'
+      : '';
+    return `<tr class="bonus-detail${isOpen ? ' open' : ''}" data-detail-key="${rowKey}">
+      <td colspan="8">
+        ${schemaLine}
+        <div style="display:flex;flex-wrap:wrap;gap:20px;font-size:12.5px;color:var(--text-dim);margin-bottom:6px">
+          <div>Sale-totaal (incl. BTW): <strong style="color:var(--text)">${fmtEUR(s.sale_total_incl)}</strong></div>
+          <div>Jouw totaal-aandeel: <strong style="color:var(--text)">${fmtEUR(s.mentor_share_total)}</strong></div>
+          <div>Per termijn: <strong style="color:var(--text)">${fmtEUR(s.per_term_amount)}</strong> (${s.term_count}×)</div>
+          <div>Betaald: <strong style="color:var(--text)">${Number(s.paid_term_count)||0}/${Number(s.term_count)||0}</strong></div>
+        </div>
+        <table class="bonus-term-table">
+          <thead><tr><th>#</th><th>Vervaldatum</th><th class="num">Bedrag</th><th>Status</th></tr></thead>
+          <tbody>${termRows}</tbody>
+        </table>
+      </td>
+    </tr>`;
+  }
+
+  function renderPager(start, end, total, pageCount, page) {
+    if (pageCount <= 1) {
+      return `<div class="pager"><div class="info">${start + 1}–${end} van ${total}</div></div>`;
+    }
+    // Pagina-nummers: eerste, laatste, huidige ±2. Ellipsis bij gaps.
+    const nums = new Set([1, pageCount, page, page - 1, page + 1, page - 2, page + 2]);
+    const ordered = [...nums].filter((n) => n >= 1 && n <= pageCount).sort((a, b) => a - b);
+    let numsHtml = '';
+    let prev = 0;
+    for (const n of ordered) {
+      if (prev && n - prev > 1) numsHtml += '<span style="color:var(--text-faint);padding:0 4px">…</span>';
+      numsHtml += `<button type="button" data-page="${n}"${n === page ? ' class="active"' : ''}>${n}</button>`;
+      prev = n;
+    }
+    return `<div class="pager">
+      <div class="info">${start + 1}–${end} van ${total}</div>
+      <button type="button" data-page="${page - 1}"${page <= 1 ? ' disabled' : ''}>← Vorige</button>
+      ${numsHtml}
+      <button type="button" data-page="${page + 1}"${page >= pageCount ? ' disabled' : ''}>Volgende →</button>
+    </div>`;
   }
 
   // Per payout_id gecachet detail; voorkomt re-fetch bij heen-en-weer klappen.
@@ -614,6 +778,8 @@
     try { if (window._authSharedReady) await window._authSharedReady; } catch {}
     // Parallel: bonus-overview (KPI's + projectie + bonus-per-event) +
     // my-events (Mijn events compleet — verplaatst uit het oude Grootboek).
+    // Skeleton-rijen tonen tijdens de fetch — voorkomt valse "geen data".
+    renderBonusLoading();
     try {
       const [bonusResp, myEventsResp] = await Promise.all([
         apiFetch('/api/mentor-bonus-overview'),

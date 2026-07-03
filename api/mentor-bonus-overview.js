@@ -212,7 +212,7 @@ export default async function handler(req, res) {
     if (invoiceIds.length) {
       const { data: invs } = await supabaseAdmin
         .from('invoices')
-        .select('id, amount_total, amount_paid, status')
+        .select('id, amount_total, amount_paid, status, paid_date')
         .in('id', invoiceIds);
       for (const v of invs || []) invoiceById.set(v.id, v);
     }
@@ -240,8 +240,10 @@ export default async function handler(req, res) {
     for (const r of rows) {
       const mentorAmount = Number(r.amount) || 0;
       const basis        = Number(r.basis) || 0;
-      earned_total += mentorAmount;
-      if (r.status === 'uitbetaald') betaald_uit += mentorAmount;
+      // KPI-totalen: schema_unknown-entries (zie hieronder) worden UITGESLOTEN
+      // omdat er nog geen abonnement bekend is. De klant verschijnt wel in de
+      // lijst met een 'geen_abonnement'-badge, maar telt niet mee in de KPI's
+      // tot er een schema ingericht is.
 
       // Vind subscription via customer → deals → latest sub.
       const customerDeals = dealsByCust.get(r.customer_id) || [];
@@ -288,6 +290,12 @@ export default async function handler(req, res) {
         nbPaid = Math.max(0, Math.min(termCount, Math.floor((paidAmt + 0.005) / perTermInc)));
       }
 
+      // KPI-earned + betaald_uit — schema-unknown entries niet meetellen.
+      if (!schemaUnknown) {
+        earned_total += mentorAmount;
+        if (r.status === 'uitbetaald') betaald_uit += mentorAmount;
+      }
+
       // Genereer termijnen.
       const termijnen = [];
       for (let i = 0; i < termCount; i++) {
@@ -300,16 +308,33 @@ export default async function handler(req, res) {
           amount  : tAmount,
           status  : isPaid ? 'betaald' : 'open',
         });
-        if (!isPaid) open_total += tAmount;
-
-        // Maand-bucket (alleen binnen 12m-projectie + nog niet betaald).
-        if (!isPaid) {
+        // KPI open/maand-bucket alleen als er een echt schema is.
+        if (!isPaid && !schemaUnknown) {
+          open_total += tAmount;
           const k = ymKey(dueDate);
           if (monthAmount.has(k)) {
             monthAmount.set(k, (monthAmount.get(k) || 0) + tAmount);
           }
         }
       }
+
+      // Status-afleiding voor UI-badges.
+      //   schema_unknown          → 'geen_abonnement'
+      //   sub.status='cancelled'  → 'geannuleerd'
+      //   alle termijnen betaald  → 'voltooid'
+      //   ≥1 termijn betaald      → 'actief'
+      //   anders (0 betaald)      → 'wacht_1e_betaling'
+      let saleStatus;
+      const subCancelled = sub && String(sub.status || '').toLowerCase() === 'cancelled';
+      if (schemaUnknown)          saleStatus = 'geen_abonnement';
+      else if (subCancelled)      saleStatus = 'geannuleerd';
+      else if (nbPaid >= termCount && termCount > 0) saleStatus = 'voltooid';
+      else if (nbPaid >= 1)       saleStatus = 'actief';
+      else                        saleStatus = 'wacht_1e_betaling';
+
+      // Extra afgeleide velden voor de UI.
+      const firstInvoicePaid = nbPaid >= 1;
+      const lastPaymentDate  = (nbPaid >= 1 && invoice?.paid_date) ? invoice.paid_date : null;
 
       // Groeperen onder event → sale (customer_id).
       const evKey = r.event_id || 'no-event';
@@ -334,6 +359,11 @@ export default async function handler(req, res) {
           term_count         : termCount,
           per_term_amount    : round2(perTermMentor),
           schema_unknown     : schemaUnknown,
+          // Nieuw (per-klant status + voortgang):
+          status             : saleStatus,
+          paid_term_count    : nbPaid,
+          first_invoice_paid : firstInvoicePaid,
+          last_payment_date  : lastPaymentDate,
           termijnen,
         });
       } else {
@@ -341,6 +371,10 @@ export default async function handler(req, res) {
         // op en breid de termijnen-array niet uit (zelfde schema).
         const cell = evNode._sales.get(saleKey);
         cell.mentor_share_total = round2(cell.mentor_share_total + mentorAmount);
+        // Als er een nieuwere betaling is (paid_date), bewaar de laatste.
+        if (lastPaymentDate && (!cell.last_payment_date || lastPaymentDate > cell.last_payment_date)) {
+          cell.last_payment_date = lastPaymentDate;
+        }
       }
     }
 
