@@ -80,41 +80,54 @@ export default async function handler(req, res) {
     }
     if (!Object.keys(dealById).length) return res.status(200).json({ items: [] });
 
-    // 3) Groepeer per klant; bepaal MAX(end_date) + verzamel subs. Bewaar
-    //    de status van de laatst-eindigende sub (last_sub_status) zodat de
-    //    UI onderscheid kan maken tussen 'afgelopen' (cancelled) en
-    //    'loopt af binnen 30d' (active).
+    // Window-grenzen vóór de groep-loop bepalen zodat we per sub kunnen
+    // checken of hij dekking BUITEN de 30-dagen-horizon geeft.
+    const now         = Date.now();
+    const horizon     = now + 30 * 86400000;
+    const WINDOW_FROM = '2026-01-01';
+    const horizonIso  = new Date(horizon).toISOString().slice(0, 10);
+
+    // 3) Groepeer per klant; bepaal MAX(end_date) over subs mét end_date
+    //    (maxEnd voor het window), tel active-subs, en bepaal per klant
+    //    of er dekking IS voorbij de horizon: een active sub met
+    //    end_date > horizonIso, of een active sub zonder end_date
+    //    (open-eind / doorlopend). Klanten met zulke dekking = retained,
+    //    die verbergen we; wél tonen we klanten wiens active abo binnen
+    //    de 30-dagen-horizon eindigt (about-to-churn).
     const byCust = {};
     for (const s of subs) {
-      if (!s.end_date) continue;
       const deal = dealById[s.deal_id];
       if (!deal?.customer_id) continue; // deal weggefilterd door owned_by_me of archived
       const cid = deal.customer_id;
-      const g = (byCust[cid] ||= { customer_id: cid, subs: [], maxEnd: null, maxDeal: null, lastStatus: null, activeCount: 0 });
+      const g = (byCust[cid] ||= {
+        customer_id: cid, subs: [], maxEnd: null, maxDeal: null,
+        lastStatus: null, activeCount: 0, hasActiveCoverageBeyondHorizon: false,
+      });
+      // Active-coverage check DOEN we óók voor subs zonder end_date
+      // (open-eind is een geldige dekkings-signaal); pas daarna slaan we
+      // ze over voor maxEnd/subs-detail.
+      if (s.status === 'active') {
+        g.activeCount++;
+        if (!s.end_date || s.end_date > horizonIso) {
+          g.hasActiveCoverageBeyondHorizon = true;
+        }
+      }
+      if (!s.end_date) continue; // rest van de loop vereist end_date
       g.subs.push({ description: s.description || '—', start_date: s.start_date, end_date: s.end_date, status: s.status });
-      if (s.status === 'active') g.activeCount++;
       if (!g.maxEnd || s.end_date > g.maxEnd) {
         g.maxEnd = s.end_date; g.maxDeal = deal; g.lastStatus = s.status;
       }
     }
 
-    const now = Date.now();
-    const horizon = now + 30 * 86400000;
     // Retentie-window: klanten met maxEnd tussen 2026-01-01 en (nu + 30d).
     // - Ondergrens 2026-01-01: sales pakt sinds dit jaar alle afgelopen +
     //   binnenkort-aflopende cases mee.
-    // - Bovengrens now+30d: klanten die verlengd zijn (nieuwe active sub met
-    //   latere end_date) vallen automatisch weg — dat is gewenst gedrag
-    //   (verlengd = uit de lijst).
-    const WINDOW_FROM = '2026-01-01';
-    const horizonIso  = new Date(horizon).toISOString().slice(0, 10);
-    // Retentie-regel: een klant met ≥1 actief abonnement is niet gechurnd →
-    // uitsluiten, ongeacht een eventuele latere cancelled sub. Alleen
-    // klanten zonder active sub én met maxEnd (over de cancelled subs) in
-    // het window komen door. last_sub_status van de resterende groepen is
-    // per definitie 'cancelled'.
+    // - Bovengrens now+30d: klanten die al gedekt zijn voorbij de horizon
+    //   (actief abo dat >30d doorloopt, of open-eind) vallen weg via
+    //   hasActiveCoverageBeyondHorizon. De 30-dagen-regel voor about-to-
+    //   churn actieve abo's blijft dus intact.
     const groups = Object.values(byCust).filter((g) =>
-      g.activeCount === 0 &&
+      !g.hasActiveCoverageBeyondHorizon &&
       g.maxEnd && g.maxEnd >= WINDOW_FROM && g.maxEnd <= horizonIso
     );
     if (!groups.length) return res.status(200).json({ items: [] });
