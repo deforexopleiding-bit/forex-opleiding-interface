@@ -118,15 +118,18 @@ export default async function handler(req, res) {
     const { data: prods } = await supabaseAdmin.from('products').select('id, tl_product_id');
     const prodByTl = {}; for (const p of prods || []) if (p.tl_product_id) prodByTl[p.tl_product_id] = p.id;
 
-    // 1. Paginate TL subscriptions.list — actieve EN beëindigde/gedeactiveerde
-    //    subs, zodat de retentie-lijst ook historische churn ziet (afgelopen
-    //    abo's van eerdere maanden). TL v2 kent enum {'active','deactivated'};
-    //    beide expliciet meegeven zodat niks wordt weggefilterd.
+    // 1. Paginate TL subscriptions.list — ZONDER status-filter zodat TL álle
+    //    abonnementen teruggeeft (active + gedeactiveerd + eventuele andere
+    //    statussen). filter.status:['active','deactivated'] leverde ons in de
+    //    praktijk alleen active op, dus we laten het filter weg en tellen zelf
+    //    per-status (zie tl_status_counts) om zichtbaar te maken wat TL geeft.
     const tlSubs = [];
     for (let page = 1; tlSubs.length < maxSubs; page++) {
-      const filter = { status: ['active', 'deactivated'] };
+      const filter = {};
       if (department_id) filter.department_id = department_id;
-      const r = await tlCall('/subscriptions.list', { filter, page: { size: 100, number: page } });
+      const listBody = { page: { size: 100, number: page } };
+      if (Object.keys(filter).length) listBody.filter = filter;
+      const r = await tlCall('/subscriptions.list', listBody);
       if (!r.ok) { const txt = await r.text().catch(() => ''); return res.status(502).json({ error: `TL subscriptions.list HTTP ${r.status}: ${txt.slice(0, 200)}`, totals }); }
       const data = await r.json();
       const batch = data.data || [];
@@ -134,6 +137,16 @@ export default async function handler(req, res) {
       if (batch.length < 100) break; // laatste pagina
     }
     const work = tlSubs.slice(0, maxSubs);
+
+    // Diagnose: tel welke ruwe TL-statussen we ontvangen (over ALLE opgehaalde
+    // subs, niet alleen imported/updated). In dry-run zien we zo direct of TL
+    // naast 'active' ook 'deactivated' of iets anders levert.
+    const tl_status_counts = {};
+    for (const s of tlSubs) {
+      const raw = String(s?.status || '(none)').toLowerCase();
+      tl_status_counts[raw] = (tl_status_counts[raw] || 0) + 1;
+    }
+    totals.tl_status_counts = tl_status_counts;
 
     // 2. Per sub.
     for (const sub of work) {
