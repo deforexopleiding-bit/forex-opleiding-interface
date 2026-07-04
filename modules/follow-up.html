@@ -13,6 +13,11 @@
   <script src="shared/supabase-client.js"></script>
   <script src="shared/agent-shared.js"></script>
   <script src="shared/theme-shared.js"></script>
+  <!-- SIP.js voor de cockpit-softphone (WebRTC-bellen via VoIPGRID).
+       Geladen vanaf jsdelivr — zelfde origin als tabler-icons hierboven.
+       Falls the load: softphone.available blijft false en de belkaart
+       valt terug op het uitkomst-panel voor handmatige registratie. -->
+  <script src="https://cdn.jsdelivr.net/npm/sip.js@0.21.2/dist/sip.min.js" defer></script>
   <style>
     /* Lokale aliases — backward compat tot volledige refactor */
     :root {
@@ -1149,6 +1154,82 @@
     /* HTML [hidden] moet display:flex overrulen — anders staat het menu
        altijd open ongeacht menu.hidden = true. */
     .fu-callcard-menu[hidden] { display: none !important; }
+
+    /* ── Softphone (WebRTC via SIP.js op VoIPGRID) ─────────────────── */
+    .fu-softphone-status {
+      display: flex; align-items: center; gap: 8px;
+      margin: 6px 0 8px 0;
+      font-size: 11.5px; letter-spacing: .3px;
+      color: rgba(255,255,255,0.75);
+    }
+    .fu-softphone-dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      background: #6b7280; box-shadow: 0 0 0 3px rgba(107,114,128,0.15);
+      transition: background .15s, box-shadow .15s;
+    }
+    .fu-softphone-status.connecting .fu-softphone-dot {
+      background: #eab308; box-shadow: 0 0 0 3px rgba(234,179,8,0.18);
+    }
+    .fu-softphone-status.connected .fu-softphone-dot {
+      background: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,0.22);
+    }
+    .fu-softphone-status.disconnected .fu-softphone-dot,
+    .fu-softphone-status.failed      .fu-softphone-dot {
+      background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,0.20);
+    }
+    .fu-softphone-status.disabled .fu-softphone-dot {
+      background: rgba(255,255,255,0.15); box-shadow: none;
+    }
+    .fu-softphone-retry {
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14);
+      color: #fff; border-radius: 6px; padding: 2px 6px; font-size: 11px;
+      cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+    }
+    .fu-softphone-retry:hover { background: rgba(255,255,255,0.12); }
+    .fu-softphone-retry[hidden] { display: none !important; }
+
+    /* Belbalk (actieve call) */
+    .fu-softphone-callbar {
+      display: flex; align-items: center; gap: 14px;
+      background: linear-gradient(180deg, rgba(9,61,84,0.85), rgba(9,61,84,0.7));
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 12px; padding: 12px 14px;
+      margin: 10px 0 14px 0;
+      color: #fff;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.25);
+    }
+    .fu-softphone-callbar[hidden] { display: none !important; }
+    .fu-softphone-callbar-status {
+      display: flex; flex-direction: column; gap: 2px;
+      flex: 1; min-width: 0;
+    }
+    .fu-softphone-callbar-title {
+      font-size: 14px; font-weight: 600; letter-spacing: .2px;
+    }
+    .fu-softphone-callbar-sub {
+      font-size: 11.5px; color: rgba(255,255,255,0.7);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .fu-softphone-callbar-timer {
+      font-size: 16px; font-weight: 600; letter-spacing: 1px;
+      font-variant-numeric: tabular-nums;
+      color: #a7f3d0;
+    }
+    .fu-softphone-callbar-actions { display: flex; gap: 8px; }
+    .fu-softphone-callbar-btn {
+      background: rgba(255,255,255,0.08); color: #fff;
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 999px; width: 40px; height: 40px;
+      display: inline-flex; align-items: center; justify-content: center;
+      cursor: pointer; font-size: 15px;
+      transition: background .15s;
+    }
+    .fu-softphone-callbar-btn:hover { background: rgba(255,255,255,0.16); }
+    .fu-softphone-callbar-btn.mute.on { background: #eab308; color: #111; border-color: #ca8a04; }
+    .fu-softphone-callbar-btn.hangup { background: #ef4444; border-color: #b91c1c; }
+    .fu-softphone-callbar-btn.hangup:hover { background: #dc2626; }
+
+    #softphone-audio { display: none; }
     .fu-callcard-menu button {
       background: transparent; border: none; color: #fff;
       text-align: left; padding: 8px 10px; border-radius: 6px;
@@ -1987,9 +2068,16 @@
             <div class="fu-callcard" id="cockpit-callcard">
               <div class="fu-callcard-top">
                 <div class="fu-callcard-label"><i class="ti ti-phone"></i> Uitbellen via</div>
-                <select class="fu-callcard-voys" id="cockpit-voys" title="Voys-nummer (welk nummer zien we uitbellen)">
+                <select class="fu-callcard-voys" id="cockpit-voys" title="Uitgaande beller-ID (VoIPGRID kiest server-side; UI-hint voor toekomstige uitbreiding)">
                   <option value="">Voys · standaard</option>
                 </select>
+              </div>
+              <div class="fu-softphone-status" id="softphone-status" aria-live="polite">
+                <span class="fu-softphone-dot" id="softphone-dot"></span>
+                <span class="fu-softphone-label" id="softphone-label">○ Verbinden…</span>
+                <button type="button" class="fu-softphone-retry" id="softphone-retry" hidden title="Opnieuw verbinden">
+                  <i class="ti ti-refresh"></i>
+                </button>
               </div>
               <input type="tel" class="fu-callcard-number" id="cockpit-number"
                      placeholder="Geen telefoonnummer" autocomplete="off"
@@ -2013,6 +2101,28 @@
                 </div>
               </div>
             </div>
+
+            <!-- Belbalk-overlay: verschijnt bij een actieve softphone-call.
+                 Toont live status (Kiezen / Gaat over / In gesprek),
+                 gesprekstimer + Mute + Ophangen. Audio-element speelt de
+                 remote stream (autoplay); mic wordt via getUserMedia
+                 opgevraagd door SIP.js. -->
+            <div class="fu-softphone-callbar" id="softphone-callbar" hidden>
+              <div class="fu-softphone-callbar-status">
+                <span class="fu-softphone-callbar-title" id="softphone-callbar-title">Kiezen…</span>
+                <span class="fu-softphone-callbar-sub" id="softphone-callbar-sub"></span>
+              </div>
+              <span class="fu-softphone-callbar-timer" id="softphone-callbar-timer">00:00</span>
+              <div class="fu-softphone-callbar-actions">
+                <button type="button" class="fu-softphone-callbar-btn mute" id="softphone-mute" title="Microfoon dempen">
+                  <i class="ti ti-microphone"></i>
+                </button>
+                <button type="button" class="fu-softphone-callbar-btn hangup" id="softphone-hangup" title="Ophangen">
+                  <i class="ti ti-phone-off"></i>
+                </button>
+              </div>
+            </div>
+            <audio id="softphone-audio" autoplay></audio>
 
             <!-- Uitkomst-panel: verschijnt na "Bel nu" of "Zoom openen" en
                  laat de sales-user een uitkomst kiezen. Cadans wordt
@@ -4281,6 +4391,270 @@
       }
     }
 
+    // ── Cockpit softphone (WebRTC via SIP.js op VoIPGRID) ──────────────
+    // Registreert 1x per sessie op wss://websocket.voipgrid.nl. Bellen =
+    // SIP INVITE naar sip:<nummer>@<domain>. Remote audio → #softphone-
+    // audio. Bij Terminated → uitkomst-panel automatisch open zodat de
+    // cadans (Fase 2) doorloopt.
+    const _softphone = {
+      available   : false,     // SIP.js geladen én config configured
+      status      : 'idle',    // idle | connecting | connected | disconnected | failed | disabled
+      ua          : null,      // SIP.js UserAgent
+      registerer  : null,      // SIP.js Registerer
+      session     : null,      // actieve Inviter/Session
+      config      : null,      // { wss, user, domain, password } — password nooit loggen
+      muted       : false,
+      timerHandle : null,
+      timerStart  : 0,
+      currentLead : null,
+    };
+
+    function _setSoftphoneStatus(status, labelOverride) {
+      _softphone.status = status;
+      const box = document.getElementById('softphone-status');
+      const lbl = document.getElementById('softphone-label');
+      const btn = document.getElementById('softphone-retry');
+      if (box) {
+        box.classList.remove('connecting','connected','disconnected','failed','disabled');
+        box.classList.add(status);
+      }
+      if (lbl) {
+        const map = {
+          idle         : '○ Verbinden…',
+          connecting   : '○ Verbinden…',
+          connected    : '● Verbonden',
+          disconnected : '○ Niet verbonden',
+          failed       : '○ Verbinding mislukt',
+          disabled     : 'Softphone niet gekoppeld',
+        };
+        lbl.textContent = labelOverride || map[status] || '';
+      }
+      if (btn) btn.hidden = !(status === 'disconnected' || status === 'failed');
+    }
+
+    async function _loadSoftphoneConfig() {
+      try {
+        const r = await window.AgentShared.apiFetch('/api/voys-sip-config');
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) return null;
+        if (!d.configured) return null;
+        return { wss: d.wss, user: d.user, domain: d.domain, password: d.password };
+      } catch (_) { return null; }
+    }
+
+    async function _initSoftphone() {
+      // SIP.js library check.
+      const SIPLib = window.SIP;
+      if (!SIPLib || !SIPLib.UserAgent) {
+        _setSoftphoneStatus('disabled', 'Softphone-bibliotheek niet geladen');
+        return;
+      }
+      _setSoftphoneStatus('connecting');
+      const cfg = await _loadSoftphoneConfig();
+      if (!cfg) {
+        _softphone.available = false;
+        _setSoftphoneStatus('disabled');
+        return;
+      }
+      _softphone.config = cfg;
+      try {
+        const uri = SIPLib.UserAgent.makeURI('sip:' + cfg.user + '@' + cfg.domain);
+        if (!uri) throw new Error('SIP URI ongeldig');
+        const ua = new SIPLib.UserAgent({
+          uri,
+          transportOptions      : { server: cfg.wss },
+          authorizationUsername : cfg.user,
+          authorizationPassword : cfg.password,
+          logBuiltinEnabled     : false,   // voorkom dat SIP.js in de default console debug print
+          logLevel              : 'warn',
+        });
+        _softphone.ua = ua;
+        await ua.start();
+        const registerer = new SIPLib.Registerer(ua);
+        _softphone.registerer = registerer;
+        registerer.stateChange.addListener((state) => {
+          // SIP.js RegistererState: Initial | Registered | Unregistered | Terminated
+          if (state === 'Registered')   { _softphone.available = true;  _setSoftphoneStatus('connected'); }
+          else if (state === 'Unregistered') { _softphone.available = false; _setSoftphoneStatus('disconnected'); }
+          else if (state === 'Terminated')   { _softphone.available = false; _setSoftphoneStatus('failed'); }
+        });
+        await registerer.register();
+      } catch (e) {
+        // NB: e kan config-details bevatten in ontwikkeling — we loggen
+        // alleen de message, nooit e.stack met SIP-URI's die password
+        // kunnen bevatten via authorization header (SIP.js verbergt dit
+        // zelf ook, maar wees defensief).
+        console.error('[softphone] init error:', e?.message || 'onbekend');
+        _softphone.available = false;
+        _setSoftphoneStatus('failed');
+      }
+    }
+
+    async function _softphoneRetry() {
+      _softphone.available = false;
+      try {
+        if (_softphone.registerer) { try { await _softphone.registerer.unregister(); } catch (_) {} }
+        if (_softphone.ua) { try { await _softphone.ua.stop(); } catch (_) {} }
+      } catch (_) {}
+      _softphone.ua = null;
+      _softphone.registerer = null;
+      await _initSoftphone();
+    }
+
+    function _showCallbar(show) {
+      const bar = document.getElementById('softphone-callbar');
+      if (bar) bar.hidden = !show;
+    }
+    function _updateCallbarStatus(title, sub) {
+      const t = document.getElementById('softphone-callbar-title');
+      const s = document.getElementById('softphone-callbar-sub');
+      if (t) t.textContent = title || '';
+      if (s) s.textContent = sub || '';
+    }
+    function _startCallTimer() {
+      _softphone.timerStart = Date.now();
+      const el = document.getElementById('softphone-callbar-timer');
+      if (el) el.textContent = '00:00';
+      _softphone.timerHandle = setInterval(() => {
+        const secs = Math.max(0, Math.floor((Date.now() - _softphone.timerStart) / 1000));
+        const mm = String(Math.floor(secs / 60)).padStart(2, '0');
+        const ss = String(secs % 60).padStart(2, '0');
+        if (el) el.textContent = mm + ':' + ss;
+      }, 1000);
+    }
+    function _stopCallTimer() {
+      if (_softphone.timerHandle) { clearInterval(_softphone.timerHandle); _softphone.timerHandle = null; }
+    }
+
+    function _attachRemoteAudio(session) {
+      // SIP.js Inviter — na Established zit de PeerConnection in
+      // session.sessionDescriptionHandler.peerConnection. Pak de remote
+      // track en hang die aan #softphone-audio.
+      try {
+        const pc = session?.sessionDescriptionHandler?.peerConnection;
+        if (!pc) return;
+        const audioEl = document.getElementById('softphone-audio');
+        if (!audioEl) return;
+        const remoteStream = new MediaStream();
+        pc.getReceivers().forEach((r) => { if (r.track) remoteStream.addTrack(r.track); });
+        audioEl.srcObject = remoteStream;
+        audioEl.play().catch(() => { /* autoplay policies: geen probleem, user heeft al gebeld */ });
+      } catch (e) {
+        console.warn('[softphone] remote audio attach:', e?.message || e);
+      }
+    }
+
+    async function _softphoneCallLead(it) {
+      const rawNumber = _currentCallNumber();
+      if (!rawNumber) { alert('Vul eerst een telefoonnummer in.'); return; }
+      if (!_softphone.available || !_softphone.ua || !_softphone.config) {
+        alert('Softphone niet gekoppeld — uitkomst-panel staat klaar voor handmatige registratie.');
+        return;
+      }
+      const SIPLib = window.SIP;
+      if (!SIPLib || !SIPLib.Inviter) { alert('SIP.js niet geladen.'); return; }
+      // Digits only voor SIP — VoIPGRID accepteert '+' → strip.
+      const digits = rawNumber.replace(/\D/g, '');
+      const target = SIPLib.UserAgent.makeURI('sip:' + digits + '@' + _softphone.config.domain);
+      if (!target) { alert('Ongeldig doel-nummer voor SIP.'); return; }
+
+      _softphone.currentLead = it;
+      _softphone.muted = false;
+      const muteBtn = document.getElementById('softphone-mute');
+      if (muteBtn) { muteBtn.classList.remove('on'); muteBtn.innerHTML = '<i class="ti ti-microphone"></i>'; }
+
+      _showCallbar(true);
+      _updateCallbarStatus('Kiezen…', it?.lead_name || rawNumber);
+      const timerEl = document.getElementById('softphone-callbar-timer');
+      if (timerEl) timerEl.textContent = '00:00';
+
+      const inviter = new SIPLib.Inviter(_softphone.ua, target, {
+        sessionDescriptionHandlerOptions: {
+          constraints: { audio: true, video: false },
+        },
+      });
+      _softphone.session = inviter;
+
+      inviter.stateChange.addListener((state) => {
+        // SessionState: Initial | Establishing | Established | Terminating | Terminated
+        if (state === 'Establishing') {
+          _updateCallbarStatus('Gaat over…', it?.lead_name || rawNumber);
+        } else if (state === 'Established') {
+          _updateCallbarStatus('In gesprek', it?.lead_name || rawNumber);
+          _attachRemoteAudio(inviter);
+          _startCallTimer();
+          // Fire-and-forget: log de call in follow_up_lead_notes zodat
+          // het dashboard 'gebeld' telt (outcome_gestart-tak logt system-
+          // note met outcome_code='call' voor toekomstige verrijking).
+          if (it?.id) {
+            try {
+              window.AgentShared.apiFetch('/api/follow-up-lead-outcome', {
+                method : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body   : JSON.stringify({ lead_id: it.id, outcome: 'offerte_gestart' }),
+              }).catch(() => {});
+              // Dit is een dashboard-only log. Als in Fase 5 een dedicated
+              // 'call-log' outcome-variant komt, wisselen we hier over.
+            } catch (_) { /* fail-soft */ }
+          }
+        } else if (state === 'Terminated') {
+          _stopCallTimer();
+          _showCallbar(false);
+          const audioEl = document.getElementById('softphone-audio');
+          if (audioEl) audioEl.srcObject = null;
+          _softphone.session = null;
+          // Uitkomst-panel automatisch openen zodat sales de outcome
+          // registreert. Zoom-lead was al gefilterd bij de bel-click.
+          try { _openOutcomePanel(false); } catch (_) {}
+        }
+      });
+
+      try {
+        await inviter.invite();
+      } catch (e) {
+        console.error('[softphone] invite error:', e?.message || 'onbekend');
+        _stopCallTimer();
+        _showCallbar(false);
+        _softphone.session = null;
+        alert('Bellen mislukt — uitkomst-panel staat klaar voor handmatige registratie.');
+        try { _openOutcomePanel(false); } catch (_) {}
+      }
+    }
+
+    function _softphoneHangup() {
+      const session = _softphone.session;
+      if (!session) { _showCallbar(false); return; }
+      try {
+        // SIP.js: Established → bye(); anders cancel/reject.
+        const state = session.state;
+        if (state === 'Established') session.bye();
+        else if (state === 'Establishing') session.cancel();
+        else session.dispose && session.dispose();
+      } catch (e) {
+        console.warn('[softphone] hangup:', e?.message || e);
+      }
+      _stopCallTimer();
+    }
+
+    function _softphoneToggleMute() {
+      const session = _softphone.session;
+      if (!session) return;
+      const pc = session?.sessionDescriptionHandler?.peerConnection;
+      if (!pc) return;
+      const senders = pc.getSenders ? pc.getSenders() : [];
+      _softphone.muted = !_softphone.muted;
+      for (const s of senders) {
+        if (s.track && s.track.kind === 'audio') s.track.enabled = !_softphone.muted;
+      }
+      const btn = document.getElementById('softphone-mute');
+      if (btn) {
+        btn.classList.toggle('on', _softphone.muted);
+        btn.innerHTML = _softphone.muted
+          ? '<i class="ti ti-microphone-off"></i>'
+          : '<i class="ti ti-microphone"></i>';
+      }
+    }
+
     // Lees het HUIDIGE nummer uit de belkaart-input. Sales kan het
     // ad-hoc bewerken (bv. mobiel i.p.v. vast); dat overschrijft niets
     // in de DB — puur voor deze poging. Strip spaties/haakjes/streepjes
@@ -4386,20 +4760,27 @@
       const brBtn = document.getElementById('cockpit-belronde');
       if (brBtn) brBtn.addEventListener('click', _toggleBelronde);
 
-      // Voys caller-ID-select: onthoud gekozen nummer (in-memory) +
-      // lazy config-load bij eerste render.
+      // Voys caller-ID-select: hint-only (VoIPGRID kiest server-side).
+      // We laten hem staan voor UI-continuïteit + toekomstige uitbreiding.
       const voysSel = document.getElementById('cockpit-voys');
       if (voysSel) voysSel.addEventListener('change', () => {
         _voysState.selectedCallerId = voysSel.value || null;
       });
       _loadVoysConfig();
 
-      // Belknop → Voys click-to-call (bel-modus) of uitkomst-panel
-      // (zoom-modus). Sales bewerkt eventueel het nummer in de belkaart-
-      // input ad-hoc; _voysCallLead leest die waarde. Als Voys niet
-      // geconfigureerd is toont _voysCallLead een nette melding en het
-      // uitkomst-panel blijft als fallback beschikbaar zodat sales de
-      // outcome alsnog kan loggen.
+      // Softphone: 1x initialiseren + retry/mute/hangup binden.
+      _initSoftphone();
+      const retryBtn = document.getElementById('softphone-retry');
+      if (retryBtn) retryBtn.addEventListener('click', () => _softphoneRetry());
+      const muteBtn  = document.getElementById('softphone-mute');
+      if (muteBtn)  muteBtn.addEventListener('click', () => _softphoneToggleMute());
+      const hangBtn  = document.getElementById('softphone-hangup');
+      if (hangBtn)  hangBtn.addEventListener('click', () => _softphoneHangup());
+
+      // Belknop → softphone-call (bel-modus) of uitkomst-panel (zoom).
+      // Softphone belt via SIP.js op wss://websocket.voipgrid.nl; als de
+      // registratie faalt, valt de UI netjes terug op het uitkomst-panel
+      // voor handmatige registratie (cadans blijft werken).
       const callBtn = document.getElementById('cockpit-call');
       if (callBtn) callBtn.addEventListener('click', async (e) => {
         const mode = callBtn.dataset.mode;
@@ -4409,12 +4790,18 @@
         if (!it) return;
         const isZoom = String(it.lead_kind || 'call') === 'zoom';
         if (isZoom) { _openOutcomePanel(true); return; }
-        // Bel-modus: eerst leeg-check zodat we geen backend-roundtrip
-        // doen voor een lege input, dan panel open + Voys-call.
         const toNumber = _currentCallNumber();
         if (!toNumber) { alert('Vul eerst een telefoonnummer in.'); return; }
-        _openOutcomePanel(false);
-        await _voysCallLead(it, callBtn);
+        // Als de softphone (nog) niet beschikbaar is: open direct het
+        // uitkomst-panel + laat sales handmatig bellen.
+        if (!_softphone.available) {
+          _openOutcomePanel(false);
+          alert(_softphone.status === 'disabled'
+            ? 'Softphone niet gekoppeld — uitkomst-panel staat klaar voor handmatige registratie.'
+            : 'Softphone nog aan het verbinden — probeer over enkele seconden opnieuw of vul de uitkomst handmatig.');
+          return;
+        }
+        await _softphoneCallLead(it);
       });
 
       // Uitkomst-panel: sluiten
