@@ -9,7 +9,7 @@
 // Query:
 //   ?owner=me|all                 (default 'all')
 //   ?kind=zoom|bel|all            (default 'all')
-//   ?view=agenda|reschedule       (default 'agenda')
+//   ?view=agenda|reschedule|afgehandeld  (default 'agenda')
 //   ?limit=<n>                    (default 500, max 1000)
 //
 // Response ?view=agenda:
@@ -139,7 +139,7 @@ export default async function handler(req, res) {
   const q     = req.query || {};
   const owner = ['me', 'all'].includes(q.owner) ? q.owner : 'all';
   const kind  = ['zoom', 'bel', 'all'].includes(q.kind) ? q.kind : 'all';
-  const view  = ['agenda', 'reschedule'].includes(q.view) ? q.view : 'agenda';
+  const view  = ['agenda', 'reschedule', 'afgehandeld'].includes(q.view) ? q.view : 'agenda';
   let limit   = Number(q.limit) || 500;
   limit = Math.max(1, Math.min(1000, Math.floor(limit)));
 
@@ -166,6 +166,70 @@ export default async function handler(req, res) {
         status        : r.status,
         owner_id      : r.owner_id,
         owner_name    : r.owner_id ? (nameById[r.owner_id] || null) : null,
+      }));
+      return res.status(200).json({ items });
+    }
+
+    // ── ?view=afgehandeld: recent afgehandelde appointments ─────────
+    // (completed / cancelled / no_show, updated_at binnen de laatste 3
+    // dagen) zodat de sales-user via de UI naar de detail kan om de
+    // "↩ Uitkomst corrigeren"-strip te gebruiken. Alleen SELECT; GHL/
+    // andere views ongemoeid. 42P01 → lege lijst (fail-soft).
+    if (view === 'afgehandeld') {
+      const threeDaysAgoIso = new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString();
+      const RICH_COLS = 'id, lead_name, lead_phone, lead_email, scheduled_at, status, updated_at, prev_state, ghl_appointment_id, zoom_join_url, owner_id';
+      const MID_COLS  = 'id, lead_name, lead_phone, lead_email, scheduled_at, status, updated_at, ghl_appointment_id, zoom_join_url, owner_id';
+      const MIN_COLS  = 'id, lead_name, lead_phone, lead_email, scheduled_at, status, updated_at, owner_id';
+
+      const buildDone = (cols) => {
+        let qq = supabaseAdmin.from('follow_up_appointments')
+          .select(cols)
+          .in('status', ['completed', 'cancelled', 'no_show'])
+          .gte('updated_at', threeDaysAgoIso)
+          .order('updated_at', { ascending: false })
+          .limit(limit);
+        if (owner === 'me') qq = qq.eq('owner_id', user.id);
+        return qq;
+      };
+      const tryDone = async (cols) => {
+        const { data, error } = await buildDone(cols);
+        if (error) {
+          if (error.code === '42P01') return { rows: null, err: 'MISSING_TABLE' };
+          if (error.code === '42703') return { rows: null, err: '42703' };
+          throw new Error(error.message);
+        }
+        return { rows: data || [], err: null };
+      };
+
+      let rr = await tryDone(RICH_COLS);
+      if (rr.err === '42703') rr = await tryDone(MID_COLS);
+      if (rr.err === '42703') rr = await tryDone(MIN_COLS);
+      if (rr.err === 'MISSING_TABLE' || rr.err === '42703') {
+        return res.status(200).json({ items: [] });
+      }
+      const rowsDone = rr.rows || [];
+
+      const ownerIds = [...new Set(rowsDone.map((r) => r.owner_id).filter(Boolean))];
+      const nameById = await lookupOwnerNames(ownerIds);
+      const items = rowsDone.map((r) => ({
+        source              : 'appointment',
+        id                  : r.id,
+        lead_name           : r.lead_name,
+        lead_phone          : r.lead_phone,
+        lead_email          : r.lead_email,
+        scheduled_at        : r.scheduled_at,
+        terugbel_datum      : r.scheduled_at,     // alias voor UI
+        kind                : 'zoom',
+        lead_kind           : 'zoom',
+        status              : r.status,
+        updated_at          : r.updated_at || null,
+        // prev_state kan een jsonb of ontbreken zijn — client heeft
+        // alleen de boolean nodig voor het corrigeer-teken.
+        prev_state_present  : !!(r.prev_state && typeof r.prev_state === 'object' && Object.keys(r.prev_state).length),
+        ghl_appointment_id  : r.ghl_appointment_id || null,
+        zoom_join_url       : r.zoom_join_url || null,
+        owner_id            : r.owner_id,
+        owner_name          : r.owner_id ? (nameById[r.owner_id] || null) : null,
       }));
       return res.status(200).json({ items });
     }

@@ -2601,6 +2601,26 @@
       font-size: 13px; font-weight: 800; color: var(--ink);
       min-width: 110px; white-space: nowrap;
     }
+    /* Time-cell voor 'afgehandeld'-view: label + waarde onder elkaar. */
+    .fu-af-row .time .k {
+      font-size: 10px; text-transform: uppercase; letter-spacing: .4px;
+      color: var(--muted-2); font-weight: 700;
+    }
+    .fu-af-row .time .v {
+      font-size: 12.5px; font-weight: 800; color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+    /* Status-badge specifiek voor de afgehandeld-view (kleur-gecodeerd
+       zodat de sales-user in één oogopslag ziet: groen=Afgerond,
+       oranje=No-show, grijs=Geannuleerd). */
+    .fu-af-status-badge {
+      display: inline-block; padding: 3px 10px; border-radius: 999px;
+      font-size: 11px; font-weight: 700; letter-spacing: .3px;
+      white-space: nowrap;
+    }
+    .fu-af-status-badge.r-green  { background: #059669; color: #fff; }
+    .fu-af-status-badge.r-gray   { background: #4b5563; color: #fff; }
+    .fu-af-status-badge.r-orange { background: #ea580c; color: #fff; }
     .fu-af-row .avatar {
       width: 32px; height: 32px; border-radius: 8px;
       background: var(--ink);
@@ -3360,6 +3380,7 @@
           <button class="fu-cockpit-pill" data-af-filter="kind" data-value="zoom">📹 Zoom</button>
           <button class="fu-cockpit-pill" data-af-filter="kind" data-value="bel">📞 Terugbel</button>
           <button class="fu-cockpit-pill" data-af-filter="kind" data-value="reschedule">💤 Wacht op reschedule</button>
+          <button class="fu-cockpit-pill" data-af-filter="kind" data-value="afgehandeld">✓ Afgehandeld</button>
         </div>
         <label class="fu-cockpit-toggle"><input type="checkbox" id="af-mine"> Mijn afspraken</label>
         <button class="fu-lead-btn" id="af-refresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
@@ -6765,8 +6786,11 @@
       const s = _fase3State.afspraken;
       const p = new URLSearchParams();
       const isReschedule = s.kind === 'reschedule';
+      const isDone       = s.kind === 'afgehandeld';
       if (isReschedule) {
         p.set('view', 'reschedule');
+      } else if (isDone) {
+        p.set('view', 'afgehandeld');
       } else if (s.kind !== 'all') {
         p.set('kind', s.kind);
       }
@@ -6782,7 +6806,7 @@
           throw new Error(d?.error || 'HTTP ' + r.status);
         }
         _fase3State.afspraken.items = d.items || [];
-        _fase3State.afspraken.viewMode = isReschedule ? 'reschedule' : 'agenda';
+        _fase3State.afspraken.viewMode = isReschedule ? 'reschedule' : (isDone ? 'afgehandeld' : 'agenda');
         const cntEl = document.getElementById('tab-count-afspraken');
         if (cntEl) cntEl.textContent = String(d.items?.length ?? '—');
         _renderAfspraken();
@@ -6808,26 +6832,35 @@
       const el = document.getElementById('af-list');
       if (!el) return;
       const items   = _fase3State.afspraken.items || [];
-      const isRes   = _fase3State.afspraken.viewMode === 'reschedule';
+      const view    = _fase3State.afspraken.viewMode || 'agenda';
+      const isRes   = view === 'reschedule';
+      const isDone  = view === 'afgehandeld';
       if (!items.length) {
-        const msg = isRes
-          ? 'Niets wacht op reschedule.'
-          : 'Geen geplande afspraken in deze selectie.';
-        const icon = isRes ? 'ti-alarm-off' : 'ti-calendar-off';
+        const msg = isRes  ? 'Niets wacht op reschedule.'
+                  : isDone ? 'Niks recent afgehandeld.'
+                  :          'Geen geplande afspraken in deze selectie.';
+        const icon = isRes  ? 'ti-alarm-off'
+                   : isDone ? 'ti-checks'
+                   :          'ti-calendar-off';
         el.innerHTML = `<div class="fu-empty"><i class="ti ${icon} fu-empty-icon"></i>${esc(msg)}</div>`;
         return;
       }
-      // Groepeer per day-label chronologisch (items zijn al ASC).
+      // Groepeer per day-label. Voor 'afgehandeld' gebruiken we
+      // updated_at (afhandelmoment) — items komen server-side al
+      // DESC-gesorteerd op updated_at. Voor de andere views blijft
+      // terugbel_datum/scheduled_at de basis.
       const groups = new Map();
       for (const it of items) {
-        const dateSrc = it.terugbel_datum || it.scheduled_at || null;
+        const dateSrc = isDone
+          ? (it.updated_at || it.scheduled_at || null)
+          : (it.terugbel_datum || it.scheduled_at || null);
         const key = dateSrc ? String(dateSrc).slice(0, 10) : 'onbekend';
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(it);
       }
       const html = [...groups.entries()].map(([key, arr]) => {
         const label = key === 'onbekend' ? 'Onbekende datum' : _dayLabel(key + 'T12:00:00');
-        const rows = arr.map((it) => _renderAfspraakRow(it, isRes)).join('');
+        const rows = arr.map((it) => _renderAfspraakRow(it, isRes, isDone)).join('');
         return `<div class="fu-af-daygroup">
           <div class="fu-af-daygroup-head"><span>${esc(label)}</span><span class="cnt">${arr.length}</span></div>
           ${rows}
@@ -6862,7 +6895,7 @@
       });
     }
 
-    function _renderAfspraakRow(it, isRes) {
+    function _renderAfspraakRow(it, isRes, isDone) {
       const isAppt = it.source === 'appointment';
       const isZoom = String(it.kind || it.lead_kind || 'call') === 'zoom' || isAppt;
       const initials = _leadInitials(it.lead_name);
@@ -6871,12 +6904,25 @@
         ? '<span class="kind-badge zoom">📹 Zoom</span>'
         : '<span class="kind-badge bel">📞 Terugbel</span>';
       const statusLbl = it.status ? _fmtStatusLabel(it.status) : (it.lead_status ? _fmtStatusLabel(it.lead_status) : '');
-      const statusBadge = statusLbl
-        ? `<span class="fu-cockpit-mini-badge" title="Status">${esc(statusLbl)}</span>`
-        : '';
-      // Voicememo-indicatie voor Zoom-appointments.
+
+      // Voor 'afgehandeld': kleur-gecodeerd status-badge (groen /
+      // grijs / oranje) én prev_state-markering. Voor andere views:
+      // neutrale badge.
+      let statusBadge = '';
+      if (isDone) {
+        const statusCls = it.status === 'completed'  ? 'r-green'
+                       : it.status === 'cancelled'  ? 'r-gray'
+                       : it.status === 'no_show'    ? 'r-orange'
+                       : 'r-gray';
+        statusBadge = `<span class="fu-af-status-badge ${statusCls}" title="Status">${esc(statusLbl || '—')}</span>`;
+      } else if (statusLbl) {
+        statusBadge = `<span class="fu-cockpit-mini-badge" title="Status">${esc(statusLbl)}</span>`;
+      }
+
+      // Voicememo-indicatie voor Zoom-appointments (niet zinvol bij
+      // afgehandeld — het gesprek is voorbij).
       let vmBadge = '';
-      if (isAppt) {
+      if (isAppt && !isDone) {
         vmBadge = it.voicememo_status === 'sent'
           ? '<span class="fu-cockpit-mini-badge zoom" title="Voicememo verstuurd">✓ voicememo</span>'
           : '<span class="fu-cockpit-mini-badge" title="Voicememo nog niet verstuurd">○ voicememo</span>';
@@ -6884,14 +6930,28 @@
       const owner = it.owner_name
         ? `<span class="owner"><i class="ti ti-user"></i> ${esc(it.owner_name)}</span>`
         : `<span class="owner" style="opacity:.6"><i class="ti ti-user-off"></i> —</span>`;
-      const timeSrc = it.terugbel_datum || it.scheduled_at;
 
-      // Actie-kolom: appointments openen de in-cockpit detail-modal;
-      // bel-lead opent de belkaart via Werklijst. Grote "Open Zoom"-knop
-      // in de rij is bewust weg — Zoom-link staat in de detail-modal.
+      // Tijd-kolom: voor 'afgehandeld' tonen we "Afgehandeld <datum>"
+      // op basis van updated_at. Anders het geplande moment.
+      const timeSrc = isDone
+        ? (it.updated_at || it.scheduled_at)
+        : (it.terugbel_datum || it.scheduled_at);
+      const timeLabel = isDone
+        ? `<div class="time"><div class="k">Afgehandeld</div><div class="v">${esc(_fmtHMwithDate(timeSrc))}</div></div>`
+        : `<div class="time">${esc(_fmtHMwithDate(timeSrc))}</div>`;
+
+      // Actie-kolom: bij 'afgehandeld' ALTIJD "Openen" (voor de
+      // corrigeer-strip in de detail); prev_state-markering als
+      // teken dat corrigeren mogelijk is.
       let actionHtml = '';
       let rowClickAttr = '';
-      if (isRes || isAppt) {
+      if (isDone) {
+        const correctHint = it.prev_state_present
+          ? ' <i class="ti ti-arrow-back-up" title="Corrigeren beschikbaar"></i>'
+          : '';
+        actionHtml = `<button type="button" class="fu-lead-btn" data-af-appt="${esc(it.id)}" title="Open afspraak-detail"><i class="ti ti-external-link"></i> Openen${correctHint}</button>`;
+        rowClickAttr = `data-af-appt-row="${esc(it.id)}" style="cursor:pointer"`;
+      } else if (isRes || isAppt) {
         actionHtml = `<button type="button" class="fu-lead-btn" data-af-appt="${esc(it.id)}" title="Open afspraak-detail"><i class="ti ti-external-link"></i> Openen</button>`;
         rowClickAttr = `data-af-appt-row="${esc(it.id)}" style="cursor:pointer"`;
       } else {
@@ -6899,7 +6959,7 @@
       }
 
       return `<div class="fu-af-row" ${rowClickAttr}>
-        <div class="time">${esc(_fmtHMwithDate(timeSrc))}</div>
+        ${timeLabel}
         <div class="avatar ${avaCls}">${esc(initials)}</div>
         <div>
           <div class="name">${esc(it.lead_name || '—')} ${it.is_hot ? '<span class="fu-cockpit-mini-badge hot">🔥</span>' : ''}</div>
