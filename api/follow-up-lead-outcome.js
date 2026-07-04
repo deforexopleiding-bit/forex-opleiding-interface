@@ -200,6 +200,36 @@ export default async function handler(req, res) {
   const nowIso = new Date().toISOString();
   const currentAttempts = Number(leadRow.attempts || 0);
   const currentKind     = String(leadRow.lead_kind || 'call');
+  const isEventLead     = String(leadRow.source || '') === 'event';
+  const sourceRef       = (leadRow.source_ref && typeof leadRow.source_ref === 'object') ? leadRow.source_ref : {};
+  // Voor event-leads: strakke 12→18→volgende-dag-12-cadans (event-datum
+  // is de deadline). We berekenen in Europe/Amsterdam om DST correct
+  // te handelen. Fallback op UTC als sourceRef.event_date ontbreekt.
+  function amsPartsOf(refDate) {
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Europe/Amsterdam', hourCycle: 'h23',
+      year:'numeric', month:'2-digit', day:'2-digit',
+      hour:'2-digit', minute:'2-digit', second:'2-digit',
+    });
+    const parts = dtf.formatToParts(refDate);
+    const m = {}; for (const p of parts) m[p.type] = p.value;
+    return { y:+m.year, mo:+m.month, d:+m.day, h:+m.hour, mi:+m.minute };
+  }
+  function amsterdamIsoAt(y, mo, d, h, mi) {
+    // Construct UTC-timestamp met deze componenten, dan corrigeer met
+    // Amsterdam-offset op die referentie.
+    const utc = new Date(Date.UTC(y, mo - 1, d, h, mi, 0));
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Europe/Amsterdam', hourCycle: 'h23',
+      year:'numeric', month:'2-digit', day:'2-digit',
+      hour:'2-digit', minute:'2-digit', second:'2-digit',
+    });
+    const parts = dtf.formatToParts(utc);
+    const m = {}; for (const p of parts) m[p.type] = p.value;
+    const asUTC = Date.UTC(+m.year, +m.month - 1, +m.day, +m.hour, +m.minute, +m.second);
+    const offMin = Math.round((asUTC - utc.getTime()) / 60000);
+    return new Date(utc.getTime() - offMin * 60000).toISOString();
+  }
 
   // Bouw patch + noteText per outcome.
   const patch = {
@@ -213,7 +243,33 @@ export default async function handler(req, res) {
   if (outcome === 'geen_gehoor') {
     attemptsAfter = currentAttempts + 1;
     patch.attempts = attemptsAfter;
-    if (attemptsAfter >= MAX_ATTEMPTS) {
+    if (isEventLead) {
+      // Event-cadans: uur < 18 → vandaag 18:00; uur ≥ 18 → morgen 12:00.
+      // Mits <= event-datum, anders lead_status='niet_bereikbaar'.
+      const now = new Date();
+      const cur = leadRow.terugbel_datum ? new Date(leadRow.terugbel_datum) : now;
+      const curAms = amsPartsOf(cur);
+      const eventDate = sourceRef.event_date ? new Date(sourceRef.event_date) : null;
+      let nextIso;
+      if (curAms.h < 18) {
+        nextIso = amsterdamIsoAt(curAms.y, curAms.mo, curAms.d, 18, 0);
+      } else {
+        // volgende dag 12:00
+        const d2 = new Date(Date.UTC(curAms.y, curAms.mo - 1, curAms.d + 1));
+        nextIso = amsterdamIsoAt(d2.getUTCFullYear(), d2.getUTCMonth() + 1, d2.getUTCDate(), 12, 0);
+      }
+      if (eventDate && new Date(nextIso).getTime() > eventDate.getTime()) {
+        // Slot komt voorbij de event-datum → onbereikbaar.
+        patch.lead_status    = 'niet_bereikbaar';
+        patch.terugbel_datum = null;
+        noteText = `Geen gehoor (event-lead) — geen sloten meer vóór event; onbereikbaar`;
+      } else {
+        patch.lead_status    = 'terugbellen';
+        patch.terugbel_datum = nextIso;
+        const when = new Date(nextIso).toLocaleString('nl-NL', { timeZone: 'Europe/Amsterdam', dateStyle: 'short', timeStyle: 'short' });
+        noteText = `Geen gehoor (event-lead, poging ${attemptsAfter}) — volgende poging ${when}`;
+      }
+    } else if (attemptsAfter >= MAX_ATTEMPTS) {
       patch.lead_status    = 'niet_bereikbaar';
       patch.terugbel_datum = null;
       noteText = `Geen gehoor — poging ${attemptsAfter}/${MAX_ATTEMPTS} · onbereikbaar, actie nodig`;
@@ -325,6 +381,23 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'update: ' + error.message });
     }
     if (!updated) return res.status(500).json({ error: 'update: geen resultaat' });
+
+    // Event-lead 'called'-write-back: zet event_attendees.called=true als
+    // de outcome een ECHT-gesproken uitkomst is. Niet bij geen_gehoor /
+    // voicemail / foutief_nummer / noshow (dat waren pogingen, geen echte
+    // gesprekken). Fail-soft — mislukking blokkeert de outcome niet.
+    const SPOKEN_OUTCOMES = new Set(['terugbel', 'sale', 'geen_interesse', 'gesprek_gehad', 'zoom_ingepland']);
+    if (isEventLead && SPOKEN_OUTCOMES.has(outcome) && sourceRef.attendee_id) {
+      try {
+        const { error: aErr } = await supabaseAdmin
+          .from('event_attendees')
+          .update({ called: true })
+          .eq('id', sourceRef.attendee_id);
+        if (aErr) console.warn('[follow-up-lead-outcome] event_attendees.called write-back:', aErr.message);
+      } catch (e) {
+        console.warn('[follow-up-lead-outcome] event_attendees write-back error:', e?.message || e);
+      }
+    }
 
     // Auto-note-insert. Failure blokkeert de state-transitie niet.
     try {

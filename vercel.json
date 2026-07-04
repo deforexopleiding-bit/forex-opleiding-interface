@@ -57,6 +57,10 @@
       "schedule": "0 6 * * *"
     },
     {
+      "path": "/api/cron-event-belronde",
+      "schedule": "0 7 * * *"
+    },
+    {
       "path": "/api/cron-cancellation-cleanup",
       "schedule": "30 2 * * *"
     },
