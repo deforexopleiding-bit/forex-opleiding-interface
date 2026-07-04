@@ -1061,6 +1061,61 @@
     .fu-cockpit-bucket.snoozed .fu-cockpit-bucket-head { color: #6b7280; }
     .fu-cockpit-leadlist { display: flex; flex-direction: column; gap: 6px; }
 
+    /* Sub-groepering per dag binnen 'Komende 7 dagen'. */
+    .fu-cockpit-daygroup { display: flex; flex-direction: column; gap: 6px; }
+    .fu-cockpit-daygroup + .fu-cockpit-daygroup { margin-top: 8px; }
+    .fu-cockpit-daygroup-head {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 11px; font-weight: 700; letter-spacing: .4px;
+      text-transform: uppercase;
+      color: var(--muted-2, rgba(0,0,0,.5));
+      padding: 2px 4px 4px;
+      border-bottom: 1px dashed var(--line, rgba(0,0,0,.1));
+    }
+    .fu-cockpit-daygroup-head .cnt {
+      background: transparent; border: 1px solid currentColor;
+      padding: 0 6px; border-radius: 10px; font-size: 10px;
+      opacity: .7;
+    }
+
+    /* Free-slots popover — verschijnt onder een datum-picker met de
+       klikbare vrije tijden per dag. */
+    .fu-freeslots-toggle {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11.5px; padding: 4px 8px;
+    }
+    .fu-freeslots-panel {
+      background: var(--paper, #fff);
+      border: 1px solid var(--line, rgba(0,0,0,.1));
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-top: 8px;
+      max-height: 260px; overflow-y: auto;
+    }
+    .fu-freeslots-panel[hidden] { display: none; }
+    .fu-freeslots-loading, .fu-freeslots-empty, .fu-freeslots-error {
+      font-size: 12px; color: var(--muted-2);
+      padding: 6px 4px;
+    }
+    .fu-freeslots-error { color: #b91c1c; }
+    .fu-freeslots-daygroup + .fu-freeslots-daygroup { margin-top: 8px; }
+    .fu-freeslots-daytitle {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .4px; color: var(--muted-2);
+      margin-bottom: 4px;
+    }
+    .fu-freeslots-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+    .fu-freeslots-chip {
+      appearance: none; border: 1px solid var(--line, rgba(0,0,0,.15));
+      background: var(--paper, #fff); color: var(--text, #0f172a);
+      font-size: 12px; padding: 4px 10px; border-radius: 999px;
+      cursor: pointer; font-variant-numeric: tabular-nums;
+      transition: background .12s, border-color .12s, color .12s;
+    }
+    .fu-freeslots-chip:hover {
+      background: #093d54; color: #fff; border-color: #0d4d69;
+    }
+
     .fu-cockpit-leadcard {
       display: flex; align-items: center; gap: 10px;
       padding: 8px 10px;
@@ -3181,7 +3236,9 @@
                 <div class="fu-outcome-planner-actions">
                   <button type="button" class="fu-lead-btn primary" id="cockpit-planner-t-save"><i class="ti ti-check"></i> Inplannen</button>
                   <button type="button" class="fu-lead-btn" id="cockpit-planner-t-cancel">Annuleren</button>
+                  <button type="button" class="fu-lead-btn fu-freeslots-toggle" id="cockpit-planner-t-slots" data-freeslots-date="cockpit-planner-t-date" data-freeslots-time="cockpit-planner-t-time" data-freeslots-panel="cockpit-planner-t-slotspanel"><i class="ti ti-calendar-search"></i> Toon vrije tijden</button>
                 </div>
+                <div class="fu-freeslots-panel" id="cockpit-planner-t-slotspanel" hidden></div>
               </div>
 
               <!-- Zoom-planner (inline) -->
@@ -3200,7 +3257,9 @@
                 <div class="fu-outcome-planner-actions">
                   <button type="button" class="fu-lead-btn primary" id="cockpit-planner-z-save"><i class="ti ti-check"></i> Inplannen</button>
                   <button type="button" class="fu-lead-btn" id="cockpit-planner-z-cancel">Annuleren</button>
+                  <button type="button" class="fu-lead-btn fu-freeslots-toggle" id="cockpit-planner-z-slots" data-freeslots-date="cockpit-planner-z-date" data-freeslots-time="cockpit-planner-z-time" data-freeslots-panel="cockpit-planner-z-slotspanel"><i class="ti ti-calendar-search"></i> Toon vrije tijden</button>
                 </div>
+                <div class="fu-freeslots-panel" id="cockpit-planner-z-slotspanel" hidden></div>
               </div>
 
               <!-- Snooze-picker (inline) -->
@@ -5030,10 +5089,31 @@
       // Bel-lead: gebruik backend bucket + is_hot.
       if (lead.is_hot) return 'hot';
       const b = lead.bucket || 'binnenkort';
-      if (b === 'te_laat')   return 'telaat';
-      if (b === 'vandaag')   return 'vandaag';
-      if (b === 'snoozed')   return 'snoozed';
+      if (b === 'te_laat')     return 'telaat';
+      if (b === 'vandaag')     return 'vandaag';
+      if (b === 'snoozed')     return 'snoozed';
+      if (b === 'komende_7')   return 'week';
       return 'week';
+    }
+
+    // Datum-key voor sub-groepering binnen 'week'. Werkt op leads
+    // (terugbel_datum) én appointments (scheduled_at wordt door de
+    // caller in terugbel_datum ge-map't).
+    function _weekDayKey(item) {
+      const iso = item.terugbel_datum || item.scheduled_at || null;
+      if (!iso) return 'onbekend';
+      try {
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return 'onbekend';
+        return d.toISOString().slice(0, 10);
+      } catch { return 'onbekend'; }
+    }
+
+    // Vergelijk-key voor sortering binnen een bucket (ASC op tijd).
+    function _worklistTimeKey(item) {
+      const iso = item.terugbel_datum || item.scheduled_at || null;
+      const t = iso ? Date.parse(iso) : NaN;
+      return Number.isFinite(t) ? t : Number.MAX_SAFE_INTEGER;
     }
 
     const BUCKET_META = {
@@ -5058,17 +5138,44 @@
         const b = _bucketFor(it);
         (groups[b] = groups[b] || []).push(it);
       }
+      // Sorteer binnen elke bucket ASC op moment (behalve 'hot' — daar
+      // laat de backend-sortering staan).
+      for (const key of Object.keys(groups)) {
+        if (key === 'hot') continue;
+        groups[key].sort((a, b) => _worklistTimeKey(a) - _worklistTimeKey(b));
+      }
       const html = BUCKET_ORDER.map((key) => {
         const arr = groups[key];
         if (!arr || !arr.length) return '';
         const meta = BUCKET_META[key];
-        const cards = arr.map(_renderCockpitCard).join('');
+        // 'week' krijgt sub-groepering per dag zodat je in één oogopslag
+        // ziet wat er per dag te doen is. Andere buckets gewoon plat.
+        let bodyHtml;
+        if (key === 'week') {
+          const byDay = new Map();
+          for (const it of arr) {
+            const dk = _weekDayKey(it);
+            if (!byDay.has(dk)) byDay.set(dk, []);
+            byDay.get(dk).push(it);
+          }
+          const dayKeys = [...byDay.keys()].sort();
+          bodyHtml = dayKeys.map((dk) => {
+            const label = dk === 'onbekend' ? 'Geen datum' : _dayLabel(dk + 'T12:00:00');
+            const cards = byDay.get(dk).map(_renderCockpitCard).join('');
+            return `<div class="fu-cockpit-daygroup">
+              <div class="fu-cockpit-daygroup-head"><span>${esc(label)}</span><span class="cnt">${byDay.get(dk).length}</span></div>
+              ${cards}
+            </div>`;
+          }).join('');
+        } else {
+          bodyHtml = arr.map(_renderCockpitCard).join('');
+        }
         return `<div class="fu-cockpit-bucket ${key}">
           <div class="fu-cockpit-bucket-head">
             <span><i class="ti ${meta.icon}"></i> ${meta.title}</span>
             <span class="cnt">${arr.length}</span>
           </div>
-          <div class="fu-cockpit-leadlist">${cards}</div>
+          <div class="fu-cockpit-leadlist">${bodyHtml}</div>
         </div>`;
       }).join('');
       el.innerHTML = html || '<div class="fu-empty"><i class="ti ti-inbox fu-empty-icon"></i>Geen leads in deze selectie.</div>';
@@ -6107,6 +6214,74 @@
           <div class="fu-cockpit-empty-title">Belronde klaar 🎉</div>
           <div class="fu-cockpit-empty-sub">Er staan geen leads meer in de huidige wachtrij. Zet filters uit voor een breder bereik of stop de belronde.</div>
         `;
+      }
+    }
+
+    // Free-slots: één handler via event-delegation op document, werkt
+    // dus zowel voor de outcome-panel-planners (statisch in DOM) als
+    // voor de afspraak-detail-planners (dynamisch gerender'd via
+    // _renderApptDetail). De knop heeft data-freeslots-date /-time /-panel
+    // attributen die naar de target-IDs wijzen. Nogmaals klikken =
+    // panel dichtklappen.
+    document.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('.fu-freeslots-toggle');
+      if (!btn) return;
+      ev.preventDefault();
+      const dateId  = btn.getAttribute('data-freeslots-date');
+      const timeId  = btn.getAttribute('data-freeslots-time');
+      const panelId = btn.getAttribute('data-freeslots-panel');
+      const panel   = panelId ? document.getElementById(panelId) : null;
+      if (!panel) return;
+      if (!panel.hidden) { panel.hidden = true; return; }
+      await _loadFreeSlotsInto(panel, { dateId, timeId, btn });
+    });
+
+    async function _loadFreeSlotsInto(panel, { dateId, timeId, btn }) {
+      const dateEl = dateId ? document.getElementById(dateId) : null;
+      const dateVal = dateEl?.value || '';
+      panel.hidden = false;
+      panel.innerHTML = '<div class="fu-freeslots-loading"><i class="ti ti-loader-2"></i> Vrije tijden ophalen…</div>';
+      // Als er een datum in de picker staat: alleen die dag ophalen;
+      // anders komende 14 dagen.
+      const url = dateVal
+        ? '/api/follow-up-ghl-free-slots?date=' + encodeURIComponent(dateVal)
+        : '/api/follow-up-ghl-free-slots';
+      try {
+        const r = await window.AgentShared.apiFetch(url);
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+        if (d?.error === 'onbeschikbaar') {
+          panel.innerHTML = '<div class="fu-freeslots-error">GHL is nu niet bereikbaar — kies handmatig een tijd.</div>';
+          return;
+        }
+        const slots = Array.isArray(d?.slots) ? d.slots : [];
+        if (!slots.length) {
+          panel.innerHTML = '<div class="fu-freeslots-empty">Geen vrije tijden gevonden — kies handmatig.</div>';
+          return;
+        }
+        panel.innerHTML = slots.map((day) => {
+          const dayLabel = _dayLabel(day.date + 'T12:00:00') || day.date;
+          const chips = (day.times || []).map((t) =>
+            `<button type="button" class="fu-freeslots-chip" data-date="${esc(day.date)}" data-time="${esc(t)}">${esc(t)}</button>`
+          ).join('');
+          return `<div class="fu-freeslots-daygroup">
+            <div class="fu-freeslots-daytitle">${esc(dayLabel)}</div>
+            <div class="fu-freeslots-chips">${chips}</div>
+          </div>`;
+        }).join('');
+        // Chip-click → vul date + time inputs, sluit panel.
+        panel.querySelectorAll('.fu-freeslots-chip').forEach((chip) => {
+          chip.addEventListener('click', () => {
+            const dv = chip.getAttribute('data-date');
+            const tv = chip.getAttribute('data-time');
+            if (dateEl && dv) dateEl.value = dv;
+            const timeEl = timeId ? document.getElementById(timeId) : null;
+            if (timeEl && tv) timeEl.value = tv;
+            panel.hidden = true;
+          });
+        });
+      } catch (e) {
+        panel.innerHTML = `<div class="fu-freeslots-error">Ophalen mislukt: ${esc(e.message || 'onbekend')}. Kies handmatig een tijd.</div>`;
       }
     }
 
@@ -7185,7 +7360,9 @@
           <div class="fu-outcome-planner-actions">
             <button type="button" class="fu-lead-btn primary" id="appt-tb-save"><i class="ti ti-check"></i> Inplannen</button>
             <button type="button" class="fu-lead-btn" id="appt-tb-cancel">Annuleren</button>
+            <button type="button" class="fu-lead-btn fu-freeslots-toggle" id="appt-tb-slots" data-freeslots-date="appt-tb-date" data-freeslots-time="appt-tb-time" data-freeslots-panel="appt-tb-slotspanel"><i class="ti ti-calendar-search"></i> Toon vrije tijden</button>
           </div>
+          <div class="fu-freeslots-panel" id="appt-tb-slotspanel" hidden></div>
         </div>
       </div>`;
     }
@@ -7347,7 +7524,9 @@
           <div class="fu-outcome-planner-actions">
             <button type="button" class="fu-lead-btn primary" id="appt-verzet-save"><i class="ti ti-check"></i> Verzetten</button>
             <button type="button" class="fu-lead-btn" id="appt-verzet-cancel">Annuleren</button>
+            <button type="button" class="fu-lead-btn fu-freeslots-toggle" id="appt-verzet-slots" data-freeslots-date="appt-verzet-date" data-freeslots-time="appt-verzet-time" data-freeslots-panel="appt-verzet-slotspanel"><i class="ti ti-calendar-search"></i> Toon vrije tijden</button>
           </div>
+          <div class="fu-freeslots-panel" id="appt-verzet-slotspanel" hidden></div>
         </div>
 
         ${_renderApptOutcomePanel(appt)}
