@@ -38,6 +38,11 @@ export async function createGhlAppointment({
     startTime,
     endTime,
     appointmentStatus: 'confirmed',
+    // Accepteer slots buiten de standaard beschikbaarheid (weekend/avond).
+    // Een mens bewust verplaatst/plant — GHL free-slot-check moet niet
+    // blokkeren. Als GHL het veld anders noemt en dit faalt, toont de
+    // error-log de exacte veldnaam die GHL verwacht.
+    ignoreFreeSlotValidation: true,
   };
   if (title)          payload.title          = title;
   if (assignedUserId) payload.assignedUserId = assignedUserId;
@@ -115,12 +120,19 @@ export async function updateGhlAppointmentTime(appointmentId, newStartIso, newEn
       body: JSON.stringify({
         startTime: newStartIso,
         endTime: newEndIso,
+        // Accepteer weekend/avond bij verplaatsen; verkleint 422's.
+        ignoreFreeSlotValidation: true,
       }),
     }
   );
 
   if (!res.ok) {
     const errBody = await res.text();
+    console.error('[ghl-update-appt] failed', {
+      appointmentId,
+      status: res.status,
+      body: (errBody || '').slice(0, 2000),
+    });
     const err = new Error(`GHL appointment update failed: ${res.status} ${errBody}`);
     err.ghlStatus = res.status;
     err.ghlBody = errBody;

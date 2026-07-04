@@ -2569,30 +2569,34 @@
     .fu-tl-undo:disabled { opacity: .5; cursor: not-allowed; }
 
     /* ── Hoogte-fix: werklijst + detail vullen viewport ────────────
-       De queue en detail-kolom nemen de resterende viewport-hoogte in,
-       zodat er veel meer afspraken/leads zichtbaar zijn zonder dat de
-       pagina zelf hoeft te scrollen. Interne scroll (queue) blijft. */
+       De queue en detail-kolom nemen (bijna) de volledige viewport-
+       hoogte in — zichtbare rijen omhoog, interne scroll blijft.
+       Offset verkleind (130px → 70px) zodat er duidelijk meer rijen
+       tegelijk zichtbaar zijn. Ook een grotere min-height voor als de
+       viewport heel klein is (mobiel liggend etc). */
     .fu-cockpit {
       align-items: stretch;
-      min-height: calc(100vh - 130px);
+      min-height: calc(100vh - 70px);
     }
     .fu-cockpit-list {
-      max-height: calc(100vh - 130px);
-      min-height: calc(100vh - 130px);
+      max-height: calc(100vh - 70px);
+      min-height: calc(100vh - 70px);
       display: flex; flex-direction: column;
     }
     .fu-cockpit-buckets {
       flex: 1;
       overflow-y: auto;
       padding-right: 4px;
+      min-height: 640px;
     }
     .fu-cockpit-detail {
-      min-height: calc(100vh - 130px);
+      min-height: calc(100vh - 70px);
     }
 
-    /* Afspraken-lijst ook hoger + scrollbaar */
+    /* Afspraken-lijst ook hoger + scrollbaar (offset 190 → 110) */
     #af-list {
-      max-height: calc(100vh - 190px);
+      max-height: calc(100vh - 110px);
+      min-height: 640px;
       overflow-y: auto;
       display: flex; flex-direction: column; gap: 10px;
       padding-right: 4px;
@@ -4686,7 +4690,15 @@
       if (!bucketsEl) return;
       // Als er al een fetch loopt, markeer dat er nog een gedaan moet
       // worden (KPI's moeten na elke mutatie geactualiseerd blijven).
-      if (_leadsState.loading) { _leadsState.reloadRequested = true; return; }
+      // Direct óók de huidige summary renderen met de bekende counts —
+      // dan flikkert de KPI-strip niet weg terwijl de eerste fetch nog
+      // loopt en zien mutaties die de counts zelf hebben aangepast
+      // (bv. een lokale patch) alvast een up-to-date view.
+      if (_leadsState.loading) {
+        _leadsState.reloadRequested = true;
+        try { renderCockpitSummary(); } catch (_) {}
+        return;
+      }
       _leadsState.loading = true;
       _leadsState.reloadRequested = false;
       bucketsEl.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
@@ -4761,6 +4773,11 @@
         bucketsEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Laden mislukt: ' + esc(e.message || '') + '</div>';
       } finally {
         _leadsState.loading = false;
+        // KPI-strip ALTIJD renderen — ook bij error of race-guard-return.
+        // Zorgt dat de counts (te laat / vandaag / open / snoozed) na
+        // elke mutatie zichtbaar bijwerken zonder afhankelijkheid van
+        // de try-success path.
+        try { renderCockpitSummary(); } catch (_) {}
         // KPI-refresh-race: als tijdens de fetch een mutatie een
         // reload aanvroeg (bv. uitkomst, patchLead), voer die nu uit
         // zodat de KPI's niet blijven hangen op de oude counts.
@@ -5196,6 +5213,11 @@
         // Herlaad wachtrij + detail. keepSelection default true, ook bij
         // filter-verandering blijft selectie behouden zolang lead in view zit.
         if (opts.silentReload !== true) loadLeadsTab();
+        // Ook bij silentReload de KPI-strip in sync trekken zodat een
+        // status/owner/terugbel-mutatie zichtbaar wordt in de counts,
+        // zelfs wanneer de caller expliciet niet wil dat de wachtrij
+        // opnieuw laadt.
+        else { try { renderCockpitSummary(); } catch (_) {} }
       } catch (e) {
         alert('Opslaan mislukt: ' + (e.message || 'onbekend'));
       }
