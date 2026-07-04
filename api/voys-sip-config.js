@@ -11,11 +11,16 @@
 //   VOYS_SIP_USER     — SIP-username (VoIPGRID SIP-account)
 //   VOYS_SIP_DOMAIN   — SIP-domain (bv. voipgrid.nl of het account-domein)
 //   VOYS_SIP_PASSWORD — SIP-password (Sensitive)
+// Optioneel:
+//   VOYS_CALLER_IDS   — komma-gescheiden lijst met publieke nummers voor
+//                        de beller-ID-dropdown. Geen secrets — publieke
+//                        nummers die aan het account zijn toegekend.
 //
 // Response:
-//   { wss, user, domain, password, configured } bij ok.
-//   { configured: false } als ook maar één van de vier ontbreekt (geen
-//   half werk — anders faalt de UserAgent bij register).
+//   { wss, user, domain, password, caller_ids, configured } bij ok.
+//   { configured: false, caller_ids: [] } als ook maar één van de vier
+//   verplichte env-vars ontbreekt (geen half werk — anders faalt de
+//   UserAgent bij register).
 
 import { createUserClient } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -41,14 +46,20 @@ export default async function handler(req, res) {
   const password = process.env.VOYS_SIP_PASSWORD || '';
   const configured = !!(wss && user_ && domain && password);
 
+  const idsRaw = String(process.env.VOYS_CALLER_IDS || '').trim();
+  const callerIds = idsRaw
+    ? idsRaw.split(',').map((s) => s.trim()).filter(Boolean)
+    : [];
+
   if (!configured) {
-    return res.status(200).json({ configured: false });
+    return res.status(200).json({ configured: false, caller_ids: callerIds });
   }
   return res.status(200).json({
-    configured: true,
+    configured : true,
     wss,
-    user     : user_,
+    user       : user_,
     domain,
     password,
+    caller_ids : callerIds,
   });
 }

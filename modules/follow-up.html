@@ -4348,16 +4348,13 @@
     };
 
     async function _loadVoysConfig() {
+      // Caller-IDs komen nu uit /api/voys-sip-config (dezelfde call die
+      // de softphone-registratie doet); /api/voys-config gaf 401 door
+      // timing (permission-check vóór session-hydratie). Deze functie
+      // is een no-op shim voor legacy call-sites; de echte vulling
+      // gebeurt in _loadSoftphoneConfig().
       if (_voysState.loaded) return _voysState;
       _voysState.loaded = true;
-      try {
-        const r = await window.AgentShared.apiFetch('/api/voys-config');
-        const d = await r.json().catch(() => ({}));
-        if (r.ok) {
-          _voysState.callerIds  = Array.isArray(d.caller_ids) ? d.caller_ids : [];
-          _voysState.configured = !!d.configured;
-        }
-      } catch (_) { /* fail-soft */ }
       _renderVoysSelect();
       return _voysState;
     }
@@ -4483,6 +4480,13 @@
         const r = await window.AgentShared.apiFetch('/api/voys-sip-config');
         const d = await r.json().catch(() => ({}));
         if (!r.ok) return null;
+        // Caller-IDs komen nu uit dezelfde sip-config-call (voys-config
+        // gaf 401 door timing). Ook bij configured=false vullen we de
+        // dropdown alvast als caller_ids meegestuurd zijn.
+        _voysState.callerIds  = Array.isArray(d.caller_ids) ? d.caller_ids : [];
+        _voysState.configured = !!d.configured;
+        _voysState.loaded     = true;
+        try { _renderVoysSelect(); } catch (_) { /* fail-soft */ }
         if (!d.configured) return null;
         return { wss: d.wss, user: d.user, domain: d.domain, password: d.password };
       } catch (_) { return null; }
@@ -4627,11 +4631,34 @@
       const timerEl = document.getElementById('softphone-callbar-timer');
       if (timerEl) timerEl.textContent = '00:00';
 
-      const inviter = new SIPLib.Inviter(_softphone.ua, target, {
+      // Beller-ID per gesprek. Als de sales-user een caller-ID heeft
+      // gekozen (niet leeg), sturen we die als P-Asserted-Identity én
+      // Remote-Party-ID mee in de INVITE — Voys/VoIPGRID gebruikt PAI
+      // (RFC 3325) als bron voor de CLI wanneer die toegekend is aan
+      // het account. Remote-Party-ID is de oudere variant die sommige
+      // proxies nog altijd honoreren. Bij leeg = account-standaard,
+      // niets overriden (geen headers → Voys pakt de default CLI).
+      //
+      // Optioneel later te tuneable (na test): een expliciete From-URI
+      // override via inviterOptions.params.fromUri kan worden toegevoegd
+      // als PAI alleen te weinig blijkt. Nu bewust conservatief.
+      const extraHeaders = [];
+      const chosenCid = _voysState.selectedCallerId || '';
+      if (chosenCid) {
+        // Normaliseer naar sip:<digits>@<domain> — laat + weg (E.164
+        // digits) omdat sommige proxies daarop struikelen.
+        const cidDigits = String(chosenCid).replace(/\D/g, '');
+        const cidUri    = 'sip:' + cidDigits + '@' + _softphone.config.domain;
+        extraHeaders.push('P-Asserted-Identity: <' + cidUri + '>');
+        extraHeaders.push('Remote-Party-ID: <' + cidUri + '>;privacy=off;screen=yes');
+      }
+      const inviterOpts = {
         sessionDescriptionHandlerOptions: {
           constraints: { audio: true, video: false },
         },
-      });
+      };
+      if (extraHeaders.length) inviterOpts.extraHeaders = extraHeaders;
+      const inviter = new SIPLib.Inviter(_softphone.ua, target, inviterOpts);
       _softphone.session = inviter;
 
       inviter.stateChange.addListener((state) => {
