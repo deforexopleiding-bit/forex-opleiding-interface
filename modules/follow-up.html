@@ -1229,6 +1229,168 @@
       margin-bottom: 16px;
     }
 
+    /* ── Fase 3 — Afspraken / Sluimerpot / Dashboard / Voicememo ─── */
+    .fu-af-daygroup, .fu-sp-group {
+      background: var(--surface-card, rgba(255,255,255,0.03));
+      border: 1px solid var(--border-default, rgba(255,255,255,0.1));
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin-bottom: 12px;
+    }
+    .fu-af-daygroup-head, .fu-sp-group-head {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 13px; font-weight: 600; letter-spacing: .3px;
+      color: var(--text-secondary, rgba(255,255,255,.8));
+      text-transform: uppercase;
+      padding-bottom: 8px; margin-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .fu-af-daygroup-head .cnt, .fu-sp-group-head .cnt {
+      background: rgba(255,255,255,0.06); border-radius: 999px;
+      padding: 1px 8px; font-size: 11px; letter-spacing: 0;
+      text-transform: none; font-weight: 500;
+    }
+    .fu-af-row, .fu-sp-row {
+      display: grid;
+      grid-template-columns: 60px 34px 1fr auto auto auto;
+      gap: 10px; align-items: center;
+      padding: 8px 10px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 8px;
+      margin-bottom: 6px;
+    }
+    .fu-af-row .time, .fu-sp-row .time {
+      font-size: 13px; font-weight: 600; color: var(--text-primary, #fff);
+      font-variant-numeric: tabular-nums;
+    }
+    .fu-af-row .avatar, .fu-sp-row .avatar {
+      width: 30px; height: 30px; border-radius: 50%; background: #093d54;
+      color: #fff; display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 600;
+    }
+    .fu-af-row .avatar.kind-zoom { background: #0f766e; }
+    .fu-af-row .avatar.src-event, .fu-sp-row .avatar.src-event { background: #7c3aed; }
+    .fu-af-row .name, .fu-sp-row .name {
+      font-size: 13px; color: var(--text-primary, #fff);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .fu-af-row .sub, .fu-sp-row .sub {
+      font-size: 11.5px; color: var(--text-secondary, rgba(255,255,255,.65));
+      margin-top: 2px;
+    }
+    .fu-af-row .owner, .fu-sp-row .owner {
+      font-size: 11.5px; color: var(--text-secondary, rgba(255,255,255,.7));
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .fu-af-row .kind-badge {
+      background: rgba(255,255,255,0.06); border-radius: 999px;
+      padding: 2px 8px; font-size: 11px; color: var(--text-secondary, rgba(255,255,255,.85));
+    }
+    .fu-af-row .kind-badge.zoom { background: rgba(15,118,110,.2); color: #5eead4; }
+    .fu-af-row .kind-badge.bel  { background: rgba(9,61,84,.35); color: #93c5fd; }
+
+    @media (max-width: 720px) {
+      .fu-af-row, .fu-sp-row {
+        grid-template-columns: 1fr auto;
+        row-gap: 4px;
+      }
+      .fu-af-row .time, .fu-af-row .avatar,
+      .fu-sp-row .time, .fu-sp-row .avatar { display: none; }
+    }
+
+    /* Dashboard */
+    .fu-db-kpigrid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px; margin-bottom: 12px;
+    }
+    .fu-db-kpi {
+      background: var(--surface-card, rgba(255,255,255,0.04));
+      border: 1px solid var(--border-default, rgba(255,255,255,0.1));
+      border-radius: 12px; padding: 12px 14px;
+    }
+    .fu-db-kpi .label {
+      font-size: 10.5px; letter-spacing: .5px; text-transform: uppercase;
+      color: var(--text-secondary, rgba(255,255,255,.7));
+    }
+    .fu-db-kpi .value {
+      font-size: 22px; font-weight: 600; color: var(--text-primary, #fff);
+      margin-top: 4px;
+    }
+    .fu-db-kpi.gebeld   { border-left: 3px solid #3b82f6; }
+    .fu-db-kpi.bereikt  { border-left: 3px solid #f59e0b; }
+    .fu-db-kpi.offerte  { border-left: 3px solid #a855f7; }
+    .fu-db-kpi.zoom     { border-left: 3px solid #14b8a6; }
+    .fu-db-kpi.gewonnen { border-left: 3px solid #10b981; }
+
+    .fu-db-table {
+      width: 100%; border-collapse: collapse; font-size: 13px;
+    }
+    .fu-db-table th, .fu-db-table td {
+      padding: 8px 10px; text-align: left;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .fu-db-table th {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+      color: var(--text-secondary, rgba(255,255,255,.65)); font-weight: 600;
+    }
+    .fu-db-table td.num, .fu-db-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .fu-db-conv {
+      display: inline-block; padding: 2px 8px; border-radius: 999px;
+      font-size: 11.5px; font-weight: 600;
+      background: rgba(16,185,129,0.15); color: #86efac;
+    }
+    .fu-db-conv.low { background: rgba(239,68,68,0.15); color: #fca5a5; }
+    .fu-db-conv.mid { background: rgba(234,179,8,0.15); color: #fde047; }
+
+    /* Voicememo */
+    .fu-voicememo-progress {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .fu-voicememo-bar-wrap {
+      flex: 1; height: 8px; background: rgba(255,255,255,0.08);
+      border-radius: 999px; overflow: hidden;
+    }
+    .fu-voicememo-bar {
+      height: 100%; background: linear-gradient(90deg, #10b981, #14b8a6);
+      width: 0%; transition: width .25s ease;
+    }
+    .fu-voicememo-progress-text {
+      font-size: 12px; color: var(--text-secondary, rgba(255,255,255,.75));
+      min-width: 60px; text-align: right;
+    }
+    .fu-voicememo-item {
+      display: grid; grid-template-columns: 60px 1fr auto; gap: 10px;
+      align-items: center;
+      padding: 8px 10px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 8px; margin-bottom: 6px;
+    }
+    .fu-voicememo-item .time {
+      font-size: 12.5px; font-weight: 600; color: var(--text-primary, #fff);
+      font-variant-numeric: tabular-nums;
+    }
+    .fu-voicememo-item .name {
+      font-size: 13px; color: var(--text-primary, #fff);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .fu-voicememo-item .sub {
+      font-size: 11px; color: var(--text-secondary, rgba(255,255,255,.65));
+    }
+    .fu-voicememo-btn {
+      background: #093d54; color: #fff; border: none; border-radius: 8px;
+      padding: 6px 12px; font-size: 12px; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .fu-voicememo-btn:hover { background: #0a4a67; }
+    .fu-voicememo-btn.done {
+      background: rgba(16,185,129,0.15); color: #86efac;
+      border: 1px solid rgba(16,185,129,0.35); cursor: default;
+    }
+
     @media (max-width: 900px) {
       .fu-cockpit { grid-template-columns: 1fr; }
       .fu-cockpit-list { max-height: none; }
@@ -1472,6 +1634,20 @@
         <span>Leads</span>
         <span class="fu-tab-count" id="tab-count-leads">—</span>
       </button>
+      <button class="fu-tab" data-tab="afspraken" role="tab" aria-selected="false">
+        <i class="ti ti-calendar-event" aria-hidden="true"></i>
+        <span>Afspraken</span>
+        <span class="fu-tab-count" id="tab-count-afspraken">—</span>
+      </button>
+      <button class="fu-tab" data-tab="sluimerpot" role="tab" aria-selected="false">
+        <i class="ti ti-moon" aria-hidden="true"></i>
+        <span>Sluimerpot</span>
+        <span class="fu-tab-count" id="tab-count-sluimerpot">—</span>
+      </button>
+      <button class="fu-tab" data-tab="dashboard" role="tab" aria-selected="false">
+        <i class="ti ti-chart-bar" aria-hidden="true"></i>
+        <span>Dashboard</span>
+      </button>
       <button class="fu-tab" data-tab="kalender" role="tab" aria-selected="false">
         <i class="ti ti-calendar" aria-hidden="true"></i>
         <span>Kalender</span>
@@ -1692,6 +1868,9 @@
               <i class="ti ti-player-play" id="cockpit-belronde-icon"></i>
               <span id="cockpit-belronde-lbl">Start belronde</span>
             </button>
+            <button class="fu-lead-btn" id="cockpit-voicememo-open" type="button" title="Voicememo-ronde openen">
+              🎙 Voicememo-ronde
+            </button>
           </div>
           <div class="fu-cockpit-summary" id="cockpit-summary"></div>
           <div class="fu-cockpit-buckets" id="cockpit-buckets">
@@ -1847,6 +2026,80 @@
             </div>
           </div>
         </section>
+      </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!--   FASE 3 — Afspraken / Sluimerpot / Dashboard tabs        -->
+    <!-- ======================================================== -->
+
+    <!-- Afspraken-tab: chronologische lijst van geplande momenten -->
+    <div class="fu-tab-panel" data-panel="afspraken" id="panel-afspraken">
+      <div class="fu-cockpit-filters" style="flex-direction:row;flex-wrap:wrap;gap:12px;margin-bottom:12px">
+        <div class="fu-cockpit-pillgroup" role="group" aria-label="Type">
+          <button class="fu-cockpit-pill active" data-af-filter="kind" data-value="all">Alle</button>
+          <button class="fu-cockpit-pill" data-af-filter="kind" data-value="zoom">📹 Zoom</button>
+          <button class="fu-cockpit-pill" data-af-filter="kind" data-value="bel">📞 Terugbel</button>
+        </div>
+        <label class="fu-cockpit-toggle"><input type="checkbox" id="af-mine"> Mijn afspraken</label>
+        <button class="fu-lead-btn" id="af-refresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+      </div>
+      <div id="af-list"><div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div></div>
+    </div>
+
+    <!-- Sluimerpot-tab: gesluimerde leads gegroepeerd op termijn -->
+    <div class="fu-tab-panel" data-panel="sluimerpot" id="panel-sluimerpot">
+      <div class="fu-cockpit-filters" style="flex-direction:row;flex-wrap:wrap;gap:12px;margin-bottom:12px">
+        <div class="fu-cockpit-pillgroup" role="group" aria-label="Bron">
+          <button class="fu-cockpit-pill active" data-sp-filter="source" data-value="all">Alle bronnen</button>
+          <button class="fu-cockpit-pill" data-sp-filter="source" data-value="retention">Retentie</button>
+          <button class="fu-cockpit-pill" data-sp-filter="source" data-value="event">Event</button>
+        </div>
+        <button class="fu-lead-btn" id="sp-refresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+      </div>
+      <div id="sp-list"><div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div></div>
+    </div>
+
+    <!-- Dashboard-tab: sales-performance -->
+    <div class="fu-tab-panel" data-panel="dashboard" id="panel-dashboard">
+      <div class="fu-cockpit-filters" style="flex-direction:row;flex-wrap:wrap;gap:12px;margin-bottom:12px">
+        <div class="fu-cockpit-pillgroup" role="group" aria-label="Periode">
+          <button class="fu-cockpit-pill active" data-db-period="today">Vandaag</button>
+          <button class="fu-cockpit-pill" data-db-period="week">Week</button>
+          <button class="fu-cockpit-pill" data-db-period="month">Maand</button>
+        </div>
+        <button class="fu-lead-btn" id="db-refresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+      </div>
+      <div id="db-kpis" class="fu-db-kpigrid"></div>
+      <section class="fu-section" style="margin-top:16px">
+        <div class="fu-section-header">
+          <h2 class="fu-section-title"><i class="ti ti-users"></i> Per medewerker</h2>
+        </div>
+        <div id="db-per-user"><div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div></div>
+      </section>
+    </div>
+
+    <!-- Voicememo-modal (auto-open s'ochtends bij Leads-tab) -->
+    <div class="fu-modal-backdrop" id="voicememo-modal" style="display:none;">
+      <div class="fu-modal" role="dialog" aria-modal="true" style="max-width:640px">
+        <div class="fu-modal-header">
+          <h2>🎙 Voicememo-ronde</h2>
+          <button class="fu-modal-close" type="button" id="voicememo-close">&times;</button>
+        </div>
+        <div class="fu-modal-body">
+          <p style="color:var(--text-secondary,rgba(255,255,255,.75));margin-bottom:12px">
+            Stuur een korte voicememo naar iedere Zoom-lead van vandaag om no-shows te voorkomen.
+          </p>
+          <div class="fu-voicememo-progress">
+            <div class="fu-voicememo-bar-wrap"><div class="fu-voicememo-bar" id="voicememo-bar"></div></div>
+            <div class="fu-voicememo-progress-text" id="voicememo-progress-text">—</div>
+          </div>
+          <div id="voicememo-list" style="margin-top:12px"><div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div></div>
+          <div class="fu-modal-actions" style="margin-top:16px">
+            <button type="button" class="fu-lead-btn primary" id="voicememo-all">✓ Alles al verstuurd</button>
+            <button type="button" class="fu-lead-btn" id="voicememo-later">Ik stuur ze zometeen</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -3198,7 +3451,12 @@
       }
       if (tabId === 'leads') {
         loadLeadsTab();
+        // Voicememo-ronde s'ochtends automatisch openen (00:01 – 12:00 lokaal).
+        _maybeAutoOpenVoicememo();
       }
+      if (tabId === 'afspraken')  { loadAfsprakenTab(); }
+      if (tabId === 'sluimerpot') { loadSluimerpotTab(); }
+      if (tabId === 'dashboard')  { loadDashboardTab(); }
     }
 
     // ── Sales-cockpit (Leads-tab, Fase 1) ────────────────────────────────
@@ -3844,6 +4102,17 @@
       // Sales-wizard accepteert ?customer_id=<uuid> om de klant vooraf in
       // te vullen (zie modules/sales.html:1034). Anders sturen we naar de
       // wizard zonder pre-fill zodat sales de klant handmatig invult.
+      //
+      // Log fire-and-forget dat de offerte-flow gestart is — het dashboard
+      // telt dit als 'offerte' zonder dat we op de POST wachten.
+      try {
+        if (it?.id) {
+          window.AgentShared.apiFetch('/api/follow-up-lead-outcome', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lead_id: it.id, outcome: 'offerte_gestart' }),
+          }).catch(() => {});
+        }
+      } catch (_) { /* fail-soft */ }
       let url = '/modules/sales-wizard.html';
       if (it?.customer_id) url += '?customer_id=' + encodeURIComponent(it.customer_id);
       window.location.href = url;
@@ -4185,7 +4454,503 @@
     // wordt lazy geladen bij switchTab('leads') → loadLeadsTab().
     document.addEventListener('DOMContentLoaded', () => {
       _bindCockpitDetail();
+      _bindFase3();
     });
+
+    // ── Fase 3 — Afspraken / Sluimerpot / Dashboard / Voicememo ─────────
+
+    const _fase3State = {
+      afspraken  : { kind: 'all', mine: false, items: [] },
+      sluimerpot : { source: 'all', items: [] },
+      dashboard  : { period: 'today' },
+      voicememo  : { leads: [], counts: null, today: null, autoOpenedFor: null },
+    };
+
+    function _fmtHM(iso) {
+      if (!iso) return '—';
+      try {
+        return new Date(iso).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+      } catch { return iso; }
+    }
+    function _startOfDay(d) {
+      const x = new Date(d); x.setHours(0,0,0,0); return x;
+    }
+    function _dayLabel(iso) {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return '—';
+      const t0 = _startOfDay(new Date());
+      const d0 = _startOfDay(d);
+      const diff = Math.round((d0 - t0) / 86400000);
+      if (diff < 0)  return 'Achterstand · ' + d.toLocaleDateString('nl-NL', { weekday:'long', day:'2-digit', month:'short' });
+      if (diff === 0) return 'Vandaag · ' + d.toLocaleDateString('nl-NL', { weekday:'long', day:'2-digit', month:'short' });
+      if (diff === 1) return 'Morgen · ' + d.toLocaleDateString('nl-NL', { weekday:'long', day:'2-digit', month:'short' });
+      return d.toLocaleDateString('nl-NL', { weekday:'long', day:'2-digit', month:'short', year:'numeric' });
+    }
+
+    // ── AFSPRAKEN-TAB ────────────────────────────────────────────────────
+    async function loadAfsprakenTab() {
+      const listEl = document.getElementById('af-list');
+      if (!listEl) return;
+      listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
+      const s = _fase3State.afspraken;
+      const p = new URLSearchParams();
+      if (s.kind !== 'all') p.set('kind', s.kind);
+      if (s.mine) p.set('owner', 'me');
+      try {
+        const r = await window.AgentShared.apiFetch('/api/follow-up-cockpit-agenda?' + p.toString());
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          if (d?.code === 'MIGRATION_REQUIRED') {
+            listEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Migratie vereist voor agenda.</div>';
+            return;
+          }
+          throw new Error(d?.error || 'HTTP ' + r.status);
+        }
+        _fase3State.afspraken.items = d.items || [];
+        const cntEl = document.getElementById('tab-count-afspraken');
+        if (cntEl) cntEl.textContent = String(d.items?.length ?? '—');
+        _renderAfspraken();
+      } catch (e) {
+        listEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Fout: ' + esc(e.message || '') + '</div>';
+      }
+    }
+
+    function _renderAfspraken() {
+      const el = document.getElementById('af-list');
+      if (!el) return;
+      const items = _fase3State.afspraken.items || [];
+      if (!items.length) {
+        el.innerHTML = '<div class="fu-empty"><i class="ti ti-calendar-off fu-empty-icon"></i>Geen geplande afspraken in deze selectie.</div>';
+        return;
+      }
+      // Groepeer per day-label chronologisch (items zijn al ASC).
+      const groups = new Map();
+      for (const it of items) {
+        const key = it.terugbel_datum ? it.terugbel_datum.slice(0, 10) : 'onbekend';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(it);
+      }
+      const html = [...groups.entries()].map(([key, arr]) => {
+        const label = key === 'onbekend' ? 'Onbekende datum' : _dayLabel(key + 'T12:00:00');
+        const rows = arr.map((it) => {
+          const isZoom = it.lead_kind === 'zoom';
+          const initials = _leadInitials(it.lead_name);
+          const avaCls = isZoom ? 'kind-zoom' : (it.source === 'event' ? 'src-event' : '');
+          const kindBadge = isZoom
+            ? '<span class="kind-badge zoom">📹 Zoom</span>'
+            : '<span class="kind-badge bel">📞 Terugbel</span>';
+          const owner = it.owner_name
+            ? `<span class="owner"><i class="ti ti-user"></i> ${esc(it.owner_name)}</span>`
+            : `<span class="owner" style="opacity:.6"><i class="ti ti-user-off"></i> —</span>`;
+          const btnLbl = isZoom ? 'Open Zoom' : 'Bel nu';
+          return `<div class="fu-af-row">
+            <div class="time">${_fmtHM(it.terugbel_datum)}</div>
+            <div class="avatar ${avaCls}">${esc(initials)}</div>
+            <div>
+              <div class="name">${esc(it.lead_name || '—')} ${it.is_hot ? '<span class="fu-cockpit-mini-badge hot">🔥</span>' : ''}</div>
+              <div class="sub">${esc(it.lead_phone || '')}${it.lead_email ? ' · ' + esc(it.lead_email) : ''}</div>
+            </div>
+            ${kindBadge}
+            ${owner}
+            <button type="button" class="fu-lead-btn primary" data-af-open="${esc(it.id)}"><i class="ti ${isZoom ? 'ti-video' : 'ti-phone-call'}"></i> ${btnLbl}</button>
+          </div>`;
+        }).join('');
+        return `<div class="fu-af-daygroup">
+          <div class="fu-af-daygroup-head"><span>${esc(label)}</span><span class="cnt">${arr.length}</span></div>
+          ${rows}
+        </div>`;
+      }).join('');
+      el.innerHTML = html;
+      // Klik-handler: open lead in cockpit-tab.
+      el.querySelectorAll('[data-af-open]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-af-open');
+          switchTab('leads');
+          // Lead-lijst wordt door loadLeadsTab (in switchTab) opnieuw
+          // opgehaald; wacht kort en probeer te selecteren via een polling
+          // fallback als de lead niet direct in de items zit.
+          const trySelect = (attempt = 0) => {
+            const has = (_leadsState.items || []).some((x) => x.id === id);
+            if (has) { selectLead(id); return; }
+            if (attempt < 20) setTimeout(() => trySelect(attempt + 1), 100);
+          };
+          setTimeout(() => trySelect(0), 150);
+        });
+      });
+    }
+
+    // ── SLUIMERPOT-TAB ────────────────────────────────────────────────────
+    async function loadSluimerpotTab() {
+      const listEl = document.getElementById('sp-list');
+      if (!listEl) return;
+      listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
+      const s = _fase3State.sluimerpot;
+      const p = new URLSearchParams();
+      p.set('view', 'snoozed');
+      if (s.source !== 'all') p.set('source', s.source);
+      try {
+        const r = await window.AgentShared.apiFetch('/api/follow-up-leads-list?' + p.toString());
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          if (d?.code === 'MIGRATION_REQUIRED') {
+            listEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Migratie vereist voor sluimerpot.</div>';
+            return;
+          }
+          throw new Error(d?.error || 'HTTP ' + r.status);
+        }
+        _fase3State.sluimerpot.items = d.leads || [];
+        const cntEl = document.getElementById('tab-count-sluimerpot');
+        if (cntEl) cntEl.textContent = String(d.counts?.snoozed ?? d.leads?.length ?? '—');
+        _renderSluimerpot();
+      } catch (e) {
+        listEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Fout: ' + esc(e.message || '') + '</div>';
+      }
+    }
+
+    function _sluimerBucket(iso) {
+      if (!iso) return 'onbekend';
+      const now = Date.now();
+      const t = Date.parse(iso);
+      if (!Number.isFinite(t)) return 'onbekend';
+      const dagen = Math.round((t - now) / 86400000);
+      if (dagen <= 30)  return 'binnenkort';
+      if (dagen <= 240) return '6maand';
+      return '12maand';
+    }
+    const SP_BUCKET_META = {
+      binnenkort: { title: 'Komt binnenkort terug',   icon: 'ti-hourglass' },
+      '6maand'  : { title: '~6 maanden',              icon: 'ti-moon' },
+      '12maand' : { title: '~12 maanden',             icon: 'ti-moon-2' },
+      onbekend  : { title: 'Onbekende sluimertermijn', icon: 'ti-question-mark' },
+    };
+    const SP_BUCKET_ORDER = ['binnenkort', '6maand', '12maand', 'onbekend'];
+
+    function _renderSluimerpot() {
+      const el = document.getElementById('sp-list');
+      if (!el) return;
+      const items = _fase3State.sluimerpot.items || [];
+      if (!items.length) {
+        el.innerHTML = '<div class="fu-empty"><i class="ti ti-moon-off fu-empty-icon"></i>Geen gesluimerde leads.</div>';
+        return;
+      }
+      const groups = {};
+      for (const it of items) {
+        const b = _sluimerBucket(it.snoozed_until);
+        (groups[b] = groups[b] || []).push(it);
+      }
+      const html = SP_BUCKET_ORDER.map((key) => {
+        const arr = groups[key];
+        if (!arr || !arr.length) return '';
+        const meta = SP_BUCKET_META[key];
+        const rows = arr.map((it) => {
+          const initials = _leadInitials(it.lead_name);
+          const avaCls = it.source === 'event' ? 'src-event' : '';
+          const back = it.snoozed_until ? fmtDateNLShort(it.snoozed_until) : '—';
+          return `<div class="fu-sp-row">
+            <div class="time">${esc(back)}</div>
+            <div class="avatar ${avaCls}">${esc(initials)}</div>
+            <div>
+              <div class="name">${esc(it.lead_name || '—')}</div>
+              <div class="sub">${esc(it.lead_phone || '')}${it.lead_email ? ' · ' + esc(it.lead_email) : ''}</div>
+            </div>
+            <span class="kind-badge">${it.source === 'event' ? 'Event' : 'Retentie'}</span>
+            <span class="owner"><i class="ti ti-user${it.owner_name ? '' : '-off'}"></i> ${esc(it.owner_name || '—')}</span>
+            <div style="display:flex;gap:6px">
+              <button type="button" class="fu-lead-btn primary" data-sp-wake="${esc(it.id)}"><i class="ti ti-alarm"></i> Nu oppakken</button>
+              <button type="button" class="fu-lead-btn" data-sp-open="${esc(it.id)}"><i class="ti ti-external-link"></i></button>
+            </div>
+          </div>`;
+        }).join('');
+        return `<div class="fu-sp-group">
+          <div class="fu-sp-group-head"><span><i class="ti ${meta.icon}"></i> ${esc(meta.title)}</span><span class="cnt">${arr.length}</span></div>
+          ${rows}
+        </div>`;
+      }).join('');
+      el.innerHTML = html || '<div class="fu-empty"><i class="ti ti-moon-off fu-empty-icon"></i>Geen gesluimerde leads.</div>';
+      // Handlers.
+      el.querySelectorAll('[data-sp-wake]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = btn.getAttribute('data-sp-wake');
+          btn.disabled = true;
+          try {
+            const r = await window.AgentShared.apiFetch('/api/follow-up-lead-update', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ lead_id: id, snoozed_until: null }),
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+            loadSluimerpotTab();
+          } catch (e) {
+            alert('Opwekken mislukt: ' + (e.message || 'onbekend'));
+            btn.disabled = false;
+          }
+        });
+      });
+      el.querySelectorAll('[data-sp-open]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-sp-open');
+          // Snoozed-toggle activeren zodat de lead in de cockpit-lijst
+          // verschijnt, daarna selecteren.
+          _leadsState.filter.snoozed = true;
+          const cb = document.getElementById('cockpit-snoozed');
+          if (cb) cb.checked = true;
+          switchTab('leads');
+          const trySelect = (attempt = 0) => {
+            const has = (_leadsState.items || []).some((x) => x.id === id);
+            if (has) { selectLead(id); return; }
+            if (attempt < 20) setTimeout(() => trySelect(attempt + 1), 100);
+          };
+          setTimeout(() => trySelect(0), 150);
+        });
+      });
+    }
+
+    // ── DASHBOARD-TAB ────────────────────────────────────────────────────
+    async function loadDashboardTab() {
+      const kpiEl = document.getElementById('db-kpis');
+      const usrEl = document.getElementById('db-per-user');
+      if (!kpiEl || !usrEl) return;
+      kpiEl.innerHTML  = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
+      usrEl.innerHTML  = '';
+      const period = _fase3State.dashboard.period || 'today';
+      try {
+        const r = await window.AgentShared.apiFetch('/api/follow-up-cockpit-dashboard?period=' + encodeURIComponent(period));
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+        _renderDashboard(d);
+      } catch (e) {
+        kpiEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Fout: ' + esc(e.message || '') + '</div>';
+      }
+    }
+
+    function _renderDashboard(data) {
+      const kpiEl = document.getElementById('db-kpis');
+      const usrEl = document.getElementById('db-per-user');
+      const t = data.totals || {};
+      const kpi = (cls, label, val) =>
+        `<div class="fu-db-kpi ${cls}"><div class="label">${esc(label)}</div><div class="value">${Number(val) || 0}</div></div>`;
+      if (kpiEl) {
+        kpiEl.innerHTML = kpi('gebeld','Gebeld',t.gebeld)
+                        + kpi('bereikt','Bereikt',t.bereikt)
+                        + kpi('offerte','Offerte',t.offerte)
+                        + kpi('zoom','Zoom',t.zoom)
+                        + kpi('gewonnen','Gewonnen',t.gewonnen);
+      }
+      const rows = (data.per_user || []).map((u) => {
+        const convCls = u.conversie >= 20 ? '' : (u.conversie >= 10 ? 'mid' : 'low');
+        return `<tr>
+          <td>${esc(u.name || '—')}</td>
+          <td class="num">${u.gebeld}</td>
+          <td class="num">${u.bereikt}</td>
+          <td class="num">${u.offerte}</td>
+          <td class="num">${u.zoom}</td>
+          <td class="num">${u.gewonnen}</td>
+          <td class="num"><span class="fu-db-conv ${convCls}">${u.conversie}%</span></td>
+        </tr>`;
+      }).join('');
+      if (usrEl) {
+        if (!(data.per_user || []).length) {
+          usrEl.innerHTML = '<div class="fu-empty"><i class="ti ti-users-off fu-empty-icon"></i>Nog geen activiteit in deze periode.</div>';
+          return;
+        }
+        usrEl.innerHTML = `<div style="overflow-x:auto"><table class="fu-db-table">
+          <thead><tr>
+            <th>Medewerker</th>
+            <th class="num">Gebeld</th>
+            <th class="num">Bereikt</th>
+            <th class="num">Offerte</th>
+            <th class="num">Zoom</th>
+            <th class="num">Gewonnen</th>
+            <th class="num">Conversie</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>`;
+      }
+    }
+
+    // ── VOICEMEMO-RONDE ─────────────────────────────────────────────────
+    async function _fetchVoicememo() {
+      try {
+        const r = await window.AgentShared.apiFetch('/api/follow-up-voicememo-round');
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) return null;
+        _fase3State.voicememo.leads  = d.leads  || [];
+        _fase3State.voicememo.counts = d.counts || null;
+        _fase3State.voicememo.today  = d.today  || null;
+        return d;
+      } catch (_) { return null; }
+    }
+
+    function _voicememoDismissedKey() {
+      const t = _fase3State.voicememo.today || new Date().toISOString().slice(0, 10);
+      return 'fu.voicememo.dismissed.' + t;
+    }
+
+    async function _maybeAutoOpenVoicememo() {
+      // Auto-open regels:
+      //  - lokale tijd tussen 00:01 en 12:00 (dagronde tegen no-shows)
+      //  - er zijn open voicememos (counts.open > 0)
+      //  - vandaag nog niet auto-opened voor deze user (localStorage-flag)
+      //  - vandaag niet handmatig weggeklikt (session flag)
+      const now = new Date();
+      const hh = now.getHours(), mm = now.getMinutes();
+      const inWindow = (hh >= 0 && hh < 12) && !(hh === 0 && mm === 0);
+      if (!inWindow) return;
+      const d = await _fetchVoicememo();
+      if (!d) return;
+      if (!(d.counts?.open > 0)) return;
+      try {
+        if (window.sessionStorage?.getItem(_voicememoDismissedKey())) return;
+      } catch (_) {}
+      const marker = _fase3State.voicememo.autoOpenedFor;
+      if (marker === d.today) return;
+      _fase3State.voicememo.autoOpenedFor = d.today;
+      _openVoicememoModal(d);
+    }
+
+    function _openVoicememoModal(prefetched) {
+      const backdrop = document.getElementById('voicememo-modal');
+      if (!backdrop) return;
+      backdrop.style.display = 'flex';
+      _renderVoicememoModal(prefetched);
+    }
+    function _closeVoicememoModal() {
+      const backdrop = document.getElementById('voicememo-modal');
+      if (backdrop) backdrop.style.display = 'none';
+    }
+
+    function _renderVoicememoModal(data) {
+      const listEl = document.getElementById('voicememo-list');
+      const bar    = document.getElementById('voicememo-bar');
+      const txt    = document.getElementById('voicememo-progress-text');
+      const d = data || { leads: _fase3State.voicememo.leads, counts: _fase3State.voicememo.counts, today: _fase3State.voicememo.today };
+      const leads = d.leads || [];
+      const today = d.today || new Date().toISOString().slice(0, 10);
+      const sent  = leads.filter((l) => String(l.voicememo_sent_on || '') === today).length;
+      const total = leads.length;
+      const pct   = total > 0 ? Math.round((sent / total) * 100) : 0;
+      if (bar) bar.style.width = pct + '%';
+      if (txt) txt.textContent = total > 0 ? `${sent}/${total} verstuurd` : 'Geen Zoom-calls vandaag';
+      if (!listEl) return;
+      if (!total) {
+        listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-check fu-empty-icon"></i>Geen Zoom-calls vandaag — geen ronde nodig.</div>';
+        return;
+      }
+      listEl.innerHTML = leads.map((l) => {
+        const done = String(l.voicememo_sent_on || '') === today;
+        const btn = done
+          ? '<button type="button" class="fu-voicememo-btn done" disabled>✓ Verstuurd</button>'
+          : `<button type="button" class="fu-voicememo-btn" data-vm-send="${esc(l.id)}">💬 Voicememo sturen</button>`;
+        return `<div class="fu-voicememo-item">
+          <div class="time">${_fmtHM(l.terugbel_datum)}</div>
+          <div>
+            <div class="name">${esc(l.lead_name || '—')}</div>
+            <div class="sub">${esc(l.lead_phone || '—')}</div>
+          </div>
+          ${btn}
+        </div>`;
+      }).join('');
+      listEl.querySelectorAll('[data-vm-send]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = btn.getAttribute('data-vm-send');
+          btn.disabled = true;
+          try {
+            const r = await window.AgentShared.apiFetch('/api/follow-up-voicememo-round', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ lead_id: id }),
+            });
+            const dd = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(dd?.error || 'HTTP ' + r.status);
+            const fresh = await _fetchVoicememo();
+            _renderVoicememoModal(fresh);
+            // Als alles nu verstuurd is → sluit vanzelf en session-flag.
+            if (fresh?.counts && fresh.counts.open === 0) {
+              try { window.sessionStorage?.setItem(_voicememoDismissedKey(), '1'); } catch (_) {}
+              _closeVoicememoModal();
+            }
+          } catch (e) {
+            alert('Voicememo markeren mislukt: ' + (e.message || 'onbekend'));
+            btn.disabled = false;
+          }
+        });
+      });
+    }
+
+    async function _sendAllVoicememos() {
+      try {
+        const r = await window.AgentShared.apiFetch('/api/follow-up-voicememo-round', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ all: true }),
+        });
+        const dd = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(dd?.error || 'HTTP ' + r.status);
+        try { window.sessionStorage?.setItem(_voicememoDismissedKey(), '1'); } catch (_) {}
+        _closeVoicememoModal();
+      } catch (e) {
+        alert('Markeren mislukt: ' + (e.message || 'onbekend'));
+      }
+    }
+
+    function _bindFase3() {
+      // Afspraken-filters
+      document.querySelectorAll('[data-af-filter]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const grp = btn.getAttribute('data-af-filter');
+          const val = btn.getAttribute('data-value');
+          _fase3State.afspraken[grp] = val;
+          btn.parentElement.querySelectorAll('.fu-cockpit-pill').forEach((b) => b.classList.toggle('active', b === btn));
+          loadAfsprakenTab();
+        });
+      });
+      const afMine = document.getElementById('af-mine');
+      if (afMine) afMine.addEventListener('change', () => { _fase3State.afspraken.mine = afMine.checked; loadAfsprakenTab(); });
+      const afRf = document.getElementById('af-refresh');
+      if (afRf) afRf.addEventListener('click', () => loadAfsprakenTab());
+
+      // Sluimerpot-filters
+      document.querySelectorAll('[data-sp-filter]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const grp = btn.getAttribute('data-sp-filter');
+          const val = btn.getAttribute('data-value');
+          _fase3State.sluimerpot[grp] = val;
+          btn.parentElement.querySelectorAll('.fu-cockpit-pill').forEach((b) => b.classList.toggle('active', b === btn));
+          loadSluimerpotTab();
+        });
+      });
+      const spRf = document.getElementById('sp-refresh');
+      if (spRf) spRf.addEventListener('click', () => loadSluimerpotTab());
+
+      // Dashboard-periode
+      document.querySelectorAll('[data-db-period]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const p = btn.getAttribute('data-db-period');
+          _fase3State.dashboard.period = p;
+          btn.parentElement.querySelectorAll('.fu-cockpit-pill').forEach((b) => b.classList.toggle('active', b === btn));
+          loadDashboardTab();
+        });
+      });
+      const dbRf = document.getElementById('db-refresh');
+      if (dbRf) dbRf.addEventListener('click', () => loadDashboardTab());
+
+      // Voicememo-modal — handmatig openen + close-knop + acties
+      const vmOpen  = document.getElementById('cockpit-voicememo-open');
+      if (vmOpen) vmOpen.addEventListener('click', async () => {
+        const fresh = await _fetchVoicememo();
+        _openVoicememoModal(fresh);
+      });
+      const vmClose = document.getElementById('voicememo-close');
+      if (vmClose) vmClose.addEventListener('click', () => _closeVoicememoModal());
+      const vmAll   = document.getElementById('voicememo-all');
+      if (vmAll) vmAll.addEventListener('click', _sendAllVoicememos);
+      const vmLater = document.getElementById('voicememo-later');
+      if (vmLater) vmLater.addEventListener('click', () => {
+        try { window.sessionStorage?.setItem(_voicememoDismissedKey(), '1'); } catch (_) {}
+        _closeVoicememoModal();
+      });
+      // Backdrop-klik sluit
+      const vmBd = document.getElementById('voicememo-modal');
+      if (vmBd) vmBd.addEventListener('click', (e) => { if (e.target === vmBd) _closeVoicememoModal(); });
+    }
 
     // ── PR Z: Event follow-ups tab ───────────────────────────────────────────
     let _eventFollowupsState = { status: 'open' };

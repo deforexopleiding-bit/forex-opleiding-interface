@@ -30,6 +30,10 @@ const OUTCOMES = new Set([
   'terugbel', 'zoom_ingepland',
   'sale', 'geen_interesse', 'snooze',
   'noshow', 'gesprek_gehad',
+  // Systeem-outcome: alleen loggen als entry_kind='system' + outcome_code='offerte'.
+  // Wordt vanuit de UI aangeroepen wanneer de sales-user op "Offerte maken" klikt,
+  // zodat het dashboard offerte-starts kan tellen zonder eerdere state te muteren.
+  'offerte_gestart',
 ]);
 
 const CADENCE_HOURS = [2, 24, 72];
@@ -47,39 +51,52 @@ function monthsFromNow(months) {
   return d.toISOString();
 }
 
-async function insertOutcomeNote(leadId, userId, text) {
-  // Insert met entry_kind='outcome'; bij 42703 (kolom bestaat niet)
-  // fallback zonder entry_kind zodat oudere schema's blijven werken.
+async function insertOutcomeNote(leadId, userId, text, {
+  entryKind    = 'outcome',
+  outcomeCode  = null,
+} = {}) {
+  // Insert met entry_kind + outcome_code voor dashboard-aggregatie. Bij
+  // 42703 op afzonderlijke kolommen strippen we die en retry-en, zodat het
+  // endpoint werkt op oudere schema's zonder migratie.
   const trimmed = String(text || '').slice(0, 4000);
   const attempt = async (payload) => supabaseAdmin
     .from('follow_up_lead_notes')
     .insert(payload)
     .select('id, created_at')
     .maybeSingle();
-  let { data, error } = await attempt({
-    lead_id: leadId,
-    note: trimmed,
-    created_by_user_id: userId,
-    entry_kind: 'outcome',
-  });
-  if (error && error.code === '42703') {
-    ({ data, error } = await attempt({
+
+  const buildPayload = (opts) => {
+    const p = {
       lead_id: leadId,
       note: trimmed,
       created_by_user_id: userId,
-    }));
+    };
+    if (opts.withEntryKind)  p.entry_kind   = entryKind;
+    if (opts.withCode)       p.outcome_code = outcomeCode;
+    return p;
+  };
+  const tries = [
+    { withEntryKind: true,  withCode: true  },
+    { withEntryKind: true,  withCode: false },
+    { withEntryKind: false, withCode: false },
+  ];
+  let lastError = null;
+  for (const opts of tries) {
+    if (opts.withCode && !outcomeCode) continue;
+    const { data, error } = await attempt(buildPayload(opts));
+    if (!error) return data || null;
+    lastError = error;
+    if (error.code !== '42703') break;
   }
-  if (error) {
-    if (error.code === '42P01') {
+  if (lastError) {
+    if (lastError.code === '42P01') {
       const err = new Error('follow_up_lead_notes ontbreekt');
       err.code = 'MIGRATION_REQUIRED';
       throw err;
     }
-    console.warn('[follow-up-lead-outcome] note insert:', error.message);
-    // Note-failure blokkeert de state-transitie niet — de kern-mutatie op
-    // follow_up_leads is al gedaan. We loggen alleen.
+    console.warn('[follow-up-lead-outcome] note insert:', lastError.message);
   }
-  return data || null;
+  return null;
 }
 
 export default async function handler(req, res) {
@@ -101,6 +118,38 @@ export default async function handler(req, res) {
 
   const outcome = String(body.outcome || '').trim();
   if (!OUTCOMES.has(outcome)) return res.status(400).json({ error: 'outcome ongeldig' });
+
+  // 'offerte_gestart' is een fire-and-forget log-actie zonder state-mutatie:
+  // dashboard telt hem, maar de lead-status blijft ongewijzigd zodat de
+  // normale bel-flow doorloopt. Owner-gate wel toepassen zodat sales geen
+  // andermans leads kan taggen.
+  if (outcome === 'offerte_gestart') {
+    // Rol + lead ophalen enkel voor owner-check.
+    const { data: myp } = await supabaseAdmin
+      .from('profiles').select('role').eq('id', user.id).maybeSingle();
+    const rRole = String(myp?.role || '').toLowerCase();
+    const rAdmin = ADMIN_ROLES.has(rRole);
+    const rSales = rRole === 'sales';
+    const { data: lRow, error: lErr } = await supabaseAdmin
+      .from('follow_up_leads').select('id, owner_id').eq('id', leadId).maybeSingle();
+    if (lErr) {
+      if (lErr.code === '42P01') return res.status(501).json({ error: 'Tabel follow_up_leads ontbreekt', code: 'MIGRATION_REQUIRED' });
+      return res.status(500).json({ error: 'lead fetch: ' + lErr.message });
+    }
+    if (!lRow) return res.status(404).json({ error: 'Lead niet gevonden' });
+    if (!rAdmin) {
+      if (!rSales) return res.status(403).json({ error: 'Geen rechten (rol vereist: sales/manager/admin)' });
+      if (lRow.owner_id && lRow.owner_id !== user.id) {
+        return res.status(403).json({ error: 'Deze lead is aan een andere sales toegewezen' });
+      }
+    }
+    try {
+      await insertOutcomeNote(leadId, user.id, 'Offerte-flow gestart vanuit cockpit', {
+        entryKind: 'system', outcomeCode: 'offerte',
+      });
+    } catch (_) { /* fail-soft */ }
+    return res.status(200).json({ ok: true, logged: true });
+  }
 
   // Rol resolven voor owner-gate (zelfde patroon als lead-update).
   const { data: myProfile, error: mpErr } = await supabaseAdmin
@@ -264,7 +313,9 @@ export default async function handler(req, res) {
 
     // Auto-note-insert. Failure blokkeert de state-transitie niet.
     try {
-      await insertOutcomeNote(leadId, user.id, noteText);
+      await insertOutcomeNote(leadId, user.id, noteText, {
+        entryKind: 'outcome', outcomeCode: outcome,
+      });
     } catch (nErr) {
       if (nErr?.code === 'MIGRATION_REQUIRED') {
         // Note-tabel ontbreekt — waarschuwen maar succes teruggeven.
