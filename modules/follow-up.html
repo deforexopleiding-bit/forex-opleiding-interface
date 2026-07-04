@@ -2876,7 +2876,7 @@
       </button>
       <button class="fu-tab fu-tab--primary" data-tab="oude-retenties" role="tab" aria-selected="false">
         <i class="ti ti-history" aria-hidden="true"></i>
-        <span>Oude retenties</span>
+        <span>Retenties</span>
         <span class="fu-tab-count" id="tab-count-oude-retenties">—</span>
       </button>
 
@@ -6695,7 +6695,7 @@
       dashboard  : { period: 'today' },
       voicememo  : { leads: [], counts: null, today: null, autoOpenedFor: null },
       afgeboekt   : { items: [], counts: null, filter: 'all', loading: false },
-      oudeRetenties: { items: [], counts: null, filter: 'all', loading: false },
+      oudeRetenties: { items: [], counts: null, filter: 'nieuw', loading: false },
     };
 
     // Gecombineerd datum + tijd voor afspraak-rijen: "Vandaag 17:04",
@@ -7099,7 +7099,7 @@
         const d = await r.json().catch(() => ({}));
         if (!r.ok) {
           if (d?.code === 'MIGRATION_REQUIRED') {
-            listEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Migratie vereist voor oude retenties.</div>';
+            listEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Migratie vereist voor retenties.</div>';
             return;
           }
           throw new Error(d?.error || 'HTTP ' + r.status);
