@@ -6540,7 +6540,13 @@
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
         const appt = d.appointment || d;
-        _renderApptDetail(appt);
+        // Verrijk render met historie + klant-context uit dezelfde
+        // response — beide fail-soft (leeg → panel-sectie wordt niet
+        // getoond of toont 'geen gegevens').
+        _renderApptDetail(appt, {
+          history: Array.isArray(d.lead_history) ? d.lead_history : [],
+          customer: d.customer_context || null,
+        });
       } catch (e) {
         apptBody.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Fout: ' + esc(e.message || '') + '</div>';
       }
@@ -6575,7 +6581,84 @@
       } catch { return iso; }
     }
 
-    function _renderApptDetail(appt) {
+    // Afspraak-historie panel: toont eerdere follow_up_appointments-rijen
+    // van dezelfde lead (op ghl_contact_id) als tijdlijn. Verzet/status-
+    // wijzigingen zijn hier zichtbaar. Huidige appointment is uitgefilterd
+    // door de backend.
+    function _renderApptHistoryPanel(history, currentId) {
+      if (!Array.isArray(history) || !history.length) {
+        return `<div class="fu-cockpit-section">
+          <div class="fu-cockpit-section-title"><i class="ti ti-history"></i> Afspraak-historie</div>
+          <div class="fu-empty" style="padding:8px 0;font-size:12.5px;color:var(--muted-2)">Geen eerdere afspraken van deze lead.</div>
+        </div>`;
+      }
+      const STATUS_LBL = {
+        scheduled:'Gepland', gepland:'Gepland', wacht_op_reschedule:'Wacht op reschedule',
+        no_show:'No-show', completed:'Afgerond', cancelled:'Geannuleerd', verwijderd:'Verwijderd',
+      };
+      const STATUS_ICON = {
+        scheduled:'ti-calendar', gepland:'ti-calendar', wacht_op_reschedule:'ti-alarm',
+        no_show:'ti-user-off', completed:'ti-check', cancelled:'ti-x', verwijderd:'ti-trash',
+      };
+      const rows = history.map((h) => {
+        const status = String(h.status || '');
+        const label  = STATUS_LBL[status] || status || '—';
+        const icon   = STATUS_ICON[status] || 'ti-calendar-event';
+        const when   = h.scheduled_at ? _fmtHMwithDate(h.scheduled_at) : '—';
+        const dur    = h.duration_minutes ? ` · ${h.duration_minutes} min` : '';
+        return `<div class="fu-cockpit-timeline-item">
+          <div class="fu-cockpit-timeline-icon"><i class="ti ${icon}"></i></div>
+          <div class="fu-cockpit-timeline-body">
+            <div class="txt">${esc(label)}${dur}</div>
+            <div class="meta">${esc(when)}</div>
+          </div>
+        </div>`;
+      }).join('');
+      return `<div class="fu-cockpit-section">
+        <div class="fu-cockpit-section-title">
+          <i class="ti ti-history"></i> Afspraak-historie
+          <span class="fu-cockpit-section-sub">${history.length} eerdere</span>
+        </div>
+        <div class="fu-cockpit-timeline">${rows}</div>
+      </div>`;
+    }
+
+    // Klant-context panel: alleen tonen als er een klant is gematcht.
+    // Toont naam/bedrijf, tel, mail, retentie-status, mentor.
+    function _renderApptCustomerPanel(customer) {
+      if (!customer) {
+        return `<div class="fu-cockpit-section">
+          <div class="fu-cockpit-section-title"><i class="ti ti-user"></i> Klant-context</div>
+          <div class="fu-empty" style="padding:8px 0;font-size:12.5px;color:var(--muted-2)">Geen gekoppelde klant gevonden.</div>
+        </div>`;
+      }
+      const cells = [];
+      if (customer.company_name && customer.company_name !== customer.name) {
+        cells.push(`<div class="fu-cockpit-ctx-cell"><span class="k">Bedrijf</span><span class="v">${esc(customer.company_name)}</span></div>`);
+      }
+      if (customer.phone) {
+        cells.push(`<div class="fu-cockpit-ctx-cell"><span class="k">Telefoon</span><span class="v"><a href="tel:${esc(String(customer.phone).replace(/\s+/g,''))}">${esc(customer.phone)}</a></span></div>`);
+      }
+      if (customer.email) {
+        cells.push(`<div class="fu-cockpit-ctx-cell"><span class="k">E-mail</span><span class="v"><a href="mailto:${esc(customer.email)}">${esc(customer.email)}</a></span></div>`);
+      }
+      if (customer.mentor_name) {
+        cells.push(`<div class="fu-cockpit-ctx-cell"><span class="k">Mentor</span><span class="v">${esc(customer.mentor_name)}</span></div>`);
+      }
+      const retentionBadge = customer.retention_not_renewing
+        ? '<span class="fu-cockpit-mini-badge hot" title="Klant wil niet verlengen">Niet verlengen</span>'
+        : '<span class="fu-cockpit-mini-badge" style="background:var(--ok-soft);color:var(--ok)">Actief</span>';
+      cells.push(`<div class="fu-cockpit-ctx-cell"><span class="k">Retentie</span><span class="v">${retentionBadge}</span></div>`);
+      return `<div class="fu-cockpit-section">
+        <div class="fu-cockpit-section-title">
+          <i class="ti ti-user"></i> Klant-context
+          <span class="fu-cockpit-section-sub">${esc(customer.name || '')}</span>
+        </div>
+        <div class="fu-cockpit-ctx">${cells.join('')}</div>
+      </div>`;
+    }
+
+    function _renderApptDetail(appt, extras = {}) {
       const body  = document.getElementById('cockpit-apptbody');
       const title = null;
       if (!body) return;
@@ -6655,7 +6738,12 @@
             <button type="button" class="fu-lead-btn primary" id="appt-verzet-save"><i class="ti ti-check"></i> Verzetten</button>
             <button type="button" class="fu-lead-btn" id="appt-verzet-cancel">Annuleren</button>
           </div>
-        </div>`;
+        </div>
+
+        ${_renderApptHistoryPanel(extras.history || [], appt?.id)}
+
+        ${_renderApptCustomerPanel(extras.customer)}
+        `;
 
       const toggle = document.getElementById('appt-toggle-verzet');
       const form   = document.getElementById('appt-verzet-form');
