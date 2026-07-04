@@ -1105,6 +1105,21 @@
     .fu-callcard-number {
       font-size: 26px; font-weight: 600; letter-spacing: 1px;
       margin: 4px 0 12px 0;
+      background: transparent;
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 8px;
+      padding: 6px 10px;
+      width: 100%; box-sizing: border-box;
+      font-family: inherit;
+      transition: border-color .15s, background .15s;
+    }
+    .fu-callcard-number::placeholder { color: rgba(255,255,255,0.4); font-weight: 500; }
+    .fu-callcard-number:hover  { border-color: rgba(255,255,255,0.24); }
+    .fu-callcard-number:focus  {
+      outline: none;
+      border-color: #10b981;
+      background: rgba(16,185,129,0.06);
     }
     .fu-callcard-actions { display: flex; gap: 8px; flex-wrap: wrap; }
     .fu-callcard-primary {
@@ -1973,7 +1988,10 @@
                   <option value="">Voys · standaard</option>
                 </select>
               </div>
-              <div class="fu-callcard-number" id="cockpit-number">—</div>
+              <input type="tel" class="fu-callcard-number" id="cockpit-number"
+                     placeholder="Geen telefoonnummer" autocomplete="off"
+                     inputmode="tel" spellcheck="false"
+                     aria-label="Telefoonnummer (bewerkbaar voor deze call)">
               <div class="fu-callcard-actions">
                 <a class="fu-callcard-primary" id="cockpit-call" href="#" aria-disabled="true">
                   <i class="ti ti-phone-call"></i> <span id="cockpit-call-label">Bel nu</span>
@@ -3846,7 +3864,7 @@
 
       // Belkaart
       const numEl = document.getElementById('cockpit-number');
-      if (numEl) numEl.textContent = it.lead_phone || 'Geen telefoonnummer';
+      if (numEl) numEl.value = it.lead_phone || '';
       const callBtn   = document.getElementById('cockpit-call');
       const callLabel = document.getElementById('cockpit-call-label');
       const isZoom = String(it.lead_kind || 'call') === 'zoom';
@@ -4146,6 +4164,10 @@
     }
 
     // Actie-dropdown open/close met click-outside + Escape.
+    // Binding is IDEMPOTENT — beschermd door _actieMenuBound zodat een
+    // tweede aanroep van _bindCockpitDetail geen dubbele listeners
+    // stapelt (vroeger oorzaak van "toggelt meerdere keren per klik").
+    let _actieMenuBound = false;
     function _showActiemenu(show) {
       const menu = document.getElementById('cockpit-actiemenu');
       const btn  = document.getElementById('cockpit-actie');
@@ -4154,9 +4176,22 @@
       if (btn) btn.setAttribute('aria-expanded', String(!!show));
     }
 
+    // Lees het HUIDIGE nummer uit de belkaart-input. Sales kan het
+    // ad-hoc bewerken (bv. mobiel i.p.v. vast); dat overschrijft niets
+    // in de DB — puur voor deze poging. Strip spaties/haakjes/streepjes
+    // en behoud een leading '+'.
+    function _currentCallNumber() {
+      const el = document.getElementById('cockpit-number');
+      const raw = el ? String(el.value || '') : '';
+      const trimmed = raw.trim();
+      if (!trimmed) return '';
+      if (trimmed.startsWith('+')) return '+' + trimmed.slice(1).replace(/\D/g, '');
+      return trimmed.replace(/\D/g, '');
+    }
+
     function _openWhatsappForLead(it) {
-      const phone = String(it?.lead_phone || '').replace(/[^\d]/g, '');
-      if (!phone) { alert('Geen telefoonnummer beschikbaar voor WhatsApp.'); return; }
+      const phone = _currentCallNumber().replace(/[^\d]/g, '');
+      if (!phone) { alert('Vul eerst een telefoonnummer in.'); return; }
       window.open('https://wa.me/' + phone, '_blank', 'noopener');
     }
     function _openMailForLead(it) {
@@ -4246,17 +4281,25 @@
       const brBtn = document.getElementById('cockpit-belronde');
       if (brBtn) brBtn.addEventListener('click', _toggleBelronde);
 
-      // Belknop → open uitkomst-panel. Bel-modus: tel:-link laat OS-dialer
-      // openen; we tonen daarnaast het panel. Zoom-modus: preventDefault +
-      // panel tonen (er is geen echte Zoom-URL — dat komt in Fase 3).
+      // Belknop → gebruik het HUIDIGE nummer uit de belkaart-input
+      // (sales mag het ad-hoc aanpassen zonder de lead te muteren).
+      // Bel-modus: preventDefault + open OS-dialer met het bewerkte
+      // nummer + uitkomst-panel meteen open. Zoom-modus: preventDefault +
+      // alleen panel. Leeg nummer → nette melding, geen call.
       const callBtn = document.getElementById('cockpit-call');
       if (callBtn) callBtn.addEventListener('click', (e) => {
         const mode = callBtn.dataset.mode;
         if (mode === 'none') { e.preventDefault(); return; }
-        if (mode === 'zoom') e.preventDefault();
+        e.preventDefault();
         const it = (_leadsState.items || []).find((x) => x.id === _leadsState.selectedId);
         if (!it) return;
-        _openOutcomePanel(String(it.lead_kind || 'call') === 'zoom');
+        const isZoom = String(it.lead_kind || 'call') === 'zoom';
+        if (isZoom) { _openOutcomePanel(true); return; }
+        // Bel-modus.
+        const toNumber = _currentCallNumber();
+        if (!toNumber) { alert('Vul eerst een telefoonnummer in.'); return; }
+        _openOutcomePanel(false);
+        try { window.location.href = 'tel:' + toNumber; } catch (_) { /* fail-soft */ }
       });
 
       // Uitkomst-panel: sluiten
@@ -4343,30 +4386,38 @@
         _showPlanner('snooze');
       });
 
-      // Actie-dropdown open/close (met click-outside + Escape).
-      const actieBtn = document.getElementById('cockpit-actie');
-      const menu     = document.getElementById('cockpit-actiemenu');
+      // Actie-dropdown open/close (met click-outside + Escape). Binding
+      // ÉÉN KEER — anders krijg je meerdere document-listeners die de
+      // knop-toggle uit fase raken. Menu wordt hier hard hidden gezet,
+      // dus per-lead render mag alleen resetten (nooit rebinden).
+      const menu = document.getElementById('cockpit-actiemenu');
       if (menu) menu.hidden = true;
-      if (actieBtn) actieBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        _showActiemenu(menu ? menu.hidden : false);
-      });
-      // Click-outside sluit.
-      document.addEventListener('click', (e) => {
-        if (!menu || menu.hidden) return;
-        const dd = e.target.closest('.fu-callcard-dropdown');
-        if (!dd) _showActiemenu(false);
-      });
-      // Escape sluit + sluit ook uitkomst-panel.
-      document.addEventListener('keydown', (e) => {
-        if (e.key !== 'Escape') return;
-        if (menu && !menu.hidden) _showActiemenu(false);
-        const panel = document.getElementById('cockpit-outcome');
-        if (panel && !panel.hidden) _closeOutcomePanel();
-      });
-      // Actie-menu items → echte acties.
-      if (menu) {
-        menu.addEventListener('click', (e) => {
+      if (!_actieMenuBound) {
+        _actieMenuBound = true;
+        const actieBtn = document.getElementById('cockpit-actie');
+        if (actieBtn) actieBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const m = document.getElementById('cockpit-actiemenu');
+          _showActiemenu(m ? m.hidden : false);
+        });
+        // Click-outside sluit. Lees menu-state elke keer opnieuw uit de
+        // DOM zodat we niet vertrouwen op een gecapt-urede variable.
+        document.addEventListener('click', (e) => {
+          const m = document.getElementById('cockpit-actiemenu');
+          if (!m || m.hidden) return;
+          const dd = e.target.closest('.fu-callcard-dropdown');
+          if (!dd) _showActiemenu(false);
+        });
+        // Escape sluit + sluit ook uitkomst-panel.
+        document.addEventListener('keydown', (e) => {
+          if (e.key !== 'Escape') return;
+          const m = document.getElementById('cockpit-actiemenu');
+          if (m && !m.hidden) _showActiemenu(false);
+          const panel = document.getElementById('cockpit-outcome');
+          if (panel && !panel.hidden) _closeOutcomePanel();
+        });
+        // Actie-menu items → echte acties.
+        if (menu) menu.addEventListener('click', (e) => {
           const b = e.target.closest('button[data-actie]');
           if (!b) return;
           _showActiemenu(false);
