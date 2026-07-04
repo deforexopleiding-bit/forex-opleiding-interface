@@ -212,14 +212,86 @@ export default async function handler(req, res) {
       countBase().gt('snoozed_until', nowISO),
     ]);
 
+    // ── Worklist-modus (?worklist=1) ────────────────────────────────
+    // Voegt de GHL-Zoom-calls (follow_up_appointments status
+    // scheduled|gepland) en wacht-op-reschedule-items toe aan de items,
+    // met horizon vandaag + 7 dagen. Andere callers krijgen NIETS extra
+    // (backwards-compatible). Fail-soft: appointment-bron mislukt →
+    // leads worden alsnog geleverd.
+    const worklist = String(q.worklist || '') === '1';
+    let apptItems  = [];
+    let reschedule = [];
+    if (worklist) {
+      const sevenDaysMs   = 7 * 24 * 3600 * 1000;
+      const horizonEndIso = new Date(Date.now() + sevenDaysMs).toISOString();
+      const APPT_COLS_RICH = 'id, lead_name, lead_phone, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id';
+      const APPT_COLS_MID  = 'id, lead_name, lead_phone, scheduled_at, status, voicememo_status, zoom_join_url, owner_id';
+      const APPT_COLS_MIN  = 'id, lead_name, lead_phone, scheduled_at, status, voicememo_status, owner_id';
+
+      const buildAppt = (cols, statusList, opts = {}) => {
+        let qq = supabaseAdmin.from('follow_up_appointments')
+          .select(cols)
+          .in('status', statusList)
+          .order('scheduled_at', { ascending: true })
+          .limit(500);
+        if (opts.requireScheduled) qq = qq.not('scheduled_at', 'is', null);
+        if (opts.withinHorizon)    qq = qq.lte('scheduled_at', horizonEndIso);
+        if (ownerFilter?.kind === 'eq') qq = qq.eq('owner_id', ownerFilter.value);
+        return qq;
+      };
+
+      const tryAppt = async (statusList, opts) => {
+        for (const cols of [APPT_COLS_RICH, APPT_COLS_MID, APPT_COLS_MIN]) {
+          const { data, error } = await buildAppt(cols, statusList, opts);
+          if (!error) return data || [];
+          if (error.code === '42P01') return [];
+          if (error.code !== '42703') { console.warn('[worklist appts]', error.message); return []; }
+        }
+        return [];
+      };
+
+      // Scheduled Zoom-calls binnen horizon + wacht_op_reschedule.
+      const [scheduled, waiting] = await Promise.all([
+        tryAppt(['scheduled', 'gepland'], { requireScheduled: true, withinHorizon: true }),
+        tryAppt(['wacht_op_reschedule'], {}),
+      ]);
+
+      apptItems = (scheduled || []).map((a) => ({
+        source          : 'appointment',
+        kind            : 'zoom',
+        id              : a.id,
+        lead_name       : a.lead_name,
+        lead_phone      : a.lead_phone,
+        scheduled_at    : a.scheduled_at,
+        status          : a.status,
+        voicememo_status: a.voicememo_status || null,
+        zoom_join_url   : a.zoom_join_url || null,
+        owner_id        : a.owner_id || null,
+      }));
+      reschedule = (waiting || []).map((a) => ({
+        source      : 'appointment',
+        kind        : 'reschedule',
+        id          : a.id,
+        lead_name   : a.lead_name,
+        lead_phone  : a.lead_phone,
+        scheduled_at: a.scheduled_at,
+        status      : 'wacht_op_reschedule',
+        owner_id    : a.owner_id || null,
+      }));
+    }
+
     return res.status(200).json({
       leads: enrichedLeads,
+      appointments: apptItems,
+      reschedule,
       counts: {
-        alle    : cAlle || 0,
-        open    : cOpen || 0,
-        vandaag : cVandaag || 0,
-        te_laat : cTeLaat || 0,
-        snoozed : cSnoozed || 0,
+        alle          : cAlle || 0,
+        open          : cOpen || 0,
+        vandaag       : cVandaag || 0,
+        te_laat       : cTeLaat || 0,
+        snoozed       : cSnoozed || 0,
+        appointments  : apptItems.length,
+        reschedule    : reschedule.length,
       },
       allowed_statuses      : LEAD_STATUSES,
       cockpit_cols_available: cockpitColsAvailable,

@@ -30,6 +30,9 @@ const OUTCOMES = new Set([
   'terugbel', 'zoom_ingepland',
   'sale', 'geen_interesse', 'snooze',
   'noshow', 'gesprek_gehad',
+  // WhatsApp gestuurd: lead wordt NIET afgesloten — komt terug op de
+  // Werklijst na WHATSAPP_FOLLOWUP_DAYS zodat sales/Dave hem opvolgt.
+  'whatsapp_gestuurd',
   // Systeem-outcome: alleen loggen als entry_kind='system' + outcome_code='offerte'.
   // Wordt vanuit de UI aangeroepen wanneer de sales-user op "Offerte maken" klikt,
   // zodat het dashboard offerte-starts kan tellen zonder eerdere state te muteren.
@@ -38,6 +41,8 @@ const OUTCOMES = new Set([
 
 const CADENCE_HOURS = [2, 24, 72];
 const MAX_ATTEMPTS  = 4;
+// WhatsApp-opvolging: standaard 2 dagen terug in de Werklijst.
+const WHATSAPP_FOLLOWUP_DAYS = 2;
 
 const ADMIN_ROLES = new Set(['super_admin', 'admin', 'manager']);
 
@@ -269,6 +274,16 @@ export default async function handler(req, res) {
   } else if (outcome === 'gesprek_gehad') {
     // Geen status/datum-mutatie — alleen note + last_contact_at.
     noteText = 'Zoom-gesprek gehad';
+  } else if (outcome === 'whatsapp_gestuurd') {
+    // WhatsApp verstuurd — lead moet TERUGKOMEN voor opvolging (WHATSAPP_
+    // FOLLOWUP_DAYS dagen later). Attempts wordt NIET verhoogd (dit was
+    // geen belpoging). Status blijft actief zodat de lead in de Werklijst
+    // opduikt op de opvolg-dag; last_contact_at markeert wanneer we
+    // laatst iets deden.
+    const days = WHATSAPP_FOLLOWUP_DAYS;
+    patch.lead_status    = 'terugbellen';
+    patch.terugbel_datum = hoursFromNow(days * 24);
+    noteText = 'WhatsApp gestuurd — opvolgen over ' + days + ' dagen';
   }
 
   // Als schema geen rijke kolommen heeft, strippen we ze uit de patch

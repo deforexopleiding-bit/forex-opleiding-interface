@@ -1451,52 +1451,68 @@
     }
     .fu-af-row, .fu-sp-row {
       display: grid;
-      grid-template-columns: 60px 34px 1fr auto auto auto;
-      gap: 10px; align-items: center;
-      padding: 8px 10px;
-      background: rgba(255,255,255,0.02);
-      border: 1px solid rgba(255,255,255,0.06);
-      border-radius: 8px;
+      grid-template-columns: 72px 36px 1fr auto auto auto;
+      gap: 12px; align-items: center;
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
       margin-bottom: 6px;
     }
+    /* Tijd LINKS in de rij — groot en prominent, mockup-stijl. */
     .fu-af-row .time, .fu-sp-row .time {
-      font-size: 13px; font-weight: 600; color: var(--text-primary, #fff);
+      font-size: 18px; font-weight: 600;
+      color: #fff;
       font-variant-numeric: tabular-nums;
+      letter-spacing: .3px;
     }
     .fu-af-row .avatar, .fu-sp-row .avatar {
-      width: 30px; height: 30px; border-radius: 50%; background: #093d54;
+      width: 34px; height: 34px; border-radius: 50%; background: #093d54;
       color: #fff; display: flex; align-items: center; justify-content: center;
-      font-size: 11px; font-weight: 600;
+      font-size: 12px; font-weight: 600;
     }
     .fu-af-row .avatar.kind-zoom { background: #0f766e; }
     .fu-af-row .avatar.src-event, .fu-sp-row .avatar.src-event { background: #7c3aed; }
     .fu-af-row .name, .fu-sp-row .name {
-      font-size: 13px; color: var(--text-primary, #fff);
+      font-size: 13.5px; font-weight: 500; color: var(--text-primary, #fff);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       display: flex; align-items: center; gap: 6px;
     }
     .fu-af-row .sub, .fu-sp-row .sub {
-      font-size: 11.5px; color: var(--text-secondary, rgba(255,255,255,.65));
-      margin-top: 2px;
+      font-size: 12px; color: var(--text-secondary, rgba(255,255,255,.75));
+      margin-top: 3px;
     }
+    /* Eigenaar-badge: volle contrast i.p.v. semi-transparant. */
     .fu-af-row .owner, .fu-sp-row .owner {
-      font-size: 11.5px; color: var(--text-secondary, rgba(255,255,255,.7));
       display: inline-flex; align-items: center; gap: 4px;
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 999px;
+      padding: 2px 10px;
+      font-size: 11.5px; font-weight: 500;
+      white-space: nowrap;
     }
+    /* Kind-badge: hergebruikt de contrast-styling van de werklijst-badges
+       zodat Zoom/Terugbel consistent leesbaar zijn met de rest. */
     .fu-af-row .kind-badge {
-      background: rgba(255,255,255,0.06); border-radius: 999px;
-      padding: 2px 8px; font-size: 11px; color: var(--text-secondary, rgba(255,255,255,.85));
+      display: inline-flex; align-items: center; gap: 3px;
+      background: #4b5563; color: #fff;
+      border: 1px solid rgba(0,0,0,0.1);
+      border-radius: 999px;
+      padding: 2px 10px; font-size: 11.5px; font-weight: 600;
+      white-space: nowrap;
     }
-    .fu-af-row .kind-badge.zoom { background: rgba(15,118,110,.2); color: #5eead4; }
-    .fu-af-row .kind-badge.bel  { background: rgba(9,61,84,.35); color: #93c5fd; }
+    .fu-af-row .kind-badge.zoom { background: #0f766e; border-color: #115e59; }
+    .fu-af-row .kind-badge.bel  { background: #093d54; border-color: #0d4d69; }
 
     @media (max-width: 720px) {
       .fu-af-row, .fu-sp-row {
-        grid-template-columns: 1fr auto;
+        grid-template-columns: 60px 1fr auto;
         row-gap: 4px;
       }
-      .fu-af-row .time, .fu-af-row .avatar,
-      .fu-sp-row .time, .fu-sp-row .avatar { display: none; }
+      .fu-af-row .avatar,
+      .fu-sp-row .avatar { display: none; }
     }
 
     /* Event-bellijst — huisstijl #093d54, compacte rijen */
@@ -3888,6 +3904,9 @@
       if (f.kind   !== 'all') p.set('kind',   f.kind);
       if (f.mine)             p.set('owner',  'me');
       p.set('view', f.snoozed ? 'snoozed' : 'open');
+      // Worklist-modus: leads + appointments (Zoom-calls) + wacht-op-
+      // reschedule in één response, met horizon vandaag + 7 dagen.
+      p.set('worklist', '1');
       return '/api/follow-up-leads-list?' + p.toString();
     }
 
@@ -3910,20 +3929,47 @@
           }
           throw new Error(d?.error || 'HTTP ' + r.status);
         }
-        _leadsState.items  = d.leads || [];
+        // Worklist-merge: bel-leads (uit d.leads) + Zoom-appointments
+        // + wacht-op-reschedule tot één lijst voor de Werklijst-render.
+        // We markeren appointments met __worklistKind zodat de UI ze
+        // anders rendert (Zoom-link / Bekijk) en de belronde ze skipt.
+        const leads = (d.leads || []).map((x) => ({ ...x, __worklistKind: 'bel' }));
+        const appts = (d.appointments || []).map((a) => ({
+          id           : a.id,
+          lead_name    : a.lead_name,
+          lead_phone   : a.lead_phone,
+          terugbel_datum: a.scheduled_at,
+          source       : 'appointment',
+          __worklistKind: 'zoom',
+          zoom_join_url : a.zoom_join_url,
+          voicememo_status: a.voicememo_status,
+          status       : a.status,
+          owner_id     : a.owner_id,
+        }));
+        const reschedule = (d.reschedule || []).map((a) => ({
+          id           : a.id,
+          lead_name    : a.lead_name,
+          lead_phone   : a.lead_phone,
+          terugbel_datum: a.scheduled_at,
+          source       : 'appointment',
+          __worklistKind: 'reschedule',
+          status       : 'wacht_op_reschedule',
+          owner_id     : a.owner_id,
+        }));
+        _leadsState.items  = [...leads, ...appts, ...reschedule];
         _leadsState.counts = d.counts || null;
         renderCockpitList();
         renderCockpitSummary();
-        // Auto-open eerstvolgende lead — of behoud selectie als hij nog in
-        // de nieuwe lijst zit. Bij belronde-focusmodus: als de vorige lead
-        // weg is (sale/snooze/verlengd/verloren), auto naar de volgende.
-        // Lege lijst tijdens focusmodus → "Belronde klaar"-melding.
+        // Auto-open eerstvolgende BEL-lead — Zoom/reschedule worden
+        // overgeslagen omdat ze de belkaart niet openen. Bij belronde-
+        // focusmodus: lege bel-lijst → "Belronde klaar"-melding.
         const items = _leadsState.items;
-        const stillThere = _leadsState.selectedId && items.some((x) => x.id === _leadsState.selectedId);
+        const belItems = items.filter((x) => (x.__worklistKind || 'bel') === 'bel');
+        const stillThere = _leadsState.selectedId && belItems.some((x) => x.id === _leadsState.selectedId);
         if (!stillThere) {
-          const first = items[0];
+          const first = belItems[0];
           if (first) {
-            _leadsState.selectedId = null; // reset zodat selectLead een nieuwe render doet
+            _leadsState.selectedId = null;
             selectLead(first.id);
           } else if (_leadsState.callSession.active) {
             _leadsState.selectedId = null;
@@ -3959,8 +4005,26 @@
     }
 
     function _bucketFor(lead) {
-      // Backend levert al bucket + is_hot. Hotleads gaan naar 'hot',
-      // rest volgt bucket. Snoozed komt alleen voor als filter aan staat.
+      // Worklist-items zonder backend-bucket (appointments +
+      // reschedule): bucket wordt hier client-side afgeleid uit
+      // terugbel_datum. Reschedule zonder tijd → altijd 'telaat'
+      // (blijft niet zomaar liggen).
+      const wk = lead.__worklistKind || 'bel';
+      if (wk !== 'bel') {
+        if (wk === 'reschedule' && !lead.terugbel_datum) return 'telaat';
+        const t = lead.terugbel_datum ? Date.parse(lead.terugbel_datum) : NaN;
+        if (Number.isFinite(t)) {
+          const now = Date.now();
+          const t0 = new Date(); t0.setHours(0,0,0,0);
+          const t1 = new Date(); t1.setHours(23,59,59,999);
+          if (t < now && t < t0.getTime()) return 'telaat';
+          if (t < now) return 'telaat';
+          if (t <= t1.getTime()) return 'vandaag';
+          return 'week';
+        }
+        return 'week';
+      }
+      // Bel-lead: gebruik backend bucket + is_hot.
       if (lead.is_hot) return 'hot';
       const b = lead.bucket || 'binnenkort';
       if (b === 'te_laat')   return 'telaat';
@@ -3970,10 +4034,10 @@
     }
 
     const BUCKET_META = {
-      hot     : { title: '🔥 Hotleads',   icon: 'ti-flame' },
-      telaat  : { title: 'Te laat',       icon: 'ti-alert-triangle' },
-      vandaag : { title: 'Vandaag',       icon: 'ti-phone' },
-      week    : { title: 'Deze week',     icon: 'ti-calendar' },
+      hot     : { title: '🔥 Hotleads',      icon: 'ti-flame' },
+      telaat  : { title: 'Te laat',          icon: 'ti-alert-triangle' },
+      vandaag : { title: 'Vandaag',          icon: 'ti-phone' },
+      week    : { title: 'Komende 7 dagen',  icon: 'ti-calendar' },
       snoozed : { title: '💤 Later opnieuw', icon: 'ti-moon' },
     };
     const BUCKET_ORDER = ['hot', 'telaat', 'vandaag', 'week', 'snoozed'];
@@ -4009,6 +4073,45 @@
     }
 
     function _renderCockpitCard(it) {
+      const wk = it.__worklistKind || 'bel';
+      // Zoom-appointment: geen belkaart-opener, wel een 'Open Zoom'-actie.
+      if (wk === 'zoom') {
+        const initials = _leadInitials(it.lead_name);
+        const nm = esc(it.lead_name || '—');
+        const timeLbl = it.terugbel_datum ? esc(new Date(it.terugbel_datum).toLocaleTimeString('nl-NL', {hour:'2-digit',minute:'2-digit'})) : '—';
+        const vmBadge = it.voicememo_status === 'sent'
+          ? '<span class="fu-cockpit-mini-badge zoom" title="Voicememo verstuurd">✓ voicememo</span>'
+          : '<span class="fu-cockpit-mini-badge" title="Voicememo nog niet verstuurd">○ voicememo</span>';
+        const url = it.zoom_join_url ? esc(it.zoom_join_url) : '#';
+        const disabled = it.zoom_join_url ? '' : 'style="opacity:.4;pointer-events:none"';
+        return `<div class="fu-cockpit-leadcard" data-appt="${esc(it.id)}">
+          <div class="fu-cockpit-leadavatar kind-zoom">${esc(initials)}</div>
+          <div class="fu-cockpit-leadcard-main">
+            <div class="fu-cockpit-leadcard-nm">${nm}</div>
+            <div class="fu-cockpit-leadcard-sub">
+              <span style="font-weight:600;color:#fff">${timeLbl}</span>
+              <span class="fu-cockpit-leadcard-badges"><span class="fu-cockpit-mini-badge zoom">📹 Zoom</span>${vmBadge}</span>
+            </div>
+          </div>
+          <a class="fu-lead-btn primary" href="${url}" target="_blank" rel="noopener" ${disabled} style="align-self:center;flex-shrink:0"><i class="ti ti-video"></i> Open Zoom</a>
+        </div>`;
+      }
+      // Reschedule: geen belactie, alleen 'Bekijk'-link.
+      if (wk === 'reschedule') {
+        const initials = _leadInitials(it.lead_name);
+        const nm = esc(it.lead_name || '—');
+        return `<div class="fu-cockpit-leadcard" data-appt="${esc(it.id)}">
+          <div class="fu-cockpit-leadavatar" style="background:#6b7280">${esc(initials)}</div>
+          <div class="fu-cockpit-leadcard-main">
+            <div class="fu-cockpit-leadcard-nm">${nm}</div>
+            <div class="fu-cockpit-leadcard-sub">
+              <span class="fu-cockpit-leadcard-badges"><span class="fu-cockpit-mini-badge" style="background:#6b7280;color:#fff">💤 Wacht op reschedule</span></span>
+            </div>
+          </div>
+          <a class="fu-lead-btn" href="/modules/follow-up-lead.html?id=${esc(it.id)}" style="align-self:center;flex-shrink:0"><i class="ti ti-external-link"></i> Bekijk</a>
+        </div>`;
+      }
+      // Standaard bel-lead (ongewijzigd gedrag).
       const initials = _leadInitials(it.lead_name);
       const isZoom = String(it.lead_kind || 'call') === 'zoom';
       const avaCls = isZoom ? 'kind-zoom' : (it.source === 'event' ? 'src-event' : 'src-retention');
@@ -4043,12 +4146,14 @@
     }
 
     function selectLead(leadId) {
+      const lead = (_leadsState.items || []).find((x) => x.id === leadId);
+      // Zoom/reschedule zijn geen bel-leads — die openen niet de belkaart.
+      // De actie zit al in de kaart (Open Zoom / Bekijk).
+      if (lead && (lead.__worklistKind || 'bel') !== 'bel') return;
       _leadsState.selectedId = leadId;
-      // Highlight update — vermijd volledige rerender voor stabiele scroll.
       document.querySelectorAll('#cockpit-buckets .fu-cockpit-leadcard').forEach((el) => {
         el.classList.toggle('active', el.getAttribute('data-lead') === leadId);
       });
-      const lead = (_leadsState.items || []).find((x) => x.id === leadId);
       if (!lead) { clearLeadDetail(); return; }
       renderLeadDetail(lead, { refreshTimeline: true });
     }
@@ -4314,8 +4419,9 @@
         { key: 'foutief_nummer', label: 'Foutief nummer',    icon: 'ti-phone-x',        cls: 'g-gray' },
       ]},
       { title: 'Wel contact', items: [
-        { key: 'terugbel',       label: 'Terugbel-afspraak', icon: 'ti-clock',   cls: 'g-blue' },
-        { key: 'zoom_ingepland', label: 'Zoom ingepland',    icon: 'ti-video',   cls: 'g-blue' },
+        { key: 'terugbel',          label: 'Terugbel-afspraak',   icon: 'ti-clock',           cls: 'g-blue' },
+        { key: 'zoom_ingepland',    label: 'Zoom ingepland',      icon: 'ti-video',           cls: 'g-blue' },
+        { key: 'whatsapp_gestuurd', label: 'WhatsApp gestuurd',   icon: 'ti-brand-whatsapp',  cls: 'g-green' },
       ]},
       { title: 'Afgerond', items: [
         { key: 'sale',           label: 'Sale geworden',     icon: 'ti-trophy',  cls: 'g-green' },
@@ -4329,8 +4435,9 @@
         { key: 'gesprek_gehad',  label: 'Gesprek gehad',     icon: 'ti-message',    cls: 'g-blue' },
       ]},
       { title: 'Wel contact', items: [
-        { key: 'terugbel',       label: 'Terugbel-afspraak', icon: 'ti-clock',   cls: 'g-blue' },
-        { key: 'zoom_ingepland', label: 'Zoom ingepland',    icon: 'ti-video',   cls: 'g-blue' },
+        { key: 'terugbel',          label: 'Terugbel-afspraak',   icon: 'ti-clock',           cls: 'g-blue' },
+        { key: 'zoom_ingepland',    label: 'Zoom ingepland',      icon: 'ti-video',           cls: 'g-blue' },
+        { key: 'whatsapp_gestuurd', label: 'WhatsApp gestuurd',   icon: 'ti-brand-whatsapp',  cls: 'g-green' },
       ]},
       { title: 'Afgerond', items: [
         { key: 'sale',           label: 'Sale geworden',     icon: 'ti-trophy',  cls: 'g-green' },
