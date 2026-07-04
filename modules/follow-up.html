@@ -2441,6 +2441,47 @@
 
     /* Buckets container spacing */
     .fu-cockpit-buckets { gap: 4px; }
+
+    /* ── Hoogte-fix: werklijst + detail vullen viewport ────────────
+       De queue en detail-kolom nemen de resterende viewport-hoogte in,
+       zodat er veel meer afspraken/leads zichtbaar zijn zonder dat de
+       pagina zelf hoeft te scrollen. Interne scroll (queue) blijft. */
+    .fu-cockpit {
+      align-items: stretch;
+      min-height: calc(100vh - 130px);
+    }
+    .fu-cockpit-list {
+      max-height: calc(100vh - 130px);
+      min-height: calc(100vh - 130px);
+      display: flex; flex-direction: column;
+    }
+    .fu-cockpit-buckets {
+      flex: 1;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    .fu-cockpit-detail {
+      min-height: calc(100vh - 130px);
+    }
+
+    /* Afspraken-lijst ook hoger + scrollbaar */
+    #af-list {
+      max-height: calc(100vh - 190px);
+      overflow-y: auto;
+      display: flex; flex-direction: column; gap: 10px;
+      padding-right: 4px;
+    }
+
+    /* Afspraak-modal body iets ruimer voor de context-grid */
+    #appt-modal .fu-modal { max-width: 640px; }
+    #appt-modal .fu-modal-body { padding: 18px 20px; }
+    #appt-modal .fu-cockpit-ctx {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr));
+      gap: 10px; background: var(--paper); border-radius: var(--radius-sm);
+      padding: 10px 12px;
+    }
+    #appt-modal .fu-cockpit-ctx-cell .k { font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted-2); font-weight:700; }
+    #appt-modal .fu-cockpit-ctx-cell .v { color: var(--text); font-size:13px; font-weight:600; margin-top:2px; }
   </style>
 </head>
 <body>
@@ -3026,6 +3067,21 @@
             <button type="button" class="fu-lead-btn primary" id="voicememo-all">✓ Alles al verstuurd</button>
             <button type="button" class="fu-lead-btn" id="voicememo-later">Ik stuur ze zometeen</button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Afspraak-detail modal (cockpit-stijl). Hergebruikt de bestaande
+         endpoints api/follow-up-appointment-detail (GET) en
+         api/follow-up-verplaats-call (POST). -->
+    <div class="fu-modal-backdrop" id="appt-modal" style="display:none;">
+      <div class="fu-modal" role="dialog" aria-modal="true" style="max-width:640px">
+        <div class="fu-modal-header">
+          <h2 id="appt-modal-title">Afspraak</h2>
+          <button class="fu-modal-close" type="button" id="appt-modal-close">&times;</button>
+        </div>
+        <div class="fu-modal-body" id="appt-modal-body">
+          <div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>
         </div>
       </div>
     </div>
@@ -4492,8 +4548,11 @@
     async function loadLeadsTab() {
       const bucketsEl = document.getElementById('cockpit-buckets');
       if (!bucketsEl) return;
-      if (_leadsState.loading) return;
+      // Als er al een fetch loopt, markeer dat er nog een gedaan moet
+      // worden (KPI's moeten na elke mutatie geactualiseerd blijven).
+      if (_leadsState.loading) { _leadsState.reloadRequested = true; return; }
       _leadsState.loading = true;
+      _leadsState.reloadRequested = false;
       bucketsEl.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
       // Ensures parallel; wachtrij niet blokkeren.
       _ensureMe();
@@ -4566,6 +4625,13 @@
         bucketsEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Laden mislukt: ' + esc(e.message || '') + '</div>';
       } finally {
         _leadsState.loading = false;
+        // KPI-refresh-race: als tijdens de fetch een mutatie een
+        // reload aanvroeg (bv. uitkomst, patchLead), voer die nu uit
+        // zodat de KPI's niet blijven hangen op de oude counts.
+        if (_leadsState.reloadRequested) {
+          _leadsState.reloadRequested = false;
+          setTimeout(loadLeadsTab, 0);
+        }
       }
     }
 
@@ -4653,7 +4719,9 @@
 
     function _renderCockpitCard(it) {
       const wk = it.__worklistKind || 'bel';
-      // Zoom-appointment: geen belkaart-opener, wel een 'Open Zoom'-actie.
+      // Zoom-appointment: klik op de rij opent afspraak-detail (modal).
+      // Geen grote 'Open Zoom'-knop meer — alleen klein 📹-badge als
+      // indicatie. De Zoom-link zit in de detail-modal.
       if (wk === 'zoom') {
         const initials = _leadInitials(it.lead_name);
         const nm = esc(it.lead_name || '—');
@@ -4661,34 +4729,30 @@
         const vmBadge = it.voicememo_status === 'sent'
           ? '<span class="fu-cockpit-mini-badge zoom" title="Voicememo verstuurd">✓ voicememo</span>'
           : '<span class="fu-cockpit-mini-badge" title="Voicememo nog niet verstuurd">○ voicememo</span>';
-        const url = it.zoom_join_url ? esc(it.zoom_join_url) : '#';
-        const disabled = it.zoom_join_url ? '' : 'style="opacity:.4;pointer-events:none"';
-        return `<div class="fu-cockpit-leadcard" data-appt="${esc(it.id)}">
+        return `<button type="button" class="fu-cockpit-leadcard" data-appt="${esc(it.id)}">
           <div class="fu-cockpit-leadavatar kind-zoom">${esc(initials)}</div>
           <div class="fu-cockpit-leadcard-main">
             <div class="fu-cockpit-leadcard-nm">${nm}</div>
             <div class="fu-cockpit-leadcard-sub">
-              <span style="font-weight:600;color:#fff">${timeLbl}</span>
-              <span class="fu-cockpit-leadcard-badges"><span class="fu-cockpit-mini-badge zoom">📹 Zoom</span>${vmBadge}</span>
+              <span style="font-weight:700;color:var(--text)">${timeLbl}</span>
+              <span class="fu-cockpit-leadcard-badges"><span class="fu-cockpit-mini-badge zoom" title="Zoom-call"><i class="ti ti-video"></i></span>${vmBadge}</span>
             </div>
           </div>
-          <a class="fu-lead-btn primary" href="${url}" target="_blank" rel="noopener" ${disabled} style="align-self:center;flex-shrink:0"><i class="ti ti-video"></i> Open Zoom</a>
-        </div>`;
+        </button>`;
       }
-      // Reschedule: geen belactie, alleen 'Bekijk'-link.
+      // Reschedule: klik op de rij opent afspraak-detail (met verzet-flow).
       if (wk === 'reschedule') {
         const initials = _leadInitials(it.lead_name);
         const nm = esc(it.lead_name || '—');
-        return `<div class="fu-cockpit-leadcard" data-appt="${esc(it.id)}">
-          <div class="fu-cockpit-leadavatar" style="background:#6b7280">${esc(initials)}</div>
+        return `<button type="button" class="fu-cockpit-leadcard" data-appt="${esc(it.id)}">
+          <div class="fu-cockpit-leadavatar" style="background:var(--muted-2)">${esc(initials)}</div>
           <div class="fu-cockpit-leadcard-main">
             <div class="fu-cockpit-leadcard-nm">${nm}</div>
             <div class="fu-cockpit-leadcard-sub">
-              <span class="fu-cockpit-leadcard-badges"><span class="fu-cockpit-mini-badge" style="background:#6b7280;color:#fff">💤 Wacht op reschedule</span></span>
+              <span class="fu-cockpit-leadcard-badges"><span class="fu-cockpit-mini-badge" style="background:var(--warn-soft);color:var(--warn)">💤 Wacht op reschedule</span></span>
             </div>
           </div>
-          <a class="fu-lead-btn" href="/modules/follow-up-lead.html?id=${esc(it.id)}" style="align-self:center;flex-shrink:0"><i class="ti ti-external-link"></i> Bekijk</a>
-        </div>`;
+        </button>`;
       }
       // Standaard bel-lead (ongewijzigd gedrag).
       const initials = _leadInitials(it.lead_name);
@@ -4721,6 +4785,9 @@
     function _wireCockpitCards(root) {
       root.querySelectorAll('[data-lead]').forEach((btn) => {
         btn.addEventListener('click', () => selectLead(btn.getAttribute('data-lead')));
+      });
+      root.querySelectorAll('[data-appt]').forEach((btn) => {
+        btn.addEventListener('click', () => _openAppointmentDetail(btn.getAttribute('data-appt')));
       });
     }
 
@@ -6094,12 +6161,17 @@
           setTimeout(() => trySelect(0), 150);
         });
       });
-      // 2) data-af-appt (appointment) → open klassieke afspraak-detail
-      //    (hergebruik bestaande flow follow-up-lead.html?id=<id>).
-      el.querySelectorAll('[data-af-appt]').forEach((a) => {
-        // <a href=...> handelt de navigatie zelf af; geen extra binding.
+      // 2) data-af-appt (knop) + data-af-appt-row (hele rij) →
+      //    open de in-cockpit afspraak-detail-modal.
+      el.querySelectorAll('[data-af-appt]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          _openAppointmentDetail(btn.getAttribute('data-af-appt'));
+        });
       });
-      // 3) data-af-zoom → open Zoom-join-URL in nieuw tabblad (target=_blank).
+      el.querySelectorAll('[data-af-appt-row]').forEach((row) => {
+        row.addEventListener('click', () => _openAppointmentDetail(row.getAttribute('data-af-appt-row')));
+      });
     }
 
     function _renderAfspraakRow(it, isRes) {
@@ -6126,24 +6198,19 @@
         : `<span class="owner" style="opacity:.6"><i class="ti ti-user-off"></i> —</span>`;
       const timeSrc = it.terugbel_datum || it.scheduled_at;
 
-      // Actie-kolom: verschilt per type + view.
+      // Actie-kolom: appointments openen de in-cockpit detail-modal;
+      // bel-lead opent de belkaart via Werklijst. Grote "Open Zoom"-knop
+      // in de rij is bewust weg — Zoom-link staat in de detail-modal.
       let actionHtml = '';
-      if (isRes) {
-        // Reschedule-rij: subtiele hint naar de klassieke afspraak-detail.
-        actionHtml = `<a class="fu-lead-btn" href="/modules/follow-up-lead.html?id=${esc(it.id)}" title="Open afspraak-detail (klassieke flow)"><i class="ti ti-external-link"></i> Bekijk</a>`;
-      } else if (isAppt) {
-        // Zoom-appointment: primair open Zoom, secundair open afspraak-detail.
-        if (it.zoom_join_url) {
-          actionHtml = `<a class="fu-lead-btn primary" href="${esc(it.zoom_join_url)}" target="_blank" rel="noopener" data-af-zoom><i class="ti ti-video"></i> Open Zoom</a>`;
-        } else {
-          actionHtml = `<a class="fu-lead-btn" href="/modules/follow-up-lead.html?id=${esc(it.id)}" data-af-appt><i class="ti ti-external-link"></i> Bekijk</a>`;
-        }
+      let rowClickAttr = '';
+      if (isRes || isAppt) {
+        actionHtml = `<button type="button" class="fu-lead-btn" data-af-appt="${esc(it.id)}" title="Open afspraak-detail"><i class="ti ti-external-link"></i> Openen</button>`;
+        rowClickAttr = `data-af-appt-row="${esc(it.id)}" style="cursor:pointer"`;
       } else {
-        // Lead-terugbelrij: opent in cockpit-Werklijst.
         actionHtml = `<button type="button" class="fu-lead-btn primary" data-af-open="${esc(it.id)}"><i class="ti ti-phone-call"></i> Bel nu</button>`;
       }
 
-      return `<div class="fu-af-row">
+      return `<div class="fu-af-row" ${rowClickAttr}>
         <div class="time">${_fmtHM(timeSrc)}</div>
         <div class="avatar ${avaCls}">${esc(initials)}</div>
         <div>
@@ -6329,6 +6396,154 @@
       }, 150);
 
       if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="ti ti-phone-call"></i> Bel nu'; }
+    }
+
+    // ── APPOINTMENT-DETAIL MODAL (in-cockpit) ───────────────────────────
+    // Opent een afspraak in dezelfde huisstijl als de cockpit; hergebruikt
+    // /api/follow-up-appointment-detail (GET) en /api/follow-up-verplaats-
+    // call (POST). Geen navigatie naar de OUDE follow-up-lead.html.
+    async function _openAppointmentDetail(appointmentId) {
+      if (!appointmentId) return;
+      const backdrop = document.getElementById('appt-modal');
+      const body     = document.getElementById('appt-modal-body');
+      const title    = document.getElementById('appt-modal-title');
+      if (!backdrop || !body) return;
+      backdrop.style.display = 'flex';
+      body.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
+      if (title) title.textContent = 'Afspraak';
+      try {
+        const r = await window.AgentShared.apiFetch('/api/follow-up-appointment-detail?id=' + encodeURIComponent(appointmentId));
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+        const appt = d.appointment || d;
+        _renderApptDetail(appt);
+      } catch (e) {
+        body.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Fout: ' + esc(e.message || '') + '</div>';
+      }
+    }
+
+    function _closeApptDetail() {
+      const backdrop = document.getElementById('appt-modal');
+      if (backdrop) backdrop.style.display = 'none';
+    }
+
+    function _fmtApptDateTime(iso) {
+      if (!iso) return '—';
+      try {
+        return new Date(iso).toLocaleString('nl-NL', {
+          weekday:'long', day:'2-digit', month:'long', year:'numeric',
+          hour:'2-digit', minute:'2-digit',
+        });
+      } catch { return iso; }
+    }
+
+    function _renderApptDetail(appt) {
+      const body  = document.getElementById('appt-modal-body');
+      const title = document.getElementById('appt-modal-title');
+      if (!body) return;
+      const nm = appt?.lead_name || '(zonder naam)';
+      if (title) title.textContent = 'Afspraak · ' + nm;
+      const phone = appt?.lead_phone || '';
+      const email = appt?.lead_email || '';
+      const when  = _fmtApptDateTime(appt?.scheduled_at);
+      const statusLabel = (appt?.status
+        ? { scheduled:'Gepland', gepland:'Gepland', wacht_op_reschedule:'Wacht op reschedule',
+            no_show:'No-show', completed:'Afgerond', cancelled:'Geannuleerd', verwijderd:'Verwijderd' }[appt.status]
+        : '') || appt?.status || '—';
+      const vm = appt?.voicememo_status === 'sent'
+        ? '<span class="fu-cockpit-mini-badge zoom">✓ voicememo</span>'
+        : (appt?.voicememo_status ? '<span class="fu-cockpit-mini-badge">○ voicememo</span>' : '');
+      const zoomUrl = appt?.zoom_join_url || '';
+      const zoomHtml = zoomUrl
+        ? `<a class="fu-lead-btn primary" href="${esc(zoomUrl)}" target="_blank" rel="noopener"><i class="ti ti-video"></i> Open Zoom</a>`
+        : '<span class="fu-empty" style="padding:6px 0;font-size:12px;color:var(--muted-2)">Geen Zoom-link beschikbaar</span>';
+
+      // Default datum/tijd voor verplaats-picker: 30 min na huidige scheduled_at
+      // (indien nog niet gepasseerd), anders morgen 09:00.
+      let defISO;
+      const t = appt?.scheduled_at ? Date.parse(appt.scheduled_at) : NaN;
+      if (Number.isFinite(t) && t > Date.now()) {
+        defISO = new Date(t + 30 * 60 * 1000);
+      } else {
+        const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0);
+        defISO = d;
+      }
+      const defDate = defISO.toISOString().slice(0, 10);
+      const defTime = defISO.toISOString().slice(11, 16);
+
+      body.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+            <div class="fu-cockpit-avatar" style="width:48px;height:48px;border-radius:12px">${esc(_leadInitials(nm))}</div>
+            <div style="min-width:0;flex:1">
+              <div style="font-size:16px;font-weight:700;color:var(--text)">${esc(nm)}</div>
+              <div class="fu-cockpit-dhead-links" style="display:flex;gap:10px;font-size:13px;margin-top:4px">
+                ${phone ? `<a href="tel:${esc(phone.replace(/\s+/g,''))}"><i class="ti ti-phone"></i> ${esc(phone)}</a>` : ''}
+                ${email ? `<a href="mailto:${esc(email)}"><i class="ti ti-mail"></i> ${esc(email)}</a>` : ''}
+              </div>
+            </div>
+          </div>
+
+          <div class="fu-cockpit-ctx">
+            <div class="fu-cockpit-ctx-cell"><span class="k">Wanneer</span><span class="v">${esc(when)}</span></div>
+            <div class="fu-cockpit-ctx-cell"><span class="k">Status</span><span class="v">${esc(statusLabel)}</span></div>
+            ${vm ? `<div class="fu-cockpit-ctx-cell"><span class="k">Voicememo</span><span class="v">${vm}</span></div>` : ''}
+          </div>
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${zoomHtml}
+            <button type="button" class="fu-lead-btn" id="appt-toggle-verzet"><i class="ti ti-calendar-time"></i> Verzetten</button>
+          </div>
+
+          <div id="appt-verzet-form" class="fu-outcome-planner" hidden>
+            <div class="fu-outcome-planner-title"><i class="ti ti-calendar"></i> Nieuwe datum + tijd</div>
+            <div class="fu-outcome-planner-row">
+              <div class="fu-cockpit-quick">
+                <label>Datum</label>
+                <input type="date" id="appt-verzet-date" class="fu-lead-inline" value="${defDate}">
+              </div>
+              <div class="fu-cockpit-quick">
+                <label>Tijd</label>
+                <input type="time" id="appt-verzet-time" class="fu-lead-inline" value="${defTime}">
+              </div>
+            </div>
+            <div class="fu-outcome-planner-actions">
+              <button type="button" class="fu-lead-btn primary" id="appt-verzet-save"><i class="ti ti-check"></i> Verzetten</button>
+              <button type="button" class="fu-lead-btn" id="appt-verzet-cancel">Annuleren</button>
+            </div>
+          </div>
+        </div>`;
+
+      const toggle = document.getElementById('appt-toggle-verzet');
+      const form   = document.getElementById('appt-verzet-form');
+      if (toggle && form) toggle.addEventListener('click', () => { form.hidden = !form.hidden; });
+      const cancel = document.getElementById('appt-verzet-cancel');
+      if (cancel && form) cancel.addEventListener('click', () => { form.hidden = true; });
+
+      const save = document.getElementById('appt-verzet-save');
+      if (save) save.addEventListener('click', async () => {
+        const dt = document.getElementById('appt-verzet-date')?.value;
+        const tm = document.getElementById('appt-verzet-time')?.value || '09:00';
+        if (!dt) { alert('Kies een datum.'); return; }
+        const newIso = new Date(dt + 'T' + tm + ':00').toISOString();
+        save.disabled = true;
+        try {
+          const r = await window.AgentShared.apiFetch('/api/follow-up-verplaats-call', {
+            method : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body   : JSON.stringify({ appointment_id: appt.id, new_datetime: newIso }),
+          });
+          const dd = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(dd?.error || 'HTTP ' + r.status);
+          _closeApptDetail();
+          // Vernieuw de zichtbare views: Werklijst + Afspraken + KPI's.
+          try { loadLeadsTab(); } catch (_) {}
+          try { loadAfsprakenTab(); } catch (_) {}
+        } catch (e) {
+          alert('Verzetten mislukt: ' + (e.message || 'onbekend'));
+          save.disabled = false;
+        }
+      });
     }
 
     // ── SLUIMERPOT-TAB ────────────────────────────────────────────────────
@@ -6706,6 +6921,17 @@
       // Backdrop-klik sluit
       const vmBd = document.getElementById('voicememo-modal');
       if (vmBd) vmBd.addEventListener('click', (e) => { if (e.target === vmBd) _closeVoicememoModal(); });
+
+      // Appointment-detail modal: close-knop + backdrop-klik + Escape.
+      const apptClose = document.getElementById('appt-modal-close');
+      if (apptClose) apptClose.addEventListener('click', () => _closeApptDetail());
+      const apptBd = document.getElementById('appt-modal');
+      if (apptBd) apptBd.addEventListener('click', (e) => { if (e.target === apptBd) _closeApptDetail(); });
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        const bd = document.getElementById('appt-modal');
+        if (bd && bd.style.display !== 'none') _closeApptDetail();
+      });
     }
 
     // ── PR Z: Event follow-ups tab ───────────────────────────────────────────
