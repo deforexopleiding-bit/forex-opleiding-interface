@@ -14,10 +14,11 @@
   <script src="shared/agent-shared.js"></script>
   <script src="shared/theme-shared.js"></script>
   <!-- SIP.js voor de cockpit-softphone (WebRTC-bellen via VoIPGRID).
-       Geladen vanaf jsdelivr — zelfde origin als tabler-icons hierboven.
-       Falls the load: softphone.available blijft false en de belkaart
+       Lokaal gebundeld (esbuild IIFE, sip.js@0.21.2 → window.SIP) zodat
+       de load synchroon en zeker klaar is voordat de app-logica draait.
+       Bij load-fail: softphone.available blijft false en de belkaart
        valt terug op het uitkomst-panel voor handmatige registratie. -->
-  <script src="https://cdn.jsdelivr.net/npm/sip.js@0.21.2/dist/sip.min.js" defer></script>
+  <script src="shared/sip.min.js"></script>
   <style>
     /* Lokale aliases — backward compat tot volledige refactor */
     :root {
@@ -4442,14 +4443,27 @@
       } catch (_) { return null; }
     }
 
+    // Vangnet-poll: mocht de sip.min.js door caching of trage disk toch
+    // niet direct beschikbaar zijn bij DOMContentLoaded, wacht max 3s
+    // (30 × 100ms) op window.SIP.UserAgent voordat we opgeven.
+    async function _waitForSIPLib(maxMs = 3000) {
+      const start = Date.now();
+      while (Date.now() - start < maxMs) {
+        if (window.SIP && window.SIP.UserAgent) return window.SIP;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return (window.SIP && window.SIP.UserAgent) ? window.SIP : null;
+    }
+
     async function _initSoftphone() {
-      // SIP.js library check.
-      const SIPLib = window.SIP;
+      _setSoftphoneStatus('connecting');
+      // SIP.js library check met poll — de bundle wordt synchroon vóór
+      // deze inline-scripts geladen, dus dit is puur een vangnet.
+      const SIPLib = await _waitForSIPLib(3000);
       if (!SIPLib || !SIPLib.UserAgent) {
         _setSoftphoneStatus('disabled', 'Softphone-bibliotheek niet geladen');
         return;
       }
-      _setSoftphoneStatus('connecting');
       const cfg = await _loadSoftphoneConfig();
       if (!cfg) {
         _softphone.available = false;

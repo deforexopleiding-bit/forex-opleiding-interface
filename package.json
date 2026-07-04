@@ -16,6 +16,7 @@
     "imapflow": "^1.0.171",
     "mailparser": "^3.6.5",
     "nodemailer": "^6.10.1",
-    "pdf-parse": "^1.1.1"
+    "pdf-parse": "^1.1.1",
+    "sip.js": "^0.21.2"
   }
 }
