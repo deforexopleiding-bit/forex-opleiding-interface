@@ -23,15 +23,30 @@ export default async function handler(req, res) {
   if (!leadId || !UUID_RE.test(leadId)) return res.status(400).json({ error: 'lead_id (uuid) vereist' });
 
   try {
-    const { data: notes, error } = await supabaseAdmin
+    // Probeer eerst met entry_kind; val terug op oude shape zonder die
+    // kolom als het schema er nog niet is (42703).
+    const runQuery = (cols) => supabaseAdmin
       .from('follow_up_lead_notes')
-      .select('id, lead_id, note, created_by_user_id, created_at')
+      .select(cols)
       .eq('lead_id', leadId)
       .order('created_at', { ascending: false })
       .limit(500);
-    if (error) {
-      if (error.code === '42P01') return res.status(501).json({ error: 'Tabel follow_up_lead_notes ontbreekt', code: 'MIGRATION_REQUIRED' });
-      throw new Error(error.message);
+    let notes = [];
+    {
+      const { data, error } = await runQuery('id, lead_id, note, entry_kind, created_by_user_id, created_at');
+      if (error && error.code === '42703') {
+        const { data: d2, error: e2 } = await runQuery('id, lead_id, note, created_by_user_id, created_at');
+        if (e2) {
+          if (e2.code === '42P01') return res.status(501).json({ error: 'Tabel follow_up_lead_notes ontbreekt', code: 'MIGRATION_REQUIRED' });
+          throw new Error(e2.message);
+        }
+        notes = (d2 || []).map((n) => ({ ...n, entry_kind: null }));
+      } else if (error) {
+        if (error.code === '42P01') return res.status(501).json({ error: 'Tabel follow_up_lead_notes ontbreekt', code: 'MIGRATION_REQUIRED' });
+        throw new Error(error.message);
+      } else {
+        notes = data || [];
+      }
     }
 
     // Naam van auteurs bij zoeken (profiles.full_name).

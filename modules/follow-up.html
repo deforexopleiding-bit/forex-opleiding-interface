@@ -1136,6 +1136,99 @@
     .fu-cockpit-noteadd { display: flex; gap: 6px; margin-top: 8px; }
     .fu-cockpit-noteadd input { flex: 1; }
 
+    /* Belronde-knop (bovenaan werklijst) */
+    .fu-belronde-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: #10b981; color: #fff; border: none; border-radius: 8px;
+      padding: 8px 12px; font-size: 13px; font-weight: 500; cursor: pointer;
+      align-self: flex-start;
+    }
+    .fu-belronde-btn:hover { background: #059669; }
+    .fu-belronde-btn.active { background: #f97316; }
+    .fu-belronde-btn.active:hover { background: #ea580c; }
+
+    /* Uitkomst-panel onder de belkaart */
+    .fu-outcome-panel {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border-default, rgba(255,255,255,0.1));
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+    }
+    .fu-outcome-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .fu-outcome-title {
+      font-size: 13px; font-weight: 600; letter-spacing: .3px;
+      color: var(--text-primary, #fff); text-transform: uppercase;
+    }
+    .fu-outcome-close {
+      background: transparent; border: none; color: var(--text-secondary, rgba(255,255,255,.6));
+      font-size: 22px; cursor: pointer; line-height: 1;
+    }
+    .fu-outcome-close:hover { color: var(--text-primary, #fff); }
+    .fu-outcome-groups { display: flex; flex-direction: column; gap: 10px; }
+    .fu-outcome-group { }
+    .fu-outcome-group-title {
+      font-size: 10.5px; font-weight: 600; letter-spacing: .5px;
+      color: var(--text-secondary, rgba(255,255,255,.55)); text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .fu-outcome-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+    .fu-outcome-btn {
+      appearance: none; border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.03); color: var(--text-primary, #fff);
+      padding: 8px 12px; border-radius: 8px; font-size: 12.5px; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 6px;
+      transition: background .15s, border-color .15s;
+    }
+    .fu-outcome-btn:hover {
+      background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.24);
+    }
+    .fu-outcome-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .fu-outcome-btn.g-red    { border-color: rgba(239,68,68,.35); color: #fecaca; background: rgba(239,68,68,.08); }
+    .fu-outcome-btn.g-red:hover    { background: rgba(239,68,68,.16); }
+    .fu-outcome-btn.g-orange { border-color: rgba(249,115,22,.35); color: #fed7aa; background: rgba(249,115,22,.08); }
+    .fu-outcome-btn.g-orange:hover { background: rgba(249,115,22,.16); }
+    .fu-outcome-btn.g-green  { border-color: rgba(16,185,129,.35); color: #bbf7d0; background: rgba(16,185,129,.08); }
+    .fu-outcome-btn.g-green:hover  { background: rgba(16,185,129,.16); }
+    .fu-outcome-btn.g-blue   { border-color: rgba(59,130,246,.35); color: #bfdbfe; background: rgba(59,130,246,.08); }
+    .fu-outcome-btn.g-blue:hover   { background: rgba(59,130,246,.16); }
+    .fu-outcome-btn.g-gray   { border-color: rgba(107,114,128,.35); color: #d1d5db; background: rgba(107,114,128,.08); }
+    .fu-outcome-btn.g-gray:hover   { background: rgba(107,114,128,.16); }
+
+    /* Inline planners in het uitkomst-panel */
+    .fu-outcome-planner {
+      margin-top: 10px; padding: 10px 12px;
+      background: rgba(9,61,84,0.12);
+      border: 1px solid rgba(9,61,84,0.35);
+      border-radius: 10px;
+    }
+    .fu-outcome-planner-title {
+      font-size: 12px; font-weight: 600; letter-spacing: .3px;
+      color: var(--text-primary, #fff); margin-bottom: 8px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .fu-outcome-planner-row {
+      display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 8px;
+    }
+    .fu-outcome-planner-actions {
+      display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap;
+    }
+
+    /* Belronde-eind melding */
+    .fu-belronde-done {
+      background: rgba(16,185,129,0.1);
+      border: 1px solid rgba(16,185,129,0.35);
+      color: #bbf7d0;
+      border-radius: 10px;
+      padding: 14px 16px;
+      text-align: center;
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+
     @media (max-width: 900px) {
       .fu-cockpit { grid-template-columns: 1fr; }
       .fu-cockpit-list { max-height: none; }
@@ -1595,6 +1688,10 @@
               <label class="fu-cockpit-toggle"><input type="checkbox" id="cockpit-snoozed"> 💤 Later opnieuw</label>
               <button class="fu-lead-btn" id="cockpit-refresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
             </div>
+            <button class="fu-belronde-btn" id="cockpit-belronde" type="button">
+              <i class="ti ti-player-play" id="cockpit-belronde-icon"></i>
+              <span id="cockpit-belronde-lbl">Start belronde</span>
+            </button>
           </div>
           <div class="fu-cockpit-summary" id="cockpit-summary"></div>
           <div class="fu-cockpit-buckets" id="cockpit-buckets">
@@ -1637,16 +1734,78 @@
                   <i class="ti ti-phone-call"></i> <span id="cockpit-call-label">Bel nu</span>
                 </a>
                 <div class="fu-callcard-dropdown">
-                  <button class="fu-callcard-secondary" id="cockpit-actie">
+                  <button class="fu-callcard-secondary" id="cockpit-actie" type="button" aria-expanded="false">
                     <i class="ti ti-bolt"></i> Actie <i class="ti ti-chevron-down"></i>
                   </button>
                   <div class="fu-callcard-menu" id="cockpit-actiemenu" hidden>
-                    <button data-actie="offerte"><i class="ti ti-file-invoice"></i> Offerte sturen</button>
-                    <button data-actie="zoom"><i class="ti ti-video"></i> Zoom plannen</button>
-                    <button data-actie="terugbel"><i class="ti ti-clock-hour-4"></i> Terugbel plannen</button>
-                    <button data-actie="whatsapp"><i class="ti ti-brand-whatsapp"></i> WhatsApp</button>
-                    <button data-actie="mail"><i class="ti ti-mail"></i> Mail</button>
+                    <button type="button" data-actie="offerte"><i class="ti ti-file-invoice"></i> Offerte maken</button>
+                    <button type="button" data-actie="zoom"><i class="ti ti-video"></i> Zoom-call inplannen</button>
+                    <button type="button" data-actie="terugbel"><i class="ti ti-clock-hour-4"></i> Terugbellen plannen</button>
+                    <button type="button" data-actie="whatsapp"><i class="ti ti-brand-whatsapp"></i> WhatsApp</button>
+                    <button type="button" data-actie="mail"><i class="ti ti-mail"></i> Mail</button>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Uitkomst-panel: verschijnt na "Bel nu" of "Zoom openen" en
+                 laat de sales-user een uitkomst kiezen. Cadans wordt
+                 serverside afgedwongen (api/follow-up-lead-outcome). -->
+            <div class="fu-outcome-panel" id="cockpit-outcome" hidden>
+              <div class="fu-outcome-head">
+                <span class="fu-outcome-title" id="cockpit-outcome-title">Wat was het resultaat?</span>
+                <button type="button" class="fu-outcome-close" id="cockpit-outcome-close" title="Sluiten">&times;</button>
+              </div>
+              <div class="fu-outcome-groups" id="cockpit-outcome-groups"></div>
+
+              <!-- Terugbel-planner (inline) -->
+              <div class="fu-outcome-planner" id="cockpit-planner-terugbel" hidden>
+                <div class="fu-outcome-planner-title"><i class="ti ti-clock"></i> Terugbel-afspraak plannen</div>
+                <div class="fu-outcome-planner-row">
+                  <div class="fu-cockpit-quick">
+                    <label>Datum</label>
+                    <input type="date" id="cockpit-planner-t-date" class="fu-lead-inline">
+                  </div>
+                  <div class="fu-cockpit-quick">
+                    <label>Tijd</label>
+                    <input type="time" id="cockpit-planner-t-time" class="fu-lead-inline" value="09:00">
+                  </div>
+                  <label class="fu-cockpit-toggle" style="align-self:center">
+                    <input type="checkbox" id="cockpit-planner-t-hot"> 🔥 Markeer als hotlead
+                  </label>
+                </div>
+                <div class="fu-outcome-planner-actions">
+                  <button type="button" class="fu-lead-btn primary" id="cockpit-planner-t-save"><i class="ti ti-check"></i> Inplannen</button>
+                  <button type="button" class="fu-lead-btn" id="cockpit-planner-t-cancel">Annuleren</button>
+                </div>
+              </div>
+
+              <!-- Zoom-planner (inline) -->
+              <div class="fu-outcome-planner" id="cockpit-planner-zoom" hidden>
+                <div class="fu-outcome-planner-title"><i class="ti ti-video"></i> Zoom-call inplannen</div>
+                <div class="fu-outcome-planner-row">
+                  <div class="fu-cockpit-quick">
+                    <label>Datum</label>
+                    <input type="date" id="cockpit-planner-z-date" class="fu-lead-inline">
+                  </div>
+                  <div class="fu-cockpit-quick">
+                    <label>Tijd</label>
+                    <input type="time" id="cockpit-planner-z-time" class="fu-lead-inline" value="10:00">
+                  </div>
+                </div>
+                <div class="fu-outcome-planner-actions">
+                  <button type="button" class="fu-lead-btn primary" id="cockpit-planner-z-save"><i class="ti ti-check"></i> Inplannen</button>
+                  <button type="button" class="fu-lead-btn" id="cockpit-planner-z-cancel">Annuleren</button>
+                </div>
+              </div>
+
+              <!-- Snooze-picker (inline) -->
+              <div class="fu-outcome-planner" id="cockpit-planner-snooze" hidden>
+                <div class="fu-outcome-planner-title"><i class="ti ti-moon"></i> Later opnieuw contact opnemen</div>
+                <div class="fu-outcome-planner-actions" style="justify-content:flex-start;flex-wrap:wrap;gap:8px">
+                  <button type="button" class="fu-lead-btn primary" data-snooze="6">Over 6 maanden</button>
+                  <button type="button" class="fu-lead-btn primary" data-snooze="12">Over 12 maanden</button>
+                  <button type="button" class="fu-lead-btn" id="cockpit-planner-s-cancel">Annuleren</button>
                 </div>
               </div>
             </div>
@@ -3058,6 +3217,10 @@
       // UI-state
       selectedId  : null,
       timelineCache: {},         // { leadId: [items] }
+      // Sales-cockpit Fase 2 — focusmodus
+      callSession : { active: false },
+      // Actief zichtbaar planner-type: null | 'terugbel' | 'zoom' | 'snooze'
+      activePlanner : null,
     };
 
     async function _ensureMe() {
@@ -3161,13 +3324,23 @@
         renderCockpitList();
         renderCockpitSummary();
         // Auto-open eerstvolgende lead — of behoud selectie als hij nog in
-        // de nieuwe lijst zit.
+        // de nieuwe lijst zit. Bij belronde-focusmodus: als de vorige lead
+        // weg is (sale/snooze/verlengd/verloren), auto naar de volgende.
+        // Lege lijst tijdens focusmodus → "Belronde klaar"-melding.
         const items = _leadsState.items;
         const stillThere = _leadsState.selectedId && items.some((x) => x.id === _leadsState.selectedId);
         if (!stillThere) {
           const first = items[0];
-          if (first) selectLead(first.id);
-          else       clearLeadDetail();
+          if (first) {
+            _leadsState.selectedId = null; // reset zodat selectLead een nieuwe render doet
+            selectLead(first.id);
+          } else if (_leadsState.callSession.active) {
+            _leadsState.selectedId = null;
+            _showBelrondeDone();
+          } else {
+            _leadsState.selectedId = null;
+            clearLeadDetail();
+          }
         } else {
           // Vernieuw detail-panel-data (bv. na status-wijziging).
           const cur = items.find((x) => x.id === _leadsState.selectedId);
@@ -3292,8 +3465,15 @@
     function clearLeadDetail() {
       const emptyEl = document.getElementById('cockpit-detail-empty');
       const bodyEl  = document.getElementById('cockpit-detailbody');
-      if (emptyEl) emptyEl.style.display = '';
       if (bodyEl)  bodyEl.style.display  = 'none';
+      if (emptyEl) {
+        emptyEl.style.display = '';
+        emptyEl.innerHTML = `
+          <i class="ti ti-user-search"></i>
+          <div class="fu-cockpit-empty-title">Selecteer een lead</div>
+          <div class="fu-cockpit-empty-sub">Kies links een lead uit de werklijst om te bellen of op te volgen.</div>
+        `;
+      }
     }
 
     function renderLeadDetail(it, { refreshTimeline } = {}) {
@@ -3322,6 +3502,12 @@
           ? '<span class="fu-cockpit-mini-badge zoom"><i class="ti ti-video"></i> Zoom</span>'
           : '<span class="fu-cockpit-mini-badge"><i class="ti ti-phone"></i> Bel</span>');
         parts.push(`<span class="fu-cockpit-mini-badge" title="Status">${esc(st.label)}</span>`);
+        // Poging N/4 direct in de detailkop naast de status, zodat de
+        // cadans zichtbaar is voordat de sales-user belt.
+        const a = Number(it.attempts) || 0;
+        if (a > 0) {
+          parts.push(`<span class="fu-cockpit-mini-badge attempts" title="Poging ${a}/4"><i class="ti ti-refresh"></i> Poging ${a}/4</span>`);
+        }
         badgesEl.innerHTML = parts.join('');
       }
       const contactEl = document.getElementById('cockpit-contact');
@@ -3396,6 +3582,11 @@
       const noteBtn   = document.getElementById('cockpit-note-add');
       if (noteInput) noteInput.value = '';
       if (noteBtn) noteBtn.dataset.leadId = it.id;
+
+      // Sluit een eventueel open uitkomst-panel / planners / actie-menu
+      // bij lead-wissel, zodat state van de vorige lead niet doorlekt.
+      _closeOutcomePanel();
+      _showActiemenu(false);
     }
 
     function _renderOwnerControl(it) {
@@ -3520,20 +3711,179 @@
       }
     }
 
-    // Actie-dropdown handlers — pure placeholder toasts voor Fase 1. In
-    // Fase 2 worden dit echte flows (offerte-wizard / zoom-schedule / etc).
-    const _actieToasts = {
-      offerte  : 'Offerte-flow komt in Fase 2 (Sales-cockpit koppeling).',
-      zoom     : 'Zoom-plannen komt in Fase 2 (agenda-integratie).',
-      terugbel : 'Gebruik de datum-picker om een terugbeltijd te plannen.',
-      whatsapp : 'WhatsApp-flow komt in Fase 2.',
-      mail     : 'Mail-flow komt in Fase 2.',
-    };
+    // ── Sales-cockpit Fase 2 — uitkomst-motor + planners + acties ─────────
 
+    // Groep-definities voor het uitkomst-panel. Elk item: {key, label, group, cls}.
+    // Groepen worden gerenderd in volgorde onder de belkaart.
+    const OUTCOME_GROUPS_CALL = [
+      { title: 'Geen contact', items: [
+        { key: 'geen_gehoor',    label: 'Geen gehoor',       icon: 'ti-phone-off',      cls: 'g-red' },
+        { key: 'voicemail',      label: 'Voicemail ingesproken', icon: 'ti-microphone', cls: 'g-orange' },
+        { key: 'foutief_nummer', label: 'Foutief nummer',    icon: 'ti-phone-x',        cls: 'g-gray' },
+      ]},
+      { title: 'Wel contact', items: [
+        { key: 'terugbel',       label: 'Terugbel-afspraak', icon: 'ti-clock',   cls: 'g-blue' },
+        { key: 'zoom_ingepland', label: 'Zoom ingepland',    icon: 'ti-video',   cls: 'g-blue' },
+      ]},
+      { title: 'Afgerond', items: [
+        { key: 'sale',           label: 'Sale geworden',     icon: 'ti-trophy',  cls: 'g-green' },
+        { key: 'snooze',         label: 'Later opnieuw',     icon: 'ti-moon',    cls: 'g-gray' },
+        { key: 'geen_interesse', label: 'Geen interesse',    icon: 'ti-x',       cls: 'g-red' },
+      ]},
+    ];
+    const OUTCOME_GROUPS_ZOOM = [
+      { title: 'Meeting', items: [
+        { key: 'noshow',         label: 'No-show',           icon: 'ti-user-off',   cls: 'g-orange' },
+        { key: 'gesprek_gehad',  label: 'Gesprek gehad',     icon: 'ti-message',    cls: 'g-blue' },
+      ]},
+      { title: 'Wel contact', items: [
+        { key: 'terugbel',       label: 'Terugbel-afspraak', icon: 'ti-clock',   cls: 'g-blue' },
+        { key: 'zoom_ingepland', label: 'Zoom ingepland',    icon: 'ti-video',   cls: 'g-blue' },
+      ]},
+      { title: 'Afgerond', items: [
+        { key: 'sale',           label: 'Sale geworden',     icon: 'ti-trophy',  cls: 'g-green' },
+        { key: 'snooze',         label: 'Later opnieuw',     icon: 'ti-moon',    cls: 'g-gray' },
+        { key: 'geen_interesse', label: 'Geen interesse',    icon: 'ti-x',       cls: 'g-red' },
+      ]},
+    ];
+
+    function _renderOutcomeGroups(isZoom) {
+      const el = document.getElementById('cockpit-outcome-groups');
+      if (!el) return;
+      const groups = isZoom ? OUTCOME_GROUPS_ZOOM : OUTCOME_GROUPS_CALL;
+      el.innerHTML = groups.map((g) => {
+        const buttons = g.items.map((it) =>
+          `<button type="button" class="fu-outcome-btn ${it.cls}" data-outcome="${esc(it.key)}"><i class="ti ${it.icon}"></i> ${esc(it.label)}</button>`
+        ).join('');
+        return `<div class="fu-outcome-group">
+          <div class="fu-outcome-group-title">${esc(g.title)}</div>
+          <div class="fu-outcome-buttons">${buttons}</div>
+        </div>`;
+      }).join('');
+    }
+
+    function _openOutcomePanel(isZoom) {
+      const panel = document.getElementById('cockpit-outcome');
+      if (!panel) return;
+      _renderOutcomeGroups(isZoom);
+      panel.hidden = false;
+      _showPlanner(null);
+      // Prefill terugbel-planner datum met vandaag+1u zodat sales snel kan
+      // inplannen zonder handmatig een dag te kiezen.
+      const tDate = document.getElementById('cockpit-planner-t-date');
+      if (tDate) tDate.value = fmtDateLocal(new Date(Date.now() + 24*3600*1000).toISOString());
+      const zDate = document.getElementById('cockpit-planner-z-date');
+      if (zDate) zDate.value = fmtDateLocal(new Date(Date.now() + 24*3600*1000).toISOString());
+    }
+
+    function _closeOutcomePanel() {
+      const panel = document.getElementById('cockpit-outcome');
+      if (!panel) return;
+      panel.hidden = true;
+      _showPlanner(null);
+    }
+
+    function _showPlanner(kind) {
+      _leadsState.activePlanner = kind || null;
+      const ids = {
+        terugbel : 'cockpit-planner-terugbel',
+        zoom     : 'cockpit-planner-zoom',
+        snooze   : 'cockpit-planner-snooze',
+      };
+      for (const [k, id] of Object.entries(ids)) {
+        const el = document.getElementById(id);
+        if (el) el.hidden = (k !== kind);
+      }
+      const groupsEl = document.getElementById('cockpit-outcome-groups');
+      if (groupsEl) groupsEl.style.display = kind ? 'none' : '';
+    }
+
+    async function submitOutcome(outcome, extra) {
+      const leadId = _leadsState.selectedId;
+      if (!leadId) return;
+      try {
+        const r = await window.AgentShared.apiFetch('/api/follow-up-lead-outcome', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lead_id: leadId, outcome, ...(extra || {}) }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+        _closeOutcomePanel();
+        // Werk wachtrij + counts + tijdlijn bij. loadLeadsTab herkent
+        // dat de vorige selectie niet meer in de lijst zit (bij sale /
+        // snooze / geen_interesse) en opent auto de volgende → precies
+        // wat de belronde nodig heeft.
+        await loadLeadsTab();
+        // Timeline verversen voor de nu (mogelijk nog) geselecteerde lead.
+        if (_leadsState.selectedId) loadLeadTimeline(_leadsState.selectedId);
+      } catch (e) {
+        alert('Uitkomst opslaan mislukt: ' + (e.message || 'onbekend'));
+      }
+    }
+
+    // Actie-dropdown open/close met click-outside + Escape.
     function _showActiemenu(show) {
       const menu = document.getElementById('cockpit-actiemenu');
+      const btn  = document.getElementById('cockpit-actie');
       if (!menu) return;
       menu.hidden = !show;
+      if (btn) btn.setAttribute('aria-expanded', String(!!show));
+    }
+
+    function _openWhatsappForLead(it) {
+      const phone = String(it?.lead_phone || '').replace(/[^\d]/g, '');
+      if (!phone) { alert('Geen telefoonnummer beschikbaar voor WhatsApp.'); return; }
+      window.open('https://wa.me/' + phone, '_blank', 'noopener');
+    }
+    function _openMailForLead(it) {
+      const em = String(it?.lead_email || '').trim();
+      if (!em) { alert('Geen e-mailadres beschikbaar.'); return; }
+      window.location.href = 'mailto:' + em;
+    }
+    function _openOfferteForLead(it) {
+      // Sales-wizard accepteert ?customer_id=<uuid> om de klant vooraf in
+      // te vullen (zie modules/sales.html:1034). Anders sturen we naar de
+      // wizard zonder pre-fill zodat sales de klant handmatig invult.
+      let url = '/modules/sales-wizard.html';
+      if (it?.customer_id) url += '?customer_id=' + encodeURIComponent(it.customer_id);
+      window.location.href = url;
+    }
+
+    // Belronde-focusmodus toggle.
+    function _toggleBelronde() {
+      const btn  = document.getElementById('cockpit-belronde');
+      const lbl  = document.getElementById('cockpit-belronde-lbl');
+      const icon = document.getElementById('cockpit-belronde-icon');
+      _leadsState.callSession.active = !_leadsState.callSession.active;
+      const on = _leadsState.callSession.active;
+      if (btn) btn.classList.toggle('active', on);
+      if (lbl) lbl.textContent = on ? 'Belronde actief' : 'Start belronde';
+      if (icon) icon.className = 'ti ' + (on ? 'ti-player-pause' : 'ti-player-play');
+      if (on) {
+        // Direct de eerstvolgende lead openen als er een selectie is (of
+        // top-of-list) en de belknop simuleren.
+        const items = _leadsState.items || [];
+        if (!items.length) { _showBelrondeDone(); return; }
+        if (!_leadsState.selectedId) {
+          selectLead(items[0].id);
+        }
+      }
+    }
+
+    function _showBelrondeDone() {
+      // Rechts een nette "klaar"-melding tonen als de belronde geen leads
+      // meer heeft. Detail-body verbergen en empty-state uitbreiden.
+      const emptyEl = document.getElementById('cockpit-detail-empty');
+      const bodyEl  = document.getElementById('cockpit-detailbody');
+      if (bodyEl)  bodyEl.style.display  = 'none';
+      if (emptyEl) {
+        emptyEl.style.display = '';
+        emptyEl.innerHTML = `
+          <i class="ti ti-flag-check"></i>
+          <div class="fu-cockpit-empty-title">Belronde klaar 🎉</div>
+          <div class="fu-cockpit-empty-sub">Er staan geen leads meer in de huidige wachtrij. Zet filters uit voor een breder bereik of stop de belronde.</div>
+        `;
+      }
     }
 
     function _bindCockpitDetail() {
@@ -3543,7 +3893,6 @@
           const grp = btn.getAttribute('data-filter'); // 'source' | 'kind'
           const val = btn.getAttribute('data-value');
           _leadsState.filter[grp] = val;
-          // Toggle actives binnen groep.
           btn.parentElement.querySelectorAll('.fu-cockpit-pill').forEach((b) => {
             b.classList.toggle('active', b === btn);
           });
@@ -3558,8 +3907,82 @@
       // Refresh
       const rf = document.getElementById('cockpit-refresh');
       if (rf) rf.addEventListener('click', () => loadLeadsTab());
+      // Belronde toggle
+      const brBtn = document.getElementById('cockpit-belronde');
+      if (brBtn) brBtn.addEventListener('click', _toggleBelronde);
 
-      // Status-select
+      // Belknop → open uitkomst-panel. Bel-modus: tel:-link laat OS-dialer
+      // openen; we tonen daarnaast het panel. Zoom-modus: preventDefault +
+      // panel tonen (er is geen echte Zoom-URL — dat komt in Fase 3).
+      const callBtn = document.getElementById('cockpit-call');
+      if (callBtn) callBtn.addEventListener('click', (e) => {
+        const mode = callBtn.dataset.mode;
+        if (mode === 'none') { e.preventDefault(); return; }
+        if (mode === 'zoom') e.preventDefault();
+        const it = (_leadsState.items || []).find((x) => x.id === _leadsState.selectedId);
+        if (!it) return;
+        _openOutcomePanel(String(it.lead_kind || 'call') === 'zoom');
+      });
+
+      // Uitkomst-panel: sluiten
+      const closeBtn = document.getElementById('cockpit-outcome-close');
+      if (closeBtn) closeBtn.addEventListener('click', () => _closeOutcomePanel());
+
+      // Uitkomst-groups: click → outcome POST of planner-open.
+      const groupsEl = document.getElementById('cockpit-outcome-groups');
+      if (groupsEl) groupsEl.addEventListener('click', (e) => {
+        const b = e.target.closest('button[data-outcome]');
+        if (!b) return;
+        const outcome = b.getAttribute('data-outcome');
+        if (outcome === 'terugbel') { _showPlanner('terugbel'); return; }
+        if (outcome === 'zoom_ingepland') { _showPlanner('zoom'); return; }
+        if (outcome === 'snooze') { _showPlanner('snooze'); return; }
+        if (outcome === 'geen_interesse') {
+          const reason = prompt('Reden voor geen interesse? (optioneel)') || '';
+          submitOutcome(outcome, { reason: reason.trim() });
+          return;
+        }
+        submitOutcome(outcome);
+      });
+
+      // Terugbel-planner
+      const tSave = document.getElementById('cockpit-planner-t-save');
+      const tCancel = document.getElementById('cockpit-planner-t-cancel');
+      if (tSave) tSave.addEventListener('click', () => {
+        const date = document.getElementById('cockpit-planner-t-date')?.value;
+        const time = document.getElementById('cockpit-planner-t-time')?.value || '09:00';
+        const hot  = !!document.getElementById('cockpit-planner-t-hot')?.checked;
+        if (!date) { alert('Kies een datum.'); return; }
+        const iso = new Date(date + 'T' + time + ':00').toISOString();
+        submitOutcome('terugbel', { terugbel_datum: iso, is_hot: hot });
+      });
+      if (tCancel) tCancel.addEventListener('click', () => _showPlanner(null));
+
+      // Zoom-planner
+      const zSave = document.getElementById('cockpit-planner-z-save');
+      const zCancel = document.getElementById('cockpit-planner-z-cancel');
+      if (zSave) zSave.addEventListener('click', () => {
+        const date = document.getElementById('cockpit-planner-z-date')?.value;
+        const time = document.getElementById('cockpit-planner-z-time')?.value || '10:00';
+        if (!date) { alert('Kies een datum.'); return; }
+        const iso = new Date(date + 'T' + time + ':00').toISOString();
+        submitOutcome('zoom_ingepland', { terugbel_datum: iso });
+      });
+      if (zCancel) zCancel.addEventListener('click', () => _showPlanner(null));
+
+      // Snooze-planner
+      const snPlanner = document.getElementById('cockpit-planner-snooze');
+      if (snPlanner) snPlanner.addEventListener('click', (e) => {
+        const cancelBtn = e.target.closest('#cockpit-planner-s-cancel');
+        if (cancelBtn) { _showPlanner(null); return; }
+        const b = e.target.closest('button[data-snooze]');
+        if (!b) return;
+        const months = Number(b.getAttribute('data-snooze'));
+        if (![6, 12].includes(months)) return;
+        submitOutcome('snooze', { snooze_months: months });
+      });
+
+      // Status-select (behoud voor gebruikers die geen uitkomst willen)
       const stSel = document.getElementById('cockpit-status');
       if (stSel) stSel.addEventListener('change', async () => {
         const leadId = stSel.dataset.leadId;
@@ -3574,38 +3997,66 @@
         const v = dInp.value ? new Date(dInp.value + 'T09:00:00').toISOString() : null;
         await patchLead(leadId, { terugbel_datum: v });
       });
-      // Snooze-knop — placeholder toast (schema-write pas in Fase 2).
+      // Snooze-knop in quickbar → toont dezelfde snooze-planner in het
+      // uitkomst-panel (opent panel als 'ie dicht was).
       const snBtn = document.getElementById('cockpit-snooze-btn');
       if (snBtn) snBtn.addEventListener('click', () => {
-        alert('Snooze-functie: kies boven links "💤 Later opnieuw" om gesnoozed te zien. Snooze-schrijven komt in Fase 2.');
+        const panel = document.getElementById('cockpit-outcome');
+        if (panel) panel.hidden = false;
+        const it = (_leadsState.items || []).find((x) => x.id === _leadsState.selectedId);
+        _renderOutcomeGroups(String(it?.lead_kind || 'call') === 'zoom');
+        _showPlanner('snooze');
       });
 
-      // Actie-dropdown open/close (met click-outside)
+      // Actie-dropdown open/close (met click-outside + Escape).
       const actieBtn = document.getElementById('cockpit-actie');
       const menu     = document.getElementById('cockpit-actiemenu');
-      if (actieBtn) {
-        actieBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          _showActiemenu(menu ? menu.hidden : false);
-        });
-      }
+      if (menu) menu.hidden = true;
+      if (actieBtn) actieBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _showActiemenu(menu ? menu.hidden : false);
+      });
+      // Click-outside sluit.
       document.addEventListener('click', (e) => {
         if (!menu || menu.hidden) return;
         const dd = e.target.closest('.fu-callcard-dropdown');
         if (!dd) _showActiemenu(false);
       });
+      // Escape sluit + sluit ook uitkomst-panel.
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        if (menu && !menu.hidden) _showActiemenu(false);
+        const panel = document.getElementById('cockpit-outcome');
+        if (panel && !panel.hidden) _closeOutcomePanel();
+      });
+      // Actie-menu items → echte acties.
       if (menu) {
         menu.addEventListener('click', (e) => {
           const b = e.target.closest('button[data-actie]');
           if (!b) return;
           _showActiemenu(false);
           const kind = b.getAttribute('data-actie');
-          const msg  = _actieToasts[kind] || '';
-          if (kind === 'terugbel') {
-            const dInp = document.getElementById('cockpit-date');
-            if (dInp) dInp.focus();
+          const it = (_leadsState.items || []).find((x) => x.id === _leadsState.selectedId);
+          if (!it) return;
+          switch (kind) {
+            case 'offerte':  _openOfferteForLead(it); break;
+            case 'zoom': {
+              const panel = document.getElementById('cockpit-outcome');
+              if (panel) panel.hidden = false;
+              _renderOutcomeGroups(String(it.lead_kind || 'call') === 'zoom');
+              _showPlanner('zoom');
+              break;
+            }
+            case 'terugbel': {
+              const panel = document.getElementById('cockpit-outcome');
+              if (panel) panel.hidden = false;
+              _renderOutcomeGroups(String(it.lead_kind || 'call') === 'zoom');
+              _showPlanner('terugbel');
+              break;
+            }
+            case 'whatsapp': _openWhatsappForLead(it); break;
+            case 'mail':     _openMailForLead(it);     break;
           }
-          if (msg) alert(msg);
         });
       }
 
