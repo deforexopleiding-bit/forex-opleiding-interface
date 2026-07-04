@@ -156,6 +156,65 @@
       border-bottom-color: var(--fg, #fff);
       font-weight: 500;
     }
+
+    /* Cockpit-hoofdnavigatie: 4 primaire tabs prominent + oude tabs
+       secundair. Divider + label ertussen zodat de scheiding leesbaar is. */
+    .fu-tab--primary {
+      padding: 14px 20px;
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--fg, #fff);
+    }
+    .fu-tab--primary .ti { font-size: 16px; }
+    .fu-tab--primary.active {
+      color: #fff;
+      border-bottom-color: #093d54;
+      background: linear-gradient(180deg, rgba(9,61,84,0) 0%, rgba(9,61,84,0.18) 100%);
+    }
+    .fu-tab--primary.active::after {
+      content: '';
+      position: absolute; left: 8px; right: 8px; bottom: -1px;
+      height: 3px; background: #093d54; border-radius: 3px 3px 0 0;
+    }
+    .fu-tab--primary:not(.active) {
+      color: var(--text-secondary, rgba(255,255,255,0.75));
+    }
+    .fu-tab--primary:hover { color: #fff; }
+
+    .fu-tabs-divider {
+      display: inline-block;
+      width: 1px; align-self: stretch;
+      background: var(--border, rgba(255,255,255,0.15));
+      margin: 8px 10px 8px 14px;
+    }
+    .fu-tabs-legacy-label {
+      display: inline-flex; align-items: center;
+      font-size: 10.5px; letter-spacing: .5px; text-transform: uppercase;
+      color: var(--text-secondary, rgba(255,255,255,0.4));
+      padding: 0 8px 0 0;
+      white-space: nowrap;
+    }
+
+    .fu-tab--legacy {
+      padding: 10px 14px;
+      font-size: 13px;
+      color: var(--text-secondary, rgba(255,255,255,0.5));
+      opacity: 0.85;
+    }
+    .fu-tab--legacy .ti { font-size: 13px; }
+    .fu-tab--legacy:hover { color: var(--fg, #fff); opacity: 1; }
+    .fu-tab--legacy.active {
+      color: var(--fg, #fff);
+      opacity: 1;
+      border-bottom-color: rgba(255,255,255,0.5);
+    }
+
+    @media (max-width: 720px) {
+      .fu-tabs-divider { margin: 6px 6px; }
+      .fu-tabs-legacy-label { display: none; }
+      .fu-tab--primary { padding: 12px 14px; font-size: 14px; }
+      .fu-tab--legacy  { padding: 10px 10px; font-size: 12px; }
+    }
     .fu-tab-count {
       display: inline-block;
       background: var(--card-bg, rgba(255,255,255,0.08));
@@ -1605,56 +1664,63 @@
     </div>
 
     <nav class="fu-tabs" role="tablist">
-      <button class="fu-tab active" data-tab="vandaag" role="tab" aria-selected="true">
-        <i class="ti ti-calendar-event" aria-hidden="true"></i>
-        <span>Vandaag</span>
-        <span class="fu-tab-count" id="tab-count-vandaag">—</span>
-      </button>
-      <button class="fu-tab" data-tab="open-acties" role="tab" aria-selected="false">
-        <i class="ti ti-list-check" aria-hidden="true"></i>
-        <span>Open acties</span>
-        <span class="fu-tab-count" id="tab-count-open-acties">—</span>
-      </button>
-      <button class="fu-tab" data-tab="opvolging" role="tab" aria-selected="false">
-        <i class="ti ti-arrow-loop-right" aria-hidden="true"></i>
-        <span>Opvolging</span>
-        <span class="fu-tab-count" id="tab-count-opvolging">—</span><span class="fu-tab-dot" id="tab-dot-opvolging" style="display:none;"></span>
-      </button>
-      <button class="fu-tab" data-tab="archief" role="tab" aria-selected="false">
-        <i class="ti ti-checks" aria-hidden="true"></i>
-        <span>Afgehandelde afspraken</span>
-      </button>
-      <button class="fu-tab" data-tab="event-followups" role="tab" aria-selected="false">
-        <i class="ti ti-presentation" aria-hidden="true"></i>
-        <span>Event follow-ups</span>
-        <span class="fu-tab-count" id="tab-count-event-followups">—</span>
-      </button>
-      <button class="fu-tab" data-tab="leads" role="tab" aria-selected="false">
-        <i class="ti ti-user-plus" aria-hidden="true"></i>
-        <span>Leads</span>
+      <!-- PRIMAIR — cockpit-hoofdnavigatie -->
+      <button class="fu-tab fu-tab--primary active" data-tab="leads" role="tab" aria-selected="true">
+        <i class="ti ti-target-arrow" aria-hidden="true"></i>
+        <span>Werklijst</span>
         <span class="fu-tab-count" id="tab-count-leads">—</span>
       </button>
-      <button class="fu-tab" data-tab="afspraken" role="tab" aria-selected="false">
+      <button class="fu-tab fu-tab--primary" data-tab="afspraken" role="tab" aria-selected="false">
         <i class="ti ti-calendar-event" aria-hidden="true"></i>
         <span>Afspraken</span>
         <span class="fu-tab-count" id="tab-count-afspraken">—</span>
       </button>
-      <button class="fu-tab" data-tab="sluimerpot" role="tab" aria-selected="false">
+      <button class="fu-tab fu-tab--primary" data-tab="sluimerpot" role="tab" aria-selected="false">
         <i class="ti ti-moon" aria-hidden="true"></i>
         <span>Sluimerpot</span>
         <span class="fu-tab-count" id="tab-count-sluimerpot">—</span>
       </button>
-      <button class="fu-tab" data-tab="dashboard" role="tab" aria-selected="false">
+      <button class="fu-tab fu-tab--primary" data-tab="dashboard" role="tab" aria-selected="false">
         <i class="ti ti-chart-bar" aria-hidden="true"></i>
         <span>Dashboard</span>
       </button>
-      <button class="fu-tab" data-tab="kalender" role="tab" aria-selected="false">
+
+      <!-- Scheiding: klassieke tabs (Dave's GHL-afspraken + kalender leven hier nog) -->
+      <span class="fu-tabs-divider" aria-hidden="true"></span>
+      <span class="fu-tabs-legacy-label" aria-hidden="true">Klassiek</span>
+
+      <!-- SECUNDAIR — bestaande tabs (Dave's afspraken-flow) -->
+      <button class="fu-tab fu-tab--legacy" data-tab="vandaag" role="tab" aria-selected="false">
+        <i class="ti ti-calendar-event" aria-hidden="true"></i>
+        <span>Vandaag</span>
+        <span class="fu-tab-count" id="tab-count-vandaag">—</span>
+      </button>
+      <button class="fu-tab fu-tab--legacy" data-tab="open-acties" role="tab" aria-selected="false">
+        <i class="ti ti-list-check" aria-hidden="true"></i>
+        <span>Open acties</span>
+        <span class="fu-tab-count" id="tab-count-open-acties">—</span>
+      </button>
+      <button class="fu-tab fu-tab--legacy" data-tab="opvolging" role="tab" aria-selected="false">
+        <i class="ti ti-arrow-loop-right" aria-hidden="true"></i>
+        <span>Opvolging</span>
+        <span class="fu-tab-count" id="tab-count-opvolging">—</span><span class="fu-tab-dot" id="tab-dot-opvolging" style="display:none;"></span>
+      </button>
+      <button class="fu-tab fu-tab--legacy" data-tab="archief" role="tab" aria-selected="false">
+        <i class="ti ti-checks" aria-hidden="true"></i>
+        <span>Afgehandelde afspraken</span>
+      </button>
+      <button class="fu-tab fu-tab--legacy" data-tab="event-followups" role="tab" aria-selected="false">
+        <i class="ti ti-presentation" aria-hidden="true"></i>
+        <span>Event follow-ups</span>
+        <span class="fu-tab-count" id="tab-count-event-followups">—</span>
+      </button>
+      <button class="fu-tab fu-tab--legacy" data-tab="kalender" role="tab" aria-selected="false">
         <i class="ti ti-calendar" aria-hidden="true"></i>
         <span>Kalender</span>
       </button>
     </nav>
 
-    <div class="fu-tab-panel active" data-panel="vandaag">
+    <div class="fu-tab-panel" data-panel="vandaag">
       <div class="fu-time-toggle">
         <button class="fu-toggle-btn active" data-range="today">Vandaag</button>
         <button class="fu-toggle-btn" data-range="7days">7 dagen</button>
@@ -1844,7 +1910,7 @@
          LINKS: werklijst met filters + prioriteits-secties (🔥 Hotleads /
          Te laat / Vandaag / Deze week). RECHTS: lead-detail met
          belkaart (#093d54), Actie-dropdown, context + tijdlijn. -->
-    <div class="fu-tab-panel" data-panel="leads" id="panel-leads">
+    <div class="fu-tab-panel active" data-panel="leads" id="panel-leads">
       <div class="fu-cockpit">
         <!-- LINKS: werklijst -->
         <aside class="fu-cockpit-list" id="cockpit-list">
@@ -5323,6 +5389,14 @@
       bindTimeToggle();
       initOpvolgingSearch();  // zoek-input in opvolging-tab activeren
       bindEventFollowupsControls();   // PR Z
+
+      // Cockpit is nu de default-tab (Werklijst); als er geen deep-link
+      // naar een andere tab was, laad de cockpit-data expliciet.
+      if (!deepLinkTab) {
+        try { loadLeadsTab(); } catch (_) { /* fail-soft */ }
+        // Voicememo-ronde s'ochtends automatisch aanbieden bij eerste bezoek.
+        try { _maybeAutoOpenVoicememo(); } catch (_) { /* fail-soft */ }
+      }
 
       await refreshFollowUpData();
 
