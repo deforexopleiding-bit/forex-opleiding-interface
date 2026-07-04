@@ -1506,7 +1506,7 @@
     }
     .fu-af-row, .fu-sp-row {
       display: grid;
-      grid-template-columns: 72px 36px 1fr auto auto auto;
+      grid-template-columns: 120px 36px 1fr auto auto auto;
       gap: 12px; align-items: center;
       padding: 10px 12px;
       background: rgba(255,255,255,0.03);
@@ -2310,7 +2310,8 @@
     }
     .fu-af-row:hover { transform: translateX(2px); border-color: #c3d3dd; }
     .fu-af-row .time {
-      font-size: 14px; font-weight: 800; color: var(--ink); width: 52px;
+      font-size: 13px; font-weight: 800; color: var(--ink);
+      min-width: 110px; white-space: nowrap;
     }
     .fu-af-row .avatar {
       width: 32px; height: 32px; border-radius: 8px;
@@ -2442,6 +2443,25 @@
     /* Buckets container spacing */
     .fu-cockpit-buckets { gap: 4px; }
 
+    /* Topbar-rechts: spacer duwt de acties naar rechts, action-knop
+       past bij de mockup-topbar (compact, hot-oranje, radius 9px). */
+    .fu-topbar-spacer { flex: 1; }
+    .fu-topbar-action {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--hot); color: #fff;
+      border: none; border-radius: 9px;
+      padding: 8px 12px;
+      font-size: 13px; font-weight: 700;
+      cursor: pointer; font-family: inherit;
+      box-shadow: 0 2px 10px rgba(232,98,44,.28);
+      white-space: nowrap;
+    }
+    .fu-topbar-action:hover { background: #cf541f; }
+    .fu-topbar-action-lbl { font-size: 13px; }
+    @media (max-width: 720px) {
+      .fu-topbar-action-lbl { display: none; }
+    }
+
     /* Compacte belronde-knop (in de queue-toggles i.p.v. groot boven).
        Behoudt het bestaande active-state (oranje/dang bij focus-modus). */
     .fu-belronde-compact {
@@ -2567,6 +2587,12 @@
         <i class="ti ti-presentation" aria-hidden="true"></i>
         <span>Event-bellijst</span>
         <span class="fu-tab-count" id="tab-count-event-bellijst">—</span>
+      </button>
+
+      <!-- Topbar-rechts: voicememo-ronde-knop (verplaatst uit de queue). -->
+      <span class="fu-topbar-spacer" aria-hidden="true"></span>
+      <button class="fu-topbar-action" id="cockpit-voicememo-open" type="button" title="Voicememo-ronde openen">
+        🎙 <span class="fu-topbar-action-lbl">Voicememo</span>
       </button>
 
       <!-- Scheiding: klassieke tabs (Dave's GHL-afspraken + kalender leven hier nog) -->
@@ -2816,9 +2842,6 @@
                 <i class="ti ti-player-play" id="cockpit-belronde-icon"></i>
                 <span id="cockpit-belronde-lbl">Belronde</span>
               </button>
-              <button class="fu-lead-btn" id="cockpit-voicememo-open" type="button" title="Voicememo-ronde openen">
-                🎙
-              </button>
               <button class="fu-lead-btn" id="cockpit-refresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
             </div>
           </div>
@@ -2835,6 +2858,10 @@
             <div class="fu-cockpit-empty-title">Selecteer een lead</div>
             <div class="fu-cockpit-empty-sub">Kies links een lead uit de werklijst om te bellen of op te volgen.</div>
           </div>
+          <!-- Afspraak-detail: verschijnt in dezelfde detail-kolom als
+               de lead-belkaart. Klik op een lead → detailbody weer aan,
+               apptbody weer uit. -->
+          <div class="fu-cockpit-apptbody" id="cockpit-apptbody" style="display:none"></div>
           <div class="fu-cockpit-detailbody" id="cockpit-detailbody" style="display:none">
             <!-- header -->
             <div class="fu-cockpit-dhead">
@@ -4762,7 +4789,7 @@
       if (wk === 'zoom') {
         const initials = _leadInitials(it.lead_name);
         const nm = esc(it.lead_name || '—');
-        const timeLbl = it.terugbel_datum ? esc(new Date(it.terugbel_datum).toLocaleTimeString('nl-NL', {hour:'2-digit',minute:'2-digit'})) : '—';
+        const timeLbl = esc(_fmtHMwithDate(it.terugbel_datum));
         const vmBadge = it.voicememo_status === 'sent'
           ? '<span class="fu-cockpit-mini-badge zoom" title="Voicememo verstuurd">✓ voicememo</span>'
           : '<span class="fu-cockpit-mini-badge" title="Voicememo nog niet verstuurd">○ voicememo</span>';
@@ -4845,6 +4872,7 @@
       const emptyEl = document.getElementById('cockpit-detail-empty');
       const bodyEl  = document.getElementById('cockpit-detailbody');
       if (bodyEl)  bodyEl.style.display  = 'none';
+      _hideApptDetail();
       if (emptyEl) {
         emptyEl.style.display = '';
         emptyEl.innerHTML = `
@@ -4860,6 +4888,7 @@
       const bodyEl  = document.getElementById('cockpit-detailbody');
       if (!bodyEl) return;
       if (emptyEl) emptyEl.style.display = 'none';
+      _hideApptDetail();
       bodyEl.style.display  = '';
 
       // Header
@@ -6119,6 +6148,23 @@
       eventBellijst: { event: null, attendees: [], loading: false },
     };
 
+    // Gecombineerd datum + tijd voor afspraak-rijen: "Vandaag 17:04",
+    // "Morgen 10:30", "za 4 jul · 17:04". Consistent met de belbox-regel.
+    function _fmtHMwithDate(iso) {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
+      const t0 = new Date(); t0.setHours(0,0,0,0);
+      const d0 = new Date(d); d0.setHours(0,0,0,0);
+      const diff = Math.round((d0 - t0) / 86400000);
+      const hhmm = d.toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' });
+      if (diff === 0)  return 'Vandaag ' + hhmm;
+      if (diff === 1)  return 'Morgen ' + hhmm;
+      if (diff === -1) return 'Gisteren ' + hhmm;
+      const dayLbl = d.toLocaleDateString('nl-NL', { weekday:'short', day:'2-digit', month:'short' });
+      return dayLbl + ' · ' + hhmm;
+    }
+
     function _fmtHM(iso) {
       if (!iso) return '—';
       try {
@@ -6285,7 +6331,7 @@
       }
 
       return `<div class="fu-af-row" ${rowClickAttr}>
-        <div class="time">${_fmtHM(timeSrc)}</div>
+        <div class="time">${esc(_fmtHMwithDate(timeSrc))}</div>
         <div class="avatar ${avaCls}">${esc(initials)}</div>
         <div>
           <div class="name">${esc(it.lead_name || '—')} ${it.is_hot ? '<span class="fu-cockpit-mini-badge hot">🔥</span>' : ''}</div>
@@ -6472,19 +6518,23 @@
       if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="ti ti-phone-call"></i> Bel nu'; }
     }
 
-    // ── APPOINTMENT-DETAIL MODAL (in-cockpit) ───────────────────────────
-    // Opent een afspraak in dezelfde huisstijl als de cockpit; hergebruikt
+    // ── APPOINTMENT-DETAIL (in-cockpit, geen modal) ─────────────────────
+    // Rendert de afspraak-info RECHTS in de bestaande detail-kolom
+    // (#cockpit-apptbody), op dezelfde plek als de lead-belkaart. Klik
+    // op een lead → belkaart verschijnt weer; klik op een afspraak →
+    // afspraak-detail verschijnt weer. Hergebruikt bestaande endpoints
     // /api/follow-up-appointment-detail (GET) en /api/follow-up-verplaats-
-    // call (POST). Geen navigatie naar de OUDE follow-up-lead.html.
+    // call (POST).
     async function _openAppointmentDetail(appointmentId) {
       if (!appointmentId) return;
-      const backdrop = document.getElementById('appt-modal');
-      const body     = document.getElementById('appt-modal-body');
-      const title    = document.getElementById('appt-modal-title');
-      if (!backdrop || !body) return;
-      backdrop.style.display = 'flex';
-      body.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
-      if (title) title.textContent = 'Afspraak';
+      const apptBody = document.getElementById('cockpit-apptbody');
+      const leadBody = document.getElementById('cockpit-detailbody');
+      const emptyEl  = document.getElementById('cockpit-detail-empty');
+      if (!apptBody) return;
+      if (emptyEl) emptyEl.style.display = 'none';
+      if (leadBody) leadBody.style.display = 'none';
+      apptBody.style.display = 'block';
+      apptBody.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
       try {
         const r = await window.AgentShared.apiFetch('/api/follow-up-appointment-detail?id=' + encodeURIComponent(appointmentId));
         const d = await r.json().catch(() => ({}));
@@ -6492,28 +6542,42 @@
         const appt = d.appointment || d;
         _renderApptDetail(appt);
       } catch (e) {
-        body.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Fout: ' + esc(e.message || '') + '</div>';
+        apptBody.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Fout: ' + esc(e.message || '') + '</div>';
       }
     }
 
-    function _closeApptDetail() {
-      const backdrop = document.getElementById('appt-modal');
-      if (backdrop) backdrop.style.display = 'none';
+    // Verberg het afspraak-detail. Wordt aangeroepen wanneer een lead
+    // wordt geselecteerd of clearLeadDetail wordt uitgevoerd, zodat de
+    // afspraak-render niet dubbel blijft staan naast de belkaart.
+    function _hideApptDetail() {
+      const apptBody = document.getElementById('cockpit-apptbody');
+      if (apptBody) { apptBody.style.display = 'none'; apptBody.innerHTML = ''; }
     }
+
+    // Backwards-compat: sommige plekken riepen _closeApptDetail() aan
+    // toen dit een modal was. Nu betekent close = verbergen.
+    function _closeApptDetail() { _hideApptDetail(); }
 
     function _fmtApptDateTime(iso) {
       if (!iso) return '—';
       try {
-        return new Date(iso).toLocaleString('nl-NL', {
-          weekday:'long', day:'2-digit', month:'long', year:'numeric',
-          hour:'2-digit', minute:'2-digit',
-        });
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return iso;
+        const t0 = new Date(); t0.setHours(0,0,0,0);
+        const d0 = new Date(d); d0.setHours(0,0,0,0);
+        const diff = Math.round((d0 - t0) / 86400000);
+        const hhmm = d.toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' });
+        if (diff === 0)  return 'Vandaag · ' + hhmm;
+        if (diff === 1)  return 'Morgen · ' + hhmm;
+        if (diff === -1) return 'Gisteren · ' + hhmm;
+        const dagLabel = d.toLocaleDateString('nl-NL', { weekday:'short', day:'2-digit', month:'short' });
+        return dagLabel + ' · ' + hhmm;
       } catch { return iso; }
     }
 
     function _renderApptDetail(appt) {
-      const body  = document.getElementById('appt-modal-body');
-      const title = document.getElementById('appt-modal-title');
+      const body  = document.getElementById('cockpit-apptbody');
+      const title = null;
       if (!body) return;
       const nm = appt?.lead_name || '(zonder naam)';
       if (title) title.textContent = 'Afspraak · ' + nm;
@@ -6546,45 +6610,50 @@
       const defTime = defISO.toISOString().slice(11, 16);
 
       body.innerHTML = `
-        <div style="display:flex;flex-direction:column;gap:14px">
-          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
-            <div class="fu-cockpit-avatar" style="width:48px;height:48px;border-radius:12px">${esc(_leadInitials(nm))}</div>
-            <div style="min-width:0;flex:1">
-              <div style="font-size:16px;font-weight:700;color:var(--text)">${esc(nm)}</div>
-              <div class="fu-cockpit-dhead-links" style="display:flex;gap:10px;font-size:13px;margin-top:4px">
+        <div class="fu-cockpit-dhead">
+          <div class="fu-cockpit-dhead-left">
+            <div class="fu-cockpit-avatar">${esc(_leadInitials(nm))}</div>
+            <div class="fu-cockpit-dhead-text">
+              <h2>${esc(nm)}</h2>
+              <div class="fu-cockpit-dhead-badges">
+                <span class="fu-cockpit-mini-badge zoom"><i class="ti ti-video"></i> Zoom-call</span>
+                <span class="fu-cockpit-mini-badge" title="Status">${esc(statusLabel)}</span>
+                ${vm}
+              </div>
+              <div class="fu-cockpit-dhead-links">
                 ${phone ? `<a href="tel:${esc(phone.replace(/\s+/g,''))}"><i class="ti ti-phone"></i> ${esc(phone)}</a>` : ''}
                 ${email ? `<a href="mailto:${esc(email)}"><i class="ti ti-mail"></i> ${esc(email)}</a>` : ''}
               </div>
             </div>
           </div>
+        </div>
 
-          <div class="fu-cockpit-ctx">
-            <div class="fu-cockpit-ctx-cell"><span class="k">Wanneer</span><span class="v">${esc(when)}</span></div>
-            <div class="fu-cockpit-ctx-cell"><span class="k">Status</span><span class="v">${esc(statusLabel)}</span></div>
-            ${vm ? `<div class="fu-cockpit-ctx-cell"><span class="k">Voicememo</span><span class="v">${vm}</span></div>` : ''}
+        <div class="fu-callcard">
+          <div class="fu-callcard-top">
+            <div class="fu-callcard-label"><i class="ti ti-calendar-event"></i> Afspraak</div>
           </div>
-
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div class="fu-callcard-number" style="cursor:default">${esc(when)}</div>
+          <div class="fu-callcard-actions">
             ${zoomHtml}
-            <button type="button" class="fu-lead-btn" id="appt-toggle-verzet"><i class="ti ti-calendar-time"></i> Verzetten</button>
+            <button type="button" class="fu-callcard-secondary" id="appt-toggle-verzet"><i class="ti ti-calendar-time"></i> Verzetten</button>
           </div>
+        </div>
 
-          <div id="appt-verzet-form" class="fu-outcome-planner" hidden>
-            <div class="fu-outcome-planner-title"><i class="ti ti-calendar"></i> Nieuwe datum + tijd</div>
-            <div class="fu-outcome-planner-row">
-              <div class="fu-cockpit-quick">
-                <label>Datum</label>
-                <input type="date" id="appt-verzet-date" class="fu-lead-inline" value="${defDate}">
-              </div>
-              <div class="fu-cockpit-quick">
-                <label>Tijd</label>
-                <input type="time" id="appt-verzet-time" class="fu-lead-inline" value="${defTime}">
-              </div>
+        <div id="appt-verzet-form" class="fu-outcome-planner" hidden style="margin-bottom:16px">
+          <div class="fu-outcome-planner-title"><i class="ti ti-calendar"></i> Nieuwe datum + tijd</div>
+          <div class="fu-outcome-planner-row">
+            <div class="fu-cockpit-quick">
+              <label>Datum</label>
+              <input type="date" id="appt-verzet-date" class="fu-lead-inline" value="${defDate}">
             </div>
-            <div class="fu-outcome-planner-actions">
-              <button type="button" class="fu-lead-btn primary" id="appt-verzet-save"><i class="ti ti-check"></i> Verzetten</button>
-              <button type="button" class="fu-lead-btn" id="appt-verzet-cancel">Annuleren</button>
+            <div class="fu-cockpit-quick">
+              <label>Tijd</label>
+              <input type="time" id="appt-verzet-time" class="fu-lead-inline" value="${defTime}">
             </div>
+          </div>
+          <div class="fu-outcome-planner-actions">
+            <button type="button" class="fu-lead-btn primary" id="appt-verzet-save"><i class="ti ti-check"></i> Verzetten</button>
+            <button type="button" class="fu-lead-btn" id="appt-verzet-cancel">Annuleren</button>
           </div>
         </div>`;
 
