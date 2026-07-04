@@ -141,3 +141,54 @@ export async function updateGhlAppointmentTime(appointmentId, newStartIso, newEn
 
   return await res.json();
 }
+
+// Update ALLEEN het appointmentStatus-veld van een bestaande GHL-appointment.
+// Gebruikt voor de cockpit-uitkomst-flow: showed (gesprek gehad),
+// noshow (niet verschenen), confirmed (undo-restore) of cancelled
+// (geannuleerd — voor consistentie; annuleer-endpoint doet dit al zelf).
+//
+// Geldige waarden: 'confirmed' | 'showed' | 'noshow' | 'cancelled'.
+//
+// Bij niet-OK response: throws Error met ghlStatus + ghlBody. Caller
+// (typisch fail-soft) pusht dat naar warnings[] zonder de DB-mutatie
+// te blokkeren.
+export async function updateGhlAppointmentStatus(appointmentId, appointmentStatus) {
+  if (!appointmentId)      throw new Error('appointmentId vereist');
+  if (!appointmentStatus)  throw new Error('appointmentStatus vereist');
+  const allowed = new Set(['confirmed', 'showed', 'noshow', 'cancelled']);
+  if (!allowed.has(appointmentStatus)) {
+    throw new Error(`appointmentStatus ongeldig: ${appointmentStatus}`);
+  }
+
+  const token = process.env.GHL_PIT_TOKEN || process.env.GHL_API_KEY;
+  if (!token) throw new Error('GHL token ontbreekt in env');
+
+  const res = await fetch(
+    `${GHL_BASE}/calendars/events/appointments/${appointmentId}`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Version: GHL_VERSION,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ appointmentStatus }),
+    }
+  );
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    console.error('[ghl-update-appt-status] failed', {
+      appointmentId,
+      appointmentStatus,
+      status: res.status,
+      body: (errBody || '').slice(0, 2000),
+    });
+    const err = new Error(`GHL appointment status update failed: ${res.status}`);
+    err.ghlStatus = res.status;
+    err.ghlBody   = errBody;
+    throw err;
+  }
+
+  return await res.json().catch(() => ({}));
+}

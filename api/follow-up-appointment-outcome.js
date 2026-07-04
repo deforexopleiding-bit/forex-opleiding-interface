@@ -35,6 +35,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { updateGhlAppointmentStatus } from './_lib/ghl-appointment.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -43,7 +44,35 @@ const OUTCOMES = new Set([
   'later_opnieuw', 'terugbel', 'verzetten', 'annuleren',
 ]);
 
+// Mapping van interne outcome → GHL appointmentStatus. Alle "call heeft
+// plaatsgevonden"-outcomes worden 'showed', geen-show is 'noshow',
+// annuleren/verzetten zijn delegatie (daar handelt het eigen endpoint).
+const GHL_STATUS_FOR_OUTCOME = {
+  gesprek_gehad : 'showed',
+  sale          : 'showed',
+  wilt_niet_meer: 'showed',
+  later_opnieuw : 'showed',
+  terugbel      : 'showed',
+  no_show       : 'noshow',
+};
+
+// Uitkomsten die NIET automatisch teruggedraaid kunnen worden — hun
+// GHL-actie is destructief (afspraak weg / verplaatst) en 'confirmed'
+// via een simpele PUT herstelt dat niet.
+const IRREVERSIBLE_OUTCOMES = new Set(['annuleren', 'verzetten']);
+
 const ADMIN_ROLES = new Set(['super_admin', 'admin', 'manager']);
+
+// Herken PostgREST/PG "kolom ontbreekt"-varianten zodat prev_state-writes
+// fail-soft strippen bij een schema-cache-miss of ontbrekende migratie.
+function isMissingColumnError(err, colName) {
+  if (!err) return false;
+  if (err.code === '42703' || err.code === 'PGRST204') return true;
+  const msg = (String(err.message || '') + ' ' + String(err.details || '') + ' ' + String(err.hint || '')).toLowerCase();
+  if (/could not find the/i.test(msg) || /schema cache/i.test(msg)) return true;
+  if (colName && msg.includes(String(colName).toLowerCase())) return true;
+  return false;
+}
 
 function hoursFromNow(hours) {
   return new Date(Date.now() + hours * 3600 * 1000).toISOString();
@@ -183,6 +212,50 @@ async function updateApptStatus(appointmentId, newStatus) {
   if (error) throw new Error('status update: ' + error.message);
 }
 
+// Schrijf prev_state (jsonb). Fail-soft bij PGRST204 / 42703 / "could
+// not find the 'prev_state' column" — dan is de migratie nog niet
+// gedraaid of de schema-cache nog niet herladen. In dat geval loggen
+// we een warning en skippen; de outcome zelf gaat gewoon door, alleen
+// undo werkt niet totdat de kolom er is.
+async function writePrevState(appointmentId, snapshot) {
+  try {
+    const { error } = await supabaseAdmin
+      .from('follow_up_appointments')
+      .update({ prev_state: snapshot })
+      .eq('id', appointmentId);
+    if (!error) return { ok: true };
+    if (isMissingColumnError(error, 'prev_state')) {
+      console.warn('[appt-outcome] prev_state kolom niet beschikbaar (migratie/schema-cache)');
+      return { ok: false, missing: true };
+    }
+    console.warn('[appt-outcome] prev_state write:', error.message);
+    return { ok: false, error: error.message };
+  } catch (e) {
+    console.warn('[appt-outcome] prev_state write exception:', e?.message || e);
+    return { ok: false, error: String(e?.message || e) };
+  }
+}
+
+// GHL-status sync — fail-soft. Alleen aanroepen als er echt een
+// ghl_appointment_id is. Return-shape { ok, warning? } zodat de caller
+// desgewenst een warning kan doorreiken naar de response.
+async function syncGhlStatus(ghlAppointmentId, ghlStatus, contextLabel) {
+  if (!ghlAppointmentId) return { ok: true };
+  if (!ghlStatus)        return { ok: true };
+  try {
+    await updateGhlAppointmentStatus(ghlAppointmentId, ghlStatus);
+    return { ok: true };
+  } catch (e) {
+    const status = e?.ghlStatus || 'unknown';
+    const body   = (e?.ghlBody || String(e?.message || '')).slice(0, 200);
+    console.warn(`[appt-outcome] GHL-status sync ${contextLabel} faalde`, { status, body });
+    return {
+      ok      : false,
+      warning : `GHL-status kon niet worden bijgewerkt naar '${ghlStatus}' (${status}). Handmatig checken in GHL.`,
+    };
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -200,8 +273,10 @@ export default async function handler(req, res) {
   const appointmentId = typeof body.appointment_id === 'string' ? body.appointment_id.trim() : '';
   if (!appointmentId || !UUID_RE.test(appointmentId)) return res.status(400).json({ error: 'appointment_id vereist' });
 
+  const action  = String(body.action  || '').trim();
   const outcome = String(body.outcome || '').trim();
-  if (!OUTCOMES.has(outcome)) return res.status(400).json({ error: 'outcome ongeldig' });
+  const isUndo  = action === 'undo';
+  if (!isUndo && !OUTCOMES.has(outcome)) return res.status(400).json({ error: 'outcome ongeldig' });
 
   // Owner-gate (zelfde patroon als de andere endpoints).
   const { data: myProfile } = await supabaseAdmin
@@ -210,13 +285,29 @@ export default async function handler(req, res) {
   const isAdmin = ADMIN_ROLES.has(myRole);
   const isSales = myRole === 'sales';
 
-  const { data: appt, error: apptErr } = await supabaseAdmin
-    .from('follow_up_appointments')
-    .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, owner_id, lead_ghl_contact_id, zoom_meeting_id')
-    .eq('id', appointmentId)
-    .maybeSingle();
-  if (apptErr) return res.status(500).json({ error: 'appt fetch: ' + apptErr.message });
-  if (!appt)   return res.status(404).json({ error: 'Appointment niet gevonden' });
+  // prev_state meelezen; als de kolom niet bestaat vangen we dat op
+  // met een fallback-select (fail-soft — undo werkt dan niet, outcome
+  // wél).
+  let appt = null;
+  {
+    const RICH_COLS = 'id, lead_name, lead_email, lead_phone, scheduled_at, status, owner_id, lead_ghl_contact_id, zoom_meeting_id, ghl_appointment_id, prev_state';
+    const CORE_COLS = 'id, lead_name, lead_email, lead_phone, scheduled_at, status, owner_id, lead_ghl_contact_id, zoom_meeting_id, ghl_appointment_id';
+    const { data, error } = await supabaseAdmin
+      .from('follow_up_appointments').select(RICH_COLS).eq('id', appointmentId).maybeSingle();
+    if (error) {
+      if (isMissingColumnError(error, 'prev_state')) {
+        const { data: d2, error: e2 } = await supabaseAdmin
+          .from('follow_up_appointments').select(CORE_COLS).eq('id', appointmentId).maybeSingle();
+        if (e2) return res.status(500).json({ error: 'appt fetch: ' + e2.message });
+        appt = d2;
+      } else {
+        return res.status(500).json({ error: 'appt fetch: ' + error.message });
+      }
+    } else {
+      appt = data;
+    }
+  }
+  if (!appt) return res.status(404).json({ error: 'Appointment niet gevonden' });
 
   if (!isAdmin) {
     if (!isSales) return res.status(403).json({ error: 'Geen rechten (rol vereist)' });
@@ -226,6 +317,71 @@ export default async function handler(req, res) {
   }
 
   try {
+    // ── UNDO: draai de vorige uitkomst terug ───────────────────────────
+    if (isUndo) {
+      const prev = (appt.prev_state && typeof appt.prev_state === 'object') ? appt.prev_state : null;
+      if (!prev) return res.status(400).json({ error: 'Niets te corrigeren (geen vorige staat opgeslagen).' });
+
+      const prevOutcome = String(prev.outcome_before_undo || '');
+      if (IRREVERSIBLE_OUTCOMES.has(prevOutcome)) {
+        // GHL is destructief geraakt (afspraak geannuleerd of verplaatst).
+        // Onze DB-status best-effort terugzetten; GHL niet aanraken.
+        const restoreStatus = String(prev.status || appt.status || 'scheduled');
+        try {
+          await updateApptStatus(appointmentId, restoreStatus);
+          await writePrevState(appointmentId, null);
+          await appendApptNote(appointmentId, `Uitkomst gecorrigeerd — DB-status hersteld naar ${restoreStatus}. GHL-actie (${prevOutcome}) NIET automatisch teruggedraaid.`);
+        } catch (_) { /* best-effort */ }
+        return res.status(400).json({
+          error: `Deze uitkomst (${prevOutcome}) kan niet automatisch teruggedraaid worden — herstel handmatig in GHL.`,
+          code : 'IRREVERSIBLE',
+        });
+      }
+
+      const warnings = [];
+      // 1) Onze status terug.
+      const restoreStatus = String(prev.status || 'scheduled');
+      try {
+        await updateApptStatus(appointmentId, restoreStatus);
+      } catch (e) {
+        return res.status(500).json({ error: 'DB-status herstellen mislukt: ' + (e?.message || e) });
+      }
+
+      // 2) GHL-status terug naar 'confirmed' (fail-soft).
+      if (appt.ghl_appointment_id) {
+        const ghlSync = await syncGhlStatus(appt.ghl_appointment_id, 'confirmed', 'undo');
+        if (!ghlSync.ok) warnings.push(ghlSync.warning);
+      }
+
+      // 3) Aangemaakte follow_up_lead HARD-deleten (per jouw akkoord —
+      //    voorkomt vervuiling in Afgeboekt-tab). Audit blijft via de
+      //    system-note hieronder + de prev_state die we net gebruikt
+      //    hebben. Fail-soft: als hij al weg is, prima.
+      if (prev.created_lead_id && typeof prev.created_lead_id === 'string') {
+        try {
+          const { error: delErr } = await supabaseAdmin
+            .from('follow_up_leads').delete().eq('id', prev.created_lead_id);
+          if (delErr) warnings.push(`Aangemaakte lead niet volledig verwijderd (${delErr.message}). Handmatig checken.`);
+        } catch (e) {
+          warnings.push('Lead-verwijderen faalde: ' + (e?.message || e));
+        }
+      }
+
+      // 4) prev_state clearen.
+      await writePrevState(appointmentId, null);
+
+      // 5) Audit-note.
+      await appendApptNote(appointmentId, `Uitkomst gecorrigeerd (teruggedraaid) — was: ${prevOutcome || 'onbekend'}, hersteld naar status='${restoreStatus}'.`);
+
+      return res.status(200).json({
+        ok            : true,
+        undone        : true,
+        appointment_id: appointmentId,
+        restored      : { status: restoreStatus, deleted_lead_id: prev.created_lead_id || null },
+        warnings      : warnings.length ? warnings : undefined,
+      });
+    }
+
     // ── Delegatie-outcomes: gebruik bestaande endpoints ────────────────
     if (outcome === 'verzetten') {
       if (!body.new_datetime) return res.status(400).json({ error: 'new_datetime vereist' });
@@ -308,8 +464,29 @@ export default async function handler(req, res) {
     }
 
     if (newStatus) {
+      // Snapshot VOOR de status-update zodat undo terug kan naar de
+      // exacte staat waarin de afspraak vóór deze uitkomst was.
+      const snapshot = {
+        status              : appt.status,
+        ghl_status_before   : 'confirmed',
+        outcome_before_undo : outcome,
+        taken_at            : new Date().toISOString(),
+        // created_lead_id: undo hard-delete't die zodat de Afgeboekt-tab
+        // niet vervuilt met een geannuleerde follow-up.
+        created_lead_id     : followupLead?.lead_id || null,
+      };
+      await writePrevState(appointmentId, snapshot);
+
       await updateApptStatus(appointmentId, newStatus);
       await appendApptNote(appointmentId, noteText);
+
+      // GHL-status meesturen (showed/noshow). Fail-soft — outcome
+      // blijft succesvol, waarschuwing komt in warnings[].
+      const ghlWanted = GHL_STATUS_FOR_OUTCOME[outcome];
+      if (ghlWanted && appt.ghl_appointment_id) {
+        const ghlSync = await syncGhlStatus(appt.ghl_appointment_id, ghlWanted, outcome);
+        if (!ghlSync.ok) extraWarnings.push(ghlSync.warning);
+      }
     }
 
     return res.status(200).json({

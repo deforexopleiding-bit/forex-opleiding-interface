@@ -1339,6 +1339,24 @@
       margin: 16px 0;
       box-shadow: 0 1px 3px rgba(15,23,42,0.04);
     }
+    /* Undo-strip verschijnt tussen belkaart en outcome-panel als er een
+       correcteerbare uitkomst is (appt.prev_state truthy). */
+    .fu-appt-undo-strip {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; flex-wrap: wrap;
+      background: rgba(59, 130, 246, 0.08);
+      border: 1px solid rgba(59, 130, 246, 0.28);
+      color: var(--text, #0f172a);
+      border-radius: 10px;
+      padding: 8px 12px;
+      margin: 12px 0;
+      font-size: 12.5px;
+    }
+    .fu-appt-undo-label {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-weight: 600;
+    }
+    .fu-appt-undo-strip .fu-lead-btn { font-size: 12px; padding: 5px 10px; }
     .fu-outcome-head { display:flex; align-items:center; justify-content:space-between; margin-bottom: 10px; }
     .fu-outcome-title {
       font-size: 13px; font-weight: 700; color: var(--text, #0f172a);
@@ -7538,6 +7556,11 @@
           <div class="fu-freeslots-panel" id="appt-verzet-slotspanel" hidden></div>
         </div>
 
+        ${appt?.prev_state ? `<div class="fu-appt-undo-strip">
+          <span class="fu-appt-undo-label"><i class="ti ti-history"></i> Er is een uitkomst geregistreerd (${esc(appt.prev_state?.outcome_before_undo || '—')}).</span>
+          <button type="button" class="fu-lead-btn" id="appt-undo-btn"><i class="ti ti-arrow-back-up"></i> Uitkomst corrigeren</button>
+        </div>` : ''}
+
         ${_renderApptOutcomePanel(appt)}
 
         ${_renderApptHistoryPanel(extras.history || [], appt?.id)}
@@ -7549,6 +7572,48 @@
       // op appt.lead_phone (de _softphoneCallLead helper leest van dat
       // veld) en roep hem met een minimale lead-shape zodat logging in de
       // callbar de klant-naam gebruikt.
+      // Uitkomst-corrigeren: alleen zichtbaar als appt.prev_state truthy.
+      // Klik → POST action:'undo' → detail + Werklijst + Afspraken-tab
+      // verversen. Bij 400 IRREVERSIBLE (annuleren/verzetten): melding
+      // tonen zonder de flow te breken.
+      const undoBtn = document.getElementById('appt-undo-btn');
+      if (undoBtn) undoBtn.addEventListener('click', async () => {
+        if (!confirm('De laatste uitkomst terugdraaien? De aangemaakte follow-up-lead wordt verwijderd.')) return;
+        undoBtn.disabled = true;
+        const origHtml = undoBtn.innerHTML;
+        undoBtn.innerHTML = '<i class="ti ti-loader-2"></i> Bezig…';
+        try {
+          const r = await window.AgentShared.apiFetch('/api/follow-up-appointment-outcome', {
+            method : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body   : JSON.stringify({ appointment_id: appt.id, action: 'undo' }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            if (d?.code === 'IRREVERSIBLE') {
+              alert(d.error || 'Deze uitkomst kan niet automatisch teruggedraaid worden.');
+              try { _openAppointmentDetail(appt.id); } catch (_) {}
+              return;
+            }
+            throw new Error(d?.error || 'HTTP ' + r.status);
+          }
+          const warnings = Array.isArray(d?.warnings) ? d.warnings : [];
+          if (warnings.length) {
+            try { window.AgentShared?.showToast?.('Uitkomst teruggedraaid met waarschuwing: ' + warnings.join(' · '), 'warn'); }
+            catch (_) { alert('Uitkomst teruggedraaid: ' + warnings.join(' · ')); }
+          } else {
+            try { window.AgentShared?.showToast?.('Uitkomst teruggedraaid.', 'success'); } catch (_) {}
+          }
+          try { _openAppointmentDetail(appt.id); } catch (_) {}
+          try { loadAfsprakenTab(); } catch (_) {}
+          try { loadLeadsTab(); } catch (_) {}
+        } catch (e) {
+          alert('Corrigeren mislukt: ' + (e.message || 'onbekend'));
+          undoBtn.disabled = false;
+          undoBtn.innerHTML = origHtml;
+        }
+      });
+
       const belNu = document.getElementById('appt-bel-nu');
       if (belNu && phone) belNu.addEventListener('click', async () => {
         if (!_softphone || !_softphone.available) {
