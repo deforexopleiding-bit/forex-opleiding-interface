@@ -869,6 +869,279 @@
       #panel-leads .fu-card-right { width: 100%; justify-content: flex-start; margin-top: 8px; }
     }
 
+    /* ── SALES-COCKPIT (Leads-tab, Fase 1) ─────────────────────────── */
+    .fu-cockpit {
+      display: grid;
+      grid-template-columns: minmax(320px, 380px) 1fr;
+      gap: 16px;
+      align-items: start;
+      min-height: 60vh;
+    }
+    .fu-cockpit-list {
+      background: var(--surface-card, rgba(255,255,255,0.04));
+      border: 1px solid var(--border-default, rgba(255,255,255,0.1));
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: calc(100vh - 200px);
+      overflow: hidden;
+    }
+    .fu-cockpit-filters { display: flex; flex-direction: column; gap: 8px; }
+    .fu-cockpit-pillgroup { display: flex; flex-wrap: wrap; gap: 6px; }
+    .fu-cockpit-pill {
+      appearance: none; border: 1px solid var(--border-default, rgba(255,255,255,0.14));
+      background: transparent; color: var(--text-secondary, rgba(255,255,255,0.7));
+      padding: 5px 10px; border-radius: 999px; font-size: 12px; cursor: pointer;
+      transition: background .15s, border-color .15s, color .15s;
+    }
+    .fu-cockpit-pill:hover { border-color: var(--border-strong, rgba(255,255,255,0.28)); color: var(--text-primary, #fff); }
+    .fu-cockpit-pill.active {
+      background: #093d54; color: #fff; border-color: #093d54;
+    }
+    .fu-cockpit-toggles { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .fu-cockpit-toggle {
+      display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px;
+      color: var(--text-secondary, rgba(255,255,255,0.75)); cursor: pointer;
+    }
+    .fu-cockpit-summary {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+      background: rgba(255,255,255,0.02); border-radius: 8px; padding: 8px;
+    }
+    .fu-cockpit-summary-cell { text-align: center; }
+    .fu-cockpit-summary-cell .n { font-size: 16px; font-weight: 600; color: var(--text-primary, #fff); }
+    .fu-cockpit-summary-cell .l { font-size: 10.5px; color: var(--text-secondary, rgba(255,255,255,.65)); text-transform: uppercase; letter-spacing: .5px; }
+    .fu-cockpit-buckets { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; padding-right: 4px; }
+    .fu-cockpit-bucket-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 6px 4px; font-size: 12px; font-weight: 600;
+      color: var(--text-secondary, rgba(255,255,255,.75)); text-transform: uppercase; letter-spacing: .5px;
+    }
+    .fu-cockpit-bucket-head .cnt {
+      background: rgba(255,255,255,0.06); border-radius: 999px;
+      padding: 1px 8px; font-size: 11px; letter-spacing: 0;
+    }
+    .fu-cockpit-bucket.hot .fu-cockpit-bucket-head { color: #ef4444; }
+    .fu-cockpit-bucket.telaat .fu-cockpit-bucket-head { color: #f97316; }
+    .fu-cockpit-bucket.vandaag .fu-cockpit-bucket-head { color: #eab308; }
+    .fu-cockpit-bucket.week .fu-cockpit-bucket-head { color: var(--text-secondary); }
+    .fu-cockpit-bucket.snoozed .fu-cockpit-bucket-head { color: #6b7280; }
+    .fu-cockpit-leadlist { display: flex; flex-direction: column; gap: 6px; }
+
+    .fu-cockpit-leadcard {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px;
+      background: var(--card-bg, rgba(255,255,255,0.04));
+      border: 1px solid var(--border-default, rgba(255,255,255,0.08));
+      border-radius: 10px;
+      cursor: pointer; text-align: left;
+      transition: background .15s, border-color .15s;
+    }
+    .fu-cockpit-leadcard:hover {
+      background: var(--surface-card-hover, rgba(255,255,255,0.07));
+      border-color: var(--border-strong, rgba(255,255,255,0.2));
+    }
+    .fu-cockpit-leadcard.active {
+      background: rgba(9,61,84,0.18);
+      border-color: #093d54;
+      box-shadow: inset 3px 0 0 #093d54;
+    }
+    .fu-cockpit-leadavatar {
+      width: 34px; height: 34px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11.5px; font-weight: 600; color: #fff; flex-shrink: 0;
+      background: #093d54;
+    }
+    .fu-cockpit-leadavatar.src-retention { background: #093d54; }
+    .fu-cockpit-leadavatar.src-event     { background: #7c3aed; }
+    .fu-cockpit-leadavatar.kind-zoom     { background: #0f766e; }
+    .fu-cockpit-leadcard-main { min-width: 0; flex: 1; }
+    .fu-cockpit-leadcard-nm {
+      font-size: 13px; font-weight: 500; color: var(--text-primary, #fff);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .fu-cockpit-leadcard-sub {
+      font-size: 11.5px; color: var(--text-secondary, rgba(255,255,255,.7));
+      display: flex; align-items: center; gap: 6px; margin-top: 1px;
+    }
+    .fu-cockpit-leadcard-badges { display: inline-flex; gap: 4px; }
+    .fu-cockpit-mini-badge {
+      display: inline-block; padding: 1px 6px; border-radius: 999px;
+      font-size: 10px; letter-spacing: .3px;
+      background: rgba(255,255,255,0.06); color: var(--text-secondary, rgba(255,255,255,.75));
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .fu-cockpit-mini-badge.hot { background: #7f1d1d; color: #fff; border-color: #b91c1c; }
+    .fu-cockpit-mini-badge.retention { background: rgba(9,61,84,.25); color: #93c5fd; border-color: rgba(9,61,84,.5); }
+    .fu-cockpit-mini-badge.event { background: rgba(124,58,237,.2); color: #c4b5fd; border-color: rgba(124,58,237,.4); }
+    .fu-cockpit-mini-badge.attempts { background: rgba(234,179,8,.18); color: #fbbf24; border-color: rgba(234,179,8,.35); }
+    .fu-cockpit-mini-badge.zoom { background: rgba(15,118,110,.2); color: #5eead4; border-color: rgba(15,118,110,.4); }
+
+    /* Detail-paneel */
+    .fu-cockpit-detail {
+      background: var(--surface-card, rgba(255,255,255,0.03));
+      border: 1px solid var(--border-default, rgba(255,255,255,0.1));
+      border-radius: 12px;
+      padding: 20px;
+      min-height: 60vh;
+    }
+    .fu-cockpit-empty {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      text-align: center; color: var(--text-secondary, rgba(255,255,255,.6));
+      padding: 60px 20px; gap: 8px;
+    }
+    .fu-cockpit-empty i.ti { font-size: 42px; opacity: .5; }
+    .fu-cockpit-empty-title { font-size: 15px; font-weight: 500; color: var(--text-primary, #fff); }
+    .fu-cockpit-empty-sub { font-size: 12.5px; }
+
+    .fu-cockpit-dhead {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 12px; margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .fu-cockpit-dhead-left { display: flex; gap: 12px; align-items: center; min-width: 0; flex: 1; }
+    .fu-cockpit-avatar {
+      width: 48px; height: 48px; border-radius: 50%;
+      background: #093d54; color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 600; font-size: 15px; flex-shrink: 0;
+    }
+    .fu-cockpit-dhead-text { min-width: 0; }
+    .fu-cockpit-dhead-text h2 {
+      margin: 0; font-size: 18px; color: var(--text-primary, #fff);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .fu-cockpit-dhead-badges { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+    .fu-cockpit-dhead-links {
+      display: flex; gap: 10px; font-size: 12.5px; margin-top: 4px;
+      color: var(--text-secondary, rgba(255,255,255,.75)); flex-wrap: wrap;
+    }
+    .fu-cockpit-dhead-links a { color: var(--text-secondary, rgba(255,255,255,.85)); text-decoration: none; }
+    .fu-cockpit-dhead-links a:hover { color: var(--text-primary, #fff); text-decoration: underline; }
+    .fu-cockpit-dhead-right { display: flex; align-items: center; gap: 8px; }
+
+    /* Belkaart (#093d54) */
+    .fu-callcard {
+      background: #093d54;
+      color: #fff;
+      border-radius: 14px;
+      padding: 16px 18px;
+      margin-bottom: 16px;
+      box-shadow: 0 4px 14px rgba(9,61,84,0.35);
+    }
+    .fu-callcard-top {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 10px; margin-bottom: 6px;
+    }
+    .fu-callcard-label {
+      font-size: 11.5px; text-transform: uppercase; letter-spacing: .6px;
+      color: rgba(255,255,255,.75); display: inline-flex; align-items: center; gap: 6px;
+    }
+    .fu-callcard-voys {
+      background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14);
+      color: #fff; border-radius: 6px; padding: 4px 8px; font-size: 12px;
+    }
+    .fu-callcard-voys:disabled { opacity: .6; cursor: not-allowed; }
+    .fu-callcard-number {
+      font-size: 26px; font-weight: 600; letter-spacing: 1px;
+      margin: 4px 0 12px 0;
+    }
+    .fu-callcard-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .fu-callcard-primary {
+      flex: 1; min-width: 160px;
+      background: #10b981; color: #fff;
+      border: none; border-radius: 8px; padding: 10px 14px;
+      font-size: 14px; font-weight: 500; text-align: center; text-decoration: none;
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      cursor: pointer;
+    }
+    .fu-callcard-primary:hover { background: #059669; }
+    .fu-callcard-primary[aria-disabled="true"] { background: #6b7280; cursor: not-allowed; opacity: .7; }
+    .fu-callcard-dropdown { position: relative; }
+    .fu-callcard-secondary {
+      background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.14);
+      color: #fff; border-radius: 8px; padding: 10px 14px; font-size: 13px;
+      display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    }
+    .fu-callcard-secondary:hover { background: rgba(255,255,255,0.16); }
+    .fu-callcard-menu {
+      position: absolute; right: 0; top: calc(100% + 4px); z-index: 20;
+      background: #0b1220; color: #fff; border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 10px; padding: 6px; min-width: 200px;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.4);
+      display: flex; flex-direction: column;
+    }
+    .fu-callcard-menu button {
+      background: transparent; border: none; color: #fff;
+      text-align: left; padding: 8px 10px; border-radius: 6px;
+      font-size: 13px; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 8px;
+    }
+    .fu-callcard-menu button:hover { background: rgba(255,255,255,0.08); }
+
+    .fu-cockpit-quickbar {
+      display: flex; gap: 12px; flex-wrap: wrap;
+      background: rgba(255,255,255,0.02); border-radius: 10px;
+      padding: 10px 12px; margin-bottom: 16px;
+      align-items: flex-end;
+    }
+    .fu-cockpit-quick { display: flex; flex-direction: column; gap: 4px; }
+    .fu-cockpit-quick label {
+      font-size: 10.5px; color: var(--text-secondary, rgba(255,255,255,.65));
+      text-transform: uppercase; letter-spacing: .5px;
+    }
+
+    .fu-cockpit-section {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border-default, rgba(255,255,255,0.08));
+      border-radius: 10px; padding: 12px 14px; margin-bottom: 12px;
+    }
+    .fu-cockpit-section-title {
+      font-size: 12.5px; font-weight: 600; letter-spacing: .3px;
+      color: var(--text-secondary, rgba(255,255,255,.8));
+      display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+    .fu-cockpit-section-sub {
+      font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0;
+      color: var(--text-secondary, rgba(255,255,255,.6)); margin-left: auto;
+    }
+    .fu-cockpit-ctx {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px;
+      font-size: 12.5px;
+    }
+    .fu-cockpit-ctx-cell { display: flex; flex-direction: column; gap: 2px; }
+    .fu-cockpit-ctx-cell .k { font-size: 10.5px; color: var(--text-secondary, rgba(255,255,255,.55)); text-transform: uppercase; letter-spacing: .3px; }
+    .fu-cockpit-ctx-cell .v { color: var(--text-primary, #fff); }
+
+    .fu-cockpit-timeline {
+      display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto;
+    }
+    .fu-cockpit-timeline-item {
+      display: flex; gap: 8px;
+      padding: 8px 10px; border-radius: 8px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.04);
+    }
+    .fu-cockpit-timeline-icon {
+      width: 24px; height: 24px; border-radius: 50%;
+      background: rgba(255,255,255,0.06); color: var(--text-secondary, rgba(255,255,255,.75));
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+      font-size: 12px;
+    }
+    .fu-cockpit-timeline-body { flex: 1; min-width: 0; }
+    .fu-cockpit-timeline-body .txt { font-size: 12.5px; color: var(--text-primary, #fff); white-space: pre-wrap; word-break: break-word; }
+    .fu-cockpit-timeline-body .meta { font-size: 10.5px; color: var(--text-secondary, rgba(255,255,255,.55)); margin-top: 2px; }
+    .fu-cockpit-noteadd { display: flex; gap: 6px; margin-top: 8px; }
+    .fu-cockpit-noteadd input { flex: 1; }
+
+    @media (max-width: 900px) {
+      .fu-cockpit { grid-template-columns: 1fr; }
+      .fu-cockpit-list { max-height: none; }
+      .fu-cockpit-buckets { max-height: 40vh; }
+    }
+
     /* ── Kalender-tab ───────────────────────────────────────────────── */
     .fu-kalender-header {
       display: flex;
@@ -1298,56 +1571,124 @@
       </div>
     </div>
 
-    <!-- Leads-tab panel (retentie/event-leads uit follow_up_leads) -->
+    <!-- Leads-tab panel — SALES-COCKPIT split-screen (Fase 1).
+         LINKS: werklijst met filters + prioriteits-secties (🔥 Hotleads /
+         Te laat / Vandaag / Deze week). RECHTS: lead-detail met
+         belkaart (#093d54), Actie-dropdown, context + tijdlijn. -->
     <div class="fu-tab-panel" data-panel="leads" id="panel-leads">
-      <div id="leads-summary" class="fu-lead-kpigrid"></div>
-      <!-- Dagoverzicht bovenaan: het eerste wat je ziet is wat vandaag moet
-           gebeuren. Filters staan pas na de urgente secties. -->
-      <div id="leads-section-vandaag"></div>
-      <div id="leads-section-telaat"></div>
-      <div class="fu-lead-filterbar">
-        <label>Bron
-          <select id="leads-source">
-            <option value="all">Alle</option>
-            <option value="retention" selected>Retentie</option>
-            <option value="event">Event</option>
-          </select>
-        </label>
-        <label>Weergave
-          <select id="leads-view">
-            <option value="open" selected>Open (todo)</option>
-            <option value="alle">Alle</option>
-            <option value="vandaag">Vandaag terugbellen</option>
-            <option value="te_laat">Te laat opgevolgd</option>
-          </select>
-        </label>
-        <label>Status
-          <select id="leads-status">
-            <option value="">Alle</option>
-            <option value="nieuw">nieuw</option>
-            <option value="benaderd">benaderd</option>
-            <option value="niet_bereikbaar">niet_bereikbaar</option>
-            <option value="terugbellen">terugbellen</option>
-            <option value="verlengd">verlengd</option>
-            <option value="verloren">verloren</option>
-          </select>
-        </label>
-        <label>Eigenaar
-          <select id="leads-owner">
-            <option value="all">Alle</option>
-            <option value="me">Mijn leads</option>
-            <option value="none">Niet toegewezen</option>
-          </select>
-        </label>
-        <button class="fu-lead-btn" id="leads-refresh"><i class="ti ti-refresh"></i> Vernieuwen</button>
+      <div class="fu-cockpit">
+        <!-- LINKS: werklijst -->
+        <aside class="fu-cockpit-list" id="cockpit-list">
+          <div class="fu-cockpit-filters">
+            <div class="fu-cockpit-pillgroup" role="group" aria-label="Bron">
+              <button class="fu-cockpit-pill active" data-filter="source" data-value="all">Alle bronnen</button>
+              <button class="fu-cockpit-pill"        data-filter="source" data-value="retention">Retentie</button>
+              <button class="fu-cockpit-pill"        data-filter="source" data-value="event">Event</button>
+            </div>
+            <div class="fu-cockpit-pillgroup" role="group" aria-label="Type">
+              <button class="fu-cockpit-pill active" data-filter="kind" data-value="all">Alle</button>
+              <button class="fu-cockpit-pill"        data-filter="kind" data-value="call">Bel</button>
+              <button class="fu-cockpit-pill"        data-filter="kind" data-value="zoom">Zoom</button>
+            </div>
+            <div class="fu-cockpit-toggles">
+              <label class="fu-cockpit-toggle"><input type="checkbox" id="cockpit-mine"> Mijn leads</label>
+              <label class="fu-cockpit-toggle"><input type="checkbox" id="cockpit-snoozed"> 💤 Later opnieuw</label>
+              <button class="fu-lead-btn" id="cockpit-refresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+            </div>
+          </div>
+          <div class="fu-cockpit-summary" id="cockpit-summary"></div>
+          <div class="fu-cockpit-buckets" id="cockpit-buckets">
+            <div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>
+          </div>
+        </aside>
+
+        <!-- RECHTS: lead-detail -->
+        <section class="fu-cockpit-detail" id="cockpit-detail">
+          <div class="fu-cockpit-empty" id="cockpit-detail-empty">
+            <i class="ti ti-user-search"></i>
+            <div class="fu-cockpit-empty-title">Selecteer een lead</div>
+            <div class="fu-cockpit-empty-sub">Kies links een lead uit de werklijst om te bellen of op te volgen.</div>
+          </div>
+          <div class="fu-cockpit-detailbody" id="cockpit-detailbody" style="display:none">
+            <!-- header -->
+            <div class="fu-cockpit-dhead">
+              <div class="fu-cockpit-dhead-left">
+                <div class="fu-cockpit-avatar" id="cockpit-avatar">?</div>
+                <div class="fu-cockpit-dhead-text">
+                  <h2 id="cockpit-name">—</h2>
+                  <div class="fu-cockpit-dhead-badges" id="cockpit-badges"></div>
+                  <div class="fu-cockpit-dhead-links" id="cockpit-contact"></div>
+                </div>
+              </div>
+              <div class="fu-cockpit-dhead-right" id="cockpit-owner-ctl"></div>
+            </div>
+
+            <!-- belkaart -->
+            <div class="fu-callcard" id="cockpit-callcard">
+              <div class="fu-callcard-top">
+                <div class="fu-callcard-label"><i class="ti ti-phone"></i> Uitbellen via</div>
+                <select class="fu-callcard-voys" id="cockpit-voys" title="Voys-nummer" disabled>
+                  <option value="">Voys · standaard</option>
+                </select>
+              </div>
+              <div class="fu-callcard-number" id="cockpit-number">—</div>
+              <div class="fu-callcard-actions">
+                <a class="fu-callcard-primary" id="cockpit-call" href="#" aria-disabled="true">
+                  <i class="ti ti-phone-call"></i> <span id="cockpit-call-label">Bel nu</span>
+                </a>
+                <div class="fu-callcard-dropdown">
+                  <button class="fu-callcard-secondary" id="cockpit-actie">
+                    <i class="ti ti-bolt"></i> Actie <i class="ti ti-chevron-down"></i>
+                  </button>
+                  <div class="fu-callcard-menu" id="cockpit-actiemenu" hidden>
+                    <button data-actie="offerte"><i class="ti ti-file-invoice"></i> Offerte sturen</button>
+                    <button data-actie="zoom"><i class="ti ti-video"></i> Zoom plannen</button>
+                    <button data-actie="terugbel"><i class="ti ti-clock-hour-4"></i> Terugbel plannen</button>
+                    <button data-actie="whatsapp"><i class="ti ti-brand-whatsapp"></i> WhatsApp</button>
+                    <button data-actie="mail"><i class="ti ti-mail"></i> Mail</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- status + terugbel + snooze -->
+            <div class="fu-cockpit-quickbar">
+              <div class="fu-cockpit-quick">
+                <label>Status</label>
+                <select id="cockpit-status" class="fu-lead-inline"></select>
+              </div>
+              <div class="fu-cockpit-quick">
+                <label>Terugbellen op</label>
+                <input type="date" id="cockpit-date" class="fu-lead-inline">
+              </div>
+              <div class="fu-cockpit-quick">
+                <button class="fu-lead-btn" id="cockpit-snooze-btn" title="Later opnieuw"><i class="ti ti-moon"></i> Snooze</button>
+              </div>
+            </div>
+
+            <!-- lead-context -->
+            <div class="fu-cockpit-section">
+              <div class="fu-cockpit-section-title"><i class="ti ti-info-square"></i> Lead-context</div>
+              <div class="fu-cockpit-ctx" id="cockpit-context"></div>
+            </div>
+
+            <!-- contact-geschiedenis -->
+            <div class="fu-cockpit-section">
+              <div class="fu-cockpit-section-title">
+                <i class="ti ti-history"></i> Contact-geschiedenis
+                <span class="fu-cockpit-section-sub" id="cockpit-attempts"></span>
+              </div>
+              <div class="fu-cockpit-timeline" id="cockpit-timeline">
+                <div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>
+              </div>
+              <div class="fu-cockpit-noteadd">
+                <input id="cockpit-note-input" class="fu-input" placeholder="Notitie toevoegen…">
+                <button class="fu-lead-btn primary" id="cockpit-note-add"><i class="ti ti-plus"></i> Toevoegen</button>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
-      <section class="fu-section" id="leads-main-section">
-        <div class="fu-section-header">
-          <h2 class="fu-section-title">Alle leads</h2>
-          <span class="fu-section-count" id="leads-main-count"></span>
-        </div>
-        <div id="leads-list"><div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div></div>
-      </section>
     </div>
 
     <!-- Kalender-tab panel -->
@@ -2701,12 +3042,22 @@
       }
     }
 
-    // ── Leads-tab (follow_up_leads / follow_up_lead_notes) ──────────────────
+    // ── Sales-cockpit (Leads-tab, Fase 1) ────────────────────────────────
+    // Split-screen werklijst LINKS + lead-detail RECHTS. Backend endpoint
+    // /api/follow-up-leads-list levert bucket + is_hot + attempts +
+    // days_since_contact. Filters bepalen de wachtrij; auto-open eerste.
     const _leadsState = {
-      items: [], counts: null, loading: false,
-      me: null,           // { id, role } — de ingelogde user (voor 'Aan mij'-claim + rol-gate)
-      teamMembers: [],    // profiles met role in ('sales','manager','admin','super_admin')
-      teamLoaded: false,
+      items       : [],
+      counts      : null,
+      loading     : false,
+      me          : null,        // { id, role }
+      teamMembers : [],
+      teamLoaded  : false,
+      // Filters
+      filter: { source: 'all', kind: 'all', mine: false, snoozed: false },
+      // UI-state
+      selectedId  : null,
+      timelineCache: {},         // { leadId: [items] }
     };
 
     async function _ensureMe() {
@@ -2733,121 +3084,25 @@
       return _leadsState.teamMembers;
     }
 
-    function _rebuildOwnerFilterOptions() {
-      const sel = document.getElementById('leads-owner');
-      if (!sel) return;
-      const cur = sel.value || 'all';
-      const opts = [
-        '<option value="all">Alle</option>',
-        '<option value="me">Mijn leads</option>',
-        '<option value="none">Niet toegewezen</option>',
-      ];
-      for (const m of _leadsState.teamMembers) {
-        opts.push(`<option value="${m.id}">${esc(m.full_name || m.email || m.id)}</option>`);
-      }
-      sel.innerHTML = opts.join('');
-      sel.value = cur;
-    }
+    // Cockpit-status-map (compat met bestaande fu-card status-* variants
+    // voor kleur-cues op de avatar).
+    const LEAD_STATUS_MAP = {
+      nieuw          : { cls: 'status-scheduled',    label: 'Nieuw' },
+      benaderd       : { cls: 'status-in-progress',  label: 'Benaderd' },
+      terugbellen    : { cls: 'status-scheduled',    label: 'Terugbellen' },
+      niet_bereikbaar: { cls: 'status-default',      label: 'Niet bereikbaar' },
+      verlengd       : { cls: 'status-completed',    label: 'Verlengd' },
+      verloren       : { cls: 'status-no-show',      label: 'Verloren' },
+    };
+    const LEAD_STATUS_ORDER = ['nieuw','benaderd','niet_bereikbaar','terugbellen','verlengd','verloren'];
 
-    function _leadsRoute() {
-      const source = document.getElementById('leads-source')?.value || 'retention';
-      const view   = document.getElementById('leads-view')?.value   || 'open';
-      const status = document.getElementById('leads-status')?.value || '';
-      const owner  = document.getElementById('leads-owner')?.value  || 'all';
-      const p = new URLSearchParams();
-      if (source && source !== 'all') p.set('source', source);
-      if (view && view !== 'alle')    p.set('view', view);
-      if (status)                     p.set('status', status);
-      if (owner && owner !== 'all')   p.set('owner', owner);
-      return '/api/follow-up-leads-list' + (p.toString() ? '?' + p.toString() : '');
-    }
-
-    async function loadLeadsTab() {
-      const listEl = document.getElementById('leads-list');
-      if (!listEl) return;
-      if (_leadsState.loading) return;
-      _leadsState.loading = true;
-      listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
-      // Team-leden + huidige gebruiker zijn nodig voor owner-select en
-      // rol-gate; blokkeer de leads-fetch er niet op (parallel).
-      _ensureMe();
-      _ensureTeamMembers().then(_rebuildOwnerFilterOptions).catch(() => {});
-      try {
-        const r = await window.AgentShared.apiFetch(_leadsRoute());
-        const d = await r.json().catch(() => ({}));
-        if (!r.ok) {
-          if (d?.code === 'MIGRATION_REQUIRED') {
-            listEl.innerHTML = '<div class="fu-loading" style="color:#b91c1c">Migratie vereist: tabel follow_up_leads ontbreekt in dit schema.</div>';
-            return;
-          }
-          throw new Error(d?.error || 'HTTP ' + r.status);
-        }
-        _leadsState.items  = d.leads || [];
-        _leadsState.counts = d.counts || null;
-        renderLeadsTab();
-        // Ook side-secties (vandaag/te_laat) apart ophalen zodat de main-lijst
-        // gescheiden blijft van de sub-secties.
-        loadLeadsSection('vandaag', document.getElementById('leads-section-vandaag'));
-        loadLeadsSection('te_laat', document.getElementById('leads-section-telaat'));
-      } catch (e) {
-        listEl.innerHTML = '<div class="fu-loading" style="color:#b91c1c">Laden mislukt: ' + esc(e.message || '') + '</div>';
-      } finally {
-        _leadsState.loading = false;
-      }
-    }
-
-    async function loadLeadsSection(viewKey, container) {
-      if (!container) return;
-      const source = document.getElementById('leads-source')?.value || 'retention';
-      const p = new URLSearchParams();
-      if (source && source !== 'all') p.set('source', source);
-      p.set('view', viewKey);
-      try {
-        const r = await window.AgentShared.apiFetch('/api/follow-up-leads-list?' + p.toString());
-        const d = await r.json().catch(() => ({}));
-        if (!r.ok || d?.code === 'MIGRATION_REQUIRED') { container.innerHTML = ''; return; }
-        const items = d.leads || [];
-        if (!items.length) { container.innerHTML = ''; return; }
-        const isTelaat = viewKey === 'te_laat';
-        const sectionCls = isTelaat ? 'fu-lead-section-danger' : 'fu-lead-section-warning';
-        const iconCls    = isTelaat ? 'ti-alert-triangle' : 'ti-phone';
-        const title      = isTelaat ? 'Te laat opgevolgd' : 'Vandaag terugbellen';
-        container.innerHTML =
-          `<section class="fu-section ${sectionCls}">
-             <div class="fu-section-header">
-               <h2 class="fu-section-title"><i class="ti ${iconCls}"></i> ${title}</h2>
-               <span class="fu-section-count">${items.length} lead${items.length === 1 ? '' : 's'}</span>
-             </div>
-             <div class="fu-lead-cards">${renderLeadCards(items)}</div>
-           </section>`;
-        wireLeadCards(container);
-      } catch (_) { container.innerHTML = ''; }
-    }
-
-    function renderLeadsTab() {
-      const listEl = document.getElementById('leads-list');
-      const sumEl  = document.getElementById('leads-summary');
-      const tabCntEl  = document.getElementById('tab-count-leads');
-      const mainCntEl = document.getElementById('leads-main-count');
-      const c = _leadsState.counts || {};
-      if (sumEl) {
-        const kpi = (label, val) =>
-          `<div class="fu-lead-kpi"><div class="fu-lead-kpi-label">${esc(label)}</div><div class="fu-lead-kpi-value">${Number(val) || 0}</div></div>`;
-        sumEl.innerHTML =
-          kpi('Alle', c.alle) +
-          kpi('Open', c.open) +
-          kpi('Vandaag', c.vandaag) +
-          kpi('Te laat', c.te_laat);
-      }
-      if (tabCntEl) tabCntEl.textContent = String(c.open ?? c.alle ?? '—');
-      const items = _leadsState.items || [];
-      if (mainCntEl) mainCntEl.textContent = items.length ? (items.length + ' lead' + (items.length === 1 ? '' : 's')) : '';
-      if (!items.length) {
-        listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-inbox fu-empty-icon"></i>Geen leads in deze selectie.</div>';
-        return;
-      }
-      listEl.innerHTML = renderLeadCards(items);
-      wireLeadCards(listEl);
+    function _leadInitials(name) {
+      const n = String(name || '').trim();
+      if (!n) return '?';
+      const parts = n.split(/\s+/);
+      const first = parts[0]?.[0] || '';
+      const last  = parts.length > 1 ? parts[parts.length - 1][0] : '';
+      return (first + last).toUpperCase() || '?';
     }
 
     function fmtDateLocal(iso) {
@@ -2865,31 +3120,282 @@
         return new Date(iso).toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' });
       } catch { return iso; }
     }
+    function fmtDateTimeNLShort(iso) {
+      if (!iso) return '—';
+      try {
+        return new Date(iso).toLocaleString('nl-NL', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+      } catch { return iso; }
+    }
 
-    // Lead-status → fu-card-avatar/-badge status-class + Nederlands label.
-    // Hergebruikt de bestaande status-* variants:
-    //   nieuw           → scheduled (info/blauw)
-    //   benaderd        → in-progress (warning/amber)
-    //   terugbellen     → scheduled (info/blauw)
-    //   niet_bereikbaar → default (neutral/grijs)
-    //   verlengd        → completed (success/groen)
-    //   verloren        → no-show (danger/rood)
-    const LEAD_STATUS_MAP = {
-      nieuw          : { cls: 'status-scheduled',    label: 'Nieuw' },
-      benaderd       : { cls: 'status-in-progress',  label: 'Benaderd' },
-      terugbellen    : { cls: 'status-scheduled',    label: 'Terugbellen' },
-      niet_bereikbaar: { cls: 'status-default',      label: 'Niet bereikbaar' },
-      verlengd       : { cls: 'status-completed',    label: 'Verlengd' },
-      verloren       : { cls: 'status-no-show',      label: 'Verloren' },
+    function _cockpitRoute() {
+      const f = _leadsState.filter;
+      const p = new URLSearchParams();
+      if (f.source !== 'all') p.set('source', f.source);
+      if (f.kind   !== 'all') p.set('kind',   f.kind);
+      if (f.mine)             p.set('owner',  'me');
+      p.set('view', f.snoozed ? 'snoozed' : 'open');
+      return '/api/follow-up-leads-list?' + p.toString();
+    }
+
+    async function loadLeadsTab() {
+      const bucketsEl = document.getElementById('cockpit-buckets');
+      if (!bucketsEl) return;
+      if (_leadsState.loading) return;
+      _leadsState.loading = true;
+      bucketsEl.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
+      // Ensures parallel; wachtrij niet blokkeren.
+      _ensureMe();
+      _ensureTeamMembers();
+      try {
+        const r = await window.AgentShared.apiFetch(_cockpitRoute());
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          if (d?.code === 'MIGRATION_REQUIRED') {
+            bucketsEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Migratie vereist: tabel follow_up_leads ontbreekt in dit schema.</div>';
+            return;
+          }
+          throw new Error(d?.error || 'HTTP ' + r.status);
+        }
+        _leadsState.items  = d.leads || [];
+        _leadsState.counts = d.counts || null;
+        renderCockpitList();
+        renderCockpitSummary();
+        // Auto-open eerstvolgende lead — of behoud selectie als hij nog in
+        // de nieuwe lijst zit.
+        const items = _leadsState.items;
+        const stillThere = _leadsState.selectedId && items.some((x) => x.id === _leadsState.selectedId);
+        if (!stillThere) {
+          const first = items[0];
+          if (first) selectLead(first.id);
+          else       clearLeadDetail();
+        } else {
+          // Vernieuw detail-panel-data (bv. na status-wijziging).
+          const cur = items.find((x) => x.id === _leadsState.selectedId);
+          if (cur) renderLeadDetail(cur, { refreshTimeline: false });
+        }
+      } catch (e) {
+        bucketsEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Laden mislukt: ' + esc(e.message || '') + '</div>';
+      } finally {
+        _leadsState.loading = false;
+      }
+    }
+
+    function renderCockpitSummary() {
+      const el = document.getElementById('cockpit-summary');
+      const tabCntEl = document.getElementById('tab-count-leads');
+      if (!el) return;
+      const c = _leadsState.counts || {};
+      const cell = (n, l) =>
+        `<div class="fu-cockpit-summary-cell"><div class="n">${Number(n) || 0}</div><div class="l">${l}</div></div>`;
+      el.innerHTML = cell(c.te_laat, 'Te laat')
+                   + cell(c.vandaag, 'Vandaag')
+                   + cell(c.open,    'Open')
+                   + cell(c.snoozed, 'Snoozed');
+      if (tabCntEl) tabCntEl.textContent = String(c.open ?? c.alle ?? '—');
+    }
+
+    function _bucketFor(lead) {
+      // Backend levert al bucket + is_hot. Hotleads gaan naar 'hot',
+      // rest volgt bucket. Snoozed komt alleen voor als filter aan staat.
+      if (lead.is_hot) return 'hot';
+      const b = lead.bucket || 'binnenkort';
+      if (b === 'te_laat')   return 'telaat';
+      if (b === 'vandaag')   return 'vandaag';
+      if (b === 'snoozed')   return 'snoozed';
+      return 'week';
+    }
+
+    const BUCKET_META = {
+      hot     : { title: '🔥 Hotleads',   icon: 'ti-flame' },
+      telaat  : { title: 'Te laat',       icon: 'ti-alert-triangle' },
+      vandaag : { title: 'Vandaag',       icon: 'ti-phone' },
+      week    : { title: 'Deze week',     icon: 'ti-calendar' },
+      snoozed : { title: '💤 Later opnieuw', icon: 'ti-moon' },
     };
+    const BUCKET_ORDER = ['hot', 'telaat', 'vandaag', 'week', 'snoozed'];
 
-    function _leadInitials(name) {
-      const n = String(name || '').trim();
-      if (!n) return '?';
-      const parts = n.split(/\s+/);
-      const first = parts[0]?.[0] || '';
-      const last  = parts.length > 1 ? parts[parts.length - 1][0] : '';
-      return (first + last).toUpperCase() || '?';
+    function renderCockpitList() {
+      const el = document.getElementById('cockpit-buckets');
+      if (!el) return;
+      const items = _leadsState.items || [];
+      if (!items.length) {
+        el.innerHTML = '<div class="fu-empty"><i class="ti ti-inbox fu-empty-icon"></i>Geen leads in deze selectie.</div>';
+        return;
+      }
+      const groups = {};
+      for (const it of items) {
+        const b = _bucketFor(it);
+        (groups[b] = groups[b] || []).push(it);
+      }
+      const html = BUCKET_ORDER.map((key) => {
+        const arr = groups[key];
+        if (!arr || !arr.length) return '';
+        const meta = BUCKET_META[key];
+        const cards = arr.map(_renderCockpitCard).join('');
+        return `<div class="fu-cockpit-bucket ${key}">
+          <div class="fu-cockpit-bucket-head">
+            <span><i class="ti ${meta.icon}"></i> ${meta.title}</span>
+            <span class="cnt">${arr.length}</span>
+          </div>
+          <div class="fu-cockpit-leadlist">${cards}</div>
+        </div>`;
+      }).join('');
+      el.innerHTML = html || '<div class="fu-empty"><i class="ti ti-inbox fu-empty-icon"></i>Geen leads in deze selectie.</div>';
+      _wireCockpitCards(el);
+    }
+
+    function _renderCockpitCard(it) {
+      const initials = _leadInitials(it.lead_name);
+      const isZoom = String(it.lead_kind || 'call') === 'zoom';
+      const avaCls = isZoom ? 'kind-zoom' : (it.source === 'event' ? 'src-event' : 'src-retention');
+      const badges = [];
+      if (it.is_hot) badges.push('<span class="fu-cockpit-mini-badge hot" title="Hotlead">🔥</span>');
+      badges.push(it.source === 'event'
+        ? '<span class="fu-cockpit-mini-badge event" title="Event-lead">Event</span>'
+        : '<span class="fu-cockpit-mini-badge retention" title="Retentie-lead">Ret</span>');
+      if (isZoom) badges.push('<span class="fu-cockpit-mini-badge zoom" title="Zoom-call">Zoom</span>');
+      if (Number(it.attempts) > 0) {
+        badges.push(`<span class="fu-cockpit-mini-badge attempts" title="Poging ${it.attempts}/4"><i class="ti ti-refresh"></i> ${it.attempts}/4</span>`);
+      }
+      const nm = esc(it.lead_name || '—');
+      const phone = it.lead_phone ? esc(it.lead_phone) : '<span style="opacity:.5">— geen tel —</span>';
+      const activeCls = (it.id === _leadsState.selectedId) ? ' active' : '';
+      return `<button type="button" class="fu-cockpit-leadcard${activeCls}" data-lead="${esc(it.id)}">
+        <div class="fu-cockpit-leadavatar ${avaCls}" title="${esc(it.lead_status || '')}">${esc(initials)}</div>
+        <div class="fu-cockpit-leadcard-main">
+          <div class="fu-cockpit-leadcard-nm">${nm}</div>
+          <div class="fu-cockpit-leadcard-sub">
+            <span>${phone}</span>
+            <span class="fu-cockpit-leadcard-badges">${badges.join('')}</span>
+          </div>
+        </div>
+      </button>`;
+    }
+
+    function _wireCockpitCards(root) {
+      root.querySelectorAll('[data-lead]').forEach((btn) => {
+        btn.addEventListener('click', () => selectLead(btn.getAttribute('data-lead')));
+      });
+    }
+
+    function selectLead(leadId) {
+      _leadsState.selectedId = leadId;
+      // Highlight update — vermijd volledige rerender voor stabiele scroll.
+      document.querySelectorAll('#cockpit-buckets .fu-cockpit-leadcard').forEach((el) => {
+        el.classList.toggle('active', el.getAttribute('data-lead') === leadId);
+      });
+      const lead = (_leadsState.items || []).find((x) => x.id === leadId);
+      if (!lead) { clearLeadDetail(); return; }
+      renderLeadDetail(lead, { refreshTimeline: true });
+    }
+
+    function clearLeadDetail() {
+      const emptyEl = document.getElementById('cockpit-detail-empty');
+      const bodyEl  = document.getElementById('cockpit-detailbody');
+      if (emptyEl) emptyEl.style.display = '';
+      if (bodyEl)  bodyEl.style.display  = 'none';
+    }
+
+    function renderLeadDetail(it, { refreshTimeline } = {}) {
+      const emptyEl = document.getElementById('cockpit-detail-empty');
+      const bodyEl  = document.getElementById('cockpit-detailbody');
+      if (!bodyEl) return;
+      if (emptyEl) emptyEl.style.display = 'none';
+      bodyEl.style.display  = '';
+
+      // Header
+      const st = LEAD_STATUS_MAP[it.lead_status] || LEAD_STATUS_MAP.nieuw;
+      const avatarEl = document.getElementById('cockpit-avatar');
+      if (avatarEl) {
+        avatarEl.textContent = _leadInitials(it.lead_name);
+        avatarEl.className   = 'fu-cockpit-avatar';
+      }
+      document.getElementById('cockpit-name').textContent = it.lead_name || '—';
+      const badgesEl = document.getElementById('cockpit-badges');
+      if (badgesEl) {
+        const parts = [];
+        if (it.is_hot) parts.push('<span class="fu-cockpit-mini-badge hot" title="Hotlead">🔥 Hotlead</span>');
+        parts.push(it.source === 'event'
+          ? '<span class="fu-cockpit-mini-badge event">Event</span>'
+          : '<span class="fu-cockpit-mini-badge retention">Retentie</span>');
+        parts.push(String(it.lead_kind || 'call') === 'zoom'
+          ? '<span class="fu-cockpit-mini-badge zoom"><i class="ti ti-video"></i> Zoom</span>'
+          : '<span class="fu-cockpit-mini-badge"><i class="ti ti-phone"></i> Bel</span>');
+        parts.push(`<span class="fu-cockpit-mini-badge" title="Status">${esc(st.label)}</span>`);
+        badgesEl.innerHTML = parts.join('');
+      }
+      const contactEl = document.getElementById('cockpit-contact');
+      if (contactEl) {
+        const parts = [];
+        if (it.lead_phone) parts.push(`<a href="tel:${esc(it.lead_phone.replace(/\s+/g,''))}"><i class="ti ti-phone"></i> ${esc(it.lead_phone)}</a>`);
+        if (it.lead_email) parts.push(`<a href="mailto:${esc(it.lead_email)}"><i class="ti ti-mail"></i> ${esc(it.lead_email)}</a>`);
+        contactEl.innerHTML = parts.join(' · ') || '<span style="opacity:.6">— geen contactgegevens —</span>';
+      }
+      const ownerCtlEl = document.getElementById('cockpit-owner-ctl');
+      if (ownerCtlEl) ownerCtlEl.innerHTML = _renderOwnerControl(it);
+
+      // Belkaart
+      const numEl = document.getElementById('cockpit-number');
+      if (numEl) numEl.textContent = it.lead_phone || 'Geen telefoonnummer';
+      const callBtn   = document.getElementById('cockpit-call');
+      const callLabel = document.getElementById('cockpit-call-label');
+      const isZoom = String(it.lead_kind || 'call') === 'zoom';
+      if (callBtn) {
+        if (isZoom) {
+          callBtn.setAttribute('href', '#');
+          callBtn.setAttribute('aria-disabled', 'false');
+          callBtn.dataset.mode = 'zoom';
+        } else if (it.lead_phone) {
+          callBtn.setAttribute('href', 'tel:' + it.lead_phone.replace(/\s+/g,''));
+          callBtn.setAttribute('aria-disabled', 'false');
+          callBtn.dataset.mode = 'call';
+        } else {
+          callBtn.setAttribute('href', '#');
+          callBtn.setAttribute('aria-disabled', 'true');
+          callBtn.dataset.mode = 'none';
+        }
+      }
+      if (callLabel) {
+        callLabel.innerHTML = isZoom ? '📹 Zoom openen' : 'Bel nu';
+      }
+
+      // Quickbar
+      const statusSel = document.getElementById('cockpit-status');
+      if (statusSel) {
+        statusSel.innerHTML = LEAD_STATUS_ORDER.map(
+          (o) => `<option value="${o}"${o === it.lead_status ? ' selected' : ''}>${LEAD_STATUS_MAP[o]?.label || o}</option>`
+        ).join('');
+        statusSel.dataset.leadId = it.id;
+      }
+      const dateInp = document.getElementById('cockpit-date');
+      if (dateInp) {
+        dateInp.value = fmtDateLocal(it.terugbel_datum);
+        dateInp.dataset.leadId = it.id;
+      }
+      const snoozeBtn = document.getElementById('cockpit-snooze-btn');
+      if (snoozeBtn) snoozeBtn.dataset.leadId = it.id;
+
+      // Lead-context
+      renderLeadContext(it);
+
+      // Attempts-sub
+      const attemptsEl = document.getElementById('cockpit-attempts');
+      if (attemptsEl) {
+        const a = Number(it.attempts) || 0;
+        const dsc = (it.days_since_contact != null) ? ` · ${it.days_since_contact}d sinds contact` : '';
+        attemptsEl.textContent = a > 0 ? `Poging ${a}/4${dsc}` : (dsc ? dsc.replace(/^ · /, '') : '');
+      }
+
+      // Timeline
+      if (refreshTimeline) {
+        loadLeadTimeline(it.id);
+      }
+
+      // Note-add binding (refresh iedere render — leadId is idempotent).
+      const noteInput = document.getElementById('cockpit-note-input');
+      const noteBtn   = document.getElementById('cockpit-note-add');
+      if (noteInput) noteInput.value = '';
+      if (noteBtn) noteBtn.dataset.leadId = it.id;
     }
 
     function _renderOwnerControl(it) {
@@ -2900,96 +3406,105 @@
       const isMine       = me && it.owner_id === me.id;
       const members      = _leadsState.teamMembers || [];
 
-      // Weergavelabel: naam van eigenaar, of "Niet toegewezen".
-      const label = it.owner_name
-        ? `<span title="Eigenaar" style="font-size:11.5px;color:var(--text-secondary,rgba(255,255,255,.7));display:inline-flex;align-items:center;gap:4px"><i class="ti ti-user"></i>${esc(it.owner_name)}</span>`
-        : `<span title="Nog niet toegewezen" style="font-size:11.5px;color:var(--text-secondary,rgba(255,255,255,.55));display:inline-flex;align-items:center;gap:4px"><i class="ti ti-user-off"></i>Niet toegewezen</span>`;
+      const labelText = it.owner_name
+        ? `<i class="ti ti-user"></i> ${esc(it.owner_name)}`
+        : `<i class="ti ti-user-off"></i> Niet toegewezen`;
+      const labelWrap = `<span title="Eigenaar" style="font-size:12px;color:var(--text-secondary,rgba(255,255,255,.75));display:inline-flex;align-items:center;gap:4px">${labelText}</span>`;
 
-      // Manager/admin krijgen een select met alle team-leden + Niemand.
       if (isPrivileged) {
         const opts = ['<option value="">Niet toegewezen</option>']
           .concat(members.map((m) => `<option value="${esc(m.id)}"${it.owner_id === m.id ? ' selected' : ''}>${esc(m.full_name || m.email || m.id)}</option>`));
         return `<select class="fu-lead-inline" data-lead-owner="${esc(it.id)}" aria-label="Eigenaar" title="Eigenaar toewijzen">${opts.join('')}</select>`;
       }
-      // Sales-user: alleen zelf claimen. Toon label + 'Aan mij'-knop indien
-      // niet al van hem zelf.
       if (isSales) {
         const claimBtn = isMine
           ? ''
           : `<button class="fu-lead-btn" data-lead-claim="${esc(it.id)}" title="Aan mij toewijzen" style="padding:4px 8px;font-size:11.5px"><i class="ti ti-hand-click"></i> Aan mij</button>`;
-        return `<span style="display:inline-flex;align-items:center;gap:6px">${label}${claimBtn}</span>`;
+        return `<span style="display:inline-flex;align-items:center;gap:6px">${labelWrap}${claimBtn}</span>`;
       }
-      // Overige rollen: alleen weergave.
-      return label;
+      return labelWrap;
     }
 
-    function renderLeadCards(items) {
-      const opts = ['nieuw','benaderd','niet_bereikbaar','terugbellen','verlengd','verloren'];
-      return items.map((it) => {
-        const st = LEAD_STATUS_MAP[it.lead_status] || LEAD_STATUS_MAP.nieuw;
-        const initials = _leadInitials(it.lead_name);
-        const nm = esc(it.lead_name || '—');
-        const phRaw = String(it.lead_phone || '').replace(/\s+/g, '');
-        const phLink = phRaw ? `<a href="tel:${esc(phRaw)}"><i class="ti ti-phone"></i> ${esc(it.lead_phone)}</a>` : '';
-        const emLink = it.lead_email ? `<a href="mailto:${esc(it.lead_email)}"><i class="ti ti-mail"></i> ${esc(it.lead_email)}</a>` : '';
-        const metaParts = [phLink, emLink].filter(Boolean).join(' · ');
-        const lastContact = it.last_contact_at ? `Laatste contact: ${fmtDateNLShort(it.last_contact_at)}` : '';
-        const sourceBadge = it.source === 'retention'
-          ? '<span class="fu-card-badge source-retention">Retentie</span>'
-          : it.source === 'event'
-            ? '<span class="fu-card-badge source-event">Event</span>'
-            : `<span class="fu-card-badge status-default">${esc(it.source || '—')}</span>`;
-        const statusSel = `<select class="fu-lead-inline" data-lead-status="${esc(it.id)}" aria-label="Status">${opts.map(o => `<option value="${o}"${o===it.lead_status ? ' selected' : ''}>${LEAD_STATUS_MAP[o]?.label || o}</option>`).join('')}</select>`;
-        const dateInp = `<input type="date" class="fu-lead-inline" data-lead-date="${esc(it.id)}" value="${fmtDateLocal(it.terugbel_datum)}" aria-label="Terugbellen op">`;
-        const noteBtn = `<button class="fu-lead-btn" data-lead-notes="${esc(it.id)}" data-lead-name="${esc(it.lead_name || '')}" title="Notitie toevoegen / bekijken"><i class="ti ti-notes"></i> Notitie</button>`;
-        const ownerCtl = _renderOwnerControl(it);
-        return `<article class="fu-card">
-          <div class="fu-card-header">
-            <div class="fu-card-left">
-              <div class="fu-card-avatar ${st.cls}" title="${esc(st.label)}">${esc(initials)}</div>
-              <div style="min-width:0">
-                <div class="fu-card-name">${nm} ${sourceBadge}</div>
-                ${metaParts ? `<div class="fu-card-meta fu-lead-card-meta">${metaParts}</div>` : ''}
-                <div class="fu-card-meta" style="opacity:.85;margin-top:2px">${ownerCtl}${lastContact ? ` <span style="opacity:.7;margin-left:6px">· ${lastContact}</span>` : ''}</div>
-              </div>
+    function renderLeadContext(it) {
+      const el = document.getElementById('cockpit-context');
+      if (!el) return;
+      const cells = [];
+      cells.push(_ctxCell('Bron', it.source === 'event' ? 'Event' : (it.source === 'retention' ? 'Retentie' : (it.source || '—'))));
+      cells.push(_ctxCell('Type', String(it.lead_kind || 'call') === 'zoom' ? 'Zoom' : 'Bel'));
+      if (it.terugbel_datum) cells.push(_ctxCell('Terugbellen', fmtDateNLShort(it.terugbel_datum)));
+      if (it.last_contact_at) cells.push(_ctxCell('Laatste contact', fmtDateNLShort(it.last_contact_at)));
+      cells.push(_ctxCell('Aangemaakt', fmtDateNLShort(it.created_at)));
+      const ref = _sourceRefSummary(it);
+      if (ref) cells.push(_ctxCell('Verwijzing', ref));
+      el.innerHTML = cells.join('');
+    }
+
+    function _ctxCell(k, v) {
+      return `<div class="fu-cockpit-ctx-cell"><span class="k">${esc(k)}</span><span class="v">${esc(v || '—')}</span></div>`;
+    }
+
+    function _sourceRefSummary(it) {
+      const r = it.source_ref;
+      if (!r || typeof r !== 'object') return '';
+      if (it.source === 'event') {
+        const parts = [];
+        if (r.event_title || r.event_name) parts.push(r.event_title || r.event_name);
+        if (r.event_date) parts.push(fmtDateNLShort(r.event_date));
+        if (r.outcome) parts.push(String(r.outcome));
+        return parts.join(' · ');
+      }
+      if (it.source === 'retention') {
+        const parts = [];
+        if (r.subscription_reason) parts.push(String(r.subscription_reason));
+        if (r.expires_on || r.end_date) parts.push('Verloopt ' + fmtDateNLShort(r.expires_on || r.end_date));
+        return parts.join(' · ');
+      }
+      return '';
+    }
+
+    // Timeline: contact-geschiedenis. Bron: follow_up_lead_notes (bestaand
+    // endpoint) — entry_kind + auteur + timestamp per rij.
+    async function loadLeadTimeline(leadId) {
+      const el = document.getElementById('cockpit-timeline');
+      if (!el) return;
+      el.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
+      try {
+        const r = await window.AgentShared.apiFetch('/api/follow-up-lead-notes-list?lead_id=' + encodeURIComponent(leadId));
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+        const notes = d.notes || [];
+        if (!notes.length) {
+          el.innerHTML = '<div class="fu-empty"><i class="ti ti-note-off fu-empty-icon"></i>Nog geen contact-geschiedenis.</div>';
+          return;
+        }
+        _leadsState.timelineCache[leadId] = notes;
+        el.innerHTML = notes.map((n) => {
+          const kind = String(n.entry_kind || 'note').toLowerCase();
+          const icon = ({
+            note        : 'ti-note',
+            call        : 'ti-phone',
+            no_answer   : 'ti-phone-off',
+            terugbel    : 'ti-clock',
+            whatsapp    : 'ti-brand-whatsapp',
+            mail        : 'ti-mail',
+            voicememo   : 'ti-microphone',
+            outcome     : 'ti-check',
+          })[kind] || 'ti-note';
+          const meta = `${esc(n.author_name || '—')} · ${fmtDateTimeNLShort(n.created_at)}`;
+          return `<div class="fu-cockpit-timeline-item">
+            <div class="fu-cockpit-timeline-icon"><i class="ti ${icon}"></i></div>
+            <div class="fu-cockpit-timeline-body">
+              <div class="txt">${esc(n.note || '')}</div>
+              <div class="meta">${meta}</div>
             </div>
-            <div class="fu-card-right">
-              ${statusSel}
-              ${dateInp}
-              ${noteBtn}
-            </div>
-          </div>
-        </article>`;
-      }).join('');
+          </div>`;
+        }).join('');
+      } catch (e) {
+        el.innerHTML = '<div class="fu-empty" style="color:#b91c1c"><i class="ti ti-alert-circle fu-empty-icon"></i>Fout: ' + esc(e.message || '') + '</div>';
+      }
     }
 
-    function wireLeadCards(root) {
-      root.querySelectorAll('[data-lead-status]').forEach((sel) => sel.addEventListener('change', async () => {
-        await patchLead(sel.getAttribute('data-lead-status'), { lead_status: sel.value });
-      }));
-      root.querySelectorAll('[data-lead-date]').forEach((inp) => inp.addEventListener('change', async () => {
-        const v = inp.value ? new Date(inp.value + 'T09:00:00').toISOString() : null;
-        await patchLead(inp.getAttribute('data-lead-date'), { terugbel_datum: v });
-      }));
-      root.querySelectorAll('[data-lead-notes]').forEach((btn) => btn.addEventListener('click', () => openLeadNotesModal(btn.getAttribute('data-lead-notes'), btn.getAttribute('data-lead-name') || '')));
-      // Owner-toewijzing: manager/admin krijgt een select met team-leden,
-      // sales krijgt een 'Aan mij'-claim-knop. Beide POSTen naar
-      // /api/follow-up-lead-update; het endpoint bewaakt rol-gate + validatie.
-      root.querySelectorAll('[data-lead-owner]').forEach((sel) => sel.addEventListener('change', async () => {
-        const leadId = sel.getAttribute('data-lead-owner');
-        const val    = sel.value ? sel.value : null;
-        await patchLead(leadId, { owner_id: val });
-      }));
-      root.querySelectorAll('[data-lead-claim]').forEach((btn) => btn.addEventListener('click', async () => {
-        const leadId = btn.getAttribute('data-lead-claim');
-        const me = await _ensureMe();
-        if (!me?.id) { alert('Kan huidige gebruiker niet resolven'); return; }
-        btn.disabled = true;
-        await patchLead(leadId, { owner_id: me.id });
-      }));
-    }
-
-    async function patchLead(leadId, patch) {
+    async function patchLead(leadId, patch, opts = {}) {
       try {
         const r = await window.AgentShared.apiFetch('/api/follow-up-lead-update', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2997,12 +3512,144 @@
         });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
-        // Refresh de hele leads-tab zodat counts + sub-secties (Vandaag/Te laat)
-        // ook meebewegen na een status/datum-wijziging.
-        loadLeadsTab();
+        // Herlaad wachtrij + detail. keepSelection default true, ook bij
+        // filter-verandering blijft selectie behouden zolang lead in view zit.
+        if (opts.silentReload !== true) loadLeadsTab();
       } catch (e) {
         alert('Opslaan mislukt: ' + (e.message || 'onbekend'));
       }
+    }
+
+    // Actie-dropdown handlers — pure placeholder toasts voor Fase 1. In
+    // Fase 2 worden dit echte flows (offerte-wizard / zoom-schedule / etc).
+    const _actieToasts = {
+      offerte  : 'Offerte-flow komt in Fase 2 (Sales-cockpit koppeling).',
+      zoom     : 'Zoom-plannen komt in Fase 2 (agenda-integratie).',
+      terugbel : 'Gebruik de datum-picker om een terugbeltijd te plannen.',
+      whatsapp : 'WhatsApp-flow komt in Fase 2.',
+      mail     : 'Mail-flow komt in Fase 2.',
+    };
+
+    function _showActiemenu(show) {
+      const menu = document.getElementById('cockpit-actiemenu');
+      if (!menu) return;
+      menu.hidden = !show;
+    }
+
+    function _bindCockpitDetail() {
+      // Filter-pillen (bron + kind)
+      document.querySelectorAll('#cockpit-list .fu-cockpit-pill').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const grp = btn.getAttribute('data-filter'); // 'source' | 'kind'
+          const val = btn.getAttribute('data-value');
+          _leadsState.filter[grp] = val;
+          // Toggle actives binnen groep.
+          btn.parentElement.querySelectorAll('.fu-cockpit-pill').forEach((b) => {
+            b.classList.toggle('active', b === btn);
+          });
+          loadLeadsTab();
+        });
+      });
+      // Toggles: Mijn leads + Snoozed
+      const mine = document.getElementById('cockpit-mine');
+      if (mine) mine.addEventListener('change', () => { _leadsState.filter.mine = mine.checked; loadLeadsTab(); });
+      const sn   = document.getElementById('cockpit-snoozed');
+      if (sn) sn.addEventListener('change', () => { _leadsState.filter.snoozed = sn.checked; loadLeadsTab(); });
+      // Refresh
+      const rf = document.getElementById('cockpit-refresh');
+      if (rf) rf.addEventListener('click', () => loadLeadsTab());
+
+      // Status-select
+      const stSel = document.getElementById('cockpit-status');
+      if (stSel) stSel.addEventListener('change', async () => {
+        const leadId = stSel.dataset.leadId;
+        if (!leadId) return;
+        await patchLead(leadId, { lead_status: stSel.value });
+      });
+      // Datum-picker
+      const dInp = document.getElementById('cockpit-date');
+      if (dInp) dInp.addEventListener('change', async () => {
+        const leadId = dInp.dataset.leadId;
+        if (!leadId) return;
+        const v = dInp.value ? new Date(dInp.value + 'T09:00:00').toISOString() : null;
+        await patchLead(leadId, { terugbel_datum: v });
+      });
+      // Snooze-knop — placeholder toast (schema-write pas in Fase 2).
+      const snBtn = document.getElementById('cockpit-snooze-btn');
+      if (snBtn) snBtn.addEventListener('click', () => {
+        alert('Snooze-functie: kies boven links "💤 Later opnieuw" om gesnoozed te zien. Snooze-schrijven komt in Fase 2.');
+      });
+
+      // Actie-dropdown open/close (met click-outside)
+      const actieBtn = document.getElementById('cockpit-actie');
+      const menu     = document.getElementById('cockpit-actiemenu');
+      if (actieBtn) {
+        actieBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          _showActiemenu(menu ? menu.hidden : false);
+        });
+      }
+      document.addEventListener('click', (e) => {
+        if (!menu || menu.hidden) return;
+        const dd = e.target.closest('.fu-callcard-dropdown');
+        if (!dd) _showActiemenu(false);
+      });
+      if (menu) {
+        menu.addEventListener('click', (e) => {
+          const b = e.target.closest('button[data-actie]');
+          if (!b) return;
+          _showActiemenu(false);
+          const kind = b.getAttribute('data-actie');
+          const msg  = _actieToasts[kind] || '';
+          if (kind === 'terugbel') {
+            const dInp = document.getElementById('cockpit-date');
+            if (dInp) dInp.focus();
+          }
+          if (msg) alert(msg);
+        });
+      }
+
+      // Note-add
+      const noteBtn   = document.getElementById('cockpit-note-add');
+      const noteInput = document.getElementById('cockpit-note-input');
+      if (noteBtn) noteBtn.addEventListener('click', async () => {
+        const leadId = noteBtn.dataset.leadId;
+        const note   = (noteInput?.value || '').trim();
+        if (!leadId || !note) return;
+        noteBtn.disabled = true;
+        try {
+          const r = await window.AgentShared.apiFetch('/api/follow-up-lead-note-add', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lead_id: leadId, note }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+          if (noteInput) noteInput.value = '';
+          loadLeadTimeline(leadId);
+        } catch (e) {
+          alert('Opslaan mislukt: ' + (e.message || 'onbekend'));
+        } finally {
+          noteBtn.disabled = false;
+        }
+      });
+
+      // Owner-controls (delegated — element wisselt bij rerender)
+      document.getElementById('cockpit-owner-ctl')?.addEventListener('change', async (e) => {
+        const sel = e.target.closest('[data-lead-owner]');
+        if (!sel) return;
+        const leadId = sel.getAttribute('data-lead-owner');
+        const val    = sel.value ? sel.value : null;
+        await patchLead(leadId, { owner_id: val });
+      });
+      document.getElementById('cockpit-owner-ctl')?.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-lead-claim]');
+        if (!btn) return;
+        const leadId = btn.getAttribute('data-lead-claim');
+        const me = await _ensureMe();
+        if (!me?.id) { alert('Kan huidige gebruiker niet resolven'); return; }
+        btn.disabled = true;
+        await patchLead(leadId, { owner_id: me.id });
+      });
     }
 
     async function openLeadNotesModal(leadId, leadName) {
@@ -3083,15 +3730,10 @@
       refresh();
     }
 
-    // Filter/refresh listeners voor de leads-tab. Bind eenmalig zodra
-    // DOMContentLoaded — safe want de switch loadt de tab lazy.
+    // Cockpit-bindings binden zich eenmalig na DOMContentLoaded — de tab
+    // wordt lazy geladen bij switchTab('leads') → loadLeadsTab().
     document.addEventListener('DOMContentLoaded', () => {
-      ['leads-source', 'leads-view', 'leads-status', 'leads-owner'].forEach((id) => {
-        const el = document.getElementById(id);
-        if (el) el.addEventListener('change', () => loadLeadsTab());
-      });
-      const rf = document.getElementById('leads-refresh');
-      if (rf) rf.addEventListener('click', () => loadLeadsTab());
+      _bindCockpitDetail();
     });
 
     // ── PR Z: Event follow-ups tab ───────────────────────────────────────────
