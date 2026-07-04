@@ -2728,6 +2728,18 @@
     }
     .fu-topbar-action:hover { background: #cf541f; }
     .fu-topbar-action-lbl { font-size: 13px; }
+    /* Belronde-variant in de topbar: standaard neutraal, active =
+       oranje/hot (matcht voicememo bij focus-modus). */
+    .fu-topbar-belronde {
+      background: rgba(255,255,255,.10); color: #fff;
+      box-shadow: none;
+    }
+    .fu-topbar-belronde:hover { background: rgba(255,255,255,.18); }
+    .fu-topbar-belronde.active {
+      background: var(--hot); color: #fff;
+      box-shadow: 0 2px 10px rgba(232,98,44,.28);
+    }
+    .fu-topbar-belronde.active:hover { background: #cf541f; }
     @media (max-width: 720px) {
       .fu-topbar-action-lbl { display: none; }
     }
@@ -2868,8 +2880,12 @@
         <span class="fu-tab-count" id="tab-count-oude-retenties">—</span>
       </button>
 
-      <!-- Topbar-rechts: voicememo-ronde-knop (verplaatst uit de queue). -->
+      <!-- Topbar-rechts: belronde + voicememo (verplaatst uit de queue). -->
       <span class="fu-topbar-spacer" aria-hidden="true"></span>
+      <button class="fu-topbar-action fu-topbar-belronde" id="cockpit-belronde" type="button" title="Start focus-belronde">
+        <i class="ti ti-player-play" id="cockpit-belronde-icon"></i>
+        <span class="fu-topbar-action-lbl" id="cockpit-belronde-lbl">Belronde</span>
+      </button>
       <button class="fu-topbar-action" id="cockpit-voicememo-open" type="button" title="Voicememo-ronde openen">
         🎙 <span class="fu-topbar-action-lbl">Voicememo</span>
       </button>
@@ -3125,14 +3141,9 @@
             <div class="fu-cockpit-toggles">
               <label class="fu-cockpit-toggle"><input type="checkbox" id="cockpit-mine"> Mijn leads</label>
               <label class="fu-cockpit-toggle"><input type="checkbox" id="cockpit-snoozed"> 💤 Later opnieuw</label>
-              <button class="fu-lead-btn fu-belronde-compact" id="cockpit-belronde" type="button" title="Start focus-belronde">
-                <i class="ti ti-player-play" id="cockpit-belronde-icon"></i>
-                <span id="cockpit-belronde-lbl">Belronde</span>
-              </button>
               <button class="fu-lead-btn" id="cockpit-refresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
             </div>
           </div>
-          <div class="fu-cockpit-summary" id="cockpit-summary"></div>
           <div class="fu-cockpit-buckets" id="cockpit-buckets">
             <div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>
           </div>
@@ -5053,17 +5064,15 @@
     }
 
     function renderCockpitSummary() {
-      const el = document.getElementById('cockpit-summary');
+      // KPI-strook is verwijderd — de counts staan nu impliciet in de
+      // buckets zelf (Te laat / Vandaag / Komende 7 dagen etc). We
+      // updaten alleen nog de tab-badge zodat de leads-tab z'n
+      // getalletje behoudt. Bestaande callers blijven werken zonder
+      // fouten (no-op fallback als de badge er ook niet is).
       const tabCntEl = document.getElementById('tab-count-leads');
-      if (!el) return;
+      if (!tabCntEl) return;
       const c = _leadsState.counts || {};
-      const cell = (n, l) =>
-        `<div class="fu-cockpit-summary-cell"><div class="n">${Number(n) || 0}</div><div class="l">${l}</div></div>`;
-      el.innerHTML = cell(c.te_laat, 'Te laat')
-                   + cell(c.vandaag, 'Vandaag')
-                   + cell(c.open,    'Open')
-                   + cell(c.snoozed, 'Snoozed');
-      if (tabCntEl) tabCntEl.textContent = String(c.open ?? c.alle ?? '—');
+      tabCntEl.textContent = String(c.open ?? c.alle ?? '—');
     }
 
     function _bucketFor(lead) {
@@ -7756,7 +7765,10 @@
           const initials = _leadInitials(it.lead_name);
           const avaCls = it.source === 'event' ? 'src-event' : '';
           const back = it.snoozed_until ? fmtDateNLShort(it.snoozed_until) : '—';
-          return `<div class="fu-sp-row">
+          // ID op de rij zelf én op de knoppen, zodat click-delegation
+          // ALTIJD het juiste id pakt — ongeacht welk kind (button, icon,
+          // span) daadwerkelijk geklikt is.
+          return `<div class="fu-sp-row" data-sp-lead="${esc(it.id)}">
             <div class="time">${esc(back)}</div>
             <div class="avatar ${avaCls}">${esc(initials)}</div>
             <div>
@@ -7767,7 +7779,7 @@
             <span class="owner"><i class="ti ti-user${it.owner_name ? '' : '-off'}"></i> ${esc(it.owner_name || '—')}</span>
             <div style="display:flex;gap:6px">
               <button type="button" class="fu-lead-btn primary" data-sp-wake="${esc(it.id)}"><i class="ti ti-alarm"></i> Nu oppakken</button>
-              <button type="button" class="fu-lead-btn" data-sp-open="${esc(it.id)}"><i class="ti ti-external-link"></i></button>
+              <button type="button" class="fu-lead-btn" data-sp-open="${esc(it.id)}" title="Openen in werklijst"><i class="ti ti-external-link"></i> Openen</button>
             </div>
           </div>`;
         }).join('');
@@ -7777,41 +7789,70 @@
         </div>`;
       }).join('');
       el.innerHTML = html || '<div class="fu-empty"><i class="ti ti-moon-off fu-empty-icon"></i>Geen gesluimerde leads.</div>';
-      // Handlers.
-      el.querySelectorAll('[data-sp-wake]').forEach((btn) => {
-        btn.addEventListener('click', async () => {
-          const id = btn.getAttribute('data-sp-wake');
-          btn.disabled = true;
+
+      // Event-delegation via #sp-list: één handler die de dichtstbijzijnde
+      // rij (fu-sp-row) en knop opzoekt. Vermijdt stale closures en pakt
+      // altijd de juiste lead-id van de aangeklikte rij — ook als er per
+      // ongeluk op een icoon binnen de knop wordt geklikt.
+      el.addEventListener('click', async (ev) => {
+        const wakeBtn = ev.target.closest('[data-sp-wake]');
+        const openBtn = wakeBtn ? null : ev.target.closest('[data-sp-open]');
+        if (!wakeBtn && !openBtn) return;
+
+        const row = (wakeBtn || openBtn).closest('.fu-sp-row');
+        const id  = row?.getAttribute('data-sp-lead')
+                  || (wakeBtn || openBtn).getAttribute('data-sp-wake')
+                  || (wakeBtn || openBtn).getAttribute('data-sp-open');
+        if (!id) return;
+
+        if (wakeBtn) {
+          wakeBtn.disabled = true;
+          const originalHtml = wakeBtn.innerHTML;
+          wakeBtn.innerHTML = '<i class="ti ti-loader-2"></i> Bezig…';
           try {
+            const nowIso = new Date().toISOString();
             const r = await window.AgentShared.apiFetch('/api/follow-up-lead-update', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ lead_id: id, snoozed_until: null }),
+              method : 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body   : JSON.stringify({
+                lead_id       : id,
+                snoozed_until : null,
+                lead_status   : 'terugbellen',
+                terugbel_datum: nowIso,
+              }),
             });
             const d = await r.json().catch(() => ({}));
             if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+            try { window.AgentShared?.showToast?.('Lead terug op de werklijst.', 'success'); } catch (_) {}
             loadSluimerpotTab();
+            try { loadLeadsTab(); } catch (_) {}
           } catch (e) {
             alert('Opwekken mislukt: ' + (e.message || 'onbekend'));
-            btn.disabled = false;
+            wakeBtn.disabled = false;
+            wakeBtn.innerHTML = originalHtml;
           }
-        });
-      });
-      el.querySelectorAll('[data-sp-open]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const id = btn.getAttribute('data-sp-open');
-          // Snoozed-toggle activeren zodat de lead in de cockpit-lijst
-          // verschijnt, daarna selecteren.
-          _leadsState.filter.snoozed = true;
-          const cb = document.getElementById('cockpit-snoozed');
-          if (cb) cb.checked = true;
-          switchTab('leads');
-          const trySelect = (attempt = 0) => {
-            const has = (_leadsState.items || []).some((x) => x.id === id);
-            if (has) { selectLead(id); return; }
-            if (attempt < 20) setTimeout(() => trySelect(attempt + 1), 100);
-          };
-          setTimeout(() => trySelect(0), 150);
-        });
+          return;
+        }
+
+        // Openen: filter.snoozed=true zodat de lead in de werklijst zit,
+        // switchTab → loadLeadsTab, en zodra de lead in _leadsState.items
+        // staat: selectLead. Snapshot-id (lokale const) voorkomt dat een
+        // late retry per ongeluk een andere id pakt.
+        const targetId = id;
+        _leadsState.filter.snoozed = true;
+        const cb = document.getElementById('cockpit-snoozed');
+        if (cb) cb.checked = true;
+        switchTab('leads');
+        const trySelect = (attempt = 0) => {
+          const item = (_leadsState.items || []).find((x) => x.id === targetId);
+          if (item && (item.__worklistKind || 'bel') === 'bel') {
+            selectLead(targetId);
+            return;
+          }
+          if (attempt < 20) setTimeout(() => trySelect(attempt + 1), 100);
+          else console.warn('[sluimerpot open] lead niet gevonden na retries:', targetId);
+        };
+        setTimeout(() => trySelect(0), 150);
       });
     }
 
