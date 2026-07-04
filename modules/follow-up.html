@@ -4154,6 +4154,112 @@
       if (btn) btn.setAttribute('aria-expanded', String(!!show));
     }
 
+    // ── Voys click-to-call (Fase 4) ─────────────────────────────────────
+    // Config wordt lazy geladen bij de eerste cockpit-open. selectedCallerId
+    // wordt in-memory bewaard (per pagina-load) zodat de sales-user niet
+    // elke keer opnieuw hoeft te kiezen.
+    const _voysState = {
+      loaded          : false,
+      configured      : false,
+      callerIds       : [],
+      selectedCallerId: null,
+    };
+
+    async function _loadVoysConfig() {
+      if (_voysState.loaded) return _voysState;
+      _voysState.loaded = true;
+      try {
+        const r = await window.AgentShared.apiFetch('/api/voys-config');
+        const d = await r.json().catch(() => ({}));
+        if (r.ok) {
+          _voysState.callerIds  = Array.isArray(d.caller_ids) ? d.caller_ids : [];
+          _voysState.configured = !!d.configured;
+        }
+      } catch (_) { /* fail-soft; UI valt terug op "Standaard" */ }
+      _renderVoysSelect();
+      return _voysState;
+    }
+
+    function _renderVoysSelect() {
+      const sel = document.getElementById('cockpit-voys');
+      if (!sel) return;
+      sel.innerHTML = '';
+      if (!_voysState.callerIds.length) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = _voysState.configured ? 'Voys · standaard' : 'Standaard';
+        sel.appendChild(opt);
+        sel.disabled = true;
+        return;
+      }
+      for (const n of _voysState.callerIds) {
+        const opt = document.createElement('option');
+        opt.value = n;
+        opt.textContent = n;
+        sel.appendChild(opt);
+      }
+      // Herstel eerdere keuze indien beschikbaar, anders eerste optie.
+      if (_voysState.selectedCallerId && _voysState.callerIds.includes(_voysState.selectedCallerId)) {
+        sel.value = _voysState.selectedCallerId;
+      } else {
+        _voysState.selectedCallerId = _voysState.callerIds[0];
+        sel.value = _voysState.selectedCallerId;
+      }
+      sel.disabled = false;
+    }
+
+    function _voysToast(msg) {
+      try { if (window.AgentShared?.showToast) { window.AgentShared.showToast(msg); return; } } catch (_) {}
+      alert(msg);
+    }
+
+    async function _voysCallLead(it, btnEl) {
+      const toNumber = String(it?.lead_phone || '').trim();
+      if (!toNumber) { _voysToast('Deze lead heeft geen telefoonnummer.'); return; }
+      // Zorg dat config geladen is (best-effort — de knop werkt ook zonder).
+      if (!_voysState.loaded) { await _loadVoysConfig(); }
+
+      const callLabel = document.getElementById('cockpit-call-label');
+      const oldLabel  = callLabel ? callLabel.textContent : 'Bel nu';
+      if (btnEl) btnEl.setAttribute('aria-disabled', 'true');
+      if (callLabel) callLabel.textContent = 'Bellen…';
+
+      try {
+        const body = {
+          lead_id    : it.id,
+          to_number  : toNumber,
+          from_number: _voysState.selectedCallerId || null,
+        };
+        const r = await window.AgentShared.apiFetch('/api/voys-call', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify(body),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.ok) {
+          _voysToast(`Je webphone (202) gaat over — neem op om door te verbinden met ${it.lead_name || 'de lead'}.`);
+        } else if (r.status === 501 || d?.code === 'VOYS_NOT_CONFIGURED') {
+          _voysToast('Voys nog niet gekoppeld — je kunt handmatig bellen. Uitkomst-panel staat klaar.');
+        } else {
+          // 502 of ander — log voys_body voor debug.
+          console.error('[voys-call] fail:', {
+            status    : r.status,
+            voys_body : d?.voys_body,
+            voys_status: d?.voys_status,
+            auth_style : d?.auth_style,
+            body_style : d?.body_style,
+          });
+          _voysToast('Bellen via Voys mislukt (zie console). Uitkomst-panel staat klaar.');
+        }
+      } catch (e) {
+        console.error('[voys-call] network error:', e?.message || e);
+        _voysToast('Bellen via Voys mislukt (netwerk). Uitkomst-panel staat klaar.');
+      } finally {
+        if (btnEl) btnEl.setAttribute('aria-disabled', 'false');
+        if (callLabel) callLabel.textContent = oldLabel || 'Bel nu';
+      }
+    }
+
     function _openWhatsappForLead(it) {
       const phone = String(it?.lead_phone || '').replace(/[^\d]/g, '');
       if (!phone) { alert('Geen telefoonnummer beschikbaar voor WhatsApp.'); return; }
@@ -4222,6 +4328,14 @@
     }
 
     function _bindCockpitDetail() {
+      // Voys caller-ID-select: onthoud gekozen nummer (in-memory).
+      const voysSel = document.getElementById('cockpit-voys');
+      if (voysSel) voysSel.addEventListener('change', () => {
+        _voysState.selectedCallerId = voysSel.value || null;
+      });
+      // Lazy config-load (config-endpoint is snel + cachet niet gevoelig).
+      _loadVoysConfig();
+
       // Filter-pillen (bron + kind)
       document.querySelectorAll('#cockpit-list .fu-cockpit-pill').forEach((btn) => {
         btn.addEventListener('click', () => {
@@ -4246,17 +4360,28 @@
       const brBtn = document.getElementById('cockpit-belronde');
       if (brBtn) brBtn.addEventListener('click', _toggleBelronde);
 
-      // Belknop → open uitkomst-panel. Bel-modus: tel:-link laat OS-dialer
-      // openen; we tonen daarnaast het panel. Zoom-modus: preventDefault +
-      // panel tonen (er is geen echte Zoom-URL — dat komt in Fase 3).
+      // Belknop → Voys click-to-call bij bel-modus (webphone rinkelt),
+      // met tel:-link fallback als Voys niet geconfigureerd is. Zoom-modus:
+      // preventDefault + panel tonen (geen echte Zoom-URL yet). Bij elke
+      // klik direct het uitkomst-panel openen zodat sales de outcome kan
+      // registreren zodra het gesprek afgelopen is.
       const callBtn = document.getElementById('cockpit-call');
-      if (callBtn) callBtn.addEventListener('click', (e) => {
+      if (callBtn) callBtn.addEventListener('click', async (e) => {
         const mode = callBtn.dataset.mode;
         if (mode === 'none') { e.preventDefault(); return; }
-        if (mode === 'zoom') e.preventDefault();
         const it = (_leadsState.items || []).find((x) => x.id === _leadsState.selectedId);
         if (!it) return;
-        _openOutcomePanel(String(it.lead_kind || 'call') === 'zoom');
+        if (mode === 'zoom') {
+          e.preventDefault();
+          _openOutcomePanel(true);
+          return;
+        }
+        // Bel-modus: preventDefault (we bellen via Voys, geen OS-dialer)
+        // + uitkomst-panel meteen open. Als Voys niet gekoppeld is valt
+        // de flow terug op tel:-link zodat sales altijd door kan werken.
+        e.preventDefault();
+        _openOutcomePanel(false);
+        await _voysCallLead(it, callBtn);
       });
 
       // Uitkomst-panel: sluiten
