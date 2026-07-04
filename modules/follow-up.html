@@ -1642,73 +1642,94 @@
       .fu-sp-row .avatar { display: none; }
     }
 
-    /* Event-bellijst — huisstijl #093d54, compacte rijen */
-    .fu-eb-header {
-      display: flex; flex-direction: column; gap: 4px;
-      background: linear-gradient(180deg, rgba(9,61,84,0.35), rgba(9,61,84,0.15));
-      border: 1px solid rgba(9,61,84,0.55);
-      border-radius: 12px; padding: 12px 16px;
-      flex: 1; min-width: 260px;
+    /* Afgeboekt-tab — filter-chips + compacte rijen met reden-badge */
+    .fu-afgb-chips {
+      display: flex; flex-wrap: wrap; gap: 6px;
     }
-    .fu-eb-header-title {
-      font-size: 15px; font-weight: 600; color: var(--text-primary, #fff);
-      display: inline-flex; align-items: center; gap: 8px;
+    .fu-afgb-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-radius: 999px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: var(--text-secondary, rgba(255,255,255,.78));
+      font-size: 12.5px; font-weight: 600; cursor: pointer;
+      transition: background .12s, border-color .12s, color .12s;
     }
-    .fu-eb-header-sub {
-      font-size: 12.5px; color: var(--text-secondary, rgba(255,255,255,.75));
-      display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    .fu-afgb-chip:hover { background: rgba(255,255,255,0.08); color: var(--text-primary, #fff); }
+    .fu-afgb-chip.active {
+      background: #093d54; color: #fff; border-color: #0d4d69;
     }
-    .fu-eb-empty {
-      background: var(--surface-card, rgba(255,255,255,0.03));
-      border: 1px solid var(--border-default, rgba(255,255,255,0.08));
-      border-radius: 12px; padding: 40px 16px;
-      text-align: center; color: var(--text-secondary, rgba(255,255,255,.65));
+    .fu-afgb-chip .cnt {
+      display: inline-block; padding: 0 6px; border-radius: 10px;
+      background: rgba(255,255,255,0.15); font-size: 11px; font-weight: 700;
     }
-    .fu-eb-empty i.ti { font-size: 32px; opacity: .5; display: block; margin-bottom: 8px; }
-    .fu-eb-row {
+    .fu-afgb-chip.active .cnt { background: rgba(255,255,255,0.22); }
+
+    .fu-afgb-row {
       display: grid;
-      grid-template-columns: 34px 1fr auto auto auto;
-      gap: 10px; align-items: center;
-      padding: 10px 12px;
+      grid-template-columns: 28px 1fr auto auto auto auto;
+      gap: 12px; align-items: center;
+      padding: 10px 14px;
       background: rgba(255,255,255,0.02);
       border: 1px solid rgba(255,255,255,0.06);
       border-radius: 10px;
       margin-bottom: 6px;
+      cursor: pointer;
+      transition: background .12s, border-color .12s;
     }
-    .fu-eb-row .avatar {
-      width: 34px; height: 34px; border-radius: 50%;
-      background: #093d54; color: #fff;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 12px; font-weight: 600;
+    .fu-afgb-row:hover { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.12); }
+    .fu-afgb-row-icon i.ti {
+      font-size: 16px; color: var(--text-secondary, rgba(255,255,255,.65));
     }
-    .fu-eb-row .avatar.done { background: #059669; }
-    .fu-eb-row .name {
+    .fu-afgb-row-main { min-width: 0; }
+    .fu-afgb-row-main .name {
       font-size: 13.5px; font-weight: 500; color: var(--text-primary, #fff);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .fu-eb-row .sub {
-      font-size: 11.5px; color: var(--text-secondary, rgba(255,255,255,.7));
+    .fu-afgb-row-main .sub {
+      font-size: 11.5px; color: var(--text-secondary, rgba(255,255,255,.65));
       margin-top: 2px;
-      display: flex; gap: 8px; flex-wrap: wrap;
+      display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
     }
-    .fu-eb-row .sub a { color: inherit; text-decoration: none; }
-    .fu-eb-row .sub a:hover { color: var(--text-primary, #fff); text-decoration: underline; }
-    .fu-eb-row .status-badge {
-      display: inline-block; padding: 2px 8px; border-radius: 999px;
-      font-size: 11px; font-weight: 600;
-      background: #e5e7eb; color: #111827;
-      border: 1px solid rgba(0,0,0,0.06);
+    .fu-afgb-row-main .sub .fu-afgb-type {
+      display: inline-block; padding: 1px 6px; border-radius: 6px;
+      background: rgba(255,255,255,0.08); color: rgba(255,255,255,.85);
+      font-size: 10.5px; font-weight: 600; letter-spacing: .3px;
     }
-    .fu-eb-row .status-badge.nieuw       { background: #093d54; color: #fff; }
-    .fu-eb-row .status-badge.benaderd    { background: #ea580c; color: #fff; }
-    .fu-eb-row .status-badge.terugbellen { background: #0d4d69; color: #fff; }
-    .fu-eb-row .status-badge.niet_bereikbaar { background: #4b5563; color: #fff; }
-    .fu-eb-row .status-badge.verlengd    { background: #059669; color: #fff; }
-    .fu-eb-row .status-badge.verloren    { background: #dc2626; color: #fff; }
-    .fu-eb-row .actions { display: flex; gap: 6px; }
-    @media (max-width: 720px) {
-      .fu-eb-row { grid-template-columns: 34px 1fr auto; row-gap: 4px; }
-      .fu-eb-row .status-badge { grid-column: 2 / -1; justify-self: start; }
+    .fu-afgb-badge {
+      display: inline-block; padding: 3px 10px; border-radius: 999px;
+      font-size: 11px; font-weight: 700; letter-spacing: .3px;
+      white-space: nowrap;
+    }
+    .fu-afgb-badge.r-orange  { background: #ea580c; color: #fff; }
+    .fu-afgb-badge.r-gray    { background: #4b5563; color: #fff; }
+    .fu-afgb-badge.r-red     { background: #dc2626; color: #fff; }
+    .fu-afgb-badge.r-darkred { background: #7f1d1d; color: #fff; }
+    .fu-afgb-when { text-align: right; }
+    .fu-afgb-when .k {
+      font-size: 10px; text-transform: uppercase; letter-spacing: .4px;
+      color: var(--text-secondary, rgba(255,255,255,.55));
+    }
+    .fu-afgb-when .v {
+      font-size: 12px; color: var(--text-primary, #fff); font-variant-numeric: tabular-nums;
+    }
+    .fu-afgb-owner {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11.5px; color: var(--text-secondary, rgba(255,255,255,.7));
+    }
+    .fu-afgb-reactivate {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 12px; padding: 6px 10px;
+    }
+    @media (max-width: 900px) {
+      .fu-afgb-row {
+        grid-template-columns: 28px 1fr auto;
+        row-gap: 6px;
+      }
+      .fu-afgb-badge   { grid-column: 2 / 3; justify-self: start; }
+      .fu-afgb-when    { grid-column: 2 / 4; text-align: left; }
+      .fu-afgb-owner   { grid-column: 2 / 3; }
+      .fu-afgb-reactivate { grid-column: 3 / 4; grid-row: 4; }
     }
 
     /* Dashboard */
@@ -2659,10 +2680,10 @@
         <i class="ti ti-chart-bar" aria-hidden="true"></i>
         <span>Dashboard</span>
       </button>
-      <button class="fu-tab fu-tab--primary" data-tab="event-bellijst" role="tab" aria-selected="false">
-        <i class="ti ti-presentation" aria-hidden="true"></i>
-        <span>Event-bellijst</span>
-        <span class="fu-tab-count" id="tab-count-event-bellijst">—</span>
+      <button class="fu-tab fu-tab--primary" data-tab="afgeboekt" role="tab" aria-selected="false">
+        <i class="ti ti-archive" aria-hidden="true"></i>
+        <span>Afgeboekt</span>
+        <span class="fu-tab-count" id="tab-count-afgeboekt">—</span>
       </button>
 
       <!-- Topbar-rechts: voicememo-ronde-knop (verplaatst uit de queue). -->
@@ -3175,16 +3196,17 @@
       </section>
     </div>
 
-    <!-- Event-bellijst-tab: deelnemers eerstvolgende event met bel-actie
-         via de bestaande softphone. Lead wordt lazy aangemaakt via
-         event-followup-to-lead (source='event') zodat de uitkomst-cadans
-         identiek werkt aan de rest van de cockpit. -->
-    <div class="fu-tab-panel" data-panel="event-bellijst" id="panel-event-bellijst">
-      <div class="fu-cockpit-filters" style="flex-direction:row;flex-wrap:wrap;gap:12px;margin-bottom:12px">
-        <div id="eb-eventheader" class="fu-eb-header"><div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div></div>
-        <button class="fu-lead-btn" id="eb-refresh" title="Vernieuwen" style="margin-left:auto"><i class="ti ti-refresh"></i></button>
+    <!-- Afgeboekt-tab: alle negatief afgesloten items (leads +
+         afspraken). Vervangt de vorige Event-bellijst-tab. Endpoint:
+         /api/follow-up-afgeboekt (GET voor lijst + counts, POST voor
+         "opnieuw oppakken"). Klik op rij → detail (lead → belkaart in
+         Werklijst; appointment → detail in Afspraken). -->
+    <div class="fu-tab-panel" data-panel="afgeboekt" id="panel-afgeboekt">
+      <div class="fu-cockpit-filters" style="flex-direction:row;flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center">
+        <div class="fu-afgb-chips" id="afgb-chips" role="tablist"></div>
+        <button class="fu-lead-btn" id="afgb-refresh" title="Vernieuwen" style="margin-left:auto"><i class="ti ti-refresh"></i></button>
       </div>
-      <div id="eb-list"></div>
+      <div id="afgb-list"><div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div></div>
     </div>
 
     <!-- Voicememo-modal (auto-open s'ochtends bij Leads-tab) -->
@@ -4580,7 +4602,7 @@
       if (tabId === 'afspraken')      { loadAfsprakenTab(); }
       if (tabId === 'sluimerpot')     { loadSluimerpotTab(); }
       if (tabId === 'dashboard')      { loadDashboardTab(); }
-      if (tabId === 'event-bellijst') { loadEventBellijstTab(); }
+      if (tabId === 'afgeboekt')      { loadAfgeboektTab(); }
     }
 
     // ── Sales-cockpit (Leads-tab, Fase 1) ────────────────────────────────
@@ -6239,7 +6261,7 @@
       sluimerpot : { source: 'all', items: [] },
       dashboard  : { period: 'today' },
       voicememo  : { leads: [], counts: null, today: null, autoOpenedFor: null },
-      eventBellijst: { event: null, attendees: [], loading: false },
+      afgeboekt   : { items: [], counts: null, filter: 'all', loading: false },
     };
 
     // Gecombineerd datum + tijd voor afspraak-rijen: "Vandaag 17:04",
@@ -6438,178 +6460,178 @@
       </div>`;
     }
 
-    // ── EVENT-BELLIJST-TAB ─────────────────────────────────────────────
-    // Toont de deelnemers van het eerstvolgende aankomende event
-    // (endpoint /api/follow-up-event-bellijst). Bel-actie hergebruikt de
-    // softphone: maakt lazy een event-lead aan via
-    // /api/event-followup-to-lead (source='event') en start dan
-    // _softphoneCallLead met die lead + attendee-telefoon. Uitkomst-panel
-    // uit Fase 2 blijft ongewijzigd — cadans + logging identiek.
-    async function loadEventBellijstTab() {
-      const headEl = document.getElementById('eb-eventheader');
-      const listEl = document.getElementById('eb-list');
-      if (!headEl || !listEl) return;
-      if (_fase3State.eventBellijst.loading) return;
-      _fase3State.eventBellijst.loading = true;
-      headEl.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
-      listEl.innerHTML = '';
+    // ── AFGEBOEKT-TAB ──────────────────────────────────────────────────
+    // Alle negatief afgesloten items uit follow_up_leads
+    // (lead_status IN 'verloren' | 'niet_bereikbaar') en
+    // follow_up_appointments (status IN 'no_show' | 'cancelled'), samen-
+    // gevoegd, gesorteerd op afgeboekt_op DESC, filter per reden, met
+    // "Opnieuw oppakken" om het item terug op de werklijst te zetten.
+    const AFGB_FILTERS = [
+      { key: 'all',             label: 'Alle',           icon: 'ti-archive'      },
+      { key: 'no_show',         label: 'No-show',        icon: 'ti-user-off'     },
+      { key: 'cancelled',       label: 'Geannuleerd',    icon: 'ti-ban'          },
+      { key: 'verloren',        label: 'Geen interesse', icon: 'ti-x'            },
+      { key: 'niet_bereikbaar', label: 'Onbereikbaar',   icon: 'ti-phone-off'    },
+    ];
+    const AFGB_REDEN_META = {
+      no_show         : { label: 'No-show',        cls: 'r-orange' },
+      cancelled       : { label: 'Geannuleerd',    cls: 'r-gray'   },
+      verloren        : { label: 'Geen interesse', cls: 'r-red'    },
+      niet_bereikbaar : { label: 'Onbereikbaar',   cls: 'r-darkred'},
+    };
+
+    async function loadAfgeboektTab() {
+      const listEl = document.getElementById('afgb-list');
+      const chipsEl = document.getElementById('afgb-chips');
+      if (!listEl || !chipsEl) return;
+      if (_fase3State.afgeboekt.loading) return;
+      _fase3State.afgeboekt.loading = true;
+      listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
       try {
-        const r = await window.AgentShared.apiFetch('/api/follow-up-event-bellijst');
+        const filter = _fase3State.afgeboekt.filter || 'all';
+        const r = await window.AgentShared.apiFetch('/api/follow-up-afgeboekt?reden=' + encodeURIComponent(filter));
         const d = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
-        _fase3State.eventBellijst.event     = d.event || null;
-        _fase3State.eventBellijst.attendees = d.attendees || [];
-        const cntEl = document.getElementById('tab-count-event-bellijst');
-        if (cntEl) cntEl.textContent = String(d.event?.attendee_count ?? d.attendees?.length ?? '—');
-        _renderEventBellijst();
+        if (!r.ok) {
+          if (d?.code === 'MIGRATION_REQUIRED') {
+            listEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Migratie vereist voor afgeboekt.</div>';
+            return;
+          }
+          throw new Error(d?.error || 'HTTP ' + r.status);
+        }
+        _fase3State.afgeboekt.items  = d.items  || [];
+        _fase3State.afgeboekt.counts = d.counts || null;
+        const cntEl = document.getElementById('tab-count-afgeboekt');
+        if (cntEl) cntEl.textContent = String(d.counts?.all ?? d.items?.length ?? '—');
+        _renderAfgeboektChips();
+        _renderAfgeboekt();
       } catch (e) {
-        headEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Fout: ' + esc(e.message || '') + '</div>';
+        listEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Fout: ' + esc(e.message || '') + '</div>';
       } finally {
-        _fase3State.eventBellijst.loading = false;
+        _fase3State.afgeboekt.loading = false;
       }
     }
 
-    function _renderEventBellijst() {
-      const headEl = document.getElementById('eb-eventheader');
-      const listEl = document.getElementById('eb-list');
-      if (!headEl || !listEl) return;
-      const ev = _fase3State.eventBellijst.event;
-      const arr = _fase3State.eventBellijst.attendees || [];
-
-      if (!ev) {
-        headEl.innerHTML = '<div class="fu-empty" style="padding:8px 0"><i class="ti ti-calendar-off fu-empty-icon"></i>Geen aankomend event.</div>';
-        listEl.innerHTML = '';
-        return;
-      }
-      // Header: naam + datum + aantal.
-      const dt = ev.starts_at ? new Date(ev.starts_at) : null;
-      const dtLabel = dt && !isNaN(dt.getTime())
-        ? dt.toLocaleDateString('nl-NL', { weekday:'long', day:'2-digit', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit' })
-        : '';
-      headEl.innerHTML = `
-        <div class="fu-eb-header-title"><i class="ti ti-presentation"></i> ${esc(ev.title || 'Event')}</div>
-        <div class="fu-eb-header-sub">
-          ${dtLabel ? '<span><i class="ti ti-calendar"></i> ' + esc(dtLabel) + '</span>' : ''}
-          <span><i class="ti ti-users"></i> ${ev.attendee_count} deelnemer${ev.attendee_count === 1 ? '' : 's'}</span>
-        </div>`;
-
-      if (!arr.length) {
-        listEl.innerHTML = '<div class="fu-eb-empty"><i class="ti ti-users-off"></i>Geen deelnemers voor dit event.</div>';
-        return;
-      }
-      listEl.innerHTML = arr.map((a) => {
-        const initials = _leadInitials(a.name);
-        const status = String(a.lead_status || '').toLowerCase();
-        const avaCls = (status === 'verlengd' || status === 'verloren' || status === 'benaderd') ? 'done' : '';
-        const statusLabel = a.lead_id
-          ? (status === 'nieuw'          ? 'Nieuw'
-           : status === 'benaderd'       ? 'Al benaderd'
-           : status === 'terugbellen'    ? 'Terugbellen'
-           : status === 'niet_bereikbaar'? 'Niet bereikbaar'
-           : status === 'verlengd'       ? 'Verlengd'
-           : status === 'verloren'       ? 'Verloren'
-           : (status || 'Bekend'))
-          : 'Nog niet gebeld';
-        const statusCls = a.lead_id ? status : 'nieuw';
-        const phone = a.phone ? esc(a.phone) : '<span style="opacity:.5">— geen tel —</span>';
-        const email = a.email ? `<a href="mailto:${esc(a.email)}"><i class="ti ti-mail"></i> ${esc(a.email)}</a>` : '';
-        const canCall = !!a.phone;
-        return `<div class="fu-eb-row">
-          <div class="avatar ${avaCls}">${esc(initials)}</div>
-          <div>
-            <div class="name">${esc(a.name)}</div>
-            <div class="sub"><span><i class="ti ti-phone"></i> ${phone}</span>${email ? '<span>·</span>' + email : ''}</div>
-          </div>
-          <span class="status-badge ${esc(statusCls)}">${esc(statusLabel)}</span>
-          <div style="opacity:0"></div>
-          <div class="actions">
-            <button type="button" class="fu-lead-btn primary" data-eb-call="${esc(a.id)}" ${canCall ? '' : 'disabled'} title="${canCall ? 'Bellen via softphone' : 'Geen telefoonnummer'}"><i class="ti ti-phone-call"></i> Bel nu</button>
-          </div>
-        </div>`;
+    function _renderAfgeboektChips() {
+      const chipsEl = document.getElementById('afgb-chips');
+      if (!chipsEl) return;
+      const active = _fase3State.afgeboekt.filter || 'all';
+      const counts = _fase3State.afgeboekt.counts || {};
+      chipsEl.innerHTML = AFGB_FILTERS.map((f) => {
+        const cnt = counts[f.key];
+        const cntSpan = (cnt !== undefined && cnt !== null)
+          ? `<span class="cnt">${Number(cnt) || 0}</span>` : '';
+        const activeCls = f.key === active ? ' active' : '';
+        return `<button type="button" class="fu-afgb-chip${activeCls}" data-afgb-filter="${esc(f.key)}"><i class="ti ${f.icon}"></i> ${esc(f.label)}${cntSpan}</button>`;
       }).join('');
-      listEl.querySelectorAll('[data-eb-call]').forEach((btn) => {
-        btn.addEventListener('click', () => _ebCallAttendee(btn.getAttribute('data-eb-call'), btn));
+      chipsEl.querySelectorAll('[data-afgb-filter]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          _fase3State.afgeboekt.filter = btn.getAttribute('data-afgb-filter') || 'all';
+          loadAfgeboektTab();
+        });
       });
     }
 
-    async function _ebCallAttendee(attendeeId, btnEl) {
-      const attendee = (_fase3State.eventBellijst.attendees || []).find((x) => x.id === attendeeId);
-      if (!attendee) return;
-      if (!attendee.phone) { alert('Deze deelnemer heeft geen telefoonnummer.'); return; }
-      if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="ti ti-loader-2"></i> Voorbereiden…'; }
-
-      // 1) Zorg dat er een event-lead is (lazy aanmaken via bestaande flow).
-      let leadId = attendee.lead_id;
-      if (!leadId) {
-        try {
-          const r = await window.AgentShared.apiFetch('/api/event-followup-to-lead', {
-            method : 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body   : JSON.stringify({ attendee_id: attendeeId }),
-          });
-          const d = await r.json().catch(() => ({}));
-          if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
-          leadId = d.lead_id || null;
-          if (leadId) {
-            attendee.lead_id = leadId;
-            attendee.lead_status = d.lead_status || 'nieuw';
-          }
-        } catch (e) {
-          if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="ti ti-phone-call"></i> Bel nu'; }
-          alert('Kon geen event-lead aanmaken: ' + (e.message || 'onbekend'));
-          return;
-        }
-      }
-
-      // 2) Bel via de softphone. Zonder softphone-registratie (of geen
-      //    lead-id gelukt): fallback = uitkomst-panel + toast.
-      const leadObj = leadId ? {
-        id            : leadId,
-        lead_name     : attendee.name,
-        lead_phone    : attendee.phone,
-        lead_email    : attendee.email,
-        source        : 'event',
-        lead_status   : attendee.lead_status || 'nieuw',
-        lead_kind     : 'call',
-        customer_id   : attendee.customer_id || null,
-      } : null;
-
-      if (!leadObj) {
-        alert('Kan lead niet resolven — probeer opnieuw of gebruik de Werklijst.');
-        if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="ti ti-phone-call"></i> Bel nu'; }
+    function _renderAfgeboekt() {
+      const el = document.getElementById('afgb-list');
+      if (!el) return;
+      const items = _fase3State.afgeboekt.items || [];
+      if (!items.length) {
+        const f = _fase3State.afgeboekt.filter || 'all';
+        const lbl = (AFGB_FILTERS.find((x) => x.key === f)?.label || 'items').toLowerCase();
+        el.innerHTML = `<div class="fu-empty"><i class="ti ti-archive-off fu-empty-icon"></i>Niks afgeboekt bij "${esc(lbl)}".</div>`;
         return;
       }
+      el.innerHTML = items.map((it) => {
+        const meta = AFGB_REDEN_META[it.reden] || { label: it.reden || '—', cls: 'r-gray' };
+        const typeIcon = it.type === 'appointment' ? 'ti-video' : 'ti-phone';
+        const typeLabel = it.type === 'appointment' ? 'Zoom-afspraak' : 'Bel-lead';
+        const when = it.afgeboekt_op ? _fmtHMwithDate(it.afgeboekt_op) : '—';
+        const owner = it.owner_name || '—';
+        return `<div class="fu-afgb-row" data-afgb-open-type="${esc(it.type)}" data-afgb-open-id="${esc(it.id)}">
+          <div class="fu-afgb-row-icon"><i class="ti ${typeIcon}"></i></div>
+          <div class="fu-afgb-row-main">
+            <div class="name">${esc(it.name)}</div>
+            <div class="sub">
+              <span class="fu-afgb-type">${esc(typeLabel)}</span>
+              <span>·</span>
+              <span>${it.phone ? esc(it.phone) : '<span style="opacity:.5">— geen tel —</span>'}</span>
+              ${it.email ? '<span>·</span><span>' + esc(it.email) + '</span>' : ''}
+            </div>
+          </div>
+          <span class="fu-afgb-badge ${esc(meta.cls)}">${esc(meta.label)}</span>
+          <div class="fu-afgb-when">
+            <div class="k">Afgeboekt op</div>
+            <div class="v">${esc(when)}</div>
+          </div>
+          <div class="fu-afgb-owner"><i class="ti ti-user"></i> ${esc(owner)}</div>
+          <button type="button" class="fu-lead-btn fu-afgb-reactivate"
+                  data-afgb-reactivate-type="${esc(it.type)}"
+                  data-afgb-reactivate-id="${esc(it.id)}"
+                  title="Terug op de werklijst zetten">
+            <i class="ti ti-refresh-dot"></i> Opnieuw oppakken
+          </button>
+        </div>`;
+      }).join('');
 
-      // Selecteer de lead in de cockpit-context zodat _softphoneCallLead
-      // + het uitkomst-panel op de juiste lead loggen. We voegen 'm toe
-      // aan _leadsState.items als hij nog niet bestaat en zetten de
-      // selectie; renderLeadDetail wordt door selectLead getriggerd
-      // zodra we de cockpit-tab openen.
-      if (!_leadsState.items.some((x) => x.id === leadObj.id)) {
-        _leadsState.items = [leadObj, ..._leadsState.items];
+      // Klik op rij → detail openen. Reactivate-knop stopt propagation.
+      el.querySelectorAll('.fu-afgb-row').forEach((row) => {
+        row.addEventListener('click', (ev) => {
+          if (ev.target.closest('.fu-afgb-reactivate')) return;
+          const type = row.getAttribute('data-afgb-open-type');
+          const id   = row.getAttribute('data-afgb-open-id');
+          _afgbOpenDetail(type, id);
+        });
+      });
+      el.querySelectorAll('.fu-afgb-reactivate').forEach((btn) => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const type = btn.getAttribute('data-afgb-reactivate-type');
+          const id   = btn.getAttribute('data-afgb-reactivate-id');
+          _afgbReactivate(type, id, btn);
+        });
+      });
+    }
+
+    function _afgbOpenDetail(type, id) {
+      if (!type || !id) return;
+      if (type === 'lead') {
+        // Ga naar Werklijst en selecteer de lead. loadLeadsTab haalt
+        // 'm alleen op als hij niet in de wachtrij zit; anders is de
+        // selectie voldoende om de belkaart te openen.
+        switchTab('leads');
+        setTimeout(() => {
+          try { selectLead(id); } catch (_) {}
+        }, 150);
+        return;
       }
-      _leadsState.selectedId = leadObj.id;
-
-      // Wissel naar Werklijst en open de outcome-panel + start de call.
-      switchTab('leads');
-      // Wacht kort zodat de tab-content is gemount, dan render + bel.
+      // appointment → Afspraken-tab + appointment-detail openen.
+      switchTab('afspraken');
       setTimeout(() => {
-        try { renderLeadDetail(leadObj, { refreshTimeline: true }); } catch (_) {}
-        try {
-          const numEl = document.getElementById('cockpit-number');
-          if (numEl) numEl.value = attendee.phone;
-        } catch (_) {}
-        try { _openOutcomePanel(false); } catch (_) {}
-        if (_softphone && _softphone.available) {
-          _softphoneCallLead(leadObj).catch((e) => {
-            console.error('[event-bellijst] call:', e?.message || e);
-          });
-        } else {
-          alert('Softphone niet actief — uitkomst-panel staat klaar voor handmatige registratie.');
-        }
+        try { _openAppointmentDetail(id); } catch (_) {}
       }, 150);
+    }
 
-      if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="ti ti-phone-call"></i> Bel nu'; }
+    async function _afgbReactivate(type, id, btn) {
+      if (!type || !id) return;
+      const label = type === 'lead' ? 'lead' : 'afspraak';
+      if (!confirm(`Deze ${label} weer op de werklijst zetten?`)) return;
+      if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Bezig…'; }
+      try {
+        const r = await window.AgentShared.apiFetch('/api/follow-up-afgeboekt', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ type, id, action: 'reactivate' }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+        try { window.AgentShared?.showToast?.('Terug op de werklijst.', 'success'); }
+        catch (_) {}
+        try { loadAfgeboektTab(); } catch (_) {}
+        try { loadLeadsTab(); }     catch (_) {}
+      } catch (e) {
+        alert('Opnieuw oppakken mislukt: ' + (e.message || 'onbekend'));
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-refresh-dot"></i> Opnieuw oppakken'; }
+      }
     }
 
     // ── APPOINTMENT-DETAIL (in-cockpit, geen modal) ─────────────────────
@@ -7377,9 +7399,9 @@
       const dbRf = document.getElementById('db-refresh');
       if (dbRf) dbRf.addEventListener('click', () => loadDashboardTab());
 
-      // Event-bellijst refresh
-      const ebRf = document.getElementById('eb-refresh');
-      if (ebRf) ebRf.addEventListener('click', () => loadEventBellijstTab());
+      // Afgeboekt refresh
+      const afgbRf = document.getElementById('afgb-refresh');
+      if (afgbRf) afgbRf.addEventListener('click', () => loadAfgeboektTab());
 
       // Voicememo-modal — handmatig openen + close-knop + acties
       const vmOpen  = document.getElementById('cockpit-voicememo-open');
