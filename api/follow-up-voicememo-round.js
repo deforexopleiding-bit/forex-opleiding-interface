@@ -39,23 +39,57 @@ function todayRange() {
 
 async function fetchTodayZoomAppointments() {
   const { startIso, endIso } = todayRange();
-  // Selecteer alleen kolommen die we zeker weten (voicememo_status +
-  // scheduled_at + basis-lead-info). Zoom-filter via zoom_meeting_id.
-  const COLS = 'id, lead_name, lead_phone, scheduled_at, voicememo_status, zoom_meeting_id, status';
-  const { data, error } = await supabaseAdmin
+  // Status accepteert BEIDE varianten (Engelse 'scheduled' + Nederlandse
+  // 'gepland') zodat we niet op nomenclatuur-verschillen missen. De
+  // zoom-herkenning verzachten we in JS: sommige calls hebben alleen
+  // zoom_join_url, andere alleen zoom_meeting_id. Selecteer beide en
+  // filter client-side (a.zoom_meeting_id || a.zoom_join_url).
+  const COLS_RICH = 'id, lead_name, lead_phone, scheduled_at, voicememo_status, zoom_meeting_id, zoom_join_url, status';
+  const COLS_MID  = 'id, lead_name, lead_phone, scheduled_at, voicememo_status, zoom_meeting_id, status';
+  const COLS_MIN  = 'id, lead_name, lead_phone, scheduled_at, voicememo_status, status';
+
+  const runQuery = (cols) => supabaseAdmin
     .from('follow_up_appointments')
-    .select(COLS)
-    .eq('status', 'gepland')
-    .not('zoom_meeting_id', 'is', null)
+    .select(cols)
+    .in('status', ['scheduled', 'gepland'])
     .gte('scheduled_at', startIso)
     .lte('scheduled_at', endIso)
     .order('scheduled_at', { ascending: true });
-  if (error) {
-    if (error.code === '42P01') { const e = new Error('follow_up_appointments ontbreekt'); e.code = 'MIGRATION_REQUIRED'; throw e; }
-    if (error.code === '42703') { const e = new Error('kolom ontbreekt (voicememo_status/zoom_meeting_id/scheduled_at/status)'); e.code = 'MIGRATION_REQUIRED'; throw e; }
-    throw new Error(error.message);
+
+  let rows = null;
+  let hadZoomCols = true;
+  {
+    const { data, error } = await runQuery(COLS_RICH);
+    if (!error) { rows = data || []; }
+    else if (error.code === '42703') {
+      // Probeer zonder zoom_join_url.
+      const { data: d2, error: e2 } = await runQuery(COLS_MID);
+      if (!e2) { rows = d2 || []; }
+      else if (e2.code === '42703') {
+        // Zowel zoom_meeting_id als zoom_join_url ontbreken → val terug
+        // op alleen status+datum. Zonder Zoom-hint kunnen we niet meer
+        // filteren; behandel alles binnen de dag als kandidaat.
+        const { data: d3, error: e3 } = await runQuery(COLS_MIN);
+        if (e3) {
+          if (e3.code === '42P01') { const e = new Error('follow_up_appointments ontbreekt'); e.code = 'MIGRATION_REQUIRED'; throw e; }
+          throw new Error(e3.message);
+        }
+        rows = d3 || [];
+        hadZoomCols = false;
+      } else {
+        if (e2.code === '42P01') { const e = new Error('follow_up_appointments ontbreekt'); e.code = 'MIGRATION_REQUIRED'; throw e; }
+        throw new Error(e2.message);
+      }
+    } else {
+      if (error.code === '42P01') { const e = new Error('follow_up_appointments ontbreekt'); e.code = 'MIGRATION_REQUIRED'; throw e; }
+      throw new Error(error.message);
+    }
   }
-  return data || [];
+
+  // Zoom-herkenning: minimaal 1 van de twee velden gevuld. Als de
+  // zoom-kolommen niet bestaan, laat alles door (schema-fallback).
+  if (!hadZoomCols) return rows;
+  return rows.filter((a) => !!(a.zoom_meeting_id || a.zoom_join_url));
 }
 
 export default async function handler(req, res) {
