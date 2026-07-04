@@ -2275,13 +2275,17 @@
     <!--   FASE 3 — Afspraken / Sluimerpot / Dashboard tabs        -->
     <!-- ======================================================== -->
 
-    <!-- Afspraken-tab: chronologische lijst van geplande momenten -->
+    <!-- Afspraken-tab: chronologische lijst van geplande momenten
+         (samenvoeging follow_up_leads terugbelafspraken +
+         follow_up_appointments Zoom-calls; GHL blijft de bron voor
+         Zoom, wij lezen alleen). -->
     <div class="fu-tab-panel" data-panel="afspraken" id="panel-afspraken">
       <div class="fu-cockpit-filters" style="flex-direction:row;flex-wrap:wrap;gap:12px;margin-bottom:12px">
         <div class="fu-cockpit-pillgroup" role="group" aria-label="Type">
           <button class="fu-cockpit-pill active" data-af-filter="kind" data-value="all">Alle</button>
           <button class="fu-cockpit-pill" data-af-filter="kind" data-value="zoom">📹 Zoom</button>
           <button class="fu-cockpit-pill" data-af-filter="kind" data-value="bel">📞 Terugbel</button>
+          <button class="fu-cockpit-pill" data-af-filter="kind" data-value="reschedule">💤 Wacht op reschedule</button>
         </div>
         <label class="fu-cockpit-toggle"><input type="checkbox" id="af-mine"> Mijn afspraken</label>
         <button class="fu-lead-btn" id="af-refresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
@@ -5222,13 +5226,21 @@
     }
 
     // ── AFSPRAKEN-TAB ────────────────────────────────────────────────────
+    // Filter-pill 'reschedule' schakelt niet 'kind' maar de view — het
+    // endpoint retourneert dan een aparte lijst van 'wacht_op_reschedule'
+    // appointments. Voor de andere pills (all/zoom/bel) is view=agenda.
     async function loadAfsprakenTab() {
       const listEl = document.getElementById('af-list');
       if (!listEl) return;
       listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
       const s = _fase3State.afspraken;
       const p = new URLSearchParams();
-      if (s.kind !== 'all') p.set('kind', s.kind);
+      const isReschedule = s.kind === 'reschedule';
+      if (isReschedule) {
+        p.set('view', 'reschedule');
+      } else if (s.kind !== 'all') {
+        p.set('kind', s.kind);
+      }
       if (s.mine) p.set('owner', 'me');
       try {
         const r = await window.AgentShared.apiFetch('/api/follow-up-cockpit-agenda?' + p.toString());
@@ -5241,6 +5253,7 @@
           throw new Error(d?.error || 'HTTP ' + r.status);
         }
         _fase3State.afspraken.items = d.items || [];
+        _fase3State.afspraken.viewMode = isReschedule ? 'reschedule' : 'agenda';
         const cntEl = document.getElementById('tab-count-afspraken');
         if (cntEl) cntEl.textContent = String(d.items?.length ?? '—');
         _renderAfspraken();
@@ -5249,60 +5262,56 @@
       }
     }
 
+    function _fmtStatusLabel(status) {
+      const s = String(status || '');
+      return {
+        scheduled           : 'Gepland',
+        gepland             : 'Gepland',
+        wacht_op_reschedule : 'Wacht op reschedule',
+        no_show             : 'No-show',
+        completed           : 'Afgerond',
+        cancelled           : 'Geannuleerd',
+        verwijderd          : 'Verwijderd',
+      }[s] || (s || '');
+    }
+
     function _renderAfspraken() {
       const el = document.getElementById('af-list');
       if (!el) return;
-      const items = _fase3State.afspraken.items || [];
+      const items   = _fase3State.afspraken.items || [];
+      const isRes   = _fase3State.afspraken.viewMode === 'reschedule';
       if (!items.length) {
-        el.innerHTML = '<div class="fu-empty"><i class="ti ti-calendar-off fu-empty-icon"></i>Geen geplande afspraken in deze selectie.</div>';
+        const msg = isRes
+          ? 'Niets wacht op reschedule.'
+          : 'Geen geplande afspraken in deze selectie.';
+        const icon = isRes ? 'ti-alarm-off' : 'ti-calendar-off';
+        el.innerHTML = `<div class="fu-empty"><i class="ti ${icon} fu-empty-icon"></i>${esc(msg)}</div>`;
         return;
       }
       // Groepeer per day-label chronologisch (items zijn al ASC).
       const groups = new Map();
       for (const it of items) {
-        const key = it.terugbel_datum ? it.terugbel_datum.slice(0, 10) : 'onbekend';
+        const dateSrc = it.terugbel_datum || it.scheduled_at || null;
+        const key = dateSrc ? String(dateSrc).slice(0, 10) : 'onbekend';
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(it);
       }
       const html = [...groups.entries()].map(([key, arr]) => {
         const label = key === 'onbekend' ? 'Onbekende datum' : _dayLabel(key + 'T12:00:00');
-        const rows = arr.map((it) => {
-          const isZoom = it.lead_kind === 'zoom';
-          const initials = _leadInitials(it.lead_name);
-          const avaCls = isZoom ? 'kind-zoom' : (it.source === 'event' ? 'src-event' : '');
-          const kindBadge = isZoom
-            ? '<span class="kind-badge zoom">📹 Zoom</span>'
-            : '<span class="kind-badge bel">📞 Terugbel</span>';
-          const owner = it.owner_name
-            ? `<span class="owner"><i class="ti ti-user"></i> ${esc(it.owner_name)}</span>`
-            : `<span class="owner" style="opacity:.6"><i class="ti ti-user-off"></i> —</span>`;
-          const btnLbl = isZoom ? 'Open Zoom' : 'Bel nu';
-          return `<div class="fu-af-row">
-            <div class="time">${_fmtHM(it.terugbel_datum)}</div>
-            <div class="avatar ${avaCls}">${esc(initials)}</div>
-            <div>
-              <div class="name">${esc(it.lead_name || '—')} ${it.is_hot ? '<span class="fu-cockpit-mini-badge hot">🔥</span>' : ''}</div>
-              <div class="sub">${esc(it.lead_phone || '')}${it.lead_email ? ' · ' + esc(it.lead_email) : ''}</div>
-            </div>
-            ${kindBadge}
-            ${owner}
-            <button type="button" class="fu-lead-btn primary" data-af-open="${esc(it.id)}"><i class="ti ${isZoom ? 'ti-video' : 'ti-phone-call'}"></i> ${btnLbl}</button>
-          </div>`;
-        }).join('');
+        const rows = arr.map((it) => _renderAfspraakRow(it, isRes)).join('');
         return `<div class="fu-af-daygroup">
           <div class="fu-af-daygroup-head"><span>${esc(label)}</span><span class="cnt">${arr.length}</span></div>
           ${rows}
         </div>`;
       }).join('');
       el.innerHTML = html;
-      // Klik-handler: open lead in cockpit-tab.
+
+      // Klik-handlers.
+      // 1) data-af-open (lead) → open lead in Werklijst.
       el.querySelectorAll('[data-af-open]').forEach((btn) => {
         btn.addEventListener('click', () => {
           const id = btn.getAttribute('data-af-open');
           switchTab('leads');
-          // Lead-lijst wordt door loadLeadsTab (in switchTab) opnieuw
-          // opgehaald; wacht kort en probeer te selecteren via een polling
-          // fallback als de lead niet direct in de items zit.
           const trySelect = (attempt = 0) => {
             const has = (_leadsState.items || []).some((x) => x.id === id);
             if (has) { selectLead(id); return; }
@@ -5311,6 +5320,67 @@
           setTimeout(() => trySelect(0), 150);
         });
       });
+      // 2) data-af-appt (appointment) → open klassieke afspraak-detail
+      //    (hergebruik bestaande flow follow-up-lead.html?id=<id>).
+      el.querySelectorAll('[data-af-appt]').forEach((a) => {
+        // <a href=...> handelt de navigatie zelf af; geen extra binding.
+      });
+      // 3) data-af-zoom → open Zoom-join-URL in nieuw tabblad (target=_blank).
+    }
+
+    function _renderAfspraakRow(it, isRes) {
+      const isAppt = it.source === 'appointment';
+      const isZoom = String(it.kind || it.lead_kind || 'call') === 'zoom' || isAppt;
+      const initials = _leadInitials(it.lead_name);
+      const avaCls = isZoom ? 'kind-zoom' : (it.source === 'event' ? 'src-event' : '');
+      const kindBadge = isZoom
+        ? '<span class="kind-badge zoom">📹 Zoom</span>'
+        : '<span class="kind-badge bel">📞 Terugbel</span>';
+      const statusLbl = it.status ? _fmtStatusLabel(it.status) : (it.lead_status ? _fmtStatusLabel(it.lead_status) : '');
+      const statusBadge = statusLbl
+        ? `<span class="fu-cockpit-mini-badge" title="Status">${esc(statusLbl)}</span>`
+        : '';
+      // Voicememo-indicatie voor Zoom-appointments.
+      let vmBadge = '';
+      if (isAppt) {
+        vmBadge = it.voicememo_status === 'sent'
+          ? '<span class="fu-cockpit-mini-badge zoom" title="Voicememo verstuurd">✓ voicememo</span>'
+          : '<span class="fu-cockpit-mini-badge" title="Voicememo nog niet verstuurd">○ voicememo</span>';
+      }
+      const owner = it.owner_name
+        ? `<span class="owner"><i class="ti ti-user"></i> ${esc(it.owner_name)}</span>`
+        : `<span class="owner" style="opacity:.6"><i class="ti ti-user-off"></i> —</span>`;
+      const timeSrc = it.terugbel_datum || it.scheduled_at;
+
+      // Actie-kolom: verschilt per type + view.
+      let actionHtml = '';
+      if (isRes) {
+        // Reschedule-rij: subtiele hint naar de klassieke afspraak-detail.
+        actionHtml = `<a class="fu-lead-btn" href="/modules/follow-up-lead.html?id=${esc(it.id)}" title="Open afspraak-detail (klassieke flow)"><i class="ti ti-external-link"></i> Bekijk</a>`;
+      } else if (isAppt) {
+        // Zoom-appointment: primair open Zoom, secundair open afspraak-detail.
+        if (it.zoom_join_url) {
+          actionHtml = `<a class="fu-lead-btn primary" href="${esc(it.zoom_join_url)}" target="_blank" rel="noopener" data-af-zoom><i class="ti ti-video"></i> Open Zoom</a>`;
+        } else {
+          actionHtml = `<a class="fu-lead-btn" href="/modules/follow-up-lead.html?id=${esc(it.id)}" data-af-appt><i class="ti ti-external-link"></i> Bekijk</a>`;
+        }
+      } else {
+        // Lead-terugbelrij: opent in cockpit-Werklijst.
+        actionHtml = `<button type="button" class="fu-lead-btn primary" data-af-open="${esc(it.id)}"><i class="ti ti-phone-call"></i> Bel nu</button>`;
+      }
+
+      return `<div class="fu-af-row">
+        <div class="time">${_fmtHM(timeSrc)}</div>
+        <div class="avatar ${avaCls}">${esc(initials)}</div>
+        <div>
+          <div class="name">${esc(it.lead_name || '—')} ${it.is_hot ? '<span class="fu-cockpit-mini-badge hot">🔥</span>' : ''}</div>
+          <div class="sub">${esc(it.lead_phone || '')}${it.lead_email ? ' · ' + esc(it.lead_email) : ''}</div>
+          ${statusBadge || vmBadge ? `<div class="sub" style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">${statusBadge}${vmBadge}</div>` : ''}
+        </div>
+        ${kindBadge}
+        ${owner}
+        ${actionHtml}
+      </div>`;
     }
 
     // ── SLUIMERPOT-TAB ────────────────────────────────────────────────────

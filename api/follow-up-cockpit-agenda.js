@@ -1,24 +1,127 @@
 // api/follow-up-cockpit-agenda.js
 //
-// GET — chronologische lijst van geplande momenten voor de sales-cockpit
-// Afspraken-tab. Alleen leads met terugbel_datum ingevuld, niet-gesnoozed
-// en niet-afgesloten (verlengd/verloren).
+// GET — chronologische samengevoegde agenda voor de cockpit-Afspraken-tab.
+// Bron: follow_up_leads (bel-terugbelafspraken) + follow_up_appointments
+// (GHL-Zoom-calls, alleen LEZEN — GHL blijft de bron). GHL-poll/webhook
+// blijven ongemoeid. De klassieke Kalender-tab blijft naast deze view
+// bestaan (additief).
 //
 // Query:
-//   ?owner=me|all   (default 'all')
-//   ?kind=zoom|bel|all (default 'all')
-//   ?limit=<n>      (default 500, max 1000)
+//   ?owner=me|all                 (default 'all')
+//   ?kind=zoom|bel|all            (default 'all')
+//   ?view=agenda|reschedule       (default 'agenda')
+//   ?limit=<n>                    (default 500, max 1000)
 //
-// Response:
-//   { items: [{ id, lead_name, lead_phone, lead_email, terugbel_datum,
-//               lead_kind ('zoom'|'bel'), lead_status, owner_id, owner_name,
-//               source, is_hot }] }
-// 42P01/42703 → 501 MIGRATION_REQUIRED.
+// Response ?view=agenda:
+//   { items: [
+//       // lead-terugbelitem:
+//       { source:'lead', id, lead_name, lead_phone, lead_email, terugbel_datum,
+//         lead_kind ('zoom'|'bel'), lead_status, owner_id, owner_name, is_hot },
+//       // appointment (Zoom):
+//       { source:'appointment', id, lead_name, lead_phone, lead_email,
+//         terugbel_datum (=scheduled_at), kind:'zoom', status, owner_id,
+//         owner_name, voicememo_status, zoom_join_url } ]
+//   }
+//
+// Response ?view=reschedule:
+//   { items: [ { source:'appointment', id, lead_name, lead_phone,
+//       scheduled_at, terugbel_datum (=scheduled_at), status:'wacht_op_reschedule',
+//       owner_id, owner_name } ] }
+//
+// 42P01/42703 → fail-soft (lege lijst; blokkeer de andere bron niet).
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+async function fetchLeadRows({ owner, kind, limit, userId, nowIso }) {
+  // ── follow_up_leads: bel-terugbelafspraken ─────────────────────────
+  const RICH_COLS = 'id, source, lead_name, lead_email, lead_phone, lead_status, terugbel_datum, owner_id, is_hot, snoozed_until, lead_kind';
+  const CORE_COLS = 'id, source, lead_name, lead_email, lead_phone, lead_status, terugbel_datum, owner_id';
+
+  const build = (cols) => {
+    let qq = supabaseAdmin.from('follow_up_leads')
+      .select(cols)
+      .not('terugbel_datum', 'is', null)
+      .not('lead_status', 'in', '(verlengd,verloren)')
+      .order('terugbel_datum', { ascending: true })
+      .limit(limit);
+    if (owner === 'me') qq = qq.eq('owner_id', userId);
+    return qq;
+  };
+
+  let hasRich = true;
+  let leadRows = [];
+  {
+    let qq = build(RICH_COLS)
+      .or('snoozed_until.is.null,snoozed_until.lte.' + nowIso);
+    if (kind === 'zoom') qq = qq.eq('lead_kind', 'zoom');
+    else if (kind === 'bel') qq = qq.or('lead_kind.is.null,lead_kind.eq.call');
+    const { data, error } = await qq;
+    if (error && error.code === '42703') {
+      hasRich = false;
+      const { data: d2, error: e2 } = await build(CORE_COLS);
+      if (e2) {
+        if (e2.code === '42P01') return { leadRows: [], hasRich: false };
+        throw new Error(e2.message);
+      }
+      leadRows = d2 || [];
+    } else if (error) {
+      if (error.code === '42P01') return { leadRows: [], hasRich: false };
+      throw new Error(error.message);
+    } else {
+      leadRows = data || [];
+    }
+  }
+  return { leadRows, hasRich };
+}
+
+async function fetchAppointmentRows({ owner, kind, statusList, limit, userId }) {
+  // ── follow_up_appointments: GHL Zoom-calls ────────────────────────
+  // We willen zoom_meeting_id + zoom_join_url meenemen — als 42703 op
+  // die kolommen, val terug op basis-set. Kind-filter: 'bel' →
+  // appointments zijn per definitie geen bel-lead, dus lege set.
+  if (kind === 'bel') return [];
+
+  const RICH_COLS = 'id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id';
+  const MID_COLS  = 'id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, zoom_join_url, owner_id';
+  const MIN_COLS  = 'id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, owner_id';
+
+  const build = (cols) => {
+    let qq = supabaseAdmin.from('follow_up_appointments')
+      .select(cols)
+      .in('status', statusList)
+      .not('scheduled_at', 'is', null)
+      .order('scheduled_at', { ascending: true })
+      .limit(limit);
+    if (owner === 'me') qq = qq.eq('owner_id', userId);
+    return qq;
+  };
+
+  const tryCols = async (cols) => {
+    const { data, error } = await build(cols);
+    if (error) {
+      if (error.code === '42P01') return { rows: null, err: 'MISSING_TABLE' };
+      if (error.code === '42703') return { rows: null, err: '42703' };
+      throw new Error(error.message);
+    }
+    return { rows: data || [], err: null };
+  };
+
+  let r = await tryCols(RICH_COLS);
+  if (r.err === '42703') r = await tryCols(MID_COLS);
+  if (r.err === '42703') r = await tryCols(MIN_COLS);
+  if (r.err === 'MISSING_TABLE' || r.err === '42703') return [];
+  return r.rows || [];
+}
+
+async function lookupOwnerNames(ownerIds) {
+  const map = {};
+  if (!ownerIds.length) return map;
+  const { data: profs } = await supabaseAdmin
+    .from('profiles').select('id, full_name').in('id', ownerIds);
+  for (const p of (profs || [])) map[p.id] = p.full_name;
+  return map;
+}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -36,74 +139,95 @@ export default async function handler(req, res) {
   const q     = req.query || {};
   const owner = ['me', 'all'].includes(q.owner) ? q.owner : 'all';
   const kind  = ['zoom', 'bel', 'all'].includes(q.kind) ? q.kind : 'all';
+  const view  = ['agenda', 'reschedule'].includes(q.view) ? q.view : 'agenda';
   let limit   = Number(q.limit) || 500;
   limit = Math.max(1, Math.min(1000, Math.floor(limit)));
 
   try {
     const nowIso = new Date().toISOString();
-    const RICH_COLS = 'id, source, lead_name, lead_email, lead_phone, lead_status, terugbel_datum, owner_id, is_hot, snoozed_until, lead_kind';
-    const CORE_COLS = 'id, source, lead_name, lead_email, lead_phone, lead_status, terugbel_datum, owner_id';
 
-    const build = (cols) => {
-      let qq = supabaseAdmin.from('follow_up_leads')
-        .select(cols)
-        .not('terugbel_datum', 'is', null)
-        .not('lead_status', 'in', '(verlengd,verloren)')
-        .order('terugbel_datum', { ascending: true })
-        .limit(limit);
-      if (owner === 'me') qq = qq.eq('owner_id', user.id);
-      return qq;
-    };
-
-    let rows = [];
-    let hasRich = true;
-    {
-      let qq = build(RICH_COLS);
-      // Snoozed uitsluiten alleen zinvol als kolom bestaat.
-      qq = qq.or('snoozed_until.is.null,snoozed_until.lte.' + nowIso);
-      if (kind === 'zoom') qq = qq.eq('lead_kind', 'zoom');
-      else if (kind === 'bel') qq = qq.or('lead_kind.is.null,lead_kind.eq.call');
-      const { data, error } = await qq;
-      if (error && error.code === '42703') {
-        hasRich = false;
-        const { data: d2, error: e2 } = await build(CORE_COLS);
-        if (e2) {
-          if (e2.code === '42P01') return res.status(501).json({ error: 'Tabel follow_up_leads ontbreekt', code: 'MIGRATION_REQUIRED' });
-          throw new Error(e2.message);
-        }
-        rows = d2 || [];
-      } else if (error) {
-        if (error.code === '42P01') return res.status(501).json({ error: 'Tabel follow_up_leads ontbreekt', code: 'MIGRATION_REQUIRED' });
-        throw new Error(error.message);
-      } else {
-        rows = data || [];
-      }
+    // ── ?view=reschedule ─────────────────────────────────────────────
+    if (view === 'reschedule') {
+      const rows = await fetchAppointmentRows({
+        owner, kind: 'zoom', statusList: ['wacht_op_reschedule'], limit, userId: user.id,
+      });
+      const ownerIds = [...new Set(rows.map((r) => r.owner_id).filter(Boolean))];
+      const nameById = await lookupOwnerNames(ownerIds);
+      const items = rows.map((r) => ({
+        source        : 'appointment',
+        id            : r.id,
+        lead_name     : r.lead_name,
+        lead_phone    : r.lead_phone,
+        lead_email    : r.lead_email,
+        scheduled_at  : r.scheduled_at,
+        terugbel_datum: r.scheduled_at,     // alias voor UI-consistentie
+        kind          : 'zoom',
+        lead_kind     : 'zoom',
+        status        : r.status,
+        owner_id      : r.owner_id,
+        owner_name    : r.owner_id ? (nameById[r.owner_id] || null) : null,
+      }));
+      return res.status(200).json({ items });
     }
 
-    // Owner-naam lookup.
-    const ownerIds = [...new Set(rows.map((r) => r.owner_id).filter(Boolean))];
-    const ownerNameById = {};
-    if (ownerIds.length) {
-      const { data: profs } = await supabaseAdmin
-        .from('profiles').select('id, full_name').in('id', ownerIds);
-      for (const p of (profs || [])) ownerNameById[p.id] = p.full_name;
-    }
+    // ── ?view=agenda: samengevoegde chronologische lijst ─────────────
+    const [leadFetch, apptRows] = await Promise.all([
+      fetchLeadRows({ owner, kind, limit, userId: user.id, nowIso })
+        .catch((e) => { console.warn('[agenda] leads:', e?.message); return { leadRows: [], hasRich: false }; }),
+      fetchAppointmentRows({
+        owner, kind, statusList: ['scheduled', 'gepland'], limit, userId: user.id,
+      }).catch((e) => { console.warn('[agenda] appts:', e?.message); return []; }),
+    ]);
+    const leadRows = leadFetch.leadRows || [];
+    const hasRich  = leadFetch.hasRich;
 
-    const items = rows.map((r) => {
+    // Owner-namen — één keer voor beide bronnen.
+    const ownerIds = [...new Set([
+      ...leadRows.map((r) => r.owner_id),
+      ...apptRows.map((r) => r.owner_id),
+    ].filter(Boolean))];
+    const nameById = await lookupOwnerNames(ownerIds);
+
+    const leadItems = leadRows.map((r) => {
       const isZoom = hasRich ? (String(r.lead_kind || 'call') === 'zoom') : false;
       return {
-        id             : r.id,
-        source         : r.source,
-        lead_name      : r.lead_name,
-        lead_phone     : r.lead_phone,
-        lead_email     : r.lead_email,
-        terugbel_datum : r.terugbel_datum,
-        lead_status    : r.lead_status,
-        owner_id       : r.owner_id,
-        owner_name     : r.owner_id ? (ownerNameById[r.owner_id] || null) : null,
-        lead_kind      : isZoom ? 'zoom' : 'bel',
-        is_hot         : hasRich ? (r.is_hot === true) : false,
+        source        : 'lead',
+        id            : r.id,
+        lead_name     : r.lead_name,
+        lead_phone    : r.lead_phone,
+        lead_email    : r.lead_email,
+        terugbel_datum: r.terugbel_datum,
+        lead_kind     : isZoom ? 'zoom' : 'bel',
+        kind          : isZoom ? 'zoom' : 'bel',
+        lead_status   : r.lead_status,
+        owner_id      : r.owner_id,
+        owner_name    : r.owner_id ? (nameById[r.owner_id] || null) : null,
+        is_hot        : hasRich ? (r.is_hot === true) : false,
       };
+    });
+
+    const apptItems = apptRows.map((r) => ({
+      source          : 'appointment',
+      id              : r.id,
+      lead_name       : r.lead_name,
+      lead_phone      : r.lead_phone,
+      lead_email      : r.lead_email,
+      scheduled_at    : r.scheduled_at,
+      terugbel_datum  : r.scheduled_at,     // alias voor UI
+      kind            : 'zoom',
+      lead_kind       : 'zoom',
+      status          : r.status,
+      owner_id        : r.owner_id,
+      owner_name      : r.owner_id ? (nameById[r.owner_id] || null) : null,
+      voicememo_status: r.voicememo_status || null,
+      zoom_join_url   : r.zoom_join_url || null,
+    }));
+
+    // Merge + chronologisch sorteren op terugbel_datum (scheduled_at).
+    const items = [...leadItems, ...apptItems].sort((a, b) => {
+      const ta = a.terugbel_datum ? Date.parse(a.terugbel_datum) : Infinity;
+      const tb = b.terugbel_datum ? Date.parse(b.terugbel_datum) : Infinity;
+      return ta - tb;
     });
 
     return res.status(200).json({ items });
