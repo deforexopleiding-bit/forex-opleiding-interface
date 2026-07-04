@@ -13,9 +13,11 @@
 // (HTTP 200 zodat de UI niet breekt). Token wordt NOOIT in response of
 // logs opgenomen — alleen als Authorization-header naar GHL.
 
-import { createUserClient } from './supabase.js';
+import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import fetch from 'node-fetch';
+
+const ADMIN_ROLES = new Set(['super_admin', 'admin', 'manager']);
 
 const GHL_BASE    = 'https://services.leadconnectorhq.com';
 const GHL_VERSION = '2021-04-15';
@@ -109,14 +111,21 @@ async function fetchGhlFreeSlots({ calendarId, token, startMs, endMs }) {
     },
   });
 
+  // Path + query zonder host (host bevat geen secret, maar path+query
+  // is genoeg voor debug — en we mixen 'm dus nooit met de token die
+  // alleen in de Authorization-header zit).
+  const requestPathQuery = url.pathname + url.search;
+
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     const err = new Error(`GHL free-slots ${res.status}`);
-    err.ghlStatus = res.status;
-    err.ghlBody   = (body || '').slice(0, 200);
+    err.ghlStatus       = res.status;
+    err.ghlBody         = (body || '').slice(0, 200);
+    err.requestPathQuery = requestPathQuery;
     throw err;
   }
-  return await res.json();
+  const raw = await res.json();
+  return { raw, status: res.status, requestPathQuery };
 }
 
 export default async function handler(req, res) {
@@ -171,25 +180,64 @@ export default async function handler(req, res) {
     });
   }
 
+  // ?debug=1 mag alleen door super_admin/admin/manager. Anders wordt de
+  // flag stil genegeerd (payload identiek aan de gewone response).
+  const debugRequested = String(q.debug || '') === '1';
+  let debugAllowed = false;
+  if (debugRequested) {
+    try {
+      const { data: prof } = await supabaseAdmin
+        .from('profiles').select('role').eq('id', user.id).maybeSingle();
+      debugAllowed = ADMIN_ROLES.has(String(prof?.role || '').toLowerCase());
+    } catch (e) {
+      // Fail-soft: rol-lookup faalt → debug niet toestaan.
+      console.warn('[ghl-free-slots] role lookup for debug:', e?.message || e);
+      debugAllowed = false;
+    }
+  }
+
   try {
-    const raw = await fetchGhlFreeSlots({ calendarId, token, startMs, endMs });
+    const { raw, status: ghlStatus, requestPathQuery } = await fetchGhlFreeSlots({ calendarId, token, startMs, endMs });
     const slots = normalizeGhlSlots(raw);
-    return res.status(200).json({
+    // Ook bij 200 loggen: helpt om te zien wanneer GHL wel/geen slots
+    // meestuurt zonder DevTools open te hoeven. GEEN token in de log.
+    const rawKeys = (raw && typeof raw === 'object') ? Object.keys(raw) : [];
+    console.log('[ghl-free-slots] ok status=' + ghlStatus + ' keys=' + JSON.stringify(rawKeys.slice(0, 20)) + ' slotcount=' + slots.reduce((n, d) => n + (d.times?.length || 0), 0));
+
+    const payload = {
       slots,
       timezone: 'Europe/Amsterdam',
       window  : { startDate, endDate },
-    });
+    };
+    if (debugAllowed) {
+      payload.debug = {
+        requestUrl  : requestPathQuery,   // path+query only, geen host of secret
+        ghlStatus,
+        ghlRawKeys  : rawKeys,
+        ghlRawSample: JSON.stringify(raw).slice(0, 1500),
+      };
+    }
+    return res.status(200).json(payload);
   } catch (e) {
     // Log status/body maar NIET het token.
     console.warn('[ghl-free-slots] fetch faalde', {
       status: e?.ghlStatus || 'unknown',
       body  : e?.ghlBody   || String(e?.message || '').slice(0, 200),
     });
-    return res.status(200).json({
+    const payload = {
       slots    : [],
       timezone : 'Europe/Amsterdam',
       window   : { startDate, endDate },
       error    : 'onbeschikbaar',
-    });
+    };
+    if (debugAllowed) {
+      payload.debug = {
+        requestUrl  : e?.requestPathQuery || null,
+        ghlStatus   : e?.ghlStatus || null,
+        ghlRawKeys  : [],
+        ghlRawSample: (e?.ghlBody || String(e?.message || '')).slice(0, 1500),
+      };
+    }
+    return res.status(200).json(payload);
   }
 }
