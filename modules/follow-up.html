@@ -1146,6 +1146,9 @@
       box-shadow: 0 12px 32px rgba(0,0,0,0.4);
       display: flex; flex-direction: column;
     }
+    /* HTML [hidden] moet display:flex overrulen — anders staat het menu
+       altijd open ongeacht menu.hidden = true. */
+    .fu-callcard-menu[hidden] { display: none !important; }
     .fu-callcard-menu button {
       background: transparent; border: none; color: #fff;
       text-align: left; padding: 8px 10px; border-radius: 6px;
@@ -1984,7 +1987,7 @@
             <div class="fu-callcard" id="cockpit-callcard">
               <div class="fu-callcard-top">
                 <div class="fu-callcard-label"><i class="ti ti-phone"></i> Uitbellen via</div>
-                <select class="fu-callcard-voys" id="cockpit-voys" title="Voys-nummer" disabled>
+                <select class="fu-callcard-voys" id="cockpit-voys" title="Voys-nummer (welk nummer zien we uitbellen)">
                   <option value="">Voys · standaard</option>
                 </select>
               </div>
@@ -4176,6 +4179,108 @@
       if (btn) btn.setAttribute('aria-expanded', String(!!show));
     }
 
+    // ── Voys click-to-call koppeling ────────────────────────────────────
+    // Caller-ID-lijst en configured-vlag worden lazy geladen uit
+    // /api/voys-config (retourneert alleen publieke nummers, geen
+    // secrets). De gekozen caller-ID wordt in-memory bewaard per
+    // pagina-load zodat sales niet elke keer opnieuw hoeft te kiezen.
+    const _voysState = {
+      loaded          : false,
+      configured      : false,
+      callerIds       : [],
+      selectedCallerId: null,
+    };
+
+    async function _loadVoysConfig() {
+      if (_voysState.loaded) return _voysState;
+      _voysState.loaded = true;
+      try {
+        const r = await window.AgentShared.apiFetch('/api/voys-config');
+        const d = await r.json().catch(() => ({}));
+        if (r.ok) {
+          _voysState.callerIds  = Array.isArray(d.caller_ids) ? d.caller_ids : [];
+          _voysState.configured = !!d.configured;
+        }
+      } catch (_) { /* fail-soft */ }
+      _renderVoysSelect();
+      return _voysState;
+    }
+
+    function _renderVoysSelect() {
+      const sel = document.getElementById('cockpit-voys');
+      if (!sel) return;
+      // Bewaar bestaande selectie voordat we opnieuw vullen.
+      const prev = _voysState.selectedCallerId || sel.value || '';
+      sel.innerHTML = '';
+      const defOpt = document.createElement('option');
+      defOpt.value = '';
+      defOpt.textContent = 'Voys · standaard';
+      sel.appendChild(defOpt);
+      for (const n of _voysState.callerIds) {
+        const opt = document.createElement('option');
+        opt.value = n;
+        opt.textContent = n;
+        sel.appendChild(opt);
+      }
+      // Herstel keuze indien geldig, anders standaard.
+      if (prev && _voysState.callerIds.includes(prev)) {
+        sel.value = prev;
+        _voysState.selectedCallerId = prev;
+      } else {
+        sel.value = '';
+        _voysState.selectedCallerId = null;
+      }
+      // Select mag klikbaar zijn zodat sales kan wisselen; bij lege
+      // caller_ids blijft alleen "standaard" beschikbaar, wat prima is.
+      sel.disabled = false;
+    }
+
+    async function _voysCallLead(it, btnEl) {
+      const toNumber = _currentCallNumber();
+      if (!toNumber) { alert('Vul eerst een telefoonnummer in.'); return; }
+      // Zorg dat config geladen is (best-effort — call werkt ook zonder).
+      if (!_voysState.loaded) { await _loadVoysConfig(); }
+
+      const callLabel = document.getElementById('cockpit-call-label');
+      const oldLabel  = callLabel ? callLabel.innerHTML : 'Bel nu';
+      if (btnEl) btnEl.setAttribute('aria-disabled', 'true');
+      if (callLabel) callLabel.textContent = 'Bellen…';
+
+      try {
+        const body = {
+          lead_id    : it.id,
+          to_number  : toNumber,
+          from_number: _voysState.selectedCallerId || '',
+        };
+        const r = await window.AgentShared.apiFetch('/api/voys-call', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify(body),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.ok) {
+          alert('Je webphone gaat over — neem op om door te verbinden.');
+        } else if (r.status === 501 || d?.code === 'VOYS_NOT_CONFIGURED') {
+          alert('Voys nog niet gekoppeld (configuratie ontbreekt). Uitkomst-panel staat klaar voor handmatige registratie.');
+        } else {
+          console.error('[voys-call] fail:', {
+            http_status: r.status,
+            voys_status: d?.voys_status,
+            voys_body  : d?.voys_body,
+            auth_style : d?.auth_style,
+            body_style : d?.body_style,
+          });
+          alert('Bellen via Voys mislukt (zie console). Uitkomst-panel staat klaar voor handmatige registratie.');
+        }
+      } catch (e) {
+        console.error('[voys-call] network error:', e?.message || e);
+        alert('Bellen via Voys mislukt (netwerk). Uitkomst-panel staat klaar voor handmatige registratie.');
+      } finally {
+        if (btnEl) btnEl.setAttribute('aria-disabled', 'false');
+        if (callLabel) callLabel.innerHTML = oldLabel || 'Bel nu';
+      }
+    }
+
     // Lees het HUIDIGE nummer uit de belkaart-input. Sales kan het
     // ad-hoc bewerken (bv. mobiel i.p.v. vast); dat overschrijft niets
     // in de DB — puur voor deze poging. Strip spaties/haakjes/streepjes
@@ -4281,13 +4386,22 @@
       const brBtn = document.getElementById('cockpit-belronde');
       if (brBtn) brBtn.addEventListener('click', _toggleBelronde);
 
-      // Belknop → gebruik het HUIDIGE nummer uit de belkaart-input
-      // (sales mag het ad-hoc aanpassen zonder de lead te muteren).
-      // Bel-modus: preventDefault + open OS-dialer met het bewerkte
-      // nummer + uitkomst-panel meteen open. Zoom-modus: preventDefault +
-      // alleen panel. Leeg nummer → nette melding, geen call.
+      // Voys caller-ID-select: onthoud gekozen nummer (in-memory) +
+      // lazy config-load bij eerste render.
+      const voysSel = document.getElementById('cockpit-voys');
+      if (voysSel) voysSel.addEventListener('change', () => {
+        _voysState.selectedCallerId = voysSel.value || null;
+      });
+      _loadVoysConfig();
+
+      // Belknop → Voys click-to-call (bel-modus) of uitkomst-panel
+      // (zoom-modus). Sales bewerkt eventueel het nummer in de belkaart-
+      // input ad-hoc; _voysCallLead leest die waarde. Als Voys niet
+      // geconfigureerd is toont _voysCallLead een nette melding en het
+      // uitkomst-panel blijft als fallback beschikbaar zodat sales de
+      // outcome alsnog kan loggen.
       const callBtn = document.getElementById('cockpit-call');
-      if (callBtn) callBtn.addEventListener('click', (e) => {
+      if (callBtn) callBtn.addEventListener('click', async (e) => {
         const mode = callBtn.dataset.mode;
         if (mode === 'none') { e.preventDefault(); return; }
         e.preventDefault();
@@ -4295,11 +4409,12 @@
         if (!it) return;
         const isZoom = String(it.lead_kind || 'call') === 'zoom';
         if (isZoom) { _openOutcomePanel(true); return; }
-        // Bel-modus.
+        // Bel-modus: eerst leeg-check zodat we geen backend-roundtrip
+        // doen voor een lege input, dan panel open + Voys-call.
         const toNumber = _currentCallNumber();
         if (!toNumber) { alert('Vul eerst een telefoonnummer in.'); return; }
         _openOutcomePanel(false);
-        try { window.location.href = 'tel:' + toNumber; } catch (_) { /* fail-soft */ }
+        await _voysCallLead(it, callBtn);
       });
 
       // Uitkomst-panel: sluiten
