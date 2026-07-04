@@ -25,9 +25,64 @@
       --fg: var(--text-primary);
       --muted: var(--text-secondary);
       --card-bg: var(--surface-card);
+
+      /* ── COCKPIT MOCKUP TOKENS ──────────────────────────────────── */
+      --card:#ffffff;
+      --paper:#f4f6f8;
+      --ink:#093d54;
+      --ink-2:#0d5470;
+      --ink-3:#12333f;
+      --text:#12222c;
+      --line:#e2e8ee;
+      --line-2:#eef2f5;
+      --muted-2:#5c7180;
+      --muted-3:#8a9aa6;
+      --radius:14px;
+      --radius-sm:9px;
+      --shadow: 0 1px 2px rgba(9,61,84,.06), 0 8px 24px rgba(9,61,84,.06);
+      --shadow-lg: 0 8px 40px rgba(9,61,84,.14);
+      --ok:#1f9d6b;   --ok-soft:#e7f6ef;
+      --dang:#d13b3b; --dang-soft:#fbe9e9;
+      --warn:#c98a12; --warn-soft:#fbf1dd;
+      --info:#2f6fb0; --info-soft:#e8f0f8;
+      --hot:#e8622c;  --hot-soft:#fdeee7;
+      --wa:#25a35a;   --wa-soft:#e4f6ec;
+      --zoom:#2f6fb0; --zoom-soft:#e8f0f8;
+      --retention:#7a55c8; --retention-soft:#efe9fb;
+      --event:#c8557a;      --event-soft:#fbe9f0;
+      --followup:#0d7a8f;   --followup-soft:#e2f2f5;
     }
 
-    .main-content { margin-left: var(--sidebar-w, 220px); min-height: 100vh; padding: 28px 28px 64px; max-width: 1200px; position: relative; z-index: 1; }
+    /* ── Oude schil verbergen (mockup-switchover) ─────────────────
+       De page-header, oude KPI-balk en overdue-topbar horen niet
+       meer in het cockpit-model. Ze blijven in de HTML (zodat andere
+       code / RBAC-hooks niks kapot maken) maar zijn onzichtbaar. */
+    .main-content > .page-header,
+    #fu-overdue-topbar,
+    #fu-metrics-container { display: none !important; }
+    /* Klassieke tab-strip: knoppen weg uit de nav, panels blijven
+       reachable (bv. reschedule → follow-up-lead.html blijft werken
+       want dat is een aparte pagina, geen panel). */
+    .fu-tab--legacy { display: none !important; }
+    .fu-tabs-divider, .fu-tabs-legacy-label { display: none !important; }
+    /* Legacy panels: onzichtbaar tenzij een deep-link ze forceert
+       (via ?tab=vandaag/kalender/etc). Cockpit-panels blijven
+       ongewijzigd. */
+    .fu-tab-panel[data-panel="vandaag"],
+    .fu-tab-panel[data-panel="open-acties"],
+    .fu-tab-panel[data-panel="opvolging"],
+    .fu-tab-panel[data-panel="archief"],
+    .fu-tab-panel[data-panel="event-followups"],
+    .fu-tab-panel[data-panel="kalender"] { display: none !important; }
+    /* …tenzij ze actief zijn (deep-link) — dan tonen we ze wel. */
+    .fu-tab-panel.active[data-panel="vandaag"],
+    .fu-tab-panel.active[data-panel="open-acties"],
+    .fu-tab-panel.active[data-panel="opvolging"],
+    .fu-tab-panel.active[data-panel="archief"],
+    .fu-tab-panel.active[data-panel="event-followups"],
+    .fu-tab-panel.active[data-panel="kalender"] { display: block !important; }
+
+    .main-content { margin-left: var(--sidebar-w, 220px); min-height: 100vh; padding: 20px 28px 64px; max-width: 1280px; position: relative; z-index: 1; }
 
     .fu-metrics-row { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; margin: 0 0 28px; }
     @media (max-width: 720px) { .fu-metrics-row { grid-template-columns: 1fr; } }
@@ -1862,6 +1917,530 @@
       color: var(--text-tertiary);
       padding: 24px;
     }
+
+    /* ═══════════════════════════════════════════════════════════════
+       MOCKUP SWITCHOVER — cockpit tot in de puntjes
+       ═══════════════════════════════════════════════════════════════
+       Overschrijft eerder gedefinieerde .fu-tabs, .fu-tab, .fu-cockpit-*,
+       .fu-callcard-* etc. met de mockup-tokens. Volgorde-cascade laat
+       deze regels winnen. Alle element-ID's en JS-handlers blijven
+       ongewijzigd — dit is puur presentatie/structuur. */
+
+    /* ── TOPBAR ─────────────────────────────────────────────────── */
+    .fu-tabs {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--ink);
+      color: #fff;
+      border: 0;
+      border-radius: var(--radius);
+      padding: 10px 16px;
+      margin: 0 0 22px;
+      min-height: 58px;
+      box-shadow: var(--shadow);
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: none;
+    }
+    .fu-tabs::-webkit-scrollbar { display: none; }
+    .fu-tab {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 8px 14px;
+      font-size: 14px; font-weight: 600;
+      color: #bcd6e2;
+      background: transparent;
+      border: none; border-radius: 8px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background .15s, color .15s;
+      white-space: nowrap;
+    }
+    .fu-tab:hover { background: rgba(255,255,255,.07); color: #fff; }
+    .fu-tab.active {
+      color: #fff !important;
+      background: rgba(255,255,255,.13);
+      border-bottom-color: transparent !important;
+    }
+    .fu-tab.active::after { display: none !important; }
+    .fu-tab .ti { font-size: 15px; }
+    .fu-tab .fu-tab-count {
+      background: var(--hot); color: #fff;
+      border-radius: 20px;
+      padding: 1px 8px;
+      font-size: 10px; font-weight: 800;
+      letter-spacing: .3px;
+    }
+    .fu-tab.active .fu-tab-count { background: var(--hot); color: #fff; }
+    .fu-tab-count.urgent { background: var(--hot); color: #fff; }
+    /* Primary/legacy modifiers verliezen hun eigen styling — mockup is
+       vlak en gelijk. Legacy is al hidden via de switchover-blok. */
+    .fu-tab--primary { padding: 8px 14px; font-size: 14px; font-weight: 600; }
+    .fu-tab--primary.active { background: rgba(255,255,255,.13); color: #fff; }
+    .fu-tab--primary.active::after, .fu-tab--primary.active::before { display: none !important; }
+
+    /* ── PANELS: witte kaarten met mockup-radius/shadow ──────────── */
+    .fu-tab-panel { background: transparent; }
+
+    /* ── WERKLIJST — split-screen kaartjes ──────────────────────── */
+    .fu-cockpit {
+      display: grid;
+      grid-template-columns: 390px 1fr;
+      gap: 22px;
+      align-items: start;
+    }
+    .fu-cockpit-list {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 16px;
+      box-shadow: var(--shadow);
+      max-height: calc(100vh - 140px);
+      overflow-y: auto;
+      color: var(--text);
+    }
+
+    /* Filter-chips */
+    .fu-cockpit-pill {
+      appearance: none;
+      background: #fff; color: var(--muted-2);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 5px 11px;
+      font-size: 12.5px; font-weight: 600;
+      cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .fu-cockpit-pill:hover { border-color: #c3d3dd; color: var(--text); }
+    .fu-cockpit-pill.active {
+      background: var(--ink); color: #fff; border-color: var(--ink);
+    }
+    .fu-cockpit-toggle { color: var(--muted-2); }
+    .fu-cockpit-toggle input { accent-color: var(--ink); }
+
+    /* Summary cells */
+    .fu-cockpit-summary {
+      background: var(--paper);
+      border-radius: var(--radius-sm);
+      padding: 10px;
+    }
+    .fu-cockpit-summary-cell .n { color: var(--text); font-weight: 700; }
+    .fu-cockpit-summary-cell .l { color: var(--muted-2); }
+
+    /* Bucket-labels */
+    .fu-cockpit-bucket-head {
+      font-size: 11px; font-weight: 700; letter-spacing: .7px;
+      color: var(--muted-3);
+      padding: 12px 4px 6px;
+      text-transform: uppercase;
+    }
+    .fu-cockpit-bucket-head .cnt {
+      background: var(--paper); color: var(--muted-2);
+      border-radius: 20px;
+    }
+    .fu-cockpit-bucket.hot .fu-cockpit-bucket-head    { color: var(--hot); }
+    .fu-cockpit-bucket.telaat .fu-cockpit-bucket-head { color: var(--dang); }
+    .fu-cockpit-bucket.vandaag .fu-cockpit-bucket-head{ color: var(--warn); }
+    .fu-cockpit-bucket.week .fu-cockpit-bucket-head   { color: var(--muted-2); }
+
+    /* Lead-card */
+    .fu-cockpit-leadcard {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 11px 12px;
+      color: var(--text);
+      transition: border-color .15s, box-shadow .15s, transform .05s;
+    }
+    .fu-cockpit-leadcard:hover {
+      background: #fff;
+      border-color: #c3d3dd;
+      box-shadow: var(--shadow);
+    }
+    .fu-cockpit-leadcard.active {
+      border-color: var(--ink);
+      box-shadow: 0 0 0 3px rgba(9,61,84,.12), var(--shadow);
+    }
+    .fu-cockpit-leadavatar {
+      width: 34px; height: 34px;
+      border-radius: var(--radius-sm);
+      background: var(--ink); color: #fff;
+    }
+    .fu-cockpit-leadavatar.src-retention { background: var(--retention); }
+    .fu-cockpit-leadavatar.src-event     { background: var(--event); }
+    .fu-cockpit-leadavatar.kind-zoom     { background: var(--zoom); }
+    .fu-cockpit-leadcard-nm { font-size: 13.5px; font-weight: 700; color: var(--text); }
+    .fu-cockpit-leadcard-sub { font-size: 12px; color: var(--muted-2); }
+
+    /* Badges — leesbare mockup-stijl (soft-bg + volle tekstkleur) */
+    .fu-cockpit-mini-badge {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 10.5px; font-weight: 800; letter-spacing: .2px;
+      padding: 2px 7px; border-radius: 6px;
+      text-transform: uppercase;
+      background: var(--paper); color: var(--text);
+      border: 0;
+    }
+    .fu-cockpit-mini-badge.hot       { background: var(--hot-soft);        color: var(--hot); }
+    .fu-cockpit-mini-badge.retention { background: var(--retention-soft);  color: var(--retention); }
+    .fu-cockpit-mini-badge.event     { background: var(--event-soft);      color: var(--event); }
+    .fu-cockpit-mini-badge.zoom      { background: var(--zoom-soft);       color: var(--zoom); }
+    .fu-cockpit-mini-badge.attempts  { background: var(--warn-soft);       color: var(--warn); }
+    .fu-cockpit-mini-badge.attempts.max { background: var(--dang-soft);    color: var(--dang); }
+
+    /* ── LEAD-DETAIL ──────────────────────────────────────────────── */
+    .fu-cockpit-detail {
+      background: var(--paper);
+      border: 0;
+      border-radius: var(--radius);
+      padding: 22px 26px;
+      color: var(--text);
+      box-shadow: var(--shadow);
+      min-height: 60vh;
+    }
+    .fu-cockpit-dhead h2 { color: var(--text); font-weight: 700; }
+    .fu-cockpit-dhead-links a { color: var(--info); }
+    .fu-cockpit-avatar {
+      width: 56px; height: 56px;
+      border-radius: var(--radius);
+      background: var(--ink);
+      font-size: 18px;
+    }
+
+    /* Belkaart — mockup gradient + witte typografie */
+    .fu-callcard {
+      background: linear-gradient(160deg, #0d5470 0%, #093d54 100%);
+      border-radius: var(--radius);
+      padding: 18px;
+      box-shadow: var(--shadow-lg);
+      color: #fff;
+      margin-bottom: 16px;
+    }
+    .fu-callcard-label {
+      color: #9fc2d3;
+      text-transform: uppercase;
+      font-size: 11.5px; letter-spacing: .6px;
+      font-weight: 600;
+    }
+    .fu-callcard-voys {
+      background: rgba(255,255,255,.12);
+      border: 1px solid rgba(255,255,255,.25);
+      color: #fff;
+    }
+    .fu-callcard-voys option { color: var(--text); background: #fff; }
+    .fu-callcard-number {
+      font-size: 26px; font-weight: 700; letter-spacing: 1px;
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.15);
+      color: #fff;
+      border-radius: var(--radius-sm);
+    }
+    .fu-callcard-number::placeholder { color: rgba(255,255,255,.5); }
+    .fu-callcard-primary {
+      background: var(--ok);
+      color: #fff;
+      border-radius: 11px;
+      font-weight: 700;
+      box-shadow: 0 2px 12px rgba(31,157,107,.35);
+    }
+    .fu-callcard-primary:hover { background: #17845a; }
+    .fu-callcard-secondary {
+      background: rgba(255,255,255,.12);
+      border: 1px solid rgba(255,255,255,.22);
+      border-radius: 11px;
+      color: #fff;
+    }
+    .fu-callcard-menu {
+      background: #fff;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-lg);
+    }
+    .fu-callcard-menu button {
+      color: var(--text);
+      border-radius: 11px;
+      padding: 9px 12px;
+      font-weight: 600;
+    }
+    .fu-callcard-menu button:hover { background: var(--paper); }
+
+    /* Afspraaktijd-regel onder de belkaart */
+    .fu-callcard-appointment {
+      background: var(--ok-soft);
+      border: 1px solid #b7e4ce;
+      color: #106b48;
+      border-radius: var(--radius-sm);
+    }
+
+    /* Softphone-status */
+    .fu-softphone-status { color: rgba(255,255,255,.85); }
+    .fu-softphone-status.connected .fu-softphone-dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(31,157,107,.25); }
+    .fu-softphone-status.connecting .fu-softphone-dot { background: var(--warn); box-shadow: 0 0 0 3px rgba(201,138,18,.22); }
+    .fu-softphone-status.failed .fu-softphone-dot,
+    .fu-softphone-status.disconnected .fu-softphone-dot { background: var(--dang); box-shadow: 0 0 0 3px rgba(209,59,59,.22); }
+
+    /* Panels (uitkomst, context, tijdlijn) — witte kaart */
+    .fu-outcome-panel,
+    .fu-cockpit-section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      color: var(--text);
+      padding: 14px 16px;
+    }
+    .fu-outcome-title,
+    .fu-cockpit-section-title {
+      color: var(--text);
+      font-size: 13px; font-weight: 700;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 8px;
+      margin-bottom: 10px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .fu-outcome-close { color: var(--muted-2); }
+    .fu-outcome-close:hover { color: var(--text); }
+    .fu-outcome-group-title {
+      color: var(--muted-3);
+      font-size: 10.5px; font-weight: 700; letter-spacing: .5px;
+    }
+
+    /* Uitkomst-knoppen */
+    .fu-outcome-btn {
+      background: #fff;
+      border: 1.5px solid var(--line);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 10px 13px;
+      font-size: 13.5px; font-weight: 700;
+      box-shadow: none;
+      transition: background .15s, border-color .15s, transform .05s;
+    }
+    .fu-outcome-btn:hover { filter: none; background: var(--paper); border-color: #c3d3dd; }
+    .fu-outcome-btn.g-red    { background: var(--dang-soft); border-color: transparent; color: var(--dang); }
+    .fu-outcome-btn.g-orange { background: var(--hot-soft);  border-color: transparent; color: var(--hot); }
+    .fu-outcome-btn.g-blue   { background: var(--info-soft); border-color: transparent; color: var(--info); }
+    .fu-outcome-btn.g-green  { background: var(--ok-soft);   border-color: transparent; color: var(--ok); }
+    .fu-outcome-btn.g-gray   { background: var(--paper);     border-color: transparent; color: var(--muted-2); }
+    .fu-outcome-btn.g-red:hover    { background: #f6d6d6; }
+    .fu-outcome-btn.g-orange:hover { background: #fbe0d3; }
+    .fu-outcome-btn.g-blue:hover   { background: #dae7f3; }
+    .fu-outcome-btn.g-green:hover  { background: #d3ecdd; }
+    .fu-outcome-btn.g-gray:hover   { background: #e9edf1; }
+    .fu-outcome-btn:active { transform: translateY(1px); }
+
+    /* Planners in uitkomst */
+    .fu-outcome-planner {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      color: var(--text);
+    }
+    .fu-outcome-planner-title { color: var(--text); }
+
+    /* Tijdlijn / context */
+    .fu-cockpit-section-sub { color: var(--muted-2); }
+    .fu-cockpit-ctx-cell .k { color: var(--muted-2); }
+    .fu-cockpit-ctx-cell .v { color: var(--text); }
+    .fu-cockpit-timeline-item {
+      background: var(--paper);
+      border: 1px solid var(--line);
+    }
+    .fu-cockpit-timeline-icon {
+      background: var(--info-soft); color: var(--info);
+    }
+    .fu-cockpit-timeline-body .txt { color: var(--text); }
+    .fu-cockpit-timeline-body .meta { color: var(--muted-2); }
+    .fu-cockpit-noteadd .fu-input:focus,
+    .fu-input:focus { border-color: var(--info); box-shadow: 0 0 0 3px var(--info-soft); }
+
+    /* Belronde-knop */
+    .fu-belronde-btn {
+      background: var(--hot); color: #fff;
+      border-radius: 9px;
+      box-shadow: 0 2px 10px rgba(232,98,44,.28);
+      font-weight: 700;
+    }
+    .fu-belronde-btn:hover { background: #cf541f; }
+    .fu-belronde-btn.active { background: var(--dang); }
+
+    /* Bel-buttons in de details (lead-inline / lead-btn) */
+    .fu-lead-btn {
+      background: #fff; color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      font-weight: 600;
+    }
+    .fu-lead-btn:hover { background: var(--paper); border-color: #c3d3dd; }
+    .fu-lead-btn.primary {
+      background: var(--ink); color: #fff; border-color: var(--ink);
+    }
+    .fu-lead-btn.primary:hover { background: var(--ink-2); }
+    .fu-lead-inline {
+      background: #fff; color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 13px;
+    }
+    .fu-lead-inline:focus { outline: none; border-color: var(--info); box-shadow: 0 0 0 3px var(--info-soft); }
+
+    /* ── AFSPRAKEN-PAGINA (mockup-rijen) ──────────────────────────── */
+    .fu-af-daygroup {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      box-shadow: var(--shadow);
+    }
+    .fu-af-daygroup-head {
+      color: var(--muted-3); font-size: 12px; letter-spacing: .5px;
+      border-bottom: 1px solid var(--line-2);
+    }
+    .fu-af-daygroup-head .cnt {
+      background: var(--paper); color: var(--muted-2);
+    }
+    .fu-af-row {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+      color: var(--text);
+      transition: transform .15s, border-color .15s;
+    }
+    .fu-af-row:hover { transform: translateX(2px); border-color: #c3d3dd; }
+    .fu-af-row .time {
+      font-size: 14px; font-weight: 800; color: var(--ink); width: 52px;
+    }
+    .fu-af-row .avatar {
+      width: 32px; height: 32px; border-radius: 8px;
+      background: var(--ink);
+    }
+    .fu-af-row .avatar.kind-zoom { background: var(--zoom); }
+    .fu-af-row .avatar.src-event { background: var(--event); }
+    .fu-af-row .name { color: var(--text); font-weight: 700; font-size: 13.5px; }
+    .fu-af-row .sub  { color: var(--muted-2); font-size: 12px; }
+    .fu-af-row .owner {
+      background: var(--paper); color: var(--muted-2);
+      border: 1px solid var(--line);
+      border-radius: 20px; padding: 3px 10px;
+      font-size: 11.5px; font-weight: 600;
+    }
+    .fu-af-row .kind-badge {
+      font-size: 10.5px; font-weight: 800; letter-spacing: .3px;
+      padding: 3px 9px; border-radius: 6px; text-transform: uppercase;
+      background: var(--paper); color: var(--text);
+    }
+    .fu-af-row .kind-badge.zoom { background: var(--zoom-soft); color: var(--zoom); border: 0; }
+    .fu-af-row .kind-badge.bel  { background: var(--followup-soft); color: var(--followup); border: 0; }
+
+    /* ── SLUIMERPOT rijen ───────────────────────────────────────── */
+    .fu-sp-group {
+      background: var(--card); border: 1px solid var(--line);
+      border-radius: var(--radius); box-shadow: var(--shadow);
+    }
+    .fu-sp-group-head { color: var(--muted-3); border-bottom: 1px solid var(--line-2); }
+    .fu-sp-group-head .cnt { background: var(--paper); color: var(--muted-2); }
+    .fu-sp-row {
+      background: #fff; border: 1px solid var(--line);
+      border-radius: 10px; box-shadow: var(--shadow); color: var(--text);
+    }
+    .fu-sp-row .time { color: var(--text); font-weight: 700; }
+    .fu-sp-row .avatar { background: var(--ink); border-radius: 8px; }
+    .fu-sp-row .name  { color: var(--text); font-weight: 700; }
+    .fu-sp-row .sub   { color: var(--muted-2); }
+    .fu-sp-row .owner { background: var(--paper); color: var(--muted-2); border: 1px solid var(--line); }
+    .fu-sp-row .kind-badge {
+      background: var(--paper); color: var(--muted-2);
+      font-weight: 700; text-transform: uppercase; font-size: 10.5px;
+      border-radius: 6px; padding: 3px 9px;
+    }
+
+    /* ── DASHBOARD ─────────────────────────────────────────────── */
+    .fu-db-kpi {
+      background: var(--card); border: 1px solid var(--line);
+      border-radius: var(--radius); box-shadow: var(--shadow);
+      padding: 16px 18px;
+    }
+    .fu-db-kpi .label {
+      font-size: 12px; letter-spacing: .5px; text-transform: uppercase;
+      color: var(--muted-2); font-weight: 700;
+    }
+    .fu-db-kpi .value { font-size: 30px; color: var(--text); font-weight: 700; }
+    .fu-db-kpi.gebeld   { border-left: 3px solid var(--info); }
+    .fu-db-kpi.bereikt  { border-left: 3px solid var(--warn); }
+    .fu-db-kpi.offerte  { border-left: 3px solid var(--retention); }
+    .fu-db-kpi.zoom     { border-left: 3px solid var(--zoom); }
+    .fu-db-kpi.gewonnen { border-left: 3px solid var(--ok); }
+    .fu-db-table th { color: var(--muted-2); font-size: 11px; }
+    .fu-db-table td { color: var(--text); border-bottom-color: var(--line-2); }
+
+    /* ── EVENT-BELLIJST ───────────────────────────────────────── */
+    .fu-eb-header {
+      background: linear-gradient(160deg, #0d5470, #093d54);
+      border: 0; color: #fff;
+      box-shadow: var(--shadow-lg);
+    }
+    .fu-eb-header-title { color: #fff; }
+    .fu-eb-header-sub   { color: rgba(255,255,255,.85); }
+    .fu-eb-row {
+      background: #fff; border: 1px solid var(--line);
+      border-radius: 10px; box-shadow: var(--shadow); color: var(--text);
+    }
+    .fu-eb-row .avatar { background: var(--ink); border-radius: 8px; }
+    .fu-eb-row .name { color: var(--text); font-weight: 700; }
+    .fu-eb-row .sub  { color: var(--muted-2); }
+    .fu-eb-row .status-badge {
+      font-size: 10.5px; font-weight: 800; letter-spacing: .3px;
+      text-transform: uppercase; border-radius: 6px; padding: 3px 9px;
+      background: var(--paper); color: var(--text); border: 0;
+    }
+    .fu-eb-row .status-badge.nieuw          { background: var(--info-soft); color: var(--info); }
+    .fu-eb-row .status-badge.benaderd       { background: var(--hot-soft);  color: var(--hot); }
+    .fu-eb-row .status-badge.terugbellen    { background: var(--info-soft); color: var(--info); }
+    .fu-eb-row .status-badge.niet_bereikbaar{ background: var(--paper);     color: var(--muted-2); }
+    .fu-eb-row .status-badge.verlengd       { background: var(--ok-soft);   color: var(--ok); }
+    .fu-eb-row .status-badge.verloren       { background: var(--dang-soft); color: var(--dang); }
+
+    /* ── VOICEMEMO-MODAL ─────────────────────────────────────── */
+    .fu-modal { background: var(--card); color: var(--text); border-radius: var(--radius); box-shadow: var(--shadow-lg); }
+    .fu-modal-header h2 { color: var(--text); }
+    .fu-modal-header { border-bottom: 1px solid var(--line-2); }
+    .fu-voicememo-item {
+      background: #fff; border: 1px solid var(--line);
+      border-radius: 10px; box-shadow: var(--shadow);
+    }
+    .fu-voicememo-item .time { color: var(--ink); font-weight: 800; }
+    .fu-voicememo-item .name { color: var(--text); font-weight: 700; }
+    .fu-voicememo-item .sub  { color: var(--muted-2); }
+    .fu-voicememo-btn {
+      background: var(--ink); color: #fff;
+      border-radius: 9px; font-weight: 700;
+    }
+    .fu-voicememo-btn:hover { background: var(--ink-2); }
+    .fu-voicememo-btn.done {
+      background: var(--ok-soft); color: var(--ok);
+      border: 1px solid #b7e4ce;
+    }
+    .fu-voicememo-bar { background: linear-gradient(90deg, var(--ok), #26b876); }
+    .fu-voicememo-progress-text { color: var(--muted-2); }
+
+    /* Empty-state text */
+    .fu-empty { color: var(--muted-2); }
+    .fu-empty i.ti { color: var(--muted-3); }
+
+    /* Cockpit-detail dhead-badges pill styling */
+    .fu-cockpit-dhead-badges .fu-cockpit-mini-badge { padding: 3px 8px; font-size: 11px; }
+
+    /* Actions in filters — align */
+    #cockpit-list .fu-cockpit-filters {
+      padding-bottom: 12px; border-bottom: 1px solid var(--line-2);
+      margin-bottom: 12px;
+    }
+    #cockpit-list .fu-cockpit-toggles { gap: 14px; }
+
+    /* Buckets container spacing */
+    .fu-cockpit-buckets { gap: 4px; }
   </style>
 </head>
 <body>
