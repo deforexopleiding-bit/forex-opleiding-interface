@@ -16,8 +16,96 @@
 // Bij GHL-fout: throw { code: 'GHL_API', ghlStatus, ghlBody } zodat de
 // caller mapGhlError kan draaien voor een nette Nederlandse melding.
 
+import fetch from 'node-fetch';
 import { supabaseAdmin } from '../supabase.js';
 import { createGhlAppointment } from './ghl-appointment.js';
+
+const GHL_BASE = 'https://services.leadconnectorhq.com';
+// GHL contacts-API gebruikt een andere Version dan de calendars-API.
+// Bevestigd in api/_lib/ghl-contact.js: '2021-07-28'.
+const GHL_CONTACTS_VERSION = '2021-07-28';
+
+// Roep GHL contacts/upsert aan om een bestaand contact te vinden (op
+// e-mail/telefoon dedup) of een nieuw contact te maken. Returnt het
+// contact-id als string. Throws { code:'GHL_API', ghlStatus, ghlBody }
+// bij API-fout — caller vertaalt naar 422 via mapGhlError.
+async function ghlUpsertContact({ email, phone, firstName, lastName }) {
+  const token      = process.env.GHL_PIT_TOKEN || process.env.GHL_API_KEY;
+  const locationId = process.env.GHL_LOCATION_ID;
+  if (!token || !locationId) {
+    const err = new Error('GHL configuratie ontbreekt op de server');
+    err.code = 'GHL_CONFIG_MISSING';
+    throw err;
+  }
+
+  const body = { locationId };
+  if (email     && String(email).trim())     body.email     = String(email).trim();
+  if (phone     && String(phone).trim())     body.phone     = String(phone).trim();
+  if (firstName && String(firstName).trim()) body.firstName = String(firstName).trim();
+  if (lastName  && String(lastName).trim())  body.lastName  = String(lastName).trim();
+
+  const res = await fetch(`${GHL_BASE}/contacts/upsert`, {
+    method : 'POST',
+    headers: {
+      Authorization : `Bearer ${token}`,
+      Version       : GHL_CONTACTS_VERSION,
+      'Content-Type': 'application/json',
+      Accept        : 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    const err = new Error(`GHL contacts/upsert ${res.status}`);
+    err.code      = 'GHL_API';
+    err.ghlStatus = res.status;
+    err.ghlBody   = (errBody || '').slice(0, 500);
+    throw err;
+  }
+
+  const data = await res.json().catch(() => ({}));
+  const contact = data?.contact || data?.data?.contact || data;
+  const id = contact?.id || contact?.contact_id || data?.id || null;
+  if (!id || typeof id !== 'string') {
+    const err = new Error('GHL contacts/upsert response zonder id');
+    err.code      = 'GHL_API';
+    err.ghlStatus = res.status;
+    err.ghlBody   = 'no-id-in-response';
+    throw err;
+  }
+  return String(id).trim();
+}
+
+// Split "Voornaam Achternaam" defensief. Enige naam → firstName only.
+function splitName(fullName) {
+  const raw = String(fullName || '').trim();
+  if (!raw) return { firstName: null, lastName: null };
+  const parts = raw.split(/\s+/);
+  if (parts.length === 1) return { firstName: parts[0], lastName: null };
+  return { firstName: parts[0], lastName: parts.slice(1).join(' ') };
+}
+
+// Write-back de vers-verkregen contact-id naar customers zodat een
+// vervolg-lookup 'm direct vindt (voorkomt dubbele upserts). Fail-soft:
+// als de write faalt, log alleen — de afspraak-flow moet NIET blokkeren.
+async function writeBackCustomerGhlContactId(customerId, ghlContactId) {
+  if (!customerId || !ghlContactId) return;
+  try {
+    const { error } = await supabaseAdmin
+      .from('customers')
+      .update({ ghl_contact_id: ghlContactId })
+      .eq('id', customerId);
+    if (error) {
+      // 42703 = kolom ontbreekt in dit schema — helemaal geen probleem, skip.
+      if (error.code !== '42703') {
+        console.warn('[create-appointment-from-lead] write-back customers.ghl_contact_id:', error.message);
+      }
+    }
+  } catch (e) {
+    console.warn('[create-appointment-from-lead] write-back exception:', e?.message || e);
+  }
+}
 
 export async function resolveGhlContactId(lead) {
   // 1) Event-lead: source_ref.ghl_contact_id (numeriek of string).
@@ -37,12 +125,27 @@ export async function resolveGhlContactId(lead) {
       const id = String(data?.ghl_contact_id || '').trim();
       if (id) return id;
     } catch (e) {
-      // Fail-soft: fetch-fout → return null zodat caller nette 422 kan geven.
+      // Fail-soft: fetch-fout → val door naar upsert.
       console.warn('[create-appointment-from-lead] customer lookup:', e?.message || e);
     }
   }
 
-  return null;
+  // 3) Upsert op e-mail/telefoon. Vereist minstens één van beide —
+  //    anders is er NIETS om op te dedupliceren en zou upsert alsnog
+  //    een dubbelspook-contact maken bij elke retry.
+  const email = String(lead?.lead_email || '').trim();
+  const phone = String(lead?.lead_phone || '').trim();
+  if (!email && !phone) {
+    return null; // caller returnt NO_GHL_CONTACT met nette melding.
+  }
+  const { firstName, lastName } = splitName(lead?.lead_name);
+  const contactId = await ghlUpsertContact({ email, phone, firstName, lastName });
+
+  // 4) Write-back — puur voor performance/volgende-keer. Fail-soft.
+  if (lead?.customer_id) {
+    await writeBackCustomerGhlContactId(lead.customer_id, contactId);
+  }
+  return contactId;
 }
 
 // Orchestreert: contact resolven → GHL-appointment aanmaken →
