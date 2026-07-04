@@ -22,6 +22,14 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { createAppointmentForLead, mapGhlError } from './_lib/create-appointment-from-lead.js';
+
+// Feature-flag: cockpit-uitkomst 'zoom_ingepland' maakt een ECHTE
+// GHL-afspraak + Zoom-link i.p.v. alleen een kale lead te patchen.
+// Default AAN (any waarde ≠ 'false'); zet op 'false' in Vercel-env om
+// terug te vallen op oude gedrag.
+const COCKPIT_ZOOM_AS_APPOINTMENT = String(process.env.COCKPIT_ZOOM_AS_APPOINTMENT || 'true') !== 'false';
+const COCKPIT_ZOOM_DURATION_MIN = 30;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -413,10 +421,73 @@ export default async function handler(req, res) {
     if (!body.terugbel_datum) return res.status(400).json({ error: 'terugbel_datum vereist' });
     const d = new Date(body.terugbel_datum);
     if (isNaN(d.getTime())) return res.status(400).json({ error: 'terugbel_datum ongeldig' });
-    patch.lead_kind      = 'zoom';
-    patch.lead_status    = 'terugbellen';
-    patch.terugbel_datum = d.toISOString();
-    noteText = 'Zoom-call ingepland';
+
+    if (COCKPIT_ZOOM_AS_APPOINTMENT) {
+      // Validate-first: maak eerst de GHL-afspraak. Bij fout: geen
+      // DB-mutatie op de lead → geen kale zoom-lead achterlaten.
+      let newAppt;
+      try {
+        newAppt = await createAppointmentForLead({
+          lead           : leadRow,
+          scheduledAt    : d.toISOString(),
+          durationMinutes: COCKPIT_ZOOM_DURATION_MIN,
+        });
+      } catch (e) {
+        if (e?.code === 'NO_GHL_CONTACT') {
+          return res.status(422).json({
+            error: 'Kon geen GHL-contact koppelen (geen ghl_contact_id op klant of event-koppeling). Bel de klant handmatig en check de TeamLeader/GHL-koppeling.',
+            code : 'NO_GHL_CONTACT',
+          });
+        }
+        if (e?.code === 'GHL_CONFIG_MISSING') {
+          return res.status(500).json({ error: 'GHL configuratie ontbreekt op de server (GHL_CALENDAR_ID / GHL_LOCATION_ID).' });
+        }
+        if (e?.code === 'GHL_API') {
+          console.error('[lead-outcome zoom_ingepland] GHL:', e.ghlStatus, e.ghlBody);
+          return res.status(422).json({
+            error     : mapGhlError(e.ghlStatus, e.ghlBody),
+            ghl_status: e.ghlStatus,
+          });
+        }
+        if (e?.code === 'DB_INSERT') {
+          // GHL-afspraak staat wél al — expliciet melden zodat sales
+          // 'm handmatig kan controleren i.p.v. dubbel te maken.
+          console.error('[lead-outcome zoom_ingepland] DB insert:', e?.message, 'ghl:', e?.ghl_appointment_id);
+          return res.status(500).json({
+            error             : 'GHL-afspraak gemaakt, maar DB-registratie mislukt — check GHL kalender handmatig. Neem contact op met beheerder.',
+            ghl_appointment_id: e?.ghl_appointment_id || null,
+          });
+        }
+        console.error('[lead-outcome zoom_ingepland] onbekend:', e?.message || e);
+        return res.status(500).json({ error: e?.message || 'Zoom-afspraak aanmaken mislukt' });
+      }
+
+      // Success: lead is afgehandeld (afspraak leeft nu als aparte
+      // follow_up_appointments-rij + GHL-afspraak). Zet lead op
+      // 'verlengd' zodat 'ie uit de werklijst is; hang de nieuwe
+      // appointment-id in source_ref voor traceability.
+      patch.lead_status    = 'verlengd';
+      patch.terugbel_datum = null;
+      patch.is_hot         = false;
+      patch.snoozed_until  = null;
+      patch.source_ref     = {
+        ...(sourceRef || {}),
+        converted_to_appointment_id: newAppt.appointment_id,
+        converted_ghl_appointment_id: newAppt.ghl_appointment_id,
+        converted_at                : nowIso,
+      };
+      noteText = 'Zoom-call ingepland → echte GHL-afspraak aangemaakt'
+        + (newAppt.ghl_appointment_id ? ` (GHL: ${newAppt.ghl_appointment_id})` : '')
+        + (newAppt.zoom_join_url ? ` — Zoom: ${newAppt.zoom_join_url}` : '');
+    } else {
+      // Feature-flag UIT: oude gedrag (alleen lead-patch, geen echte
+      // afspraak). Blijft beschikbaar voor snelle rollback via Vercel-
+      // env-var COCKPIT_ZOOM_AS_APPOINTMENT='false'.
+      patch.lead_kind      = 'zoom';
+      patch.lead_status    = 'terugbellen';
+      patch.terugbel_datum = d.toISOString();
+      noteText = 'Zoom-call ingepland';
+    }
   } else if (outcome === 'sale') {
     patch.lead_status = 'verlengd';
     noteText = 'Sale geworden 🎉';
