@@ -1,20 +1,22 @@
 // api/follow-up-voicememo-round.js
 //
-// Ochtendronde tegen no-shows: Dave/sales stuurt korte voicememo naar iedere
-// Zoom-lead die vandaag een gesprek heeft. Endpoint is dual-purpose.
+// Cockpit-ochtendronde tegen no-shows. Bron is follow_up_appointments
+// (de GHL-gesynchroniseerde Zoom-calls van vandaag), NIET follow_up_leads
+// — de leads-tabel bevat geen actuele Zoom-calls.
 //
-// GET → { leads: [...], counts: { total, sent, open } }
-//   Zoom-leads (lead_kind='zoom') met terugbel_datum::date = current_date.
-//   Terugbel_datum kolomtype is timestamptz; we filteren via day-range in
-//   applicatie-code (from 00:00 to 23:59:59 vandaag) om timezone-issues
-//   met snelle inserts te vermijden.
+// GET → { leads: [...], counts: { total, sent, open }, today }
+//   Appointments met status='gepland' EN scheduled_at::datum = current_date
+//   EN zoom_meeting_id IS NOT NULL (dus alleen Zoom-calls). counts.sent =
+//   voicememo_status='sent', counts.open = rest.
 //
-// POST { lead_id? | all?: true }
-//   Zet voicememo_sent_on = current_date op één lead of alle vandaag-zooms.
-//   Logt per lead een note entry_kind='voicememo' outcome_code='voicememo'.
-//   Owner-gate: privileged (super_admin/admin/manager) mag alles; sales
-//   mag alle vandaag-zooms markeren (dagtaak, geen per-lead-owner check).
+// POST { appointment_id? | all?: true }
+//   Zet voicememo_status='sent' (+ voicememo_sent_at, voicememo_sent_by) op
+//   1 appointment (of alle vandaag-zooms die nog niet sent zijn). Zelfde
+//   waarde-conventie als api/follow-up-appointments.js (enum:
+//   pending | sent | skipped | no_whatsapp).
 //
+// Owner-gate: privileged (super_admin/admin/manager) mag alles; sales mag
+// alle vandaag-Zoom-calls markeren (dagtaak, geen per-appointment owner).
 // 42P01/42703 → 501 MIGRATION_REQUIRED.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
@@ -35,35 +37,22 @@ function todayRange() {
   };
 }
 
-async function insertVoicememoNote(leadId, userId, text) {
-  const trimmed = String(text || '').slice(0, 4000);
-  const attempt = async (payload) => supabaseAdmin
-    .from('follow_up_lead_notes').insert(payload).select('id').maybeSingle();
-
-  const p1 = { lead_id: leadId, note: trimmed, created_by_user_id: userId, entry_kind: 'voicememo', outcome_code: 'voicememo' };
-  const p2 = { lead_id: leadId, note: trimmed, created_by_user_id: userId, entry_kind: 'voicememo' };
-  const p3 = { lead_id: leadId, note: trimmed, created_by_user_id: userId };
-  for (const p of [p1, p2, p3]) {
-    const { data, error } = await attempt(p);
-    if (!error) return data;
-    if (error.code !== '42703') { console.warn('[voicememo] note:', error.message); return null; }
-  }
-  return null;
-}
-
-async function fetchTodayZooms() {
+async function fetchTodayZoomAppointments() {
   const { startIso, endIso } = todayRange();
-  const COLS = 'id, lead_name, lead_phone, terugbel_datum, voicememo_sent_on, lead_kind';
+  // Selecteer alleen kolommen die we zeker weten (voicememo_status +
+  // scheduled_at + basis-lead-info). Zoom-filter via zoom_meeting_id.
+  const COLS = 'id, lead_name, lead_phone, scheduled_at, voicememo_status, zoom_meeting_id, status';
   const { data, error } = await supabaseAdmin
-    .from('follow_up_leads')
+    .from('follow_up_appointments')
     .select(COLS)
-    .eq('lead_kind', 'zoom')
-    .gte('terugbel_datum', startIso)
-    .lte('terugbel_datum', endIso)
-    .order('terugbel_datum', { ascending: true });
+    .eq('status', 'gepland')
+    .not('zoom_meeting_id', 'is', null)
+    .gte('scheduled_at', startIso)
+    .lte('scheduled_at', endIso)
+    .order('scheduled_at', { ascending: true });
   if (error) {
-    if (error.code === '42P01') { const e = new Error('follow_up_leads ontbreekt'); e.code = 'MIGRATION_REQUIRED'; throw e; }
-    if (error.code === '42703') { const e = new Error('lead_kind of voicememo_sent_on kolom ontbreekt'); e.code = 'MIGRATION_REQUIRED'; throw e; }
+    if (error.code === '42P01') { const e = new Error('follow_up_appointments ontbreekt'); e.code = 'MIGRATION_REQUIRED'; throw e; }
+    if (error.code === '42703') { const e = new Error('kolom ontbreekt (voicememo_status/zoom_meeting_id/scheduled_at/status)'); e.code = 'MIGRATION_REQUIRED'; throw e; }
     throw new Error(error.message);
   }
   return data || [];
@@ -83,54 +72,76 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
-      const leads = await fetchTodayZooms();
+      const appts = await fetchTodayZoomAppointments();
       const { dayIso } = todayRange();
-      const sent = leads.filter((l) => String(l.voicememo_sent_on || '') === dayIso).length;
+      const sent = appts.filter((a) => String(a.voicememo_status || '') === 'sent').length;
+      // Frontend leest 'leads' (historisch veld-naam) — inhoud is
+      // appointments-shape met .id (= appointment_id) + terugbel_datum
+      // alias voor de UI zodat de bestaande render blijft werken.
+      const leads = appts.map((a) => ({
+        id                : a.id,
+        lead_name         : a.lead_name,
+        lead_phone        : a.lead_phone,
+        terugbel_datum    : a.scheduled_at,  // alias — UI gebruikt _fmtHM(terugbel_datum)
+        voicememo_status  : a.voicememo_status || 'pending',
+        voicememo_sent_on : a.voicememo_status === 'sent' ? dayIso : null,
+      }));
       return res.status(200).json({
         leads,
         today  : dayIso,
-        counts : { total: leads.length, sent, open: leads.length - sent },
+        counts : { total: appts.length, sent, open: appts.length - sent },
       });
     }
 
     if (req.method === 'POST') {
       const body = (req.body && typeof req.body === 'object') ? req.body : {};
-      const all    = body.all === true;
-      const leadId = typeof body.lead_id === 'string' ? body.lead_id.trim() : '';
-      if (!all && !leadId) return res.status(400).json({ error: 'lead_id of all=true vereist' });
-      if (leadId && !UUID_RE.test(leadId)) return res.status(400).json({ error: 'lead_id ongeldig' });
+      const all           = body.all === true;
+      // Accepteer beide vormen: appointment_id (nieuw) en lead_id (legacy
+      // frontend die nog niet is bijgewerkt) — beide worden hier als
+      // appointment-uuid geïnterpreteerd.
+      const targetIdRaw = typeof body.appointment_id === 'string'
+        ? body.appointment_id
+        : (typeof body.lead_id === 'string' ? body.lead_id : '');
+      const targetId    = targetIdRaw.trim();
+      if (!all && !targetId) return res.status(400).json({ error: 'appointment_id of all=true vereist' });
+      if (targetId && !UUID_RE.test(targetId)) return res.status(400).json({ error: 'appointment_id ongeldig' });
 
-      const { dayIso } = todayRange();
-      let targetIds = [];
+      let ids = [];
       if (all) {
-        const leads = await fetchTodayZooms();
-        targetIds = leads.filter((l) => String(l.voicememo_sent_on || '') !== dayIso).map((l) => l.id);
+        const appts = await fetchTodayZoomAppointments();
+        ids = appts.filter((a) => String(a.voicememo_status || '') !== 'sent').map((a) => a.id);
       } else {
-        targetIds = [leadId];
+        ids = [targetId];
       }
+      if (!ids.length) return res.status(200).json({ ok: true, updated: 0 });
 
-      if (!targetIds.length) return res.status(200).json({ ok: true, updated: 0 });
-
-      const patch = { voicememo_sent_on: dayIso, updated_at: new Date().toISOString() };
-      // Fallback bij 42703 (kolom voicememo_sent_on ontbreekt) → 501.
+      const nowIso = new Date().toISOString();
+      const patch = {
+        voicememo_status : 'sent',
+        voicememo_sent_at: nowIso,
+        voicememo_sent_by: user.id,
+        updated_at       : nowIso,
+      };
       const { data, error } = await supabaseAdmin
-        .from('follow_up_leads')
+        .from('follow_up_appointments')
         .update(patch)
-        .in('id', targetIds)
-        .select('id')
-        ;
+        .in('id', ids)
+        .select('id');
       if (error) {
-        if (error.code === '42P01') return res.status(501).json({ error: 'Tabel follow_up_leads ontbreekt', code: 'MIGRATION_REQUIRED' });
-        if (error.code === '42703') return res.status(501).json({ error: 'Kolom voicememo_sent_on ontbreekt', code: 'MIGRATION_REQUIRED' });
+        if (error.code === '42P01') return res.status(501).json({ error: 'Tabel follow_up_appointments ontbreekt', code: 'MIGRATION_REQUIRED' });
+        if (error.code === '42703') {
+          // Val terug op alleen voicememo_status (oudere schema's).
+          const { data: d2, error: e2 } = await supabaseAdmin
+            .from('follow_up_appointments')
+            .update({ voicememo_status: 'sent' })
+            .in('id', ids)
+            .select('id');
+          if (e2) throw new Error(e2.message);
+          return res.status(200).json({ ok: true, updated: (d2 || []).length });
+        }
         throw new Error(error.message);
       }
-      const updatedIds = (data || []).map((r) => r.id);
-      // Notes per lead loggen (best-effort, geen blokker).
-      for (const id of updatedIds) {
-        try { await insertVoicememoNote(id, user.id, 'Voicememo verstuurd ter voorbereiding op Zoom-call'); }
-        catch (_) { /* fail-soft */ }
-      }
-      return res.status(200).json({ ok: true, updated: updatedIds.length });
+      return res.status(200).json({ ok: true, updated: (data || []).length });
     }
 
     return res.status(405).json({ error: 'GET/POST only' });

@@ -1032,17 +1032,23 @@
       display: flex; align-items: center; gap: 6px; margin-top: 1px;
     }
     .fu-cockpit-leadcard-badges { display: inline-flex; gap: 4px; }
+    /* Badges met voldoende contrast: donkere tekst op vaste tint zodat
+       ze in beide themas leesbaar zijn. Achtergronden zijn niet meer
+       semi-transparant zodat ze niet vervagen op de kleuren-gradient
+       van de detailkop. */
     .fu-cockpit-mini-badge {
-      display: inline-block; padding: 1px 6px; border-radius: 999px;
-      font-size: 10px; letter-spacing: .3px;
-      background: rgba(255,255,255,0.06); color: var(--text-secondary, rgba(255,255,255,.75));
-      border: 1px solid rgba(255,255,255,0.06);
+      display: inline-flex; align-items: center; gap: 3px;
+      padding: 2px 8px; border-radius: 999px;
+      font-size: 11px; font-weight: 600; letter-spacing: .3px;
+      background: #e5e7eb; color: #111827;
+      border: 1px solid rgba(0,0,0,0.08);
+      white-space: nowrap;
     }
-    .fu-cockpit-mini-badge.hot { background: #7f1d1d; color: #fff; border-color: #b91c1c; }
-    .fu-cockpit-mini-badge.retention { background: rgba(9,61,84,.25); color: #93c5fd; border-color: rgba(9,61,84,.5); }
-    .fu-cockpit-mini-badge.event { background: rgba(124,58,237,.2); color: #c4b5fd; border-color: rgba(124,58,237,.4); }
-    .fu-cockpit-mini-badge.attempts { background: rgba(234,179,8,.18); color: #fbbf24; border-color: rgba(234,179,8,.35); }
-    .fu-cockpit-mini-badge.zoom { background: rgba(15,118,110,.2); color: #5eead4; border-color: rgba(15,118,110,.4); }
+    .fu-cockpit-mini-badge.hot       { background: #dc2626; color: #fff; border-color: #b91c1c; }
+    .fu-cockpit-mini-badge.retention { background: #0d4d69; color: #fff; border-color: #093d54; }
+    .fu-cockpit-mini-badge.event     { background: #7c3aed; color: #fff; border-color: #6d28d9; }
+    .fu-cockpit-mini-badge.attempts  { background: #f59e0b; color: #1f2937; border-color: #d97706; }
+    .fu-cockpit-mini-badge.zoom      { background: #0f766e; color: #fff; border-color: #115e59; }
 
     /* Detail-paneel */
     .fu-cockpit-detail {
@@ -1103,11 +1109,29 @@
       font-size: 11.5px; text-transform: uppercase; letter-spacing: .6px;
       color: rgba(255,255,255,.75); display: inline-flex; align-items: center; gap: 6px;
     }
+    /* Beller-ID select: donkere achtergrond met witte tekst zodat het
+       leesbaar is op de #093d54 belkaart. Options krijgen expliciet
+       licht-op-donker zodat het OS-thema niet met wit-op-wit gooit. */
     .fu-callcard-voys {
-      background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14);
-      color: #fff; border-radius: 6px; padding: 4px 8px; font-size: 12px;
+      background: rgba(0,0,0,0.32);
+      border: 1px solid rgba(255,255,255,0.28);
+      color: #fff; border-radius: 6px;
+      padding: 5px 26px 5px 10px; font-size: 12.5px;
+      font-family: inherit;
+      appearance: none; -webkit-appearance: none;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      background-size: 12px;
+      cursor: pointer;
     }
-    .fu-callcard-voys:disabled { opacity: .6; cursor: not-allowed; }
+    .fu-callcard-voys:hover { border-color: rgba(255,255,255,0.5); }
+    .fu-callcard-voys:focus { outline: none; border-color: #10b981; }
+    .fu-callcard-voys option {
+      background: #ffffff;
+      color: #111827;
+    }
+    .fu-callcard-voys:disabled { opacity: .55; cursor: not-allowed; }
     .fu-callcard-number {
       font-size: 26px; font-weight: 600; letter-spacing: 1px;
       margin: 4px 0 12px 0;
@@ -1127,6 +1151,22 @@
       border-color: #10b981;
       background: rgba(16,185,129,0.06);
     }
+    /* Afspraaktijd-regel onder het nummer — leest terugbel_datum en
+       toont "Afspraak: vandaag 14:00" / "Afspraak: morgen 10:30" /
+       "Afspraak: ma 8 juli · 14:00". */
+    .fu-callcard-appointment {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(16,185,129,0.14);
+      border: 1px solid rgba(16,185,129,0.35);
+      color: #a7f3d0;
+      border-radius: 8px;
+      padding: 4px 10px;
+      font-size: 12.5px; font-weight: 500;
+      margin: -6px 0 12px 0;
+    }
+    .fu-callcard-appointment[hidden] { display: none !important; }
+    .fu-callcard-appointment i.ti { font-size: 13px; }
+
     .fu-callcard-actions { display: flex; gap: 8px; flex-wrap: wrap; }
     .fu-callcard-primary {
       flex: 1; min-width: 160px;
@@ -1335,27 +1375,27 @@
       margin-bottom: 4px;
     }
     .fu-outcome-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+    /* Uitkomst-knoppen: voluit levendig i.p.v. half-transparant. Volle
+       achtergrondkleur uit de groep-tint, witte tekst, uitgesproken
+       rand + subtiele shadow zodat ze duidelijk klikbaar zijn. */
     .fu-outcome-btn {
-      appearance: none; border: 1px solid rgba(255,255,255,0.12);
-      background: rgba(255,255,255,0.03); color: var(--text-primary, #fff);
-      padding: 8px 12px; border-radius: 8px; font-size: 12.5px; cursor: pointer;
+      appearance: none; border: 1px solid rgba(255,255,255,0.28);
+      background: #374151; color: #fff;
+      padding: 9px 14px; border-radius: 8px; font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
       display: inline-flex; align-items: center; gap: 6px;
-      transition: background .15s, border-color .15s;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+      transition: background .15s, border-color .15s, transform .05s;
     }
-    .fu-outcome-btn:hover {
-      background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.24);
-    }
-    .fu-outcome-btn:disabled { opacity: .5; cursor: not-allowed; }
-    .fu-outcome-btn.g-red    { border-color: rgba(239,68,68,.35); color: #fecaca; background: rgba(239,68,68,.08); }
-    .fu-outcome-btn.g-red:hover    { background: rgba(239,68,68,.16); }
-    .fu-outcome-btn.g-orange { border-color: rgba(249,115,22,.35); color: #fed7aa; background: rgba(249,115,22,.08); }
-    .fu-outcome-btn.g-orange:hover { background: rgba(249,115,22,.16); }
-    .fu-outcome-btn.g-green  { border-color: rgba(16,185,129,.35); color: #bbf7d0; background: rgba(16,185,129,.08); }
-    .fu-outcome-btn.g-green:hover  { background: rgba(16,185,129,.16); }
-    .fu-outcome-btn.g-blue   { border-color: rgba(59,130,246,.35); color: #bfdbfe; background: rgba(59,130,246,.08); }
-    .fu-outcome-btn.g-blue:hover   { background: rgba(59,130,246,.16); }
-    .fu-outcome-btn.g-gray   { border-color: rgba(107,114,128,.35); color: #d1d5db; background: rgba(107,114,128,.08); }
-    .fu-outcome-btn.g-gray:hover   { background: rgba(107,114,128,.16); }
+    .fu-outcome-btn:hover     { filter: brightness(1.1); }
+    .fu-outcome-btn:active    { transform: translateY(1px); }
+    .fu-outcome-btn:disabled  { opacity: .5; cursor: not-allowed; filter: none; }
+    .fu-outcome-btn.g-red     { background: #dc2626; border-color: #b91c1c; }
+    .fu-outcome-btn.g-orange  { background: #ea580c; border-color: #c2410c; }
+    .fu-outcome-btn.g-green   { background: #059669; border-color: #047857; }
+    .fu-outcome-btn.g-blue    { background: #093d54; border-color: #0d4d69; }
+    .fu-outcome-btn.g-gray    { background: #4b5563; border-color: #374151; }
 
     /* Inline planners in het uitkomst-panel */
     .fu-outcome-planner {
@@ -2084,6 +2124,10 @@
                      placeholder="Geen telefoonnummer" autocomplete="off"
                      inputmode="tel" spellcheck="false"
                      aria-label="Telefoonnummer (bewerkbaar voor deze call)">
+              <div class="fu-callcard-appointment" id="cockpit-appointment" hidden>
+                <i class="ti ti-calendar-event"></i>
+                <span id="cockpit-appointment-text"></span>
+              </div>
               <div class="fu-callcard-actions">
                 <a class="fu-callcard-primary" id="cockpit-call" href="#" aria-disabled="true">
                   <i class="ti ti-phone-call"></i> <span id="cockpit-call-label">Bel nu</span>
@@ -3979,6 +4023,7 @@
       // Belkaart
       const numEl = document.getElementById('cockpit-number');
       if (numEl) numEl.value = it.lead_phone || '';
+      _renderAppointmentLabel(it);
       const callBtn   = document.getElementById('cockpit-call');
       const callLabel = document.getElementById('cockpit-call-label');
       const isZoom = String(it.lead_kind || 'call') === 'zoom';
@@ -4667,6 +4712,35 @@
           ? '<i class="ti ti-microphone-off"></i>'
           : '<i class="ti ti-microphone"></i>';
       }
+    }
+
+    // Afspraaktijd-regel onder de belkaart-input. Toont een leesbaar
+    // NL-formaat voor terugbel_datum: "Vandaag 14:00" / "Morgen 10:30" /
+    // "ma 8 juli · 14:00". Verborgen als er geen terugbel_datum is.
+    function _renderAppointmentLabel(it) {
+      const box = document.getElementById('cockpit-appointment');
+      const txt = document.getElementById('cockpit-appointment-text');
+      if (!box || !txt) return;
+      const iso = it?.terugbel_datum;
+      const t = iso ? Date.parse(iso) : NaN;
+      if (!Number.isFinite(t)) { box.hidden = true; return; }
+      const d  = new Date(t);
+      const t0 = new Date(); t0.setHours(0,0,0,0);
+      const d0 = new Date(d); d0.setHours(0,0,0,0);
+      const diffDays = Math.round((d0 - t0) / 86400000);
+      const hhmm = d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+      const isZoom = String(it?.lead_kind || 'call') === 'zoom';
+      const prefix = isZoom ? 'Zoom-call' : 'Afspraak';
+      let when;
+      if (diffDays === 0)      when = 'vandaag ' + hhmm;
+      else if (diffDays === 1) when = 'morgen ' + hhmm;
+      else if (diffDays === -1) when = 'gisteren ' + hhmm;
+      else {
+        const day = d.toLocaleDateString('nl-NL', { weekday: 'short', day: '2-digit', month: 'short' });
+        when = day + ' · ' + hhmm;
+      }
+      txt.textContent = prefix + ': ' + when;
+      box.hidden = false;
     }
 
     // Lees het HUIDIGE nummer uit de belkaart-input. Sales kan het
@@ -5490,7 +5564,7 @@
           try {
             const r = await window.AgentShared.apiFetch('/api/follow-up-voicememo-round', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ lead_id: id }),
+              body: JSON.stringify({ appointment_id: id }),
             });
             const dd = await r.json().catch(() => ({}));
             if (!r.ok) throw new Error(dd?.error || 'HTTP ' + r.status);
