@@ -1732,6 +1732,81 @@
       .fu-afgb-reactivate { grid-column: 3 / 4; grid-row: 4; }
     }
 
+    /* Oude retenties-tab — filter-chips + compacte rijen met status-badge */
+    .fu-oret-chips {
+      display: flex; flex-wrap: wrap; gap: 6px;
+    }
+    .fu-oret-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-radius: 999px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: var(--text-secondary, rgba(255,255,255,.78));
+      font-size: 12.5px; font-weight: 600; cursor: pointer;
+      transition: background .12s, border-color .12s, color .12s;
+    }
+    .fu-oret-chip:hover { background: rgba(255,255,255,0.08); color: var(--text-primary, #fff); }
+    .fu-oret-chip.active { background: #093d54; color: #fff; border-color: #0d4d69; }
+    .fu-oret-chip .cnt {
+      display: inline-block; padding: 0 6px; border-radius: 10px;
+      background: rgba(255,255,255,0.15); font-size: 11px; font-weight: 700;
+    }
+    .fu-oret-chip.active .cnt { background: rgba(255,255,255,0.22); }
+
+    .fu-oret-row {
+      display: grid;
+      grid-template-columns: 28px 1fr auto auto auto;
+      gap: 12px; align-items: center;
+      padding: 10px 14px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 10px;
+      margin-bottom: 6px;
+    }
+    .fu-oret-row-icon i.ti {
+      font-size: 16px; color: var(--text-secondary, rgba(255,255,255,.65));
+    }
+    .fu-oret-row-main { min-width: 0; }
+    .fu-oret-row-main .name {
+      font-size: 13.5px; font-weight: 500; color: var(--text-primary, #fff);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .fu-oret-row-main .sub {
+      font-size: 11.5px; color: var(--text-secondary, rgba(255,255,255,.65));
+      margin-top: 2px;
+      display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+    }
+    .fu-oret-badge {
+      display: inline-block; padding: 3px 10px; border-radius: 999px;
+      font-size: 11px; font-weight: 700; letter-spacing: .3px;
+      white-space: nowrap;
+    }
+    .fu-oret-badge.r-blue   { background: #1d4ed8; color: #fff; }
+    .fu-oret-badge.r-orange { background: #ea580c; color: #fff; }
+    .fu-oret-badge.r-green  { background: #059669; color: #fff; }
+    .fu-oret-badge.r-gray   { background: #4b5563; color: #fff; }
+    .fu-oret-when { text-align: right; }
+    .fu-oret-when .k {
+      font-size: 10px; text-transform: uppercase; letter-spacing: .4px;
+      color: var(--text-secondary, rgba(255,255,255,.55));
+    }
+    .fu-oret-when .v {
+      font-size: 12px; color: var(--text-primary, #fff); font-variant-numeric: tabular-nums;
+    }
+    .fu-oret-pickup {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 12px; padding: 6px 10px;
+    }
+    @media (max-width: 900px) {
+      .fu-oret-row {
+        grid-template-columns: 28px 1fr auto;
+        row-gap: 6px;
+      }
+      .fu-oret-badge  { grid-column: 2 / 3; justify-self: start; }
+      .fu-oret-when   { grid-column: 2 / 4; text-align: left; }
+      .fu-oret-pickup { grid-column: 3 / 4; grid-row: 3; }
+    }
+
     /* Dashboard */
     .fu-db-kpigrid {
       display: grid;
@@ -2685,6 +2760,11 @@
         <span>Afgeboekt</span>
         <span class="fu-tab-count" id="tab-count-afgeboekt">—</span>
       </button>
+      <button class="fu-tab fu-tab--primary" data-tab="oude-retenties" role="tab" aria-selected="false">
+        <i class="ti ti-history" aria-hidden="true"></i>
+        <span>Oude retenties</span>
+        <span class="fu-tab-count" id="tab-count-oude-retenties">—</span>
+      </button>
 
       <!-- Topbar-rechts: voicememo-ronde-knop (verplaatst uit de queue). -->
       <span class="fu-topbar-spacer" aria-hidden="true"></span>
@@ -3196,7 +3276,7 @@
       </section>
     </div>
 
-    <!-- Afgeboekt-tab: alle negatief afgesloten items (leads +
+<!-- Afgeboekt-tab: alle negatief afgesloten items (leads +
          afspraken). Vervangt de vorige Event-bellijst-tab. Endpoint:
          /api/follow-up-afgeboekt (GET voor lijst + counts, POST voor
          "opnieuw oppakken"). Klik op rij → detail (lead → belkaart in
@@ -3207,6 +3287,19 @@
         <button class="fu-lead-btn" id="afgb-refresh" title="Vernieuwen" style="margin-left:auto"><i class="ti ti-refresh"></i></button>
       </div>
       <div id="afgb-list"><div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div></div>
+    </div>
+
+    <!-- Oude retenties-tab: browsbare achterstand. Retentie-abo's die AL
+         zijn afgelopen (maxEnd < vandaag) en >= 2026-01-01. Endpoint:
+         /api/follow-up-oude-retenties (GET achterstand + counts, POST
+         action=pickup → maak/hergebruik lead + terugbel_datum=now). Geen
+         bulk-import — sales pakt on-demand per klant. -->
+    <div class="fu-tab-panel" data-panel="oude-retenties" id="panel-oude-retenties">
+      <div class="fu-cockpit-filters" style="flex-direction:row;flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center">
+        <div class="fu-oret-chips" id="oret-chips" role="tablist"></div>
+        <button class="fu-lead-btn" id="oret-refresh" title="Vernieuwen" style="margin-left:auto"><i class="ti ti-refresh"></i></button>
+      </div>
+      <div id="oret-list"><div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div></div>
     </div>
 
     <!-- Voicememo-modal (auto-open s'ochtends bij Leads-tab) -->
@@ -4603,6 +4696,7 @@
       if (tabId === 'sluimerpot')     { loadSluimerpotTab(); }
       if (tabId === 'dashboard')      { loadDashboardTab(); }
       if (tabId === 'afgeboekt')      { loadAfgeboektTab(); }
+      if (tabId === 'oude-retenties') { loadOudeRetentiesTab(); }
     }
 
     // ── Sales-cockpit (Leads-tab, Fase 1) ────────────────────────────────
@@ -6262,6 +6356,7 @@
       dashboard  : { period: 'today' },
       voicememo  : { leads: [], counts: null, today: null, autoOpenedFor: null },
       afgeboekt   : { items: [], counts: null, filter: 'all', loading: false },
+      oudeRetenties: { items: [], counts: null, filter: 'all', loading: false },
     };
 
     // Gecombineerd datum + tijd voor afspraak-rijen: "Vandaag 17:04",
@@ -6631,6 +6726,190 @@
       } catch (e) {
         alert('Opnieuw oppakken mislukt: ' + (e.message || 'onbekend'));
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-refresh-dot"></i> Opnieuw oppakken'; }
+      }
+    }
+
+    // ── OUDE RETENTIES-TAB ─────────────────────────────────────────────
+    // Toont de retentie-achterstand: abonnementen die AL zijn afgelopen
+    // (maxEnd < vandaag) EN >= 2026-01-01. Bulk-import blijft achterwege
+    // — Sales pakt on-demand per klant op via de "Oppakken"-knop; dat
+    // maakt/hergebruikt een follow_up_lead met terugbel_datum=now zodat
+    // de werklijst niet massaal wordt gevuld.
+    const ORET_FILTERS = [
+      { key: 'all',         label: 'Alle',        icon: 'ti-list'         },
+      { key: 'nieuw',       label: 'Nieuw',       icon: 'ti-sparkles'     },
+      { key: 'opgepakt',    label: 'Opgepakt',    icon: 'ti-progress'     },
+      { key: 'afgehandeld', label: 'Afgehandeld', icon: 'ti-check'        },
+    ];
+    const ORET_STATUS_META = {
+      nieuw       : { label: 'Nieuw',        cls: 'r-blue'   },
+      opgepakt    : { label: 'Opgepakt',     cls: 'r-orange' },
+      afgehandeld : { label: 'Afgehandeld',  cls: 'r-green'  },
+    };
+
+    async function loadOudeRetentiesTab() {
+      const listEl = document.getElementById('oret-list');
+      const chipsEl = document.getElementById('oret-chips');
+      if (!listEl || !chipsEl) return;
+      if (_fase3State.oudeRetenties.loading) return;
+      _fase3State.oudeRetenties.loading = true;
+      listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
+      try {
+        const filter = _fase3State.oudeRetenties.filter || 'all';
+        const r = await window.AgentShared.apiFetch('/api/follow-up-oude-retenties?reden=' + encodeURIComponent(filter));
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          if (d?.code === 'MIGRATION_REQUIRED') {
+            listEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Migratie vereist voor oude retenties.</div>';
+            return;
+          }
+          throw new Error(d?.error || 'HTTP ' + r.status);
+        }
+        _fase3State.oudeRetenties.items  = d.items  || [];
+        _fase3State.oudeRetenties.counts = d.counts || null;
+        const cntEl = document.getElementById('tab-count-oude-retenties');
+        // Badge toont 'nieuw'-count (nog niet opgepakte achterstand).
+        if (cntEl) cntEl.textContent = String(d.counts?.nieuw ?? d.counts?.totaal ?? '—');
+        _renderOudeRetentiesChips();
+        _renderOudeRetenties();
+      } catch (e) {
+        listEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Fout: ' + esc(e.message || '') + '</div>';
+      } finally {
+        _fase3State.oudeRetenties.loading = false;
+      }
+    }
+
+    function _renderOudeRetentiesChips() {
+      const chipsEl = document.getElementById('oret-chips');
+      if (!chipsEl) return;
+      const active = _fase3State.oudeRetenties.filter || 'all';
+      const counts = _fase3State.oudeRetenties.counts || {};
+      chipsEl.innerHTML = ORET_FILTERS.map((f) => {
+        const cntKey = f.key === 'all' ? 'totaal' : f.key;
+        const cnt = counts[cntKey];
+        const cntSpan = (cnt !== undefined && cnt !== null)
+          ? `<span class="cnt">${Number(cnt) || 0}</span>` : '';
+        const activeCls = f.key === active ? ' active' : '';
+        return `<button type="button" class="fu-oret-chip${activeCls}" data-oret-filter="${esc(f.key)}"><i class="ti ${f.icon}"></i> ${esc(f.label)}${cntSpan}</button>`;
+      }).join('');
+      chipsEl.querySelectorAll('[data-oret-filter]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          _fase3State.oudeRetenties.filter = btn.getAttribute('data-oret-filter') || 'all';
+          loadOudeRetentiesTab();
+        });
+      });
+    }
+
+    function _renderOudeRetenties() {
+      const el = document.getElementById('oret-list');
+      if (!el) return;
+      const items = _fase3State.oudeRetenties.items || [];
+      if (!items.length) {
+        const f = _fase3State.oudeRetenties.filter || 'all';
+        const lbl = (ORET_FILTERS.find((x) => x.key === f)?.label || 'items').toLowerCase();
+        el.innerHTML = `<div class="fu-empty"><i class="ti ti-history fu-empty-icon"></i>Niks in "${esc(lbl)}".</div>`;
+        return;
+      }
+      el.innerHTML = items.map((it) => {
+        const status = it.pickup_status || 'nieuw';
+        const meta = ORET_STATUS_META[status] || { label: status, cls: 'r-gray' };
+        const endLabel = it.end_date ? _fmtEndDateNL(it.end_date) : '—';
+        const btnLabel = status === 'nieuw' ? 'Oppakken' : 'Openen';
+        const btnIcon  = status === 'nieuw' ? 'ti-user-plus' : 'ti-external-link';
+        return `<div class="fu-oret-row">
+          <div class="fu-oret-row-icon"><i class="ti ti-history"></i></div>
+          <div class="fu-oret-row-main">
+            <div class="name">${esc(it.name)}</div>
+            <div class="sub">
+              <span>${it.phone ? esc(it.phone) : '<span style="opacity:.5">— geen tel —</span>'}</span>
+              ${it.email ? '<span>·</span><span>' + esc(it.email) + '</span>' : ''}
+              ${it.mentor_name ? '<span>·</span><span><i class="ti ti-user"></i> ' + esc(it.mentor_name) + '</span>' : ''}
+            </div>
+          </div>
+          <span class="fu-oret-badge ${esc(meta.cls)}">${esc(meta.label)}</span>
+          <div class="fu-oret-when">
+            <div class="k">Afgelopen op</div>
+            <div class="v">${esc(endLabel)}</div>
+          </div>
+          <button type="button" class="fu-lead-btn fu-oret-pickup ${status === 'nieuw' ? 'primary' : ''}"
+                  data-oret-pickup-id="${esc(it.customer_id)}"
+                  data-oret-pickup-end="${esc(it.end_date || '')}"
+                  data-oret-pickup-lss="${esc(it.last_sub_status || '')}"
+                  data-oret-pickup-lead="${esc(it.lead_id || '')}"
+                  data-oret-pickup-status="${esc(status)}"
+                  title="${status === 'nieuw' ? 'Aanmaken en openen in werklijst' : 'Openen in werklijst'}">
+            <i class="ti ${btnIcon}"></i> ${esc(btnLabel)}
+          </button>
+        </div>`;
+      }).join('');
+
+      el.querySelectorAll('.fu-oret-pickup').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          _oretPickup({
+            customer_id    : btn.getAttribute('data-oret-pickup-id'),
+            end_date       : btn.getAttribute('data-oret-pickup-end') || null,
+            last_sub_status: btn.getAttribute('data-oret-pickup-lss') || null,
+            lead_id        : btn.getAttribute('data-oret-pickup-lead') || null,
+            status         : btn.getAttribute('data-oret-pickup-status') || 'nieuw',
+          }, btn);
+        });
+      });
+    }
+
+    function _fmtEndDateNL(iso) {
+      if (!iso) return '—';
+      try {
+        const d = new Date(String(iso).slice(0, 10) + 'T12:00:00');
+        if (isNaN(d.getTime())) return String(iso);
+        return d.toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' });
+      } catch { return String(iso); }
+    }
+
+    async function _oretPickup(row, btn) {
+      if (!row.customer_id) return;
+      if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Bezig…'; }
+      try {
+        let leadId = row.lead_id || null;
+
+        // Als er nog geen lead is (nieuw) of enkel een afgehandelde lead:
+        // roep pickup aan zodat een nieuwe/hergebruikte open lead
+        // gemaakt wordt met terugbel_datum=now.
+        if (!leadId || row.status === 'nieuw' || row.status === 'afgehandeld') {
+          const r = await window.AgentShared.apiFetch('/api/follow-up-oude-retenties', {
+            method : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body   : JSON.stringify({
+              action         : 'pickup',
+              customer_id    : row.customer_id,
+              end_date       : row.end_date || null,
+              last_sub_status: row.last_sub_status || null,
+            }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+          leadId = d.lead_id || leadId;
+        }
+
+        try { window.AgentShared?.showToast?.('Lead klaar in de werklijst.', 'success'); }
+        catch (_) {}
+
+        // Switch naar Werklijst + open de lead in de belkaart. loadLeadsTab
+        // haalt 'm op; selectLead met korte delay zodat de lijst gerender is.
+        switchTab('leads');
+        setTimeout(() => {
+          try { loadLeadsTab(); } catch (_) {}
+          if (leadId) setTimeout(() => {
+            try { selectLead(leadId); } catch (_) {}
+          }, 300);
+        }, 100);
+      } catch (e) {
+        alert('Oppakken mislukt: ' + (e.message || 'onbekend'));
+        if (btn) {
+          btn.disabled = false;
+          const label = row.status === 'nieuw' ? 'Oppakken' : 'Openen';
+          const icon  = row.status === 'nieuw' ? 'ti-user-plus' : 'ti-external-link';
+          btn.innerHTML = `<i class="ti ${icon}"></i> ${label}`;
+        }
       }
     }
 
@@ -7402,6 +7681,10 @@
       // Afgeboekt refresh
       const afgbRf = document.getElementById('afgb-refresh');
       if (afgbRf) afgbRf.addEventListener('click', () => loadAfgeboektTab());
+
+      // Oude retenties refresh
+      const oretRf = document.getElementById('oret-refresh');
+      if (oretRf) oretRf.addEventListener('click', () => loadOudeRetentiesTab());
 
       // Voicememo-modal — handmatig openen + close-knop + acties
       const vmOpen  = document.getElementById('cockpit-voicememo-open');
