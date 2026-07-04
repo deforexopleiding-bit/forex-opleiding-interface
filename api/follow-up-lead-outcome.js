@@ -434,8 +434,11 @@ export default async function handler(req, res) {
         });
       } catch (e) {
         if (e?.code === 'NO_GHL_CONTACT') {
+          // Nu de upsert-fallback bestaat betekent NO_GHL_CONTACT alleen
+          // nog "geen e-mail én geen telefoon" — er is niks om GHL op
+          // te dedupliceren, dus we willen geen spook-contact aanmaken.
           return res.status(422).json({
-            error: 'Kon geen GHL-contact koppelen (geen ghl_contact_id op klant of event-koppeling). Bel de klant handmatig en check de TeamLeader/GHL-koppeling.',
+            error: 'Geen e-mail of telefoon bekend — kan geen GHL-contact aanmaken. Vul klantgegevens aan.',
             code : 'NO_GHL_CONTACT',
           });
         }
