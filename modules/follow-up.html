@@ -1098,7 +1098,15 @@
       font-size: 11.5px; color: var(--text-secondary, rgba(255,255,255,.7));
       display: flex; align-items: center; gap: 6px; margin-top: 1px;
     }
-    .fu-cockpit-leadcard-badges { display: inline-flex; gap: 4px; }
+    /* Badge-container: expliciete gap + flex-wrap zodat mini-badges
+       (Ret / Zoom / Event / 🔥 / Poging) niet aan elkaar plakken. Margin
+       op de kinderen als fallback voor render-omstandigheden waar gap
+       niet aanslaat (oude WebKit, contained inline-flex). */
+    .fu-cockpit-leadcard-badges {
+      display: inline-flex; flex-wrap: wrap; gap: 4px;
+      align-items: center;
+    }
+    .fu-cockpit-leadcard-badges > .fu-cockpit-mini-badge + .fu-cockpit-mini-badge { margin-left: 4px; }
     /* Badges met voldoende contrast: donkere tekst op vaste tint zodat
        ze in beide themas leesbaar zijn. Achtergronden zijn niet meer
        semi-transparant zodat ze niet vervagen op de kleuren-gradient
@@ -1150,7 +1158,11 @@
       margin: 0; font-size: 18px; color: var(--text-primary, #fff);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .fu-cockpit-dhead-badges { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+    .fu-cockpit-dhead-badges {
+      display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap;
+      align-items: center;
+    }
+    .fu-cockpit-dhead-badges > .fu-cockpit-mini-badge + .fu-cockpit-mini-badge { margin-left: 4px; }
     .fu-cockpit-dhead-links {
       display: flex; gap: 10px; font-size: 12.5px; margin-top: 4px;
       color: var(--text-secondary, rgba(255,255,255,.75)); flex-wrap: wrap;
@@ -1369,16 +1381,36 @@
     .fu-softphone-retry[hidden] { display: none !important; }
 
     /* Belbalk (actieve call) */
+    /* Softphone-callbar: GLOBALE fixed overlay tijdens een actief gesprek.
+       Verplaatst uit #cockpit-detail zodat 'ie ook zichtbaar is wanneer je
+       de afspraak-detail (#cockpit-apptbody) hebt geopend en de lead-
+       belkaart verborgen is. Zo blijft ophangen/mute/timer altijd bij
+       de hand, ongeacht welke view actief is. */
     .fu-softphone-callbar {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 9999;
       display: flex; align-items: center; gap: 14px;
-      background: linear-gradient(180deg, rgba(9,61,84,0.85), rgba(9,61,84,0.7));
-      border: 1px solid rgba(255,255,255,0.14);
-      border-radius: 12px; padding: 12px 14px;
-      margin: 10px 0 14px 0;
+      background: linear-gradient(180deg, rgba(9,61,84,0.95), rgba(9,61,84,0.85));
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 12px; padding: 12px 16px;
       color: #fff;
-      box-shadow: 0 4px 18px rgba(0,0,0,0.25);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+      min-width: 320px; max-width: calc(100vw - 40px);
+      animation: fuCallbarSlideIn .18s ease-out;
+    }
+    @keyframes fuCallbarSlideIn {
+      from { transform: translateY(20px); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
     }
     .fu-softphone-callbar[hidden] { display: none !important; }
+    @media (max-width: 720px) {
+      .fu-softphone-callbar {
+        left: 12px; right: 12px; bottom: 12px;
+        min-width: 0;
+      }
+    }
     .fu-softphone-callbar-status {
       display: flex; flex-direction: column; gap: 2px;
       flex: 1; min-width: 0;
@@ -3118,26 +3150,6 @@
               </div>
             </div>
 
-            <!-- Belbalk-overlay: verschijnt bij een actieve softphone-call.
-                 Toont live status (Kiezen / Gaat over / In gesprek),
-                 gesprekstimer + Mute + Ophangen. Audio-element speelt de
-                 remote stream (autoplay); mic wordt via getUserMedia
-                 opgevraagd door SIP.js. -->
-            <div class="fu-softphone-callbar" id="softphone-callbar" hidden>
-              <div class="fu-softphone-callbar-status">
-                <span class="fu-softphone-callbar-title" id="softphone-callbar-title">Kiezen…</span>
-                <span class="fu-softphone-callbar-sub" id="softphone-callbar-sub"></span>
-              </div>
-              <span class="fu-softphone-callbar-timer" id="softphone-callbar-timer">00:00</span>
-              <div class="fu-softphone-callbar-actions">
-                <button type="button" class="fu-softphone-callbar-btn mute" id="softphone-mute" title="Microfoon dempen">
-                  <i class="ti ti-microphone"></i>
-                </button>
-                <button type="button" class="fu-softphone-callbar-btn hangup" id="softphone-hangup" title="Ophangen">
-                  <i class="ti ti-phone-off"></i>
-                </button>
-              </div>
-            </div>
             <audio id="softphone-audio" autoplay></audio>
 
             <!-- Uitkomst-panel: verschijnt na "Bel nu" of "Zoom openen" en
@@ -3323,6 +3335,30 @@
         <button class="fu-lead-btn" id="oret-refresh" title="Vernieuwen" style="margin-left:auto"><i class="ti ti-refresh"></i></button>
       </div>
       <div id="oret-list"><div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div></div>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────
+         GLOBALE softphone-callbar: verplaatst uit #cockpit-detail zodat
+         'ie ALTIJD zichtbaar is tijdens een actief gesprek — ook wanneer
+         de gebruiker de afspraak-detail (#cockpit-apptbody) open heeft
+         staan en de lead-belkaart is verborgen. Positie via CSS
+         (.fu-softphone-callbar → position:fixed bottom-right). ID's +
+         handlers ongewijzigd (softphone-callbar-title/-sub/-timer/
+         -mute/-hangup). Show/hide via [hidden]-toggle blijft werken. -->
+    <div class="fu-softphone-callbar" id="softphone-callbar" hidden>
+      <div class="fu-softphone-callbar-status">
+        <span class="fu-softphone-callbar-title" id="softphone-callbar-title">Kiezen…</span>
+        <span class="fu-softphone-callbar-sub" id="softphone-callbar-sub"></span>
+      </div>
+      <span class="fu-softphone-callbar-timer" id="softphone-callbar-timer">00:00</span>
+      <div class="fu-softphone-callbar-actions">
+        <button type="button" class="fu-softphone-callbar-btn mute" id="softphone-mute" title="Microfoon dempen">
+          <i class="ti ti-microphone"></i>
+        </button>
+        <button type="button" class="fu-softphone-callbar-btn hangup" id="softphone-hangup" title="Ophangen">
+          <i class="ti ti-phone-off"></i>
+        </button>
+      </div>
     </div>
 
     <!-- Voicememo-modal (auto-open s'ochtends bij Leads-tab) -->
