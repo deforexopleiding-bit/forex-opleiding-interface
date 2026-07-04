@@ -37,7 +37,11 @@ const OUTCOMES = new Set([
   // Wordt vanuit de UI aangeroepen wanneer de sales-user op "Offerte maken" klikt,
   // zodat het dashboard offerte-starts kan tellen zonder eerdere state te muteren.
   'offerte_gestart',
+  // Corrigeer-flow: draai de vorige outcome terug naar prev_state.
+  'undo',
 ]);
+
+const PREV_STATE_KEYS = ['lead_status', 'attempts', 'terugbel_datum', 'is_hot', 'snoozed_until', 'last_outcome'];
 
 const CADENCE_HOURS = [2, 24, 72];
 const MAX_ATTEMPTS  = 4;
@@ -124,6 +128,70 @@ export default async function handler(req, res) {
   const outcome = String(body.outcome || '').trim();
   if (!OUTCOMES.has(outcome)) return res.status(400).json({ error: 'outcome ongeldig' });
 
+  // 'undo' — corrigeer de vorige uitkomst: herstel lead naar prev_state
+  // en clear prev_state. Vereist dat er iets in prev_state staat; anders
+  // 400. Owner-gate identiek aan de andere outcomes.
+  if (outcome === 'undo') {
+    const { data: myp } = await supabaseAdmin
+      .from('profiles').select('role').eq('id', user.id).maybeSingle();
+    const uRole = String(myp?.role || '').toLowerCase();
+    const uAdmin = ADMIN_ROLES.has(uRole);
+    const uSales = uRole === 'sales';
+    // Fetch met prev_state; 42703 → kolom ontbreekt (migratie nodig).
+    let leadRow;
+    {
+      const { data, error } = await supabaseAdmin
+        .from('follow_up_leads')
+        .select('id, owner_id, lead_status, attempts, terugbel_datum, is_hot, snoozed_until, last_outcome, prev_state')
+        .eq('id', leadId)
+        .maybeSingle();
+      if (error) {
+        if (error.code === '42P01') return res.status(501).json({ error: 'Tabel follow_up_leads ontbreekt', code: 'MIGRATION_REQUIRED' });
+        if (error.code === '42703') return res.status(501).json({ error: 'prev_state kolom ontbreekt — ALTER TABLE public.follow_up_leads ADD COLUMN prev_state jsonb;', code: 'MIGRATION_REQUIRED' });
+        return res.status(500).json({ error: 'lead fetch: ' + error.message });
+      }
+      leadRow = data;
+    }
+    if (!leadRow) return res.status(404).json({ error: 'Lead niet gevonden' });
+    if (!uAdmin) {
+      if (!uSales) return res.status(403).json({ error: 'Geen rechten (rol vereist: sales/manager/admin)' });
+      if (leadRow.owner_id && leadRow.owner_id !== user.id) {
+        return res.status(403).json({ error: 'Deze lead is aan een andere sales toegewezen' });
+      }
+    }
+    const prev = (leadRow.prev_state && typeof leadRow.prev_state === 'object') ? leadRow.prev_state : null;
+    if (!prev) return res.status(400).json({ error: 'Niets te corrigeren (geen vorige staat opgeslagen)' });
+
+    const nowIso = new Date().toISOString();
+    const restorePatch = { updated_at: nowIso, prev_state: null };
+    for (const k of PREV_STATE_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(prev, k)) restorePatch[k] = prev[k];
+    }
+    // 42703 defensief strippen (rijke kolommen kunnen ontbreken).
+    let attempt = { ...restorePatch };
+    for (let i = 0; i < 3; i++) {
+      const { data, error } = await supabaseAdmin
+        .from('follow_up_leads').update(attempt).eq('id', leadId).select('id').maybeSingle();
+      if (!error) break;
+      if (error.code === '42703') {
+        const msg = String(error.message || '').toLowerCase();
+        let didStrip = false;
+        for (const k of ['attempts','is_hot','snoozed_until','last_outcome','prev_state']) {
+          if (msg.includes(k) && k in attempt) { delete attempt[k]; didStrip = true; }
+        }
+        if (!didStrip) return res.status(500).json({ error: 'undo update: ' + error.message });
+        continue;
+      }
+      return res.status(500).json({ error: 'undo update: ' + error.message });
+    }
+    try {
+      await insertOutcomeNote(leadId, user.id, 'Uitkomst gecorrigeerd (teruggedraaid)', {
+        entryKind: 'system', outcomeCode: 'undo',
+      });
+    } catch (_) { /* fail-soft */ }
+    return res.status(200).json({ ok: true, undone: true, restored: attempt });
+  }
+
   // 'offerte_gestart' is een fire-and-forget log-actie zonder state-mutatie:
   // dashboard telt hem, maar de lead-status blijft ongewijzigd zodat de
   // normale bel-flow doorloopt. Owner-gate wel toepassen zodat sales geen
@@ -201,11 +269,20 @@ export default async function handler(req, res) {
   const currentAttempts = Number(leadRow.attempts || 0);
   const currentKind     = String(leadRow.lead_kind || 'call');
 
+  // Bewaar de HUIDIGE staat als prev_state (jsonb) — zodat de UI met
+  // 'undo' 1 stap terug kan. Bij ontbreken van de kolom (42703) wordt
+  // dit veld in de update gestript, dus geen crash.
+  const currentSnapshot = {};
+  for (const k of PREV_STATE_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(leadRow, k)) currentSnapshot[k] = leadRow[k];
+  }
+
   // Bouw patch + noteText per outcome.
   const patch = {
     updated_at      : nowIso,
     last_contact_at : nowIso,
     last_outcome    : outcome,
+    prev_state      : currentSnapshot,
   };
   let noteText  = '';
   let attemptsAfter = currentAttempts;
@@ -315,7 +392,7 @@ export default async function handler(req, res) {
         const msg = String(error.message || '').toLowerCase();
         const stripped = { ...updateAttempt };
         let didStrip = false;
-        for (const k of ['attempts', 'is_hot', 'snoozed_until', 'lead_kind', 'last_outcome']) {
+        for (const k of ['attempts', 'is_hot', 'snoozed_until', 'lead_kind', 'last_outcome', 'prev_state']) {
           if (msg.includes(k) && k in stripped) { delete stripped[k]; didStrip = true; }
         }
         if (!didStrip) return res.status(500).json({ error: 'update: ' + error.message });

@@ -2442,6 +2442,40 @@
     /* Buckets container spacing */
     .fu-cockpit-buckets { gap: 4px; }
 
+    /* Compacte belronde-knop (in de queue-toggles i.p.v. groot boven).
+       Behoudt het bestaande active-state (oranje/dang bij focus-modus). */
+    .fu-belronde-compact {
+      padding: 5px 10px !important;
+      font-size: 12px !important;
+      font-weight: 600;
+      background: #fff;
+      color: var(--muted-2);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      display: inline-flex; align-items: center; gap: 4px;
+      box-shadow: none;
+    }
+    .fu-belronde-compact:hover { background: var(--paper); color: var(--text); }
+    .fu-belronde-compact.active {
+      background: var(--hot); color: #fff; border-color: var(--hot);
+      box-shadow: 0 1px 6px rgba(232,98,44,.25);
+    }
+    .fu-belronde-compact.active:hover { background: #cf541f; }
+
+    /* Uitkomst corrigeren-link boven de tijdlijn */
+    .fu-tl-undo {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: transparent;
+      border: none;
+      color: var(--info);
+      font-size: 12px; font-weight: 600;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 6px;
+    }
+    .fu-tl-undo:hover { background: var(--info-soft); }
+    .fu-tl-undo:disabled { opacity: .5; cursor: not-allowed; }
+
     /* ── Hoogte-fix: werklijst + detail vullen viewport ────────────
        De queue en detail-kolom nemen de resterende viewport-hoogte in,
        zodat er veel meer afspraken/leads zichtbaar zijn zonder dat de
@@ -2778,15 +2812,15 @@
             <div class="fu-cockpit-toggles">
               <label class="fu-cockpit-toggle"><input type="checkbox" id="cockpit-mine"> Mijn leads</label>
               <label class="fu-cockpit-toggle"><input type="checkbox" id="cockpit-snoozed"> 💤 Later opnieuw</label>
+              <button class="fu-lead-btn fu-belronde-compact" id="cockpit-belronde" type="button" title="Start focus-belronde">
+                <i class="ti ti-player-play" id="cockpit-belronde-icon"></i>
+                <span id="cockpit-belronde-lbl">Belronde</span>
+              </button>
+              <button class="fu-lead-btn" id="cockpit-voicememo-open" type="button" title="Voicememo-ronde openen">
+                🎙
+              </button>
               <button class="fu-lead-btn" id="cockpit-refresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
             </div>
-            <button class="fu-belronde-btn" id="cockpit-belronde" type="button">
-              <i class="ti ti-player-play" id="cockpit-belronde-icon"></i>
-              <span id="cockpit-belronde-lbl">Start belronde</span>
-            </button>
-            <button class="fu-lead-btn" id="cockpit-voicememo-open" type="button" title="Voicememo-ronde openen">
-              🎙 Voicememo-ronde
-            </button>
           </div>
           <div class="fu-cockpit-summary" id="cockpit-summary"></div>
           <div class="fu-cockpit-buckets" id="cockpit-buckets">
@@ -2967,6 +3001,9 @@
               <div class="fu-cockpit-section-title">
                 <i class="ti ti-history"></i> Contact-geschiedenis
                 <span class="fu-cockpit-section-sub" id="cockpit-attempts"></span>
+                <button type="button" class="fu-tl-undo" id="cockpit-undo-outcome" hidden title="Draai de vorige uitkomst terug en kies opnieuw">
+                  <i class="ti ti-arrow-back-up"></i> Uitkomst corrigeren
+                </button>
               </div>
               <div class="fu-cockpit-timeline" id="cockpit-timeline">
                 <div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>
@@ -4914,6 +4951,15 @@
         const dsc = (it.days_since_contact != null) ? ` · ${it.days_since_contact}d sinds contact` : '';
         attemptsEl.textContent = a > 0 ? `Poging ${a}/4${dsc}` : (dsc ? dsc.replace(/^ · /, '') : '');
       }
+      // Undo-knop tonen als er een last_outcome bestaat die te corrigeren
+      // valt (system-events zoals 'offerte_gestart'/'undo' vallen af).
+      const undoEl = document.getElementById('cockpit-undo-outcome');
+      if (undoEl) {
+        const lo = String(it.last_outcome || '');
+        const UNDOABLE = new Set(['geen_gehoor','voicemail','foutief_nummer','terugbel','zoom_ingepland','sale','geen_interesse','snooze','noshow','gesprek_gehad','whatsapp_gestuurd']);
+        undoEl.hidden = !UNDOABLE.has(lo);
+        undoEl.dataset.leadId = it.id;
+      }
 
       // Timeline
       if (refreshTimeline) {
@@ -5906,6 +5952,34 @@
           }
         });
       }
+
+      // Uitkomst corrigeren (undo): POST outcome='undo' + heropen panel.
+      const undoBtn = document.getElementById('cockpit-undo-outcome');
+      if (undoBtn) undoBtn.addEventListener('click', async () => {
+        const leadId = undoBtn.dataset.leadId || _leadsState.selectedId;
+        if (!leadId) return;
+        undoBtn.disabled = true;
+        try {
+          const r = await window.AgentShared.apiFetch('/api/follow-up-lead-outcome', {
+            method : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body   : JSON.stringify({ lead_id: leadId, outcome: 'undo' }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+          await loadLeadsTab();
+          if (_leadsState.selectedId) loadLeadTimeline(_leadsState.selectedId);
+          // Heropen uitkomst-panel zodat Dave meteen de juiste kiest.
+          try {
+            const it = (_leadsState.items || []).find((x) => x.id === leadId);
+            _openOutcomePanel(String(it?.lead_kind || 'call') === 'zoom');
+          } catch (_) {}
+        } catch (e) {
+          alert('Corrigeren mislukt: ' + (e.message || 'onbekend'));
+        } finally {
+          undoBtn.disabled = false;
+        }
+      });
 
       // Note-add
       const noteBtn   = document.getElementById('cockpit-note-add');
