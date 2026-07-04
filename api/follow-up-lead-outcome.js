@@ -60,6 +60,30 @@ function monthsFromNow(months) {
   return d.toISOString();
 }
 
+// Herkent alle Postgres/PostgREST-varianten die op "kolom ontbreekt" wijzen:
+// 42703 = SQL-error "column does not exist"
+// PGRST204 = PostgREST schema-cache miss (bv. na migratie zonder reload)
+// "Could not find the '<col>' column" — PostgREST message-tekst
+// "schema cache" — idem
+function isMissingColumnError(error) {
+  if (!error) return false;
+  if (error.code === '42703' || error.code === 'PGRST204') return true;
+  const msg = String(error.message || '') + ' ' + String(error.details || '') + ' ' + String(error.hint || '');
+  return /could not find the/i.test(msg) || /schema cache/i.test(msg);
+}
+
+// Vind alle kolomnamen uit `candidates` die in de foutmelding worden
+// genoemd. Werkt op zowel de expliciete 42703-message ("column X does
+// not exist") als de PostgREST-variant ("Could not find the 'X' column").
+function stripMissingColumns(error, obj, candidates) {
+  const msg = (String(error?.message || '') + ' ' + String(error?.details || '') + ' ' + String(error?.hint || '')).toLowerCase();
+  let didStrip = false;
+  for (const k of candidates) {
+    if (msg.includes(k) && k in obj) { delete obj[k]; didStrip = true; }
+  }
+  return didStrip;
+}
+
 async function insertOutcomeNote(leadId, userId, text, {
   entryKind    = 'outcome',
   outcomeCode  = null,
@@ -95,7 +119,7 @@ async function insertOutcomeNote(leadId, userId, text, {
     const { data, error } = await attempt(buildPayload(opts));
     if (!error) return data || null;
     lastError = error;
-    if (error.code !== '42703') break;
+    if (!isMissingColumnError(error)) break;
   }
   if (lastError) {
     if (lastError.code === '42P01') {
@@ -147,10 +171,23 @@ export default async function handler(req, res) {
         .maybeSingle();
       if (error) {
         if (error.code === '42P01') return res.status(501).json({ error: 'Tabel follow_up_leads ontbreekt', code: 'MIGRATION_REQUIRED' });
-        if (error.code === '42703') return res.status(501).json({ error: 'prev_state kolom ontbreekt — ALTER TABLE public.follow_up_leads ADD COLUMN prev_state jsonb;', code: 'MIGRATION_REQUIRED' });
-        return res.status(500).json({ error: 'lead fetch: ' + error.message });
+        // 42703 of PostgREST-schema-cache-miss ("Could not find the
+        // 'prev_state' column") → fall back op minimale select zodat undo
+        // niet blokkeert; verderop detecteren we alsnog een leeg prev.
+        if (isMissingColumnError(error)) {
+          const { data: d2, error: e2 } = await supabaseAdmin
+            .from('follow_up_leads')
+            .select('id, owner_id, lead_status, attempts, terugbel_datum, is_hot, snoozed_until, last_outcome')
+            .eq('id', leadId)
+            .maybeSingle();
+          if (e2) return res.status(500).json({ error: 'lead fetch: ' + e2.message });
+          leadRow = d2 || null;
+        } else {
+          return res.status(500).json({ error: 'lead fetch: ' + error.message });
+        }
+      } else {
+        leadRow = data;
       }
-      leadRow = data;
     }
     if (!leadRow) return res.status(404).json({ error: 'Lead niet gevonden' });
     if (!uAdmin) {
@@ -173,12 +210,8 @@ export default async function handler(req, res) {
       const { data, error } = await supabaseAdmin
         .from('follow_up_leads').update(attempt).eq('id', leadId).select('id').maybeSingle();
       if (!error) break;
-      if (error.code === '42703') {
-        const msg = String(error.message || '').toLowerCase();
-        let didStrip = false;
-        for (const k of ['attempts','is_hot','snoozed_until','last_outcome','prev_state']) {
-          if (msg.includes(k) && k in attempt) { delete attempt[k]; didStrip = true; }
-        }
+      if (isMissingColumnError(error)) {
+        const didStrip = stripMissingColumns(error, attempt, ['attempts','is_hot','snoozed_until','last_outcome','prev_state']);
         if (!didStrip) return res.status(500).json({ error: 'undo update: ' + error.message });
         continue;
       }
@@ -242,7 +275,7 @@ export default async function handler(req, res) {
       .from('follow_up_leads').select(RICH_COLS).eq('id', leadId).maybeSingle();
     if (error) {
       if (error.code === '42P01') return res.status(501).json({ error: 'Tabel follow_up_leads ontbreekt', code: 'MIGRATION_REQUIRED' });
-      if (error.code === '42703') {
+      if (isMissingColumnError(error)) {
         hasRichCols = false;
         const { data: d2, error: e2 } = await supabaseAdmin
           .from('follow_up_leads').select(CORE_COLS).eq('id', leadId).maybeSingle();
@@ -443,14 +476,12 @@ export default async function handler(req, res) {
         .maybeSingle();
       if (!error) { updated = data; break; }
       if (error.code === '42P01') return res.status(501).json({ error: 'Tabel follow_up_leads ontbreekt', code: 'MIGRATION_REQUIRED' });
-      if (error.code === '42703') {
-        // Detecteer welke kolom, en strip die.
-        const msg = String(error.message || '').toLowerCase();
+      if (isMissingColumnError(error)) {
+        // Detecteer welke kolom, en strip die. Werkt óók bij PostgREST-
+        // schema-cache-miss (PGRST204 / "Could not find the '<col>'
+        // column") die zonder deze harding een outcome zou blokkeren.
         const stripped = { ...updateAttempt };
-        let didStrip = false;
-        for (const k of ['attempts', 'is_hot', 'snoozed_until', 'lead_kind', 'last_outcome', 'prev_state']) {
-          if (msg.includes(k) && k in stripped) { delete stripped[k]; didStrip = true; }
-        }
+        const didStrip = stripMissingColumns(error, stripped, ['attempts', 'is_hot', 'snoozed_until', 'lead_kind', 'last_outcome', 'prev_state']);
         if (!didStrip) return res.status(500).json({ error: 'update: ' + error.message });
         updateAttempt = stripped;
         continue;

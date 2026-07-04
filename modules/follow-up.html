@@ -1008,7 +1008,19 @@
       max-height: calc(100vh - 200px);
       overflow: hidden;
     }
-    .fu-cockpit-filters { display: flex; flex-direction: column; gap: 8px; }
+    .fu-cockpit-filters { display: flex; flex-direction: column; gap: 10px; }
+    /* Filter-rij (Bron / Snelfilter): compact label + pill-groep. Rijen
+       staan onder elkaar zodat de sales-user snel visueel scant welke
+       filter waar zit. */
+    .fu-filter-row {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    .fu-filter-row-lbl {
+      font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px;
+      color: var(--text-secondary, rgba(255,255,255,.55));
+      font-weight: 700;
+      min-width: 74px;
+    }
     .fu-cockpit-pillgroup { display: flex; flex-wrap: wrap; gap: 6px; }
     .fu-cockpit-pill {
       appearance: none; border: 1px solid var(--border-default, rgba(255,255,255,0.14));
@@ -2116,7 +2128,7 @@
       display: inline-flex; align-items: center; gap: 8px;
       padding: 8px 14px;
       font-size: 14px; font-weight: 600;
-      color: rgba(255,255,255,.88);
+      color: #cfe0ec;
       background: transparent;
       border: none; border-radius: 8px;
       cursor: pointer;
@@ -2124,7 +2136,10 @@
       transition: background .15s, color .15s;
       white-space: nowrap;
     }
-    .fu-tab:hover { background: rgba(255,255,255,.10); color: #fff; }
+    .fu-tab:hover { background: rgba(255,255,255,.12); color: #fff; }
+    /* Feller default voor niet-actieve primaire tabs — de vorige 88%-
+       waarde bleef nog te laag contrast op de donkere balk. */
+    .fu-tab--primary:not(.active) { color: #cfe0ec; }
     .fu-tab.active {
       color: #fff !important;
       background: rgba(255,255,255,.13);
@@ -3002,15 +3017,23 @@
         <!-- LINKS: werklijst -->
         <aside class="fu-cockpit-list" id="cockpit-list">
           <div class="fu-cockpit-filters">
-            <div class="fu-cockpit-pillgroup" role="group" aria-label="Bron">
-              <button class="fu-cockpit-pill active" data-filter="source" data-value="all">Alle bronnen</button>
-              <button class="fu-cockpit-pill"        data-filter="source" data-value="retention">Retentie</button>
-              <button class="fu-cockpit-pill"        data-filter="source" data-value="event">Event</button>
+            <div class="fu-filter-row" role="group" aria-label="Bron">
+              <span class="fu-filter-row-lbl">Bron</span>
+              <div class="fu-cockpit-pillgroup">
+                <button class="fu-cockpit-pill active" data-filter="source" data-value="all">Alle bronnen</button>
+                <button class="fu-cockpit-pill"        data-filter="source" data-value="retention">Retentie</button>
+                <button class="fu-cockpit-pill"        data-filter="source" data-value="event">Event</button>
+                <button class="fu-cockpit-pill"        data-filter="source" data-value="zoom"><i class="ti ti-video"></i> Zoom</button>
+              </div>
             </div>
-            <div class="fu-cockpit-pillgroup" role="group" aria-label="Type">
-              <button class="fu-cockpit-pill active" data-filter="kind" data-value="all">Alle</button>
-              <button class="fu-cockpit-pill"        data-filter="kind" data-value="call">Bel</button>
-              <button class="fu-cockpit-pill"        data-filter="kind" data-value="zoom">Zoom</button>
+            <div class="fu-filter-row" role="group" aria-label="Snelfilters">
+              <span class="fu-filter-row-lbl">Snelfilter</span>
+              <div class="fu-cockpit-pillgroup">
+                <button class="fu-cockpit-pill" data-quick="hot">🔥 Hotleads</button>
+                <button class="fu-cockpit-pill" data-quick="te_laat">⏰ Te laat</button>
+                <button class="fu-cockpit-pill" data-quick="vandaag">📅 Vandaag</button>
+                <button class="fu-cockpit-pill" data-quick="reschedule">💤 Wacht op reschedule</button>
+              </div>
             </div>
             <div class="fu-cockpit-toggles">
               <label class="fu-cockpit-toggle"><input type="checkbox" id="cockpit-mine"> Mijn leads</label>
@@ -4711,7 +4734,7 @@
       teamMembers : [],
       teamLoaded  : false,
       // Filters
-      filter: { source: 'all', kind: 'all', mine: false, snoozed: false },
+      filter: { source: 'all', mine: false, snoozed: false, quick: null },
       // UI-state
       selectedId  : null,
       timelineCache: {},         // { leadId: [items] }
@@ -4791,14 +4814,44 @@
     function _cockpitRoute() {
       const f = _leadsState.filter;
       const p = new URLSearchParams();
-      if (f.source !== 'all') p.set('source', f.source);
-      if (f.kind   !== 'all') p.set('kind',   f.kind);
+      // source='zoom' is een client-side view (alleen Zoom-appointments
+      // uit de queue tonen) — server ontvangt geen 'zoom' als lead.source,
+      // dus we sturen 'm niet mee. Dat voorkomt een lege response.
+      if (f.source !== 'all' && f.source !== 'zoom') p.set('source', f.source);
       if (f.mine)             p.set('owner',  'me');
       p.set('view', f.snoozed ? 'snoozed' : 'open');
       // Worklist-modus: leads + appointments (Zoom-calls) + wacht-op-
       // reschedule in één response, met horizon vandaag + 7 dagen.
       p.set('worklist', '1');
       return '/api/follow-up-leads-list?' + p.toString();
+    }
+
+    // Pas de source/quick-filter TOE op de geladen items voordat we ze
+    // renderen. Dit is client-side omdat:
+    //  - source='zoom' → alleen Zoom-appointments uit de worklist (geen
+    //    aparte fetch nodig; de leads-list levert ze al).
+    //  - quick='hot|te_laat|vandaag|reschedule' → semantische views op
+    //    dezelfde geladen set; geen extra API-call vereist.
+    function _applyClientFilters(items) {
+      const f = _leadsState.filter;
+      let out = items.slice();
+      if (f.source === 'zoom') {
+        out = out.filter((x) => (x.__worklistKind || 'bel') === 'zoom');
+      }
+      const q = f.quick;
+      if (q === 'hot') {
+        out = out.filter((x) => x.is_hot === true);
+      } else if (q === 'reschedule') {
+        out = out.filter((x) => (x.__worklistKind || 'bel') === 'reschedule');
+      } else if (q === 'te_laat' || q === 'vandaag') {
+        out = out.filter((x) => {
+          const b = _bucketFor(x);
+          if (q === 'te_laat') return b === 'telaat';
+          if (q === 'vandaag') return b === 'vandaag';
+          return true;
+        });
+      }
+      return out;
     }
 
     async function loadLeadsTab() {
@@ -4959,7 +5012,7 @@
     function renderCockpitList() {
       const el = document.getElementById('cockpit-buckets');
       if (!el) return;
-      const items = _leadsState.items || [];
+      const items = _applyClientFilters(_leadsState.items || []);
       if (!items.length) {
         el.innerHTML = '<div class="fu-empty"><i class="ti ti-inbox fu-empty-icon"></i>Geen leads in deze selectie.</div>';
         return;
@@ -5251,6 +5304,48 @@
       const ref = _sourceRefSummary(it);
       if (ref) cells.push(_ctxCell('Verwijzing', ref));
       el.innerHTML = cells.join('');
+
+      // Retention-context (abonnement + traject + einddatum) lazy fetchen
+      // voor retention-leads met een customer_id. Cache per customer_id
+      // in _leadsState zodat we bij herhaalde selectie niet opnieuw
+      // fetchen. Fail-soft: bij fout blijft de basis-context intact.
+      if (it.source === 'retention' && it.customer_id) {
+        _hydrateRetentionContext(el, it.customer_id);
+      }
+    }
+
+    // Cache: { [customerId]: { abo_description, abo_end_date, traject_label } }
+    const _retentionCtxCache = new Map();
+    async function _hydrateRetentionContext(el, customerId) {
+      if (!el || !customerId) return;
+      const currentCustomerId = customerId;
+      let data = _retentionCtxCache.get(customerId);
+      if (!data) {
+        try {
+          const r = await window.AgentShared.apiFetch('/api/follow-up-lead-retention-context?customer_id=' + encodeURIComponent(customerId));
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) return;
+          data = j || {};
+          _retentionCtxCache.set(customerId, data);
+        } catch (e) {
+          console.warn('[retention-context]', e?.message || e);
+          return;
+        }
+      }
+      // Race-guard: als de gebruiker inmiddels een andere lead heeft
+      // geselecteerd, niet appenden (kan verouderde data tonen).
+      const sel = _leadsState.selectedId;
+      const cur = (_leadsState.items || []).find((x) => x.id === sel);
+      if (!cur || cur.customer_id !== currentCustomerId) return;
+
+      const extra = [];
+      if (data.abo_description) {
+        const statusSuf = data.abo_status === 'cancelled' ? ' (opgezegd)' : '';
+        extra.push(_ctxCell('Abonnement', data.abo_description + statusSuf));
+      }
+      if (data.traject_label) extra.push(_ctxCell('Traject', data.traject_label));
+      if (data.abo_end_date)  extra.push(_ctxCell('Abo einddatum', fmtDateNLShort(data.abo_end_date)));
+      if (extra.length) el.insertAdjacentHTML('beforeend', extra.join(''));
     }
 
     function _ctxCell(k, v) {
@@ -5980,16 +6075,40 @@
     }
 
     function _bindCockpitDetail() {
-      // Filter-pillen (bron + kind)
-      document.querySelectorAll('#cockpit-list .fu-cockpit-pill').forEach((btn) => {
+      // Bron-pillen (data-filter="source"): server-side voor
+      // retention/event/all (kleinere payload), client-side voor zoom
+      // (Zoom = view-op-worklist, geen aparte fetch).
+      document.querySelectorAll('#cockpit-list .fu-cockpit-pill[data-filter="source"]').forEach((btn) => {
         btn.addEventListener('click', () => {
-          const grp = btn.getAttribute('data-filter'); // 'source' | 'kind'
           const val = btn.getAttribute('data-value');
-          _leadsState.filter[grp] = val;
+          const prev = _leadsState.filter.source;
+          _leadsState.filter.source = val;
           btn.parentElement.querySelectorAll('.fu-cockpit-pill').forEach((b) => {
             b.classList.toggle('active', b === btn);
           });
-          loadLeadsTab();
+          // Zoom is puur client-side (renderen op geladen worklist).
+          // Switching TO or FROM 'zoom' vereist geen nieuwe fetch — de
+          // items zitten al in _leadsState.items.
+          if (val === 'zoom' || prev === 'zoom') {
+            renderCockpitList();
+          } else {
+            loadLeadsTab();
+          }
+        });
+      });
+      // Snelfilter-pillen (data-quick="hot|te_laat|vandaag|reschedule"):
+      // toggle on/off; nogmaals klikken op de actieve = uit. Alleen
+      // client-side render, geen fetch.
+      document.querySelectorAll('#cockpit-list .fu-cockpit-pill[data-quick]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const val = btn.getAttribute('data-quick');
+          const wasActive = _leadsState.filter.quick === val;
+          const next = wasActive ? null : val;
+          _leadsState.filter.quick = next;
+          btn.parentElement.querySelectorAll('.fu-cockpit-pill').forEach((b) => {
+            b.classList.toggle('active', !wasActive && b === btn);
+          });
+          renderCockpitList();
         });
       });
       // Toggles: Mijn leads + Snoozed
@@ -7171,6 +7290,7 @@
           </div>
           <div class="fu-callcard-number" style="cursor:default">${esc(when)}</div>
           <div class="fu-callcard-actions">
+            ${phone ? `<button type="button" class="fu-lead-btn primary" id="appt-bel-nu" title="Bel deze klant via de softphone"><i class="ti ti-phone-call"></i> Bel nu</button>` : ''}
             ${zoomHtml}
             <button type="button" class="fu-callcard-secondary" id="appt-toggle-verzet"><i class="ti ti-calendar-time"></i> Verzetten</button>
           </div>
@@ -7200,6 +7320,35 @@
 
         ${_renderApptCustomerPanel(extras.customer)}
         `;
+
+      // Bel nu: hergebruikt de softphone-flow. Zet #cockpit-number tijdelijk
+      // op appt.lead_phone (de _softphoneCallLead helper leest van dat
+      // veld) en roep hem met een minimale lead-shape zodat logging in de
+      // callbar de klant-naam gebruikt.
+      const belNu = document.getElementById('appt-bel-nu');
+      if (belNu && phone) belNu.addEventListener('click', async () => {
+        if (!_softphone || !_softphone.available) {
+          alert('Softphone niet gekoppeld — bel handmatig en registreer daarna de uitkomst.');
+          return;
+        }
+        const numEl = document.getElementById('cockpit-number');
+        const prev  = numEl ? numEl.value : null;
+        if (numEl) numEl.value = phone;
+        try {
+          await _softphoneCallLead({
+            id            : appt.id,
+            lead_name     : appt.lead_name || '',
+            lead_phone    : phone,
+            source        : 'appointment',
+            __worklistKind: 'appointment',
+          });
+        } catch (e) {
+          console.error('[appt-bel-nu]', e?.message || e);
+          alert('Bellen mislukt: ' + (e?.message || 'onbekend'));
+        } finally {
+          if (numEl && prev !== null) numEl.value = prev;
+        }
+      });
 
       const toggle = document.getElementById('appt-toggle-verzet');
       const form   = document.getElementById('appt-verzet-form');
