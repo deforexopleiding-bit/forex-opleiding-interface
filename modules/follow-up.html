@@ -1251,6 +1251,78 @@
        altijd open ongeacht menu.hidden = true. */
     .fu-callcard-menu[hidden] { display: none !important; }
 
+    /* ── Zoom-appointment uitkomst-panel ─────────────────────────── */
+    .fu-outcome-panel {
+      background: var(--card, #fff);
+      border: 1px solid var(--border, #e5e7eb);
+      border-radius: var(--radius, 12px);
+      padding: 14px 16px 16px 16px;
+      margin: 16px 0;
+      box-shadow: 0 1px 3px rgba(15,23,42,0.04);
+    }
+    .fu-outcome-head { display:flex; align-items:center; justify-content:space-between; margin-bottom: 10px; }
+    .fu-outcome-title {
+      font-size: 13px; font-weight: 700; color: var(--text, #0f172a);
+      letter-spacing: .2px;
+    }
+    .fu-outcome-groups {
+      display: grid; grid-template-columns: 1fr; gap: 12px;
+    }
+    @media (min-width: 720px) {
+      .fu-outcome-groups { grid-template-columns: 1fr 1fr; }
+    }
+    .fu-outcome-group {
+      background: var(--muted-3, #f8fafc);
+      border: 1px solid var(--border, #e5e7eb);
+      border-radius: 10px;
+      padding: 10px 10px 12px 10px;
+    }
+    .fu-outcome-group-title {
+      font-size: 11px; text-transform: uppercase; font-weight: 700;
+      color: var(--muted-2, #64748b);
+      letter-spacing: .8px;
+      margin-bottom: 8px;
+    }
+    .fu-outcome-buttons {
+      display: flex; flex-wrap: wrap; gap: 6px;
+    }
+    .fu-outcome-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 12.5px; font-weight: 600;
+      padding: 7px 11px;
+      border-radius: 8px; cursor: pointer;
+      border: 1px solid transparent;
+      transition: transform .05s ease, box-shadow .15s ease, filter .15s ease;
+    }
+    .fu-outcome-btn:hover { filter: brightness(0.97); }
+    .fu-outcome-btn:active { transform: translateY(1px); }
+    .fu-outcome-btn:disabled { opacity: .55; cursor: not-allowed; }
+    .fu-outcome-btn i.ti { font-size: 15px; }
+    .fu-outcome-btn.g-green  { background: #d1fae5; color: #065f46; border-color: #a7f3d0; }
+    .fu-outcome-btn.g-red    { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+    .fu-outcome-btn.g-blue   { background: #dbeafe; color: #1e40af; border-color: #bfdbfe; }
+    .fu-outcome-btn.g-orange { background: #ffedd5; color: #9a3412; border-color: #fed7aa; }
+    .fu-outcome-btn.g-gray   { background: #f1f5f9; color: #334155; border-color: #e2e8f0; }
+
+    .fu-outcome-planner {
+      background: var(--muted-3, #f8fafc);
+      border: 1px dashed var(--border, #cbd5e1);
+      border-radius: 10px;
+      padding: 10px 12px 12px 12px;
+    }
+    .fu-outcome-planner-title {
+      font-size: 12.5px; font-weight: 700; color: var(--text, #0f172a);
+      display: inline-flex; align-items: center; gap: 6px;
+      margin-bottom: 8px;
+    }
+    .fu-outcome-planner-row {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 8px; margin-bottom: 10px;
+    }
+    .fu-outcome-planner-actions {
+      display: flex; gap: 8px; flex-wrap: wrap;
+    }
+
     /* ── Softphone (WebRTC via SIP.js op VoIPGRID) ─────────────────── */
     .fu-softphone-status {
       display: flex; align-items: center; gap: 8px;
@@ -6581,6 +6653,65 @@
       } catch { return iso; }
     }
 
+    // Zoom-appointment uitkomst-panel — 2 groepen knoppen (Gesprek /
+    // Niet verschenen). Klik → POST /api/follow-up-appointment-outcome
+    // met event delegation via _submitApptOutcome. Verzetten opent de
+    // bestaande verzet-form; annuleren vraagt eerst om bevestiging.
+    // Terugbel opent een inline planner met datum/tijd + bel/zoom-keuze.
+    function _renderApptOutcomePanel(appt) {
+      const apptId = appt?.id || '';
+      return `<div class="fu-outcome-panel" hidden="false" style="position:relative">
+        <div class="fu-outcome-head">
+          <span class="fu-outcome-title">Uitkomst kiezen</span>
+        </div>
+        <div class="fu-outcome-groups" data-appt-outcome="${esc(apptId)}">
+          <div class="fu-outcome-group">
+            <div class="fu-outcome-group-title">Gesprek</div>
+            <div class="fu-outcome-buttons">
+              <button type="button" class="fu-outcome-btn g-green" data-appt-out="gesprek_gehad"><i class="ti ti-message"></i> Gesprek gehad</button>
+              <button type="button" class="fu-outcome-btn g-green" data-appt-out="sale"><i class="ti ti-trophy"></i> Sale</button>
+              <button type="button" class="fu-outcome-btn g-red"   data-appt-out="wilt_niet_meer"><i class="ti ti-x"></i> Wilt niet meer</button>
+              <button type="button" class="fu-outcome-btn g-gray"  data-appt-out="later_opnieuw"><i class="ti ti-moon"></i> Later opnieuw</button>
+              <button type="button" class="fu-outcome-btn g-blue"  data-appt-out="terugbel-open"><i class="ti ti-clock"></i> Terugbelafspraak</button>
+            </div>
+          </div>
+          <div class="fu-outcome-group">
+            <div class="fu-outcome-group-title">Niet verschenen / plannen</div>
+            <div class="fu-outcome-buttons">
+              <button type="button" class="fu-outcome-btn g-orange" data-appt-out="no_show"><i class="ti ti-user-off"></i> No-show</button>
+              <button type="button" class="fu-outcome-btn g-blue"   data-appt-out="verzetten-open"><i class="ti ti-calendar-time"></i> Verzetten</button>
+              <button type="button" class="fu-outcome-btn g-red"    data-appt-out="annuleren"><i class="ti ti-ban"></i> Annuleren</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="appt-terugbel-form" class="fu-outcome-planner" hidden style="margin-top:10px">
+          <div class="fu-outcome-planner-title"><i class="ti ti-clock"></i> Terugbelafspraak plannen</div>
+          <div class="fu-outcome-planner-row">
+            <div class="fu-cockpit-quick">
+              <label>Datum</label>
+              <input type="date" id="appt-tb-date" class="fu-lead-inline">
+            </div>
+            <div class="fu-cockpit-quick">
+              <label>Tijd</label>
+              <input type="time" id="appt-tb-time" class="fu-lead-inline" value="09:00">
+            </div>
+            <div class="fu-cockpit-quick">
+              <label>Type</label>
+              <select id="appt-tb-kind" class="fu-lead-inline">
+                <option value="bel">📞 Bel</option>
+                <option value="zoom">📹 Zoom</option>
+              </select>
+            </div>
+          </div>
+          <div class="fu-outcome-planner-actions">
+            <button type="button" class="fu-lead-btn primary" id="appt-tb-save"><i class="ti ti-check"></i> Inplannen</button>
+            <button type="button" class="fu-lead-btn" id="appt-tb-cancel">Annuleren</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
     // Afspraak-historie panel: toont eerdere follow_up_appointments-rijen
     // van dezelfde lead (op ghl_contact_id) als tijdlijn. Verzet/status-
     // wijzigingen zijn hier zichtbaar. Huidige appointment is uitgefilterd
@@ -6740,6 +6871,8 @@
           </div>
         </div>
 
+        ${_renderApptOutcomePanel(appt)}
+
         ${_renderApptHistoryPanel(extras.history || [], appt?.id)}
 
         ${_renderApptCustomerPanel(extras.customer)}
@@ -6775,6 +6908,98 @@
           save.disabled = false;
         }
       });
+
+      // ── Uitkomst-panel handlers ───────────────────────────────────
+      // Event delegation op de outcome-groups container. Elke knop
+      // heeft data-appt-out; specials openen inline planners.
+      const outWrap = body.querySelector('[data-appt-outcome]');
+      const tbForm  = document.getElementById('appt-terugbel-form');
+      const tbDate  = document.getElementById('appt-tb-date');
+      const tbTime  = document.getElementById('appt-tb-time');
+      const tbKind  = document.getElementById('appt-tb-kind');
+      const tbSave  = document.getElementById('appt-tb-save');
+      const tbCncl  = document.getElementById('appt-tb-cancel');
+      if (tbDate) {
+        const t = new Date(); t.setDate(t.getDate() + 1);
+        tbDate.value = t.toISOString().slice(0, 10);
+      }
+      if (tbCncl && tbForm) tbCncl.addEventListener('click', () => { tbForm.hidden = true; });
+      if (tbSave) tbSave.addEventListener('click', async () => {
+        if (!tbDate?.value) { alert('Kies een datum.'); return; }
+        const iso = new Date(tbDate.value + 'T' + (tbTime?.value || '09:00') + ':00').toISOString();
+        tbSave.disabled = true;
+        try {
+          await _submitApptOutcome(appt.id, 'terugbel', {
+            terugbel_datum: iso,
+            lead_kind     : tbKind?.value || 'bel',
+          });
+        } finally {
+          tbSave.disabled = false;
+        }
+      });
+
+      if (outWrap) outWrap.addEventListener('click', async (ev) => {
+        const btn = ev.target.closest('[data-appt-out]');
+        if (!btn) return;
+        const act = btn.getAttribute('data-appt-out');
+        // Specials: open inline planners in plaats van direct submit.
+        if (act === 'terugbel-open') {
+          if (tbForm) { tbForm.hidden = false; tbForm.scrollIntoView({ behavior:'smooth', block:'nearest' }); }
+          return;
+        }
+        if (act === 'verzetten-open') {
+          const vf = document.getElementById('appt-verzet-form');
+          if (vf) { vf.hidden = false; vf.scrollIntoView({ behavior:'smooth', block:'nearest' }); }
+          return;
+        }
+        if (act === 'annuleren') {
+          const reden = window.prompt('Reden voor annuleren (optioneel):', '');
+          if (reden === null) return; // cancel
+          btn.disabled = true;
+          try {
+            await _submitApptOutcome(appt.id, 'annuleren', { reden: reden.trim() || null });
+          } finally { btn.disabled = false; }
+          return;
+        }
+        if (act === 'wilt_niet_meer') {
+          if (!confirm('Klant heeft aangegeven niet meer geïnteresseerd te zijn. Registreren?')) return;
+        }
+        if (act === 'sale') {
+          if (!confirm('Sale registreren voor deze klant?')) return;
+        }
+        btn.disabled = true;
+        try {
+          await _submitApptOutcome(appt.id, act, {});
+        } finally { btn.disabled = false; }
+      });
+    }
+
+    // Submit uitkomst → POST /api/follow-up-appointment-outcome
+    // Sluit detail, refresht relevante tabs, toast bij warnings.
+    async function _submitApptOutcome(appointmentId, outcome, extra) {
+      try {
+        const body = Object.assign({ appointment_id: appointmentId, outcome }, extra || {});
+        const r = await window.AgentShared.apiFetch('/api/follow-up-appointment-outcome', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify(body),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+        if (Array.isArray(d.warnings) && d.warnings.length) {
+          try { window.AgentShared?.showToast?.('Uitkomst opgeslagen (met waarschuwing): ' + d.warnings.join(' · '), 'warn'); }
+          catch (_) { alert('Uitkomst opgeslagen (met waarschuwing): ' + d.warnings.join(' · ')); }
+        } else {
+          try { window.AgentShared?.showToast?.('Uitkomst opgeslagen.', 'success'); } catch (_) {}
+        }
+        _closeApptDetail();
+        try { loadLeadsTab(); }      catch (_) {}
+        try { loadAfsprakenTab(); }  catch (_) {}
+        try { loadSluimerpotTab(); } catch (_) {}
+        try { loadDashboardTab(); }  catch (_) {}
+      } catch (e) {
+        alert('Uitkomst opslaan mislukt: ' + (e.message || 'onbekend'));
+      }
     }
 
     // ── SLUIMERPOT-TAB ────────────────────────────────────────────────────
