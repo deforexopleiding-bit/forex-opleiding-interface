@@ -1225,6 +1225,20 @@
     .fu-cockpit-dhead-links a { color: var(--text-secondary, rgba(255,255,255,.85)); text-decoration: none; }
     .fu-cockpit-dhead-links a:hover { color: var(--text-primary, #fff); text-decoration: underline; }
     .fu-cockpit-dhead-right { display: flex; align-items: center; gap: 8px; }
+    /* Prominente datum+tijd-badge onder de badges in de appt-detail-kop.
+       Zorgt dat de sales-user in één oogopslag ziet WANNEER de afspraak
+       staat, ook al staat 'ie ook groter in de belkaart. */
+    .fu-appt-dhead-when {
+      display: inline-flex; align-items: center; gap: 6px;
+      margin-top: 6px;
+      font-size: 13px; font-weight: 700;
+      color: var(--text-primary, #fff);
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.14);
+      padding: 4px 10px; border-radius: 8px;
+      font-variant-numeric: tabular-nums;
+    }
+    .fu-appt-dhead-when i.ti { font-size: 14px; opacity: .85; }
 
     /* Belkaart (#093d54) */
     .fu-callcard {
@@ -1462,7 +1476,11 @@
     .fu-softphone-callbar {
       position: fixed;
       bottom: 20px;
-      right: 20px;
+      /* Rechts genoeg vrijhouden voor de globale "+ Taken"-fab
+         (right:20px, ~120px breed) zodat ophangen/mute nooit
+         onder die knop verdwijnen. Op mobiel wisselt de callbar
+         in de @720px-block naar full-width bottom. */
+      right: 160px;
       z-index: 9999;
       display: flex; align-items: center; gap: 14px;
       background: linear-gradient(180deg, rgba(9,61,84,0.95), rgba(9,61,84,0.85));
@@ -4993,6 +5011,11 @@
       let out = items.slice();
       if (f.source === 'zoom') {
         out = out.filter((x) => (x.__worklistKind || 'bel') === 'zoom');
+      } else if (f.source === 'retention' || f.source === 'event') {
+        // Bron-filter op retentie/event: ALLEEN echte bel-leads van die
+        // bron. Appointments/reschedules hebben source='appointment' en
+        // vallen zo automatisch weg (voorheen bleven ze zichtbaar).
+        out = out.filter((x) => (x.__worklistKind || 'bel') === 'bel' && x.source === f.source);
       }
       const q = f.quick;
       if (q === 'hot') {
@@ -5000,10 +5023,24 @@
       } else if (q === 'reschedule') {
         out = out.filter((x) => (x.__worklistKind || 'bel') === 'reschedule');
       } else if (q === 'te_laat' || q === 'vandaag') {
+        // Filter op OVER-TIJD-ZIJN i.p.v. de weergave-bucket: hot-leads
+        // zitten in de 'hot'-bucket maar kunnen wel over-tijd zijn — die
+        // moeten ook in "Te laat" verschijnen. Voor 'vandaag': moment
+        // valt binnen deze kalenderdag.
+        const now = Date.now();
+        const startToday = new Date(); startToday.setHours(0,0,0,0);
+        const endToday   = new Date(); endToday.setHours(23,59,59,999);
         out = out.filter((x) => {
-          const b = _bucketFor(x);
-          if (q === 'te_laat') return b === 'telaat';
-          if (q === 'vandaag') return b === 'vandaag';
+          const iso = x.terugbel_datum || x.scheduled_at || null;
+          const t   = iso ? Date.parse(iso) : NaN;
+          if (!Number.isFinite(t)) {
+            // Geen tijd: bel-lead status 'nieuw' telt als te_laat
+            // (achterstand op oppakken); anders geen match.
+            if (q === 'te_laat') return String(x.lead_status || '') === 'nieuw';
+            return false;
+          }
+          if (q === 'te_laat') return t < now;
+          if (q === 'vandaag') return t >= startToday.getTime() && t <= endToday.getTime();
           return true;
         });
       }
@@ -5301,6 +5338,12 @@
       }
       const nm = esc(it.lead_name || '—');
       const phone = it.lead_phone ? esc(it.lead_phone) : '<span style="opacity:.5">— geen tel —</span>';
+      // Terugbel-tijd tonen zodat de sales-user meteen ziet WANNEER de
+      // lead opgevolgd moet worden — cruciaal voor te-laat/vandaag/week
+      // triage zonder de detail te openen.
+      const timeLbl = it.terugbel_datum
+        ? `<span style="font-weight:700;color:var(--text)">${esc(_fmtHMwithDate(it.terugbel_datum))}</span>`
+        : '';
       const activeCls = (it.id === _leadsState.selectedId) ? ' active' : '';
       return `<button type="button" class="fu-cockpit-leadcard${activeCls}" data-lead="${esc(it.id)}">
         <div class="fu-cockpit-leadavatar ${avaCls}" title="${esc(it.lead_status || '')}">${esc(initials)}</div>
@@ -5308,6 +5351,7 @@
           <div class="fu-cockpit-leadcard-nm">${nm}</div>
           <div class="fu-cockpit-leadcard-sub">
             <span>${phone}</span>
+            ${timeLbl}
             <span class="fu-cockpit-leadcard-badges">${badges.join('')}</span>
           </div>
         </div>
@@ -5695,7 +5739,7 @@
       ]},
       { title: 'Wel contact', items: [
         { key: 'terugbel',          label: 'Terugbel-afspraak',   icon: 'ti-clock',           cls: 'g-blue' },
-        { key: 'zoom_ingepland',    label: 'Zoom ingepland',      icon: 'ti-video',           cls: 'g-blue' },
+        { key: 'zoom_ingepland',    label: 'Zoom inplannen',      icon: 'ti-video',           cls: 'g-blue' },
         { key: 'whatsapp_gestuurd', label: 'WhatsApp gestuurd',   icon: 'ti-brand-whatsapp',  cls: 'g-green' },
       ]},
       { title: 'Afgerond', items: [
@@ -5711,7 +5755,7 @@
       ]},
       { title: 'Wel contact', items: [
         { key: 'terugbel',          label: 'Terugbel-afspraak',   icon: 'ti-clock',           cls: 'g-blue' },
-        { key: 'zoom_ingepland',    label: 'Zoom ingepland',      icon: 'ti-video',           cls: 'g-blue' },
+        { key: 'zoom_ingepland',    label: 'Zoom inplannen',      icon: 'ti-video',           cls: 'g-blue' },
         { key: 'whatsapp_gestuurd', label: 'WhatsApp gestuurd',   icon: 'ti-brand-whatsapp',  cls: 'g-green' },
       ]},
       { title: 'Afgerond', items: [
@@ -5734,7 +5778,7 @@
       ]},
       { title: 'Plannen', items: [
         { key: 'terugbel',       label: 'Terugbel-afspraak',     icon: 'ti-clock',      cls: 'g-blue' },
-        { key: 'zoom_ingepland', label: 'Zoom ingepland',        icon: 'ti-video',      cls: 'g-blue' },
+        { key: 'zoom_ingepland', label: 'Zoom inplannen',        icon: 'ti-video',      cls: 'g-blue' },
       ]},
     ];
 
@@ -7778,6 +7822,7 @@
                 <span class="fu-cockpit-mini-badge" title="Status">${esc(statusLabel)}</span>
                 ${vm}
               </div>
+              <div class="fu-appt-dhead-when" title="Geplande datum en tijd"><i class="ti ti-clock"></i> ${esc(when)}</div>
               <div class="fu-cockpit-dhead-links">
                 ${phone ? `<a href="tel:${esc(phone.replace(/\s+/g,''))}"><i class="ti ti-phone"></i> ${esc(phone)}</a>` : ''}
                 ${email ? `<a href="mailto:${esc(email)}"><i class="ti ti-mail"></i> ${esc(email)}</a>` : ''}
