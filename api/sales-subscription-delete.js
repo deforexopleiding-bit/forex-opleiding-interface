@@ -37,7 +37,9 @@ export default async function handler(req, res) {
     // TL-FIRST (Issue 2): deactiveer eerst in TL. Faalt dat én geen force →
     // 502 zonder lokale wijziging (geen out-of-sync state). Met force=true of
     // zonder TL-koppeling → lokaal stopzetten.
-    let tl = { deactivated: false };
+    // Init met skipped-signaal zodat frontend "was er niets in TL" kan
+    // onderscheiden van "TL-call faalde".
+    let tl = { deactivated: false, skipped: 'geen TL-koppeling' };
     if (sub.teamleader_subscription_id) {
       try {
         const tok = await getActiveToken();

@@ -882,7 +882,19 @@ async function deleteQuotation(dealId) {
     });
     const data = await res.json();
     if (!res.ok || data.success === false) throw new Error(data.error || 'HTTP ' + res.status);
-    toast('Offerte verwijderd', 'success');
+    // TL-opschoning is best-effort — toon of het écht gelukt is, zodat
+    // Dave weet of hij TL handmatig moet nakijken. Reden overnemen uit
+    // token/quotation/deal-substatus.
+    const tl = data.tl || {};
+    const reasons = [];
+    if (tl.token === false) reasons.push('geen actief TL-token');
+    if (tl.quotation && tl.quotation.ok === false) reasons.push('quotations.delete faalde (' + (tl.quotation.status || tl.quotation.error || 'onbekend') + ')');
+    if (tl.deal && tl.deal.ok === false) reasons.push('deals.lose faalde (' + (tl.deal.status || tl.deal.error || 'onbekend') + ')');
+    if (reasons.length) {
+      toast('Lokaal verwijderd, maar TeamLeader-opschoning mislukte: ' + reasons.join(' + ') + '. Controleer TL handmatig of herprobeer.', 'error');
+    } else {
+      toast('Offerte verwijderd (lokaal + TL)', 'success');
+    }
     loadQuotations();
   } catch (e) { toast('Verwijderen mislukt: ' + e.message, 'error'); }
 }
@@ -1164,7 +1176,18 @@ async function subListDelete(id, force) {
     const d = await res.json();
     if (res.status === 502 && d.tl_failed) { if (confirm('Teamleader-deactivatie mislukt: ' + (d.tl?.error || 'onbekend') + '\n\nAlleen lokaal stopzetten?')) return subListDelete(id, true); return; }
     if (!res.ok || d.success === false) throw new Error(d.error || 'HTTP ' + res.status);
-    toast(d.tl?.deactivated ? 'Verwijderd + TL gedeactiveerd' : 'Lokaal stopgezet', 'success'); loadSubscriptions();
+    // TL-status uit response tonen. deactivated=true → succes; false met
+    // skipped → er was geen TL-koppeling (info); false zonder skipped →
+    // force-modus geactiveerd (waarschuwing, TL is niet opgeschoond).
+    const tl = d.tl || {};
+    if (tl.deactivated) {
+      toast('Abonnement verwijderd (lokaal + TL gedeactiveerd)', 'success');
+    } else if (tl.skipped) {
+      toast('Abonnement lokaal stopgezet (geen TL-koppeling)', 'success');
+    } else {
+      toast('Lokaal stopgezet, maar TeamLeader-deactivatie mislukte: ' + (tl.error || 'onbekend') + '. Controleer TL handmatig of herprobeer.', 'error');
+    }
+    loadSubscriptions();
   } catch (e) { toast('Mislukt: ' + e.message, 'error'); }
 }
 document.getElementById('subMineToggle').addEventListener('change', () => loadSubscriptions());

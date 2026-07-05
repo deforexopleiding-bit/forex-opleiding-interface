@@ -30,30 +30,55 @@ export default async function handler(req, res) {
       .select('id, tl_deal_id, tl_quotation_id').eq('id', deal_id).maybeSingle();
     if (!deal) return res.status(404).json({ error: 'Deal niet gevonden' });
 
-    // Best-effort TL-opschoning (non-blocking).
+    // Best-effort TL-opschoning (non-blocking). Verzamel per-call het
+    // resultaat zodat de frontend zichtbaar kan maken of TL écht is
+    // opgeschoond (ipv stille success bij verlopen/ontbrekende token).
     const tok = await getActiveToken();
+    const tl_result = { token: !!tok, quotation: null, deal: null };
     if (tok) {
       if (deal.tl_quotation_id) {
         try {
           const r = await tlFetch('/quotations.delete', { method: 'POST', body: JSON.stringify({ id: deal.tl_quotation_id }) });
-          if (!r.ok) console.warn('[tl-delete] quotations.delete HTTP', r.status, (await r.text()).slice(0, 150));
-        } catch (e) { console.warn('[tl-delete] quotations.delete exception:', e.message); }
+          if (r.ok) {
+            tl_result.quotation = { ok: true };
+          } else {
+            const body = (await r.text().catch(() => '')).slice(0, 200);
+            console.warn('[tl-delete] quotations.delete HTTP', r.status, body);
+            tl_result.quotation = { ok: false, status: r.status, body };
+          }
+        } catch (e) {
+          console.warn('[tl-delete] quotations.delete exception:', e.message);
+          tl_result.quotation = { ok: false, error: e.message };
+        }
+      } else {
+        tl_result.quotation = { skipped: 'geen tl_quotation_id' };
       }
       if (deal.tl_deal_id) {
         try {
           const r = await tlFetch('/deals.lose', { method: 'POST', body: JSON.stringify({ id: deal.tl_deal_id }) });
-          if (!r.ok) console.warn('[tl-delete] deals.lose HTTP', r.status);
-        } catch (e) { console.warn('[tl-delete] deals.lose exception:', e.message); }
+          if (r.ok) {
+            tl_result.deal = { ok: true };
+          } else {
+            const body = (await r.text().catch(() => '')).slice(0, 200);
+            console.warn('[tl-delete] deals.lose HTTP', r.status, body);
+            tl_result.deal = { ok: false, status: r.status, body };
+          }
+        } catch (e) {
+          console.warn('[tl-delete] deals.lose exception:', e.message);
+          tl_result.deal = { ok: false, error: e.message };
+        }
+      } else {
+        tl_result.deal = { skipped: 'geen tl_deal_id' };
       }
     }
 
-    // Lokale soft-delete.
+    // Lokale soft-delete blijft altijd doorgaan (gewenst gedrag).
     await supabaseAdmin.from('deals').update({
       archived_at:              new Date().toISOString(),
       tl_quotation_declined_at: new Date().toISOString(),
     }).eq('id', deal_id);
 
-    return res.status(200).json({ success: true });
+    return res.status(200).json({ ok: true, success: true, archived: true, tl: tl_result });
   } catch (e) {
     console.error('[tl-delete-quotation]', e.message);
     return res.status(500).json({ error: e.message });
