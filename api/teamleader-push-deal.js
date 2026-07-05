@@ -47,11 +47,17 @@ export async function pushDealToTl(dealId) {
         const tlContactId = tlCustomerRef.type === 'contact' ? tlCustomerRef.id : null;
 
         // 3. POST /deals.create.
+        // Verantwoordelijke TL-user (voor handtekening op offertes) komt uit
+        // env TEAMLEADER_RESPONSIBLE_USER_ID. TL v2 verwacht een flat
+        // user-UUID op top-level als string; niet meesturen == vorig gedrag
+        // (deal krijgt dan geen expliciete responsible + geen handtekening).
+        const respUser = process.env.TEAMLEADER_RESPONSIBLE_USER_ID;
         const dealBody = {
                   lead: { customer: tlCustomerRef },
                   title: `Deal ${deal.id.slice(0, 8)}`,
                   estimated_value: deal.total_amount ? { amount: Number(deal.total_amount), currency: 'EUR' } : undefined,
         };
+        if (respUser) dealBody.responsible_user_id = respUser;
               const dr = await tlFetch('/deals.create', { method: 'POST', body: JSON.stringify(dealBody) });
               if (!dr.ok) {
                         const txt = await dr.text();
