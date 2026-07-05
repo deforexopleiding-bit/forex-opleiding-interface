@@ -360,6 +360,26 @@ function prefillSubs(){
     const monthly = d.payment_term_amount!=null ? Number(d.payment_term_amount) : round2(((Number(state.totals.incl)||0)-down)/tc);
     state.subs.push({description:'Maandelijkse termijnen',term_count:tc,start_date:d.payment_term_start_date||addMonths(startBase,1),_descCustom:false,line_items:splitFromOffer(monthly)});
   }
+  // Fallback voor offertes zonder aanbetaling én zonder termijnen: neem
+  // het volledige incl.-totaal over als één abonnement. Zonder deze
+  // stap kreeg de gebruiker een lege regel (newEmptySub) en moest 'ie
+  // de bedragen handmatig overtypen — waarbij BTW-splitsing per tarief
+  // makkelijk mis gaat. splitFromOffer bouwt regels met _lead:'incl'
+  // (zie eerdere BTW-fix) dus geen dubbele BTW.
+  // term_count: gebruik d.duration_months als de sales-wizard die heeft
+  // meegeschreven; anders 1 (eenmalige subscription). Deal veld-namen
+  // recon: state.deal wordt uit dRes.deal geladen; sales-wizard schrijft
+  // duration_months + payment_* velden weg. Als 'ie ontbreekt: 1 termijn.
+  if(!state.subs.length && Number(state.totals.incl)>0){
+    const dur = Number(d.duration_months) || 0;
+    state.subs.push({
+      description : 'Abonnement',
+      term_count  : dur>0 ? dur : 1,
+      start_date  : d.payment_start_date || d.start_date || today(),
+      _descCustom : false,
+      line_items  : splitFromOffer(Number(state.totals.incl)),
+    });
+  }
   if(!state.subs.length) state.subs.push(newEmptySub());
 }
 function vatOptions(v){ return [21,9,0].map(x=>`<option value="${x}"${Number(v)===x?' selected':''}>${x}%</option>`).join(''); }
