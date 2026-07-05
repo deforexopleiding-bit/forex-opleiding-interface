@@ -65,7 +65,6 @@
     <div class="card">
       <div class="row">
         <div class="field"><label>Bedrijfsentiteit</label><select id="deptSelect"></select></div>
-        <div class="field"><label>Eerste call <span style="color:var(--red,#dc2626)">*</span></label><input id="firstCall" type="datetime-local" /></div>
       </div>
       <div class="field" id="saleTypeWrap" style="display:none"><label>Type verkoop (BTW-regeling)</label>
         <select id="saleTypeSel"><option value="domestic">Normaal NL/BE</option><option value="intracommunautair">Zakelijk België - Intracommunautair</option></select>
@@ -156,17 +155,12 @@ async function init(){
     }
     if(state.deal && state.deal.tl_department_id) document.getElementById('deptSelect').value=state.deal.tl_department_id;
     renderSubs();
-    document.getElementById('firstCall').value = defaultFirstCall();
   }catch(e){ document.getElementById('topSub').textContent='Laden mislukt: '+e.message; }
 }
 function buildDescPresets(trajects){
   const labels=['Aanbetaling','Maandelijkse termijnen'];
   for(const t of trajects||[]){ for(const v of (t.variants||[]).filter(x=>x.is_active)){ labels.push(`${t.name} > ${v.name}`); } }
   state.descPresets=labels;
-}
-function defaultFirstCall(){
-  const base = (state.deal && state.deal.payment_start_date) || state.subs[0]?.start_date || (state.deal && state.deal.start_date) || today();
-  const d=new Date(base); d.setDate(d.getDate()+7); return d.toISOString().slice(0,16);
 }
 function scName(o){ if(!o) return ''; return o.is_company ? (o.company_name||'').trim() : `${o.first_name||''} ${o.last_name||''}`.trim(); }
 function buildReview(){
@@ -525,7 +519,6 @@ document.getElementById('addSub').addEventListener('click',()=>{state.subs.push(
 
 function validateSubs(){
   if(!state.subs.length) return 'Minimaal 1 abonnement vereist';
-  if(!document.getElementById('firstCall').value) return 'Eerste call is verplicht';
   for(const s of state.subs){
     if(!(Number(s.term_count)>=1)) return 'Aantal termijnen is verplicht, minimaal 1';
     if(!s.start_date) return 'Startdatum verplicht bij elk abonnement';
@@ -587,7 +580,9 @@ async function submit(syncToTl){
     }));
     const payload={
       tl_department_id:document.getElementById('deptSelect').value||null,
-      first_call_at:document.getElementById('firstCall').value||null,
+      // 'Eerste call' is uit de wizard verwijderd — mentor plant later.
+      // Backend accepteert null en zet deals.first_call_at = null.
+      first_call_at:null,
       sync_to_tl:!!syncToTl,
       subscriptions:subsPayload,
     };

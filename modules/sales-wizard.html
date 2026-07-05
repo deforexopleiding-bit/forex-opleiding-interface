@@ -470,6 +470,24 @@ function renderPaymentPreview() {
     ? `Op offerte komt: '${t}'`
     : 'Op offerte komt: geen extra info (alleen totaalbedrag)';
 }
+// 1e termijndatum moet minstens 3 kalenderdagen VÓÓR de cursus-
+// startdatum liggen. Rekening houdt met kale YYYY-MM-DD zonder tijd/UTC-
+// verschuiving. Retourneert null als startdatum leeg/ongeldig is.
+function _termStartMaxFor(startIso){
+  const s = String(startIso || '');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const [y,m,d] = s.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m-1, d));
+  dt.setUTCDate(dt.getUTCDate() - 3);
+  return dt.toISOString().slice(0,10);
+}
+function _applyTermStartMax(){
+  const w = state.wizard;
+  const el = document.getElementById('payTermStartDate');
+  if(!el) return;
+  const max = _termStartMaxFor(w.payment_start_date);
+  if(max) el.setAttribute('max', max); else el.removeAttribute('max');
+}
 function renderPaymentStep() {
   const w = state.wizard;
   document.getElementById('payStartDate').value = w.payment_start_date || '';
@@ -477,10 +495,30 @@ function renderPaymentStep() {
   document.getElementById('payDownDate').value = w.payment_downpayment_date || '';
   document.getElementById('payTermCount').value = w.payment_term_count || '';
   document.getElementById('payTermStartDate').value = w.payment_term_start_date || '';
+  _applyTermStartMax();
   recomputeTermAmount();
   renderPaymentPreview();
 }
-document.getElementById('payStartDate').addEventListener('change', e => { state.wizard.payment_start_date = e.target.value; markDirty(); renderPaymentPreview(); updateNextEnabled(); });
+document.getElementById('payStartDate').addEventListener('change', e => {
+  state.wizard.payment_start_date = e.target.value;
+  markDirty();
+  // Default + max voor de 1e termijndatum bijwerken. Als er nog geen
+  // datum is óf de bestaande ligt te dicht op de startdatum (> max),
+  // schuiven we automatisch naar 3 dagen vóór start. Verder terug mag
+  // sales handmatig.
+  const max = _termStartMaxFor(e.target.value);
+  if(max){
+    const cur = state.wizard.payment_term_start_date || '';
+    if(!cur || cur > max){
+      state.wizard.payment_term_start_date = max;
+      const tsEl = document.getElementById('payTermStartDate');
+      if(tsEl) tsEl.value = max;
+    }
+  }
+  _applyTermStartMax();
+  renderPaymentPreview();
+  updateNextEnabled();
+});
 document.getElementById('payDownAmount').addEventListener('input', e => { state.wizard.payment_downpayment_amount = e.target.value; markDirty(); recomputeTermAmount(); renderPaymentPreview(); updateNextEnabled(); });
 document.getElementById('payDownDate').addEventListener('change', e => { state.wizard.payment_downpayment_date = e.target.value; markDirty(); updateNextEnabled(); });
 document.getElementById('payTermCount').addEventListener('input', e => { state.wizard.payment_term_count = e.target.value; markDirty(); recomputeTermAmount(); renderPaymentPreview(); updateNextEnabled(); });
@@ -1304,6 +1342,15 @@ function updateNextEnabled() {
     // doorschakelen.
     if (!(Number(w.payment_term_count) >= 1)) miss.push('Aantal termijnen (min. 1)');
     if (Number(w.payment_term_count) > 0 && !w.payment_term_start_date) miss.push('Datum 1e termijn');
+    // 1e termijndatum moet minstens 3 kalenderdagen vóór de startdatum
+    // liggen. Sales mag verder terug, niet dichterbij (SEPA + operationele
+    // buffer voor Rogier).
+    if (w.payment_term_start_date && w.payment_start_date){
+      const max = _termStartMaxFor(w.payment_start_date);
+      if (max && w.payment_term_start_date > max){
+        miss.push('Datum 1e termijn moet minstens 3 dagen vóór de startdatum liggen');
+      }
+    }
     const pm = document.getElementById('payMissing');
     if (pm) pm.innerHTML = miss.length ? `Ontbrekende velden: <strong>${miss.join(', ')}</strong>` : '';
     valid = miss.length === 0;
