@@ -287,29 +287,49 @@ function validateCustomer(){
 }
 
 // ── Auto-split uit de offerte-regels (proportioneel per BTW-tarief) ──
+// Belangrijk: prefillSubs geeft ons INCL.-targets (aanbetaling +
+// termijnbedrag komen uit de offerte-INCL.-totalen). We houden zowel
+// een excl.- als incl.-gewicht per tarief bij; splitFromOffer verdeelt
+// target vervolgens proportioneel over de INCL.-gewichten en geeft de
+// nieuwe regel een amount_incl-waarde (met _lead:'incl'), zodat
+// recalcLine de juiste excl. eruit rekent — niet nog eens BTW erbovenop.
 function splitGroups(){
-  const map={}; let total=0;
+  const map={}; let total=0, totalIncl=0;
   for(const l of state.lineItems){
     const rate=(Number(l.vat_percentage)||0)/100;
     const base=Number(l.quantity||1)*Number(l.unit_price||0);
-    const excl=l.price_includes_vat&&rate>0 ? base/(1+rate) : base;
+    const excl = l.price_includes_vat&&rate>0 ? base/(1+rate) : base;
+    const incl = l.price_includes_vat ? base : base*(1+rate);
     const v=Number(l.vat_percentage)||0;
-    if(!map[v]) map[v]={excl:0,names:[]};
-    map[v].excl+=excl; if(l.product_name) map[v].names.push(l.product_name);
-    total+=excl;
+    if(!map[v]) map[v]={excl:0,incl:0,names:[]};
+    map[v].excl+=excl; map[v].incl+=incl;
+    if(l.product_name) map[v].names.push(l.product_name);
+    total+=excl; totalIncl+=incl;
   }
-  return {map,total};
+  return {map,total,totalIncl};
 }
 function splitFromOffer(target){
   target=Number(target)||0;
-  const {map,total}=splitGroups();
+  const {map,totalIncl}=splitGroups();
   const vats=Object.keys(map).map(Number);
-  if(!total||!vats.length) return [newLine({amount:round2(target)})];
+  if(!totalIncl||!vats.length){
+    // Fallback: geen offerte-regels — target is incl., laat 'm als
+    // incl. binnenkomen zodat recalcLine de excl. juist afleidt.
+    return [newLine({amount_incl:round2(target), _lead:'incl'})];
+  }
   let acc=0; const items=[];
   vats.forEach((v,idx)=>{
-    let amt = idx===vats.length-1 ? round2(target-acc) : round2(target*map[v].excl/total);
-    acc+=amt;
-    items.push(newLine({description: map[v].names.join(' + ')||'Regel', amount: amt, vat_percentage: v}));
+    // Laatste regel krijgt de rest zodat afronding exact optelt tot target.
+    const inclDeel = idx===vats.length-1
+      ? round2(target-acc)
+      : round2(target*map[v].incl/totalIncl);
+    acc+=inclDeel;
+    items.push(newLine({
+      description: map[v].names.join(' + ')||'Regel',
+      amount_incl: inclDeel,
+      vat_percentage: v,
+      _lead: 'incl',
+    }));
   });
   return items;
 }
