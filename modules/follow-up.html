@@ -6479,11 +6479,13 @@
       const dateVal = dateEl?.value || '';
       panel.hidden = false;
       panel.innerHTML = '<div class="fu-freeslots-loading"><i class="ti ti-loader-2"></i> Vrije tijden ophalen…</div>';
-      // ALTIJD een venster van 14 dagen ophalen zodat de sales-user
-      // ook ervoor/erna sloten ziet. Startdatum = gekozen datum (of
-      // vandaag), einddatum = start + 14 dagen. Groepering per dag
-      // gebeurt server-side + hieronder in de render.
-      const startDate = dateVal || new Date().toISOString().slice(0, 10);
+      // ALTIJD een venster van 14 dagen VANAF VANDAAG ophalen. Zo ziet
+      // de sales-user ook dagen VÓÓR een eerder gekozen datum — nuttig
+      // wanneer de klant liever eerder wil verzetten. De gekozen datum
+      // blijft in de picker staan; alleen het opgehaalde slot-venster
+      // begint bij vandaag. Groepering per dag gebeurt server-side +
+      // in de render.
+      const startDate = new Date().toISOString().slice(0, 10);
       const endDateObj = new Date(startDate + 'T12:00:00');
       endDateObj.setDate(endDateObj.getDate() + 14);
       const endDate = endDateObj.toISOString().slice(0, 10);
