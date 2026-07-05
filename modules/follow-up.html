@@ -5444,7 +5444,7 @@
       const undoEl = document.getElementById('cockpit-undo-outcome');
       if (undoEl) {
         const lo = String(it.last_outcome || '');
-        const UNDOABLE = new Set(['geen_gehoor','voicemail','foutief_nummer','terugbel','zoom_ingepland','sale','geen_interesse','snooze','noshow','gesprek_gehad','whatsapp_gestuurd']);
+        const UNDOABLE = new Set(['geen_gehoor','voicemail','foutief_nummer','terugbel','zoom_ingepland','sale','geen_interesse','snooze','noshow','gesprek_gehad','whatsapp_gestuurd','bevestigd','komt_niet']);
         undoEl.hidden = !UNDOABLE.has(lo);
         undoEl.dataset.leadId = it.id;
       }
@@ -5707,11 +5707,52 @@
         { key: 'geen_interesse', label: 'Geen interesse',    icon: 'ti-x',       cls: 'g-red' },
       ]},
     ];
+    // Event-leads: kleinere, gerichtere set — geen Sale/WhatsApp/Snooze/
+    // Geen interesse. Focus op bevestigen of afmelden voor het event.
+    const OUTCOME_GROUPS_EVENT = [
+      { title: 'Geen contact', items: [
+        { key: 'geen_gehoor',    label: 'Geen gehoor',           icon: 'ti-phone-off',  cls: 'g-red' },
+        { key: 'voicemail',      label: 'Voicemail ingesproken', icon: 'ti-microphone', cls: 'g-orange' },
+        { key: 'foutief_nummer', label: 'Foutief nummer',        icon: 'ti-phone-x',    cls: 'g-gray' },
+      ]},
+      { title: 'Bevestiging', items: [
+        { key: 'bevestigd',      label: 'Bevestigd',             icon: 'ti-check',      cls: 'g-green' },
+        { key: 'komt_niet',      label: 'Komt toch niet',        icon: 'ti-x',          cls: 'g-red' },
+      ]},
+      { title: 'Plannen', items: [
+        { key: 'terugbel',       label: 'Terugbel-afspraak',     icon: 'ti-clock',      cls: 'g-blue' },
+        { key: 'zoom_ingepland', label: 'Zoom ingepland',        icon: 'ti-video',      cls: 'g-blue' },
+      ]},
+    ];
 
-    function _renderOutcomeGroups(isZoom) {
+    // Bepaal welke outcome-set van toepassing is op basis van de lead.
+    // Event-leads (source='event') krijgen de kleinere gerichte set;
+    // Zoom-leads/afspraken de meeting-set; anders de standaard call-set.
+    function _outcomeModeForLead(lead) {
+      if (!lead) return 'call';
+      if (String(lead.source || '').toLowerCase() === 'event') return 'event';
+      if (String(lead.lead_kind || 'call') === 'zoom') return 'zoom';
+      return 'call';
+    }
+    function _outcomeModeFromIsZoom(isZoom) {
+      // Backwards-compat: bestaande call-sites geven boolean; via
+      // _leadsState kunnen we opwaarderen naar 'event' bij een event-
+      // lead ongeacht wat de caller doorgeeft.
+      const sel = (_leadsState.items || []).find((x) => x.id === _leadsState.selectedId);
+      if (sel && String(sel.source || '').toLowerCase() === 'event') return 'event';
+      return isZoom ? 'zoom' : 'call';
+    }
+
+    function _renderOutcomeGroups(modeOrIsZoom) {
       const el = document.getElementById('cockpit-outcome-groups');
       if (!el) return;
-      const groups = isZoom ? OUTCOME_GROUPS_ZOOM : OUTCOME_GROUPS_CALL;
+      // Accept boolean (isZoom) voor backward-compat of string mode.
+      const mode = typeof modeOrIsZoom === 'string'
+        ? modeOrIsZoom
+        : _outcomeModeFromIsZoom(!!modeOrIsZoom);
+      const groups = mode === 'event' ? OUTCOME_GROUPS_EVENT
+                   : mode === 'zoom'  ? OUTCOME_GROUPS_ZOOM
+                   :                    OUTCOME_GROUPS_CALL;
       el.innerHTML = groups.map((g) => {
         const buttons = g.items.map((it) =>
           `<button type="button" class="fu-outcome-btn ${it.cls}" data-outcome="${esc(it.key)}"><i class="ti ${it.icon}"></i> ${esc(it.label)}</button>`
@@ -5770,10 +5811,17 @@
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
         _closeOutcomePanel();
+        // Event-specifieke feedback zodat sales meteen ziet wat er is
+        // gebeurd zonder de werklijst te hoeven scannen.
+        if (outcome === 'bevestigd') {
+          try { window.AgentShared?.showToast?.('Bevestigd — komt naar het event ✅', 'success'); } catch (_) {}
+        } else if (outcome === 'komt_niet') {
+          try { window.AgentShared?.showToast?.('Afgemeld — naar Afgeboekt', 'success'); } catch (_) {}
+        }
         // Werk wachtrij + counts + tijdlijn bij. loadLeadsTab herkent
         // dat de vorige selectie niet meer in de lijst zit (bij sale /
-        // snooze / geen_interesse) en opent auto de volgende → precies
-        // wat de belronde nodig heeft.
+        // snooze / geen_interesse / bevestigd / komt_niet) en opent
+        // auto de volgende → precies wat de belronde nodig heeft.
         await loadLeadsTab();
         // Timeline verversen voor de nu (mogelijk nog) geselecteerde lead.
         if (_leadsState.selectedId) loadLeadTimeline(_leadsState.selectedId);
