@@ -188,14 +188,22 @@
       <button class="btn btn-warn" id="dupCheckBtn" style="width:100%;padding:11px;font-size:13.5px" title="Vul minimaal email of telefoon in">🔍 Zoek in onze DB + Teamleader</button>
       <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Controleert of deze klant al bestaat (lokaal én in Teamleader) — vul je een email in, dan zoeken we automatisch.</div>
     </div>
-    <div class="row3">
-      <div class="field"><label>Straat <span class="req">*</span></label><input id="f_street" /></div>
-      <div class="field"><label>Huisnr <span class="req">*</span></label><input id="f_number" /></div>
-      <div class="field"><label>Postcode <span class="req">*</span></label><input id="f_postal" placeholder="1234 AB" /></div>
-    </div>
-    <div class="row2">
-      <div class="field"><label>Plaats <span class="req">*</span></label><input id="f_city" /></div>
-      <div class="field"><label>Geboortedatum</label><input id="f_dob" type="date" /></div>
+    <div id="addrBlock">
+      <div style="margin:6px 0 8px;padding:8px 10px;background:var(--bg-elev-2);border-radius:6px">
+        <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:12.5px;color:var(--text);cursor:pointer">
+          <input type="checkbox" id="addrKnownCheck" style="flex:0 0 auto;width:15px;height:15px" />
+          <span>Ik heb de adresgegevens al (adres niet nodig in offerte)</span>
+        </label>
+      </div>
+      <div class="row3">
+        <div class="field"><label>Straat <span class="req req-addr">*</span><span class="addr-optional" style="display:none;color:var(--text-faint);font-weight:400;text-transform:none;letter-spacing:0"> (optioneel)</span></label><input id="f_street" /></div>
+        <div class="field"><label>Huisnr <span class="req req-addr">*</span><span class="addr-optional" style="display:none;color:var(--text-faint);font-weight:400;text-transform:none;letter-spacing:0"> (optioneel)</span></label><input id="f_number" /></div>
+        <div class="field"><label>Postcode <span class="req req-addr">*</span><span class="addr-optional" style="display:none;color:var(--text-faint);font-weight:400;text-transform:none;letter-spacing:0"> (optioneel)</span></label><input id="f_postal" placeholder="1234 AB" /></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Plaats <span class="req req-addr">*</span><span class="addr-optional" style="display:none;color:var(--text-faint);font-weight:400;text-transform:none;letter-spacing:0"> (optioneel)</span></label><input id="f_city" /></div>
+        <div class="field"><label>Geboortedatum</label><input id="f_dob" type="date" /></div>
+      </div>
     </div>
 
     <div class="field">
@@ -396,6 +404,10 @@ const state = {
     is_company: false, company_name: '', kvk_number: '', vat_number: '',
     first_name: '', last_name: '', email: '', phone: '',
     address_street: '', address_number: '', address_postal: '', address_city: '',
+    // True: sales bevestigt dat de adresgegevens al elders bekend zijn
+    // (bv. bestaande klant / TL-contact). updateNextEnabled slaat dan de
+    // 4 adres-verplicht-checks over. Blijft bewaard in draft_json.
+    address_known: false,
     date_of_birth: '',
     tags: [],
     avg_ok: false,
@@ -811,7 +823,18 @@ function syncStep1Fields() {
   document.getElementById('f_kvk').value = w.kvk_number || '';
   document.getElementById('f_vat').value = w.vat_number || '';
   document.getElementById('f_is_company').checked = !!w.is_company;
+  const ak = document.getElementById('addrKnownCheck');
+  if (ak) ak.checked = !!w.address_known;
+  applyAddressKnownUI();
   onWizCompanyToggle();
+}
+// Verberg de rode * en toon "(optioneel)" bij de 4 adresvelden als
+// address_known aan staat. Velden blijven invulbaar; validatie in
+// updateNextEnabled slaat de checks over.
+function applyAddressKnownUI() {
+  const on = !!state.wizard.address_known;
+  document.querySelectorAll('#addrBlock .req-addr').forEach(el => { el.style.display = on ? 'none' : ''; });
+  document.querySelectorAll('#addrBlock .addr-optional').forEach(el => { el.style.display = on ? '' : 'none'; });
 }
 function syncStep2Fields() {
   document.getElementById('quoteRef').value = state.wizard.quote_reference || '';
@@ -836,6 +859,11 @@ function updateSaleTypeHint() {
   });
 });
 document.getElementById('avgCheck').addEventListener('change', e => { state.wizard.avg_ok = e.target.checked; markDirty(); updateNextEnabled(); });
+document.getElementById('addrKnownCheck').addEventListener('change', e => {
+  state.wizard.address_known = e.target.checked;
+  applyAddressKnownUI();
+  markDirty(); updateNextEnabled();
+});
 // B2B: type-toggle + bedrijfsvelden.
 function custName(o) { if (!o) return ''; return o.is_company ? (o.company_name || '').trim() : `${o.first_name || ''} ${o.last_name || ''}`.trim(); }
 function onWizCompanyToggle() {
@@ -1242,8 +1270,12 @@ async function submitDeal(syncToTl) {
         is_company: !!w.is_company, company_name: w.company_name || null,
         kvk_number: w.kvk_number || null, vat_number: w.vat_number || null,
         first_name: w.first_name, last_name: w.last_name, email: w.email, phone: w.phone,
-        address_street: w.address_street, address_number: w.address_number,
-        address_postal: w.address_postal, address_city: w.address_city,
+        // Lege adres-strings → null zodat backend niet met "" in TL/DB knalt
+        // wanneer address_known aan staat en de velden bewust leeg zijn.
+        address_street: w.address_street || null,
+        address_number: w.address_number || null,
+        address_postal: w.address_postal || null,
+        address_city: w.address_city || null,
         date_of_birth: w.date_of_birth || null,
       },
       deal_data: {
@@ -1322,10 +1354,15 @@ function updateNextEnabled() {
     else { if (!w.first_name) missing.push('Voornaam'); if (!w.last_name) missing.push('Achternaam'); }
     if (!w.email) missing.push('E-mail');
     if (!w.phone) missing.push('Telefoon');
-    if (!w.address_street) missing.push('Straat');
-    if (!w.address_number) missing.push('Huisnr');
-    if (!w.address_postal) missing.push('Postcode');
-    if (!w.address_city) missing.push('Plaats');
+    // Adres-verplicht-checks overslaan als sales bevestigt dat het adres
+    // al elders bekend is (bestaande klant / TL-contact). Velden blijven
+    // invulbaar; ingevulde waarden gaan gewoon mee in de payload.
+    if (!w.address_known) {
+      if (!w.address_street) missing.push('Straat');
+      if (!w.address_number) missing.push('Huisnr');
+      if (!w.address_postal) missing.push('Postcode');
+      if (!w.address_city) missing.push('Plaats');
+    }
     if (!w.avg_ok) missing.push('Privacy-bevestiging');
     const dupOk = state.duplicate_check_status === 'completed' || state.matched_customer_id;
     const sum = document.getElementById('step2Missing');
