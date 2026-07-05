@@ -4871,12 +4871,18 @@
     // Split-screen werklijst LINKS + lead-detail RECHTS. Backend endpoint
     // /api/follow-up-leads-list levert bucket + is_hot + attempts +
     // days_since_contact. Filters bepalen de wachtrij; auto-open eerste.
+    // Guard voor de #af-list event-delegation (Afspraken-tab) — buiten
+    // state-object omdat 'ie ongebonden mag zijn aan lead-state resets.
+    let _afListDelegationBound = false;
     const _leadsState = {
       items       : [],
       counts      : null,
       loading     : false,
       me          : null,        // { id, role }
       teamMembers : [],
+      // Guard voor de #af-list event-delegation zodat de handler maar
+      // één keer per page-load wordt gebonden ondanks meerdere renders.
+      // Zie _renderAfspraken.
       teamLoaded  : false,
       // Filters
       filter: { source: 'all', mine: false, snoozed: false, quick: null },
@@ -5376,6 +5382,10 @@
       }
       const ownerCtlEl = document.getElementById('cockpit-owner-ctl');
       if (ownerCtlEl) ownerCtlEl.innerHTML = _renderOwnerControl(it);
+      // Bij 1-persoons-salesteam: auto-claim de lead als owner nog leeg
+      // is. Fire-and-forget zodat de render niet blokkeert; interne
+      // guard voorkomt dubbele calls.
+      _maybeAutoClaimOwner(it);
 
       // Belkaart
       const numEl = document.getElementById('cockpit-number');
@@ -5463,11 +5473,20 @@
       const isSales      = role === 'sales';
       const isMine       = me && it.owner_id === me.id;
       const members      = _leadsState.teamMembers || [];
+      // Bij 1 salesteam-lid heeft owner-toewijzing geen betekenis meer
+      // (er is maar 1 toewijsbare persoon). Val terug op de sales-naam
+      // ipv "Niet toegewezen" en verberg dropdown/claim-knop.
+      const salesUsers   = members.filter((m) => String(m.role || '').toLowerCase() === 'sales');
+      const soloSales    = salesUsers.length === 1 ? salesUsers[0] : null;
+      const impliedName  = it.owner_name || (soloSales ? (soloSales.full_name || soloSales.email || null) : null);
 
-      const labelText = it.owner_name
-        ? `<i class="ti ti-user"></i> ${esc(it.owner_name)}`
+      const labelText = impliedName
+        ? `<i class="ti ti-user"></i> ${esc(impliedName)}`
         : `<i class="ti ti-user-off"></i> Niet toegewezen`;
       const labelWrap = `<span title="Eigenaar" style="font-size:12px;color:var(--text-secondary,rgba(255,255,255,.75));display:inline-flex;align-items:center;gap:4px">${labelText}</span>`;
+
+      // Solo-sales-team → alleen label; geen dropdown of claim-knop.
+      if (soloSales) return labelWrap;
 
       if (isPrivileged) {
         const opts = ['<option value="">Niet toegewezen</option>']
@@ -5481,6 +5500,32 @@
         return `<span style="display:inline-flex;align-items:center;gap:6px">${labelWrap}${claimBtn}</span>`;
       }
       return labelWrap;
+    }
+
+    // Silent auto-claim: bij een 1-persoons-salesteam wijzen we een
+    // ongeclaimde lead impliciet toe aan de enige sales-user zodra 'ie
+    // opent. Voorkomt "Niet toegewezen"-ruis in de UI en backend-owner-
+    // gates die owner_id verwachten. Fail-soft en race-safe: patch alleen
+    // als owner_id nog echt leeg is + we niet al bezig zijn.
+    let _autoClaimInFlight = null;
+    async function _maybeAutoClaimOwner(it) {
+      if (!it || it.owner_id) return;
+      const me = _leadsState.me;
+      if (!me?.id) return;
+      const members = _leadsState.teamMembers || [];
+      const salesUsers = members.filter((m) => String(m.role || '').toLowerCase() === 'sales');
+      if (salesUsers.length !== 1) return;
+      // Alleen zelf claimen als me OOK de enige sales is; een manager
+      // die per ongeluk toewijzen zou niet stil in-flight moeten gaan.
+      if (salesUsers[0].id !== me.id) return;
+      if (_autoClaimInFlight === it.id) return;
+      _autoClaimInFlight = it.id;
+      try {
+        await patchLead(it.id, { owner_id: me.id }, { silentReload: true });
+        it.owner_id   = me.id;
+        it.owner_name = salesUsers[0].full_name || salesUsers[0].email || me.id;
+      } catch (_) { /* fail-soft */ }
+      finally { _autoClaimInFlight = null; }
     }
 
     function renderLeadContext(it) {
@@ -6868,31 +6913,90 @@
       }).join('');
       el.innerHTML = html;
 
-      // Klik-handlers.
-      // 1) data-af-open (lead) → open lead in Werklijst.
-      el.querySelectorAll('[data-af-open]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const id = btn.getAttribute('data-af-open');
-          switchTab('leads');
-          const trySelect = (attempt = 0) => {
-            const has = (_leadsState.items || []).some((x) => x.id === id);
-            if (has) { selectLead(id); return; }
-            if (attempt < 20) setTimeout(() => trySelect(attempt + 1), 100);
-          };
-          setTimeout(() => trySelect(0), 150);
+      // Klik-handlers via ÉÉN event-delegation op #af-list. Per-element-
+      // binding gaf een bug na filterwissels/re-renders — de nieuwe
+      // knoppen bleven ongebonden. Delegation leest bij elke klik de
+      // dichtstbijzijnde data-af-*-attribuut van de klik-target en
+      // dispatched de juiste actie. Guard tegen dubbel-binden via
+      // _afListDelegationBound zodat de handler maar één keer per
+      // page-load leeft, ongeacht hoe vaak _renderAfspraken loopt.
+      if (!_afListDelegationBound) {
+        _afListDelegationBound = true;
+        el.addEventListener('click', async (ev) => {
+          // Priority: annuleer/verwijder-knoppen eerst (specifieker), dan
+          // knoppen die naar detail leiden, dan row-click.
+          const cancelBtn = ev.target.closest('[data-af-cancel-appt]');
+          if (cancelBtn) {
+            ev.stopPropagation();
+            const id = cancelBtn.getAttribute('data-af-cancel-appt');
+            const reden = window.prompt('Reden voor annuleren (optioneel):', '');
+            if (reden === null) return;
+            cancelBtn.disabled = true;
+            try {
+              const r = await window.AgentShared.apiFetch('/api/follow-up-appointment-outcome', {
+                method : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body   : JSON.stringify({ appointment_id: id, outcome: 'annuleren', reden: reden.trim() || null }),
+              });
+              const d = await r.json().catch(() => ({}));
+              if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+              try { window.AgentShared?.showToast?.('Afspraak geannuleerd.', 'success'); } catch (_) {}
+              try { loadAfsprakenTab(); } catch (_) {}
+              try { loadLeadsTab(); }    catch (_) {}
+            } catch (e) {
+              alert('Annuleren mislukt: ' + (e.message || 'onbekend'));
+              cancelBtn.disabled = false;
+            }
+            return;
+          }
+          const delBtn = ev.target.closest('[data-af-delete-lead]');
+          if (delBtn) {
+            ev.stopPropagation();
+            if (!confirm('Deze zoom-lead verwijderen (naar Afgeboekt-tab)?')) return;
+            const id = delBtn.getAttribute('data-af-delete-lead');
+            delBtn.disabled = true;
+            try {
+              const r = await window.AgentShared.apiFetch('/api/follow-up-lead-update', {
+                method : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body   : JSON.stringify({ lead_id: id, lead_status: 'verloren' }),
+              });
+              const d = await r.json().catch(() => ({}));
+              if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+              try { window.AgentShared?.showToast?.('Lead verwijderd (naar Afgeboekt).', 'success'); } catch (_) {}
+              try { loadAfsprakenTab(); } catch (_) {}
+              try { loadLeadsTab(); }    catch (_) {}
+            } catch (e) {
+              alert('Verwijderen mislukt: ' + (e.message || 'onbekend'));
+              delBtn.disabled = false;
+            }
+            return;
+          }
+          const openBtn = ev.target.closest('[data-af-open]');
+          if (openBtn) {
+            ev.stopPropagation();
+            const id = openBtn.getAttribute('data-af-open');
+            switchTab('leads');
+            const trySelect = (attempt = 0) => {
+              const has = (_leadsState.items || []).some((x) => x.id === id);
+              if (has) { selectLead(id); return; }
+              if (attempt < 20) setTimeout(() => trySelect(attempt + 1), 100);
+            };
+            setTimeout(() => trySelect(0), 150);
+            return;
+          }
+          const apptBtn = ev.target.closest('[data-af-appt]');
+          if (apptBtn) {
+            ev.stopPropagation();
+            _openAppointmentDetail(apptBtn.getAttribute('data-af-appt'));
+            return;
+          }
+          const apptRow = ev.target.closest('[data-af-appt-row]');
+          if (apptRow) {
+            _openAppointmentDetail(apptRow.getAttribute('data-af-appt-row'));
+          }
         });
-      });
-      // 2) data-af-appt (knop) + data-af-appt-row (hele rij) →
-      //    open de in-cockpit afspraak-detail-modal.
-      el.querySelectorAll('[data-af-appt]').forEach((btn) => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          _openAppointmentDetail(btn.getAttribute('data-af-appt'));
-        });
-      });
-      el.querySelectorAll('[data-af-appt-row]').forEach((row) => {
-        row.addEventListener('click', () => _openAppointmentDetail(row.getAttribute('data-af-appt-row')));
-      });
+      }
     }
 
     function _renderAfspraakRow(it, isRes, isDone) {
@@ -6942,7 +7046,9 @@
 
       // Actie-kolom: bij 'afgehandeld' ALTIJD "Openen" (voor de
       // corrigeer-strip in de detail); prev_state-markering als
-      // teken dat corrigeren mogelijk is.
+      // teken dat corrigeren mogelijk is. Bij open appointments +
+      // reschedule: Openen + Annuleren. Bij bel-lead: Bel nu +
+      // Verwijderen (voor kale zoom-leads zonder appointment).
       let actionHtml = '';
       let rowClickAttr = '';
       if (isDone) {
@@ -6952,10 +7058,23 @@
         actionHtml = `<button type="button" class="fu-lead-btn" data-af-appt="${esc(it.id)}" title="Open afspraak-detail"><i class="ti ti-external-link"></i> Openen${correctHint}</button>`;
         rowClickAttr = `data-af-appt-row="${esc(it.id)}" style="cursor:pointer"`;
       } else if (isRes || isAppt) {
-        actionHtml = `<button type="button" class="fu-lead-btn" data-af-appt="${esc(it.id)}" title="Open afspraak-detail"><i class="ti ti-external-link"></i> Openen</button>`;
+        actionHtml = `<div style="display:inline-flex;gap:4px">
+          <button type="button" class="fu-lead-btn" data-af-appt="${esc(it.id)}" title="Open afspraak-detail"><i class="ti ti-external-link"></i> Openen</button>
+          <button type="button" class="fu-lead-btn" data-af-cancel-appt="${esc(it.id)}" title="Afspraak annuleren"><i class="ti ti-ban"></i></button>
+        </div>`;
         rowClickAttr = `data-af-appt-row="${esc(it.id)}" style="cursor:pointer"`;
       } else {
-        actionHtml = `<button type="button" class="fu-lead-btn primary" data-af-open="${esc(it.id)}"><i class="ti ti-phone-call"></i> Bel nu</button>`;
+        // Bel-lead: kale zoom-lead (lead_kind='zoom') krijgt een
+        // Verwijder-optie zodat je een dubbele/verkeerd aangemaakte
+        // zoom-lead direct kunt afboeken zonder detour naar de detail.
+        const isZoomLead = String(it.lead_kind || 'call') === 'zoom';
+        const deleteBtn  = isZoomLead
+          ? `<button type="button" class="fu-lead-btn" data-af-delete-lead="${esc(it.id)}" title="Verwijderen (afboeken als verloren)"><i class="ti ti-trash"></i></button>`
+          : '';
+        actionHtml = `<div style="display:inline-flex;gap:4px">
+          <button type="button" class="fu-lead-btn primary" data-af-open="${esc(it.id)}"><i class="ti ti-phone-call"></i> Bel nu</button>
+          ${deleteBtn}
+        </div>`;
       }
 
       return `<div class="fu-af-row" ${rowClickAttr}>
