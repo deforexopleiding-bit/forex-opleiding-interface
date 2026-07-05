@@ -262,7 +262,7 @@
   <!-- STAP 4: Betalingsvoorwaarden (optioneel) -->
   <section class="panel" id="panelPay">
     <h2>4. Betalingsvoorwaarden</h2>
-    <div class="sub">Startdatum cursus is verplicht. Aanbetaling en termijnen zijn optioneel — vul je ze in, dan is de bijbehorende datum verplicht.</div>
+    <div class="sub">Startdatum cursus is verplicht. Aanbetaling is optioneel; termijnen zijn verplicht (minimaal 1). Vul de aanbetaling in en de bijbehorende datum is ook verplicht.</div>
     <div class="row2" style="margin-top:14px">
       <div class="field"><label>Startdatum cursus <span class="req">*</span></label><input id="payStartDate" type="date" /></div>
       <div class="field"></div>
@@ -272,7 +272,7 @@
       <div class="field"><label>Aanbetaling-datum</label><input id="payDownDate" type="date" /></div>
     </div>
     <div class="row2">
-      <div class="field"><label>Aantal termijnen</label><input id="payTermCount" type="number" min="1" max="60" placeholder="bv. 12" /></div>
+      <div class="field"><label>Aantal termijnen <span style="color:#dc2626">*</span></label><input id="payTermCount" type="number" min="1" max="60" required placeholder="bv. 12" title="Verplicht — minimaal 1 termijn" /></div>
       <div class="field"><label>Datum 1e termijn</label><input id="payTermStartDate" type="date" /></div>
     </div>
     <div class="field"><label>Termijnbedrag</label><input id="payTermAmount" readonly style="background:var(--bg);color:var(--text-dim)" /><div class="hint">Auto-berekend: (totaal − aanbetaling) / aantal termijnen</div></div>
@@ -1299,6 +1299,10 @@ function updateNextEnabled() {
     const miss = [];
     if (!w.payment_start_date) miss.push('Startdatum cursus');
     if (Number(w.payment_downpayment_amount) > 0 && !w.payment_downpayment_date) miss.push('Aanbetaling-datum');
+    // Termijnen zijn verplicht (≥ 1). De datum-1e-termijn check volgt
+    // automatisch omdat term_count nu altijd > 0 is als de wizard mag
+    // doorschakelen.
+    if (!(Number(w.payment_term_count) >= 1)) miss.push('Aantal termijnen (min. 1)');
     if (Number(w.payment_term_count) > 0 && !w.payment_term_start_date) miss.push('Datum 1e termijn');
     const pm = document.getElementById('payMissing');
     if (pm) pm.innerHTML = miss.length ? `Ontbrekende velden: <strong>${miss.join(', ')}</strong>` : '';
