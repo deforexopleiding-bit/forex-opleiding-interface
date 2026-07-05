@@ -36,6 +36,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { updateGhlAppointmentStatus } from './_lib/ghl-appointment.js';
+import { deleteZoomMeeting } from './_lib/zoom-meeting.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -44,17 +45,26 @@ const OUTCOMES = new Set([
   'later_opnieuw', 'terugbel', 'verzetten', 'annuleren',
 ]);
 
-// Mapping van interne outcome → GHL appointmentStatus. Alle "call heeft
-// plaatsgevonden"-outcomes worden 'showed', geen-show is 'noshow',
-// annuleren/verzetten zijn delegatie (daar handelt het eigen endpoint).
+// Mapping van interne outcome → GHL appointmentStatus.
+//   'gesprek_gehad'/'sale'/'wilt_niet_meer' → 'cancelled' (haalt de
+//   afspraak UIT Dave's agenda; call heeft plaatsgevonden of is niet
+//   meer relevant). 'later_opnieuw'/'terugbel' → 'showed' (de call
+//   vond wel plaats — attendance-tag). 'no_show' → 'noshow'.
+//   'annuleren'/'verzetten' zijn delegatie (eigen endpoint).
 const GHL_STATUS_FOR_OUTCOME = {
-  gesprek_gehad : 'showed',
-  sale          : 'showed',
-  wilt_niet_meer: 'showed',
+  gesprek_gehad : 'cancelled',
+  sale          : 'cancelled',
+  wilt_niet_meer: 'cancelled',
   later_opnieuw : 'showed',
   terugbel      : 'showed',
   no_show       : 'noshow',
 };
+
+// Uitkomsten die NAAST de GHL-status ook de Zoom-meeting VERWIJDEREN
+// (via deleteZoomMeeting). Zorgt dat de meeting uit Dave's Zoom-account
+// verdwijnt zodra we weten dat de call niet meer plaatsvindt of al is
+// geweest. Onze eigen DB-status volgt de bestaande logica.
+const AGENDA_REMOVING_OUTCOMES = new Set(['gesprek_gehad', 'sale', 'wilt_niet_meer']);
 
 // Uitkomsten die NIET automatisch teruggedraaid kunnen worden — hun
 // GHL-actie is destructief (afspraak weg / verplaatst) en 'confirmed'
@@ -347,10 +357,18 @@ export default async function handler(req, res) {
         return res.status(500).json({ error: 'DB-status herstellen mislukt: ' + (e?.message || e) });
       }
 
-      // 2) GHL-status terug naar 'confirmed' (fail-soft).
+      // 2) GHL-status terug naar 'confirmed' (fail-soft). Voor de
+      //    afgeronde-outcomes was GHL op 'cancelled' gezet — 'confirmed'
+      //    zet 'm terug op de agenda. De verwijderde Zoom-meeting kan
+      //    echter NIET automatisch teruggezet worden (DELETE is
+      //    destructief) — we melden dat als warning zodat sales een
+      //    nieuwe Zoom-link handmatig kan (her)maken in GHL.
       if (appt.ghl_appointment_id) {
         const ghlSync = await syncGhlStatus(appt.ghl_appointment_id, 'confirmed', 'undo');
         if (!ghlSync.ok) warnings.push(ghlSync.warning);
+      }
+      if (prev.zoom_removed_by_outcome) {
+        warnings.push(`Zoom-meeting is verwijderd bij de uitkomst '${prevOutcome}' en kan niet automatisch teruggezet worden — maak zo nodig handmatig een nieuwe Zoom-link.`);
       }
 
       // 3) Aangemaakte follow_up_lead HARD-deleten (per jouw akkoord —
@@ -464,6 +482,7 @@ export default async function handler(req, res) {
     }
 
     if (newStatus) {
+      const zoomWillBeRemoved = AGENDA_REMOVING_OUTCOMES.has(outcome) && !!appt.zoom_meeting_id;
       // Snapshot VOOR de status-update zodat undo terug kan naar de
       // exacte staat waarin de afspraak vóór deze uitkomst was.
       const snapshot = {
@@ -474,18 +493,38 @@ export default async function handler(req, res) {
         // created_lead_id: undo hard-delete't die zodat de Afgeboekt-tab
         // niet vervuilt met een geannuleerde follow-up.
         created_lead_id     : followupLead?.lead_id || null,
+        // zoom_removed_by_outcome: markeert dat deze outcome de Zoom-
+        // meeting heeft verwijderd; undo kan die niet meer terugzetten,
+        // maar we melden dat expliciet in de undo-response.
+        zoom_removed_by_outcome: zoomWillBeRemoved,
       };
       await writePrevState(appointmentId, snapshot);
 
       await updateApptStatus(appointmentId, newStatus);
       await appendApptNote(appointmentId, noteText);
 
-      // GHL-status meesturen (showed/noshow). Fail-soft — outcome
-      // blijft succesvol, waarschuwing komt in warnings[].
+      // GHL-status meesturen (cancelled/showed/noshow). Fail-soft —
+      // outcome blijft succesvol, waarschuwing komt in warnings[].
       const ghlWanted = GHL_STATUS_FOR_OUTCOME[outcome];
       if (ghlWanted && appt.ghl_appointment_id) {
         const ghlSync = await syncGhlStatus(appt.ghl_appointment_id, ghlWanted, outcome);
         if (!ghlSync.ok) extraWarnings.push(ghlSync.warning);
+      }
+
+      // Zoom-meeting verwijderen voor de afgeronde-outcomes zodat de
+      // meeting weg is uit Dave's Zoom-account. Fail-soft — als Zoom-
+      // delete faalt, blijft de outcome geslaagd; alleen een warning.
+      if (AGENDA_REMOVING_OUTCOMES.has(outcome) && appt.zoom_meeting_id) {
+        try {
+          await deleteZoomMeeting(appt.zoom_meeting_id);
+        } catch (e) {
+          console.warn('[appt-outcome] Zoom delete faalde', {
+            outcome,
+            zoom_meeting_id: appt.zoom_meeting_id,
+            error: String(e?.message || e).slice(0, 200),
+          });
+          extraWarnings.push(`Zoom-meeting kon niet worden verwijderd — handmatig checken in Zoom-account.`);
+        }
       }
     }
 
