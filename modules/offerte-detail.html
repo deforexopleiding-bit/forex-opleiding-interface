@@ -118,6 +118,29 @@
   </div>
 </div>
 
+<!-- Verstuur-modal: template-keuze zodat de mail niet kaal aankomt. Geen
+     directe /api/teamleader-send-quotation-call meer via de knop. -->
+<div class="ob-modal" id="odSendModal" role="dialog" aria-modal="true" aria-labelledby="odSendModalTitle" hidden>
+  <div class="ob-modal-card">
+    <div class="ob-modal-h">
+      <h2 id="odSendModalTitle">Offerte versturen</h2>
+      <button type="button" class="ob-modal-x" id="odSendModalClose" aria-label="Sluiten">&times;</button>
+    </div>
+    <div class="ob-modal-body">
+      <label>Ontvanger</label>
+      <div class="read-only" id="odSendRecipient">—</div>
+      <label for="odSendTemplate">E-mail template</label>
+      <select id="odSendTemplate"><option value="">Standaard (instelling)</option></select>
+      <div id="odSendHint" style="font-size:11.5px;color:var(--text-faint);margin:-8px 0 14px;line-height:1.45">Templates laden…</div>
+      <div id="odSendErr" class="ob-error" hidden></div>
+    </div>
+    <div class="ob-modal-f">
+      <button type="button" class="btn btn-ghost" id="odSendCancel">Annuleren</button>
+      <button type="button" class="btn btn-success" id="odSendConfirm">Verstuur nu</button>
+    </div>
+  </div>
+</div>
+
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
 <script src="/modules/shared/theme-shared.js"></script>
@@ -202,6 +225,9 @@ async function load(){
 
 function render(d){
   const deal=d.deal||{}, c=d.customer||{}, lines=d.line_items||[], t=d.totals||{};
+  // Bewaar customer voor de verstuur-modal (recipient-veld + fallback).
+  _odCustomer = c;
+  _odDealTitle = (d.traject?.label) || `Offerte ${String(deal.id).slice(0,8)}`;
   const st=deal.tl_quotation_status||'draft';
   const sb=STATUS[st]||STATUS.draft;
   document.getElementById('detailTitle').textContent = (d.traject?.label) || `Offerte ${String(deal.id).slice(0,8)}`;
@@ -304,9 +330,9 @@ function render(d){
       : '';
     btns = `${convertBtn} ${obF0Btn} ${histEvBtn} ${tlBtn}`;
   } else if (st==='sent'){
-    btns = `<button class="btn" onclick="doSend()">Opnieuw versturen</button> <button class="btn" style="background:#f59e0b;color:#fff" onclick="doMarkAccepted()">Markeer als getekend</button> <button class="btn btn-danger" onclick="doDelete()">Verwijderen</button> ${tlBtn}`;
+    btns = `<button class="btn" onclick="openOdSendModal()">Opnieuw versturen</button> <button class="btn" style="background:#f59e0b;color:#fff" onclick="doMarkAccepted()">Markeer als getekend</button> <button class="btn btn-danger" onclick="doDelete()">Verwijderen</button> ${tlBtn}`;
   } else if (st==='draft'){
-    const sendOrPush = deal.tl_quotation_id ? `<button class="btn btn-success" onclick="doSend()">Versturen</button>` : `<button class="btn" onclick="doPush()">Push naar TL</button>`;
+    const sendOrPush = deal.tl_quotation_id ? `<button class="btn btn-success" onclick="openOdSendModal()">Versturen</button>` : `<button class="btn" onclick="doPush()">Push naar TL</button>`;
     btns = `${sendOrPush} <a class="btn btn-ghost" href="/modules/sales-wizard.html?edit_deal_id=${esc(deal.id)}">Bewerken</a> <button class="btn btn-danger" onclick="doDelete()">Verwijderen</button> ${tlBtn}`;
   } else {
     btns = tlBtn;
@@ -327,6 +353,87 @@ async function doSend(){
   try { const r=await window.AgentShared.apiFetch('/api/teamleader-send-quotation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deal_id:dealId})}); const d=await r.json(); if(!r.ok)throw new Error(d.error||'HTTP '+r.status); toast('Offerte verzonden','success'); load(); }
   catch(e){ toast('Versturen mislukt: '+e.message,'error'); }
 }
+
+// ── Verstuur-modal (template-keuze) ──
+// Vervangt de directe doSend()-call op de "Versturen"-knop. Zonder keuze
+// stuurt de backend de default template. templates-cache is per page-load
+// zodat 2e open geen extra roundtrip doet.
+let _odCustomer   = null;
+let _odDealTitle  = '';
+let _odEmailTpls  = null; // null=nog niet geladen, []=geladen (leeg of gevuld)
+async function openOdSendModal(){
+  const modal = document.getElementById('odSendModal');
+  if (!modal) return;
+  const email = _odCustomer?.email || '(geen email bekend)';
+  document.getElementById('odSendRecipient').textContent = email;
+  const sel  = document.getElementById('odSendTemplate');
+  const hint = document.getElementById('odSendHint');
+  const err  = document.getElementById('odSendErr');
+  err.hidden = true; err.textContent = '';
+  sel.innerHTML = '<option value="">Standaard (instelling)</option>';
+  modal.hidden = false; modal.classList.add('open');
+  // Templates lazy laden.
+  if (_odEmailTpls === null) {
+    hint.textContent = 'Templates laden…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/teamleader-email-templates?type=quotation');
+      const d = await r.json().catch(() => ({}));
+      if (d && d.reason) { _odEmailTpls = []; hint.textContent = 'Geen templates opgehaald — standaard wordt gebruikt.'; }
+      else { _odEmailTpls = Array.isArray(d?.templates) ? d.templates : []; }
+    } catch (e) {
+      _odEmailTpls = [];
+      hint.textContent = 'Templates ophalen mislukt — standaard wordt gebruikt.';
+    }
+  }
+  if (Array.isArray(_odEmailTpls) && _odEmailTpls.length) {
+    for (const t of _odEmailTpls) {
+      const label = (t.name || t.title || t.id) + (t.language ? ` (${t.language})` : '');
+      sel.insertAdjacentHTML('beforeend', `<option value="${esc(t.id)}">${esc(label)}</option>`);
+    }
+    hint.textContent = 'Kies een template, of laat leeg voor de standaard.';
+  } else if (_odEmailTpls && _odEmailTpls.length === 0 && !document.getElementById('odSendHint').textContent) {
+    hint.textContent = 'Geen templates beschikbaar — standaard wordt gebruikt.';
+  }
+}
+function closeOdSendModal(){
+  const modal = document.getElementById('odSendModal');
+  if (!modal) return;
+  modal.classList.remove('open'); modal.hidden = true;
+}
+async function odDoSend(){
+  const sel = document.getElementById('odSendTemplate');
+  const err = document.getElementById('odSendErr');
+  const btn = document.getElementById('odSendConfirm');
+  err.hidden = true; err.textContent = '';
+  btn.disabled = true; btn.textContent = 'Verzenden…';
+  const body = { deal_id: dealId };
+  const tplId = sel?.value || '';
+  if (tplId) body.email_template_id = tplId;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/teamleader-send-quotation', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+    toast('Offerte verzonden', 'success');
+    closeOdSendModal();
+    load();
+  } catch (e) {
+    err.textContent = 'Versturen mislukt: ' + e.message;
+    err.hidden = false;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Verstuur nu';
+  }
+}
+// Modal-handlers 1x wiren.
+document.addEventListener('DOMContentLoaded', () => {
+  const close = document.getElementById('odSendModalClose');
+  const cancel = document.getElementById('odSendCancel');
+  const confirmBtn = document.getElementById('odSendConfirm');
+  if (close) close.addEventListener('click', closeOdSendModal);
+  if (cancel) cancel.addEventListener('click', closeOdSendModal);
+  if (confirmBtn) confirmBtn.addEventListener('click', odDoSend);
+});
 async function doPush(){
   try { const r=await window.AgentShared.apiFetch('/api/sales-deal-retry-push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deal_id:dealId})}); const d=await r.json(); if(!r.ok||d.success===false)throw new Error(d.error||'HTTP '+r.status); toast('Naar Teamleader gepusht','success'); load(); }
   catch(e){ toast('Push mislukt: '+e.message,'error'); }
