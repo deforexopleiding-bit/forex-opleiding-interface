@@ -1030,7 +1030,10 @@ function koQuotActions(q) {
   const tl = q.tl_quotation_id ? `<a class="sr-ibtn" href="https://focus.teamleader.eu/quotations/${encodeURIComponent(q.tl_quotation_id)}" target="_blank" title="Open in Teamleader"><i class="ti ti-external-link"></i></a>` : '';
   const items = [];
   if (st !== 'sent') items.push(`<button class="sr-menu-item" onclick="koEdit('${escapeHtml(q.deal_id)}', ${st === 'accepted' || st === 'signed'})"><i class="ti ti-edit"></i> Bewerken</button>`);
-  if (['draft', 'sent', 'failed'].includes(st)) items.push(`<button class="sr-menu-item danger" onclick="koDelete('${escapeHtml(q.deal_id)}')"><i class="ti ti-trash"></i> Verwijderen</button>`);
+  // Getekende offertes (accepted/signed) mogen óók verwijderd worden;
+  // status gaat mee zodat koDelete een extra waarschuwing over een
+  // reeds omgezette abbo kan tonen.
+  if (['draft', 'sent', 'failed', 'accepted', 'signed'].includes(st)) items.push(`<button class="sr-menu-item danger" onclick="koDelete('${escapeHtml(q.deal_id)}', '${escapeHtml(st)}')"><i class="ti ti-trash"></i> Verwijderen</button>`);
   items.push(`<button class="sr-menu-item" onclick="renderOffertesTab()"><i class="ti ti-refresh"></i> Status vernieuwen</button>`);
   if (q.tl_quotation_id) items.push(`<a class="sr-menu-item" href="https://focus.teamleader.eu/quotations/${encodeURIComponent(q.tl_quotation_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>`);
   const dots = `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${items.join('')}</div></div>`;
@@ -1046,7 +1049,28 @@ function koQuotActions(q) {
 async function koSend(id) { try { const r = await window.AgentShared.apiFetch('/api/teamleader-send-quotation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deal_id: id }) }); const d = await r.json(); if (!r.ok || d.success === false) throw new Error(d.error || 'HTTP ' + r.status); window.AgentShared?.showToast('Offerte verzonden', 'success'); renderOffertesTab(); } catch (e) { window.AgentShared?.showToast('Mislukt: ' + e.message, 'error'); } }
 async function koPush(id) { try { const r = await window.AgentShared.apiFetch('/api/sales-deal-retry-push', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deal_id: id }) }); const d = await r.json(); if (!r.ok || d.success === false) throw new Error(d.error || 'HTTP ' + r.status); window.AgentShared?.showToast('Naar Teamleader gepusht', 'success'); renderOffertesTab(); } catch (e) { window.AgentShared?.showToast('Mislukt: ' + e.message, 'error'); } }
 function koEdit(id, needConfirm) { if (needConfirm && !confirm('Weet je zeker dat je de offerte wilt bewerken? Deze is al getekend en zal niet meer geldig zijn.')) return; window.location.href = '/modules/sales-wizard.html?edit_deal_id=' + id; }
-async function koDelete(id) { if (!confirm('Weet je zeker dat je deze offerte wilt verwijderen?')) return; if (!confirm('Dit kan NIET ongedaan worden. Offerte wordt zowel hier als in Teamleader verwijderd. Doorgaan?')) return; try { const r = await window.AgentShared.apiFetch('/api/teamleader-delete-quotation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deal_id: id }) }); const d = await r.json(); if (!r.ok || d.success === false) throw new Error(d.error || 'HTTP ' + r.status); window.AgentShared?.showToast('Offerte verwijderd', 'success'); renderOffertesTab(); } catch (e) { window.AgentShared?.showToast('Mislukt: ' + e.message, 'error'); } }
+async function koDelete(id, status) {
+  if (!confirm('Weet je zeker dat je deze offerte wilt verwijderen?')) return;
+  if (!confirm('Dit kan NIET ongedaan worden. Offerte wordt zowel hier als in Teamleader verwijderd. Doorgaan?')) return;
+  if ((status === 'accepted' || status === 'signed') &&
+      !confirm('Let op: deze offerte is al GETEKEND en mogelijk omgezet naar een abonnement. Verwijderen haalt \'m hier + in TeamLeader weg, maar een reeds aangemaakt abonnement blijft bestaan (deactiveer dat apart indien nodig). Doorgaan?')) {
+    return;
+  }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/teamleader-delete-quotation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deal_id: id }) });
+    const d = await r.json();
+    if (!r.ok || d.success === false) throw new Error(d.error || 'HTTP ' + r.status);
+    // TL-diagnose in de toast zodat Dave ziet of TL écht opgeschoond is.
+    const tl = d.tl || {};
+    const reasons = [];
+    if (tl.token === false) reasons.push('geen actief TL-token');
+    if (tl.quotation && tl.quotation.ok === false) reasons.push('quotations.delete faalde (' + (tl.quotation.status || tl.quotation.error || 'onbekend') + ')');
+    if (tl.deal && tl.deal.ok === false) reasons.push('deals.lose faalde (' + (tl.deal.status || tl.deal.error || 'onbekend') + ')');
+    if (reasons.length) window.AgentShared?.showToast('Lokaal verwijderd, maar TeamLeader-opschoning mislukte: ' + reasons.join(' + ') + '. Controleer TL handmatig of herprobeer.', 'error');
+    else window.AgentShared?.showToast('Offerte verwijderd (lokaal + TL)', 'success');
+    renderOffertesTab();
+  } catch (e) { window.AgentShared?.showToast('Mislukt: ' + e.message, 'error'); }
+}
 // 3-dots controller (één keer).
 if (!window._koMenuInit) {
   window._koMenuInit = true;
@@ -1932,7 +1956,7 @@ function renderKoAbos() {
     <div class="kpi-cell"><div class="kpi-lbl">Loopt t/m</div><div class="kpi-val">${loptTm ? fmtDate(loptTm) : '—'}</div></div>
   </div>`;
   const segCount = (k) => k === 'alle' ? subs.length : subs.filter(s => (s.status || 'active') === k).length;
-  const SEGS = [['active', 'Actief'], ['paused', 'Gepauzeerd'], ['cancelled', 'Geannuleerd'], ['alle', 'Alle']];
+  const SEGS = [['active', 'Actief'], ['paused', 'Gepauzeerd'], ['alle', 'Alle'], ['cancelled', 'Gedeactiveerd']];
   const bulkBtn = active.length > 1 ? `<button class="sr-abtn warning" id="postpone-all-btn">Stel alle abo's uit (${active.length})</button>` : '';
   const newBtn = koAboPending ? `<a class="sr-abtn primary" href="/modules/subscription-wizard.html?deal_id=${encodeURIComponent(koAboPending)}"><i class="ti ti-plus"></i> Nieuw abonnement</a>` : '';
   const pills = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
@@ -1952,7 +1976,7 @@ function renderKoAbos() {
     const menu = cancelled ? '' : `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">
       <button class="sr-menu-item" onclick="renderAbonnementenTab()"><i class="ti ti-refresh"></i> Status vernieuwen</button>
       ${s.teamleader_subscription_id ? `<a class="sr-menu-item" href="https://focus.teamleader.eu/subscriptions/${escapeHtml(s.teamleader_subscription_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : ''}
-      <button class="sr-menu-item danger" data-sub-delete="${escapeHtml(s.id)}"><i class="ti ti-trash"></i> Verwijderen</button></div></div>`;
+      <button class="sr-menu-item danger" data-sub-delete="${escapeHtml(s.id)}"><i class="ti ti-ban"></i> Deactiveren</button></div></div>`;
     const actions = cancelled ? '<span class="sr-cellsub">—</span>' : `<div class="sr-actions"><button class="sr-abtn warning" data-sub-postpone="${escapeHtml(s.id)}" data-sub-running="${isRunning(s) ? '1' : '0'}">Uitstellen</button>${menu}</div>`;
     const ppBadge = s.postponed_months ? ` <span class="sr-tag warning" title="uitgesteld">+${s.postponed_months}m${isExtended(s) ? ' verlengd' : ''}</span>` : '';
     const perTerm = (Number(s.term_count) || 1) === 1 ? 'eenmalig' : 'incl. /termijn';
@@ -2063,18 +2087,22 @@ function openPostponeAllModal(customerId, count) {
   });
 }
 
-// PUNT 3 — Abonnement verwijderen (lokaal cancelled + TL deactivate).
+// PUNT 3 — Abonnement deactiveren (lokaal status='cancelled' + TL deactivate).
 async function deleteSubscription(subId, force) {
-  if (!force && !confirm('Weet je zeker dat je dit abonnement wilt verwijderen? Dit wordt ook in Teamleader gedeactiveerd.')) return;
+  if (!force && !confirm('Weet je zeker dat je dit abonnement wilt deactiveren? Het abonnement stopt en wordt in Teamleader gedeactiveerd (blijft in de historie staan).')) return;
   try {
     const res = await window.AgentShared.apiFetch('/api/sales-subscription-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription_id: subId, force: !!force }) });
     const d = await res.json();
     if (res.status === 502 && d.tl_failed) {
-      if (confirm('Teamleader-deactivatie mislukt: ' + (d.tl?.error || 'onbekend') + '\n\nAlleen lokaal stopzetten (TL handmatig afhandelen)?')) return deleteSubscription(subId, true);
+      if (confirm('Teamleader-deactivatie mislukt: ' + (d.tl?.error || 'onbekend') + '\n\nAlleen lokaal deactiveren (TL handmatig afhandelen)?')) return deleteSubscription(subId, true);
       return;
     }
     if (!res.ok || d.success === false) throw new Error(d.error || 'HTTP ' + res.status);
-    window.AgentShared?.showToast(d.tl?.deactivated ? 'Verwijderd + TL gedeactiveerd' : 'Lokaal stopgezet (TL niet gesynct)', 'success');
+    // TL-diagnose zichtbaar maken zodat Dave weet of TL echt gedeactiveerd is.
+    const tl = d.tl || {};
+    if (tl.deactivated) window.AgentShared?.showToast('Abonnement gedeactiveerd (lokaal + TL)', 'success');
+    else if (tl.skipped) window.AgentShared?.showToast('Abonnement lokaal gedeactiveerd (geen TL-koppeling)', 'success');
+    else window.AgentShared?.showToast('Lokaal gedeactiveerd, maar TeamLeader-deactivatie mislukte: ' + (tl.error || 'onbekend') + '. Controleer TL handmatig of herprobeer.', 'error');
     renderAbonnementenTab();
   } catch (e) { window.AgentShared?.showToast('Mislukt: ' + e.message, 'error'); }
 }

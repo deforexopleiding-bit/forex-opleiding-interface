@@ -202,8 +202,8 @@
     <div class="sr-segments" id="subSegments">
       <button class="sr-seg active" data-status="active">Actief</button>
       <button class="sr-seg" data-status="paused">Gepauzeerd</button>
-      <button class="sr-seg" data-status="cancelled">Geannuleerd</button>
       <button class="sr-seg" data-status="all">Alle</button>
+      <button class="sr-seg" data-status="cancelled">Gedeactiveerd</button>
     </div>
     <div id="subscriptionsList"><div class="sr-empty">Laden…</div></div>
   </section>
@@ -828,7 +828,7 @@ function renderQuotations() {
   }));
   document.querySelectorAll('#quotationsList [data-send]').forEach(b => b.addEventListener('click', () => openSendModal(b.dataset.send)));
   document.querySelectorAll('#quotationsList [data-push]').forEach(b => b.addEventListener('click', () => retryPush(b.dataset.push)));
-  document.querySelectorAll('#quotationsList [data-delete]').forEach(b => b.addEventListener('click', () => deleteQuotation(b.dataset.delete)));
+  document.querySelectorAll('#quotationsList [data-delete]').forEach(b => b.addEventListener('click', () => deleteQuotation(b.dataset.delete, b.dataset.status || '')));
 }
 function quotationActions(q) {
   const st = q.tl_quotation_status;
@@ -840,7 +840,10 @@ function quotationActions(q) {
   // server-side blokkeert het ook. 'Bewerken' verschijnt alleen bij niet-
   // verzonden/niet-getekende statussen zodat een fout gecorrigeerd kan worden.
   if (st !== 'sent' && st !== 'accepted' && st !== 'signed') items.push(`<button class="sr-menu-item" onclick="editQuotation('${esc(q.deal_id)}', false)"><i class="ti ti-edit"></i> Bewerken</button>`);
-  if (['draft', 'sent', 'failed'].includes(st)) items.push(`<button class="sr-menu-item danger" data-delete="${esc(q.deal_id)}"><i class="ti ti-trash"></i> Verwijderen</button>`);
+  // Getekende offertes (accepted/signed) mogen óók verwijderd worden;
+  // handler krijgt de status mee zodat 'ie een extra waarschuwing over
+  // een reeds omgezette abbo kan tonen.
+  if (['draft', 'sent', 'failed', 'accepted', 'signed'].includes(st)) items.push(`<button class="sr-menu-item danger" data-delete="${esc(q.deal_id)}" data-status="${esc(st)}"><i class="ti ti-trash"></i> Verwijderen</button>`);
   items.push(`<button class="sr-menu-item" onclick="loadQuotations()"><i class="ti ti-refresh"></i> Status vernieuwen</button>`);
   if (q.tl_quotation_id) items.push(`<a class="sr-menu-item" href="https://focus.teamleader.eu/quotations/${esc(q.tl_quotation_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>`);
   const dots = `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer acties"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${items.join('')}</div></div>`;
@@ -873,9 +876,16 @@ async function retryPush(dealId) {
     loadQuotations();
   } catch (e) { toast('Push mislukt: ' + e.message, 'error'); }
 }
-async function deleteQuotation(dealId) {
+async function deleteQuotation(dealId, status) {
   if (!confirm('Weet je zeker dat je deze offerte wilt verwijderen?')) return;
   if (!confirm('Dit kan NIET ongedaan worden. Offerte wordt zowel hier als in Teamleader verwijderd. Doorgaan?')) return;
+  // Extra waarschuwing bij getekende offertes: TL-abbo blijft bestaan als
+  // dat al is aangemaakt (sales-subscription-delete moet daar apart voor
+  // worden gebruikt).
+  if ((status === 'accepted' || status === 'signed') &&
+      !confirm('Let op: deze offerte is al GETEKEND en mogelijk omgezet naar een abonnement. Verwijderen haalt \'m hier + in TeamLeader weg, maar een reeds aangemaakt abonnement blijft bestaan (deactiveer dat apart indien nodig). Doorgaan?')) {
+    return;
+  }
   try {
     const res = await window.AgentShared.apiFetch('/api/teamleader-delete-quotation', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deal_id: dealId }),
@@ -1150,7 +1160,7 @@ function renderSubscriptions() {
       menu.push(`<a class="sr-menu-item" href="${detailHref}"><i class="ti ti-arrow-bar-to-right"></i> Looptijd verlengen</a>`);
       menu.push(`<button class="sr-menu-item" onclick="loadSubscriptions()"><i class="ti ti-refresh"></i> Status vernieuwen</button>`);
       if (it.teamleader_subscription_id) menu.push(`<a class="sr-menu-item" href="https://focus.teamleader.eu/subscriptions/${esc(it.teamleader_subscription_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>`);
-      if (!cancelled) menu.push(`<button class="sr-menu-item danger" data-subdel="${esc(it.id)}"><i class="ti ti-trash"></i> Verwijderen</button>`);
+      if (!cancelled) menu.push(`<button class="sr-menu-item danger" data-subdel="${esc(it.id)}"><i class="ti ti-ban"></i> Deactiveren</button>`);
       const dots = `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer acties"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${menu.join('')}</div></div>`;
       return `<tr>
         <td><a class="sr-userline" href="${detailHref}" style="text-decoration:none;color:inherit">${avatarHtml(it.customer_name)}<span><span class="sr-uname">${esc(it.customer_name)}</span><br><span class="sr-cellsub">${esc(it.customer_email || '—')}</span></span></a></td>
@@ -1170,7 +1180,7 @@ function renderSubscriptions() {
   wrap.querySelectorAll('[data-subdel]').forEach(b => b.addEventListener('click', () => subListDelete(b.dataset.subdel)));
 }
 async function subListDelete(id, force) {
-  if (!force && !confirm('Weet je zeker dat je dit abonnement wilt verwijderen? Dit wordt ook in Teamleader gedeactiveerd.')) return;
+  if (!force && !confirm('Weet je zeker dat je dit abonnement wilt deactiveren? Het abonnement stopt en wordt in Teamleader gedeactiveerd (blijft in de historie staan).')) return;
   try {
     const res = await window.AgentShared.apiFetch('/api/sales-subscription-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription_id: id, force: !!force }) });
     const d = await res.json();
@@ -1181,11 +1191,11 @@ async function subListDelete(id, force) {
     // force-modus geactiveerd (waarschuwing, TL is niet opgeschoond).
     const tl = d.tl || {};
     if (tl.deactivated) {
-      toast('Abonnement verwijderd (lokaal + TL gedeactiveerd)', 'success');
+      toast('Abonnement gedeactiveerd (lokaal + TL)', 'success');
     } else if (tl.skipped) {
-      toast('Abonnement lokaal stopgezet (geen TL-koppeling)', 'success');
+      toast('Abonnement lokaal gedeactiveerd (geen TL-koppeling)', 'success');
     } else {
-      toast('Lokaal stopgezet, maar TeamLeader-deactivatie mislukte: ' + (tl.error || 'onbekend') + '. Controleer TL handmatig of herprobeer.', 'error');
+      toast('Lokaal gedeactiveerd, maar TeamLeader-deactivatie mislukte: ' + (tl.error || 'onbekend') + '. Controleer TL handmatig of herprobeer.', 'error');
     }
     loadSubscriptions();
   } catch (e) { toast('Mislukt: ' + e.message, 'error'); }
