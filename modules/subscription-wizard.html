@@ -120,6 +120,29 @@ function addMonths(iso,n){ if(!iso) return ''; const d=new Date(iso); d.setMonth
 function today(){ return new Date().toISOString().slice(0,10); }
 function apiFetch(u,o){ return window.AgentShared.apiFetch(u,o); }
 
+// Sub-startdatum-plafond: elke sub (aanbetaling + termijnen) moet
+// minstens 3 kalenderdagen vóór de cursus-startdatum liggen. Alleen
+// van toepassing in deal-modus (bij standalone abbo is er geen cursus-
+// startdatum). UTC-veilig via Date.UTC, consistent met sales-wizard.
+function _courseStartIso(){
+  if(state.mode!=='deal') return null;
+  const d=state.deal||{};
+  const s=d.payment_start_date||d.start_date||null;
+  return (typeof s==='string' && /^\d{4}-\d{2}-\d{2}/.test(s)) ? s.slice(0,10) : null;
+}
+function _maxSubStartIso(){
+  const s=_courseStartIso(); if(!s) return null;
+  const [y,m,dd]=s.split('-').map(Number);
+  const dt=new Date(Date.UTC(y,m-1,dd));
+  dt.setUTCDate(dt.getUTCDate()-3);
+  return dt.toISOString().slice(0,10);
+}
+function _clampSubStart(iso){
+  const max=_maxSubStartIso();
+  if(!max || !iso) return iso;
+  return (iso>max) ? max : iso;
+}
+
 async function init(){
   await window._authSharedReady;
   const profile = await window.AuthShared?.requireAuth();
@@ -371,11 +394,13 @@ function prefillSubs(){
   const d=state.deal;
   const down=Number(d.payment_downpayment_amount)||0;
   const startBase=d.payment_start_date||d.start_date||today();
-  if(down>0) state.subs.push({description:'Aanbetaling',term_count:1,start_date:d.payment_downpayment_date||startBase,_descCustom:false,line_items:splitFromOffer(down)});
+  // Sub-startdatums clampen naar cursus-start − 3d zodat prefill meteen
+  // aan de regel voldoet. Verder terug mag sales handmatig.
+  if(down>0) state.subs.push({description:'Aanbetaling',term_count:1,start_date:_clampSubStart(d.payment_downpayment_date||startBase),_descCustom:false,line_items:splitFromOffer(down)});
   const tc=Number(d.payment_term_count)||0;
   if(tc>0){
     const monthly = d.payment_term_amount!=null ? Number(d.payment_term_amount) : round2(((Number(state.totals.incl)||0)-down)/tc);
-    state.subs.push({description:'Maandelijkse termijnen',term_count:tc,start_date:d.payment_term_start_date||addMonths(startBase,1),_descCustom:false,line_items:splitFromOffer(monthly)});
+    state.subs.push({description:'Maandelijkse termijnen',term_count:tc,start_date:_clampSubStart(d.payment_term_start_date||addMonths(startBase,1)),_descCustom:false,line_items:splitFromOffer(monthly)});
   }
   // Fallback voor offertes zonder aanbetaling én zonder termijnen: neem
   // het volledige incl.-totaal over als één abonnement. Zonder deze
@@ -397,7 +422,9 @@ function prefillSubs(){
     state.subs.push({
       description : 'Abonnement',
       term_count  : dur>0 ? dur : 1,
-      start_date  : d.payment_start_date || d.start_date || today(),
+      // Fallback-sub gebruikt cursus-start als default; clamp naar
+      // cursus-start − 3d om aan de 3-dagen-regel te voldoen.
+      start_date  : _clampSubStart(d.payment_start_date || d.start_date || today()),
       _descCustom : false,
       line_items  : items,
     });
@@ -423,7 +450,7 @@ function renderSubs(){
       ${state.subs.length>1?`<button class="btn btn-danger btn-sm" data-rm="${i}" style="position:absolute;top:10px;right:10px">×</button>`:''}
       <div class="field"><label>Omschrijving abonnement</label>${descSelect(s,i)}</div>
       <div class="row3">
-        <div class="field"><label>Startdatum</label><input type="date" data-f="start_date" data-i="${i}" value="${esc(s.start_date)}" /></div>
+        <div class="field"><label>Startdatum</label><input type="date" data-f="start_date" data-i="${i}" value="${esc(s.start_date)}"${_maxSubStartIso()?` max="${_maxSubStartIso()}"`:''} /></div>
         <div class="field"><label>Aantal termijnen <span style="color:var(--danger,#dc2626)">*</span></label><input type="number" min="1" required data-f="term_count" data-i="${i}" value="${esc(s.term_count)}" title="Verplicht — minimaal 1 termijn" /></div>
         <div class="field"><label>Einddatum (auto)</label><input type="date" readonly data-end="${i}" style="background:var(--bg-elev-2)" value="${calcEnd(s.start_date,s.term_count)}" /></div>
       </div>
@@ -519,9 +546,17 @@ document.getElementById('addSub').addEventListener('click',()=>{state.subs.push(
 
 function validateSubs(){
   if(!state.subs.length) return 'Minimaal 1 abonnement vereist';
+  // 3-dagen-regel alleen in deal-modus (standalone heeft geen cursus-
+  // startdatum). Aanbetaling én termijnen moeten allebei minstens 3
+  // dagen vóór de cursus-start staan.
+  const courseStart = _courseStartIso();
+  const maxSub      = _maxSubStartIso();
   for(const s of state.subs){
     if(!(Number(s.term_count)>=1)) return 'Aantal termijnen is verplicht, minimaal 1';
     if(!s.start_date) return 'Startdatum verplicht bij elk abonnement';
+    if(courseStart && maxSub && s.start_date > maxSub){
+      return `Startdatum van "${s.description||'abonnement'}" moet minstens 3 dagen vóór de cursus-startdatum (${courseStart}) liggen`;
+    }
     const lines=(s.line_items||[]).filter(li=>Number(li.amount)>0);
     if(!lines.length) return `Abonnement "${s.description||'(naamloos)'}" heeft minstens 1 regel met bedrag > 0 nodig`;
   }
