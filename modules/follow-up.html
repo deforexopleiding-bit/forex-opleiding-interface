@@ -4874,6 +4874,11 @@
     // Guard voor de #af-list event-delegation (Afspraken-tab) — buiten
     // state-object omdat 'ie ongebonden mag zijn aan lead-state resets.
     let _afListDelegationBound = false;
+    // Cross-tab pending-open handshake: als een klik op een afspraak in
+    // de Afspraken-tab een tab-switch naar Werklijst triggert, moet
+    // loadLeadsTab de auto-open-first overslaan en de gekozen afspraak
+    // openen. Setter is de #af-list-handler; consumer is loadLeadsTab.
+    let _pendingApptOpen = null;
     const _leadsState = {
       items       : [],
       counts      : null,
@@ -5072,7 +5077,15 @@
         const items = _leadsState.items;
         const belItems = items.filter((x) => (x.__worklistKind || 'bel') === 'bel');
         const stillThere = _leadsState.selectedId && belItems.some((x) => x.id === _leadsState.selectedId);
-        if (!stillThere) {
+        if (_pendingApptOpen) {
+          // Cross-tab handshake: gebruiker klikte "Openen" op een afspraak
+          // in de Afspraken-tab. Open EXACT die afspraak; sla de gewone
+          // auto-open-first over (anders wint het bovenste item de race).
+          const aid = _pendingApptOpen;
+          _pendingApptOpen = null;
+          _leadsState.selectedId = null;
+          try { _openAppointmentDetail(aid); } catch (_) {}
+        } else if (!stillThere) {
           const first = belItems[0];
           if (first) {
             _leadsState.selectedId = null;
@@ -6333,10 +6346,18 @@
       if (icon) icon.className = 'ti ' + (on ? 'ti-player-pause' : 'ti-player-play');
       if (on) {
         // Direct de eerstvolgende lead openen als er een selectie is (of
-        // top-of-list) en de belknop simuleren.
+        // top-of-list) en de belknop simuleren. Respecteer een pending
+        // apptbench (klik vanuit Afspraken-tab): dan opent loadLeadsTab
+        // die afspraak, en belronde slaat de eigen auto-open over zodat
+        // we niet over de afspraak-detail heen renderen.
         const items = _leadsState.items || [];
         if (!items.length) { _showBelrondeDone(); return; }
-        if (!_leadsState.selectedId) {
+        if (_pendingApptOpen) {
+          const aid = _pendingApptOpen;
+          _pendingApptOpen = null;
+          _leadsState.selectedId = null;
+          try { _openAppointmentDetail(aid); } catch (_) {}
+        } else if (!_leadsState.selectedId) {
           selectLead(items[0].id);
         }
       }
@@ -7035,21 +7056,22 @@
           }
           // Appointment openen: de detail rendert in #cockpit-apptbody
           // dat binnen de Werklijst-tab (#panel-leads) zit. Vanuit de
-          // Afspraken-tab is dat onzichtbaar → eerst switchTab('leads'),
-          // daarna de detail openen zodra het panel gemount is.
+          // Afspraken-tab is dat onzichtbaar → switchTab('leads') doet
+          // loadLeadsTab; die opent normaal automatisch het eerste
+          // bel-item als er geen selectie is → race met setTimeout.
+          // Deterministisch fixen via _pendingApptOpen: loadLeadsTab
+          // ziet de vlag en opent DIE afspraak i.p.v. de auto-first.
           const apptBtn = ev.target.closest('[data-af-appt]');
           if (apptBtn) {
             ev.stopPropagation();
-            const id = apptBtn.getAttribute('data-af-appt');
+            _pendingApptOpen = apptBtn.getAttribute('data-af-appt');
             switchTab('leads');
-            setTimeout(() => { try { _openAppointmentDetail(id); } catch (_) {} }, 150);
             return;
           }
           const apptRow = ev.target.closest('[data-af-appt-row]');
           if (apptRow) {
-            const id = apptRow.getAttribute('data-af-appt-row');
+            _pendingApptOpen = apptRow.getAttribute('data-af-appt-row');
             switchTab('leads');
-            setTimeout(() => { try { _openAppointmentDetail(id); } catch (_) {} }, 150);
           }
         });
       }
