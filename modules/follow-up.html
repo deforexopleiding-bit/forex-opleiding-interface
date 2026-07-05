@@ -6181,8 +6181,10 @@
       }
       const SIPLib = window.SIP;
       if (!SIPLib || !SIPLib.Inviter) { alert('SIP.js niet geladen.'); return; }
-      // Digits only voor SIP — VoIPGRID accepteert '+' → strip.
-      const digits = rawNumber.replace(/\D/g, '');
+      // Normaliseer voor Voys/VoIPGRID: +31... → 0..., overig
+      // internationaal → 00<landcode>..., 0... blijft. Zie
+      // _normalizeDialNumber voor de volledige regels + comment.
+      const digits = _normalizeDialNumber(rawNumber);
       const target = SIPLib.UserAgent.makeURI('sip:' + digits + '@' + _softphone.config.domain);
       if (!target) { alert('Ongeldig doel-nummer voor SIP.'); return; }
 
@@ -6346,6 +6348,36 @@
       if (!trimmed) return '';
       if (trimmed.startsWith('+')) return '+' + trimmed.slice(1).replace(/\D/g, '');
       return trimmed.replace(/\D/g, '');
+    }
+
+    // Normaliseer een telefoonnummer voor het SIP-dial-plan van Voys.
+    // Regels (bijstelbaar als Voys internationaal toch met '+' wil):
+    //   1) strip spaties/streepjes/haakjes/punten; behoud eventuele
+    //      leidende '+'.
+    //   2) NL nationaal:
+    //        +31...  → 0...   (bv. +31655270212 → 0655270212)
+    //        0031... → 0...
+    //   3) Overig internationaal:
+    //        +<landcode>... (niet 31) → 00<landcode>... (bv. +32... → 0032...)
+    //        00<landcode>... (niet 0031) → laat staan.
+    //   4) 0...   (nationaal) → laat staan.
+    //   5) anders (kaal digits zonder prefix) → laat staan.
+    function _normalizeDialNumber(raw) {
+      let s = String(raw || '').trim();
+      if (!s) return '';
+      // (1) strip alles behalve digits en de eventuele leidende '+'.
+      const hasPlus = s.startsWith('+');
+      s = s.replace(/[\s\-().]/g, '');
+      s = hasPlus ? '+' + s.slice(1).replace(/\D/g, '') : s.replace(/\D/g, '');
+      if (!s) return '';
+      // (2) NL nationaal.
+      if (s.startsWith('+31'))  return '0' + s.slice(3);
+      if (s.startsWith('0031')) return '0' + s.slice(4);
+      // (3) Overig internationaal.
+      if (s.startsWith('+'))  return '00' + s.slice(1);
+      // (4) begint met 0 (nationaal of al 00-genormaliseerd) → laten staan.
+      // (5) kaal digits zonder prefix → laten staan.
+      return s;
     }
 
     function _openWhatsappForLead(it) {
