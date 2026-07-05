@@ -6403,11 +6403,16 @@
       const dateVal = dateEl?.value || '';
       panel.hidden = false;
       panel.innerHTML = '<div class="fu-freeslots-loading"><i class="ti ti-loader-2"></i> Vrije tijden ophalen…</div>';
-      // Als er een datum in de picker staat: alleen die dag ophalen;
-      // anders komende 14 dagen.
-      const url = dateVal
-        ? '/api/follow-up-ghl-free-slots?date=' + encodeURIComponent(dateVal)
-        : '/api/follow-up-ghl-free-slots';
+      // ALTIJD een venster van 14 dagen ophalen zodat de sales-user
+      // ook ervoor/erna sloten ziet. Startdatum = gekozen datum (of
+      // vandaag), einddatum = start + 14 dagen. Groepering per dag
+      // gebeurt server-side + hieronder in de render.
+      const startDate = dateVal || new Date().toISOString().slice(0, 10);
+      const endDateObj = new Date(startDate + 'T12:00:00');
+      endDateObj.setDate(endDateObj.getDate() + 14);
+      const endDate = endDateObj.toISOString().slice(0, 10);
+      const url = '/api/follow-up-ghl-free-slots?startDate=' + encodeURIComponent(startDate) +
+                  '&endDate=' + encodeURIComponent(endDate);
       try {
         const r = await window.AgentShared.apiFetch(url);
         const d = await r.json().catch(() => ({}));

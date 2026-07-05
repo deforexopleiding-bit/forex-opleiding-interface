@@ -108,6 +108,20 @@ export async function updateGhlAppointmentTime(appointmentId, newStartIso, newEn
     throw new Error('GHL token ontbreekt in env');
   }
 
+  // Body basis: startTime + endTime + ignoreFreeSlotValidation. Sinds
+  // GHL de update-endpoint strenger valideert ("assignedUserId is
+  // missing") sturen we óók calendarId/locationId/assignedUserId mee
+  // wanneer die in env aanwezig zijn — zelfde payload-shape als bij
+  // createGhlAppointment. Token/secret worden nergens gelogd.
+  const putBody = {
+    startTime: newStartIso,
+    endTime: newEndIso,
+    ignoreFreeSlotValidation: true,
+  };
+  if (process.env.GHL_CALENDAR_ID)   putBody.calendarId     = process.env.GHL_CALENDAR_ID;
+  if (process.env.GHL_LOCATION_ID)   putBody.locationId     = process.env.GHL_LOCATION_ID;
+  if (process.env.GHL_DAVE_USER_ID)  putBody.assignedUserId = process.env.GHL_DAVE_USER_ID;
+
   const res = await fetch(
     `${GHL_BASE}/calendars/events/appointments/${appointmentId}`,
     {
@@ -117,12 +131,7 @@ export async function updateGhlAppointmentTime(appointmentId, newStartIso, newEn
         Version: GHL_VERSION,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        startTime: newStartIso,
-        endTime: newEndIso,
-        // Accepteer weekend/avond bij verplaatsen; verkleint 422's.
-        ignoreFreeSlotValidation: true,
-      }),
+      body: JSON.stringify(putBody),
     }
   );
 
