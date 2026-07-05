@@ -346,6 +346,10 @@ function linesFromOffer(){
     const base = Number(l.quantity||1) * Number(l.unit_price||0);
     const incl = l.price_includes_vat ? base : base*(1+rate);
     return newLine({
+      // product_id mee zodat de dropdown het gekoppelde product
+      // selecteert (productOptions matcht op id) en TL bij opslaan
+      // dezelfde product-koppeling meekrijgt als de offerte.
+      product_id    : l.product_id || '',
       description   : l.product_name || l.description || 'Regel',
       amount_incl   : round2(incl),
       vat_percentage: isZeroVat() ? 0 : (Number(l.vat_percentage)||0),
@@ -426,7 +430,7 @@ function renderSubs(){
       <div class="field"><label>Omschrijving abonnement</label>${descSelect(s,i)}</div>
       <div class="row3">
         <div class="field"><label>Startdatum</label><input type="date" data-f="start_date" data-i="${i}" value="${esc(s.start_date)}" /></div>
-        <div class="field"><label>Aantal termijnen</label><input type="number" min="1" data-f="term_count" data-i="${i}" value="${esc(s.term_count)}" /></div>
+        <div class="field"><label>Aantal termijnen <span style="color:var(--danger,#dc2626)">*</span></label><input type="number" min="1" required data-f="term_count" data-i="${i}" value="${esc(s.term_count)}" title="Verplicht — minimaal 1 termijn" /></div>
         <div class="field"><label>Einddatum (auto)</label><input type="date" readonly data-end="${i}" style="background:var(--bg-elev-2)" value="${calcEnd(s.start_date,s.term_count)}" /></div>
       </div>
       <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-dim);margin:6px 0 4px">Regels (per termijn)</label>
@@ -455,6 +459,18 @@ function renderSubs(){
   root.querySelectorAll('[data-desccustom]').forEach(inp=>inp.addEventListener('input',e=>{ state.subs[Number(e.target.dataset.desccustom)].description=e.target.value; }));
   // Sub-velden (start/term): targeted herberekening.
   root.querySelectorAll('[data-f]').forEach(inp=>inp.addEventListener('input',e=>{ state.subs[Number(e.target.dataset.i)][e.target.dataset.f]=e.target.value; updateComputed(); }));
+  // term_count is verplicht ≥1: bij blur met leeg/0/ongeldig →
+  // terugzetten naar 1 zodat de wizard niet in een niet-opslaanbare
+  // staat blijft. UI-required + validateSubs vangen de rest af.
+  root.querySelectorAll('[data-f="term_count"]').forEach(inp=>inp.addEventListener('blur',e=>{
+    const i=Number(e.target.dataset.i);
+    const n=Number(e.target.value);
+    if(!Number.isFinite(n) || n<1){
+      state.subs[i].term_count = 1;
+      e.target.value = 1;
+      updateComputed();
+    }
+  }));
   // Product dropdown (PUNT 5): autofill → re-render.
   root.querySelectorAll('[data-prod]').forEach(sel=>sel.addEventListener('change',e=>onProduct(Number(e.target.dataset.sub),Number(e.target.dataset.li),e.target.value)));
   // Beschrijving regel (targeted).
@@ -511,7 +527,7 @@ function validateSubs(){
   if(!state.subs.length) return 'Minimaal 1 abonnement vereist';
   if(!document.getElementById('firstCall').value) return 'Eerste call is verplicht';
   for(const s of state.subs){
-    if(!(Number(s.term_count)>=1)) return 'Aantal termijnen minimaal 1';
+    if(!(Number(s.term_count)>=1)) return 'Aantal termijnen is verplicht, minimaal 1';
     if(!s.start_date) return 'Startdatum verplicht bij elk abonnement';
     const lines=(s.line_items||[]).filter(li=>Number(li.amount)>0);
     if(!lines.length) return `Abonnement "${s.description||'(naamloos)'}" heeft minstens 1 regel met bedrag > 0 nodig`;
