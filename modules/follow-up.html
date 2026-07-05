@@ -7033,15 +7033,23 @@
             setTimeout(() => trySelect(0), 150);
             return;
           }
+          // Appointment openen: de detail rendert in #cockpit-apptbody
+          // dat binnen de Werklijst-tab (#panel-leads) zit. Vanuit de
+          // Afspraken-tab is dat onzichtbaar → eerst switchTab('leads'),
+          // daarna de detail openen zodra het panel gemount is.
           const apptBtn = ev.target.closest('[data-af-appt]');
           if (apptBtn) {
             ev.stopPropagation();
-            _openAppointmentDetail(apptBtn.getAttribute('data-af-appt'));
+            const id = apptBtn.getAttribute('data-af-appt');
+            switchTab('leads');
+            setTimeout(() => { try { _openAppointmentDetail(id); } catch (_) {} }, 150);
             return;
           }
           const apptRow = ev.target.closest('[data-af-appt-row]');
           if (apptRow) {
-            _openAppointmentDetail(apptRow.getAttribute('data-af-appt-row'));
+            const id = apptRow.getAttribute('data-af-appt-row');
+            switchTab('leads');
+            setTimeout(() => { try { _openAppointmentDetail(id); } catch (_) {} }, 150);
           }
         });
       }
