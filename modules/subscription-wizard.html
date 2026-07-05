@@ -334,6 +334,25 @@ function splitFromOffer(target){
   return items;
 }
 function newLine(o){ const li={product_id:'',description:'',amount:'',amount_incl:'',vat_percentage:isZeroVat()?0:21,_lead:'excl',...(o||{})}; recalcLine(li); return li; }
+
+// 1-op-1 mapping van offerte-regels naar abbo-regels. Gebruikt voor de
+// "volledige offerte"-fallback in prefillSubs zodat de specificatie
+// (product + BTW-tarief) behouden blijft — anders zou splitFromOffer
+// alles per BTW-tarief samenvoegen op één regel. Elke regel krijgt
+// _lead:'incl' zodat recalcLine geen dubbele BTW oplevert.
+function linesFromOffer(){
+  return (state.lineItems||[]).map(l => {
+    const rate = isZeroVat() ? 0 : (Number(l.vat_percentage)||0)/100;
+    const base = Number(l.quantity||1) * Number(l.unit_price||0);
+    const incl = l.price_includes_vat ? base : base*(1+rate);
+    return newLine({
+      description   : l.product_name || l.description || 'Regel',
+      amount_incl   : round2(incl),
+      vat_percentage: isZeroVat() ? 0 : (Number(l.vat_percentage)||0),
+      _lead         : 'incl',
+    });
+  }).filter(li => Number(li.amount_incl) > 0);
+}
 function newEmptySub(){ return {description:'',term_count:1,start_date:today(),_descCustom:false,line_items:[newLine()]}; }
 // excl<->incl herberekening op basis van _lead (laatst bewerkte veld).
 function recalcLine(li){
@@ -372,12 +391,17 @@ function prefillSubs(){
   // duration_months + payment_* velden weg. Als 'ie ontbreekt: 1 termijn.
   if(!state.subs.length && Number(state.totals.incl)>0){
     const dur = Number(d.duration_months) || 0;
+    // Elk offerte-product als eigen abbo-regel (met behoud van BTW-
+    // tarief en incl.-bedrag). Fallback op splitFromOffer voor het
+    // zeldzame geval dat state.lineItems leeg is maar totaal >0.
+    const perProduct = linesFromOffer();
+    const items = perProduct.length ? perProduct : splitFromOffer(Number(state.totals.incl));
     state.subs.push({
       description : 'Abonnement',
       term_count  : dur>0 ? dur : 1,
       start_date  : d.payment_start_date || d.start_date || today(),
       _descCustom : false,
-      line_items  : splitFromOffer(Number(state.totals.incl)),
+      line_items  : items,
     });
   }
   if(!state.subs.length) state.subs.push(newEmptySub());
