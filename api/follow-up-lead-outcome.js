@@ -41,6 +41,10 @@ const OUTCOMES = new Set([
   // WhatsApp gestuurd: lead wordt NIET afgesloten — komt terug op de
   // Werklijst na WHATSAPP_FOLLOWUP_DAYS zodat sales/Dave hem opvolgt.
   'whatsapp_gestuurd',
+  // Event-specifieke uitkomsten (alleen voor source='event').
+  // 'bevestigd'  → lead 'verlengd' (afgehandeld, gastenlijst blijft).
+  // 'komt_niet'  → lead 'verloren' (naar Afgeboekt-tab), attendee.status='geannuleerd'.
+  'bevestigd', 'komt_niet',
   // Systeem-outcome: alleen loggen als entry_kind='system' + outcome_code='offerte'.
   // Wordt vanuit de UI aangeroepen wanneer de sales-user op "Offerte maken" klikt,
   // zodat het dashboard offerte-starts kan tellen zonder eerdere state te muteren.
@@ -48,6 +52,11 @@ const OUTCOMES = new Set([
   // Corrigeer-flow: draai de vorige outcome terug naar prev_state.
   'undo',
 ]);
+
+// Event-only outcomes: als source !== 'event' → 400. Bewuste beperking
+// omdat de status-normalisatie op event_attendees alleen zin heeft bij
+// een gekoppeld attendee-record.
+const EVENT_ONLY_OUTCOMES = new Set(['bevestigd', 'komt_niet']);
 
 const PREV_STATE_KEYS = ['lead_status', 'attempts', 'terugbel_datum', 'is_hot', 'snoozed_until', 'last_outcome'];
 
@@ -174,7 +183,7 @@ export default async function handler(req, res) {
     {
       const { data, error } = await supabaseAdmin
         .from('follow_up_leads')
-        .select('id, owner_id, lead_status, attempts, terugbel_datum, is_hot, snoozed_until, last_outcome, prev_state')
+        .select('id, owner_id, lead_status, attempts, terugbel_datum, is_hot, snoozed_until, last_outcome, prev_state, source, source_ref')
         .eq('id', leadId)
         .maybeSingle();
       if (error) {
@@ -185,7 +194,7 @@ export default async function handler(req, res) {
         if (isMissingColumnError(error)) {
           const { data: d2, error: e2 } = await supabaseAdmin
             .from('follow_up_leads')
-            .select('id, owner_id, lead_status, attempts, terugbel_datum, is_hot, snoozed_until, last_outcome')
+            .select('id, owner_id, lead_status, attempts, terugbel_datum, is_hot, snoozed_until, last_outcome, source, source_ref')
             .eq('id', leadId)
             .maybeSingle();
           if (e2) return res.status(500).json({ error: 'lead fetch: ' + e2.message });
@@ -224,6 +233,28 @@ export default async function handler(req, res) {
         continue;
       }
       return res.status(500).json({ error: 'undo update: ' + error.message });
+    }
+    // Event-attendee restore: als de vorige uitkomst 'bevestigd'/'komt_niet'
+    // was en we een attendee_before-snapshot hebben, zet die status +
+    // called terug. Fail-soft: mislukking blokkeert de undo niet.
+    if (prev.attendee_before && typeof prev.attendee_before === 'object') {
+      // Zoek attendee_id via source_ref (dezelfde bron als de forward-write).
+      const sourceRef = (leadRow.source_ref && typeof leadRow.source_ref === 'object') ? leadRow.source_ref : {};
+      const attendeeId = sourceRef.attendee_id ? String(sourceRef.attendee_id) : null;
+      if (attendeeId) {
+        try {
+          const restoreAttendee = {};
+          if (prev.attendee_before.status !== undefined) restoreAttendee.status = prev.attendee_before.status;
+          if (prev.attendee_before.called !== undefined) restoreAttendee.called = prev.attendee_before.called === true;
+          if (Object.keys(restoreAttendee).length) {
+            const { error: aErr } = await supabaseAdmin
+              .from('event_attendees').update(restoreAttendee).eq('id', attendeeId);
+            if (aErr) console.warn('[follow-up-lead-outcome] attendee undo-restore:', aErr.message);
+          }
+        } catch (e) {
+          console.warn('[follow-up-lead-outcome] attendee undo-restore exception:', e?.message || e);
+        }
+      }
     }
     try {
       await insertOutcomeNote(leadId, user.id, 'Uitkomst gecorrigeerd (teruggedraaid)', {
@@ -340,12 +371,37 @@ export default async function handler(req, res) {
     return new Date(utc.getTime() - offMin * 60000).toISOString();
   }
 
+  // Voor event-leads: fetch VOORAF de huidige attendee-snapshot
+  // (status + called). Nodig voor (a) de status-normalisatie bij
+  // 'bevestigd'/'komt_niet' verderop en (b) undo-restore. Fail-soft —
+  // als de fetch faalt, blijft attendeeBeforeSnapshot null en gaat de
+  // outcome gewoon door (write-back doet dan alleen called=true).
+  let attendeeBeforeSnapshot = null;
+  if (isEventLead && sourceRef.attendee_id) {
+    try {
+      const { data: ab } = await supabaseAdmin
+        .from('event_attendees')
+        .select('id, status, called')
+        .eq('id', sourceRef.attendee_id)
+        .maybeSingle();
+      if (ab) attendeeBeforeSnapshot = { status: ab.status || null, called: ab.called === true };
+    } catch (e) {
+      console.warn('[follow-up-lead-outcome] attendee-before fetch:', e?.message || e);
+    }
+  }
+
   // Bewaar de HUIDIGE staat als prev_state (jsonb) — zodat de UI met
   // 'undo' 1 stap terug kan. Bij ontbreken van de kolom (42703) wordt
   // dit veld in de update gestript, dus geen crash.
   const currentSnapshot = {};
   for (const k of PREV_STATE_KEYS) {
     if (Object.prototype.hasOwnProperty.call(leadRow, k)) currentSnapshot[k] = leadRow[k];
+  }
+  // Attendee-snapshot mee-serialiseren zodat undo (verderop) 'm kan
+  // restoren. Los veld — niet in PREV_STATE_KEYS want dat is voor
+  // lead-kolommen; hier zit het als sub-object 'attendee_before'.
+  if (attendeeBeforeSnapshot) {
+    currentSnapshot.attendee_before = attendeeBeforeSnapshot;
   }
 
   // Bouw patch + noteText per outcome.
@@ -524,6 +580,28 @@ export default async function handler(req, res) {
     patch.lead_status    = 'terugbellen';
     patch.terugbel_datum = hoursFromNow(days * 24);
     noteText = 'WhatsApp gestuurd — opvolgen over ' + days + ' dagen';
+  } else if (outcome === 'bevestigd') {
+    // Event-only: klant bevestigt telefonisch dat hij komt. Lead wordt
+    // afgehandeld (verlengd → uit werklijst), gastenlijst-status blijft
+    // 'aangemeld' (of wordt teruggenormaliseerd vanaf 'geannuleerd').
+    // De attendee-write-back gebeurt verderop in dezelfde flow als de
+    // 'called'-schrijf.
+    if (!isEventLead) return res.status(400).json({ error: "'bevestigd' geldt alleen voor event-leads", code: 'EVENT_ONLY' });
+    patch.lead_status    = 'verlengd';
+    patch.terugbel_datum = null;
+    patch.is_hot         = false;
+    patch.snoozed_until  = null;
+    noteText = 'Bevestigd — komt naar het event';
+  } else if (outcome === 'komt_niet') {
+    // Event-only: klant meldt zich telefonisch af. Lead → 'verloren'
+    // (verschijnt in Afgeboekt-tab), gastenlijst-status naar
+    // 'geannuleerd' (tenzij definitief 'sale'/'aanwezig').
+    if (!isEventLead) return res.status(400).json({ error: "'komt_niet' geldt alleen voor event-leads", code: 'EVENT_ONLY' });
+    patch.lead_status    = 'verloren';
+    patch.terugbel_datum = null;
+    patch.is_hot         = false;
+    patch.snoozed_until  = null;
+    noteText = 'Komt toch niet — afgemeld';
   }
 
   // Als schema geen rijke kolommen heeft, strippen we ze uit de patch
@@ -564,18 +642,45 @@ export default async function handler(req, res) {
     }
     if (!updated) return res.status(500).json({ error: 'update: geen resultaat' });
 
-    // Event-lead 'called'-write-back: zet event_attendees.called=true als
-    // de outcome een ECHT-gesproken uitkomst is. Niet bij geen_gehoor /
-    // voicemail / foutief_nummer / noshow (dat waren pogingen, geen echte
-    // gesprekken). Fail-soft — mislukking blokkeert de outcome niet.
-    const SPOKEN_OUTCOMES = new Set(['terugbel', 'sale', 'geen_interesse', 'gesprek_gehad', 'zoom_ingepland']);
+    // Event-lead write-back: zet event_attendees.called=true als de
+    // outcome een ECHT-gesproken uitkomst is. Bij 'bevestigd' / 'komt_niet'
+    // óók de status normaliseren op de gastenlijst. Fail-soft — mislukking
+    // blokkeert de outcome niet.
+    //   'bevestigd'  → normaliseer geannuleerd/switched → 'aangemeld',
+    //                  anders status ongewijzigd (aangemeld/aanwezig=OK).
+    //   'komt_niet'  → status='geannuleerd', tenzij definitief
+    //                  ('sale'/'aanwezig'): dan alleen called=true.
+    // De prev_state (verderop) heeft attendee_before al vastgelegd voor
+    // undo-restore.
+    const SPOKEN_OUTCOMES = new Set([
+      'terugbel', 'sale', 'geen_interesse', 'gesprek_gehad', 'zoom_ingepland',
+      'bevestigd', 'komt_niet',
+    ]);
     if (isEventLead && SPOKEN_OUTCOMES.has(outcome) && sourceRef.attendee_id) {
       try {
+        // Bepaal patch: called=true altijd; status alleen bij bevestigd/
+        // komt_niet en afhankelijk van de huidige waarde.
+        const patchAttendee = { called: true };
+        if (outcome === 'bevestigd' || outcome === 'komt_niet') {
+          const beforeStatus = String(attendeeBeforeSnapshot?.status || '').toLowerCase();
+          if (outcome === 'bevestigd') {
+            // Alleen normaliseren als klant eerder was afgemeld/verschoven.
+            if (beforeStatus === 'geannuleerd' || beforeStatus === 'switched_to_other_event') {
+              patchAttendee.status = 'aangemeld';
+            }
+            // In alle andere gevallen laat de status staan.
+          } else { // komt_niet
+            if (beforeStatus !== 'sale' && beforeStatus !== 'aanwezig') {
+              patchAttendee.status = 'geannuleerd';
+            }
+            // definitieve statussen ('sale'/'aanwezig') niet terugdraaien.
+          }
+        }
         const { error: aErr } = await supabaseAdmin
           .from('event_attendees')
-          .update({ called: true })
+          .update(patchAttendee)
           .eq('id', sourceRef.attendee_id);
-        if (aErr) console.warn('[follow-up-lead-outcome] event_attendees.called write-back:', aErr.message);
+        if (aErr) console.warn('[follow-up-lead-outcome] event_attendees write-back:', aErr.message);
       } catch (e) {
         console.warn('[follow-up-lead-outcome] event_attendees write-back error:', e?.message || e);
       }
