@@ -30,23 +30,53 @@ async function resolveDepartmentId(preferred) {
   return active.id;
 }
 
-// Bouwt een leesbare titel-string uit traject + optionele betalingsvoorwaarden.
-// Returnt null als er niets is ingevuld (caller gebruikt dan een fallback).
+// Titel is nu SCHOON: alleen het trajectlabel (of null → caller gebruikt
+// klantnaam als fallback). De betalingsvoorwaarden zijn verhuisd naar
+// buildPaymentSummaryText → verschijnen op de offerte als €0-regel én
+// (bij Route B) in de begeleidende tekst.
 function buildQuotationTitle(deal, trajectLabel) {
-  const seg = [];
-  if (trajectLabel) seg.push(trajectLabel);
+  return trajectLabel || null;
+}
+
+// Formatteert YYYY-MM-DD → dd-mm-jjjj zonder UTC-verschuiving (kale datum).
+function _fmtDateNL(iso) {
+  const s = String(iso || '');
+  if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return '';
+  const [y, m, d] = s.slice(0, 10).split('-');
+  return `${d}-${m}-${y}`;
+}
+
+// Multiline betaal-samenvatting voor de klant. Alleen regels tonen die
+// daadwerkelijk ingevuld zijn. Reserveringsfee-regel alleen bij een
+// goedgekeurde late-start-uitzondering met fee-akkoord (bouwstap 2/2
+// offerte-beveiliging). Returnt null als er niks te tonen valt.
+function buildPaymentSummaryText(deal) {
+  const parts = [];
   if (deal.payment_start_date) {
-    const d = new Date(deal.payment_start_date);
-    seg.push(`Start: ${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`);
+    parts.push(`- Startdatum: ${_fmtDateNL(deal.payment_start_date)}`);
   }
-  if (deal.payment_downpayment_amount) {
-    seg.push(`Aanbetaling €${Number(deal.payment_downpayment_amount).toLocaleString('nl-NL')}`);
+  const down = Number(deal.payment_downpayment_amount) || 0;
+  if (down > 0) {
+    parts.push(`- Aanbetaling: € ${down.toLocaleString('nl-NL')}`);
   }
-  if (deal.payment_term_count) {
-    const amt = deal.payment_term_amount ? ` van €${Number(deal.payment_term_amount).toLocaleString('nl-NL')}` : '';
-    seg.push(`${deal.payment_term_count} termijnen${amt}`);
+  const tc = Number(deal.payment_term_count) || 0;
+  if (tc > 0) {
+    const amt = Number(deal.payment_term_amount) || 0;
+    const amtLabel = amt > 0 ? ` à € ${amt.toLocaleString('nl-NL')} per maand` : '';
+    parts.push(`- ${tc} termijnen${amtLabel}`);
   }
-  return seg.length ? seg.join(' | ') : null;
+  if (deal.payment_term_start_date) {
+    parts.push(`- Eerste termijn: ${_fmtDateNL(deal.payment_term_start_date)}`);
+  }
+  const reasons = String(deal.exception_reasons || '');
+  const feeApplies = deal.exception_flagged
+                  && reasons.split(',').map(s => s.trim()).includes('late_start')
+                  && deal.exception_fee_agreed;
+  if (feeApplies) {
+    parts.push('- Reserveringsfee (reservering startdatum): € 100,00');
+  }
+  if (!parts.length) return null;
+  return 'Betaalregeling:\n' + parts.join('\n');
 }
 
 // TL department-UUID → korte naam voor per-department env-vars.
@@ -165,12 +195,48 @@ export async function pushQuotationToTl(dealId) {
         tax_rate_id: taxRateIdFor(l.vat_percentage, departmentId, deal.sale_type),
       };
     });
+    // Route A: betaalregeling als extra €0-regel onderaan (naast producten).
+    // Hergebruikt tax_rate_id van de eerste regel (irrelevant voor €0-lijn,
+    // maar TL vereist een geldig tax_rate_id per line_item). Bij ontbrekende
+    // regels fallback naar 21%-domestic (kan niet vóórkomen — er is
+    // hierboven al een throw op 0 regels — maar defensief).
+    const paymentText = buildPaymentSummaryText(deal);
+    if (paymentText) {
+      const fallbackRateId = lineItems[0]?.tax_rate_id
+        || taxRateIdFor(21, departmentId, deal.sale_type);
+      lineItems.push({
+        quantity:    1,
+        description: paymentText,
+        unit_price:  { amount: 0, currency: CURRENCY, tax: 'excluding' },
+        tax_rate_id: fallbackRateId,
+      });
+    }
+
     const quotationBody = {
       deal_id:       tlDealId,
       department_id: departmentId,
       grouped_lines: [{ line_items: lineItems }],
     };
-    const qr = await tlFetch('/quotations.create', { method: 'POST', body: JSON.stringify(quotationBody) });
+    // Route B: begeleidende tekst → $QUOTATION_TEXT$ in de mail-template.
+    // Veldnaam best-effort geraden op basis van doc-conventie (klant-
+    // template heeft $QUOTATION_TEXT$ shortcode → text-veld). Als TL 'text'
+    // niet accepteert (HTTP 400), doen we ÉÉN retry zonder text zodat de
+    // push niet stukloopt op deze diagnostische toevoeging — Route A staat
+    // dan alsnog. De fout wordt duidelijk gelogd zodat we bij de handmatige
+    // test kunnen zien of we een ander veldnaam moeten proberen.
+    if (paymentText) quotationBody.text = paymentText;
+
+    let qr = await tlFetch('/quotations.create', { method: 'POST', body: JSON.stringify(quotationBody) });
+    if (!qr.ok && paymentText && quotationBody.text) {
+      const failText = await qr.text().catch(() => '');
+      const looksLikeTextFieldError = /"?text"?/i.test(failText);
+      console.warn('[tl-quotation] quotations.create met text-veld faalde',
+        { status: qr.status, body: failText.slice(0, 300), retryingWithoutText: looksLikeTextFieldError });
+      if (looksLikeTextFieldError) {
+        delete quotationBody.text;
+        qr = await tlFetch('/quotations.create', { method: 'POST', body: JSON.stringify(quotationBody) });
+      }
+    }
     if (!qr.ok) {
       const txt = await qr.text();
       throw new Error(`TL quotations.create HTTP ${qr.status}: ${txt.slice(0, 200)}`);
