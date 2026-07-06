@@ -6,8 +6,11 @@
 // Permission: mentor.module.access. Self-scope: mentor_user_id = auth.uid().
 //
 // Bron-of-truth:
-//   - mentor_ledger_entries (entry_type='bonus', status != 'geannuleerd')
-//     levert de mentor-amounts per sale.
+//   - mentor_ledger_entries (entry_type='bonus'). Geannuleerde entries
+//     worden WEL opgehaald (zichtbaar met grijze 'geannuleerd'-badge in
+//     de UI, voor transparantie), maar tellen NIET mee in earned_total,
+//     betaald_uit, open, deze_maand, volgende_maand, projection_12m of
+//     mentor_share_total. Ze zijn puur informatief.
 //   - subscriptions (via deals.customer_id) levert termijnschema (per_term_incl,
 //     term_count, billing_cycle, start_date).
 //   - invoices.amount_paid bepaalt hoeveel termijnen reeds betaald zijn.
@@ -134,12 +137,14 @@ export default async function handler(req, res) {
 
   try {
     // 1) Bonus-entries van deze mentor (excl. geannuleerd).
+    // Geannuleerde entries WORDEN meegehaald voor transparantie (grijze badge
+    // in de UI). Ze tellen niet mee in KPI's/mentor_share_total; zie de
+    // isCancelled-check in de verwerkingslus hieronder.
     const { data: entries, error: entErr } = await supabaseAdmin
       .from('mentor_ledger_entries')
       .select('id, mentor_user_id, event_id, entry_type, basis, amount, pct, status, attendee_id, customer_id, source_invoice_id, created_at')
       .eq('mentor_user_id', effectiveUserId)
       .eq('entry_type', 'bonus')
-      .neq('status', 'geannuleerd')
       .limit(5000);
     if (entErr) throw new Error('ledger fetch: ' + entErr.message);
 
@@ -310,7 +315,13 @@ export default async function handler(req, res) {
     let open_total   = 0;
 
     for (const r of rows) {
-      const mentorAmount = Number(r.amount) || 0;
+      // Geannuleerde entries blijven in de lijst (zichtbaar met grijze
+      // 'Geannuleerd'-badge) maar mogen NERGENS meetellen. Effective
+      // mentorAmount = 0 → geen invloed op earned_total, betaald_uit,
+      // open_total, month-buckets, mentor_share_total. saleStatus wordt
+      // hieronder geforceerd op 'geannuleerd'.
+      const isCancelled  = r.status === 'geannuleerd';
+      const mentorAmount = isCancelled ? 0 : (Number(r.amount) || 0);
       const basis        = Number(r.basis) || 0;
       // KPI-totalen: schema_unknown-entries (zie hieronder) worden UITGESLOTEN
       // omdat er nog geen abonnement bekend is. De klant verschijnt wel in de
@@ -439,6 +450,10 @@ export default async function handler(req, res) {
       else if (nbPaid >= termCount && termCount > 0) saleStatus = 'voltooid';
       else if (nbPaid >= 1)       saleStatus = 'actief';
       else                        saleStatus = 'wacht_1e_betaling';
+      // Geannuleerde ledger-entry overschrijft alle andere status-afleiding:
+      // sale is zichtbaar in de lijst met de grijze 'Geannuleerd'-badge en
+      // telt nergens mee (mentorAmount was al 0).
+      if (isCancelled) saleStatus = 'geannuleerd';
 
       // Extra afgeleide velden voor de UI. last_payment_date valt eerst
       // terug op de source_invoice_id.paid_date; als die er niet is,
