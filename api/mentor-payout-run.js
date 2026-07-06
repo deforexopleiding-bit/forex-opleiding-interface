@@ -24,6 +24,14 @@
 // Period_month: we accepteren 'YYYY-MM' of 'YYYY-MM-DD' (de dag wordt
 // genegeerd; we normaliseren naar de 1e van die maand). period_month is een
 // date-kolom; we sluiten ervoor [period_start, period_end+1mo) op released_at.
+//
+// "1 MAAND ACHTERAF"-REGEL (sinds 2026-07):
+//   Payout voor maand M pakt:
+//     * event/handmatige (cashtraject) bonussen vrijgevallen in M-1 (vorige maand)
+//     * reguliere (abonnement-gedreven) bonussen vrijgevallen in M (huidige maand)
+//   Type-detectie via idempotency_key: 'cashtraject:*' → handmatig;
+//   ':bonus:' in de key → event; anders → regulier.
+//   Het LABEL/period_month op de payout-rij blijft de gekozen maand M.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -33,6 +41,11 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 function normalizeMonth(s) {
   if (typeof s !== 'string') return null;
+  return _monthPeriod(s);
+}
+
+// 'YYYY-MM' / 'YYYY-MM-DD' → { start, end } (start = 1e vd maand, end = 1e vd volgende maand).
+function _monthPeriod(s) {
   const m1 = s.match(/^(\d{4})-(\d{2})$/);
   const m2 = s.match(/^(\d{4})-(\d{2})-\d{2}$/);
   const m = m1 || m2;
@@ -51,6 +64,25 @@ function normalizeMonth(s) {
 }
 
 function round2(n) { return Math.round(Number(n) * 100) / 100; }
+
+// 'YYYY-MM-DD…' → 'YYYY-MM-01' (bucket-start van die maand).
+function _monthStartOf(iso) {
+  const s = String(iso || '');
+  const m = s.match(/^(\d{4})-(\d{2})/);
+  return m ? `${m[1]}-${m[2]}-01` : null;
+}
+
+// 'YYYY-MM-01' → 'YYYY-(MM-1)-01' (vorige-maand bucket-start).
+function _prevMonthStartOf(monthStartIso) {
+  const s = String(monthStartIso || '');
+  const m = s.match(/^(\d{4})-(\d{2})-\d{2}$/);
+  if (!m) return null;
+  const y  = Number(m[1]);
+  const mo = Number(m[2]);
+  const py = mo === 1 ? y - 1 : y;
+  const pm = mo === 1 ? 12    : mo - 1;
+  return `${py}-${String(pm).padStart(2, '0')}-01`;
+}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -95,17 +127,35 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2) Vrijgegeven entries in die periode (op released_at)
+    // 2) Vrijgegeven entries — met "1 maand achteraf"-regel voor event +
+    //    handmatige (cashtraject) bonussen. Payout voor maand M pakt:
+    //      * event/handmatig-bonussen vrijgevallen in M-1 (vorige maand)
+    //      * reguliere (abonnement-gedreven) bonussen vrijgevallen in M
+    //    Praktisch: één query over [M-1, M+1), daarna JS-filter op type +
+    //    juiste maand-bucket. Type-detectie via idempotency_key:
+    //      * 'cashtraject:*'        → handmatig
+    //      * bevat ':bonus:'        → event-bonus (event-afronding)
+    //      * anders                 → regulier (subscription/betaal-flow)
+    const prevMonthStart = _prevMonthStartOf(period.start);
+    const curMonthStart  = period.start;
     const { data: entries, error: entErr } = await supabaseAdmin
       .from('mentor_ledger_entries')
-      .select('id, entry_type, amount, released_at')
+      .select('id, entry_type, amount, released_at, idempotency_key')
       .eq('mentor_user_id', mentorId)
       .eq('status', 'vrijgegeven')
-      .gte('released_at', period.start)
+      .gte('released_at', prevMonthStart)
       .lt('released_at', period.end);
     if (entErr) throw new Error('entries fetch: ' + entErr.message);
 
-    const rows = entries || [];
+    const rowsAll = entries || [];
+    const rows = rowsAll.filter((e) => {
+      const key  = String(e.idempotency_key || '');
+      const isCash  = key.startsWith('cashtraject:');
+      const isEvent = /:bonus:/.test(key);
+      const bucket  = _monthStartOf(e.released_at);
+      if (isCash || isEvent) return bucket === prevMonthStart;
+      return bucket === curMonthStart;
+    });
     if (rows.length === 0) {
       return res.status(404).json({
         error: 'Geen vrijgegeven entries in deze periode',
