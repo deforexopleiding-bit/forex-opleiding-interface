@@ -940,6 +940,16 @@ async function openSendModal(dealId) {
       o.value = t.id; o.textContent = t.name + (t.language ? ' (' + t.language + ')' : '');
       sel.appendChild(o);
     }
+    // Voorselectie 'Offerte verzenden DFO' zodat sales niet handmatig hoeft
+    // te kiezen. Match bij voorkeur op naam (case-insensitive prefix) —
+    // robuuster dan een hardcoded id — met id als fallback voor het geval
+    // de template is hernoemd.
+    const DFO_TPL_ID = 'b603e6de-c3a9-0e69-a46c-6a00b827b3aa';
+    const preselect = state.emailTemplates.find(t =>
+      String(t.name || '').toLowerCase().startsWith('offerte verzenden dfo')
+      || String(t.id) === DFO_TPL_ID
+    );
+    if (preselect) sel.value = preselect.id;
   } catch { hint.textContent = 'Templates laden mislukt — standaard wordt gebruikt.'; }
 }
 async function doSendQuotation() {

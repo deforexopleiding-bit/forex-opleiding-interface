@@ -396,6 +396,15 @@ async function openOdSendModal(){
       const label = (t.name || t.title || t.id) + (t.language ? ` (${t.language})` : '');
       sel.insertAdjacentHTML('beforeend', `<option value="${esc(t.id)}">${esc(label)}</option>`);
     }
+    // Voorselectie 'Offerte verzenden DFO' zodat sales niet handmatig hoeft
+    // te kiezen. Prefix-match op naam (robuuster dan hardcoded id), met id
+    // als fallback voor het geval de template is hernoemd.
+    const DFO_TPL_ID = 'b603e6de-c3a9-0e69-a46c-6a00b827b3aa';
+    const preselect = _odEmailTpls.find(t =>
+      String(t.name || t.title || '').toLowerCase().startsWith('offerte verzenden dfo')
+      || String(t.id) === DFO_TPL_ID
+    );
+    if (preselect) sel.value = preselect.id;
     hint.textContent = 'Kies een template, of laat leeg voor de standaard.';
   } else if (_odEmailTpls && _odEmailTpls.length === 0 && !document.getElementById('odSendHint').textContent) {
     hint.textContent = 'Geen templates beschikbaar — standaard wordt gebruikt.';
