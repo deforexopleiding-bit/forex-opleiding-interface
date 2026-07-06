@@ -48,6 +48,7 @@ export default async function handler(req, res) {
     id, event_id,
     customer_id = null, client_label,
     total_amount, term_count, start_month, note = null,
+    release_day,
   } = b;
 
   // Validatie (op UPDATE mag event_id ontbreken; op INSERT verplicht).
@@ -75,6 +76,15 @@ export default async function handler(req, res) {
   if (start_month !== undefined && !startMonthNorm) {
     return res.status(400).json({ error: 'start_month moet YYYY-MM-DD/YYYY-MM zijn' });
   }
+  // release_day: integer 1..31; INSERT default 1, UPDATE alleen aanraken
+  // als het veld expliciet meegegeven is.
+  let releaseDayNum;
+  if (release_day !== undefined) {
+    releaseDayNum = Number(release_day);
+    if (!Number.isInteger(releaseDayNum) || releaseDayNum < 1 || releaseDayNum > 31) {
+      return res.status(400).json({ error: 'release_day moet integer 1..31' });
+    }
+  }
 
   try {
     // Bij INSERT: event verifiëren + pct snapshot. mentor_user_id blijft null
@@ -97,6 +107,7 @@ export default async function handler(req, res) {
         pct,
         bonus_total:  bonusTotal,
         start_month:  startMonthNorm,
+        release_day:  releaseDayNum || 1,   // default 1
         status:       'active',
         created_by:   user.id,
         note:         note ? String(note).slice(0, 2000) : null,
@@ -115,6 +126,7 @@ export default async function handler(req, res) {
     if (term_count !== undefined) patch.term_count = tcNum;
     if (start_month !== undefined) patch.start_month = startMonthNorm;
     if (note !== undefined) patch.note = note ? String(note).slice(0, 2000) : null;
+    if (releaseDayNum !== undefined) patch.release_day = releaseDayNum;
     if (total_amount !== undefined) {
       patch.total_amount = round2(totalNum);
       // pct uit bestaande rij lezen zodat we bonus_total consistent bijwerken.

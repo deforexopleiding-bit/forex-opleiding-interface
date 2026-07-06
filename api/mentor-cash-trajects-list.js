@@ -42,7 +42,7 @@ export default async function handler(req, res) {
 
   try {
     let q = supabaseAdmin.from('mentor_cash_trajects')
-      .select('id, event_id, customer_id, client_label, total_amount, term_count, pct, bonus_total, start_month, status, paused_at, created_at, note')
+      .select('id, event_id, customer_id, client_label, total_amount, term_count, pct, bonus_total, start_month, release_day, status, paused_at, created_at, note')
       .order('created_at', { ascending: false })
       .limit(500);
     if (status)   q = q.eq('status', String(status));
@@ -108,6 +108,7 @@ export default async function handler(req, res) {
         pct:            Number(t.pct),
         bonus_total:    Number(t.bonus_total),
         start_month:    t.start_month,
+        release_day:    Number(t.release_day) || 1,
         status:         t.status,
         paused_at:      t.paused_at,
         note:           t.note,

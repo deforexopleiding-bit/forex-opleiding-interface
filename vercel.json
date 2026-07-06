@@ -122,7 +122,7 @@
     },
     {
       "path": "/api/cron-mentor-cash-release",
-      "schedule": "0 6 1 * *"
+      "schedule": "0 6 * * *"
     }
   ],
   "headers": [

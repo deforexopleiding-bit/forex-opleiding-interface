@@ -110,7 +110,10 @@
       <h1>Handmatige trajecten</h1>
       <p>Mentor-bonussen die per maand vrijvallen zonder factuurcheck. Bouwstap 2 UI.</p>
     </div>
-    <button type="button" class="btn btn-primary" id="btnNew"><i class="ti ti-plus"></i> Nieuw handmatig traject</button>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button type="button" class="btn" id="btnReleaseAll" title="Draai de vrijval-motor voor alle trajecten (per traject max 1 termijn per dag)"><i class="ti ti-refresh"></i> Vrijval nu draaien</button>
+      <button type="button" class="btn btn-primary" id="btnNew"><i class="ti ti-plus"></i> Nieuw handmatig traject</button>
+    </div>
   </div>
 
   <div class="metrics">
@@ -150,10 +153,16 @@
           <input id="fTerms" type="number" min="1" max="60" placeholder="6" />
         </div>
       </div>
-      <div class="field">
-        <label>Startmaand <span style="color:var(--danger,#dc2626)">*</span></label>
-        <input id="fStart" type="month" />
-        <div class="hint">Eerste termijn valt vrij op de 1e vd startmaand (via de maandelijkse cron).</div>
+      <div class="row2">
+        <div class="field">
+          <label>Startmaand <span style="color:var(--danger,#dc2626)">*</span></label>
+          <input id="fStart" type="month" />
+        </div>
+        <div class="field">
+          <label>Vrijval-dag (1–31)</label>
+          <input id="fReleaseDay" type="number" min="1" max="31" value="1" />
+          <div class="hint">Dag vd maand waarop een termijn vrijvalt. 31 in feb → 28/29 feb.</div>
+        </div>
       </div>
       <div class="live-calc" id="fCalc">Vul totaalprijs en termijnen in om het bonusbedrag te zien.</div>
     </div>
@@ -201,6 +210,23 @@
     // 1-based month; wrap safely via Date.UTC.
     const dt = new Date(Date.UTC(y, m - 1 + delta, 1));
     return dt.toISOString().slice(0, 10);
+  }
+  // Spiegel van server-side releaseDate() in _lib/mentor-cash-release-core.js.
+  // release_day 31 in feb → laatste dag feb.
+  function releaseDateFor(startIso, termIdx, releaseDay) {
+    const [y0, m0] = String(startIso).slice(0,7).split('-').map(Number);
+    const total = (m0 - 1) + (termIdx - 1);
+    const y = y0 + Math.floor(total / 12);
+    const mo = ((total % 12) + 12) % 12;
+    const lastDay = new Date(Date.UTC(y, mo + 1, 0)).getUTCDate();
+    const day = Math.min(Number(releaseDay) || 1, lastDay);
+    const dt = new Date(Date.UTC(y, mo, day));
+    return dt.toISOString().slice(0, 10);
+  }
+  function fmtDateShortNL(iso) {
+    if (!iso) return '—';
+    const [y, m, d] = iso.slice(0, 10).split('-');
+    return `${d}-${m}-${y}`;
   }
 
   async function loadList() {
@@ -272,6 +298,7 @@
     const stLbl = t.status === 'active' ? 'Actief' : (t.status === 'paused' ? 'Gepauzeerd' : 'Voltooid');
     const canEdit = t.status !== 'completed';
     const actions = [];
+    if (t.status === 'active') actions.push(`<button class="btn btn-sm" data-action="release-now" data-id="${esc(t.id)}" title="Draai de vrijval-motor alleen voor dit traject"><i class="ti ti-refresh"></i> Nu vrijgeven</button>`);
     if (t.status === 'active') actions.push(`<button class="btn btn-sm" data-action="pause" data-id="${esc(t.id)}"><i class="ti ti-player-pause"></i> Pauzeren</button>`);
     if (t.status === 'paused') actions.push(`<button class="btn btn-sm btn-primary" data-action="resume" data-id="${esc(t.id)}"><i class="ti ti-player-play"></i> Hervatten</button>`);
     if (canEdit) actions.push(`<button class="btn btn-sm" data-action="edit" data-id="${esc(t.id)}"><i class="ti ti-edit"></i> Bewerken</button>`);
@@ -287,7 +314,7 @@
               <strong>Verdeeld over:</strong> ${(Array.isArray(t.mentor_names) && t.mentor_names.length)
                 ? esc(t.mentor_names.join(', ')) + ' <span style="color:var(--text-faint)">(' + t.mentor_names.length + ' aanwezige mentor' + (t.mentor_names.length === 1 ? '' : 'en') + ')</span>'
                 : '<span style="color:var(--danger,#dc2626)">geen aanwezige mentoren — vrijval blokkeert tot event_mentors.was_present is gezet</span>'}<br>
-              ${fmtEuro(t.total_amount)} · ${t.term_count} termijnen · ${Number(t.pct).toFixed(1)}% bonus (${fmtEuro(t.bonus_total)}) · start ${fmtMonth(t.start_month)}
+              ${fmtEuro(t.total_amount)} · ${t.term_count} termijnen · ${Number(t.pct).toFixed(1)}% bonus (${fmtEuro(t.bonus_total)}) · start ${fmtMonth(t.start_month)} · vrijval dag ${t.release_day || 1}
             </div>
           </div>
           <span class="tc-badge ${stCls}">${stLbl}</span>
@@ -315,6 +342,7 @@
 
   function renderTermRows(t) {
     const perTerm = t.term_count > 0 ? Number(t.bonus_total) / Number(t.term_count) : 0;
+    const relDay = Number(t.release_day) || 1;
     const rows = [];
     for (let i = 1; i <= t.term_count; i++) {
       const isLast = i === t.term_count;
@@ -322,12 +350,13 @@
         ? Math.round((Number(t.bonus_total) - perTerm * (t.term_count - 1)) * 100) / 100
         : Math.round(perTerm * 100) / 100;
       const released = i <= (t.released_terms || 0);
-      const monthLbl = fmtMonth(addMonthsIso(t.start_month, i - 1));
+      const relIso = releaseDateFor(t.start_month, i, relDay);
+      const dateLbl = fmtDateShortNL(relIso);
       rows.push(`
         <div class="term-row ${released ? 'released' : 'pending'}">
           <span class="idx">Termijn ${i}</span>
           <span class="amt">${fmtEuro(amt)}</span>
-          <span>${esc(monthLbl)}</span>
+          <span>${esc(dateLbl)}</span>
           <span class="stat">${released ? '✓ vrijgegeven' : '— nog niet'}</span>
         </div>
       `);
@@ -341,9 +370,28 @@
       if (!confirm('Weet je zeker dat je dit handmatige traject wilt verwijderen? Al aangemaakte bonussen blijven staan; alleen toekomstige vrijval stopt.')) return;
       return apiStatus(id, 'delete');
     }
-    if (action === 'pause')  return apiStatus(id, 'pause');
-    if (action === 'resume') return apiStatus(id, 'resume');
+    if (action === 'pause')       return apiStatus(id, 'pause');
+    if (action === 'resume')      return apiStatus(id, 'resume');
+    if (action === 'release-now') return runRelease(id);
   }
+
+  async function runRelease(trajectId) {
+    try {
+      const body = trajectId ? { id: trajectId } : {};
+      const r = await window.AgentShared.apiFetch('/api/mentor-cash-traject-release', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (!r.ok || d.ok === false) throw new Error(d.error || 'HTTP ' + r.status);
+      const parts = [`${d.released_count || 0} termijn(en) vrijgegeven`, `${d.mentor_entries_count || 0} ledger-entries`];
+      if (d.skipped_not_due)    parts.push(`${d.skipped_not_due} nog niet aan de beurt`);
+      if (d.skipped_no_mentors) parts.push(`${d.skipped_no_mentors} zonder aanwezige mentoren`);
+      if (d.completed_count)    parts.push(`${d.completed_count} voltooid`);
+      toast('Vrijval: ' + parts.join(' · '), 'success');
+      loadList();
+    } catch (e) { toast('Vrijval mislukt: ' + e.message, 'error'); }
+  }
+  document.getElementById('btnReleaseAll').addEventListener('click', () => runRelease(null));
 
   async function apiStatus(id, action) {
     try {
@@ -369,6 +417,7 @@
     document.getElementById('fTotal').value = '';
     document.getElementById('fTerms').value = '';
     document.getElementById('fStart').value = '';
+    document.getElementById('fReleaseDay').value = 1;
     document.getElementById('fCalc').textContent = 'Vul totaalprijs en termijnen in om het bonusbedrag te zien.';
     populateDropdowns().then(() => {
       if (id) {
@@ -379,6 +428,7 @@
           document.getElementById('fTotal').value  = t.total_amount;
           document.getElementById('fTerms').value  = t.term_count;
           document.getElementById('fStart').value  = String(t.start_month).slice(0, 7);
+          document.getElementById('fReleaseDay').value = Number(t.release_day) || 1;
           updateCalc();
         }
       }
@@ -436,6 +486,7 @@
       total_amount:   Number(document.getElementById('fTotal').value) || 0,
       term_count:     Number(document.getElementById('fTerms').value) || 0,
       start_month:    document.getElementById('fStart').value || null,
+      release_day:    Number(document.getElementById('fReleaseDay').value) || 1,
     };
     if (state.editingId) body.id = state.editingId;
     // Basis-validatie client-side (server valideert opnieuw).
