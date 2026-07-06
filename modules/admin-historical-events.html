@@ -114,6 +114,33 @@
       <div id="msg" style="flex:1"></div>
     </div>
 
+    <!-- Sales-management panel: gekoppelde attendees + toevoegen/verwijderen.
+         Verschijnt bij geopend event; acties zijn vergrendeld bij bonus_geboekt=true. -->
+    <div class="sr-card" id="salesManagePanel" style="display:none;margin-top:16px">
+      <div class="sr-card-h">
+        Gekoppelde sales
+        <span id="smLock" style="display:none;font-size:11.5px;color:#b45309;font-weight:600;margin-left:8px">
+          <i class="ti ti-lock"></i> Geboekt — sales vergrendeld
+        </span>
+      </div>
+      <div class="sub" style="font-size:12px;color:var(--text-dim);margin-bottom:10px">
+        Deze deals zijn als 'aanwezig' aan dit event gekoppeld. Verwijderen breekt alleen de koppeling
+        (deal + klant blijven bestaan). Toevoegen gaat via de deal-search onderaan.
+      </div>
+      <div id="smAttendees"><div class="sr-empty">Laden…</div></div>
+
+      <div id="smAddWrap" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Sales toevoegen aan dit event</div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <input id="smDealSearch" placeholder="Zoek deal (klantnaam of e-mail)…"
+                 style="flex:1;padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit" />
+          <button class="sr-abtn" id="smDealSearchBtn"><i class="ti ti-search"></i> Zoek</button>
+        </div>
+        <div id="smDealsList"></div>
+        <div id="smAddMsg" style="margin-top:8px"></div>
+      </div>
+    </div>
+
     <!-- Bonus-acties: verschijnen na save (of bij ?event_id=... in URL) -->
     <div class="sr-card" id="bonusPanel" style="display:none;margin-top:16px">
       <div class="sr-card-h">Bonus + kosten-aftrek</div>
@@ -152,6 +179,9 @@ const state = {
   selectedMnts: new Set(),
   expenses:     [],   // in-memory rijen
   dealsFound:   [],   // last search
+  histEvents:   [],   // laatste hist-events-list respons (nodig voor bonus_geboekt-lookup)
+  smAttendees:  [],   // huidige event-attendees (voor de sales-manage widget)
+  smDealsFound: [],   // deals-search result in sales-manage widget
   selectedDeals: new Set(),
   dealDetailsById: new Map(), // id → row (voor weergave in "selected"-samenvatting)
   currentEventId: null, // gezet na save of bij ?event_id=... in URL
@@ -384,6 +414,8 @@ async function loadHistList() {
 function renderHistList(events) {
   const box = document.getElementById('histList');
   if (!box) return;
+  // Cache voor bonus_geboekt-lookup in setCurrentEvent + sales-manage-panel.
+  state.histEvents = Array.isArray(events) ? events : [];
   if (!events.length) { box.innerHTML = '<div class="sr-empty">Nog geen historische events.</div>'; return; }
   box.innerHTML = events.map((e) => {
     const isCurr = state.currentEventId === e.id;
@@ -452,11 +484,169 @@ function setCurrentEvent(eventId) {
   state.currentEventId = eventId || null;
   const panel = document.getElementById('bonusPanel');
   const idSpan = document.getElementById('bpEventId');
+  const smPanel = document.getElementById('salesManagePanel');
   if (!panel) return;
-  if (!eventId) { panel.style.display = 'none'; return; }
+  if (!eventId) {
+    panel.style.display = 'none';
+    if (smPanel) smPanel.style.display = 'none';
+    return;
+  }
   panel.style.display = '';
   if (idSpan) idSpan.textContent = eventId;
   document.getElementById('bonusMsg').innerHTML = '';
+  if (smPanel) { smPanel.style.display = ''; loadEventAttendees(); }
+}
+
+// Bonus-geboekt-lookup uit gecachte hist-events. Als lookup faalt (bv. het
+// event is net aangemaakt en histList is nog niet geladen), returnen we
+// null → sales-panel behandelt dat als "nog niet geboekt" (veilig: de
+// server-side check in add-endpoint blijft de definitieve gate).
+function _bonusGeboekt(eventId) {
+  const rec = (state.histEvents || []).find(e => e.id === eventId);
+  return rec ? !!rec.bonus_geboekt : null;
+}
+
+// ── Sales-management widget (add/delete koppelingen vóór boeking) ────────
+async function loadEventAttendees() {
+  const wrap = document.getElementById('smAttendees');
+  const eventId = state.currentEventId;
+  if (!wrap || !eventId) return;
+  wrap.innerHTML = '<div class="sr-empty">Laden…</div>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-attendees-list?event_id=' + encodeURIComponent(eventId) + '&limit=500');
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+    state.smAttendees = Array.isArray(d.items) ? d.items : [];
+    renderEventAttendees();
+  } catch (e) {
+    wrap.innerHTML = '<div class="msg err">Attendees laden mislukt: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderEventAttendees() {
+  const wrap = document.getElementById('smAttendees');
+  const lockLbl = document.getElementById('smLock');
+  const addWrap = document.getElementById('smAddWrap');
+  if (!wrap) return;
+  const boekt = _bonusGeboekt(state.currentEventId);
+  const locked = boekt === true;
+  if (lockLbl) lockLbl.style.display = locked ? '' : 'none';
+  if (addWrap) addWrap.style.display = locked ? 'none' : '';
+  if (!state.smAttendees.length) {
+    wrap.innerHTML = '<div class="sr-empty">Nog geen sales gekoppeld aan dit event.</div>';
+    return;
+  }
+  wrap.innerHTML = state.smAttendees.map(a => {
+    const name = [a.first_name, a.last_name].filter(Boolean).join(' ') || a.email || '(naamloos)';
+    const meta = [];
+    if (a.deal_id) meta.push('deal ' + String(a.deal_id).slice(0, 8));
+    if (a.email) meta.push(esc(a.email));
+    const delBtn = locked
+      ? ''
+      : `<button class="sr-abtn danger" data-att-del="${esc(a.id)}" data-att-name="${esc(name)}" style="padding:5px 10px;font-size:12px"><i class="ti ti-x"></i> Verwijderen</button>`;
+    return `<div class="deal-row" style="align-items:center;padding:6px 0">
+      <div style="flex:1">
+        <b>${esc(name)}</b>
+        <div class="sub" style="color:var(--text-dim);font-size:11.5px">${meta.join(' · ')}</div>
+      </div>
+      ${delBtn}
+    </div>`;
+  }).join('');
+  wrap.querySelectorAll('[data-att-del]').forEach(btn => {
+    btn.addEventListener('click', () => removeAttendee(btn.dataset.attDel, btn.dataset.attName || ''));
+  });
+}
+
+async function removeAttendee(attendeeId, name) {
+  if (_bonusGeboekt(state.currentEventId) === true) {
+    if (window.AgentShared?.showToast) window.AgentShared.showToast('Event is geboekt — sales-koppelingen zijn vergrendeld', 'error');
+    return;
+  }
+  if (!confirm(`${name || 'Deelnemer'} loskoppelen van dit event? De deal/klant blijft bestaan, alleen de koppeling aan dit event verdwijnt.`)) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-attendee-delete?id=' + encodeURIComponent(attendeeId), { method: 'POST' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+    if (window.AgentShared?.showToast) window.AgentShared.showToast('Sale losgekoppeld', 'success');
+    // Herlaad attendees + hist-lijst (deal-count in de kaart bijwerken).
+    loadEventAttendees();
+    loadHistList();
+  } catch (e) {
+    if (window.AgentShared?.showToast) window.AgentShared.showToast('Verwijderen mislukt: ' + e.message, 'error');
+    else alert('Verwijderen mislukt: ' + e.message);
+  }
+}
+
+async function smSearchDeals() {
+  const q = (document.getElementById('smDealSearch').value || '').trim();
+  const list = document.getElementById('smDealsList');
+  if (!q) { list.innerHTML = ''; return; }
+  list.innerHTML = '<div class="sr-empty">Zoeken…</div>';
+  try {
+    const p = new URLSearchParams({ q });
+    const r = await window.AgentShared.apiFetch('/api/admin/deals-search?' + p.toString());
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+    state.smDealsFound = Array.isArray(d.deals) ? d.deals : [];
+    renderSmDealResults();
+  } catch (e) {
+    list.innerHTML = '<div class="msg err">Zoeken mislukt: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderSmDealResults() {
+  const list = document.getElementById('smDealsList');
+  if (!list) return;
+  if (!state.smDealsFound.length) { list.innerHTML = '<div class="sr-empty">Geen deals gevonden.</div>'; return; }
+  // Filter deals uit die al gekoppeld zijn (dedup ook client-side voor UX;
+  // server-side dedup blijft leidend).
+  const alreadyLinked = new Set(state.smAttendees.map(a => a.deal_id).filter(Boolean));
+  list.innerHTML = state.smDealsFound.map(d => {
+    const name = d.customer_name || d.first_name || d.company_name || '(naamloos)';
+    const already = alreadyLinked.has(d.id);
+    return `<div class="deal-row" style="align-items:center;padding:6px 0">
+      <div style="flex:1">
+        <b>${esc(name)}</b>
+        ${d.email ? `<span class="sub" style="color:var(--text-dim);margin-left:8px">${esc(d.email)}</span>` : ''}
+        <div class="sub" style="color:var(--text-dim);font-size:11.5px">${esc(fmtDateNL(d.created_at || d.start_date))}</div>
+      </div>
+      ${already
+        ? '<span class="pill g" style="font-size:11px">al gekoppeld</span>'
+        : `<button class="sr-abtn primary" data-add-deal="${esc(d.id)}" style="padding:5px 10px;font-size:12px"><i class="ti ti-plus"></i> Toevoegen</button>`}
+    </div>`;
+  }).join('');
+  list.querySelectorAll('[data-add-deal]').forEach(btn => {
+    btn.addEventListener('click', () => smAddDeal(btn.dataset.addDeal));
+  });
+}
+
+async function smAddDeal(dealId) {
+  const msg = document.getElementById('smAddMsg');
+  if (_bonusGeboekt(state.currentEventId) === true) {
+    msg.innerHTML = '<div class="msg err">Event is geboekt — sales toevoegen vergrendeld.</div>';
+    return;
+  }
+  msg.innerHTML = '<div class="sub">Toevoegen…</div>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/admin/historical-event-attendees-add', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event_id: state.currentEventId, deal_ids: [dealId] }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+    const parts = [];
+    if (d.added)              parts.push(`${d.added} toegevoegd`);
+    if (d.skipped_duplicates) parts.push(`${d.skipped_duplicates} al gekoppeld`);
+    if (d.missing)            parts.push(`${d.missing} deal(s) niet gevonden`);
+    msg.innerHTML = '<div class="msg ok">' + esc(parts.join(' · ') || 'Geen wijziging') + '</div>';
+    // Herlaad attendees + hist-lijst zodat de deal-count klopt.
+    loadEventAttendees();
+    loadHistList();
+    // Deal uit zoek-resultaat markeren als 'al gekoppeld'.
+    renderSmDealResults();
+  } catch (e) {
+    msg.innerHTML = '<div class="msg err">Toevoegen mislukt: ' + esc(e.message) + '</div>';
+  }
 }
 
 async function runPreview() {
@@ -602,6 +792,11 @@ async function runCommit() {
   document.getElementById('expAdd').addEventListener('click', () => addExpense());
   document.getElementById('dealSearchBtn').addEventListener('click', () => searchDeals());
   document.getElementById('dealSearch').addEventListener('keydown', (e) => { if (e.key === 'Enter') searchDeals(); });
+  // Sales-manage widget: deal-search + Enter-key.
+  const smBtn = document.getElementById('smDealSearchBtn');
+  const smInp = document.getElementById('smDealSearch');
+  if (smBtn) smBtn.addEventListener('click', () => smSearchDeals());
+  if (smInp) smInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') smSearchDeals(); });
   document.getElementById('saveBtn').addEventListener('click', () => save());
   document.getElementById('previewBtn').addEventListener('click', () => runPreview());
   document.getElementById('commitBtn').addEventListener('click', () => runCommit());
