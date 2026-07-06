@@ -264,32 +264,75 @@
   // hier expliciet op _authSharedReady zodat de routing pas runt nadat de
   // sessie hersteld is. Op latere mounts (snelle storage-cache) heeft dat
   // geen merkbare cost.
+  // Kernresolve: gebruikt door zowel de proactieve applyDashboardRouting
+  // als de click-guard (voor de race waarbij de klik vóór de async-update
+  // gebeurt). Retourneert de rol-specifieke landing-url of null als het
+  // profiel/rol nog niet beschikbaar is.
+  async function _resolveRoleLandingUrl() {
+    if (!window.AuthShared || typeof window.AuthShared.getProfile !== 'function') return null;
+    if (typeof window.AuthShared.getRoleLandingUrl !== 'function')                   return null;
+    var profile = await window.AuthShared.getProfile();
+    if (!profile) {
+      try { await window.AuthShared.getSession(); } catch (_) {}
+      profile = await window.AuthShared.getProfile();
+    }
+    var role = profile && profile.role;
+    if (!role) return null;
+    return window.AuthShared.getRoleLandingUrl(role) || null;
+  }
+
   async function applyDashboardRouting() {
     try {
       var link = document.querySelector('#sidebar-mount [data-module="dashboard"]');
       if (!link) return;
       // Wacht op session-warmup zodat getProfile betrouwbaar resolved.
       try { if (window._authSharedReady) await window._authSharedReady; } catch (_) {}
-      if (!window.AuthShared || typeof window.AuthShared.getProfile !== 'function') return;
-      if (typeof window.AuthShared.getRoleLandingUrl !== 'function') return;
-      var profile = await window.AuthShared.getProfile();
-      if (!profile) {
-        // Eénmalig re-try met session-warmup voor de zeldzame race waarbij
-        // _authSharedReady wel resolved is maar getSession nog niet hot is.
-        try { await window.AuthShared.getSession(); } catch (_) {}
-        profile = await window.AuthShared.getProfile();
+      // Retry-loop tegen sessie/profiel-timing-race bij eerste page-load:
+      // 3 pogingen met 200ms tussen elke poging. Zodra we een rol vinden,
+      // href zetten + data-attribute markeren zodat de click-guard verderop
+      // weet dat de link "klaar" is.
+      var url = null;
+      for (var attempt = 0; attempt < 3; attempt++) {
+        url = await _resolveRoleLandingUrl();
+        if (url) break;
+        await new Promise(function (r) { setTimeout(r, 200); });
       }
-      var role = profile && profile.role;
-      if (!role) {
-        console.warn('[sidebar.applyDashboardRouting] geen rol uit profiel — laat default-link staan');
+      if (!url) {
+        console.warn('[sidebar.applyDashboardRouting] geen rol uit profiel na 3 pogingen — laat default-link staan');
         return; // bewust GEEN '/index.html' setten — laat hardcoded default staan
       }
-      var url = window.AuthShared.getRoleLandingUrl(role) || '/index.html';
       link.setAttribute('href', url);
+      link.setAttribute('data-role-applied', '1');
     } catch (e) {
       console.warn('[sidebar.applyDashboardRouting]', e && e.message ? e.message : e);
       /* fail-open: laat default dashboard-link staan */
     }
+  }
+
+  // Click-guard: als de user op Dashboard klikt vóór de async-update de
+  // href heeft kunnen zetten, onderscheppen we de klik, resolven de rol
+  // alsnog on-demand en navigeren handmatig naar de juiste landing. Zonder
+  // deze guard belandt sales soms op /index.html omdat de klik gebeurt
+  // vóór applyDashboardRouting z'n await klaar had.
+  function _wireDashboardClickGuard() {
+    var link = document.querySelector('#sidebar-mount [data-module="dashboard"]');
+    if (!link || link._dashClickGuardWired) return;
+    link._dashClickGuardWired = true;
+    link.addEventListener('click', function (e) {
+      // Al gecorrigeerd? Laat de browser gewoon navigeren.
+      if (link.getAttribute('data-role-applied') === '1') return;
+      // Modifier-key (ctrl/cmd/middle-click) → open in nieuwe tab; niet
+      // onderscheppen zodat de user niet vast komt te zitten in preventDefault.
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1) return;
+      e.preventDefault();
+      _resolveRoleLandingUrl().then(function (url) {
+        if (!url) { url = link.getAttribute('href') || '/index.html'; }
+        else       { link.setAttribute('href', url); link.setAttribute('data-role-applied', '1'); }
+        window.location.href = url;
+      }).catch(function () {
+        window.location.href = link.getAttribute('href') || '/index.html';
+      });
+    });
   }
 
   // Follow-up leads-badge (Fase B): telt vandaag + te_laat leads uit
@@ -1440,6 +1483,7 @@
     startApprovalsBadgePolling();
     applyAdminGating();
     applySecretAreaGating();
+    _wireDashboardClickGuard();
     applyDashboardRouting();
     // Footer (gebruiker + theme-toggle) via bestaande gedeelde helper.
     if (window.AgentShared && typeof window.AgentShared.renderUserSection === 'function') {
