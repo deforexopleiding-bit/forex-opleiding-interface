@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Contante trajecten · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .app { margin-left: 220px; padding: 24px 28px 24px; }
+
+    .page-header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; }
+    .page-header h1 { font-size: 20px; font-weight: 700; }
+    .page-header p  { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; }
+    .btn { display:inline-flex; align-items:center; gap:6px; padding:8px 14px; font-size:13px; font-weight:600; border-radius:8px; border:1px solid var(--border); background:var(--bg-elev); color:var(--text); cursor:pointer; font-family: inherit; }
+    .btn:hover { background: var(--bg-elev-2); }
+    .btn-primary { background:#0a2f63; border-color:#0a2f63; color:#fff; }
+    .btn-primary:hover { background:#1e6cd6; border-color:#1e6cd6; }
+    .btn-ghost { background: transparent; border-color: transparent; }
+    .btn-ghost:hover { background: var(--bg-elev); }
+    .btn-danger { color: var(--danger,#dc2626); border-color: rgba(220,38,38,0.35); background: rgba(220,38,38,0.06); }
+    .btn-danger:hover { background: rgba(220,38,38,0.14); }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+    .metrics { display:grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
+    .metric-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+    .metric-card .lbl { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+    .metric-card .val { font-size: 22px; font-weight: 700; color: var(--text); margin-top: 4px; }
+
+    .empty { padding: 40px 20px; text-align: center; color: var(--text-dim); font-size: 13px; background: var(--bg-elev); border: 1px dashed var(--border); border-radius: 10px; }
+
+    .traject-list { display:flex; flex-direction: column; gap: 12px; }
+    .traject-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+    .traject-card.paused { opacity: 0.65; background: rgba(245,158,11,0.05); }
+    .traject-card.completed { opacity: 0.75; }
+    .tc-head { display:flex; justify-content: space-between; align-items:flex-start; gap: 12px; flex-wrap: wrap; }
+    .tc-title { font-size: 15px; font-weight: 700; color: var(--text); }
+    .tc-sub { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; line-height: 1.5; }
+    .tc-badge { display:inline-flex; align-items:center; gap: 5px; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .tc-badge.active   { background: rgba(5,150,105,0.14);   color: #047857; }
+    .tc-badge.paused   { background: rgba(245,158,11,0.16);  color: #b45309; }
+    .tc-badge.completed { background: rgba(107,114,128,0.14); color: #4b5563; }
+    .tc-body { display:grid; grid-template-columns: 1fr 200px; gap: 14px; margin-top: 12px; align-items: center; }
+    .tc-progress { }
+    .tc-progress-bar { width: 100%; height: 8px; background: var(--border); border-radius: 999px; overflow: hidden; }
+    .tc-progress-bar > div { height: 100%; background: linear-gradient(90deg, #0a2f63, #1e6cd6); border-radius: 999px; transition: width .3s; }
+    .tc-progress-meta { display:flex; justify-content: space-between; font-size: 12px; color: var(--text-dim); margin-top: 6px; }
+    .tc-amounts { text-align: right; font-size: 12.5px; }
+    .tc-amounts .big { font-size: 15px; font-weight: 700; color: var(--text); }
+    .tc-amounts .dim { color: var(--text-dim); font-size: 11.5px; }
+    .tc-actions { display:flex; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+    .tc-terms-toggle { margin-left: auto; }
+
+    .tc-terms { display: none; margin-top: 12px; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+    .tc-terms.open { display: block; }
+    .term-row { display:grid; grid-template-columns: 60px 1fr 120px 150px; gap: 12px; padding: 6px 0; font-size: 12.5px; align-items: center; border-bottom: 1px solid var(--border); }
+    .term-row:last-child { border-bottom: 0; }
+    .term-row .idx { font-weight: 700; color: var(--text-dim); }
+    .term-row .amt { font-weight: 600; }
+    .term-row .stat { text-align: right; font-size: 11.5px; }
+    .term-row.released .stat { color: #047857; }
+    .term-row.pending .stat  { color: var(--text-faint); }
+
+    /* Modal */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(15,23,42,0.55); display: none; align-items: center; justify-content: center; z-index: 200; padding: 20px; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; width: 100%; max-width: 520px; max-height: 90vh; overflow: auto; }
+    .modal-h { display:flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+    .modal-h h2 { font-size: 15px; font-weight: 700; }
+    .modal-x { background: transparent; border: 0; color: var(--text-dim); cursor: pointer; font-size: 20px; padding: 4px 8px; border-radius: 6px; }
+    .modal-x:hover { background: var(--bg-elev); }
+    .modal-body { padding: 18px; }
+    .field { margin-bottom: 14px; }
+    .field label { display:block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); margin-bottom: 5px; }
+    .field input, .field select, .field textarea { width: 100%; padding: 8px 10px; font-size: 13px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-family: inherit; }
+    .field .hint { font-size: 11.5px; color: var(--text-faint); margin-top: 4px; }
+    .row2 { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .modal-f { display:flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border); background: var(--bg-elev); }
+    .live-calc { padding: 10px 12px; background: var(--bg-elev); border-radius: 6px; font-size: 12.5px; color: var(--text); margin-bottom: 14px; line-height: 1.6; }
+    .form-err { background: rgba(220,38,38,0.08); color: #b91c1c; padding: 9px 11px; border-radius: 6px; font-size: 12px; margin-bottom: 12px; display: none; }
+    .form-err.show { display: block; }
+
+    #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; z-index: 300; display: none; }
+    #toast.show { display: block; }
+    #toast.success { background: rgba(5,150,105,0.16); color: #047857; }
+    #toast.error   { background: rgba(220,38,38,0.14); color: #b91c1c; }
+
+    @media (max-width: 880px) {
+      .app { margin-left: 0; padding: 14px; }
+      .metrics { grid-template-columns: 1fr; }
+      .tc-body { grid-template-columns: 1fr; }
+      .tc-amounts { text-align: left; }
+      .term-row { grid-template-columns: 40px 1fr 100px; }
+      .term-row .amt { grid-column: 2; }
+    }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app">
+  <div class="page-header">
+    <div>
+      <h1>Contante trajecten</h1>
+      <p>Mentor-bonussen die per maand vrijvallen zonder factuurcheck. Bouwstap 2 UI.</p>
+    </div>
+    <button type="button" class="btn btn-primary" id="btnNew"><i class="ti ti-plus"></i> Nieuw contant traject</button>
+  </div>
+
+  <div class="metrics">
+    <div class="metric-card"><div class="lbl">Actief</div><div class="val" id="mActive">—</div></div>
+    <div class="metric-card"><div class="lbl">Vrijgevallen deze maand</div><div class="val" id="mThisMonth">—</div></div>
+    <div class="metric-card"><div class="lbl">Gepauzeerd</div><div class="val" id="mPaused">—</div></div>
+  </div>
+
+  <div id="listWrap"></div>
+</div>
+
+<!-- Aanmaak / bewerk modal -->
+<div class="modal-overlay" id="editModal" role="dialog" aria-modal="true">
+  <div class="modal">
+    <div class="modal-h">
+      <h2 id="editTitle">Nieuw contant traject</h2>
+      <button type="button" class="modal-x" id="editClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-err" id="formErr"></div>
+      <div class="field">
+        <label>Mentor <span style="color:var(--danger,#dc2626)">*</span></label>
+        <select id="fMentor"><option value="">Laden…</option></select>
+      </div>
+      <div class="field">
+        <label>Event <span style="color:var(--danger,#dc2626)">*</span></label>
+        <select id="fEvent"><option value="">Laden…</option></select>
+      </div>
+      <div class="field">
+        <label>Klant / traject-omschrijving <span style="color:var(--danger,#dc2626)">*</span></label>
+        <input id="fLabel" type="text" placeholder="bv. Jan Jansen — 6-maanden traject" />
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label>Totaalprijs traject (€) <span style="color:var(--danger,#dc2626)">*</span></label>
+          <input id="fTotal" type="number" step="0.01" min="0" placeholder="3600" />
+        </div>
+        <div class="field">
+          <label>Aantal termijnen <span style="color:var(--danger,#dc2626)">*</span></label>
+          <input id="fTerms" type="number" min="1" max="60" placeholder="6" />
+        </div>
+      </div>
+      <div class="field">
+        <label>Startmaand <span style="color:var(--danger,#dc2626)">*</span></label>
+        <input id="fStart" type="month" />
+        <div class="hint">Eerste termijn valt vrij op de 1e vd startmaand (via de maandelijkse cron).</div>
+      </div>
+      <div class="live-calc" id="fCalc">Vul totaalprijs en termijnen in om het bonusbedrag te zien.</div>
+    </div>
+    <div class="modal-f">
+      <button type="button" class="btn btn-ghost" id="editCancel">Annuleren</button>
+      <button type="button" class="btn btn-primary" id="editSave">Opslaan</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const BONUS_PCT = 3; // spiegel van BONUS_PCT server-side (info-only in de calc)
+  const state = {
+    trajects: [],
+    mentors:  [],
+    events:   [],
+    editingId: null,
+  };
+
+  function toast(msg, kind) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'show ' + (kind || '');
+    setTimeout(() => el.classList.remove('show'), 2400);
+  }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
+  function fmtEuro(v) { const n = Number(v); if (!Number.isFinite(n)) return '—'; return '€' + n.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function fmtMonth(iso) {
+    if (!iso) return '—';
+    const [y, m] = String(iso).slice(0, 7).split('-');
+    const names = ['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
+    return `${names[Number(m) - 1] || '?'} ${y}`;
+  }
+  function addMonthsIso(startIso, delta) {
+    const [y, m] = String(startIso).slice(0,7).split('-').map(Number);
+    // 1-based month; wrap safely via Date.UTC.
+    const dt = new Date(Date.UTC(y, m - 1 + delta, 1));
+    return dt.toISOString().slice(0, 10);
+  }
+
+  async function loadList() {
+    const wrap = document.getElementById('listWrap');
+    wrap.innerHTML = '<div class="empty">Laden…</div>';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/mentor-cash-trajects-list');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+      state.trajects = Array.isArray(d.trajects) ? d.trajects : [];
+      renderMetrics();
+      renderList();
+    } catch (e) {
+      wrap.innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>';
+    }
+  }
+
+  function renderMetrics() {
+    const active = state.trajects.filter(t => t.status === 'active').length;
+    const paused = state.trajects.filter(t => t.status === 'paused').length;
+    // Vrijgevallen deze maand = som van entries met released_at >= 1e vd huidige maand.
+    // Ledger-entries per traject hebben we niet in detail; approx via released_terms
+    // + released_amount is niet real-time filterbaar op maand. Voor MVP: som van
+    // released_amount − released_amount die vóór 30 dagen zaten is te complex.
+    // Simpel én accuraat genoeg: som van bonus_total/term_count voor trajects die
+    // dit maand een release hadden (released_terms > 0 én laatste release was
+    // deze maand — approximeren via start_month + released_terms).
+    let thisMonthEur = 0;
+    const now = new Date();
+    const curYm = now.getUTCFullYear() * 100 + (now.getUTCMonth() + 1);
+    for (const t of state.trajects) {
+      if (!t.released_terms || !t.start_month) continue;
+      const lastReleaseIso = addMonthsIso(t.start_month, t.released_terms - 1);
+      const [ly, lm] = lastReleaseIso.slice(0, 7).split('-').map(Number);
+      if (ly * 100 + lm === curYm) {
+        const perTerm = t.term_count > 0 ? (Number(t.bonus_total) / Number(t.term_count)) : 0;
+        thisMonthEur += perTerm;
+      }
+    }
+    document.getElementById('mActive').textContent = String(active);
+    document.getElementById('mThisMonth').textContent = fmtEuro(Math.round(thisMonthEur * 100) / 100);
+    document.getElementById('mPaused').textContent = String(paused);
+  }
+
+  function renderList() {
+    const wrap = document.getElementById('listWrap');
+    if (!state.trajects.length) {
+      wrap.innerHTML = '<div class="empty">Nog geen trajecten. Klik op "Nieuw contant traject" om er een aan te maken.</div>';
+      return;
+    }
+    wrap.innerHTML = '<div class="traject-list">' + state.trajects.map(t => renderCard(t)).join('') + '</div>';
+    // Wiring per card.
+    wrap.querySelectorAll('[data-action]').forEach(btn => {
+      btn.addEventListener('click', () => handleAction(btn.dataset.action, btn.dataset.id));
+    });
+    wrap.querySelectorAll('[data-toggle-terms]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const box = document.getElementById('terms-' + btn.dataset.toggleTerms);
+        if (!box) return;
+        const open = box.classList.toggle('open');
+        btn.innerHTML = open ? '<i class="ti ti-chevron-up"></i> Termijnen verbergen' : '<i class="ti ti-chevron-down"></i> Termijnen tonen';
+      });
+    });
+  }
+
+  function renderCard(t) {
+    const progressPct = t.term_count > 0 ? Math.round((t.released_terms || 0) / t.term_count * 100) : 0;
+    const stCls = t.status === 'active' ? 'active' : (t.status === 'paused' ? 'paused' : 'completed');
+    const stLbl = t.status === 'active' ? 'Actief' : (t.status === 'paused' ? 'Gepauzeerd' : 'Voltooid');
+    const canEdit = t.status !== 'completed';
+    const actions = [];
+    if (t.status === 'active') actions.push(`<button class="btn btn-sm" data-action="pause" data-id="${esc(t.id)}"><i class="ti ti-player-pause"></i> Pauzeren</button>`);
+    if (t.status === 'paused') actions.push(`<button class="btn btn-sm btn-primary" data-action="resume" data-id="${esc(t.id)}"><i class="ti ti-player-play"></i> Hervatten</button>`);
+    if (canEdit) actions.push(`<button class="btn btn-sm" data-action="edit" data-id="${esc(t.id)}"><i class="ti ti-edit"></i> Bewerken</button>`);
+    actions.push(`<button class="btn btn-sm btn-danger" data-action="delete" data-id="${esc(t.id)}"><i class="ti ti-trash"></i> Verwijderen</button>`);
+    actions.push(`<button class="btn btn-sm btn-ghost tc-terms-toggle" data-toggle-terms="${esc(t.id)}"><i class="ti ti-chevron-down"></i> Termijnen tonen</button>`);
+    return `
+      <div class="traject-card ${stCls}">
+        <div class="tc-head">
+          <div>
+            <div class="tc-title">${esc(t.client_label)}</div>
+            <div class="tc-sub">
+              <strong>Event:</strong> ${esc(t.event_title || '—')}<br>
+              <strong>Mentor:</strong> ${esc(t.mentor_name || '—')}<br>
+              ${fmtEuro(t.total_amount)} · ${t.term_count} termijnen · ${Number(t.pct).toFixed(1)}% bonus (${fmtEuro(t.bonus_total)}) · start ${fmtMonth(t.start_month)}
+            </div>
+          </div>
+          <span class="tc-badge ${stCls}">${stLbl}</span>
+        </div>
+        <div class="tc-body">
+          <div class="tc-progress">
+            <div class="tc-progress-bar"><div style="width:${progressPct}%"></div></div>
+            <div class="tc-progress-meta">
+              <span>${t.released_terms || 0} van ${t.term_count} termijnen vrijgegeven</span>
+              <span>${progressPct}%</span>
+            </div>
+          </div>
+          <div class="tc-amounts">
+            <div class="big">${fmtEuro(t.released_amount)}</div>
+            <div class="dim">vrijgevallen</div>
+            <div class="big" style="margin-top:6px">${fmtEuro(t.remaining_amount)}</div>
+            <div class="dim">resterend</div>
+          </div>
+        </div>
+        <div class="tc-terms" id="terms-${esc(t.id)}">${renderTermRows(t)}</div>
+        <div class="tc-actions">${actions.join('')}</div>
+      </div>
+    `;
+  }
+
+  function renderTermRows(t) {
+    const perTerm = t.term_count > 0 ? Number(t.bonus_total) / Number(t.term_count) : 0;
+    const rows = [];
+    for (let i = 1; i <= t.term_count; i++) {
+      const isLast = i === t.term_count;
+      const amt = isLast
+        ? Math.round((Number(t.bonus_total) - perTerm * (t.term_count - 1)) * 100) / 100
+        : Math.round(perTerm * 100) / 100;
+      const released = i <= (t.released_terms || 0);
+      const monthLbl = fmtMonth(addMonthsIso(t.start_month, i - 1));
+      rows.push(`
+        <div class="term-row ${released ? 'released' : 'pending'}">
+          <span class="idx">Termijn ${i}</span>
+          <span class="amt">${fmtEuro(amt)}</span>
+          <span>${esc(monthLbl)}</span>
+          <span class="stat">${released ? '✓ vrijgegeven' : '— nog niet'}</span>
+        </div>
+      `);
+    }
+    return rows.join('');
+  }
+
+  async function handleAction(action, id) {
+    if (action === 'edit') { openModal(id); return; }
+    if (action === 'delete') {
+      if (!confirm('Weet je zeker dat je dit contante traject wilt verwijderen? Al aangemaakte bonussen blijven staan; alleen toekomstige vrijval stopt.')) return;
+      return apiStatus(id, 'delete');
+    }
+    if (action === 'pause')  return apiStatus(id, 'pause');
+    if (action === 'resume') return apiStatus(id, 'resume');
+  }
+
+  async function apiStatus(id, action) {
+    try {
+      const r = await window.AgentShared.apiFetch('/api/mentor-cash-traject-status', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action }),
+      });
+      const d = await r.json();
+      if (!r.ok || d.ok === false) throw new Error(d.error || 'HTTP ' + r.status);
+      const map = { pause: 'gepauzeerd', resume: 'hervat', delete: 'verwijderd' };
+      toast('Traject ' + (map[action] || action), 'success');
+      loadList();
+    } catch (e) { toast('Mislukt: ' + e.message, 'error'); }
+  }
+
+  // Modal handlers.
+  const modal = document.getElementById('editModal');
+  function openModal(id) {
+    state.editingId = id || null;
+    document.getElementById('editTitle').textContent = id ? 'Traject bewerken' : 'Nieuw contant traject';
+    document.getElementById('formErr').classList.remove('show');
+    document.getElementById('fLabel').value = '';
+    document.getElementById('fTotal').value = '';
+    document.getElementById('fTerms').value = '';
+    document.getElementById('fStart').value = '';
+    document.getElementById('fCalc').textContent = 'Vul totaalprijs en termijnen in om het bonusbedrag te zien.';
+    populateDropdowns().then(() => {
+      if (id) {
+        const t = state.trajects.find(x => x.id === id);
+        if (t) {
+          document.getElementById('fMentor').value = t.mentor_user_id;
+          document.getElementById('fEvent').value  = t.event_id;
+          document.getElementById('fLabel').value  = t.client_label || '';
+          document.getElementById('fTotal').value  = t.total_amount;
+          document.getElementById('fTerms').value  = t.term_count;
+          document.getElementById('fStart').value  = String(t.start_month).slice(0, 7);
+          updateCalc();
+        }
+      }
+    });
+    modal.classList.add('open');
+  }
+  function closeModal() { modal.classList.remove('open'); state.editingId = null; }
+  document.getElementById('editClose').addEventListener('click', closeModal);
+  document.getElementById('editCancel').addEventListener('click', closeModal);
+  document.getElementById('btnNew').addEventListener('click', () => openModal(null));
+
+  async function populateDropdowns() {
+    if (!state.mentors.length) {
+      try {
+        const r = await window.AgentShared.apiFetch('/api/mentor-admin-list');
+        const d = await r.json();
+        state.mentors = Array.isArray(d.mentors) ? d.mentors : [];
+      } catch { state.mentors = []; }
+    }
+    if (!state.events.length) {
+      try {
+        const r = await window.AgentShared.apiFetch('/api/events-list?status=draft,published&limit=200');
+        const d = await r.json();
+        state.events = Array.isArray(d.items) ? d.items : [];
+      } catch { state.events = []; }
+    }
+    const mSel = document.getElementById('fMentor');
+    mSel.innerHTML = '<option value="">— kies mentor —</option>' + state.mentors.map(m =>
+      `<option value="${esc(m.user_id)}">${esc(m.name || m.email || m.user_id)}</option>`
+    ).join('');
+    const eSel = document.getElementById('fEvent');
+    eSel.innerHTML = '<option value="">— kies event —</option>' + state.events.map(e => {
+      const dt = e.starts_at ? new Date(e.starts_at).toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' }) : '';
+      return `<option value="${esc(e.id)}">${esc(e.title)}${dt ? ' — ' + esc(dt) : ''}</option>`;
+    }).join('');
+  }
+
+  function updateCalc() {
+    const total = Number(document.getElementById('fTotal').value) || 0;
+    const terms = Number(document.getElementById('fTerms').value) || 0;
+    const el = document.getElementById('fCalc');
+    if (total <= 0 || terms < 1) {
+      el.textContent = 'Vul totaalprijs en termijnen in om het bonusbedrag te zien.';
+      return;
+    }
+    const bonus = Math.round(total * BONUS_PCT) / 100;
+    const perTerm = Math.round(bonus / terms * 100) / 100;
+    el.innerHTML = `Bonus (${BONUS_PCT}% van ${fmtEuro(total)}) = <strong>${fmtEuro(bonus)}</strong> · per termijn = <strong>${fmtEuro(perTerm)}</strong>`;
+  }
+  document.getElementById('fTotal').addEventListener('input', updateCalc);
+  document.getElementById('fTerms').addEventListener('input', updateCalc);
+
+  document.getElementById('editSave').addEventListener('click', async () => {
+    const btn = document.getElementById('editSave');
+    const err = document.getElementById('formErr');
+    err.classList.remove('show');
+    const body = {
+      mentor_user_id: document.getElementById('fMentor').value || null,
+      event_id:       document.getElementById('fEvent').value || null,
+      client_label:   document.getElementById('fLabel').value.trim(),
+      total_amount:   Number(document.getElementById('fTotal').value) || 0,
+      term_count:     Number(document.getElementById('fTerms').value) || 0,
+      start_month:    document.getElementById('fStart').value || null,
+    };
+    if (state.editingId) body.id = state.editingId;
+    // Basis-validatie client-side (server valideert opnieuw).
+    if (!body.mentor_user_id) { err.textContent = 'Kies een mentor.'; err.classList.add('show'); return; }
+    if (!body.event_id)        { err.textContent = 'Kies een event.'; err.classList.add('show'); return; }
+    if (!body.client_label)    { err.textContent = 'Omschrijving verplicht.'; err.classList.add('show'); return; }
+    if (!(body.total_amount >= 0)) { err.textContent = 'Totaalprijs moet ≥ 0 zijn.'; err.classList.add('show'); return; }
+    if (!(body.term_count >= 1))   { err.textContent = 'Aantal termijnen moet ≥ 1 zijn.'; err.classList.add('show'); return; }
+    if (!body.start_month)     { err.textContent = 'Startmaand verplicht.'; err.classList.add('show'); return; }
+    btn.disabled = true; btn.textContent = 'Opslaan…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/mentor-cash-traject-save', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (!r.ok || d.ok === false) throw new Error(d.error || 'HTTP ' + r.status);
+      toast(state.editingId ? 'Traject bijgewerkt' : 'Traject aangemaakt', 'success');
+      closeModal();
+      loadList();
+    } catch (e) {
+      err.textContent = 'Opslaan mislukt: ' + e.message;
+      err.classList.add('show');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Opslaan';
+    }
+  });
+
+  async function init() {
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+    if (window.AuthShared?.requireAuth) await window.AuthShared.requireAuth();
+    loadList();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
+</script>
+</body>
+</html>
