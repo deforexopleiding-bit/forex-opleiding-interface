@@ -288,6 +288,18 @@
       <label>Wat komt er op de offerte?</label>
       <div class="sub-preview" id="payPreview">—</div>
     </div>
+    <!-- Zichtbaar zodra state.wizard.exception_flagged === true. Live
+         reset gebeurt automatisch als de grenzen weer voldoen; sales kan
+         'm hier ook handmatig ongedaan maken. -->
+    <div id="exceptionApprovalBlock" style="display:none;margin-top:12px;padding:10px 12px;background:var(--bg-elev-2);border:1px solid var(--border);border-radius:6px;font-size:12.5px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <div style="flex:1;line-height:1.5">
+          <strong>Uitzondering goedgekeurd</strong><br>
+          <span id="exceptionApprovalSummary" style="color:var(--text-dim)"></span>
+        </div>
+        <button type="button" id="exceptionUndoBtn" class="btn btn-ghost btn-sm" style="flex:0 0 auto">Ongedaan maken</button>
+      </div>
+    </div>
     <div id="payMissing" style="font-size:11.5px;color:#dc2626;margin-top:8px"></div>
   </section>
 
@@ -620,6 +632,7 @@ function renderPaymentStep() {
   _applyTermStartMax();
   _applyDownDateBounds(false);
   recomputeTermAmount();
+  _renderExceptionApprovalBlock();
   renderPaymentPreview();
 }
 document.getElementById('payStartDate').addEventListener('change', e => {
@@ -638,6 +651,9 @@ document.getElementById('payStartDate').addEventListener('change', e => {
   _applyTermStartBounds(true);
   _applyDownDateBounds(true);
   renderPaymentPreview();
+  // Startdatum wijzigt → mogelijk niet meer lateStart → auto-reset
+  // exception-goedkeuring als geen enkele trigger meer actief is.
+  _revalidateExceptions();
   updateNextEnabled();
 });
 document.getElementById('payDownAmount').addEventListener('input', e => {
@@ -649,6 +665,8 @@ document.getElementById('payDownAmount').addEventListener('input', e => {
   // zonder=−3d vóór). Clamp de state als de huidige datum buiten de nieuwe
   // range valt en toon uitleg.
   _applyTermStartBounds(true);
+  // Aanbetaling beïnvloedt termijnbedrag → mogelijk niet meer lowTerm.
+  _revalidateExceptions();
   updateNextEnabled();
 });
 document.getElementById('payDownDate').addEventListener('change', e => {
@@ -658,7 +676,15 @@ document.getElementById('payDownDate').addEventListener('change', e => {
   _applyDownDateBounds(true);
   updateNextEnabled();
 });
-document.getElementById('payTermCount').addEventListener('input', e => { state.wizard.payment_term_count = e.target.value; markDirty(); recomputeTermAmount(); renderPaymentPreview(); updateNextEnabled(); });
+document.getElementById('payTermCount').addEventListener('input', e => {
+  state.wizard.payment_term_count = e.target.value;
+  markDirty();
+  recomputeTermAmount();
+  renderPaymentPreview();
+  // Termijn-aantal beïnvloedt termijnbedrag → mogelijk niet meer lowTerm.
+  _revalidateExceptions();
+  updateNextEnabled();
+});
 document.getElementById('payTermStartDate').addEventListener('change', e => { state.wizard.payment_term_start_date = e.target.value; markDirty(); updateNextEnabled(); });
 
 // ── Bedrijfsentiteit (stap 1) ──
@@ -1584,6 +1610,61 @@ function _daysBetweenTodayAnd(dateIso) {
   const today  = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
   return Math.round((target - today) / 86400000);
 }
+// Reset de exception-goedkeuring als de offerte weer binnen de grenzen
+// valt na een startdatum-/termijnbedrag-wijziging. Laat de goedkeuring
+// staan zolang er ook maar één trigger (lowTerm of lateStart) actief is
+// zodat sales niet bij elke toetsaanslag opnieuw hoeft goed te keuren.
+function _revalidateExceptions() {
+  if (!state.wizard.exception_flagged) { _renderExceptionApprovalBlock(); return; }
+  const detect = _detectExceptions();
+  if (!detect.lowTerm && !detect.lateStart) {
+    state.wizard.exception_flagged     = false;
+    state.wizard.exception_reasons     = '';
+    state.wizard.exception_reason_note = '';
+    state.wizard.exception_fee_agreed  = false;
+    markDirty();
+    // Fee eraf → termijnbedrag over volledig totaal, preview opnieuw.
+    recomputeTermAmount();
+    renderPaymentPreview();
+    updateNextEnabled();
+    toast('Uitzondering-goedkeuring automatisch ingetrokken: offerte valt weer binnen de grenzen.', '');
+  }
+  _renderExceptionApprovalBlock();
+}
+// Toont / verbergt het goedkeuring-blok op stap 4 op basis van state.
+function _renderExceptionApprovalBlock() {
+  const block   = document.getElementById('exceptionApprovalBlock');
+  const summary = document.getElementById('exceptionApprovalSummary');
+  if (!block || !summary) return;
+  const w = state.wizard;
+  if (!w.exception_flagged) { block.style.display = 'none'; return; }
+  const reasons = String(w.exception_reasons || '').split(',').map(s => s.trim()).filter(Boolean);
+  const labels  = reasons.map(r => r === 'low_term_amount' ? 'lage termijn' : (r === 'late_start' ? 'late startdatum' : r));
+  const parts   = [];
+  if (labels.length) parts.push(labels.join(' + '));
+  if (w.exception_fee_agreed) parts.push('€100 reserveringsfee akkoord');
+  summary.textContent = parts.join(' · ') || 'goedgekeurd';
+  block.style.display = '';
+}
+// Handmatige 'Ongedaan maken' vanaf stap 4.
+function _undoExceptionApproval() {
+  if (!state.wizard.exception_flagged) return;
+  state.wizard.exception_flagged     = false;
+  state.wizard.exception_reasons     = '';
+  state.wizard.exception_reason_note = '';
+  state.wizard.exception_fee_agreed  = false;
+  markDirty();
+  recomputeTermAmount();
+  renderPaymentPreview();
+  _renderExceptionApprovalBlock();
+  updateNextEnabled();
+  toast('Uitzondering-goedkeuring ongedaan gemaakt.', '');
+}
+// Undo-knop 1x wiren (DOM zit vast in de HTML, dus geen re-wire nodig).
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('exceptionUndoBtn');
+  if (btn) btn.addEventListener('click', _undoExceptionApproval);
+});
 function _detectExceptions() {
   const w         = state.wizard;
   const minTerm   = Number(_exceptionLimits.minTermAmount);
