@@ -852,7 +852,14 @@ function quotationActions(q) {
   // "Omzetten naar abonnement" alleen voor wie ook abonnementen mag beheren.
   // Mentor met alleen offertes-rechten ziet 'm niet — getekende offerte valt
   // dan terug op oog-icoon + TL-link (showEye=true).
-  if ((st === 'accepted' || st === 'signed') && can('sales.tab.subscriptions')) primary = `<a class="sr-abtn success" href="/modules/subscription-wizard.html?deal_id=${esc(q.deal_id)}">Omzetten naar abonnement</a>`;
+  if ((st === 'accepted' || st === 'signed') && can('sales.tab.subscriptions')) {
+    // Al ≥1 abbo? Toon "Abbo al ingevoerd" — knop blijft klikbaar zodat
+    // bewust opnieuw omzetten mogelijk is (bv. tweede abbo op dezelfde deal).
+    const convLabel = q.has_subscription ? '✓ Abbo al ingevoerd' : 'Omzetten naar abonnement';
+    const convClass = q.has_subscription ? 'sr-abtn' : 'sr-abtn success';
+    const convTitle = q.has_subscription ? 'Er bestaat al een abonnement voor deze offerte. Klik om (opnieuw) om te zetten.' : '';
+    primary = `<a class="${convClass}" href="/modules/subscription-wizard.html?deal_id=${esc(q.deal_id)}"${convTitle ? ` title="${esc(convTitle)}"` : ''}>${convLabel}</a>`;
+  }
   else if (st === 'accepted' || st === 'signed') showEye = true;
   else if (st === 'sent') primary = `<button class="sr-abtn primary" data-send="${esc(q.deal_id)}">Opnieuw versturen</button>`;
   else if (st === 'failed') { primary = `<button class="sr-abtn warning" data-push="${esc(q.deal_id)}">Retry push</button>`; showEye = true; }
@@ -1783,7 +1790,14 @@ async function loadDashboard() {
     const canConv = can('sales.tab.subscriptions');
     wrap.innerHTML = items.map(it => `<div class="sr-userline" style="justify-content:space-between;padding:8px 0;border-bottom:.5px solid var(--border)">
       <span class="sr-userline">${avatarHtml(it.customer_name)}<span>${esc(it.customer_name || '—')}</span></span>
-      ${canConv ? `<a class="sr-abtn success" href="/modules/subscription-wizard.html?deal_id=${encodeURIComponent(it.deal_id)}">Omzetten naar abonnement</a>` : ''}</div>`).join('');
+      ${canConv ? (() => {
+        // Safety-net: deze lijst filtert normaal op deals zonder abbo, maar
+        // als er tóch eentje met has_subscription binnenkomt: consistent label.
+        const cLabel = it.has_subscription ? '✓ Abbo al ingevoerd' : 'Omzetten naar abonnement';
+        const cClass = it.has_subscription ? 'sr-abtn' : 'sr-abtn success';
+        const cTitle = it.has_subscription ? 'Er bestaat al een abonnement voor deze offerte. Klik om (opnieuw) om te zetten.' : '';
+        return `<a class="${cClass}" href="/modules/subscription-wizard.html?deal_id=${encodeURIComponent(it.deal_id)}"${cTitle ? ` title="${esc(cTitle)}"` : ''}>${cLabel}</a>`;
+      })() : ''}</div>`).join('');
   } catch (e) { wrap.innerHTML = '<div class="sr-empty">Laden mislukt.</div>'; }
 }
 // Avatar-helper (kleur op naam-hash) — gedeeld door alle tabs in latere fases.

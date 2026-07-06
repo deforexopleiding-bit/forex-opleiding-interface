@@ -78,10 +78,18 @@ export default async function handler(req, res) {
       excl += lineExcl; incl += lineIncl;
     }
 
+    // Heeft-abbo-marker voor de "Omzetten naar abonnement"-knop: toont
+    // "Abbo al ingevoerd" wanneer er al ≥1 sub voor deze deal bestaat.
+    // Knop blijft klikbaar (bewust opnieuw omzetten mogelijk).
+    const { data: subs } = await supabaseAdmin.from('subscriptions')
+      .select('id').eq('deal_id', id).limit(1);
+    const has_subscription = Array.isArray(subs) && subs.length > 0;
+
     return res.status(200).json({
       deal, customer, line_items: lineItems || [], traject, entity,
       discount_percentage: Number(deal.discount_percentage) || 0,
       totals: { excl: Math.round(excl * 100) / 100, incl: Math.round(incl * 100) / 100 },
+      has_subscription,
     });
   } catch (e) {
     console.error('[sales-deal-detail]', e.message);

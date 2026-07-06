@@ -320,8 +320,14 @@ function render(d){
     // Getekende offerte: alleen bekijken + (optioneel) omzetten + onboarding-actie.
     // Bewerken is uitgezet (server-side blokkeert het ook — SALES_DEAL_SIGNED).
     // Omzetten-knop hangt aan sales.tab.subscriptions — mentor ziet 'm niet.
+    // Al ≥1 abbo? Toon "Abbo al ingevoerd" — knop blijft klikbaar zodat
+    // bewust opnieuw omzetten mogelijk is (bv. tweede abbo op dezelfde deal).
+    const _hasSub = !!d.has_subscription;
+    const _convLabel = _hasSub ? '✓ Abbo al ingevoerd' : 'Omzetten naar abonnement';
+    const _convClass = _hasSub ? 'btn' : 'btn btn-success';
+    const _convTitle = _hasSub ? 'Er bestaat al een abonnement voor deze offerte. Klik om (opnieuw) om te zetten.' : '';
     const convertBtn = _canManageSubs
-      ? `<a class="btn btn-success" href="/modules/subscription-wizard.html?deal_id=${esc(deal.id)}">Omzetten naar abonnement</a>`
+      ? `<a class="${_convClass}" href="/modules/subscription-wizard.html?deal_id=${esc(deal.id)}"${_convTitle ? ` title="${esc(_convTitle)}"` : ''}>${_convLabel}</a>`
       : '';
     // Historisch-event-koppeling: alleen voor sales-team-leden (proxy via
     // _canManageSubs); de admin-pagina zelf gate't hard op super_admin.

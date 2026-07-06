@@ -84,6 +84,16 @@ export default async function handler(req, res) {
       for (const u of profs || []) userById[u.id] = u.full_name;
     }
 
+    // Heeft-abbo-marker per deal — voor de "Omzetten naar abonnement"-knop
+    // die dan "Abbo al ingevoerd" toont (klikbaar; bewust opnieuw omzetten
+    // blijft mogelijk). Bulk-lookup zodat er geen N+1-query ontstaat.
+    const hasSubByDeal = {};
+    if (dealIds.length) {
+      const { data: subs } = await supabaseAdmin.from('subscriptions')
+        .select('deal_id').in('deal_id', dealIds);
+      for (const s of subs || []) hasSubByDeal[s.deal_id] = true;
+    }
+
     const s = (search || '').trim().toLowerCase();
     const quotations = (deals || []).map(d => {
       const c = custById[d.customer_id] || {};
@@ -104,6 +114,7 @@ export default async function handler(req, res) {
         sent_at:             d.tl_quotation_email_sent_at || d.tl_quotation_sent_at || null,
         accepted_at:         d.tl_quotation_accepted_at || null,
         declined_at:         d.tl_quotation_declined_at || null,
+        has_subscription:    !!hasSubByDeal[d.id],
       };
     }).filter(qn => !s || qn.customer_name.toLowerCase().includes(s) || (qn.customer_email || '').toLowerCase().includes(s));
 
