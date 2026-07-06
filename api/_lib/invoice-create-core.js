@@ -127,14 +127,33 @@ export async function createTlInvoice({ customer, departmentId, lines, action, o
   }
 
   // 5. Versturen (alleen na succesvol boeken).
+  // TL invoices.send verwacht `to` (NIET `recipients`) + verplichte
+  // `content` en `subject` (bevestigd via HTTP 400 "to must be present" +
+  // "content must be present"). Recipient-vorm is dezelfde als bij
+  // invoices.draft: array van { type: 'contact'|'company', id }.
+  //
+  // Content/subject zijn hier VERPLICHT — TL weigert lege waarden. Als de
+  // caller geen tekst meestuurt, gebruiken we een generieke DFO-tekst zodat
+  // de fee-factuur (en andere book_and_send-calls zonder eigen tekst) niet
+  // meer op HTTP 400 stukloopt.
   if (booked && action === 'book_and_send') {
     try {
       const send    = opts.send || {};
-      const recList = (Array.isArray(send.recipients) && send.recipients.length) ? send.recipients
+      const toList  = (Array.isArray(send.recipients) && send.recipients.length) ? send.recipients
         : (customerRef.type === 'company' ? [{ type: 'company', id: customerRef.id }] : [{ type: 'contact', id: customerRef.id }]);
-      const sb = { id: tlInvoiceId, recipients: recList, language: send.language || language };
-      if (send.subject) sb.subject = String(send.subject);
-      if (send.content) sb.content = String(send.content);
+      const subject = send.subject
+        ? String(send.subject)
+        : 'Factuur - De Forex Opleiding';
+      const content = send.content
+        ? String(send.content)
+        : 'Beste,\n\nIn bijlage vindt u de factuur.\n\nMet vriendelijke groet,\nDe Forex Opleiding B.V.';
+      const sb = {
+        id:       tlInvoiceId,
+        to:       toList,
+        subject,
+        content,
+        language: send.language || language,
+      };
       const sr    = await tlFetch('/invoices.send', { method: 'POST', body: JSON.stringify(sb) });
       const sText = await sr.text().catch(() => '');
       if (!sr.ok) { sendErr = { http: sr.status, response: sText }; console.error('[invoice-core] send GEWEIGERD', sr.status, sText.slice(0, 300)); }
