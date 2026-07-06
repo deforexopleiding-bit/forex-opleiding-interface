@@ -44,6 +44,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { releaseDate as cashReleaseDate } from './_lib/mentor-cash-release-core.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -142,7 +143,7 @@ export default async function handler(req, res) {
     // isCancelled-check in de verwerkingslus hieronder.
     const { data: entries, error: entErr } = await supabaseAdmin
       .from('mentor_ledger_entries')
-      .select('id, mentor_user_id, event_id, entry_type, basis, amount, pct, status, attendee_id, customer_id, source_invoice_id, created_at')
+      .select('id, mentor_user_id, event_id, entry_type, basis, amount, pct, status, attendee_id, customer_id, source_invoice_id, idempotency_key, created_at')
       .eq('mentor_user_id', effectiveUserId)
       .eq('entry_type', 'bonus')
       .limit(5000);
@@ -314,7 +315,158 @@ export default async function handler(req, res) {
     let betaald_uit  = 0;
     let open_total   = 0;
 
+    // ── Handmatige trajecten (cashtraject:*) — aparte weergave ─────────────
+    // Deze entries hebben GEEN abonnement/factuur. entry.amount ÍS de al
+    // vrijgegeven bonus. Herken via idempotency_key-prefix, groepeer per
+    // traject_id, verrijk met mentor_cash_trajects (client_label,
+    // start_month, release_day, ...), push als één sale-cell per traject
+    // in perEventMap en tel op in KPI's (behalve geannuleerde).
+    //
+    // Regex: 'cashtraject:<uuid>:term:<n>:mentor:<uid>' — trajectId is de
+    // 1e capture, termIdx de 2e. Legacy 'cashtraject:<uuid>:term:<n>' zonder
+    // mentor-suffix wordt ook geaccepteerd voor backwards-compat.
+    const CASHTRAJECT_KEY_RE = /^cashtraject:([0-9a-f-]{36}):term:(\d+)(?::mentor:[0-9a-f-]{36})?$/i;
+
+    const cashByTraject = new Map(); // trajectId → array van entries (deze mentor)
+    const regularRows   = [];
     for (const r of rows) {
+      const key = r.idempotency_key;
+      const m = typeof key === 'string' ? CASHTRAJECT_KEY_RE.exec(key) : null;
+      if (m) {
+        const tid = m[1];
+        if (!cashByTraject.has(tid)) cashByTraject.set(tid, []);
+        cashByTraject.get(tid).push({ ...r, _termIdx: Number(m[2]) });
+      } else {
+        regularRows.push(r);
+      }
+    }
+
+    // Trajecten ophalen om client_label/term_count/bonus_total etc. te weten.
+    const trajectIds = [...cashByTraject.keys()];
+    const trajectById = new Map();
+    if (trajectIds.length) {
+      const { data: ts } = await supabaseAdmin
+        .from('mentor_cash_trajects')
+        .select('id, client_label, term_count, bonus_total, event_id, start_month, release_day, status')
+        .in('id', trajectIds);
+      for (const t of (ts || [])) trajectById.set(t.id, t);
+    }
+
+    // Ontbrekende events (voor cashtraject-entries met event_id dat nog niet
+    // in eventById zit — kan gebeuren als de reguliere fetch dit event niet
+    // ophaalde). Aanvullen zodat event_title/starts_at kloppen.
+    const missingEventIds = [];
+    for (const t of trajectById.values()) {
+      if (t.event_id && !eventById.has(t.event_id)) missingEventIds.push(t.event_id);
+    }
+    if (missingEventIds.length) {
+      const { data: evs } = await supabaseAdmin
+        .from('events').select('id, title, starts_at').in('id', [...new Set(missingEventIds)]);
+      for (const e of evs || []) eventById.set(e.id, e);
+    }
+
+    // Per traject een sale-cell bouwen en KPI's optellen.
+    for (const [tid, ents] of cashByTraject.entries()) {
+      const t = trajectById.get(tid);
+      if (!t) {
+        // Traject-rij ontbreekt (bv. verwijderd) — sla over met warning-log.
+        console.warn('[mentor-bonus-overview] cashtraject entry zonder traject-rij:', tid);
+        continue;
+      }
+      const termCount   = Number(t.term_count) || 1;
+      const releaseDay  = Number(t.release_day) || 1;
+      const startMonth  = t.start_month;
+
+      // Distincte termijnen die deze mentor al vrij heeft gekregen +
+      // amount-per-termijn map (index → entry.amount, laatste wint bij
+      // duplicaten wat theoretisch onmogelijk is dankzij idempotency_key).
+      const paidTermIdx = new Set();
+      const amountByTerm = new Map();
+      let mentorShareTotal = 0;
+      let mentorShareNonCancelled = 0;   // voor KPI-tellingen
+      let hasCancelled = false;
+      for (const e of ents) {
+        const cancelled = e.status === 'geannuleerd';
+        if (cancelled) hasCancelled = true;
+        const amt = Number(e.amount) || 0;
+        paidTermIdx.add(e._termIdx);
+        amountByTerm.set(e._termIdx, amt);
+        mentorShareTotal += (cancelled ? 0 : amt);
+        if (!cancelled) mentorShareNonCancelled += amt;
+      }
+
+      // Fallback per-termijn bedrag (voor nog-niet-vrijgevallen termijnen).
+      // Gemiddelde van reeds vrijgevallen entries; als er nog geen zijn:
+      // bonus_total / term_count / N-onbekend → conservatief: gebruik
+      // bonus_total / term_count als proxy.
+      let perTermFallback;
+      if (amountByTerm.size > 0) {
+        const sum = [...amountByTerm.values()].reduce((s, a) => s + a, 0);
+        perTermFallback = round2(sum / amountByTerm.size);
+      } else {
+        perTermFallback = round2(Number(t.bonus_total || 0) / termCount);
+      }
+
+      // Termijnen array bouwen (alle N termijnen; status per termijn).
+      const termijnen = [];
+      for (let i = 1; i <= termCount; i++) {
+        const paid = paidTermIdx.has(i);
+        const amt  = paid ? (amountByTerm.get(i) || 0) : perTermFallback;
+        termijnen.push({
+          index    : i,
+          due_date : cashReleaseDate(startMonth, i, releaseDay),
+          amount   : round2(amt),
+          status   : paid ? 'betaald' : 'open',
+        });
+      }
+
+      // Sale-status voor de badge.
+      let saleStatus;
+      if (t.status === 'completed')        saleStatus = 'voltooid';
+      else if (paidTermIdx.size >= 1)      saleStatus = 'actief';
+      else                                 saleStatus = 'wacht_1e_betaling';
+      // Alleen forceren als ALLES geannuleerd is (geen actieve termijnen).
+      if (hasCancelled && mentorShareNonCancelled <= 0) saleStatus = 'geannuleerd';
+
+      // KPI-tellingen. Vrijgegeven mentor-amount telt in earned_total +
+      // betaald_uit (het is al uitgekeerd/vrijgegeven). Geannuleerde niet.
+      earned_total += mentorShareNonCancelled;
+      betaald_uit  += mentorShareNonCancelled;
+
+      // Groeperen onder event (event_id vanuit traject).
+      const evKey = t.event_id || 'no-event';
+      if (!perEventMap.has(evKey)) {
+        const ev = eventById.get(t.event_id) || null;
+        perEventMap.set(evKey, {
+          event_id    : t.event_id || null,
+          event_title : ev?.title     || null,
+          starts_at   : ev?.starts_at || null,
+          _sales      : new Map(),
+        });
+      }
+      const evNode = perEventMap.get(evKey);
+      // Sale-key: traject-id (uniek per handmatig traject).
+      evNode._sales.set('cashtraject:' + t.id, {
+        customer_id        : null,
+        customer_label     : t.client_label || '(traject)',
+        sale_total_incl    : round2(Number(t.bonus_total) || 0),
+        mentor_share_total : round2(mentorShareTotal),
+        term_count         : termCount,
+        per_term_amount    : perTermFallback,
+        schema_unknown     : false,
+        status             : saleStatus,
+        paid_term_count    : paidTermIdx.size,
+        first_invoice_paid : paidTermIdx.size >= 1,
+        last_payment_date  : null,
+        has_overdue        : false,
+        overdue_count      : 0,
+        overdue_amount     : 0,
+        is_cash_traject    : true,
+        termijnen,
+      });
+    }
+
+    for (const r of regularRows) {
       // Geannuleerde entries blijven in de lijst (zichtbaar met grijze
       // 'Geannuleerd'-badge) maar mogen NERGENS meetellen. Effective
       // mentorAmount = 0 → geen invloed op earned_total, betaald_uit,
