@@ -25,13 +25,17 @@
 // genegeerd; we normaliseren naar de 1e van die maand). period_month is een
 // date-kolom; we sluiten ervoor [period_start, period_end+1mo) op released_at.
 //
-// "1 MAAND ACHTERAF"-REGEL (sinds 2026-07):
-//   Payout voor maand M pakt:
-//     * event/handmatige (cashtraject) bonussen vrijgevallen in M-1 (vorige maand)
-//     * reguliere (abonnement-gedreven) bonussen vrijgevallen in M (huidige maand)
-//   Type-detectie via idempotency_key: 'cashtraject:*' → handmatig;
-//   ':bonus:' in de key → event; anders → regulier.
-//   Het LABEL/period_month op de payout-rij blijft de gekozen maand M.
+// "2 MAANDEN ACHTERAF + ACHTERSTAND-INHAAL"-REGEL (sinds 2026-07):
+//   Payout maand M = alle vrijgegeven, nog-niet-uitbetaalde entries t/m
+//   eind M-2 (2 maanden achteraf; achterstand loopt in). Concreet:
+//     cutoffStart = 1e van maand M-1
+//     selectie   = status='vrijgegeven' AND released_at < cutoffStart
+//   Geen ondergrens: achterstallige bonussen (bv. uit april die nog niet
+//   uitbetaald zijn) worden bij een latere run automatisch meegenomen.
+//   status='vrijgegeven' garandeert dat reeds uitbetaalde entries
+//   (status='uitbetaald') nooit dubbel gepakt worden.
+//   GEEN type-onderscheid meer: event/handmatig/regulier volgen dezelfde
+//   maand-regel. Het LABEL/period_month op de payout-rij blijft M.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -64,13 +68,6 @@ function _monthPeriod(s) {
 }
 
 function round2(n) { return Math.round(Number(n) * 100) / 100; }
-
-// 'YYYY-MM-DD…' → 'YYYY-MM-01' (bucket-start van die maand).
-function _monthStartOf(iso) {
-  const s = String(iso || '');
-  const m = s.match(/^(\d{4})-(\d{2})/);
-  return m ? `${m[1]}-${m[2]}-01` : null;
-}
 
 // 'YYYY-MM-01' → 'YYYY-(MM-1)-01' (vorige-maand bucket-start).
 function _prevMonthStartOf(monthStartIso) {
@@ -127,35 +124,24 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2) Vrijgegeven entries — met "1 maand achteraf"-regel voor event +
-    //    handmatige (cashtraject) bonussen. Payout voor maand M pakt:
-    //      * event/handmatig-bonussen vrijgevallen in M-1 (vorige maand)
-    //      * reguliere (abonnement-gedreven) bonussen vrijgevallen in M
-    //    Praktisch: één query over [M-1, M+1), daarna JS-filter op type +
-    //    juiste maand-bucket. Type-detectie via idempotency_key:
-    //      * 'cashtraject:*'        → handmatig
-    //      * bevat ':bonus:'        → event-bonus (event-afronding)
-    //      * anders                 → regulier (subscription/betaal-flow)
-    const prevMonthStart = _prevMonthStartOf(period.start);
-    const curMonthStart  = period.start;
+    // 2) Vrijgegeven entries — "2 maanden achteraf + achterstand-inhaal"-regel.
+    //    Payout voor maand M pakt ALLE nog-niet-uitbetaalde vrijgegeven entries
+    //    met released_at < 1 vd maand (M-1) — dus t/m eind maand M-2 én alles
+    //    daarvóór dat nog openstond. Geen ondergrens: achterstallige bonussen
+    //    (bv. uit april die nog niet uitbetaald zijn) lopen automatisch in.
+    //    GEEN type-onderscheid meer: event/handmatig/regulier volgen dezelfde
+    //    maand-regel. status='vrijgegeven' garandeert dat reeds uitbetaalde
+    //    entries (status='uitbetaald') nooit dubbel gepakt worden.
+    const cutoffStart = _prevMonthStartOf(period.start); // = M-1
     const { data: entries, error: entErr } = await supabaseAdmin
       .from('mentor_ledger_entries')
-      .select('id, entry_type, amount, released_at, idempotency_key')
+      .select('id, entry_type, amount, released_at')
       .eq('mentor_user_id', mentorId)
       .eq('status', 'vrijgegeven')
-      .gte('released_at', prevMonthStart)
-      .lt('released_at', period.end);
+      .lt('released_at', cutoffStart);
     if (entErr) throw new Error('entries fetch: ' + entErr.message);
 
-    const rowsAll = entries || [];
-    const rows = rowsAll.filter((e) => {
-      const key  = String(e.idempotency_key || '');
-      const isCash  = key.startsWith('cashtraject:');
-      const isEvent = /:bonus:/.test(key);
-      const bucket  = _monthStartOf(e.released_at);
-      if (isCash || isEvent) return bucket === prevMonthStart;
-      return bucket === curMonthStart;
-    });
+    const rows = entries || [];
     if (rows.length === 0) {
       return res.status(404).json({
         error: 'Geen vrijgegeven entries in deze periode',
