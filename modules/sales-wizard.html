@@ -536,24 +536,61 @@ function renderPaymentPreview() {
     ? `Op offerte komt: '${t}'`
     : 'Op offerte komt: geen extra info (alleen totaalbedrag)';
 }
-// 1e termijndatum moet minstens 3 kalenderdagen VÓÓR de cursus-
-// startdatum liggen. Rekening houdt met kale YYYY-MM-DD zonder tijd/UTC-
-// verschuiving. Retourneert null als startdatum leeg/ongeldig is.
-function _termStartMaxFor(startIso){
+// UTC-veilige datum-shift (kale YYYY-MM-DD, geen tijd/tz-shift).
+function _shiftDaysIso(startIso, deltaDays){
   const s = String(startIso || '');
   if(!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
   const [y,m,d] = s.split('-').map(Number);
   const dt = new Date(Date.UTC(y, m-1, d));
-  dt.setUTCDate(dt.getUTCDate() - 3);
+  dt.setUTCDate(dt.getUTCDate() + deltaDays);
   return dt.toISOString().slice(0,10);
 }
-function _applyTermStartMax(){
+// Backward-compat: _termStartMaxFor stond nog gebruikt in updateNextEnabled.
+// Retourneert start-3d (max VÓÓR-start deadline).
+function _termStartMaxFor(startIso){ return _shiftDaysIso(startIso, -3); }
+// Nieuwe conditionele bounds voor #payTermStartDate:
+// - MÉT aanbetaling: 1e termijn mag tot start+30d (aanbetaling dekt de
+//   vóór-startdatum-betaling); min blijft leeg zodat sales verder terug mag.
+// - ZONDER aanbetaling: 1e termijn MOET vóór start (start-3d) — bestaand.
+// Retourneert { min, max } (beide string of null).
+function _termStartBounds(startIso, hasDownpayment){
+  if(!startIso) return { min: null, max: null };
+  return hasDownpayment
+    ? { min: null, max: _shiftDaysIso(startIso, +30) }
+    : { min: null, max: _shiftDaysIso(startIso, -3)  };
+}
+function _hasDownpayment(){
+  return Number(state.wizard.payment_downpayment_amount) > 0;
+}
+// Zet min/max op #payTermStartDate volgens de huidige bounds; clamp de
+// state-waarde bij een verandering van startdatum of aanbetaling. Toont
+// een toast als de datum is verschoven zodat sales weet WAAROM.
+function _applyTermStartBounds(explainOnClamp){
   const w = state.wizard;
   const el = document.getElementById('payTermStartDate');
   if(!el) return;
-  const max = _termStartMaxFor(w.payment_start_date);
-  if(max) el.setAttribute('max', max); else el.removeAttribute('max');
+  const b = _termStartBounds(w.payment_start_date, _hasDownpayment());
+  if(b.max) el.setAttribute('max', b.max); else el.removeAttribute('max');
+  if(b.min) el.setAttribute('min', b.min); else el.removeAttribute('min');
+  // Clamp state als de huidige datum buiten de nieuwe range valt.
+  const cur = w.payment_term_start_date || '';
+  if(!cur || !b.max) return;
+  let clamped = cur;
+  if(b.max && cur > b.max) clamped = b.max;
+  if(b.min && cur < b.min) clamped = b.min;
+  if(clamped !== cur){
+    w.payment_term_start_date = clamped;
+    el.value = clamped;
+    if(explainOnClamp){
+      const msg = _hasDownpayment()
+        ? '1e termijndatum aangepast: met aanbetaling mag de termijn tot 30 dagen ná de startdatum.'
+        : '1e termijndatum aangepast: zonder aanbetaling moet de termijn minstens 3 dagen vóór de startdatum liggen.';
+      toast(msg, '');
+    }
+  }
 }
+// Backward-compat naam voor bestaande callers.
+function _applyTermStartMax(){ _applyTermStartBounds(false); }
 function renderPaymentStep() {
   const w = state.wizard;
   document.getElementById('payStartDate').value = w.payment_start_date || '';
@@ -568,24 +605,31 @@ function renderPaymentStep() {
 document.getElementById('payStartDate').addEventListener('change', e => {
   state.wizard.payment_start_date = e.target.value;
   markDirty();
-  // Default + max voor de 1e termijndatum bijwerken. Als er nog geen
-  // datum is óf de bestaande ligt te dicht op de startdatum (> max),
-  // schuiven we automatisch naar 3 dagen vóór start. Verder terug mag
-  // sales handmatig.
-  const max = _termStartMaxFor(e.target.value);
-  if(max){
-    const cur = state.wizard.payment_term_start_date || '';
-    if(!cur || cur > max){
-      state.wizard.payment_term_start_date = max;
-      const tsEl = document.getElementById('payTermStartDate');
-      if(tsEl) tsEl.value = max;
-    }
+  // Default voor 1e termijn als 'ie nog leeg is: startdatum − 3 dagen
+  // (past bij zowel de MÉT- als ZONDER-aanbetaling-regel). Bij een reeds
+  // ingevulde datum die buiten de nieuwe range valt → clamp + melding
+  // via _applyTermStartBounds hieronder.
+  const startMinus3 = _termStartMaxFor(e.target.value);
+  if(startMinus3 && !state.wizard.payment_term_start_date){
+    state.wizard.payment_term_start_date = startMinus3;
+    const tsEl = document.getElementById('payTermStartDate');
+    if(tsEl) tsEl.value = startMinus3;
   }
-  _applyTermStartMax();
+  _applyTermStartBounds(true);
   renderPaymentPreview();
   updateNextEnabled();
 });
-document.getElementById('payDownAmount').addEventListener('input', e => { state.wizard.payment_downpayment_amount = e.target.value; markDirty(); recomputeTermAmount(); renderPaymentPreview(); updateNextEnabled(); });
+document.getElementById('payDownAmount').addEventListener('input', e => {
+  state.wizard.payment_downpayment_amount = e.target.value;
+  markDirty();
+  recomputeTermAmount();
+  renderPaymentPreview();
+  // Aanbetaling wijzigt → bounds voor 1e termijn schakelen (met=+30d na,
+  // zonder=−3d vóór). Clamp de state als de huidige datum buiten de nieuwe
+  // range valt en toon uitleg.
+  _applyTermStartBounds(true);
+  updateNextEnabled();
+});
 document.getElementById('payDownDate').addEventListener('change', e => { state.wizard.payment_downpayment_date = e.target.value; markDirty(); updateNextEnabled(); });
 document.getElementById('payTermCount').addEventListener('input', e => { state.wizard.payment_term_count = e.target.value; markDirty(); recomputeTermAmount(); renderPaymentPreview(); updateNextEnabled(); });
 document.getElementById('payTermStartDate').addEventListener('change', e => { state.wizard.payment_term_start_date = e.target.value; markDirty(); updateNextEnabled(); });
@@ -1465,13 +1509,19 @@ function updateNextEnabled() {
     // doorschakelen.
     if (!(Number(w.payment_term_count) >= 1)) miss.push('Aantal termijnen (min. 1)');
     if (Number(w.payment_term_count) > 0 && !w.payment_term_start_date) miss.push('Datum 1e termijn');
-    // 1e termijndatum moet minstens 3 kalenderdagen vóór de startdatum
-    // liggen. Sales mag verder terug, niet dichterbij (SEPA + operationele
-    // buffer voor Rogier).
+    // 1e termijndatum-range (conditioneel):
+    // - MÉT aanbetaling: 1e termijn mag tot 30 dagen ná start.
+    // - ZONDER aanbetaling: 1e termijn moet minstens 3 dagen vóór start
+    //   (dekking van de vóór-startdatum-betaling).
     if (w.payment_term_start_date && w.payment_start_date){
-      const max = _termStartMaxFor(w.payment_start_date);
-      if (max && w.payment_term_start_date > max){
-        miss.push('Datum 1e termijn moet minstens 3 dagen vóór de startdatum liggen');
+      const b = _termStartBounds(w.payment_start_date, Number(w.payment_downpayment_amount) > 0);
+      if (b.max && w.payment_term_start_date > b.max){
+        miss.push(Number(w.payment_downpayment_amount) > 0
+          ? 'Datum 1e termijn mag max. 30 dagen ná de startdatum liggen'
+          : 'Datum 1e termijn moet minstens 3 dagen vóór de startdatum liggen');
+      }
+      if (b.min && w.payment_term_start_date < b.min){
+        miss.push('Datum 1e termijn ligt te ver in het verleden');
       }
     }
     const pm = document.getElementById('payMissing');
