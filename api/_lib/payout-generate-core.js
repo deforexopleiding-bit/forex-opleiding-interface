@@ -36,12 +36,6 @@ export const BTW_RATE = 1.21;
 
 export function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 
-// 'YYYY-MM-DD…' → 'YYYY-MM-01' (bucket-start van die maand).
-function _monthStartOfCore(iso) {
-  const s = String(iso || '');
-  const m = s.match(/^(\d{4})-(\d{2})/);
-  return m ? `${m[1]}-${m[2]}-01` : null;
-}
 // 'YYYY-MM-01' → 'YYYY-(MM-1)-01' (vorige-maand bucket-start).
 function _prevMonthStartOfCore(monthStartIso) {
   const s = String(monthStartIso || '');
@@ -120,30 +114,23 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
   }
 
   // 3) BONUS — som vrijgegeven ledger-entries (niet gekoppeld aan payout).
-  //    "1 maand achteraf"-regel: event/handmatige bonussen vrijgevallen in
-  //    M-1 tellen mee in de payout voor maand M. Reguliere (abonnement-
-  //    gedreven) bonussen blijven op M. Zelfde logica als in mentor-payout-run.
-  //    Type-detectie via idempotency_key ('cashtraject:*' / ':bonus:' / rest).
-  const _prevMonthStart = _prevMonthStartOfCore(period.start);
-  const _curMonthStart  = period.start;
+  //    "2 maanden achteraf + achterstand-inhaal"-regel: concept voor maand M
+  //    pakt ALLE nog-niet-gekoppelde vrijgegeven entries met released_at < 1
+  //    vd maand (M-1) — dus t/m eind M-2 én alles daarvóór dat nog openstond.
+  //    Geen ondergrens: achterstallige bonussen lopen automatisch in.
+  //    GEEN type-onderscheid meer: event/handmatig/regulier volgen dezelfde
+  //    regel. status='vrijgegeven' + payout_id IS NULL garanderen samen dat
+  //    reeds gebundelde entries nooit dubbel in een concept terechtkomen.
+  const cutoffStart = _prevMonthStartOfCore(period.start); // = M-1
   const { data: ledgerRows, error: ledErr } = await supabaseAdmin
     .from('mentor_ledger_entries')
-    .select('amount, released_at, idempotency_key')
+    .select('amount, released_at')
     .eq('mentor_user_id', mentorUserId)
     .eq('status', 'vrijgegeven')
     .is('payout_id', null)
-    .gte('released_at', _prevMonthStart)
-    .lt('released_at',  period.end);
+    .lt('released_at', cutoffStart);
   if (ledErr) throw new Error(`ledger fetch (${mentorUserId}): ${ledErr.message}`);
-  const relevantLedger = (ledgerRows || []).filter((r) => {
-    const key    = String(r.idempotency_key || '');
-    const isCash  = key.startsWith('cashtraject:');
-    const isEvent = /:bonus:/.test(key);
-    const bucket  = _monthStartOfCore(r.released_at);
-    if (isCash || isEvent) return bucket === _prevMonthStart;
-    return bucket === _curMonthStart;
-  });
-  const bonusTotal = round2(relevantLedger.reduce((s, r) => s + (Number(r.amount) || 0), 0));
+  const bonusTotal = round2((ledgerRows || []).reduce((s, r) => s + (Number(r.amount) || 0), 0));
 
   // 4) COACHING — helper.
   let coachingBreakdown = null;
