@@ -6037,22 +6037,32 @@
         };
         lbl.textContent = labelOverride || map[status] || '';
       }
-      if (btn) btn.hidden = !(status === 'disconnected' || status === 'failed');
+      // Retry-knop is zinvol bij disconnected/failed én bij een "config-
+      // timing"-disabled (config-fetch faalde tijdens init). ALLEEN bij
+      // 'Softphone-bibliotheek niet geladen' is retry zinloos — dan is de
+      // JS-bundle er echt niet en hulp is een refresh, niet nog een poging.
+      const isLibMissing = status === 'disabled' && labelOverride === 'Softphone-bibliotheek niet geladen';
+      const showRetry    = (status === 'disconnected' || status === 'failed' || status === 'disabled') && !isLibMissing;
+      if (btn) btn.hidden = !showRetry;
     }
 
+    // Discriminated result-shape zodat _initSoftphone onderscheid kan maken
+    // tussen "kon niet ophalen" (retryable transient) en "backend zegt
+    // expliciet niet configured" (retry loont niet). Callers krijgen:
+    //   null                  → transient (netwerk/HTTP/parse-fout, retry heeft zin)
+    //   { notConfigured:true} → backend antwoordde 200 met configured:false
+    //   { wss, user, ... }    → success
     async function _loadSoftphoneConfig() {
       try {
         const r = await window.AgentShared.apiFetch('/api/voys-sip-config');
-        const d = await r.json().catch(() => ({}));
         if (!r.ok) return null;
-        // Caller-IDs komen nu uit dezelfde sip-config-call (voys-config
-        // gaf 401 door timing). Ook bij configured=false vullen we de
-        // dropdown alvast als caller_ids meegestuurd zijn.
+        const d = await r.json().catch(() => null);
+        if (!d) return null;
         _voysState.callerIds  = Array.isArray(d.caller_ids) ? d.caller_ids : [];
         _voysState.configured = !!d.configured;
         _voysState.loaded     = true;
         try { _renderVoysSelect(); } catch (_) { /* fail-soft */ }
-        if (!d.configured) return null;
+        if (!d.configured) return { notConfigured: true };
         return { wss: d.wss, user: d.user, domain: d.domain, password: d.password };
       } catch (_) { return null; }
     }
@@ -6078,8 +6088,18 @@
         _setSoftphoneStatus('disabled', 'Softphone-bibliotheek niet geladen');
         return;
       }
-      const cfg = await _loadSoftphoneConfig();
-      if (!cfg) {
+      // Config-fetch met kleine retry-loop tegen timing-races bij eerste
+      // laadcyclus (auth-token/apiFetch): max 3 pogingen, 500ms tussen.
+      // null = transient (retryen), { notConfigured } = expliciet backend-
+      // antwoord (retry heeft geen zin). Alleen bij configured cfg gaan we
+      // door naar UA-init.
+      let cfg = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        cfg = await _loadSoftphoneConfig();
+        if (cfg) break;                    // notConfigured OR success — stop met retryen
+        if (attempt < 3) await new Promise((r) => setTimeout(r, 500));
+      }
+      if (!cfg || cfg.notConfigured) {
         _softphone.available = false;
         _setSoftphoneStatus('disabled');
         return;
