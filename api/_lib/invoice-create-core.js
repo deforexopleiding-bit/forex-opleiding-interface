@@ -127,15 +127,17 @@ export async function createTlInvoice({ customer, departmentId, lines, action, o
   }
 
   // 5. Versturen (alleen na succesvol boeken).
-  // TL invoices.send verwacht `to` (NIET `recipients`) + verplichte
-  // `content` en `subject` (bevestigd via HTTP 400 "to must be present" +
-  // "content must be present"). Recipient-vorm is dezelfde als bij
-  // invoices.draft: array van { type: 'contact'|'company', id }.
+  // TL invoices.send verwacht:
+  //   - `to`        : array van { type: 'contact'|'company', id } (NIET 'recipients').
+  //   - `content`   : GENEST object { subject, body }. Losse top-level
+  //                   subject/content werden genegeerd → HTTP 400
+  //                   "subject must be present" + "body must be present".
+  //   - `language`  : optioneel.
   //
-  // Content/subject zijn hier VERPLICHT — TL weigert lege waarden. Als de
-  // caller geen tekst meestuurt, gebruiken we een generieke DFO-tekst zodat
-  // de fee-factuur (en andere book_and_send-calls zonder eigen tekst) niet
-  // meer op HTTP 400 stukloopt.
+  // subject + body zijn verplicht binnen content. Callers kunnen via
+  // opts.send.subject / opts.send.content (of opts.send.body) eigen tekst
+  // meesturen; anders generieke DFO-defaults zodat de fee-factuur (en
+  // andere book_and_send zonder eigen tekst) TL passeert.
   if (booked && action === 'book_and_send') {
     try {
       const send    = opts.send || {};
@@ -144,14 +146,13 @@ export async function createTlInvoice({ customer, departmentId, lines, action, o
       const subject = send.subject
         ? String(send.subject)
         : 'Factuur - De Forex Opleiding';
-      const content = send.content
-        ? String(send.content)
+      const body = (send.body || send.content)
+        ? String(send.body || send.content)
         : 'Beste,\n\nIn bijlage vindt u de factuur.\n\nMet vriendelijke groet,\nDe Forex Opleiding B.V.';
       const sb = {
         id:       tlInvoiceId,
         to:       toList,
-        subject,
-        content,
+        content:  { subject, body },
         language: send.language || language,
       };
       const sr    = await tlFetch('/invoices.send', { method: 'POST', body: JSON.stringify(sb) });
