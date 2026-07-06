@@ -301,6 +301,10 @@ function render(d){
   // Acties op basis van status.
   const A=document.getElementById('detailActions');
   const tlBtn = deal.tl_quotation_id ? `<a class="btn btn-ghost" href="https://focus.teamleader.eu/quotations/${esc(deal.tl_quotation_id)}" target="_blank">↗ Open in TL</a>` : '';
+  // Kopiëren-knop: maakt een verse concept-offerte (zelfde regels + klant,
+  // zonder TL-koppeling). Beschikbaar bij elke status; vooral nuttig bij
+  // getekende offertes om aan te passen zonder origineel te muteren.
+  const copyBtn = `<button class="btn btn-ghost" onclick="doCopy()" title="Maak een verse concept-offerte met dezelfde gegevens"><i class="ti ti-copy"></i> Kopiëren</button>`;
   let btns='';
   if (st==='accepted' || st==='signed'){
     // Snapshot klant-context voor de F0.2 modal.
@@ -334,14 +338,14 @@ function render(d){
     const histEvBtn = _canManageSubs
       ? `<a class="btn btn-ghost" href="/modules/admin-historical-events.html?deal_id=${esc(deal.id)}" title="Koppel deze deal aan een historisch event (2b-1)"><i class="ti ti-calendar-plus"></i> Koppel aan historisch event</a>`
       : '';
-    btns = `${convertBtn} ${obF0Btn} ${histEvBtn} ${tlBtn}`;
+    btns = `${convertBtn} ${obF0Btn} ${histEvBtn} ${copyBtn} ${tlBtn}`;
   } else if (st==='sent'){
-    btns = `<button class="btn" onclick="openOdSendModal()">Opnieuw versturen</button> <button class="btn" style="background:#f59e0b;color:#fff" onclick="doMarkAccepted()">Markeer als getekend</button> <button class="btn btn-danger" onclick="doDelete()">Verwijderen</button> ${tlBtn}`;
+    btns = `<button class="btn" onclick="openOdSendModal()">Opnieuw versturen</button> <button class="btn" style="background:#f59e0b;color:#fff" onclick="doMarkAccepted()">Markeer als getekend</button> ${copyBtn} <button class="btn btn-danger" onclick="doDelete()">Verwijderen</button> ${tlBtn}`;
   } else if (st==='draft'){
     const sendOrPush = deal.tl_quotation_id ? `<button class="btn btn-success" onclick="openOdSendModal()">Versturen</button>` : `<button class="btn" onclick="doPush()">Push naar TL</button>`;
-    btns = `${sendOrPush} <a class="btn btn-ghost" href="/modules/sales-wizard.html?edit_deal_id=${esc(deal.id)}">Bewerken</a> <button class="btn btn-danger" onclick="doDelete()">Verwijderen</button> ${tlBtn}`;
+    btns = `${sendOrPush} <a class="btn btn-ghost" href="/modules/sales-wizard.html?edit_deal_id=${esc(deal.id)}">Bewerken</a> ${copyBtn} <button class="btn btn-danger" onclick="doDelete()">Verwijderen</button> ${tlBtn}`;
   } else {
-    btns = tlBtn;
+    btns = `${copyBtn} ${tlBtn}`;
   }
   A.innerHTML = btns;
 }
@@ -452,6 +456,17 @@ document.addEventListener('DOMContentLoaded', () => {
 async function doPush(){
   try { const r=await window.AgentShared.apiFetch('/api/sales-deal-retry-push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deal_id:dealId})}); const d=await r.json(); if(!r.ok||d.success===false)throw new Error(d.error||'HTTP '+r.status); toast('Naar Teamleader gepusht','success'); load(); }
   catch(e){ toast('Push mislukt: '+e.message,'error'); }
+}
+async function doCopy(){
+  try {
+    const r = await window.AgentShared.apiFetch('/api/sales-deal-copy', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ deal_id: dealId })
+    });
+    const d = await r.json();
+    if (!r.ok || d.success === false) throw new Error(d.error || 'HTTP '+r.status);
+    toast('Offerte gekopieerd naar concept','success');
+    setTimeout(() => { window.location.href = '/modules/offerte-detail.html?id=' + encodeURIComponent(d.new_deal_id); }, 400);
+  } catch (e) { toast('Kopiëren mislukt: '+e.message,'error'); }
 }
 async function doDelete(){
   if(!confirm('Weet je zeker dat je deze offerte wilt verwijderen?'))return;

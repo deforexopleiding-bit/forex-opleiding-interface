@@ -829,6 +829,7 @@ function renderQuotations() {
   document.querySelectorAll('#quotationsList [data-send]').forEach(b => b.addEventListener('click', () => openSendModal(b.dataset.send)));
   document.querySelectorAll('#quotationsList [data-push]').forEach(b => b.addEventListener('click', () => retryPush(b.dataset.push)));
   document.querySelectorAll('#quotationsList [data-delete]').forEach(b => b.addEventListener('click', () => deleteQuotation(b.dataset.delete, b.dataset.status || '')));
+  document.querySelectorAll('#quotationsList [data-copy]').forEach(b => b.addEventListener('click', () => copyQuotation(b.dataset.copy)));
 }
 function quotationActions(q) {
   const st = q.tl_quotation_status;
@@ -840,6 +841,9 @@ function quotationActions(q) {
   // server-side blokkeert het ook. 'Bewerken' verschijnt alleen bij niet-
   // verzonden/niet-getekende statussen zodat een fout gecorrigeerd kan worden.
   if (st !== 'sent' && st !== 'accepted' && st !== 'signed') items.push(`<button class="sr-menu-item" onclick="editQuotation('${esc(q.deal_id)}', false)"><i class="ti ti-edit"></i> Bewerken</button>`);
+  // Kopiëren — voor elke status. Maakt een verse concept-offerte met
+  // dezelfde regels + klant, zonder TL-koppeling. Geen mutatie op origineel.
+  items.push(`<button class="sr-menu-item" data-copy="${esc(q.deal_id)}"><i class="ti ti-copy"></i> Kopiëren</button>`);
   // Getekende offertes (accepted/signed) mogen óók verwijderd worden;
   // handler krijgt de status mee zodat 'ie een extra waarschuwing over
   // een reeds omgezette abbo kan tonen.
@@ -882,6 +886,18 @@ async function retryPush(dealId) {
     toast('Offerte naar Teamleader gepusht', 'success');
     loadQuotations();
   } catch (e) { toast('Push mislukt: ' + e.message, 'error'); }
+}
+async function copyQuotation(dealId) {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-deal-copy', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deal_id: dealId }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) throw new Error(data.error || 'HTTP ' + res.status);
+    toast('Offerte gekopieerd naar concept', 'success');
+    // Direct naar de nieuwe offerte-detailpagina zodat sales kan bewerken.
+    setTimeout(() => { window.location.href = '/modules/offerte-detail.html?id=' + encodeURIComponent(data.new_deal_id); }, 400);
+  } catch (e) { toast('Kopiëren mislukt: ' + e.message, 'error'); }
 }
 async function deleteQuotation(dealId, status) {
   if (!confirm('Weet je zeker dat je deze offerte wilt verwijderen?')) return;
