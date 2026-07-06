@@ -125,6 +125,19 @@ export default async function handler(req, res) {
       tl_push_status:     'not_pushed',
       tl_quotation_status: 'draft',
     };
+    // Offerte-beveiliging bouwstap 1/2: manager-goedkeuring-audit. Alleen
+    // meenemen als de wizard een goedkeuring registreerde (flagged=true);
+    // anders default false/null uit de migratie. exception_approved_by =
+    // ingelogde sales-user die de goedkeuring vastlegde (klant-attest,
+    // geen 2FA). fee_agreed alleen betekenisvol bij late_start.
+    if (deal_data.exception_flagged === true) {
+      dealPayload.exception_flagged     = true;
+      dealPayload.exception_reasons     = deal_data.exception_reasons     || null;
+      dealPayload.exception_reason_note = deal_data.exception_reason_note || null;
+      dealPayload.exception_fee_agreed  = !!deal_data.exception_fee_agreed;
+      dealPayload.exception_approved_by = user.id;
+      dealPayload.exception_approved_at = new Date().toISOString();
+    }
     const { data: deal, error: dErr } = await supabaseAdmin.from('deals').insert(dealPayload).select('id').single();
     if (dErr) throw dErr;
     const dealId = deal.id;

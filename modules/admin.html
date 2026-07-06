@@ -306,6 +306,31 @@
             </div>
           </div>
 
+          <!-- Offerte-beveiliging: instelbare grenzen voor manager-goedkeuring
+               op offerte-wizard (te laag termijnbedrag / te late startdatum).
+               Bouwstap 1/2 — bouwstap 2 (fee-verrekening/factuur) volgt. -->
+          <div class="integration-card" id="card-sales-exception" style="border:1px solid var(--border);border-radius:10px;padding:18px;margin-top:12px">
+            <div style="display:flex;align-items:flex-start;gap:14px">
+              <div style="font-size:26px;color:var(--text-dim);line-height:1"><i class="ti ti-shield-check"></i></div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:15px;font-weight:700">Offerte-beveiliging (uitzonderingen)</div>
+                <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:12px">Grenzen waarboven de offerte-wizard om manager-goedkeuring vraagt. Onder de drempel: geen popup, offerte gaat normaal door.</div>
+                <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end">
+                  <div>
+                    <label for="salesMinTermInput" style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);margin-bottom:4px">Minimaal termijnbedrag (€/mnd)</label>
+                    <input id="salesMinTermInput" type="number" min="0" step="1" class="form-input" style="max-width:160px" value="400" />
+                  </div>
+                  <div>
+                    <label for="salesMaxDaysInput" style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);margin-bottom:4px">Max. dagen tot startdatum</label>
+                    <input id="salesMaxDaysInput" type="number" min="1" step="1" class="form-input" style="max-width:160px" value="40" />
+                  </div>
+                  <button class="btn btn-sm" id="saveSalesExceptionBtn" onclick="saveSalesExceptionSettings()">Opslaan</button>
+                </div>
+                <div id="salesExceptionHint" style="font-size:11.5px;color:var(--text-faint);margin-top:8px"></div>
+              </div>
+            </div>
+          </div>
+
           <div class="integration-card" id="card-tl-import" style="border:1px solid var(--border);border-radius:10px;padding:18px;margin-top:12px">
             <div style="display:flex;align-items:flex-start;gap:14px">
               <div style="font-size:26px;color:var(--text-dim);line-height:1"><i class="ti ti-download"></i></div>
@@ -1558,6 +1583,64 @@ async function saveTemplateSetting() {
     else window.AgentShared?.showToast('Opslaan mislukt: ' + (data.error || 'onbekend'), 'error');
   } catch (e) { window.AgentShared?.showToast('Opslaan mislukt: ' + e.message, 'error'); }
 }
+
+// ── Offerte-beveiliging (uitzonderingen) — bouwstap 1/2 ────────────────
+// Grenzen in app_settings. Wizard leest ze bij load; hier alleen edit.
+async function loadSalesExceptionSettings() {
+  const hint = document.getElementById('salesExceptionHint');
+  if (hint) hint.textContent = '';
+  try {
+    const [rMin, rMax] = await Promise.all([
+      window.AgentShared.apiFetch('/api/app-settings?key=sales_min_term_amount'),
+      window.AgentShared.apiFetch('/api/app-settings?key=sales_max_start_days'),
+    ]);
+    if (rMin.ok) {
+      const j = await rMin.json();
+      const n = Number(j?.value?.amount);
+      const el = document.getElementById('salesMinTermInput');
+      if (el && Number.isFinite(n) && n >= 0) el.value = n;
+    }
+    if (rMax.ok) {
+      const j = await rMax.json();
+      const n = Number(j?.value?.days);
+      const el = document.getElementById('salesMaxDaysInput');
+      if (el && Number.isFinite(n) && n >= 1) el.value = n;
+    }
+  } catch (e) {
+    if (hint) hint.textContent = 'Grenzen laden mislukt: ' + (e?.message || String(e));
+  }
+}
+async function saveSalesExceptionSettings() {
+  const btn  = document.getElementById('saveSalesExceptionBtn');
+  const hint = document.getElementById('salesExceptionHint');
+  const minV = Number(document.getElementById('salesMinTermInput').value);
+  const maxV = Number(document.getElementById('salesMaxDaysInput').value);
+  if (!Number.isFinite(minV) || minV < 0) { hint.textContent = 'Minimaal termijnbedrag moet 0 of hoger zijn.'; return; }
+  if (!Number.isFinite(maxV) || maxV < 1) { hint.textContent = 'Max. dagen tot startdatum moet minstens 1 zijn.'; return; }
+  if (btn) btn.disabled = true;
+  hint.textContent = 'Opslaan…';
+  try {
+    const r1 = await window.AgentShared.apiFetch('/api/app-settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'sales_min_term_amount', value: { amount: minV } }),
+    });
+    if (!r1.ok) { const j = await r1.json().catch(()=>({})); throw new Error(j.error || ('HTTP ' + r1.status)); }
+    const r2 = await window.AgentShared.apiFetch('/api/app-settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'sales_max_start_days', value: { days: maxV } }),
+    });
+    if (!r2.ok) { const j = await r2.json().catch(()=>({})); throw new Error(j.error || ('HTTP ' + r2.status)); }
+    hint.textContent = 'Opgeslagen. Nieuwe grenzen gelden voor volgende offertes.';
+    window.AgentShared?.showToast('Offerte-beveiliging opgeslagen', 'success');
+  } catch (e) {
+    hint.textContent = 'Opslaan mislukt: ' + (e?.message || String(e));
+    window.AgentShared?.showToast('Opslaan mislukt: ' + (e?.message || String(e)), 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+// Auto-load bij eerste render van Integraties-tab (fail-soft).
+document.addEventListener('DOMContentLoaded', () => { loadSalesExceptionSettings(); });
 
 // ── Webflow auto-publish (Blok 2 PR 4) ────────────────────────────────────
 let _wfAutoPublishBusy = false;
