@@ -201,7 +201,19 @@
 
   function highlightActive() {
     var cur = currentModule();
+    // sales.html?tab=dashboard is het sales-dashboard-view (redirect-stub
+    // sales-dashboard.html stuurt hierheen). Zonder deze check zou de
+    // 'Sales'-link oplichten in plaats van 'Dashboard'. Andere sales-tabs
+    // (offertes/abbo/klanten/…) blijven bewust onder 'Sales' vallen.
+    if (cur === 'sales') {
+      try {
+        var tab = new URLSearchParams(location.search).get('tab');
+        if (tab === 'dashboard') cur = 'dashboard';
+      } catch (_) { /* fail-open: sales blijft actief */ }
+    }
     // sales-dashboard.html highlight valt onder Dashboard-link in de sidebar
+    // (behoud alias voor het geval de stub-URL direct bezocht wordt vóór de
+    // redirect).
     if (cur === 'sales-dashboard') cur = 'dashboard';
     // mentor-home.html is de nieuwe landing voor de mentor-rol — alias naar
     // de bovenste Dashboard-link zodat die actief oplicht (zelfde pattern
