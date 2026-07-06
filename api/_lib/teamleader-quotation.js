@@ -195,22 +195,10 @@ export async function pushQuotationToTl(dealId) {
         tax_rate_id: taxRateIdFor(l.vat_percentage, departmentId, deal.sale_type),
       };
     });
-    // Route A: betaalregeling als extra €0-regel onderaan (naast producten).
-    // Hergebruikt tax_rate_id van de eerste regel (irrelevant voor €0-lijn,
-    // maar TL vereist een geldig tax_rate_id per line_item). Bij ontbrekende
-    // regels fallback naar 21%-domestic (kan niet vóórkomen — er is
-    // hierboven al een throw op 0 regels — maar defensief).
+    // Betaalregeling gaat via Route B (begeleidende tekst → $QUOTATION_TEXT$)
+    // hieronder. Route A (extra €0-line_item) is bewust verwijderd zodat de
+    // betaalregeling niet dubbel op de PDF staat.
     const paymentText = buildPaymentSummaryText(deal);
-    if (paymentText) {
-      const fallbackRateId = lineItems[0]?.tax_rate_id
-        || taxRateIdFor(21, departmentId, deal.sale_type);
-      lineItems.push({
-        quantity:    1,
-        description: paymentText,
-        unit_price:  { amount: 0, currency: CURRENCY, tax: 'excluding' },
-        tax_rate_id: fallbackRateId,
-      });
-    }
 
     const quotationBody = {
       deal_id:       tlDealId,
