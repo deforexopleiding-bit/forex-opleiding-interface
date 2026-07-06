@@ -506,12 +506,27 @@ function buildQuotationTitleFE() {
   }
   return seg.length ? seg.join(' | ') : null;
 }
+// Offerte-beveiliging bouwstap 2/2 — €100 reserveringsfee.
+// Alleen actief bij late-start-uitzondering + fee-akkoord. Fee gaat vóór
+// aanbetaling van het totaal af; termijnen worden herberekend over het
+// restbedrag. Bouwstap 2 (sales-subscription-create) factureert bij
+// abbo-invoer. Constante hier + backend spiegelen elkaar.
+const RESERVATION_FEE_INCL = 100;
+function _reservationFeeApplies() {
+  const w = state.wizard;
+  const reasons = String(w.exception_reasons || '');
+  return w.exception_flagged === true
+      && reasons.split(',').map(s => s.trim()).includes('late_start')
+      && w.exception_fee_agreed === true;
+}
 function recomputeTermAmount() {
   const w = state.wizard;
   const total = totalInclBtw();
   const down = Number(w.payment_downpayment_amount) || 0;
   const tc = Number(w.payment_term_count) || 0;
-  w.payment_term_amount = tc > 0 ? Math.floor((total - down) / tc * 100) / 100 : '';
+  const feeApplies = _reservationFeeApplies();
+  const effectiveTotal = feeApplies ? (total - RESERVATION_FEE_INCL) : total;
+  w.payment_term_amount = tc > 0 ? Math.floor((effectiveTotal - down) / tc * 100) / 100 : '';
   const el = document.getElementById('payTermAmount');
   if (el) el.value = w.payment_term_amount ? '€' + Number(w.payment_term_amount).toFixed(2) : '';
 }
@@ -1285,8 +1300,10 @@ function renderReview() {
       <div class="section-head"><span class="chev">▾</span><span class="title">Betalingsvoorwaarden</span><a href="#" data-back="4" style="font-size:11px;color:var(--accent-cyan,#0891b2)">Bewerken</a></div>
       <div class="section-body">
         ${w.payment_start_date ? `Startdatum cursus: ${fmtDateLong(w.payment_start_date)}<br>` : ''}
+        ${_reservationFeeApplies() ? `<span style="color:#b45309;font-weight:600">Reserveringsfee (direct): ${fmtEuro(RESERVATION_FEE_INCL)} incl. btw</span><br>` : ''}
         ${Number(w.payment_downpayment_amount) > 0 ? `Aanbetaling: ${fmtEuro(w.payment_downpayment_amount)}${w.payment_downpayment_date ? ' op ' + fmtDateLong(w.payment_downpayment_date) : ''}<br>` : ''}
         ${Number(w.payment_term_count) > 0 ? `Termijnen: ${w.payment_term_count} × ${fmtEuro(w.payment_term_amount)}${w.payment_term_start_date ? ' vanaf ' + fmtDateLong(w.payment_term_start_date) : ''}<br>` : ''}
+        ${_reservationFeeApplies() ? `<div style="margin-top:6px;font-size:11px;color:var(--text-faint)">Termijnen berekend over (totaal − €${RESERVATION_FEE_INCL} reserveringsfee${Number(w.payment_downpayment_amount) > 0 ? ' − aanbetaling' : ''}). De €${RESERVATION_FEE_INCL} wordt bij het aanmaken van het abonnement direct als aparte factuur geboekt+verstuurd.</div>` : ''}
         <div style="margin-top:6px;font-size:11px;color:var(--text-faint)">Op offerte: '${esc(buildQuotationTitleFE() || '')}'</div>
       </div>
     </div>` : ''}
@@ -1358,6 +1375,11 @@ async function submitDeal(syncToTl) {
         exception_reasons:     w.exception_flagged ? (w.exception_reasons || null) : null,
         exception_reason_note: w.exception_flagged ? (w.exception_reason_note || null) : null,
         exception_fee_agreed:  !!w.exception_fee_agreed,
+        // Bouwstap 2 marker: expliciet meesturen zodat de abbo-stap weet dat
+        // er een fee hoort te worden gefactureerd. Server leest 'm uit de
+        // exception-velden (single source of truth); dit is puur redundantie
+        // voor logs/debug.
+        reservation_fee_due:   _reservationFeeApplies(),
       },
       products: w.products,
       matched_customer_id: state.matched_customer_id,

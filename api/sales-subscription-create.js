@@ -15,6 +15,13 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 import { getOrCreateContact } from './_lib/teamleader-contact.js';
 import { taxRateIdFor } from './_lib/teamleader-quotation.js';
+import { createTlInvoice } from './_lib/invoice-create-core.js';
+
+// Offerte-beveiliging bouwstap 2/2 — €100 reserveringsfee bij late-start-
+// uitzondering met fee-akkoord. Fee is INCL. btw; excl. wordt afgeleid van
+// het hoogste btw-tarief in de deal-regels. Vast bedrag hier; kan later
+// naar app_settings verhuizen zonder API-shape wijziging.
+const RESERVATION_FEE_INCL = 100;
 
 // Normaliseer een sub naar een line_items-array (backwards-compat met oude
 // single-amount payloads). Returnt altijd een array (mogelijk leeg na filter).
@@ -111,6 +118,78 @@ export default async function handler(req, res) {
         for (const s of subsNorm) for (const li of s._lines) taxRateIdFor(li.vat_percentage, departmentId, deal.sale_type);
       } catch (e) {
         return res.status(422).json({ error: e.message });
+      }
+    }
+
+    // ── Offerte-beveiliging bouwstap 2/2 — €100 reserveringsfee ──
+    // Aftrap VÓÓR de subs worden aangemaakt zodat een falende factuur de
+    // abbo-flow blokkeert (alles-of-niets: geen half werk). Idempotent op
+    // deals.reservation_fee_invoice_id: bij retry wordt geen tweede factuur
+    // gemaakt. Alleen bij deal-modus (standalone-abbo heeft geen offerte
+    // met exception-context).
+    if (!standalone) {
+      const reasons  = String(deal?.exception_reasons || '');
+      const feeDue   = !!deal?.exception_flagged
+                    && reasons.split(',').map(s => s.trim()).includes('late_start')
+                    && !!deal?.exception_fee_agreed
+                    && !deal?.reservation_fee_invoice_id;
+      if (feeDue) {
+        // 1. Hoogste btw-tarief uit de deal-regels (fallback 21).
+        const { data: dealLines } = await supabaseAdmin.from('deal_line_items')
+          .select('vat_percentage').eq('deal_id', dealId);
+        const rates = (dealLines || [])
+          .map(l => Number(l.vat_percentage))
+          .filter(v => Number.isFinite(v));
+        const topVat = rates.length ? Math.max(...rates) : 21;
+        // 2. Klant + department resolven voor de factuur.
+        const { data: feeCustomer } = await supabaseAdmin.from('customers')
+          .select('id, is_company, company_name, first_name, last_name, email, phone, tl_contact_id, tl_company_id, address_street, address_number, address_postal, address_city')
+          .eq('id', deal.customer_id).maybeSingle();
+        if (!feeCustomer) return res.status(404).json({ error: 'Klant niet gevonden bij fee-factuur' });
+        const feeDeptId = departmentId || deal.tl_department_id;
+        if (!feeDeptId) return res.status(422).json({ error: 'Fee-factuur mislukt: geen bedrijfsentiteit gekoppeld aan de deal.' });
+        // 3. €100 incl → excl afleiden met hoogste tarief.
+        const unitExcl = Math.round((RESERVATION_FEE_INCL / (1 + topVat / 100)) * 100) / 100;
+        // 4. Boeken + versturen via de gedeelde helper.
+        let feeRes;
+        try {
+          feeRes = await createTlInvoice({
+            customer:     feeCustomer,
+            departmentId: feeDeptId,
+            lines: [{
+              description:     'Reserveringsfee (reservering startdatum)',
+              quantity:        1,
+              unit_price_excl: unitExcl,
+              vat_percentage:  topVat,
+            }],
+            action: 'book_and_send',
+            opts:   { saleType: deal.sale_type || 'domestic', language: 'nl' },
+          });
+        } catch (e) {
+          // Draft/network/link-fout → hard blokkeren, geen abbo aanmaken.
+          console.error('[sub-create] fee-factuur draft-fout', e.stage, e.message);
+          return res.status(e.stage === 'draft_network' ? 502 : 422).json({
+            error: 'Reserveringsfee-factuur mislukt: ' + e.message,
+            stage: e.stage || null,
+          });
+        }
+        if (!feeRes.booked || !feeRes.sent) {
+          // Book of send is mislukt → abbo NIET aanmaken; nette foutmelding.
+          console.error('[sub-create] fee-factuur book/send mislukt', { booked: feeRes.booked, sent: feeRes.sent, bookErr: feeRes.bookErr, sendErr: feeRes.sendErr });
+          return res.status(422).json({
+            error:  'Reserveringsfee-factuur is niet geboekt of niet verstuurd — abonnement niet aangemaakt.',
+            booked: feeRes.booked,
+            sent:   feeRes.sent,
+            bookErr: feeRes.bookErr,
+            sendErr: feeRes.sendErr,
+            tl_invoice_id: feeRes.tl_invoice_id,
+          });
+        }
+        // 5. Idempotentie-marker: lokale invoice-id opslaan op de deal.
+        await supabaseAdmin.from('deals')
+          .update({ reservation_fee_invoice_id: feeRes.invoice_id || feeRes.tl_invoice_id })
+          .eq('id', dealId);
+        deal.reservation_fee_invoice_id = feeRes.invoice_id || feeRes.tl_invoice_id;
       }
     }
 
