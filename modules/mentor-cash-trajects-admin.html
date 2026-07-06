@@ -393,15 +393,21 @@
   async function populateDropdowns() {
     if (!state.events.length) {
       try {
-        const r = await window.AgentShared.apiFetch('/api/events-list?status=draft,published&limit=200');
+        // Historische events krijgen status='archived' (historical-event-save)
+        // — expliciet meenemen zodat de handmatige-trajects-flow ze ook ziet.
+        const r = await window.AgentShared.apiFetch('/api/events-list?status=draft,published,archived&limit=200');
         const d = await r.json();
         state.events = Array.isArray(d.items) ? d.items : [];
+        // Server sorteert ASC (chronologisch); voor deze dropdown willen we
+        // recente/laatste events bovenaan zodat historische snel vindbaar zijn.
+        state.events.sort((a, b) => (b.starts_at || '').localeCompare(a.starts_at || ''));
       } catch { state.events = []; }
     }
     const eSel = document.getElementById('fEvent');
     eSel.innerHTML = '<option value="">— kies event —</option>' + state.events.map(e => {
       const dt = e.starts_at ? new Date(e.starts_at).toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' }) : '';
-      return `<option value="${esc(e.id)}">${esc(e.title)}${dt ? ' — ' + esc(dt) : ''}</option>`;
+      const hist = e.status === 'archived' ? ' (historisch)' : '';
+      return `<option value="${esc(e.id)}">${esc(e.title)}${dt ? ' — ' + esc(dt) : ''}${hist}</option>`;
     }).join('');
   }
 
