@@ -69,7 +69,9 @@ export default async function handler(req, res) {
       payment_term_count:         src.payment_term_count || null,
       payment_term_start_date:    src.payment_term_start_date || null,
       payment_term_amount:        src.payment_term_amount || null,
-      duration_months:            src.duration_months || null,
+      // NB: duration_months bestaat NIET op deals — de duur wordt afgeleid
+      // van traject_variants.default_duration_months (via traject_variant_id
+      // dat we hierboven wél kopiëren). Zie sales-deal-update.js regel 65.
       // Verse TL-status: nog niet gepusht, nog geen offerte-koppeling.
       tl_push_status:             'not_pushed',
       tl_quotation_status:        'draft',
