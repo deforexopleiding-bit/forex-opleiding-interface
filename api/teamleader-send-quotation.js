@@ -26,6 +26,21 @@ export default async function handler(req, res) {
   const { deal_id, email_template_id } = req.body || {};
   if (!deal_id) return res.status(400).json({ error: 'deal_id vereist' });
 
+  // Diagnose-object — puur observability, geen gedragswijziging. Wordt
+  // meegegeven in zowel success- als fout-response zodat we in de UI/console
+  // exact zien welke tak is gedraaid en waarom de mail kaal aankomt.
+  const debug = {
+    received_template_id:  email_template_id || null,
+    resolved_template_id:  null,
+    default_from_settings: null,
+    used_template:         false,
+    substitution_error:    null,
+    subject_preview:       null,
+    content_preview:       null,
+    tl_send_status:        null,
+    tl_send_body:          null,
+  };
+
   try {
     const tok = await getActiveToken();
     if (!tok) return res.status(503).json({ error: 'Geen TL-token actief' });
@@ -47,11 +62,15 @@ export default async function handler(req, res) {
 
     // Template-keuze: expliciete param, anders default uit settings.
     let templateId = email_template_id || null;
-    if (!templateId) {
+    // Default altijd inlezen zodat debug 'default_from_settings' consistent
+    // gezet wordt, ongeacht of er een expliciete template mee kwam.
+    {
       const { data: setting } = await supabaseAdmin.from('teamleader_settings')
         .select('value').eq('key', 'default_email_template_id').maybeSingle();
-      templateId = setting?.value || null;
+      debug.default_from_settings = setting?.value || null;
+      if (!templateId) templateId = debug.default_from_settings;
     }
+    debug.resolved_template_id = templateId;
 
     // Verplichte velden.
     const base = {
@@ -87,15 +106,21 @@ export default async function handler(req, res) {
         if (sub?.content) { subject = sub.subject || subject; content = sub.content; usedTemplate = true; }
       } catch (e) {
         console.warn('[tl-send-quotation] template-substitutie mislukt, fallback inline:', e.message);
+        debug.substitution_error = e?.message || String(e);
       }
     }
+    debug.used_template    = usedTemplate;
+    debug.subject_preview  = (subject || '').slice(0, 80);
+    debug.content_preview  = (content || '').slice(0, 120);
 
     const r = await tlFetch('/quotations.send', {
       method: 'POST',
       body: JSON.stringify({ ...base, subject, content }),
     });
+    debug.tl_send_status = r.status;
     if (!r.ok) {
       const txt = await r.text();
+      debug.tl_send_body = (txt || '').slice(0, 300);
       throw new Error(`TL quotations.send HTTP ${r.status}: ${txt.slice(0, 200)}`);
     }
 
@@ -105,9 +130,9 @@ export default async function handler(req, res) {
       tl_quotation_sent_at:       deal.tl_quotation_sent_at || new Date().toISOString(),
     }).eq('id', deal_id);
 
-    return res.status(200).json({ success: true, tl_quotation_status: 'sent', used_template: usedTemplate });
+    return res.status(200).json({ success: true, tl_quotation_status: 'sent', used_template: usedTemplate, debug });
   } catch (e) {
     console.error('[tl-send-quotation]', e.message);
-    return res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message, debug });
   }
 }
