@@ -610,7 +610,10 @@ export default async function handler(req, res) {
       // Extra afgeleide velden voor de UI. last_payment_date valt eerst
       // terug op de source_invoice_id.paid_date; als die er niet is,
       // pakken we de laatste betaaldatum uit de klant/subscription-route.
-      const firstInvoicePaid = nbPaid >= 1;
+      // Bij een GEANNULEERDE sale (isCancelled OF subCancelled OF
+      // saleStatus='geannuleerd') GEEN groene '1e factuur betaald'-badge
+      // tonen — de sale is niet meer geldig, betaling doet niet ter zake.
+      const firstInvoicePaid = (isCancelled || saleStatus === 'geannuleerd') ? false : (nbPaid >= 1);
       let lastPaymentDate = null;
       if (nbPaid >= 1) {
         lastPaymentDate = invoice?.paid_date || lastPaidFromInvs || null;
