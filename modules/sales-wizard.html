@@ -338,6 +338,38 @@
   </div>
 </div>
 
+<!-- Offerte-beveiliging: manager-goedkeuring bij lage termijn / late start.
+     Grenzen komen uit app_settings (sales_min_term_amount / sales_max_start_days).
+     Bij overschrijding vóór stap 5 → popup met verplichte reden + (bij late
+     start) €100-reserveringsfee-checkbox. Klik "Goedgekeurd" → state.wizard
+     krijgt exception_* velden mee naar submitDeal. -->
+<div class="overlay" id="exceptionModal">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-head">
+      <span class="modal-title">Goedkeuring vereist</span>
+      <button class="modal-close" id="exceptionClose" type="button">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="exceptionReasonsList" style="font-size:13px;line-height:1.55;margin-bottom:12px"></div>
+      <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:14px;line-height:1.5">
+        Neem contact op met een van de managers (Jeffrey of Maxim) voor goedkeuring.
+      </div>
+      <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);margin-bottom:6px">Reden van de uitzondering <span style="color:var(--danger,#dc2626)">*</span></label>
+      <textarea id="exceptionReasonNote" rows="3" placeholder="Waarom valt deze offerte buiten de standaard? Wie heeft goedgekeurd?" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:13px;margin-bottom:12px"></textarea>
+      <div id="exceptionFeeWrap" style="display:none;margin:4px 0 14px;padding:10px 12px;background:var(--bg-elev-2);border-radius:6px">
+        <label style="display:flex;align-items:flex-start;gap:10px;text-transform:none;letter-spacing:0;font-size:12.5px;color:var(--text);line-height:1.45;cursor:pointer">
+          <input type="checkbox" id="exceptionFeeCheck" style="flex:0 0 auto;width:16px;height:16px;margin-top:1px" />
+          <span style="flex:1">Klant gaat akkoord met <strong>€100 reserveringsfee</strong> voor de reservering. <span style="color:var(--danger,#dc2626)">*</span></span>
+        </label>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost btn-sm" id="exceptionReject" type="button">Manager niet akkoord</button>
+      <button class="btn btn-sm" id="exceptionApprove" type="button" disabled>Goedgekeurd door manager</button>
+    </div>
+  </div>
+</div>
+
 <!-- Concept-resume modal -->
 <div class="overlay" id="resumeModal">
   <div class="modal" style="max-width:440px">
@@ -419,6 +451,13 @@ const state = {
     discount_percentage: 0,
     sale_type: 'domestic',
     // Stap 4: betalingsvoorwaarden (optioneel)
+    // Offerte-beveiliging: manager-goedkeuring bij lage termijn / late start.
+    // Wordt gezet door de exception-modal vóór de overgang naar stap 5;
+    // meegenomen in submitDeal-payload zodat sales-deal-create ze persisteert.
+    exception_flagged:      false,
+    exception_reasons:      '',    // csv: 'low_term_amount', 'late_start'
+    exception_reason_note:  '',
+    exception_fee_agreed:   false, // alleen relevant bij late_start
     payment_start_date: '',
     payment_downpayment_amount: '',
     payment_downpayment_date: '',
@@ -591,11 +630,29 @@ async function autoSave() {
 }
 
 // ── Init ──
+// Offerte-beveiliging: grenzen uit app_settings. Fallback op 400/40 zodat
+// een ontbrekende key of failing endpoint de wizard nooit blokkeert.
+const _exceptionLimits = { minTermAmount: 400, maxStartDays: 40 };
+async function _loadExceptionLimits() {
+  try {
+    const [rMin, rMax] = await Promise.all([
+      window.AgentShared.apiFetch('/api/app-settings?key=sales_min_term_amount').then(r => r.ok ? r.json() : null).catch(() => null),
+      window.AgentShared.apiFetch('/api/app-settings?key=sales_max_start_days').then(r => r.ok ? r.json() : null).catch(() => null),
+    ]);
+    const nMin = Number(rMin?.value?.amount);
+    const nMax = Number(rMax?.value?.days);
+    if (Number.isFinite(nMin) && nMin >= 0) _exceptionLimits.minTermAmount = nMin;
+    if (Number.isFinite(nMax) && nMax >= 1) _exceptionLimits.maxStartDays  = nMax;
+  } catch { /* fallback blijft actief */ }
+}
+
 async function init() {
   await window._authSharedReady;
   const profile = await window.AuthShared?.requireAuth();
   if (!profile) return;
   if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
+  // Non-blocking: mag renderen zonder deze; wordt gebruikt bij nextBtn stap 4→5.
+  _loadExceptionLimits();
 
   // Load lead-sources + products + entities + TL-status in parallel
   const [lsRes, prodRes, tlRes, entRes, trajRes] = await Promise.all([
@@ -1294,6 +1351,13 @@ async function submitDeal(syncToTl) {
         payment_term_count: Number(w.payment_term_count) || null,
         payment_term_start_date: w.payment_term_start_date || null,
         payment_term_amount: Number(w.payment_term_amount) || null,
+        // Offerte-beveiliging: alleen meesturen als flagged=true (sales heeft
+        // manager-goedkeuring geregistreerd). Bij false blijven de kolommen
+        // default op de deals-rij.
+        exception_flagged:     !!w.exception_flagged,
+        exception_reasons:     w.exception_flagged ? (w.exception_reasons || null) : null,
+        exception_reason_note: w.exception_flagged ? (w.exception_reason_note || null) : null,
+        exception_fee_agreed:  !!w.exception_fee_agreed,
       },
       products: w.products,
       matched_customer_id: state.matched_customer_id,
@@ -1398,8 +1462,99 @@ function updateNextEnabled() {
 }
 
 document.getElementById('prevBtn').addEventListener('click', () => { if (state.step > 1) { state.step--; renderProgress(); } });
+// Offerte-beveiliging: bij overgang stap 4 → 5 (naar review) checken of
+// termijnbedrag onder minimum ligt of startdatum te ver in de toekomst
+// staat. Zo ja: manager-goedkeuring-modal openen. Als sales al goedgekeurd
+// heeft (exception_flagged=true) → geen re-check. Bij niet-akkoord blijft
+// de gebruiker op stap 4.
+function _daysBetweenTodayAnd(dateIso) {
+  const s = String(dateIso || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const [y, m, d] = s.split('-').map(Number);
+  const target = Date.UTC(y, m - 1, d);
+  const now    = new Date();
+  const today  = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.round((target - today) / 86400000);
+}
+function _detectExceptions() {
+  const w         = state.wizard;
+  const minTerm   = Number(_exceptionLimits.minTermAmount);
+  const maxDays   = Number(_exceptionLimits.maxStartDays);
+  const termAmt   = Number(w.payment_term_amount);
+  const daysToStart = _daysBetweenTodayAnd(w.payment_start_date);
+  const lowTerm   = termAmt > 0 && termAmt < minTerm;
+  const lateStart = daysToStart !== null && daysToStart > maxDays;
+  return { lowTerm, lateStart, termAmt, daysToStart, minTerm, maxDays };
+}
+function _openExceptionModal(detect) {
+  const modal      = document.getElementById('exceptionModal');
+  const listEl     = document.getElementById('exceptionReasonsList');
+  const noteEl     = document.getElementById('exceptionReasonNote');
+  const feeWrap    = document.getElementById('exceptionFeeWrap');
+  const feeCheck   = document.getElementById('exceptionFeeCheck');
+  const approveBtn = document.getElementById('exceptionApprove');
+  const reasons = [];
+  if (detect.lowTerm) reasons.push(`<div>• Termijnbedrag <strong>€${detect.termAmt.toLocaleString('nl-NL')}</strong> ligt onder het minimum van <strong>€${detect.minTerm.toLocaleString('nl-NL')}</strong>.</div>`);
+  if (detect.lateStart) reasons.push(`<div>• Startdatum ligt <strong>${detect.daysToStart} dagen</strong> in de toekomst (max. <strong>${detect.maxDays}</strong>).</div>`);
+  listEl.innerHTML = reasons.join('');
+  noteEl.value = state.wizard.exception_reason_note || '';
+  feeCheck.checked = !!state.wizard.exception_fee_agreed;
+  feeWrap.style.display = detect.lateStart ? '' : 'none';
+  const updateApprove = () => {
+    const hasNote = noteEl.value.trim().length > 0;
+    const feeOk   = !detect.lateStart || feeCheck.checked;
+    approveBtn.disabled = !(hasNote && feeOk);
+  };
+  noteEl.oninput      = updateApprove;
+  feeCheck.onchange   = updateApprove;
+  updateApprove();
+  return new Promise((resolve) => {
+    const close = () => {
+      modal.classList.remove('show');
+      approveBtn.onclick = null;
+      document.getElementById('exceptionReject').onclick = null;
+      document.getElementById('exceptionClose').onclick  = null;
+    };
+    approveBtn.onclick = () => {
+      const csv = [detect.lowTerm && 'low_term_amount', detect.lateStart && 'late_start'].filter(Boolean).join(',');
+      state.wizard.exception_flagged     = true;
+      state.wizard.exception_reasons     = csv;
+      state.wizard.exception_reason_note = noteEl.value.trim();
+      state.wizard.exception_fee_agreed  = detect.lateStart ? !!feeCheck.checked : false;
+      markDirty();
+      close();
+      resolve(true);
+    };
+    document.getElementById('exceptionReject').onclick = () => { close(); resolve(false); };
+    document.getElementById('exceptionClose').onclick  = () => { close(); resolve(false); };
+    modal.classList.add('show');
+  });
+}
+
 document.getElementById('nextBtn').addEventListener('click', async () => {
   if (state.step === 2) syncStep2Fields();
+  // Guard vóór 4 → 5: alleen als grenzen overschreden worden én er nog geen
+  // goedkeuring is voor deze offerte-sessie. Herloop wanneer sales de
+  // startdatum/termijn heeft aangepast na een eerdere goedkeuring.
+  if (state.step === 4) {
+    const detect = _detectExceptions();
+    if (detect.lowTerm || detect.lateStart) {
+      const alreadyApproved = state.wizard.exception_flagged
+        && state.wizard.exception_reason_note
+        && (!detect.lateStart || state.wizard.exception_fee_agreed);
+      if (!alreadyApproved) {
+        const ok = await _openExceptionModal(detect);
+        if (!ok) return; // blijft op stap 4
+      }
+    } else {
+      // Grenzen niet meer overschreden: reset eerdere goedkeuring zodat
+      // de deal-payload niet ten onrechte flagged blijft.
+      state.wizard.exception_flagged     = false;
+      state.wizard.exception_reasons     = '';
+      state.wizard.exception_reason_note = '';
+      state.wizard.exception_fee_agreed  = false;
+    }
+  }
   if (state.step < 5) { state.step++; renderProgress(); markDirty(); }
 });
 

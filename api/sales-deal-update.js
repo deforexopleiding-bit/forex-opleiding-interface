@@ -72,6 +72,17 @@ export default async function handler(req, res) {
     if (deal_data.discount_percentage !== undefined) patch.discount_percentage = Number(deal_data.discount_percentage) || 0;
     // sale_type is NOT NULL → 'domestic' als fallback.
     if (deal_data.sale_type !== undefined) patch.sale_type = deal_data.sale_type || 'domestic';
+    // Offerte-beveiliging bouwstap 1/2: alleen aanraken als wizard een
+    // (nieuwe) goedkeuring meestuurt. Bij flagged=false blijven bestaande
+    // waarden staan zodat een niet-aangeraakte edit de audit niet wist.
+    if (deal_data.exception_flagged === true) {
+      patch.exception_flagged     = true;
+      patch.exception_reasons     = deal_data.exception_reasons     || null;
+      patch.exception_reason_note = deal_data.exception_reason_note || null;
+      patch.exception_fee_agreed  = !!deal_data.exception_fee_agreed;
+      patch.exception_approved_by = user.id;
+      patch.exception_approved_at = new Date().toISOString();
+    }
     if (products.length) patch.total_amount = totalAmount;
 
     const { error: dErr } = await supabaseAdmin.from('deals').update(patch).eq('id', deal_id);
