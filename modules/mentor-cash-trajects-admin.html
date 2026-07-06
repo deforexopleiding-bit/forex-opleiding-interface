@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Contante trajecten · De Forex Opleiding</title>
+  <title>Handmatige trajecten · De Forex Opleiding</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -107,10 +107,10 @@
 <div class="app">
   <div class="page-header">
     <div>
-      <h1>Contante trajecten</h1>
+      <h1>Handmatige trajecten</h1>
       <p>Mentor-bonussen die per maand vrijvallen zonder factuurcheck. Bouwstap 2 UI.</p>
     </div>
-    <button type="button" class="btn btn-primary" id="btnNew"><i class="ti ti-plus"></i> Nieuw contant traject</button>
+    <button type="button" class="btn btn-primary" id="btnNew"><i class="ti ti-plus"></i> Nieuw handmatig traject</button>
   </div>
 
   <div class="metrics">
@@ -126,18 +126,15 @@
 <div class="modal-overlay" id="editModal" role="dialog" aria-modal="true">
   <div class="modal">
     <div class="modal-h">
-      <h2 id="editTitle">Nieuw contant traject</h2>
+      <h2 id="editTitle">Nieuw handmatig traject</h2>
       <button type="button" class="modal-x" id="editClose">&times;</button>
     </div>
     <div class="modal-body">
       <div class="form-err" id="formErr"></div>
       <div class="field">
-        <label>Mentor <span style="color:var(--danger,#dc2626)">*</span></label>
-        <select id="fMentor"><option value="">Laden…</option></select>
-      </div>
-      <div class="field">
         <label>Event <span style="color:var(--danger,#dc2626)">*</span></label>
         <select id="fEvent"><option value="">Laden…</option></select>
+        <div class="hint">De bonus wordt automatisch verdeeld over de aanwezige mentoren van dit event (event_mentors.was_present).</div>
       </div>
       <div class="field">
         <label>Klant / traject-omschrijving <span style="color:var(--danger,#dc2626)">*</span></label>
@@ -181,7 +178,6 @@
   const BONUS_PCT = 3; // spiegel van BONUS_PCT server-side (info-only in de calc)
   const state = {
     trajects: [],
-    mentors:  [],
     events:   [],
     editingId: null,
   };
@@ -252,7 +248,7 @@
   function renderList() {
     const wrap = document.getElementById('listWrap');
     if (!state.trajects.length) {
-      wrap.innerHTML = '<div class="empty">Nog geen trajecten. Klik op "Nieuw contant traject" om er een aan te maken.</div>';
+      wrap.innerHTML = '<div class="empty">Nog geen trajecten. Klik op "Nieuw handmatig traject" om er een aan te maken.</div>';
       return;
     }
     wrap.innerHTML = '<div class="traject-list">' + state.trajects.map(t => renderCard(t)).join('') + '</div>';
@@ -288,7 +284,9 @@
             <div class="tc-title">${esc(t.client_label)}</div>
             <div class="tc-sub">
               <strong>Event:</strong> ${esc(t.event_title || '—')}<br>
-              <strong>Mentor:</strong> ${esc(t.mentor_name || '—')}<br>
+              <strong>Verdeeld over:</strong> ${(Array.isArray(t.mentor_names) && t.mentor_names.length)
+                ? esc(t.mentor_names.join(', ')) + ' <span style="color:var(--text-faint)">(' + t.mentor_names.length + ' aanwezige mentor' + (t.mentor_names.length === 1 ? '' : 'en') + ')</span>'
+                : '<span style="color:var(--danger,#dc2626)">geen aanwezige mentoren — vrijval blokkeert tot event_mentors.was_present is gezet</span>'}<br>
               ${fmtEuro(t.total_amount)} · ${t.term_count} termijnen · ${Number(t.pct).toFixed(1)}% bonus (${fmtEuro(t.bonus_total)}) · start ${fmtMonth(t.start_month)}
             </div>
           </div>
@@ -340,7 +338,7 @@
   async function handleAction(action, id) {
     if (action === 'edit') { openModal(id); return; }
     if (action === 'delete') {
-      if (!confirm('Weet je zeker dat je dit contante traject wilt verwijderen? Al aangemaakte bonussen blijven staan; alleen toekomstige vrijval stopt.')) return;
+      if (!confirm('Weet je zeker dat je dit handmatige traject wilt verwijderen? Al aangemaakte bonussen blijven staan; alleen toekomstige vrijval stopt.')) return;
       return apiStatus(id, 'delete');
     }
     if (action === 'pause')  return apiStatus(id, 'pause');
@@ -365,7 +363,7 @@
   const modal = document.getElementById('editModal');
   function openModal(id) {
     state.editingId = id || null;
-    document.getElementById('editTitle').textContent = id ? 'Traject bewerken' : 'Nieuw contant traject';
+    document.getElementById('editTitle').textContent = id ? 'Traject bewerken' : 'Nieuw handmatig traject';
     document.getElementById('formErr').classList.remove('show');
     document.getElementById('fLabel').value = '';
     document.getElementById('fTotal').value = '';
@@ -376,7 +374,6 @@
       if (id) {
         const t = state.trajects.find(x => x.id === id);
         if (t) {
-          document.getElementById('fMentor').value = t.mentor_user_id;
           document.getElementById('fEvent').value  = t.event_id;
           document.getElementById('fLabel').value  = t.client_label || '';
           document.getElementById('fTotal').value  = t.total_amount;
@@ -394,13 +391,6 @@
   document.getElementById('btnNew').addEventListener('click', () => openModal(null));
 
   async function populateDropdowns() {
-    if (!state.mentors.length) {
-      try {
-        const r = await window.AgentShared.apiFetch('/api/mentor-admin-list');
-        const d = await r.json();
-        state.mentors = Array.isArray(d.mentors) ? d.mentors : [];
-      } catch { state.mentors = []; }
-    }
     if (!state.events.length) {
       try {
         const r = await window.AgentShared.apiFetch('/api/events-list?status=draft,published&limit=200');
@@ -408,10 +398,6 @@
         state.events = Array.isArray(d.items) ? d.items : [];
       } catch { state.events = []; }
     }
-    const mSel = document.getElementById('fMentor');
-    mSel.innerHTML = '<option value="">— kies mentor —</option>' + state.mentors.map(m =>
-      `<option value="${esc(m.user_id)}">${esc(m.name || m.email || m.user_id)}</option>`
-    ).join('');
     const eSel = document.getElementById('fEvent');
     eSel.innerHTML = '<option value="">— kies event —</option>' + state.events.map(e => {
       const dt = e.starts_at ? new Date(e.starts_at).toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' }) : '';
@@ -439,7 +425,6 @@
     const err = document.getElementById('formErr');
     err.classList.remove('show');
     const body = {
-      mentor_user_id: document.getElementById('fMentor').value || null,
       event_id:       document.getElementById('fEvent').value || null,
       client_label:   document.getElementById('fLabel').value.trim(),
       total_amount:   Number(document.getElementById('fTotal').value) || 0,
@@ -448,8 +433,7 @@
     };
     if (state.editingId) body.id = state.editingId;
     // Basis-validatie client-side (server valideert opnieuw).
-    if (!body.mentor_user_id) { err.textContent = 'Kies een mentor.'; err.classList.add('show'); return; }
-    if (!body.event_id)        { err.textContent = 'Kies een event.'; err.classList.add('show'); return; }
+    if (!body.event_id) { err.textContent = 'Kies een event.'; err.classList.add('show'); return; }
     if (!body.client_label)    { err.textContent = 'Omschrijving verplicht.'; err.classList.add('show'); return; }
     if (!(body.total_amount >= 0)) { err.textContent = 'Totaalprijs moet ≥ 0 zijn.'; err.classList.add('show'); return; }
     if (!(body.term_count >= 1))   { err.textContent = 'Aantal termijnen moet ≥ 1 zijn.'; err.classList.add('show'); return; }

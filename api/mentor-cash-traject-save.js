@@ -1,15 +1,17 @@
 // api/mentor-cash-traject-save.js
-// POST { id?, mentor_user_id, event_id, customer_id?, client_label,
+// POST { id?, event_id, customer_id?, client_label,
 //        total_amount, term_count, start_month, note? }
 // → { ok:true, traject }
 // Permission: mentor.ledger.write (zelfde als mentor-ledger-set-status).
 //
-// Insert (of update bij id) van een mentor_cash_trajects-rij. pct + bonus_total
-// worden gesnapshot bij aanmaak (constante 3% wijzigen mag lopende trajects
-// niet retroactief raken). Bij update wordt pct/bonus_total NIET herrekend
-// tenzij total_amount ook wordt aangepast — dan blijft de gesnapshotte pct
-// staan en herrekenen we alleen bonus_total.
+// Handmatig traject is EVENT-GEDREVEN sinds 2026-07-06-cash-trajects-
+// event-driven.sql: er wordt géén vaste mentor gekoppeld. De cron
+// verdeelt elke termijn-bonus over event_mentors.was_present=true.
+// mentor_user_id blijft nullable in de DB (kolom bewaard voor evt.
+// toekomstig 'lock op één mentor'-gebruik) maar wordt NIET meer gezet.
 //
+// pct + bonus_total worden gesnapshot bij aanmaak (BONUS_PCT=3);
+// wijziging van de constante raakt lopende trajects niet retroactief.
 // GEEN ledger-entries hier — die maakt de cron per maand aan.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
@@ -43,17 +45,17 @@ export default async function handler(req, res) {
 
   const b = req.body || {};
   const {
-    id, mentor_user_id, event_id,
+    id, event_id,
     customer_id = null, client_label,
     total_amount, term_count, start_month, note = null,
   } = b;
 
-  // Validatie (op UPDATE mogen mentor/event ontbreken; op INSERT verplicht).
+  // Validatie (op UPDATE mag event_id ontbreken; op INSERT verplicht).
+  // mentor_user_id is niet meer verplicht sinds event-driven variant.
   if (id && !UUID_RE.test(String(id))) return res.status(400).json({ error: 'id ongeldig' });
   const isUpdate = !!id;
   if (!isUpdate) {
-    if (!UUID_RE.test(String(mentor_user_id || ''))) return res.status(400).json({ error: 'mentor_user_id vereist' });
-    if (!UUID_RE.test(String(event_id      || ''))) return res.status(400).json({ error: 'event_id vereist' });
+    if (!UUID_RE.test(String(event_id || ''))) return res.status(400).json({ error: 'event_id vereist' });
   }
   if (customer_id != null && customer_id !== '' && !UUID_RE.test(String(customer_id))) {
     return res.status(400).json({ error: 'customer_id ongeldig' });
@@ -75,14 +77,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Bij INSERT: mentor + event verifiëren + pct snapshot.
-    // Mentor-existence via profiles (profiles.id = auth.users.id in dit
-    // project; auth.users is niet direct via PostgREST bereikbaar).
+    // Bij INSERT: event verifiëren + pct snapshot. mentor_user_id blijft null
+    // (event-gedreven — cron verdeelt over event_mentors.was_present=true).
     if (!isUpdate) {
-      const { data: prof } = await supabaseAdmin
-        .from('profiles').select('id').eq('id', mentor_user_id).maybeSingle();
-      if (!prof) return res.status(404).json({ error: 'mentor niet gevonden' });
-
       const { data: ev } = await supabaseAdmin
         .from('events').select('id').eq('id', event_id).maybeSingle();
       if (!ev) return res.status(404).json({ error: 'event niet gevonden' });
@@ -91,7 +88,8 @@ export default async function handler(req, res) {
       const bonusTotal  = round2(totalNum * pct / 100);
 
       const row = {
-        mentor_user_id, event_id,
+        mentor_user_id: null,          // event-gedreven; verdeling gebeurt in cron
+        event_id,
         customer_id: customer_id || null,
         client_label: String(client_label).trim(),
         total_amount: round2(totalNum),
