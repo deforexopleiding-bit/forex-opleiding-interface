@@ -963,13 +963,23 @@ export async function computeBonusOverview(effectiveUserId) {
     // Cashflow-KPI's:
     //   cf_received   = som paid t/m huidige maand (verleden + deze maand betaald)
     //   cf_this_month = paid + expected van deze maand
-    //   cf_expected   = som open van deze maand en later (nog te ontvangen)
+    //   cf_expected   = alles wat de mentor nog moet krijgen = som parent-status
+    //     pending + vrijgegeven − uitbetaald. Geannuleerde parents tellen niet
+    //     mee. Zo pakt de KPI ook achterstallige open termijnen uit het verleden
+    //     én vrijgegeven-maar-nog-niet-uitbetaalde bonussen (die met de oude
+    //     monthOpen-som gemist werden).
     let cf_received = 0;
-    let cf_expected = 0;
     for (const k of monthOrder) {
       if (k <= thisYm) cf_received += (monthPaid.get(k) || 0);
-      if (k >= thisYm) cf_expected += (monthOpen.get(k) || 0);
     }
+    let cf_expected = 0;
+    for (const r of rows) {
+      const amt = Number(r.amount) || 0;
+      if (r.status === 'pending' || r.status === 'vrijgegeven') cf_expected += amt;
+      else if (r.status === 'uitbetaald')                       cf_expected -= amt;
+      // 'geannuleerd' telt niet mee
+    }
+    cf_expected = round2(cf_expected);
     const cf_this_month = round2((monthPaid.get(thisYm) || 0) + (monthOpen.get(thisYm) || 0));
 
     return {
@@ -983,7 +993,7 @@ export async function computeBonusOverview(effectiveUserId) {
         volgende_maand,
         cf_received : round2(cf_received),
         cf_this_month,
-        cf_expected : round2(cf_expected),
+        cf_expected,
       },
       projection_12m,
       per_event,
