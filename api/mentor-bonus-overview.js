@@ -141,15 +141,38 @@ export default async function handler(req, res) {
     // Geannuleerde entries WORDEN meegehaald voor transparantie (grijze badge
     // in de UI). Ze tellen niet mee in KPI's/mentor_share_total; zie de
     // isCancelled-check in de verwerkingslus hieronder.
+    // CHILD-entries (parent_entry_id != null) worden UITGESLOTEN — die zijn
+    // vrijgave-slices van hun parent en zouden anders als losse sale-rijen
+    // dubbel geteld worden in de projectie/telling. Voor de "reeds vrijgevallen"-
+    // weergave halen we de children-som per parent apart op (zie hieronder).
     const { data: entries, error: entErr } = await supabaseAdmin
       .from('mentor_ledger_entries')
-      .select('id, mentor_user_id, event_id, entry_type, basis, amount, pct, status, attendee_id, customer_id, source_invoice_id, idempotency_key, created_at')
+      .select('id, mentor_user_id, event_id, entry_type, basis, amount, original_amount, parent_entry_id, pct, status, attendee_id, customer_id, source_invoice_id, idempotency_key, created_at')
       .eq('mentor_user_id', effectiveUserId)
       .eq('entry_type', 'bonus')
+      .is('parent_entry_id', null)
       .limit(5000);
     if (entErr) throw new Error('ledger fetch: ' + entErr.message);
 
     const rows = entries || [];
+
+    // Children-som per parent (voor `released_share` op de sale-cell).
+    // Alleen vrijgegeven + uitbetaalde children tellen als "reeds vrijgevallen".
+    const releasedByParent = new Map(); // parent_id -> sum(child.amount)
+    if (rows.length > 0) {
+      const parentIds = rows.map((r) => r.id);
+      const { data: kids, error: kidsErr } = await supabaseAdmin
+        .from('mentor_ledger_entries')
+        .select('parent_entry_id, amount, status')
+        .in('parent_entry_id', parentIds)
+        .in('status', ['vrijgegeven', 'uitbetaald']);
+      if (kidsErr) throw new Error('children fetch: ' + kidsErr.message);
+      for (const c of (kids || [])) {
+        if (!c.parent_entry_id) continue;
+        const cur = releasedByParent.get(c.parent_entry_id) || 0;
+        releasedByParent.set(c.parent_entry_id, cur + (Number(c.amount) || 0));
+      }
+    }
 
     // Snel pad: geen bonussen.
     if (rows.length === 0) {
@@ -503,8 +526,26 @@ export default async function handler(req, res) {
       // open_total, month-buckets, mentor_share_total. saleStatus wordt
       // hieronder geforceerd op 'geannuleerd'.
       const isCancelled  = r.status === 'geannuleerd';
-      const mentorAmount = isCancelled ? 0 : (Number(r.amount) || 0);
+      // Volledige mentor-aandeel: bij proportional-releases is parent.amount
+      // verlaagd (rest); original_amount is het snapshot van vóór de eerste
+      // slice. Gebruik dat als "totaal" zodat mentor_share_total consistent
+      // het volledige bedrag toont, niet het restbedrag.
+      const mentorAmount = isCancelled ? 0
+        : (r.original_amount != null ? Number(r.original_amount) : Number(r.amount) || 0);
       const basis        = Number(r.basis) || 0;
+      // Reeds vrijgevallen deel op deze parent:
+      //   * Klassieke pre-proportional flow: parent zelf op 'vrijgegeven'/
+      //     'uitbetaald' → volledige mentorAmount is vrij.
+      //   * Proportional flow: parent blijft 'pending'/'wachten_op_betaling'
+      //     → som(children) is vrij.
+      let entryReleased;
+      if (isCancelled) {
+        entryReleased = 0;
+      } else if (r.status === 'vrijgegeven' || r.status === 'uitbetaald') {
+        entryReleased = mentorAmount;
+      } else {
+        entryReleased = round2(releasedByParent.get(r.id) || 0);
+      }
       // KPI-totalen: schema_unknown-entries (zie hieronder) worden UITGESLOTEN
       // omdat er nog geen abonnement bekend is. De klant verschijnt wel in de
       // lijst met een 'geen_abonnement'-badge, maar telt niet mee in de KPI's
@@ -747,6 +788,7 @@ export default async function handler(req, res) {
           customer_label     : customerLabel(cust),
           sale_total_incl    : round2(perTermInc * termCount),
           mentor_share_total : round2(mentorAmount),
+          released_share     : round2(entryReleased),
           term_count         : termCount,
           per_term_amount    : round2(perTermMentor),
           schema_unknown     : schemaUnknown,
@@ -766,6 +808,7 @@ export default async function handler(req, res) {
         // op en breid de termijnen-array niet uit (zelfde schema).
         const cell = evNode._sales.get(saleKey);
         cell.mentor_share_total = round2(cell.mentor_share_total + mentorAmount);
+        cell.released_share     = round2((cell.released_share || 0) + entryReleased);
         // Als er een nieuwere betaling is (paid_date), bewaar de laatste.
         if (lastPaymentDate && (!cell.last_payment_date || lastPaymentDate > cell.last_payment_date)) {
           cell.last_payment_date = lastPaymentDate;
