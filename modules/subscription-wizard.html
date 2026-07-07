@@ -107,6 +107,10 @@ const state = {
   customerMode: 'search', matched_customer_id: null, tl_imported_contact_id: null,
   newCustomer: { first_name:'', last_name:'', email:'', phone:'', address_street:'', address_number:'', address_postal:'', address_city:'', date_of_birth:'' },
   avg: false, saleType: 'domestic',
+  // Opt-in escape voor de 3-dagen/30-dagen startdatum-regel — ALLEEN
+  // bedoeld voor het WIJZIGEN van bestaande abonnementen; skipt in
+  // validateSubs uitsluitend de cursusdatum-relatie (andere checks blijven).
+  overrideStartDateRule: false,
 };
 function round2(v){ return Math.round((Number(v)||0)*100)/100; }
 function saleType(){ return state.mode==='standalone' ? (state.saleType || 'domestic') : (state.deal && state.deal.sale_type) || 'domestic'; }
@@ -479,7 +483,21 @@ function renderSubs(){
   const root=document.getElementById('subList');
   const zero=isZeroVat();
   const warn = zero ? `<div class="bonus" style="background:rgba(245,158,11,.14);color:#b45309;margin-bottom:10px;padding:10px;border-radius:8px;font-size:12.5px">⚠️ ${esc(saleType()==='intracommunautair'?'Intracommunautair':'Buiten EU')}: alle regels worden met <strong>0% BTW</strong> gefactureerd. Het BTW-tarief blijft zichtbaar voor de administratie, maar Teamleader rekent 0%.</div>` : '';
-  root.innerHTML = warn + state.subs.map((s,i)=>`
+  // Opt-in override voor de 3-dagen/30-dagen startdatum-regel — alleen
+  // relevant in deal-modus (standalone kent geen cursus-start).
+  const overrideBlock = (state.mode === 'deal') ? `
+    <div style="margin:10px 0 14px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elev)">
+      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:12.5px">
+        <input type="checkbox" id="overrideStartDate" ${state.overrideStartDateRule?'checked':''} style="margin-top:2px" />
+        <span>
+          <strong>Startdatum-controle overslaan</strong> (alleen voor het WIJZIGEN van bestaande abonnementen)
+          <div style="margin-top:4px;font-size:11px;color:#b45309;font-weight:500;line-height:1.4">
+            Let op: gebruik dit alleen om een bestaand abonnement te corrigeren. Niet gebruiken bij nieuwe verkopen — de 3-dagen-regel beschermt tegen verkeerde facturatiedatums.
+          </div>
+        </span>
+      </label>
+    </div>` : '';
+  root.innerHTML = warn + overrideBlock + state.subs.map((s,i)=>`
     <div class="sub-card">
       ${state.subs.length>1?`<button class="btn btn-danger btn-sm" data-rm="${i}" style="position:absolute;top:10px;right:10px">×</button>`:''}
       <div class="field"><label>Omschrijving abonnement</label>${descSelect(s,i)}</div>
@@ -537,6 +555,17 @@ function renderSubs(){
   root.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>{state.subs.splice(Number(b.dataset.rm),1);renderSubs();}));
   root.querySelectorAll('[data-rmli]').forEach(b=>b.addEventListener('click',()=>{state.subs[Number(b.dataset.sub)].line_items.splice(Number(b.dataset.li),1);renderSubs();}));
   root.querySelectorAll('[data-addli]').forEach(b=>b.addEventListener('click',()=>{state.subs[Number(b.dataset.addli)].line_items.push(newLine());renderSubs();}));
+  const overrideCb = root.querySelector('#overrideStartDate');
+  if(overrideCb){
+    overrideCb.addEventListener('change',e=>{
+      state.overrideStartDateRule = !!e.target.checked;
+      // Bij aan-vinken: veeg een eventuele eerdere blokkeer-melding weg.
+      if(state.overrideStartDateRule){
+        const p2err = document.getElementById('p2err');
+        if(p2err) p2err.textContent = '';
+      }
+    });
+  }
   updateComputed();
 }
 function onAmt(i,j,which,val){
@@ -589,7 +618,10 @@ function validateSubs(){
   for(const s of state.subs){
     if(!(Number(s.term_count)>=1)) return 'Aantal termijnen is verplicht, minimaal 1';
     if(!s.start_date) return 'Startdatum verplicht bij elk abonnement';
-    if(courseStart){
+    // Startdatum-vs-cursusdatum-check. Kan opt-in overgeslagen worden voor
+    // het CORRIGEREN van bestaande abonnementen (state.overrideStartDateRule).
+    // Alle andere validaties blijven ALTIJD gelden.
+    if(courseStart && !state.overrideStartDateRule){
       const kind = _subKindOf(s);
       const maxSub = _maxSubStartFor(kind);
       if(maxSub && s.start_date > maxSub){
@@ -678,6 +710,9 @@ async function submit(syncToTl){
     const data=await res.json();
     if(!res.ok||data.success===false) throw new Error(data.error||'HTTP '+res.status);
     toast('Abonnementen aangemaakt','success');
+    if(state.overrideStartDateRule){
+      setTimeout(()=>toast('Startdatum-controle overgeslagen'),600);
+    }
     if(syncToTl) setTimeout(()=>toast(`TL: ${data.tl_pushed} gepusht, ${data.tl_failed} mislukt`, data.tl_failed?'error':'success'),1200);
     const custId = data.customer_id || (state.deal && state.deal.customer_id);
     setTimeout(()=>{window.location.href='/modules/klanten.html?id='+custId+'&tab=abonnementen';},1000);
