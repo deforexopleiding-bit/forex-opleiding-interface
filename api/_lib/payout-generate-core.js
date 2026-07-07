@@ -127,20 +127,24 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
     if (unlinkErr) throw new Error(`ledger unlink (${mentorUserId}): ${unlinkErr.message}`);
   }
 
-  // 3) BONUS — event/bonus-venster voor rapportmaand M.
+  // 3) BONUS — strak M-1 venster voor rapportmaand M.
   //    Model: coaching = maand M zelf (via computeCoachingEarnings hieronder);
-  //    event/bonus = t/m eind maand M-1 (bovengrens = 1e vd rapportmaand M,
-  //    exclusief). Zo dekt het juni-rapport (rapportmaand M = juni) mei-
-  //    bonussen; juni-bonussen schuiven naar het juli-rapport.
-  //    Geen ondergrens + status='vrijgegeven' + payout_id IS NULL = inhaal-
-  //    vangnet voor oudere niet-uitbetaalde bonussen zonder dubbeltelling.
+  //    event/bonus = releases in [1e van M-1, 1e van M). Zo hoort elke
+  //    release bij precies één rapportmaand, ongeacht generatie-volgorde
+  //    (deterministisch — de eerst-gegenereerde maand slokt niet meer alle
+  //    oudere releases op).
+  //    payout_id IS NULL blijft: een al gekoppelde release valt buiten select.
+  //    Achterstallige releases ouder dan M-1 blijven ongekoppeld en worden
+  //    later via een apart inhaal-overzicht toegewezen.
   //    GEEN type-onderscheid: event/handmatig/regulier volgen dezelfde regel.
+  const lowerBound = _prevMonthStartOfCore(period.start); // 1e van M-1
   const { data: ledgerRows, error: ledErr } = await supabaseAdmin
     .from('mentor_ledger_entries')
     .select('id, amount, released_at')
     .eq('mentor_user_id', mentorUserId)
     .eq('status', 'vrijgegeven')
     .is('payout_id', null)
+    .gte('released_at', lowerBound)
     .lt('released_at', period.start);
   if (ledErr) throw new Error(`ledger fetch (${mentorUserId}): ${ledErr.message}`);
   const bonusTotal = round2((ledgerRows || []).reduce((s, r) => s + (Number(r.amount) || 0), 0));

@@ -122,19 +122,21 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2) Vrijgegeven entries — event/bonus-venster voor uitbetalingsmaand M.
-    //    Payout maand M = ALLE nog-niet-uitbetaalde vrijgegeven entries met
-    //    released_at < 1 vd rapportmaand M — dus t/m eind M-1 én alles
-    //    daarvóór dat nog openstond. Consistent met payout-generate-core.
-    //    Geen ondergrens: achterstallige bonussen lopen automatisch in.
+    // 2) Vrijgegeven entries — strak M-1 venster voor uitbetalingsmaand M.
+    //    Payout maand M = releases in [1e van M-1, 1e van M) — één maand per
+    //    rapport, geen opslok van oudere releases. Consistent met
+    //    payout-generate-core. Achterstallige releases ouder dan M-1 blijven
+    //    ongekoppeld en worden later via een apart inhaal-overzicht toegewezen.
     //    GEEN type-onderscheid meer: event/handmatig/regulier volgen dezelfde
     //    maand-regel. status='vrijgegeven' garandeert dat reeds uitbetaalde
     //    entries (status='uitbetaald') nooit dubbel gepakt worden.
+    const lowerBound = _prevMonthStartOf(period.start); // 1e van M-1
     const { data: entries, error: entErr } = await supabaseAdmin
       .from('mentor_ledger_entries')
       .select('id, entry_type, amount, released_at')
       .eq('mentor_user_id', mentorId)
       .eq('status', 'vrijgegeven')
+      .gte('released_at', lowerBound)
       .lt('released_at', period.start);
     if (entErr) throw new Error('entries fetch: ' + entErr.message);
 
