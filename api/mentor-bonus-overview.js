@@ -104,39 +104,13 @@ function customerLabel(c) {
 
 // ── Handler ──────────────────────────────────────────────────────────────────
 
-export default async function handler(req, res) {
-  res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('Content-Type', 'application/json');
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET');
-    return res.status(405).json({ error: 'GET only' });
-  }
-
-  const supabase = createUserClient(req);
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-
-  // Dual-gate: ?mentor_user_id=… → admin-pad (mentor.admin.view);
-  // afwezig → self-pad (mentor.module.access, auth.uid()).
-  const requestedMentorId = typeof req.query?.mentor_user_id === 'string'
-    ? req.query.mentor_user_id.trim() : '';
-  let effectiveUserId;
-  if (requestedMentorId) {
-    if (!UUID_RE.test(requestedMentorId)) {
-      return res.status(400).json({ error: 'mentor_user_id (uuid) ongeldig' });
-    }
-    if (!(await requirePermission(req, 'mentor.admin.view'))) {
-      return res.status(403).json({ error: 'Geen rechten (mentor.admin.view)' });
-    }
-    effectiveUserId = requestedMentorId;
-  } else {
-    if (!(await requirePermission(req, 'mentor.module.access'))) {
-      return res.status(403).json({ error: 'Geen rechten (mentor.module.access)' });
-    }
-    effectiveUserId = user.id;
-  }
-
-  try {
+/**
+ * Kern-berekening: dezelfde output als de HTTP-handler, maar aanroepbaar
+ * vanuit andere endpoints (o.a. payout-generate-core, om de bonus voor het
+ * rapport uit dezelfde bron te halen als de mentor-cashflow-tooltip).
+ * Werpt fouten via throw i.p.v. res.status(500).
+ */
+export async function computeBonusOverview(effectiveUserId) {
     // 1) Bonus-entries van deze mentor (excl. geannuleerd).
     // Geannuleerde entries WORDEN meegehaald voor transparantie (grijze badge
     // in de UI). Ze tellen niet mee in KPI's/mentor_share_total; zie de
@@ -182,13 +156,13 @@ export default async function handler(req, res) {
       for (let i = -6; i <= 36; i++) {
         projection_12m.push({ month: ymKey(addMonths(now, i)), amount: 0, paid: 0, expected: 0, breakdown: [], rest_count: 0, rest_amount: 0 });
       }
-      return res.status(200).json({
+      return {
         ok: true,
         scope: 'self',
         totals: { earned_total: 0, betaald_uit: 0, open: 0, deze_maand: 0, volgende_maand: 0, cf_received: 0, cf_this_month: 0, cf_expected: 0 },
         projection_12m,
         per_event: [],
-      });
+      };
     }
 
     // 2) Bijbehorende customers, deals, subscriptions, invoices.
@@ -998,7 +972,7 @@ export default async function handler(req, res) {
     }
     const cf_this_month = round2((monthPaid.get(thisYm) || 0) + (monthOpen.get(thisYm) || 0));
 
-    return res.status(200).json({
+    return {
       ok: true,
       scope: 'self',
       totals: {
@@ -1013,7 +987,44 @@ export default async function handler(req, res) {
       },
       projection_12m,
       per_event,
-    });
+    };
+}
+
+export default async function handler(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Type', 'application/json');
+  if (req.method !== 'GET') {
+    res.setHeader('Allow', 'GET');
+    return res.status(405).json({ error: 'GET only' });
+  }
+
+  const supabase = createUserClient(req);
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
+
+  // Dual-gate: ?mentor_user_id=… → admin-pad (mentor.admin.view);
+  // afwezig → self-pad (mentor.module.access, auth.uid()).
+  const requestedMentorId = typeof req.query?.mentor_user_id === 'string'
+    ? req.query.mentor_user_id.trim() : '';
+  let effectiveUserId;
+  if (requestedMentorId) {
+    if (!UUID_RE.test(requestedMentorId)) {
+      return res.status(400).json({ error: 'mentor_user_id (uuid) ongeldig' });
+    }
+    if (!(await requirePermission(req, 'mentor.admin.view'))) {
+      return res.status(403).json({ error: 'Geen rechten (mentor.admin.view)' });
+    }
+    effectiveUserId = requestedMentorId;
+  } else {
+    if (!(await requirePermission(req, 'mentor.module.access'))) {
+      return res.status(403).json({ error: 'Geen rechten (mentor.module.access)' });
+    }
+    effectiveUserId = user.id;
+  }
+
+  try {
+    const out = await computeBonusOverview(effectiveUserId);
+    return res.status(200).json(out);
   } catch (e) {
     console.error('[mentor-bonus-overview]', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });

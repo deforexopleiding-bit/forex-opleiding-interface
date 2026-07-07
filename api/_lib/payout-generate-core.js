@@ -31,6 +31,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { computeCoachingEarnings } from './coaching-earnings.js';
+import { computeBonusOverview } from '../mentor-bonus-overview.js';
 
 export const BTW_RATE = 1.21;
 
@@ -127,16 +128,22 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
     if (unlinkErr) throw new Error(`ledger unlink (${mentorUserId}): ${unlinkErr.message}`);
   }
 
-  // 3) BONUS — strak M-1 venster voor rapportmaand M.
-  //    Model: coaching = maand M zelf (via computeCoachingEarnings hieronder);
-  //    event/bonus = releases in [1e van M-1, 1e van M). Zo hoort elke
-  //    release bij precies één rapportmaand, ongeacht generatie-volgorde
-  //    (deterministisch — de eerst-gegenereerde maand slokt niet meer alle
-  //    oudere releases op).
-  //    payout_id IS NULL blijft: een al gekoppelde release valt buiten select.
-  //    Achterstallige releases ouder dan M-1 blijven ongekoppeld en worden
-  //    later via een apart inhaal-overzicht toegewezen.
-  //    GEEN type-onderscheid: event/handmatig/regulier volgen dezelfde regel.
+  // 3) BONUS — bron: mentor-cashflow-tooltip (computeBonusOverview).
+  //    Rapport maand M pakt bonussen uit maand M-1 (termijn-due_date basis).
+  //    Zo matcht wat de mentor in zijn cashflow-tooltip voor maand M-1 ziet
+  //    exact de bonus-line in het rapport voor maand M.
+  //    Coaching-tak blijft ONGEWIJZIGD (maand M zelf, via
+  //    computeCoachingEarnings hieronder).
+  //    De ledger-koppeling (payout_id op mentor_ledger_entries) blijft
+  //    behouden verderop als audit/afvink-mechanisme — de bonusTotal komt
+  //    echter uit de overview, niet meer uit de ledger-som.
+  const bonusOverview = await computeBonusOverview(mentorUserId);
+  // M-1 ym-key: pak eerste 7 chars van _prevMonthStartOfCore (YYYY-MM-01 → YYYY-MM).
+  const bonusYmKey = _prevMonthStartOfCore(period.start).slice(0, 7);
+  const bonusMonthEntry = (bonusOverview.projection_12m || []).find((m) => m.month === bonusYmKey) || null;
+  const bonusTotal = round2(Number(bonusMonthEntry?.paid) || 0);
+  // Voor payout_id-koppeling (audit) — zelfde ledger-query als voorheen,
+  // maar puur voor het koppelen. bonusTotal wordt hierboven al bepaald.
   const lowerBound = _prevMonthStartOfCore(period.start); // 1e van M-1
   const { data: ledgerRows, error: ledErr } = await supabaseAdmin
     .from('mentor_ledger_entries')
@@ -147,7 +154,6 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
     .gte('released_at', lowerBound)
     .lt('released_at', period.start);
   if (ledErr) throw new Error(`ledger fetch (${mentorUserId}): ${ledErr.message}`);
-  const bonusTotal = round2((ledgerRows || []).reduce((s, r) => s + (Number(r.amount) || 0), 0));
   const bonusEntryIds = (ledgerRows || []).map((r) => r.id);
 
   // 4) COACHING — helper.
