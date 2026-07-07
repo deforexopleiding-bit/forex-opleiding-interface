@@ -25,13 +25,11 @@
 // genegeerd; we normaliseren naar de 1e van die maand). period_month is een
 // date-kolom; we sluiten ervoor [period_start, period_end+1mo) op released_at.
 //
-// "2 MAANDEN ACHTERAF + ACHTERSTAND-INHAAL"-REGEL (sinds 2026-07):
-//   Payout maand M = alle vrijgegeven, nog-niet-uitbetaalde entries t/m
-//   eind M-2 (2 maanden achteraf; achterstand loopt in). Concreet:
-//     cutoffStart = 1e van maand M-1
-//     selectie   = status='vrijgegeven' AND released_at < cutoffStart
-//   Geen ondergrens: achterstallige bonussen (bv. uit april die nog niet
-//   uitbetaald zijn) worden bij een latere run automatisch meegenomen.
+// EVENT/BONUS-VENSTER (sinds 2026-07):
+//   Payout maand M = alle vrijgegeven, nog-niet-uitbetaalde entries met
+//   released_at < 1e vd rapportmaand M (dus t/m eind M-1) én alles
+//   daarvóór dat nog openstond. Consistent met payout-generate-core.
+//   Geen ondergrens: achterstallige bonussen lopen automatisch mee.
 //   status='vrijgegeven' garandeert dat reeds uitbetaalde entries
 //   (status='uitbetaald') nooit dubbel gepakt worden.
 //   GEEN type-onderscheid meer: event/handmatig/regulier volgen dezelfde
@@ -124,21 +122,20 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2) Vrijgegeven entries — "2 maanden achteraf + achterstand-inhaal"-regel.
-    //    Payout voor maand M pakt ALLE nog-niet-uitbetaalde vrijgegeven entries
-    //    met released_at < 1 vd maand (M-1) — dus t/m eind maand M-2 én alles
-    //    daarvóór dat nog openstond. Geen ondergrens: achterstallige bonussen
-    //    (bv. uit april die nog niet uitbetaald zijn) lopen automatisch in.
+    // 2) Vrijgegeven entries — event/bonus-venster voor uitbetalingsmaand M.
+    //    Payout maand M = ALLE nog-niet-uitbetaalde vrijgegeven entries met
+    //    released_at < 1 vd rapportmaand M — dus t/m eind M-1 én alles
+    //    daarvóór dat nog openstond. Consistent met payout-generate-core.
+    //    Geen ondergrens: achterstallige bonussen lopen automatisch in.
     //    GEEN type-onderscheid meer: event/handmatig/regulier volgen dezelfde
     //    maand-regel. status='vrijgegeven' garandeert dat reeds uitbetaalde
     //    entries (status='uitbetaald') nooit dubbel gepakt worden.
-    const cutoffStart = _prevMonthStartOf(period.start); // = M-1
     const { data: entries, error: entErr } = await supabaseAdmin
       .from('mentor_ledger_entries')
       .select('id, entry_type, amount, released_at')
       .eq('mentor_user_id', mentorId)
       .eq('status', 'vrijgegeven')
-      .lt('released_at', cutoffStart);
+      .lt('released_at', period.start);
     if (entErr) throw new Error('entries fetch: ' + entErr.message);
 
     const rows = entries || [];
