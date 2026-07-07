@@ -279,13 +279,14 @@ export async function markOverdue({ customerId } = {}) {
  * We splitsen die new_slice per termijn: elke betaalde termijn krijgt
  * zijn eigen child (per_term_slice = original / term_count, met
  * remainder-correctie op de laatste termijn). released_at van elk child
- * is de 1e van de maand NA de paid_date van die termijn — zo valt de
- * slice in de payout-run van de maand erna (payout selecteert op
- * released_at).
+ * is de 1e van de BETAALMAAND (de maand VAN paid_date) — zo valt de
+ * bonus in de maand van betaling (~termijnmaand) en matchen tooltip en
+ * payout-rapport. Payout selecteert op released_at met strak M-1 venster
+ * (PR #631).
  *
  * Voorbeeld: John betaalt termijn 1 op 14 april → slice met
- * released_at = 2024-05-01 → valt in mei-payout. 3/36 betaald =
- * 3 slices, elk in de maand na hun eigen paid_date.
+ * released_at = 2024-04-01 → valt in mei-rapport (M-1 van mei). 3/36
+ * betaald = 3 slices, elk in de maand van hun eigen paid_date.
  *
  * Parent-scope: per parent zoeken we de subscription:
  *   - primair via source_quote_id (deal-id) → subscription van dat deal
@@ -317,14 +318,16 @@ export async function releaseProportionalForPaidInvoices({ customerId, dryRun = 
   if (!customerId) throw new Error('releaseProportionalForPaidInvoices: customerId vereist');
   const _r2 = (n) => Math.round(Number(n) * 100) / 100;
 
-  // 1e van de maand NA een YYYY-MM-DD als volledige ISO-timestamp
-  // (00:00:00.000Z). Zo valt de released_at netjes in de payout-run van
-  // die maand — payout selecteert op released_at.
-  function firstOfNextMonthTimestamp(dateStr) {
+  // 1e van de BETAALMAAND (de maand VAN dateStr) als volledige ISO-timestamp
+  // (00:00:00.000Z). De +1-maand-buffer is bewust weg zodat de bonus in de
+  // maand van betaling valt (~termijnmaand) en tooltip + payout-rapport
+  // matchen. Payout selecteert op released_at (strak M-1 venster, PR #631):
+  // mei-betaling → released_at = 1 mei → valt in juni-rapport.
+  function firstOfMonthTimestamp(dateStr) {
     if (!dateStr) return null;
     const d = new Date(String(dateStr).slice(0, 10) + 'T00:00:00Z');
     if (isNaN(d.getTime())) return null;
-    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)).toISOString();
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString();
   }
 
   // ── 1) Subscriptions van deze klant (voor term_count + tl_sub_id) ──────
@@ -493,7 +496,7 @@ export async function releaseProportionalForPaidInvoices({ customerId, dryRun = 
     // wordt zowel in dry-run als live overgeslagen.
     for (let termIdx = 1; termIdx <= paidTermCount; termIdx++) {
       const paidDateStr = paidTermsForSub[termIdx - 1]?.paid_date || null;
-      const releasedAt  = firstOfNextMonthTimestamp(paidDateStr);
+      const releasedAt  = firstOfMonthTimestamp(paidDateStr);
       const idem        = `${parent.id}:paidrel-term:${termIdx}`;
 
       if (existingIdemForParent.has(idem)) {
@@ -614,8 +617,9 @@ export async function releaseProportionalForPaidInvoices({ customerId, dryRun = 
  *   Later meer betaald -> nieuwe key -> extra child voor het verschil.
  *   Forward-only, geen clawback.
  *
- * released_at = 1e vd maand NA de laatste paid_date, zodat de child in de
- * juiste payout-maand valt (payout selecteert op released_at).
+ * released_at = 1e vd BETAALMAAND (de maand VAN de laatste paid_date),
+ * zodat de bonus in de maand van betaling valt en tooltip + payout-rapport
+ * matchen. Payout selecteert op released_at (strak M-1 venster, PR #631).
  *
  * `dryRun=true`: berekent + returned simulaties, schrijft niets. Bestaande
  * children (matching idem-key) worden opgehaald zodat de sim niet zegt dat
@@ -634,11 +638,15 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
   if (!customerId) throw new Error('releaseProportionalForPaidAmount: customerId vereist');
   const _r2 = (n) => Math.round(Number(n) * 100) / 100;
 
-  function firstOfNextMonthTimestamp(dateStr) {
+  // 1e van de BETAALMAAND als volledige ISO-timestamp (00:00:00.000Z). Zonder
+  // +1-maand-buffer, zodat de bonus in de maand van betaling valt (~termijn-
+  // maand) en tooltip + payout-rapport matchen. Payout selecteert op
+  // released_at (strak M-1 venster, PR #631).
+  function firstOfMonthTimestamp(dateStr) {
     if (!dateStr) return null;
     const d = new Date(String(dateStr).slice(0, 10) + 'T00:00:00Z');
     if (isNaN(d.getTime())) return null;
-    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)).toISOString();
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString();
   }
 
   // ── 1) Subs van deze klant (voor tl_sub_id per deal) ────────────────────
@@ -744,7 +752,7 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
     const reedsReleased = _r2(kids.reduce((s, k) => s + (Number(k.amount) || 0), 0));
     const paidCents     = Math.round(saleTotaalBetaald * 100);
     const idem          = `${parent.id}:paidamount:${paidCents}`;
-    const releasedAt    = firstOfNextMonthTimestamp(saleLastPaidDate);
+    const releasedAt    = firstOfMonthTimestamp(saleLastPaidDate);
 
     if (parentBasis <= 0) {
       simulations.push({
