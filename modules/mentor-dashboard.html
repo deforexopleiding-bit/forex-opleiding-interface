@@ -543,9 +543,17 @@
       const firstBadge = s.first_invoice_paid
         ? '<span class="badge badge-green">1e factuur betaald</span>'
         : '<span class="badge badge-grey">Nog niet</span>';
-      const shareCell = s.schema_unknown
-        ? `${fmtEUR(s.mentor_share_total)} <span class="badge badge-grey" style="margin-left:4px" title="Nog niet meegeteld in KPI\'s tot er een abonnement is">nog niet in KPI</span>`
-        : fmtEUR(s.mentor_share_total);
+      // Cashtraject: toon TOTAAL trajectbedrag in de kolom (niet vrijgevallen),
+      // met "vrij: €X" als subtiele indicatie. mentor_share_total is bij cash
+      // de som van reeds vrijgevallen termijnen; traject_total_incl is het
+      // volledige bedrag over alle N termijnen. Reguliere sales blijven op
+      // mentor_share_total (schema-unknown-fallback ongewijzigd).
+      const shareCell = s.is_cash_traject
+        ? `${fmtEUR(s.traject_total_incl != null ? s.traject_total_incl : s.mentor_share_total)}`
+          + ` <span class="badge badge-grey" style="margin-left:4px" title="Reeds vrijgevallen">vrij: ${fmtEUR(s.mentor_share_total)}</span>`
+        : (s.schema_unknown
+            ? `${fmtEUR(s.mentor_share_total)} <span class="badge badge-grey" style="margin-left:4px" title="Nog niet meegeteld in KPI\'s tot er een abonnement is">nog niet in KPI</span>`
+            : fmtEUR(s.mentor_share_total));
       const summary =
         `<tr class="bonus-row${isOpen ? ' open' : ''}" data-row-key="${rowKey}">
           <td><strong>${esc(s.customer_label || '—')}</strong></td>
