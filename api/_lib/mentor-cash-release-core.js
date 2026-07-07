@@ -177,7 +177,10 @@ export async function releaseCashTrajectTerms(opts = {}) {
             pct            : t.pct,
             amount         : amount,
             status         : 'vrijgegeven',
-            released_at    : nowIso,
+            // Geplande termijn-datum i.p.v. moment-van-vrijgeven, zodat de
+            // termijn-bonus in het payout-rapport valt van de maand waarin
+            // 'ie hoort (payout selecteert op released_at).
+            released_at    : dueDate,
             source_quote_id  : null,
             source_invoice_id: null,
             idempotency_key: idem,
