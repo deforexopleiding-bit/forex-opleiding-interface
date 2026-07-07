@@ -476,6 +476,10 @@ export default async function handler(req, res) {
         customer_id        : null,
         customer_label     : t.client_label || '(traject)',
         sale_total_incl    : round2(Number(t.bonus_total) || 0),
+        // Volledige traject-bonus over alle N termijnen. mentor_share_total is
+        // hier de som van reeds vrijgevallen termijnen (kan lager zijn); UI
+        // toont beide zodat totaal én vrijgevallen naast elkaar zichtbaar zijn.
+        traject_total_incl : round2(Number(t.bonus_total) || 0),
         mentor_share_total : round2(mentorShareTotal),
         term_count         : termCount,
         per_term_amount    : perTermFallback,
@@ -584,23 +588,9 @@ export default async function handler(req, res) {
           || subAcc?.last_paid_date || custAcc?.last_paid_date || null;
       }
 
-      let nbPaid;
-      if (schemaUnknown || perTermInc <= 0) {
-        // Fallback: gebruik ledger-status — 'uitbetaald'=1, anders 0.
-        nbPaid = r.status === 'uitbetaald' ? 1 : 0;
-      } else {
-        const nbPaidA = Math.max(0, Math.min(termCount, Math.floor((paidAmt            + 0.005) / perTermInc)));
-        const nbPaidB = Math.max(0, Math.min(termCount, Math.floor((paidTotalFromInvs  + 0.005) / perTermInc)));
-        nbPaid = Math.max(nbPaidA, nbPaidB);
-      }
-
-      // KPI-earned + betaald_uit — schema-unknown entries niet meetellen.
-      if (!schemaUnknown) {
-        earned_total += mentorAmount;
-        if (r.status === 'uitbetaald') betaald_uit += mentorAmount;
-      }
-
-      // Genereer termijnen.
+      // Bepaal factuur-lijst (invList) vóór nbPaid, want nbPaid telt nu het
+      // aantal daadwerkelijk (volledig) betaalde facturen — niet de bedrag/
+      // termijn-deling die bij grote aanbetalingen 12/12 forceerde.
       // Bron van waarheid = ECHTE facturen. Termijn i wordt gematcht op de i-de
       // factuur in de op due_date gesorteerde lijst; die factuur bepaalt due_date
       // + betaal-status. We kiezen bewust de COMPLEETSTE van invoicesBySub en
@@ -615,15 +605,45 @@ export default async function handler(req, res) {
       // de nu bekende gevallen (1 sale, deels ongekoppelde facturen) is
       // "completere lijst" correct; de exactheid verbetert zodra facturen
       // consequent aan de sub gekoppeld zijn (wizard-flow).
-      // Als er voor termijn i géén factuur is (toekomstige termijn die nog niet
-      // is aangemaakt), vallen we terug op de berekende addMonths-datum +
-      // nbPaid-teller.
       const subKeyForTerm = sub?.teamleader_subscription_id || null;
       const invListSub    = subKeyForTerm ? (invoicesBySub.get(subKeyForTerm) || null) : null;
       const invListCust   = r.customer_id ? (invoicesByCust.get(r.customer_id) || null) : null;
       const subLen        = invListSub  ? invListSub.length  : 0;
       const custLen       = invListCust ? invListCust.length : 0;
       const invList       = (custLen > subLen) ? invListCust : (invListSub || invListCust);
+
+      // nbPaid = aantal VOLLEDIG betaalde facturen (niet bedrag/perTerm).
+      // Bij een grote aanbetaling (bv. Cedric: €4000 + €266/mnd) zou de oude
+      // bedrag-deling €4266 / €266 ≈ 16 → geklampt op termCount → 12/12 tonen
+      // terwijl er echt maar 2 facturen betaald zijn. Factuur-telling voorkomt
+      // dat: 1 aanbetaling + 1 termijn = 2 betaalde facturen = 2/N.
+      let nbPaid;
+      if (schemaUnknown || perTermInc <= 0) {
+        // Fallback: gebruik ledger-status — 'uitbetaald'=1, anders 0.
+        nbPaid = r.status === 'uitbetaald' ? 1 : 0;
+      } else if (invList && invList.length) {
+        const paidCount = invList.filter((inv) => {
+          const tot = Number(inv.amount_total) || 0;
+          const pd  = Number(inv.amount_paid)  || 0;
+          return tot > 0 && pd + 0.005 >= tot;
+        }).length;
+        nbPaid = Math.max(0, Math.min(termCount, paidCount));
+      } else {
+        // Geen factuurlijst → oude bedrag-deling als fallback.
+        const nbPaidA = Math.max(0, Math.min(termCount, Math.floor((paidAmt            + 0.005) / perTermInc)));
+        const nbPaidB = Math.max(0, Math.min(termCount, Math.floor((paidTotalFromInvs  + 0.005) / perTermInc)));
+        nbPaid = Math.max(nbPaidA, nbPaidB);
+      }
+
+      // KPI-earned + betaald_uit — schema-unknown entries niet meetellen.
+      if (!schemaUnknown) {
+        earned_total += mentorAmount;
+        if (r.status === 'uitbetaald') betaald_uit += mentorAmount;
+      }
+
+      // Genereer termijnen.
+      // Bij ontbrekende factuur voor termijn i (toekomstige termijn die nog niet
+      // is aangemaakt), fallback op de berekende addMonths-datum + nbPaid-teller.
 
       const termijnen = [];
       for (let i = 0; i < termCount; i++) {
