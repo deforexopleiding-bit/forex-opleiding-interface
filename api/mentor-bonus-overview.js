@@ -448,6 +448,7 @@ export default async function handler(req, res) {
       // Sale-status voor de badge.
       let saleStatus;
       if (t.status === 'completed')        saleStatus = 'voltooid';
+      else if (t.status === 'paused')      saleStatus = 'pauze';
       else if (paidTermIdx.size >= 1)      saleStatus = 'actief';
       else                                 saleStatus = 'wacht_1e_betaling';
       // Alleen forceren als ALLES geannuleerd is (geen actieve termijnen).
