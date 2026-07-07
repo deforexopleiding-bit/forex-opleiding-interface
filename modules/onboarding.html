@@ -113,6 +113,13 @@
     }
     .blk-paragraph { font-size: 14.5px; color: var(--text); margin: 4px 0 6px; line-height: 1.6; }
     .blk-divider { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
+    .blk-link-button {
+      display: inline-block; padding: 10px 18px;
+      background: var(--brand-azure, var(--azure, #1473d6)); color: #fff;
+      border-radius: 8px; font-weight: 600; font-size: 14px;
+      text-decoration: none; transition: background 0.15s;
+    }
+    .blk-link-button:hover { background: #0f5fb8; }
     .blk-image { width: 100%; height: auto; border-radius: 12px; display: block; }
 
     /* Stats-grid: auto-fit kaarten, stapelt op mobiel (min 140px). */
@@ -741,6 +748,19 @@
     const t = b.type;
     if (t === 'heading')   return el('div', { class: 'blk' }, [el('div', { class: 'blk-heading', text: b.text || '' })]);
     if (t === 'paragraph') return el('div', { class: 'blk' }, [el('div', { class: 'blk-paragraph', text: b.text || '' })]);
+    if (t === 'link_button') {
+      // Verberg als er geen URL is ingesteld — voorkomt een klikbare '#'-knop.
+      if (!b.url) return null;
+      return el('div', { class: 'blk' }, [
+        el('a', {
+          class: 'blk-link-button',
+          href : b.url,
+          target: '_blank',
+          rel  : 'noopener noreferrer',
+          text : b.label || 'Open link',
+        }),
+      ]);
+    }
     if (t === 'divider')   return el('hr',  { class: 'blk-divider' });
     if (t === 'image') {
       // Skippen als er nog geen src is — voorkomt 1px broken-image-icoon.
