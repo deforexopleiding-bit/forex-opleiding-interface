@@ -113,22 +113,21 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
     };
   }
 
-  // 3) BONUS — som vrijgegeven ledger-entries (niet gekoppeld aan payout).
-  //    "2 maanden achteraf + achterstand-inhaal"-regel: concept voor maand M
-  //    pakt ALLE nog-niet-gekoppelde vrijgegeven entries met released_at < 1
-  //    vd maand (M-1) — dus t/m eind M-2 én alles daarvóór dat nog openstond.
-  //    Geen ondergrens: achterstallige bonussen lopen automatisch in.
-  //    GEEN type-onderscheid meer: event/handmatig/regulier volgen dezelfde
-  //    regel. status='vrijgegeven' + payout_id IS NULL garanderen samen dat
-  //    reeds gebundelde entries nooit dubbel in een concept terechtkomen.
-  const cutoffStart = _prevMonthStartOfCore(period.start); // = M-1
+  // 3) BONUS — event/bonus-venster voor rapportmaand M.
+  //    Model: coaching = maand M zelf (via computeCoachingEarnings hieronder);
+  //    event/bonus = t/m eind maand M-1 (bovengrens = 1e vd rapportmaand M,
+  //    exclusief). Zo dekt het juni-rapport (rapportmaand M = juni) mei-
+  //    bonussen; juni-bonussen schuiven naar het juli-rapport.
+  //    Geen ondergrens + status='vrijgegeven' + payout_id IS NULL = inhaal-
+  //    vangnet voor oudere niet-uitbetaalde bonussen zonder dubbeltelling.
+  //    GEEN type-onderscheid: event/handmatig/regulier volgen dezelfde regel.
   const { data: ledgerRows, error: ledErr } = await supabaseAdmin
     .from('mentor_ledger_entries')
     .select('amount, released_at')
     .eq('mentor_user_id', mentorUserId)
     .eq('status', 'vrijgegeven')
     .is('payout_id', null)
-    .lt('released_at', cutoffStart);
+    .lt('released_at', period.start);
   if (ledErr) throw new Error(`ledger fetch (${mentorUserId}): ${ledErr.message}`);
   const bonusTotal = round2((ledgerRows || []).reduce((s, r) => s + (Number(r.amount) || 0), 0));
 
