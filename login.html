@@ -531,6 +531,18 @@
       // Auth state change listener
       window.supabase.auth.onAuthStateChange((event, sess) => {
         if (event === 'SIGNED_IN' && sess) {
+          // Fire-and-forget login-tracking → last_login_at + auth.login-entry
+          // in het activiteitenlogboek. Faalt 'ie stil → login gaat gewoon door.
+          try {
+            const token = sess && sess.access_token;
+            if (token) {
+              fetch('/api/activity-record-login', {
+                method  : 'POST',
+                headers : { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body    : '{}',
+              }).catch((e) => { try { console.warn('[activity-log] record-login', e && e.message); } catch (_) {} });
+            }
+          } catch (_) { /* fail-soft */ }
           redirectAfterLogin();
         }
       });
