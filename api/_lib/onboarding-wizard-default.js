@@ -219,6 +219,7 @@ const ALLOWED_BLOCK_TYPES = new Set([
   // Rich content
   'embed',             // https-iframe (bv. GoHighLevel-agenda/booking)
   'stats',             // kaarten-grid met value/label/sub
+  'link_button',       // knop met label + https-URL (bv. Discord-invite)
   // Tekst-invoer
   'short_text', 'long_text', 'email', 'tel',
   // Numeriek
@@ -404,6 +405,15 @@ export function normalizeStructure(input) {
           if (items.length >= 12) break;        // hard cap
         }
         out.items = items;
+        page.blocks.push(out);
+        continue;
+      }
+      if (type === 'link_button') {
+        out.label = _str(rawBlock.label, 240).trim() || 'Word lid';
+        const rawUrl = _str(rawBlock.url, 1024).trim();
+        // Alleen https-URL bewaren (consistent met embed). Anders leeg →
+        // renderer verbergt de knop.
+        out.url = /^https:\/\//i.test(rawUrl) ? rawUrl : '';
         page.blocks.push(out);
         continue;
       }
