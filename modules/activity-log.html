@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Logboek · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css"/>
+  <style>
+    .page-header { display:flex; align-items:flex-start; gap:16px; margin-bottom:18px; }
+    .page-titlewrap { flex:1; }
+    .page-title { font-size:22px; font-weight:700; letter-spacing:-.3px; display:flex; align-items:center; gap:10px; }
+    .page-sub { font-size:12px; color:var(--text-faint); margin-top:3px; }
+
+    /* Tabs */
+    .tabs-bar { display:flex; gap:0; border-bottom:1px solid var(--border); margin-bottom:14px; }
+    .tab-btn { padding:10px 16px; background:transparent; border:none; border-bottom:2px solid transparent; color:var(--text-faint); font-size:13px; cursor:pointer; font-family:inherit; display:flex; align-items:center; gap:6px; transition:color .15s, border-color .15s; }
+    .tab-btn:hover:not(.active) { color:var(--text); }
+    .tab-btn.active { color:var(--text); font-weight:600; border-bottom-color:var(--brand-primary); }
+
+    /* Filters */
+    .filter-panel { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; padding:12px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; }
+    .filter-panel .filter-field { display:flex; flex-direction:column; gap:4px; }
+    .filter-panel label { font-size:11px; color:var(--text-faint); font-weight:500; }
+    .filter-panel select,
+    .filter-panel input[type="text"],
+    .filter-panel input[type="date"] {
+      padding:6px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px;
+      color:var(--text); font-size:12px; font-family:inherit; min-width:130px;
+    }
+    .filter-panel select:focus,
+    .filter-panel input:focus { outline:none; border-color:var(--brand-primary); }
+    .filter-panel input[type="text"] { min-width:200px; }
+    .btn-reset { padding:6px 12px; background:transparent; color:var(--text-dim); border:1px solid var(--border); border-radius:8px; font-size:12px; cursor:pointer; font-family:inherit; align-self:flex-end; }
+    .btn-reset:hover { background:var(--bg-elev-2); color:var(--text); }
+    .preset-group { display:flex; gap:4px; align-self:flex-end; }
+    .preset-chip { padding:5px 10px; background:var(--bg); border:1px solid var(--border); border-radius:14px; font-size:11px; cursor:pointer; color:var(--text-dim); font-family:inherit; }
+    .preset-chip:hover { background:var(--bg-elev-2); color:var(--text); }
+    .preset-chip.active { background:var(--brand-primary-soft); border-color:var(--brand-primary); color:var(--brand-primary); font-weight:600; }
+    .custom-range { display:none; gap:6px; align-items:center; }
+    .custom-range.show { display:flex; }
+
+    /* Data table */
+    .data-table-wrap { border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+    .data-table { width:100%; border-collapse:collapse; font-size:12px; }
+    .data-table th { text-align:left; padding:10px 12px; background:var(--bg-elev-2); font-weight:600; font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.4px; border-bottom:1px solid var(--border); }
+    .data-table td { padding:9px 12px; border-bottom:1px solid var(--border); color:var(--text); vertical-align:top; }
+    .data-table tbody tr:last-child td { border-bottom:none; }
+    .data-table tbody tr:hover { background:var(--bg-elev); }
+    .data-table .cell-time { white-space:nowrap; color:var(--text-dim); font-size:11px; }
+    .data-table .cell-email { color:var(--text); font-weight:500; }
+    .data-table .cell-action { font-family:'Monaco', 'Menlo', monospace; font-size:11px; color:var(--text-dim); }
+    .data-table .cell-endpoint { font-family:'Monaco', 'Menlo', monospace; font-size:11px; color:var(--text-faint); word-break:break-all; }
+    .data-table .cell-ip { font-family:'Monaco', 'Menlo', monospace; font-size:11px; color:var(--text-faint); }
+    .data-table .row-user { cursor:pointer; }
+
+    /* Status badges */
+    .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.3px; }
+    .badge-ok { background:var(--color-success-soft); color:var(--color-success-text); }
+    .badge-fail { background:var(--color-danger-soft); color:var(--color-danger-text); }
+    .badge-neutral { background:var(--color-neutral-soft, rgba(148,163,184,0.16)); color:var(--color-neutral-text, #64748b); }
+    .badge-module { background:var(--color-info-soft, rgba(59,130,246,0.13)); color:var(--color-info-text, #1e40af); font-size:10px; padding:1px 7px; }
+    .badge-role { background:var(--bg-elev-2); color:var(--text-dim); border:1px solid var(--border); font-size:10px; padding:1px 7px; text-transform:none; letter-spacing:0; }
+
+    /* Paginering */
+    .pagination { display:flex; justify-content:space-between; align-items:center; margin-top:14px; padding:0 4px; font-size:12px; color:var(--text-dim); }
+    .pagination-buttons { display:flex; gap:6px; }
+    .btn-page { padding:6px 12px; background:var(--bg); border:1px solid var(--border); border-radius:8px; font-size:12px; cursor:pointer; color:var(--text); font-family:inherit; }
+    .btn-page:hover:not(:disabled) { background:var(--bg-elev); }
+    .btn-page:disabled { opacity:0.4; cursor:not-allowed; }
+
+    /* States */
+    .empty-state { padding:60px 20px; text-align:center; color:var(--text-faint); font-size:13px; }
+    .empty-state .empty-icon { font-size:36px; margin-bottom:10px; opacity:.5; }
+    .loading-state { padding:40px 20px; text-align:center; color:var(--text-faint); font-size:13px; }
+    .forbidden-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; padding:32px 28px; max-width:480px; margin:40px auto; text-align:center; }
+    .forbidden-card h2 { font-size:16px; font-weight:700; margin-bottom:6px; }
+    .forbidden-card p { font-size:13px; color:var(--text-dim); margin-bottom:16px; }
+
+    /* Tab content */
+    .tab-panel { display:none; }
+    .tab-panel.active { display:block; }
+  </style>
+</head>
+<body>
+
+<div id="sidebar-mount"></div>
+
+<div class="main">
+  <div class="main-inner" id="page-content">
+    <!-- Wordt door init() gevuld na auth + RBAC check -->
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+
+<script>
+(function () {
+  'use strict';
+
+  const esc = (window.AgentShared && window.AgentShared.esc)
+    ? window.AgentShared.esc
+    : (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+  const fmtDateTimeNL = (iso) => {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleString('nl-NL', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  };
+  const fmtRelTimeNL = (iso) => {
+    if (!iso) return '—';
+    if (window.AgentShared && typeof window.AgentShared.relTime === 'function') {
+      try { return window.AgentShared.relTime(iso); } catch (_) { /* fall through */ }
+    }
+    return fmtDateTimeNL(iso);
+  };
+
+  // Sidebar-modules — spiegelt de labels die de logger als 'module' schrijft.
+  const MODULES = [
+    'Finance', 'Onboarding', 'Klanten', 'E-mail', 'Events',
+    'Mentoren beheer', 'Sales', 'Tickets', 'Takenbeheer', 'Follow-up',
+    'Admin', 'Studenten', 'Kennisbank', 'Overig'
+  ];
+  const ROLES = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'administratie', 'marketing', 'viewer'];
+  const PAGE_SIZE = 50;
+
+  const state = {
+    tab       : 'activity',   // 'activity' | 'users'
+    // filters
+    userId    : '',
+    role      : '',
+    module    : '',
+    success   : '',           // '' | 'true' | 'false'
+    q         : '',
+    preset    : 'week',       // today | week | month | custom
+    from      : '',
+    to        : '',
+    page      : 1,
+    // data
+    rows      : [],
+    total     : 0,
+    users     : [],
+    loading   : false,
+    error     : null,
+  };
+
+  let _qDebounceTimer = null;
+
+  // ── Preset-datums ──────────────────────────────────────────────────────────
+  function computePresetRange(preset) {
+    const now = new Date();
+    const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+    let fromDate, toDate;
+    if (preset === 'today') {
+      fromDate = new Date(y, m, d, 0, 0, 0, 0);
+      toDate   = new Date(y, m, d, 23, 59, 59, 999);
+    } else if (preset === 'week') {
+      const dow = now.getDay() || 7; // ma=1 .. zo=7
+      fromDate = new Date(y, m, d - (dow - 1), 0, 0, 0, 0);
+      toDate   = new Date(y, m, d, 23, 59, 59, 999);
+    } else if (preset === 'month') {
+      fromDate = new Date(y, m, 1, 0, 0, 0, 0);
+      toDate   = new Date(y, m, d, 23, 59, 59, 999);
+    } else {
+      return { from: null, to: null };
+    }
+    return { from: fromDate.toISOString(), to: toDate.toISOString() };
+  }
+
+  function currentRange() {
+    if (state.preset === 'custom') {
+      const fromIso = state.from ? new Date(state.from + 'T00:00:00').toISOString() : null;
+      const toIso   = state.to   ? new Date(state.to + 'T23:59:59.999').toISOString() : null;
+      return { from: fromIso, to: toIso };
+    }
+    return computePresetRange(state.preset);
+  }
+
+  // ── Renderers ──────────────────────────────────────────────────────────────
+  function renderPage() {
+    const root = document.getElementById('page-content');
+    root.innerHTML =
+      '<div class="page-header">' +
+        '<div class="page-titlewrap">' +
+          '<div class="page-title"><i class="ti ti-history"></i> Logboek</div>' +
+          '<div class="page-sub">Wie deed wat, wanneer. Retentie 90 dagen.</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="tabs-bar">' +
+        '<button class="tab-btn" data-tab="activity"><i class="ti ti-list"></i> Activiteit</button>' +
+        '<button class="tab-btn" data-tab="users"><i class="ti ti-users"></i> Per gebruiker</button>' +
+      '</div>' +
+      '<div id="tabActivity" class="tab-panel"></div>' +
+      '<div id="tabUsers"    class="tab-panel"></div>';
+
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    });
+
+    switchTab(state.tab);
+  }
+
+  function switchTab(tab) {
+    state.tab = tab;
+    document.querySelectorAll('.tab-btn').forEach((b) => {
+      b.classList.toggle('active', b.dataset.tab === tab);
+    });
+    document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
+    if (tab === 'activity') {
+      document.getElementById('tabActivity').classList.add('active');
+      renderActivityTab();
+      loadActivity();
+    } else {
+      document.getElementById('tabUsers').classList.add('active');
+      renderUsersTab();
+      loadUsers();
+    }
+  }
+
+  // ── TAB 1: Activiteit ──────────────────────────────────────────────────────
+  function renderActivityTab() {
+    const panel = document.getElementById('tabActivity');
+    const userOpts = ['<option value="">Alle gebruikers</option>']
+      .concat(state.users.map((u) => `<option value="${esc(u.user_id)}"${u.user_id === state.userId ? ' selected' : ''}>${esc(u.user_email || u.user_id)}</option>`))
+      .join('');
+    const roleOpts = ['<option value="">Alle rollen</option>']
+      .concat(ROLES.map((r) => `<option value="${esc(r)}"${r === state.role ? ' selected' : ''}>${esc(r)}</option>`))
+      .join('');
+    const modOpts = ['<option value="">Alle modules</option>']
+      .concat(MODULES.map((m) => `<option value="${esc(m)}"${m === state.module ? ' selected' : ''}>${esc(m)}</option>`))
+      .join('');
+    const succOpts = [
+      '<option value="">Alle</option>',
+      `<option value="true"${state.success === 'true' ? ' selected' : ''}>Gelukt</option>`,
+      `<option value="false"${state.success === 'false' ? ' selected' : ''}>Mislukt</option>`,
+    ].join('');
+
+    panel.innerHTML =
+      '<div class="filter-panel">' +
+        `<div class="filter-field"><label>Gebruiker</label><select id="fUser">${userOpts}</select></div>` +
+        `<div class="filter-field"><label>Rol</label><select id="fRole">${roleOpts}</select></div>` +
+        `<div class="filter-field"><label>Module</label><select id="fModule">${modOpts}</select></div>` +
+        `<div class="filter-field"><label>Status</label><select id="fSuccess">${succOpts}</select></div>` +
+        `<div class="filter-field"><label>Zoeken</label><input type="text" id="fQ" placeholder="e-mail, actie, endpoint…" value="${esc(state.q)}"/></div>` +
+        '<div class="preset-group">' +
+          `<button class="preset-chip${state.preset === 'today' ? ' active' : ''}" data-preset="today">Vandaag</button>` +
+          `<button class="preset-chip${state.preset === 'week' ? ' active' : ''}" data-preset="week">Deze week</button>` +
+          `<button class="preset-chip${state.preset === 'month' ? ' active' : ''}" data-preset="month">Deze maand</button>` +
+          `<button class="preset-chip${state.preset === 'custom' ? ' active' : ''}" data-preset="custom">Aangepast</button>` +
+        '</div>' +
+        `<div id="customRange" class="custom-range${state.preset === 'custom' ? ' show' : ''}">` +
+          `<input type="date" id="fFrom" value="${esc(state.from)}"/>` +
+          `<span style="color:var(--text-faint);font-size:11px">t/m</span>` +
+          `<input type="date" id="fTo" value="${esc(state.to)}"/>` +
+        '</div>' +
+        '<button class="btn-reset" id="btnReset">Wis filters</button>' +
+      '</div>' +
+      '<div id="activityTableWrap"></div>' +
+      '<div id="pagination"></div>';
+
+    document.getElementById('fUser').addEventListener('change', (e) => { state.userId = e.target.value; state.page = 1; loadActivity(); });
+    document.getElementById('fRole').addEventListener('change', (e) => { state.role = e.target.value; state.page = 1; loadActivity(); });
+    document.getElementById('fModule').addEventListener('change', (e) => { state.module = e.target.value; state.page = 1; loadActivity(); });
+    document.getElementById('fSuccess').addEventListener('change', (e) => { state.success = e.target.value; state.page = 1; loadActivity(); });
+    document.getElementById('fQ').addEventListener('input', (e) => {
+      state.q = e.target.value;
+      clearTimeout(_qDebounceTimer);
+      _qDebounceTimer = setTimeout(() => { state.page = 1; loadActivity(); }, 300);
+    });
+    document.querySelectorAll('.preset-chip').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.preset = btn.dataset.preset;
+        state.page = 1;
+        renderActivityTab();
+        loadActivity();
+      });
+    });
+    document.getElementById('fFrom').addEventListener('change', (e) => { state.from = e.target.value; state.page = 1; loadActivity(); });
+    document.getElementById('fTo').addEventListener('change',   (e) => { state.to   = e.target.value; state.page = 1; loadActivity(); });
+    document.getElementById('btnReset').addEventListener('click', () => {
+      state.userId = ''; state.role = ''; state.module = ''; state.success = '';
+      state.q = ''; state.preset = 'week'; state.from = ''; state.to = ''; state.page = 1;
+      renderActivityTab();
+      loadActivity();
+    });
+  }
+
+  function renderActivityTable() {
+    const wrap = document.getElementById('activityTableWrap');
+    if (!wrap) return;
+    if (state.loading) {
+      wrap.innerHTML = '<div class="loading-state"><i class="ti ti-loader"></i> Laden…</div>';
+      return;
+    }
+    if (state.error) {
+      wrap.innerHTML = `<div class="empty-state"><div class="empty-icon"><i class="ti ti-alert-triangle"></i></div>${esc(state.error)}</div>`;
+      return;
+    }
+    if (!state.rows.length) {
+      wrap.innerHTML = '<div class="empty-state"><div class="empty-icon"><i class="ti ti-inbox"></i></div>Geen activiteit gevonden voor deze filters.</div>';
+      renderPagination();
+      return;
+    }
+    const rowsHtml = state.rows.map((r) => {
+      const statusBadge = r.success === true
+        ? `<span class="badge badge-ok">${r.status_code || 'ok'}</span>`
+        : r.success === false
+          ? `<span class="badge badge-fail">${r.status_code || 'fail'}</span>`
+          : '<span class="badge badge-neutral">—</span>';
+      const roleBadge = r.user_role ? `<span class="badge badge-role">${esc(r.user_role)}</span>` : '<span style="color:var(--text-faint)">—</span>';
+      const modBadge  = r.module ? `<span class="badge badge-module">${esc(r.module)}</span>` : '<span style="color:var(--text-faint)">—</span>';
+      return '<tr>' +
+        `<td class="cell-time" title="${esc(r.created_at)}">${esc(fmtDateTimeNL(r.created_at))}</td>` +
+        `<td class="cell-email">${esc(r.user_email || '—')}</td>` +
+        `<td>${roleBadge}</td>` +
+        `<td>${modBadge}</td>` +
+        `<td class="cell-action">${esc(r.action || '—')}</td>` +
+        `<td>${esc(r.method || '—')}</td>` +
+        `<td>${statusBadge}</td>` +
+        `<td class="cell-ip">${esc(r.ip || '—')}</td>` +
+      '</tr>';
+    }).join('');
+    wrap.innerHTML =
+      '<div class="data-table-wrap"><table class="data-table">' +
+        '<thead><tr>' +
+          '<th style="width:130px">Tijd</th>' +
+          '<th>Gebruiker</th>' +
+          '<th style="width:110px">Rol</th>' +
+          '<th style="width:130px">Module</th>' +
+          '<th>Actie</th>' +
+          '<th style="width:60px">Methode</th>' +
+          '<th style="width:70px">Status</th>' +
+          '<th style="width:110px">IP</th>' +
+        '</tr></thead>' +
+        `<tbody>${rowsHtml}</tbody>` +
+      '</table></div>';
+    renderPagination();
+  }
+
+  function renderPagination() {
+    const wrap = document.getElementById('pagination');
+    if (!wrap) return;
+    const totalPages = Math.max(1, Math.ceil(state.total / PAGE_SIZE));
+    const from = (state.page - 1) * PAGE_SIZE + 1;
+    const to   = Math.min(state.total, state.page * PAGE_SIZE);
+    wrap.innerHTML =
+      `<div>${state.total > 0 ? `${from}–${to} van ${state.total}` : '0 rijen'}</div>` +
+      '<div class="pagination-buttons">' +
+        `<button class="btn-page" id="btnPrev"${state.page <= 1 ? ' disabled' : ''}>Vorige</button>` +
+        `<span style="align-self:center;padding:0 8px">Pagina ${state.page} / ${totalPages}</span>` +
+        `<button class="btn-page" id="btnNext"${state.page >= totalPages ? ' disabled' : ''}>Volgende</button>` +
+      '</div>';
+    const prev = document.getElementById('btnPrev');
+    const next = document.getElementById('btnNext');
+    if (prev) prev.addEventListener('click', () => { if (state.page > 1) { state.page--; loadActivity(); } });
+    if (next) next.addEventListener('click', () => { if (state.page < totalPages) { state.page++; loadActivity(); } });
+  }
+
+  async function loadActivity() {
+    state.loading = true; state.error = null;
+    renderActivityTable();
+    try {
+      const rng = currentRange();
+      const params = new URLSearchParams();
+      params.set('page', String(state.page));
+      params.set('page_size', String(PAGE_SIZE));
+      if (state.userId)  params.set('user_id', state.userId);
+      if (state.role)    params.set('role',    state.role);
+      if (state.module)  params.set('module',  state.module);
+      if (state.success) params.set('success', state.success);
+      if (state.q)       params.set('q',       state.q);
+      if (rng.from)      params.set('from',    rng.from);
+      if (rng.to)        params.set('to',      rng.to);
+
+      const res = await window.AgentShared.apiFetch('/api/activity-log-list?' + params.toString());
+      if (res.status === 403) {
+        state.rows = []; state.total = 0; state.error = 'Geen toegang tot het logboek.';
+      } else if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        state.rows = []; state.total = 0;
+        state.error = err.error || `Fout ${res.status}`;
+      } else {
+        const data = await res.json();
+        state.rows  = data.rows || [];
+        state.total = data.total || 0;
+      }
+    } catch (e) {
+      state.rows = []; state.total = 0;
+      state.error = 'Netwerkfout: ' + (e?.message || e);
+    } finally {
+      state.loading = false;
+      renderActivityTable();
+    }
+  }
+
+  // ── TAB 2: Per gebruiker ───────────────────────────────────────────────────
+  function renderUsersTab() {
+    const panel = document.getElementById('tabUsers');
+    panel.innerHTML = '<div id="usersTableWrap"></div>';
+  }
+
+  function renderUsersTable() {
+    const wrap = document.getElementById('usersTableWrap');
+    if (!wrap) return;
+    if (state.loading) {
+      wrap.innerHTML = '<div class="loading-state"><i class="ti ti-loader"></i> Laden…</div>';
+      return;
+    }
+    if (state.error) {
+      wrap.innerHTML = `<div class="empty-state"><div class="empty-icon"><i class="ti ti-alert-triangle"></i></div>${esc(state.error)}</div>`;
+      return;
+    }
+    if (!state.users.length) {
+      wrap.innerHTML = '<div class="empty-state"><div class="empty-icon"><i class="ti ti-users-off"></i></div>Nog geen activiteit geregistreerd.</div>';
+      return;
+    }
+    const rowsHtml = state.users.map((u) => {
+      const roleBadge = u.user_role ? `<span class="badge badge-role">${esc(u.user_role)}</span>` : '<span style="color:var(--text-faint)">—</span>';
+      return `<tr class="row-user" data-uid="${esc(u.user_id)}">` +
+        `<td class="cell-email">${esc(u.user_email || u.user_id)}</td>` +
+        `<td>${roleBadge}</td>` +
+        `<td class="cell-time" title="${esc(u.last_login_at || '')}">${esc(fmtDateTimeNL(u.last_login_at))}</td>` +
+        `<td class="cell-time" title="${esc(u.last_activity_at || '')}">${esc(fmtRelTimeNL(u.last_activity_at))}</td>` +
+        `<td class="cell-ip">${esc(u.last_ip || '—')}</td>` +
+        `<td style="text-align:right;font-weight:600">${esc(String(u.action_count || 0))}</td>` +
+      '</tr>';
+    }).join('');
+    wrap.innerHTML =
+      '<div class="data-table-wrap"><table class="data-table">' +
+        '<thead><tr>' +
+          '<th>Gebruiker</th>' +
+          '<th style="width:110px">Rol</th>' +
+          '<th style="width:170px">Laatst ingelogd</th>' +
+          '<th style="width:150px">Laatst actief</th>' +
+          '<th style="width:120px">Laatst IP</th>' +
+          '<th style="width:100px;text-align:right">Acties</th>' +
+        '</tr></thead>' +
+        `<tbody>${rowsHtml}</tbody>` +
+      '</table></div>';
+    wrap.querySelectorAll('.row-user').forEach((tr) => {
+      tr.addEventListener('click', () => {
+        state.userId = tr.dataset.uid || '';
+        state.tab = 'activity';
+        state.page = 1;
+        switchTab('activity');
+      });
+    });
+  }
+
+  async function loadUsers() {
+    state.loading = true; state.error = null;
+    renderUsersTable();
+    try {
+      const res = await window.AgentShared.apiFetch('/api/activity-users-list');
+      if (res.status === 403) {
+        state.users = []; state.error = 'Geen toegang tot het logboek.';
+      } else if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        state.users = [];
+        state.error = err.error || `Fout ${res.status}`;
+      } else {
+        const data = await res.json();
+        state.users = data.users || [];
+      }
+    } catch (e) {
+      state.users = [];
+      state.error = 'Netwerkfout: ' + (e?.message || e);
+    } finally {
+      state.loading = false;
+      renderUsersTable();
+    }
+  }
+
+  function renderForbidden() {
+    document.getElementById('page-content').innerHTML =
+      '<div class="forbidden-card">' +
+        '<h2>Geen toegang</h2>' +
+        '<p>Je hebt geen rechten om het logboek te bekijken (<code>audit.log.view</code>).</p>' +
+        '<a href="/index.html">← Terug naar dashboard</a>' +
+      '</div>';
+  }
+
+  // ── Init ───────────────────────────────────────────────────────────────────
+  async function init() {
+    await window._authSharedReady;
+    const profile = await window.AuthShared.requireAuth();
+    if (!profile) return;
+    if (window.AgentShared && window.AgentShared.renderUserSection) {
+      await window.AgentShared.renderUserSection(profile);
+    }
+
+    await window.RBAC.ensurePermissionsLoaded();
+    if (!window.RBAC.canSync('audit.log.view')) {
+      renderForbidden();
+      return;
+    }
+
+    // Users pre-fetch zodat de gebruiker-dropdown gevuld is in tab Activiteit
+    // (silently — errors laat activity-tab gewoon werken zonder dropdown-vulling).
+    try {
+      const res = await window.AgentShared.apiFetch('/api/activity-users-list');
+      if (res.ok) {
+        const data = await res.json();
+        state.users = data.users || [];
+      }
+    } catch (_) { /* fail-soft */ }
+
+    renderPage();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+
+</body>
+</html>

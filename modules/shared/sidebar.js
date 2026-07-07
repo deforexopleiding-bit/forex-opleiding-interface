@@ -64,7 +64,9 @@
     // lucide "certificate" — funded-certificaten admin.
     'funded-certificates-admin': '<rect x="3" y="4" width="18" height="14" rx="2"/><circle cx="12" cy="11" r="3"/><path d="M9 21l3-3 3 3"/>',
     // lucide "users-cog" — Mentoren beheer (consolidatie van 3 admin-modules).
-    'mentoren-beheer': '<circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><circle cx="18" cy="14" r="2"/><path d="M18 9v2M18 17v2M22 14h-2M14 14h2"/>'
+    'mentoren-beheer': '<circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><circle cx="18" cy="14" r="2"/><path d="M18 9v2M18 17v2M22 14h-2M14 14h2"/>',
+    // lucide "history" — activiteitenlogboek (PR2). Kloklijn met terugpijl.
+    'activity-log': '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/><line x1="12" y1="7" x2="12" y2="12"/><line x1="12" y1="12" x2="15" y2="14"/>'
   };
 
   function svg(key) {
@@ -174,6 +176,10 @@
             svg('admin') + 'Admin' +
             '<span class="nav-badge" id="navApprovalsBadge" data-target="/modules/open-acties.html?status=PENDING" title="Open acties"></span>' +
           '</a>' +
+          // Logboek (PR2 activiteitenlogboek) — leest activity_log via
+          // audit.log.view. applyModuleGating() verbergt de link voor rollen
+          // zonder recht; super_admin ziet 'm altijd via perms.has('*').
+          navLink('activity-log', '/modules/activity-log.html', 'Logboek') +
           // Secret Area — verborgen by default; pas onthuld als
           // GET /api/secret-area { allowed:true } voor deze user true is.
           // Geen user_id / PIN in client-code; alleen de paint-state komt
@@ -657,7 +663,11 @@
     // sub-tab — geen eigen sidebar-link meer. Badge hangt nu op de Finance nav-item zelf.
     // Backward-compat: /modules/open-acties.html bestaat als redirector. RBAC-gating voor
     // de badge (finance.tasks.view) zit in financeTasksBadgeAllowed() hieronder.
-    'admin': 'admin.module.access'
+    'admin': 'admin.module.access',
+    // PR2 activiteitenlogboek — sidebar-link + page-gate identiek. Endpoint-gate
+    // (activity-log-list / activity-users-list) enforced dezelfde permission
+    // server-side (defense-in-depth).
+    'activity-log': 'audit.log.view'
   };
 
   function blockPageAccess() {
