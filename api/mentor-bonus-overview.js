@@ -147,7 +147,7 @@ export default async function handler(req, res) {
     // weergave halen we de children-som per parent apart op (zie hieronder).
     const { data: entries, error: entErr } = await supabaseAdmin
       .from('mentor_ledger_entries')
-      .select('id, mentor_user_id, event_id, entry_type, basis, amount, original_amount, parent_entry_id, pct, status, attendee_id, customer_id, source_invoice_id, idempotency_key, created_at')
+      .select('id, mentor_user_id, event_id, entry_type, basis, amount, original_amount, parent_entry_id, pct, status, attendee_id, customer_id, source_invoice_id, source_quote_id, idempotency_key, created_at')
       .eq('mentor_user_id', effectiveUserId)
       .eq('entry_type', 'bonus')
       .is('parent_entry_id', null)
@@ -582,20 +582,60 @@ export default async function handler(req, res) {
       // lijst met een 'geen_abonnement'-badge, maar telt niet mee in de KPI's
       // tot er een schema ingericht is.
 
-      // Vind subscription via customer → deals → latest sub.
+      // Combineer subs van de klant tot één sale-schema, afgebakend op de
+      // bonus-basis. Reden: bij een AANBETALING staan er altijd 2 subs klaar
+      // (aanbetaling = 1 termijn groot bedrag + termijnen-abbo = N × klein
+      // bedrag), op verschillende deals maar samen één sale. Oude gedrag
+      // (kies laatste-start_date sub) toont "0/1" voor Richiano-achtige
+      // sales. We nemen subs op VOLGORDE (start_date asc) op zolang de
+      // cumulatieve waarde de bonus-basis niet significant overschrijdt
+      // (5% marge). Zo horen aanbetaling + termijnen samen (samen ≈ basis);
+      // een ECHT losse tweede sale (basis zou ver overschreden worden)
+      // wordt NIET meegesleept. Fallback zonder basis: laatste-start_date
+      // sub (oude gedrag) — voorkomt regressies bij klanten zonder basis.
+      // Randgeval multi-sale klant: bij >1 sale per customer kan de custPaid-
+      // route (nbPaid) facturen van meerdere sales bevatten; de basis-marge
+      // hier voorkomt dat de subs samensmelten. Exactheid verbetert zodra de
+      // wizard-flow alles onder één deal zet.
       const customerDeals = dealsByCust.get(r.customer_id) || [];
-      let sub = null;
+      const allCustSubs = [];
       for (const d of customerDeals) {
-        const candidate = subByDeal.get(d.id);
-        if (candidate && (!sub || (candidate.start_date || '') > (sub.start_date || ''))) {
-          sub = candidate;
+        const s = subByDeal.get(d.id);
+        if (s) allCustSubs.push(s);
+      }
+      allCustSubs.sort((a, b) => String(a.start_date || '').localeCompare(String(b.start_date || '')));
+
+      let subsForSale = [];
+      if (basis > 0 && allCustSubs.length > 0) {
+        const cap = basis * 1.05;
+        let cum = 0;
+        for (const s of allCustSubs) {
+          const w = (inclPerTerm(s) || 0) * (Number(s.term_count) || 0);
+          if (subsForSale.length > 0 && cum + w > cap) break;
+          subsForSale.push(s);
+          cum += w;
+          if (cum >= cap) break;
         }
       }
+      if (subsForSale.length === 0) {
+        // Fallback: laatste-start_date sub (oude gedrag).
+        let latest = null;
+        for (const s of allCustSubs) {
+          if (!latest || String(s.start_date || '') > String(latest.start_date || '')) latest = s;
+        }
+        if (latest) subsForSale = [latest];
+      }
+      // Leidende sub = eerste chronologisch (bij aanbetaling-patroon: de
+      // aanbetaling; anders de enige sub).
+      const sub = subsForSale[0] || null;
 
-      // Schema bepalen. Fallback bij ontbrekend schema: 1 termijn met
+      // Schema bepalen. combinedTermCount = som van term_counts van de
+      // meegenomen subs. Fallback bij ontbrekend schema: 1 termijn met
       // due_date = invoice-issue OF ledger-created_at, status afgeleid van
       // ledger-status zodat de UI iets toont.
-      let termCount    = sub && Number.isFinite(Number(sub.term_count)) ? Number(sub.term_count) : null;
+      let combinedTermCount = 0;
+      for (const s of subsForSale) combinedTermCount += (Number(s.term_count) || 0);
+      let termCount    = combinedTermCount > 0 ? combinedTermCount : null;
       const perTermInc = inclPerTerm(sub);
       const cycleMo    = billingCycleMonths(sub?.billing_cycle);
       const startStr   = sub?.start_date || null;
@@ -607,11 +647,16 @@ export default async function handler(req, res) {
         termCount = 1;
       }
 
-      // Per-termijn-bonus = mentor.amount × (per_term_incl / basis).
-      // Bij ontbrekend schema valt 'ie terug op 1 termijn = mentor.amount.
+      // Per-termijn-bonus:
+      //   * enkele sub of geen combined: mentor × (per_term_incl / basis).
+      //   * combined multi-sub: mentor / termCount (proxy — individuele
+      //     termijnen kunnen andere waardes hebben; echte factuur-due_date
+      //     + amount worden per termijn overrulet via invList[i]).
       let perTermMentor;
       if (schemaUnknown || basis <= 0) {
         perTermMentor = mentorAmount;
+      } else if (subsForSale.length > 1) {
+        perTermMentor = mentorAmount / termCount;
       } else {
         perTermMentor = (mentorAmount * perTermInc) / basis;
       }

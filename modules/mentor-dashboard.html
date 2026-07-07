@@ -545,11 +545,11 @@
     switch (tab) {
       case 'overdue':     return rows.filter((s) => s.has_overdue === true);
       case 'pauze':       return rows.filter((s) => s.status === 'pauze');
-      case 'wacht_start': return rows.filter((s) => (s.status === 'wacht_1e_betaling' || s.status === 'geen_abonnement' || s.status === 'wacht_op_start') && s.has_overdue !== true);
+      case 'wacht_start': return rows.filter((s) => (s.status === 'geen_abonnement' || s.status === 'wacht_op_start') && s.has_overdue !== true);
       case 'geannuleerd': return rows.filter((s) => s.status === 'geannuleerd');
       case 'alle':        return rows;
       case 'actief':
-      default:            return rows.filter((s) => s.status === 'actief' || s.status === 'voltooid' || s.has_overdue === true);
+      default:            return rows.filter((s) => s.status === 'actief' || s.status === 'voltooid' || s.status === 'wacht_1e_betaling' || s.has_overdue === true);
     }
   }
 
