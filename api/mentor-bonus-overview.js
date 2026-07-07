@@ -601,19 +601,29 @@ export default async function handler(req, res) {
       }
 
       // Genereer termijnen.
-      // Bron van waarheid = ECHTE facturen (invoicesBySub primair; invoicesByCust
-      // fallback). Termijn i wordt gematcht op de i-de factuur in de op due_date
-      // gesorteerde lijst; die factuur bepaalt due_date + betaal-status. Bij
-      // klanten met meerdere sales/subs kan de customer-fallback te veel
-      // facturen bevatten — sub-route is daarom primair en de exactheid
-      // verbetert zodra facturen consequent aan subs gekoppeld zijn.
-      // Als er voor termijn i géén factuur is (bv. toekomstige termijnen die
-      // nog niet zijn aangemaakt), vallen we terug op de berekende addMonths-
-      // datum + nbPaid-teller.
+      // Bron van waarheid = ECHTE facturen. Termijn i wordt gematcht op de i-de
+      // factuur in de op due_date gesorteerde lijst; die factuur bepaalt due_date
+      // + betaal-status. We kiezen bewust de COMPLEETSTE van invoicesBySub en
+      // invoicesByCust (langste lijst wint; gelijkspel → sub, dan preciezer).
+      // Reden: bij klanten waar sommige facturen wel en andere niet aan de sub
+      // gekoppeld zijn (tl_subscription_id=NULL op deel), is de sub-lijst
+      // incompleet maar niet leeg — pure "sub-tenzij-leeg" zou dan de rest van
+      // de termijnen op berekende datums laten vallen en ze onterecht
+      // 'achterstallig' maken.
+      // Randgeval multi-sale klant: bij >1 sale per customer kan invoicesByCust
+      // facturen van meerdere sales bevatten (langer, maar niet 1-op-1). Voor
+      // de nu bekende gevallen (1 sale, deels ongekoppelde facturen) is
+      // "completere lijst" correct; de exactheid verbetert zodra facturen
+      // consequent aan de sub gekoppeld zijn (wizard-flow).
+      // Als er voor termijn i géén factuur is (toekomstige termijn die nog niet
+      // is aangemaakt), vallen we terug op de berekende addMonths-datum +
+      // nbPaid-teller.
       const subKeyForTerm = sub?.teamleader_subscription_id || null;
       const invListSub    = subKeyForTerm ? (invoicesBySub.get(subKeyForTerm) || null) : null;
       const invListCust   = r.customer_id ? (invoicesByCust.get(r.customer_id) || null) : null;
-      const invList       = (invListSub && invListSub.length) ? invListSub : invListCust;
+      const subLen        = invListSub  ? invListSub.length  : 0;
+      const custLen       = invListCust ? invListCust.length : 0;
+      const invList       = (custLen > subLen) ? invListCust : (invListSub || invListCust);
 
       const termijnen = [];
       for (let i = 0; i < termCount; i++) {
