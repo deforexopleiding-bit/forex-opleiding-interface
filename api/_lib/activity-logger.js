@@ -22,6 +22,43 @@ function getIp(req) {
 }
 
 /**
+ * Prefix-matching mapping van endpoint-naam (het pad na /api/) op de
+ * sidebar-modules. Volgorde = prioriteit: eerste hit wint (specifiek →
+ * algemeen). Case-insensitive. Uitbreiden = regel toevoegen bovenaan.
+ *
+ * De module wordt bij LOGGEN afgeleid en opgeslagen op activity_log.module.
+ * Mapping-wijzigingen gelden vooruit; bestaande rijen zonder module tonen
+ * later in het PR2-scherm als 'Overig'.
+ */
+const MODULE_RULES = [
+  { module: 'Finance',         test: (s) => /(payout|invoice|finance|\bbank\b|dunning|cash-traject)/i.test(s) },
+  { module: 'Onboarding',      test: (s) => /^onboarding/i.test(s) },
+  { module: 'Klanten',         test: (s) => /(customer|klant)/i.test(s) },
+  { module: 'E-mail',          test: (s) => /(^email|email-)/i.test(s) },
+  { module: 'Events',          test: (s) => /event/i.test(s) },
+  { module: 'Mentoren beheer', test: (s) => /(mentor|coaching|1on1)/i.test(s) },
+  { module: 'Sales',           test: (s) => /(sales|deal|quote)/i.test(s) },
+  { module: 'Tickets',         test: (s) => /ticket/i.test(s) },
+  { module: 'Follow-up',       test: (s) => /follow-up/i.test(s) },
+  { module: 'Admin',           test: (s) => /(admin|user|permission|role|impersonate)/i.test(s) },
+  { module: 'Studenten',       test: (s) => /(student|assessment)/i.test(s) },
+  { module: 'Kennisbank',      test: (s) => /kennisbank/i.test(s) },
+];
+
+/**
+ * Leidt de sidebar-module af uit een endpoint (bv. '/api/mentor-payout-approve'
+ * of een action-string). Retourneert 'Overig' bij geen match.
+ */
+export function deriveModule(endpoint) {
+  if (!endpoint) return 'Overig';
+  const raw = String(endpoint).replace(/^\/?api\/?/i, ''); // strip /api/ prefix
+  for (const rule of MODULE_RULES) {
+    if (rule.test(raw)) return rule.module;
+  }
+  return 'Overig';
+}
+
+/**
  * Log een activiteit (permission-check, endpoint-toegang, etc.).
  *
  * Fire-and-forget: dit is `async` maar caller moet 'em NIET await'en in
@@ -52,6 +89,10 @@ export async function logActivity({
     const url    = req?.url    || null;
     const method = req?.method || null;
     const success = (typeof statusCode === 'number') ? (statusCode < 400) : null;
+    // Module wordt bij LOGGEN afgeleid (niet achteraf) — mapping-wijzigingen
+    // gelden vooruit. Voer endpoint mee, val terug op action als endpoint
+    // ontbreekt zodat 'audit.log.view' en soortgelijke actie-keys ook mappen.
+    const module = deriveModule(url || action);
 
     // 1) Append naar activity_log — fail-soft.
     supabaseAdmin
@@ -65,6 +106,7 @@ export async function logActivity({
         method,
         status_code : statusCode,
         success,
+        module,
         ip,
         user_agent  : ua,
         detail      : detail || null,

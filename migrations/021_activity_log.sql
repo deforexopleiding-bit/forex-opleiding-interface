@@ -25,15 +25,21 @@ create table if not exists activity_log (
   method       text null,                       -- GET/POST/…
   status_code  int  null,                       -- HTTP-resultaat
   success      boolean null,                    -- status_code < 400
+  module       text null,                       -- sidebar-module afgeleid uit endpoint (Finance/Onboarding/…)
   ip           text null,
   user_agent   text null,
   detail       jsonb null,                      -- ruimte voor latere verrijking
   created_at   timestamptz not null default now()
 );
 
+-- module-kolom kan ontbreken bij een bestaande activity_log uit een eerdere
+-- run — voeg 'em idempotent toe.
+alter table activity_log add column if not exists module text null;
+
 create index if not exists activity_log_user_id_idx    on activity_log (user_id);
 create index if not exists activity_log_created_at_idx on activity_log (created_at desc);
 create index if not exists activity_log_action_idx     on activity_log (action);
+create index if not exists activity_log_module_idx     on activity_log (module);
 
 -- ── 2) user_last_activity ────────────────────────────────────────────────────
 create table if not exists user_last_activity (
