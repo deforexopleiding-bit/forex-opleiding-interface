@@ -110,7 +110,6 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
       payout_id     : existing.id,
       status        : existing.status,
       reason        : 'al definitief',
-      _debug        : { code_version: 'payout-v627-window-period-start', skipped: true },
     };
   }
 
@@ -131,14 +130,6 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
     .lt('released_at', period.start);
   if (ledErr) throw new Error(`ledger fetch (${mentorUserId}): ${ledErr.message}`);
   const bonusTotal = round2((ledgerRows || []).reduce((s, r) => s + (Number(r.amount) || 0), 0));
-  // TEMP DEBUG (verwijderen na diagnose): bewaar wat de query hier écht ziet.
-  const _debug = {
-    code_version     : 'payout-v627-window-period-start',
-    period_start     : period.start,
-    ledger_rows_count: (ledgerRows || []).length,
-    ledger_amounts   : (ledgerRows || []).map((r) => r.amount),
-    bonusTotal,
-  };
 
   // 4) COACHING — helper.
   let coachingBreakdown = null;
@@ -366,6 +357,5 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
     total_excl      : totalExcl,
     btw_amount      : btwAmount,
     lines,
-    _debug,
   };
 }
