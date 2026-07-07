@@ -229,6 +229,11 @@ export default async function handler(req, res) {
     // customer (breder, matcht ook subscriptions zonder TL-id).
     const subPaidMap  = new Map(); // teamleader_subscription_id → { paid_total, last_paid_date }
     const custPaidMap = new Map(); // customer_id                → { paid_total, last_paid_date }
+    // Factuur-lijsten per subscription en per customer — gesorteerd op due_date
+    // (asc). Dit is de bron van waarheid voor per-termijn status (echte
+    // vervaldatum + betaalstatus i.p.v. berekende addMonths).
+    const invoicesBySub  = new Map(); // tl_subscription_id → [{id, due_date, amount_total, amount_paid, status, paid_date}]
+    const invoicesByCust = new Map(); // customer_id        → [idem]
 
     // Verzamel alle bekende teamleader_subscription_ids uit subByDeal.
     const tlSubIds = [];
@@ -240,7 +245,7 @@ export default async function handler(req, res) {
     if (uniqTlSubIds.length) {
       const { data: subInvs, error: subInvErr } = await supabaseAdmin
         .from('invoices')
-        .select('tl_subscription_id, amount_paid, status, paid_date')
+        .select('id, tl_subscription_id, amount_total, amount_paid, status, paid_date, due_date')
         .in('tl_subscription_id', uniqTlSubIds);
       if (!subInvErr) {
         for (const inv of (subInvs || [])) {
@@ -253,6 +258,16 @@ export default async function handler(req, res) {
           if (inv.paid_date && (!acc.last_paid_date || inv.paid_date > acc.last_paid_date)) {
             acc.last_paid_date = inv.paid_date;
           }
+          if (!invoicesBySub.has(inv.tl_subscription_id)) invoicesBySub.set(inv.tl_subscription_id, []);
+          invoicesBySub.get(inv.tl_subscription_id).push(inv);
+        }
+        // Sorteer per sub op due_date asc (facturen zonder due_date achteraan).
+        for (const arr of invoicesBySub.values()) {
+          arr.sort((a, b) => {
+            const da = a.due_date || '9999-12-31';
+            const db = b.due_date || '9999-12-31';
+            return da < db ? -1 : da > db ? 1 : 0;
+          });
         }
       }
     }
@@ -277,6 +292,8 @@ export default async function handler(req, res) {
           if (inv.paid_date && (!acc.last_paid_date || inv.paid_date > acc.last_paid_date)) {
             acc.last_paid_date = inv.paid_date;
           }
+          if (!invoicesByCust.has(inv.customer_id)) invoicesByCust.set(inv.customer_id, []);
+          invoicesByCust.get(inv.customer_id).push(inv);
           // Overdue: due_date < vandaag EN nog niet volledig betaald.
           const total = Number(inv.amount_total) || 0;
           const paid  = Number(inv.amount_paid)  || 0;
@@ -291,6 +308,14 @@ export default async function handler(req, res) {
               od.amount += Math.max(0, total - paid);
             }
           }
+        }
+        // Sorteer per customer op due_date asc.
+        for (const arr of invoicesByCust.values()) {
+          arr.sort((a, b) => {
+            const da = a.due_date || '9999-12-31';
+            const db = b.due_date || '9999-12-31';
+            return da < db ? -1 : da > db ? 1 : 0;
+          });
         }
       }
     }
@@ -575,27 +600,59 @@ export default async function handler(req, res) {
       }
 
       // Genereer termijnen.
+      // Bron van waarheid = ECHTE facturen (invoicesBySub primair; invoicesByCust
+      // fallback). Termijn i wordt gematcht op de i-de factuur in de op due_date
+      // gesorteerde lijst; die factuur bepaalt due_date + betaal-status. Bij
+      // klanten met meerdere sales/subs kan de customer-fallback te veel
+      // facturen bevatten — sub-route is daarom primair en de exactheid
+      // verbetert zodra facturen consequent aan subs gekoppeld zijn.
+      // Als er voor termijn i géén factuur is (bv. toekomstige termijnen die
+      // nog niet zijn aangemaakt), vallen we terug op de berekende addMonths-
+      // datum + nbPaid-teller.
+      const subKeyForTerm = sub?.teamleader_subscription_id || null;
+      const invListSub    = subKeyForTerm ? (invoicesBySub.get(subKeyForTerm) || null) : null;
+      const invListCust   = r.customer_id ? (invoicesByCust.get(r.customer_id) || null) : null;
+      const invList       = (invListSub && invListSub.length) ? invListSub : invListCust;
+
       const termijnen = [];
       for (let i = 0; i < termCount; i++) {
-        const dueDate = addMonths(startDate, i * cycleMo);
-        const dueYmd  = dueDate.toISOString().slice(0, 10);
-        const isPaid  = i < nbPaid;
-        const tAmount = round2(perTermMentor);
+        const calcDate = addMonths(startDate, i * cycleMo);
+        const calcYmd  = calcDate.toISOString().slice(0, 10);
+        const tAmount  = round2(perTermMentor);
+
+        const invForTerm = (invList && i < invList.length) ? invList[i] : null;
+
+        let effectiveYmd;
+        let isPaidTerm;
+        let bucketDate;
+        if (invForTerm) {
+          effectiveYmd = invForTerm.due_date || calcYmd;
+          const total  = Number(invForTerm.amount_total) || 0;
+          const paid   = Number(invForTerm.amount_paid)  || 0;
+          isPaidTerm   = total > 0 && paid + 0.005 >= total;
+          bucketDate   = invForTerm.due_date ? new Date(invForTerm.due_date + 'T00:00:00Z') : calcDate;
+        } else {
+          effectiveYmd = calcYmd;
+          isPaidTerm   = i < nbPaid;
+          bucketDate   = calcDate;
+        }
+
         // Status: 'betaald' | 'achterstallig' (open + due voorbij) | 'open' (toekomst).
         let tStatus;
-        if (isPaid)                tStatus = 'betaald';
-        else if (dueYmd < todayISO) tStatus = 'achterstallig';
-        else                        tStatus = 'open';
+        if (isPaidTerm)                    tStatus = 'betaald';
+        else if (effectiveYmd < todayISO)  tStatus = 'achterstallig';
+        else                                tStatus = 'open';
+
         termijnen.push({
           index   : i + 1,
-          due_date: dueYmd,
+          due_date: effectiveYmd,
           amount  : tAmount,
           status  : tStatus,
         });
         // KPI open/maand-bucket alleen als er een echt schema is.
-        if (!isPaid && !schemaUnknown) {
+        if (!isPaidTerm && !schemaUnknown) {
           open_total += tAmount;
-          const k = ymKey(dueDate);
+          const k = ymKey(bucketDate);
           if (monthAmount.has(k)) {
             monthAmount.set(k, (monthAmount.get(k) || 0) + tAmount);
           }
