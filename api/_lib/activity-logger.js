@@ -39,8 +39,9 @@ const MODULE_RULES = [
   { module: 'Mentoren beheer', test: (s) => /(mentor|coaching|1on1)/i.test(s) },
   { module: 'Sales',           test: (s) => /(sales|deal|quote)/i.test(s) },
   { module: 'Tickets',         test: (s) => /ticket/i.test(s) },
+  { module: 'Takenbeheer',     test: (s) => /(^taken|\btaken\b|\btask\b)/i.test(s) },
   { module: 'Follow-up',       test: (s) => /follow-up/i.test(s) },
-  { module: 'Admin',           test: (s) => /(admin|user|permission|role|impersonate)/i.test(s) },
+  { module: 'Admin',           test: (s) => /(admin|auth|user|permission|role|impersonate)/i.test(s) },
   { module: 'Studenten',       test: (s) => /(student|assessment)/i.test(s) },
   { module: 'Kennisbank',      test: (s) => /kennisbank/i.test(s) },
 ];
@@ -90,9 +91,12 @@ export async function logActivity({
     const method = req?.method || null;
     const success = (typeof statusCode === 'number') ? (statusCode < 400) : null;
     // Module wordt bij LOGGEN afgeleid (niet achteraf) — mapping-wijzigingen
-    // gelden vooruit. Voer endpoint mee, val terug op action als endpoint
-    // ontbreekt zodat 'audit.log.view' en soortgelijke actie-keys ook mappen.
-    const module = deriveModule(url || action);
+    // gelden vooruit. Probeer eerst de URL; levert die 'Overig' op (het pad
+    // matcht dan geen module-woord), val dan terug op de action-key. Action-
+    // keys zijn domein-first (finance.tasks.view / onboarding.inbox.view) en
+    // mappen betrouwbaar via de MODULE_RULES.
+    let module = deriveModule(url);
+    if (module === 'Overig') module = deriveModule(action);
 
     // 1) Append naar activity_log — fail-soft.
     supabaseAdmin
