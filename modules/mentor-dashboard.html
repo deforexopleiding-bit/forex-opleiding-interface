@@ -543,17 +543,19 @@
       const firstBadge = s.first_invoice_paid
         ? '<span class="badge badge-green">1e factuur betaald</span>'
         : '<span class="badge badge-grey">Nog niet</span>';
-      // Cashtraject: toon TOTAAL trajectbedrag in de kolom (niet vrijgevallen),
-      // met "vrij: €X" als subtiele indicatie. mentor_share_total is bij cash
-      // de som van reeds vrijgevallen termijnen; traject_total_incl is het
-      // volledige bedrag over alle N termijnen. Reguliere sales blijven op
-      // mentor_share_total (schema-unknown-fallback ongewijzigd).
+      // Kolom "Totaal bonus":
+      //   * Cashtraject: TOTAAL traject-bonus (traject_total_incl) + "vrij: €X"
+      //     badge (mentor_share_total = som vrijgevallen termijnen).
+      //   * Regulier: volledige mentor_share_total + "vrij: €X" badge
+      //     (released_share = som van vrijgegeven/uitbetaalde children, of
+      //     mentor_share_total als de parent zelf al vrij/uitbetaald is).
+      //   * schema_unknown behoudt de bestaande "nog niet in KPI"-badge.
       const shareCell = s.is_cash_traject
         ? `${fmtEUR(s.traject_total_incl != null ? s.traject_total_incl : s.mentor_share_total)}`
           + ` <span class="badge badge-grey" style="margin-left:4px" title="Reeds vrijgevallen">vrij: ${fmtEUR(s.mentor_share_total)}</span>`
         : (s.schema_unknown
             ? `${fmtEUR(s.mentor_share_total)} <span class="badge badge-grey" style="margin-left:4px" title="Nog niet meegeteld in KPI\'s tot er een abonnement is">nog niet in KPI</span>`
-            : fmtEUR(s.mentor_share_total));
+            : `${fmtEUR(s.mentor_share_total)} <span class="badge badge-grey" style="margin-left:4px" title="Reeds vrijgevallen">vrij: ${fmtEUR(s.released_share != null ? s.released_share : 0)}</span>`);
       const summary =
         `<tr class="bonus-row${isOpen ? ' open' : ''}" data-row-key="${rowKey}">
           <td><strong>${esc(s.customer_label || '—')}</strong></td>
@@ -639,7 +641,8 @@
             ? `<div>Totaal traject-bonus: <strong style="color:var(--text)">${fmtEUR(s.traject_total_incl != null ? s.traject_total_incl : s.sale_total_incl)}</strong></div>
                <div>Reeds vrijgevallen: <strong style="color:var(--text)">${fmtEUR(s.mentor_share_total)}</strong></div>`
             : `<div>Sale-totaal (incl. BTW): <strong style="color:var(--text)">${fmtEUR(s.sale_total_incl)}</strong></div>
-               <div>Jouw totaal-aandeel: <strong style="color:var(--text)">${fmtEUR(s.mentor_share_total)}</strong></div>`}
+               <div>Jouw totaal-aandeel: <strong style="color:var(--text)">${fmtEUR(s.mentor_share_total)}</strong></div>
+               <div>Reeds vrijgevallen: <strong style="color:var(--text)">${fmtEUR(s.released_share != null ? s.released_share : 0)}</strong></div>`}
           <div>Per termijn: <strong style="color:var(--text)">${fmtEUR(s.per_term_amount)}</strong> (${s.term_count}×)</div>
           <div>Betaald: <strong style="color:var(--text)">${Number(s.paid_term_count)||0}/${Number(s.term_count)||0}</strong></div>
         </div>
