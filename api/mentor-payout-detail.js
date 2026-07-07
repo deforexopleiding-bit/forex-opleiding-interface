@@ -30,6 +30,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { computeBonusOverview } from './mentor-bonus-overview.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MENTOR_VISIBLE_STATUSES = new Set(['goedgekeurd', 'uitbetaald']);
@@ -147,69 +148,106 @@ export default async function handler(req, res) {
       mentor_email = tm?.email || null;
     }
 
-    // 5) Bonus-breakdown: klant-labels + term-hint + source per entry.
-    const bonusRows = (bonusRaw || []).filter((e) => e.entry_type === 'bonus');
-    const custIds   = [...new Set(bonusRows.map((e) => e.customer_id).filter(Boolean))];
-    const custById  = new Map();
-    if (custIds.length) {
-      const { data: custRows, error: custErr } = await supabaseAdmin
-        .from('customers')
-        .select('id, first_name, last_name, company_name, is_company, email')
-        .in('id', custIds);
-      if (custErr) throw new Error('customers fetch: ' + custErr.message);
-      for (const c of (custRows || [])) custById.set(c.id, c);
-    }
-    const customerLabel = (c) => {
-      if (!c) return null;
-      if (c.is_company) return c.company_name || c.email || '(klant)';
-      const nm = [c.first_name, c.last_name].filter(Boolean).join(' ').trim();
-      return nm || c.email || '(klant)';
-    };
-    // Traject-label uit note: "Handmatig traject: <label> — termijn N/M".
-    const noteTrajectLabel = (note) => {
-      if (typeof note !== 'string') return null;
-      const m = note.match(/^Handmatig traject:\s*(.+?)\s*—/);
-      return m ? m[1].trim() : null;
-    };
-    const derive = (e) => {
-      const key = String(e.idempotency_key || '');
-      // Traject: "cashtraject:<uuid>:<termIdx>:mentor:<userId>"
-      const cashMatch = key.match(/^cashtraject:[^:]+:(\d+):mentor:/);
-      if (cashMatch) {
-        return {
-          label    : customerLabel(custById.get(e.customer_id)) || noteTrajectLabel(e.note) || '(traject)',
-          term_hint: `termijn ${cashMatch[1]}`,
-          source   : 'coaching_traject',
-        };
-      }
-      // Event-child (proportional / paidrel-term): term = eventuele nummer.
-      // "<parentId>:paidrel-term:<N>" of "<parentId>:pay:<paymentId>" of ":paidamount:<cents>"
-      const paidRelMatch = key.match(/:paidrel-term:(\d+)/);
-      return {
-        label    : customerLabel(custById.get(e.customer_id)) || '(onbekend)',
-        term_hint: paidRelMatch ? `termijn ${paidRelMatch[1]}` : '',
-        source   : 'event',
-      };
-    };
-    const BREAKDOWN_CAP = 50;
-    const breakdownAll = bonusRows.map((e) => {
-      const d = derive(e);
-      return {
-        label       : d.label,
-        term_hint   : d.term_hint,
-        amount      : round2(Number(e.amount) || 0),
-        released_at : e.released_at || null,
-        source      : d.source,
-      };
-    }).sort((a, b) => b.amount - a.amount);
-    let bonus_breakdown = breakdownAll;
+    // 5) Bonus-breakdown: uit dezelfde bron als de mentor-cashflow-tooltip.
+    //    Rapport maand M → pak entry voor maand M-1 uit projection_12m.
+    //    De term_hint komt hier NIET meer als "termijn N" want de overview
+    //    aggregeert per klant/termijn-due_date; we mappen wat 'ie geeft:
+    //    { label, term (optioneel), amount, status }. Voor 'event' zetten we
+    //    source op 'event', voor traject-achtige rijen kunnen we niet altijd
+    //    onderscheiden — de overview merkt handmatige trajecten aan
+    //    is_cash_traject in per_event/sales, maar de projection_12m breakdown
+    //    heeft die info niet expliciet. Voor nu: alle regels bron 'event',
+    //    de klant/termijn-info is wat de mentor zelf ziet in de tooltip.
+    let bonus_breakdown = [];
     let bonus_rest_count  = 0;
     let bonus_rest_amount = 0;
-    if (breakdownAll.length > BREAKDOWN_CAP) {
+    try {
+      // M-1 ym-key voor deze payout: 'YYYY-MM-01' → 'YYYY-MM'.
+      const pm = String(payout.period_month || '').slice(0, 7);
+      if (pm) {
+        // Pak M-1 via addMonths equivalent: parse jaar/mnd en trek 1 af.
+        const parts = pm.split('-');
+        const y = Number(parts[0]);
+        const mo = Number(parts[1]);
+        const pyi = mo === 1 ? y - 1 : y;
+        const pmi = mo === 1 ? 12    : mo - 1;
+        const mMinus1 = `${pyi}-${String(pmi).padStart(2, '0')}`;
+        const bo = await computeBonusOverview(payout.mentor_user_id);
+        const entry = (bo.projection_12m || []).find((m) => m.month === mMinus1);
+        if (entry && Array.isArray(entry.breakdown)) {
+          bonus_breakdown = entry.breakdown.map((b) => ({
+            label      : String(b.label || '(onbekend)'),
+            term_hint  : b.term ? `termijn ${b.term}` : '',
+            amount     : round2(Number(b.amount) || 0),
+            released_at: null,
+            source     : b.status === 'betaald' ? 'event' : 'event',
+          }));
+          bonus_rest_count  = Number(entry.rest_count)  || 0;
+          bonus_rest_amount = round2(Number(entry.rest_amount) || 0);
+        }
+      }
+    } catch (e) {
+      console.warn('[mentor-payout-detail] bonus-overview fetch faalde:', e?.message || e);
+    }
+    // Fallback: als de overview geen breakdown gaf (bv. oude data), leun op
+    // de ledger-entries die aan deze payout gekoppeld zijn (audit-mechanisme
+    // uit PR #629). Dit is de "backup"-bron zodat oude rapporten blijven
+    // werken.
+    if (bonus_breakdown.length === 0 && Array.isArray(bonusRaw) && bonusRaw.length > 0) {
+      const bonusRows = bonusRaw.filter((e) => e.entry_type === 'bonus');
+      const custIds   = [...new Set(bonusRows.map((e) => e.customer_id).filter(Boolean))];
+      const custById  = new Map();
+      if (custIds.length) {
+        const { data: custRows } = await supabaseAdmin
+          .from('customers')
+          .select('id, first_name, last_name, company_name, is_company, email')
+          .in('id', custIds);
+        for (const c of (custRows || [])) custById.set(c.id, c);
+      }
+      const customerLabel = (c) => {
+        if (!c) return null;
+        if (c.is_company) return c.company_name || c.email || '(klant)';
+        const nm = [c.first_name, c.last_name].filter(Boolean).join(' ').trim();
+        return nm || c.email || '(klant)';
+      };
+      const noteTrajectLabel = (note) => {
+        const m = String(note || '').match(/^Handmatig traject:\s*(.+?)\s*—/);
+        return m ? m[1].trim() : null;
+      };
+      const derive = (e) => {
+        const key = String(e.idempotency_key || '');
+        const cashMatch = key.match(/^cashtraject:[^:]+:(\d+):mentor:/);
+        if (cashMatch) {
+          return {
+            label    : customerLabel(custById.get(e.customer_id)) || noteTrajectLabel(e.note) || '(traject)',
+            term_hint: `termijn ${cashMatch[1]}`,
+            source   : 'coaching_traject',
+          };
+        }
+        const paidRelMatch = key.match(/:paidrel-term:(\d+)/);
+        return {
+          label    : customerLabel(custById.get(e.customer_id)) || '(onbekend)',
+          term_hint: paidRelMatch ? `termijn ${paidRelMatch[1]}` : '',
+          source   : 'event',
+        };
+      };
+      const BREAKDOWN_CAP = 50;
+      const breakdownAll = bonusRows.map((e) => {
+        const d = derive(e);
+        return {
+          label       : d.label,
+          term_hint   : d.term_hint,
+          amount      : round2(Number(e.amount) || 0),
+          released_at : e.released_at || null,
+          source      : d.source,
+        };
+      }).sort((a, b) => b.amount - a.amount);
       bonus_breakdown = breakdownAll.slice(0, BREAKDOWN_CAP);
-      const rest = breakdownAll.slice(BREAKDOWN_CAP);
-      bonus_rest_count  = rest.length;
-      bonus_rest_amount = round2(rest.reduce((s, x) => s + x.amount, 0));
+      if (breakdownAll.length > BREAKDOWN_CAP) {
+        const rest = breakdownAll.slice(BREAKDOWN_CAP);
+        bonus_rest_count  = rest.length;
+        bonus_rest_amount = round2(rest.reduce((s, x) => s + x.amount, 0));
+      }
     }
 
     return res.status(200).json({
