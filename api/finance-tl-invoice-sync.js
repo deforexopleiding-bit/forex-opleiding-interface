@@ -26,6 +26,7 @@
 import { verifyAdmin, supabaseAdmin } from './supabase.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 import { getClientIp } from './_lib/audit-customer.js';
+import { releaseProportionalForPaidAmount } from './_lib/mentor-ledger-engine.js';
 
 const SYNC_FROM = '2026-01-01';
 
@@ -69,6 +70,25 @@ function mapStatus(inv, payable, due) {
   return 'open';
 }
 
+// Bonus-vrijgave-hook: per klant met zojuist toegenomen amount_paid roepen we
+// releaseProportionalForPaidAmount aan. Fail-soft per klant; totals wordt
+// bijgewerkt. dry_run → helemaal geen aanroep (geen geld-mutaties in dry).
+async function runBonusReleases(customerIds, dryRun, totals) {
+  if (dryRun) return; // sync-dry-run mag geen ledger raken
+  for (const cid of customerIds) {
+    try {
+      const r = await releaseProportionalForPaidAmount({ customerId: cid, dryRun: false });
+      const rel = Number(r?.total_released) || 0;
+      const kids = Number(r?.released_children) || 0;
+      totals.bonus_released = Math.round((totals.bonus_released + rel) * 100) / 100;
+      totals.bonus_children += kids;
+    } catch (e) {
+      totals.release_errors += 1;
+      console.error('[finance-invoice-sync] bonus-release', cid, e?.message || e);
+    }
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -88,9 +108,19 @@ export default async function handler(req, res) {
   if (!tok) return res.status(400).json({ error: 'Geen actief Teamleader-token' });
 
   const depts = department_id ? [department_id] : DEPARTMENTS;
-  const totals = { processed: 0, inserted: 0, updated: 0, skipped_no_customer: 0, skipped_old: 0, errors: 0 };
+  const totals = {
+    processed: 0, inserted: 0, updated: 0, skipped_no_customer: 0, skipped_old: 0, errors: 0,
+    // Bonus-vrijgave-hook (na hoofd-loop; alleen live-mode schrijft).
+    payments_grew: 0, bonus_released: 0, bonus_children: 0, release_errors: 0,
+  };
   const skipped_details = [];
   let sampleShape = null;
+  // Customer-ids waar in deze run een INSERT met paid>0 of UPDATE met stijgende
+  // amount_paid gebeurde. Aan het eind van elke (partial of finale) run roepen
+  // we releaseProportionalForPaidAmount aan per klant. Idempotent — dubbele
+  // sync geeft geen dubbele vrijgave (functie ziet reeds vrijgegeven children
+  // via de paidamount:CENTS-key én via de reedsReleased-som).
+  const custIdsPaymentGrew = new Set();
 
   // Skip-detail-regel (hoofddoel deze ronde: wie zijn de no-customer-skips?).
   const pushSkip = (inv, incl) => {
@@ -169,13 +199,19 @@ export default async function handler(req, res) {
 
           // Idempotent: SELECT → UPDATE/INSERT op tl_invoice_id (geen ON CONFLICT;
           // partial unique index kan geen arbiter zijn — lesson 20 mei).
-          const { data: existing } = await supabaseAdmin.from('invoices').select('id').eq('tl_invoice_id', inv.id).maybeSingle();
+          // amount_paid meelezen voor betaal-delta-detectie (bonus-hook).
+          const { data: existing } = await supabaseAdmin.from('invoices').select('id, amount_paid').eq('tl_invoice_id', inv.id).maybeSingle();
+          const newPaid = Number(paid) || 0;
           if (existing) {
+            const oldPaid = Number(existing.amount_paid) || 0;
+            const paymentIncreased = newPaid > oldPaid + 0.005;
             if (!dry_run) { const { error } = await supabaseAdmin.from('invoices').update(row).eq('id', existing.id); if (error) throw new Error('update: ' + error.message); }
             totals.updated++;
+            if (paymentIncreased && cust.id) custIdsPaymentGrew.add(cust.id);
           } else {
             if (!dry_run) { const { error } = await supabaseAdmin.from('invoices').insert(row); if (error) throw new Error('insert: ' + error.message); }
             totals.inserted++;
+            if (newPaid > 0 && cust.id) custIdsPaymentGrew.add(cust.id);
           }
         } catch (e) {
           totals.errors++;
@@ -186,6 +222,8 @@ export default async function handler(req, res) {
       if (batch.length < 100) { di++; page = 1; } else { page++; }
 
       if (totals.processed >= maxPerRun && di < depts.length) {
+        totals.payments_grew = custIdsPaymentGrew.size;
+        await runBonusReleases(custIdsPaymentGrew, dry_run, totals);
         return res.status(200).json({
           done: false, dry_run, totals,
           next_cursor: { di, page },
@@ -194,6 +232,8 @@ export default async function handler(req, res) {
         });
       }
     }
+    totals.payments_grew = custIdsPaymentGrew.size;
+    await runBonusReleases(custIdsPaymentGrew, dry_run, totals);
 
     try {
       await supabaseAdmin.from('audit_log').insert({
@@ -201,7 +241,7 @@ export default async function handler(req, res) {
         action: dry_run ? 'finance_invoice_sync.dry_run' : 'finance_invoice_sync.run',
         entity_type: 'invoice', entity_id: null,
         after_json: { totals, dry_run, department_id, sync_from: SYNC_FROM },
-        reason_text: `Finance invoice-sync (${dry_run ? 'dry-run' : 'live'}): ${totals.inserted} nieuw, ${totals.updated} bijgewerkt, ${totals.skipped_no_customer} zonder klant, ${totals.errors} errors`,
+        reason_text: `Finance invoice-sync (${dry_run ? 'dry-run' : 'live'}): ${totals.inserted} nieuw, ${totals.updated} bijgewerkt, ${totals.skipped_no_customer} zonder klant, ${totals.errors} errors — bonus-hook: ${totals.payments_grew} klanten met nieuwe betaling, ${totals.bonus_released.toFixed(2)} vrijgegeven (${totals.bonus_children} children), ${totals.release_errors} release-errors`,
         ip_address: getClientIp(req),
       });
     } catch (e) { console.error('[finance-invoice-sync] audit:', e.message); }
