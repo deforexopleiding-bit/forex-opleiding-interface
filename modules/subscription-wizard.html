@@ -484,8 +484,18 @@ function renderSubs(){
   const zero=isZeroVat();
   const warn = zero ? `<div class="bonus" style="background:rgba(245,158,11,.14);color:#b45309;margin-bottom:10px;padding:10px;border-radius:8px;font-size:12.5px">⚠️ ${esc(saleType()==='intracommunautair'?'Intracommunautair':'Buiten EU')}: alle regels worden met <strong>0% BTW</strong> gefactureerd. Het BTW-tarief blijft zichtbaar voor de administratie, maar Teamleader rekent 0%.</div>` : '';
   // Opt-in override voor de 3-dagen/30-dagen startdatum-regel — alleen
-  // relevant in deal-modus (standalone kent geen cursus-start).
-  const overrideBlock = (state.mode === 'deal') ? `
+  // relevant in deal-modus (standalone kent geen cursus-start), én alleen
+  // als er daadwerkelijk een sub is die de regel overtreedt (anders overbodig
+  // + nodigt uit tot verkeerd gebruik). Zodra de override al aan staat blijft
+  // 'ie zichtbaar, ook al lijkt de datum daardoor "geldig".
+  const courseStartIso = _courseStartIso();
+  const hasStartViolation = (state.mode === 'deal' && !!courseStartIso) && state.subs.some((s) => {
+    if (!s.start_date) return false;
+    const maxSub = _maxSubStartFor(_subKindOf(s));
+    return maxSub && s.start_date > maxSub;
+  });
+  const showOverride = (state.mode === 'deal') && (hasStartViolation || state.overrideStartDateRule);
+  const overrideBlock = showOverride ? `
     <div style="margin:10px 0 14px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elev)">
       <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:12.5px">
         <input type="checkbox" id="overrideStartDate" ${state.overrideStartDateRule?'checked':''} style="margin-top:2px" />
@@ -532,6 +542,11 @@ function renderSubs(){
   root.querySelectorAll('[data-desccustom]').forEach(inp=>inp.addEventListener('input',e=>{ state.subs[Number(e.target.dataset.desccustom)].description=e.target.value; }));
   // Sub-velden (start/term): targeted herberekening.
   root.querySelectorAll('[data-f]').forEach(inp=>inp.addEventListener('input',e=>{ state.subs[Number(e.target.dataset.i)][e.target.dataset.f]=e.target.value; updateComputed(); }));
+  // Startdatum-change: re-render zodat de override-checkbox reactief
+  // verschijnt/verdwijnt wanneer de datum de 3d/30d-cursusregel overtreedt
+  // of weer geldig wordt. 'change' i.p.v. 'input' voor date-picker → geen
+  // cursor/focus-verlies tijdens typen.
+  root.querySelectorAll('[data-f="start_date"]').forEach(inp=>inp.addEventListener('change',()=>renderSubs()));
   // term_count is verplicht ≥1: bij blur met leeg/0/ongeldig →
   // terugzetten naar 1 zodat de wizard niet in een niet-opslaanbare
   // staat blijft. UI-required + validateSubs vangen de rest af.
