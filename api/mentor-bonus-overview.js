@@ -174,11 +174,12 @@ export default async function handler(req, res) {
       }
     }
 
-    // Snel pad: geen bonussen.
+    // Snel pad: geen bonussen. 43 maanden lege buckets (-6..+36) — zelfde
+    // range als de hoofd-projectie zodat de frontend consistent kan renderen.
     if (rows.length === 0) {
       const now = new Date();
       const projection_12m = [];
-      for (let i = 0; i < 12; i++) {
+      for (let i = -6; i <= 36; i++) {
         projection_12m.push({ month: ymKey(addMonths(now, i)), amount: 0 });
       }
       return res.status(200).json({
@@ -349,10 +350,13 @@ export default async function handler(req, res) {
     const thisYm = ymKey(now);
     const nextYm = ymKey(addMonths(now, 1));
 
-    // monthBuckets: 12 maanden vanaf deze maand.
+    // monthBuckets: 43 maanden — 6 terug t/m 36 vooruit. Veld-naam
+    // projection_12m blijft voor backward-compat; de frontend legt er een
+    // schuifbaar 12-maands venster overheen. Termijnen buiten dit venster
+    // worden hieronder genegeerd (bucket-check `monthAmount.has(k)`).
     const monthOrder = [];
     const monthAmount = new Map();
-    for (let i = 0; i < 12; i++) {
+    for (let i = -6; i <= 36; i++) {
       const k = ymKey(addMonths(now, i));
       monthOrder.push(k);
       monthAmount.set(k, 0);

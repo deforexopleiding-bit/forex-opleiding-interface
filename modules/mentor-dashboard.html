@@ -92,12 +92,24 @@
     .bonus-subtab.active { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); }
 
     /* 12-maands balk in Verdiensten-overzicht */
-    .month-bars { display: grid; grid-template-columns: repeat(12, 1fr); gap: 6px; align-items: end; padding: 14px 12px 10px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; min-height: 180px; }
-    .month-bar { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    /* Projection: schuifbaar 12-maands venster over 43 maanden (-6..+36). */
+    .month-bars-viewport { position: relative; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .month-bars-scroll { overflow-x: auto; overflow-y: hidden; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; }
+    .month-bars { display: flex; gap: 6px; align-items: end; padding: 14px 12px 10px; width: max-content; min-height: 180px; }
+    .month-bar { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 52px; }
+    .month-bar.now { position: relative; }
+    .month-bar.now .bar-label { color: var(--accent, #6366f1); font-weight: 700; }
+    .month-bar.now::after { content: 'nu'; position: absolute; top: -14px; left: 50%; transform: translateX(-50%); font-size: 9px; font-weight: 700; color: var(--accent, #6366f1); text-transform: uppercase; letter-spacing: 0.5px; }
     .month-bar .bar { width: 100%; background: linear-gradient(180deg, var(--accent, #6366f1) 0%, rgba(99,102,241,0.55) 100%); border-radius: 4px 4px 0 0; min-height: 2px; transition: height 0.2s; }
     .month-bar .bar.zero { background: var(--bg-elev-2, rgba(100,116,139,0.18)); }
-    .month-bar .bar-label { font-size: 10.5px; color: var(--text-faint); margin-top: 2px; text-transform: uppercase; }
+    .month-bar .bar-label { font-size: 10.5px; color: var(--text-faint); margin-top: 2px; text-transform: uppercase; text-align: center; line-height: 1.1; }
     .month-bar .bar-amount { font-size: 10.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+    /* Scroll-hint fades op de randen. */
+    .month-bars-viewport::before, .month-bars-viewport::after { content: ''; position: absolute; top: 0; bottom: 0; width: 20px; pointer-events: none; z-index: 2; transition: opacity 0.15s; }
+    .month-bars-viewport::before { left: 0; background: linear-gradient(90deg, var(--bg-elev), transparent); }
+    .month-bars-viewport::after  { right: 0; background: linear-gradient(-90deg, var(--bg-elev), transparent); }
+    .month-bars-viewport[data-at-start="1"]::before { opacity: 0; }
+    .month-bars-viewport[data-at-end="1"]::after { opacity: 0; }
 
     /* Mijn studenten — kaarten + uitklap */
     .student-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
@@ -393,20 +405,62 @@
       wrap.innerHTML = `<div class="empty-state"><i class="ti ti-chart-bar-off"></i>Geen projectie beschikbaar.</div>`;
       return;
     }
+    // months bevat 43 buckets (-6..+36 t.o.v. nu). We renderen alles naast
+    // elkaar in een horizontaal scrollbare viewport en scrollen bij mount
+    // naar de HUIDIGE maand zodat -6..-1 links "achter" de rand zit.
+    const MONTHS_SHORT = ['', 'jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+    const now = new Date();
+    const nowYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const max = months.reduce((m, x) => Math.max(m, Number(x.amount) || 0), 0);
-    const bars = months.map((m) => {
-      const amt   = Number(m.amount) || 0;
-      const pct   = max > 0 ? Math.max(2, Math.round((amt / max) * 140)) : 2;
-      const lbl   = (m.month || '').split('-')[1] || '';
-      const monthShort = ['', 'jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'][parseInt(lbl, 10)] || lbl;
+    let nowIdx = months.findIndex((m) => (m.month || '') === nowYm);
+    if (nowIdx < 0) nowIdx = 0;
+    const bars = months.map((m, idx) => {
+      const amt = Number(m.amount) || 0;
+      const pct = max > 0 ? Math.max(2, Math.round((amt / max) * 140)) : 2;
+      const parts = String(m.month || '').split('-');
+      const monIdx = parseInt(parts[1], 10);
+      const yr = parts[0] ? String(parts[0]).slice(-2) : '';
+      const monShort = MONTHS_SHORT[monIdx] || parts[1] || '';
+      // Label toont altijd jaar (bv. "mrt '26") zodat je niet verdwaalt over
+      // meerdere jaren scrollen.
+      const label = yr ? `${monShort} '${yr}` : monShort;
+      const isNow = idx === nowIdx;
       return `
-        <div class="month-bar" title="${esc(m.month)} — ${fmtEUR(amt)}">
+        <div class="month-bar${isNow ? ' now' : ''}" title="${esc(m.month)} — ${fmtEUR(amt)}">
           <div class="bar-amount">${amt > 0 ? Math.round(amt) : ''}</div>
           <div class="bar ${amt > 0 ? '' : 'zero'}" style="height:${pct}px"></div>
-          <div class="bar-label">${esc(monthShort)}</div>
+          <div class="bar-label">${esc(label)}</div>
         </div>`;
     }).join('');
-    wrap.innerHTML = `<div class="month-bars">${bars}</div>`;
+    wrap.innerHTML = `
+      <div class="month-bars-viewport" data-at-start="0" data-at-end="0">
+        <div class="month-bars-scroll">
+          <div class="month-bars">${bars}</div>
+        </div>
+      </div>`;
+    // Scroll de huidige maand links-vooraan (met kleine offset zodat de
+    // scroll-hint-fade zichtbaar blijft). Update at-start/at-end op scroll
+    // zodat de fade-hints subtiel verdwijnen bij de randen.
+    const viewport = wrap.querySelector('.month-bars-viewport');
+    const scroll   = wrap.querySelector('.month-bars-scroll');
+    const bar      = scroll?.querySelector('.month-bar');
+    if (scroll && bar) {
+      const colW = bar.getBoundingClientRect().width + 6; /* gap */
+      // Positioneer: huidige maand ~1 kolom vanaf links (zodat je één stapje
+      // terug meteen ziet dat er historie is).
+      const targetLeft = Math.max(0, (nowIdx - 1) * colW);
+      scroll.scrollLeft = targetLeft;
+      const updateEdges = () => {
+        if (!viewport) return;
+        const atStart = scroll.scrollLeft <= 2 ? '1' : '0';
+        const maxScroll = scroll.scrollWidth - scroll.clientWidth;
+        const atEnd = scroll.scrollLeft >= maxScroll - 2 ? '1' : '0';
+        viewport.setAttribute('data-at-start', atStart);
+        viewport.setAttribute('data-at-end', atEnd);
+      };
+      scroll.addEventListener('scroll', updateEdges, { passive: true });
+      updateEdges();
+    }
   }
 
   // ── Bonus per klant (platte tabel, paginering 25/pagina, inklap-detail) ──
