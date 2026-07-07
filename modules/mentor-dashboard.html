@@ -492,7 +492,7 @@
     ).join('');
     wrap.innerHTML =
       '<table class="bonus-table"><thead>' +
-      '<tr><th>Klant</th><th>Event</th><th>Status</th><th>Termijnen</th><th>Laatste betaling</th><th>1e factuur</th><th class="num">Bonus (jouw aandeel)</th><th></th></tr>' +
+      '<tr><th>Klant</th><th>Event</th><th>Status</th><th>Termijnen</th><th>Laatste betaling</th><th>1e factuur</th><th class="num">Totaal bonus</th><th></th></tr>' +
       '</thead><tbody>' + rows + '</tbody></table>';
   }
 
@@ -571,7 +571,7 @@
 
     wrap.innerHTML = tabStrip +
       '<table class="bonus-table"><thead>' +
-      '<tr><th>Klant</th><th>Event</th><th>Status</th><th>Termijnen</th><th>Laatste betaling</th><th>1e factuur</th><th class="num">Bonus (jouw aandeel)</th><th></th></tr>' +
+      '<tr><th>Klant</th><th>Event</th><th>Status</th><th>Termijnen</th><th>Laatste betaling</th><th>1e factuur</th><th class="num">Totaal bonus</th><th></th></tr>' +
       '</thead><tbody>' + bodyRows + '</tbody></table>' + pagerHtml;
 
     bindBonusTabClicks(wrap);
@@ -627,8 +627,11 @@
       <td colspan="8">
         ${schemaLine}
         <div style="display:flex;flex-wrap:wrap;gap:20px;font-size:12.5px;color:var(--text-dim);margin-bottom:6px">
-          <div>Sale-totaal (incl. BTW): <strong style="color:var(--text)">${fmtEUR(s.sale_total_incl)}</strong></div>
-          <div>Jouw totaal-aandeel: <strong style="color:var(--text)">${fmtEUR(s.mentor_share_total)}</strong></div>
+          ${s.is_cash_traject
+            ? `<div>Totaal traject-bonus: <strong style="color:var(--text)">${fmtEUR(s.traject_total_incl != null ? s.traject_total_incl : s.sale_total_incl)}</strong></div>
+               <div>Reeds vrijgevallen: <strong style="color:var(--text)">${fmtEUR(s.mentor_share_total)}</strong></div>`
+            : `<div>Sale-totaal (incl. BTW): <strong style="color:var(--text)">${fmtEUR(s.sale_total_incl)}</strong></div>
+               <div>Jouw totaal-aandeel: <strong style="color:var(--text)">${fmtEUR(s.mentor_share_total)}</strong></div>`}
           <div>Per termijn: <strong style="color:var(--text)">${fmtEUR(s.per_term_amount)}</strong> (${s.term_count}×)</div>
           <div>Betaald: <strong style="color:var(--text)">${Number(s.paid_term_count)||0}/${Number(s.term_count)||0}</strong></div>
         </div>
