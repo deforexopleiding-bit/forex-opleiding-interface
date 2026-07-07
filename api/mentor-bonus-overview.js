@@ -740,13 +740,21 @@ export default async function handler(req, res) {
       //   sub.status='cancelled'  → 'geannuleerd'
       //   alle termijnen betaald  → 'voltooid'
       //   ≥1 termijn betaald      → 'actief'
+      //   0 betaald + 0 facturen verstuurd + startdatum in toekomst
+      //                            → 'wacht_op_start' (met datum in badge)
       //   anders (0 betaald)      → 'wacht_1e_betaling'
+      // Startdatum-detectie: sub.start_date primair; fallback = due_date van
+      // de vroegste factuur voor deze sale (invList[0]).
+      const firstInvoiceSent = !!(invList && invList.length > 0);
+      const firstInvoiceDue  = firstInvoiceSent ? (invList[0].due_date || null) : null;
+      const saleStartYmd     = sub?.start_date || firstInvoiceDue || null;
       let saleStatus;
       const subCancelled = sub && String(sub.status || '').toLowerCase() === 'cancelled';
       if (schemaUnknown)          saleStatus = 'geen_abonnement';
       else if (subCancelled)      saleStatus = 'geannuleerd';
       else if (nbPaid >= termCount && termCount > 0) saleStatus = 'voltooid';
       else if (nbPaid >= 1)       saleStatus = 'actief';
+      else if (!firstInvoiceSent && saleStartYmd && saleStartYmd > todayISO) saleStatus = 'wacht_op_start';
       else                        saleStatus = 'wacht_1e_betaling';
       // Geannuleerde ledger-entry overschrijft alle andere status-afleiding:
       // sale is zichtbaar in de lijst met de grijze 'Geannuleerd'-badge en
@@ -798,6 +806,7 @@ export default async function handler(req, res) {
           schema_unknown     : schemaUnknown,
           // Nieuw (per-klant status + voortgang):
           status             : saleStatus,
+          start_date         : saleStartYmd,
           paid_term_count    : nbPaid,
           first_invoice_paid : firstInvoicePaid,
           last_payment_date  : lastPaymentDate,

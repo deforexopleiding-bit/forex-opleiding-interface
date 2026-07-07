@@ -480,7 +480,7 @@
     switch (tab) {
       case 'overdue':     return rows.filter((s) => s.has_overdue === true);
       case 'pauze':       return rows.filter((s) => s.status === 'pauze');
-      case 'wacht_start': return rows.filter((s) => (s.status === 'wacht_1e_betaling' || s.status === 'geen_abonnement') && s.has_overdue !== true);
+      case 'wacht_start': return rows.filter((s) => (s.status === 'wacht_1e_betaling' || s.status === 'geen_abonnement' || s.status === 'wacht_op_start') && s.has_overdue !== true);
       case 'geannuleerd': return rows.filter((s) => s.status === 'geannuleerd');
       case 'alle':        return rows;
       case 'actief':
@@ -504,9 +504,12 @@
       '</div>';
   }
 
-  function statusBadge(status) {
+  function statusBadge(status, startDate) {
     switch (status) {
       case 'actief':            return '<span class="badge badge-green">Actief</span>';
+      case 'wacht_op_start':    return startDate
+        ? `<span class="badge badge-blue" title="Startdatum in de toekomst; 1e factuur nog niet verstuurd">Start op ${esc(fmtDateNL(startDate))}</span>`
+        : '<span class="badge badge-blue">Wacht op start</span>';
       case 'wacht_1e_betaling': return '<span class="badge badge-amber">Wacht op 1e betaling</span>';
       case 'voltooid':          return '<span class="badge badge-blue">Voltooid</span>';
       case 'pauze':             return '<span class="badge badge-grey" title="Handmatig traject is gepauzeerd">Pauze</span>';
@@ -617,7 +620,7 @@
             <div>${esc(s.event_title || '—')}</div>
             <div style="font-size:11px;color:var(--text-faint)">${fmtDateNL(s.event_starts)}</div>
           </td>
-          <td>${statusBadge(s.status)}${s.has_overdue ? ' <span class="badge badge-red" title="' + Number(s.overdue_count) + ' factu(u)r(en) te laat — €' + Number(s.overdue_amount).toFixed(2) + ' openstaand">Achterstand</span>' : ''}</td>
+          <td>${statusBadge(s.status, s.start_date)}${s.has_overdue ? ' <span class="badge badge-red" title="' + Number(s.overdue_count) + ' factu(u)r(en) te laat — €' + Number(s.overdue_amount).toFixed(2) + ' openstaand">Achterstand</span>' : ''}</td>
           <td>
             ${paidCount}/${termCount}
             <div class="progress-bar mini"><div style="width:${pct.toFixed(1)}%"></div></div>
