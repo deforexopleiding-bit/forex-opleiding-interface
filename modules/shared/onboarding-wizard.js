@@ -419,7 +419,7 @@
   // types (embed/stats) behoren tot info-only voor RBAC/required-validatie
   // maar krijgen wel hun eigen UI/config-form.
   const FIELD_TYPES = ['short_text','long_text','email','tel','number','single_choice','multi_choice','select','scale','availability','consent','file_download'];
-  const INFO_TYPES  = ['heading','paragraph','image','divider','embed','stats'];
+  const INFO_TYPES  = ['heading','paragraph','image','divider','embed','stats','link_button'];
   const ALL_TYPES   = INFO_TYPES.concat(FIELD_TYPES);
   const TYPE_LABEL = {
     heading        : 'Kop',
@@ -428,6 +428,7 @@
     divider        : 'Scheidingslijn',
     embed          : 'Embed (iframe)',
     stats          : 'Stats-kaarten',
+    link_button    : 'Knop / link',
     short_text     : 'Tekst (kort)',
     long_text      : 'Tekst (lang)',
     email          : 'E-mail',
@@ -791,6 +792,7 @@
       { value: '', label: '', sub: '' },
       { value: '', label: '', sub: '' },
     ] };
+    if (type === 'link_button') return { id, type, label: 'Word lid', url: '', style: 'primary' };
     if (type === 'file_download') {
       return {
         id, type,
@@ -921,6 +923,28 @@
       ta.addEventListener('input', () => { b.text = ta.value; setDirty(true); });
       row.appendChild(ta);
       host.appendChild(row);
+      return;
+    }
+    if (b.type === 'link_button') {
+      const rowLabel = document.createElement('div'); rowLabel.className = 'field-row';
+      rowLabel.innerHTML = `<label class="lbl">Knoptekst</label>`;
+      const inpLabel = document.createElement('input');
+      inpLabel.type = 'text';
+      inpLabel.value = b.label || '';
+      inpLabel.placeholder = 'Bijv. Word lid van Discord';
+      inpLabel.addEventListener('input', () => { b.label = inpLabel.value; setDirty(true); });
+      rowLabel.appendChild(inpLabel);
+      host.appendChild(rowLabel);
+
+      const rowUrl = document.createElement('div'); rowUrl.className = 'field-row';
+      rowUrl.innerHTML = `<label class="lbl">URL</label>`;
+      const inpUrl = document.createElement('input');
+      inpUrl.type = 'url';
+      inpUrl.value = b.url || '';
+      inpUrl.placeholder = 'https://discord.gg/...';
+      inpUrl.addEventListener('input', () => { b.url = inpUrl.value; setDirty(true); });
+      rowUrl.appendChild(inpUrl);
+      host.appendChild(rowUrl);
       return;
     }
     if (b.type === 'image') {
@@ -1698,6 +1722,16 @@
     }
     if (b.type === 'paragraph') {
       wrap.appendChild(mk('div', 'pv-p', b.text || '')); return wrap;
+    }
+    if (b.type === 'link_button') {
+      const a = document.createElement('a');
+      a.href = b.url || '#';
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = b.label || 'Open link';
+      a.style.cssText = 'display:inline-block;padding:10px 18px;background:#1473d6;color:#fff;border-radius:8px;font-weight:600;text-decoration:none;font-size:13.5px';
+      wrap.appendChild(a);
+      return wrap;
     }
     if (b.type === 'divider') {
       wrap.innerHTML = '<hr class="pv-div"/>'; return wrap;
