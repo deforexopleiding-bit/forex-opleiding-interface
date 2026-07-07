@@ -160,16 +160,26 @@
           <label for="tcf-module">Module</label>
           <select name="module" id="tcf-module">
             <option value="">— Geen / niet gekoppeld —</option>
+            <option value="AI Agents">AI Agents</option>
+            <option value="Admin">Admin</option>
+            <option value="Agent center">Agent center</option>
+            <option value="Alle studenten">Alle studenten</option>
+            <option value="Appointment setting">Appointment setting</option>
+            <option value="Control Center">Control Center</option>
             <option value="Dashboard">Dashboard</option>
             <option value="E-mail">E-mail</option>
+            <option value="Events">Events</option>
+            <option value="Finance">Finance</option>
             <option value="Follow-up">Follow-up</option>
-            <option value="Lisa">Lisa</option>
+            <option value="Kennisbank">Kennisbank</option>
             <option value="Klanten">Klanten</option>
-            <option value="Admin">Admin</option>
-            <option value="Control Center">Control Center</option>
-            <option value="Taken">Taken</option>
-            <option value="Agents">Agents</option>
-            <option value="Meetings">Meetings</option>
+            <option value="Mentoren beheer">Mentoren beheer</option>
+            <option value="Onboarding">Onboarding</option>
+            <option value="Sales">Sales</option>
+            <option value="Studenten">Studenten</option>
+            <option value="Takenbeheer">Takenbeheer</option>
+            <option value="Tickets">Tickets</option>
+            <option value="Vergaderruimte">Vergaderruimte</option>
             <option value="Anders">Anders</option>
           </select>
           <div class="field-error" id="tcf-err-module"></div>
@@ -197,7 +207,7 @@ const STATUS_LABELS = {
 const TYPE_LABELS = { bug: 'Bug', feature: 'Feature', question: 'Vraag' };
 const VALID_TYPES = ['bug', 'feature', 'question'];
 const VALID_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
-const KNOWN_MODULES = ['Dashboard','E-mail','Follow-up','Lisa','Klanten','Admin','Control Center','Taken','Agents','Meetings','Anders'];
+const KNOWN_MODULES = ['AI Agents','Admin','Agent center','Alle studenten','Appointment setting','Control Center','Dashboard','E-mail','Events','Finance','Follow-up','Kennisbank','Klanten','Mentoren beheer','Onboarding','Sales','Studenten','Takenbeheer','Tickets','Vergaderruimte','Anders'];
 
 const state = {
   status: 'open',     // actieve tab
