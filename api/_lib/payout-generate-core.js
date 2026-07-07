@@ -113,6 +113,20 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
     };
   }
 
+  // 2b) HERBEREKENING: als er al een concept/open payout bestaat, koppel
+  //     eerst DIE payout's eigen entries los. Zonder deze stap zou de
+  //     bonus-query (met payout_id IS NULL) de eerder gekoppelde entries
+  //     missen en bonusTotal op 0 zetten. We raken ALLEEN entries met
+  //     payout_id = existing.id → nooit entries van andere rapporten.
+  //     Goedgekeurde/uitbetaalde payouts zijn hierboven al ge-return'd.
+  if (existing) {
+    const { error: unlinkErr } = await supabaseAdmin
+      .from('mentor_ledger_entries')
+      .update({ payout_id: null })
+      .eq('payout_id', existing.id);
+    if (unlinkErr) throw new Error(`ledger unlink (${mentorUserId}): ${unlinkErr.message}`);
+  }
+
   // 3) BONUS — event/bonus-venster voor rapportmaand M.
   //    Model: coaching = maand M zelf (via computeCoachingEarnings hieronder);
   //    event/bonus = t/m eind maand M-1 (bovengrens = 1e vd rapportmaand M,
@@ -123,13 +137,14 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
   //    GEEN type-onderscheid: event/handmatig/regulier volgen dezelfde regel.
   const { data: ledgerRows, error: ledErr } = await supabaseAdmin
     .from('mentor_ledger_entries')
-    .select('amount, released_at')
+    .select('id, amount, released_at')
     .eq('mentor_user_id', mentorUserId)
     .eq('status', 'vrijgegeven')
     .is('payout_id', null)
     .lt('released_at', period.start);
   if (ledErr) throw new Error(`ledger fetch (${mentorUserId}): ${ledErr.message}`);
   const bonusTotal = round2((ledgerRows || []).reduce((s, r) => s + (Number(r.amount) || 0), 0));
+  const bonusEntryIds = (ledgerRows || []).map((r) => r.id);
 
   // 4) COACHING — helper.
   let coachingBreakdown = null;
@@ -252,6 +267,24 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
       .single();
     if (insErr) throw new Error(`payouts insert (${mentorUserId}): ${insErr.message}`);
     payoutId = inserted.id;
+  }
+
+  // 9b) LEDGER-KOPPELING: koppel de geselecteerde bonus-entries aan deze
+  //     payout. Zonder deze stap blijft payout_id NULL en zou een nieuwe
+  //     generatie na goedkeuring/uitbetaling dezelfde entries opnieuw pakken
+  //     (dubbele uitbetaling). `.is('payout_id', null)`-guard voorkomt dat
+  //     entries die intussen door een parallel proces aan een andere payout
+  //     zijn gekoppeld, per ongeluk worden overschreven. Niet atomair met de
+  //     lines-insert: bij een fout halverwege blijft de koppeling deels
+  //     gedaan; een herberekening lost dat op (eerst unlink, dan opnieuw
+  //     link). Bekende beperking t.b.v. eenvoudige implementatie.
+  if (bonusEntryIds.length > 0) {
+    const { error: linkErr } = await supabaseAdmin
+      .from('mentor_ledger_entries')
+      .update({ payout_id: payoutId })
+      .in('id', bonusEntryIds)
+      .is('payout_id', null);
+    if (linkErr) throw new Error(`ledger link (${mentorUserId}): ${linkErr.message}`);
   }
 
   // 10) Lines opbouwen. Volgorde: bonus → coaching-categorieën → travel →
