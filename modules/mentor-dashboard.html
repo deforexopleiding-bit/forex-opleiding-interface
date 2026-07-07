@@ -553,9 +553,10 @@
 
   function renderBonusDetailRow(s, rowKey, isOpen) {
     const termRows = (s.termijnen || []).map((t) => {
-      const badge = t.status === 'betaald'
-        ? '<span class="badge badge-green">Betaald</span>'
-        : '<span class="badge badge-amber">Open</span>';
+      let badge;
+      if (t.status === 'betaald')            badge = '<span class="badge badge-green">Betaald</span>';
+      else if (t.status === 'achterstallig') badge = '<span class="badge badge-red" title="Vervaldatum voorbij en nog niet betaald">Achterstallig</span>';
+      else                                    badge = '<span class="badge badge-amber">Open</span>';
       return `<tr>
         <td>${t.index}</td>
         <td>${fmtDateNL(t.due_date)}</td>

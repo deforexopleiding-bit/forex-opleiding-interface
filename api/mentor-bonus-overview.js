@@ -571,13 +571,19 @@ export default async function handler(req, res) {
       const termijnen = [];
       for (let i = 0; i < termCount; i++) {
         const dueDate = addMonths(startDate, i * cycleMo);
+        const dueYmd  = dueDate.toISOString().slice(0, 10);
         const isPaid  = i < nbPaid;
         const tAmount = round2(perTermMentor);
+        // Status: 'betaald' | 'achterstallig' (open + due voorbij) | 'open' (toekomst).
+        let tStatus;
+        if (isPaid)                tStatus = 'betaald';
+        else if (dueYmd < todayISO) tStatus = 'achterstallig';
+        else                        tStatus = 'open';
         termijnen.push({
           index   : i + 1,
-          due_date: dueDate.toISOString().slice(0, 10),
+          due_date: dueYmd,
           amount  : tAmount,
-          status  : isPaid ? 'betaald' : 'open',
+          status  : tStatus,
         });
         // KPI open/maand-bucket alleen als er een echt schema is.
         if (!isPaid && !schemaUnknown) {
