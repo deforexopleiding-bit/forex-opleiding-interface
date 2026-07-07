@@ -180,7 +180,7 @@ export default async function handler(req, res) {
       const now = new Date();
       const projection_12m = [];
       for (let i = -6; i <= 36; i++) {
-        projection_12m.push({ month: ymKey(addMonths(now, i)), amount: 0, paid: 0, expected: 0 });
+        projection_12m.push({ month: ymKey(addMonths(now, i)), amount: 0, paid: 0, expected: 0, breakdown: [], rest_count: 0, rest_amount: 0 });
       }
       return res.status(200).json({
         ok: true,
@@ -355,10 +355,13 @@ export default async function handler(req, res) {
     // schuifbaar 12-maands venster overheen. Termijnen buiten dit venster
     // worden hieronder genegeerd (bucket-check `monthAmount.has(k)`).
     // monthPaid + monthOpen splitsen paid/expected voor de cashflow-projectie.
+    // monthBreakdown: per maand een lijst met bijdragen ({label, term, amount,
+    // status}) voor de hover-tooltip. Lazy gevuld.
     const monthOrder = [];
     const monthAmount = new Map();
     const monthPaid = new Map();
     const monthOpen = new Map();
+    const monthBreakdown = new Map();
     for (let i = -6; i <= 36; i++) {
       const k = ymKey(addMonths(now, i));
       monthOrder.push(k);
@@ -496,6 +499,15 @@ export default async function handler(req, res) {
             if (monthOpen.has(k)) monthOpen.set(k, round2((monthOpen.get(k) || 0) + amt));
           }
           if (monthAmount.has(k)) monthAmount.set(k, round2((monthAmount.get(k) || 0) + amt));
+          if (monthAmount.has(k)) {
+            if (!monthBreakdown.has(k)) monthBreakdown.set(k, []);
+            monthBreakdown.get(k).push({
+              label : t.client_label || '(traject)',
+              term  : term.index,
+              amount: amt,
+              status: term.status === 'betaald' ? 'betaald' : 'verwacht',
+            });
+          }
         }
       }
 
@@ -605,25 +617,40 @@ export default async function handler(req, res) {
       }
       allCustSubs.sort((a, b) => String(a.start_date || '').localeCompare(String(b.start_date || '')));
 
+      // #625-regressie-fix: filter cancelled subs eruit vóór de combinatie
+      // zodat een geannuleerde aanbetaling-sub niet als leidend gekozen wordt
+      // en niet meetelt in sale_total_incl/termCount. Als ALLE subs cancelled
+      // zijn: val terug op allCustSubs zodat de sale nog getoond wordt als
+      // geannuleerd (zie subCancelled hieronder).
+      const activeSubs = allCustSubs.filter(
+        (s) => String(s.status || '').toLowerCase() !== 'cancelled'
+      );
+      const subsPool = activeSubs.length > 0 ? activeSubs : allCustSubs;
+
       let subsForSale = [];
-      if (basis > 0 && allCustSubs.length > 0) {
+      let saleTotalFromSubs = 0;
+      if (basis > 0 && subsPool.length > 0) {
         const cap = basis * 1.05;
         let cum = 0;
-        for (const s of allCustSubs) {
+        for (const s of subsPool) {
           const w = (inclPerTerm(s) || 0) * (Number(s.term_count) || 0);
           if (subsForSale.length > 0 && cum + w > cap) break;
           subsForSale.push(s);
           cum += w;
           if (cum >= cap) break;
         }
+        saleTotalFromSubs = round2(cum);
       }
       if (subsForSale.length === 0) {
         // Fallback: laatste-start_date sub (oude gedrag).
         let latest = null;
-        for (const s of allCustSubs) {
+        for (const s of subsPool) {
           if (!latest || String(s.start_date || '') > String(latest.start_date || '')) latest = s;
         }
-        if (latest) subsForSale = [latest];
+        if (latest) {
+          subsForSale = [latest];
+          saleTotalFromSubs = round2((inclPerTerm(latest) || 0) * (Number(latest.term_count) || 0));
+        }
       }
       // Leidende sub = eerste chronologisch (bij aanbetaling-patroon: de
       // aanbetaling; anders de enige sub).
@@ -800,7 +827,7 @@ export default async function handler(req, res) {
         // Cashflow-projectie: vul zowel monthPaid (betaalde termijnen, historie)
         // als monthOpen (openstaande termijnen, toekomst). open_total blijft
         // ALLEEN open termijnen (KPI ongewijzigd). monthAmount = paid+open per
-        // maand (backward-compat).
+        // maand (backward-compat). monthBreakdown: per bijdrage (voor tooltip).
         if (!schemaUnknown) {
           const k = ymKey(bucketDate);
           if (isPaidTerm) {
@@ -810,6 +837,16 @@ export default async function handler(req, res) {
             if (monthOpen.has(k)) monthOpen.set(k, round2((monthOpen.get(k) || 0) + tAmount));
           }
           if (monthAmount.has(k)) monthAmount.set(k, round2((monthAmount.get(k) || 0) + tAmount));
+          if (tAmount > 0 && monthAmount.has(k)) {
+            const custObj = r.customer_id ? customerById.get(r.customer_id) : null;
+            if (!monthBreakdown.has(k)) monthBreakdown.set(k, []);
+            monthBreakdown.get(k).push({
+              label : customerLabel(custObj),
+              term  : i + 1,
+              amount: round2(tAmount),
+              status: isPaidTerm ? 'betaald' : 'verwacht',
+            });
+          }
         }
       }
 
@@ -827,7 +864,10 @@ export default async function handler(req, res) {
       const firstInvoiceDue  = firstInvoiceSent ? (invList[0].due_date || null) : null;
       const saleStartYmd     = sub?.start_date || firstInvoiceDue || null;
       let saleStatus;
-      const subCancelled = sub && String(sub.status || '').toLowerCase() === 'cancelled';
+      // Alleen 'geannuleerd' als ALLE actieve subs weg zijn (= activeSubs
+      // leeg). Zo blijft een sale met 1 cancelled aanbetaling + 1 actieve
+      // termijnen-sub gewoon lopend/actief.
+      const subCancelled = activeSubs.length === 0 && allCustSubs.length > 0;
       if (schemaUnknown)          saleStatus = 'geen_abonnement';
       else if (subCancelled)      saleStatus = 'geannuleerd';
       else if (nbPaid >= termCount && termCount > 0) saleStatus = 'voltooid';
@@ -876,7 +916,7 @@ export default async function handler(req, res) {
         evNode._sales.set(saleKey, {
           customer_id        : r.customer_id || null,
           customer_label     : customerLabel(cust),
-          sale_total_incl    : round2(perTermInc * termCount),
+          sale_total_incl    : round2(saleTotalFromSubs > 0 ? saleTotalFromSubs : (perTermInc * termCount)),
           mentor_share_total : round2(mentorAmount),
           released_share     : round2(entryReleased),
           term_count         : termCount,
@@ -917,13 +957,31 @@ export default async function handler(req, res) {
       }))
       .sort((a, b) => (b.starts_at || '').localeCompare(a.starts_at || ''));
 
-    // 12-maands projectie array — per maand paid + expected + totaal.
-    const projection_12m = monthOrder.map((k) => ({
-      month   : k,
-      amount  : round2((monthPaid.get(k) || 0) + (monthOpen.get(k) || 0)),
-      paid    : round2(monthPaid.get(k) || 0),
-      expected: round2(monthOpen.get(k) || 0),
-    }));
+    // 12-maands projectie array — per maand paid + expected + totaal + breakdown.
+    // breakdown: top 12 bijdragen (hoogste eerst) + rest_count/rest_amount voor
+    // maanden met meer dan 12 bijdragen, om de response-grootte te beperken.
+    const BREAKDOWN_CAP = 12;
+    const projection_12m = monthOrder.map((k) => {
+      const list = (monthBreakdown.get(k) || []).slice().sort((a, b) => b.amount - a.amount);
+      let breakdown = list;
+      let rest_count = 0;
+      let rest_amount = 0;
+      if (list.length > BREAKDOWN_CAP) {
+        breakdown = list.slice(0, BREAKDOWN_CAP);
+        const rest = list.slice(BREAKDOWN_CAP);
+        rest_count = rest.length;
+        rest_amount = round2(rest.reduce((s, x) => s + (Number(x.amount) || 0), 0));
+      }
+      return {
+        month   : k,
+        amount  : round2((monthPaid.get(k) || 0) + (monthOpen.get(k) || 0)),
+        paid    : round2(monthPaid.get(k) || 0),
+        expected: round2(monthOpen.get(k) || 0),
+        breakdown,
+        rest_count,
+        rest_amount,
+      };
+    });
 
     const deze_maand     = round2(monthAmount.get(thisYm) || 0);
     const volgende_maand = round2(monthAmount.get(nextYm) || 0);
