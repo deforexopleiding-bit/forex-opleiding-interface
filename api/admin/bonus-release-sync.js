@@ -11,10 +11,16 @@
 //     naarmate klanten meer termijnen betalen — de engine is idempotent
 //     op (parent_id, allocated_paid_cents).
 //
-// Body: { dry_run?: boolean, customer_id?: uuid }
+// Body: { dry_run?: boolean, customer_id?: uuid, mode?: 'terms'|'amount' }
 //   customer_id (optioneel): beperk de sync tot één klant (test/single-run).
+//   mode (optioneel, default 'terms'):
+//     * 'terms'  = releaseProportionalForPaidInvoices (per-termijn 1/N,
+//                  bestaande logica).
+//     * 'amount' = releaseProportionalForPaidAmount (3% × betaald / basis,
+//                  inhaal-backfill voor TL-gesyncte betalingen die de
+//                  register-payment-hook missen).
 //
-// Response 200: { ok:true, dry_run, customers_scanned, per_customer:[…],
+// Response 200: { ok:true, dry_run, mode, customers_scanned, per_customer:[…],
 //                 totals: { total_released, released_children,
 //                           parents_touched, per_mentor: [{ mentor_user_id,
 //                           total_released, released_children }] } }
@@ -24,7 +30,10 @@
 // Beveiliging: verifyAdmin + super_admin gate.
 
 import { verifyAdmin, supabaseAdmin } from '../supabase.js';
-import { releaseProportionalForPaidInvoices } from '../_lib/mentor-ledger-engine.js';
+import {
+  releaseProportionalForPaidInvoices,
+  releaseProportionalForPaidAmount,
+} from '../_lib/mentor-ledger-engine.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -45,6 +54,15 @@ export default async function handler(req, res) {
   if (singleCust && !UUID_RE.test(singleCust)) {
     return res.status(400).json({ error: 'customer_id (uuid) ongeldig' });
   }
+  const modeRaw = typeof body.mode === 'string' ? body.mode.trim().toLowerCase() : 'terms';
+  if (!['terms', 'amount'].includes(modeRaw)) {
+    return res.status(400).json({ error: "mode moet 'terms' of 'amount' zijn" });
+  }
+  const mode = modeRaw;
+  const releaseFn = mode === 'amount'
+    ? releaseProportionalForPaidAmount
+    : releaseProportionalForPaidInvoices;
+  const sliceField = mode === 'amount' ? 'te_releasen' : 'slice_amount';
 
   try {
     // 1) Verzamel unieke customer_ids uit parent-obligaties (bonus, geen
@@ -78,7 +96,7 @@ export default async function handler(req, res) {
 
     for (const cid of uniqCustomerIds) {
       try {
-        const r = await releaseProportionalForPaidInvoices({ customerId: cid, dryRun });
+        const r = await releaseFn({ customerId: cid, dryRun });
         per_customer.push({
           customer_id      : cid,
           paid_total       : r.paid_total,
@@ -96,7 +114,7 @@ export default async function handler(req, res) {
           const key = s.mentor_user_id;
           if (!perMentor.has(key)) perMentor.set(key, { total_released: 0, released_children: 0 });
           const acc = perMentor.get(key);
-          acc.total_released    = Math.round((acc.total_released + Number(s.slice_amount)) * 100) / 100;
+          acc.total_released    = Math.round((acc.total_released + Number(s[sliceField])) * 100) / 100;
           acc.released_children += 1;
         }
       } catch (e) {
@@ -108,6 +126,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok               : true,
       dry_run          : !!dryRun,
+      mode,
       customers_scanned: uniqCustomerIds.length,
       per_customer,
       totals: {
