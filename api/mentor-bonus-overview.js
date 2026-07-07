@@ -180,12 +180,12 @@ export default async function handler(req, res) {
       const now = new Date();
       const projection_12m = [];
       for (let i = -6; i <= 36; i++) {
-        projection_12m.push({ month: ymKey(addMonths(now, i)), amount: 0 });
+        projection_12m.push({ month: ymKey(addMonths(now, i)), amount: 0, paid: 0, expected: 0 });
       }
       return res.status(200).json({
         ok: true,
         scope: 'self',
-        totals: { earned_total: 0, betaald_uit: 0, open: 0, deze_maand: 0, volgende_maand: 0 },
+        totals: { earned_total: 0, betaald_uit: 0, open: 0, deze_maand: 0, volgende_maand: 0, cf_received: 0, cf_this_month: 0, cf_expected: 0 },
         projection_12m,
         per_event: [],
       });
@@ -354,12 +354,17 @@ export default async function handler(req, res) {
     // projection_12m blijft voor backward-compat; de frontend legt er een
     // schuifbaar 12-maands venster overheen. Termijnen buiten dit venster
     // worden hieronder genegeerd (bucket-check `monthAmount.has(k)`).
+    // monthPaid + monthOpen splitsen paid/expected voor de cashflow-projectie.
     const monthOrder = [];
     const monthAmount = new Map();
+    const monthPaid = new Map();
+    const monthOpen = new Map();
     for (let i = -6; i <= 36; i++) {
       const k = ymKey(addMonths(now, i));
       monthOrder.push(k);
       monthAmount.set(k, 0);
+      monthPaid.set(k, 0);
+      monthOpen.set(k, 0);
     }
 
     const perEventMap = new Map(); // event_id → { event, salesByCust }
@@ -470,6 +475,28 @@ export default async function handler(req, res) {
           amount   : round2(amt),
           status   : paid ? 'betaald' : 'open',
         });
+      }
+
+      // Cashflow-projectie: handmatige trajecten ook in de maand-buckets
+      // (voorheen volledig afwezig). Geannuleerde trajecten
+      // (mentorShareNonCancelled <= 0) tellen NIET mee — consistent met KPI-
+      // uitsluiting. cashReleaseDate returnt een YYYY-MM-DD string; normaliseer
+      // naar Date tijdzone-veilig via `T00:00:00Z`.
+      const trajectActive = !(hasCancelled && mentorShareNonCancelled <= 0);
+      if (trajectActive) {
+        for (const term of termijnen) {
+          if (!term.due_date) continue;
+          const k = ymKey(new Date(String(term.due_date).slice(0, 10) + 'T00:00:00Z'));
+          const amt = round2(Number(term.amount) || 0);
+          if (amt <= 0) continue;
+          if (term.status === 'betaald') {
+            if (monthPaid.has(k)) monthPaid.set(k, round2((monthPaid.get(k) || 0) + amt));
+          } else {
+            open_total += amt;
+            if (monthOpen.has(k)) monthOpen.set(k, round2((monthOpen.get(k) || 0) + amt));
+          }
+          if (monthAmount.has(k)) monthAmount.set(k, round2((monthAmount.get(k) || 0) + amt));
+        }
       }
 
       // Sale-status voor de badge.
@@ -725,13 +752,19 @@ export default async function handler(req, res) {
           amount  : tAmount,
           status  : tStatus,
         });
-        // KPI open/maand-bucket alleen als er een echt schema is.
-        if (!isPaidTerm && !schemaUnknown) {
-          open_total += tAmount;
+        // Cashflow-projectie: vul zowel monthPaid (betaalde termijnen, historie)
+        // als monthOpen (openstaande termijnen, toekomst). open_total blijft
+        // ALLEEN open termijnen (KPI ongewijzigd). monthAmount = paid+open per
+        // maand (backward-compat).
+        if (!schemaUnknown) {
           const k = ymKey(bucketDate);
-          if (monthAmount.has(k)) {
-            monthAmount.set(k, (monthAmount.get(k) || 0) + tAmount);
+          if (isPaidTerm) {
+            if (monthPaid.has(k)) monthPaid.set(k, round2((monthPaid.get(k) || 0) + tAmount));
+          } else {
+            open_total += tAmount;
+            if (monthOpen.has(k)) monthOpen.set(k, round2((monthOpen.get(k) || 0) + tAmount));
           }
+          if (monthAmount.has(k)) monthAmount.set(k, round2((monthAmount.get(k) || 0) + tAmount));
         }
       }
 
@@ -839,11 +872,28 @@ export default async function handler(req, res) {
       }))
       .sort((a, b) => (b.starts_at || '').localeCompare(a.starts_at || ''));
 
-    // 12-maands projectie array.
-    const projection_12m = monthOrder.map((k) => ({ month: k, amount: round2(monthAmount.get(k) || 0) }));
+    // 12-maands projectie array — per maand paid + expected + totaal.
+    const projection_12m = monthOrder.map((k) => ({
+      month   : k,
+      amount  : round2((monthPaid.get(k) || 0) + (monthOpen.get(k) || 0)),
+      paid    : round2(monthPaid.get(k) || 0),
+      expected: round2(monthOpen.get(k) || 0),
+    }));
 
     const deze_maand     = round2(monthAmount.get(thisYm) || 0);
     const volgende_maand = round2(monthAmount.get(nextYm) || 0);
+
+    // Cashflow-KPI's:
+    //   cf_received   = som paid t/m huidige maand (verleden + deze maand betaald)
+    //   cf_this_month = paid + expected van deze maand
+    //   cf_expected   = som open van deze maand en later (nog te ontvangen)
+    let cf_received = 0;
+    let cf_expected = 0;
+    for (const k of monthOrder) {
+      if (k <= thisYm) cf_received += (monthPaid.get(k) || 0);
+      if (k >= thisYm) cf_expected += (monthOpen.get(k) || 0);
+    }
+    const cf_this_month = round2((monthPaid.get(thisYm) || 0) + (monthOpen.get(thisYm) || 0));
 
     return res.status(200).json({
       ok: true,
@@ -854,6 +904,9 @@ export default async function handler(req, res) {
         open        : round2(open_total),
         deze_maand,
         volgende_maand,
+        cf_received : round2(cf_received),
+        cf_this_month,
+        cf_expected : round2(cf_expected),
       },
       projection_12m,
       per_event,

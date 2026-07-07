@@ -92,18 +92,34 @@
     .bonus-subtab.active { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); }
 
     /* 12-maands balk in Verdiensten-overzicht */
-    /* Projection: schuifbaar 12-maands venster over 43 maanden (-6..+36). */
+    /* Cashflow-overzicht: KPI-rij + schuifbaar 12-maands venster (43 mnd -6..+36). */
+    .cashflow-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
+    .cashflow-kpi { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+    .cashflow-kpi .k-label { font-size: 11.5px; color: var(--text-dim); margin-bottom: 4px; }
+    .cashflow-kpi .k-value { font-size: 20px; font-weight: 500; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.1; }
+    .cashflow-kpi.accent .k-value { color: #2a78d6; }
     .month-bars-viewport { position: relative; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
     .month-bars-scroll { overflow-x: auto; overflow-y: hidden; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; }
-    .month-bars { display: flex; gap: 6px; align-items: end; padding: 14px 12px 10px; width: max-content; min-height: 180px; }
-    .month-bar { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 52px; }
+    .month-bars { display: flex; gap: 10px; align-items: end; padding: 22px 14px 10px; width: max-content; min-height: 200px; }
+    .month-bar { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 40px; }
     .month-bar.now { position: relative; }
     .month-bar.now .bar-label { color: var(--accent, #6366f1); font-weight: 700; }
-    .month-bar.now::after { content: 'nu'; position: absolute; top: -14px; left: 50%; transform: translateX(-50%); font-size: 9px; font-weight: 700; color: var(--accent, #6366f1); text-transform: uppercase; letter-spacing: 0.5px; }
-    .month-bar .bar { width: 100%; background: linear-gradient(180deg, var(--accent, #6366f1) 0%, rgba(99,102,241,0.55) 100%); border-radius: 4px 4px 0 0; min-height: 2px; transition: height 0.2s; }
-    .month-bar .bar.zero { background: var(--bg-elev-2, rgba(100,116,139,0.18)); }
+    .month-bar.now .bar-stack { outline: 2px solid var(--accent, #6366f1); outline-offset: 1px; border-radius: 3px; }
+    .month-bar.now::after { content: 'nu'; position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 9px; font-weight: 700; color: var(--accent, #6366f1); text-transform: uppercase; letter-spacing: 0.5px; }
+    .month-bar .bar-stack { display: flex; flex-direction: column; justify-content: flex-end; width: 14px; }
+    .month-bar .bar-seg { width: 100%; min-height: 0; transition: height 0.2s; }
+    .month-bar .bar-seg.paid     { background: #1baf7a; border-radius: 0 0 2px 2px; }
+    .month-bar .bar-seg.expected { background: #2a78d6; border-radius: 2px 2px 0 0; }
+    /* Bij één-kleur (alleen paid of alleen expected) volledige radius. */
+    .month-bar .bar-seg.paid.only     { border-radius: 2px; }
+    .month-bar .bar-seg.expected.only { border-radius: 2px; }
+    .month-bar .bar-zero { width: 14px; height: 2px; background: var(--border); border-radius: 1px; }
     .month-bar .bar-label { font-size: 10.5px; color: var(--text-faint); margin-top: 2px; text-transform: uppercase; text-align: center; line-height: 1.1; }
-    .month-bar .bar-amount { font-size: 10.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+    .month-bar .bar-amount { font-size: 10.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; min-height: 12px; text-align: center; }
+    .cashflow-legend { display: flex; gap: 18px; padding: 8px 14px 12px; font-size: 12px; color: var(--text-dim); align-items: center; flex-wrap: wrap; }
+    .cashflow-legend .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+    .cashflow-legend .swatch.paid     { background: #1baf7a; }
+    .cashflow-legend .swatch.expected { background: #2a78d6; }
     /* Scroll-hint fades op de randen. */
     .month-bars-viewport::before, .month-bars-viewport::after { content: ''; position: absolute; top: 0; bottom: 0; width: 20px; pointer-events: none; z-index: 2; transition: opacity 0.15s; }
     .month-bars-viewport::before { left: 0; background: linear-gradient(90deg, var(--bg-elev), transparent); }
@@ -229,7 +245,7 @@
         <div class="kpi-card"><div class="kpi-label">Open</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Niet-betaalde termijnen</div></div>
       </div>
       <div class="section">
-        <h2><i class="ti ti-chart-bar"></i> 12-maands projectie</h2>
+        <h2><i class="ti ti-chart-bar"></i> Cashflow overzicht bonussen</h2>
         <div id="projection12mWrap"></div>
       </div>
       <div class="section">
@@ -399,55 +415,104 @@
       `<div class="kpi-card"><div class="kpi-label">Open</div><div class="kpi-value">${fmtEUR(t.open)}</div><div class="kpi-sub">Niet-betaalde termijnen</div></div>`;
   }
 
-  function renderProjection12m(months) {
+  function renderProjection12m(months, totals) {
     const wrap = document.getElementById('projection12mWrap');
     if (!Array.isArray(months) || months.length === 0) {
-      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-chart-bar-off"></i>Geen projectie beschikbaar.</div>`;
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-chart-bar-off"></i>Geen cashflow beschikbaar.</div>`;
       return;
     }
-    // months bevat 43 buckets (-6..+36 t.o.v. nu). We renderen alles naast
-    // elkaar in een horizontaal scrollbare viewport en scrollen bij mount
-    // naar de HUIDIGE maand zodat -6..-1 links "achter" de rand zit.
+    // months bevat 43 buckets (-6..+36 t.o.v. nu) met paid+expected per maand.
+    // Groen = ontvangen/vrijgegeven (paid); Blauw = verwacht (expected).
+    // Bij beide > 0 wordt de balk gestapeld: groen onder, blauw boven.
     const MONTHS_SHORT = ['', 'jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
     const now = new Date();
     const nowYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const max = months.reduce((m, x) => Math.max(m, Number(x.amount) || 0), 0);
+    const totalHeight = 140;
+    // Schaal: max van (paid+expected) per maand, zodat de gestapelde bar-stack
+    // consistent hoog is over alle 43 maanden.
+    const max = months.reduce((m, x) => {
+      const t = (Number(x.paid) || 0) + (Number(x.expected) || 0);
+      return Math.max(m, t);
+    }, 0);
     let nowIdx = months.findIndex((m) => (m.month || '') === nowYm);
     if (nowIdx < 0) nowIdx = 0;
+
+    // KPI-rij bovenaan.
+    const t = totals || {};
+    const kpiRow = `
+      <div class="cashflow-kpis">
+        <div class="cashflow-kpi"><div class="k-label">Ontvangen</div><div class="k-value">${fmtEUR(Number(t.cf_received) || 0)}</div></div>
+        <div class="cashflow-kpi"><div class="k-label">Deze maand</div><div class="k-value">${fmtEUR(Number(t.cf_this_month) || 0)}</div></div>
+        <div class="cashflow-kpi accent"><div class="k-label">Nog verwacht</div><div class="k-value">${fmtEUR(Number(t.cf_expected) || 0)}</div></div>
+      </div>`;
+
     const bars = months.map((m, idx) => {
-      const amt = Number(m.amount) || 0;
-      const pct = max > 0 ? Math.max(2, Math.round((amt / max) * 140)) : 2;
+      const paid     = Number(m.paid)     || 0;
+      const expected = Number(m.expected) || 0;
+      const total    = paid + expected;
       const parts = String(m.month || '').split('-');
       const monIdx = parseInt(parts[1], 10);
       const yr = parts[0] ? String(parts[0]).slice(-2) : '';
       const monShort = MONTHS_SHORT[monIdx] || parts[1] || '';
-      // Label toont altijd jaar (bv. "mrt '26") zodat je niet verdwaalt over
-      // meerdere jaren scrollen.
       const label = yr ? `${monShort} '${yr}` : monShort;
       const isNow = idx === nowIdx;
+
+      // Tooltip: toon paid en/of expected apart.
+      const titleParts = [];
+      if (paid     > 0) titleParts.push(`${fmtEUR(paid)} ontvangen`);
+      if (expected > 0) titleParts.push(`${fmtEUR(expected)} verwacht`);
+      const title = `${label} — ${titleParts.length ? titleParts.join(', ') : '—'}`;
+
+      // Bedrag boven de balk (compact: totaal). Alleen als > 0.
+      const amountLabel = total > 0 ? fmtEUR(Math.round(total)) : '';
+
+      let stackHtml;
+      if (total <= 0) {
+        stackHtml = `<div class="bar-zero" title="${esc(title)}"></div>`;
+      } else {
+        const paidH     = max > 0 ? Math.round((paid     / max) * totalHeight) : 0;
+        const expectedH = max > 0 ? Math.round((expected / max) * totalHeight) : 0;
+        // Minimaal 2px voor niet-nul segmenten zodat 'ie zichtbaar blijft.
+        const paidPx     = paid     > 0 ? Math.max(2, paidH)     : 0;
+        const expectedPx = expected > 0 ? Math.max(2, expectedH) : 0;
+        const onlyPaid     = paid     > 0 && expected === 0;
+        const onlyExpected = expected > 0 && paid     === 0;
+        const segs = [];
+        if (expected > 0) segs.push(`<div class="bar-seg expected${onlyExpected ? ' only' : ''}" style="height:${expectedPx}px"></div>`);
+        if (paid     > 0) segs.push(`<div class="bar-seg paid${onlyPaid ? ' only' : ''}" style="height:${paidPx}px"></div>`);
+        stackHtml = `<div class="bar-stack" title="${esc(title)}">${segs.join('')}</div>`;
+      }
+
       return `
-        <div class="month-bar${isNow ? ' now' : ''}" title="${esc(m.month)} — ${fmtEUR(amt)}">
-          <div class="bar-amount">${amt > 0 ? Math.round(amt) : ''}</div>
-          <div class="bar ${amt > 0 ? '' : 'zero'}" style="height:${pct}px"></div>
+        <div class="month-bar${isNow ? ' now' : ''}">
+          <div class="bar-amount">${esc(amountLabel)}</div>
+          ${stackHtml}
           <div class="bar-label">${esc(label)}</div>
         </div>`;
     }).join('');
+
+    const legend = `
+      <div class="cashflow-legend">
+        <span><span class="swatch paid"></span>Ontvangen / vrijgegeven</span>
+        <span><span class="swatch expected"></span>Verwacht</span>
+      </div>`;
+
     wrap.innerHTML = `
+      ${kpiRow}
       <div class="month-bars-viewport" data-at-start="0" data-at-end="0">
         <div class="month-bars-scroll">
           <div class="month-bars">${bars}</div>
         </div>
+        ${legend}
       </div>`;
-    // Scroll de huidige maand links-vooraan (met kleine offset zodat de
-    // scroll-hint-fade zichtbaar blijft). Update at-start/at-end op scroll
-    // zodat de fade-hints subtiel verdwijnen bij de randen.
+
+    // Auto-scroll: huidige maand ~1 kolom vanaf links (één stapje historie
+    // zichtbaar). Update at-start/at-end op scroll voor de fade-hints.
     const viewport = wrap.querySelector('.month-bars-viewport');
     const scroll   = wrap.querySelector('.month-bars-scroll');
     const bar      = scroll?.querySelector('.month-bar');
     if (scroll && bar) {
-      const colW = bar.getBoundingClientRect().width + 6; /* gap */
-      // Positioneer: huidige maand ~1 kolom vanaf links (zodat je één stapje
-      // terug meteen ziet dat er historie is).
+      const colW = bar.getBoundingClientRect().width + 10; /* gap */
       const targetLeft = Math.max(0, (nowIdx - 1) * colW);
       scroll.scrollLeft = targetLeft;
       const updateEdges = () => {
@@ -936,7 +1001,7 @@
       const d = await bonusResp.json();
       if (!bonusResp.ok) throw new Error(d?.error || 'bonus-overview failed');
       setVerdienstenKpis(d.totals || { earned_total: 0, betaald_uit: 0, open: 0, deze_maand: 0, volgende_maand: 0 });
-      renderProjection12m(d.projection_12m || []);
+      renderProjection12m(d.projection_12m || [], d.totals || {});
       renderEventBonus(d.per_event || []);
       try {
         const ev = await myEventsResp.json();
