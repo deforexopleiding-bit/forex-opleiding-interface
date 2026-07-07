@@ -718,17 +718,26 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
     if (!sub) sub = subsForCust[0] || null;
     const tlSubId = sub?.teamleader_subscription_id || null;
 
-    // Sale-scope totalBetaald + laatste paid_date. Fallback = customer-breed.
-    let saleTotaalBetaald = 0;
-    let saleLastPaidDate  = null;
-    if (tlSubId && paidBySub.has(tlSubId)) {
-      const acc = paidBySub.get(tlSubId);
-      saleTotaalBetaald = _r2(acc.paid);
-      saleLastPaidDate  = acc.lastPaidDate;
-    } else {
-      saleTotaalBetaald = custPaidTotal;
-      saleLastPaidDate  = custLastPaidDate;
-    }
+    // Sale-scope totaalBetaald: MAX van sub-route en customer-route.
+    // Waarom max en niet else-if: bij klanten met deels ongekoppelde
+    // facturen (tl_subscription_id=NULL op sommige betalingen) is de
+    // sub-route incompleet. Customer-route bevat álle klant-facturen (incl.
+    // de gekoppelde) en is dus altijd >= sub-route.
+    // Randgeval multi-sale klant: bij >1 sale per customer kan custPaidTotal
+    // facturen van andere sales bevatten — bekende beperking (idem in
+    // mentor-bonus-overview). De cap op (origAmount - reedsReleased) verderop
+    // voorkomt dat er ooit meer dan de volledige bonus vrijkomt. Exactheid
+    // verbetert zodra facturen consequent aan de sub gekoppeld zijn.
+    const subAcc  = (tlSubId && paidBySub.has(tlSubId)) ? paidBySub.get(tlSubId) : null;
+    const subPaid  = subAcc ? _r2(subAcc.paid) : 0;
+    const custPaid = _r2(custPaidTotal);
+    const saleTotaalBetaald = Math.max(subPaid, custPaid);
+    // last paid_date volgt de route met het hoogste bedrag (typisch = recentste
+    // betaling); fallback op de andere route zodat we nooit null returnen als
+    // er wél betaald is.
+    const saleLastPaidDate =
+      (custPaid >= subPaid ? custLastPaidDate : (subAcc?.lastPaidDate || null))
+      || custLastPaidDate || subAcc?.lastPaidDate || null;
 
     const parentBasis = Number(parent.basis) || 0;
     const kids        = kidsByParent.get(parent.id) || [];
