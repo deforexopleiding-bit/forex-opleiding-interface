@@ -426,7 +426,7 @@
     switch (tab) {
       case 'overdue':     return rows.filter((s) => s.has_overdue === true);
       case 'pauze':       return rows.filter((s) => s.status === 'pauze');
-      case 'wacht_start': return rows.filter((s) => s.status === 'wacht_1e_betaling' || s.status === 'geen_abonnement');
+      case 'wacht_start': return rows.filter((s) => (s.status === 'wacht_1e_betaling' || s.status === 'geen_abonnement') && s.has_overdue !== true);
       case 'geannuleerd': return rows.filter((s) => s.status === 'geannuleerd');
       case 'alle':        return rows;
       case 'actief':
