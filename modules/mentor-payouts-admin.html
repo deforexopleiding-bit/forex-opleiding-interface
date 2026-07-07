@@ -578,19 +578,51 @@
     if (!host) return;
     const p = detail || {};
     const lines = Array.isArray(p.lines) ? p.lines : [];
+    // Bonus-breakdown (sinds PR #629 hebben ledger-entries payout_id). Voor
+    // oudere payouts blijft de lijst leeg → tooltip toont "Geen bonus-opbouw".
+    const bonusBreakdown = Array.isArray(p.bonus_breakdown) ? p.bonus_breakdown : [];
+    const bonusRestCount  = Number(p.bonus_rest_count)  || 0;
+    const bonusRestAmount = Number(p.bonus_rest_amount) || 0;
+    const buildBonusBreakdownHtml = () => {
+      if (bonusBreakdown.length === 0) {
+        return `<div style="padding:8px 10px;color:var(--text-faint);font-style:italic;font-size:11.5px">Geen bonus-opbouw beschikbaar (payout van vóór ledger-koppeling).</div>`;
+      }
+      const items = bonusBreakdown.map((b) => {
+        const term = b.term_hint ? ` · ${esc(b.term_hint)}` : '';
+        const badge = b.source === 'coaching_traject'
+          ? '<span style="font-size:10px;padding:1px 6px;border-radius:9px;background:#dbeafe;color:#1e40af;margin-left:6px">traject</span>'
+          : '<span style="font-size:10px;padding:1px 6px;border-radius:9px;background:#dcfce7;color:#166534;margin-left:6px">event</span>';
+        return `<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0;font-size:12px">
+          <span>${esc(b.label || '(onbekend)')}${term}${badge}</span>
+          <span class="num" style="font-variant-numeric:tabular-nums">${fmtEUR(b.amount)}</span>
+        </div>`;
+      }).join('');
+      const rest = bonusRestCount > 0
+        ? `<div style="padding:6px 0 0;margin-top:4px;border-top:1px dashed var(--border);font-size:11.5px;color:var(--text-faint)">+ ${bonusRestCount} meer — ${fmtEUR(bonusRestAmount)}</div>`
+        : '';
+      return `<div style="padding:8px 10px;background:var(--bg-elev);border-radius:6px;max-height:280px;overflow-y:auto">${items}${rest}</div>`;
+    };
     const lineRows = lines.length === 0
       ? `<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:14px">Geen regels.</td></tr>`
-      : lines.map((l) => {
+      : lines.map((l, li) => {
           const qty       = (l.qty == null) ? '—' : String(l.qty);
           const unitIncl  = (l.unit_incl == null) ? '—' : fmtEUR(l.unit_incl);
-          return `
-            <tr>
-              <td>${esc(l.label || l.kind || '—')}</td>
+          const isBonus   = l.kind === 'bonus';
+          const chevron   = isBonus ? '<span class="bonus-chevron" style="display:inline-block;transition:transform 0.15s;margin-right:6px">▸</span>' : '';
+          const clickable = isBonus ? ' data-bonus-toggle="' + li + '" style="cursor:pointer"' : '';
+          const rowMain = `
+            <tr${clickable}>
+              <td>${chevron}${esc(l.label || l.kind || '—')}</td>
               <td class="num">${esc(qty)}</td>
               <td class="num">${esc(unitIncl)}</td>
               <td class="num">${fmtEUR(l.amount_incl)}</td>
               <td class="num">${fmtEUR(l.amount_excl)}</td>
             </tr>`;
+          const rowBreakdown = isBonus ? `
+            <tr class="bonus-breakdown-row" data-bonus-row="${li}" style="display:none">
+              <td colspan="5" style="padding:6px 10px 10px">${buildBonusBreakdownHtml()}</td>
+            </tr>` : '';
+          return rowMain + rowBreakdown;
         }).join('');
 
     const meta = [];
@@ -727,6 +759,20 @@
         <span class="adj-add-status" style="font-size:11.5px;color:var(--text-faint)"></span>
       </div>
     `;
+
+    // Bonus-breakdown uitklap-toggle: klik op de bonus-rij toont/verbergt
+    // de breakdown-rij eronder.
+    host.querySelectorAll('[data-bonus-toggle]').forEach((tr) => {
+      tr.addEventListener('click', () => {
+        const li = tr.getAttribute('data-bonus-toggle');
+        const br = host.querySelector(`.bonus-breakdown-row[data-bonus-row="${li}"]`);
+        const chev = tr.querySelector('.bonus-chevron');
+        if (!br) return;
+        const willOpen = br.style.display === 'none';
+        br.style.display = willOpen ? '' : 'none';
+        if (chev) chev.style.transform = willOpen ? 'rotate(90deg)' : '';
+      });
+    });
 
     // Wiring voor edit/delete/add — zelfde host-scope.
     host.querySelectorAll('.adj-edit').forEach((b) => b.addEventListener('click', () =>

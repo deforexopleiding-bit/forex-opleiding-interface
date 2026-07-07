@@ -98,10 +98,20 @@ export default async function handler(req, res) {
           .eq('period_month', payout.period_month)
           .order('id', { ascending: true });
 
-    const [{ data: linesRaw, error: lineErr }, { data: adjRaw, error: adjErr }] =
-      await Promise.all([linesPromise, adjPromise]);
-    if (lineErr) throw new Error('lines fetch: ' + lineErr.message);
-    if (adjErr)  throw new Error('adjustments fetch: ' + adjErr.message);
+    // Bonus-entries van deze payout (sinds PR #629 hebben ze payout_id gezet).
+    // Voor oudere rapporten van vóór #629 blijft deze lijst leeg → UI toont
+    // dan "Geen bonus-opbouw beschikbaar".
+    const bonusEntriesPromise = supabaseAdmin
+      .from('mentor_ledger_entries')
+      .select('id, amount, entry_type, released_at, customer_id, note, idempotency_key')
+      .eq('payout_id', payoutId)
+      .order('released_at', { ascending: true });
+
+    const [{ data: linesRaw, error: lineErr }, { data: adjRaw, error: adjErr }, { data: bonusRaw, error: bonusErr }] =
+      await Promise.all([linesPromise, adjPromise, bonusEntriesPromise]);
+    if (lineErr)  throw new Error('lines fetch: ' + lineErr.message);
+    if (adjErr)   throw new Error('adjustments fetch: ' + adjErr.message);
+    if (bonusErr) throw new Error('bonus entries fetch: ' + bonusErr.message);
 
     const lines = (linesRaw || []).map((l) => ({
       id          : l.id,
@@ -137,6 +147,71 @@ export default async function handler(req, res) {
       mentor_email = tm?.email || null;
     }
 
+    // 5) Bonus-breakdown: klant-labels + term-hint + source per entry.
+    const bonusRows = (bonusRaw || []).filter((e) => e.entry_type === 'bonus');
+    const custIds   = [...new Set(bonusRows.map((e) => e.customer_id).filter(Boolean))];
+    const custById  = new Map();
+    if (custIds.length) {
+      const { data: custRows, error: custErr } = await supabaseAdmin
+        .from('customers')
+        .select('id, first_name, last_name, company_name, is_company, email')
+        .in('id', custIds);
+      if (custErr) throw new Error('customers fetch: ' + custErr.message);
+      for (const c of (custRows || [])) custById.set(c.id, c);
+    }
+    const customerLabel = (c) => {
+      if (!c) return null;
+      if (c.is_company) return c.company_name || c.email || '(klant)';
+      const nm = [c.first_name, c.last_name].filter(Boolean).join(' ').trim();
+      return nm || c.email || '(klant)';
+    };
+    // Traject-label uit note: "Handmatig traject: <label> — termijn N/M".
+    const noteTrajectLabel = (note) => {
+      if (typeof note !== 'string') return null;
+      const m = note.match(/^Handmatig traject:\s*(.+?)\s*—/);
+      return m ? m[1].trim() : null;
+    };
+    const derive = (e) => {
+      const key = String(e.idempotency_key || '');
+      // Traject: "cashtraject:<uuid>:<termIdx>:mentor:<userId>"
+      const cashMatch = key.match(/^cashtraject:[^:]+:(\d+):mentor:/);
+      if (cashMatch) {
+        return {
+          label    : customerLabel(custById.get(e.customer_id)) || noteTrajectLabel(e.note) || '(traject)',
+          term_hint: `termijn ${cashMatch[1]}`,
+          source   : 'coaching_traject',
+        };
+      }
+      // Event-child (proportional / paidrel-term): term = eventuele nummer.
+      // "<parentId>:paidrel-term:<N>" of "<parentId>:pay:<paymentId>" of ":paidamount:<cents>"
+      const paidRelMatch = key.match(/:paidrel-term:(\d+)/);
+      return {
+        label    : customerLabel(custById.get(e.customer_id)) || '(onbekend)',
+        term_hint: paidRelMatch ? `termijn ${paidRelMatch[1]}` : '',
+        source   : 'event',
+      };
+    };
+    const BREAKDOWN_CAP = 50;
+    const breakdownAll = bonusRows.map((e) => {
+      const d = derive(e);
+      return {
+        label       : d.label,
+        term_hint   : d.term_hint,
+        amount      : round2(Number(e.amount) || 0),
+        released_at : e.released_at || null,
+        source      : d.source,
+      };
+    }).sort((a, b) => b.amount - a.amount);
+    let bonus_breakdown = breakdownAll;
+    let bonus_rest_count  = 0;
+    let bonus_rest_amount = 0;
+    if (breakdownAll.length > BREAKDOWN_CAP) {
+      bonus_breakdown = breakdownAll.slice(0, BREAKDOWN_CAP);
+      const rest = breakdownAll.slice(BREAKDOWN_CAP);
+      bonus_rest_count  = rest.length;
+      bonus_rest_amount = round2(rest.reduce((s, x) => s + x.amount, 0));
+    }
+
     return res.status(200).json({
       ok    : true,
       payout: {
@@ -158,6 +233,9 @@ export default async function handler(req, res) {
         created_at      : payout.created_at,
         lines,
         adjustments,
+        bonus_breakdown,
+        bonus_rest_count,
+        bonus_rest_amount,
       },
     });
   } catch (e) {
