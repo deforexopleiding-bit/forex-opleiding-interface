@@ -532,23 +532,30 @@ export default async function handler(req, res) {
       const invoice  = invoiceById.get(r.source_invoice_id) || null;
       const paidAmt  = Number(invoice?.amount_paid) || 0;
 
-      // Route B: totaal betaald op subscription (primair) of customer (fallback).
+      // Route B: totaal betaald — MAX van subscription- en customer-route.
+      // Waarom max en niet else-if: als de subscription 1 gekoppelde betaalde
+      // factuur heeft (bv. eerste termijn) maar volgende termijnen komen
+      // binnen als klant-facturen ZONDER tl_subscription_id, mist een pure
+      // else-if die vervolg-betalingen. Customer-route bevat álle klant-
+      // facturen (incl. de gekoppelde) en is dus altijd ≥ sub-route.
+      // Randgeval: bij klanten met meerdere sales/subs telt de customer-
+      // route facturen van alle sales — nbPaid wordt echter door
+      // Math.min(termCount, …) begrensd tot de termijnen van deze sale, en
+      // exacter wordt het pas als wizard-subs consequent gekoppeld zijn.
       let paidTotalFromInvs = 0;
       let lastPaidFromInvs  = null;
       {
         const subKey  = sub?.teamleader_subscription_id || null;
         const subAcc  = subKey ? subPaidMap.get(subKey) : null;
         const custAcc = r.customer_id ? custPaidMap.get(r.customer_id) : null;
-        // Primair: subscription-facturen (als er iets betaald is).
-        // Fallback: customer-facturen — dekt bonussen waar de subscription
-        // geen TL-id heeft (of we alleen customer_id kennen).
-        if (subAcc && subAcc.paid_total > 0) {
-          paidTotalFromInvs = subAcc.paid_total;
-          lastPaidFromInvs  = subAcc.last_paid_date;
-        } else if (custAcc && custAcc.paid_total > 0) {
-          paidTotalFromInvs = custAcc.paid_total;
-          lastPaidFromInvs  = custAcc.last_paid_date;
-        }
+        const subPaid  = (subAcc  && subAcc.paid_total  > 0) ? subAcc.paid_total  : 0;
+        const custPaid = (custAcc && custAcc.paid_total > 0) ? custAcc.paid_total : 0;
+        paidTotalFromInvs = Math.max(subPaid, custPaid);
+        // last_paid_date: kies de datum uit de route met het hoogste bedrag
+        // (typisch = de recentste betaling). Fallback op de andere route.
+        lastPaidFromInvs  =
+          (custPaid >= subPaid ? custAcc?.last_paid_date : subAcc?.last_paid_date)
+          || subAcc?.last_paid_date || custAcc?.last_paid_date || null;
       }
 
       let nbPaid;
