@@ -29,11 +29,53 @@
 // en is laag-waarde/hoog-risico voor deze interne tools — daarom uitgesteld.
 
 import { supabase, supabaseAdmin } from '../supabase.js';
+import { logActivity } from './activity-logger.js';
+
+/**
+ * Fire-and-forget wrapper: probeer profiel-email/rol op te halen voor
+ * betere leesbaarheid in het logboek. Fout stil wegslikken.
+ */
+async function _fetchUserProfile(userId) {
+  try {
+    const { data } = await supabaseAdmin
+      .from('profiles')
+      .select('email, role')
+      .eq('id', userId)
+      .maybeSingle();
+    return data || null;
+  } catch { return null; }
+}
+
+/**
+ * Log de uitkomst van een permissie-check. Volledig fire-and-forget: geen
+ * await in de caller, geen throw. Draait profile-lookup + logActivity
+ * asynchroon zodat requirePermission's timing niet raakt.
+ */
+function _fireLog({ req, userId, featureKey, allowed }) {
+  try {
+    _fetchUserProfile(userId).then((prof) => {
+      logActivity({
+        req,
+        userId,
+        userEmail : prof?.email || null,
+        userRole  : prof?.role  || null,
+        action    : featureKey,
+        statusCode: allowed ? 200 : 403,
+      });
+    }).catch(() => {});
+  } catch { /* nooit door laten stromen */ }
+}
 
 /**
  * @returns {Promise<boolean>} true als de Bearer-user de feature mag.
  * Zelfde token-patroon als verifyAdmin(): anon-client valideert de token,
  * service-role draait de RPC.
+ *
+ * De uitkomst (allow of deny) wordt naar activity_log geschreven —
+ * fire-and-forget, dus timing/return van deze functie is ongewijzigd. Ook
+ * super_admin-acties worden gelogd (super_admin bypasst permission-check
+ * in de DB-functie user_has_permission, maar valt hier gewoon door en
+ * krijgt data===true).
  */
 export async function requirePermission(req, featureKey) {
   try {
@@ -48,8 +90,14 @@ export async function requirePermission(req, featureKey) {
       user_uuid: user.id,
       fkey: featureKey,
     });
-    if (error) { console.error('[requirePermission] RPC fout:', error.message); return false; }
-    return data === true;
+    if (error) {
+      console.error('[requirePermission] RPC fout:', error.message);
+      _fireLog({ req, userId: user.id, featureKey, allowed: false });
+      return false;
+    }
+    const allowed = data === true;
+    _fireLog({ req, userId: user.id, featureKey, allowed });
+    return allowed;
   } catch (err) {
     console.error('[requirePermission] fout:', err.message);
     return false;
@@ -68,18 +116,24 @@ export async function requirePermission(req, featureKey) {
 export async function requirePermissionFailOpen(req, featureKey) {
   try {
     const authHeader = req.headers?.authorization || '';
-    if (!authHeader.startsWith('Bearer ')) return true;        // geen token → fail-open
+    if (!authHeader.startsWith('Bearer ')) return true;        // geen token → fail-open (niet gelogd — geen user)
     const token = authHeader.slice(7);
 
     const { data: { user }, error: userErr } = await supabase.auth.getUser(token);
-    if (userErr || !user) return true;                          // token-validatie faalt → fail-open
+    if (userErr || !user) return true;                          // token-validatie faalt → fail-open (geen user om te loggen)
 
     const { data, error } = await supabaseAdmin.rpc('user_has_permission', {
       user_uuid: user.id,
       fkey: featureKey,
     });
-    if (error) { console.error('[requirePermissionFailOpen] RPC fout (fail-open):', error.message); return true; }
-    return data !== false;                                      // ALLEEN false = bewezen-geen-permission
+    if (error) {
+      console.error('[requirePermissionFailOpen] RPC fout (fail-open):', error.message);
+      _fireLog({ req, userId: user.id, featureKey, allowed: true });   // effectief allowed (fail-open)
+      return true;
+    }
+    const allowed = data !== false;                             // ALLEEN false = bewezen-geen-permission
+    _fireLog({ req, userId: user.id, featureKey, allowed });
+    return allowed;
   } catch (err) {
     console.error('[requirePermissionFailOpen] fout (fail-open):', err.message);
     return true;                                                // elke fout → fail-open
