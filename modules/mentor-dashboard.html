@@ -127,23 +127,22 @@
     .month-bar.now .bar-stack { outline: 2px solid #1baf7a; outline-offset: 3px; border-radius: 22px; }
     .month-bar.now::before { content: 'nu'; position: absolute; top: -22px; left: 50%; transform: translateX(-50%); background: #1baf7a; color: #fff; padding: 2px 8px; border-radius: 999px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; z-index: 2; }
 
-    /* Hover-tooltip met opbouw per maand. */
+    /* Hover-tooltip met opbouw per maand — muis-volgend, position:fixed
+       t.o.v. de viewport zodat geen enkele container 'm klipt. */
     .month-bar { cursor: default; }
-    /* Tooltip ONDER de balk (top:100%) — meer ruimte, geen conflict met de
-       "nu"-pill of card-bovenrand. Positie robuust in de scroll-context. */
-    .month-tooltip { position: absolute; top: 100%; left: 50%; transform: translateX(-50%) translateY(8px); background: var(--surface-2, var(--bg-elev-2, #fff)); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(15,23,42,0.14); padding: 10px 12px; font-size: 12px; min-width: 200px; max-width: 260px; z-index: 20; opacity: 0; pointer-events: none; transition: opacity 0.12s; }
-    .month-tooltip.visible { opacity: 1; pointer-events: auto; }
-    .month-tooltip .tt-head { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; color: var(--text); padding-bottom: 6px; border-bottom: 1px solid var(--border); margin-bottom: 6px; }
-    .month-tooltip .tt-head .tt-total { font-variant-numeric: tabular-nums; }
-    .month-tooltip .tt-list { display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow-y: auto; }
-    .month-tooltip .tt-item { display: flex; align-items: center; gap: 6px; line-height: 1.35; }
-    .month-tooltip .tt-item .tt-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-    .month-tooltip .tt-item .tt-dot.paid     { background: #1baf7a; }
-    .month-tooltip .tt-item .tt-dot.expected { background: #2a78d6; }
-    .month-tooltip .tt-item .tt-lbl { flex: 1; min-width: 0; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .month-tooltip .tt-item .tt-amt { color: var(--text); font-variant-numeric: tabular-nums; }
-    .month-tooltip .tt-empty { color: var(--text-faint); font-style: italic; padding: 4px 0; }
-    .month-tooltip .tt-rest  { color: var(--text-faint); font-size: 11px; padding-top: 4px; border-top: 1px dashed var(--border); margin-top: 4px; }
+    .month-tooltip-float { position: fixed; z-index: 9999; background: var(--surface-2, var(--bg-elev-2, #fff)); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(15,23,42,0.18); padding: 10px 12px; font-size: 12px; min-width: 200px; max-width: 280px; opacity: 0; pointer-events: none; transition: opacity 0.1s; }
+    .month-tooltip-float.visible { opacity: 1; }
+    .month-tooltip-float .tt-head { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; color: var(--text); padding-bottom: 6px; border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+    .month-tooltip-float .tt-head .tt-total { font-variant-numeric: tabular-nums; }
+    .month-tooltip-float .tt-list { display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow-y: auto; }
+    .month-tooltip-float .tt-item { display: flex; align-items: center; gap: 6px; line-height: 1.35; }
+    .month-tooltip-float .tt-item .tt-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .month-tooltip-float .tt-item .tt-dot.paid     { background: #1baf7a; }
+    .month-tooltip-float .tt-item .tt-dot.expected { background: #2a78d6; }
+    .month-tooltip-float .tt-item .tt-lbl { flex: 1; min-width: 0; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .month-tooltip-float .tt-item .tt-amt { color: var(--text); font-variant-numeric: tabular-nums; }
+    .month-tooltip-float .tt-empty { color: var(--text-faint); font-style: italic; padding: 4px 0; }
+    .month-tooltip-float .tt-rest  { color: var(--text-faint); font-size: 11px; padding-top: 4px; border-top: 1px dashed var(--border); margin-top: 4px; }
 
     .cashflow-legend { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-top: 14px; font-size: 12px; color: var(--text-dim); flex-wrap: wrap; }
     .cashflow-legend .legend-items { display: flex; gap: 16px; }
@@ -514,44 +513,31 @@
         stackHtml = `<div class="bar-stack">${segs.join('')}</div>`;
       }
 
-      // Breakdown-tooltip HTML. Lazy: bouw altijd, kost weinig.
-      const breakdown = Array.isArray(m.breakdown) ? m.breakdown : [];
-      const restCount  = Number(m.rest_count)  || 0;
-      const restAmount = Number(m.rest_amount) || 0;
-      const ttHead = `
-        <div class="tt-head">
-          <span>${esc(monLong)} '${esc(yr)}</span>
-          <span class="tt-total">${fmtEUR(total)}</span>
-        </div>`;
-      let ttBody;
-      if (breakdown.length === 0) {
-        ttBody = `<div class="tt-empty">Geen bijdragen</div>`;
-      } else {
-        const rows = breakdown.map((b) => {
-          const cls = b.status === 'betaald' ? 'paid' : 'expected';
-          const term = Number(b.term) ? ` · termijn ${Number(b.term)}` : '';
-          return `<div class="tt-item">
-            <span class="tt-dot ${cls}"></span>
-            <span class="tt-lbl">${esc(b.label || '(onbekend)')}${term}</span>
-            <span class="tt-amt">${fmtEUR(Number(b.amount) || 0)}</span>
-          </div>`;
-        }).join('');
-        const rest = restCount > 0
-          ? `<div class="tt-rest">+ ${restCount} meer — ${fmtEUR(restAmount)}</div>`
-          : '';
-        ttBody = `<div class="tt-list">${rows}</div>${rest}`;
-      }
-      const tooltip = `<div class="month-tooltip" data-tooltip-idx="${idx}">${ttHead}${ttBody}</div>`;
-
       return `
         <div class="month-bar${isNow ? ' now' : ''} ${dominantClass}" data-idx="${idx}">
           <div class="bar-amount">${esc(amountLabel)}</div>
           ${stackHtml}
           <div class="bar-mo">${esc(monShort)}</div>
           <div class="bar-yr">'${esc(yr)}</div>
-          ${tooltip}
         </div>`;
     }).join('');
+
+    // Breakdown-data per index — voor de muis-volgende tooltip.
+    const _tooltipData = months.map((m, idx) => {
+      const parts = String(m.month || '').split('-');
+      const monIdx = parseInt(parts[1], 10);
+      const yr = parts[0] ? String(parts[0]).slice(-2) : '';
+      const monLong = MONTHS_LONG[monIdx] || parts[1] || '';
+      const paid     = Number(m.paid)     || 0;
+      const expected = Number(m.expected) || 0;
+      return {
+        monLong, yr,
+        total     : paid + expected,
+        breakdown : Array.isArray(m.breakdown) ? m.breakdown : [],
+        rest_count: Number(m.rest_count)  || 0,
+        rest_amount: Number(m.rest_amount) || 0,
+      };
+    });
 
     const legend = `
       <div class="cashflow-legend">
@@ -593,26 +579,85 @@
       updateEdges();
     }
 
-    // Hover / touch → tooltip zichtbaar maken.
+    // Muis-volgende float-tooltip. Één element hergebruikt over alle balken.
+    // position:fixed t.o.v. viewport → geen enkele container klipt 'm; ligt
+    // over alles heen via z-index:9999.
+    let tt = document.getElementById('cashflowFloatTooltip');
+    if (!tt) {
+      tt = document.createElement('div');
+      tt.id = 'cashflowFloatTooltip';
+      tt.className = 'month-tooltip-float';
+      document.body.appendChild(tt);
+    }
+    const buildTooltipHtml = (d) => {
+      const head = `
+        <div class="tt-head">
+          <span>${esc(d.monLong)} '${esc(d.yr)}</span>
+          <span class="tt-total">${fmtEUR(d.total)}</span>
+        </div>`;
+      let body;
+      if (!d.breakdown || d.breakdown.length === 0) {
+        body = `<div class="tt-empty">Geen bijdragen</div>`;
+      } else {
+        const rows = d.breakdown.map((b) => {
+          const cls = b.status === 'betaald' ? 'paid' : 'expected';
+          const term = Number(b.term) ? ` · termijn ${Number(b.term)}` : '';
+          return `<div class="tt-item">
+            <span class="tt-dot ${cls}"></span>
+            <span class="tt-lbl">${esc(b.label || '(onbekend)')}${term}</span>
+            <span class="tt-amt">${fmtEUR(Number(b.amount) || 0)}</span>
+          </div>`;
+        }).join('');
+        const rest = d.rest_count > 0
+          ? `<div class="tt-rest">+ ${d.rest_count} meer — ${fmtEUR(d.rest_amount)}</div>`
+          : '';
+        body = `<div class="tt-list">${rows}</div>${rest}`;
+      }
+      return head + body;
+    };
+    const positionTooltip = (x, y) => {
+      // Meet de tooltip-afmetingen na render; flip als 'ie buiten viewport valt.
+      const rect = tt.getBoundingClientRect();
+      const gap = 14;
+      let left = x + gap;
+      let top  = y + gap;
+      if (left + rect.width > window.innerWidth - 4)  left = x - rect.width - gap;
+      if (top  + rect.height > window.innerHeight - 4) top  = y - rect.height - gap;
+      if (left < 4) left = 4;
+      if (top  < 4) top  = 4;
+      tt.style.left = left + 'px';
+      tt.style.top  = top + 'px';
+    };
+    const showFor = (idx, x, y) => {
+      const d = _tooltipData[idx];
+      if (!d) return;
+      tt.innerHTML = buildTooltipHtml(d);
+      tt.classList.add('visible');
+      positionTooltip(x, y);
+    };
+    const hide = () => tt.classList.remove('visible');
     wrap.querySelectorAll('.month-bar').forEach((mb) => {
-      const tt = mb.querySelector('.month-tooltip');
-      if (!tt) return;
-      const show = () => tt.classList.add('visible');
-      const hide = () => tt.classList.remove('visible');
-      mb.addEventListener('mouseenter', show);
+      const idx = Number(mb.getAttribute('data-idx'));
+      mb.addEventListener('mouseenter', (e) => showFor(idx, e.clientX, e.clientY));
+      mb.addEventListener('mousemove',  (e) => {
+        if (!tt.classList.contains('visible')) showFor(idx, e.clientX, e.clientY);
+        else positionTooltip(e.clientX, e.clientY);
+      });
       mb.addEventListener('mouseleave', hide);
-      // Touch: toggle bij tap; sluit als je een andere bar tapt.
+      // Touch: tap toont; buiten-tap verbergt (zie document-handler).
       mb.addEventListener('click', (e) => {
         e.stopPropagation();
-        const wasVisible = tt.classList.contains('visible');
-        wrap.querySelectorAll('.month-tooltip.visible').forEach((x) => x.classList.remove('visible'));
-        if (!wasVisible) tt.classList.add('visible');
+        const wasVisible = tt.classList.contains('visible') && Number(tt.getAttribute('data-active-idx')) === idx;
+        if (wasVisible) { hide(); return; }
+        tt.setAttribute('data-active-idx', String(idx));
+        showFor(idx, e.clientX, e.clientY);
       });
     });
-    // Klik buiten balken sluit tooltip (touch).
-    document.addEventListener('click', () => {
-      wrap.querySelectorAll('.month-tooltip.visible').forEach((x) => x.classList.remove('visible'));
-    }, { passive: true });
+    // Klik buiten balken sluit de tooltip (touch).
+    document.addEventListener('click', hide, { passive: true });
+    // Scroll van de balken zelf ⇒ tooltip verbergen zodat 'ie niet blijft
+    // hangen op een oude positie.
+    scroll && scroll.addEventListener('scroll', hide, { passive: true });
   }
 
   // ── Bonus per klant (platte tabel, paginering 25/pagina, inklap-detail) ──
