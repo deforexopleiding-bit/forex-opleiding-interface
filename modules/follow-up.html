@@ -1869,71 +1869,83 @@
     }
     .fu-afgb-chip.active .cnt { background: rgba(255,255,255,0.22); }
 
+    /* Clean stijl A — avatar + naam/sub + zachte pill-badge + outline-knop.
+       Consistent met .fu-eb-row (Event-bellijst). */
     .fu-afgb-row {
       display: grid;
-      grid-template-columns: 28px 1fr auto auto auto auto;
+      grid-template-columns: 40px 1fr auto auto;
       gap: 12px; align-items: center;
-      padding: 10px 14px;
+      padding: 12px 16px;
       background: rgba(255,255,255,0.02);
-      border: 1px solid rgba(255,255,255,0.06);
-      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
       margin-bottom: 6px;
       cursor: pointer;
       transition: background .12s, border-color .12s;
     }
-    .fu-afgb-row:hover { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.12); }
-    .fu-afgb-row-icon i.ti {
-      font-size: 16px; color: var(--text-secondary, rgba(255,255,255,.65));
+    .fu-afgb-row:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.14); }
+    .fu-afgb-avatar {
+      width: 36px; height: 36px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12.5px; font-weight: 700;
+      letter-spacing: .3px;
     }
+    /* Zachte tinten per reden-categorie. */
+    .fu-afgb-avatar.r-red     { background: rgba(220,38,38,.15);  color: #f87171; }
+    .fu-afgb-avatar.r-darkred { background: rgba(127,29,29,.22);  color: #fca5a5; }
+    .fu-afgb-avatar.r-orange  { background: rgba(234,88,12,.15);  color: #fdba74; }
+    .fu-afgb-avatar.r-gray    { background: rgba(148,163,184,.15); color: #cbd5e1; }
     .fu-afgb-row-main { min-width: 0; }
     .fu-afgb-row-main .name {
       font-size: 13.5px; font-weight: 500; color: var(--text-primary, #fff);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .fu-afgb-row-main .sub {
-      font-size: 11.5px; color: var(--text-secondary, rgba(255,255,255,.65));
-      margin-top: 2px;
-      display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+      font-size: 11.5px; color: var(--text-secondary, rgba(255,255,255,.70));
+      margin-top: 3px;
+      display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
     }
-    .fu-afgb-row-main .sub .fu-afgb-type {
-      display: inline-block; padding: 1px 6px; border-radius: 6px;
-      background: rgba(255,255,255,0.08); color: rgba(255,255,255,.85);
-      font-size: 10.5px; font-weight: 600; letter-spacing: .3px;
+    .fu-afgb-row-main .sub .ti { font-size: 12px; opacity: .8; }
+    .fu-afgb-row-right {
+      display: flex; flex-direction: column; align-items: flex-end; gap: 3px;
+      min-width: 0;
     }
     .fu-afgb-badge {
       display: inline-block; padding: 3px 10px; border-radius: 999px;
-      font-size: 11px; font-weight: 700; letter-spacing: .3px;
+      font-size: 11px; font-weight: 600; letter-spacing: .2px;
       white-space: nowrap;
     }
-    .fu-afgb-badge.r-orange  { background: #ea580c; color: #fff; }
-    .fu-afgb-badge.r-gray    { background: #4b5563; color: #fff; }
-    .fu-afgb-badge.r-red     { background: #dc2626; color: #fff; }
-    .fu-afgb-badge.r-darkred { background: #7f1d1d; color: #fff; }
-    .fu-afgb-when { text-align: right; }
-    .fu-afgb-when .k {
-      font-size: 10px; text-transform: uppercase; letter-spacing: .4px;
-      color: var(--text-secondary, rgba(255,255,255,.55));
-    }
-    .fu-afgb-when .v {
-      font-size: 12px; color: var(--text-primary, #fff); font-variant-numeric: tabular-nums;
-    }
-    .fu-afgb-owner {
-      display: inline-flex; align-items: center; gap: 4px;
-      font-size: 11.5px; color: var(--text-secondary, rgba(255,255,255,.7));
+    .fu-afgb-badge.r-red     { background: rgba(220,38,38,.15);  color: #f87171; border: 1px solid rgba(220,38,38,.25); }
+    .fu-afgb-badge.r-darkred { background: rgba(127,29,29,.22);  color: #fca5a5; border: 1px solid rgba(220,38,38,.25); }
+    .fu-afgb-badge.r-orange  { background: rgba(234,88,12,.15);  color: #fdba74; border: 1px solid rgba(234,88,12,.25); }
+    .fu-afgb-badge.r-gray    { background: rgba(148,163,184,.15); color: #cbd5e1; border: 1px solid rgba(148,163,184,.22); }
+    .fu-afgb-when {
+      font-size: 11px; color: var(--text-secondary, rgba(255,255,255,.55));
+      font-variant-numeric: tabular-nums;
     }
     .fu-afgb-reactivate {
-      display: inline-flex; align-items: center; gap: 4px;
-      font-size: 12px; padding: 6px 10px;
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 12px; padding: 7px 12px;
+      background: transparent;
+      color: var(--text-primary, #fff);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background .12s, border-color .12s;
+      font-family: inherit;
     }
+    .fu-afgb-reactivate:hover:not(:disabled) {
+      background: rgba(255,255,255,0.05);
+      border-color: rgba(255,255,255,0.25);
+    }
+    .fu-afgb-reactivate:disabled { opacity: .55; cursor: not-allowed; }
     @media (max-width: 900px) {
       .fu-afgb-row {
-        grid-template-columns: 28px 1fr auto;
-        row-gap: 6px;
+        grid-template-columns: 40px 1fr;
+        row-gap: 8px;
       }
-      .fu-afgb-badge   { grid-column: 2 / 3; justify-self: start; }
-      .fu-afgb-when    { grid-column: 2 / 4; text-align: left; }
-      .fu-afgb-owner   { grid-column: 2 / 3; }
-      .fu-afgb-reactivate { grid-column: 3 / 4; grid-row: 4; }
+      .fu-afgb-row-right   { grid-column: 2 / 3; align-items: flex-start; }
+      .fu-afgb-reactivate  { grid-column: 2 / 3; justify-self: start; }
     }
 
     /* Oude retenties-tab — filter-chips + compacte rijen met status-badge */
@@ -1957,18 +1969,25 @@
     }
     .fu-oret-chip.active .cnt { background: rgba(255,255,255,0.22); }
 
+    /* Clean stijl A — zelfde layout als .fu-afgb-row, huisstijl-tint avatar. */
     .fu-oret-row {
       display: grid;
-      grid-template-columns: 28px 1fr auto auto auto;
+      grid-template-columns: 40px 1fr auto auto;
       gap: 12px; align-items: center;
-      padding: 10px 14px;
+      padding: 12px 16px;
       background: rgba(255,255,255,0.02);
-      border: 1px solid rgba(255,255,255,0.06);
-      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
       margin-bottom: 6px;
+      transition: background .12s, border-color .12s;
     }
-    .fu-oret-row-icon i.ti {
-      font-size: 16px; color: var(--text-secondary, rgba(255,255,255,.65));
+    .fu-oret-row:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.14); }
+    .fu-oret-avatar {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: #093d54; color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12.5px; font-weight: 700;
+      letter-spacing: .3px;
     }
     .fu-oret-row-main { min-width: 0; }
     .fu-oret-row-main .name {
@@ -1976,39 +1995,58 @@
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .fu-oret-row-main .sub {
-      font-size: 11.5px; color: var(--text-secondary, rgba(255,255,255,.65));
-      margin-top: 2px;
-      display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+      font-size: 11.5px; color: var(--text-secondary, rgba(255,255,255,.70));
+      margin-top: 3px;
+      display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+    }
+    .fu-oret-row-main .sub .ti { font-size: 12px; opacity: .8; }
+    .fu-oret-row-right {
+      display: flex; flex-direction: column; align-items: flex-end; gap: 3px;
+      min-width: 0;
     }
     .fu-oret-badge {
       display: inline-block; padding: 3px 10px; border-radius: 999px;
-      font-size: 11px; font-weight: 700; letter-spacing: .3px;
+      font-size: 11px; font-weight: 600; letter-spacing: .2px;
       white-space: nowrap;
     }
-    .fu-oret-badge.r-blue   { background: #1d4ed8; color: #fff; }
-    .fu-oret-badge.r-orange { background: #ea580c; color: #fff; }
-    .fu-oret-badge.r-green  { background: #059669; color: #fff; }
-    .fu-oret-badge.r-gray   { background: #4b5563; color: #fff; }
-    .fu-oret-when { text-align: right; }
-    .fu-oret-when .k {
-      font-size: 10px; text-transform: uppercase; letter-spacing: .4px;
-      color: var(--text-secondary, rgba(255,255,255,.55));
-    }
-    .fu-oret-when .v {
-      font-size: 12px; color: var(--text-primary, #fff); font-variant-numeric: tabular-nums;
+    /* Zachte tinten — geen volle blokken. */
+    .fu-oret-badge.r-blue   { background: rgba(59,130,246,.15); color: #93c5fd; border: 1px solid rgba(59,130,246,.28); }
+    .fu-oret-badge.r-orange { background: rgba(234,88,12,.15);  color: #fdba74; border: 1px solid rgba(234,88,12,.25); }
+    .fu-oret-badge.r-green  { background: rgba(34,197,94,.15);  color: #86efac; border: 1px solid rgba(34,197,94,.28); }
+    .fu-oret-badge.r-gray   { background: rgba(148,163,184,.15); color: #cbd5e1; border: 1px solid rgba(148,163,184,.22); }
+    .fu-oret-when {
+      font-size: 11px; color: var(--text-secondary, rgba(255,255,255,.55));
+      font-variant-numeric: tabular-nums;
     }
     .fu-oret-pickup {
-      display: inline-flex; align-items: center; gap: 4px;
-      font-size: 12px; padding: 6px 10px;
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 12px; padding: 7px 12px;
+      background: transparent;
+      color: var(--text-primary, #fff);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background .12s, border-color .12s;
+      font-family: inherit;
+    }
+    .fu-oret-pickup:hover:not(:disabled) {
+      background: rgba(255,255,255,0.05);
+      border-color: rgba(255,255,255,0.25);
+    }
+    .fu-oret-pickup:disabled { opacity: .55; cursor: not-allowed; }
+    .fu-oret-pickup.primary {
+      background: #093d54; border-color: #0d4d69;
+    }
+    .fu-oret-pickup.primary:hover:not(:disabled) {
+      background: #0d4d69; border-color: #145a7c;
     }
     @media (max-width: 900px) {
       .fu-oret-row {
-        grid-template-columns: 28px 1fr auto;
-        row-gap: 6px;
+        grid-template-columns: 40px 1fr;
+        row-gap: 8px;
       }
-      .fu-oret-badge  { grid-column: 2 / 3; justify-self: start; }
-      .fu-oret-when   { grid-column: 2 / 4; text-align: left; }
-      .fu-oret-pickup { grid-column: 3 / 4; grid-row: 3; }
+      .fu-oret-row-right { grid-column: 2 / 3; align-items: flex-start; }
+      .fu-oret-pickup    { grid-column: 2 / 3; justify-self: start; }
     }
 
     /* Dashboard */
@@ -7558,24 +7596,25 @@
         const typeLabel = it.type === 'appointment' ? 'Zoom-afspraak' : 'Bel-lead';
         const when = it.afgeboekt_op ? _fmtHMwithDate(it.afgeboekt_op) : '—';
         const owner = it.owner_name || '—';
+        const initials = _leadInitials(it.name);
         return `<div class="fu-afgb-row" data-afgb-open-type="${esc(it.type)}" data-afgb-open-id="${esc(it.id)}">
-          <div class="fu-afgb-row-icon"><i class="ti ${typeIcon}"></i></div>
+          <div class="fu-afgb-avatar ${esc(meta.cls)}">${esc(initials)}</div>
           <div class="fu-afgb-row-main">
             <div class="name">${esc(it.name)}</div>
             <div class="sub">
-              <span class="fu-afgb-type">${esc(typeLabel)}</span>
+              <span><i class="ti ${typeIcon}"></i> ${esc(typeLabel)}</span>
               <span>·</span>
               <span>${it.phone ? esc(it.phone) : '<span style="opacity:.5">— geen tel —</span>'}</span>
               ${it.email ? '<span>·</span><span>' + esc(it.email) + '</span>' : ''}
+              <span>·</span>
+              <span><i class="ti ti-user"></i> ${esc(owner)}</span>
             </div>
           </div>
-          <span class="fu-afgb-badge ${esc(meta.cls)}">${esc(meta.label)}</span>
-          <div class="fu-afgb-when">
-            <div class="k">Afgeboekt op</div>
-            <div class="v">${esc(when)}</div>
+          <div class="fu-afgb-row-right">
+            <span class="fu-afgb-badge ${esc(meta.cls)}">${esc(meta.label)}</span>
+            <span class="fu-afgb-when">${esc(when)}</span>
           </div>
-          <div class="fu-afgb-owner"><i class="ti ti-user"></i> ${esc(owner)}</div>
-          <button type="button" class="fu-lead-btn fu-afgb-reactivate"
+          <button type="button" class="fu-afgb-reactivate"
                   data-afgb-reactivate-type="${esc(it.type)}"
                   data-afgb-reactivate-id="${esc(it.id)}"
                   title="Terug op de werklijst zetten">
@@ -7732,8 +7771,9 @@
         const endLabel = it.end_date ? _fmtEndDateNL(it.end_date) : '—';
         const btnLabel = status === 'nieuw' ? 'Oppakken' : 'Openen';
         const btnIcon  = status === 'nieuw' ? 'ti-user-plus' : 'ti-external-link';
+        const initials = _leadInitials(it.name);
         return `<div class="fu-oret-row">
-          <div class="fu-oret-row-icon"><i class="ti ti-history"></i></div>
+          <div class="fu-oret-avatar">${esc(initials)}</div>
           <div class="fu-oret-row-main">
             <div class="name">${esc(it.name)}</div>
             <div class="sub">
@@ -7742,12 +7782,11 @@
               ${it.mentor_name ? '<span>·</span><span><i class="ti ti-user"></i> ' + esc(it.mentor_name) + '</span>' : ''}
             </div>
           </div>
-          <span class="fu-oret-badge ${esc(meta.cls)}">${esc(meta.label)}</span>
-          <div class="fu-oret-when">
-            <div class="k">Afgelopen op</div>
-            <div class="v">${esc(endLabel)}</div>
+          <div class="fu-oret-row-right">
+            <span class="fu-oret-badge ${esc(meta.cls)}">${esc(meta.label)}</span>
+            <span class="fu-oret-when">Afgelopen op ${esc(endLabel)}</span>
           </div>
-          <button type="button" class="fu-lead-btn fu-oret-pickup ${status === 'nieuw' ? 'primary' : ''}"
+          <button type="button" class="fu-oret-pickup ${status === 'nieuw' ? 'primary' : ''}"
                   data-oret-pickup-id="${esc(it.customer_id)}"
                   data-oret-pickup-end="${esc(it.end_date || '')}"
                   data-oret-pickup-lss="${esc(it.last_sub_status || '')}"
