@@ -197,7 +197,7 @@ async function init() {
   if (!profile) return;
   // adminNavLink wordt nu centraal door sidebar.js gegate (RBAC-voorbereiding)
   try {
-    const r    = await fetch('/api/agents');
+    const r    = await window.AgentShared.apiFetch('/api/agents');
     const data = await r.json();
     if (data.agents?.length) {
       agents = data.agents.map(a => {
@@ -296,7 +296,7 @@ async function openChat(agentName) {
       ? `/api/agent-conversations?session=${encodeURIComponent(savedSession)}`
       : `/api/agent-conversations?agent_name=${encodeURIComponent(activeAgent.name)}`;
 
-    const r = await fetch(url);
+    const r = await window.AgentShared.apiFetch(url);
     if (r.ok) {
       const data = await r.json();
       const sid  = data.session_id || savedSession || ('session_' + Date.now());
@@ -499,7 +499,7 @@ async function generateReportFor(agentName) {
   AgentShared.showReport(`📊 Dagrapport — ${agent.name}`, 'Rapport genereren…');
   document.getElementById('reportContent').innerHTML = '<div style="color:var(--text-faint);text-align:center;padding:32px">Rapport genereren…</div>';
   try {
-    const r    = await fetch('/api/agent-report', {
+    const r    = await window.AgentShared.apiFetch('/api/agent-report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agent_id: agent.id, agent_name: agent.name, report_type: 'dagrapport' }),
@@ -523,7 +523,7 @@ async function saveLearning(triggerText, idealResponse, btn) {
   }
   if (btn) { btn.disabled = true; btn.textContent = '…'; }
   try {
-    const r = await fetch('/api/agent-learnings', {
+    const r = await window.AgentShared.apiFetch('/api/agent-learnings', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ agent_id: activeAgent.id || null, agent_name: activeAgent.name, trigger_text: triggerText, ideal_response: idealResponse }),
@@ -640,7 +640,7 @@ async function inlineReject(approvalId, btn) {
 
 async function handleInlineApproval(approvalId, action) {
   try {
-    const res  = await fetch('/api/agent-approval', {
+    const res  = await window.AgentShared.apiFetch('/api/agent-approval', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ action, approval_id: approvalId, approved_item_indices: null, decided_by: 'Jeffrey' }),

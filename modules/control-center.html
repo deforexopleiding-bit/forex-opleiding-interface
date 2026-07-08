@@ -149,9 +149,35 @@ function showAuditDetail(entryStr) {
   } catch {}
 }
 
-function exportAuditCsv() {
+async function exportAuditCsv() {
+  // Security H1 — CSV-export gaat via apiFetch (Bearer-token nodig voor de
+  // guard op /api/agent-audit). window.open kan geen Authorization-header
+  // meesturen, dus we downloaden via een blob + tijdelijke <a>-klik.
   const agentFilter = document.getElementById('auditFilterAgent')?.value || '';
-  window.open(`/api/agent-audit?action=export_csv${agentFilter ? '&agent_filter=' + encodeURIComponent(agentFilter) : ''}`, '_blank');
+  const url = `/api/agent-audit?action=export_csv${agentFilter ? '&agent_filter=' + encodeURIComponent(agentFilter) : ''}`;
+  try {
+    const res = await window.AgentShared.apiFetch(url);
+    if (res.status === 403) {
+      window.AgentShared.showToast?.('Geen rechten voor CSV-export', 'error');
+      return;
+    }
+    if (!res.ok) {
+      window.AgentShared.showToast?.('Export mislukt (' + res.status + ')', 'error');
+      return;
+    }
+    const blob = await res.blob();
+    const filename = `audit-log-${new Date().toISOString().split('T')[0]}.csv`;
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 1000);
+  } catch (e) {
+    window.AgentShared.showToast?.('Export fout: ' + (e?.message || e), 'error');
+  }
 }
 
 // ═══════════════════════════════════
@@ -160,14 +186,14 @@ function exportAuditCsv() {
 async function loadKPIBanner() {
   try {
     // Approvals count
-    const apRes  = await fetch('/api/agent-approval?action=list');
+    const apRes  = await window.AgentShared.apiFetch('/api/agent-approval?action=list');
     const apData = await apRes.json();
     const pendingCount = (apData.pending || []).length;
     const kpiApprovals = document.getElementById('kpiApprovals');
     if (kpiApprovals) kpiApprovals.textContent = pendingCount;
 
     // Audit stats (7 days)
-    const auditRes  = await fetch('/api/agent-audit?action=list&limit=200');
+    const auditRes  = await window.AgentShared.apiFetch('/api/agent-audit?action=list&limit=200');
     const auditData = await auditRes.json();
     const entries   = auditData.entries || [];
     const oneWeekAgo = Date.now() - 7 * 24 * 3600 * 1000;

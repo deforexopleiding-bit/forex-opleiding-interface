@@ -1,4 +1,5 @@
 import { createUserClient } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 // GET  /api/agent-conversations?agent_name=<name>
 //      → { messages: [{role, content, created_at, conversation_session}], session_id }
@@ -7,6 +8,11 @@ import { createUserClient } from './supabase.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
+
+  // Security H1 — RBAC-gate.
+  const allowed = await requirePermission(req, 'agents.view.chat');
+  if (!allowed) return res.status(403).json({ error: 'Geen rechten (agents.view.chat)' });
+
   const supabase = createUserClient(req);
 
   if (req.method === 'GET') {

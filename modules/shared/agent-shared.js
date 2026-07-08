@@ -113,7 +113,7 @@
 
   async function loadApprovals() {
     try {
-      const res  = await fetch('/api/agent-approval?action=list');
+      const res  = await apiFetch('/api/agent-approval?action=list');
       const data = await res.json();
       const list  = document.getElementById('approvalList');
       const badge = document.getElementById('approvalBadge');
@@ -161,7 +161,7 @@
     document.getElementById('approvalDetailBody').innerHTML = '<div style="padding:20px;color:var(--text-faint)">Laden…</div>';
     document.getElementById('approvalDetailOverlay').classList.remove('hidden');
     try {
-      const res  = await fetch(`/api/agent-approval?action=get_detail&approval_id=${approvalId}`);
+      const res  = await apiFetch(`/api/agent-approval?action=get_detail&approval_id=${approvalId}`);
       const data = await res.json();
       currentApprovalData = data.approval;
       const ap    = data.approval;
@@ -215,7 +215,7 @@
     btns.forEach(b => { b.disabled = true; });
     const comment = document.getElementById('approvalComment')?.value?.trim() || undefined;
     try {
-      const res  = await fetch('/api/agent-approval', {
+      const res  = await apiFetch('/api/agent-approval', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
@@ -249,7 +249,7 @@
     const reason     = document.getElementById('approvalComment')?.value?.trim() || '';
     const decided_by = 'Jeffrey';
     try {
-      await fetch('/api/agent-approval', {
+      await apiFetch('/api/agent-approval', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
