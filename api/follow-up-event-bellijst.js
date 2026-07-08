@@ -62,7 +62,7 @@ export default async function handler(req, res) {
     // 2) Deelnemers van dat event.
     const { data: attendees, error: attErr } = await supabaseAdmin
       .from('event_attendees')
-      .select('id, event_id, customer_id, first_name, last_name, email, phone')
+      .select('id, event_id, customer_id, first_name, last_name, email, phone, assessment_response_id')
       .eq('event_id', eventRow.id);
 
     if (attErr) {
@@ -111,13 +111,15 @@ export default async function handler(req, res) {
           || (a.customer_id ? leadByCustId.get(a.customer_id) : null)
           || null;
         return {
-          id          : a.id,
-          name        : displayName(a),
-          email       : a.email || null,
-          phone       : a.phone || null,
-          customer_id : a.customer_id || null,
-          lead_id     : matchedLead?.id || null,
-          lead_status : matchedLead?.lead_status || null,
+          id                    : a.id,
+          name                  : displayName(a),
+          email                 : a.email || null,
+          phone                 : a.phone || null,
+          customer_id           : a.customer_id || null,
+          lead_id               : matchedLead?.id || null,
+          lead_status           : matchedLead?.lead_status || null,
+          assessment_response_id: a.assessment_response_id || null,
+          questionnaire_filled  : !!a.assessment_response_id,
         };
       })
       .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'nl'));
