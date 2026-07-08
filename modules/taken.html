@@ -1666,9 +1666,6 @@ async function init() {
   }
   render();
   handleUrlParams();
-  if (!localStorage.getItem('db_migrated_v1')) {
-    fetch('/api/db-migrate').then(r => { if (r.ok) localStorage.setItem('db_migrated_v1', '1'); }).catch(() => {});
-  }
   // Server-side scoped fetch — vervangt loadTakenFromSupabase().
   loadTaken().catch((e) => console.warn('[taken] loadTaken init', e?.message || e));
 

@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { supabase, verifyAdmin } from './supabase.js';
 
 // ── Nieuwe kolommen voor email_messages (body-fetch Fase 2) ────────────────
 const NEW_COLS = [
@@ -44,6 +44,13 @@ async function tableExists(table) {
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
+
+  // K2 — super_admin-only gate vóór alle DB-actie. Endpoint kan schema
+  // wijzigen (ALTER TABLE / CREATE TABLE via RPC).
+  const admin = await verifyAdmin(req);
+  if (!admin || admin.profile?.role !== 'super_admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
 
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });

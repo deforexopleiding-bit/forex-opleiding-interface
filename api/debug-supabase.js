@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { supabase, verifyAdmin } from './supabase.js';
 
 async function probeCol(table, col) {
   try {
@@ -8,6 +8,13 @@ async function probeCol(table, col) {
 }
 
 export default async function handler(req, res) {
+  // K1 — super_admin-only gate. Endpoint lekt schema-details + kan
+  // test-insert doen, dus geen andere rollen toestaan.
+  const admin = await verifyAdmin(req);
+  if (!admin || admin.profile?.role !== 'super_admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
   const out = {
     timestamp: new Date().toISOString(),
     supabase_url: process.env.SUPABASE_URL ? process.env.SUPABASE_URL.slice(0, 40) + '…' : 'MISSING',
