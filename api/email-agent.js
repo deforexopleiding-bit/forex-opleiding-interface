@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { supabase, supabaseAdmin } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 const CLASSIFIER_VERSION = 'v1';
 
@@ -842,6 +843,13 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  // Security H2 — RBAC-gate voor de HTTP-route. Interne callers importeren
+  // categorize() rechtstreeks als functie (backfill-emails, email-reclassify,
+  // reanalyze-all, sync-emails) — die raken deze handler NIET en blijven werken.
+  const allowed = await requirePermission(req, 'email.module.access');
+  if (!allowed) return res.status(403).json({ error: 'Geen rechten (email.module.access)' });
+
   const { from, subject, bodySnippet, date, uid, mailbox } = req.body || {};
   if (!from && !subject) {
     return res.status(400).json({ error: 'from of subject vereist' });

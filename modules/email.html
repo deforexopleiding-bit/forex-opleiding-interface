@@ -2180,7 +2180,7 @@
     const bodyEntry = state.bodyCache[email.uid];
     const bodySnippet = (bodyEntry && !bodyEntry.loading && !bodyEntry.error) ? (bodyEntry.text || '').slice(0, 500) : '';
     try {
-      const res = await fetch('/api/email-agent', {
+      const res = await window.AgentShared.apiFetch('/api/email-agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // uid+mailbox: backend persisteert resultaat in email_classifications (Fase 2).
@@ -3260,7 +3260,7 @@
   async function fetchEmailThread(uid) {
     if (state.threadCache[uid]) return state.threadCache[uid];
     try {
-      const res = await fetch('/api/email-thread', {
+      const res = await window.AgentShared.apiFetch('/api/email-thread', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email_id: uid }),
       });
@@ -3278,7 +3278,7 @@
     try {
       const ids = state.emails.map((e) => e.uid).slice(0, 400);
       if (!ids.length) return;
-      const res = await fetch('/api/email-thread', {
+      const res = await window.AgentShared.apiFetch('/api/email-thread', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email_ids: ids }),
       });
@@ -3999,7 +3999,7 @@
     const newValue = !current;
     setActionFlag(uid, newValue);
     render();
-    fetch('/api/email-action-flag', {
+    window.AgentShared.apiFetch('/api/email-action-flag', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email_id: uid, requires_action: newValue }),
     }).then((r) => {
@@ -5423,7 +5423,7 @@
     if (btn) btn.disabled = true;
     document.getElementById('tabContent').innerHTML = '<div class="state"><div class="spinner"></div><h3>Mailbox laden…</h3><p>We halen je e-mails op via IMAP.</p></div>';
     try {
-      const res  = await fetch('/api/emails', { cache: 'no-store' });
+      const res  = await window.AgentShared.apiFetch('/api/emails', { cache: 'no-store' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
       state.emails = data.emails || [];

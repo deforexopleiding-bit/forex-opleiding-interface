@@ -1,5 +1,6 @@
 import { ImapFlow } from 'imapflow';
 import { supabaseAdmin } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 // Mapping mailbox → env variable that holds its IMAP password.
 // To add another mailbox: add an entry here, set the password env var
@@ -16,6 +17,10 @@ const ACCOUNTS = [
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
+
+  // Security H2 — RBAC-gate. Lees-endpoint dat mailbox-content teruggeeft.
+  const allowed = await requirePermission(req, 'email.module.access');
+  if (!allowed) return res.status(403).json({ error: 'Geen rechten (email.module.access)' });
 
   const { IMAP_HOST, IMAP_PORT } = process.env;
   if (!IMAP_HOST) {
