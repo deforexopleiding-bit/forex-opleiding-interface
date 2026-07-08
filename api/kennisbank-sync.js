@@ -1,4 +1,5 @@
 import { createUserClient } from './supabase.js';
+import { safeError } from './_lib/safe-error.js';
 
 export default async function handler(req, res) {
   const supabase = createUserClient(req);
@@ -14,8 +15,9 @@ export default async function handler(req, res) {
       if (error) throw error;
       return res.status(200).json({ items: items || [], count: (items || []).length });
     } catch (err) {
-      console.error('[kennisbank-sync] GET fout:', err.message);
-      return res.status(500).json({ items: [], count: 0, error: err.message });
+      // Behoud items+count in de response-shape voor de FE; details naar log.
+      console.error('[kennisbank-sync] GET fout:', err?.message || err);
+      return res.status(500).json({ items: [], count: 0, error: 'Er ging iets mis. Probeer het later opnieuw.' });
     }
   }
 
@@ -38,8 +40,7 @@ export default async function handler(req, res) {
       console.log('[kennisbank-sync] PUT id:', id);
       return res.status(200).json({ ok: true });
     } catch (err) {
-      console.error('[kennisbank-sync] PUT fout:', err.message);
-      return res.status(500).json({ error: err.message });
+      return safeError(res, 500, err);
     }
   }
 
@@ -53,8 +54,7 @@ export default async function handler(req, res) {
       console.log('[kennisbank-sync] DELETE id:', id);
       return res.status(200).json({ ok: true });
     } catch (err) {
-      console.error('[kennisbank-sync] DELETE fout:', err.message);
-      return res.status(500).json({ error: err.message });
+      return safeError(res, 500, err);
     }
   }
 
@@ -116,8 +116,7 @@ export default async function handler(req, res) {
       console.log(`[kennisbank-sync] upsert_item → label: ${labelKey} | auto: ${payload.auto_generated} | title: ${payload.title.slice(0, 40)}`);
       return res.status(200).json({ ok: true });
     } catch (err) {
-      console.error('[kennisbank-sync] upsert_item fout:', err.message);
-      return res.status(500).json({ error: err.message });
+      return safeError(res, 500, err);
     }
   }
 
@@ -128,8 +127,7 @@ export default async function handler(req, res) {
       await supabase.from('kennisbank_items').delete().eq('label', localId);
       return res.status(200).json({ ok: true });
     } catch (err) {
-      console.error('[kennisbank-sync] delete_item fout:', err.message);
-      return res.status(500).json({ error: err.message });
+      return safeError(res, 500, err);
     }
   }
 
@@ -159,8 +157,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({ ok: true });
     } catch (err) {
-      console.error('[kennisbank-sync] sync_profile fout:', err.message);
-      return res.status(500).json({ error: err.message });
+      return safeError(res, 500, err);
     }
   }
 
@@ -200,10 +197,17 @@ export default async function handler(req, res) {
           helpfulness_score: 100,
           times_used: 0
         });
-        if (error) errors.push('Profiel: ' + error.message);
-        else synced++;
+        if (error) {
+          console.error('[kennisbank-sync] profiel insert fout:', error?.message || error);
+          errors.push('Profiel: kon niet gesynchroniseerd worden.');
+        } else {
+          synced++;
+        }
       }
-    } catch (e) { errors.push('Profiel crash: ' + e.message); }
+    } catch (e) {
+      console.error('[kennisbank-sync] profiel crash:', e?.message || e);
+      errors.push('Profiel: kon niet gesynchroniseerd worden.');
+    }
   }
 
   if (Array.isArray(items)) {
@@ -237,10 +241,15 @@ export default async function handler(req, res) {
           source_email_id:   item.source_email_id || null
         });
 
-        if (error) errors.push(`Item "${item.title}": ${error.message}`);
-        else synced++;
+        if (error) {
+          console.error('[kennisbank-sync] item insert fout:', item.title, error?.message || error);
+          errors.push(`Item "${item.title}": kon niet gesynchroniseerd worden.`);
+        } else {
+          synced++;
+        }
       } catch (e) {
-        errors.push(`Item crash: ${e.message}`);
+        console.error('[kennisbank-sync] item crash:', e?.message || e);
+        errors.push('Item: kon niet gesynchroniseerd worden.');
       }
     }
   }

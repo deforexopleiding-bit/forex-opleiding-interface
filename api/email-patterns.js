@@ -1,4 +1,5 @@
 import { createUserClient } from './supabase.js';
+import { safeError } from './_lib/safe-error.js';
 
 const TRUSTED_SENDER_EMAILS  = ['no-reply-forms@webflow.com', 'noreply@send.lcmsgsndr.net', 'info+deforexopleiding.nl@send.lcmsgsndr.net'];
 const TRUSTED_SENDER_DOMAINS = ['webflow.com', 'send.lcmsgsndr.net', 'lcmsgsndr.net'];
@@ -21,8 +22,9 @@ export default async function handler(req, res) {
       if (error) throw error;
       return res.status(200).json({ patterns: data || [] });
     } catch (err) {
-      console.error('[email-patterns GET]', err.message);
-      return res.status(500).json({ error: err.message, patterns: [] });
+      // Behoud patterns:[] in de response-shape voor de FE — details naar log.
+      console.error('[email-patterns GET]', err?.message || err);
+      return res.status(500).json({ error: 'Er ging iets mis. Probeer het later opnieuw.', patterns: [] });
     }
   }
 
@@ -47,8 +49,7 @@ export default async function handler(req, res) {
       console.log('[email-patterns DELETE] Stale Reclame patronen verwijderd');
       return res.status(200).json({ ok: true, cleaned: deleted });
     } catch (err) {
-      console.error('[email-patterns DELETE]', err.message);
-      return res.status(500).json({ error: err.message });
+      return safeError(res, 500, err);
     }
   }
 

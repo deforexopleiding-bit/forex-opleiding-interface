@@ -23,6 +23,7 @@
 
 import { createUserClient } from './supabase.js';
 import { applyLearning } from './_lib/email-learn.js';
+import { safeError } from './_lib/safe-error.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -36,6 +37,12 @@ export default async function handler(req, res) {
     return res.status(200).json(result);
   } catch (err) {
     const status = err.statusCode || 500;
-    return res.status(status).json({ error: err.message });
+    // Bij 4xx (bewuste validatie-fouten uit applyLearning) geven we de
+    // originele message door — die is opzettelijk nette gebruikersfeedback.
+    // Bij 5xx (DB/exception) → generiek + server-log via safeError.
+    if (status >= 400 && status < 500) {
+      return res.status(status).json({ error: err.message });
+    }
+    return safeError(res, status, err);
   }
 }

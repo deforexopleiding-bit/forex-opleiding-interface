@@ -24,6 +24,7 @@ import {
   NIVEAU_FROM_ROUTING,
   getOpenEventsWithSpace,
 } from './_lib/event-registration.js';
+import { safeError } from './_lib/safe-error.js';
 
 const ALLOWED_NIVEAUS = Object.values(NIVEAU_FROM_ROUTING); // ['gevorderd','basis']
 
@@ -64,7 +65,6 @@ export default async function handler(req, res) {
     }));
     return res.status(200).json({ niveau, events: out });
   } catch (e) {
-    console.error('[assessment-open-events]', e.message);
-    return res.status(500).json({ error: e.message });
+    return safeError(res, 500, e);
   }
 }

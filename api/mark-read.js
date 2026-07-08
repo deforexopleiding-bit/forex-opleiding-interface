@@ -1,4 +1,5 @@
 import { ImapFlow } from 'imapflow';
+import { safeError } from './_lib/safe-error.js';
 
 // Houd deze lijst in sync met api/emails.js — dezelfde mailboxen,
 // dezelfde env-vars voor de wachtwoorden. onboarding@ is toegevoegd zodat
@@ -89,7 +90,7 @@ export default async function handler(req, res) {
       lock.release();
     }
   } catch (err) {
-    return res.status(500).json({ error: `IMAP fout: ${err.message}` });
+    return safeError(res, 500, err, 'Kon leesstatus niet bijwerken.');
   } finally {
     try { await client.logout(); } catch {}
   }

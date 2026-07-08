@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js';
+import { safeError } from './_lib/safe-error.js';
 
 // Werkelijke kolomnamen (geverifieerd via Supabase diagnose):
 // learn_examples : id, email_id, email_sender, sender_domain, email_subject,
@@ -20,8 +21,9 @@ export default async function handler(req, res) {
 
   function log(label, result) {
     if (result.error) {
-      console.error(`[learning-report] ${label} fout:`, result.error.message);
-      _errors.push({ query: label, error: result.error.message });
+      // Details naar server-log; naar client alleen een generieke marker per query.
+      console.error(`[learning-report] ${label} fout:`, result.error?.message || result.error);
+      _errors.push({ query: label, error: 'query failed' });
     } else {
       console.log(`[learning-report] ${label}: ${result.count ?? result.data?.length ?? '?'}`);
     }
@@ -148,7 +150,6 @@ export default async function handler(req, res) {
     console.log('[learning-report] klaar · fouten:', _errors.length, '· patronen:', response.total_patterns, '· correcties:', response.total_corrections);
     return res.status(200).json(response);
   } catch (err) {
-    console.error('Learning report crash:', err);
-    return res.status(500).json({ error: err.message || 'Onbekende fout' });
+    return safeError(res, 500, err);
   }
 }

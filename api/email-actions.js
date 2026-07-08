@@ -1,4 +1,5 @@
 import { createUserClient } from './supabase.js';
+import { safeError } from './_lib/safe-error.js';
 
 /*
   Supabase table (run once in SQL editor):
@@ -40,8 +41,10 @@ export default async function handler(req, res) {
       if (error) throw error;
       return res.status(200).json({ rows: data || [] });
     } catch (err) {
-      console.error('[email-actions] GET fout:', err.message);
-      return res.status(200).json({ rows: [], error: err.message });
+      // GET-load faalt zacht: 200 met lege lijst zodat de UI niet stukloopt.
+      // Details naar server-log, generiek naar client (geen .message-lek).
+      console.error('[email-actions] GET fout:', err?.message || err);
+      return res.status(200).json({ rows: [], error: 'Kon overrides niet laden.' });
     }
   }
 
@@ -70,7 +73,6 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ ok: true });
   } catch (err) {
-    console.warn('email_actions insert mislukt:', err.message);
-    return res.status(500).json({ error: err.message || 'Onbekende fout' });
+    return safeError(res, 500, err);
   }
 }

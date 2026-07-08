@@ -11,6 +11,7 @@
 
 import { loadActiveQuestions, sanitizeQuestionsForPublic } from './_lib/assessment-validation.js';
 import { getActiveQuestionnaire } from './_lib/assessment-questionnaires.js';
+import { safeError } from './_lib/safe-error.js';
 
 export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
@@ -31,7 +32,6 @@ export default async function handler(req, res) {
       questions: sanitizeQuestionsForPublic(questions),
     });
   } catch (e) {
-    console.error('[assessment-questions]', e.message);
-    return res.status(500).json({ error: e.message });
+    return safeError(res, 500, e);
   }
 }

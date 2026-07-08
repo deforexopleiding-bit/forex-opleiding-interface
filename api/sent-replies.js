@@ -1,3 +1,5 @@
+import { safeError } from './_lib/safe-error.js';
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -61,7 +63,8 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ sent: unique, count: unique.length, page, limit });
   } catch (err) {
-    console.error('[sent-replies] fout:', err.message);
-    return res.status(500).json({ error: err.message, sent: [] });
+    // Behoud sent:[] in de response-shape voor de FE; details naar log.
+    console.error('[sent-replies] fout:', err?.message || err);
+    return res.status(500).json({ error: 'Er ging iets mis. Probeer het later opnieuw.', sent: [] });
   }
 }
