@@ -1,5 +1,6 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
+import { safeError } from './_lib/safe-error.js';
 
 const ACCOUNTS = [
   { user: 'leads@deforexopleiding.nl',         passEnv: 'IMAP_PASS' },
@@ -107,7 +108,7 @@ export default async function handler(req, res) {
       lock.release();
     }
   } catch (err) {
-    return res.status(500).json({ error: `IMAP fout: ${err.message}` });
+    return safeError(res, 500, err, 'Mailbody kon niet worden opgehaald.');
   } finally {
     try { await client.logout(); } catch {}
   }

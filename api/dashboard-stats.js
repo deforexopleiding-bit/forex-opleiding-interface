@@ -1,4 +1,5 @@
 import { createUserClient } from './supabase.js';
+import { safeError } from './_lib/safe-error.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -252,7 +253,6 @@ export default async function handler(req, res) {
     return res.status(200).json(payload);
 
   } catch (err) {
-    console.error('[dashboard-stats] Error:', err.message);
-    return res.status(500).json({ error: err.message });
+    return safeError(res, 500, err);
   }
 }

@@ -43,6 +43,7 @@
 import { supabaseAdmin } from './supabase.js';
 import { UUID_RE } from './_lib/assessment-validation.js';
 import { checkRateLimit } from './_lib/rate-limit.js';
+import { safeError } from './_lib/safe-error.js';
 import {
   isNiveauMatch,
   getConfirmedCount,
@@ -92,8 +93,7 @@ export default async function handler(req, res) {
     if (!data)  return res.status(404).json({ error: 'Assessment niet gevonden.', code: 'ASSESSMENT_NOT_FOUND' });
     assessment = data;
   } catch (e) {
-    console.error('[assessment-register] assessment fetch', e.message);
-    return res.status(500).json({ error: e.message });
+    return safeError(res, 500, e);
   }
 
   if (assessment.routing_result === 'incomplete' || !assessment.routing_result) {
@@ -115,8 +115,7 @@ export default async function handler(req, res) {
     if (!data)  return res.status(404).json({ error: 'Event niet gevonden.', code: 'EVENT_NOT_FOUND' });
     event = data;
   } catch (e) {
-    console.error('[assessment-register] event fetch', e.message);
-    return res.status(500).json({ error: e.message });
+    return safeError(res, 500, e);
   }
 
   // ── 3) Gates ──────────────────────────────────────────────────────────

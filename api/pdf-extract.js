@@ -1,5 +1,7 @@
 // Lazy import zodat een ontbrekende dep tijdens module-init geen 500 oplevert
 // op andere endpoints.
+import { safeError } from './_lib/safe-error.js';
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
@@ -27,6 +29,6 @@ export default async function handler(req, res) {
       pages: result.numpages || 0
     });
   } catch (err) {
-    return res.status(500).json({ error: `PDF-parse fout: ${err.message}` });
+    return safeError(res, 500, err, 'PDF kon niet worden ingelezen.');
   }
 }
