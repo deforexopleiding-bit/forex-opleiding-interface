@@ -3093,32 +3093,37 @@
       <span class="fu-tabs-divider" aria-hidden="true"></span>
       <span class="fu-tabs-legacy-label" aria-hidden="true">Klassiek</span>
 
-      <!-- SECUNDAIR — bestaande tabs (Dave's afspraken-flow) -->
-      <button class="fu-tab fu-tab--legacy" data-tab="vandaag" role="tab" aria-selected="false">
+      <!-- SECUNDAIR — 'gepensioneerde' tabs (Dave's afspraken-flow).
+           Class .fu-tab--retired + style=display:none: buttons blijven in
+           DOM zodat deeplinks (?tab=vandaag) + switchTab-logica blijven
+           werken, maar ze verschijnen NIET in de "Zie meer"-dropdown
+           (die vraagt alleen .fu-tab--legacy). Panels en load-functies
+           blijven ongewijzigd. -->
+      <button class="fu-tab fu-tab--retired" data-tab="vandaag" role="tab" aria-selected="false" style="display:none">
         <i class="ti ti-calendar-event" aria-hidden="true"></i>
         <span>Vandaag</span>
         <span class="fu-tab-count" id="tab-count-vandaag">—</span>
       </button>
-      <button class="fu-tab fu-tab--legacy" data-tab="open-acties" role="tab" aria-selected="false">
+      <button class="fu-tab fu-tab--retired" data-tab="open-acties" role="tab" aria-selected="false" style="display:none">
         <i class="ti ti-list-check" aria-hidden="true"></i>
         <span>Open acties</span>
         <span class="fu-tab-count" id="tab-count-open-acties">—</span>
       </button>
-      <button class="fu-tab fu-tab--legacy" data-tab="opvolging" role="tab" aria-selected="false">
+      <button class="fu-tab fu-tab--retired" data-tab="opvolging" role="tab" aria-selected="false" style="display:none">
         <i class="ti ti-arrow-loop-right" aria-hidden="true"></i>
         <span>Opvolging</span>
         <span class="fu-tab-count" id="tab-count-opvolging">—</span><span class="fu-tab-dot" id="tab-dot-opvolging" style="display:none;"></span>
       </button>
-      <button class="fu-tab fu-tab--legacy" data-tab="archief" role="tab" aria-selected="false">
+      <button class="fu-tab fu-tab--retired" data-tab="archief" role="tab" aria-selected="false" style="display:none">
         <i class="ti ti-checks" aria-hidden="true"></i>
         <span>Afgehandelde afspraken</span>
       </button>
-      <button class="fu-tab fu-tab--legacy" data-tab="event-followups" role="tab" aria-selected="false">
+      <button class="fu-tab fu-tab--retired" data-tab="event-followups" role="tab" aria-selected="false" style="display:none">
         <i class="ti ti-presentation" aria-hidden="true"></i>
         <span>Event follow-ups</span>
         <span class="fu-tab-count" id="tab-count-event-followups">—</span>
       </button>
-      <button class="fu-tab fu-tab--legacy" data-tab="kalender" role="tab" aria-selected="false">
+      <button class="fu-tab fu-tab--retired" data-tab="kalender" role="tab" aria-selected="false" style="display:none">
         <i class="ti ti-calendar" aria-hidden="true"></i>
         <span>Kalender</span>
       </button>
@@ -8457,17 +8462,36 @@
         customer_id : attendee.customer_id || null,
       };
 
-      // 2) Voeg toe aan _leadsState zodat de Werklijst 'em kan tonen als
-      //    de user daar naartoe navigeert. Geen switchTab hier — dat is de
-      //    keuze van de user.
+      // 2) Zet cockpit-state klaar zodat de Werklijst + uitkomst-panel op
+      //    de juiste lead landen. Elke stap eigen try/catch: als één ding
+      //    faalt breekt de rest niet, en de call gaat door.
       try {
         if (_leadsState && Array.isArray(_leadsState.items) && !_leadsState.items.some((x) => x.id === leadObj.id)) {
           _leadsState.items = [leadObj, ..._leadsState.items];
-          _leadsState.selectedId = leadObj.id;
         }
+        if (_leadsState) _leadsState.selectedId = leadObj.id;
       } catch (e) { console.warn('[event-bellijst] state-inject:', e); }
 
-      // 3) Bel via softphone óf toon duidelijke melding.
+      // 3) Switch naar Werklijst-tab zodat #cockpit-outcome zichtbaar wordt
+      //    zodra _softphoneCallLead het opent.
+      try {
+        if (typeof switchTab === 'function') switchTab('leads');
+      } catch (e) { console.error('[event-bellijst] switchTab fout:', e); }
+
+      // 4) Render lead-detail op de juiste lead. Gebeurt na een korte tick
+      //    zodat DOM-updates van switchTab zichtbaar zijn. Fouten stoppen
+      //    de call niet.
+      await new Promise((r) => setTimeout(r, 60));
+      try {
+        if (typeof renderLeadDetail === 'function') renderLeadDetail(leadObj, { refreshTimeline: true });
+      } catch (e) { console.error('[event-bellijst] renderLeadDetail fout:', e); }
+      try {
+        const numEl = document.getElementById('cockpit-number');
+        if (numEl) numEl.value = attendee.phone;
+      } catch (e) { console.warn('[event-bellijst] cockpit-number fill:', e); }
+
+      // 5) Bel via softphone — die opent zelf het uitkomst-panel op de
+      //    huidige (Werklijst-)tab. Fouten: log + zichtbare alert.
       const spAvail = !!(typeof _softphone !== 'undefined' && _softphone && _softphone.available);
       console.log('[event-bellijst] softphone.available =', spAvail);
       if (spAvail && typeof _softphoneCallLead === 'function') {
@@ -8477,11 +8501,16 @@
         } catch (e) {
           console.error('[event-bellijst] softphoneCallLead throw:', e);
           alert('Softphone-call mislukt: ' + (e?.message || 'onbekend') +
-                '\n\nOpen de Werklijst-tab om het gesprek handmatig te registreren.');
+                '\n\nHet uitkomst-panel in de Werklijst staat klaar voor handmatige registratie.');
         }
       } else {
+        // Zonder softphone: uitkomst-panel handmatig openen zodat de user
+        // de status alsnog kan registreren.
+        try {
+          if (typeof _openOutcomePanel === 'function') _openOutcomePanel(false);
+        } catch (e) { console.error('[event-bellijst] _openOutcomePanel fout:', e); }
         alert('Softphone is niet actief.\n\nBel handmatig ' + attendee.phone + ' (' + attendee.name + ').' +
-              '\n\nOpen daarna de Werklijst-tab om het gesprek te registreren — de lead staat al klaar bovenaan.');
+              '\n\nJe staat nu in de Werklijst met de lead geselecteerd — registreer het gesprek via het uitkomst-panel.');
       }
 
       restoreBtn();
