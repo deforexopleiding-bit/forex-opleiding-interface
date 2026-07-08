@@ -640,11 +640,15 @@ async function loadCustomers() {
   params.set('status', custSeg === 'inactief' ? 'archived' : 'active');
   const s = document.getElementById('custSearch').value.trim();
   if (s) params.set('search', s);
+  params.set('page', String(custPage));
+  params.set('page_size', String(custPageSize));
   try {
     const res = await window.AgentShared.apiFetch('/api/sales-customers?' + params);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     state.customers = data.customers || [];
+    state.customersTotal      = data.total || 0;
+    state.customersTotalPages = data.total_pages || 1;
     renderCustomers();
   } catch (e) {
     document.getElementById('customersList').innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>';
@@ -696,11 +700,14 @@ function renderCustomers() {
   if (custSeg !== 'alle' && custSeg !== 'inactief') rows = rows.filter(c => c._st === custSeg);
   if (!rows.length) { document.getElementById('customersList').innerHTML = '<div class="sr-empty">Geen klanten gevonden.</div>'; return; }
 
-  // Client-side paginering (server levert max 200 in één GET — geen extra calls).
-  const total = rows.length, pages = Math.max(1, Math.ceil(total / custPageSize));
-  if (custPage > pages) custPage = pages;
-  const slice = rows.slice((custPage - 1) * custPageSize, custPage * custPageSize);
-  const psOpts = [20, 50, 100, 500].map(n => `<option value="${n}" ${custPageSize === n ? 'selected' : ''}>${n}</option>`).join('');
+  // Echte server-side paginering: de server geeft de huidige page-slice terug
+  // met een `total` over de volledige gefilterde set (status/search/owned_by_me).
+  // Entity/segment blijven client-side filters over de page-slice (cosmetisch
+  // voor rollups binnen de pagina).
+  const total = state.customersTotal || 0;
+  const pages = Math.max(1, state.customersTotalPages || 1);
+  const slice = rows; // server heeft al gepagineerd; slice = wat we hebben.
+  const psOpts = [25, 50, 100, 200, 500].map(n => `<option value="${n}" ${custPageSize === n ? 'selected' : ''}>${n}</option>`).join('');
   const kebabSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>';
   const kebab = (c) => {
     let tlUrl = null;
@@ -733,9 +740,9 @@ function renderCustomers() {
         <button class="sr-abtn" id="custNext" type="button" ${custPage >= pages ? 'disabled' : ''}>Volgende</button>
       </span>
     </div>`;
-  document.getElementById('custPageSize').addEventListener('change', (e) => { custPageSize = Number(e.target.value) || 50; custPage = 1; renderCustomers(); });
-  document.getElementById('custPrev').addEventListener('click', () => { if (custPage > 1) { custPage--; renderCustomers(); } });
-  document.getElementById('custNext').addEventListener('click', () => { if (custPage < pages) { custPage++; renderCustomers(); } });
+  document.getElementById('custPageSize').addEventListener('change', (e) => { custPageSize = Number(e.target.value) || 50; custPage = 1; loadCustomers(); });
+  document.getElementById('custPrev').addEventListener('click', () => { if (custPage > 1) { custPage--; loadCustomers(); } });
+  document.getElementById('custNext').addEventListener('click', () => { if (custPage < pages) { custPage++; loadCustomers(); } });
 }
 
 // ── Wiring ──
@@ -749,8 +756,8 @@ document.getElementById('productModal').addEventListener('click', e => { if (e.t
 document.getElementById('prodSearch').addEventListener('input', () => renderProducts());
 document.getElementById('prodCategory').addEventListener('change', () => renderProducts());
 document.getElementById('prodArchivedToggle').addEventListener('change', () => loadProducts());
-document.getElementById('custSearch').addEventListener('input', () => { clearTimeout(window._cs); window._cs = setTimeout(loadCustomers, 250); });
-document.getElementById('custAllToggle').addEventListener('change', () => loadCustomers());
+document.getElementById('custSearch').addEventListener('input', () => { clearTimeout(window._cs); window._cs = setTimeout(() => { custPage = 1; loadCustomers(); }, 250); });
+document.getElementById('custAllToggle').addEventListener('change', () => { custPage = 1; loadCustomers(); });
 document.getElementById('custEntity').addEventListener('change', () => { custPage = 1; renderCustomers(); });
 document.getElementById('custRefresh').addEventListener('click', () => loadCustomers());
 document.querySelectorAll('#custSegments .sr-seg').forEach(seg => seg.addEventListener('click', () => {
@@ -763,6 +770,7 @@ document.querySelectorAll('#custSegments .sr-seg').forEach(seg => seg.addEventLi
 // ── Offertes ──
 let quotStatus = '';
 let quotSort = { key: 'date', dir: 'desc' };
+let quotPage = 1, quotPageSize = 50;
 async function loadQuotations() {
   const params = new URLSearchParams();
   // Mentor (en andere beperkte sales-rollen zonder 'sales.tab.customers')
@@ -773,11 +781,15 @@ async function loadQuotations() {
   if (quotStatus) params.set('status', quotStatus);
   const s = document.getElementById('quotSearch').value.trim();
   if (s) params.set('search', s);
+  params.set('page', String(quotPage));
+  params.set('page_size', String(quotPageSize));
   try {
     const res = await window.AgentShared.apiFetch('/api/sales-quotations?' + params);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    state.quotations = data.quotations || [];
+    state.quotations          = data.quotations || [];
+    state.quotationsTotal     = data.total || 0;
+    state.quotationsTotalPages= data.total_pages || 1;
     populateQuotFilters();
     renderQuotations();
   } catch (e) {
@@ -821,6 +833,26 @@ function renderQuotations() {
         </tr>`;
       }).join('')}</tbody>
     </table></div>`;
+  // Server-side paginering: gebruik state.quotationsTotal / total_pages voor de
+  // footer-controls. entity+seller-filters blijven client-side over de page-slice
+  // (cosmetisch); sort werkt binnen de page (dezelfde smaak als eerder).
+  const qTotal = state.quotationsTotal || 0;
+  const qPages = Math.max(1, state.quotationsTotalPages || 1);
+  const qPsOpts = [25, 50, 100, 200, 500].map(n => `<option value="${n}" ${quotPageSize === n ? 'selected' : ''}>${n}</option>`).join('');
+  document.getElementById('quotationsList').insertAdjacentHTML('beforeend', `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-dim)">
+      <span>${qTotal} offertes · pagina ${quotPage}/${qPages}</span>
+      <span style="display:flex;gap:8px;align-items:center">
+        <label style="display:flex;gap:5px;align-items:center;color:var(--text-dim)">Per pagina
+          <select id="quotPageSize" class="fin-input" style="padding:4px 6px;background:var(--bg-elev-2);border:1px solid var(--border);color:var(--text);border-radius:6px;font-size:12.5px">${qPsOpts}</select></label>
+        <button class="sr-abtn" id="quotPrev" type="button" ${quotPage <= 1 ? 'disabled' : ''}>Vorige</button>
+        <button class="sr-abtn" id="quotNext" type="button" ${quotPage >= qPages ? 'disabled' : ''}>Volgende</button>
+      </span>
+    </div>`);
+  document.getElementById('quotPageSize').addEventListener('change', (e) => { quotPageSize = Number(e.target.value) || 50; quotPage = 1; loadQuotations(); });
+  document.getElementById('quotPrev').addEventListener('click', () => { if (quotPage > 1) { quotPage--; loadQuotations(); } });
+  document.getElementById('quotNext').addEventListener('click', () => { if (quotPage < qPages) { quotPage++; loadQuotations(); } });
+
   document.querySelectorAll('#quotationsList [data-sort]').forEach(th => th.addEventListener('click', () => {
     const k = th.dataset.sort;
     if (quotSort.key === k) quotSort.dir = quotSort.dir === 'asc' ? 'desc' : 'asc'; else { quotSort.key = k; quotSort.dir = 'desc'; }
@@ -996,8 +1028,8 @@ document.getElementById('sendModalClose').addEventListener('click', () => docume
 document.getElementById('sendCancel').addEventListener('click', e => { e.preventDefault(); document.getElementById('sendModal').classList.remove('show'); });
 document.getElementById('sendModal').addEventListener('click', e => { if (e.target.id === 'sendModal') e.currentTarget.classList.remove('show'); });
 document.getElementById('sendConfirm').addEventListener('click', doSendQuotation);
-document.getElementById('quotSearch').addEventListener('input', () => { clearTimeout(window._qs); window._qs = setTimeout(loadQuotations, 250); });
-document.getElementById('quotMineToggle').addEventListener('change', () => loadQuotations());
+document.getElementById('quotSearch').addEventListener('input', () => { clearTimeout(window._qs); window._qs = setTimeout(() => { quotPage = 1; loadQuotations(); }, 250); });
+document.getElementById('quotMineToggle').addEventListener('change', () => { quotPage = 1; loadQuotations(); });
 
 // ── Retentie ──
 let retSeg = 'alle', retMarkedSeg = 'open', retSort = { key: 'end', dir: 'asc' }, retItems = [], retColsAvailable = true;
@@ -1154,17 +1186,22 @@ document.querySelectorAll('#retMarkSegments .sr-seg').forEach(seg => seg.addEven
 // ── Abonnementen ──
 const SUB_STATUS = { active: { l: 'Actief', c: 'green' }, cancelled: { l: 'Geannuleerd', c: 'gray' }, paused: { l: 'Gepauzeerd', c: 'warning' } };
 let subSeg = 'active', subSort = { key: 'start', dir: 'desc' }, subItems = [];
+let subPage = 1, subPageSize = 50, subTotal = 0, subTotalPages = 1;
 async function loadSubscriptions() {
   const wrap = document.getElementById('subscriptionsList');
   wrap.innerHTML = '<div class="sr-empty">Laden…</div>';
   const params = new URLSearchParams();
   if (document.getElementById('subMineToggle').checked) params.set('owned_by_me', 'true');
   params.set('status', subSeg || 'all');
+  params.set('page', String(subPage));
+  params.set('page_size', String(subPageSize));
   try {
     const res = await window.AgentShared.apiFetch('/api/sales-subscriptions-list?' + params);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    subItems = data.items || [];
+    subItems      = data.items || [];
+    subTotal      = data.total || 0;
+    subTotalPages = data.total_pages || 1;
     renderSubscriptions();
   } catch (e) { wrap.innerHTML = '<div class="sr-empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
 }
@@ -1207,6 +1244,22 @@ function renderSubscriptions() {
         <td class="sr-actions"><a class="sr-abtn primary" href="${detailHref}">Detail</a>${dots}</td>
       </tr>`;
     }).join('')}</tbody></table></div>`;
+  // Server-side paginering controls (identiek patroon aan Klanten/Offertes).
+  const sPsOpts = [25, 50, 100, 200, 500].map(n => `<option value="${n}" ${subPageSize === n ? 'selected' : ''}>${n}</option>`).join('');
+  wrap.insertAdjacentHTML('beforeend', `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-dim)">
+      <span>${subTotal} abonnementen · pagina ${subPage}/${Math.max(1, subTotalPages)}</span>
+      <span style="display:flex;gap:8px;align-items:center">
+        <label style="display:flex;gap:5px;align-items:center;color:var(--text-dim)">Per pagina
+          <select id="subPageSize" class="fin-input" style="padding:4px 6px;background:var(--bg-elev-2);border:1px solid var(--border);color:var(--text);border-radius:6px;font-size:12.5px">${sPsOpts}</select></label>
+        <button class="sr-abtn" id="subPrev" type="button" ${subPage <= 1 ? 'disabled' : ''}>Vorige</button>
+        <button class="sr-abtn" id="subNext" type="button" ${subPage >= subTotalPages ? 'disabled' : ''}>Volgende</button>
+      </span>
+    </div>`);
+  document.getElementById('subPageSize').addEventListener('change', (e) => { subPageSize = Number(e.target.value) || 50; subPage = 1; loadSubscriptions(); });
+  document.getElementById('subPrev').addEventListener('click', () => { if (subPage > 1) { subPage--; loadSubscriptions(); } });
+  document.getElementById('subNext').addEventListener('click', () => { if (subPage < subTotalPages) { subPage++; loadSubscriptions(); } });
+
   wrap.querySelectorAll('[data-sort]').forEach(th => th.addEventListener('click', () => {
     const k = th.dataset.sort; if (subSort.key === k) subSort.dir = subSort.dir === 'asc' ? 'desc' : 'asc'; else { subSort.key = k; subSort.dir = 'desc'; } renderSubscriptions();
   }));
@@ -1233,18 +1286,18 @@ async function subListDelete(id, force) {
     loadSubscriptions();
   } catch (e) { toast('Mislukt: ' + e.message, 'error'); }
 }
-document.getElementById('subMineToggle').addEventListener('change', () => loadSubscriptions());
+document.getElementById('subMineToggle').addEventListener('change', () => { subPage = 1; loadSubscriptions(); });
 document.getElementById('subSearch').addEventListener('input', () => renderSubscriptions());
 document.getElementById('subRefresh').addEventListener('click', () => loadSubscriptions());
 document.querySelectorAll('#subSegments .sr-seg').forEach(seg => seg.addEventListener('click', () => {
   document.querySelectorAll('#subSegments .sr-seg').forEach(x => x.classList.remove('active'));
-  seg.classList.add('active'); subSeg = seg.dataset.status; loadSubscriptions();
+  seg.classList.add('active'); subSeg = seg.dataset.status; subPage = 1; loadSubscriptions();
 }));
 
 // Segment-pills (status) → server-side filter; entity/seller → client-side.
 document.querySelectorAll('#quotSegments .sr-seg').forEach(seg => seg.addEventListener('click', () => {
   document.querySelectorAll('#quotSegments .sr-seg').forEach(x => x.classList.remove('active'));
-  seg.classList.add('active'); quotStatus = seg.dataset.status; loadQuotations();
+  seg.classList.add('active'); quotStatus = seg.dataset.status; quotPage = 1; loadQuotations();
 }));
 document.getElementById('quotEntity').addEventListener('change', () => renderQuotations());
 document.getElementById('quotSeller').addEventListener('change', () => renderQuotations());
