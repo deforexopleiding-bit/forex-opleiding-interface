@@ -5892,7 +5892,10 @@
         } else {
           qValue = '<span style="opacity:.6" data-q-placeholder="1"><i class="ti ti-loader-2"></i> Laden…</span>';
         }
-        cells.push(_ctxCell('Vragenlijst', qValue));
+        // qValue is HTML (span + eventuele knop of laad-placeholder) —
+        // gebruik de HTML-variant zodat de tags gerenderd worden i.p.v.
+        // als tekst getoond.
+        cells.push(_ctxCellHtml('Vragenlijst', qValue));
       }
       el.innerHTML = cells.join('');
 
@@ -5954,11 +5957,37 @@
       it.questionnaire_filled     = data.questionnaire_filled;
       it.assessment_response_id   = data.assessment_response_id;
 
-      // Race-guard: alleen re-renderen als deze lead nog geselecteerd is.
+      // Race-guard: alleen bijwerken als deze lead nog geselecteerd is.
       const sel = _leadsState.selectedId;
       if (sel !== it.id) return;
-      // Simpelste update: hele context opnieuw renderen (nu MET flag).
-      renderLeadContext(it);
+
+      // Alleen de vragenlijst-cell in-place vervangen — GEEN volledige
+      // renderLeadContext-herhaling. Anders zou _renderMoveToEventBlock
+      // opnieuw draaien; door de async fetch-race verdwijnt de eerste
+      // (nog niet aangehangen) blok niet, en verschijnt de move-block
+      // dubbel. Door de placeholder gericht te swappen blijven alle
+      // andere blokken (incl. move-block, no-show outcome-block) intact.
+      const ctxEl = document.getElementById('cockpit-context');
+      const placeholder = ctxEl?.querySelector('[data-q-placeholder]');
+      if (!placeholder) return;
+      const filled = data.questionnaire_filled === true;
+      let qHtml;
+      if (filled) {
+        qHtml = '<span style="color:var(--text-primary,#fff)">Ingevuld ✅</span>';
+      } else {
+        qHtml = '<span style="color:#b45309">Niet ingevuld ❌</span> ' +
+          '<button type="button" class="fu-lead-btn" data-eb-resend="' + esc(attendeeId) + '" ' +
+            'style="margin-left:8px;padding:4px 10px;font-size:11px" title="Verstuur de vragenlijst-link opnieuw naar deze deelnemer">' +
+            '<i class="ti ti-send"></i> Opnieuw toesturen</button>';
+      }
+      // Placeholder zit binnen de .v-span; we vervangen de HELE inhoud
+      // van die v-span. outerHTML van de placeholder pakt alleen de
+      // <span data-q-placeholder>… — niet ideaal, want daarna kan er
+      // extra HTML nodig zijn (knop naast tekst). Robuuster: swap op
+      // parent .v.
+      const vSpan = placeholder.closest('.v');
+      if (vSpan) vSpan.innerHTML = qHtml;
+      else placeholder.outerHTML = qHtml;
     }
 
     // Verplaats-naar-ander-event blok voor event-leads. Async: haalt de
@@ -6066,6 +6095,13 @@
 
     function _ctxCell(k, v) {
       return `<div class="fu-cockpit-ctx-cell"><span class="k">${esc(k)}</span><span class="v">${esc(v || '—')}</span></div>`;
+    }
+    // Variant voor cells die HTML in de value bevatten (bv. gekleurde
+    // spans, knoppen, laad-placeholders). Key wordt geëscaped, value
+    // wordt RAW ingevoegd — de caller is verantwoordelijk voor het
+    // veilig samenstellen van de HTML-string.
+    function _ctxCellHtml(k, vHtml) {
+      return `<div class="fu-cockpit-ctx-cell"><span class="k">${esc(k)}</span><span class="v">${vHtml || '—'}</span></div>`;
     }
 
     function _sourceRefSummary(it) {
