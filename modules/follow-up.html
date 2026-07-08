@@ -2348,6 +2348,60 @@
     }
     .fu-tab.active .fu-tab-count { background: var(--hot); color: #fff; }
     .fu-tab-count.urgent { background: var(--hot); color: #fff; }
+
+    /* Tab-overflow: legacy-tabs zijn nu bereikbaar via "Zie meer"-dropdown.
+       De legacy-buttons blijven in DOM (voor switchTab + counts) maar zijn
+       niet meer inline zichtbaar. */
+    .fu-tab--legacy { display: none !important; }
+
+    .fu-tab-more {
+      position: relative;
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 12px;
+      font-size: 14px; font-weight: 600;
+      color: #cfe0ec;
+      background: transparent;
+      border: none; border-radius: 8px;
+      cursor: pointer;
+      font-family: inherit;
+      white-space: nowrap;
+      transition: background .15s, color .15s;
+    }
+    .fu-tab-more:hover { background: rgba(255,255,255,.12); color: #fff; }
+    .fu-tab-more.active-hidden { background: rgba(255,255,255,.13); color: #fff; }
+    .fu-tab-more .ti { font-size: 15px; }
+    .fu-tab-more-menu {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      z-index: 100;
+      min-width: 240px;
+      max-height: 60vh; overflow-y: auto;
+      padding: 6px;
+      background: var(--ink, #0b1c26);
+      border: 1px solid rgba(255,255,255,.15);
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.45);
+    }
+    .fu-tab-more-menu[hidden] { display: none; }
+    .fu-tab-more-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      color: #cfe0ec;
+      font-size: 13.5px;
+      background: transparent;
+      border: 0;
+      width: 100%;
+      text-align: left;
+      font-family: inherit;
+      white-space: nowrap;
+    }
+    .fu-tab-more-item:hover { background: rgba(255,255,255,.10); color: #fff; }
+    .fu-tab-more-item.active { background: rgba(255,255,255,.15); color: #fff; }
+    .fu-tab-more-item .ti { font-size: 15px; }
+    .fu-tab-more-item .fu-tab-count { margin-left: auto; }
     /* Primary/legacy modifiers verliezen hun eigen styling — mockup is
        vlak en gelijk. Legacy is al hidden via de switchover-blok. */
     .fu-tab--primary { padding: 8px 14px; font-size: 14px; font-weight: 600; }
@@ -3009,6 +3063,16 @@
         <span>Retenties</span>
         <span class="fu-tab-count" id="tab-count-oude-retenties">—</span>
       </button>
+
+      <!-- Zie meer ▾: dropdown met de legacy-tabs (klassieke afspraken-flow).
+           De legacy-buttons hieronder blijven in DOM voor switchTab-compat
+           en count-badges, maar zijn CSS-hidden. Dropdown wordt in JS
+           gepopuleerd vanuit die buttons. -->
+      <button class="fu-tab-more" id="fuTabMore" type="button" aria-haspopup="true" aria-expanded="false" title="Meer tabs">
+        <span id="fuTabMoreLabel">Zie meer</span>
+        <i class="ti ti-chevron-down" aria-hidden="true"></i>
+      </button>
+      <div class="fu-tab-more-menu" id="fuTabMoreMenu" role="menu" hidden></div>
 
       <!-- Topbar-rechts: belronde + voicememo (verplaatst uit de queue). -->
       <span class="fu-topbar-spacer" aria-hidden="true"></span>
@@ -4970,6 +5034,24 @@
       if (tabId === 'event-bellijst') { loadEventBellijstTab(); }
       if (tabId === 'afgeboekt')      { loadAfgeboektTab(); }
       if (tabId === 'oude-retenties') { loadOudeRetentiesTab(); }
+      _syncTabMoreState(tabId);
+    }
+
+    // "Zie meer"-dropdown state syncen: als de actieve tab een legacy-tab is,
+    // highlight de "Zie meer"-knop + zet de label naar "Zie meer: <naam>".
+    function _syncTabMoreState(tabId) {
+      const more = document.getElementById('fuTabMore');
+      const lbl  = document.getElementById('fuTabMoreLabel');
+      if (!more || !lbl) return;
+      const activeLegacy = document.querySelector('.fu-tab--legacy[data-tab="' + tabId + '"]');
+      if (activeLegacy) {
+        more.classList.add('active-hidden');
+        const name = activeLegacy.querySelector('span:not(.fu-tab-count)')?.textContent?.trim() || 'Meer';
+        lbl.textContent = 'Zie meer: ' + name;
+      } else {
+        more.classList.remove('active-hidden');
+        lbl.textContent = 'Zie meer';
+      }
     }
 
     // ── Sales-cockpit (Leads-tab, Fase 1) ────────────────────────────────
@@ -8307,14 +8389,28 @@
     }
 
     async function _ebCallAttendee(attendeeId, btnEl) {
+      // Robuuste versie: elke stap logt naar console + toont bij fout een
+      // zichtbare alert. Geen stille catches meer — de "Bel nu"-knop mag
+      // nooit meer "niets" doen.
+      console.log('[event-bellijst] Bel nu → attendeeId=', attendeeId);
       const attendee = (_fase3State.eventBellijst.attendees || []).find((x) => x.id === attendeeId);
-      if (!attendee) return;
-      if (!attendee.phone) { alert('Deze deelnemer heeft geen telefoonnummer.'); return; }
+      if (!attendee) {
+        console.error('[event-bellijst] attendee niet gevonden in state');
+        alert('Deelnemer niet gevonden — herlaad de Event-bellijst-tab en probeer opnieuw.');
+        return;
+      }
+      if (!attendee.phone) {
+        alert('Deze deelnemer heeft geen telefoonnummer.');
+        return;
+      }
+      const origHtml = btnEl?.innerHTML || '<i class="ti ti-phone-call"></i> Bel nu';
+      const restoreBtn = () => { if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = origHtml; } };
       if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="ti ti-loader-2"></i> Voorbereiden…'; }
 
       // 1) Zorg dat er een event-lead is (lazy aanmaken via bestaande flow).
       let leadId = attendee.lead_id;
       if (!leadId) {
+        console.log('[event-bellijst] geen lead_id → aanmaken via /api/event-followup-to-lead');
         try {
           const r = await window.AgentShared.apiFetch('/api/event-followup-to-lead', {
             method : 'POST',
@@ -8327,17 +8423,22 @@
           if (leadId) {
             attendee.lead_id = leadId;
             attendee.lead_status = d.lead_status || 'nieuw';
+            console.log('[event-bellijst] lead aangemaakt/hergebruikt:', leadId);
           }
         } catch (e) {
-          if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="ti ti-phone-call"></i> Bel nu'; }
-          alert('Kon geen event-lead aanmaken: ' + (e.message || 'onbekend'));
+          console.error('[event-bellijst] lead-aanmaak fout:', e);
+          restoreBtn();
+          alert('Kon geen event-lead aanmaken: ' + (e?.message || 'onbekend'));
           return;
         }
       }
+      if (!leadId) {
+        restoreBtn();
+        alert('Kan lead niet resolven — probeer opnieuw of gebruik de Werklijst.');
+        return;
+      }
 
-      // 2) Bel via de softphone. Zonder softphone-registratie (of geen
-      //    lead-id gelukt): fallback = uitkomst-panel + toast.
-      const leadObj = leadId ? {
+      const leadObj = {
         id            : leadId,
         lead_name     : attendee.name,
         lead_phone    : attendee.phone,
@@ -8346,44 +8447,55 @@
         lead_status   : attendee.lead_status || 'nieuw',
         lead_kind     : 'call',
         customer_id   : attendee.customer_id || null,
-      } : null;
+      };
 
-      if (!leadObj) {
-        alert('Kan lead niet resolven — probeer opnieuw of gebruik de Werklijst.');
-        if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="ti ti-phone-call"></i> Bel nu'; }
-        return;
-      }
-
-      // Selecteer de lead in de cockpit-context zodat _softphoneCallLead
-      // + het uitkomst-panel op de juiste lead loggen. We voegen 'm toe
-      // aan _leadsState.items als hij nog niet bestaat en zetten de
-      // selectie; renderLeadDetail wordt door selectLead getriggerd
-      // zodra we de cockpit-tab openen.
-      if (!_leadsState.items.some((x) => x.id === leadObj.id)) {
-        _leadsState.items = [leadObj, ..._leadsState.items];
-      }
-      _leadsState.selectedId = leadObj.id;
-
-      // Wissel naar Werklijst en open de outcome-panel + start de call.
-      switchTab('leads');
-      // Wacht kort zodat de tab-content is gemount, dan render + bel.
-      setTimeout(() => {
-        try { renderLeadDetail(leadObj, { refreshTimeline: true }); } catch (_) {}
-        try {
-          const numEl = document.getElementById('cockpit-number');
-          if (numEl) numEl.value = attendee.phone;
-        } catch (_) {}
-        try { _openOutcomePanel(false); } catch (_) {}
-        if (_softphone && _softphone.available) {
-          _softphoneCallLead(leadObj).catch((e) => {
-            console.error('[event-bellijst] call:', e?.message || e);
-          });
-        } else {
-          alert('Softphone niet actief — uitkomst-panel staat klaar voor handmatige registratie.');
+      // 2) Voeg toe aan cockpit-state (voor timeline + follow-up-registratie).
+      try {
+        if (!_leadsState.items.some((x) => x.id === leadObj.id)) {
+          _leadsState.items = [leadObj, ..._leadsState.items];
         }
-      }, 150);
+        _leadsState.selectedId = leadObj.id;
+      } catch (e) {
+        console.error('[event-bellijst] state-inject fout:', e);
+      }
 
-      if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="ti ti-phone-call"></i> Bel nu'; }
+      // 3) Wissel naar Werklijst zodat het uitkomst-panel + cockpit zichtbaar zijn.
+      try { switchTab('leads'); }
+      catch (e) { console.error('[event-bellijst] switchTab fout:', e); }
+
+      // 4) Wacht 1 tick + korte delay zodat de Werklijst-DOM is gemount.
+      await new Promise((r) => setTimeout(r, 120));
+
+      // 5) Render lead-detail + vul telefoon + open uitkomst-panel.
+      try { renderLeadDetail(leadObj, { refreshTimeline: true }); }
+      catch (e) {
+        console.error('[event-bellijst] renderLeadDetail fout:', e);
+        alert('Fout bij openen lead-detail: ' + (e?.message || 'onbekend'));
+      }
+      try {
+        const numEl = document.getElementById('cockpit-number');
+        if (numEl) numEl.value = attendee.phone;
+      } catch (e) { console.warn('[event-bellijst] number-fill:', e); }
+      try { _openOutcomePanel(false); }
+      catch (e) { console.error('[event-bellijst] _openOutcomePanel fout:', e); }
+
+      // 6) Bel via softphone óf toon expliciete fallback-boodschap.
+      if (_softphone && _softphone.available) {
+        console.log('[event-bellijst] softphone actief → _softphoneCallLead');
+        try {
+          await _softphoneCallLead(leadObj);
+        } catch (e) {
+          console.error('[event-bellijst] softphoneCallLead fout:', e);
+          alert('Softphone-call mislukt: ' + (e?.message || 'onbekend') +
+                '\n\nHet uitkomst-panel staat klaar zodat je het gesprek handmatig kunt registreren.');
+        }
+      } else {
+        console.warn('[event-bellijst] softphone NIET actief — fallback naar handmatige registratie');
+        alert('Softphone is niet actief.\n\nBel handmatig ' + attendee.phone +
+              ' en registreer het gesprek via het uitkomst-panel (nu geopend).');
+      }
+
+      restoreBtn();
     }
 
     // ── SLUIMERPOT-TAB ────────────────────────────────────────────────────
@@ -9155,6 +9267,63 @@
       document.querySelectorAll('.fu-tab').forEach(tab => {
         tab.addEventListener('click', () => switchTab(tab.dataset.tab));
       });
+
+      // ── "Zie meer ▾" dropdown: populeert items uit .fu-tab--legacy en
+      //     opent/sluit een menu onder de knop. ──────────────────────────
+      (function wireTabMoreDropdown() {
+        const moreBtn  = document.getElementById('fuTabMore');
+        const moreMenu = document.getElementById('fuTabMoreMenu');
+        if (!moreBtn || !moreMenu) return;
+
+        function _rebuildMoreMenu() {
+          const items = [...document.querySelectorAll('.fu-tab--legacy')];
+          moreMenu.innerHTML = items.map((btn) => {
+            const tab   = btn.dataset.tab || '';
+            const icon  = btn.querySelector('i.ti')?.className || '';
+            const label = btn.querySelector('span:not(.fu-tab-count)')?.textContent?.trim() || tab;
+            const count = btn.querySelector('.fu-tab-count')?.textContent?.trim() || '';
+            const active = btn.classList.contains('active') ? ' active' : '';
+            const countHtml = count && count !== '—' ? `<span class="fu-tab-count">${count}</span>` : '';
+            return `<button class="fu-tab-more-item${active}" role="menuitem" data-tab="${tab}" type="button">
+              <i class="${icon}" aria-hidden="true"></i>
+              <span>${label}</span>${countHtml}
+            </button>`;
+          }).join('');
+          moreMenu.querySelectorAll('.fu-tab-more-item').forEach((item) => {
+            item.addEventListener('click', () => {
+              const t = item.dataset.tab;
+              _closeMoreMenu();
+              if (t) switchTab(t);
+            });
+          });
+        }
+        function _openMoreMenu() {
+          _rebuildMoreMenu();
+          moreMenu.hidden = false;
+          moreBtn.setAttribute('aria-expanded', 'true');
+        }
+        function _closeMoreMenu() {
+          moreMenu.hidden = true;
+          moreBtn.setAttribute('aria-expanded', 'false');
+        }
+        moreBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (moreMenu.hidden) _openMoreMenu(); else _closeMoreMenu();
+        });
+        // Sluit bij klik buiten menu of Escape.
+        document.addEventListener('click', (e) => {
+          if (moreMenu.hidden) return;
+          if (moreMenu.contains(e.target) || moreBtn.contains(e.target)) return;
+          _closeMoreMenu();
+        });
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && !moreMenu.hidden) _closeMoreMenu();
+        });
+      })();
+
+      // Initieel: highlight "Zie meer" als startup-tab een legacy-tab is.
+      _syncTabMoreState(document.querySelector('.fu-tab.active')?.dataset?.tab || 'leads');
+
       // Deep-link support: ?tab=<id> uit URL (bv. vanuit sales-dashboard
       // open-acties-card). Alleen activeren als de tab daadwerkelijk bestaat.
       const params = new URLSearchParams(window.location.search);
