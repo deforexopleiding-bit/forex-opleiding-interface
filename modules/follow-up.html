@@ -1777,6 +1777,75 @@
       .fu-sp-row .avatar { display: none; }
     }
 
+    /* Event-bellijst — huisstijl #093d54, compacte rijen */
+    .fu-eb-header {
+      display: flex; flex-direction: column; gap: 4px;
+      background: linear-gradient(180deg, rgba(9,61,84,0.35), rgba(9,61,84,0.15));
+      border: 1px solid rgba(9,61,84,0.55);
+      border-radius: 12px; padding: 12px 16px;
+      flex: 1; min-width: 260px;
+    }
+    .fu-eb-header-title {
+      font-size: 15px; font-weight: 600; color: var(--text-primary, #fff);
+      display: inline-flex; align-items: center; gap: 8px;
+    }
+    .fu-eb-header-sub {
+      font-size: 12.5px; color: var(--text-secondary, rgba(255,255,255,.75));
+      display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    .fu-eb-empty {
+      background: var(--surface-card, rgba(255,255,255,0.03));
+      border: 1px solid var(--border-default, rgba(255,255,255,0.08));
+      border-radius: 12px; padding: 40px 16px;
+      text-align: center; color: var(--text-secondary, rgba(255,255,255,.65));
+    }
+    .fu-eb-empty i.ti { font-size: 32px; opacity: .5; display: block; margin-bottom: 8px; }
+    .fu-eb-row {
+      display: grid;
+      grid-template-columns: 34px 1fr auto auto auto;
+      gap: 10px; align-items: center;
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 10px;
+      margin-bottom: 6px;
+    }
+    .fu-eb-row .avatar {
+      width: 34px; height: 34px; border-radius: 50%;
+      background: #093d54; color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 600;
+    }
+    .fu-eb-row .avatar.done { background: #059669; }
+    .fu-eb-row .name {
+      font-size: 13.5px; font-weight: 500; color: var(--text-primary, #fff);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .fu-eb-row .sub {
+      font-size: 11.5px; color: var(--text-secondary, rgba(255,255,255,.7));
+      margin-top: 2px;
+      display: flex; gap: 8px; flex-wrap: wrap;
+    }
+    .fu-eb-row .sub a { color: inherit; text-decoration: none; }
+    .fu-eb-row .sub a:hover { color: var(--text-primary, #fff); text-decoration: underline; }
+    .fu-eb-row .status-badge {
+      display: inline-block; padding: 2px 8px; border-radius: 999px;
+      font-size: 11px; font-weight: 600;
+      background: #e5e7eb; color: #111827;
+      border: 1px solid rgba(0,0,0,0.06);
+    }
+    .fu-eb-row .status-badge.nieuw       { background: #093d54; color: #fff; }
+    .fu-eb-row .status-badge.benaderd    { background: #ea580c; color: #fff; }
+    .fu-eb-row .status-badge.terugbellen { background: #0d4d69; color: #fff; }
+    .fu-eb-row .status-badge.niet_bereikbaar { background: #4b5563; color: #fff; }
+    .fu-eb-row .status-badge.verlengd    { background: #059669; color: #fff; }
+    .fu-eb-row .status-badge.verloren    { background: #dc2626; color: #fff; }
+    .fu-eb-row .actions { display: flex; gap: 6px; }
+    @media (max-width: 720px) {
+      .fu-eb-row { grid-template-columns: 34px 1fr auto; row-gap: 4px; }
+      .fu-eb-row .status-badge { grid-column: 2 / -1; justify-self: start; }
+    }
+
     /* Afgeboekt-tab — filter-chips + compacte rijen met reden-badge */
     .fu-afgb-chips {
       display: flex; flex-wrap: wrap; gap: 6px;
@@ -2925,6 +2994,11 @@
         <i class="ti ti-chart-bar" aria-hidden="true"></i>
         <span>Dashboard</span>
       </button>
+      <button class="fu-tab fu-tab--primary" data-tab="event-bellijst" role="tab" aria-selected="false">
+        <i class="ti ti-presentation" aria-hidden="true"></i>
+        <span>Event-bellijst</span>
+        <span class="fu-tab-count" id="tab-count-event-bellijst">—</span>
+      </button>
       <button class="fu-tab fu-tab--primary" data-tab="afgeboekt" role="tab" aria-selected="false">
         <i class="ti ti-archive" aria-hidden="true"></i>
         <span>Afgeboekt</span>
@@ -3449,6 +3523,18 @@
         <button class="fu-lead-btn" id="afgb-refresh" title="Vernieuwen" style="margin-left:auto"><i class="ti ti-refresh"></i></button>
       </div>
       <div id="afgb-list"><div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div></div>
+    </div>
+
+    <!-- Event-bellijst-tab (hersteld 2026-07-08): deelnemers eerstvolgende
+         event met bel-actie via de bestaande softphone. Lead wordt lazy
+         aangemaakt via event-followup-to-lead (source='event') zodat de
+         uitkomst-cadans identiek werkt aan de rest van de cockpit. -->
+    <div class="fu-tab-panel" data-panel="event-bellijst" id="panel-event-bellijst">
+      <div class="fu-cockpit-filters" style="flex-direction:row;flex-wrap:wrap;gap:12px;margin-bottom:12px">
+        <div id="eb-eventheader" class="fu-eb-header"><div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div></div>
+        <button class="fu-lead-btn" id="eb-refresh" title="Vernieuwen" style="margin-left:auto"><i class="ti ti-refresh"></i></button>
+      </div>
+      <div id="eb-list"></div>
     </div>
 
     <!-- Oude retenties-tab: browsbare achterstand. Retentie-abo's die AL
@@ -4881,6 +4967,7 @@
       if (tabId === 'afspraken')      { loadAfsprakenTab(); }
       if (tabId === 'sluimerpot')     { loadSluimerpotTab(); }
       if (tabId === 'dashboard')      { loadDashboardTab(); }
+      if (tabId === 'event-bellijst') { loadEventBellijstTab(); }
       if (tabId === 'afgeboekt')      { loadAfgeboektTab(); }
       if (tabId === 'oude-retenties') { loadOudeRetentiesTab(); }
     }
@@ -6952,6 +7039,7 @@
       voicememo  : { leads: [], counts: null, today: null, autoOpenedFor: null },
       afgeboekt   : { items: [], counts: null, filter: 'all', loading: false },
       oudeRetenties: { items: [], counts: null, filter: 'nieuw', loading: false },
+      eventBellijst: { event: null, attendees: [], loading: false },
     };
 
     // Gecombineerd datum + tijd voor afspraak-rijen: "Vandaag 17:04",
@@ -8124,6 +8212,180 @@
       }
     }
 
+    // ── EVENT-BELLIJST-TAB ─────────────────────────────────────────────
+    // Toont de deelnemers van het eerstvolgende aankomende event
+    // (endpoint /api/follow-up-event-bellijst). Bel-actie hergebruikt de
+    // softphone: maakt lazy een event-lead aan via
+    // /api/event-followup-to-lead (source='event') en start dan
+    // _softphoneCallLead met die lead + attendee-telefoon. Uitkomst-panel
+    // uit Fase 2 blijft ongewijzigd — cadans + logging identiek.
+    async function loadEventBellijstTab() {
+      const headEl = document.getElementById('eb-eventheader');
+      const listEl = document.getElementById('eb-list');
+      if (!headEl || !listEl) return;
+      if (_fase3State.eventBellijst.loading) return;
+      _fase3State.eventBellijst.loading = true;
+      headEl.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
+      listEl.innerHTML = '';
+      try {
+        const r = await window.AgentShared.apiFetch('/api/follow-up-event-bellijst');
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+        _fase3State.eventBellijst.event     = d.event || null;
+        _fase3State.eventBellijst.attendees = d.attendees || [];
+        const cntEl = document.getElementById('tab-count-event-bellijst');
+        if (cntEl) cntEl.textContent = String(d.event?.attendee_count ?? d.attendees?.length ?? '—');
+        _renderEventBellijst();
+      } catch (e) {
+        headEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Fout: ' + esc(e.message || '') + '</div>';
+      } finally {
+        _fase3State.eventBellijst.loading = false;
+      }
+    }
+
+    function _renderEventBellijst() {
+      const headEl = document.getElementById('eb-eventheader');
+      const listEl = document.getElementById('eb-list');
+      if (!headEl || !listEl) return;
+      const ev = _fase3State.eventBellijst.event;
+      const arr = _fase3State.eventBellijst.attendees || [];
+
+      if (!ev) {
+        headEl.innerHTML = '<div class="fu-empty" style="padding:8px 0"><i class="ti ti-calendar-off fu-empty-icon"></i>Geen aankomend event.</div>';
+        listEl.innerHTML = '';
+        return;
+      }
+      // Header: naam + datum + aantal.
+      const dt = ev.starts_at ? new Date(ev.starts_at) : null;
+      const dtLabel = dt && !isNaN(dt.getTime())
+        ? dt.toLocaleDateString('nl-NL', { weekday:'long', day:'2-digit', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit' })
+        : '';
+      headEl.innerHTML = `
+        <div class="fu-eb-header-title"><i class="ti ti-presentation"></i> ${esc(ev.title || 'Event')}</div>
+        <div class="fu-eb-header-sub">
+          ${dtLabel ? '<span><i class="ti ti-calendar"></i> ' + esc(dtLabel) + '</span>' : ''}
+          <span><i class="ti ti-users"></i> ${ev.attendee_count} deelnemer${ev.attendee_count === 1 ? '' : 's'}</span>
+        </div>`;
+
+      if (!arr.length) {
+        listEl.innerHTML = '<div class="fu-eb-empty"><i class="ti ti-users-off"></i>Geen deelnemers voor dit event.</div>';
+        return;
+      }
+      listEl.innerHTML = arr.map((a) => {
+        const initials = _leadInitials(a.name);
+        const status = String(a.lead_status || '').toLowerCase();
+        const avaCls = (status === 'verlengd' || status === 'verloren' || status === 'benaderd') ? 'done' : '';
+        const statusLabel = a.lead_id
+          ? (status === 'nieuw'          ? 'Nieuw'
+           : status === 'benaderd'       ? 'Al benaderd'
+           : status === 'terugbellen'    ? 'Terugbellen'
+           : status === 'niet_bereikbaar'? 'Niet bereikbaar'
+           : status === 'verlengd'       ? 'Verlengd'
+           : status === 'verloren'       ? 'Verloren'
+           : (status || 'Bekend'))
+          : 'Nog niet gebeld';
+        const statusCls = a.lead_id ? status : 'nieuw';
+        const phone = a.phone ? esc(a.phone) : '<span style="opacity:.5">— geen tel —</span>';
+        const email = a.email ? `<a href="mailto:${esc(a.email)}"><i class="ti ti-mail"></i> ${esc(a.email)}</a>` : '';
+        const canCall = !!a.phone;
+        return `<div class="fu-eb-row">
+          <div class="avatar ${avaCls}">${esc(initials)}</div>
+          <div>
+            <div class="name">${esc(a.name)}</div>
+            <div class="sub"><span><i class="ti ti-phone"></i> ${phone}</span>${email ? '<span>·</span>' + email : ''}</div>
+          </div>
+          <span class="status-badge ${esc(statusCls)}">${esc(statusLabel)}</span>
+          <div style="opacity:0"></div>
+          <div class="actions">
+            <button type="button" class="fu-lead-btn primary" data-eb-call="${esc(a.id)}" ${canCall ? '' : 'disabled'} title="${canCall ? 'Bellen via softphone' : 'Geen telefoonnummer'}"><i class="ti ti-phone-call"></i> Bel nu</button>
+          </div>
+        </div>`;
+      }).join('');
+      listEl.querySelectorAll('[data-eb-call]').forEach((btn) => {
+        btn.addEventListener('click', () => _ebCallAttendee(btn.getAttribute('data-eb-call'), btn));
+      });
+    }
+
+    async function _ebCallAttendee(attendeeId, btnEl) {
+      const attendee = (_fase3State.eventBellijst.attendees || []).find((x) => x.id === attendeeId);
+      if (!attendee) return;
+      if (!attendee.phone) { alert('Deze deelnemer heeft geen telefoonnummer.'); return; }
+      if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="ti ti-loader-2"></i> Voorbereiden…'; }
+
+      // 1) Zorg dat er een event-lead is (lazy aanmaken via bestaande flow).
+      let leadId = attendee.lead_id;
+      if (!leadId) {
+        try {
+          const r = await window.AgentShared.apiFetch('/api/event-followup-to-lead', {
+            method : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body   : JSON.stringify({ attendee_id: attendeeId }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+          leadId = d.lead_id || null;
+          if (leadId) {
+            attendee.lead_id = leadId;
+            attendee.lead_status = d.lead_status || 'nieuw';
+          }
+        } catch (e) {
+          if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="ti ti-phone-call"></i> Bel nu'; }
+          alert('Kon geen event-lead aanmaken: ' + (e.message || 'onbekend'));
+          return;
+        }
+      }
+
+      // 2) Bel via de softphone. Zonder softphone-registratie (of geen
+      //    lead-id gelukt): fallback = uitkomst-panel + toast.
+      const leadObj = leadId ? {
+        id            : leadId,
+        lead_name     : attendee.name,
+        lead_phone    : attendee.phone,
+        lead_email    : attendee.email,
+        source        : 'event',
+        lead_status   : attendee.lead_status || 'nieuw',
+        lead_kind     : 'call',
+        customer_id   : attendee.customer_id || null,
+      } : null;
+
+      if (!leadObj) {
+        alert('Kan lead niet resolven — probeer opnieuw of gebruik de Werklijst.');
+        if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="ti ti-phone-call"></i> Bel nu'; }
+        return;
+      }
+
+      // Selecteer de lead in de cockpit-context zodat _softphoneCallLead
+      // + het uitkomst-panel op de juiste lead loggen. We voegen 'm toe
+      // aan _leadsState.items als hij nog niet bestaat en zetten de
+      // selectie; renderLeadDetail wordt door selectLead getriggerd
+      // zodra we de cockpit-tab openen.
+      if (!_leadsState.items.some((x) => x.id === leadObj.id)) {
+        _leadsState.items = [leadObj, ..._leadsState.items];
+      }
+      _leadsState.selectedId = leadObj.id;
+
+      // Wissel naar Werklijst en open de outcome-panel + start de call.
+      switchTab('leads');
+      // Wacht kort zodat de tab-content is gemount, dan render + bel.
+      setTimeout(() => {
+        try { renderLeadDetail(leadObj, { refreshTimeline: true }); } catch (_) {}
+        try {
+          const numEl = document.getElementById('cockpit-number');
+          if (numEl) numEl.value = attendee.phone;
+        } catch (_) {}
+        try { _openOutcomePanel(false); } catch (_) {}
+        if (_softphone && _softphone.available) {
+          _softphoneCallLead(leadObj).catch((e) => {
+            console.error('[event-bellijst] call:', e?.message || e);
+          });
+        } else {
+          alert('Softphone niet actief — uitkomst-panel staat klaar voor handmatige registratie.');
+        }
+      }, 150);
+
+      if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="ti ti-phone-call"></i> Bel nu'; }
+    }
+
     // ── SLUIMERPOT-TAB ────────────────────────────────────────────────────
     async function loadSluimerpotTab() {
       const listEl = document.getElementById('sp-list');
@@ -8508,6 +8770,10 @@
       });
       const dbRf = document.getElementById('db-refresh');
       if (dbRf) dbRf.addEventListener('click', () => loadDashboardTab());
+
+      // Event-bellijst refresh
+      const ebRf = document.getElementById('eb-refresh');
+      if (ebRf) ebRf.addEventListener('click', () => loadEventBellijstTab());
 
       // Afgeboekt refresh
       const afgbRf = document.getElementById('afgb-refresh');
