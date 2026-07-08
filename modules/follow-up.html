@@ -3098,7 +3098,7 @@
       </button>
       <button class="fu-tab fu-tab--primary" data-tab="noshow" role="tab" aria-selected="false">
         <i class="ti ti-user-off" aria-hidden="true"></i>
-        <span>No-show</span>
+        <span>No show events</span>
         <span class="fu-tab-count" id="tab-count-noshow">—</span>
       </button>
       <!-- Onderstaande 4 tabs verhuisd naar de "Zie meer"-dropdown
@@ -5876,7 +5876,12 @@
       // hydraten we questionnaire_filled lazy via /api/follow-up-attendee-info.
       const attId = it.attendee_id || (it.source_ref && it.source_ref.attendee_id) || null;
       const hasQuestionnaireFlag = typeof it.questionnaire_filled === 'boolean';
-      const showQ = it.source === 'event' && attId;
+      // Vragenlijst + verplaats-blok verschijnen UITSLUITEND bij zuivere
+      // event-bel-leads. Zoom-afspraken (lead_kind='zoom'), retentie-
+      // leads en overige typen krijgen deze blokken NIET — die zijn niet
+      // relevant voor die flows.
+      const _isEventCallLead = it.source === 'event' && attId && String(it.lead_kind || 'call') !== 'zoom';
+      const showQ = _isEventCallLead;
       if (showQ) {
         let qValue;
         if (hasQuestionnaireFlag) {
@@ -5907,12 +5912,12 @@
         _hydrateQuestionnaireStatus(it, attId);
       }
 
-      // "Verplaats naar ander event"-blok — beschikbaar voor ALLE event-
-      // leads met attendee_id (event-bellijst én no-show én reguliere
-      // werklijst-event-leads). Dropdown met upcoming events + verzend-
-      // knop; server-call gaat naar /api/events-attendee-move met
-      // send_invite=true.
-      if (it.source === 'event' && attId) {
+      // "Verplaats naar ander event"-blok — alleen bij zuivere event-bel-
+      // leads (dezelfde voorwaarde als de vragenlijst-cell). Zoom-
+      // afspraken / retentie-leads / overige leads krijgen dit blok NIET.
+      // Dropdown met upcoming events + verzend-knop; server-call gaat
+      // naar /api/events-attendee-move met send_invite=true.
+      if (_isEventCallLead) {
         _renderMoveToEventBlock(el, it, attId);
       }
 
