@@ -5560,12 +5560,19 @@
       // Standaard bel-lead (ongewijzigd gedrag).
       const initials = _leadInitials(it.lead_name);
       const isZoom = String(it.lead_kind || 'call') === 'zoom';
-      const avaCls = isZoom ? 'kind-zoom' : (it.source === 'event' ? 'src-event' : 'src-retention');
+      // Avatar-class: zoom > event > retention. Mini-badge alleen tonen
+      // als de source ECHT event/retention is (voor zoom-afspraken zonder
+      // duidelijke source niet meer default 'Retentie' plakken).
+      const avaCls = isZoom
+        ? 'kind-zoom'
+        : (it.source === 'event' ? 'src-event' : (it.source === 'retention' ? 'src-retention' : 'src-event'));
       const badges = [];
       if (it.is_hot) badges.push('<span class="fu-cockpit-mini-badge hot" title="Hotlead">🔥</span>');
-      badges.push(it.source === 'event'
-        ? '<span class="fu-cockpit-mini-badge event" title="Event-lead">Event</span>'
-        : '<span class="fu-cockpit-mini-badge retention" title="Retentie-lead">Ret</span>');
+      if (it.source === 'event') {
+        badges.push('<span class="fu-cockpit-mini-badge event" title="Event-lead">Event</span>');
+      } else if (it.source === 'retention') {
+        badges.push('<span class="fu-cockpit-mini-badge retention" title="Retentie-lead">Ret</span>');
+      }
       if (isZoom) badges.push('<span class="fu-cockpit-mini-badge zoom" title="Zoom-call">Zoom</span>');
       if (Number(it.attempts) > 0) {
         badges.push(`<span class="fu-cockpit-mini-badge attempts" title="Poging ${it.attempts}/4"><i class="ti ti-refresh"></i> ${it.attempts}/4</span>`);
@@ -5823,8 +5830,18 @@
       const el = document.getElementById('cockpit-context');
       if (!el) return;
       const cells = [];
-      cells.push(_ctxCell('Bron', it.source === 'event' ? 'Event' : (it.source === 'retention' ? 'Retentie' : (it.source || '—'))));
-      cells.push(_ctxCell('Type', String(it.lead_kind || 'call') === 'zoom' ? 'Zoom' : 'Bel'));
+      // Bron-label: een zoom-afspraak-lead is primair een AFSPRAAK, niet
+      // een retentie/event-lead. Lead_kind='zoom' krijgt daarom voorrang
+      // boven de source-fallback (die zonder deze check op 'Retentie'
+      // uitkomt voor niet-event-leads en zoom-afspraken foutief labelt).
+      const _isZoomLead = String(it.lead_kind || 'call') === 'zoom';
+      const _srcLbl = _isZoomLead
+        ? 'Afspraak'
+        : (it.source === 'event'     ? 'Event'
+        : (it.source === 'retention' ? 'Retentie'
+        : (it.source || '—')));
+      cells.push(_ctxCell('Bron', _srcLbl));
+      cells.push(_ctxCell('Type', _isZoomLead ? 'Zoom' : 'Bel'));
       if (it.terugbel_datum) cells.push(_ctxCell('Terugbellen', fmtDateNLShort(it.terugbel_datum)));
       if (it.last_contact_at) cells.push(_ctxCell('Laatste contact', fmtDateNLShort(it.last_contact_at)));
       cells.push(_ctxCell('Aangemaakt', fmtDateNLShort(it.created_at)));
@@ -7969,6 +7986,7 @@
               <button type="button" class="fu-outcome-btn g-green" data-appt-out="gesprek_gehad"><i class="ti ti-message"></i> Gesprek gehad</button>
               <button type="button" class="fu-outcome-btn g-green" data-appt-out="sale"><i class="ti ti-trophy"></i> Sale</button>
               <button type="button" class="fu-outcome-btn g-red"   data-appt-out="wilt_niet_meer"><i class="ti ti-x"></i> Wilt niet meer</button>
+              <button type="button" class="fu-outcome-btn g-red"   data-appt-out="niet_geschikt"><i class="ti ti-user-x"></i> Niet geschikt</button>
               <button type="button" class="fu-outcome-btn g-gray"  data-appt-out="later_opnieuw"><i class="ti ti-moon"></i> Later opnieuw</button>
               <button type="button" class="fu-outcome-btn g-blue"  data-appt-out="terugbel-open"><i class="ti ti-clock"></i> Terugbelafspraak</button>
             </div>
@@ -8344,6 +8362,9 @@
         if (act === 'wilt_niet_meer') {
           if (!confirm('Klant heeft aangegeven niet meer geïnteresseerd te zijn. Registreren?')) return;
         }
+        if (act === 'niet_geschikt') {
+          if (!confirm('Klant is niet geschikt voor onze opleiding. Afspraak afboeken?')) return;
+        }
         if (act === 'sale') {
           if (!confirm('Sale registreren voor deze klant?')) return;
         }
@@ -8458,6 +8479,9 @@
         const phone = a.phone ? esc(a.phone) : '<span style="opacity:.5">— geen tel —</span>';
         const email = a.email ? `<a href="mailto:${esc(a.email)}"><i class="ti ti-mail"></i> ${esc(a.email)}</a>` : '';
         const canCall = !!a.phone;
+        const btnIcon  = canCall ? 'ti-phone-call'   : 'ti-external-link';
+        const btnLabel = canCall ? 'Bel nu'          : 'Openen';
+        const btnTitle = canCall ? 'Bellen via softphone' : 'Geen telefoonnummer — open in werklijst voor handmatige opvolging';
         return `<div class="fu-eb-row">
           <div class="avatar ${avaCls}">${esc(initials)}</div>
           <div>
@@ -8467,7 +8491,7 @@
           <span class="status-badge ${esc(statusCls)}">${esc(statusLabel)}</span>
           <div style="opacity:0"></div>
           <div class="actions">
-            <button type="button" class="fu-lead-btn primary" data-eb-call="${esc(a.id)}" data-phone="${esc(a.phone || '')}" ${canCall ? '' : 'disabled'} title="${canCall ? 'Bellen via softphone' : 'Geen telefoonnummer'}"><i class="ti ti-phone-call"></i> Bel nu</button>
+            <button type="button" class="fu-lead-btn primary" data-eb-call="${esc(a.id)}" data-phone="${esc(a.phone || '')}" title="${esc(btnTitle)}"><i class="ti ${btnIcon}"></i> ${esc(btnLabel)}</button>
           </div>
         </div>`;
       }).join('');
@@ -8489,12 +8513,12 @@
         alert('Deelnemer niet gevonden — herlaad de Event-bellijst-tab en probeer opnieuw.');
         return;
       }
-      if (!attendee.phone) {
-        alert('Deze deelnemer heeft geen telefoonnummer.');
-        return;
-      }
+      // Geen telefoonnummer? Toch de lead aanmaken en in de werklijst
+      // openen zodat handmatige opvolging mogelijk is (mail, WA via andere
+      // route). Softphone-call wordt geskipt.
+      const hasPhone = !!attendee.phone;
 
-      const origHtml   = btnEl?.innerHTML || '<i class="ti ti-phone-call"></i> Bel nu';
+      const origHtml   = btnEl?.innerHTML || (hasPhone ? '<i class="ti ti-phone-call"></i> Bel nu' : '<i class="ti ti-external-link"></i> Openen');
       const restoreBtn = () => { if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = origHtml; } };
       if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="ti ti-loader-2"></i> Voorbereiden…'; }
 
@@ -8567,10 +8591,22 @@
       //    zelf opent bij state='Terminated') werken zonder die re-render.
       try {
         const numEl = document.getElementById('cockpit-number');
-        if (numEl) numEl.value = attendee.phone;
+        if (numEl) numEl.value = attendee.phone || '';
       } catch (e) { console.warn('[event-bellijst] cockpit-number fill:', e); }
 
-      // 5) Bel als LAATSTE — één keer, geen andere trigger die 'em kan
+      // 5) Zonder telefoonnummer: geen softphone-call. Lead staat nu in de
+      //    Werklijst — subtiele toast, geen alert-modal.
+      if (!hasPhone) {
+        try {
+          if (window.AgentShared?.showToast) {
+            window.AgentShared.showToast('Geen telefoonnummer — lead geopend in werklijst, bel handmatig of vul een nummer in.', 'info');
+          }
+        } catch (_) {}
+        restoreBtn();
+        return;
+      }
+
+      // 6) Bel als LAATSTE — één keer, geen andere trigger die 'em kan
       //    ophangen. _softphoneCallLead regelt callbar-update +
       //    uitkomst-panel-open op state-events, precies zoals bij een
       //    afspraak-call.

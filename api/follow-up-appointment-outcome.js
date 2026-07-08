@@ -4,8 +4,8 @@
 //
 // Body: {
 //   appointment_id : uuid,
-//   outcome        : 'gesprek_gehad' | 'sale' | 'wilt_niet_meer' | 'no_show'
-//                  | 'later_opnieuw' | 'terugbel' | 'verzetten' | 'annuleren',
+//   outcome        : 'gesprek_gehad' | 'sale' | 'wilt_niet_meer' | 'niet_geschikt'
+//                  | 'no_show' | 'later_opnieuw' | 'terugbel' | 'verzetten' | 'annuleren',
 //   terugbel_datum?: ISO,        // vereist bij terugbel; optioneel bij later
 //   lead_kind?     : 'bel'|'zoom', // bij terugbel; default 'bel'
 //   snooze_months? : number,     // bij later_opnieuw; default 3
@@ -19,6 +19,9 @@
 //   sale           → appointment.status='completed' + note "Sale 🎉"
 //   wilt_niet_meer → appointment.status='cancelled' + note (GHL/Zoom NIET
 //                    annuleren — de call was al)
+//   niet_geschikt  → appointment.status='cancelled' + note (klant niet
+//                    geschikt voor onze opleiding; call was al gevoerd,
+//                    behandeling analoog aan wilt_niet_meer)
 //   no_show        → appointment.status='no_show' + nieuwe follow_up_lead
 //                    (source='manual', lead_kind='bel', lead_status=
 //                    'terugbellen', terugbel_datum=now()+2u)
@@ -41,7 +44,7 @@ import { deleteZoomMeeting } from './_lib/zoom-meeting.js';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const OUTCOMES = new Set([
-  'gesprek_gehad', 'sale', 'wilt_niet_meer', 'no_show',
+  'gesprek_gehad', 'sale', 'wilt_niet_meer', 'niet_geschikt', 'no_show',
   'later_opnieuw', 'terugbel', 'verzetten', 'annuleren',
 ]);
 
@@ -55,6 +58,7 @@ const GHL_STATUS_FOR_OUTCOME = {
   gesprek_gehad : 'cancelled',
   sale          : 'cancelled',
   wilt_niet_meer: 'cancelled',
+  niet_geschikt : 'cancelled',
   later_opnieuw : 'showed',
   terugbel      : 'showed',
   no_show       : 'noshow',
@@ -64,7 +68,7 @@ const GHL_STATUS_FOR_OUTCOME = {
 // (via deleteZoomMeeting). Zorgt dat de meeting uit Dave's Zoom-account
 // verdwijnt zodra we weten dat de call niet meer plaatsvindt of al is
 // geweest. Onze eigen DB-status volgt de bestaande logica.
-const AGENDA_REMOVING_OUTCOMES = new Set(['gesprek_gehad', 'sale', 'wilt_niet_meer']);
+const AGENDA_REMOVING_OUTCOMES = new Set(['gesprek_gehad', 'sale', 'wilt_niet_meer', 'niet_geschikt']);
 
 // Uitkomsten die NIET automatisch teruggedraaid kunnen worden — hun
 // GHL-actie is destructief (afspraak weg / verplaatst) en 'confirmed'
@@ -430,6 +434,13 @@ export default async function handler(req, res) {
     } else if (outcome === 'wilt_niet_meer') {
       newStatus = 'cancelled';
       noteText  = 'Geen interesse — call was al gevoerd, GHL/Zoom NIET geannuleerd';
+    } else if (outcome === 'niet_geschikt') {
+      // Klant is niet geschikt voor onze opleiding. Behandeling analoog
+      // aan 'wilt_niet_meer': afspraak op cancelled, GHL op cancelled,
+      // Zoom-meeting weg uit Dave's account. Geen follow-up-lead — de
+      // klant hoort niet meer op de werklijst.
+      newStatus = 'cancelled';
+      noteText  = 'Niet geschikt voor opleiding — call was al gevoerd, GHL/Zoom afgeboekt';
     } else if (outcome === 'no_show') {
       newStatus = 'no_show';
       noteText  = 'No-show — nabellen gepland (+2u)';
