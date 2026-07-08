@@ -3096,6 +3096,11 @@
         <span>Event-bellijst</span>
         <span class="fu-tab-count" id="tab-count-event-bellijst">—</span>
       </button>
+      <button class="fu-tab fu-tab--primary" data-tab="noshow" role="tab" aria-selected="false">
+        <i class="ti ti-user-off" aria-hidden="true"></i>
+        <span>No-show</span>
+        <span class="fu-tab-count" id="tab-count-noshow">—</span>
+      </button>
       <!-- Onderstaande 4 tabs verhuisd naar de "Zie meer"-dropdown
            (class .fu-tab--legacy). Data-tab blijft ongewijzigd zodat
            switchTab-logica + count-badges werken. -->
@@ -3664,6 +3669,22 @@
         <button class="fu-lead-btn" id="eb-refresh" title="Vernieuwen" style="margin-left:auto"><i class="ti ti-refresh"></i></button>
       </div>
       <div id="eb-list"></div>
+    </div>
+
+    <!-- No-show-tab: attendees van AFGERONDE events die niet zijn komen
+         opdagen en nog opgevolgd moeten worden. Endpoint:
+         /api/follow-up-no-show-list. Rij-klik / Bel-knop maakt lazy een
+         event-lead aan (event-followup-to-lead) en start de softphone;
+         bij ontbrekend nummer: 'Openen' en toast. Uitkomst-registratie
+         via /api/follow-up-no-show-outcome (4 outcomes). -->
+    <div class="fu-tab-panel" data-panel="noshow" id="panel-noshow">
+      <div class="fu-cockpit-filters" style="flex-direction:row;flex-wrap:wrap;gap:12px;margin-bottom:12px">
+        <div id="ns-header" class="fu-eb-header">
+          <div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>
+        </div>
+        <button class="fu-lead-btn" id="ns-refresh" title="Vernieuwen" style="margin-left:auto"><i class="ti ti-refresh"></i></button>
+      </div>
+      <div id="ns-list"></div>
     </div>
 
     <!-- Oude retenties-tab: browsbare achterstand. Retentie-abo's die AL
@@ -5097,6 +5118,7 @@
       if (tabId === 'sluimerpot')     { loadSluimerpotTab(); }
       if (tabId === 'dashboard')      { loadDashboardTab(); }
       if (tabId === 'event-bellijst') { loadEventBellijstTab(); }
+      if (tabId === 'noshow')         { loadNoShowTab(); }
       if (tabId === 'afgeboekt')      { loadAfgeboektTab(); }
       if (tabId === 'oude-retenties') { loadOudeRetentiesTab(); }
       _syncTabMoreState(tabId);
@@ -5847,26 +5869,56 @@
       cells.push(_ctxCell('Aangemaakt', fmtDateNLShort(it.created_at)));
       const ref = _sourceRefSummary(it);
       if (ref) cells.push(_ctxCell('Verwijzing', ref));
-      // Vragenlijst-status (event-leads met attendee_id): read-only regel +
-      // "Opnieuw toesturen"-knop bij niet-ingevuld. Alleen als we de status
-      // kennen (uit _ebCallAttendee-flow). Voor event-leads uit de Werklijst
-      // zonder deze info tonen we niets.
+      // Vragenlijst-status voor ELKE event-lead met attendee_id.
+      // Voorheen alleen zichtbaar als _ebCallAttendee de flag had gezet;
+      // sinds no-show-blok relaxen we de conditie zodat de regel ook
+      // verschijnt voor event-leads uit de reguliere Werklijst — daar
+      // hydraten we questionnaire_filled lazy via /api/follow-up-attendee-info.
       const attId = it.attendee_id || (it.source_ref && it.source_ref.attendee_id) || null;
-      const showQ = it.source === 'event' && attId && typeof it.questionnaire_filled === 'boolean';
+      const hasQuestionnaireFlag = typeof it.questionnaire_filled === 'boolean';
+      const showQ = it.source === 'event' && attId;
       if (showQ) {
-        const filled = it.questionnaire_filled === true;
         let qValue;
-        if (filled) {
-          qValue = '<span style="color:var(--text-primary,#fff)">Ingevuld ✅</span>';
+        if (hasQuestionnaireFlag) {
+          const filled = it.questionnaire_filled === true;
+          if (filled) {
+            qValue = '<span style="color:var(--text-primary,#fff)">Ingevuld ✅</span>';
+          } else {
+            qValue = '<span style="color:#b45309">Niet ingevuld ❌</span> ' +
+              '<button type="button" class="fu-lead-btn" data-eb-resend="' + esc(attId) + '" ' +
+                'style="margin-left:8px;padding:4px 10px;font-size:11px" title="Verstuur de vragenlijst-link opnieuw naar deze deelnemer">' +
+                '<i class="ti ti-send"></i> Opnieuw toesturen</button>';
+          }
         } else {
-          qValue = '<span style="color:#b45309">Niet ingevuld ❌</span> ' +
-            '<button type="button" class="fu-lead-btn" data-eb-resend="' + esc(attId) + '" ' +
-              'style="margin-left:8px;padding:4px 10px;font-size:11px" title="Verstuur de vragenlijst-link opnieuw naar deze deelnemer">' +
-              '<i class="ti ti-send"></i> Opnieuw toesturen</button>';
+          qValue = '<span style="opacity:.6" data-q-placeholder="1"><i class="ti ti-loader-2"></i> Laden…</span>';
         }
         cells.push(_ctxCell('Vragenlijst', qValue));
       }
       el.innerHTML = cells.join('');
+
+      // Lazy hydrate: als we voor een event-lead nog geen questionnaire-
+      // status hebben, resolve die via het attendee-info-endpoint en her-
+      // render alleen die ene cell. Cache per attendee_id om herfetches
+      // te vermijden.
+      if (showQ && !hasQuestionnaireFlag) {
+        _hydrateQuestionnaireStatus(it, attId);
+      }
+
+      // "Verplaats naar ander event"-blok — beschikbaar voor ALLE event-
+      // leads met attendee_id (event-bellijst én no-show én reguliere
+      // werklijst-event-leads). Dropdown met upcoming events + verzend-
+      // knop; server-call gaat naar /api/events-attendee-move met
+      // send_invite=true.
+      if (it.source === 'event' && attId) {
+        _renderMoveToEventBlock(el, it, attId);
+      }
+
+      // No-show outcome-knoppen — voor leads die via _nsCallAttendee zijn
+      // geopend (is_no_show_followup=true). 4 outcomes; endpoint sluit de
+      // opvolging via /api/follow-up-no-show-outcome.
+      if (it.is_no_show_followup === true && attId) {
+        _renderNoShowOutcomeBlock(el, it, attId);
+      }
 
       // Retention-context (abonnement + traject + einddatum) lazy fetchen
       // voor retention-leads met een customer_id. Cache per customer_id
@@ -5875,6 +5927,107 @@
       if (it.source === 'retention' && it.customer_id) {
         _hydrateRetentionContext(el, it.customer_id);
       }
+    }
+
+    // Cache: attendee_id → { questionnaire_filled, assessment_response_id }
+    const _questionnaireStatusCache = new Map();
+    async function _hydrateQuestionnaireStatus(it, attendeeId) {
+      if (!attendeeId) return;
+      let data = _questionnaireStatusCache.get(attendeeId);
+      if (!data) {
+        try {
+          const r = await window.AgentShared.apiFetch('/api/follow-up-attendee-info?attendee_id=' + encodeURIComponent(attendeeId));
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) return;
+          data = {
+            questionnaire_filled  : !!j.questionnaire_filled,
+            assessment_response_id: j.assessment_response_id || null,
+          };
+          _questionnaireStatusCache.set(attendeeId, data);
+        } catch (e) {
+          console.warn('[questionnaire-hydrate]', e?.message || e);
+          return;
+        }
+      }
+      // Update de lead in state zodat toekomstige re-renders 'm direct
+      // beschikbaar hebben.
+      it.questionnaire_filled     = data.questionnaire_filled;
+      it.assessment_response_id   = data.assessment_response_id;
+
+      // Race-guard: alleen re-renderen als deze lead nog geselecteerd is.
+      const sel = _leadsState.selectedId;
+      if (sel !== it.id) return;
+      // Simpelste update: hele context opnieuw renderen (nu MET flag).
+      renderLeadContext(it);
+    }
+
+    // Verplaats-naar-ander-event blok voor event-leads. Async: haalt de
+    // upcoming events op en rendert een select + verzend-knop.
+    async function _renderMoveToEventBlock(ctxEl, it, attendeeId) {
+      const parent = ctxEl?.parentNode;
+      if (!parent) return;
+      // Verwijder eerdere versie voor deze lead om stapeling te vermijden.
+      const oldBlock = parent.querySelector('[data-ns-move-block]');
+      if (oldBlock) oldBlock.remove();
+
+      const upcoming = await _loadUpcomingEventsForMove();
+      // Race-guard: alleen appenden als deze lead nog geselecteerd is.
+      if (_leadsState.selectedId !== it.id) return;
+
+      const options = upcoming.length === 0
+        ? '<option value="">— geen aankomende events —</option>'
+        : ['<option value="">— kies een event —</option>']
+            .concat(upcoming.map((ev) => {
+              const dt = ev.starts_at ? new Date(ev.starts_at) : null;
+              const dtLbl = dt && !isNaN(dt.getTime())
+                ? dt.toLocaleDateString('nl-NL', { weekday:'short', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })
+                : '';
+              const cap = (typeof ev.seats_remaining === 'number') ? ` — ${ev.seats_remaining} plek${ev.seats_remaining === 1 ? '' : 'ken'} vrij` : '';
+              return `<option value="${esc(ev.id)}">${esc(ev.title || 'Event')}${dtLbl ? ' · ' + esc(dtLbl) : ''}${cap}</option>`;
+            }))
+            .join('');
+      const disabled = upcoming.length === 0 ? 'disabled' : '';
+      const block = document.createElement('div');
+      block.setAttribute('data-ns-move-block', '1');
+      block.style.cssText = 'margin-top:10px;padding:10px;border:1px solid var(--border-default);border-radius:8px;background:var(--surface-card)';
+      block.innerHTML = `
+        <div style="font-size:12px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px">
+          <i class="ti ti-calendar-plus"></i> Verplaats naar ander event
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select data-ns-move-select data-attendee-id="${esc(attendeeId)}" class="fu-lead-inline" style="flex:1;min-width:220px" ${disabled}>
+            ${options}
+          </select>
+          <button type="button" class="fu-lead-btn primary" data-ns-move-go data-attendee-id="${esc(attendeeId)}" ${disabled}>
+            <i class="ti ti-arrow-right"></i> Verplaats + invite
+          </button>
+        </div>
+        <div style="font-size:11px;opacity:.7;margin-top:4px">Uitnodiging (WhatsApp + e-mail) wordt automatisch verstuurd.</div>`;
+      parent.insertBefore(block, ctxEl.nextSibling);
+    }
+
+    // 4 no-show outcome-knoppen. Blijft zichtbaar zolang de lead
+    // is_no_show_followup=true heeft.
+    function _renderNoShowOutcomeBlock(ctxEl, it, attendeeId) {
+      const parent = ctxEl?.parentNode;
+      if (!parent) return;
+      const oldBlock = parent.querySelector('[data-ns-outcome-block]');
+      if (oldBlock) oldBlock.remove();
+      const block = document.createElement('div');
+      block.setAttribute('data-ns-outcome-block', '1');
+      block.style.cssText = 'margin-top:10px;padding:10px;border:1px solid var(--border-default);border-radius:8px;background:var(--surface-card)';
+      block.innerHTML = `
+        <div style="font-size:12px;font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+          <i class="ti ti-user-off"></i> No-show opvolg-uitkomst
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button type="button" class="fu-lead-btn" data-ns-out="ander_event"    data-attendee-id="${esc(attendeeId)}" title="Bereikt — komt naar ander event (verdwijnt uit no-show-lijst)"><i class="ti ti-calendar-plus"></i> Ander event</button>
+          <button type="button" class="fu-lead-btn" data-ns-out="geen_interesse" data-attendee-id="${esc(attendeeId)}" title="Bereikt — geen interesse (verdwijnt uit no-show-lijst)"><i class="ti ti-x"></i> Geen interesse</button>
+          <button type="button" class="fu-lead-btn" data-ns-out="niet_bereikt"   data-attendee-id="${esc(attendeeId)}" title="Niet bereikt (blijft zichtbaar met markering)"><i class="ti ti-phone-off"></i> Niet bereikt</button>
+          <button type="button" class="fu-lead-btn" data-ns-out="terugbellen"    data-attendee-id="${esc(attendeeId)}" title="Terugbelafspraak (blijft zichtbaar met markering)"><i class="ti ti-clock"></i> Terugbellen</button>
+        </div>`;
+      // Onderaan appenden zodat 't onder de move-block staat.
+      parent.appendChild(block);
     }
 
     // Cache: { [customerId]: { abo_description, abo_end_date, traject_label } }
@@ -7223,6 +7376,7 @@
       afgeboekt   : { items: [], counts: null, filter: 'all', loading: false },
       oudeRetenties: { items: [], counts: null, filter: 'nieuw', loading: false },
       eventBellijst: { event: null, attendees: [], loading: false },
+      noShow       : { items: [], loading: false, upcomingEvents: null, upcomingEventsLoadedAt: 0 },
     };
 
     // Gecombineerd datum + tijd voor afspraak-rijen: "Vandaag 17:04",
@@ -8664,6 +8818,302 @@
       }
     }
 
+    // ── NO-SHOW-TAB ───────────────────────────────────────────────────────
+    // Attendees van AFGERONDE events die niet zijn komen opdagen en nog
+    // opgevolgd moeten worden. Endpoint: /api/follow-up-no-show-list.
+    // Belactie hergebruikt de softphone: lazy event-lead aanmaken via
+    // /api/event-followup-to-lead (source='event'), state-inject, switchTab
+    // naar Werklijst, en dial. Bij ontbrekend nummer: geen call, wel
+    // openen + toast.
+    async function loadNoShowTab() {
+      const headEl = document.getElementById('ns-header');
+      const listEl = document.getElementById('ns-list');
+      if (!headEl || !listEl) return;
+      if (_fase3State.noShow.loading) return;
+      _fase3State.noShow.loading = true;
+      listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
+      try {
+        const r = await window.AgentShared.apiFetch('/api/follow-up-no-show-list');
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          if (d?.code === 'MIGRATION_REQUIRED') {
+            listEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Migratie 024 vereist voor no-show-opvolging.</div>';
+            return;
+          }
+          throw new Error(d?.error || 'HTTP ' + r.status);
+        }
+        _fase3State.noShow.items = d.attendees || [];
+        const cnt = typeof d.count === 'number' ? d.count : (d.attendees?.length || 0);
+        const cntEl = document.getElementById('tab-count-noshow');
+        if (cntEl) cntEl.textContent = cnt > 0 ? String(cnt) : '—';
+        _renderNoShow();
+      } catch (e) {
+        console.error('[no-show-list]', e?.message || e);
+        listEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Laden mislukt: ' + esc(e?.message || 'onbekend') + '</div>';
+      } finally {
+        _fase3State.noShow.loading = false;
+      }
+    }
+
+    function _renderNoShow() {
+      const headEl = document.getElementById('ns-header');
+      const listEl = document.getElementById('ns-list');
+      if (!headEl || !listEl) return;
+      const arr = _fase3State.noShow.items || [];
+      headEl.innerHTML = `
+        <div class="fu-eb-header-title"><i class="ti ti-user-off"></i> No-show opvolging</div>
+        <div class="fu-eb-header-sub">
+          <span><i class="ti ti-users"></i> ${arr.length} openstaand${arr.length === 1 ? '' : 'e'}</span>
+        </div>`;
+
+      if (!arr.length) {
+        listEl.innerHTML = '<div class="fu-eb-empty"><i class="ti ti-mood-happy"></i>Geen openstaande no-shows.</div>';
+        return;
+      }
+      listEl.innerHTML = arr.map((a) => {
+        const initials = _leadInitials(a.name);
+        const status = String(a.no_show_followup_status || '').toLowerCase();
+        // Zichtbare no-shows die eerder een outcome hebben gekregen die
+        // 'm nog niet afsluit — badge geven.
+        let markerBadge = '';
+        if (status === 'niet_bereikt') {
+          markerBadge = '<span class="status-badge" style="background:#f97316;color:#fff">Niet bereikt</span>';
+        } else if (status === 'terugbellen') {
+          markerBadge = '<span class="status-badge" style="background:#3b82f6;color:#fff">Terugbellen</span>';
+        } else {
+          markerBadge = '<span class="status-badge nieuw">Nog opvolgen</span>';
+        }
+        const phone = a.phone ? esc(a.phone) : '<span style="opacity:.5">— geen tel —</span>';
+        const email = a.email ? `<a href="mailto:${esc(a.email)}"><i class="ti ti-mail"></i> ${esc(a.email)}</a>` : '';
+        const evLine = a.event_title
+          ? `<span class="fu-ns-event-label"><i class="ti ti-presentation"></i> No-show bij ${esc(a.event_title)}${a.event_date ? ' · ' + esc(_fmtHMwithDate(a.event_date)) : ''}</span>`
+          : '';
+        const canCall  = !!a.phone;
+        const btnIcon  = canCall ? 'ti-phone-call'   : 'ti-external-link';
+        const btnLabel = canCall ? 'Bel nu'          : 'Openen';
+        const btnTitle = canCall ? 'Bellen via softphone' : 'Geen telefoonnummer — open in werklijst voor handmatige opvolging';
+        return `<div class="fu-eb-row">
+          <div class="avatar">${esc(initials)}</div>
+          <div>
+            <div class="name">${esc(a.name)}</div>
+            <div class="sub">
+              <span><i class="ti ti-phone"></i> ${phone}</span>${email ? '<span>·</span>' + email : ''}
+            </div>
+            ${evLine ? '<div class="sub" style="margin-top:2px">' + evLine + '</div>' : ''}
+          </div>
+          ${markerBadge}
+          <div style="opacity:0"></div>
+          <div class="actions">
+            <button type="button" class="fu-lead-btn primary" data-ns-call="${esc(a.attendee_id)}" data-phone="${esc(a.phone || '')}" title="${esc(btnTitle)}"><i class="ti ${btnIcon}"></i> ${esc(btnLabel)}</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    // Klik-delegation voor de No-show-tab (Bel/Openen-knop). Zelfde
+    // pattern als setupEventBellijstDelegation.
+    let _nsDelegationBound = false;
+    function _bindNoShowDelegation() {
+      if (_nsDelegationBound) return;
+      _nsDelegationBound = true;
+      document.addEventListener('click', (ev) => {
+        const btn = ev.target?.closest?.('[data-ns-call]');
+        if (!btn) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        const id = btn.getAttribute('data-ns-call');
+        if (!id) return;
+        _nsCallAttendee(id, btn);
+      });
+      const refresh = document.getElementById('ns-refresh');
+      if (refresh) refresh.addEventListener('click', () => loadNoShowTab());
+    }
+
+    async function _nsCallAttendee(attendeeId, btnEl) {
+      console.log('[no-show] Bel/Openen geklikt →', attendeeId);
+      const attendee = (_fase3State.noShow.items || []).find((x) => x.attendee_id === attendeeId);
+      if (!attendee) {
+        console.error('[no-show] attendee niet in state');
+        alert('Deelnemer niet gevonden — herlaad de No-show-tab en probeer opnieuw.');
+        return;
+      }
+      const hasPhone = !!attendee.phone;
+      const origHtml = btnEl?.innerHTML || (hasPhone ? '<i class="ti ti-phone-call"></i> Bel nu' : '<i class="ti ti-external-link"></i> Openen');
+      const restoreBtn = () => { if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = origHtml; } };
+      if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="ti ti-loader-2"></i> Voorbereiden…'; }
+
+      // 1) Lazy lead-aanmaak via bestaand endpoint.
+      let leadId = attendee.lead_id;
+      if (!leadId) {
+        try {
+          const r = await window.AgentShared.apiFetch('/api/event-followup-to-lead', {
+            method : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body   : JSON.stringify({ attendee_id: attendeeId }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+          leadId = d.lead_id || null;
+          if (leadId) {
+            attendee.lead_id     = leadId;
+            attendee.lead_status = d.lead_status || 'nieuw';
+          }
+        } catch (e) {
+          console.error('[no-show] lead-aanmaak fout:', e);
+          restoreBtn();
+          alert('Kon geen event-lead aanmaken: ' + (e?.message || 'onbekend'));
+          return;
+        }
+      }
+      if (!leadId) {
+        restoreBtn();
+        alert('Kan lead niet resolven — probeer opnieuw.');
+        return;
+      }
+
+      const leadObj = {
+        id                      : leadId,
+        lead_name               : attendee.name,
+        lead_phone              : attendee.phone,
+        lead_email              : attendee.email,
+        source                  : 'event',
+        lead_status             : attendee.lead_status || 'nieuw',
+        lead_kind               : 'call',
+        customer_id             : attendee.customer_id || null,
+        attendee_id             : attendeeId,
+        questionnaire_filled    : attendee.questionnaire_filled === true,
+        assessment_response_id  : attendee.assessment_response_id || null,
+        // No-show-marker: zorgt dat renderLeadContext de 4 outcome-knoppen
+        // toont onder de context-cells + de "Verplaats naar ander event"
+        // sectie beschikbaar wordt.
+        is_no_show_followup     : true,
+        no_show_followup_status : attendee.no_show_followup_status || null,
+        source_ref              : { attendee_id: attendeeId, event_id: attendee.event_id || null },
+      };
+
+      try {
+        if (_leadsState && Array.isArray(_leadsState.items) && !_leadsState.items.some((x) => x.id === leadObj.id)) {
+          _leadsState.items = [leadObj, ..._leadsState.items];
+        }
+        if (_leadsState) _leadsState.selectedId = leadObj.id;
+      } catch (e) { console.warn('[no-show] state-inject:', e); }
+
+      try { if (typeof switchTab === 'function') switchTab('leads'); }
+      catch (e) { console.error('[no-show] switchTab fout:', e); }
+
+      try {
+        const numEl = document.getElementById('cockpit-number');
+        if (numEl) numEl.value = attendee.phone || '';
+      } catch (e) { console.warn('[no-show] cockpit-number fill:', e); }
+
+      if (!hasPhone) {
+        try {
+          window.AgentShared?.showToast?.('Geen telefoonnummer — lead geopend in werklijst, bel handmatig of vul een nummer in.', 'info');
+        } catch (_) {}
+        restoreBtn();
+        return;
+      }
+
+      const spAvail = !!(typeof _softphone !== 'undefined' && _softphone && _softphone.available);
+      if (spAvail && typeof _softphoneCallLead === 'function') {
+        try {
+          await _softphoneCallLead(leadObj);
+        } catch (e) {
+          console.error('[no-show] softphoneCallLead throw:', e);
+          alert('Softphone-call mislukt: ' + (e?.message || 'onbekend') +
+                '\n\nHet uitkomst-panel in de Werklijst staat klaar voor handmatige registratie.');
+        }
+      } else {
+        try { if (typeof _openOutcomePanel === 'function') _openOutcomePanel(false); }
+        catch (e) { console.error('[no-show] _openOutcomePanel fout:', e); }
+        alert('Softphone is niet actief.\n\nBel handmatig ' + attendee.phone + ' (' + attendee.name + ').' +
+              '\n\nJe staat nu in de Werklijst met de lead geselecteerd — registreer het gesprek via het uitkomst-panel.');
+      }
+      restoreBtn();
+    }
+
+    // POST no-show-outcome — sluit de opvolging voor de attendee.
+    async function _nsSubmitOutcome(attendeeId, outcome, btnEl) {
+      if (!attendeeId || !outcome) return;
+      const origHtml = btnEl?.innerHTML || '';
+      if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="ti ti-loader-2"></i> Opslaan…'; }
+      try {
+        const r = await window.AgentShared.apiFetch('/api/follow-up-no-show-outcome', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ attendee_id: attendeeId, outcome }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          if (d?.code === 'MIGRATION_REQUIRED') {
+            alert('Migratie 024 nog niet gedraaid — outcome kan pas na migratie worden opgeslagen.');
+            return;
+          }
+          throw new Error(d?.error || 'HTTP ' + r.status);
+        }
+        window.AgentShared?.showToast?.('No-show opvolging geregistreerd (' + outcome + ')', 'success');
+        try { loadNoShowTab(); } catch (_) {}
+      } catch (e) {
+        console.error('[no-show-outcome]', e?.message || e);
+        alert('Opslaan mislukt: ' + (e?.message || 'onbekend'));
+      } finally {
+        if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = origHtml; }
+      }
+    }
+
+    // Haal (of hergebruik uit cache) de lijst met aankomende events voor
+    // de "Verplaats naar ander event"-dropdown. Cache 60s zodat we niet
+    // bij elke lead-select een nieuwe HTTP-call doen.
+    async function _loadUpcomingEventsForMove() {
+      const state = _fase3State.noShow;
+      const now = Date.now();
+      if (state.upcomingEvents && (now - state.upcomingEventsLoadedAt) < 60_000) {
+        return state.upcomingEvents;
+      }
+      try {
+        const r = await window.AgentShared.apiFetch('/api/events-list?status=published&limit=50');
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+        const nowIso = new Date().toISOString();
+        const upcoming = (d.items || []).filter((ev) => ev.starts_at && ev.starts_at > nowIso);
+        upcoming.sort((a, b) => (a.starts_at || '').localeCompare(b.starts_at || ''));
+        state.upcomingEvents = upcoming;
+        state.upcomingEventsLoadedAt = now;
+        return upcoming;
+      } catch (e) {
+        console.warn('[no-show] upcoming events fetch:', e?.message || e);
+        return [];
+      }
+    }
+
+    // Voer een verplaatsing uit via het bestaande events-attendee-move
+    // endpoint. send_invite=true → WhatsApp + email invite.
+    async function _moveAttendeeToEvent(attendeeId, targetEventId, btnEl) {
+      if (!attendeeId || !targetEventId) return;
+      const origHtml = btnEl?.innerHTML || '';
+      if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="ti ti-loader-2"></i> Verplaatsen…'; }
+      try {
+        const r = await window.AgentShared.apiFetch('/api/events-attendee-move', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ attendee_id: attendeeId, target_event_id: targetEventId, send_invite: true }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+        const evLabel = (_fase3State.noShow.upcomingEvents || []).find((e) => e.id === targetEventId)?.title || 'nieuw event';
+        window.AgentShared?.showToast?.(`Verplaatst naar ${evLabel} + uitnodiging verstuurd`, 'success');
+        // Cache invalideren zodat nieuwe capaciteit wordt gerefetcht.
+        _fase3State.noShow.upcomingEventsLoadedAt = 0;
+        // Refresh no-show-lijst (attendee is nu switched → verdwijnt).
+        try { loadNoShowTab(); } catch (_) {}
+      } catch (e) {
+        console.error('[no-show move]', e?.message || e);
+        alert('Verplaatsen mislukt: ' + (e?.message || 'onbekend'));
+      } finally {
+        if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = origHtml; }
+      }
+    }
+
     // ── SLUIMERPOT-TAB ────────────────────────────────────────────────────
     async function loadSluimerpotTab() {
       const listEl = document.getElementById('sp-list');
@@ -9856,6 +10306,39 @@
         }
       }, true);
       console.log('[event-bellijst] click-delegation actief (capture-fase)');
+    })();
+
+    // No-show-tab delegation — analoog aan setupEventBellijstDelegation.
+    // Behandelt "Bel/Openen"-knop + "Verplaats naar ander event"-select
+    // + "Verplaats"-actieknop + 4 outcome-knoppen die in renderLeadContext
+    // gerenderd worden voor no-show-leads.
+    (function setupNoShowDelegation() {
+      // Bel/openen-knop op de tab-rij + refresh-knop.
+      _bindNoShowDelegation();
+
+      // Outcome-knoppen (data-ns-out) + verplaats-actieknop (data-ns-move-go)
+      // + change-listener voor de dropdown (data-ns-move-select).
+      document.addEventListener('click', (e) => {
+        const outBtn = e.target?.closest?.('[data-ns-out]');
+        if (outBtn) {
+          e.preventDefault(); e.stopPropagation();
+          const attId = outBtn.getAttribute('data-attendee-id');
+          const out   = outBtn.getAttribute('data-ns-out');
+          if (attId && out) _nsSubmitOutcome(attId, out, outBtn);
+          return;
+        }
+        const moveBtn = e.target?.closest?.('[data-ns-move-go]');
+        if (moveBtn) {
+          e.preventDefault(); e.stopPropagation();
+          const attId  = moveBtn.getAttribute('data-attendee-id');
+          const sel    = document.querySelector('[data-ns-move-select][data-attendee-id="' + attId + '"]');
+          const target = sel?.value || null;
+          if (!target) { alert('Kies eerst een event om naar te verplaatsen.'); return; }
+          if (!confirm('Deze deelnemer verplaatsen naar het gekozen event? Er wordt een uitnodiging (WhatsApp + email) verstuurd.')) return;
+          _moveAttendeeToEvent(attId, target, moveBtn);
+        }
+      }, true);
+      console.log('[no-show] click-delegation actief (capture-fase)');
     })();
 
     init();
