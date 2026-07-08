@@ -3,6 +3,7 @@
 // Handmatige override van requires_action op een mail in email_messages.
 
 import { supabaseAdmin } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -11,6 +12,12 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  // Security H2 — RBAC-gate. email.module.access is de basis-gate voor de hele
+  // email-module (lezen/toggle-flag). Verfijning naar een aparte
+  // 'email.actie.toggle' kan later; FE gebruikt de module-gate breed.
+  const allowed = await requirePermission(req, 'email.module.access');
+  if (!allowed) return res.status(403).json({ error: 'Geen rechten (email.module.access)' });
 
   const { email_id, requires_action } = req.body || {};
   if (!email_id || typeof requires_action !== 'boolean') {
