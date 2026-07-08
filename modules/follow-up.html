@@ -7614,17 +7614,20 @@
         const when = it.afgeboekt_op ? _fmtHMwithDate(it.afgeboekt_op) : '—';
         const owner = it.owner_name || '—';
         const initials = _leadInitials(it.name);
+        // HTML 1-op-1 gelijkgetrokken met _renderOudeRetenties: 3-items sub
+        // (phone / email / owner), kortere knop-label. Zo past de grid
+        // (40px 1fr auto auto) op dezelfde container-breedte als oret.
+        // Type-info (Zoom/Bel) zit al impliciet in de kebab bij openen; het
+        // reden-label staat in de pill-badge rechts.
         return `<div class="fu-afgb-row" data-afgb-open-type="${esc(it.type)}" data-afgb-open-id="${esc(it.id)}">
           <div class="fu-afgb-avatar ${esc(meta.cls)}">${esc(initials)}</div>
           <div class="fu-afgb-row-main">
             <div class="name">${esc(it.name)}</div>
             <div class="sub">
-              <span><i class="ti ${typeIcon}"></i> ${esc(typeLabel)}</span>
-              <span>·</span>
               <span>${it.phone ? esc(it.phone) : '<span style="opacity:.5">— geen tel —</span>'}</span>
               ${it.email ? '<span>·</span><span>' + esc(it.email) + '</span>' : ''}
               <span>·</span>
-              <span><i class="ti ti-user"></i> ${esc(owner)}</span>
+              <span title="${esc(typeLabel)}"><i class="ti ${typeIcon}"></i> ${esc(owner)}</span>
             </div>
           </div>
           <div class="fu-afgb-row-right">
@@ -7635,7 +7638,7 @@
                   data-afgb-reactivate-type="${esc(it.type)}"
                   data-afgb-reactivate-id="${esc(it.id)}"
                   title="Terug op de werklijst zetten">
-            <i class="ti ti-refresh-dot"></i> Opnieuw oppakken
+            <i class="ti ti-refresh-dot"></i> Opnieuw
           </button>
         </div>`;
       }).join('');
