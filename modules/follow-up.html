@@ -1891,17 +1891,18 @@
       transition: background .12s, border-color .12s;
     }
     .fu-afgb-row:hover { background: var(--bg-elev, var(--surface-2)); border-color: var(--border-strong, var(--border-default)); }
+    /* Volle huisstijl-fill, identiek aan .fu-oret-avatar. De reden zit al
+       in de pill-badge rechts; avatar hoeft die niet ook nog te dragen.
+       Reden-classes (r-red/r-darkred/r-orange/r-gray) worden nog in de
+       HTML gerenderd maar hebben visueel geen effect meer — de avatar is
+       uniform blauw met witte initialen. */
     .fu-afgb-avatar {
       width: 36px; height: 36px; border-radius: 50%;
+      background: #093d54; color: #fff;
       display: flex; align-items: center; justify-content: center;
       font-size: 12.5px; font-weight: 700;
       letter-spacing: .3px;
     }
-    /* Zachte tinten via semantische color-tokens. */
-    .fu-afgb-avatar.r-red     { background: var(--color-danger-soft);  color: var(--color-danger-text); }
-    .fu-afgb-avatar.r-darkred { background: var(--color-danger-soft);  color: var(--color-danger-text); }
-    .fu-afgb-avatar.r-orange  { background: var(--color-warning-soft); color: var(--color-warning-text); }
-    .fu-afgb-avatar.r-gray    { background: var(--color-neutral-soft); color: var(--color-neutral-text); }
     .fu-afgb-row-main { min-width: 0; }
     .fu-afgb-row-main .name {
       font-size: 13.5px; font-weight: 500; color: var(--text-primary);
