@@ -1,5 +1,6 @@
 import { supabase } from './supabase.js';
 import { executeAgentTool } from './agent-tool-executor.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 // ── Interne audit-helper ───────────────────────────────────────────────────
 
@@ -18,6 +19,14 @@ async function logAudit({ agent_name = 'system', action, payload = {}, result = 
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
+
+  // Security H1 — RBAC-gate. Skip als de cron-wrapper (agent-expire-approvals.js)
+  // ons aanroept: die zet req.__cronAuthed = true na een geldige checkCronAuth.
+  // Zo blijft de HTTP-route beschermd zonder de cron te breken.
+  if (!req.__cronAuthed) {
+    const allowed = await requirePermission(req, 'agents.approval.act');
+    if (!allowed) return res.status(403).json({ error: 'Geen rechten (agents.approval.act)' });
+  }
 
   // GET actions via query params
   const action = req.method === 'GET'

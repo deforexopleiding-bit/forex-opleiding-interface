@@ -1,7 +1,12 @@
 import { supabase } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
+
+  // Security H1 — RBAC-gate voor alle audit-acties (list/log/export_csv).
+  const allowed = await requirePermission(req, 'agents.view.overview');
+  if (!allowed) return res.status(403).json({ error: 'Geen rechten (agents.view.overview)' });
 
   const action = req.method === 'GET'
     ? (req.query?.action || 'list')

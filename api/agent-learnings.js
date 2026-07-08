@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 // GET  /api/agent-learnings?agent_name=<name>&limit=20
 //      → { learnings: [{id, trigger_text, ideal_response, created_at}] }
@@ -7,6 +8,13 @@ import { supabase } from './supabase.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
+
+  // Security H1 — RBAC-gate. Pragmatische keuze: één permission voor beide
+  // methoden — een user die learnings ziet mag er in deze admin-tool ook
+  // toevoegen. Verfijning naar 'agents.train.rule' voor POST kan later
+  // zonder de flow te breken.
+  const allowed = await requirePermission(req, 'agents.view.overview');
+  if (!allowed) return res.status(403).json({ error: 'Geen rechten (agents.view.overview)' });
 
   if (req.method === 'GET') {
     const { agent_name, limit = '20' } = req.query;

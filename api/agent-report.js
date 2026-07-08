@@ -1,8 +1,13 @@
 import { supabase } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   res.setHeader('Cache-Control', 'no-store');
+
+  // Security H1 — RBAC-gate. Rapport-generatie is een dure Anthropic-call.
+  const allowed = await requirePermission(req, 'agents.report.generate');
+  if (!allowed) return res.status(403).json({ error: 'Geen rechten (agents.report.generate)' });
 
   const { agent_id, agent_name, report_type = 'dagrapport' } = req.body || {};
   const apiKey = process.env.ANTHROPIC_API_KEY;

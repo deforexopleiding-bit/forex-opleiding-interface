@@ -378,7 +378,7 @@ async function init() {
   if (!profile) return;
   // adminNavLink wordt nu centraal door sidebar.js gegate (RBAC-voorbereiding)
   try {
-    const r = await fetch('/api/agents');
+    const r = await window.AgentShared.apiFetch('/api/agents');
     const data = await r.json();
     if (data.agents?.length) agents = data.agents;
   } catch {}
