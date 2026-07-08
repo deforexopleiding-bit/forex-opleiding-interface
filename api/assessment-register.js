@@ -42,6 +42,7 @@
 
 import { supabaseAdmin } from './supabase.js';
 import { UUID_RE } from './_lib/assessment-validation.js';
+import { checkRateLimit } from './_lib/rate-limit.js';
 import {
   isNiveauMatch,
   getConfirmedCount,
@@ -72,6 +73,12 @@ export default async function handler(req, res) {
   if (!evId || !UUID_RE.test(evId)) {
     return res.status(400).json({ error: 'event_id (uuid) vereist.' });
   }
+
+  // Security H3 — soft rate-limit per IP tegen spam. Ruim genoeg dat een
+  // legitieme klant (1 assessment → 1-2 event-inschrijvingen) NOOIT geraakt
+  // wordt. Fail-open bij DB-fout.
+  const rl = await checkRateLimit({ req, bucket: 'assessment-register', maxHits: 5, withinSeconds: 60 });
+  if (rl.limited) return res.status(429).json({ error: 'Te veel verzoeken, probeer later opnieuw.' });
 
   // ── 1) Assessment ophalen ─────────────────────────────────────────────
   let assessment;

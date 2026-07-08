@@ -20,6 +20,7 @@
 
 import { supabaseAdmin } from './supabase.js';
 import { createNotification } from './_lib/notify.js';
+import { checkRateLimit } from './_lib/rate-limit.js';
 import {
   DEFAULT_WIZARD_STRUCTURE,
   validateRequired,
@@ -42,6 +43,12 @@ export default async function handler(req, res) {
   if (!token || !UUID_RE.test(token)) {
     return res.status(400).json({ error: 'Link niet geldig.' });
   }
+
+  // Security H3 — soft rate-limit per IP tegen spam. Legitieme klant klikt
+  // 1x op "afronden"; 10/min is ruim genoeg voor terugkeer + herhaalpoging.
+  // Fail-open bij DB-fout.
+  const rl = await checkRateLimit({ req, bucket: 'onboarding-complete', maxHits: 10, withinSeconds: 60 });
+  if (rl.limited) return res.status(429).json({ error: 'Te veel verzoeken, probeer later opnieuw.' });
 
   try {
     const { data: ob, error: obErr } = await supabaseAdmin
