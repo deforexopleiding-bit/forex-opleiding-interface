@@ -60,6 +60,19 @@ const EVENT_ONLY_OUTCOMES = new Set(['bevestigd', 'komt_niet']);
 
 const PREV_STATE_KEYS = ['lead_status', 'attempts', 'terugbel_datum', 'is_hot', 'snoozed_until', 'last_outcome'];
 
+// Mapping van follow-up-outcome → event_attendees.call_status. Alleen
+// outcomes waarbij er echt een belronde-status uit voortvloeit staan hier;
+// andere outcomes laten call_status ongewijzigd. NULL blijft = 'nog niet
+// gebeld'. Undo herstelt call_status uit attendee_before.
+const OUTCOME_TO_CALL_STATUS = Object.freeze({
+  bevestigd     : 'bevestigd',
+  komt_niet     : 'komt_niet',
+  geen_gehoor   : 'geen_gehoor',
+  voicemail     : 'voicemail',
+  terugbel      : 'terugbellen',
+  foutief_nummer: 'foutief_nummer',
+});
+
 const CADENCE_HOURS = [2, 24, 72];
 const MAX_ATTEMPTS  = 4;
 // WhatsApp-opvolging: standaard 2 dagen terug in de Werklijst.
@@ -246,10 +259,33 @@ export default async function handler(req, res) {
           const restoreAttendee = {};
           if (prev.attendee_before.status !== undefined) restoreAttendee.status = prev.attendee_before.status;
           if (prev.attendee_before.called !== undefined) restoreAttendee.called = prev.attendee_before.called === true;
+          // call_status + call_status_at ook mee-restoren zodat de badge
+          // naar de vorige waarde springt bij undo.
+          if (prev.attendee_before.call_status !== undefined) {
+            restoreAttendee.call_status = prev.attendee_before.call_status;
+          }
+          if (prev.attendee_before.call_status_at !== undefined) {
+            restoreAttendee.call_status_at = prev.attendee_before.call_status_at;
+          }
           if (Object.keys(restoreAttendee).length) {
             const { error: aErr } = await supabaseAdmin
               .from('event_attendees').update(restoreAttendee).eq('id', attendeeId);
-            if (aErr) console.warn('[follow-up-lead-outcome] attendee undo-restore:', aErr.message);
+            if (aErr) {
+              // 42703 → migratie 023 nog niet gedraaid. Retry zonder de
+              // nieuwe kolommen zodat status/called wel terug worden gezet.
+              if (aErr.code === '42703' || /column .* does not exist/i.test(aErr.message || '')) {
+                const fb = {};
+                if (restoreAttendee.status !== undefined) fb.status = restoreAttendee.status;
+                if (restoreAttendee.called !== undefined) fb.called = restoreAttendee.called;
+                if (Object.keys(fb).length) {
+                  const { error: fErr } = await supabaseAdmin
+                    .from('event_attendees').update(fb).eq('id', attendeeId);
+                  if (fErr) console.warn('[follow-up-lead-outcome] attendee undo-restore (fallback):', fErr.message);
+                }
+              } else {
+                console.warn('[follow-up-lead-outcome] attendee undo-restore:', aErr.message);
+              }
+            }
           }
         } catch (e) {
           console.warn('[follow-up-lead-outcome] attendee undo-restore exception:', e?.message || e);
@@ -381,12 +417,33 @@ export default async function handler(req, res) {
     try {
       const { data: ab } = await supabaseAdmin
         .from('event_attendees')
-        .select('id, status, called')
+        .select('id, status, called, call_status, call_status_at')
         .eq('id', sourceRef.attendee_id)
         .maybeSingle();
-      if (ab) attendeeBeforeSnapshot = { status: ab.status || null, called: ab.called === true };
+      if (ab) {
+        attendeeBeforeSnapshot = {
+          status         : ab.status || null,
+          called         : ab.called === true,
+          call_status    : ab.call_status || null,
+          call_status_at : ab.call_status_at || null,
+        };
+      }
     } catch (e) {
-      console.warn('[follow-up-lead-outcome] attendee-before fetch:', e?.message || e);
+      // 42703 → kolom call_status/call_status_at ontbreekt (migratie 023
+      // nog niet gedraaid). Herprobeer met minimale set zodat de outcome
+      // door kan; call_status wordt dan niet meegeschreven.
+      if (e?.code === '42703' || /column .* does not exist/i.test(e?.message || '')) {
+        try {
+          const { data: ab2 } = await supabaseAdmin
+            .from('event_attendees')
+            .select('id, status, called')
+            .eq('id', sourceRef.attendee_id)
+            .maybeSingle();
+          if (ab2) attendeeBeforeSnapshot = { status: ab2.status || null, called: ab2.called === true };
+        } catch (_) { /* fail-soft */ }
+      } else {
+        console.warn('[follow-up-lead-outcome] attendee-before fetch:', e?.message || e);
+      }
     }
   }
 
@@ -652,35 +709,72 @@ export default async function handler(req, res) {
     //                  ('sale'/'aanwezig'): dan alleen called=true.
     // De prev_state (verderop) heeft attendee_before al vastgelegd voor
     // undo-restore.
+    // SPOKEN_OUTCOMES: outcomes waarbij we called=true zetten. Uitgebreid
+    // met de outcomes die naar call_status mappen zodat álle mogelijke
+    // belronde-uitkomsten ook de nieuwe belstatus-badge muteren.
     const SPOKEN_OUTCOMES = new Set([
       'terugbel', 'sale', 'geen_interesse', 'gesprek_gehad', 'zoom_ingepland',
       'bevestigd', 'komt_niet',
+      // Voor call_status-write ook nodig — deze outcomes waren voorheen
+      // "niet-gesproken" (called=false) maar zijn wél belronde-signalen
+      // die de gebruiker in de badge wil zien.
+      'geen_gehoor', 'voicemail', 'foutief_nummer',
     ]);
     if (isEventLead && SPOKEN_OUTCOMES.has(outcome) && sourceRef.attendee_id) {
       try {
-        // Bepaal patch: called=true altijd; status alleen bij bevestigd/
-        // komt_niet en afhankelijk van de huidige waarde.
-        const patchAttendee = { called: true };
+        // Bepaal patch: called=true bij daadwerkelijk contact, status alleen
+        // bij bevestigd/komt_niet, call_status uit OUTCOME_TO_CALL_STATUS.
+        const patchAttendee = {};
+        // called=true alleen bij de outcomes die impliceren dat de belronde
+        // écht bereik had. geen_gehoor / voicemail / foutief_nummer zetten
+        // wel call_status maar NIET called=true (backward-compat semantiek).
+        const CALLED_TRUE_OUTCOMES = new Set([
+          'terugbel', 'sale', 'geen_interesse', 'gesprek_gehad', 'zoom_ingepland',
+          'bevestigd', 'komt_niet',
+        ]);
+        if (CALLED_TRUE_OUTCOMES.has(outcome)) patchAttendee.called = true;
         if (outcome === 'bevestigd' || outcome === 'komt_niet') {
           const beforeStatus = String(attendeeBeforeSnapshot?.status || '').toLowerCase();
           if (outcome === 'bevestigd') {
-            // Alleen normaliseren als klant eerder was afgemeld/verschoven.
             if (beforeStatus === 'geannuleerd' || beforeStatus === 'switched_to_other_event') {
               patchAttendee.status = 'aangemeld';
             }
-            // In alle andere gevallen laat de status staan.
           } else { // komt_niet
             if (beforeStatus !== 'sale' && beforeStatus !== 'aanwezig') {
               patchAttendee.status = 'geannuleerd';
             }
-            // definitieve statussen ('sale'/'aanwezig') niet terugdraaien.
           }
         }
-        const { error: aErr } = await supabaseAdmin
-          .from('event_attendees')
-          .update(patchAttendee)
-          .eq('id', sourceRef.attendee_id);
-        if (aErr) console.warn('[follow-up-lead-outcome] event_attendees write-back:', aErr.message);
+        // call_status write — nieuw. Waarde uit mapping; als outcome er niet
+        // in staat blijft call_status ongewijzigd (patch bevat 'em niet).
+        const mappedCallStatus = OUTCOME_TO_CALL_STATUS[outcome];
+        if (mappedCallStatus) {
+          patchAttendee.call_status    = mappedCallStatus;
+          patchAttendee.call_status_at = nowIso;
+        }
+        if (Object.keys(patchAttendee).length > 0) {
+          const { error: aErr } = await supabaseAdmin
+            .from('event_attendees')
+            .update(patchAttendee)
+            .eq('id', sourceRef.attendee_id);
+          if (aErr) {
+            // 42703 → migratie 023 nog niet gedraaid. Retry zonder de nieuwe
+            // kolommen zodat de bestaande write-back (called/status) blijft
+            // werken totdat de kolom bestaat.
+            if (aErr.code === '42703' || /column .* does not exist/i.test(aErr.message || '')) {
+              const fallback = {};
+              if (Object.prototype.hasOwnProperty.call(patchAttendee, 'called')) fallback.called = patchAttendee.called;
+              if (Object.prototype.hasOwnProperty.call(patchAttendee, 'status')) fallback.status = patchAttendee.status;
+              if (Object.keys(fallback).length > 0) {
+                const { error: fErr } = await supabaseAdmin
+                  .from('event_attendees').update(fallback).eq('id', sourceRef.attendee_id);
+                if (fErr) console.warn('[follow-up-lead-outcome] event_attendees write-back (fallback):', fErr.message);
+              }
+            } else {
+              console.warn('[follow-up-lead-outcome] event_attendees write-back:', aErr.message);
+            }
+          }
+        }
       } catch (e) {
         console.warn('[follow-up-lead-outcome] event_attendees write-back error:', e?.message || e);
       }

@@ -856,7 +856,7 @@ function renderAttendeesTab() {
         <th title="Datum waarop de aanwezige zich aanmeldde voor dit event">Aanmelddatum</th>
         <th title="Telt mee voor capaciteit als de vragenlijst is voltooid (assessment_response_id aanwezig).">Vragenlijst</th>
         <th title="Datum waarop de aanwezige de vragenlijst heeft afgerond">Vragenlijst ingevuld</th>
-        <th title="Markeer als al gebeld">Gebeld</th>
+        <th title="Laatste belronde-uitkomst (via follow-up cockpit)">Belstatus</th>
         <th>Tags</th>
         <th></th>
       </tr></thead>
@@ -912,9 +912,31 @@ function renderAttendeesTab() {
           </div>
         ` : '';
 
-        const calledChecked = a.called_at ? 'checked' : '';
-        const calledTitle = a.called_at ? ('Gebeld op ' + fmtDate(a.called_at)) : 'Nog niet gebeld';
-        const calledCell = `<input type="checkbox" class="att-called-chk" data-id="${esc(a.id)}" ${calledChecked} title="${esc(calledTitle)}" style="cursor:pointer" ${canEditAtt ? '' : 'disabled'} />`;
+        // Belstatus-badge: read-only weergave van de laatste belronde-uitkomst
+        // die via api/follow-up-lead-outcome naar event_attendees.call_status
+        // wordt geschreven. Handmatige toggle is bewust weg — belstatus komt
+        // nu ALTIJD uit de belronde. Fallback bij ontbrekende call_status:
+        //   - called_at gevuld → toch "Gebeld" (compat met pre-023 data)
+        //   - anders            → "Nog niet gebeld"
+        const CALL_STATUS_BADGES = {
+          bevestigd     : { label: 'Komt',           bg: 'rgba(34,197,94,0.16)',  fg: '#15803d', border: 'rgba(34,197,94,0.32)' },
+          komt_niet     : { label: 'Komt niet',      bg: 'rgba(220,38,38,0.15)',  fg: '#b91c1c', border: 'rgba(220,38,38,0.3)' },
+          geen_gehoor   : { label: 'Geen gehoor',    bg: 'rgba(245,158,11,0.18)', fg: '#b45309', border: 'rgba(245,158,11,0.3)' },
+          voicemail     : { label: 'Voicemail',      bg: 'rgba(245,158,11,0.18)', fg: '#b45309', border: 'rgba(245,158,11,0.3)' },
+          terugbellen   : { label: 'Terugbellen',    bg: 'rgba(20,115,214,0.16)', fg: '#1160bd', border: 'rgba(20,115,214,0.32)' },
+          foutief_nummer: { label: 'Fout nummer',    bg: 'rgba(100,116,139,0.18)', fg: '#7f1d1d', border: 'rgba(220,38,38,0.3)' },
+        };
+        let calledCell;
+        if (a.call_status && CALL_STATUS_BADGES[a.call_status]) {
+          const st = CALL_STATUS_BADGES[a.call_status];
+          const titleTs = a.call_status_at ? (' op ' + fmtDate(a.call_status_at)) : '';
+          calledCell = `<span title="${esc(st.label + titleTs)}" style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;background:${st.bg};color:${st.fg};border:1px solid ${st.border}">${esc(st.label)}</span>`;
+        } else if (a.called_at) {
+          // Compat: pre-023 attendees hebben alleen called_at.
+          calledCell = `<span title="Gebeld op ${esc(fmtDate(a.called_at))}" style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;background:rgba(100,116,139,0.18);color:#475569;border:1px solid rgba(100,116,139,0.3)">Gebeld</span>`;
+        } else {
+          calledCell = '<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:rgba(148,163,184,0.15);color:#64748b;border:1px solid rgba(148,163,184,0.3)">Nog niet gebeld</span>';
+        }
 
         // TAAL-FILTER: kleine badge wanneer taal !== 'nl' (en niet leeg).
         // 'en' → amber "EN (een beetje)"; 'anders' → rood "Niet-NL".
@@ -990,10 +1012,9 @@ function renderAttendeesTab() {
     sel.addEventListener('change', () => onAttStatusChange(sel.dataset.id, sel.value));
   });
 
-  // Gebeld-checkbox wire
-  document.querySelectorAll('.att-called-chk').forEach((cb) => {
-    cb.addEventListener('change', () => onAttCalledChange(cb.dataset.id, cb.checked, cb));
-  });
+  // Belstatus is nu een read-only badge (komt uit follow-up-lead-outcome
+  // → event_attendees.call_status). De oude .att-called-chk-checkbox is
+  // vervangen; geen wire nodig.
 
   // STAP 4: klik op naam → uitklaprij met communicatie van die attendee.
   document.querySelectorAll('.att-name-btn').forEach((btn) => {
@@ -2600,27 +2621,9 @@ async function onAttStatusChange(attendeeId, newStatus) {
   }
 }
 
-async function onAttCalledChange(attendeeId, called, cbEl) {
-  if (cbEl) cbEl.disabled = true;
-  try {
-    const res = await window.AgentShared.apiFetch('/api/events-attendee-update?id=' + encodeURIComponent(attendeeId), {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ called: !!called }),
-    });
-    if (!res.ok) {
-      const e = await res.json().catch(() => ({}));
-      throw new Error(e.error || `HTTP ${res.status}`);
-    }
-    window.AgentShared?.showToast?.(called ? 'Gemarkeerd als gebeld' : 'Vinkje verwijderd', 'success');
-    await loadAttendees();
-  } catch (e) {
-    window.AgentShared?.showToast?.('Gebeld wijzigen mislukt: ' + e.message, 'error');
-    await loadAttendees(); // herstel UI
-  } finally {
-    if (cbEl) cbEl.disabled = false;
-  }
-}
+// onAttCalledChange is verwijderd — de handmatige gebeld-checkbox is
+// vervangen door een read-only belstatus-badge die de follow-up cockpit
+// vult via api/follow-up-lead-outcome → event_attendees.call_status.
 
 async function deleteAttendee(attendeeId) {
   if (!confirm('Deze aanwezige verwijderen? Dit is permanent.')) return;

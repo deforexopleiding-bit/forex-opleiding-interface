@@ -5775,6 +5775,25 @@
       cells.push(_ctxCell('Aangemaakt', fmtDateNLShort(it.created_at)));
       const ref = _sourceRefSummary(it);
       if (ref) cells.push(_ctxCell('Verwijzing', ref));
+      // Vragenlijst-status (event-leads met attendee_id): read-only regel +
+      // "Opnieuw toesturen"-knop bij niet-ingevuld. Alleen als we de status
+      // kennen (uit _ebCallAttendee-flow). Voor event-leads uit de Werklijst
+      // zonder deze info tonen we niets.
+      const attId = it.attendee_id || (it.source_ref && it.source_ref.attendee_id) || null;
+      const showQ = it.source === 'event' && attId && typeof it.questionnaire_filled === 'boolean';
+      if (showQ) {
+        const filled = it.questionnaire_filled === true;
+        let qValue;
+        if (filled) {
+          qValue = '<span style="color:var(--text-primary,#fff)">Ingevuld ✅</span>';
+        } else {
+          qValue = '<span style="color:#b45309">Niet ingevuld ❌</span> ' +
+            '<button type="button" class="fu-lead-btn" data-eb-resend="' + esc(attId) + '" ' +
+              'style="margin-left:8px;padding:4px 10px;font-size:11px" title="Verstuur de vragenlijst-link opnieuw naar deze deelnemer">' +
+              '<i class="ti ti-send"></i> Opnieuw toesturen</button>';
+        }
+        cells.push(_ctxCell('Vragenlijst', qValue));
+      }
       el.innerHTML = cells.join('');
 
       // Retention-context (abonnement + traject + einddatum) lazy fetchen
@@ -8452,14 +8471,18 @@
       }
 
       const leadObj = {
-        id          : leadId,
-        lead_name   : attendee.name,
-        lead_phone  : attendee.phone,
-        lead_email  : attendee.email,
-        source      : 'event',
-        lead_status : attendee.lead_status || 'nieuw',
-        lead_kind   : 'call',
-        customer_id : attendee.customer_id || null,
+        id                    : leadId,
+        lead_name              : attendee.name,
+        lead_phone             : attendee.phone,
+        lead_email             : attendee.email,
+        source                 : 'event',
+        lead_status            : attendee.lead_status || 'nieuw',
+        lead_kind              : 'call',
+        customer_id            : attendee.customer_id || null,
+        // Voor de renderLeadContext-vragenlijst-cell + herstuur-knop.
+        attendee_id            : attendeeId,
+        questionnaire_filled   : attendee.questionnaire_filled === true,
+        assessment_response_id : attendee.assessment_response_id || null,
       };
 
       // 2) Zet cockpit-state klaar (licht — geen DOM-herbouw). Zo staat
@@ -8514,6 +8537,36 @@
       }
 
       restoreBtn();
+    }
+
+    // Herstuur de vragenlijst-link naar de attendee. Wrapper rond
+    // /api/events-attendee-send-questionnaire dat een 400 geeft als de
+    // attendee geen choice_token heeft (dan tonen we een nette melding).
+    async function _ebResendQuestionnaire(attendeeId, btnEl) {
+      if (!attendeeId) return;
+      const origHtml = btnEl?.innerHTML || '<i class="ti ti-send"></i> Opnieuw toesturen';
+      if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="ti ti-loader-2"></i> Versturen…'; }
+      try {
+        const r = await window.AgentShared.apiFetch('/api/events-attendee-send-questionnaire', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ attendee_id: attendeeId }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.status === 400 && /choice_token/i.test(String(d?.error || ''))) {
+          alert('Vragenlijst kan niet opnieuw worden verstuurd: deze deelnemer mist een geldige link (choice_token). Neem contact op met de deelnemer of maak een nieuwe link aan via de event-detail-pagina.');
+          return;
+        }
+        if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+        const toast = window.AgentShared?.showToast;
+        if (typeof toast === 'function') toast('Vragenlijst opnieuw verstuurd', 'success');
+        else alert('Vragenlijst opnieuw verstuurd');
+      } catch (e) {
+        console.error('[event-bellijst] resend fout:', e);
+        alert('Vragenlijst opnieuw versturen mislukt: ' + (e?.message || 'onbekend'));
+      } finally {
+        if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = origHtml; }
+      }
     }
 
     // ── SLUIMERPOT-TAB ────────────────────────────────────────────────────
@@ -9678,20 +9731,32 @@
     (function setupEventBellijstDelegation() {
       // Capture=true zodat we vóór eventuele stopPropagation elders vuren.
       document.addEventListener('click', (e) => {
-        const btn = e.target && e.target.closest ? e.target.closest('[data-eb-call]') : null;
-        // Debug-log: sla informatie over de klik op zodat de gebruiker in
-        // DevTools kan zien wat er gebeurt bij een niet-werkende knop.
-        if (btn) {
-          const id = btn.getAttribute('data-eb-call');
-          console.log('[event-bellijst] klik gedetecteerd op data-eb-call btn, id=', id, 'target=', e.target?.tagName);
+        const callBtn = e.target && e.target.closest ? e.target.closest('[data-eb-call]') : null;
+        if (callBtn) {
+          const id = callBtn.getAttribute('data-eb-call');
+          console.log('[event-bellijst] klik op data-eb-call, id=', id, 'target=', e.target?.tagName);
           e.preventDefault();
           if (typeof _ebCallAttendee === 'function') {
-            _ebCallAttendee(id, btn);
+            _ebCallAttendee(id, callBtn);
           } else {
             console.error('[event-bellijst] _ebCallAttendee niet gedefinieerd — probeer tel-fallback');
-            const phone = btn.dataset?.phone;
+            const phone = callBtn.dataset?.phone;
             if (phone) window.location.href = 'tel:' + phone;
             else alert('Belfunctie niet gevonden. Herlaad de pagina.');
+          }
+          return;
+        }
+        // Vragenlijst opnieuw toesturen — knop in renderLeadContext van
+        // event-leads met attendee_id.
+        const resendBtn = e.target && e.target.closest ? e.target.closest('[data-eb-resend]') : null;
+        if (resendBtn) {
+          const attId = resendBtn.getAttribute('data-eb-resend');
+          console.log('[event-bellijst] klik op data-eb-resend, attendee_id=', attId);
+          e.preventDefault();
+          if (typeof _ebResendQuestionnaire === 'function') {
+            _ebResendQuestionnaire(attId, resendBtn);
+          } else {
+            console.error('[event-bellijst] _ebResendQuestionnaire niet gedefinieerd');
           }
         }
       }, true);
