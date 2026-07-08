@@ -8462,9 +8462,8 @@
         customer_id : attendee.customer_id || null,
       };
 
-      // 2) Zet cockpit-state klaar zodat de Werklijst + uitkomst-panel op
-      //    de juiste lead landen. Elke stap eigen try/catch: als één ding
-      //    faalt breekt de rest niet, en de call gaat door.
+      // 2) Zet cockpit-state klaar (licht — geen DOM-herbouw). Zo staat
+      //    de lead klaar voor de Werklijst zonder de callbar te raken.
       try {
         if (_leadsState && Array.isArray(_leadsState.items) && !_leadsState.items.some((x) => x.id === leadObj.id)) {
           _leadsState.items = [leadObj, ..._leadsState.items];
@@ -8472,26 +8471,27 @@
         if (_leadsState) _leadsState.selectedId = leadObj.id;
       } catch (e) { console.warn('[event-bellijst] state-inject:', e); }
 
-      // 3) Switch naar Werklijst-tab zodat #cockpit-outcome zichtbaar wordt
-      //    zodra _softphoneCallLead het opent.
+      // 3) switchTab('leads') maakt #cockpit-outcome + callbar zichtbaar.
+      //    Alleen een tab-classToggle, geen zware fetch → callbar overleeft.
       try {
         if (typeof switchTab === 'function') switchTab('leads');
       } catch (e) { console.error('[event-bellijst] switchTab fout:', e); }
 
-      // 4) Render lead-detail op de juiste lead. Gebeurt na een korte tick
-      //    zodat DOM-updates van switchTab zichtbaar zijn. Fouten stoppen
-      //    de call niet.
-      await new Promise((r) => setTimeout(r, 60));
-      try {
-        if (typeof renderLeadDetail === 'function') renderLeadDetail(leadObj, { refreshTimeline: true });
-      } catch (e) { console.error('[event-bellijst] renderLeadDetail fout:', e); }
+      // 4) Vul cockpit-number direct (DOM-write, geen re-render).
+      //    BEWUST GEEN renderLeadDetail(refreshTimeline:true) meer hier —
+      //    die async fetch herbouwde de cockpit-DOM terwijl de SIP-session
+      //    startte → callbar-element werd vervangen → call brak direct af.
+      //    _softphoneCallLead + het uitkomst-panel (dat _softphoneCallLead
+      //    zelf opent bij state='Terminated') werken zonder die re-render.
       try {
         const numEl = document.getElementById('cockpit-number');
         if (numEl) numEl.value = attendee.phone;
       } catch (e) { console.warn('[event-bellijst] cockpit-number fill:', e); }
 
-      // 5) Bel via softphone — die opent zelf het uitkomst-panel op de
-      //    huidige (Werklijst-)tab. Fouten: log + zichtbare alert.
+      // 5) Bel als LAATSTE — één keer, geen andere trigger die 'em kan
+      //    ophangen. _softphoneCallLead regelt callbar-update +
+      //    uitkomst-panel-open op state-events, precies zoals bij een
+      //    afspraak-call.
       const spAvail = !!(typeof _softphone !== 'undefined' && _softphone && _softphone.available);
       console.log('[event-bellijst] softphone.available =', spAvail);
       if (spAvail && typeof _softphoneCallLead === 'function') {
