@@ -19,18 +19,41 @@ export default async function handler(req, res) {
   }
 
   const { status, search, owned_by_me, customer_id } = req.query || {};
+  const page     = Math.max(1, parseInt(req.query?.page, 10) || 1);
+  const rawSize  = parseInt(req.query?.page_size, 10) || 50;
+  const pageSize = Math.min(500, Math.max(1, rawSize));
+  const from     = (page - 1) * pageSize;
+  const to       = from + pageSize - 1;
 
   try {
+    // Search matcht op klant-naam/e-mail (deals-tabel heeft die niet). Voor
+    // stabiele server-side paginering: prefetch de matchende customer_ids en
+    // filter deals daarop. Zonder search: direct pagineren over alle deals.
+    let searchCustomerIds = null;
+    if (search) {
+      const s = String(search).trim();
+      const { data: matched } = await supabaseAdmin.from('customers')
+        .select('id')
+        .or(`first_name.ilike.%${s}%,last_name.ilike.%${s}%,company_name.ilike.%${s}%,email.ilike.%${s}%`);
+      searchCustomerIds = [...new Set((matched || []).map(c => c.id))];
+      if (searchCustomerIds.length === 0) {
+        return res.status(200).json({
+          quotations: [], total: 0, page, page_size: pageSize, total_pages: 0,
+        });
+      }
+    }
+
     let q = supabaseAdmin.from('deals')
-      .select('id, customer_id, total_amount, created_at, sales_user_id, traject_variant_id, tl_department_id, quote_reference, tl_quotation_id, tl_quotation_status, tl_quotation_sent_at, tl_quotation_email_sent_at, tl_quotation_accepted_at, tl_quotation_declined_at')
+      .select('id, customer_id, total_amount, created_at, sales_user_id, traject_variant_id, tl_department_id, quote_reference, tl_quotation_id, tl_quotation_status, tl_quotation_sent_at, tl_quotation_email_sent_at, tl_quotation_accepted_at, tl_quotation_declined_at', { count: 'exact' })
       .is('archived_at', null)  // verwijderde offertes (soft-delete) niet tonen
       .neq('tl_quotation_status', 'no_quotation')  // ghost-deals (abo zonder offerte) niet als offerte tonen
       .order('created_at', { ascending: false })
-      .limit(300);
+      .range(from, to);
     if (owned_by_me === 'true') q = q.eq('sales_user_id', user.id);
     if (customer_id) q = q.eq('customer_id', customer_id);
     if (status) q = q.eq('tl_quotation_status', status);
-    const { data: deals, error } = await q;
+    if (searchCustomerIds) q = q.in('customer_id', searchCustomerIds);
+    const { data: deals, count: total, error } = await q;
     if (error) throw error;
 
     // Traject-label per deal (traject > variant).
@@ -94,7 +117,8 @@ export default async function handler(req, res) {
       for (const s of subs || []) hasSubByDeal[s.deal_id] = true;
     }
 
-    const s = (search || '').trim().toLowerCase();
+    // Search wordt server-side afgehandeld via searchCustomerIds hierboven.
+    // Geen client-side .filter() meer, want dat corrupt de paginering-count.
     const quotations = (deals || []).map(d => {
       const c = custById[d.customer_id] || {};
       return {
@@ -116,9 +140,16 @@ export default async function handler(req, res) {
         declined_at:         d.tl_quotation_declined_at || null,
         has_subscription:    !!hasSubByDeal[d.id],
       };
-    }).filter(qn => !s || qn.customer_name.toLowerCase().includes(s) || (qn.customer_email || '').toLowerCase().includes(s));
+    });
 
-    return res.status(200).json({ quotations });
+    const totalCount = total || 0;
+    return res.status(200).json({
+      quotations,
+      total       : totalCount,
+      page,
+      page_size   : pageSize,
+      total_pages : Math.ceil(totalCount / pageSize),
+    });
   } catch (err) {
     console.error('[sales-quotations]', err.message);
     return res.status(500).json({ error: err.message });

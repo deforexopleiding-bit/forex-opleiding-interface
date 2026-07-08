@@ -19,6 +19,13 @@ export default async function handler(req, res) {
   }
 
   const { owned_by_me, search, status } = req.query || {};
+  // Server-side paginering (customers.js patroon). clamp [1..500] zodat de
+  // UI-dropdown "Per pagina 500" blijft werken.
+  const page     = Math.max(1, parseInt(req.query?.page, 10) || 1);
+  const rawSize  = parseInt(req.query?.page_size, 10) || 50;
+  const pageSize = Math.min(500, Math.max(1, rawSize));
+  const from     = (page - 1) * pageSize;
+  const to       = from + pageSize - 1;
 
   try {
     // Owner-filter via deals.sales_user_id; klanten zonder deal zien we niet
@@ -28,12 +35,17 @@ export default async function handler(req, res) {
       const { data: ownedDeals } = await supabaseAdmin
         .from('deals').select('customer_id').eq('sales_user_id', user.id);
       customerIds = [...new Set((ownedDeals || []).map(d => d.customer_id).filter(Boolean))];
-      if (customerIds.length === 0) return res.status(200).json({ customers: [] });
+      if (customerIds.length === 0) {
+        return res.status(200).json({
+          customers: [], total: 0, page, page_size: pageSize, total_pages: 0,
+        });
+      }
     }
 
     let q = supabaseAdmin.from('customers')
-      .select('id, is_company, company_name, tl_contact_id, tl_company_id, first_name, last_name, email, phone, created_at, archived_at, risk_tag_auto, subscription_end_date, onboarding_status')
-      .order('updated_at', { ascending: false }).limit(200);
+      .select('id, is_company, company_name, tl_contact_id, tl_company_id, first_name, last_name, email, phone, created_at, archived_at, risk_tag_auto, subscription_end_date, onboarding_status', { count: 'exact' })
+      .order('updated_at', { ascending: false })
+      .range(from, to);
     if (customerIds) q = q.in('id', customerIds);
     if (status === 'archived') q = q.not('archived_at', 'is', null);
     else q = q.is('archived_at', null);
@@ -41,7 +53,7 @@ export default async function handler(req, res) {
       const s = String(search).trim();
       q = q.or(`first_name.ilike.%${s}%,last_name.ilike.%${s}%,company_name.ilike.%${s}%,email.ilike.%${s}%,phone.ilike.%${s}%`);
     }
-    const { data: customers, error } = await q;
+    const { data: customers, count: total, error } = await q;
     if (error) throw error;
 
     const ids = (customers || []).map(c => c.id);
@@ -79,7 +91,14 @@ export default async function handler(req, res) {
       };
     });
 
-    return res.status(200).json({ customers: enriched });
+    const totalCount = total || 0;
+    return res.status(200).json({
+      customers   : enriched,
+      total       : totalCount,
+      page,
+      page_size   : pageSize,
+      total_pages : Math.ceil(totalCount / pageSize),
+    });
   } catch (err) {
     console.error('[sales-customers]', err.message);
     return res.status(500).json({ error: err.message });

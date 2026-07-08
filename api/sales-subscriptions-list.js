@@ -37,20 +37,46 @@ export default async function handler(req, res) {
 
   const ownedByMe = req.query?.owned_by_me === 'true';
   const status    = req.query?.status || 'all';
+  const page     = Math.max(1, parseInt(req.query?.page, 10) || 1);
+  const rawSize  = parseInt(req.query?.page_size, 10) || 50;
+  const pageSize = Math.min(500, Math.max(1, rawSize));
+  const from     = (page - 1) * pageSize;
+  const to       = from + pageSize - 1;
 
   try {
-    // 1) Subscriptions eerst (klein) — status-filter en limit direct hier.
+    // owned_by_me: prefetch de eigen deal_ids (klein), zodat we de subs-query
+    // server-side kunnen filteren op deal_id IN (…). Zonder dit zou de count
+    // niet kloppen (owned filtering gebeurde eerder client-side na de fetch).
+    let ownedDealIds = null;
+    if (ownedByMe) {
+      const { data: ownedDeals } = await supabaseAdmin
+        .from('deals').select('id').eq('sales_user_id', user.id).is('archived_at', null);
+      ownedDealIds = [...new Set((ownedDeals || []).map(d => d.id))];
+      if (ownedDealIds.length === 0) {
+        return res.status(200).json({
+          items: [], total: 0, page, page_size: pageSize, total_pages: 0,
+        });
+      }
+    }
+
+    // 1) Subscriptions eerst — status-filter, owned_by_me-filter, page/range.
     let subQ = supabaseAdmin.from('subscriptions')
-      .select('id, deal_id, description, amount, vat_percentage, term_count, start_date, end_date, teamleader_subscription_id, status, line_items')
+      .select('id, deal_id, description, amount, vat_percentage, term_count, start_date, end_date, teamleader_subscription_id, status, line_items', { count: 'exact' })
       .order('start_date', { ascending: false })
-      .limit(500);
+      .range(from, to);
     if (status && status !== 'all') subQ = subQ.eq('status', status);
-    const { data: subs, error: subErr } = await subQ;
+    if (ownedDealIds) subQ = subQ.in('deal_id', ownedDealIds);
+    const { data: subs, count: subCount, error: subErr } = await subQ;
     if (subErr) {
       console.error('[sales-subscriptions-list] subs fetch:', subErr.message);
       return res.status(500).json({ error: 'subs fetch: ' + subErr.message });
     }
-    if (!subs || !subs.length) return res.status(200).json({ items: [] });
+    if (!subs || !subs.length) {
+      return res.status(200).json({
+        items: [], total: subCount || 0, page, page_size: pageSize,
+        total_pages: Math.ceil((subCount || 0) / pageSize),
+      });
+    }
 
     // 2) Deals via de kleine dealIds-set (≤500) — géén IN-overflow meer.
     const dealIds = [...new Set(subs.map((s) => s.deal_id).filter(Boolean))];
@@ -67,14 +93,10 @@ export default async function handler(req, res) {
       for (const d of (deals || [])) dealById[d.id] = d;
     }
 
-    // 3) owned_by_me: filter subs waarvan het deal-record een matchende
-    //    sales_user_id heeft. Subs zonder deal (bv. archived) vallen sowieso
-    //    uit want dealById[sub.deal_id] === undefined.
-    let filteredSubs = subs.filter((s) => dealById[s.deal_id]);
-    if (ownedByMe) {
-      filteredSubs = filteredSubs.filter((s) => dealById[s.deal_id]?.sales_user_id === user.id);
-    }
-    if (!filteredSubs.length) return res.status(200).json({ items: [] });
+    // 3) owned_by_me wordt server-side afgehandeld via ownedDealIds. Filter
+    //    hier alleen subs zonder deal-record uit (archived deal → sub blijft
+    //    lokaal maar zonder joinbare deal-data).
+    const filteredSubs = subs.filter((s) => dealById[s.deal_id]);
 
     // 4) Klanten + entiteit-labels (kleine IN-lijsten, veilig).
     const custIds = [...new Set(Object.values(dealById).map((d) => d.customer_id).filter(Boolean))];
@@ -123,7 +145,14 @@ export default async function handler(req, res) {
       };
     });
 
-    return res.status(200).json({ items });
+    const totalCount = subCount || 0;
+    return res.status(200).json({
+      items,
+      total       : totalCount,
+      page,
+      page_size   : pageSize,
+      total_pages : Math.ceil(totalCount / pageSize),
+    });
   } catch (e) {
     console.error('[sales-subscriptions-list]', e.message);
     return res.status(500).json({ error: e.message });
