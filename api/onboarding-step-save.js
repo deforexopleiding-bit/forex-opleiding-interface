@@ -19,6 +19,7 @@
 // Response 200: { ok:true, current_step }.
 
 import { supabaseAdmin } from './supabase.js';
+import { checkRateLimit } from './_lib/rate-limit.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -49,6 +50,12 @@ export default async function handler(req, res) {
   if (!Number.isFinite(stepNum) || !Number.isInteger(stepNum) || stepNum < 0) {
     return res.status(400).json({ error: 'current_step moet een niet-negatief geheel getal zijn.' });
   }
+
+  // Security H3 — soft rate-limit per IP tegen spam. Ruimere cap dan de andere
+  // twee: klanten kunnen legitiem elke paar seconden een auto-save doen tijdens
+  // het invullen (30/min = 1 per 2s). Fail-open bij DB-fout.
+  const rl = await checkRateLimit({ req, bucket: 'onboarding-step-save', maxHits: 30, withinSeconds: 60 });
+  if (rl.limited) return res.status(429).json({ error: 'Te veel verzoeken, probeer later opnieuw.' });
 
   try {
     const { data: ob, error: obErr } = await supabaseAdmin
