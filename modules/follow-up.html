@@ -2371,10 +2371,12 @@
     .fu-tab-more.active-hidden { background: rgba(255,255,255,.13); color: #fff; }
     .fu-tab-more .ti { font-size: 15px; }
     .fu-tab-more-menu {
-      position: absolute;
-      top: calc(100% + 6px);
-      left: 0;
-      z-index: 100;
+      /* position:fixed nodig om te ontsnappen aan .fu-tabs { overflow-x:auto }
+         dat het menu anders afknipt. Top/left worden bij openen dynamisch
+         gezet via JS obv. moreBtn.getBoundingClientRect(). */
+      position: fixed;
+      top: 0; left: 0;
+      z-index: 9999;
       min-width: 240px;
       max-height: 60vh; overflow-y: auto;
       padding: 6px;
@@ -8382,7 +8384,7 @@
           <span class="status-badge ${esc(statusCls)}">${esc(statusLabel)}</span>
           <div style="opacity:0"></div>
           <div class="actions">
-            <button type="button" class="fu-lead-btn primary" data-eb-call="${esc(a.id)}" ${canCall ? '' : 'disabled'} title="${canCall ? 'Bellen via softphone' : 'Geen telefoonnummer'}"><i class="ti ti-phone-call"></i> Bel nu</button>
+            <button type="button" class="fu-lead-btn primary" data-eb-call="${esc(a.id)}" data-phone="${esc(a.phone || '')}" ${canCall ? '' : 'disabled'} title="${canCall ? 'Bellen via softphone' : 'Geen telefoonnummer'}"><i class="ti ti-phone-call"></i> Bel nu</button>
           </div>
         </div>`;
       }).join('');
@@ -9579,6 +9581,17 @@
         _rebuildMoreMenu();
         menu.hidden = false;
         btn.setAttribute('aria-expanded', 'true');
+        // Positioneer fixed obv. actuele knop-rect (ontsnapt aan .fu-tabs
+        // overflow-x:auto dat het menu anders afknipt).
+        const rect = btn.getBoundingClientRect();
+        menu.style.top = (rect.bottom + 6) + 'px';
+        // Left-clamp: als menu rechts buiten viewport valt, rechts uitlijnen.
+        const mw = menu.offsetWidth || 240;
+        let left = rect.left;
+        if (left + mw > window.innerWidth - 8) {
+          left = Math.max(8, rect.right - mw);
+        }
+        menu.style.left = left + 'px';
       }
       function _closeMoreMenu() {
         const menu = _getMoreMenu(); const btn = _getMoreBtn();
@@ -9616,30 +9629,44 @@
         const menu = _getMoreMenu();
         if (e.key === 'Escape' && menu && !menu.hidden) _closeMoreMenu();
       });
+      // Bij scroll of resize: sluit menu (positie zou anders foutlopen).
+      window.addEventListener('scroll', () => {
+        const menu = _getMoreMenu();
+        if (menu && !menu.hidden) _closeMoreMenu();
+      }, { passive: true });
+      window.addEventListener('resize', () => {
+        const menu = _getMoreMenu();
+        if (menu && !menu.hidden) _closeMoreMenu();
+      });
       console.log('[fu-tab-more] dropdown-listeners actief');
     })();
 
-    // ── Event-bellijst "Bel nu" delegation (globaal — draait onafhankelijk
-    //    van init/renders). Klik op elk .fu-eb-row [data-eb-call]-element
-    //    triggert _ebCallAttendee. Werkt ook na re-render (zoals bij tab-
-    //    switch of loadEventBellijstTab-refresh).
+    // ── Event-bellijst "Bel nu" delegation (globaal, capture-fase zodat
+    //    andere listeners de klik niet kunnen inhouden). We hangen 'em
+    //    alleen op als data-eb-call gevonden wordt — container-check
+    //    weggehaald zodat een render met een andere wrapper-id ook werkt.
+    //    Attribuut data-eb-call is uniek genoeg om de bel-knop te herkennen.
     (function setupEventBellijstDelegation() {
+      // Capture=true zodat we vóór eventuele stopPropagation elders vuren.
       document.addEventListener('click', (e) => {
-        const btn = e.target.closest('[data-eb-call]');
-        if (!btn) return;
-        const list = document.getElementById('eb-list');
-        // Alleen reageren als de knop echt in de event-bellijst zit.
-        if (!list || !list.contains(btn)) return;
-        e.preventDefault();
-        const id = btn.getAttribute('data-eb-call');
-        if (typeof _ebCallAttendee === 'function') {
-          _ebCallAttendee(id, btn);
-        } else {
-          console.error('[event-bellijst] _ebCallAttendee is niet gedefinieerd');
-          alert('Kan de belfunctie niet vinden. Herlaad de pagina.');
+        const btn = e.target && e.target.closest ? e.target.closest('[data-eb-call]') : null;
+        // Debug-log: sla informatie over de klik op zodat de gebruiker in
+        // DevTools kan zien wat er gebeurt bij een niet-werkende knop.
+        if (btn) {
+          const id = btn.getAttribute('data-eb-call');
+          console.log('[event-bellijst] klik gedetecteerd op data-eb-call btn, id=', id, 'target=', e.target?.tagName);
+          e.preventDefault();
+          if (typeof _ebCallAttendee === 'function') {
+            _ebCallAttendee(id, btn);
+          } else {
+            console.error('[event-bellijst] _ebCallAttendee niet gedefinieerd — probeer tel-fallback');
+            const phone = btn.dataset?.phone;
+            if (phone) window.location.href = 'tel:' + phone;
+            else alert('Belfunctie niet gevonden. Herlaad de pagina.');
+          }
         }
-      });
-      console.log('[event-bellijst] click-delegation actief');
+      }, true);
+      console.log('[event-bellijst] click-delegation actief (capture-fase)');
     })();
 
     init();
