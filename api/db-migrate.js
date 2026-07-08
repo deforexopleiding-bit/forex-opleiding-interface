@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { supabase, verifyAdmin } from './supabase.js';
 
 // Verwachte schema's — pas dit aan als de tabellen uitbreiden
 const EXPECTED = {
@@ -246,6 +246,14 @@ async function colExists(table, col) {
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  // K2 — super_admin-only gate vóór alle DB-actie. Endpoint kan schema
+  // wijzigen (ALTER TABLE / CREATE TABLE via RPC). Client-side auto-trigger
+  // in taken.html is verwijderd; alleen bewuste super_admin-calls mogen door.
+  const admin = await verifyAdmin(req);
+  if (!admin || admin.profile?.role !== 'super_admin') {
+    return res.status(403).json({ error: 'Forbidden' });
   }
 
   const report = { tables: {}, missing: [], missing_tables: [], sql_to_run: '', ok: false };
