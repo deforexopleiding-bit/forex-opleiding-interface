@@ -61,13 +61,19 @@ export default async function handler(req, res) {
     } catch (e) { console.warn('[deals-search ref]', e?.message); }
 
     // 2) Klanten matchen; hun deals meenemen.
+    // Multi-woord support: 'Ibrahim Dorman' matcht first_name~Ibrahim
+    // AND last_name~Dorman. Meerdere .or()-calls op dezelfde query =
+    // AND tussen de groepen (patroon uit inbox-attendee-search.js
+    // regel ~58-64). Bij één woord identiek gedrag aan voorheen.
     let customerIds = [];
     try {
-      const { data: custs } = await supabaseAdmin
-        .from('customers')
-        .select('id')
-        .or(`first_name.ilike.${pattern},last_name.ilike.${pattern},company_name.ilike.${pattern},email.ilike.${pattern}`)
-        .limit(limit);
+      const words = safe.split(/\s+/).filter(Boolean);
+      let custQuery = supabaseAdmin.from('customers').select('id');
+      for (const w of words) {
+        const pat = `%${w}%`;
+        custQuery = custQuery.or(`first_name.ilike.${pat},last_name.ilike.${pat},company_name.ilike.${pat},email.ilike.${pat}`);
+      }
+      const { data: custs } = await custQuery.limit(limit);
       customerIds = (custs || []).map((c) => c.id);
     } catch (e) { console.warn('[deals-search cust]', e?.message); }
 
