@@ -29,14 +29,16 @@ export const ENGAGEMENT_GATE_KEYS = ['motivatie', 'uitspraak'];
 
 export const GRATIS_INFO_VALUE = 'gratis_info';
 
-// Masterplan-tekst per copy_tier (zoals afgesproken Blok 2 PR 2).
-// API stuurt copy_text direct mee in de submit-response zodat de frontend
-// niet zelf hoeft te mappen en wij de tekst kunnen kalibreren zonder
-// frontend-deploy.
+// Masterplan-tekst per copy_tier (Blok C — Aanpak A: één uniform event-type).
+// De scoring blijft intern draaien (routing_result + copy_tier worden nog
+// berekend en opgeslagen), maar de deelnemer ziet één neutrale bevestiging
+// die past bij de uniforme "Masterclass event in Gent". De frontend
+// (modules/assessment.html) toont daarnaast zijn eigen uniforme bevestiging;
+// deze COPY_BY_TIER blijft als API-response-veld voor backward-compat.
 export const COPY_BY_TIER = {
-  high: 'Op basis van jouw antwoorden kom je in aanmerking voor onze exclusieve Forex Masterclass Gevorderd. Tijdens deze masterclass analyseren we samen waarom je ondanks jouw kennis nog niet de gewenste resultaten behaalt.',
-  mid:  'Je hebt duidelijk interesse in trading en bent bezig met jouw ontwikkeling. Op dit moment denken we dat Forex Masterclass Basis de meeste waarde zal bieden.',
-  low:  'Bedankt voor jouw interesse. Op basis van jouw antwoorden denken we dat het momenteel waardevoller is om eerst verder te bouwen aan jouw fundering. We raden daarom aan om te starten met Forex Masterclass Basis.',
+  high:       'Je bent nu officieel aangemeld voor de Masterclass event in Gent. Je ontvangt per WhatsApp en e-mail alle informatie over het event.',
+  mid:        'Je bent nu officieel aangemeld voor de Masterclass event in Gent. Je ontvangt per WhatsApp en e-mail alle informatie over het event.',
+  low:        'Je bent nu officieel aangemeld voor de Masterclass event in Gent. Je ontvangt per WhatsApp en e-mail alle informatie over het event.',
   incomplete: 'Gelieve de ontbrekende onderdelen aan te vullen zodat we jouw aanvraag verder kunnen verwerken.',
 };
 

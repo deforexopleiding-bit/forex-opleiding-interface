@@ -247,14 +247,11 @@ export default async function handler(req, res) {
       effectiveAssessmentId = attendee.assessment_response_id;
     }
 
-    // Niveau-check tegen target.niveau (alleen als er een effectieve
-    // routing is — signup-first pad zonder assessment slaat dit over).
-    if (effectiveRouting && !isNiveauMatch(effectiveRouting, targetEvent.niveau)) {
-      return res.status(409).json({
-        error: `Niveau van event komt niet overeen met jouw resultaat (${effectiveRouting} vs ${targetEvent.niveau}).`,
-        code : 'NIVEAU_MISMATCH',
-      });
-    }
+    // Blok C — Aanpak A: niveau-check vervalt. Elk (Masterclass-)event mag
+    // gekozen worden ongeacht routing_result. De overige validaties
+    // (assessment hoort bij deelnemer, capaciteit, signups_closed) blijven
+    // intact. effectiveRouting blijft opgeslagen voor rapportage; het stuurt
+    // alleen geen keuze meer.
 
     // 6) Same-event: NO_OP óf assessment-LINK (Fase 2c).
     //

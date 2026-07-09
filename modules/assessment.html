@@ -472,25 +472,21 @@
       // Fallback-tekst per tier - API stuurt copy_text mee maar als die om
       // welke reden dan ook ontbreekt, vallen we hierop terug zodat de
       // gebruiker nooit een leeg scherm krijgt.
+      // Blok C — Aanpak A: uniforme bevestigingstekst ongeacht tier.
+      // De scoring blijft intern draaien (routing_result + copy_tier
+      // worden nog opgeslagen) maar stuurt geen advies meer. Iedereen
+      // ziet dezelfde tekst zodra 'ie de vragenlijst heeft ingevuld en
+      // een datum kiest.
+      const UNIFORM_CONFIRM = {
+        badge: 'Aangemeld',
+        title: 'Je bent aangemeld voor de Masterclass event in Gent',
+        copy : 'Je bent nu officieel aangemeld voor de Masterclass event in Gent. Je ontvangt per WhatsApp en e-mail nu alle informatie omtrent het event. Hou dit goed in de gaten en tot snel!',
+        followup: '',
+      };
       const TIER_FALLBACK = {
-        high: {
-          badge: 'Match: gevorderd',
-          title: 'Je komt in aanmerking voor de Forex Masterclass Gevorderd',
-          copy : 'Op basis van jouw antwoorden kom je in aanmerking voor onze exclusieve Forex Masterclass Gevorderd. Tijdens deze masterclass analyseren we samen waarom je ondanks jouw kennis nog niet de gewenste resultaten behaalt.',
-          followup: 'We nemen binnenkort persoonlijk contact met je op met de details.',
-        },
-        mid: {
-          badge: 'Match: basis',
-          title: 'Forex Masterclass Basis past het beste bij jou',
-          copy : 'Je hebt duidelijk interesse in trading en bent bezig met jouw ontwikkeling. Op dit moment denken we dat Forex Masterclass Basis de meeste waarde zal bieden.',
-          followup: '',
-        },
-        low: {
-          badge: 'Aanbeveling: bouw je fundering',
-          title: 'We raden Forex Masterclass Basis aan',
-          copy : 'Bedankt voor jouw interesse. Op basis van jouw antwoorden denken we dat het momenteel waardevoller is om eerst verder te bouwen aan jouw fundering. We raden daarom aan om te starten met Forex Masterclass Basis.',
-          followup: '',
-        },
+        high: UNIFORM_CONFIRM,
+        mid : UNIFORM_CONFIRM,
+        low : UNIFORM_CONFIRM,
         incomplete: {
           badge: 'Inzending incompleet',
           title: 'We hebben nog wat aanvulling nodig',
@@ -815,11 +811,13 @@
         // "Blijf bij m'n keuze"-blok: alleen tonen bij choice-token flow zodra
         // event-choice-get het huidige event teruggeeft (current_event_id != null).
         await maybeShowKeepCurrent();
-        $pickerSub.textContent = niveau === 'gevorderd'
-          ? 'Beschikbare datums voor de gevorderd-masterclass:'
-          : 'Beschikbare datums voor de basis-masterclass:';
+        // Blok C — Aanpak A: één Masterclass event-type. Niveau-tekst
+        // vervalt; iedereen ziet dezelfde datumlijst.
+        $pickerSub.textContent = 'Beschikbare datums voor de Masterclass event in Gent:';
         try {
-          const r = await fetch('/api/assessment-open-events?niveau=' + encodeURIComponent(niveau));
+          // Niveau blijft in de query voor backward-compat maar wordt
+          // server-side niet meer als filter gebruikt.
+          const r = await fetch('/api/assessment-open-events?niveau=' + encodeURIComponent(niveau || ''));
           if (!r.ok) throw new Error('HTTP ' + r.status);
           const j = await r.json();
           const events = Array.isArray(j.events) ? j.events : [];
@@ -828,7 +826,7 @@
             $pickerEmpty.hidden = false;
             return;
           }
-          const niveauLabel = niveau === 'gevorderd' ? 'Gevorderd' : 'Basis';
+          const niveauLabel = 'Masterclass event in Gent';
           $eventList.innerHTML = events.map((ev) => {
             const dateLabel = formatDateLabel(ev.starts_at);
             const cap = ev.capacity;
