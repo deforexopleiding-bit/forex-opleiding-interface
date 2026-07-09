@@ -232,6 +232,7 @@ export async function runEventsCompleteCore({ userId, body }) {
       const followDate = a.followup.follow_up_date || null;
       const ownerId    = a.followup.owner_id || DEFAULT_FOLLOWUP_OWNER_ID || null;
 
+      let followupIdForLead = null;
       try {
         const { data: existing, error: selErr } = await supabaseAdmin
           .from('event_followups')
@@ -246,14 +247,16 @@ export async function runEventsCompleteCore({ userId, body }) {
             .update({ event_id: eventId, reason: reasonText, follow_up_date: followDate, owner_id: ownerId })
             .eq('id', existing.id);
           if (upErr) summary.warnings.push(`followup-update ${a.attendee_id}: ${upErr.message}`);
-          else summary.followups_updated += 1;
+          else { summary.followups_updated += 1; followupIdForLead = existing.id; }
         } else {
-          const { error: insErr } = await supabaseAdmin
+          const { data: insData, error: insErr } = await supabaseAdmin
             .from('event_followups')
             .insert({
               attendee_id: a.attendee_id, event_id: eventId, reason: reasonText,
               follow_up_date: followDate, owner_id: ownerId, status: 'open', created_by: userId,
-            });
+            })
+            .select('id')
+            .maybeSingle();
           if (insErr) {
             if (insErr.code === '23505') {
               const { data: again } = await supabaseAdmin
@@ -265,18 +268,129 @@ export async function runEventsCompleteCore({ userId, body }) {
                   .update({ event_id: eventId, reason: reasonText, follow_up_date: followDate, owner_id: ownerId })
                   .eq('id', again.id);
                 if (upErr2) summary.warnings.push(`followup-race-update ${a.attendee_id}: ${upErr2.message}`);
-                else summary.followups_updated += 1;
+                else { summary.followups_updated += 1; followupIdForLead = again.id; }
               }
             } else {
               summary.warnings.push(`followup-insert ${a.attendee_id}: ${insErr.message}`);
             }
           } else {
             summary.followups_created += 1;
+            followupIdForLead = insData?.id || null;
           }
         }
       } catch (e) {
         console.error('[events-complete-core followup]', a.attendee_id, e?.message || e);
         summary.warnings.push(`followup ${a.attendee_id}: ${e?.message || 'unknown'}`);
+      }
+
+      // Punt A: ook meteen een follow_up_leads-lead (source='event')
+      // borgen zodat de opvolging automatisch in de Werklijst-cockpit
+      // verschijnt (met 'Follow-up event'-badge via source_ref.is_event_followup).
+      // Idempotent: match op source_ref.attendee_id (naam-basis) of
+      // (customer_id, source='event') met open lead_status. Bij bestaande
+      // open lead → update terugbel_datum + reason. Fail-soft bij 42P01.
+      try {
+        // Attendee-basis nodig voor naam/email/phone/customer_id.
+        const { data: att, error: attErr } = await supabaseAdmin
+          .from('event_attendees')
+          .select('id, customer_id, first_name, last_name, email, phone')
+          .eq('id', a.attendee_id)
+          .maybeSingle();
+        if (attErr) throw new Error('att fetch: ' + attErr.message);
+        if (!att) throw new Error('attendee not found');
+
+        const nameParts = [att.first_name, att.last_name].filter(Boolean).map((s) => String(s).trim()).filter(Boolean);
+        const leadName = nameParts.join(' ').trim() || att.email || '(onbekend)';
+        const leadRow = {
+          customer_id       : att.customer_id || null,
+          source            : 'event',
+          lead_name         : leadName,
+          lead_email        : att.email || null,
+          lead_phone        : att.phone || null,
+          lead_status       : 'nieuw',
+          terugbel_datum    : followDate,
+          source_ref        : {
+            event_id       : eventId,
+            attendee_id    : att.id,
+            is_event_followup: true,
+            ...(followupIdForLead ? { followup_id: followupIdForLead } : {}),
+            ...(reasonText ? { reason: reasonText } : {}),
+          },
+          created_by_user_id: userId,
+        };
+
+        // 1) Zoek eerst een bestaande open event-lead voor deze attendee
+        //    (via source_ref.attendee_id → dekt zowel customer_id- als
+        //    naam-basis-varianten). Zo voorkomen we duplicates die het
+        //    unique-index-pad niet zou vangen bij customer_id=NULL.
+        let existingLeadId = null;
+        try {
+          const { data: byAtt } = await supabaseAdmin
+            .from('follow_up_leads')
+            .select('id, lead_status, source_ref')
+            .eq('source', 'event')
+            .filter('source_ref->>attendee_id', 'eq', att.id)
+            .not('lead_status', 'in', '(verlengd,verloren)')
+            .limit(1);
+          if (byAtt && byAtt[0]) existingLeadId = byAtt[0].id;
+        } catch (_) {}
+
+        if (existingLeadId) {
+          const { error: leadUpErr } = await supabaseAdmin
+            .from('follow_up_leads')
+            .update({
+              terugbel_datum: followDate,
+              source_ref    : leadRow.source_ref,
+              lead_email    : att.email || null,
+              lead_phone    : att.phone || null,
+            })
+            .eq('id', existingLeadId);
+          if (leadUpErr) summary.warnings.push(`event-lead update ${a.attendee_id}: ${leadUpErr.message}`);
+          else {
+            summary.event_leads_updated = (summary.event_leads_updated || 0) + 1;
+          }
+        } else {
+          const { error: leadInsErr } = await supabaseAdmin
+            .from('follow_up_leads')
+            .insert(leadRow);
+          if (leadInsErr) {
+            if (leadInsErr.code === '42P01') {
+              summary.warnings.push(`event-lead ${a.attendee_id}: follow_up_leads ontbreekt (MIGRATION_REQUIRED)`);
+            } else if (leadInsErr.code === '23505') {
+              // Unique-index (customer_id, source) WHERE lead_status NOT IN
+              // (verlengd,verloren). Zoek de bestaande en update.
+              try {
+                const { data: existLead } = await supabaseAdmin
+                  .from('follow_up_leads')
+                  .select('id')
+                  .eq('source', 'event')
+                  .eq('customer_id', att.customer_id)
+                  .not('lead_status', 'in', '(verlengd,verloren)')
+                  .order('created_at', { ascending: false })
+                  .limit(1);
+                if (existLead && existLead[0]) {
+                  await supabaseAdmin
+                    .from('follow_up_leads')
+                    .update({
+                      terugbel_datum: followDate,
+                      source_ref    : leadRow.source_ref,
+                      lead_email    : att.email || null,
+                      lead_phone    : att.phone || null,
+                    })
+                    .eq('id', existLead[0].id);
+                  summary.event_leads_updated = (summary.event_leads_updated || 0) + 1;
+                }
+              } catch (_) {}
+            } else {
+              summary.warnings.push(`event-lead insert ${a.attendee_id}: ${leadInsErr.message}`);
+            }
+          } else {
+            summary.event_leads_created = (summary.event_leads_created || 0) + 1;
+          }
+        }
+      } catch (e) {
+        console.error('[events-complete-core event-lead]', a.attendee_id, e?.message || e);
+        summary.warnings.push(`event-lead ${a.attendee_id}: ${e?.message || 'unknown'}`);
       }
     }
 

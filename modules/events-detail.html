@@ -364,7 +364,7 @@
 <div class="modal-overlay hidden" id="evCompleteModal" role="dialog" aria-modal="true">
   <div class="modal-card" style="max-width:720px;width:100%;max-height:calc(100vh - 40px)">
     <div class="modal-header">
-      <div class="modal-title">Event afronden</div>
+      <div class="modal-title" id="evCompleteModalTitle">Event afronden</div>
       <button class="modal-close" type="button" onclick="closeEvCompleteModal()">&#x2715;</button>
     </div>
     <div class="modal-body" style="overflow-y:auto">
@@ -2164,6 +2164,14 @@ async function openEvCompleteModal() {
   _evCompleteAllMentors = [];
   renderEvCompleteExpenses();
   const sumEl = document.getElementById('evcSummary'); if (sumEl) sumEl.value = '';
+  // Punt C: titel + submit-knop meebewegen met afgerond-status.
+  const isCompletedNow = !!(state?.event?.completed_at);
+  const titleEl = document.getElementById('evCompleteModalTitle');
+  const submitBtn = document.getElementById('evCompleteSubmit');
+  if (titleEl) titleEl.textContent = isCompletedNow ? 'Afronding bekijken / wijzigen' : 'Event afronden';
+  if (submitBtn) submitBtn.innerHTML = isCompletedNow
+    ? '<i class="ti ti-checks"></i> Is afgerond'
+    : '<i class="ti ti-checks"></i> Event afronden';
   document.getElementById('evCompleteModal').classList.remove('hidden');
 
   try {
