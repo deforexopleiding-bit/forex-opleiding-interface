@@ -40,7 +40,11 @@ export default async function handler(req, res) {
   if (q.length < 2) return res.status(200).json({ items: [] });
 
   const safe = q.replace(/[%,]/g, '');
-  const pattern = `*${safe}*`;
+  // PostgREST ilike-filter in .or()-string gebruikt '%' als wildcard,
+  // NIET '*'. Met '*' zochten we letterlijk op sterretjes en vonden
+  // niks (bug in initiele Blok B). Consistent met sales-customers.js
+  // en inbox-attendee-search.js die al '%' gebruiken.
+  const pattern = `%${safe}%`;
 
   try {
     // 1) Deals matchen op reference / tl_quotation_id direct.

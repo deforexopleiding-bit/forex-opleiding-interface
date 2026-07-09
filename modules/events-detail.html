@@ -2211,26 +2211,43 @@ async function openEvCompleteModal() {
 // modal om ALLE deals te doorzoeken (niet beperkt tot eigen klant) en
 // er eentje aan de attendee te hangen. Endpoint:
 // /api/deals-search + /api/events-attendee-link-deal.
-let _evcLinkAttendeeId = null;
+let _evcLinkAttendeeId  = null;
+let _evcLinkAttendeeCid = null;   // customer_id van de attendee — voor 'zelfde klant'-markering
 let _evcLinkSearchTimer = null;
-function _evcOpenLinkSaleModal(attendeeId) {
-  _evcLinkAttendeeId = attendeeId;
+function _evcOpenLinkSaleModal(attendeeId, ctx) {
+  _evcLinkAttendeeId  = attendeeId;
+  _evcLinkAttendeeCid = ctx?.customer_id || null;
   const m = document.getElementById('evcLinkSaleModal');
   if (!m) return;
   const input = document.getElementById('evcLinkSaleSearch');
   const list  = document.getElementById('evcLinkSaleResults');
-  if (input) input.value = '';
-  if (list)  list.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding:8px">Typ minimaal 2 tekens om te zoeken…</div>';
+  const name  = String(ctx?.name || '').trim();
+  const email = String(ctx?.email || '').trim();
+  // Auto-suggest: klantnaam heeft voorkeur boven e-mail (breder match-
+  // veld in de deal-zoeker). Als beide leeg zijn valt de gebruiker
+  // terug op vrij typen.
+  const preQ = name || email;
+  if (input) input.value = preQ;
+  if (list) {
+    list.innerHTML = preQ
+      ? '<div style="font-size:12px;color:var(--text-dim);padding:8px">Voorgestelde deals voor "' + esc(preQ) + '" laden…</div>'
+      : '<div style="font-size:12px;color:var(--text-dim);padding:8px">Typ minimaal 2 tekens om te zoeken…</div>';
+  }
   m.classList.remove('hidden');
-  try { input?.focus(); } catch (_) {}
+  try { input?.focus(); if (input && preQ) input.select(); } catch (_) {}
+  if (preQ && preQ.length >= 2) {
+    _evcRunDealSearch(preQ, { suggested: true });
+  }
 }
 function _evcCloseLinkSaleModal() {
-  _evcLinkAttendeeId = null;
+  _evcLinkAttendeeId  = null;
+  _evcLinkAttendeeCid = null;
   document.getElementById('evcLinkSaleModal')?.classList.add('hidden');
 }
-async function _evcRunDealSearch(q) {
+async function _evcRunDealSearch(q, opts) {
   const list = document.getElementById('evcLinkSaleResults');
   if (!list) return;
+  const suggested = !!(opts && opts.suggested);
   if (!q || q.length < 2) {
     list.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding:8px">Typ minimaal 2 tekens om te zoeken…</div>';
     return;
@@ -2245,21 +2262,45 @@ async function _evcRunDealSearch(q) {
       list.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding:8px">Geen deals gevonden voor "' + esc(q) + '".</div>';
       return;
     }
-    list.innerHTML = items.map((it) => {
+    // Sorteer 'zelfde klant' bovenaan als attendee.customer_id bekend is.
+    const sameCid = _evcLinkAttendeeCid;
+    if (sameCid) {
+      items.sort((a, b) => {
+        const aSame = a.customer_id === sameCid ? 1 : 0;
+        const bSame = b.customer_id === sameCid ? 1 : 0;
+        return bSame - aSame;
+      });
+    }
+    const header = suggested
+      ? `<div style="font-size:11.5px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin:2px 4px 8px">Voorgestelde deals voor deze klant</div>`
+      : '';
+    const rowsHtml = items.map((it) => {
       const dt = it.created_at ? new Date(it.created_at).toLocaleDateString('nl-NL', { day:'numeric', month:'short', year:'numeric' }) : '';
       const eur = it.total_incl != null ? _evcEur(it.total_incl) : '—';
       const st = it.tl_quotation_status || '—';
       const ref = it.reference || it.tl_quotation_id || String(it.id).slice(0, 8);
-      return `<button type="button" class="evc-link-pick" data-deal="${esc(it.id)}" style="width:100%;text-align:left;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;margin-bottom:6px;display:grid;grid-template-columns:1fr auto;gap:6px">
+      const isSameCust = sameCid && it.customer_id === sameCid;
+      const sameBadge = isSameCust
+        ? '<span title="Deze deal hoort bij dezelfde klant als de deelnemer" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;padding:1px 7px;border-radius:99px;font-size:10px;font-weight:700;background:rgba(5,150,105,0.20);color:#059669"><i class="ti ti-user-check"></i> zelfde klant</span>'
+        : '';
+      // Verhoogd oppervlak t.o.v. de modal-body (--bg-elev) + duidelijke
+      // hover-state (--bg-elev-2) zodat elke rij als aparte klikbare kaart
+      // leest. Same-customer krijgt een extra groene rand-accent links.
+      const borderAccent = isSameCust ? 'border-left:3px solid #059669;' : '';
+      return `<button type="button" class="evc-link-pick" data-deal="${esc(it.id)}" style="width:100%;text-align:left;padding:10px 12px;border:1px solid var(--border);${borderAccent}border-radius:8px;background:var(--bg-elev);color:var(--text);cursor:pointer;margin-bottom:8px;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;transition:background .12s,border-color .12s">
         <div style="min-width:0">
-          <div style="font-size:12.5px;font-weight:600">${esc(it.customer_name)}</div>
-          <div style="font-size:11px;color:var(--text-dim)">${esc(ref)} · ${esc(st)}${dt ? ' · ' + esc(dt) : ''}</div>
+          <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(it.customer_name)}${sameBadge}</div>
+          <div style="font-size:11.5px;color:var(--text-dim);margin-top:2px">${esc(ref)} · ${esc(st)}${dt ? ' · ' + esc(dt) : ''}</div>
         </div>
-        <div style="font-size:12.5px;font-weight:700;color:var(--text)">${esc(eur)}</div>
+        <div style="font-size:13px;font-weight:700;color:var(--text);white-space:nowrap">${esc(eur)}</div>
       </button>`;
     }).join('');
+    list.innerHTML = header + rowsHtml;
     list.querySelectorAll('.evc-link-pick').forEach((btn) => {
       btn.addEventListener('click', () => _evcLinkDeal(btn.getAttribute('data-deal'), btn));
+      // Hover-boost — inline zodat geen aparte CSS-klasse nodig is.
+      btn.addEventListener('mouseenter', () => { btn.style.background = 'var(--bg-elev-2)'; btn.style.borderColor = 'var(--accent-cyan,#0891b2)'; });
+      btn.addEventListener('mouseleave', () => { btn.style.background = 'var(--bg-elev)';   btn.style.borderColor = 'var(--border)'; });
     });
   } catch (e) {
     console.error('[deals-search]', e);
@@ -2294,18 +2335,25 @@ async function _evcLinkDeal(dealId, btnEl) {
 }
 
 // Delegated click voor 'Sale koppelen'-knop op attendee-rijen.
+// Attendee-context (naam/email/customer_id) uit data-* zodat de modal
+// meteen suggesties kan laden en 'zelfde klant' kan markeren.
 document.addEventListener('click', (ev) => {
   const btn = ev.target?.closest?.('.evc-link-sale');
   if (btn) {
     ev.preventDefault();
-    _evcOpenLinkSaleModal(btn.getAttribute('data-att'));
+    _evcOpenLinkSaleModal(btn.getAttribute('data-att'), {
+      name       : btn.getAttribute('data-name')  || '',
+      email      : btn.getAttribute('data-email') || '',
+      customer_id: btn.getAttribute('data-cid')   || null,
+    });
   }
 });
 document.addEventListener('input', (ev) => {
   if (ev.target && ev.target.id === 'evcLinkSaleSearch') {
     clearTimeout(_evcLinkSearchTimer);
     const q = ev.target.value.trim();
-    _evcLinkSearchTimer = setTimeout(() => _evcRunDealSearch(q), 250);
+    // Handmatig typen = geen 'Voorgestelde deals'-header meer.
+    _evcLinkSearchTimer = setTimeout(() => _evcRunDealSearch(q, { suggested: false }), 250);
   }
 });
 
@@ -2353,7 +2401,10 @@ function renderEvCompleteAttendees(list) {
       // Geen sale? Toon 'Sale koppelen'-knop zodat de gebruiker
       // handmatig een deal aan deze attendee kan hangen. Endpoint:
       // /api/events-attendee-link-deal; deal-zoeker via /api/deals-search.
-      saleBadge = `<button type="button" class="evc-link-sale" data-att="${esc(a.id)}" title="Koppel handmatig een deal aan deze deelnemer" style="margin-left:6px;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;background:transparent;color:var(--accent-cyan,#0891b2);border:1px dashed var(--accent-cyan,#0891b2);cursor:pointer;display:inline-flex;align-items:center;gap:4px"><i class="ti ti-link"></i> Sale koppelen</button>`;
+      // data-name/data-email/data-cid worden opgepikt door de delegated
+      // click-handler en doorgegeven aan _evcOpenLinkSaleModal → auto-
+      // suggestie op basis van de attendee.
+      saleBadge = `<button type="button" class="evc-link-sale" data-att="${esc(a.id)}" data-name="${esc(naam)}" data-email="${esc(a.email || '')}" data-cid="${esc(a.customer_id || '')}" title="Koppel handmatig een deal aan deze deelnemer" style="margin-left:6px;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;background:transparent;color:var(--accent-cyan,#0891b2);border:1px dashed var(--accent-cyan,#0891b2);cursor:pointer;display:inline-flex;align-items:center;gap:4px"><i class="ti ti-link"></i> Sale koppelen</button>`;
     }
     return `
       <div class="evc-att-row" data-att="${esc(a.id)}" style="padding:10px 0;border-bottom:1px solid var(--border)">
