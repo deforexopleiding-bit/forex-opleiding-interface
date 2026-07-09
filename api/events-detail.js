@@ -158,6 +158,8 @@ export default async function handler(req, res) {
         signups_closed_at:         ev.signups_closed_at,
         signups_closed_reason:     ev.signups_closed_reason,
         signups_closed_by_user_id: ev.signups_closed_by_user_id,
+        completed_at:              ev.completed_at,
+        completed_by:              ev.completed_by,
         created_by_user_id:        ev.created_by_user_id,
         created_at:                ev.created_at,
         updated_at:                ev.updated_at,
