@@ -38,6 +38,30 @@ function buildQuotationTitle(deal, trajectLabel) {
   return trajectLabel || null;
 }
 
+// Nette offerte-titel op basis van de trajectnaam. Detecteert het type
+// (Membership / 1-op-1) en de looptijd ("(X maanden)") en levert één
+// schone label:
+//   "Membership (X maanden)" of "1-op-1 begeleidingstraject (X maanden)"
+// Onbekende trajecten (geen match op keyword) → fallback op de rauwe
+// trajectnaam zodat we nooit een lege of misleidende titel produceren.
+// De looptijd wordt genormaliseerd naar kleine letter ("maanden").
+function formatQuotationLabelFromTraject(trajectName) {
+  const raw = String(trajectName || '').trim();
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+  const m = raw.match(/\((\d+)\s*maanden?\)/i);
+  const months = m ? Number(m[1]) : null;
+  const suffix = months ? ` (${months} ${months === 1 ? 'maand' : 'maanden'})` : '';
+  if (lower.includes('membership')) {
+    return `Membership${suffix}`;
+  }
+  if (lower.includes('1-op-1') || lower.includes('begeleiding')) {
+    return `1-op-1 begeleidingstraject${suffix}`;
+  }
+  // Onbekend type → gebruik trajectnaam zoals 'ie is (geen dubbeling).
+  return raw;
+}
+
 // Formatteert YYYY-MM-DD → dd-mm-jjjj zonder UTC-verschuiving (kale datum).
 function _fmtDateNL(iso) {
   const s = String(iso || '');
@@ -145,14 +169,20 @@ export async function pushQuotationToTl(dealId) {
     // Bedrijfsentiteit: gekozen department (deal) → env → eerste actieve.
     const departmentId = await resolveDepartmentId(deal.tl_department_id);
 
-    // Traject-label (optioneel): "Traject > Variant".
+    // Traject-label (optioneel): nette omschrijving op basis van de
+    // trajectnaam. Historisch was dit "Traject > Variant", maar omdat
+    // traject en variant identiek heten ontstond dubbeling zoals
+    // "1-op-1 begeleiding (12 maanden) > 1-op-1 begeleiding (12 maanden)".
+    // We detecteren nu het type op de trajectnaam en bouwen één schone
+    // titel. Onbekende trajecten → fallback op traject.name zonder
+    // variant-suffix (geen dubbeling meer).
     let trajectLabel = null;
     if (deal.traject_variant_id) {
       const { data: variant } = await supabaseAdmin.from('traject_variants')
         .select('name, traject_id').eq('id', deal.traject_variant_id).maybeSingle();
       if (variant) {
         const { data: traject } = await supabaseAdmin.from('trajects').select('name').eq('id', variant.traject_id).maybeSingle();
-        trajectLabel = [traject?.name, variant.name].filter(Boolean).join(' > ');
+        trajectLabel = formatQuotationLabelFromTraject(traject?.name || null);
       }
     }
 
