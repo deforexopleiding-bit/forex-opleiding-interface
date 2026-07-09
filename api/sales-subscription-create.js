@@ -13,7 +13,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
-import { getOrCreateContact } from './_lib/teamleader-contact.js';
+import { getOrCreateTlCustomer } from './_lib/teamleader-contact.js';
 import { taxRateIdFor } from './_lib/teamleader-quotation.js';
 import { createTlInvoice } from './_lib/invoice-create-core.js';
 
@@ -240,8 +240,25 @@ export default async function handler(req, res) {
     const tok = sync_to_tl ? await getActiveToken() : null;
     if (sync_to_tl && tok) {
       const { data: customer } = await supabaseAdmin.from('customers').select('*').eq('id', deal.customer_id).maybeSingle();
-      let tlContactId = null;
-      try { tlContactId = await getOrCreateContact(customer); } catch (e) { console.error('[sub-create] contact:', e.message); }
+      // B2B (is_company=true) → companies-ref; B2C → contacts-ref. Één
+      // helper doet beide (getOrCreateTlCustomer delegeert intern naar
+      // getOrCreateContact voor B2C, en gebruikt companies.add + bewaart
+      // tl_company_id voor B2B). Voor B2C is het gedrag identiek aan de
+      // oude getOrCreateContact-call: dezelfde tl_contact_id, dezelfde
+      // customers.tl_contact_id-write, geen regressie.
+      let tlCustomerRef = null;
+      let tlCustomerResolveError = null;
+      try {
+        tlCustomerRef = await getOrCreateTlCustomer(customer);
+        // Sanity: ref moet {type, id} met beide gevuld zijn.
+        if (!tlCustomerRef || !tlCustomerRef.id) {
+          tlCustomerResolveError = 'TL customer-ref onvolledig (id ontbreekt) na getOrCreateTlCustomer';
+          tlCustomerRef = null;
+        }
+      } catch (e) {
+        tlCustomerResolveError = 'TL customer-resolve mislukt: ' + (e?.message || 'onbekend');
+        console.error('[sub-create] customer-resolve:', tlCustomerResolveError);
+      }
 
       // Definitieve billing_cycle-shape (uit live discovery + TL-docs):
       //   periodicity.unit = 'month' (NIET 'monthly'); period (NIET quantity).
@@ -260,6 +277,18 @@ export default async function handler(req, res) {
       for (let i = 0; i < subRows.length; i++) {
         const row = subRows[i];
         const lines = subsNorm[i]._lines;
+        // Als de TL-customer-resolve gefaald is: markeer deze sub als
+        // tl-failed met dezelfde reden — geen stille skip meer waarbij
+        // de wizard-toast 'alles goed' zei terwijl teamleader_subscription_id
+        // leeg bleef (root cause voor B2B-klanten met tl_company_id).
+        if (!tlCustomerRef) {
+          tlResults.push({
+            sub_id : row.id,
+            success: false,
+            error  : tlCustomerResolveError || 'TL customer-ref ontbreekt (is_company + tl_company_id resolve faalde)',
+          });
+          continue;
+        }
         // Tax-rate is in de pre-flight al gevalideerd → hier veilig.
         // LET OP intracommunautair: vat_percentage in DB blijft het echte tarief
         // (bv. 21) voor administratie-helderheid; taxRateIdFor(.., sale_type)
@@ -271,7 +300,10 @@ export default async function handler(req, res) {
           tax_rate_id: taxRateIdFor(li.vat_percentage, departmentId, deal.sale_type),
         }));
         const body = {
-          invoicee: { customer: { type: 'contact', id: tlContactId } },
+          // B2B (is_company=true) → { type: 'company', id: tl_company_id };
+          // B2C → { type: 'contact', id: tl_contact_id }. tlCustomerRef is
+          // door getOrCreateTlCustomer opgebouwd volgens is_company.
+          invoicee: { customer: { type: tlCustomerRef.type, id: tlCustomerRef.id } },
           department_id: departmentId,
           starts_on: row.start_date,
           title: row.description || 'Abonnement',
