@@ -19,7 +19,19 @@ import { createNotification } from './notify.js';
 
 const UUID_RE     = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ATT_SET     = new Set(['aanwezig', 'no_show', 'afgemeld']);
-const OUTCOME_SET = new Set(['opvolgen', 'geen_interesse', 'nog_onbekend']);
+const OUTCOME_SET = new Set([
+  'opvolgen', 'geen_interesse', 'nog_onbekend',
+  // Uitgebreid in Blok B: sale-koppeling + twijfel-vervolg. Beide leiden
+  // NIET automatisch tot bonus-verandering; alleen 'opvolgen' + 'twijfelt_nog'
+  // triggeren een follow-up (met verplichte notitie).
+  'klant_geworden', 'twijfelt_nog',
+]);
+// Outcomes waarvoor een follow-up-record aangemaakt/bijgewerkt moet worden.
+// no_show is een aparte status, niet een outcome; die trigger blijft in
+// de aanvullende conditie hieronder staan.
+const FOLLOWUP_OUTCOMES = new Set(['opvolgen', 'twijfelt_nog']);
+// Outcomes waarbij server-side notitie (followup.reason) verplicht is.
+const REASON_REQUIRED_OUTCOMES = new Set(['opvolgen', 'twijfelt_nog']);
 const ACCEPTED    = new Set(['accepted', 'signed']);
 const BONUS_PCT   = 3;
 const DEFAULT_FOLLOWUP_OWNER_ID = process.env.DEFAULT_EVENT_FOLLOWUP_OWNER_ID || null;
@@ -153,13 +165,27 @@ export async function runEventsCompleteCore({ userId, body }) {
     }
 
     // ── 3b) Event follow-ups upsert ─────────────────────────────────────────
+    // Blok B: outcome 'twijfelt_nog' triggert ook een follow-up (analoog aan
+    // 'opvolgen'). Reason (notitie) is verplicht voor beide outcomes; server-
+    // side check hier + UI-check in events-detail. no_show blijft trigger op
+    // status-niveau; daar is reden nog steeds optioneel (nabellen zonder
+    // context is toegestaan).
     for (const a of attendeesIn) {
       const triggers = (a.attendance_status === 'no_show') ||
-                       (a.attendance_status === 'aanwezig' && a.outcome === 'opvolgen');
+                       (a.attendance_status === 'aanwezig' && FOLLOWUP_OUTCOMES.has(a.outcome));
       if (!triggers) continue;
       if (!a.followup || typeof a.followup !== 'object') continue;
 
       const reasonText = a.followup.reason != null ? String(a.followup.reason).slice(0, 500) : null;
+      // Reason (notitie) verplicht bij 'opvolgen' en 'twijfelt_nog'.
+      if (a.attendance_status === 'aanwezig' && REASON_REQUIRED_OUTCOMES.has(a.outcome)) {
+        if (!reasonText || !reasonText.trim()) {
+          const err = new Error(`attendee ${a.attendee_id}: notitie verplicht bij outcome '${a.outcome}'`);
+          err.status = 400;
+          err.code = 'REASON_REQUIRED';
+          throw err;
+        }
+      }
       const followDate = a.followup.follow_up_date || null;
       const ownerId    = a.followup.owner_id || DEFAULT_FOLLOWUP_OWNER_ID || null;
 

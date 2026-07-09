@@ -30,6 +30,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { computeDealTotals } from './_lib/deal-total.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_STATUS = ['aangemeld', 'aanwezig', 'no_show', 'sale', 'switched_to_other_event', 'geannuleerd'];
@@ -195,20 +196,61 @@ export default async function handler(req, res) {
     // Een attendee is "sale" als zijn deal_id een tl_quotation_status in
     // ('accepted','signed') heeft, of een tl_quotation_accepted_at-stempel.
     const signedDealIds = new Set();
+    // Blok B: bewaar per sale-deal ook de totaal-waarde incl BTW zodat de
+    // frontend 'Sale ✓ €X.XXX' kan tonen. Gebruikt computeDealTotals
+    // (zelfde helper als events-complete-core voor de bonus-berekening).
+    const saleInfoByDealId = new Map();
     const dealIds = Array.from(new Set((rows || []).map((r) => r.deal_id).filter(Boolean)));
     if (dealIds.length > 0) {
       try {
         const { data: deals, error: dealErr } = await supabaseAdmin
           .from('deals')
-          .select('id, tl_quotation_status, tl_quotation_accepted_at')
+          .select('id, discount_percentage, sale_type, tl_quotation_status, tl_quotation_accepted_at')
           .in('id', dealIds);
         if (dealErr) {
           console.error('[events-attendees-list deals]', dealErr.message);
         } else {
+          const signedDeals = [];
           for (const d of deals || []) {
             const st = String(d.tl_quotation_status || '').toLowerCase();
             if (st === 'accepted' || st === 'signed' || d.tl_quotation_accepted_at) {
               signedDealIds.add(d.id);
+              signedDeals.push(d);
+            }
+          }
+          // Line items ophalen voor sale-deals in één batch en per deal
+          // groeperen; dan computeDealTotals aanroepen.
+          if (signedDeals.length > 0) {
+            const signedIds = signedDeals.map((d) => d.id);
+            try {
+              const { data: lines, error: linesErr } = await supabaseAdmin
+                .from('deal_line_items')
+                .select('deal_id, quantity, unit_price, vat_percentage, price_includes_vat')
+                .in('deal_id', signedIds);
+              if (linesErr) {
+                console.error('[events-attendees-list line-items]', linesErr.message);
+              } else {
+                const linesByDeal = new Map();
+                for (const li of lines || []) {
+                  const arr = linesByDeal.get(li.deal_id) || [];
+                  arr.push(li);
+                  linesByDeal.set(li.deal_id, arr);
+                }
+                for (const d of signedDeals) {
+                  try {
+                    const totals = computeDealTotals(d, linesByDeal.get(d.id) || []);
+                    saleInfoByDealId.set(d.id, {
+                      total_incl : Number.isFinite(totals?.incl) ? Number(totals.incl) : null,
+                      status     : d.tl_quotation_status || null,
+                    });
+                  } catch (e) {
+                    console.error('[events-attendees-list total-calc]', d.id, e?.message || e);
+                    saleInfoByDealId.set(d.id, { total_incl: null, status: d.tl_quotation_status || null });
+                  }
+                }
+              }
+            } catch (e) {
+              console.error('[events-attendees-list totals-fetch]', e?.message || e);
             }
           }
         }
@@ -253,20 +295,30 @@ export default async function handler(req, res) {
       }
     }
 
-    const items = (rows || []).map((r) => ({
-      ...r,
-      tags: tagsByAttendee.get(r.id) || [],
-      has_signed_deal: !!(r.deal_id && signedDealIds.has(r.deal_id)),
-      taal: r.assessment_response_id ? (taalByResponse.get(r.assessment_response_id) || null) : null,
-      questionnaire_filled_at: r.assessment_response_id
-        ? (filledAtByResponse.get(r.assessment_response_id) || null)
-        : null,
-      // Bestemmings-titel voor verplaatst-attendees (migratie 026). NULL
-      // voor legacy-rijen zonder switched_to_event_id.
-      switched_to_event_title: r.switched_to_event_id
-        ? (targetTitleById.get(r.switched_to_event_id) || null)
-        : null,
-    }));
+    const items = (rows || []).map((r) => {
+      const saleInfo = (r.deal_id && signedDealIds.has(r.deal_id))
+        ? (saleInfoByDealId.get(r.deal_id) || null)
+        : null;
+      return {
+        ...r,
+        tags: tagsByAttendee.get(r.id) || [],
+        has_signed_deal: !!(r.deal_id && signedDealIds.has(r.deal_id)),
+        // Blok B: sale-info per attendee. Frontend toont
+        // 'Sale ✓ €{sale_total_incl}' + koppel-status.
+        sale_deal_id     : saleInfo ? r.deal_id : null,
+        sale_total_incl  : saleInfo ? saleInfo.total_incl : null,
+        sale_deal_status : saleInfo ? saleInfo.status : null,
+        taal: r.assessment_response_id ? (taalByResponse.get(r.assessment_response_id) || null) : null,
+        questionnaire_filled_at: r.assessment_response_id
+          ? (filledAtByResponse.get(r.assessment_response_id) || null)
+          : null,
+        // Bestemmings-titel voor verplaatst-attendees (migratie 026). NULL
+        // voor legacy-rijen zonder switched_to_event_id.
+        switched_to_event_title: r.switched_to_event_id
+          ? (targetTitleById.get(r.switched_to_event_id) || null)
+          : null,
+      };
+    });
 
     // byStatus counts (zonder paginatie, zonder status-filter, met search).
     const byStatus = { aangemeld: 0, aanwezig: 0, no_show: 0, sale: 0, switched_to_other_event: 0, geannuleerd: 0 };

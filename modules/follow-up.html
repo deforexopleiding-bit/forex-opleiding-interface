@@ -5715,7 +5715,13 @@
       const badges = [];
       if (it.is_hot) badges.push('<span class="fu-cockpit-mini-badge hot" title="Hotlead">🔥</span>');
       if (it.source === 'event') {
-        badges.push('<span class="fu-cockpit-mini-badge event" title="Event-lead">Event</span>');
+        // Blok B: lead uit event-afrondscherm (outcome opvolgen/twijfelt_nog/no_show)
+        // krijgt een specifiekere badge zodat sales meteen ziet dat 't een
+        // event-followup is (met bijbehorende reason zichtbaar in belpaneel).
+        const isEvFu = !!(it.source_ref && it.source_ref.is_event_followup);
+        badges.push(isEvFu
+          ? '<span class="fu-cockpit-mini-badge event" title="Follow-up vanuit event-afrondscherm — reden in belpaneel" style="background:#7c3aed;color:#fff">Follow-up event</span>'
+          : '<span class="fu-cockpit-mini-badge event" title="Event-lead">Event</span>');
       } else if (it.source === 'retention') {
         badges.push('<span class="fu-cockpit-mini-badge retention" title="Retentie-lead">Ret</span>');
       }
@@ -5993,6 +5999,12 @@
       cells.push(_ctxCell('Aangemaakt', fmtDateNLShort(it.created_at)));
       const ref = _sourceRefSummary(it);
       if (ref) cells.push(_ctxCell('Verwijzing', ref));
+      // Blok B: reden uit event-afrondscherm zichtbaar maken voor sales.
+      // source_ref.reason wordt door event-followup-to-lead + events-complete
+      // gevuld met de notitie die de mentor invulde. Zonder deze cel zou de
+      // beller de context missen bij een 'Follow-up event'-lead.
+      const evFuReason = it?.source_ref?.is_event_followup ? String(it?.source_ref?.reason || '').trim() : '';
+      if (evFuReason) cells.push(_ctxCell('Reden opvolgen', evFuReason));
       // Vragenlijst-status voor ELKE event-lead met attendee_id.
       // Voorheen alleen zichtbaar als _ebCallAttendee de flag had gezet;
       // sinds no-show-blok relaxen we de conditie zodat de regel ook
