@@ -1061,6 +1061,7 @@
     <!-- Groep C: Dashboard tab op positie 1 (default landing-view). -->
     <button class="sr-seg" id="navDashboard" data-view="dashboard" type="button">Dashboard</button>
     <button class="sr-seg active" data-view="facturen" type="button">Facturen</button>
+    <button class="sr-seg" data-view="creditnotes" type="button">Creditnota's</button>
     <!-- Groep B: Klanten thin view. -->
     <button class="sr-seg" id="navKlanten" data-view="klanten" type="button">Klanten</button>
     <button class="sr-seg" id="navWanbetalers" data-view="wanbetalers" type="button" style="display:none">Wanbetalers</button>
@@ -1160,6 +1161,44 @@
       </div>
       <div id="invPager" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-dim)"></div>
     </div>
+  </div>
+
+  <!-- ===== Creditnota's-view (read-only lijst uit gespiegelde credit_notes-tabel) ===== -->
+  <div id="view-creditnotes" hidden>
+    <div class="fin-toolbar" style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+      <input id="cnSearch" class="fin-input" type="search" placeholder="Zoek nummer of klant…" style="flex:1;min-width:220px" />
+      <input id="cnPeriodStart" class="fin-input" type="date" title="Vanaf datum" />
+      <input id="cnPeriodEnd"   class="fin-input" type="date" title="T/m datum" />
+      <button id="cnRefreshBtn" class="fin-btn" type="button">Vernieuwen</button>
+    </div>
+    <div id="cnKpi" class="fin-kpi-strip" style="display:grid;grid-template-columns:repeat(2, 1fr);gap:12px;margin-bottom:16px">
+      <div class="fin-kpi-cell" style="padding:14px 16px;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px">
+        <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px">Aantal creditnota's</div>
+        <div id="cnKpiCount" style="font-size:22px;font-weight:700;margin-top:4px">—</div>
+      </div>
+      <div class="fin-kpi-cell" style="padding:14px 16px;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px">
+        <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px">Totaal gecrediteerd</div>
+        <div id="cnKpiSum" style="font-size:22px;font-weight:700;margin-top:4px;color:#dc2626">—</div>
+      </div>
+    </div>
+    <div id="cnLoading" style="display:none;padding:12px;text-align:center;color:var(--text-dim);font-size:13px">Laden…</div>
+    <div id="cnError" style="display:none;padding:12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px;color:#dc2626;font-size:13px"></div>
+    <div style="overflow-x:auto">
+      <table id="cnTable" class="fin-table" style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="background:var(--bg-elev);text-align:left">
+            <th style="padding:10px 12px">Nummer</th>
+            <th style="padding:10px 12px">Datum</th>
+            <th style="padding:10px 12px">Klant</th>
+            <th style="padding:10px 12px">Gekoppelde factuur</th>
+            <th style="padding:10px 12px;text-align:right">Bedrag</th>
+            <th style="padding:10px 12px">Status</th>
+          </tr>
+        </thead>
+        <tbody id="cnTbody"></tbody>
+      </table>
+    </div>
+    <div id="cnPager" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-dim)"></div>
   </div>
 
   <!-- ===== Bank-view CAMT (Fase 3 — upload + spiegel uit ISO 20022 CAMT.053) ===== -->
@@ -3001,6 +3040,7 @@
     // Groep D: Instellingen-view (Joost AI / Templates / Afdeling-config).
     const instellingenWrap = document.getElementById('view-instellingen');
     document.getElementById('view-facturen').hidden = (view !== 'facturen');
+    { const el = document.getElementById('view-creditnotes'); if (el) el.hidden = (view !== 'creditnotes'); }
     document.getElementById('view-camtbank').hidden = (view !== 'camtbank');
     document.getElementById('view-bank').hidden = (view !== 'bank');
     document.getElementById('view-roadmap').hidden = (view !== 'roadmap');
@@ -3035,6 +3075,11 @@
     // Groep D: bij Instellingen-view → mount FinanceInstellingen (idempotent).
     if (view === 'instellingen' && instellingenWrap) {
       mountFinanceInstellingenHost(instellingenWrap);
+    }
+    // Creditnota's-view: lazy-init (wire + eerste load) idempotent via _cnInited.
+    if (view === 'creditnotes') {
+      _wireCreditnotesOnce();
+      loadCreditnotes();
     }
     // Polish PR-2: bij Roadmap-view → mount FinanceViewRoadmap (idempotent,
     // statisch). Eerste view die uit finance.html geëxtraheerd is.
@@ -3169,6 +3214,99 @@
       url.searchParams.set('sub', sub);
       window.history.replaceState(null, '', url.toString());
     } catch (_) {}
+  }
+
+  // ── Creditnota's-view (read-only lijst) ────────────────────────────────
+  // Nieuwe finance-tab die de gespiegelde credit_notes-tabel oplevert via
+  // /api/finance-creditnotes-list. Hergebruikt eur/fmtDate + AgentShared.apiFetch.
+  let _cnWired    = false;
+  let _cnPage     = 1;
+  const _cnPageSize = 50;
+
+  function _wireCreditnotesOnce() {
+    if (_cnWired) return;
+    _cnWired = true;
+    const $s  = document.getElementById('cnSearch');
+    const $ps = document.getElementById('cnPeriodStart');
+    const $pe = document.getElementById('cnPeriodEnd');
+    const $rf = document.getElementById('cnRefreshBtn');
+    // Debounce search om te voorkomen dat elke toets een request afvuurt.
+    let _t;
+    const onFilter = () => { _cnPage = 1; loadCreditnotes(); };
+    if ($s)  $s.addEventListener('input', () => { clearTimeout(_t); _t = setTimeout(onFilter, 250); });
+    if ($ps) $ps.addEventListener('change', onFilter);
+    if ($pe) $pe.addEventListener('change', onFilter);
+    if ($rf) $rf.addEventListener('click', () => loadCreditnotes());
+  }
+
+  async function loadCreditnotes() {
+    const $loading = document.getElementById('cnLoading');
+    const $error   = document.getElementById('cnError');
+    const $tbody   = document.getElementById('cnTbody');
+    const $pager   = document.getElementById('cnPager');
+    const $count   = document.getElementById('cnKpiCount');
+    const $sum     = document.getElementById('cnKpiSum');
+    if (!$tbody) return;
+    if ($loading) $loading.style.display = '';
+    if ($error)   { $error.style.display = 'none'; $error.textContent = ''; }
+    const params = new URLSearchParams();
+    const s  = (document.getElementById('cnSearch')?.value || '').trim();
+    const ps = document.getElementById('cnPeriodStart')?.value || '';
+    const pe = document.getElementById('cnPeriodEnd')?.value   || '';
+    if (s)  params.set('q', s);
+    if (ps) params.set('period_start', ps);
+    if (pe) params.set('period_end', pe);
+    params.set('page', String(_cnPage));
+    params.set('page_size', String(_cnPageSize));
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-creditnotes-list?' + params.toString());
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error || ('HTTP ' + r.status));
+      const items = Array.isArray(j.items) ? j.items : [];
+      const kpi   = j.kpi || { count: 0, sum_amount: 0 };
+      if ($count) $count.textContent = String(kpi.count || 0);
+      if ($sum)   $sum.textContent   = '− ' + eur(kpi.sum_amount || 0);
+      if (items.length === 0) {
+        $tbody.innerHTML = `<tr><td colspan="6" style="padding:20px 12px;text-align:center;color:var(--text-dim)">Geen creditnota's gevonden.</td></tr>`;
+      } else {
+        const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        $tbody.innerHTML = items.map((c) => {
+          const invLabel = c.invoice_number ? esc(c.invoice_number) : '—';
+          const custLabel = c.customer_name && c.customer_name !== '—' ? esc(c.customer_name) : '—';
+          const statusLabel = c.status ? esc(c.status) : '—';
+          return `<tr style="border-top:1px solid var(--border)">
+            <td style="padding:9px 12px;font-weight:600">${esc(c.credit_note_number || '—')}</td>
+            <td style="padding:9px 12px">${fmtDate(c.credit_note_date)}</td>
+            <td style="padding:9px 12px">${custLabel}</td>
+            <td style="padding:9px 12px">${invLabel}</td>
+            <td style="padding:9px 12px;text-align:right;color:#dc2626;font-weight:600">− ${eur(c.amount_total || 0)}</td>
+            <td style="padding:9px 12px"><span style="display:inline-block;padding:2px 9px;background:var(--bg-elev);border:1px solid var(--border);border-radius:99px;font-size:11px">${statusLabel}</span></td>
+          </tr>`;
+        }).join('');
+      }
+      if ($pager) {
+        const total = Number(j.total || 0);
+        const pageCount = Math.max(1, Math.ceil(total / _cnPageSize));
+        const from = total === 0 ? 0 : ((_cnPage - 1) * _cnPageSize + 1);
+        const to   = Math.min(_cnPage * _cnPageSize, total);
+        $pager.innerHTML = `<div>${from}–${to} van ${total}</div>
+          <div style="display:flex;gap:6px">
+            <button id="cnPrev" class="fin-btn" ${_cnPage <= 1 ? 'disabled' : ''} type="button">Vorige</button>
+            <button id="cnNext" class="fin-btn" ${_cnPage >= pageCount ? 'disabled' : ''} type="button">Volgende</button>
+          </div>`;
+        const $prev = document.getElementById('cnPrev');
+        const $next = document.getElementById('cnNext');
+        if ($prev) $prev.addEventListener('click', () => { if (_cnPage > 1) { _cnPage--; loadCreditnotes(); } });
+        if ($next) $next.addEventListener('click', () => { if (_cnPage < pageCount) { _cnPage++; loadCreditnotes(); } });
+      }
+    } catch (e) {
+      if ($error) { $error.style.display = ''; $error.textContent = 'Fout bij laden: ' + (e?.message || 'onbekend'); }
+      $tbody.innerHTML = '';
+      if ($count) $count.textContent = '—';
+      if ($sum)   $sum.textContent   = '—';
+    } finally {
+      if ($loading) $loading.style.display = 'none';
+    }
   }
 
   // Wanbetalers sub-nav wiring (één keer).
