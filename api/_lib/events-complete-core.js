@@ -165,14 +165,14 @@ export async function runEventsCompleteCore({ userId, body }) {
     }
 
     // ── 3b) Event follow-ups upsert ─────────────────────────────────────────
-    // Blok B: outcome 'twijfelt_nog' triggert ook een follow-up (analoog aan
-    // 'opvolgen'). Reason (notitie) is verplicht voor beide outcomes; server-
-    // side check hier + UI-check in events-detail. no_show blijft trigger op
-    // status-niveau; daar is reden nog steeds optioneel (nabellen zonder
-    // context is toegestaan).
+    // Blok B: outcome 'opvolgen' en 'twijfelt_nog' triggeren een follow-up.
+    // Reason (notitie) is verplicht voor beide outcomes; server-side check
+    // hier + UI-check in events-detail. No_show is een KALE status — geen
+    // follow-up meer via dit pad. De no-show-opvolging in de follow-up-
+    // cockpit werkt via event_attendees.status='no_show' (Opvolglijst-tab
+    // via api/follow-up-opvolglijst.js), niet via event_followups.
     for (const a of attendeesIn) {
-      const triggers = (a.attendance_status === 'no_show') ||
-                       (a.attendance_status === 'aanwezig' && FOLLOWUP_OUTCOMES.has(a.outcome));
+      const triggers = (a.attendance_status === 'aanwezig' && FOLLOWUP_OUTCOMES.has(a.outcome));
       if (!triggers) continue;
       if (!a.followup || typeof a.followup !== 'object') continue;
 

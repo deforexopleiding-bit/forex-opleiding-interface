@@ -2537,9 +2537,11 @@ function renderEvCompleteAttendees(list) {
     if (outcomeWrap) outcomeWrap.style.display = (attVal === 'aanwezig') ? 'flex' : 'none';
     if (attVal !== 'aanwezig' && outcomeSel) outcomeSel.value = '';
 
-    // Follow-up bij no-show OF (aanwezig + opvolgen/twijfelt_nog).
-    const showFu = (attVal === 'no_show') ||
-                   (attVal === 'aanwezig' && outcomeSel && _EVC_FOLLOWUP_OUTCOMES.has(outcomeSel.value));
+    // Follow-up ALLEEN bij aanwezig + opvolgen/twijfelt_nog. No-show is
+    // een kale status — geen uitkomst-dropdown, geen follow-up-blok.
+    // (De no-show-OPVOLGLIJST in de follow-up-cockpit werkt via
+    // event_attendees.status='no_show', niet via event_followups.)
+    const showFu = (attVal === 'aanwezig' && outcomeSel && _EVC_FOLLOWUP_OUTCOMES.has(outcomeSel.value));
     if (fuWrap) fuWrap.style.display = showFu ? 'block' : 'none';
   }
   // Helper: datum vandaag+X als YYYY-MM-DD lokaal.
@@ -2722,10 +2724,10 @@ async function submitEvComplete() {
         if (outcomeVal) item.outcome = outcomeVal;
       }
 
-      // PR Z + Blok B: follow-up triggert bij no_show OF (aanwezig +
-      // opvolgen/twijfelt_nog). Notitie verplicht bij opvolgen/twijfelt_nog.
-      const triggersFollowup = (status === 'no_show') ||
-                               (status === 'aanwezig' && _EVC_FOLLOWUP_OUTCOMES.has(item.outcome));
+      // Follow-up ALLEEN bij aanwezig + opvolgen/twijfelt_nog. No-show
+      // is een kale status (opvolging via event_attendees.status='no_show'
+      // in de Opvolglijst-tab, niet via event_followups).
+      const triggersFollowup = (status === 'aanwezig' && _EVC_FOLLOWUP_OUTCOMES.has(item.outcome));
       if (triggersFollowup) {
         const reasonSel = r.querySelector('.evc-fu-reason');
         const noteEl    = r.querySelector('.evc-fu-note');
