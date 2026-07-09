@@ -281,16 +281,29 @@ export async function runEventsCompleteCore({ userId, body }) {
     }
 
     // ── 4) event_mentors.was_present ────────────────────────────────────────
+    // Bug: de oude UPDATE .in('team_member_id', presentMentorIds) raakte
+    // alleen mentoren die AL een event_mentors-rij hadden. Aangevinkte
+    // mentoren zonder bestaande koppeling werden stil genegeerd → count=0
+    // → 'geen mentoren aanwezig' → geen bonus, ondanks correcte sale.
+    // Fix: eerst reset, dan UPSERT op (event_id, team_member_id) zodat
+    // ontbrekende koppelingen als was_present=true worden aangemaakt en
+    // bestaande rijen naar was_present=true worden bijgewerkt.
     {
       const { error: resetErr } = await supabaseAdmin
         .from('event_mentors').update({ was_present: false }).eq('event_id', eventId);
       if (resetErr) summary.warnings.push('mentors reset: ' + resetErr.message);
       if (presentMentorIds.length > 0) {
-        const { error: setErr, count } = await supabaseAdmin
-          .from('event_mentors').update({ was_present: true }, { count: 'exact' })
-          .eq('event_id', eventId).in('team_member_id', presentMentorIds);
-        if (setErr) summary.warnings.push('mentors mark present: ' + setErr.message);
-        else summary.mentors_marked_present = count || 0;
+        const rows = presentMentorIds.map((tmId) => ({
+          event_id         : eventId,
+          team_member_id   : tmId,
+          was_present      : true,
+          added_by_user_id : userId,
+        }));
+        const { error: upsertErr } = await supabaseAdmin
+          .from('event_mentors')
+          .upsert(rows, { onConflict: 'event_id,team_member_id' });
+        if (upsertErr) summary.warnings.push('mentors upsert: ' + upsertErr.message);
+        else summary.mentors_marked_present = presentMentorIds.length;
       }
     }
 
