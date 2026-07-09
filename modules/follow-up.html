@@ -9458,17 +9458,26 @@
         return;
       }
       if (item.type === 'appointment') {
-        // Voor appointments: open de bestaande afspraak-detail modal. Sales
-        // kan daar bellen + outcome invullen via de bestaande flow. Geen
-        // lazy-lead pad (er is al een appointment).
+        // Het afspraak-detail rendert in #cockpit-apptbody dat BINNEN de
+        // Werklijst-tab zit — vanuit de Opvolglijst-tab is die container
+        // onzichtbaar, dus een kale _openAppointmentDetail-call rendert
+        // achter de schermen zonder dat de user er iets van ziet.
+        //
+        // Fix: hergebruik het bestaande race-vrije _pendingApptOpen-
+        // handshake (regel ~5192, consumer in loadLeadsTab ~5436). Zet
+        // de pending-id, switch naar de Werklijst-tab, en loadLeadsTab
+        // opent EXACT deze afspraak na zijn server-fetch — vóór de
+        // auto-open-first belItems[0]-race.
         try {
-          if (typeof _openAppointmentDetail === 'function') {
+          _pendingApptOpen = item.ref_id;
+          if (typeof switchTab === 'function') {
+            switchTab('leads');
+          } else if (typeof _openAppointmentDetail === 'function') {
+            // Fallback: geen switchTab beschikbaar → best-effort direct.
             _openAppointmentDetail(item.ref_id);
-          } else {
-            alert('Afspraak-detail is niet beschikbaar — open Follow-up → Afspraken-tab en zoek deze lead handmatig.');
           }
         } catch (e) {
-          console.error('[opvolglijst] appt-detail:', e);
+          console.error('[opvolglijst] appt-open:', e?.message || e);
           alert('Kon afspraak-detail niet openen: ' + (e?.message || 'onbekend'));
         }
         return;
