@@ -131,12 +131,9 @@ export default async function handler(req, res) {
       code : 'EVENT_CLOSED',
     });
   }
-  if (!isNiveauMatch(assessment.routing_result, event.niveau)) {
-    return res.status(409).json({
-      error: `Niveau van event komt niet overeen met jouw resultaat (${assessment.routing_result} vs ${event.niveau}).`,
-      code : 'NIVEAU_MISMATCH',
-    });
-  }
+  // Blok C — Aanpak A: niveau-check vervalt. Elk (Masterclass-)event mag
+  // ongeacht routing_result gekozen worden. routing_result blijft opgeslagen
+  // op de assessment voor rapportage/scoring.
 
   // ── 4) Insert event_attendees ─────────────────────────────────────────
   //

@@ -20,13 +20,12 @@
 // Response 405: GET only
 // Response 500: database-fout
 
-import {
-  NIVEAU_FROM_ROUTING,
-  getOpenEventsWithSpace,
-} from './_lib/event-registration.js';
+import { getOpenEventsWithSpace } from './_lib/event-registration.js';
 import { safeError } from './_lib/safe-error.js';
 
-const ALLOWED_NIVEAUS = Object.values(NIVEAU_FROM_ROUTING); // ['gevorderd','basis']
+// Blok C — Aanpak A: niveau-query-param wordt geaccepteerd voor
+// backward-compat (oude assessment-links) maar verder niet meer als filter
+// gebruikt. Alle open Masterclass-events worden getoond.
 
 export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
@@ -37,20 +36,12 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'GET only' });
   }
 
-  const niveau = req.query?.niveau ? String(req.query.niveau).toLowerCase() : null;
-  if (!niveau || !ALLOWED_NIVEAUS.includes(niveau)) {
-    return res.status(400).json({
-      error: `niveau vereist (${ALLOWED_NIVEAUS.join('|')})`,
-    });
-  }
+  // Backward-compat: niveau accepteren maar niet meer valideren/filteren.
+  const niveauEcho = req.query?.niveau ? String(req.query.niveau).toLowerCase() : null;
 
   try {
-    // Fase 2a: delegeer naar getOpenEventsWithSpace helper (single source of
-    // truth voor "open events met has_space"). Output-shape voor de publieke
-    // assessment-flow is byte-identiek aan vóór de refactor — we strippen
-    // het 'niveau'-veld uit de helper-output omdat de oorspronkelijke
-    // response-shape het niet bevatte (caller weet al voor welk niveau).
-    const events = await getOpenEventsWithSpace({ niveau, limit: 50 });
+    // Blok C: niveau=null → alle events (post-migratie 029 alleen 'masterclass').
+    const events = await getOpenEventsWithSpace({ niveau: null, limit: 50 });
     const out = events.map((e) => ({
       id              : e.id,
       title           : e.title,
@@ -63,7 +54,7 @@ export default async function handler(req, res) {
       image_url       : e.image_url,
       spots_left      : e.spots_left,
     }));
-    return res.status(200).json({ niveau, events: out });
+    return res.status(200).json({ niveau: niveauEcho, events: out });
   } catch (e) {
     return safeError(res, 500, e);
   }

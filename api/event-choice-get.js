@@ -124,26 +124,15 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: 'Link niet geldig.' });
     }
 
-    // 4) Routing/niveau ophalen indien assessment-koppeling bestaat.
-    let niveau = null;
-    if (attendee.assessment_response_id) {
-      try {
-        const { data: ar, error: arErr } = await supabaseAdmin
-          .from('assessment_responses')
-          .select('routing_result')
-          .eq('id', attendee.assessment_response_id)
-          .maybeSingle();
-        if (arErr) {
-          console.error('[event-choice-get] assessment fetch:', arErr.message);
-        } else if (ar?.routing_result === 'basis' || ar?.routing_result === 'gevorderd') {
-          niveau = ar.routing_result;
-        }
-      } catch (e) {
-        console.error('[event-choice-get] assessment exception:', e?.message || e);
-      }
-    }
+    // Blok C — Aanpak A: niveau-filter uitgeschakeld. Alle Masterclass-events
+    // zijn toegankelijk ongeacht routing_result. De routing_result blijft
+    // wél bewaard voor rapportage/scoring; alleen de UI-lijst is niet meer
+    // gefilterd. current_event_niveau in de response blijft leeg (backward-
+    // compat veld dat nu geen keuze meer stuurt).
+    const niveau = null;
 
-    // 5) Open events via shared helper. Bij niveau=null → alle niveaus.
+    // 5) Open events via shared helper. niveau=null → alle niveaus (post-
+    //    migratie 029 zijn dat alleen nog 'masterclass'-events).
     let events = [];
     try {
       events = await getOpenEventsWithSpace({ niveau, limit: 50 });
