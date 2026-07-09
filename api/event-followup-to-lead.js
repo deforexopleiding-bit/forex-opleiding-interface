@@ -52,11 +52,12 @@ export default async function handler(req, res) {
     let attendeeId = bodyAttendeeId || null;
     let eventId = null;
     let reason = null;
+    let followDate = null;
 
     if (followupId) {
       const { data: fu, error: fuErr } = await supabaseAdmin
         .from('event_followups')
-        .select('id, attendee_id, event_id, reason')
+        .select('id, attendee_id, event_id, reason, follow_up_date')
         .eq('id', followupId)
         .maybeSingle();
       if (fuErr) throw new Error('event_followups fetch: ' + fuErr.message);
@@ -65,6 +66,7 @@ export default async function handler(req, res) {
       attendeeId = fu.attendee_id || attendeeId;
       eventId    = fu.event_id || null;
       reason     = fu.reason || null;
+      followDate = fu.follow_up_date || null;
     }
     if (!attendeeId) return res.status(400).json({ error: 'Geen attendee gekoppeld aan followup' });
 
@@ -85,6 +87,10 @@ export default async function handler(req, res) {
       lead_email : att.email || null,
       lead_phone : att.phone || null,
       lead_status: 'nieuw',
+      // Punt B: terugbel_datum = de geplande follow-up-datum uit het
+      // event_followups-record. Zonder dit stond de lead altijd 'nu' in
+      // de werklijst i.p.v. op de gekozen opvolgdatum.
+      terugbel_datum: followDate,
       source_ref : {
         event_id   : eventId,
         attendee_id: att.id,
