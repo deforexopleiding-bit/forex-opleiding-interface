@@ -85,6 +85,10 @@
       "schedule": "5 1 * * *"
     },
     {
+      "path": "/api/cron-events-auto-archive",
+      "schedule": "0 3 * * *"
+    },
+    {
       "path": "/api/cron-events-automations",
       "schedule": "* * * * *"
     },
