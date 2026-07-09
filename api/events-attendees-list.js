@@ -259,6 +259,170 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── Sale-suggestie (Blok B follow-up) — server-side sterke match ──
+    // Voor attendees zonder gekoppelde sale-deal berekenen we per attendee
+    // een suggestie zodat het afrond-scherm '💡 Mogelijke sale: €X.XXX'
+    // met 1-klik koppelen kan tonen. Gebatcht — geen N+1.
+    // STERK = deal.customer_id === attendee.customer_id, of matchende
+    // e-mail (lowercase). Alleen accepted/signed-deals. Deals die al aan
+    // enige andere attendee zijn gekoppeld → uitgesloten (voorkomt dubbele
+    // koppeling). Zelfde helper computeDealTotals voor bedrag.
+    const suggestionByAttendeeId = new Map();
+    try {
+      const attNoSale = (rows || []).filter(
+        (r) => !(r.deal_id && signedDealIds.has(r.deal_id))
+              && (r.customer_id || (r.email || '').trim())
+      );
+      if (attNoSale.length > 0) {
+        const noSaleCids   = Array.from(new Set(attNoSale.map((r) => r.customer_id).filter(Boolean)));
+        const noSaleEmails = Array.from(new Set(
+          attNoSale.map((r) => String(r.email || '').trim().toLowerCase()).filter(Boolean)
+        ));
+
+        // Email-lookup: welke customers matchen de attendee-emails?
+        const emailToCustIds = new Map(); // lowercase email → [customer_id]
+        const custIdToName   = new Map(); // customer_id → naam (label)
+        let emailMatchedCids = [];
+        if (noSaleEmails.length > 0) {
+          try {
+            const { data: emailCusts, error: eErr } = await supabaseAdmin
+              .from('customers')
+              .select('id, email, first_name, last_name, company_name')
+              .in('email', noSaleEmails);
+            if (!eErr) {
+              for (const c of emailCusts || []) {
+                const em = String(c.email || '').trim().toLowerCase();
+                if (em) {
+                  const arr = emailToCustIds.get(em) || [];
+                  arr.push(c.id);
+                  emailToCustIds.set(em, arr);
+                }
+                const nm = (c.company_name || '').trim()
+                  || `${(c.first_name || '').trim()} ${(c.last_name || '').trim()}`.trim();
+                if (nm) custIdToName.set(c.id, nm);
+              }
+              emailMatchedCids = Array.from(new Set((emailCusts || []).map((c) => c.id)));
+            }
+          } catch (e) { console.warn('[events-attendees-list email-lookup]', e?.message || e); }
+        }
+
+        const allCandidateCids = Array.from(new Set([...noSaleCids, ...emailMatchedCids]));
+        if (allCandidateCids.length > 0) {
+          // Signed-only deals voor deze customer_ids.
+          const { data: candDeals, error: candErr } = await supabaseAdmin
+            .from('deals')
+            .select('id, customer_id, quote_reference, tl_quotation_status, tl_quotation_accepted_at, discount_percentage, sale_type, created_at')
+            .in('customer_id', allCandidateCids)
+            .or('tl_quotation_status.eq.accepted,tl_quotation_status.eq.signed,tl_quotation_accepted_at.not.is.null');
+          if (candErr) {
+            console.warn('[events-attendees-list sugg-deals]', candErr.message);
+          } else if (candDeals && candDeals.length > 0) {
+            // Uitsluiten: deals die al aan enige event_attendees-rij gekoppeld zijn.
+            const candIds = candDeals.map((d) => d.id);
+            let linkedSet = new Set();
+            try {
+              const { data: linkedRows } = await supabaseAdmin
+                .from('event_attendees')
+                .select('deal_id')
+                .in('deal_id', candIds);
+              for (const l of linkedRows || []) {
+                if (l.deal_id) linkedSet.add(l.deal_id);
+              }
+            } catch (e) { console.warn('[events-attendees-list linked-lookup]', e?.message || e); }
+            const freeDeals = candDeals.filter((d) => !linkedSet.has(d.id));
+
+            if (freeDeals.length > 0) {
+              // Batch line items voor computeDealTotals.
+              const freeIds = freeDeals.map((d) => d.id);
+              const linesByDeal = new Map();
+              try {
+                const { data: lines } = await supabaseAdmin
+                  .from('deal_line_items')
+                  .select('deal_id, quantity, unit_price, vat_percentage, price_includes_vat')
+                  .in('deal_id', freeIds);
+                for (const li of lines || []) {
+                  const arr = linesByDeal.get(li.deal_id) || [];
+                  arr.push(li);
+                  linesByDeal.set(li.deal_id, arr);
+                }
+              } catch (e) { console.warn('[events-attendees-list sugg-lines]', e?.message || e); }
+
+              // Extra customer-namen voor de labels (customer_id-only matches).
+              const missingCustIds = Array.from(new Set(
+                freeDeals.map((d) => d.customer_id).filter((cid) => cid && !custIdToName.has(cid))
+              ));
+              if (missingCustIds.length > 0) {
+                try {
+                  const { data: extraCusts } = await supabaseAdmin
+                    .from('customers')
+                    .select('id, first_name, last_name, company_name')
+                    .in('id', missingCustIds);
+                  for (const c of extraCusts || []) {
+                    const nm = (c.company_name || '').trim()
+                      || `${(c.first_name || '').trim()} ${(c.last_name || '').trim()}`.trim();
+                    if (nm) custIdToName.set(c.id, nm);
+                  }
+                } catch (_) {}
+              }
+
+              // Group by customer_id, sort recentst-accepted eerst.
+              const dealsByCust = new Map();
+              for (const d of freeDeals) {
+                let total_incl = null;
+                try {
+                  const t = computeDealTotals(d, linesByDeal.get(d.id) || []);
+                  total_incl = Number.isFinite(t?.incl) ? Number(t.incl) : null;
+                } catch (_) {}
+                const enriched = {
+                  deal_id         : d.id,
+                  total_incl,
+                  quote_reference : d.quote_reference || null,
+                  customer_id     : d.customer_id,
+                  customer_label  : custIdToName.get(d.customer_id) || null,
+                  accepted_at     : d.tl_quotation_accepted_at || d.created_at || null,
+                };
+                const arr = dealsByCust.get(d.customer_id) || [];
+                arr.push(enriched);
+                dealsByCust.set(d.customer_id, arr);
+              }
+              for (const arr of dealsByCust.values()) {
+                arr.sort((a, b) => String(b.accepted_at || '').localeCompare(String(a.accepted_at || '')));
+              }
+
+              // Per attendee: kies STERKE match — customer_id primair, email secundair.
+              // Voorkom hetzelfde deal-id twee keer suggereren binnen deze lijst.
+              const alreadySuggested = new Set();
+              for (const a of attNoSale) {
+                let best = null;
+                if (a.customer_id) {
+                  const arr = dealsByCust.get(a.customer_id) || [];
+                  best = arr.find((x) => !alreadySuggested.has(x.deal_id)) || null;
+                }
+                if (!best) {
+                  const em = String(a.email || '').trim().toLowerCase();
+                  if (em) {
+                    const emCids = emailToCustIds.get(em) || [];
+                    for (const emCid of emCids) {
+                      const arr = dealsByCust.get(emCid) || [];
+                      const cand = arr.find((x) => !alreadySuggested.has(x.deal_id));
+                      if (cand) { best = cand; break; }
+                    }
+                  }
+                }
+                if (best) {
+                  alreadySuggested.add(best.deal_id);
+                  const { customer_id: _cid, accepted_at: _acc, ...pub } = best;
+                  suggestionByAttendeeId.set(a.id, pub);
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[events-attendees-list sale-suggestion]', e?.message || e);
+    }
+
     // Taal per aanwezige — mirror van het tags/deals secundaire-fetch-patroon.
     // Bron: assessment_responses.answers->>'taal' (de nieuwe radio-vraag
     // 'taal' met waarden 'nl'|'en'|'anders'). Afwezigheid van de vraag
@@ -308,6 +472,9 @@ export default async function handler(req, res) {
         sale_deal_id     : saleInfo ? r.deal_id : null,
         sale_total_incl  : saleInfo ? saleInfo.total_incl : null,
         sale_deal_status : saleInfo ? saleInfo.status : null,
+        // Sterke-match-suggestie (Blok B follow-up): NULL bij geen match.
+        // Frontend toont '💡 Mogelijke sale: €X.XXX — Koppel' met 1-klik.
+        suggested_deal   : suggestionByAttendeeId.get(r.id) || null,
         taal: r.assessment_response_id ? (taalByResponse.get(r.assessment_response_id) || null) : null,
         questionnaire_filled_at: r.assessment_response_id
           ? (filledAtByResponse.get(r.assessment_response_id) || null)

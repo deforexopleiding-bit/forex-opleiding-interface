@@ -2347,6 +2347,19 @@ async function _evcLinkDeal(dealId, btnEl) {
 // Attendee-context (naam/email/customer_id) uit data-* zodat de modal
 // meteen suggesties kan laden en 'zelfde klant' kan markeren.
 document.addEventListener('click', (ev) => {
+  // 1-klik-koppel voor sterke-match-suggestie ('💡 Mogelijke sale').
+  const sug = ev.target?.closest?.('.evc-link-suggested');
+  if (sug) {
+    ev.preventDefault();
+    const attId  = sug.getAttribute('data-att');
+    const dealId = sug.getAttribute('data-deal');
+    if (attId && dealId) {
+      _evcLinkAttendeeId  = attId;
+      _evcLinkAttendeeCid = null;
+      _evcLinkDeal(dealId, sug);
+    }
+    return;
+  }
   const btn = ev.target?.closest?.('.evc-link-sale');
   if (btn) {
     ev.preventDefault();
@@ -2407,13 +2420,28 @@ function renderEvCompleteAttendees(list) {
       const eur = a.sale_total_incl != null ? ' ' + _evcEur(a.sale_total_incl) : '';
       saleBadge = `<span title="Klant heeft een getekende offerte — telt als sale" style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;background:rgba(5,150,105,0.18);color:#059669"><i class="ti ti-circle-check"></i> Sale ${esc(eur)}</span>`;
     } else {
-      // Geen sale? Toon 'Sale koppelen'-knop zodat de gebruiker
-      // handmatig een deal aan deze attendee kan hangen. Endpoint:
-      // /api/events-attendee-link-deal; deal-zoeker via /api/deals-search.
-      // data-name/data-email/data-cid worden opgepikt door de delegated
-      // click-handler en doorgegeven aan _evcOpenLinkSaleModal → auto-
-      // suggestie op basis van de attendee.
-      saleBadge = `<button type="button" class="evc-link-sale" data-att="${esc(a.id)}" data-name="${esc(naam)}" data-email="${esc(a.email || '')}" data-cid="${esc(a.customer_id || '')}" title="Koppel handmatig een deal aan deze deelnemer" style="margin-left:6px;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;background:transparent;color:var(--accent-cyan,#0891b2);border:1px dashed var(--accent-cyan,#0891b2);cursor:pointer;display:inline-flex;align-items:center;gap:4px"><i class="ti ti-link"></i> Sale koppelen</button>`;
+      // Geen sale? Twee paden:
+      //   1) Sterke match beschikbaar → toon '💡 Mogelijke sale: €X.XXX'
+      //      met 1-klik-koppel-knop + subtiele 'andere zoeken'-link.
+      //   2) Geen match → gewoon 'Sale koppelen'-knop (bestaand gedrag).
+      // De 1-klik-knop roept _evcLinkSuggested aan; die zet
+      // _evcLinkAttendeeId en delegeert naar de bestaande _evcLinkDeal-
+      // logica → link-deal endpoint → herlaad attendees.
+      const otherBtn = `<button type="button" class="evc-link-sale" data-att="${esc(a.id)}" data-name="${esc(naam)}" data-email="${esc(a.email || '')}" data-cid="${esc(a.customer_id || '')}" title="Zoek zelf een andere deal om te koppelen" style="margin-left:6px;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;background:transparent;color:var(--accent-cyan,#0891b2);border:1px dashed var(--accent-cyan,#0891b2);cursor:pointer;display:inline-flex;align-items:center;gap:4px"><i class="ti ti-link"></i> Sale koppelen</button>`;
+      const s = a.suggested_deal;
+      if (s && s.deal_id) {
+        const sugEur = s.total_incl != null ? _evcEur(s.total_incl) : '—';
+        const sugMeta = s.quote_reference
+          ? esc(s.quote_reference)
+          : (s.customer_label ? esc(s.customer_label) : '');
+        const metaStr = sugMeta ? ` (${sugMeta})` : '';
+        saleBadge = `<span style="margin-left:6px;display:inline-flex;align-items:center;gap:6px;padding:3px 8px 3px 10px;border-radius:99px;font-size:11px;font-weight:600;background:rgba(5,150,105,0.14);color:#059669;border:1px solid rgba(5,150,105,0.35)" title="Zelfde klant — waarschijnlijk deze sale">
+          <span>💡 Mogelijke sale: ${esc(sugEur)}${esc(metaStr)}</span>
+          <button type="button" class="evc-link-suggested" data-att="${esc(a.id)}" data-deal="${esc(s.deal_id)}" title="Koppel deze deal in één klik" style="padding:2px 10px;border-radius:99px;font-size:11px;font-weight:700;background:#059669;color:#fff;border:1px solid #059669;cursor:pointer;display:inline-flex;align-items:center;gap:4px"><i class="ti ti-link"></i> Koppel</button>
+        </span>${otherBtn}`;
+      } else {
+        saleBadge = otherBtn;
+      }
     }
     return `
       <div class="evc-att-row" data-att="${esc(a.id)}" style="padding:10px 0;border-bottom:1px solid var(--border)">
