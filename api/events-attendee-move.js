@@ -197,14 +197,35 @@ export default async function handler(req, res) {
       console.error('[events-attendee-move tag-copy]', e?.message || e);
     }
 
-    // UPDATE bron-attendee: markeer als geswitched.
-    const { error: updErr } = await supabaseAdmin
-      .from('event_attendees')
-      .update({
-        status:      'switched_to_other_event',
-        switched_at: nowIso,
-      })
-      .eq('id', source.id);
+    // UPDATE bron-attendee: markeer als geswitched + bestemming.
+    // switched_to_event_id is nieuw sinds migratie 026 — bij 42703 (kolom
+    // ontbreekt) retry zonder die kolom zodat de move-flow niet breekt
+    // vóór de migratie draait.
+    let updErr = null;
+    {
+      const richUpdate = {
+        status:               'switched_to_other_event',
+        switched_at:          nowIso,
+        switched_to_event_id: targetEventId,
+      };
+      const r1 = await supabaseAdmin
+        .from('event_attendees')
+        .update(richUpdate)
+        .eq('id', source.id);
+      updErr = r1.error;
+      if (updErr && (updErr.code === '42703' || updErr.code === 'PGRST204')) {
+        // Kolom ontbreekt → retry zonder switched_to_event_id.
+        console.warn('[events-attendee-move] switched_to_event_id kolom ontbreekt — draai migratie 026 voor volledige bestemmings-audit');
+        const r2 = await supabaseAdmin
+          .from('event_attendees')
+          .update({
+            status:      'switched_to_other_event',
+            switched_at: nowIso,
+          })
+          .eq('id', source.id);
+        updErr = r2.error;
+      }
+    }
     if (updErr) {
       // Niet fataal; nieuwe rij staat al. Log en ga door.
       console.error('[events-attendee-move source-update]', updErr.message);
