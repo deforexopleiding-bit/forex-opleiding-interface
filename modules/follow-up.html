@@ -9527,6 +9527,32 @@
       try { if (typeof switchTab === 'function') switchTab('leads'); }
       catch (e) { console.error('[no-show] switchTab fout:', e); }
 
+      // switchTab('leads') triggert loadLeadsTab() dat _leadsState.items
+      // van de server herlaadt en onze zojuist ge-injecteerde leadObj
+      // + selectedId overschrijft. Zonder her-injectie is de lead na de
+      // reload NIET zichtbaar in de werklijst (event-leads uit een
+      // reload vallen niet altijd binnen de default filter). Poll +
+      // re-inject + selectLead lost dit deterministisch op, analoog aan
+      // het data-af-open-patroon rond regel ~7855.
+      const trySelect = (attempt = 0) => {
+        try {
+          const items = _leadsState?.items || [];
+          const has = items.some((x) => x.id === leadId);
+          if (!has) {
+            // Lead niet in server-lijst → her-injecteer onze leadObj vooraan
+            // zodat de lead-cards 'em rendert. renderCockpitList wordt
+            // hieronder direct getriggerd door selectLead → renderLeadDetail.
+            if (Array.isArray(_leadsState?.items)) _leadsState.items = [leadObj, ..._leadsState.items];
+            try { if (typeof renderCockpitList === 'function') renderCockpitList(); } catch (_) {}
+          }
+          selectLead(leadId);
+        } catch (e) {
+          console.error('[no-show] selectLead retry', attempt, e?.message || e);
+          if (attempt < 20) setTimeout(() => trySelect(attempt + 1), 100);
+        }
+      };
+      setTimeout(() => trySelect(0), 300);
+
       try {
         const numEl = document.getElementById('cockpit-number');
         if (numEl) numEl.value = attendee.phone || '';
