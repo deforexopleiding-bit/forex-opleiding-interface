@@ -401,6 +401,24 @@
   </div>
 </div>
 
+<!-- Sale koppelen — deal-zoeker modal (Blok B). -->
+<div class="modal-overlay hidden" id="evcLinkSaleModal" role="dialog" aria-modal="true">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <h2><i class="ti ti-link"></i> Sale koppelen</h2>
+      <button class="modal-close" type="button" onclick="_evcCloseLinkSaleModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px">Zoek een deal op klantnaam, e-mail of offertenummer. Alle deals in het systeem zijn doorzoekbaar.</div>
+      <input type="text" id="evcLinkSaleSearch" placeholder="Bijv. 'Jansen' of '2024-…'" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:inherit;margin-bottom:10px">
+      <div id="evcLinkSaleResults" style="max-height:360px;overflow-y:auto;padding-right:2px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" type="button" onclick="_evcCloseLinkSaleModal()">Annuleren</button>
+    </div>
+  </div>
+</div>
+
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
 <script src="/modules/shared/theme-shared.js"></script>
@@ -2097,12 +2115,27 @@ const FOLLOWUP_REASONS = [
   'Niet bereikbaar',
 ];
 
-// PR Z: uitkomst-dropdown bij attendance_status='aanwezig'
+// PR Z + Blok B: uitkomst-dropdown bij attendance_status='aanwezig'.
+// klant_geworden en twijfelt_nog nieuw sinds Blok B (sale + follow-up
+// planning met verplichte notitie).
 const ATT_OUTCOMES = [
   { value: 'opvolgen',        label: 'Opvolgen' },
+  { value: 'twijfelt_nog',    label: 'Twijfelt nog' },
+  { value: 'klant_geworden',  label: 'Klant geworden' },
   { value: 'geen_interesse',  label: 'Geen interesse' },
   { value: 'nog_onbekend',    label: 'Nog onbekend' },
 ];
+// Outcomes die de follow-up planner + verplichte notitie triggeren
+// (naast attendance_status='no_show'). Server-side identiek in
+// events-complete-core.js.
+const _EVC_FOLLOWUP_OUTCOMES = new Set(['opvolgen', 'twijfelt_nog']);
+const _EVC_REASON_REQUIRED   = new Set(['opvolgen', 'twijfelt_nog']);
+// Euro-notatie voor sale-badges.
+function _evcEur(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '';
+  return '€' + n.toLocaleString('nl-NL', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
 
 let _evCompleteFollowupOwners = []; // [{ id, full_name, email }]
 
@@ -2173,6 +2206,109 @@ async function openEvCompleteModal() {
   }
 }
 
+// ── Sale koppelen — modal + deal-search (Blok B) ─────────────────────
+// Vanuit een attendee zonder gekoppelde deal opent de gebruiker deze
+// modal om ALLE deals te doorzoeken (niet beperkt tot eigen klant) en
+// er eentje aan de attendee te hangen. Endpoint:
+// /api/deals-search + /api/events-attendee-link-deal.
+let _evcLinkAttendeeId = null;
+let _evcLinkSearchTimer = null;
+function _evcOpenLinkSaleModal(attendeeId) {
+  _evcLinkAttendeeId = attendeeId;
+  const m = document.getElementById('evcLinkSaleModal');
+  if (!m) return;
+  const input = document.getElementById('evcLinkSaleSearch');
+  const list  = document.getElementById('evcLinkSaleResults');
+  if (input) input.value = '';
+  if (list)  list.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding:8px">Typ minimaal 2 tekens om te zoeken…</div>';
+  m.classList.remove('hidden');
+  try { input?.focus(); } catch (_) {}
+}
+function _evcCloseLinkSaleModal() {
+  _evcLinkAttendeeId = null;
+  document.getElementById('evcLinkSaleModal')?.classList.add('hidden');
+}
+async function _evcRunDealSearch(q) {
+  const list = document.getElementById('evcLinkSaleResults');
+  if (!list) return;
+  if (!q || q.length < 2) {
+    list.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding:8px">Typ minimaal 2 tekens om te zoeken…</div>';
+    return;
+  }
+  list.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding:8px">Zoeken…</div>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/deals-search?q=' + encodeURIComponent(q));
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+    const items = Array.isArray(d.items) ? d.items : [];
+    if (items.length === 0) {
+      list.innerHTML = '<div style="font-size:12px;color:var(--text-dim);padding:8px">Geen deals gevonden voor "' + esc(q) + '".</div>';
+      return;
+    }
+    list.innerHTML = items.map((it) => {
+      const dt = it.created_at ? new Date(it.created_at).toLocaleDateString('nl-NL', { day:'numeric', month:'short', year:'numeric' }) : '';
+      const eur = it.total_incl != null ? _evcEur(it.total_incl) : '—';
+      const st = it.tl_quotation_status || '—';
+      const ref = it.reference || it.tl_quotation_id || String(it.id).slice(0, 8);
+      return `<button type="button" class="evc-link-pick" data-deal="${esc(it.id)}" style="width:100%;text-align:left;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;margin-bottom:6px;display:grid;grid-template-columns:1fr auto;gap:6px">
+        <div style="min-width:0">
+          <div style="font-size:12.5px;font-weight:600">${esc(it.customer_name)}</div>
+          <div style="font-size:11px;color:var(--text-dim)">${esc(ref)} · ${esc(st)}${dt ? ' · ' + esc(dt) : ''}</div>
+        </div>
+        <div style="font-size:12.5px;font-weight:700;color:var(--text)">${esc(eur)}</div>
+      </button>`;
+    }).join('');
+    list.querySelectorAll('.evc-link-pick').forEach((btn) => {
+      btn.addEventListener('click', () => _evcLinkDeal(btn.getAttribute('data-deal'), btn));
+    });
+  } catch (e) {
+    console.error('[deals-search]', e);
+    list.innerHTML = '<div style="font-size:12px;color:var(--red,#dc2626);padding:8px">Zoeken mislukt: ' + esc(e.message || 'onbekend') + '</div>';
+  }
+}
+async function _evcLinkDeal(dealId, btnEl) {
+  const attId = _evcLinkAttendeeId;
+  if (!attId || !dealId) return;
+  const origHtml = btnEl?.innerHTML || '';
+  if (btnEl) { btnEl.disabled = true; btnEl.style.opacity = '0.6'; }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-attendee-link-deal', {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body   : JSON.stringify({ attendee_id: attId, deal_id: dealId }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+    _evcCloseLinkSaleModal();
+    // Herlaad de attendees zodat de sale-badge met bedrag verschijnt.
+    try {
+      if (state.attendees) { await loadAttendees(); }
+      renderEvCompleteAttendees(state.attendees || []);
+    } catch (_) {}
+    try { window.AgentShared?.showToast?.('Deal gekoppeld aan deelnemer', 'success'); } catch (_) {}
+  } catch (e) {
+    console.error('[link-deal]', e);
+    alert('Koppelen mislukt: ' + (e?.message || 'onbekend'));
+    if (btnEl) { btnEl.disabled = false; btnEl.style.opacity = '1'; btnEl.innerHTML = origHtml; }
+  }
+}
+
+// Delegated click voor 'Sale koppelen'-knop op attendee-rijen.
+document.addEventListener('click', (ev) => {
+  const btn = ev.target?.closest?.('.evc-link-sale');
+  if (btn) {
+    ev.preventDefault();
+    _evcOpenLinkSaleModal(btn.getAttribute('data-att'));
+  }
+});
+document.addEventListener('input', (ev) => {
+  if (ev.target && ev.target.id === 'evcLinkSaleSearch') {
+    clearTimeout(_evcLinkSearchTimer);
+    const q = ev.target.value.trim();
+    _evcLinkSearchTimer = setTimeout(() => _evcRunDealSearch(q), 250);
+  }
+});
+
 function closeEvCompleteModal() {
   document.getElementById('evCompleteModal').classList.add('hidden');
 }
@@ -2206,11 +2342,19 @@ function renderEvCompleteAttendees(list) {
     const naam = [a.first_name, a.last_name].filter(Boolean).join(' ') || a.email || '(zonder naam)';
     const initial = (a.attendance_status === 'aanwezig' || a.attendance_status === 'no_show' || a.attendance_status === 'afgemeld')
       ? a.attendance_status : 'aanwezig';
-    const initialOutcome = (a.outcome === 'opvolgen' || a.outcome === 'geen_interesse' || a.outcome === 'nog_onbekend')
-      ? a.outcome : '';
-    const saleBadge = a.has_signed_deal
-      ? '<span title="Klant heeft een getekende offerte — telt als sale" style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;background:rgba(5,150,105,0.18);color:#059669"><i class="ti ti-circle-check"></i> Sale</span>'
-      : '';
+    const initialOutcome = ATT_OUTCOMES.some((o) => o.value === a.outcome) ? a.outcome : '';
+    // Sale-badge met bedrag incl BTW (Blok B). sale_total_incl komt uit
+    // events-attendees-list met computeDealTotals.
+    let saleBadge;
+    if (a.has_signed_deal) {
+      const eur = a.sale_total_incl != null ? ' ' + _evcEur(a.sale_total_incl) : '';
+      saleBadge = `<span title="Klant heeft een getekende offerte — telt als sale" style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;background:rgba(5,150,105,0.18);color:#059669"><i class="ti ti-circle-check"></i> Sale ${esc(eur)}</span>`;
+    } else {
+      // Geen sale? Toon 'Sale koppelen'-knop zodat de gebruiker
+      // handmatig een deal aan deze attendee kan hangen. Endpoint:
+      // /api/events-attendee-link-deal; deal-zoeker via /api/deals-search.
+      saleBadge = `<button type="button" class="evc-link-sale" data-att="${esc(a.id)}" title="Koppel handmatig een deal aan deze deelnemer" style="margin-left:6px;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;background:transparent;color:var(--accent-cyan,#0891b2);border:1px dashed var(--accent-cyan,#0891b2);cursor:pointer;display:inline-flex;align-items:center;gap:4px"><i class="ti ti-link"></i> Sale koppelen</button>`;
+    }
     return `
       <div class="evc-att-row" data-att="${esc(a.id)}" style="padding:10px 0;border-bottom:1px solid var(--border)">
         <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:flex-start">
@@ -2237,16 +2381,32 @@ function renderEvCompleteAttendees(list) {
           <div style="font-size:11.5px;color:var(--text-dim);font-weight:600;margin-bottom:6px">
             <i class="ti ti-arrow-iteration"></i> Follow-up — komt in Dave's scherm
           </div>
-          <div style="display:grid;grid-template-columns:1fr 130px 1fr;gap:6px">
-            <select class="evc-fu-reason" style="font-size:12.5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
-              <option value="">— Reden</option>
+          <!-- Termijn-presets 1/2/3 wk + zelf aantal dagen. Kies-preset
+               update .evc-fu-date. 'Zelf' is een nummer-veld waarvan de
+               'change' de datum berekent op basis van vandaag. -->
+          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;align-items:center">
+            <span style="font-size:11.5px;color:var(--text-dim);font-weight:600;margin-right:4px">Termijn:</span>
+            <button type="button" class="evc-fu-preset" data-days="7"  style="font-size:11.5px;padding:3px 10px;border:1px solid var(--border);border-radius:99px;background:var(--bg);color:var(--text);cursor:pointer">1 week</button>
+            <button type="button" class="evc-fu-preset" data-days="14" style="font-size:11.5px;padding:3px 10px;border:1px solid var(--border);border-radius:99px;background:var(--bg);color:var(--text);cursor:pointer">2 weken</button>
+            <button type="button" class="evc-fu-preset" data-days="21" style="font-size:11.5px;padding:3px 10px;border:1px solid var(--border);border-radius:99px;background:var(--bg);color:var(--text);cursor:pointer">3 weken</button>
+            <label style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;font-size:11.5px;color:var(--text-dim)">
+              Zelf: <input type="number" class="evc-fu-custom-days" min="1" max="365" placeholder="dagen" style="width:70px;font-size:11.5px;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+            </label>
+            <input type="date" class="evc-fu-date" value="${esc(defaultFollowupDate)}" style="font-size:12.5px;padding:3px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);margin-left:auto">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+            <select class="evc-fu-reason" title="Snelle reden (optioneel — vul zelf een uitgebreidere notitie hieronder)" style="font-size:12.5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              <option value="">— Reden (optioneel)</option>
               ${reasonOpts}
             </select>
-            <input type="date" class="evc-fu-date" value="${esc(defaultFollowupDate)}" style="font-size:12.5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
             <select class="evc-fu-owner" style="font-size:12.5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
               <option value="">— Eigenaar (default)</option>
               ${ownerOpts}
             </select>
+          </div>
+          <div style="position:relative">
+            <textarea class="evc-fu-note" rows="2" placeholder="Notitie (verplicht bij Opvolgen / Twijfelt nog)" style="width:100%;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:inherit;resize:vertical"></textarea>
+            <div class="evc-fu-note-err" style="display:none;font-size:11px;color:var(--red,#dc2626);margin-top:3px">Notitie is verplicht bij deze uitkomst.</div>
           </div>
         </div>
       </div>`;
@@ -2273,10 +2433,17 @@ function renderEvCompleteAttendees(list) {
     if (outcomeWrap) outcomeWrap.style.display = (attVal === 'aanwezig') ? 'flex' : 'none';
     if (attVal !== 'aanwezig' && outcomeSel) outcomeSel.value = '';
 
-    // Follow-up bij no-show OF (aanwezig + opvolgen).
+    // Follow-up bij no-show OF (aanwezig + opvolgen/twijfelt_nog).
     const showFu = (attVal === 'no_show') ||
-                   (attVal === 'aanwezig' && outcomeSel && outcomeSel.value === 'opvolgen');
+                   (attVal === 'aanwezig' && outcomeSel && _EVC_FOLLOWUP_OUTCOMES.has(outcomeSel.value));
     if (fuWrap) fuWrap.style.display = showFu ? 'block' : 'none';
+  }
+  // Helper: datum vandaag+X als YYYY-MM-DD lokaal.
+  function _evcDatePlus(days) {
+    const d = new Date();
+    d.setDate(d.getDate() + Number(days || 0));
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   }
   host.querySelectorAll('.evc-att-row').forEach((row) => {
     applyVisual(row);
@@ -2285,6 +2452,41 @@ function renderEvCompleteAttendees(list) {
     });
     const outcomeSel = row.querySelector('.evc-outcome');
     if (outcomeSel) outcomeSel.addEventListener('change', () => applyVisual(row));
+    // Termijn-presets: klik → zet datum + visual active-state.
+    row.querySelectorAll('.evc-fu-preset').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const days = Number(btn.dataset.days || 7);
+        const dateInp = row.querySelector('.evc-fu-date');
+        if (dateInp) dateInp.value = _evcDatePlus(days);
+        row.querySelectorAll('.evc-fu-preset').forEach((b) => {
+          b.style.background = b === btn ? 'rgba(9,61,84,0.12)' : 'var(--bg)';
+          b.style.borderColor = b === btn ? '#0a2f63' : 'var(--border)';
+          b.style.fontWeight = b === btn ? '700' : '400';
+        });
+        const custom = row.querySelector('.evc-fu-custom-days');
+        if (custom) custom.value = '';
+      });
+    });
+    // 'Zelf'-veld: update datum bij input.
+    const customDays = row.querySelector('.evc-fu-custom-days');
+    if (customDays) customDays.addEventListener('input', () => {
+      const n = Number(customDays.value);
+      if (!Number.isFinite(n) || n < 1) return;
+      const dateInp = row.querySelector('.evc-fu-date');
+      if (dateInp) dateInp.value = _evcDatePlus(n);
+      // Preset-buttons deactiveren.
+      row.querySelectorAll('.evc-fu-preset').forEach((b) => {
+        b.style.background = 'var(--bg)';
+        b.style.borderColor = 'var(--border)';
+        b.style.fontWeight = '400';
+      });
+    });
+    // Notitie: verberg foutmelding zodra er getypt wordt.
+    const noteEl = row.querySelector('.evc-fu-note');
+    if (noteEl) noteEl.addEventListener('input', () => {
+      const err = row.querySelector('.evc-fu-note-err');
+      if (err && noteEl.value.trim()) err.style.display = 'none';
+    });
   });
 }
 
@@ -2416,17 +2618,36 @@ async function submitEvComplete() {
         if (outcomeVal) item.outcome = outcomeVal;
       }
 
-      // PR Z: follow-up triggert bij no_show (nabellen) OF aanwezig+opvolgen.
+      // PR Z + Blok B: follow-up triggert bij no_show OF (aanwezig +
+      // opvolgen/twijfelt_nog). Notitie verplicht bij opvolgen/twijfelt_nog.
       const triggersFollowup = (status === 'no_show') ||
-                               (status === 'aanwezig' && item.outcome === 'opvolgen');
+                               (status === 'aanwezig' && _EVC_FOLLOWUP_OUTCOMES.has(item.outcome));
       if (triggersFollowup) {
         const reasonSel = r.querySelector('.evc-fu-reason');
+        const noteEl    = r.querySelector('.evc-fu-note');
         const dateInp   = r.querySelector('.evc-fu-date');
         const ownerSel  = r.querySelector('.evc-fu-owner');
+        const noteText  = noteEl ? noteEl.value.trim() : '';
+        const quickRsn  = reasonSel && reasonSel.value ? String(reasonSel.value).trim() : '';
+        // Notitie verplicht bij opvolgen/twijfelt_nog. UI-check blokkeert
+        // afronden + toont inline-fout; server-side dubbele check in
+        // events-complete-core.js.
+        if (status === 'aanwezig' && _EVC_REASON_REQUIRED.has(item.outcome) && !noteText) {
+          const errEl = r.querySelector('.evc-fu-note-err');
+          if (errEl) errEl.style.display = 'block';
+          if (noteEl) noteEl.focus();
+          const label = item.outcome === 'twijfelt_nog' ? 'Twijfelt nog' : 'Opvolgen';
+          throw new Error('Notitie is verplicht bij "' + label + '" — vul de reden in.');
+        }
+        // Combineer quick-reden + notitie: notitie is de bron; quickRsn
+        // gaat als prefix mee zodat we de context niet verliezen.
+        const combinedReason = noteText
+          ? (quickRsn ? quickRsn + ' — ' + noteText : noteText)
+          : (quickRsn || null);
         const fu = {
-          reason         : (reasonSel && reasonSel.value) ? reasonSel.value : null,
-          follow_up_date : (dateInp   && dateInp.value)   ? dateInp.value   : null,
-          owner_id       : (ownerSel  && ownerSel.value)  ? ownerSel.value  : null,
+          reason         : combinedReason,
+          follow_up_date : (dateInp && dateInp.value) ? dateInp.value : null,
+          owner_id       : (ownerSel && ownerSel.value) ? ownerSel.value : null,
         };
         item.followup = fu;
       }

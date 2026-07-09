@@ -88,6 +88,10 @@ export default async function handler(req, res) {
       source_ref : {
         event_id   : eventId,
         attendee_id: att.id,
+        // Marker voor de Follow-up cockpit: deze lead komt uit het
+        // event-afrond-scherm (outcome 'opvolgen' / 'twijfelt_nog' / no_show).
+        // Frontend toont een 'Follow-up event'-badge + de reason als notitie.
+        is_event_followup: true,
         ...(followup ? { followup_id: followup.id } : {}),
         ...(reason   ? { reason }                   : {}),
       },
