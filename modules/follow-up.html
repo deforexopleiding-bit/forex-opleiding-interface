@@ -5190,6 +5190,14 @@
     // loadLeadsTab de auto-open-first overslaan en de gekozen afspraak
     // openen. Setter is de #af-list-handler; consumer is loadLeadsTab.
     let _pendingApptOpen = null;
+    // Analoog voor een LEAD: de Opvolglijst-tab wil na 'Bel nu' de
+    // event-lead deterministisch openen in de Werklijst. loadLeadsTab
+    // fetch overschrijft _leadsState.items van de server, dus we
+    // bewaren de volledige leadObj (met is_no_show_followup + source_ref)
+    // om 'em zo nodig terug te injecteren als de server-lijst 'm mist.
+    // Setter: _nsCallItem. Consumer: loadLeadsTab.
+    let _pendingLeadOpen = null;
+    let _pendingLeadObj  = null;
     const _leadsState = {
       items       : [],
       counts      : null,
@@ -5407,7 +5415,25 @@
         const items = _leadsState.items;
         const belItems = items.filter((x) => (x.__worklistKind || 'bel') === 'bel');
         const stillThere = _leadsState.selectedId && belItems.some((x) => x.id === _leadsState.selectedId);
-        if (_pendingApptOpen) {
+        if (_pendingLeadOpen) {
+          // Opvolglijst → 'Bel nu' handshake. Open EXACT die lead; sla de
+          // gewone auto-open-first over (anders wint belItems[0]). De
+          // server-fetch heeft _leadsState.items overschreven; als de
+          // gekozen lead er niet in zit (event-lead valt niet in default-
+          // filter) her-injecteren we de bewaarde leadObj vooraan zodat
+          // renderCockpitCard + selectLead 'em vinden.
+          const lid = _pendingLeadOpen;
+          const lobj = _pendingLeadObj;
+          _pendingLeadOpen = null;
+          _pendingLeadObj  = null;
+          try {
+            if (!_leadsState.items.some((x) => x.id === lid) && lobj && lobj.id === lid) {
+              _leadsState.items = [lobj, ..._leadsState.items];
+            }
+          } catch (_) {}
+          _leadsState.selectedId = null;
+          try { selectLead(lid); } catch (e) { console.error('[opvolglijst] selectLead:', e?.message || e); }
+        } else if (_pendingApptOpen) {
           // Cross-tab handshake: gebruiker klikte "Openen" op een afspraak
           // in de Afspraken-tab. Open EXACT die afspraak; sla de gewone
           // auto-open-first over (anders wint het bovenste item de race).
@@ -9196,14 +9222,13 @@
       const counts = _fase3State.noShow.counts || {};
       const items  = _fase3State.noShow.items  || [];
       const active = _fase3State.noShow.filter || 'all';
+      // Endpoint levert de zoom_*-keys al MET appt_*-varianten meegeteld
+      // (zie api/follow-up-opvolglijst.js counts). Frontend leest daarom
+      // 1-op-1 uit de count-key; geen matches-reduce meer, die zorgde
+      // voor dubbeltelling (bv. zoom_noshow werd 2× opgeteld via
+      // ['zoom_noshow','appt_noshow']).
       el.innerHTML = NS_FILTERS.map((f) => {
-        let n;
-        if (f.key === 'all') n = items.length;
-        else n = f.matches.reduce((s, k) => s + (counts[k === 'event_noshow' ? 'event_noshow'
-                                                : k === 'zoom_noshow'     || k === 'appt_noshow'     ? 'zoom_noshow'
-                                                : k === 'zoom_reschedule' || k === 'appt_reschedule' ? 'zoom_reschedule'
-                                                : k === 'zoom_cancelled'  || k === 'appt_cancelled'  ? 'zoom_cancelled'
-                                                : k] || 0), 0);
+        const n = f.key === 'all' ? items.length : (counts[f.key] || 0);
         const activeCls = f.key === active ? ' active' : '';
         return `<button type="button" class="fu-oret-chip${activeCls}" data-ns-filter="${esc(f.key)}">
           ${esc(f.label)}<span class="cnt">${n}</span>
@@ -9524,34 +9549,16 @@
         if (_leadsState) _leadsState.selectedId = leadObj.id;
       } catch (e) { console.warn('[no-show] state-inject:', e); }
 
+      // Deterministisch: registreer een pending-lead-open handshake VOOR
+      // switchTab('leads'). loadLeadsTab (getriggerd door switchTab) leest
+      // _pendingLeadOpen af NA de server-fetch, her-injecteert de leadObj
+      // indien nodig, en roept selectLead aan als eerste tak — vóór de
+      // auto-open-first belItems[0] race. Setter hier; consumer in
+      // loadLeadsTab rond regel ~5410.
+      _pendingLeadOpen = leadId;
+      _pendingLeadObj  = leadObj;
       try { if (typeof switchTab === 'function') switchTab('leads'); }
       catch (e) { console.error('[no-show] switchTab fout:', e); }
-
-      // switchTab('leads') triggert loadLeadsTab() dat _leadsState.items
-      // van de server herlaadt en onze zojuist ge-injecteerde leadObj
-      // + selectedId overschrijft. Zonder her-injectie is de lead na de
-      // reload NIET zichtbaar in de werklijst (event-leads uit een
-      // reload vallen niet altijd binnen de default filter). Poll +
-      // re-inject + selectLead lost dit deterministisch op, analoog aan
-      // het data-af-open-patroon rond regel ~7855.
-      const trySelect = (attempt = 0) => {
-        try {
-          const items = _leadsState?.items || [];
-          const has = items.some((x) => x.id === leadId);
-          if (!has) {
-            // Lead niet in server-lijst → her-injecteer onze leadObj vooraan
-            // zodat de lead-cards 'em rendert. renderCockpitList wordt
-            // hieronder direct getriggerd door selectLead → renderLeadDetail.
-            if (Array.isArray(_leadsState?.items)) _leadsState.items = [leadObj, ..._leadsState.items];
-            try { if (typeof renderCockpitList === 'function') renderCockpitList(); } catch (_) {}
-          }
-          selectLead(leadId);
-        } catch (e) {
-          console.error('[no-show] selectLead retry', attempt, e?.message || e);
-          if (attempt < 20) setTimeout(() => trySelect(attempt + 1), 100);
-        }
-      };
-      setTimeout(() => trySelect(0), 300);
 
       try {
         const numEl = document.getElementById('cockpit-number');
