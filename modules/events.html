@@ -346,8 +346,11 @@ const STATUS_LABELS = {
 };
 
 const state = {
-  // Filter-state. status=null betekent default ('draft,published' op de API).
-  status: null,           // null | 'draft' | 'published' | 'cancelled' | 'archived'
+  // Filter-state. Default = 'published' zodat de Events-pagina meteen de
+  // Gepubliceerd-tab actief laadt (Gepubliceerd staat vooraan in de strip).
+  // status=null blijft geldig (Alle-tab) en resolvt server-side naar
+  // 'draft,published'.
+  status: 'published',    // null (Alle) | 'draft' | 'published' | 'cancelled' | 'archived'
   niveau: null,           // null | slug
   search: '',
   items: [],
@@ -485,9 +488,9 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
       </div>
 
       <div class="sr-segments" id="evSegments" style="margin-bottom:14px">
-        <button class="sr-seg active" data-status="">Alle</button>
+        <button class="sr-seg active" data-status="published">Gepubliceerd</button>
+        <button class="sr-seg" data-status="">Alle</button>
         <button class="sr-seg" data-status="draft">Concept</button>
-        <button class="sr-seg" data-status="published">Gepubliceerd</button>
         <button class="sr-seg" data-status="afgerond">Afgerond</button>
         <button class="sr-seg" data-status="cancelled">Geannuleerd</button>
         <button class="sr-seg" data-status="archived">Gearchiveerd</button>
