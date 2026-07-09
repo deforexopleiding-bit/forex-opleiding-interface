@@ -3454,6 +3454,11 @@
                 <select class="fu-callcard-voys" id="cockpit-voys" title="Uitgaande beller-ID (VoIPGRID kiest server-side; UI-hint voor toekomstige uitbreiding)">
                   <option value="">Voys · standaard</option>
                 </select>
+                <select class="fu-callcard-voys" id="cockpit-voys-line" title="Welke SIP-lijn (NL / BE). Automatisch = op basis van landnummer van de lead." style="margin-left:6px" hidden>
+                  <option value="auto">Lijn · automatisch</option>
+                  <option value="nl">NL-lijn</option>
+                  <option value="be">BE-lijn</option>
+                </select>
               </div>
               <div class="fu-softphone-status" id="softphone-status" aria-live="polite">
                 <span class="fu-softphone-dot" id="softphone-dot"></span>
@@ -6564,10 +6569,15 @@
     const _softphone = {
       available   : false,     // SIP.js geladen én config configured
       status      : 'idle',    // idle | connecting | connected | disconnected | failed | disabled
-      ua          : null,      // SIP.js UserAgent
-      registerer  : null,      // SIP.js Registerer
+      ua          : null,      // SIP.js UserAgent (van actieve account)
+      registerer  : null,      // SIP.js Registerer (van actieve account)
       session     : null,      // actieve Inviter/Session
-      config      : null,      // { wss, user, domain, password } — password nooit loggen
+      config      : null,      // actieve config { wss, user, domain, password } — password nooit loggen
+      // Dual-account (NL/BE) support:
+      accounts        : { nl: null, be: null }, // per key: { configured, wss, user, domain, password, caller_ids }
+      activeAccount   : null,    // 'nl' | 'be' — welk account is nu geregistreerd
+      accountOverride : 'auto',  // 'auto' | 'nl' | 'be' — handmatige override uit UI
+      switchingAccount: false,   // guard voor concurrent switches
       muted       : false,
       timerHandle : null,
       timerStart  : 0,
@@ -6619,6 +6629,20 @@
         _voysState.configured = !!d.configured;
         _voysState.loaded     = true;
         try { _renderVoysSelect(); } catch (_) { /* fail-soft */ }
+        // Dual-account: bewaar per-account config. NL top-level = fallback
+        // voor het NL-account als d.accounts.nl ontbreekt (oudere API-shape).
+        const accounts = (d.accounts && typeof d.accounts === 'object') ? d.accounts : {};
+        _softphone.accounts.nl = accounts.nl && accounts.nl.configured
+          ? { ...accounts.nl }
+          : (d.configured ? { configured: true, wss: d.wss, user: d.user, domain: d.domain, password: d.password, caller_ids: d.caller_ids || [] } : { configured: false, caller_ids: [] });
+        _softphone.accounts.be = (accounts.be && accounts.be.configured)
+          ? { ...accounts.be }
+          : { configured: false, caller_ids: [] };
+        // BE-lijn UI-select tonen als BE configured is.
+        try {
+          const lineSel = document.getElementById('cockpit-voys-line');
+          if (lineSel) lineSel.hidden = !_softphone.accounts.be.configured;
+        } catch (_) {}
         if (!d.configured) return { notConfigured: true };
         return { wss: d.wss, user: d.user, domain: d.domain, password: d.password };
       } catch (_) { return null; }
@@ -6662,28 +6686,15 @@
         return;
       }
       _softphone.config = cfg;
+      // Initieel registreren met NL-account (default). Als _softphone.accounts.nl
+      // volledig is, gebruik dat; anders val terug op de meegeleverde cfg
+      // (backward-compat pad wanneer /api/voys-sip-config nog geen accounts-
+      // sub-object stuurt).
+      const initialCfg = (_softphone.accounts.nl && _softphone.accounts.nl.configured)
+        ? _softphone.accounts.nl
+        : cfg;
       try {
-        const uri = SIPLib.UserAgent.makeURI('sip:' + cfg.user + '@' + cfg.domain);
-        if (!uri) throw new Error('SIP URI ongeldig');
-        const ua = new SIPLib.UserAgent({
-          uri,
-          transportOptions      : { server: cfg.wss },
-          authorizationUsername : cfg.user,
-          authorizationPassword : cfg.password,
-          logBuiltinEnabled     : false,   // voorkom dat SIP.js in de default console debug print
-          logLevel              : 'warn',
-        });
-        _softphone.ua = ua;
-        await ua.start();
-        const registerer = new SIPLib.Registerer(ua);
-        _softphone.registerer = registerer;
-        registerer.stateChange.addListener((state) => {
-          // SIP.js RegistererState: Initial | Registered | Unregistered | Terminated
-          if (state === 'Registered')   { _softphone.available = true;  _setSoftphoneStatus('connected'); }
-          else if (state === 'Unregistered') { _softphone.available = false; _setSoftphoneStatus('disconnected'); }
-          else if (state === 'Terminated')   { _softphone.available = false; _setSoftphoneStatus('failed'); }
-        });
-        await registerer.register();
+        await _buildAndRegister(initialCfg, 'nl', SIPLib);
       } catch (e) {
         // NB: e kan config-details bevatten in ontwikkeling — we loggen
         // alleen de message, nooit e.stack met SIP-URI's die password
@@ -6692,6 +6703,119 @@
         console.error('[softphone] init error:', e?.message || 'onbekend');
         _softphone.available = false;
         _setSoftphoneStatus('failed');
+      }
+    }
+
+    // Herbruikbare UA + Registerer opbouw voor een specifiek account.
+    // accountKey = 'nl' | 'be'. Wacht max 8s op RegistererState='Registered'.
+    // Bij success: _softphone.ua, .registerer, .config, .activeAccount gezet.
+    // Bij fail: throw met een leesbare reden (caller besluit fallback).
+    async function _buildAndRegister(cfg, accountKey, SIPLib) {
+      if (!SIPLib || !SIPLib.UserAgent) throw new Error('SIP.js niet geladen');
+      if (!cfg || !cfg.wss || !cfg.user || !cfg.domain || !cfg.password) {
+        throw new Error('Config ontbreekt of onvolledig voor account ' + (accountKey || '?'));
+      }
+      const uri = SIPLib.UserAgent.makeURI('sip:' + cfg.user + '@' + cfg.domain);
+      if (!uri) throw new Error('SIP URI ongeldig voor account ' + accountKey);
+      const ua = new SIPLib.UserAgent({
+        uri,
+        transportOptions      : { server: cfg.wss },
+        authorizationUsername : cfg.user,
+        authorizationPassword : cfg.password,
+        logBuiltinEnabled     : false,
+        logLevel              : 'warn',
+      });
+      await ua.start();
+      const registerer = new SIPLib.Registerer(ua);
+      registerer.stateChange.addListener((state) => {
+        if (state === 'Registered')   { _softphone.available = true;  _setSoftphoneStatus('connected'); }
+        else if (state === 'Unregistered') { _softphone.available = false; _setSoftphoneStatus('disconnected'); }
+        else if (state === 'Terminated')   { _softphone.available = false; _setSoftphoneStatus('failed'); }
+      });
+      // Vervang _softphone-state ATOMISCH zodat _softphoneCallLead niet
+      // op halve state pakt tijdens een switch.
+      _softphone.ua            = ua;
+      _softphone.registerer    = registerer;
+      _softphone.config        = cfg;
+      _softphone.activeAccount = accountKey;
+      await registerer.register();
+      // Wacht op 'Registered' (of timeout). SIP.js zet available=true in de
+      // stateChange-listener zodra het REGISTER-verkeer klaar is.
+      const start = Date.now();
+      while (!_softphone.available && (Date.now() - start) < 8000) {
+        await new Promise((r) => setTimeout(r, 100));
+        // Als de registerer inmiddels Terminated is → geen success meer.
+        try {
+          if (registerer.state === 'Terminated' || registerer.state === 'Unregistered') break;
+        } catch (_) {}
+      }
+      if (!_softphone.available) {
+        throw new Error('SIP-register timeout of geweigerd voor account ' + accountKey);
+      }
+    }
+
+    // Bepaal het doel-account voor een gegeven telefoonnummer.
+    // '+32' / '0032' → 'be' (mits BE configured), anders 'nl'.
+    function _accountForPhone(phone) {
+      if (!phone) return 'nl';
+      const cleaned = String(phone).replace(/[\s\-.]/g, '');
+      const isBe = /^\+32/.test(cleaned) || /^0032/.test(cleaned);
+      if (isBe && _softphone.accounts?.be?.configured) return 'be';
+      return 'nl';
+    }
+
+    // Zorg dat _softphone geregistreerd is met het target-account. Als 'ie
+    // al actief is: direct returnen. Anders: unregister oude, build+register
+    // nieuwe. Bij fout op BE → val terug op NL en toast een melding.
+    async function _ensureAccount(target) {
+      if (!target || target === _softphone.activeAccount) return true;
+      if (_softphone.switchingAccount) {
+        // Kort wachten tot de lopende switch klaar is; dan retry.
+        const start = Date.now();
+        while (_softphone.switchingAccount && (Date.now() - start) < 8000) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        if (target === _softphone.activeAccount) return true;
+      }
+      const targetCfg = _softphone.accounts?.[target];
+      if (!targetCfg || !targetCfg.configured) {
+        // Fallback naar NL — als target zelf niet configured is, hebben
+        // we niets om naartoe te wisselen.
+        if (target === 'nl') return false;
+        console.warn('[softphone] account', target, 'niet geconfigureerd — blijf op', _softphone.activeAccount);
+        return false;
+      }
+      const SIPLib = window.SIP;
+      if (!SIPLib || !SIPLib.UserAgent) throw new Error('SIP.js niet geladen');
+      _softphone.switchingAccount = true;
+      _setSoftphoneStatus('connecting', 'Overschakelen naar ' + (target === 'be' ? 'BE' : 'NL') + '-lijn…');
+      try {
+        // Unregister + stop huidige UA.
+        try { if (_softphone.registerer) await _softphone.registerer.unregister(); } catch (_) {}
+        try { if (_softphone.ua) await _softphone.ua.stop(); } catch (_) {}
+        _softphone.ua            = null;
+        _softphone.registerer    = null;
+        _softphone.available     = false;
+        _softphone.activeAccount = null;
+        await _buildAndRegister(targetCfg, target, SIPLib);
+        return true;
+      } catch (e) {
+        console.error('[softphone] switch naar', target, 'mislukt:', e?.message || 'onbekend');
+        // Fallback: probeer NL-account terug te zetten zodat er ALTIJD een
+        // werkende registratie is (Jeffrey's regel: nooit stil falen).
+        try {
+          const nlCfg = _softphone.accounts?.nl;
+          if (nlCfg && nlCfg.configured) {
+            await _buildAndRegister(nlCfg, 'nl', SIPLib);
+            try { window.AgentShared?.showToast?.((target === 'be' ? 'BE' : 'NL') + '-lijn niet beschikbaar — teruggevallen op NL-lijn', 'warn'); } catch (_) {}
+          }
+        } catch (fallbackErr) {
+          console.error('[softphone] NL-fallback ook mislukt:', fallbackErr?.message || 'onbekend');
+          _setSoftphoneStatus('failed');
+        }
+        return false;
+      } finally {
+        _softphone.switchingAccount = false;
       }
     }
 
@@ -6752,12 +6876,24 @@
     async function _softphoneCallLead(it) {
       const rawNumber = _currentCallNumber();
       if (!rawNumber) { alert('Vul eerst een telefoonnummer in.'); return; }
+      const SIPLib = window.SIP;
+      if (!SIPLib || !SIPLib.Inviter) { alert('SIP.js niet geladen.'); return; }
+
+      // Bepaal het doel-account (dual-lijn NL/BE). Override uit UI wint
+      // van landdetectie. Als het target-account niet actief is: her-
+      // registreer op aanvraag vóór de Inviter aangemaakt wordt.
+      const override = _softphone.accountOverride || 'auto';
+      const targetAccount = override === 'nl' ? 'nl'
+                         : override === 'be' && _softphone.accounts?.be?.configured ? 'be'
+                         : _accountForPhone(rawNumber);
+      if (targetAccount !== _softphone.activeAccount) {
+        await _ensureAccount(targetAccount);
+      }
+
       if (!_softphone.available || !_softphone.ua || !_softphone.config) {
         alert('Softphone niet gekoppeld — uitkomst-panel staat klaar voor handmatige registratie.');
         return;
       }
-      const SIPLib = window.SIP;
-      if (!SIPLib || !SIPLib.Inviter) { alert('SIP.js niet geladen.'); return; }
       // Normaliseer voor Voys/VoIPGRID: +31... → 0..., overig
       // internationaal → 00<landcode>..., 0... blijft. Zie
       // _normalizeDialNumber voor de volledige regels + comment.
@@ -7161,6 +7297,15 @@
       const voysSel = document.getElementById('cockpit-voys');
       if (voysSel) voysSel.addEventListener('change', () => {
         _voysState.selectedCallerId = voysSel.value || null;
+      });
+      // Line-override (dual-lijn NL/BE). Alleen zichtbaar als BE
+      // configured is (zie _loadSoftphoneConfig). Bewaart in
+      // _softphone.accountOverride; het daadwerkelijke wisselen gebeurt
+      // vlak vóór de call in _softphoneCallLead via _ensureAccount.
+      const lineSel = document.getElementById('cockpit-voys-line');
+      if (lineSel) lineSel.addEventListener('change', () => {
+        const v = lineSel.value || 'auto';
+        _softphone.accountOverride = (v === 'nl' || v === 'be') ? v : 'auto';
       });
       _loadVoysConfig();
 
