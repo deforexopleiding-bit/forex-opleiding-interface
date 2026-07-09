@@ -403,7 +403,10 @@
 
 <!-- Sale koppelen — deal-zoeker modal (Blok B). -->
 <div class="modal-overlay hidden" id="evcLinkSaleModal" role="dialog" aria-modal="true">
-  <div class="modal" style="max-width:640px">
+  <!-- .modal-card levert de bg-elev-achtergrond + border/radius zoals de
+       andere modals (attAddModal, attMoveModal). Klasse .modal bestaat
+       niet in dit bestand → kaart was transparant → tekst onleesbaar. -->
+  <div class="modal-card" style="max-width:640px">
     <div class="modal-header">
       <h2><i class="ti ti-link"></i> Sale koppelen</h2>
       <button class="modal-close" type="button" onclick="_evcCloseLinkSaleModal()">&#x2715;</button>
@@ -1694,7 +1697,13 @@ function renderMentorsTab() {
     `;
   }
 
-  document.getElementById('tab-mentors').innerHTML = `
+  // #tab-mentors bestaat ALLEEN als het event afgerond is (regel ~680).
+  // Bij een NIET-afgerond event roept openEvCompleteModal() nog steeds
+  // loadMentors() aan om was_present-vinkjes te preloaden; die keten
+  // eindigt hier. Zonder null-check → 'Cannot set properties of null'.
+  const target = document.getElementById('tab-mentors');
+  if (!target) return;
+  target.innerHTML = `
     <div class="att-toolbar">
       ${canAssign ? '<button class="btn-primary" style="margin-left:auto" onclick="openMentorAddModal()"><i class="ti ti-user-plus"></i> Mentor toevoegen</button>' : ''}
     </div>

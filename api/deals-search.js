@@ -7,7 +7,7 @@
 // de attendee's eigen customer_id) op:
 //   - klantnaam (customers.first_name / last_name / company_name)
 //   - klant-email (customers.email)
-//   - deal-referentie/offertenummer (deals.reference / deals.tl_quotation_id)
+//   - deal-referentie/offertenummer (deals.quote_reference / deals.tl_quotation_id)
 //
 // Response:
 //   { items: [{ id, reference, tl_quotation_id, tl_quotation_status,
@@ -47,13 +47,15 @@ export default async function handler(req, res) {
   const pattern = `%${safe}%`;
 
   try {
-    // 1) Deals matchen op reference / tl_quotation_id direct.
+    // 1) Deals matchen op quote_reference / tl_quotation_id direct.
+    // Kolom heet quote_reference, NIET reference (geverifieerd via
+    // information_schema — 'reference' bestaat niet op deals-tabel).
     const dealMatchIds = new Set();
     try {
       const { data: byRef } = await supabaseAdmin
         .from('deals')
         .select('id')
-        .or(`reference.ilike.${pattern},tl_quotation_id.ilike.${pattern}`)
+        .or(`quote_reference.ilike.${pattern},tl_quotation_id.ilike.${pattern}`)
         .limit(limit);
       for (const d of byRef || []) dealMatchIds.add(d.id);
     } catch (e) { console.warn('[deals-search ref]', e?.message); }
@@ -84,7 +86,7 @@ export default async function handler(req, res) {
     const ids = Array.from(dealMatchIds).slice(0, limit);
     const { data: deals, error: dealsErr } = await supabaseAdmin
       .from('deals')
-      .select('id, customer_id, reference, tl_quotation_id, tl_quotation_status, tl_quotation_accepted_at, discount_percentage, sale_type, created_at')
+      .select('id, customer_id, quote_reference, tl_quotation_id, tl_quotation_status, tl_quotation_accepted_at, discount_percentage, sale_type, created_at')
       .in('id', ids)
       .order('created_at', { ascending: false });
     if (dealsErr) throw new Error('deals: ' + dealsErr.message);
@@ -127,7 +129,9 @@ export default async function handler(req, res) {
       } catch (_) {}
       return {
         id                    : d.id,
-        reference             : d.reference || null,
+        // Frontend leest it.reference — response-veldnaam ongewijzigd,
+        // alleen de DB-kolom (quote_reference) is de bron.
+        reference             : d.quote_reference || null,
         tl_quotation_id       : d.tl_quotation_id || null,
         tl_quotation_status   : d.tl_quotation_status || null,
         tl_quotation_accepted_at: d.tl_quotation_accepted_at || null,
