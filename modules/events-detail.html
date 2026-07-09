@@ -379,7 +379,10 @@
         <span><strong>Bonus berekenen incl. BTW</strong> <span style="color:var(--text-faint); font-size:12px">— als uit, dan rekent de 3 %-bonus over het excl. BTW totaal van de getekende offerte</span></span>
       </label>
 
-      <h3 style="font-size:12px; font-weight:700; color:var(--text-faint); text-transform:uppercase; letter-spacing:.06em; margin:6px 0 8px">Aanwezigheid</h3>
+      <h3 style="font-size:12px; font-weight:700; color:var(--text-faint); text-transform:uppercase; letter-spacing:.06em; margin:6px 0 8px;display:flex;align-items:center;gap:6px">
+        Aanwezigheid
+        <i class="ti ti-info-circle" style="font-size:14px;color:var(--text-dim);cursor:help" title="Wat gebeurt er per keuze?&#10;• Aanwezig + Opvolgen → Follow-up module (termijn + notitie verplicht)&#10;• Aanwezig + Twijfelt nog → Follow-up module (termijn + notitie verplicht)&#10;• Aanwezig + Klant geworden → Sale / mentor-bonus, geen follow-up&#10;• Aanwezig + Geen interesse / Nog onbekend → Geen follow-up&#10;• No-show → Verschijnt automatisch in de No-show opvolglijst&#10;• Afgemeld → Alleen de status wordt vastgelegd"></i>
+      </h3>
       <div id="evCompleteAttendees"></div>
 
       <h3 style="font-size:12px; font-weight:700; color:var(--text-faint); text-transform:uppercase; letter-spacing:.06em; margin:16px 0 8px">Welke mentoren waren aanwezig?</h3>
@@ -2128,11 +2131,11 @@ const FOLLOWUP_REASONS = [
 // klant_geworden en twijfelt_nog nieuw sinds Blok B (sale + follow-up
 // planning met verplichte notitie).
 const ATT_OUTCOMES = [
-  { value: 'opvolgen',        label: 'Opvolgen' },
-  { value: 'twijfelt_nog',    label: 'Twijfelt nog' },
-  { value: 'klant_geworden',  label: 'Klant geworden' },
-  { value: 'geen_interesse',  label: 'Geen interesse' },
-  { value: 'nog_onbekend',    label: 'Nog onbekend' },
+  { value: 'opvolgen',        label: 'Opvolgen',        hint: '→ Follow-up module (termijn + notitie verplicht)' },
+  { value: 'twijfelt_nog',    label: 'Twijfelt nog',    hint: '→ Follow-up module (termijn + notitie verplicht)' },
+  { value: 'klant_geworden',  label: 'Klant geworden',  hint: '→ Sale / mentor-bonus, geen follow-up' },
+  { value: 'geen_interesse',  label: 'Geen interesse',  hint: '→ Afgesloten, geen follow-up' },
+  { value: 'nog_onbekend',    label: 'Nog onbekend',    hint: '→ Geen follow-up' },
 ];
 // Outcomes die de follow-up planner + verplichte notitie triggeren
 // (naast attendance_status='no_show'). Server-side identiek in
@@ -2467,18 +2470,21 @@ function renderEvCompleteAttendees(list) {
             })()}
           </div>
           <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">
-            <label class="evc-st" style="font-size:12px;padding:4px 9px;border:1px solid var(--border);border-radius:99px;cursor:pointer"><input type="radio" name="evc_${esc(a.id)}" value="aanwezig" ${initial === 'aanwezig' ? 'checked' : ''} style="display:none"> Aanwezig</label>
-            <label class="evc-st" style="font-size:12px;padding:4px 9px;border:1px solid var(--border);border-radius:99px;cursor:pointer"><input type="radio" name="evc_${esc(a.id)}" value="no_show" ${initial === 'no_show' ? 'checked' : ''} style="display:none"> No-show</label>
-            <label class="evc-st" style="font-size:12px;padding:4px 9px;border:1px solid var(--border);border-radius:99px;cursor:pointer"><input type="radio" name="evc_${esc(a.id)}" value="afgemeld" ${initial === 'afgemeld' ? 'checked' : ''} style="display:none"> Afgemeld</label>
+            <label class="evc-st" title="De aanwezige was er. Kies daarna een uitkomst." style="font-size:12px;padding:4px 9px;border:1px solid var(--border);border-radius:99px;cursor:pointer"><input type="radio" name="evc_${esc(a.id)}" value="aanwezig" ${initial === 'aanwezig' ? 'checked' : ''} style="display:none"> Aanwezig</label>
+            <label class="evc-st" title="Niet verschenen. Komt automatisch in de No-show opvolglijst." style="font-size:12px;padding:4px 9px;border:1px solid var(--border);border-radius:99px;cursor:pointer"><input type="radio" name="evc_${esc(a.id)}" value="no_show" ${initial === 'no_show' ? 'checked' : ''} style="display:none"> No-show</label>
+            <label class="evc-st" title="Vooraf afgemeld. Alleen de status wordt vastgelegd." style="font-size:12px;padding:4px 9px;border:1px solid var(--border);border-radius:99px;cursor:pointer"><input type="radio" name="evc_${esc(a.id)}" value="afgemeld" ${initial === 'afgemeld' ? 'checked' : ''} style="display:none"> Afgemeld</label>
           </div>
         </div>
 
-        <div class="evc-outcome-wrap" style="margin-top:8px;display:${initial === 'aanwezig' ? 'flex' : 'none'};align-items:center;gap:8px">
-          <label style="font-size:11.5px;color:var(--text-dim);font-weight:600;min-width:70px">Uitkomst</label>
-          <select class="evc-outcome" style="font-size:12.5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);flex:1">
-            <option value="">— Kies</option>
-            ${outcomeOpts}
-          </select>
+        <div class="evc-outcome-wrap" style="margin-top:8px;display:${initial === 'aanwezig' ? 'block' : 'none'}">
+          <div style="display:flex;align-items:center;gap:8px">
+            <label style="font-size:11.5px;color:var(--text-dim);font-weight:600;min-width:70px">Uitkomst</label>
+            <select class="evc-outcome" style="font-size:12.5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);flex:1">
+              <option value="">— Kies</option>
+              ${outcomeOpts}
+            </select>
+          </div>
+          <div class="evc-outcome-hint" style="font-size:11px;color:var(--text-dim);margin-top:3px;margin-left:78px;min-height:14px"></div>
         </div>
 
         <div class="evc-followup-wrap" style="margin-top:8px;display:none;padding:10px;border:1px dashed var(--border);border-radius:8px;background:var(--bg-elev)">
@@ -2534,8 +2540,16 @@ function renderEvCompleteAttendees(list) {
     const fuWrap      = rowEl.querySelector('.evc-followup-wrap');
 
     // Laag 2: uitkomst alleen bij Aanwezig.
-    if (outcomeWrap) outcomeWrap.style.display = (attVal === 'aanwezig') ? 'flex' : 'none';
+    if (outcomeWrap) outcomeWrap.style.display = (attVal === 'aanwezig') ? 'block' : 'none';
     if (attVal !== 'aanwezig' && outcomeSel) outcomeSel.value = '';
+    // Hint-regeltje onder de uitkomst-dropdown: toont wat de gekozen
+    // uitkomst betekent (bv. '→ Follow-up module ...'). Leeg als geen keuze.
+    const hintEl = rowEl.querySelector('.evc-outcome-hint');
+    if (hintEl) {
+      const outVal = outcomeSel ? outcomeSel.value : '';
+      const meta = ATT_OUTCOMES.find((o) => o.value === outVal);
+      hintEl.textContent = (attVal === 'aanwezig' && meta && meta.hint) ? meta.hint : '';
+    }
 
     // Follow-up ALLEEN bij aanwezig + opvolgen/twijfelt_nog. No-show is
     // een kale status — geen uitkomst-dropdown, geen follow-up-blok.
