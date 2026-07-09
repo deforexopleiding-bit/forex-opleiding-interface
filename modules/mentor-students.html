@@ -841,6 +841,9 @@
         <button type="button" class="stu-act-btn" data-stu-action="signal" data-stu-id="${sidAttr}">
           <i class="ti ${sig ? 'ti-flag-filled' : 'ti-flag'}" style="${sig ? 'color:#b91c1c' : ''}"></i>${esc(signalLabel)}
         </button>
+        ${overdueN > 0 ? `<button type="button" class="stu-act-btn" data-stu-action="overdue-invoices" data-stu-id="${sidAttr}" data-stu-email="${esc(email || '')}" style="border-color:#fecaca;color:#b91c1c" title="Bekijk te late facturen">
+          <i class="ti ti-receipt"></i>Te late facturen (${overdueN})
+        </button>` : ''}
         <div class="stu-act-spacer"></div>
         <a href="#" class="stu-act-link" data-stu-action="detail" data-stu-id="${sidAttr}">Student openen →</a>
       </div>
@@ -879,6 +882,7 @@
         if (action === 'assess')      _openAssessForm(sid);
         else if (action === 'cert')   _triggerFundedUpload(sid);
         else if (action === 'signal') _openSignalModal(sid);
+        else if (action === 'overdue-invoices') _openOverdueInvoicesModal(el.dataset.stuEmail || '');
         else if (action === 'detail') _loadStudentDetail(sid);
       });
     });
@@ -1122,6 +1126,121 @@
         _toggleStudentCard(sid, true);
       }
     );
+  }
+
+  // ── Overdue-facturen modal ─────────────────────────────────────────────
+  // Toont per te late factuur: nummer, factuurdatum (issue_date), openstaand
+  // bedrag (incl BTW) + knop "Factuur opnieuw versturen". Backend-endpoint
+  // borgt de scope-check (alleen eigen studenten).
+  function _closeOverdueModal() {
+    const el = document.getElementById('overdueInvoicesModal');
+    if (el) el.remove();
+  }
+  async function _openOverdueInvoicesModal(email) {
+    if (!email) return;
+    _closeOverdueModal(); // idempotent
+    const overlay = document.createElement('div');
+    overlay.id = 'overdueInvoicesModal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px';
+    overlay.innerHTML = `
+      <div role="dialog" aria-modal="true" style="background:var(--bg,#fff);border-radius:12px;max-width:720px;width:100%;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.35)">
+        <div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--border);background:var(--bg-elev)">
+          <i class="ti ti-receipt" style="color:#b91c1c"></i>
+          <div style="flex:1;font-weight:700;font-size:15px">Te late facturen</div>
+          <div style="font-size:12px;color:var(--text-dim)" data-oiv-recipient>${esc(email)}</div>
+          <button type="button" class="stu-act-btn" data-oiv-close style="padding:4px 10px;font-size:12px">Sluiten</button>
+        </div>
+        <div style="padding:14px 20px;border-bottom:1px solid var(--border);background:rgba(185,28,28,0.05);font-size:13px" data-oiv-summary>Laden…</div>
+        <div style="overflow-y:auto;flex:1;padding:6px 20px 16px" data-oiv-body>
+          <div style="color:var(--text-faint);font-size:12.5px;padding:20px;text-align:center">Laden…</div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    // Sluit-handlers.
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) _closeOverdueModal(); });
+    overlay.querySelector('[data-oiv-close]')?.addEventListener('click', _closeOverdueModal);
+
+    try {
+      const apiFetch = window.AgentShared?.apiFetch;
+      if (typeof apiFetch !== 'function') throw new Error('apiFetch niet beschikbaar');
+      const r = await apiFetch('/api/mentor-student-overdue-invoices?email=' + encodeURIComponent(email));
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      const items = Array.isArray(d.items) ? d.items : [];
+      const kpi   = d.kpi || { count: 0, sum_open: 0 };
+      const $sum  = overlay.querySelector('[data-oiv-summary]');
+      const $body = overlay.querySelector('[data-oiv-body]');
+      if ($sum) {
+        $sum.innerHTML = `<strong>${kpi.count || 0}</strong> te late ${kpi.count === 1 ? 'factuur' : 'facturen'} · totaal openstaand: <strong>${_eur(kpi.sum_open || 0)}</strong>`;
+      }
+      if (items.length === 0) {
+        $body.innerHTML = `<div style="color:var(--text-faint);font-size:12.5px;padding:20px;text-align:center">Geen te late facturen gevonden.</div>`;
+        return;
+      }
+      $body.innerHTML = `
+        <table class="data-table" style="width:100%;margin-top:8px;font-size:13px">
+          <thead>
+            <tr style="background:var(--bg-elev);text-align:left">
+              <th style="padding:8px 10px">Nummer</th>
+              <th style="padding:8px 10px">Factuurdatum</th>
+              <th style="padding:8px 10px">Vervaldatum</th>
+              <th style="padding:8px 10px;text-align:right">Bedrag openstaand</th>
+              <th style="padding:8px 10px"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.map((it) => `
+              <tr style="border-top:1px solid var(--border)" data-oiv-row="${esc(it.invoice_id)}">
+                <td style="padding:8px 10px;font-weight:600">${esc(it.invoice_number || '—')}</td>
+                <td style="padding:8px 10px">${esc(fmtDateNL(it.invoice_date))}</td>
+                <td style="padding:8px 10px;color:#b91c1c">${esc(fmtDateNL(it.due_date))}</td>
+                <td style="padding:8px 10px;text-align:right;font-weight:600">${_eur(it.amount_open || 0)}</td>
+                <td style="padding:8px 10px;text-align:right">
+                  <button type="button" class="stu-act-btn" data-oiv-resend="${esc(it.invoice_id)}" style="font-size:11.5px;padding:5px 10px">
+                    <i class="ti ti-mail-forward"></i>Opnieuw versturen
+                  </button>
+                  <div data-oiv-status="${esc(it.invoice_id)}" style="font-size:11px;margin-top:4px;color:var(--text-faint)"></div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>`;
+      // Wire resend-buttons.
+      overlay.querySelectorAll('[data-oiv-resend]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const invId  = btn.dataset.oivResend;
+          const $stat  = overlay.querySelector('[data-oiv-status="' + invId.replace(/"/g, '') + '"]');
+          if (btn.disabled) return;
+          btn.disabled = true;
+          if ($stat) { $stat.textContent = 'Versturen…'; $stat.style.color = 'var(--text-dim)'; }
+          try {
+            const apiFetch2 = window.AgentShared?.apiFetch;
+            const rr = await apiFetch2('/api/mentor-student-invoice-resend', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ invoice_id: invId }),
+            });
+            const dd = await rr.json();
+            if (!rr.ok) throw new Error(dd?.error || ('HTTP ' + rr.status));
+            if ($stat) { $stat.textContent = '✓ Verstuurd naar ' + (dd.recipient_email || email); $stat.style.color = '#047857'; }
+            btn.innerHTML = '<i class="ti ti-check"></i>Verstuurd';
+          } catch (e) {
+            if ($stat) { $stat.textContent = 'Fout: ' + (e?.message || 'onbekend'); $stat.style.color = '#b91c1c'; }
+            btn.disabled = false;
+          }
+        });
+      });
+    } catch (e) {
+      const $body = overlay.querySelector('[data-oiv-body]');
+      const $sum  = overlay.querySelector('[data-oiv-summary]');
+      if ($sum)  $sum.textContent  = 'Kon lijst niet ophalen.';
+      if ($body) $body.innerHTML   = `<div style="color:#b91c1c;font-size:12.5px;padding:20px;text-align:center">Fout: ${esc(e?.message || 'onbekend')}</div>`;
+    }
+  }
+  // Kleine lokale eur-helper (mentor-students.html heeft er nog geen).
+  function _eur(n) {
+    try { return new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(Number(n) || 0); }
+    catch (_) { return '€ ' + (Number(n) || 0).toFixed(2); }
   }
 
   // ── Student-detail (uitgeklapt body) ──────────────────────────────────
