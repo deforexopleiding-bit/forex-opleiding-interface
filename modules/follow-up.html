@@ -3106,8 +3106,8 @@
         <span class="fu-tab-count" id="tab-count-event-bellijst">—</span>
       </button>
       <button class="fu-tab fu-tab--primary" data-tab="noshow" role="tab" aria-selected="false">
-        <i class="ti ti-user-off" aria-hidden="true"></i>
-        <span>No show events</span>
+        <i class="ti ti-list-check" aria-hidden="true"></i>
+        <span>Opvolglijst</span>
         <span class="fu-tab-count" id="tab-count-noshow">—</span>
       </button>
       <!-- Onderstaande 4 tabs verhuisd naar de "Zie meer"-dropdown
@@ -3693,7 +3693,30 @@
         </div>
         <button class="fu-lead-btn" id="ns-refresh" title="Vernieuwen" style="margin-left:auto"><i class="ti ti-refresh"></i></button>
       </div>
+      <!-- Sub-filter pills — JS vult 'em met tellers per categorie. -->
+      <div class="fu-oret-chips" id="ns-chips" role="tablist" style="margin-bottom:10px"></div>
       <div id="ns-list"></div>
+    </div>
+
+    <!-- Afschrijf-modal (Opvolglijst) — verplichte reden vóór 'Afschrijven'
+         gedrukt kan worden. Sluit lead/appointment af (naar Afgeboekt). -->
+    <div class="fu-modal-backdrop" id="ns-afschrijf-modal" style="display:none;">
+      <div class="fu-modal" role="dialog" aria-modal="true" style="max-width:520px">
+        <div class="fu-modal-header">
+          <h2>🗑 Opvolg-item afschrijven</h2>
+          <button type="button" class="fu-modal-close" id="ns-afschrijf-close" aria-label="Sluiten"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="fu-modal-body">
+          <div style="font-size:13px;margin-bottom:8px" id="ns-afschrijf-subject">—</div>
+          <label for="ns-afschrijf-reason" style="display:block;font-weight:600;font-size:12px;margin-bottom:4px">Reden afschrijven <span style="color:#dc2626">*</span></label>
+          <textarea id="ns-afschrijf-reason" rows="4" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;font-family:inherit;font-size:13px;resize:vertical" placeholder="Bijv. Klant onbereikbaar na 4 pogingen, geen interesse getoond."></textarea>
+          <div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Verplicht — de reden wordt in de audit-notitie opgeslagen. Item verdwijnt uit Opvolglijst en verschijnt in Afgeboekt.</div>
+        </div>
+        <div class="fu-modal-footer">
+          <button type="button" class="fu-lead-btn" id="ns-afschrijf-cancel">Annuleren</button>
+          <button type="button" class="fu-lead-btn primary" id="ns-afschrijf-go" disabled><i class="ti ti-trash"></i> Afschrijven</button>
+        </div>
+      </div>
     </div>
 
     <!-- Oude retenties-tab: browsbare achterstand. Retentie-abo's die AL
@@ -5553,12 +5576,12 @@
       const el = document.getElementById('cockpit-buckets');
       if (!el) return;
       const items = _applyClientFilters(_leadsState.items || []);
-      // Pre-fetch de event-bellijst voor de CTA-rij — non-blokkerend.
-      // Bij eerste renderCockpitList weten we de open-count nog niet;
-      // loadEventBellijstTab callt renderCockpitList opnieuw zodra hij
-      // klaar is.
+      // Pre-fetch de event-bellijst + opvolglijst voor de CTA-rijen —
+      // non-blokkerend. Bij eerste render weten we de counts nog niet;
+      // hun load-functies callen renderCockpitList opnieuw zodra klaar.
       _maybePrefetchEventBellijstForCta();
-      const ctaHtml = _renderEventBellijstCta();
+      _maybePrefetchOpvolglijstForCta();
+      const ctaHtml = _renderEventBellijstCta() + _renderOpvolglijstCta();
       if (!items.length) {
         el.innerHTML = ctaHtml + '<div class="fu-empty"><i class="ti ti-inbox fu-empty-icon"></i>Geen leads in deze selectie.</div>';
         return;
@@ -7487,7 +7510,7 @@
       afgeboekt   : { items: [], counts: null, filter: 'all', loading: false },
       oudeRetenties: { items: [], counts: null, filter: 'nieuw', loading: false },
       eventBellijst: { event: null, attendees: [], loading: false },
-      noShow       : { items: [], loading: false, upcomingEvents: null, upcomingEventsLoadedAt: 0 },
+      noShow       : { items: [], counts: {}, filter: 'all', loading: false, upcomingEvents: null, upcomingEventsLoadedAt: 0 },
     };
 
     // Gecombineerd datum + tijd voor afspraak-rijen: "Vandaag 17:04",
@@ -8956,41 +8979,91 @@
       }
     }
 
-    // ── NO-SHOW-TAB ───────────────────────────────────────────────────────
-    // Attendees van AFGERONDE events die niet zijn komen opdagen en nog
-    // opgevolgd moeten worden. Endpoint: /api/follow-up-no-show-list.
-    // Belactie hergebruikt de softphone: lazy event-lead aanmaken via
-    // /api/event-followup-to-lead (source='event'), state-inject, switchTab
-    // naar Werklijst, en dial. Bij ontbrekend nummer: geen call, wel
-    // openen + toast.
+    // ── OPVOLGLIJST-TAB (v2 — 4 bronnen samengevoegd) ─────────────────────
+    // Endpoint: /api/follow-up-opvolglijst. Vier categorieën in één lijst:
+    //   event_noshow / zoom_noshow / zoom_reschedule / zoom_cancelled
+    // Per rij: herkomst-badge + actie-hint + Bel + Afschrijven. Sub-filter-
+    // pills bovenaan (Alles + 4 categorieën met tellers). Event-noshow-
+    // items behouden de outcome-knoppen + verplaats-naar-event + vragen-
+    // lijst-flow uit de vorige iteratie (marker is_no_show_followup).
+
+    const NS_HERKOMST_META = {
+      event_noshow    : { label: 'Event no-show',    bg: '#7c3aed', icon: 'ti-presentation'   },
+      zoom_noshow     : { label: 'Zoom no-show',     bg: '#0f766e', icon: 'ti-video-off'      },
+      zoom_reschedule : { label: 'Zoom reschedule',  bg: '#0369a1', icon: 'ti-calendar-time'  },
+      zoom_cancelled  : { label: 'Zoom geannuleerd', bg: '#6b7280', icon: 'ti-ban'            },
+      appt_noshow     : { label: 'Afspraak no-show', bg: '#0f766e', icon: 'ti-user-off'       },
+      appt_reschedule : { label: 'Afspraak reschedule', bg: '#0369a1', icon: 'ti-calendar-time' },
+      appt_cancelled  : { label: 'Afspraak geannuleerd', bg: '#6b7280', icon: 'ti-ban'         },
+    };
+
+    // Filter-map: pill-key → herkomst-set die matcht. 'all' matcht alles.
+    const NS_FILTERS = [
+      { key: 'all',             label: 'Alle',              matches: null },
+      { key: 'event_noshow',    label: 'Event no-show',     matches: ['event_noshow'] },
+      { key: 'zoom_noshow',     label: 'Zoom no-show',      matches: ['zoom_noshow', 'appt_noshow'] },
+      { key: 'zoom_reschedule', label: 'Zoom reschedule',   matches: ['zoom_reschedule', 'appt_reschedule'] },
+      { key: 'zoom_cancelled',  label: 'Zoom geannuleerd',  matches: ['zoom_cancelled', 'appt_cancelled'] },
+    ];
+
     async function loadNoShowTab() {
       const headEl = document.getElementById('ns-header');
       const listEl = document.getElementById('ns-list');
       if (!headEl || !listEl) return;
       if (_fase3State.noShow.loading) return;
       _fase3State.noShow.loading = true;
+      if (!_fase3State.noShow.filter) _fase3State.noShow.filter = 'all';
       listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
       try {
-        const r = await window.AgentShared.apiFetch('/api/follow-up-no-show-list');
+        const r = await window.AgentShared.apiFetch('/api/follow-up-opvolglijst');
         const d = await r.json().catch(() => ({}));
         if (!r.ok) {
           if (d?.code === 'MIGRATION_REQUIRED') {
-            listEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Migratie 024 vereist voor no-show-opvolging.</div>';
+            listEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Migratie 024/025 vereist voor Opvolglijst.</div>';
             return;
           }
           throw new Error(d?.error || 'HTTP ' + r.status);
         }
-        _fase3State.noShow.items = d.attendees || [];
-        const cnt = typeof d.count === 'number' ? d.count : (d.attendees?.length || 0);
+        _fase3State.noShow.items  = d.items  || [];
+        _fase3State.noShow.counts = d.counts || {};
+        const cnt = typeof d.count === 'number' ? d.count : (d.items?.length || 0);
         const cntEl = document.getElementById('tab-count-noshow');
         if (cntEl) cntEl.textContent = cnt > 0 ? String(cnt) : '—';
+        _renderNoShowChips();
         _renderNoShow();
+        // Werklijst-CTA "Opvolglijst" meeverversen als de werklijst
+        // zichtbaar is. Fail-soft.
+        try {
+          const b = document.getElementById('cockpit-buckets');
+          if (b && typeof renderCockpitList === 'function') renderCockpitList();
+        } catch (_) {}
       } catch (e) {
-        console.error('[no-show-list]', e?.message || e);
+        console.error('[opvolglijst]', e?.message || e);
         listEl.innerHTML = '<div class="fu-empty" style="color:#b91c1c">Laden mislukt: ' + esc(e?.message || 'onbekend') + '</div>';
       } finally {
         _fase3State.noShow.loading = false;
       }
+    }
+
+    function _renderNoShowChips() {
+      const el = document.getElementById('ns-chips');
+      if (!el) return;
+      const counts = _fase3State.noShow.counts || {};
+      const items  = _fase3State.noShow.items  || [];
+      const active = _fase3State.noShow.filter || 'all';
+      el.innerHTML = NS_FILTERS.map((f) => {
+        let n;
+        if (f.key === 'all') n = items.length;
+        else n = f.matches.reduce((s, k) => s + (counts[k === 'event_noshow' ? 'event_noshow'
+                                                : k === 'zoom_noshow'     || k === 'appt_noshow'     ? 'zoom_noshow'
+                                                : k === 'zoom_reschedule' || k === 'appt_reschedule' ? 'zoom_reschedule'
+                                                : k === 'zoom_cancelled'  || k === 'appt_cancelled'  ? 'zoom_cancelled'
+                                                : k] || 0), 0);
+        const activeCls = f.key === active ? ' active' : '';
+        return `<button type="button" class="fu-oret-chip${activeCls}" data-ns-filter="${esc(f.key)}">
+          ${esc(f.label)}<span class="cnt">${n}</span>
+        </button>`;
+      }).join('');
     }
 
     function _renderNoShow() {
@@ -8998,54 +9071,105 @@
       const listEl = document.getElementById('ns-list');
       if (!headEl || !listEl) return;
       const arr = _fase3State.noShow.items || [];
+      const active = _fase3State.noShow.filter || 'all';
+      const filterMeta = NS_FILTERS.find((f) => f.key === active) || NS_FILTERS[0];
+      const shown = filterMeta.matches === null
+        ? arr
+        : arr.filter((it) => filterMeta.matches.includes(it.herkomst));
+
       headEl.innerHTML = `
-        <div class="fu-eb-header-title"><i class="ti ti-user-off"></i> No-show opvolging</div>
+        <div class="fu-eb-header-title"><i class="ti ti-list-check"></i> Opvolglijst</div>
         <div class="fu-eb-header-sub">
-          <span><i class="ti ti-users"></i> ${arr.length} openstaand${arr.length === 1 ? '' : 'e'}</span>
+          <span><i class="ti ti-users"></i> ${shown.length} openstaand${shown.length === 1 ? '' : 'e'}${active !== 'all' ? ' in filter' : ''}</span>
         </div>`;
 
-      if (!arr.length) {
-        listEl.innerHTML = '<div class="fu-eb-empty"><i class="ti ti-mood-happy"></i>Geen openstaande no-shows.</div>';
+      if (!shown.length) {
+        listEl.innerHTML = '<div class="fu-eb-empty"><i class="ti ti-mood-happy"></i>Geen openstaande opvolg-items in deze filter.</div>';
         return;
       }
-      listEl.innerHTML = arr.map((a) => {
-        const initials = _leadInitials(a.name);
-        const status = String(a.no_show_followup_status || '').toLowerCase();
-        // Zichtbare no-shows die eerder een outcome hebben gekregen die
-        // 'm nog niet afsluit — badge geven.
-        let markerBadge = '';
-        if (status === 'niet_bereikt') {
-          markerBadge = '<span class="status-badge" style="background:#f97316;color:#fff">Niet bereikt</span>';
-        } else if (status === 'terugbellen') {
-          markerBadge = '<span class="status-badge" style="background:#3b82f6;color:#fff">Terugbellen</span>';
-        } else {
-          markerBadge = '<span class="status-badge nieuw">Nog opvolgen</span>';
+      listEl.innerHTML = shown.map((it) => {
+        const initials = _leadInitials(it.name);
+        const meta = NS_HERKOMST_META[it.herkomst] || { label: it.herkomst_label || it.herkomst, bg: '#4b5563', icon: 'ti-tag' };
+        const herkomstBadge = `<span class="status-badge" style="background:${meta.bg};color:#fff;display:inline-flex;align-items:center;gap:4px"><i class="ti ${meta.icon}"></i>${esc(meta.label)}</span>`;
+
+        // Sub-marker voor event-noshows die eerder outcome hebben gekregen.
+        let subMarkerBadge = '';
+        if (it.type === 'attendee') {
+          const st = String(it.no_show_followup_status || '').toLowerCase();
+          if (st === 'niet_bereikt') subMarkerBadge = '<span class="status-badge" style="background:#f97316;color:#fff">Niet bereikt</span>';
+          else if (st === 'terugbellen') subMarkerBadge = '<span class="status-badge" style="background:#3b82f6;color:#fff">Terugbellen</span>';
         }
-        const phone = a.phone ? esc(a.phone) : '<span style="opacity:.5">— geen tel —</span>';
-        const email = a.email ? `<a href="mailto:${esc(a.email)}"><i class="ti ti-mail"></i> ${esc(a.email)}</a>` : '';
-        const evLine = a.event_title
-          ? `<span class="fu-ns-event-label"><i class="ti ti-presentation"></i> No-show bij ${esc(a.event_title)}${a.event_date ? ' · ' + esc(_fmtHMwithDate(a.event_date)) : ''}</span>`
+
+        const phone = it.phone ? esc(it.phone) : '<span style="opacity:.5">— geen tel —</span>';
+        const email = it.email ? `<a href="mailto:${esc(it.email)}"><i class="ti ti-mail"></i> ${esc(it.email)}</a>` : '';
+        const ctxLine = (it.type === 'attendee' && it.event_title)
+          ? `<span class="fu-ns-event-label"><i class="ti ti-presentation"></i> ${esc(it.event_title)}${it.scheduled_at ? ' · ' + esc(_fmtHMwithDate(it.scheduled_at)) : ''}</span>`
+          : (it.type === 'appointment' && it.scheduled_at)
+            ? `<span class="fu-ns-event-label"><i class="ti ti-calendar"></i> Gepland ${esc(_fmtHMwithDate(it.scheduled_at))}</span>`
+            : '';
+        const hintLine = it.actie_hint
+          ? `<span style="font-size:11px;color:var(--text-secondary)"><i class="ti ti-info-circle"></i> ${esc(it.actie_hint)}</span>`
           : '';
-        const canCall  = !!a.phone;
+
+        const canCall  = !!it.phone;
         const btnIcon  = canCall ? 'ti-phone-call'   : 'ti-external-link';
         const btnLabel = canCall ? 'Bel nu'          : 'Openen';
-        const btnTitle = canCall ? 'Bellen via softphone' : 'Geen telefoonnummer — open in werklijst voor handmatige opvolging';
+        const btnTitle = canCall ? 'Bellen via softphone' : 'Geen telefoonnummer — open handmatig';
+
         return `<div class="fu-eb-row">
           <div class="avatar">${esc(initials)}</div>
           <div>
-            <div class="name">${esc(a.name)}</div>
+            <div class="name">${esc(it.name)}</div>
             <div class="sub">
               <span><i class="ti ti-phone"></i> ${phone}</span>${email ? '<span>·</span>' + email : ''}
             </div>
-            ${evLine ? '<div class="sub" style="margin-top:2px">' + evLine + '</div>' : ''}
+            ${ctxLine ? '<div class="sub" style="margin-top:2px">' + ctxLine + '</div>' : ''}
+            ${hintLine ? '<div class="sub" style="margin-top:2px">' + hintLine + '</div>' : ''}
           </div>
-          ${markerBadge}
+          <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+            ${herkomstBadge}
+            ${subMarkerBadge}
+          </div>
           <div style="opacity:0"></div>
-          <div class="actions">
-            <button type="button" class="fu-lead-btn primary" data-ns-call="${esc(a.attendee_id)}" data-phone="${esc(a.phone || '')}" title="${esc(btnTitle)}"><i class="ti ${btnIcon}"></i> ${esc(btnLabel)}</button>
+          <div class="actions" style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">
+            <button type="button" class="fu-lead-btn primary" data-ns-call="${esc(it.uid)}" data-phone="${esc(it.phone || '')}" title="${esc(btnTitle)}"><i class="ti ${btnIcon}"></i> ${esc(btnLabel)}</button>
+            <button type="button" class="fu-lead-btn" data-ns-afschrijf="${esc(it.uid)}" title="Afschrijven met reden (naar Afgeboekt)"><i class="ti ti-trash"></i></button>
           </div>
         </div>`;
       }).join('');
+    }
+
+    // Cockpit-CTA: aantal openstaande opvolglijst-items.
+    function _openOpvolglijstCount() {
+      const arr = _fase3State?.noShow?.items || [];
+      return Array.isArray(arr) ? arr.length : 0;
+    }
+    // Genereer CTA-rij (of lege string bij count=0). Wordt door
+    // renderCockpitList mee-geprepend NAAST de event-bellijst-CTA.
+    function _renderOpvolglijstCta() {
+      const cnt = _openOpvolglijstCount();
+      if (cnt <= 0) return '';
+      const noun = cnt === 1 ? 'lead te bellen' : 'leads te bellen';
+      return `<div class="fu-cockpit-eventbelcta" data-goto-opvolglijst="1" role="button" tabindex="0"
+        style="display:flex;align-items:center;gap:12px;padding:12px 14px;margin-bottom:10px;border-radius:10px;background:var(--surface-card);border:1px solid var(--border-default);border-left:4px solid #7c3aed;cursor:pointer;transition:background .12s,border-color .12s">
+        <div style="width:36px;height:36px;border-radius:50%;background:#7c3aed;color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">
+          <i class="ti ti-list-check"></i>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:14px;color:var(--text-primary)">Opvolglijst</div>
+          <div style="font-size:12px;color:var(--text-secondary);margin-top:2px">${cnt} ${noun} (no-show / reschedule / geannuleerd)</div>
+        </div>
+        <i class="ti ti-chevron-right" style="color:var(--text-secondary);font-size:18px"></i>
+      </div>`;
+    }
+    let _cockpitOpvolglijstFetchTriggered = false;
+    function _maybePrefetchOpvolglijstForCta() {
+      const s = _fase3State?.noShow;
+      if (!s) return;
+      if (Array.isArray(s.items) && s.items.length > 0) return;
+      if (s.loading || _cockpitOpvolglijstFetchTriggered) return;
+      _cockpitOpvolglijstFetchTriggered = true;
+      try { loadNoShowTab(); } catch (_) {}
     }
 
     // Klik-delegation voor de No-show-tab (Bel/Openen-knop). Zelfde
@@ -9055,26 +9179,145 @@
       if (_nsDelegationBound) return;
       _nsDelegationBound = true;
       document.addEventListener('click', (ev) => {
-        const btn = ev.target?.closest?.('[data-ns-call]');
-        if (!btn) return;
-        ev.preventDefault();
-        ev.stopPropagation();
-        const id = btn.getAttribute('data-ns-call');
-        if (!id) return;
-        _nsCallAttendee(id, btn);
+        // Bel/openen-knop (uid-based sinds Opvolglijst-refactor).
+        const callBtn = ev.target?.closest?.('[data-ns-call]');
+        if (callBtn) {
+          ev.preventDefault(); ev.stopPropagation();
+          const uid = callBtn.getAttribute('data-ns-call');
+          if (uid) _nsCallItem(uid, callBtn);
+          return;
+        }
+        // Sub-filter-pill.
+        const chip = ev.target?.closest?.('[data-ns-filter]');
+        if (chip) {
+          ev.preventDefault(); ev.stopPropagation();
+          const key = chip.getAttribute('data-ns-filter') || 'all';
+          _fase3State.noShow.filter = key;
+          _renderNoShowChips();
+          _renderNoShow();
+          return;
+        }
+        // Afschrijf-knop → open modal met verplichte reden.
+        const afBtn = ev.target?.closest?.('[data-ns-afschrijf]');
+        if (afBtn) {
+          ev.preventDefault(); ev.stopPropagation();
+          const uid = afBtn.getAttribute('data-ns-afschrijf');
+          if (uid) _nsOpenAfschrijfModal(uid);
+          return;
+        }
       });
       const refresh = document.getElementById('ns-refresh');
       if (refresh) refresh.addEventListener('click', () => loadNoShowTab());
+
+      // Modal-bindings (eenmalig).
+      _nsBindAfschrijfModal();
     }
 
-    async function _nsCallAttendee(attendeeId, btnEl) {
-      console.log('[no-show] Bel/Openen geklikt →', attendeeId);
-      const attendee = (_fase3State.noShow.items || []).find((x) => x.attendee_id === attendeeId);
-      if (!attendee) {
-        console.error('[no-show] attendee niet in state');
-        alert('Deelnemer niet gevonden — herlaad de No-show-tab en probeer opnieuw.');
+    // ── Afschrijf-modal ────────────────────────────────────────────────
+    let _nsPendingAfschrijfUid = null;
+    function _nsBindAfschrijfModal() {
+      const modal   = document.getElementById('ns-afschrijf-modal');
+      const closeBtn= document.getElementById('ns-afschrijf-close');
+      const cancel  = document.getElementById('ns-afschrijf-cancel');
+      const goBtn   = document.getElementById('ns-afschrijf-go');
+      const textarea= document.getElementById('ns-afschrijf-reason');
+      if (!modal || !closeBtn || !cancel || !goBtn || !textarea) return;
+      const close = () => { modal.style.display = 'none'; _nsPendingAfschrijfUid = null; textarea.value = ''; goBtn.disabled = true; };
+      closeBtn.addEventListener('click', close);
+      cancel .addEventListener('click', close);
+      textarea.addEventListener('input', () => {
+        goBtn.disabled = textarea.value.trim().length < 3;
+      });
+      goBtn.addEventListener('click', async () => {
+        const uid = _nsPendingAfschrijfUid;
+        const reason = textarea.value.trim();
+        if (!uid || reason.length < 3) return;
+        goBtn.disabled = true;
+        const origHtml = goBtn.innerHTML;
+        goBtn.innerHTML = '<i class="ti ti-loader-2"></i> Afschrijven…';
+        try {
+          const item = (_fase3State.noShow.items || []).find((x) => x.uid === uid);
+          if (!item) throw new Error('Item niet gevonden');
+          const r = await window.AgentShared.apiFetch('/api/follow-up-opvolglijst-afschrijven', {
+            method : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body   : JSON.stringify({ type: item.type, ref_id: item.ref_id, reason }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            if (d?.code === 'MIGRATION_REQUIRED') {
+              alert('Migratie 024/025 nog niet gedraaid — afschrijven pas mogelijk na migratie.');
+              return;
+            }
+            throw new Error(d?.error || 'HTTP ' + r.status);
+          }
+          window.AgentShared?.showToast?.('Afgeschreven — verplaatst naar Afgeboekt', 'success');
+          close();
+          try { loadNoShowTab(); } catch (_) {}
+        } catch (e) {
+          console.error('[opvolglijst-afschrijven]', e?.message || e);
+          alert('Afschrijven mislukt: ' + (e?.message || 'onbekend'));
+          goBtn.innerHTML = origHtml;
+          goBtn.disabled = false;
+        }
+      });
+    }
+    function _nsOpenAfschrijfModal(uid) {
+      const modal    = document.getElementById('ns-afschrijf-modal');
+      const subject  = document.getElementById('ns-afschrijf-subject');
+      const textarea = document.getElementById('ns-afschrijf-reason');
+      const goBtn    = document.getElementById('ns-afschrijf-go');
+      if (!modal || !subject || !textarea || !goBtn) return;
+      const item = (_fase3State.noShow.items || []).find((x) => x.uid === uid);
+      if (!item) return;
+      _nsPendingAfschrijfUid = uid;
+      const meta = NS_HERKOMST_META[item.herkomst] || { label: item.herkomst_label || item.herkomst };
+      subject.innerHTML = `<strong>${esc(item.name)}</strong> · <span style="opacity:.7">${esc(meta.label)}</span>`;
+      textarea.value = '';
+      goBtn.disabled = true;
+      modal.style.display = 'flex';
+      try { textarea.focus(); } catch (_) {}
+    }
+
+    async function _nsCallItem(uid, btnEl) {
+      console.log('[opvolglijst] Bel/Openen geklikt →', uid);
+      const item = (_fase3State.noShow.items || []).find((x) => x.uid === uid);
+      if (!item) {
+        console.error('[opvolglijst] item niet in state', uid);
+        alert('Item niet gevonden — herlaad de Opvolglijst en probeer opnieuw.');
         return;
       }
+      if (item.type === 'appointment') {
+        // Voor appointments: open de bestaande afspraak-detail modal. Sales
+        // kan daar bellen + outcome invullen via de bestaande flow. Geen
+        // lazy-lead pad (er is al een appointment).
+        try {
+          if (typeof _openAppointmentDetail === 'function') {
+            _openAppointmentDetail(item.ref_id);
+          } else {
+            alert('Afspraak-detail is niet beschikbaar — open Follow-up → Afspraken-tab en zoek deze lead handmatig.');
+          }
+        } catch (e) {
+          console.error('[opvolglijst] appt-detail:', e);
+          alert('Kon afspraak-detail niet openen: ' + (e?.message || 'onbekend'));
+        }
+        return;
+      }
+      // type='attendee' → oude no-show-flow (event lead + is_no_show_followup).
+      const attendee = {
+        attendee_id             : item.attendee_id,
+        name                    : item.name,
+        phone                   : item.phone,
+        email                   : item.email,
+        customer_id             : item.customer_id || null,
+        event_id                : item.event_id || null,
+        questionnaire_filled    : item.questionnaire_filled === true,
+        assessment_response_id  : item.assessment_response_id || null,
+        lead_id                 : item.lead_id || null,
+        lead_status             : item.lead_status || null,
+        no_show_followup_status : item.no_show_followup_status || null,
+      };
+      const attendeeId = attendee.attendee_id;
       const hasPhone = !!attendee.phone;
       const origHtml = btnEl?.innerHTML || (hasPhone ? '<i class="ti ti-phone-call"></i> Bel nu' : '<i class="ti ti-external-link"></i> Openen');
       const restoreBtn = () => { if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = origHtml; } };
@@ -10447,6 +10690,13 @@
         if (ctaEl) {
           e.preventDefault();
           if (typeof switchTab === 'function') switchTab('event-bellijst');
+          return;
+        }
+        // Werklijst-CTA "Opvolglijst" → switchTab naar Opvolglijst.
+        const opvCta = e.target && e.target.closest ? e.target.closest('[data-goto-opvolglijst]') : null;
+        if (opvCta) {
+          e.preventDefault();
+          if (typeof switchTab === 'function') switchTab('noshow');
           return;
         }
       }, true);
