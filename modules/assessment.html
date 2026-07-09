@@ -746,14 +746,33 @@
         assessmentId      = (payload && payload.id) || null;
         assessmentRouting = (payload && payload.routing_result) || null;
 
-        // CTA toon-logica: alleen bij valide niveau (gevorderd/basis) +
-        // wanneer we een assessmentId hebben om door te geven aan register.
+        // Auto-load picker-flow: iedereen met een valide niveau
+        // (gevorderd/basis) krijgt direct de datumkeuze te zien; de
+        // tussenklik "Klik hier en bevestig je datum" vervalt. De losse
+        // CTA-knop blijft in de DOM als accessible fallback (bv. bij
+        // rerender) maar staat default verborgen.
         const canPickDate = !!assessmentId
           && (assessmentRouting === 'gevorderd' || assessmentRouting === 'basis');
-        $ctaRow.hidden = !canPickDate;
+        $ctaRow.hidden = true;
 
         $success.hidden = true;
         $result.hidden  = false;
+
+        if (canPickDate) {
+          // Direct de open events laden zodat de deelnemer geen extra klik
+          // hoeft te doen. loadOpenEvents heeft z'n eigen try/catch +
+          // showPickerError; falen betekent nette empty/error-state in
+          // de picker, niet een crash van renderResult.
+          try { loadOpenEvents(); } catch (e) { console.error('auto-loadOpenEvents', e); }
+          // Zachte scroll naar de picker zodat de datums direct in beeld
+          // komen onder de bevestigingstekst.
+          setTimeout(() => {
+            try {
+              const el = document.getElementById('picker');
+              if (el && !el.hidden) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } catch (_) { /* soft */ }
+          }, 120);
+        }
       }
 
       // TAAL-FILTER: render een nette niet-NL melding i.p.v. de routing-

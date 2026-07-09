@@ -32,6 +32,41 @@
 
 import { supabaseAdmin } from './supabase.js';
 import { createNotification } from './_lib/notify.js';
+
+// Nabewerking (late-link + gastenlijst-sync + auto-close + notify) mag de
+// deelnemer NOOIT ~10s laten wachten. Deze wrapper geeft het volledige blok
+// een strakke timeout; als een externe call (Webflow / GHL) traag is,
+// laten we het los en gaan we door naar de response. Alle DB-writes in
+// het blok zijn idempotent (assessment_response_id partial UNIQUE +
+// autoCloseIfFull is no-op als events.signups_closed al true is), dus
+// dropping is veilig — cron / event-koppeling ronden 't alsnog af.
+const LATE_WORK_TIMEOUT_MS = 1500;
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve) => {
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      console.warn('[assessment-submit] late-work timeout na ' + ms + 'ms (' + label + ')');
+      resolve({ timeout: true });
+    }, ms);
+    Promise.resolve()
+      .then(() => promise)
+      .then((v) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve({ timeout: false, value: v });
+      })
+      .catch((e) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        console.warn('[assessment-submit] late-work fail (' + label + '):', e?.message || e);
+        resolve({ timeout: false, error: e });
+      });
+  });
+}
 import {
   loadActiveQuestions,
   validateAnswers,
@@ -203,12 +238,19 @@ export default async function handler(req, res) {
     // overschrijven bij 'aangemeld' — operator-edits naar aanwezig/sale/etc
     // blijven gerespecteerd.
     const isIncomplete = scored.routing_result === 'incomplete';
+
+    // ── NABEWERKING onder tijdslimiet ─────────────────────────────────────
+    // Alles hieronder t/m het notify-blok is fail-soft. In serverless kan
+    // werk ná res.json() worden afgekapt (geen ctx.waitUntil op Vercel Node
+    // runtime), dus we houden 't in het kritieke pad maar met een strakke
+    // timeout. Externe calls (syncGastenlijstWebflow / autoCloseIfFull /
+    // customers-lookup) blijven hierdoor niet ~10s hangen.
+    await withTimeout((async () => {
     // Set van event_id's waar minstens 1 rij hierdoor de confirmed_count laat
     // stijgen (was: status IN CONFIRMED_STATUSES + assessment_response_id NULL;
     // wordt: status IN CONFIRMED_STATUSES + assessment_response_id NON-NULL,
     // wat de getConfirmedCount-guard voorheen uitsloot). Na de loop draaien we
-    // per uniek event_id de auto-close-triplet. Declared outside try zodat het
-    // ná het try-blok toegankelijk blijft.
+    // per uniek event_id de auto-close-triplet.
     const eventIdsToCheck = new Set();
     try {
       const { data: existing, error: lookupErr } = await supabaseAdmin
@@ -335,6 +377,7 @@ export default async function handler(req, res) {
         createNotification({ toRole: ['manager'], ...payload }).catch(() => {});
       }
     } catch (_) { /* fail-soft */ }
+    })(), LATE_WORK_TIMEOUT_MS, 'late-link+notify');
 
     return res.status(200).json({
       ok            : true,
