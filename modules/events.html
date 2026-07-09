@@ -784,10 +784,10 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
         <button class="sr-iconbtn" id="evSignupInboxRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
       </div>
       <div class="sr-segments" id="evSignupInboxFilters" style="margin-bottom:12px;display:flex;gap:6px;flex-wrap:wrap">
-        <button class="sr-seg active" data-sistatus="todo">Te reviewen <span data-cnt="todo" style="margin-left:4px;opacity:0.7"></span></button>
+        <button class="sr-seg active" data-sistatus="matched">Matched <span data-cnt="matched" style="margin-left:4px;opacity:0.7"></span></button>
+        <button class="sr-seg" data-sistatus="todo">Te reviewen <span data-cnt="todo" style="margin-left:4px;opacity:0.7"></span></button>
         <button class="sr-seg" data-sistatus="no_match">No match <span data-cnt="no_match" style="margin-left:4px;opacity:0.7"></span></button>
         <button class="sr-seg" data-sistatus="ambiguous">Ambiguous <span data-cnt="ambiguous" style="margin-left:4px;opacity:0.7"></span></button>
-        <button class="sr-seg" data-sistatus="matched">Matched <span data-cnt="matched" style="margin-left:4px;opacity:0.7"></span></button>
         <button class="sr-seg" data-sistatus="invalid_payload">Invalid <span data-cnt="invalid_payload" style="margin-left:4px;opacity:0.7"></span></button>
         <button class="sr-seg" data-sistatus="all">Alle <span data-cnt="all" style="margin-left:4px;opacity:0.7"></span></button>
       </div>
@@ -5478,7 +5478,7 @@ async function linkAttendee(attendeeId) {
 }
 
 // ── Stap 1: Inschrijvingen-inbox (events.attendee.create) ───────────────────
-const _siState = { filter: 'todo', counts: null, activeRow: null, eventsCache: null };
+const _siState = { filter: 'matched', counts: null, activeRow: null, eventsCache: null };
 
 async function loadSignupInbox() {
   const list = document.getElementById('evSignupInboxList');

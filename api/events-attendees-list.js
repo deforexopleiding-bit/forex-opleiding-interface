@@ -79,38 +79,91 @@ export default async function handler(req, res) {
   const offset = Math.max(0, clampInt(q.offset, 0, 0, 1_000_000));
 
   try {
-    let query = supabaseAdmin
-      .from('event_attendees')
-      .select(`
-        id, event_id, first_name, last_name, email, phone, status,
-        attendance_status, outcome,
-        customer_id, deal_id, subscription_id,
-        ghl_contact_id, ghl_form_submission_id, assessment_response_id,
-        switched_from_event_id, switched_at,
-        registered_at, attended_at, no_show_marked_at, sale_at,
-        follow_up_flagged, follow_up_reason, called_at, call_status, call_status_at, notes,
-        source, automation_enabled,
-        created_at, updated_at
-      `, { count: 'exact' })
-      .eq('event_id', eventId)
-      // Automation-tester: filter test-rijen uit reguliere lijsten.
-      .eq('is_test', false)
-      .order('registered_at', { ascending: true })
-      .range(offset, offset + limit - 1);
+    // switched_to_event_id is nieuw sinds migratie 026. Fail-soft: bij
+    // 42703/PGRST204 (kolom ontbreekt) retry zonder — dan blijft
+    // 'switched_to_event_title' NULL en toont de UI enkel 'Verplaatst'.
+    const RICH_SELECT = `
+      id, event_id, first_name, last_name, email, phone, status,
+      attendance_status, outcome,
+      customer_id, deal_id, subscription_id,
+      ghl_contact_id, ghl_form_submission_id, assessment_response_id,
+      switched_from_event_id, switched_to_event_id, switched_at,
+      registered_at, attended_at, no_show_marked_at, sale_at,
+      follow_up_flagged, follow_up_reason, called_at, call_status, call_status_at, notes,
+      source, automation_enabled,
+      created_at, updated_at
+    `;
+    const CORE_SELECT = `
+      id, event_id, first_name, last_name, email, phone, status,
+      attendance_status, outcome,
+      customer_id, deal_id, subscription_id,
+      ghl_contact_id, ghl_form_submission_id, assessment_response_id,
+      switched_from_event_id, switched_at,
+      registered_at, attended_at, no_show_marked_at, sale_at,
+      follow_up_flagged, follow_up_reason, called_at, call_status, call_status_at, notes,
+      source, automation_enabled,
+      created_at, updated_at
+    `;
+    const buildQuery = (selectCols) => {
+      let q = supabaseAdmin
+        .from('event_attendees')
+        .select(selectCols, { count: 'exact' })
+        .eq('event_id', eventId)
+        // Automation-tester: filter test-rijen uit reguliere lijsten.
+        .eq('is_test', false)
+        .order('registered_at', { ascending: true })
+        .range(offset, offset + limit - 1);
+      if (statusList.length === 1) q = q.eq('status', statusList[0]);
+      else if (statusList.length > 1) q = q.in('status', statusList);
+      if (search) {
+        const safe = search.replace(/[%,]/g, '');
+        if (safe.length > 0) {
+          const pattern = `*${safe}*`;
+          q = q.or(`first_name.ilike.${pattern},last_name.ilike.${pattern},email.ilike.${pattern}`);
+        }
+      }
+      return q;
+    };
 
-    if (statusList.length === 1) query = query.eq('status', statusList[0]);
-    else if (statusList.length > 1) query = query.in('status', statusList);
-
-    if (search) {
-      const safe = search.replace(/[%,]/g, '');
-      if (safe.length > 0) {
-        const pattern = `*${safe}*`;
-        query = query.or(`first_name.ilike.${pattern},last_name.ilike.${pattern},email.ilike.${pattern}`);
+    let rows;
+    let count;
+    {
+      const r1 = await buildQuery(RICH_SELECT);
+      if (r1.error && (r1.error.code === '42703' || r1.error.code === 'PGRST204')) {
+        console.warn('[attendees-list] switched_to_event_id kolom ontbreekt — draai migratie 026 voor bestemmings-titel');
+        const r2 = await buildQuery(CORE_SELECT);
+        if (r2.error) throw new Error('attendees-list: ' + r2.error.message);
+        rows = r2.data;
+        count = r2.count;
+      } else if (r1.error) {
+        throw new Error('attendees-list: ' + r1.error.message);
+      } else {
+        rows = r1.data;
+        count = r1.count;
       }
     }
 
-    const { data: rows, error, count } = await query;
-    if (error) throw new Error('attendees-list: ' + error.message);
+    // Batch-lookup: titels van doel-events voor de rijen die verplaatst
+    // zijn. Één query per unieke switched_to_event_id (max 1 round-trip).
+    const targetEventIds = Array.from(new Set(
+      (rows || []).map((r) => r.switched_to_event_id).filter(Boolean)
+    ));
+    const targetTitleById = new Map();
+    if (targetEventIds.length > 0) {
+      try {
+        const { data: tRows, error: tErr } = await supabaseAdmin
+          .from('events')
+          .select('id, title')
+          .in('id', targetEventIds);
+        if (tErr) {
+          console.error('[attendees-list target-titles]', tErr.message);
+        } else {
+          for (const t of tRows || []) targetTitleById.set(t.id, t.title || null);
+        }
+      } catch (e) {
+        console.error('[attendees-list target-titles-catch]', e?.message || e);
+      }
+    }
 
     // Tags per attendee (1 query met IN-clause + groepering in JS).
     const ids = (rows || []).map((r) => r.id);
@@ -207,6 +260,11 @@ export default async function handler(req, res) {
       taal: r.assessment_response_id ? (taalByResponse.get(r.assessment_response_id) || null) : null,
       questionnaire_filled_at: r.assessment_response_id
         ? (filledAtByResponse.get(r.assessment_response_id) || null)
+        : null,
+      // Bestemmings-titel voor verplaatst-attendees (migratie 026). NULL
+      // voor legacy-rijen zonder switched_to_event_id.
+      switched_to_event_title: r.switched_to_event_id
+        ? (targetTitleById.get(r.switched_to_event_id) || null)
         : null,
     }));
 

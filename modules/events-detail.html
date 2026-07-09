@@ -878,6 +878,12 @@ function renderAttendeesTab() {
         } else {
           statusCell = `<span class="tag-chip">${esc(ATT_STATUS_LABELS[a.status] || a.status)}</span>`;
         }
+        // Verplaatst-bestemming (sinds migratie 026 + list-endpoint update):
+        // toon "→ [naam doel-event]" onder de status. Legacy verplaatsingen
+        // zonder switched_to_event_title: alleen 'Verplaatst' zoals nu.
+        if (a.status === 'switched_to_other_event' && a.switched_to_event_title) {
+          statusCell += `<div style="margin-top:3px;font-size:11px;color:var(--text-dim);line-height:1.3" title="Verplaatst naar: ${esc(a.switched_to_event_title)}">→ ${esc(a.switched_to_event_title)}</div>`;
+        }
 
         // Fase 1: telt-mee-laag bovenop de status — assessment_response_id
         // gevuld → "Actief" (telt mee), leeg → "Ontbreekt" (telt niet mee).
