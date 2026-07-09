@@ -3149,7 +3149,7 @@ function renderList() {
             <td>${esc(ev.location || '—')}</td>
             <td>${esc(niveauLbl)}</td>
             <td class="center"><span class="${capClass}">${active}/${cap}</span></td>
-            <td><span class="status-badge status-${ev.status}">${esc(STATUS_LABELS[ev.status] || ev.status)}</span>${renderSignupsClosedBadge(ev)}</td>
+            <td><span class="status-badge status-${ev.status}">${esc(STATUS_LABELS[ev.status] || ev.status)}</span>${renderSignupsClosedBadge(ev)}${ev.completed_at ? `<span title="Event afgerond op ${esc(fmtDate(ev.completed_at))}" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;padding:2px 7px;border-radius:99px;font-size:10.5px;font-weight:700;background:rgba(5,150,105,0.16);color:#047857"><i class="ti ti-checks"></i> Afgerond</span>` : ''}</td>
             <td>${renderSyncCell(ev)}</td>
             <td class="sr-actions">
               ${window.RBAC?.canSync?.('events.event.create') ? `<button class="sr-ibtn ev-dup-btn" data-id="${esc(ev.id)}" title="Kopieer event als concept" type="button"><i class="ti ti-copy"></i></button>` : ''}

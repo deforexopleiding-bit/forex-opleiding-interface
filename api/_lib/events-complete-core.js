@@ -147,15 +147,58 @@ export async function runEventsCompleteCore({ userId, body }) {
       if (cErr) throw new Error('event complete update: ' + cErr.message);
     }
 
-    // ── 3) Per attendee: attendance_status + outcome ────────────────────────
+    // ── 3) Per attendee: attendance_status + outcome + status-lifecycle ─
+    // De lifecycle-kolom `status` beweegt nu MEE met attendance_status:
+    //   aanwezig  → 'aanwezig'    (deal-koppeling maakt 'em een 'sale' via
+    //                              de bestaande has_signed_deal-afleiding
+    //                              in events-attendees-list; status='sale'
+    //                              hier zetten zou de detectie dubbelen).
+    //   no_show   → 'no_show'     (Opvolglijst-tab filtert op deze kolom).
+    //   afgemeld  → 'geannuleerd' (VALID_STATUS kent alleen deze; 'afgemeld'
+    //                              is geen lifecycle-status).
+    // Bijbehorende timestamps (attended_at / no_show_marked_at) worden gezet
+    // als de kolom bestaat en de attendee die nog niet had. Fail-soft 42703:
+    // bij ontbrekende kolom → retry zonder timestamps.
+    const STATUS_MAP = {
+      aanwezig : 'aanwezig',
+      no_show  : 'no_show',
+      afgemeld : 'geannuleerd',
+    };
+    const nowIsoAtt = new Date().toISOString();
     for (const a of attendeesIn) {
       const upd = { attendance_status: a.attendance_status };
       upd.outcome = (a.attendance_status === 'aanwezig' && a.outcome) ? a.outcome : null;
+      const mappedStatus = STATUS_MAP[a.attendance_status];
+      if (mappedStatus) upd.status = mappedStatus;
+      // Timestamp-kolommen (fail-soft in de retry hieronder).
+      const rich = { ...upd };
+      if (a.attendance_status === 'aanwezig') rich.attended_at       = nowIsoAtt;
+      if (a.attendance_status === 'no_show')  rich.no_show_marked_at = nowIsoAtt;
       const { error: aErr } = await supabaseAdmin
         .from('event_attendees')
-        .update(upd)
+        .update(rich)
         .eq('id', a.attendee_id)
-        .eq('event_id', eventId);
+        .eq('event_id', eventId)
+        // Beveiliging: sla verplaatste attendees over (mocht die per ongeluk
+        // toch in de payload zitten). Hun status='switched_to_other_event'
+        // is een aparte lifecycle-toestand.
+        .neq('status', 'switched_to_other_event');
+      if (aErr && (aErr.code === '42703' || aErr.code === 'PGRST204')) {
+        // Timestamp-kolom(men) ontbreken → retry zonder.
+        const { error: aErr2 } = await supabaseAdmin
+          .from('event_attendees')
+          .update(upd)
+          .eq('id', a.attendee_id)
+          .eq('event_id', eventId)
+          .neq('status', 'switched_to_other_event');
+        if (aErr2) {
+          console.error('[events-complete-core] attendee update fallback', a.attendee_id, aErr2.message);
+          summary.warnings.push(`attendee ${a.attendee_id}: ${aErr2.message}`);
+          continue;
+        }
+        summary.attendees_updated += 1;
+        continue;
+      }
       if (aErr) {
         console.error('[events-complete-core] attendee update', a.attendee_id, aErr.message);
         summary.warnings.push(`attendee ${a.attendee_id}: ${aErr.message}`);

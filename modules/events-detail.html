@@ -589,7 +589,7 @@ function renderPage() {
   if (isDraft && canPublish) {
     primaryActionHtml = '<button class="btn-primary" onclick="publishEvent()"><i class="ti ti-rocket"></i> Publiceren</button>';
   } else if (isPublished && canComplete) {
-    primaryActionHtml = `<button class="btn-primary" onclick="openEvCompleteModal()" title="${isCompleted ? 'Wijzig aanwezigheid / her-afronden' : 'Event afronden'}"><i class="ti ti-checks"></i> ${isCompleted ? 'Her-afronden' : 'Event afronden'}</button>`;
+    primaryActionHtml = `<button class="btn-primary" onclick="openEvCompleteModal()" title="${isCompleted ? 'Bekijk of wijzig de afronding' : 'Event afronden'}"><i class="ti ti-checks"></i> ${isCompleted ? 'Is afgerond' : 'Event afronden'}</button>`;
   }
 
   // Icon-rij onder de primaire knop. Slot 2 toont Heropenen of Sluiten
