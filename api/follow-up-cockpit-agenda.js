@@ -211,26 +211,58 @@ export default async function handler(req, res) {
 
       const ownerIds = [...new Set(rowsDone.map((r) => r.owner_id).filter(Boolean))];
       const nameById = await lookupOwnerNames(ownerIds);
-      const items = rowsDone.map((r) => ({
-        source              : 'appointment',
-        id                  : r.id,
-        lead_name           : r.lead_name,
-        lead_phone          : r.lead_phone,
-        lead_email          : r.lead_email,
-        scheduled_at        : r.scheduled_at,
-        terugbel_datum      : r.scheduled_at,     // alias voor UI
-        kind                : 'zoom',
-        lead_kind           : 'zoom',
-        status              : r.status,
-        updated_at          : r.updated_at || null,
-        // prev_state kan een jsonb of ontbreken zijn — client heeft
-        // alleen de boolean nodig voor het corrigeer-teken.
-        prev_state_present  : !!(r.prev_state && typeof r.prev_state === 'object' && Object.keys(r.prev_state).length),
-        ghl_appointment_id  : r.ghl_appointment_id || null,
-        zoom_join_url       : r.zoom_join_url || null,
-        owner_id            : r.owner_id,
-        owner_name          : r.owner_id ? (nameById[r.owner_id] || null) : null,
-      }));
+
+      // Outcome-verrijking: koppel per appointment de outcome-waarde
+      // uit follow_up_outcomes. Zonder outcome → null. Fail-soft: als
+      // de tabel ontbreekt of de query faalt, blijft outcome overal
+      // null en toont de UI 'Outcome ontbreekt' voor completed/no_show
+      // (wat correct is als context: er is geen outcome geregistreerd).
+      const apptIds = rowsDone.map((r) => r.id);
+      const outcomeById = new Map();
+      if (apptIds.length > 0) {
+        try {
+          const { data: outRows, error: outErr } = await supabaseAdmin
+            .from('follow_up_outcomes')
+            .select('appointment_id, outcome')
+            .in('appointment_id', apptIds);
+          if (outErr) {
+            console.warn('[cockpit-agenda afgehandeld outcomes]', outErr.message);
+          } else {
+            for (const o of outRows || []) {
+              if (o.appointment_id) outcomeById.set(o.appointment_id, o.outcome || null);
+            }
+          }
+        } catch (e) {
+          console.warn('[cockpit-agenda afgehandeld outcomes-fetch]', e?.message || e);
+        }
+      }
+
+      const items = rowsDone.map((r) => {
+        const outcome = outcomeById.has(r.id) ? outcomeById.get(r.id) : null;
+        return {
+          source              : 'appointment',
+          id                  : r.id,
+          lead_name           : r.lead_name,
+          lead_phone          : r.lead_phone,
+          lead_email          : r.lead_email,
+          scheduled_at        : r.scheduled_at,
+          terugbel_datum      : r.scheduled_at,     // alias voor UI
+          kind                : 'zoom',
+          lead_kind           : 'zoom',
+          status              : r.status,
+          updated_at          : r.updated_at || null,
+          // prev_state kan een jsonb of ontbreken zijn — client heeft
+          // alleen de boolean nodig voor het corrigeer-teken.
+          prev_state_present  : !!(r.prev_state && typeof r.prev_state === 'object' && Object.keys(r.prev_state).length),
+          ghl_appointment_id  : r.ghl_appointment_id || null,
+          zoom_join_url       : r.zoom_join_url || null,
+          owner_id            : r.owner_id,
+          owner_name          : r.owner_id ? (nameById[r.owner_id] || null) : null,
+          // Sale-badge / "outcome ontbreekt"-signaal in de UI.
+          outcome             : outcome,
+          has_outcome         : outcomeById.has(r.id),
+        };
+      });
       return res.status(200).json({ items });
     }
 

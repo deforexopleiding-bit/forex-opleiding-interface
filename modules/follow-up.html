@@ -2819,6 +2819,15 @@
     .fu-af-status-badge.r-green  { background: #059669; color: #fff; }
     .fu-af-status-badge.r-gray   { background: #4b5563; color: #fff; }
     .fu-af-status-badge.r-orange { background: #ea580c; color: #fff; }
+    .fu-af-status-badge.r-red    { background: #dc2626; color: #fff; }
+    .fu-af-status-badge.r-amber  { background: #f59e0b; color: #fff; }
+    /* Rand-accent voor rijen die nog een outcome missen (completed /
+       no_show zonder follow_up_outcomes-rij) — analoog aan
+       .fu-card-needs-outcome op de cockpit-kaart. */
+    .fu-af-row.needs-outcome {
+      border-left: 3px solid #f59e0b;
+      background: rgba(245, 158, 11, 0.05);
+    }
     .fu-af-row .avatar {
       width: 32px; height: 32px; border-radius: 8px;
       background: var(--ink);
@@ -7717,16 +7726,35 @@
         : '<span class="kind-badge bel">📞 Terugbel</span>';
       const statusLbl = it.status ? _fmtStatusLabel(it.status) : (it.lead_status ? _fmtStatusLabel(it.lead_status) : '');
 
-      // Voor 'afgehandeld': kleur-gecodeerd status-badge (groen /
-      // grijs / oranje) én prev_state-markering. Voor andere views:
-      // neutrale badge.
-      let statusBadge = '';
+      // Voor 'afgehandeld': drie takken.
+      //  1) heeft outcome → outcome-badge (kleur via outcomeBadgeColor),
+      //     zodat sales / manager direct 'klant_geworden' (sale) ziet.
+      //  2) completed / no_show ZONDER outcome → "⚠ Outcome ontbreekt"-
+      //     waarschuwing (amber) + rand-accent op de rij.
+      //  3) cancelled zonder outcome → grijze status-badge (was ook zo).
+      // Voor andere views: neutrale mini-badge.
+      let statusBadge   = '';
+      let needsOutcome  = false;
       if (isDone) {
-        const statusCls = it.status === 'completed'  ? 'r-green'
-                       : it.status === 'cancelled'  ? 'r-gray'
-                       : it.status === 'no_show'    ? 'r-orange'
-                       : 'r-gray';
-        statusBadge = `<span class="fu-af-status-badge ${statusCls}" title="Status">${esc(statusLbl || '—')}</span>`;
+        if (it.outcome) {
+          // Kleur-mapping: outcomeBadgeColor → .r-* class.
+          const color   = (typeof outcomeBadgeColor === 'function') ? outcomeBadgeColor(it.outcome) : 'gray';
+          const cls     = color === 'green' ? 'r-green'
+                        : color === 'amber' ? 'r-amber'
+                        : color === 'red'   ? 'r-red'
+                        :                     'r-gray';
+          const lblFn   = (typeof outcomeLabel === 'function') ? outcomeLabel : ((k) => k);
+          const outLbl  = lblFn(it.outcome);
+          statusBadge   = `<span class="fu-af-status-badge ${cls}" title="Outcome">${esc(outLbl)}</span>`;
+        } else if (it.status === 'completed' || it.status === 'no_show') {
+          needsOutcome  = true;
+          statusBadge   = `<span class="fu-af-status-badge r-amber" title="Er is nog geen outcome ingevuld — open de afspraak om 'm alsnog te registreren">⚠ Outcome ontbreekt</span>`;
+        } else {
+          const statusCls = it.status === 'cancelled' ? 'r-gray'
+                         : it.status === 'no_show'   ? 'r-orange'
+                         : 'r-gray';
+          statusBadge = `<span class="fu-af-status-badge ${statusCls}" title="Status">${esc(statusLbl || '—')}</span>`;
+        }
       } else if (statusLbl) {
         statusBadge = `<span class="fu-cockpit-mini-badge" title="Status">${esc(statusLbl)}</span>`;
       }
@@ -7785,7 +7813,8 @@
         </div>`;
       }
 
-      return `<div class="fu-af-row" ${rowClickAttr}>
+      const rowCls = needsOutcome ? 'fu-af-row needs-outcome' : 'fu-af-row';
+      return `<div class="${rowCls}" ${rowClickAttr}>
         ${timeLabel}
         <div class="avatar ${avaCls}">${esc(initials)}</div>
         <div>
