@@ -79,11 +79,15 @@ export default async function handler(req, res) {
     }
 
     // Heeft-abbo-marker voor de "Omzetten naar abonnement"-knop: toont
-    // "Abbo al ingevoerd" wanneer er al ≥1 sub bestaat voor:
-    //   (a) deze deal (klassieke deal-match), OF
-    //   (b) een andere deal van dezelfde klant (klant-match) — dekt
-    //       TL-imports (source='tl_import') en standalone-subs die aan
-    //       een ghost-deal van dezelfde customer_id hangen.
+    // "Abbo al ingevoerd" wanneer:
+    //   (a) er al ≥1 sub bestaat voor deze deal (klassieke deal-match), OF
+    //   (b) er al ≥1 sub bestaat voor een andere deal van dezelfde klant
+    //       (klant-match) — dekt TL-imports (source='tl_import') en
+    //       standalone-subs die aan een ghost-deal hangen, OF
+    //   (c) de deal handmatig is afgevinkt via het
+    //       subscription_marked_done-vlaggetje (migratie 035). Dit is
+    //       de "achterstand-afvink"-route voor geaccepteerde offertes
+    //       waarvan het abo buiten de omzet-knop om is binnengekomen.
     // Knop blijft klikbaar (bewust opnieuw omzetten mogelijk).
     let has_subscription = false;
     try {
@@ -109,10 +113,12 @@ export default async function handler(req, res) {
         }
       }
 
-      has_subscription = dealMatch || custMatch;
+      const markedDone = deal.subscription_marked_done === true;
+      has_subscription = dealMatch || custMatch || markedDone;
     } catch (eSub) {
       console.warn('[sales-deal-detail] deal-match sub-lookup faalde:', eSub?.message || eSub);
-      has_subscription = false;
+      // Zelfs bij sub-lookup-fout blijft het handmatige vlaggetje leidend.
+      has_subscription = (deal.subscription_marked_done === true);
     }
 
     return res.status(200).json({
