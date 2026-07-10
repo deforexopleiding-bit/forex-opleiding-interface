@@ -44,7 +44,7 @@ export default async function handler(req, res) {
     }
 
     let q = supabaseAdmin.from('deals')
-      .select('id, customer_id, total_amount, created_at, sales_user_id, traject_variant_id, tl_department_id, quote_reference, tl_quotation_id, tl_quotation_status, tl_quotation_sent_at, tl_quotation_email_sent_at, tl_quotation_accepted_at, tl_quotation_declined_at', { count: 'exact' })
+      .select('id, customer_id, total_amount, created_at, sales_user_id, traject_variant_id, tl_department_id, quote_reference, tl_quotation_id, tl_quotation_status, tl_quotation_sent_at, tl_quotation_email_sent_at, tl_quotation_accepted_at, tl_quotation_declined_at, subscription_marked_done', { count: 'exact' })
       .is('archived_at', null)  // verwijderde offertes (soft-delete) niet tonen
       .neq('tl_quotation_status', 'no_quotation')  // ghost-deals (abo zonder offerte) niet als offerte tonen
       .order('created_at', { ascending: false })
@@ -138,7 +138,7 @@ export default async function handler(req, res) {
         sent_at:             d.tl_quotation_email_sent_at || d.tl_quotation_sent_at || null,
         accepted_at:         d.tl_quotation_accepted_at || null,
         declined_at:         d.tl_quotation_declined_at || null,
-        has_subscription:    !!hasSubByDeal[d.id],
+        has_subscription:    !!hasSubByDeal[d.id] || d.subscription_marked_done === true,
       };
     });
 
