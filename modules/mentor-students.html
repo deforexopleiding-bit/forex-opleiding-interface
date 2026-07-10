@@ -1284,7 +1284,27 @@
           const items = (t.items && t.items.length) ? `<div style="margin-top:2px;color:var(--text-dim);font-size:11.5px">${esc(t.items.join(' · '))}</div>` : '';
           return `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px dashed var(--border);font-size:12.5px"><div style="flex:1"><strong>${esc(t.type_of_task || 'Taak')}</strong>${items}</div><span style="font-size:11px;color:var(--text-faint);font-variant-numeric:tabular-nums">${Math.round(Number(t.progress) || 0)}%</span></div>`;
         }).join('')}</div>`;
+    // Klantgegevens uit customers (telefoon + e-mail) — bovenaan voor
+    // makkelijk contact opnemen. Bubble houdt geen phone bij; de backend
+    // matcht student-email → customers.
+    const contact = (d && d.contact) ? d.contact : { email: null, phone: null };
+    const cEmail  = contact.email && String(contact.email).trim();
+    const cPhone  = contact.phone && String(contact.phone).trim();
+    const emailHtml = cEmail
+      ? `<a href="mailto:${esc(cEmail)}" style="color:var(--accent,#0f766e);text-decoration:none">${esc(cEmail)}</a>`
+      : `<span style="color:var(--text-faint)">geen e-mailadres bekend</span>`;
+    const phoneHtml = cPhone
+      ? `<a href="tel:${esc(cPhone.replace(/\s+/g, ''))}" style="color:var(--accent,#0f766e);text-decoration:none">${esc(cPhone)}</a>`
+      : `<span style="color:var(--text-faint)">geen telefoonnummer bekend</span>`;
+
     body.innerHTML = `
+      <div style="margin-bottom:12px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elev,rgba(100,116,139,0.06))">
+        <div style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Klantgegevens</div>
+        <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:13px;line-height:1.4">
+          <div style="display:inline-flex;align-items:center;gap:6px"><i class="ti ti-phone" style="color:var(--text-dim)"></i>${phoneHtml}</div>
+          <div style="display:inline-flex;align-items:center;gap:6px"><i class="ti ti-mail" style="color:var(--text-dim)"></i>${emailHtml}</div>
+        </div>
+      </div>
       <div style="margin-bottom:10px">
         <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-dim)">
           <span>Traject-voortgang</span>
