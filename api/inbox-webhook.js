@@ -162,7 +162,7 @@ async function upsertConversation(req, { phoneE164Plus, displayName, inboundTime
   if (phoneNumberId) {
     const r = await supabaseAdmin
       .from('whatsapp_conversations')
-      .select('id, customer_id, unread_count, phone_number_id')
+      .select('id, customer_id, unread_count, phone_number_id, status')
       .eq('phone_number',    phoneE164Plus)
       .eq('phone_number_id', phoneNumberId)
       .maybeSingle();
@@ -175,7 +175,7 @@ async function upsertConversation(req, { phoneE164Plus, displayName, inboundTime
     );
     const r = await supabaseAdmin
       .from('whatsapp_conversations')
-      .select('id, customer_id, unread_count, phone_number_id')
+      .select('id, customer_id, unread_count, phone_number_id, status')
       .eq('phone_number', phoneE164Plus)
       .order('created_at', { ascending: true })
       .limit(1);
@@ -193,17 +193,24 @@ async function upsertConversation(req, { phoneE164Plus, displayName, inboundTime
   if (existing) {
     // 2a. UPDATE — bestaande conversation
     const newUnread = (existing.unread_count || 0) + 1;
+    // AUTO-HEROPEN vs ARCHIEF-met-rust:
+    //   - Afgehandeld ('closed') → 'open' (bestaand gedrag; auto-heropen).
+    //   - Reeds 'open'           → 'open' (no-op).
+    //   - Gearchiveerd ('archived') → BLIJFT 'archived'. Het archief is
+    //     bewust definitief; alleen handmatig terughalen mag 'm weer op
+    //     'open' zetten. last_message_at/unread_count/last_inbound_at
+    //     updaten we WEL zodat de operator in het Archief-tabblad ziet
+    //     dat er een nieuw bericht binnenkwam.
+    // Fail-soft op status-lookup: bij ontbrekende status → fallback 'open'
+    // (bestaand gedrag) zodat een gesprek nooit "verdwijnt".
+    const currentStatus = String(existing.status || 'open');
+    const nextStatus = (currentStatus === 'archived') ? 'archived' : 'open';
     const updatePayload = {
       last_message_at:      tsIso,
       last_message_preview: preview,
       unread_count:         newUnread,
       last_inbound_at:      tsIso,
-      // AUTO-HEROPEN: een inbound bericht heropent een afgehandeld gesprek.
-      // Deze upsertConversation-tak wordt uitsluitend vanuit het inbound-
-      // pad aangeroepen (regel ~1342), dus deze status='open'-toekenning
-      // gebeurt nooit bij outbound. 'closed'/'archived' → 'open';
-      // reeds 'open' → 'open' (no-op).
-      status:               'open',
+      status:               nextStatus,
     };
     if (displayName) updatePayload.display_name = displayName;
     // phone_number_id: veilige heal. Met de tuple-SELECT hierboven is een

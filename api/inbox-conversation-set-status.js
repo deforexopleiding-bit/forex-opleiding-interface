@@ -1,10 +1,15 @@
 // api/inbox-conversation-set-status.js
 //
-// POST { conversation_id, status: 'open'|'afgehandeld' } → update
-// whatsapp_conversations.status. 'afgehandeld' wordt on-wire opgeslagen
-// als 'closed' (CHECK-constraint accepteert alleen 'open'|'closed'|
-// 'archived', dus geen migratie nodig). Op de weg terug is 'closed'
-// equivalent aan "Afgehandeld" in de UI.
+// POST { conversation_id, status: 'open'|'afgehandeld'|'gearchiveerd' }
+// → update whatsapp_conversations.status.
+//
+// UI ↔ on-wire mapping:
+//   'open'         ↔ 'open'      (actief)
+//   'afgehandeld'  ↔ 'closed'    (tijdelijk weg; komt terug bij inbound)
+//   'gearchiveerd' ↔ 'archived'  (definitief weg; komt NIET terug bij inbound)
+//
+// De CHECK-constraint op whatsapp_conversations.status accepteert al
+// alle drie de on-wire waarden, dus geen migratie nodig.
 //
 // Permission: finance.inbox.view (lichte actie — geen berichten sturen).
 
@@ -12,7 +17,9 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const VALID_UI_STATUSES = ['open', 'afgehandeld'];
+const VALID_UI_STATUSES = ['open', 'afgehandeld', 'gearchiveerd'];
+const UI_TO_DB = { open: 'open', afgehandeld: 'closed', gearchiveerd: 'archived' };
+const DB_TO_UI = { open: 'open', closed: 'afgehandeld', archived: 'gearchiveerd' };
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -39,8 +46,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: `status verwacht ${VALID_UI_STATUSES.join('|')}` });
   }
 
-  // 'afgehandeld' → on-wire 'closed'.
-  const dbStatus = uiStatus === 'afgehandeld' ? 'closed' : 'open';
+  const dbStatus = UI_TO_DB[uiStatus];
 
   try {
     const { data, error } = await supabaseAdmin
@@ -51,7 +57,12 @@ export default async function handler(req, res) {
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!data)  return res.status(404).json({ error: 'Conversation niet gevonden' });
-    return res.status(200).json({ ok: true, id: data.id, status: data.status, ui_status: uiStatus });
+    return res.status(200).json({
+      ok       : true,
+      id       : data.id,
+      status   : data.status,
+      ui_status: DB_TO_UI[data.status] || uiStatus,
+    });
   } catch (e) {
     console.error('[inbox-conversation-set-status]', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });

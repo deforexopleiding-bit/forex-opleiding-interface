@@ -77,12 +77,12 @@ export default async function handler(req, res) {
   let offset = parseInt(q.offset, 10);
   if (!Number.isFinite(offset) || offset < 0) offset = 0;
   const search = String(q.search || '').trim();
-  // status_filter: 'active' (default) = niet-afgehandeld ; 'afgehandeld' =
-  // status IN ('closed','archived') ; 'all' = geen filter. On-wire gebruiken
-  // we 'closed' voor "afgehandeld" (bestaande CHECK-constraint accepteert
-  // alleen 'open'|'closed'|'archived', dus geen migratie nodig).
+  // status_filter: 'active' (default) = alleen 'open'. 'afgehandeld' = alleen
+  // 'closed' (definitief-tijdelijk, komt terug bij inbound). 'archief' =
+  // alleen 'archived' (definitief; NIET auto-heropenen — bewuste splitsing
+  // sinds Jeffrey's onderscheid). 'all' = geen filter.
   const statusFilterRaw = String(q.status_filter || 'active').trim().toLowerCase();
-  const statusFilter = ['active', 'afgehandeld', 'all'].includes(statusFilterRaw) ? statusFilterRaw : 'active';
+  const statusFilter = ['active', 'afgehandeld', 'archief', 'all'].includes(statusFilterRaw) ? statusFilterRaw : 'active';
 
   try {
     // Module-config: welk phone_number_id hoort bij de gevraagde module?
@@ -133,10 +133,11 @@ export default async function handler(req, res) {
       .order('last_message_at', { ascending: false, nullsFirst: false })
       .range(offset, offset + limit - 1);
 
-    // Status-filter server-side: 'active' = alleen 'open' (netter dan
-    // NOT IN); 'afgehandeld' = closed/archived.
-    if (statusFilter === 'active')       query = query.eq('status', 'open');
-    else if (statusFilter === 'afgehandeld') query = query.in('status', ['closed', 'archived']);
+    // Status-filter server-side. Splitsing 'afgehandeld' (closed, komt terug
+    // bij inbound) vs 'archief' (archived, komt NIET terug bij inbound).
+    if      (statusFilter === 'active')      query = query.eq('status', 'open');
+    else if (statusFilter === 'afgehandeld') query = query.eq('status', 'closed');
+    else if (statusFilter === 'archief')     query = query.eq('status', 'archived');
     // 'all' → geen extra status-clause.
 
     if (search) {
