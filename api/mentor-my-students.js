@@ -22,7 +22,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { bubbleUserDisplay } from './_lib/bubble.js';
-import { getMentorBubbleId, fetchBubbleStudents } from './_lib/mentorStudents.js';
+import { getMentorBubbleId, fetchBubbleStudents, getBubbleStudentsCacheInfo } from './_lib/mentorStudents.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -97,6 +97,9 @@ export default async function handler(req, res) {
     if (!bubbleUserId) {
       return res.status(200).json({ ok: true, scope, linked: false, students: [] });
     }
+    // Cache-status vóór de call → hit vs miss transparant maken in response.
+    // TTL 3 min zit intern in fetchBubbleStudents (mentorStudents.js).
+    const cacheBefore = getBubbleStudentsCacheInfo(bubbleUserId);
     const results = await fetchBubbleStudents(bubbleUserId);
 
     // 3) Map → API-shape (suffix-keys met bare-name fallback).
@@ -135,7 +138,14 @@ export default async function handler(req, res) {
 
     students.sort((a, b) => (a.name || a.email || '').localeCompare(b.name || b.email || ''));
 
-    return res.status(200).json({ ok: true, scope, linked: true, students });
+    return res.status(200).json({
+      ok      : true,
+      scope,
+      linked  : true,
+      students,
+      cached  : !!cacheBefore,
+      cache_age_ms: cacheBefore ? cacheBefore.age_ms : 0,
+    });
   } catch (e) {
     console.error('[mentor-my-students]', e?.message || e);
     if (e?.code === 'BUBBLE_CONFIG_MISSING') {

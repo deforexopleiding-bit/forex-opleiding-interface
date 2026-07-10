@@ -58,14 +58,66 @@ export async function getMentorBubbleId(effectiveUserId) {
  * @param {string|null} bubbleUserId
  * @returns {Promise<Array<object>>}
  */
-export async function fetchBubbleStudents(bubbleUserId) {
-  if (!bubbleUserId || typeof bubbleUserId !== 'string') return [];
+// Server-side cache voor de trage Bubble-fetch. TTL = 3 min = binnen de
+// 2-5 min die de business acceptabel vindt. Pattern gespiegeld van
+// bubbleStudentMentors.js (module-scope Map + coalesced in-flight promise).
+// Cache-key = bubbleUserId (server-bepaald ná RBAC in de callers), dus
+// scope-veilig: een mentor kan nooit de gecachte lijst van een andere mentor
+// terugkrijgen.
+//
+// Alle callers profiteren automatisch: mentor-my-students, mentor-1on1-
+// sessions (via getMentorStudents), overdue-badge (via getMentorStudent-
+// Emails), contact-lookup, mentor-student-invoice-resend scope-check, etc.
+const BUBBLE_STUDENTS_TTL_MS = 3 * 60 * 1000;
+const _bubbleStudentsCache = new Map(); // bubbleUserId → { at, students }
+const _bubbleStudentsInflight = new Map(); // bubbleUserId → Promise<Array>
+
+async function _fetchBubbleStudentsRaw(bubbleUserId) {
   const constraints = [
     { key: 'mentor_user',              constraint_type: 'equals', value: bubbleUserId },
     { key: 'role_option_os___roles',   constraint_type: 'equals', value: 'student' },
   ];
   const { results } = await bubbleList('user', constraints, { limit: 500 });
   return Array.isArray(results) ? results : [];
+}
+
+export async function fetchBubbleStudents(bubbleUserId) {
+  if (!bubbleUserId || typeof bubbleUserId !== 'string') return [];
+  const now = Date.now();
+  const hit = _bubbleStudentsCache.get(bubbleUserId);
+  if (hit && (now - hit.at) < BUBBLE_STUDENTS_TTL_MS) return hit.students;
+
+  // Coalesce parallelle callers op één in-flight promise.
+  const running = _bubbleStudentsInflight.get(bubbleUserId);
+  if (running) return running;
+
+  const p = (async () => {
+    try {
+      const students = await _fetchBubbleStudentsRaw(bubbleUserId);
+      _bubbleStudentsCache.set(bubbleUserId, { at: Date.now(), students });
+      return students;
+    } finally {
+      // Altijd loskoppelen (ook bij throw) zodat volgende callers niet
+      // vastzitten aan een gefaalde promise en snel kunnen retryen.
+      _bubbleStudentsInflight.delete(bubbleUserId);
+    }
+  })();
+  _bubbleStudentsInflight.set(bubbleUserId, p);
+  return p;
+}
+
+/**
+ * Meta over de bubble-students cache-entry voor deze mentor. Return null als
+ * er geen (verse) hit is. Bedoeld voor debug-veldjes in de response
+ * (bv. mentor-my-students.cached / cache_age_ms).
+ */
+export function getBubbleStudentsCacheInfo(bubbleUserId) {
+  if (!bubbleUserId) return null;
+  const hit = _bubbleStudentsCache.get(bubbleUserId);
+  if (!hit) return null;
+  const age = Date.now() - hit.at;
+  if (age >= BUBBLE_STUDENTS_TTL_MS) return null;
+  return { at: hit.at, age_ms: age };
 }
 
 /**
