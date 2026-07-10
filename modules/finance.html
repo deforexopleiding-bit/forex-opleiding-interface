@@ -1452,11 +1452,14 @@
               <input id="inboxConvSearch" type="text" class="fin-input" placeholder="Zoeken op naam of nummer…" style="flex:1;font-size:12.5px"/>
               <button class="sr-ibtn" id="inboxConvRefresh" type="button" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
             </div>
-            <!-- Status-tabs (server-side) -->
-            <div id="inboxConvStatusTabs" class="sr-segments" style="display:flex;gap:4px">
-              <button class="sr-seg active" data-conv-status="active" type="button" style="font-size:11.5px;padding:4px 10px">Actief</button>
-              <button class="sr-seg" data-conv-status="afgehandeld" type="button" style="font-size:11.5px;padding:4px 10px">Afgehandeld</button>
-              <button class="sr-seg" data-conv-status="all" type="button" style="font-size:11.5px;padding:4px 10px">Alles</button>
+            <!-- Status-tabs (server-side).
+                 Afgehandeld = tijdelijk weg (komt terug bij inbound).
+                 Archief     = definitief weg (blijft in archief bij inbound). -->
+            <div id="inboxConvStatusTabs" class="sr-segments" style="display:flex;gap:4px;flex-wrap:wrap">
+              <button class="sr-seg active" data-conv-status="active"      type="button" style="font-size:11.5px;padding:4px 10px">Actief</button>
+              <button class="sr-seg"        data-conv-status="afgehandeld" type="button" style="font-size:11.5px;padding:4px 10px">Afgehandeld</button>
+              <button class="sr-seg"        data-conv-status="archief"     type="button" style="font-size:11.5px;padding:4px 10px"><i class="ti ti-archive" style="font-size:11px;margin-right:2px"></i>Archief</button>
+              <button class="sr-seg"        data-conv-status="all"         type="button" style="font-size:11.5px;padding:4px 10px">Alles</button>
             </div>
             <!-- Snelfilters (client-side) + sortering -->
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
@@ -1506,8 +1509,10 @@
               </div>
               <div class="inbox-c-thread-actions">
                 <span id="inboxThreadWindowBadge" class="inbox-c-window-badge open" title="">24h open</span>
-                <button class="sr-ibtn" id="inboxThreadResolveBtn" type="button" title="Gesprek afhandelen" hidden style="color:#059669"><i class="ti ti-check"></i></button>
-                <button class="sr-ibtn" id="inboxThreadReopenBtn" type="button" title="Gesprek heropenen" hidden style="color:var(--accent-cyan)"><i class="ti ti-refresh"></i></button>
+                <button class="sr-ibtn" id="inboxThreadResolveBtn" type="button" title="Gesprek afhandelen (komt terug bij nieuw bericht)" hidden style="color:#059669"><i class="ti ti-check"></i></button>
+                <button class="sr-ibtn" id="inboxThreadArchiveBtn" type="button" title="Gesprek archiveren (komt NIET terug bij nieuw bericht)" hidden style="color:#b45309"><i class="ti ti-archive"></i></button>
+                <button class="sr-ibtn" id="inboxThreadReopenBtn"  type="button" title="Gesprek heropenen"        hidden style="color:var(--accent-cyan)"><i class="ti ti-refresh"></i></button>
+                <button class="sr-ibtn" id="inboxThreadUnarchiveBtn" type="button" title="Uit archief halen"      hidden style="color:var(--accent-cyan)"><i class="ti ti-archive-off"></i></button>
                 <button class="sr-ibtn" id="inboxThreadCustomerBtn" type="button" title="Klant-info"><i class="ti ti-user"></i></button>
               </div>
             </div>
@@ -7510,11 +7515,18 @@
       const debtorBadge = c.is_debtor
         ? `<span title="Wanbetaler" style="display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:700;background:rgba(239,68,68,.12);color:#b91c1c;padding:2px 6px;border-radius:10px;border:1px solid rgba(239,68,68,.28)"><i class="ti ti-alert-triangle" style="font-size:10px"></i>${esc(_inboxFmtEurFromCents(c.total_open_cents))} open</span>`
         : '';
-      // Status-indicator voor afgehandelde gesprekken (in Afgehandeld/Alles).
-      const closedBadge = (c.status === 'closed' || c.status === 'archived')
-        ? `<span title="Afgehandeld" style="font-size:10px;color:var(--text-faint)"><i class="ti ti-check"></i></span>`
-        : '';
-      return `<div class="inbox-conv-row" data-conv-id="${esc(c.id)}" style="${bg}display:flex;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04);align-items:flex-start">
+      // Status-indicator: check-icon voor 'closed' (Afgehandeld),
+      // archive-icon voor 'archived' (Archief). Zichtbaar in Afgehandeld/
+      // Archief/Alles-tabs.
+      const closedBadge = c.status === 'archived'
+        ? `<span title="Gearchiveerd" style="font-size:10px;color:#b45309"><i class="ti ti-archive"></i></span>`
+        : c.status === 'closed'
+          ? `<span title="Afgehandeld" style="font-size:10px;color:var(--text-faint)"><i class="ti ti-check"></i></span>`
+          : '';
+      // Archief-rijen dimmen zodat ze visueel duidelijk anders zijn dan
+      // actieve/afgehandelde gesprekken (definitieve state).
+      const rowOpacity = c.status === 'archived' ? 'opacity:.65;' : '';
+      return `<div class="inbox-conv-row" data-conv-id="${esc(c.id)}" style="${bg}${rowOpacity}display:flex;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04);align-items:flex-start">
         <div style="width:36px;height:36px;border-radius:50%;background:${avColor};color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">${esc(initials)}</div>
         <div style="flex:1;min-width:0">
           <div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline">
@@ -7797,15 +7809,21 @@
       _inboxMessages        = Array.isArray(d.items) ? d.items : [];
       _inboxActiveConv      = d.conversation || null;
       _inboxConvCanSendText = !!(d.conversation && d.conversation.can_send_text);
-      // Afhandelen / heropenen knop-visibility op basis van conv.status
-      // (on-wire: 'open'|'closed'|'archived'; 'closed'/'archived' = "afgehandeld").
+      // Actie-knop-visibility op basis van conv.status.
+      // 'open'     -> Afhandelen + Archiveren zichtbaar, geen Heropenen/Terug.
+      // 'closed'   -> Heropenen + Archiveren zichtbaar (afgehandelde gesprekken
+      //               kunnen alsnog naar archief).
+      // 'archived' -> alleen Terug zichtbaar (archief = definitieve state).
       try {
         const st = String(_inboxActiveConv?.status || 'open');
-        const isClosed = (st === 'closed' || st === 'archived');
-        const resolveBtn = document.getElementById('inboxThreadResolveBtn');
-        const reopenBtn  = document.getElementById('inboxThreadReopenBtn');
-        if (resolveBtn) resolveBtn.hidden = isClosed;
-        if (reopenBtn)  reopenBtn.hidden  = !isClosed;
+        const resolveBtn   = document.getElementById('inboxThreadResolveBtn');
+        const archiveBtn   = document.getElementById('inboxThreadArchiveBtn');
+        const reopenBtn    = document.getElementById('inboxThreadReopenBtn');
+        const unarchiveBtn = document.getElementById('inboxThreadUnarchiveBtn');
+        if (resolveBtn)   resolveBtn.hidden   = (st !== 'open');
+        if (archiveBtn)   archiveBtn.hidden   = (st === 'archived');
+        if (reopenBtn)    reopenBtn.hidden    = (st !== 'closed');
+        if (unarchiveBtn) unarchiveBtn.hidden = (st !== 'archived');
       } catch (_) { /* fail-soft */ }
 
       // Thread-header invullen
@@ -10477,6 +10495,14 @@
       if (_inboxActiveConvId) _inboxSetConvStatus(_inboxActiveConvId, 'afgehandeld');
     });
     document.getElementById('inboxThreadReopenBtn')?.addEventListener('click', () => {
+      if (_inboxActiveConvId) _inboxSetConvStatus(_inboxActiveConvId, 'open');
+    });
+    document.getElementById('inboxThreadArchiveBtn')?.addEventListener('click', () => {
+      if (!_inboxActiveConvId) return;
+      if (!confirm('Dit gesprek archiveren? Het komt NIET automatisch terug bij een nieuw bericht — je vindt het alleen nog in de Archief-tab.')) return;
+      _inboxSetConvStatus(_inboxActiveConvId, 'gearchiveerd');
+    });
+    document.getElementById('inboxThreadUnarchiveBtn')?.addEventListener('click', () => {
       if (_inboxActiveConvId) _inboxSetConvStatus(_inboxActiveConvId, 'open');
     });
 
