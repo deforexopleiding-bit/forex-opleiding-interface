@@ -242,6 +242,33 @@ async function detectAndStartRuns(startedAt, abortMs, errors) {
   }
   const cooldownCutoffIso = new Date(Date.now() - cooldownDays * 24 * 60 * 60 * 1000).toISOString();
 
+  // ── Pipeline-hook: nieuwe wanbetalers → 'nieuw'-fase (batch, geen N+1) ─
+  // Eén ronde per engine-run: verzamel alle unieke customer_ids met een
+  // te late factuur, roep ensurePipelineCustomer per klant aan (idempotent
+  // — bestaande records blijven ongewijzigd). Voordelen tov een aparte
+  // cron: draait al dagelijks, heeft de overdue-lijst al in scope,
+  // FAIL-SOFT dus geen risico voor de engine zelf.
+  try {
+    const { isAutoEnabled, ensurePipelineCustomer } = await import('./dunning-pipeline.js');
+    if (await isAutoEnabled('on_overdue_to_nieuw')) {
+      const today = new Date().toISOString().slice(0, 10);
+      const { data: overdueRows } = await supabaseAdmin
+        .from('invoices')
+        .select('customer_id')
+        .in('status', ['open', 'partially_paid', 'overdue'])
+        .lt('due_date', today);
+      const uniqueCustIds = Array.from(new Set(
+        (overdueRows || []).map((r) => r.customer_id).filter(Boolean)
+      ));
+      for (const cid of uniqueCustIds) {
+        if (elapsed(startedAt) > abortMs) break;
+        await ensurePipelineCustomer(cid);
+      }
+    }
+  } catch (e) {
+    console.warn('[dunning-engine] pipeline-hook overdue soft-fail:', e?.message || e);
+  }
+
   outer: for (const workflow of workflows || []) {
     if (elapsed(startedAt) > abortMs) break;
 

@@ -1358,6 +1358,26 @@ export default async function handler(req, res) {
               if (insRes.inserted) stats.msgs_new++;
               else                 stats.msgs_dup++;
 
+              // 2a. Pipeline-hook: klant reageert → fase 'in_gesprek' (mits
+              // toggle aan). Volgorde-guard: alleen vanuit 'nieuw' of
+              // 'aangemaand' — een regeling/incasso mag niet automatisch
+              // terug naar in_gesprek. Alleen bij nieuw bericht (niet
+              // Meta-retry-dup) en alleen als de conv een customer_id heeft
+              // (alleen wanbetalers hebben een pipeline-record; anders skip).
+              // Fail-soft — webhook mag nooit falen.
+              if (insRes.inserted && conv.customerId) {
+                try {
+                  const { isAutoEnabled, setStage } = await import('./_lib/dunning-pipeline.js');
+                  if (await isAutoEnabled('on_inbound_to_in_gesprek')) {
+                    await setStage(conv.customerId, 'in_gesprek', 'inbound_reply', 'auto:inbound_reply', {
+                      onlyIfFrom: new Set(['nieuw', 'aangemaand']),
+                    });
+                  }
+                } catch (e) {
+                  console.warn('[inbox-webhook] pipeline hook soft-fail', conv.id, e?.message || e);
+                }
+              }
+
               // 2b. Fail-soft dual-write: notify mentor van deelnemer bij een
               // NIEUW inbound bericht. Skip bij Meta-retry (duplicate). Skip
               // als er geen mentor gekoppeld is (via onboardings). Throttle
