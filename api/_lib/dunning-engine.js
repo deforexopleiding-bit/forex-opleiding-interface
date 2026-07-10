@@ -222,6 +222,26 @@ async function detectAndStartRuns(startedAt, abortMs, errors) {
 
   let started = 0;
 
+  // ── Cooldown-setting één keer per engine-run laden ─────────────────────
+  // app_settings key 'dunning_cooldown_days' (integer, 1-90). Ontbreekt/
+  // ongeldig → default 7. Cooldown vult de bestaande "actieve run"-skip
+  // AAN: klanten die recent via de bulk-flow zijn benaderd worden ook
+  // overgeslagen. Maakt de engine CONSERVATIEVER, nooit agressiever.
+  let cooldownDays = 7;
+  try {
+    const { data: cdRow } = await supabaseAdmin
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'dunning_cooldown_days')
+      .maybeSingle();
+    const raw = cdRow?.value?.days;
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 1 && n <= 90) cooldownDays = Math.trunc(n);
+  } catch (e) {
+    console.warn('[dunning-engine] cooldown-setting fail-soft, default 7:', e?.message || e);
+  }
+  const cooldownCutoffIso = new Date(Date.now() - cooldownDays * 24 * 60 * 60 * 1000).toISOString();
+
   outer: for (const workflow of workflows || []) {
     if (elapsed(startedAt) > abortMs) break;
 
@@ -287,6 +307,29 @@ async function detectAndStartRuns(startedAt, abortMs, errors) {
           .maybeSingle();
         if (exErr) throw exErr;
         if (existing) continue;
+
+        // COOLDOWN-check: sla klant over als recent (< cooldownDays) al
+        // een bulk_reminder_sent-log voor deze klant bestaat. Bewuste
+        // scope: alleen bulk-entries. Engine-dubbeling wordt al gedekt
+        // door de actieve-run-check hierboven. Een gecombineerde join
+        // engine-logs → runs.customer_id zou een aparte round-trip per
+        // klant vereisen; niet nodig voor deze cooldown-doel.
+        try {
+          const { data: recentBulk } = await supabaseAdmin
+            .from('dunning_log')
+            .select('id, created_at')
+            .eq('event_type', 'bulk_reminder_sent')
+            .eq('payload->>customer_id', customerId)
+            .gte('created_at', cooldownCutoffIso)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (recentBulk) continue;
+        } catch (e) {
+          console.warn('[dunning-engine] cooldown-check fail-soft:', customerId, e?.message || e);
+          // Fail-open: bij DB-fout NIET skippen (anders schaadt een tijdelijke
+          // glitch de aanmaan-flow). We laten 'm gewoon door.
+        }
 
         const triggerCount = agg.openInvoices.length;
         const { data: inserted, error: insErr } = await supabaseAdmin
