@@ -25,11 +25,33 @@
 //   { ok, scope, student_id,
 //     sessions: [{ date, is_done, no_show, agenda, stage }],
 //     tasks: [{ id, progress, due_date, end_date, items: [...], type_of_task }],
-//     progress: <0..100>|null }
+//     progress: <0..100>|null,
+//     contact: { email, phone } }
+//
+// contact: telefoon + e-mail van de klant. Bubble houdt geen phone bij, dus
+// we matchen de student-email (via bubbleUserDisplay — de standaard nested-
+// email-conventie) case-insensitief tegen customers.email. Bij geen match
+// wordt phone=null en valt email terug op de Bubble-email. Fail-soft: een
+// falende customers-lookup doet de detail-response niet mislukken.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { bubbleList, bubbleGet } from './_lib/bubble.js';
+import { bubbleList, bubbleGet, bubbleUserDisplay } from './_lib/bubble.js';
+
+// Ilike-safe helpers (spiegel van mentor-students-invoice-status.js): PostgREST
+// .or() interpreteert ',' en ')' als delimiters; die zitten niet in geldige
+// e-mails maar defensief filteren we ze weg. LIKE-wildcards % en _ escapen
+// naar een letterlijke gelijkheid (voorkomt patroon-matching false positives).
+function isSafeForIlikeOr(email) {
+  return typeof email === 'string' && email.length > 0
+    && !email.includes(',') && !email.includes('(') && !email.includes(')');
+}
+function escapeIlikePattern(s) {
+  return String(s)
+    .replace(/\\/g, '\\\\')
+    .replace(/%/g, '\\%')
+    .replace(/_/g, '\\_');
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Bubble IDs zijn typisch 32+ chars met underscores/letters/cijfers;
@@ -177,6 +199,34 @@ export default async function handler(req, res) {
       ? Math.max(0, Math.min(100, tasks.reduce((m, t) => Math.max(m, t.progress || 0), 0)))
       : null;
 
+    // ── Contact (fail-soft) ────────────────────────────────────────────────
+    // Student-email uit Bubble (nested authentication.email.email of email-
+    // varianten) → customers.email case-insensitief. phone komt uit customers.
+    // De OWNERSHIP-CHECK boven beschermt deze data al: alleen de eigen mentor
+    // (of admin-scope-mentor) komt hier ooit.
+    const bubbleEmailLc = (bubbleUserDisplay(studentUser)?.email) || null;
+    let contact = { email: bubbleEmailLc, phone: null };
+    if (bubbleEmailLc && isSafeForIlikeOr(bubbleEmailLc)) {
+      try {
+        const { data: custRows, error: cErr } = await supabaseAdmin
+          .from('customers')
+          .select('email, phone')
+          .ilike('email', escapeIlikePattern(bubbleEmailLc))
+          .limit(1);
+        if (cErr) {
+          console.warn('[mentor-student-detail] customers lookup:', cErr.message);
+        } else if (custRows && custRows.length > 0) {
+          const c = custRows[0];
+          contact = {
+            email: (c.email && String(c.email).trim()) || bubbleEmailLc,
+            phone: (c.phone && String(c.phone).trim()) || null,
+          };
+        }
+      } catch (e) {
+        console.warn('[mentor-student-detail] customers lookup catch:', e?.message || e);
+      }
+    }
+
     return res.status(200).json({
       ok: true,
       scope,
@@ -184,6 +234,7 @@ export default async function handler(req, res) {
       sessions,
       tasks,
       progress,
+      contact,
     });
   } catch (e) {
     console.error('[mentor-student-detail]', e?.message || e);
