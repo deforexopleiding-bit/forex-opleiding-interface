@@ -35,6 +35,7 @@ import { buildMetaVariablesFromMapping } from './_lib/template-variables.js';
 import { upsertOutboundConversation } from './_lib/conv-upsert.js';
 import { sendEmailViaSmtp } from './_lib/send-email-core.js';
 import { createNotification } from './_lib/notify.js';
+import { ensurePipelineCustomer, setStage, isAutoEnabled } from './_lib/dunning-pipeline.js';
 
 const BATCH_SIZE     = 10;
 const EMAIL_MAILBOX  = 'administratie@deforexopleiding.nl';
@@ -324,6 +325,18 @@ export default async function handler(req, res) {
           });
         } catch (e) {
           console.warn('[cron-dunning-bulk-send] dunning_log insert soft-fail', rec.id, e?.message || e);
+        }
+
+        // Pipeline-hook: fase → 'aangemaand' (mits toggle aan). Volgorde-
+        // guard: alleen vanuit 'nieuw'. Terminal-guard zit in setStage.
+        // Fail-soft — mag verzending niet omvallen.
+        try {
+          if (await isAutoEnabled('on_bulk_sent_to_aangemaand')) {
+            await ensurePipelineCustomer(rec.customer_id);
+            await setStage(rec.customer_id, 'aangemaand', 'bulk_sent', 'auto:bulk_sent', { onlyIfFrom: 'nieuw' });
+          }
+        } catch (e) {
+          console.warn('[cron-dunning-bulk-send] pipeline hook soft-fail', rec.id, e?.message || e);
         }
       }
 

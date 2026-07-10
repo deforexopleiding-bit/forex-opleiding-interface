@@ -228,6 +228,26 @@ export async function registerPaymentInternal(opts) {
       entityType: 'invoice',
       entityId:   inv.id,
     }).catch(() => {});
+
+    // 5d. Pipeline-hook: als de klant geen andere open facturen meer heeft,
+    // fase → 'opgelost'. Terminal-guard in setStage voorkomt dat een
+    // reeds afgeschreven pipeline-record ongedaan wordt gemaakt.
+    // Fail-soft; mag betaal-registratie nooit doen falen.
+    try {
+      const { isAutoEnabled, setStage } = await import('./dunning-pipeline.js');
+      if (inv.customer_id && (await isAutoEnabled('on_paid_to_opgelost'))) {
+        const { count: openLeft } = await supabaseAdmin
+          .from('invoices')
+          .select('id', { count: 'exact', head: true })
+          .eq('customer_id', inv.customer_id)
+          .in('status', ['open', 'partially_paid', 'overdue']);
+        if ((openLeft || 0) === 0) {
+          await setStage(inv.customer_id, 'opgelost', 'all_paid', 'auto:paid');
+        }
+      }
+    } catch (e) {
+      console.warn('[register-payment-internal] pipeline hook soft-fail', inv.id, e?.message || e);
+    }
   }
 
   // 6. Audit (fail-soft).
