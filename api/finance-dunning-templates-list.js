@@ -8,7 +8,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
-const VALID_KINDS = ['email', 'whatsapp'];
+const VALID_KINDS = ['email', 'whatsapp', 'brief'];
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');

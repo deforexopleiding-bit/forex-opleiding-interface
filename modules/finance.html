@@ -1651,6 +1651,9 @@
             <button class="sr-abtn primary" id="dunBulkOpenBtn" type="button" style="font-size:11.5px;padding:5px 10px" disabled>
               <i class="ti ti-send" style="margin-right:4px"></i>Bulk aanmanen (<span id="dunBulkCount">0</span>)
             </button>
+            <button class="sr-abtn" id="dunBriefOpenBtn" type="button" style="font-size:11.5px;padding:5px 10px" disabled>
+              <i class="ti ti-file-text" style="margin-right:4px"></i>Brieven genereren
+            </button>
             <button class="sr-abtn" id="dunProbRefreshBtn" type="button" style="font-size:11.5px;padding:5px 10px">
               <i class="ti ti-refresh" style="margin-right:4px"></i>Vernieuw
             </button>
@@ -2363,6 +2366,7 @@
         <select id="dunTplKind" class="fin-input">
           <option value="email">E-mail</option>
           <option value="whatsapp">WhatsApp</option>
+          <option value="brief">Brief (PDF)</option>
         </select>
       </label>
       <label style="font-size:12px;color:var(--text-dim);grid-column:1/2">
@@ -3586,7 +3590,9 @@
       tb.innerHTML = _dunTplItems.map((t, i) => {
         const kindBadge = t.kind === 'email'
           ? '<span class="sr-tag blue">E-mail</span>'
-          : '<span class="sr-tag green">WhatsApp</span>';
+          : (t.kind === 'brief'
+              ? '<span class="sr-tag" style="background:rgba(245,158,11,.15);color:#b45309">Brief</span>'
+              : '<span class="sr-tag green">WhatsApp</span>');
         const activeBadge = t.is_active
           ? '<span class="sr-tag green">Ja</span>'
           : '<span class="sr-tag gray">Nee</span>';
@@ -3631,7 +3637,8 @@
   }
   function setDunTplKindVisibility() {
     const kind = document.getElementById('dunTplKind').value;
-    document.getElementById('dunTplSubjectWrap').style.display  = (kind === 'email')    ? '' : 'none';
+    // Brief + email hebben allebei een onderwerp; whatsapp heeft een meta-template-naam.
+    document.getElementById('dunTplSubjectWrap').style.display  = (kind === 'email' || kind === 'brief') ? '' : 'none';
     document.getElementById('dunTplMetaNameWrap').style.display = (kind === 'whatsapp') ? '' : 'none';
   }
   function insertDunTplVar(varText) {
@@ -4548,6 +4555,9 @@
     const cnt = document.getElementById('dunBulkCount');
     if (cnt) cnt.textContent = String(sel.length);
     if (btn) btn.disabled = sel.length === 0;
+    // Brief-knop volgt dezelfde selectie-state.
+    const briefBtn = document.getElementById('dunBriefOpenBtn');
+    if (briefBtn) briefBtn.disabled = sel.length === 0;
   }
   function _wireDunBulkOnce() {
     if (_dunBulkWired) return;
@@ -4561,6 +4571,165 @@
       });
     }
     if (openBtn) openBtn.addEventListener('click', _dunBulkOpenModal);
+    const briefBtn = document.getElementById('dunBriefOpenBtn');
+    if (briefBtn) briefBtn.addEventListener('click', _dunBriefOpenModal);
+  }
+
+  // ─── Brief-generator (PDF, geen verzending) ─────────────────────────────
+  let _dunBriefTplCache = null;
+  function _dunBriefCloseModal() {
+    const el = document.getElementById('dunBriefModal');
+    if (el) el.remove();
+  }
+  async function _dunBriefLoadTemplates() {
+    if (_dunBriefTplCache && (Date.now() - _dunBriefTplCache.at) < 120000) return _dunBriefTplCache.items;
+    const r = await window.AgentShared.apiFetch('/api/finance-dunning-templates-list?kind=brief&active=true');
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    const items = Array.isArray(d.items) ? d.items : [];
+    _dunBriefTplCache = { at: Date.now(), items };
+    return items;
+  }
+  async function _dunBriefOpenModal() {
+    const sel = _dunBulkGetSelected();
+    if (sel.length === 0) return;
+    _dunBriefCloseModal();
+    const overlay = document.createElement('div');
+    overlay.id = 'dunBriefModal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px';
+    overlay.innerHTML = `
+      <div role="dialog" aria-modal="true" style="background:var(--bg,#fff);border-radius:12px;max-width:760px;width:100%;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.35)">
+        <div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--border);background:var(--bg-elev)">
+          <i class="ti ti-file-text" style="color:#b45309"></i>
+          <div style="flex:1">
+            <div style="font-weight:700;font-size:15px">Brieven genereren (PDF)</div>
+            <div style="font-size:11.5px;color:var(--text-dim);margin-top:2px">${sel.length} klanten geselecteerd. Er wordt niets verstuurd — je krijgt een PDF om zelf te printen en te posten.</div>
+          </div>
+          <button type="button" class="sr-abtn" data-dbr-close style="padding:4px 10px;font-size:12px">Sluiten</button>
+        </div>
+        <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end">
+          <div style="flex:1;min-width:240px">
+            <label style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px">Brief-template</label>
+            <select id="dbrTemplateId" class="fin-input" style="width:100%;margin-top:4px"><option value="">Templates laden…</option></select>
+            <div id="dbrTemplatePreview" style="font-size:11px;color:var(--text-faint);margin-top:4px;max-height:60px;overflow-y:auto;white-space:pre-wrap"></div>
+          </div>
+          <div>
+            <button type="button" class="sr-abtn primary" id="dbrPreviewBtn" style="font-size:12.5px;padding:7px 14px">
+              <i class="ti ti-eye" style="margin-right:4px"></i>Preview
+            </button>
+          </div>
+        </div>
+        <div style="padding:14px 20px;border-bottom:1px solid var(--border);background:rgba(245,158,11,.05);font-size:12.5px" data-dbr-summary>Kies een template en klik 'Preview' om te zien wie er wel/geen adres heeft.</div>
+        <div style="overflow-y:auto;flex:1;padding:8px 20px 16px" data-dbr-body></div>
+        <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--bg-elev)">
+          <button type="button" class="sr-abtn" data-dbr-close style="font-size:12.5px;padding:7px 14px">Annuleren</button>
+          <button type="button" class="sr-abtn primary" id="dbrDownloadBtn" style="font-size:12.5px;padding:7px 14px" disabled>
+            <i class="ti ti-download" style="margin-right:4px"></i>Genereer PDF
+          </button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) _dunBriefCloseModal(); });
+    overlay.querySelectorAll('[data-dbr-close]').forEach((b) => b.addEventListener('click', _dunBriefCloseModal));
+
+    // Templates laden.
+    const $sel = overlay.querySelector('#dbrTemplateId');
+    const $prev = overlay.querySelector('#dbrTemplatePreview');
+    try {
+      const items = await _dunBriefLoadTemplates();
+      if (items.length === 0) {
+        $sel.innerHTML = '<option value="">Geen brief-templates gevonden</option>';
+        if ($prev) $prev.textContent = 'Maak eerst een brief-template aan in de Templates-tab (kind = brief).';
+      } else {
+        $sel.innerHTML = '<option value="">— Kies een template —</option>' + items.map((t) => `<option value="${esc(t.id)}">${esc(t.name || '(zonder naam)')}</option>`).join('');
+      }
+    } catch (e) {
+      $sel.innerHTML = '<option value="">(Fout bij laden)</option>';
+      if ($prev) { $prev.style.color = '#b91c1c'; $prev.textContent = 'Kon templates niet laden: ' + (e?.message || 'onbekend'); }
+    }
+    $sel.addEventListener('change', () => {
+      const t = (_dunBriefTplCache?.items || []).find((x) => String(x.id) === String($sel.value)) || null;
+      if (!t) { $prev.textContent = ''; return; }
+      const body = String(t.body || '').trim();
+      $prev.style.color = 'var(--text-faint)';
+      $prev.textContent = (t.subject ? `[${t.subject.slice(0, 60)}] ` : '') + (body.slice(0, 180) + (body.length > 180 ? '…' : ''));
+    });
+    overlay.querySelector('#dbrPreviewBtn')?.addEventListener('click', () => _dunBriefFetchPreview(sel, overlay));
+    overlay.querySelector('#dbrDownloadBtn')?.addEventListener('click', () => _dunBriefDownloadPdf(sel, overlay));
+  }
+
+  async function _dunBriefFetchPreview(selected, overlay) {
+    const $sum = overlay.querySelector('[data-dbr-summary]');
+    const $body = overlay.querySelector('[data-dbr-body]');
+    const $btn = overlay.querySelector('#dbrDownloadBtn');
+    const tplId = (overlay.querySelector('#dbrTemplateId')?.value || '').trim();
+    if (!tplId) { if ($sum) { $sum.style.color = '#b45309'; $sum.textContent = 'Kies eerst een template.'; } return; }
+    if ($sum) { $sum.style.color = 'var(--text-dim)'; $sum.textContent = 'Preview laden…'; }
+    if ($body) $body.innerHTML = '';
+    if ($btn) $btn.disabled = true;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/wanbetalers-brief-pdf?preview=1', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_ids: selected.map((s) => s.id), template_id: tplId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      const items = Array.isArray(d.items) ? d.items : [];
+      const s = d.summary || { total: 0, will_print: 0, skipped: 0 };
+      if ($sum) {
+        $sum.style.color = 'var(--text)';
+        $sum.innerHTML = `<strong>${s.will_print}</strong> worden geprint · <strong>${s.skipped}</strong> overgeslagen (geen adres)`;
+      }
+      if ($body) {
+        $body.innerHTML = `
+          <table class="sr-table" style="font-size:12.5px">
+            <thead><tr><th></th><th>Klant</th><th>Adres</th></tr></thead>
+            <tbody>${items.map((it) => {
+              const tag = it.has_address
+                ? '<i class="ti ti-check" style="color:#047857"></i>'
+                : '<i class="ti ti-alert-triangle" style="color:#b45309" title="Geen adres — wordt overgeslagen"></i>';
+              const addr = it.has_address
+                ? `<div>${esc(it.address.line1)}</div><div>${esc(it.address.line2)}</div>`
+                : '<span style="color:var(--text-faint)">— geen adres —</span>';
+              return `<tr${it.has_address ? '' : ' style="opacity:.55"'}><td style="width:24px">${tag}</td><td>${esc(it.name || '—')}</td><td>${addr}</td></tr>`;
+            }).join('')}</tbody>
+          </table>`;
+      }
+      if ($btn) $btn.disabled = (s.will_print || 0) === 0;
+    } catch (e) {
+      if ($sum) { $sum.style.color = '#b91c1c'; $sum.textContent = 'Fout: ' + (e?.message || 'onbekend'); }
+    }
+  }
+
+  async function _dunBriefDownloadPdf(selected, overlay) {
+    const tplId = (overlay.querySelector('#dbrTemplateId')?.value || '').trim();
+    if (!tplId) return;
+    const $btn = overlay.querySelector('#dbrDownloadBtn');
+    if ($btn) $btn.disabled = true;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/wanbetalers-brief-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_ids: selected.map((s) => s.id), template_id: tplId }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d?.error || ('HTTP ' + r.status));
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'aanmaningsbrieven_' + new Date().toISOString().slice(0, 10) + '.pdf';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) {
+      const $sum = overlay.querySelector('[data-dbr-summary]');
+      if ($sum) { $sum.style.color = '#b91c1c'; $sum.textContent = 'Downloadfout: ' + (e?.message || 'onbekend'); }
+    } finally {
+      if ($btn) $btn.disabled = false;
+    }
   }
 
   function _dunBulkCloseModal() {
