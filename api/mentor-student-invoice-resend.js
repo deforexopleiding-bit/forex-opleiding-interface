@@ -15,10 +15,9 @@
 //
 // Mail template:
 //   Deze endpoint kiest GEEN template — de mentor mag geen finance-templates
-//   selecteren. We gebruiken een vaste env-var-template
-//   MENTOR_INVOICE_REMINDER_TEMPLATE_ID (TL mail-template van type=invoice).
-//   Ontbreekt → 503 zodat een config-issue zichtbaar is (zelfde patroon als
-//   ANTHROPIC_API_KEY-check bij Joost).
+//   selecteren. We gebruiken de VASTE TL mail-template 'Factuur verzenden'
+//   (id in MENTOR_INVOICE_TEMPLATE_ID hieronder). Als TL de template niet
+//   meer heeft (verwijderd/gehernoemd) → 502/503 met duidelijke tekst.
 //
 // Rate-limit (soft):
 //   Anti-dubbelklik binnen dezelfde request-cycle; UI zet de knop kort
@@ -34,7 +33,6 @@
 // Response 200: { ok:true, invoice_id, tl_endpoint, template_name,
 //                 shape_used, recipient_email }
 // Response 400/401/403/404/422/500 → { error, code?, details? }
-// Response 503 → env-var ontbreekt.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -44,6 +42,12 @@ import { sendInvoiceViaTl } from './_lib/tl-invoice-send.js';
 import { upsertInvoiceFromTl } from './_lib/invoice-upsert.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Vaste TL mail-template die de mentor-resend gebruikt: 'Factuur verzenden'
+// (standaard factuur-mail). Als deze id ooit wijzigt (template verwijderd
+// of hernoemd in TL), geeft sendInvoiceViaTl een TEMPLATE_NOT_FOUND terug
+// en returnt de endpoint een nette 502/503.
+const MENTOR_INVOICE_TEMPLATE_ID = '600a810a-9a18-0e93-986a-c16e0727b07e';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -74,13 +78,7 @@ export default async function handler(req, res) {
     effectiveUserId = user.id;
   }
 
-  const mailTemplateId = process.env.MENTOR_INVOICE_REMINDER_TEMPLATE_ID || '';
-  if (!mailTemplateId) {
-    return res.status(503).json({
-      error: 'MENTOR_INVOICE_REMINDER_TEMPLATE_ID niet geconfigureerd — vraag een beheerder de env-var te zetten.',
-      code : 'ENV_MISSING',
-    });
-  }
+  const mailTemplateId = MENTOR_INVOICE_TEMPLATE_ID;
 
   try {
     // 1) Factuur ophalen incl. klant-email.
@@ -113,15 +111,19 @@ export default async function handler(req, res) {
         // Geen overrides — mentor bepaalt niet de tekst.
       });
     } catch (e) {
-      const code   = e?.code || 'TL_UNKNOWN';
-      const status = (code === 'TL_NETWORK') ? 502
-                   : (code === 'TEMPLATE_NOT_FOUND') ? 500
-                   : 422;
-      return res.status(status).json({
-        error: e?.message || 'Kon factuur niet versturen via Teamleader',
-        code,
-        details: e?.details || null,
-      });
+      const code = e?.code || 'TL_UNKNOWN';
+      let status, errText;
+      if (code === 'TL_NETWORK') {
+        status  = 502;
+        errText = e?.message || 'Kon Teamleader niet bereiken';
+      } else if (code === 'TEMPLATE_NOT_FOUND') {
+        status  = 503;
+        errText = 'Factuur-template niet gevonden in Teamleader — vraag een beheerder de TL-template te controleren.';
+      } else {
+        status  = 422;
+        errText = e?.message || 'Kon factuur niet versturen via Teamleader';
+      }
+      return res.status(status).json({ error: errText, code, details: e?.details || null });
     }
 
     // 4) Post-write sync-back (best-effort).
