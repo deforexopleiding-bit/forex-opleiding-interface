@@ -1050,6 +1050,9 @@
       }
       .inbox-c-col-left { max-width: none; }
     }
+    /* Klikbare KPI-cell (bv. Probleemklanten in Overzicht → Probleemklanten-tab). */
+    .fin-kpi-clickable:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(15,23,42,0.10); }
+    .fin-kpi-clickable:active { transform: translateY(0); }
   </style>
 </head>
 <body>
@@ -1081,10 +1084,11 @@
   <!-- ===== Wanbetalers wrapper (Groep A: nested 4 sub-tabs) ===== -->
   <div id="view-wanbetalers" hidden>
     <div class="sr-segments" id="wanbetalersSubNav" style="margin-bottom:18px">
-      <button class="sr-seg active" data-wb-sub="overzicht"   type="button">Overzicht</button>
-      <button class="sr-seg"        data-wb-sub="inbox"       type="button">Inbox</button>
-      <button class="sr-seg"        data-wb-sub="arrangements" type="button">Arrangements</button>
-      <button class="sr-seg"        data-wb-sub="open-acties" type="button">Open Acties</button>
+      <button class="sr-seg active" data-wb-sub="overzicht"      type="button">Overzicht</button>
+      <button class="sr-seg"        data-wb-sub="probleemklanten" type="button">Probleemklanten</button>
+      <button class="sr-seg"        data-wb-sub="inbox"          type="button">Inbox</button>
+      <button class="sr-seg"        data-wb-sub="arrangements"   type="button">Arrangements</button>
+      <button class="sr-seg"        data-wb-sub="open-acties"    type="button">Open Acties</button>
     </div>
     <!-- Open Acties sub-tab host: hier mount FinanceTasks. De andere 3 sub-tabs
          hergebruiken view-dunning / view-inbox / view-arrangements via display-
@@ -3165,7 +3169,7 @@
   // (overzicht/probleemklanten/workflows/templates/geschiedenis/arrangements)
   // blijft volledig intact onder de 'overzicht' sub-tab.
   function setSubView(sub) {
-    const validSubs = ['overzicht', 'inbox', 'arrangements', 'open-acties'];
+    const validSubs = ['overzicht', 'probleemklanten', 'inbox', 'arrangements', 'open-acties'];
     if (!validSubs.includes(sub)) sub = 'overzicht';
     _wbActiveSub = sub;
 
@@ -3200,6 +3204,15 @@
       if (vDunning) vDunning.hidden = false;
       ensureDunningLoaded();
       activateDunningSub('arrangements');
+    } else if (sub === 'probleemklanten') {
+      // Probleemklanten zit óók binnen view-dunning > dunningSubNav. De
+      // dunningSubNav zelf blijft verborgen (Wanbetalers-nav vervangt 'm);
+      // we activeren programmatisch de juiste interne sub-knop. Die knop
+      // triggert wireDunProb + loadDunProblemCustomers + _wireDunBulkOnce
+      // (regel ~3446-3449), dus de checkbox/bulk-flow werkt automatisch.
+      if (vDunning) vDunning.hidden = false;
+      ensureDunningLoaded();
+      activateDunningSub('probleemklanten');
     } else if (sub === 'open-acties') {
       if (vOpenActies) vOpenActies.hidden = false;
       mountFinanceTasksHost();
@@ -4040,11 +4053,16 @@
   function renderDunOvKpis(k) {
     const strip = document.getElementById('dunOvKpis');
     if (!strip) return;
-    const cell = (lbl, val, sub, alert) => {
+    const cell = (lbl, val, sub, alert, opts) => {
       const bg = alert
         ? 'background:linear-gradient(135deg, rgba(239,68,68,.10), rgba(239,68,68,.03));border:1px solid rgba(239,68,68,.30)'
         : '';
-      return `<div class="kpi-cell" style="${bg}"><div class="kpi-lbl">${lbl}</div><div class="kpi-val">${val}</div>${sub ? `<div class="kpi-lbl" style="margin-top:2px">${sub}</div>` : ''}</div>`;
+      const clickable = opts && opts.gotoSub
+        ? `cursor:pointer;transition:transform .08s ease,box-shadow .12s ease`
+        : '';
+      const attr = opts && opts.gotoSub ? ` data-kpi-goto="${opts.gotoSub}" title="Open ${lbl}-lijst"` : '';
+      const hoverCls = opts && opts.gotoSub ? ' fin-kpi-clickable' : '';
+      return `<div class="kpi-cell${hoverCls}" style="${bg};${clickable}"${attr}><div class="kpi-lbl">${lbl}</div><div class="kpi-val">${val}</div>${sub ? `<div class="kpi-lbl" style="margin-top:2px">${sub}</div>` : ''}</div>`;
     };
     // Veldnamen komen 1-op-1 uit /api/finance-dunning-overview.kpis
     // (total_open_cents / open_invoices_count / wanbetalers_count /
@@ -4058,9 +4076,19 @@
     strip.innerHTML =
       cell('Openstaand', fmtEur2Cents(openCents), `${openCount} facturen`) +
       cell('Wanbetalers', String(wanbetalers), 'klanten in dunning') +
-      cell('Probleemklanten', String(probleem), '> 60 dagen overdue', probleem > 0) +
+      cell('Probleemklanten', String(probleem), '> 60 dagen overdue', probleem > 0, { gotoSub: 'probleemklanten' }) +
       cell('Actieve workflows', String(actief), 'lopende runs') +
       cell('Voltooid (30d)', String(voltooid30), 'laatste 30 dagen');
+
+    // Wire klikbare KPI-cells → sub-tab. Hergebruikt setSubView() zodat de
+    // Wanbetalers-nav-highlight vanzelf mee-syncet (die zet .active op de
+    // juiste sr-seg via de bestaande querySelectorAll-loop in setSubView).
+    strip.querySelectorAll('[data-kpi-goto]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const target = el.dataset.kpiGoto;
+        if (target && typeof setSubView === 'function') setSubView(target);
+      });
+    });
   }
 
   function renderDunOvActiveRuns(runs) {
