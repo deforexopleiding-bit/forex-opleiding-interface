@@ -1092,14 +1092,17 @@
       <button class="sr-seg"        data-wb-sub="templates"      type="button">Templates</button>
       <button class="sr-seg"        data-wb-sub="workflows"      type="button">Workflows</button>
       <button class="sr-seg"        data-wb-sub="inbox"          type="button">Inbox</button>
+      <button class="sr-seg"        data-wb-sub="pipeline"       type="button">Pipeline</button>
       <button class="sr-seg"        data-wb-sub="arrangements"   type="button">Arrangements</button>
       <button class="sr-seg"        data-wb-sub="open-acties"    type="button">Open Acties</button>
       <button class="sr-seg"        data-wb-sub="geschiedenis"   type="button">Geschiedenis</button>
     </div>
-    <!-- Open Acties sub-tab host: hier mount FinanceTasks. De andere 3 sub-tabs
-         hergebruiken view-dunning / view-inbox / view-arrangements via display-
-         toggling (zie setSubView()), zodat hun DOM-node + state behouden blijft. -->
+    <!-- Open Acties + Pipeline sub-tab hosts: hier mounten FinanceTasks resp.
+         DunPipeline. De andere sub-tabs hergebruiken view-dunning / view-inbox
+         / view-arrangements via display-toggling (zie setSubView()), zodat hun
+         DOM-node + state behouden blijft. -->
     <div id="wb-sub-open-acties" hidden></div>
+    <div id="wb-sub-pipeline"    hidden></div>
   </div>
 
   <!-- ===== Klanten-view (Groep B: thin view binnen Finance) =====
@@ -3252,7 +3255,7 @@
   // (overzicht/probleemklanten/workflows/templates/geschiedenis/arrangements)
   // blijft volledig intact onder de 'overzicht' sub-tab.
   function setSubView(sub) {
-    const validSubs = ['overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'arrangements', 'open-acties', 'geschiedenis'];
+    const validSubs = ['overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis'];
     if (!validSubs.includes(sub)) sub = 'overzicht';
     _wbActiveSub = sub;
 
@@ -3269,9 +3272,11 @@
     const dunningSubNav = document.getElementById('dunningSubNav');
 
     // Default: alles uit, dan target weer aan.
+    const vPipeline = document.getElementById('wb-sub-pipeline');
     if (vInbox)        vInbox.hidden        = true;
     if (vDunning)      vDunning.hidden      = true;
     if (vOpenActies)   vOpenActies.hidden   = true;
+    if (vPipeline)     vPipeline.hidden     = true;
 
     // Sub-nav layering fix: bij Wanbetalers-wrapper actief verbergen we de
     // interne dunningSubNav (Overzicht/Probleemklanten/Workflows/Templates/
@@ -3319,6 +3324,9 @@
     } else if (sub === 'open-acties') {
       if (vOpenActies) vOpenActies.hidden = false;
       mountFinanceTasksHost();
+    } else if (sub === 'pipeline') {
+      if (vPipeline) vPipeline.hidden = false;
+      mountDunPipelineHost();
     } else { // overzicht
       if (vDunning) vDunning.hidden = false;
       ensureDunningLoaded();
@@ -12899,6 +12907,677 @@
     } finally {
       btn.disabled = false;
       btn.innerHTML = origHtml;
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Wanbetalers-Pipeline (Fase 2 UI) — kanban-bord + detailkaart
+  // met logboek/afspraken/facturen + WhatsApp-gesprek ernaast.
+  //
+  // Puur frontend op bestaande endpoints:
+  //   GET  /api/dunning-pipeline-stages
+  //   GET  /api/dunning-pipeline-list
+  //   GET  /api/dunning-pipeline-detail?customer_id
+  //   POST /api/dunning-pipeline-set-stage
+  //   POST /api/dunning-pipeline-add-log
+  //   POST /api/dunning-pipeline-appointment
+  //   GET  /api/inbox-conversation-by-customer?customer_id
+  //   GET  /api/inbox-messages-list?conversation_id
+  //   POST /api/inbox-send                (hergebruikt 1-op-1: { conversation_id, mode:'text', body })
+  //   POST /api/inbox-conversation-set-status (voor archiveren-knop)
+  //
+  // Geen nieuwe verzendlogica, geen migratie.
+  // ────────────────────────────────────────────────────────────────────
+  const _pipeState = {
+    mounted        : false,
+    loading        : false,
+    stages         : [],   // [{ slug, label, sort_order, color, is_terminal }]
+    list           : [],   // pipeline-list items
+    filter         : '',
+    dragCustomerId : null,
+    dragOriginSlug : null,
+    // Detail-modal:
+    detail         : null, // { pipeline, customer, logs[], appointments[], open_invoices[] }
+    detailLoading  : false,
+    activeCustId   : null,
+    // Chat-substate:
+    chat           : { convId: null, messages: [], loading: false, canSend: false, phone: null },
+  };
+
+  function mountDunPipelineHost() {
+    const host = document.getElementById('wb-sub-pipeline');
+    if (!host) return;
+    if (!_pipeState.mounted) {
+      host.innerHTML = _pipeShellHtml();
+      _pipeWireShell();
+      _pipeState.mounted = true;
+    }
+    loadPipelineData({ background: false });
+  }
+
+  function _pipeShellHtml() {
+    return `
+      <div class="pipe-wrap" style="display:flex;flex-direction:column;gap:12px">
+        <div class="pipe-toolbar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <input id="pipeSearchInput" type="text" placeholder="Zoek klant…" style="min-width:220px;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);color:var(--text-dim);font-size:13px">
+          <button id="pipeRefreshBtn" class="sr-btn" type="button" style="padding:6px 12px"><i class="ti ti-refresh"></i> Herlaad</button>
+          <div id="pipeCounter" style="font-size:12px;color:var(--text-faint);margin-left:auto"></div>
+        </div>
+        <div id="pipeBoard" class="pipe-board" style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;min-height:60vh"></div>
+      </div>
+      <div id="pipeDetailOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1200;display:none;align-items:stretch;justify-content:center;padding:20px">
+        <div id="pipeDetailPanel" style="background:#0f172a;border:1px solid rgba(255,255,255,.10);border-radius:12px;box-shadow:0 24px 60px rgba(0,0,0,.55);width:min(1400px,100%);max-height:100%;display:flex;flex-direction:column;overflow:hidden">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.06);gap:10px">
+            <div id="pipeDetailTitle" style="font-size:14.5px;font-weight:600;color:var(--text-dim)">Klant</div>
+            <button id="pipeDetailCloseBtn" class="sr-ibtn" type="button" title="Sluiten"><i class="ti ti-x"></i></button>
+          </div>
+          <div style="display:flex;flex:1;min-height:0">
+            <div id="pipeDetailDossier" style="flex:1 1 55%;min-width:0;overflow-y:auto;padding:16px;border-right:1px solid rgba(255,255,255,.06)"></div>
+            <div id="pipeDetailChat"   style="flex:1 1 45%;min-width:0;overflow:hidden;display:flex;flex-direction:column;background:#0b1220"></div>
+          </div>
+        </div>
+      </div>
+      <style>
+        .pipe-col { flex:0 0 300px; background:rgba(255,255,255,.02); border:1px solid rgba(255,255,255,.06); border-radius:10px; display:flex; flex-direction:column; max-height:75vh; }
+        .pipe-col.terminal { opacity:.7; }
+        .pipe-col.drag-over { border-color:var(--accent-cyan, #0891b2); background:rgba(6,182,212,.06); }
+        .pipe-col-head { padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.06); display:flex; flex-direction:column; gap:2px; }
+        .pipe-col-title { font-size:13px; font-weight:700; color:var(--text-dim); display:flex; align-items:center; gap:6px; }
+        .pipe-col-title .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+        .pipe-col-meta { font-size:11px; color:var(--text-faint); }
+        .pipe-col-body { flex:1; overflow-y:auto; padding:8px; display:flex; flex-direction:column; gap:8px; }
+        .pipe-card { background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:10px 12px; cursor:pointer; user-select:none; }
+        .pipe-card:hover { border-color:rgba(255,255,255,.16); background:rgba(255,255,255,.06); }
+        .pipe-card[draggable="true"]:active { cursor:grabbing; }
+        .pipe-card.dragging { opacity:.5; }
+        .pipe-card-name { font-size:13px; font-weight:600; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .pipe-card-open { font-size:12.5px; font-weight:700; color:#f87171; margin-top:2px; }
+        .pipe-card-meta { font-size:11px; color:var(--text-faint); margin-top:3px; }
+        .pipe-card-hint { font-size:11px; color:var(--text-faint); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .pipe-empty  { font-size:11.5px; color:var(--text-faint); padding:12px 8px; text-align:center; }
+        .pipe-dos-section { margin-bottom:16px; }
+        .pipe-dos-h { font-size:11.5px; text-transform:uppercase; letter-spacing:.6px; color:var(--text-faint); margin-bottom:6px; }
+        .pipe-log-item { padding:8px 10px; border-left:2px solid rgba(255,255,255,.10); background:rgba(255,255,255,.02); border-radius:0 6px 6px 0; margin-bottom:6px; }
+        .pipe-log-item.stage_change { border-left-color:#8b5cf6; }
+        .pipe-log-item.auto_event   { border-left-color:#0ea5e9; }
+        .pipe-log-item.note         { border-left-color:#10b981; }
+        .pipe-log-item.appointment  { border-left-color:#f59e0b; }
+        .pipe-log-meta { font-size:10.5px; color:var(--text-faint); margin-top:2px; }
+        .pipe-appt { display:flex; align-items:center; gap:8px; padding:6px 8px; background:rgba(255,255,255,.03); border-radius:6px; margin-bottom:4px; }
+        .pipe-appt.done { opacity:.6; text-decoration:line-through; }
+        .pipe-inv  { display:flex; justify-content:space-between; padding:4px 0; font-size:12px; }
+        .pipe-chat-msgs { flex:1; overflow-y:auto; padding:12px 14px; display:flex; flex-direction:column; gap:6px; }
+        .pipe-chat-msg { max-width:82%; padding:7px 10px; border-radius:10px; font-size:13px; line-height:1.35; word-wrap:break-word; }
+        .pipe-chat-msg.inbound  { background:rgba(255,255,255,.06); align-self:flex-start; border-bottom-left-radius:3px; }
+        .pipe-chat-msg.outbound { background:rgba(6,182,212,.16); align-self:flex-end; border-bottom-right-radius:3px; }
+        .pipe-chat-meta { font-size:10px; color:var(--text-faint); margin-top:2px; text-align:right; }
+        .pipe-chat-compose { border-top:1px solid rgba(255,255,255,.06); padding:10px 12px; display:flex; gap:8px; align-items:flex-end; }
+        .pipe-chat-compose textarea { flex:1; min-height:44px; max-height:120px; resize:vertical; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:8px 10px; color:var(--text-dim); font-size:13px; font-family:inherit; }
+        .pipe-chat-compose textarea:disabled { opacity:.5; cursor:not-allowed; }
+        .pipe-chat-empty { flex:1; display:flex; align-items:center; justify-content:center; text-align:center; padding:24px; color:var(--text-faint); font-size:12.5px; }
+        .pipe-chat-header { padding:10px 14px; border-bottom:1px solid rgba(255,255,255,.06); font-size:12px; color:var(--text-faint); display:flex; align-items:center; justify-content:space-between; gap:8px; }
+      </style>
+    `;
+  }
+
+  function _pipeWireShell() {
+    const inp = document.getElementById('pipeSearchInput');
+    if (inp) inp.addEventListener('input', () => {
+      _pipeState.filter = (inp.value || '').trim().toLowerCase();
+      renderPipelineBoard();
+    });
+    document.getElementById('pipeRefreshBtn')?.addEventListener('click', () => loadPipelineData({ background: false }));
+    document.getElementById('pipeDetailCloseBtn')?.addEventListener('click', closePipelineDetail);
+    document.getElementById('pipeDetailOverlay')?.addEventListener('click', (e) => {
+      if (e.target && e.target.id === 'pipeDetailOverlay') closePipelineDetail();
+    });
+  }
+
+  async function loadPipelineData({ background }) {
+    if (_pipeState.loading) return;
+    _pipeState.loading = true;
+    const board = document.getElementById('pipeBoard');
+    if (!background && board) board.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-faint);font-size:12.5px;width:100%">Laden…</div>';
+    try {
+      const [rStages, rList] = await Promise.all([
+        window.AgentShared.apiFetch('/api/dunning-pipeline-stages'),
+        window.AgentShared.apiFetch('/api/dunning-pipeline-list'),
+      ]);
+      const dStages = await rStages.json().catch(() => ({}));
+      const dList   = await rList.json().catch(() => ({}));
+      if (!rStages.ok) throw new Error(dStages?.error || 'Kon fases niet laden');
+      if (!rList.ok)   throw new Error(dList?.error   || 'Kon pipeline-lijst niet laden');
+      _pipeState.stages = Array.isArray(dStages.items) ? dStages.items.slice().sort((a,b) => (a.sort_order||0) - (b.sort_order||0)) : [];
+      _pipeState.list   = Array.isArray(dList.items)   ? dList.items   : [];
+      renderPipelineBoard();
+    } catch (e) {
+      console.error('[pipeline load]', e);
+      if (board) board.innerHTML = `<div style="padding:40px;text-align:center;color:#f87171;font-size:12.5px;width:100%">Fout bij laden: ${esc(e?.message || 'onbekend')}</div>`;
+      if (typeof showToast === 'function') showToast('Pipeline laden mislukt: ' + (e?.message || 'onbekend'), 'error');
+    } finally {
+      _pipeState.loading = false;
+    }
+  }
+
+  function _pipeFmtEurCents(cents) {
+    const c = Number(cents);
+    if (!Number.isFinite(c) || c === 0) return '€ 0,00';
+    return '€ ' + (c / 100).toFixed(2).replace('.', ',');
+  }
+  function _pipeFmtRel(iso) {
+    if (!iso) return '';
+    try { return (typeof fmtRelTime === 'function') ? fmtRelTime(iso) : new Date(iso).toLocaleString('nl-NL'); }
+    catch (_) { return ''; }
+  }
+  function _pipeFmtDate(iso) {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      if (!Number.isFinite(d.getTime())) return '';
+      return d.toLocaleDateString('nl-NL', { day:'2-digit', month:'short' });
+    } catch (_) { return ''; }
+  }
+  function _pipeFmtDateTime(iso) {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      if (!Number.isFinite(d.getTime())) return '';
+      return d.toLocaleString('nl-NL', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+    } catch (_) { return ''; }
+  }
+
+  function renderPipelineBoard() {
+    const board = document.getElementById('pipeBoard');
+    if (!board) return;
+    const q = _pipeState.filter;
+    const filteredList = q
+      ? _pipeState.list.filter(it => String(it.customer_name || '').toLowerCase().includes(q))
+      : _pipeState.list;
+
+    const counter = document.getElementById('pipeCounter');
+    if (counter) {
+      const totalCents = filteredList.reduce((s, it) => s + (Number(it.total_open_cents) || 0), 0);
+      counter.textContent = `${filteredList.length} klanten · ${_pipeFmtEurCents(totalCents)} openstaand`;
+    }
+
+    // Groepeer per stage
+    const byStage = new Map();
+    for (const s of _pipeState.stages) byStage.set(s.slug, []);
+    for (const it of filteredList) {
+      const slug = it.stage_slug || 'nieuw';
+      if (!byStage.has(slug)) byStage.set(slug, []);
+      byStage.get(slug).push(it);
+    }
+
+    board.innerHTML = _pipeState.stages.map((s) => {
+      const items = byStage.get(s.slug) || [];
+      const sum = items.reduce((x, it) => x + (Number(it.total_open_cents) || 0), 0);
+      const cards = items.map((it) => _pipeCardHtml(it)).join('')
+        || `<div class="pipe-empty">Geen klanten</div>`;
+      const color = s.color || '#94a3b8';
+      const termCls = s.is_terminal ? ' terminal' : '';
+      return `<div class="pipe-col${termCls}" data-stage-slug="${esc(s.slug)}">
+        <div class="pipe-col-head" style="border-top:3px solid ${esc(color)}">
+          <div class="pipe-col-title"><span class="dot" style="background:${esc(color)}"></span>${esc(s.label)}</div>
+          <div class="pipe-col-meta">${items.length} · ${_pipeFmtEurCents(sum)}</div>
+        </div>
+        <div class="pipe-col-body" data-stage-body="${esc(s.slug)}">${cards}</div>
+      </div>`;
+    }).join('');
+
+    _pipeWireBoardEvents();
+  }
+
+  function _pipeCardHtml(it) {
+    const name  = it.customer_name || 'Onbekende klant';
+    const open  = _pipeFmtEurCents(it.total_open_cents);
+    const cnt   = Number(it.open_invoice_count) || 0;
+    let   hint  = '';
+    if (it.next_appointment && it.next_appointment.title) {
+      hint = `<div class="pipe-card-hint"><i class="ti ti-calendar-event" style="font-size:10px"></i> ${esc(it.next_appointment.title)} · ${esc(_pipeFmtDateTime(it.next_appointment.due_at))}</div>`;
+    } else if (it.last_log && it.last_log.body) {
+      const body = String(it.last_log.body).slice(0, 80);
+      hint = `<div class="pipe-card-hint"><i class="ti ti-message" style="font-size:10px"></i> ${esc(body)}</div>`;
+    }
+    return `<div class="pipe-card" draggable="true" data-customer-id="${esc(it.customer_id)}" data-stage-slug="${esc(it.stage_slug)}">
+      <div class="pipe-card-name">${esc(name)}</div>
+      <div class="pipe-card-open">${open} openstaand</div>
+      <div class="pipe-card-meta">${cnt} factu${cnt === 1 ? 'ur' : 'ren'} · gew. ${esc(_pipeFmtRel(it.stage_changed_at))}</div>
+      ${hint}
+    </div>`;
+  }
+
+  function _pipeWireBoardEvents() {
+    const board = document.getElementById('pipeBoard');
+    if (!board) return;
+    // Kaartje klik → detail
+    board.querySelectorAll('.pipe-card').forEach((card) => {
+      card.addEventListener('click', (e) => {
+        // Onderdruk als er nog een drag bezig is
+        if (card.classList.contains('dragging')) return;
+        const cid = card.dataset.customerId;
+        if (cid) openPipelineDetail(cid);
+      });
+      card.addEventListener('dragstart', (e) => {
+        _pipeState.dragCustomerId = card.dataset.customerId || null;
+        _pipeState.dragOriginSlug = card.dataset.stageSlug  || null;
+        card.classList.add('dragging');
+        try {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', card.dataset.customerId || '');
+        } catch (_) {}
+      });
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+        _pipeState.dragCustomerId = null;
+        _pipeState.dragOriginSlug = null;
+        board.querySelectorAll('.pipe-col.drag-over').forEach(c => c.classList.remove('drag-over'));
+      });
+    });
+    // Kolom-body als drop-target
+    board.querySelectorAll('[data-stage-body]').forEach((body) => {
+      const col = body.closest('.pipe-col');
+      body.addEventListener('dragover', (e) => {
+        if (!_pipeState.dragCustomerId) return;
+        e.preventDefault();
+        try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+        if (col) col.classList.add('drag-over');
+      });
+      body.addEventListener('dragleave', (e) => {
+        if (col && !col.contains(e.relatedTarget)) col.classList.remove('drag-over');
+      });
+      body.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        if (col) col.classList.remove('drag-over');
+        const cid = _pipeState.dragCustomerId || (e.dataTransfer && e.dataTransfer.getData('text/plain'));
+        const targetSlug = body.dataset.stageBody;
+        const originSlug = _pipeState.dragOriginSlug;
+        if (!cid || !targetSlug || targetSlug === originSlug) return;
+        await pipelineMoveCustomer(cid, originSlug, targetSlug);
+      });
+    });
+  }
+
+  async function pipelineMoveCustomer(customerId, fromSlug, toSlug) {
+    // Optimistisch verplaatsen in state, dan POST. Bij fout: rollback.
+    const idx = _pipeState.list.findIndex(x => x.customer_id === customerId);
+    if (idx < 0) return;
+    const prev = _pipeState.list[idx].stage_slug;
+    _pipeState.list[idx].stage_slug       = toSlug;
+    _pipeState.list[idx].stage_changed_at = new Date().toISOString();
+    renderPipelineBoard();
+    try {
+      const r = await window.AgentShared.apiFetch('/api/dunning-pipeline-set-stage', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ customer_id: customerId, stage_slug: toSlug }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      if (typeof showToast === 'function') showToast('Fase gewijzigd', 'success');
+    } catch (e) {
+      // Rollback
+      _pipeState.list[idx].stage_slug = prev;
+      renderPipelineBoard();
+      if (typeof showToast === 'function') showToast('Fase-wijziging mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+
+  // ── DETAIL-KAART ─────────────────────────────────────────────────────
+  async function openPipelineDetail(customerId) {
+    _pipeState.activeCustId = customerId;
+    const overlay = document.getElementById('pipeDetailOverlay');
+    if (overlay) overlay.style.display = 'flex';
+    const dossier = document.getElementById('pipeDetailDossier');
+    const chat    = document.getElementById('pipeDetailChat');
+    if (dossier) dossier.innerHTML = '<div style="color:var(--text-faint);font-size:12.5px">Laden…</div>';
+    if (chat)    chat.innerHTML    = '<div class="pipe-chat-empty">WhatsApp laden…</div>';
+    // Parallel: detail + conversation-lookup
+    await Promise.all([
+      _pipeLoadDetail(customerId),
+      _pipeLoadChat(customerId),
+    ]);
+  }
+
+  function closePipelineDetail() {
+    const overlay = document.getElementById('pipeDetailOverlay');
+    if (overlay) overlay.style.display = 'none';
+    _pipeState.activeCustId = null;
+    _pipeState.detail       = null;
+    _pipeState.chat         = { convId: null, messages: [], loading: false, canSend: false, phone: null };
+  }
+
+  async function _pipeLoadDetail(customerId) {
+    if (_pipeState.activeCustId !== customerId) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/dunning-pipeline-detail?customer_id=' + encodeURIComponent(customerId));
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Fout bij laden dossier');
+      if (_pipeState.activeCustId !== customerId) return;
+      _pipeState.detail = d;
+      renderPipelineDossier();
+    } catch (e) {
+      console.error('[pipeline detail]', e);
+      const dossier = document.getElementById('pipeDetailDossier');
+      if (dossier) dossier.innerHTML = `<div style="color:#f87171;font-size:12.5px">Dossier laden mislukt: ${esc(e?.message || 'onbekend')}</div>`;
+    }
+  }
+
+  function _pipeCustomerDisplayName(customer) {
+    if (!customer) return 'Onbekende klant';
+    if (customer.display_name) return customer.display_name;
+    const parts = [customer.first_name, customer.last_name].filter(Boolean).join(' ').trim();
+    return parts || customer.company_name || customer.email || 'Onbekende klant';
+  }
+
+  function renderPipelineDossier() {
+    const dossier = document.getElementById('pipeDetailDossier');
+    const title   = document.getElementById('pipeDetailTitle');
+    if (!dossier || !_pipeState.detail) return;
+    const { customer, pipeline, logs, appointments, open_invoices } = _pipeState.detail;
+    const name  = _pipeCustomerDisplayName(customer);
+    if (title) title.textContent = name;
+
+    const totalOpenCents = (open_invoices || []).reduce((s, iv) => s + Math.round((Number(iv.amount_open) || 0) * 100), 0);
+    const stageOptions = _pipeState.stages.map(s => `<option value="${esc(s.slug)}"${s.slug === pipeline.stage_slug ? ' selected' : ''}>${esc(s.label)}</option>`).join('');
+
+    const openAppts = (appointments || []).filter(a => a.status === 'open');
+    const doneAppts = (appointments || []).filter(a => a.status !== 'open').slice(0, 5);
+
+    dossier.innerHTML = `
+      <div class="pipe-dos-section">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px">
+          <div>
+            <div style="font-size:16px;font-weight:700;color:var(--text-dim)">${esc(name)}</div>
+            <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">${esc(customer?.email || '')} ${customer?.phone ? '· ' + esc(customer.phone) : ''}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:18px;font-weight:700;color:#f87171">${_pipeFmtEurCents(totalOpenCents)}</div>
+            <div style="font-size:11px;color:var(--text-faint)">${(open_invoices || []).length} openstaand</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pipe-dos-section">
+        <div class="pipe-dos-h">Fase</div>
+        <select id="pipeDetailStageSel" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);color:var(--text-dim);font-size:13px">${stageOptions}</select>
+      </div>
+
+      <div class="pipe-dos-section">
+        <div class="pipe-dos-h">Afspraken</div>
+        <div id="pipeDetailApptList">${openAppts.map(_pipeApptHtml).join('') || '<div style="font-size:11.5px;color:var(--text-faint)">Nog geen open afspraken</div>'}</div>
+        ${doneAppts.length ? `<details style="margin-top:6px"><summary style="font-size:11px;color:var(--text-faint);cursor:pointer">${doneAppts.length} afgehandeld</summary><div style="margin-top:6px">${doneAppts.map(_pipeApptHtml).join('')}</div></details>` : ''}
+        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+          <input id="pipeApptTitle" type="text" placeholder="Titel afspraak…" style="flex:1;min-width:160px;padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);color:var(--text-dim);font-size:12px">
+          <input id="pipeApptDue"   type="datetime-local" style="padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);color:var(--text-dim);font-size:12px">
+          <button id="pipeApptAddBtn" class="sr-btn" type="button" style="font-size:12px;padding:6px 10px">Toevoegen</button>
+        </div>
+      </div>
+
+      <div class="pipe-dos-section">
+        <div class="pipe-dos-h">Logboek</div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <input id="pipeLogInput" type="text" placeholder="Notitie…" style="flex:1;padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);color:var(--text-dim);font-size:12px">
+          <button id="pipeLogAddBtn" class="sr-btn" type="button" style="font-size:12px;padding:6px 10px">Plaats</button>
+        </div>
+        <div id="pipeDetailLogList">${(logs || []).map(_pipeLogHtml).join('') || '<div style="font-size:11.5px;color:var(--text-faint)">Nog geen logboek-items</div>'}</div>
+      </div>
+
+      <div class="pipe-dos-section">
+        <div class="pipe-dos-h">Open facturen</div>
+        ${(open_invoices || []).map(_pipeInvHtml).join('') || '<div style="font-size:11.5px;color:var(--text-faint)">Geen open facturen</div>'}
+      </div>
+    `;
+
+    _pipeWireDossier();
+  }
+
+  function _pipeApptHtml(a) {
+    const done = a.status !== 'open';
+    return `<div class="pipe-appt${done ? ' done' : ''}" data-appt-id="${esc(a.id)}">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12.5px;font-weight:600;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.title)}</div>
+        <div style="font-size:10.5px;color:var(--text-faint)">${esc(_pipeFmtDateTime(a.due_at))}${a.status !== 'open' ? ' · ' + esc(a.status) : ''}</div>
+      </div>
+      ${a.status === 'open' ? `<button class="sr-ibtn pipe-appt-done" type="button" title="Afvinken"><i class="ti ti-check"></i></button>` : ''}
+    </div>`;
+  }
+  function _pipeLogHtml(l) {
+    const t = l.entry_type || 'note';
+    const author = l.created_by || 'system';
+    return `<div class="pipe-log-item ${esc(t)}">
+      <div style="font-size:12.5px;color:var(--text-dim);white-space:pre-wrap;word-wrap:break-word">${esc(l.body || '')}</div>
+      <div class="pipe-log-meta">${esc(t)} · ${esc(author)} · ${esc(_pipeFmtRel(l.created_at))}</div>
+    </div>`;
+  }
+  function _pipeInvHtml(iv) {
+    const openEur = Number(iv.amount_open) || 0;
+    return `<div class="pipe-inv">
+      <span style="color:var(--text-dim)">${esc(iv.invoice_number || iv.id)}</span>
+      <span style="color:var(--text-faint)">${esc(_pipeFmtDate(iv.due_date))}</span>
+      <span style="color:#f87171;font-weight:600">€ ${openEur.toFixed(2).replace('.', ',')}</span>
+    </div>`;
+  }
+
+  function _pipeWireDossier() {
+    document.getElementById('pipeDetailStageSel')?.addEventListener('change', async (e) => {
+      const newSlug = e.target.value;
+      const cid = _pipeState.activeCustId;
+      if (!cid || !newSlug) return;
+      try {
+        const r = await window.AgentShared.apiFetch('/api/dunning-pipeline-set-stage', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ customer_id: cid, stage_slug: newSlug }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+        if (typeof showToast === 'function') showToast('Fase gewijzigd', 'success');
+        // Refresh detail + achtergrondlijst
+        await _pipeLoadDetail(cid);
+        await loadPipelineData({ background: true });
+      } catch (err) {
+        if (typeof showToast === 'function') showToast('Fase wijzigen mislukt: ' + (err?.message || 'onbekend'), 'error');
+      }
+    });
+
+    document.getElementById('pipeLogAddBtn')?.addEventListener('click', async () => {
+      const inp = document.getElementById('pipeLogInput');
+      const body = (inp?.value || '').trim();
+      const cid = _pipeState.activeCustId;
+      if (!body || !cid) return;
+      try {
+        const r = await window.AgentShared.apiFetch('/api/dunning-pipeline-add-log', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ customer_id: cid, body }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+        if (inp) inp.value = '';
+        await _pipeLoadDetail(cid);
+        await loadPipelineData({ background: true });
+      } catch (err) {
+        if (typeof showToast === 'function') showToast('Notitie mislukt: ' + (err?.message || 'onbekend'), 'error');
+      }
+    });
+
+    document.getElementById('pipeApptAddBtn')?.addEventListener('click', async () => {
+      const t   = document.getElementById('pipeApptTitle');
+      const due = document.getElementById('pipeApptDue');
+      const cid = _pipeState.activeCustId;
+      const title = (t?.value || '').trim();
+      const dueRaw = (due?.value || '').trim();
+      if (!cid || !title || !dueRaw) {
+        if (typeof showToast === 'function') showToast('Titel én datum verplicht', 'warning');
+        return;
+      }
+      let dueIso;
+      try { dueIso = new Date(dueRaw).toISOString(); }
+      catch (_) { if (typeof showToast === 'function') showToast('Ongeldige datum', 'warning'); return; }
+      try {
+        const r = await window.AgentShared.apiFetch('/api/dunning-pipeline-appointment', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ customer_id: cid, title, due_at: dueIso }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+        if (t)   t.value = '';
+        if (due) due.value = '';
+        await _pipeLoadDetail(cid);
+        await loadPipelineData({ background: true });
+      } catch (err) {
+        if (typeof showToast === 'function') showToast('Afspraak mislukt: ' + (err?.message || 'onbekend'), 'error');
+      }
+    });
+
+    document.querySelectorAll('.pipe-appt-done').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const wrap = btn.closest('[data-appt-id]');
+        const apptId = wrap?.dataset?.apptId;
+        if (!apptId) return;
+        try {
+          const r = await window.AgentShared.apiFetch('/api/dunning-pipeline-appointment', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ appointment_id: apptId, status: 'done' }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+          await _pipeLoadDetail(_pipeState.activeCustId);
+          await loadPipelineData({ background: true });
+        } catch (err) {
+          if (typeof showToast === 'function') showToast('Afvinken mislukt: ' + (err?.message || 'onbekend'), 'error');
+        }
+      });
+    });
+  }
+
+  // ── CHAT (WhatsApp) ──────────────────────────────────────────────────
+  async function _pipeLoadChat(customerId) {
+    if (_pipeState.activeCustId !== customerId) return;
+    _pipeState.chat.loading = true;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-conversation-by-customer?customer_id=' + encodeURIComponent(customerId));
+      const d = await r.json().catch(() => ({}));
+      if (_pipeState.activeCustId !== customerId) return;
+      if (!r.ok || !d.found || !d.conversation_id) {
+        _pipeState.chat.convId = null;
+        _renderPipeChatEmpty(d?.reason);
+        return;
+      }
+      _pipeState.chat.convId = d.conversation_id;
+      // Berichten laden
+      const rM = await window.AgentShared.apiFetch('/api/inbox-messages-list?conversation_id=' + encodeURIComponent(d.conversation_id));
+      const dM = await rM.json().catch(() => ({}));
+      if (_pipeState.activeCustId !== customerId) return;
+      if (!rM.ok) throw new Error(dM?.error || 'Berichten laden mislukt');
+      _pipeState.chat.messages = Array.isArray(dM.items) ? dM.items : [];
+      _pipeState.chat.canSend  = !!(dM.conversation && dM.conversation.can_send_text);
+      _pipeState.chat.phone    = dM.conversation?.phone_number || null;
+      _renderPipeChat();
+    } catch (e) {
+      console.error('[pipeline chat]', e);
+      _renderPipeChatEmpty(null, e?.message);
+    } finally {
+      _pipeState.chat.loading = false;
+    }
+  }
+
+  function _renderPipeChatEmpty(reason, err) {
+    const chat = document.getElementById('pipeDetailChat');
+    if (!chat) return;
+    let msg = 'Nog geen WhatsApp-gesprek met deze klant.';
+    if (reason === 'no_finance_config') msg = 'Finance-WhatsApp is niet geconfigureerd.';
+    if (err) msg = 'Chat laden mislukt: ' + err;
+    chat.innerHTML = `<div class="pipe-chat-empty">${esc(msg)}</div>`;
+  }
+
+  function _renderPipeChat() {
+    const chat = document.getElementById('pipeDetailChat');
+    if (!chat) return;
+    const conv = _pipeState.chat;
+    const canSendText = !!conv.canSend;
+    const bubbles = conv.messages.map((m) => {
+      const dir = m.direction === 'outbound' ? 'outbound' : 'inbound';
+      const time = _pipeFmtDateTime(m.created_at || m.sent_at);
+      const body = m.body || (m.template_name ? `[template] ${m.template_name}` : (m.media_type ? `[${m.media_type}]` : ''));
+      return `<div class="pipe-chat-msg ${dir}">
+        <div style="white-space:pre-wrap;word-wrap:break-word">${esc(body)}</div>
+        <div class="pipe-chat-meta">${esc(time)}</div>
+      </div>`;
+    }).join('');
+
+    const archiveBtn = `<button id="pipeChatArchiveBtn" class="sr-ibtn" type="button" title="Archiveer gesprek" style="color:#b45309"><i class="ti ti-archive"></i></button>`;
+    const windowBadge = canSendText
+      ? '<span style="color:#10b981">● 24u venster open</span>'
+      : '<span style="color:#f59e0b">● Buiten 24u — alleen template</span>';
+
+    chat.innerHTML = `
+      <div class="pipe-chat-header">
+        <div>${esc(conv.phone || 'WhatsApp')} · ${windowBadge}</div>
+        ${archiveBtn}
+      </div>
+      <div class="pipe-chat-msgs" id="pipeChatMsgs">${bubbles || '<div class="pipe-chat-empty">Nog geen berichten</div>'}</div>
+      <div class="pipe-chat-compose">
+        <textarea id="pipeChatText" ${canSendText ? '' : 'disabled'} placeholder="${canSendText ? 'Typ een bericht…' : '24u-venster gesloten — gebruik een template in de gewone inbox'}"></textarea>
+        <button id="pipeChatSendBtn" class="sr-btn" type="button" ${canSendText ? '' : 'disabled'} style="padding:8px 14px">Verstuur</button>
+      </div>
+    `;
+    // Auto-scroll naar onder
+    const msgs = document.getElementById('pipeChatMsgs');
+    if (msgs) msgs.scrollTop = msgs.scrollHeight;
+
+    document.getElementById('pipeChatSendBtn')?.addEventListener('click', _pipeSendChat);
+    document.getElementById('pipeChatText')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _pipeSendChat(); }
+    });
+    document.getElementById('pipeChatArchiveBtn')?.addEventListener('click', _pipeArchiveConv);
+  }
+
+  async function _pipeSendChat() {
+    const ta = document.getElementById('pipeChatText');
+    const btn = document.getElementById('pipeChatSendBtn');
+    const body = (ta?.value || '').trim();
+    const convId = _pipeState.chat.convId;
+    if (!body || !convId) return;
+    if (btn) btn.disabled = true;
+    try {
+      // HERGEBRUIK 1-OP-1 van sendInboxText (regel 7994-7998):
+      //   POST /api/inbox-send  { conversation_id, mode:'text', body }
+      const r = await window.AgentShared.apiFetch('/api/inbox-send', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ conversation_id: convId, mode: 'text', body }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      if (ta) ta.value = '';
+      // Herlaad berichten
+      await _pipeLoadChat(_pipeState.activeCustId);
+    } catch (e) {
+      if (typeof showToast === 'function') showToast('Verzenden mislukt: ' + (e?.message || 'onbekend'), 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function _pipeArchiveConv() {
+    const convId = _pipeState.chat.convId;
+    if (!convId) return;
+    if (!confirm('Dit WhatsApp-gesprek archiveren? Het komt NIET automatisch terug bij een nieuw bericht.')) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-conversation-set-status', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ conversation_id: convId, status: 'gearchiveerd' }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      if (typeof showToast === 'function') showToast('Gesprek gearchiveerd', 'success');
+    } catch (e) {
+      if (typeof showToast === 'function') showToast('Archiveren mislukt: ' + (e?.message || 'onbekend'), 'error');
     }
   }
 
