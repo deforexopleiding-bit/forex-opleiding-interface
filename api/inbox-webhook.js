@@ -198,6 +198,12 @@ async function upsertConversation(req, { phoneE164Plus, displayName, inboundTime
       last_message_preview: preview,
       unread_count:         newUnread,
       last_inbound_at:      tsIso,
+      // AUTO-HEROPEN: een inbound bericht heropent een afgehandeld gesprek.
+      // Deze upsertConversation-tak wordt uitsluitend vanuit het inbound-
+      // pad aangeroepen (regel ~1342), dus deze status='open'-toekenning
+      // gebeurt nooit bij outbound. 'closed'/'archived' → 'open';
+      // reeds 'open' → 'open' (no-op).
+      status:               'open',
     };
     if (displayName) updatePayload.display_name = displayName;
     // phone_number_id: veilige heal. Met de tuple-SELECT hierboven is een
