@@ -1089,9 +1089,12 @@
     <div class="sr-segments" id="wanbetalersSubNav" style="margin-bottom:18px">
       <button class="sr-seg active" data-wb-sub="overzicht"      type="button">Overzicht</button>
       <button class="sr-seg"        data-wb-sub="probleemklanten" type="button">Probleemklanten</button>
+      <button class="sr-seg"        data-wb-sub="templates"      type="button">Templates</button>
+      <button class="sr-seg"        data-wb-sub="workflows"      type="button">Workflows</button>
       <button class="sr-seg"        data-wb-sub="inbox"          type="button">Inbox</button>
       <button class="sr-seg"        data-wb-sub="arrangements"   type="button">Arrangements</button>
       <button class="sr-seg"        data-wb-sub="open-acties"    type="button">Open Acties</button>
+      <button class="sr-seg"        data-wb-sub="geschiedenis"   type="button">Geschiedenis</button>
     </div>
     <!-- Open Acties sub-tab host: hier mount FinanceTasks. De andere 3 sub-tabs
          hergebruiken view-dunning / view-inbox / view-arrangements via display-
@@ -3195,7 +3198,7 @@
   // (overzicht/probleemklanten/workflows/templates/geschiedenis/arrangements)
   // blijft volledig intact onder de 'overzicht' sub-tab.
   function setSubView(sub) {
-    const validSubs = ['overzicht', 'probleemklanten', 'inbox', 'arrangements', 'open-acties'];
+    const validSubs = ['overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'arrangements', 'open-acties', 'geschiedenis'];
     if (!validSubs.includes(sub)) sub = 'overzicht';
     _wbActiveSub = sub;
 
@@ -3239,6 +3242,26 @@
       if (vDunning) vDunning.hidden = false;
       ensureDunningLoaded();
       activateDunningSub('probleemklanten');
+    } else if (sub === 'templates') {
+      // Templates-beheer (e-mail + WhatsApp dunning_templates) zit binnen
+      // view-dunning > dunningSubTemplates. activateDunningSub klikt de
+      // verborgen data-dunning-sub knop; dunningSubNav-click-handler
+      // (regel ~3434+) doet wire + load van de templates-lijst.
+      if (vDunning) vDunning.hidden = false;
+      ensureDunningLoaded();
+      activateDunningSub('templates');
+    } else if (sub === 'workflows') {
+      // Workflows (dunningSubWorkflows) idem — interne sub-nav-click
+      // triggert wireDunWfEditor + wireDunWfList.
+      if (vDunning) vDunning.hidden = false;
+      ensureDunningLoaded();
+      activateDunningSub('workflows');
+    } else if (sub === 'geschiedenis') {
+      // Geschiedenis (dunningSubGeschiedenis) idem — sub-nav-click
+      // triggert wireDunHistory + loadDunHistory({reset:true}).
+      if (vDunning) vDunning.hidden = false;
+      ensureDunningLoaded();
+      activateDunningSub('geschiedenis');
     } else if (sub === 'open-acties') {
       if (vOpenActies) vOpenActies.hidden = false;
       mountFinanceTasksHost();
