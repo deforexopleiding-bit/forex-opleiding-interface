@@ -1053,6 +1053,9 @@
     /* Klikbare KPI-cell (bv. Probleemklanten in Overzicht → Probleemklanten-tab). */
     .fin-kpi-clickable:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(15,23,42,0.10); }
     .fin-kpi-clickable:active { transform: translateY(0); }
+    /* Sorteer-pijltjes in Probleemklanten-tabel. */
+    #dunProbTable th[data-sort-key]:hover { background: rgba(100,116,139,0.08); }
+    .fin-sort-arrow { font-size: 10px; margin-left: 3px; }
   </style>
 </head>
 <body>
@@ -1607,7 +1610,7 @@
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:10px">
           <div>
             <h2 style="margin:0;font-size:18px;font-weight:700">Probleemklanten</h2>
-            <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Klanten met 2 of meer openstaande facturen. Gesorteerd op oudste vervaldatum.</div>
+            <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Klanten met 2 of meer openstaande facturen. Klik een kolomkop om te sorteren.</div>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="sr-abtn primary" id="dunBulkOpenBtn" type="button" style="font-size:11.5px;padding:5px 10px" disabled>
@@ -1618,17 +1621,40 @@
             </button>
           </div>
         </div>
-        <div class="sr-tablewrap">
-          <table class="sr-table" id="dunProbTable">
+        <!-- Filter-strip: zoek + dagen-buckets + bedrag-drempel + workflow-status. -->
+        <div id="dunProbFilters" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px;padding:10px 12px;background:var(--bg-elev,rgba(100,116,139,0.06));border:1px solid var(--border);border-radius:8px">
+          <input type="search" id="dunProbSearch" class="fin-input" placeholder="Zoek klant of e-mail…" style="flex:1;min-width:180px;font-size:12px" />
+          <select id="dunProbDaysBucket" class="fin-input" title="Dagen te laat" style="font-size:12px">
+            <option value="">Alle · dagen</option>
+            <option value="0-30">0-30 dagen</option>
+            <option value="30-60">30-60 dagen</option>
+            <option value="60+">60+ dagen</option>
+          </select>
+          <select id="dunProbAmountBucket" class="fin-input" title="Min. openstaand" style="font-size:12px">
+            <option value="">Alle · bedrag</option>
+            <option value="100">&gt; €100</option>
+            <option value="500">&gt; €500</option>
+            <option value="1000">&gt; €1.000</option>
+          </select>
+          <select id="dunProbWorkflowFilter" class="fin-input" title="Workflow-status" style="font-size:12px">
+            <option value="">Alle · workflow</option>
+            <option value="with">Met actieve workflow</option>
+            <option value="without">Zonder workflow</option>
+          </select>
+          <button type="button" class="sr-abtn" id="dunProbFiltersReset" style="font-size:11.5px;padding:5px 10px">Reset</button>
+          <span id="dunProbFilterInfo" style="margin-left:auto;font-size:11.5px;color:var(--text-dim)">—</span>
+        </div>
+        <div class="sr-tablewrap" style="overflow-x:auto">
+          <table class="sr-table" id="dunProbTable" style="min-width:840px">
             <thead><tr>
-              <th style="width:36px"><input type="checkbox" id="dunProbSelectAll" title="Selecteer alles" /></th>
-              <th>Klant</th>
-              <th style="width:110px"># Open facturen</th>
-              <th style="width:160px">Totaal openstaand</th>
-              <th style="width:140px">Oudste vervaldatum</th>
-              <th style="width:120px">Dagen overdue</th>
-              <th style="width:150px">Actieve workflow?</th>
-              <th style="width:220px">Acties</th>
+              <th style="width:36px"><input type="checkbox" id="dunProbSelectAll" title="Selecteer alles (gefilterde set)" /></th>
+              <th data-sort-key="name" style="cursor:pointer;user-select:none">Klant<span class="fin-sort-arrow" data-arrow-for="name"></span></th>
+              <th data-sort-key="open_invoice_count" style="width:80px;cursor:pointer;user-select:none;text-align:center">Facturen<span class="fin-sort-arrow" data-arrow-for="open_invoice_count"></span></th>
+              <th data-sort-key="total_open_amount" style="width:120px;cursor:pointer;user-select:none">Openstaand<span class="fin-sort-arrow" data-arrow-for="total_open_amount"></span></th>
+              <th data-sort-key="oldest_due_date" style="width:110px;cursor:pointer;user-select:none">Vervaldatum<span class="fin-sort-arrow" data-arrow-for="oldest_due_date"></span></th>
+              <th data-sort-key="days_overdue_oldest" style="width:88px;cursor:pointer;user-select:none">Dagen<span class="fin-sort-arrow" data-arrow-for="days_overdue_oldest"></span></th>
+              <th style="width:90px">Workflow</th>
+              <th style="width:210px">Acties</th>
             </tr></thead>
             <tbody id="dunProbTbody"><tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
           </table>
@@ -4241,6 +4267,45 @@
     _dunProbWired = true;
     document.getElementById('dunProbRefreshBtn')?.addEventListener('click', () => loadDunProblemCustomers());
     _wireDunBulkOnce();
+
+    // Filters wire (client-side op _dunProbItems).
+    const $srch = document.getElementById('dunProbSearch');
+    const $db   = document.getElementById('dunProbDaysBucket');
+    const $ab   = document.getElementById('dunProbAmountBucket');
+    const $wf   = document.getElementById('dunProbWorkflowFilter');
+    const $reset = document.getElementById('dunProbFiltersReset');
+    let _srchT;
+    if ($srch) $srch.addEventListener('input', () => {
+      clearTimeout(_srchT);
+      _srchT = setTimeout(() => { _dunProbFilter.search = $srch.value || ''; _dunProbRenderCurrent(); }, 200);
+    });
+    if ($db) $db.addEventListener('change', () => { _dunProbFilter.daysBucket   = $db.value || ''; _dunProbRenderCurrent(); });
+    if ($ab) $ab.addEventListener('change', () => { _dunProbFilter.amountBucket = $ab.value || ''; _dunProbRenderCurrent(); });
+    if ($wf) $wf.addEventListener('change', () => { _dunProbFilter.workflow     = $wf.value || ''; _dunProbRenderCurrent(); });
+    if ($reset) $reset.addEventListener('click', () => {
+      _dunProbFilter.search = ''; _dunProbFilter.daysBucket = ''; _dunProbFilter.amountBucket = ''; _dunProbFilter.workflow = '';
+      if ($srch) $srch.value = '';
+      if ($db) $db.value = '';
+      if ($ab) $ab.value = '';
+      if ($wf) $wf.value = '';
+      _dunProbRenderCurrent();
+    });
+
+    // Sort wire: click op th[data-sort-key] wisselt asc/desc.
+    document.querySelectorAll('#dunProbTable th[data-sort-key]').forEach((th) => {
+      th.addEventListener('click', () => {
+        const key = th.dataset.sortKey;
+        if (!key) return;
+        if (_dunProbSort.key === key) {
+          _dunProbSort.dir = _dunProbSort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          _dunProbSort.key = key;
+          // Default per kolom: tekst asc, getal/datum desc (meest urgent bovenaan).
+          _dunProbSort.dir = (key === 'name') ? 'asc' : 'desc';
+        }
+        _dunProbRenderCurrent();
+      });
+    });
   }
 
   async function loadDunProblemCustomers() {
@@ -4262,19 +4327,95 @@
     }
   }
 
-  function renderDunProbRows(items) {
+  // Filter + sort state voor Probleemklanten. Client-side toepassing op de
+  // al-geladen _dunProbItems, zodat we geen extra fetches doen bij filter/sort.
+  const _dunProbFilter = { search: '', daysBucket: '', amountBucket: '', workflow: '' };
+  const _dunProbSort   = { key: 'days_overdue_oldest', dir: 'desc' }; // default: meest urgente bovenaan
+
+  function _dunProbApplyFilters(items) {
+    const s = String(_dunProbFilter.search || '').trim().toLowerCase();
+    const db = String(_dunProbFilter.daysBucket || '');
+    const ab = Number(_dunProbFilter.amountBucket || 0);
+    const wf = String(_dunProbFilter.workflow || '');
+    return (items || []).filter((p) => {
+      if (s) {
+        const hay = (String(p.name || '') + ' ' + String(p.email || '')).toLowerCase();
+        if (!hay.includes(s)) return false;
+      }
+      if (db) {
+        const d = Number(p.days_overdue_oldest || 0);
+        if (db === '0-30'  && !(d <= 30))               return false;
+        if (db === '30-60' && !(d > 30 && d <= 60))     return false;
+        if (db === '60+'   && !(d > 60))                return false;
+      }
+      if (ab > 0) {
+        // total_open_amount is in cents; drempel in EUR.
+        if (Number(p.total_open_amount || 0) <= ab * 100) return false;
+      }
+      if (wf === 'with'    && !p.has_active_run) return false;
+      if (wf === 'without' &&  p.has_active_run) return false;
+      return true;
+    });
+  }
+  function _dunProbApplySort(items) {
+    const key = _dunProbSort.key;
+    const dir = _dunProbSort.dir === 'asc' ? 1 : -1;
+    const arr = items.slice();
+    arr.sort((a, b) => {
+      const av = a?.[key];
+      const bv = b?.[key];
+      if (key === 'name') {
+        return String(av || '').localeCompare(String(bv || '')) * dir;
+      }
+      if (key === 'oldest_due_date') {
+        return String(av || '').localeCompare(String(bv || '')) * dir;
+      }
+      const na = Number(av || 0);
+      const nb = Number(bv || 0);
+      return (na - nb) * dir;
+    });
+    return arr;
+  }
+  function _dunProbUpdateSortArrows() {
+    document.querySelectorAll('#dunProbTable .fin-sort-arrow').forEach((el) => {
+      const forKey = el.dataset.arrowFor;
+      if (forKey === _dunProbSort.key) {
+        el.textContent = _dunProbSort.dir === 'asc' ? ' ▲' : ' ▼';
+        el.style.color = 'var(--accent-cyan)';
+      } else {
+        el.textContent = '';
+      }
+    });
+  }
+  function _dunProbRenderCurrent() {
+    if (!Array.isArray(_dunProbItems)) return;
+    const filtered = _dunProbApplyFilters(_dunProbItems);
+    const sorted   = _dunProbApplySort(filtered);
+    const info = document.getElementById('dunProbFilterInfo');
+    if (info) info.textContent = `${sorted.length} van ${_dunProbItems.length} klanten`;
+    _dunProbRenderTbody(sorted);
+    _dunProbUpdateSortArrows();
+  }
+  function _dunProbRenderTbody(items) {
     const tb = document.getElementById('dunProbTbody');
     if (!tb) return;
     if (!items.length) {
-      tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-faint)">Geen probleemklanten gevonden.</td></tr>';
+      tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-faint)">Geen klanten die aan de filters voldoen.</td></tr>';
+      const selAll = document.getElementById('dunProbSelectAll');
+      if (selAll) selAll.checked = false;
       _dunBulkRefreshCount();
       return;
     }
-    tb.innerHTML = items.map((p, i) => {
+    tb.innerHTML = items.map((p) => {
       const customerCell = p.customer_id
         ? `<a href="/modules/klanten.html?id=${esc(p.customer_id)}&tab=facturen" style="color:var(--accent-cyan);text-decoration:none;font-weight:600">${esc(p.name || '—')}</a>`
         : `<span style="font-weight:600">${esc(p.name || '—')}</span>`;
-      const emailLine = p.email ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px">${esc(p.email)}</div>` : '';
+      const emailLine = p.email
+        ? `<div style="font-size:11px;margin-top:2px"><a href="mailto:${esc(p.email)}" style="color:var(--text-faint);text-decoration:none">${esc(p.email)}</a></div>`
+        : '';
+      const phoneLine = p.phone
+        ? `<div style="font-size:11px;margin-top:1px"><a href="tel:${esc(String(p.phone).replace(/\s+/g, ''))}" style="color:var(--text-faint);text-decoration:none"><i class="ti ti-phone" style="font-size:10px;margin-right:2px"></i>${esc(p.phone)}</a></div>`
+        : '';
       const oldestDue = p.oldest_due_date ? esc(fmtDateNl(p.oldest_due_date)) : '—';
       const daysOver = Number(p.days_overdue_oldest || 0);
       const daysCell = daysOver > 0
@@ -4287,14 +4428,14 @@
         ? `<a href="/modules/klanten.html?id=${esc(p.customer_id)}&tab=facturen" class="sr-abtn" style="font-size:11px;padding:4px 8px;text-decoration:none"><i class="ti ti-eye"></i> Bekijk</a>`
         : '—';
       const proposeBtn = p.customer_id
-        ? `<button class="sr-abtn primary" data-arrang-propose-customer="${esc(p.customer_id)}" type="button" style="font-size:11px;padding:4px 8px;margin-left:4px"><i class="ti ti-calendar-plus"></i> Stel afspraak voor</button>`
+        ? `<button class="sr-abtn primary" data-arrang-propose-customer="${esc(p.customer_id)}" type="button" style="font-size:11px;padding:4px 8px;margin-left:4px"><i class="ti ti-calendar-plus"></i> Voorstel</button>`
         : '';
       const cbCell = p.customer_id
         ? `<input type="checkbox" class="dun-prob-cb" data-cust-id="${esc(p.customer_id)}" data-cust-name="${esc(p.name || '')}" />`
         : '';
       return `<tr>
         <td>${cbCell}</td>
-        <td>${customerCell}${emailLine}</td>
+        <td>${customerCell}${emailLine}${phoneLine}</td>
         <td style="text-align:center">${esc(p.open_invoice_count)}</td>
         <td style="font-variant-numeric:tabular-nums">${fmtEur2Cents(p.total_open_amount)}</td>
         <td>${oldestDue}</td>
@@ -4304,7 +4445,6 @@
       </tr>`;
     }).join('');
 
-    // Delegated click voor "Stel afspraak voor" button.
     tb.querySelectorAll('[data-arrang-propose-customer]').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -4313,12 +4453,19 @@
         if (cid) openArrangPropose({ customer_id: cid, customer_name: name });
       });
     });
-
-    // Selectie-checkboxes → tel + toggle bulk-knop.
     tb.querySelectorAll('.dun-prob-cb').forEach((cb) => {
       cb.addEventListener('change', _dunBulkRefreshCount);
     });
+    // Select-all reset bij re-render (nieuwe filter-set).
+    const selAll = document.getElementById('dunProbSelectAll');
+    if (selAll) selAll.checked = false;
     _dunBulkRefreshCount();
+  }
+
+  // Backwards-compat: bestaande callers roepen renderDunProbRows(items) aan.
+  function renderDunProbRows(items) {
+    _dunProbItems = items || [];
+    _dunProbRenderCurrent();
   }
 
   // ─── Bulk aanmanen — Fase 1 (preview + draft-job; verstuurt NIETS) ──────
@@ -4329,6 +4476,7 @@
   // In Fase 2 pikt een cron approved jobs op en verstuurt daadwerkelijk.
   let _dunBulkWired = false;
   let _dunBulkJobId = null;
+  let _dunBulkTemplatesCache = null; // { at, items } — refresht bij open van modal
 
   function _dunBulkGetSelected() {
     const cbs = document.querySelectorAll('#dunProbTbody .dun-prob-cb:checked');
@@ -4394,8 +4542,10 @@
           </div>
           <div style="flex:1;min-width:240px">
             <label style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px">WhatsApp template</label>
-            <input type="text" id="dbmTemplateName" class="fin-input" style="width:100%;margin-top:4px" placeholder="bijv. dunning_reminder_v1" />
-            <div style="font-size:11px;color:var(--text-faint);margin-top:2px">Naam van een approved template in whatsapp_meta_templates.</div>
+            <select id="dbmTemplateName" class="fin-input" style="width:100%;margin-top:4px">
+              <option value="">Templates laden…</option>
+            </select>
+            <div id="dbmTemplatePreview" style="font-size:11px;color:var(--text-faint);margin-top:4px;max-height:60px;overflow-y:auto;white-space:pre-wrap"></div>
           </div>
           <div>
             <button type="button" class="sr-abtn primary" id="dbmPreviewBtn" style="font-size:12.5px;padding:7px 14px">
@@ -4422,6 +4572,62 @@
     overlay.querySelector('#dbmPreviewBtn')?.addEventListener('click', () => _dunBulkFetchPreview(sel));
     // Approve.
     overlay.querySelector('#dbmApproveBtn')?.addEventListener('click', _dunBulkApprove);
+    // Template-dropdown vullen + change-handler voor preview-hint.
+    _dunBulkLoadTemplates(overlay);
+    overlay.querySelector('#dbmTemplateName')?.addEventListener('change', (ev) => {
+      _dunBulkOnTemplateChange(overlay, ev.target.value);
+    });
+    // Kanaal-wissel: bij 'email' verbergt de template-select z'n verplichtingslabel.
+    overlay.querySelector('#dbmChannel')?.addEventListener('change', () => {
+      const chan = overlay.querySelector('#dbmChannel')?.value || 'whatsapp';
+      const $tpl = overlay.querySelector('#dbmTemplateName');
+      if ($tpl) $tpl.disabled = (chan === 'email');
+    });
+  }
+
+  async function _dunBulkLoadTemplates(overlay) {
+    const $sel  = overlay.querySelector('#dbmTemplateName');
+    const $prev = overlay.querySelector('#dbmTemplatePreview');
+    if (!$sel) return;
+    const now = Date.now();
+    // Reuse cache (2 min TTL) om de modal snel te openen bij re-open.
+    if (_dunBulkTemplatesCache && (now - _dunBulkTemplatesCache.at) < 120000) {
+      _dunBulkFillTemplateSelect($sel, $prev, _dunBulkTemplatesCache.items);
+      return;
+    }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/wanbetalers-whatsapp-templates-list');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      const items = Array.isArray(d.items) ? d.items : [];
+      _dunBulkTemplatesCache = { at: Date.now(), items };
+      _dunBulkFillTemplateSelect($sel, $prev, items);
+    } catch (e) {
+      $sel.innerHTML = '<option value="">(Fout bij laden)</option>';
+      if ($prev) { $prev.style.color = '#b91c1c'; $prev.textContent = 'Kon templates niet laden: ' + (e?.message || 'onbekend'); }
+    }
+  }
+  function _dunBulkFillTemplateSelect($sel, $prev, items) {
+    if (!items || items.length === 0) {
+      $sel.innerHTML = '<option value="">Geen goedgekeurde templates gevonden</option>';
+      if ($prev) $prev.textContent = 'Dien eerst een template in bij Meta en wacht op goedkeuring.';
+      return;
+    }
+    $sel.innerHTML = '<option value="">— Kies een template —</option>' + items.map((t) => {
+      const label = t.language ? `${t.name} · ${t.language}` : t.name;
+      return `<option value="${esc(t.name)}">${esc(label)}</option>`;
+    }).join('');
+    if ($prev) $prev.textContent = '';
+  }
+  function _dunBulkOnTemplateChange(overlay, name) {
+    const $prev = overlay.querySelector('#dbmTemplatePreview');
+    if (!$prev) return;
+    const items = _dunBulkTemplatesCache?.items || [];
+    const tpl = items.find((t) => t.name === name) || null;
+    if (!tpl) { $prev.textContent = ''; return; }
+    const body = String(tpl.body_text || '').trim();
+    $prev.style.color = 'var(--text-faint)';
+    $prev.textContent = body ? body.slice(0, 240) + (body.length > 240 ? '…' : '') : '(geen body_text)';
   }
 
   async function _dunBulkFetchPreview(selected) {
