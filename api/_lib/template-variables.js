@@ -85,9 +85,14 @@ export const AVAILABLE_VARIABLES = [
   // ── customer ───────────────────────────────────────────────────────────
   { key: 'klant.naam',       label: 'Volledige naam',     category: 'customer', example: 'Jeffrey Biemold',    requires_context: 'customer' },
   { key: 'klant.voornaam',   label: 'Voornaam',           category: 'customer', example: 'Jeffrey',            requires_context: 'customer' },
+  { key: 'klant.achternaam', label: 'Achternaam',         category: 'customer', example: 'Biemold',            requires_context: 'customer' },
   { key: 'klant.email',      label: 'E-mailadres',        category: 'customer', example: 'klant@example.com',  requires_context: 'customer' },
   { key: 'klant.telefoon',   label: 'Telefoonnummer',     category: 'customer', example: '+31612345678',       requires_context: 'customer' },
   { key: 'klant.bedrijf',    label: 'Bedrijfsnaam',       category: 'customer', example: 'Voorbeeld B.V.',     requires_context: 'customer' },
+  { key: 'klant.adres_straat',   label: 'Straat + nummer',      category: 'customer', example: 'Voorbeeldstraat 12', requires_context: 'customer' },
+  { key: 'klant.adres_postcode', label: 'Postcode',             category: 'customer', example: '1234 AB',           requires_context: 'customer' },
+  { key: 'klant.adres_plaats',   label: 'Plaats',               category: 'customer', example: 'Amsterdam',         requires_context: 'customer' },
+  { key: 'klant.adres_volledig', label: 'Volledig adres',       category: 'customer', example: 'Voorbeeldstraat 12, 1234 AB Amsterdam', requires_context: 'customer' },
 
   // ── invoice (oudste open factuur) ──────────────────────────────────────
   { key: 'factuur.nummer',       label: 'Factuurnummer',         category: 'invoice', example: '2026-0001',         requires_context: 'invoice' },
@@ -330,11 +335,28 @@ function getDateValue(key) {
 function getCustomerValue(customer, key) {
   if (!customer) return '';
   switch (key) {
-    case 'klant.naam':     return customerDisplayName(customer);
-    case 'klant.voornaam': return (customer.first_name || '').trim();
-    case 'klant.email':    return customer.email || '';
-    case 'klant.telefoon': return customer.phone || '';
-    case 'klant.bedrijf':  return customer.company_name || '';
+    case 'klant.naam':       return customerDisplayName(customer);
+    case 'klant.voornaam':   return (customer.first_name || '').trim();
+    case 'klant.achternaam': return (customer.last_name  || '').trim();
+    case 'klant.email':      return customer.email || '';
+    case 'klant.telefoon':   return customer.phone || '';
+    case 'klant.bedrijf':    return customer.company_name || '';
+    case 'klant.adres_straat': {
+      const s = (customer.address_street || '').trim();
+      const n = (customer.address_number || '').trim();
+      return [s, n].filter(Boolean).join(' ');
+    }
+    case 'klant.adres_postcode': return (customer.address_postal || '').trim();
+    case 'klant.adres_plaats':   return (customer.address_city   || '').trim();
+    case 'klant.adres_volledig': {
+      const s = (customer.address_street || '').trim();
+      const n = (customer.address_number || '').trim();
+      const p = (customer.address_postal || '').trim();
+      const c = (customer.address_city   || '').trim();
+      const line1 = [s, n].filter(Boolean).join(' ');
+      const line2 = [p, c].filter(Boolean).join(' ');
+      return [line1, line2].filter(Boolean).join(', ');
+    }
     default: return '';
   }
 }

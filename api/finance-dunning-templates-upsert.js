@@ -19,7 +19,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getClientIp } from './_lib/audit-customer.js';
 
-const VALID_KINDS = ['email', 'whatsapp'];
+const VALID_KINDS = ['email', 'whatsapp', 'brief'];
 const MAX_NAME = 200;
 const MAX_SUBJECT = 500;
 const MAX_BODY = 50000;          // royaal — templates kunnen lang zijn
