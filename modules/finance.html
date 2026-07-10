@@ -1605,13 +1605,19 @@
             <h2 style="margin:0;font-size:18px;font-weight:700">Probleemklanten</h2>
             <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Klanten met 2 of meer openstaande facturen. Gesorteerd op oudste vervaldatum.</div>
           </div>
-          <button class="sr-abtn" id="dunProbRefreshBtn" type="button" style="font-size:11.5px;padding:5px 10px">
-            <i class="ti ti-refresh" style="margin-right:4px"></i>Vernieuw
-          </button>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="sr-abtn primary" id="dunBulkOpenBtn" type="button" style="font-size:11.5px;padding:5px 10px" disabled>
+              <i class="ti ti-send" style="margin-right:4px"></i>Bulk aanmanen (<span id="dunBulkCount">0</span>)
+            </button>
+            <button class="sr-abtn" id="dunProbRefreshBtn" type="button" style="font-size:11.5px;padding:5px 10px">
+              <i class="ti ti-refresh" style="margin-right:4px"></i>Vernieuw
+            </button>
+          </div>
         </div>
         <div class="sr-tablewrap">
           <table class="sr-table" id="dunProbTable">
             <thead><tr>
+              <th style="width:36px"><input type="checkbox" id="dunProbSelectAll" title="Selecteer alles" /></th>
               <th>Klant</th>
               <th style="width:110px"># Open facturen</th>
               <th style="width:160px">Totaal openstaand</th>
@@ -1620,7 +1626,7 @@
               <th style="width:150px">Actieve workflow?</th>
               <th style="width:220px">Acties</th>
             </tr></thead>
-            <tbody id="dunProbTbody"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
+            <tbody id="dunProbTbody"><tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -4206,6 +4212,7 @@
     if (_dunProbWired) return;
     _dunProbWired = true;
     document.getElementById('dunProbRefreshBtn')?.addEventListener('click', () => loadDunProblemCustomers());
+    _wireDunBulkOnce();
   }
 
   async function loadDunProblemCustomers() {
@@ -4231,7 +4238,8 @@
     const tb = document.getElementById('dunProbTbody');
     if (!tb) return;
     if (!items.length) {
-      tb.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-faint)">Geen probleemklanten gevonden.</td></tr>';
+      tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-faint)">Geen probleemklanten gevonden.</td></tr>';
+      _dunBulkRefreshCount();
       return;
     }
     tb.innerHTML = items.map((p, i) => {
@@ -4253,7 +4261,11 @@
       const proposeBtn = p.customer_id
         ? `<button class="sr-abtn primary" data-arrang-propose-customer="${esc(p.customer_id)}" type="button" style="font-size:11px;padding:4px 8px;margin-left:4px"><i class="ti ti-calendar-plus"></i> Stel afspraak voor</button>`
         : '';
+      const cbCell = p.customer_id
+        ? `<input type="checkbox" class="dun-prob-cb" data-cust-id="${esc(p.customer_id)}" data-cust-name="${esc(p.name || '')}" />`
+        : '';
       return `<tr>
+        <td>${cbCell}</td>
         <td>${customerCell}${emailLine}</td>
         <td style="text-align:center">${esc(p.open_invoice_count)}</td>
         <td style="font-variant-numeric:tabular-nums">${fmtEur2Cents(p.total_open_amount)}</td>
@@ -4273,6 +4285,234 @@
         if (cid) openArrangPropose({ customer_id: cid, customer_name: name });
       });
     });
+
+    // Selectie-checkboxes → tel + toggle bulk-knop.
+    tb.querySelectorAll('.dun-prob-cb').forEach((cb) => {
+      cb.addEventListener('change', _dunBulkRefreshCount);
+    });
+    _dunBulkRefreshCount();
+  }
+
+  // ─── Bulk aanmanen — Fase 1 (preview + draft-job; verstuurt NIETS) ──────
+  //
+  // Backend endpoints:
+  //   /api/wanbetalers-bulk-preview  → maakt draft-job + recipients, geeft preview.
+  //   /api/wanbetalers-bulk-approve  → zet status draft → approved.
+  // In Fase 2 pikt een cron approved jobs op en verstuurt daadwerkelijk.
+  let _dunBulkWired = false;
+  let _dunBulkJobId = null;
+
+  function _dunBulkGetSelected() {
+    const cbs = document.querySelectorAll('#dunProbTbody .dun-prob-cb:checked');
+    const out = [];
+    cbs.forEach((cb) => {
+      const id = cb.dataset.custId;
+      if (id) out.push({ id, name: cb.dataset.custName || '' });
+    });
+    return out;
+  }
+  function _dunBulkRefreshCount() {
+    const sel = _dunBulkGetSelected();
+    const btn = document.getElementById('dunBulkOpenBtn');
+    const cnt = document.getElementById('dunBulkCount');
+    if (cnt) cnt.textContent = String(sel.length);
+    if (btn) btn.disabled = sel.length === 0;
+  }
+  function _wireDunBulkOnce() {
+    if (_dunBulkWired) return;
+    _dunBulkWired = true;
+    const openBtn = document.getElementById('dunBulkOpenBtn');
+    const selAll  = document.getElementById('dunProbSelectAll');
+    if (selAll) {
+      selAll.addEventListener('change', () => {
+        document.querySelectorAll('#dunProbTbody .dun-prob-cb').forEach((cb) => { cb.checked = selAll.checked; });
+        _dunBulkRefreshCount();
+      });
+    }
+    if (openBtn) openBtn.addEventListener('click', _dunBulkOpenModal);
+  }
+
+  function _dunBulkCloseModal() {
+    const el = document.getElementById('dunBulkModal');
+    if (el) el.remove();
+    _dunBulkJobId = null;
+  }
+  function _dunBulkOpenModal() {
+    const sel = _dunBulkGetSelected();
+    if (sel.length === 0) return;
+    _dunBulkCloseModal();
+    const overlay = document.createElement('div');
+    overlay.id = 'dunBulkModal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px';
+    overlay.innerHTML = `
+      <div role="dialog" aria-modal="true" style="background:var(--bg,#fff);border-radius:12px;max-width:860px;width:100%;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.35)">
+        <div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--border);background:var(--bg-elev)">
+          <i class="ti ti-send" style="color:var(--accent-cyan)"></i>
+          <div style="flex:1">
+            <div style="font-weight:700;font-size:15px">Bulk aanmanen — Fase 1</div>
+            <div style="font-size:11.5px;color:var(--text-dim);margin-top:2px">${sel.length} klanten geselecteerd</div>
+          </div>
+          <span class="sr-tag" style="background:rgba(245,158,11,.15);color:#b45309;font-weight:600">Verzending nog niet actief</span>
+          <button type="button" class="sr-abtn" data-dbm-close style="padding:4px 10px;font-size:12px;margin-left:6px">Sluiten</button>
+        </div>
+        <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end" data-dbm-form>
+          <div style="min-width:200px">
+            <label style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px">Kanaal</label>
+            <select id="dbmChannel" class="fin-input" style="width:100%;margin-top:4px">
+              <option value="whatsapp" selected>WhatsApp</option>
+              <option value="email">E-mail</option>
+              <option value="both">Beide</option>
+            </select>
+          </div>
+          <div style="flex:1;min-width:240px">
+            <label style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px">WhatsApp template</label>
+            <input type="text" id="dbmTemplateName" class="fin-input" style="width:100%;margin-top:4px" placeholder="bijv. dunning_reminder_v1" />
+            <div style="font-size:11px;color:var(--text-faint);margin-top:2px">Naam van een approved template in whatsapp_meta_templates.</div>
+          </div>
+          <div>
+            <button type="button" class="sr-abtn primary" id="dbmPreviewBtn" style="font-size:12.5px;padding:7px 14px">
+              <i class="ti ti-eye" style="margin-right:4px"></i>Toon preview
+            </button>
+          </div>
+        </div>
+        <div style="padding:14px 20px;border-bottom:1px solid var(--border);background:rgba(245,158,11,.05);font-size:12.5px" data-dbm-summary>
+          Kies kanaal + template, dan "Toon preview".
+        </div>
+        <div style="overflow-y:auto;flex:1;padding:8px 20px 16px" data-dbm-body></div>
+        <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--bg-elev)">
+          <button type="button" class="sr-abtn" data-dbm-close style="font-size:12.5px;padding:7px 14px">Annuleren</button>
+          <button type="button" class="sr-abtn primary" id="dbmApproveBtn" style="font-size:12.5px;padding:7px 14px" disabled>
+            <i class="ti ti-check" style="margin-right:4px"></i>Goedkeuren (verstuurt NIET)
+          </button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    // Sluit-handlers.
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) _dunBulkCloseModal(); });
+    overlay.querySelectorAll('[data-dbm-close]').forEach((b) => b.addEventListener('click', _dunBulkCloseModal));
+    // Preview.
+    overlay.querySelector('#dbmPreviewBtn')?.addEventListener('click', () => _dunBulkFetchPreview(sel));
+    // Approve.
+    overlay.querySelector('#dbmApproveBtn')?.addEventListener('click', _dunBulkApprove);
+  }
+
+  async function _dunBulkFetchPreview(selected) {
+    const overlay = document.getElementById('dunBulkModal');
+    if (!overlay) return;
+    const $sum  = overlay.querySelector('[data-dbm-summary]');
+    const $body = overlay.querySelector('[data-dbm-body]');
+    const $btn  = overlay.querySelector('#dbmApproveBtn');
+    const channel = (overlay.querySelector('#dbmChannel')?.value || 'whatsapp').trim();
+    const templateName = (overlay.querySelector('#dbmTemplateName')?.value || '').trim();
+    if ((channel === 'whatsapp' || channel === 'both') && !templateName) {
+      if ($sum) { $sum.style.color = '#b45309'; $sum.textContent = 'Template-naam vereist voor WhatsApp.'; }
+      return;
+    }
+    if ($sum) { $sum.style.color = 'var(--text-dim)'; $sum.textContent = 'Preview laden…'; }
+    if ($body) $body.innerHTML = '';
+    if ($btn) $btn.disabled = true;
+    _dunBulkJobId = null;
+
+    try {
+      const payload = {
+        customer_ids: selected.map((s) => s.id),
+        channel,
+        template_name    : templateName || undefined,
+        email_template_id: null,
+      };
+      const r = await window.AgentShared.apiFetch('/api/wanbetalers-bulk-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+
+      _dunBulkJobId = d.job_id;
+      const s = d.summary || { total: 0, will_send: 0, skipped: 0, skipped_breakdown: {} };
+      const bd = s.skipped_breakdown || {};
+      const skipDetail = [];
+      if (bd.no_phone)   skipDetail.push(`${bd.no_phone} zonder telefoon`);
+      if (bd.no_email)   skipDetail.push(`${bd.no_email} zonder e-mail`);
+      if (bd.no_contact) skipDetail.push(`${bd.no_contact} zonder contact`);
+      if ($sum) {
+        $sum.style.color = 'var(--text)';
+        $sum.innerHTML = `
+          <strong>${s.will_send}</strong> worden verstuurd · <strong>${s.skipped}</strong> overgeslagen${skipDetail.length ? ' (' + esc(skipDetail.join(', ')) + ')' : ''}
+          <span style="float:right;color:var(--text-faint);font-size:11px">Job-ID: ${esc(d.job_id || '—')}</span>`;
+      }
+      const recips = Array.isArray(d.recipients) ? d.recipients : [];
+      if ($body) {
+        if (recips.length === 0) {
+          $body.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-faint);font-size:12.5px">Geen recipients.</div>`;
+        } else {
+          $body.innerHTML = `
+            <table class="sr-table" style="margin-top:6px;font-size:12.5px">
+              <thead><tr>
+                <th style="width:34px"></th>
+                <th>Klant</th>
+                <th style="width:70px">#</th>
+                <th style="width:120px">Totaal open</th>
+                <th style="width:100px">Kanaal</th>
+                <th>Preview</th>
+              </tr></thead>
+              <tbody>${recips.map((r) => {
+                const skipTag = r.status === 'skipped'
+                  ? `<span class="sr-tag" style="background:rgba(245,158,11,.15);color:#b45309;font-size:10.5px">skipped: ${esc(r.skip_reason || '')}</span>`
+                  : '';
+                const chanTags = [
+                  r.channel_whatsapp ? '<span class="sr-tag green" style="font-size:10.5px">WA</span>' : '',
+                  r.channel_email    ? '<span class="sr-tag" style="background:rgba(59,130,246,.15);color:#1d4ed8;font-size:10.5px">E-mail</span>' : '',
+                ].filter(Boolean).join(' ');
+                const preview = r.preview_whatsapp
+                  ? `<div style="white-space:pre-wrap;font-size:11.5px;color:var(--text-dim);max-height:88px;overflow-y:auto">${esc(r.preview_whatsapp)}</div>`
+                  : '<span style="color:var(--text-faint);font-size:11px">—</span>';
+                return `<tr${r.status === 'skipped' ? ' style="opacity:.55"' : ''}>
+                  <td>${r.status === 'skipped' ? '<i class="ti ti-alert-triangle" style="color:#b45309"></i>' : '<i class="ti ti-mail" style="color:var(--accent-cyan)"></i>'}</td>
+                  <td>
+                    <div style="font-weight:600">${esc(r.customer_name || '—')}</div>
+                    <div style="font-size:11px;color:var(--text-faint)">${esc(r.customer_email || '')}${r.customer_phone ? ' · ' + esc(r.customer_phone) : ''}</div>
+                    ${skipTag}
+                  </td>
+                  <td style="text-align:center">${esc(r.open_invoice_count || 0)}</td>
+                  <td style="font-variant-numeric:tabular-nums">${fmtEur2Cents(r.total_open_cents || 0)}</td>
+                  <td>${chanTags || '<span style="color:var(--text-faint)">—</span>'}</td>
+                  <td>${preview}</td>
+                </tr>`;
+              }).join('')}</tbody>
+            </table>`;
+        }
+      }
+      if ($btn) $btn.disabled = false;
+    } catch (e) {
+      if ($sum) { $sum.style.color = '#b91c1c'; $sum.textContent = 'Fout: ' + (e?.message || 'onbekend'); }
+      if ($body) $body.innerHTML = '';
+    }
+  }
+
+  async function _dunBulkApprove() {
+    if (!_dunBulkJobId) return;
+    const overlay = document.getElementById('dunBulkModal');
+    const $btn = overlay?.querySelector('#dbmApproveBtn');
+    const $sum = overlay?.querySelector('[data-dbm-summary]');
+    if ($btn) $btn.disabled = true;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/wanbetalers-bulk-approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_id: _dunBulkJobId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      if ($sum) {
+        $sum.style.color = '#047857';
+        $sum.innerHTML = `<i class="ti ti-check"></i> Bulk goedgekeurd. <strong>Verzending volgt (Fase 2)</strong> — er is niets naar klanten gestuurd.`;
+      }
+      if ($btn) { $btn.innerHTML = '<i class="ti ti-check" style="margin-right:4px"></i>Goedgekeurd'; }
+    } catch (e) {
+      if ($sum) { $sum.style.color = '#b91c1c'; $sum.textContent = 'Fout: ' + (e?.message || 'onbekend'); }
+      if ($btn) $btn.disabled = false;
+    }
   }
 
   // ─── Dunning Geschiedenis sub-tab (PR B5) ──────────────────────────────────
