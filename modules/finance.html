@@ -4535,6 +4535,7 @@
     const el = document.getElementById('dunBulkModal');
     if (el) el.remove();
     _dunBulkJobId = null;
+    if (typeof _dunBulkStopPolling === 'function') _dunBulkStopPolling();
   }
   function _dunBulkOpenModal() {
     const sel = _dunBulkGetSelected();
@@ -4551,7 +4552,7 @@
             <div style="font-weight:700;font-size:15px">Bulk aanmanen — Fase 1</div>
             <div style="font-size:11.5px;color:var(--text-dim);margin-top:2px">${sel.length} klanten geselecteerd</div>
           </div>
-          <span class="sr-tag" style="background:rgba(245,158,11,.15);color:#b45309;font-weight:600">Verzending nog niet actief</span>
+          <span class="sr-tag" style="background:rgba(5,150,105,.15);color:#047857;font-weight:600" title="Verzending gaat via cron in batches van 10 per 3 min">Verzending actief</span>
           <button type="button" class="sr-abtn" data-dbm-close style="padding:4px 10px;font-size:12px;margin-left:6px">Sluiten</button>
         </div>
         <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end" data-dbm-form>
@@ -4590,7 +4591,7 @@
         <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--bg-elev)">
           <button type="button" class="sr-abtn" data-dbm-close style="font-size:12.5px;padding:7px 14px">Annuleren</button>
           <button type="button" class="sr-abtn primary" id="dbmApproveBtn" style="font-size:12.5px;padding:7px 14px" disabled>
-            <i class="ti ti-check" style="margin-right:4px"></i>Goedkeuren (verstuurt NIET)
+            <i class="ti ti-send" style="margin-right:4px"></i>Goedkeuren &amp; versturen
           </button>
         </div>
       </div>`;
@@ -4827,6 +4828,7 @@
     }
   }
 
+  let _dunBulkPollTimer = null;
   async function _dunBulkApprove() {
     if (!_dunBulkJobId) return;
     const overlay = document.getElementById('dunBulkModal');
@@ -4841,15 +4843,51 @@
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      if ($btn) { $btn.innerHTML = '<i class="ti ti-check" style="margin-right:4px"></i>Goedgekeurd'; }
       if ($sum) {
         $sum.style.color = '#047857';
-        $sum.innerHTML = `<i class="ti ti-check"></i> Bulk goedgekeurd. <strong>Verzending volgt (Fase 2)</strong> — er is niets naar klanten gestuurd.`;
+        $sum.innerHTML = `<i class="ti ti-check"></i> <strong>Bulk goedgekeurd.</strong> Cron verstuurt max 10 berichten per 3 min.`;
       }
-      if ($btn) { $btn.innerHTML = '<i class="ti ti-check" style="margin-right:4px"></i>Goedgekeurd'; }
+      _dunBulkStartPolling(_dunBulkJobId);
     } catch (e) {
       if ($sum) { $sum.style.color = '#b91c1c'; $sum.textContent = 'Fout: ' + (e?.message || 'onbekend'); }
       if ($btn) $btn.disabled = false;
     }
+  }
+
+  function _dunBulkStopPolling() {
+    if (_dunBulkPollTimer) { clearInterval(_dunBulkPollTimer); _dunBulkPollTimer = null; }
+  }
+  function _dunBulkStartPolling(jobId) {
+    _dunBulkStopPolling();
+    const tick = async () => {
+      const overlay = document.getElementById('dunBulkModal');
+      if (!overlay) { _dunBulkStopPolling(); return; }
+      const $sum = overlay.querySelector('[data-dbm-summary]');
+      try {
+        const r = await window.AgentShared.apiFetch('/api/wanbetalers-bulk-job-status?job_id=' + encodeURIComponent(jobId));
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+        const j = d.job || {};
+        const sent    = Number(j.sent_count    || 0);
+        const failed  = Number(j.failed_count  || 0);
+        const skipped = Number(j.skipped_count || 0);
+        const total   = Number(j.total_recipients || 0);
+        const doneCount = sent + failed + skipped;
+        const doneAll   = j.status === 'completed';
+        if ($sum) {
+          $sum.style.color = doneAll ? '#047857' : 'var(--text)';
+          $sum.innerHTML = `${doneAll ? '<i class="ti ti-flag-check"></i> Klaar. ' : '<i class="ti ti-loader"></i> '}` +
+            `Verstuurd <strong>${sent}</strong> · mislukt <strong>${failed}</strong> · overgeslagen <strong>${skipped}</strong> · totaal ${total}` +
+            (doneAll ? '' : ` (${doneCount}/${total})`);
+        }
+        if (doneAll) _dunBulkStopPolling();
+      } catch (e) {
+        if ($sum) { $sum.textContent = 'Statuscheck fout: ' + (e?.message || 'onbekend'); }
+      }
+    };
+    tick();
+    _dunBulkPollTimer = setInterval(tick, 8000);
   }
 
   // ─── Dunning Geschiedenis sub-tab (PR B5) ──────────────────────────────────

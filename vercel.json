@@ -89,6 +89,10 @@
       "schedule": "0 3 * * *"
     },
     {
+      "path": "/api/cron-dunning-bulk-send",
+      "schedule": "*/3 * * * *"
+    },
+    {
       "path": "/api/cron-events-automations",
       "schedule": "* * * * *"
     },
