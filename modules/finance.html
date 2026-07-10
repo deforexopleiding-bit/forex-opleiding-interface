@@ -1447,9 +1447,39 @@
       <div class="inbox-layout-c">
         <!-- LEFT column: conversation list -->
         <div class="inbox-c-col-left">
-          <div style="padding:12px 14px;border-bottom:1px solid var(--border,rgba(255,255,255,.08));display:flex;gap:8px;align-items:center">
-            <input id="inboxConvSearch" type="text" class="fin-input" placeholder="Zoeken op naam of nummer…" style="flex:1;font-size:12.5px"/>
-            <button class="sr-ibtn" id="inboxConvRefresh" type="button" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+          <div style="padding:12px 14px;border-bottom:1px solid var(--border,rgba(255,255,255,.08));display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;gap:8px;align-items:center">
+              <input id="inboxConvSearch" type="text" class="fin-input" placeholder="Zoeken op naam of nummer…" style="flex:1;font-size:12.5px"/>
+              <button class="sr-ibtn" id="inboxConvRefresh" type="button" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+            </div>
+            <!-- Status-tabs (server-side) -->
+            <div id="inboxConvStatusTabs" class="sr-segments" style="display:flex;gap:4px">
+              <button class="sr-seg active" data-conv-status="active" type="button" style="font-size:11.5px;padding:4px 10px">Actief</button>
+              <button class="sr-seg" data-conv-status="afgehandeld" type="button" style="font-size:11.5px;padding:4px 10px">Afgehandeld</button>
+              <button class="sr-seg" data-conv-status="all" type="button" style="font-size:11.5px;padding:4px 10px">Alles</button>
+            </div>
+            <!-- Snelfilters (client-side) + sortering -->
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);cursor:pointer">
+                <input type="checkbox" id="inboxFilterUnread" style="margin:0"/>Ongelezen
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#b91c1c;cursor:pointer">
+                <input type="checkbox" id="inboxFilterDebtor" style="margin:0"/>Wanbetalers
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);cursor:pointer">
+                <input type="checkbox" id="inboxFilterLinked" style="margin:0"/>Gekoppeld
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);cursor:pointer">
+                <input type="checkbox" id="inboxFilterUnlinked" style="margin:0"/>Niet-gekoppeld
+              </label>
+              <select id="inboxSortSelect" class="fin-input" style="font-size:11px;padding:3px 6px;margin-left:auto">
+                <option value="default">Ongelezen eerst</option>
+                <option value="latest">Nieuwste bericht</option>
+                <option value="amount">Hoogste openstaand</option>
+                <option value="unread_only">Alleen ongelezen</option>
+              </select>
+            </div>
+            <div id="inboxCountersBar" style="font-size:11px;color:var(--text-dim);display:flex;gap:8px;flex-wrap:wrap"></div>
           </div>
           <div id="inboxConvList" style="overflow:auto;flex:1;padding:6px 0">
             <div style="padding:24px;text-align:center;color:var(--text-faint);font-size:12px">Laden…</div>
@@ -1476,6 +1506,8 @@
               </div>
               <div class="inbox-c-thread-actions">
                 <span id="inboxThreadWindowBadge" class="inbox-c-window-badge open" title="">24h open</span>
+                <button class="sr-ibtn" id="inboxThreadResolveBtn" type="button" title="Gesprek afhandelen" hidden style="color:#059669"><i class="ti ti-check"></i></button>
+                <button class="sr-ibtn" id="inboxThreadReopenBtn" type="button" title="Gesprek heropenen" hidden style="color:var(--accent-cyan)"><i class="ti ti-refresh"></i></button>
                 <button class="sr-ibtn" id="inboxThreadCustomerBtn" type="button" title="Klant-info"><i class="ti ti-user"></i></button>
               </div>
             </div>
@@ -1512,7 +1544,7 @@
               <div class="inbox-c-actions">
                 <div class="inbox-c-actions-left">
                   <button class="sr-abtn" id="inboxTplBtn" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-template"></i> Template</button>
-                  <button class="sr-abtn" id="inboxQrBtn" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-message-bolt"></i> Snel antwoord</button>
+                  <button class="sr-abtn primary" id="inboxQrBtn" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Snel-antwoord kiezen (opent picker)" style="font-size:12px;padding:6px 12px"><i class="ti ti-message-bolt" style="margin-right:4px"></i>Snel antwoord</button>
                   <!-- Joost AI knop (E1.0) — opent inboxJoostModal met suggestion-card.
                        Groene pulserende dot rechts-boven wanneer data-joost-has-recent="true"
                        (recente auto-suggestion uit E1.1 webhook beschikbaar). Hidden tot
@@ -7147,12 +7179,170 @@
     return 'hsl(' + (h % 360) + ', 55%, 42%)';
   }
 
+  // Inbox-UI state (client-side, gepersist in memory tussen renders).
+  const _inboxUiState = {
+    statusFilter: 'active',    // 'active' | 'afgehandeld' | 'all'
+    onlyUnread  : false,
+    onlyDebtor  : false,
+    onlyLinked  : false,
+    onlyUnlinked: false,
+    sortMode    : 'default',   // 'default' | 'latest' | 'amount' | 'unread_only'
+  };
+  function _inboxFmtEurFromCents(cents) {
+    const eur = (Number(cents) || 0) / 100;
+    try { return new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(eur); }
+    catch (_) { return '€ ' + eur.toFixed(0); }
+  }
+  function _inboxApplyClientFilters(items) {
+    const s = _inboxUiState;
+    return (items || []).filter((c) => {
+      if (s.onlyUnread && !(Number(c.unread_count) > 0)) return false;
+      if (s.onlyDebtor && !c.is_debtor)                  return false;
+      if (s.onlyLinked && !c.customer_id)                return false;
+      if (s.onlyUnlinked && c.customer_id)               return false;
+      return true;
+    });
+  }
+  function _inboxApplyClientSort(items) {
+    const s = _inboxUiState;
+    const arr = items.slice();
+    if (s.sortMode === 'latest') {
+      arr.sort((a, b) => String(b.last_message_at || '').localeCompare(String(a.last_message_at || '')));
+    } else if (s.sortMode === 'amount') {
+      arr.sort((a, b) => (Number(b.total_open_cents || 0)) - (Number(a.total_open_cents || 0)));
+    } else if (s.sortMode === 'unread_only') {
+      // Filter dan alleen unread; sortering last_message_at desc.
+      return items
+        .filter((c) => Number(c.unread_count) > 0)
+        .sort((a, b) => String(b.last_message_at || '').localeCompare(String(a.last_message_at || '')));
+    } else {
+      // default: WhatsApp-stijl — ongelezen eerst, dan nieuwste bericht.
+      arr.sort((a, b) => {
+        const ua = Number(a.unread_count) > 0 ? 1 : 0;
+        const ub = Number(b.unread_count) > 0 ? 1 : 0;
+        if (ua !== ub) return ub - ua;
+        return String(b.last_message_at || '').localeCompare(String(a.last_message_at || ''));
+      });
+    }
+    return arr;
+  }
+
+  function _inboxUpdateCounters(visibleItems, totalItems) {
+    const el = document.getElementById('inboxCountersBar');
+    if (!el) return;
+    const unread  = (visibleItems || []).filter((c) => Number(c.unread_count) > 0).length;
+    const debtors = (visibleItems || []).filter((c) => c.is_debtor).length;
+    el.innerHTML =
+      `<span><strong>${unread}</strong> ongelezen</span>` +
+      `<span style="color:#b91c1c"><strong>${debtors}</strong> wanbetalers-gesprek${debtors === 1 ? '' : 'ken'}</span>` +
+      `<span style="color:var(--text-faint);margin-left:auto">${visibleItems.length}/${totalItems}</span>`;
+  }
+
+  function _inboxRenderConvList() {
+    const list = document.getElementById('inboxConvList');
+    if (!list) return;
+    const filtered = _inboxApplyClientFilters(_inboxConvs);
+    const sorted   = _inboxApplyClientSort(filtered);
+    _inboxUpdateCounters(sorted, _inboxConvs.length);
+    if (!sorted.length) {
+      list.innerHTML = '<div style="padding:30px 20px;text-align:center;color:var(--text-faint);font-size:12.5px">Geen gesprekken die aan de filters voldoen.</div>';
+      return;
+    }
+    list.innerHTML = sorted.map((c) => {
+      const isActive = (c.id === _inboxActiveConvId);
+      const name = c.customer_name || c.display_name || c.phone_number || 'Onbekend';
+      const phone = c.phone_number || '';
+      const preview = (c.last_message_preview || '').slice(0, 80);
+      const rel = fmtRelTime(c.last_message_at);
+      const unread = Number(c.unread_count) || 0;
+      const initials = _inboxInitials(name, phone);
+      const avColor = _inboxAvatarColor(phone);
+      const bg = isActive ? 'background:rgba(59,130,246,.10);' : '';
+      const unreadBadge = unread > 0
+        ? `<span style="background:#22c55e;color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:10px;min-width:18px;text-align:center">${unread}</span>`
+        : '';
+      // Wanbetaler-badge — rood accent bij is_debtor.
+      const debtorBadge = c.is_debtor
+        ? `<span title="Wanbetaler" style="display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:700;background:rgba(239,68,68,.12);color:#b91c1c;padding:2px 6px;border-radius:10px;border:1px solid rgba(239,68,68,.28)"><i class="ti ti-alert-triangle" style="font-size:10px"></i>${esc(_inboxFmtEurFromCents(c.total_open_cents))} open</span>`
+        : '';
+      // Status-indicator voor afgehandelde gesprekken (in Afgehandeld/Alles).
+      const closedBadge = (c.status === 'closed' || c.status === 'archived')
+        ? `<span title="Afgehandeld" style="font-size:10px;color:var(--text-faint)"><i class="ti ti-check"></i></span>`
+        : '';
+      return `<div class="inbox-conv-row" data-conv-id="${esc(c.id)}" style="${bg}display:flex;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04);align-items:flex-start">
+        <div style="width:36px;height:36px;border-radius:50%;background:${avColor};color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">${esc(initials)}</div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline">
+            <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1">${esc(name)}${closedBadge ? ' ' + closedBadge : ''}</div>
+            <div style="font-size:10.5px;color:var(--text-faint);flex-shrink:0">${esc(rel)}</div>
+          </div>
+          <div style="font-size:11px;color:var(--text-faint);margin-top:1px">${esc(phone)}</div>
+          ${debtorBadge ? `<div style="margin-top:3px">${debtorBadge}</div>` : ''}
+          <div style="display:flex;justify-content:space-between;gap:6px;align-items:center;margin-top:3px">
+            <div style="font-size:11.5px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1">${esc(preview)}</div>
+            ${unreadBadge}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    list.querySelectorAll('[data-conv-id]').forEach((row) => {
+      row.addEventListener('click', () => openInboxConv(row.dataset.convId));
+    });
+    // Autonomy-badges per conv (Joost).
+    _joostRenderAllConvBadges(sorted);
+  }
+
+  // Wire filters/sort/tabs/afhandelen. Idempotent.
+  let _inboxUiWired = false;
+  function _wireInboxUiOnce() {
+    if (_inboxUiWired) return;
+    _inboxUiWired = true;
+    document.querySelectorAll('#inboxConvStatusTabs [data-conv-status]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        _inboxUiState.statusFilter = btn.dataset.convStatus || 'active';
+        document.querySelectorAll('#inboxConvStatusTabs [data-conv-status]').forEach((b) => {
+          b.classList.toggle('active', b === btn);
+        });
+        loadInboxConvList();
+      });
+    });
+    const bind = (id, key) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', () => { _inboxUiState[key] = !!el.checked; _inboxRenderConvList(); });
+    };
+    bind('inboxFilterUnread',   'onlyUnread');
+    bind('inboxFilterDebtor',   'onlyDebtor');
+    bind('inboxFilterLinked',   'onlyLinked');
+    bind('inboxFilterUnlinked', 'onlyUnlinked');
+    const sortSel = document.getElementById('inboxSortSelect');
+    if (sortSel) sortSel.addEventListener('change', () => { _inboxUiState.sortMode = sortSel.value || 'default'; _inboxRenderConvList(); });
+  }
+
+  async function _inboxSetConvStatus(convId, uiStatus) {
+    if (!convId) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-conversation-set-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: convId, status: uiStatus }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      // Re-fetch lijst zodat het gesprek naar de juiste tab beweegt.
+      loadInboxConvList();
+    } catch (e) {
+      if (typeof showToast === 'function') showToast('Kon status niet wijzigen: ' + (e?.message || 'onbekend'), 'error');
+      else console.error('[inbox set-status]', e);
+    }
+  }
+
   async function loadInboxConvList() {
     const list = document.getElementById('inboxConvList');
     if (!list) return;
     try {
       const params = new URLSearchParams();
       params.set('limit', '50');
+      params.set('status_filter', _inboxUiState.statusFilter);
       if (_inboxConvFilter) params.set('search', _inboxConvFilter);
       const r = await window.AgentShared.apiFetch('/api/inbox-conversations-list?' + params.toString());
       const d = await r.json().catch(() => ({}));
@@ -7162,44 +7352,7 @@
         return;
       }
       _inboxConvs = Array.isArray(d.items) ? d.items : [];
-      if (!_inboxConvs.length) {
-        list.innerHTML = '<div style="padding:30px 20px;text-align:center;color:var(--text-faint);font-size:12.5px">Nog geen gesprekken.</div>';
-        return;
-      }
-      list.innerHTML = _inboxConvs.map(c => {
-        const isActive = (c.id === _inboxActiveConvId);
-        const name = c.customer_name || c.display_name || c.phone_number || 'Onbekend';
-        const phone = c.phone_number || '';
-        const preview = (c.last_message_preview || '').slice(0, 80);
-        const rel = fmtRelTime(c.last_message_at);
-        const unread = Number(c.unread_count) || 0;
-        const initials = _inboxInitials(name, phone);
-        const avColor = _inboxAvatarColor(phone);
-        const bg = isActive ? 'background:rgba(59,130,246,.10);' : '';
-        const unreadBadge = unread > 0
-          ? `<span style="background:#22c55e;color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:10px;min-width:18px;text-align:center">${unread}</span>`
-          : '';
-        return `<div class="inbox-conv-row" data-conv-id="${esc(c.id)}" style="${bg}display:flex;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04);align-items:flex-start">
-          <div style="width:36px;height:36px;border-radius:50%;background:${avColor};color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">${esc(initials)}</div>
-          <div style="flex:1;min-width:0">
-            <div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline">
-              <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1">${esc(name)}</div>
-              <div style="font-size:10.5px;color:var(--text-faint);flex-shrink:0">${esc(rel)}</div>
-            </div>
-            <div style="font-size:11px;color:var(--text-faint);margin-top:1px">${esc(phone)}</div>
-            <div style="display:flex;justify-content:space-between;gap:6px;align-items:center;margin-top:3px">
-              <div style="font-size:11.5px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1">${esc(preview)}</div>
-              ${unreadBadge}
-            </div>
-          </div>
-        </div>`;
-      }).join('');
-      list.querySelectorAll('[data-conv-id]').forEach(row => {
-        row.addEventListener('click', () => openInboxConv(row.dataset.convId));
-      });
-      // E2.x: render autonomy-badges per conv (Joost actief / Wacht op Jeffrey).
-      // Fail-soft: gebruikt cache wanneer beschikbaar, fetcht parallel anders.
-      _joostRenderAllConvBadges(_inboxConvs);
+      _inboxRenderConvList();
     } catch (e) {
       console.error('[loadInboxConvList]', e);
       list.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:12px">Fout: ' + esc(e.message) + '</div>';
@@ -7399,6 +7552,16 @@
       _inboxMessages        = Array.isArray(d.items) ? d.items : [];
       _inboxActiveConv      = d.conversation || null;
       _inboxConvCanSendText = !!(d.conversation && d.conversation.can_send_text);
+      // Afhandelen / heropenen knop-visibility op basis van conv.status
+      // (on-wire: 'open'|'closed'|'archived'; 'closed'/'archived' = "afgehandeld").
+      try {
+        const st = String(_inboxActiveConv?.status || 'open');
+        const isClosed = (st === 'closed' || st === 'archived');
+        const resolveBtn = document.getElementById('inboxThreadResolveBtn');
+        const reopenBtn  = document.getElementById('inboxThreadReopenBtn');
+        if (resolveBtn) resolveBtn.hidden = isClosed;
+        if (reopenBtn)  reopenBtn.hidden  = !isClosed;
+      } catch (_) { /* fail-soft */ }
 
       // Thread-header invullen
       const headerName  = document.getElementById('inboxThreadName');
@@ -10058,6 +10221,19 @@
   function wireInboxOnce() {
     if (_inboxWiredOnce) return;
     _inboxWiredOnce = true;
+
+    // Status-tabs / snelfilters / sort — één keer wiren.
+    _wireInboxUiOnce();
+
+    // Afhandelen / heropenen: mutueel exclusief. Roept set-status-endpoint
+    // aan → lijst wordt geherlaad zodat het gesprek naar de juiste tab
+    // beweegt (Actief ↔ Afgehandeld).
+    document.getElementById('inboxThreadResolveBtn')?.addEventListener('click', () => {
+      if (_inboxActiveConvId) _inboxSetConvStatus(_inboxActiveConvId, 'afgehandeld');
+    });
+    document.getElementById('inboxThreadReopenBtn')?.addEventListener('click', () => {
+      if (_inboxActiveConvId) _inboxSetConvStatus(_inboxActiveConvId, 'open');
+    });
 
     // Zoek-input met 300ms debounce.
     const search = document.getElementById('inboxConvSearch');

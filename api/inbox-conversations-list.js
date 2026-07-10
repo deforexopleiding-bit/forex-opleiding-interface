@@ -77,6 +77,12 @@ export default async function handler(req, res) {
   let offset = parseInt(q.offset, 10);
   if (!Number.isFinite(offset) || offset < 0) offset = 0;
   const search = String(q.search || '').trim();
+  // status_filter: 'active' (default) = niet-afgehandeld ; 'afgehandeld' =
+  // status IN ('closed','archived') ; 'all' = geen filter. On-wire gebruiken
+  // we 'closed' voor "afgehandeld" (bestaande CHECK-constraint accepteert
+  // alleen 'open'|'closed'|'archived', dus geen migratie nodig).
+  const statusFilterRaw = String(q.status_filter || 'active').trim().toLowerCase();
+  const statusFilter = ['active', 'afgehandeld', 'all'].includes(statusFilterRaw) ? statusFilterRaw : 'active';
 
   try {
     // Module-config: welk phone_number_id hoort bij de gevraagde module?
@@ -127,6 +133,12 @@ export default async function handler(req, res) {
       .order('last_message_at', { ascending: false, nullsFirst: false })
       .range(offset, offset + limit - 1);
 
+    // Status-filter server-side: 'active' = alleen 'open' (netter dan
+    // NOT IN); 'afgehandeld' = closed/archived.
+    if (statusFilter === 'active')       query = query.eq('status', 'open');
+    else if (statusFilter === 'afgehandeld') query = query.in('status', ['closed', 'archived']);
+    // 'all' → geen extra status-clause.
+
     if (search) {
       const like = '%' + search.replace(/[%_]/g, m => '\\' + m) + '%';
       // PostgREST OR-filter: phone_number / display_name (customer-naam doen we client-side).
@@ -135,6 +147,43 @@ export default async function handler(req, res) {
 
     const { data, error, count } = await query;
     if (error) throw new Error(error.message);
+
+    // ── Wanbetaler-verrijking (gebatcht, geen N+1) ──────────────────────
+    // 1 query op invoices voor alle unieke customer_ids in de lijst; client-
+    // side aggregeren. Cents-precisie (round-half-up bij toCents).
+    const openInvoicesByCustomer = new Map(); // customer_id → { count, cents }
+    try {
+      const custIds = Array.from(new Set(
+        (data || []).map((r) => r.customer_id).filter(Boolean)
+      ));
+      if (custIds.length > 0) {
+        const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
+        const { data: invRows, error: iErr } = await supabaseAdmin
+          .from('invoices')
+          .select('customer_id, amount_total, amount_paid, credited_amount, status')
+          .in('customer_id', custIds)
+          .in('status', OPEN_STATUSES);
+        if (iErr) {
+          console.error('[inbox-conversations-list] invoices batch:', iErr.message);
+        } else {
+          for (const inv of invRows || []) {
+            const total = Number(inv.amount_total)    || 0;
+            const paid  = Number(inv.amount_paid)     || 0;
+            const cred  = Number(inv.credited_amount) || 0;
+            const openEur = Math.max(0, total - paid - cred);
+            if (openEur <= 0) continue;
+            const agg = openInvoicesByCustomer.get(inv.customer_id) || { count: 0, cents: 0 };
+            agg.count += 1;
+            agg.cents += Math.round(openEur * 100);
+            openInvoicesByCustomer.set(inv.customer_id, agg);
+          }
+        }
+      }
+    } catch (e) {
+      // Fail-soft: als de invoices-lookup faalt, verrijken we niet — de
+      // inbox-lijst zelf mag niet omvallen.
+      console.error('[inbox-conversations-list] wanbetaler-agg fail:', e?.message || e);
+    }
 
     const now = Date.now();
     const items = (data || []).map(row => {
@@ -159,6 +208,7 @@ export default async function handler(req, res) {
         const t = new Date(row.last_inbound_at).getTime();
         if (Number.isFinite(t) && (now - t) <= TWENTY_FOUR_HOURS_MS) canSendText = true;
       }
+      const agg = row.customer_id ? openInvoicesByCustomer.get(row.customer_id) : null;
       return {
         id: row.id,
         phone_number: row.phone_number,
@@ -175,6 +225,11 @@ export default async function handler(req, res) {
         unread_count: row.unread_count || 0,
         last_inbound_at: row.last_inbound_at,
         can_send_text: canSendText,
+        // Wanbetaler-info (F1). is_debtor is true zodra er >0 open facturen
+        // zijn voor de gekoppelde klant. Ongekoppelde conv: 0 / false.
+        open_invoice_count: agg ? agg.count : 0,
+        total_open_cents  : agg ? agg.cents : 0,
+        is_debtor         : !!(agg && agg.count > 0),
       };
     });
 
