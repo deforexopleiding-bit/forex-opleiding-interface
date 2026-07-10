@@ -132,6 +132,10 @@ export default async function handler(req, res) {
 
     // Template-body ophalen (whatsapp / both). Bij not-found: laat body_source='not_found' zien;
     // preview_whatsapp wordt dan een placeholder-tekst en de UI kan waarschuwen.
+    // Status hoofdletter-tolerant ('approved' | 'APPROVED') — spiegelt de
+    // dunning-templates-list + events-send. Vroeger stond hier strict
+    // .eq('status','approved') → APPROVED-rijen verschenen in de dropdown
+    // maar gaven 'not_found' bij preview.
     let templateBodyText = '';
     let templateSource   = null;
     if (templateName) {
@@ -139,13 +143,37 @@ export default async function handler(req, res) {
         .from('whatsapp_meta_templates')
         .select('name, language, status, body_text')
         .eq('name', templateName)
-        .eq('status', 'approved')
-        .limit(1);
-      if (!tErr && tplRows && tplRows[0]) {
-        templateBodyText = String(tplRows[0].body_text || '');
-        templateSource   = { name: tplRows[0].name, body_source: 'raw', language: tplRows[0].language };
+        .limit(5);
+      const approvedRow = (tplRows || []).find((r) => String(r.status || '').toLowerCase() === 'approved') || null;
+      if (!tErr && approvedRow) {
+        templateBodyText = String(approvedRow.body_text || '');
+        templateSource   = { name: approvedRow.name, body_source: 'raw', language: approvedRow.language };
       } else {
         templateSource = { name: templateName, body_source: 'not_found' };
+      }
+    }
+
+    // E-mail template ophalen (email/both). Hergebruikt de bestaande
+    // dunning_templates-tabel (kind='email') — zelfde bron als de UI in de
+    // dunning-templates-tab, dus operators beheren één plek.
+    let emailTemplateSubject = '';
+    let emailTemplateBody    = '';
+    let emailTemplateSource  = null;
+    if (emailTemplateId && (channel === 'email' || channel === 'both')) {
+      const { data: etRow, error: etErr } = await supabaseAdmin
+        .from('dunning_templates')
+        .select('id, name, kind, subject, body, is_active')
+        .eq('id', emailTemplateId)
+        .maybeSingle();
+      if (etErr) {
+        console.warn('[wanbetalers-bulk-preview] email template fetch:', etErr.message);
+        emailTemplateSource = { id: emailTemplateId, source: 'error' };
+      } else if (etRow && etRow.kind === 'email' && etRow.is_active) {
+        emailTemplateSubject = String(etRow.subject || '');
+        emailTemplateBody    = String(etRow.body    || '');
+        emailTemplateSource  = { id: etRow.id, name: etRow.name, source: 'raw' };
+      } else {
+        emailTemplateSource = { id: emailTemplateId, source: 'not_found_or_inactive' };
       }
     }
 
@@ -181,16 +209,33 @@ export default async function handler(req, res) {
 
       // Preview-resolve. Named-mode: resolveVariables leest {{klant.*}} etc.
       // Bij template not_found → placeholder-tekst.
+      const ctx = { customer: cust, openInvoices };
       let previewWa = null;
       if (wantWa && templateBodyText) {
         try {
-          const resolved = resolveVariables(templateBodyText, null, { customer: cust, openInvoices });
+          const resolved = resolveVariables(templateBodyText, null, ctx);
           previewWa = resolved?.text ?? '';
         } catch (e) {
           previewWa = '(preview-fout: ' + (e?.message || 'onbekend') + ')';
         }
       } else if (wantWa && templateSource?.body_source === 'not_found') {
         previewWa = '(WhatsApp-template niet gevonden: ' + templateName + ')';
+      }
+
+      // E-mail preview (subject + body los resolven — resolveVariables is
+      // per string; we roepen 'm 2x aan met dezelfde context).
+      let previewEmailSubject = null;
+      let previewEmailBody    = null;
+      if (wantEm && (emailTemplateSubject || emailTemplateBody)) {
+        try {
+          previewEmailSubject = resolveVariables(emailTemplateSubject, null, ctx)?.text ?? '';
+          previewEmailBody    = resolveVariables(emailTemplateBody,    null, ctx)?.text ?? '';
+        } catch (e) {
+          previewEmailBody = '(preview-fout: ' + (e?.message || 'onbekend') + ')';
+        }
+      } else if (wantEm && emailTemplateId && emailTemplateSource?.source !== 'raw') {
+        previewEmailSubject = '(E-mail template niet gevonden/inactief)';
+        previewEmailBody    = '';
       }
 
       recipients.push({
@@ -204,6 +249,8 @@ export default async function handler(req, res) {
         channel_whatsapp: canWa,
         channel_email   : canEm,
         preview_whatsapp: previewWa,
+        preview_email_subject: previewEmailSubject,
+        preview_email_body   : previewEmailBody,
         skip_reason     : skipReason,
         status,
       });
@@ -240,19 +287,21 @@ export default async function handler(req, res) {
     const CHUNK = 100;
     for (let i = 0; i < recipients.length; i += CHUNK) {
       const slice = recipients.slice(i, i + CHUNK).map((r) => ({
-        job_id                   : jobId,
-        customer_id              : r.customer_id,
-        customer_name            : r.customer_name,
-        customer_email           : r.customer_email,
-        customer_phone           : r.customer_phone,
-        invoice_ids              : r.invoice_ids,
-        total_open_cents         : r.total_open_cents,
-        open_invoice_count       : r.open_invoice_count,
-        channel_whatsapp         : r.channel_whatsapp,
-        channel_email            : r.channel_email,
-        resolved_preview_whatsapp: r.preview_whatsapp,
-        status                   : r.status,
-        skip_reason              : r.skip_reason,
+        job_id                        : jobId,
+        customer_id                   : r.customer_id,
+        customer_name                 : r.customer_name,
+        customer_email                : r.customer_email,
+        customer_phone                : r.customer_phone,
+        invoice_ids                   : r.invoice_ids,
+        total_open_cents              : r.total_open_cents,
+        open_invoice_count            : r.open_invoice_count,
+        channel_whatsapp              : r.channel_whatsapp,
+        channel_email                 : r.channel_email,
+        resolved_preview_whatsapp     : r.preview_whatsapp,
+        resolved_preview_email_subject: r.preview_email_subject,
+        resolved_preview_email_body   : r.preview_email_body,
+        status                        : r.status,
+        skip_reason                   : r.skip_reason,
       }));
       const { error: rErr } = await supabaseAdmin.from('dunning_bulk_recipients').insert(slice);
       if (rErr) {
@@ -272,6 +321,7 @@ export default async function handler(req, res) {
       },
       recipients,
       template: templateSource,
+      email_template: emailTemplateSource,
       rejected: rejectedNoCustomer,
       phase_note: 'FASE 1: draft-job aangemaakt. Er wordt nog NIETS verstuurd — dat gebeurt in Fase 2.',
     });
