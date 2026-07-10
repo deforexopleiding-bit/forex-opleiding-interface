@@ -1701,6 +1701,19 @@
 
       <!-- Sub-view: Workflows -->
       <div id="dunningSubWorkflows" hidden>
+        <!-- Engine-instellingen: instelbare cooldown tussen aanmaningen. -->
+        <div id="dunSettingsBar" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:16px;padding:10px 14px;background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle,#e5e7eb);border-radius:10px">
+          <div style="flex:1;min-width:240px">
+            <div style="font-size:12.5px;font-weight:700;margin-bottom:2px"><i class="ti ti-clock-pause"></i> Cooldown tussen aanmaningen</div>
+            <div style="font-size:11px;color:var(--text-faint)">Klanten die binnen deze periode al zijn aangemaand (bulk of engine) worden overgeslagen. Standaard 7 dagen. 1-90.</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input type="number" id="dunCooldownInput" min="1" max="90" step="1" class="fin-input" style="width:80px;font-size:12.5px" />
+            <span style="font-size:11.5px;color:var(--text-dim)">dagen</span>
+            <button class="sr-abtn primary" id="dunCooldownSaveBtn" type="button" style="font-size:11.5px;padding:5px 12px" disabled><i class="ti ti-device-floppy"></i> Opslaan</button>
+            <span id="dunCooldownFeedback" style="font-size:11px;color:var(--text-faint)"></span>
+          </div>
+        </div>
         <div style="display:grid;grid-template-columns:320px 1fr;gap:18px;align-items:start">
           <!-- Links: workflows-lijst -->
           <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #e5e7eb);border-radius:10px;padding:14px">
@@ -3540,6 +3553,8 @@
         _dunWfLoadedOnce = true;
         loadDunWfList();
         wireDunWfEditor();
+        _wireDunCooldownOnce();
+        _loadDunCooldown();
       }
       if (target === 'probleemklanten' && !_dunProbLoadedOnce) {
         _dunProbLoadedOnce = true;
@@ -4090,6 +4105,67 @@
     const el = document.getElementById('dunWfError');
     el.textContent = msg;
     el.style.display = '';
+  }
+
+  // ─── Cooldown-setting (bovenaan Workflows-tab) ─────────────────────────
+  let _dunCooldownWired = false;
+  let _dunCooldownCurrent = 7;
+  function _wireDunCooldownOnce() {
+    if (_dunCooldownWired) return;
+    _dunCooldownWired = true;
+    const $inp = document.getElementById('dunCooldownInput');
+    const $btn = document.getElementById('dunCooldownSaveBtn');
+    if ($inp) $inp.addEventListener('input', () => {
+      const n = Number($inp.value);
+      const valid = Number.isFinite(n) && n >= 1 && n <= 90 && Math.trunc(n) === n;
+      const changed = valid && n !== _dunCooldownCurrent;
+      if ($btn) $btn.disabled = !changed;
+    });
+    if ($btn) $btn.addEventListener('click', _saveDunCooldown);
+  }
+  async function _loadDunCooldown() {
+    const $inp = document.getElementById('dunCooldownInput');
+    const $fb  = document.getElementById('dunCooldownFeedback');
+    const $btn = document.getElementById('dunCooldownSaveBtn');
+    try {
+      const r = await window.AgentShared.apiFetch('/api/dunning-settings-get');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      _dunCooldownCurrent = Number(d.dunning_cooldown_days) || 7;
+      if ($inp) $inp.value = String(_dunCooldownCurrent);
+      if ($btn) $btn.disabled = true;
+      if ($fb) {
+        $fb.style.color = 'var(--text-faint)';
+        $fb.textContent = d.is_default ? '(default, nog niet opgeslagen)' : '';
+      }
+    } catch (e) {
+      if ($fb) { $fb.style.color = '#b91c1c'; $fb.textContent = 'Kon niet laden: ' + (e?.message || 'onbekend'); }
+    }
+  }
+  async function _saveDunCooldown() {
+    const $inp = document.getElementById('dunCooldownInput');
+    const $fb  = document.getElementById('dunCooldownFeedback');
+    const $btn = document.getElementById('dunCooldownSaveBtn');
+    const n = Number($inp?.value);
+    if (!Number.isFinite(n) || n < 1 || n > 90 || Math.trunc(n) !== n) {
+      if ($fb) { $fb.style.color = '#b45309'; $fb.textContent = '1-90 dagen'; }
+      return;
+    }
+    if ($btn) $btn.disabled = true;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/dunning-settings-update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dunning_cooldown_days: n }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      _dunCooldownCurrent = n;
+      if ($fb) { $fb.style.color = '#047857'; $fb.textContent = '✓ opgeslagen'; setTimeout(() => { if ($fb) $fb.textContent = ''; }, 2500); }
+    } catch (e) {
+      if ($fb) { $fb.style.color = '#b91c1c'; $fb.textContent = 'Fout: ' + (e?.message || 'onbekend'); }
+      if ($btn) $btn.disabled = false;
+    }
   }
 
   function wireDunWfEditor() {

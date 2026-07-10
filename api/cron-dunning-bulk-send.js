@@ -19,11 +19,12 @@
 //   Fail-soft per recipient (try/catch): één klant faalt → rest gaat door.
 //
 // DUNNING-KOPPELING:
-//   In deze PR NIET geschreven naar dunning_log (run_id FK is potentieel
-//   NOT NULL en er is niet altijd een actieve dunning_workflow_run per
-//   bulk-klant). Audit-spoor zit in dunning_bulk_recipients (sent_at,
-//   wamid, email_message_id, error). Volgende PR kan een expliciete
-//   dunning_log-koppeling toevoegen na SQL-analyse.
+//   Per succesvolle send (recipient status='sent', minstens één kanaal
+//   geslaagd) schrijven we een dunning_log-entry met event_type=
+//   'bulk_reminder_sent'. run_id=NULL (kolom is nullable — geverifieerd
+//   in 2026-06-07-dunning-foundation.sql r75-83). customer_id gaat mee
+//   in payload zodat de engine's cooldown-check 'm kan vinden. Fail-soft:
+//   log-insert faalt → verzending faalt NIET, alleen console-warning.
 //
 // Auth: Bearer $CRON_SECRET (checkCronAuth).
 
@@ -300,6 +301,31 @@ export default async function handler(req, res) {
       }
       if (successAny) summary.sent++;
       else            summary.failed++;
+
+      // Dunning-koppeling: alleen bij ECHTE 'sent'. Fail-soft — verzending
+      // is al gebeurd, log-fail mag de flow niet stoppen. run_id=NULL is
+      // toegestaan (zie file-header).
+      if (successAny && rec.customer_id) {
+        try {
+          await supabaseAdmin.from('dunning_log').insert({
+            run_id     : null,
+            step_id    : null,
+            event_type : 'bulk_reminder_sent',
+            payload    : {
+              customer_id       : rec.customer_id,
+              channels          : { whatsapp: waOk, email: emOk },
+              total_open_cents  : Number(rec.total_open_cents) || 0,
+              invoice_ids       : Array.isArray(rec.invoice_ids) ? rec.invoice_ids : [],
+              job_id            : rec.job_id,
+              bulk_recipient_id : rec.id,
+              wamid             : wamid || null,
+              email_message_id  : emailMsgId || null,
+            },
+          });
+        } catch (e) {
+          console.warn('[cron-dunning-bulk-send] dunning_log insert soft-fail', rec.id, e?.message || e);
+        }
+      }
 
       // 3f) Job-tellers atomisch bumpen (via RPC-vrije weg: re-read + increment).
       try {
