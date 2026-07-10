@@ -53,12 +53,14 @@ export default async function handler(req, res) {
     if (openErr) throw new Error('open invoices: ' + openErr.message);
 
     let totalOpenEur = 0;
+    let openInvoicesCount = 0;
     const wanbetalerSet = new Set();
     const perCustomerCount = new Map();
     for (const inv of openRows || []) {
       const open = openAmount(inv);
       if (open <= 0) continue;
       totalOpenEur += open;
+      openInvoicesCount++;
 
       const isOverdue =
         inv.status === 'overdue' ||
@@ -174,6 +176,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       kpis: {
         total_open_cents:     toCents(totalOpenEur),
+        open_invoices_count:  openInvoicesCount,
         wanbetalers_count:    wanbetalerSet.size,
         problem_customers:    problemCustomers,
         active_runs:          activeRunsCount || 0,

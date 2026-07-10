@@ -4040,13 +4040,17 @@
         : '';
       return `<div class="kpi-cell" style="${bg}"><div class="kpi-lbl">${lbl}</div><div class="kpi-val">${val}</div>${sub ? `<div class="kpi-lbl" style="margin-top:2px">${sub}</div>` : ''}</div>`;
     };
-    const openCents = Number(k.openstaand_cents || 0);
-    const wanbetalers = Number(k.wanbetalers_count || 0);
-    const probleem = Number(k.probleemklanten_count || 0);
-    const actief = Number(k.actieve_workflows_count || 0);
-    const voltooid30 = Number(k.voltooid_30d_count || 0);
+    // Veldnamen komen 1-op-1 uit /api/finance-dunning-overview.kpis
+    // (total_open_cents / open_invoices_count / wanbetalers_count /
+    //  problem_customers / active_runs / completed_runs_30d).
+    const openCents   = Number(k.total_open_cents    || 0);
+    const openCount   = Number(k.open_invoices_count || 0);
+    const wanbetalers = Number(k.wanbetalers_count   || 0);
+    const probleem    = Number(k.problem_customers   || 0);
+    const actief      = Number(k.active_runs         || 0);
+    const voltooid30  = Number(k.completed_runs_30d  || 0);
     strip.innerHTML =
-      cell('Openstaand', fmtEur2Cents(openCents), `${Number(k.openstaand_count || 0)} facturen`) +
+      cell('Openstaand', fmtEur2Cents(openCents), `${openCount} facturen`) +
       cell('Wanbetalers', String(wanbetalers), 'klanten in dunning') +
       cell('Probleemklanten', String(probleem), '> 60 dagen overdue', probleem > 0) +
       cell('Actieve workflows', String(actief), 'lopende runs') +
