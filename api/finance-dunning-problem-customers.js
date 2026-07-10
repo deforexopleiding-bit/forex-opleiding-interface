@@ -53,7 +53,7 @@ export default async function handler(req, res) {
       .from('invoices')
       .select(`
         id, customer_id, amount_total, amount_paid, credited_amount, due_date, status,
-        customers:customer_id ( id, first_name, last_name, company_name, is_company, email, archived_at, anonymized_at )
+        customers:customer_id ( id, first_name, last_name, company_name, is_company, email, phone, archived_at, anonymized_at )
       `)
       .in('status', OPEN_STATUSES);
     if (invErr) throw new Error('invoices: ' + invErr.message);
@@ -97,6 +97,7 @@ export default async function handler(req, res) {
         customer_id:           customerId,
         name:                  customerDisplayName(agg.customer, '(zonder naam)'),
         email:                 agg.customer.email || null,
+        phone:                 agg.customer.phone || null,
         open_invoice_count:    agg.open_invoice_count,
         total_open_amount:     toCents(agg.total_open_eur),
         oldest_due_date:       agg.oldest_due_iso,
