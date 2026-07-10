@@ -79,11 +79,41 @@ export default async function handler(req, res) {
     }
 
     // Heeft-abbo-marker voor de "Omzetten naar abonnement"-knop: toont
-    // "Abbo al ingevoerd" wanneer er al ≥1 sub voor deze deal bestaat.
+    // "Abbo al ingevoerd" wanneer er al ≥1 sub bestaat voor:
+    //   (a) deze deal (klassieke deal-match), OF
+    //   (b) een andere deal van dezelfde klant (klant-match) — dekt
+    //       TL-imports (source='tl_import') en standalone-subs die aan
+    //       een ghost-deal van dezelfde customer_id hangen.
     // Knop blijft klikbaar (bewust opnieuw omzetten mogelijk).
-    const { data: subs } = await supabaseAdmin.from('subscriptions')
-      .select('id').eq('deal_id', id).limit(1);
-    const has_subscription = Array.isArray(subs) && subs.length > 0;
+    let has_subscription = false;
+    try {
+      const { data: subsDeal } = await supabaseAdmin.from('subscriptions')
+        .select('id').eq('deal_id', id).limit(1);
+      const dealMatch = Array.isArray(subsDeal) && subsDeal.length > 0;
+
+      let custMatch = false;
+      if (!dealMatch && deal.customer_id) {
+        // 2-staps klant-match — subscriptions heeft geen customer_id.
+        try {
+          const { data: custDeals } = await supabaseAdmin.from('deals')
+            .select('id').eq('customer_id', deal.customer_id);
+          const dealIds = Array.isArray(custDeals) ? custDeals.map((d) => d.id).filter(Boolean) : [];
+          if (dealIds.length > 0) {
+            const { data: subsCust } = await supabaseAdmin.from('subscriptions')
+              .select('id').in('deal_id', dealIds).limit(1);
+            custMatch = Array.isArray(subsCust) && subsCust.length > 0;
+          }
+        } catch (eCust) {
+          // Fail-soft: klant-match faalt → val terug op deal-match.
+          console.warn('[sales-deal-detail] klant-match sub-lookup faalde:', eCust?.message || eCust);
+        }
+      }
+
+      has_subscription = dealMatch || custMatch;
+    } catch (eSub) {
+      console.warn('[sales-deal-detail] deal-match sub-lookup faalde:', eSub?.message || eSub);
+      has_subscription = false;
+    }
 
     return res.status(200).json({
       deal, customer, line_items: lineItems || [], traject, entity,
