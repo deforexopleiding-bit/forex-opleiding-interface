@@ -49,13 +49,16 @@ export default async function handler(req, res) {
 
   try {
     // 1) Pull all open invoices (status open/partially_paid/overdue) + joined customer.
+    // Sandbox-guardrail: sluit is_test-rijen uit van de production
+    // problem-customers-lijst (zowel op factuur- als klant-niveau).
     const { data: rows, error: invErr } = await supabaseAdmin
       .from('invoices')
       .select(`
-        id, customer_id, amount_total, amount_paid, credited_amount, due_date, status,
-        customers:customer_id ( id, first_name, last_name, company_name, is_company, email, phone, archived_at, anonymized_at )
+        id, customer_id, amount_total, amount_paid, credited_amount, due_date, status, is_test,
+        customers:customer_id ( id, first_name, last_name, company_name, is_company, email, phone, archived_at, anonymized_at, is_test )
       `)
-      .in('status', OPEN_STATUSES);
+      .in('status', OPEN_STATUSES)
+      .eq('is_test', false);
     if (invErr) throw new Error('invoices: ' + invErr.message);
 
     // 2) Aggregate per customer.
@@ -65,6 +68,7 @@ export default async function handler(req, res) {
       const cust = inv.customers;
       if (!cust) continue;
       if (cust.archived_at || cust.anonymized_at) continue;
+      if (cust.is_test) continue; // sandbox-klant nooit in production-lijst
 
       const open = openAmount(inv);
       if (open <= 0) continue;

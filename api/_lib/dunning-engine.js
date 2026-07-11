@@ -32,10 +32,11 @@ const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
  * Entry-point. Wordt aangeroepen vanuit api/cron-dunning-engine.js
  * en (optioneel) vanuit een handmatige debug-endpoint met mode="manual".
  */
-export async function runEngine({ mode = 'cron', abortMs = 50_000 } = {}) {
+export async function runEngine({ mode = 'cron', abortMs = 50_000, scope = 'production' } = {}) {
   const startedAt = Date.now();
   const result = {
     mode,
+    scope,
     detected: 0,
     runs_advanced: 0,
     errors: [],
@@ -43,14 +44,14 @@ export async function runEngine({ mode = 'cron', abortMs = 50_000 } = {}) {
   };
 
   try {
-    result.detected = await detectAndStartRuns(startedAt, abortMs, result.errors);
+    result.detected = await detectAndStartRuns(startedAt, abortMs, result.errors, scope);
   } catch (e) {
     result.errors.push({ phase: 'detect', error: e?.message || String(e) });
     console.error('[dunning-engine] detect fatal', e);
   }
 
   try {
-    result.runs_advanced = await advanceActiveRuns(startedAt, abortMs, result.errors);
+    result.runs_advanced = await advanceActiveRuns(startedAt, abortMs, result.errors, scope);
   } catch (e) {
     result.errors.push({ phase: 'advance', error: e?.message || String(e) });
     console.error('[dunning-engine] advance fatal', e);
@@ -117,14 +118,24 @@ function matchesCustomerType(customer, wanted) {
  * actieve betaalafspraak loopt. Bij VERBROKEN/NAGEKOMEN/GEANNULEERD valt de
  * factuur vanzelf weer in scope op de volgende cron-run.
  */
-async function fetchOpenInvoices(customerId = null) {
+async function fetchOpenInvoices(customerId = null, opts = {}) {
+  // Sandbox-scoping:
+  //   scope='production' (default) → alleen is_test=false rijen (cron-modus)
+  //   scope='test'                  → alleen is_test=true rijen (sandbox-run)
+  //   scope=null / unset            → geen is_test-filter (back-compat)
+  const scope = opts?.scope || null;
   let q = supabaseAdmin
     .from('invoices')
     .select(
-      'id, customer_id, amount_total, amount_paid, credited_amount, due_date, status, invoice_number, customers!inner(id, first_name, last_name, company_name, is_company, email, archived_at, anonymized_at)'
+      'id, customer_id, amount_total, amount_paid, credited_amount, due_date, status, invoice_number, is_test, customers!inner(id, first_name, last_name, company_name, is_company, email, archived_at, anonymized_at, is_test)'
     )
     .in('status', OPEN_STATUSES);
   if (customerId) q = q.eq('customer_id', customerId);
+  if (scope === 'production') {
+    q = q.eq('is_test', false).eq('customers.is_test', false);
+  } else if (scope === 'test') {
+    q = q.eq('is_test', true).eq('customers.is_test', true);
+  }
   const { data, error } = await q;
   if (error) throw error;
   const rows = Array.isArray(data) ? data : [];
@@ -212,7 +223,7 @@ function aggregatePerCustomer(rows) {
 // Phase 1: detect + start
 // ---------------------------------------------------------------------------
 
-async function detectAndStartRuns(startedAt, abortMs, errors) {
+async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'production') {
   const { data: workflows, error: wfErr } = await supabaseAdmin
     .from('dunning_workflows')
     .select('id, name, trigger_conditions, priority, is_active')
@@ -279,7 +290,7 @@ async function detectAndStartRuns(startedAt, abortMs, errors) {
 
     let openRows;
     try {
-      openRows = await fetchOpenInvoices(null);
+      openRows = await fetchOpenInvoices(null, { scope });
     } catch (e) {
       errors.push({ phase: 'detect', workflow_id: workflow.id, error: e?.message || String(e) });
       console.error('[dunning-engine] fetch invoices failed', workflow.id, e?.message);
@@ -411,7 +422,7 @@ async function detectAndStartRuns(startedAt, abortMs, errors) {
 // Phase 2: advance active runs
 // ---------------------------------------------------------------------------
 
-async function advanceActiveRuns(startedAt, abortMs, errors) {
+async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production') {
   const now = nowIso();
   const { data: runs, error: runsErr } = await supabaseAdmin
     .from('dunning_workflow_runs')

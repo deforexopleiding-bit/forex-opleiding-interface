@@ -93,10 +93,13 @@ export default async function handler(req, res) {
 
   try {
     // 1) Pick jobs met pending recipients (FIFO op created_at).
+    // Sandbox-guardrail: alleen NIET-test-jobs. Sandbox-run-bulk-endpoint
+    // creëert is_test=true jobs en draait zelf de send-flow inline.
     const { data: jobs, error: jobsErr } = await supabaseAdmin
       .from('dunning_bulk_jobs')
-      .select('id, channel, template_name, email_template_id, status, batch_size, sent_count, failed_count, skipped_count, total_recipients')
+      .select('id, channel, template_name, email_template_id, status, batch_size, sent_count, failed_count, skipped_count, total_recipients, is_test')
       .in('status', ['approved', 'running'])
+      .eq('is_test', false)
       .order('created_at', { ascending: true })
       .limit(20);
     if (jobsErr) throw new Error('jobs fetch: ' + jobsErr.message);
@@ -173,7 +176,7 @@ export default async function handler(req, res) {
         if (rec.customer_id) {
           const { data: c } = await supabaseAdmin
             .from('customers')
-            .select('id, first_name, last_name, company_name, is_company, email, phone')
+            .select('id, first_name, last_name, company_name, is_company, email, phone, is_test')
             .eq('id', rec.customer_id).maybeSingle();
           customerRow = c || null;
         }
@@ -226,13 +229,25 @@ export default async function handler(req, res) {
             : {};
           const { components } = buildSendComponents({ template: tpl, bodyVariables });
 
-          const sendRes = await sendTemplate({
-            to           : phonePlus,
-            templateName : tpl.name,
-            languageCode : tpl.language || 'nl',
-            components   : components.length ? components : null,
-            phoneNumberId: waba.phone_number_id,
-          });
+          // Sandbox / dry-run guards.
+          const { isDryRunEnabled, assertRecipientMatchesSandbox } =
+            await import('./_lib/dunning-dry-run.js');
+          if (customerRow?.is_test) {
+            await assertRecipientMatchesSandbox({ isTest: true, actual: phonePlus, channel: 'whatsapp' });
+          }
+          let sendRes;
+          if (await isDryRunEnabled()) {
+            sendRes = { wamid: 'dry-run:wa:' + rec.id };
+            console.log('[cron-dunning-bulk-send] DRY-RUN WA', rec.id, phonePlus, tpl.name);
+          } else {
+            sendRes = await sendTemplate({
+              to           : phonePlus,
+              templateName : tpl.name,
+              languageCode : tpl.language || 'nl',
+              components   : components.length ? components : null,
+              phoneNumberId: waba.phone_number_id,
+            });
+          }
           wamid = sendRes?.wamid || sendRes?.messages?.[0]?.id || null;
           waOk = true;
 
@@ -264,13 +279,25 @@ export default async function handler(req, res) {
           const bodyHtml = '<div style="font-family:system-ui,sans-serif;font-size:14px;line-height:1.5;white-space:pre-wrap">' +
             bodyText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') +
             '</div>';
-          const emRes = await sendEmailViaSmtp({
-            fromMailbox: EMAIL_MAILBOX,
-            to         : rec.customer_email,
-            subject    : subj,
-            text       : bodyText,
-            html       : bodyHtml,
-          });
+          // Sandbox / dry-run guards.
+          const { isDryRunEnabled, assertRecipientMatchesSandbox } =
+            await import('./_lib/dunning-dry-run.js');
+          if (customerRow?.is_test) {
+            await assertRecipientMatchesSandbox({ isTest: true, actual: rec.customer_email, channel: 'email' });
+          }
+          let emRes;
+          if (await isDryRunEnabled()) {
+            emRes = { ok: true, messageId: 'dry-run:em:' + rec.id };
+            console.log('[cron-dunning-bulk-send] DRY-RUN EM', rec.id, rec.customer_email, subj);
+          } else {
+            emRes = await sendEmailViaSmtp({
+              fromMailbox: EMAIL_MAILBOX,
+              to         : rec.customer_email,
+              subject    : subj,
+              text       : bodyText,
+              html       : bodyHtml,
+            });
+          }
           if (emRes.ok) {
             emailMsgId = emRes.messageId || null;
             emOk = true;
