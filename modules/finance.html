@@ -1115,11 +1115,11 @@
     </div>
     <style>
       .wb-menu-btn { display:inline-flex; align-items:center; gap:4px; }
-      .wb-menu-panel { position:absolute; top:calc(100% + 4px); left:0; z-index:900; min-width:200px; background:#0f172a; border:1px solid rgba(255,255,255,.10); border-radius:8px; box-shadow:0 10px 24px rgba(0,0,0,.45); padding:4px; display:flex; flex-direction:column; gap:2px; }
+      .wb-menu-panel { position:absolute; top:calc(100% + 4px); left:0; z-index:900; min-width:200px; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; box-shadow:0 10px 24px rgba(0,0,0,.45); padding:4px; display:flex; flex-direction:column; gap:2px; }
       .wb-menu-panel[hidden] { display:none; }
       .wb-menu-panel-right { left:auto; right:0; }
       .wb-menu-item { display:flex; align-items:center; gap:8px; padding:8px 10px; background:transparent; border:none; color:var(--text-dim); font-size:13px; text-align:left; cursor:pointer; border-radius:6px; }
-      .wb-menu-item:hover { background:rgba(255,255,255,.06); }
+      .wb-menu-item:hover { background:var(--bg-elev-2); }
     </style>
 
     <!-- Sub-tab hosts. Open Acties + Pipeline + Vandaag hebben eigen hosts;
@@ -13050,7 +13050,7 @@
               </div>
               <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Cijfers · signalen · snelle acties</div>
             </div>
-            <button id="vdgStartAanmaanBtn" class="sr-btn" type="button" style="padding:8px 14px">
+            <button id="vdgStartAanmaanBtn" class="sr-abtn primary" type="button" style="padding:8px 14px">
               <i class="ti ti-mail-forward"></i> Start aanmaanronde
             </button>
           </div>
@@ -13142,7 +13142,7 @@
         </div>
 
         <div style="display:flex;justify-content:flex-end">
-          <button id="actRefreshBtn" class="sr-btn" type="button" style="padding:6px 12px"><i class="ti ti-refresh"></i> Herlaad</button>
+          <button id="actRefreshBtn" class="sr-abtn" type="button" style="padding:6px 12px"><i class="ti ti-refresh"></i> Herlaad</button>
         </div>
 
         <div id="actEmpty" style="display:none;padding:40px 20px;text-align:center;color:var(--text-faint);font-size:13px;background:rgba(255,255,255,.02);border:1px dashed rgba(255,255,255,.10);border-radius:10px">
@@ -13396,7 +13396,7 @@
       <div class="pipe-wrap" style="display:flex;flex-direction:column;gap:12px">
         <div class="pipe-toolbar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <input id="pipeSearchInput" type="text" placeholder="Zoek klant…" style="min-width:220px;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);color:var(--text-dim);font-size:13px">
-          <button id="pipeRefreshBtn" class="sr-btn" type="button" style="padding:6px 12px"><i class="ti ti-refresh"></i> Herlaad</button>
+          <button id="pipeRefreshBtn" class="sr-abtn" type="button" style="padding:6px 12px"><i class="ti ti-refresh"></i> Herlaad</button>
           <div id="pipeCounter" style="font-size:12px;color:var(--text-faint);margin-left:auto"></div>
         </div>
         <div id="pipeBoard" class="pipe-board" style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;min-height:60vh"></div>
@@ -13746,7 +13746,7 @@
         <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
           <input id="pipeApptTitle" type="text" placeholder="Titel afspraak…" style="flex:1;min-width:160px;padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);color:var(--text-dim);font-size:12px">
           <input id="pipeApptDue"   type="datetime-local" style="padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);color:var(--text-dim);font-size:12px">
-          <button id="pipeApptAddBtn" class="sr-btn" type="button" style="font-size:12px;padding:6px 10px">Toevoegen</button>
+          <button id="pipeApptAddBtn" class="sr-abtn primary" type="button" style="font-size:12px;padding:6px 10px">Toevoegen</button>
         </div>
       </div>
 
@@ -13754,7 +13754,7 @@
         <div class="pipe-dos-h">Logboek</div>
         <div style="display:flex;gap:6px;margin-bottom:8px">
           <input id="pipeLogInput" type="text" placeholder="Notitie…" style="flex:1;padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);color:var(--text-dim);font-size:12px">
-          <button id="pipeLogAddBtn" class="sr-btn" type="button" style="font-size:12px;padding:6px 10px">Plaats</button>
+          <button id="pipeLogAddBtn" class="sr-abtn primary" type="button" style="font-size:12px;padding:6px 10px">Plaats</button>
         </div>
         <div id="pipeDetailLogList">${(logs || []).map(_pipeLogHtml).join('') || '<div style="font-size:11.5px;color:var(--text-faint)">Nog geen logboek-items</div>'}</div>
       </div>
@@ -13958,7 +13958,7 @@
       <div class="pipe-chat-msgs" id="pipeChatMsgs">${bubbles || '<div class="pipe-chat-empty">Nog geen berichten</div>'}</div>
       <div class="pipe-chat-compose">
         <textarea id="pipeChatText" ${canSendText ? '' : 'disabled'} placeholder="${canSendText ? 'Typ een bericht…' : '24u-venster gesloten — gebruik een template in de gewone inbox'}"></textarea>
-        <button id="pipeChatSendBtn" class="sr-btn" type="button" ${canSendText ? '' : 'disabled'} style="padding:8px 14px">Verstuur</button>
+        <button id="pipeChatSendBtn" class="sr-abtn primary" type="button" ${canSendText ? '' : 'disabled'} style="padding:8px 14px">Verstuur</button>
       </div>
     `;
     // Auto-scroll naar onder
