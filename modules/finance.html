@@ -13348,9 +13348,10 @@
             <textarea id="incEditNotes" class="fin-input" rows="4" style="margin-top:2px;width:100%">${esc(dossier.notes || '')}</textarea>
           </label>
           <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
-            <button id="incSaveBtn"  class="sr-abtn primary" type="button"><i class="ti ti-device-floppy"></i> Opslaan</button>
-            <button id="incPdfBtn"   class="sr-abtn" type="button"><i class="ti ti-file-download"></i> Genereer dossier-PDF</button>
-            <button id="incMailBtn"  class="sr-abtn" type="button"><i class="ti ti-mail-forward"></i> E-mail naar bureau</button>
+            <button id="incSaveBtn"    class="sr-abtn primary" type="button"><i class="ti ti-device-floppy"></i> Opslaan</button>
+            <button id="incPdfBtn"     class="sr-abtn" type="button"><i class="ti ti-file-download"></i> Genereer dossier-PDF</button>
+            <button id="incMailBtn"    class="sr-abtn" type="button"><i class="ti ti-mail-forward"></i> E-mail naar bureau</button>
+            <button id="incPreBriefBtn" class="sr-abtn" type="button" title="Verstuur WIK-14-dagenbrief (NL) of eerste (kosteloze) herinnering (BE)"><i class="ti ti-mailbox"></i> Verstuur pre-incassobrief</button>
           </div>
 
           <div class="pipe-dos-h">Facturen ${flags?.wik_letter_sent ? '· <span style="color:#10b981">WIK/BE-brief verstuurd</span>' : ''}</div>
@@ -13386,6 +13387,9 @@
     document.getElementById('incSaveBtn')?.addEventListener('click', () => incSaveDossier(dossier.id));
     document.getElementById('incPdfBtn')?.addEventListener('click', () => incDownloadPdf(dossier.id));
     document.getElementById('incMailBtn')?.addEventListener('click', () => incMailToBureau(dossier.id));
+    document.getElementById('incPreBriefBtn')?.addEventListener('click', () => {
+      incDownloadPreBrief(dossier.customer_id, dossier.country || 'NL').then(() => incOpenDetail(dossier.id));
+    });
   }
 
   async function incDownloadPdf(dossierId) {
@@ -13471,11 +13475,49 @@
       const bureauId = (idx >= 0 && idx < bureaus.length) ? bureaus[idx].id : null;
       const country = window.prompt('Land (NL/BE):', 'NL');
       if (!country) return;
+      const chosenCountry = country.toUpperCase() === 'BE' ? 'BE' : 'NL';
       const d = await _incCall('/api/incasso-dossier-create', {
         customer_id: customerId,
         bureau_id  : bureauId,
-        country    : country.toUpperCase() === 'BE' ? 'BE' : 'NL',
+        country    : chosenCountry,
       });
+      // PR-3: server geeft { needs_brief:true } bij particulier zonder brief.
+      if (d && d.needs_brief === true) {
+        const briefLabel = chosenCountry === 'BE'
+          ? 'BE eerste (kosteloze) herinnering'
+          : 'NL WIK-14-dagenbrief';
+        const msg = 'Deze klant is een particulier en de verplichte pre-incassobrief (' + briefLabel + ') is nog niet verstuurd.\n\n' +
+                    'OK  = verstuur brief nu (PDF downloadt)\n' +
+                    'Annuleren  = terug (of houd Shift ingedrukt tijdens Annuleren om tóch door te gaan zonder brief).';
+        const ok = window.confirm(msg);
+        if (ok) {
+          // Download de PDF; server logt 'incasso_pre_brief_sent'.
+          await incDownloadPreBrief(customerId, chosenCountry);
+          // Automatisch opnieuw proberen — marker staat nu, guard laat door.
+          const d2 = await _incCall('/api/incasso-dossier-create', {
+            customer_id: customerId, bureau_id: bureauId, country: chosenCountry,
+          });
+          if (d2?.dossier?.id) {
+            window.AgentShared?.showToast?.('Dossier aangemaakt (id ' + String(d2.dossier.id).slice(0, 8) + '…)', 'success');
+            if (typeof loadPipelineData === 'function') loadPipelineData({ background: true });
+          } else {
+            window.AgentShared?.showToast?.('Naar incasso mislukt na brief: ' + (d2?.message || 'onbekend'), 'error');
+          }
+          return;
+        }
+        // Tweede vraag: toch doorgaan?
+        const skip = window.confirm('Toch doorgaan zonder brief? Klant is een particulier — dit kan juridisch nadelig zijn.');
+        if (!skip) return;
+        const d3 = await _incCall('/api/incasso-dossier-create', {
+          customer_id: customerId, bureau_id: bureauId, country: chosenCountry,
+          confirm_no_brief: true,
+        });
+        if (d3?.dossier?.id) {
+          window.AgentShared?.showToast?.('Dossier aangemaakt zonder brief (id ' + String(d3.dossier.id).slice(0, 8) + '…)', 'success');
+          if (typeof loadPipelineData === 'function') loadPipelineData({ background: true });
+        }
+        return;
+      }
       window.AgentShared?.showToast?.('Dossier aangemaakt (id ' + String(d.dossier?.id || '').slice(0, 8) + '…)', 'success');
       // Ververs pipeline zodat klant naar fase incasso schuift.
       if (typeof loadPipelineData === 'function') loadPipelineData({ background: true });
@@ -13483,6 +13525,36 @@
       window.AgentShared?.showToast?.('Naar incasso mislukt: ' + (e?.message || 'onbekend'), 'error');
     }
   };
+
+  // Download de pre-incassobrief-PDF (WIK/BE) voor deze klant. Blob-attachment.
+  async function incDownloadPreBrief(customerId, country) {
+    try {
+      const r = await window.AgentShared.apiFetch('/api/incasso-pre-brief', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_id: customerId, country: country || 'NL' }),
+      });
+      if (!r.ok) {
+        let msg = 'HTTP ' + r.status;
+        try { const j = await r.json(); msg = j?.error || msg; } catch (_) {}
+        throw new Error(msg);
+      }
+      const blob = await r.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href = url;
+      a.download = 'pre-incassobrief_' + (country || 'NL') + '_' + String(customerId).slice(0, 8) + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      window.AgentShared?.showToast?.('Pre-incassobrief gedownload', 'success');
+    } catch (e) {
+      window.AgentShared?.showToast?.('Brief mislukt: ' + (e?.message || 'onbekend'), 'error');
+      throw e; // re-throw zodat de caller weet
+    }
+  }
+  window._incDownloadPreBrief = incDownloadPreBrief;
 
   // ────────────────────────────────────────────────────────────────────
   // Wanbetalers-SANDBOX (super_admin) — test-persoon + versneld testpaneel.
