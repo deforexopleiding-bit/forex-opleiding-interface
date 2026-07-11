@@ -105,7 +105,7 @@ export default async function handler(req, res) {
       resolved_preview_email_subject: channel === 'email' ? subject : null,
       resolved_preview_email_body   : channel === 'email' ? bodyText : null,
       invoice_ids      : invoiceIds,
-      status           : 'sending',
+      status           : 'pending',
       created_at       : nowIso,
     }).select('id').single();
     if (rErr) throw new Error('bulk_recipients insert: ' + rErr.message);
