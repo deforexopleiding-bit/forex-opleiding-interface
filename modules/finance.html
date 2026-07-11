@@ -13246,11 +13246,17 @@
     });
 
     document.getElementById('sbxRunBulkBtn')?.addEventListener('click', async () => {
-      const channel = window.prompt('Channel (whatsapp/email):', 'whatsapp');
+      const channel = window.prompt('Channel (whatsapp/email):', 'email');
       if (!channel) return;
       try {
         const d = await _sbxCall('/api/wanbetalers-sandbox-run-bulk', { channel });
-        if (typeof showToast === 'function') showToast(`Bulk-job aangemaakt (is_test=true, id=${d.job_id})`, 'success');
+        const status = d.sent ? 'verstuurd' : 'mislukt';
+        const dryStr = d.dry_run ? ' (dry-run)' : '';
+        let stageStr = '';
+        if (d.pipeline_moved)      stageStr = ' → fase aangemaand';
+        else if (d.sent && !d.auto_toggle) stageStr = ' (fase niet verschoven: auto-trigger uit)';
+        if (typeof showToast === 'function') showToast(`Bulk (test): ${status}${dryStr}${stageStr}`, d.sent ? 'success' : 'error');
+        sbxReloadStatus();
       } catch (e) {
         if (typeof showToast === 'function') showToast('Bulk mislukt: ' + (e?.message || 'onbekend'), 'error');
       }
