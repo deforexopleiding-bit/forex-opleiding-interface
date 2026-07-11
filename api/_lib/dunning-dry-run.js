@@ -67,9 +67,21 @@ export function invalidateDryRunCache() {
 }
 
 // Normaliseer telefoon/e-mail voor vergelijking (strip whitespace + hoofdletters).
+// Cijfer-only normalisatie: strip +, spaties, streepjes, haakjes en 00-prefix.
+// Zo matchen '+0612343423' en '0612343423' als hetzelfde nummer, en '+31612…'
+// wordt via phoneMatches (laatste 9 cijfers) equivalent aan '0612…'.
 function normPhone(p) {
   if (!p) return '';
-  return String(p).replace(/\s+/g, '').replace(/^00/, '+');
+  return String(p).replace(/\D+/g, '');
+}
+// Tolerante telefoon-matcher: exact-op-cijfers OF gelijke laatste 9 cijfers
+// (nationaal significant deel → dekt landcode-verschillen).
+function phoneMatches(a, b) {
+  const x = normPhone(a), y = normPhone(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  if (x.length >= 9 && y.length >= 9 && x.slice(-9) === y.slice(-9)) return true;
+  return false;
 }
 function normEmail(e) {
   if (!e) return '';
@@ -83,12 +95,11 @@ export async function assertRecipientMatchesSandbox({ isTest, actual, channel })
   const contact = await getSandboxContact();
   if (channel === 'whatsapp') {
     const want = normPhone(contact.phone);
-    const got  = normPhone(actual);
     if (!want) {
       throw new Error('[sandbox-guard] geen sandbox-telefoon geconfigureerd — abort test-verzending');
     }
-    if (want !== got) {
-      throw new Error(`[sandbox-guard] test-verzending geblokkeerd: doel=${got} matcht niet met sandbox=${want}`);
+    if (!phoneMatches(contact.phone, actual)) {
+      throw new Error(`[sandbox-guard] test-verzending geblokkeerd: doel=${normPhone(actual)} matcht niet met sandbox=${want}`);
     }
     return;
   }
