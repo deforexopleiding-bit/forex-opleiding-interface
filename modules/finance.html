@@ -13173,7 +13173,9 @@
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <button id="incAutoSaveBtn"    class="sr-abtn primary" type="button"><i class="ti ti-device-floppy"></i> Instellingen opslaan</button>
               <button id="incAutoPreviewBtn" class="sr-abtn" type="button"><i class="ti ti-eye"></i> Toon kandidaten (preview)</button>
+              <button id="incAutoRunBtn"     class="sr-abtn" type="button" title="Verwerk de gepreviewde kandidaten NU. Draait ongeacht de toggle."><i class="ti ti-player-play"></i> Verwerk kandidaten nu</button>
             </div>
+            <div style="font-size:11px;color:var(--text-faint);margin-top:-4px">De geplande cron (dagelijks 09:15) draait pas als de toggle AAN staat. "Verwerk nu" is een expliciete mensactie en negeert de toggle.</div>
             <div id="incAutoPreview" style="margin-top:6px"></div>
           </div>
         </details>
@@ -13232,6 +13234,34 @@
     // Auto-blok (PR-4a).
     document.getElementById('incAutoSaveBtn')?.addEventListener('click', () => incAutoSave());
     document.getElementById('incAutoPreviewBtn')?.addEventListener('click', () => incAutoPreview());
+    // Auto-blok (PR-4b) — handmatige verwerking.
+    document.getElementById('incAutoRunBtn')?.addEventListener('click', () => incAutoRunNow());
+  }
+
+  async function incAutoRunNow() {
+    if (!confirm('Verwerk de huidige kandidaten NU (dossiers aanmaken + pipeline naar incasso)? Dit is een expliciete mensactie en negeert de toggle.')) return;
+    const btn = document.getElementById('incAutoRunBtn');
+    if (btn) btn.disabled = true;
+    try {
+      const d = await _incCall('/api/incasso-auto-run', {});
+      const created  = (d.created || []).length;
+      const wik      = (d.skipped_wik || []).length;
+      const already  = (d.skipped_other || []).length;
+      const errors   = (d.errors || []).length;
+      const parts = [
+        `${created} dossier${created === 1 ? '' : 's'} aangemaakt`,
+        wik     > 0 ? `${wik} overgeslagen (WIK-brief ontbreekt)` : null,
+        already > 0 ? `${already} al in incasso`                  : null,
+        errors  > 0 ? `${errors} fout${errors === 1 ? '' : 'en'}` : null,
+      ].filter(Boolean).join(' · ');
+      window.AgentShared?.showToast?.('Verwerkt: ' + (parts || 'geen kandidaten'), errors > 0 ? 'warning' : 'success');
+      await incLoadOverview();
+      await incAutoPreview();
+    } catch (e) {
+      window.AgentShared?.showToast?.('Verwerken mislukt: ' + (e?.message || 'onbekend'), 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   async function incAutoLoadSettings() {
