@@ -25,7 +25,16 @@ export default async function handler(req, res) {
   const admin = await requireSuperAdmin(req, res);
   if (!admin) return;
 
-  const summary = { customers_deleted: 0, invoices_deleted: 0, conversations_deleted: 0, messages_deleted: 0, pipeline_rows: 0, bulk_jobs: 0 };
+  const summary = {
+    customers_deleted     : 0,
+    invoices_deleted      : 0,
+    conversations_deleted : 0,
+    messages_deleted      : 0,
+    pipeline_rows         : 0,
+    bulk_jobs             : 0,
+    credited_debt_rows    : 0,
+    subscriptions_deleted : 0,
+  };
 
   try {
     // 1) Alle test-customer-ids ophalen.
@@ -78,6 +87,24 @@ export default async function handler(req, res) {
           await supabaseAdmin.from('dunning_log').delete().filter('payload->>customer_id', 'eq', cid);
         } catch (_) { /* fail-soft per klant */ }
       }
+
+      // 5b) dunning_credited_debt — snapshot-rijen van eerdere sandbox-crediteerrondes.
+      //     Fail-soft: tabel bestaat pas vanaf migratie 039; oude environments
+      //     die die migratie nog niet gerund hebben mogen niet crashen.
+      try {
+        const { count: cdCount } = await supabaseAdmin.from('dunning_credited_debt')
+          .delete({ count: 'exact' }).in('customer_id', custIds);
+        summary.credited_debt_rows = cdCount || 0;
+      } catch (e) { console.warn('[sandbox-reset] dunning_credited_debt soft-fail:', e?.message || e); }
+
+      // 5c) Test-subscriptions — geïdentificeerd op customer_id (test-persoon).
+      //     Deals van test-klanten hebben we sowieso niet, dus alle subs op
+      //     die customer_id zijn per definitie sandbox-artefacten.
+      try {
+        const { count: sCount } = await supabaseAdmin.from('subscriptions')
+          .delete({ count: 'exact' }).in('customer_id', custIds);
+        summary.subscriptions_deleted = sCount || 0;
+      } catch (e) { console.warn('[sandbox-reset] subscriptions soft-fail:', e?.message || e); }
     }
 
     // 6) Invoices + customers (in die volgorde vanwege FK).

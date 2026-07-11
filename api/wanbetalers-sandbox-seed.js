@@ -114,12 +114,83 @@ export default async function handler(req, res) {
     const contact = await setSandboxContact({ phone, email });
     invalidateDryRunCache();
 
+    // 6) Test-abonnement voor de crediteerronde-sandbox (PR-4). Idempotent:
+    //    er bestaat max één test-sub per test-klant, geïdentificeerd op
+    //    description='TEST-abonnement'. Als de kolom is_test bestaat wordt
+    //    die op true gezet; anders valt de scope terug op customer_id + de
+    //    unieke description. Geen teamleader_subscription_id → nooit een
+    //    TL-mutatie via sandbox-flows.
+    let subscription = null;
+    try {
+      const today = new Date();
+      const startDate = new Date(today);
+      startDate.setMonth(startDate.getMonth() - 6);
+      const endDate = new Date(today);
+      endDate.setMonth(endDate.getMonth() + 12);
+      const iso = (d) => d.toISOString().slice(0, 10);
+      const subPayload = {
+        customer_id             : customer.id,
+        description             : 'TEST-abonnement',
+        amount                  : 300,
+        term_count              : 24,
+        start_date              : iso(startDate),
+        end_date                : iso(endDate),
+        status                  : 'actief',
+        teamleader_subscription_id: null,
+        postponed_months        : 0,
+        original_start_date     : null,
+        original_end_date       : null,
+      };
+      // Bestaand test-sub zoeken (op customer_id + description).
+      const { data: existingSub } = await supabaseAdmin
+        .from('subscriptions').select('id')
+        .eq('customer_id', customer.id).eq('description', 'TEST-abonnement')
+        .maybeSingle();
+      if (existingSub) {
+        // Refresh — reset counters zodat een re-seed altijd dezelfde
+        // start-state oplevert.
+        const { data: upd, error: uSubErr } = await supabaseAdmin
+          .from('subscriptions').update(subPayload).eq('id', existingSub.id)
+          .select('id, customer_id, description, amount, term_count, start_date, end_date, status, postponed_months')
+          .single();
+        if (uSubErr) throw new Error('subscription update: ' + uSubErr.message);
+        subscription = upd;
+      } else {
+        // Poging 1: mét is_test=true (nieuwere migraties).
+        const withFlag = { ...subPayload, is_test: true };
+        const first = await supabaseAdmin
+          .from('subscriptions').insert(withFlag)
+          .select('id, customer_id, description, amount, term_count, start_date, end_date, status, postponed_months')
+          .single();
+        if (first.error) {
+          const msg = String(first.error?.message || '').toLowerCase();
+          const isSchemaMiss = msg.includes('is_test') || msg.includes('column');
+          if (!isSchemaMiss) throw new Error('subscription insert: ' + first.error.message);
+          // Poging 2: zonder is_test (kolom bestaat nog niet).
+          const { data: ins2, error: iErr2 } = await supabaseAdmin
+            .from('subscriptions').insert(subPayload)
+            .select('id, customer_id, description, amount, term_count, start_date, end_date, status, postponed_months')
+            .single();
+          if (iErr2) throw new Error('subscription insert (fallback): ' + iErr2.message);
+          subscription = ins2;
+        } else {
+          subscription = first.data;
+        }
+      }
+    } catch (e) {
+      // Sub-seed is fail-soft — als het niet lukt, verstoort dat niet de
+      // klant/facturen-seed. De simulate-credit-round-endpoint checkt zelf
+      // of er een test-sub bestaat en past zich aan.
+      console.warn('[sandbox-seed] test-sub soft-fail:', e?.message || e);
+    }
+
     return res.status(200).json({
       ok       : true,
       customer,
       invoices : newInvs || [],
       contact,
       pipeline_stage: 'nieuw',
+      subscription,
     });
   } catch (e) {
     console.error('[sandbox-seed]', e?.message || e);

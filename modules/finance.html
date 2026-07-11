@@ -13799,6 +13799,7 @@
             <button id="sbxPaidBtn"    class="sr-abtn" type="button"><i class="ti ti-cash"></i> Markeer alle facturen betaald</button>
             <button id="sbxRunEngineBtn" class="sr-abtn primary" type="button"><i class="ti ti-player-play"></i> Run engine (test)</button>
             <button id="sbxRunBulkBtn"   class="sr-abtn primary" type="button"><i class="ti ti-send"></i> Bulk-job (test)</button>
+            <button id="sbxSimCreditBtn" class="sr-abtn primary" type="button" title="Simuleer de kwartaal-crediteerronde lokaal op de test-persoon — geen TL-calls."><i class="ti ti-receipt-refund"></i> 🧪 Simuleer crediteerronde</button>
           </div>
         </div>
 
@@ -13966,10 +13967,35 @@
       if (!confirm('⚠️ ALLE is_test-data verwijderen (persoon, facturen, conversaties, pipeline)?\n\nDit is definitief.')) return;
       try {
         const d = await _sbxCall('/api/wanbetalers-sandbox-reset', {});
-        window.AgentShared?.showToast?.(`Reset: ${d.customers_deleted||0} klant, ${d.invoices_deleted||0} facturen, ${d.conversations_deleted||0} gesprekken`, 'success');
+        window.AgentShared?.showToast?.(`Reset: ${d.customers_deleted||0} klant, ${d.invoices_deleted||0} facturen, ${d.conversations_deleted||0} gesprekken · ${d.credited_debt_rows||0} credit-rijen · ${d.subscriptions_deleted||0} sub(s)`, 'success');
         sbxReloadStatus();
       } catch (e) {
         window.AgentShared?.showToast?.('Reset mislukt: ' + (e?.message || 'onbekend'), 'error');
+      }
+    });
+
+    // "🧪 Simuleer crediteerronde" — PR-4. Draait de nieuwe sandbox-actie
+    // wanbetalers-sandbox-simulate-credit-round: lokaal crediteren van
+    // is_test-facturen + test-sub verlengen + dunning_credited_debt inserten.
+    // Nooit een TL-call; puur DB-mutaties op is_test-rijen.
+    document.getElementById('sbxSimCreditBtn')?.addEventListener('click', async () => {
+      if (!confirm('🧪 Simuleer de crediteerronde op de test-persoon?\n\nDit crediteert alle open test-facturen lokaal (geen TL-call), verlengt het TEST-abonnement en schrijft dunning_credited_debt-rijen. Alleen voor is_test-data.')) return;
+      const btn = document.getElementById('sbxSimCreditBtn');
+      if (btn) btn.disabled = true;
+      try {
+        const d = await _sbxCall('/api/wanbetalers-sandbox-simulate-credit-round', {});
+        const s = d?.summary || {};
+        const parts = [
+          `${s.invoices_credited || 0} factu${(s.invoices_credited||0) === 1 ? 'ur' : 'ren'} gecrediteerd`,
+          `abo +${s.months_extended || 0} mnd`,
+          `${s.debt_rows_inserted || 0} credit-rij(en)`,
+        ];
+        window.AgentShared?.showToast?.(`🧪 Crediteerronde-simulatie: ${parts.join(' · ')}`, (s.invoices_credited || 0) > 0 ? 'success' : 'warning');
+        sbxReloadStatus();
+      } catch (e) {
+        window.AgentShared?.showToast?.('Simulatie mislukt: ' + (e?.message || 'onbekend'), 'error');
+      } finally {
+        if (btn) btn.disabled = false;
       }
     });
   }
