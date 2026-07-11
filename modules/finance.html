@@ -13372,6 +13372,16 @@
     filter         : '',
     dragCustomerId : null,
     dragOriginSlug : null,
+    // Weergave-schakelaar (Lijst / Bord). Default = 'list' (verticale
+    // gegroepeerde lijst). Bewaard in module-scope; geen refetch bij wisselen.
+    view           : 'list',
+    // Lijst-specifieke controls: fase-filter (null=alle) + sortering.
+    stageFilter    : null,
+    sortMode       : 'bedrag', // 'bedrag' | 'dagen' | 'contact'
+    // Inklap-state per fase (Set van slugs). Terminale fases starten dicht.
+    collapsedStages: new Set(['opgelost', 'afschrijven']),
+    // Row-menu (⋮): { anchorEl, cid, currentSlug } of null.
+    openMenu       : null,
     // Detail-modal:
     detail         : null, // { pipeline, customer, logs[], appointments[], open_invoices[] }
     detailLoading  : false,
@@ -13395,11 +13405,22 @@
     return `
       <div class="pipe-wrap" style="display:flex;flex-direction:column;gap:12px">
         <div class="pipe-toolbar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <input id="pipeSearchInput" type="text" placeholder="Zoek klant…" style="min-width:220px;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);color:var(--text-dim);font-size:13px">
+          <input id="pipeSearchInput" type="text" placeholder="Zoek klant…" style="min-width:220px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-elev-2);color:var(--text-dim);font-size:13px">
+          <select id="pipeSortSelect" class="pipe-sort" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-elev-2);color:var(--text-dim);font-size:12.5px" title="Sortering binnen elke fase">
+            <option value="bedrag">Bedrag ↓</option>
+            <option value="dagen">Dagen in fase ↓</option>
+            <option value="contact">Laatste contact ↓</option>
+          </select>
+          <div class="sr-segments" role="tablist" style="display:inline-flex;gap:4px">
+            <button class="sr-seg active" data-pipe-view="list"  type="button" title="Lijst-weergave (gegroepeerd per fase)"><i class="ti ti-list-details"></i> Lijst</button>
+            <button class="sr-seg"        data-pipe-view="board" type="button" title="Kanban-bord (kolommen per fase)"><i class="ti ti-layout-kanban"></i> Bord</button>
+          </div>
           <button id="pipeRefreshBtn" class="sr-abtn" type="button" style="padding:6px 12px"><i class="ti ti-refresh"></i> Herlaad</button>
           <div id="pipeCounter" style="font-size:12px;color:var(--text-faint);margin-left:auto"></div>
         </div>
-        <div id="pipeBoard" class="pipe-board" style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;min-height:60vh"></div>
+        <div id="pipeStageFilters" class="pipe-stage-filters" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+        <div id="pipeBoard" class="pipe-board" style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;min-height:60vh" hidden></div>
+        <div id="pipeList"  class="pipe-list"  style="display:flex;flex-direction:column;gap:14px;min-height:40vh"></div>
       </div>
       <div id="pipeDetailOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1200;display:none;align-items:stretch;justify-content:center;padding:20px">
         <div id="pipeDetailPanel" style="background:#0f172a;border:1px solid rgba(255,255,255,.10);border-radius:12px;box-shadow:0 24px 60px rgba(0,0,0,.55);width:min(1400px,100%);max-height:100%;display:flex;flex-direction:column;overflow:hidden">
@@ -13452,6 +13473,46 @@
         .pipe-chat-compose textarea:disabled { opacity:.5; cursor:not-allowed; }
         .pipe-chat-empty { flex:1; display:flex; align-items:center; justify-content:center; text-align:center; padding:24px; color:var(--text-faint); font-size:12.5px; }
         .pipe-chat-header { padding:10px 14px; border-bottom:1px solid rgba(255,255,255,.06); font-size:12px; color:var(--text-faint); display:flex; align-items:center; justify-content:space-between; gap:8px; }
+
+        /* Lijst-weergave */
+        .pipe-stage-filters .sr-seg { font-size:11.5px; padding:4px 10px; display:inline-flex; align-items:center; gap:6px; }
+        .pipe-stage-filters .sr-seg .stage-dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+        .pipe-list-section { background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+        .pipe-list-section.terminal { opacity:.75; }
+        .pipe-list-head { display:flex; align-items:center; gap:10px; padding:10px 14px; cursor:pointer; user-select:none; border-bottom:1px solid var(--border); background:var(--bg-elev-2); }
+        .pipe-list-head:hover { background:var(--bg-elev); }
+        .pipe-list-head.collapsed { border-bottom-color:transparent; }
+        .pipe-list-head .dot { width:10px; height:10px; border-radius:50%; display:inline-block; flex-shrink:0; }
+        .pipe-list-head .caret { font-size:12px; color:var(--text-faint); transition:transform .12s ease; }
+        .pipe-list-head.collapsed .caret { transform:rotate(-90deg); }
+        .pipe-list-head-title { font-size:13.5px; font-weight:700; color:var(--text-dim); flex:1; }
+        .pipe-list-head-meta { font-size:11.5px; color:var(--text-faint); }
+        .pipe-list-body { display:flex; flex-direction:column; }
+        .pipe-list-empty { padding:14px; font-size:12px; color:var(--text-faint); text-align:center; }
+        .pipe-list-row { display:flex; align-items:center; gap:12px; padding:10px 14px; border-top:1px solid var(--border); cursor:pointer; transition:background .10s ease; }
+        .pipe-list-row:first-child { border-top:none; }
+        .pipe-list-row:hover { background:var(--bg-elev-2); }
+        .pipe-list-row-avatar { flex:0 0 auto; width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:12.5px; font-weight:700; }
+        .pipe-list-row-body { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+        .pipe-list-row-name { font-size:13.5px; font-weight:600; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .pipe-list-row-ctx { font-size:11.5px; color:var(--text-faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; gap:6px; }
+        .pipe-list-row-ctx.next-appt { color:#f59e0b; }
+        .pipe-list-row-right { text-align:right; display:flex; flex-direction:column; gap:2px; flex-shrink:0; }
+        .pipe-list-row-open { font-size:13.5px; font-weight:700; color:#f87171; }
+        .pipe-list-row-meta { font-size:11px; color:var(--text-faint); }
+        .pipe-list-row-menu { flex-shrink:0; }
+        .pipe-list-row-menu button { background:transparent; border:none; color:var(--text-faint); cursor:pointer; padding:6px; border-radius:6px; font-size:14px; }
+        .pipe-list-row-menu button:hover { background:var(--bg-elev); color:var(--text-dim); }
+
+        /* Row-menu popover */
+        .pipe-row-menu { position:fixed; z-index:1300; min-width:220px; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; box-shadow:0 12px 30px rgba(0,0,0,.45); padding:4px; display:flex; flex-direction:column; gap:2px; }
+        .pipe-row-menu-item { display:flex; align-items:center; gap:8px; padding:8px 10px; background:transparent; border:none; color:var(--text-dim); font-size:13px; text-align:left; cursor:pointer; border-radius:6px; }
+        .pipe-row-menu-item:hover { background:var(--bg-elev-2); }
+        .pipe-row-menu-item[disabled] { opacity:.5; cursor:default; }
+        .pipe-row-menu-sep { height:1px; background:var(--border); margin:4px 2px; }
+        .pipe-row-menu-h { font-size:10.5px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-faint); padding:6px 10px 2px; }
+        .pipe-row-menu-stages { max-height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:2px; }
+        .pipe-row-menu-stages .pipe-row-menu-item .stage-dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
       </style>
     `;
   }
@@ -13460,12 +13521,39 @@
     const inp = document.getElementById('pipeSearchInput');
     if (inp) inp.addEventListener('input', () => {
       _pipeState.filter = (inp.value || '').trim().toLowerCase();
-      renderPipelineBoard();
+      renderPipeline();
     });
     document.getElementById('pipeRefreshBtn')?.addEventListener('click', () => loadPipelineData({ background: false }));
     document.getElementById('pipeDetailCloseBtn')?.addEventListener('click', closePipelineDetail);
     document.getElementById('pipeDetailOverlay')?.addEventListener('click', (e) => {
       if (e.target && e.target.id === 'pipeDetailOverlay') closePipelineDetail();
+    });
+    // Weergave-schakelaar Lijst / Bord.
+    document.querySelectorAll('[data-pipe-view]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.dataset.pipeView;
+        if (!v || v === _pipeState.view) return;
+        _pipeState.view = v;
+        document.querySelectorAll('[data-pipe-view]').forEach((b) => {
+          b.classList.toggle('active', b.dataset.pipeView === v);
+        });
+        renderPipeline();
+      });
+    });
+    // Sortering (alleen zichtbaar in lijst-modus, maar altijd binden).
+    document.getElementById('pipeSortSelect')?.addEventListener('change', (e) => {
+      _pipeState.sortMode = e.target.value || 'bedrag';
+      if (_pipeState.view === 'list') renderPipelineList();
+    });
+    // Klik buiten row-menu sluit het menu.
+    document.addEventListener('click', (e) => {
+      if (!_pipeState.openMenu) return;
+      if (e.target && e.target.closest && e.target.closest('.pipe-row-menu')) return;
+      if (e.target && e.target.closest && e.target.closest('.pipe-list-row-menu')) return;
+      _pipeCloseRowMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') _pipeCloseRowMenu();
     });
   }
 
@@ -13485,7 +13573,7 @@
       if (!rList.ok)   throw new Error(dList?.error   || 'Kon pipeline-lijst niet laden');
       _pipeState.stages = Array.isArray(dStages.items) ? dStages.items.slice().sort((a,b) => (a.sort_order||0) - (b.sort_order||0)) : [];
       _pipeState.list   = Array.isArray(dList.items)   ? dList.items   : [];
-      renderPipelineBoard();
+      renderPipeline();
     } catch (e) {
       console.error('[pipeline load]', e);
       if (board) board.innerHTML = `<div style="padding:40px;text-align:center;color:#f87171;font-size:12.5px;width:100%">Fout bij laden: ${esc(e?.message || 'onbekend')}</div>`;
@@ -13641,7 +13729,7 @@
     const prev = _pipeState.list[idx].stage_slug;
     _pipeState.list[idx].stage_slug       = toSlug;
     _pipeState.list[idx].stage_changed_at = new Date().toISOString();
-    renderPipelineBoard();
+    renderPipeline();
     try {
       const r = await window.AgentShared.apiFetch('/api/dunning-pipeline-set-stage', {
         method:  'POST',
@@ -13654,8 +13742,295 @@
     } catch (e) {
       // Rollback
       _pipeState.list[idx].stage_slug = prev;
-      renderPipelineBoard();
+      renderPipeline();
       if (typeof showToast === 'function') showToast('Fase-wijziging mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+
+  // ── ROUTER: kies board of list op basis van _pipeState.view ──────────
+  function renderPipeline() {
+    const board = document.getElementById('pipeBoard');
+    const list  = document.getElementById('pipeList');
+    const stageFilters = document.getElementById('pipeStageFilters');
+    const sortSel = document.getElementById('pipeSortSelect');
+    if (_pipeState.view === 'board') {
+      if (board) board.hidden = false;
+      if (list)  list.hidden  = true;
+      if (stageFilters) stageFilters.style.display = 'none';
+      if (sortSel) sortSel.style.display = 'none';
+      renderPipelineBoard();
+    } else {
+      if (board) board.hidden = true;
+      if (list)  list.hidden  = false;
+      if (stageFilters) stageFilters.style.display = 'flex';
+      if (sortSel) sortSel.style.display = '';
+      renderPipelineList();
+    }
+  }
+
+  // ── LIJST-WEERGAVE ───────────────────────────────────────────────────
+  function _pipeDaysSince(iso) {
+    if (!iso) return null;
+    const t = new Date(iso).getTime();
+    if (!Number.isFinite(t)) return null;
+    return Math.floor((Date.now() - t) / (24 * 3600 * 1000));
+  }
+  function _pipeInitials(name) {
+    const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return '?';
+    const a = parts[0][0] || '';
+    const b = parts.length > 1 ? (parts[parts.length - 1][0] || '') : '';
+    return (a + b).toUpperCase() || '?';
+  }
+  function _pipeAvatarColor(seed) {
+    const colors = ['#0891b2','#8b5cf6','#f59e0b','#10b981','#ef4444','#3b82f6','#ec4899','#14b8a6'];
+    let h = 0;
+    for (let i = 0; i < String(seed || '').length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
+    return colors[Math.abs(h) % colors.length];
+  }
+
+  function _pipeApplyListSort(items) {
+    const mode = _pipeState.sortMode || 'bedrag';
+    const arr = items.slice();
+    if (mode === 'bedrag') {
+      arr.sort((x, y) => (Number(y.total_open_cents) || 0) - (Number(x.total_open_cents) || 0));
+    } else if (mode === 'dagen') {
+      arr.sort((x, y) => (_pipeDaysSince(y.stage_changed_at) || 0) - (_pipeDaysSince(x.stage_changed_at) || 0));
+    } else if (mode === 'contact') {
+      // Meest recent contact bovenaan: neem max(last_log.created_at, last_activity_at).
+      const ts = (r) => {
+        const a = r.last_log?.created_at ? new Date(r.last_log.created_at).getTime() : 0;
+        const b = r.last_activity_at     ? new Date(r.last_activity_at).getTime()     : 0;
+        return Math.max(a, b);
+      };
+      arr.sort((x, y) => ts(y) - ts(x));
+    }
+    return arr;
+  }
+
+  function _pipeRenderStageFilters(countsBySlug, sumsBySlug, totalCount) {
+    const wrap = document.getElementById('pipeStageFilters');
+    if (!wrap) return;
+    const currentSlug = _pipeState.stageFilter;
+    const pill = (label, slug, count, color) => {
+      const active = (slug === currentSlug) || (slug == null && currentSlug == null);
+      const dot = color ? `<span class="stage-dot" style="background:${esc(color)}"></span>` : '';
+      return `<button class="sr-seg${active ? ' active' : ''}" type="button" data-stage-filter="${slug == null ? '' : esc(slug)}">${dot}${esc(label)} <span style="color:var(--text-faint)">(${count})</span></button>`;
+    };
+    let html = pill('Alle', null, totalCount, null);
+    for (const s of _pipeState.stages) {
+      const c = countsBySlug.get(s.slug) || 0;
+      html += pill(s.label, s.slug, c, s.color);
+    }
+    wrap.innerHTML = html;
+    wrap.querySelectorAll('[data-stage-filter]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const raw = btn.dataset.stageFilter;
+        _pipeState.stageFilter = raw ? raw : null;
+        renderPipelineList();
+      });
+    });
+  }
+
+  function renderPipelineList() {
+    const list = document.getElementById('pipeList');
+    if (!list) return;
+    const q = _pipeState.filter;
+    const searchFiltered = q
+      ? _pipeState.list.filter((it) => String(it.customer_name || '').toLowerCase().includes(q))
+      : _pipeState.list;
+
+    // Counts per stage vóór stage-filter (voor pill-tellingen).
+    const countsBySlug = new Map();
+    const sumsBySlug   = new Map();
+    for (const it of searchFiltered) {
+      const slug = it.stage_slug || 'nieuw';
+      countsBySlug.set(slug, (countsBySlug.get(slug) || 0) + 1);
+      sumsBySlug.set(slug,   (sumsBySlug.get(slug)   || 0) + (Number(it.total_open_cents) || 0));
+    }
+    _pipeRenderStageFilters(countsBySlug, sumsBySlug, searchFiltered.length);
+
+    // Header-counter reuse.
+    const counter = document.getElementById('pipeCounter');
+    if (counter) {
+      const totalCents = searchFiltered.reduce((s, it) => s + (Number(it.total_open_cents) || 0), 0);
+      counter.textContent = `${searchFiltered.length} klanten · ${_pipeFmtEurCents(totalCents)} openstaand`;
+    }
+
+    // Stage-filter toepassen: als een fase gekozen, toon alleen die sectie.
+    const activeSlug = _pipeState.stageFilter;
+    const stagesToRender = activeSlug
+      ? _pipeState.stages.filter((s) => s.slug === activeSlug)
+      : _pipeState.stages;
+
+    if (!stagesToRender.length) {
+      list.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-faint);font-size:12.5px">Geen fases beschikbaar.</div>`;
+      return;
+    }
+
+    list.innerHTML = stagesToRender.map((s) => {
+      const items = searchFiltered.filter((it) => (it.stage_slug || 'nieuw') === s.slug);
+      const sorted = _pipeApplyListSort(items);
+      const sum = items.reduce((x, it) => x + (Number(it.total_open_cents) || 0), 0);
+      const collapsed = _pipeState.collapsedStages.has(s.slug);
+      const termCls = s.is_terminal ? ' terminal' : '';
+      const bodyHtml = sorted.length
+        ? sorted.map((it) => _pipeListRowHtml(it)).join('')
+        : `<div class="pipe-list-empty">Geen klanten in deze fase</div>`;
+      return `<section class="pipe-list-section${termCls}" data-stage-slug="${esc(s.slug)}">
+        <header class="pipe-list-head${collapsed ? ' collapsed' : ''}" data-stage-toggle="${esc(s.slug)}">
+          <span class="caret"><i class="ti ti-chevron-down"></i></span>
+          <span class="dot" style="background:${esc(s.color || '#94a3b8')}"></span>
+          <div class="pipe-list-head-title">${esc(s.label)}</div>
+          <div class="pipe-list-head-meta">${items.length} · ${_pipeFmtEurCents(sum)}</div>
+        </header>
+        <div class="pipe-list-body" ${collapsed ? 'hidden' : ''}>${bodyHtml}</div>
+      </section>`;
+    }).join('');
+
+    _pipeWireListEvents();
+  }
+
+  function _pipeListRowHtml(it) {
+    const name = it.customer_name || 'Onbekende klant';
+    const avColor = _pipeAvatarColor(it.customer_id || name);
+    const initials = _pipeInitials(name);
+    const days = _pipeDaysSince(it.stage_changed_at);
+    const cnt = Number(it.open_invoice_count) || 0;
+    // Context-regel: next_appointment > last_log > "—".
+    let ctxHtml;
+    if (it.next_appointment && it.next_appointment.title) {
+      ctxHtml = `<div class="pipe-list-row-ctx next-appt"><i class="ti ti-calendar-event" style="font-size:11px"></i>${esc(it.next_appointment.title)} · ${esc(_pipeFmtDateTime(it.next_appointment.due_at))}</div>`;
+    } else if (it.last_log && it.last_log.body) {
+      const body = String(it.last_log.body).slice(0, 120);
+      ctxHtml = `<div class="pipe-list-row-ctx"><i class="ti ti-message" style="font-size:11px"></i>${esc(body)}</div>`;
+    } else {
+      ctxHtml = `<div class="pipe-list-row-ctx" style="color:var(--text-faint)">—</div>`;
+    }
+    return `<div class="pipe-list-row" data-cid="${esc(it.customer_id)}" data-stage="${esc(it.stage_slug)}">
+      <div class="pipe-list-row-avatar" style="background:${esc(avColor)}">${esc(initials)}</div>
+      <div class="pipe-list-row-body">
+        <div class="pipe-list-row-name">${esc(name)}</div>
+        ${ctxHtml}
+      </div>
+      <div class="pipe-list-row-right">
+        <div class="pipe-list-row-open">${_pipeFmtEurCents(it.total_open_cents)}</div>
+        <div class="pipe-list-row-meta">${cnt} fact${days != null ? ` · ${days}d in fase` : ''}</div>
+      </div>
+      <div class="pipe-list-row-menu">
+        <button type="button" title="Meer acties" data-row-menu-cid="${esc(it.customer_id)}"><i class="ti ti-dots-vertical"></i></button>
+      </div>
+    </div>`;
+  }
+
+  function _pipeWireListEvents() {
+    // Sectie in-/uitklappen.
+    document.querySelectorAll('#pipeList [data-stage-toggle]').forEach((head) => {
+      head.addEventListener('click', () => {
+        const slug = head.dataset.stageToggle;
+        if (!slug) return;
+        if (_pipeState.collapsedStages.has(slug)) _pipeState.collapsedStages.delete(slug);
+        else                                       _pipeState.collapsedStages.add(slug);
+        renderPipelineList();
+      });
+    });
+    // Rij-klik → detail. Menu-knop stopt propagatie.
+    document.querySelectorAll('#pipeList .pipe-list-row').forEach((row) => {
+      row.addEventListener('click', (e) => {
+        if (e.target && e.target.closest && e.target.closest('.pipe-list-row-menu')) return;
+        const cid = row.dataset.cid;
+        if (cid) openPipelineDetail(cid);
+      });
+    });
+    // ⋮-menu.
+    document.querySelectorAll('#pipeList [data-row-menu-cid]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cid = btn.dataset.rowMenuCid;
+        const row = btn.closest('.pipe-list-row');
+        const currentSlug = row?.dataset?.stage || null;
+        _pipeOpenRowMenu(btn, cid, currentSlug);
+      });
+    });
+  }
+
+  // ── ROW-MENU (⋮) ─────────────────────────────────────────────────────
+  function _pipeCloseRowMenu() {
+    if (_pipeState.openMenu && _pipeState.openMenu.el) {
+      _pipeState.openMenu.el.remove();
+    }
+    _pipeState.openMenu = null;
+  }
+
+  function _pipeOpenRowMenu(anchorEl, cid, currentSlug) {
+    _pipeCloseRowMenu();
+    if (!cid || !anchorEl) return;
+    const rect = anchorEl.getBoundingClientRect();
+    const menu = document.createElement('div');
+    menu.className = 'pipe-row-menu';
+    const stagesHtml = _pipeState.stages.map((s) => {
+      const isCurrent = (s.slug === currentSlug);
+      return `<button class="pipe-row-menu-item" type="button" data-move-slug="${esc(s.slug)}" ${isCurrent ? 'disabled' : ''}>
+        <span class="stage-dot" style="background:${esc(s.color || '#94a3b8')}"></span>
+        ${esc(s.label)}${isCurrent ? ' <span style="margin-left:auto;color:var(--text-faint);font-size:11px">huidig</span>' : ''}
+      </button>`;
+    }).join('');
+    menu.innerHTML = `
+      <button class="pipe-row-menu-item" type="button" data-action="open"><i class="ti ti-external-link"></i> Open dossier</button>
+      <button class="pipe-row-menu-item" type="button" data-action="note"><i class="ti ti-note"></i> Notitie toevoegen</button>
+      <div class="pipe-row-menu-sep"></div>
+      <div class="pipe-row-menu-h">Fase wijzigen</div>
+      <div class="pipe-row-menu-stages">${stagesHtml}</div>
+    `;
+    document.body.appendChild(menu);
+    // Positioneer: rechts van de anchor, viewport-safe.
+    const menuW = 240;
+    let top = rect.bottom + 4;
+    let left = rect.right - menuW;
+    if (left < 8) left = 8;
+    if (top + 320 > window.innerHeight) top = Math.max(8, rect.top - 320 - 4);
+    menu.style.top  = top  + 'px';
+    menu.style.left = left + 'px';
+    _pipeState.openMenu = { el: menu, cid, currentSlug };
+
+    // Wire acties.
+    menu.querySelector('[data-action="open"]')?.addEventListener('click', () => {
+      _pipeCloseRowMenu();
+      openPipelineDetail(cid);
+    });
+    menu.querySelector('[data-action="note"]')?.addEventListener('click', () => {
+      _pipeCloseRowMenu();
+      _pipeAddLogPrompt(cid);
+    });
+    menu.querySelectorAll('[data-move-slug]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const targetSlug = b.dataset.moveSlug;
+        _pipeCloseRowMenu();
+        if (!targetSlug || targetSlug === currentSlug) return;
+        // Hergebruik bestaande pipelineMoveCustomer: optimistic + rollback.
+        pipelineMoveCustomer(cid, currentSlug, targetSlug);
+      });
+    });
+  }
+
+  async function _pipeAddLogPrompt(customerId) {
+    const body = window.prompt('Notitie toevoegen:');
+    if (!body) return;
+    const trimmed = String(body).trim();
+    if (!trimmed) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/dunning-pipeline-add-log', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ customer_id: customerId, body: trimmed }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      if (typeof showToast === 'function') showToast('Notitie geplaatst', 'success');
+      // Achtergrond-refresh zodat de last_log-hint bijwerkt.
+      loadPipelineData({ background: true });
+    } catch (e) {
+      if (typeof showToast === 'function') showToast('Notitie mislukt: ' + (e?.message || 'onbekend'), 'error');
     }
   }
 
