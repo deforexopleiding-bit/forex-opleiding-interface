@@ -1099,6 +1099,7 @@
           <button class="wb-menu-item" data-wb-sub="probleemklanten" type="button" role="menuitem"><i class="ti ti-alert-triangle" style="color:#f59e0b"></i> Probleemklanten</button>
           <button class="wb-menu-item" data-wb-sub="arrangements"    type="button" role="menuitem"><i class="ti ti-calendar-stats" style="color:#8b5cf6"></i> Arrangements</button>
           <button class="wb-menu-item" data-wb-sub="open-acties"     type="button" role="menuitem"><i class="ti ti-checklist" style="color:#0ea5e9"></i> Open Acties</button>
+          <button class="wb-menu-item" data-wb-sub="crediteren"      type="button" role="menuitem"><i class="ti ti-receipt-refund" style="color:#10b981"></i> Crediteren</button>
           <button class="wb-menu-item" data-wb-sub="incasso"         type="button" role="menuitem" data-perm-key="finance.incasso.manage" hidden><i class="ti ti-gavel" style="color:#dc2626"></i> Incasso</button>
         </div>
       </div>
@@ -1136,6 +1137,7 @@
     <div id="wb-sub-vandaag"     hidden></div>
     <div id="wb-sub-sandbox"     hidden></div>
     <div id="wb-sub-incasso"     hidden></div>
+    <div id="wb-sub-crediteren"  hidden></div>
   </div>
 
   <!-- ===== Klanten-view (Groep B: thin view binnen Finance) =====
@@ -3105,6 +3107,8 @@
 <script src="/modules/shared/finance-tasks.js"></script>
 <!-- Groep B: Finance > Klanten thin view (klant-lijst met finance-context). -->
 <script src="/modules/shared/finance-klanten.js"></script>
+<!-- Wanbetalers > Crediteren (PR-1: read-only startpunt kwartaal-crediteerronde). -->
+<script src="/modules/shared/finance-crediteer.js"></script>
 <!-- Groep C: Finance Dashboard (12 KPIs + 3 charts, Recharts lazy-loaded). -->
 <script src="/modules/shared/finance-dashboard.js"></script>
 <!-- Groep D: Finance > Instellingen (Joost AI verhuisd uit Admin + WhatsApp Templates/Connection deep-links). -->
@@ -3289,7 +3293,7 @@
   // (overzicht/probleemklanten/workflows/templates/geschiedenis/arrangements)
   // blijft volledig intact onder de 'overzicht' sub-tab.
   function setSubView(sub) {
-    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis', 'sandbox', 'incasso'];
+    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis', 'sandbox', 'incasso', 'crediteren'];
     if (!validSubs.includes(sub)) sub = 'vandaag';
     // Backward-compat: deep-link ?sub=actie is nu opgenomen in Vandaag —
     // redirect naar 'vandaag' zodat de zichtbare view klopt. 'overzicht'
@@ -3301,7 +3305,7 @@
     // Sub-nav highlight — 3 hoofdtabs krijgen active als sub matcht;
     // dropdowns (Meer / Instellingen) worden actief zodra hun sub-key
     // in de bijbehorende groep zit.
-    const MEER_SUBS  = ['probleemklanten', 'arrangements', 'open-acties', 'incasso'];
+    const MEER_SUBS  = ['probleemklanten', 'arrangements', 'open-acties', 'crediteren', 'incasso'];
     const INST_SUBS  = ['templates', 'workflows', 'geschiedenis', 'sandbox'];
     document.querySelectorAll('#wanbetalersSubNav .sr-seg').forEach(b => {
       const btnSub = b.dataset.wbSub;
@@ -3321,10 +3325,11 @@
     const dunningSubNav = document.getElementById('dunningSubNav');
 
     // Default: alles uit, dan target weer aan.
-    const vPipeline = document.getElementById('wb-sub-pipeline');
-    const vVandaag  = document.getElementById('wb-sub-vandaag');
-    const vSandbox  = document.getElementById('wb-sub-sandbox');
-    const vIncasso  = document.getElementById('wb-sub-incasso');
+    const vPipeline    = document.getElementById('wb-sub-pipeline');
+    const vVandaag     = document.getElementById('wb-sub-vandaag');
+    const vSandbox     = document.getElementById('wb-sub-sandbox');
+    const vIncasso     = document.getElementById('wb-sub-incasso');
+    const vCrediteren  = document.getElementById('wb-sub-crediteren');
     if (vInbox)        vInbox.hidden        = true;
     if (vDunning)      vDunning.hidden      = true;
     if (vOpenActies)   vOpenActies.hidden   = true;
@@ -3332,6 +3337,7 @@
     if (vVandaag)      vVandaag.hidden      = true;
     if (vSandbox)      vSandbox.hidden      = true;
     if (vIncasso)      vIncasso.hidden      = true;
+    if (vCrediteren)   vCrediteren.hidden   = true;
 
     // Sub-nav layering fix: bij Wanbetalers-wrapper actief verbergen we de
     // interne dunningSubNav (Overzicht/Probleemklanten/Workflows/Templates/
@@ -3391,6 +3397,9 @@
     } else if (sub === 'incasso') {
       if (vIncasso) vIncasso.hidden = false;
       mountIncassoHost();
+    } else if (sub === 'crediteren') {
+      if (vCrediteren) vCrediteren.hidden = false;
+      mountCrediteerHost();
     } else { // overzicht (deep-link backward-compat: niet meer in de nav,
              // maar blijft functioneel).
       if (vDunning) vDunning.hidden = false;
@@ -13115,6 +13124,20 @@
     }
     incLoadOverview();
     incAutoLoadSettings();
+  }
+
+  // Crediteer-overzicht (PR-1: read-only startpunt kwartaal-crediteerronde).
+  // Delegeert naar de externe shared-module FinanceCrediteer. Zelfde patroon
+  // als mountFinanceKlantenHost / mountFinanceInstellingenHost — idempotent
+  // via mount-guard in modules/shared/finance-crediteer.js.
+  function mountCrediteerHost() {
+    const host = document.getElementById('wb-sub-crediteren');
+    if (!host) return;
+    if (!window.FinanceCrediteer || typeof window.FinanceCrediteer.mount !== 'function') {
+      host.innerHTML = '<div style="padding:20px;color:var(--text-faint);font-size:13px">Crediteer-module wordt geladen…</div>';
+      return;
+    }
+    window.FinanceCrediteer.mount({ host });
   }
 
   function _incShellHtml() {
