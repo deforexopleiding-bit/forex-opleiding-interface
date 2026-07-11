@@ -82,8 +82,10 @@ export default async function handler(req, res) {
       });
     }
 
-    // Echte send.
+    // Echte send. De reeds gebouwde `buffer` (uit builDossierPdfBuffer)
+    // gaat mee als bijlage via de nodemailer-attachments-shape.
     const { sendMail } = await import('./mailer.js');
+    const attachmentName = `incassodossier_${dossierId.slice(0, 8)}.pdf`;
     const result = await sendMail({
       to      : dossier.bureau.email,
       subject,
@@ -91,6 +93,7 @@ export default async function handler(req, res) {
       html    : '<pre style="font-family:system-ui,sans-serif;white-space:pre-wrap">' +
                 String(bodyText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') +
                 '</pre>',
+      attachments: [{ filename: attachmentName, content: buffer, contentType: 'application/pdf' }],
     });
     if (!result || !result.success) {
       return res.status(502).json({ error: result?.error || 'SMTP fail' });
