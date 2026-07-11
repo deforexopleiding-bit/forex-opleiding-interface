@@ -36,6 +36,8 @@ export default async function handler(req, res) {
   const bureauId   = typeof body.bureau_id   === 'string' && UUID_RE.test(body.bureau_id)   ? body.bureau_id   : null;
   const country    = (body.country === 'BE') ? 'BE' : 'NL';
   const notes      = typeof body.notes === 'string' ? body.notes.trim() : null;
+  // PR-3: bewust doorgaan zonder pre-incassobrief bij particulier.
+  const confirmNoBrief = body.confirm_no_brief === true;
 
   if (!customerId) return res.status(400).json({ error: 'customer_id (uuid) verplicht' });
 
@@ -56,6 +58,34 @@ export default async function handler(req, res) {
       .eq('id', customerId).maybeSingle();
     if (cErr) throw new Error('customers lookup: ' + cErr.message);
     if (!customer) return res.status(404).json({ error: 'Klant niet gevonden' });
+
+    // 2b) PR-3 particulier-guard: pre-incassobrief (WIK NL / eerste
+    // herinnering BE) verplicht vóór incasso, tenzij expliciet
+    // confirm_no_brief=true. Zakelijke klanten (is_company=true) zijn
+    // vrijgesteld. Marker: dunning_log event 'incasso_pre_brief_sent'
+    // voor deze klant. Geen brief én geen bevestiging → 200 met
+    // { needs_brief:true } (NIET een dossier aanmaken).
+    const isPrivate = customer.is_company !== true;
+    if (isPrivate && !confirmNoBrief) {
+      let hasBriefSent = false;
+      try {
+        const { data: sentRows } = await supabaseAdmin
+          .from('dunning_log').select('id')
+          .eq('event_type', 'incasso_pre_brief_sent')
+          .filter('payload->>customer_id', 'eq', customerId).limit(1);
+        hasBriefSent = Array.isArray(sentRows) && sentRows.length > 0;
+      } catch (e) {
+        console.warn('[incasso-dossier-create] pre-brief lookup soft-fail', e?.message || e);
+      }
+      if (!hasBriefSent) {
+        return res.status(200).json({
+          needs_brief: true,
+          country,
+          customer_id: customerId,
+          message: 'Verplichte pre-incassobrief nog niet verstuurd — verstuur eerst de WIK/BE-brief of bevestig doorgaan zonder brief.',
+        });
+      }
+    }
 
     // 3) debt_snapshot bouwen — open invoices op moment van aanmelden.
     const { data: invs } = await supabaseAdmin
