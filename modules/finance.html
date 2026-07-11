@@ -1084,27 +1084,53 @@
        wordt door setView('dashboard') + DOMContentLoaded geactiveerd. -->
   <div id="view-dashboard" hidden></div>
 
-  <!-- ===== Wanbetalers wrapper (Groep A: nested 4 sub-tabs) ===== -->
+  <!-- ===== Wanbetalers wrapper (nav-herontwerp: 3 hoofdtabs + Meer + Instellingen) ===== -->
   <div id="view-wanbetalers" hidden>
-    <div class="sr-segments" id="wanbetalersSubNav" style="margin-bottom:18px">
-      <button class="sr-seg active" data-wb-sub="overzicht"      type="button">Overzicht</button>
-      <button class="sr-seg"        data-wb-sub="probleemklanten" type="button">Probleemklanten</button>
-      <button class="sr-seg"        data-wb-sub="templates"      type="button">Templates</button>
-      <button class="sr-seg"        data-wb-sub="workflows"      type="button">Workflows</button>
-      <button class="sr-seg"        data-wb-sub="inbox"          type="button">Inbox</button>
-      <button class="sr-seg"        data-wb-sub="actie"          type="button">Actie vandaag</button>
-      <button class="sr-seg"        data-wb-sub="pipeline"       type="button">Pipeline</button>
-      <button class="sr-seg"        data-wb-sub="arrangements"   type="button">Arrangements</button>
-      <button class="sr-seg"        data-wb-sub="open-acties"    type="button">Open Acties</button>
-      <button class="sr-seg"        data-wb-sub="geschiedenis"   type="button">Geschiedenis</button>
+    <div class="sr-segments" id="wanbetalersSubNav" style="margin-bottom:18px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <button class="sr-seg active" data-wb-sub="vandaag"  type="button" title="Vandaag"><i class="ti ti-sun"></i> Vandaag</button>
+      <button class="sr-seg"        data-wb-sub="pipeline" type="button" title="Pipeline"><i class="ti ti-layout-kanban"></i> Pipeline</button>
+      <button class="sr-seg"        data-wb-sub="inbox"    type="button" title="Inbox"><i class="ti ti-brand-whatsapp"></i> Inbox</button>
+
+      <div class="wb-menu" data-wb-dropdown="meer" style="position:relative">
+        <button class="sr-seg wb-menu-btn" data-wb-toggle="meer" type="button" aria-expanded="false" aria-haspopup="menu">
+          Meer <i class="ti ti-chevron-down" style="margin-left:2px"></i>
+        </button>
+        <div class="wb-menu-panel" data-wb-panel="meer" role="menu" hidden>
+          <button class="wb-menu-item" data-wb-sub="probleemklanten" type="button" role="menuitem"><i class="ti ti-alert-triangle" style="color:#f59e0b"></i> Probleemklanten</button>
+          <button class="wb-menu-item" data-wb-sub="arrangements"    type="button" role="menuitem"><i class="ti ti-calendar-stats" style="color:#8b5cf6"></i> Arrangements</button>
+          <button class="wb-menu-item" data-wb-sub="open-acties"     type="button" role="menuitem"><i class="ti ti-checklist" style="color:#0ea5e9"></i> Open Acties</button>
+        </div>
+      </div>
+
+      <div class="wb-menu" data-wb-dropdown="instellingen" style="position:relative;margin-left:auto">
+        <button class="sr-seg wb-menu-btn" data-wb-toggle="instellingen" type="button" aria-expanded="false" aria-haspopup="menu" title="Instellingen">
+          <i class="ti ti-settings"></i> Instellingen <i class="ti ti-chevron-down" style="margin-left:2px"></i>
+        </button>
+        <div class="wb-menu-panel wb-menu-panel-right" data-wb-panel="instellingen" role="menu" hidden>
+          <button class="wb-menu-item" data-wb-sub="templates"    type="button" role="menuitem"><i class="ti ti-file-text"    style="color:#0ea5e9"></i> Templates</button>
+          <button class="wb-menu-item" data-wb-sub="workflows"    type="button" role="menuitem"><i class="ti ti-git-branch"   style="color:#10b981"></i> Workflows</button>
+          <button class="wb-menu-item" data-wb-sub="geschiedenis" type="button" role="menuitem"><i class="ti ti-history"      style="color:#94a3b8"></i> Geschiedenis</button>
+        </div>
+      </div>
     </div>
-    <!-- Open Acties + Pipeline sub-tab hosts: hier mounten FinanceTasks resp.
-         DunPipeline. De andere sub-tabs hergebruiken view-dunning / view-inbox
-         / view-arrangements via display-toggling (zie setSubView()), zodat hun
-         DOM-node + state behouden blijft. -->
+    <style>
+      .wb-menu-btn { display:inline-flex; align-items:center; gap:4px; }
+      .wb-menu-panel { position:absolute; top:calc(100% + 4px); left:0; z-index:900; min-width:200px; background:#0f172a; border:1px solid rgba(255,255,255,.10); border-radius:8px; box-shadow:0 10px 24px rgba(0,0,0,.45); padding:4px; display:flex; flex-direction:column; gap:2px; }
+      .wb-menu-panel-right { left:auto; right:0; }
+      .wb-menu-item { display:flex; align-items:center; gap:8px; padding:8px 10px; background:transparent; border:none; color:var(--text-dim); font-size:13px; text-align:left; cursor:pointer; border-radius:6px; }
+      .wb-menu-item:hover { background:rgba(255,255,255,.06); }
+    </style>
+
+    <!-- Sub-tab hosts. Open Acties + Pipeline + Vandaag hebben eigen hosts;
+         de andere sub-tabs hergebruiken view-dunning / view-inbox /
+         view-arrangements via display-toggling (zie setSubView()) zodat hun
+         DOM-node + state behouden blijft.
+         'wb-sub-actie' bestaat NIET meer als aparte visible host — de Actie
+         vandaag-widget wordt nu in Vandaag gemount (zelfde renderer, andere
+         host-id via mountDunActiesHost(hostId)). -->
     <div id="wb-sub-open-acties" hidden></div>
     <div id="wb-sub-pipeline"    hidden></div>
-    <div id="wb-sub-actie"       hidden></div>
+    <div id="wb-sub-vandaag"     hidden></div>
   </div>
 
   <!-- ===== Klanten-view (Groep B: thin view binnen Finance) =====
@@ -3154,8 +3180,9 @@
 
     if (view === 'wanbetalers') {
       wireWanbetalersOnce();
-      // Default sub als nog niet gekozen.
-      const initialSub = _wbActiveSub || 'overzicht';
+      // Default sub als nog niet gekozen — sinds nav-herontwerp is 'vandaag'
+      // het startscherm (Vandaag combineert KPI + Actie).
+      const initialSub = _wbActiveSub || 'vandaag';
       setSubView(initialSub);
     } else {
       // Stop inbox auto-poll wanneer we de inbox-tab verlaten — bespaart requests.
@@ -3257,13 +3284,28 @@
   // (overzicht/probleemklanten/workflows/templates/geschiedenis/arrangements)
   // blijft volledig intact onder de 'overzicht' sub-tab.
   function setSubView(sub) {
-    const validSubs = ['overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis'];
-    if (!validSubs.includes(sub)) sub = 'overzicht';
+    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis'];
+    if (!validSubs.includes(sub)) sub = 'vandaag';
+    // Backward-compat: deep-link ?sub=actie is nu opgenomen in Vandaag —
+    // redirect naar 'vandaag' zodat de zichtbare view klopt. 'overzicht'
+    // blijft functioneel (deep-links naar oude overzicht renderen gewoon
+    // het bestaande view-dunning overzicht-panel).
+    if (sub === 'actie') sub = 'vandaag';
     _wbActiveSub = sub;
 
-    // Sub-nav highlight.
+    // Sub-nav highlight — 3 hoofdtabs krijgen active als sub matcht;
+    // dropdowns (Meer / Instellingen) worden actief zodra hun sub-key
+    // in de bijbehorende groep zit.
+    const MEER_SUBS  = ['probleemklanten', 'arrangements', 'open-acties'];
+    const INST_SUBS  = ['templates', 'workflows', 'geschiedenis'];
     document.querySelectorAll('#wanbetalersSubNav .sr-seg').forEach(b => {
-      b.classList.toggle('active', b.dataset.wbSub === sub);
+      const btnSub = b.dataset.wbSub;
+      const btnTgl = b.dataset.wbToggle;
+      let active = false;
+      if (btnSub) active = (btnSub === sub);
+      else if (btnTgl === 'meer')         active = MEER_SUBS.includes(sub);
+      else if (btnTgl === 'instellingen') active = INST_SUBS.includes(sub);
+      b.classList.toggle('active', active);
     });
 
     // Visibility van de onderliggende panels.
@@ -3275,12 +3317,12 @@
 
     // Default: alles uit, dan target weer aan.
     const vPipeline = document.getElementById('wb-sub-pipeline');
-    const vActie    = document.getElementById('wb-sub-actie');
+    const vVandaag  = document.getElementById('wb-sub-vandaag');
     if (vInbox)        vInbox.hidden        = true;
     if (vDunning)      vDunning.hidden      = true;
     if (vOpenActies)   vOpenActies.hidden   = true;
     if (vPipeline)     vPipeline.hidden     = true;
-    if (vActie)        vActie.hidden        = true;
+    if (vVandaag)      vVandaag.hidden      = true;
 
     // Sub-nav layering fix: bij Wanbetalers-wrapper actief verbergen we de
     // interne dunningSubNav (Overzicht/Probleemklanten/Workflows/Templates/
@@ -3331,10 +3373,11 @@
     } else if (sub === 'pipeline') {
       if (vPipeline) vPipeline.hidden = false;
       mountDunPipelineHost();
-    } else if (sub === 'actie') {
-      if (vActie) vActie.hidden = false;
-      mountDunActiesHost();
-    } else { // overzicht
+    } else if (sub === 'vandaag') {
+      if (vVandaag) vVandaag.hidden = false;
+      mountDunVandaagHost();
+    } else { // overzicht (deep-link backward-compat: niet meer in de nav,
+             // maar blijft functioneel).
       if (vDunning) vDunning.hidden = false;
       ensureDunningLoaded();
       // Forceer altijd dunning-overzicht voor de Wanbetalers > Overzicht tab —
@@ -3447,12 +3490,60 @@
   }
 
   // Wanbetalers sub-nav wiring (één keer).
+  // 3 hoofdtabs (Vandaag/Pipeline/Inbox) dragen data-wb-sub op de .sr-seg
+  // knop en gaan direct naar setSubView. Meer/Instellingen zijn dropdowns:
+  // de .sr-seg.wb-menu-btn heeft data-wb-toggle en opent een panel; de
+  // menu-items daarin dragen zelf data-wb-sub.
   function wireWanbetalersOnce() {
     if (_wbWired) return;
     _wbWired = true;
-    document.querySelectorAll('#wanbetalersSubNav .sr-seg').forEach(b => {
+
+    // Hoofdtabs (data-wb-sub direct op de knop).
+    document.querySelectorAll('#wanbetalersSubNav .sr-seg[data-wb-sub]').forEach(b => {
       b.addEventListener('click', () => setSubView(b.dataset.wbSub));
     });
+
+    // Menu-items binnen dropdowns.
+    document.querySelectorAll('#wanbetalersSubNav .wb-menu-item[data-wb-sub]').forEach(b => {
+      b.addEventListener('click', () => {
+        setSubView(b.dataset.wbSub);
+        _wbCloseAllMenus();
+      });
+    });
+
+    // Dropdown-toggles.
+    document.querySelectorAll('#wanbetalersSubNav .wb-menu-btn[data-wb-toggle]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const key = btn.dataset.wbToggle;
+        const panel = document.querySelector(`#wanbetalersSubNav [data-wb-panel="${key}"]`);
+        if (!panel) return;
+        const willOpen = !!panel.hidden;
+        // Sluit alle andere panels eerst.
+        _wbCloseAllMenus();
+        if (willOpen) {
+          panel.hidden = false;
+          btn.setAttribute('aria-expanded', 'true');
+        }
+      });
+    });
+
+    // Klik buiten dropdown → sluiten.
+    document.addEventListener('click', (e) => {
+      if (!e.target || !e.target.closest) return;
+      if (e.target.closest('#wanbetalersSubNav .wb-menu')) return;
+      _wbCloseAllMenus();
+    });
+
+    // Escape sluit dropdowns.
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') _wbCloseAllMenus();
+    });
+  }
+
+  function _wbCloseAllMenus() {
+    document.querySelectorAll('#wanbetalersSubNav [data-wb-panel]').forEach(p => { p.hidden = true; });
+    document.querySelectorAll('#wanbetalersSubNav .wb-menu-btn').forEach(b => b.setAttribute('aria-expanded', 'false'));
   }
 
   // Mount FinanceTasks in de open-acties host. Idempotent: tweede call met
@@ -4234,8 +4325,19 @@
     }
   }
 
-  function renderDunOvKpis(k) {
-    const strip = document.getElementById('dunOvKpis');
+  // renderDunOvKpis(k, opts?) — vult de KPI-strip.
+  //   opts.targetId = 'dunOvKpis' (default) — override om in een andere
+  //                    strip te renderen (bv. Vandaag-view: 'vdgKpis').
+  //   opts.compact  = false (default) — 5-cel klassieke overzicht.
+  //   opts.compact  = true → 3-cel Vandaag-variant (Openstaand / Wanbetalers /
+  //                    Vragen aandacht). opts.aandacht is dan het aantal
+  //                    signalen uit dunning-pipeline-actions (som van 3
+  //                    KPIs). aandacht > 0 → cell wordt alert.
+  function renderDunOvKpis(k, opts) {
+    const targetId = (opts && opts.targetId) || 'dunOvKpis';
+    const compact  = !!(opts && opts.compact);
+    const aandacht = Number((opts && opts.aandacht) || 0);
+    const strip = document.getElementById(targetId);
     if (!strip) return;
     const cell = (lbl, val, sub, alert, opts) => {
       const bg = alert
@@ -4257,12 +4359,19 @@
     const probleem    = Number(k.problem_customers   || 0);
     const actief      = Number(k.active_runs         || 0);
     const voltooid30  = Number(k.completed_runs_30d  || 0);
-    strip.innerHTML =
-      cell('Openstaand', fmtEur2Cents(openCents), `${openCount} facturen`) +
-      cell('Wanbetalers', String(wanbetalers), 'klanten in dunning') +
-      cell('Probleemklanten', String(probleem), '> 60 dagen overdue', probleem > 0, { gotoSub: 'probleemklanten' }) +
-      cell('Actieve workflows', String(actief), 'lopende runs') +
-      cell('Voltooid (30d)', String(voltooid30), 'laatste 30 dagen');
+    if (compact) {
+      strip.innerHTML =
+        cell('Openstaand', fmtEur2Cents(openCents), `${openCount} facturen`) +
+        cell('Wanbetalers', String(wanbetalers), 'klanten in dunning') +
+        cell('Vragen aandacht', String(aandacht), 'signalen vandaag', aandacht > 0, { gotoSub: 'vandaag' });
+    } else {
+      strip.innerHTML =
+        cell('Openstaand', fmtEur2Cents(openCents), `${openCount} facturen`) +
+        cell('Wanbetalers', String(wanbetalers), 'klanten in dunning') +
+        cell('Probleemklanten', String(probleem), '> 60 dagen overdue', probleem > 0, { gotoSub: 'probleemklanten' }) +
+        cell('Actieve workflows', String(actief), 'lopende runs') +
+        cell('Voltooid (30d)', String(voltooid30), 'laatste 30 dagen');
+    }
 
     // Wire klikbare KPI-cells → sub-tab. Hergebruikt setSubView() zodat de
     // Wanbetalers-nav-highlight vanzelf mee-syncet (die zet .active op de
@@ -12918,6 +13027,72 @@
   }
 
   // ────────────────────────────────────────────────────────────────────
+  // Wanbetalers "Vandaag" (nav-herontwerp) — combineert:
+  //   * 3 KPI-cellen (Openstaand / Wanbetalers / Vragen aandacht) via
+  //     renderDunOvKpis(compact:true) op /api/finance-dunning-overview.
+  //   * "Start aanmaanronde"-knop → setSubView('probleemklanten').
+  //   * Actie-widget (Fase 3, mountDunActiesHost) in een inner-host.
+  // Hergebruikt bestaande renderers 1-op-1; geen nieuwe endpoints.
+  // ────────────────────────────────────────────────────────────────────
+  const _vdgState = { mounted: false, kpisLoading: false };
+
+  function mountDunVandaagHost() {
+    const host = document.getElementById('wb-sub-vandaag');
+    if (!host) return;
+    if (!_vdgState.mounted) {
+      host.innerHTML = `
+        <div class="vdg-wrap" style="display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+            <div>
+              <div style="font-size:15.5px;font-weight:700;color:var(--text-dim);display:flex;align-items:center;gap:8px">
+                <i class="ti ti-sun" style="color:#f59e0b"></i> Vandaag
+              </div>
+              <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Cijfers · signalen · snelle acties</div>
+            </div>
+            <button id="vdgStartAanmaanBtn" class="sr-btn" type="button" style="padding:8px 14px">
+              <i class="ti ti-mail-forward"></i> Start aanmaanronde
+            </button>
+          </div>
+          <div class="kpi-strip" id="vdgKpis" style="grid-template-columns:repeat(3,1fr);margin-bottom:0">
+            <div class="kpi-cell"><div class="kpi-lbl">Openstaand</div><div class="kpi-val">—</div></div>
+            <div class="kpi-cell"><div class="kpi-lbl">Wanbetalers</div><div class="kpi-val">—</div></div>
+            <div class="kpi-cell"><div class="kpi-lbl">Vragen aandacht</div><div class="kpi-val">—</div></div>
+          </div>
+          <div id="wb-sub-vandaag-actie"></div>
+        </div>
+      `;
+      host.querySelector('#vdgStartAanmaanBtn')?.addEventListener('click', () => setSubView('probleemklanten'));
+      _vdgState.mounted = true;
+    }
+    // Fail-soft: KPI en Actie zijn onafhankelijk. Als één van beide faalt
+    // blijft de rest zichtbaar.
+    _vdgLoadKpis();
+    mountDunActiesHost('wb-sub-vandaag-actie');
+  }
+
+  async function _vdgLoadKpis() {
+    if (_vdgState.kpisLoading) return;
+    _vdgState.kpisLoading = true;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-dunning-overview');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      // "Vragen aandacht" = som van de 3 signaal-groepen uit dunning-pipeline-
+      // actions. Als dat endpoint al geladen is (Actie-widget loopt parallel),
+      // hergebruik de cijfers uit _actState. Anders vullen we 0 in en werkt
+      // de KPI zichzelf bij zodra Actie z'n data heeft.
+      let aandacht = 0;
+      const ak = _actState?.data?.kpis;
+      if (ak) aandacht = (Number(ak.appointments_today) || 0) + (Number(ak.awaiting_reply) || 0) + (Number(ak.stale_count) || 0);
+      renderDunOvKpis(d.kpis || {}, { targetId: 'vdgKpis', compact: true, aandacht });
+    } catch (e) {
+      console.error('[vdg-kpis]', e);
+    } finally {
+      _vdgState.kpisLoading = false;
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────────────
   // Wanbetalers "Actie vandaag" (Fase 3) — read-only dashboard.
   //
   // Toont 3 signaal-groepen op basis van dunning-pipeline-actions:
@@ -12929,8 +13104,12 @@
   // ────────────────────────────────────────────────────────────────────
   const _actState = { mounted: false, loading: false, data: null };
 
-  function mountDunActiesHost() {
-    const host = document.getElementById('wb-sub-actie');
+  // mountDunActiesHost(hostId?) — sinds nav-herontwerp is de Actie-widget
+  // een onderdeel van Vandaag. Default host is nu 'wb-sub-vandaag-actie'
+  // (de inner-div die mountDunVandaagHost() injecteert). Bestaande callers
+  // die géén argument meegeven mounten dus automatisch in de Vandaag-shell.
+  function mountDunActiesHost(hostId) {
+    const host = document.getElementById(hostId || 'wb-sub-vandaag-actie');
     if (!host) return;
     if (!_actState.mounted) {
       host.innerHTML = _actShellHtml();
@@ -13034,6 +13213,10 @@
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
       _actState.data = d;
       renderDunActies();
+      // Vandaag-KPI's kunnen de "Vragen aandacht"-teller pas bijwerken
+      // zodra deze data binnen is. Fail-soft: als Vandaag niet gemount is,
+      // no-op (functie check zelf).
+      if (_vdgState && _vdgState.mounted) _vdgLoadKpis();
     } catch (e) {
       console.error('[dun-actions load]', e);
       if (typeof showToast === 'function') showToast('Actie-lijst laden mislukt: ' + (e?.message || 'onbekend'), 'error');
