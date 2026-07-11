@@ -76,6 +76,24 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
 3. **Automations Fase 4B** — `create_task` (vereist agent_tasks tabel), `date_chosen`-conditie (design nodig), `on_attended`/`on_no_show` triggers.
 
 ## Module-architectuur
+
+**Wanbetalers-module** (`/modules/finance.html` sub-view `#view-wanbetalers`) —
+sinds nav-herontwerp #680 georganiseerd rond **3 hoofdtabs + 2 dropdowns**:
+Vandaag (default, KPI-strip + Actie-vandaag-widget + "Start aanmaanronde"-knop)
+· Pipeline · Inbox · `Meer ▾` (Probleemklanten / Arrangements / Open Acties)
+· `Instellingen ⚙` (Templates / Workflows / Geschiedenis). De **pipeline** heeft
+zowel een **lijst-weergave (default)** — gegroepeerd per fase, inklapbaar,
+sorteer + fase-filter + ⋮ row-menu — als een **kanban-bord** met drag-and-drop;
+schakelaar deelt dezelfde in-memory data (geen refetch bij wisselen).
+**Detailkaart** (op klik) toont dossier links (fase-dropdown / afspraken /
+logboek / open facturen) + WhatsApp-chat rechts (hergebruikt `inbox-send`).
+**Auto-fase-triggers** achter `app_settings.dunning_pipeline_auto`-toggles
+(fail-soft, non-blocking). **Bulk-aanmaning** via `cron-dunning-bulk-send`
+(batches van 10 per 3 min, idempotent atomic claim). **Brief-PDF** via `pdfkit`
+(enkel + bulk, bewerkbare template in `dunning_templates.kind='brief'`).
+**Inbox** heeft archief-tab (`whatsapp_conversations.status='archived'`
+heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
+
 - /index.html — Dashboard
 - /modules/klanten.html — Klantenbeheer (🚧 Fase 1 fundament: DB + RBAC + placeholder)
 - /modules/email.html — E-mail beheer
@@ -246,6 +264,76 @@ Werkelijke kolomnamen profiles (auth — aangemaakt 14 mei 2026):
 - created_at, updated_at, last_login_at timestamptz
 - created_by uuid REFERENCES auth.users
 
+Werkelijke kolomnamen dunning_pipeline_stages (migratie 034):
+- id uuid PK
+- slug text UNIQUE (seed: nieuw / aangemaand / in_gesprek / regeling /
+  brief_verstuurd / incasso / afschrijven / opgelost — 8 fases)
+- label text, sort_order int, color text
+- is_active boolean DEFAULT true
+- is_terminal boolean DEFAULT false (opgelost + afschrijven = true)
+- created_at timestamptz
+
+Werkelijke kolomnamen dunning_pipeline_customers (migratie 034):
+- id uuid PK
+- customer_id uuid UNIQUE (1 rij per klant)
+- stage_slug text NOT NULL DEFAULT 'nieuw'
+- stage_changed_at timestamptz, stage_changed_by text
+- last_activity_at timestamptz NOT NULL DEFAULT now()
+- created_at, updated_at timestamptz
+- idx op stage_slug
+
+Werkelijke kolomnamen dunning_pipeline_log (migratie 034):
+- id uuid PK
+- customer_id uuid NOT NULL
+- entry_type text CHECK IN (note / auto_event / stage_change / appointment)
+- body text, meta jsonb
+- created_by text, created_at timestamptz
+- idx op (customer_id, created_at desc)
+
+Werkelijke kolomnamen dunning_pipeline_appointments (migratie 034):
+- id uuid PK
+- customer_id uuid NOT NULL
+- title text NOT NULL, due_at timestamptz NOT NULL
+- status text CHECK IN (open / done / missed) DEFAULT 'open'
+- note text, created_by text
+- completed_at timestamptz
+- idx op (status, due_at) en op customer_id
+
+Werkelijke kolomnamen dunning_bulk_jobs / _recipients (migratie 031):
+- Bulk-aanmaan wachtrij. jobs = 1 rij per bulk-batch met status en
+  approval-state; recipients = N rijen per job met per-klant status
+  + wamid + retry-count. Verstuurd door cron-dunning-bulk-send
+  (batches van 10 per 3 min, idempotent atomic claim
+  `.eq('id',rid).eq('status','pending')`).
+
+Werkelijke kolomnamen dunning_templates:
+- kind text CHECK IN (email / whatsapp / brief) (migratie 032 splitste
+  van whatsapp-only naar 3-way; migratie 033 seedt de default
+  brief-template die door de PDF-generator wordt gebruikt).
+
+Werkelijke kolomnamen deals — nieuwe kolom (migratie 035):
+- subscription_marked_done boolean NOT NULL DEFAULT false
+  → handmatig-afvink voor "✓ Abbo al ingevoerd" op offerte-detail/lijst
+  wanneer het abo via TL-import binnenkwam en aan een andere deal hangt.
+  has_subscription = deal-match OR klant-match OR marked_done.
+
+Werkelijke kolomnamen whatsapp_conversations:
+- status text CHECK IN (open / closed / archived)
+  UI ↔ on-wire mapping: 'open'↔'open' (actief); 'afgehandeld'↔'closed'
+  (tijdelijk weg; komt terug bij inbound); 'gearchiveerd'↔'archived'
+  (definitief weg; komt NIET terug bij inbound — inbox-webhook
+  respecteert dit via een status-check op de bestaande rij).
+
+app_settings keys (nieuw sinds pipeline):
+- 'dunning_cooldown_days' → jsonb `{days: int}`, default 7. Bepaalt
+  minimale wachttijd tussen 2 aanmaan-runs voor dezelfde klant.
+- 'dunning_pipeline_auto' → jsonb met 4 booleans (
+  `on_overdue_to_nieuw`, `on_bulk_sent_to_aangemaand`,
+  `on_inbound_to_in_gesprek`, `on_paid_to_opgelost`). Alle default
+  true; ontbrekende/false leest als true (fail-safe). Auto-triggers
+  in de pipeline draaien fail-soft: engine-fout blokkeert nooit de
+  onderliggende actie (bulk-send, inbound-webhook, betaal-registratie).
+
 Werkelijke kolomnamen team_members:
 - id uuid
 - name text
@@ -411,6 +499,17 @@ Lopend op Vercel:
 - /api/cron-arrangements-breach-check (0 6 * * *) — D5 dagelijkse breach-detection
   voor ACTIEF payment_arrangements (UITSTEL/SPLITSING/ABONNEMENT_PAUZE → NAGEKOMEN/VERBROKEN).
   Zie docs/cleanup-batch-d5-uuid-modal-voorstel.md.
+- /api/cron-dunning-bulk-send (*/3 * * * *) — verstuurt goedgekeurde
+  bulk-aanmaningen uit `dunning_bulk_recipients`. Batches van 10 per run,
+  idempotent atomic claim (`.eq('id',rid).eq('status','pending')`), per-recipient
+  try/catch zodat één fout de rest van de batch niet blokkeert. Sinds #672
+  logt elke succesvolle send ook naar `dunning_engine` zodat de cooldown-teller
+  klopt en de pipeline-triggers vuren.
+- /api/cron-dunning-engine (0 9 * * *) — automatische aanmaan-engine.
+  Selecteert wanbetalers per workflow-stap, respecteert
+  `app_settings.dunning_cooldown_days` (default 7), skipt klanten met een
+  actieve payment_arrangement, en kan pipeline-fase-triggers vuren
+  (`on_overdue_to_nieuw`, `on_bulk_sent_to_aangemaand`) — allemaal fail-soft.
 
 ## TeamLeader (TL) — Backend-only integratie
 

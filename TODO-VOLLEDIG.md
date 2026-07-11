@@ -6,6 +6,55 @@
 
 ---
 
+## ✅ Sessie juli 2026 — Wanbetalers-module + Pipeline + nav-herontwerp
+
+### Voltooid — LIVE op main (laatste hoofd-SHA: 462816c)
+
+**Wanbetalers-overzicht + Probleemklanten + bulk**
+- #663 KPI-fix wanbetalers-overzicht (juiste tellingen op openstaand / wanbetalers / probleemklanten).
+- #664 bulk Fase 1 — selectie/preview/approve-flow voor bulk-aanmaningen (migratie 031: `dunning_bulk_jobs` + `dunning_bulk_recipients`).
+- #665 Probleemklanten-tab (aparte sub-tab in dunning met > 60d overdue).
+- #666 tabel-verbeteringen (telefoon-kolom, sorteren, filters, WA-template-dropdown per rij).
+- #667 WA-status-fix + e-mail templates (kind='email' in dunning_templates naast whatsapp).
+- #668 verstopte tabs bereikbaar (klik-doorroutering in oude nav).
+- #669 bulk Fase 2 — ECHTE verzending via `cron-dunning-bulk-send` (batches van 10 per 3 min, idempotent atomic claim).
+
+**Inbox + brief-PDF + engine-koppeling**
+- #670 inbox verfrist — wanbetaler-labels + filters + afhandelen-knop + auto-heropenen bij inbound.
+- #671 brief-PDF-generator (pdfkit, migraties 032 `dunning_templates.kind='brief'` + 033 seed brief-template; enkel- + bulk-modus).
+- #672 bulk→engine-koppeling + instelbare cooldown (`app_settings.dunning_cooldown_days`, default 7).
+
+**Pipeline-fundament + inbox-archief**
+- #673 pipeline-fundament (migratie 034: `dunning_pipeline_stages` + `dunning_pipeline_customers` + `dunning_pipeline_log` + `dunning_pipeline_appointments`; 8 fases geseed; 4 auto-triggers achter `app_settings.dunning_pipeline_auto`-toggles, fail-soft).
+- #674 inbox-archief-tab (`whatsapp_conversations.status` splits closed/archived; webhook laat archief met rust; UI: aparte Archief-tab + archiveren/terughalen knoppen).
+
+**Pipeline UI-lagen**
+- #675 pipeline Fase 2 — kanban-bord (drag-and-drop tussen kolommen, optimistic + rollback) + detailkaart met dossier links (fase-dropdown / afspraken / logboek / open facturen) en WA-chat rechts (hergebruikt `inbox-send`).
+- #676 pipeline Fase 3 — "Actie vandaag"-dashboard: 3 signaal-groepen (afspraken vandaag/te laat, wacht op reactie >2d, stale >14d), read-only, gebatched, geen N+1.
+- #683 pipeline lijst-weergave (default) + Lijst/Bord-schakelaar; gegroepeerd per fase (inklapbaar, terminals dicht), fase-filter-pillen, sortering (bedrag/dagen/contact), rijk-compacte rijen met avatar + context + bedrag + ⋮ menu (Open dossier / Notitie / Fase wijzigen).
+
+**Sales polish (voortkomend uit wanbetalers-context)**
+- #677 offerte-detail "Abbo al ingevoerd" bij klant-match (naast bestaande deal-match) — 2-staps sub-lookup.
+- #678 handmatig vlaggetje `deals.subscription_marked_done` (migratie 035) + achterstand-UPDATE voor pre-10-juli deals.
+- #679 offerte-LIJST ook laten reageren op `subscription_marked_done` (consistent met detailpagina).
+
+**Nav-herontwerp + UI-fixes**
+- #680 nav-herontwerp van de wanbetalers-module: 10 gelijkwaardige tabs → 3 hoofdtabs (Vandaag / Pipeline / Inbox) + `Meer ▾` (Probleemklanten / Arrangements / Open Acties) + `Instellingen ⚙` (Templates / Workflows / Geschiedenis). Vandaag combineert KPI-strip + Actie-vandaag-widget + "Start aanmaanronde"-knop. Deep-link `?sub=actie` → redirect naar `vandaag`; `?sub=overzicht` blijft functioneel voor backward-compat.
+- #681 dropdown-open-bug fix (`.wb-menu-panel[hidden]{display:none}` tegen display:flex).
+- #682 dropdown theme-aware (`--bg-elev` / `--border`) + 6× `sr-btn` → `sr-abtn(primary)` op Vandaag/Actie/Pipeline knoppen.
+
+### Openstaand voor Jeffrey (één-malig, KRITIEK vóór livegang)
+- **GROTE INTEGRATIETEST nog te doen**. Bulk-verzending eerst mini-testen met 1 klant = Jeffrey zelf, vóór echte batch van 94.
+- **Env-vars zetten**: `CRON_SECRET`, `IMAP_PASS_ADMINISTRATIE`, `META_WHATSAPP_BUSINESS_ACCOUNT_ID` + `META_WHATSAPP_PHONE_NUMBER_ID` (of `whatsapp_module_config` module=finance/dunning). Er is nog NOOIT een echt aanmaan-bericht verstuurd.
+- **Meta-goedkeuring** 3 aanmaan-WhatsApp-templates (Utility-categorie). Tot dan: e-mail-only testen kan.
+- **Migraties gedraaid t/m 035**. Volgende migratie-nummer = 036.
+
+### Backlog / openstaand
+- Pipeline vult zich pas als engine-cron draait of bulk verstuurd wordt (`dunning_pipeline_customers` blijft leeg zonder trigger-events).
+- Fase-definities aanpasbaar-UI: data ondersteunt het (`dunning_pipeline_stages` heeft `slug/label/sort_order/color/is_active/is_terminal`), UI nog niet gebouwd.
+
+---
+
 ## ✅ Sessie 17–18 juni 2026 — Events comms + Simone autonomie + automation-tester + Webflow fix + Fase 4A
 
 ### Voltooid — LIVE op main (laatste hoofd-SHA: 646978022ee7c64fc90f740e024e848cfc329227)
