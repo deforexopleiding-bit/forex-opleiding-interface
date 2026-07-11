@@ -30,13 +30,39 @@ export default async function handler(req, res) {
       .eq('module', 'finance').eq('is_active', true).maybeSingle();
     const pnId = modCfg?.phone_number_id || null;
 
-    // 2) find-or-create conversation.
+    // 2) find-or-create conversation op de VOLLEDIGE unieke sleutel
+    // (phone_number, phone_number_id). Alleen op phone matchen faalt bij
+    // legacy pnid=null-rijen naast een pnid-gebonden rij → duplicate-key
+    // op de unieke index whatsapp_conversations_phone_pnid_key.
     const phone = customer.phone.startsWith('+') ? customer.phone : ('+' + customer.phone);
     let convId;
-    const { data: existing } = await supabaseAdmin
-      .from('whatsapp_conversations').select('id, status')
-      .eq('phone_number', phone).maybeSingle();
+
+    async function _findConv() {
+      let q = supabaseAdmin
+        .from('whatsapp_conversations').select('id, status, customer_id')
+        .eq('phone_number', phone);
+      q = (pnId == null) ? q.is('phone_number_id', null) : q.eq('phone_number_id', pnId);
+      const { data: rows } = await q.limit(1);
+      return (rows && rows[0]) || null;
+    }
+
+    let existing = await _findConv();
+
+    // Guard: kaap nooit een echt (niet-test) gesprek voor een andere klant.
+    if (existing && existing.customer_id && existing.customer_id !== customer.id) {
+      const { data: owner } = await supabaseAdmin
+        .from('customers').select('is_test').eq('id', existing.customer_id).maybeSingle();
+      if (owner && owner.is_test === false) {
+        return res.status(409).json({
+          error: 'Er bestaat al een echt gesprek met dit nummer voor een andere klant. Gebruik een ander test-telefoonnummer.',
+        });
+      }
+    }
+
+    const displayName = String(customer.first_name || '').replace(/^🧪 TEST — /, '') || 'Sandbox';
+
     if (existing) {
+      // Adopt: koppel aan de test-klant + registreer inbound-timestamps.
       convId = existing.id;
       const currentStatus = String(existing.status || 'open');
       const nextStatus    = (currentStatus === 'archived') ? 'archived' : 'open';
@@ -48,20 +74,38 @@ export default async function handler(req, res) {
         customer_id         : customer.id,
       }).eq('id', existing.id);
     } else {
+      // Insert; bij dup-key (race of subtiel formaatverschil) opnieuw zoeken
+      // op de volledige sleutel en de gevonden rij adopteren.
       const { data: inserted, error: cErr } = await supabaseAdmin
         .from('whatsapp_conversations').insert({
           phone_number        : phone,
           phone_number_id     : pnId,
           customer_id         : customer.id,
-          display_name        : String(customer.first_name || '').replace(/^🧪 TEST — /, '') || 'Sandbox',
+          display_name        : displayName,
           status              : 'open',
           last_message_at     : nowIso,
           last_message_preview: messageText.slice(0, 120),
           unread_count        : 1,
           last_inbound_at     : nowIso,
         }).select('id').single();
-      if (cErr) throw new Error('conv insert: ' + cErr.message);
-      convId = inserted.id;
+      if (cErr) {
+        const isDup = /duplicate key|whatsapp_conversations_phone_pnid_key|23505/i.test(cErr.message || '');
+        if (!isDup) throw new Error('conv insert: ' + cErr.message);
+        const retry = await _findConv();
+        if (!retry) throw new Error('conv insert (race): ' + cErr.message);
+        convId = retry.id;
+        const currentStatus = String(retry.status || 'open');
+        const nextStatus    = (currentStatus === 'archived') ? 'archived' : 'open';
+        await supabaseAdmin.from('whatsapp_conversations').update({
+          last_message_at     : nowIso,
+          last_message_preview: messageText.slice(0, 120),
+          last_inbound_at     : nowIso,
+          status              : nextStatus,
+          customer_id         : customer.id,
+        }).eq('id', retry.id);
+      } else {
+        convId = inserted.id;
+      }
     }
 
     // 3) Insert het inbound bericht.
