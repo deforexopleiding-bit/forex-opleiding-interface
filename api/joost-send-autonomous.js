@@ -152,6 +152,9 @@ export default async function handler(req, res) {
   const suggestionId = typeof body.suggestion_id === 'string' ? body.suggestion_id.trim() : '';
   if (!suggestionId) return res.status(400).json({ error: 'suggestion_id vereist' });
   if (!isUuid(suggestionId)) return res.status(400).json({ error: 'suggestion_id moet geldige uuid zijn' });
+  // Sandbox-bypass voor de e2_reactive_autonomy-gate. Alleen honoreerd als
+  // de conv-klant is_test=true (guard verderop). Productie: negeer stil.
+  const testBypass = body.test_bypass === true;
 
   try {
     // ========================================================================
@@ -211,11 +214,22 @@ export default async function handler(req, res) {
     // hoeven veranderen.
     const featureFlags = (cfg && cfg.feature_flags && typeof cfg.feature_flags === 'object')
       ? cfg.feature_flags : {};
-    if (featureFlags.e2_reactive_autonomy !== true) {
+    // Sandbox-bypass: alleen honoreerd als (a) caller stuurt test_bypass=true
+    // én (b) conv-klant is_test=true. Productie: 403 exact als voorheen.
+    let isTestConv = false;
+    if (testBypass && conv.customer_id) {
+      const { data: cRow } = await supabaseAdmin
+        .from('customers').select('is_test').eq('id', conv.customer_id).maybeSingle();
+      isTestConv = !!(cRow && cRow.is_test === true);
+    }
+    if (featureFlags.e2_reactive_autonomy !== true && !(testBypass && isTestConv)) {
       return res.status(403).json({
         error: 'Reactive autonomy is uitgeschakeld',
         feature_flag: 'e2_reactive_autonomy',
       });
+    }
+    if (testBypass && isTestConv && featureFlags.e2_reactive_autonomy !== true) {
+      console.log('[joost-send-autonomous] test-bypass actief (e2_reactive_autonomy=false + is_test-klant) conv=' + convId);
     }
 
     // ========================================================================

@@ -142,12 +142,14 @@ export default async function handler(req, res) {
     try {
       const { runJoostSuggest } = await import('./_lib/joost-suggest-core.js');
       const sug = await runJoostSuggest({
-        supabase             : supabaseAdmin,
-        conversationId       : convId,
-        triggeredByMessageId : msg.id,
-        autoTriggered        : true,
-        requestedByUserId    : null,
-        clientIp             : null,
+        supabase              : supabaseAdmin,
+        conversationId        : convId,
+        triggeredByMessageId  : msg.id,
+        autoTriggered         : true,
+        requestedByUserId     : null,
+        clientIp              : null,
+        // Sandbox-bypass: honoreerd door core alleen bij is_test-klant.
+        allowDisabledForTest  : true,
       });
       if (sug?.status === 200 && sug.body?.suggestion?.id) {
         joost.ran = true;
@@ -164,7 +166,7 @@ export default async function handler(req, res) {
             const r2 = await fetch(`${base}/api/joost-send-autonomous`, {
               method:  'POST',
               headers: { 'content-type': 'application/json', 'x-internal-token': token },
-              body:    JSON.stringify({ suggestion_id: joost.suggestion_id }),
+              body:    JSON.stringify({ suggestion_id: joost.suggestion_id, test_bypass: true }),
             });
             joost.autonomy_sent = r2.ok;
             if (!r2.ok) {
