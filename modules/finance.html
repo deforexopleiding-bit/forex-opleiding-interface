@@ -13411,15 +13411,10 @@
             <option value="dagen">Dagen in fase ↓</option>
             <option value="contact">Laatste contact ↓</option>
           </select>
-          <div class="sr-segments" role="tablist" style="display:inline-flex;gap:4px">
-            <button class="sr-seg active" data-pipe-view="list"  type="button" title="Lijst-weergave (gegroepeerd per fase)"><i class="ti ti-list-details"></i> Lijst</button>
-            <button class="sr-seg"        data-pipe-view="board" type="button" title="Kanban-bord (kolommen per fase)"><i class="ti ti-layout-kanban"></i> Bord</button>
-          </div>
           <button id="pipeRefreshBtn" class="sr-abtn" type="button" style="padding:6px 12px"><i class="ti ti-refresh"></i> Herlaad</button>
           <div id="pipeCounter" style="font-size:12px;color:var(--text-faint);margin-left:auto"></div>
         </div>
         <div id="pipeStageFilters" class="pipe-stage-filters" style="display:flex;flex-wrap:wrap;gap:6px"></div>
-        <div id="pipeBoard" class="pipe-board" style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;min-height:60vh" hidden></div>
         <div id="pipeList"  class="pipe-list"  style="display:flex;flex-direction:column;gap:14px;min-height:40vh"></div>
       </div>
       <div id="pipeDetailOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1200;display:none;align-items:stretch;justify-content:center;padding:20px">
@@ -13528,22 +13523,10 @@
     document.getElementById('pipeDetailOverlay')?.addEventListener('click', (e) => {
       if (e.target && e.target.id === 'pipeDetailOverlay') closePipelineDetail();
     });
-    // Weergave-schakelaar Lijst / Bord.
-    document.querySelectorAll('[data-pipe-view]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const v = btn.dataset.pipeView;
-        if (!v || v === _pipeState.view) return;
-        _pipeState.view = v;
-        document.querySelectorAll('[data-pipe-view]').forEach((b) => {
-          b.classList.toggle('active', b.dataset.pipeView === v);
-        });
-        renderPipeline();
-      });
-    });
-    // Sortering (alleen zichtbaar in lijst-modus, maar altijd binden).
+    // Sortering (lijst-weergave — enige weergave sinds bord verwijderd).
     document.getElementById('pipeSortSelect')?.addEventListener('change', (e) => {
       _pipeState.sortMode = e.target.value || 'bedrag';
-      if (_pipeState.view === 'list') renderPipelineList();
+      renderPipelineList();
     });
     // Klik buiten row-menu sluit het menu.
     document.addEventListener('click', (e) => {
@@ -13560,8 +13543,8 @@
   async function loadPipelineData({ background }) {
     if (_pipeState.loading) return;
     _pipeState.loading = true;
-    const board = document.getElementById('pipeBoard');
-    if (!background && board) board.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-faint);font-size:12.5px;width:100%">Laden…</div>';
+    const list = document.getElementById('pipeList');
+    if (!background && list) list.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-faint);font-size:12.5px;width:100%">Laden…</div>';
     try {
       const [rStages, rList] = await Promise.all([
         window.AgentShared.apiFetch('/api/dunning-pipeline-stages'),
@@ -13576,7 +13559,7 @@
       renderPipeline();
     } catch (e) {
       console.error('[pipeline load]', e);
-      if (board) board.innerHTML = `<div style="padding:40px;text-align:center;color:#f87171;font-size:12.5px;width:100%">Fout bij laden: ${esc(e?.message || 'onbekend')}</div>`;
+      if (list) list.innerHTML = `<div style="padding:40px;text-align:center;color:#f87171;font-size:12.5px;width:100%">Fout bij laden: ${esc(e?.message || 'onbekend')}</div>`;
       if (typeof showToast === 'function') showToast('Pipeline laden mislukt: ' + (e?.message || 'onbekend'), 'error');
     } finally {
       _pipeState.loading = false;
@@ -13610,118 +13593,6 @@
     } catch (_) { return ''; }
   }
 
-  function renderPipelineBoard() {
-    const board = document.getElementById('pipeBoard');
-    if (!board) return;
-    const q = _pipeState.filter;
-    const filteredList = q
-      ? _pipeState.list.filter(it => String(it.customer_name || '').toLowerCase().includes(q))
-      : _pipeState.list;
-
-    const counter = document.getElementById('pipeCounter');
-    if (counter) {
-      const totalCents = filteredList.reduce((s, it) => s + (Number(it.total_open_cents) || 0), 0);
-      counter.textContent = `${filteredList.length} klanten · ${_pipeFmtEurCents(totalCents)} openstaand`;
-    }
-
-    // Groepeer per stage
-    const byStage = new Map();
-    for (const s of _pipeState.stages) byStage.set(s.slug, []);
-    for (const it of filteredList) {
-      const slug = it.stage_slug || 'nieuw';
-      if (!byStage.has(slug)) byStage.set(slug, []);
-      byStage.get(slug).push(it);
-    }
-
-    board.innerHTML = _pipeState.stages.map((s) => {
-      const items = byStage.get(s.slug) || [];
-      const sum = items.reduce((x, it) => x + (Number(it.total_open_cents) || 0), 0);
-      const cards = items.map((it) => _pipeCardHtml(it)).join('')
-        || `<div class="pipe-empty">Geen klanten</div>`;
-      const color = s.color || '#94a3b8';
-      const termCls = s.is_terminal ? ' terminal' : '';
-      return `<div class="pipe-col${termCls}" data-stage-slug="${esc(s.slug)}">
-        <div class="pipe-col-head" style="border-top:3px solid ${esc(color)}">
-          <div class="pipe-col-title"><span class="dot" style="background:${esc(color)}"></span>${esc(s.label)}</div>
-          <div class="pipe-col-meta">${items.length} · ${_pipeFmtEurCents(sum)}</div>
-        </div>
-        <div class="pipe-col-body" data-stage-body="${esc(s.slug)}">${cards}</div>
-      </div>`;
-    }).join('');
-
-    _pipeWireBoardEvents();
-  }
-
-  function _pipeCardHtml(it) {
-    const name  = it.customer_name || 'Onbekende klant';
-    const open  = _pipeFmtEurCents(it.total_open_cents);
-    const cnt   = Number(it.open_invoice_count) || 0;
-    let   hint  = '';
-    if (it.next_appointment && it.next_appointment.title) {
-      hint = `<div class="pipe-card-hint"><i class="ti ti-calendar-event" style="font-size:10px"></i> ${esc(it.next_appointment.title)} · ${esc(_pipeFmtDateTime(it.next_appointment.due_at))}</div>`;
-    } else if (it.last_log && it.last_log.body) {
-      const body = String(it.last_log.body).slice(0, 80);
-      hint = `<div class="pipe-card-hint"><i class="ti ti-message" style="font-size:10px"></i> ${esc(body)}</div>`;
-    }
-    return `<div class="pipe-card" draggable="true" data-customer-id="${esc(it.customer_id)}" data-stage-slug="${esc(it.stage_slug)}">
-      <div class="pipe-card-name">${esc(name)}</div>
-      <div class="pipe-card-open">${open} openstaand</div>
-      <div class="pipe-card-meta">${cnt} factu${cnt === 1 ? 'ur' : 'ren'} · gew. ${esc(_pipeFmtRel(it.stage_changed_at))}</div>
-      ${hint}
-    </div>`;
-  }
-
-  function _pipeWireBoardEvents() {
-    const board = document.getElementById('pipeBoard');
-    if (!board) return;
-    // Kaartje klik → detail
-    board.querySelectorAll('.pipe-card').forEach((card) => {
-      card.addEventListener('click', (e) => {
-        // Onderdruk als er nog een drag bezig is
-        if (card.classList.contains('dragging')) return;
-        const cid = card.dataset.customerId;
-        if (cid) openPipelineDetail(cid);
-      });
-      card.addEventListener('dragstart', (e) => {
-        _pipeState.dragCustomerId = card.dataset.customerId || null;
-        _pipeState.dragOriginSlug = card.dataset.stageSlug  || null;
-        card.classList.add('dragging');
-        try {
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', card.dataset.customerId || '');
-        } catch (_) {}
-      });
-      card.addEventListener('dragend', () => {
-        card.classList.remove('dragging');
-        _pipeState.dragCustomerId = null;
-        _pipeState.dragOriginSlug = null;
-        board.querySelectorAll('.pipe-col.drag-over').forEach(c => c.classList.remove('drag-over'));
-      });
-    });
-    // Kolom-body als drop-target
-    board.querySelectorAll('[data-stage-body]').forEach((body) => {
-      const col = body.closest('.pipe-col');
-      body.addEventListener('dragover', (e) => {
-        if (!_pipeState.dragCustomerId) return;
-        e.preventDefault();
-        try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
-        if (col) col.classList.add('drag-over');
-      });
-      body.addEventListener('dragleave', (e) => {
-        if (col && !col.contains(e.relatedTarget)) col.classList.remove('drag-over');
-      });
-      body.addEventListener('drop', async (e) => {
-        e.preventDefault();
-        if (col) col.classList.remove('drag-over');
-        const cid = _pipeState.dragCustomerId || (e.dataTransfer && e.dataTransfer.getData('text/plain'));
-        const targetSlug = body.dataset.stageBody;
-        const originSlug = _pipeState.dragOriginSlug;
-        if (!cid || !targetSlug || targetSlug === originSlug) return;
-        await pipelineMoveCustomer(cid, originSlug, targetSlug);
-      });
-    });
-  }
-
   async function pipelineMoveCustomer(customerId, fromSlug, toSlug) {
     // Optimistisch verplaatsen in state, dan POST. Bij fout: rollback.
     const idx = _pipeState.list.findIndex(x => x.customer_id === customerId);
@@ -13747,25 +13618,13 @@
     }
   }
 
-  // ── ROUTER: kies board of list op basis van _pipeState.view ──────────
+  // ── RENDER: lijst is de enige weergave (bord verwijderd) ─────────────
   function renderPipeline() {
-    const board = document.getElementById('pipeBoard');
-    const list  = document.getElementById('pipeList');
     const stageFilters = document.getElementById('pipeStageFilters');
     const sortSel = document.getElementById('pipeSortSelect');
-    if (_pipeState.view === 'board') {
-      if (board) board.hidden = false;
-      if (list)  list.hidden  = true;
-      if (stageFilters) stageFilters.style.display = 'none';
-      if (sortSel) sortSel.style.display = 'none';
-      renderPipelineBoard();
-    } else {
-      if (board) board.hidden = true;
-      if (list)  list.hidden  = false;
-      if (stageFilters) stageFilters.style.display = 'flex';
-      if (sortSel) sortSel.style.display = '';
-      renderPipelineList();
-    }
+    if (stageFilters) stageFilters.style.display = 'flex';
+    if (sortSel) sortSel.style.display = '';
+    renderPipelineList();
   }
 
   // ── LIJST-WEERGAVE ───────────────────────────────────────────────────
