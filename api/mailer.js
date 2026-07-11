@@ -49,7 +49,7 @@ function getTransport() {
  *                                              Standaard 'De Forex Opleiding'.
  * @returns {Promise<{success: boolean, messageId?: string, error?: string}>}
  */
-export async function sendMail({ to, subject, text, html, from, fromName } = {}) {
+export async function sendMail({ to, subject, text, html, from, fromName, attachments } = {}) {
   if (!to || !subject || (!text && !html)) {
     return { success: false, error: 'Missing required fields' };
   }
@@ -62,12 +62,16 @@ export async function sendMail({ to, subject, text, html, from, fromName } = {})
 
   try {
     const transport = getTransport();
+    // Optionele attachments: nodemailer-shape ({ filename, content: Buffer|string, contentType? }).
+    // Backward-compatible: geen array of leeg → veld niet meesturen (transport
+    // gedraagt zich exact als voorheen).
     const info = await transport.sendMail({
       from: `"${useFromName}" <${useFromAddr}>`,
       to: recipients.join(', '),
       subject,
       text: text || stripHtml(html),
       html,
+      ...(Array.isArray(attachments) && attachments.length ? { attachments } : {}),
     });
 
     return { success: true, messageId: info.messageId };
