@@ -13347,9 +13347,10 @@
           <label style="font-size:11.5px;color:var(--text-faint);display:block;margin-bottom:8px">Notities
             <textarea id="incEditNotes" class="fin-input" rows="4" style="margin-top:2px;width:100%">${esc(dossier.notes || '')}</textarea>
           </label>
-          <div style="display:flex;gap:8px;margin-bottom:16px">
-            <button id="incSaveBtn" class="sr-abtn primary" type="button"><i class="ti ti-device-floppy"></i> Opslaan</button>
-            <button class="sr-abtn" type="button" title="Komt in PR-2" disabled><i class="ti ti-file-download"></i> Genereer PDF</button>
+          <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+            <button id="incSaveBtn"  class="sr-abtn primary" type="button"><i class="ti ti-device-floppy"></i> Opslaan</button>
+            <button id="incPdfBtn"   class="sr-abtn" type="button"><i class="ti ti-file-download"></i> Genereer dossier-PDF</button>
+            <button id="incMailBtn"  class="sr-abtn" type="button"><i class="ti ti-mail-forward"></i> E-mail naar bureau</button>
           </div>
 
           <div class="pipe-dos-h">Facturen ${flags?.wik_letter_sent ? '· <span style="color:#10b981">WIK/BE-brief verstuurd</span>' : ''}</div>
@@ -13383,6 +13384,57 @@
       </div>
     `;
     document.getElementById('incSaveBtn')?.addEventListener('click', () => incSaveDossier(dossier.id));
+    document.getElementById('incPdfBtn')?.addEventListener('click', () => incDownloadPdf(dossier.id));
+    document.getElementById('incMailBtn')?.addEventListener('click', () => incMailToBureau(dossier.id));
+  }
+
+  async function incDownloadPdf(dossierId) {
+    const btn = document.getElementById('incPdfBtn');
+    if (btn) btn.disabled = true;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/incasso-dossier-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dossier_id: dossierId }),
+      });
+      if (!r.ok) {
+        let msg = 'HTTP ' + r.status;
+        try { const j = await r.json(); msg = j?.error || msg; } catch (_) {}
+        throw new Error(msg);
+      }
+      const blob = await r.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href = url;
+      a.download = 'incassodossier_' + String(dossierId).slice(0, 8) + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      window.AgentShared?.showToast?.('Dossier-PDF gedownload', 'success');
+    } catch (e) {
+      window.AgentShared?.showToast?.('PDF mislukt: ' + (e?.message || 'onbekend'), 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function incMailToBureau(dossierId) {
+    if (!confirm('Dossier-PDF versturen naar het gekoppelde incasso-bureau?')) return;
+    const btn = document.getElementById('incMailBtn');
+    if (btn) btn.disabled = true;
+    try {
+      const d = await _incCall('/api/incasso-dossier-email', { dossier_id: dossierId });
+      if (d.dry_run) {
+        window.AgentShared?.showToast?.('Dry-run: zou sturen naar ' + (d.would_send_to || '?') + ' (' + (d.pdf_bytes || 0) + ' bytes)', 'success');
+      } else {
+        window.AgentShared?.showToast?.('Verstuurd naar ' + (d.sent_to || d.bureau_name || 'bureau'), 'success');
+      }
+    } catch (e) {
+      window.AgentShared?.showToast?.('E-mail mislukt: ' + (e?.message || 'onbekend'), 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   async function incSaveDossier(id) {
