@@ -370,13 +370,50 @@ export default async function handler(req, res) {
     }
 
     // ---- Meta API call ----
+    // Sandbox-guard: alleen ECHTE klanten worden zonder aanvullende check
+    // naar Meta gestuurd. Bij een is_test-klant (sandbox-persoon):
+    //   1) recipient-guard (nummer moet matchen met sandbox-contact);
+    //   2) als dry-run AAN → sla de Meta-call over, gebruik dry-run-wamid.
+    // Zo blijft de productie-flow voor echte klanten identiek en kan Joost
+    // per ongeluk nooit een test-persoon lastigvallen.
+    let isTestRecipient = false;
+    if (conv.customer_id) {
+      const { data: cRow } = await supabaseAdmin
+        .from('customers').select('is_test').eq('id', conv.customer_id).maybeSingle();
+      isTestRecipient = !!(cRow && cRow.is_test === true);
+    }
+
     let metaResult;
     try {
-      metaResult = await sendText({
-        to:             conv.phone_number,
-        body:           text,
-        phoneNumberId:  outboundPnId,
-      });
+      if (isTestRecipient) {
+        const { isDryRunEnabled, assertRecipientMatchesSandbox } =
+          await import('./_lib/dunning-dry-run.js');
+        try {
+          await assertRecipientMatchesSandbox({
+            isTest: true, actual: conv.phone_number, channel: 'whatsapp',
+          });
+        } catch (guardErr) {
+          return res.status(400).json({
+            error: guardErr?.message || 'Sandbox recipient-guard geblokkeerd',
+          });
+        }
+        if (await isDryRunEnabled()) {
+          metaResult = { wamid: 'dry-run:joost:' + (sugg?.id || conv.id) };
+          console.log('[joost-send-autonomous] DRY-RUN (test) skip Meta', conv.phone_number);
+        } else {
+          metaResult = await sendText({
+            to:             conv.phone_number,
+            body:           text,
+            phoneNumberId:  outboundPnId,
+          });
+        }
+      } else {
+        metaResult = await sendText({
+          to:             conv.phone_number,
+          body:           text,
+          phoneNumberId:  outboundPnId,
+        });
+      }
     } catch (metaErr) {
       if (metaErr instanceof MetaNotConfiguredError) {
         return res.status(503).json({
