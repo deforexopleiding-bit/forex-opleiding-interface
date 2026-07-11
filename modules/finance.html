@@ -13216,8 +13216,16 @@
       const text = window.prompt('Berichttekst (leeg = default):', 'Ik zal deze week betalen.');
       if (text === null) return;
       try {
-        await _sbxCall('/api/wanbetalers-sandbox-simulate-inbound', { body: text });
-        window.AgentShared?.showToast?.('Inkomend bericht ontvangen', 'success');
+        const d = await _sbxCall('/api/wanbetalers-sandbox-simulate-inbound', { body: text });
+        const j = d?.joost || {};
+        let joostPart = 'niet gedraaid';
+        if (j.ran && j.autonomy_sent)  joostPart = 'autonoom geantwoord (dry-run)';
+        else if (j.ran)                joostPart = 'concept opgesteld';
+        else if (j.note)               joostPart = 'niet gedraaid: ' + String(j.note).slice(0, 100);
+        window.AgentShared?.showToast?.(
+          'Inkomend ontvangen. Joost: ' + joostPart + '. Open de pipeline-kaart of Inbox voor het volledige antwoord.',
+          'success'
+        );
         sbxReloadStatus();
       } catch (e) {
         window.AgentShared?.showToast?.('Inbound mislukt: ' + (e?.message || 'onbekend'), 'error');

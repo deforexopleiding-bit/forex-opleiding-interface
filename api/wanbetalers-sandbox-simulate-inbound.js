@@ -132,7 +132,59 @@ export default async function handler(req, res) {
       console.warn('[sandbox-simulate-inbound] pipeline hook soft-fail', e?.message);
     }
 
-    return res.status(200).json({ ok: true, conversation_id: convId, message_id: msg.id });
+    // 5) Joost-keten — zelfde als de echte inbox-webhook (runJoostSuggest +
+    // autonomie-chain via HTTP self-call), maar SYNCHROON. De #691-guard
+    // in joost-send-autonomous onderschept de echte Meta-send voor
+    // is_test-klanten (dry-run → gelogd + outbound message in de chat).
+    // Alles fail-soft: een Joost-fout mag de inbound-simulatie NOOIT laten
+    // falen.
+    const joost = { ran: false, suggestion_id: null, suggested_reply: null, autonomy_sent: false, note: null };
+    try {
+      const { runJoostSuggest } = await import('./_lib/joost-suggest-core.js');
+      const sug = await runJoostSuggest({
+        supabase             : supabaseAdmin,
+        conversationId       : convId,
+        triggeredByMessageId : msg.id,
+        autoTriggered        : true,
+        requestedByUserId    : null,
+        clientIp             : null,
+      });
+      if (sug?.status === 200 && sug.body?.suggestion?.id) {
+        joost.ran = true;
+        joost.suggestion_id   = sug.body.suggestion.id;
+        joost.suggested_reply = sug.body.suggestion.suggested_reply || null;
+        // Autonomie-chain — zelfde als de webhook (HTTP self-call).
+        // De #691-guard vangt is_test-klanten op.
+        const token = process.env.INTERNAL_API_TOKEN;
+        if (token) {
+          const base = process.env.VERCEL_URL
+            ? `https://${process.env.VERCEL_URL}`
+            : (process.env.APP_BASE_URL || 'http://localhost:3000');
+          try {
+            const r2 = await fetch(`${base}/api/joost-send-autonomous`, {
+              method:  'POST',
+              headers: { 'content-type': 'application/json', 'x-internal-token': token },
+              body:    JSON.stringify({ suggestion_id: joost.suggestion_id }),
+            });
+            joost.autonomy_sent = r2.ok;
+            if (!r2.ok) {
+              const txt = await r2.text().catch(() => '');
+              joost.note = 'autonomie HTTP ' + r2.status + ': ' + (txt || '').slice(0, 160);
+            }
+          } catch (fetchErr) {
+            joost.note = 'autonomie fetch fail: ' + (fetchErr?.message || fetchErr);
+          }
+        } else {
+          joost.note = 'INTERNAL_API_TOKEN ontbreekt — alleen concept, geen autonome send';
+        }
+      } else {
+        joost.note = 'suggest status ' + (sug?.status) + ': ' + (sug?.body?.error || sug?.body?.message || '');
+      }
+    } catch (e) {
+      joost.note = 'joost fail-soft: ' + (e?.message || e);
+    }
+
+    return res.status(200).json({ ok: true, conversation_id: convId, message_id: msg.id, joost });
   } catch (e) {
     console.error('[sandbox-simulate-inbound]', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });
