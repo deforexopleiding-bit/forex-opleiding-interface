@@ -163,9 +163,18 @@ export default async function handler(req, res) {
             ? `https://${process.env.VERCEL_URL}`
             : (process.env.APP_BASE_URL || 'http://localhost:3000');
           try {
+            // Vercel Deployment Protection: sturen we de bypass-header mee
+            // als VERCEL_AUTOMATION_BYPASS_SECRET gezet is. Zonder secret:
+            // header weglaten (geen gedrags­verandering).
+            const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+            const headers = {
+              'content-type':     'application/json',
+              'x-internal-token': token,
+              ...(bypass ? { 'x-vercel-protection-bypass': bypass } : {}),
+            };
             const r2 = await fetch(`${base}/api/joost-send-autonomous`, {
               method:  'POST',
-              headers: { 'content-type': 'application/json', 'x-internal-token': token },
+              headers,
               body:    JSON.stringify({ suggestion_id: joost.suggestion_id, test_bypass: true }),
             });
             joost.autonomy_sent = r2.ok;

@@ -508,12 +508,19 @@ function triggerJoostAutoSuggest({ conversationId, triggeredByMessageId, autonom
         ? `https://${process.env.VERCEL_URL}`
         : (process.env.APP_BASE_URL || 'http://localhost:3000');
       const autonomousUrl = `${base}/api/joost-send-autonomous`;
+      // Vercel Deployment Protection: als VERCEL_AUTOMATION_BYPASS_SECRET
+      // gezet is, sturen we de bypass-header mee zodat interne self-calls
+      // niet op 401 stranden. Zonder secret: header weglaten (geen
+      // gedrags­verandering vs. eerder).
+      const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+      const headers = {
+        'content-type':     'application/json',
+        'x-internal-token': token,
+        ...(bypass ? { 'x-vercel-protection-bypass': bypass } : {}),
+      };
       return fetch(autonomousUrl, {
         method:  'POST',
-        headers: {
-          'content-type':     'application/json',
-          'x-internal-token': token,
-        },
+        headers,
         body: JSON.stringify({ suggestion_id: suggestionId }),
       }).then(async (resp2) => {
         if (!resp2.ok) {
