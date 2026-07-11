@@ -274,6 +274,23 @@ export default async function handler(req, res) {
       now:              new Date(),
     });
 
+    // Sandbox test-override: bij is_test-conversatie + test_bypass geven we
+    // Joost's antwoord ALTIJD door de send-flow, ook als de beslis-engine
+    // 'm zou blokkeren. Rapporteer wél wat productie zou blokkeren
+    // (prod_block_reason) zodat we in de UI eerlijk laten zien wat er
+    // gebeurt. De #691-guard onderschept alsnog de echte Meta-send.
+    let prodBlockReason = null;
+    if (testBypass && isTestConv && !decision.allow_autonomous) {
+      prodBlockReason = mapDecisionToDbStatus(decision).dbStatus;
+      decision.allow_autonomous = true;
+      decision.test_override    = true;
+      decision.prod_block_reason = prodBlockReason;
+      decision.decision_log = [
+        ...(decision.decision_log || []),
+        'TEST-OVERRIDE (is_test sandbox): prod zou blokkeren (' + prodBlockReason + '), toch versturen via dry-run.',
+      ];
+    }
+
     const triggeredBy = isInternalCall ? 'webhook' : 'user_click';
 
     // Audit-log decision ALTIJD (ook bij allow=false).
@@ -585,11 +602,15 @@ export default async function handler(req, res) {
     }
 
     return res.status(200).json({
-      sent:           true,
-      suggestion_id:  suggestionId,
-      message_id:     sentMessageId,
-      meta_wamid:     wamid,
+      sent:              true,
+      suggestion_id:     suggestionId,
+      message_id:        sentMessageId,
+      meta_wamid:        wamid,
       decision,
+      // Test-override transparantie: null bij een normaal toegestane send,
+      // anders de DB-status die productie zou hebben gezet (bv.
+      // BLOCKED_INTENT_DISABLED, BLOCKED_LOW_CONFIDENCE, ...).
+      prod_block_reason: prodBlockReason,
     });
   } catch (e) {
     console.error('[joost-send-autonomous]', e && e.message);
