@@ -1110,6 +1110,7 @@
           <button class="wb-menu-item" data-wb-sub="templates"    type="button" role="menuitem"><i class="ti ti-file-text"    style="color:#0ea5e9"></i> Templates</button>
           <button class="wb-menu-item" data-wb-sub="workflows"    type="button" role="menuitem"><i class="ti ti-git-branch"   style="color:#10b981"></i> Workflows</button>
           <button class="wb-menu-item" data-wb-sub="geschiedenis" type="button" role="menuitem"><i class="ti ti-history"      style="color:#94a3b8"></i> Geschiedenis</button>
+          <button class="wb-menu-item" data-wb-sub="sandbox"      type="button" role="menuitem" data-super-admin-only hidden><i class="ti ti-flask" style="color:#f59e0b"></i> 🧪 Sandbox</button>
         </div>
       </div>
     </div>
@@ -1132,6 +1133,7 @@
     <div id="wb-sub-open-acties" hidden></div>
     <div id="wb-sub-pipeline"    hidden></div>
     <div id="wb-sub-vandaag"     hidden></div>
+    <div id="wb-sub-sandbox"     hidden></div>
   </div>
 
   <!-- ===== Klanten-view (Groep B: thin view binnen Finance) =====
@@ -3285,7 +3287,7 @@
   // (overzicht/probleemklanten/workflows/templates/geschiedenis/arrangements)
   // blijft volledig intact onder de 'overzicht' sub-tab.
   function setSubView(sub) {
-    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis'];
+    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis', 'sandbox'];
     if (!validSubs.includes(sub)) sub = 'vandaag';
     // Backward-compat: deep-link ?sub=actie is nu opgenomen in Vandaag —
     // redirect naar 'vandaag' zodat de zichtbare view klopt. 'overzicht'
@@ -3298,7 +3300,7 @@
     // dropdowns (Meer / Instellingen) worden actief zodra hun sub-key
     // in de bijbehorende groep zit.
     const MEER_SUBS  = ['probleemklanten', 'arrangements', 'open-acties'];
-    const INST_SUBS  = ['templates', 'workflows', 'geschiedenis'];
+    const INST_SUBS  = ['templates', 'workflows', 'geschiedenis', 'sandbox'];
     document.querySelectorAll('#wanbetalersSubNav .sr-seg').forEach(b => {
       const btnSub = b.dataset.wbSub;
       const btnTgl = b.dataset.wbToggle;
@@ -3319,11 +3321,13 @@
     // Default: alles uit, dan target weer aan.
     const vPipeline = document.getElementById('wb-sub-pipeline');
     const vVandaag  = document.getElementById('wb-sub-vandaag');
+    const vSandbox  = document.getElementById('wb-sub-sandbox');
     if (vInbox)        vInbox.hidden        = true;
     if (vDunning)      vDunning.hidden      = true;
     if (vOpenActies)   vOpenActies.hidden   = true;
     if (vPipeline)     vPipeline.hidden     = true;
     if (vVandaag)      vVandaag.hidden      = true;
+    if (vSandbox)      vSandbox.hidden      = true;
 
     // Sub-nav layering fix: bij Wanbetalers-wrapper actief verbergen we de
     // interne dunningSubNav (Overzicht/Probleemklanten/Workflows/Templates/
@@ -3377,6 +3381,9 @@
     } else if (sub === 'vandaag') {
       if (vVandaag) vVandaag.hidden = false;
       mountDunVandaagHost();
+    } else if (sub === 'sandbox') {
+      if (vSandbox) vSandbox.hidden = false;
+      mountSandboxHost();
     } else { // overzicht (deep-link backward-compat: niet meer in de nav,
              // maar blijft functioneel).
       if (vDunning) vDunning.hidden = false;
@@ -3498,6 +3505,18 @@
   function wireWanbetalersOnce() {
     if (_wbWired) return;
     _wbWired = true;
+
+    // Super_admin-only zichtbaarheid van de 🧪 Sandbox-menu-item.
+    // Hergebruikt het bestaande RBAC-wildcard-patroon (perms.has('*')).
+    (async () => {
+      try {
+        if (!window.RBAC || typeof window.RBAC.ensurePermissionsLoaded !== 'function') return;
+        const perms = await window.RBAC.ensurePermissionsLoaded();
+        if (perms && perms.has && perms.has('*')) {
+          document.querySelectorAll('[data-super-admin-only]').forEach((el) => { el.hidden = false; });
+        }
+      } catch (_) { /* fail-soft: item blijft verborgen */ }
+    })();
 
     // Hoofdtabs (data-wb-sub direct op de knop).
     document.querySelectorAll('#wanbetalersSubNav .sr-seg[data-wb-sub]').forEach(b => {
@@ -13025,6 +13044,228 @@
       btn.disabled = false;
       btn.innerHTML = origHtml;
     }
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Wanbetalers-SANDBOX (super_admin) — test-persoon + versneld testpaneel.
+  // Roept /api/wanbetalers-sandbox-* endpoints aan (die zelf super_admin
+  // gaten). Alle acties tonen resultaat via toast.
+  // ────────────────────────────────────────────────────────────────────
+  const _sbxState = { mounted: false };
+
+  function mountSandboxHost() {
+    const host = document.getElementById('wb-sub-sandbox');
+    if (!host) return;
+    if (!_sbxState.mounted) {
+      host.innerHTML = _sbxShellHtml();
+      _sbxWireShell();
+      _sbxState.mounted = true;
+    }
+    sbxReloadStatus();
+  }
+
+  function _sbxShellHtml() {
+    return `
+      <div style="display:flex;flex-direction:column;gap:16px;max-width:900px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <i class="ti ti-flask" style="color:#f59e0b;font-size:22px"></i>
+          <div>
+            <div style="font-size:15.5px;font-weight:700;color:var(--text-dim)">Wanbetalers-sandbox</div>
+            <div style="font-size:11.5px;color:var(--text-faint)">Test-persoon + versneld testpaneel · alleen super_admin.</div>
+          </div>
+        </div>
+
+        <div id="sbxDryRunCard" style="border:1px solid var(--border);background:var(--bg-elev);border-radius:10px;padding:14px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+          <div>
+            <div id="sbxDryRunLabel" style="font-size:14px;font-weight:700">Dry-run …</div>
+            <div id="sbxDryRunHint"  style="font-size:11.5px;color:var(--text-faint);margin-top:2px">status wordt geladen…</div>
+          </div>
+          <button id="sbxDryRunToggle" class="sr-abtn" type="button">Schakel</button>
+        </div>
+
+        <div style="border:1px solid var(--border);background:var(--bg-elev);border-radius:10px;padding:14px">
+          <div style="font-size:13.5px;font-weight:700;margin-bottom:8px">1. Test-persoon</div>
+          <div id="sbxStatusBlock" style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">Laden…</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <input id="sbxSeedName"  class="fin-input" placeholder="Naam (bv. Jeffrey)">
+            <input id="sbxSeedPhone" class="fin-input" placeholder="Telefoon (bv. +31612345678)">
+            <input id="sbxSeedEmail" class="fin-input" placeholder="E-mail">
+            <input id="sbxSeedCount" class="fin-input" type="number" min="1" max="10" value="2" placeholder="# facturen">
+            <input id="sbxSeedAmount" class="fin-input" type="number" min="1" max="10000" value="250" placeholder="€ per factuur">
+            <input id="sbxSeedDays"  class="fin-input" type="number" min="1" max="365" value="30" placeholder="Dagen te laat">
+          </div>
+          <button id="sbxSeedBtn" class="sr-abtn primary" type="button" style="margin-top:10px"><i class="ti ti-user-plus"></i> Seed / refresh test-persoon</button>
+        </div>
+
+        <div style="border:1px solid var(--border);background:var(--bg-elev);border-radius:10px;padding:14px">
+          <div style="font-size:13.5px;font-weight:700;margin-bottom:8px">2. Versneld testen</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+            <label style="font-size:12.5px;color:var(--text-dim)">Fast-forward
+              <input id="sbxFfDays" class="fin-input" type="number" min="1" max="365" value="7" style="width:70px;margin-left:4px">
+            </label>
+            <button id="sbxFfBtn" class="sr-abtn" type="button">Backdate</button>
+            <button id="sbxInboundBtn" class="sr-abtn" type="button"><i class="ti ti-message-plus"></i> Simuleer inkomend WA</button>
+            <button id="sbxPaidBtn"    class="sr-abtn" type="button"><i class="ti ti-cash"></i> Markeer alle facturen betaald</button>
+            <button id="sbxRunEngineBtn" class="sr-abtn primary" type="button"><i class="ti ti-player-play"></i> Run engine (test)</button>
+            <button id="sbxRunBulkBtn"   class="sr-abtn primary" type="button"><i class="ti ti-send"></i> Bulk-job (test)</button>
+          </div>
+        </div>
+
+        <div style="border:1px solid rgba(239,68,68,.40);background:rgba(239,68,68,.06);border-radius:10px;padding:14px">
+          <div style="font-size:13.5px;font-weight:700;color:#dc2626;margin-bottom:6px">Gevarenzone</div>
+          <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:8px">Verwijdert ALLE is_test-data (persoon, facturen, conversaties, pipeline-log). Idempotent.</div>
+          <button id="sbxResetBtn" class="sr-abtn danger" type="button"><i class="ti ti-trash"></i> Reset (wis alle testdata)</button>
+        </div>
+      </div>
+    `;
+  }
+
+  async function _sbxCall(url, body) {
+    const opts = { method: body ? 'POST' : 'GET' };
+    if (body) { opts.headers = { 'Content-Type': 'application/json' }; opts.body = JSON.stringify(body); }
+    const r = await window.AgentShared.apiFetch(url, opts);
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    return d;
+  }
+
+  async function sbxReloadStatus() {
+    try {
+      const d = await _sbxCall('/api/wanbetalers-sandbox-status');
+      const dryLbl = document.getElementById('sbxDryRunLabel');
+      const dryHint = document.getElementById('sbxDryRunHint');
+      const dryBtn = document.getElementById('sbxDryRunToggle');
+      const card = document.getElementById('sbxDryRunCard');
+      if (d.dry_run) {
+        if (dryLbl)  dryLbl.textContent  = 'Dry-run: AAN (veilig)';
+        if (dryHint) dryHint.textContent = 'Geen berichten gaan de deur uit. Alles wordt alleen gelogd.';
+        if (card)    card.style.borderColor = 'var(--border)';
+        if (dryBtn)  dryBtn.textContent = 'Zet UIT (⚠️ echt versturen)';
+      } else {
+        if (dryLbl)  dryLbl.textContent  = '⚠️ ECHTE verzending actief';
+        if (dryHint) dryHint.textContent = 'Berichten gaan nu daadwerkelijk naar de recipient-guard-adressen.';
+        if (card)    card.style.borderColor = '#dc2626';
+        if (dryBtn)  dryBtn.textContent = 'Zet AAN (veilig)';
+      }
+      const st = document.getElementById('sbxStatusBlock');
+      if (st) {
+        if (d.customer) {
+          const invLines = (d.invoices || []).map((iv) => `<li>${esc(iv.invoice_number)} · € ${(Number(iv.amount_total)||0).toFixed(2)} · vervalt ${esc(iv.due_date || '—')} · <em>${esc(iv.status)}</em></li>`).join('');
+          st.innerHTML = `
+            <div><strong>${esc(d.customer.first_name || 'Onbekend')}</strong> — ${esc(d.customer.email || '')} · ${esc(d.customer.phone || '')}</div>
+            <div style="margin-top:4px">Fase pipeline: <strong>${esc(d.pipeline_stage || '—')}</strong></div>
+            <ul style="margin:6px 0 0 18px;padding:0;font-size:11.5px">${invLines || '<li>Geen facturen</li>'}</ul>
+            <div style="margin-top:6px;color:var(--text-faint)">Sandbox-contact voor recipient-guard: WA=${esc(d.contact?.phone || '—')} · EM=${esc(d.contact?.email || '—')}</div>
+          `;
+        } else {
+          st.innerHTML = '<em>Nog geen test-persoon. Vul de velden en klik Seed.</em>';
+        }
+      }
+    } catch (e) {
+      if (typeof showToast === 'function') showToast('Status laden mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+
+  function _sbxWireShell() {
+    document.getElementById('sbxDryRunToggle')?.addEventListener('click', async () => {
+      const label = document.getElementById('sbxDryRunLabel')?.textContent || '';
+      const currentlyOn = label.startsWith('Dry-run: AAN');
+      const nextEnabled = !currentlyOn ? true : false;
+      if (currentlyOn) {
+        if (!confirm('⚠️ Weet je zeker dat je dry-run wilt UITZETTEN?\n\nBerichten gaan dan ECHT de deur uit naar de recipient-guard-adressen (sandbox-contact). Alleen voor eindtest gebruiken.')) return;
+      }
+      try {
+        await _sbxCall('/api/wanbetalers-sandbox-set-dry-run', { enabled: nextEnabled });
+        if (typeof showToast === 'function') showToast(`Dry-run ${nextEnabled ? 'AAN' : 'UIT'}`, 'success');
+        sbxReloadStatus();
+      } catch (e) {
+        if (typeof showToast === 'function') showToast('Toggle mislukt: ' + (e?.message || 'onbekend'), 'error');
+      }
+    });
+
+    document.getElementById('sbxSeedBtn')?.addEventListener('click', async () => {
+      const body = {
+        name : document.getElementById('sbxSeedName')?.value.trim(),
+        phone: document.getElementById('sbxSeedPhone')?.value.trim(),
+        email: document.getElementById('sbxSeedEmail')?.value.trim(),
+        invoice_count         : Number(document.getElementById('sbxSeedCount')?.value)  || 2,
+        amount_per_invoice_eur: Number(document.getElementById('sbxSeedAmount')?.value) || 250,
+        days_overdue          : Number(document.getElementById('sbxSeedDays')?.value)   || 30,
+      };
+      try {
+        await _sbxCall('/api/wanbetalers-sandbox-seed', body);
+        if (typeof showToast === 'function') showToast('Test-persoon opgeslagen', 'success');
+        sbxReloadStatus();
+      } catch (e) {
+        if (typeof showToast === 'function') showToast('Seed mislukt: ' + (e?.message || 'onbekend'), 'error');
+      }
+    });
+
+    document.getElementById('sbxFfBtn')?.addEventListener('click', async () => {
+      const days = Number(document.getElementById('sbxFfDays')?.value) || 7;
+      try {
+        const d = await _sbxCall('/api/wanbetalers-sandbox-fast-forward', { days });
+        if (typeof showToast === 'function') showToast(`Fast-forward ${days}d — ${d.invoices_updated || 0} facturen bijgewerkt`, 'success');
+        sbxReloadStatus();
+      } catch (e) {
+        if (typeof showToast === 'function') showToast('Fast-forward mislukt: ' + (e?.message || 'onbekend'), 'error');
+      }
+    });
+
+    document.getElementById('sbxInboundBtn')?.addEventListener('click', async () => {
+      const text = window.prompt('Berichttekst (leeg = default):', 'Ik zal deze week betalen.');
+      if (text === null) return;
+      try {
+        await _sbxCall('/api/wanbetalers-sandbox-simulate-inbound', { body: text });
+        if (typeof showToast === 'function') showToast('Inkomend bericht ontvangen', 'success');
+        sbxReloadStatus();
+      } catch (e) {
+        if (typeof showToast === 'function') showToast('Inbound mislukt: ' + (e?.message || 'onbekend'), 'error');
+      }
+    });
+
+    document.getElementById('sbxPaidBtn')?.addEventListener('click', async () => {
+      if (!confirm('Alle test-facturen op betaald zetten?')) return;
+      try {
+        const d = await _sbxCall('/api/wanbetalers-sandbox-mark-paid', {});
+        if (typeof showToast === 'function') showToast(`${d.invoices_marked_paid || 0} facturen betaald · pipeline ${d.pipeline_opgelost_fired ? 'opgelost' : 'ongewijzigd'}`, 'success');
+        sbxReloadStatus();
+      } catch (e) {
+        if (typeof showToast === 'function') showToast('Mark-paid mislukt: ' + (e?.message || 'onbekend'), 'error');
+      }
+    });
+
+    document.getElementById('sbxRunEngineBtn')?.addEventListener('click', async () => {
+      try {
+        const d = await _sbxCall('/api/wanbetalers-sandbox-run-engine', {});
+        if (typeof showToast === 'function') showToast(`Engine: detected=${d.engine_result?.detected||0}, advanced=${d.engine_result?.runs_advanced||0}${d.dry_run ? ' (dry-run)' : ''}`, 'success');
+        sbxReloadStatus();
+      } catch (e) {
+        if (typeof showToast === 'function') showToast('Engine-run mislukt: ' + (e?.message || 'onbekend'), 'error');
+      }
+    });
+
+    document.getElementById('sbxRunBulkBtn')?.addEventListener('click', async () => {
+      const channel = window.prompt('Channel (whatsapp/email):', 'whatsapp');
+      if (!channel) return;
+      try {
+        const d = await _sbxCall('/api/wanbetalers-sandbox-run-bulk', { channel });
+        if (typeof showToast === 'function') showToast(`Bulk-job aangemaakt (is_test=true, id=${d.job_id})`, 'success');
+      } catch (e) {
+        if (typeof showToast === 'function') showToast('Bulk mislukt: ' + (e?.message || 'onbekend'), 'error');
+      }
+    });
+
+    document.getElementById('sbxResetBtn')?.addEventListener('click', async () => {
+      if (!confirm('⚠️ ALLE is_test-data verwijderen (persoon, facturen, conversaties, pipeline)?\n\nDit is definitief.')) return;
+      try {
+        const d = await _sbxCall('/api/wanbetalers-sandbox-reset', {});
+        if (typeof showToast === 'function') showToast(`Reset: ${d.customers_deleted||0} klant, ${d.invoices_deleted||0} facturen, ${d.conversations_deleted||0} gesprekken`, 'success');
+        sbxReloadStatus();
+      } catch (e) {
+        if (typeof showToast === 'function') showToast('Reset mislukt: ' + (e?.message || 'onbekend'), 'error');
+      }
+    });
   }
 
   // ────────────────────────────────────────────────────────────────────

@@ -101,6 +101,65 @@ export async function executeEmailStep({ supabaseAdmin, run, step, customer, ope
     };
   }
 
+  // ─── SANDBOX / DRY-RUN GUARDS ───────────────────────────────────────
+  // 1) Als de globale dry-run vlag AAN staat → geen echte SMTP-call, wel
+  //    het 'email_sent'-log-event zodat de rest van de flow (pipeline-
+  //    trigger, workflow-status) normaal doorloopt.
+  // 2) Als de klant is_test=true is: assert dat het doel-adres exact
+  //    matcht met app_settings.dunning_sandbox_contact.email — anders
+  //    abort. Zelfs zonder dry-run kan een test-mail dus nooit lekken.
+  try {
+    const { isDryRunEnabled, assertRecipientMatchesSandbox, buildDryRunLogPayload } =
+      await import('./dunning-dry-run.js');
+    if (customer?.is_test) {
+      try {
+        await assertRecipientMatchesSandbox({ isTest: true, actual: to, channel: 'email' });
+      } catch (guardErr) {
+        return {
+          status: 'skipped',
+          log_event: 'email_skipped_sandbox_guard',
+          log_payload: { template_id: template.id, to, reason: guardErr.message },
+        };
+      }
+    }
+    if (await isDryRunEnabled()) {
+      return {
+        status: 'ok',
+        log_event: 'email_sent',
+        log_payload: {
+          template_id: template.id,
+          to,
+          subject: rendered.subject,
+          message_id: 'dry-run',
+          variables_used: rendered.variables_used,
+          ...buildDryRunLogPayload({
+            channel: 'email',
+            to,
+            isTest: !!customer?.is_test,
+            preview: { subject: rendered.subject, body: rendered.body.slice(0, 200) },
+          }),
+        },
+      };
+    }
+  } catch (guardModuleErr) {
+    // Fail-safe: als de guard-module niet laadt (bv. eerste deploy zonder
+    // migratie 036), gedragen we ons alsof dry-run AAN staat en sturen NIET.
+    console.warn('[dunning-executor] dry-run module niet beschikbaar → skip send', guardModuleErr?.message);
+    return {
+      status: 'ok',
+      log_event: 'email_sent',
+      log_payload: {
+        template_id: template.id,
+        to,
+        subject: rendered.subject,
+        message_id: 'dry-run-fallback',
+        variables_used: rendered.variables_used,
+        dry_run: true,
+        fallback: 'guard_module_unavailable',
+      },
+    };
+  }
+
   try {
     const html = wrapEmailHtml(rendered.subject, escapeBodyToHtml(rendered.body));
     const result = await sendMail({
