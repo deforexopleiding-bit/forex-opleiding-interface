@@ -7732,8 +7732,8 @@
       // Re-fetch lijst zodat het gesprek naar de juiste tab beweegt.
       loadInboxConvList();
     } catch (e) {
-      if (typeof showToast === 'function') showToast('Kon status niet wijzigen: ' + (e?.message || 'onbekend'), 'error');
-      else console.error('[inbox set-status]', e);
+      window.AgentShared?.showToast?.('Kon status niet wijzigen: ' + (e?.message || 'onbekend'), 'error');
+      console.error('[inbox set-status]', e);
     }
   }
 
@@ -13162,7 +13162,7 @@
         }
       }
     } catch (e) {
-      if (typeof showToast === 'function') showToast('Status laden mislukt: ' + (e?.message || 'onbekend'), 'error');
+      window.AgentShared?.showToast?.('Status laden mislukt: ' + (e?.message || 'onbekend'), 'error');
     }
   }
 
@@ -13176,10 +13176,10 @@
       }
       try {
         await _sbxCall('/api/wanbetalers-sandbox-set-dry-run', { enabled: nextEnabled });
-        if (typeof showToast === 'function') showToast(`Dry-run ${nextEnabled ? 'AAN' : 'UIT'}`, 'success');
+        window.AgentShared?.showToast?.(`Dry-run ${nextEnabled ? 'AAN' : 'UIT'}`, 'success');
         sbxReloadStatus();
       } catch (e) {
-        if (typeof showToast === 'function') showToast('Toggle mislukt: ' + (e?.message || 'onbekend'), 'error');
+        window.AgentShared?.showToast?.('Toggle mislukt: ' + (e?.message || 'onbekend'), 'error');
       }
     });
 
@@ -13194,10 +13194,10 @@
       };
       try {
         await _sbxCall('/api/wanbetalers-sandbox-seed', body);
-        if (typeof showToast === 'function') showToast('Test-persoon opgeslagen', 'success');
+        window.AgentShared?.showToast?.('Test-persoon opgeslagen', 'success');
         sbxReloadStatus();
       } catch (e) {
-        if (typeof showToast === 'function') showToast('Seed mislukt: ' + (e?.message || 'onbekend'), 'error');
+        window.AgentShared?.showToast?.('Seed mislukt: ' + (e?.message || 'onbekend'), 'error');
       }
     });
 
@@ -13205,10 +13205,10 @@
       const days = Number(document.getElementById('sbxFfDays')?.value) || 7;
       try {
         const d = await _sbxCall('/api/wanbetalers-sandbox-fast-forward', { days });
-        if (typeof showToast === 'function') showToast(`Fast-forward ${days}d — ${d.invoices_updated || 0} facturen bijgewerkt`, 'success');
+        window.AgentShared?.showToast?.(`Fast-forward ${days}d — ${d.invoices_updated || 0} facturen bijgewerkt`, 'success');
         sbxReloadStatus();
       } catch (e) {
-        if (typeof showToast === 'function') showToast('Fast-forward mislukt: ' + (e?.message || 'onbekend'), 'error');
+        window.AgentShared?.showToast?.('Fast-forward mislukt: ' + (e?.message || 'onbekend'), 'error');
       }
     });
 
@@ -13217,10 +13217,10 @@
       if (text === null) return;
       try {
         await _sbxCall('/api/wanbetalers-sandbox-simulate-inbound', { body: text });
-        if (typeof showToast === 'function') showToast('Inkomend bericht ontvangen', 'success');
+        window.AgentShared?.showToast?.('Inkomend bericht ontvangen', 'success');
         sbxReloadStatus();
       } catch (e) {
-        if (typeof showToast === 'function') showToast('Inbound mislukt: ' + (e?.message || 'onbekend'), 'error');
+        window.AgentShared?.showToast?.('Inbound mislukt: ' + (e?.message || 'onbekend'), 'error');
       }
     });
 
@@ -13228,20 +13228,20 @@
       if (!confirm('Alle test-facturen op betaald zetten?')) return;
       try {
         const d = await _sbxCall('/api/wanbetalers-sandbox-mark-paid', {});
-        if (typeof showToast === 'function') showToast(`${d.invoices_marked_paid || 0} facturen betaald · pipeline ${d.pipeline_opgelost_fired ? 'opgelost' : 'ongewijzigd'}`, 'success');
+        window.AgentShared?.showToast?.(`${d.invoices_marked_paid || 0} facturen betaald · pipeline ${d.pipeline_opgelost_fired ? 'opgelost' : 'ongewijzigd'}`, 'success');
         sbxReloadStatus();
       } catch (e) {
-        if (typeof showToast === 'function') showToast('Mark-paid mislukt: ' + (e?.message || 'onbekend'), 'error');
+        window.AgentShared?.showToast?.('Mark-paid mislukt: ' + (e?.message || 'onbekend'), 'error');
       }
     });
 
     document.getElementById('sbxRunEngineBtn')?.addEventListener('click', async () => {
       try {
         const d = await _sbxCall('/api/wanbetalers-sandbox-run-engine', {});
-        if (typeof showToast === 'function') showToast(`Engine: detected=${d.engine_result?.detected||0}, advanced=${d.engine_result?.runs_advanced||0}${d.dry_run ? ' (dry-run)' : ''}`, 'success');
+        window.AgentShared?.showToast?.(`Engine: detected=${d.engine_result?.detected||0}, advanced=${d.engine_result?.runs_advanced||0}${d.dry_run ? ' (dry-run)' : ''}`, 'success');
         sbxReloadStatus();
       } catch (e) {
-        if (typeof showToast === 'function') showToast('Engine-run mislukt: ' + (e?.message || 'onbekend'), 'error');
+        window.AgentShared?.showToast?.('Engine-run mislukt: ' + (e?.message || 'onbekend'), 'error');
       }
     });
 
@@ -13255,10 +13255,10 @@
         let stageStr = '';
         if (d.pipeline_moved)      stageStr = ' → fase aangemaand';
         else if (d.sent && !d.auto_toggle) stageStr = ' (fase niet verschoven: auto-trigger uit)';
-        if (typeof showToast === 'function') showToast(`Bulk (test): ${status}${dryStr}${stageStr}`, d.sent ? 'success' : 'error');
+        window.AgentShared?.showToast?.(`Bulk (test): ${status}${dryStr}${stageStr}`, d.sent ? 'success' : 'error');
         sbxReloadStatus();
       } catch (e) {
-        if (typeof showToast === 'function') showToast('Bulk mislukt: ' + (e?.message || 'onbekend'), 'error');
+        window.AgentShared?.showToast?.('Bulk mislukt: ' + (e?.message || 'onbekend'), 'error');
       }
     });
 
@@ -13266,10 +13266,10 @@
       if (!confirm('⚠️ ALLE is_test-data verwijderen (persoon, facturen, conversaties, pipeline)?\n\nDit is definitief.')) return;
       try {
         const d = await _sbxCall('/api/wanbetalers-sandbox-reset', {});
-        if (typeof showToast === 'function') showToast(`Reset: ${d.customers_deleted||0} klant, ${d.invoices_deleted||0} facturen, ${d.conversations_deleted||0} gesprekken`, 'success');
+        window.AgentShared?.showToast?.(`Reset: ${d.customers_deleted||0} klant, ${d.invoices_deleted||0} facturen, ${d.conversations_deleted||0} gesprekken`, 'success');
         sbxReloadStatus();
       } catch (e) {
-        if (typeof showToast === 'function') showToast('Reset mislukt: ' + (e?.message || 'onbekend'), 'error');
+        window.AgentShared?.showToast?.('Reset mislukt: ' + (e?.message || 'onbekend'), 'error');
       }
     });
   }
@@ -13467,7 +13467,7 @@
       if (_vdgState && _vdgState.mounted) _vdgLoadKpis();
     } catch (e) {
       console.error('[dun-actions load]', e);
-      if (typeof showToast === 'function') showToast('Actie-lijst laden mislukt: ' + (e?.message || 'onbekend'), 'error');
+      window.AgentShared?.showToast?.('Actie-lijst laden mislukt: ' + (e?.message || 'onbekend'), 'error');
     } finally {
       _actState.loading = false;
     }
@@ -13807,7 +13807,7 @@
     } catch (e) {
       console.error('[pipeline load]', e);
       if (list) list.innerHTML = `<div style="padding:40px;text-align:center;color:#f87171;font-size:12.5px;width:100%">Fout bij laden: ${esc(e?.message || 'onbekend')}</div>`;
-      if (typeof showToast === 'function') showToast('Pipeline laden mislukt: ' + (e?.message || 'onbekend'), 'error');
+      window.AgentShared?.showToast?.('Pipeline laden mislukt: ' + (e?.message || 'onbekend'), 'error');
     } finally {
       _pipeState.loading = false;
     }
@@ -13856,12 +13856,12 @@
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
-      if (typeof showToast === 'function') showToast('Fase gewijzigd', 'success');
+      window.AgentShared?.showToast?.('Fase gewijzigd', 'success');
     } catch (e) {
       // Rollback
       _pipeState.list[idx].stage_slug = prev;
       renderPipeline();
-      if (typeof showToast === 'function') showToast('Fase-wijziging mislukt: ' + (e?.message || 'onbekend'), 'error');
+      window.AgentShared?.showToast?.('Fase-wijziging mislukt: ' + (e?.message || 'onbekend'), 'error');
     }
   }
 
@@ -14132,11 +14132,11 @@
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
-      if (typeof showToast === 'function') showToast('Notitie geplaatst', 'success');
+      window.AgentShared?.showToast?.('Notitie geplaatst', 'success');
       // Achtergrond-refresh zodat de last_log-hint bijwerkt.
       loadPipelineData({ background: true });
     } catch (e) {
-      if (typeof showToast === 'function') showToast('Notitie mislukt: ' + (e?.message || 'onbekend'), 'error');
+      window.AgentShared?.showToast?.('Notitie mislukt: ' + (e?.message || 'onbekend'), 'error');
     }
   }
 
@@ -14289,12 +14289,12 @@
         });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
-        if (typeof showToast === 'function') showToast('Fase gewijzigd', 'success');
+        window.AgentShared?.showToast?.('Fase gewijzigd', 'success');
         // Refresh detail + achtergrondlijst
         await _pipeLoadDetail(cid);
         await loadPipelineData({ background: true });
       } catch (err) {
-        if (typeof showToast === 'function') showToast('Fase wijzigen mislukt: ' + (err?.message || 'onbekend'), 'error');
+        window.AgentShared?.showToast?.('Fase wijzigen mislukt: ' + (err?.message || 'onbekend'), 'error');
       }
     });
 
@@ -14315,7 +14315,7 @@
         await _pipeLoadDetail(cid);
         await loadPipelineData({ background: true });
       } catch (err) {
-        if (typeof showToast === 'function') showToast('Notitie mislukt: ' + (err?.message || 'onbekend'), 'error');
+        window.AgentShared?.showToast?.('Notitie mislukt: ' + (err?.message || 'onbekend'), 'error');
       }
     });
 
@@ -14326,12 +14326,12 @@
       const title = (t?.value || '').trim();
       const dueRaw = (due?.value || '').trim();
       if (!cid || !title || !dueRaw) {
-        if (typeof showToast === 'function') showToast('Titel én datum verplicht', 'warning');
+        window.AgentShared?.showToast?.('Titel én datum verplicht', 'warning');
         return;
       }
       let dueIso;
       try { dueIso = new Date(dueRaw).toISOString(); }
-      catch (_) { if (typeof showToast === 'function') showToast('Ongeldige datum', 'warning'); return; }
+      catch (_) { window.AgentShared?.showToast?.('Ongeldige datum', 'warning'); return; }
       try {
         const r = await window.AgentShared.apiFetch('/api/dunning-pipeline-appointment', {
           method:  'POST',
@@ -14345,7 +14345,7 @@
         await _pipeLoadDetail(cid);
         await loadPipelineData({ background: true });
       } catch (err) {
-        if (typeof showToast === 'function') showToast('Afspraak mislukt: ' + (err?.message || 'onbekend'), 'error');
+        window.AgentShared?.showToast?.('Afspraak mislukt: ' + (err?.message || 'onbekend'), 'error');
       }
     });
 
@@ -14365,7 +14365,7 @@
           await _pipeLoadDetail(_pipeState.activeCustId);
           await loadPipelineData({ background: true });
         } catch (err) {
-          if (typeof showToast === 'function') showToast('Afvinken mislukt: ' + (err?.message || 'onbekend'), 'error');
+          window.AgentShared?.showToast?.('Afvinken mislukt: ' + (err?.message || 'onbekend'), 'error');
         }
       });
     });
@@ -14474,7 +14474,7 @@
       // Herlaad berichten
       await _pipeLoadChat(_pipeState.activeCustId);
     } catch (e) {
-      if (typeof showToast === 'function') showToast('Verzenden mislukt: ' + (e?.message || 'onbekend'), 'error');
+      window.AgentShared?.showToast?.('Verzenden mislukt: ' + (e?.message || 'onbekend'), 'error');
     } finally {
       if (btn) btn.disabled = false;
     }
@@ -14492,9 +14492,9 @@
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
-      if (typeof showToast === 'function') showToast('Gesprek gearchiveerd', 'success');
+      window.AgentShared?.showToast?.('Gesprek gearchiveerd', 'success');
     } catch (e) {
-      if (typeof showToast === 'function') showToast('Archiveren mislukt: ' + (e?.message || 'onbekend'), 'error');
+      window.AgentShared?.showToast?.('Archiveren mislukt: ' + (e?.message || 'onbekend'), 'error');
     }
   }
 
