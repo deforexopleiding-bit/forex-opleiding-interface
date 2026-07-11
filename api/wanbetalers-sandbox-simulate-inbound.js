@@ -177,10 +177,18 @@ export default async function handler(req, res) {
               headers,
               body:    JSON.stringify({ suggestion_id: joost.suggestion_id, test_bypass: true }),
             });
-            joost.autonomy_sent = r2.ok;
             if (!r2.ok) {
               const txt = await r2.text().catch(() => '');
+              joost.autonomy_sent = false;
               joost.note = 'autonomie HTTP ' + r2.status + ': ' + (txt || '').slice(0, 160);
+            } else {
+              const j2 = await r2.json().catch(() => ({}));
+              joost.autonomy_sent = (j2.sent === true);
+              if (j2.sent === true && j2.prod_block_reason) {
+                joost.note = 'prod zou blokkeren: ' + j2.prod_block_reason;
+              } else if (j2.sent === false) {
+                joost.note = 'geblokkeerd: ' + (j2.blocked_reason || j2.db_status || 'onbekend');
+              }
             }
           } catch (fetchErr) {
             joost.note = 'autonomie fetch fail: ' + (fetchErr?.message || fetchErr);
