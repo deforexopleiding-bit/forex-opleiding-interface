@@ -6,6 +6,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { customerDisplayName } from './_lib/customer-name.js';
+import { getCreditedDebtBatch } from './_lib/credited-debt.js';
 
 const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
 const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
@@ -94,9 +95,14 @@ export default async function handler(req, res) {
       if (!nextApptByCust.has(a.customer_id)) nextApptByCust.set(a.customer_id, a);
     }
 
+    // Batch 5: gecrediteerde-schuld aggregaat per klant (fail-soft; retourneert
+    // lege Map bij DB-fout of ontbrekende tabel). Alleen aggregate, geen rows[].
+    const creditedByCust = await getCreditedDebtBatch(custIds);
+
     const items = rows.map((r) => {
       const c = custById.get(r.customer_id) || null;
       const agg = openByCust.get(r.customer_id) || { count: 0, cents: 0 };
+      const cd = creditedByCust.get(r.customer_id) || null;
       return {
         pipeline_id       : r.id,
         customer_id       : r.customer_id,
@@ -110,6 +116,11 @@ export default async function handler(req, res) {
         total_open_cents  : agg.cents,
         last_log          : lastLogByCust.get(r.customer_id) || null,
         next_appointment  : nextApptByCust.get(r.customer_id) || null,
+        credited_debt     : cd && cd.count > 0 ? {
+          count            : cd.count,
+          total_incl_cents : Math.round((cd.total_incl || 0) * 100),
+          last_credited_on : cd.last_credited_on,
+        } : null,
       };
     });
     return res.status(200).json({ items });

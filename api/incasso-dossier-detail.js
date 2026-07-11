@@ -4,6 +4,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { getCreditedDebt } from './_lib/credited-debt.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
@@ -66,6 +67,10 @@ export default async function handler(req, res) {
       return type === 'wik_letter_sent' || type === 'be_letter_sent' || type === 'brief_verstuurd';
     });
 
+    // Crediteerronde-historie (PR-3 zichtbaarheid). Fail-soft — helper geeft
+    // lege agg terug bij DB-fout of ontbrekende tabel.
+    const credited_debt = await getCreditedDebt(cid);
+
     return res.status(200).json({
       ok           : true,
       dossier,
@@ -74,6 +79,7 @@ export default async function handler(req, res) {
       arrangements : arrangements || [],
       conversations: conversations || [],
       dunning_log  : dunningLog || [],
+      credited_debt,
       flags        : { wik_letter_sent },
     });
   } catch (e) {

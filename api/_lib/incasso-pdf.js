@@ -13,6 +13,7 @@
 import PDFDocument from 'pdfkit';
 import { supabaseAdmin } from '../supabase.js';
 import { customerDisplayName } from './customer-name.js';
+import { getCreditedDebt } from './credited-debt.js';
 
 const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
 
@@ -103,6 +104,7 @@ async function fetchDossierContext(dossierId) {
     { data: conversations },
     { data: dunningLog },
     { data: deals },
+    creditedDebt,
   ] = await Promise.all([
     supabaseAdmin.from('customers')
       .select('id, first_name, last_name, company_name, is_company, email, phone, address_street, address_number, address_postal, address_city, tl_contact_id, tl_company_id')
@@ -123,6 +125,7 @@ async function fetchDossierContext(dossierId) {
     supabaseAdmin.from('deals')
       .select('id, quote_reference, tl_quotation_status, tl_quotation_accepted_at, total_amount, created_at')
       .eq('customer_id', cid).order('created_at', { ascending: false }).limit(5),
+    getCreditedDebt(cid),
   ]);
 
   return {
@@ -133,6 +136,7 @@ async function fetchDossierContext(dossierId) {
     conversations : conversations || [],
     dunning_log   : dunningLog || [],
     deals         : deals || [],
+    credited_debt : creditedDebt,
   };
 }
 
@@ -170,7 +174,7 @@ function _kvRow(doc, label, value) {
 }
 
 function _renderSections(doc, ctx) {
-  const { dossier, customer, invoices, arrangements, conversations, dunning_log, deals } = ctx;
+  const { dossier, customer, invoices, arrangements, conversations, dunning_log, deals, credited_debt } = ctx;
 
   // ── KOP ────────────────────────────────────────────────────────────
   doc.font('Helvetica-Bold').fontSize(18).fillColor('#0f172a').text('INCASSODOSSIER', 50, 50);
@@ -270,6 +274,58 @@ function _renderSections(doc, ctx) {
   doc.moveDown(0.6);
   doc.font('Helvetica').fontSize(8).fillColor('#64748b')
     .text('(Snapshot bij aanmelding: ' + eur(dossier.debt_snapshot?.total_open_eur || 0) + ' — ' + (dossier.debt_snapshot?.open_invoice_count || 0) + ' facturen)');
+
+  // ── GECREDITEERDE SCHULD (crediteerronde-historie) ────────────────
+  // Alleen renderen als er credit-historie is. Context voor het bureau:
+  // toont hoeveel schuld eerder (deels) is gecrediteerd + welk abo verlengd
+  // is + wanneer de laatste ronde was. De klant is nog steeds het openstaande
+  // bedrag hierboven verschuldigd — dat is de vordering die het bureau int.
+  if (credited_debt && credited_debt.count > 0) {
+    _sectionHeader(doc, 'Gecrediteerde schuld (eerdere crediteerronde)');
+    const summaryLine =
+      `${credited_debt.count} factu${credited_debt.count === 1 ? 'ur' : 'ren'} eerder gecrediteerd` +
+      (credited_debt.last_credited_on ? ' (laatst op ' + fmtDateNl(credited_debt.last_credited_on) + ')' : '') +
+      ', totaal ' + eur(credited_debt.total_incl) + ' incl. BTW' +
+      (credited_debt.total_vat > 0 ? ' (waarvan ' + eur(credited_debt.total_vat) + ' BTW)' : '') +
+      (credited_debt.months_extended_total > 0 ? ', abonnement +' + credited_debt.months_extended_total + ' maand(en) verlengd' : '') +
+      '.';
+    doc.font('Helvetica').fontSize(10).fillColor('#0f172a').text(sanitizeForPdf(summaryLine), { width: 495 });
+    doc.moveDown(0.4);
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#0f172a')
+      .text('Klant is nog steeds ' + eur(totalOpen) + ' verschuldigd (zie Vordering hierboven).', { width: 495 });
+    // Historie-tabel (max 10 recente ronde-inserts).
+    const rows = Array.isArray(credited_debt.rows) ? credited_debt.rows.slice(0, 10) : [];
+    if (rows.length > 0) {
+      doc.moveDown(0.4);
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(8).fillColor('#475569');
+      doc.text('Datum',        50,  headerY, { width: 70 });
+      doc.text('Kwartaal',     120, headerY, { width: 55 });
+      doc.text('Creditnota',   175, headerY, { width: 150 });
+      doc.text('Bedrag incl.', 325, headerY, { width: 70, align: 'right' });
+      doc.text('BTW',          395, headerY, { width: 60, align: 'right' });
+      doc.text('Abo +mnd',     455, headerY, { width: 90, align: 'right' });
+      doc.moveDown(0.3);
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
+      doc.moveDown(0.2);
+      doc.font('Helvetica').fontSize(8).fillColor('#0f172a');
+      for (const r of rows) {
+        const rowY = doc.y;
+        doc.text(fmtDateNl(r.credited_on),                                    50,  rowY, { width: 70 });
+        doc.text(String(r.quarter || '—'),                                    120, rowY, { width: 55 });
+        doc.text(sanitizeForPdf(String(r.tl_credit_note_id || '—')).slice(0, 24), 175, rowY, { width: 150 });
+        doc.text(eur(r.amount_incl),                                          325, rowY, { width: 70, align: 'right' });
+        doc.text(eur(r.vat_amount),                                           395, rowY, { width: 60, align: 'right' });
+        doc.text(r.months_extended ? '+' + r.months_extended : '—',           455, rowY, { width: 90, align: 'right' });
+        doc.moveDown(0.25);
+      }
+      if ((credited_debt.rows || []).length > rows.length) {
+        doc.moveDown(0.2);
+        doc.font('Helvetica').fontSize(8).fillColor('#64748b')
+          .text('(' + ((credited_debt.rows || []).length - rows.length) + ' oudere entries niet getoond.)', 50, doc.y);
+      }
+    }
+  }
 
   // ── ONDERBOUWING (deals) ──────────────────────────────────────────
   _sectionHeader(doc, 'Onderbouwing (offerte / deal)');
