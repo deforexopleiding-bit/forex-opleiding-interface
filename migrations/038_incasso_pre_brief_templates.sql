@@ -12,9 +12,12 @@
 alter table public.dunning_templates
   add column if not exists code text;
 
+-- Volledige unieke index (zonder WHERE-predicaat): PostgreSQL staat
+-- meerdere NULLs toe onder een gewone unieke index, dus bestaande
+-- templates zonder code blijven geldig én ON CONFLICT (code) blijft
+-- werken. Repo == DB (Jeffrey draaide de niet-partial versie).
 create unique index if not exists ux_dunning_templates_code
-  on public.dunning_templates (code)
-  where code is not null;
+  on public.dunning_templates (code);
 
 -- ────────────────────────────────────────────────────────────────────
 -- Seed: NL WIK 14-dagenbrief
