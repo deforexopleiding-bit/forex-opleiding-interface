@@ -10,6 +10,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { customerDisplayName } from './customer-name.js';
+import { createDossierCore } from './incasso-dossier.js';
 
 const SETTINGS_KEY = 'incasso_auto';
 const OPEN_INV_STATUSES = ['open', 'partially_paid', 'overdue'];
@@ -211,4 +212,90 @@ export async function evaluateIncassoCandidates(opts = {}) {
 
   candidates.sort((a, b) => b.total_open_eur - a.total_open_eur);
   return { settings, candidates };
+}
+
+// runIncassoAuto({ openedBy, source }) — verwerkt de kandidaten uit
+// evaluateIncassoCandidates() en zet ze in dossier via createDossierCore.
+// - wik_needed → OVERSLAAN + dunning_log 'incasso_auto_skipped_wik'
+// - bureau bepaling: enige actieve bureau voor de country → gebruik die;
+//   bij >1 of 0 → bureau_id=null (mensactie kan later koppelen).
+// - createDossierCore is idempotent; created:false → stil overslaan.
+export async function runIncassoAuto({ openedBy = null, source = 'auto' } = {}) {
+  const { settings, candidates } = await evaluateIncassoCandidates();
+  const summary = {
+    total_candidates: candidates.length,
+    created         : [],
+    skipped_wik     : [],
+    skipped_other   : [],
+    errors          : [],
+  };
+
+  // Actieve bureaus vooraf ophalen — 1× query.
+  let bureausByCountry = { NL: [], BE: [] };
+  try {
+    const { data: buRows } = await supabaseAdmin
+      .from('dunning_incasso_bureaus')
+      .select('id, name, country').eq('is_active', true);
+    for (const b of buRows || []) {
+      const key = (b.country === 'BE') ? 'BE' : 'NL';
+      bureausByCountry[key].push(b);
+    }
+  } catch (e) {
+    console.warn('[incasso-auto] bureaus lookup soft-fail:', e?.message || e);
+  }
+
+  for (const c of candidates) {
+    try {
+      if (c.wik_needed) {
+        summary.skipped_wik.push({ customer_id: c.customer_id, customer_name: c.customer_name });
+        try {
+          await supabaseAdmin.from('dunning_log').insert({
+            run_id     : null,
+            step_id    : null,
+            event_type : 'incasso_auto_skipped_wik',
+            payload    : { customer_id: c.customer_id, reason: 'wik_brief_ontbreekt', source },
+          });
+        } catch (_) { /* fail-soft */ }
+        continue;
+      }
+      const country = 'NL'; // default; later te overrulen o.b.v. klant-adres.
+      const active  = bureausByCountry[country] || [];
+      const bureauId = (active.length === 1) ? active[0].id : null;
+      const result = await createDossierCore(c.customer_id, {
+        country, bureauId, openedBy, source,
+      });
+      if (result.created) {
+        summary.created.push({
+          customer_id: c.customer_id,
+          customer_name: c.customer_name,
+          dossier_id : result.dossier.id,
+          bureau_id  : bureauId,
+        });
+        try {
+          await supabaseAdmin.from('dunning_log').insert({
+            run_id     : null,
+            step_id    : null,
+            event_type : 'incasso_auto_created',
+            payload    : {
+              customer_id: c.customer_id,
+              dossier_id : result.dossier.id,
+              bureau_id  : bureauId,
+              source     : source,
+              matched_conditions: c.matched_conditions,
+              total_open_eur    : c.total_open_eur,
+              days_overdue      : c.days_overdue,
+            },
+          });
+        } catch (_) { /* fail-soft */ }
+      } else {
+        summary.skipped_other.push({ customer_id: c.customer_id, reason: 'already_open_dossier' });
+      }
+    } catch (e) {
+      console.error('[incasso-auto] candidate fail', c.customer_id, e?.message || e);
+      summary.errors.push({ customer_id: c.customer_id, error: e?.message || String(e) });
+    }
+  }
+
+  summary.settings = settings;
+  return summary;
 }

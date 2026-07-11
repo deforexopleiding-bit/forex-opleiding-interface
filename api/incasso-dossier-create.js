@@ -1,23 +1,18 @@
 // api/incasso-dossier-create.js
-// POST { customer_id, bureau_id?, country? }
-//   Bouwt debt_snapshot uit open invoices, insert dossier (status='aangemeld'),
-//   zet pipeline-fase op 'incasso' (fail-soft).
-//   Guard: al open dossier voor deze klant → 409.
+// POST { customer_id, bureau_id?, country?, confirm_no_brief? }
+//   1) 409 als klant al open dossier heeft (via createDossierCore
+//      idempotency-check).
+//   2) Particulier-guard (PR-3): is_company !== true + geen
+//      'incasso_pre_brief_sent'-marker + confirm_no_brief !== true
+//      → 200 { needs_brief:true, country, customer_id, message }.
+//   3) Anders: createDossierCore(...) → dossier + pipeline-fase incasso.
 // Permission: finance.incasso.manage.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { createDossierCore } from './_lib/incasso-dossier.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const OPEN_STATUSES     = ['open', 'partially_paid', 'overdue'];
-const TERMINAL_STATUSES = ['betaald', 'afgeschreven', 'oninbaar', 'geretourneerd'];
-
-function openAmountEur(inv) {
-  const t = Number(inv?.amount_total)    || 0;
-  const p = Number(inv?.amount_paid)     || 0;
-  const c = Number(inv?.credited_amount) || 0;
-  return Math.max(0, t - p - c);
-}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -36,35 +31,21 @@ export default async function handler(req, res) {
   const bureauId   = typeof body.bureau_id   === 'string' && UUID_RE.test(body.bureau_id)   ? body.bureau_id   : null;
   const country    = (body.country === 'BE') ? 'BE' : 'NL';
   const notes      = typeof body.notes === 'string' ? body.notes.trim() : null;
-  // PR-3: bewust doorgaan zonder pre-incassobrief bij particulier.
   const confirmNoBrief = body.confirm_no_brief === true;
 
   if (!customerId) return res.status(400).json({ error: 'customer_id (uuid) verplicht' });
 
   try {
-    // 1) Guard: bestaand open dossier?
-    const { data: existing } = await supabaseAdmin
-      .from('dunning_incasso_dossiers').select('id, status')
-      .eq('customer_id', customerId)
-      .not('status', 'in', `(${TERMINAL_STATUSES.map((s) => `"${s}"`).join(',')})`)
-      .limit(1);
-    if (existing && existing.length > 0) {
-      return res.status(409).json({ error: 'Klant zit al in incasso (open dossier)', dossier_id: existing[0].id });
-    }
-
-    // 2) Customer bestaat?
+    // 1) Customer bestaat?
     const { data: customer, error: cErr } = await supabaseAdmin
       .from('customers').select('id, first_name, last_name, company_name, is_company, email, phone')
       .eq('id', customerId).maybeSingle();
     if (cErr) throw new Error('customers lookup: ' + cErr.message);
     if (!customer) return res.status(404).json({ error: 'Klant niet gevonden' });
 
-    // 2b) PR-3 particulier-guard: pre-incassobrief (WIK NL / eerste
-    // herinnering BE) verplicht vóór incasso, tenzij expliciet
-    // confirm_no_brief=true. Zakelijke klanten (is_company=true) zijn
-    // vrijgesteld. Marker: dunning_log event 'incasso_pre_brief_sent'
-    // voor deze klant. Geen brief én geen bevestiging → 200 met
-    // { needs_brief:true } (NIET een dossier aanmaken).
+    // 2) Particulier-guard (PR-3): pre-brief verplicht tenzij expliciet
+    //    bevestigd. is_company=true (zakelijk) → guard skippen. Marker:
+    //    dunning_log event 'incasso_pre_brief_sent'.
     const isPrivate = customer.is_company !== true;
     if (isPrivate && !confirmNoBrief) {
       let hasBriefSent = false;
@@ -87,55 +68,19 @@ export default async function handler(req, res) {
       }
     }
 
-    // 3) debt_snapshot bouwen — open invoices op moment van aanmelden.
-    const { data: invs } = await supabaseAdmin
-      .from('invoices')
-      .select('id, invoice_number, amount_total, amount_paid, credited_amount, due_date, issue_date, status')
-      .eq('customer_id', customerId).in('status', OPEN_STATUSES);
-    const openInvs = (invs || []).filter((iv) => openAmountEur(iv) > 0);
-    let totalEur = 0;
-    const invoiceRows = openInvs.map((iv) => {
-      const openEur = openAmountEur(iv);
-      totalEur += openEur;
-      return {
-        id            : iv.id,
-        invoice_number: iv.invoice_number || null,
-        amount_open   : Math.round(openEur * 100) / 100,
-        due_date      : iv.due_date || null,
-      };
+    // 3) Core-flow via helper. Idempotent: bij bestaand OPEN dossier
+    //    krijgen we { created:false, dossier:<bestaand> } → 409.
+    const result = await createDossierCore(customerId, {
+      country, bureauId, openedBy: user.id, source: 'handmatig', notes,
     });
-    const debtSnapshot = {
-      snapshot_at         : new Date().toISOString(),
-      total_open_eur      : Math.round(totalEur * 100) / 100,
-      total_open_cents    : Math.round(totalEur * 100),
-      open_invoice_count  : invoiceRows.length,
-      invoice_ids         : invoiceRows.map((r) => r.id),
-      invoices            : invoiceRows,
-    };
-
-    // 4) Dossier insert.
-    const { data: dossier, error: dErr } = await supabaseAdmin
-      .from('dunning_incasso_dossiers').insert({
-        customer_id  : customerId,
-        bureau_id    : bureauId,
-        country      : country,
-        status       : 'aangemeld',
-        debt_snapshot: debtSnapshot,
-        notes        : notes,
-        opened_by    : user.id,
-      }).select('id, customer_id, bureau_id, country, status, debt_snapshot, notes, opened_by, opened_at, updated_at').single();
-    if (dErr) throw new Error('dossier insert: ' + dErr.message);
-
-    // 5) Pipeline-fase → 'incasso'. Fail-soft: dossier moet slagen ook zonder pipeline-move.
-    try {
-      const { ensurePipelineCustomer, setStage } = await import('./_lib/dunning-pipeline.js');
-      await ensurePipelineCustomer(customerId);
-      await setStage(customerId, 'incasso', 'incasso_dossier_created', 'user:' + user.id, {});
-    } catch (e) {
-      console.warn('[incasso-dossier-create] pipeline hook soft-fail', e?.message || e);
+    if (!result.created) {
+      return res.status(409).json({
+        error: 'Klant zit al in incasso (open dossier)',
+        dossier_id: result.dossier.id,
+      });
     }
 
-    return res.status(200).json({ ok: true, dossier });
+    return res.status(200).json({ ok: true, dossier: result.dossier });
   } catch (e) {
     console.error('[incasso-dossier-create]', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });

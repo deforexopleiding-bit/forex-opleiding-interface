@@ -53,6 +53,10 @@
       "schedule": "0 9 * * *"
     },
     {
+      "path": "/api/cron-incasso-auto",
+      "schedule": "15 9 * * *"
+    },
+    {
       "path": "/api/cron-arrangements-breach-check",
       "schedule": "0 6 * * *"
     },
