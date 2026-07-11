@@ -18,6 +18,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { customerDisplayName } from './_lib/customer-name.js';
 import { resolveVariables } from './_lib/template-variables.js';
+import { sanitizeForPdf } from './_lib/incasso-pdf.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
@@ -115,14 +116,15 @@ export default async function handler(req, res) {
         doc.text(companyEmail, 320, doc.y, { width: 220, align: 'right' });
 
         // Geadresseerde linksboven.
-        const geadresseerde = customer.is_company
+        const geadresseerdeRaw = customer.is_company
           ? (customer.company_name || customerDisplayName(customer, ''))
           : customerDisplayName(customer, '');
+        const geadresseerde = sanitizeForPdf(geadresseerdeRaw);
         const addr = buildAddressLines(customer);
         doc.font('Helvetica').fontSize(10).fillColor('#0f172a')
           .text(geadresseerde || '(zonder naam)', 60, 150);
-        if (addr.line1) doc.text(addr.line1, 60, doc.y);
-        if (addr.line2) doc.text(addr.line2, 60, doc.y);
+        if (addr.line1) doc.text(sanitizeForPdf(addr.line1), 60, doc.y);
+        if (addr.line2) doc.text(sanitizeForPdf(addr.line2), 60, doc.y);
 
         // Datum + onderwerp.
         doc.moveDown(2);

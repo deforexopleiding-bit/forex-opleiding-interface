@@ -40,6 +40,52 @@ function daysBetween(a, b) {
   return Math.floor((ta - tb) / (24 * 3600 * 1000));
 }
 
+// Verwijder tekens die pdfkit's ingebouwde WinAnsi/Helvetica-font niet
+// aankan (code point > 255 → emoji/CJK) en control chars. Accenten
+// (é/ü/ï) blijven behouden. Ook multi-space compact.
+export function sanitizeForPdf(str) {
+  if (str == null) return '';
+  const s = String(str);
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const cp = s.codePointAt(i);
+    if (cp == null) continue;
+    // Skip control chars (0-31 en 127) en alles buiten Latin-1 (>255).
+    // Accenten (cp 128-255) blijven staan; emoji / CJK vallen af.
+    if (cp < 32 || cp === 127) continue;
+    if (cp > 255) {
+      if (cp > 0xFFFF) i++; // skip low surrogate half
+      continue;
+    }
+    out += String.fromCodePoint(cp);
+  }
+  return out.replace(/\s+/g, ' ').trim();
+}
+
+function truncate(str, max) {
+  const s = String(str || '');
+  if (s.length <= max) return s;
+  return s.slice(0, max - 1) + '…';
+}
+
+// Humaniseer dunning_log event_type naar leesbaar label.
+const EVENT_LABELS = {
+  incasso_pre_brief_sent  : 'Pre-incassobrief verstuurd',
+  bulk_reminder_sent      : 'Aanmaning verstuurd',
+  incasso_dossier_created : 'Aangemeld voor incasso',
+  incasso_auto_created    : 'Automatisch aangemeld',
+  incasso_dossier_emailed : 'Dossier gemaild naar bureau',
+  payment_refusal_flagged : 'Betalingsonwil gemarkeerd',
+  payment_refusal_cleared : 'Betalingsonwil opgeheven',
+  incasso_auto_skipped_wik: 'Auto-run overgeslagen (WIK ontbreekt)',
+};
+function labelEvent(t) {
+  if (EVENT_LABELS[t]) return EVENT_LABELS[t];
+  const raw = String(t || '').replace(/_/g, ' ').trim();
+  if (!raw) return '—';
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
 async function fetchDossierContext(dossierId) {
   const { data: dossier, error: dErr } = await supabaseAdmin
     .from('dunning_incasso_dossiers')
@@ -159,9 +205,10 @@ function _renderSections(doc, ctx) {
   // ── DEBITEUR ───────────────────────────────────────────────────────
   _sectionHeader(doc, 'Debiteur');
   if (customer) {
-    const naam = customer.is_company
+    const naamRaw = customer.is_company
       ? (customer.company_name || customerDisplayName(customer, '(zonder naam)'))
       : customerDisplayName(customer, '(zonder naam)');
+    const naam = sanitizeForPdf(naamRaw) || '(zonder naam)';
     const addr1 = [customer.address_street, customer.address_number].filter(Boolean).join(' ');
     const addr2 = [customer.address_postal, customer.address_city].filter(Boolean).join(' ');
     _kvRow(doc, 'Naam',        naam); doc.moveDown(0.2);
@@ -180,35 +227,36 @@ function _renderSections(doc, ctx) {
   const openInvs = (invoices || []).filter((iv) => OPEN_STATUSES.includes(String(iv.status || '').toLowerCase()) && openAmount(iv) > 0);
   const totalOpen = openInvs.reduce((s, iv) => s + openAmount(iv), 0);
 
-  // Header-rij
+  // Header-rij (kolommen zoals in het polish-verzoek)
   const headerY = doc.y;
-  doc.font('Helvetica-Bold').fontSize(9).fillColor('#475569');
-  doc.text('Nr.',          50,  headerY, { width: 70 });
-  doc.text('Factuurdatum', 120, headerY, { width: 75 });
-  doc.text('Vervaldatum',  195, headerY, { width: 75 });
-  doc.text('Origineel',    270, headerY, { width: 70, align: 'right' });
-  doc.text('Betaald',      340, headerY, { width: 70, align: 'right' });
-  doc.text('Open',         410, headerY, { width: 70, align: 'right' });
-  doc.text('Dagen te laat',480, headerY, { width: 65, align: 'right' });
+  doc.font('Helvetica-Bold').fontSize(8).fillColor('#475569');
+  doc.text('Nr.',           50,  headerY, { width: 95 });
+  doc.text('Factuurdatum',  150, headerY, { width: 58 });
+  doc.text('Vervaldatum',   212, headerY, { width: 58 });
+  doc.text('Origineel',     278, headerY, { width: 58, align: 'right' });
+  doc.text('Betaald',       340, headerY, { width: 52, align: 'right' });
+  doc.text('Open',          396, headerY, { width: 52, align: 'right' });
+  doc.text('Dagen te laat', 452, headerY, { width: 93, align: 'right' });
   doc.moveDown(0.3);
   doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#cbd5e1').lineWidth(0.5).stroke();
   doc.moveDown(0.2);
 
   const nowIso = new Date();
-  doc.font('Helvetica').fontSize(9).fillColor('#0f172a');
+  doc.font('Helvetica').fontSize(8).fillColor('#0f172a');
   if (openInvs.length === 0) {
     doc.text('Geen openstaande facturen.', 50, doc.y);
   } else {
     for (const iv of openInvs) {
       const rowY = doc.y;
       const dagen = daysBetween(nowIso, iv.due_date);
-      doc.text(iv.invoice_number || String(iv.id).slice(0, 8), 50,  rowY, { width: 70 });
-      doc.text(fmtDateNl(iv.issue_date),                       120, rowY, { width: 75 });
-      doc.text(fmtDateNl(iv.due_date),                          195, rowY, { width: 75 });
-      doc.text(eur(iv.amount_total),                            270, rowY, { width: 70, align: 'right' });
-      doc.text(eur(iv.amount_paid),                             340, rowY, { width: 70, align: 'right' });
-      doc.text(eur(openAmount(iv)),                             410, rowY, { width: 70, align: 'right' });
-      doc.text(dagen != null && dagen > 0 ? String(dagen) : '—', 480, rowY, { width: 65, align: 'right' });
+      const nrRaw = iv.invoice_number || String(iv.id).slice(0, 8);
+      doc.text(truncate(sanitizeForPdf(nrRaw), 16),                50,  rowY, { width: 95 });
+      doc.text(fmtDateNl(iv.issue_date),                           150, rowY, { width: 58 });
+      doc.text(fmtDateNl(iv.due_date),                             212, rowY, { width: 58 });
+      doc.text(eur(iv.amount_total),                               278, rowY, { width: 58, align: 'right' });
+      doc.text(eur(iv.amount_paid),                                340, rowY, { width: 52, align: 'right' });
+      doc.text(eur(openAmount(iv)),                                396, rowY, { width: 52, align: 'right' });
+      doc.text(dagen != null && dagen > 0 ? String(dagen) : '—',   452, rowY, { width: 93, align: 'right' });
       doc.moveDown(0.3);
     }
   }
@@ -217,8 +265,8 @@ function _renderSections(doc, ctx) {
   doc.moveDown(0.2);
   const totalY = doc.y;
   doc.font('Helvetica-Bold').fontSize(10).fillColor('#0f172a')
-    .text('Totaal openstaand', 340, totalY, { width: 70, align: 'right' })
-    .text(eur(totalOpen),      410, totalY, { width: 70, align: 'right' });
+    .text('Totaal openstaand', 278, totalY, { width: 114, align: 'right' })
+    .text(eur(totalOpen),      396, totalY, { width: 52,  align: 'right' });
   doc.moveDown(0.6);
   doc.font('Helvetica').fontSize(8).fillColor('#64748b')
     .text('(Snapshot bij aanmelding: ' + eur(dossier.debt_snapshot?.total_open_eur || 0) + ' — ' + (dossier.debt_snapshot?.open_invoice_count || 0) + ' facturen)');
@@ -240,11 +288,22 @@ function _renderSections(doc, ctx) {
 
   // ── AANMAAN- & CONTACTHISTORIE ────────────────────────────────────
   _sectionHeader(doc, 'Aanmaan- & contacthistorie');
-  const wikSent = (dunning_log || []).some((r) => {
+  // WIK/BE-status: laatste marker van 'incasso_pre_brief_sent' (nieuwe route),
+  // met legacy-fallback naar oude event_types.
+  const briefEvents = (dunning_log || []).filter((r) => {
     const t = String(r.event_type || '');
-    return t === 'wik_letter_sent' || t === 'be_letter_sent' || t === 'brief_verstuurd';
+    return t === 'incasso_pre_brief_sent'
+        || t === 'wik_letter_sent'
+        || t === 'be_letter_sent'
+        || t === 'brief_verstuurd';
   });
-  doc.text('WIK/BE-brief: ' + (wikSent ? 'verstuurd' : 'niet vastgelegd'));
+  const lastBriefAt = briefEvents
+    .map((r) => r.created_at).filter(Boolean).sort().pop();
+  if (lastBriefAt) {
+    doc.text('WIK/BE-brief: verstuurd op ' + fmtDateNl(lastBriefAt));
+  } else {
+    doc.text('WIK/BE-brief: niet vastgelegd');
+  }
   doc.moveDown(0.3);
   if ((dunning_log || []).length === 0) {
     doc.text('Geen aanmaan-logs geregistreerd.');
@@ -262,9 +321,9 @@ function _renderSections(doc, ctx) {
       const info = channels
         ? Object.entries(channels).filter(([, v]) => v).map(([k]) => k).join('+') || '—'
         : (l.payload?.info || '');
-      doc.text(fmtDateNl(l.created_at), 50,  rowY, { width: 80 });
-      doc.text(String(l.event_type || ''), 130, rowY, { width: 180 });
-      doc.text(String(info).slice(0, 60), 310, rowY, { width: 235 });
+      doc.text(fmtDateNl(l.created_at),                     50,  rowY, { width: 80 });
+      doc.text(sanitizeForPdf(labelEvent(l.event_type)),    130, rowY, { width: 180 });
+      doc.text(sanitizeForPdf(String(info)).slice(0, 60),   310, rowY, { width: 235 });
       doc.moveDown(0.25);
     }
   }
