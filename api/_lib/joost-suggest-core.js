@@ -109,6 +109,10 @@ export async function runJoostSuggest({
   autoTriggered,
   requestedByUserId,
   clientIp,
+  // Sandbox-bypass: alleen actief wanneer expliciet true én de conv-klant
+  // is_test=true. Voor echte klanten of afwezige param → exact het bestaande
+  // 503-gedrag bij is_enabled=false. Zie #691/#692.
+  allowDisabledForTest = false,
 }) {
   // ========================================================================
   // STAP 1: Rate-limit (per conv: max 1 suggestie per 30 sec, ongeacht status)
@@ -207,10 +211,21 @@ export async function runJoostSuggest({
     };
   }
   if (config.is_enabled === false) {
-    return {
-      status: 503,
-      body: { error: 'Joost is gedeactiveerd voor deze module', module: config.module },
-    };
+    // Sandbox-bypass: alleen doorgaan als (a) caller vraagt erom expliciet
+    // én (b) de conv-klant is_test=true. Productie: exact het bestaande 503.
+    let bypass = false;
+    if (allowDisabledForTest && conv?.customer_id) {
+      const { data: c } = await supabase
+        .from('customers').select('is_test').eq('id', conv.customer_id).maybeSingle();
+      bypass = !!(c && c.is_test === true);
+    }
+    if (!bypass) {
+      return {
+        status: 503,
+        body: { error: 'Joost is gedeactiveerd voor deze module', module: config.module },
+      };
+    }
+    console.log('[joost-suggest-core] test-bypass actief (is_enabled=false + is_test-klant) conv=' + conversationId);
   }
 
   // ========================================================================
