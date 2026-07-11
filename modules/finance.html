@@ -13114,6 +13114,7 @@
       _incState.mounted = true;
     }
     incLoadOverview();
+    incAutoLoadSettings();
   }
 
   function _incShellHtml() {
@@ -13137,6 +13138,45 @@
         <div id="incListWrap" style="background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;overflow:hidden">
           <div id="incList" style="min-height:200px"></div>
         </div>
+
+        <!-- Automatisch-blok (PR-4a) — config + preview. Nog geen echte
+             cron-actie; alleen instellingen + read-only kandidatenlijst. -->
+        <details id="incAutoWrap" style="background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:14px">
+          <summary style="cursor:pointer;font-size:13.5px;font-weight:700;color:var(--text-dim);display:flex;align-items:center;gap:8px">
+            <i class="ti ti-robot" style="color:#dc2626"></i> Automatische route (nog niet actief)
+            <span id="incAutoBadge" style="font-size:11px;color:var(--text-faint)"></span>
+          </summary>
+          <div style="margin-top:12px;display:flex;flex-direction:column;gap:12px">
+            <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-dim)">
+              <input id="incAutoEnabled" type="checkbox"> Auto-modus ingeschakeld (configuratie klaar; cron komt in PR-4b)
+            </label>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <label style="font-size:11.5px;color:var(--text-faint)">Min. dagen te laat
+                <input id="incAutoMinDays" class="fin-input" type="number" min="0" max="3650" placeholder="bv. 60" style="margin-top:2px">
+              </label>
+              <label style="font-size:11.5px;color:var(--text-faint)">Min. openstaand bedrag (€)
+                <input id="incAutoMinEur" class="fin-input" type="number" min="0" placeholder="bv. 250" style="margin-top:2px">
+              </label>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <div style="font-size:11.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.5px">Triggers (OR — één moet matchen als er triggers aan staan)</div>
+              <label style="font-size:12.5px;color:var(--text-dim);display:flex;align-items:center;gap:6px">
+                <input id="incAutoTrgBroken" type="checkbox"> Verbroken payment_arrangement
+              </label>
+              <label style="font-size:12.5px;color:var(--text-dim);display:flex;align-items:center;gap:6px">
+                <input id="incAutoTrgNoResp" type="checkbox"> Laatste aanmaning zonder inkomende reactie erna
+              </label>
+              <label style="font-size:12.5px;color:var(--text-dim);display:flex;align-items:center;gap:6px">
+                <input id="incAutoTrgRefusal" type="checkbox"> Handmatige betalingsonwil-marker (payment_refusal_flagged)
+              </label>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button id="incAutoSaveBtn"    class="sr-abtn primary" type="button"><i class="ti ti-device-floppy"></i> Instellingen opslaan</button>
+              <button id="incAutoPreviewBtn" class="sr-abtn" type="button"><i class="ti ti-eye"></i> Toon kandidaten (preview)</button>
+            </div>
+            <div id="incAutoPreview" style="margin-top:6px"></div>
+          </div>
+        </details>
       </div>
 
       <!-- Bureau-beheer modal -->
@@ -13189,6 +13229,84 @@
     document.getElementById('incDetailOverlay')?.addEventListener('click', (e) => {
       if (e.target && e.target.id === 'incDetailOverlay') incCloseDetail();
     });
+    // Auto-blok (PR-4a).
+    document.getElementById('incAutoSaveBtn')?.addEventListener('click', () => incAutoSave());
+    document.getElementById('incAutoPreviewBtn')?.addEventListener('click', () => incAutoPreview());
+  }
+
+  async function incAutoLoadSettings() {
+    try {
+      const d = await _incCall('/api/incasso-auto-settings-get');
+      const s = d.settings || {};
+      const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v ?? ''; };
+      const chk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+      chk('incAutoEnabled',     s.enabled);
+      set('incAutoMinDays',     s.min_days_overdue);
+      set('incAutoMinEur',      s.min_amount_open_eur);
+      chk('incAutoTrgBroken',   s.require_broken_arrangement);
+      chk('incAutoTrgNoResp',   s.require_no_response_after_aanmaning);
+      chk('incAutoTrgRefusal',  s.require_refusal_signal);
+      const badge = document.getElementById('incAutoBadge');
+      if (badge) badge.textContent = s.enabled ? '· UIT (cron nog niet actief)' : '';
+    } catch (e) {
+      window.AgentShared?.showToast?.('Auto-settings laden mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+
+  async function incAutoSave() {
+    const val = (id) => document.getElementById(id)?.value;
+    const chk = (id) => !!document.getElementById(id)?.checked;
+    const body = {
+      enabled                             : chk('incAutoEnabled'),
+      min_days_overdue                    : val('incAutoMinDays') || null,
+      min_amount_open_eur                 : val('incAutoMinEur')  || null,
+      require_broken_arrangement          : chk('incAutoTrgBroken'),
+      require_no_response_after_aanmaning : chk('incAutoTrgNoResp'),
+      require_refusal_signal              : chk('incAutoTrgRefusal'),
+    };
+    try {
+      await _incCall('/api/incasso-auto-settings-set', body);
+      window.AgentShared?.showToast?.('Auto-instellingen opgeslagen', 'success');
+      await incAutoLoadSettings();
+    } catch (e) {
+      window.AgentShared?.showToast?.('Opslaan mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+
+  async function incAutoPreview() {
+    const wrap = document.getElementById('incAutoPreview');
+    if (wrap) wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12px">Laden…</div>';
+    try {
+      const d = await _incCall('/api/incasso-auto-preview');
+      const items = d.candidates || [];
+      if (!wrap) return;
+      if (!items.length) {
+        wrap.innerHTML = '<div style="padding:14px;text-align:center;color:var(--text-faint);font-size:12.5px;background:var(--bg-elev-2);border:1px solid var(--border);border-radius:8px">Geen kandidaten met de huidige instellingen.</div>';
+        return;
+      }
+      const rows = items.map((c) => {
+        const flags = (c.matched_conditions || []).map((m) => `<span style="display:inline-block;padding:2px 6px;background:var(--bg-elev);border:1px solid var(--border);border-radius:99px;font-size:10.5px;color:var(--text-dim);margin-right:4px">${esc(m)}</span>`).join('');
+        const wik = c.wik_needed ? '<span title="Particulier zonder WIK/BE-brief" style="color:#f59e0b">⚠️</span>' : '';
+        return `<div style="display:grid;grid-template-columns:2fr 1fr 0.8fr 2fr 0.4fr;gap:8px;padding:8px 12px;border-top:1px solid var(--border);align-items:center;font-size:12px">
+          <div>${esc(c.customer_name)}${c.is_company ? ' <span style="color:var(--text-faint);font-size:10.5px">(B2B)</span>' : ''}</div>
+          <div style="font-weight:700;color:#f87171">€ ${(Number(c.total_open_eur)||0).toFixed(2).replace('.',',')}</div>
+          <div style="color:var(--text-faint)">${Number(c.days_overdue) || 0}d</div>
+          <div>${flags || '<span style="color:var(--text-faint)">—</span>'}</div>
+          <div style="text-align:right">${wik}</div>
+        </div>`;
+      }).join('');
+      wrap.innerHTML = `
+        <div style="background:var(--bg-elev-2);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+          <div style="display:grid;grid-template-columns:2fr 1fr 0.8fr 2fr 0.4fr;gap:8px;padding:8px 12px;font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.5px">
+            <div>Klant</div><div>Openstaand</div><div>Dagen</div><div>Triggers</div><div style="text-align:right">WIK</div>
+          </div>
+          ${rows}
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text-faint)">${items.length} kandidaten · read-only preview, er gebeurt niets automatisch (cron komt in PR-4b).</div>
+      `;
+    } catch (e) {
+      if (wrap) wrap.innerHTML = `<div style="color:#f87171;font-size:12px">Preview mislukt: ${esc(e?.message || 'onbekend')}</div>`;
+    }
   }
 
   async function incLoadOverview() {
