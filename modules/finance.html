@@ -13487,7 +13487,8 @@
     const b = document.getElementById('incDetailBody');
     const t = document.getElementById('incDetailTitle');
     if (!b || !_incState.detail) return;
-    const { dossier, customer, invoices, arrangements, conversations, dunning_log, flags } = _incState.detail;
+    const { dossier, customer, invoices, arrangements, conversations, dunning_log, credited_debt, flags } = _incState.detail;
+    const cd = credited_debt && credited_debt.count > 0 ? credited_debt : null;
     const snap = dossier?.debt_snapshot || {};
     const custName = customer ? [customer.first_name, customer.last_name].filter(Boolean).join(' ').trim() || customer.company_name || customer.email || '—' : '—';
     if (t) t.textContent = 'Dossier — ' + custName;
@@ -13537,6 +13538,15 @@
             <div><strong>${_incFmtEurCents(snap.total_open_cents)}</strong> · ${snap.open_invoice_count || 0} facturen</div>
             <div style="color:var(--text-faint);margin-top:2px">op ${esc(_incFmtDate(snap.snapshot_at))}</div>
           </div>
+
+          ${cd ? `
+          <div class="pipe-dos-h">Gecrediteerde schuld</div>
+          <div style="background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.24);border-radius:8px;padding:10px;margin-bottom:14px;font-size:12px;line-height:1.5">
+            <div><strong>${cd.count}</strong> factuur${cd.count === 1 ? '' : 'en'} gecrediteerd${cd.last_credited_on ? ` · laatst op <strong>${esc(cd.last_credited_on)}</strong>` : ''}</div>
+            <div style="margin-top:3px">Totaal <strong>€ ${(Number(cd.total_incl) || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> incl. BTW${cd.total_vat > 0 ? ` (waarvan € ${(Number(cd.total_vat) || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} BTW)` : ''}</div>
+            ${cd.months_extended_total > 0 ? `<div style="margin-top:3px">Abonnement <strong>+${cd.months_extended_total} mnd</strong> verlengd</div>` : ''}
+            <div style="margin-top:6px;color:var(--text-faint);font-size:11px">Deze credit-historie is context voor het bureau — de openstaande vordering hierboven is wat geïncasseerd wordt.</div>
+          </div>` : ''}
 
           <div class="pipe-dos-h">Betalingsregelingen</div>
           <div style="margin-bottom:14px">
@@ -14426,7 +14436,11 @@
         .pipe-list-row:hover { background:var(--bg-elev-2); }
         .pipe-list-row-avatar { flex:0 0 auto; width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:12.5px; font-weight:700; }
         .pipe-list-row-body { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
-        .pipe-list-row-name { font-size:13.5px; font-weight:600; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .pipe-list-row-name { font-size:13.5px; font-weight:600; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; gap:6px; }
+        .pipe-cred-badge { display:inline-block; padding:1px 7px; border-radius:999px; background:rgba(16,185,129,.14); color:#10b981; font-size:10.5px; font-weight:700; letter-spacing:.2px; border:1px solid rgba(16,185,129,.32); text-transform:lowercase; flex-shrink:0; }
+        .pipe-cred-summary { padding:10px 12px; border-radius:8px; background:rgba(16,185,129,.06); border:1px solid rgba(16,185,129,.22); font-size:12.5px; color:var(--text-dim); line-height:1.5; }
+        .pipe-cred-summary strong { color:var(--text); }
+        .pipe-cred-summary .pipe-cred-outstanding { display:block; margin-top:6px; color:#f87171; font-weight:600; }
         .pipe-list-row-ctx { font-size:11.5px; color:var(--text-faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; gap:6px; }
         .pipe-list-row-ctx.next-appt { color:#f59e0b; }
         .pipe-list-row-right { text-align:right; display:flex; flex-direction:column; gap:2px; flex-shrink:0; }
@@ -14703,10 +14717,17 @@
     } else {
       ctxHtml = `<div class="pipe-list-row-ctx" style="color:var(--text-faint)">—</div>`;
     }
+    // Gecrediteerd-badge (PR-3): klanten waarvoor eerder een crediteerronde
+    // is gelopen krijgen een kleine, groene pill naast hun naam. Toon last-
+    // date + aantal in de tooltip zodat de rij compact blijft.
+    const cd = it.credited_debt || null;
+    const credBadge = cd && cd.count > 0
+      ? `<span class="pipe-cred-badge" title="${cd.count} factuur${cd.count === 1 ? '' : 'en'} gecrediteerd${cd.last_credited_on ? ` · laatst op ${esc(cd.last_credited_on)}` : ''}">gecrediteerd</span>`
+      : '';
     return `<div class="pipe-list-row" data-cid="${esc(it.customer_id)}" data-stage="${esc(it.stage_slug)}">
       <div class="pipe-list-row-avatar" style="background:${esc(avColor)}">${esc(initials)}</div>
       <div class="pipe-list-row-body">
-        <div class="pipe-list-row-name">${esc(name)}</div>
+        <div class="pipe-list-row-name">${esc(name)}${credBadge}</div>
         ${ctxHtml}
       </div>
       <div class="pipe-list-row-right">
@@ -14877,11 +14898,37 @@
     return parts || customer.company_name || customer.email || 'Onbekende klant';
   }
 
+  // Render "Gecrediteerde schuld"-sectie op de pipeline-detailkaart. Bron =
+  // dunning_credited_debt aggregate uit /api/dunning-pipeline-detail (PR-3).
+  // Toont N facturen + laatste ronde-datum + totaalbedrag incl. BTW + eventuele
+  // abo-verlengingen, en herinnert dat het openstaande bedrag (uit Open facturen
+  // hieronder) nog steeds verschuldigd is.
+  function _pipeCreditedDebtHtml(cd, totalOpenCents) {
+    if (!cd || !cd.count) return '';
+    const parts = [];
+    parts.push(`<strong>${cd.count}</strong> factuur${cd.count === 1 ? '' : 'en'} gecrediteerd`);
+    if (cd.last_credited_on) parts.push(`laatst op <strong>${esc(cd.last_credited_on)}</strong>`);
+    const totalIncl = `€ ${(Number(cd.total_incl) || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    parts.push(`totaal <strong>${totalIncl}</strong> incl. BTW`);
+    if (cd.months_extended_total > 0) parts.push(`abo <strong>+${cd.months_extended_total} mnd</strong> verlengd`);
+    const outstandingHtml = (Number(totalOpenCents) > 0)
+      ? `<span class="pipe-cred-outstanding">Klant is nog steeds ${_pipeFmtEurCents(totalOpenCents)} verschuldigd.</span>`
+      : `<span class="pipe-cred-outstanding" style="color:#10b981">Klant heeft geen openstaande facturen meer.</span>`;
+    return `
+      <div class="pipe-dos-section">
+        <div class="pipe-dos-h">Gecrediteerde schuld</div>
+        <div class="pipe-cred-summary">
+          ${parts.join(' · ')}.
+          ${outstandingHtml}
+        </div>
+      </div>`;
+  }
+
   function renderPipelineDossier() {
     const dossier = document.getElementById('pipeDetailDossier');
     const title   = document.getElementById('pipeDetailTitle');
     if (!dossier || !_pipeState.detail) return;
-    const { customer, pipeline, logs, appointments, open_invoices } = _pipeState.detail;
+    const { customer, pipeline, logs, appointments, open_invoices, credited_debt } = _pipeState.detail;
     const name  = _pipeCustomerDisplayName(customer);
     if (title) title.textContent = name;
 
@@ -14890,6 +14937,13 @@
 
     const openAppts = (appointments || []).filter(a => a.status === 'open');
     const doneAppts = (appointments || []).filter(a => a.status !== 'open').slice(0, 5);
+
+    // Gecrediteerde-schuld sectie (PR-3): alleen renderen als er credit-historie
+    // is. Toont N facturen gecrediteerd + totaalbedrag incl. BTW + eventueel abo-
+    // verlengingen, en herinnert dat de klant nog steeds het openstaande bedrag
+    // verschuldigd is (dat komt uit de open_invoices hierboven, dus geen dubbele bron).
+    const cd = credited_debt && credited_debt.count > 0 ? credited_debt : null;
+    const credSectionHtml = cd ? _pipeCreditedDebtHtml(cd, totalOpenCents) : '';
 
     dossier.innerHTML = `
       <div class="pipe-dos-section">
@@ -14904,6 +14958,8 @@
           </div>
         </div>
       </div>
+
+      ${credSectionHtml}
 
       <div class="pipe-dos-section">
         <div class="pipe-dos-h">Fase</div>

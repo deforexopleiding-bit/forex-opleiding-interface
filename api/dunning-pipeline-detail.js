@@ -5,6 +5,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { customerDisplayName } from './_lib/customer-name.js';
+import { getCreditedDebt } from './_lib/credited-debt.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
@@ -64,12 +65,17 @@ export default async function handler(req, res) {
       ...i, amount_open: openAmount(i),
     }));
 
+    // Crediteerronde-historie (PR-3 zichtbaarheid). Fail-soft: als de tabel
+    // niet bestaat of leeg is, valt de sectie stilzwijgend weg in de UI.
+    const creditedDebt = await getCreditedDebt(cid);
+
     return res.status(200).json({
       pipeline,
       customer: cust ? { ...cust, display_name: customerDisplayName(cust, '(zonder naam)') } : null,
       logs   : logs  || [],
       appointments: appts || [],
       open_invoices: openInvoices,
+      credited_debt: creditedDebt,
     });
   } catch (e) {
     console.error('[dunning-pipeline-detail]', e?.message || e);
