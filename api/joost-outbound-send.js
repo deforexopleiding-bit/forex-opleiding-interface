@@ -247,14 +247,19 @@ export default async function handler(req, res) {
 
     const { data: openInvRows, error: invErr } = await supabaseAdmin
       .from('invoices')
-      .select('id, customer_id, amount_total, amount_paid, credited_amount, amount_open, due_date, status, invoice_number')
+      .select('id, customer_id, amount_total, amount_paid, credited_amount, due_date, status, invoice_number')
       .eq('customer_id', customer.id)
       .in('status', OPEN_STATUSES);
     if (invErr) throw new Error('invoices lookup: ' + invErr.message);
     const openInvoices = Array.isArray(openInvRows) ? openInvRows : [];
     let openAmount = 0;
     for (const inv of openInvoices) {
-      const v = Number(inv.amount_open);
+      // Openstaand = amount_total − amount_paid − credited_amount (kolom
+      // amount_open bestaat niet in de invoices-tabel).
+      const total = Number(inv.amount_total) || 0;
+      const paid  = Number(inv.amount_paid)  || 0;
+      const cred  = Number(inv.credited_amount) || 0;
+      const v = Math.round(Math.max(0, total - paid - cred) * 100) / 100;
       if (Number.isFinite(v)) openAmount += v;
     }
     // STOP-CONDITIE: geen open invoices = klant heeft betaald.
