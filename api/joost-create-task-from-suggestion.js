@@ -21,7 +21,7 @@
 //     claim_text_override:  string  (optioneel — overschrijft suggestion.suggested_reply
 //                                    als claim-tekst voor de pending_action payload;
 //                                    min 10 chars als wel meegegeven),
-//     claimed_amount:       number  (optioneel — default = invoice.amount_open; > 0)
+//     claimed_amount:       number  (optioneel — default = openstaand bedrag; > 0)
 //   }
 //
 // Flow:
@@ -150,7 +150,7 @@ export default async function handler(req, res) {
     // ========================================================================
     const { data: inv, error: invErr } = await supabaseAdmin
       .from('invoices')
-      .select('id, customer_id, invoice_number, amount_total, amount_open, status')
+      .select('id, customer_id, invoice_number, amount_total, amount_paid, credited_amount, status')
       .eq('id', invoiceId)
       .maybeSingle();
     if (invErr) {
@@ -164,13 +164,18 @@ export default async function handler(req, res) {
       });
     }
 
-    // Default claimed_amount = invoice.amount_open als niet meegegeven
+    // Default claimed_amount = openstaand bedrag (amount_total − amount_paid − credited_amount)
+    // als niet meegegeven. Zelfde berekening als elders in de codebase (o.a.
+    // dunning-pipeline-detail, inbox-conversation-context).
     let finalClaimedAmount = claimedAmount;
     if (finalClaimedAmount == null) {
-      const open = Number(inv.amount_open);
+      const total = Number(inv.amount_total) || 0;
+      const paid  = Number(inv.amount_paid)  || 0;
+      const cred  = Number(inv.credited_amount) || 0;
+      const open  = Math.round(Math.max(0, total - paid - cred) * 100) / 100;
       if (!isPosNum(open)) {
         return res.status(400).json({
-          error: 'claimed_amount vereist (invoice.amount_open niet beschikbaar als default)',
+          error: 'claimed_amount vereist (openstaand bedrag niet beschikbaar als default)',
         });
       }
       finalClaimedAmount = open;

@@ -571,14 +571,19 @@ export default async function handler(req, res) {
     if (conv && conv.customer_id) {
       const { data: invs, error: invErr } = await supabaseAdmin
         .from('invoices')
-        .select('amount_open, status')
+        .select('amount_total, amount_paid, credited_amount, status')
         .eq('customer_id', conv.customer_id)
         .in('status', ['open', 'partially_paid', 'overdue']);
       if (invErr) {
         console.error('[joost-autonomy-evaluate] invoices lookup:', invErr.message);
       } else if (Array.isArray(invs)) {
         for (const inv of invs) {
-          const v = Number(inv.amount_open);
+          // Openstaand = amount_total − amount_paid − credited_amount
+          // (kolom amount_open bestaat niet in de invoices-tabel).
+          const total = Number(inv.amount_total) || 0;
+          const paid  = Number(inv.amount_paid)  || 0;
+          const cred  = Number(inv.credited_amount) || 0;
+          const v = Math.round(Math.max(0, total - paid - cred) * 100) / 100;
           if (Number.isFinite(v)) openAmount += v;
         }
       }
