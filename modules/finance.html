@@ -1503,6 +1503,124 @@
     }
 
     /* ======================================================
+       Incasso-sub — scoped .wbx-huid voor het incasso-scherm.
+       Handlers/IDs ongewijzigd; alleen opmaak.
+       ====================================================== */
+    .wbx .wbx-inc-filters { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:13px; }
+    .wbx .wbx-inc-filter {
+      border:1px solid var(--wbx-border-strong); background:#fff; color:var(--wbx-ink);
+      font:600 12.5px/1 inherit; padding:6px 11px; border-radius:9px;
+      cursor:pointer; white-space:nowrap; display:inline-flex; align-items:center; gap:6px;
+    }
+    .wbx .wbx-inc-filter:hover { border-color:var(--wbx-muted); }
+    .wbx .wbx-inc-filter.wbx-on {
+      background:var(--wbx-accent-soft); border-color:var(--wbx-accent-ink); color:var(--wbx-accent-ink);
+    }
+    .wbx .wbx-inc-filter .wbx-strip-dot {
+      display:inline-block; width:8px; height:8px; border-radius:50%; vertical-align:1px;
+    }
+    .wbx .wbx-inc-filter .wbx-c { color:var(--wbx-faint); font-weight:600; }
+
+    .wbx .wbx-inc-detail { display:grid; grid-template-columns:1.4fr 1fr; gap:18px; }
+    @media(max-width:920px) { .wbx .wbx-inc-detail { grid-template-columns:1fr; } }
+    .wbx .wbx-inc-actions { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0 16px; }
+    .wbx .wbx-inc-form { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; }
+    .wbx .wbx-inc-form label {
+      font-size:12px; color:var(--wbx-muted); display:block; font-weight:500;
+    }
+    .wbx .wbx-inc-form select, .wbx .wbx-inc-form input, .wbx .wbx-inc-form textarea {
+      width:100%; box-sizing:border-box; margin-top:4px; padding:8px 10px;
+      border:1px solid var(--wbx-border-strong); border-radius:8px; background:#fff;
+      color:var(--wbx-ink); font:inherit;
+    }
+    .wbx .wbx-inc-form textarea { min-height:80px; resize:vertical; }
+    .wbx .wbx-inc-kv {
+      background:#FAFBFC; border:1px solid var(--wbx-border); border-radius:10px;
+      padding:12px 14px; margin-bottom:12px; font-size:13px; line-height:1.5;
+    }
+    .wbx .wbx-inc-kv strong { color:var(--wbx-ink); }
+    .wbx .wbx-inc-kv-note {
+      background:rgba(16,185,129,.06); border-color:rgba(16,185,129,.28);
+    }
+    .wbx .wbx-inc-h {
+      font-size:11.5px; text-transform:uppercase; letter-spacing:.05em;
+      color:var(--wbx-faint); font-weight:600; margin:14px 0 6px;
+    }
+    .wbx .wbx-inc-list {
+      background:#fff; border:1px solid var(--wbx-border); border-radius:10px;
+      overflow:hidden; margin-bottom:10px;
+    }
+    .wbx .wbx-inc-list-row {
+      display:flex; justify-content:space-between; gap:10px; align-items:center;
+      padding:9px 14px; border-bottom:1px solid var(--wbx-border); font-size:13px;
+    }
+    .wbx .wbx-inc-list-row:last-child { border-bottom:0; }
+    .wbx .wbx-inc-list-empty {
+      padding:14px; text-align:center; color:var(--wbx-muted); font-size:12.5px;
+    }
+    .wbx .wbx-inc-auto {
+      background:#fff; border:1px solid var(--wbx-border);
+      border-radius:var(--wbx-radius); padding:16px; margin-top:6px;
+    }
+    .wbx .wbx-inc-auto > summary {
+      cursor:pointer; font-size:14px; font-weight:600; color:var(--wbx-ink);
+      display:flex; align-items:center; gap:8px; list-style:none;
+    }
+    .wbx .wbx-inc-auto > summary::-webkit-details-marker { display:none; }
+    .wbx .wbx-inc-auto > summary::before {
+      content:'▸'; color:var(--wbx-faint); font-size:12px; transition:transform .15s;
+    }
+    .wbx .wbx-inc-auto[open] > summary::before { transform:rotate(90deg); }
+    .wbx .wbx-inc-auto-body { margin-top:14px; display:flex; flex-direction:column; gap:12px; }
+    .wbx .wbx-inc-auto-body .wbx-inc-form { margin-bottom:0; }
+    .wbx .wbx-inc-triggers { display:flex; flex-direction:column; gap:6px; }
+    .wbx .wbx-inc-triggers-h {
+      font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+      color:var(--wbx-faint); font-weight:600;
+    }
+    .wbx .wbx-inc-check {
+      display:flex; align-items:center; gap:8px; font-size:13px; color:var(--wbx-ink);
+    }
+    .wbx .wbx-inc-preview-tbl {
+      width:100%; border-collapse:separate; border-spacing:0;
+      background:#fff; border:1px solid var(--wbx-border); border-radius:10px; overflow:hidden;
+    }
+    .wbx .wbx-inc-preview-tbl th {
+      text-align:left; font-size:11px; letter-spacing:.05em; text-transform:uppercase;
+      color:var(--wbx-faint); font-weight:600; padding:10px 12px; background:#FAFBFC;
+      border-bottom:1px solid var(--wbx-border);
+    }
+    .wbx .wbx-inc-preview-tbl td {
+      padding:10px 12px; border-bottom:1px solid var(--wbx-border); font-size:13px;
+    }
+    .wbx .wbx-inc-preview-tbl tr:last-child td { border-bottom:0; }
+    .wbx .wbx-inc-preview-tbl td.wbx-r { text-align:right; }
+    .wbx .wbx-inc-preview-tbl td.wbx-mono { font-family:var(--wbx-mono); font-weight:600; }
+    .wbx .wbx-inc-modal-scrim {
+      position:fixed; inset:0; background:rgba(14,19,28,.44); backdrop-filter:blur(2px);
+      z-index:1200; display:none; align-items:center; justify-content:center; padding:20px;
+    }
+    .wbx .wbx-inc-modal-scrim.wbx-inc-detail-scrim { align-items:stretch; }
+    .wbx .wbx-inc-modal {
+      background:var(--wbx-bg); color:var(--wbx-ink); border:1px solid var(--wbx-border);
+      border-radius:12px; width:min(680px,100%); max-height:90vh;
+      display:flex; flex-direction:column; overflow:hidden;
+      font-family:'Inter', system-ui, sans-serif;
+    }
+    .wbx .wbx-inc-modal.wbx-inc-detail-modal { width:min(1200px,100%); max-height:100%; }
+    .wbx .wbx-inc-modal-head {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:14px 18px; border-bottom:1px solid var(--wbx-border); gap:10px;
+    }
+    .wbx .wbx-inc-modal-title { font-size:15px; font-weight:600; color:var(--wbx-ink); }
+    .wbx .wbx-inc-modal-body { padding:18px; overflow-y:auto; flex:1; }
+    .wbx .wbx-inc-close {
+      border:none; background:transparent; color:var(--wbx-muted);
+      cursor:pointer; font-size:18px; padding:4px 8px; border-radius:6px;
+    }
+    .wbx .wbx-inc-close:hover { background:#FAFBFC; color:var(--wbx-ink); }
+
+    /* ======================================================
        Ronde 3 — Instellingen + Opruimen + Inbox-scope styling.
        ====================================================== */
 
@@ -13947,6 +14065,12 @@
   function _incStatusMeta(slug) {
     return INC_STATUSES.find((s) => s.slug === slug) || { slug, label: slug || '—', color: '#94a3b8' };
   }
+  // Status-pill in .wbx-huid: pastel tint + donker-tekst uit status-color.
+  function _incStatusPillHtml(slug) {
+    const st = _incStatusMeta(slug);
+    const c = st.color || '#94a3b8';
+    return `<span class="wbx-pill" style="background:${esc(c)}1A;color:${esc(c)}">${esc(st.label)}</span>`;
+  }
   function _incFmtEurCents(cents) {
     const c = Number(cents);
     if (!Number.isFinite(c) || c === 0) return '€ 0,00';
@@ -15573,100 +15697,105 @@
   }
 
   function _incShellHtml() {
+    // Ronde 3 follow-up: incasso-sub in .wbx-huid. Data, endpoints en
+    // handler-IDs blijven 1-op-1 (incRefreshBtn / incBureauMgrBtn /
+    // incStatusPills / incList / incAutoWrap / incAutoEnabled /
+    // incAutoMinDays / incAutoMinEur / incAutoTrg* / incAutoSaveBtn /
+    // incAutoPreviewBtn / incAutoRunBtn / incAutoBadge / incAutoPreview /
+    // incBureauModal / incBureauCloseBtn / incBureauList / incBurName /
+    // incBurEmail / incBurCountry / incBurAddress / incBurAddBtn /
+    // incDetailOverlay / incDetailTitle / incDetailBody /
+    // incDetailCloseBtn). Alleen opmaak is vervangen.
     return `
-      <div style="display:flex;flex-direction:column;gap:14px">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-          <div>
-            <div style="font-size:15.5px;font-weight:700;color:var(--text-dim);display:flex;align-items:center;gap:8px">
-              <i class="ti ti-gavel" style="color:#dc2626"></i> Incasso-dossiers
-            </div>
-            <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Handmatige incasso · bureau-keuze · status-lifecycle</div>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center">
-            <button id="incBureauMgrBtn" class="sr-abtn" type="button"><i class="ti ti-building"></i> Bureaus beheren</button>
-            <button id="incRefreshBtn" class="sr-abtn" type="button"><i class="ti ti-refresh"></i> Herlaad</button>
-          </div>
-        </div>
-
-        <div id="incStatusPills" style="display:flex;flex-wrap:wrap;gap:6px"></div>
-
-        <div id="incListWrap" style="background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;overflow:hidden">
-          <div id="incList" style="min-height:200px"></div>
-        </div>
-
-        <!-- Automatisch-blok (PR-4a) — config + preview. Nog geen echte
-             cron-actie; alleen instellingen + read-only kandidatenlijst. -->
-        <details id="incAutoWrap" style="background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:14px">
-          <summary style="cursor:pointer;font-size:13.5px;font-weight:700;color:var(--text-dim);display:flex;align-items:center;gap:8px">
-            <i class="ti ti-robot" style="color:#dc2626"></i> Automatische route (nog niet actief)
-            <span id="incAutoBadge" style="font-size:11px;color:var(--text-faint)"></span>
-          </summary>
-          <div style="margin-top:12px;display:flex;flex-direction:column;gap:12px">
-            <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-dim)">
-              <input id="incAutoEnabled" type="checkbox"> Auto-modus ingeschakeld (configuratie klaar; cron komt in PR-4b)
-            </label>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-              <label style="font-size:11.5px;color:var(--text-faint)">Min. dagen te laat
-                <input id="incAutoMinDays" class="fin-input" type="number" min="0" max="3650" placeholder="bv. 60" style="margin-top:2px">
-              </label>
-              <label style="font-size:11.5px;color:var(--text-faint)">Min. openstaand bedrag (€)
-                <input id="incAutoMinEur" class="fin-input" type="number" min="0" placeholder="bv. 250" style="margin-top:2px">
-              </label>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:6px">
-              <div style="font-size:11.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.5px">Triggers (OR — één moet matchen als er triggers aan staan)</div>
-              <label style="font-size:12.5px;color:var(--text-dim);display:flex;align-items:center;gap:6px">
-                <input id="incAutoTrgBroken" type="checkbox"> Verbroken payment_arrangement
-              </label>
-              <label style="font-size:12.5px;color:var(--text-dim);display:flex;align-items:center;gap:6px">
-                <input id="incAutoTrgNoResp" type="checkbox"> Laatste aanmaning zonder inkomende reactie erna
-              </label>
-              <label style="font-size:12.5px;color:var(--text-dim);display:flex;align-items:center;gap:6px">
-                <input id="incAutoTrgRefusal" type="checkbox"> Handmatige betalingsonwil-marker (payment_refusal_flagged)
-              </label>
-            </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <button id="incAutoSaveBtn"    class="sr-abtn primary" type="button"><i class="ti ti-device-floppy"></i> Instellingen opslaan</button>
-              <button id="incAutoPreviewBtn" class="sr-abtn" type="button"><i class="ti ti-eye"></i> Toon kandidaten (preview)</button>
-              <button id="incAutoRunBtn"     class="sr-abtn" type="button" title="Verwerk de gepreviewde kandidaten NU. Draait ongeacht de toggle."><i class="ti ti-player-play"></i> Verwerk kandidaten nu</button>
-            </div>
-            <div style="font-size:11px;color:var(--text-faint);margin-top:-4px">De geplande cron (dagelijks 09:15) draait pas als de toggle AAN staat. "Verwerk nu" is een expliciete mensactie en negeert de toggle.</div>
-            <div id="incAutoPreview" style="margin-top:6px"></div>
-          </div>
-        </details>
+      <div class="wbx-page-head">
+        <h1>Incasso-dossiers</h1>
+        <p>Handmatige incasso · bureau-keuze · status van aangemeld tot afgerond.</p>
       </div>
 
-      <!-- Bureau-beheer modal -->
-      <div id="incBureauModal" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1200;display:none;align-items:center;justify-content:center;padding:20px">
-        <div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;width:min(680px,100%);max-height:90vh;display:flex;flex-direction:column;overflow:hidden">
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border)">
-            <div style="font-size:14.5px;font-weight:600;color:var(--text-dim)">Incasso-bureaus</div>
-            <button id="incBureauCloseBtn" class="sr-ibtn" type="button"><i class="ti ti-x"></i></button>
+      <div class="wbx-toolbar">
+        <div class="wbx-flex1"></div>
+        <button id="incBureauMgrBtn" class="wbx-btn" type="button">Bureaus beheren</button>
+        <button id="incRefreshBtn"   class="wbx-btn" type="button">Herlaad</button>
+      </div>
+
+      <div id="incStatusPills" class="wbx-inc-filters"></div>
+
+      <div id="incList"></div>
+
+      <details id="incAutoWrap" class="wbx-inc-auto">
+        <summary>
+          Automatische route <span id="incAutoBadge" class="wbx-c" style="color:var(--wbx-faint);font-weight:500;font-size:12.5px"></span>
+        </summary>
+        <div class="wbx-inc-auto-body">
+          <label class="wbx-inc-check">
+            <input id="incAutoEnabled" type="checkbox"> Auto-modus ingeschakeld (configuratie klaar; cron komt in PR-4b)
+          </label>
+          <div class="wbx-inc-form">
+            <label>Minimaal dagen te laat
+              <input id="incAutoMinDays" type="number" min="0" max="3650" placeholder="bv. 60">
+            </label>
+            <label>Minimaal openstaand bedrag (€)
+              <input id="incAutoMinEur" type="number" min="0" placeholder="bv. 250">
+            </label>
           </div>
-          <div style="padding:16px;overflow-y:auto">
-            <div id="incBureauList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px"></div>
-            <div style="border-top:1px solid var(--border);padding-top:12px">
-              <div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-faint);margin-bottom:6px">Nieuw bureau</div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-                <input id="incBurName"    class="fin-input" placeholder="Naam" style="grid-column:span 2">
-                <input id="incBurEmail"   class="fin-input" placeholder="E-mail">
-                <select id="incBurCountry" class="fin-input"><option value="NL">NL</option><option value="BE">BE</option></select>
-                <input id="incBurAddress" class="fin-input" placeholder="Adres" style="grid-column:span 2">
+          <div class="wbx-inc-triggers">
+            <div class="wbx-inc-triggers-h">Triggers (OR — één moet matchen als er triggers aan staan)</div>
+            <label class="wbx-inc-check"><input id="incAutoTrgBroken"  type="checkbox"> Verbroken payment_arrangement</label>
+            <label class="wbx-inc-check"><input id="incAutoTrgNoResp"  type="checkbox"> Laatste aanmaning zonder inkomende reactie erna</label>
+            <label class="wbx-inc-check"><input id="incAutoTrgRefusal" type="checkbox"> Handmatige betalingsonwil-marker</label>
+          </div>
+          <div class="wbx-inc-actions">
+            <button id="incAutoSaveBtn"    class="wbx-btn wbx-primary" type="button">Instellingen opslaan</button>
+            <button id="incAutoPreviewBtn" class="wbx-btn"             type="button">Toon kandidaten</button>
+            <button id="incAutoRunBtn"     class="wbx-btn"             type="button" title="Verwerk de gepreviewde kandidaten NU. Draait ongeacht de toggle.">Verwerk kandidaten nu</button>
+          </div>
+          <div style="font-size:12px;color:var(--wbx-faint)">
+            De geplande cron (dagelijks 09:15) draait pas als de toggle AAN staat.
+            "Verwerk nu" is een expliciete mensactie en negeert de toggle.
+          </div>
+          <div id="incAutoPreview"></div>
+        </div>
+      </details>
+
+      <!-- Bureau-beheer modal -->
+      <div id="incBureauModal" class="wbx-inc-modal-scrim">
+        <div class="wbx-inc-modal">
+          <div class="wbx-inc-modal-head">
+            <div class="wbx-inc-modal-title">Incasso-bureaus</div>
+            <button id="incBureauCloseBtn" class="wbx-inc-close" type="button">✕</button>
+          </div>
+          <div class="wbx-inc-modal-body">
+            <div id="incBureauList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px"></div>
+            <div style="border-top:1px solid var(--wbx-border);padding-top:14px">
+              <div class="wbx-inc-h" style="margin-top:0">Nieuw bureau</div>
+              <div class="wbx-inc-form" style="grid-template-columns:1fr 1fr">
+                <label style="grid-column:span 2">Naam
+                  <input id="incBurName" placeholder="Naam bureau">
+                </label>
+                <label>E-mail
+                  <input id="incBurEmail" placeholder="e-mail@bureau.nl">
+                </label>
+                <label>Land
+                  <select id="incBurCountry"><option value="NL">NL</option><option value="BE">BE</option></select>
+                </label>
+                <label style="grid-column:span 2">Adres
+                  <input id="incBurAddress" placeholder="Straat + huisnr, postcode, plaats">
+                </label>
               </div>
-              <button id="incBurAddBtn" class="sr-abtn primary" type="button" style="margin-top:8px"><i class="ti ti-plus"></i> Bureau toevoegen</button>
+              <button id="incBurAddBtn" class="wbx-btn wbx-primary" type="button" style="margin-top:10px">Bureau toevoegen</button>
             </div>
           </div>
         </div>
       </div>
 
       <!-- Dossier-detail overlay -->
-      <div id="incDetailOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1200;display:none;align-items:stretch;justify-content:center;padding:20px">
-        <div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;width:min(1200px,100%);max-height:100%;display:flex;flex-direction:column;overflow:hidden">
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);gap:10px">
-            <div id="incDetailTitle" style="font-size:14.5px;font-weight:600;color:var(--text-dim)">Dossier</div>
-            <button id="incDetailCloseBtn" class="sr-ibtn" type="button"><i class="ti ti-x"></i></button>
+      <div id="incDetailOverlay" class="wbx-inc-modal-scrim wbx-inc-detail-scrim">
+        <div class="wbx-inc-modal wbx-inc-detail-modal">
+          <div class="wbx-inc-modal-head">
+            <div id="incDetailTitle" class="wbx-inc-modal-title">Dossier</div>
+            <button id="incDetailCloseBtn" class="wbx-inc-close" type="button">✕</button>
           </div>
-          <div id="incDetailBody" style="flex:1;overflow-y:auto;padding:16px"></div>
+          <div id="incDetailBody" class="wbx-inc-modal-body"></div>
         </div>
       </div>
     `;
@@ -15760,37 +15889,43 @@
 
   async function incAutoPreview() {
     const wrap = document.getElementById('incAutoPreview');
-    if (wrap) wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12px">Laden…</div>';
+    if (wrap) wrap.innerHTML = '<div style="color:var(--wbx-faint);font-size:12.5px">Laden…</div>';
     try {
       const d = await _incCall('/api/incasso-auto-preview');
       const items = d.candidates || [];
       if (!wrap) return;
       if (!items.length) {
-        wrap.innerHTML = '<div style="padding:14px;text-align:center;color:var(--text-faint);font-size:12.5px;background:var(--bg-elev-2);border:1px solid var(--border);border-radius:8px">Geen kandidaten met de huidige instellingen.</div>';
+        wrap.innerHTML = '<div class="wbx-inc-list-empty" style="background:#FAFBFC;border:1px solid var(--wbx-border);border-radius:10px">Geen kandidaten met de huidige instellingen.</div>';
         return;
       }
       const rows = items.map((c) => {
-        const flags = (c.matched_conditions || []).map((m) => `<span style="display:inline-block;padding:2px 6px;background:var(--bg-elev);border:1px solid var(--border);border-radius:99px;font-size:10.5px;color:var(--text-dim);margin-right:4px">${esc(m)}</span>`).join('');
-        const wik = c.wik_needed ? '<span title="Particulier zonder WIK/BE-brief" style="color:#f59e0b">⚠️</span>' : '';
-        return `<div style="display:grid;grid-template-columns:2fr 1fr 0.8fr 2fr 0.4fr;gap:8px;padding:8px 12px;border-top:1px solid var(--border);align-items:center;font-size:12px">
-          <div>${esc(c.customer_name)}${c.is_company ? ' <span style="color:var(--text-faint);font-size:10.5px">(B2B)</span>' : ''}</div>
-          <div style="font-weight:700;color:#f87171">€ ${(Number(c.total_open_eur)||0).toFixed(2).replace('.',',')}</div>
-          <div style="color:var(--text-faint)">${Number(c.days_overdue) || 0}d</div>
-          <div>${flags || '<span style="color:var(--text-faint)">—</span>'}</div>
-          <div style="text-align:right">${wik}</div>
-        </div>`;
+        const flags = (c.matched_conditions || []).map((m) => `<span class="wbx-chip" style="display:inline-block;padding:2px 8px;border:1px solid var(--wbx-border-strong);border-radius:99px;font-size:11px;color:var(--wbx-muted);margin-right:4px">${esc(m)}</span>`).join('');
+        const wik = c.wik_needed ? '<span title="Particulier zonder WIK/BE-brief" style="color:#F5A524">⚠</span>' : '';
+        return `<tr>
+          <td>${esc(c.customer_name)}${c.is_company ? ' <span style="color:var(--wbx-faint);font-size:11px">(B2B)</span>' : ''}</td>
+          <td class="wbx-r wbx-mono">€ ${(Number(c.total_open_eur)||0).toFixed(2).replace('.',',')}</td>
+          <td class="wbx-mono">${Number(c.days_overdue) || 0}d</td>
+          <td>${flags || '<span style="color:var(--wbx-faint)">—</span>'}</td>
+          <td class="wbx-r">${wik}</td>
+        </tr>`;
       }).join('');
       wrap.innerHTML = `
-        <div style="background:var(--bg-elev-2);border:1px solid var(--border);border-radius:8px;overflow:hidden">
-          <div style="display:grid;grid-template-columns:2fr 1fr 0.8fr 2fr 0.4fr;gap:8px;padding:8px 12px;font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.5px">
-            <div>Klant</div><div>Openstaand</div><div>Dagen</div><div>Triggers</div><div style="text-align:right">WIK</div>
-          </div>
-          ${rows}
-        </div>
-        <div style="margin-top:6px;font-size:11px;color:var(--text-faint)">${items.length} kandidaten · read-only preview, er gebeurt niets automatisch (cron komt in PR-4b).</div>
+        <table class="wbx-inc-preview-tbl">
+          <thead>
+            <tr>
+              <th>Klant</th>
+              <th class="wbx-r">Openstaand</th>
+              <th>Dagen</th>
+              <th>Triggers</th>
+              <th class="wbx-r">WIK</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div style="margin-top:8px;font-size:12px;color:var(--wbx-faint)">${items.length} kandidaten · read-only preview, er gebeurt niets automatisch (cron komt in PR-4b).</div>
       `;
     } catch (e) {
-      if (wrap) wrap.innerHTML = `<div style="color:#f87171;font-size:12px">Preview mislukt: ${esc(e?.message || 'onbekend')}</div>`;
+      if (wrap) wrap.innerHTML = `<div style="color:var(--wbx-s-inc-tx);font-size:12.5px">Preview mislukt: ${esc(e?.message || 'onbekend')}</div>`;
     }
   }
 
@@ -15816,8 +15951,8 @@
     for (const d of _incState.dossiers) counts.set(d.status, (counts.get(d.status) || 0) + 1);
     const pill = (label, slug, count, color) => {
       const active = (slug === _incState.statusFilter) || (slug == null && _incState.statusFilter == null);
-      const dot = color ? `<span style="width:8px;height:8px;border-radius:50%;display:inline-block;background:${esc(color)};margin-right:6px"></span>` : '';
-      return `<button class="sr-seg${active ? ' active' : ''}" type="button" data-inc-filter="${slug == null ? '' : esc(slug)}">${dot}${esc(label)} <span style="color:var(--text-faint)">(${count || 0})</span></button>`;
+      const dot = color ? `<span class="wbx-strip-dot" style="background:${esc(color)}"></span>` : '';
+      return `<button class="wbx-inc-filter${active ? ' wbx-on' : ''}" type="button" data-inc-filter="${slug == null ? '' : esc(slug)}">${dot}${esc(label)} <span class="wbx-c">(${count || 0})</span></button>`;
     };
     let html = pill('Alle', null, _incState.dossiers.length, null);
     for (const s of INC_STATUSES) html += pill(s.label, s.slug, counts.get(s.slug), s.color);
@@ -15834,22 +15969,41 @@
     const list = document.getElementById('incList');
     if (!list) return;
     if (!_incState.dossiers.length) {
-      list.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text-faint);font-size:12.5px">Geen dossiers${_incState.statusFilter ? ' met status "' + esc(_incState.statusFilter) + '"' : ''}.</div>`;
+      list.innerHTML = `
+        <div class="wbx-empty">
+          <div class="wbx-big">📁</div>
+          <h3>Geen dossiers${_incState.statusFilter ? ' met status "' + esc(_incStatusMeta(_incState.statusFilter).label) + '"' : ''}</h3>
+          <div>Zodra je een klant naar incasso stuurt komt hier een dossier bij.</div>
+        </div>`;
       return;
     }
-    list.innerHTML = _incState.dossiers.map((d) => {
-      const st = _incStatusMeta(d.status);
-      return `<div class="inc-row" data-id="${esc(d.id)}" style="display:grid;grid-template-columns:2fr 1fr 1fr 1.2fr 1fr;gap:12px;padding:10px 14px;border-top:1px solid var(--border);cursor:pointer;align-items:center">
-        <div>
-          <div style="font-size:13.5px;font-weight:600;color:var(--text-dim)">${esc(d.customer_name || '—')}</div>
-          <div style="font-size:11px;color:var(--text-faint)">${esc(d.customer_email || '')}</div>
-        </div>
-        <div style="font-size:13px;font-weight:700;color:#f87171">${_incFmtEurCents(d.total_open_cents)}</div>
-        <div><span style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 10px;border-radius:99px;border:1px solid var(--border);background:var(--bg-elev-2)"><span style="width:8px;height:8px;border-radius:50%;background:${esc(st.color)}"></span>${esc(st.label)}</span></div>
-        <div style="font-size:12px;color:var(--text-dim)">${esc(d.bureau_name || '—')} <span style="color:var(--text-faint)">(${esc(d.country || 'NL')})</span></div>
-        <div style="font-size:11.5px;color:var(--text-faint);text-align:right">${esc(_incFmtDate(d.opened_at))}</div>
-      </div>`;
-    }).join('');
+    list.innerHTML = `
+      <table class="wbx-table">
+        <thead>
+          <tr>
+            <th>Klant</th>
+            <th class="wbx-r">Openstaand</th>
+            <th>Status</th>
+            <th>Bureau</th>
+            <th class="wbx-r">Aangemeld</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${_incState.dossiers.map((d) => `
+            <tr class="inc-row" data-id="${esc(d.id)}">
+              <td>
+                <div style="font-weight:600;color:var(--wbx-ink)">${esc(d.customer_name || '—')}</div>
+                ${d.customer_email ? `<div class="wbx-sub-inv">${esc(d.customer_email)}</div>` : ''}
+              </td>
+              <td class="wbx-r wbx-mono">${_incFmtEurCents(d.total_open_cents)}</td>
+              <td>${_incStatusPillHtml(d.status)}</td>
+              <td>${esc(d.bureau_name || '—')} <span style="color:var(--wbx-faint)">(${esc(d.country || 'NL')})</span></td>
+              <td class="wbx-r wbx-mono" style="font-weight:500">${esc(_incFmtDate(d.opened_at))}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
     list.querySelectorAll('.inc-row').forEach((row) => {
       row.addEventListener('click', () => incOpenDetail(row.dataset.id));
     });
@@ -15865,16 +16019,16 @@
     const wrap = document.getElementById('incBureauList');
     if (!wrap) return;
     if (!_incState.bureaus.length) {
-      wrap.innerHTML = '<div style="font-size:12px;color:var(--text-faint);padding:10px;text-align:center">Nog geen bureaus. Voeg er hieronder één toe.</div>';
+      wrap.innerHTML = '<div class="wbx-inc-list-empty">Nog geen bureaus. Voeg er hieronder één toe.</div>';
       return;
     }
-    wrap.innerHTML = _incState.bureaus.map((b) => `
-      <div style="display:flex;justify-content:space-between;gap:8px;padding:8px 10px;background:var(--bg-elev-2);border:1px solid var(--border);border-radius:6px;align-items:center">
+    wrap.innerHTML = `<div class="wbx-inc-list">${_incState.bureaus.map((b) => `
+      <div class="wbx-inc-list-row">
         <div>
-          <div style="font-size:13px;font-weight:600;color:var(--text-dim)">${esc(b.name)} <span style="color:var(--text-faint);font-size:11px">(${esc(b.country || 'NL')})</span></div>
-          <div style="font-size:11px;color:var(--text-faint)">${esc(b.email || '')} ${b.address ? '· ' + esc(b.address) : ''}</div>
+          <div style="font-weight:600;color:var(--wbx-ink)">${esc(b.name)} <span style="color:var(--wbx-faint);font-weight:500;font-size:12px">(${esc(b.country || 'NL')})</span></div>
+          <div class="wbx-sub-inv">${esc(b.email || '')}${b.address ? ' · ' + esc(b.address) : ''}</div>
         </div>
-      </div>`).join('');
+      </div>`).join('')}</div>`;
   }
   async function incAddBureau() {
     const body = {
@@ -15900,14 +16054,14 @@
     const overlay = document.getElementById('incDetailOverlay');
     const b = document.getElementById('incDetailBody');
     if (overlay) overlay.style.display = 'flex';
-    if (b) b.innerHTML = '<div style="color:var(--text-faint)">Laden…</div>';
+    if (b) b.innerHTML = '<div style="color:var(--wbx-faint)">Laden…</div>';
     try {
       const d = await _incCall('/api/incasso-dossier-detail?id=' + encodeURIComponent(id));
       if (_incState.activeDossierId !== id) return;
       _incState.detail = d;
       _incRenderDetail();
     } catch (e) {
-      if (b) b.innerHTML = `<div style="color:#f87171">Detail laden mislukt: ${esc(e?.message || 'onbekend')}</div>`;
+      if (b) b.innerHTML = `<div style="color:var(--wbx-s-inc-tx)">Detail laden mislukt: ${esc(e?.message || 'onbekend')}</div>`;
     }
   }
   function incCloseDetail() {
@@ -15932,68 +16086,92 @@
     const st = _incStatusMeta(dossier.status);
 
     b.innerHTML = `
-      <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px">
+      <div class="wbx-inc-detail">
         <div>
-          <div style="display:flex;gap:12px;align-items:baseline;margin-bottom:10px">
-            <div style="font-size:16px;font-weight:700;color:var(--text-dim)">${esc(custName)}</div>
-            <span style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 10px;border-radius:99px;border:1px solid var(--border);background:var(--bg-elev-2)"><span style="width:8px;height:8px;border-radius:50%;background:${esc(st.color)}"></span>${esc(st.label)}</span>
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
+            <div style="font-size:18px;font-weight:700;color:var(--wbx-ink)">${esc(custName)}</div>
+            ${_incStatusPillHtml(dossier.status)}
           </div>
-          <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:14px">${esc(customer?.email || '')} · ${esc(customer?.phone || '')} · Land: ${esc(dossier.country)} · Aangemeld: ${esc(_incFmtDate(dossier.opened_at))}</div>
+          <div style="font-size:12.5px;color:var(--wbx-muted);margin-bottom:14px">
+            ${esc(customer?.email || '—')}${customer?.phone ? ' · ' + esc(customer.phone) : ''}
+            · Land: <span class="wbx-mono">${esc(dossier.country)}</span>
+            · Aangemeld: <span class="wbx-mono">${esc(_incFmtDate(dossier.opened_at))}</span>
+          </div>
 
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
-            <label style="font-size:11.5px;color:var(--text-faint)">Status
-              <select id="incEditStatus" class="fin-input" style="margin-top:2px">${statusOpts}</select>
+          <div class="wbx-inc-form">
+            <label>Status
+              <select id="incEditStatus">${statusOpts}</select>
             </label>
-            <label style="font-size:11.5px;color:var(--text-faint)">Bureau
-              <select id="incEditBureau" class="fin-input" style="margin-top:2px">${bureauOpts}</select>
+            <label>Bureau
+              <select id="incEditBureau">${bureauOpts}</select>
             </label>
           </div>
-          <label style="font-size:11.5px;color:var(--text-faint);display:block;margin-bottom:8px">Notities
-            <textarea id="incEditNotes" class="fin-input" rows="4" style="margin-top:2px;width:100%">${esc(dossier.notes || '')}</textarea>
+          <label style="display:block;font-size:12px;color:var(--wbx-muted);font-weight:500">Notities
+            <textarea id="incEditNotes" rows="4" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:#fff;color:var(--wbx-ink);font:inherit;min-height:80px;resize:vertical">${esc(dossier.notes || '')}</textarea>
           </label>
-          <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
-            <button id="incSaveBtn"    class="sr-abtn primary" type="button"><i class="ti ti-device-floppy"></i> Opslaan</button>
-            <button id="incPdfBtn"     class="sr-abtn" type="button"><i class="ti ti-file-download"></i> Genereer dossier-PDF</button>
-            <button id="incMailBtn"    class="sr-abtn" type="button"><i class="ti ti-mail-forward"></i> E-mail naar bureau</button>
-            <button id="incPreBriefBtn" class="sr-abtn" type="button" title="Verstuur WIK-14-dagenbrief (NL) of eerste (kosteloze) herinnering (BE)"><i class="ti ti-mailbox"></i> Verstuur pre-incassobrief</button>
+          <div class="wbx-inc-actions">
+            <button id="incSaveBtn"     class="wbx-btn wbx-primary" type="button">Opslaan</button>
+            <button id="incPdfBtn"      class="wbx-btn"             type="button">Genereer dossier-PDF</button>
+            <button id="incMailBtn"     class="wbx-btn"             type="button">E-mail naar bureau</button>
+            <button id="incPreBriefBtn" class="wbx-btn"             type="button" title="Verstuur WIK-14-dagenbrief (NL) of eerste (kosteloze) herinnering (BE)">Verstuur pre-incassobrief</button>
           </div>
 
-          <div class="pipe-dos-h">Facturen ${flags?.wik_letter_sent ? '· <span style="color:#10b981">WIK/BE-brief verstuurd</span>' : ''}</div>
-          <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:12px">
-            ${(invoices || []).map((iv) => `<div style="display:flex;justify-content:space-between;padding:6px 10px;border-top:1px solid var(--border);font-size:12px"><span>${esc(iv.invoice_number || iv.id)}</span><span style="color:var(--text-faint)">${esc(_incFmtDate(iv.due_date))}</span><span>${esc(iv.status)}</span><span style="color:#f87171;font-weight:600">€ ${(Number(iv.amount_total)||0).toFixed(2).replace('.',',')}</span></div>`).join('') || '<div style="padding:10px;color:var(--text-faint);font-size:11.5px">Geen facturen</div>'}
-          </div>
+          <div class="wbx-inc-h">Facturen ${flags?.wik_letter_sent ? '· <span style="color:var(--wbx-s-paid-tx);text-transform:none;letter-spacing:0;font-weight:500">WIK/BE-brief verstuurd</span>' : ''}</div>
+          ${(invoices || []).length ? `
+            <div class="wbx-inc-list">
+              ${(invoices || []).map((iv) => `
+                <div class="wbx-inc-list-row">
+                  <div class="wbx-mono">${esc(iv.invoice_number || iv.id)}</div>
+                  <div class="wbx-mono" style="color:var(--wbx-faint)">${esc(_incFmtDate(iv.due_date))}</div>
+                  <div style="color:var(--wbx-muted)">${esc(iv.status)}</div>
+                  <div class="wbx-mono" style="font-weight:700;color:var(--wbx-s-inc-tx)">€ ${(Number(iv.amount_total)||0).toFixed(2).replace('.',',')}</div>
+                </div>`).join('')}
+            </div>
+          ` : '<div class="wbx-inc-list-empty" style="background:#FAFBFC;border:1px solid var(--wbx-border);border-radius:10px">Geen facturen</div>'}
         </div>
 
         <div>
-          <div class="pipe-dos-h">Snapshot bij aanmelden</div>
-          <div style="background:var(--bg-elev-2);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:14px;font-size:12px">
-            <div><strong>${_incFmtEurCents(snap.total_open_cents)}</strong> · ${snap.open_invoice_count || 0} facturen</div>
-            <div style="color:var(--text-faint);margin-top:2px">op ${esc(_incFmtDate(snap.snapshot_at))}</div>
+          <div class="wbx-inc-h" style="margin-top:0">Snapshot bij aanmelden</div>
+          <div class="wbx-inc-kv">
+            <div><strong class="wbx-mono">${_incFmtEurCents(snap.total_open_cents)}</strong> · ${snap.open_invoice_count || 0} facturen</div>
+            <div style="color:var(--wbx-faint);margin-top:2px">op <span class="wbx-mono">${esc(_incFmtDate(snap.snapshot_at))}</span></div>
           </div>
 
           ${cd ? `
-          <div class="pipe-dos-h">Gecrediteerde schuld</div>
-          <div style="background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.24);border-radius:8px;padding:10px;margin-bottom:14px;font-size:12px;line-height:1.5">
-            <div><strong>${cd.count}</strong> factuur${cd.count === 1 ? '' : 'en'} gecrediteerd${cd.last_credited_on ? ` · laatst op <strong>${esc(cd.last_credited_on)}</strong>` : ''}</div>
-            <div style="margin-top:3px">Totaal <strong>€ ${(Number(cd.total_incl) || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> incl. BTW${cd.total_vat > 0 ? ` (waarvan € ${(Number(cd.total_vat) || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} BTW)` : ''}</div>
+          <div class="wbx-inc-h">Gecrediteerde schuld</div>
+          <div class="wbx-inc-kv wbx-inc-kv-note">
+            <div><strong>${cd.count}</strong> factuur${cd.count === 1 ? '' : 'en'} gecrediteerd${cd.last_credited_on ? ` · laatst op <strong class="wbx-mono">${esc(cd.last_credited_on)}</strong>` : ''}</div>
+            <div style="margin-top:3px">Totaal <strong class="wbx-mono">€ ${(Number(cd.total_incl) || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> incl. BTW${cd.total_vat > 0 ? ` (waarvan <span class="wbx-mono">€ ${(Number(cd.total_vat) || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> BTW)` : ''}</div>
             ${cd.months_extended_total > 0 ? `<div style="margin-top:3px">Abonnement <strong>+${cd.months_extended_total} mnd</strong> verlengd</div>` : ''}
-            <div style="margin-top:6px;color:var(--text-faint);font-size:11px">Deze credit-historie is context voor het bureau — de openstaande vordering hierboven is wat geïncasseerd wordt.</div>
+            <div style="margin-top:6px;color:var(--wbx-faint);font-size:12px">Deze credit-historie is context voor het bureau — de openstaande vordering hierboven is wat geïncasseerd wordt.</div>
           </div>` : ''}
 
-          <div class="pipe-dos-h">Betalingsregelingen</div>
-          <div style="margin-bottom:14px">
-            ${(arrangements || []).map((a) => `<div style="padding:6px 10px;background:var(--bg-elev-2);border:1px solid var(--border);border-radius:6px;margin-bottom:4px;font-size:12px">${esc(a.type)} · <span style="color:var(--text-faint)">${esc(a.status)}</span></div>`).join('') || '<div style="color:var(--text-faint);font-size:11.5px">Geen regelingen</div>'}
-          </div>
+          <div class="wbx-inc-h">Betalingsregelingen</div>
+          ${(arrangements || []).length ? `
+            <div class="wbx-inc-list">
+              ${(arrangements || []).map((a) => `
+                <div class="wbx-inc-list-row"><div><strong>${esc(a.type)}</strong></div><div style="color:var(--wbx-muted)">${esc(a.status)}</div></div>
+              `).join('')}
+            </div>
+          ` : '<div class="wbx-inc-list-empty" style="background:#FAFBFC;border:1px solid var(--wbx-border);border-radius:10px;margin-bottom:10px">Geen regelingen</div>'}
 
-          <div class="pipe-dos-h">WhatsApp-gesprek(ken)</div>
-          <div style="margin-bottom:14px">
-            ${(conversations || []).slice(0, 3).map((c) => `<div style="font-size:11.5px;color:var(--text-dim)">${esc(c.phone_number)} · <span style="color:var(--text-faint)">${esc(_incFmtDate(c.last_message_at))}</span></div>`).join('') || '<div style="color:var(--text-faint);font-size:11.5px">Geen gesprekken</div>'}
-          </div>
+          <div class="wbx-inc-h">WhatsApp-gesprek(ken)</div>
+          ${(conversations || []).length ? `
+            <div class="wbx-inc-list">
+              ${(conversations || []).slice(0, 3).map((c) => `
+                <div class="wbx-inc-list-row"><div class="wbx-mono">${esc(c.phone_number)}</div><div class="wbx-mono" style="color:var(--wbx-faint)">${esc(_incFmtDate(c.last_message_at))}</div></div>
+              `).join('')}
+            </div>
+          ` : '<div class="wbx-inc-list-empty" style="background:#FAFBFC;border:1px solid var(--wbx-border);border-radius:10px;margin-bottom:10px">Geen gesprekken</div>'}
 
-          <div class="pipe-dos-h">Aanmaan-historie</div>
-          <div style="max-height:200px;overflow-y:auto">
-            ${(dunning_log || []).slice(0, 20).map((l) => `<div style="font-size:11.5px;padding:4px 0;border-bottom:1px solid var(--border);color:var(--text-dim)">${esc(l.event_type)} <span style="color:var(--text-faint)">· ${esc(_incFmtDate(l.created_at))}</span></div>`).join('') || '<div style="color:var(--text-faint);font-size:11.5px">Geen historie</div>'}
-          </div>
+          <div class="wbx-inc-h">Aanmaan-historie</div>
+          ${(dunning_log || []).length ? `
+            <div class="wbx-inc-list" style="max-height:220px;overflow-y:auto">
+              ${(dunning_log || []).slice(0, 20).map((l) => `
+                <div class="wbx-inc-list-row"><div>${esc(l.event_type)}</div><div class="wbx-mono" style="color:var(--wbx-faint)">${esc(_incFmtDate(l.created_at))}</div></div>
+              `).join('')}
+            </div>
+          ` : '<div class="wbx-inc-list-empty" style="background:#FAFBFC;border:1px solid var(--wbx-border);border-radius:10px">Geen historie</div>'}
         </div>
       </div>
     `;
