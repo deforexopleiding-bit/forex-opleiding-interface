@@ -19,9 +19,17 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Sluit handmatig-afgehandelde offertes uit (deals.subscription_marked_done=true).
+    // De per-deal-koppeling (dealIds ∈ subscriptions.deal_id) blijft de primaire
+    // check hieronder; deze extra vlag is de ontsnappingsroute voor accepted
+    // offertes waarvan het abo standalone is ingevoerd — die zetten via
+    // sales-deal-mark-subscription-done deals.subscription_marked_done=true,
+    // waarna ze uit dit widget verdwijnen.
     const { data: deals } = await supabaseAdmin.from('deals')
       .select('id, customer_id, total_amount, tl_quotation_accepted_at')
-      .eq('tl_quotation_status', 'accepted').is('archived_at', null)
+      .eq('tl_quotation_status', 'accepted')
+      .eq('subscription_marked_done', false)
+      .is('archived_at', null)
       .order('tl_quotation_accepted_at', { ascending: false }).limit(50);
 
     const dealIds = (deals || []).map(d => d.id);

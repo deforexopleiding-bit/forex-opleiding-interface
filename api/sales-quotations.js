@@ -139,6 +139,11 @@ export default async function handler(req, res) {
         accepted_at:         d.tl_quotation_accepted_at || null,
         declined_at:         d.tl_quotation_declined_at || null,
         has_subscription:    !!hasSubByDeal[d.id] || d.subscription_marked_done === true,
+        // Split-out zodat de UI onderscheid kan maken tussen "sub bestaat écht"
+        // (per-deal join) en "handmatig als afgehandeld gemarkeerd" (vlag).
+        // Nodig voor het menu-item 'Markeer afgehandeld' vs 'Weer openzetten'.
+        has_linked_subscription:      !!hasSubByDeal[d.id],
+        subscription_marked_done:     d.subscription_marked_done === true,
       };
     });
 

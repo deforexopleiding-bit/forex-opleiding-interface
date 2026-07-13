@@ -308,9 +308,45 @@ function renderCustomerStep(){
 function renderChosen(){
   const el=document.getElementById('custChosen'); if(!el) return;
   if(state.matched_customer_id && state.customerMode==='search' && state._chosenName){
-    el.innerHTML=`<div style="padding:8px 10px;background:rgba(5,150,105,.12);border-radius:6px;font-size:12.5px;margin-bottom:8px">✓ Gekozen klant: <strong>${esc(state._chosenName)}</strong> <a href="#" id="clearChosen" style="margin-left:8px;font-size:11px;color:var(--accent-cyan,#0891b2)">wijzig</a></div>`;
+    el.innerHTML=`<div style="padding:8px 10px;background:rgba(5,150,105,.12);border-radius:6px;font-size:12.5px;margin-bottom:8px">✓ Gekozen klant: <strong>${esc(state._chosenName)}</strong> <a href="#" id="clearChosen" style="margin-left:8px;font-size:11px;color:var(--accent-cyan,#0891b2)">wijzig</a></div><div id="openQuotWarn"></div>`;
     document.getElementById('clearChosen').addEventListener('click',e=>{e.preventDefault();state.matched_customer_id=null;state._chosenName=null;renderCustomerStep();updateNext();});
+    // Standalone-flow: waarschuwen als de gekozen klant nog een openstaande
+    // (accepted) offerte heeft die niet gekoppeld en niet als afgehandeld
+    // gemarkeerd is. NIET blokkeren — gewoon banner + omzet-link zodat de
+    // gebruiker bewust kiest tussen omzetten of tóch los abo aanmaken.
+    if(state.mode==='standalone'){ checkStandaloneOpenQuotations(state.matched_customer_id); }
   } else el.innerHTML='';
+}
+
+async function checkStandaloneOpenQuotations(customerId){
+  const warn=document.getElementById('openQuotWarn'); if(!warn||!customerId) return;
+  try{
+    // sales-quotations retourneert per-deal has_linked_subscription en
+    // subscription_marked_done (sinds de opschoon-PR). We filteren aan de
+    // client-kant naar accepted/signed zonder abo en zonder handmatige
+    // afhandeling — dat is dezelfde criterium-set als het opschoon-overzicht.
+    const r=await apiFetch('/api/sales-quotations?customer_id='+encodeURIComponent(customerId)+'&page_size=100');
+    if(!r.ok) return;
+    const d=await r.json();
+    const open=(d.quotations||[]).filter(q=>
+      (q.tl_quotation_status==='accepted'||q.tl_quotation_status==='signed')
+      && !q.has_linked_subscription
+      && !q.subscription_marked_done
+    );
+    if(!open.length){ warn.innerHTML=''; return; }
+    const items=open.slice(0,5).map(q=>{
+      const eur=q.total_amount_incl!=null?'€'+Number(q.total_amount_incl).toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
+      return `<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid rgba(217,119,6,.24);font-size:12.5px">
+        <span>${esc(q.quote_reference||'(zonder ref)')} · ${esc(q.traject_label||'')}</span>
+        <span><strong>${eur}</strong> <a href="/modules/subscription-wizard.html?deal_id=${encodeURIComponent(q.deal_id)}" style="color:#b45309;margin-left:8px;text-decoration:underline">Omzetten →</a></span>
+      </div>`;
+    }).join('');
+    warn.innerHTML=`<div style="padding:10px 12px;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.32);border-radius:8px;font-size:13px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:6px"><span>⚠️</span><strong>Deze klant heeft ${open.length} openstaande offerte${open.length===1?'':'s'}.</strong></div>
+      <div style="margin-top:4px;color:var(--text-dim)">Wil je die omzetten in plaats van een los abo aanmaken? Als het abo standalone móet, ga dan gewoon door.</div>
+      ${items}
+    </div>`;
+  }catch(_){ /* fail-soft: waarschuwing is optioneel, blokkeert de flow niet */ }
 }
 function bindCustomerStep(){
   const search=document.getElementById('custSearch');
