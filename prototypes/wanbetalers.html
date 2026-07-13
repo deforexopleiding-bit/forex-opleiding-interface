@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wanbetalers — compleet herontwerp (prototype)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F4F6F8;--surface:#FFF;--ink:#161D29;--muted:#66717F;--faint:#98A2B0;
+    --border:#E6E9EF;--border-strong:#D6DBE4;--accent:#0E7C6B;--accent-soft:#E1F1EE;--accent-ink:#0A5A4E;
+    --s-new-bg:#FDF3E3;--s-new-tx:#986412;--s-remind-bg:#E9F0FB;--s-remind-tx:#2B5FA8;
+    --s-talk-bg:#E1F1EE;--s-talk-tx:#0A5A4E;--s-plan-bg:#EEEAFA;--s-plan-tx:#5B44A8;
+    --s-paid-bg:#E5F3EA;--s-paid-tx:#2A7047;--s-inc-bg:#FBE9E9;--s-inc-tx:#B23434;--s-back-bg:#FBEAE7;--s-back-tx:#B24A2E;
+    --ok-bg:#E5F3EA;--ok-tx:#2A7047;--no-bg:#F0F2F5;--no-tx:#66717F;
+    --radius:14px;--mono:'JetBrains Mono',ui-monospace,monospace;--shadow:0 1px 2px rgba(20,25,35,.05),0 12px 34px rgba(20,25,35,.08);
+  }
+  *{box-sizing:border-box}html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:'Inter',system-ui,sans-serif;font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+  button{font:inherit}
+  .app{max-width:1120px;margin:0 auto;padding:0 22px 90px}
+  .topbar{display:flex;align-items:center;gap:20px;padding:18px 0 14px;position:sticky;top:0;background:var(--bg);z-index:20}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:-.02em}
+  .brand .dot{width:27px;height:27px;border-radius:8px;background:var(--accent);display:grid;place-items:center;color:#fff;font-weight:700}
+  nav.main{display:flex;gap:3px;margin-left:6px;flex-wrap:wrap}
+  nav.main button{border:0;background:transparent;color:var(--muted);cursor:pointer;font-weight:500;padding:9px 14px;border-radius:9px}
+  nav.main button:hover{background:#EAEDF1;color:var(--ink)}
+  nav.main button.active{background:var(--ink);color:#fff}
+  nav.main button .badge{background:#DC5B3E;color:#fff;font:600 11px/1 var(--mono);padding:2px 6px;border-radius:999px;margin-left:6px;vertical-align:1px}
+  nav.main button.active .badge{background:rgba(255,255,255,.25)}
+  .topbar .spacer{flex:1}.clock{font:600 13px/1 var(--mono);color:var(--faint)}
+  .page-head{padding:12px 2px 16px}.page-head h1{margin:0;font-size:25px;letter-spacing:-.02em}
+  .page-head p{margin:5px 0 0;color:var(--muted);font-size:14px;max-width:660px}
+  .back{cursor:pointer;color:var(--muted);font-size:15px}.back:hover{color:var(--ink)}
+
+  .btn{border:1px solid var(--border-strong);background:#fff;color:var(--ink);font-weight:600;font-size:13px;padding:7px 13px;border-radius:9px;cursor:pointer;white-space:nowrap}
+  .btn:hover{border-color:var(--muted)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}.btn.primary:hover{background:var(--accent-ink)}
+  .btn.danger{color:var(--s-inc-tx)}.btn.danger:hover{border-color:var(--s-inc-tx)}
+  .btn.sm{padding:6px 11px;font-size:12.5px}
+  .btn.lg{padding:10px 18px;font-size:14px}
+
+  .pill{display:inline-block;font-size:11.5px;font-weight:600;padding:4px 10px;border-radius:999px;white-space:nowrap}
+  .p-new{background:var(--s-new-bg);color:var(--s-new-tx)}.p-remind{background:var(--s-remind-bg);color:var(--s-remind-tx)}
+  .p-talk{background:var(--s-talk-bg);color:var(--s-talk-tx)}.p-plan{background:var(--s-plan-bg);color:var(--s-plan-tx)}
+  .p-paid{background:var(--s-paid-bg);color:var(--s-paid-tx)}.p-inc{background:var(--s-inc-bg);color:var(--s-inc-tx)}.p-back{background:var(--s-back-bg);color:var(--s-back-tx)}
+
+  .sumstrip{display:flex;align-items:center;gap:16px;background:linear-gradient(90deg,#0E7C6B,#0A5A4E);color:#fff;border-radius:var(--radius);padding:15px 20px;margin-bottom:14px}
+  .sumstrip .big{font:600 26px/1 var(--mono)}.sumstrip .lbl{font-size:13px;color:#CDE7E1;margin-top:3px}
+  .sumstrip .split{display:flex;gap:18px;margin-left:6px}.sumstrip .split div{font-size:13px}.sumstrip .split b{font-family:var(--mono)}
+  .sumstrip .spacer{flex:1}
+  .sumstrip button{border:0;background:#fff;color:var(--accent-ink);font-weight:600;padding:9px 15px;border-radius:9px;cursor:pointer;white-space:nowrap}
+
+  .campaign{display:flex;align-items:center;gap:15px;background:linear-gradient(90deg,#122536,#1B3A53);color:#fff;border-radius:var(--radius);padding:14px 18px;margin-bottom:18px}
+  .campaign .ic{width:36px;height:36px;border-radius:10px;background:rgba(255,255,255,.12);display:grid;place-items:center;font-size:18px;flex:none}
+  .campaign b{font-weight:600}.campaign .sub{color:#B7C4D4;font-size:12.5px;margin-top:2px}.campaign .spacer{flex:1}
+  .campaign button{border:0;background:#fff;color:#132a3d;font-weight:600;padding:9px 16px;border-radius:9px;cursor:pointer}
+
+  .sec-head{display:flex;align-items:center;justify-content:space-between;margin:20px 2px 11px}
+  .sec-head h2{margin:0;font-size:15px}.sec-head .muted{color:var(--muted);font-size:13px}
+  .seg{display:inline-flex;background:#E9EBEF;border-radius:10px;padding:3px}
+  .seg button{border:0;background:transparent;font-weight:500;color:var(--muted);padding:6px 13px;border-radius:8px;cursor:pointer;font-size:13.5px}
+  .seg button.active{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+
+  .worklist{display:flex;flex-direction:column;gap:8px}
+  .case{display:grid;grid-template-columns:minmax(0,1.5fr) .8fr .95fr auto;align-items:center;gap:16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:0 16px 0 0;cursor:pointer;overflow:hidden;position:relative}
+  .case:hover{border-color:var(--border-strong)}.case:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .case .urg{position:absolute;left:0;top:0;bottom:0;width:5px}
+  .who{padding:14px 0 14px 20px}.who .name{font-weight:600;letter-spacing:-.01em}.who .inv{color:var(--faint);font:500 12px/1.4 var(--mono);margin-top:3px}
+  .amt{font:600 15px/1 var(--mono);text-align:right}
+  .late{font:600 13.5px/1 var(--mono);color:var(--muted);text-align:right}.late small{display:block;font:500 10.5px/1.4 'Inter';color:var(--faint);margin-top:4px;letter-spacing:.02em}
+  .case .right{display:flex;align-items:center;gap:13px;justify-content:flex-end}
+
+  .alist{display:flex;flex-direction:column;gap:8px}
+  .arow{display:flex;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px}
+  .arow .ic{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-size:16px;flex:none}
+  .ic.verify{background:var(--s-remind-bg);color:var(--s-remind-tx)}.ic.plan{background:var(--s-plan-bg);color:var(--s-plan-tx)}.ic.esc{background:var(--s-inc-bg);color:var(--s-inc-tx)}
+  .arow .body{flex:1;min-width:0}.arow .title{font-weight:600;font-size:14px}.arow .sub{color:var(--muted);font-size:12.5px;margin-top:1px}
+  .arow .age{font:600 12px/1 var(--mono);color:var(--faint);flex:none;margin-right:4px}.arow .btns{display:flex;gap:8px;flex:none}
+  .tag{display:inline-block;font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px}.tag.ok{background:var(--ok-bg);color:var(--ok-tx)}.tag.no{background:var(--no-bg);color:var(--no-tx)}
+
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:14px}
+  .tabs button{border:0;background:transparent;color:var(--muted);font-weight:600;font-size:14px;padding:10px 14px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabs button:hover{color:var(--ink)}.tabs button.active{color:var(--accent-ink);border-bottom-color:var(--accent)}
+  .tabs button .c{font:600 11px/1 var(--mono);background:#E9EBEF;color:var(--muted);padding:2px 6px;border-radius:999px;margin-left:6px}.tabs button.active .c{background:var(--accent-soft);color:var(--accent-ink)}
+  .filters{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}
+  .chip{border:1px solid var(--border);background:#fff;color:var(--muted);font-weight:500;font-size:13px;padding:6px 12px;border-radius:999px;cursor:pointer}
+  .chip.active{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+  .strip{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:16px}
+  .strip button{border:1px solid var(--border);background:#fff;border-radius:12px;padding:11px 15px;cursor:pointer;text-align:left;min-width:118px}
+  .strip button:hover{border-color:var(--border-strong)}.strip button.active{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+  .strip .n{font:600 20px/1 var(--mono)}.strip .l{display:block;font-size:12px;color:var(--muted);margin-top:5px;font-weight:500}
+  .strip .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}
+
+  .toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:13px}.toolbar .spacer{flex:1}
+  table{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+  thead th{text-align:left;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);font-weight:600;padding:12px 16px;background:#FAFBFC;border-bottom:1px solid var(--border)}
+  th.r,td.r{text-align:right}
+  tbody td{padding:13px 16px;border-bottom:1px solid var(--border);font-size:14px}tbody tr:last-child td{border-bottom:0}
+  tbody tr{cursor:pointer}tbody tr:hover td{background:#FAFBFC}
+  td.mono{font-family:var(--mono);font-weight:600}.sub-inv{color:var(--faint);font:500 12px/1.3 var(--mono)}
+
+  .inbox{display:grid;grid-template-columns:320px 1fr;gap:16px;min-height:460px}
+  .conv-list{background:#fff;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+  .conv{display:flex;gap:11px;padding:13px 15px;border-bottom:1px solid var(--border);cursor:pointer;align-items:center}
+  .conv:hover{background:#FAFBFC}.conv.active{background:var(--accent-soft)}
+  .conv .av{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:700;font-size:13px;flex:none}
+  .conv .cbody{flex:1;min-width:0}.conv .cname{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .conv .cmsg{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}.conv .ctime{font:500 11px/1 var(--mono);color:var(--faint);flex:none}
+  .conv-view{background:#fff;border:1px solid var(--border);border-radius:var(--radius);display:flex;flex-direction:column}
+  .cv-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+  .cv-body{flex:1;padding:18px;display:flex;flex-direction:column;gap:10px;overflow-y:auto;max-height:420px}
+  .cv-foot{padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:9px;align-items:center}
+  .cv-foot input{flex:1;border:1px solid var(--border-strong);border-radius:9px;padding:9px 12px;font:inherit}
+  .av-sm{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:700;font-size:12px;flex:none}
+
+  .msg{max-width:78%;padding:10px 13px;border-radius:14px;font-size:14px;line-height:1.45}
+  .msg.in{align-self:flex-start;background:#EEF0F4;border-bottom-left-radius:5px}
+  .msg.out{align-self:flex-end;background:var(--accent-soft);color:var(--accent-ink);border-bottom-right-radius:5px}
+  .msg .t{font:500 10px/1 var(--mono);opacity:.55;margin-top:5px;display:block}
+  .joost{border:1px dashed var(--accent);border-radius:12px;padding:13px 14px;background:linear-gradient(#fff,#FBFDFC)}
+  .joost.stretch{align-self:stretch}
+  .joost .jhead{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .joost .jbadge{font-size:10.5px;font-weight:700;color:var(--accent-ink);background:var(--accent-soft);padding:3px 8px;border-radius:6px;letter-spacing:.03em}
+  .joost .conf{font:600 11px/1 var(--mono);color:var(--faint)}
+  .joost p{margin:0;font-size:13.5px;color:#39434f}.joost-actions{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap}
+
+  .set-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px}
+  .set-card{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:18px;cursor:pointer;transition:border-color .12s}
+  .set-card:hover{border-color:var(--border-strong)}
+  .set-card .ico{width:38px;height:38px;border-radius:10px;background:var(--accent-soft);color:var(--accent-ink);display:grid;place-items:center;font-size:18px;margin-bottom:12px}
+  .set-card h3{margin:0 0 4px;font-size:15px}.set-card p{margin:0;color:var(--muted);font-size:13px}
+  .set-card .st{margin-top:11px;font-size:12.5px;font-weight:600}
+  .st.on{color:var(--accent-ink)}.st.off{color:var(--faint)}
+
+  /* case sheet */
+  .scrim{position:fixed;inset:0;background:rgba(14,19,28,.44);backdrop-filter:blur(2px);opacity:0;pointer-events:none;transition:opacity .2s;z-index:50}
+  .scrim.open{opacity:1;pointer-events:auto}
+  .sheet{position:fixed;top:0;right:0;height:100%;width:min(720px,100%);background:var(--bg);box-shadow:-16px 0 44px rgba(14,19,28,.16);transform:translateX(100%);transition:transform .26s cubic-bezier(.2,.8,.2,1);z-index:51;display:flex;flex-direction:column;overflow-y:auto}
+  .sheet.open{transform:none}
+  .sheet-top{position:sticky;top:0;background:var(--bg);padding:18px 24px 6px;z-index:2}
+  .sheet-top .row{display:flex;align-items:center;gap:12px}
+  .icon-btn{border:1px solid var(--border);background:#fff;width:34px;height:34px;border-radius:9px;cursor:pointer;font-size:15px;color:var(--muted)}.icon-btn:hover{border-color:var(--border-strong);color:var(--ink)}
+  .sheet h2{margin:0;font-size:19px;letter-spacing:-.01em}.sheet .sub{color:var(--faint);font:500 12px/1.4 var(--mono)}
+  .flow{display:flex;align-items:center;padding:14px 24px 2px;flex-wrap:wrap}
+  .step{display:flex;align-items:center;gap:7px;color:var(--faint);font-size:12px;font-weight:600}
+  .step .bul{width:11px;height:11px;border-radius:50%;background:var(--border-strong)}
+  .step.done{color:var(--muted)}.step.done .bul{background:var(--accent)}
+  .step.here{color:var(--accent-ink)}.step.here .bul{background:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+  .flow .bar{width:20px;height:2px;background:var(--border-strong);margin:0 6px}.flow .bar.done{background:var(--accent)}
+  .sheet-body{padding:14px 24px 30px;display:flex;flex-direction:column;gap:14px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px}
+  .card h4{margin:0 0 11px;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);font-weight:600}
+  .kv{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)}.kv:last-child{border-bottom:0}
+  .kv .k{color:var(--muted)}.kv .v{font-weight:600}.kv .v.mono{font-family:var(--mono)}
+  .sheet-actions{display:flex;gap:9px;padding:15px 24px;position:sticky;bottom:0;background:linear-gradient(transparent,var(--bg) 28%);flex-wrap:wrap}
+
+  /* generic modal */
+  .mscrim{position:fixed;inset:0;background:rgba(14,19,28,.5);backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:opacity .18s;z-index:60;display:grid;place-items:center;padding:20px}
+  .mscrim.open{opacity:1;pointer-events:auto}
+  .modal{background:var(--surface);border-radius:16px;box-shadow:var(--shadow);width:min(560px,100%);max-height:86vh;overflow-y:auto;transform:translateY(8px) scale(.99);transition:transform .18s}
+  .mscrim.open .modal{transform:none}
+  .modal-head{display:flex;align-items:center;gap:10px;padding:18px 20px 8px}
+  .modal-head h3{margin:0;font-size:17px}.modal-head .spacer{flex:1}
+  .modal-body{padding:6px 20px 8px;font-size:14px;color:var(--ink)}
+  .modal-body .fld{margin-bottom:14px}.modal-body label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:5px}
+  .modal-body input[type=text],.modal-body textarea,.modal-body select{width:100%;border:1px solid var(--border-strong);border-radius:9px;padding:9px 11px;font:inherit;background:#fff}
+  .modal-body textarea{min-height:110px;resize:vertical;font-size:13px;line-height:1.5}
+  .modal-foot{display:flex;gap:9px;justify-content:flex-end;padding:12px 20px 18px}
+  .rule{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--border)}.rule:last-child{border-bottom:0}
+  .rule .rb{flex:1}.rule .rt{font-weight:600;font-size:13.5px}.rule .rd{color:var(--muted);font-size:12.5px;margin-top:1px}
+  .sw{width:38px;height:22px;border-radius:999px;background:var(--accent);position:relative;flex:none;cursor:pointer}
+  .sw.off{background:#CBD2DC}.sw::after{content:"";position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:3px;right:3px;transition:.15s}.sw.off::after{right:auto;left:3px}
+
+  /* cleanup */
+  .cleanup-note{background:var(--accent-soft);border:1px solid #BEE3DC;border-radius:12px;padding:13px 16px;font-size:13.5px;color:var(--accent-ink);margin-bottom:16px}
+  .co-row{display:grid;grid-template-columns:30px minmax(0,1.4fr) .8fr .7fr 1fr;gap:14px;align-items:center;background:#fff;border:1px solid var(--border);border-radius:12px;padding:12px 16px;margin-bottom:8px}
+  .co-row input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent)}
+  .co-choose{display:flex;gap:6px}.co-choose .btn.sm.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .cleanup-bar{position:sticky;bottom:16px;margin-top:16px;background:var(--ink);color:#fff;border-radius:12px;padding:14px 18px;display:flex;align-items:center;gap:14px}
+  .cleanup-bar .spacer{flex:1}.cleanup-bar .cbtn{border:0;background:var(--accent);color:#fff;font-weight:600;padding:9px 16px;border-radius:9px;cursor:pointer}
+
+  .empty{text-align:center;padding:54px 20px;color:var(--muted);background:#fff;border:1px solid var(--border);border-radius:var(--radius)}
+  .empty .big{font-size:38px;margin-bottom:6px}.empty h3{margin:0 0 4px;color:var(--ink)}
+  .hidden{display:none}
+  .foot{margin-top:32px;color:var(--faint);font-size:12px;text-align:center}
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 18px;border-radius:10px;font-size:13.5px;opacity:0;transition:opacity .2s;z-index:70;box-shadow:var(--shadow)}
+  .toast.show{opacity:1}
+  @media(max-width:720px){.inbox{grid-template-columns:1fr}.case{grid-template-columns:1fr auto}.amt,.late{display:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="brand"><span class="dot">F</span> De Forex Opleiding</div>
+    <nav class="main">
+      <button class="active" data-nav="todo">Te doen</button>
+      <button data-nav="acties">Acties <span class="badge" id="navActies">25</span></button>
+      <button data-nav="facturen">Facturen</button>
+      <button data-nav="gesprekken">Gesprekken <span class="badge">2</span></button>
+      <button data-nav="settings">Instellingen</button>
+    </nav>
+    <div class="spacer"></div><div class="clock">ma 13 jul · 12:05</div>
+  </div>
+
+  <!-- TE DOEN -->
+  <section id="todo">
+    <div class="page-head"><h1>Te doen</h1><p>Je dagelijkse worklist met te late facturen. Acties om te beoordelen zie je als melding bovenaan; de achterstand zit apart in de opruimactie.</p></div>
+    <div class="sumstrip" id="actiesBox">
+      <div><div class="big" id="sumTotal">25</div><div class="lbl">openstaande acties</div></div>
+      <div class="split"><div><b id="sumVerify">8</b> betaalcontroles</div><div><b id="sumPlan">12</b> regelingen</div><div><b id="sumEsc">5</b> escalaties</div></div>
+      <div class="spacer"></div><button onclick="go('acties')">Bekijk alle →</button>
+    </div>
+    <div class="campaign">
+      <div class="ic">📦</div>
+      <div><b>61 klanten met een achterstand</b> · € 56.911,51 open<div class="sub">Meerdere facturen tegelijk open — hoort bij de opruimactie, niet bij je dagelijkse lijst.</div></div>
+      <div class="spacer"></div><button onclick="go('cleanup')">Opruimen →</button>
+    </div>
+    <div class="sec-head"><h2>Te late facturen</h2><div class="seg"><button class="active">Langst te laat</button><button>Nieuwste</button></div></div>
+    <div class="worklist" id="worklist"></div>
+  </section>
+
+  <!-- ACTIES -->
+  <section id="acties" class="hidden">
+    <div class="page-head"><h1>Acties</h1><p>Alle acties met filters en historie. Werk de "Te doen"-tab leeg; wat je afhandelt of afwijst schuift naar de andere tabs.</p></div>
+    <div class="tabs" id="tabs">
+      <button class="active" data-tab="open">Te doen <span class="c" id="cOpen">25</span></button>
+      <button data-tab="done">Afgehandeld <span class="c" id="cDone">0</span></button>
+      <button data-tab="rej">Afgewezen <span class="c" id="cRej">0</span></button>
+    </div>
+    <div class="filters" id="afilters">
+      <button class="chip active" data-f="all">Alle types</button>
+      <button class="chip" data-f="verify">Betaalcontroles</button>
+      <button class="chip" data-f="plan">Regelingen</button>
+      <button class="chip" data-f="esc">Escalaties</button>
+    </div>
+    <div class="alist" id="actiesList"></div>
+  </section>
+
+  <!-- FACTUREN -->
+  <section id="facturen" class="hidden">
+    <div class="page-head"><h1>Facturen</h1><p>Je volledige overzicht. Zie in één blik hoeveel facturen in welke fase staan, filter erop, en wissel tussen per factuur of per klant.</p></div>
+    <div class="strip" id="statusStrip"></div>
+    <div class="toolbar">
+      <div class="seg"><button class="active" data-view="factuur">Per factuur</button><button data-view="klant">Per klant</button></div>
+      <div class="spacer"></div><span style="color:var(--muted);font-size:13px" id="factCount"></span>
+    </div>
+    <table id="factTable"></table>
+  </section>
+
+  <!-- GESPREKKEN -->
+  <section id="gesprekken" class="hidden">
+    <div class="page-head"><h1>Gesprekken</h1><p>Alle WhatsApp-gesprekken, los van een factuur. Klik een gesprek om te lezen, te reageren of Joost te vragen.</p></div>
+    <div class="inbox"><div class="conv-list" id="convList"></div><div class="conv-view" id="convView"></div></div>
+  </section>
+
+  <!-- INSTELLINGEN -->
+  <section id="settings" class="hidden">
+    <div class="page-head"><h1>Instellingen</h1><p>Alles wat het proces stuurt, op één plek. Klik een kaart om te bewerken. Oefen veilig in de testmodus voordat je live gaat.</p></div>
+    <div class="set-grid" id="setGrid"></div>
+  </section>
+
+  <!-- OPRUIMEN -->
+  <section id="cleanup" class="hidden">
+    <div class="page-head"><h1><span class="back" onclick="go('todo')">← Te doen</span> &nbsp;/&nbsp; Opruimen</h1><p>De eenmalige opruiming van je achterstand. Selecteer klanten en kies per rij wat ermee gebeurt. Alles gaat eerst in preview — er verandert niets tot je bevestigt.</p></div>
+    <div class="cleanup-note">💡 Deze klanten hebben <b>2 of meer</b> open facturen. Crediteren verlengt hun abonnement en houdt de restschuld in beeld; aanmanen stuurt een herinnering; naar incasso maakt een dossier aan.</div>
+    <div id="cleanupRows"></div>
+    <div class="cleanup-bar"><span><b id="coSel">0</b> geselecteerd · <span id="coTot">€ 0,00</span></span><div class="spacer"></div><button class="cbtn" onclick="openPreview()">Bekijk preview →</button></div>
+  </section>
+
+  <div class="foot">Prototype · verzonnen data · alles klikbaar met popups — nog niet gekoppeld aan het echte systeem.</div>
+</div>
+
+<div class="scrim" id="scrim" onclick="closeCase()"></div>
+<aside class="sheet" id="sheet" aria-hidden="true"></aside>
+<div class="mscrim" id="mscrim" onclick="if(event.target===this)closeModal()"><div class="modal" id="modal"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+  const money=n=>'€ '+n.toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const initials=n=>n.split(' ').filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase();
+  const avColors=['#0E7C6B','#2B5FA8','#5B44A8','#B24A2E','#986412','#2A7047'];
+  const avc=s=>avColors[(s.charCodeAt(0)+s.length)%avColors.length];
+  const toast=m=>{const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(t._);t._=setTimeout(()=>t.classList.remove('show'),1800)};
+
+  const STATUS={new:{label:'Nieuw te laat',pill:'p-new',dot:'#986412'},remind:{label:'Aangemaand',pill:'p-remind',dot:'#2B5FA8'},talk:{label:'In gesprek',pill:'p-talk',dot:'#0A5A4E'},plan:{label:'Regeling',pill:'p-plan',dot:'#5B44A8'},paid:{label:'Betaald',pill:'p-paid',dot:'#2A7047'},inc:{label:'Incasso',pill:'p-inc',dot:'#B23434'}};
+  const FLOW=['new','remind','talk','plan'];
+  const TYPES={verify:{ic:'💶',cls:'verify',label:'Betaalcontrole'},plan:{ic:'📅',cls:'plan',label:'Regeling'},esc:{ic:'⚠️',cls:'esc',label:'Escalatie'}};
+
+  const CASES=[
+    {id:1,name:'Hidaya Lahrache',inv:'2026/208',amount:250,late:159,status:'new'},
+    {id:2,name:'Julian Terlien',inv:'2026/293',amount:400,late:148,status:'new'},
+    {id:3,name:'Bouwonderneming Helsmoortel',inv:'2026/301',amount:600,late:31,status:'talk',chat:[{who:'in',t:'Kan ik in termijnen betalen?',time:'12:41'}],joost:{intent:'Regeling gevraagd',conf:'0.97',text:'Goedendag! Een betalingsregeling behoort zeker tot de mogelijkheden. Hoeveel termijnen had u in gedachten, en wanneer zou de eerste betaling kunnen? Dan stem ik het intern af.'}},
+    {id:4,name:'Mark Jansen',inv:'2026/388',amount:300,late:22,status:'remind',chat:[{who:'in',t:'Ik zag de herinnering, komt goed volgende week.',time:'09:12'}],joost:{intent:'Betaaltoezegging',conf:'0.94',text:'Fijn dat u het laat weten, Mark. We noteren dat u volgende week betaalt. Mocht er iets tussenkomen, laat het gerust weten.'}},
+    {id:5,name:'Priya Sharma',inv:'2026/333',amount:300,late:18,status:'remind'},
+  ];
+  const EXTRA=[
+    {name:'Lisa Bakker',inv:'2026/290',amount:300,late:44,status:'inc'},
+    {name:'Ayoub El Amrani',inv:'2026/355',amount:300,late:26,status:'plan'},
+    {name:'Thijs Michielsens',inv:'2026/318',amount:300,late:144,status:'back'},
+    {name:'Gabriël de Koning',inv:'2026/330',amount:219.75,late:141,status:'back'},
+    {name:'Tom Visser',inv:'2026/299',amount:300,late:12,status:'paid'},
+  ];
+  const backlog=[{name:'Thijs Michielsens',count:3,total:900,oldest:144},{name:'Gabriël de Koning',count:2,total:439.50,oldest:141},{name:'Jamil Stanikzai',count:4,total:1200,oldest:139},{name:'Sanne Vermeulen',count:2,total:600,oldest:96}];
+  const CONVS=[{id:3,open:600},{id:4,open:300}];
+
+  const names=['Mark Jansen','Ayoub El Amrani','Lisa Bakker','Priya Sharma','Tom Visser','Sanne de Vries','Julian Terlien','Gabriël de Koning','Jamil Stanikzai','Hidaya Lahrache','Thijs Michielsens','Noa Willemsen','Youssef Barzan','Emma de Wit','Daan Kuipers','Fatima Zahra','Ruben Smit','Isa Vermeer','Karim Haddad','Lotte Jansen','Bram de Boer','Nadia El Fassi','Sven Bakker','Amir Rahimi','Julia Peters'];
+  let ID=0,ACTIONS=[];
+  [...Array(8).fill('verify'),...Array(12).fill('plan'),...Array(5).fill('esc')].forEach((type,i)=>{
+    let sub;
+    if(type==='verify')sub=`Claimt € ${[300,250,400,150,300][i%5]} al betaald · factuur 2026/${200+i}`;
+    else if(type==='plan')sub=`Voorstel: ${[3,4,2,6][i%4]} termijnen van € ${[100,150,75,50][i%4]}`;
+    else sub=['Betwist de factuur','Vraagt juridische reactie','Klacht over de opleiding','Reageert boos','Onvindbaar — post retour'][i%5];
+    ACTIONS.push({id:++ID,type,name:names[i%names.length],sub,age:(i*7+3)%40+1,status:'open'});
+  });
+
+  function urg(l){const t=Math.min(60,l)/60;const f=[245,158,11],to=[194,72,42];return`rgb(${f.map((c,i)=>Math.round(c+(to[i]-c)*t)).join(',')})`}
+
+  /* ---- Te doen worklist ---- */
+  function renderWorklist(){
+    document.getElementById('worklist').innerHTML=CASES.map(c=>{const s=STATUS[c.status];const act=c.status==='new'?'Start aanmaning':c.status==='remind'?'Vraag Joost':c.status==='talk'?'Bekijk gesprek':'Bekijk';
+      return`<div class="case" tabindex="0" role="button" onclick="openCase(${c.id})"><div class="urg" style="background:${urg(c.late)}"></div><div class="who"><div class="name">${c.name}</div><div class="inv">${c.inv}</div></div><div class="amt">${money(c.amount)}</div><div class="late">${c.late}<small>DAGEN TE LAAT</small></div><div class="right"><span class="pill ${s.pill}">${s.label}</span><button class="btn primary sm" onclick="event.stopPropagation();openCase(${c.id})">${act}</button></div></div>`}).join('');
+  }
+
+  /* ---- acties ---- */
+  function counts(){const o=ACTIONS.filter(a=>a.status==='open');return{open:o.length,done:ACTIONS.filter(a=>a.status==='done').length,rej:ACTIONS.filter(a=>a.status==='rej').length,verify:o.filter(a=>a.type==='verify').length,plan:o.filter(a=>a.type==='plan').length,esc:o.filter(a=>a.type==='esc').length}}
+  function renderTodoBox(){const c=counts();const box=document.getElementById('actiesBox');const nav=document.getElementById('navActies');
+    if(c.open===0){box.classList.add('hidden');nav.classList.add('hidden')}else{box.classList.remove('hidden');nav.classList.remove('hidden');
+      document.getElementById('sumTotal').textContent=c.open;document.getElementById('sumVerify').textContent=c.verify;document.getElementById('sumPlan').textContent=c.plan;document.getElementById('sumEsc').textContent=c.esc;nav.textContent=c.open}}
+  let atab='open',afilt='all';
+  function renderActies(){const c=counts();document.getElementById('cOpen').textContent=c.open;document.getElementById('cDone').textContent=c.done;document.getElementById('cRej').textContent=c.rej;
+    let rows=ACTIONS.filter(a=>a.status===atab);if(afilt!=='all')rows=rows.filter(a=>a.type===afilt);rows.sort((a,b)=>b.age-a.age);
+    document.getElementById('actiesList').innerHTML=rows.map(arowHTML).join('')||`<div class="empty"><div class="big">✓</div><h3>${atab==='open'?'Niks te doen — top.':'Nog niets hier.'}</h3></div>`;
+    document.querySelectorAll('#actiesList [data-ap]').forEach(b=>b.onclick=()=>actApprove(+b.dataset.ap));
+    document.querySelectorAll('#actiesList [data-rj]').forEach(b=>b.onclick=()=>{setStatus(+b.dataset.rj,'rej');toast('Afgewezen — nu onder “Afgewezen”')});
+  }
+  function arowHTML(a){const t=TYPES[a.type];const right=a.status==='open'?`<span class="age">${a.age} dg</span><div class="btns"><button class="btn primary sm" data-ap="${a.id}">${a.type==='esc'?'Oppakken':'Goedkeuren'}</button><button class="btn sm danger" data-rj="${a.id}">Afwijzen</button></div>`:`<span class="tag ${a.status==='done'?'ok':'no'}">${a.status==='done'?'Afgehandeld':'Afgewezen'}</span>`;
+    return`<div class="arow"><div class="ic ${t.cls}">${t.ic}</div><div class="body"><div class="title">${t.label} — ${a.name}</div><div class="sub">${a.sub}</div></div>${right}</div>`}
+  function actApprove(id){const a=ACTIONS.find(x=>x.id===id);if(!a)return;
+    if(a.type==='esc'){openModal('Escalatie oppakken',`<p>Je pakt de escalatie van <b>${a.name}</b> op: <i>${a.sub}</i>.</p><p style="color:var(--muted);font-size:13px">In het echte systeem zet dit een taak voor een mens klaar en pauzeert Joost dit gesprek.</p>`,`<button class="btn" onclick="closeModal()">Annuleren</button><button class="btn primary" onclick="setStatus(${id},'done');closeModal();toast('Escalatie opgepakt')">Oppakken</button>`);}
+    else if(a.type==='verify'){openModal('Betaling verifiëren',`<p><b>${a.name}</b> — ${a.sub}</p><div class="fld" style="margin-top:12px"><label>Uitkomst</label><select><option>Betaling gevonden — factuur afboeken</option><option>Nog niet gevonden — openhouden</option></select></div>`,`<button class="btn" onclick="closeModal()">Annuleren</button><button class="btn primary" onclick="setStatus(${id},'done');closeModal();toast('Betaalcontrole afgehandeld')">Bevestigen</button>`);}
+    else{setStatus(id,'done');toast('Regeling goedgekeurd — nu onder “Afgehandeld”')}
+  }
+  function setStatus(id,st){const a=ACTIONS.find(x=>x.id===id);if(a)a.status=st;renderTodoBox();renderActies()}
+
+  /* ---- Facturen ---- */
+  let factView='factuur',factFilter='all';
+  const ALLINV=[...CASES.map(c=>({name:c.name,inv:c.inv,amount:c.amount,late:c.late,status:c.status})),...EXTRA];
+  const stMeta=s=>s==='back'?{label:'Achterstand',pill:'p-back'}:STATUS[s];
+  function renderStrip(){const cnt={};ALLINV.forEach(i=>cnt[i.status]=(cnt[i.status]||0)+1);
+    const items=[['all','Alles',ALLINV.length,'#66717F'],['new','Nieuw te laat',cnt.new||0,'#986412'],['remind','Aangemaand',cnt.remind||0,'#2B5FA8'],['talk','In gesprek',cnt.talk||0,'#0A5A4E'],['plan','Regeling',cnt.plan||0,'#5B44A8'],['back','Achterstand',cnt.back||0,'#B24A2E'],['inc','Incasso',cnt.inc||0,'#B23434'],['paid','Betaald',cnt.paid||0,'#2A7047']];
+    document.getElementById('statusStrip').innerHTML=items.map(([k,l,n,col])=>`<button class="${factFilter===k?'active':''}" onclick="setFilter('${k}')"><span class="n">${n}</span><span class="l"><span class="dot" style="background:${col}"></span>${l}</span></button>`).join('')}
+  function setFilter(k){factFilter=k;renderStrip();renderFact()}
+  function renderFact(){const t=document.getElementById('factTable');let rows=ALLINV.filter(i=>factFilter==='all'||i.status===factFilter);
+    if(factView==='factuur'){t.innerHTML=`<thead><tr><th>Klant</th><th>Factuur</th><th class="r">Bedrag</th><th class="r">Te laat</th><th>Status</th></tr></thead><tbody>${rows.map(i=>{const s=stMeta(i.status);return`<tr onclick="openCaseByName('${i.name.replace(/'/g,'')}')"><td>${i.name}</td><td class="mono sub-inv">${i.inv}</td><td class="mono r">${money(i.amount)}</td><td class="mono r">${i.status==='paid'?'—':i.late+' d'}</td><td><span class="pill ${s.pill}">${s.label}</span></td></tr>`}).join('')}</tbody>`}
+    else{const map={};rows.forEach(i=>{(map[i.name]=map[i.name]||[]).push(i)});t.innerHTML=`<thead><tr><th>Klant</th><th class="r">Open facturen</th><th class="r">Totaal open</th><th class="r">Oudste</th><th>Status</th></tr></thead><tbody>${Object.entries(map).map(([name,list])=>{const open=list.filter(x=>x.status!=='paid');const total=open.reduce((a,b)=>a+b.amount,0);const oldest=Math.max(...open.map(x=>x.late),0);const multi=open.length>1;const st=multi?{label:'Achterstand',pill:'p-back'}:stMeta(open[0]?open[0].status:'paid');return`<tr onclick="openCaseByName('${name.replace(/'/g,'')}')"><td>${name}</td><td class="mono r">${open.length}</td><td class="mono r">${money(total)}</td><td class="mono r">${oldest?oldest+' d':'—'}</td><td><span class="pill ${st.pill}">${st.label}</span></td></tr>`}).join('')}</tbody>`}
+    document.getElementById('factCount').textContent=rows.length+' facturen'}
+  function openCaseByName(n){const c=CASES.find(x=>x.name.replace(/'/g,'')===n);if(c)openCase(c.id);else toast('Klant zonder losse case — zou het klant-dossier openen.')}
+
+  /* ---- Gesprekken ---- */
+  let activeConv=CONVS[0].id;
+  function renderInbox(){
+    document.getElementById('convList').innerHTML=CONVS.map(cv=>{const c=CASES.find(x=>x.id===cv.id);const last=(c.chat&&c.chat[0])?c.chat[0].t:'';return`<div class="conv ${cv.id===activeConv?'active':''}" onclick="selConv(${cv.id})"><div class="av" style="background:${avc(c.name)}">${initials(c.name)}</div><div class="cbody"><div class="cname">${c.name}</div><div class="cmsg">${last}</div></div><div class="ctime">${cv.id===3?'5m':'2u'}</div></div>`}).join('');
+    const c=CASES.find(x=>x.id===activeConv);const cv=CONVS.find(x=>x.id===activeConv);
+    const chat=(c.chat||[]).map(m=>`<div class="msg ${m.who}">${m.t}<span class="t">${m.time||''}</span></div>`).join('');
+    document.getElementById('convView').innerHTML=`<div class="cv-head"><div class="av-sm" style="background:${avc(c.name)}">${initials(c.name)}</div><div><div style="font-weight:600">${c.name}</div><div style="font-size:12px;color:var(--faint)">${money(cv.open)} open</div></div><div style="flex:1"></div><button class="btn sm" onclick="openCase(${c.id})">Open dossier →</button></div><div class="cv-body">${chat}${c.joost?joostBox(c.joost,'stretch'):''}</div><div class="cv-foot"><button class="btn sm" onclick="openJoost(${c.id})">✨ Vraag Joost</button><input placeholder="Typ een bericht…"><button class="btn primary sm" onclick="toast('Bericht verstuurd (dry-run)')">Verstuur</button></div>`;
+  }
+  function selConv(id){activeConv=id;renderInbox()}
+  function joostBox(j,cls){return`<div class="joost ${cls||''}"><div class="jhead"><span class="jbadge">${j.intent.toUpperCase()}</span><span class="conf">${j.conf} vertrouwen</span></div><p>${j.text}</p><div class="joost-actions"><button class="btn primary sm" onclick="toast('Joost-antwoord verstuurd (dry-run)')">Verstuur</button><button class="btn sm">Bewerk</button></div></div>`}
+  function openJoost(id){const c=CASES.find(x=>x.id===id);const j=c.joost||{intent:'Algemene vraag',conf:'0.88',text:'Bedankt voor uw bericht! Kunt u aangeven waar het over gaat, dan help ik u verder.'};
+    openModal('✨ Joost — AI-assistent',`<div style="margin-bottom:6px"><span class="jbadge" style="font-size:11px;font-weight:700;color:var(--accent-ink);background:var(--accent-soft);padding:4px 9px;border-radius:6px">${j.intent.toUpperCase()}</span> <span style="font:600 12px/1 var(--mono);color:var(--faint);margin-left:6px">${j.conf} vertrouwen</span></div><p style="font-size:14px;color:#39434f;background:#F8FAF9;border:1px solid var(--border);border-radius:10px;padding:12px 14px">${j.text}</p>`,`<button class="btn" onclick="closeModal()">Negeer</button><button class="btn" onclick="closeModal();toast('Concept geopend om te bewerken')">Bewerk</button><button class="btn primary" onclick="closeModal();toast('Joost-antwoord verstuurd (dry-run)')">Verstuur zo</button>`)}
+
+  /* ---- Instellingen ---- */
+  const SET=[
+    {k:'joost',ic:'💬',h:'Joost — de toon',p:'Hoe Joost klanten aanspreekt en wanneer hij zelf mag antwoorden.',st:'Assist aan · autonoom uit',on:true},
+    {k:'rules',ic:'⏱️',h:'Wanneer starten &amp; regels',p:'De automatische stappen: wanneer welke aanmaning of actie afgaat.',st:'Auto oppakken bij 14 dg',on:true},
+    {k:'bureaus',ic:'🏢',h:'Incassobureaus',p:'De partners (NL en BE) waar dossiers naartoe gaan.',st:'2 bureaus actief',on:true},
+    {k:'berichten',ic:'✉️',h:'Berichten',p:'Aanmaan- en briefteksten, aanpasbaar in jouw stijl.',st:'5 sjablonen',on:true},
+    {k:'test',ic:'🧪',h:'Testmodus',p:'Oefen de hele flow op een testklant — er gaat niets echt de deur uit.',st:'Uit',on:false},
+    {k:'log',ic:'📜',h:'Geschiedenis &amp; log',p:'Wat er is verstuurd, gewijzigd en besloten — met tijdstempels.',st:'Bekijken',on:true},
+  ];
+  function renderSettings(){document.getElementById('setGrid').innerHTML=SET.map(s=>`<div class="set-card" onclick="openSetting('${s.k}')"><div class="ico">${s.ic}</div><h3>${s.h}</h3><p>${s.p}</p><div class="st ${s.on?'on':'off'}">${s.st}</div></div>`).join('')}
+  function openSetting(k){
+    if(k==='joost')openModal('Joost — de toon',`<div class="fld"><label>Naam</label><input type="text" value="Joost"></div><div class="fld"><label>Toon</label><input type="text" value="professioneel, empathisch, oplossingsgericht — u-vorm"></div><div class="fld"><label>Systeem-prompt (hoe Joost schrijft)</label><textarea>Je bent Joost, de betalingsassistent van De Forex Opleiding. Je schrijft in het Nederlands, in de u-vorm, professioneel en oplossingsgericht — nooit dreigend. Bied waar passend een betalingsregeling binnen het mandaat. Escaleer bij klachten of betwisting naar een mens.</textarea></div><div class="rule"><div class="rb"><div class="rt">Zelf antwoorden versturen</div><div class="rd">Uit = Joost stelt alleen concepten op die jij goedkeurt.</div></div><div class="sw off" onclick="this.classList.toggle('off')"></div></div>`,`<button class="btn" onclick="closeModal()">Annuleren</button><button class="btn primary" onclick="closeModal();toast('Joost-instellingen opgeslagen')">Opslaan</button>`);
+    else if(k==='rules')openModal('Wanneer starten & regels',ruleRows([['Automatisch oppakken bij 14 dagen te laat','Teamleader zet op te laat → dit systeem neemt over.',true],['Alleen bij één open factuur','Klanten met achterstand (≥2) gaan naar de opruimactie.',true],['1e aanmaning direct bij oppakken','Vriendelijke herinnering met bedrag + link.',true],['2e aanmaning na 5 dagen geen reactie','Steviger, met aanbod tot regeling.',true],['Naar incasso na laatste aanmaning','Alleen na jouw akkoord, niet automatisch.',false]]),`<button class="btn" onclick="closeModal()">Annuleren</button><button class="btn primary" onclick="closeModal();toast('Regels opgeslagen')">Opslaan</button>`);
+    else if(k==='bureaus')openModal('Incassobureaus',`<table style="border:none"><thead><tr><th>Naam</th><th>Land</th><th>E-mail</th></tr></thead><tbody><tr><td>Incasso Nederland BV</td><td class="mono">NL</td><td class="sub-inv">dossier@incassonl.nl</td></tr><tr><td>Recouvrement België</td><td class="mono">BE</td><td class="sub-inv">dossiers@recouvbe.be</td></tr></tbody></table>`,`<button class="btn" onclick="closeModal()">Sluiten</button><button class="btn primary" onclick="toast('Nieuw bureau — formulier (buiten prototype)')">+ Bureau toevoegen</button>`);
+    else if(k==='berichten')openModal('Berichten',`<div class="rule"><div class="rb"><div class="rt">1e herinnering</div><div class="rd">Vriendelijk · e-mail + WhatsApp</div></div><button class="btn sm">Bewerken</button></div><div class="rule"><div class="rb"><div class="rt">2e aanmaning</div><div class="rd">Steviger · met regeling-aanbod</div></div><button class="btn sm">Bewerken</button></div><div class="rule"><div class="rb"><div class="rt">Laatste aanmaning</div><div class="rd">Aankondiging incasso</div></div><button class="btn sm">Bewerken</button></div><div class="rule"><div class="rb"><div class="rt">WIK 14-dagenbrief (NL)</div><div class="rd">Wettelijk verplichte pre-incassobrief</div></div><button class="btn sm">Bewerken</button></div><div class="rule"><div class="rb"><div class="rt">Eerste herinnering (BE)</div><div class="rd">Kosteloze herinnering, Boek XIX</div></div><button class="btn sm">Bewerken</button></div>`,`<button class="btn" onclick="closeModal()">Sluiten</button>`);
+    else if(k==='test')openModal('Testmodus',`<p style="color:var(--muted);font-size:13.5px">Oefen de hele flow op een testklant. In testmodus gaat er <b>niets</b> echt naar Teamleader of WhatsApp.</p><div class="rule"><div class="rb"><div class="rt">Testmodus actief</div><div class="rd">Zet een veilige oefen-omgeving aan.</div></div><div class="sw off" onclick="this.classList.toggle('off')"></div></div><div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn sm" onclick="toast('Testklant aangemaakt')">Testklant seeden</button><button class="btn sm" onclick="toast('Inkomend WhatsApp gesimuleerd')">Simuleer bericht</button><button class="btn sm" onclick="toast('Alles opgeruimd')">Reset</button></div>`,`<button class="btn" onclick="closeModal()">Sluiten</button>`);
+    else if(k==='log')openModal('Geschiedenis & log',`<div class="rule"><div class="rb"><div class="rt">Aanmaning verstuurd — Mark Jansen</div><div class="rd">vandaag 09:12 · door systeem</div></div></div><div class="rule"><div class="rb"><div class="rt">Regeling goedgekeurd — Ayoub El Amrani</div><div class="rd">gisteren 16:40 · door Jeffrey</div></div></div><div class="rule"><div class="rb"><div class="rt">Naar incasso — Lisa Bakker</div><div class="rd">10 jul · door Jeffrey</div></div></div>`,`<button class="btn" onclick="closeModal()">Sluiten</button>`);
+  }
+  function ruleRows(arr){return arr.map(([t,d,on])=>`<div class="rule"><div class="rb"><div class="rt">${t}</div><div class="rd">${d}</div></div><div class="sw ${on?'':'off'}" onclick="this.classList.toggle('off')"></div></div>`).join('')}
+
+  /* ---- Opruimen ---- */
+  function renderCleanup(){document.getElementById('cleanupRows').innerHTML=backlog.map(b=>`<div class="co-row"><input type="checkbox" onchange="coSel()" data-tot="${b.total}"><div><div style="font-weight:600">${b.name}</div><div class="sub-inv">${b.count} open facturen · oudste ${b.oldest} dg</div></div><div class="mono" style="font-weight:600">${money(b.total)}</div><div class="mono" style="color:var(--muted)">${b.count} fact.</div><div class="co-choose"><button class="btn sm active">Crediteren</button><button class="btn sm">Aanmanen</button><button class="btn sm">Incasso</button></div></div>`).join('');
+    document.querySelectorAll('.co-choose').forEach(g=>g.querySelectorAll('.btn').forEach(b=>b.onclick=()=>{g.querySelectorAll('.btn').forEach(x=>x.classList.remove('active'));b.classList.add('active')}))}
+  function coSel(){let n=0,t=0;document.querySelectorAll('#cleanupRows input:checked').forEach(c=>{n++;t+=+c.dataset.tot});document.getElementById('coSel').textContent=n;document.getElementById('coTot').textContent=money(t)}
+  function openPreview(){const n=document.querySelectorAll('#cleanupRows input:checked').length;if(!n){toast('Selecteer eerst één of meer klanten');return}
+    openModal('Preview — dry-run',`<div class="cleanup-note" style="margin:0 0 12px">🧪 Dit is een <b>preview</b>. Er wordt niets geboekt tot je bevestigt.</div><p style="font-size:14px"><b>${n} klanten</b> zouden worden verwerkt:</p><ul style="margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:13.5px;line-height:1.9"><li>Crediteren: facturen crediteren in Teamleader + abonnement verlengen</li><li>Restschuld wordt vastgelegd zodat de klant in beeld blijft</li><li>Geen echte creditnota's in deze preview</li></ul>`,`<button class="btn" onclick="closeModal()">Terug</button><button class="btn primary" onclick="closeModal();toast('Preview bevestigd (dry-run) — niets echt geboekt')">Bevestig (dry-run)</button>`)}
+
+  /* ---- case sheet ---- */
+  function flowHTML(status){let steps=FLOW.slice(),hi=steps.indexOf(status);if(status==='paid')hi=2;if(status==='inc'){steps=['new','remind','talk','inc'];hi=3}let h='';steps.forEach((st,i)=>{const cls=i<hi?'done':(i===hi?'here':'');const lbl=st==='inc'?'Incasso':STATUS[st].label;h+=`<div class="step ${cls}"><span class="bul"></span>${lbl}</div>`;if(i<steps.length-1)h+=`<span class="bar ${i<hi?'done':''}"></span>`});return h}
+  function openCase(id){const c=CASES.find(x=>x.id===id);if(!c)return;const s=STATUS[c.status];
+    const chat=(c.chat||[]).map(m=>`<div class="msg ${m.who}">${m.t}<span class="t">${m.time||''}</span></div>`).join('');
+    const joost=c.joost?joostBox(c.joost):`<p style="color:var(--faint);font-size:13px;margin:0">Nog geen gesprek. Stuur een herinnering of vraag Joost.</p>`;
+    const prim=c.status==='new'?'Start aanmaning':c.status==='plan'?'Keur regeling goed':c.status==='remind'?'Vraag Joost':'Markeer betaald';
+    document.getElementById('sheet').innerHTML=`<div class="sheet-top"><div class="row"><button class="icon-btn" onclick="closeCase()" aria-label="Sluiten">✕</button><div><h2>${c.name}</h2><div class="sub">${c.inv} · ${c.late} dagen te laat</div></div><div style="flex:1"></div><span class="pill ${s.pill}">${s.label}</span></div></div><div class="flow">${flowHTML(c.status)}</div><div class="sheet-body"><div class="card"><h4>De factuur</h4><div class="kv"><span class="k">Factuurnummer</span><span class="v mono">${c.inv}</span></div><div class="kv"><span class="k">Bedrag</span><span class="v mono">${money(c.amount)}</span></div><div class="kv"><span class="k">Dagen te laat</span><span class="v mono">${c.late}</span></div><div class="kv"><span class="k">Open facturen van deze klant</span><span class="v">1 — geen achterstand</span></div></div><div class="card"><h4>Gesprek</h4><div style="display:flex;flex-direction:column;gap:9px">${chat}${joost}</div></div></div><div class="sheet-actions"><button class="btn primary" onclick="caseAction('${prim.replace(/'/g,'')}')">${prim}</button><button class="btn" onclick="toast('Herinnering verstuurd (dry-run)')">Herinnering sturen</button><button class="btn" onclick="caseIncasso('${c.name.replace(/'/g,'')}')">Naar incasso</button></div>`;
+    document.getElementById('scrim').classList.add('open');const sh=document.getElementById('sheet');sh.classList.add('open');sh.setAttribute('aria-hidden','false')}
+  function caseAction(a){if(a.includes('Joost')){toast('Joost stelt een antwoord op…')}else{toast(a+' — gedaan (dry-run)');closeCase()}}
+  function caseIncasso(name){openModal('Naar incasso',`<p>Je draagt de vordering van <b>${name}</b> over aan een incassobureau.</p><div class="fld" style="margin-top:12px"><label>Bureau</label><select><option>Incasso Nederland BV (NL)</option><option>Recouvrement België (BE)</option></select></div><div class="cleanup-note" style="margin:6px 0 0">⚠️ Particulier zonder WIK-brief — er wordt eerst een 14-dagenbrief aangeboden.</div>`,`<button class="btn" onclick="closeModal()">Annuleren</button><button class="btn primary" onclick="closeModal();closeCase();toast('Dossier aangemaakt · WIK-brief klaargezet')">Dossier aanmaken</button>`)}
+  function closeCase(){document.getElementById('scrim').classList.remove('open');const sh=document.getElementById('sheet');sh.classList.remove('open');sh.setAttribute('aria-hidden','true')}
+
+  /* ---- modal ---- */
+  function openModal(title,body,foot){document.getElementById('modal').innerHTML=`<div class="modal-head"><h3>${title}</h3><div class="spacer"></div><button class="icon-btn" onclick="closeModal()">✕</button></div><div class="modal-body">${body}</div><div class="modal-foot">${foot||'<button class="btn" onclick="closeModal()">Sluiten</button>'}</div>`;document.getElementById('mscrim').classList.add('open')}
+  function closeModal(){document.getElementById('mscrim').classList.remove('open')}
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeCase();closeModal()}});
+
+  /* ---- nav ---- */
+  const SECTIONS=['todo','acties','facturen','gesprekken','settings','cleanup'];
+  function go(id){SECTIONS.forEach(s=>document.getElementById(s).classList.add('hidden'));document.getElementById(id).classList.remove('hidden');document.querySelectorAll('nav.main button[data-nav]').forEach(b=>b.classList.toggle('active',b.dataset.nav===id));window.scrollTo(0,0)}
+  document.querySelectorAll('nav.main button[data-nav]').forEach(b=>b.addEventListener('click',()=>go(b.dataset.nav)));
+  document.querySelectorAll('#tabs button').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('#tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');atab=b.dataset.tab;renderActies()}));
+  document.querySelectorAll('#afilters .chip').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('#afilters .chip').forEach(x=>x.classList.remove('active'));b.classList.add('active');afilt=b.dataset.f;renderActies()}));
+  document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('[data-view]').forEach(x=>x.classList.remove('active'));b.classList.add('active');factView=b.dataset.view;renderFact()}));
+
+  renderWorklist();renderTodoBox();renderActies();renderStrip();renderFact();renderInbox();renderSettings();renderCleanup();
+</script>
+</body>
+</html>
