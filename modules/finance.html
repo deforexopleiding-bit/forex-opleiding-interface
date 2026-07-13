@@ -1087,6 +1087,7 @@
   <!-- ===== Wanbetalers wrapper (nav-herontwerp: 3 hoofdtabs + Meer + Instellingen) ===== -->
   <div id="view-wanbetalers" hidden>
     <div class="sr-segments" id="wanbetalersSubNav" style="margin-bottom:18px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <button class="sr-seg"        data-wb-sub="te-doen" type="button" title="Te doen"><i class="ti ti-checkbox"></i> Te doen</button>
       <button class="sr-seg active" data-wb-sub="vandaag"  type="button" title="Vandaag"><i class="ti ti-sun"></i> Vandaag</button>
       <button class="sr-seg"        data-wb-sub="pipeline" type="button" title="Pipeline"><i class="ti ti-layout-kanban"></i> Pipeline</button>
       <button class="sr-seg"        data-wb-sub="inbox"    type="button" title="Inbox"><i class="ti ti-brand-whatsapp"></i> Inbox</button>
@@ -1138,6 +1139,7 @@
     <div id="wb-sub-sandbox"     hidden></div>
     <div id="wb-sub-incasso"     hidden></div>
     <div id="wb-sub-crediteren"  hidden></div>
+    <div id="wb-sub-te-doen"     hidden></div>
   </div>
 
   <!-- ===== Klanten-view (Groep B: thin view binnen Finance) =====
@@ -3293,7 +3295,7 @@
   // (overzicht/probleemklanten/workflows/templates/geschiedenis/arrangements)
   // blijft volledig intact onder de 'overzicht' sub-tab.
   function setSubView(sub) {
-    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis', 'sandbox', 'incasso', 'crediteren'];
+    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis', 'sandbox', 'incasso', 'crediteren', 'te-doen'];
     if (!validSubs.includes(sub)) sub = 'vandaag';
     // Backward-compat: deep-link ?sub=actie is nu opgenomen in Vandaag —
     // redirect naar 'vandaag' zodat de zichtbare view klopt. 'overzicht'
@@ -3330,6 +3332,7 @@
     const vSandbox     = document.getElementById('wb-sub-sandbox');
     const vIncasso     = document.getElementById('wb-sub-incasso');
     const vCrediteren  = document.getElementById('wb-sub-crediteren');
+    const vTeDoen      = document.getElementById('wb-sub-te-doen');
     if (vInbox)        vInbox.hidden        = true;
     if (vDunning)      vDunning.hidden      = true;
     if (vOpenActies)   vOpenActies.hidden   = true;
@@ -3338,6 +3341,7 @@
     if (vSandbox)      vSandbox.hidden      = true;
     if (vIncasso)      vIncasso.hidden      = true;
     if (vCrediteren)   vCrediteren.hidden   = true;
+    if (vTeDoen)       vTeDoen.hidden       = true;
 
     // Sub-nav layering fix: bij Wanbetalers-wrapper actief verbergen we de
     // interne dunningSubNav (Overzicht/Probleemklanten/Workflows/Templates/
@@ -3400,6 +3404,9 @@
     } else if (sub === 'crediteren') {
       if (vCrediteren) vCrediteren.hidden = false;
       mountCrediteerHost();
+    } else if (sub === 'te-doen') {
+      if (vTeDoen) vTeDoen.hidden = false;
+      mountTeDoenHost();
     } else { // overzicht (deep-link backward-compat: niet meer in de nav,
              // maar blijft functioneel).
       if (vDunning) vDunning.hidden = false;
@@ -13138,6 +13145,231 @@
       return;
     }
     window.FinanceCrediteer.mount({ host });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // "Te doen"-worklist — herontwerp stap 1. Read-only startscherm met
+  // dagelijkse 1-factuur-flow + campagne-banner voor de achterstand
+  // (≥2 open facturen). Rij-klik hergebruikt de bestaande pipeline-detail-
+  // kaart via openPipelineDetail(cid). Endpoint: /api/wanbetalers-todo-list.
+  // Theme-aware via app-tokens; volledige kleur-huid komt in stap 6.
+  // ────────────────────────────────────────────────────────────────────
+  const _tdState = { wired: false, loading: false, data: null, error: null };
+
+  function mountTeDoenHost() {
+    const host = document.getElementById('wb-sub-te-doen');
+    if (!host) return;
+    if (!_tdState.wired) {
+      host.innerHTML = _tdShellHtml();
+      _tdInjectStyles();
+      _tdWireShell();
+      _tdState.wired = true;
+    }
+    loadTeDoen();
+  }
+
+  function _tdShellHtml() {
+    return `
+      <div class="td-wrap">
+        <div class="td-header">
+          <div>
+            <h2>Te doen</h2>
+            <p class="td-subtitle">Dagelijkse worklist — 1 open factuur per klant, gesorteerd op dagen te laat. Klanten met een achterstand (≥2 facturen) zie je in de campagne-banner.</p>
+          </div>
+          <button class="sr-ibtn" id="tdRefreshBtn" type="button" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+        </div>
+        <div id="tdCampaignSlot"></div>
+        <div id="tdBody"></div>
+        <div id="tdMeta" class="td-meta"></div>
+      </div>
+    `;
+  }
+
+  function _tdInjectStyles() {
+    if (document.getElementById('td-worklist-styles')) return;
+    const st = document.createElement('style');
+    st.id = 'td-worklist-styles';
+    st.textContent = `
+      .td-wrap { display:flex; flex-direction:column; gap:16px; }
+      .td-header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+      .td-header h2 { margin:0 0 4px 0; font-size:18px; font-weight:700; color:var(--text); }
+      .td-subtitle { margin:0; font-size:12.5px; color:var(--text-dim); max-width:640px; line-height:1.5; }
+      .td-campaign { display:flex; align-items:center; gap:14px; padding:14px 16px; border-radius:10px; background:var(--bg-elev); border:1px solid var(--border); }
+      .td-campaign-icon { flex:0 0 40px; width:40px; height:40px; border-radius:10px; background:rgba(220,38,38,.12); color:#dc2626; display:flex; align-items:center; justify-content:center; font-size:20px; }
+      .td-campaign-body { flex:1; min-width:0; }
+      .td-campaign-title { font-size:14px; font-weight:700; color:var(--text); }
+      .td-campaign-meta  { font-size:12px; color:var(--text-dim); margin-top:2px; }
+      .td-campaign-cta   { flex-shrink:0; }
+      .td-list { display:flex; flex-direction:column; gap:8px; }
+      .td-row { position:relative; display:grid; grid-template-columns:6px minmax(0, 1fr) 130px 90px 130px 150px; align-items:center; gap:14px; padding:12px 14px 12px 22px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; cursor:pointer; }
+      .td-row:hover { border-color:var(--text-faint); }
+      .td-urg { position:absolute; left:0; top:0; bottom:0; width:6px; border-radius:10px 0 0 10px; background:#f59e0b; }
+      .td-name-cell { min-width:0; }
+      .td-name { font-size:13.5px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .td-invnr { font-family:ui-monospace, SFMono-Regular, monospace; font-size:11.5px; color:var(--text-faint); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .td-amount { font-family:ui-monospace, SFMono-Regular, monospace; font-size:13.5px; color:var(--text); text-align:right; font-variant-numeric:tabular-nums; }
+      .td-days { font-family:ui-monospace, SFMono-Regular, monospace; font-size:12.5px; color:var(--text-dim); text-align:right; font-variant-numeric:tabular-nums; }
+      .td-stage-pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:600; letter-spacing:.2px; background:rgba(148,163,184,.14); color:var(--text-dim); border:1px solid var(--border); white-space:nowrap; }
+      .td-stage-pill.stage-nieuw           { color:#64748b; background:rgba(100,116,139,.14); border-color:rgba(100,116,139,.28); }
+      .td-stage-pill.stage-aangemaand      { color:#f59e0b; background:rgba(245,158,11,.14); border-color:rgba(245,158,11,.28); }
+      .td-stage-pill.stage-in_gesprek      { color:#0ea5e9; background:rgba(14,165,233,.14); border-color:rgba(14,165,233,.28); }
+      .td-stage-pill.stage-regeling        { color:#8b5cf6; background:rgba(139,92,246,.14); border-color:rgba(139,92,246,.28); }
+      .td-stage-pill.stage-brief_verstuurd { color:#ec4899; background:rgba(236,72,153,.14); border-color:rgba(236,72,153,.28); }
+      .td-action-btn { padding:8px 14px; border-radius:8px; border:1px solid var(--border); background:rgba(14,165,233,.14); color:#0ea5e9; font-size:12.5px; font-weight:600; cursor:pointer; white-space:nowrap; }
+      .td-action-btn:hover { background:rgba(14,165,233,.22); }
+      .td-empty { padding:32px 20px; text-align:center; color:var(--text-dim); font-size:13px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; }
+      .td-empty strong { color:var(--text); font-size:14px; display:block; margin-bottom:4px; }
+      .td-meta { font-size:11px; color:var(--text-faint); text-align:right; }
+      @media (max-width:900px) {
+        .td-row { grid-template-columns:6px 1fr auto; row-gap:6px; padding:12px 14px 12px 22px; }
+        .td-row > .td-amount, .td-row > .td-days, .td-row > .td-stage-pill { grid-column: 2 / -1; text-align:left; }
+        .td-action-btn { grid-column: 1 / -1; justify-self:stretch; text-align:center; }
+      }
+    `;
+    document.head.appendChild(st);
+  }
+
+  function _tdWireShell() {
+    document.getElementById('tdRefreshBtn')?.addEventListener('click', loadTeDoen);
+  }
+
+  async function loadTeDoen() {
+    _tdState.loading = true;
+    _tdState.error = null;
+    _tdRenderBody();
+    try {
+      const r = await window.AgentShared.apiFetch('/api/wanbetalers-todo-list');
+      if (!r.ok) {
+        let msg = 'HTTP ' + r.status;
+        try { const j = await r.json(); if (j?.error) msg = j.error; } catch (_) {}
+        throw new Error(msg);
+      }
+      _tdState.data = await r.json();
+    } catch (e) {
+      _tdState.error = e?.message || String(e);
+    } finally {
+      _tdState.loading = false;
+      _tdRenderBody();
+    }
+  }
+
+  function _tdRenderBody() {
+    const body     = document.getElementById('tdBody');
+    const campaign = document.getElementById('tdCampaignSlot');
+    const meta     = document.getElementById('tdMeta');
+    if (!body) return;
+
+    if (_tdState.loading) {
+      body.innerHTML = '<div class="td-empty">Laden…</div>';
+      if (campaign) campaign.innerHTML = '';
+      if (meta)     meta.textContent   = '';
+      return;
+    }
+    if (_tdState.error) {
+      body.innerHTML = `<div class="td-empty" style="color:#dc2626">Fout: ${esc(_tdState.error)}</div>`;
+      if (campaign) campaign.innerHTML = '';
+      return;
+    }
+
+    const d = _tdState.data || {};
+    const camp = d.campaign || { count: 0, total_open_cents: 0 };
+    const list = Array.isArray(d.worklist) ? d.worklist : [];
+
+    if (campaign) {
+      campaign.innerHTML = camp.count > 0 ? `
+        <div class="td-campaign">
+          <div class="td-campaign-icon"><i class="ti ti-alert-triangle"></i></div>
+          <div class="td-campaign-body">
+            <div class="td-campaign-title">${camp.count} klant${camp.count === 1 ? '' : 'en'} met een achterstand · ${_tdFmtEurCents(camp.total_open_cents)} open</div>
+            <div class="td-campaign-meta">Deze klanten hebben ≥2 open facturen — hoort bij de opruimactie (crediteerronde), niet bij de dagelijkse flow.</div>
+          </div>
+          <div class="td-campaign-cta">
+            <button class="td-action-btn" type="button" id="tdCampaignOpenBtn"><i class="ti ti-receipt-refund"></i> Start opruimactie</button>
+          </div>
+        </div>
+      ` : '';
+      const openBtn = document.getElementById('tdCampaignOpenBtn');
+      if (openBtn) openBtn.addEventListener('click', () => setSubView('crediteren'));
+    }
+
+    if (list.length === 0) {
+      body.innerHTML = `
+        <div class="td-empty">
+          <strong>Niks te doen — top.</strong>
+          Zodra een factuur 14 dagen te laat is, verschijnt 'ie hier.
+        </div>
+      `;
+    } else {
+      body.innerHTML = '<div class="td-list">' + list.map(_tdRowHtml).join('') + '</div>';
+      body.querySelectorAll('.td-row[data-cid]').forEach((row) => {
+        row.addEventListener('click', (ev) => {
+          // Klik op de actie-knop mag ook naar de detailkaart — geen aparte flow in stap 1.
+          const cid = row.dataset.cid;
+          if (!cid) return;
+          ev.preventDefault();
+          if (typeof openPipelineDetail === 'function') {
+            if (!_pipeState.stages || !_pipeState.stages.length) {
+              loadPipelineData({ background: true }).then(() => openPipelineDetail(cid));
+            } else {
+              openPipelineDetail(cid);
+            }
+          }
+        });
+      });
+    }
+
+    if (meta) {
+      const stamp = d.generated_at ? new Date(d.generated_at).toLocaleTimeString('nl-NL') : '';
+      meta.textContent = stamp ? `Bijgewerkt ${stamp}` : '';
+    }
+  }
+
+  function _tdRowHtml(r) {
+    const urgColor = _tdUrgColor(r.days_overdue);
+    const stageClass = 'stage-' + String(r.stage_slug || 'nieuw').toLowerCase();
+    const stageLabel = _tdStageLabel(r.stage_slug);
+    const daysTxt = (Number(r.days_overdue) > 0) ? `${r.days_overdue} dg te laat` : 'vandaag verlopen';
+    return `
+      <div class="td-row" data-cid="${esc(r.customer_id)}" title="Open klant-dossier">
+        <div class="td-urg" style="background:${urgColor}"></div>
+        <div class="td-name-cell">
+          <div class="td-name">${esc(r.customer_name || '—')}</div>
+          <div class="td-invnr">${esc(r.invoice_number || String(r.invoice_id || '').slice(0, 8))}</div>
+        </div>
+        <div class="td-amount">${_tdFmtEurCents(r.open_amount_cents)}</div>
+        <div class="td-days">${esc(daysTxt)}</div>
+        <div><span class="td-stage-pill ${stageClass}">${esc(stageLabel)}</span></div>
+        <div><button class="td-action-btn" type="button">${esc(r.suggested_action || 'Bekijk')}</button></div>
+      </div>
+    `;
+  }
+
+  function _tdUrgColor(days) {
+    const d = Math.max(0, Math.min(60, Number(days) || 0));
+    // 0 dg → amber, 60+ dg → rood. Lineaire interpolatie tussen #f59e0b en #dc2626.
+    const t = d / 60;
+    const from = [245, 158, 11];
+    const to   = [220, 38, 38];
+    const rgb  = from.map((c, i) => Math.round(c + (to[i] - c) * t));
+    return `rgb(${rgb.join(',')})`;
+  }
+
+  function _tdStageLabel(slug) {
+    const map = {
+      nieuw           : 'Nieuw',
+      aangemaand      : 'Aangemaand',
+      in_gesprek      : 'In gesprek',
+      regeling        : 'Regeling',
+      brief_verstuurd : 'Brief verstuurd',
+    };
+    const s = String(slug || 'nieuw').toLowerCase();
+    return map[s] || (s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' '));
+  }
+
+  function _tdFmtEurCents(cents) {
+    const n = Number(cents);
+    if (!isFinite(n)) return '—';
+    return '€ ' + (n / 100).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
   function _incShellHtml() {
