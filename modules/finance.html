@@ -1621,6 +1621,88 @@
     .wbx .wbx-inc-close:hover { background:#FAFBFC; color:var(--wbx-ink); }
 
     /* ======================================================
+       Bulk multi-select — Facturen (Per klant) + Opruimen.
+       ====================================================== */
+    .wbx .wbx-bulk-tbl td.wbx-bulk-cb-cell,
+    .wbx .wbx-bulk-tbl th.wbx-bulk-cb-cell { width:32px; padding-left:14px; padding-right:0; }
+    .wbx .wbx-bulk-tbl input[type="checkbox"] { accent-color:var(--wbx-accent-ink); cursor:pointer; }
+    .wbx .wbx-bulk-tbl tbody tr:has(input[data-bulk-cb]:checked) td { background:var(--wbx-accent-soft); }
+
+    /* Sticky bulk-actiebalk — body-level element (class="wbx wbx-bulk-bar")
+       zodat de scope-check bevat: adjacent class-combinator .wbx.wbx-bulk-bar. */
+    .wbx.wbx-bulk-bar {
+      position:fixed; left:50%; bottom:20px; transform:translateX(-50%);
+      background:var(--wbx-ink); color:#fff;
+      border-radius:12px; box-shadow:0 12px 40px rgba(14,19,28,.28);
+      padding:10px 14px; z-index:1150;
+      display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+      font-family:'Inter', system-ui, sans-serif;
+      max-width:calc(100% - 40px);
+    }
+    .wbx.wbx-bulk-bar .wbx-bulk-info { font-size:14px; }
+    .wbx.wbx-bulk-bar .wbx-bulk-info strong { color:#fff; }
+    .wbx.wbx-bulk-bar .wbx-bulk-actions { display:flex; gap:6px; flex-wrap:wrap; }
+    .wbx.wbx-bulk-bar .wbx-btn {
+      background:#fff; color:var(--wbx-ink); border:1px solid var(--wbx-border-strong);
+    }
+    .wbx.wbx-bulk-bar .wbx-btn:hover { border-color:var(--wbx-accent); color:var(--wbx-accent-ink); }
+    .wbx.wbx-bulk-bar .wbx-btn.wbx-sm { padding:6px 10px; font-size:12.5px; }
+
+    /* Bevestig-modal — body-level (class="wbx wbx-bulk-scrim"). */
+    .wbx.wbx-bulk-scrim {
+      position:fixed; inset:0; background:rgba(14,19,28,.44);
+      backdrop-filter:blur(2px); z-index:1200;
+      display:flex; align-items:center; justify-content:center; padding:20px;
+      font-family:'Inter', system-ui, sans-serif;
+    }
+    .wbx.wbx-bulk-scrim .wbx-bulk-modal {
+      background:var(--wbx-bg); color:var(--wbx-ink);
+      border:1px solid var(--wbx-border); border-radius:12px;
+      width:min(880px,100%); max-height:90vh;
+      display:flex; flex-direction:column; overflow:hidden;
+    }
+    .wbx.wbx-bulk-scrim .wbx-bulk-modal-head {
+      display:flex; align-items:flex-start; justify-content:space-between;
+      gap:12px; padding:16px 18px 14px; border-bottom:1px solid var(--wbx-border);
+    }
+    .wbx.wbx-bulk-scrim .wbx-bulk-modal-title { font-size:16px; font-weight:600; }
+    .wbx.wbx-bulk-scrim .wbx-bulk-modal-sub {
+      font-size:13px; color:var(--wbx-muted); margin-top:4px; max-width:640px; line-height:1.5;
+    }
+    .wbx.wbx-bulk-scrim .wbx-bulk-modal-body { padding:16px 18px; overflow-y:auto; flex:1; font-size:13.5px; }
+    .wbx.wbx-bulk-scrim .wbx-bulk-modal-foot {
+      display:flex; justify-content:flex-end; gap:8px;
+      padding:12px 18px; border-top:1px solid var(--wbx-border); background:#FAFBFC;
+    }
+    .wbx.wbx-bulk-scrim .wbx-bulk-note {
+      background:#FAFBFC; border:1px solid var(--wbx-border); border-radius:8px;
+      padding:10px 12px; font-size:13px; line-height:1.5; margin-bottom:12px;
+    }
+    .wbx.wbx-bulk-scrim .wbx-bulk-warn {
+      background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.32);
+      border-radius:8px; padding:10px 12px; margin-top:8px;
+      font-size:13px; line-height:1.5;
+    }
+    .wbx.wbx-bulk-scrim .wbx-bulk-err {
+      background:rgba(220,38,38,.08); border:1px solid rgba(220,38,38,.32);
+      border-radius:8px; padding:10px 12px; margin-bottom:10px;
+      font-size:13px; color:var(--wbx-s-inc-tx);
+    }
+    .wbx.wbx-bulk-scrim .wbx-bulk-ok {
+      background:rgba(16,185,129,.08); border:1px solid rgba(16,185,129,.28);
+      border-radius:8px; padding:12px 14px; font-size:13.5px; line-height:1.5;
+    }
+    .wbx.wbx-bulk-scrim .wbx-bulk-loading { padding:20px; text-align:center; color:var(--wbx-muted); font-size:13px; }
+    .wbx.wbx-bulk-scrim tr.wbx-bulk-skip td { color:var(--wbx-faint); text-decoration:line-through; }
+    .wbx.wbx-bulk-scrim tr.wbx-bulk-skip td em { text-decoration:none; }
+
+    /* Opruimen — extra klanten-lijst-sectie */
+    .wbx .wbx-cleanup-list { margin-top:22px; }
+    .wbx .wbx-cleanup-list-head { display:flex; align-items:baseline; gap:12px; margin-bottom:10px; }
+    .wbx .wbx-cleanup-list-head h2 { margin:0; font-size:15px; font-weight:600; }
+    .wbx .wbx-cleanup-list-head .wbx-c { color:var(--wbx-faint); font-size:13px; }
+
+    /* ======================================================
        Ronde 3 — Instellingen + Opruimen + Inbox-scope styling.
        ====================================================== */
 
@@ -3997,6 +4079,14 @@
     if (vInstellingen) vInstellingen.hidden = true;
     if (vOpruimen)     vOpruimen.hidden     = true;
     if (vJoost)        vJoost.hidden        = true;
+
+    // Bulk-multiselect leeft alleen binnen 'facturen' (Per klant) en
+    // 'opruimen'. Bij switch naar een andere sub clearen we selectie +
+    // sticky bar zodat er geen bulk-actie kan vuren op een niet-zichtbare
+    // context.
+    if (sub !== 'facturen' && sub !== 'opruimen' && typeof _bulkResetSelection === 'function') {
+      _bulkResetSelection();
+    }
 
     // Sub-nav layering fix: bij Wanbetalers-wrapper actief verbergen we de
     // interne dunningSubNav (Overzicht/Probleemklanten/Workflows/Templates/
@@ -14562,29 +14652,109 @@
       <div class="wbx-cleanup-grid">
         <div class="wbx-cleanup-card">
           <h2>Crediteren</h2>
-          <p>Selecteer klanten, kies per rij wat er gecrediteerd wordt (dry-run of live). Facturen worden in Teamleader gecrediteerd, het abonnement wordt verlengd, en de restschuld wordt vastgelegd in <code>dunning_credited_debt</code>.</p>
-          <ul>
-            <li>Preview vóór boeken (dry-run)</li>
-            <li>Bulk-selectie + per-klant abo-keuze</li>
-            <li>Restschuld zichtbaar op klant-dossier + PDF</li>
-          </ul>
+          <p>Volledige per-rij editor met abo-keuze — dry-run / live schakelaar, restschuld-vastlegging.</p>
           <button type="button" class="wbx-btn wbx-primary" data-opruim-go="crediteren">Open crediteer-overzicht →</button>
         </div>
         <div class="wbx-cleanup-card">
           <h2>Incasso</h2>
-          <p>Alle dossiers, statussen, en de automatische route. Handmatig dossier aanmaken, PDF genereren, mailen naar bureau, WIK/BE-brief versturen, bureau-beheer.</p>
-          <ul>
-            <li>Alle dossiers en statussen</li>
-            <li>Auto-route (config + cron)</li>
-            <li>PDF + e-mail + WIK/BE-brief</li>
-            <li>Bureaus beheren</li>
-          </ul>
+          <p>Alle dossiers, auto-route, PDF, e-mail naar bureau, WIK/BE-brief, bureau-beheer.</p>
           <button type="button" class="wbx-btn wbx-primary" data-opruim-go="incasso">Open incasso-dossiers →</button>
         </div>
+      </div>
+
+      <!-- Bulk multi-select — klanten met ≥2 open facturen. Zelfde
+           preview→confirm→execute flow als op Facturen (Per klant); de
+           sticky bulk-bar verschijnt onderaan zodra >=1 selectie. -->
+      <div class="wbx-cleanup-list">
+        <div class="wbx-cleanup-list-head">
+          <h2>Klanten met achterstand</h2>
+          <span class="wbx-c" id="opruimListCount"></span>
+          <div class="wbx-flex1"></div>
+          <button class="wbx-btn wbx-sm" type="button" id="opruimReloadBtn">Herlaad</button>
+        </div>
+        <div id="opruimListBody"></div>
       </div>
     `;
     host.querySelectorAll('[data-opruim-go]').forEach((btn) => {
       btn.addEventListener('click', () => setSubView(btn.getAttribute('data-opruim-go')));
+    });
+    host.querySelector('#opruimReloadBtn')?.addEventListener('click', () => _opruimLoadList());
+    _opruimLoadList();
+  }
+
+  async function _opruimLoadList() {
+    const body = document.getElementById('opruimListBody');
+    const cnt  = document.getElementById('opruimListCount');
+    if (!body) return;
+    body.innerHTML = `<div class="wbx-empty"><h3>Laden…</h3></div>`;
+    if (cnt) cnt.textContent = '';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/wanbetalers-invoices-list?backlog=1');
+      if (!r.ok) {
+        let msg = 'HTTP ' + r.status;
+        try { const j = await r.json(); if (j?.error) msg = j.error; } catch (_) {}
+        throw new Error(msg);
+      }
+      const d = await r.json();
+      const list = Array.isArray(d.by_customer) ? d.by_customer : [];
+      if (cnt) cnt.textContent = list.length + ' klant' + (list.length === 1 ? '' : 'en');
+      if (!list.length) {
+        body.innerHTML = `<div class="wbx-empty"><h3>Geen achterstand</h3>Alle klanten hebben maximaal één open factuur.</div>`;
+        if (typeof _bulkResetSelection === 'function') _bulkResetSelection();
+        return;
+      }
+      body.innerHTML = `
+        <table class="wbx-table wbx-bulk-tbl" id="opruimTable">
+          <thead>
+            <tr>
+              <th class="wbx-bulk-cb-cell" data-bulk-cell><input type="checkbox" data-bulk-cb-all title="Selecteer alle zichtbare klanten"></th>
+              <th>Klant</th>
+              <th class="wbx-r">Open facturen</th>
+              <th class="wbx-r">Totaal open</th>
+              <th class="wbx-r">Oudste</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>${list.map(_opruimCustRowHtml).join('')}</tbody>
+        </table>
+      `;
+      _opruimWireRows(list);
+    } catch (e) {
+      body.innerHTML = `<div class="wbx-empty" style="color:var(--wbx-s-inc-tx)"><h3>Fout</h3>${esc(e?.message || String(e))}</div>`;
+    }
+  }
+
+  function _opruimCustRowHtml(r) {
+    const pill   = _fcPillFor(r.stage_slug, r.has_backlog);
+    const oldest = (Number(r.oldest_days_overdue) > 0) ? `${r.oldest_days_overdue} d` : '—';
+    return `
+      <tr data-cid="${esc(r.customer_id)}">
+        <td class="wbx-bulk-cb-cell" data-bulk-cell><input type="checkbox" data-bulk-cb="${esc(r.customer_id)}"></td>
+        <td>${esc(r.customer_name || '—')}</td>
+        <td class="wbx-mono wbx-r">${r.open_invoice_count}</td>
+        <td class="wbx-mono wbx-r">${_tdFmtEurCents(r.total_open_cents)}</td>
+        <td class="wbx-mono wbx-r">${esc(oldest)}</td>
+        <td><span class="wbx-pill ${pill.cls}">${esc(pill.label)}</span></td>
+      </tr>
+    `;
+  }
+
+  function _opruimWireRows(list) {
+    _bulkSetActiveScope('opruimen', list);
+    document.querySelectorAll('#opruimTable [data-bulk-cb]').forEach((cb) => {
+      cb.addEventListener('click', (e) => e.stopPropagation());
+      cb.addEventListener('change', (e) => _bulkToggleRow(cb.getAttribute('data-bulk-cb'), !!e.target.checked));
+    });
+    document.querySelectorAll('#opruimTable [data-bulk-cb-all]').forEach((cb) => {
+      cb.addEventListener('click', (e) => e.stopPropagation());
+      cb.addEventListener('change', (e) => _bulkToggleAll(!!e.target.checked));
+    });
+    document.querySelectorAll('#opruimTable tbody tr[data-cid]').forEach((row) => {
+      row.addEventListener('click', (e) => {
+        if (e.target?.closest?.('[data-bulk-cell], input[data-bulk-cb], input[data-bulk-cb-all]')) return;
+        const cid = row.dataset.cid;
+        if (cid) openCaseSheet(cid);
+      });
     });
   }
 
@@ -14799,6 +14969,8 @@
     }
 
     if (_fcState.view === 'invoice') {
+      // Per factuur: geen bulk-multiselect (bulk werkt op klant-niveau).
+      _bulkResetSelection();
       const list = Array.isArray(d.by_invoice) ? d.by_invoice : [];
       if (cnt) cnt.textContent = list.length + ' factu' + (list.length === 1 ? 'ur' : 'ren');
       if (list.length === 0) {
@@ -14826,9 +14998,10 @@
         body.innerHTML = `<div class="wbx-empty"><h3>Geen klanten met open facturen</h3>Alles is netjes betaald.</div>`;
       } else {
         body.innerHTML = `
-          <table class="wbx-table" id="fcTable">
+          <table class="wbx-table wbx-bulk-tbl" id="fcTable">
             <thead>
               <tr>
+                <th class="wbx-bulk-cb-cell" data-bulk-cell><input type="checkbox" data-bulk-cb-all title="Selecteer alle zichtbare klanten"></th>
                 <th>Klant</th>
                 <th class="wbx-r">Open facturen</th>
                 <th class="wbx-r">Totaal open</th>
@@ -14839,6 +15012,7 @@
             <tbody>${list.map(_fcCustRowHtml).join('')}</tbody>
           </table>`;
         _fcWireCustRows(list);
+        _bulkWireCustomerRows(list);
       }
     }
 
@@ -14880,6 +15054,7 @@
     const oldest = (Number(r.oldest_days_overdue) > 0) ? `${r.oldest_days_overdue} d` : '—';
     return `
       <tr data-cid="${esc(r.customer_id)}">
+        <td class="wbx-bulk-cb-cell" data-bulk-cell><input type="checkbox" data-bulk-cb="${esc(r.customer_id)}"></td>
         <td>${esc(r.customer_name || '—')}</td>
         <td class="wbx-mono wbx-r">${r.open_invoice_count}</td>
         <td class="wbx-mono wbx-r">${_tdFmtEurCents(r.total_open_cents)}</td>
@@ -14903,10 +15078,500 @@
   }
   function _fcWireCustRows(list) {
     document.querySelectorAll('#fcTable tbody tr[data-cid]').forEach((row) => {
-      row.addEventListener('click', () => {
+      row.addEventListener('click', (e) => {
+        // Klik op de checkbox-cel of checkbox zelf mag GEEN case-sheet openen.
+        if (e.target?.closest?.('[data-bulk-cell], input[data-bulk-cb], input[data-bulk-cb-all]')) return;
         const cid = row.dataset.cid;
         if (cid) openCaseSheet(cid);
       });
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  //   BULK MULTI-SELECT — Facturen (Per klant) + Opruimen
+  //
+  //   Client-state houdt geselecteerde customer_ids bij + een row-index
+  //   voor rendering-context. Bulk-acties HERGEBRUIKEN de bestaande
+  //   endpoints (preview + execute paren) en dwingen ALTIJD een
+  //   bevestigingsstap af nadat de preview getoond is. Geen nieuwe
+  //   geld-/verzendlogica hier.
+  //
+  //   Scope-schakelaar: één bar tegelijk actief; bij tab-switch clearen
+  //   we (zie setSubView).
+  // ─────────────────────────────────────────────────────────────────
+  const _bulkState = {
+    selected     : new Set(),   // Set<customer_id>
+    rowIndex     : new Map(),   // cid -> { customer_id, customer_name, total_open_cents, open_invoice_count, oldest_days_overdue, stage_slug, has_backlog }
+    activeScope  : null,        // 'facturen' | 'opruimen'
+    execBusy     : false,
+    lastJobId    : null,        // wanbetalers-bulk-preview job voor aanmaning
+  };
+
+  function _bulkFmtEurCents(cents) {
+    const c = Number(cents) || 0;
+    return '€ ' + (c / 100).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function _bulkResetSelection() {
+    _bulkState.selected.clear();
+    _bulkState.rowIndex.clear();
+    _bulkState.activeScope = null;
+    _bulkState.lastJobId = null;
+    _bulkRenderBar();
+  }
+
+  function _bulkSetActiveScope(scope, rows) {
+    // Bij scope-switch alles clearen (voorkomt cross-tab selectie-lek).
+    if (_bulkState.activeScope && _bulkState.activeScope !== scope) {
+      _bulkState.selected.clear();
+      _bulkState.lastJobId = null;
+    }
+    _bulkState.activeScope = scope;
+    _bulkState.rowIndex.clear();
+    for (const r of (rows || [])) {
+      if (r && r.customer_id) _bulkState.rowIndex.set(r.customer_id, r);
+    }
+    // Selectie snijden op wat nu zichtbaar is (rijen die weggefilterd zijn
+    // droppen we uit selectie — voorkomt "ghost"-selecties).
+    for (const cid of Array.from(_bulkState.selected)) {
+      if (!_bulkState.rowIndex.has(cid)) _bulkState.selected.delete(cid);
+    }
+    _bulkRenderBar();
+    _bulkSyncCheckboxes();
+  }
+
+  function _bulkToggleRow(cid, on) {
+    if (!cid) return;
+    if (on) _bulkState.selected.add(cid);
+    else    _bulkState.selected.delete(cid);
+    _bulkRenderBar();
+    _bulkSyncCheckboxes();
+  }
+
+  function _bulkToggleAll(on) {
+    if (on) {
+      for (const cid of _bulkState.rowIndex.keys()) _bulkState.selected.add(cid);
+    } else {
+      _bulkState.selected.clear();
+    }
+    _bulkRenderBar();
+    _bulkSyncCheckboxes();
+  }
+
+  function _bulkSyncCheckboxes() {
+    // Sync alle zichtbare row-checkboxes + kop-checkbox met _bulkState.
+    document.querySelectorAll('input[data-bulk-cb]').forEach((cb) => {
+      const cid = cb.getAttribute('data-bulk-cb');
+      cb.checked = _bulkState.selected.has(cid);
+    });
+    document.querySelectorAll('input[data-bulk-cb-all]').forEach((cb) => {
+      const total = _bulkState.rowIndex.size;
+      const sel   = _bulkState.selected.size;
+      cb.checked = total > 0 && sel === total;
+      cb.indeterminate = sel > 0 && sel < total;
+    });
+  }
+
+  function _bulkComputeTotals() {
+    let totalCents = 0;
+    let count = 0;
+    for (const cid of _bulkState.selected) {
+      const r = _bulkState.rowIndex.get(cid);
+      if (!r) continue;
+      totalCents += Number(r.total_open_cents) || 0;
+      count++;
+    }
+    return { count, totalCents };
+  }
+
+  function _bulkRenderBar() {
+    let bar = document.getElementById('wbxBulkBar');
+    const { count, totalCents } = _bulkComputeTotals();
+    if (count === 0) {
+      if (bar) bar.remove();
+      return;
+    }
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'wbxBulkBar';
+      bar.className = 'wbx wbx-bulk-bar';
+      bar.innerHTML = `
+        <div class="wbx-bulk-info">
+          <strong id="wbxBulkCount">0</strong> geselecteerd
+          · <span id="wbxBulkTotal">€ 0,00</span> open
+        </div>
+        <div class="wbx-bulk-actions">
+          <button class="wbx-btn"          type="button" data-bulk-act="aanmaan">Aanmaning sturen</button>
+          <button class="wbx-btn"          type="button" data-bulk-act="crediteren">Crediteren</button>
+          <button class="wbx-btn"          type="button" data-bulk-act="incasso">Naar incasso</button>
+          <button class="wbx-btn"          type="button" data-bulk-act="opgelost">Markeer opgelost</button>
+          <button class="wbx-btn wbx-sm"   type="button" data-bulk-act="clear" title="Selectie legen">Legen</button>
+        </div>
+      `;
+      document.body.appendChild(bar);
+      bar.querySelectorAll('[data-bulk-act]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          if (_bulkState.execBusy) return;
+          const act = btn.getAttribute('data-bulk-act');
+          if      (act === 'clear')      _bulkResetSelection();
+          else if (act === 'aanmaan')    _bulkActionAanmaan();
+          else if (act === 'crediteren') _bulkActionCrediteren();
+          else if (act === 'incasso')    _bulkActionIncasso();
+          else if (act === 'opgelost')   _bulkActionOpgelost();
+        });
+      });
+    }
+    bar.querySelector('#wbxBulkCount').textContent = String(count);
+    bar.querySelector('#wbxBulkTotal').textContent = _bulkFmtEurCents(totalCents);
+  }
+
+  function _bulkSelectedIds() {
+    return Array.from(_bulkState.selected);
+  }
+  function _bulkSelectedRows() {
+    return _bulkSelectedIds().map((cid) => _bulkState.rowIndex.get(cid)).filter(Boolean);
+  }
+
+  // Gedeelde preview→confirm modal. previewHtml is een string; onConfirm is
+  // een async fn die de daadwerkelijke uitvoer doet en een result-html
+  // string terug moet geven (die de modal daarna toont, en de gebruiker
+  // kan sluiten). Wanneer onConfirm gooit, tonen we de foutmelding.
+  function _bulkOpenActionModal({ title, subtitle, previewHtml, confirmLabel, dangerTint, onConfirm }) {
+    // Ruim vorige modal op.
+    document.getElementById('wbxBulkModal')?.remove();
+    const wrap = document.createElement('div');
+    wrap.id = 'wbxBulkModal';
+    wrap.className = 'wbx wbx-bulk-scrim';
+    wrap.innerHTML = `
+      <div class="wbx-bulk-modal">
+        <div class="wbx-bulk-modal-head">
+          <div>
+            <div class="wbx-bulk-modal-title">${esc(title)}</div>
+            ${subtitle ? `<div class="wbx-bulk-modal-sub">${esc(subtitle)}</div>` : ''}
+          </div>
+          <button class="wbx-inc-close" type="button" data-bulk-close>✕</button>
+        </div>
+        <div class="wbx-bulk-modal-body" id="wbxBulkModalBody">${previewHtml || ''}</div>
+        <div class="wbx-bulk-modal-foot">
+          <button class="wbx-btn"                                 type="button" data-bulk-close>Annuleren</button>
+          <button class="wbx-btn ${dangerTint ? 'wbx-danger' : 'wbx-primary'}" type="button" data-bulk-confirm>${esc(confirmLabel || 'Bevestig & uitvoeren')}</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+    const close = () => wrap.remove();
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+    wrap.querySelectorAll('[data-bulk-close]').forEach((b) => b.addEventListener('click', close));
+    wrap.querySelector('[data-bulk-confirm]')?.addEventListener('click', async () => {
+      if (_bulkState.execBusy) return;
+      _bulkState.execBusy = true;
+      const confirmBtn = wrap.querySelector('[data-bulk-confirm]');
+      const body       = wrap.querySelector('#wbxBulkModalBody');
+      if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Bezig…'; }
+      try {
+        const resultHtml = await onConfirm();
+        if (body && typeof resultHtml === 'string') body.innerHTML = resultHtml;
+        if (confirmBtn) confirmBtn.remove();
+        // Bevestig-knop weg; Annuleren-knop → "Sluiten".
+        const cancelBtn = wrap.querySelector('[data-bulk-close].wbx-btn');
+        if (cancelBtn) cancelBtn.textContent = 'Sluiten';
+      } catch (e) {
+        if (body) body.insertAdjacentHTML('afterbegin', `<div class="wbx-bulk-err">Fout: ${esc(e?.message || 'onbekend')}</div>`);
+        if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = confirmLabel || 'Opnieuw proberen'; }
+      } finally {
+        _bulkState.execBusy = false;
+      }
+    });
+  }
+
+  async function _bulkCall(url, body) {
+    const opts = { method: body ? 'POST' : 'GET' };
+    if (body) { opts.headers = { 'Content-Type': 'application/json' }; opts.body = JSON.stringify(body); }
+    const r = await window.AgentShared.apiFetch(url, opts);
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    return d;
+  }
+
+  // ── ACTIE 1: Aanmaning sturen ──────────────────────────────────────
+  // Preview: POST /api/wanbetalers-bulk-preview (draft-job aanmaken).
+  // Execute: POST /api/wanbetalers-bulk-approve (draft → approved; cron
+  // verstuurt in batches van 10 per 3 min). Standaard-kanaal 'whatsapp'
+  // + template null (backend valt terug op eerste approved template).
+  async function _bulkActionAanmaan() {
+    const rows = _bulkSelectedRows();
+    if (!rows.length) return;
+    // Client-side heuristiek: skip klanten die al 'incasso' als fase hebben
+    // (de bulk-preview server-side heeft dit gedrag niet ingebouwd; we
+    // waarschuwen). Aangezien de server-side per-recipient status ook uitzet
+    // (channel_email/no_contact), is dit alleen een UI-hint.
+    const inIncasso = rows.filter((r) => String(r.stage_slug || '').toLowerCase() === 'incasso');
+    const previewIds = rows.map((r) => r.customer_id);
+    _bulkOpenActionModal({
+      title       : 'Aanmaning sturen — preview',
+      subtitle    : `${rows.length} geselecteerd. We maken eerst een concept-bulkjob en tonen wie een aanmaning krijgt. Pas na "Bevestigen" wordt de job goedgekeurd; verzenden gebeurt vervolgens in de reguliere cron (batches van 10 per 3 min).`,
+      previewHtml : `<div class="wbx-bulk-loading">Concept-job aanmaken…</div>`,
+      confirmLabel: 'Bevestig & goedkeuren',
+      onConfirm   : async () => {
+        // Guard: preview moet succesvol een job-id hebben opgeleverd. Ontstaat
+        // een gebruiker toch nog kans de knop te klikken (bv. race), dan
+        // faalt confirm netjes met een banner ipv random gedrag.
+        // We calling approve HIER — de preview zelf gebeurt vóór opening, dus
+        // we vervangen previewHtml na fetch. Voor eenvoud: doe alles binnen
+        // onConfirm zou fout zijn — de bedoeling is preview EERST, DAN bevestig.
+        // Gebruiker heeft nu de preview gezien in de modal-body.
+        const jobId = _bulkState.lastJobId;
+        if (!jobId) throw new Error('Geen concept-job (preview eerst); herstart.');
+        await _bulkCall('/api/wanbetalers-bulk-approve', { job_id: jobId });
+        _bulkState.lastJobId = null;
+        return `<div class="wbx-bulk-ok">
+          <strong>Job goedgekeurd</strong>
+          <div style="margin-top:6px">De cron (elke 3 min, batches van 10) verstuurt nu de aanmaningen. Volg de voortgang bij Instellingen → Berichten of via de bestaande bulk-job-status.</div>
+        </div>`;
+      },
+    });
+    // Bevestig-knop pas actief maken NADAT preview succesvol een job-id gaf.
+    const confirmBtn = document.querySelector('#wbxBulkModal [data-bulk-confirm]');
+    if (confirmBtn) confirmBtn.disabled = true;
+    // Preview-fetch: doe dit ná modal-open zodat de loading-state zichtbaar is.
+    try {
+      const d = await _bulkCall('/api/wanbetalers-bulk-preview', {
+        customer_ids : previewIds,
+        channel      : 'whatsapp',
+      });
+      _bulkState.lastJobId = d.job_id || null;
+      if (confirmBtn && _bulkState.lastJobId) confirmBtn.disabled = false;
+      const s = d.summary || {};
+      const skipMap = s.skipped_breakdown || {};
+      const skipLine = Object.entries(skipMap).map(([k, v]) => `${esc(k)}: ${v}`).join(' · ') || '—';
+      const recipRows = (d.recipients || []).map((r) => {
+        const isSkip = r.status === 'skipped';
+        return `<tr${isSkip ? ' class="wbx-bulk-skip"' : ''}>
+          <td>${esc(r.customer_name || '—')}</td>
+          <td class="wbx-mono wbx-r">${_bulkFmtEurCents(r.total_open_cents)}</td>
+          <td class="wbx-mono">${Number(r.open_invoice_count) || 0}</td>
+          <td>${r.channel_whatsapp ? 'WA' : ''}${r.channel_email ? ' · Mail' : ''}${isSkip ? ' · <em>skip: ' + esc(r.skip_reason || '') + '</em>' : ''}</td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--wbx-faint)">Geen ontvangers</td></tr>';
+      const body = document.querySelector('#wbxBulkModalBody');
+      if (body) {
+        body.innerHTML = `
+          <div class="wbx-bulk-note">
+            Voorbeeld · <strong>${s.total || 0}</strong> totaal · <strong>${s.will_send || 0}</strong> ontvangt bericht · <strong>${s.skipped || 0}</strong> overgeslagen (${skipLine}).
+            ${inIncasso.length ? `<div class="wbx-bulk-warn">Let op: <strong>${inIncasso.length}</strong> geselecteerde klant(en) staan al in fase incasso. Bevestig alleen als je zeker weet dat ze een extra aanmaning moeten krijgen.</div>` : ''}
+          </div>
+          <table class="wbx-inc-preview-tbl">
+            <thead><tr><th>Klant</th><th class="wbx-r">Open</th><th>Facturen</th><th>Kanaal</th></tr></thead>
+            <tbody>${recipRows}</tbody>
+          </table>
+        `;
+      }
+    } catch (e) {
+      const body = document.querySelector('#wbxBulkModalBody');
+      if (body) body.innerHTML = `<div class="wbx-bulk-err">Preview mislukt: ${esc(e?.message || 'onbekend')}</div>`;
+      _bulkState.lastJobId = null;
+    }
+  }
+
+  // ── ACTIE 2: Crediteren ────────────────────────────────────────────
+  // Preview: POST /api/crediteer-ronde-preview (read-only per klant).
+  // Execute: POST /api/crediteer-ronde-execute { items:[{customer_id,
+  // subscription_id:null}], confirm:true }. Endpoint respecteert
+  // globale dry-run vlag; UI toont die stand duidelijk in het preview-blok.
+  async function _bulkActionCrediteren() {
+    const rows = _bulkSelectedRows();
+    if (!rows.length) return;
+    const inIncasso = rows.filter((r) => String(r.stage_slug || '').toLowerCase() === 'incasso');
+    const customerIds = rows.map((r) => r.customer_id);
+    _bulkOpenActionModal({
+      title       : 'Crediteren — preview',
+      subtitle    : `${rows.length} geselecteerd. Facturen worden in Teamleader gecrediteerd; abonnement(en) verlengen niet automatisch (per-klant abo-keuze in het volledige crediteer-overzicht). Voor bulk laten we abonnement leeg (null).`,
+      previewHtml : `<div class="wbx-bulk-loading">Preview ophalen…</div>`,
+      confirmLabel: 'Bevestig & crediteren',
+      dangerTint  : true,
+      onConfirm   : async () => {
+        const items = customerIds.map((cid) => ({ customer_id: cid, subscription_id: null }));
+        const d = await _bulkCall('/api/crediteer-ronde-execute', { items, confirm: true });
+        const summary = d.summary || {};
+        const dryLabel = d.dry_run ? ' (dry-run — niets geboekt)' : '';
+        return `<div class="wbx-bulk-ok">
+          <strong>Klaar${dryLabel}</strong>
+          <div style="margin-top:6px">
+            ${summary.total_customers || 0} klanten verwerkt · ${summary.credited_invoices || 0} facturen gecrediteerd · ${summary.extended_subscriptions || 0} abo's verlengd · ${summary.skipped_no_invoices || 0} zonder open facturen · ${summary.error_customers || 0} met fouten.
+          </div>
+        </div>`;
+      },
+    });
+    try {
+      const d = await _bulkCall('/api/crediteer-ronde-preview', { customer_ids: customerIds });
+      const items = Array.isArray(d.items) ? d.items : [];
+      let totalIncl = 0;
+      let totalCount = 0;
+      const rowsHtml = items.map((it) => {
+        const t = it.totals || {};
+        totalIncl += Number(t.open_incl) || 0;
+        totalCount += Number(t.count) || 0;
+        return `<tr>
+          <td>${esc(it.customer_name || '—')}</td>
+          <td class="wbx-mono">${Number(t.count) || 0}</td>
+          <td class="wbx-mono wbx-r">€ ${(Number(t.open_incl) || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td class="wbx-mono wbx-r">€ ${(Number(t.open_vat) || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td>${Array.isArray(it.subscriptions) ? it.subscriptions.length : 0}</td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--wbx-faint)">Geen facturen om te crediteren</td></tr>';
+      const body = document.querySelector('#wbxBulkModalBody');
+      if (body) {
+        body.innerHTML = `
+          <div class="wbx-bulk-warn">
+            <strong>Belangrijk — fiscaal impact.</strong> Crediteren maakt credit-nota's in Teamleader. Laat de accountant bevestigen; gecrediteerde maanden betekenen dat de toegang tot de opleiding wordt gepauzeerd voor die periode.
+            ${d.dry_run ? '<br><strong>Dry-run staat AAN</strong> — er wordt niets geboekt, alleen een "would do"-summary.' : ''}
+          </div>
+          <div class="wbx-bulk-note">
+            ${items.length} klant(en) · ${totalCount} openstaande factu(u)r(en) · totaal € ${totalIncl.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} incl. BTW.
+            ${inIncasso.length ? `<div class="wbx-bulk-warn">Let op: <strong>${inIncasso.length}</strong> geselecteerde klant(en) staan al in fase incasso. Crediteren daar wist de vordering die het bureau moet innen.</div>` : ''}
+          </div>
+          <table class="wbx-inc-preview-tbl">
+            <thead><tr><th>Klant</th><th>Facturen</th><th class="wbx-r">Totaal incl.</th><th class="wbx-r">Waarvan BTW</th><th>Abbo's</th></tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        `;
+      }
+    } catch (e) {
+      const body = document.querySelector('#wbxBulkModalBody');
+      if (body) body.innerHTML = `<div class="wbx-bulk-err">Preview mislukt: ${esc(e?.message || 'onbekend')}</div>`;
+    }
+  }
+
+  // ── ACTIE 3: Naar incasso ──────────────────────────────────────────
+  // Geen bulk-endpoint; per-customer loop op /api/incasso-dossier-create.
+  // Preview client-side (uit de selectie). Server-side skip bij open
+  // dossier (409) en particulier-zonder-brief (needs_brief:true).
+  async function _bulkActionIncasso() {
+    const rows = _bulkSelectedRows();
+    if (!rows.length) return;
+    const alreadyIncasso = rows.filter((r) => String(r.stage_slug || '').toLowerCase() === 'incasso');
+    _bulkOpenActionModal({
+      title       : 'Naar incasso — preview',
+      subtitle    : `${rows.length} geselecteerd. We maken per klant een dossier aan (zonder bureau/land — dat kan later in Incasso). Particulieren zonder WIK/BE-brief blijven pending in de "brief nodig"-status; klanten met al een open dossier worden overgeslagen.`,
+      previewHtml : (() => {
+        const rowsHtml = rows.map((r) => {
+          const already = alreadyIncasso.some((x) => x.customer_id === r.customer_id);
+          return `<tr${already ? ' class="wbx-bulk-skip"' : ''}>
+            <td>${esc(r.customer_name || '—')}</td>
+            <td class="wbx-mono">${Number(r.open_invoice_count) || 0}</td>
+            <td class="wbx-mono wbx-r">${_bulkFmtEurCents(r.total_open_cents)}</td>
+            <td>${already ? '<em>al in incasso — wordt overgeslagen</em>' : 'nieuw dossier aanmaken'}</td>
+          </tr>`;
+        }).join('');
+        return `
+          <div class="wbx-bulk-note">
+            ${rows.length} klant(en) klaar voor incasso. Bureau/land instel je per dossier in Incasso zelf; hier maken we alleen de basisdossiers aan.
+            ${alreadyIncasso.length ? `<div class="wbx-bulk-warn">Let op: <strong>${alreadyIncasso.length}</strong> klant(en) staan al in fase incasso — die worden overgeslagen (429 al-open-dossier).</div>` : ''}
+          </div>
+          <table class="wbx-inc-preview-tbl">
+            <thead><tr><th>Klant</th><th>Facturen</th><th class="wbx-r">Open</th><th>Wat gebeurt er</th></tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        `;
+      })(),
+      confirmLabel: 'Bevestig & dossiers aanmaken',
+      dangerTint  : true,
+      onConfirm   : async () => {
+        const created = [];
+        const skipped = [];
+        const needsBrief = [];
+        const errors = [];
+        for (const r of rows) {
+          try {
+            const d = await _bulkCall('/api/incasso-dossier-create', {
+              customer_id      : r.customer_id,
+              confirm_no_brief : false,
+            });
+            if (d?.needs_brief) needsBrief.push({ cid: r.customer_id, name: r.customer_name, country: d.country || 'NL' });
+            else               created.push({ cid: r.customer_id, name: r.customer_name });
+          } catch (e) {
+            const msg = e?.message || String(e);
+            if (/al open dossier|409/i.test(msg)) skipped.push({ cid: r.customer_id, name: r.customer_name });
+            else                                  errors.push({ cid: r.customer_id, name: r.customer_name, msg });
+          }
+        }
+        return `<div class="wbx-bulk-ok">
+          <strong>Klaar</strong>
+          <div style="margin-top:6px">
+            ${created.length} dossier(s) aangemaakt · ${needsBrief.length} wachtend op WIK/BE-brief · ${skipped.length} overgeslagen (al open) · ${errors.length} fout.
+          </div>
+          ${needsBrief.length ? `<div class="wbx-bulk-warn" style="margin-top:8px">Klanten die nog een pre-incassobrief nodig hebben: ${needsBrief.map((x) => esc(x.name)).join(', ')}. Open Wanbetalers → Incasso om per klant de brief te versturen (of "Confirm no brief" te vinken).</div>` : ''}
+          ${errors.length ? `<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">Fouten (${errors.length})</summary><ul>${errors.map((e) => `<li>${esc(e.name)}: ${esc(e.msg)}</li>`).join('')}</ul></details>` : ''}
+        </div>`;
+      },
+    });
+  }
+
+  // ── ACTIE 4: Markeer opgelost ──────────────────────────────────────
+  // Geen bulk-endpoint; per-customer POST /api/dunning-pipeline-set-stage
+  // met stage_slug='opgelost'. GEEN "markeer betaald" — echte betaling
+  // komt uit register-payment / bank-match.
+  async function _bulkActionOpgelost() {
+    const rows = _bulkSelectedRows();
+    if (!rows.length) return;
+    _bulkOpenActionModal({
+      title       : 'Markeer opgelost — preview',
+      subtitle    : `${rows.length} geselecteerd. We zetten de pipeline-fase op 'opgelost'. Dit boekt GEEN betaling — echte betalingen komen uit register-payment / bank-match.`,
+      previewHtml : (() => {
+        const rowsHtml = rows.map((r) => `
+          <tr>
+            <td>${esc(r.customer_name || '—')}</td>
+            <td class="wbx-mono">${Number(r.open_invoice_count) || 0}</td>
+            <td class="wbx-mono wbx-r">${_bulkFmtEurCents(r.total_open_cents)}</td>
+            <td>${esc(String(r.stage_slug || 'nieuw'))} → <strong>opgelost</strong></td>
+          </tr>`).join('');
+        return `
+          <div class="wbx-bulk-note">
+            Fase-wijziging voor ${rows.length} klant(en). Dit wist de openstaande status niet — het is administratieve markering. Log-regel via <code>dunning_pipeline.set_stage</code>.
+          </div>
+          <table class="wbx-inc-preview-tbl">
+            <thead><tr><th>Klant</th><th>Facturen</th><th class="wbx-r">Open</th><th>Van → naar</th></tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        `;
+      })(),
+      confirmLabel: 'Bevestig & markeer opgelost',
+      onConfirm   : async () => {
+        const done = [];
+        const errors = [];
+        for (const r of rows) {
+          try {
+            await _bulkCall('/api/dunning-pipeline-set-stage', {
+              customer_id : r.customer_id,
+              stage_slug  : 'opgelost',
+              reason      : 'Bulk: markeer opgelost',
+            });
+            done.push(r.customer_id);
+          } catch (e) {
+            errors.push({ name: r.customer_name, msg: e?.message || String(e) });
+          }
+        }
+        return `<div class="wbx-bulk-ok">
+          <strong>Klaar</strong>
+          <div style="margin-top:6px">${done.length} gemarkeerd opgelost · ${errors.length} fout.</div>
+          ${errors.length ? `<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">Fouten (${errors.length})</summary><ul>${errors.map((e) => `<li>${esc(e.name)}: ${esc(e.msg)}</li>`).join('')}</ul></details>` : ''}
+        </div>`;
+      },
+    });
+  }
+
+  // Helper voor de facturen "Per klant"-render: wire de checkboxen op de
+  // reeds bestaande <tr data-cid> rijen (kolom wordt via _fcCustRowHtml
+  // aangeleverd). Aangeroepen door _fcRenderBody na row-render.
+  function _bulkWireCustomerRows(list) {
+    _bulkSetActiveScope('facturen', list);
+    document.querySelectorAll('#fcTable [data-bulk-cb]').forEach((cb) => {
+      cb.addEventListener('click', (e) => e.stopPropagation());
+      cb.addEventListener('change', (e) => _bulkToggleRow(cb.getAttribute('data-bulk-cb'), !!e.target.checked));
+    });
+    document.querySelectorAll('#fcTable [data-bulk-cb-all]').forEach((cb) => {
+      cb.addEventListener('click', (e) => e.stopPropagation());
+      cb.addEventListener('change', (e) => _bulkToggleAll(!!e.target.checked));
     });
   }
 
