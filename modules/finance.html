@@ -13301,19 +13301,24 @@
       `;
     } else {
       body.innerHTML = '<div class="td-list">' + list.map(_tdRowHtml).join('') + '</div>';
+      // Referentie-map cid → worklist-item zodat we de context (invoice_id,
+      // invoice_number, days_overdue) mee kunnen geven aan het case-paneel.
+      const byCid = new Map();
+      for (const r of list) if (r?.customer_id) byCid.set(r.customer_id, r);
       body.querySelectorAll('.td-row[data-cid]').forEach((row) => {
         row.addEventListener('click', (ev) => {
-          // Klik op de actie-knop mag ook naar de detailkaart — geen aparte flow in stap 1.
           const cid = row.dataset.cid;
           if (!cid) return;
           ev.preventDefault();
-          if (typeof openPipelineDetail === 'function') {
-            if (!_pipeState.stages || !_pipeState.stages.length) {
-              loadPipelineData({ background: true }).then(() => openPipelineDetail(cid));
-            } else {
-              openPipelineDetail(cid);
-            }
-          }
+          // Brok A stap 2: worklist-rij opent het nieuwe #caseSheet, niet meer
+          // de oude pipeline-detailkaart. openPipelineDetail blijft bestaan
+          // voor de Pipeline-tab.
+          const it = byCid.get(cid) || {};
+          openCaseSheet(cid, {
+            invoiceId  : it.invoice_id || null,
+            invoiceNr  : it.invoice_number || null,
+            daysOverdue: (it.days_overdue != null) ? it.days_overdue : null,
+          });
         });
       });
     }
@@ -13370,6 +13375,713 @@
     const n = Number(cents);
     if (!isFinite(n)) return '—';
     return '€ ' + (n / 100).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // CASE-SHEET (herontwerp Brok A, stap 2 + 3) — rechts-in-schuivend
+  // paneel dat opent vanuit "Te doen". Herbouwt de klant-context op één
+  // scherm met een leesbare statusbalk (stap 3), factuurkaart,
+  // gesprekskaart met laatste Joost-suggestie, en een actiebalk. Alle
+  // acties zijn gebonden aan de BESTAANDE handlers/endpoints. Oude
+  // detailkaart (openPipelineDetail + pipeDetailOverlay) blijft
+  // ongewijzigd — beide bestaan naast elkaar in deze release.
+  // ────────────────────────────────────────────────────────────────────
+  const _caseState = {
+    open           : false,
+    cid            : null,
+    focusInvoiceId : null,           // meegegeven vanuit de worklist
+    focusInvoiceNr : null,
+    focusDaysOverdue: null,
+    detail         : null,           // dunning-pipeline-detail response
+    chat           : { convId: null, messages: [], canSend: false, phone: null, reason: null, loading: false },
+    suggestion     : null,           // laatste joost-suggestion (PROPOSED)
+    suggestionAge  : null,
+    joostBusy      : false,
+    escHandler     : null,
+  };
+
+  // Reis-mapping stap 3 — de gebruiker ziet een leesbare journey ipv slugs.
+  // primary  = één van de vier journey-steps (index 0-3), gebruikt voor
+  //            "gedaan"/"nu"/"nog-te-doen" kleuring.
+  // eindchip = losse chip die de 4e cel invult met de correcte uitkomst
+  //            (Regeling / Betaald / Incasso / Afgeschreven) — pas gezet
+  //            als de klant in een terminal fase zit.
+  const CASE_JOURNEY = [
+    { key: 'nieuw',      label: 'Nieuw te laat' },
+    { key: 'aangemaand', label: 'Aangemaand'     },
+    { key: 'in_gesprek', label: 'In gesprek'     },
+    { key: 'einde',      label: 'Uitkomst'       },
+  ];
+  function _caseJourneyMap(stageSlug) {
+    const s = String(stageSlug || 'nieuw').toLowerCase();
+    // { primaryIndex, endChip: {label, tint} | null }
+    switch (s) {
+      case 'nieuw':           return { primaryIndex: 0, endChip: null };
+      case 'aangemaand':      return { primaryIndex: 1, endChip: null };
+      case 'brief_verstuurd': return { primaryIndex: 1, endChip: null, subLabel: 'Brief verstuurd' };
+      case 'in_gesprek':      return { primaryIndex: 2, endChip: null };
+      case 'regeling':        return { primaryIndex: 3, endChip: { label: 'Regeling',     tint: '#8b5cf6' } };
+      case 'opgelost':        return { primaryIndex: 3, endChip: { label: 'Betaald',      tint: '#10b981' } };
+      case 'incasso':         return { primaryIndex: 3, endChip: { label: 'Incasso',      tint: '#dc2626' } };
+      case 'afschrijven':     return { primaryIndex: 3, endChip: { label: 'Afgeschreven', tint: '#94a3b8' } };
+      default:                return { primaryIndex: 0, endChip: null };
+    }
+  }
+
+  // Primaire actie per fase (mapping uit spec). Retour = { label, run() }.
+  function _caseSuggestedActionFor(stageSlug) {
+    const s = String(stageSlug || 'nieuw').toLowerCase();
+    switch (s) {
+      case 'nieuw':           return { label: 'Start aanmaning',      key: 'to_aangemaand' };
+      case 'aangemaand':      return { label: 'Vraag Joost',          key: 'ask_joost'     };
+      case 'in_gesprek':      return { label: 'Bekijk gesprek',       key: 'focus_chat'    };
+      case 'regeling':        return { label: 'Keur regeling goed',   key: 'go_arrangements' };
+      case 'brief_verstuurd': return { label: 'Naar incasso',         key: 'to_incasso'    };
+      default:                return { label: 'Bekijk',               key: 'noop'          };
+    }
+  }
+
+  // Panel-DOM: eenmaal in body injecteren. Alle events worden bij elke
+  // render opnieuw gebonden (idempotent) — voorkomt duplicate listeners.
+  function _caseEnsurePanel() {
+    let panel = document.getElementById('caseSheetOverlay');
+    if (panel) return panel;
+    panel = document.createElement('div');
+    panel.id = 'caseSheetOverlay';
+    panel.className = 'case-overlay';
+    panel.hidden = true;
+    panel.innerHTML = `
+      <div class="case-backdrop" data-case-close="1"></div>
+      <div class="case-sheet" role="dialog" aria-modal="true" aria-labelledby="caseSheetTitle">
+        <div class="case-sheet-inner" id="caseSheetInner">
+          <div style="padding:32px;text-align:center;color:var(--text-dim)">Laden…</div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(panel);
+    panel.querySelector('.case-backdrop')?.addEventListener('click', closeCaseSheet);
+    _caseInjectStyles();
+    return panel;
+  }
+
+  function _caseInjectStyles() {
+    if (document.getElementById('case-sheet-styles')) return;
+    const st = document.createElement('style');
+    st.id = 'case-sheet-styles';
+    st.textContent = `
+      .case-overlay { position:fixed; inset:0; z-index:1300; display:flex; }
+      .case-overlay[hidden] { display:none; }
+      .case-backdrop { position:absolute; inset:0; background:rgba(0,0,0,.45); }
+      .case-sheet { position:relative; margin-left:auto; height:100%; width:min(760px, 100%); background:var(--bg); border-left:1px solid var(--border); box-shadow:-24px 0 60px rgba(0,0,0,.4); display:flex; flex-direction:column; animation:caseSlideIn .18s ease-out; }
+      @keyframes caseSlideIn { from { transform:translateX(24px); opacity:0; } to { transform:translateX(0); opacity:1; } }
+      .case-sheet-inner { flex:1; overflow-y:auto; }
+      .case-head { position:sticky; top:0; z-index:2; padding:16px 22px 14px 22px; background:var(--bg); border-bottom:1px solid var(--border); display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+      .case-head-title h3 { margin:0; font-size:17px; font-weight:700; color:var(--text); }
+      .case-head-subtitle { margin-top:2px; font-size:12px; color:var(--text-dim); font-family:ui-monospace, SFMono-Regular, monospace; }
+      .case-head-actions { display:flex; align-items:center; gap:8px; flex-shrink:0; }
+      .case-close-btn { background:transparent; border:none; color:var(--text-dim); font-size:22px; padding:4px 10px; border-radius:6px; cursor:pointer; }
+      .case-close-btn:hover { background:var(--bg-elev-2); color:var(--text); }
+      .case-status-pill { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--bg-elev); }
+      .case-body { padding:18px 22px 24px 22px; display:flex; flex-direction:column; gap:16px; }
+
+      /* Statusbalk (stap 3) — reis met stap-bolletjes */
+      .case-journey { display:grid; grid-template-columns:repeat(4, 1fr); align-items:center; padding:14px 16px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; gap:0; }
+      .case-jstep { position:relative; display:flex; flex-direction:column; align-items:center; gap:6px; padding:0 6px; }
+      .case-jdot { width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; background:var(--bg-elev-2, rgba(148,163,184,.14)); color:var(--text-dim); border:2px solid var(--border); z-index:1; }
+      .case-jlabel { font-size:11.5px; color:var(--text-dim); text-align:center; line-height:1.3; }
+      .case-jsub   { font-size:10.5px; color:var(--text-faint); text-align:center; margin-top:2px; }
+      .case-jstep.done .case-jdot { background:#10b981; color:#fff; border-color:#10b981; }
+      .case-jstep.done .case-jlabel { color:var(--text); }
+      .case-jstep.now  .case-jdot { background:#0ea5e9; color:#fff; border-color:#0ea5e9; box-shadow:0 0 0 4px rgba(14,165,233,.15); }
+      .case-jstep.now  .case-jlabel { color:var(--text); font-weight:700; }
+      .case-jstep + .case-jstep::before { content:''; position:absolute; left:calc(-50% + 14px); right:calc(50% + 14px); top:14px; height:2px; background:var(--border); z-index:0; }
+      .case-jstep.done + .case-jstep::before,
+      .case-jstep.done + .case-jstep.done::before { background:#10b981; }
+      .case-jchip { display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:999px; font-size:11.5px; font-weight:700; border:1px solid; }
+
+      /* Kaarten */
+      .case-card { padding:14px 16px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; }
+      .case-card-h { font-size:11.5px; text-transform:uppercase; letter-spacing:.6px; color:var(--text-faint); margin-bottom:8px; }
+      .case-invoice-row { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:baseline; }
+      .case-invoice-nr { font-family:ui-monospace, SFMono-Regular, monospace; font-size:13px; color:var(--text-dim); }
+      .case-invoice-amt { font-family:ui-monospace, SFMono-Regular, monospace; font-size:20px; font-weight:700; color:var(--text); text-align:right; font-variant-numeric:tabular-nums; }
+      .case-invoice-meta { display:flex; flex-wrap:wrap; gap:14px; font-size:12.5px; color:var(--text-dim); margin-top:8px; }
+      .case-invoice-meta strong { color:var(--text); }
+      .case-invoice-note { margin-top:10px; padding:8px 12px; border-radius:8px; font-size:12px; }
+      .case-note-ok  { background:rgba(16,185,129,.08); border:1px solid rgba(16,185,129,.24); color:var(--text); }
+      .case-note-warn{ background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.28); color:var(--text); }
+
+      /* Chat + Joost */
+      .case-chat-box { max-height:280px; overflow-y:auto; padding:8px; background:var(--bg-elev-2, rgba(255,255,255,.02)); border:1px solid var(--border); border-radius:8px; display:flex; flex-direction:column; gap:6px; }
+      .case-chat-msg { max-width:82%; padding:7px 10px; border-radius:10px; font-size:13px; line-height:1.35; word-wrap:break-word; color:var(--text); }
+      .case-chat-msg.inbound  { background:var(--bg-elev); align-self:flex-start; border-bottom-left-radius:3px; }
+      .case-chat-msg.outbound { background:rgba(6,182,212,.18); align-self:flex-end; border-bottom-right-radius:3px; }
+      .case-chat-meta { font-size:10.5px; color:var(--text-faint); margin-top:2px; text-align:right; }
+      .case-chat-hint { padding:16px; text-align:center; color:var(--text-faint); font-size:12.5px; }
+      .case-joost { margin-top:12px; padding:10px 12px; background:rgba(124,58,237,.06); border:1px solid rgba(124,58,237,.28); border-radius:10px; }
+      .case-joost-h { display:flex; gap:8px; align-items:center; font-size:11.5px; color:var(--text-dim); font-weight:600; margin-bottom:6px; }
+      .case-joost-intent { padding:2px 8px; border-radius:999px; font-size:10.5px; font-weight:700; background:rgba(124,58,237,.14); color:#7c3aed; border:1px solid rgba(124,58,237,.28); }
+      .case-joost-body { font-size:13px; color:var(--text); white-space:pre-wrap; line-height:1.5; }
+      .case-joost-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+
+      /* Actiebalk */
+      .case-actionbar { position:sticky; bottom:0; padding:12px 22px; background:var(--bg); border-top:1px solid var(--border); display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+      .case-btn { padding:9px 14px; border-radius:8px; border:1px solid var(--border); background:var(--bg-elev); color:var(--text); font-size:13px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+      .case-btn:hover { background:var(--bg-elev-2); }
+      .case-btn[disabled] { opacity:.55; cursor:not-allowed; }
+      .case-btn.primary { background:#0ea5e9; border-color:#0ea5e9; color:#fff; }
+      .case-btn.primary:hover { background:#0284c7; }
+      .case-btn.ghost   { background:transparent; }
+      .case-btn.danger  { background:rgba(220,38,38,.14); border-color:rgba(220,38,38,.28); color:#dc2626; }
+
+      @media (max-width:640px) {
+        .case-sheet { width:100%; }
+        .case-journey { grid-template-columns:1fr 1fr; row-gap:14px; }
+      }
+    `;
+    document.head.appendChild(st);
+  }
+
+  async function openCaseSheet(customerId, opts = {}) {
+    if (!customerId) return;
+    _caseState.cid = customerId;
+    _caseState.focusInvoiceId  = opts.invoiceId   || null;
+    _caseState.focusInvoiceNr  = opts.invoiceNr   || null;
+    _caseState.focusDaysOverdue= (opts.daysOverdue != null) ? opts.daysOverdue : null;
+    _caseState.detail          = null;
+    _caseState.chat            = { convId: null, messages: [], canSend: false, phone: null, reason: null, loading: true };
+    _caseState.suggestion      = null;
+    _caseState.suggestionAge   = null;
+    _caseState.open            = true;
+
+    const panel = _caseEnsurePanel();
+    panel.hidden = false;
+    _caseRenderLoading();
+
+    // Escape-toets → sluiten (herregistreren zodat we niet blijven stapelen).
+    if (_caseState.escHandler) document.removeEventListener('keydown', _caseState.escHandler);
+    _caseState.escHandler = (e) => { if (e.key === 'Escape') closeCaseSheet(); };
+    document.addEventListener('keydown', _caseState.escHandler);
+
+    // Parallel: pipeline-detail + chat + laatste joost-suggestie.
+    await Promise.all([_caseLoadDetail(customerId), _caseLoadChat(customerId)]);
+    // Suggestion op basis van de convId die net geladen is.
+    if (_caseState.chat.convId) await _caseLoadSuggestion(_caseState.chat.convId);
+    _caseRender();
+  }
+
+  function closeCaseSheet() {
+    _caseState.open = false;
+    _caseState.cid = null;
+    _caseState.detail = null;
+    _caseState.chat = { convId: null, messages: [], canSend: false, phone: null, reason: null, loading: false };
+    _caseState.suggestion = null;
+    if (_caseState.escHandler) {
+      document.removeEventListener('keydown', _caseState.escHandler);
+      _caseState.escHandler = null;
+    }
+    const panel = document.getElementById('caseSheetOverlay');
+    if (panel) panel.hidden = true;
+  }
+
+  async function _caseLoadDetail(cid) {
+    try {
+      const r = await window.AgentShared.apiFetch('/api/dunning-pipeline-detail?customer_id=' + encodeURIComponent(cid));
+      const d = await r.json().catch(() => ({}));
+      if (_caseState.cid !== cid) return;
+      if (!r.ok) throw new Error(d?.error || 'Fout bij laden');
+      _caseState.detail = d;
+    } catch (e) {
+      console.error('[case-sheet detail]', e);
+      _caseState.detail = { _error: e?.message || 'Onbekend' };
+    }
+  }
+
+  async function _caseLoadChat(cid) {
+    _caseState.chat.loading = true;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-conversation-by-customer?customer_id=' + encodeURIComponent(cid));
+      const d = await r.json().catch(() => ({}));
+      if (_caseState.cid !== cid) return;
+      if (!r.ok || !d.found || !d.conversation_id) {
+        _caseState.chat = { convId: null, messages: [], canSend: false, phone: null, reason: d?.reason || null, loading: false };
+        return;
+      }
+      _caseState.chat.convId = d.conversation_id;
+      const rM = await window.AgentShared.apiFetch('/api/inbox-messages-list?conversation_id=' + encodeURIComponent(d.conversation_id));
+      const dM = await rM.json().catch(() => ({}));
+      if (_caseState.cid !== cid) return;
+      if (!rM.ok) throw new Error(dM?.error || 'Berichten laden mislukt');
+      _caseState.chat.messages = Array.isArray(dM.items) ? dM.items : [];
+      _caseState.chat.canSend  = !!(dM.conversation && dM.conversation.can_send_text);
+      _caseState.chat.phone    = dM.conversation?.phone_number || null;
+    } catch (e) {
+      console.error('[case-sheet chat]', e);
+      _caseState.chat = { convId: null, messages: [], canSend: false, phone: null, reason: 'error:' + (e?.message || ''), loading: false };
+    } finally {
+      _caseState.chat.loading = false;
+    }
+  }
+
+  async function _caseLoadSuggestion(convId) {
+    if (!convId) return;
+    try {
+      const r = await window.AgentShared.apiFetch(
+        '/api/joost-suggestions-recent?conversation_id=' + encodeURIComponent(convId) + '&max_age_minutes=60'
+      );
+      if (!r.ok) return; // 403/500 → stil negeren
+      const d = await r.json().catch(() => ({}));
+      const s = d && d.suggestion ? d.suggestion : null;
+      if (!s) return;
+      _caseState.suggestion    = s;
+      _caseState.suggestionAge = d.age_seconds != null ? d.age_seconds : null;
+    } catch (_) { /* fail-soft */ }
+  }
+
+  function _caseRenderLoading() {
+    const inner = document.getElementById('caseSheetInner');
+    if (inner) inner.innerHTML = `
+      <div style="padding:32px;text-align:center;color:var(--text-dim);font-size:13px">Klant-dossier laden…</div>
+    `;
+  }
+
+  function _caseRender() {
+    const inner = document.getElementById('caseSheetInner');
+    if (!inner) return;
+    if (!_caseState.detail) return _caseRenderLoading();
+    if (_caseState.detail._error) {
+      inner.innerHTML = `
+        <div class="case-head">
+          <div class="case-head-title"><h3>Klant-dossier</h3></div>
+          <button class="case-close-btn" type="button" id="caseCloseBtn" aria-label="Sluiten">×</button>
+        </div>
+        <div class="case-body">
+          <div style="color:#dc2626">Fout: ${esc(_caseState.detail._error)}</div>
+        </div>`;
+      document.getElementById('caseCloseBtn')?.addEventListener('click', closeCaseSheet);
+      return;
+    }
+
+    const d = _caseState.detail;
+    const cust = d.customer || null;
+    const stageSlug = d.pipeline?.stage_slug || 'nieuw';
+    const openInvs  = Array.isArray(d.open_invoices) ? d.open_invoices : [];
+    const totalOpenCents = openInvs.reduce((s, iv) => s + Math.round((Number(iv.amount_open) || 0) * 100), 0);
+    // Focus-factuur: die uit "Te doen" meegegeven; anders eerste open factuur.
+    const focus = _caseState.focusInvoiceId
+      ? openInvs.find((iv) => iv.id === _caseState.focusInvoiceId) || openInvs[0] || null
+      : openInvs[0] || null;
+
+    const nOpen = openInvs.length;
+    const isMulti = nOpen >= 2;
+    const name = cust?.display_name || _pipeCustomerDisplayName(cust);
+
+    const daysStr = (_caseState.focusDaysOverdue != null && _caseState.focusDaysOverdue >= 0)
+      ? `${_caseState.focusDaysOverdue} dagen te laat`
+      : (focus?.due_date ? _caseDueDateText(focus.due_date) : '');
+    const stagePill = _caseStagePillHtml(stageSlug);
+
+    inner.innerHTML = `
+      <div class="case-head">
+        <div class="case-head-title">
+          <h3 id="caseSheetTitle">${esc(name || 'Klant')}</h3>
+          <div class="case-head-subtitle">${esc(focus?.invoice_number || '—')}${daysStr ? ' · ' + esc(daysStr) : ''}</div>
+        </div>
+        <div class="case-head-actions">
+          ${stagePill}
+          <button class="case-close-btn" type="button" id="caseCloseBtn" aria-label="Sluiten (Escape)" title="Sluiten (Escape)">×</button>
+        </div>
+      </div>
+      <div class="case-body">
+        ${_caseJourneyHtml(stageSlug)}
+        ${_caseInvoiceCardHtml(focus, nOpen, totalOpenCents, isMulti)}
+        ${_caseChatCardHtml()}
+      </div>
+      ${_caseActionBarHtml(stageSlug, openInvs, focus)}
+    `;
+
+    _caseWire(stageSlug, focus, openInvs);
+  }
+
+  function _caseStagePillHtml(stageSlug) {
+    const map = _pipeStageColor(stageSlug);
+    const label = _tdStageLabel(stageSlug);
+    return `<span class="case-status-pill" style="color:${map};border-color:${map}55;background:${map}18">${esc(label)}</span>`;
+  }
+  function _pipeStageColor(slug) {
+    const c = {
+      nieuw:'#64748b', aangemaand:'#f59e0b', in_gesprek:'#0ea5e9',
+      regeling:'#8b5cf6', brief_verstuurd:'#ec4899', incasso:'#dc2626',
+      opgelost:'#10b981', afschrijven:'#94a3b8',
+    };
+    return c[String(slug || 'nieuw').toLowerCase()] || '#64748b';
+  }
+
+  function _caseJourneyHtml(stageSlug) {
+    const j = _caseJourneyMap(stageSlug);
+    const currentIdx = j.primaryIndex;
+    const chip = j.endChip;
+    const cells = CASE_JOURNEY.map((step, i) => {
+      let stateCls = '';
+      let inner    = '';
+      if (i < currentIdx)      stateCls = 'done';
+      else if (i === currentIdx) stateCls = 'now';
+      if (step.key === 'einde') {
+        if (chip) {
+          inner = `<span class="case-jchip" style="color:${chip.tint};background:${chip.tint}14;border-color:${chip.tint}55">${esc(chip.label)}</span>`;
+        } else {
+          inner = `<div class="case-jdot">${i + 1}</div><div class="case-jlabel">${esc(step.label)}</div>`;
+        }
+      } else {
+        const iconInner = (i < currentIdx) ? '✓' : String(i + 1);
+        inner = `<div class="case-jdot">${iconInner}</div><div class="case-jlabel">${esc(step.label)}</div>`;
+        if (i === currentIdx && j.subLabel) {
+          inner += `<div class="case-jsub">${esc(j.subLabel)}</div>`;
+        }
+      }
+      return `<div class="case-jstep ${stateCls}">${inner}</div>`;
+    }).join('');
+    return `<div class="case-journey">${cells}</div>`;
+  }
+
+  function _caseInvoiceCardHtml(focus, nOpen, totalOpenCents, isMulti) {
+    const openAmt = focus ? Math.round((Number(focus.amount_open) || 0) * 100) : 0;
+    const days = (_caseState.focusDaysOverdue != null && _caseState.focusDaysOverdue >= 0)
+      ? _caseState.focusDaysOverdue
+      : _caseDaysOverdueFrom(focus?.due_date);
+    const noteHtml = isMulti
+      ? `<div class="case-invoice-note case-note-warn"><i class="ti ti-alert-triangle" style="color:#f59e0b"></i> Klant heeft <strong>${nOpen} open facturen</strong> (achterstand ${_tdFmtEurCents(totalOpenCents)}) — hoort bij de <a href="#" data-case-goto="crediteren" style="color:#0ea5e9">opruimactie</a>, niet bij de dagelijkse flow.</div>`
+      : `<div class="case-invoice-note case-note-ok"><i class="ti ti-check" style="color:#10b981"></i> Geen achterstand — één te late factuur, dagelijkse flow.</div>`;
+    return `
+      <div class="case-card">
+        <div class="case-card-h">De factuur</div>
+        <div class="case-invoice-row">
+          <div>
+            <div class="case-invoice-nr">${esc(focus?.invoice_number || 'Onbekend')}</div>
+            <div style="color:var(--text-faint);font-size:11.5px;margin-top:2px">Vervaldatum: ${esc(focus?.due_date || '—')}</div>
+          </div>
+          <div class="case-invoice-amt">${_tdFmtEurCents(openAmt)}</div>
+        </div>
+        <div class="case-invoice-meta">
+          <span><strong>${days != null && days > 0 ? days : '—'}</strong> dagen te laat</span>
+          <span><strong>${nOpen}</strong> open factu${nOpen === 1 ? 'ur' : 'ren'} bij deze klant</span>
+        </div>
+        ${noteHtml}
+      </div>
+    `;
+  }
+
+  function _caseChatCardHtml() {
+    const c = _caseState.chat;
+    let bodyHtml = '';
+    if (c.loading) {
+      bodyHtml = `<div class="case-chat-hint">Gesprek laden…</div>`;
+    } else if (!c.convId) {
+      bodyHtml = `<div class="case-chat-hint">Nog geen WhatsApp-gesprek met deze klant. Stuur een herinnering om er één te openen.</div>`;
+    } else if (c.messages.length === 0) {
+      bodyHtml = `<div class="case-chat-hint">Gesprek staat open (${esc(c.phone || 'WhatsApp')}), maar er zijn nog geen berichten.</div>`;
+    } else {
+      const lastMsgs = c.messages.slice(-8);
+      const bubbles = lastMsgs.map((m) => {
+        const dir = m.direction === 'outbound' ? 'outbound' : 'inbound';
+        const time = _pipeFmtDateTime(m.created_at || m.sent_at);
+        const body = m.body || (m.template_name ? `[template] ${m.template_name}` : (m.media_type ? `[${m.media_type}]` : ''));
+        return `<div class="case-chat-msg ${dir}"><div style="white-space:pre-wrap;word-wrap:break-word">${esc(body)}</div><div class="case-chat-meta">${esc(time)}</div></div>`;
+      }).join('');
+      const windowBadge = c.canSend
+        ? '<span style="color:#10b981">● 24u venster open</span>'
+        : '<span style="color:#f59e0b">● Buiten 24u — alleen template</span>';
+      bodyHtml = `
+        <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:6px">${esc(c.phone || 'WhatsApp')} · ${windowBadge}</div>
+        <div class="case-chat-box" id="caseChatBox">${bubbles}</div>
+      `;
+    }
+    return `
+      <div class="case-card">
+        <div class="case-card-h">Gesprek</div>
+        ${bodyHtml}
+        ${_caseJoostBlockHtml()}
+      </div>
+    `;
+  }
+
+  function _caseJoostBlockHtml() {
+    const s = _caseState.suggestion;
+    if (_caseState.joostBusy) {
+      return `<div class="case-joost"><div class="case-joost-h"><i class="ti ti-sparkles" style="color:#7c3aed"></i> Joost denkt na…</div></div>`;
+    }
+    if (!s) {
+      return `<div class="case-joost" style="background:transparent;border-style:dashed"><div class="case-joost-h"><i class="ti ti-sparkles" style="color:#7c3aed"></i> Joost heeft geen recente suggestie — klik <em>Vraag Joost</em> om er een te vragen.</div></div>`;
+    }
+    const conf = Number(s.confidence);
+    const confTxt = isFinite(conf) ? Math.round(conf * 100) + '% zeker' : '';
+    const intent = s.detected_intent || 'other';
+    const body = s.suggested_reply || '(geen suggestie)';
+    const showRegelingBtn = intent === 'payment_promise' || String(_caseState.detail?.pipeline?.stage_slug || '').toLowerCase() === 'in_gesprek';
+    return `
+      <div class="case-joost">
+        <div class="case-joost-h">
+          <i class="ti ti-sparkles" style="color:#7c3aed"></i>
+          Joost's suggestie
+          <span class="case-joost-intent">${esc(_caseIntentLabel(intent))}</span>
+          ${confTxt ? `<span style="color:var(--text-faint);font-weight:500">· ${esc(confTxt)}</span>` : ''}
+        </div>
+        <div class="case-joost-body">${esc(body)}</div>
+        <div class="case-joost-actions">
+          <button class="case-btn primary" type="button" data-case-joost="send" ${!_caseState.chat.canSend ? 'disabled title="24u-venster gesloten"' : ''}>Verstuur zo</button>
+          <button class="case-btn ghost"   type="button" data-case-joost="edit"  ${!_caseState.chat.canSend ? 'disabled' : ''}>Bewerken</button>
+          ${showRegelingBtn ? `<button class="case-btn" type="button" data-case-joost="arrangement">Stel regeling voor</button>` : ''}
+        </div>
+      </div>
+    `;
+  }
+  function _caseIntentLabel(intent) {
+    const m = {
+      verify_payment    : 'Betaling verifiëren',
+      arrangement_request:'Regeling gevraagd',
+      escalation_needed : 'Escalatie',
+      payment_promise   : 'Betaal-belofte',
+      general_question  : 'Vraag',
+      other             : 'Overig',
+    };
+    return m[String(intent || 'other')] || 'Overig';
+  }
+
+  function _caseActionBarHtml(stageSlug, openInvs, focus) {
+    const sug = _caseSuggestedActionFor(stageSlug);
+    const noopClass = sug.key === 'noop' ? '' : '';
+    return `
+      <div class="case-actionbar">
+        <button class="case-btn primary" type="button" data-case-action="${esc(sug.key)}">${esc(sug.label)}</button>
+        <button class="case-btn"        type="button" data-case-action="reminder">Herinnering</button>
+        <button class="case-btn"        type="button" data-case-action="ask_joost" ${_caseState.joostBusy ? 'disabled' : ''}>Vraag Joost</button>
+        <button class="case-btn danger" type="button" data-case-action="to_incasso">Naar incasso</button>
+      </div>
+    `;
+  }
+
+  function _caseWire(stageSlug, focus, openInvs) {
+    document.getElementById('caseCloseBtn')?.addEventListener('click', closeCaseSheet);
+
+    // "opruimactie"-link in de multi-notitie.
+    document.querySelectorAll('[data-case-goto]').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        const target = el.getAttribute('data-case-goto');
+        if (target === 'crediteren') { closeCaseSheet(); setSubView('crediteren'); }
+      });
+    });
+
+    // Joost-suggestie actie-knoppen.
+    document.querySelectorAll('[data-case-joost]').forEach((btn) => {
+      btn.addEventListener('click', () => _caseJoostAction(btn.getAttribute('data-case-joost')));
+    });
+
+    // Primaire / secundaire actie-balk.
+    document.querySelectorAll('[data-case-action]').forEach((btn) => {
+      btn.addEventListener('click', () => _caseAction(btn.getAttribute('data-case-action')));
+    });
+
+    // Auto-scroll chatbox naar onder.
+    const cbox = document.getElementById('caseChatBox');
+    if (cbox) cbox.scrollTop = cbox.scrollHeight;
+  }
+
+  async function _caseAction(key) {
+    const cid = _caseState.cid;
+    if (!cid || !key) return;
+    switch (key) {
+      case 'to_aangemaand':
+        await _caseSetStage('aangemaand', 'Aanmaning gestart');
+        break;
+      case 'ask_joost':
+        await _caseJoostFetchFresh();
+        break;
+      case 'focus_chat': {
+        const cbox = document.getElementById('caseChatBox');
+        if (cbox) cbox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        else window.AgentShared?.showToast?.('Geen gesprek beschikbaar — stuur eerst een herinnering', 'warning');
+        break;
+      }
+      case 'go_arrangements':
+        closeCaseSheet();
+        setSubView('arrangements');
+        break;
+      case 'to_incasso':
+        if (typeof window._openNaarIncassoDialog === 'function') {
+          closeCaseSheet();
+          window._openNaarIncassoDialog(cid);
+        } else {
+          window.AgentShared?.showToast?.('Incasso-dialog niet beschikbaar', 'warning');
+        }
+        break;
+      case 'reminder':
+        // "Herinnering" — als klant in fase 'nieuw' staat, gedraagt zich als
+        // primaire actie (fase → aangemaand + log). Anders alleen een log-
+        // regel dat er een herinnering gestuurd is, zonder fase-wissel.
+        if (String(_caseState.detail?.pipeline?.stage_slug || '').toLowerCase() === 'nieuw') {
+          await _caseSetStage('aangemaand', 'Herinnering gestuurd (fase → aangemaand)');
+        } else {
+          await _caseAddLog('Herinnering gestuurd (handmatig)');
+        }
+        break;
+      case 'noop':
+      default:
+        window.AgentShared?.showToast?.('Geen automatische actie voor deze fase — bekijk het dossier', 'info');
+        break;
+    }
+  }
+
+  async function _caseSetStage(newSlug, logNote) {
+    const cid = _caseState.cid;
+    if (!cid) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/dunning-pipeline-set-stage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_id: cid, stage_slug: newSlug }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      if (logNote) await _caseAddLog(logNote, /*silent*/ true);
+      window.AgentShared?.showToast?.('Fase → ' + _tdStageLabel(newSlug), 'success');
+      // Herlaad detail + achtergrond-worklist.
+      await _caseLoadDetail(cid);
+      _caseRender();
+      if (typeof loadTeDoen === 'function') loadTeDoen();
+    } catch (e) {
+      window.AgentShared?.showToast?.('Fase wijzigen mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+
+  async function _caseAddLog(body, silent) {
+    const cid = _caseState.cid;
+    if (!cid || !body) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/dunning-pipeline-add-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_id: cid, body }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      if (!silent) window.AgentShared?.showToast?.('Notitie toegevoegd', 'success');
+    } catch (e) {
+      if (!silent) window.AgentShared?.showToast?.('Notitie mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+
+  async function _caseJoostFetchFresh() {
+    const convId = _caseState.chat.convId;
+    if (!convId) {
+      window.AgentShared?.showToast?.('Nog geen gesprek — stuur eerst een herinnering', 'warning');
+      return;
+    }
+    _caseState.joostBusy = true;
+    _caseRender();
+    try {
+      const r = await window.AgentShared.apiFetch('/api/joost-suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: convId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 429) {
+        const wait = Math.max(1, Number(d?.retry_after_seconds) || 30);
+        window.AgentShared?.showToast?.(`Wacht ${wait}s voor een nieuwe suggestie`, 'warning');
+      } else if (r.status === 503) {
+        window.AgentShared?.showToast?.(d?.error || 'Joost niet beschikbaar', 'error');
+      } else if (!r.ok) {
+        throw new Error(d?.error || ('HTTP ' + r.status));
+      } else {
+        // Response bevat { suggestion: {…} }
+        if (d && d.suggestion) {
+          _caseState.suggestion = d.suggestion;
+          _caseState.suggestionAge = 0;
+          window.AgentShared?.showToast?.('Joost heeft een suggestie', 'success');
+        } else {
+          window.AgentShared?.showToast?.('Joost gaf geen suggestie terug', 'warning');
+        }
+      }
+    } catch (e) {
+      window.AgentShared?.showToast?.('Joost mislukt: ' + (e?.message || 'onbekend'), 'error');
+    } finally {
+      _caseState.joostBusy = false;
+      _caseRender();
+    }
+  }
+
+  async function _caseJoostAction(kind) {
+    const convId = _caseState.chat.convId;
+    const s = _caseState.suggestion;
+    if (!s || !convId) return;
+    switch (kind) {
+      case 'send': {
+        // Verstuur suggested_reply 1-op-1. Hergebruikt /api/inbox-send.
+        const body = (s.suggested_reply || '').trim();
+        if (!body) { window.AgentShared?.showToast?.('Lege suggestie — niks te versturen', 'warning'); return; }
+        try {
+          const r = await window.AgentShared.apiFetch('/api/inbox-send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ conversation_id: convId, mode: 'text', body }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+          window.AgentShared?.showToast?.('Suggestie verstuurd', 'success');
+          // Herlaad de chat om het outbound-bericht te tonen. Suggestie
+          // wordt aan de kant gezet — behandeld als "used".
+          _caseState.suggestion = null;
+          await _caseLoadChat(_caseState.cid);
+          _caseRender();
+        } catch (e) {
+          window.AgentShared?.showToast?.('Verzenden mislukt: ' + (e?.message || 'onbekend'), 'error');
+        }
+        break;
+      }
+      case 'edit': {
+        // Simpele prompt-based edit; de gebruiker plakt/wijzigt en stuurt.
+        const edited = window.prompt('Suggestie bewerken en versturen:', s.suggested_reply || '');
+        if (!edited || !edited.trim()) return;
+        try {
+          const r = await window.AgentShared.apiFetch('/api/inbox-send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ conversation_id: convId, mode: 'text', body: edited.trim() }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+          window.AgentShared?.showToast?.('Bewerkte suggestie verstuurd', 'success');
+          _caseState.suggestion = null;
+          await _caseLoadChat(_caseState.cid);
+          _caseRender();
+        } catch (e) {
+          window.AgentShared?.showToast?.('Verzenden mislukt: ' + (e?.message || 'onbekend'), 'error');
+        }
+        break;
+      }
+      case 'arrangement':
+        // Stel regeling voor → navigeer naar Arrangements-sub. In een volgende
+        // stap kan dit direct de propose-wizard openen; voor stap 2 is nav genoeg.
+        closeCaseSheet();
+        setSubView('arrangements');
+        break;
+    }
+  }
+
+  function _caseDaysOverdueFrom(iso) {
+    if (!iso) return null;
+    const d = new Date(String(iso).slice(0, 10) + 'T00:00:00');
+    if (isNaN(d.getTime())) return null;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    return Math.floor((today.getTime() - d.getTime()) / 86400000);
+  }
+  function _caseDueDateText(iso) {
+    const dg = _caseDaysOverdueFrom(iso);
+    if (dg == null) return '';
+    if (dg > 0) return `${dg} dagen te laat`;
+    if (dg === 0) return 'vandaag verlopen';
+    return `over ${-dg} dagen`;
   }
 
   function _incShellHtml() {
