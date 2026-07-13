@@ -188,8 +188,20 @@
       <button class="sr-seg" data-status="declined">Afgewezen</button>
       <button class="sr-seg" data-status="expired">Verlopen</button>
     </div>
+    <!-- Opschoon-banner: telt accepted offertes zonder abo + zonder handmatige
+         afhandeling; opent een modal met bulk-select. RBAC-gated. -->
+    <div id="quotCleanupBanner" style="display:none;margin-bottom:12px;padding:10px 14px;background:var(--bg-elev-2);border:1px solid var(--border);border-radius:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <i class="ti ti-alert-triangle" style="color:#f59e0b"></i>
+      <span style="font-size:13px"><strong id="quotCleanupCount">0</strong> geaccepteerde offertes zonder gekoppeld abo — mogelijk is het abo standalone ingevoerd.</span>
+      <div style="flex:1"></div>
+      <button class="sr-abtn" id="quotCleanupOpen" type="button"><i class="ti ti-broom"></i> Opschonen…</button>
+    </div>
     <div id="quotationsList"><div class="sr-empty">Laden…</div></div>
   </section>
+
+  <!-- Opschoon-modal (bulk markeer afgehandeld) — appended aan body via JS
+       zodra hij nodig is; hier alleen host-plaatshouder voor zichtbaarheid. -->
+  <div id="quotCleanupModal" style="display:none"></div>
 
   <!-- ── Tab: Abonnementen ── -->
   <section class="tab-content" id="tab-subscriptions">
@@ -477,7 +489,7 @@ document.querySelectorAll('.tab').forEach(t => {
     stopQuotationsPolling();
     if (state.tab === 'dashboard') loadDashboard();
     else if (state.tab === 'aanbod') loadAanbod();
-    else if (state.tab === 'quotations') { loadQuotations(); startQuotationsPolling(); }
+    else if (state.tab === 'quotations') { loadQuotations(); loadCleanupPanel(); startQuotationsPolling(); }
     else if (state.tab === 'subscriptions') loadSubscriptions();
     else if (state.tab === 'retentie') loadRetentie();
     else if (state.tab === 'reports') initReportsTab();
@@ -862,6 +874,188 @@ function renderQuotations() {
   document.querySelectorAll('#quotationsList [data-push]').forEach(b => b.addEventListener('click', () => retryPush(b.dataset.push)));
   document.querySelectorAll('#quotationsList [data-delete]').forEach(b => b.addEventListener('click', () => deleteQuotation(b.dataset.delete, b.dataset.status || '')));
   document.querySelectorAll('#quotationsList [data-copy]').forEach(b => b.addEventListener('click', () => copyQuotation(b.dataset.copy)));
+  document.querySelectorAll('#quotationsList [data-mark-done]').forEach(b => b.addEventListener('click', () => markSubscriptionDone(b.dataset.markDone, b.dataset.markDoneTo === 'true')));
+}
+
+// Roept sales-deal-mark-subscription-done aan en refresht de lijst.
+// Idempotent — bij unchanged komt er geen fout, alleen een neutrale toast.
+async function markSubscriptionDone(dealId, done) {
+  if (!dealId) return;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-deal-mark-subscription-done', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deal_id: dealId, done: !!done }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'HTTP ' + res.status);
+    toast(done ? 'Offerte gemarkeerd als afgehandeld' : 'Offerte weer opengezet', 'success');
+    loadQuotations();
+    // Refresh eventueel het opruim-panel + pending-widget als die open staan.
+    if (typeof loadPendingSubs === 'function') { try { loadPendingSubs(); } catch (_) {} }
+    if (typeof loadCleanupPanel === 'function') { try { loadCleanupPanel(); } catch (_) {} }
+  } catch (e) { toast('Actie mislukt: ' + (e?.message || 'onbekend'), 'error'); }
+}
+
+// ─────────────────────────────────────────────────────────────────
+//   Offerte-opschoning: banner + modal met bulk-select.
+//   Data: sales-cleanup-quotations. Bulk-actie: loop over de
+//   sales-deal-mark-subscription-done endpoint (per-item guardrail).
+// ─────────────────────────────────────────────────────────────────
+let _cleanupState = { items: [], selected: new Set(), loading: false };
+
+async function loadCleanupPanel() {
+  const banner = document.getElementById('quotCleanupBanner');
+  const cnt    = document.getElementById('quotCleanupCount');
+  if (!banner || !cnt) return;
+  if (typeof can === 'function' && !can('sales.tab.subscriptions')) { banner.style.display = 'none'; return; }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/sales-cleanup-quotations');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    _cleanupState.items = Array.isArray(d.items) ? d.items : [];
+    _cleanupState.selected.clear();
+    if (_cleanupState.items.length) {
+      cnt.textContent = String(_cleanupState.items.length);
+      banner.style.display = 'flex';
+    } else {
+      banner.style.display = 'none';
+    }
+  } catch (e) {
+    banner.style.display = 'none';
+    console.warn('[cleanup-panel]', e?.message || e);
+  }
+}
+
+function openCleanupModal() {
+  const host = document.getElementById('quotCleanupModal');
+  if (!host) return;
+  host.style.display = 'flex';
+  host.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1200;align-items:center;justify-content:center;padding:20px';
+  host.innerHTML = `
+    <div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;width:min(1000px,100%);max-height:90vh;display:flex;flex-direction:column;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border);gap:10px">
+        <div>
+          <div style="font-size:15px;font-weight:600;color:var(--text)">Offerte-opschoning</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-top:2px">Geaccepteerde offertes zonder gekoppeld abo. Vink af wat je als "afgehandeld" wil markeren — de bestaande abo's van de klant staan ernaast als context.</div>
+        </div>
+        <button class="sr-ibtn" id="quotCleanupClose" type="button" title="Sluiten"><i class="ti ti-x"></i></button>
+      </div>
+      <div id="quotCleanupBody" style="flex:1;overflow-y:auto;padding:14px 18px"></div>
+      <div id="quotCleanupFoot" style="display:flex;justify-content:space-between;align-items:center;padding:12px 18px;border-top:1px solid var(--border);background:var(--bg-elev-2);gap:10px">
+        <div style="font-size:12.5px;color:var(--text-dim)"><strong id="quotCleanupSelCount">0</strong> geselecteerd</div>
+        <div style="display:flex;gap:8px">
+          <button class="sr-abtn" id="quotCleanupCancel" type="button">Sluiten</button>
+          <button class="sr-abtn success" id="quotCleanupBulk" type="button" disabled><i class="ti ti-checkbox"></i> Markeer geselecteerde afgehandeld</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById('quotCleanupClose')?.addEventListener('click', closeCleanupModal);
+  document.getElementById('quotCleanupCancel')?.addEventListener('click', closeCleanupModal);
+  host.addEventListener('click', (e) => { if (e.target === host) closeCleanupModal(); });
+  document.getElementById('quotCleanupBulk')?.addEventListener('click', bulkMarkCleanup);
+  renderCleanupModalBody();
+}
+function closeCleanupModal() {
+  const host = document.getElementById('quotCleanupModal');
+  if (!host) return;
+  host.innerHTML = '';
+  host.style.cssText = 'display:none';
+}
+function renderCleanupModalBody() {
+  const body = document.getElementById('quotCleanupBody');
+  if (!body) return;
+  const items = _cleanupState.items;
+  if (!items.length) {
+    body.innerHTML = '<div class="sr-empty">Niets op te schonen.</div>';
+    return;
+  }
+  const fmtEur = (v) => '€' + (Number(v) || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const rows = items.map((it) => {
+    const subs = it.customer_subscriptions || { count: 0, total_amount: 0, list: [] };
+    const subsTxt = subs.count > 0
+      ? `<strong>${subs.count} abo${subs.count === 1 ? '' : "'s"}</strong> · ${fmtEur(subs.total_amount)}`
+      : '<span style="color:#f87171">geen abo</span>';
+    const subsList = subs.list && subs.list.length
+      ? subs.list.map((s) => `<div style="font-size:11px;color:var(--text-faint)">${esc(s.description)} · ${fmtDate(s.start_date)}${s.end_date ? ' → ' + fmtDate(s.end_date) : ''} · ${fmtEur(s.total_amount)}</div>`).join('')
+      : '';
+    return `<tr>
+      <td style="width:36px"><input type="checkbox" data-cleanup-cb="${esc(it.deal_id)}"></td>
+      <td>
+        <div style="font-weight:600;color:var(--text)">${esc(it.customer_name || '—')}</div>
+        <div style="font-size:11.5px;color:var(--text-faint)">${it.quote_reference ? esc(it.quote_reference) + ' · ' : ''}${fmtDate(it.accepted_at)}</div>
+      </td>
+      <td class="num">${fmtEur(it.total_amount)}</td>
+      <td>${subsTxt}${subsList}</td>
+      <td style="text-align:right">
+        <a class="sr-ibtn" href="/modules/offerte-detail.html?id=${esc(it.deal_id)}" target="_blank" title="Open offerte"><i class="ti ti-external-link"></i></a>
+      </td>
+    </tr>`;
+  }).join('');
+  body.innerHTML = `
+    <div class="sr-tablewrap"><table class="sr-table">
+      <thead><tr>
+        <th style="width:36px"><input type="checkbox" id="quotCleanupAll" title="Selecteer alles"></th>
+        <th>Klant + offerte</th>
+        <th class="num">Bedrag</th>
+        <th>Bestaande abo's van klant</th>
+        <th></th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+  `;
+  document.getElementById('quotCleanupAll')?.addEventListener('change', (e) => {
+    const on = !!e.target.checked;
+    document.querySelectorAll('[data-cleanup-cb]').forEach((cb) => { cb.checked = on; });
+    _cleanupState.selected.clear();
+    if (on) items.forEach((it) => _cleanupState.selected.add(it.deal_id));
+    syncCleanupFooter();
+  });
+  document.querySelectorAll('[data-cleanup-cb]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const id = cb.getAttribute('data-cleanup-cb');
+      if (cb.checked) _cleanupState.selected.add(id);
+      else _cleanupState.selected.delete(id);
+      const all = document.getElementById('quotCleanupAll');
+      if (all) {
+        all.checked = _cleanupState.selected.size === items.length;
+        all.indeterminate = _cleanupState.selected.size > 0 && _cleanupState.selected.size < items.length;
+      }
+      syncCleanupFooter();
+    });
+  });
+  syncCleanupFooter();
+}
+function syncCleanupFooter() {
+  const n = _cleanupState.selected.size;
+  const cnt = document.getElementById('quotCleanupSelCount');
+  const btn = document.getElementById('quotCleanupBulk');
+  if (cnt) cnt.textContent = String(n);
+  if (btn) btn.disabled = n === 0;
+}
+async function bulkMarkCleanup() {
+  const ids = Array.from(_cleanupState.selected);
+  if (!ids.length) return;
+  if (!confirm(`Markeer ${ids.length} offerte(s) als afgehandeld?`)) return;
+  const btn = document.getElementById('quotCleanupBulk');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Bezig…'; }
+  let ok = 0, fail = 0;
+  for (const dealId of ids) {
+    try {
+      const r = await window.AgentShared.apiFetch('/api/sales-deal-mark-subscription-done', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deal_id: dealId, done: true }),
+      });
+      const d = await r.json();
+      if (!r.ok || d.error) throw new Error(d.error || 'HTTP ' + r.status);
+      ok++;
+    } catch (_) { fail++; }
+  }
+  toast(`Klaar: ${ok} gemarkeerd, ${fail} fout.`, fail > 0 ? 'warning' : 'success');
+  closeCleanupModal();
+  loadCleanupPanel();
+  loadQuotations();
 }
 function quotationActions(q) {
   const st = q.tl_quotation_status;
@@ -881,6 +1075,19 @@ function quotationActions(q) {
   // een reeds omgezette abbo kan tonen.
   if (['draft', 'sent', 'failed', 'accepted', 'signed'].includes(st)) items.push(`<button class="sr-menu-item danger" data-delete="${esc(q.deal_id)}" data-status="${esc(st)}"><i class="ti ti-trash"></i> Verwijderen</button>`);
   items.push(`<button class="sr-menu-item" onclick="loadQuotations()"><i class="ti ti-refresh"></i> Status vernieuwen</button>`);
+  // Handmatige "afgehandeld"-vlag voor accepted/signed offertes zonder
+  // gekoppeld abo — voor het opruimen van standalone-abo-cases (klant heeft
+  // z'n abo standalone ingevoerd, offerte blijft anders in "wachten op sub").
+  // Alleen tonen aan wie abo's mag beheren (zelfde gate als de omzet-knop).
+  // Menu-item wisselt tussen "Markeer afgehandeld" en "Weer openzetten"
+  // afhankelijk van de huidige vlag; zichtbaar bij accepted/signed.
+  if ((st === 'accepted' || st === 'signed') && can('sales.tab.subscriptions')) {
+    if (q.subscription_marked_done) {
+      items.push(`<button class="sr-menu-item" data-mark-done="${esc(q.deal_id)}" data-mark-done-to="false"><i class="ti ti-arrow-back-up"></i> Weer openzetten</button>`);
+    } else {
+      items.push(`<button class="sr-menu-item" data-mark-done="${esc(q.deal_id)}" data-mark-done-to="true"><i class="ti ti-checkbox"></i> Markeer afgehandeld</button>`);
+    }
+  }
   if (q.tl_quotation_id) items.push(`<a class="sr-menu-item" href="https://focus.teamleader.eu/quotations/${esc(q.tl_quotation_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>`);
   const dots = `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer acties"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${items.join('')}</div></div>`;
   // primary actie per status
@@ -1301,7 +1508,8 @@ document.querySelectorAll('#quotSegments .sr-seg').forEach(seg => seg.addEventLi
 }));
 document.getElementById('quotEntity').addEventListener('change', () => renderQuotations());
 document.getElementById('quotSeller').addEventListener('change', () => renderQuotations());
-document.getElementById('quotRefresh').addEventListener('click', () => loadQuotations());
+document.getElementById('quotRefresh').addEventListener('click', () => { loadQuotations(); loadCleanupPanel(); });
+document.getElementById('quotCleanupOpen')?.addEventListener('click', openCleanupModal);
 // Ververs ALLE open offertes vanuit Teamleader (webhook-onafhankelijk).
 // POST /api/sales-deal-sync-status { all:true } → per-deal deals.info + veilige
 // smalle update. Toast met #bijgewerkt; daarna lijst herladen.
