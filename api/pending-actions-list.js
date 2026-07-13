@@ -82,15 +82,21 @@ export default async function handler(req, res) {
     // NB: DB-kolommen heten proposed_by_user_id / approved_by_user_id.
     // We mappen ze in de response naar de kortere aliassen proposed_by /
     // approved_by die de UI verwacht (back-compat met arrangement-laag).
+    // Ronde 3 follow-up: sluit is_test-klanten SERVER-SIDE uit zodat items,
+    // total én counts consistent zijn. `customers!inner` maakt van de embed
+    // een inner-join; `.eq('customers.is_test', false)` filtert de rijen weg
+    // waarvan de gekoppelde klant is_test=true is. De client-side vangnet in
+    // finance.html mag blijven staan (defense-in-depth).
     let query = supabaseAdmin
       .from('pending_actions')
       .select(`
         id, customer_id, arrangement_id, action_type, payload, status,
         proposed_by_user_id, approved_by_user_id, approved_at, executed_at, execution_result,
         rejection_reason, scheduled_for, expires_at, created_at, updated_at,
-        customers:customer_id ( id, is_company, company_name, first_name, last_name, email, is_test ),
+        customers!inner:customer_id ( id, is_company, company_name, first_name, last_name, email, is_test ),
         payment_arrangements:arrangement_id ( id, type, status )
       `, { count: 'exact' })
+      .eq('customers.is_test', false)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -144,9 +150,12 @@ export default async function handler(req, res) {
       // Filter customer_id ook hier om de KPI consistent met de huidige view te houden.
       const statusKeys = ['PENDING', 'APPROVED', 'REJECTED', 'EXECUTED', 'FAILED'];
       await Promise.all(statusKeys.map(async (s) => {
+        // Zelfde is_test-uitsluiting als de hoofdquery: inner-join op customers
+        // zodat de counts consistent zijn met de items die de UI toont.
         let cq = supabaseAdmin
           .from('pending_actions')
-          .select('id', { count: 'exact', head: true })
+          .select('id, customers!inner(is_test)', { count: 'exact', head: true })
+          .eq('customers.is_test', false)
           .eq('status', s);
         if (customerId) cq = cq.eq('customer_id', customerId);
         if (actionType) cq = cq.eq('action_type', actionType);
