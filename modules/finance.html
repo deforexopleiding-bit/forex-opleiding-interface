@@ -1373,6 +1373,135 @@
       flex-wrap:wrap;
     }
 
+    /* ======================================================
+       Ronde 2 — Acties (open-acties) + Facturen scoped styling.
+       ====================================================== */
+
+    /* Acties: tabs + type-filter chips + rij-lijst */
+    .wbx .wbx-tabs {
+      display:flex; gap:4px;
+      border-bottom:1px solid var(--wbx-border);
+      margin-bottom:14px;
+    }
+    .wbx .wbx-tabs button {
+      border:0; background:transparent; color:var(--wbx-muted);
+      font-weight:600; font-size:14px; padding:10px 14px;
+      cursor:pointer; border-bottom:2px solid transparent;
+      margin-bottom:-1px; font-family:inherit;
+    }
+    .wbx .wbx-tabs button:hover { color:var(--wbx-ink); }
+    .wbx .wbx-tabs button.active {
+      color:var(--wbx-accent-ink);
+      border-bottom-color:var(--wbx-accent);
+    }
+    .wbx .wbx-tabs button .wbx-c {
+      font:600 11px/1 var(--wbx-mono);
+      background:#E9EBEF; color:var(--wbx-muted);
+      padding:2px 6px; border-radius:999px; margin-left:6px;
+    }
+    .wbx .wbx-tabs button.active .wbx-c {
+      background:var(--wbx-accent-soft); color:var(--wbx-accent-ink);
+    }
+
+    .wbx .wbx-chips { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:14px; }
+    .wbx .wbx-chip {
+      border:1px solid var(--wbx-border); background:#fff;
+      color:var(--wbx-muted); font-weight:500; font-size:13px;
+      padding:6px 12px; border-radius:999px; cursor:pointer;
+      font-family:inherit;
+    }
+    .wbx .wbx-chip.active {
+      background:var(--wbx-ink); color:#fff; border-color:var(--wbx-ink);
+    }
+
+    .wbx .wbx-alist { display:flex; flex-direction:column; gap:8px; }
+    .wbx .wbx-arow {
+      display:flex; align-items:center; gap:14px;
+      background:var(--wbx-surface); border:1px solid var(--wbx-border);
+      border-radius:var(--wbx-radius); padding:12px 16px;
+    }
+    .wbx .wbx-arow .wbx-aic {
+      width:34px; height:34px; border-radius:9px;
+      display:grid; place-items:center;
+      font-size:16px; flex:none;
+    }
+    .wbx .wbx-aic.wbx-verify { background:var(--wbx-s-remind-bg); color:var(--wbx-s-remind-tx); }
+    .wbx .wbx-aic.wbx-plan   { background:var(--wbx-s-plan-bg);   color:var(--wbx-s-plan-tx); }
+    .wbx .wbx-aic.wbx-esc    { background:var(--wbx-s-inc-bg);    color:var(--wbx-s-inc-tx); }
+    .wbx .wbx-arow .wbx-abody { flex:1; min-width:0; }
+    .wbx .wbx-arow .wbx-atitle { font-weight:600; font-size:14px; }
+    .wbx .wbx-arow .wbx-asub {
+      color:var(--wbx-muted); font-size:12.5px; margin-top:1px;
+      overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+    .wbx .wbx-arow .wbx-aage {
+      font:600 12px/1 var(--wbx-mono);
+      color:var(--wbx-faint); flex:none; margin-right:4px;
+    }
+    .wbx .wbx-arow .wbx-abtns { display:flex; gap:8px; flex:none; }
+
+    .wbx .wbx-tag {
+      display:inline-block; font-size:11px; font-weight:600;
+      padding:3px 9px; border-radius:999px;
+    }
+    .wbx .wbx-tag.wbx-ok { background:var(--wbx-ok-bg); color:var(--wbx-ok-tx); }
+    .wbx .wbx-tag.wbx-no { background:var(--wbx-no-bg); color:var(--wbx-no-tx); }
+
+    /* Facturen: status-strip + toolbar + tabel */
+    .wbx .wbx-strip {
+      display:flex; gap:9px; flex-wrap:wrap; margin-bottom:16px;
+    }
+    .wbx .wbx-strip button {
+      border:1px solid var(--wbx-border); background:#fff;
+      border-radius:12px; padding:11px 15px; cursor:pointer;
+      text-align:left; min-width:118px; font-family:inherit;
+    }
+    .wbx .wbx-strip button:hover { border-color:var(--wbx-border-strong); }
+    .wbx .wbx-strip button.active {
+      border-color:var(--wbx-ink);
+      box-shadow:0 0 0 1px var(--wbx-ink);
+    }
+    .wbx .wbx-strip .wbx-strip-n { font:600 20px/1 var(--wbx-mono); display:block; }
+    .wbx .wbx-strip .wbx-strip-l {
+      display:block; font-size:12px; color:var(--wbx-muted);
+      margin-top:5px; font-weight:500;
+    }
+    .wbx .wbx-strip .wbx-strip-dot {
+      display:inline-block; width:8px; height:8px; border-radius:50%;
+      margin-right:6px; vertical-align:1px;
+    }
+
+    .wbx .wbx-toolbar {
+      display:flex; align-items:center; gap:12px;
+      flex-wrap:wrap; margin-bottom:13px;
+    }
+    .wbx .wbx-toolbar .wbx-flex1 { flex:1; }
+
+    .wbx .wbx-table {
+      width:100%; border-collapse:separate; border-spacing:0;
+      background:#fff; border:1px solid var(--wbx-border);
+      border-radius:var(--wbx-radius); overflow:hidden;
+    }
+    .wbx .wbx-table thead th {
+      text-align:left; font-size:11px; letter-spacing:.05em;
+      text-transform:uppercase; color:var(--wbx-faint); font-weight:600;
+      padding:12px 16px; background:#FAFBFC;
+      border-bottom:1px solid var(--wbx-border);
+    }
+    .wbx .wbx-table th.wbx-r, .wbx .wbx-table td.wbx-r { text-align:right; }
+    .wbx .wbx-table tbody td {
+      padding:13px 16px; border-bottom:1px solid var(--wbx-border);
+      font-size:14px;
+    }
+    .wbx .wbx-table tbody tr:last-child td { border-bottom:0; }
+    .wbx .wbx-table tbody tr { cursor:pointer; }
+    .wbx .wbx-table tbody tr:hover td { background:#FAFBFC; }
+    .wbx .wbx-table td.wbx-mono { font-family:var(--wbx-mono); font-weight:600; }
+    .wbx .wbx-sub-inv {
+      color:var(--wbx-faint);
+      font:500 12px/1.3 var(--wbx-mono);
+    }
+
     /* Toast */
     .wbx-toast {
       position:fixed; bottom:22px; left:50%; transform:translateX(-50%);
@@ -3960,15 +4089,317 @@
       host.innerHTML = '<div style="padding:20px;color:var(--text-faint);font-size:13px">Open Acties module wordt geladen…</div>';
       return;
     }
-    // Default status uit URL param ?status= (backward-compat met legacy
-    // /modules/open-acties.html?status=PENDING redirector).
+    // Ronde 2: mount de nieuwe .wbx-huid render (bypassed FinanceTasks-module).
+    // Bestaande /api/pending-actions-list, /api/pending-actions-approve en
+    // /api/pending-actions-reject blijven het contract. is_test-klanten worden
+    // uitgesloten (zelfde regel als Te doen-acties-count).
     let statusFilter = 'PENDING';
     try {
       const params = new URLSearchParams(window.location.search);
       const s = params.get('status');
       if (s && ['PENDING','APPROVED','EXECUTED','FAILED'].includes(s)) statusFilter = s;
     } catch (_) {}
-    window.FinanceTasks.mount({ host, statusFilter });
+    mountActiesWbx(host, statusFilter);
+  }
+
+  // ── Ronde 2: Acties in .wbx-huid ─────────────────────────────────────
+  // Prototype-structuur: tabs (Te doen / Afgehandeld / Afgewezen) + type-
+  // filter chips (Alle / Betaalcontroles / Regelingen / Escalaties) + rij-
+  // lijst met .wbx-arow. Detail-modal is buiten scope in deze ronde — klik
+  // op een rij opent (voor nu) simpelweg niets (approve/reject-knoppen
+  // doen wel hun werk direct). Meer complexe flows leunen op de bestaande
+  // Meer ▾ → Open Acties diepere flow tot Ronde 3 een dossier-view maakt.
+  const _acWbxState = {
+    tab      : 'open',   // 'open' | 'done' | 'rej'
+    filter   : 'all',    // 'all' | 'verify' | 'plan' | 'esc'
+    loading  : false,
+    error    : null,
+    items    : [],
+    counts   : { open: 0, done: 0, rej: 0, verify: 0, plan: 0, esc: 0 },
+  };
+
+  function mountActiesWbx(host, statusFilterFromUrl) {
+    if (!host) return;
+    // .wbx wrapper zit al op #view-wanbetalers, de host staat daarbinnen —
+    // dus alle .wbx-* classes pakken automatisch.
+    if (statusFilterFromUrl === 'REJECTED') _acWbxState.tab = 'rej';
+    else if (statusFilterFromUrl === 'APPROVED' || statusFilterFromUrl === 'EXECUTED') _acWbxState.tab = 'done';
+    else _acWbxState.tab = 'open';
+
+    host.innerHTML = _acWbxShellHtml();
+    _acWbxWire();
+    _acWbxLoad();
+  }
+
+  function _acWbxShellHtml() {
+    return `
+      <div class="wbx-page-head">
+        <h1>Acties</h1>
+        <p>Alle acties met filters en historie. Werk de "Te doen"-tab leeg; wat je afhandelt of afwijst schuift naar de andere tabs.</p>
+      </div>
+      <div class="wbx-tabs" id="acWbxTabs">
+        <button class="active" type="button" data-actab="open">Te doen <span class="wbx-c" data-actab-c="open">0</span></button>
+        <button              type="button" data-actab="done">Afgehandeld <span class="wbx-c" data-actab-c="done">0</span></button>
+        <button              type="button" data-actab="rej">Afgewezen <span class="wbx-c" data-actab-c="rej">0</span></button>
+      </div>
+      <div class="wbx-chips" id="acWbxChips">
+        <button class="wbx-chip active" type="button" data-acfilt="all">Alle types</button>
+        <button class="wbx-chip"        type="button" data-acfilt="verify">Betaalcontroles</button>
+        <button class="wbx-chip"        type="button" data-acfilt="plan">Regelingen</button>
+        <button class="wbx-chip"        type="button" data-acfilt="esc">Escalaties</button>
+      </div>
+      <div class="wbx-alist" id="acWbxList"></div>
+    `;
+  }
+
+  function _acWbxWire() {
+    document.querySelectorAll('#acWbxTabs [data-actab]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        _acWbxState.tab = btn.dataset.actab || 'open';
+        document.querySelectorAll('#acWbxTabs [data-actab]').forEach((b) => {
+          b.classList.toggle('active', b.dataset.actab === _acWbxState.tab);
+        });
+        _acWbxLoad();
+      });
+    });
+    document.querySelectorAll('#acWbxChips [data-acfilt]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        _acWbxState.filter = btn.dataset.acfilt || 'all';
+        document.querySelectorAll('#acWbxChips [data-acfilt]').forEach((b) => {
+          b.classList.toggle('active', b.dataset.acfilt === _acWbxState.filter);
+        });
+        _acWbxRenderList();
+      });
+    });
+  }
+
+  // Map tab → status-lijst. Afgehandeld = EXECUTED + APPROVED. Afgewezen =
+  // REJECTED + FAILED + CANCELLED (alles wat "definitief niet meer open" is
+  // maar geen positief resultaat had).
+  function _acWbxStatusesFor(tab) {
+    if (tab === 'done') return ['EXECUTED', 'APPROVED'];
+    if (tab === 'rej')  return ['REJECTED', 'FAILED', 'CANCELLED'];
+    return ['PENDING'];
+  }
+  function _acWbxCategoryFor(actionType) {
+    const t = String(actionType || '');
+    if (t === 'MANUAL_VERIFY_PAYMENT') return 'verify';
+    if (t === 'MANUAL_ESCALATION')      return 'esc';
+    // TL_INVOICE_UPDATE_DUE / TL_INVOICE_SPLIT / TL_SUBSCRIPTION_PAUSE /
+    // TL_SUBSCRIPTION_STOP / TL_INVOICE_WRITEOFF / MANUAL_PROPOSE_* /
+    // MANUAL_FOLLOWUP → regelingen-bucket.
+    return 'plan';
+  }
+  const _AC_WBX_TYPE_META = {
+    verify: { ic: '💶', cls: 'wbx-verify', label: 'Betaalcontrole' },
+    plan  : { ic: '📅', cls: 'wbx-plan',   label: 'Regeling'      },
+    esc   : { ic: '⚠️', cls: 'wbx-esc',    label: 'Escalatie'     },
+  };
+
+  async function _acWbxLoad() {
+    _acWbxState.loading = true;
+    _acWbxState.error = null;
+    _acWbxRenderList();
+    try {
+      // Voor de teller-badges op de 3 tabs hebben we per tab de count nodig —
+      // we halen ALLE items van deze tab op (limit 200) en tellen client-side.
+      // De 'open'-tab (PENDING) is bijna altijd < 100 items; 'done' en 'rej'
+      // groeien over tijd — als volume-issue dan later paginate.
+      const statuses = _acWbxStatusesFor(_acWbxState.tab);
+      const results = await Promise.all(statuses.map(async (st) => {
+        const r = await window.AgentShared.apiFetch('/api/pending-actions-list?status=' + encodeURIComponent(st) + '&limit=200');
+        if (!r.ok) return [];
+        const d = await r.json().catch(() => ({}));
+        return Array.isArray(d?.items) ? d.items : [];
+      }));
+      const items = [].concat(...results).filter((it) => !it?.customer?.is_test);
+      _acWbxState.items = items;
+      _acWbxUpdateAllCounts();
+    } catch (e) {
+      _acWbxState.error = e?.message || String(e);
+    } finally {
+      _acWbxState.loading = false;
+      _acWbxRenderList();
+    }
+  }
+
+  // Update alle tab-tellers (PENDING / EXECUTED+APPROVED / REJECTED+FAILED+CANCELLED)
+  // via lichte separate count-calls op /api/pending-actions-list (die geeft
+  // 'counts' terug in response).
+  async function _acWbxUpdateAllCounts() {
+    try {
+      // Alleen 1 lichte call: fetch alle recent PENDING+APPROVED+EXECUTED etc.
+      // is duur. In plaats daarvan: haal counts per status via ?status=X&limit=1
+      // en gebruik de 'total' uit response.
+      const [open, exec, appr, rej, fail, canc] = await Promise.all([
+        _acWbxCountFor('PENDING'),
+        _acWbxCountFor('EXECUTED'),
+        _acWbxCountFor('APPROVED'),
+        _acWbxCountFor('REJECTED'),
+        _acWbxCountFor('FAILED'),
+        _acWbxCountFor('CANCELLED'),
+      ]);
+      _acWbxState.counts.open = open;
+      _acWbxState.counts.done = exec + appr;
+      _acWbxState.counts.rej  = rej + fail + canc;
+      _acWbxApplyTabCounts();
+    } catch (_) { /* fail-soft */ }
+  }
+  async function _acWbxCountFor(status) {
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-list?status=' + encodeURIComponent(status) + '&limit=1');
+      if (!r.ok) return 0;
+      const d = await r.json().catch(() => ({}));
+      return Number(d?.total) || 0;
+    } catch (_) { return 0; }
+  }
+  function _acWbxApplyTabCounts() {
+    const c = _acWbxState.counts;
+    document.querySelectorAll('[data-actab-c]').forEach((el) => {
+      const k = el.dataset.actabC;
+      if (k === 'open') el.textContent = String(c.open || 0);
+      if (k === 'done') el.textContent = String(c.done || 0);
+      if (k === 'rej')  el.textContent = String(c.rej  || 0);
+    });
+  }
+
+  function _acWbxRenderList() {
+    const list = document.getElementById('acWbxList');
+    if (!list) return;
+
+    if (_acWbxState.loading) {
+      list.innerHTML = `<div class="wbx-empty"><h3>Laden…</h3></div>`;
+      return;
+    }
+    if (_acWbxState.error) {
+      list.innerHTML = `<div class="wbx-empty" style="color:var(--wbx-s-inc-tx)"><h3>Fout</h3>${esc(_acWbxState.error)}</div>`;
+      return;
+    }
+
+    // Client-side type-filter.
+    let items = _acWbxState.items.slice();
+    if (_acWbxState.filter !== 'all') {
+      items = items.filter((it) => _acWbxCategoryFor(it.action_type) === _acWbxState.filter);
+    }
+
+    // Sort: nieuwste eerst voor open, oudste eerst voor done/rej (historie).
+    items.sort((a, b) => {
+      const ta = new Date(a?.created_at || 0).getTime();
+      const tb = new Date(b?.created_at || 0).getTime();
+      return _acWbxState.tab === 'open' ? (tb - ta) : (ta - tb);
+    });
+
+    if (items.length === 0) {
+      const msg = _acWbxState.tab === 'open' ? 'Niks te doen — top.' : 'Nog niets hier.';
+      list.innerHTML = `<div class="wbx-empty"><div class="wbx-big">✓</div><h3>${esc(msg)}</h3></div>`;
+      return;
+    }
+
+    list.innerHTML = items.map((it) => _acWbxRowHtml(it)).join('');
+
+    // Bind approve/reject-knoppen.
+    list.querySelectorAll('[data-ac-approve]').forEach((btn) => {
+      btn.addEventListener('click', () => _acWbxDoApprove(btn.getAttribute('data-ac-approve')));
+    });
+    list.querySelectorAll('[data-ac-reject]').forEach((btn) => {
+      btn.addEventListener('click', () => _acWbxDoReject(btn.getAttribute('data-ac-reject')));
+    });
+  }
+
+  function _acWbxAgeText(it) {
+    if (!it?.created_at) return '';
+    const diffMs = Date.now() - new Date(it.created_at).getTime();
+    const days = Math.max(0, Math.floor(diffMs / 86400000));
+    return days + ' dg';
+  }
+  function _acWbxSubtitle(it) {
+    const cust = it?.customer?.name || '(onbekende klant)';
+    const payload = it?.payload || {};
+    // Bekende payload-samenvattingen per type — best-effort.
+    if (it.action_type === 'MANUAL_VERIFY_PAYMENT') {
+      const amt = payload.claimed_amount ? '€ ' + Number(payload.claimed_amount).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+      const inv = payload.invoice_number || '';
+      const parts = ['Claim'];
+      if (amt) parts.push(amt);
+      if (inv) parts.push('factuur ' + inv);
+      return parts.join(' · ');
+    }
+    if (it.action_type === 'MANUAL_ESCALATION') {
+      return payload.reason || payload.context_summary || 'Escalatie';
+    }
+    if (String(it.action_type || '').startsWith('TL_')) {
+      const arr = it.arrangement;
+      if (arr) return 'Regeling · ' + esc(arr.type || arr.id?.slice?.(0, 8) || '');
+      return 'Regeling';
+    }
+    return cust;
+  }
+  function _acWbxRowHtml(it) {
+    const cat = _acWbxCategoryFor(it.action_type);
+    const meta = _AC_WBX_TYPE_META[cat] || _AC_WBX_TYPE_META.plan;
+    const cust = it?.customer?.name || '(onbekende klant)';
+    const sub  = _acWbxSubtitle(it);
+    const age  = _acWbxAgeText(it);
+    let right;
+    if (_acWbxState.tab === 'open') {
+      const primaryLbl = cat === 'esc' ? 'Oppakken' : 'Goedkeuren';
+      right = `
+        <span class="wbx-aage">${esc(age)}</span>
+        <div class="wbx-abtns">
+          <button class="wbx-btn wbx-primary wbx-sm" type="button" data-ac-approve="${esc(it.id)}">${primaryLbl}</button>
+          <button class="wbx-btn wbx-sm wbx-danger" type="button" data-ac-reject="${esc(it.id)}">Afwijzen</button>
+        </div>
+      `;
+    } else if (_acWbxState.tab === 'done') {
+      right = `<span class="wbx-tag wbx-ok">Afgehandeld</span>`;
+    } else {
+      right = `<span class="wbx-tag wbx-no">Afgewezen</span>`;
+    }
+    return `
+      <div class="wbx-arow" data-ac-id="${esc(it.id)}">
+        <div class="wbx-aic ${meta.cls}">${meta.ic}</div>
+        <div class="wbx-abody">
+          <div class="wbx-atitle">${esc(meta.label)} — ${esc(cust)}</div>
+          <div class="wbx-asub">${esc(sub)}</div>
+        </div>
+        ${right}
+      </div>
+    `;
+  }
+
+  async function _acWbxDoApprove(id) {
+    if (!id) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast?.('Goedgekeurd', 'success');
+      _acWbxLoad(); // herlaad huidige tab
+    } catch (e) {
+      window.AgentShared?.showToast?.('Goedkeuren mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+  async function _acWbxDoReject(id) {
+    if (!id) return;
+    const reason = window.prompt('Reden om af te wijzen (verplicht):', '');
+    if (!reason || !reason.trim()) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-reject', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, reason: reason.trim() }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast?.('Afgewezen', 'success');
+      _acWbxLoad();
+    } catch (e) {
+      window.AgentShared?.showToast?.('Afwijzen mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
   }
 
   // Activeer een specifieke sub binnen view-dunning's dunningSubNav. Triggert
@@ -13842,42 +14273,29 @@
     loadFacturen();
   }
 
+  // Ronde 2: Facturen-shell herbouwd naar .wbx-huid — prototype-tabel-stijl
+  // met status-strip (fase-tellers), segmented Per factuur / Per klant, en
+  // .wbx-table met mono bedragen/dagen. Data + logica ongewijzigd.
   function _fcShellHtml() {
     return `
-      <div class="wb-wrap">
-        <div class="wb-header">
-          <div>
-            <h2>Facturen</h2>
-            <p class="wb-subtitle">Alle open, te-late facturen. Wissel tussen weergave per factuur of per klant, en filter op fase of achterstand.</p>
-          </div>
-          <button class="sr-ibtn" id="fcRefreshBtn" type="button" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
-        </div>
-
-        <div class="wb-kpis" id="fcKpis"></div>
-
-        <div class="wb-toolbar">
-          <div class="sr-segments wb-viewseg">
-            <button class="sr-seg active" data-fc-view="invoice"  type="button"><i class="ti ti-file-invoice"></i> Per factuur</button>
-            <button class="sr-seg"        data-fc-view="customer" type="button"><i class="ti ti-users"></i> Per klant</button>
-          </div>
-          <div class="wb-toolbar-right">
-            <select id="fcStageSel" class="fin-input" title="Fase-filter">
-              <option value="">Alle fases</option>
-              <option value="nieuw">Nieuw</option>
-              <option value="aangemaand">Aangemaand</option>
-              <option value="in_gesprek">In gesprek</option>
-              <option value="regeling">Regeling</option>
-              <option value="brief_verstuurd">Brief verstuurd</option>
-            </select>
-            <label class="wb-toggle-lbl">
-              <input type="checkbox" id="fcBacklogChk" /> Alleen achterstand (≥2)
-            </label>
-          </div>
-        </div>
-
-        <div id="fcBody"></div>
-        <div id="fcMeta" class="wb-meta"></div>
+      <div class="wbx-page-head">
+        <h1>Facturen</h1>
+        <p>Je volledige overzicht. Zie in één blik hoeveel facturen in welke fase staan, filter erop, en wissel tussen per factuur of per klant.</p>
       </div>
+      <div class="wbx-strip" id="fcStrip"></div>
+      <div class="wbx-toolbar">
+        <div class="wbx-seg">
+          <button class="active" data-fc-view="invoice"  type="button">Per factuur</button>
+          <button              data-fc-view="customer" type="button">Per klant</button>
+        </div>
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--wbx-muted)">
+          <input type="checkbox" id="fcBacklogChk" style="accent-color:var(--wbx-accent)"> Alleen achterstand (≥2)
+        </label>
+        <div class="wbx-flex1"></div>
+        <span style="color:var(--wbx-muted);font-size:13px" id="fcCount"></span>
+      </div>
+      <div id="fcBody"></div>
+      <div id="fcMeta" style="font-size:11px;color:var(--wbx-faint);text-align:right;margin-top:8px"></div>
     `;
   }
 
@@ -13948,7 +14366,7 @@
   }
 
   function _fcWireShell() {
-    document.getElementById('fcRefreshBtn')?.addEventListener('click', loadFacturen);
+    // Toggle Per factuur / Per klant (.wbx-seg).
     document.querySelectorAll('[data-fc-view]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const v = btn.getAttribute('data-fc-view');
@@ -13960,13 +14378,43 @@
         _fcRenderBody();
       });
     });
-    document.getElementById('fcStageSel')?.addEventListener('change', (e) => {
-      _fcState.stage = String(e.target.value || '');
-      loadFacturen();
-    });
     document.getElementById('fcBacklogChk')?.addEventListener('change', (e) => {
       _fcState.backlog = !!e.target.checked;
       loadFacturen();
+    });
+  }
+
+  // Status-strip helper — klikbare fase-tellers incl. Achterstand (backlog).
+  // Filter-gedrag: klik zet _fcState.stage (of achterstand) en triggert
+  // loadFacturen(). "Alles" resets beide.
+  function _fcStripHtml(totals) {
+    const t = totals || {};
+    const byStage = t.by_stage || null;
+    const items = [
+      { key: 'all',              label: 'Alles',           n: t.invoices || 0,           dot: '#66717F' },
+      { key: 'nieuw',            label: 'Nieuw te laat',    n: (byStage?.nieuw) || 0,     dot: '#986412' },
+      { key: 'aangemaand',       label: 'Aangemaand',       n: (byStage?.aangemaand) || 0, dot: '#2B5FA8' },
+      { key: 'in_gesprek',       label: 'In gesprek',       n: (byStage?.in_gesprek) || 0, dot: '#0A5A4E' },
+      { key: 'regeling',         label: 'Regeling',         n: (byStage?.regeling) || 0,   dot: '#5B44A8' },
+      { key: 'backlog',          label: 'Achterstand',      n: t.backlog_customers || 0,   dot: '#B24A2E' },
+    ];
+    const active = _fcState.backlog ? 'backlog' : (_fcState.stage || 'all');
+    return items.map((it) => {
+      const cls = (it.key === active) ? 'active' : '';
+      return `<button class="${cls}" type="button" data-fc-strip="${esc(it.key)}"><span class="wbx-strip-n">${it.n}</span><span class="wbx-strip-l"><span class="wbx-strip-dot" style="background:${it.dot}"></span>${esc(it.label)}</span></button>`;
+    }).join('');
+  }
+  function _fcWireStrip() {
+    document.querySelectorAll('#fcStrip [data-fc-strip]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const k = btn.getAttribute('data-fc-strip');
+        if (k === 'all')          { _fcState.stage = '';    _fcState.backlog = false; }
+        else if (k === 'backlog') { _fcState.stage = '';    _fcState.backlog = true;  }
+        else                      { _fcState.stage = k;     _fcState.backlog = false; }
+        const chk = document.getElementById('fcBacklogChk');
+        if (chk) chk.checked = _fcState.backlog;
+        loadFacturen();
+      });
     });
   }
 
@@ -13995,45 +14443,73 @@
   }
 
   function _fcRenderBody() {
-    const body = document.getElementById('fcBody');
-    const kpis = document.getElementById('fcKpis');
-    const meta = document.getElementById('fcMeta');
+    const body  = document.getElementById('fcBody');
+    const strip = document.getElementById('fcStrip');
+    const cnt   = document.getElementById('fcCount');
+    const meta  = document.getElementById('fcMeta');
     if (!body) return;
+
     if (_fcState.loading) {
-      body.innerHTML = '<div class="fc-empty">Laden…</div>';
-      if (kpis) kpis.innerHTML = '';
-      if (meta) meta.textContent = '';
+      body.innerHTML = `<div class="wbx-empty"><h3>Laden…</h3></div>`;
+      if (strip) strip.innerHTML = '';
+      if (cnt)   cnt.textContent = '';
+      if (meta)  meta.textContent = '';
       return;
     }
     if (_fcState.error) {
-      body.innerHTML = `<div class="fc-empty" style="color:#dc2626">Fout: ${esc(_fcState.error)}</div>`;
-      if (kpis) kpis.innerHTML = '';
+      body.innerHTML = `<div class="wbx-empty" style="color:var(--wbx-s-inc-tx)"><h3>Fout</h3>${esc(_fcState.error)}</div>`;
+      if (strip) strip.innerHTML = '';
       return;
     }
     const d = _fcState.data || { by_invoice: [], by_customer: [], totals: {} };
     const t = d.totals || {};
 
-    if (kpis) kpis.innerHTML = `
-      <div class="wb-kpi"><div class="wb-kpi-label">Klanten</div><div class="wb-kpi-val">${t.customers || 0}</div></div>
-      <div class="wb-kpi"><div class="wb-kpi-label">Open facturen</div><div class="wb-kpi-val">${t.invoices || 0}</div></div>
-      <div class="wb-kpi"><div class="wb-kpi-label">Totaal open</div><div class="wb-kpi-val">${_tdFmtEurCents(t.total_open_cents || 0)}</div></div>
-      <div class="wb-kpi"><div class="wb-kpi-label">Met achterstand</div><div class="wb-kpi-val" style="color:#dc2626">${t.backlog_customers || 0}</div></div>
-    `;
+    // Status-strip met fase-tellers + Achterstand.
+    if (strip) {
+      strip.innerHTML = _fcStripHtml(t);
+      _fcWireStrip();
+    }
 
     if (_fcState.view === 'invoice') {
       const list = Array.isArray(d.by_invoice) ? d.by_invoice : [];
+      if (cnt) cnt.textContent = list.length + ' factu' + (list.length === 1 ? 'ur' : 'ren');
       if (list.length === 0) {
-        body.innerHTML = `<div class="fc-empty"><strong>Geen te-late facturen.</strong>Alle open facturen zijn binnen hun vervaldatum.</div>`;
+        body.innerHTML = `<div class="wbx-empty"><h3>Geen te-late facturen</h3>Alle open facturen zijn binnen hun vervaldatum.</div>`;
       } else {
-        body.innerHTML = '<div class="fc-list">' + list.map(_fcInvRowHtml).join('') + '</div>';
+        body.innerHTML = `
+          <table class="wbx-table" id="fcTable">
+            <thead>
+              <tr>
+                <th>Klant</th>
+                <th>Factuur</th>
+                <th class="wbx-r">Bedrag</th>
+                <th class="wbx-r">Te laat</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>${list.map(_fcInvRowHtml).join('')}</tbody>
+          </table>`;
         _fcWireInvoiceRows(list);
       }
     } else {
       const list = Array.isArray(d.by_customer) ? d.by_customer : [];
+      if (cnt) cnt.textContent = list.length + ' klant' + (list.length === 1 ? '' : 'en');
       if (list.length === 0) {
-        body.innerHTML = `<div class="fc-empty"><strong>Geen klanten met open facturen.</strong>Alles is netjes betaald.</div>`;
+        body.innerHTML = `<div class="wbx-empty"><h3>Geen klanten met open facturen</h3>Alles is netjes betaald.</div>`;
       } else {
-        body.innerHTML = '<div class="fc-list">' + list.map(_fcCustRowHtml).join('') + '</div>';
+        body.innerHTML = `
+          <table class="wbx-table" id="fcTable">
+            <thead>
+              <tr>
+                <th>Klant</th>
+                <th class="wbx-r">Open facturen</th>
+                <th class="wbx-r">Totaal open</th>
+                <th class="wbx-r">Oudste</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>${list.map(_fcCustRowHtml).join('')}</tbody>
+          </table>`;
         _fcWireCustRows(list);
       }
     }
@@ -14044,47 +14520,48 @@
     }
   }
 
+  // Map slug → prototype pill-class (hergebruik uit Ronde 1).
+  function _fcPillFor(slug, backlog) {
+    if (backlog) return { cls: 'wbx-p-back', label: 'Achterstand' };
+    const s = String(slug || 'nieuw').toLowerCase();
+    if (s === 'nieuw')           return { cls: 'wbx-p-new',    label: 'Nieuw te laat' };
+    if (s === 'aangemaand')      return { cls: 'wbx-p-remind', label: 'Aangemaand' };
+    if (s === 'brief_verstuurd') return { cls: 'wbx-p-remind', label: 'Brief verstuurd' };
+    if (s === 'in_gesprek')      return { cls: 'wbx-p-talk',   label: 'In gesprek' };
+    if (s === 'regeling')        return { cls: 'wbx-p-plan',   label: 'Regeling' };
+    if (s === 'incasso')         return { cls: 'wbx-p-inc',    label: 'Incasso' };
+    if (s === 'opgelost')        return { cls: 'wbx-p-paid',   label: 'Betaald' };
+    if (s === 'afschrijven')     return { cls: 'wbx-p-back',   label: 'Afgeschreven' };
+    return { cls: 'wbx-p-new', label: 'Nieuw te laat' };
+  }
+
   function _fcInvRowHtml(r) {
-    const stageClass = 'stage-' + String(r.stage_slug || 'nieuw').toLowerCase();
-    const stageLabel = _tdStageLabel(r.stage_slug);
-    const backlog = r.has_backlog ? `<span class="wb-pill backlog" title="Klant heeft ≥2 open facturen">Achterstand</span>` : '';
+    const pill = _fcPillFor(r.stage_slug, r.has_backlog);
     return `
-      <div class="fc-row" data-cid="${esc(r.customer_id)}" data-invid="${esc(r.invoice_id || '')}" data-days="${esc(r.days_overdue)}" data-invnr="${esc(r.invoice_number || '')}">
-        <div class="fc-cust">
-          <div class="fc-cust-name">${esc(r.customer_name || '—')} ${backlog}</div>
-          <div class="fc-cust-sub">Verval ${esc(r.due_date || '—')}</div>
-        </div>
-        <div class="fc-invcell">
-          <div class="fc-invcell-nr">${esc(r.invoice_number || String(r.invoice_id || '').slice(0, 8))}</div>
-        </div>
-        <div class="fc-num">${_tdFmtEurCents(r.open_amount_cents)}</div>
-        <div class="fc-days">${r.days_overdue} dg</div>
-        <div><span class="wb-pill ${stageClass}">${esc(stageLabel)}</span></div>
-      </div>
+      <tr data-cid="${esc(r.customer_id)}" data-invid="${esc(r.invoice_id || '')}" data-days="${esc(r.days_overdue)}" data-invnr="${esc(r.invoice_number || '')}">
+        <td>${esc(r.customer_name || '—')}</td>
+        <td class="wbx-mono wbx-sub-inv">${esc(r.invoice_number || String(r.invoice_id || '').slice(0, 8))}</td>
+        <td class="wbx-mono wbx-r">${_tdFmtEurCents(r.open_amount_cents)}</td>
+        <td class="wbx-mono wbx-r">${r.days_overdue} d</td>
+        <td><span class="wbx-pill ${pill.cls}">${esc(pill.label)}</span></td>
+      </tr>
     `;
   }
   function _fcCustRowHtml(r) {
-    const stageClass = 'stage-' + String(r.stage_slug || 'nieuw').toLowerCase();
-    const stageLabel = _tdStageLabel(r.stage_slug);
-    const statusPill = r.has_backlog
-      ? `<span class="wb-pill backlog">Achterstand</span>`
-      : `<span class="wb-pill ${stageClass}">${esc(stageLabel)}</span>`;
-    const oldest = (Number(r.oldest_days_overdue) > 0) ? `${r.oldest_days_overdue} dg` : '—';
+    const pill = _fcPillFor(r.stage_slug, r.has_backlog);
+    const oldest = (Number(r.oldest_days_overdue) > 0) ? `${r.oldest_days_overdue} d` : '—';
     return `
-      <div class="fc-row fc-row-customer" data-cid="${esc(r.customer_id)}">
-        <div class="fc-cust">
-          <div class="fc-cust-name">${esc(r.customer_name || '—')}</div>
-          <div class="fc-cust-sub">Oudste verval ${esc(r.oldest_due_date || '—')}</div>
-        </div>
-        <div class="fc-num">${r.open_invoice_count}</div>
-        <div class="fc-num">${_tdFmtEurCents(r.total_open_cents)}</div>
-        <div class="fc-days">${oldest}</div>
-        <div>${statusPill}</div>
-      </div>
+      <tr data-cid="${esc(r.customer_id)}">
+        <td>${esc(r.customer_name || '—')}</td>
+        <td class="wbx-mono wbx-r">${r.open_invoice_count}</td>
+        <td class="wbx-mono wbx-r">${_tdFmtEurCents(r.total_open_cents)}</td>
+        <td class="wbx-mono wbx-r">${esc(oldest)}</td>
+        <td><span class="wbx-pill ${pill.cls}">${esc(pill.label)}</span></td>
+      </tr>
     `;
   }
   function _fcWireInvoiceRows(list) {
-    document.querySelectorAll('#fcBody .fc-row[data-cid]').forEach((row) => {
+    document.querySelectorAll('#fcTable tbody tr[data-cid]').forEach((row) => {
       row.addEventListener('click', () => {
         const cid = row.dataset.cid;
         if (!cid) return;
@@ -14097,7 +14574,7 @@
     });
   }
   function _fcWireCustRows(list) {
-    document.querySelectorAll('#fcBody .fc-row[data-cid]').forEach((row) => {
+    document.querySelectorAll('#fcTable tbody tr[data-cid]').forEach((row) => {
       row.addEventListener('click', () => {
         const cid = row.dataset.cid;
         if (cid) openCaseSheet(cid);
