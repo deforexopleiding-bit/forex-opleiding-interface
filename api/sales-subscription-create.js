@@ -23,6 +23,38 @@ import { createTlInvoice } from './_lib/invoice-create-core.js';
 // naar app_settings verhuizen zonder API-shape wijziging.
 const RESERVATION_FEE_INCL = 100;
 
+// Server-side spiegel van _daysBetweenTodayAnd() in modules/sales-wizard.html
+// (regel 1604-1612). Exact zelfde formule (Date.UTC + Math.round op /86400000)
+// zodat de late-start-guard hieronder 1-op-1 dezelfde uitkomst geeft als de
+// wizard-UI voor identieke input. Returnt null bij onbekend/misvormd formaat.
+function _daysBetweenTodayAnd(dateIso) {
+  const s = String(dateIso || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const [y, m, d] = s.split('-').map(Number);
+  const target = Date.UTC(y, m - 1, d);
+  const now    = new Date();
+  const today  = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.round((target - today) / 86400000);
+}
+
+// Haal de late-start-drempel uit app_settings (sales_max_start_days). De
+// waarde-shape in app_settings varieert historisch (raw number, string, of
+// jsonb { days: N }); alle drie ondersteunen we. Fallback 40 als de key
+// ontbreekt of niet-parseerbaar is — zelfde default als de wizard-UI.
+async function _resolveMaxStartDays(admin) {
+  try {
+    const { data: setting } = await admin.from('app_settings')
+      .select('value').eq('key', 'sales_max_start_days').maybeSingle();
+    const raw = setting?.value;
+    let parsed = null;
+    if (typeof raw === 'number' && Number.isFinite(raw)) parsed = raw;
+    else if (raw && typeof raw === 'object' && Number.isFinite(Number(raw.days))) parsed = Number(raw.days);
+    else if (typeof raw === 'string' && Number.isFinite(Number(raw))) parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  } catch (_) { /* fallback */ }
+  return 40;
+}
+
 // Normaliseer een sub naar een line_items-array (backwards-compat met oude
 // single-amount payloads). Returnt altijd een array (mogelijk leeg na filter).
 function normalizeLineItems(s) {
@@ -65,12 +97,61 @@ export default async function handler(req, res) {
       if (!s._lines.length) return res.status(400).json({ error: `Abonnement "${s.description || ''}" heeft geen regel met bedrag > 0` });
     }
 
+    // ── Late-start-server-side guard ──
+    // Spiegelt _detectExceptions (modules/sales-wizard.html regel 1668-1677):
+    // vroegste sub-startdatum > app_settings.sales_max_start_days ⇒ late start.
+    // Bij late start MOET er ofwel (a) een gemarkeerde deal zijn met
+    // exception_flagged=true, 'late_start' in exception_reasons én
+    // exception_fee_agreed=true (dan boekt de bestaande fee-invoice-flow
+    // hieronder de €100), ofwel de startdatum moet aangepast worden.
+    //
+    // Zonder deze guard kunnen deals die BUITEN de wizard om ontstaan zijn
+    // (bv. import, admin-flow, standalone-abo) stilletjes een late start
+    // krijgen zonder dat de €100 reserveringsfee wordt geboekt — dat gat
+    // dichten we hier. De bestaande fee-logica hieronder is de ENIGE plek
+    // die de €100 boekt; deze guard voegt niets extra toe qua geld.
+    let deal = null, dealId = null;
+    {
+      const earliestStartIso = subsNorm
+        .map((s) => (typeof s.start_date === 'string' && s.start_date) ? String(s.start_date).slice(0, 10) : null)
+        .filter(Boolean)
+        .sort()[0] || null;
+      if (earliestStartIso) {
+        const maxDays     = await _resolveMaxStartDays(supabaseAdmin);
+        const daysToStart = _daysBetweenTodayAnd(earliestStartIso);
+        const isLateStart = Number.isFinite(daysToStart) && daysToStart > maxDays;
+        if (isLateStart) {
+          const errMsg  = `Late start (>${maxDays} dagen) gedetecteerd maar geen reserveringsfee afgesproken — bevestig de €100 in de offerte of pas de startdatum aan.`;
+          const errBody = { error: errMsg, code: 'LATE_START_NO_FEE', details: { earliest_start_date: earliestStartIso, days_to_start: daysToStart, max_days: maxDays } };
+          if (standalone) {
+            // Standalone-abo heeft geen offerte-context met exception-vlag →
+            // altijd blokkeren zodra late start.
+            return res.status(422).json(errBody);
+          }
+          // Deal-modus: fetch de deal om de vlag te checken. We hergebruiken
+          // dit `deal`-object hieronder zodat we niet nogmaals fetchen.
+          const { data: d } = await supabaseAdmin.from('deals').select('*').eq('id', deal_id).maybeSingle();
+          if (!d) return res.status(404).json({ error: 'Deal niet gevonden' });
+          deal = d; dealId = d.id;
+          const reasons = String(d.exception_reasons || '');
+          const feeAgreedForLate = !!d.exception_flagged
+            && reasons.split(',').map((r) => r.trim()).includes('late_start')
+            && !!d.exception_fee_agreed;
+          if (!feeAgreedForLate) return res.status(422).json(errBody);
+        }
+      }
+    }
+
     // ── Deal resolven: bestaande deal (uit Wizard 1) OF ghost-deal (standalone) ──
-    let deal, dealId;
+    // Als de late-start-guard hierboven de deal al gefetcht heeft (non-standalone
+    // + late-start-met-vlag) staan `deal` en `dealId` al gezet; anders fetchen
+    // we hem nu op de reguliere manier.
     if (!standalone) {
-      const { data: d } = await supabaseAdmin.from('deals').select('*').eq('id', deal_id).maybeSingle();
-      if (!d) return res.status(404).json({ error: 'Deal niet gevonden' });
-      deal = d; dealId = d.id;
+      if (!deal) {
+        const { data: d } = await supabaseAdmin.from('deals').select('*').eq('id', deal_id).maybeSingle();
+        if (!d) return res.status(404).json({ error: 'Deal niet gevonden' });
+        deal = d; dealId = d.id;
+      }
     } else {
       // Bedrijfsentiteit valideren.
       if (tl_department_id) {
