@@ -7,6 +7,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <!-- Wanbetalers herontwerp Ronde 1: JetBrains Mono voor bedragen/dagen in de .wbx-scope -->
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
   <link rel="stylesheet" href="/styles/sales-redesign.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
@@ -1057,6 +1059,337 @@
     #dunProbTable th[data-sort-key]:hover { background: rgba(100,116,139,0.08); }
     .fin-sort-arrow { font-size: 10px; margin-left: 3px; }
   </style>
+
+  <!-- ================================================================
+       WANBETALERS HERONTWERP RONDE 1 — .wbx scoped design-huid.
+       Bron: prototypes/wanbetalers.html. Alles gescoped onder .wbx
+       (of .wbx-* voor body-level overlays: sheet / scrim / modal /
+       toast). Design-tokens gaan op de wrappers zelf ipv :root zodat
+       ze niet lekken naar Dashboard/Klanten/Bank of andere finance-
+       tabs. Bestaande wanbetalers-styles (.td-*, .fc-*, .case-*, .wb-*)
+       blijven bestaan tot Ronde 2/3.
+       ================================================================ -->
+  <style id="wbx-scoped-styles">
+    /* Design tokens — 1-op-1 uit prototype. Op alle .wbx-scopes zodat
+       body-level overlays (sheet/modal/toast) ze ook krijgen. */
+    .wbx, .wbx-sheet, .wbx-scrim, .wbx-mscrim, .wbx-toast {
+      --wbx-bg:#F4F6F8; --wbx-surface:#FFF; --wbx-ink:#161D29;
+      --wbx-muted:#66717F; --wbx-faint:#98A2B0;
+      --wbx-border:#E6E9EF; --wbx-border-strong:#D6DBE4;
+      --wbx-accent:#0E7C6B; --wbx-accent-soft:#E1F1EE; --wbx-accent-ink:#0A5A4E;
+      --wbx-s-new-bg:#FDF3E3; --wbx-s-new-tx:#986412;
+      --wbx-s-remind-bg:#E9F0FB; --wbx-s-remind-tx:#2B5FA8;
+      --wbx-s-talk-bg:#E1F1EE; --wbx-s-talk-tx:#0A5A4E;
+      --wbx-s-plan-bg:#EEEAFA; --wbx-s-plan-tx:#5B44A8;
+      --wbx-s-paid-bg:#E5F3EA; --wbx-s-paid-tx:#2A7047;
+      --wbx-s-inc-bg:#FBE9E9; --wbx-s-inc-tx:#B23434;
+      --wbx-s-back-bg:#FBEAE7; --wbx-s-back-tx:#B24A2E;
+      --wbx-ok-bg:#E5F3EA; --wbx-ok-tx:#2A7047;
+      --wbx-no-bg:#F0F2F5; --wbx-no-tx:#66717F;
+      --wbx-radius:14px;
+      --wbx-mono:'JetBrains Mono', ui-monospace, monospace;
+      --wbx-shadow:0 1px 2px rgba(20,25,35,.05), 0 12px 34px rgba(20,25,35,.08);
+    }
+
+    /* Basis-scope. .wbx is de wrapper rond alle wanbetalers-UI. */
+    .wbx {
+      font-family:'Inter', system-ui, sans-serif;
+      font-size:15px; line-height:1.5; color:var(--wbx-ink);
+      -webkit-font-smoothing:antialiased;
+    }
+    .wbx *, .wbx *::before, .wbx *::after { box-sizing:border-box; }
+    .wbx button { font:inherit; }
+
+    /* --- Top-nav pillen (Te doen · Acties · Gesprekken · Facturen · Instellingen) --- */
+    .wbx .wbx-nav { display:flex; gap:3px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
+    .wbx .wbx-nav button {
+      border:0; background:transparent; color:var(--wbx-muted);
+      cursor:pointer; font-weight:500; padding:9px 14px; border-radius:9px;
+      font-size:14px;
+    }
+    .wbx .wbx-nav button:hover { background:#EAEDF1; color:var(--wbx-ink); }
+    .wbx .wbx-nav button.active { background:var(--wbx-ink); color:#fff; }
+    .wbx .wbx-nav button .wbx-badge {
+      background:#DC5B3E; color:#fff;
+      font:600 11px/1 var(--wbx-mono);
+      padding:2px 6px; border-radius:999px; margin-left:6px; vertical-align:1px;
+    }
+    .wbx .wbx-nav button.active .wbx-badge { background:rgba(255,255,255,.25); }
+    .wbx .wbx-nav-spacer { flex:1; }
+
+    /* Page-head */
+    .wbx .wbx-page-head { padding:6px 2px 16px; }
+    .wbx .wbx-page-head h1 { margin:0; font-size:25px; letter-spacing:-.02em; font-weight:700; }
+    .wbx .wbx-page-head p { margin:5px 0 0; color:var(--wbx-muted); font-size:14px; max-width:660px; }
+
+    /* Sumstrip (teal gradient) — acties-melding op Te doen */
+    .wbx .wbx-sumstrip {
+      display:flex; align-items:center; gap:16px;
+      background:linear-gradient(90deg, #0E7C6B, #0A5A4E); color:#fff;
+      border-radius:var(--wbx-radius); padding:15px 20px; margin-bottom:14px;
+    }
+    .wbx .wbx-sumstrip .wbx-big { font:600 26px/1 var(--wbx-mono); }
+    .wbx .wbx-sumstrip .wbx-lbl { font-size:13px; color:#CDE7E1; margin-top:3px; }
+    .wbx .wbx-sumstrip .wbx-split { display:flex; gap:18px; margin-left:6px; }
+    .wbx .wbx-sumstrip .wbx-split div { font-size:13px; }
+    .wbx .wbx-sumstrip .wbx-split b { font-family:var(--wbx-mono); }
+    .wbx .wbx-sumstrip .wbx-flex1 { flex:1; }
+    .wbx .wbx-sumstrip button {
+      border:0; background:#fff; color:var(--wbx-accent-ink);
+      font-weight:600; padding:9px 15px; border-radius:9px; cursor:pointer; white-space:nowrap;
+    }
+
+    /* Campagne-banner (dark, achterstand → Crediteren) */
+    .wbx .wbx-campaign {
+      display:flex; align-items:center; gap:15px;
+      background:linear-gradient(90deg, #122536, #1B3A53); color:#fff;
+      border-radius:var(--wbx-radius); padding:14px 18px; margin-bottom:18px;
+    }
+    .wbx .wbx-campaign .wbx-ic {
+      width:36px; height:36px; border-radius:10px;
+      background:rgba(255,255,255,.12);
+      display:grid; place-items:center; font-size:18px; flex:none;
+    }
+    .wbx .wbx-campaign b { font-weight:600; }
+    .wbx .wbx-campaign .wbx-sub { color:#B7C4D4; font-size:12.5px; margin-top:2px; }
+    .wbx .wbx-campaign .wbx-flex1 { flex:1; }
+    .wbx .wbx-campaign button {
+      border:0; background:#fff; color:#132a3d;
+      font-weight:600; padding:9px 16px; border-radius:9px; cursor:pointer;
+    }
+
+    /* Sec-head + segmented control */
+    .wbx .wbx-sec-head { display:flex; align-items:center; justify-content:space-between; margin:20px 2px 11px; }
+    .wbx .wbx-sec-head h2 { margin:0; font-size:15px; font-weight:600; }
+    .wbx .wbx-seg { display:inline-flex; background:#E9EBEF; border-radius:10px; padding:3px; }
+    .wbx .wbx-seg button {
+      border:0; background:transparent; font-weight:500; color:var(--wbx-muted);
+      padding:6px 13px; border-radius:8px; cursor:pointer; font-size:13.5px;
+    }
+    .wbx .wbx-seg button.active {
+      background:#fff; color:var(--wbx-ink);
+      box-shadow:0 1px 2px rgba(0,0,0,.06);
+    }
+
+    /* Worklist — case-cards */
+    .wbx .wbx-worklist { display:flex; flex-direction:column; gap:8px; }
+    .wbx .wbx-case {
+      display:grid; grid-template-columns:minmax(0, 1.5fr) .8fr .95fr auto;
+      align-items:center; gap:16px;
+      background:var(--wbx-surface); border:1px solid var(--wbx-border);
+      border-radius:var(--wbx-radius);
+      padding:0 16px 0 0; cursor:pointer; overflow:hidden; position:relative;
+    }
+    .wbx .wbx-case:hover { border-color:var(--wbx-border-strong); }
+    .wbx .wbx-case:focus-visible { outline:2px solid var(--wbx-accent); outline-offset:2px; }
+    .wbx .wbx-case .wbx-urg { position:absolute; left:0; top:0; bottom:0; width:5px; }
+    .wbx .wbx-case .wbx-who { padding:14px 0 14px 20px; min-width:0; }
+    .wbx .wbx-case .wbx-who .wbx-name { font-weight:600; letter-spacing:-.01em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .wbx .wbx-case .wbx-who .wbx-inv  { color:var(--wbx-faint); font:500 12px/1.4 var(--wbx-mono); margin-top:3px; }
+    .wbx .wbx-case .wbx-amt  { font:600 15px/1 var(--wbx-mono); text-align:right; }
+    .wbx .wbx-case .wbx-late { font:600 13.5px/1 var(--wbx-mono); color:var(--wbx-muted); text-align:right; }
+    .wbx .wbx-case .wbx-late small {
+      display:block; font:500 10.5px/1.4 'Inter', sans-serif;
+      color:var(--wbx-faint); margin-top:4px; letter-spacing:.02em;
+    }
+    .wbx .wbx-case .wbx-right { display:flex; align-items:center; gap:13px; justify-content:flex-end; padding-right:0; }
+    @media(max-width:720px) {
+      .wbx .wbx-case { grid-template-columns:1fr auto; }
+      .wbx .wbx-case .wbx-amt, .wbx .wbx-case .wbx-late { display:none; }
+    }
+
+    /* Status-pills */
+    .wbx .wbx-pill,
+    .wbx-sheet .wbx-pill {
+      display:inline-block; font-size:11.5px; font-weight:600;
+      padding:4px 10px; border-radius:999px; white-space:nowrap;
+    }
+    .wbx .wbx-p-new,    .wbx-sheet .wbx-p-new    { background:var(--wbx-s-new-bg);    color:var(--wbx-s-new-tx); }
+    .wbx .wbx-p-remind, .wbx-sheet .wbx-p-remind { background:var(--wbx-s-remind-bg); color:var(--wbx-s-remind-tx); }
+    .wbx .wbx-p-talk,   .wbx-sheet .wbx-p-talk   { background:var(--wbx-s-talk-bg);   color:var(--wbx-s-talk-tx); }
+    .wbx .wbx-p-plan,   .wbx-sheet .wbx-p-plan   { background:var(--wbx-s-plan-bg);   color:var(--wbx-s-plan-tx); }
+    .wbx .wbx-p-paid,   .wbx-sheet .wbx-p-paid   { background:var(--wbx-s-paid-bg);   color:var(--wbx-s-paid-tx); }
+    .wbx .wbx-p-inc,    .wbx-sheet .wbx-p-inc    { background:var(--wbx-s-inc-bg);    color:var(--wbx-s-inc-tx); }
+    .wbx .wbx-p-back,   .wbx-sheet .wbx-p-back   { background:var(--wbx-s-back-bg);   color:var(--wbx-s-back-tx); }
+
+    /* Buttons */
+    .wbx .wbx-btn,
+    .wbx-sheet .wbx-btn, .wbx-mscrim .wbx-btn {
+      border:1px solid var(--wbx-border-strong); background:#fff; color:var(--wbx-ink);
+      font-weight:600; font-size:13px; padding:7px 13px; border-radius:9px;
+      cursor:pointer; white-space:nowrap; font-family:inherit;
+    }
+    .wbx .wbx-btn:hover,
+    .wbx-sheet .wbx-btn:hover, .wbx-mscrim .wbx-btn:hover { border-color:var(--wbx-muted); }
+    .wbx .wbx-btn.wbx-primary,
+    .wbx-sheet .wbx-btn.wbx-primary, .wbx-mscrim .wbx-btn.wbx-primary {
+      background:var(--wbx-accent); border-color:var(--wbx-accent); color:#fff;
+    }
+    .wbx .wbx-btn.wbx-primary:hover,
+    .wbx-sheet .wbx-btn.wbx-primary:hover, .wbx-mscrim .wbx-btn.wbx-primary:hover { background:var(--wbx-accent-ink); }
+    .wbx .wbx-btn.wbx-danger,
+    .wbx-sheet .wbx-btn.wbx-danger { color:var(--wbx-s-inc-tx); }
+    .wbx .wbx-btn.wbx-danger:hover,
+    .wbx-sheet .wbx-btn.wbx-danger:hover { border-color:var(--wbx-s-inc-tx); }
+    .wbx .wbx-btn.wbx-sm,
+    .wbx-sheet .wbx-btn.wbx-sm, .wbx-mscrim .wbx-btn.wbx-sm { padding:6px 11px; font-size:12.5px; }
+
+    /* Empty state */
+    .wbx .wbx-empty {
+      text-align:center; padding:54px 20px; color:var(--wbx-muted);
+      background:#fff; border:1px solid var(--wbx-border);
+      border-radius:var(--wbx-radius);
+    }
+    .wbx .wbx-empty .wbx-big { font-size:38px; margin-bottom:6px; }
+    .wbx .wbx-empty h3 { margin:0 0 4px; color:var(--wbx-ink); font-weight:600; }
+
+    /* ======================================================
+       Body-level overlays: case-sheet + scrim + modal + toast
+       ====================================================== */
+    .wbx-scrim {
+      position:fixed; inset:0; background:rgba(14,19,28,.44);
+      backdrop-filter:blur(2px);
+      opacity:0; pointer-events:none; transition:opacity .2s; z-index:50;
+    }
+    .wbx-scrim.open { opacity:1; pointer-events:auto; }
+
+    .wbx-sheet {
+      position:fixed; top:0; right:0; height:100%;
+      width:min(720px, 100%);
+      background:var(--wbx-bg); color:var(--wbx-ink);
+      box-shadow:-16px 0 44px rgba(14,19,28,.16);
+      transform:translateX(100%); transition:transform .26s cubic-bezier(.2,.8,.2,1);
+      z-index:51;
+      display:flex; flex-direction:column; overflow-y:auto;
+      font-family:'Inter', system-ui, sans-serif;
+      -webkit-font-smoothing:antialiased;
+    }
+    .wbx-sheet * { box-sizing:border-box; }
+    .wbx-sheet button { font:inherit; }
+    .wbx-sheet.open { transform:none; }
+
+    .wbx-sheet .wbx-sheet-top {
+      position:sticky; top:0; background:var(--wbx-bg);
+      padding:18px 24px 6px; z-index:2;
+    }
+    .wbx-sheet .wbx-sheet-top .wbx-row { display:flex; align-items:center; gap:12px; }
+    .wbx-sheet .wbx-icon-btn {
+      border:1px solid var(--wbx-border); background:#fff;
+      width:34px; height:34px; border-radius:9px;
+      cursor:pointer; font-size:15px; color:var(--wbx-muted);
+    }
+    .wbx-sheet .wbx-icon-btn:hover { border-color:var(--wbx-border-strong); color:var(--wbx-ink); }
+    .wbx-sheet h2 { margin:0; font-size:19px; letter-spacing:-.01em; font-weight:600; }
+    .wbx-sheet .wbx-sub { color:var(--wbx-faint); font:500 12px/1.4 var(--wbx-mono); }
+
+    /* Flow — leesbare statusbalk */
+    .wbx-sheet .wbx-flow {
+      display:flex; align-items:center; padding:14px 24px 2px; flex-wrap:wrap;
+    }
+    .wbx-sheet .wbx-step {
+      display:flex; align-items:center; gap:7px;
+      color:var(--wbx-faint); font-size:12px; font-weight:600;
+    }
+    .wbx-sheet .wbx-step .wbx-bul {
+      width:11px; height:11px; border-radius:50%;
+      background:var(--wbx-border-strong);
+    }
+    .wbx-sheet .wbx-step.wbx-done { color:var(--wbx-muted); }
+    .wbx-sheet .wbx-step.wbx-done .wbx-bul { background:var(--wbx-accent); }
+    .wbx-sheet .wbx-step.wbx-here { color:var(--wbx-accent-ink); }
+    .wbx-sheet .wbx-step.wbx-here .wbx-bul {
+      background:var(--wbx-accent);
+      box-shadow:0 0 0 4px var(--wbx-accent-soft);
+    }
+    .wbx-sheet .wbx-flow .wbx-bar {
+      width:20px; height:2px; background:var(--wbx-border-strong);
+      margin:0 6px;
+    }
+    .wbx-sheet .wbx-flow .wbx-bar.wbx-done { background:var(--wbx-accent); }
+
+    .wbx-sheet .wbx-sheet-body {
+      padding:14px 24px 30px;
+      display:flex; flex-direction:column; gap:14px;
+    }
+
+    /* Card in de sheet */
+    .wbx-sheet .wbx-card {
+      background:var(--wbx-surface); border:1px solid var(--wbx-border);
+      border-radius:var(--wbx-radius); padding:16px 18px;
+    }
+    .wbx-sheet .wbx-card h4 {
+      margin:0 0 11px; font-size:11.5px;
+      letter-spacing:.06em; text-transform:uppercase;
+      color:var(--wbx-faint); font-weight:600;
+    }
+    .wbx-sheet .wbx-kv {
+      display:flex; justify-content:space-between;
+      padding:7px 0; border-bottom:1px solid var(--wbx-border);
+    }
+    .wbx-sheet .wbx-kv:last-child { border-bottom:0; }
+    .wbx-sheet .wbx-kv .wbx-k { color:var(--wbx-muted); }
+    .wbx-sheet .wbx-kv .wbx-v { font-weight:600; }
+    .wbx-sheet .wbx-kv .wbx-v.wbx-mono { font-family:var(--wbx-mono); }
+
+    /* Chat bubbles + Joost */
+    .wbx-sheet .wbx-msg {
+      max-width:78%; padding:10px 13px; border-radius:14px;
+      font-size:14px; line-height:1.45;
+    }
+    .wbx-sheet .wbx-msg.wbx-in {
+      align-self:flex-start; background:#EEF0F4;
+      border-bottom-left-radius:5px;
+    }
+    .wbx-sheet .wbx-msg.wbx-out {
+      align-self:flex-end; background:var(--wbx-accent-soft); color:var(--wbx-accent-ink);
+      border-bottom-right-radius:5px;
+    }
+    .wbx-sheet .wbx-msg .wbx-t {
+      font:500 10px/1 var(--wbx-mono); opacity:.55;
+      margin-top:5px; display:block;
+    }
+    .wbx-sheet .wbx-joost {
+      border:1px dashed var(--wbx-accent); border-radius:12px;
+      padding:13px 14px;
+      background:linear-gradient(#fff, #FBFDFC);
+    }
+    .wbx-sheet .wbx-joost.wbx-stretch { align-self:stretch; }
+    .wbx-sheet .wbx-joost .wbx-jhead { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+    .wbx-sheet .wbx-joost .wbx-jbadge {
+      font-size:10.5px; font-weight:700; color:var(--wbx-accent-ink);
+      background:var(--wbx-accent-soft); padding:3px 8px; border-radius:6px;
+      letter-spacing:.03em;
+    }
+    .wbx-sheet .wbx-joost .wbx-conf {
+      font:600 11px/1 var(--wbx-mono); color:var(--wbx-faint);
+    }
+    .wbx-sheet .wbx-joost p { margin:0; font-size:13.5px; color:#39434f; }
+    .wbx-sheet .wbx-joost-actions { display:flex; gap:8px; margin-top:11px; flex-wrap:wrap; }
+
+    .wbx-sheet .wbx-sheet-actions {
+      display:flex; gap:9px; padding:15px 24px;
+      position:sticky; bottom:0;
+      background:linear-gradient(transparent, var(--wbx-bg) 28%);
+      flex-wrap:wrap;
+    }
+
+    /* Toast */
+    .wbx-toast {
+      position:fixed; bottom:22px; left:50%; transform:translateX(-50%);
+      background:var(--wbx-ink); color:#fff;
+      padding:11px 18px; border-radius:10px;
+      font-size:13.5px; opacity:0; transition:opacity .2s;
+      z-index:70; box-shadow:var(--wbx-shadow);
+      font-family:'Inter', system-ui, sans-serif;
+    }
+    .wbx-toast.show { opacity:1; }
+
+    @media(prefers-reduced-motion:reduce) {
+      .wbx *, .wbx-sheet *, .wbx-scrim, .wbx-mscrim, .wbx-toast {
+        animation:none !important; transition:none !important;
+      }
+    }
+  </style>
 </head>
 <body>
 
@@ -1084,25 +1417,24 @@
        wordt door setView('dashboard') + DOMContentLoaded geactiveerd. -->
   <div id="view-dashboard" hidden></div>
 
-  <!-- ===== Wanbetalers wrapper (nav-herontwerp: 3 hoofdtabs + Meer + Instellingen) ===== -->
-  <div id="view-wanbetalers" hidden>
-    <div class="sr-segments" id="wanbetalersSubNav" style="margin-bottom:18px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-      <!-- Brok B stap 5: platte nav — Te doen (default) · Facturen · Meer ▾ · Instellingen ⚙.
-           Alle sub-views die vroeger primair waren (Vandaag/Pipeline/Inbox/Open Acties/
-           Arrangements/Probleemklanten/Crediteren/Incasso) zijn nu bereikbaar onder Meer ▾;
-           config-views (Templates/Workflows/Geschiedenis/Sandbox) onder Instellingen ⚙. -->
-      <button class="sr-seg active" data-wb-sub="te-doen"  type="button" title="Te doen"><i class="ti ti-checkbox"></i> Te doen</button>
-      <button class="sr-seg"        data-wb-sub="facturen" type="button" title="Facturen"><i class="ti ti-file-invoice"></i> Facturen</button>
+  <!-- ===== Wanbetalers wrapper (Herontwerp Ronde 1: .wbx-scoped design-huid) ===== -->
+  <div id="view-wanbetalers" class="wbx" hidden>
+    <!-- Platte prototype-nav: Te doen · Acties · Gesprekken · Facturen · Instellingen (+ Meer ▾ blijft voorlopig).
+         Mapping op de bestaande sub-keys: Acties → open-acties, Gesprekken → inbox.
+         De klik-handlers (wanbetalersSubNav delegated event) blijven werken op data-wb-sub. -->
+    <div id="wanbetalersSubNav" class="wbx-nav" style="margin-bottom:18px">
+      <button class="active" data-wb-sub="te-doen"  type="button" title="Te doen">Te doen</button>
+      <button                 data-wb-sub="open-acties" type="button" title="Acties">Acties<span class="wbx-badge" id="wbxNavActiesBadge" hidden>0</span></button>
+      <button                 data-wb-sub="inbox"    type="button" title="Gesprekken">Gesprekken</button>
+      <button                 data-wb-sub="facturen" type="button" title="Facturen">Facturen</button>
 
       <div class="wb-menu" data-wb-dropdown="meer" style="position:relative">
-        <button class="sr-seg wb-menu-btn" data-wb-toggle="meer" type="button" aria-expanded="false" aria-haspopup="menu">
-          Meer <i class="ti ti-chevron-down" style="margin-left:2px"></i>
+        <button class="wb-menu-btn" data-wb-toggle="meer" type="button" aria-expanded="false" aria-haspopup="menu">
+          Meer <i class="ti ti-chevron-down" style="margin-left:2px;font-size:12px"></i>
         </button>
         <div class="wb-menu-panel" data-wb-panel="meer" role="menu" hidden>
           <button class="wb-menu-item" data-wb-sub="vandaag"         type="button" role="menuitem"><i class="ti ti-sun"           style="color:#f59e0b"></i> Vandaag</button>
           <button class="wb-menu-item" data-wb-sub="pipeline"        type="button" role="menuitem"><i class="ti ti-layout-kanban" style="color:#0ea5e9"></i> Pipeline</button>
-          <button class="wb-menu-item" data-wb-sub="inbox"           type="button" role="menuitem"><i class="ti ti-brand-whatsapp" style="color:#10b981"></i> Inbox</button>
-          <button class="wb-menu-item" data-wb-sub="open-acties"     type="button" role="menuitem"><i class="ti ti-checklist"     style="color:#0ea5e9"></i> Open Acties</button>
           <button class="wb-menu-item" data-wb-sub="arrangements"    type="button" role="menuitem"><i class="ti ti-calendar-stats" style="color:#8b5cf6"></i> Arrangements</button>
           <button class="wb-menu-item" data-wb-sub="probleemklanten" type="button" role="menuitem"><i class="ti ti-alert-triangle" style="color:#f59e0b"></i> Probleemklanten</button>
           <button class="wb-menu-item" data-wb-sub="crediteren"      type="button" role="menuitem"><i class="ti ti-receipt-refund" style="color:#10b981"></i> Crediteren</button>
@@ -1110,9 +1442,11 @@
         </div>
       </div>
 
-      <div class="wb-menu" data-wb-dropdown="instellingen" style="position:relative;margin-left:auto">
-        <button class="sr-seg wb-menu-btn" data-wb-toggle="instellingen" type="button" aria-expanded="false" aria-haspopup="menu" title="Instellingen">
-          <i class="ti ti-settings"></i> Instellingen <i class="ti ti-chevron-down" style="margin-left:2px"></i>
+      <div class="wbx-nav-spacer"></div>
+
+      <div class="wb-menu" data-wb-dropdown="instellingen" style="position:relative">
+        <button class="wb-menu-btn" data-wb-toggle="instellingen" type="button" aria-expanded="false" aria-haspopup="menu" title="Instellingen">
+          Instellingen <i class="ti ti-chevron-down" style="margin-left:2px;font-size:12px"></i>
         </button>
         <div class="wb-menu-panel wb-menu-panel-right" data-wb-panel="instellingen" role="menu" hidden>
           <button class="wb-menu-item" data-wb-sub="templates"    type="button" role="menuitem"><i class="ti ti-file-text"    style="color:#0ea5e9"></i> Templates</button>
@@ -3316,11 +3650,13 @@
     // Sub-nav highlight — 3 hoofdtabs krijgen active als sub matcht;
     // dropdowns (Meer / Instellingen) worden actief zodra hun sub-key
     // in de bijbehorende groep zit.
-    // Brok B stap 5: Meer ▾ groepeert alle secondary sub-views (nav-platslag).
-    // Vandaag/Pipeline/Inbox waren primair, staan nu ook onder Meer ▾.
-    const MEER_SUBS  = ['vandaag', 'pipeline', 'inbox', 'open-acties', 'arrangements', 'probleemklanten', 'crediteren', 'incasso'];
+    // Ronde 1 herontwerp: Acties (open-acties) en Gesprekken (inbox) zijn nu
+    // primair in de .wbx-nav; ze zitten daarom niet meer onder Meer ▾.
+    const MEER_SUBS  = ['vandaag', 'pipeline', 'arrangements', 'probleemklanten', 'crediteren', 'incasso'];
     const INST_SUBS  = ['templates', 'workflows', 'geschiedenis', 'sandbox'];
-    document.querySelectorAll('#wanbetalersSubNav .sr-seg').forEach(b => {
+    // Selector werkt zowel voor de nieuwe .wbx-nav-knoppen (direct kind,
+    // data-wb-sub/data-wb-toggle) als voor de bestaande .wb-menu-btn's.
+    document.querySelectorAll('#wanbetalersSubNav [data-wb-sub], #wanbetalersSubNav [data-wb-toggle]').forEach(b => {
       const btnSub = b.dataset.wbSub;
       const btnTgl = b.dataset.wbToggle;
       let active = false;
@@ -3565,8 +3901,9 @@
       } catch (_) { /* fail-soft: items blijven verborgen */ }
     })();
 
-    // Hoofdtabs (data-wb-sub direct op de knop).
-    document.querySelectorAll('#wanbetalersSubNav .sr-seg[data-wb-sub]').forEach(b => {
+    // Hoofdtabs (data-wb-sub direct op de knop). Selector is class-agnostisch
+    // sinds Ronde 1 (nav gebruikt .wbx-nav ipv .sr-seg).
+    document.querySelectorAll('#wanbetalersSubNav > [data-wb-sub]').forEach(b => {
       b.addEventListener('click', () => setSubView(b.dataset.wbSub));
     });
 
@@ -13170,84 +13507,132 @@
   // kaart via openPipelineDetail(cid). Endpoint: /api/wanbetalers-todo-list.
   // Theme-aware via app-tokens; volledige kleur-huid komt in stap 6.
   // ────────────────────────────────────────────────────────────────────
-  const _tdState = { wired: false, loading: false, data: null, error: null };
+  const _tdState = {
+    wired: false, loading: false, data: null, error: null,
+    // Ronde 1: acties-melding (pending_actions gegroepeerd naar type)
+    acties: { open: 0, verify: 0, plan: 0, esc: 0, loaded: false },
+    sort  : 'oldest',   // 'oldest' | 'newest' — segmented control
+  };
 
   function mountTeDoenHost() {
     const host = document.getElementById('wb-sub-te-doen');
     if (!host) return;
     if (!_tdState.wired) {
       host.innerHTML = _tdShellHtml();
-      _wbInjectSharedStyles();  // Brok B stap 6: gedeelde clean-huid met Facturen
-      _tdInjectStyles();
       _tdWireShell();
       _tdState.wired = true;
     }
     loadTeDoen();
+    loadTeDoenActiesCount(); // async, updates sumstrip + nav-badge zodra klaar
   }
 
+  // Ronde 1: prototype-shell. Alle styles komen uit de .wbx-scoped stylesheet
+  // in <head>. Deze div zit IN de #view-wanbetalers wrapper die zelf al .wbx
+  // heeft, dus alle .wbx-* classes hier binnen pakken automatisch.
   function _tdShellHtml() {
     return `
-      <div class="td-wrap">
-        <div class="td-header">
+      <div class="wbx-page-head">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
           <div>
-            <h2>Te doen</h2>
-            <p class="td-subtitle">Dagelijkse worklist — 1 open factuur per klant, gesorteerd op dagen te laat. Klanten met een achterstand (≥2 facturen) zie je in de campagne-banner.</p>
+            <h1>Te doen</h1>
+            <p>Je dagelijkse worklist met te late facturen. Acties om te beoordelen zie je als melding bovenaan; de achterstand zit apart in de opruimactie.</p>
           </div>
-          <button class="sr-ibtn" id="tdRefreshBtn" type="button" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+          <button class="wbx-btn wbx-sm" id="tdRefreshBtn" type="button" title="Vernieuwen">Verversen</button>
         </div>
-        <div id="tdCampaignSlot"></div>
-        <div id="tdBody"></div>
-        <div id="tdMeta" class="td-meta"></div>
       </div>
+      <div id="tdActiesBox"></div>
+      <div id="tdCampaignSlot"></div>
+      <div class="wbx-sec-head">
+        <h2>Te late facturen</h2>
+        <div class="wbx-seg" id="tdSortSeg">
+          <button class="active" type="button" data-td-sort="oldest">Langst te laat</button>
+          <button              type="button" data-td-sort="newest">Nieuwste</button>
+        </div>
+      </div>
+      <div class="wbx-worklist" id="tdBody"></div>
+      <div id="tdMeta" style="font-size:11px;color:var(--wbx-faint);text-align:right;margin-top:8px"></div>
     `;
   }
 
-  function _tdInjectStyles() {
-    if (document.getElementById('td-worklist-styles')) return;
-    const st = document.createElement('style');
-    st.id = 'td-worklist-styles';
-    st.textContent = `
-      .td-wrap { display:flex; flex-direction:column; gap:16px; }
-      .td-header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
-      .td-header h2 { margin:0 0 4px 0; font-size:18px; font-weight:700; color:var(--text); }
-      .td-subtitle { margin:0; font-size:12.5px; color:var(--text-dim); max-width:640px; line-height:1.5; }
-      .td-campaign { display:flex; align-items:center; gap:14px; padding:14px 16px; border-radius:10px; background:var(--bg-elev); border:1px solid var(--border); }
-      .td-campaign-icon { flex:0 0 40px; width:40px; height:40px; border-radius:10px; background:rgba(220,38,38,.12); color:#dc2626; display:flex; align-items:center; justify-content:center; font-size:20px; }
-      .td-campaign-body { flex:1; min-width:0; }
-      .td-campaign-title { font-size:14px; font-weight:700; color:var(--text); }
-      .td-campaign-meta  { font-size:12px; color:var(--text-dim); margin-top:2px; }
-      .td-campaign-cta   { flex-shrink:0; }
-      .td-list { display:flex; flex-direction:column; gap:8px; }
-      .td-row { position:relative; display:grid; grid-template-columns:minmax(0, 1fr) 130px 90px 130px 150px; align-items:center; gap:14px; padding:12px 14px 12px 22px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; cursor:pointer; }
-      .td-row:hover { border-color:var(--text-faint); }
-      .td-urg { position:absolute; left:0; top:0; bottom:0; width:6px; border-radius:10px 0 0 10px; background:#f59e0b; }
-      .td-name-cell { min-width:0; }
-      .td-name { font-size:13.5px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-      .td-invnr { font-family:ui-monospace, SFMono-Regular, monospace; font-size:11.5px; color:var(--text-faint); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-      .td-amount { font-family:ui-monospace, SFMono-Regular, monospace; font-size:13.5px; color:var(--text); text-align:right; font-variant-numeric:tabular-nums; }
-      .td-days { font-family:ui-monospace, SFMono-Regular, monospace; font-size:12.5px; color:var(--text-dim); text-align:right; font-variant-numeric:tabular-nums; }
-      .td-stage-pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:600; letter-spacing:.2px; background:rgba(148,163,184,.14); color:var(--text-dim); border:1px solid var(--border); white-space:nowrap; }
-      .td-stage-pill.stage-nieuw           { color:#64748b; background:rgba(100,116,139,.14); border-color:rgba(100,116,139,.28); }
-      .td-stage-pill.stage-aangemaand      { color:#f59e0b; background:rgba(245,158,11,.14); border-color:rgba(245,158,11,.28); }
-      .td-stage-pill.stage-in_gesprek      { color:#0ea5e9; background:rgba(14,165,233,.14); border-color:rgba(14,165,233,.28); }
-      .td-stage-pill.stage-regeling        { color:#8b5cf6; background:rgba(139,92,246,.14); border-color:rgba(139,92,246,.28); }
-      .td-stage-pill.stage-brief_verstuurd { color:#ec4899; background:rgba(236,72,153,.14); border-color:rgba(236,72,153,.28); }
-      .td-action-btn { padding:8px 14px; border-radius:8px; border:1px solid var(--border); background:rgba(14,165,233,.14); color:#0ea5e9; font-size:12.5px; font-weight:600; cursor:pointer; white-space:nowrap; }
-      .td-action-btn:hover { background:rgba(14,165,233,.22); }
-      .td-empty { padding:32px 20px; text-align:center; color:var(--text-dim); font-size:13px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; }
-      .td-empty strong { color:var(--text); font-size:14px; display:block; margin-bottom:4px; }
-      .td-meta { font-size:11px; color:var(--text-faint); text-align:right; }
-      @media (max-width:900px) {
-        .td-row { grid-template-columns:6px 1fr auto; row-gap:6px; padding:12px 14px 12px 22px; }
-        .td-row > .td-amount, .td-row > .td-days, .td-row > .td-stage-pill { grid-column: 2 / -1; text-align:left; }
-        .td-action-btn { grid-column: 1 / -1; justify-self:stretch; text-align:center; }
-      }
-    `;
-    document.head.appendChild(st);
-  }
+  // Ronde 1: alle Te doen-styles komen nu uit de .wbx scope in <head>.
+  // Deze inject-helper is een no-op — bewaard voor back-compat als Brok B er
+  // nog naar refereert; verwijderen kan in een latere ronde.
+  function _tdInjectStyles() { /* no-op sinds Ronde 1 (.wbx-scoped styles) */ }
 
   function _tdWireShell() {
-    document.getElementById('tdRefreshBtn')?.addEventListener('click', loadTeDoen);
+    document.getElementById('tdRefreshBtn')?.addEventListener('click', () => {
+      loadTeDoen();
+      loadTeDoenActiesCount();
+    });
+    // Sort-segmented control ("Langst te laat" vs "Nieuwste") — client-side.
+    document.querySelectorAll('#tdSortSeg [data-td-sort]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        _tdState.sort = btn.dataset.tdSort || 'oldest';
+        document.querySelectorAll('#tdSortSeg [data-td-sort]').forEach((b) => {
+          b.classList.toggle('active', b.dataset.tdSort === _tdState.sort);
+        });
+        _tdRenderBody();
+      });
+    });
+  }
+
+  // Fetcht pending_actions status=PENDING en telt per action_type-familie:
+  //   verify  = MANUAL_VERIFY_PAYMENT
+  //   plan    = TL_*  (alle arrangement-uitvoer-acties)
+  //   esc     = MANUAL_ESCALATION
+  // Sluit is_test-klanten uit (client-side check op customer.is_test).
+  async function loadTeDoenActiesCount() {
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-list?status=PENDING&limit=200');
+      if (!r.ok) { _tdState.acties.loaded = true; _tdRenderActiesBox(); _tdRenderNavBadge(); return; }
+      const d = await r.json().catch(() => ({}));
+      const items = Array.isArray(d?.items) ? d.items : [];
+      let verify = 0, plan = 0, esc = 0;
+      for (const it of items) {
+        if (it?.customer?.is_test) continue; // is_test uitsluiten
+        const t = String(it?.action_type || '');
+        if (t === 'MANUAL_VERIFY_PAYMENT') verify++;
+        else if (t === 'MANUAL_ESCALATION') esc++;
+        else if (t.startsWith('TL_'))       plan++;
+        // Overige types (bv. MANUAL_PROPOSE_ARRANGEMENT / MANUAL_FOLLOWUP)
+        // tellen we onder 'plan' als samenvattend "regelingen-blok".
+        else if (t.startsWith('MANUAL_PROPOSE_') || t === 'MANUAL_FOLLOWUP') plan++;
+      }
+      _tdState.acties = { open: verify + plan + esc, verify, plan, esc, loaded: true };
+    } catch (_) { _tdState.acties.loaded = true; }
+    _tdRenderActiesBox();
+    _tdRenderNavBadge();
+  }
+
+  function _tdRenderNavBadge() {
+    const badge = document.getElementById('wbxNavActiesBadge');
+    if (!badge) return;
+    const n = Number(_tdState.acties?.open) || 0;
+    if (n > 0) { badge.textContent = String(n); badge.hidden = false; }
+    else       { badge.hidden = true; }
+  }
+
+  function _tdRenderActiesBox() {
+    const box = document.getElementById('tdActiesBox');
+    if (!box) return;
+    const a = _tdState.acties;
+    if (!a || !a.loaded || a.open <= 0) { box.innerHTML = ''; return; }
+    box.innerHTML = `
+      <div class="wbx-sumstrip">
+        <div>
+          <div class="wbx-big">${a.open}</div>
+          <div class="wbx-lbl">openstaande acties</div>
+        </div>
+        <div class="wbx-split">
+          <div><b>${a.verify}</b> betaalcontroles</div>
+          <div><b>${a.plan}</b> regelingen</div>
+          <div><b>${a.esc}</b> escalaties</div>
+        </div>
+        <div class="wbx-flex1"></div>
+        <button type="button" id="tdActiesGoBtn">Bekijk alle →</button>
+      </div>
+    `;
+    document.getElementById('tdActiesGoBtn')?.addEventListener('click', () => setSubView('open-acties'));
   }
 
   async function loadTeDoen() {
@@ -13277,65 +13662,75 @@
     if (!body) return;
 
     if (_tdState.loading) {
-      body.innerHTML = '<div class="td-empty">Laden…</div>';
+      body.innerHTML = `<div class="wbx-empty"><h3>Laden…</h3></div>`;
       if (campaign) campaign.innerHTML = '';
       if (meta)     meta.textContent   = '';
       return;
     }
     if (_tdState.error) {
-      body.innerHTML = `<div class="td-empty" style="color:#dc2626">Fout: ${esc(_tdState.error)}</div>`;
+      body.innerHTML = `<div class="wbx-empty" style="color:var(--wbx-s-inc-tx)"><h3>Fout</h3>${esc(_tdState.error)}</div>`;
       if (campaign) campaign.innerHTML = '';
       return;
     }
 
     const d = _tdState.data || {};
     const camp = d.campaign || { count: 0, total_open_cents: 0 };
-    const list = Array.isArray(d.worklist) ? d.worklist : [];
+    let list = Array.isArray(d.worklist) ? d.worklist.slice() : [];
 
+    // Sort: 'oldest' = langst te laat DESC (server-default), 'newest' = kortst
+    // te laat eerst (client-side flip).
+    if (_tdState.sort === 'newest') {
+      list.sort((a, b) => (Number(a.days_overdue) || 0) - (Number(b.days_overdue) || 0));
+    } else {
+      list.sort((a, b) => (Number(b.days_overdue) || 0) - (Number(a.days_overdue) || 0));
+    }
+
+    // Campagne-banner (dark) — alleen zichtbaar als er ≥1 achterstand-klant is.
     if (campaign) {
       campaign.innerHTML = camp.count > 0 ? `
-        <div class="td-campaign">
-          <div class="td-campaign-icon"><i class="ti ti-alert-triangle"></i></div>
-          <div class="td-campaign-body">
-            <div class="td-campaign-title">${camp.count} klant${camp.count === 1 ? '' : 'en'} met een achterstand · ${_tdFmtEurCents(camp.total_open_cents)} open</div>
-            <div class="td-campaign-meta">Deze klanten hebben ≥2 open facturen — hoort bij de opruimactie (crediteerronde), niet bij de dagelijkse flow.</div>
+        <div class="wbx-campaign">
+          <div class="wbx-ic">📦</div>
+          <div>
+            <b>${camp.count} klant${camp.count === 1 ? '' : 'en'} met een achterstand</b> · ${_tdFmtEurCents(camp.total_open_cents)} open
+            <div class="wbx-sub">Meerdere facturen tegelijk open — hoort bij de opruimactie, niet bij je dagelijkse lijst.</div>
           </div>
-          <div class="td-campaign-cta">
-            <button class="td-action-btn" type="button" id="tdCampaignOpenBtn"><i class="ti ti-receipt-refund"></i> Start opruimactie</button>
-          </div>
+          <div class="wbx-flex1"></div>
+          <button type="button" id="tdCampaignOpenBtn">Opruimen →</button>
         </div>
       ` : '';
-      const openBtn = document.getElementById('tdCampaignOpenBtn');
-      if (openBtn) openBtn.addEventListener('click', () => setSubView('crediteren'));
+      document.getElementById('tdCampaignOpenBtn')?.addEventListener('click', () => setSubView('crediteren'));
     }
 
     if (list.length === 0) {
       body.innerHTML = `
-        <div class="td-empty">
-          <strong>Niks te doen — top.</strong>
-          Zodra een factuur 14 dagen te laat is, verschijnt 'ie hier.
+        <div class="wbx-empty">
+          <div class="wbx-big">✓</div>
+          <h3>Niks te doen — top.</h3>
+          <div>Zodra een factuur te laat is, verschijnt 'ie hier.</div>
         </div>
       `;
     } else {
-      body.innerHTML = '<div class="td-list">' + list.map(_tdRowHtml).join('') + '</div>';
-      // Referentie-map cid → worklist-item zodat we de context (invoice_id,
-      // invoice_number, days_overdue) mee kunnen geven aan het case-paneel.
+      body.innerHTML = list.map(_tdRowHtml).join('');
+      // Klik-context (invoice_id, invoice_number, days_overdue) meegeven aan case-paneel.
       const byCid = new Map();
       for (const r of list) if (r?.customer_id) byCid.set(r.customer_id, r);
-      body.querySelectorAll('.td-row[data-cid]').forEach((row) => {
-        row.addEventListener('click', (ev) => {
-          const cid = row.dataset.cid;
-          if (!cid) return;
-          ev.preventDefault();
-          // Brok A stap 2: worklist-rij opent het nieuwe #caseSheet, niet meer
-          // de oude pipeline-detailkaart. openPipelineDetail blijft bestaan
-          // voor de Pipeline-tab.
+      body.querySelectorAll('.wbx-case[data-cid]').forEach((row) => {
+        const doOpen = (cid) => {
           const it = byCid.get(cid) || {};
           openCaseSheet(cid, {
             invoiceId  : it.invoice_id || null,
             invoiceNr  : it.invoice_number || null,
             daysOverdue: (it.days_overdue != null) ? it.days_overdue : null,
           });
+        };
+        row.addEventListener('click', (ev) => { ev.preventDefault(); doOpen(row.dataset.cid); });
+        row.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); doOpen(row.dataset.cid); }
+        });
+        // Primaire actie-knop (in .wbx-right) stopt propagation zodat 'ie
+        // niet dubbel triggert, maar opent hetzelfde paneel.
+        row.querySelectorAll('[data-td-actbtn]').forEach((btn) => {
+          btn.addEventListener('click', (ev) => { ev.stopPropagation(); doOpen(row.dataset.cid); });
         });
       });
     }
@@ -13346,22 +13741,44 @@
     }
   }
 
+  // Map stage-slug → prototype pill-class (p-new / p-remind / p-talk / p-plan / p-inc / p-paid / p-back).
+  function _tdPillClassFor(slug) {
+    const s = String(slug || 'nieuw').toLowerCase();
+    if (s === 'nieuw')           return 'wbx-p-new';
+    if (s === 'aangemaand')      return 'wbx-p-remind';
+    if (s === 'brief_verstuurd') return 'wbx-p-remind';
+    if (s === 'in_gesprek')      return 'wbx-p-talk';
+    if (s === 'regeling')        return 'wbx-p-plan';
+    if (s === 'incasso')         return 'wbx-p-inc';
+    if (s === 'opgelost')        return 'wbx-p-paid';
+    if (s === 'afschrijven')     return 'wbx-p-back';
+    return 'wbx-p-new';
+  }
+  function _tdPillLabelFor(slug) {
+    const s = String(slug || 'nieuw').toLowerCase();
+    if (s === 'nieuw') return 'Nieuw te laat';
+    return _tdStageLabel(slug);
+  }
+
   function _tdRowHtml(r) {
-    const urgColor = _tdUrgColor(r.days_overdue);
-    const stageClass = 'stage-' + String(r.stage_slug || 'nieuw').toLowerCase();
-    const stageLabel = _tdStageLabel(r.stage_slug);
-    const daysTxt = (Number(r.days_overdue) > 0) ? `${r.days_overdue} dg te laat` : 'vandaag verlopen';
+    const urgColor   = _tdUrgColor(r.days_overdue);
+    const pillCls    = _tdPillClassFor(r.stage_slug);
+    const pillLabel  = _tdPillLabelFor(r.stage_slug);
+    const primAction = String(r.suggested_action || 'Bekijk');
+    const daysN      = Number(r.days_overdue) > 0 ? r.days_overdue : 0;
     return `
-      <div class="td-row" data-cid="${esc(r.customer_id)}" title="Open klant-dossier">
-        <div class="td-urg" style="background:${urgColor}"></div>
-        <div class="td-name-cell">
-          <div class="td-name">${esc(r.customer_name || '—')}</div>
-          <div class="td-invnr">${esc(r.invoice_number || String(r.invoice_id || '').slice(0, 8))}</div>
+      <div class="wbx-case" tabindex="0" role="button" data-cid="${esc(r.customer_id)}" title="Open klant-dossier">
+        <div class="wbx-urg" style="background:${urgColor}"></div>
+        <div class="wbx-who">
+          <div class="wbx-name">${esc(r.customer_name || '—')}</div>
+          <div class="wbx-inv">${esc(r.invoice_number || String(r.invoice_id || '').slice(0, 8))}</div>
         </div>
-        <div class="td-amount">${_tdFmtEurCents(r.open_amount_cents)}</div>
-        <div class="td-days">${esc(daysTxt)}</div>
-        <div><span class="td-stage-pill ${stageClass}">${esc(stageLabel)}</span></div>
-        <div><button class="td-action-btn" type="button">${esc(r.suggested_action || 'Bekijk')}</button></div>
+        <div class="wbx-amt">${_tdFmtEurCents(r.open_amount_cents)}</div>
+        <div class="wbx-late">${daysN}<small>DAGEN TE LAAT</small></div>
+        <div class="wbx-right">
+          <span class="wbx-pill ${pillCls}">${esc(pillLabel)}</span>
+          <button class="wbx-btn wbx-primary wbx-sm" type="button" data-td-actbtn>${esc(primAction)}</button>
+        </div>
       </div>
     `;
   }
@@ -13752,27 +14169,32 @@
     }
   }
 
-  // Panel-DOM: eenmaal in body injecteren. Alle events worden bij elke
-  // render opnieuw gebonden (idempotent) — voorkomt duplicate listeners.
+  // Ronde 1: het case-paneel gebruikt nu twee body-level elementen —
+  // .wbx-scrim (backdrop) + .wbx-sheet (right-slide drawer). Beide krijgen
+  // .open toegevoegd/verwijderd om te tonen/verbergen. Styles zitten in de
+  // .wbx-scoped stylesheet in <head>.
   function _caseEnsurePanel() {
-    let panel = document.getElementById('caseSheetOverlay');
-    if (panel) return panel;
-    panel = document.createElement('div');
-    panel.id = 'caseSheetOverlay';
-    panel.className = 'case-overlay';
-    panel.hidden = true;
-    panel.innerHTML = `
-      <div class="case-backdrop" data-case-close="1"></div>
-      <div class="case-sheet" role="dialog" aria-modal="true" aria-labelledby="caseSheetTitle">
-        <div class="case-sheet-inner" id="caseSheetInner">
-          <div style="padding:32px;text-align:center;color:var(--text-dim)">Laden…</div>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(panel);
-    panel.querySelector('.case-backdrop')?.addEventListener('click', closeCaseSheet);
-    _caseInjectStyles();
-    return panel;
+    let scrim = document.getElementById('caseScrim');
+    let sheet = document.getElementById('caseSheet');
+    if (scrim && sheet) return sheet;
+    if (!scrim) {
+      scrim = document.createElement('div');
+      scrim.id = 'caseScrim';
+      scrim.className = 'wbx-scrim';
+      scrim.addEventListener('click', closeCaseSheet);
+      document.body.appendChild(scrim);
+    }
+    if (!sheet) {
+      sheet = document.createElement('aside');
+      sheet.id = 'caseSheet';
+      sheet.className = 'wbx-sheet';
+      sheet.setAttribute('role', 'dialog');
+      sheet.setAttribute('aria-modal', 'true');
+      sheet.setAttribute('aria-hidden', 'true');
+      sheet.innerHTML = `<div id="caseSheetInner" style="padding:32px;text-align:center;color:var(--wbx-muted)">Laden…</div>`;
+      document.body.appendChild(sheet);
+    }
+    return sheet;
   }
 
   function _caseInjectStyles() {
@@ -13865,8 +14287,11 @@
     _caseState.suggestionAge   = null;
     _caseState.open            = true;
 
-    const panel = _caseEnsurePanel();
-    panel.hidden = false;
+    _caseEnsurePanel();
+    // Toon scrim + sheet via .open class-toggle (prototype-mechanisme).
+    document.getElementById('caseScrim')?.classList.add('open');
+    const sheet = document.getElementById('caseSheet');
+    if (sheet) { sheet.classList.add('open'); sheet.setAttribute('aria-hidden', 'false'); }
     _caseRenderLoading();
 
     // Escape-toets → sluiten (herregistreren zodat we niet blijven stapelen).
@@ -13891,8 +14316,9 @@
       document.removeEventListener('keydown', _caseState.escHandler);
       _caseState.escHandler = null;
     }
-    const panel = document.getElementById('caseSheetOverlay');
-    if (panel) panel.hidden = true;
+    document.getElementById('caseScrim')?.classList.remove('open');
+    const sheet = document.getElementById('caseSheet');
+    if (sheet) { sheet.classList.remove('open'); sheet.setAttribute('aria-hidden', 'true'); }
   }
 
   async function _caseLoadDetail(cid) {
@@ -13950,26 +14376,33 @@
   }
 
   function _caseRenderLoading() {
-    const inner = document.getElementById('caseSheetInner');
-    if (inner) inner.innerHTML = `
-      <div style="padding:32px;text-align:center;color:var(--text-dim);font-size:13px">Klant-dossier laden…</div>
+    const sheet = document.getElementById('caseSheet');
+    if (sheet) sheet.innerHTML = `
+      <div style="padding:32px;text-align:center;color:var(--wbx-muted);font-size:13px">Klant-dossier laden…</div>
     `;
   }
 
+  // Ronde 1: nieuwe .wbx-sheet-structuur (inline). Bypassed de oude
+  // _caseJourneyHtml / _caseInvoiceCardHtml / _caseChatCardHtml / _caseActionBarHtml
+  // helpers — die produceerden .case-*-HTML en zijn nu dead-code (opruimen
+  // kan in Ronde 2). Alle handlers uit _caseWire zijn hier inline
+  // hergebonden (zelfde data-attributes zodat gedrag identiek blijft).
   function _caseRender() {
-    const inner = document.getElementById('caseSheetInner');
-    if (!inner) return;
+    const sheet = document.getElementById('caseSheet');
+    if (!sheet) return;
     if (!_caseState.detail) return _caseRenderLoading();
     if (_caseState.detail._error) {
-      inner.innerHTML = `
-        <div class="case-head">
-          <div class="case-head-title"><h3>Klant-dossier</h3></div>
-          <button class="case-close-btn" type="button" id="caseCloseBtn" aria-label="Sluiten">×</button>
+      sheet.innerHTML = `
+        <div class="wbx-sheet-top">
+          <div class="wbx-row">
+            <button class="wbx-icon-btn" type="button" data-case-close aria-label="Sluiten">✕</button>
+            <div><h2>Klant-dossier</h2></div>
+          </div>
         </div>
-        <div class="case-body">
-          <div style="color:#dc2626">Fout: ${esc(_caseState.detail._error)}</div>
+        <div class="wbx-sheet-body">
+          <div class="wbx-card" style="color:var(--wbx-s-inc-tx)">Fout: ${esc(_caseState.detail._error)}</div>
         </div>`;
-      document.getElementById('caseCloseBtn')?.addEventListener('click', closeCaseSheet);
+      sheet.querySelector('[data-case-close]')?.addEventListener('click', closeCaseSheet);
       return;
     }
 
@@ -13978,40 +14411,145 @@
     const stageSlug = d.pipeline?.stage_slug || 'nieuw';
     const openInvs  = Array.isArray(d.open_invoices) ? d.open_invoices : [];
     const totalOpenCents = openInvs.reduce((s, iv) => s + Math.round((Number(iv.amount_open) || 0) * 100), 0);
-    // Focus-factuur: die uit "Te doen" meegegeven; anders eerste open factuur.
     const focus = _caseState.focusInvoiceId
       ? openInvs.find((iv) => iv.id === _caseState.focusInvoiceId) || openInvs[0] || null
       : openInvs[0] || null;
 
-    const nOpen = openInvs.length;
+    const nOpen   = openInvs.length;
     const isMulti = nOpen >= 2;
-    const name = cust?.display_name || _pipeCustomerDisplayName(cust);
+    const name    = cust?.display_name || _pipeCustomerDisplayName(cust);
 
-    const daysStr = (_caseState.focusDaysOverdue != null && _caseState.focusDaysOverdue >= 0)
-      ? `${_caseState.focusDaysOverdue} dagen te laat`
-      : (focus?.due_date ? _caseDueDateText(focus.due_date) : '');
-    const stagePill = _caseStagePillHtml(stageSlug);
+    const focusAmt   = focus ? Math.round((Number(focus.amount_open) || 0) * 100) : 0;
+    const daysN      = (_caseState.focusDaysOverdue != null && _caseState.focusDaysOverdue >= 0)
+      ? _caseState.focusDaysOverdue
+      : _caseDaysOverdueFrom(focus?.due_date) || 0;
+    const daysStr   = daysN > 0 ? `${daysN} dagen te laat` : (focus?.due_date ? _caseDueDateText(focus.due_date) : '');
 
-    inner.innerHTML = `
-      <div class="case-head">
-        <div class="case-head-title">
-          <h3 id="caseSheetTitle">${esc(name || 'Klant')}</h3>
-          <div class="case-head-subtitle">${esc(focus?.invoice_number || '—')}${daysStr ? ' · ' + esc(daysStr) : ''}</div>
-        </div>
-        <div class="case-head-actions">
-          ${stagePill}
-          <button class="case-close-btn" type="button" id="caseCloseBtn" aria-label="Sluiten (Escape)" title="Sluiten (Escape)">×</button>
+    const pillCls   = _tdPillClassFor(stageSlug);
+    const pillLabel = _tdPillLabelFor(stageSlug);
+    const primary   = _caseSuggestedActionFor(stageSlug);
+
+    // Chat-bubbles (laatste 8 berichten uit inbox-messages-list).
+    const c = _caseState.chat;
+    let chatBubbles = '';
+    if (c.loading) {
+      chatBubbles = `<div style="color:var(--wbx-faint);font-size:13px;padding:6px 0">Gesprek laden…</div>`;
+    } else if (!c.convId) {
+      chatBubbles = `<p style="color:var(--wbx-faint);font-size:13px;margin:0">Nog geen gesprek. Stuur een herinnering of vraag Joost.</p>`;
+    } else if (!c.messages.length) {
+      chatBubbles = `<p style="color:var(--wbx-faint);font-size:13px;margin:0">Gesprek staat open, nog geen berichten (${esc(c.phone || 'WhatsApp')}).</p>`;
+    } else {
+      chatBubbles = c.messages.slice(-8).map((m) => {
+        const dir = m.direction === 'outbound' ? 'wbx-out' : 'wbx-in';
+        const time = _pipeFmtDateTime(m.created_at || m.sent_at);
+        const body = m.body || (m.template_name ? `[template] ${m.template_name}` : (m.media_type ? `[${m.media_type}]` : ''));
+        return `<div class="wbx-msg ${dir}">${esc(body)}<span class="wbx-t">${esc(time)}</span></div>`;
+      }).join('');
+    }
+
+    // Joost-suggestie inline (of hint als er nog geen is).
+    let joostBlock = '';
+    if (_caseState.joostBusy) {
+      joostBlock = `<div class="wbx-joost wbx-stretch"><div class="wbx-jhead"><span class="wbx-jbadge">JOOST</span></div><p>Joost denkt na…</p></div>`;
+    } else if (_caseState.suggestion) {
+      const s = _caseState.suggestion;
+      const conf = Number(s.confidence);
+      const confTxt = isFinite(conf) ? conf.toFixed(2) + ' vertrouwen' : '';
+      const intentLbl = _caseIntentLabel(s.detected_intent || 'other');
+      const showRegBtn = String(s.detected_intent || '') === 'payment_promise' || String(stageSlug || '').toLowerCase() === 'in_gesprek';
+      joostBlock = `
+        <div class="wbx-joost wbx-stretch">
+          <div class="wbx-jhead">
+            <span class="wbx-jbadge">${esc(intentLbl).toUpperCase()}</span>
+            ${confTxt ? `<span class="wbx-conf">${esc(confTxt)}</span>` : ''}
+          </div>
+          <p>${esc(s.suggested_reply || '(geen suggestie)')}</p>
+          <div class="wbx-joost-actions">
+            <button class="wbx-btn wbx-primary wbx-sm" type="button" data-case-joost="send" ${!c.canSend ? 'disabled' : ''}>Verstuur zo</button>
+            <button class="wbx-btn wbx-sm"           type="button" data-case-joost="edit" ${!c.canSend ? 'disabled' : ''}>Bewerken</button>
+            ${showRegBtn ? `<button class="wbx-btn wbx-sm" type="button" data-case-joost="arrangement">Stel regeling voor</button>` : ''}
+          </div>
+        </div>`;
+    } else {
+      joostBlock = `<p style="color:var(--wbx-faint);font-size:13px;margin:0">Nog geen recente Joost-suggestie. Klik "Vraag Joost" onderaan.</p>`;
+    }
+
+    // Statusbalk (prototype-flow): 4 steps → done / here / pending.
+    const FLOW_STEPS = ['nieuw', 'aangemaand', 'in_gesprek', 'einde'];
+    const journeyMap = _caseJourneyMap(stageSlug);
+    const hi = journeyMap.primaryIndex;
+    const endChip = journeyMap.endChip;
+    const endLabel = endChip ? endChip.label : 'Uitkomst';
+    const stepHtml = FLOW_STEPS.map((key, i) => {
+      const stateCls = (i < hi) ? 'wbx-done' : (i === hi ? 'wbx-here' : '');
+      const label = key === 'nieuw' ? 'Nieuw te laat'
+                  : key === 'aangemaand' ? 'Aangemaand'
+                  : key === 'in_gesprek' ? 'In gesprek'
+                  : endLabel;
+      const cell = `<div class="wbx-step ${stateCls}"><span class="wbx-bul"></span>${esc(label)}</div>`;
+      const barCls = (i < hi) ? 'wbx-bar wbx-done' : 'wbx-bar';
+      return i < FLOW_STEPS.length - 1 ? cell + `<span class="${barCls}"></span>` : cell;
+    }).join('');
+
+    // Multi-invoice notitie in factuurkaart.
+    const nOpenNote = isMulti
+      ? `<span style="color:var(--wbx-s-back-tx)">${nOpen} — achterstand, hoort bij <a href="#" data-case-goto="crediteren" style="color:var(--wbx-accent-ink)">opruimactie</a></span>`
+      : `<span>1 — geen achterstand</span>`;
+
+    sheet.innerHTML = `
+      <div class="wbx-sheet-top">
+        <div class="wbx-row">
+          <button class="wbx-icon-btn" type="button" data-case-close aria-label="Sluiten (Escape)" title="Sluiten (Escape)">✕</button>
+          <div style="min-width:0">
+            <h2>${esc(name || 'Klant')}</h2>
+            <div class="wbx-sub">${esc(focus?.invoice_number || '—')}${daysStr ? ' · ' + esc(daysStr) : ''}</div>
+          </div>
+          <div style="flex:1"></div>
+          <span class="wbx-pill ${pillCls}">${esc(pillLabel)}</span>
         </div>
       </div>
-      <div class="case-body">
-        ${_caseJourneyHtml(stageSlug)}
-        ${_caseInvoiceCardHtml(focus, nOpen, totalOpenCents, isMulti)}
-        ${_caseChatCardHtml()}
+
+      <div class="wbx-flow">${stepHtml}</div>
+
+      <div class="wbx-sheet-body">
+        <div class="wbx-card">
+          <h4>De factuur</h4>
+          <div class="wbx-kv"><span class="wbx-k">Factuurnummer</span><span class="wbx-v wbx-mono">${esc(focus?.invoice_number || '—')}</span></div>
+          <div class="wbx-kv"><span class="wbx-k">Bedrag</span><span class="wbx-v wbx-mono">${_tdFmtEurCents(focusAmt)}</span></div>
+          <div class="wbx-kv"><span class="wbx-k">Dagen te laat</span><span class="wbx-v wbx-mono">${daysN}</span></div>
+          <div class="wbx-kv"><span class="wbx-k">Open facturen van deze klant</span><span class="wbx-v">${nOpenNote}</span></div>
+        </div>
+        <div class="wbx-card">
+          <h4>Gesprek</h4>
+          <div style="display:flex;flex-direction:column;gap:9px">
+            ${chatBubbles}
+            ${joostBlock}
+          </div>
+        </div>
       </div>
-      ${_caseActionBarHtml(stageSlug, openInvs, focus)}
+
+      <div class="wbx-sheet-actions">
+        <button class="wbx-btn wbx-primary" type="button" data-case-action="${esc(primary.key)}">${esc(primary.label)}</button>
+        <button class="wbx-btn"              type="button" data-case-action="reminder">Herinnering sturen</button>
+        <button class="wbx-btn"              type="button" data-case-action="ask_joost" ${_caseState.joostBusy ? 'disabled' : ''}>Vraag Joost</button>
+        <button class="wbx-btn wbx-danger"   type="button" data-case-action="to_incasso">Naar incasso</button>
+      </div>
     `;
 
-    _caseWire(stageSlug, focus, openInvs);
+    // Wire handlers (identiek gedrag als Ronde A — puur andere HTML/CSS).
+    sheet.querySelectorAll('[data-case-close]').forEach((b) => b.addEventListener('click', closeCaseSheet));
+    sheet.querySelectorAll('[data-case-goto]').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (el.getAttribute('data-case-goto') === 'crediteren') { closeCaseSheet(); setSubView('crediteren'); }
+      });
+    });
+    sheet.querySelectorAll('[data-case-joost]').forEach((btn) => {
+      btn.addEventListener('click', () => _caseJoostAction(btn.getAttribute('data-case-joost')));
+    });
+    sheet.querySelectorAll('[data-case-action]').forEach((btn) => {
+      btn.addEventListener('click', () => _caseAction(btn.getAttribute('data-case-action')));
+    });
   }
 
   function _caseStagePillHtml(stageSlug) {
