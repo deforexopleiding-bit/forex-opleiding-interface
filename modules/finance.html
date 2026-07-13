@@ -1502,6 +1502,76 @@
       font:500 12px/1.3 var(--wbx-mono);
     }
 
+    /* ======================================================
+       Ronde 3 — Instellingen + Opruimen + Inbox-scope styling.
+       ====================================================== */
+
+    /* Instellingen: 6-card grid */
+    .wbx .wbx-set-grid {
+      display:grid; grid-template-columns:repeat(auto-fill, minmax(270px, 1fr));
+      gap:14px;
+    }
+    .wbx .wbx-set-card {
+      background:#fff; border:1px solid var(--wbx-border);
+      border-radius:var(--wbx-radius); padding:18px;
+      cursor:pointer; transition:border-color .12s;
+      text-align:left; font-family:inherit;
+    }
+    .wbx .wbx-set-card:hover { border-color:var(--wbx-border-strong); }
+    .wbx .wbx-set-card .wbx-set-ico {
+      width:38px; height:38px; border-radius:10px;
+      background:var(--wbx-accent-soft); color:var(--wbx-accent-ink);
+      display:grid; place-items:center; font-size:18px; margin-bottom:12px;
+    }
+    .wbx .wbx-set-card h3 {
+      margin:0 0 4px; font-size:15px; color:var(--wbx-ink); font-weight:600;
+    }
+    .wbx .wbx-set-card p {
+      margin:0; color:var(--wbx-muted); font-size:13px;
+    }
+    .wbx .wbx-set-card .wbx-st {
+      margin-top:11px; font-size:12.5px; font-weight:600;
+    }
+    .wbx .wbx-set-card .wbx-st.wbx-on  { color:var(--wbx-accent-ink); }
+    .wbx .wbx-set-card .wbx-st.wbx-off { color:var(--wbx-faint); }
+
+    /* Opruimen: landing met 2 secties (Crediteren + Incasso) */
+    .wbx .wbx-cleanup-note {
+      background:var(--wbx-accent-soft);
+      border:1px solid #BEE3DC;
+      border-radius:12px;
+      padding:13px 16px; font-size:13.5px;
+      color:var(--wbx-accent-ink);
+      margin-bottom:16px;
+    }
+    .wbx .wbx-cleanup-grid {
+      display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));
+      gap:14px;
+    }
+    .wbx .wbx-cleanup-card {
+      background:#fff; border:1px solid var(--wbx-border);
+      border-radius:var(--wbx-radius); padding:20px;
+    }
+    .wbx .wbx-cleanup-card h2 {
+      margin:0 0 6px; font-size:17px; color:var(--wbx-ink); font-weight:600;
+    }
+    .wbx .wbx-cleanup-card p {
+      margin:0 0 14px; color:var(--wbx-muted); font-size:13.5px; line-height:1.55;
+    }
+    .wbx .wbx-cleanup-card ul {
+      margin:0 0 14px 20px; padding:0;
+      color:var(--wbx-muted); font-size:13px; line-height:1.75;
+    }
+
+    /* Gesprekken (view-inbox) minimale .wbx-scope overrides — geeft de
+       bestaande inbox-huid de prototype-typografie en kaartranden zonder
+       de interne structuur/handlers te wijzigen. Ronde 3 rondt de
+       cosmetische port af; deep interne restyling kan later. */
+    #view-inbox {
+      font-family:'Inter', system-ui, sans-serif;
+      color:var(--wbx-ink);
+    }
+
     /* Toast */
     .wbx-toast {
       position:fixed; bottom:22px; left:50%; transform:translateX(-50%);
@@ -1551,39 +1621,19 @@
     <!-- Platte prototype-nav: Te doen · Acties · Gesprekken · Facturen · Instellingen (+ Meer ▾ blijft voorlopig).
          Mapping op de bestaande sub-keys: Acties → open-acties, Gesprekken → inbox.
          De klik-handlers (wanbetalersSubNav delegated event) blijven werken op data-wb-sub. -->
+    <!-- Ronde 3: platte nav — 5 primaire tabs, geen dropdowns meer.
+         De oude sub-keys (vandaag / pipeline / probleemklanten / arrangements /
+         crediteren / incasso / templates / workflows / geschiedenis / sandbox)
+         blijven in validSubs staan zodat alle deep-links (?sub=…) werken;
+         ze zijn bereikbaar via Instellingen (config-schermen) en Opruimen
+         (crediteren + incasso). Vandaag is opgegaan in Te doen. -->
     <div id="wanbetalersSubNav" class="wbx-nav" style="margin-bottom:18px">
-      <button class="active" data-wb-sub="te-doen"  type="button" title="Te doen">Te doen</button>
-      <button                 data-wb-sub="open-acties" type="button" title="Acties">Acties<span class="wbx-badge" id="wbxNavActiesBadge" hidden>0</span></button>
-      <button                 data-wb-sub="inbox"    type="button" title="Gesprekken">Gesprekken</button>
-      <button                 data-wb-sub="facturen" type="button" title="Facturen">Facturen</button>
-
-      <div class="wb-menu" data-wb-dropdown="meer" style="position:relative">
-        <button class="wb-menu-btn" data-wb-toggle="meer" type="button" aria-expanded="false" aria-haspopup="menu">
-          Meer <i class="ti ti-chevron-down" style="margin-left:2px;font-size:12px"></i>
-        </button>
-        <div class="wb-menu-panel" data-wb-panel="meer" role="menu" hidden>
-          <button class="wb-menu-item" data-wb-sub="vandaag"         type="button" role="menuitem"><i class="ti ti-sun"           style="color:#f59e0b"></i> Vandaag</button>
-          <button class="wb-menu-item" data-wb-sub="pipeline"        type="button" role="menuitem"><i class="ti ti-layout-kanban" style="color:#0ea5e9"></i> Pipeline</button>
-          <button class="wb-menu-item" data-wb-sub="arrangements"    type="button" role="menuitem"><i class="ti ti-calendar-stats" style="color:#8b5cf6"></i> Arrangements</button>
-          <button class="wb-menu-item" data-wb-sub="probleemklanten" type="button" role="menuitem"><i class="ti ti-alert-triangle" style="color:#f59e0b"></i> Probleemklanten</button>
-          <button class="wb-menu-item" data-wb-sub="crediteren"      type="button" role="menuitem"><i class="ti ti-receipt-refund" style="color:#10b981"></i> Crediteren</button>
-          <button class="wb-menu-item" data-wb-sub="incasso"         type="button" role="menuitem" data-perm-key="finance.incasso.manage" hidden><i class="ti ti-gavel" style="color:#dc2626"></i> Incasso</button>
-        </div>
-      </div>
-
+      <button class="active" data-wb-sub="te-doen"     type="button" title="Te doen">Te doen</button>
+      <button                data-wb-sub="open-acties" type="button" title="Acties">Acties<span class="wbx-badge" id="wbxNavActiesBadge" hidden>0</span></button>
+      <button                data-wb-sub="inbox"       type="button" title="Gesprekken">Gesprekken</button>
+      <button                data-wb-sub="facturen"    type="button" title="Facturen">Facturen</button>
       <div class="wbx-nav-spacer"></div>
-
-      <div class="wb-menu" data-wb-dropdown="instellingen" style="position:relative">
-        <button class="wb-menu-btn" data-wb-toggle="instellingen" type="button" aria-expanded="false" aria-haspopup="menu" title="Instellingen">
-          Instellingen <i class="ti ti-chevron-down" style="margin-left:2px;font-size:12px"></i>
-        </button>
-        <div class="wb-menu-panel wb-menu-panel-right" data-wb-panel="instellingen" role="menu" hidden>
-          <button class="wb-menu-item" data-wb-sub="templates"    type="button" role="menuitem"><i class="ti ti-file-text"    style="color:#0ea5e9"></i> Templates</button>
-          <button class="wb-menu-item" data-wb-sub="workflows"    type="button" role="menuitem"><i class="ti ti-git-branch"   style="color:#10b981"></i> Workflows</button>
-          <button class="wb-menu-item" data-wb-sub="geschiedenis" type="button" role="menuitem"><i class="ti ti-history"      style="color:#94a3b8"></i> Geschiedenis</button>
-          <button class="wb-menu-item" data-wb-sub="sandbox"      type="button" role="menuitem" data-super-admin-only hidden><i class="ti ti-flask" style="color:#f59e0b"></i> 🧪 Sandbox</button>
-        </div>
-      </div>
+      <button                data-wb-sub="instellingen" type="button" title="Instellingen">Instellingen</button>
     </div>
     <style>
       .wb-menu-btn { display:inline-flex; align-items:center; gap:4px; }
@@ -1601,14 +1651,16 @@
          'wb-sub-actie' bestaat NIET meer als aparte visible host — de Actie
          vandaag-widget wordt nu in Vandaag gemount (zelfde renderer, andere
          host-id via mountDunActiesHost(hostId)). -->
-    <div id="wb-sub-open-acties" hidden></div>
-    <div id="wb-sub-pipeline"    hidden></div>
-    <div id="wb-sub-vandaag"     hidden></div>
-    <div id="wb-sub-sandbox"     hidden></div>
-    <div id="wb-sub-incasso"     hidden></div>
-    <div id="wb-sub-crediteren"  hidden></div>
-    <div id="wb-sub-te-doen"     hidden></div>
-    <div id="wb-sub-facturen"    hidden></div>
+    <div id="wb-sub-open-acties"  hidden></div>
+    <div id="wb-sub-pipeline"     hidden></div>
+    <div id="wb-sub-vandaag"      hidden></div>
+    <div id="wb-sub-sandbox"      hidden></div>
+    <div id="wb-sub-incasso"      hidden></div>
+    <div id="wb-sub-crediteren"   hidden></div>
+    <div id="wb-sub-te-doen"      hidden></div>
+    <div id="wb-sub-facturen"     hidden></div>
+    <div id="wb-sub-instellingen" hidden></div>
+    <div id="wb-sub-opruimen"     hidden></div>
   </div>
 
   <!-- ===== Klanten-view (Groep B: thin view binnen Finance) =====
@@ -3767,7 +3819,7 @@
   // (overzicht/probleemklanten/workflows/templates/geschiedenis/arrangements)
   // blijft volledig intact onder de 'overzicht' sub-tab.
   function setSubView(sub) {
-    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis', 'sandbox', 'incasso', 'crediteren', 'te-doen', 'facturen'];
+    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis', 'sandbox', 'incasso', 'crediteren', 'te-doen', 'facturen', 'instellingen', 'opruimen'];
     if (!validSubs.includes(sub)) sub = 'vandaag';
     // Backward-compat: deep-link ?sub=actie is nu opgenomen in Vandaag —
     // redirect naar 'vandaag' zodat de zichtbare view klopt. 'overzicht'
@@ -3803,13 +3855,15 @@
     const dunningSubNav = document.getElementById('dunningSubNav');
 
     // Default: alles uit, dan target weer aan.
-    const vPipeline    = document.getElementById('wb-sub-pipeline');
-    const vVandaag     = document.getElementById('wb-sub-vandaag');
-    const vSandbox     = document.getElementById('wb-sub-sandbox');
-    const vIncasso     = document.getElementById('wb-sub-incasso');
-    const vCrediteren  = document.getElementById('wb-sub-crediteren');
-    const vTeDoen      = document.getElementById('wb-sub-te-doen');
-    const vFacturen    = document.getElementById('wb-sub-facturen');
+    const vPipeline     = document.getElementById('wb-sub-pipeline');
+    const vVandaag      = document.getElementById('wb-sub-vandaag');
+    const vSandbox      = document.getElementById('wb-sub-sandbox');
+    const vIncasso      = document.getElementById('wb-sub-incasso');
+    const vCrediteren   = document.getElementById('wb-sub-crediteren');
+    const vTeDoen       = document.getElementById('wb-sub-te-doen');
+    const vFacturen     = document.getElementById('wb-sub-facturen');
+    const vInstellingen = document.getElementById('wb-sub-instellingen');
+    const vOpruimen     = document.getElementById('wb-sub-opruimen');
     if (vInbox)        vInbox.hidden        = true;
     if (vDunning)      vDunning.hidden      = true;
     if (vOpenActies)   vOpenActies.hidden   = true;
@@ -3820,6 +3874,8 @@
     if (vCrediteren)   vCrediteren.hidden   = true;
     if (vTeDoen)       vTeDoen.hidden       = true;
     if (vFacturen)     vFacturen.hidden     = true;
+    if (vInstellingen) vInstellingen.hidden = true;
+    if (vOpruimen)     vOpruimen.hidden     = true;
 
     // Sub-nav layering fix: bij Wanbetalers-wrapper actief verbergen we de
     // interne dunningSubNav (Overzicht/Probleemklanten/Workflows/Templates/
@@ -3888,6 +3944,12 @@
     } else if (sub === 'facturen') {
       if (vFacturen) vFacturen.hidden = false;
       mountFacturenHost();
+    } else if (sub === 'instellingen') {
+      if (vInstellingen) vInstellingen.hidden = false;
+      mountInstellingenHubHost();
+    } else if (sub === 'opruimen') {
+      if (vOpruimen) vOpruimen.hidden = false;
+      mountOpruimenHost();
     } else { // overzicht (deep-link backward-compat: niet meer in de nav,
              // maar blijft functioneel).
       if (vDunning) vDunning.hidden = false;
@@ -14129,7 +14191,7 @@
           <button type="button" id="tdCampaignOpenBtn">Opruimen →</button>
         </div>
       ` : '';
-      document.getElementById('tdCampaignOpenBtn')?.addEventListener('click', () => setSubView('crediteren'));
+      document.getElementById('tdCampaignOpenBtn')?.addEventListener('click', () => setSubView('opruimen'));
     }
 
     if (list.length === 0) {
@@ -14259,6 +14321,106 @@
     data     : null,
     error    : null,
   };
+
+  // ─────────────────────────────────────────────────────────────────
+  // Ronde 3 — Instellingen-hub (kaartenraster) + Opruimen (landing).
+  // Elke Instellingen-kaart opent het VOLLEDIGE bestaande scherm; alle
+  // handlers/endpoints ongewijzigd. Opruimen bundelt de bestaande
+  // Crediteren- en Incasso-schermen achter één ingang.
+  // ─────────────────────────────────────────────────────────────────
+  const INSTEL_CARDS = [
+    { key:'joost',     ic:'💬', label:'Joost — de toon',      desc:'Hoe Joost klanten aanspreekt en wanneer hij zelf mag antwoorden. Persona, systeem-prompt, model, autonomie per intent, arrangement-mandaat, communicatie-limieten en feature-flags.', target:'joost-admin' },
+    { key:'workflows', ic:'⏱️', label:'Wanneer starten & regels', desc:'De automatische stappen: wanneer welke aanmaning of actie afgaat.', target:'workflows' },
+    { key:'templates', ic:'✉️', label:'Berichten',            desc:'Aanmaan- en briefteksten (incl. WIK-14-dagen en BE-eerste-herinnering).', target:'templates' },
+    { key:'bureaus',   ic:'🏢', label:'Incassobureaus',       desc:'Partners (NL/BE) waar dossiers naartoe gaan. Beheer opent binnen Incasso.', target:'incasso' },
+    { key:'sandbox',   ic:'🧪', label:'Testmodus',            desc:'Oefen de hele flow op een testklant — seed, simuleer, bulk, betaald markeren, crediteerronde-simulatie, reset, dry-run-schakelaar.', target:'sandbox', superAdmin:true },
+    { key:'log',       ic:'📜', label:'Geschiedenis & log',   desc:'Wat er is verstuurd, gewijzigd en besloten — met tijdstempels.', target:'geschiedenis' },
+  ];
+
+  function mountInstellingenHubHost() {
+    const host = document.getElementById('wb-sub-instellingen');
+    if (!host) return;
+    host.innerHTML = `
+      <div class="wbx-page-head">
+        <h1>Instellingen</h1>
+        <p>Alles wat het proces stuurt, op één plek. Klik een kaart om te bewerken. Oefen veilig in de testmodus voordat je live gaat.</p>
+      </div>
+      <div class="wbx-set-grid" id="instelCardGrid"></div>
+    `;
+
+    const grid = document.getElementById('instelCardGrid');
+    if (!grid) return;
+    grid.innerHTML = INSTEL_CARDS.map((c) => `
+      <button type="button" class="wbx-set-card" data-instel-target="${esc(c.target)}" data-instel-key="${esc(c.key)}" ${c.superAdmin ? 'data-super-admin-only hidden' : ''}>
+        <div class="wbx-set-ico">${c.ic}</div>
+        <h3>${esc(c.label)}</h3>
+        <p>${esc(c.desc)}</p>
+      </button>
+    `).join('');
+
+    // Super_admin gating voor Sandbox-kaart (zelfde patroon als de oude
+    // Instellingen-dropdown). Fail-open: als RBAC-check faalt, kaart blijft
+    // verborgen — matcht bestaand gedrag.
+    (async () => {
+      try {
+        const profile = window.AuthShared ? await window.AuthShared.getProfile() : null;
+        if (profile?.role === 'super_admin') {
+          document.querySelectorAll('#instelCardGrid [data-super-admin-only]').forEach((el) => { el.hidden = false; });
+        }
+      } catch (_) { /* fail-soft */ }
+    })();
+
+    grid.querySelectorAll('[data-instel-target]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const target = btn.getAttribute('data-instel-target');
+        if (target === 'joost-admin') {
+          // Joost-config leeft in /modules/admin.html (bestaand admin-scherm).
+          // Open in nieuwe tab zodat de wanbetalers-context bewaard blijft.
+          window.open('/modules/admin.html#joost-ai', '_blank', 'noopener');
+          return;
+        }
+        setSubView(target);
+      });
+    });
+  }
+
+  function mountOpruimenHost() {
+    const host = document.getElementById('wb-sub-opruimen');
+    if (!host) return;
+    host.innerHTML = `
+      <div class="wbx-page-head">
+        <h1>Opruimen</h1>
+        <p>De eenmalige opruiming van de achterstand. Klanten met meerdere open facturen krijg je hier weg via crediteren of incasso — allebei met preview en dry-run.</p>
+      </div>
+      <div class="wbx-cleanup-note">💡 Klanten met ≥2 open facturen horen bij de opruimactie. Crediteren houdt de restschuld in beeld; incasso maakt een dossier aan (met WIK-brief indien nodig).</div>
+      <div class="wbx-cleanup-grid">
+        <div class="wbx-cleanup-card">
+          <h2>Crediteren</h2>
+          <p>Selecteer klanten, kies per rij wat er gecrediteerd wordt (dry-run of live). Facturen worden in Teamleader gecrediteerd, het abonnement wordt verlengd, en de restschuld wordt vastgelegd in <code>dunning_credited_debt</code>.</p>
+          <ul>
+            <li>Preview vóór boeken (dry-run)</li>
+            <li>Bulk-selectie + per-klant abo-keuze</li>
+            <li>Restschuld zichtbaar op klant-dossier + PDF</li>
+          </ul>
+          <button type="button" class="wbx-btn wbx-primary" data-opruim-go="crediteren">Open crediteer-overzicht →</button>
+        </div>
+        <div class="wbx-cleanup-card">
+          <h2>Incasso</h2>
+          <p>Alle dossiers, statussen, en de automatische route. Handmatig dossier aanmaken, PDF genereren, mailen naar bureau, WIK/BE-brief versturen, bureau-beheer.</p>
+          <ul>
+            <li>Alle dossiers en statussen</li>
+            <li>Auto-route (config + cron)</li>
+            <li>PDF + e-mail + WIK/BE-brief</li>
+            <li>Bureaus beheren</li>
+          </ul>
+          <button type="button" class="wbx-btn wbx-primary" data-opruim-go="incasso">Open incasso-dossiers →</button>
+        </div>
+      </div>
+    `;
+    host.querySelectorAll('[data-opruim-go]').forEach((btn) => {
+      btn.addEventListener('click', () => setSubView(btn.getAttribute('data-opruim-go')));
+    });
+  }
 
   function mountFacturenHost() {
     const host = document.getElementById('wb-sub-facturen');
