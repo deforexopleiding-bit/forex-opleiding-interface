@@ -259,22 +259,76 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
   // — bestaande records blijven ongewijzigd). Voordelen tov een aparte
   // cron: draait al dagelijks, heeft de overdue-lijst al in scope,
   // FAIL-SOFT dus geen risico voor de engine zelf.
+  //
+  // Auto-instroom-verfijning: alleen klanten met PRECIES 1 open factuur
+  // stromen in. ≥2 open facturen → overgeslagen (hoort bij de massa-
+  // opruiming / crediteerronde). Ook overslaan als de klant al een OPEN
+  // incasso-dossier heeft (defensieve extra bovenop de idempotency van
+  // ensurePipelineCustomer). is_test-scope volgt runEngine's scope-param
+  // (production/test/back-compat), consistent met fetchOpenInvoices.
   try {
     const { isAutoEnabled, ensurePipelineCustomer } = await import('./dunning-pipeline.js');
     if (await isAutoEnabled('on_overdue_to_nieuw')) {
       const today = new Date().toISOString().slice(0, 10);
-      const { data: overdueRows } = await supabaseAdmin
+      let overdueQ = supabaseAdmin
         .from('invoices')
         .select('customer_id')
-        .in('status', ['open', 'partially_paid', 'overdue'])
+        .in('status', OPEN_STATUSES)
         .lt('due_date', today);
+      if      (scope === 'production') overdueQ = overdueQ.eq('is_test', false);
+      else if (scope === 'test')       overdueQ = overdueQ.eq('is_test', true);
+      const { data: overdueRows } = await overdueQ;
       const uniqueCustIds = Array.from(new Set(
         (overdueRows || []).map((r) => r.customer_id).filter(Boolean)
       ));
-      for (const cid of uniqueCustIds) {
-        if (elapsed(startedAt) > abortMs) break;
-        await ensurePipelineCustomer(cid);
+
+      let addedCount = 0, skippedMulti = 0, skippedIncasso = 0;
+
+      if (uniqueCustIds.length > 0) {
+        // Aantal open facturen per klant — één query op invoices, client-side
+        // tellen. Zelfde is_test-scope als de overdue-query hierboven.
+        let countQ = supabaseAdmin
+          .from('invoices')
+          .select('customer_id')
+          .in('customer_id', uniqueCustIds)
+          .in('status', OPEN_STATUSES);
+        if      (scope === 'production') countQ = countQ.eq('is_test', false);
+        else if (scope === 'test')       countQ = countQ.eq('is_test', true);
+        const { data: openInvRows } = await countQ;
+        const openCountByCust = new Map();
+        for (const r of openInvRows || []) {
+          if (!r?.customer_id) continue;
+          openCountByCust.set(r.customer_id, (openCountByCust.get(r.customer_id) || 0) + 1);
+        }
+
+        // Klanten met een niet-terminaal incasso-dossier → skippen. Fail-
+        // soft: tabel bestaat pas vanaf migratie 037; oudere DB's raken
+        // dit blok nooit met een crash.
+        const TERMINAL_INCASSO_STATUSES = ['betaald', 'afgeschreven', 'oninbaar', 'geretourneerd'];
+        const inIncasso = new Set();
+        try {
+          const { data: dossiers } = await supabaseAdmin
+            .from('dunning_incasso_dossiers')
+            .select('customer_id, status')
+            .in('customer_id', uniqueCustIds)
+            .not('status', 'in', `(${TERMINAL_INCASSO_STATUSES.map((s) => `"${s}"`).join(',')})`);
+          for (const d of dossiers || []) if (d?.customer_id) inIncasso.add(d.customer_id);
+        } catch (e) {
+          console.warn('[dunning-engine] incasso-lookup soft-fail:', e?.message || e);
+        }
+
+        for (const cid of uniqueCustIds) {
+          if (elapsed(startedAt) > abortMs) break;
+          const cnt = openCountByCust.get(cid) || 0;
+          if (cnt === 0)      continue;                             // shouldn't happen, defensief
+          if (cnt >= 2)     { skippedMulti++;   continue; }
+          if (inIncasso.has(cid)) { skippedIncasso++; continue; }
+          await ensurePipelineCustomer(cid);
+          addedCount++;
+        }
       }
+
+      console.log(`[dunning-engine] auto-instroom: ${addedCount} toegevoegd, ${skippedMulti} overgeslagen (>1 factuur), ${skippedIncasso} overgeslagen (in incasso)`);
     }
   } catch (e) {
     console.warn('[dunning-engine] pipeline-hook overdue soft-fail:', e?.message || e);
