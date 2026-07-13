@@ -1779,6 +1779,7 @@
     <div id="wb-sub-facturen"     hidden></div>
     <div id="wb-sub-instellingen" hidden></div>
     <div id="wb-sub-opruimen"     hidden></div>
+    <div id="wb-sub-joost"        hidden></div>
   </div>
 
   <!-- ===== Klanten-view (Groep B: thin view binnen Finance) =====
@@ -3937,7 +3938,7 @@
   // (overzicht/probleemklanten/workflows/templates/geschiedenis/arrangements)
   // blijft volledig intact onder de 'overzicht' sub-tab.
   function setSubView(sub) {
-    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis', 'sandbox', 'incasso', 'crediteren', 'te-doen', 'facturen', 'instellingen', 'opruimen'];
+    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis', 'sandbox', 'incasso', 'crediteren', 'te-doen', 'facturen', 'instellingen', 'opruimen', 'joost'];
     if (!validSubs.includes(sub)) sub = 'vandaag';
     // Backward-compat: deep-link ?sub=actie is nu opgenomen in Vandaag —
     // redirect naar 'vandaag' zodat de zichtbare view klopt. 'overzicht'
@@ -3982,6 +3983,7 @@
     const vFacturen     = document.getElementById('wb-sub-facturen');
     const vInstellingen = document.getElementById('wb-sub-instellingen');
     const vOpruimen     = document.getElementById('wb-sub-opruimen');
+    const vJoost        = document.getElementById('wb-sub-joost');
     if (vInbox)        vInbox.hidden        = true;
     if (vDunning)      vDunning.hidden      = true;
     if (vOpenActies)   vOpenActies.hidden   = true;
@@ -3994,6 +3996,7 @@
     if (vFacturen)     vFacturen.hidden     = true;
     if (vInstellingen) vInstellingen.hidden = true;
     if (vOpruimen)     vOpruimen.hidden     = true;
+    if (vJoost)        vJoost.hidden        = true;
 
     // Sub-nav layering fix: bij Wanbetalers-wrapper actief verbergen we de
     // interne dunningSubNav (Overzicht/Probleemklanten/Workflows/Templates/
@@ -4068,6 +4071,12 @@
     } else if (sub === 'opruimen') {
       if (vOpruimen) vOpruimen.hidden = false;
       mountOpruimenHost();
+    } else if (sub === 'joost') {
+      // Punt 3 herontwerp: Joost-config inline via de gedeelde
+      // finance-instellingen.js. Zelfde endpoints (module=finance) als
+      // agency center → wijzigingen synchroniseren automatisch.
+      if (vJoost) vJoost.hidden = false;
+      mountJoostConfigHost();
     } else { // overzicht (deep-link backward-compat: niet meer in de nav,
              // maar blijft functioneel).
       if (vDunning) vDunning.hidden = false;
@@ -14453,7 +14462,7 @@
   // Crediteren- en Incasso-schermen achter één ingang.
   // ─────────────────────────────────────────────────────────────────
   const INSTEL_CARDS = [
-    { key:'joost',     ic:'💬', label:'Joost — de toon',      desc:'Hoe Joost klanten aanspreekt en wanneer hij zelf mag antwoorden. Persona, systeem-prompt, model, autonomie per intent, arrangement-mandaat, communicatie-limieten en feature-flags.', target:'joost-admin' },
+    { key:'joost',     ic:'💬', label:'Joost — de toon',      desc:'Hoe Joost klanten aanspreekt en wanneer hij zelf mag antwoorden. Persona, systeem-prompt, model, autonomie per intent, arrangement-mandaat, communicatie-limieten en feature-flags.', target:'joost' },
     { key:'workflows', ic:'⏱️', label:'Wanneer starten & regels', desc:'De automatische stappen: wanneer welke aanmaning of actie afgaat.', target:'workflows' },
     { key:'templates', ic:'✉️', label:'Berichten',            desc:'Aanmaan- en briefteksten (incl. WIK-14-dagen en BE-eerste-herinnering).', target:'templates' },
     { key:'bureaus',   ic:'🏢', label:'Incassobureaus',       desc:'Partners (NL/BE) waar dossiers naartoe gaan. Beheer opent binnen Incasso.', target:'incasso' },
@@ -14497,15 +14506,48 @@
     grid.querySelectorAll('[data-instel-target]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const target = btn.getAttribute('data-instel-target');
-        if (target === 'joost-admin') {
-          // Joost-config leeft in /modules/admin.html (bestaand admin-scherm).
-          // Open in nieuwe tab zodat de wanbetalers-context bewaard blijft.
-          window.open('/modules/admin.html#joost-ai', '_blank', 'noopener');
-          return;
-        }
-        setSubView(target);
+        // Backward-compat alias: oude bookmarks / seed-data met 'joost-admin'
+        // openen nu de inline Joost-sub (Punt 3 herontwerp).
+        const resolved = (target === 'joost-admin') ? 'joost' : target;
+        setSubView(resolved);
       });
     });
+  }
+
+  // Punt 3 herontwerp: Joost-config inline in wanbetalers via de gedeelde
+  // shared/finance-instellingen.js — 1-op-1 dezelfde velden en dezelfde
+  // endpoints (module=finance) als in agency center, dus wijzigingen zijn
+  // automatisch gesynchroniseerd. Idempotent: window.FinanceInstellingen.mount
+  // guardt op host-referentie, dus meerdere clicks doen niets extra.
+  function mountJoostConfigHost() {
+    const host = document.getElementById('wb-sub-joost');
+    if (!host) return;
+    if (!host.__joostShellBuilt) {
+      host.innerHTML = `
+        <div class="wbx-page-head">
+          <h1>Joost — de toon</h1>
+          <p>Hoe Joost klanten aanspreekt en wanneer hij zelf mag antwoorden. Persona, systeem-prompt, model, autonomie per intent, arrangement-mandaat, communicatie-limieten en feature-flags. Deze instellingen zijn identiek aan die in agency center.</p>
+        </div>
+        <!-- Verberg de top-level fi-tabs (Joost/Templates/Connection) die
+             FinanceInstellingen normaal boven z'n content zet — hier tonen
+             we alleen Joost. De interne Joost sub-strip (Algemeen/Autonomy/
+             Decisions) blijft zichtbaar want die heeft geen #fiTabs id. -->
+        <style>#wb-sub-joost #fiTabs { display:none !important; }</style>
+        <div id="wb-sub-joost-mount"></div>
+      `;
+      host.__joostShellBuilt = true;
+    }
+    const mountEl = document.getElementById('wb-sub-joost-mount');
+    if (!mountEl) return;
+    if (typeof window.FinanceInstellingen?.mount !== 'function') {
+      mountEl.innerHTML = '<div style="padding:20px;color:var(--wbx-faint);font-size:13px">Joost-config kan niet geladen worden — shared/finance-instellingen.js ontbreekt.</div>';
+      return;
+    }
+    try { window.FinanceInstellingen.mount({ host: mountEl }); }
+    catch (e) {
+      console.error('[mountJoostConfigHost]', e);
+      mountEl.innerHTML = `<div style="padding:20px;color:var(--wbx-s-inc-tx);font-size:13px">Joost-config laden mislukt: ${esc(e?.message || 'onbekend')}</div>`;
+    }
   }
 
   function mountOpruimenHost() {
