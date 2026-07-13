@@ -1087,19 +1087,24 @@
   <!-- ===== Wanbetalers wrapper (nav-herontwerp: 3 hoofdtabs + Meer + Instellingen) ===== -->
   <div id="view-wanbetalers" hidden>
     <div class="sr-segments" id="wanbetalersSubNav" style="margin-bottom:18px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-      <button class="sr-seg"        data-wb-sub="te-doen" type="button" title="Te doen"><i class="ti ti-checkbox"></i> Te doen</button>
-      <button class="sr-seg active" data-wb-sub="vandaag"  type="button" title="Vandaag"><i class="ti ti-sun"></i> Vandaag</button>
-      <button class="sr-seg"        data-wb-sub="pipeline" type="button" title="Pipeline"><i class="ti ti-layout-kanban"></i> Pipeline</button>
-      <button class="sr-seg"        data-wb-sub="inbox"    type="button" title="Inbox"><i class="ti ti-brand-whatsapp"></i> Inbox</button>
+      <!-- Brok B stap 5: platte nav — Te doen (default) · Facturen · Meer ▾ · Instellingen ⚙.
+           Alle sub-views die vroeger primair waren (Vandaag/Pipeline/Inbox/Open Acties/
+           Arrangements/Probleemklanten/Crediteren/Incasso) zijn nu bereikbaar onder Meer ▾;
+           config-views (Templates/Workflows/Geschiedenis/Sandbox) onder Instellingen ⚙. -->
+      <button class="sr-seg active" data-wb-sub="te-doen"  type="button" title="Te doen"><i class="ti ti-checkbox"></i> Te doen</button>
+      <button class="sr-seg"        data-wb-sub="facturen" type="button" title="Facturen"><i class="ti ti-file-invoice"></i> Facturen</button>
 
       <div class="wb-menu" data-wb-dropdown="meer" style="position:relative">
         <button class="sr-seg wb-menu-btn" data-wb-toggle="meer" type="button" aria-expanded="false" aria-haspopup="menu">
           Meer <i class="ti ti-chevron-down" style="margin-left:2px"></i>
         </button>
         <div class="wb-menu-panel" data-wb-panel="meer" role="menu" hidden>
-          <button class="wb-menu-item" data-wb-sub="probleemklanten" type="button" role="menuitem"><i class="ti ti-alert-triangle" style="color:#f59e0b"></i> Probleemklanten</button>
+          <button class="wb-menu-item" data-wb-sub="vandaag"         type="button" role="menuitem"><i class="ti ti-sun"           style="color:#f59e0b"></i> Vandaag</button>
+          <button class="wb-menu-item" data-wb-sub="pipeline"        type="button" role="menuitem"><i class="ti ti-layout-kanban" style="color:#0ea5e9"></i> Pipeline</button>
+          <button class="wb-menu-item" data-wb-sub="inbox"           type="button" role="menuitem"><i class="ti ti-brand-whatsapp" style="color:#10b981"></i> Inbox</button>
+          <button class="wb-menu-item" data-wb-sub="open-acties"     type="button" role="menuitem"><i class="ti ti-checklist"     style="color:#0ea5e9"></i> Open Acties</button>
           <button class="wb-menu-item" data-wb-sub="arrangements"    type="button" role="menuitem"><i class="ti ti-calendar-stats" style="color:#8b5cf6"></i> Arrangements</button>
-          <button class="wb-menu-item" data-wb-sub="open-acties"     type="button" role="menuitem"><i class="ti ti-checklist" style="color:#0ea5e9"></i> Open Acties</button>
+          <button class="wb-menu-item" data-wb-sub="probleemklanten" type="button" role="menuitem"><i class="ti ti-alert-triangle" style="color:#f59e0b"></i> Probleemklanten</button>
           <button class="wb-menu-item" data-wb-sub="crediteren"      type="button" role="menuitem"><i class="ti ti-receipt-refund" style="color:#10b981"></i> Crediteren</button>
           <button class="wb-menu-item" data-wb-sub="incasso"         type="button" role="menuitem" data-perm-key="finance.incasso.manage" hidden><i class="ti ti-gavel" style="color:#dc2626"></i> Incasso</button>
         </div>
@@ -1140,6 +1145,7 @@
     <div id="wb-sub-incasso"     hidden></div>
     <div id="wb-sub-crediteren"  hidden></div>
     <div id="wb-sub-te-doen"     hidden></div>
+    <div id="wb-sub-facturen"    hidden></div>
   </div>
 
   <!-- ===== Klanten-view (Groep B: thin view binnen Finance) =====
@@ -3193,7 +3199,10 @@
       wireWanbetalersOnce();
       // Default sub als nog niet gekozen — sinds nav-herontwerp is 'vandaag'
       // het startscherm (Vandaag combineert KPI + Actie).
-      const initialSub = _wbActiveSub || 'vandaag';
+      // Brok B stap 5: default startscherm is 'te-doen' (was 'vandaag').
+      // Deep-links (?sub=…) blijven werken; _wbActiveSub wordt eerder gezet
+      // in DOMContentLoaded als ?sub aanwezig is (regel ~12840).
+      const initialSub = _wbActiveSub || 'te-doen';
       setSubView(initialSub);
     } else {
       // Stop inbox auto-poll wanneer we de inbox-tab verlaten — bespaart requests.
@@ -3295,7 +3304,7 @@
   // (overzicht/probleemklanten/workflows/templates/geschiedenis/arrangements)
   // blijft volledig intact onder de 'overzicht' sub-tab.
   function setSubView(sub) {
-    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis', 'sandbox', 'incasso', 'crediteren', 'te-doen'];
+    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis', 'sandbox', 'incasso', 'crediteren', 'te-doen', 'facturen'];
     if (!validSubs.includes(sub)) sub = 'vandaag';
     // Backward-compat: deep-link ?sub=actie is nu opgenomen in Vandaag —
     // redirect naar 'vandaag' zodat de zichtbare view klopt. 'overzicht'
@@ -3307,7 +3316,9 @@
     // Sub-nav highlight — 3 hoofdtabs krijgen active als sub matcht;
     // dropdowns (Meer / Instellingen) worden actief zodra hun sub-key
     // in de bijbehorende groep zit.
-    const MEER_SUBS  = ['probleemklanten', 'arrangements', 'open-acties', 'crediteren', 'incasso'];
+    // Brok B stap 5: Meer ▾ groepeert alle secondary sub-views (nav-platslag).
+    // Vandaag/Pipeline/Inbox waren primair, staan nu ook onder Meer ▾.
+    const MEER_SUBS  = ['vandaag', 'pipeline', 'inbox', 'open-acties', 'arrangements', 'probleemklanten', 'crediteren', 'incasso'];
     const INST_SUBS  = ['templates', 'workflows', 'geschiedenis', 'sandbox'];
     document.querySelectorAll('#wanbetalersSubNav .sr-seg').forEach(b => {
       const btnSub = b.dataset.wbSub;
@@ -3333,6 +3344,7 @@
     const vIncasso     = document.getElementById('wb-sub-incasso');
     const vCrediteren  = document.getElementById('wb-sub-crediteren');
     const vTeDoen      = document.getElementById('wb-sub-te-doen');
+    const vFacturen    = document.getElementById('wb-sub-facturen');
     if (vInbox)        vInbox.hidden        = true;
     if (vDunning)      vDunning.hidden      = true;
     if (vOpenActies)   vOpenActies.hidden   = true;
@@ -3342,6 +3354,7 @@
     if (vIncasso)      vIncasso.hidden      = true;
     if (vCrediteren)   vCrediteren.hidden   = true;
     if (vTeDoen)       vTeDoen.hidden       = true;
+    if (vFacturen)     vFacturen.hidden     = true;
 
     // Sub-nav layering fix: bij Wanbetalers-wrapper actief verbergen we de
     // interne dunningSubNav (Overzicht/Probleemklanten/Workflows/Templates/
@@ -3407,6 +3420,9 @@
     } else if (sub === 'te-doen') {
       if (vTeDoen) vTeDoen.hidden = false;
       mountTeDoenHost();
+    } else if (sub === 'facturen') {
+      if (vFacturen) vFacturen.hidden = false;
+      mountFacturenHost();
     } else { // overzicht (deep-link backward-compat: niet meer in de nav,
              // maar blijft functioneel).
       if (vDunning) vDunning.hidden = false;
@@ -13161,6 +13177,7 @@
     if (!host) return;
     if (!_tdState.wired) {
       host.innerHTML = _tdShellHtml();
+      _wbInjectSharedStyles();  // Brok B stap 6: gedeelde clean-huid met Facturen
       _tdInjectStyles();
       _tdWireShell();
       _tdState.wired = true;
@@ -13375,6 +13392,300 @@
     const n = Number(cents);
     if (!isFinite(n)) return '—';
     return '€ ' + (n / 100).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Brok B stap 4 — Facturen-sub-view (nieuw, additief).
+  // Toggle Per factuur / Per klant + status-filters (fase + achterstand).
+  // Rij-klik opent openCaseSheet (zelfde als "Te doen"). Endpoint:
+  // /api/wanbetalers-invoices-list. Geen andere finance-tabs aangeraakt.
+  // Clean-huid (stap 6) via gedeelde .wb-pill/.wb-mono classes en de
+  // bestaande app-tokens — geen nieuwe accent-kleur.
+  // ────────────────────────────────────────────────────────────────────
+  const _fcState = {
+    wired    : false,
+    loading  : false,
+    view     : 'invoice',   // 'invoice' | 'customer'
+    stage    : '',          // '' = alle, of één slug
+    backlog  : false,
+    data     : null,
+    error    : null,
+  };
+
+  function mountFacturenHost() {
+    const host = document.getElementById('wb-sub-facturen');
+    if (!host) return;
+    if (!_fcState.wired) {
+      host.innerHTML = _fcShellHtml();
+      _wbInjectSharedStyles();
+      _fcInjectStyles();
+      _fcWireShell();
+      _fcState.wired = true;
+    }
+    loadFacturen();
+  }
+
+  function _fcShellHtml() {
+    return `
+      <div class="wb-wrap">
+        <div class="wb-header">
+          <div>
+            <h2>Facturen</h2>
+            <p class="wb-subtitle">Alle open, te-late facturen. Wissel tussen weergave per factuur of per klant, en filter op fase of achterstand.</p>
+          </div>
+          <button class="sr-ibtn" id="fcRefreshBtn" type="button" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+        </div>
+
+        <div class="wb-kpis" id="fcKpis"></div>
+
+        <div class="wb-toolbar">
+          <div class="sr-segments wb-viewseg">
+            <button class="sr-seg active" data-fc-view="invoice"  type="button"><i class="ti ti-file-invoice"></i> Per factuur</button>
+            <button class="sr-seg"        data-fc-view="customer" type="button"><i class="ti ti-users"></i> Per klant</button>
+          </div>
+          <div class="wb-toolbar-right">
+            <select id="fcStageSel" class="fin-input" title="Fase-filter">
+              <option value="">Alle fases</option>
+              <option value="nieuw">Nieuw</option>
+              <option value="aangemaand">Aangemaand</option>
+              <option value="in_gesprek">In gesprek</option>
+              <option value="regeling">Regeling</option>
+              <option value="brief_verstuurd">Brief verstuurd</option>
+            </select>
+            <label class="wb-toggle-lbl">
+              <input type="checkbox" id="fcBacklogChk" /> Alleen achterstand (≥2)
+            </label>
+          </div>
+        </div>
+
+        <div id="fcBody"></div>
+        <div id="fcMeta" class="wb-meta"></div>
+      </div>
+    `;
+  }
+
+  function _fcInjectStyles() {
+    if (document.getElementById('fc-facturen-styles')) return;
+    const st = document.createElement('style');
+    st.id = 'fc-facturen-styles';
+    st.textContent = `
+      .wb-viewseg { flex-shrink:0; }
+      .wb-toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+      .wb-toolbar-right { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+      .wb-toggle-lbl { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:var(--text-dim); }
+      /* Facturen-lijst (per factuur + per klant delen deze structuur) */
+      .fc-list { display:flex; flex-direction:column; gap:8px; }
+      .fc-row  { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) 130px 90px 150px; align-items:center; gap:14px; padding:12px 14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; cursor:pointer; }
+      .fc-row:hover { border-color:var(--text-faint); }
+      .fc-row.fc-row-customer { grid-template-columns:minmax(0,1.4fr) 80px 130px 120px 150px; }
+      .fc-cust  { min-width:0; }
+      .fc-cust-name { font-size:13.5px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:6px; }
+      .fc-cust-sub  { font-size:11.5px; color:var(--text-faint); margin-top:2px; }
+      .fc-invcell    { min-width:0; }
+      .fc-invcell-nr { font-family:ui-monospace, SFMono-Regular, monospace; font-size:12.5px; color:var(--text-dim); }
+      .fc-num  { font-family:ui-monospace, SFMono-Regular, monospace; font-size:13.5px; color:var(--text); text-align:right; font-variant-numeric:tabular-nums; }
+      .fc-days { font-family:ui-monospace, SFMono-Regular, monospace; font-size:12.5px; color:var(--text-dim); text-align:right; font-variant-numeric:tabular-nums; }
+      .fc-empty { padding:32px 20px; text-align:center; color:var(--text-dim); font-size:13px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; }
+      .fc-empty strong { color:var(--text); font-size:14px; display:block; margin-bottom:4px; }
+      @media (max-width:900px) {
+        .fc-row, .fc-row.fc-row-customer { grid-template-columns:1fr auto; row-gap:6px; }
+        .fc-row > *:not(.fc-cust) { grid-column:1 / -1; text-align:left; }
+      }
+    `;
+    document.head.appendChild(st);
+  }
+
+  // Wanbetalers gedeelde styles (stap 6 clean-huid): consistente pill,
+  // header, subtitle, kpi-strip en meta-regel voor Te doen + Facturen.
+  // Alleen tokens die bestaan; geen nieuwe accent-kleuren.
+  function _wbInjectSharedStyles() {
+    if (document.getElementById('wb-shared-styles')) return;
+    const st = document.createElement('style');
+    st.id = 'wb-shared-styles';
+    st.textContent = `
+      .wb-wrap { display:flex; flex-direction:column; gap:16px; }
+      .wb-header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+      .wb-header h2 { margin:0 0 4px 0; font-size:18px; font-weight:700; color:var(--text); }
+      .wb-subtitle { margin:0; font-size:12.5px; color:var(--text-dim); max-width:640px; line-height:1.5; }
+      .wb-kpis { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }
+      .wb-kpi { padding:12px 14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; }
+      .wb-kpi-label { font-size:11.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.5px; }
+      .wb-kpi-val { font-size:20px; font-weight:700; margin-top:4px; color:var(--text); font-variant-numeric:tabular-nums; }
+      .wb-meta { font-size:11px; color:var(--text-faint); text-align:right; }
+      /* Shared status-pill met fase-kleuren — zelfde klassen als het case-paneel. */
+      .wb-pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:600; letter-spacing:.2px; background:rgba(148,163,184,.14); color:var(--text-dim); border:1px solid var(--border); white-space:nowrap; }
+      .wb-pill.stage-nieuw           { color:#64748b; background:rgba(100,116,139,.14); border-color:rgba(100,116,139,.28); }
+      .wb-pill.stage-aangemaand      { color:#f59e0b; background:rgba(245,158,11,.14); border-color:rgba(245,158,11,.28); }
+      .wb-pill.stage-in_gesprek      { color:#0ea5e9; background:rgba(14,165,233,.14); border-color:rgba(14,165,233,.28); }
+      .wb-pill.stage-regeling        { color:#8b5cf6; background:rgba(139,92,246,.14); border-color:rgba(139,92,246,.28); }
+      .wb-pill.stage-brief_verstuurd { color:#ec4899; background:rgba(236,72,153,.14); border-color:rgba(236,72,153,.28); }
+      .wb-pill.stage-incasso         { color:#dc2626; background:rgba(220,38,38,.14); border-color:rgba(220,38,38,.28); }
+      .wb-pill.stage-opgelost        { color:#10b981; background:rgba(16,185,129,.14); border-color:rgba(16,185,129,.28); }
+      .wb-pill.stage-afschrijven     { color:#94a3b8; background:rgba(148,163,184,.14); border-color:rgba(148,163,184,.28); }
+      .wb-pill.backlog               { color:#dc2626; background:rgba(220,38,38,.14); border-color:rgba(220,38,38,.28); }
+      @media (max-width:900px) {
+        .wb-kpis { grid-template-columns:repeat(2, 1fr); }
+      }
+    `;
+    document.head.appendChild(st);
+  }
+
+  function _fcWireShell() {
+    document.getElementById('fcRefreshBtn')?.addEventListener('click', loadFacturen);
+    document.querySelectorAll('[data-fc-view]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-fc-view');
+        if (!v || v === _fcState.view) return;
+        _fcState.view = v;
+        document.querySelectorAll('[data-fc-view]').forEach((b) => {
+          b.classList.toggle('active', b.getAttribute('data-fc-view') === v);
+        });
+        _fcRenderBody();
+      });
+    });
+    document.getElementById('fcStageSel')?.addEventListener('change', (e) => {
+      _fcState.stage = String(e.target.value || '');
+      loadFacturen();
+    });
+    document.getElementById('fcBacklogChk')?.addEventListener('change', (e) => {
+      _fcState.backlog = !!e.target.checked;
+      loadFacturen();
+    });
+  }
+
+  async function loadFacturen() {
+    _fcState.loading = true;
+    _fcState.error = null;
+    _fcRenderBody();
+    const params = new URLSearchParams();
+    if (_fcState.stage)   params.set('stage', _fcState.stage);
+    if (_fcState.backlog) params.set('backlog', '1');
+    const qs = params.toString();
+    try {
+      const r = await window.AgentShared.apiFetch('/api/wanbetalers-invoices-list' + (qs ? '?' + qs : ''));
+      if (!r.ok) {
+        let msg = 'HTTP ' + r.status;
+        try { const j = await r.json(); if (j?.error) msg = j.error; } catch (_) {}
+        throw new Error(msg);
+      }
+      _fcState.data = await r.json();
+    } catch (e) {
+      _fcState.error = e?.message || String(e);
+    } finally {
+      _fcState.loading = false;
+      _fcRenderBody();
+    }
+  }
+
+  function _fcRenderBody() {
+    const body = document.getElementById('fcBody');
+    const kpis = document.getElementById('fcKpis');
+    const meta = document.getElementById('fcMeta');
+    if (!body) return;
+    if (_fcState.loading) {
+      body.innerHTML = '<div class="fc-empty">Laden…</div>';
+      if (kpis) kpis.innerHTML = '';
+      if (meta) meta.textContent = '';
+      return;
+    }
+    if (_fcState.error) {
+      body.innerHTML = `<div class="fc-empty" style="color:#dc2626">Fout: ${esc(_fcState.error)}</div>`;
+      if (kpis) kpis.innerHTML = '';
+      return;
+    }
+    const d = _fcState.data || { by_invoice: [], by_customer: [], totals: {} };
+    const t = d.totals || {};
+
+    if (kpis) kpis.innerHTML = `
+      <div class="wb-kpi"><div class="wb-kpi-label">Klanten</div><div class="wb-kpi-val">${t.customers || 0}</div></div>
+      <div class="wb-kpi"><div class="wb-kpi-label">Open facturen</div><div class="wb-kpi-val">${t.invoices || 0}</div></div>
+      <div class="wb-kpi"><div class="wb-kpi-label">Totaal open</div><div class="wb-kpi-val">${_tdFmtEurCents(t.total_open_cents || 0)}</div></div>
+      <div class="wb-kpi"><div class="wb-kpi-label">Met achterstand</div><div class="wb-kpi-val" style="color:#dc2626">${t.backlog_customers || 0}</div></div>
+    `;
+
+    if (_fcState.view === 'invoice') {
+      const list = Array.isArray(d.by_invoice) ? d.by_invoice : [];
+      if (list.length === 0) {
+        body.innerHTML = `<div class="fc-empty"><strong>Geen te-late facturen.</strong>Alle open facturen zijn binnen hun vervaldatum.</div>`;
+      } else {
+        body.innerHTML = '<div class="fc-list">' + list.map(_fcInvRowHtml).join('') + '</div>';
+        _fcWireInvoiceRows(list);
+      }
+    } else {
+      const list = Array.isArray(d.by_customer) ? d.by_customer : [];
+      if (list.length === 0) {
+        body.innerHTML = `<div class="fc-empty"><strong>Geen klanten met open facturen.</strong>Alles is netjes betaald.</div>`;
+      } else {
+        body.innerHTML = '<div class="fc-list">' + list.map(_fcCustRowHtml).join('') + '</div>';
+        _fcWireCustRows(list);
+      }
+    }
+
+    if (meta && d.generated_at) {
+      const stamp = new Date(d.generated_at).toLocaleTimeString('nl-NL');
+      meta.textContent = stamp ? `Bijgewerkt ${stamp}` : '';
+    }
+  }
+
+  function _fcInvRowHtml(r) {
+    const stageClass = 'stage-' + String(r.stage_slug || 'nieuw').toLowerCase();
+    const stageLabel = _tdStageLabel(r.stage_slug);
+    const backlog = r.has_backlog ? `<span class="wb-pill backlog" title="Klant heeft ≥2 open facturen">Achterstand</span>` : '';
+    return `
+      <div class="fc-row" data-cid="${esc(r.customer_id)}" data-invid="${esc(r.invoice_id || '')}" data-days="${esc(r.days_overdue)}" data-invnr="${esc(r.invoice_number || '')}">
+        <div class="fc-cust">
+          <div class="fc-cust-name">${esc(r.customer_name || '—')} ${backlog}</div>
+          <div class="fc-cust-sub">Verval ${esc(r.due_date || '—')}</div>
+        </div>
+        <div class="fc-invcell">
+          <div class="fc-invcell-nr">${esc(r.invoice_number || String(r.invoice_id || '').slice(0, 8))}</div>
+        </div>
+        <div class="fc-num">${_tdFmtEurCents(r.open_amount_cents)}</div>
+        <div class="fc-days">${r.days_overdue} dg</div>
+        <div><span class="wb-pill ${stageClass}">${esc(stageLabel)}</span></div>
+      </div>
+    `;
+  }
+  function _fcCustRowHtml(r) {
+    const stageClass = 'stage-' + String(r.stage_slug || 'nieuw').toLowerCase();
+    const stageLabel = _tdStageLabel(r.stage_slug);
+    const statusPill = r.has_backlog
+      ? `<span class="wb-pill backlog">Achterstand</span>`
+      : `<span class="wb-pill ${stageClass}">${esc(stageLabel)}</span>`;
+    const oldest = (Number(r.oldest_days_overdue) > 0) ? `${r.oldest_days_overdue} dg` : '—';
+    return `
+      <div class="fc-row fc-row-customer" data-cid="${esc(r.customer_id)}">
+        <div class="fc-cust">
+          <div class="fc-cust-name">${esc(r.customer_name || '—')}</div>
+          <div class="fc-cust-sub">Oudste verval ${esc(r.oldest_due_date || '—')}</div>
+        </div>
+        <div class="fc-num">${r.open_invoice_count}</div>
+        <div class="fc-num">${_tdFmtEurCents(r.total_open_cents)}</div>
+        <div class="fc-days">${oldest}</div>
+        <div>${statusPill}</div>
+      </div>
+    `;
+  }
+  function _fcWireInvoiceRows(list) {
+    document.querySelectorAll('#fcBody .fc-row[data-cid]').forEach((row) => {
+      row.addEventListener('click', () => {
+        const cid = row.dataset.cid;
+        if (!cid) return;
+        openCaseSheet(cid, {
+          invoiceId  : row.dataset.invid || null,
+          invoiceNr  : row.dataset.invnr || null,
+          daysOverdue: row.dataset.days != null ? Number(row.dataset.days) : null,
+        });
+      });
+    });
+  }
+  function _fcWireCustRows(list) {
+    document.querySelectorAll('#fcBody .fc-row[data-cid]').forEach((row) => {
+      row.addEventListener('click', () => {
+        const cid = row.dataset.cid;
+        if (cid) openCaseSheet(cid);
+      });
+    });
   }
 
   // ────────────────────────────────────────────────────────────────────
