@@ -106,7 +106,16 @@ async function metaPostMessage(requestBody, opts = {}) {
       meta_error:  err,
       raw_body:    parsed ? undefined : text.slice(0, 500),
     });
-    throw new Error(`Meta API ${code}: ${msg} (subcode=${subcode}, fbtrace=${fbtrace})`);
+    // Attach de gestructureerde Meta-velden aan de Error zodat callers
+    // ze kunnen inspecteren (bv. re-engagement 131047 als 24h_window_expired
+    // vertalen) i.p.v. te moeten regex'en over de message-string.
+    const throwErr = new Error(`Meta API ${code}: ${msg} (subcode=${subcode}, fbtrace=${fbtrace})`);
+    throwErr.metaCode    = code;
+    throwErr.metaSubcode = subcode;
+    throwErr.metaMessage = msg;
+    throwErr.metaFbtrace = fbtrace;
+    throwErr.httpStatus  = res.status;
+    throw throwErr;
   }
   return parsed || {};
 }
