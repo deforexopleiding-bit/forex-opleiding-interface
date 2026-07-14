@@ -62,7 +62,12 @@ export default async function handler(req, res) {
     // 1) Subscriptions eerst — status-filter, owned_by_me-filter, page/range.
     let subQ = supabaseAdmin.from('subscriptions')
       .select('id, deal_id, description, amount, vat_percentage, term_count, start_date, end_date, teamleader_subscription_id, status, line_items, created_at', { count: 'exact' })
-      .order('start_date', { ascending: false })
+      // Server-side ordering op created_at desc (nieuwste aangemaakt eerst),
+      // consistent met de frontend-sortering sinds #726. Voorheen op
+      // start_date desc: subs met verre-toekomst-startdatums vulden pagina 1
+      // en recent aangemaakte subs met nabije startdatums leken te
+      // "verdwijnen" achter latere pagina's.
+      .order('created_at', { ascending: false })
       .range(from, to);
     if (status && status !== 'all') subQ = subQ.eq('status', status);
     if (ownedDealIds) subQ = subQ.in('deal_id', ownedDealIds);
