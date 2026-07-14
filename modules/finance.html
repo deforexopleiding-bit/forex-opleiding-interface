@@ -3201,10 +3201,14 @@
 
     <div id="dunTplMetaNameWrap" style="margin-top:12px;display:none">
       <label style="font-size:12px;color:var(--text-dim)">
-        <div style="margin-bottom:4px;font-weight:600">Meta-template-naam</div>
-        <input id="dunTplMetaName" type="text" class="fin-input" maxlength="200" placeholder="bv. invoice_reminder_v1"/>
-        <div style="font-size:11px;color:var(--text-faint);margin-top:3px">Exacte naam van approved template in Meta Business Manager. Vereist voor verzending buiten 24h-window. Leeg laten als deze template alleen binnen 24h gebruikt wordt.</div>
+        <div style="margin-bottom:4px;font-weight:600">Meta-template</div>
+        <select id="dunTplMetaName" class="fin-input"><option value="">— geen —</option></select>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:3px">Alleen door Meta goedgekeurde templates zijn selecteerbaar. Deze naam wordt gebruikt voor verzending buiten het 24h-window. Kies "— geen —" als deze template alleen binnen 24h gebruikt wordt.</div>
       </label>
+      <div id="dunTplMetaPreview" style="display:none;margin-top:8px;padding:8px 10px;background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle,#e5e7eb);border-radius:6px;font-size:11.5px;color:var(--text-dim);white-space:pre-wrap;line-height:1.4">
+        <div style="font-weight:600;margin-bottom:4px;font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.03em">Approved body-preview</div>
+        <div id="dunTplMetaPreviewBody"></div>
+      </div>
     </div>
 
     <div style="margin-top:12px">
@@ -4886,6 +4890,71 @@
     }
   }
 
+  // Cache van approved Meta-WhatsApp-templates (bron:
+  // wanbetalers-whatsapp-templates-list — filtert al op status=approved
+  // en scope-tot de finance-WABA). Gebruikt door:
+  //   * de template-editor Meta-dropdown (dunTplMetaName)
+  //   * de workflow-step-picker (tplOptions('whatsapp')) — alleen
+  //     dunning-templates waarvan meta_template_name in deze lijst zit
+  //     zijn selecteerbaar.
+  let _approvedMetaTemplatesCache = null; // null = niet geladen, [] = geladen (geen approved)
+  let _approvedMetaTemplatesLoading = null;
+
+  async function loadApprovedMetaTemplates() {
+    if (Array.isArray(_approvedMetaTemplatesCache)) return _approvedMetaTemplatesCache;
+    if (_approvedMetaTemplatesLoading) return _approvedMetaTemplatesLoading;
+    _approvedMetaTemplatesLoading = (async () => {
+      try {
+        const r = await window.AgentShared.apiFetch('/api/wanbetalers-whatsapp-templates-list');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        _approvedMetaTemplatesCache = Array.isArray(d.items) ? d.items : [];
+      } catch (e) {
+        console.warn('[loadApprovedMetaTemplates]', e?.message || e);
+        _approvedMetaTemplatesCache = [];
+      } finally {
+        _approvedMetaTemplatesLoading = null;
+      }
+      return _approvedMetaTemplatesCache;
+    })();
+    return _approvedMetaTemplatesLoading;
+  }
+
+  // Populate de dunTplMetaName-<select> met approved Meta-template-namen.
+  // Zet de gekozen waarde en toont/verbergt de preview.
+  async function populateDunTplMetaDropdown(selectedName) {
+    const sel = document.getElementById('dunTplMetaName');
+    if (!sel) return;
+    const items = await loadApprovedMetaTemplates();
+    const opts  = ['<option value="">— geen —</option>'];
+    for (const t of items) {
+      const label = t.language && t.language !== 'nl' ? `${t.name} (${t.language})` : t.name;
+      opts.push(`<option value="${esc(t.name)}" ${selectedName === t.name ? 'selected' : ''}>${esc(label)}</option>`);
+    }
+    // Bestaande bewaarde naam die NIET (meer) in de approved-lijst zit
+    // tonen we als disabled-optie zodat Jeffrey ziet wat er stond en
+    // bewust een andere kiest (of "— geen —").
+    if (selectedName && !items.some((t) => t.name === selectedName)) {
+      opts.push(`<option value="${esc(selectedName)}" selected disabled>${esc(selectedName)} — ⚠ niet meer approved</option>`);
+    }
+    sel.innerHTML = opts.join('');
+    updateDunTplMetaPreview();
+  }
+
+  function updateDunTplMetaPreview() {
+    const sel = document.getElementById('dunTplMetaName');
+    const wrap = document.getElementById('dunTplMetaPreview');
+    const body = document.getElementById('dunTplMetaPreviewBody');
+    if (!sel || !wrap || !body) return;
+    const name = sel.value;
+    if (!name) { wrap.style.display = 'none'; body.textContent = ''; return; }
+    const items = Array.isArray(_approvedMetaTemplatesCache) ? _approvedMetaTemplatesCache : [];
+    const match = items.find((t) => t.name === name);
+    if (!match) { wrap.style.display = 'none'; body.textContent = ''; return; }
+    body.textContent = match.body_text || '(geen body_text beschikbaar)';
+    wrap.style.display = '';
+  }
+
   function openDunTplModal(tpl) {
     _dunTplEditingId = tpl?.id || null;
     document.getElementById('dunTplModalTitle').textContent = tpl ? `Bewerk template — ${tpl.name}` : 'Nieuwe template';
@@ -4894,8 +4963,18 @@
     document.getElementById('dunTplLang').value      = tpl?.language || 'nl';
     document.getElementById('dunTplActive').checked  = tpl?.is_active !== false;
     document.getElementById('dunTplSubject').value   = tpl?.subject || '';
-    document.getElementById('dunTplMetaName').value  = tpl?.meta_template_name || '';
     document.getElementById('dunTplBody').value      = tpl?.body || '';
+    // Meta-dropdown async populeren (fail-soft): zet 'em eerst op — geen —
+    // met de bewaarde waarde als placeholder, dan overschrijven zodra de
+    // approved-lijst binnen is.
+    const metaSel = document.getElementById('dunTplMetaName');
+    if (metaSel) {
+      const savedName = tpl?.meta_template_name || '';
+      metaSel.innerHTML = savedName
+        ? `<option value="">— geen —</option><option value="${esc(savedName)}" selected>${esc(savedName)}</option>`
+        : '<option value="">— geen —</option>';
+      populateDunTplMetaDropdown(savedName);
+    }
     setDunTplKindVisibility();
     const errEl = document.getElementById('dunTplError');
     errEl.style.display = 'none'; errEl.textContent = '';
@@ -4998,6 +5077,7 @@
     document.getElementById('dunTplCancel')?.addEventListener('click', closeDunTplModal);
     document.getElementById('dunTplSave')?.addEventListener('click', saveDunTpl);
     document.getElementById('dunTplKind')?.addEventListener('change', setDunTplKindVisibility);
+    document.getElementById('dunTplMetaName')?.addEventListener('change', updateDunTplMetaPreview);
     document.querySelectorAll('#dunTplVarBadges [data-tplvar]').forEach(b => b.addEventListener('click', () => insertDunTplVar(b.dataset.tplvar)));
     // Close on backdrop click + Escape:
     document.getElementById('dunTplModal')?.addEventListener('click', (e) => {
@@ -5140,14 +5220,51 @@
       return;
     }
     const templates = _dunWfTemplatesCache || [];
+    // Approved Meta-templates whitelist voor WhatsApp-step-picker. Bevat
+    // Set<name>. Kan null zijn (nog niet geladen) → we tonen dan een neutraal
+    // "laden…"-optie ipv per ongeluk niets. Loader is idempotent + cached;
+    // eerste render triggert het en re-rendert steps als klaar.
+    const approvedMetaNames = Array.isArray(_approvedMetaTemplatesCache)
+      ? new Set(_approvedMetaTemplatesCache.map((t) => t.name))
+      : null;
+    if (approvedMetaNames === null) {
+      // Fire-and-forget: laad approved-lijst en re-render steps zodra klaar.
+      loadApprovedMetaTemplates().then(() => { try { renderDunWfSteps(steps); } catch (_) {} });
+    }
     wrap.innerHTML = steps.map((s, idx) => {
       const type = s.step_type || 'wait';
       const cfg  = s.config || {};
       const tplOptions = (kind) => {
-        const opts = templates.filter(t => t.kind === kind && t.is_active !== false)
-          .map(t => `<option value="${esc(t.id)}" ${cfg.template_id === t.id ? 'selected' : ''}>${esc(t.name)}</option>`)
+        // WhatsApp-steps: alleen dunning-templates waarvan
+        // meta_template_name in de approved-lijst zit. Niet-gekoppelde of
+        // niet-approved templates worden verborgen (tenzij het huidige
+        // selected id ertussen zit — dan tonen we hem grijs met een
+        // "⚠ geen goedgekeurde Meta-template" hint zodat Jeffrey weet
+        // waarom de step niet vuurt en 'em kan wisselen).
+        const isWa = kind === 'whatsapp';
+        const filtered = templates.filter((t) => t.kind === kind && t.is_active !== false);
+        const selectable = isWa
+          ? filtered.filter((t) => t.meta_template_name && approvedMetaNames && approvedMetaNames.has(t.meta_template_name))
+          : filtered;
+        const opts = selectable
+          .map((t) => `<option value="${esc(t.id)}" ${cfg.template_id === t.id ? 'selected' : ''}>${esc(t.name)}</option>`)
           .join('');
-        return `<option value="">— kies template —</option>${opts}`;
+        // Als de huidige geselecteerde WhatsApp-template niet in de
+        // whitelist zit, tonen we hem als disabled-optie zodat de UI zijn
+        // huidige state respecteert zonder dat 'ie opnieuw gekozen kan
+        // worden.
+        let disabledCurrent = '';
+        if (isWa && cfg.template_id && !selectable.some((t) => t.id === cfg.template_id)) {
+          const currentTpl = filtered.find((t) => t.id === cfg.template_id);
+          if (currentTpl) {
+            disabledCurrent = `<option value="${esc(currentTpl.id)}" selected disabled>${esc(currentTpl.name)} — ⚠ geen goedgekeurde Meta-template</option>`;
+          }
+        }
+        // Loading-hint zolang approved-lijst nog niet binnen is (isWa-only).
+        const loadingHint = isWa && approvedMetaNames === null
+          ? '<option value="" disabled>Approved Meta-templates laden…</option>'
+          : '';
+        return `<option value="">— kies template —</option>${disabledCurrent}${loadingHint}${opts}`;
       };
       let cfgHtml = '';
       if (type === 'email') {
