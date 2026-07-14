@@ -5,6 +5,14 @@
 import { tlFetch } from './teamleader-token.js';
 import { supabaseAdmin } from '../supabase.js';
 
+// Resolve TL address country vanuit customer.address_country. Whitelist
+// NL/BE (matcht customers_address_country_check + de UI-keuze in de
+// sales-wizard). Fallback 'NL' voor legacy customers waar de kolom
+// nog NULL is — bewaart backward-compat gedrag.
+function resolveTlCountry(customer) {
+  return customer?.address_country === 'BE' ? 'BE' : 'NL';
+}
+
 // Geeft bestaande customer.tl_contact_id terug, of maakt een TL-contact aan
 // via /contacts.add en bewaart het id op de customer-rij.
 // Throwt bij een TL-fout (caller vangt dit af en zet de juiste status).
@@ -29,7 +37,7 @@ export async function getOrCreateContact(customer) {
         line_1:      line1 || null,
         postal_code: customer.address_postal || null,
         city:        customer.address_city || null,
-        country:     'NL',
+        country:     resolveTlCountry(customer),
       },
     }];
   }
@@ -72,7 +80,7 @@ export async function getOrCreateTlCustomer(customer) {
   if (line1 || customer.address_postal || customer.address_city) {
     body.addresses = [{
       type: 'primary',
-      address: { line_1: line1 || null, postal_code: customer.address_postal || null, city: customer.address_city || null, country: 'NL' },
+      address: { line_1: line1 || null, postal_code: customer.address_postal || null, city: customer.address_city || null, country: resolveTlCountry(customer) },
     }];
   }
   const cr = await tlFetch('/companies.add', { method: 'POST', body: JSON.stringify(body) });

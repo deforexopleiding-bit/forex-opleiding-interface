@@ -200,8 +200,9 @@
         <div class="field"><label>Huisnr <span class="req req-addr">*</span><span class="addr-optional" style="display:none;color:var(--text-faint);font-weight:400;text-transform:none;letter-spacing:0"> (optioneel)</span></label><input id="f_number" /></div>
         <div class="field"><label>Postcode <span class="req req-addr">*</span><span class="addr-optional" style="display:none;color:var(--text-faint);font-weight:400;text-transform:none;letter-spacing:0"> (optioneel)</span></label><input id="f_postal" placeholder="1234 AB" /></div>
       </div>
-      <div class="row2">
+      <div class="row3">
         <div class="field"><label>Plaats <span class="req req-addr">*</span><span class="addr-optional" style="display:none;color:var(--text-faint);font-weight:400;text-transform:none;letter-spacing:0"> (optioneel)</span></label><input id="f_city" /></div>
+        <div class="field"><label>Land</label><select id="f_country"><option value="NL">Nederland</option><option value="BE">België</option></select></div>
         <div class="field"><label>Geboortedatum</label><input id="f_dob" type="date" /></div>
       </div>
     </div>
@@ -448,6 +449,10 @@ const state = {
     is_company: false, company_name: '', kvk_number: '', vat_number: '',
     first_name: '', last_name: '', email: '', phone: '',
     address_street: '', address_number: '', address_postal: '', address_city: '',
+    // NL/BE landkeuze (default NL). Wordt gebruikt door
+    // api/_lib/teamleader-contact.js voor de country-field in
+    // TL contacts.add/companies.add.
+    address_country: 'NL',
     // True: sales bevestigt dat de adresgegevens al elders bekend zijn
     // (bv. bestaande klant / TL-contact). updateNextEnabled slaat dan de
     // 4 adres-verplicht-checks over. Blijft bewaard in draft_json.
@@ -805,7 +810,7 @@ async function init() {
         Object.assign(state.wizard, {
           is_company: !!c.is_company, company_name: c.company_name || '', kvk_number: c.kvk_number || '', vat_number: c.vat_number || '',
           first_name: c.first_name || '', last_name: c.last_name || '', email: c.email || '', phone: c.phone || '',
-          address_street: c.address_street || '', address_number: c.address_number || '', address_postal: c.address_postal || '', address_city: c.address_city || '',
+          address_street: c.address_street || '', address_number: c.address_number || '', address_postal: c.address_postal || '', address_city: c.address_city || '', address_country: (c.address_country === 'BE' ? 'BE' : 'NL'),
           tl_department_id: deal.tl_department_id || '', traject_variant_id: deal.traject_variant_id || '',
           discount_percentage: deal.discount_percentage || 0, sale_type: deal.sale_type || 'domestic',
           quote_reference: deal.quote_reference || '', source_lead_id: deal.source_lead_id || '',
@@ -963,12 +968,12 @@ function populateProductPicker() {
 function showExistingBanner(name) {
   document.getElementById('existingCustName').textContent = name || '—';
   document.getElementById('existingCustBanner').style.display = 'block';
-  ['f_first','f_last','f_email','f_phone','f_street','f_number','f_postal','f_city','f_dob'].forEach(id => document.getElementById(id).disabled = true);
+  ['f_first','f_last','f_email','f_phone','f_street','f_number','f_postal','f_city','f_country','f_dob'].forEach(id => document.getElementById(id).disabled = true);
   document.getElementById('dupCheckBtn').style.display = 'none';
 }
 function hideExistingBanner() {
   document.getElementById('existingCustBanner').style.display = 'none';
-  ['f_first','f_last','f_email','f_phone','f_street','f_number','f_postal','f_city','f_dob'].forEach(id => document.getElementById(id).disabled = false);
+  ['f_first','f_last','f_email','f_phone','f_street','f_number','f_postal','f_city','f_country','f_dob'].forEach(id => document.getElementById(id).disabled = false);
   document.getElementById('dupCheckBtn').style.display = '';
   state.matched_customer_id = null;
   state.tl_imported_contact_id = null;
@@ -986,6 +991,7 @@ function syncStep1Fields() {
   document.getElementById('f_number').value = w.address_number || '';
   document.getElementById('f_postal').value = w.address_postal || '';
   document.getElementById('f_city').value = w.address_city || '';
+  document.getElementById('f_country').value = (w.address_country === 'BE' ? 'BE' : 'NL');
   document.getElementById('f_dob').value = w.date_of_birth || '';
   document.getElementById('avgCheck').checked = !!w.avg_ok;
   document.getElementById('f_company_name').value = w.company_name || '';
@@ -1020,9 +1026,9 @@ function updateSaleTypeHint() {
   if (hint) hint.textContent = (state.wizard.sale_type && state.wizard.sale_type !== 'domestic') ? 'Alle regels 0% BTW (verlegd / vrijgesteld).' : '';
 }
 
-['f_first','f_last','f_email','f_phone','f_street','f_number','f_postal','f_city','f_dob'].forEach(id => {
+['f_first','f_last','f_email','f_phone','f_street','f_number','f_postal','f_city','f_country','f_dob'].forEach(id => {
   document.getElementById(id).addEventListener('input', e => {
-    const map = { f_first:'first_name', f_last:'last_name', f_email:'email', f_phone:'phone', f_street:'address_street', f_number:'address_number', f_postal:'address_postal', f_city:'address_city', f_dob:'date_of_birth' };
+    const map = { f_first:'first_name', f_last:'last_name', f_email:'email', f_phone:'phone', f_street:'address_street', f_number:'address_number', f_postal:'address_postal', f_city:'address_city', f_country:'address_country', f_dob:'date_of_birth' };
     state.wizard[map[id]] = e.target.value;
     markDirty(); updateNextEnabled();
   });
@@ -1169,6 +1175,7 @@ function showDupModal(dbMatches, tlMatches) {
     if (m.address_number) state.wizard.address_number = m.address_number;
     if (m.address_postal) state.wizard.address_postal = m.address_postal;
     if (m.address_city)   state.wizard.address_city   = m.address_city;
+    if (m.address_country === 'BE' || m.address_country === 'NL') state.wizard.address_country = m.address_country;
     if (m.date_of_birth)  state.wizard.date_of_birth  = String(m.date_of_birth).slice(0, 10);
     syncStep1Fields();
     state.duplicate_check_status = 'completed';
@@ -1447,6 +1454,7 @@ async function submitDeal(syncToTl) {
         address_number: w.address_number || null,
         address_postal: w.address_postal || null,
         address_city: w.address_city || null,
+        address_country: (w.address_country === 'BE' ? 'BE' : 'NL'),
         date_of_birth: w.date_of_birth || null,
       },
       deal_data: {

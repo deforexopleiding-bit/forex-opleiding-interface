@@ -67,6 +67,7 @@ export default async function handler(req, res) {
         address_number:  customer_data.address_number || null,
         address_postal:  customer_data.address_postal || null,
         address_city:    customer_data.address_city || null,
+        address_country: (customer_data.address_country === 'BE' ? 'BE' : (customer_data.address_country === 'NL' ? 'NL' : null)),
         tl_contact_id:   tl_imported_contact_id || null,
         created_by_user_id: user.id,
       };

@@ -168,6 +168,7 @@ export default async function handler(req, res) {
           date_of_birth: customer_data.date_of_birth || null,
           address_street: customer_data.address_street || null, address_number: customer_data.address_number || null,
           address_postal: customer_data.address_postal || null, address_city: customer_data.address_city || null,
+          address_country: (customer_data.address_country === 'BE' ? 'BE' : (customer_data.address_country === 'NL' ? 'NL' : null)),
           tl_contact_id: tl_imported_contact_id || null, created_by_user_id: user.id,
         };
         const { data: cust, error: cErr } = await supabaseAdmin.from('customers').insert(custPayload).select('id').single();
@@ -224,7 +225,7 @@ export default async function handler(req, res) {
         const topVat = rates.length ? Math.max(...rates) : 21;
         // 2. Klant + department resolven voor de factuur.
         const { data: feeCustomer } = await supabaseAdmin.from('customers')
-          .select('id, is_company, company_name, first_name, last_name, email, phone, tl_contact_id, tl_company_id, address_street, address_number, address_postal, address_city')
+          .select('id, is_company, company_name, first_name, last_name, email, phone, tl_contact_id, tl_company_id, address_street, address_number, address_postal, address_city, address_country')
           .eq('id', deal.customer_id).maybeSingle();
         if (!feeCustomer) return res.status(404).json({ error: 'Klant niet gevonden bij fee-factuur' });
         const feeDeptId = departmentId || deal.tl_department_id;

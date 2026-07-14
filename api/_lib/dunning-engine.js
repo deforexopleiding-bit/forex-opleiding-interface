@@ -127,7 +127,7 @@ async function fetchOpenInvoices(customerId = null, opts = {}) {
   let q = supabaseAdmin
     .from('invoices')
     .select(
-      'id, customer_id, amount_total, amount_paid, credited_amount, due_date, status, invoice_number, is_test, customers!inner(id, first_name, last_name, company_name, is_company, email, archived_at, anonymized_at, is_test)'
+      'id, customer_id, amount_total, amount_paid, credited_amount, due_date, issue_date, status, invoice_number, is_test, customers!inner(id, first_name, last_name, company_name, is_company, email, archived_at, anonymized_at, is_test)'
     )
     .in('status', OPEN_STATUSES);
   if (customerId) q = q.eq('customer_id', customerId);
@@ -195,6 +195,7 @@ function aggregatePerCustomer(rows) {
       openInvoices: [],
       total_open_eur: 0,
       oldest_due_iso: null,
+      oldest_issue_iso: null,
     };
     agg.openInvoices.push(inv);
     agg.total_open_eur += open;
@@ -203,6 +204,15 @@ function aggregatePerCustomer(rows) {
       const iso = String(inv.due_date).slice(0, 10);
       if (!agg.oldest_due_iso || iso < agg.oldest_due_iso) {
         agg.oldest_due_iso = iso;
+      }
+    }
+    // issue_date bijhouden voor de "N dagen na factuurdatum"-trigger (dag-7-duwtje).
+    // Alleen relevante keuze: de OUDSTE openstaande factuur bepaalt de leeftijd —
+    // matcht de bestaande overdue-logic (oudste due_date).
+    if (inv.issue_date) {
+      const iso = String(inv.issue_date).slice(0, 10);
+      if (!agg.oldest_issue_iso || iso < agg.oldest_issue_iso) {
+        agg.oldest_issue_iso = iso;
       }
     }
     per.set(inv.customer_id, agg);
@@ -215,6 +225,16 @@ function aggregatePerCustomer(rows) {
       days = Math.floor((todayMs - oldestMs) / 86400000);
     }
     agg.days_overdue = days;
+    // days_since_oldest_invoice — leeftijd van de oudste openstaande factuur.
+    // Wordt gebruikt door workflows met trigger_conditions.min_days_since_invoice_date
+    // (bv. het vriendelijke dag-7-duwtje). Gebruikt dezelfde dueDateMs-parser
+    // (ISO-datum + T00:00:00 lokale tijd) voor consistentie met days_overdue.
+    let daysSinceInvoice = 0;
+    const oldestIssueMs = dueDateMs(agg.oldest_issue_iso);
+    if (oldestIssueMs != null && todayMs > oldestIssueMs) {
+      daysSinceInvoice = Math.floor((todayMs - oldestIssueMs) / 86400000);
+    }
+    agg.days_since_oldest_invoice = daysSinceInvoice;
   }
   return per;
 }
@@ -338,9 +358,23 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
     if (elapsed(startedAt) > abortMs) break;
 
     const tc = workflow.trigger_conditions || {};
-    const minDays = Number.isFinite(tc.min_days_overdue) ? tc.min_days_overdue : 14;
-    const customerType = tc.customer_type || 'any';
-    const minTotal = Number.isFinite(tc.min_total_amount) ? tc.min_total_amount : 0;
+    // Backwards-compat: als NIETS gezet is (nieuwe workflows zonder velden) →
+    // fallback default 14 dagen overdue (huidige gedrag). Als er WEL een
+    // min_days_since_invoice_date is gezet zonder min_days_overdue, moet de
+    // overdue-check GEEN default 14 gebruiken (anders zou een dag-7 duwtje
+    // pas dag-21 vuren). We zetten minDays op -1 zodat de overdue-check
+    // effectief altijd slaagt (days_overdue >= 0).
+    const hasOverdueTrigger      = Number.isFinite(tc.min_days_overdue);
+    const hasIssueDateTrigger    = Number.isFinite(tc.min_days_since_invoice_date);
+    const minDays                = hasOverdueTrigger
+      ? tc.min_days_overdue
+      : (hasIssueDateTrigger ? -1 : 14);
+    const minDaysSinceInvoice    = hasIssueDateTrigger ? tc.min_days_since_invoice_date : null;
+    const customerType           = tc.customer_type || 'any';
+    const minTotal               = Number.isFinite(tc.min_total_amount) ? tc.min_total_amount : 0;
+    // Extra guard voor workflows die maar 1x per customer mogen vuren
+    // (dag-7-duwtje bv.): check ANY-status runs voor deze workflow_id.
+    const runOncePerCustomer     = tc.run_once_per_customer_per_workflow === true;
 
     let openRows;
     try {
@@ -374,6 +408,10 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
       if (elapsed(startedAt) > abortMs) break outer;
 
       if (agg.days_overdue < minDays) continue;
+      // Issue-date-trigger: alleen relevant als workflow expliciet
+      // min_days_since_invoice_date heeft (bv. het vriendelijke dag-7-duwtje
+      // dat vóór de vervaldatum vuurt). NULL = geen filter.
+      if (minDaysSinceInvoice != null && agg.days_since_oldest_invoice < minDaysSinceInvoice) continue;
 
       // F5.1 mentor-hook: zodra vaststaat dat de klant te laat is, openstaande
       // bonus-entries (pending) van die klant op 'wachten_op_betaling' zetten.
@@ -399,6 +437,25 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
           .maybeSingle();
         if (exErr) throw exErr;
         if (existing) continue;
+
+        // run_once_per_customer_per_workflow: extra guard voor workflows die
+        // maximaal 1x per klant mogen vuren (dag-7-duwtje). We kijken naar
+        // ANY-status runs voor deze workflow_id + customer_id. Blijft de
+        // klant een openstaande factuur houden nadat de run is afgerond, dan
+        // wordt er GEEN tweede duwtje gestuurd. Klant met een nieuw factuur
+        // die weer 7 dagen oud wordt: valt onder dezelfde guard tenzij de
+        // oude run wordt heropend of gewist.
+        if (runOncePerCustomer) {
+          const { data: everRan, error: erErr } = await supabaseAdmin
+            .from('dunning_workflow_runs')
+            .select('id')
+            .eq('workflow_id', workflow.id)
+            .eq('customer_id', customerId)
+            .limit(1)
+            .maybeSingle();
+          if (erErr) throw erErr;
+          if (everRan) continue;
+        }
 
         // COOLDOWN-check: sla klant over als recent (< cooldownDays) al
         // een bulk_reminder_sent-log voor deze klant bestaat. Bewuste
@@ -451,6 +508,7 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
               trigger_invoice_count: triggerCount,
               total_open_eur: Number(agg.total_open_eur.toFixed(2)),
               days_overdue: agg.days_overdue,
+              days_since_oldest_invoice: agg.days_since_oldest_invoice,
             },
           });
         if (logErr) {

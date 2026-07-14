@@ -2543,7 +2543,7 @@
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
                   <label style="font-size:11px;color:var(--text-dim)">
                     Min dagen overdue
-                    <input id="dunWfTrgMinDays" type="number" class="fin-input" min="0" value="14"/>
+                    <input id="dunWfTrgMinDays" type="number" class="fin-input" min="0" placeholder="leeg = geen" value="14"/>
                   </label>
                   <label style="font-size:11px;color:var(--text-dim)">
                     Klant-type
@@ -2556,6 +2556,14 @@
                   <label style="font-size:11px;color:var(--text-dim)">
                     Min openstaand bedrag (EUR)
                     <input id="dunWfTrgMinAmount" type="number" class="fin-input" min="0" value="0"/>
+                  </label>
+                  <label style="font-size:11px;color:var(--text-dim)">
+                    Min dagen NA factuurdatum (dag-N-duwtje)
+                    <input id="dunWfTrgMinDaysSinceInvoice" type="number" class="fin-input" min="0" placeholder="leeg = niet gebruiken"/>
+                  </label>
+                  <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:6px;padding-top:16px">
+                    <input id="dunWfTrgRunOnce" type="checkbox" style="width:auto;margin:0"/>
+                    Max 1× per klant (ooit)
                   </label>
                 </div>
               </div>
@@ -5104,6 +5112,9 @@
     document.getElementById('dunWfTrgMinDays').value      = (tc.min_days_overdue != null) ? tc.min_days_overdue : 14;
     document.getElementById('dunWfTrgCustomerType').value = tc.customer_type || 'any';
     document.getElementById('dunWfTrgMinAmount').value    = (tc.min_amount != null) ? tc.min_amount : 0;
+    // Nieuwe dag-N-duwtje-velden: leeg = niet gebruiken (engine default).
+    document.getElementById('dunWfTrgMinDaysSinceInvoice').value = (tc.min_days_since_invoice_date != null) ? tc.min_days_since_invoice_date : '';
+    document.getElementById('dunWfTrgRunOnce').checked           = tc.run_once_per_customer_per_workflow === true;
     const delBtn = document.getElementById('dunWfDeleteBtn');
     if (delBtn) delBtn.hidden = !workflow?.id;
     const errEl = document.getElementById('dunWfError');
@@ -5270,9 +5281,22 @@
     if (!Number.isInteger(priority)) return showDunWfErr('Priority moet integer zijn');
 
     const trigger_conditions = {};
-    if (Number.isFinite(minDays)   && minDays   >= 0) trigger_conditions.min_days_overdue = minDays;
+    // min_days_overdue leeg laten → engine gebruikt default 14 (backwards-compat).
+    // Voor het dag-N-duwtje kan Jeffrey dit veld leegmaken; dan bepaalt alleen
+    // min_days_since_invoice_date wanneer de workflow vuurt.
+    const minDaysInput = document.getElementById('dunWfTrgMinDays').value;
+    if (minDaysInput !== '' && Number.isFinite(minDays) && minDays >= 0) trigger_conditions.min_days_overdue = minDays;
     if (custType && custType !== 'any')               trigger_conditions.customer_type   = custType;
     if (Number.isFinite(minAmount) && minAmount > 0)  trigger_conditions.min_amount      = minAmount;
+    // Dag-N-duwtje-velden: leeg = niet meesturen (engine ziet geen key).
+    const minDaysSinceInvoiceInput = document.getElementById('dunWfTrgMinDaysSinceInvoice').value;
+    if (minDaysSinceInvoiceInput !== '') {
+      const n = Number(minDaysSinceInvoiceInput);
+      if (Number.isFinite(n) && n >= 0) trigger_conditions.min_days_since_invoice_date = n;
+    }
+    if (document.getElementById('dunWfTrgRunOnce').checked) {
+      trigger_conditions.run_once_per_customer_per_workflow = true;
+    }
 
     const payload = {
       workflow: { name, description: description || null, is_active: isActive, priority, trigger_conditions },
@@ -14175,6 +14199,7 @@
     statusFilter: null,
     activeDossierId: null,
     detail      : null,
+    editingBureauId: null,
   };
   const INC_STATUSES = [
     { slug: 'aangemeld',    label: 'Aangemeld',    color: '#f59e0b' },
@@ -16497,7 +16522,7 @@
           <div class="wbx-inc-modal-body">
             <div id="incBureauList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px"></div>
             <div style="border-top:1px solid var(--wbx-border);padding-top:14px">
-              <div class="wbx-inc-h" style="margin-top:0">Nieuw bureau</div>
+              <div class="wbx-inc-h" id="incBurFormHeading" style="margin-top:0">Nieuw bureau</div>
               <div class="wbx-inc-form" style="grid-template-columns:1fr 1fr">
                 <label style="grid-column:span 2">Naam
                   <input id="incBurName" placeholder="Naam bureau">
@@ -16512,7 +16537,10 @@
                   <input id="incBurAddress" placeholder="Straat + huisnr, postcode, plaats">
                 </label>
               </div>
-              <button id="incBurAddBtn" class="wbx-btn wbx-primary" type="button" style="margin-top:10px">Bureau toevoegen</button>
+              <div style="display:flex;gap:8px;margin-top:10px">
+                <button id="incBurAddBtn" class="wbx-btn wbx-primary" type="button">Bureau toevoegen</button>
+                <button id="incBurCancelEditBtn" class="wbx-btn" type="button" style="display:none">Annuleer</button>
+              </div>
             </div>
           </div>
         </div>
@@ -16541,6 +16569,7 @@
       if (e.target && e.target.id === 'incBureauModal') e.target.style.display = 'none';
     });
     document.getElementById('incBurAddBtn')?.addEventListener('click', () => incAddBureau());
+    document.getElementById('incBurCancelEditBtn')?.addEventListener('click', () => incCancelEditBureau());
     document.getElementById('incDetailCloseBtn')?.addEventListener('click', incCloseDetail);
     document.getElementById('incDetailOverlay')?.addEventListener('click', (e) => {
       if (e.target && e.target.id === 'incDetailOverlay') incCloseDetail();
@@ -16752,13 +16781,52 @@
       wrap.innerHTML = '<div class="wbx-inc-list-empty">Nog geen bureaus. Voeg er hieronder één toe.</div>';
       return;
     }
+    // Edit-state bewaren zodat de "Nieuw bureau"-titel wisselt tussen
+    // toevoegen en bewerken (id in hidden input incBurEditId).
     wrap.innerHTML = `<div class="wbx-inc-list">${_incState.bureaus.map((b) => `
       <div class="wbx-inc-list-row">
-        <div>
+        <div style="flex:1;min-width:0">
           <div style="font-weight:600;color:var(--wbx-ink)">${esc(b.name)} <span style="color:var(--wbx-faint);font-weight:500;font-size:12px">(${esc(b.country || 'NL')})</span></div>
           <div class="wbx-sub-inv">${esc(b.email || '')}${b.address ? ' · ' + esc(b.address) : ''}</div>
         </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+          <button class="wbx-btn wbx-sm" type="button" data-bur-edit="${esc(b.id)}">Bewerk</button>
+          <button class="wbx-btn wbx-sm wbx-danger" type="button" data-bur-del="${esc(b.id)}">Verwijder</button>
+        </div>
       </div>`).join('')}</div>`;
+    wrap.querySelectorAll('[data-bur-edit]').forEach((btn) => {
+      btn.addEventListener('click', () => incEditBureau(btn.getAttribute('data-bur-edit')));
+    });
+    wrap.querySelectorAll('[data-bur-del]').forEach((btn) => {
+      btn.addEventListener('click', () => incDeleteBureau(btn.getAttribute('data-bur-del')));
+    });
+  }
+  function incEditBureau(id) {
+    const b = (_incState.bureaus || []).find((x) => x.id === id);
+    if (!b) return;
+    _incState.editingBureauId = id;
+    const set = (elId, v) => { const el = document.getElementById(elId); if (el) el.value = v || ''; };
+    set('incBurName',    b.name);
+    set('incBurEmail',   b.email);
+    set('incBurAddress', b.address);
+    const c = document.getElementById('incBurCountry'); if (c) c.value = (b.country === 'BE' ? 'BE' : 'NL');
+    const addBtn = document.getElementById('incBurAddBtn');
+    if (addBtn) addBtn.textContent = 'Wijzigingen opslaan';
+    const cancelBtn = document.getElementById('incBurCancelEditBtn');
+    if (cancelBtn) cancelBtn.style.display = '';
+    const h = document.getElementById('incBurFormHeading');
+    if (h) h.textContent = 'Bewerk bureau';
+  }
+  function incCancelEditBureau() {
+    _incState.editingBureauId = null;
+    ['incBurName','incBurEmail','incBurAddress'].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
+    const c = document.getElementById('incBurCountry'); if (c) c.value = 'NL';
+    const addBtn = document.getElementById('incBurAddBtn');
+    if (addBtn) addBtn.textContent = 'Bureau toevoegen';
+    const cancelBtn = document.getElementById('incBurCancelEditBtn');
+    if (cancelBtn) cancelBtn.style.display = 'none';
+    const h = document.getElementById('incBurFormHeading');
+    if (h) h.textContent = 'Nieuw bureau';
   }
   async function incAddBureau() {
     const body = {
@@ -16767,15 +16835,30 @@
       country : document.getElementById('incBurCountry')?.value || 'NL',
       address : document.getElementById('incBurAddress')?.value.trim(),
     };
+    if (_incState.editingBureauId) body.id = _incState.editingBureauId;
     if (!body.name) { window.AgentShared?.showToast?.('Naam verplicht', 'warning'); return; }
     try {
       await _incCall('/api/incasso-bureaus-upsert', body);
-      window.AgentShared?.showToast?.('Bureau toegevoegd', 'success');
-      ['incBurName','incBurEmail','incBurAddress'].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
+      window.AgentShared?.showToast?.(body.id ? 'Bureau bijgewerkt' : 'Bureau toegevoegd', 'success');
+      incCancelEditBureau();
       await incLoadOverview();
       _incRenderBureauList();
     } catch (e) {
       window.AgentShared?.showToast?.('Bureau opslaan mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+  async function incDeleteBureau(id) {
+    const b = (_incState.bureaus || []).find((x) => x.id === id);
+    if (!b) return;
+    if (!confirm(`Verwijder bureau "${b.name}"? Alleen mogelijk als er geen open dossiers aan gekoppeld zijn.`)) return;
+    try {
+      await _incCall('/api/incasso-bureaus-delete', { id });
+      window.AgentShared?.showToast?.('Bureau verwijderd', 'success');
+      if (_incState.editingBureauId === id) incCancelEditBureau();
+      await incLoadOverview();
+      _incRenderBureauList();
+    } catch (e) {
+      window.AgentShared?.showToast?.('Verwijderen mislukt: ' + (e?.message || 'onbekend'), 'error');
     }
   }
 
