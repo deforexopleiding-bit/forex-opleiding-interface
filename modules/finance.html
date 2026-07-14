@@ -1728,59 +1728,59 @@
     /* ======================================================
        Bellen-kaart in case-paneel (wanbetaler-softphone).
        ====================================================== */
-    .wbx .wbx-call-card { }
-    .wbx .wbx-call-cockpit {
+    :where(.wbx, .wbx-sheet) .wbx-call-card { }
+    :where(.wbx, .wbx-sheet) .wbx-call-cockpit {
       background: linear-gradient(135deg, #0E7C6B 0%, #0A5A4E 100%);
       color:#fff; border-radius:10px; padding:16px; text-align:center;
       margin:8px 0 12px;
     }
-    .wbx .wbx-call-line-badge {
+    :where(.wbx, .wbx-sheet) .wbx-call-line-badge {
       display:inline-block; padding:3px 10px; border-radius:99px;
       background:rgba(255,255,255,.14); font-size:11.5px; font-weight:600;
       letter-spacing:.02em;
     }
-    .wbx .wbx-call-number {
+    :where(.wbx, .wbx-sheet) .wbx-call-number {
       font-size:20px; font-weight:600; margin-top:8px; font-family:var(--wbx-mono);
       letter-spacing:.02em;
     }
-    .wbx .wbx-call-state {
+    :where(.wbx, .wbx-sheet) .wbx-call-state {
       font-size:12px; opacity:.85; margin-top:4px; letter-spacing:.02em;
     }
-    .wbx .wbx-call-state.connected { color:#7cf3c8; font-weight:600; }
-    .wbx .wbx-call-state.dialing   { color:#ffe1a3; }
-    .wbx .wbx-call-state.error     { color:#fca5a5; }
-    .wbx .wbx-call-btn {
+    :where(.wbx, .wbx-sheet) .wbx-call-state.connected { color:#7cf3c8; font-weight:600; }
+    :where(.wbx, .wbx-sheet) .wbx-call-state.dialing   { color:#ffe1a3; }
+    :where(.wbx, .wbx-sheet) .wbx-call-state.error     { color:#fca5a5; }
+    :where(.wbx, .wbx-sheet) .wbx-call-btn {
       border:none; padding:9px 18px; border-radius:9px; font-weight:600;
       font-size:13.5px; cursor:pointer; font-family:inherit;
     }
-    .wbx .wbx-call-btn.wbx-call-dial   { background:#fff; color:#0A5A4E; }
-    .wbx .wbx-call-btn.wbx-call-dial:hover:not(:disabled) { background:#f5f5f5; }
-    .wbx .wbx-call-btn.wbx-call-dial:disabled { opacity:.4; cursor:not-allowed; }
-    .wbx .wbx-call-btn.wbx-call-hangup { background:#dc2626; color:#fff; }
-    .wbx .wbx-call-btn.wbx-call-hangup:hover { background:#b91c1c; }
-    .wbx .wbx-call-btn.wbx-call-mute {
+    :where(.wbx, .wbx-sheet) .wbx-call-btn.wbx-call-dial   { background:#fff; color:#0A5A4E; }
+    :where(.wbx, .wbx-sheet) .wbx-call-btn.wbx-call-dial:hover:not(:disabled) { background:#f5f5f5; }
+    :where(.wbx, .wbx-sheet) .wbx-call-btn.wbx-call-dial:disabled { opacity:.4; cursor:not-allowed; }
+    :where(.wbx, .wbx-sheet) .wbx-call-btn.wbx-call-hangup { background:#dc2626; color:#fff; }
+    :where(.wbx, .wbx-sheet) .wbx-call-btn.wbx-call-hangup:hover { background:#b91c1c; }
+    :where(.wbx, .wbx-sheet) .wbx-call-btn.wbx-call-mute {
       background:rgba(255,255,255,.14); color:#fff; padding:8px 12px;
       border:1px solid rgba(255,255,255,.22);
     }
-    .wbx .wbx-call-btn.wbx-call-mute:hover { background:rgba(255,255,255,.22); }
-    .wbx .wbx-call-btn.wbx-call-mute.on { background:#eab308; color:#111; border-color:#ca8a04; }
+    :where(.wbx, .wbx-sheet) .wbx-call-btn.wbx-call-mute:hover { background:rgba(255,255,255,.22); }
+    :where(.wbx, .wbx-sheet) .wbx-call-btn.wbx-call-mute.on { background:#eab308; color:#111; border-color:#ca8a04; }
 
     /* NL/BE-lijnkeuze rij + editable nummer-input in de cockpit */
-    .wbx .wbx-call-line-row {
+    :where(.wbx, .wbx-sheet) .wbx-call-line-row {
       display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;
     }
-    .wbx .wbx-call-line-picker { display:flex; gap:8px; }
-    .wbx .wbx-call-line-picker input[type="radio"] { accent-color:#fff; margin:0; }
-    .wbx .wbx-call-number-input {
+    :where(.wbx, .wbx-sheet) .wbx-call-line-picker { display:flex; gap:8px; }
+    :where(.wbx, .wbx-sheet) .wbx-call-line-picker input[type="radio"] { accent-color:#fff; margin:0; }
+    :where(.wbx, .wbx-sheet) .wbx-call-number-input {
       display:block; width:100%; margin-top:8px; text-align:center;
       background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.18);
       color:#fff; font-size:20px; font-weight:600; padding:8px 10px; border-radius:8px;
       letter-spacing:.02em; font-variant-numeric:tabular-nums;
     }
-    .wbx .wbx-call-number-input:focus {
+    :where(.wbx, .wbx-sheet) .wbx-call-number-input:focus {
       outline:none; border-color:rgba(255,255,255,.5); background:rgba(255,255,255,.12);
     }
-    .wbx .wbx-call-state.ringing { color:#ffe1a3; }
+    :where(.wbx, .wbx-sheet) .wbx-call-state.ringing { color:#ffe1a3; }
 
     /* Body-level floating callbar (dupliceert Follow-up fu-softphone-callbar).
        Blijft zichtbaar wanneer het case-sheet dicht is; z-index boven de
@@ -1831,47 +1831,47 @@
     .wbx.wbx-call-callbar .wbx-call-callbar-btn.hangup { background:#ef4444; border-color:#b91c1c; }
     .wbx.wbx-call-callbar .wbx-call-callbar-btn.hangup:hover { background:#dc2626; }
     .wbx.wbx-bulk-bar .wbx-call-btn,
-    .wbx .wbx-call-cockpit .wbx-btn.wbx-sm {
+    :where(.wbx, .wbx-sheet) .wbx-call-cockpit .wbx-btn.wbx-sm {
       background:rgba(255,255,255,.14); color:#fff; border:1px solid rgba(255,255,255,.22);
     }
-    .wbx .wbx-call-cockpit .wbx-btn.wbx-sm:hover { background:rgba(255,255,255,.22); }
+    :where(.wbx, .wbx-sheet) .wbx-call-cockpit .wbx-btn.wbx-sm:hover { background:rgba(255,255,255,.22); }
 
-    .wbx .wbx-call-tracker { margin:14px 0 10px; }
-    .wbx .wbx-call-tracker-h {
+    :where(.wbx, .wbx-sheet) .wbx-call-tracker { margin:14px 0 10px; }
+    :where(.wbx, .wbx-sheet) .wbx-call-tracker-h {
       font-size:11.5px; text-transform:uppercase; letter-spacing:.05em;
       color:var(--wbx-faint); font-weight:600; margin-bottom:6px;
     }
-    .wbx .wbx-call-dots {
+    :where(.wbx, .wbx-sheet) .wbx-call-dots {
       display:flex; align-items:center; gap:4px;
     }
-    .wbx .wbx-call-dot {
+    :where(.wbx, .wbx-sheet) .wbx-call-dot {
       width:14px; height:14px; border-radius:50%;
       background:#fff; border:2px solid #0E7C6B;
     }
-    .wbx .wbx-call-dot.done { background:#0E7C6B; border-color:#0E7C6B; }
-    .wbx .wbx-call-dotbar {
+    :where(.wbx, .wbx-sheet) .wbx-call-dot.done { background:#0E7C6B; border-color:#0E7C6B; }
+    :where(.wbx, .wbx-sheet) .wbx-call-dotbar {
       flex:1; height:2px; background:var(--wbx-border);
     }
 
-    .wbx .wbx-call-remind {
+    :where(.wbx, .wbx-sheet) .wbx-call-remind {
       background:#FAFBFC; border:1px solid var(--wbx-border); border-radius:8px;
       padding:8px 12px; font-size:12.5px; margin-bottom:10px;
     }
 
-    .wbx .wbx-call-log { display:flex; flex-direction:column; gap:8px; }
-    .wbx .wbx-call-log-row {
+    :where(.wbx, .wbx-sheet) .wbx-call-log { display:flex; flex-direction:column; gap:8px; }
+    :where(.wbx, .wbx-sheet) .wbx-call-log-row {
       background:#FAFBFC; border:1px solid var(--wbx-border); border-radius:8px;
       padding:8px 10px; display:flex; flex-wrap:wrap; align-items:center; gap:8px;
       font-size:12.5px;
     }
-    .wbx .wbx-call-log-time { color:var(--wbx-faint); }
-    .wbx .wbx-call-log-note {
+    :where(.wbx, .wbx-sheet) .wbx-call-log-time { color:var(--wbx-faint); }
+    :where(.wbx, .wbx-sheet) .wbx-call-log-note {
       flex-basis:100%; font-size:12px; color:var(--wbx-muted);
       background:#fff; border:1px solid var(--wbx-border); border-radius:6px;
       padding:6px 8px; margin-top:4px;
     }
 
-    .wbx .wbx-call-nudge {
+    :where(.wbx, .wbx-sheet) .wbx-call-nudge {
       display:flex; gap:12px; align-items:center; margin-top:12px;
       background:rgba(245,158,11,.10); border:1px solid rgba(245,158,11,.32);
       border-radius:8px; padding:10px 12px;
