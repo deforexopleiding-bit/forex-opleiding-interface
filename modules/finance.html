@@ -2773,6 +2773,10 @@
       <button                data-wb-sub="inbox"       type="button" title="Gesprekken">Gesprekken</button>
       <button                data-wb-sub="facturen"    type="button" title="Facturen">Facturen</button>
       <div class="wbx-nav-spacer"></div>
+      <!-- Verversen: alleen zichtbaar op de Te doen-sub (getoggled door
+           setSubView). Geen data-wb-sub attribuut → sub-nav-handler pikt 'm
+           NIET op als tab (voorkomt actieve-tab-verwarring). -->
+      <button                id="tdRefreshBtn"           type="button" title="Ververs de Te doen-lijst" style="display:none;align-items:center;gap:5px"><i class="ti ti-refresh" style="font-size:14px"></i>Verversen</button>
       <button                data-wb-sub="instellingen" type="button" title="Instellingen">Instellingen</button>
     </div>
     <style>
@@ -5037,6 +5041,11 @@
       else if (btnTgl === 'instellingen') active = INST_SUBS.includes(sub);
       b.classList.toggle('active', active);
     });
+    // Verversen-knop alleen zinvol op de Te doen-sub. Expliciet inline-flex
+    // bij reveal (matcht de nav-styling met gap tussen icon en label) i.p.v.
+    // .hidden — voorkomt de [hidden]-valkuil met inline display uit #744/#751.
+    const tdRefreshBtn = document.getElementById('tdRefreshBtn');
+    if (tdRefreshBtn) tdRefreshBtn.style.display = (sub === 'te-doen') ? 'inline-flex' : 'none';
 
     // Visibility van de onderliggende panels.
     const vInbox        = document.getElementById('view-inbox');
@@ -5303,6 +5312,15 @@
     // sinds Ronde 1 (nav gebruikt .wbx-nav ipv .sr-seg).
     document.querySelectorAll('#wanbetalersSubNav > [data-wb-sub]').forEach(b => {
       b.addEventListener('click', () => setSubView(b.dataset.wbSub));
+    });
+
+    // Te doen — Verversen-knop: leeft in de statische nav (r2770) i.p.v.
+    // in _tdShellHtml() zodat 'ie qua styling in de nav-strip past en niet
+    // dubbel geboden raakt bij re-mount. Geen data-wb-sub → wordt door de
+    // querySelector hierboven niet als tab opgepakt.
+    document.getElementById('tdRefreshBtn')?.addEventListener('click', () => {
+      if (typeof loadTeDoen === 'function') loadTeDoen();
+      if (typeof loadTeDoenActiesCount === 'function') loadTeDoenActiesCount();
     });
 
     // Menu-items binnen dropdowns.
@@ -15687,15 +15705,12 @@
   // in <head>. Deze div zit IN de #view-wanbetalers wrapper die zelf al .wbx
   // heeft, dus alle .wbx-* classes hier binnen pakken automatisch.
   function _tdShellHtml() {
+    // Verversen-knop is verhuisd naar #wanbetalersSubNav (r2770) zodat 'ie
+    // consistent rechts in de nav staat naast Instellingen; uitleg-<p> weg
+    // (te veel ruis). H1 blijft voor sectie-context.
     return `
       <div class="wbx-page-head">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
-          <div>
-            <h1>Te doen</h1>
-            <p>Je dagelijkse worklist met te late facturen. Acties om te beoordelen zie je als melding bovenaan; de achterstand zit apart in de opruimactie.</p>
-          </div>
-          <button class="wbx-btn wbx-sm" id="tdRefreshBtn" type="button" title="Vernieuwen">Verversen</button>
-        </div>
+        <h1>Te doen</h1>
       </div>
       <div id="tdActiesBox"></div>
       <div id="tdCampaignSlot"></div>
@@ -15717,10 +15732,10 @@
   function _tdInjectStyles() { /* no-op sinds Ronde 1 (.wbx-scoped styles) */ }
 
   function _tdWireShell() {
-    document.getElementById('tdRefreshBtn')?.addEventListener('click', () => {
-      loadTeDoen();
-      loadTeDoenActiesCount();
-    });
+    // NB: tdRefreshBtn zit sinds de nav-refactor NIET meer in _tdShellHtml()
+    // maar in de statische #wanbetalersSubNav-markup. Zijn click-listener
+    // wordt daar gewired (in de once-wire van de wanbetalers-view) zodat
+    // 'ie niet bij elke shell-render dubbel gebonden raakt.
     // Sort-segmented control ("Langst te laat" vs "Nieuwste") — client-side.
     document.querySelectorAll('#tdSortSeg [data-td-sort]').forEach((btn) => {
       btn.addEventListener('click', () => {
