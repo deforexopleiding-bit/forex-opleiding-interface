@@ -1181,16 +1181,29 @@
     }
     #view-inbox .inbox-counters-bar:empty { display: none; }
 
-    /* Compacte Filters-knop + popover — vervangt de bredere 4-checkbox-
-       regel + sort-select uit de vroegere layout. IDs (inboxFilterUnread/
+    /* Compacte status-tabs — passen met z'n vieren op één regel in de
+       smalle conv-kolom. Archief is icon-only zodat de rij ook op smallere
+       viewport nog past. */
+    #view-inbox .inbox-status-tabs .sr-seg {
+      font-size: 11px !important;
+      padding: 4px 8px !important;
+      white-space: nowrap;
+      flex-shrink: 1;
+      min-width: 0;
+    }
+    #view-inbox .inbox-status-tabs .sr-seg i { font-size: 13px; line-height: 1; }
+
+    /* Compacte Filters-icoonknop + popover — icon-only zodat 'ie niet
+       afgekapt raakt naast zoek + refresh. IDs (inboxFilterUnread/
        Debtor/Linked/Unlinked + inboxSortSelect) blijven identiek zodat
        alle bestaande change-handlers ongewijzigd blijven werken. */
     #view-inbox #inboxFiltersToggle {
+      position: relative;
       display: inline-flex;
       align-items: center;
-      gap: 5px;
-      font-size: 12px;
-      padding: 6px 10px;
+      justify-content: center;
+      gap: 3px;
+      padding: 7px 9px;
       color: var(--wbxi-muted);
       white-space: nowrap;
     }
@@ -1199,17 +1212,24 @@
       color: var(--wbxi-accent-ink);
       background: var(--wbxi-accent-soft);
     }
+    /* Kleine overlay-badge rechtsboven op de icon-only Filters-knop —
+       toont het aantal actieve snelfilters (verborgen als 0). */
     #view-inbox .inbox-filters-badge {
+      position: absolute;
+      top: -3px;
+      right: -3px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       background: var(--wbxi-accent);
       color: #fff;
-      font: 700 10px/1 'Inter', system-ui, sans-serif;
-      padding: 2px 5px;
+      font: 700 9.5px/1 'Inter', system-ui, sans-serif;
+      padding: 0 4px;
       border-radius: 999px;
-      min-width: 15px;
-      height: 15px;
+      min-width: 14px;
+      height: 14px;
+      border: 2px solid var(--wbxi-surface);
+      box-sizing: content-box;
     }
     #view-inbox .inbox-filters-popover {
       position: absolute;
@@ -2324,23 +2344,33 @@
       color:var(--wbx-faint); font-weight:600; margin-bottom:6px;
     }
     :where(.wbx, .wbx-sheet) .wbx-call-dots {
-      display:flex; align-items:center; gap:4px;
+      display:flex; align-items:center; gap:6px;
     }
+    /* Drie duidelijk verschillende states, zodat het HUIDIGE balletje
+       onmiskenbaar prominent is en dus zichtbaar meeschuift.
+         - default (leeg / toekomst) → klein wit balletje met dunne teal outline
+         - .done  (voltooide poging) → klein, gedempt-gevuld teal (geen ring)
+         - .here  (huidige poging)   → GROOT solide teal + duidelijke ring       */
     :where(.wbx, .wbx-sheet) .wbx-call-dot {
-      width:14px; height:14px; border-radius:50%;
-      background:#fff; border:2px solid #0E7C6B;
+      width:12px; height:12px; border-radius:50%;
+      background:#fff; border:1.5px solid #0E7C6B;
+      transition:width .12s ease, height .12s ease, background-color .12s ease;
+      flex-shrink:0;
     }
-    :where(.wbx, .wbx-sheet) .wbx-call-dot.done { background:#0E7C6B; border-color:#0E7C6B; }
-    /* Huidige-positie balletje — witte vulling, teal border, subtiele ring.
-       Vult NIET (dat is 'done'); markeert alleen dat dit de eerstvolgende,
-       nog-niet-gedane poging is. */
+    :where(.wbx, .wbx-sheet) .wbx-call-dot.done {
+      background:rgba(14,124,107,.55);
+      border-color:rgba(14,124,107,.55);
+      /* geen ring — done is bewust minder prominent dan here */
+    }
     :where(.wbx, .wbx-sheet) .wbx-call-dot.here {
-      background:#fff;
+      width:18px; height:18px;
+      background:#0E7C6B;
       border-color:#0E7C6B;
-      box-shadow:0 0 0 4px rgba(14,124,107,.18);
+      box-shadow:0 0 0 4px rgba(14,124,107,.20);
     }
     :where(.wbx, .wbx-sheet) .wbx-call-dotbar {
       flex:1; height:2px; background:var(--wbx-border);
+      min-width:12px;
     }
 
     :where(.wbx, .wbx-sheet) .wbx-call-remind {
@@ -2908,28 +2938,16 @@
         <!-- LEFT column: conversation list -->
         <div class="inbox-c-col-left">
           <div style="padding:12px 14px;border-bottom:1px solid var(--border,rgba(255,255,255,.08));display:flex;flex-direction:column;gap:8px">
+            <!-- Rij 1: zoek + refresh + compacte Filters-icoonknop (popover).
+                 Filters-knop is icon-only zodat 'ie niet afgekapt raakt in
+                 smalle kolommen; badge blijft zichtbaar bij actieve filters. -->
             <div style="display:flex;gap:8px;align-items:center">
-              <input id="inboxConvSearch" type="text" class="fin-input" placeholder="Zoeken op naam of nummer…" style="flex:1;font-size:12.5px"/>
+              <input id="inboxConvSearch" type="text" class="fin-input" placeholder="Zoeken op naam of nummer…" style="flex:1;font-size:12.5px;min-width:0"/>
               <button class="sr-ibtn" id="inboxConvRefresh" type="button" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
-            </div>
-            <!-- Status-tabs (server-side) + compacte Filters-popover.
-                 Afgehandeld = tijdelijk weg (komt terug bij inbound).
-                 Archief     = definitief weg (blijft in archief bij inbound).
-                 Filters ▾   = 4 client-side snelfilters + sortering, ingeklapt
-                               in een popover om de header compact te houden. -->
-            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-              <div id="inboxConvStatusTabs" class="sr-segments" style="display:flex;gap:4px;flex-wrap:wrap;flex:1;min-width:0">
-                <button class="sr-seg active" data-conv-status="active"      type="button" style="font-size:11.5px;padding:4px 10px">Actief</button>
-                <button class="sr-seg"        data-conv-status="afgehandeld" type="button" style="font-size:11.5px;padding:4px 10px">Afgehandeld</button>
-                <button class="sr-seg"        data-conv-status="archief"     type="button" style="font-size:11.5px;padding:4px 10px"><i class="ti ti-archive" style="font-size:11px;margin-right:2px"></i>Archief</button>
-                <button class="sr-seg"        data-conv-status="all"         type="button" style="font-size:11.5px;padding:4px 10px">Alles</button>
-              </div>
               <div id="inboxFiltersWrap" style="position:relative;flex-shrink:0">
                 <button class="sr-ibtn" id="inboxFiltersToggle" type="button" title="Snelfilters + sortering">
-                  <i class="ti ti-adjustments" style="font-size:12px"></i>
-                  <span>Filters</span>
+                  <i class="ti ti-adjustments" style="font-size:13px"></i>
                   <span id="inboxFiltersBadge" class="inbox-filters-badge" hidden>0</span>
-                  <i class="ti ti-chevron-down" style="font-size:10px;margin-left:1px"></i>
                 </button>
                 <div id="inboxFiltersPopover" class="inbox-filters-popover" hidden>
                   <div class="inbox-filters-popover-lbl">Snelfilters</div>
@@ -2946,6 +2964,15 @@
                   </select>
                 </div>
               </div>
+            </div>
+            <!-- Rij 2: status-tabs (compact, past op één regel).
+                 Afgehandeld = tijdelijk weg (komt terug bij inbound).
+                 Archief     = definitief weg (blijft in archief bij inbound). -->
+            <div id="inboxConvStatusTabs" class="sr-segments inbox-status-tabs" style="display:flex;gap:3px;flex-wrap:nowrap">
+              <button class="sr-seg active" data-conv-status="active"      type="button">Actief</button>
+              <button class="sr-seg"        data-conv-status="afgehandeld" type="button">Afgehandeld</button>
+              <button class="sr-seg"        data-conv-status="archief"     type="button" title="Archief"><i class="ti ti-archive"></i></button>
+              <button class="sr-seg"        data-conv-status="all"         type="button">Alles</button>
             </div>
             <div id="inboxCountersBar" class="inbox-counters-bar"></div>
           </div>
