@@ -17340,6 +17340,11 @@
     config     : null,   // /api/voys-sip-config response
     uaByLine   : {},     // { nl:UserAgent, be:UserAgent }
     regByLine  : {},     // { nl:Registerer, be:Registerer }
+    // Follow-up-parity: welke lijnen zijn server-side geconfigureerd?
+    // Wordt geset in _wbxInitSoftphone en stuurt de UI-visibility van de
+    // BE-optie (i.p.v. alleen op geregistreerd te gaten — anders is BE
+    // niet kiesbaar tot registratie klaar is).
+    configuredLines: { nl: false, be: false },
     activeLine : null,   // 'nl' | 'be' — de gebruikte lijn voor de huidige call
     session    : null,   // actieve Inviter
     audioEl    : null,   // <audio autoplay> voor remote stream
@@ -17535,9 +17540,29 @@
       }
 
       // Bouw UA + Registerer per account (nl + be als aanwezig).
-      const accounts = Array.isArray(cfg.accounts) && cfg.accounts.length
-        ? cfg.accounts
-        : (cfg.user ? [{ key: 'nl', ...cfg }] : []);
+      // /api/voys-sip-config retourneert `accounts` als OBJECT {nl,be}
+      // (zoals Follow up 'm leest via _softphone.accounts.nl/.be). Ouder
+      // pad: array of top-level cfg.user (backward-compat). Ondersteun alle
+      // drie zodat het BE-account daadwerkelijk geregistreerd wordt.
+      let accounts = [];
+      if (cfg.accounts && typeof cfg.accounts === 'object' && !Array.isArray(cfg.accounts)) {
+        // OBJECT-shape {nl:{...}, be:{...}} — Follow-up canonical.
+        for (const key of ['nl', 'be']) {
+          const acc = cfg.accounts[key];
+          if (acc && acc.configured) accounts.push({ key, ...acc });
+        }
+      } else if (Array.isArray(cfg.accounts) && cfg.accounts.length) {
+        accounts = cfg.accounts;
+      } else if (cfg.user) {
+        accounts = [{ key: 'nl', ...cfg }];
+      }
+      // configuredLines vullen VOORDAT de register-loop draait, zodat de
+      // UI-gate ('BE-optie tonen') per lijn onafhankelijk is van of de
+      // register-poging al is afgerond.
+      _wbxSoftphone.configuredLines = {
+        nl: accounts.some((a) => (a.key || 'nl') === 'nl'),
+        be: accounts.some((a) => a.key === 'be'),
+      };
       for (const acc of accounts) {
         if (!acc?.user || !acc?.password || !acc?.domain) continue;
         try {
@@ -17723,11 +17748,13 @@
       'Klaar';
     const canCall  = !!effPhone;
     const inCall   = state === 'dialing' || state === 'ringing' || state === 'connected';
-    // BE-optie alleen tonen als de BE-account geregistreerd is (matcht
-    // Follow-up-gedrag). Zolang de UA nog niet geïnit is, laten we 'em
-    // sowieso zien zodat de gebruiker de intentie kan vastleggen; init
-    // gebeurt lazy bij eerste Bel nu.
-    const beAvailable = _wbxIsBeAvailable() || !sp.config;
+    // BE-optie tonen zodra BE server-side CONFIGURED is (Follow-up-parity)
+    // — niet pas ná registratie. Op die manier is BE kiesbaar meteen bij
+    // eerste render; de strikte account-lookup in _wbxPlaceCall (#745) is
+    // het vangnet als registratie faalt (toast + retry). Vóór init hebben
+    // we nog geen configuredLines — dan tonen we de optie sowieso zodat
+    // de gebruiker z'n intentie kan vastleggen (init is lazy).
+    const beAvailable = sp.config ? !!sp.configuredLines?.be : true;
     const ov = sp.lineOverride || 'auto';
 
     // 3-stap-tracker: gebruik cadence.max_attempts (default 3).
