@@ -10486,10 +10486,60 @@
 
   function startInboxPolling() {
     stopInboxPolling();
-    _inboxPollTimer = setInterval(refreshInboxConv, 30000);
+    // Interval 6s (van 30s). refreshInboxConv() is al stil (no flicker,
+    // scroll-preserverend, mark_as_read=false, changed-check). Snellere
+    // poll = "voelt live" ook als de realtime-hook (spoor 2) niet kan
+    // subscriben. Bij tab-verlaten stopt setInterval via stopInboxPolling
+    // (zie setSubView-branch die niet-inbox = stopInboxPolling()).
+    _inboxPollTimer = setInterval(refreshInboxConv, 6000);
+    // Realtime-instant: fire-and-forget. Bij fout / geen realtime valt de
+    // poll erover terug (fail-soft, geen impact op UX).
+    _startInboxRealtime();
   }
   function stopInboxPolling() {
     if (_inboxPollTimer) { clearInterval(_inboxPollTimer); _inboxPollTimer = null; }
+    _stopInboxRealtime();
+  }
+
+  // Supabase realtime op whatsapp_messages (INSERT) — spoor 2.
+  // Pattern gespiegeld van modules/shared/sidebar.js _startNotifRealtime.
+  // Levert een instant update ~ms na INSERT via de bestaande publication
+  // supabase_realtime (whatsapp_messages toegevoegd via migratie
+  // 2026-07-14-whatsapp-messages-realtime.sql). RLS-policy op de tabel
+  // was al SELECT WHERE auth.uid() IS NOT NULL — dus authenticated
+  // gebruikers ontvangen zonder extra RLS-wijziging.
+  //
+  // Fail-soft: try/catch + null-checks. Als realtime niet werkt (channel
+  // fails / geen publication / auth expired), blijft de 6s-poll bepalend.
+  // Handler her-fetcht via refreshInboxConv (die actieve conv + conv-list
+  // beide doet); serveris the source of truth, geen client-side merge.
+  let _inboxRealtimeChannel = null;
+  function _startInboxRealtime() {
+    if (_inboxRealtimeChannel) return;
+    try {
+      if (!window.supabase || typeof window.supabase.channel !== 'function') return;
+      _inboxRealtimeChannel = window.supabase
+        .channel('inbox-live-wanbetalers')
+        .on('postgres_changes', {
+          event : 'INSERT',
+          schema: 'public',
+          table : 'whatsapp_messages',
+        }, () => {
+          // refreshInboxConv is al stil + scroll-preserverend + changed-
+          // check. Als de INSERT niet voor de actieve conv is, herlaadt
+          // hij de conv-list voor unread-badges.
+          try { refreshInboxConv(); } catch (_) {}
+        })
+        .subscribe();
+    } catch (_) { /* stil — poll vangt het op */ }
+  }
+  function _stopInboxRealtime() {
+    if (!_inboxRealtimeChannel) return;
+    try {
+      if (typeof _inboxRealtimeChannel.unsubscribe === 'function') _inboxRealtimeChannel.unsubscribe();
+      else if (window.supabase && typeof window.supabase.removeChannel === 'function') window.supabase.removeChannel(_inboxRealtimeChannel);
+    } catch (_) { /* ignore */ }
+    _inboxRealtimeChannel = null;
   }
 
   // Open de klant-info modal en render de body via renderInboxCustomerPanel met
