@@ -9388,9 +9388,11 @@
   async function openInboxConv(convId) {
     if (!convId) return;
     _inboxActiveConvId = convId;
-    // Highlight active conv direct
+    // Highlight active conv direct — toggle klasse zodat de teal
+    // .inbox-conv-row-active-styling wint (PR #740). Inline bg zetten
+    // zou de CSS-klasse overschrijven en de rij blauw kleuren.
     document.querySelectorAll('#inboxConvList [data-conv-id]').forEach(r => {
-      r.style.background = (r.dataset.convId === convId) ? 'rgba(59,130,246,.10)' : '';
+      r.classList.toggle('inbox-conv-row-active', r.dataset.convId === convId);
     });
     const threadEl = document.getElementById('inboxThread');
     const emptyEl  = document.getElementById('inboxThreadEmpty');
