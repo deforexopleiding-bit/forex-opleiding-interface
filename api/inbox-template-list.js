@@ -133,7 +133,7 @@ export default async function handler(req, res) {
     //    geeft. Beschermt tegen config-rij die naar een oude/verkeerde
     //    WABA-id verwijst terwijl de approved templates onder een andere
     //    WABA staan.
-    const SELECT_COLS = 'id, meta_template_id, name, language, category, header_type, header_content, body_text, body_examples, footer_text, buttons, status, approved_at, updated_at, meta_param_mapping';
+    const SELECT_COLS = 'id, meta_template_id, name, language, category, header_type, header_content, body_text, body_examples, footer_text, buttons, status, approved_at, updated_at, meta_param_mapping, folder';
     async function fetchApproved(filterBaId) {
       let q = supabaseAdmin
         .from('whatsapp_meta_templates')
