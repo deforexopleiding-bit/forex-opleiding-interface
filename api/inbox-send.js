@@ -29,7 +29,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 // hieronder (events.simone.use / onboarding.inbox.send / finance.inbox.send)
 // blijft de enige gate per conv-module.
 import { getClientIp } from './_lib/audit-customer.js';
-import { sendText, sendTemplate, getConfigStatus, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
+import { sendText, sendTemplate, sendMedia, getConfigStatus, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -70,12 +70,19 @@ export default async function handler(req, res) {
   const templateVariables = body.template_variables && typeof body.template_variables === 'object'
     ? body.template_variables : null;
   const templateComponents = Array.isArray(body.template_components) ? body.template_components : [];
+  // Media-mode (image/document/video): link uit whatsapp-media bucket +
+  // optionele caption/filename. Free-form (net als text) → 24h-venster
+  // vereist. Buiten venster: gebruik sendTemplate met media-header.
+  const mediaKind = ['image', 'document', 'video'].includes(mode) ? mode : null;
+  const mediaLink = mediaKind ? String(body.media_link || '').trim() : '';
+  const mediaCaption = mediaKind && body.caption ? String(body.caption).trim().slice(0, 1024) : '';
+  const mediaFilename = mediaKind === 'document' && body.filename ? String(body.filename).trim().slice(0, 200) : '';
 
   // Validatie
   if (!convId) return res.status(400).json({ error: 'conversation_id vereist' });
   if (!UUID_RE.test(convId)) return res.status(400).json({ error: 'conversation_id moet geldige uuid zijn' });
-  if (mode !== 'text' && mode !== 'template') {
-    return res.status(400).json({ error: "mode moet 'text' of 'template' zijn" });
+  if (mode !== 'text' && mode !== 'template' && !mediaKind) {
+    return res.status(400).json({ error: "mode moet 'text', 'template', 'image', 'document' of 'video' zijn" });
   }
   if (mode === 'text') {
     if (!text) return res.status(400).json({ error: 'body vereist bij mode=text' });
@@ -84,6 +91,10 @@ export default async function handler(req, res) {
   if (mode === 'template') {
     if (!templateName) return res.status(400).json({ error: 'template_name vereist bij mode=template' });
     if (templateName.length > MAX_TEMPLATE_NAME) return res.status(400).json({ error: `template_name max ${MAX_TEMPLATE_NAME} chars` });
+  }
+  if (mediaKind) {
+    if (!mediaLink) return res.status(400).json({ error: `media_link vereist bij mode=${mediaKind}` });
+    if (!/^https:\/\//i.test(mediaLink)) return res.status(400).json({ error: 'media_link moet https:// zijn' });
   }
 
   // Meta-config check
@@ -165,14 +176,19 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: 'Geen rechten (finance.inbox.send voor finance-conv)' });
     }
 
-    // 24h-window guard voor free-form text
-    if (mode === 'text') {
+    // 24h-window guard voor free-form text EN media (Meta-regel: alle
+    // free-form berichten vereisen een inbound msg binnen 24h). Buiten
+    // venster: gebruik sendTemplate — voor media kan een template met
+    // media-header via inbox-send-template.js (runtime_media).
+    if (mode === 'text' || mediaKind) {
       const t = conv.last_inbound_at ? new Date(conv.last_inbound_at).getTime() : 0;
       const withinWindow = t && (Date.now() - t) <= TWENTY_FOUR_HOURS_MS;
       if (!withinWindow) {
         return res.status(422).json({
           error: '24h_window_expired',
-          message: 'Buiten 24-uurs venster sinds laatste inbound bericht. Gebruik een approved template.',
+          message: mediaKind
+            ? `Buiten 24-uurs venster — vrij ${mediaKind} versturen kan niet meer. Gebruik een approved template met een ${mediaKind}-header.`
+            : 'Buiten 24-uurs venster sinds laatste inbound bericht. Gebruik een approved template.',
         });
       }
     }
@@ -183,11 +199,22 @@ export default async function handler(req, res) {
     // doorgeven aan sendText/sendTemplate triggert getConfig default).
     const outboundPnId = conv.phone_number_id || financePnId || undefined;
 
-    // Meta API call
+    // Meta API call. Nieuwe mediaKind-branch gebruikt sendMedia (link-mode
+    // met de publieke bucket-URL). Meta accepteert filename alleen bij
+    // 'document' (image/video negeren het).
     let metaResult;
     try {
       if (mode === 'text') {
         metaResult = await sendText({ to: conv.phone_number, body: text, phoneNumberId: outboundPnId });
+      } else if (mediaKind) {
+        metaResult = await sendMedia({
+          to           : conv.phone_number,
+          kind         : mediaKind,
+          link         : mediaLink,
+          caption      : mediaCaption || undefined,
+          filename     : mediaFilename || undefined,
+          phoneNumberId: outboundPnId,
+        });
       } else {
         metaResult = await sendTemplate({
           to: conv.phone_number,
@@ -208,14 +235,19 @@ export default async function handler(req, res) {
     const wamid = metaResult && metaResult.wamid ? String(metaResult.wamid) : null;
     const nowIso = new Date().toISOString();
 
-    // Persist outbound message
+    // Persist outbound message. Voor mediaKind: media_url = bucket-link,
+    // media_type = kind, body = caption (of filename bij document als geen
+    // caption). Zo rendert de inbox-UI dezelfde thumbnail/download-link
+    // die 'ie voor inbound gebruikt.
     const insertRow = {
       conversation_id:    convId,
       direction:          'out',
       meta_wamid:         wamid,
-      body:               mode === 'text' ? text : null,
+      body:               mode === 'text' ? text : (mediaKind ? (mediaCaption || mediaFilename || null) : null),
       template_name:      mode === 'template' ? templateName : null,
       template_variables: mode === 'template' ? (templateVariables || null) : null,
+      media_url:          mediaKind ? mediaLink : null,
+      media_type:         mediaKind || null,
       status:             'queued',
       sent_at:            nowIso,
       sent_by_user_id:    user.id,
@@ -230,7 +262,9 @@ export default async function handler(req, res) {
     // Conversation last_message_at + preview
     const preview = mode === 'text'
       ? text.slice(0, 120)
-      : ('[template] ' + templateName).slice(0, 120);
+      : (mediaKind
+          ? ('[' + mediaKind + '] ' + (mediaCaption || mediaFilename || '')).slice(0, 120)
+          : ('[template] ' + templateName).slice(0, 120));
     const { error: updErr } = await supabaseAdmin
       .from('whatsapp_conversations')
       .update({ last_message_at: nowIso, last_message_preview: preview })
