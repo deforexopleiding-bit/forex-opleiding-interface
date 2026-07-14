@@ -49,12 +49,15 @@ const TYPE_ALIASES = {
   ABONNEMENT_PAUZE: 'ABONNEMENT_PAUZE',
   ABONNEMENT_STOP:  'ABONNEMENT_STOP',
   KWIJTSCHELDING:   'KWIJTSCHELDING',
+  // Fase 1 (2026-07-14): licht type voor betaalafspraak zonder TL-actie.
+  TOEZEGGING:       'TOEZEGGING',
   // Legacy lowercase (backward compat)
   uitstel:        'UITSTEL',
   gespreid:       'SPLITSING',
   pauze:          'ABONNEMENT_PAUZE',
   overig:         'ABONNEMENT_STOP',
   kwijtschelding: 'KWIJTSCHELDING',
+  toezegging:     'TOEZEGGING',
 };
 
 // Mapping naar pending_actions.action_type. TL_ prefix markeert acties die
@@ -71,6 +74,10 @@ const ACTION_TYPE_FOR = {
   ABONNEMENT_PAUZE: 'TL_SUBSCRIPTION_PAUSE',
   ABONNEMENT_STOP:  'TL_SUBSCRIPTION_STOP',
   KWIJTSCHELDING:   'TL_INVOICE_WRITEOFF',
+  // TOEZEGGING is een light type ZONDER pending_actions: geen TL-mutatie, dus
+  // action-type expliciet null. De propose-flow slaat de pending-actions-branch
+  // over voor TOEZEGGING en insert direct met status='ACTIEF'.
+  TOEZEGGING:       null,
 };
 
 // Legacy mapping (pre-D1.5). Niet gebruikt voor nieuwe inserts; alleen ter
@@ -145,6 +152,9 @@ export default async function handler(req, res) {
   const type         = TYPE_ALIASES[typeRaw];
   const invoiceIds   = invoiceIdsRaw.map(String).filter(isUuid);
   const isSubAction  = (type === 'ABONNEMENT_PAUZE' || type === 'ABONNEMENT_STOP');
+  // TOEZEGGING: invoice_ids ZIJN vereist (breach-check gebruikt ze om te
+  // bepalen of de afspraak is nagekomen). Als geen invoice_id per part wordt
+  // gegeven, geldt de datum voor ALLE arrangement invoice_ids.
   const needsInvoices = !isSubAction;
   if (needsInvoices && invoiceIds.length === 0) {
     return res.status(400).json({ error: 'invoice_ids vereist (>=1 uuid) voor type ' + type });
@@ -197,6 +207,32 @@ export default async function handler(req, res) {
       case 'KWIJTSCHELDING': {
         if (!isPosNum(Number(details.write_off_amount))) throw new Error('details.write_off_amount (>0) vereist voor KWIJTSCHELDING');
         if (!details.reason || typeof details.reason !== 'string') throw new Error('details.reason vereist voor KWIJTSCHELDING');
+        break;
+      }
+      case 'TOEZEGGING': {
+        // details.parts: min 1 part. Elk part heeft een verplichte due_date
+        // (concrete kalenderdag — vage input mag niet doorkomen). invoice_id
+        // en amount_cents zijn optioneel; als invoice_id ontbreekt geldt de
+        // datum voor alle arrangement invoice_ids.
+        if (!Array.isArray(details.parts) || details.parts.length < 1) {
+          throw new Error('details.parts (min 1 element) vereist voor TOEZEGGING');
+        }
+        // Alle part-invoice_ids (indien gezet) moeten in arrangement.invoice_ids zitten.
+        const invSet = new Set(invoiceIds);
+        for (const p of details.parts) {
+          if (!p || typeof p !== 'object') throw new Error('details.parts: elk part is een object {due_date, invoice_id?, amount_cents?}');
+          if (!isDate(p.due_date)) throw new Error('details.parts[].due_date moet YYYY-MM-DD zijn (concrete datum vereist)');
+          if (p.invoice_id != null) {
+            if (!isUuid(p.invoice_id)) throw new Error('details.parts[].invoice_id moet uuid zijn');
+            if (!invSet.has(p.invoice_id)) throw new Error('details.parts[].invoice_id moet in invoice_ids voorkomen');
+          }
+          if (p.amount_cents != null) {
+            const c = Number(p.amount_cents);
+            if (!Number.isFinite(c) || !Number.isInteger(c) || c <= 0) {
+              throw new Error('details.parts[].amount_cents moet positief geheel getal in centen zijn');
+            }
+          }
+        }
         break;
       }
     }
@@ -306,11 +342,14 @@ export default async function handler(req, res) {
     }
 
     // ---- INSERT payment_arrangement ----
+    // TOEZEGGING gaat DIRECT naar ACTIEF: geen approval-flow (het is een
+    // notitie van een afspraak, geen geld-actie). Alle andere types starten
+    // op VOORGESTELD en bewegen naar ACTIEF via pending_actions executed.
     const insertRow = {
       customer_id:   customerId,
       invoice_ids:   invoiceIds,
       type,
-      status:        'VOORGESTELD',
+      status:        (type === 'TOEZEGGING') ? 'ACTIEF' : 'VOORGESTELD',
       details:       detailsToStore,
       proposed_by:   user.id,
       notes:         rationale,
@@ -336,8 +375,11 @@ export default async function handler(req, res) {
       proposed_by_user_id: user.id,
     };
 
+    // TOEZEGGING heeft geen pending_actions (geen TL-mutatie). Sla de switch
+    // en de INSERT-branch over — de breach-check cron bewaakt 'em direct
+    // op basis van details.parts + invoice-status.
     const rows = [];
-    switch (type) {
+    if (type !== 'TOEZEGGING') switch (type) {
       case 'UITSTEL': {
         // D1.5: 1 atomic action voor het hele arrangement
         // (TL_INVOICE_CONSOLIDATE_AND_RESTART).
