@@ -2283,6 +2283,75 @@
     }
     :where(.wbx, .wbx-sheet) .wbx-call-line-picker { display:flex; gap:8px; }
     :where(.wbx, .wbx-sheet) .wbx-call-line-picker input[type="radio"] { accent-color:#fff; margin:0; }
+
+    /* ── Cockpit top: "UITBELLEN VIA" label + lijn-select (Follow-up parity) ── */
+    :where(.wbx, .wbx-sheet) .wbx-call-cockpit-top {
+      display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    }
+    :where(.wbx, .wbx-sheet) .wbx-call-cockpit-label {
+      display:inline-flex; align-items:center; gap:6px;
+      font: 600 10.5px/1 'Inter', system-ui, sans-serif;
+      text-transform:uppercase; letter-spacing:.06em;
+      color:rgba(255,255,255,.75);
+    }
+    :where(.wbx, .wbx-sheet) .wbx-call-cockpit-label i { font-size:12px; }
+    :where(.wbx, .wbx-sheet) .wbx-call-line-select {
+      flex:1; min-width:0;
+      background:rgba(255,255,255,.10);
+      border:1px solid rgba(255,255,255,.22);
+      color:#fff;
+      font: 500 12.5px/1 'Inter', system-ui, sans-serif;
+      padding:6px 10px;
+      border-radius:8px;
+      cursor:pointer;
+      appearance:none;
+      background-image: linear-gradient(45deg, transparent 50%, #fff 50%),
+                        linear-gradient(135deg, #fff 50%, transparent 50%);
+      background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+      background-size: 5px 5px, 5px 5px;
+      background-repeat: no-repeat;
+      padding-right:26px;
+    }
+    :where(.wbx, .wbx-sheet) .wbx-call-line-select:hover { border-color:rgba(255,255,255,.45); }
+    :where(.wbx, .wbx-sheet) .wbx-call-line-select:focus { outline:none; border-color:#fff; box-shadow:0 0 0 3px rgba(255,255,255,.20); }
+    :where(.wbx, .wbx-sheet) .wbx-call-line-select:disabled { opacity:.55; cursor:not-allowed; }
+    :where(.wbx, .wbx-sheet) .wbx-call-line-select option { color:#161D29; background:#fff; }
+
+    /* Registratie-status (● Verbonden / Verbinden… / Niet verbonden / Fout). */
+    :where(.wbx, .wbx-sheet) .wbx-call-conn-status {
+      display:flex; align-items:center; gap:8px;
+      margin: 6px 0 2px 0;
+      font: 500 11.5px/1 'Inter', system-ui, sans-serif;
+      letter-spacing:.3px;
+      color:rgba(255,255,255,.85);
+    }
+    :where(.wbx, .wbx-sheet) .wbx-call-conn-dot {
+      display:inline-block; width:8px; height:8px; border-radius:50%;
+      background:#9ca3af; box-shadow:0 0 0 3px rgba(156,163,175,.20);
+      transition: background-color .15s ease, box-shadow .15s ease;
+    }
+    :where(.wbx, .wbx-sheet) .wbx-call-conn-status.connecting .wbx-call-conn-dot {
+      background:#eab308; box-shadow:0 0 0 3px rgba(234,179,8,.24);
+    }
+    :where(.wbx, .wbx-sheet) .wbx-call-conn-status.connected  .wbx-call-conn-dot {
+      background:#22c55e; box-shadow:0 0 0 3px rgba(34,197,94,.28);
+    }
+    :where(.wbx, .wbx-sheet) .wbx-call-conn-status.failed     .wbx-call-conn-dot,
+    :where(.wbx, .wbx-sheet) .wbx-call-conn-status.disabled   .wbx-call-conn-dot {
+      background:#ef4444; box-shadow:0 0 0 3px rgba(239,68,68,.22);
+    }
+    :where(.wbx, .wbx-sheet) .wbx-call-conn-retry {
+      background:rgba(255,255,255,.10);
+      border:1px solid rgba(255,255,255,.22);
+      color:#fff;
+      font-size:11px;
+      padding:3px 8px;
+      border-radius:6px;
+      cursor:pointer;
+      display:inline-flex; align-items:center; gap:4px;
+    }
+    :where(.wbx, .wbx-sheet) .wbx-call-conn-retry:hover { background:rgba(255,255,255,.20); }
+    :where(.wbx, .wbx-sheet) .wbx-call-conn-retry[hidden] { display:none !important; }
     /* Nummer-veld in de teal cockpit — wit veld met donker-teal tekst
        zodat het onmiskenbaar een invoerveld is en het nummer goed
        leesbaar blijft. Placeholder gedempt donker-teal. */
@@ -17412,8 +17481,29 @@
   }
   function _wbxResolveEffectiveLine(customerPhone) {
     const ov = String(_wbxSoftphone.lineOverride || 'auto').toLowerCase();
-    if (ov === 'nl' || (ov === 'be' && _wbxIsBeAvailable())) return ov;
+    // User-override wint ALTIJD (nl of be) — óók vóór init. De
+    // availability-check gebeurt pas op UA-lookup-tijd (_wbxPlaceCall)
+    // zodat de UI direct meebeweegt met de keuze i.p.v. stilletjes
+    // terug te vallen op NL.
+    if (ov === 'nl' || ov === 'be') return ov;
     return _wbxDetectLine(customerPhone);
+  }
+  // Registratie-status van de lijn voor de conn-dot in de cockpit.
+  // idle       — nog geen init geprobeerd
+  // connecting — init loopt (fetcht config + registreert UA's)
+  // connected  — UA voor deze lijn geregistreerd
+  // failed     — init afgebroken met een error
+  // disabled   — deze lijn is niet geconfigureerd (bv. BE zonder env)
+  function _wbxRegistrationStatusForLine(line) {
+    const sp = _wbxSoftphone;
+    if (sp.uaByLine?.[line]) return 'connected';
+    // Init is klaar (initPromise blijft na success) én er is een config,
+    // maar deze specifieke lijn ontbreekt in uaByLine → niet geconfigureerd
+    // of registratie is voor deze lijn mislukt.
+    if (sp.initPromise && sp.config) return 'disabled';
+    if (sp.lastError) return 'failed';
+    if (sp.initPromise) return 'connecting';
+    return 'idle';
   }
 
   // Lazy SIP.js UA-init. Fetcht /api/voys-sip-config, bouwt UserAgent per
@@ -17496,10 +17586,14 @@
       window.AgentShared?.showToast?.('SIP niet beschikbaar: ' + (e?.message || 'onbekend'), 'error');
       return { ok: false, line, error: e?.message || 'init' };
     }
-    const ua = _wbxSoftphone.uaByLine[line] || _wbxSoftphone.uaByLine.nl;
+    // Strikt: geen silent-fallback naar NL wanneer BE expliciet gekozen is.
+    // Als de gekozen lijn geen UA heeft, tonen we een duidelijke fout i.p.v.
+    // via het verkeerde account uit te bellen.
+    const ua = _wbxSoftphone.uaByLine[line];
     if (!ua) {
-      _wbxSoftphone.lastError = `Geen ${line.toUpperCase()}-account beschikbaar`;
+      _wbxSoftphone.lastError = `${line.toUpperCase()}-lijn niet geregistreerd. Check VOYS_SIP_*_${line.toUpperCase()} env vars.`;
       _caseRender();
+      window.AgentShared?.showToast?.(_wbxSoftphone.lastError, 'error');
       return { ok: false, line };
     }
 
@@ -17681,22 +17775,43 @@
       </div>`;
     }
 
+    // Follow-up parity: label "Uitbellen via" + lijn-select (auto/NL/BE)
+    // + registratie-status (dot + label + retry). Alleen de LIJN (geen
+    // apart Voys-account-veld). Auto-detectie toont welke lijn gekozen is.
+    const detected     = _wbxDetectLine(phone);          // wat auto zou kiezen
+    const detectedLbl  = detected === 'be' ? 'BE-lijn' : 'NL-lijn';
+    const autoOptLabel = phone ? `Lijn · automatisch (→ ${detectedLbl})` : 'Lijn · automatisch';
+    // BE-optie tonen als: BE UA is geregistreerd, OF init nog niet gelopen
+    // heeft en de gebruiker moet 'em kunnen kiezen (backward-compat pad).
+    const showBeOpt    = beAvailable;
+    const connState    = _wbxRegistrationStatusForLine(line);
+    const connLabelMap = {
+      idle       : '○ Nog niet verbonden',
+      connecting : '○ Verbinden…',
+      connected  : '● Verbonden',
+      failed     : '● Verbinding mislukt',
+      disabled   : `● ${line.toUpperCase()}-lijn niet beschikbaar`,
+    };
+    const connLabel     = connLabelMap[connState] || connLabelMap.idle;
+    const showConnRetry = (connState === 'failed' || connState === 'disabled');
+
     return `<div class="wbx-card wbx-call-card">
       <h4>Bellen</h4>
       <div class="wbx-call-cockpit">
-        <div class="wbx-call-line-row">
-          <div class="wbx-call-line-badge">${esc(lineLabel)}</div>
-          <div class="wbx-call-line-picker">
-            <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:rgba(255,255,255,.75);cursor:pointer">
-              <input type="radio" name="wbxCallLine" value="auto" data-case-line ${ov === 'auto' ? 'checked' : ''} ${inCall ? 'disabled' : ''}> auto
-            </label>
-            <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:rgba(255,255,255,.75);cursor:pointer">
-              <input type="radio" name="wbxCallLine" value="nl" data-case-line ${ov === 'nl' ? 'checked' : ''} ${inCall ? 'disabled' : ''}> NL
-            </label>
-            ${beAvailable ? `<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:rgba(255,255,255,.75);cursor:pointer">
-              <input type="radio" name="wbxCallLine" value="be" data-case-line ${ov === 'be' ? 'checked' : ''} ${inCall ? 'disabled' : ''}> BE
-            </label>` : ''}
-          </div>
+        <!-- UITBELLEN VIA + lijn-select -->
+        <div class="wbx-call-cockpit-top">
+          <div class="wbx-call-cockpit-label"><i class="ti ti-phone"></i> Uitbellen via</div>
+          <select class="wbx-call-line-select" data-case-line-sel ${inCall ? 'disabled' : ''} title="Kies handmatig NL/BE of laat automatisch bepalen op basis van het klantnummer">
+            <option value="auto" ${ov === 'auto' ? 'selected' : ''}>${esc(autoOptLabel)}</option>
+            <option value="nl"   ${ov === 'nl'   ? 'selected' : ''}>NL-lijn (+31)</option>
+            ${showBeOpt ? `<option value="be" ${ov === 'be' ? 'selected' : ''}>BE-lijn (+32)</option>` : ''}
+          </select>
+        </div>
+        <!-- Registratie-status van de gekozen lijn -->
+        <div class="wbx-call-conn-status ${connState}" aria-live="polite">
+          <span class="wbx-call-conn-dot"></span>
+          <span class="wbx-call-conn-label">${esc(connLabel)}</span>
+          <button type="button" class="wbx-call-conn-retry" data-case-conn-retry ${showConnRetry ? '' : 'hidden'} title="Opnieuw verbinden"><i class="ti ti-refresh"></i></button>
         </div>
         ${inCall
           ? `<div class="wbx-call-number wbx-mono">${esc(effPhone || 'geen nummer')}</div>`
@@ -17816,14 +17931,38 @@
       inp.addEventListener('blur', () => _caseRender());
     });
 
-    // NL/BE line-override radios.
-    sheet.querySelectorAll('[data-case-line]').forEach((r) => {
-      r.addEventListener('change', (e) => {
-        if (!e.target.checked) return;
+    // Lijn-select (auto/NL/BE) — Follow-up parity. Bij wisselen direct
+    // re-renderen zodat het status-label + conn-dot meebewegen met de
+    // gekozen lijn (NIET blijven hangen op de eerste auto-detectie).
+    sheet.querySelectorAll('[data-case-line-sel]').forEach((sel) => {
+      sel.addEventListener('change', (e) => {
         _wbxSoftphone.lineOverride = String(e.target.value || 'auto');
         _caseRender();
       });
     });
+    // "Opnieuw verbinden"-knop bij failed/disabled conn-status. Reset
+    // initPromise + lastError zodat _wbxInitSoftphone opnieuw draait.
+    sheet.querySelectorAll('[data-case-conn-retry]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        _wbxSoftphone.initPromise = null;
+        _wbxSoftphone.lastError   = null;
+        _caseRender();
+        _wbxInitSoftphone()
+          .catch(() => {})
+          .finally(() => setTimeout(() => _caseRender(), 0));
+      });
+    });
+    // Eager init on cockpit-mount (fire-and-forget) — geeft direct de
+    // 'Verbinden…' → 'Verbonden' feedback zonder dat de gebruiker eerst
+    // 'Bel nu' hoeft te klikken. Alleen kicken als er nog geen poging is
+    // gedaan (initPromise=null én geen uaByLine-entries én geen lastError).
+    if (!_wbxSoftphone.initPromise
+        && !Object.keys(_wbxSoftphone.uaByLine).length
+        && !_wbxSoftphone.lastError) {
+      _wbxInitSoftphone()
+        .catch(() => {})
+        .finally(() => setTimeout(() => _caseRender(), 0));
+    }
 
     // Bel nu — gebruikt effective phone + line via _wbxPlaceCall.
     sheet.querySelectorAll('[data-case-bel]').forEach((btn) => {
