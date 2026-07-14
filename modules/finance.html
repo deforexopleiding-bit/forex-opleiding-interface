@@ -17340,6 +17340,8 @@
     config     : null,   // /api/voys-sip-config response
     uaByLine   : {},     // { nl:UserAgent, be:UserAgent }
     regByLine  : {},     // { nl:Registerer, be:Registerer }
+    accByLine  : {},     // { nl:{domain,wss,user,...}, be:{...} } — per-lijn account-object voor INVITE-target
+
     // Follow-up-parity: welke lijnen zijn server-side geconfigureerd?
     // Wordt geset in _wbxInitSoftphone en stuurt de UI-visibility van de
     // BE-optie (i.p.v. alleen op geregistreerd te gaten — anders is BE
@@ -17579,6 +17581,10 @@
           await reg.register();
           _wbxSoftphone.uaByLine[acc.key || 'nl']  = ua;
           _wbxSoftphone.regByLine[acc.key || 'nl'] = reg;
+          // Bewaar het account-object (domain/wss/user/display_name) per
+          // lijn zodat _wbxPlaceCall de INVITE-target op het JUISTE
+          // per-lijn domein bouwt (BE-UA → BE-domein, NL-UA → NL-domein).
+          _wbxSoftphone.accByLine[acc.key || 'nl'] = acc;
         } catch (e) {
           console.warn('[wbx-softphone] account ' + (acc.key || 'nl') + ' init failed:', e?.message || e);
         }
@@ -17635,7 +17641,13 @@
     if (muteBtn) { muteBtn.classList.remove('on'); muteBtn.innerHTML = '<i class="ti ti-microphone"></i>'; muteBtn.title = 'Mute microfoon'; }
 
     try {
-      const domain = _wbxSoftphone.config?.domain || 'voipgrid.nl';
+      // Per-lijn domein: BE-UA → BE-domein, NL-UA → NL-domein. Top-level
+      // config.domain is het NL-domein (backward-compat) — als we dat
+      // hardcoden zou een INVITE via de BE-UA naar het NL-domein gaan en
+      // dan komt de call niet over. Fallback op config.domain zodat oude
+      // NL-only setups blijven werken.
+      const acc    = _wbxSoftphone.accByLine?.[line];
+      const domain = acc?.domain || _wbxSoftphone.config?.domain || 'voipgrid.nl';
       const target = window.SIP.UserAgent.makeURI('sip:' + digits + '@' + domain);
       const inviter = new window.SIP.Inviter(ua, target, {
         sessionDescriptionHandlerOptions: {
