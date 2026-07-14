@@ -803,22 +803,36 @@
     '</div>';
   }
 
-  // ── Fase 4b — Cancel-knop rol-gate (manager/super_admin only) ──────────
-  // De backend (api/onboarding-cancel.js) is seesAll (admin/manager/super_admin),
-  // de UI is strikter: alleen manager + super_admin krijgen de knop. We
-  // cachen de profile-role na de eerste lookup.
-  let _profileRoleCache = null;
-  async function _getProfileRoleOnce() {
-    if (_profileRoleCache !== null) return _profileRoleCache;
+  // ── Fase 4b — Cancel-knop permissie-gate (onboarding.admin) ────────────
+  // Backend (api/onboarding-cancel.js → onboardingScope.seesAll) gate't op
+  // permissie 'onboarding.admin' via user_has_permission(). Sales heeft die
+  // sinds migratie 2026-07-06-sales-onboarding-admin-permission.sql. UI moet
+  // dus OOK op dezelfde permissie gaten (client- en server-check spiegelen)
+  // i.p.v. op een harde rol-check die 'sales' nooit ziet.
+  //
+  // Fail-closed: als de permissie-matrix nog niet geladen is (of load faalt)
+  // → knop NIET tonen. Server blijft hoe dan ook autoriteit (403 zonder
+  // rechten). Liever een keer verbergen dan onterecht tonen — annuleren is
+  // onomkeerbaar.
+  let _canCancelCache = null; // null=nog niet geladen, true/false=resolved
+  async function _ensureCanCancelPermission() {
+    if (_canCancelCache !== null) return _canCancelCache;
     try {
-      const p = await (window.AuthShared?.getProfile?.() || Promise.resolve(null));
-      _profileRoleCache = String(p?.role || '').toLowerCase() || '';
-    } catch (e) { _profileRoleCache = ''; }
-    return _profileRoleCache;
+      if (window.RBAC?.ensurePermissionsLoaded) {
+        await window.RBAC.ensurePermissionsLoaded();
+      }
+      _canCancelCache = !!(window.RBAC?.canSync && window.RBAC.canSync('onboarding.admin'));
+    } catch (e) {
+      // Fail-closed: elke lookup-fout → knop verborgen.
+      _canCancelCache = false;
+    }
+    return _canCancelCache;
   }
   function _canCancelOnboardingSync() {
-    const role = _profileRoleCache;
-    return role === 'manager' || role === 'super_admin';
+    // null (matrix nog niet geladen) → false. Callers awaiten
+    // _ensureCanCancelPermission() vóór render zodat dit meestal correct is;
+    // de fail-closed default beschermt tegen edge-cases (render-race).
+    return _canCancelCache === true;
   }
 
   // ── Fase 3 — Admin-acties block in detail-modal ─────────────────────────
@@ -869,7 +883,7 @@
     const canCancel = _canCancelOnboardingSync();
     // Cancel-sectie: drie staten.
     //   1) Al gecancelled → toon read-only record (datum/wie/reden/€-snapshot/per-stap)
-    //   2) Mag annuleren (manager/super_admin) en NIET gecancelled → toon knop
+    //   2) Mag annuleren (permissie onboarding.admin) en NIET gecancelled → toon knop
     //   3) Anders → niets tonen
     let cancelHtml = '';
     if (cancelled) {
@@ -1365,9 +1379,9 @@
     const onChange = (typeof opts.onChange === 'function') ? opts.onChange : (() => {});
     const compact  = (opts.compact !== false);
 
-    // Rol cache vullen vóór render, zodat _canCancelOnboardingSync() betrouwbaar
-    // de cancel-knop laat verschijnen (of niet).
-    await _getProfileRoleOnce();
+    // Permissie-cache vullen vóór render, zodat _canCancelOnboardingSync()
+    // betrouwbaar de cancel-knop laat verschijnen (of niet) — fail-closed.
+    await _ensureCanCancelPermission();
 
     async function render() {
       host.innerHTML = '<div style="padding:18px;text-align:center;color:var(--text-faint)">Laden…</div>';
@@ -1414,10 +1428,10 @@
     m.removeAttribute('hidden');
     m.classList.add('open');
     bd.innerHTML = `<div class="empty-state"><span class="skeleton" style="width:160px"></span></div>`;
-    // Profile-role cache vullen voordat we het admin-acties-block renderen,
-    // zodat _canCancelOnboardingSync() betrouwbaar is. Fail-soft: bij geen
-    // profile is de cancel-knop sowieso verborgen.
-    await _getProfileRoleOnce();
+    // Permissie-cache vullen voordat we het admin-acties-block renderen,
+    // zodat _canCancelOnboardingSync() betrouwbaar is. Fail-closed: bij
+    // load-fout of nog niet geladen is de cancel-knop verborgen.
+    await _ensureCanCancelPermission();
     try {
       const r = await window.AgentShared.apiFetch('/api/onboarding-detail?id=' + encodeURIComponent(id));
       let d = null; try { d = await r.json(); } catch {}
