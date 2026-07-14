@@ -1231,6 +1231,9 @@
       border: 2px solid var(--wbxi-surface);
       box-sizing: content-box;
     }
+    /* [hidden] attribuut moet display:inline-flex overrulen — anders
+       toont de badge "0" ook bij 0 actieve filters. */
+    #view-inbox .inbox-filters-badge[hidden] { display: none !important; }
     #view-inbox .inbox-filters-popover {
       position: absolute;
       top: calc(100% + 6px);
@@ -2257,7 +2260,14 @@
     }
     :where(.wbx, .wbx-sheet) .wbx-call-btn.wbx-call-dial   { background:#fff; color:#0A5A4E; }
     :where(.wbx, .wbx-sheet) .wbx-call-btn.wbx-call-dial:hover:not(:disabled) { background:#f5f5f5; }
-    :where(.wbx, .wbx-sheet) .wbx-call-btn.wbx-call-dial:disabled { opacity:.4; cursor:not-allowed; }
+    /* Disabled 'Bel nu' — bewust minder prominent maar tekst blijft leesbaar
+       op de teal cockpit-achtergrond (was opacity .4 → onleesbaar). */
+    :where(.wbx, .wbx-sheet) .wbx-call-btn.wbx-call-dial:disabled {
+      opacity:.75;
+      background:rgba(255,255,255,.85);
+      color:#0A5A4E;
+      cursor:not-allowed;
+    }
     :where(.wbx, .wbx-sheet) .wbx-call-btn.wbx-call-hangup { background:#dc2626; color:#fff; }
     :where(.wbx, .wbx-sheet) .wbx-call-btn.wbx-call-hangup:hover { background:#b91c1c; }
     :where(.wbx, .wbx-sheet) .wbx-call-btn.wbx-call-mute {
@@ -2273,14 +2283,22 @@
     }
     :where(.wbx, .wbx-sheet) .wbx-call-line-picker { display:flex; gap:8px; }
     :where(.wbx, .wbx-sheet) .wbx-call-line-picker input[type="radio"] { accent-color:#fff; margin:0; }
+    /* Nummer-veld in de teal cockpit — wit veld met donker-teal tekst
+       zodat het onmiskenbaar een invoerveld is en het nummer goed
+       leesbaar blijft. Placeholder gedempt donker-teal. */
     :where(.wbx, .wbx-sheet) .wbx-call-number-input {
       display:block; width:100%; margin-top:8px; text-align:center;
-      background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.18);
-      color:#fff; font-size:20px; font-weight:600; padding:8px 10px; border-radius:8px;
+      background:#fff; border:1px solid rgba(255,255,255,.6);
+      color:#0A5A4E; font-size:20px; font-weight:600; padding:8px 10px; border-radius:8px;
       letter-spacing:.02em; font-variant-numeric:tabular-nums;
     }
+    :where(.wbx, .wbx-sheet) .wbx-call-number-input::placeholder {
+      color:#5B7D75;
+      opacity:1;
+    }
     :where(.wbx, .wbx-sheet) .wbx-call-number-input:focus {
-      outline:none; border-color:rgba(255,255,255,.5); background:rgba(255,255,255,.12);
+      outline:none; border-color:#fff; background:#fff;
+      box-shadow:0 0 0 3px rgba(255,255,255,.28);
     }
     :where(.wbx, .wbx-sheet) .wbx-call-state.ringing { color:#ffe1a3; }
 
@@ -17169,9 +17187,11 @@
     }).join('');
 
     // Multi-invoice notitie in factuurkaart.
+    // Single-case: alleen zeggen dat er niet meer open facturen zijn — NIET
+    // "geen achterstand", want deze ene factuur kan zelf 160 dg te laat zijn.
     const nOpenNote = isMulti
       ? `<span style="color:var(--wbx-s-back-tx)">${nOpen} — achterstand, hoort bij <a href="#" data-case-goto="crediteren" style="color:var(--wbx-accent-ink)">opruimactie</a></span>`
-      : `<span>1 — geen achterstand</span>`;
+      : `<span>1 — enkel deze factuur</span>`;
 
     sheet.innerHTML = `
       <div class="wbx-sheet-top">
