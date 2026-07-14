@@ -4272,6 +4272,7 @@
             <a class="sr-abtn" id="inboxCustPanelOpen" href="#" target="_blank" rel="noopener" style="font-size:12.5px"><i class="ti ti-user"></i> Open klant-profiel</a>
             <a class="sr-abtn" id="inboxCustPanelInvoice" href="#" target="_blank" rel="noopener" style="font-size:12.5px"><i class="ti ti-file-invoice"></i> Maak factuur aan</a>
             <button class="sr-abtn secondary" id="inboxClaimPaidBtn" type="button" style="font-size:12.5px" disabled title="Eerst klant koppelen"><i class="ti ti-cash-check"></i> Klant claimt betaald</button>
+            <button class="sr-abtn secondary" id="inboxToezeggingBtn" type="button" style="font-size:12.5px" disabled title="Eerst klant koppelen"><i class="ti ti-calendar-check"></i> Leg afspraak vast</button>
           </div>
         </div>
       </div>
@@ -8030,6 +8031,7 @@
       ABONNEMENT_PAUZE: 'Abonnement pauze',
       ABONNEMENT_STOP:  'Abonnement stop',
       KWIJTSCHELDING:   'Kwijtschelding',
+      TOEZEGGING:       'Betaalafspraak',
     };
     return map[t] || (t || '—');
   }
@@ -8175,6 +8177,11 @@
     } else if (item.type === 'SPLITSING' && Array.isArray(d.parts) && d.parts.length) {
       from = d.parts[0]?.due_date || null;
       until = d.parts[d.parts.length - 1]?.due_date || null;
+    } else if (item.type === 'TOEZEGGING' && Array.isArray(d.parts) && d.parts.length) {
+      // Betaalafspraak — sorteer parts op due_date en toon vroegste → laatste.
+      const dates = d.parts.map((p) => p?.due_date).filter(Boolean).sort();
+      from  = dates[0] || null;
+      until = dates[dates.length - 1] || null;
     } else {
       from = item.created_at ? String(item.created_at).slice(0, 10) : null;
     }
@@ -12036,6 +12043,7 @@
     const openLnk  = document.getElementById('inboxCustPanelOpen');
     const invLnk   = document.getElementById('inboxCustPanelInvoice');
     const claimBtn = document.getElementById('inboxClaimPaidBtn');
+    const toezeggingBtn = document.getElementById('inboxToezeggingBtn');
     const infoSec  = document.getElementById('inboxCustPanelInfoSection');
     // Openstaand-strip (kern-info in één regel): bedrag / factuur-count /
     // oudste dagen te laat. Alleen zichtbaar bij >=1 open factuur.
@@ -12192,6 +12200,37 @@
           claimBtn.title = hasOpen ? 'Eerst klant koppelen' : 'Geen open factuur om te claimen';
         }
       }
+      // Fase 1 — Leg betaalafspraak vast (TOEZEGGING). Enabled bij matched
+      // klant met >=1 open factuur (breach-check heeft facturen nodig als
+      // bewijs-anker). Wordt opgeslagen als light arrangement zonder TL-actie.
+      if (toezeggingBtn) {
+        const hasOpen = invs.length > 0;
+        if (cust && cust.id && hasOpen) {
+          toezeggingBtn.disabled = false;
+          toezeggingBtn.classList.remove('dim');
+          toezeggingBtn.style.pointerEvents = '';
+          toezeggingBtn.title = 'Leg een betaalafspraak vast (datum + optioneel factuur)';
+          toezeggingBtn.onclick = () => {
+            openToezeggingModal({
+              customerId:   cust.id,
+              customerName: cust.name || '',
+              openInvoices: invs.map((iv) => ({
+                id: iv.id, invoice_number: iv.invoice_number,
+                amount_open: iv.amount_open, due_date: iv.due_date,
+                is_overdue: iv.is_overdue, days_overdue: iv.days_overdue,
+              })),
+              initialParts: [{}],
+              note: 'Betaalafspraak vastgelegd via WhatsApp-inbox',
+            });
+          };
+        } else {
+          toezeggingBtn.disabled = true;
+          toezeggingBtn.classList.add('dim');
+          toezeggingBtn.style.pointerEvents = 'none';
+          toezeggingBtn.title = hasOpen ? 'Eerst klant koppelen' : 'Geen open factuur — niets af te spreken';
+          toezeggingBtn.onclick = null;
+        }
+      }
     } else {
       // state === 'unknown'
       // Geen facturen / abonnementen-sectie tonen — we hebben geen klant om
@@ -12236,6 +12275,15 @@
         claimBtn.classList.add('dim');
         claimBtn.style.pointerEvents = 'none';
         claimBtn.title = 'Eerst klant koppelen';
+      }
+      // Fase 1 — zonder gekoppelde klant kunnen we geen afspraak vastleggen
+      // (breach-check heeft invoice_ids nodig als bewijs-anker).
+      if (toezeggingBtn) {
+        toezeggingBtn.disabled = true;
+        toezeggingBtn.classList.add('dim');
+        toezeggingBtn.style.pointerEvents = 'none';
+        toezeggingBtn.title = 'Eerst klant koppelen';
+        toezeggingBtn.onclick = null;
       }
     }
   }
@@ -17458,6 +17506,7 @@
 
       <div class="wbx-sheet-actions">
         <button class="wbx-btn wbx-primary" type="button" data-case-action="${esc(primary.key)}">${esc(primary.label)}</button>
+        <button class="wbx-btn"              type="button" data-case-action="toezegging">Betaalafspraak vastleggen</button>
         <button class="wbx-btn"              type="button" data-case-action="reminder">Herinnering sturen</button>
         <button class="wbx-btn"              type="button" data-case-action="ask_joost" ${_caseState.joostBusy ? 'disabled' : ''}>Vraag Joost</button>
         <button class="wbx-btn wbx-danger"   type="button" data-case-action="to_incasso">Naar incasso</button>
@@ -18100,7 +18149,25 @@
         const d = await r.json();
         if (!r.ok || d.error) throw new Error(d.error || 'HTTP ' + r.status);
         window.AgentShared?.showToast?.('Belpoging gelogd', 'success');
+        // Bij payment_promise / payment_plan: bied direct de kans de
+        // afgesproken datum vast te leggen als TOEZEGGING (Fase 1). De
+        // uitkomst-modal sluit + de toezegging-modal opent met 1 (promise)
+        // of 2 (plan) parts pre-gevuld.
+        const wantsToezegging = (chosen === 'payment_promise' || chosen === 'payment_plan');
         close();
+        if (wantsToezegging) {
+          const initialParts = (chosen === 'payment_plan')
+            ? [{ due_date: '' }, { due_date: '' }]
+            : [{ due_date: '' }];
+          openToezeggingModal({
+            customerId:   cust?.id || _caseState.cid,
+            customerName: cust?.display_name || cust?.name || '',
+            openInvoices: _caseState.detail?.open_invoices || [],
+            initialParts,
+            note:         chosen === 'payment_plan' ? 'Betalingsregeling vastgelegd via belpoging' : 'Toezegging vastgelegd via belpoging',
+            onSaved:      () => _caseLoadCallLog(cust?.id || _caseState.cid).catch(() => {}),
+          });
+        }
         await _caseLoadCallLog(cust?.id || _caseState.cid);
       } catch (e) {
         if (err) { err.style.display = ''; err.textContent = 'Fout: ' + (e?.message || 'onbekend'); }
@@ -18108,6 +18175,218 @@
         saveBtn.textContent = 'Opslaan';
       }
     });
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  //   TOEZEGGING (betaalafspraak zonder TL-actie) — shared modal
+  //
+  //   openToezeggingModal({
+  //     customerId, customerName?, openInvoices: [...],
+  //     initialParts?: [{ due_date, invoice_id?, amount_cents? }],
+  //     note?: string, onSaved?: () => void
+  //   })
+  //
+  //   - Rendert 1 of meerdere termijnen (add/remove) met datepicker (verplicht,
+  //     concrete kalenderdag — vage input mag niet) + optionele factuurkeuze +
+  //     optioneel bedrag.
+  //   - Bouwt arrangement.invoice_ids = alle open invoice-ids (globale scope);
+  //     per part is invoice_id de subset (of NULL = alle).
+  //   - POST /api/arrangements-propose { type:'TOEZEGGING', ... }
+  //   - Server plaatst 'em direct op status='ACTIEF' (geen approval nodig),
+  //     de breach-check cron bewaakt de parts.
+  // ═════════════════════════════════════════════════════════════════════════
+  function openToezeggingModal(opts) {
+    opts = opts || {};
+    const customerId   = opts.customerId || null;
+    const customerName = opts.customerName || '';
+    const openInvoices = Array.isArray(opts.openInvoices) ? opts.openInvoices : [];
+    const initialParts = Array.isArray(opts.initialParts) && opts.initialParts.length ? opts.initialParts : [{}];
+    const initialNote  = typeof opts.note === 'string' ? opts.note : '';
+    const onSaved      = typeof opts.onSaved === 'function' ? opts.onSaved : (() => {});
+
+    if (!customerId) {
+      window.AgentShared?.showToast?.('Kan afspraak niet vastleggen: klant onbekend', 'error');
+      return;
+    }
+    if (!openInvoices.length) {
+      window.AgentShared?.showToast?.('Klant heeft geen openstaande facturen', 'error');
+      return;
+    }
+
+    // Bestaande modal opruimen (bv. bij opnieuw openen).
+    document.getElementById('wbxToezeggingModal')?.remove();
+
+    const wrap = document.createElement('div');
+    wrap.id = 'wbxToezeggingModal';
+    wrap.className = 'wbx wbx-call-outcome-scrim';
+    // State (mutable) — parts en note leven in local vars, we re-renderen bij
+    // add/remove en lezen op save de current DOM-waarden.
+    const state = { parts: initialParts.map((p) => ({
+      due_date:     typeof p?.due_date === 'string' ? p.due_date : '',
+      invoice_id:   typeof p?.invoice_id === 'string' ? p.invoice_id : '',
+      amount_euros: (p && p.amount_cents != null) ? (Number(p.amount_cents) / 100).toFixed(2) : '',
+    })) };
+
+    // Optie-lijst voor factuur-select. Eerste optie = alle openstaande.
+    function invoiceOptions(selected) {
+      const opts = [`<option value=""${selected === '' ? ' selected' : ''}>Alle openstaande facturen</option>`];
+      for (const iv of openInvoices) {
+        const label = `${iv.invoice_number || iv.id?.slice(0,6) || '—'} — ${_inboxFmtEur(Number(iv.amount_open) || 0)}${iv.is_overdue ? ' (' + (iv.days_overdue || 0) + 'd te laat)' : ''}`;
+        opts.push(`<option value="${esc(iv.id)}"${selected === iv.id ? ' selected' : ''}>${esc(label)}</option>`);
+      }
+      return opts.join('');
+    }
+
+    function partRowHtml(part, idx, total) {
+      const showFactuur = openInvoices.length > 1;
+      const rmBtn = total > 1
+        ? `<button class="wbx-btn wbx-sm" type="button" data-toezegging-remove="${idx}" title="Termijn verwijderen" style="align-self:end">✕</button>`
+        : '';
+      const factuurCell = showFactuur
+        ? `<label style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:180px">
+            <span style="font-size:11px;color:var(--wbx-muted);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Factuur (optioneel)</span>
+            <select data-toezegging-inv="${idx}" style="padding:7px 9px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:#fff;color:var(--wbx-ink);font:inherit;font-size:12.5px">${invoiceOptions(part.invoice_id || '')}</select>
+          </label>`
+        : '';
+      return `<div class="wbx-toezegging-part" data-toezegging-part="${idx}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;padding:10px;border:1px solid var(--wbx-border);border-radius:8px;background:#fff">
+        <label style="display:flex;flex-direction:column;gap:3px">
+          <span style="font-size:11px;color:var(--wbx-muted);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Wanneer *</span>
+          <input type="date" required data-toezegging-date="${idx}" value="${esc(part.due_date || '')}" style="padding:7px 9px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:#fff;color:var(--wbx-ink);font:inherit;font-size:12.5px"/>
+        </label>
+        ${factuurCell}
+        <label style="display:flex;flex-direction:column;gap:3px;width:120px">
+          <span style="font-size:11px;color:var(--wbx-muted);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Bedrag (opt.)</span>
+          <input type="number" min="0" step="0.01" data-toezegging-amt="${idx}" value="${esc(part.amount_euros || '')}" placeholder="€" style="padding:7px 9px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:#fff;color:var(--wbx-ink);font:inherit;font-size:12.5px;font-family:var(--wbx-mono, ui-monospace, monospace)"/>
+        </label>
+        ${rmBtn}
+      </div>`;
+    }
+
+    function render() {
+      const partsHtml = state.parts.map((p, i) => partRowHtml(p, i, state.parts.length)).join('');
+      wrap.innerHTML = `
+        <div class="wbx-call-outcome-modal" style="max-width:640px">
+          <div class="wbx-call-outcome-head">
+            <div>
+              <div style="font-weight:600">Betaalafspraak vastleggen</div>
+              <div style="font-size:12px;color:var(--wbx-muted);margin-top:2px">${esc(customerName || 'Klant')} · ${openInvoices.length} openstaande factu${openInvoices.length === 1 ? 'ur' : 'ren'}</div>
+            </div>
+            <button class="wbx-inc-close" type="button" data-toezegging-close>✕</button>
+          </div>
+          <div class="wbx-call-outcome-body" style="display:flex;flex-direction:column;gap:12px">
+            <div id="wbxToezeggingParts" style="display:flex;flex-direction:column;gap:8px">${partsHtml}</div>
+            <button class="wbx-btn wbx-sm" type="button" data-toezegging-add style="align-self:flex-start;font-size:12px"><i class="ti ti-plus"></i> Termijn toevoegen</button>
+            <label style="display:block;font-size:12px;color:var(--wbx-muted)">Notitie (optioneel)
+              <textarea id="wbxToezeggingNote" rows="2" placeholder="Bv. 'Klant belde, betaalt maandag'" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:#fff;color:var(--wbx-ink);font:inherit;min-height:52px;resize:vertical">${esc(initialNote)}</textarea>
+            </label>
+            <div id="wbxToezeggingErr" style="display:none;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#b23434;font-size:12.5px"></div>
+          </div>
+          <div class="wbx-call-outcome-foot">
+            <button class="wbx-btn" type="button" data-toezegging-close>Annuleer</button>
+            <button class="wbx-btn wbx-primary" type="button" data-toezegging-save>Afspraak vastleggen</button>
+          </div>
+        </div>
+      `;
+      wire();
+    }
+
+    function readCurrentPartsFromDom() {
+      // Lees de current form-state per part uit de DOM (na render).
+      const rows = wrap.querySelectorAll('[data-toezegging-part]');
+      const out = [];
+      rows.forEach((row) => {
+        const idx = row.getAttribute('data-toezegging-part');
+        const dateEl = wrap.querySelector(`[data-toezegging-date="${idx}"]`);
+        const invEl  = wrap.querySelector(`[data-toezegging-inv="${idx}"]`);
+        const amtEl  = wrap.querySelector(`[data-toezegging-amt="${idx}"]`);
+        out.push({
+          due_date:     dateEl?.value || '',
+          invoice_id:   invEl?.value || '',
+          amount_euros: amtEl?.value || '',
+        });
+      });
+      return out;
+    }
+
+    function wire() {
+      // Sluit-handlers.
+      wrap.querySelectorAll('[data-toezegging-close]').forEach((b) =>
+        b.addEventListener('click', () => wrap.remove()));
+      wrap.addEventListener('click', (e) => { if (e.target === wrap) wrap.remove(); });
+
+      // Termijn toevoegen — bewaar current state uit DOM, push nieuw part, re-render.
+      wrap.querySelector('[data-toezegging-add]')?.addEventListener('click', () => {
+        state.parts = readCurrentPartsFromDom();
+        state.parts.push({});
+        render();
+      });
+
+      // Termijn verwijderen.
+      wrap.querySelectorAll('[data-toezegging-remove]').forEach((b) =>
+        b.addEventListener('click', () => {
+          state.parts = readCurrentPartsFromDom();
+          const idx = Number(b.getAttribute('data-toezegging-remove'));
+          state.parts.splice(idx, 1);
+          if (!state.parts.length) state.parts.push({});
+          render();
+        }));
+
+      // Opslaan.
+      wrap.querySelector('[data-toezegging-save]')?.addEventListener('click', async () => {
+        const err = wrap.querySelector('#wbxToezeggingErr');
+        const setErr = (msg) => { if (err) { err.style.display = 'block'; err.textContent = msg; } };
+        if (err) { err.style.display = 'none'; err.textContent = ''; }
+        const current = readCurrentPartsFromDom();
+
+        // Client-side validatie (server valideert nogmaals — dit is UX).
+        for (let i = 0; i < current.length; i++) {
+          const p = current[i];
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(p.due_date)) {
+            return setErr(`Termijn ${i + 1}: kies een concrete datum.`);
+          }
+        }
+
+        // Bouw payload: arrangement.invoice_ids = alle open invoice-ids
+        // (globale scope), parts krijgen optioneel eigen invoice_id + bedrag.
+        const invoiceIds = openInvoices.map((iv) => iv.id).filter(Boolean);
+        const parts = current.map((p) => {
+          const out = { due_date: p.due_date };
+          if (p.invoice_id) out.invoice_id = p.invoice_id;
+          const eur = Number(p.amount_euros);
+          if (Number.isFinite(eur) && eur > 0) out.amount_cents = Math.round(eur * 100);
+          return out;
+        });
+        const rationale = wrap.querySelector('#wbxToezeggingNote')?.value?.trim() || null;
+
+        const saveBtn = wrap.querySelector('[data-toezegging-save]');
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Bezig…'; }
+        try {
+          const r = await window.AgentShared.apiFetch('/api/arrangements-propose', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              customer_id: customerId,
+              invoice_ids: invoiceIds,
+              type: 'TOEZEGGING',
+              details: { parts },
+              rationale,
+            }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+          window.AgentShared?.showToast?.('Betaalafspraak vastgelegd', 'success');
+          wrap.remove();
+          try { onSaved(); } catch (_) {}
+          // Refresh Afspraken-lijst als die zichtbaar is (idempotent).
+          if (typeof loadArrangements === 'function') { try { loadArrangements(); } catch (_) {} }
+        } catch (e) {
+          setErr('Kon niet opslaan: ' + (e?.message || 'onbekend'));
+          if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Afspraak vastleggen'; }
+        }
+      });
+    }
+
+    document.body.appendChild(wrap);
+    render();
   }
 
   // Wire de Bellen-kaart-acties na _caseRender.
@@ -18410,6 +18689,21 @@
           await _caseAddLog('Herinnering gestuurd (handmatig)');
         }
         break;
+      case 'toezegging': {
+        // Fase 1 — open de shared toezegging-modal met de open facturen van
+        // de klant. Prefill 1 lege part; gebruiker kiest datum + optioneel
+        // factuur/bedrag. Wordt opgeslagen als light arrangement (TOEZEGGING).
+        const cust = _caseState.detail?.customer || null;
+        openToezeggingModal({
+          customerId:   cid,
+          customerName: cust?.display_name || _pipeCustomerDisplayName(cust) || '',
+          openInvoices: _caseState.detail?.open_invoices || [],
+          initialParts: [{}],
+          note:         'Betaalafspraak vastgelegd via dossier',
+          onSaved:      () => _caseLoadDetail(cid).catch(() => {}),
+        });
+        break;
+      }
       case 'noop':
       default:
         window.AgentShared?.showToast?.('Geen automatische actie voor deze fase — bekijk het dossier', 'info');

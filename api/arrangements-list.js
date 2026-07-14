@@ -32,7 +32,7 @@ function clampInt(v, def, min, max) {
 }
 
 const VALID_STATUS = ['VOORGESTELD', 'ACTIEF', 'NAGEKOMEN', 'VERBROKEN', 'GEANNULEERD'];
-const VALID_TYPE   = ['UITSTEL', 'SPLITSING', 'ABONNEMENT_PAUZE', 'ABONNEMENT_STOP', 'KWIJTSCHELDING'];
+const VALID_TYPE   = ['UITSTEL', 'SPLITSING', 'ABONNEMENT_PAUZE', 'ABONNEMENT_STOP', 'KWIJTSCHELDING', 'TOEZEGGING'];
 
 // Backward-compat aliases (lowercase -> uppercase canonical).
 const STATUS_ALIAS = {
@@ -51,6 +51,7 @@ const TYPE_ALIAS = {
   pauze:          'ABONNEMENT_PAUZE',
   overig:         'ABONNEMENT_STOP',
   kwijtschelding: 'KWIJTSCHELDING',
+  toezegging:     'TOEZEGGING',
 };
 
 export default async function handler(req, res) {

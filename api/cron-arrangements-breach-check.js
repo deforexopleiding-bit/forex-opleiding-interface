@@ -13,6 +13,12 @@
 //   ABONNEMENT_PAUZE — als now > pause_until -> NAGEKOMEN (pauze afgelopen)
 //   ABONNEMENT_STOP  — skip (stop = final)
 //   KWIJTSCHELDING   — skip (final)
+//   TOEZEGGING       — LICHT type (geen TL-actie). Per part:
+//                      * part.invoice_id gezet + verstreken → check die factuur
+//                      * part.invoice_id NULL + verstreken → check alle
+//                        arrangement invoice_ids (geldt voor 'alles op X')
+//                      Alle parts nagekomen (facturen paid) -> NAGEKOMEN
+//                      Minstens 1 verstreken part met open bedrag -> VERBROKEN
 //
 // Per state-change wordt een audit_log row geschreven met action
 // 'finance.arrangement.breach_check_state_change'. Aan het eind een
@@ -274,6 +280,56 @@ async function evaluateArrangement(arr) {
       // Final actions — er is geen breach-evaluatie. Pending_actions-executor
       // markeert deze als NAGEKOMEN bij EXECUTED via mark-executed cascade.
       return null;
+
+    case 'TOEZEGGING': {
+      // Licht type zonder TL-actie. Bewaking uit details.parts:
+      //   part.invoice_id gezet → die specifieke factuur moet paid zijn op/vóór due_date
+      //   part.invoice_id NULL  → alle arrangement invoice_ids moeten paid zijn
+      // Alle parts nagekomen (invoices paid) -> NAGEKOMEN
+      // Minstens 1 part verstreken met openstaand bedrag -> VERBROKEN
+      const parts = Array.isArray(details.parts) ? details.parts : [];
+      if (parts.length === 0) return null;
+
+      const invoices = await fetchInvoicesByIds(arr.invoice_ids || []);
+      const invById = new Map(invoices.map((i) => [i.id, i]));
+
+      // Vroegtijdige NAGEKOMEN: alle betrokken facturen zijn paid, ongeacht
+      // of alle parts al verstreken zijn — de afspraak is volledig voldaan.
+      const allInvoicesPaid = invoices.length > 0 && invoices.every(isInvoicePaid);
+      if (allInvoicesPaid) {
+        return {
+          newStatus: 'NAGEKOMEN',
+          reason: `TOEZEGGING: alle ${invoices.length} facturen voldaan`,
+        };
+      }
+
+      // Zoek de oudste verstreken part met een niet-betaalde factuur.
+      let oldestBreachedPart = null;
+      for (const p of parts) {
+        const dueMs = p?.due_date ? isoToMs(p.due_date) : null;
+        if (dueMs == null || todayMs <= dueMs) continue; // niet verstreken
+
+        // Bepaal welke facturen deze part dekt.
+        const partInvoices = p.invoice_id
+          ? (invById.has(p.invoice_id) ? [invById.get(p.invoice_id)] : [])
+          : invoices; // NULL invoice_id = alle facturen
+        if (partInvoices.length === 0) continue; // arrangement invoice_id weg? skip
+
+        const anyOpen = partInvoices.some((i) => !isInvoicePaid(i));
+        if (anyOpen) {
+          if (!oldestBreachedPart || isoToMs(oldestBreachedPart.due_date) > dueMs) {
+            oldestBreachedPart = p;
+          }
+        }
+      }
+      if (oldestBreachedPart) {
+        return {
+          newStatus: 'VERBROKEN',
+          reason: `TOEZEGGING: afgesproken datum ${oldestBreachedPart.due_date} verstreken, factuur nog niet voldaan`,
+        };
+      }
+      return null;
+    }
 
     default:
       // Onbekend type: skip stil.
