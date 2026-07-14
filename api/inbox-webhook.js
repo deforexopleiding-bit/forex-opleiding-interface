@@ -1372,6 +1372,42 @@ export default async function handler(req, res) {
               if (insRes.inserted) stats.msgs_new++;
               else                 stats.msgs_dup++;
 
+              // 2a-media. Bij inbound MEDIA-berichten (image/document/audio/
+              // video/sticker) heeft insertInboundMessage 'meta-media-id:<id>'
+              // in media_url gezet. We downloaden nu de bytes van Meta en
+              // uploaden naar de whatsapp-media bucket, waarna we media_url
+              // vervangen door de publieke URL. Fire-and-forget zodat de
+              // webhook binnen het 200-OK budget van Meta blijft; fail-soft
+              // (bij mislukking blijft de 'meta-media-id:'-placeholder staan
+              // + log-lijn zodat handmatig re-run of debugging mogelijk is).
+              if (insRes.inserted && insRes.messageId && ['image','document','audio','video','sticker'].includes(insRes.type)) {
+                const mediaId = msg[insRes.type]?.id || null;
+                const filename = msg[insRes.type]?.filename || null;
+                if (mediaId) {
+                  const runMediaFetch = async () => {
+                    try {
+                      const mod = await import('./_lib/whatsapp-media-download.js');
+                      const dl = await mod.downloadAndStoreMetaMedia(mediaId, insRes.type, { messageId: insRes.messageId, filename });
+                      if (!dl?.ok) {
+                        console.warn('[inbox-webhook] media download soft-fail', insRes.messageId, mediaId, dl?.error);
+                        return;
+                      }
+                      const upd = await mod.updateInboundMediaUrl(insRes.messageId, dl.publicUrl, {
+                        originalFilename: filename,
+                        hasBody         : !!insRes.body,
+                      });
+                      if (!upd?.ok) console.warn('[inbox-webhook] media url update soft-fail', insRes.messageId, upd?.error);
+                    } catch (e) {
+                      console.warn('[inbox-webhook] media fetch exception', insRes.messageId, mediaId, e?.message || e);
+                    }
+                  };
+                  try {
+                    if (typeof waitUntil === 'function') waitUntil(runMediaFetch());
+                    else runMediaFetch().catch(() => {});
+                  } catch (_) { runMediaFetch().catch(() => {}); }
+                }
+              }
+
               // 2a. Pipeline-hook: klant reageert → fase 'in_gesprek' (mits
               // toggle aan). Volgorde-guard: alleen vanuit 'nieuw' of
               // 'aangemaand' — een regeling/incasso mag niet automatisch

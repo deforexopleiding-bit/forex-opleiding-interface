@@ -205,6 +205,51 @@ export async function sendTemplate({ to, templateName, languageCode = 'nl', vari
   return { wamid };
 }
 
+// ── Send: media (image/document/video) via publieke URL ──────────────────
+/**
+ * Verzend een image/document/video via de Cloud API met een publieke URL
+ * (link-mode; alternatief is media-id na upload naar Meta zelf — voor onze
+ * eigen bucket-URLs is link-mode simpelst en robuust).
+ *
+ * Vereist het 24u customer-service-venster (net als sendText). Buiten
+ * venster: gebruik sendTemplate met media-header.
+ *
+ * @param {object} opts
+ * @param {string} opts.to              E.164 zonder +
+ * @param {string} opts.kind            'image' | 'document' | 'video'
+ * @param {string} opts.link            HTTPS-URL naar de bijlage
+ * @param {string} [opts.caption]       optionele bijschrift
+ * @param {string} [opts.filename]      alleen relevant bij document (Meta toont deze naam)
+ * @param {string} [opts.phoneNumberId]
+ * @returns {Promise<{ wamid: string }>}
+ */
+export async function sendMedia({ to, kind, link, caption, filename, phoneNumberId } = {}) {
+  if (!to || !kind || !link) throw new Error('sendMedia: to + kind + link vereist');
+  const validKind = kind === 'image' || kind === 'document' || kind === 'video';
+  if (!validKind) throw new Error(`sendMedia: kind '${kind}' niet ondersteund (image|document|video)`);
+  if (!/^https:\/\//i.test(link)) throw new Error('sendMedia: link moet https:// zijn');
+
+  const mediaPayload = { link };
+  if (caption) mediaPayload.caption = String(caption);
+  // Meta accepteert filename alleen op document (image/video negeren het).
+  if (kind === 'document' && filename) mediaPayload.filename = String(filename);
+
+  const requestBody = {
+    messaging_product: 'whatsapp',
+    recipient_type   : 'individual',
+    to               : toMetaPhone(to),
+    type             : kind,
+    [kind]           : mediaPayload,
+  };
+  const resp = await metaPostMessage(requestBody, { phoneNumberId });
+  const wamid = resp?.messages?.[0]?.id || null;
+  if (!wamid) {
+    console.error('[meta-whatsapp] sendMedia: 2xx maar geen wamid', resp);
+    throw new Error('Meta API: 2xx zonder wamid in messages[0].id');
+  }
+  return { wamid };
+}
+
 // ── Mark inbound message as read (UX-nicety: toont blauwe vinkjes) ─────────
 /**
  * Markeert een ontvangen bericht als gelezen in WhatsApp. Goed voor UX

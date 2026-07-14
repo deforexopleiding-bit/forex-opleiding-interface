@@ -2435,6 +2435,22 @@
               <!-- 24-uurs servicewindow banner is verwijderd (de "24h verlopen"-tag
                    onder de Verstuur-knop geeft visueel voldoende waarschuwing). -->
 
+              <!-- Bijlage-preview-strook (verborgen tot een bestand gekozen is).
+                   Textarea eronder wordt de caption. Bij versturen: mode=image|
+                   document|video (afhankelijk van MIME), media_link=publicUrl,
+                   caption=textarea-text (mag leeg). -->
+              <div id="inboxAttachPreview" style="display:none;padding:8px 10px;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle,#e5e7eb);border-radius:8px;margin-bottom:6px;font-size:12.5px">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div id="inboxAttachPreviewIcon" style="flex-shrink:0"></div>
+                  <div style="flex:1;min-width:0">
+                    <div id="inboxAttachPreviewName" style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+                    <div id="inboxAttachPreviewSize" style="font-size:11px;color:var(--text-faint)"></div>
+                  </div>
+                  <button class="sr-ibtn" type="button" id="inboxAttachClearBtn" title="Bijlage verwijderen"><i class="ti ti-x"></i></button>
+                </div>
+                <div id="inboxAttachPreviewStatus" style="font-size:11px;color:var(--text-faint);margin-top:4px"></div>
+              </div>
+
               <!-- Eén textarea voor alle compose-acties -->
               <textarea
                 id="inboxComposeTextarea"
@@ -2446,6 +2462,11 @@
               <!-- Actie-rij: links pickers (incl. Vraag Joost), rechts window-hint + Verstuur -->
               <div class="inbox-c-actions">
                 <div class="inbox-c-actions-left">
+                  <!-- Bijlage-knop (media-send). Verborgen file-input aan de bar; de knop triggert 'em.
+                       Upload gaat via bestaande /api/whatsapp-media-upload; daarna send via /api/inbox-send
+                       mode=image/document/video. 24h-venster wordt server-side afgedwongen. -->
+                  <input id="inboxAttachInput" type="file" accept="image/jpeg,image/png,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,video/mp4,video/3gpp" style="display:none">
+                  <button class="sr-abtn" id="inboxAttachBtn" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Bijlage toevoegen (afbeelding/document/video)" style="font-size:12px;padding:6px 10px"><i class="ti ti-paperclip"></i> Bijlage</button>
                   <button class="sr-abtn" id="inboxTplBtn" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-template"></i> Template</button>
                   <button class="sr-abtn primary" id="inboxQrBtn" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Snel-antwoord kiezen (opent picker)" style="font-size:12px;padding:6px 12px"><i class="ti ti-message-bolt" style="margin-right:4px"></i>Snel antwoord</button>
                   <!-- Joost AI knop (E1.0) — opent inboxJoostModal met suggestion-card.
@@ -9249,10 +9270,39 @@
         ? '<span class="autonomous-sparkle" title="Autonoom verstuurd door Joost">✦</span>'
         : '';
       const metaInner = `${sparkleIcon}${esc(time)}${statusIcon ? `<span class="receipt">${statusIcon}</span>` : ''}`;
+      // Media-render: bij media_type=image → thumbnail; document/audio/video
+      // → download-link met bestandsnaam of type-label. Val terug op tekst
+      // als media_url ontbreekt (of legacy 'meta-media-id:' placeholder).
+      let mediaHtml = '';
+      if (m.media_type && m.media_url && !/^meta-media-id:/i.test(m.media_url)) {
+        const url = m.media_url;
+        const filename = m.body || '';
+        if (m.media_type === 'image' || m.media_type === 'sticker') {
+          mediaHtml = `<a href="${esc(url)}" target="_blank" rel="noopener" class="bubble-media-img"><img src="${esc(url)}" alt="afbeelding" style="max-width:240px;max-height:240px;border-radius:6px;display:block"/></a>`;
+        } else if (m.media_type === 'video') {
+          mediaHtml = `<video controls preload="metadata" style="max-width:280px;max-height:220px;border-radius:6px;display:block"><source src="${esc(url)}"/>Video niet af te spelen — <a href="${esc(url)}" target="_blank" rel="noopener">download</a></video>`;
+        } else if (m.media_type === 'audio') {
+          mediaHtml = `<audio controls preload="metadata" style="max-width:260px;display:block"><source src="${esc(url)}"/>Audio niet af te spelen — <a href="${esc(url)}" target="_blank" rel="noopener">download</a></audio>`;
+        } else if (m.media_type === 'document') {
+          const displayName = filename || 'Document';
+          mediaHtml = `<a href="${esc(url)}" target="_blank" rel="noopener" class="bubble-media-doc" style="display:inline-flex;align-items:center;gap:6px;padding:8px 10px;background:rgba(0,0,0,0.06);border-radius:6px;color:inherit;text-decoration:none;font-size:12.5px"><i class="ti ti-file-download"></i> ${esc(displayName)}</a>`;
+        } else {
+          // Onbekend media-type → simpele download-link.
+          mediaHtml = `<a href="${esc(url)}" target="_blank" rel="noopener">Bijlage openen (${esc(m.media_type)})</a>`;
+        }
+      } else if (m.media_type && (!m.media_url || /^meta-media-id:/i.test(m.media_url || ''))) {
+        // Media nog niet gedownload (webhook nog in flight of gefaald).
+        mediaHtml = `<div style="font-size:12px;color:var(--wbx-faint,#94a3b8);font-style:italic">[${esc(m.media_type)}] — bijlage laadt…</div>`;
+      }
+      const textLine = body
+        ? `<span class="bubble-text">${esc(body)}<span class="meta-phantom" aria-hidden="true">${esc(time)}${receiptSpacer}</span></span>`
+        : (mediaHtml ? '' : `<span class="bubble-text">${esc(body)}<span class="meta-phantom" aria-hidden="true">${esc(time)}${receiptSpacer}</span></span>`);
+      const mediaBlock = mediaHtml ? `<div class="bubble-media" style="margin-bottom:4px">${mediaHtml}</div>` : '';
       return `${dateSep}<div class="inbox-c-msg ${out ? 'outbound' : 'inbound'}${failed ? ' failed' : ''}${sameSender ? ' same-sender' : ''}">
         <div class="inbox-c-msg-bubble">
           ${tplBadge}
-          <span class="bubble-text">${esc(body)}<span class="meta-phantom" aria-hidden="true">${esc(time)}${receiptSpacer}</span></span>
+          ${mediaBlock}
+          ${textLine}
           ${failedRow}
           <span class="bubble-meta">${metaInner}</span>
         </div>
@@ -9460,6 +9510,7 @@
     // de "24h verlopen"-tag onder de Verstuur-knop geeft visueel voldoende
     // waarschuwing.
     const joostBtn = document.getElementById('inboxJoostBtn');
+    const attachBtn = document.getElementById('inboxAttachBtn');
 
     if (!_inboxActiveConvId) {
       // Geen actief gesprek
@@ -9468,12 +9519,16 @@
       if (qrBtn)   { qrBtn.disabled   = true;  qrBtn.title   = 'Eerst gesprek selecteren'; }
       if (sendBtn) { sendBtn.disabled = true;  sendBtn.title = 'Eerst gesprek selecteren'; }
       if (joostBtn){ joostBtn.disabled = true; joostBtn.title = 'Eerst gesprek selecteren'; }
+      if (attachBtn){ attachBtn.disabled = true; attachBtn.title = 'Eerst gesprek selecteren'; }
       if (hint)    { hint.hidden = true; hint.textContent = ''; hint.classList.remove('open','expired'); }
       // Joost-state resetten naar empty bij geen conv (badge + cache leeg).
       _joostClearPanel();
       // Verberg autonomy-strip wanneer geen conv geselecteerd is.
       const strip = document.getElementById('inboxJoostAutonomyStrip');
       if (strip) strip.hidden = true;
+      // Bijlage-preview clearen bij conv-switch (voorkomt dat een half-
+      // geüploade bijlage aan een ander gesprek geplakt wordt).
+      try { _inboxAttachClear(); } catch (_) {}
       return;
     }
 
@@ -9481,17 +9536,120 @@
     if (tplBtn) { tplBtn.disabled = false; tplBtn.title = ''; }
     if (joostBtn) { _joostApplySuggestBtnState(); }
     if (_inboxConvCanSendText) {
-      // 24h-window open: tekst-bericht versturen mag
+      // 24h-window open: tekst-bericht + media-send mag
       if (ta)      { ta.disabled = false; ta.placeholder = 'Typ een bericht…'; }
       if (qrBtn)   { qrBtn.disabled = false; qrBtn.title = ''; }
       if (sendBtn) { sendBtn.disabled = false; sendBtn.title = 'Versturen (Ctrl+Enter)'; }
+      if (attachBtn){ attachBtn.disabled = false; attachBtn.title = 'Bijlage toevoegen'; }
       if (hint)    { hint.hidden = false; hint.textContent = '24h open'; hint.classList.remove('expired'); hint.classList.add('open'); }
     } else {
-      // Window verlopen: alleen templates
+      // Window verlopen: alleen templates (geen tekst, geen media)
       if (ta)      { ta.disabled = true; ta.placeholder = 'Window verlopen — gebruik Template knop'; }
       if (qrBtn)   { qrBtn.disabled = true; qrBtn.title = 'Window verlopen — alleen templates toegestaan'; }
       if (sendBtn) { sendBtn.disabled = true; sendBtn.title = 'Window verlopen — gebruik Template knop'; }
+      if (attachBtn){ attachBtn.disabled = true; attachBtn.title = 'Window verlopen — gebruik een media-template'; }
       if (hint)    { hint.hidden = false; hint.textContent = '24h verlopen'; hint.classList.remove('open'); hint.classList.add('expired'); }
+    }
+  }
+
+  // Bijlage-state voor de wanbetalers-inbox compose (media-send).
+  // Wordt gezet door de file-input change-handler; gelezen door
+  // sendInboxText om te beslissen text vs media path.
+  let _inboxAttachState = null; // { kind, publicUrl, filename, contentType, sizeBytes }
+
+  function _inboxAttachKindFor(mime) {
+    if (!mime) return null;
+    const m = String(mime).toLowerCase();
+    if (m.startsWith('image/')) return 'image';
+    if (m.startsWith('video/')) return 'video';
+    // Rest → document (Meta staat pdf/office/txt toe; upload valideert MIME).
+    return 'document';
+  }
+  function _inboxAttachFileSizeLabel(bytes) {
+    const n = Number(bytes) || 0;
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / 1024 / 1024).toFixed(2) + ' MB';
+  }
+
+  function _inboxAttachClear() {
+    _inboxAttachState = null;
+    const inp = document.getElementById('inboxAttachInput');
+    if (inp) inp.value = '';
+    const wrap = document.getElementById('inboxAttachPreview');
+    if (wrap) wrap.style.display = 'none';
+    const nm = document.getElementById('inboxAttachPreviewName');
+    if (nm) nm.textContent = '';
+    const sz = document.getElementById('inboxAttachPreviewSize');
+    if (sz) sz.textContent = '';
+    const st = document.getElementById('inboxAttachPreviewStatus');
+    if (st) st.textContent = '';
+    const ico = document.getElementById('inboxAttachPreviewIcon');
+    if (ico) ico.innerHTML = '';
+  }
+
+  async function _inboxAttachOnFilePicked(file) {
+    if (!file) return;
+    const kind = _inboxAttachKindFor(file.type);
+    if (!kind) {
+      window.AgentShared?.showToast?.('Bestandstype niet ondersteund', 'error');
+      return;
+    }
+    // Preview meteen tonen (met "uploading…" state).
+    const wrap = document.getElementById('inboxAttachPreview');
+    const nm   = document.getElementById('inboxAttachPreviewName');
+    const sz   = document.getElementById('inboxAttachPreviewSize');
+    const st   = document.getElementById('inboxAttachPreviewStatus');
+    const ico  = document.getElementById('inboxAttachPreviewIcon');
+    if (wrap) wrap.style.display = '';
+    if (nm)   nm.textContent = file.name || '(bestand)';
+    if (sz)   sz.textContent = _inboxAttachFileSizeLabel(file.size) + ' · ' + (file.type || 'onbekend');
+    if (st)   st.textContent = 'Uploaden…';
+    if (ico)  ico.innerHTML = `<i class="ti ${kind === 'image' ? 'ti-photo' : kind === 'video' ? 'ti-video' : 'ti-file'}" style="font-size:18px"></i>`;
+    // Lees als base64 (whatsapp-media-upload verwacht data_base64).
+    let dataBase64;
+    try {
+      dataBase64 = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => {
+          const s = String(r.result || '');
+          const idx = s.indexOf('base64,');
+          resolve(idx >= 0 ? s.slice(idx + 7) : '');
+        };
+        r.onerror = () => reject(r.error || new Error('read fail'));
+        r.readAsDataURL(file);
+      });
+    } catch (e) {
+      if (st) st.textContent = 'Lezen mislukt: ' + (e?.message || 'onbekend');
+      return;
+    }
+    // Upload naar bucket.
+    try {
+      const r = await window.AgentShared.apiFetch('/api/whatsapp-media-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename    : file.name || 'file',
+          content_type: file.type || 'application/octet-stream',
+          kind,
+          data_base64 : dataBase64,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok || !d.url) {
+        throw new Error(d.error || ('HTTP ' + r.status));
+      }
+      _inboxAttachState = {
+        kind,
+        publicUrl  : d.url,
+        filename   : file.name || null,
+        contentType: d.content_type || file.type || null,
+        sizeBytes  : d.size_bytes || file.size || null,
+      };
+      if (st) st.textContent = '✓ Klaar — voeg optioneel een bijschrift toe en druk op Verstuur';
+    } catch (e) {
+      _inboxAttachState = null;
+      if (st) st.textContent = 'Upload mislukt: ' + (e?.message || 'onbekend');
     }
   }
 
@@ -9503,6 +9661,44 @@
     const ta = document.getElementById('inboxComposeTextarea');
     if (!ta) return;
     const body = (ta.value || '').trim();
+    // Media-send-path: als er een geüploade bijlage klaar staat, versturen
+    // we als image/document/video met de textarea als optionele caption.
+    if (_inboxAttachState && _inboxAttachState.publicUrl) {
+      const attach = _inboxAttachState;
+      const btn = document.getElementById('inboxComposeSendBtn');
+      if (btn) btn.disabled = true;
+      try {
+        const payload = {
+          conversation_id: _inboxActiveConvId,
+          mode           : attach.kind,          // image | document | video
+          media_link     : attach.publicUrl,
+          caption        : body || undefined,
+        };
+        if (attach.kind === 'document' && attach.filename) payload.filename = attach.filename;
+        const r = await window.AgentShared.apiFetch('/api/inbox-send', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify(payload),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.status === 422 && d.error === '24h_window_expired') {
+          window.AgentShared.showToast(d.message || '24-uurs venster verlopen — gebruik een media-template', 'error');
+          return;
+        }
+        if (!r.ok) {
+          window.AgentShared.showToast('Versturen mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+          return;
+        }
+        window.AgentShared?.showToast?.('Bijlage verstuurd', 'success');
+        ta.value = '';
+        ta.style.height = '';
+        _inboxAttachClear();
+        try { await openInboxConv(_inboxActiveConvId); } catch (_) {}
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+      return;
+    }
     if (!body) {
       window.AgentShared.showToast('Bericht is leeg', 'error');
       return;
@@ -12091,9 +12287,23 @@
     const refreshBtn = document.getElementById('inboxConvRefresh');
     if (refreshBtn) refreshBtn.addEventListener('click', () => loadInboxConvList());
 
-    // Send-knop (één compose-knop voor text-versturen).
+    // Send-knop (één compose-knop voor text-versturen — checkt intern of
+    // er een geüploade bijlage klaarstaat en gaat dan via de media-flow).
     const sendBtn = document.getElementById('inboxComposeSendBtn');
     if (sendBtn) sendBtn.addEventListener('click', () => sendInboxText());
+
+    // Bijlage-flow (media-send). Knop triggert file-input; input-change
+    // uploadt via /api/whatsapp-media-upload en toont preview-strook.
+    // De clear-knop reset _inboxAttachState en verbergt de preview.
+    const attachBtn   = document.getElementById('inboxAttachBtn');
+    const attachInput = document.getElementById('inboxAttachInput');
+    const attachClear = document.getElementById('inboxAttachClearBtn');
+    if (attachBtn && attachInput) attachBtn.addEventListener('click', () => attachInput.click());
+    if (attachInput) attachInput.addEventListener('change', (e) => {
+      const file = e?.target?.files?.[0] || null;
+      if (file) _inboxAttachOnFilePicked(file);
+    });
+    if (attachClear) attachClear.addEventListener('click', () => _inboxAttachClear());
 
     // Template-picker opener.
     const tplBtn = document.getElementById('inboxTplBtn');
