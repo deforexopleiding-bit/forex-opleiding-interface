@@ -1726,6 +1726,119 @@
     .wbx .wbx-cleanup-list-head .wbx-c { color:var(--wbx-faint); font-size:13px; }
 
     /* ======================================================
+       Bellen-kaart in case-paneel (wanbetaler-softphone).
+       ====================================================== */
+    .wbx .wbx-call-card { }
+    .wbx .wbx-call-cockpit {
+      background: linear-gradient(135deg, #0E7C6B 0%, #0A5A4E 100%);
+      color:#fff; border-radius:10px; padding:16px; text-align:center;
+      margin:8px 0 12px;
+    }
+    .wbx .wbx-call-line-badge {
+      display:inline-block; padding:3px 10px; border-radius:99px;
+      background:rgba(255,255,255,.14); font-size:11.5px; font-weight:600;
+      letter-spacing:.02em;
+    }
+    .wbx .wbx-call-number {
+      font-size:20px; font-weight:600; margin-top:8px; font-family:var(--wbx-mono);
+      letter-spacing:.02em;
+    }
+    .wbx .wbx-call-state {
+      font-size:12px; opacity:.85; margin-top:4px; letter-spacing:.02em;
+    }
+    .wbx .wbx-call-state.connected { color:#7cf3c8; font-weight:600; }
+    .wbx .wbx-call-state.dialing   { color:#ffe1a3; }
+    .wbx .wbx-call-state.error     { color:#fca5a5; }
+    .wbx .wbx-call-btn {
+      border:none; padding:9px 18px; border-radius:9px; font-weight:600;
+      font-size:13.5px; cursor:pointer; font-family:inherit;
+    }
+    .wbx .wbx-call-btn.wbx-call-dial   { background:#fff; color:#0A5A4E; }
+    .wbx .wbx-call-btn.wbx-call-dial:hover:not(:disabled) { background:#f5f5f5; }
+    .wbx .wbx-call-btn.wbx-call-dial:disabled { opacity:.4; cursor:not-allowed; }
+    .wbx .wbx-call-btn.wbx-call-hangup { background:#dc2626; color:#fff; }
+    .wbx .wbx-call-btn.wbx-call-hangup:hover { background:#b91c1c; }
+    .wbx.wbx-bulk-bar .wbx-call-btn,
+    .wbx .wbx-call-cockpit .wbx-btn.wbx-sm {
+      background:rgba(255,255,255,.14); color:#fff; border:1px solid rgba(255,255,255,.22);
+    }
+    .wbx .wbx-call-cockpit .wbx-btn.wbx-sm:hover { background:rgba(255,255,255,.22); }
+
+    .wbx .wbx-call-tracker { margin:14px 0 10px; }
+    .wbx .wbx-call-tracker-h {
+      font-size:11.5px; text-transform:uppercase; letter-spacing:.05em;
+      color:var(--wbx-faint); font-weight:600; margin-bottom:6px;
+    }
+    .wbx .wbx-call-dots {
+      display:flex; align-items:center; gap:4px;
+    }
+    .wbx .wbx-call-dot {
+      width:14px; height:14px; border-radius:50%;
+      background:#fff; border:2px solid #0E7C6B;
+    }
+    .wbx .wbx-call-dot.done { background:#0E7C6B; border-color:#0E7C6B; }
+    .wbx .wbx-call-dotbar {
+      flex:1; height:2px; background:var(--wbx-border);
+    }
+
+    .wbx .wbx-call-remind {
+      background:#FAFBFC; border:1px solid var(--wbx-border); border-radius:8px;
+      padding:8px 12px; font-size:12.5px; margin-bottom:10px;
+    }
+
+    .wbx .wbx-call-log { display:flex; flex-direction:column; gap:8px; }
+    .wbx .wbx-call-log-row {
+      background:#FAFBFC; border:1px solid var(--wbx-border); border-radius:8px;
+      padding:8px 10px; display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+      font-size:12.5px;
+    }
+    .wbx .wbx-call-log-time { color:var(--wbx-faint); }
+    .wbx .wbx-call-log-note {
+      flex-basis:100%; font-size:12px; color:var(--wbx-muted);
+      background:#fff; border:1px solid var(--wbx-border); border-radius:6px;
+      padding:6px 8px; margin-top:4px;
+    }
+
+    .wbx .wbx-call-nudge {
+      display:flex; gap:12px; align-items:center; margin-top:12px;
+      background:rgba(245,158,11,.10); border:1px solid rgba(245,158,11,.32);
+      border-radius:8px; padding:10px 12px;
+    }
+
+    /* Uitkomst-modal (body-level, class="wbx wbx-call-outcome-scrim") */
+    .wbx.wbx-call-outcome-scrim {
+      position:fixed; inset:0; background:rgba(14,19,28,.44); backdrop-filter:blur(2px);
+      z-index:1200; display:flex; align-items:center; justify-content:center; padding:20px;
+      font-family:'Inter', system-ui, sans-serif;
+    }
+    .wbx.wbx-call-outcome-scrim .wbx-call-outcome-modal {
+      background:var(--wbx-bg); border:1px solid var(--wbx-border); border-radius:12px;
+      width:min(600px,100%); max-height:90vh; display:flex; flex-direction:column; overflow:hidden;
+    }
+    .wbx.wbx-call-outcome-scrim .wbx-call-outcome-head {
+      display:flex; justify-content:space-between; align-items:flex-start;
+      padding:14px 18px; border-bottom:1px solid var(--wbx-border); gap:10px;
+    }
+    .wbx.wbx-call-outcome-scrim .wbx-call-outcome-body { padding:16px 18px; overflow-y:auto; flex:1; }
+    .wbx.wbx-call-outcome-scrim .wbx-call-outcome-foot {
+      display:flex; justify-content:flex-end; gap:8px;
+      padding:12px 18px; border-top:1px solid var(--wbx-border); background:#FAFBFC;
+    }
+    .wbx.wbx-call-outcome-scrim .wbx-call-outcome-grid {
+      display:grid; grid-template-columns:1fr 1fr; gap:6px;
+    }
+    .wbx.wbx-call-outcome-scrim .wbx-call-outcome-opt {
+      background:#fff; border:1px solid var(--wbx-border-strong); border-radius:8px;
+      padding:10px; cursor:pointer; text-align:left; font-family:inherit;
+    }
+    .wbx.wbx-call-outcome-scrim .wbx-call-outcome-opt:hover {
+      border-color:var(--wbx-accent-ink);
+    }
+    .wbx.wbx-call-outcome-scrim .wbx-call-outcome-opt.wbx-on {
+      background:var(--wbx-accent-soft); border-color:var(--wbx-accent-ink);
+    }
+
+    /* ======================================================
        Ronde 3 — Instellingen + Opruimen + Inbox-scope styling.
        ====================================================== */
 
@@ -3839,6 +3952,10 @@
 
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
+<!-- SIP.js voor de wanbetaler-softphone in het case-paneel. Dezelfde
+     library die de Follow-up-cockpit gebruikt; registreren gebeurt lazy
+     bij de eerste Bel nu-actie via /api/voys-sip-config. -->
+<script src="/modules/shared/sip.min.js"></script>
 <script src="/modules/shared/theme-shared.js"></script>
 <script>
 (async () => {
@@ -15967,6 +16084,8 @@
       console.error('[case-sheet detail]', e);
       _caseState.detail = { _error: e?.message || 'Onbekend' };
     }
+    // Belpogingen-log parallel laden (fail-soft; render toont "nog geen").
+    _caseLoadCallLog(cid).catch(() => {});
   }
 
   async function _caseLoadChat(cid) {
@@ -16154,6 +16273,7 @@
           <div class="wbx-kv"><span class="wbx-k">Dagen te laat</span><span class="wbx-v wbx-mono">${daysN}</span></div>
           <div class="wbx-kv"><span class="wbx-k">Open facturen van deze klant</span><span class="wbx-v">${nOpenNote}</span></div>
         </div>
+        ${_caseBellenCardHtml(cust)}
         <div class="wbx-card">
           <h4>Gesprek</h4>
           <div style="display:flex;flex-direction:column;gap:9px">
@@ -16184,6 +16304,390 @@
     });
     sheet.querySelectorAll('[data-case-action]').forEach((btn) => {
       btn.addEventListener('click', () => _caseAction(btn.getAttribute('data-case-action')));
+    });
+    // Bellen-kaart handlers (Bel nu / Ophangen / Uitkomst noteren).
+    _caseWireBellenCard();
+  }
+
+  // ═════════════════════════════════════════════════════════════════
+  //   WANBETALER-SOFTPHONE + BELPOGINGEN-LOG (Bellen-kaart in case-paneel)
+  //
+  //   Duplicaat van het follow-up-cockpit-softphone-patroon
+  //   (modules/follow-up.html rond r6603+). Gebruikt dezelfde /api/voys-sip-
+  //   config en dezelfde sip.min.js library. Aparte instance zodat cockpit
+  //   en wanbetaler-softphone elkaar niet in de weg zitten (aparte SIP-
+  //   sessies onmogelijk in één UserAgent; wel apart per pagina).
+  //
+  //   State:
+  //     _wbxSoftphone   — SIP.js UA + session-tracker
+  //     _caseCallLog    — { items, cadence, resolved, attempts_count,
+  //                         next_reminder_at } uit /api/dunning-call-log-list
+  // ═════════════════════════════════════════════════════════════════
+  const _wbxSoftphone = {
+    initPromise: null,   // singleton-init voor SIP.js UA (lazy)
+    config     : null,   // /api/voys-sip-config response
+    uaByLine   : {},     // { nl:UserAgent, be:UserAgent }
+    regByLine  : {},     // { nl:Registerer, be:Registerer }
+    activeLine : null,   // 'nl' | 'be'
+    session    : null,   // actieve Inviter
+    audioEl    : null,   // <audio autoplay> voor remote stream
+    lastState  : 'idle', // idle | dialing | connected | ended | error
+    lastError  : null,
+  };
+  let _caseCallLog = { items: [], cadence: { max_attempts: 3, interval_days: 3 }, resolved: false, attempts_count: 0, next_reminder_at: null };
+
+  const CALL_OUTCOMES = [
+    { key: 'no_answer',        label: 'Geen gehoor',              tint: '#dc2626' },
+    { key: 'voicemail',        label: 'Voicemail ingesproken',    tint: '#64748b' },
+    { key: 'callback',         label: 'Terugbelafspraak',         tint: '#64748b' },
+    { key: 'payment_promise',  label: 'Toezegging tot betaling',  tint: '#10b981' },
+    { key: 'payment_plan',     label: 'Betalingsregeling',        tint: '#8b5cf6' },
+    { key: 'refused',          label: 'Weigert / betwist',        tint: '#dc2626' },
+    { key: 'wrong_number',     label: 'Verkeerd nummer',          tint: '#dc2626' },
+    { key: 'paid_during_call', label: 'Betaald tijdens gesprek',  tint: '#10b981' },
+  ];
+
+  function _callOutcomeMeta(key) {
+    return CALL_OUTCOMES.find((o) => o.key === key) || { key, label: key, tint: '#64748b' };
+  }
+
+  // NL/BE line-detectie op basis van customer.phone (E.164). +32 = BE,
+  // alles anders → NL (default). Zelfde regel als follow-up-cockpit.
+  function _wbxDetectLine(phone) {
+    const p = String(phone || '').trim();
+    if (/^\+?32/.test(p) || /^0032/.test(p)) return 'be';
+    return 'nl';
+  }
+
+  function _wbxDigitsFor(phone) {
+    return String(phone || '').replace(/[^\d+]/g, '');
+  }
+
+  // Lazy SIP.js UA-init. Fetcht /api/voys-sip-config, bouwt UserAgent per
+  // account, registreert bij Voys. Retourneert een resolve na Registered.
+  async function _wbxInitSoftphone() {
+    if (_wbxSoftphone.initPromise) return _wbxSoftphone.initPromise;
+    _wbxSoftphone.initPromise = (async () => {
+      // Wachten op sip.min.js (caching / trage disk).
+      let SIPLib = window.SIP;
+      for (let i = 0; !SIPLib?.UserAgent && i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        SIPLib = window.SIP;
+      }
+      if (!SIPLib?.UserAgent) throw new Error('SIP.js niet geladen');
+
+      const r = await window.AgentShared.apiFetch('/api/voys-sip-config');
+      if (!r.ok) throw new Error('voys-sip-config HTTP ' + r.status);
+      const cfg = await r.json();
+      _wbxSoftphone.config = cfg;
+
+      // <audio>-element voor remote stream.
+      if (!_wbxSoftphone.audioEl) {
+        const a = document.createElement('audio');
+        a.id = 'wbxSoftphoneAudio';
+        a.autoplay = true;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        _wbxSoftphone.audioEl = a;
+      }
+
+      // Bouw UA + Registerer per account (nl + be als aanwezig).
+      const accounts = Array.isArray(cfg.accounts) && cfg.accounts.length
+        ? cfg.accounts
+        : (cfg.user ? [{ key: 'nl', ...cfg }] : []);
+      for (const acc of accounts) {
+        if (!acc?.user || !acc?.password || !acc?.domain) continue;
+        try {
+          const uri = SIPLib.UserAgent.makeURI('sip:' + acc.user + '@' + acc.domain);
+          const ua  = new SIPLib.UserAgent({
+            uri,
+            transportOptions: { server: acc.wss || 'wss://websocket.voipgrid.nl' },
+            authorizationUsername: acc.user,
+            authorizationPassword: acc.password,
+            displayName          : acc.display_name || 'Wanbetalers',
+          });
+          await ua.start();
+          const reg = new SIPLib.Registerer(ua);
+          await reg.register();
+          _wbxSoftphone.uaByLine[acc.key || 'nl']  = ua;
+          _wbxSoftphone.regByLine[acc.key || 'nl'] = reg;
+        } catch (e) {
+          console.warn('[wbx-softphone] account ' + (acc.key || 'nl') + ' init failed:', e?.message || e);
+        }
+      }
+      if (!Object.keys(_wbxSoftphone.uaByLine).length) {
+        throw new Error('Geen SIP-account geregistreerd. Check VOYS_SIP_* env vars.');
+      }
+      return true;
+    })().catch((e) => {
+      _wbxSoftphone.lastError = e?.message || String(e);
+      _wbxSoftphone.initPromise = null; // retry mogelijk
+      throw e;
+    });
+    return _wbxSoftphone.initPromise;
+  }
+
+  async function _wbxPlaceCall(phone) {
+    const line   = _wbxDetectLine(phone);
+    const digits = _wbxDigitsFor(phone);
+    if (!digits) { _wbxSoftphone.lastError = 'Geen telefoonnummer'; return { ok: false, line }; }
+    try {
+      await _wbxInitSoftphone();
+    } catch (e) {
+      _caseRender();
+      window.AgentShared?.showToast?.('SIP niet beschikbaar: ' + (e?.message || 'onbekend'), 'error');
+      return { ok: false, line, error: e?.message || 'init' };
+    }
+    const ua = _wbxSoftphone.uaByLine[line] || _wbxSoftphone.uaByLine.nl;
+    if (!ua) {
+      _wbxSoftphone.lastError = `Geen ${line.toUpperCase()}-account beschikbaar`;
+      _caseRender();
+      return { ok: false, line };
+    }
+    _wbxSoftphone.activeLine = line;
+    _wbxSoftphone.lastState = 'dialing';
+    _wbxSoftphone.lastError = null;
+    _caseRender();
+    try {
+      const target = window.SIP.UserAgent.makeURI('sip:' + digits + '@' + _wbxSoftphone.config?.domain || 'voipgrid.nl');
+      const inviter = new window.SIP.Inviter(ua, target, {
+        sessionDescriptionHandlerOptions: {
+          constraints: { audio: true, video: false },
+        },
+      });
+      _wbxSoftphone.session = inviter;
+      inviter.stateChange.addListener((state) => {
+        if (state === 'Established') {
+          _wbxSoftphone.lastState = 'connected';
+          const pc = inviter.sessionDescriptionHandler?.peerConnection;
+          if (pc && _wbxSoftphone.audioEl) {
+            const stream = new MediaStream();
+            pc.getReceivers().forEach((r) => { if (r.track) stream.addTrack(r.track); });
+            _wbxSoftphone.audioEl.srcObject = stream;
+          }
+        } else if (state === 'Terminated') {
+          _wbxSoftphone.lastState = 'ended';
+          _wbxSoftphone.session = null;
+        }
+        _caseRender();
+      });
+      await inviter.invite();
+      return { ok: true, line };
+    } catch (e) {
+      _wbxSoftphone.lastState = 'error';
+      _wbxSoftphone.lastError = e?.message || String(e);
+      _caseRender();
+      return { ok: false, line, error: e?.message || 'invite' };
+    }
+  }
+
+  async function _wbxHangup() {
+    const s = _wbxSoftphone.session;
+    if (!s) return;
+    try {
+      if (s.state === 'Established') await s.bye();
+      else await s.cancel();
+    } catch (_) { /* ignore */ }
+    _wbxSoftphone.session = null;
+    _wbxSoftphone.lastState = 'ended';
+    _caseRender();
+  }
+
+  // Log-fetch voor het actieve dossier.
+  async function _caseLoadCallLog(customerId) {
+    if (!customerId) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/dunning-call-log-list?customer_id=' + encodeURIComponent(customerId));
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      _caseCallLog = {
+        items          : Array.isArray(d.items) ? d.items : [],
+        cadence        : d.cadence || { max_attempts: 3, interval_days: 3 },
+        resolved       : !!d.resolved,
+        attempts_count : Number(d.attempts_count) || 0,
+        next_reminder_at: d.next_reminder_at || null,
+      };
+    } catch (e) {
+      console.warn('[case-call-log-load]', e?.message || e);
+      _caseCallLog = { items: [], cadence: { max_attempts: 3, interval_days: 3 }, resolved: false, attempts_count: 0, next_reminder_at: null };
+    }
+    _caseRender();
+  }
+
+  // Bellen-kaart HTML: teal dialer-cockpit + tracker + log + nudge.
+  function _caseBellenCardHtml(cust) {
+    const phone = cust?.phone || '';
+    const line  = _wbxDetectLine(phone);
+    const lineLabel = line === 'be' ? 'BE-lijn (+32)' : 'NL-lijn (+31)';
+    const digits = _wbxDigitsFor(phone);
+    const sp = _wbxSoftphone;
+    const state = sp.lastState;
+    const stateLabel =
+      state === 'dialing'   ? 'Bellen…' :
+      state === 'connected' ? 'Verbonden' :
+      state === 'ended'     ? 'Beëindigd' :
+      state === 'error'     ? 'Fout: ' + (sp.lastError || 'onbekend') :
+      'Klaar';
+    const canCall  = !!phone;
+    const inCall   = state === 'dialing' || state === 'connected';
+
+    // 3-stap-tracker: gebruik cadence.max_attempts (default 3).
+    const max = Math.max(1, Number(_caseCallLog.cadence?.max_attempts) || 3);
+    const done = Math.min(_caseCallLog.attempts_count, max);
+    const here = _caseCallLog.resolved ? max : done; // resolved → alle balletjes gevuld
+    const dots = Array.from({ length: max }, (_, i) => {
+      const filled = i < here;
+      return `<div class="wbx-call-dot ${filled ? 'done' : ''}" title="Poging ${i + 1}"></div>${i < max - 1 ? '<span class="wbx-call-dotbar"></span>' : ''}`;
+    }).join('');
+
+    // Log-render (chronologisch, nieuwste eerst).
+    const logHtml = _caseCallLog.items.length ? _caseCallLog.items.map((it) => {
+      const meta = _callOutcomeMeta(it.outcome);
+      const when = _pipeFmtDateTime(it.attempted_at);
+      const who  = it.created_by_name ? ' · ' + esc(it.created_by_name) : '';
+      const noteHtml = it.note ? `<div class="wbx-call-log-note">${esc(it.note)}</div>` : '';
+      return `<div class="wbx-call-log-row">
+        <span class="wbx-pill" style="background:${meta.tint}22;color:${meta.tint}">${esc(meta.label)}</span>
+        <span class="wbx-call-log-time">${esc(when)}${who}</span>
+        ${noteHtml}
+      </div>`;
+    }).join('') : `<div style="color:var(--wbx-faint);font-size:12.5px">Nog geen belpogingen.</div>`;
+
+    // Reminder-info + incasso-nudge (na max pogingen zonder resolutie).
+    let reminderHtml = '';
+    if (_caseCallLog.next_reminder_at && !_caseCallLog.resolved) {
+      const rt = _pipeFmtDateTime(_caseCallLog.next_reminder_at);
+      reminderHtml = `<div class="wbx-call-remind">📅 Volgende belpoging vanaf <strong>${esc(rt)}</strong> (${_caseCallLog.cadence.interval_days} dg na de vorige)</div>`;
+    }
+    let nudgeHtml = '';
+    if (_caseCallLog.attempts_count >= max && !_caseCallLog.resolved) {
+      nudgeHtml = `<div class="wbx-call-nudge">
+        <div style="flex:1">
+          <strong>${max} pogingen zonder resolutie.</strong>
+          <div style="font-size:12px;color:var(--wbx-muted);margin-top:2px">Overweeg de klant naar incasso te routeren. Deze knop opent alleen de flow — er wordt niet automatisch verstuurd.</div>
+        </div>
+        <button class="wbx-btn wbx-danger wbx-sm" type="button" data-case-action="to_incasso">→ naar incasso</button>
+      </div>`;
+    }
+
+    return `<div class="wbx-card wbx-call-card">
+      <h4>Bellen</h4>
+      <div class="wbx-call-cockpit">
+        <div class="wbx-call-line-badge">${esc(lineLabel)}</div>
+        <div class="wbx-call-number wbx-mono">${esc(phone || 'geen telefoonnummer')}</div>
+        <div class="wbx-call-state ${state}">${esc(stateLabel)}</div>
+        <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
+          ${inCall
+            ? `<button class="wbx-call-btn wbx-call-hangup" type="button" data-case-hangup>Ophangen</button>`
+            : `<button class="wbx-call-btn wbx-call-dial" type="button" data-case-bel ${!canCall ? 'disabled' : ''}>${canCall ? '📞 Bel nu' : 'Geen nummer'}</button>`
+          }
+          <button class="wbx-btn wbx-sm" type="button" data-case-log-manual>Uitkomst noteren</button>
+        </div>
+      </div>
+      <div class="wbx-call-tracker">
+        <div class="wbx-call-tracker-h">Poging ${Math.min(done + 1, max)} van ${max}</div>
+        <div class="wbx-call-dots">${dots}</div>
+      </div>
+      ${reminderHtml}
+      <div class="wbx-call-log">${logHtml}</div>
+      ${nudgeHtml}
+    </div>`;
+  }
+
+  // Uitkomst-modal.
+  function _caseOpenOutcomeModal(cust, opts) {
+    document.getElementById('wbxCallOutcomeModal')?.remove();
+    const focusInv = _caseState.detail?.open_invoices?.[0] || null;
+    const wrap = document.createElement('div');
+    wrap.id = 'wbxCallOutcomeModal';
+    wrap.className = 'wbx wbx-call-outcome-scrim';
+    wrap.innerHTML = `
+      <div class="wbx-call-outcome-modal">
+        <div class="wbx-call-outcome-head">
+          <div>
+            <div style="font-weight:600">Wat was de uitkomst?</div>
+            <div style="font-size:12px;color:var(--wbx-muted);margin-top:2px">${esc(cust?.display_name || 'Klant')} · ${esc(cust?.phone || 'geen nummer')}</div>
+          </div>
+          <button class="wbx-inc-close" type="button" data-outcome-close>✕</button>
+        </div>
+        <div class="wbx-call-outcome-body">
+          <div class="wbx-call-outcome-grid">
+            ${CALL_OUTCOMES.map((o) => `<button class="wbx-call-outcome-opt" type="button" data-outcome="${esc(o.key)}"><span class="wbx-pill" style="background:${o.tint}22;color:${o.tint}">${esc(o.label)}</span></button>`).join('')}
+          </div>
+          <label style="display:block;margin-top:14px;font-size:12px;color:var(--wbx-muted)">Notitie (optioneel)
+            <textarea id="wbxCallOutcomeNote" rows="3" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:#fff;color:var(--wbx-ink);font:inherit;min-height:70px;resize:vertical"></textarea>
+          </label>
+          <div id="wbxCallOutcomeErr" style="display:none;margin-top:8px;color:var(--wbx-s-inc-tx);font-size:12.5px"></div>
+        </div>
+        <div class="wbx-call-outcome-foot">
+          <button class="wbx-btn" type="button" data-outcome-close>Annuleer</button>
+          <button class="wbx-btn wbx-primary" type="button" data-outcome-save disabled>Opslaan</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+    let chosen = null;
+    const err = wrap.querySelector('#wbxCallOutcomeErr');
+    const saveBtn = wrap.querySelector('[data-outcome-save]');
+    const close = () => wrap.remove();
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+    wrap.querySelectorAll('[data-outcome-close]').forEach((b) => b.addEventListener('click', close));
+    wrap.querySelectorAll('[data-outcome]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        chosen = btn.getAttribute('data-outcome');
+        wrap.querySelectorAll('[data-outcome]').forEach((b) => b.classList.toggle('wbx-on', b === btn));
+        saveBtn.disabled = false;
+      });
+    });
+    saveBtn.addEventListener('click', async () => {
+      if (!chosen) return;
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Bezig…';
+      try {
+        const r = await window.AgentShared.apiFetch('/api/dunning-call-log-create', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customer_id: cust?.id || _caseState.cid,
+            invoice_id : focusInv?.id || null,
+            sip_line   : opts?.line || _wbxSoftphone.activeLine || _wbxDetectLine(cust?.phone),
+            outcome    : chosen,
+            note       : wrap.querySelector('#wbxCallOutcomeNote').value.trim() || null,
+          }),
+        });
+        const d = await r.json();
+        if (!r.ok || d.error) throw new Error(d.error || 'HTTP ' + r.status);
+        window.AgentShared?.showToast?.('Belpoging gelogd', 'success');
+        close();
+        await _caseLoadCallLog(cust?.id || _caseState.cid);
+      } catch (e) {
+        if (err) { err.style.display = ''; err.textContent = 'Fout: ' + (e?.message || 'onbekend'); }
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Opslaan';
+      }
+    });
+  }
+
+  // Wire de Bellen-kaart-acties na _caseRender.
+  function _caseWireBellenCard() {
+    const sheet = document.getElementById('caseSheet');
+    if (!sheet) return;
+    const cust = _caseState.detail?.customer || null;
+    sheet.querySelectorAll('[data-case-bel]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (!cust?.phone) return;
+        const line = _wbxDetectLine(cust.phone);
+        const res  = await _wbxPlaceCall(cust.phone);
+        // Bij succes én bij fail openen we alsnog de uitkomst-modal zodat
+        // de gebruiker de handmatige uitkomst kan noteren (de gebruiker
+        // kan sowieso met eigen telefoon bellen als SIP faalt).
+        _caseOpenOutcomeModal(cust, { line: res?.line || line });
+      });
+    });
+    sheet.querySelectorAll('[data-case-hangup]').forEach((btn) => {
+      btn.addEventListener('click', () => _wbxHangup());
+    });
+    sheet.querySelectorAll('[data-case-log-manual]').forEach((btn) => {
+      btn.addEventListener('click', () => _caseOpenOutcomeModal(cust, { line: _wbxDetectLine(cust?.phone) }));
     });
   }
 
