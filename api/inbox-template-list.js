@@ -133,7 +133,14 @@ export default async function handler(req, res) {
     //    geeft. Beschermt tegen config-rij die naar een oude/verkeerde
     //    WABA-id verwijst terwijl de approved templates onder een andere
     //    WABA staan.
-    const SELECT_COLS = 'id, meta_template_id, name, language, category, header_type, header_content, body_text, body_examples, footer_text, buttons, status, approved_at, updated_at, meta_param_mapping, folder';
+    // KOLOMMEN: het echte schema (migratie 2026-06-18-whatsapp-template-
+    // folders.sql) heeft `folder_id uuid` op whatsapp_meta_templates dat FK'd
+    // naar whatsapp_template_folders(id, name, sort_order). Vroegere versie
+    // selecteerde `folder` — die kolom bestaat NIET → productie-fout in de
+    // template-picker. Frontend groepeert echter op `folder` (string), dus
+    // we mappen folder_id → folder-naam in-memory (één extra query, geen N+1)
+    // en geven zowel `folder` (naam-string) als `folder_id` terug.
+    const SELECT_COLS = 'id, meta_template_id, name, language, category, header_type, header_content, body_text, body_examples, footer_text, buttons, status, approved_at, updated_at, meta_param_mapping, folder_id';
     async function fetchApproved(filterBaId) {
       let q = supabaseAdmin
         .from('whatsapp_meta_templates')
@@ -157,6 +164,34 @@ export default async function handler(req, res) {
       items             = fallback;
     }
 
+    // Resolve folder_id → folder-naam. Één extra query (folders-lijst) + in-
+    // memory map — geen N+1. Fail-soft: bij fout gaan we door met folder=null
+    // voor alles (frontend groepeert die onder "Overig"). Een ontbrekende
+    // mapnaam mag NOOIT de template-picker blokkeren.
+    const folderIds = [...new Set(items.map((t) => t.folder_id).filter(Boolean))];
+    let folderMap = new Map();
+    if (folderIds.length) {
+      try {
+        const { data: folders, error: folderErr } = await supabaseAdmin
+          .from('whatsapp_template_folders')
+          .select('id, name, sort_order')
+          .in('id', folderIds);
+        if (folderErr) {
+          console.warn('[inbox-template-list] folders-lookup fail-soft:', folderErr.message);
+        } else if (Array.isArray(folders)) {
+          folderMap = new Map(folders.map((f) => [f.id, f]));
+        }
+      } catch (e) {
+        console.warn('[inbox-template-list] folders-lookup exception fail-soft:', e?.message || e);
+      }
+    }
+    // Verrijk elk template met een `folder` (naam-string of null). Zo hoeft
+    // de frontend niet te wijzigen — die groepeert al op tpl.folder.
+    items = items.map((t) => {
+      const f = t.folder_id ? folderMap.get(t.folder_id) : null;
+      return { ...t, folder: f?.name || null };
+    });
+
     console.log('[inbox-template-list]', JSON.stringify({
       conversation_id         : convId,
       business_account_id     : businessAccountId,
@@ -165,6 +200,7 @@ export default async function handler(req, res) {
       fallback_triggered      : fallbackTriggered,
       fallback_approved       : fallbackCount,
       final_approved          : items.length,
+      folders_resolved        : folderMap.size,
     }));
 
     return res.status(200).json({ items });
