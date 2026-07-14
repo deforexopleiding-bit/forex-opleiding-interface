@@ -1392,7 +1392,7 @@ document.querySelectorAll('#retMarkSegments .sr-seg').forEach(seg => seg.addEven
 
 // ── Abonnementen ──
 const SUB_STATUS = { active: { l: 'Actief', c: 'green' }, cancelled: { l: 'Geannuleerd', c: 'gray' }, paused: { l: 'Gepauzeerd', c: 'warning' } };
-let subSeg = 'active', subSort = { key: 'start', dir: 'desc' }, subItems = [];
+let subSeg = 'active', subSort = { key: 'created', dir: 'desc' }, subItems = [];
 let subPage = 1, subPageSize = 50, subTotal = 0, subTotalPages = 1;
 async function loadSubscriptions() {
   const wrap = document.getElementById('subscriptionsList');
@@ -1419,6 +1419,13 @@ function renderSubscriptions() {
   rows = rows.slice().sort((a, b) => {
     const dir = subSort.dir === 'asc' ? 1 : -1;
     if (subSort.key === 'amount') return ((a.amount_incl || 0) - (b.amount_incl || 0)) * dir;
+    if (subSort.key === 'created') {
+      // Fallback op id (uuid v4 is niet chronologisch, maar geeft stabiele
+      // sub-orde als created_at ontbreekt op oudere rijen).
+      const ca = String(a.created_at || ''), cb = String(b.created_at || '');
+      if (ca || cb) return ca.localeCompare(cb) * dir;
+      return String(a.id || '').localeCompare(String(b.id || '')) * dir;
+    }
     return String(a.start_date || '').localeCompare(String(b.start_date || '')) * dir;
   });
   if (!rows.length) { wrap.innerHTML = '<div class="sr-empty">Geen abonnementen gevonden.</div>'; return; }
@@ -1426,7 +1433,9 @@ function renderSubscriptions() {
   wrap.innerHTML = `<div class="sr-tablewrap"><table class="sr-table">
     <thead><tr><th>Klant</th><th>Bedrijf</th><th>Omschrijving</th>
       <th class="num ${sc('amount')}" data-sort="amount">Bedrag incl.</th><th class="center">Termijnen</th>
-      <th class="${sc('start')}" data-sort="start">Start</th><th>Eind</th><th>Status</th><th></th></tr></thead>
+      <th class="${sc('start')}" data-sort="start">Start</th><th>Eind</th>
+      <th class="${sc('created')}" data-sort="created">Aangemaakt</th>
+      <th>Status</th><th></th></tr></thead>
     <tbody>${rows.map(it => {
       const st = SUB_STATUS[it.status] || { l: it.status || '—', c: 'gray' };
       const cancelled = it.status === 'cancelled';
@@ -1447,6 +1456,7 @@ function renderSubscriptions() {
         <td class="center">${it.term_count || '—'}×</td>
         <td>${it.start_date ? fmtDateNL(it.start_date) : '—'}</td>
         <td>${it.end_date ? fmtDateNL(it.end_date) : '—'}</td>
+        <td>${it.created_at ? fmtDateNL(it.created_at) : '—'}</td>
         <td><span class="sr-tag ${st.c}">${st.l}</span></td>
         <td class="sr-actions"><a class="sr-abtn primary" href="${detailHref}">Detail</a>${dots}</td>
       </tr>`;

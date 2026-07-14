@@ -61,7 +61,7 @@ export default async function handler(req, res) {
 
     // 1) Subscriptions eerst — status-filter, owned_by_me-filter, page/range.
     let subQ = supabaseAdmin.from('subscriptions')
-      .select('id, deal_id, description, amount, vat_percentage, term_count, start_date, end_date, teamleader_subscription_id, status, line_items', { count: 'exact' })
+      .select('id, deal_id, description, amount, vat_percentage, term_count, start_date, end_date, teamleader_subscription_id, status, line_items, created_at', { count: 'exact' })
       .order('start_date', { ascending: false })
       .range(from, to);
     if (status && status !== 'all') subQ = subQ.eq('status', status);
@@ -142,6 +142,7 @@ export default async function handler(req, res) {
         end_date: s.end_date || null,
         status: s.status || null,
         teamleader_subscription_id: s.teamleader_subscription_id || null,
+        created_at: s.created_at || null,
       };
     });
 

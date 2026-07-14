@@ -463,19 +463,42 @@
     .inbox-c-msg.inbound:not(.same-sender) .inbox-c-msg-bubble {
       border-top-left-radius: 2.5px;
     }
+    /* WhatsApp-stijl in/uit: outbound = accent-groen (van jou), inbound =
+       neutrale grijze bubbel (van klant). Stevig contrast zodat je in een
+       oogopslag ziet wat wie heeft gestuurd. */
     .inbox-c-msg.outbound .inbox-c-msg-bubble {
-      background: #d9fdd3;
-      color: #111b21;
+      background: #b6e8b0;
+      color: #0b3d2e;
+      border: 0.5px solid rgba(11,61,46,.14);
     }
     .inbox-c-msg.outbound.failed .inbox-c-msg-bubble {
       background: rgba(239,68,68,.12);
       border: 1px solid rgba(239,68,68,.3);
-      color: #fecaca;
+      color: #7f1d1d;
     }
     .inbox-c-msg.inbound .inbox-c-msg-bubble {
-      background: #ffffff;
-      color: #111b21;
-      border: 0.5px solid rgba(0,0,0,0.08);
+      background: #eef1f4;
+      color: #1f2937;
+      border: 0.5px solid rgba(0,0,0,0.06);
+    }
+    /* Kleine sender-label boven de eerste bubble in een reeks. Neutraal
+       "Jij" / "Klant" — dynamisch label kan later, dit is visueel al
+       genoeg om de kanten te labelen. */
+    .inbox-c-msg:not(.same-sender) .inbox-c-msg-bubble::before {
+      display: block;
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      margin-bottom: 3px;
+      opacity: 0.7;
+    }
+    .inbox-c-msg.outbound:not(.same-sender) .inbox-c-msg-bubble::before {
+      content: 'Jij';
+      color: #0b3d2e;
+    }
+    .inbox-c-msg.inbound:not(.same-sender) .inbox-c-msg-bubble::before {
+      content: 'Klant';
+      color: #1f2937;
     }
     .bubble-text {
       display: inline;
