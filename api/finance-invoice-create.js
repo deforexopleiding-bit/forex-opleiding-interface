@@ -43,7 +43,7 @@ export default async function handler(req, res) {
 
   try {
     const { data: cust } = await supabaseAdmin.from('customers')
-      .select('id, is_company, company_name, first_name, last_name, email, phone, tl_contact_id, tl_company_id, address_street, address_number, address_postal, address_city')
+      .select('id, is_company, company_name, first_name, last_name, email, phone, tl_contact_id, tl_company_id, address_street, address_number, address_postal, address_city, address_country')
       .eq('id', customer_id).maybeSingle();
     if (!cust) return res.status(404).json({ error: 'Klant niet gevonden' });
 

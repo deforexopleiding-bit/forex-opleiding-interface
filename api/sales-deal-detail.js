@@ -43,7 +43,7 @@ export default async function handler(req, res) {
     }
 
     const { data: customer } = await supabaseAdmin.from('customers')
-      .select('id, is_company, company_name, kvk_number, vat_number, first_name, last_name, email, phone, address_street, address_number, address_postal, address_city, onboarding_status, onboarding_sent_at, onboarding_completed_at')
+      .select('id, is_company, company_name, kvk_number, vat_number, first_name, last_name, email, phone, address_street, address_number, address_postal, address_city, address_country, onboarding_status, onboarding_sent_at, onboarding_completed_at')
       .eq('id', deal.customer_id).maybeSingle();
     const { data: lineItems } = await supabaseAdmin.from('deal_line_items')
       .select('*').eq('deal_id', id).order('position', { ascending: true });
