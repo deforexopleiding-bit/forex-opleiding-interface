@@ -2543,7 +2543,7 @@
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
                   <label style="font-size:11px;color:var(--text-dim)">
                     Min dagen overdue
-                    <input id="dunWfTrgMinDays" type="number" class="fin-input" min="0" value="14"/>
+                    <input id="dunWfTrgMinDays" type="number" class="fin-input" min="0" placeholder="leeg = geen" value="14"/>
                   </label>
                   <label style="font-size:11px;color:var(--text-dim)">
                     Klant-type
@@ -2556,6 +2556,14 @@
                   <label style="font-size:11px;color:var(--text-dim)">
                     Min openstaand bedrag (EUR)
                     <input id="dunWfTrgMinAmount" type="number" class="fin-input" min="0" value="0"/>
+                  </label>
+                  <label style="font-size:11px;color:var(--text-dim)">
+                    Min dagen NA factuurdatum (dag-N-duwtje)
+                    <input id="dunWfTrgMinDaysSinceInvoice" type="number" class="fin-input" min="0" placeholder="leeg = niet gebruiken"/>
+                  </label>
+                  <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:6px;padding-top:16px">
+                    <input id="dunWfTrgRunOnce" type="checkbox" style="width:auto;margin:0"/>
+                    Max 1× per klant (ooit)
                   </label>
                 </div>
               </div>
@@ -5104,6 +5112,9 @@
     document.getElementById('dunWfTrgMinDays').value      = (tc.min_days_overdue != null) ? tc.min_days_overdue : 14;
     document.getElementById('dunWfTrgCustomerType').value = tc.customer_type || 'any';
     document.getElementById('dunWfTrgMinAmount').value    = (tc.min_amount != null) ? tc.min_amount : 0;
+    // Nieuwe dag-N-duwtje-velden: leeg = niet gebruiken (engine default).
+    document.getElementById('dunWfTrgMinDaysSinceInvoice').value = (tc.min_days_since_invoice_date != null) ? tc.min_days_since_invoice_date : '';
+    document.getElementById('dunWfTrgRunOnce').checked           = tc.run_once_per_customer_per_workflow === true;
     const delBtn = document.getElementById('dunWfDeleteBtn');
     if (delBtn) delBtn.hidden = !workflow?.id;
     const errEl = document.getElementById('dunWfError');
@@ -5270,9 +5281,22 @@
     if (!Number.isInteger(priority)) return showDunWfErr('Priority moet integer zijn');
 
     const trigger_conditions = {};
-    if (Number.isFinite(minDays)   && minDays   >= 0) trigger_conditions.min_days_overdue = minDays;
+    // min_days_overdue leeg laten → engine gebruikt default 14 (backwards-compat).
+    // Voor het dag-N-duwtje kan Jeffrey dit veld leegmaken; dan bepaalt alleen
+    // min_days_since_invoice_date wanneer de workflow vuurt.
+    const minDaysInput = document.getElementById('dunWfTrgMinDays').value;
+    if (minDaysInput !== '' && Number.isFinite(minDays) && minDays >= 0) trigger_conditions.min_days_overdue = minDays;
     if (custType && custType !== 'any')               trigger_conditions.customer_type   = custType;
     if (Number.isFinite(minAmount) && minAmount > 0)  trigger_conditions.min_amount      = minAmount;
+    // Dag-N-duwtje-velden: leeg = niet meesturen (engine ziet geen key).
+    const minDaysSinceInvoiceInput = document.getElementById('dunWfTrgMinDaysSinceInvoice').value;
+    if (minDaysSinceInvoiceInput !== '') {
+      const n = Number(minDaysSinceInvoiceInput);
+      if (Number.isFinite(n) && n >= 0) trigger_conditions.min_days_since_invoice_date = n;
+    }
+    if (document.getElementById('dunWfTrgRunOnce').checked) {
+      trigger_conditions.run_once_per_customer_per_workflow = true;
+    }
 
     const payload = {
       workflow: { name, description: description || null, is_active: isActive, priority, trigger_conditions },
