@@ -88,6 +88,7 @@ export default async function handler(req, res) {
     //    Prefer: module-config-rij die hoort bij conv.phone_number_id (exacte afzendlijn).
     //    Fallback: actieve finance-module-config (legacy / conv zonder phone_number_id).
     let businessAccountId = null;
+    let baSource = 'none';
 
     if (conv.phone_number_id) {
       const { data: lineCfg, error: lineErr } = await supabaseAdmin
@@ -100,6 +101,7 @@ export default async function handler(req, res) {
         console.error('[inbox-template-list] line module-config lookup:', lineErr.message);
       } else if (lineCfg?.business_account_id) {
         businessAccountId = lineCfg.business_account_id;
+        baSource = 'line';
       }
     }
 
@@ -114,6 +116,7 @@ export default async function handler(req, res) {
         console.error('[inbox-template-list] finance module-config lookup:', modErr.message);
       } else if (modCfg?.business_account_id) {
         businessAccountId = modCfg.business_account_id;
+        baSource = 'finance-module';
       }
     }
 
@@ -123,20 +126,48 @@ export default async function handler(req, res) {
       });
     }
 
-    // 3) APPROVED templates ophalen.
-    const { data, error } = await supabaseAdmin
-      .from('whatsapp_meta_templates')
-      .select('id, meta_template_id, name, language, category, header_type, header_content, body_text, body_examples, footer_text, buttons, status, approved_at, updated_at, meta_param_mapping')
-      .eq('business_account_id', businessAccountId)
-      .eq('status', 'APPROVED')
-      .order('name', { ascending: true });
-
-    if (error) {
-      console.error('[inbox-template-list] select:', error.message);
-      return res.status(500).json({ error: error.message });
+    // 3) APPROVED templates ophalen — try-met-filter; als 0 rijen én er wás
+    //    een filter, val terug op ALL-approved. Spiegel van #732-fix in
+    //    api/wanbetalers-whatsapp-templates-list.js: single-WABA-setups
+    //    werken altijd; multi-WABA blijft gescoped zolang de filter matches
+    //    geeft. Beschermt tegen config-rij die naar een oude/verkeerde
+    //    WABA-id verwijst terwijl de approved templates onder een andere
+    //    WABA staan.
+    const SELECT_COLS = 'id, meta_template_id, name, language, category, header_type, header_content, body_text, body_examples, footer_text, buttons, status, approved_at, updated_at, meta_param_mapping';
+    async function fetchApproved(filterBaId) {
+      let q = supabaseAdmin
+        .from('whatsapp_meta_templates')
+        .select(SELECT_COLS)
+        .eq('status', 'APPROVED')
+        .order('name', { ascending: true });
+      if (filterBaId) q = q.eq('business_account_id', filterBaId);
+      const { data, error } = await q;
+      if (error) throw new Error(error.message);
+      return Array.isArray(data) ? data : [];
     }
 
-    return res.status(200).json({ items: data || [] });
+    let items = await fetchApproved(businessAccountId);
+    const primaryCount = items.length;
+    let fallbackTriggered = false;
+    let fallbackCount     = 0;
+    if (businessAccountId && items.length === 0) {
+      const fallback   = await fetchApproved(null);
+      fallbackTriggered = true;
+      fallbackCount     = fallback.length;
+      items             = fallback;
+    }
+
+    console.log('[inbox-template-list]', JSON.stringify({
+      conversation_id         : convId,
+      business_account_id     : businessAccountId,
+      business_account_source : baSource,
+      primary_approved        : primaryCount,
+      fallback_triggered      : fallbackTriggered,
+      fallback_approved       : fallbackCount,
+      final_approved          : items.length,
+    }));
+
+    return res.status(200).json({ items });
   } catch (e) {
     console.error('[inbox-template-list] exception:', e.message);
     return res.status(500).json({ error: e.message });
