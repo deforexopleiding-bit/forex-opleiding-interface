@@ -228,6 +228,31 @@ export default async function handler(req, res) {
       if (metaErr instanceof MetaNotConfiguredError) {
         return res.status(503).json({ error: 'Meta WhatsApp niet geconfigureerd', missing: metaErr.missing });
       }
+      // Meta re-engagement fout 131047 = 24u-venster verlopen. Onze eigen
+      // guard hierboven kijkt naar conv.last_inbound_at in de DB, maar dat
+      // kan "open" zeggen terwijl Meta's venster in werkelijkheid dicht is
+      // (bv. sandbox-gesimuleerde inbound die Meta niet kent). Vertaal 131047
+      // naar dezelfde 422/'24h_window_expired'-shape als de eigen guard
+      // zodat de UI 't identiek afhandelt (badge naar 'verlopen' + toast).
+      // source:'meta' zodat de UI kan onderscheiden of het onze eigen
+      // check was of Meta zelf.
+      const metaCode = Number(metaErr?.metaCode);
+      if (metaCode === 131047 || metaCode === 131051 || metaCode === 131026) {
+        console.warn('[inbox-send] Meta re-engagement fout — vertaald naar 24h_window_expired:', {
+          meta_code   : metaErr.metaCode,
+          meta_subcode: metaErr.metaSubcode,
+          meta_message: metaErr.metaMessage,
+          fbtrace_id  : metaErr.metaFbtrace,
+        });
+        return res.status(422).json({
+          error  : '24h_window_expired',
+          source : 'meta',
+          message: mediaKind
+            ? `Meta's 24-uurs venster is verlopen (de klant heeft niet binnen 24u geantwoord). Vrij ${mediaKind} versturen kan niet meer — gebruik de Template-knop voor een goedgekeurde template met ${mediaKind}-header.`
+            : 'Meta\'s 24-uurs venster is verlopen (de klant heeft niet binnen 24u geantwoord). Gebruik de Template-knop om een goedgekeurde template te sturen.',
+          meta_code: metaErr.metaCode,
+        });
+      }
       console.error('[inbox-send] Meta API fout:', metaErr.message);
       return res.status(502).json({ error: 'Meta API fout', meta_error: metaErr.message });
     }
