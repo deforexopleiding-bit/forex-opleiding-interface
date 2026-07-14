@@ -1541,6 +1541,149 @@
       color: var(--wbxi-muted);
     }
 
+    /* ══════════════════════════════════════════════════════════════════
+       Klantgegevens-modal (#inboxCustomerModal) — light-theme overrides.
+       De .inbox-c-* klassen zijn origineel donker-thema (color:#fff /
+       var(--text-strong,#fff)) — die maken bedragen wit-op-wit in de
+       lichte modal. Deze block trekt ze naar wbx-tokens en voegt de
+       compacte-header / openstaand-strip / info-grid / actie-rij look
+       toe. Scope is strikt #inboxCustomerModal zodat .modal-card + de
+       .inbox-c-* klassen elders (inbox #view-inbox) niet geraakt worden.
+       ══════════════════════════════════════════════════════════════════ */
+    #inboxCustomerModal .modal-card { max-width: 640px; }
+    #inboxCustomerModal .inbox-c-customer-content { padding: 0; }
+    #inboxCustomerModal .inbox-c-customer-name {
+      color: #161D29;
+      text-align: left;
+      font-size: 16px;
+      margin: 0;
+    }
+    #inboxCustomerModal .inbox-c-customer-phone {
+      color: #66717F;
+      text-align: left;
+      margin: 2px 0 0 0;
+      font: 500 12.5px/1.3 var(--wbx-mono, ui-monospace, monospace);
+    }
+    #inboxCustomerModal .inbox-c-section {
+      border-top-color: #E6E9EF;
+      padding: 12px 0;
+    }
+    #inboxCustomerModal .inbox-c-section:first-of-type { padding-top: 10px; }
+    #inboxCustomerModal .inbox-c-section-lbl { color: #98A2B0; }
+    #inboxCustomerModal .inbox-c-section-total {
+      color: #0A5A4E;
+      font: 700 15px/1 var(--wbx-mono, ui-monospace, monospace);
+    }
+    #inboxCustomerModal .inbox-c-invoice-row {
+      padding: 8px 0;
+      border-bottom: 1px solid #EEF0F3;
+    }
+    #inboxCustomerModal .inbox-c-invoice-row:last-child { border-bottom: none; }
+    #inboxCustomerModal .inbox-c-invoice-nr {
+      color: #161D29;
+      font-weight: 600;
+    }
+    #inboxCustomerModal .inbox-c-invoice-amount {
+      color: #161D29;
+      font-family: var(--wbx-mono, ui-monospace, monospace);
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+    }
+    #inboxCustomerModal .inbox-c-overdue-badge.normal {
+      color: #66717F;
+      background: #F0F2F5;
+    }
+    #inboxCustomerModal .inbox-c-overdue-badge.overdue {
+      color: #B23434;
+      background: #FBE9E9;
+    }
+    #inboxCustomerModal .inbox-c-kv .k { color: #66717F; }
+    #inboxCustomerModal .inbox-c-kv .v { color: #161D29; }
+    #inboxCustomerModal .inbox-c-kv .v a { color: #0E7C6B; }
+    #inboxCustomerModal .inbox-c-empty-line { color: #98A2B0; }
+
+    /* Compacte kop: avatar links, info midden, badge rechts */
+    #inboxCustomerModal .incm-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 6px 0 14px 0;
+      border-bottom: 1px solid #E6E9EF;
+      margin-bottom: 4px;
+    }
+    #inboxCustomerModal .incm-avatar-sm {
+      width: 48px !important;
+      height: 48px !important;
+      font-size: 18px !important;
+      margin: 0 !important;
+      flex-shrink: 0;
+    }
+    #inboxCustomerModal .incm-header-info { flex: 1; min-width: 0; }
+    #inboxCustomerModal .incm-badge {
+      align-self: center !important;
+      margin: 0 !important;
+      flex-shrink: 0;
+    }
+
+    /* Openstaand-strip — prominent in één regel */
+    #inboxCustomerModal .incm-open-strip {
+      margin: 10px 0 4px 0;
+      padding: 10px 14px;
+      background: #FBE9E9;
+      border: 1px solid #F3D2CB;
+      border-radius: 10px;
+      color: #B23434;
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.4;
+    }
+    #inboxCustomerModal .incm-open-strip[hidden] { display: none !important; }
+    #inboxCustomerModal .incm-open-amount {
+      font: 700 15px/1 var(--wbx-mono, ui-monospace, monospace);
+      color: #7A1F1F;
+      margin-right: 2px;
+    }
+
+    /* Klant info als 2-koloms grid */
+    #inboxCustomerModal .incm-info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 20px;
+    }
+    #inboxCustomerModal .incm-info-grid .inbox-c-kv {
+      display: block;
+      padding: 2px 0;
+    }
+    #inboxCustomerModal .incm-info-grid .inbox-c-kv .k {
+      display: block;
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      font-weight: 600;
+    }
+    #inboxCustomerModal .incm-info-grid .inbox-c-kv .v {
+      display: block;
+      text-align: left;
+      margin-top: 2px;
+      font-weight: 600;
+    }
+
+    /* Acties in één rij (wrap op smal) */
+    #inboxCustomerModal .incm-actions-row {
+      flex-direction: row;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    #inboxCustomerModal .incm-actions-row .sr-abtn {
+      width: auto;
+      flex: 1 1 auto;
+      min-width: 140px;
+      justify-content: center;
+    }
+    #inboxCustomerModal .incm-actions-row .sr-abtn.dim {
+      opacity: .55;
+    }
+
     @media (max-width: 1100px) {
       .inbox-layout-c {
         grid-template-columns: minmax(240px, 33%) minmax(0, 1fr);
@@ -4057,10 +4200,22 @@
       </div>
       <!-- Content -->
       <div class="inbox-c-customer-content" id="inboxCustomerPanelContent" hidden style="padding:0">
-        <div class="inbox-c-avatar-large" id="inboxCustPanelAvatar" style="background:hsl(210,55%,42%)">?</div>
-        <h3 class="inbox-c-customer-name" id="inboxCustPanelName">—</h3>
-        <div class="inbox-c-customer-phone" id="inboxCustPanelPhone">—</div>
-        <span class="inbox-c-window-badge-large open" id="inboxCustPanelWindow" hidden>24h open</span>
+        <!-- Compacte kop: avatar klein links, naam + telefoonnummer, 24h-badge rechts. -->
+        <div class="incm-header">
+          <div class="inbox-c-avatar-large incm-avatar-sm" id="inboxCustPanelAvatar" style="background:hsl(210,55%,42%)">?</div>
+          <div class="incm-header-info">
+            <h3 class="inbox-c-customer-name incm-name" id="inboxCustPanelName">—</h3>
+            <div class="inbox-c-customer-phone incm-phone" id="inboxCustPanelPhone">—</div>
+          </div>
+          <span class="inbox-c-window-badge-large incm-badge open" id="inboxCustPanelWindow" hidden>24h open</span>
+        </div>
+
+        <!-- Openstaand-strip: kern-info in één regel, prominent. Alleen bij >0 open facturen. -->
+        <div class="incm-open-strip" id="inboxCustPanelOpenStrip" hidden>
+          <span class="incm-open-amount" id="inboxCustPanelOpenStripAmount">€ 0,00</span> open
+          · <span id="inboxCustPanelOpenStripCount">0</span>
+          · <span id="inboxCustPanelOpenStripOverdue">—</span>
+        </div>
 
         <!-- Sectie: open facturen -->
         <div class="inbox-c-section">
@@ -4073,7 +4228,7 @@
           </div>
         </div>
 
-        <!-- Sectie: actieve abonnementen -->
+        <!-- Sectie: actieve abonnementen — VERBORGEN bij 0 subs via render. -->
         <div class="inbox-c-section" id="inboxCustPanelSubsSection">
           <div class="inbox-c-section-head">
             <span class="inbox-c-section-lbl">Actieve abonnementen</span>
@@ -4084,23 +4239,23 @@
           </div>
         </div>
 
-        <!-- Sectie: klant info -->
+        <!-- Sectie: klant info — 2-koloms grid. -->
         <div class="inbox-c-section" id="inboxCustPanelInfoSection">
           <div class="inbox-c-section-head">
             <span class="inbox-c-section-lbl">Klant info</span>
           </div>
-          <div id="inboxCustPanelInfoBody">
+          <div id="inboxCustPanelInfoBody" class="incm-info-grid">
             <div class="inbox-c-kv"><span class="k">Klant sinds</span><span class="v" id="inboxCustPanelSince">—</span></div>
             <div class="inbox-c-kv" id="inboxCustPanelEmailRow" hidden><span class="k">E-mail</span><span class="v" id="inboxCustPanelEmail">—</span></div>
           </div>
         </div>
 
-        <!-- Sectie: acties -->
+        <!-- Sectie: acties — één rij, wrap op smal. -->
         <div class="inbox-c-section">
           <div class="inbox-c-section-head">
             <span class="inbox-c-section-lbl">Acties</span>
           </div>
-          <div class="inbox-c-actions-list">
+          <div class="inbox-c-actions-list incm-actions-row">
             <a class="sr-abtn" id="inboxCustPanelOpen" href="#" target="_blank" rel="noopener" style="font-size:12.5px"><i class="ti ti-user"></i> Open klant-profiel</a>
             <a class="sr-abtn" id="inboxCustPanelInvoice" href="#" target="_blank" rel="noopener" style="font-size:12.5px"><i class="ti ti-file-invoice"></i> Maak factuur aan</a>
             <button class="sr-abtn secondary" id="inboxClaimPaidBtn" type="button" style="font-size:12.5px" disabled title="Eerst klant koppelen"><i class="ti ti-cash-check"></i> Klant claimt betaald</button>
@@ -11856,6 +12011,12 @@
     const invLnk   = document.getElementById('inboxCustPanelInvoice');
     const claimBtn = document.getElementById('inboxClaimPaidBtn');
     const infoSec  = document.getElementById('inboxCustPanelInfoSection');
+    // Openstaand-strip (kern-info in één regel): bedrag / factuur-count /
+    // oudste dagen te laat. Alleen zichtbaar bij >=1 open factuur.
+    const stripEl  = document.getElementById('inboxCustPanelOpenStrip');
+    const stripAmt = document.getElementById('inboxCustPanelOpenStripAmount');
+    const stripCnt = document.getElementById('inboxCustPanelOpenStripCount');
+    const stripOv  = document.getElementById('inboxCustPanelOpenStripOverdue');
 
     // Naam + phone + avatar — gedeeld tussen matched en unknown.
     const phone = (cust && cust.phone) || (conv && conv.phone_number) || '';
@@ -11894,6 +12055,26 @@
       // Facturen-sectie + abonnementen + klant-info + acties allemaal zichtbaar + gevuld.
       if (invSection) invSection.style.display = '';
       if (totEl)  totEl.textContent  = _inboxFmtEur(totals.open_amount);
+      // Openstaand-strip vullen — alleen tonen als er open facturen zijn.
+      if (stripEl) {
+        const invCount = Number(totals.invoice_count) || invs.length || 0;
+        if (invCount > 0) {
+          const maxOverdue = invs.reduce((mx, iv) => {
+            const d = Number(iv.days_overdue) || 0;
+            return (iv.is_overdue && d > mx) ? d : mx;
+          }, 0);
+          if (stripAmt) stripAmt.textContent = _inboxFmtEur(totals.open_amount);
+          if (stripCnt) stripCnt.textContent = invCount + ' factuur' + (invCount === 1 ? '' : 'en');
+          if (stripOv) {
+            stripOv.textContent = maxOverdue > 0
+              ? 'oudste ' + maxOverdue + ' dagen te laat'
+              : 'nog niet verstreken';
+          }
+          stripEl.hidden = false;
+        } else {
+          stripEl.hidden = true;
+        }
+      }
       if (invsEl) {
         if (!invs.length) {
           invsEl.innerHTML = '<div class="inbox-c-empty-line">Geen open facturen</div>';
@@ -11914,10 +12095,10 @@
           }).join('');
         }
       }
-      // Abonnementen-sectie tonen + vullen. Header-totaal = MRR (per maand);
-      // hover-title toont contract-totaal (som van termijn-bedragen) zodat de
-      // gebruiker beide getallen kan zien zonder UI-clutter.
-      if (subsSec) subsSec.style.display = '';
+      // Abonnementen-sectie alleen tonen als er actieve abonnementen zijn
+      // — verborgen anders (scheelt onnodige "geen actieve abonnementen"-
+      // ruimte in de modal).
+      if (subsSec) subsSec.style.display = subs.length ? '' : 'none';
       if (subsTotEl) {
         const mrr = Number(totals.subscriptions_total_mrr) || 0;
         const contract = Number(totals.subscriptions_total_contract_value) || 0;
@@ -11994,6 +12175,7 @@
       if (subsSec)    subsSec.style.display    = 'none';
       if (infoSec)    infoSec.style.display    = 'none';
       if (emailRow)   emailRow.hidden          = true;
+      if (stripEl)    stripEl.hidden           = true;
 
       // Acties: 'Koppel aan klant' opent in-place modal (F1 polish — vervangt
       // dead-end href naar klanten.html). Factuur-link blijft disabled.
