@@ -1171,7 +1171,84 @@
       border-radius: 8px;
       padding: 5px 8px;
     }
-    #view-inbox #inboxCountersBar { color: var(--wbxi-muted); font-size: 11px; }
+    #view-inbox #inboxCountersBar,
+    #view-inbox .inbox-counters-bar {
+      color: var(--wbxi-muted);
+      font-size: 11px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    #view-inbox .inbox-counters-bar:empty { display: none; }
+
+    /* Compacte Filters-knop + popover — vervangt de bredere 4-checkbox-
+       regel + sort-select uit de vroegere layout. IDs (inboxFilterUnread/
+       Debtor/Linked/Unlinked + inboxSortSelect) blijven identiek zodat
+       alle bestaande change-handlers ongewijzigd blijven werken. */
+    #view-inbox #inboxFiltersToggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      padding: 6px 10px;
+      color: var(--wbxi-muted);
+      white-space: nowrap;
+    }
+    #view-inbox #inboxFiltersToggle.has-active-filters {
+      border-color: var(--wbxi-accent);
+      color: var(--wbxi-accent-ink);
+      background: var(--wbxi-accent-soft);
+    }
+    #view-inbox .inbox-filters-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--wbxi-accent);
+      color: #fff;
+      font: 700 10px/1 'Inter', system-ui, sans-serif;
+      padding: 2px 5px;
+      border-radius: 999px;
+      min-width: 15px;
+      height: 15px;
+    }
+    #view-inbox .inbox-filters-popover {
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      min-width: 220px;
+      background: var(--wbxi-surface);
+      border: 1px solid var(--wbxi-border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      box-shadow: 0 12px 32px rgba(20,25,35,.14);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 20;
+    }
+    #view-inbox .inbox-filters-popover[hidden] { display: none; }
+    #view-inbox .inbox-filters-popover-lbl {
+      font: 600 10.5px/1 'Inter', system-ui, sans-serif;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--wbxi-faint);
+      margin-bottom: 2px;
+    }
+    #view-inbox .inbox-filters-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12.5px;
+      color: var(--wbxi-ink) !important;
+      cursor: pointer;
+      padding: 3px 0;
+    }
+    #view-inbox .inbox-filters-check input { margin: 0; }
+    #view-inbox .inbox-filters-sort {
+      font-size: 12px;
+      padding: 6px 10px;
+      width: 100%;
+    }
 
     /* Conversation-lijst — witruimte rond items, geen dichte muur. */
     #view-inbox #inboxConvList {
@@ -2254,6 +2331,14 @@
       background:#fff; border:2px solid #0E7C6B;
     }
     :where(.wbx, .wbx-sheet) .wbx-call-dot.done { background:#0E7C6B; border-color:#0E7C6B; }
+    /* Huidige-positie balletje — witte vulling, teal border, subtiele ring.
+       Vult NIET (dat is 'done'); markeert alleen dat dit de eerstvolgende,
+       nog-niet-gedane poging is. */
+    :where(.wbx, .wbx-sheet) .wbx-call-dot.here {
+      background:#fff;
+      border-color:#0E7C6B;
+      box-shadow:0 0 0 4px rgba(14,124,107,.18);
+    }
     :where(.wbx, .wbx-sheet) .wbx-call-dotbar {
       flex:1; height:2px; background:var(--wbx-border);
     }
@@ -2827,37 +2912,42 @@
               <input id="inboxConvSearch" type="text" class="fin-input" placeholder="Zoeken op naam of nummer…" style="flex:1;font-size:12.5px"/>
               <button class="sr-ibtn" id="inboxConvRefresh" type="button" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
             </div>
-            <!-- Status-tabs (server-side).
+            <!-- Status-tabs (server-side) + compacte Filters-popover.
                  Afgehandeld = tijdelijk weg (komt terug bij inbound).
-                 Archief     = definitief weg (blijft in archief bij inbound). -->
-            <div id="inboxConvStatusTabs" class="sr-segments" style="display:flex;gap:4px;flex-wrap:wrap">
-              <button class="sr-seg active" data-conv-status="active"      type="button" style="font-size:11.5px;padding:4px 10px">Actief</button>
-              <button class="sr-seg"        data-conv-status="afgehandeld" type="button" style="font-size:11.5px;padding:4px 10px">Afgehandeld</button>
-              <button class="sr-seg"        data-conv-status="archief"     type="button" style="font-size:11.5px;padding:4px 10px"><i class="ti ti-archive" style="font-size:11px;margin-right:2px"></i>Archief</button>
-              <button class="sr-seg"        data-conv-status="all"         type="button" style="font-size:11.5px;padding:4px 10px">Alles</button>
-            </div>
-            <!-- Snelfilters (client-side) + sortering -->
+                 Archief     = definitief weg (blijft in archief bij inbound).
+                 Filters ▾   = 4 client-side snelfilters + sortering, ingeklapt
+                               in een popover om de header compact te houden. -->
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-              <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);cursor:pointer">
-                <input type="checkbox" id="inboxFilterUnread" style="margin:0"/>Ongelezen
-              </label>
-              <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#b91c1c;cursor:pointer">
-                <input type="checkbox" id="inboxFilterDebtor" style="margin:0"/>Wanbetalers
-              </label>
-              <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);cursor:pointer">
-                <input type="checkbox" id="inboxFilterLinked" style="margin:0"/>Gekoppeld
-              </label>
-              <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);cursor:pointer">
-                <input type="checkbox" id="inboxFilterUnlinked" style="margin:0"/>Niet-gekoppeld
-              </label>
-              <select id="inboxSortSelect" class="fin-input" style="font-size:11px;padding:3px 6px;margin-left:auto">
-                <option value="default">Ongelezen eerst</option>
-                <option value="latest">Nieuwste bericht</option>
-                <option value="amount">Hoogste openstaand</option>
-                <option value="unread_only">Alleen ongelezen</option>
-              </select>
+              <div id="inboxConvStatusTabs" class="sr-segments" style="display:flex;gap:4px;flex-wrap:wrap;flex:1;min-width:0">
+                <button class="sr-seg active" data-conv-status="active"      type="button" style="font-size:11.5px;padding:4px 10px">Actief</button>
+                <button class="sr-seg"        data-conv-status="afgehandeld" type="button" style="font-size:11.5px;padding:4px 10px">Afgehandeld</button>
+                <button class="sr-seg"        data-conv-status="archief"     type="button" style="font-size:11.5px;padding:4px 10px"><i class="ti ti-archive" style="font-size:11px;margin-right:2px"></i>Archief</button>
+                <button class="sr-seg"        data-conv-status="all"         type="button" style="font-size:11.5px;padding:4px 10px">Alles</button>
+              </div>
+              <div id="inboxFiltersWrap" style="position:relative;flex-shrink:0">
+                <button class="sr-ibtn" id="inboxFiltersToggle" type="button" title="Snelfilters + sortering">
+                  <i class="ti ti-adjustments" style="font-size:12px"></i>
+                  <span>Filters</span>
+                  <span id="inboxFiltersBadge" class="inbox-filters-badge" hidden>0</span>
+                  <i class="ti ti-chevron-down" style="font-size:10px;margin-left:1px"></i>
+                </button>
+                <div id="inboxFiltersPopover" class="inbox-filters-popover" hidden>
+                  <div class="inbox-filters-popover-lbl">Snelfilters</div>
+                  <label class="inbox-filters-check"><input type="checkbox" id="inboxFilterUnread"/>Ongelezen</label>
+                  <label class="inbox-filters-check"><input type="checkbox" id="inboxFilterDebtor"/>Wanbetalers</label>
+                  <label class="inbox-filters-check"><input type="checkbox" id="inboxFilterLinked"/>Gekoppeld</label>
+                  <label class="inbox-filters-check"><input type="checkbox" id="inboxFilterUnlinked"/>Niet-gekoppeld</label>
+                  <div class="inbox-filters-popover-lbl" style="margin-top:6px">Sortering</div>
+                  <select id="inboxSortSelect" class="fin-input inbox-filters-sort">
+                    <option value="default">Ongelezen eerst</option>
+                    <option value="latest">Nieuwste bericht</option>
+                    <option value="amount">Hoogste openstaand</option>
+                    <option value="unread_only">Alleen ongelezen</option>
+                  </select>
+                </div>
+              </div>
             </div>
-            <div id="inboxCountersBar" style="font-size:11px;color:var(--text-dim);display:flex;gap:8px;flex-wrap:wrap"></div>
+            <div id="inboxCountersBar" class="inbox-counters-bar"></div>
           </div>
           <div id="inboxConvList" style="overflow:auto;flex:1;padding:6px 0">
             <div style="padding:24px;text-align:center;color:var(--text-faint);font-size:12px">Laden…</div>
@@ -9580,9 +9670,29 @@
         loadInboxConvList();
       });
     });
+    const FILTER_IDS = ['inboxFilterUnread', 'inboxFilterDebtor', 'inboxFilterLinked', 'inboxFilterUnlinked'];
+    // Badge-teller = aantal aangevinkte snelfilters. Wordt op elke change
+    // bijgewerkt, plus 1x bij init voor de startstate.
+    const _updateInboxFiltersBadge = () => {
+      const active = FILTER_IDS.reduce((n, id) => {
+        const el = document.getElementById(id);
+        return n + (el && el.checked ? 1 : 0);
+      }, 0);
+      const badge  = document.getElementById('inboxFiltersBadge');
+      const toggle = document.getElementById('inboxFiltersToggle');
+      if (badge) {
+        badge.textContent = String(active);
+        badge.hidden = active === 0;
+      }
+      if (toggle) toggle.classList.toggle('has-active-filters', active > 0);
+    };
     const bind = (id, key) => {
       const el = document.getElementById(id);
-      if (el) el.addEventListener('change', () => { _inboxUiState[key] = !!el.checked; _inboxRenderConvList(); });
+      if (el) el.addEventListener('change', () => {
+        _inboxUiState[key] = !!el.checked;
+        _inboxRenderConvList();
+        _updateInboxFiltersBadge();
+      });
     };
     bind('inboxFilterUnread',   'onlyUnread');
     bind('inboxFilterDebtor',   'onlyDebtor');
@@ -9590,6 +9700,22 @@
     bind('inboxFilterUnlinked', 'onlyUnlinked');
     const sortSel = document.getElementById('inboxSortSelect');
     if (sortSel) sortSel.addEventListener('change', () => { _inboxUiState.sortMode = sortSel.value || 'default'; _inboxRenderConvList(); });
+    // Filters-popover: toggle + click-outside.
+    const filtersToggle = document.getElementById('inboxFiltersToggle');
+    const filtersPop    = document.getElementById('inboxFiltersPopover');
+    if (filtersToggle && filtersPop) {
+      filtersToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        filtersPop.hidden = !filtersPop.hidden;
+      });
+      // Klik binnen de popover niet propageren zodat het document-click-
+      // listener 'm niet direct weer sluit (checkbox-toggle blijft werken).
+      filtersPop.addEventListener('click', (e) => e.stopPropagation());
+      document.addEventListener('click', () => {
+        if (!filtersPop.hidden) filtersPop.hidden = true;
+      });
+    }
+    _updateInboxFiltersBadge();
   }
 
   async function _inboxSetConvStatus(convId, uiStatus) {
@@ -17464,12 +17590,18 @@
     const ov = sp.lineOverride || 'auto';
 
     // 3-stap-tracker: gebruik cadence.max_attempts (default 3).
+    // Done  = gevuld  (i < done).
+    // Here  = eerstvolgende, nog-niet-gedane poging (i === done && !resolved && done < max).
+    //         Wanneer resolved → alle balletjes gevuld, geen here-highlight.
+    // Empty = i > done (of resolved → geen, want alle done).
     const max = Math.max(1, Number(_caseCallLog.cadence?.max_attempts) || 3);
-    const done = Math.min(_caseCallLog.attempts_count, max);
-    const here = _caseCallLog.resolved ? max : done; // resolved → alle balletjes gevuld
+    const done = _caseCallLog.resolved
+      ? max
+      : Math.min(_caseCallLog.attempts_count, max);
+    const hereIdx = (_caseCallLog.resolved || done >= max) ? -1 : done;
     const dots = Array.from({ length: max }, (_, i) => {
-      const filled = i < here;
-      return `<div class="wbx-call-dot ${filled ? 'done' : ''}" title="Poging ${i + 1}"></div>${i < max - 1 ? '<span class="wbx-call-dotbar"></span>' : ''}`;
+      const cls = (i < done) ? 'done' : (i === hereIdx ? 'here' : '');
+      return `<div class="wbx-call-dot ${cls}" title="Poging ${i + 1}"></div>${i < max - 1 ? '<span class="wbx-call-dotbar"></span>' : ''}`;
     }).join('');
 
     // Log-render (chronologisch, nieuwste eerst).
