@@ -21,19 +21,51 @@
 // Reminder 2: Meta-approved template (naam in no_reply.reminder_2_template_name).
 //             Zonder goedgekeurde template → skip met duidelijke reden.
 //
-// Guardrails (respect voor bestaande):
-//   - office-hours (via commLimits + isWithinOfficeHours)
-//   - caps (max_messages_per_day + total) via joost_conversation_state
-//   - cooldown_after_outbound_seconds
-//   - dry-run (dunning-dry-run.js)
-//   - sandbox-guard voor is_test-klanten
-//   - fail-soft: cron-fout mag NOOIT klapt de andere runs.
+// Guardrails (allemaal DAADWERKELIJK geïmplementeerd — niet alleen belofte):
+//   - Office-hours: hergebruikt `isWithinOfficeHours` uit joost-autonomy-evaluate.js
+//     (exact zelfde config: office_hours_tz/days/start/end). Buiten venster:
+//     skip zonder teller-mutatie zodat de VOLGENDE tick binnen kantooruren
+//     'em alsnog stuurt (gemiste ticks laten niets vallen).
+//   - Caps: max_messages_per_conversation_per_day + _total lezen uit
+//     joost_config.autonomy_config.communication_limits, tellers uit
+//     joost_conversation_state. Bij total-cap: aanroep van
+//     `maybeCreateTotalCapTask` (bestaande #764-flow) zodat de badge/taak
+//     opduikt zoals bij reactive autonomy. Bij day-cap: skip (tijdelijk).
+//   - Cooldown: cooldown_after_outbound_seconds t.o.v.
+//     joost_conversation_state.last_message_sent_at (elke outbound telt mee,
+//     ook reminders én workflow-sends). Skip als binnen cooldown.
+//   - Teller-update na succesvolle send: joost_conversation_state
+//     messages_sent_today + messages_sent_total + last_message_sent_at,
+//     zelfde patroon als joost-outbound-send r510-568. Zonder deze update
+//     zouden de caps uit de pas lopen.
+//   - Dry-run (dunning-dry-run.js): overslaat Meta-call + persist, maar
+//     hoogt reminder-teller wél op zodat test-runs de stage-progressie
+//     kunnen doorlopen. Update joost_conversation_state NIET in dry-run
+//     (anders zou een dry-run test de echte caps opeten).
+//   - Sandbox-guard voor is_test-klanten (assertRecipientMatchesSandbox).
+//   - Fail-soft per run: try/catch — 1 fout laat de andere runs door.
+//
+// Bewuste keuze pad (b) i.p.v. pad (a) evaluateAutonomy():
+//   evaluateAutonomy heeft een intent-mode-check (r232-238) die vóór de
+//   office-hours- en rate-limit-checks een early-return doet als intent geen
+//   INTENT_TO_CONFIG_KEY-mapping heeft. Voor een REMINDER hebben we geen
+//   natuurlijke intent (dit is geen klant-suggestion) — een synthetic
+//   'other' zou de gate falen, en semi-echte intents zoals 'payment_promise'
+//   toewijzen zou het audit-log misleiden. Beter: expliciet de bestaande
+//   helpers (`isWithinOfficeHours` + config lezen + joost_conversation_state
+//   teller) hergebruiken. Bij total-cap: dezelfde `maybeCreateTotalCapTask`
+//   aanroepen als reactive autonomy dat doet, zodat de #764-taak-flow
+//   consistent blijft.
 //
 // Auth: Authorization: Bearer $CRON_SECRET (checkCronAuth).
 // Schedule: */15 * * * * (elke 15 min; ruim binnen 20u/24u nauwkeurigheid).
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
 import { unpauseRunsForConversation } from './_lib/dunning-arrangement-hooks.js';
+import {
+  isWithinOfficeHours,
+  maybeCreateTotalCapTask,
+} from './joost-autonomy-evaluate.js';
 
 const ABORT_MS = 50_000;
 const MAX_RUNS_PER_TICK = 100;
@@ -264,6 +296,30 @@ export default async function handler(req, res) {
           continue;
         }
 
+        // ─── GUARDRAIL 1: office-hours ─────────────────────────────────
+        // Buiten kantooruren: skip zonder teller-mutatie zodat de volgende
+        // tick binnen het venster 'em alsnog stuurt (gemiste ticks laten
+        // niets vallen — determineStage kijkt naar de tijd sinds
+        // last_inbound_at / last_reminder_at, niet naar aantal ticks).
+        const commLimits = (autonomyCfg.communication_limits && typeof autonomyCfg.communication_limits === 'object')
+          ? autonomyCfg.communication_limits : {};
+        const officeHoursOnly = commLimits.office_hours_only !== false;
+        if (officeHoursOnly) {
+          const within = isWithinOfficeHours(
+            {
+              tz:        commLimits.office_hours_tz   || 'Europe/Amsterdam',
+              days:      commLimits.office_hours_days || [1, 2, 3, 4, 5],
+              startHHMM: commLimits.office_hours_start || '08:30',
+              endHHMM:   commLimits.office_hours_end   || '18:00',
+            },
+            new Date(nowMs),
+          );
+          if (!within) {
+            summary.skipped.push({ run_id: run.id, reason: 'OFFICE_HOURS_CLOSED' });
+            continue;
+          }
+        }
+
         // ── Stage 'r1' of 'r2': render + send ──
         const { customer, openInvoices } = await loadRenderContext(run.customer_id);
         if (!customer) {
@@ -282,6 +338,72 @@ export default async function handler(req, res) {
             await assertRecipientMatchesSandbox({ isTest: true, actual: sendTo, channel: 'whatsapp' });
           } catch (guardErr) {
             summary.skipped.push({ run_id: run.id, reason: 'SANDBOX_GUARD:' + guardErr.message });
+            continue;
+          }
+        }
+
+        // ─── GUARDRAIL 2 + 3: caps + cooldown (op joost_conversation_state) ──
+        // Lees per-conversatie state om beide te evalueren. Zelfde velden als
+        // joost-outbound-send r280-286 leest.
+        let convState = null;
+        try {
+          const { data } = await supabaseAdmin
+            .from('joost_conversation_state')
+            .select('conversation_id, messages_sent_today, messages_sent_today_date, messages_sent_total, last_message_sent_at')
+            .eq('conversation_id', conv.id)
+            .maybeSingle();
+          convState = data || null;
+        } catch (e) {
+          console.warn('[conv-reminder-cron] state lookup fail:', e?.message);
+        }
+        const todayStr = new Date(nowMs).toISOString().slice(0, 10);
+        const sameDay  = convState && convState.messages_sent_today_date === todayStr;
+        const sentToday = sameDay ? Number(convState?.messages_sent_today || 0) : 0;
+        const sentTotal = Number(convState?.messages_sent_total || 0);
+        const lastSentMs = convState?.last_message_sent_at
+          ? new Date(convState.last_message_sent_at).getTime()
+          : 0;
+
+        const maxPerDay = Number(commLimits.max_messages_per_conversation_per_day ?? 3);
+        const maxTotal  = Number(commLimits.max_messages_per_conversation_total   ?? 10);
+        const cooldownSec = (commLimits.cooldown_after_outbound_seconds != null)
+          ? Number(commLimits.cooldown_after_outbound_seconds)
+          : (commLimits.cooldown_after_outbound_minutes != null
+              ? Number(commLimits.cooldown_after_outbound_minutes) * 60
+              : 3600);
+
+        // Total-cap: zelfde signaal als reactive autonomy — cap-taak vuren
+        // via #764-helper (maybeCreateTotalCapTask). Idempotent per conv.
+        if (sentTotal >= maxTotal) {
+          try {
+            await maybeCreateTotalCapTask({
+              supabaseAdmin,
+              conv_id: conv.id,
+              decision: {
+                intent: 'reminder',
+                blocked_reason: 'BLOCKED_RATE_LIMIT',
+                rate_limit_reason: 'total',
+                decision_log: [`messages_sent_total (${sentTotal}) >= max_total (${maxTotal}) via conv-reminder-cron`],
+              },
+              triggered_by: 'conv_reminder_cron',
+            });
+          } catch (e) {
+            console.warn('[conv-reminder-cron] cap-taak fail-soft:', e?.message);
+          }
+          summary.skipped.push({ run_id: run.id, reason: `CAP_TOTAL: ${sentTotal}/${maxTotal}` });
+          continue;
+        }
+        // Day-cap: skip (tijdelijk — morgen weer, geen taak nodig).
+        if (sentToday >= maxPerDay) {
+          summary.skipped.push({ run_id: run.id, reason: `CAP_DAY: ${sentToday}/${maxPerDay}` });
+          continue;
+        }
+        // Cooldown: elke outbound telt mee. Skip zonder teller-mutatie zodat
+        // de volgende tick 'em alsnog stuurt zodra cooldown voorbij is.
+        if (lastSentMs > 0 && cooldownSec > 0) {
+          const elapsedSec = Math.floor((nowMs - lastSentMs) / 1000);
+          if (elapsedSec < cooldownSec) {
+            summary.skipped.push({ run_id: run.id, reason: `COOLDOWN: ${elapsedSec}/${cooldownSec}s` });
             continue;
           }
         }
@@ -331,9 +453,12 @@ export default async function handler(req, res) {
             variables,
             dry_run: true,
           });
-          // Toch de teller ophogen zodat de volgende tick de VOLGENDE stage
-          // ziet — anders blijft dry-run in dezelfde stage hangen en zie je
-          // geen r2/rz progressie in test-runs.
+          // Toch de reminder-teller ophogen op dunning_workflow_runs zodat
+          // de volgende tick de VOLGENDE stage ziet — anders blijft dry-run
+          // in dezelfde stage hangen en zie je geen r2/rz progressie in
+          // test-runs. joost_conversation_state wordt in dry-run BEWUST NIET
+          // bijgewerkt — anders zou een test-run de echte caps opeten en
+          // zou live-verkeer daarna vroegtijdig geblokkeerd worden.
           await supabaseAdmin
             .from('dunning_workflow_runs')
             .update({
@@ -448,7 +573,7 @@ export default async function handler(req, res) {
             .eq('id', conv.id);
         } catch (_) { /* fail-soft */ }
 
-        // ── State-update: teller ophogen ──
+        // ── State-update dunning_workflow_runs: reminder-teller ──
         await supabaseAdmin
           .from('dunning_workflow_runs')
           .update({
@@ -457,6 +582,62 @@ export default async function handler(req, res) {
             updated_at: sentAt,
           })
           .eq('id', run.id);
+
+        // ── State-update joost_conversation_state: caps + cooldown tellers ──
+        // Zonder deze update zouden de caps uit de pas lopen met wat andere
+        // outbound-paden (joost-outbound-send, reactive autonomy) doen. Zelfde
+        // patroon als joost-outbound-send r510-568 (race-safe insert+update).
+        try {
+          if (!convState) {
+            const { error: stateInsErr } = await supabaseAdmin
+              .from('joost_conversation_state')
+              .insert({
+                conversation_id:          conv.id,
+                messages_sent_today:      1,
+                messages_sent_today_date: todayStr,
+                messages_sent_total:      1,
+                last_message_sent_at:     sentAt,
+              });
+            if (stateInsErr && stateInsErr.code === '23505') {
+              // Race: andere caller insertte intussen → reload + update.
+              const { data: again } = await supabaseAdmin
+                .from('joost_conversation_state')
+                .select('messages_sent_today, messages_sent_today_date, messages_sent_total')
+                .eq('conversation_id', conv.id)
+                .maybeSingle();
+              if (again) {
+                const raceSameDay = again.messages_sent_today_date === todayStr;
+                const raceToday   = (raceSameDay ? Number(again.messages_sent_today || 0) : 0) + 1;
+                const raceTotal   = Number(again.messages_sent_total || 0) + 1;
+                await supabaseAdmin
+                  .from('joost_conversation_state')
+                  .update({
+                    messages_sent_today:      raceToday,
+                    messages_sent_today_date: todayStr,
+                    messages_sent_total:      raceTotal,
+                    last_message_sent_at:     sentAt,
+                  })
+                  .eq('conversation_id', conv.id);
+              }
+            } else if (stateInsErr) {
+              console.warn('[conv-reminder-cron] conv_state insert fail:', stateInsErr.message);
+            }
+          } else {
+            const newToday = (sameDay ? sentToday : 0) + 1;
+            const newTotal = sentTotal + 1;
+            await supabaseAdmin
+              .from('joost_conversation_state')
+              .update({
+                messages_sent_today:      newToday,
+                messages_sent_today_date: todayStr,
+                messages_sent_total:      newTotal,
+                last_message_sent_at:     sentAt,
+              })
+              .eq('conversation_id', conv.id);
+          }
+        } catch (e) {
+          console.warn('[conv-reminder-cron] conv_state update exception:', e?.message);
+        }
 
         if (stage === 'r1') summary.r1_sent++;
         if (stage === 'r2') summary.r2_sent++;

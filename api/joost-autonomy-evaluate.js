@@ -139,7 +139,7 @@ function nowMs() { return Date.now(); }
 // Vercel-cron draait UTC; voor NL-office-hours (Europe/Amsterdam) doen we de
 // venster-check in-code i.p.v. via cron-syntax. Voordeel: één schedule werkt
 // zomer + winter zonder DST-shifts in vercel.json.
-function isWithinOfficeHours({ tz, days, startHHMM, endHHMM }, when = new Date()) {
+export function isWithinOfficeHours({ tz, days, startHHMM, endHHMM }, when = new Date()) {
   if (!tz || !startHHMM || !endHHMM) return true; // mis-config -> niet blokkeren
   try {
     // Lokale dag-of-week + lokale tijd in TZ.
@@ -600,7 +600,7 @@ export async function logAutonomyDecision({
  * telt mee in navFinanceTasksBadge (sidebar.js updateFinanceTasksBadge, via
  * /api/tasks-list?status=PENDING,APPROVED). Geen tweede meldingssysteem.
  */
-async function maybeCreateTotalCapTask({ supabaseAdmin: admin, conv_id, decision, triggered_by }) {
+export async function maybeCreateTotalCapTask({ supabaseAdmin: admin, conv_id, decision, triggered_by }) {
   // Conversation + klant ophalen (voor customer_id + label in taak-titel).
   let conv = null;
   try {
