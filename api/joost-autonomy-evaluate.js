@@ -47,6 +47,52 @@
 //     confidence:       number,
 //     mode:             string,               // intent-mode uit config
 //   }
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// KEY-CONTRACT — autonomy_config (juli 2026, na fix/joost-config-key-mismatch)
+// ─────────────────────────────────────────────────────────────────────────────
+// De UI (modules/shared/finance-instellingen.js), de seed-migraties en
+// runtime-migraties GEBRUIKEN EXACT DEZE KEYS. Afwijken (verkorte namen,
+// synoniemen) → engine leest 'em niet → wijzigingen hebben geen effect.
+// Voeg NIEUWE keys hier toe zodra ze in de engine of andere lezer landen.
+//
+// autonomy_config.communication_limits (met defaults als key ontbreekt):
+//   max_messages_per_conversation_per_day    (int)      default 3      — dagcap; tijdelijk
+//   max_messages_per_conversation_total      (int)      default 10     — total-cap; taak bij bereiken (via maybeCreateTotalCapTask)
+//   cooldown_after_outbound_seconds          (int, sec) default 3600   — anti-burst tussen outbound
+//   office_hours_only                        (bool)     default true
+//   office_hours_tz                          (string)   default 'Europe/Amsterdam'
+//   office_hours_days                        (int[])    default [1..5] (ma-vr)
+//   office_hours_start                       (string)   default '08:30'
+//   office_hours_end                         (string)   default '18:00'
+//   no_reply_pause_threshold                 (int)      — futures
+//   no_reply_pause_duration_hours            (int)      — futures
+//
+// DEFAULT-NO-DRIFT-REGEL: bovenstaande defaults MOETEN identiek blijven aan
+// het pre-#765 gedrag zodat modules zonder expliciete config (bv. 'onboarding'
+// dat helemaal geen communication_limits heeft) zich niet stilletjes anders
+// gedragen. Alleen modules met een expliciete DB-waarde wijken af (bv.
+// finance = 10/10/30s na 2026-07-15-joost-config-keys-canoniseren.sql). Bij
+// het toevoegen van nieuwe defaults: check tegen de oude implementatie en
+// documenteer expliciet als je een default bewust wijzigt (voor alle modules).
+//
+// autonomy_config.arrangement_mandate:
+//   allowed_types                            (string[]) — UITSTEL/SPLITSING/…
+//   min_total_amount_to_negotiate_eur        (number)
+//   max_total_amount_to_auto_propose_eur     (number)
+//   uitstel.{enabled, max_dagen_zonder_approval, max_dagen_total, auto_approve_if_within}
+//   splitsing.{enabled, max_termijnen_zonder_approval, max_termijnen_total,
+//              min_eerste_termijn_pct, auto_approve_if_within}
+//   abonnement_pauze / abonnement_stop / kwijtschelding: {enabled, requires_human_approval}
+//
+// Legacy-keys die de engine NIET meer leest (blijven fallback in load-paden
+// zolang de migratie 2026-07-15-joost-config-keys-canoniseren.sql niet is
+// gedraaid): max_per_day, max_total, min_seconds_between,
+// min_seconds_between_messages, cooldown_after_outbound_minutes (units-shift),
+// max_messages_per_conv_per_day, max_messages_per_conv_total, office_start,
+// office_end, min_to_negotiate, max_auto_propose, max_termijnen (top-level),
+// max_uitstel_dagen (top-level). Verwijder na migratie.
+// ─────────────────────────────────────────────────────────────────────────────
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -266,8 +312,30 @@ export function evaluateAutonomy({
   // code-default vangt alleen NIEUWE rijen zonder deze key af.
   const maxPerDay = num(commLimits.max_messages_per_conversation_per_day, 3);
   const maxTotal  = num(commLimits.max_messages_per_conversation_total, 10);
-  const cooldownMin = num(commLimits.cooldown_after_outbound_minutes, 60);
-  const cooldownMs  = cooldownMin * 60 * 1000;
+  // Cooldown: canonical eenheid is SECONDEN. Fallback-ladder voor rijen die
+  // nog niet door migratie 2026-07-15-joost-config-keys-canoniseren zijn:
+  //   1) cooldown_after_outbound_seconds   (canonical)
+  //   2) cooldown_after_outbound_minutes   (interim, *60)
+  //   3) min_seconds_between               (UI-legacy, seconden)
+  //   4) min_seconds_between_messages      (seed-legacy, seconden)
+  //   5) default 3600 seconden (= 60 minuten, matcht pre-#765 gedrag)
+  // Default DEFAULT_COOLDOWN_SECONDS = 3600: modules zonder expliciete cooldown-
+  // key gedragen zich EXACT als voorheen (was cooldown_after_outbound_minutes
+  // default 60 -> 3600 sec). Alleen modules met een expliciete waarde in DB
+  // wijken af (finance = 30s na migratie — bewuste keuze Jeffrey).
+  let cooldownSec = null;
+  if (commLimits.cooldown_after_outbound_seconds != null) {
+    cooldownSec = num(commLimits.cooldown_after_outbound_seconds, null);
+  } else if (commLimits.cooldown_after_outbound_minutes != null) {
+    const cooldownMin = num(commLimits.cooldown_after_outbound_minutes, null);
+    if (cooldownMin != null) cooldownSec = cooldownMin * 60;
+  } else if (commLimits.min_seconds_between != null) {
+    cooldownSec = num(commLimits.min_seconds_between, null);
+  } else if (commLimits.min_seconds_between_messages != null) {
+    cooldownSec = num(commLimits.min_seconds_between_messages, null);
+  }
+  if (cooldownSec == null) cooldownSec = 3600;
+  const cooldownMs = cooldownSec * 1000;
 
   const state = conv_state || {};
   const sentToday = num(state.messages_sent_today, 0);
@@ -295,14 +363,14 @@ export function evaluateAutonomy({
   if (lastSentAt && cooldownMs > 0) {
     const elapsed = nowDate.getTime() - lastSentAt;
     if (elapsed < cooldownMs) {
-      const waitMin = Math.ceil((cooldownMs - elapsed) / 60000);
-      log.push(`Cooldown actief (nog ${waitMin}m te wachten) -> BLOCKED_RATE_LIMIT.`);
+      const waitSec = Math.ceil((cooldownMs - elapsed) / 1000);
+      log.push(`Cooldown actief (nog ${waitSec}s te wachten) -> BLOCKED_RATE_LIMIT.`);
       decision.blocked_reason = 'BLOCKED_RATE_LIMIT';
       decision.rate_limit_reason = 'cooldown';
       return decision;
     }
   }
-  log.push(`Rate-limit ok (today=${sentToday}/${maxPerDay}, total=${sentTotal}/${maxTotal}, cooldown=${cooldownMin}m).`);
+  log.push(`Rate-limit ok (today=${sentToday}/${maxPerDay}, total=${sentTotal}/${maxTotal}, cooldown=${cooldownSec}s).`);
 
   // ---- e. Paused-check ----
   const pausedUntil = state.autonomy_paused_until

@@ -440,11 +440,11 @@
                     </div>
                     <div>
                       <label class="form-label" for="commMaxTotal">max_total (per conv)</label>
-                      <input type="number" id="commMaxTotal" class="form-input" min="0" step="1" value="20" />
+                      <input type="number" id="commMaxTotal" class="form-input" min="0" step="1" value="10" title="max_messages_per_conversation_total — maximum aantal berichten dat Joost in één conversatie mag sturen; bij bereiken volgt een taak in Open Acties" />
                     </div>
                     <div>
-                      <label class="form-label" for="commMinSecondsBetween">min_seconds_between</label>
-                      <input type="number" id="commMinSecondsBetween" class="form-input" min="0" step="1" value="30" />
+                      <label class="form-label" for="commMinSecondsBetween">cooldown (seconden)</label>
+                      <input type="number" id="commMinSecondsBetween" class="form-input" min="0" step="1" value="3600" title="cooldown_after_outbound_seconds — minimaal aantal seconden tussen twee opeenvolgende outbound-berichten in dezelfde conversatie (no-drift default = 3600 = 1 uur; finance zit op 30s via de canoniseren-migratie)" />
                     </div>
                   </div>
                   <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:12px;align-items:end;margin-top:10px">
@@ -454,11 +454,11 @@
                     </label>
                     <div>
                       <label class="form-label" for="commOfficeStart">office_start</label>
-                      <input type="time" id="commOfficeStart" class="form-input" value="09:00" />
+                      <input type="time" id="commOfficeStart" class="form-input" value="08:30" />
                     </div>
                     <div>
                       <label class="form-label" for="commOfficeEnd">office_end</label>
-                      <input type="time" id="commOfficeEnd" class="form-input" value="17:00" />
+                      <input type="time" id="commOfficeEnd" class="form-input" value="18:00" />
                     </div>
                   </div>
                 </div>
@@ -777,6 +777,11 @@
     return out;
   }
 
+  // KEY-CONTRACT voor autonomy_config: zie de header van
+  // api/joost-autonomy-evaluate.js. UI, seeds en migraties gebruiken EXACT
+  // dezelfde keys als de decision-engine leest. Dit blok (load + save)
+  // implementeert dat contract voor Joost/finance; fallback-ladders zijn
+  // uitsluitend voor rijen die nog niet door de canoniseren-migratie zijn.
   async function loadJoostAutonomyConfig() {
     const host = _state.hostMounted; if (!host) return;
     const loading = host.querySelector('#joostAutoLoading');
@@ -795,6 +800,11 @@
       const cfg = data.config || data || {};
       const ff = (cfg.feature_flags && typeof cfg.feature_flags === 'object') ? cfg.feature_flags : {};
       const ac = (cfg.autonomy_config && typeof cfg.autonomy_config === 'object') ? cfg.autonomy_config : {};
+      // Bewaar snapshot zodat save de sub-keys kan behouden die de UI niet
+      // rendert (zoals uitstel.auto_approve_if_within, splitsing.enabled,
+      // office_hours_tz, office_hours_days). Zonder deze snapshot zou een
+      // save die sub-keys weggooien -> engine valt terug op code-defaults.
+      _joost.lastAutonomyConfig = ac;
 
       const setChk = (id, val) => { const el = host.querySelector('#' + id); if (el) el.checked = !!val; };
       setChk('ffDecisionEngineLogs',     ff.e2_decision_engine_logs === undefined ? true : !!ff.e2_decision_engine_logs);
@@ -811,19 +821,50 @@
         cb.checked = allowed.includes(cb.dataset.mandateType);
       });
       const setVal = (id, v, def) => { const el = host.querySelector('#' + id); if (el) el.value = (v == null || v === '') ? def : v; };
-      setVal('mandateMaxTermijnen',     mandate.max_termijnen,        6);
-      setVal('mandateMinTermijnBedrag', mandate.min_termijn_bedrag,   25);
-      setVal('mandateMaxUitstelDagen',  mandate.max_uitstel_dagen,    30);
-      setVal('mandateMinToNegotiate',   mandate.min_to_negotiate,     50);
-      setVal('mandateMaxAutoPropose',   mandate.max_auto_propose,     5);
+      // NB: canonical keys sinds fix/joost-config-key-mismatch — de UI schreef
+      // voorheen naar keys die de decision-engine (joost-autonomy-evaluate)
+      // niet las. `max_termijnen` en `max_uitstel_dagen` zitten canonical
+      // GENESTE onder splitsing.* / uitstel.*. Fallback op de oude (foute)
+      // keys blijft voor legacy-rijen die nog niet door de migratie gegaan
+      // zijn — dan zien we tenminste iets zinnigs i.p.v. de default.
+      const _splitsing = mandate.splitsing || {};
+      const _uitstel   = mandate.uitstel   || {};
+      setVal('mandateMaxTermijnen',     _splitsing.max_termijnen_total ?? mandate.max_termijnen,        6);
+      setVal('mandateMinTermijnBedrag', mandate.min_termijn_bedrag,   25);  // geen canonical equivalent — informatief veld
+      setVal('mandateMaxUitstelDagen',  _uitstel.max_dagen_total ?? mandate.max_uitstel_dagen,    30);
+      setVal('mandateMinToNegotiate',   mandate.min_total_amount_to_negotiate_eur ?? mandate.min_to_negotiate,     50);
+      setVal('mandateMaxAutoPropose',   mandate.max_total_amount_to_auto_propose_eur ?? mandate.max_auto_propose,   5);
 
       const comm = ac.communication_limits || {};
-      setVal('commMaxPerDay',         comm.max_per_day,        3);
-      setVal('commMaxTotal',          comm.max_total,          20);
-      setVal('commMinSecondsBetween', comm.min_seconds_between,30);
-      setChk('commOfficeHoursOnly',   !!comm.office_hours_only);
-      setVal('commOfficeStart',       comm.office_start,       '09:00');
-      setVal('commOfficeEnd',         comm.office_end,         '17:00');
+      // KEY-CONTRACT: zie api/joost-autonomy-evaluate.js. Fallback-ladder voor
+      // rijen die nog niet gemigreerd zijn (2026-07-15-joost-config-keys-canoniseren):
+      //   per_day  : max_messages_per_conversation_per_day > max_messages_per_conv_per_day > max_per_day
+      //   total    : max_messages_per_conversation_total   > max_messages_per_conv_total   > max_total
+      //   cooldown : cooldown_after_outbound_seconds > cooldown_after_outbound_minutes*60
+      //              > min_seconds_between > min_seconds_between_messages
+      setVal('commMaxPerDay', comm.max_messages_per_conversation_per_day
+                              ?? comm.max_messages_per_conv_per_day
+                              ?? comm.max_per_day, 3);
+      setVal('commMaxTotal',  comm.max_messages_per_conversation_total
+                              ?? comm.max_messages_per_conv_total
+                              ?? comm.max_total, 10);
+      const _cooldownSec = (typeof comm.cooldown_after_outbound_seconds === 'number')
+        ? comm.cooldown_after_outbound_seconds
+        : (typeof comm.cooldown_after_outbound_minutes === 'number')
+          ? comm.cooldown_after_outbound_minutes * 60
+          : (typeof comm.min_seconds_between === 'number')
+            ? comm.min_seconds_between
+            : (typeof comm.min_seconds_between_messages === 'number')
+              ? comm.min_seconds_between_messages
+              : null;
+      // No-drift defaults: matchen evaluateAutonomy fallback (3600s cooldown,
+      // 08:30-18:00 office-hours). Finance's productie-waarden zitten in de
+      // DB en overrulen deze defaults; overige modules zien hier de code-
+      // default terug.
+      setVal('commMinSecondsBetween', _cooldownSec, 3600);
+      setChk('commOfficeHoursOnly',   comm.office_hours_only !== false);
+      setVal('commOfficeStart',       comm.office_hours_start ?? comm.office_start, '08:30');
+      setVal('commOfficeEnd',         comm.office_hours_end   ?? comm.office_end,   '18:00');
 
       const pers = ac.personality || {};
       setVal('personalityMaxSentences', pers.max_sentences, 3);
@@ -866,22 +907,66 @@
       const n = Number(host.querySelector('#' + id)?.value);
       return isFinite(n) ? n : def;
     };
+    // ── SAVE: canonical keys (fix/joost-config-key-mismatch) ──────────────
+    // De decision-engine (api/joost-autonomy-evaluate.js) leest deze keys:
+    //   arrangement_mandate.min_total_amount_to_negotiate_eur
+    //   arrangement_mandate.max_total_amount_to_auto_propose_eur
+    //   arrangement_mandate.uitstel.max_dagen_total
+    //   arrangement_mandate.splitsing.max_termijnen_total
+    //   communication_limits.max_messages_per_conversation_per_day
+    //   communication_limits.max_messages_per_conversation_total
+    //   communication_limits.cooldown_after_outbound_minutes
+    //   communication_limits.office_hours_start / _end (en _tz / _days)
+    //
+    // Behoud van seed-nested velden (auto_approve_if_within, enabled etc):
+    // we mergen ONZE waarden in bestaande sub-objecten zodat een save via de
+    // UI de andere sub-keys niet weggooit. `_currentAutonomyCfg` is de
+    // laatst geladen snapshot (loadJoostAutonomyConfig zet 'm impliciet
+    // door setVal — we lezen 't uit de sub-objecten die op _joost hangen).
+    const _currentAc = (_joost && _joost.lastAutonomyConfig && typeof _joost.lastAutonomyConfig === 'object')
+      ? _joost.lastAutonomyConfig : {};
+    const _currentMandate = _currentAc.arrangement_mandate || {};
+    const _currentComm    = _currentAc.communication_limits || {};
+
     const arrangement_mandate = {
+      ..._currentMandate,
       allowed_types,
-      max_termijnen:      numVal('mandateMaxTermijnen', 6),
+      min_total_amount_to_negotiate_eur:  numVal('mandateMinToNegotiate', 50),
+      max_total_amount_to_auto_propose_eur: numVal('mandateMaxAutoPropose', 5),
+      // Genesteld: behoud eventuele bestaande sub-keys (auto_approve_if_within etc).
+      uitstel: {
+        ...(_currentMandate.uitstel || {}),
+        max_dagen_total: numVal('mandateMaxUitstelDagen', 30),
+      },
+      splitsing: {
+        ...(_currentMandate.splitsing || {}),
+        max_termijnen_total: numVal('mandateMaxTermijnen', 6),
+      },
+      // Informatief veld dat geen canonical-tegenhanger heeft (semantiek:
+      // absoluut bedrag, canonical splitsing.min_eerste_termijn_pct is percentage).
+      // Blijft in de blob staan voor UI-continuïteit maar wordt door engine
+      // niet gebruikt. TODO in separate PR: verbergen of omzetten naar pct.
       min_termijn_bedrag: numVal('mandateMinTermijnBedrag', 25),
-      max_uitstel_dagen:  numVal('mandateMaxUitstelDagen', 30),
-      min_to_negotiate:   numVal('mandateMinToNegotiate', 50),
-      max_auto_propose:   numVal('mandateMaxAutoPropose', 5),
     };
 
+    // KEY-CONTRACT: zie api/joost-autonomy-evaluate.js. Canonical eenheid
+    // voor cooldown = SECONDEN (was tijdelijk minutes in eerdere iteratie,
+    // toen bleek onnodig grof). Sub-object merge (`..._currentComm`) zorgt
+    // dat andere seed-sub-keys (office_hours_tz / _days / no_reply_pause_*)
+    // niet wegvallen bij een UI-save.
+    // No-drift-defaults: fallback-values matchen evaluateAutonomy's defaults
+    // zodat een form-save met leeg input identiek gedrag oplevert als "geen
+    // key in DB". Sub-object merge (`..._currentComm`) zorgt dat andere
+    // seed-sub-keys (office_hours_tz / _days / no_reply_pause_*) niet
+    // wegvallen bij een UI-save.
     const communication_limits = {
-      max_per_day:         numVal('commMaxPerDay', 3),
-      max_total:           numVal('commMaxTotal', 20),
-      min_seconds_between: numVal('commMinSecondsBetween', 30),
-      office_hours_only:   getChk('commOfficeHoursOnly'),
-      office_start:        (host.querySelector('#commOfficeStart')?.value || '09:00'),
-      office_end:          (host.querySelector('#commOfficeEnd')?.value || '17:00'),
+      ..._currentComm,
+      max_messages_per_conversation_per_day: numVal('commMaxPerDay', 3),
+      max_messages_per_conversation_total:   numVal('commMaxTotal', 20),
+      cooldown_after_outbound_seconds:       numVal('commMinSecondsBetween', 3600),
+      office_hours_only:                     getChk('commOfficeHoursOnly'),
+      office_hours_start:                    (host.querySelector('#commOfficeStart')?.value || '08:30'),
+      office_hours_end:                      (host.querySelector('#commOfficeEnd')?.value   || '18:00'),
     };
 
     const personality = {
