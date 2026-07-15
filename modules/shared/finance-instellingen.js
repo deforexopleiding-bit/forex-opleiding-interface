@@ -440,11 +440,11 @@
                     </div>
                     <div>
                       <label class="form-label" for="commMaxTotal">max_total (per conv)</label>
-                      <input type="number" id="commMaxTotal" class="form-input" min="0" step="1" value="20" />
+                      <input type="number" id="commMaxTotal" class="form-input" min="0" step="1" value="10" title="max_messages_per_conversation_total — maximum aantal berichten dat Joost in één conversatie mag sturen; bij bereiken volgt een taak in Open Acties" />
                     </div>
                     <div>
-                      <label class="form-label" for="commMinSecondsBetween">min_seconds_between</label>
-                      <input type="number" id="commMinSecondsBetween" class="form-input" min="0" step="1" value="30" />
+                      <label class="form-label" for="commMinSecondsBetween">cooldown (minuten)</label>
+                      <input type="number" id="commMinSecondsBetween" class="form-input" min="0" step="1" value="60" title="cooldown_after_outbound_minutes — minimaal aantal minuten tussen twee opeenvolgende outbound-berichten in dezelfde conversatie" />
                     </div>
                   </div>
                   <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:12px;align-items:end;margin-top:10px">
@@ -795,6 +795,11 @@
       const cfg = data.config || data || {};
       const ff = (cfg.feature_flags && typeof cfg.feature_flags === 'object') ? cfg.feature_flags : {};
       const ac = (cfg.autonomy_config && typeof cfg.autonomy_config === 'object') ? cfg.autonomy_config : {};
+      // Bewaar snapshot zodat save de sub-keys kan behouden die de UI niet
+      // rendert (zoals uitstel.auto_approve_if_within, splitsing.enabled,
+      // office_hours_tz, office_hours_days). Zonder deze snapshot zou een
+      // save die sub-keys weggooien -> engine valt terug op code-defaults.
+      _joost.lastAutonomyConfig = ac;
 
       const setChk = (id, val) => { const el = host.querySelector('#' + id); if (el) el.checked = !!val; };
       setChk('ffDecisionEngineLogs',     ff.e2_decision_engine_logs === undefined ? true : !!ff.e2_decision_engine_logs);
@@ -811,19 +816,33 @@
         cb.checked = allowed.includes(cb.dataset.mandateType);
       });
       const setVal = (id, v, def) => { const el = host.querySelector('#' + id); if (el) el.value = (v == null || v === '') ? def : v; };
-      setVal('mandateMaxTermijnen',     mandate.max_termijnen,        6);
-      setVal('mandateMinTermijnBedrag', mandate.min_termijn_bedrag,   25);
-      setVal('mandateMaxUitstelDagen',  mandate.max_uitstel_dagen,    30);
-      setVal('mandateMinToNegotiate',   mandate.min_to_negotiate,     50);
-      setVal('mandateMaxAutoPropose',   mandate.max_auto_propose,     5);
+      // NB: canonical keys sinds fix/joost-config-key-mismatch — de UI schreef
+      // voorheen naar keys die de decision-engine (joost-autonomy-evaluate)
+      // niet las. `max_termijnen` en `max_uitstel_dagen` zitten canonical
+      // GENESTE onder splitsing.* / uitstel.*. Fallback op de oude (foute)
+      // keys blijft voor legacy-rijen die nog niet door de migratie gegaan
+      // zijn — dan zien we tenminste iets zinnigs i.p.v. de default.
+      const _splitsing = mandate.splitsing || {};
+      const _uitstel   = mandate.uitstel   || {};
+      setVal('mandateMaxTermijnen',     _splitsing.max_termijnen_total ?? mandate.max_termijnen,        6);
+      setVal('mandateMinTermijnBedrag', mandate.min_termijn_bedrag,   25);  // geen canonical equivalent — informatief veld
+      setVal('mandateMaxUitstelDagen',  _uitstel.max_dagen_total ?? mandate.max_uitstel_dagen,    30);
+      setVal('mandateMinToNegotiate',   mandate.min_total_amount_to_negotiate_eur ?? mandate.min_to_negotiate,     50);
+      setVal('mandateMaxAutoPropose',   mandate.max_total_amount_to_auto_propose_eur ?? mandate.max_auto_propose,   5);
 
       const comm = ac.communication_limits || {};
-      setVal('commMaxPerDay',         comm.max_per_day,        3);
-      setVal('commMaxTotal',          comm.max_total,          20);
-      setVal('commMinSecondsBetween', comm.min_seconds_between,30);
-      setChk('commOfficeHoursOnly',   !!comm.office_hours_only);
-      setVal('commOfficeStart',       comm.office_start,       '09:00');
-      setVal('commOfficeEnd',         comm.office_end,         '17:00');
+      setVal('commMaxPerDay',         comm.max_messages_per_conversation_per_day ?? comm.max_per_day,        3);
+      setVal('commMaxTotal',          comm.max_messages_per_conversation_total   ?? comm.max_total,         10);
+      // cooldown-input toont MINUTEN sinds de key-canonisation. Legacy-fallback:
+      // als de rij nog een `min_seconds_between` heeft (oude UI), ronden we naar
+      // hele minuten (ceil) zodat de gebruiker niet in "0 minuten"-verwarring valt.
+      const _cooldownMin = (typeof comm.cooldown_after_outbound_minutes === 'number')
+        ? comm.cooldown_after_outbound_minutes
+        : (typeof comm.min_seconds_between === 'number' ? Math.ceil(comm.min_seconds_between / 60) : null);
+      setVal('commMinSecondsBetween', _cooldownMin, 60);
+      setChk('commOfficeHoursOnly',   comm.office_hours_only !== false);
+      setVal('commOfficeStart',       comm.office_hours_start ?? comm.office_start, '08:30');
+      setVal('commOfficeEnd',         comm.office_hours_end   ?? comm.office_end,   '18:00');
 
       const pers = ac.personality || {};
       setVal('personalityMaxSentences', pers.max_sentences, 3);
@@ -866,22 +885,56 @@
       const n = Number(host.querySelector('#' + id)?.value);
       return isFinite(n) ? n : def;
     };
+    // ── SAVE: canonical keys (fix/joost-config-key-mismatch) ──────────────
+    // De decision-engine (api/joost-autonomy-evaluate.js) leest deze keys:
+    //   arrangement_mandate.min_total_amount_to_negotiate_eur
+    //   arrangement_mandate.max_total_amount_to_auto_propose_eur
+    //   arrangement_mandate.uitstel.max_dagen_total
+    //   arrangement_mandate.splitsing.max_termijnen_total
+    //   communication_limits.max_messages_per_conversation_per_day
+    //   communication_limits.max_messages_per_conversation_total
+    //   communication_limits.cooldown_after_outbound_minutes
+    //   communication_limits.office_hours_start / _end (en _tz / _days)
+    //
+    // Behoud van seed-nested velden (auto_approve_if_within, enabled etc):
+    // we mergen ONZE waarden in bestaande sub-objecten zodat een save via de
+    // UI de andere sub-keys niet weggooit. `_currentAutonomyCfg` is de
+    // laatst geladen snapshot (loadJoostAutonomyConfig zet 'm impliciet
+    // door setVal — we lezen 't uit de sub-objecten die op _joost hangen).
+    const _currentAc = (_joost && _joost.lastAutonomyConfig && typeof _joost.lastAutonomyConfig === 'object')
+      ? _joost.lastAutonomyConfig : {};
+    const _currentMandate = _currentAc.arrangement_mandate || {};
+    const _currentComm    = _currentAc.communication_limits || {};
+
     const arrangement_mandate = {
+      ..._currentMandate,
       allowed_types,
-      max_termijnen:      numVal('mandateMaxTermijnen', 6),
+      min_total_amount_to_negotiate_eur:  numVal('mandateMinToNegotiate', 50),
+      max_total_amount_to_auto_propose_eur: numVal('mandateMaxAutoPropose', 5),
+      // Genesteld: behoud eventuele bestaande sub-keys (auto_approve_if_within etc).
+      uitstel: {
+        ...(_currentMandate.uitstel || {}),
+        max_dagen_total: numVal('mandateMaxUitstelDagen', 30),
+      },
+      splitsing: {
+        ...(_currentMandate.splitsing || {}),
+        max_termijnen_total: numVal('mandateMaxTermijnen', 6),
+      },
+      // Informatief veld dat geen canonical-tegenhanger heeft (semantiek:
+      // absoluut bedrag, canonical splitsing.min_eerste_termijn_pct is percentage).
+      // Blijft in de blob staan voor UI-continuïteit maar wordt door engine
+      // niet gebruikt. TODO in separate PR: verbergen of omzetten naar pct.
       min_termijn_bedrag: numVal('mandateMinTermijnBedrag', 25),
-      max_uitstel_dagen:  numVal('mandateMaxUitstelDagen', 30),
-      min_to_negotiate:   numVal('mandateMinToNegotiate', 50),
-      max_auto_propose:   numVal('mandateMaxAutoPropose', 5),
     };
 
     const communication_limits = {
-      max_per_day:         numVal('commMaxPerDay', 3),
-      max_total:           numVal('commMaxTotal', 20),
-      min_seconds_between: numVal('commMinSecondsBetween', 30),
-      office_hours_only:   getChk('commOfficeHoursOnly'),
-      office_start:        (host.querySelector('#commOfficeStart')?.value || '09:00'),
-      office_end:          (host.querySelector('#commOfficeEnd')?.value || '17:00'),
+      ..._currentComm,
+      max_messages_per_conversation_per_day: numVal('commMaxPerDay', 3),
+      max_messages_per_conversation_total:   numVal('commMaxTotal', 10),
+      cooldown_after_outbound_minutes:       numVal('commMinSecondsBetween', 60),
+      office_hours_only:                     getChk('commOfficeHoursOnly'),
+      office_hours_start:                    (host.querySelector('#commOfficeStart')?.value || '08:30'),
+      office_hours_end:                      (host.querySelector('#commOfficeEnd')?.value || '18:00'),
     };
 
     const personality = {
