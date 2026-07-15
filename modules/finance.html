@@ -6194,7 +6194,26 @@
 
   function fillDunWfForm(workflow, steps) {
     document.getElementById('dunWfName').value        = workflow?.name || '';
-    document.getElementById('dunWfActive').checked    = workflow?.is_active === true;
+    const activeEl = document.getElementById('dunWfActive');
+    activeEl.checked = workflow?.is_active === true;
+    // Aan/uit zetten mag NOOIT afhangen van de step-historie (fix workflow-
+    // upsert-fk). Detail-editor checkbox gebruikt daarom direct het toggle-
+    // endpoint i.p.v. de Opslaan-flow. Bij een niet-opgeslagen nieuwe
+    // workflow (_dunWfEditingId leeg) is er nog geen id om te togglen —
+    // dan valt 'ie automatisch mee in het volgende POST-payload (waar
+    // is_active correct is bij de eerste create).
+    if (!activeEl.dataset.wired) {
+      activeEl.addEventListener('change', async (e) => {
+        if (!_dunWfEditingId) return; // nog niet opgeslagen; is_active vaart bij POST mee.
+        try {
+          await toggleDunWfActive(_dunWfEditingId, e.target.checked);
+        } catch (err) {
+          e.target.checked = !e.target.checked; // revert bij fout
+          window.AgentShared?.showToast?.('Actief-toggle mislukt: ' + (err?.message || 'onbekend'), 'error');
+        }
+      });
+      activeEl.dataset.wired = '1';
+    }
     document.getElementById('dunWfDescription').value = workflow?.description || '';
     document.getElementById('dunWfPriority').value    = (workflow?.priority != null) ? workflow.priority : 100;
     const tc = workflow?.trigger_conditions || {};
@@ -6312,7 +6331,7 @@
       } else if (type === 'resume_dunning') {
         cfgHtml = `<div style="font-size:11px;color:var(--text-faint);grid-column:1/-1;padding:6px 0">Geen config nodig — hervat alle gepauzeerde aanmaan-workflow-runs van deze klant (bedoeld voor workflows getriggerd door een verbroken betaalafspraak).</div>`;
       }
-      return `<div data-step-idx="${idx}" style="border:1px solid var(--border-subtle,#e5e7eb);border-radius:8px;padding:10px;background:rgba(255,255,255,0.015)">
+      return `<div data-step-idx="${idx}" data-step-id="${step?.id || ''}" style="border:1px solid var(--border-subtle,#e5e7eb);border-radius:8px;padding:10px;background:rgba(255,255,255,0.015)">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px">
           <div style="display:flex;align-items:center;gap:8px">
             <span style="font-size:11px;font-weight:700;background:rgba(99,102,241,.15);color:#a5b4fc;padding:2px 7px;border-radius:10px">Stap ${idx + 1}</span>
@@ -6392,7 +6411,12 @@
         cfg.title = t.trim();
         if (d.trim()) cfg.description = d.trim();
       }
-      return { step_order: i, step_type: type, config: cfg };
+      // Diff-based upsert: bestaande step-id meesturen zodat de backend
+      // die rij UPDATE ipv DELETE+INSERT. Nieuwe steps hebben lege data-step-id.
+      const existingId = row.dataset.stepId || '';
+      const out = { step_order: i, step_type: type, config: cfg };
+      if (existingId) out.id = existingId;
+      return out;
     });
   }
 
@@ -6435,10 +6459,12 @@
       trigger_conditions.arrangement_breached = true;
     }
 
-    const payload = {
-      workflow: { name, description: description || null, is_active: isActive, priority, trigger_conditions },
-      steps,
-    };
+    // is_active alleen meesturen bij POST (nieuwe workflow); bij PATCH is de
+    // detail-checkbox aan het toggle-endpoint gekoppeld en mag saveDunWf de
+    // actief-staat niet overschrijven (voorkomt race met concurrent toggles).
+    const workflowPayload = { name, description: description || null, priority, trigger_conditions };
+    if (!_dunWfEditingId) workflowPayload.is_active = isActive;
+    const payload = { workflow: workflowPayload, steps };
 
     const btn = document.getElementById('dunWfSave');
     const orig = btn.innerHTML;

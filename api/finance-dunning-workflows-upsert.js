@@ -1,16 +1,38 @@
 // api/finance-dunning-workflows-upsert.js
 // POST   -> create een dunning_workflow incl. steps.
 // PATCH  -> update een dunning_workflow (vereist ?id=<uuid> of body.id). Steps
-//          worden vervangen: DELETE alle bestaande steps, dan INSERT nieuwe array.
+//          worden diff-based ge-upsert (zie hieronder) i.p.v. DELETE+INSERT
+//          zodat step-id's behouden blijven bij tekst-wijzigingen en
+//          dunning_log/dunning_workflow_runs referenties geldig blijven.
 // Permission: finance.dunning.config.
+//
+// DIFF-BASED UPSERT (sinds fix/workflow-upsert-fk):
+//   De DELETE+INSERT-strategie faalde op FK-RESTRICT zodra de workflow had
+//   gedraaid (dunning_log.step_id / dunning_workflow_runs.current_step_id).
+//   Migratie 2026-07-15-workflow-steps-fk-set-null.sql zet die FK's naar
+//   SET NULL zodat DELETE altijd lukt. Maar SET-NULL-alle-log-referenties
+//   bij elke save zou de audit-trail elke keer resetten -> daarom is de
+//   upsert ook diff-based:
+//     - Steps met een `id` in de payload -> UPDATE die specifieke rij
+//       (step_type, config, step_order) -> id blijft; logs die naar deze
+//       id verwijzen blijven geldig.
+//     - Steps zonder `id` -> INSERT nieuwe rij met verse UUID.
+//     - Bestaande DB-steps waarvan de id NIET meer in de payload voorkomt
+//       -> DELETE (FK SET NULL vangt de log-referenties op).
+//   Voor UNIQUE(workflow_id, step_order) botsingen bij hernummering:
+//   eerst +100000-shift op alle bestaande, dan definitieve step_order.
 //
 // Body shape:
 //   {
 //     workflow: { name, description?, is_active?, priority?, trigger_conditions? },
 //     steps: [
-//       { step_order, step_type: 'email'|'whatsapp'|'wait'|'task'|'stop', config: {...} }
+//       { id?, step_order, step_type: 'email'|'whatsapp'|'wait'|'task'|'stop', config: {...} }
 //     ]
 //   }
+//   NB: `id` is optioneel per step. Bestaande UI-flow (POST zonder id, PATCH
+//       met alleen step_order) blijft werken -- zonder id fallt de upsert
+//       terug op DELETE+INSERT-shape, wat sinds de FK SET NULL migratie
+//       veilig is.
 //
 // Step-config validatie per type:
 //   email/whatsapp: config.template_id (uuid) required; moet bestaan in
@@ -147,7 +169,16 @@ function validateSteps(steps) {
     }
     // stop: config blijft {}
 
-    normalized.push({ step_order: order, step_type: type, config: cleanCfg });
+    // Optioneel id per step (voor diff-based upsert). Als ontbrekend →
+    // step is nieuw en wordt geïnsert; als aanwezig → moet uuid zijn en
+    // wordt geüpdatet (mits die id bij deze workflow hoort — cross-check
+    // in de handler).
+    const stepId = raw.id != null && raw.id !== '' ? raw.id : null;
+    if (stepId != null && !isUuid(stepId)) {
+      errors.push(`${label}: id moet uuid zijn (of leeg voor nieuwe step)`);
+    }
+
+    normalized.push({ id: stepId, step_order: order, step_type: type, config: cleanCfg });
   });
 
   return { errors, normalized };
@@ -251,27 +282,91 @@ export default async function handler(req, res) {
       if (updErr) throw new Error('update workflow: ' + updErr.message);
       workflowRow = updated;
 
-      // Steps replace-strategy. Geen DB-transactie beschikbaar in supabase-js:
-      // bij INSERT-fout van steps blijft de workflow staan zonder steps. Loggen
-      // en 500 teruggeven zodat de UI de fout zichtbaar maakt.
+      // Diff-based steps upsert. Geen DB-transactie in supabase-js: elke stap
+      // is fail-fast (bij fout: 500). De volgorde is bewust:
+      //   1. Fetch bestaande steps (voor id-mapping + cross-check).
+      //   2. Valideer dat elk payload-step.id ook echt bij deze workflow hoort
+      //      (anders zou een client een step van een andere workflow kunnen
+      //      overschrijven).
+      //   3. Bepaal DELETE-set (bestaande id's niet in payload).
+      //   4. Shift alle nog-te-behouden bestaande steps naar step_order + 100000
+      //      om UNIQUE(workflow_id, step_order)-botsingen te vermijden tijdens
+      //      hernummering.
+      //   5. UPDATE per bestaand-id → definitief step_order + type + config.
+      //   6. INSERT nieuwe rijen (payload-steps zonder id).
+      //   7. DELETE de weggevallen steps (FK SET NULL vangt log-referenties op).
       if (stepsProvided) {
-        const { error: delErr } = await supabaseAdmin
-          .from('dunning_workflow_steps').delete().eq('workflow_id', id);
-        if (delErr) throw new Error('delete oude steps: ' + delErr.message);
+        // 1. Bestaande steps ophalen.
+        const { data: existing, error: exErr } = await supabaseAdmin
+          .from('dunning_workflow_steps')
+          .select('id, step_order')
+          .eq('workflow_id', id);
+        if (exErr) throw new Error('bestaande steps ophalen: ' + exErr.message);
+        const existingById = new Map((existing || []).map(s => [s.id, s]));
 
-        if (normalizedSteps.length) {
-          const insertRows = normalizedSteps.map(s => ({
+        // 2. Cross-check: iedere payload-step.id moet bij deze workflow horen.
+        for (const s of normalizedSteps) {
+          if (s.id && !existingById.has(s.id)) {
+            throw new Error(`step id=${s.id} hoort niet bij workflow ${id} (of bestaat niet)`);
+          }
+        }
+
+        // 3. DELETE-set: bestaande id's die niet meer in payload zitten.
+        const keptIds = new Set(normalizedSteps.filter(s => s.id).map(s => s.id));
+        const deleteIds = (existing || []).map(s => s.id).filter(sid => !keptIds.has(sid));
+
+        // 4. Shift van te-behouden bestaande steps naar step_order + 100000
+        //    om conflicten met de nieuwe step_orders te vermijden. Idempotent:
+        //    +100000 zit ver buiten normale range (typische workflow ~30 steps).
+        if (keptIds.size > 0) {
+          for (const sid of keptIds) {
+            const cur = existingById.get(sid);
+            const { error: shiftErr } = await supabaseAdmin
+              .from('dunning_workflow_steps')
+              .update({ step_order: (cur?.step_order || 0) + 100000 })
+              .eq('id', sid);
+            if (shiftErr) throw new Error('step-shift naar temp-order: ' + shiftErr.message);
+          }
+        }
+
+        // 5. UPDATE per bestaand-id → definitieve step_order + type + config.
+        for (const s of normalizedSteps) {
+          if (!s.id) continue;
+          const { error: updStepErr } = await supabaseAdmin
+            .from('dunning_workflow_steps')
+            .update({
+              step_order: s.step_order,
+              step_type:  s.step_type,
+              config:     s.config,
+            })
+            .eq('id', s.id);
+          if (updStepErr) throw new Error(`update step ${s.id}: ${updStepErr.message}`);
+        }
+
+        // 6. INSERT nieuwe rijen.
+        const newRows = normalizedSteps
+          .filter(s => !s.id)
+          .map(s => ({
             workflow_id: id,
             step_order:  s.step_order,
             step_type:   s.step_type,
             config:      s.config,
           }));
+        if (newRows.length > 0) {
           const { error: insErr } = await supabaseAdmin
-            .from('dunning_workflow_steps').insert(insertRows);
-          if (insErr) {
-            console.error('[finance-dunning-workflows-upsert] steps insert na delete faalde:', insErr.message);
-            throw new Error('insert nieuwe steps: ' + insErr.message);
-          }
+            .from('dunning_workflow_steps').insert(newRows);
+          if (insErr) throw new Error('insert nieuwe steps: ' + insErr.message);
+        }
+
+        // 7. DELETE weggevallen steps. FK SET NULL (migratie 2026-07-15-
+        //    workflow-steps-fk-set-null) zorgt dat log-referenties intact
+        //    blijven met step_id=NULL.
+        if (deleteIds.length > 0) {
+          const { error: delErr } = await supabaseAdmin
+            .from('dunning_workflow_steps')
+            .delete()
+            .in('id', deleteIds);
+          if (delErr) throw new Error('delete weggevallen steps: ' + delErr.message);
         }
       }
     } else {
