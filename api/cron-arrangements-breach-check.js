@@ -31,6 +31,7 @@
 // Schedule: dagelijks 06:00 UTC (zie vercel.json).
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
+import { isDryRunEnabled } from './_lib/dunning-dry-run.js';
 
 const ABORT_MS = 50_000;
 const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
@@ -48,7 +49,29 @@ export default async function handler(req, res) {
   if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
 
   const startedAt = Date.now();
+  // ── DRY-RUN KILLSWITCH ──────────────────────────────────────────────
+  // Bewuste keuze (fundament voor Fase 2b acties):
+  //   * Status-flips VOORGESTELD/ACTIEF -> NAGEKOMEN/VERBROKEN blijven ook
+  //     in dry-run doorgaan. Reden: het zijn zuivere administratie-updates
+  //     in ONZE eigen DB (geen externe zij-effecten), en de status is de
+  //     bron van waarheid waarop de rest van de UI + toekomstige action-
+  //     hooks al vertrouwen. Als we die zouden stoppen zou de sandbox een
+  //     valse indruk geven ("afspraak nog ACTIEF"), en zouden Fase 2b-
+  //     acties bij Live-modus ineens allemaal tegelijk vuren.
+  //   * De `dry`-vlag wordt WEL vastgelegd in de summary + in elke audit_log
+  //     state-change entry (before_json.dry_run + after_json.dry_run),
+  //     zodat Fase 2b action-hooks (WhatsApp / taak / workflow hervatten)
+  //     de vlag kunnen inspecteren en hard skip'en in dry-run.
+  //   * Log-regel bij start + eind maakt zichtbaar of dry-run aan stond,
+  //     zodat je in Vercel-logs direct ziet: 'wel geflipt, geen acties'
+  //     vs 'echt geflipt + echte acties'.
+  const dry = await isDryRunEnabled().catch((e) => {
+    console.warn('[cron-arrangements-breach-check] dry-run lookup faalde, fail-safe naar dry=true:', e?.message || e);
+    return true;
+  });
+  console.log('[cron-arrangements-breach-check] start dry_run=' + dry);
   const summary = {
+    dry_run: dry,
     checked_count: 0,
     transitioned_to_nagekomen: 0,
     transitioned_to_verbroken: 0,
@@ -97,13 +120,14 @@ export default async function handler(req, res) {
             action:      'finance.arrangement.breach_check_state_change',
             entity_type: 'payment_arrangement',
             entity_id:   arr.id,
-            before_json: { status: arr.status },
+            before_json: { status: arr.status, dry_run: dry },
             after_json:  {
               arrangement_id: arr.id,
               type:           arr.type,
               old_status:     arr.status,
               new_status:     newStatus,
               reason,
+              dry_run:        dry, // Fase 2b action-hooks moeten hier op branchen
             },
             reason_text: reason,
           });

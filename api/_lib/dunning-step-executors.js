@@ -283,23 +283,176 @@ export async function executeWaitStep({ run, step }) {
 }
 
 /**
- * Task-step: zou een taak moeten aanmaken in de tasks-tabel.
- * Voor nu: log-only. Implementatie volgt in PR B5.
+ * Task-step: maakt een echte taak aan in pending_actions (Fase 2a).
+ *
+ * Model-keuze: we hergebruiken de bestaande pending_actions-tabel met
+ * action_type='MANUAL_FOLLOWUP' (uit api/_lib/task-types.js — categorie
+ * 'arrangement', label 'Follow-up bericht'). Dat is bewust:
+ *   - de tabel + het frontend Open Acties-dashboard renderen 'em al;
+ *   - MANUAL_FOLLOWUP is expliciet bedoeld als "generieke follow-up
+ *     die door een mens moet worden opgepakt" (zie task-types.js r47-51);
+ *   - geen nieuwe migratie nodig.
+ *
+ * Config (step.config):
+ *   title       (verplicht) — kop van de taak
+ *   description (opt)       — vrije tekst
+ *   assignee_role (opt)     — informatief; routing komt in later fase
+ *
+ * Dry-run: consistent met email/whatsapp-executor. In dry-run géén
+ * pending_actions-INSERT, wel log_event='task_created' met dry_run:true
+ * payload zodat de rest van de workflow-run normaal doorloopt.
+ *
+ * Fail-soft:
+ *   config.title ontbreekt        → skipped 'task_skipped_no_title'
+ *   customer.id ontbreekt         → skipped 'task_skipped_no_customer'
+ *   dry-run module load faalt     → skipped 'task_skipped_no_guard' (fail-safe: geen insert)
+ *   insert-fout                   → failed  'task_create_failed'
+ * Een mislukte taak laat de workflow-run niet klappen — cron logt + telt.
  */
-export async function executeTaskStep({ supabaseAdmin, run, step, customer }) {
-  const title = step?.config?.title || '';
-  const description = step?.config?.description || '';
-  const assigned_user_id = step?.config?.assigned_user_id || null;
+export async function executeTaskStep({ supabaseAdmin, run, step, customer, openInvoices }) {
+  const cfg = step?.config || {};
+  const rawTitle       = String(cfg.title || '').trim();
+  const rawDescription = String(cfg.description || '').trim();
+  const assigneeRole   = cfg.assignee_role ? String(cfg.assignee_role) : null;
 
-  // TODO PR B5: insert in tasks-tabel
-  return {
-    status: 'ok',
-    log_event: 'task_created',
-    log_payload: {
-      title,
-      description,
-      assigned_user_id,
-      customer_id: customer?.id || null,
-    },
+  if (!rawTitle) {
+    return {
+      status: 'skipped',
+      log_event: 'task_skipped_no_title',
+      log_payload: {
+        workflow_id: run?.workflow_id || null,
+        step_id: step?.id || null,
+        reason: 'step.config.title ontbreekt',
+      },
+    };
+  }
+  if (!customer?.id) {
+    return {
+      status: 'skipped',
+      log_event: 'task_skipped_no_customer',
+      log_payload: {
+        workflow_id: run?.workflow_id || null,
+        step_id: step?.id || null,
+        reason: 'customer.id ontbreekt in run-context',
+      },
+    };
+  }
+
+  // Kies een aanleiding-factuur (eerste openstaande) — informatief in de
+  // taak; niet leidend. Bewust: pending_actions.invoice_id is een FK die
+  // Open Acties toont, dus we koppelen 'em zodat de admin direct de
+  // context ziet. Bij geen open facturen: null.
+  const firstInvoice = Array.isArray(openInvoices) && openInvoices.length
+    ? openInvoices[0]
+    : null;
+
+  // ─── DRY-RUN GUARD ────────────────────────────────────────────────
+  // Zelfde patroon als email/whatsapp-executors. In dry-run géén write
+  // naar pending_actions; wel log_event zodat de workflow doorloopt en
+  // je in dunning_log ziet wat er gebeurd zou zijn.
+  let dry = false;
+  try {
+    const { isDryRunEnabled, buildDryRunLogPayload } = await import('./dunning-dry-run.js');
+    dry = await isDryRunEnabled();
+    if (dry) {
+      return {
+        status: 'ok',
+        log_event: 'task_created',
+        log_payload: {
+          title:           rawTitle,
+          description:     rawDescription || null,
+          assignee_role:   assigneeRole,
+          customer_id:     customer.id,
+          invoice_id:      firstInvoice?.id || null,
+          workflow_id:     run?.workflow_id || null,
+          workflow_run_id: run?.id || null,
+          step_id:         step?.id || null,
+          pending_action_id: 'dry-run',
+          ...buildDryRunLogPayload({
+            channel: 'task',
+            to:      customer.id,
+            isTest:  !!customer?.is_test,
+            preview: { title: rawTitle, description: rawDescription.slice(0, 200) },
+          }),
+        },
+      };
+    }
+  } catch (guardModuleErr) {
+    // Guard-module niet beschikbaar → fail-safe: GEEN taak aanmaken.
+    // Zelfde defensieve keuze als email-executor (r144-161).
+    console.warn('[dunning-executor task] dry-run module niet beschikbaar → skip insert', guardModuleErr?.message);
+    return {
+      status: 'skipped',
+      log_event: 'task_skipped_no_guard',
+      log_payload: {
+        title:           rawTitle,
+        customer_id:     customer.id,
+        workflow_id:     run?.workflow_id || null,
+        step_id:         step?.id || null,
+        reason:          'dry-run guard module load failed: ' + (guardModuleErr?.message || 'unknown'),
+        fallback:        'no_insert',
+      },
+    };
+  }
+
+  // ─── LIVE INSERT ──────────────────────────────────────────────────
+  // action_type='MANUAL_FOLLOWUP' zodat de taak in Open Acties (categorie
+  // 'arrangement') verschijnt. arrangement_id=NULL — deze taak is
+  // workflow-driven, niet arrangement-driven.
+  const payload = {
+    title:           rawTitle,
+    description:     rawDescription || null,
+    assignee_role:   assigneeRole,
+    source:          'dunning_workflow',
+    workflow_id:     run?.workflow_id || null,
+    workflow_run_id: run?.id || null,
+    step_id:         step?.id || null,
+    rationale:       `Taak aangemaakt door dunning-workflow-step (run ${run?.id || '?'})`,
   };
+  const insertRow = {
+    customer_id:         customer.id,
+    arrangement_id:      null,
+    invoice_id:          firstInvoice?.id || null,
+    action_type:         'MANUAL_FOLLOWUP',
+    status:              'PENDING',
+    proposed_by_user_id: null, // cron
+    payload,
+  };
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('pending_actions')
+      .insert(insertRow)
+      .select('id, customer_id, action_type, status, invoice_id, created_at')
+      .single();
+    if (error) throw new Error(error.message);
+    return {
+      status: 'ok',
+      log_event: 'task_created',
+      log_payload: {
+        title:             rawTitle,
+        description:       rawDescription || null,
+        assignee_role:     assigneeRole,
+        pending_action_id: data.id,
+        customer_id:       data.customer_id,
+        action_type:       data.action_type,
+        invoice_id:        data.invoice_id,
+        workflow_id:       run?.workflow_id || null,
+        workflow_run_id:   run?.id || null,
+        step_id:           step?.id || null,
+        dry_run:           false,
+      },
+    };
+  } catch (e) {
+    return {
+      status: 'failed',
+      log_event: 'task_create_failed',
+      log_payload: {
+        title:       rawTitle,
+        customer_id: customer.id,
+        workflow_id: run?.workflow_id || null,
+        step_id:     step?.id || null,
+        error:       e?.message || String(e),
+      },
+    };
+  }
 }
