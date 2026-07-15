@@ -5410,6 +5410,7 @@
   const _acWbxState = {
     tab      : 'open',   // 'open' | 'done' | 'rej'
     filter   : 'all',    // 'all' | 'verify' | 'plan' | 'esc'
+    kind     : 'all',    // 'all' | 'call' | 'letter' | 'joost' | 'other' — filter op payload.kind
     loading  : false,
     error    : null,
     items    : [],
@@ -5445,6 +5446,14 @@
         <button class="wbx-chip"        type="button" data-acfilt="plan">Regelingen</button>
         <button class="wbx-chip"        type="button" data-acfilt="esc">Escalaties</button>
       </div>
+      <!-- Kind-filter: soort taak binnen MANUAL_FOLLOWUP (bel / brief / joost / overig). -->
+      <div class="wbx-chips" id="acWbxKindChips" style="margin-top:6px">
+        <button class="wbx-chip active" type="button" data-ackind="all">Alle soorten</button>
+        <button class="wbx-chip"        type="button" data-ackind="call">Bellen</button>
+        <button class="wbx-chip"        type="button" data-ackind="letter">Brieven</button>
+        <button class="wbx-chip"        type="button" data-ackind="joost">Joost</button>
+        <button class="wbx-chip"        type="button" data-ackind="other">Overig</button>
+      </div>
       <div class="wbx-alist" id="acWbxList"></div>
     `;
   }
@@ -5464,6 +5473,16 @@
         _acWbxState.filter = btn.dataset.acfilt || 'all';
         document.querySelectorAll('#acWbxChips [data-acfilt]').forEach((b) => {
           b.classList.toggle('active', b.dataset.acfilt === _acWbxState.filter);
+        });
+        _acWbxRenderList();
+      });
+    });
+    // Kind-chips: filter op payload.kind (bel/brief/joost/other).
+    document.querySelectorAll('#acWbxKindChips [data-ackind]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        _acWbxState.kind = btn.dataset.ackind || 'all';
+        document.querySelectorAll('#acWbxKindChips [data-ackind]').forEach((b) => {
+          b.classList.toggle('active', b.dataset.ackind === _acWbxState.kind);
         });
         _acWbxRenderList();
       });
@@ -5573,8 +5592,15 @@
       return;
     }
 
-    // Client-side type-filter.
+    // Client-side type-filter + kind-filter (payload.kind, uit migratie
+    // 2026-07-15-belmomenten-een-bron-van-waarheid.sql).
     let items = _acWbxState.items.slice();
+    if (_acWbxState.kind !== 'all') {
+      items = items.filter((it) => {
+        const k = it?.payload?.kind || null;
+        return k === _acWbxState.kind;
+      });
+    }
     if (_acWbxState.filter !== 'all') {
       items = items.filter((it) => _acWbxCategoryFor(it.action_type) === _acWbxState.filter);
     }
@@ -18028,11 +18054,15 @@
       </div>`;
     }).join('') : `<div style="color:var(--wbx-faint);font-size:12.5px">Nog geen belpogingen.</div>`;
 
-    // Reminder-info + incasso-nudge (na max pogingen zonder resolutie).
+    // Volgende-actie-info: sinds "belmomenten-een-bron" komt next_reminder_at
+    // uit pending_actions (kind='call' + scheduled_for) — geen synthetische
+    // laatste_poging + interval_days meer. Als er een terugbelafspraak
+    // openligt: "Terugbellen op DD-MM"; anders geen tekst (workflow-taak
+    // verschijnt vanzelf in Acties zodra 't tijd is).
     let reminderHtml = '';
     if (_caseCallLog.next_reminder_at && !_caseCallLog.resolved) {
       const rt = _pipeFmtDateTime(_caseCallLog.next_reminder_at);
-      reminderHtml = `<div class="wbx-call-remind">📅 Volgende belpoging vanaf <strong>${esc(rt)}</strong> (${_caseCallLog.cadence.interval_days} dg na de vorige)</div>`;
+      reminderHtml = `<div class="wbx-call-remind">📞 Terugbellen op <strong>${esc(rt)}</strong></div>`;
     }
     let nudgeHtml = '';
     if (_caseCallLog.attempts_count >= max && !_caseCallLog.resolved) {
@@ -18127,6 +18157,10 @@
           <div class="wbx-call-outcome-grid">
             ${CALL_OUTCOMES.map((o) => `<button class="wbx-call-outcome-opt" type="button" data-outcome="${esc(o.key)}"><span class="wbx-pill" style="background:${o.tint}22;color:${o.tint}">${esc(o.label)}</span></button>`).join('')}
           </div>
+          <label id="wbxCallOutcomeCallbackWrap" style="display:none;margin-top:14px;font-size:12px;color:var(--wbx-muted)">Terugbellen op <span style="color:var(--wbx-s-inc-tx)">*</span>
+            <input id="wbxCallOutcomeCallbackAt" type="datetime-local" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:#fff;color:var(--wbx-ink);font:inherit"/>
+            <span style="display:block;font-size:11px;color:var(--wbx-muted);margin-top:3px">Verplicht bij Teruggebeld worden — verschijnt automatisch als taak in Open Acties op de gekozen datum.</span>
+          </label>
           <label style="display:block;margin-top:14px;font-size:12px;color:var(--wbx-muted)">Notitie (optioneel)
             <textarea id="wbxCallOutcomeNote" rows="3" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:#fff;color:var(--wbx-ink);font:inherit;min-height:70px;resize:vertical"></textarea>
           </label>
@@ -18145,15 +18179,40 @@
     const close = () => wrap.remove();
     wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
     wrap.querySelectorAll('[data-outcome-close]').forEach((b) => b.addEventListener('click', close));
+    const callbackWrap  = wrap.querySelector('#wbxCallOutcomeCallbackWrap');
+    const callbackInput = wrap.querySelector('#wbxCallOutcomeCallbackAt');
     wrap.querySelectorAll('[data-outcome]').forEach((btn) => {
       btn.addEventListener('click', () => {
         chosen = btn.getAttribute('data-outcome');
         wrap.querySelectorAll('[data-outcome]').forEach((b) => b.classList.toggle('wbx-on', b === btn));
+        // callback-datum verplicht+zichtbaar bij outcome='callback'; verborgen bij andere.
+        if (callbackWrap) {
+          callbackWrap.style.display = (chosen === 'callback') ? '' : 'none';
+        }
         saveBtn.disabled = false;
       });
     });
     saveBtn.addEventListener('click', async () => {
       if (!chosen) return;
+      // Validatie callback_at: verplicht + toekomst bij outcome=callback.
+      let callbackAtIso = null;
+      if (chosen === 'callback') {
+        const raw = (callbackInput?.value || '').trim();
+        if (!raw) {
+          if (err) { err.style.display = ''; err.textContent = 'Kies een datum + tijd voor de terugbelafspraak.'; }
+          return;
+        }
+        const t = new Date(raw);
+        if (!(t instanceof Date) || Number.isNaN(t.getTime())) {
+          if (err) { err.style.display = ''; err.textContent = 'Ongeldige datum/tijd.'; }
+          return;
+        }
+        if (t.getTime() < Date.now()) {
+          if (err) { err.style.display = ''; err.textContent = 'De terugbelafspraak moet in de toekomst liggen.'; }
+          return;
+        }
+        callbackAtIso = t.toISOString();
+      }
       saveBtn.disabled = true;
       saveBtn.textContent = 'Bezig…';
       try {
@@ -18165,6 +18224,7 @@
             sip_line   : opts?.line || _wbxSoftphone.activeLine || _wbxDetectLine(cust?.phone),
             outcome    : chosen,
             note       : wrap.querySelector('#wbxCallOutcomeNote').value.trim() || null,
+            callback_at: callbackAtIso,
           }),
         });
         const d = await r.json();

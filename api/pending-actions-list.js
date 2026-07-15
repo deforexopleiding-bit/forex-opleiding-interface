@@ -66,9 +66,15 @@ export default async function handler(req, res) {
   const statusRaw  = q.status      ? String(q.status).toUpperCase() : null;
   const actionType = q.action_type ? String(q.action_type)          : null;
   const source     = q.source      ? String(q.source)               : null;
+  const kind       = q.kind        ? String(q.kind)                 : null;
   const customerId = q.customer_id ? String(q.customer_id)          : null;
   const limit      = clampInt(q.limit,  50, 1, 200);
   const offset     = Math.max(0, clampInt(q.offset, 0, 0, 1_000_000));
+  // include_scheduled=1 → toon óók toekomstige scheduled_for. Default 0:
+  // filter op scheduled_for IS NULL OR scheduled_for <= now(), zodat een
+  // terugbel-taak pas op de afspraakdatum in de lijst verschijnt (identiek
+  // gedrag als de sidebar-badge via tasks-list).
+  const includeScheduled = String(q.include_scheduled || '') === '1';
 
   if (statusRaw && !VALID_STATUS.includes(statusRaw)) {
     return res.status(400).json({ error: `Ongeldige status; verwacht ${VALID_STATUS.join('|')} (case-insensitive)` });
@@ -105,6 +111,14 @@ export default async function handler(req, res) {
     if (customerId) query = query.eq('customer_id', customerId);
     // payload.source is jsonb-veld; PostgREST ondersteunt ->> operator in filter-keys.
     if (source)     query = query.eq('payload->>source', source);
+    if (kind)       query = query.eq('payload->>kind',   kind);
+    // Defer-filter voor scheduled_for: standaard verbergen we taken met een
+    // scheduled_for in de toekomst (bv. terugbelafspraken). include_scheduled=1
+    // zet dit uit voor admin-views die alles willen zien.
+    if (!includeScheduled) {
+      const nowIso = new Date().toISOString();
+      query = query.or(`scheduled_for.is.null,scheduled_for.lte.${nowIso}`);
+    }
 
     const { data: rows, error, count } = await query;
     if (error) throw new Error('list: ' + error.message);
