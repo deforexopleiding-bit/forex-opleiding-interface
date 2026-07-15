@@ -1428,6 +1428,23 @@ export default async function handler(req, res) {
                 }
               }
 
+              // 2b. Joost fase 2 — gespreks-pauze hook. Zodra een klant met
+              // een lopende dunning-run reageert, pauzeert de aanmaan-flow.
+              // Reminder-cron (cron-dunning-conversation-reminders) beslist
+              // wanneer de flow eventueel hervat. Bij elke nieuwe inbound
+              // wordt de reminder-teller gereset (nieuwe stilte begint).
+              // Alleen bij insRes.inserted (Meta-retry-dup mag niet nog een
+              // keer resetten) en customerId aanwezig. Fail-soft — webhook
+              // mag nooit falen.
+              if (insRes.inserted && conv.customerId) {
+                try {
+                  const { pauseRunsForConversation } = await import('./_lib/dunning-arrangement-hooks.js');
+                  await pauseRunsForConversation(conv.id, conv.customerId);
+                } catch (e) {
+                  console.warn('[inbox-webhook] conv-pauze hook soft-fail', conv.id, e?.message || e);
+                }
+              }
+
               // 2b. Fail-soft dual-write: notify mentor van deelnemer bij een
               // NIEUW inbound bericht. Skip bij Meta-retry (duplicate). Skip
               // als er geen mentor gekoppeld is (via onboardings). Throttle
