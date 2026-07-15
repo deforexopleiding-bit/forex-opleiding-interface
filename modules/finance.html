@@ -90,7 +90,12 @@
     .inv-locked { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 36px 20px; text-align: center; color: var(--text-dim); }
     .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 600; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); padding: 20px; }
     .modal-overlay.hidden { display: none !important; }
-    .modal-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 14px; max-width: 520px; width: 100%; padding: 22px 24px; }
+    /* max-height + overflow-y voor generic .modal-card zodat lange inhoud
+       (bv. dunTplModal WhatsApp/E-mail-editor) scrollt in plaats van
+       onderaan van het scherm te lopen. Individuele modals kunnen dit
+       overrulen via inline max-height (bv. arrangProposeModal met 90vh
+       + eigen flex-column scroll-body). */
+    .modal-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 14px; max-width: 520px; width: 100%; padding: 22px 24px; max-height: 88vh; overflow-y: auto; }
     .modal-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 14px; }
     .inv-drow { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
     .inv-drow:last-child { border-bottom: none; }
@@ -99,7 +104,8 @@
     #invTable .sr-menu-toggle { border: 1px solid var(--border); background: var(--bg-elev-2); color: var(--text); width: 30px; height: 30px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; }
     #invTable .sr-menu-toggle:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
     /* Fase 2C variant A: gestapelde detail-kaarten (TL-stijl) */
-    #invModal .modal-card { max-width: 680px; max-height: 88vh; overflow-y: auto; }
+    /* max-width override; max-height + overflow-y komen nu uit de generic .modal-card-regel */
+    #invModal .modal-card { max-width: 680px; }
     .fin-card { background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
     .fin-card h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); margin: 0 0 8px; font-weight: 700; }
     .fin-kv { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 16px; font-size: 13px; }
