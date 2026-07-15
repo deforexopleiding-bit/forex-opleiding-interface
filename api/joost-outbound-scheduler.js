@@ -1,7 +1,25 @@
 // api/joost-outbound-scheduler.js
 // Joost E2.2 — outbound template-send scheduler (cron-driven).
 //
-// Doel:
+// ─────────────────────────────────────────────────────────────────────────────
+// KRITIEK — CONFLICT MET DUNNING-ENGINE (PR #761 / #763):
+// ─────────────────────────────────────────────────────────────────────────────
+// Deze scheduler is ORIGINEEL gebouwd toen executeWhatsappStep in
+// api/_lib/dunning-step-executors.js nog een stub was ("altijd skipped_no_meta"
+// — zie joost-outbound-send.js r9-12). Sinds PR #761 verstuurt die executor
+// ECHT via dezelfde workflow-runs (status=active, next_action_at<=now,
+// step_type=whatsapp). Beide paden actief = klant krijgt elk bericht 2x.
+//
+// BESLISSING: pad A (dunning-engine executeWhatsappStep) is leidend. Deze
+// scheduler blijft UIT.
+//
+// GUARD (defense-in-depth): als iemand `e2_outbound_cron` ooit AAN zet, wordt
+// hier een HARDE conflict-error geretourneerd — geen stille dubbele-send. Zie
+// r108-121 hieronder. Verwijder de cron uit vercel.json OF fix eerst de
+// dubbele-send-vraag voordat je 'em aanzet.
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Doel (origineel, nu gepauzeerd):
 //   Vercel cron-endpoint dat per office-hours-tick pending dunning workflow-
 //   events ophaalt (dunning_workflow_runs.status='active' + next_action_at <=
 //   now() + step_type='whatsapp') en per event INTERN /api/joost-outbound-send
@@ -111,6 +129,51 @@ export default async function handler(req, res) {
         ...summary,
         skipped_reason: 'FEATURE_FLAG_DISABLED',
         feature_flag:   'e2_outbound_cron',
+      });
+    }
+
+    // ====================================================================
+    // HARDE CONFLICT-GUARD (PR #761/#763):
+    //   Sinds executeWhatsappStep in dunning-step-executors.js daadwerkelijk
+    //   verstuurt, zou deze scheduler dezelfde dunning_workflow_runs een
+    //   TWEEDE keer oppikken -> klant krijgt elk bericht dubbel. We laten
+    //   e2_outbound_cron dus NIET meer per-flag "gewoon aan"; wie 'em toch
+    //   aan zet krijgt een luidruchtige 409 (audit + log) i.p.v. stille
+    //   dubbele verzending. Om deze scheduler te reactiveren:
+    //     1) zet expliciet feature_flags.e2_outbound_cron_override_dunning_conflict = true
+    //        in joost_config (finance) — bewust omslachtige naam zodat je
+    //        niet per ongeluk aanzet;
+    //     2) OF verwijder de dunning-executor whatsapp-send + verwijder
+    //        deze guard.
+    // ====================================================================
+    if (featureFlags.e2_outbound_cron_override_dunning_conflict !== true) {
+      const conflictMsg = 'DUNNING_ENGINE_CONFLICT: executeWhatsappStep verstuurt sinds PR #761 dezelfde workflow-runs. Aan zetten van e2_outbound_cron zonder e2_outbound_cron_override_dunning_conflict zou dubbele sends veroorzaken.';
+      console.error('[joost-outbound-scheduler] REFUSED', conflictMsg);
+      // Fail-soft audit (best-effort, geen throw).
+      try {
+        await supabaseAdmin.from('audit_log').insert({
+          user_id:     null,
+          action:      'joost.outbound_scheduler_refused',
+          entity_type: null,
+          entity_id:   null,
+          after_json:  {
+            reason: 'DUNNING_ENGINE_CONFLICT',
+            explanation: conflictMsg,
+            feature_flag_e2_outbound_cron: true,
+            override_flag_missing: 'e2_outbound_cron_override_dunning_conflict',
+          },
+          reason_text: 'scheduler_refused_conflict',
+          ip_address:  null,
+        });
+      } catch (eAudit) {
+        console.error('[joost-outbound-scheduler] audit refused exception:', eAudit && eAudit.message);
+      }
+      summary.duration_ms = Date.now() - startedAt;
+      return res.status(409).json({
+        ...summary,
+        error: conflictMsg,
+        error_code: 'DUNNING_ENGINE_CONFLICT',
+        remediation: 'Zet e2_outbound_cron uit in joost_config, OF verwijder de cron uit vercel.json, OF (als je weet wat je doet) zet e2_outbound_cron_override_dunning_conflict=true.',
       });
     }
 

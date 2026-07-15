@@ -1,14 +1,29 @@
 // api/joost-outbound-send.js
 // Joost E2.2 — outbound template-send executor (per workflow-event).
 //
-// Doel:
+// ─────────────────────────────────────────────────────────────────────────────
+// KRITIEK — CONFLICT MET DUNNING-ENGINE (PR #761 / #763):
+// ─────────────────────────────────────────────────────────────────────────────
+// Deze endpoint werd ORIGINEEL geschreven ALS ALTERNATIEF voor de dunning-
+// executor toen die nog een stub was. Sinds PR #761 verstuurt executeWhatsappStep
+// in api/_lib/dunning-step-executors.js ECHT. Beide paden actief op dezelfde
+// dunning_workflow_runs = klant krijgt elk aanmaan-bericht 2x.
+//
+// BESLISSING: pad A (dunning-engine executeWhatsappStep) is leidend. Deze
+// endpoint blijft UIT via feature-flag e2_outbound_executor (nu default false).
+// De caller joost-outbound-scheduler.js heeft daarnaast een harde conflict-
+// guard die 409 geeft als iemand e2_outbound_cron aan zet zonder expliciete
+// override — zie joost-outbound-scheduler.js r108-121.
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Doel (origineel, nu gepauzeerd):
 //   Verzend (of weiger te verzenden) een Joost outbound WhatsApp-template die
 //   hoort bij één dunning_workflow_runs-event. STRICT template-only: er wordt
 //   GEEN LLM-generatie gedaan; de template-keuze + variabelen-render volgen
 //   uitsluitend de workflow-step config (template_id). Dit is de "Joost-laag"
 //   bovenop de dunning engine: in plaats van direct via dunning-step-executors
-//   te sturen (die zit nog in 'skipped_no_meta'-mode), routeert deze endpoint
-//   via Joost's autonomy-laag zodat dezelfde guardrails (office-hours,
+//   te sturen (die zat toen nog in 'skipped_no_meta'-mode), routeerde deze
+//   endpoint via Joost's autonomy-laag zodat dezelfde guardrails (office-hours,
 //   rate-limits, paused-check) gelden als bij reactive autonomy.
 //
 // Architectuur:

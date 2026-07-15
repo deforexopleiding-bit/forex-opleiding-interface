@@ -260,8 +260,12 @@ export function evaluateAutonomy({
   }
 
   // ---- d. Rate-limit-checks ----
+  // NOTE: max_messages_per_conversation_total default verlaagd van 20 -> 10
+  // (Joost-integratie fase 1). Bestaande joost_config-rijen in productie
+  // krijgen 10 via migratie 2026-07-15-joost-fase1-cap-verlagen.sql. Deze
+  // code-default vangt alleen NIEUWE rijen zonder deze key af.
   const maxPerDay = num(commLimits.max_messages_per_conversation_per_day, 3);
-  const maxTotal  = num(commLimits.max_messages_per_conversation_total, 20);
+  const maxTotal  = num(commLimits.max_messages_per_conversation_total, 10);
   const cooldownMin = num(commLimits.cooldown_after_outbound_minutes, 60);
   const cooldownMs  = cooldownMin * 60 * 1000;
 
@@ -272,14 +276,20 @@ export function evaluateAutonomy({
     ? new Date(state.last_message_sent_at).getTime()
     : 0;
 
+  // rate_limit_reason (additive, backwards-compatible): sub-discriminator zodat
+  // callers (logAutonomyDecision) kunnen onderscheiden waarom er geblokkeerd
+  // wordt — total-cap = permanent (menselijke overname nodig), day-cap +
+  // cooldown = tijdelijk (morgen weer). Bestaande callers negeren dit veld.
   if (sentToday >= maxPerDay) {
     log.push(`messages_sent_today (${sentToday}) >= max_per_day (${maxPerDay}) -> BLOCKED_RATE_LIMIT.`);
     decision.blocked_reason = 'BLOCKED_RATE_LIMIT';
+    decision.rate_limit_reason = 'day';
     return decision;
   }
   if (sentTotal >= maxTotal) {
     log.push(`messages_sent_total (${sentTotal}) >= max_total (${maxTotal}) -> BLOCKED_RATE_LIMIT.`);
     decision.blocked_reason = 'BLOCKED_RATE_LIMIT';
+    decision.rate_limit_reason = 'total';
     return decision;
   }
   if (lastSentAt && cooldownMs > 0) {
@@ -288,6 +298,7 @@ export function evaluateAutonomy({
       const waitMin = Math.ceil((cooldownMs - elapsed) / 60000);
       log.push(`Cooldown actief (nog ${waitMin}m te wachten) -> BLOCKED_RATE_LIMIT.`);
       decision.blocked_reason = 'BLOCKED_RATE_LIMIT';
+      decision.rate_limit_reason = 'cooldown';
       return decision;
     }
   }
@@ -477,6 +488,150 @@ export async function logAutonomyDecision({
       }).catch(() => {});
     }
   } catch (_) { /* fail-soft */ }
+
+  // ─── Fase 1: TOTAL-CAP → maak een MANUAL_FOLLOWUP-taak aan ─────────
+  // Bij BLOCKED_RATE_LIMIT met rate_limit_reason='total' heeft Joost de
+  // permanente cap bereikt zonder resultaat → mens moet overnemen. We
+  // maken één taak per conversatie per cap-bereik (idempotent: check
+  // bestaande PENDING/APPROVED taak met payload.source='joost_total_cap'
+  // voor dezelfde conversation_id — als er al eentje ligt, geen nieuwe).
+  //
+  // NIET voor rate_limit_reason='day' of 'cooldown' (die zijn tijdelijk),
+  // en niet voor admin_dryrun (dan alleen loggen).
+  //
+  // Fail-soft: bij lookup- of insert-fout logt de helper een warning en
+  // gaat door — autonomy-evaluatie mag nooit klappen door taak-creatie.
+  try {
+    if (decision.blocked_reason === 'BLOCKED_RATE_LIMIT'
+        && decision.rate_limit_reason === 'total'
+        && triggered_by
+        && triggered_by !== 'admin_dryrun'
+        && conv_id) {
+      await maybeCreateTotalCapTask({
+        supabaseAdmin: admin,
+        conv_id,
+        decision,
+        triggered_by,
+      });
+    }
+  } catch (_) { /* fail-soft */ }
+}
+
+/**
+ * Idempotente cap-taak-creator. Maakt maximaal één MANUAL_FOLLOWUP-taak per
+ * conversatie zolang de vorige nog PENDING/APPROVED is. Fail-soft.
+ *
+ * De taak verschijnt automatisch in Open Acties (Finance > Wanbetalers) en
+ * telt mee in navFinanceTasksBadge (sidebar.js updateFinanceTasksBadge, via
+ * /api/tasks-list?status=PENDING,APPROVED). Geen tweede meldingssysteem.
+ */
+async function maybeCreateTotalCapTask({ supabaseAdmin: admin, conv_id, decision, triggered_by }) {
+  // Conversation + klant ophalen (voor customer_id + label in taak-titel).
+  let conv = null;
+  try {
+    const { data, error } = await admin
+      .from('whatsapp_conversations')
+      .select('id, customer_id, phone_number, display_name')
+      .eq('id', conv_id)
+      .maybeSingle();
+    if (error) {
+      console.warn('[joost-autonomy total-cap] conv lookup fail:', error.message);
+      return;
+    }
+    conv = data;
+  } catch (e) {
+    console.warn('[joost-autonomy total-cap] conv exception:', e?.message);
+    return;
+  }
+  if (!conv) return;
+
+  const customerId = conv.customer_id || null;
+  if (!customerId) {
+    // Zonder customer_id kan pending_actions niet inserten (customer_id NOT NULL).
+    console.warn('[joost-autonomy total-cap] conv zonder customer_id → skip taak', conv_id);
+    return;
+  }
+
+  // Idempotency: bestaat er al een open cap-taak voor deze conv?
+  // Check via payload->>'source' + payload->>'conversation_id'.
+  try {
+    const { data: existing, error: exErr } = await admin
+      .from('pending_actions')
+      .select('id')
+      .eq('customer_id', customerId)
+      .eq('action_type', 'MANUAL_FOLLOWUP')
+      .in('status', ['PENDING', 'APPROVED'])
+      .filter('payload->>source', 'eq', 'joost_total_cap')
+      .filter('payload->>conversation_id', 'eq', conv_id)
+      .limit(1);
+    if (exErr) {
+      console.warn('[joost-autonomy total-cap] idempotency check fail:', exErr.message);
+      // Geen return: bij twijfel liever niet inserten om duplicates te
+      // voorkomen. Alternatief zou zijn wél inserten en op unique-index
+      // vertrouwen, maar die bestaat niet — dus veiliger om te stoppen.
+      return;
+    }
+    if (Array.isArray(existing) && existing.length > 0) {
+      // Al een open cap-taak → skip.
+      return;
+    }
+  } catch (e) {
+    console.warn('[joost-autonomy total-cap] idempotency exception:', e?.message);
+    return;
+  }
+
+  // Bepaal klant-label voor de titel.
+  const convLabel = conv.display_name || conv.phone_number || 'klant';
+  const capLine = Array.isArray(decision?.decision_log)
+    ? decision.decision_log.find((l) => typeof l === 'string' && l.includes('max_total'))
+    : null;
+
+  const title = `Joost heeft cap van berichten bereikt bij ${convLabel} - neem handmatig over`;
+  const description = [
+    `Joost heeft het maximum aantal WhatsApp-berichten in deze conversatie bereikt zonder respons van de klant.`,
+    ``,
+    `Klant: ${convLabel}`,
+    conv.phone_number ? `Telefoon: ${conv.phone_number}` : null,
+    ``,
+    `Overweeg:`,
+    `- Bellen (misschien is WhatsApp niet het juiste kanaal)`,
+    `- Aangetekende brief (dag 21 in workflow)`,
+    `- Overdragen naar incasso`,
+    ``,
+    capLine ? `Trigger: ${capLine}` : null,
+    `Getriggerd door: ${triggered_by}`,
+  ].filter(Boolean).join('\n');
+
+  const insertRow = {
+    customer_id:         customerId,
+    arrangement_id:      null,
+    invoice_id:          null,
+    action_type:         'MANUAL_FOLLOWUP',
+    status:              'PENDING',
+    proposed_by_user_id: null,
+    payload: {
+      title,
+      description,
+      assignee_role:   'manager',
+      source:          'joost_total_cap',
+      conversation_id: conv_id,
+      customer_id:     customerId,
+      triggered_by,
+      rate_limit_reason: 'total',
+      rationale:       'Joost bereikte max_messages_per_conversation_total zonder klant-respons',
+    },
+  };
+
+  try {
+    const { error: insErr } = await admin
+      .from('pending_actions')
+      .insert(insertRow);
+    if (insErr) {
+      console.warn('[joost-autonomy total-cap] insert fail:', insErr.message);
+    }
+  } catch (e) {
+    console.warn('[joost-autonomy total-cap] insert exception:', e?.message);
+  }
 }
 
 // ---------------------------------------------------------------------------
