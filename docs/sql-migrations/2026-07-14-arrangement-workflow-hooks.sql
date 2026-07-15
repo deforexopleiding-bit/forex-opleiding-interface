@@ -84,7 +84,7 @@ INSERT INTO public.dunning_workflows
   (name, description, trigger_conditions, is_active, priority)
 SELECT
   'Betaalafspraak verbroken',
-  'Voorbeeld-workflow: klant is de betaalafspraak niet nagekomen. Standaard: maak een taak (bel de klant na) + hervat de aanmaan-workflow. Standaard uit — Jeffrey activeert 'r zelf.',
+  'Voorbeeld-workflow: klant is de betaalafspraak niet nagekomen. Standaard: maak een taak (bel de klant na) + hervat de aanmaan-workflow. Staat standaard uit.',
   jsonb_build_object(
     'arrangement_breached', true,
     'min_total_amount', 0
