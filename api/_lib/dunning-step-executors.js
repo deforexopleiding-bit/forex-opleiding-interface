@@ -17,8 +17,14 @@
 // omgeving zonder IMAP_PASS_INFO) de cron niet keihard crasht — bij missende
 // infra valt deze terug op een "skipped" + log_event.
 //
-// WhatsApp-strategie: altijd "skipped" — Meta Cloud API credentials komen pas
-// online in PR A2 (zie module A roadmap).
+// WhatsApp-strategie (PR A2 — deze module):
+//   Zelfde patroon als email-executor: render → dry-run/sandbox-guard → send.
+//   Meta-send via _lib/meta-whatsapp.js sendTemplate (hergebruik van joost-
+//   outbound-send). Vereist een bestaande whatsapp_conversation voor de klant
+//   (zonder conv geen persistence-pad — whatsapp_messages.conversation_id is
+//   NOT NULL). Zonder conv/telefoonnummer/meta_template_name: nette skip met
+//   duidelijk log_event. Fail-soft: Meta-fout → 'failed'-status per stap, hele
+//   run klapt NIET.
 
 import { renderTemplate } from './dunning-template-render.js';
 
@@ -28,7 +34,7 @@ async function loadTemplate(supabaseAdmin, templateId, expectedKind) {
   }
   const { data, error } = await supabaseAdmin
     .from('dunning_templates')
-    .select('id, name, kind, subject, body, is_active')
+    .select('id, name, kind, subject, body, meta_template_name, language, is_active')
     .eq('id', templateId)
     .maybeSingle();
   if (error) {
@@ -214,9 +220,24 @@ function escapeBodyToHtml(text) {
 }
 
 /**
- * WhatsApp-step: altijd "skipped" tot Meta Cloud API credentials online zijn
- * (PR A2). We renderen wel zodat we de body in de log kunnen meegeven voor
- * preview/audit.
+ * WhatsApp-step (PR A2 — echte send):
+ *   Zelfde flow-shape als executeEmailStep. Vereisten voor een echte send:
+ *     1) template + template.meta_template_name (approved Meta-template naam);
+ *     2) klant met telefoonnummer;
+ *     3) bestaande whatsapp_conversation voor die klant (persist-pad);
+ *     4) Meta credentials in env-vars.
+ *   Bij missende vereisten → 'skipped' met specifiek log_event. Bij Meta-fout
+ *   → 'failed' met foutcode; run-cron logt + telt maar de run klapt niet.
+ *
+ *   Named-variable resolve is (nog) NIET in dit pad: we sturen de POSITIONELE
+ *   volgorde die joost-outbound-send óók gebruikt
+ *   (NAAM|FACTUUR_NR|TOTAAL_BEDRAG|DAGEN_OVERDUE|VERVAL_DATUM), zodat de
+ *   dunning-templates die vandaag geseed zijn 1:1 werken. De meta_param_mapping-
+ *   route uit inbox-send-template.js is een parallel-pad voor whatsapp_meta_
+ *   templates; migratie richting die richting hoort in latere PR (mapping op
+ *   dunning_templates ontbreekt vandaag als kolom).
+ *
+ * Dry-run + sandbox-guard: identiek aan email-executor (zie r104-161).
  */
 export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, openInvoices }) {
   const templateId = step?.config?.template_id;
@@ -236,36 +257,352 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
     openInvoices,
   });
 
-  // C4.5 + C4.6 TODO: bij integratie met named-variable templates, twee
-  // extra resolve-stappen vóór de send-call:
-  //
-  //   1. Roep `await ensureInvoicePaymentLink(invoice.id)` aan
-  //      (api/_lib/invoice-payment-link.js) zodat factuur.betaal_link gevuld
-  //      is. Pre-warm bespaart een latency-spike op het send-moment; de
-  //      send-endpoint zelf doet ook lazy-fetch als backup.
-  //   2. Roep `await getModuleContextByPhoneNumberId(supabaseAdmin,
-  //      conv.phone_number_id)` aan (api/_lib/module-context.js) zodat
-  //      afdeling.* (telefoon/whatsapp/email/ondertekenaar) geresolved worden
-  //      uit de juiste whatsapp_module_config rij van de zendende lijn.
-  //   3. Geef beide resultaten door aan resolveVariables-context:
-  //      { customer, invoice, openInvoices, moduleContext }.
-  //
-  // Pattern (zodra Meta credentials live zijn, PR A2):
-  //   - Detecteer of de gekozen WhatsApp-template een factuur.betaal_link of
-  //     afdeling.* mapping bevat (meta_param_mapping.body bevat de keys).
-  //   - Kies de eerste openInvoices[0] (of een step.config.invoice_id selector)
-  //     en doe pre-warm + lookup.
-  //   - POST naar /api/inbox-send-template (die intern dezelfde resolve-flow
-  //     doet) of inline render via resolveVariables.
-  //   - Fail-soft: errors loggen en doorgaan — resolver vult lege string.
+  // Meta-template NAAM verplicht — approved template in Meta Business Manager.
+  // Zonder: nette skip, Jeffrey koppelt eerst.
+  if (!template.meta_template_name) {
+    return {
+      status: 'skipped',
+      log_event: 'whatsapp_skipped_no_meta_template',
+      log_payload: {
+        template_id: template.id,
+        body_rendered: rendered.body,
+        reason: 'template.meta_template_name is leeg - koppel eerst een goedgekeurde Meta-template',
+      },
+    };
+  }
+
+  // Supplemental customer-fetch: de dunning-engine SELECT bevat vandaag géén
+  // `phone` en géén `is_test` (zie dunning-engine.js fetchCustomerOnly r770-
+  // 772). Zonder deze kolommen kan de executor geen telefoonnummer bepalen en
+  // faalt de is_test-sandbox-guard silently. We laten de engine byte-identiek
+  // (BEHOUD-eis) en halen de missende velden hier zelf op als ze ontbreken.
+  // Fail-soft: bij lookup-fout gaan we door met wat we hebben.
+  let customerPhone = customer?.phone || null;
+  let customerIsTest = customer?.is_test === true;
+  if (customer?.id && (customerPhone === undefined || customerPhone === null || customer?.is_test === undefined)) {
+    try {
+      const { data: extra, error: extraErr } = await supabaseAdmin
+        .from('customers')
+        .select('phone, is_test')
+        .eq('id', customer.id)
+        .maybeSingle();
+      if (extraErr) {
+        console.warn('[dunning-executor whatsapp] customer supplemental fetch fail:', extraErr.message);
+      } else if (extra) {
+        if (!customerPhone) customerPhone = extra.phone || null;
+        if (customer?.is_test === undefined) customerIsTest = extra.is_test === true;
+      }
+    } catch (e) {
+      console.warn('[dunning-executor whatsapp] customer supplemental exception:', e?.message);
+    }
+  }
+
+  // Klant-telefoon verplicht.
+  if (!customerPhone) {
+    return {
+      status: 'skipped',
+      log_event: 'whatsapp_skipped_no_phone',
+      log_payload: {
+        template_id: template.id,
+        meta_template_name: template.meta_template_name,
+        body_rendered: rendered.body,
+        reason: 'Klant heeft geen telefoonnummer',
+      },
+    };
+  }
+
+  // Bestaande WhatsApp-conversation voor deze klant (recentste). Vereist voor
+  // whatsapp_messages-insert (conversation_id NOT NULL). Spiegel exact het
+  // joost-outbound-send patroon (order last_message_at desc, limit 1).
+  let conv = null;
+  if (customer?.id) {
+    try {
+      const { data: convRow, error: convErr } = await supabaseAdmin
+        .from('whatsapp_conversations')
+        .select('id, customer_id, phone_number, phone_number_id, last_message_at')
+        .eq('customer_id', customer.id)
+        .order('last_message_at', { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+      if (convErr) {
+        console.warn('[dunning-executor whatsapp] conv lookup fail:', convErr.message);
+      } else if (convRow) {
+        conv = convRow;
+      }
+    } catch (e) {
+      console.warn('[dunning-executor whatsapp] conv exception:', e?.message);
+    }
+  }
+  if (!conv) {
+    return {
+      status: 'skipped',
+      log_event: 'whatsapp_skipped_no_conversation',
+      log_payload: {
+        template_id: template.id,
+        meta_template_name: template.meta_template_name,
+        to: toPhone,
+        reason: 'Geen bestaande WhatsApp-conversation voor klant - kan template niet persist zonder conversation_id',
+      },
+    };
+  }
+  if (!conv.phone_number) {
+    return {
+      status: 'skipped',
+      log_event: 'whatsapp_skipped_no_phone',
+      log_payload: {
+        template_id: template.id,
+        meta_template_name: template.meta_template_name,
+        conversation_id: conv.id,
+        reason: 'Conversation heeft geen phone_number',
+      },
+    };
+  }
+  // Autoritatief: gebruik conversation.phone_number (webhook-genormaliseerd)
+  // boven customer.phone voor de Meta-call.
+  const sendTo = conv.phone_number;
+
+  // ─── SANDBOX / DRY-RUN GUARDS ───────────────────────────────────────
+  // Zelfde 2-lagige guard als email-executor (r104-161):
+  //   1) is_test-klant → nummer moet exact matchen met sandbox-contact;
+  //      bij mismatch abort (test-send kan nooit lekken).
+  //   2) globale dry-run AAN → geen Meta-call, wel log-event zodat de
+  //      workflow-run normaal doorloopt.
+  try {
+    const { isDryRunEnabled, assertRecipientMatchesSandbox, buildDryRunLogPayload } =
+      await import('./dunning-dry-run.js');
+    if (customerIsTest) {
+      try {
+        await assertRecipientMatchesSandbox({ isTest: true, actual: sendTo, channel: 'whatsapp' });
+      } catch (guardErr) {
+        return {
+          status: 'skipped',
+          log_event: 'whatsapp_skipped_sandbox_guard',
+          log_payload: {
+            template_id: template.id,
+            meta_template_name: template.meta_template_name,
+            to: sendTo,
+            reason: guardErr.message,
+          },
+        };
+      }
+    }
+    if (await isDryRunEnabled()) {
+      return {
+        status: 'ok',
+        log_event: 'whatsapp_sent',
+        log_payload: {
+          template_id: template.id,
+          meta_template_name: template.meta_template_name,
+          conversation_id: conv.id,
+          to: sendTo,
+          message_id: 'dry-run',
+          meta_wamid: 'dry-run',
+          variables_used: rendered.variables_used,
+          ...buildDryRunLogPayload({
+            channel: 'whatsapp',
+            to: sendTo,
+            isTest: customerIsTest,
+            preview: { body: rendered.body.slice(0, 200) },
+          }),
+        },
+      };
+    }
+  } catch (guardModuleErr) {
+    // Fail-safe: guard-module niet beschikbaar → gedraag ons alsof dry-run
+    // AAN staat en stuur NIET. Zelfde defensieve keuze als email-executor.
+    console.warn('[dunning-executor whatsapp] dry-run module niet beschikbaar → skip send', guardModuleErr?.message);
+    return {
+      status: 'ok',
+      log_event: 'whatsapp_sent',
+      log_payload: {
+        template_id: template.id,
+        meta_template_name: template.meta_template_name,
+        conversation_id: conv.id,
+        to: sendTo,
+        message_id: 'dry-run-fallback',
+        meta_wamid: 'dry-run-fallback',
+        variables_used: rendered.variables_used,
+        dry_run: true,
+        fallback: 'guard_module_unavailable',
+      },
+    };
+  }
+
+  // ─── LIVE META-SEND ───────────────────────────────────────────────
+  // Meta-config check → nette skip bij ontbrekende env-vars (fail-soft).
+  let sendTemplate;
+  let MetaNotConfiguredError;
+  let getConfigStatus;
+  try {
+    const metaMod = await import('./meta-whatsapp.js');
+    sendTemplate = metaMod.sendTemplate;
+    MetaNotConfiguredError = metaMod.MetaNotConfiguredError;
+    getConfigStatus = metaMod.getConfigStatus;
+  } catch (e) {
+    return {
+      status: 'skipped',
+      log_event: 'whatsapp_skipped_no_meta_module',
+      log_payload: {
+        template_id: template.id,
+        meta_template_name: template.meta_template_name,
+        conversation_id: conv.id,
+        to: sendTo,
+        reason: `meta-whatsapp module load failed: ${e.message}`,
+      },
+    };
+  }
+  const cfgStatus = getConfigStatus();
+  if (!cfgStatus.configured) {
+    return {
+      status: 'skipped',
+      log_event: 'whatsapp_skipped_no_meta_config',
+      log_payload: {
+        template_id: template.id,
+        meta_template_name: template.meta_template_name,
+        conversation_id: conv.id,
+        to: sendTo,
+        reason: 'Meta WhatsApp niet geconfigureerd',
+        missing: cfgStatus.missing,
+      },
+    };
+  }
+
+  // Afzendlijn: conversation.phone_number_id (autoritatief; door webhook op
+  // inbound-time gezet); fallback op module-config finance-lijn.
+  let outboundPnId = conv.phone_number_id || undefined;
+  if (!outboundPnId) {
+    try {
+      const { data: modCfg, error: modErr } = await supabaseAdmin
+        .from('whatsapp_module_config')
+        .select('phone_number_id')
+        .eq('module', 'finance')
+        .eq('is_active', true)
+        .maybeSingle();
+      if (!modErr && modCfg?.phone_number_id) {
+        outboundPnId = modCfg.phone_number_id;
+      }
+    } catch (e) {
+      console.warn('[dunning-executor whatsapp] module-config exception:', e?.message);
+    }
+  }
+
+  // Positionele variables volgens dezelfde volgorde als joost-outbound-send:
+  //   1=NAAM, 2=FACTUUR_NR, 3=TOTAAL_BEDRAG, 4=DAGEN_OVERDUE, 5=VERVAL_DATUM.
+  // Alleen keys die daadwerkelijk in de template body vervangen zijn worden
+  // meegestuurd; dat matcht het aantal {{N}}-placeholders in de approved
+  // Meta-template. Templates met andere/extra vars behoeven mapping-support
+  // in een latere PR (dunning_templates.meta_param_mapping kolom).
+  const variablesUsed = rendered.variables_used || {};
+  const orderedKeys = ['NAAM', 'FACTUUR_NR', 'TOTAAL_BEDRAG', 'DAGEN_OVERDUE', 'VERVAL_DATUM'];
+  const variables = orderedKeys
+    .filter(k => Object.prototype.hasOwnProperty.call(variablesUsed, k))
+    .map(k => String(variablesUsed[k] || ''));
+
+  let metaResult;
+  try {
+    metaResult = await sendTemplate({
+      to:            sendTo,
+      templateName:  template.meta_template_name,
+      languageCode:  template.language || 'nl',
+      variables,
+      phoneNumberId: outboundPnId,
+    });
+  } catch (metaErr) {
+    // MetaNotConfiguredError → skipped (config), niet failed (send-poging).
+    if (metaErr instanceof MetaNotConfiguredError) {
+      return {
+        status: 'skipped',
+        log_event: 'whatsapp_skipped_no_meta_config',
+        log_payload: {
+          template_id: template.id,
+          meta_template_name: template.meta_template_name,
+          conversation_id: conv.id,
+          to: sendTo,
+          reason: 'Meta WhatsApp niet geconfigureerd (runtime)',
+          missing: metaErr.missing,
+        },
+      };
+    }
+    // Alle overige Meta-fouten → 'failed' met gestructureerde codes.
+    // Fail-soft op executor-niveau: cron logt + telt, run gaat verder.
+    return {
+      status: 'failed',
+      log_event: 'whatsapp_send_failed',
+      log_payload: {
+        template_id: template.id,
+        meta_template_name: template.meta_template_name,
+        conversation_id: conv.id,
+        to: sendTo,
+        error: metaErr?.message || 'unknown',
+        meta_code: metaErr?.metaCode ?? null,
+        meta_subcode: metaErr?.metaSubcode ?? null,
+        meta_message: metaErr?.metaMessage ?? null,
+        meta_fbtrace: metaErr?.metaFbtrace ?? null,
+        http_status: metaErr?.httpStatus ?? null,
+      },
+    };
+  }
+
+  const wamid = metaResult?.wamid ? String(metaResult.wamid) : null;
+  const sentAt = new Date().toISOString();
+
+  // Persist in whatsapp_messages zodat de chat-history de outbound toont.
+  // Fail-soft: als insert faalt is de Meta-send al gebeurd — log warning maar
+  // return 'ok' zodat de workflow doorloopt (dubbele send is erger dan een
+  // ontbrekende UI-row).
+  const templateVarsForDb = variables.length
+    ? Object.fromEntries(variables.map((v, i) => [String(i + 1), v]))
+    : null;
+  const previewBody = rendered.body ? String(rendered.body).slice(0, 1000) : null;
+  let messageId = null;
+  try {
+    const { data: inserted, error: insErr } = await supabaseAdmin
+      .from('whatsapp_messages')
+      .insert({
+        conversation_id:    conv.id,
+        direction:          'out',
+        meta_wamid:         wamid,
+        body:               previewBody,
+        template_name:      template.meta_template_name,
+        template_variables: templateVarsForDb,
+        status:             'queued',
+        sent_at:            sentAt,
+        sent_by_user_id:    null,
+      })
+      .select('id')
+      .single();
+    if (insErr) {
+      console.warn('[dunning-executor whatsapp] whatsapp_messages insert fail:', insErr.message);
+    } else {
+      messageId = inserted?.id || null;
+    }
+  } catch (e) {
+    console.warn('[dunning-executor whatsapp] whatsapp_messages exception:', e?.message);
+  }
+
+  // Conversation-preview updaten (fail-soft).
+  try {
+    const preview = ('[template] ' + template.meta_template_name).slice(0, 120);
+    await supabaseAdmin
+      .from('whatsapp_conversations')
+      .update({ last_message_at: sentAt, last_message_preview: preview })
+      .eq('id', conv.id);
+  } catch (e) {
+    console.warn('[dunning-executor whatsapp] conv update exception:', e?.message);
+  }
 
   return {
-    status: 'skipped',
-    log_event: 'whatsapp_skipped_no_meta',
+    status: 'ok',
+    log_event: 'whatsapp_sent',
     log_payload: {
       template_id: template.id,
-      body_rendered: rendered.body,
-      reason: 'Meta credentials niet ingesteld - wacht op PR A2',
+      meta_template_name: template.meta_template_name,
+      conversation_id: conv.id,
+      to: sendTo,
+      message_id: messageId,
+      meta_wamid: wamid,
+      variables_used: rendered.variables_used,
+      phone_number_id: outboundPnId || null,
     },
   };
 }
