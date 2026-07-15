@@ -444,7 +444,7 @@
                     </div>
                     <div>
                       <label class="form-label" for="commMinSecondsBetween">cooldown (seconden)</label>
-                      <input type="number" id="commMinSecondsBetween" class="form-input" min="0" step="1" value="30" title="cooldown_after_outbound_seconds — minimaal aantal seconden tussen twee opeenvolgende outbound-berichten in dezelfde conversatie" />
+                      <input type="number" id="commMinSecondsBetween" class="form-input" min="0" step="1" value="3600" title="cooldown_after_outbound_seconds — minimaal aantal seconden tussen twee opeenvolgende outbound-berichten in dezelfde conversatie (no-drift default = 3600 = 1 uur; finance zit op 30s via de canoniseren-migratie)" />
                     </div>
                   </div>
                   <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:12px;align-items:end;margin-top:10px">
@@ -454,11 +454,11 @@
                     </label>
                     <div>
                       <label class="form-label" for="commOfficeStart">office_start</label>
-                      <input type="time" id="commOfficeStart" class="form-input" value="09:00" />
+                      <input type="time" id="commOfficeStart" class="form-input" value="08:30" />
                     </div>
                     <div>
                       <label class="form-label" for="commOfficeEnd">office_end</label>
-                      <input type="time" id="commOfficeEnd" class="form-input" value="17:00" />
+                      <input type="time" id="commOfficeEnd" class="form-input" value="18:00" />
                     </div>
                   </div>
                 </div>
@@ -857,10 +857,14 @@
             : (typeof comm.min_seconds_between_messages === 'number')
               ? comm.min_seconds_between_messages
               : null;
-      setVal('commMinSecondsBetween', _cooldownSec, 30);
+      // No-drift defaults: matchen evaluateAutonomy fallback (3600s cooldown,
+      // 08:30-18:00 office-hours). Finance's productie-waarden zitten in de
+      // DB en overrulen deze defaults; overige modules zien hier de code-
+      // default terug.
+      setVal('commMinSecondsBetween', _cooldownSec, 3600);
       setChk('commOfficeHoursOnly',   comm.office_hours_only !== false);
-      setVal('commOfficeStart',       comm.office_hours_start ?? comm.office_start, '08:00');
-      setVal('commOfficeEnd',         comm.office_hours_end   ?? comm.office_end,   '20:00');
+      setVal('commOfficeStart',       comm.office_hours_start ?? comm.office_start, '08:30');
+      setVal('commOfficeEnd',         comm.office_hours_end   ?? comm.office_end,   '18:00');
 
       const pers = ac.personality || {};
       setVal('personalityMaxSentences', pers.max_sentences, 3);
@@ -950,14 +954,19 @@
     // toen bleek onnodig grof). Sub-object merge (`..._currentComm`) zorgt
     // dat andere seed-sub-keys (office_hours_tz / _days / no_reply_pause_*)
     // niet wegvallen bij een UI-save.
+    // No-drift-defaults: fallback-values matchen evaluateAutonomy's defaults
+    // zodat een form-save met leeg input identiek gedrag oplevert als "geen
+    // key in DB". Sub-object merge (`..._currentComm`) zorgt dat andere
+    // seed-sub-keys (office_hours_tz / _days / no_reply_pause_*) niet
+    // wegvallen bij een UI-save.
     const communication_limits = {
       ..._currentComm,
       max_messages_per_conversation_per_day: numVal('commMaxPerDay', 3),
-      max_messages_per_conversation_total:   numVal('commMaxTotal', 10),
-      cooldown_after_outbound_seconds:       numVal('commMinSecondsBetween', 30),
+      max_messages_per_conversation_total:   numVal('commMaxTotal', 20),
+      cooldown_after_outbound_seconds:       numVal('commMinSecondsBetween', 3600),
       office_hours_only:                     getChk('commOfficeHoursOnly'),
-      office_hours_start:                    (host.querySelector('#commOfficeStart')?.value || '08:00'),
-      office_hours_end:                      (host.querySelector('#commOfficeEnd')?.value || '20:00'),
+      office_hours_start:                    (host.querySelector('#commOfficeStart')?.value || '08:30'),
+      office_hours_end:                      (host.querySelector('#commOfficeEnd')?.value   || '18:00'),
     };
 
     const personality = {

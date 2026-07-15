@@ -56,17 +56,25 @@
 // synoniemen) → engine leest 'em niet → wijzigingen hebben geen effect.
 // Voeg NIEUWE keys hier toe zodra ze in de engine of andere lezer landen.
 //
-// autonomy_config.communication_limits:
-//   max_messages_per_conversation_per_day    (int)      — dagcap; tijdelijk
-//   max_messages_per_conversation_total      (int)      — total-cap; taak bij bereiken
-//   cooldown_after_outbound_seconds          (int, sec) — canonical eenheid
-//   office_hours_only                        (bool)
-//   office_hours_tz                          (string)   — IANA, default Europe/Amsterdam
-//   office_hours_days                        (int[])    — ISO 1..7
-//   office_hours_start                       (string)   — HH:MM
-//   office_hours_end                         (string)   — HH:MM
+// autonomy_config.communication_limits (met defaults als key ontbreekt):
+//   max_messages_per_conversation_per_day    (int)      default 3      — dagcap; tijdelijk
+//   max_messages_per_conversation_total      (int)      default 10     — total-cap; taak bij bereiken (via maybeCreateTotalCapTask)
+//   cooldown_after_outbound_seconds          (int, sec) default 3600   — anti-burst tussen outbound
+//   office_hours_only                        (bool)     default true
+//   office_hours_tz                          (string)   default 'Europe/Amsterdam'
+//   office_hours_days                        (int[])    default [1..5] (ma-vr)
+//   office_hours_start                       (string)   default '08:30'
+//   office_hours_end                         (string)   default '18:00'
 //   no_reply_pause_threshold                 (int)      — futures
 //   no_reply_pause_duration_hours            (int)      — futures
+//
+// DEFAULT-NO-DRIFT-REGEL: bovenstaande defaults MOETEN identiek blijven aan
+// het pre-#765 gedrag zodat modules zonder expliciete config (bv. 'onboarding'
+// dat helemaal geen communication_limits heeft) zich niet stilletjes anders
+// gedragen. Alleen modules met een expliciete DB-waarde wijken af (bv.
+// finance = 10/10/30s na 2026-07-15-joost-config-keys-canoniseren.sql). Bij
+// het toevoegen van nieuwe defaults: check tegen de oude implementatie en
+// documenteer expliciet als je een default bewust wijzigt (voor alle modules).
 //
 // autonomy_config.arrangement_mandate:
 //   allowed_types                            (string[]) — UITSTEL/SPLITSING/…
@@ -310,10 +318,11 @@ export function evaluateAutonomy({
   //   2) cooldown_after_outbound_minutes   (interim, *60)
   //   3) min_seconds_between               (UI-legacy, seconden)
   //   4) min_seconds_between_messages      (seed-legacy, seconden)
-  //   5) default 60 seconden
-  // Bewuste keuze om seconden te ondersteunen (Jeffrey wil 30s): minuten-
-  // granulariteit klopt niet meer als de dag- en total-caps al voor
-  // spam-preventie zorgen; cooldown is dan een korte anti-burst.
+  //   5) default 3600 seconden (= 60 minuten, matcht pre-#765 gedrag)
+  // Default DEFAULT_COOLDOWN_SECONDS = 3600: modules zonder expliciete cooldown-
+  // key gedragen zich EXACT als voorheen (was cooldown_after_outbound_minutes
+  // default 60 -> 3600 sec). Alleen modules met een expliciete waarde in DB
+  // wijken af (finance = 30s na migratie — bewuste keuze Jeffrey).
   let cooldownSec = null;
   if (commLimits.cooldown_after_outbound_seconds != null) {
     cooldownSec = num(commLimits.cooldown_after_outbound_seconds, null);
@@ -325,7 +334,7 @@ export function evaluateAutonomy({
   } else if (commLimits.min_seconds_between_messages != null) {
     cooldownSec = num(commLimits.min_seconds_between_messages, null);
   }
-  if (cooldownSec == null) cooldownSec = 60;
+  if (cooldownSec == null) cooldownSec = 3600;
   const cooldownMs = cooldownSec * 1000;
 
   const state = conv_state || {};
