@@ -27,6 +27,12 @@
 //   whatsapp_messages.conversation_id is NOT NULL. Zonder telefoonnummer of
 //   meta_template_name: nette skip. Fail-soft: Meta-fout → 'failed'-status
 //   per stap, hele run klapt NIET.
+//
+// LEIDEND pad voor WhatsApp-aanmaningen. joost-outbound-scheduler.js +
+// joost-outbound-send.js zijn een historisch parallel-pad dat expliciet UIT
+// staat (feature-flags e2_outbound_cron + e2_outbound_executor default false)
+// met een harde conflict-guard om dubbele-send te voorkomen. Zie de
+// conflict-headers in die twee bestanden.
 
 import { renderTemplate } from './dunning-template-render.js';
 
