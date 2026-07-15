@@ -456,3 +456,140 @@ export async function executeTaskStep({ supabaseAdmin, run, step, customer, open
     };
   }
 }
+
+/**
+ * Resume-dunning-step (Fase 2b): zet alle gepauzeerde runs van de klant
+ * weer op 'active'. Bedoeld voor workflows met trigger_conditions
+ * arrangement_breached=true — de klant is de betaalafspraak niet nagekomen,
+ * dus de aanmaan-flow moet weer draaien.
+ *
+ * Design-keuze:
+ *   - Hervat ALLE paused runs van de klant (niet alleen die door dit
+ *     specifieke arrangement zijn gepauzeerd). Reden: als een klant meerdere
+ *     opeenvolgende afspraken heeft gemaakt en telkens breekt, is 'de meest
+ *     recente breach' de trigger — alle paused runs zijn achterhaald.
+ *   - Reset paused_by_arrangement_id.
+ *   - next_action_at = nu → de eerstvolgende engine-tick pakt 'em op.
+ *
+ * Dry-run: consistent met email/whatsapp/task-executor. In dry-run géén
+ * status-flip; wel log_event='dunning_resumed' met dry_run:true payload.
+ *
+ * Fail-soft:
+ *   - customer.id ontbreekt        → skipped 'dunning_resume_no_customer'
+ *   - guard module load faalt      → skipped 'dunning_resume_no_guard' (fail-safe)
+ *   - geen paused runs             → skipped 'dunning_resume_geen_paused_runs'
+ *   - UPDATE-fout                  → failed  'dunning_resume_failed'
+ */
+export async function executeResumeDunningStep({ supabaseAdmin, run, step, customer }) {
+  if (!customer?.id) {
+    return {
+      status: 'skipped',
+      log_event: 'dunning_resume_no_customer',
+      log_payload: {
+        workflow_id: run?.workflow_id || null,
+        step_id:     step?.id || null,
+        reason:      'customer.id ontbreekt in run-context',
+      },
+    };
+  }
+
+  // ─── DRY-RUN GUARD ────────────────────────────────────────────────
+  let dry = false;
+  try {
+    const { isDryRunEnabled, buildDryRunLogPayload } = await import('./dunning-dry-run.js');
+    dry = await isDryRunEnabled();
+    if (dry) {
+      // Sanity-count zonder mutatie zodat de dry-run-log iets zinvols zegt.
+      const { data: pausedRows } = await supabaseAdmin
+        .from('dunning_workflow_runs')
+        .select('id')
+        .eq('customer_id', customer.id)
+        .eq('status', 'paused');
+      const pausedCount = Array.isArray(pausedRows) ? pausedRows.length : 0;
+      return {
+        status: 'ok',
+        log_event: 'dunning_resumed',
+        log_payload: {
+          customer_id:     customer.id,
+          workflow_id:     run?.workflow_id || null,
+          workflow_run_id: run?.id || null,
+          step_id:         step?.id || null,
+          would_resume_count: pausedCount,
+          ...buildDryRunLogPayload({
+            channel: 'resume_dunning',
+            to:      customer.id,
+            isTest:  !!customer?.is_test,
+            preview: { would_resume_count: pausedCount },
+          }),
+        },
+      };
+    }
+  } catch (guardModuleErr) {
+    console.warn('[dunning-executor resume] dry-run module niet beschikbaar → skip', guardModuleErr?.message);
+    return {
+      status: 'skipped',
+      log_event: 'dunning_resume_no_guard',
+      log_payload: {
+        customer_id: customer.id,
+        workflow_id: run?.workflow_id || null,
+        step_id:     step?.id || null,
+        reason:      'dry-run guard module load failed: ' + (guardModuleErr?.message || 'unknown'),
+        fallback:    'no_resume',
+      },
+    };
+  }
+
+  // ─── LIVE ─────────────────────────────────────────────────────────
+  try {
+    const { resumeAllPausedRunsForCustomer } = await import('./dunning-arrangement-hooks.js');
+    const res = await resumeAllPausedRunsForCustomer(customer.id);
+    if (!res?.ok) {
+      return {
+        status: 'failed',
+        log_event: 'dunning_resume_failed',
+        log_payload: {
+          customer_id: customer.id,
+          workflow_id: run?.workflow_id || null,
+          step_id:     step?.id || null,
+          error:       res?.error || 'unknown',
+        },
+      };
+    }
+    const count = res.resumed_count || 0;
+    if (count === 0) {
+      return {
+        status: 'skipped',
+        log_event: 'dunning_resume_geen_paused_runs',
+        log_payload: {
+          customer_id: customer.id,
+          workflow_id: run?.workflow_id || null,
+          step_id:     step?.id || null,
+          reason:      'Geen paused runs voor deze klant',
+        },
+      };
+    }
+    return {
+      status: 'ok',
+      log_event: 'dunning_resumed',
+      log_payload: {
+        customer_id:     customer.id,
+        workflow_id:     run?.workflow_id || null,
+        workflow_run_id: run?.id || null,
+        step_id:         step?.id || null,
+        resumed_count:   count,
+        dry_run:         false,
+      },
+    };
+  } catch (e) {
+    return {
+      status: 'failed',
+      log_event: 'dunning_resume_failed',
+      log_payload: {
+        customer_id: customer.id,
+        workflow_id: run?.workflow_id || null,
+        step_id:     step?.id || null,
+        error:       e?.message || String(e),
+      },
+    };
+  }
+}

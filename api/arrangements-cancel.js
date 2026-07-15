@@ -100,6 +100,17 @@ export default async function handler(req, res) {
       else cancelledCount = (paUpd || []).length;
     } catch (e) { console.error('[arrangements-cancel pending_actions ex]', e.message); }
 
+    // ---- Fase 2b hook: hervat de door dit arrangement gepauzeerde runs ----
+    // De afspraak is van tafel; de aanmaan-flow moet weer draaien. Fail-soft.
+    let resumedRunCount = 0;
+    try {
+      const { unpauseRunsFromArrangement } = await import('./_lib/dunning-arrangement-hooks.js');
+      const res = await unpauseRunsFromArrangement(id);
+      resumedRunCount = res?.resumed_count || 0;
+    } catch (e) {
+      console.warn('[arrangements-cancel hook unpause]', e?.message || e);
+    }
+
     // ---- Audit-log (fail-soft) ----
     try {
       await supabaseAdmin.from('audit_log').insert({
@@ -112,6 +123,7 @@ export default async function handler(req, res) {
           status:                    'GEANNULEERD',
           cancellation_reason:       reason,
           cancelled_pending_actions: cancelledCount,
+          resumed_workflow_runs:     resumedRunCount,
         },
         reason_text: reason,
         ip_address:  getClientIp(req),
@@ -123,6 +135,7 @@ export default async function handler(req, res) {
       status:                    updated.status,
       cancellation_reason:       updated.cancellation_reason,
       cancelled_pending_actions: cancelledCount,
+      resumed_workflow_runs:     resumedRunCount,
     });
   } catch (e) {
     console.error('[arrangements-cancel]', e.message);

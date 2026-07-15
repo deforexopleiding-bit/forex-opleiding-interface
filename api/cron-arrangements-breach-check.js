@@ -114,6 +114,21 @@ export default async function handler(req, res) {
         if (newStatus === 'NAGEKOMEN') summary.transitioned_to_nagekomen++;
         if (newStatus === 'VERBROKEN') summary.transitioned_to_verbroken++;
 
+        // ── Fase 2b hook (NAGEKOMEN) ─────────────────────────────────
+        // Facturen zijn betaald; de door dit arrangement gepauzeerde
+        // aanmaan-runs kunnen definitief afgesloten worden. Fail-soft.
+        // Bij VERBROKEN doen we NIETS — de dunning-engine picked die op
+        // via trigger_conditions.arrangement_breached (Deel 2), zodat
+        // Jeffrey via de workflow-editor bepaalt wat er gebeurt.
+        if (newStatus === 'NAGEKOMEN') {
+          try {
+            const { completeRunsFromArrangement } = await import('./_lib/dunning-arrangement-hooks.js');
+            await completeRunsFromArrangement(arr.id);
+          } catch (e) {
+            console.warn('[cron-arrangements-breach-check hook complete]', e?.message || e);
+          }
+        }
+
         try {
           await supabaseAdmin.from('audit_log').insert({
             user_id:     null,

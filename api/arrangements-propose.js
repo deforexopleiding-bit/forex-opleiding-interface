@@ -475,6 +475,21 @@ export default async function handler(req, res) {
       pendingActions = paRows || [];
     }
 
+    // ---- Fase 2b hook: pauzeer lopende aanmaan-runs bij TOEZEGGING ----
+    // TOEZEGGING gaat direct naar status='ACTIEF' — de aanmaan-workflow moet
+    // dus meteen pauzeren zodat de klant niet zaterdag de volgende aanmaning
+    // krijgt. Andere types starten op VOORGESTELD; die pauze gebeurt bij
+    // pending-actions-mark-executed cascade (VOORGESTELD -> ACTIEF).
+    // Fail-soft: hook-fout blokkeert de propose-response niet.
+    if (type === 'TOEZEGGING') {
+      try {
+        const { pauseRunsForArrangement } = await import('./_lib/dunning-arrangement-hooks.js');
+        await pauseRunsForArrangement(arr.id, customerId);
+      } catch (e) {
+        console.warn('[arrangements-propose hook]', e?.message || e);
+      }
+    }
+
     // ---- Audit-log (fail-soft) ----
     try {
       await supabaseAdmin.from('audit_log').insert({
