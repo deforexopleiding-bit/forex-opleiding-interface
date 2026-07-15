@@ -122,6 +122,15 @@ export default async function handler(req, res) {
   // search-term (ILIKE op klant-naamvelden via embed-filter)
   const search = q.search ? String(q.search).trim() : null;
 
+  // kind: filter op payload->>'kind' (call / letter / joost / other).
+  // Ook CSV toegestaan voor multi-select in de UI.
+  const kindList = parseCsv(q.kind);
+
+  // include_scheduled=1 → toon toekomstige scheduled_for. Default 0:
+  // filter scheduled_for IS NULL OR scheduled_for <= now() zodat een
+  // terugbel-taak pas op de afspraakdatum in de lijst + badge verschijnt.
+  const includeScheduled = String(q.include_scheduled || '') === '1';
+
   const limit  = clampInt(q.limit, 50, 1, 200);
   const offset = Math.max(0, clampInt(q.offset, 0, 0, 1_000_000));
 
@@ -141,6 +150,12 @@ export default async function handler(req, res) {
     }
     if (customerId) qb = qb.eq('customer_id', customerId);
     if (invoiceId)  qb = qb.eq('invoice_id', invoiceId);
+    if (kindList.length === 1) qb = qb.eq('payload->>kind', kindList[0]);
+    else if (kindList.length > 1) qb = qb.in('payload->>kind', kindList);
+    if (!includeScheduled) {
+      const nowIso = new Date().toISOString();
+      qb = qb.or(`scheduled_for.is.null,scheduled_for.lte.${nowIso}`);
+    }
     return qb;
   };
 
@@ -243,12 +258,13 @@ export default async function handler(req, res) {
     // overige filters wel zodat de KPI consistent is met de huidige view-context.
     const byStatus = { PENDING: 0, APPROVED: 0, REJECTED: 0, EXECUTED: 0, FAILED: 0, CANCELLED: 0 };
     try {
+      const nowIsoForCounts = new Date().toISOString();
       await Promise.all(VALID_STATUS.map(async (s) => {
         let cq = supabaseAdmin
           .from('pending_actions')
           .select('id', { count: 'exact', head: true })
           .eq('status', s);
-        // herbouw filters zonder status, maar met actionType/category/customer/invoice
+        // herbouw filters zonder status, maar met actionType/category/customer/invoice/kind/scheduled
         if (actionTypes.length === 1) cq = cq.eq('action_type', actionTypes[0]);
         else if (actionTypes.length > 1) cq = cq.in('action_type', actionTypes);
         if (category === 'arrangement')      cq = cq.ilike('action_type', 'TL\\_%');
@@ -256,6 +272,11 @@ export default async function handler(req, res) {
         else if (category === 'escalation')     cq = cq.eq('action_type', 'MANUAL_ESCALATION');
         if (customerId) cq = cq.eq('customer_id', customerId);
         if (invoiceId)  cq = cq.eq('invoice_id', invoiceId);
+        if (kindList.length === 1) cq = cq.eq('payload->>kind', kindList[0]);
+        else if (kindList.length > 1) cq = cq.in('payload->>kind', kindList);
+        if (!includeScheduled) {
+          cq = cq.or(`scheduled_for.is.null,scheduled_for.lte.${nowIsoForCounts}`);
+        }
         const { count: c, error: ce } = await cq;
         if (ce) { console.error('[tasks-list count', s, ']', ce.message); return; }
         byStatus[s] = typeof c === 'number' ? c : 0;
@@ -278,6 +299,9 @@ export default async function handler(req, res) {
       else if (statusList.length > 1) arrQ = arrQ.in('status', statusList);
       if (customerId) arrQ = arrQ.eq('customer_id', customerId);
       if (invoiceId)  arrQ = arrQ.eq('invoice_id', invoiceId);
+      if (kindList.length === 1) arrQ = arrQ.eq('payload->>kind', kindList[0]);
+      else if (kindList.length > 1) arrQ = arrQ.in('payload->>kind', kindList);
+      if (!includeScheduled) arrQ = arrQ.or(`scheduled_for.is.null,scheduled_for.lte.${new Date().toISOString()}`);
       const { count: arrCount, error: arrErr } = await arrQ;
       if (arrErr) console.error('[tasks-list byCategory.arrangement]', arrErr.message);
       else byCategory.arrangement = typeof arrCount === 'number' ? arrCount : 0;
@@ -291,6 +315,9 @@ export default async function handler(req, res) {
       else if (statusList.length > 1) verQ = verQ.in('status', statusList);
       if (customerId) verQ = verQ.eq('customer_id', customerId);
       if (invoiceId)  verQ = verQ.eq('invoice_id', invoiceId);
+      if (kindList.length === 1) verQ = verQ.eq('payload->>kind', kindList[0]);
+      else if (kindList.length > 1) verQ = verQ.in('payload->>kind', kindList);
+      if (!includeScheduled) verQ = verQ.or(`scheduled_for.is.null,scheduled_for.lte.${new Date().toISOString()}`);
       const { count: verCount, error: verErr } = await verQ;
       if (verErr) console.error('[tasks-list byCategory.verify_payment]', verErr.message);
       else byCategory.verify_payment = typeof verCount === 'number' ? verCount : 0;
@@ -304,6 +331,9 @@ export default async function handler(req, res) {
       else if (statusList.length > 1) escQ = escQ.in('status', statusList);
       if (customerId) escQ = escQ.eq('customer_id', customerId);
       if (invoiceId)  escQ = escQ.eq('invoice_id', invoiceId);
+      if (kindList.length === 1) escQ = escQ.eq('payload->>kind', kindList[0]);
+      else if (kindList.length > 1) escQ = escQ.in('payload->>kind', kindList);
+      if (!includeScheduled) escQ = escQ.or(`scheduled_for.is.null,scheduled_for.lte.${new Date().toISOString()}`);
       const { count: escCount, error: escErr } = await escQ;
       if (escErr) console.error('[tasks-list byCategory.escalation]', escErr.message);
       else byCategory.escalation = typeof escCount === 'number' ? escCount : 0;

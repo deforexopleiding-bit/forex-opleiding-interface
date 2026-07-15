@@ -867,6 +867,56 @@ export async function executeTaskStep({ supabaseAdmin, run, step, customer, open
   }
 
   // ─── LIVE INSERT ──────────────────────────────────────────────────
+  // Kind-derivation voor filter in Wanbetalers > Acties. Heuristiek op
+  // title (moet matchen met backfill-migratie 2026-07-15-belmomenten-een-
+  // bron-van-waarheid.sql). Nieuwe workflow-task-teksten die niet met
+  // "Bel klant" / "Stuur WIK-14-dagenbrief" / "Stuur aangetekende brief"
+  // beginnen krijgen kind='other' (fallback zodat de filter altijd werkt).
+  let taskKind = 'other';
+  if (/^Bel klant/i.test(rawTitle)) {
+    taskKind = 'call';
+  } else if (/^Stuur WIK-14-dagenbrief/i.test(rawTitle) || /^Stuur aangetekende brief/i.test(rawTitle)) {
+    taskKind = 'letter';
+  }
+
+  // Skip-if-open-callback: als er voor deze klant een openstaande terugbel-
+  // afspraak (kind='call', source='callback_appointment') in pending_actions
+  // ligt, sla deze workflow-bel-taak over — de callback gaat voor.
+  // Belangrijk: skippen mag geen duplicaat maken; workflow gaat door naar de
+  // volgende step. Alleen wanneer taskKind='call' — brief/other blijven wel
+  // vuren want dat is een ander soort actie.
+  if (taskKind === 'call') {
+    try {
+      const { data: openCallback } = await supabaseAdmin
+        .from('pending_actions')
+        .select('id')
+        .eq('customer_id', customer.id)
+        .eq('action_type', 'MANUAL_FOLLOWUP')
+        .in('status', ['PENDING', 'APPROVED'])
+        .filter('payload->>kind', 'eq', 'call')
+        .filter('payload->>source', 'eq', 'callback_appointment')
+        .limit(1);
+      if (Array.isArray(openCallback) && openCallback.length > 0) {
+        return {
+          status: 'skipped',
+          log_event: 'task_skipped_open_callback',
+          log_payload: {
+            title:       rawTitle,
+            customer_id: customer.id,
+            workflow_id: run?.workflow_id || null,
+            step_id:     step?.id || null,
+            reason:      'Er ligt al een openstaande terugbelafspraak voor deze klant — die gaat voor.',
+          },
+        };
+      }
+    } catch (e) {
+      // Fail-soft: bij lookup-fout gaan we door met de workflow-taak.
+      // Duplicatie in Acties (2 bel-taken) is minder erg dan ontbrekende
+      // bel-taak omdat de heuristiek-check faalde.
+      console.warn('[dunning-executor task] callback-lookup fail, continue:', e?.message);
+    }
+  }
+
   // action_type='MANUAL_FOLLOWUP' zodat de taak in Open Acties (categorie
   // 'arrangement') verschijnt. arrangement_id=NULL — deze taak is
   // workflow-driven, niet arrangement-driven.
@@ -875,6 +925,7 @@ export async function executeTaskStep({ supabaseAdmin, run, step, customer, open
     description:     rawDescription || null,
     assignee_role:   assigneeRole,
     source:          'dunning_workflow',
+    kind:            taskKind,
     workflow_id:     run?.workflow_id || null,
     workflow_run_id: run?.id || null,
     step_id:         step?.id || null,

@@ -1,18 +1,27 @@
 // api/dunning-call-log-list.js
 // GET ?customer_id=<uuid> → alle belpogingen voor deze klant (chronologisch,
 // nieuwste eerst). Ook de cadence-instellingen uit app_settings zodat de UI
-// de 3-stap-tracker en de incasso-nudge kan renderen zonder aparte call.
+// de tracker en de incasso-nudge kan renderen zonder aparte call.
 //
 // Permissie: finance.dunning.view (lees-bredere gate; write via -create.js).
+//
+// next_reminder_at (sinds "belmomenten-een-bron"):
+//   is nu de vroegste ECHTE afspraak — geen synthetische
+//   laatste_poging + interval_days meer. Bron: pending_actions waar
+//   customer_id + payload->>'kind'='call' + status IN (PENDING,APPROVED)
+//   + scheduled_for IS NOT NULL, ORDER scheduled_for ASC LIMIT 1. Als
+//   er geen concrete afspraak is → null (workflow-bel-taken zonder
+//   scheduled_for tellen niet mee; die verschijnen vanzelf in Acties
+//   op de dag dat de workflow ze aanmaakt).
 //
 // Response:
 //   {
 //     items: [{ id, customer_id, invoice_id, attempted_at, sip_line,
-//               outcome, note, created_by, created_by_name, created_at }],
+//               outcome, note, callback_at, created_by, created_by_name, created_at }],
 //     cadence: { max_attempts, interval_days },
 //     resolved: boolean,          // true als er >=1 poging met resolutie-outcome is
 //     attempts_count: N,          // totaal aantal pogingen (voor tracker)
-//     next_reminder_at: iso|null  // laatste_poging_at + interval_days, als niet resolved
+//     next_reminder_at: iso|null  // eerstvolgende openstaande call-taak scheduled_for
 //   }
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
@@ -46,7 +55,7 @@ export default async function handler(req, res) {
   try {
     const { data: rows, error } = await supabaseAdmin
       .from('dunning_call_log')
-      .select('id, customer_id, invoice_id, attempted_at, sip_line, outcome, note, created_by, created_at')
+      .select('id, customer_id, invoice_id, attempted_at, sip_line, outcome, note, callback_at, created_by, created_at')
       .eq('customer_id', customerId)
       .order('attempted_at', { ascending: false });
     if (error) throw new Error('log: ' + error.message);
@@ -88,11 +97,30 @@ export default async function handler(req, res) {
 
     const resolved = items.some((r) => RESOLVED_OUTCOMES.has(r.outcome));
     const attemptsCount = items.length;
+
+    // next_reminder_at: eerstvolgende ECHTE afspraak uit pending_actions
+    // (vervangt de synthetische laatste_poging + interval_days berekening).
+    // Fail-soft: bij lookup-fout → null (UI toont "geen afspraak").
     let nextReminderAt = null;
-    if (!resolved && items.length > 0) {
-      const last = items[0]; // nieuwste eerst → items[0] = laatste poging
-      const t = new Date(last.attempted_at).getTime();
-      if (Number.isFinite(t)) nextReminderAt = new Date(t + cadence.interval_days * 86400000).toISOString();
+    if (!resolved) {
+      try {
+        const { data: nextTask } = await supabaseAdmin
+          .from('pending_actions')
+          .select('scheduled_for')
+          .eq('customer_id', customerId)
+          .eq('action_type', 'MANUAL_FOLLOWUP')
+          .in('status', ['PENDING', 'APPROVED'])
+          .filter('payload->>kind', 'eq', 'call')
+          .not('scheduled_for', 'is', null)
+          .order('scheduled_for', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (nextTask?.scheduled_for) {
+          nextReminderAt = nextTask.scheduled_for;
+        }
+      } catch (e) {
+        console.warn('[dunning-call-log-list] next_reminder_at lookup fail-soft:', e?.message);
+      }
     }
 
     return res.status(200).json({
