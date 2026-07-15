@@ -303,6 +303,39 @@ export default async function handler(req, res) {
           .eq('workflow_id', id);
         if (exErr) throw new Error('bestaande steps ophalen: ' + exErr.message);
         const existingById = new Map((existing || []).map(s => [s.id, s]));
+        const existingCount = (existing || []).length;
+
+        // ─── DATA-LOSS GUARDS (kritisch, na typo-incident 15-jul-2026) ───
+        //
+        // Guard A: workflow met bestaande steps + lege payload → nooit
+        // stilzwijgend alles wissen. Alleen toestaan met expliciete
+        // body.confirm_delete_all=true bevestiging.
+        const confirmDeleteAll = body.confirm_delete_all === true;
+        if (existingCount > 0 && normalizedSteps.length === 0 && !confirmDeleteAll) {
+          return res.status(400).json({
+            error: `Workflow heeft ${existingCount} bestaande stappen en de payload is leeg. ` +
+                   `Weigering: leegmaken vereist expliciete bevestiging (body.confirm_delete_all=true). ` +
+                   `Als je de editor kapot ziet: herlaad de pagina en probeer opnieuw.`,
+            code: 'REFUSE_EMPTY_PAYLOAD_ON_POPULATED_WORKFLOW',
+            existing_step_count: existingCount,
+          });
+        }
+
+        // Guard B: workflow met bestaande steps + payload waarin GEEN enkele
+        // step een id heeft → verouderde/gecrashte client. Zonder id's zou
+        // de diff-based upsert alle bestaande verwijderen en de payload als
+        // "nieuwe" steps inserten -> ontkoppeling van log-history + effectief
+        // dataverlies-equivalent.
+        const stepsWithIdCount = normalizedSteps.filter(s => s.id).length;
+        if (existingCount > 0 && normalizedSteps.length > 0 && stepsWithIdCount === 0 && !confirmDeleteAll) {
+          return res.status(400).json({
+            error: `Verouderde clientversie: workflow heeft ${existingCount} bestaande stappen, ` +
+                   `maar de payload bevat geen enkele step-id. Ververs de pagina en probeer opnieuw.`,
+            code: 'REFUSE_ID_LESS_STEPS_ON_POPULATED_WORKFLOW',
+            existing_step_count: existingCount,
+            payload_step_count: normalizedSteps.length,
+          });
+        }
 
         // 2. Cross-check: iedere payload-step.id moet bij deze workflow horen.
         for (const s of normalizedSteps) {
