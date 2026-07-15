@@ -23,6 +23,7 @@ import {
   executeWhatsappStep,
   executeWaitStep,
   executeTaskStep,
+  executeResumeDunningStep,
 } from './dunning-step-executors.js';
 import { markOverdue } from './mentor-ledger-engine.js';
 
@@ -366,15 +367,56 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
     // effectief altijd slaagt (days_overdue >= 0).
     const hasOverdueTrigger      = Number.isFinite(tc.min_days_overdue);
     const hasIssueDateTrigger    = Number.isFinite(tc.min_days_since_invoice_date);
+    // Fase 2b: arrangement_breached-trigger. Wanneer true → workflow vuurt
+    // alleen voor klanten met een payment_arrangement in status VERBROKEN
+    // dat nog niet is afgehandeld (breach_handled_at IS NULL). Combineerbaar
+    // met andere condities (customer_type / min_total_amount). GEEN default:
+    // workflows zonder deze key gedragen zich EXACT als vroeger.
+    const arrangementBreached    = tc.arrangement_breached === true;
+    // Bij een arrangement_breached-workflow is de overdue-guard niet
+    // relevant — een breach kán ook op een factuur zijn die net verstreken
+    // is. Zet minDays op -1 tenzij de workflow expliciet een min_days_overdue
+    // heeft geconfigureerd.
     const minDays                = hasOverdueTrigger
       ? tc.min_days_overdue
-      : (hasIssueDateTrigger ? -1 : 14);
+      : ((hasIssueDateTrigger || arrangementBreached) ? -1 : 14);
     const minDaysSinceInvoice    = hasIssueDateTrigger ? tc.min_days_since_invoice_date : null;
     const customerType           = tc.customer_type || 'any';
     const minTotal               = Number.isFinite(tc.min_total_amount) ? tc.min_total_amount : 0;
     // Extra guard voor workflows die maar 1x per customer mogen vuren
     // (dag-7-duwtje bv.): check ANY-status runs voor deze workflow_id.
     const runOncePerCustomer     = tc.run_once_per_customer_per_workflow === true;
+
+    // Fase 2b: als arrangement_breached-workflow → laad onafgehandelde
+    // breaches ÉÉN keer per workflow (map customerId → arrangementId).
+    // Dedup-guard: alleen VERBROKEN + breach_handled_at IS NULL. Nieuwe
+    // TOEZEGGING die opnieuw breekt → nieuwe rij, dus opnieuw NULL, dus
+    // vuurt opnieuw. Per klant per breach: 1x.
+    let breachedByCustomer = null; // Map<customerId, arrangementId>
+    if (arrangementBreached) {
+      try {
+        const { data: breaches, error: brErr } = await supabaseAdmin
+          .from('payment_arrangements')
+          .select('id, customer_id, updated_at')
+          .eq('status', 'VERBROKEN')
+          .is('breach_handled_at', null)
+          .order('updated_at', { ascending: true });
+        if (brErr) throw brErr;
+        breachedByCustomer = new Map();
+        // Bij >1 unafgehandelde breach per klant: pak de OUDSTE (eerste in
+        // sort). Nieuwere breaches worden in een volgende engine-tick opgepakt
+        // nadat we deze afgehandeld hebben (breach_handled_at gezet).
+        for (const b of (breaches || [])) {
+          if (!breachedByCustomer.has(b.customer_id)) {
+            breachedByCustomer.set(b.customer_id, b.id);
+          }
+        }
+      } catch (e) {
+        errors.push({ phase: 'detect_breach_load', workflow_id: workflow.id, error: e?.message || String(e) });
+        console.error('[dunning-engine] breach load failed', workflow.id, e?.message);
+        continue; // sla deze workflow deze tick over
+      }
+    }
 
     let openRows;
     try {
@@ -406,6 +448,15 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
 
     for (const [customerId, agg] of perCustomer) {
       if (elapsed(startedAt) > abortMs) break outer;
+
+      // Fase 2b: arrangement_breached-filter. Klant moet een onafgehandeld
+      // VERBROKEN arrangement hebben, anders overslaan. arrangementIdForBreach
+      // is de specifieke rij die we straks als 'afgehandeld' markeren.
+      let arrangementIdForBreach = null;
+      if (arrangementBreached) {
+        arrangementIdForBreach = breachedByCustomer?.get(customerId) || null;
+        if (!arrangementIdForBreach) continue;
+      }
 
       if (agg.days_overdue < minDays) continue;
       // Issue-date-trigger: alleen relevant als workflow expliciet
@@ -509,11 +560,31 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
               total_open_eur: Number(agg.total_open_eur.toFixed(2)),
               days_overdue: agg.days_overdue,
               days_since_oldest_invoice: agg.days_since_oldest_invoice,
+              triggered_by_arrangement_id: arrangementIdForBreach, // null als niet-breach-trigger
             },
           });
         if (logErr) {
           console.error('[dunning-engine] log insert failed', inserted.id, logErr.message);
         }
+
+        // Fase 2b: markeer breach als afgehandeld (dedup). Als iemand
+        // dezelfde afspraak later opnieuw breekt (bv. nieuwe TOEZEGGING op
+        // hetzelfde arrangement — kan niet gebeuren want ACTIEF blijft
+        // ACTIEF; alleen nieuw arrangement kan opnieuw VERBROKEN worden),
+        // dan is dat een NIEUWE rij met eigen breach_handled_at=NULL.
+        if (arrangementIdForBreach) {
+          try {
+            const { error: bhErr } = await supabaseAdmin
+              .from('payment_arrangements')
+              .update({ breach_handled_at: nowIso() })
+              .eq('id', arrangementIdForBreach)
+              .is('breach_handled_at', null); // race-safe: alleen als nog NULL
+            if (bhErr) throw bhErr;
+          } catch (e) {
+            console.warn('[dunning-engine] breach_handled_at update fail-soft:', arrangementIdForBreach, e?.message || e);
+          }
+        }
+
         started++;
       } catch (e) {
         errors.push({
@@ -625,6 +696,9 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
           break;
         case 'task':
           stepResult = await executeTaskStep(execArgs);
+          break;
+        case 'resume_dunning':
+          stepResult = await executeResumeDunningStep(execArgs);
           break;
         case 'stop':
           stepResult = { status: 'ok', log_event: 'stop_step', log_payload: {} };

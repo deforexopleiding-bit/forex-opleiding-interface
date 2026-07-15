@@ -341,9 +341,21 @@ export default async function handler(req, res) {
             })
             .eq('id', arrangementIdForResponse)
             .eq('status', 'VOORGESTELD')   // alleen vanuit VOORGESTELD oppakken
-            .select('id, status');
+            .select('id, status, customer_id');
           if (arrErr) throw new Error('arrangement-cascade: ' + arrErr.message);
           arrangementStatusUpdated = !!(arrUpd && arrUpd.length > 0);
+          // Fase 2b hook: nu de afspraak echt ACTIEF is, pauzeer lopende
+          // aanmaan-workflow-runs van deze klant (fail-soft — hook-fout
+          // blokkeert de mark-executed-response niet).
+          if (arrangementStatusUpdated) {
+            const flippedRow = arrUpd[0];
+            try {
+              const { pauseRunsForArrangement } = await import('./_lib/dunning-arrangement-hooks.js');
+              await pauseRunsForArrangement(flippedRow.id, flippedRow.customer_id);
+            } catch (e) {
+              console.warn('[pending-actions-mark-executed hook pause]', e?.message || e);
+            }
+          }
         }
         // stillOpen===0 && !hasExecuted: alleen FAILED/REJECTED/CANCELLED -> blijft VOORGESTELD.
         // stillOpen>0: nog werk te doen -> blijft VOORGESTELD.

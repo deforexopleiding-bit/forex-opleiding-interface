@@ -3508,6 +3508,10 @@
                     <input id="dunWfTrgRunOnce" type="checkbox" style="width:auto;margin:0"/>
                     Max 1× per klant (ooit)
                   </label>
+                  <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:6px;padding-top:16px;grid-column:1/-1" title="Workflow vuurt alleen voor klanten met een verbroken betaalafspraak (payment_arrangement status VERBROKEN, niet eerder afgehandeld). Combineerbaar met andere condities.">
+                    <input id="dunWfTrgArrangementBreached" type="checkbox" style="width:auto;margin:0"/>
+                    Vuur bij verbroken betaalafspraak
+                  </label>
                 </div>
               </div>
               <!-- Stappen -->
@@ -6168,6 +6172,9 @@
     // Nieuwe dag-N-duwtje-velden: leeg = niet gebruiken (engine default).
     document.getElementById('dunWfTrgMinDaysSinceInvoice').value = (tc.min_days_since_invoice_date != null) ? tc.min_days_since_invoice_date : '';
     document.getElementById('dunWfTrgRunOnce').checked           = tc.run_once_per_customer_per_workflow === true;
+    // Fase 2b: arrangement_breached-trigger checkbox.
+    const abEl = document.getElementById('dunWfTrgArrangementBreached');
+    if (abEl) abEl.checked = tc.arrangement_breached === true;
     const delBtn = document.getElementById('dunWfDeleteBtn');
     if (delBtn) delBtn.hidden = !workflow?.id;
     const errEl = document.getElementById('dunWfError');
@@ -6270,17 +6277,20 @@
           </label>`;
       } else if (type === 'stop') {
         cfgHtml = `<div style="font-size:11px;color:var(--text-faint);grid-column:1/-1;padding:6px 0">Geen config nodig — workflow stopt hier.</div>`;
+      } else if (type === 'resume_dunning') {
+        cfgHtml = `<div style="font-size:11px;color:var(--text-faint);grid-column:1/-1;padding:6px 0">Geen config nodig — hervat alle gepauzeerde aanmaan-workflow-runs van deze klant (bedoeld voor workflows getriggerd door een verbroken betaalafspraak).</div>`;
       }
       return `<div data-step-idx="${idx}" style="border:1px solid var(--border-subtle,#e5e7eb);border-radius:8px;padding:10px;background:rgba(255,255,255,0.015)">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px">
           <div style="display:flex;align-items:center;gap:8px">
             <span style="font-size:11px;font-weight:700;background:rgba(99,102,241,.15);color:#a5b4fc;padding:2px 7px;border-radius:10px">Stap ${idx + 1}</span>
             <select class="fin-input" data-stepfield="step_type" style="font-size:12px;padding:4px 6px;width:auto">
-              <option value="email"    ${type === 'email'    ? 'selected' : ''}>E-mail</option>
-              <option value="whatsapp" ${type === 'whatsapp' ? 'selected' : ''}>WhatsApp</option>
-              <option value="wait"     ${type === 'wait'     ? 'selected' : ''}>Wachten</option>
-              <option value="task"     ${type === 'task'     ? 'selected' : ''}>Taak</option>
-              <option value="stop"     ${type === 'stop'     ? 'selected' : ''}>Stop</option>
+              <option value="email"          ${type === 'email'          ? 'selected' : ''}>E-mail</option>
+              <option value="whatsapp"       ${type === 'whatsapp'       ? 'selected' : ''}>WhatsApp</option>
+              <option value="wait"           ${type === 'wait'           ? 'selected' : ''}>Wachten</option>
+              <option value="task"           ${type === 'task'           ? 'selected' : ''}>Taak</option>
+              <option value="resume_dunning" ${type === 'resume_dunning' ? 'selected' : ''}>Aanmaningen hervatten</option>
+              <option value="stop"           ${type === 'stop'           ? 'selected' : ''}>Stop</option>
             </select>
           </div>
           <div style="display:flex;gap:4px">
@@ -6386,6 +6396,11 @@
     }
     if (document.getElementById('dunWfTrgRunOnce').checked) {
       trigger_conditions.run_once_per_customer_per_workflow = true;
+    }
+    // Fase 2b: alleen zetten als AAN — anders leeg laten (workflows zonder
+    // deze key gedragen zich exact als voorheen).
+    if (document.getElementById('dunWfTrgArrangementBreached')?.checked) {
+      trigger_conditions.arrangement_breached = true;
     }
 
     const payload = {
