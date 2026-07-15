@@ -17,14 +17,16 @@
 // omgeving zonder IMAP_PASS_INFO) de cron niet keihard crasht — bij missende
 // infra valt deze terug op een "skipped" + log_event.
 //
-// WhatsApp-strategie (PR A2 — deze module):
+// WhatsApp-strategie (PR A2 + auto-conversation-create):
 //   Zelfde patroon als email-executor: render → dry-run/sandbox-guard → send.
 //   Meta-send via _lib/meta-whatsapp.js sendTemplate (hergebruik van joost-
-//   outbound-send). Vereist een bestaande whatsapp_conversation voor de klant
-//   (zonder conv geen persistence-pad — whatsapp_messages.conversation_id is
-//   NOT NULL). Zonder conv/telefoonnummer/meta_template_name: nette skip met
-//   duidelijk log_event. Fail-soft: Meta-fout → 'failed'-status per stap, hele
-//   run klapt NIET.
+//   outbound-send). Meta-templates mogen naar elk nummer (ook buiten 24u en
+//   zonder voorgeschiedenis) — dus als er geen whatsapp_conversation bestaat
+//   voor de klant, wordt er automatisch één aangemaakt (spiegel het inbox-
+//   webhook upsertConversation-patroon). Persistence-pad is verplicht want
+//   whatsapp_messages.conversation_id is NOT NULL. Zonder telefoonnummer of
+//   meta_template_name: nette skip. Fail-soft: Meta-fout → 'failed'-status
+//   per stap, hele run klapt NIET.
 
 import { renderTemplate } from './dunning-template-render.js';
 
@@ -220,11 +222,25 @@ function escapeBodyToHtml(text) {
 }
 
 /**
- * WhatsApp-step (PR A2 — echte send):
+ * Normaliseer een telefoonnummer naar E.164-plus-formaat (+316...). Identiek
+ * aan events-send.js / onboarding-invite.js toE164Plus (intentioneel inline
+ * i.p.v. import om de helper-graph plat te houden; bestaand patroon).
+ */
+function toE164Plus(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.length < 8) return null;
+  return '+' + digits;
+}
+
+/**
+ * WhatsApp-step (PR A2 — echte send + auto-conversation-create):
  *   Zelfde flow-shape als executeEmailStep. Vereisten voor een echte send:
  *     1) template + template.meta_template_name (approved Meta-template naam);
  *     2) klant met telefoonnummer;
- *     3) bestaande whatsapp_conversation voor die klant (persist-pad);
+ *     3) whatsapp_conversation voor die klant (wordt automatisch aangemaakt
+ *        als 'ie ontbreekt — Meta-templates mogen naar elk nummer, ook zonder
+ *        voorgeschiedenis; de conversation is puur ons persist-pad);
  *     4) Meta credentials in env-vars.
  *   Bij missende vereisten → 'skipped' met specifiek log_event. Bij Meta-fout
  *   → 'failed' met foutcode; run-cron logt + telt maar de run klapt niet.
@@ -236,6 +252,17 @@ function escapeBodyToHtml(text) {
  *   route uit inbox-send-template.js is een parallel-pad voor whatsapp_meta_
  *   templates; migratie richting die richting hoort in latere PR (mapping op
  *   dunning_templates ontbreekt vandaag als kolom).
+ *
+ * Volgorde-keuze (BEARGUMENTEERD):
+ *   De dry-run-check zit BEWUST vóór de conv-lookup+create. Reden: dry-run
+ *   mag GEEN DB-write doen, dus we willen 'm laten early-returnen vóór de
+ *   auto-create (dat is een INSERT). Als we conv-create eerst zouden doen
+ *   zou 'ie óók moeten worden geskipt in dry-run — dan hebben we per-check
+ *   een dry-run-branch nodig. Deze volgorde geeft één schone early-return
+ *   in dry-run met een nette "zou verstuurd worden naar <customerPhone>"-
+ *   log; de conv-lookup gebeurt alleen op het live-pad waar 'ie relevant is.
+ *   De sandbox-guard blijft óók vóór dry-run — die is een safeguard tegen
+ *   data-leak en werkt op customerPhone, geen conv nodig.
  *
  * Dry-run + sandbox-guard: identiek aan email-executor (zie r104-161).
  */
@@ -311,68 +338,16 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
     };
   }
 
-  // Bestaande WhatsApp-conversation voor deze klant (recentste). Vereist voor
-  // whatsapp_messages-insert (conversation_id NOT NULL). Spiegel exact het
-  // joost-outbound-send patroon (order last_message_at desc, limit 1).
-  let conv = null;
-  if (customer?.id) {
-    try {
-      const { data: convRow, error: convErr } = await supabaseAdmin
-        .from('whatsapp_conversations')
-        .select('id, customer_id, phone_number, phone_number_id, last_message_at')
-        .eq('customer_id', customer.id)
-        .order('last_message_at', { ascending: false, nullsFirst: false })
-        .limit(1)
-        .maybeSingle();
-      if (convErr) {
-        console.warn('[dunning-executor whatsapp] conv lookup fail:', convErr.message);
-      } else if (convRow) {
-        conv = convRow;
-      }
-    } catch (e) {
-      console.warn('[dunning-executor whatsapp] conv exception:', e?.message);
-    }
-  }
-  if (!conv) {
-    return {
-      status: 'skipped',
-      log_event: 'whatsapp_skipped_no_conversation',
-      log_payload: {
-        template_id: template.id,
-        meta_template_name: template.meta_template_name,
-        to: toPhone,
-        reason: 'Geen bestaande WhatsApp-conversation voor klant - kan template niet persist zonder conversation_id',
-      },
-    };
-  }
-  if (!conv.phone_number) {
-    return {
-      status: 'skipped',
-      log_event: 'whatsapp_skipped_no_phone',
-      log_payload: {
-        template_id: template.id,
-        meta_template_name: template.meta_template_name,
-        conversation_id: conv.id,
-        reason: 'Conversation heeft geen phone_number',
-      },
-    };
-  }
-  // Autoritatief: gebruik conversation.phone_number (webhook-genormaliseerd)
-  // boven customer.phone voor de Meta-call.
-  const sendTo = conv.phone_number;
-
   // ─── SANDBOX / DRY-RUN GUARDS ───────────────────────────────────────
-  // Zelfde 2-lagige guard als email-executor (r104-161):
-  //   1) is_test-klant → nummer moet exact matchen met sandbox-contact;
-  //      bij mismatch abort (test-send kan nooit lekken).
-  //   2) globale dry-run AAN → geen Meta-call, wel log-event zodat de
-  //      workflow-run normaal doorloopt.
+  // Geplaatst vóór de conv-lookup+create zodat dry-run géén DB-write triggert
+  // (zie volgorde-argumentatie in JSDoc). Gebruikt customerPhone als to-adres
+  // voor het dry-run log — geen conv-info want die is nog niet opgezocht.
   try {
     const { isDryRunEnabled, assertRecipientMatchesSandbox, buildDryRunLogPayload } =
       await import('./dunning-dry-run.js');
     if (customerIsTest) {
       try {
-        await assertRecipientMatchesSandbox({ isTest: true, actual: sendTo, channel: 'whatsapp' });
+        await assertRecipientMatchesSandbox({ isTest: true, actual: customerPhone, channel: 'whatsapp' });
       } catch (guardErr) {
         return {
           status: 'skipped',
@@ -380,7 +355,7 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
           log_payload: {
             template_id: template.id,
             meta_template_name: template.meta_template_name,
-            to: sendTo,
+            to: customerPhone,
             reason: guardErr.message,
           },
         };
@@ -393,14 +368,14 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
         log_payload: {
           template_id: template.id,
           meta_template_name: template.meta_template_name,
-          conversation_id: conv.id,
-          to: sendTo,
+          conversation_id: null,
+          to: customerPhone,
           message_id: 'dry-run',
           meta_wamid: 'dry-run',
           variables_used: rendered.variables_used,
           ...buildDryRunLogPayload({
             channel: 'whatsapp',
-            to: sendTo,
+            to: customerPhone,
             isTest: customerIsTest,
             preview: { body: rendered.body.slice(0, 200) },
           }),
@@ -417,8 +392,8 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
       log_payload: {
         template_id: template.id,
         meta_template_name: template.meta_template_name,
-        conversation_id: conv.id,
-        to: sendTo,
+        conversation_id: null,
+        to: customerPhone,
         message_id: 'dry-run-fallback',
         meta_wamid: 'dry-run-fallback',
         variables_used: rendered.variables_used,
@@ -445,8 +420,7 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
       log_payload: {
         template_id: template.id,
         meta_template_name: template.meta_template_name,
-        conversation_id: conv.id,
-        to: sendTo,
+        to: customerPhone,
         reason: `meta-whatsapp module load failed: ${e.message}`,
       },
     };
@@ -459,32 +433,186 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
       log_payload: {
         template_id: template.id,
         meta_template_name: template.meta_template_name,
-        conversation_id: conv.id,
-        to: sendTo,
+        to: customerPhone,
         reason: 'Meta WhatsApp niet geconfigureerd',
         missing: cfgStatus.missing,
       },
     };
   }
 
-  // Afzendlijn: conversation.phone_number_id (autoritatief; door webhook op
-  // inbound-time gezet); fallback op module-config finance-lijn.
-  let outboundPnId = conv.phone_number_id || undefined;
-  if (!outboundPnId) {
+  // ─── OUTBOUND phone_number_id (finance-lijn uit module-config) ─────
+  // Nodig zowel voor de conv-INSERT (nieuwe conv koppelt aan deze lijn) als
+  // voor de sendTemplate-call. We halen 'em VOOR de conv-lookup omdat de
+  // lookup-fallback op tuple (phone_number, phone_number_id) matcht en dus
+  // de finance-lijn nodig heeft.
+  let outboundPnId = undefined;
+  try {
+    const { data: modCfg, error: modErr } = await supabaseAdmin
+      .from('whatsapp_module_config')
+      .select('phone_number_id')
+      .eq('module', 'finance')
+      .eq('is_active', true)
+      .maybeSingle();
+    if (!modErr && modCfg?.phone_number_id) {
+      outboundPnId = modCfg.phone_number_id;
+    }
+  } catch (e) {
+    console.warn('[dunning-executor whatsapp] module-config exception:', e?.message);
+  }
+
+  // ─── CONVERSATION lookup + auto-create ─────────────────────────────
+  // Zoek/maak een whatsapp_conversation zodat we het outbound-template kunnen
+  // persistieren (whatsapp_messages.conversation_id NOT NULL). Drie stappen:
+  //   1) SELECT bestaande op customer_id (recentste). Als er een gekoppelde
+  //      conv is: gebruik die.
+  //   2) Fallback SELECT op (phone_number, phone_number_id) — vindt een conv
+  //      die de webhook heeft aangemaakt maar nog niet aan de klant is
+  //      gekoppeld; koppel 'm dan alsnog.
+  //   3) Bestaat helemaal niks: INSERT nieuwe conv (spiegel het webhook-
+  //      insertPayload, r237-247, met status='open' + unread_count=0 want er
+  //      is nog geen inbound). Race-safe: bij 23505 unique-violation
+  //      → re-SELECT op tuple (spiegel webhook r257-266).
+  const phoneE164Plus = toE164Plus(customerPhone);
+  if (!phoneE164Plus) {
+    return {
+      status: 'skipped',
+      log_event: 'whatsapp_skipped_no_phone',
+      log_payload: {
+        template_id: template.id,
+        meta_template_name: template.meta_template_name,
+        to: customerPhone,
+        reason: `Telefoonnummer '${customerPhone}' kon niet naar E.164 worden genormaliseerd (te kort of geen digits)`,
+      },
+    };
+  }
+  let conv = null;
+  // Stap 1: bestaande conv-koppeling via customer_id
+  if (customer?.id) {
     try {
-      const { data: modCfg, error: modErr } = await supabaseAdmin
-        .from('whatsapp_module_config')
-        .select('phone_number_id')
-        .eq('module', 'finance')
-        .eq('is_active', true)
+      const { data: convRow, error: convErr } = await supabaseAdmin
+        .from('whatsapp_conversations')
+        .select('id, customer_id, phone_number, phone_number_id, last_message_at')
+        .eq('customer_id', customer.id)
+        .order('last_message_at', { ascending: false, nullsFirst: false })
+        .limit(1)
         .maybeSingle();
-      if (!modErr && modCfg?.phone_number_id) {
-        outboundPnId = modCfg.phone_number_id;
+      if (convErr) {
+        console.warn('[dunning-executor whatsapp] conv lookup fail:', convErr.message);
+      } else if (convRow) {
+        conv = convRow;
       }
     } catch (e) {
-      console.warn('[dunning-executor whatsapp] module-config exception:', e?.message);
+      console.warn('[dunning-executor whatsapp] conv exception:', e?.message);
     }
   }
+  // Stap 2: fallback op (phone_number, phone_number_id) — kan bestaan zonder customer-koppeling
+  if (!conv && outboundPnId) {
+    try {
+      const { data: convRow, error: convErr } = await supabaseAdmin
+        .from('whatsapp_conversations')
+        .select('id, customer_id, phone_number, phone_number_id')
+        .eq('phone_number', phoneE164Plus)
+        .eq('phone_number_id', outboundPnId)
+        .maybeSingle();
+      if (convErr) {
+        console.warn('[dunning-executor whatsapp] conv tuple-lookup fail:', convErr.message);
+      } else if (convRow) {
+        conv = convRow;
+        // Best-effort: koppel bestaande conv aan klant als 'ie nog los hangt.
+        if (customer?.id && !conv.customer_id) {
+          try {
+            await supabaseAdmin
+              .from('whatsapp_conversations')
+              .update({ customer_id: customer.id })
+              .eq('id', conv.id)
+              .is('customer_id', null);
+            conv.customer_id = customer.id;
+          } catch (e) {
+            console.warn('[dunning-executor whatsapp] conv link fail:', e?.message);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[dunning-executor whatsapp] conv tuple exception:', e?.message);
+    }
+  }
+  // Stap 3: INSERT nieuwe conv (auto-create) — de kern van deze PR
+  if (!conv) {
+    if (!outboundPnId) {
+      return {
+        status: 'skipped',
+        log_event: 'whatsapp_skipped_no_outbound_line',
+        log_payload: {
+          template_id: template.id,
+          meta_template_name: template.meta_template_name,
+          to: phoneE164Plus,
+          reason: 'Geen outbound phone_number_id: whatsapp_module_config voor module=finance ontbreekt of is_active=false',
+        },
+      };
+    }
+    const nowIso = new Date().toISOString();
+    const insertPayload = {
+      phone_number:         phoneE164Plus,
+      phone_number_id:      outboundPnId,
+      display_name:         null,
+      customer_id:          customer?.id || null,
+      status:               'open',
+      last_message_at:      nowIso,
+      last_message_preview: null,
+      unread_count:         0,
+      last_inbound_at:      null,
+    };
+    try {
+      const { data: inserted, error: insErr } = await supabaseAdmin
+        .from('whatsapp_conversations')
+        .insert(insertPayload)
+        .select('id, customer_id, phone_number, phone_number_id')
+        .single();
+      if (insErr) {
+        // Race: andere caller insertte intussen (of pre-existing rij die stap 2
+        // om een of andere reden niet zag). Re-SELECT met dezelfde tuple.
+        if (insErr.code === '23505') {
+          const { data: again, error: againErr } = await supabaseAdmin
+            .from('whatsapp_conversations')
+            .select('id, customer_id, phone_number, phone_number_id')
+            .eq('phone_number', phoneE164Plus)
+            .eq('phone_number_id', outboundPnId)
+            .maybeSingle();
+          if (againErr || !again) {
+            console.warn('[dunning-executor whatsapp] conv race re-select fail:', againErr?.message || 'no row');
+          } else {
+            conv = again;
+          }
+        } else {
+          console.warn('[dunning-executor whatsapp] conv insert fail:', insErr.message);
+        }
+      } else if (inserted) {
+        conv = inserted;
+      }
+    } catch (e) {
+      console.warn('[dunning-executor whatsapp] conv insert exception:', e?.message);
+    }
+  }
+  if (!conv) {
+    // Alle 3 stappen faalden — skip fail-soft (run klapt niet).
+    return {
+      status: 'skipped',
+      log_event: 'whatsapp_skipped_conv_create_failed',
+      log_payload: {
+        template_id: template.id,
+        meta_template_name: template.meta_template_name,
+        to: phoneE164Plus,
+        outbound_phone_number_id: outboundPnId || null,
+        reason: 'Kon geen whatsapp_conversation vinden of aanmaken (zie warnings hierboven)',
+      },
+    };
+  }
+
+  // Autoritatief: gebruik conversation.phone_number (webhook/insert-genormaliseerd)
+  // boven customer.phone voor de Meta-call.
+  const sendTo = conv.phone_number || phoneE164Plus;
+  // Als de bestaande conv al een phone_number_id had, wint die (multi-line correctness).
+  if (conv.phone_number_id) outboundPnId = conv.phone_number_id;
 
   // Positionele variables volgens dezelfde volgorde als joost-outbound-send:
   //   1=NAAM, 2=FACTUUR_NR, 3=TOTAAL_BEDRAG, 4=DAGEN_OVERDUE, 5=VERVAL_DATUM.
