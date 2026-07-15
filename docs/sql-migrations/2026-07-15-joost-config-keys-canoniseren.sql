@@ -1,29 +1,55 @@
 -- 2026-07-15-joost-config-keys-canoniseren.sql
--- Fix: joost_config.autonomy_config bevatte foute keys omdat de UI
--- (modules/shared/finance-instellingen.js) verkorte namen schreef die de
--- decision-engine (api/joost-autonomy-evaluate.js) niet las.
+-- Fix: joost_config.autonomy_config bevatte 3 varianten van dezelfde keys omdat
+--   1) de UI (finance-instellingen.js) verkorte namen schreef (max_total, ...)
+--   2) de seed-migratie (2026-06-09-joost-e2-autonomy-full.sql) ANDERE verkorte
+--      namen gebruikte (max_messages_per_conv_total, min_seconds_between_messages)
+--   3) de decision-engine (api/joost-autonomy-evaluate.js) canonical LANGE namen
+--      leest (max_messages_per_conversation_total, cooldown_after_outbound_seconds)
 --
--- Achtergrond: joost-config-upsert.js overschrijft autonomy_config VOLLEDIG
--- bij UPDATE (read-modify-write vanuit UI). Als Jeffrey ooit een save deed
--- via Instellingen->Joost, staan de canonical seed-keys niet meer in de DB
--- en valt de engine terug op code-defaults.
+-- joost-config-upsert.js overschrijft autonomy_config VOLLEDIG bij UPDATE
+-- (r182-186 "UI-laag stuurt de full blob"), dus historische UI-saves hebben
+-- canonical keys al kunnen weggooien.
 --
--- Deze migratie is DEFENSIEF idempotent:
---   - Alleen fixen waar de foute key aanwezig is EN de canonical key ONTBREEKT
---     (of NULL is). Als de canonical key al waarde heeft, blijft die staan
---     (dan is-ie leidend en heeft de UI 'em al vervangen door onze fix).
---   - Foute keys worden na copy opgeruimd (jsonb `#-` operator).
---   - Idempotent: na re-run doet 't niets (WHERE-guards vinden geen rijen meer).
+-- Deze migratie is defensief idempotent:
+--   - Alleen COPY-en waar canonical key ontbreekt (foute rijen mag je niet
+--     overschrijven als iemand al de canonical waarde gezet heeft).
+--   - Daarna foute keys opruimen (jsonb #- operator) zodat geen "dode
+--     instellingen" achterblijven die verwarring geven.
 --
--- SQL-string-conventie (les uit #758): geen losse apostrofs in string-literals.
--- Alle jsonb-paths als text-arrays.
+-- KEY-CONTRACT eindtoestand (na deze migratie):
+--   autonomy_config.communication_limits:
+--     max_messages_per_conversation_per_day
+--     max_messages_per_conversation_total
+--     cooldown_after_outbound_seconds    <-- SECONDEN (canonical eenheid)
+--     office_hours_only, office_hours_start/end/days/tz
+--     no_reply_pause_threshold, no_reply_pause_duration_hours
+--   autonomy_config.arrangement_mandate:
+--     allowed_types
+--     min_total_amount_to_negotiate_eur
+--     max_total_amount_to_auto_propose_eur
+--     uitstel.{max_dagen_total, ...}
+--     splitsing.{max_termijnen_total, ...}
+--
+-- Voor module='finance' zetten we aan het eind Jeffreys operationele waarden:
+--   max_messages_per_conversation_per_day = 10
+--   max_messages_per_conversation_total   = 10
+--   cooldown_after_outbound_seconds       = 30
+-- Andere modules ('events', 'onboarding'): alleen key-hernoeming, waarden blijven.
+--
+-- SQL-string-conventie (les uit #758): geen losse apostrofs. Alle jsonb-paths
+-- als text-arrays. Tokenizer-check vóór oplevering.
 
 BEGIN;
 
 -- =============================================================================
--- 1) communication_limits: 6 foute keys naar canonical
+-- 1) communication_limits: canonicalise per-day / total / cooldown
 -- =============================================================================
--- max_per_day -> max_messages_per_conversation_per_day
+-- Er zijn TWEE oude varianten voor per_day en total (UI vs seed):
+--   UI-oud:   max_per_day                       max_total
+--   Seed-oud: max_messages_per_conv_per_day     max_messages_per_conv_total
+-- Canonical: max_messages_per_conversation_per_day / _total
+
+-- max_per_day (UI-oud) -> canonical
 UPDATE public.joost_config
 SET autonomy_config = jsonb_set(
       autonomy_config #- '{communication_limits,max_per_day}',
@@ -34,7 +60,30 @@ SET autonomy_config = jsonb_set(
 WHERE autonomy_config->'communication_limits' ? 'max_per_day'
   AND NOT (autonomy_config->'communication_limits' ? 'max_messages_per_conversation_per_day');
 
--- max_total -> max_messages_per_conversation_total
+UPDATE public.joost_config
+SET autonomy_config = autonomy_config #- '{communication_limits,max_per_day}',
+    updated_at = now()
+WHERE autonomy_config->'communication_limits' ? 'max_per_day'
+  AND autonomy_config->'communication_limits' ? 'max_messages_per_conversation_per_day';
+
+-- max_messages_per_conv_per_day (seed-oud) -> canonical
+UPDATE public.joost_config
+SET autonomy_config = jsonb_set(
+      autonomy_config #- '{communication_limits,max_messages_per_conv_per_day}',
+      '{communication_limits,max_messages_per_conversation_per_day}',
+      autonomy_config->'communication_limits'->'max_messages_per_conv_per_day'
+    ),
+    updated_at = now()
+WHERE autonomy_config->'communication_limits' ? 'max_messages_per_conv_per_day'
+  AND NOT (autonomy_config->'communication_limits' ? 'max_messages_per_conversation_per_day');
+
+UPDATE public.joost_config
+SET autonomy_config = autonomy_config #- '{communication_limits,max_messages_per_conv_per_day}',
+    updated_at = now()
+WHERE autonomy_config->'communication_limits' ? 'max_messages_per_conv_per_day'
+  AND autonomy_config->'communication_limits' ? 'max_messages_per_conversation_per_day';
+
+-- max_total (UI-oud) -> canonical
 UPDATE public.joost_config
 SET autonomy_config = jsonb_set(
       autonomy_config #- '{communication_limits,max_total}',
@@ -45,39 +94,83 @@ SET autonomy_config = jsonb_set(
 WHERE autonomy_config->'communication_limits' ? 'max_total'
   AND NOT (autonomy_config->'communication_limits' ? 'max_messages_per_conversation_total');
 
--- min_seconds_between -> cooldown_after_outbound_minutes (units-conversie: seconds/60 -> minutes, CEIL)
-UPDATE public.joost_config
-SET autonomy_config = jsonb_set(
-      autonomy_config #- '{communication_limits,min_seconds_between}',
-      '{communication_limits,cooldown_after_outbound_minutes}',
-      to_jsonb(GREATEST(1, CEIL((autonomy_config->'communication_limits'->>'min_seconds_between')::numeric / 60.0)::int))
-    ),
-    updated_at = now()
-WHERE autonomy_config->'communication_limits' ? 'min_seconds_between'
-  AND NOT (autonomy_config->'communication_limits' ? 'cooldown_after_outbound_minutes')
-  AND (autonomy_config->'communication_limits'->>'min_seconds_between') ~ '^[0-9]+(\.[0-9]+)?$';
-
--- Als min_seconds_between wel bestaat maar cooldown_after_outbound_minutes OOK -> alleen foute key opruimen.
-UPDATE public.joost_config
-SET autonomy_config = autonomy_config #- '{communication_limits,min_seconds_between}',
-    updated_at = now()
-WHERE autonomy_config->'communication_limits' ? 'min_seconds_between'
-  AND autonomy_config->'communication_limits' ? 'cooldown_after_outbound_minutes';
-
--- Idem voor max_per_day / max_total waar canonical al bestond: foute key opruimen.
-UPDATE public.joost_config
-SET autonomy_config = autonomy_config #- '{communication_limits,max_per_day}',
-    updated_at = now()
-WHERE autonomy_config->'communication_limits' ? 'max_per_day'
-  AND autonomy_config->'communication_limits' ? 'max_messages_per_conversation_per_day';
-
 UPDATE public.joost_config
 SET autonomy_config = autonomy_config #- '{communication_limits,max_total}',
     updated_at = now()
 WHERE autonomy_config->'communication_limits' ? 'max_total'
   AND autonomy_config->'communication_limits' ? 'max_messages_per_conversation_total';
 
--- office_start -> office_hours_start
+-- max_messages_per_conv_total (seed-oud) -> canonical
+UPDATE public.joost_config
+SET autonomy_config = jsonb_set(
+      autonomy_config #- '{communication_limits,max_messages_per_conv_total}',
+      '{communication_limits,max_messages_per_conversation_total}',
+      autonomy_config->'communication_limits'->'max_messages_per_conv_total'
+    ),
+    updated_at = now()
+WHERE autonomy_config->'communication_limits' ? 'max_messages_per_conv_total'
+  AND NOT (autonomy_config->'communication_limits' ? 'max_messages_per_conversation_total');
+
+UPDATE public.joost_config
+SET autonomy_config = autonomy_config #- '{communication_limits,max_messages_per_conv_total}',
+    updated_at = now()
+WHERE autonomy_config->'communication_limits' ? 'max_messages_per_conv_total'
+  AND autonomy_config->'communication_limits' ? 'max_messages_per_conversation_total';
+
+-- ── cooldown: 3 oude varianten -> cooldown_after_outbound_seconds ──
+-- min_seconds_between (UI-oud, seconden) -> _seconds
+UPDATE public.joost_config
+SET autonomy_config = jsonb_set(
+      autonomy_config #- '{communication_limits,min_seconds_between}',
+      '{communication_limits,cooldown_after_outbound_seconds}',
+      autonomy_config->'communication_limits'->'min_seconds_between'
+    ),
+    updated_at = now()
+WHERE autonomy_config->'communication_limits' ? 'min_seconds_between'
+  AND NOT (autonomy_config->'communication_limits' ? 'cooldown_after_outbound_seconds');
+
+UPDATE public.joost_config
+SET autonomy_config = autonomy_config #- '{communication_limits,min_seconds_between}',
+    updated_at = now()
+WHERE autonomy_config->'communication_limits' ? 'min_seconds_between'
+  AND autonomy_config->'communication_limits' ? 'cooldown_after_outbound_seconds';
+
+-- min_seconds_between_messages (seed-oud, seconden) -> _seconds
+UPDATE public.joost_config
+SET autonomy_config = jsonb_set(
+      autonomy_config #- '{communication_limits,min_seconds_between_messages}',
+      '{communication_limits,cooldown_after_outbound_seconds}',
+      autonomy_config->'communication_limits'->'min_seconds_between_messages'
+    ),
+    updated_at = now()
+WHERE autonomy_config->'communication_limits' ? 'min_seconds_between_messages'
+  AND NOT (autonomy_config->'communication_limits' ? 'cooldown_after_outbound_seconds');
+
+UPDATE public.joost_config
+SET autonomy_config = autonomy_config #- '{communication_limits,min_seconds_between_messages}',
+    updated_at = now()
+WHERE autonomy_config->'communication_limits' ? 'min_seconds_between_messages'
+  AND autonomy_config->'communication_limits' ? 'cooldown_after_outbound_seconds';
+
+-- cooldown_after_outbound_minutes (interim, minutes) -> _seconds (*60)
+UPDATE public.joost_config
+SET autonomy_config = jsonb_set(
+      autonomy_config #- '{communication_limits,cooldown_after_outbound_minutes}',
+      '{communication_limits,cooldown_after_outbound_seconds}',
+      to_jsonb(((autonomy_config->'communication_limits'->>'cooldown_after_outbound_minutes')::int) * 60)
+    ),
+    updated_at = now()
+WHERE autonomy_config->'communication_limits' ? 'cooldown_after_outbound_minutes'
+  AND NOT (autonomy_config->'communication_limits' ? 'cooldown_after_outbound_seconds')
+  AND (autonomy_config->'communication_limits'->>'cooldown_after_outbound_minutes') ~ '^[0-9]+$';
+
+UPDATE public.joost_config
+SET autonomy_config = autonomy_config #- '{communication_limits,cooldown_after_outbound_minutes}',
+    updated_at = now()
+WHERE autonomy_config->'communication_limits' ? 'cooldown_after_outbound_minutes'
+  AND autonomy_config->'communication_limits' ? 'cooldown_after_outbound_seconds';
+
+-- office_start / office_end (UI-oud) -> office_hours_start / _end
 UPDATE public.joost_config
 SET autonomy_config = jsonb_set(
       autonomy_config #- '{communication_limits,office_start}',
@@ -94,7 +187,6 @@ SET autonomy_config = autonomy_config #- '{communication_limits,office_start}',
 WHERE autonomy_config->'communication_limits' ? 'office_start'
   AND autonomy_config->'communication_limits' ? 'office_hours_start';
 
--- office_end -> office_hours_end
 UPDATE public.joost_config
 SET autonomy_config = jsonb_set(
       autonomy_config #- '{communication_limits,office_end}',
@@ -112,9 +204,8 @@ WHERE autonomy_config->'communication_limits' ? 'office_end'
   AND autonomy_config->'communication_limits' ? 'office_hours_end';
 
 -- =============================================================================
--- 2) arrangement_mandate top-level: 2 foute keys naar canonical
+-- 2) arrangement_mandate top-level: 2 foute UI-keys -> canonical
 -- =============================================================================
--- min_to_negotiate -> min_total_amount_to_negotiate_eur
 UPDATE public.joost_config
 SET autonomy_config = jsonb_set(
       autonomy_config #- '{arrangement_mandate,min_to_negotiate}',
@@ -131,7 +222,6 @@ SET autonomy_config = autonomy_config #- '{arrangement_mandate,min_to_negotiate}
 WHERE autonomy_config->'arrangement_mandate' ? 'min_to_negotiate'
   AND autonomy_config->'arrangement_mandate' ? 'min_total_amount_to_negotiate_eur';
 
--- max_auto_propose -> max_total_amount_to_auto_propose_eur
 UPDATE public.joost_config
 SET autonomy_config = jsonb_set(
       autonomy_config #- '{arrangement_mandate,max_auto_propose}',
@@ -149,9 +239,9 @@ WHERE autonomy_config->'arrangement_mandate' ? 'max_auto_propose'
   AND autonomy_config->'arrangement_mandate' ? 'max_total_amount_to_auto_propose_eur';
 
 -- =============================================================================
--- 3) arrangement_mandate genest: 2 foute top-level keys naar splitsing.*/uitstel.*
+-- 3) arrangement_mandate genest: 2 foute top-level keys -> splitsing.*/uitstel.*
 -- =============================================================================
--- max_termijnen -> splitsing.max_termijnen_total (met behoud van bestaande splitsing sub-keys)
+-- max_termijnen -> splitsing.max_termijnen_total (met behoud van bestaande sub-keys)
 UPDATE public.joost_config
 SET autonomy_config = jsonb_set(
       autonomy_config #- '{arrangement_mandate,max_termijnen}',
@@ -170,7 +260,7 @@ SET autonomy_config = autonomy_config #- '{arrangement_mandate,max_termijnen}',
 WHERE autonomy_config->'arrangement_mandate' ? 'max_termijnen'
   AND COALESCE(autonomy_config->'arrangement_mandate'->'splitsing', '{}'::jsonb) ? 'max_termijnen_total';
 
--- max_uitstel_dagen -> uitstel.max_dagen_total (met behoud van bestaande uitstel sub-keys)
+-- max_uitstel_dagen -> uitstel.max_dagen_total
 UPDATE public.joost_config
 SET autonomy_config = jsonb_set(
       autonomy_config #- '{arrangement_mandate,max_uitstel_dagen}',
@@ -189,6 +279,31 @@ SET autonomy_config = autonomy_config #- '{arrangement_mandate,max_uitstel_dagen
 WHERE autonomy_config->'arrangement_mandate' ? 'max_uitstel_dagen'
   AND COALESCE(autonomy_config->'arrangement_mandate'->'uitstel', '{}'::jsonb) ? 'max_dagen_total';
 
+-- =============================================================================
+-- 4) Finance operationele waarden zetten (Jeffrey's target: 10 / 10 / 30s)
+-- =============================================================================
+-- Non-destructief voor office_hours_* (blijven zoals ingesteld: 08:00-20:00).
+-- Overschrijft ALTIJD (idempotent voor deze specifieke waarden — bij re-run
+-- blijven 10/10/30 gewoon staan; als iemand ze via UI aanpast naar iets
+-- anders wordt dat bij re-run WEL teruggezet — die is idempotent per
+-- migratie-draai, niet t.o.v. latere UI-wijzigingen).
+UPDATE public.joost_config
+SET autonomy_config = jsonb_set(
+      jsonb_set(
+        jsonb_set(
+          autonomy_config,
+          '{communication_limits,max_messages_per_conversation_per_day}',
+          to_jsonb(10)
+        ),
+        '{communication_limits,max_messages_per_conversation_total}',
+        to_jsonb(10)
+      ),
+      '{communication_limits,cooldown_after_outbound_seconds}',
+      to_jsonb(30)
+    ),
+    updated_at = now()
+WHERE module = 'finance';
+
 COMMIT;
 
 -- =============================================================================
@@ -198,30 +313,26 @@ COMMIT;
 --        autonomy_config->'communication_limits' AS comm_limits,
 --        autonomy_config->'arrangement_mandate'  AS mandate
 -- FROM public.joost_config
--- WHERE module = 'finance';
+-- ORDER BY module;
 --
--- Verwacht: geen keys `max_per_day`, `max_total`, `min_seconds_between`,
--- `office_start`, `office_end` in comm_limits;
--- geen keys `min_to_negotiate`, `max_auto_propose`, `max_termijnen`,
--- `max_uitstel_dagen` in mandate top-level.
--- Wel: max_messages_per_conversation_per_day, max_messages_per_conversation_total,
--- cooldown_after_outbound_minutes, office_hours_start, office_hours_end,
--- min_total_amount_to_negotiate_eur, max_total_amount_to_auto_propose_eur,
--- uitstel.max_dagen_total, splitsing.max_termijnen_total.
-
+-- Verwacht voor 'finance':
+--   comm_limits keys = {max_messages_per_conversation_per_day, _total,
+--                       cooldown_after_outbound_seconds, office_hours_only,
+--                       office_hours_start, office_hours_end, office_hours_tz,
+--                       office_hours_days, no_reply_pause_threshold,
+--                       no_reply_pause_duration_hours}
+--   comm_limits waarden: per_day=10, total=10, cooldown_seconds=30
+--   mandate keys: allowed_types, min_total_amount_to_negotiate_eur,
+--                 max_total_amount_to_auto_propose_eur, uitstel.*, splitsing.*,
+--                 abonnement_pauze, abonnement_stop, kwijtschelding
+--   geen dode keys uit UI-oud of seed-oud.
+--
+-- Voor 'events' en 'onboarding': alleen key-hernoemingen, geen waarde-wijzigingen.
+--
 -- =============================================================================
 -- ROLLBACK (alleen binnen rollback-window)
 -- =============================================================================
--- Deze migratie is destructief voor de foute keys (jsonb #-). Rollback zou
--- vereisen dat je de foute keys herstelt uit de canonical waarden -- doe dat
--- alleen als je het zeker weet. Voorbeeld voor communication_limits:
--- BEGIN;
---   UPDATE public.joost_config
---   SET autonomy_config = jsonb_set(
---         autonomy_config,
---         '{communication_limits,max_per_day}',
---         autonomy_config->'communication_limits'->'max_messages_per_conversation_per_day'
---       )
---   WHERE autonomy_config->'communication_limits' ? 'max_messages_per_conversation_per_day';
---   -- idem voor de andere keys.
--- COMMIT;
+-- Deze migratie is destructief voor foute keys (jsonb #-). Rollback vereist
+-- reconstructie uit de canonical waarden. Voor finance-caps: pas een handmatige
+-- UPDATE toe met de oude waarden als je die weet. Verifieer eerst met SELECT
+-- voordat je een rollback overweegt.

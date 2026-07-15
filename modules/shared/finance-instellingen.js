@@ -443,8 +443,8 @@
                       <input type="number" id="commMaxTotal" class="form-input" min="0" step="1" value="10" title="max_messages_per_conversation_total — maximum aantal berichten dat Joost in één conversatie mag sturen; bij bereiken volgt een taak in Open Acties" />
                     </div>
                     <div>
-                      <label class="form-label" for="commMinSecondsBetween">cooldown (minuten)</label>
-                      <input type="number" id="commMinSecondsBetween" class="form-input" min="0" step="1" value="60" title="cooldown_after_outbound_minutes — minimaal aantal minuten tussen twee opeenvolgende outbound-berichten in dezelfde conversatie" />
+                      <label class="form-label" for="commMinSecondsBetween">cooldown (seconden)</label>
+                      <input type="number" id="commMinSecondsBetween" class="form-input" min="0" step="1" value="30" title="cooldown_after_outbound_seconds — minimaal aantal seconden tussen twee opeenvolgende outbound-berichten in dezelfde conversatie" />
                     </div>
                   </div>
                   <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:12px;align-items:end;margin-top:10px">
@@ -777,6 +777,11 @@
     return out;
   }
 
+  // KEY-CONTRACT voor autonomy_config: zie de header van
+  // api/joost-autonomy-evaluate.js. UI, seeds en migraties gebruiken EXACT
+  // dezelfde keys als de decision-engine leest. Dit blok (load + save)
+  // implementeert dat contract voor Joost/finance; fallback-ladders zijn
+  // uitsluitend voor rijen die nog niet door de canoniseren-migratie zijn.
   async function loadJoostAutonomyConfig() {
     const host = _state.hostMounted; if (!host) return;
     const loading = host.querySelector('#joostAutoLoading');
@@ -831,18 +836,31 @@
       setVal('mandateMaxAutoPropose',   mandate.max_total_amount_to_auto_propose_eur ?? mandate.max_auto_propose,   5);
 
       const comm = ac.communication_limits || {};
-      setVal('commMaxPerDay',         comm.max_messages_per_conversation_per_day ?? comm.max_per_day,        3);
-      setVal('commMaxTotal',          comm.max_messages_per_conversation_total   ?? comm.max_total,         10);
-      // cooldown-input toont MINUTEN sinds de key-canonisation. Legacy-fallback:
-      // als de rij nog een `min_seconds_between` heeft (oude UI), ronden we naar
-      // hele minuten (ceil) zodat de gebruiker niet in "0 minuten"-verwarring valt.
-      const _cooldownMin = (typeof comm.cooldown_after_outbound_minutes === 'number')
-        ? comm.cooldown_after_outbound_minutes
-        : (typeof comm.min_seconds_between === 'number' ? Math.ceil(comm.min_seconds_between / 60) : null);
-      setVal('commMinSecondsBetween', _cooldownMin, 60);
+      // KEY-CONTRACT: zie api/joost-autonomy-evaluate.js. Fallback-ladder voor
+      // rijen die nog niet gemigreerd zijn (2026-07-15-joost-config-keys-canoniseren):
+      //   per_day  : max_messages_per_conversation_per_day > max_messages_per_conv_per_day > max_per_day
+      //   total    : max_messages_per_conversation_total   > max_messages_per_conv_total   > max_total
+      //   cooldown : cooldown_after_outbound_seconds > cooldown_after_outbound_minutes*60
+      //              > min_seconds_between > min_seconds_between_messages
+      setVal('commMaxPerDay', comm.max_messages_per_conversation_per_day
+                              ?? comm.max_messages_per_conv_per_day
+                              ?? comm.max_per_day, 3);
+      setVal('commMaxTotal',  comm.max_messages_per_conversation_total
+                              ?? comm.max_messages_per_conv_total
+                              ?? comm.max_total, 10);
+      const _cooldownSec = (typeof comm.cooldown_after_outbound_seconds === 'number')
+        ? comm.cooldown_after_outbound_seconds
+        : (typeof comm.cooldown_after_outbound_minutes === 'number')
+          ? comm.cooldown_after_outbound_minutes * 60
+          : (typeof comm.min_seconds_between === 'number')
+            ? comm.min_seconds_between
+            : (typeof comm.min_seconds_between_messages === 'number')
+              ? comm.min_seconds_between_messages
+              : null;
+      setVal('commMinSecondsBetween', _cooldownSec, 30);
       setChk('commOfficeHoursOnly',   comm.office_hours_only !== false);
-      setVal('commOfficeStart',       comm.office_hours_start ?? comm.office_start, '08:30');
-      setVal('commOfficeEnd',         comm.office_hours_end   ?? comm.office_end,   '18:00');
+      setVal('commOfficeStart',       comm.office_hours_start ?? comm.office_start, '08:00');
+      setVal('commOfficeEnd',         comm.office_hours_end   ?? comm.office_end,   '20:00');
 
       const pers = ac.personality || {};
       setVal('personalityMaxSentences', pers.max_sentences, 3);
@@ -927,14 +945,19 @@
       min_termijn_bedrag: numVal('mandateMinTermijnBedrag', 25),
     };
 
+    // KEY-CONTRACT: zie api/joost-autonomy-evaluate.js. Canonical eenheid
+    // voor cooldown = SECONDEN (was tijdelijk minutes in eerdere iteratie,
+    // toen bleek onnodig grof). Sub-object merge (`..._currentComm`) zorgt
+    // dat andere seed-sub-keys (office_hours_tz / _days / no_reply_pause_*)
+    // niet wegvallen bij een UI-save.
     const communication_limits = {
       ..._currentComm,
       max_messages_per_conversation_per_day: numVal('commMaxPerDay', 3),
       max_messages_per_conversation_total:   numVal('commMaxTotal', 10),
-      cooldown_after_outbound_minutes:       numVal('commMinSecondsBetween', 60),
+      cooldown_after_outbound_seconds:       numVal('commMinSecondsBetween', 30),
       office_hours_only:                     getChk('commOfficeHoursOnly'),
-      office_hours_start:                    (host.querySelector('#commOfficeStart')?.value || '08:30'),
-      office_hours_end:                      (host.querySelector('#commOfficeEnd')?.value || '18:00'),
+      office_hours_start:                    (host.querySelector('#commOfficeStart')?.value || '08:00'),
+      office_hours_end:                      (host.querySelector('#commOfficeEnd')?.value || '20:00'),
     };
 
     const personality = {
