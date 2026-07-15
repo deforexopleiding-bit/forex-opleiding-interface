@@ -85,6 +85,13 @@
 //              min_eerste_termijn_pct, auto_approve_if_within}
 //   abonnement_pauze / abonnement_stop / kwijtschelding: {enabled, requires_human_approval}
 //
+// autonomy_config.no_reply (Joost fase 2 — gespreks-pauze reminder-cron):
+//   reminder_1_hours         (int)      default 20  — uren na klant-inbound → reminder 1
+//   reminder_2_hours         (int)      default 24  — uren na reminder 1     → reminder 2
+//   resume_after_hours       (int)      default 24  — uren na reminder 2     → hervat run
+//   reminder_2_template_name (string|null) — naam van approved Meta-template voor R2
+//   Gelezen door: api/cron-dunning-conversation-reminders.js
+//
 // Legacy-keys die de engine NIET meer leest (blijven fallback in load-paden
 // zolang de migratie 2026-07-15-joost-config-keys-canoniseren.sql niet is
 // gedraaid): max_per_day, max_total, min_seconds_between,
@@ -132,7 +139,7 @@ function nowMs() { return Date.now(); }
 // Vercel-cron draait UTC; voor NL-office-hours (Europe/Amsterdam) doen we de
 // venster-check in-code i.p.v. via cron-syntax. Voordeel: één schedule werkt
 // zomer + winter zonder DST-shifts in vercel.json.
-function isWithinOfficeHours({ tz, days, startHHMM, endHHMM }, when = new Date()) {
+export function isWithinOfficeHours({ tz, days, startHHMM, endHHMM }, when = new Date()) {
   if (!tz || !startHHMM || !endHHMM) return true; // mis-config -> niet blokkeren
   try {
     // Lokale dag-of-week + lokale tijd in TZ.
@@ -593,7 +600,7 @@ export async function logAutonomyDecision({
  * telt mee in navFinanceTasksBadge (sidebar.js updateFinanceTasksBadge, via
  * /api/tasks-list?status=PENDING,APPROVED). Geen tweede meldingssysteem.
  */
-async function maybeCreateTotalCapTask({ supabaseAdmin: admin, conv_id, decision, triggered_by }) {
+export async function maybeCreateTotalCapTask({ supabaseAdmin: admin, conv_id, decision, triggered_by }) {
   // Conversation + klant ophalen (voor customer_id + label in taak-titel).
   let conv = null;
   try {

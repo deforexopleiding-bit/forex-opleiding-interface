@@ -489,22 +489,31 @@
                       <input type="number" id="outboundMaxPerConvPerDay" class="form-input" style="max-width:240px" min="0" step="1" value="2" />
                     </div>
                   </div>
-                  <div style="margin-top:10px">
-                    <div style="font-size:12px;font-weight:600;margin-bottom:6px">no_reply_days_per_step</div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-                      <div>
-                        <label class="form-label" for="outboundNoReplyStep1">stap 1</label>
-                        <input type="number" id="outboundNoReplyStep1" class="form-input" min="0" step="1" value="3" />
-                      </div>
-                      <div>
-                        <label class="form-label" for="outboundNoReplyStep2">stap 2</label>
-                        <input type="number" id="outboundNoReplyStep2" class="form-input" min="0" step="1" value="7" />
-                      </div>
-                      <div>
-                        <label class="form-label" for="outboundNoReplyStep3">stap 3</label>
-                        <input type="number" id="outboundNoReplyStep3" class="form-input" min="0" step="1" value="14" />
-                      </div>
+                </div>
+
+                <!-- (g) No-reply reminders (Joost fase 2) -->
+                <div class="form-group" style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px">
+                  <div style="font-weight:700;font-size:13px;margin-bottom:10px">Gesprek pauzeert de aanmaningen (no_reply)</div>
+                  <div style="font-size:11px;color:var(--text-faint);margin-bottom:12px">
+                    Zodra een klant reageert, pauzeert de aanmaningsflow. Blijft de klant stil, dan volgen 2 reminders en daarna hervat de flow.
+                  </div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+                    <div>
+                      <label class="form-label" for="noReplyReminder1Hours">reminder_1_hours</label>
+                      <input type="number" id="noReplyReminder1Hours" class="form-input" min="0" step="1" value="20" title="Uren na laatste klant-inbound → reminder 1 (vrij bericht, mits venster open)" />
                     </div>
+                    <div>
+                      <label class="form-label" for="noReplyReminder2Hours">reminder_2_hours</label>
+                      <input type="number" id="noReplyReminder2Hours" class="form-input" min="0" step="1" value="24" title="Uren na reminder 1 → reminder 2 (Meta-template)" />
+                    </div>
+                    <div>
+                      <label class="form-label" for="noReplyResumeAfterHours">resume_after_hours</label>
+                      <input type="number" id="noReplyResumeAfterHours" class="form-input" min="0" step="1" value="24" title="Uren na reminder 2 → aanmaningsflow hervat (mits geen actief arrangement)" />
+                    </div>
+                  </div>
+                  <div style="margin-top:10px">
+                    <label class="form-label" for="noReplyReminder2TemplateName">reminder_2_template_name (Meta approved)</label>
+                    <input type="text" id="noReplyReminder2TemplateName" class="form-input" placeholder="joost_reminder_2_nl" title="Naam van de goedgekeurde Meta-template. Zonder deze naam wordt reminder 2 overgeslagen." />
                   </div>
                 </div>
 
@@ -872,10 +881,15 @@
 
       const outb = ac.outbound || {};
       setVal('outboundMaxPerConvPerDay', outb.max_outbound_per_conv_per_day, 2);
-      const steps = Array.isArray(outb.no_reply_days_per_step) ? outb.no_reply_days_per_step : [3, 7, 14];
-      setVal('outboundNoReplyStep1', steps[0], 3);
-      setVal('outboundNoReplyStep2', steps[1], 7);
-      setVal('outboundNoReplyStep3', steps[2], 14);
+
+      // Joost fase 2 — no_reply reminders. Canonical keys volgens KEY-CONTRACT.
+      const noReply = ac.no_reply || {};
+      setVal('noReplyReminder1Hours',   noReply.reminder_1_hours,   20);
+      setVal('noReplyReminder2Hours',   noReply.reminder_2_hours,   24);
+      setVal('noReplyResumeAfterHours', noReply.resume_after_hours, 24);
+      const tmplName = noReply.reminder_2_template_name;
+      const tmplInput = host.querySelector('#noReplyReminder2TemplateName');
+      if (tmplInput) tmplInput.value = (tmplName == null || tmplName === '') ? '' : String(tmplName);
 
       if (loading) loading.style.display = 'none';
       if (form) form.style.display = '';
@@ -974,21 +988,34 @@
       use_emojis:    getChk('personalityUseEmojis'),
     };
 
+    // Outbound: no_reply_days_per_step is opgeruimd (dood — nergens gelezen).
+    // Behoud eventuele andere sub-keys (enabled, allowed_templates, etc) via
+    // spread van de bestaande waarde uit de snapshot.
     const outbound = {
+      ...(_currentAc.outbound || {}),
       max_outbound_per_conv_per_day: numVal('outboundMaxPerConvPerDay', 2),
-      no_reply_days_per_step: [
-        numVal('outboundNoReplyStep1', 3),
-        numVal('outboundNoReplyStep2', 7),
-        numVal('outboundNoReplyStep3', 14),
-      ],
+    };
+    // Verwijder expliciet de dode key als 'ie nog uit een oude save meekomt.
+    delete outbound.no_reply_days_per_step;
+
+    // Joost fase 2 — no_reply reminders (canonical keys).
+    const _tmplRaw = (host.querySelector('#noReplyReminder2TemplateName')?.value || '').trim();
+    const no_reply = {
+      ...(_currentAc.no_reply || {}),
+      reminder_1_hours:         numVal('noReplyReminder1Hours', 20),
+      reminder_2_hours:         numVal('noReplyReminder2Hours', 24),
+      resume_after_hours:       numVal('noReplyResumeAfterHours', 24),
+      reminder_2_template_name: _tmplRaw ? _tmplRaw : null,
     };
 
     const autonomy_config = {
+      ..._currentAc,
       intents,
       arrangement_mandate,
       communication_limits,
       personality,
       outbound,
+      no_reply,
     };
 
     const btn = host.querySelector('#joostAutoSaveBtn');
