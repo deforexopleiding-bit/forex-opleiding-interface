@@ -132,6 +132,20 @@ export default async function handler(req, res) {
       console.warn('[sandbox-simulate-inbound] pipeline hook soft-fail', e?.message);
     }
 
+    // 4b) Joost fase 2 — gespreks-pauze hook. Spiegel van inbox-webhook.js
+    // r1431-1446. Zodra een klant met een lopende dunning-run reageert,
+    // pauzeert de aanmaan-flow (paused_by_conversation_id gezet, reminder-
+    // teller op 0). Zonder deze hook blijft de run active en is de
+    // reminder-cirkel van #766 niet testbaar. Fail-soft — mag de simulatie
+    // NOOIT laten falen. Scope: super_admin + sandbox-klant is per
+    // definitie is_test=true (via getSandboxCustomer r22).
+    try {
+      const { pauseRunsForConversation } = await import('./_lib/dunning-arrangement-hooks.js');
+      await pauseRunsForConversation(convId, customer.id);
+    } catch (e) {
+      console.warn('[sandbox-simulate-inbound] conv-pauze hook soft-fail', convId, e?.message || e);
+    }
+
     // 5) Joost-keten — zelfde als de echte inbox-webhook (runJoostSuggest +
     // autonomie-chain via HTTP self-call), maar SYNCHROON. De #691-guard
     // in joost-send-autonomous onderschept de echte Meta-send voor
