@@ -389,8 +389,15 @@
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     };
     // Content-Type alleen toevoegen als body aanwezig en niet expliciet overschreven
-    // (voorkomt issues met FormData uploads — die hebben eigen multipart boundary)
-    if (options.body && !headers['Content-Type'] && typeof options.body === 'string') {
+    // (voorkomt issues met FormData uploads — die hebben eigen multipart boundary).
+    //
+    // #786 — HTTP-headers zijn per RFC 7230 §3.2 hoofdletterongevoelig. De
+    // eerdere check `!headers['Content-Type']` was hoofdlettergevoelig, dus
+    // een caller die 'content-type' schreef kreeg TWEE Content-Type headers
+    // in het uitgaande request → server: "invalid media type". Met de
+    // case-insensitive check kan dit nooit meer per ongeluk.
+    const hasContentType = Object.keys(headers).some((k) => k.toLowerCase() === 'content-type');
+    if (options.body && !hasContentType && typeof options.body === 'string') {
       headers['Content-Type'] = 'application/json';
     }
     return fetch(url, { ...options, headers });
