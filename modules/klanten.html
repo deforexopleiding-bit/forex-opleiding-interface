@@ -209,6 +209,17 @@
     .audit-raw { display:none; margin-top:6px; padding:10px; background:var(--bg); border:1px solid var(--border); border-radius:6px; font-family:monospace; font-size:11px; white-space:pre-wrap; word-break:break-word; max-height:280px; overflow-y:auto; color:var(--text-dim); }
     .audit-raw.visible { display:block; }
 
+    /* Wanbetalers-tijdlijn tab (feat/wanbetalers-tijdlijn-notities) */
+    .wb-tl-note-form textarea { width:100%; min-height:56px; padding:9px 11px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font:inherit; font-size:13px; resize:vertical; box-sizing:border-box; }
+    .wb-tl-item { display:grid; grid-template-columns:28px 1fr; gap:10px; padding:10px 12px; margin-bottom:8px; background:var(--bg); border:1px solid var(--border); border-radius:8px; }
+    .wb-tl-ic { font-size:15px; line-height:22px; text-align:center; color:var(--text-dim); }
+    .wb-tl-body { min-width:0; }
+    .wb-tl-h { font-size:13px; color:var(--text); line-height:1.35; }
+    .wb-tl-h strong { font-weight:600; }
+    .wb-tl-sub { font-size:11.5px; color:var(--text-faint); margin-top:3px; }
+    .wb-tl-desc { margin-top:6px; font-size:12.5px; color:var(--text); white-space:pre-wrap; word-break:break-word; }
+    .wb-tl-badge { display:inline-block; margin-left:6px; padding:1px 6px; border-radius:999px; font-size:10.5px; font-weight:700; background:#F59E0B22; color:#B45309; border:1px solid #F59E0B44; }
+
     /* Heractiveren-knop (alleen zichtbaar bij archived) */
     .btn-unarchive { background:#10B981; color:#fff; border:none; }
     .btn-unarchive:hover { background:#0EA371; }
@@ -501,6 +512,9 @@
           <button class="tab-btn" data-tab="facturen" role="tab" aria-selected="false" aria-controls="tab-panel-facturen" id="tab-btn-facturen">
             <i class="ti ti-receipt"></i> Facturen
           </button>
+          <button class="tab-btn" data-tab="wanbetalers" role="tab" aria-selected="false" aria-controls="tab-panel-wanbetalers" id="tab-btn-wanbetalers">
+            <i class="ti ti-alert-triangle"></i> Wanbetalers
+          </button>
           <button class="tab-btn" data-tab="audit" role="tab" aria-selected="false" aria-controls="tab-panel-audit" id="tab-btn-audit">
             <i class="ti ti-history"></i> Audit <span class="tab-count" id="tab-count-audit">0</span>
           </button>
@@ -623,6 +637,31 @@
         <div class="tab-content" id="tab-panel-facturen" role="tabpanel" aria-labelledby="tab-btn-facturen" hidden>
           <div id="facturen-wrap">
             <div class="placeholder-card">Facturen laden…</div>
+          </div>
+        </div>
+
+        <!-- Tab: Wanbetalers -->
+        <div class="tab-content" id="tab-panel-wanbetalers" role="tabpanel" aria-labelledby="tab-btn-wanbetalers" hidden>
+          <div class="detail-section">
+            <h3><i class="ti ti-alert-triangle"></i> Wanbetalers-tijdlijn</h3>
+            <p class="cust-empty" style="margin:0 0 12px 0">
+              Alle gebeurtenissen uit het wanbetaler-dossier: notities, belpogingen,
+              regelingen, taken, workflow-events, WhatsApp en klant-audit.
+            </p>
+            <div class="wb-tl-note-form" style="margin-bottom:14px">
+              <textarea id="wb-note-input" placeholder="Notitie toevoegen (verschijnt bovenaan de tijdlijn)…" rows="2"></textarea>
+              <div style="display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-top:6px">
+                <button class="btn btn-sm" type="button" id="wb-note-refresh" title="Ververs">
+                  <i class="ti ti-refresh"></i> Ververs
+                </button>
+                <button class="btn btn-sm btn-primary" type="button" id="wb-note-save">
+                  <i class="ti ti-note"></i> Notitie plaatsen
+                </button>
+              </div>
+            </div>
+            <div id="wb-timeline-list">
+              <div class="placeholder-card">Tijdlijn laden…</div>
+            </div>
           </div>
         </div>
 
@@ -892,6 +931,7 @@ const detailState = {
   customer: null,
   notes: null,            // null = nog niet geladen; [] = geladen, leeg
   audit: null,            // idem, voor audit-tab lazy-load
+  wanbetalers: null,      // idem, voor Wanbetalers-tab lazy-load
   activeTab: 'profiel',
   // Fase 2A.4:
   tagEditMode: false,     // toggle voor Tags-kaart edit-controls
@@ -899,7 +939,7 @@ const detailState = {
   //  gedeeld met lijst-view bulk-tag modal in commit 6)
   editingNoteId: null,    // id van note in inline-edit modus (null = geen)
 };
-const VALID_TABS = new Set(['profiel', 'communicatie', 'offertes', 'abonnementen', 'facturen', 'audit']);
+const VALID_TABS = new Set(['profiel', 'communicatie', 'offertes', 'abonnementen', 'facturen', 'wanbetalers', 'audit']);
 const UUID_RE_CLIENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const fmtDateTime = (iso) => {
@@ -1009,6 +1049,7 @@ function activateDetailTab(tabName, updateUrl) {
   else if (tabName === 'offertes')     renderOffertesTab();
   else if (tabName === 'abonnementen') renderAbonnementenTab();
   else if (tabName === 'facturen')     renderFacturenTab();
+  else if (tabName === 'wanbetalers')  renderWanbetalersTab();
   else if (tabName === 'audit')        renderAuditTab();
 
   if (updateUrl) {
@@ -2381,6 +2422,115 @@ async function renderAuditTab() {
   });
 }
 
+// ── Wanbetalers-tijdlijn (feat/wanbetalers-tijdlijn-notities) ────────────
+// Spiegel van renderAuditTab: cache in detailState.wanbetalers, lazy load,
+// error-fallback, empty-state. Notitie-post via /api/customer-notes POST
+// (bestaand endpoint, hergebruikt vanuit klant-detail Communicatie-tab).
+// Renderer is identiek aan de tijdlijn in modules/finance.html #caseSheet
+// zodat wanbetaler-events op beide plekken hetzelfde uitziene.
+
+const WB_TL_ICON = {
+  note:          '📝',
+  call:          '📞',
+  wa_in:         '💬',
+  wa_out:        '💬',
+  run_started:   '▶️',
+  run_completed: '⏹️',
+};
+function wbTlIcon(t) {
+  const s = String(t || '');
+  if (WB_TL_ICON[s]) return WB_TL_ICON[s];
+  if (s.startsWith('task_'))        return '✅';
+  if (s.startsWith('arrangement_')) return '🤝';
+  if (s.startsWith('dunning_'))     return '⚙️';
+  if (s.startsWith('audit_'))       return '📋';
+  return '•';
+}
+
+async function renderWanbetalersTab() {
+  const listEl = document.getElementById('wb-timeline-list');
+  const inp    = document.getElementById('wb-note-input');
+  const btnSv  = document.getElementById('wb-note-save');
+  const btnRf  = document.getElementById('wb-note-refresh');
+
+  // Wire buttons idempotent — de tab kan meerdere keren geactiveerd worden.
+  if (btnSv && !btnSv._wbBound) { btnSv._wbBound = true; btnSv.addEventListener('click', submitWanbetalersNote); }
+  if (btnRf && !btnRf._wbBound) { btnRf._wbBound = true; btnRf.addEventListener('click', () => { detailState.wanbetalers = null; renderWanbetalersTab(); }); }
+
+  if (detailState.wanbetalers === null) {
+    listEl.innerHTML = '<div class="placeholder-card">Tijdlijn laden…</div>';
+    try {
+      const res = await window.AgentShared.apiFetch('/api/wanbetalers-timeline?customer_id=' + encodeURIComponent(detailState.customerId));
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('HTTP ' + res.status));
+      }
+      const { items } = await res.json();
+      detailState.wanbetalers = items || [];
+    } catch (err) {
+      console.error('[klanten] wanbetalers load failed:', err);
+      listEl.innerHTML = `<div class="placeholder-card" style="color:#EF4444;">Kon tijdlijn niet laden: ${escapeHtml(err.message)}</div>`;
+      return;
+    }
+  }
+
+  if (!detailState.wanbetalers.length) {
+    listEl.innerHTML = '<div class="placeholder-card">Nog geen wanbetaler-gebeurtenissen voor deze klant. Notities die je hierboven plaatst verschijnen hier.</div>';
+    return;
+  }
+
+  listEl.innerHTML = detailState.wanbetalers.map(renderWanbetalersEntry).join('');
+}
+
+function renderWanbetalersEntry(it) {
+  const when   = fmtDateTime(it.at);
+  const icon   = wbTlIcon(it.type);
+  const actor  = it.actor && it.actor.name ? ' · ' + escapeHtml(it.actor.name) : '';
+  const dry    = it.dry_run ? ' <span class="wb-tl-badge">dry-run</span>' : '';
+  const desc   = it.description
+    ? `<div class="wb-tl-desc">${escapeHtml(String(it.description)).replace(/\n/g, '<br>')}</div>`
+    : '';
+  return `
+    <div class="wb-tl-item">
+      <div class="wb-tl-ic">${icon}</div>
+      <div class="wb-tl-body">
+        <div class="wb-tl-h"><strong>${escapeHtml(it.title || it.type || '')}</strong>${dry}</div>
+        <div class="wb-tl-sub">${escapeHtml(when)}${actor}</div>
+        ${desc}
+      </div>
+    </div>`;
+}
+
+async function submitWanbetalersNote() {
+  const inp = document.getElementById('wb-note-input');
+  const txt = String((inp && inp.value) || '').trim();
+  if (!txt) return;
+  const btn = document.getElementById('wb-note-save');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> Opslaan…'; }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/customer-notes', {
+      method  : 'POST',
+      headers : { 'Content-Type': 'application/json' },
+      body    : JSON.stringify({ customer_id: detailState.customerId, body: txt }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d?.error || 'HTTP ' + r.status);
+    }
+    if (inp) inp.value = '';
+    detailState.wanbetalers = null;
+    // Notities-cache in Communicatie-tab ook resetten zodat de nieuwe note
+    // daar ook zichtbaar wordt na een tab-wissel.
+    detailState.notes = null;
+    await renderWanbetalersTab();
+  } catch (err) {
+    console.error('[klanten] wanbetalers note save failed:', err);
+    alert('Notitie opslaan mislukt: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-note"></i> Notitie plaatsen'; }
+  }
+}
+
 const AUDIT_ACTION_LABELS = {
   created:     'Aangemaakt',
   updated:     'Bewerkt',
@@ -2465,6 +2615,8 @@ function renderDetailNotFound() {
 function reloadDetail() {
   detailState.customer = null;
   detailState.notes = null;
+  detailState.audit = null;
+  detailState.wanbetalers = null;
   showDetailView(detailState.customerId);
 }
 window.reloadDetail = reloadDetail;
