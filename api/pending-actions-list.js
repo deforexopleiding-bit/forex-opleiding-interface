@@ -116,8 +116,11 @@ export default async function handler(req, res) {
     // scheduled_for in de toekomst (bv. terugbelafspraken). include_scheduled=1
     // zet dit uit voor admin-views die alles willen zien.
     if (!includeScheduled) {
+      // PostgREST or() parseert `.` als sub-field/operator-scheiding en `:`
+      // als iets speciaals; een ISO-timestamp ("2026-07-15T23:12:39.562Z")
+      // moet daarom dubbel-gequote worden, anders 500. Zie #772-recon.
       const nowIso = new Date().toISOString();
-      query = query.or(`scheduled_for.is.null,scheduled_for.lte.${nowIso}`);
+      query = query.or(`scheduled_for.is.null,scheduled_for.lte."${nowIso}"`);
     }
 
     const { data: rows, error, count } = await query;
