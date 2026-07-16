@@ -19922,6 +19922,7 @@
             <button id="sbxPaidBtn"    class="sr-abtn" type="button"><i class="ti ti-cash"></i> Markeer alle facturen betaald</button>
             <button id="sbxRunEngineBtn" class="sr-abtn primary" type="button"><i class="ti ti-player-play"></i> Run engine (test)</button>
             <button id="sbxRunBreachBtn" class="sr-abtn primary" type="button" title="Draait de arrangementen-bewaking (breach-check cron) op alleen de sandbox-klant. VERBROKEN/NAGEKOMEN wordt geflipt zoals 06:00 zou doen."><i class="ti ti-shield-check"></i> Bewaking draaien (test)</button>
+            <button id="sbxRunConvRemindersBtn" class="sr-abtn primary" type="button" title="Draait de no-reply reminder-cirkel van Joost (fase 2) op alleen de sandbox-klant. Detecteert stilte na inbound; stuurt reminder 1 → 2 → hervat run. Skip-reden wordt getoond (office-hours, caps, cooldown, template)."><i class="ti ti-clock-play"></i> Herinneringen draaien (test)</button>
             <button id="sbxRunBulkBtn"   class="sr-abtn primary" type="button"><i class="ti ti-send"></i> Bulk-job (test)</button>
             <button id="sbxSimCreditBtn" class="sr-abtn primary" type="button" title="Simuleer de kwartaal-crediteerronde lokaal op de test-persoon — geen TL-calls."><i class="ti ti-receipt-refund"></i> 🧪 Simuleer crediteerronde</button>
           </div>
@@ -20078,6 +20079,36 @@
         sbxReloadStatus();
       } catch (e) {
         window.AgentShared?.showToast?.('Bewaking-run mislukt: ' + (e?.message || 'onbekend'), 'error');
+      }
+    });
+
+    // "Herinneringen draaien (test)" — draait cron-dunning-conversation-
+    // reminders (Joost fase 2 no-reply cirkel) op alleen de sandbox-klant.
+    // Skips worden getoond in de toast zodat Jeffrey ziet waarom er niets
+    // gebeurde (OFFICE_HOURS_CLOSED / CAP_TOTAL / NO_TEMPLATE_CONFIGURED / …).
+    document.getElementById('sbxRunConvRemindersBtn')?.addEventListener('click', async () => {
+      const btn = document.getElementById('sbxRunConvRemindersBtn');
+      if (btn) btn.disabled = true;
+      try {
+        const d = await _sbxCall('/api/wanbetalers-sandbox-run-conversation-reminders', {});
+        const dryStr = d.dry_run ? ' (dry-run)' : '';
+        const parts = [
+          `evaluated=${d.evaluated || 0}`,
+          `r1=${d.reminder_1_sent || 0}`,
+          `r2=${d.reminder_2_sent || 0}`,
+          `resumed=${d.resumed || 0}`,
+        ];
+        // Toon eerste skip-reden voor duidelijkheid (office-hours-closed etc).
+        const firstSkip = Array.isArray(d.skipped) && d.skipped.length > 0 ? d.skipped[0] : null;
+        if (firstSkip) parts.push(`skip:${firstSkip.reason}`);
+        const errCount = Array.isArray(d.errors) ? d.errors.length : 0;
+        const tone = errCount > 0 ? 'error' : ((d.reminder_1_sent || 0) + (d.reminder_2_sent || 0) + (d.resumed || 0) > 0 ? 'success' : 'warning');
+        window.AgentShared?.showToast?.(`Herinneringen: ${parts.join(' · ')}${dryStr}`, tone);
+        sbxReloadStatus();
+      } catch (e) {
+        window.AgentShared?.showToast?.('Herinnering-run mislukt: ' + (e?.message || 'onbekend'), 'error');
+      } finally {
+        if (btn) btn.disabled = false;
       }
     });
 
