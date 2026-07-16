@@ -39,8 +39,26 @@
 import { supabaseAdmin } from '../supabase.js';
 
 /**
- * Pauzeer alle actieve dunning_workflow_runs van een klant vanwege een
- * nieuwe ACTIEF arrangement. Idempotent (dubbel-pauzeren geen kwaad).
+ * Pauzeer alle dunning_workflow_runs van een klant vanwege een nieuw ACTIEF
+ * arrangement, en zet de arrangement-reden — ook als de run al gepauzeerd
+ * was door een gesprek (Joost fase 2, #766).
+ *
+ * Dual-reason pattern (2-UPDATE, spiegel van pauseRunsForConversation):
+ *   1) Runs `status='active'`           → status='paused' + reden zetten.
+ *   2) Runs `status='paused'` waarvan   → alleen reden zetten,
+ *      paused_by_arrangement_id NULL       status blijft paused. Zo blijft
+ *      is (dus alleen door gesprek        het gesprek de andere pauze-
+ *      gepauzeerd)                        reden en unpauseRunsForConversation
+ *                                         weet dat de arrangement-reden ook
+ *                                         actief is → resumed niet naar
+ *                                         active zolang de afspraak loopt.
+ * `completed` / `cancelled` runs worden NOOIT aangeraakt.
+ *
+ * De 2e UPDATE filtert `paused_by_arrangement_id IS NULL` zodat een
+ * bestaande andere arrangement-koppeling nooit overschreven wordt (defensief;
+ * per klant hoort er hooguit één ACTIEF arrangement te zijn).
+ *
+ * Idempotent: dubbel-pauzeren geen kwaad.
  *
  * @param {string} arrangementId
  * @param {string} customerId
@@ -51,18 +69,37 @@ export async function pauseRunsForArrangement(arrangementId, customerId) {
     return { ok: false, paused_count: 0, error: 'arrangementId + customerId vereist' };
   }
   try {
-    const { data, error } = await supabaseAdmin
+    const nowIso = new Date().toISOString();
+    // 1) Actieve runs → paused met arrangement-reden.
+    const { data: paused, error: pErr } = await supabaseAdmin
       .from('dunning_workflow_runs')
       .update({
         status:                   'paused',
         paused_by_arrangement_id: arrangementId,
-        updated_at:               new Date().toISOString(),
+        updated_at:               nowIso,
       })
       .eq('customer_id', customerId)
       .eq('status', 'active')
       .select('id');
-    if (error) throw error;
-    const count = Array.isArray(data) ? data.length : 0;
+    if (pErr) throw pErr;
+    // 2) Runs al paused door alleen een gesprek → alleen arrangement-reden
+    //    erbij, status blijft paused. Zonder deze stap zou een run die eerst
+    //    door een inbound message gepauzeerd is, straks bij unpauseRunsFor
+    //    Conversation als "geen andere reden" naar active gaan — en de klant
+    //    krijgt aanmaningen ondanks een actieve betaalafspraak.
+    const { data: linked, error: lErr } = await supabaseAdmin
+      .from('dunning_workflow_runs')
+      .update({
+        paused_by_arrangement_id: arrangementId,
+        updated_at:               nowIso,
+      })
+      .eq('customer_id', customerId)
+      .eq('status', 'paused')
+      .is('paused_by_arrangement_id', null)
+      .select('id');
+    if (lErr) throw lErr;
+    const count = (Array.isArray(paused) ? paused.length : 0)
+                + (Array.isArray(linked) ? linked.length : 0);
     if (count > 0) {
       console.log(`[arrangement-hook] gepauzeerd ${count} runs voor klant ${customerId} (arrangement ${arrangementId})`);
     }
