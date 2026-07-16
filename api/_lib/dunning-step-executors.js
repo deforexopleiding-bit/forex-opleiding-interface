@@ -817,40 +817,30 @@ export async function executeTaskStep({ supabaseAdmin, run, step, customer, open
     ? openInvoices[0]
     : null;
 
-  // ─── DRY-RUN GUARD ────────────────────────────────────────────────
-  // Zelfde patroon als email/whatsapp-executors. In dry-run géén write
-  // naar pending_actions; wel log_event zodat de workflow doorloopt en
-  // je in dunning_log ziet wat er gebeurd zou zijn.
+  // ─── DRY-RUN DETECTIE (NIET blokkerend) ──────────────────────────
+  // In tegenstelling tot email/whatsapp-executors doen we in dry-run
+  // WEL de echte INSERT. Een taak is interne administratie (landt in
+  // pending_actions -> Wanbetalers > Acties, dat testklanten server-
+  // side uitfiltert via customers.is_test=false). Er gaat dus niks
+  // richting de klant, en zonder INSERT is de keten workflow -> taak
+  // -> badge niet testbaar.
+  //
+  // Wel markeren we de taak met payload.dry_run=true zodat sandbox-
+  // gegenereerde rijen herkenbaar zijn (voor toekomstige selectieve
+  // cleanup als CASCADE via customers-delete ooit onvoldoende blijkt).
+  //
+  // De log-event blijft dry_run:true tonen zodat duidelijk is dat de
+  // run zelf in dry-run draaide.
   let dry = false;
+  let buildDryRunLogPayload = null;
   try {
-    const { isDryRunEnabled, buildDryRunLogPayload } = await import('./dunning-dry-run.js');
-    dry = await isDryRunEnabled();
-    if (dry) {
-      return {
-        status: 'ok',
-        log_event: 'task_created',
-        log_payload: {
-          title:           rawTitle,
-          description:     rawDescription || null,
-          assignee_role:   assigneeRole,
-          customer_id:     customer.id,
-          invoice_id:      firstInvoice?.id || null,
-          workflow_id:     run?.workflow_id || null,
-          workflow_run_id: run?.id || null,
-          step_id:         step?.id || null,
-          pending_action_id: 'dry-run',
-          ...buildDryRunLogPayload({
-            channel: 'task',
-            to:      customer.id,
-            isTest:  !!customer?.is_test,
-            preview: { title: rawTitle, description: rawDescription.slice(0, 200) },
-          }),
-        },
-      };
-    }
+    const dryMod = await import('./dunning-dry-run.js');
+    dry = await dryMod.isDryRunEnabled();
+    buildDryRunLogPayload = dryMod.buildDryRunLogPayload;
   } catch (guardModuleErr) {
-    // Guard-module niet beschikbaar → fail-safe: GEEN taak aanmaken.
-    // Zelfde defensieve keuze als email-executor (r144-161).
+    // Guard-module niet beschikbaar → fail-safe: taak nog steeds NIET
+    // aanmaken. Interne actie of niet, we willen bij infra-issues niets
+    // stiekem doen. Consistent met email-executor (r144-161).
     console.warn('[dunning-executor task] dry-run module niet beschikbaar → skip insert', guardModuleErr?.message);
     return {
       status: 'skipped',
@@ -920,6 +910,11 @@ export async function executeTaskStep({ supabaseAdmin, run, step, customer, open
   // action_type='MANUAL_FOLLOWUP' zodat de taak in Open Acties (categorie
   // 'arrangement') verschijnt. arrangement_id=NULL — deze taak is
   // workflow-driven, niet arrangement-driven.
+  //
+  // Dry-run marker: payload.dry_run=true als de globale dry-run vlag AAN
+  // stond bij aanmaak. Sandbox-gegenereerde rijen zijn zo herkenbaar
+  // zonder aparte tabel of aparte source-suffix. CASCADE via customers-
+  // delete blijft de primaire cleanup (sandbox-reset delete is_test-klant).
   const payload = {
     title:           rawTitle,
     description:     rawDescription || null,
@@ -930,6 +925,7 @@ export async function executeTaskStep({ supabaseAdmin, run, step, customer, open
     workflow_run_id: run?.id || null,
     step_id:         step?.id || null,
     rationale:       `Taak aangemaakt door dunning-workflow-step (run ${run?.id || '?'})`,
+    ...(dry ? { dry_run: true } : {}),
   };
   const insertRow = {
     customer_id:         customer.id,
@@ -961,7 +957,15 @@ export async function executeTaskStep({ supabaseAdmin, run, step, customer, open
         workflow_id:       run?.workflow_id || null,
         workflow_run_id:   run?.id || null,
         step_id:           step?.id || null,
-        dry_run:           false,
+        dry_run:           dry,
+        ...(dry && buildDryRunLogPayload
+          ? buildDryRunLogPayload({
+              channel: 'task',
+              to:      customer.id,
+              isTest:  !!customer?.is_test,
+              preview: { title: rawTitle, description: rawDescription.slice(0, 200) },
+            })
+          : {}),
       },
     };
   } catch (e) {
@@ -1015,38 +1019,20 @@ export async function executeResumeDunningStep({ supabaseAdmin, run, step, custo
     };
   }
 
-  // ─── DRY-RUN GUARD ────────────────────────────────────────────────
+  // ─── DRY-RUN DETECTIE (NIET blokkerend) ──────────────────────────
+  // Status paused -> active is interne administratie (geen klantcommu-
+  // nicatie). Consistent met cron-arrangements-breach-check (#757) die
+  // status-flips in dry-run ook gewoon doet. Zonder deze flip is de
+  // keten "arrangement verbroken -> workflow hervat" niet testbaar.
   let dry = false;
+  let buildDryRunLogPayload = null;
   try {
-    const { isDryRunEnabled, buildDryRunLogPayload } = await import('./dunning-dry-run.js');
-    dry = await isDryRunEnabled();
-    if (dry) {
-      // Sanity-count zonder mutatie zodat de dry-run-log iets zinvols zegt.
-      const { data: pausedRows } = await supabaseAdmin
-        .from('dunning_workflow_runs')
-        .select('id')
-        .eq('customer_id', customer.id)
-        .eq('status', 'paused');
-      const pausedCount = Array.isArray(pausedRows) ? pausedRows.length : 0;
-      return {
-        status: 'ok',
-        log_event: 'dunning_resumed',
-        log_payload: {
-          customer_id:     customer.id,
-          workflow_id:     run?.workflow_id || null,
-          workflow_run_id: run?.id || null,
-          step_id:         step?.id || null,
-          would_resume_count: pausedCount,
-          ...buildDryRunLogPayload({
-            channel: 'resume_dunning',
-            to:      customer.id,
-            isTest:  !!customer?.is_test,
-            preview: { would_resume_count: pausedCount },
-          }),
-        },
-      };
-    }
+    const dryMod = await import('./dunning-dry-run.js');
+    dry = await dryMod.isDryRunEnabled();
+    buildDryRunLogPayload = dryMod.buildDryRunLogPayload;
   } catch (guardModuleErr) {
+    // Guard-module niet beschikbaar → status niet flippen. Consistent
+    // met email-executor: bij infra-issues niets stiekem doen.
     console.warn('[dunning-executor resume] dry-run module niet beschikbaar → skip', guardModuleErr?.message);
     return {
       status: 'skipped',
@@ -1061,7 +1047,7 @@ export async function executeResumeDunningStep({ supabaseAdmin, run, step, custo
     };
   }
 
-  // ─── LIVE ─────────────────────────────────────────────────────────
+  // ─── LIVE (ook in dry-run) ────────────────────────────────────────
   try {
     const { resumeAllPausedRunsForCustomer } = await import('./dunning-arrangement-hooks.js');
     const res = await resumeAllPausedRunsForCustomer(customer.id);
@@ -1099,7 +1085,15 @@ export async function executeResumeDunningStep({ supabaseAdmin, run, step, custo
         workflow_run_id: run?.id || null,
         step_id:         step?.id || null,
         resumed_count:   count,
-        dry_run:         false,
+        dry_run:         dry,
+        ...(dry && buildDryRunLogPayload
+          ? buildDryRunLogPayload({
+              channel: 'resume_dunning',
+              to:      customer.id,
+              isTest:  !!customer?.is_test,
+              preview: { resumed_count: count },
+            })
+          : {}),
       },
     };
   } catch (e) {
