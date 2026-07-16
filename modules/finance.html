@@ -16783,7 +16783,6 @@
     try {
       const r = await window.AgentShared.apiFetch('/api/wanbetalers-sandbox-simulate-inbound', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ body: text }),
       });
       const d = await r.json().catch(() => ({}));
@@ -16816,7 +16815,6 @@
     try {
       const r = await window.AgentShared.apiFetch('/api/wanbetalers-sandbox-oefengesprek-reset', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
         body: '{}',
       });
       const d = await r.json().catch(() => ({}));
