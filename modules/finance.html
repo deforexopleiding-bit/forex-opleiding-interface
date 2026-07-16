@@ -17219,6 +17219,11 @@
     suggestionAge  : null,
     joostBusy      : false,
     escHandler     : null,
+    // Tijdlijn (feat/wanbetalers-tijdlijn-notities) — leest 8 bronnen via
+    // /api/wanbetalers-timeline en verwerkt customer_notes POST voor
+    // ingetypte notities. Blijft loading tot fetch klaar is; error-string
+    // pinnend zodat de UI-melding niet elke render mist.
+    timeline       : { items: [], loading: false, error: null, submitting: false },
   };
 
   // Reis-mapping stap 3 — de gebruiker ziet een leesbare journey ipv slugs.
@@ -17350,6 +17355,18 @@
       .case-joost-body { font-size:13px; color:var(--text); white-space:pre-wrap; line-height:1.5; }
       .case-joost-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
 
+      /* Tijdlijn + notitie-invoer (feat/wanbetalers-tijdlijn-notities) */
+      .wbx-tl-note-form textarea { width:100%; min-height:52px; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font:inherit; font-size:13px; resize:vertical; box-sizing:border-box; }
+      .wbx-tl { display:flex; flex-direction:column; gap:8px; max-height:360px; overflow-y:auto; padding-right:2px; }
+      .wbx-tl-item { display:grid; grid-template-columns:24px 1fr; gap:8px; padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; }
+      .wbx-tl-ic { font-size:14px; line-height:20px; text-align:center; color:var(--text-dim); }
+      .wbx-tl-body { min-width:0; }
+      .wbx-tl-h { font-size:13px; color:var(--text); line-height:1.35; }
+      .wbx-tl-h strong { font-weight:600; }
+      .wbx-tl-sub { font-size:11.5px; color:var(--text-faint); margin-top:2px; }
+      .wbx-tl-desc { margin-top:6px; font-size:12.5px; color:var(--text); white-space:pre-wrap; word-break:break-word; }
+      .wbx-tl-badge { display:inline-block; margin-left:6px; padding:1px 6px; border-radius:999px; font-size:10.5px; font-weight:700; background:rgba(245,158,11,.14); color:#b45309; border:1px solid rgba(245,158,11,.28); }
+
       /* Actiebalk */
       .case-actionbar { position:sticky; bottom:0; padding:12px 22px; background:var(--bg); border-top:1px solid var(--border); display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
       .case-btn { padding:9px 14px; border-radius:8px; border:1px solid var(--border); background:var(--bg-elev); color:var(--text); font-size:13px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
@@ -17378,6 +17395,7 @@
     _caseState.chat            = { convId: null, messages: [], canSend: false, phone: null, reason: null, loading: true };
     _caseState.suggestion      = null;
     _caseState.suggestionAge   = null;
+    _caseState.timeline        = { items: [], loading: false, error: null, submitting: false };
     _caseState.open            = true;
 
     _caseEnsurePanel();
@@ -17397,6 +17415,8 @@
     // Suggestion op basis van de convId die net geladen is.
     if (_caseState.chat.convId) await _caseLoadSuggestion(_caseState.chat.convId);
     _caseRender();
+    // Tijdlijn parallel na eerste render (blokkeert de sheet niet).
+    _caseLoadTimeline(customerId).catch(() => {});
   }
 
   function closeCaseSheet() {
@@ -17624,6 +17644,7 @@
             ${joostBlock}
           </div>
         </div>
+        ${_caseTimelineCardHtml()}
       </div>
 
       <div class="wbx-sheet-actions">
@@ -17651,6 +17672,145 @@
     });
     // Bellen-kaart handlers (Bel nu / Ophangen / Uitkomst noteren).
     _caseWireBellenCard();
+    // Tijdlijn-kaart handlers (notitie posten, refresh).
+    _caseWireTimelineCard();
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  //   TIJDLIJN — dossier-brede historie + notitie-invoer
+  //   Bron: /api/wanbetalers-timeline (voegt 8 tabellen samen tot 1 feed).
+  //   Notitie-post: /api/customer-notes POST (bestaand endpoint).
+  // ═════════════════════════════════════════════════════════════════════════
+
+  // Iconen per timeline-type — puur visuele hint, geen filter-tekst.
+  const _WBX_TL_ICON = {
+    note:             '📝',
+    call:             '📞',
+    wa_in:            '💬',
+    wa_out:           '💬',
+    run_started:      '▶️',
+    run_completed:    '⏹️',
+  };
+
+  function _wbxTlIcon(t) {
+    const s = String(t || '');
+    if (_WBX_TL_ICON[s]) return _WBX_TL_ICON[s];
+    if (s.startsWith('task_'))        return '✅';
+    if (s.startsWith('arrangement_')) return '🤝';
+    if (s.startsWith('dunning_'))     return '⚙️';
+    if (s.startsWith('audit_'))       return '📋';
+    return '•';
+  }
+
+  function _caseTimelineCardHtml() {
+    const tl = _caseState.timeline || { items: [], loading: false, error: null };
+    let bodyHtml;
+    if (tl.loading) {
+      bodyHtml = `<div style="color:var(--wbx-faint);font-size:13px;padding:6px 0">Tijdlijn laden…</div>`;
+    } else if (tl.error) {
+      bodyHtml = `<div style="color:var(--wbx-s-inc-tx);font-size:13px">${esc(tl.error)}</div>`;
+    } else if (!tl.items.length) {
+      bodyHtml = `<p style="color:var(--wbx-faint);font-size:13px;margin:0">Nog geen dossier-gebeurtenissen. Notities die je hierboven toevoegt verschijnen hier automatisch.</p>`;
+    } else {
+      bodyHtml = `<div class="wbx-tl">${tl.items.map(_wbxTlItemHtml).join('')}</div>`;
+    }
+    const submitDisabled = tl.submitting ? 'disabled' : '';
+    return `
+      <div class="wbx-card">
+        <h4>Tijdlijn &amp; notities</h4>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div class="wbx-tl-note-form">
+            <textarea id="wbxTlNoteInput" placeholder="Notitie toevoegen (verschijnt bovenaan de tijdlijn)…" rows="2" ${submitDisabled}></textarea>
+            <div style="display:flex;gap:8px;align-items:center;justify-content:flex-end">
+              <button class="wbx-btn wbx-sm" type="button" data-wbx-tl="refresh" ${submitDisabled} title="Ververs">↻</button>
+              <button class="wbx-btn wbx-primary wbx-sm" type="button" data-wbx-tl="save" ${submitDisabled}>${tl.submitting ? 'Opslaan…' : 'Notitie plaatsen'}</button>
+            </div>
+          </div>
+          ${bodyHtml}
+        </div>
+      </div>`;
+  }
+
+  function _wbxTlItemHtml(it) {
+    const when   = _pipeFmtDateTime(it.at);
+    const icon   = _wbxTlIcon(it.type);
+    const actor  = it.actor && it.actor.name ? ' · ' + esc(it.actor.name) : '';
+    const dry    = it.dry_run ? ' <span class="wbx-tl-badge">dry-run</span>' : '';
+    const descHtml = it.description
+      ? `<div class="wbx-tl-desc">${esc(String(it.description)).replace(/\n/g, '<br>')}</div>`
+      : '';
+    return `
+      <div class="wbx-tl-item">
+        <div class="wbx-tl-ic">${icon}</div>
+        <div class="wbx-tl-body">
+          <div class="wbx-tl-h"><strong>${esc(it.title || it.type || '')}</strong>${dry}</div>
+          <div class="wbx-tl-sub">${esc(when)}${actor}</div>
+          ${descHtml}
+        </div>
+      </div>`;
+  }
+
+  function _caseWireTimelineCard() {
+    const sheet = document.getElementById('caseSheet');
+    if (!sheet) return;
+    sheet.querySelectorAll('[data-wbx-tl]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const act = btn.getAttribute('data-wbx-tl');
+        if (act === 'refresh') _caseLoadTimeline(_caseState.cid).catch(() => {});
+        else if (act === 'save') _caseSubmitTimelineNote();
+      });
+    });
+  }
+
+  async function _caseLoadTimeline(cid) {
+    if (!cid) return;
+    _caseState.timeline = { items: [], loading: true, error: null, submitting: false };
+    _caseRender();
+    try {
+      const r = await window.AgentShared.apiFetch('/api/wanbetalers-timeline?customer_id=' + encodeURIComponent(cid));
+      const d = await r.json().catch(() => ({}));
+      if (_caseState.cid !== cid) return;
+      if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+      _caseState.timeline = {
+        items      : Array.isArray(d.items) ? d.items : [],
+        loading    : false,
+        error      : null,
+        submitting : false,
+      };
+    } catch (e) {
+      console.error('[case-sheet timeline]', e);
+      _caseState.timeline = { items: [], loading: false, error: 'Kon tijdlijn niet laden: ' + (e?.message || 'onbekend'), submitting: false };
+    }
+    _caseRender();
+  }
+
+  async function _caseSubmitTimelineNote() {
+    const cid = _caseState.cid;
+    if (!cid) return;
+    const inp = document.getElementById('wbxTlNoteInput');
+    const txt = String((inp && inp.value) || '').trim();
+    if (!txt) return;
+    _caseState.timeline.submitting = true;
+    _caseRender();
+    try {
+      const r = await window.AgentShared.apiFetch('/api/customer-notes', {
+        method  : 'POST',
+        headers : { 'Content-Type': 'application/json' },
+        body    : JSON.stringify({ customer_id: cid, body: txt }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+      // Refresh volledige tijdlijn — de nieuwe notitie zit erin en de volgorde
+      // is opnieuw goed. Leeg het input-veld pas na een succesvolle save.
+      await _caseLoadTimeline(cid);
+      const inp2 = document.getElementById('wbxTlNoteInput');
+      if (inp2) inp2.value = '';
+    } catch (e) {
+      console.error('[case-sheet timeline note]', e);
+      _caseState.timeline.submitting = false;
+      _caseState.timeline.error = 'Notitie plaatsen mislukt: ' + (e?.message || 'onbekend');
+      _caseRender();
+    }
   }
 
   // ═════════════════════════════════════════════════════════════════
