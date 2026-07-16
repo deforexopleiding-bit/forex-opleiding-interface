@@ -99,7 +99,7 @@ export default async function handler(req, res) {
         id, customer_id, arrangement_id, action_type, payload, status,
         proposed_by_user_id, approved_by_user_id, approved_at, executed_at, execution_result,
         rejection_reason, scheduled_for, expires_at, created_at, updated_at,
-        customers!inner:customer_id ( id, is_company, company_name, first_name, last_name, email, is_test ),
+        customers!inner ( id, is_company, company_name, first_name, last_name, email, is_test ),
         payment_arrangements:arrangement_id ( id, type, status )
       `, { count: 'exact' })
       .eq('customers.is_test', false)
