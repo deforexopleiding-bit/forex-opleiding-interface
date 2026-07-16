@@ -19789,6 +19789,7 @@
             <button id="sbxInboundBtn" class="sr-abtn" type="button"><i class="ti ti-message-plus"></i> Simuleer inkomend WA</button>
             <button id="sbxPaidBtn"    class="sr-abtn" type="button"><i class="ti ti-cash"></i> Markeer alle facturen betaald</button>
             <button id="sbxRunEngineBtn" class="sr-abtn primary" type="button"><i class="ti ti-player-play"></i> Run engine (test)</button>
+            <button id="sbxRunBreachBtn" class="sr-abtn primary" type="button" title="Draait de arrangementen-bewaking (breach-check cron) op alleen de sandbox-klant. VERBROKEN/NAGEKOMEN wordt geflipt zoals 06:00 zou doen."><i class="ti ti-shield-check"></i> Bewaking draaien (test)</button>
             <button id="sbxRunBulkBtn"   class="sr-abtn primary" type="button"><i class="ti ti-send"></i> Bulk-job (test)</button>
             <button id="sbxSimCreditBtn" class="sr-abtn primary" type="button" title="Simuleer de kwartaal-crediteerronde lokaal op de test-persoon — geen TL-calls."><i class="ti ti-receipt-refund"></i> 🧪 Simuleer crediteerronde</button>
           </div>
@@ -19934,6 +19935,17 @@
         sbxReloadStatus();
       } catch (e) {
         window.AgentShared?.showToast?.('Engine-run mislukt: ' + (e?.message || 'onbekend'), 'error');
+      }
+    });
+
+    document.getElementById('sbxRunBreachBtn')?.addEventListener('click', async () => {
+      try {
+        const d = await _sbxCall('/api/wanbetalers-sandbox-run-breach-check', {});
+        const dryStr = d.dry_run ? ' (dry-run)' : '';
+        window.AgentShared?.showToast?.(`Bewaking: evaluated=${d.evaluated||0}, nagekomen=${d.nagekomen||0}, verbroken=${d.verbroken||0}${dryStr}`, 'success');
+        sbxReloadStatus();
+      } catch (e) {
+        window.AgentShared?.showToast?.('Bewaking-run mislukt: ' + (e?.message || 'onbekend'), 'error');
       }
     });
 

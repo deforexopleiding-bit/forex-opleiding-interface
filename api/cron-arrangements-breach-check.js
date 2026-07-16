@@ -226,8 +226,11 @@ async function fetchInvoicesByIds(invoiceIds) {
 /**
  * Beslist of een arrangement van status moet wisselen.
  * Returns { newStatus, reason } of null (geen wijziging).
+ *
+ * Exported sinds sandbox-run-breach-check zodat de sandbox de exact zelfde
+ * evaluatie doet zonder logica te dupliceren.
  */
-async function evaluateArrangement(arr) {
+export async function evaluateArrangement(arr) {
   const type = String(arr.type || '').toUpperCase();
   const details = arr.details || {};
   const todayMs = todayMidnightMs();
