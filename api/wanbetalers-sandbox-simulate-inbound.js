@@ -11,13 +11,20 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'POST only' }); }
+  // #785 — top-level try/catch omvat OOK requireSuperAdmin + body-parsing.
+  // Zonder deze wrap kan een uncaught rejection uit verifyAdmin() (bv.
+  // Supabase auth-glitch, DNS hiccup, cold-start) een kale Vercel HTML
+  // 500 opleveren; de UI probeert die als JSON te parsen en toont
+  // "Fout: HTTP 500" zonder context. Alles binnen deze catch geeft een
+  // net { error: "..." } object terug zodat het chat-paneel iets
+  // leesbaars kan tonen.
+  try {
   const admin = await requireSuperAdmin(req, res);
   if (!admin) return;
 
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const messageText = String(body.body || '').trim() || 'Ik zal deze week betalen.';
 
-  try {
     const customer = await getSandboxCustomer();
     if (!customer) return res.status(400).json({ error: 'Geen test-persoon gevonden — seed eerst.' });
     if (!customer.phone) return res.status(400).json({ error: 'Test-persoon heeft geen telefoonnummer.' });
