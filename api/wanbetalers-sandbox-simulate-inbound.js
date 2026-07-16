@@ -152,7 +152,23 @@ export default async function handler(req, res) {
     // is_test-klanten (dry-run → gelogd + outbound message in de chat).
     // Alles fail-soft: een Joost-fout mag de inbound-simulatie NOOIT laten
     // falen.
-    const joost = { ran: false, suggestion_id: null, suggested_reply: null, autonomy_sent: false, note: null };
+    // Oefengesprek (#783): extra velden intent/confidence/reasoning/mode
+    // zodat het chat-paneel in de Testmodus-kaart Joost's classificatie kan
+    // tonen naast z'n antwoord. Waarden komen uit runJoostSuggest (intent,
+    // confidence, reasoning) en joost-send-autonomous HTTP-response
+    // (decision.mode, blocked_reason).
+    const joost = {
+      ran:               false,
+      suggestion_id:     null,
+      suggested_reply:   null,
+      detected_intent:   null,
+      confidence:        null,
+      reasoning:         null,
+      mode:              null,
+      blocked_reason:    null,
+      autonomy_sent:     false,
+      note:              null,
+    };
     try {
       const { runJoostSuggest } = await import('./_lib/joost-suggest-core.js');
       const sug = await runJoostSuggest({
@@ -169,6 +185,9 @@ export default async function handler(req, res) {
         joost.ran = true;
         joost.suggestion_id   = sug.body.suggestion.id;
         joost.suggested_reply = sug.body.suggestion.suggested_reply || null;
+        joost.detected_intent = sug.body.suggestion.detected_intent || null;
+        joost.confidence      = (sug.body.suggestion.confidence != null) ? Number(sug.body.suggestion.confidence) : null;
+        joost.reasoning       = sug.body.suggestion.reasoning || null;
         // Autonomie-chain — zelfde als de webhook (HTTP self-call).
         // De #691-guard vangt is_test-klanten op.
         const token = process.env.INTERNAL_API_TOKEN;
@@ -198,10 +217,18 @@ export default async function handler(req, res) {
             } else {
               const j2 = await r2.json().catch(() => ({}));
               joost.autonomy_sent = (j2.sent === true);
+              // Mode en blocked_reason uit de decision-block naar de UI
+              // (oefengesprek #783).
+              if (j2.decision && typeof j2.decision === 'object') {
+                joost.mode = j2.decision.mode || null;
+                if (j2.decision.blocked_reason) joost.blocked_reason = j2.decision.blocked_reason;
+              }
               if (j2.sent === true && j2.prod_block_reason) {
                 joost.note = 'prod zou blokkeren: ' + j2.prod_block_reason;
+                if (!joost.blocked_reason) joost.blocked_reason = j2.prod_block_reason;
               } else if (j2.sent === false) {
-                joost.note = 'geblokkeerd: ' + (j2.blocked_reason || j2.db_status || 'onbekend');
+                if (!joost.blocked_reason) joost.blocked_reason = j2.blocked_reason || j2.db_status || 'onbekend';
+                joost.note = 'geblokkeerd: ' + joost.blocked_reason;
               }
             }
           } catch (fetchErr) {
@@ -215,6 +242,38 @@ export default async function handler(req, res) {
       }
     } catch (e) {
       joost.note = 'joost fail-soft: ' + (e?.message || e);
+    }
+
+    // Oefengesprek-fallback (#783): als de autonome send GEBLOKKEERD was
+    // (mode=draft, low confidence, out-of-mandate, …) is de suggested_reply
+    // wél gegenereerd maar staat 'ie NIET in whatsapp_messages. Voor het
+    // chat-oefengesprek moet Joost's antwoord vanaf de volgende turn wél
+    // context vormen. We loggen 'm daarom expliciet als direction='out' met
+    // een dry-run wamid. Alleen voor de sandbox-klant (customer.is_test) —
+    // dit gedrag bestaat in productie NIET.
+    if (joost.ran && joost.suggested_reply && !joost.autonomy_sent) {
+      try {
+        const outIso = new Date().toISOString();
+        const outBody = String(joost.suggested_reply).trim().slice(0, 4096);
+        const { data: outMsg } = await supabaseAdmin
+          .from('whatsapp_messages').insert({
+            conversation_id: convId,
+            direction:       'out',
+            body:            outBody,
+            meta_wamid:      'dry-run:oefengesprek:' + convId,
+            status:          'queued',
+            sent_at:         outIso,
+            created_at:      outIso,
+          }).select('id').single();
+        joost.out_message_id = outMsg?.id || null;
+        joost.out_persisted_as = 'oefengesprek_fallback';
+        await supabaseAdmin
+          .from('whatsapp_conversations')
+          .update({ last_message_at: outIso, last_message_preview: outBody.slice(0, 120) })
+          .eq('id', convId);
+      } catch (e) {
+        console.warn('[sandbox-simulate-inbound] oefengesprek fallback insert soft-fail', e?.message || e);
+      }
     }
 
     return res.status(200).json({ ok: true, conversation_id: convId, message_id: msg.id, joost });
