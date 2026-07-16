@@ -93,7 +93,28 @@ const AUDIT_ACTION_LABELS = {
   'customer.note.created': 'Notitie toegevoegd',
   'customer.note.updated': 'Notitie bewerkt',
   'customer.note.archived': 'Notitie gearchiveerd',
+  'dunning_pipeline.set_stage': 'Fase gewijzigd',
 };
+
+// Event-types uit dunning_log die we server-side WEGLATEN — motor-mechaniek
+// zonder klant-waarde (wait / skipped / diagnostiek). Dossier toont wat er
+// richting de klant gebeurde, niet dat de motor 7 dagen wachtte.
+// De UI heeft een spiegel-lijst (shared/wanbetalers-timeline.js HIDDEN_PREFIXES)
+// zodat legacy-clients ook zonder server-filter geen ruis krijgen.
+const DUNNING_LOG_HIDDEN_EVENTS = new Set([
+  'wait',
+  'stop_step',
+  'unknown_step_type',
+  'email_send_failed',
+  'email_send_exception',
+  'incasso_auto_skipped_wik',
+]);
+function isHiddenDlogEvent(et) {
+  if (!et) return false;
+  const s = String(et).toLowerCase();
+  if (DUNNING_LOG_HIDDEN_EVENTS.has(s)) return true;
+  return s.startsWith('email_skipped_') || s.startsWith('whatsapp_skipped_');
+}
 
 // dunning_log.event_type → tijdlijn-label. Fallback: raw key.
 const DLOG_LABELS = {
@@ -136,7 +157,7 @@ export default async function handler(req, res) {
   const pageSize = Math.min(200, Math.max(1, rawSize));
 
   try {
-    // 1) Alle 8 bronnen parallel — elk gecapt op BRON_CAP nieuwste rijen.
+    // 1) Alle 9 bronnen parallel — elk gecapt op BRON_CAP nieuwste rijen.
     const [
       notesRes,
       callsRes,
@@ -144,6 +165,7 @@ export default async function handler(req, res) {
       arrsRes,
       runsRes,
       dlogRes,
+      plogRes,
       waRes,
       auditRes,
     ] = await Promise.all([
@@ -153,13 +175,14 @@ export default async function handler(req, res) {
       fetchArrangements(customerId),
       fetchRuns(customerId),
       fetchDunningLog(customerId),
+      fetchPipelineLog(customerId),
       fetchWhatsapp(customerId),
       fetchAudit(customerId),
     ]);
 
     // 2) Actor-namen resolven (batch via profiles.in()).
     const userIds = new Set();
-    for (const arr of [notesRes, callsRes, tasksRes, arrsRes, auditRes]) {
+    for (const arr of [notesRes, callsRes, tasksRes, arrsRes, plogRes, auditRes]) {
       for (const r of arr) {
         const uid = r._actor_user_id;
         if (uid) userIds.add(uid);
@@ -168,13 +191,17 @@ export default async function handler(req, res) {
     const actorsById = await fetchActors(Array.from(userIds));
 
     // 3) Merge → items met genormaliseerde shape.
+    //    dlogRes-events die interne mechaniek zijn (wait / skipped / …) worden
+    //    hier server-side gefilterd — de shared UI-helper doet hetzelfde als
+    //    dubbele verdediging voor legacy-clients.
     const items = [
       ...notesRes.map((r) => noteToItem(r, actorsById)),
       ...callsRes.map((r) => callToItem(r, actorsById)),
       ...tasksRes.map((r) => taskToItem(r, actorsById)),
       ...arrsRes.map((r) => arrangementToItem(r, actorsById)),
       ...runsRes.flatMap(runToItems),
-      ...dlogRes.map(dlogToItem),
+      ...dlogRes.filter((r) => !isHiddenDlogEvent(r.event_type)).map(dlogToItem),
+      ...plogRes.map((r) => pipelineLogToItem(r, actorsById)),
       ...waRes.map(waToItem),
       ...auditRes.map((r) => auditToItem(r, actorsById)),
     ].filter(Boolean);
@@ -290,6 +317,28 @@ async function fetchDunningLog(cid) {
     .limit(BRON_CAP);
   if (error) { console.warn('[timeline] dlog:', error.message); return []; }
   return data || [];
+}
+
+async function fetchPipelineLog(cid) {
+  // dunning_pipeline_log heeft customer_id direct. entry_type in
+  // { note / auto_event / stage_change / appointment }. `note` overlapt met
+  // customer_notes qua betekenis niet — pipeline-notes worden vanuit de
+  // pipeline-UI zelf gepost (dunning-pipeline-add-log.js), niet vanuit de
+  // klant-detail Notities-tab. We laten beide bronnen door voor volledigheid.
+  const { data, error } = await supabaseAdmin
+    .from('dunning_pipeline_log')
+    .select('id, entry_type, body, meta, created_by, created_at')
+    .eq('customer_id', cid)
+    .order('created_at', { ascending: false })
+    .limit(BRON_CAP);
+  if (error) { console.warn('[timeline] plog:', error.message); return []; }
+  // `created_by` is text (kan uuid of 'auto:<source>' zijn). Alleen uuid's
+  // gaan naar de actor-lookup; anders leeg laten.
+  const UUID_RE_ANY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return (data || []).map((r) => ({
+    ...r,
+    _actor_user_id: (r.created_by && UUID_RE_ANY.test(r.created_by)) ? r.created_by : null,
+  }));
 }
 
 async function fetchWhatsapp(cid) {
@@ -495,6 +544,33 @@ function dlogToItem(r) {
     actor:       null,
     dry_run:     isDry || undefined,
     meta:        { run_id: r.run_id || null, step_id: r.step_id || null, event_type: r.event_type, message_id: r.message_id || null, payload: p },
+  };
+}
+
+function pipelineLogToItem(r, actorsById) {
+  const et = String(r.entry_type || '').toLowerCase();
+  // Type-key: `pipeline_<entry_type>` — de shared UI-helper heeft de labels.
+  const type = 'pipeline_' + et;
+  // Description: voor stage_change is `body` typisch "nieuw → aangemaand" of
+  // een uitgeschreven reden — die tonen we direct. Voor note/auto_event/
+  // appointment is body de vrije tekst.
+  const desc = r.body ? String(r.body).slice(0, 400) : null;
+  // Titel: laten we leeg — de shared helper vult de canonical label in
+  // op basis van type. Server geeft alleen fallback voor legacy-clients.
+  const fallbackTitle = et === 'stage_change' ? 'Fase gewijzigd'
+                       : et === 'note'         ? 'Notitie (pipeline)'
+                       : et === 'auto_event'   ? 'Pipeline-gebeurtenis'
+                       : et === 'appointment'  ? 'Afspraak'
+                       : 'Pipeline-gebeurtenis';
+  return {
+    id:          'plog:' + r.id,
+    at:          r.created_at,
+    type,
+    source:      'dunning_pipeline_log',
+    title:       fallbackTitle,
+    description: desc,
+    actor:       actorsById[r._actor_user_id] || null,
+    meta:        { entry_type: r.entry_type, meta: r.meta || null, created_by_raw: r.created_by || null },
   };
 }
 

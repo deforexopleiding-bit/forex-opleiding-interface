@@ -4805,6 +4805,7 @@
 
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/wanbetalers-timeline.js"></script>
 <!-- SIP.js voor de wanbetaler-softphone in het case-paneel. Dezelfde
      library die de Follow-up-cockpit gebruikt; registreren gebeurt lazy
      bij de eerste Bel nu-actie via /api/voys-sip-config. -->
@@ -17219,11 +17220,12 @@
     suggestionAge  : null,
     joostBusy      : false,
     escHandler     : null,
-    // Tijdlijn (feat/wanbetalers-tijdlijn-notities) — leest 8 bronnen via
+    // Tijdlijn (feat/wanbetalers-tijdlijn-notities) — leest 9 bronnen via
     // /api/wanbetalers-timeline en verwerkt customer_notes POST voor
     // ingetypte notities. Blijft loading tot fetch klaar is; error-string
-    // pinnend zodat de UI-melding niet elke render mist.
-    timeline       : { items: [], loading: false, error: null, submitting: false },
+    // pinnend zodat de UI-melding niet elke render mist. `showAll` klapt
+    // de eerste 3 items uit naar de volledige lijst.
+    timeline       : { items: [], loading: false, error: null, submitting: false, showAll: false },
   };
 
   // Reis-mapping stap 3 — de gebruiker ziet een leesbare journey ipv slugs.
@@ -17356,16 +17358,26 @@
       .case-joost-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
 
       /* Tijdlijn + notitie-invoer (feat/wanbetalers-tijdlijn-notities) */
-      .wbx-tl-note-form textarea { width:100%; min-height:52px; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font:inherit; font-size:13px; resize:vertical; box-sizing:border-box; }
-      .wbx-tl { display:flex; flex-direction:column; gap:8px; max-height:360px; overflow-y:auto; padding-right:2px; }
-      .wbx-tl-item { display:grid; grid-template-columns:24px 1fr; gap:8px; padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; }
-      .wbx-tl-ic { font-size:14px; line-height:20px; text-align:center; color:var(--text-dim); }
+      .wbx-tl-note-form { display:flex; flex-direction:column; gap:8px; margin-bottom:14px; }
+      .wbx-tl-note-form textarea { width:100%; min-height:72px; padding:10px 12px; border-radius:8px; border:1px solid var(--wbx-border, var(--border)); background:var(--wbx-bg, var(--bg)); color:var(--wbx-ink, var(--text)); font:inherit; font-size:13px; line-height:1.4; resize:vertical; box-sizing:border-box; }
+      .wbx-tl-note-form textarea:focus { outline:none; border-color:var(--wbx-accent-ink, #0ea5e9); }
+      .wbx-tl-note-actions { display:flex; gap:8px; align-items:center; justify-content:flex-end; }
+
+      /* Echte tijdlijn: verticale lijn links, stip per item */
+      .wbx-tl { position:relative; padding-left:24px; margin-top:2px; }
+      .wbx-tl::before { content:''; position:absolute; left:9px; top:6px; bottom:6px; width:2px; background:var(--wbx-border, var(--border)); border-radius:2px; }
+      .wbx-tl-item { position:relative; display:block; padding:4px 0 12px 0; }
+      .wbx-tl-item:last-child { padding-bottom:2px; }
+      .wbx-tl-dot { position:absolute; left:-24px; top:2px; width:20px; height:20px; border-radius:50%; background:var(--wbx-bg, var(--bg)); border:2px solid var(--wbx-border, var(--border)); display:flex; align-items:center; justify-content:center; z-index:1; }
+      .wbx-tl-icon { font-size:11px; line-height:1; }
       .wbx-tl-body { min-width:0; }
-      .wbx-tl-h { font-size:13px; color:var(--text); line-height:1.35; }
+      .wbx-tl-h { font-size:13px; color:var(--wbx-ink, var(--text)); line-height:1.4; display:flex; flex-wrap:wrap; align-items:baseline; gap:6px; }
       .wbx-tl-h strong { font-weight:600; }
-      .wbx-tl-sub { font-size:11.5px; color:var(--text-faint); margin-top:2px; }
-      .wbx-tl-desc { margin-top:6px; font-size:12.5px; color:var(--text); white-space:pre-wrap; word-break:break-word; }
-      .wbx-tl-badge { display:inline-block; margin-left:6px; padding:1px 6px; border-radius:999px; font-size:10.5px; font-weight:700; background:rgba(245,158,11,.14); color:#b45309; border:1px solid rgba(245,158,11,.28); }
+      .wbx-tl-time { font-size:11.5px; color:var(--wbx-faint, var(--text-faint)); font-weight:400; }
+      .wbx-tl-desc { margin-top:3px; font-size:12.5px; color:var(--wbx-muted, var(--text-dim)); white-space:pre-wrap; word-break:break-word; line-height:1.45; }
+      .wbx-tl-badge { display:inline-block; padding:1px 6px; border-radius:999px; font-size:10.5px; font-weight:700; background:rgba(245,158,11,.14); color:#b45309; border:1px solid rgba(245,158,11,.28); }
+      .wbx-tl-more { display:inline-block; margin-top:6px; padding:6px 10px; background:transparent; border:1px dashed var(--wbx-border, var(--border)); border-radius:8px; color:var(--wbx-muted, var(--text-dim)); font-size:12.5px; cursor:pointer; font-family:inherit; }
+      .wbx-tl-more:hover { color:var(--wbx-ink, var(--text)); border-color:var(--wbx-accent-ink, #0ea5e9); }
 
       /* Actiebalk */
       .case-actionbar { position:sticky; bottom:0; padding:12px 22px; background:var(--bg); border-top:1px solid var(--border); display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
@@ -17395,7 +17407,7 @@
     _caseState.chat            = { convId: null, messages: [], canSend: false, phone: null, reason: null, loading: true };
     _caseState.suggestion      = null;
     _caseState.suggestionAge   = null;
-    _caseState.timeline        = { items: [], loading: false, error: null, submitting: false };
+    _caseState.timeline        = { items: [], loading: false, error: null, submitting: false, showAll: false };
     _caseState.open            = true;
 
     _caseEnsurePanel();
@@ -17678,74 +17690,71 @@
 
   // ═════════════════════════════════════════════════════════════════════════
   //   TIJDLIJN — dossier-brede historie + notitie-invoer
-  //   Bron: /api/wanbetalers-timeline (voegt 8 tabellen samen tot 1 feed).
+  //   Bron: /api/wanbetalers-timeline (voegt 9 tabellen samen tot 1 feed).
   //   Notitie-post: /api/customer-notes POST (bestaand endpoint).
+  //   Labels + iconen: modules/shared/wanbetalers-timeline.js (window.
+  //   WanbetalersTimeline) — één bron van waarheid, gedeeld met klanten.html.
   // ═════════════════════════════════════════════════════════════════════════
 
-  // Iconen per timeline-type — puur visuele hint, geen filter-tekst.
-  const _WBX_TL_ICON = {
-    note:             '📝',
-    call:             '📞',
-    wa_in:            '💬',
-    wa_out:           '💬',
-    run_started:      '▶️',
-    run_completed:    '⏹️',
-  };
-
-  function _wbxTlIcon(t) {
-    const s = String(t || '');
-    if (_WBX_TL_ICON[s]) return _WBX_TL_ICON[s];
-    if (s.startsWith('task_'))        return '✅';
-    if (s.startsWith('arrangement_')) return '🤝';
-    if (s.startsWith('dunning_'))     return '⚙️';
-    if (s.startsWith('audit_'))       return '📋';
-    return '•';
-  }
-
   function _caseTimelineCardHtml() {
-    const tl = _caseState.timeline || { items: [], loading: false, error: null };
+    const tl = _caseState.timeline || { items: [], loading: false, error: null, showAll: false };
+    // Client-side filter voor legacy-events (defense in depth naast server).
+    const WT = window.WanbetalersTimeline || null;
+    const visible = (tl.items || []).filter((it) => !WT || !WT.isHidden(it));
+    const LIMIT = (WT && WT.DEFAULT_LIMIT) || 3;
+
     let bodyHtml;
     if (tl.loading) {
       bodyHtml = `<div style="color:var(--wbx-faint);font-size:13px;padding:6px 0">Tijdlijn laden…</div>`;
     } else if (tl.error) {
       bodyHtml = `<div style="color:var(--wbx-s-inc-tx);font-size:13px">${esc(tl.error)}</div>`;
-    } else if (!tl.items.length) {
+    } else if (!visible.length) {
       bodyHtml = `<p style="color:var(--wbx-faint);font-size:13px;margin:0">Nog geen dossier-gebeurtenissen. Notities die je hierboven toevoegt verschijnen hier automatisch.</p>`;
     } else {
-      bodyHtml = `<div class="wbx-tl">${tl.items.map(_wbxTlItemHtml).join('')}</div>`;
+      const shown  = tl.showAll ? visible : visible.slice(0, LIMIT);
+      const rest   = Math.max(0, visible.length - shown.length);
+      const items  = shown.map((it) => _wbxTlItemHtml(it)).join('');
+      const toggle = rest > 0
+        ? `<button class="wbx-tl-more" type="button" data-wbx-tl="more">Toon meer (${rest})</button>`
+        : (tl.showAll && visible.length > LIMIT
+            ? `<button class="wbx-tl-more" type="button" data-wbx-tl="less">Inklappen</button>`
+            : '');
+      bodyHtml = `<div class="wbx-tl">${items}</div>${toggle}`;
     }
     const submitDisabled = tl.submitting ? 'disabled' : '';
     return `
       <div class="wbx-card">
         <h4>Tijdlijn &amp; notities</h4>
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div class="wbx-tl-note-form">
-            <textarea id="wbxTlNoteInput" placeholder="Notitie toevoegen (verschijnt bovenaan de tijdlijn)…" rows="2" ${submitDisabled}></textarea>
-            <div style="display:flex;gap:8px;align-items:center;justify-content:flex-end">
-              <button class="wbx-btn wbx-sm" type="button" data-wbx-tl="refresh" ${submitDisabled} title="Ververs">↻</button>
-              <button class="wbx-btn wbx-primary wbx-sm" type="button" data-wbx-tl="save" ${submitDisabled}>${tl.submitting ? 'Opslaan…' : 'Notitie plaatsen'}</button>
-            </div>
+        <div class="wbx-tl-note-form">
+          <textarea id="wbxTlNoteInput" placeholder="Notitie toevoegen…" rows="3" ${submitDisabled}></textarea>
+          <div class="wbx-tl-note-actions">
+            <button class="wbx-btn wbx-sm" type="button" data-wbx-tl="refresh" ${submitDisabled} title="Ververs">↻</button>
+            <button class="wbx-btn wbx-primary wbx-sm" type="button" data-wbx-tl="save" ${submitDisabled}>${tl.submitting ? 'Opslaan…' : 'Notitie plaatsen'}</button>
           </div>
-          ${bodyHtml}
         </div>
+        ${bodyHtml}
       </div>`;
   }
 
   function _wbxTlItemHtml(it) {
-    const when   = _pipeFmtDateTime(it.at);
-    const icon   = _wbxTlIcon(it.type);
-    const actor  = it.actor && it.actor.name ? ' · ' + esc(it.actor.name) : '';
-    const dry    = it.dry_run ? ' <span class="wbx-tl-badge">dry-run</span>' : '';
-    const descHtml = it.description
+    const WT   = window.WanbetalersTimeline;
+    const meta = WT ? WT.describe(it) : { icon: '•', title: it.title || 'Gebeurtenis' };
+    const when  = _pipeFmtDateTime(it.at);
+    const actor = it.actor && it.actor.name ? ' · ' + esc(it.actor.name) : '';
+    const dry   = it.dry_run ? '<span class="wbx-tl-badge">dry-run</span>' : '';
+    const desc  = it.description
       ? `<div class="wbx-tl-desc">${esc(String(it.description)).replace(/\n/g, '<br>')}</div>`
       : '';
     return `
       <div class="wbx-tl-item">
-        <div class="wbx-tl-ic">${icon}</div>
+        <div class="wbx-tl-dot"><span class="wbx-tl-icon">${meta.icon}</span></div>
         <div class="wbx-tl-body">
-          <div class="wbx-tl-h"><strong>${esc(it.title || it.type || '')}</strong>${dry}</div>
-          <div class="wbx-tl-sub">${esc(when)}${actor}</div>
-          ${descHtml}
+          <div class="wbx-tl-h">
+            <strong>${esc(meta.title)}</strong>
+            ${dry}
+            <span class="wbx-tl-time">${esc(when)}${actor}</span>
+          </div>
+          ${desc}
         </div>
       </div>`;
   }
@@ -17756,15 +17765,17 @@
     sheet.querySelectorAll('[data-wbx-tl]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const act = btn.getAttribute('data-wbx-tl');
-        if (act === 'refresh') _caseLoadTimeline(_caseState.cid).catch(() => {});
-        else if (act === 'save') _caseSubmitTimelineNote();
+        if      (act === 'refresh') _caseLoadTimeline(_caseState.cid).catch(() => {});
+        else if (act === 'save')    _caseSubmitTimelineNote();
+        else if (act === 'more')    { _caseState.timeline.showAll = true;  _caseRender(); }
+        else if (act === 'less')    { _caseState.timeline.showAll = false; _caseRender(); }
       });
     });
   }
 
   async function _caseLoadTimeline(cid) {
     if (!cid) return;
-    _caseState.timeline = { items: [], loading: true, error: null, submitting: false };
+    _caseState.timeline = { items: [], loading: true, error: null, submitting: false, showAll: false };
     _caseRender();
     try {
       const r = await window.AgentShared.apiFetch('/api/wanbetalers-timeline?customer_id=' + encodeURIComponent(cid));
@@ -17776,10 +17787,11 @@
         loading    : false,
         error      : null,
         submitting : false,
+        showAll    : false,
       };
     } catch (e) {
       console.error('[case-sheet timeline]', e);
-      _caseState.timeline = { items: [], loading: false, error: 'Kon tijdlijn niet laden: ' + (e?.message || 'onbekend'), submitting: false };
+      _caseState.timeline = { items: [], loading: false, error: 'Kon tijdlijn niet laden: ' + (e?.message || 'onbekend'), submitting: false, showAll: false };
     }
     _caseRender();
   }
