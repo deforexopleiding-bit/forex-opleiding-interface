@@ -75,11 +75,19 @@ export default async function handler(req, res) {
       totalDeleted += (count || 0);
       touched.push(conv.id);
 
-      // Preview en last_message_at leegmaken zodat de UI direct schoon oogt.
+      // Preview + unread_count leegmaken zodat de UI direct schoon oogt.
       // Meta van de conversation zelf blijft intact (phone, customer_id, …).
+      //
+      // #785 — `last_inbound_at` en `last_message_at` worden BEWUST NIET meer
+      // gereset. Argument: simulate-inbound zet beide velden bij het eerste
+      // volgende bericht direct op `nowIso`, dus null-zetten heeft geen
+      // waarde en één tussenliggende call die op die velden rekent kan een
+      // 500 opleveren. Alle productie-lezers (joost-send-autonomous r345,
+      // joost-suggest-core r235, inbox-send r184, dunning-conv-reminders
+      // r99) zijn al null-safe, maar we vermijden liever elke race.
       await supabaseAdmin
         .from('whatsapp_conversations')
-        .update({ last_message_preview: null, last_message_at: null, last_inbound_at: null, unread_count: 0 })
+        .update({ last_message_preview: null, unread_count: 0 })
         .eq('id', conv.id);
     }
 
