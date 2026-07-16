@@ -2032,6 +2032,58 @@
       flex-wrap:wrap;
     }
 
+    /* Tijdlijn & notities — dossier-brede historie, in het caseSheet.
+       #779 zette dit oorspronkelijk in de dode _caseInjectStyles() (die
+       nooit werd aangeroepen); #781 verplaatst het naar dit actieve blok
+       met .wbx-sheet-prefix zodat de selectors bij body-level sheet matchen. */
+    .wbx-sheet .wbx-tl-note-form { display:flex; flex-direction:column; gap:8px; margin-bottom:14px; }
+    .wbx-sheet .wbx-tl-note-form textarea {
+      width:100%; min-height:72px; padding:10px 12px;
+      border-radius:8px; border:1px solid var(--wbx-border);
+      background:var(--wbx-surface); color:var(--wbx-ink);
+      font:inherit; font-size:13.5px; line-height:1.45;
+      resize:vertical; box-sizing:border-box;
+    }
+    .wbx-sheet .wbx-tl-note-form textarea:focus {
+      outline:none; border-color:var(--wbx-accent-ink);
+    }
+    .wbx-sheet .wbx-tl-note-actions { display:flex; gap:8px; align-items:center; justify-content:flex-end; }
+
+    /* Echte tijdlijn: verticale lijn links, ronde stip per item */
+    .wbx-sheet .wbx-tl { position:relative; padding-left:26px; margin-top:2px; }
+    .wbx-sheet .wbx-tl::before {
+      content:''; position:absolute; left:10px; top:6px; bottom:6px;
+      width:2px; background:var(--wbx-border); border-radius:2px;
+    }
+    .wbx-sheet .wbx-tl-item { position:relative; display:block; padding:4px 0 14px 0; }
+    .wbx-sheet .wbx-tl-item:last-child { padding-bottom:2px; }
+    .wbx-sheet .wbx-tl-dot {
+      position:absolute; left:-26px; top:2px;
+      width:22px; height:22px; border-radius:50%;
+      background:var(--wbx-surface); border:2px solid var(--wbx-border);
+      display:flex; align-items:center; justify-content:center; z-index:1;
+    }
+    .wbx-sheet .wbx-tl-icon { font-size:12px; line-height:1; }
+    .wbx-sheet .wbx-tl-body { min-width:0; }
+    .wbx-sheet .wbx-tl-h {
+      font-size:13.5px; color:var(--wbx-ink); line-height:1.4;
+      display:flex; flex-wrap:wrap; align-items:baseline; gap:6px;
+    }
+    .wbx-sheet .wbx-tl-h strong { font-weight:600; }
+    .wbx-sheet .wbx-tl-time { font-size:11.5px; color:var(--wbx-faint); font-weight:400; }
+    .wbx-sheet .wbx-tl-desc {
+      margin-top:3px; font-size:12.5px; color:var(--wbx-muted);
+      white-space:pre-wrap; word-break:break-word; line-height:1.5;
+    }
+    .wbx-sheet .wbx-tl-badge {
+      display:inline-block; padding:1px 6px; border-radius:999px;
+      font-size:10.5px; font-weight:700;
+      background:rgba(245,158,11,.14); color:#b45309;
+      border:1px solid rgba(245,158,11,.28);
+    }
+    /* "Toon meer"-actie hangt eronder rechts — zelfde look als 'ie in place is */
+    .wbx-sheet .wbx-tl-more-wrap { display:flex; justify-content:flex-start; margin-top:6px; }
+
     /* ======================================================
        Ronde 2 — Acties (open-acties) + Facturen scoped styling.
        ====================================================== */
@@ -17297,105 +17349,13 @@
     return sheet;
   }
 
-  function _caseInjectStyles() {
-    if (document.getElementById('case-sheet-styles')) return;
-    const st = document.createElement('style');
-    st.id = 'case-sheet-styles';
-    st.textContent = `
-      .case-overlay { position:fixed; inset:0; z-index:1300; display:flex; }
-      .case-overlay[hidden] { display:none; }
-      .case-backdrop { position:absolute; inset:0; background:rgba(0,0,0,.45); }
-      .case-sheet { position:relative; margin-left:auto; height:100%; width:min(760px, 100%); background:var(--bg); border-left:1px solid var(--border); box-shadow:-24px 0 60px rgba(0,0,0,.4); display:flex; flex-direction:column; animation:caseSlideIn .18s ease-out; }
-      @keyframes caseSlideIn { from { transform:translateX(24px); opacity:0; } to { transform:translateX(0); opacity:1; } }
-      .case-sheet-inner { flex:1; overflow-y:auto; }
-      .case-head { position:sticky; top:0; z-index:2; padding:16px 22px 14px 22px; background:var(--bg); border-bottom:1px solid var(--border); display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
-      .case-head-title h3 { margin:0; font-size:17px; font-weight:700; color:var(--text); }
-      .case-head-subtitle { margin-top:2px; font-size:12px; color:var(--text-dim); font-family:ui-monospace, SFMono-Regular, monospace; }
-      .case-head-actions { display:flex; align-items:center; gap:8px; flex-shrink:0; }
-      .case-close-btn { background:transparent; border:none; color:var(--text-dim); font-size:22px; padding:4px 10px; border-radius:6px; cursor:pointer; }
-      .case-close-btn:hover { background:var(--bg-elev-2); color:var(--text); }
-      .case-status-pill { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--bg-elev); }
-      .case-body { padding:18px 22px 24px 22px; display:flex; flex-direction:column; gap:16px; }
-
-      /* Statusbalk (stap 3) — reis met stap-bolletjes */
-      .case-journey { display:grid; grid-template-columns:repeat(4, 1fr); align-items:center; padding:14px 16px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; gap:0; }
-      .case-jstep { position:relative; display:flex; flex-direction:column; align-items:center; gap:6px; padding:0 6px; }
-      .case-jdot { width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; background:var(--bg-elev-2, rgba(148,163,184,.14)); color:var(--text-dim); border:2px solid var(--border); z-index:1; }
-      .case-jlabel { font-size:11.5px; color:var(--text-dim); text-align:center; line-height:1.3; }
-      .case-jsub   { font-size:10.5px; color:var(--text-faint); text-align:center; margin-top:2px; }
-      .case-jstep.done .case-jdot { background:#10b981; color:#fff; border-color:#10b981; }
-      .case-jstep.done .case-jlabel { color:var(--text); }
-      .case-jstep.now  .case-jdot { background:#0ea5e9; color:#fff; border-color:#0ea5e9; box-shadow:0 0 0 4px rgba(14,165,233,.15); }
-      .case-jstep.now  .case-jlabel { color:var(--text); font-weight:700; }
-      .case-jstep + .case-jstep::before { content:''; position:absolute; left:calc(-50% + 14px); right:calc(50% + 14px); top:14px; height:2px; background:var(--border); z-index:0; }
-      .case-jstep.done + .case-jstep::before,
-      .case-jstep.done + .case-jstep.done::before { background:#10b981; }
-      .case-jchip { display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:999px; font-size:11.5px; font-weight:700; border:1px solid; }
-
-      /* Kaarten */
-      .case-card { padding:14px 16px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; }
-      .case-card-h { font-size:11.5px; text-transform:uppercase; letter-spacing:.6px; color:var(--text-faint); margin-bottom:8px; }
-      .case-invoice-row { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:baseline; }
-      .case-invoice-nr { font-family:ui-monospace, SFMono-Regular, monospace; font-size:13px; color:var(--text-dim); }
-      .case-invoice-amt { font-family:ui-monospace, SFMono-Regular, monospace; font-size:20px; font-weight:700; color:var(--text); text-align:right; font-variant-numeric:tabular-nums; }
-      .case-invoice-meta { display:flex; flex-wrap:wrap; gap:14px; font-size:12.5px; color:var(--text-dim); margin-top:8px; }
-      .case-invoice-meta strong { color:var(--text); }
-      .case-invoice-note { margin-top:10px; padding:8px 12px; border-radius:8px; font-size:12px; }
-      .case-note-ok  { background:rgba(16,185,129,.08); border:1px solid rgba(16,185,129,.24); color:var(--text); }
-      .case-note-warn{ background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.28); color:var(--text); }
-
-      /* Chat + Joost */
-      .case-chat-box { max-height:280px; overflow-y:auto; padding:8px; background:var(--bg-elev-2, rgba(255,255,255,.02)); border:1px solid var(--border); border-radius:8px; display:flex; flex-direction:column; gap:6px; }
-      .case-chat-msg { max-width:82%; padding:7px 10px; border-radius:10px; font-size:13px; line-height:1.35; word-wrap:break-word; color:var(--text); }
-      .case-chat-msg.inbound  { background:var(--bg-elev); align-self:flex-start; border-bottom-left-radius:3px; }
-      .case-chat-msg.outbound { background:rgba(6,182,212,.18); align-self:flex-end; border-bottom-right-radius:3px; }
-      .case-chat-meta { font-size:10.5px; color:var(--text-faint); margin-top:2px; text-align:right; }
-      .case-chat-hint { padding:16px; text-align:center; color:var(--text-faint); font-size:12.5px; }
-      .case-joost { margin-top:12px; padding:10px 12px; background:rgba(124,58,237,.06); border:1px solid rgba(124,58,237,.28); border-radius:10px; }
-      .case-joost-h { display:flex; gap:8px; align-items:center; font-size:11.5px; color:var(--text-dim); font-weight:600; margin-bottom:6px; }
-      .case-joost-intent { padding:2px 8px; border-radius:999px; font-size:10.5px; font-weight:700; background:rgba(124,58,237,.14); color:#7c3aed; border:1px solid rgba(124,58,237,.28); }
-      .case-joost-body { font-size:13px; color:var(--text); white-space:pre-wrap; line-height:1.5; }
-      .case-joost-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
-
-      /* Tijdlijn + notitie-invoer (feat/wanbetalers-tijdlijn-notities) */
-      .wbx-tl-note-form { display:flex; flex-direction:column; gap:8px; margin-bottom:14px; }
-      .wbx-tl-note-form textarea { width:100%; min-height:72px; padding:10px 12px; border-radius:8px; border:1px solid var(--wbx-border, var(--border)); background:var(--wbx-bg, var(--bg)); color:var(--wbx-ink, var(--text)); font:inherit; font-size:13px; line-height:1.4; resize:vertical; box-sizing:border-box; }
-      .wbx-tl-note-form textarea:focus { outline:none; border-color:var(--wbx-accent-ink, #0ea5e9); }
-      .wbx-tl-note-actions { display:flex; gap:8px; align-items:center; justify-content:flex-end; }
-
-      /* Echte tijdlijn: verticale lijn links, stip per item */
-      .wbx-tl { position:relative; padding-left:24px; margin-top:2px; }
-      .wbx-tl::before { content:''; position:absolute; left:9px; top:6px; bottom:6px; width:2px; background:var(--wbx-border, var(--border)); border-radius:2px; }
-      .wbx-tl-item { position:relative; display:block; padding:4px 0 12px 0; }
-      .wbx-tl-item:last-child { padding-bottom:2px; }
-      .wbx-tl-dot { position:absolute; left:-24px; top:2px; width:20px; height:20px; border-radius:50%; background:var(--wbx-bg, var(--bg)); border:2px solid var(--wbx-border, var(--border)); display:flex; align-items:center; justify-content:center; z-index:1; }
-      .wbx-tl-icon { font-size:11px; line-height:1; }
-      .wbx-tl-body { min-width:0; }
-      .wbx-tl-h { font-size:13px; color:var(--wbx-ink, var(--text)); line-height:1.4; display:flex; flex-wrap:wrap; align-items:baseline; gap:6px; }
-      .wbx-tl-h strong { font-weight:600; }
-      .wbx-tl-time { font-size:11.5px; color:var(--wbx-faint, var(--text-faint)); font-weight:400; }
-      .wbx-tl-desc { margin-top:3px; font-size:12.5px; color:var(--wbx-muted, var(--text-dim)); white-space:pre-wrap; word-break:break-word; line-height:1.45; }
-      .wbx-tl-badge { display:inline-block; padding:1px 6px; border-radius:999px; font-size:10.5px; font-weight:700; background:rgba(245,158,11,.14); color:#b45309; border:1px solid rgba(245,158,11,.28); }
-      .wbx-tl-more { display:inline-block; margin-top:6px; padding:6px 10px; background:transparent; border:1px dashed var(--wbx-border, var(--border)); border-radius:8px; color:var(--wbx-muted, var(--text-dim)); font-size:12.5px; cursor:pointer; font-family:inherit; }
-      .wbx-tl-more:hover { color:var(--wbx-ink, var(--text)); border-color:var(--wbx-accent-ink, #0ea5e9); }
-
-      /* Actiebalk */
-      .case-actionbar { position:sticky; bottom:0; padding:12px 22px; background:var(--bg); border-top:1px solid var(--border); display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-      .case-btn { padding:9px 14px; border-radius:8px; border:1px solid var(--border); background:var(--bg-elev); color:var(--text); font-size:13px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
-      .case-btn:hover { background:var(--bg-elev-2); }
-      .case-btn[disabled] { opacity:.55; cursor:not-allowed; }
-      .case-btn.primary { background:#0ea5e9; border-color:#0ea5e9; color:#fff; }
-      .case-btn.primary:hover { background:#0284c7; }
-      .case-btn.ghost   { background:transparent; }
-      .case-btn.danger  { background:rgba(220,38,38,.14); border-color:rgba(220,38,38,.28); color:#dc2626; }
-
-      @media (max-width:640px) {
-        .case-sheet { width:100%; }
-        .case-journey { grid-template-columns:1fr 1fr; row-gap:14px; }
-      }
-    `;
-    document.head.appendChild(st);
-  }
+  // NB: _caseInjectStyles() is verwijderd in #781 — het was dode code. De
+  // functie werd nergens aangeroepen (grep in de hele bundle bevestigde 0
+  // aanroepen) en al z'n .case-*-selectors matchten nooit iets, want de
+  // echte sheet gebruikt sheet.className = 'wbx-sheet' (r17290). De actieve
+  // sheet-styling staat in het hoofdstyle-blok bovenin dit bestand
+  // (.wbx-sheet .foo, r1875-2090). De .wbx-tl-* tijdlijn-CSS uit #779 is
+  // met #781 daarheen verhuisd zodat 'ie eindelijk zichtbaar wordt.
 
   async function openCaseSheet(customerId, opts = {}) {
     if (!customerId) return;
@@ -17715,9 +17675,9 @@
       const rest   = Math.max(0, visible.length - shown.length);
       const items  = shown.map((it) => _wbxTlItemHtml(it)).join('');
       const toggle = rest > 0
-        ? `<button class="wbx-tl-more" type="button" data-wbx-tl="more">Toon meer (${rest})</button>`
+        ? `<div class="wbx-tl-more-wrap"><button class="wbx-btn wbx-sm" type="button" data-wbx-tl="more">Toon meer (${rest})</button></div>`
         : (tl.showAll && visible.length > LIMIT
-            ? `<button class="wbx-tl-more" type="button" data-wbx-tl="less">Inklappen</button>`
+            ? `<div class="wbx-tl-more-wrap"><button class="wbx-btn wbx-sm" type="button" data-wbx-tl="less">Inklappen</button></div>`
             : '');
       bodyHtml = `<div class="wbx-tl">${items}</div>${toggle}`;
     }
