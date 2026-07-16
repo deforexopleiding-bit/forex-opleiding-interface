@@ -89,24 +89,9 @@
     .fin-input:focus { outline: none; border-color: var(--accent-cyan); }
 
     /* Oefengesprek met Joost (#783) — sandbox-chat in Testmodus-kaart. */
-    .sbx-og-chat { max-height:320px; overflow-y:auto; padding:10px 12px; background:var(--bg); border:1px solid var(--border); border-radius:8px; display:flex; flex-direction:column; gap:8px; }
-    .sbx-og-empty { color:var(--text-faint); font-size:12px; font-style:italic; text-align:center; padding:12px 0; }
-    .sbx-og-row { display:flex; }
-    .sbx-og-row.out { justify-content:flex-end; }
-    .sbx-og-row.in  { justify-content:flex-start; }
-    .sbx-og-bubble { max-width:78%; padding:8px 11px; border-radius:12px; font-size:13px; line-height:1.4; word-wrap:break-word; color:var(--text); }
-    .sbx-og-row.out .sbx-og-bubble { background:rgba(6,182,212,.18); border-bottom-right-radius:4px; }
-    .sbx-og-row.in  .sbx-og-bubble { background:var(--bg-elev); border:1px solid var(--border); border-bottom-left-radius:4px; }
-    .sbx-og-meta { margin-top:4px; display:flex; flex-wrap:wrap; gap:6px; font-size:10.5px; color:var(--text-faint); }
-    .sbx-og-badge { display:inline-block; padding:1px 7px; border-radius:999px; font-size:10.5px; font-weight:600; border:1px solid var(--border); background:var(--bg-elev); color:var(--text-dim); }
-    .sbx-og-badge.intent { background:rgba(124,58,237,.10); color:#7c3aed; border-color:rgba(124,58,237,.28); }
-    .sbx-og-badge.conf   { background:rgba(6,182,212,.10);  color:#0891b2; border-color:rgba(6,182,212,.28); }
-    .sbx-og-badge.mode   { background:rgba(16,185,129,.10); color:#059669; border-color:rgba(16,185,129,.28); }
-    .sbx-og-badge.mode.draft      { background:rgba(245,158,11,.10); color:#b45309; border-color:rgba(245,158,11,.28); }
-    .sbx-og-badge.mode.disabled   { background:rgba(239,68,68,.10);  color:#dc2626; border-color:rgba(239,68,68,.28); }
-    .sbx-og-badge.blocked { background:rgba(239,68,68,.10);  color:#dc2626; border-color:rgba(239,68,68,.28); }
-    .sbx-og-badge.sent    { background:rgba(16,185,129,.10); color:#059669; border-color:rgba(16,185,129,.28); }
-    .sbx-og-reason { font-size:10.5px; color:var(--text-faint); margin-top:3px; font-style:italic; white-space:pre-wrap; }
+    /* .sbx-og-* CSS uit #783 verwijderd — oefengesprek is verhuisd naar
+       Instellingen → Joost → Oefengesprek (#784). Nieuwe styling staat bij
+       .joost-tabs / .joost-og-* / #joostOgThread — zie style-blok r462+. */
     .inv-locked { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 36px 20px; text-align: center; color: var(--text-dim); }
     .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 600; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); padding: 20px; }
     .modal-overlay.hidden { display: none !important; }
@@ -526,6 +511,123 @@
       content: 'Klant';
       color: #1f2937;
     }
+    /* Oefengesprek (#784): Jeffrey speelt de klant, dus de labels-per-kant
+       zijn omgedraaid t.o.v. de echte inbox. Outbound-styling (rechts,
+       groen) → "Jij (klant)"; inbound-styling (links, grijs) → "Joost". */
+    #joostOgThread .inbox-c-msg.outbound:not(.same-sender) .inbox-c-msg-bubble::before {
+      content: 'Jij (klant)';
+    }
+    #joostOgThread .inbox-c-msg.inbound:not(.same-sender) .inbox-c-msg-bubble::before {
+      content: 'Joost';
+    }
+
+    /* Joost-instellingen-pagina — tab-strip + oefengesprek-chat shell (#784).
+       Hoort BOVEN het bestaande scoped inbox-styleblok van #view-inbox zodat
+       ook Chrome scoped-override niet in het geding komt: onze selectors
+       gebruiken alleen #joostOgThread / .joost-og-* / .joost-tab-*, geen
+       overlap met #view-inbox rules. */
+    .joost-tabs {
+      display:flex; gap:4px; padding:0 4px;
+      border-bottom:1px solid var(--border);
+      margin:14px 0 18px;
+    }
+    .joost-tab-btn {
+      background:transparent; border:0; padding:9px 16px 11px;
+      font-size:13.5px; font-weight:600; color:var(--text-dim); cursor:pointer;
+      display:inline-flex; align-items:center; gap:6px;
+      border-bottom:2px solid transparent; margin-bottom:-1px;
+      font-family:inherit;
+    }
+    .joost-tab-btn:hover { color:var(--text); }
+    .joost-tab-btn.active { color:var(--accent-cyan, #06b6d4); border-bottom-color:var(--accent-cyan, #06b6d4); }
+    .joost-tab-panel { display:block; }
+    .joost-tab-panel[hidden] { display:none; }
+
+    .joost-og-shell { display:flex; flex-direction:column; min-height:640px; gap:12px; }
+
+    /* Sandbox-strook boven de chat: dry-run + testklant + waarschuwing */
+    .joost-og-bar {
+      display:flex; align-items:center; gap:10px;
+      padding:10px 14px; border-radius:10px; font-size:13px;
+      background:rgba(14,165,233,.08); border:1px solid rgba(14,165,233,.25); color:var(--text);
+    }
+    .joost-og-bar.ok   { background:rgba(16,185,129,.08); border-color:rgba(16,185,129,.28); }
+    .joost-og-bar.warn { background:rgba(245,158,11,.08); border-color:rgba(245,158,11,.28); }
+    .joost-og-bar.err  { background:rgba(239,68,68,.08);  border-color:rgba(239,68,68,.28); }
+    .joost-og-bar strong { font-weight:600; }
+    .joost-og-bar a { color:var(--accent-cyan, #06b6d4); text-decoration:underline; }
+    .joost-og-bar-dot {
+      width:9px; height:9px; border-radius:50%; flex:0 0 auto;
+      background:var(--text-faint);
+    }
+    .joost-og-bar-dot.ok   { background:#10b981; box-shadow:0 0 0 3px rgba(16,185,129,.14); }
+    .joost-og-bar-dot.warn { background:#f59e0b; box-shadow:0 0 0 3px rgba(245,158,11,.14); }
+    .joost-og-bar-dot.err  { background:#ef4444; box-shadow:0 0 0 3px rgba(239,68,68,.14); }
+    .joost-og-bar-spacer { flex:1; }
+    .joost-og-reset {
+      background:transparent; border:1px solid var(--border); color:var(--text-dim);
+      padding:5px 11px; border-radius:8px; font-size:12px; cursor:pointer;
+      display:inline-flex; align-items:center; gap:5px; font-family:inherit;
+    }
+    .joost-og-reset:hover { color:var(--text); border-color:var(--accent-cyan, #06b6d4); }
+
+    /* Mode-per-intent strook */
+    .joost-og-modes {
+      display:flex; flex-wrap:wrap; gap:6px; align-items:center;
+      padding:8px 12px; background:var(--bg); border:1px solid var(--border);
+      border-radius:8px; font-size:11.5px;
+    }
+    .joost-og-modes-label { color:var(--text-faint); font-weight:600; margin-right:4px; }
+    .joost-og-mode-pill {
+      display:inline-block; padding:2px 8px; border-radius:999px;
+      font-size:11px; font-weight:500;
+      background:var(--bg-elev); border:1px solid var(--border); color:var(--text-dim);
+    }
+    .joost-og-mode-pill.mode-draft      { background:rgba(245,158,11,.10); color:#b45309; border-color:rgba(245,158,11,.28); }
+    .joost-og-mode-pill.mode-autonomous { background:rgba(16,185,129,.10); color:#059669; border-color:rgba(16,185,129,.28); }
+    .joost-og-mode-pill.mode-disabled   { background:rgba(239,68,68,.10);  color:#dc2626; border-color:rgba(239,68,68,.28); }
+
+    /* Thread */
+    .joost-og-thread-wrap { flex:1; display:flex; min-height:420px; }
+    .joost-og-thread {
+      flex:1; overflow-y:auto; padding:16px 18px; background:#f7f8fa;
+      border:1px solid var(--border); border-radius:12px;
+      display:flex; flex-direction:column;
+    }
+    .joost-og-thread .inbox-c-msg-bubble { max-width:70%; }
+    .joost-og-empty {
+      margin:auto; text-align:center; color:var(--text-faint); font-size:13px;
+      display:flex; flex-direction:column; align-items:center; gap:8px;
+      padding:36px 20px;
+    }
+    .joost-og-empty p { margin:0; }
+    .joost-og-empty strong { color:var(--text-dim); }
+
+    /* Meta-strook onder Joost's laatste bubbel */
+    .joost-og-meta-row {
+      align-self:flex-start; max-width:70%;
+      margin:2px 0 12px 6px;
+      display:flex; flex-wrap:wrap; align-items:center; gap:5px;
+      font-size:10.5px; color:var(--text-faint); font-weight:500;
+    }
+    .joost-og-meta-sep { color:var(--border); }
+    .joost-og-meta-intent { color:#7c3aed; font-weight:600; }
+    .joost-og-meta-conf   { color:#0891b2; font-weight:600; }
+    .joost-og-meta-mode.mode-draft      { color:#b45309; }
+    .joost-og-meta-mode.mode-autonomous { color:#059669; }
+    .joost-og-meta-mode.mode-disabled   { color:#dc2626; }
+    .joost-og-meta-blocked { color:#dc2626; }
+    .joost-og-meta-sent    { color:#059669; }
+    .joost-og-meta-why {
+      background:transparent; border:0; padding:0 3px; color:var(--accent-cyan, #06b6d4);
+      text-decoration:underline dotted; cursor:help; font-size:10.5px; font-family:inherit;
+    }
+
+    /* Compose */
+    .joost-og-compose { position:static; background:transparent; border-top:0; padding:0; box-shadow:none; }
+    .joost-og-compose .inbox-c-compose-textarea { background:#fff; }
+    .joost-og-status { font-size:11px; color:var(--text-faint); font-style:italic; margin-right:6px; }
+
     .bubble-text {
       display: inline;
       white-space: pre-line;
@@ -16302,38 +16404,430 @@
   }
 
   // Punt 3 herontwerp: Joost-config inline in wanbetalers via de gedeelde
-  // shared/finance-instellingen.js — 1-op-1 dezelfde velden en dezelfde
-  // endpoints (module=finance) als in agency center, dus wijzigingen zijn
-  // automatisch gesynchroniseerd. Idempotent: window.FinanceInstellingen.mount
-  // guardt op host-referentie, dus meerdere clicks doen niets extra.
+  // shared/finance-instellingen.js.
+  //
+  // #784 herstructurering: onder de pagina-titel staat nu een tab-strip met
+  // twee tabs — "Oefengesprek" (default) en "Instellingen". Argument voor
+  // die volgorde: de instellingen zijn een self-service admin-flow die maar
+  // zelden gewijzigd wordt; het oefengesprek is de reden dat Jeffrey op
+  // deze pagina komt zodra hij Joost wil bijsturen of testen. De chat vult
+  // het scherm; de bestaande shared/finance-instellingen.js-mount wordt
+  // lazy geladen wanneer je op de andere tab klikt (idempotent).
   function mountJoostConfigHost() {
     const host = document.getElementById('wb-sub-joost');
     if (!host) return;
     if (!host.__joostShellBuilt) {
       host.innerHTML = `
         <div class="wbx-page-head">
-          <h1>Joost — de toon</h1>
-          <p>Hoe Joost klanten aanspreekt en wanneer hij zelf mag antwoorden. Persona, systeem-prompt, model, autonomie per intent, arrangement-mandaat, communicatie-limieten en feature-flags. Deze instellingen zijn identiek aan die in agency center.</p>
+          <h1>Joost</h1>
+          <p>Test hoe Joost reageert op een klant, of stel z'n toon en mandaat bij. Het oefengesprek draait op de sandbox-test-persoon in dry-run — er gaat nooit iets naar een echte klant.</p>
         </div>
-        <!-- Verberg de top-level fi-tabs (Joost/Templates/Connection) die
-             FinanceInstellingen normaal boven z'n content zet — hier tonen
-             we alleen Joost. De interne Joost sub-strip (Algemeen/Autonomy/
-             Decisions) blijft zichtbaar want die heeft geen #fiTabs id. -->
-        <style>#wb-sub-joost #fiTabs { display:none !important; }</style>
-        <div id="wb-sub-joost-mount"></div>
+        <div class="joost-tabs" role="tablist" aria-label="Joost sub-secties">
+          <button type="button" class="joost-tab-btn active" data-joost-tab="oefengesprek" role="tab" aria-selected="true"><i class="ti ti-messages"></i> Oefengesprek</button>
+          <button type="button" class="joost-tab-btn"        data-joost-tab="instellingen" role="tab" aria-selected="false"><i class="ti ti-adjustments"></i> Instellingen</button>
+        </div>
+        <div id="joost-tab-oefengesprek" class="joost-tab-panel" role="tabpanel"></div>
+        <div id="joost-tab-instellingen" class="joost-tab-panel" role="tabpanel" hidden>
+          <!-- Verberg de top-level fi-tabs (Joost/Templates/Connection) die
+               FinanceInstellingen normaal boven z'n content zet — hier tonen
+               we alleen Joost. De interne Joost sub-strip (Algemeen/Autonomy/
+               Decisions) blijft zichtbaar want die heeft geen #fiTabs id. -->
+          <style>#joost-tab-instellingen #fiTabs { display:none !important; }</style>
+          <div id="wb-sub-joost-mount"></div>
+        </div>
       `;
       host.__joostShellBuilt = true;
+      // Wire tab-strip. Lazy mount van instellingen-tab bij eerste bezoek.
+      host.querySelectorAll('.joost-tab-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const tab = btn.getAttribute('data-joost-tab');
+          host.querySelectorAll('.joost-tab-btn').forEach((b) => {
+            const isActive = (b === btn);
+            b.classList.toggle('active', isActive);
+            b.setAttribute('aria-selected', String(isActive));
+          });
+          const oPan = document.getElementById('joost-tab-oefengesprek');
+          const iPan = document.getElementById('joost-tab-instellingen');
+          if (oPan) oPan.hidden = (tab !== 'oefengesprek');
+          if (iPan) iPan.hidden = (tab !== 'instellingen');
+          if (tab === 'instellingen') _mountJoostInstellingenLazy();
+          if (tab === 'oefengesprek') _joostOgFocusInputSafely();
+        });
+      });
     }
+    // Oefengesprek is default zichtbaar; bouw of ververs de chat.
+    _mountJoostOefengesprekPanel();
+  }
+
+  // Lazy mount van de shared FinanceInstellingen — pas bij eerste tab-click
+  // (of bij hard-mount van de instellingen-tab). Idempotent guarded op
+  // host-referentie.
+  function _mountJoostInstellingenLazy() {
     const mountEl = document.getElementById('wb-sub-joost-mount');
-    if (!mountEl) return;
+    if (!mountEl || mountEl.__mounted) return;
     if (typeof window.FinanceInstellingen?.mount !== 'function') {
       mountEl.innerHTML = '<div style="padding:20px;color:var(--wbx-faint);font-size:13px">Joost-config kan niet geladen worden — shared/finance-instellingen.js ontbreekt.</div>';
       return;
     }
-    try { window.FinanceInstellingen.mount({ host: mountEl }); }
-    catch (e) {
+    try {
+      window.FinanceInstellingen.mount({ host: mountEl });
+      mountEl.__mounted = true;
+    } catch (e) {
       console.error('[mountJoostConfigHost]', e);
       mountEl.innerHTML = `<div style="padding:20px;color:var(--wbx-s-inc-tx);font-size:13px">Joost-config laden mislukt: ${esc(e?.message || 'onbekend')}</div>`;
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════
+  //   OEFENGESPREK-CHAT op de Joost-instellingen-pagina (#784)
+  //   Verplaatst het paneel uit de Testmodus-kaart (#783) naar hier, met
+  //   volwaardige inbox-style chat. Backend ongewijzigd:
+  //     • POST /api/wanbetalers-sandbox-simulate-inbound   { body }
+  //     • POST /api/wanbetalers-sandbox-oefengesprek-reset {}
+  //     • GET  /api/inbox-messages-list?conversation_id=X
+  //     • GET  /api/wanbetalers-sandbox-status
+  //     • GET  /api/inbox-conversation-by-customer?customer_id=X
+  //     • GET  /api/joost-config-get?module=finance         (mode per intent)
+  //   Sandbox-guards: #691 (assertRecipientMatchesSandbox + dry-run wamid)
+  //   blijft leidend — er gaat nooit iets naar een echte klant.
+  // ═════════════════════════════════════════════════════════════════════
+  const _joostOg = {
+    convId:      null,
+    customer:    null,     // { id, first_name, is_test, ... } uit sandbox-status
+    dryRun:      null,     // boolean uit sandbox-status of joost-config
+    intentModes: {},       // { arrangement_request: 'draft', payment_promise: 'autonomous', ... }
+    loading:     false,
+    lastJoost:   null,
+  };
+  // Mapping van suggestion.detected_intent -> autonomy_config.intents.key.
+  // Spiegel van api/joost-autonomy-evaluate.js r111-118. Zonder deze mapping
+  // kunnen we mode-per-intent niet uit joost_config lezen.
+  const JOOST_OG_INTENT_KEY = {
+    payment_promise:     'ja_op_uitstel',
+    verify_payment:      'al_betaald_claim',
+    arrangement_request: 'tegenvoorstel_termijn',
+    general_question:    'vraag_om_kopie_factuur',
+    escalation_needed:   'boos_of_klacht',
+    other:               null,
+  };
+  const JOOST_OG_INTENT_LABEL = {
+    payment_promise:     'betaal-belofte',
+    verify_payment:      'al betaald',
+    arrangement_request: 'regeling',
+    general_question:    'vraag',
+    escalation_needed:   'escalatie',
+    other:               'anders',
+  };
+
+  function _joostOgFocusInputSafely() {
+    const inp = document.getElementById('joostOgInput');
+    if (inp) setTimeout(() => inp.focus(), 60);
+  }
+
+  function _mountJoostOefengesprekPanel() {
+    const host = document.getElementById('joost-tab-oefengesprek');
+    if (!host) return;
+    if (!host.__built) {
+      host.innerHTML = `
+        <div class="joost-og-shell">
+          <div class="joost-og-bar" id="joostOgBar" role="status">
+            <span class="joost-og-bar-dot" id="joostOgBarDot" aria-hidden="true"></span>
+            <span id="joostOgBarText">Status laden…</span>
+            <span class="joost-og-bar-spacer"></span>
+            <button type="button" class="joost-og-reset" id="joostOgResetBtn" title="Wist alle berichten uit dit gesprek (facturen/klant blijven).">
+              <i class="ti ti-refresh"></i> Nieuw gesprek
+            </button>
+          </div>
+          <div class="joost-og-modes" id="joostOgModes" aria-label="Huidige autonomie-mode per intent"></div>
+          <div class="joost-og-thread-wrap">
+            <div class="joost-og-thread" id="joostOgThread" role="log" aria-live="polite" aria-label="Oefengesprek berichten"></div>
+          </div>
+          <div class="inbox-c-compose joost-og-compose">
+            <textarea id="joostOgInput" class="inbox-c-compose-textarea" placeholder="Type een bericht zoals een klant dat zou sturen… (Enter = versturen · Shift+Enter = nieuwe regel)"></textarea>
+            <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center">
+              <span id="joostOgStatus" class="joost-og-status" aria-live="polite"></span>
+              <button type="button" class="sr-abtn primary" id="joostOgSendBtn"><i class="ti ti-send"></i> Verstuur</button>
+            </div>
+          </div>
+        </div>
+      `;
+      host.__built = true;
+
+      // Compose-handlers
+      document.getElementById('joostOgSendBtn')?.addEventListener('click', _joostOgSend);
+      const input = document.getElementById('joostOgInput');
+      input?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          _joostOgSend();
+        }
+      });
+      document.getElementById('joostOgResetBtn')?.addEventListener('click', _joostOgReset);
+    }
+    // Bij elke (re-)mount: status + config + messages verversen.
+    _joostOgReloadEverything();
+  }
+
+  async function _joostOgReloadEverything() {
+    await Promise.all([
+      _joostOgLoadStatus(),
+      _joostOgLoadConfig(),
+    ]);
+    _joostOgRenderTopBar();
+    _joostOgRenderModes();
+    await _joostOgReloadMessages();
+  }
+
+  async function _joostOgLoadStatus() {
+    try {
+      const r = await window.AgentShared.apiFetch('/api/wanbetalers-sandbox-status');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      _joostOg.customer = d?.customer || null;
+      _joostOg.dryRun   = (d?.dry_run === true);
+      // Conv-id via inbox-conversation-by-customer.
+      if (_joostOg.customer?.id) {
+        const rC = await window.AgentShared.apiFetch(
+          '/api/inbox-conversation-by-customer?customer_id=' + encodeURIComponent(_joostOg.customer.id)
+        );
+        const dC = await rC.json().catch(() => ({}));
+        if (rC.ok && dC.found && dC.conversation_id) _joostOg.convId = dC.conversation_id;
+      }
+    } catch (e) {
+      console.warn('[joost-og status]', e?.message || e);
+      _joostOg.customer = null;
+    }
+  }
+
+  async function _joostOgLoadConfig() {
+    try {
+      const r = await window.AgentShared.apiFetch('/api/joost-config-get?module=finance');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      const cfg   = d?.config || d || {};
+      const auto  = (cfg.autonomy_config && typeof cfg.autonomy_config === 'object') ? cfg.autonomy_config : {};
+      const flags = (cfg.feature_flags && typeof cfg.feature_flags === 'object') ? cfg.feature_flags : {};
+      const intents = (auto.intents && typeof auto.intents === 'object') ? auto.intents : {};
+      const globalAuto = (flags.e2_auto_send_text === true) ? 'autonomous' : 'draft';
+      const modes = {};
+      for (const [intentKey, cfgKey] of Object.entries(JOOST_OG_INTENT_KEY)) {
+        if (!cfgKey) { modes[intentKey] = 'n.v.t.'; continue; }
+        const iCfg = intents[cfgKey] || null;
+        if (!iCfg) { modes[intentKey] = globalAuto; continue; }
+        if (iCfg.enabled === false) { modes[intentKey] = 'disabled'; continue; }
+        if (typeof iCfg.mode === 'string' && ['draft','autonomous','disabled'].includes(iCfg.mode)) {
+          modes[intentKey] = iCfg.mode;
+        } else {
+          modes[intentKey] = globalAuto;
+        }
+      }
+      _joostOg.intentModes = modes;
+    } catch (e) {
+      console.warn('[joost-og config]', e?.message || e);
+      _joostOg.intentModes = {};
+    }
+  }
+
+  function _joostOgRenderTopBar() {
+    const bar    = document.getElementById('joostOgBar');
+    const dot    = document.getElementById('joostOgBarDot');
+    const txtEl  = document.getElementById('joostOgBarText');
+    if (!bar || !txtEl) return;
+    if (!_joostOg.customer) {
+      bar.classList.remove('ok', 'warn');
+      bar.classList.add('err');
+      if (dot) dot.className = 'joost-og-bar-dot err';
+      txtEl.innerHTML = 'Geen test-persoon gevonden. Ga naar <a href="#" data-joost-og-goto="testmodus">Wanbetalers → Instellingen → Testmodus</a> en klik "Seed test-persoon".';
+      bar.querySelector('[data-joost-og-goto="testmodus"]')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        setSubView('testmodus');
+      });
+      return;
+    }
+    const name = _joostOg.customer.first_name || _joostOg.customer.company_name || 'test-persoon';
+    const dryLabel = _joostOg.dryRun ? 'Dry-run AAN' : 'Dry-run UIT';
+    txtEl.innerHTML = `Oefening op <strong>${esc(name)}</strong> · ${esc(dryLabel)} · geen bericht gaat naar een echte klant`;
+    bar.classList.remove('err', 'warn');
+    bar.classList.add('ok');
+    if (dot) dot.className = 'joost-og-bar-dot ok';
+  }
+
+  function _joostOgRenderModes() {
+    const el = document.getElementById('joostOgModes');
+    if (!el) return;
+    const modes = _joostOg.intentModes || {};
+    const entries = Object.entries(JOOST_OG_INTENT_LABEL);
+    if (entries.length === 0 || Object.keys(modes).length === 0) {
+      el.innerHTML = '';
+      return;
+    }
+    el.innerHTML = '<span class="joost-og-modes-label">Modes:</span>' + entries.map(([intent, label]) => {
+      const m = modes[intent] || '—';
+      return `<span class="joost-og-mode-pill mode-${esc(m)}" title="Intent: ${esc(intent)} → mode ${esc(m)}">${esc(label)} · ${esc(m)}</span>`;
+    }).join('');
+  }
+
+  async function _joostOgReloadMessages() {
+    const thread = document.getElementById('joostOgThread');
+    if (!thread) return;
+    if (!_joostOg.convId) {
+      thread.innerHTML = `
+        <div class="joost-og-empty">
+          <i class="ti ti-message-2" style="font-size:32px;opacity:.4"></i>
+          <p><strong>Nog geen bericht.</strong></p>
+          <p>Typ hieronder een bericht zoals een klant dat zou sturen, en zie hoe Joost reageert.</p>
+        </div>`;
+      return;
+    }
+    try {
+      const r = await window.AgentShared.apiFetch(
+        '/api/inbox-messages-list?conversation_id=' + encodeURIComponent(_joostOg.convId)
+      );
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      const items = Array.isArray(d.items) ? d.items : [];
+      if (items.length === 0) {
+        thread.innerHTML = `
+          <div class="joost-og-empty">
+            <i class="ti ti-message-2" style="font-size:32px;opacity:.4"></i>
+            <p><strong>Nog geen bericht.</strong></p>
+            <p>Typ hieronder een bericht zoals een klant dat zou sturen, en zie hoe Joost reageert.</p>
+          </div>`;
+        return;
+      }
+      // Renderen met inbox-c-msg-bubble hergebruik. NB: Jeffrey speelt de
+      // KLANT — DB `direction='in'` (van klant) rendert dus als outbound
+      // (rechts, groen); DB `direction='out'` (Joost) als inbound (links,
+      // grijs). De sender-labels ("Jij (klant)" / "Joost") worden via CSS
+      // gescoped op #joostOgThread override — zie style-blok r462+.
+      const rows = items.map((m, idx) => {
+        const dir  = String(m.direction || '').toLowerCase();
+        const isKlant = (dir === 'in' || dir === 'inbound');   // Jeffrey
+        const outClass = isKlant ? 'outbound' : 'inbound';
+        const body = (m.body || (m.template_name ? `[template] ${m.template_name}` : '')).trim();
+        const time = _joostOgFmtTime(m.sent_at || m.created_at);
+        const prev = idx > 0 ? items[idx - 1] : null;
+        const sameSender = prev && String(prev.direction || '').toLowerCase() === dir;
+        // Bij Joost-bericht (dir='out') plakken we z'n metadata onder de
+        // bubbel. Data komt uit _joostOg.lastJoost bij de meest recente
+        // out-message; oudere Joost-berichten hebben geen inline meta
+        // (kunnen later uit joost_suggestions gefetcht worden — buiten
+        // scope voor #784).
+        const isLatestOut = (!isKlant) && (idx === items.length - 1);
+        const metaHtml = isLatestOut ? _joostOgJoostMetaHtml(_joostOg.lastJoost) : '';
+        return `
+          <div class="inbox-c-msg ${outClass}${sameSender ? ' same-sender' : ''}">
+            <div class="inbox-c-msg-bubble">
+              <span class="bubble-text">${esc(body)}<span class="meta-phantom" aria-hidden="true">${esc(time)}</span></span>
+              <span class="bubble-meta">${esc(time)}</span>
+            </div>
+          </div>
+          ${metaHtml}`;
+      }).join('');
+      thread.innerHTML = rows;
+      thread.scrollTop = thread.scrollHeight;
+    } catch (e) {
+      console.warn('[joost-og reload]', e?.message || e);
+      thread.innerHTML = `<div class="joost-og-empty" style="color:#dc2626">Kon berichten niet laden: ${esc(e?.message || 'onbekend')}</div>`;
+    }
+  }
+
+  function _joostOgFmtTime(iso) {
+    if (!iso) return '';
+    try {
+      return new Intl.DateTimeFormat('nl-NL', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+    } catch (_) { return ''; }
+  }
+
+  function _joostOgJoostMetaHtml(j) {
+    if (!j || !j.ran) return '';
+    const bits = [];
+    if (j.detected_intent) {
+      const lbl = JOOST_OG_INTENT_LABEL[j.detected_intent] || j.detected_intent;
+      bits.push(`<span class="joost-og-meta-intent">${esc(lbl)}</span>`);
+    }
+    if (j.confidence != null && Number.isFinite(Number(j.confidence))) {
+      const pct = Math.round(Number(j.confidence) * 100);
+      bits.push(`<span class="joost-og-meta-conf">${pct}%</span>`);
+    }
+    if (j.mode) {
+      bits.push(`<span class="joost-og-meta-mode mode-${esc(j.mode)}">${esc(j.mode)}</span>`);
+    }
+    if (j.blocked_reason) {
+      bits.push(`<span class="joost-og-meta-blocked">${esc(j.blocked_reason)}</span>`);
+    } else if (j.autonomy_sent === true) {
+      bits.push(`<span class="joost-og-meta-sent">autonoom verzonden</span>`);
+    }
+    const reasoning = j.reasoning
+      ? `<button type="button" class="joost-og-meta-why" title="${esc(j.reasoning)}">waarom?</button>`
+      : '';
+    return `<div class="joost-og-meta-row">${bits.join('<span class="joost-og-meta-sep">·</span>')}${reasoning}</div>`;
+  }
+
+  async function _joostOgSend() {
+    if (_joostOg.loading) return;
+    if (!_joostOg.customer) {
+      const status = document.getElementById('joostOgStatus');
+      if (status) status.textContent = 'Geen test-persoon — seed eerst.';
+      return;
+    }
+    const input = document.getElementById('joostOgInput');
+    const btn   = document.getElementById('joostOgSendBtn');
+    const status = document.getElementById('joostOgStatus');
+    const text  = String((input && input.value) || '').trim();
+    if (!text) return;
+    _joostOg.loading = true;
+    if (input) input.disabled = true;
+    if (btn)   btn.disabled = true;
+    if (status) status.textContent = 'Joost denkt na…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/wanbetalers-sandbox-simulate-inbound', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body: text }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      if (input) input.value = '';
+      if (d?.conversation_id) _joostOg.convId = d.conversation_id;
+      _joostOg.lastJoost = d?.joost || null;
+      await _joostOgReloadMessages();
+      if (status) {
+        if (d?.joost?.blocked_reason) status.textContent = 'Joost geblokkeerd: ' + d.joost.blocked_reason;
+        else if (d?.joost?.autonomy_sent) status.textContent = 'Joost heeft autonoom geantwoord (dry-run).';
+        else status.textContent = 'Joost heeft geantwoord.';
+      }
+    } catch (e) {
+      if (status) status.textContent = 'Fout: ' + (e?.message || 'onbekend');
+    } finally {
+      _joostOg.loading = false;
+      if (input) { input.disabled = false; input.focus(); }
+      if (btn)   btn.disabled = false;
+    }
+  }
+
+  async function _joostOgReset() {
+    if (_joostOg.loading) return;
+    if (!_joostOg.customer) return;
+    if (!confirm('Nieuw gesprek starten? Alle berichten van dit oefengesprek worden gewist (facturen/klant blijven).')) return;
+    _joostOg.loading = true;
+    const status = document.getElementById('joostOgStatus');
+    if (status) status.textContent = 'Wissen…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/wanbetalers-sandbox-oefengesprek-reset', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      _joostOg.lastJoost = null;
+      await _joostOgReloadMessages();
+      if (status) status.textContent = `${d.messages_deleted || 0} bericht(en) gewist. Klaar voor een nieuwe start.`;
+    } catch (e) {
+      if (status) status.textContent = 'Reset mislukt: ' + (e?.message || 'onbekend');
+    } finally {
+      _joostOg.loading = false;
     }
   }
 
@@ -19948,30 +20442,11 @@
           </div>
         </div>
 
-        <!-- Oefengesprek met Joost (#783) — chat met Joost op de sandbox-klant.
-             Elke turn stuurt POST /api/wanbetalers-sandbox-simulate-inbound
-             met body.body = wat je typt. Response bevat suggested_reply +
-             intent + confidence + mode + blocked_reason.
-             #691-guard onderschept de Meta-send: bij is_test dry-run wordt
-             er nooit naar een echt nummer verstuurd. -->
-        <div style="border:1px solid rgba(14,165,233,.30);background:rgba(14,165,233,.05);border-radius:10px;padding:14px;margin-bottom:14px">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-            <div style="font-size:13.5px;font-weight:700;color:var(--text)">🤖 Oefengesprek met Joost</div>
-            <button id="sbxOgResetBtn" class="sr-abtn" type="button" title="Wist alle berichten van dit gesprek (klant + facturen blijven)."><i class="ti ti-refresh"></i> Nieuw gesprek</button>
-          </div>
-          <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:10px">
-            Type als klant → Joost reageert direct. Zie z'n intent + confidence + mode zodat je
-            weet wat hij zou doen als je autonomie aanzet. Alleen op de test-persoon; geen echte
-            klanten worden geraakt.
-          </div>
-          <div id="sbxOgChat" class="sbx-og-chat" role="log" aria-live="polite" aria-label="Oefengesprek berichten">
-            <div class="sbx-og-empty">Nog geen berichten. Typ hieronder om te beginnen.</div>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:10px">
-            <input id="sbxOgInput" class="fin-input" type="text" placeholder="Type als klant… (Enter = verstuur)" style="flex:1" />
-            <button id="sbxOgSendBtn" class="sr-abtn primary" type="button"><i class="ti ti-send"></i> Verstuur</button>
-          </div>
-          <div id="sbxOgStatus" style="font-size:11px;color:var(--text-faint);margin-top:6px;min-height:14px"></div>
+        <!-- Oefengesprek is verhuisd naar Instellingen → Joost (#784).
+             Daar staat 'ie in het groot met inbox-style bubbels en metadata. -->
+        <div style="border:1px solid rgba(14,165,233,.30);background:rgba(14,165,233,.05);border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--text-dim)">
+          <i class="ti ti-messages"></i> Oefengesprek met Joost is verhuisd naar
+          <a href="#" data-sbx-goto="joost" style="color:var(--accent-cyan, #06b6d4);text-decoration:underline">Instellingen → Joost → Oefengesprek</a>.
         </div>
 
         <div style="border:1px solid rgba(239,68,68,.40);background:rgba(239,68,68,.06);border-radius:10px;padding:14px">
@@ -20190,168 +20665,14 @@
     // wanbetalers-sandbox-simulate-credit-round: lokaal crediteren van
     // is_test-facturen + test-sub verlengen + dunning_credited_debt inserten.
     // Nooit een TL-call; puur DB-mutaties op is_test-rijen.
-    // ────────────────────────────────────────────────────────────────────
-    // Oefengesprek met Joost (#783) — chat-flow op de sandbox-klant.
-    //   * Elke turn → POST simulate-inbound { body } → toon suggested_reply
-    //     + intent + confidence + mode + blocked_reason.
-    //   * "Nieuw gesprek" → POST oefengesprek-reset (wist alleen messages).
-    //   * Chat wordt bij elke actie opnieuw opgehaald via de bestaande
-    //     inbox-messages-list op de sandbox-conv. Zo blijven de bubbels
-    //     consistent met wat runJoostSuggest als context gebruikt.
-    // ────────────────────────────────────────────────────────────────────
-    const _sbxOg = {
-      convId:      null,     // sandbox-conv (via sbxReloadStatus of eerste turn)
-      loading:     false,    // tijdens send / reset — verhindert dubbelklik
-      lastJoost:   null,     // laatste joost-metadata voor debug/inspectie
-    };
-
-    async function _sbxOgFetchConvId() {
-      // Sandbox-status geeft (indirect) niet altijd de conv-id terug; we
-      // vragen 'em op via de webhook-vriendelijke conversation-lookup op
-      // customer_id van de sandbox-persoon. Als er nog geen conv is,
-      // vraagt de eerste simulate-inbound 'em zelf aan.
-      try {
-        const r = await window.AgentShared.apiFetch('/api/wanbetalers-sandbox-status');
-        const d = await r.json().catch(() => ({}));
-        if (r.ok && d?.customer?.id) {
-          const rC = await window.AgentShared.apiFetch(
-            '/api/inbox-conversation-by-customer?customer_id=' + encodeURIComponent(d.customer.id)
-          );
-          const dC = await rC.json().catch(() => ({}));
-          if (rC.ok && dC.found && dC.conversation_id) return dC.conversation_id;
-        }
-      } catch (_) { /* fail-soft — chat werkt ook zonder pre-fetch */ }
-      return null;
-    }
-
-    async function _sbxOgReloadMessages() {
-      const chatEl = document.getElementById('sbxOgChat');
-      if (!chatEl) return;
-      if (!_sbxOg.convId) _sbxOg.convId = await _sbxOgFetchConvId();
-      if (!_sbxOg.convId) {
-        chatEl.innerHTML = `<div class="sbx-og-empty">Nog geen berichten. Typ hieronder om te beginnen.</div>`;
-        return;
-      }
-      try {
-        const r = await window.AgentShared.apiFetch(
-          '/api/inbox-messages-list?conversation_id=' + encodeURIComponent(_sbxOg.convId)
-        );
-        const d = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
-        const items = Array.isArray(d.items) ? d.items : [];
-        if (items.length === 0) {
-          chatEl.innerHTML = `<div class="sbx-og-empty">Nog geen berichten. Typ hieronder om te beginnen.</div>`;
-          return;
-        }
-        chatEl.innerHTML = items.map((m) => {
-          const dir = String(m.direction || '').toLowerCase();
-          const isOut = (dir === 'out' || dir === 'outbound');
-          const body = m.body || (m.template_name ? `[template] ${m.template_name}` : '');
-          return `
-            <div class="sbx-og-row ${isOut ? 'out' : 'in'}">
-              <div class="sbx-og-bubble">${esc(body)}</div>
-            </div>`;
-        }).join('');
-        chatEl.scrollTop = chatEl.scrollHeight;
-      } catch (e) {
-        console.warn('[sbx-og reload]', e?.message || e);
-        chatEl.innerHTML = `<div class="sbx-og-empty" style="color:#dc2626">Kon berichten niet laden: ${esc(e?.message || 'onbekend')}</div>`;
-      }
-    }
-
-    function _sbxOgAppendJoostMeta(joost) {
-      // Toon Joost's metadata (intent + confidence + mode + block-reason)
-      // onder z'n laatste bubble in de chat. We hangen 'em op de laatste
-      // .sbx-og-row.in in de chat-container zodat 'ie visueel bij de bubble
-      // hoort — sneller dan een reload van het bericht met classe-injectie.
-      const chatEl = document.getElementById('sbxOgChat');
-      if (!chatEl || !joost) return;
-      const lastIn = chatEl.querySelector('.sbx-og-row.in:last-of-type');
-      if (!lastIn) return;
-      const badges = [];
-      if (joost.detected_intent) {
-        badges.push(`<span class="sbx-og-badge intent">${esc(joost.detected_intent)}</span>`);
-      }
-      if (joost.confidence != null && Number.isFinite(Number(joost.confidence))) {
-        const pct = Math.round(Number(joost.confidence) * 100);
-        badges.push(`<span class="sbx-og-badge conf">${pct}% vertrouwen</span>`);
-      }
-      if (joost.mode) {
-        badges.push(`<span class="sbx-og-badge mode ${esc(joost.mode)}">mode: ${esc(joost.mode)}</span>`);
-      }
-      if (joost.blocked_reason) {
-        badges.push(`<span class="sbx-og-badge blocked">${esc(joost.blocked_reason)}</span>`);
-      } else if (joost.autonomy_sent === true) {
-        badges.push(`<span class="sbx-og-badge sent">autonoom verzonden (dry-run)</span>`);
-      }
-      const reasonHtml = joost.reasoning ? `<div class="sbx-og-reason">${esc(joost.reasoning)}</div>` : '';
-      const metaWrap = document.createElement('div');
-      metaWrap.className = 'sbx-og-meta-wrap';
-      metaWrap.innerHTML = `<div class="sbx-og-meta" style="margin-left:0">${badges.join('')}</div>${reasonHtml}`;
-      lastIn.appendChild(metaWrap);
-    }
-
-    async function _sbxOgSend() {
-      if (_sbxOg.loading) return;
-      const input = document.getElementById('sbxOgInput');
-      const status = document.getElementById('sbxOgStatus');
-      const text = String((input && input.value) || '').trim();
-      if (!text) return;
-      _sbxOg.loading = true;
-      if (input) input.disabled = true;
-      const btn = document.getElementById('sbxOgSendBtn');
-      if (btn) btn.disabled = true;
-      if (status) status.textContent = 'Joost denkt na…';
-      try {
-        const d = await _sbxCall('/api/wanbetalers-sandbox-simulate-inbound', { body: text });
-        if (input) input.value = '';
-        _sbxOg.convId = d?.conversation_id || _sbxOg.convId;
-        _sbxOg.lastJoost = d?.joost || null;
-        await _sbxOgReloadMessages();
-        if (d?.joost?.ran) {
-          _sbxOgAppendJoostMeta(d.joost);
-          if (status) {
-            const noteBits = [];
-            if (d.joost.autonomy_sent) noteBits.push('autonoom verzonden (dry-run)');
-            else if (d.joost.blocked_reason) noteBits.push('geblokkeerd: ' + d.joost.blocked_reason);
-            if (d.joost.note) noteBits.push(d.joost.note);
-            status.textContent = noteBits.join(' · ') || 'Joost heeft geantwoord.';
-          }
-        } else {
-          if (status) status.textContent = 'Joost gaf geen antwoord: ' + (d?.joost?.note || 'onbekend');
-        }
-      } catch (e) {
-        if (status) status.textContent = 'Fout: ' + (e?.message || 'onbekend');
-      } finally {
-        _sbxOg.loading = false;
-        if (input) { input.disabled = false; input.focus(); }
-        if (btn) btn.disabled = false;
-      }
-    }
-
-    document.getElementById('sbxOgSendBtn')?.addEventListener('click', _sbxOgSend);
-    document.getElementById('sbxOgInput')?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _sbxOgSend(); }
+    // Link uit Testmodus-kaart naar de nieuwe locatie (#784 — oefengesprek is
+    // verhuisd naar Instellingen → Joost → Oefengesprek).
+    document.querySelectorAll('[data-sbx-goto="joost"]').forEach((a) => {
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        setSubView('joost');
+      });
     });
-    document.getElementById('sbxOgResetBtn')?.addEventListener('click', async () => {
-      if (_sbxOg.loading) return;
-      if (!confirm('Nieuw gesprek starten? Alle berichten van dit oefengesprek worden gewist (facturen/klant blijven).')) return;
-      _sbxOg.loading = true;
-      const status = document.getElementById('sbxOgStatus');
-      if (status) status.textContent = 'Wissen…';
-      try {
-        const d = await _sbxCall('/api/wanbetalers-sandbox-oefengesprek-reset', {});
-        if (status) status.textContent = `${d.messages_deleted || 0} bericht(en) gewist. Klaar voor een nieuwe start.`;
-        await _sbxOgReloadMessages();
-      } catch (e) {
-        if (status) status.textContent = 'Reset mislukt: ' + (e?.message || 'onbekend');
-      } finally {
-        _sbxOg.loading = false;
-      }
-    });
-
-    // Initial load van de chat wanneer de kaart voor het eerst gemount wordt.
-    _sbxOgReloadMessages().catch(() => {});
 
     document.getElementById('sbxSimCreditBtn')?.addEventListener('click', async () => {
       if (!confirm('🧪 Simuleer de crediteerronde op de test-persoon?\n\nDit crediteert alle open test-facturen lokaal (geen TL-call), verlengt het TEST-abonnement en schrijft dunning_credited_debt-rijen. Alleen voor is_test-data.')) return;
