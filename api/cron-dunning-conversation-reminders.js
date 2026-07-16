@@ -77,7 +77,7 @@ function nowIso() { return new Date().toISOString(); }
  * Reminder-1 tekst (vast, met bestaande variabelen). Geen LLM — voorspelbaar
  * eerste-contact-bericht.
  */
-function buildReminder1Text({ naam, factuur_nr, totaal_bedrag, dagen_overdue }) {
+export function buildReminder1Text({ naam, factuur_nr, totaal_bedrag, dagen_overdue }) {
   const lines = [
     `Hoi ${naam || 'daar'},`,
     ``,
@@ -89,7 +89,7 @@ function buildReminder1Text({ naam, factuur_nr, totaal_bedrag, dagen_overdue }) 
   return lines.join('\n');
 }
 
-async function isWithin24hWindow(supabase, convId) {
+export async function isWithin24hWindow(supabase, convId) {
   try {
     const { data } = await supabase
       .from('whatsapp_conversations')
@@ -111,7 +111,7 @@ async function isWithin24hWindow(supabase, convId) {
  *   stage 'rz'  → resume (2 gestuurd + stil-na-r2 >= resume_after_hours)
  *   stage null  → niets doen (nog te vroeg of al voltooid)
  */
-function determineStage({ run, convLastInboundAt, noReplyCfg, nowMs }) {
+export function determineStage({ run, convLastInboundAt, noReplyCfg, nowMs }) {
   const count = Number(run.paused_conversation_reminder_count || 0);
   const lastReminderAt = run.paused_conversation_last_reminder_at
     ? new Date(run.paused_conversation_last_reminder_at).getTime()
@@ -149,7 +149,7 @@ function determineStage({ run, convLastInboundAt, noReplyCfg, nowMs }) {
  * Fail-soft: bij fout returnt lege waarden zodat de reminder een minimale
  * bericht kan sturen ("Hoi daar, ...").
  */
-async function loadRenderContext(customerId) {
+export async function loadRenderContext(customerId) {
   const ctx = { customer: null, openInvoices: [] };
   try {
     const { data: cust } = await supabaseAdmin
@@ -173,6 +173,58 @@ async function loadRenderContext(customerId) {
   return ctx;
 }
 
+/**
+ * Laadt de finance-module joost_config (no_reply-cirkel + comm_limits).
+ * Returned { ok, cfg, autonomyCfg, noReplyCfg } of { ok:false, reason }.
+ * Zowel de cron als de sandbox-variant gebruiken dit — één centrale
+ * config-shape voor beide.
+ */
+export async function loadConversationReminderConfig() {
+  const { data: cfg, error: cfgErr } = await supabaseAdmin
+    .from('joost_config')
+    .select('module, autonomy_config, feature_flags, is_enabled')
+    .eq('module', 'finance')
+    .maybeSingle();
+  if (cfgErr) return { ok: false, reason: 'CONFIG_LOOKUP_FAIL', error: cfgErr.message };
+  if (!cfg)   return { ok: false, reason: 'JOOST_CONFIG_MISSING' };
+  const autonomyCfg = (cfg.autonomy_config && typeof cfg.autonomy_config === 'object') ? cfg.autonomy_config : {};
+  const noReplyCfg  = (autonomyCfg.no_reply  && typeof autonomyCfg.no_reply  === 'object') ? autonomyCfg.no_reply : {};
+  return { ok: true, cfg, autonomyCfg, noReplyCfg };
+}
+
+/**
+ * Laadt de externe modules (dry-run, meta-whatsapp, template-render) fail-safe.
+ * Returned { isDryRunEnabled, assertRecipientMatchesSandbox, sendText,
+ * sendTemplate, MetaNotConfiguredError, getConfigStatus, computeVariables }.
+ * Elk veld kan null zijn als de import faalt — de per-run processor
+ * degradeert dan naar dry-run of skip-scenario's.
+ */
+export async function loadConversationReminderDeps() {
+  const deps = {
+    isDryRunEnabled: null, assertRecipientMatchesSandbox: null,
+    sendText: null, sendTemplate: null,
+    MetaNotConfiguredError: null, getConfigStatus: null,
+    computeVariables: null,
+  };
+  try {
+    const dry = await import('./_lib/dunning-dry-run.js');
+    deps.isDryRunEnabled = dry.isDryRunEnabled;
+    deps.assertRecipientMatchesSandbox = dry.assertRecipientMatchesSandbox;
+  } catch (e) { console.warn('[conv-reminder] dunning-dry-run module load fail:', e?.message); }
+  try {
+    const meta = await import('./_lib/meta-whatsapp.js');
+    deps.sendText = meta.sendText;
+    deps.sendTemplate = meta.sendTemplate;
+    deps.MetaNotConfiguredError = meta.MetaNotConfiguredError;
+    deps.getConfigStatus = meta.getConfigStatus;
+  } catch (e) { console.warn('[conv-reminder] meta-whatsapp module load fail:', e?.message); }
+  try {
+    const rt = await import('./_lib/dunning-template-render.js');
+    deps.computeVariables = rt.computeVariables;
+  } catch (e) { console.warn('[conv-reminder] template-render module load fail:', e?.message); }
+  return deps;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -193,22 +245,17 @@ export default async function handler(req, res) {
 
   try {
     // ── Config ophalen (finance-module: no_reply-blok + comm_limits) ──────
-    const { data: cfg, error: cfgErr } = await supabaseAdmin
-      .from('joost_config')
-      .select('module, autonomy_config, feature_flags, is_enabled')
-      .eq('module', 'finance')
-      .maybeSingle();
-    if (cfgErr) {
-      console.error('[conv-reminder-cron] joost_config lookup:', cfgErr.message);
+    const cfgRes = await loadConversationReminderConfig();
+    if (!cfgRes.ok) {
+      if (cfgRes.reason === 'CONFIG_LOOKUP_FAIL') {
+        console.error('[conv-reminder-cron] joost_config lookup:', cfgRes.error);
+        summary.duration_ms = elapsed(startedAt);
+        return res.status(500).json({ ...summary, error: 'joost_config lookup: ' + cfgRes.error });
+      }
       summary.duration_ms = elapsed(startedAt);
-      return res.status(500).json({ ...summary, error: 'joost_config lookup: ' + cfgErr.message });
+      return res.status(200).json({ ...summary, skipped_reason: cfgRes.reason });
     }
-    if (!cfg) {
-      summary.duration_ms = elapsed(startedAt);
-      return res.status(200).json({ ...summary, skipped_reason: 'JOOST_CONFIG_MISSING' });
-    }
-    const autonomyCfg = (cfg.autonomy_config && typeof cfg.autonomy_config === 'object') ? cfg.autonomy_config : {};
-    const noReplyCfg  = (autonomyCfg.no_reply  && typeof autonomyCfg.no_reply  === 'object') ? autonomyCfg.no_reply : {};
+    const { autonomyCfg, noReplyCfg } = cfgRes;
 
     // ── Pending gespreks-pauze runs ophalen ────────────────────────────────
     const { data: runs, error: runsErr } = await supabaseAdmin
@@ -225,46 +272,85 @@ export default async function handler(req, res) {
       return res.status(200).json(summary);
     }
 
-    // ── Dry-run helpers laden (fail-safe: bij fout → skip alle sends) ────
-    let isDryRunEnabled = null, assertRecipientMatchesSandbox = null;
-    try {
-      const dry = await import('./_lib/dunning-dry-run.js');
-      isDryRunEnabled = dry.isDryRunEnabled;
-      assertRecipientMatchesSandbox = dry.assertRecipientMatchesSandbox;
-    } catch (e) {
-      console.warn('[conv-reminder-cron] dunning-dry-run module load fail:', e?.message);
-    }
-    const dryRunOn = isDryRunEnabled ? await isDryRunEnabled() : true; // fail-safe: dry-run AAN
+    // ── Deps + dry-run laden via shared loader ────────────────────────────
+    const deps = await loadConversationReminderDeps();
+    const dryRunOn = deps.isDryRunEnabled ? await deps.isDryRunEnabled() : true; // fail-safe: dry-run AAN
 
-    // ── Meta-send helpers laden ────────────────────────────────────────────
-    let sendText = null, sendTemplate = null, MetaNotConfiguredError = null, getConfigStatus = null;
-    try {
-      const meta = await import('./_lib/meta-whatsapp.js');
-      sendText = meta.sendText;
-      sendTemplate = meta.sendTemplate;
-      MetaNotConfiguredError = meta.MetaNotConfiguredError;
-      getConfigStatus = meta.getConfigStatus;
-    } catch (e) {
-      console.warn('[conv-reminder-cron] meta-whatsapp module load fail:', e?.message);
-    }
-
-    // ── Renderer laden ─────────────────────────────────────────────────────
-    let computeVariables = null;
-    try {
-      const rt = await import('./_lib/dunning-template-render.js');
-      computeVariables = rt.computeVariables;
-    } catch (e) {
-      console.warn('[conv-reminder-cron] template-render module load fail:', e?.message);
-    }
-
-    // ── Per-run afwerken ───────────────────────────────────────────────────
+    // ── Per-run afwerken via shared processor ─────────────────────────────
     const nowMs = Date.now();
     for (const run of runList) {
       if (elapsed(startedAt) > ABORT_MS) {
         console.warn('[conv-reminder-cron] abort budget overschreden');
         break;
       }
-      summary.processed_count++;
+      await processReminderRun({
+        run,
+        autonomyCfg,
+        noReplyCfg,
+        deps,
+        dryRunOn,
+        nowMs,
+        summary,
+        logPrefix: 'conv-reminder-cron',
+      });
+    }
+
+    summary.duration_ms = elapsed(startedAt);
+
+    // Audit (fail-soft).
+    try {
+      await supabaseAdmin.from('audit_log').insert({
+        user_id: null,
+        action: 'joost.conv_reminder_cron_run',
+        entity_type: null,
+        entity_id: null,
+        after_json: {
+          processed_count: summary.processed_count,
+          r1_sent: summary.r1_sent,
+          r2_sent: summary.r2_sent,
+          resumed: summary.resumed,
+          skipped_count: summary.skipped.length,
+          errors_count: summary.errors.length,
+          first_skips: summary.skipped.slice(0, 5),
+          first_errors: summary.errors.slice(0, 3),
+          duration_ms: summary.duration_ms,
+          dry_run: dryRunOn,
+        },
+        reason_text: `conv_reminders: r1=${summary.r1_sent} r2=${summary.r2_sent} resumed=${summary.resumed} skipped=${summary.skipped.length}`,
+        ip_address: null,
+      });
+    } catch (_) { /* fail-soft */ }
+
+    return res.status(200).json(summary);
+  } catch (e) {
+    console.error('[conv-reminder-cron] fatal:', e?.message || e);
+    summary.duration_ms = elapsed(startedAt);
+    return res.status(500).json({ ...summary, error: e?.message || String(e) });
+  }
+}
+
+/**
+ * Verwerk één run door de reminder-cirkel (stage bepalen, guardrails,
+ * send/skip/resume). Mutates `summary` in-place. Fail-soft per run.
+ *
+ * @param {object} args
+ * @param {object} args.run                            dunning_workflow_runs-rij (id, customer_id, paused_by_conversation_id, paused_conversation_reminder_count, paused_conversation_last_reminder_at)
+ * @param {object} args.autonomyCfg                    joost_config.autonomy_config
+ * @param {object} args.noReplyCfg                     autonomyCfg.no_reply
+ * @param {object} args.deps                           result van loadConversationReminderDeps()
+ * @param {boolean} args.dryRunOn                      globale dry-run
+ * @param {number} args.nowMs                          Date.now() gebonden aan de tick
+ * @param {object} args.summary                        aggregate object (processed_count, r1_sent, r2_sent, resumed, skipped, errors)
+ * @param {string} args.logPrefix                      log-tag (bv. 'conv-reminder-cron' of 'sandbox-conv-reminders')
+ */
+export async function processReminderRun({
+  run, autonomyCfg, noReplyCfg, deps, dryRunOn, nowMs, summary, logPrefix,
+}) {
+  const {
+    assertRecipientMatchesSandbox, sendText, sendTemplate,
+    MetaNotConfiguredError, getConfigStatus, computeVariables,
+  } = deps || {};
+  summary.processed_count++;
 
       try {
         // Conv-info + laatste inbound (voor stage-bepaling en 24u-venster).
@@ -275,7 +361,7 @@ export default async function handler(req, res) {
           .maybeSingle();
         if (!conv) {
           summary.skipped.push({ run_id: run.id, reason: 'CONV_NOT_FOUND' });
-          continue;
+          return;
         }
 
         const stage = determineStage({
@@ -286,14 +372,14 @@ export default async function handler(req, res) {
         });
         if (!stage) {
           summary.skipped.push({ run_id: run.id, reason: 'NOT_DUE_YET' });
-          continue;
+          return;
         }
 
         // ── Stage 'rz': hervat de run (geen send) ──
         if (stage === 'rz') {
           const rz = await unpauseRunsForConversation(conv.id);
           if (rz.ok && rz.resumed_count > 0) summary.resumed += rz.resumed_count;
-          continue;
+          return;
         }
 
         // ─── GUARDRAIL 1: office-hours ─────────────────────────────────
@@ -316,7 +402,7 @@ export default async function handler(req, res) {
           );
           if (!within) {
             summary.skipped.push({ run_id: run.id, reason: 'OFFICE_HOURS_CLOSED' });
-            continue;
+            return;
           }
         }
 
@@ -324,12 +410,12 @@ export default async function handler(req, res) {
         const { customer, openInvoices } = await loadRenderContext(run.customer_id);
         if (!customer) {
           summary.skipped.push({ run_id: run.id, reason: 'CUSTOMER_NOT_FOUND' });
-          continue;
+          return;
         }
         const sendTo = conv.phone_number || customer.phone;
         if (!sendTo) {
           summary.skipped.push({ run_id: run.id, reason: 'NO_PHONE' });
-          continue;
+          return;
         }
 
         // Sandbox-guard voor is_test-klanten: nummer moet matchen sandbox.
@@ -338,7 +424,7 @@ export default async function handler(req, res) {
             await assertRecipientMatchesSandbox({ isTest: true, actual: sendTo, channel: 'whatsapp' });
           } catch (guardErr) {
             summary.skipped.push({ run_id: run.id, reason: 'SANDBOX_GUARD:' + guardErr.message });
-            continue;
+            return;
           }
         }
 
@@ -391,12 +477,12 @@ export default async function handler(req, res) {
             console.warn('[conv-reminder-cron] cap-taak fail-soft:', e?.message);
           }
           summary.skipped.push({ run_id: run.id, reason: `CAP_TOTAL: ${sentTotal}/${maxTotal}` });
-          continue;
+          return;
         }
         // Day-cap: skip (tijdelijk — morgen weer, geen taak nodig).
         if (sentToday >= maxPerDay) {
           summary.skipped.push({ run_id: run.id, reason: `CAP_DAY: ${sentToday}/${maxPerDay}` });
-          continue;
+          return;
         }
         // Cooldown: elke outbound telt mee. Skip zonder teller-mutatie zodat
         // de volgende tick 'em alsnog stuurt zodra cooldown voorbij is.
@@ -404,7 +490,7 @@ export default async function handler(req, res) {
           const elapsedSec = Math.floor((nowMs - lastSentMs) / 1000);
           if (elapsedSec < cooldownSec) {
             summary.skipped.push({ run_id: run.id, reason: `COOLDOWN: ${elapsedSec}/${cooldownSec}s` });
-            continue;
+            return;
           }
         }
 
@@ -431,7 +517,7 @@ export default async function handler(req, res) {
             run_id: run.id,
             reason: 'NO_TEMPLATE_CONFIGURED: no_reply.reminder_2_template_name is null in joost_config. Zie PR-body voor template-spec.',
           });
-          continue;
+          return;
         }
 
         // ── DRY-RUN pad: log intent, geen Meta-call, geen state-mutatie ──
@@ -469,18 +555,18 @@ export default async function handler(req, res) {
             .eq('id', run.id);
           if (stage === 'r1') summary.r1_sent++;
           if (stage === 'r2') summary.r2_sent++;
-          continue;
+          return;
         }
 
         // ── LIVE pad: Meta-config check ──
         if (!getConfigStatus) {
           summary.skipped.push({ run_id: run.id, reason: 'META_MODULE_UNAVAILABLE' });
-          continue;
+          return;
         }
         const cfgStatus = getConfigStatus();
         if (!cfgStatus.configured) {
           summary.skipped.push({ run_id: run.id, reason: 'META_NOT_CONFIGURED: ' + (cfgStatus.missing || []).join(',') });
-          continue;
+          return;
         }
 
         // Outbound phone_number_id: conv.phone_number_id (autoritatief) →
@@ -526,7 +612,7 @@ export default async function handler(req, res) {
         } catch (metaErr) {
           if (metaErr instanceof MetaNotConfiguredError) {
             summary.skipped.push({ run_id: run.id, reason: 'META_NOT_CONFIGURED_RUNTIME' });
-            continue;
+            return;
           }
           summary.errors.push({
             run_id: run.id,
@@ -534,7 +620,7 @@ export default async function handler(req, res) {
             error: metaErr?.message || String(metaErr),
             meta_code: metaErr?.metaCode ?? null,
           });
-          continue;
+          return;
         }
 
         // ── Persist whatsapp_messages + conv-preview ──
@@ -647,38 +733,4 @@ export default async function handler(req, res) {
           error: perRunErr?.message || String(perRunErr),
         });
       }
-    }
-
-    summary.duration_ms = elapsed(startedAt);
-
-    // Audit (fail-soft).
-    try {
-      await supabaseAdmin.from('audit_log').insert({
-        user_id: null,
-        action: 'joost.conv_reminder_cron_run',
-        entity_type: null,
-        entity_id: null,
-        after_json: {
-          processed_count: summary.processed_count,
-          r1_sent: summary.r1_sent,
-          r2_sent: summary.r2_sent,
-          resumed: summary.resumed,
-          skipped_count: summary.skipped.length,
-          errors_count: summary.errors.length,
-          first_skips: summary.skipped.slice(0, 5),
-          first_errors: summary.errors.slice(0, 3),
-          duration_ms: summary.duration_ms,
-          dry_run: dryRunOn,
-        },
-        reason_text: `conv_reminders: r1=${summary.r1_sent} r2=${summary.r2_sent} resumed=${summary.resumed} skipped=${summary.skipped.length}`,
-        ip_address: null,
-      });
-    } catch (_) { /* fail-soft */ }
-
-    return res.status(200).json(summary);
-  } catch (e) {
-    console.error('[conv-reminder-cron] fatal:', e?.message || e);
-    summary.duration_ms = elapsed(startedAt);
-    return res.status(500).json({ ...summary, error: e?.message || String(e) });
-  }
 }
