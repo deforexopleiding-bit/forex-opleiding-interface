@@ -66,6 +66,14 @@ function parseCsv(raw) {
     .filter((s) => s.length > 0);
 }
 
+// PostgREST or()-parser leest `.` als sub-field/operator-scheiding en `:` als
+// bijzonder karakter; een ISO-timestamp met "T..:..:..." + ".xxxZ" moet daarom
+// dubbel-gequote worden, anders geeft de request HTTP 500 ("invalid input syntax").
+// Wrapper gebruikt door de main-query én de count-queries hieronder.
+function schedFilter(nowIso) {
+  return `scheduled_for.is.null,scheduled_for.lte."${nowIso}"`;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -153,8 +161,7 @@ export default async function handler(req, res) {
     if (kindList.length === 1) qb = qb.eq('payload->>kind', kindList[0]);
     else if (kindList.length > 1) qb = qb.in('payload->>kind', kindList);
     if (!includeScheduled) {
-      const nowIso = new Date().toISOString();
-      qb = qb.or(`scheduled_for.is.null,scheduled_for.lte.${nowIso}`);
+      qb = qb.or(schedFilter(new Date().toISOString()));
     }
     return qb;
   };
@@ -275,7 +282,7 @@ export default async function handler(req, res) {
         if (kindList.length === 1) cq = cq.eq('payload->>kind', kindList[0]);
         else if (kindList.length > 1) cq = cq.in('payload->>kind', kindList);
         if (!includeScheduled) {
-          cq = cq.or(`scheduled_for.is.null,scheduled_for.lte.${nowIsoForCounts}`);
+          cq = cq.or(schedFilter(nowIsoForCounts));
         }
         const { count: c, error: ce } = await cq;
         if (ce) { console.error('[tasks-list count', s, ']', ce.message); return; }
@@ -301,7 +308,7 @@ export default async function handler(req, res) {
       if (invoiceId)  arrQ = arrQ.eq('invoice_id', invoiceId);
       if (kindList.length === 1) arrQ = arrQ.eq('payload->>kind', kindList[0]);
       else if (kindList.length > 1) arrQ = arrQ.in('payload->>kind', kindList);
-      if (!includeScheduled) arrQ = arrQ.or(`scheduled_for.is.null,scheduled_for.lte.${new Date().toISOString()}`);
+      if (!includeScheduled) arrQ = arrQ.or(schedFilter(new Date().toISOString()));
       const { count: arrCount, error: arrErr } = await arrQ;
       if (arrErr) console.error('[tasks-list byCategory.arrangement]', arrErr.message);
       else byCategory.arrangement = typeof arrCount === 'number' ? arrCount : 0;
@@ -317,7 +324,7 @@ export default async function handler(req, res) {
       if (invoiceId)  verQ = verQ.eq('invoice_id', invoiceId);
       if (kindList.length === 1) verQ = verQ.eq('payload->>kind', kindList[0]);
       else if (kindList.length > 1) verQ = verQ.in('payload->>kind', kindList);
-      if (!includeScheduled) verQ = verQ.or(`scheduled_for.is.null,scheduled_for.lte.${new Date().toISOString()}`);
+      if (!includeScheduled) verQ = verQ.or(schedFilter(new Date().toISOString()));
       const { count: verCount, error: verErr } = await verQ;
       if (verErr) console.error('[tasks-list byCategory.verify_payment]', verErr.message);
       else byCategory.verify_payment = typeof verCount === 'number' ? verCount : 0;
@@ -333,7 +340,7 @@ export default async function handler(req, res) {
       if (invoiceId)  escQ = escQ.eq('invoice_id', invoiceId);
       if (kindList.length === 1) escQ = escQ.eq('payload->>kind', kindList[0]);
       else if (kindList.length > 1) escQ = escQ.in('payload->>kind', kindList);
-      if (!includeScheduled) escQ = escQ.or(`scheduled_for.is.null,scheduled_for.lte.${new Date().toISOString()}`);
+      if (!includeScheduled) escQ = escQ.or(schedFilter(new Date().toISOString()));
       const { count: escCount, error: escErr } = await escQ;
       if (escErr) console.error('[tasks-list byCategory.escalation]', escErr.message);
       else byCategory.escalation = typeof escCount === 'number' ? escCount : 0;
