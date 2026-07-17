@@ -16,11 +16,20 @@
 //      een echt gesprek kan onmogelijk worden geraakt.
 //
 // De conversation-rijen zelf blijven staan (met customer_id + phone_number),
-// zodat de volgende simulate-inbound in hetzelfde gesprek doorloopt. Ook
-// joost_conversation_state en joost_suggestions blijven staan — die willen
-// we tijdens een oefengesprek meestal niet mee-wissen (state = cross-turn
-// context voor de LLM; suggestions = audit-trail). Wie een echte volledige
-// reset wil, gebruikt wanbetalers-sandbox-reset (bestaande gevaren-knop).
+// zodat de volgende simulate-inbound in hetzelfde gesprek doorloopt.
+// joost_suggestions blijft staan (audit-trail).
+//
+// #797 — joost_conversation_state RESET WE WEL. Het gaat om
+// messages_sent_total / messages_sent_today / messages_sent_today_date /
+// last_message_sent_at / no_reply_streak_count. Zonder deze reset botst
+// Jeffrey na ~10 test-berichten tegen max_messages_per_conversation_total
+// (BLOCKED_COMMUNICATION_LIMIT) en is het oefengesprek onbruikbaar tot een
+// volledige Testmodus-Reset. De autonomy-pauze-velden (autonomy_paused_until
+// / _reason) laten we WEL staan — als Jeffrey de conv-pauze test wil, is die
+// state relevante context.
+//
+// Wie een echte volledige reset wil (facturen/pipeline/klant weg), gebruikt
+// wanbetalers-sandbox-reset (bestaande gevaren-knop).
 //
 // Super_admin only, geen CRON_SECRET.
 //
@@ -89,6 +98,28 @@ export default async function handler(req, res) {
         .from('whatsapp_conversations')
         .update({ last_message_preview: null, unread_count: 0 })
         .eq('id', conv.id);
+
+      // #797 — Joost-tellers voor deze conv terug op nul zodat "Nieuw
+      // gesprek" ook echt Joost's kant reset. messages_sent_today_date op
+      // null zodat de eerstvolgende send 'em opnieuw seedt (zoals bij een
+      // nieuwe klant). no_reply_streak_count ook, want vorig oefengesprek
+      // kan die opgevoerd hebben.
+      // Autonomy_paused_* blijven staan — als 't relevant is voor wat
+      // Jeffrey test, zou 'em zelf 'unpause' verwachten.
+      const { error: sErr } = await supabaseAdmin
+        .from('joost_conversation_state')
+        .update({
+          messages_sent_today:      0,
+          messages_sent_today_date: null,
+          messages_sent_total:      0,
+          last_message_sent_at:     null,
+          no_reply_streak_count:    0,
+          updated_at:               new Date().toISOString(),
+        })
+        .eq('conversation_id', conv.id);
+      if (sErr) {
+        console.warn('[oefengesprek-reset] joost_conversation_state reset fail conv', conv.id, sErr.message);
+      }
     }
 
     return res.status(200).json({
