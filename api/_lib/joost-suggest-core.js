@@ -1043,6 +1043,7 @@ export async function runJoostSuggest({
         promisedDateRaw,
         promisedDateHint,
         klantcitaat:      lastInbound?.body ? String(lastInbound.body).slice(0, 500) : null,
+        klantnaam:        klantNaam || null,
       });
     } catch (e) {
       console.warn('[joost-suggest-core promise-task] fail-soft:', e?.message || e);
@@ -1110,8 +1111,40 @@ async function _maybeCreateOrUpdatePromiseTask({
   promisedDateRaw,
   promisedDateHint,
   klantcitaat,
+  klantnaam,
 }) {
   const nowIso = new Date().toISOString();
+
+  // #803 — Title + description bouwen in de stijl van andere pending_actions-
+  // taken (spiegel joost-autonomy-evaluate.js maybeCreateTotalCapTask r747-765).
+  // Zonder title verschijnt de taak als lege regel in de Acties-lijst en in
+  // de nav-badge — die lezen beide `payload->>'title'`.
+  //
+  // Regels:
+  //   * Klantnaam altijd in title als bekend.
+  //   * hint gezet → noem 'em in description ("Joost leidt daaruit YYYY-MM-DD af").
+  //   * hint null   → geen datum in description, wél het klantcitaat.
+  //   * raw null    → generieke tekst (defensief; edge case: LLM classificeert
+  //                    payment_promise maar zonder date-indicatie).
+  const _naamLabel = klantnaam && klantnaam.trim() ? klantnaam.trim() : 'klant';
+  const _title = `Betaal-toezegging bevestigen — ${_naamLabel}`;
+  let _description;
+  if (promisedDateRaw && promisedDateHint) {
+    _description = [
+      `Klant zegt: "${promisedDateRaw}". Joost leidt daaruit ${promisedDateHint} af.`,
+      `Controleer de datum en leg de toezegging vast, of laat de aanmaningen doorlopen.`,
+    ].join(' ');
+  } else if (promisedDateRaw) {
+    _description = [
+      `Klant zegt: "${promisedDateRaw}". Geen concrete datum af te leiden.`,
+      `Neem contact op om een datum af te spreken, of laat de aanmaningen doorlopen.`,
+    ].join(' ');
+  } else {
+    _description = [
+      `Klant deed een betaaltoezegging zonder concrete datum.`,
+      `Neem contact op om een datum af te spreken, of laat de aanmaningen doorlopen.`,
+    ].join(' ');
+  }
 
   // Idempotency-check: bestaande open taak?
   const { data: existing, error: exErr } = await supabase
@@ -1156,6 +1189,11 @@ async function _maybeCreateOrUpdatePromiseTask({
     }
     const newPayload = {
       ...prevPayload,
+      // #803 — title/description ook bij UPDATE bijwerken. Anders hangt er
+      // een oude datum in de titel terwijl de payload de nieuwste heeft.
+      title:               _title,
+      description:         _description,
+      assignee_role:       'manager',
       kind:                'promise',
       source:              'joost',
       conversation_id:     conversationId,
@@ -1180,6 +1218,12 @@ async function _maybeCreateOrUpdatePromiseTask({
 
   // INSERT: geen bestaande taak.
   const insertPayload = {
+    // #803 — title/description/assignee_role: Acties-lijst en nav-badge
+    // lezen deze; zonder deze velden verschijnt de taak als lege regel.
+    // Spiegel van maybeCreateTotalCapTask (joost-autonomy-evaluate.js).
+    title:               _title,
+    description:         _description,
+    assignee_role:       'manager',
     kind:                'promise',
     source:              'joost',
     conversation_id:     conversationId,
