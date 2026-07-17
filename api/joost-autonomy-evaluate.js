@@ -108,18 +108,14 @@ import { createNotification } from './_lib/notify.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const INTENT_TO_CONFIG_KEY = {
-  payment_promise:     'ja_op_uitstel',
-  verify_payment:      'al_betaald_claim',
-  arrangement_request: 'tegenvoorstel_termijn',
-  general_question:    'vraag_om_kopie_factuur',
-  escalation_needed:   'boos_of_klacht',
-  other:               null,
-};
-
+// KEY-CONTRACT: intent-keys komen 1-op-1 uit joost-suggest-core.js
+// DETECTED_INTENTS (het tool-schema van het LLM). autonomy_config.intents
+// gebruikt exact dezelfde keys. Er is GEEN mapping meer nodig — evaluator
+// leest `intents[detected_intent]` direct. Zie migratie
+// 2026-07-17-joost-intent-namen-consolideren.sql voor de rename van legacy
+// keys (ja_op_uitstel / tegenvoorstel_termijn / etc).
 const ARRANGEMENT_INTENT_KEYS = new Set([
-  'tegenvoorstel_termijn',
-  'gespreid_betalen',
+  'arrangement_request',
 ]);
 
 const ALLOWED_MODES = new Set(['draft', 'autonomous', 'disabled']);
@@ -243,10 +239,13 @@ export function evaluateAutonomy({
 
   log.push(`Start evaluatie: intent="${intent}" confidence=${confidence.toFixed(2)}`);
 
-  const intentKey = INTENT_TO_CONFIG_KEY[intent] || null;
-  const intentCfg = intentKey && intents[intentKey] ? intents[intentKey] : null;
+  // KEY-CONTRACT: intent-keys komen 1-op-1 uit LLM DETECTED_INTENTS. Geen
+  // mapping meer nodig. Legacy config-blobs (pre 2026-07-17) hadden andere
+  // keys — de rename-migratie migreert die naar deze set.
+  const intentKey = intent;
+  const intentCfg = intents[intentKey] ? intents[intentKey] : null;
   if (intentCfg) {
-    log.push(`Intent mapt naar config-key "${intentKey}".`);
+    log.push(`Intent-config gevonden voor "${intentKey}".`);
   } else {
     log.push(`Intent "${intent}" heeft geen autonomy-config -> escalation default.`);
   }
@@ -416,10 +415,22 @@ export function evaluateAutonomy({
       return decision;
     }
 
-    // Allowed-types / sub-mandate. Voor gespreid_betalen: max_termijnen-cap.
+    // Allowed-types / sub-mandate. Sinds de intent-namen-consolidatie
+    // (2026-07-17) is er nog maar één arrangement-intent (`arrangement_request`).
+    // Het onderscheid UITSTEL vs SPLITSING komt uit de proposal-velden van de
+    // LLM: proposal_uitstel_dagen>0 = UITSTEL, proposal_termijnen>0 = SPLITSING.
+    // Als beide gezet zijn: SPLITSING wint (termijnen impliceert meerdere
+    // betalingen; uitstel is een enkel-shift). Als geen van beide: NO_STRUCTURED_
+    // PROPOSAL fail-safe vangt 'em verderop af.
+    const requestedDagen     = num(suggestion.proposal_uitstel_dagen, 0);
+    const requestedTermijnen = num(suggestion.proposal_termijnen, 0);
+    const proposalType =
+      requestedTermijnen > 0 ? 'SPLITSING'
+        : requestedDagen > 0 ? 'UITSTEL'
+        : null;
+
     const allowedTypes = Array.isArray(mandate.allowed_types) ? mandate.allowed_types : null;
-    if (allowedTypes && allowedTypes.length > 0) {
-      const proposalType = intentKey === 'gespreid_betalen' ? 'SPLITSING' : 'UITSTEL';
+    if (allowedTypes && allowedTypes.length > 0 && proposalType) {
       if (!allowedTypes.includes(proposalType)) {
         log.push(`Voorstel-type ${proposalType} niet in allowed_types (${allowedTypes.join(', ')}) -> BLOCKED_OUT_OF_MANDATE.`);
         decision.blocked_reason = 'BLOCKED_OUT_OF_MANDATE';
@@ -429,15 +440,15 @@ export function evaluateAutonomy({
       }
     }
 
-    if (intentKey === 'tegenvoorstel_termijn') {
-      const requestedDagen = num(suggestion.proposal_uitstel_dagen, 0);
+    // UITSTEL-cap: alleen relevant als LLM een uitstel-voorstel doet.
+    if (requestedDagen > 0) {
       const maxUitstelDagen = num(
         intentCfg.max_termijn_dagen
         || (mandate.uitstel && mandate.uitstel.max_dagen_zonder_approval)
         || (mandate.uitstel && mandate.uitstel.max_dagen_total),
         0,
       );
-      if (requestedDagen > 0 && maxUitstelDagen > 0 && requestedDagen > maxUitstelDagen) {
+      if (maxUitstelDagen > 0 && requestedDagen > maxUitstelDagen) {
         log.push(`Voorgesteld uitstel (${requestedDagen}d) > max_uitstel_dagen (${maxUitstelDagen}d) -> BLOCKED_OUT_OF_MANDATE.`);
         decision.blocked_reason = 'BLOCKED_OUT_OF_MANDATE';
         decision.stop_action    = 'task_create';
@@ -445,15 +456,15 @@ export function evaluateAutonomy({
         return decision;
       }
     }
-    if (intentKey === 'gespreid_betalen') {
-      const requestedTermijnen = num(suggestion.proposal_termijnen, 0);
+    // SPLITSING-cap: alleen relevant als LLM een termijnen-voorstel doet.
+    if (requestedTermijnen > 0) {
       const maxTermijnen = num(
         intentCfg.max_termijnen
         || (mandate.splitsing && mandate.splitsing.max_termijnen_zonder_approval)
         || (mandate.splitsing && mandate.splitsing.max_termijnen_total),
         0,
       );
-      if (requestedTermijnen > 0 && maxTermijnen > 0 && requestedTermijnen > maxTermijnen) {
+      if (maxTermijnen > 0 && requestedTermijnen > maxTermijnen) {
         log.push(`Voorgestelde termijnen (${requestedTermijnen}) > max_termijnen (${maxTermijnen}) -> BLOCKED_OUT_OF_MANDATE.`);
         decision.blocked_reason = 'BLOCKED_OUT_OF_MANDATE';
         decision.stop_action    = 'task_create';

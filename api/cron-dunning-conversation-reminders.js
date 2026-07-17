@@ -46,12 +46,12 @@
 //   - Fail-soft per run: try/catch — 1 fout laat de andere runs door.
 //
 // Bewuste keuze pad (b) i.p.v. pad (a) evaluateAutonomy():
-//   evaluateAutonomy heeft een intent-mode-check (r232-238) die vóór de
-//   office-hours- en rate-limit-checks een early-return doet als intent geen
-//   INTENT_TO_CONFIG_KEY-mapping heeft. Voor een REMINDER hebben we geen
-//   natuurlijke intent (dit is geen klant-suggestion) — een synthetic
-//   'other' zou de gate falen, en semi-echte intents zoals 'payment_promise'
-//   toewijzen zou het audit-log misleiden. Beter: expliciet de bestaande
+//   evaluateAutonomy heeft een intent-mode-check die vóór de office-hours-
+//   en rate-limit-checks een early-return doet als intent geen intent-config
+//   heeft. Voor een REMINDER hebben we geen natuurlijke intent (dit is geen
+//   klant-suggestion) — een synthetic 'other' zou de gate falen, en semi-
+//   echte intents zoals 'payment_promise' toewijzen zou het audit-log
+//   misleiden. Beter: expliciet de bestaande
 //   helpers (`isWithinOfficeHours` + config lezen + joost_conversation_state
 //   teller) hergebruiken. Bij total-cap: dezelfde `maybeCreateTotalCapTask`
 //   aanroepen als reactive autonomy dat doet, zodat de #764-taak-flow
