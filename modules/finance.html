@@ -633,10 +633,14 @@
     }
     .joost-og-prod-row.prod-ok    { background:#ecfdf5; color:#065f46; border-color:#a7f3d0; }
     .joost-og-prod-row.prod-block { background:#fff7ed; color:#7c2d12; border-color:#fed7aa; }
+    /* #799 — Neutraal grijs voor MODE_DRAFT (geen rem, normaal gedrag). */
+    .joost-og-prod-row.prod-neutral { background:#f3f4f6; color:#374151; border-color:#d1d5db; }
     .joost-og-prod-dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
     .joost-og-prod-row.prod-ok    .joost-og-prod-dot { background:#059669; }
     .joost-og-prod-row.prod-block .joost-og-prod-dot { background:#c2410c; }
-    .joost-og-prod-row.prod-block strong { font-weight:700; }
+    .joost-og-prod-row.prod-neutral .joost-og-prod-dot { background:#6b7280; }
+    .joost-og-prod-row.prod-block strong,
+    .joost-og-prod-row.prod-neutral strong { font-weight:700; }
 
     /* Inline rate-limit-melding onder klantbubbel (#796). Rendert rechts
        uitgelijnd zodat 't visueel aan Jeffrey's kant hangt, niet aan Joost. */
@@ -16557,13 +16561,20 @@
     BLOCKED_INTENT_DISABLED:     'dit onderwerp staat uit',
     NO_STRUCTURED_PROPOSAL:      'geen concreet voorstel — mens moet meekijken',
     GEEN_ONDERGRENS_BEKEND:      'geen ondergrens per termijn bekend',
-    MODE_DRAFT:                  'staat op concept (niet-autonoom)',
+    MODE_DRAFT:                  'Joost staat op voorstellen — jij verstuurt zelf',
     INTENT_DISABLED:             'dit onderwerp staat uit',
     MANDATE_EXCEEDED:            'buiten mandaat',
   };
+  // #799 — MODE_DRAFT is de NORMALE toestand (Joost stelt voor, mens verstuurt),
+  // geen blokkade. Toon 'm daarom als neutrale grijze rij i.p.v. oranje
+  // "gezwegen"-badge. Alle andere codes zijn wél een echte rem in productie.
+  const JOOST_OG_NEUTRAL_REASONS = new Set(['MODE_DRAFT']);
   function _joostOgBlockReasonNl(code) {
     if (!code) return null;
     return JOOST_OG_BLOCK_REASON_NL[String(code)] || String(code);
+  }
+  function _joostOgIsNeutralReason(code) {
+    return code != null && JOOST_OG_NEUTRAL_REASONS.has(String(code));
   }
 
   function _joostOgFocusInputSafely() {
@@ -16878,11 +16889,22 @@
         <span class="joost-og-prod-text">In productie: dit bericht was verstuurd</span>
       </div>`;
     } else if (j.prod_would_send === false) {
-      const reasonNl = _joostOgBlockReasonNl(j.prod_block_reason || j.blocked_reason) || 'onbekende reden';
-      prodRow = `<div class="joost-og-prod-row prod-block">
-        <span class="joost-og-prod-dot"></span>
-        <span class="joost-og-prod-text">In productie: Joost had gezwegen — <strong>${esc(reasonNl)}</strong></span>
-      </div>`;
+      // #799 — Onderscheid tussen "correct gedrag op draft" (neutraal grijs)
+      // en een echte rem (oranje). MODE_DRAFT is NIET stuk; Joost's ontwerp
+      // is dat de mens verstuurt zolang de intent op 'draft' staat.
+      const rawReason = j.prod_block_reason || j.blocked_reason;
+      const reasonNl = _joostOgBlockReasonNl(rawReason) || 'onbekende reden';
+      if (_joostOgIsNeutralReason(rawReason)) {
+        prodRow = `<div class="joost-og-prod-row prod-neutral">
+          <span class="joost-og-prod-dot"></span>
+          <span class="joost-og-prod-text">In productie: <strong>${esc(reasonNl)}</strong> — dit was een voorstel geweest, geen autonome send.</span>
+        </div>`;
+      } else {
+        prodRow = `<div class="joost-og-prod-row prod-block">
+          <span class="joost-og-prod-dot"></span>
+          <span class="joost-og-prod-text">In productie: Joost had gezwegen — <strong>${esc(reasonNl)}</strong></span>
+        </div>`;
+      }
     }
     return `<div class="joost-og-meta-row">${bits.join('<span class="joost-og-meta-sep">·</span>')}${reasoning}</div>${prodRow}`;
   }
@@ -16927,8 +16949,14 @@
         } else if (jo.prod_would_send === true) {
           status.textContent = 'Joost antwoordt — in productie was dit verstuurd.';
         } else if (jo.prod_would_send === false) {
-          const reasonNl = _joostOgBlockReasonNl(jo.prod_block_reason || jo.blocked_reason) || 'onbekende reden';
-          status.textContent = 'Joost antwoordt in oefengesprek — in productie had Joost gezwegen (' + reasonNl + ').';
+          const rawReason = jo.prod_block_reason || jo.blocked_reason;
+          const reasonNl = _joostOgBlockReasonNl(rawReason) || 'onbekende reden';
+          if (_joostOgIsNeutralReason(rawReason)) {
+            // #799 — MODE_DRAFT is geen storing; correct gedrag.
+            status.textContent = 'Joost antwoordt — ' + reasonNl + '.';
+          } else {
+            status.textContent = 'Joost antwoordt in oefengesprek — in productie had Joost gezwegen (' + reasonNl + ').';
+          }
         } else {
           status.textContent = 'Joost heeft geantwoord.';
         }

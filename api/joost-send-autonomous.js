@@ -378,9 +378,15 @@ export default async function handler(req, res) {
     // 'm zou blokkeren. Rapporteer wél wat productie zou blokkeren
     // (prod_block_reason) zodat we in de UI eerlijk laten zien wat er
     // gebeurt. De #691-guard onderschept alsnog de echte Meta-send.
+    //
+    // #799 — gebruik `reasonForResponse` (de EVAL-reden) i.p.v. de DB-status.
+    // Anders krijgt de UI 'BLOCKED_COMMUNICATION_LIMIT' voor drie compleet
+    // verschillende situaties (rate-limit, office-hours, én mode=draft) en
+    // toont dan één misleidende tekst. `reasonForResponse` bewaart de echte
+    // eval-reden zoals MODE_DRAFT / BLOCKED_OFFICE_HOURS / etc.
     let prodBlockReason = null;
     if (testBypass && isTestConv && !decision.allow_autonomous) {
-      prodBlockReason = mapDecisionToDbStatus(decision).dbStatus;
+      prodBlockReason = mapDecisionToDbStatus(decision).reasonForResponse;
       decision.allow_autonomous = true;
       decision.test_override    = true;
       decision.prod_block_reason = prodBlockReason;
