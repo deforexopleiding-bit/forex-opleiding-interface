@@ -263,11 +263,24 @@ export async function runJoostSuggest({
       };
       // Maandbedrag ophalen — na customer bevestiging, vóór de open-invoices
       // lookup zodat de mandate-alinea 'em straks kan gebruiken.
+      //
+      // #790 — deze catch is FAIL-CLOSED via de default state. Als de
+      // dynamic-import of helper-call throwt, blijft customerMonthlyPayment
+      // op { hasSubscription:false, monthlyAmount:null }. Dat wordt door de
+      // mandate-alinea hieronder (r506+) vertaald naar "deze klant heeft
+      // geen actief abonnement — SPLITSING NIET toegestaan, verwijs naar
+      // medewerker", en de range-remark (r521+) voegt toe "SPLITSING
+      // onmogelijk, escaleer". Joost krijgt dus GEEN ondergrens en biedt
+      // geen regeling — de veilige uitkomst. Fout wordt met console.error
+      // gelogd zodat je 'em terugvindt.
+      //
+      // LET OP: verander de default state van customerMonthlyPayment NIET
+      // zonder deze fail-closed-garantie te heroverwegen.
       try {
         const { getCustomerMonthlyPayment } = await import('./customer-monthly-payment.js');
         customerMonthlyPayment = await getCustomerMonthlyPayment(supabase, cust.id);
       } catch (e) {
-        console.warn('[joost-suggest-core] monthly-payment lookup fail-soft:', e?.message || e);
+        console.error('[joost-suggest-core] monthly-payment lookup failed → fail-closed (Joost escaleert):', e?.message || e, e?.stack);
       }
     }
   }

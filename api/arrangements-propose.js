@@ -285,36 +285,51 @@ export default async function handler(req, res) {
       // >= wat de klant al aantoonbaar per maand betaalt. Geen abo → geen
       // regeling, escaleren.
       //
-      // Fail-soft: als de lookup faalt (DB-glitch), stuur geen valse
-      // ondergrens; log warning en laat de propose doorlopen. Beter geen
-      // false positive dan een terecht arrangement blokkeren op een
-      // infrastructuur-hik.
+      // #790 — FAIL-CLOSED (was fail-soft in #788). Deze catch bepaalt wat
+      // Joost aan een klant toezegt. Bij een import-fout, timeout of andere
+      // onverwachte throw MOET SPLITSING geweigerd worden — anders komt elk
+      // termijnbedrag erdoor terwijl er GEEN check heeft gelopen. Beter een
+      // afgewezen legitiem verzoek dan een klant met een belofte die het
+      // systeem niet kan honoreren.
+      //
+      // De helper zelf (getCustomerMonthlyPayment) is defensief: DB-fout →
+      // hasSubscription:false → 400 NO_ACTIVE_SUBSCRIPTION. Dit vangt de
+      // GAPS die de helper mist (dynamic-import fail, module-eval error,
+      // Vercel-cold-start hiccup).
+      let mp;
       try {
         const { getCustomerMonthlyPayment } = await import('./_lib/customer-monthly-payment.js');
-        const mp = await getCustomerMonthlyPayment(supabaseAdmin, customerId);
-        if (!mp.hasSubscription) {
+        mp = await getCustomerMonthlyPayment(supabaseAdmin, customerId);
+      } catch (e) {
+        console.error('[arrangements-propose] MANDAAT_CHECK_ONBESCHIKBAAR (fail-closed):', e?.message || e, e?.stack);
+        return res.status(400).json({
+          error: 'De mandaat-check kon nu niet uitgevoerd worden door een tijdelijke storing ' +
+                 'in het maandbedrag-systeem. Probeer het over een paar minuten opnieuw, of ' +
+                 'leg deze splitsing handmatig vast na overleg met een collega. ' +
+                 '(Dit ligt aan het systeem, niet aan de klant.)',
+          violation: 'MANDAAT_CHECK_ONBESCHIKBAAR',
+        });
+      }
+      if (!mp || !mp.hasSubscription) {
+        return res.status(400).json({
+          error: 'Deze klant heeft geen actief abonnement — SPLITSING vereist een lopend maand-ritme. ' +
+                 'Laat een medewerker deze afspraak beoordelen (bijvoorbeeld UITSTEL of KWIJTSCHELDING).',
+          violation: 'NO_ACTIVE_SUBSCRIPTION',
+        });
+      }
+      const minPerTermijn = Number(mp.monthlyAmount);
+      if (Number.isFinite(minPerTermijn) && minPerTermijn > 0) {
+        const tooSmall = details.parts.find(p => Number(p.amount || 0) < minPerTermijn);
+        if (tooSmall) {
           return res.status(400).json({
-            error: 'Deze klant heeft geen actief abonnement — SPLITSING vereist een lopend maand-ritme. ' +
-                   'Laat een medewerker deze afspraak beoordelen (bijvoorbeeld UITSTEL of KWIJTSCHELDING).',
-            violation:            'NO_ACTIVE_SUBSCRIPTION',
+            error: `Termijn van EUR ${Number(tooSmall.amount).toFixed(2)} ligt onder het maandbedrag ` +
+                   `van deze klant (EUR ${minPerTermijn.toFixed(2)}). Splits over minder termijnen ` +
+                   `of laat een medewerker deze afspraak beoordelen.`,
+            violation:            'MIN_TERMIJN_ONDER_MAANDBEDRAG',
+            maand_bedrag_eur:     minPerTermijn,
+            offending_amount_eur: Number(tooSmall.amount),
           });
         }
-        const minPerTermijn = Number(mp.monthlyAmount);
-        if (Number.isFinite(minPerTermijn) && minPerTermijn > 0) {
-          const tooSmall = details.parts.find(p => Number(p.amount || 0) < minPerTermijn);
-          if (tooSmall) {
-            return res.status(400).json({
-              error: `Termijn van EUR ${Number(tooSmall.amount).toFixed(2)} ligt onder het maandbedrag ` +
-                     `van deze klant (EUR ${minPerTermijn.toFixed(2)}). Splits over minder termijnen ` +
-                     `of laat een medewerker deze afspraak beoordelen.`,
-              violation:            'MIN_TERMIJN_ONDER_MAANDBEDRAG',
-              maand_bedrag_eur:     minPerTermijn,
-              offending_amount_eur: Number(tooSmall.amount),
-            });
-          }
-        }
-      } catch (e) {
-        console.warn('[arrangements-propose] maandbedrag lookup fail-soft:', e?.message || e);
       }
     }
 
