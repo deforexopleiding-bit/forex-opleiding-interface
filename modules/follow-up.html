@@ -8960,7 +8960,7 @@
         listEl.innerHTML = '<div class="fu-eb-empty"><i class="ti ti-users-off"></i>Geen deelnemers voor dit event.</div>';
         return;
       }
-      // LOKALE label+kleur-map voor event-bellijst. Bron is
+      // LOKALE label+kleur-map voor event-bellijst. Primaire bron is
       // event_attendees.call_status (event-specifieke bel-uitkomst,
       // migratie 023). NIET gedeeld met LEAD_STATUS_LABEL (r5253) —
       // daar betekent 'verlengd' iets anders ("abonnement verlengd"
@@ -8975,8 +8975,15 @@
       //   terugbellen    → terugbellen (blauw info)
       //   foutief_nummer → niet_bereikbaar (grijs neutral)
       //
-      // Val NIET terug op lead_status als call_status NULL is; dat is
-      // juist de verwarrende bron. NULL → "Nog niet gebeld".
+      // Fallback-ladder (call_status NULL — pre-migratie 023):
+      //   1. lead_status in DONE-set ('benaderd','verlengd','verloren') →
+      //      "Afgehandeld" (grijs neutraal). Niet 'Bevestigd' toekennen —
+      //      dat zou een aanname zijn (lead_status='verlengd' wordt ook
+      //      door sale/zoom_ingepland gezet).
+      //   2. Anders → "Nog niet gebeld" (donker).
+      //
+      // Doel: nooit "Nog niet gebeld" tonen bij iemand die aantoonbaar
+      // gebeld is. Bij twijfel neutraal ("Afgehandeld").
       const CALL_STATUS_LABEL = {
         bevestigd     : { label: 'Bevestigd',    cls: 'verlengd' },
         komt_niet     : { label: 'Komt niet',    cls: 'verloren' },
@@ -8986,15 +8993,39 @@
         foutief_nummer: { label: 'Fout nummer',  cls: 'niet_bereikbaar' },
       };
       const DONE_CALL_STATUSES = new Set(['bevestigd', 'komt_niet', 'foutief_nummer']);
+      // DONE_LEAD_STATUSES — spiegelt r5558. Zelfde definitie hergebruiken
+      // zodat de count-teller (_openEventBellijstCount) en deze render
+      // dezelfde "afgehandeld"-invalidatie hebben.
+      const DONE_LEAD_STATUSES = new Set(['benaderd', 'verlengd', 'verloren']);
 
       listEl.innerHTML = arr.map((a) => {
-        const initials  = _leadInitials(a.name);
-        const callSt    = String(a.call_status || '').toLowerCase();
-        const callMeta  = CALL_STATUS_LABEL[callSt] || null;
-        const avaCls    = DONE_CALL_STATUSES.has(callSt) ? 'done' : '';
-        const statusLabel = callMeta ? callMeta.label : 'Nog niet gebeld';
-        const statusCls   = callMeta ? callMeta.cls   : 'nieuw';
+        const initials = _leadInitials(a.name);
+        const callSt   = String(a.call_status || '').toLowerCase();
+        const leadSt   = String(a.lead_status || '').toLowerCase();
+        const callMeta = CALL_STATUS_LABEL[callSt] || null;
+
+        // Gelaagde status-bepaling: call_status > afgehandeld-fallback > nog niet gebeld.
+        let statusLabel;
+        let statusCls;
+        let isDone;
+        if (callMeta) {
+          statusLabel = callMeta.label;
+          statusCls   = callMeta.cls;
+          isDone      = DONE_CALL_STATUSES.has(callSt);
+        } else if (DONE_LEAD_STATUSES.has(leadSt)) {
+          statusLabel = 'Afgehandeld';
+          statusCls   = 'niet_bereikbaar'; // grijs neutraal — geen positieve/negatieve aanname
+          isDone      = true;
+        } else {
+          statusLabel = 'Nog niet gebeld';
+          statusCls   = 'nieuw';
+          isDone      = false;
+        }
+        const avaCls = isDone ? 'done' : '';
+
         // Tooltip: wanneer is er gebeld? Alleen als er een call_status is.
+        // Bij DONE-lead-status-fallback weten we het tijdstip niet (was
+        // pre-migratie 023), dus geen tooltip.
         let statusTitle = '';
         if (callMeta && a.call_status_at) {
           try {
@@ -9005,6 +9036,8 @@
               });
             }
           } catch (_) {}
+        } else if (!callMeta && DONE_LEAD_STATUSES.has(leadSt)) {
+          statusTitle = 'Aangemerkt als afgehandeld — precieze bel-uitkomst niet geregistreerd (pre-migratie 023).';
         }
         const phone = a.phone ? esc(a.phone) : '<span style="opacity:.5">— geen tel —</span>';
         const email = a.email ? `<a href="mailto:${esc(a.email)}"><i class="ti ti-mail"></i> ${esc(a.email)}</a>` : '';
