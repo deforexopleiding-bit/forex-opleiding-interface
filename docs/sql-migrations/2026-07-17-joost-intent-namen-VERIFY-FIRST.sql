@@ -30,8 +30,12 @@
 --   3. **events/onboarding-rijen.** Als daar keys staan die overlappen met
 --      de finance-oude keys (zeer onwaarschijnlijk — de sets zijn disjunct),
 --      meld het. Anders: gewoon informatief zichtbaar.
+--
+-- LET OP: pure SELECT — geen BEGIN/ROLLBACK. Supabase SQL editor draait elke
+-- statement in een eigen transactie; deze 3 queries zijn puur lees en kunnen
+-- afzonderlijk worden gedraaid als het editor-scherm ze niet gecombineerd
+-- accepteert.
 
-BEGIN;
 
 -- ===========================================================================
 -- 1. Overzicht ALLE modules — welke intent-keys bestaan, welke mode, welke
@@ -164,4 +168,3 @@ SELECT
        THEN 'disabled (behoud)' ELSE 'draft (default of autonomous->draft)' END
 FROM cfg;
 
-ROLLBACK;
