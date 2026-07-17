@@ -36,6 +36,7 @@
 
 import { customerDisplayName } from './customer-name.js';
 import { getModuleContextByPhoneNumberId } from './module-context.js';
+import { getMaxDagenTotEersteTermijn, uiterlijkeEersteTermijnDatum } from './splitsing-start-grens.js';
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const ONE_DAY_MS           = 24 * 60 * 60 * 1000;
@@ -151,6 +152,16 @@ const JOOST_TOOL = {
         type: ['string', 'null'],
         description:
           'Datum die je afleidt uit wat de klant zegt, in YYYY-MM-DD. Huidige datum staat in je context-block (Vandaag: <weekdag> <datum>). Null als je de datum niet ondubbelzinnig kunt afleiden. Noem deze datum in je suggested_reply als BEVESTIGINGSVRAAG ("klopt die datum?") zodat de klant kan corrigeren als je fout gokt. Leg nooit zelf iets vast. Een collega bevestigt.',
+      },
+      // #809 — startdatum van de eerste termijn bij SPLITSING-voorstel.
+      // Bewaakt door mandate.splitsing.max_dagen_tot_eerste_termijn (default
+      // 45): een regeling die te ver in de toekomst start is geen regeling
+      // meer maar uitstel. Autonoom voorstel met datum voorbij de grens =
+      // BLOCKED_OUT_OF_MANDATE.
+      proposal_eerste_termijn_datum: {
+        type: ['string', 'null'],
+        description:
+          'YYYY-MM-DD waarop de eerste termijn valt bij een SPLITSING-voorstel. Je krijgt in je context de UITERLIJKE datum die is toegestaan (mandaat splitsing.max_dagen_tot_eerste_termijn). Stel zelf een datum voor die binnen die grens ligt en noem die datum in suggested_reply als bevestigingsvraag ("werkt dat voor je?"). Null bij UITSTEL of geen splitsing-voorstel.',
       },
     },
     required: ['suggested_reply', 'detected_intent', 'confidence', 'reasoning'],
@@ -693,9 +704,16 @@ export async function runJoostSuggest({
     } else {
       hardMinStr = ` LET OP: deze klant heeft geen actief abonnement. SPLITSING is voor deze klant NIET toegestaan. Bied GEEN regeling, verwijs naar een medewerker.`;
     }
+    // #809 — start-grens voor de EERSTE termijn: uiterlijke datum uit
+    // mandate.splitsing.max_dagen_tot_eerste_termijn (default 45). Joost
+    // moet zelf een datum voorstellen binnen deze grens en die noemen als
+    // bevestigingsvraag. Latere datum door klant → weigeren of escaleren.
+    const _maxDagenTotEerste = getMaxDagenTotEersteTermijn(mandate);
+    const _uiterlijkeStart   = uiterlijkeEersteTermijnDatum(mandate);
+    const startGrensStr = ` START-GRENS: de eerste termijn moet binnen ${_maxDagenTotEerste} dagen liggen, dus uiterlijk ${_uiterlijkeStart}. Stel ZELF een datum voor binnen die grens en noem die datum als bevestigingsvraag ("werkt dat voor je?"). Wil de klant later starten → weiger vriendelijk en leg de grens uit, of escaleer.`;
     mandateLines.push(
       `SPLITSING: max ${termijnenStr} termijnen. ` +
-      `Min eerste termijn: ${pctStr} van openstaand bedrag (richtlijn min EUR per termijn: ${minBedragStr}).${hardMinStr}`
+      `Min eerste termijn: ${pctStr} van openstaand bedrag (richtlijn min EUR per termijn: ${minBedragStr}).${hardMinStr}${startGrensStr}`
     );
   }
 
@@ -967,6 +985,9 @@ export async function runJoostSuggest({
   }
   const promisedDateRaw  = _trimStr(toolInput.promised_date_raw, 200);
   const promisedDateHint = _validDate(toolInput.promised_date_hint);
+  // #809 — eerste-termijn-datum bij SPLITSING-voorstel. Zelfde validatie als
+  // promised_date_hint: strikt YYYY-MM-DD + kalender-round-trip.
+  const proposalEersteTermijnDatum = _validDate(toolInput.proposal_eerste_termijn_datum);
 
   if (!suggestedReply) {
     return { status: 502, body: { error: 'Anthropic gaf een lege suggested_reply terug' } };
@@ -994,6 +1015,8 @@ export async function runJoostSuggest({
     // #801 — betaal-toezegging velden (nullable).
     promised_date_raw:            promisedDateRaw,
     promised_date_hint:           promisedDateHint,
+    // #809 — eerste-termijn-datum bij SPLITSING (nullable).
+    proposal_eerste_termijn_datum: proposalEersteTermijnDatum,
   };
 
   const { data: sugg, error: insErr } = await supabase

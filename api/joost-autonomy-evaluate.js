@@ -105,6 +105,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getClientIp } from './_lib/audit-customer.js';
 import { createNotification } from './_lib/notify.js';
+import { getMaxDagenTotEersteTermijn, daysUntil } from './_lib/splitsing-start-grens.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -470,6 +471,27 @@ export function evaluateAutonomy({
         decision.stop_action    = 'task_create';
         decision.stop_task_type = 'MANUAL_PROPOSE_ARRANGEMENT';
         return decision;
+      }
+
+      // #809 — Eerste-termijn-datum voorbij mandate.splitsing.max_dagen_tot_
+      // eerste_termijn (default 45). Regeling die later start = uitstel,
+      // niet een regeling. Alleen checken als LLM een concrete datum gaf;
+      // ontbreken van de datum vangt NO_STRUCTURED_PROPOSAL af verderop.
+      const eersteTermijnStr = typeof suggestion.proposal_eerste_termijn_datum === 'string'
+        ? suggestion.proposal_eerste_termijn_datum.trim() : null;
+      if (eersteTermijnStr) {
+        const dagenTot   = daysUntil(eersteTermijnStr, nowDate);
+        const maxDagen   = getMaxDagenTotEersteTermijn(mandate);
+        if (dagenTot != null && dagenTot > maxDagen) {
+          log.push(
+            `Voorgestelde eerste termijn (${eersteTermijnStr}) valt ${dagenTot}d in de toekomst > ` +
+            `max_dagen_tot_eerste_termijn (${maxDagen}d) -> BLOCKED_OUT_OF_MANDATE.`
+          );
+          decision.blocked_reason = 'BLOCKED_OUT_OF_MANDATE';
+          decision.stop_action    = 'task_create';
+          decision.stop_task_type = 'MANUAL_PROPOSE_ARRANGEMENT';
+          return decision;
+        }
       }
     }
 

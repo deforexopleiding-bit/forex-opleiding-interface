@@ -36,6 +36,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getClientIp } from './_lib/audit-customer.js';
 import { buildVatDistribution, computeTermijnAmounts } from './_lib/invoice-vat-mix.js';
+import { getMaxDagenTotEersteTermijn, daysUntil } from './_lib/splitsing-start-grens.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -330,6 +331,47 @@ export default async function handler(req, res) {
             offending_amount_eur: Number(tooSmall.amount),
           });
         }
+      }
+
+      // #809 — Server-side vangnet voor start-grens. Vroegste due_date over
+      // alle parts wordt gemeten tegen mandate.splitsing.max_dagen_tot_
+      // eerste_termijn (default 45). Zelfde helper als evaluateAutonomy →
+      // één bron voor de grens (les uit #808).
+      // Mandate lookup uit joost_config; bij lookup-fout valt de helper terug
+      // op default 45 (fail-safe: strengere grens dan gefaalde config).
+      let arrMandate = null;
+      try {
+        const { data: cfgRow } = await supabaseAdmin
+          .from('joost_config').select('autonomy_config').eq('module', 'finance').maybeSingle();
+        if (cfgRow?.autonomy_config?.arrangement_mandate) {
+          arrMandate = cfgRow.autonomy_config.arrangement_mandate;
+        }
+      } catch (e) {
+        console.warn('[arrangements-propose] joost_config lookup soft-fail — default 45:', e?.message);
+      }
+      const maxDagenTotEerste = getMaxDagenTotEersteTermijn(arrMandate);
+      let earliestDueYmd = null;
+      let earliestDueDays = null;
+      for (const p of details.parts) {
+        const d = typeof p.due_date === 'string' ? p.due_date.trim() : null;
+        if (!d) continue;
+        const days = daysUntil(d);
+        if (days == null) continue;
+        if (earliestDueDays == null || days < earliestDueDays) {
+          earliestDueDays = days;
+          earliestDueYmd  = d;
+        }
+      }
+      if (earliestDueDays != null && earliestDueDays > maxDagenTotEerste) {
+        return res.status(400).json({
+          error: `Eerste termijn valt op ${earliestDueYmd} (${earliestDueDays}d in de toekomst), ` +
+                 `voorbij de grens van ${maxDagenTotEerste} dagen. Een regeling die later start is uitstel — ` +
+                 `laat een medewerker deze afspraak beoordelen (bijvoorbeeld als UITSTEL).`,
+          violation:                'EERSTE_TERMIJN_VOORBIJ_GRENS',
+          max_dagen_tot_eerste:     maxDagenTotEerste,
+          eerste_termijn_datum:     earliestDueYmd,
+          dagen_tot_eerste_termijn: earliestDueDays,
+        });
       }
     }
 
