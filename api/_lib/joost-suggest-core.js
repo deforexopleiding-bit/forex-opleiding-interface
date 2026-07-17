@@ -490,6 +490,18 @@ export async function runJoostSuggest({
   const minEersteTermijnPct = Number.isFinite(Number(splitsingM.min_eerste_termijn_pct))
     ? Number(splitsingM.min_eerste_termijn_pct) : null;
 
+  // #787 — harde ondergrens per termijn uit joost_config.autonomy_config.
+  // arrangement_mandate.min_termijn_bedrag_eur. Standaard 300 (beleid Jeffrey:
+  // onder EUR 300/mnd is het geen regeling maar een gesprek voor een mens).
+  // Voorheen was dit veld dood; deze release wél gelezen in prompt-hint hier
+  // én afgedwongen in api/arrangements-propose.js server-side.
+  const minTermijnBedrag = Number.isFinite(Number(mandate.min_termijn_bedrag_eur))
+    ? Number(mandate.min_termijn_bedrag_eur) : null;
+  // Maximaal haalbare termijnen bij deze min_termijn_bedrag (integer).
+  // 0 of 1 → SPLITSING onmogelijk (SPLITSING vereist ≥2 parts).
+  const maxHaalbaarTermijnen = (minTermijnBedrag && minTermijnBedrag > 0 && totalOpen > 0)
+    ? Math.floor(totalOpen / minTermijnBedrag) : null;
+
   let minBedragPerTermijn = null;
   if (minEersteTermijnPct !== null && totalOpen > 0) {
     minBedragPerTermijn = Math.round(totalOpen * minEersteTermijnPct * 100) / 100;
@@ -512,9 +524,19 @@ export async function runJoostSuggest({
       ? `${Math.round(minEersteTermijnPct * 100)}%` : '?';
     const minBedragStr = minBedragPerTermijn != null
       ? `EUR ${fmtEur(minBedragPerTermijn)}` : 'n.v.t.';
+    // Effectief maximum aantal termijnen = min(mandaat-cap, floor(totaal /
+    // min_termijn_bedrag)). Als min_termijn_bedrag is gezet, cap het model.
+    let effMaxTermijnen = maxTermijnen;
+    if (maxHaalbaarTermijnen != null) {
+      effMaxTermijnen = (effMaxTermijnen != null)
+        ? Math.min(effMaxTermijnen, maxHaalbaarTermijnen)
+        : maxHaalbaarTermijnen;
+    }
+    const termijnenStr = effMaxTermijnen != null ? String(effMaxTermijnen) : '?';
+    const hardMinStr = minTermijnBedrag != null ? ` HARDE ONDERGRENS per termijn: EUR ${fmtEur(minTermijnBedrag)}.` : '';
     mandateLines.push(
-      `SPLITSING: max ${maxTermijnen != null ? maxTermijnen : '?'} termijnen. ` +
-      `Min eerste termijn: ${pctStr} van openstaand bedrag (richtlijn min EUR per termijn: ${minBedragStr}).`
+      `SPLITSING: max ${termijnenStr} termijnen. ` +
+      `Min eerste termijn: ${pctStr} van openstaand bedrag (richtlijn min EUR per termijn: ${minBedragStr}).${hardMinStr}`
     );
   }
 
@@ -527,6 +549,17 @@ export async function runJoostSuggest({
         `Openstaand bedrag (EUR ${fmtEur(totalOpen)}) ligt onder de minimum-termijn ` +
         `(EUR ${fmtEur(minBedragPerTermijn)}) -- zelf SPLITSING voorstellen verboden.`
       );
+    }
+    // #787 harde min_termijn_bedrag: als het openstaand bedrag geen 2 termijnen
+    // toelaat boven de ondergrens → SPLITSING is per definitie onmogelijk;
+    // Joost mag geen splitsing voorstellen en moet escaleren.
+    if (splitsingEnabled && minTermijnBedrag != null && minTermijnBedrag > 0) {
+      if (maxHaalbaarTermijnen == null || maxHaalbaarTermijnen < 2) {
+        rangeRemarks.push(
+          `SPLITSING onmogelijk: openstaand bedrag (EUR ${fmtEur(totalOpen)}) laat geen 2 termijnen ` +
+          `van minimaal EUR ${fmtEur(minTermijnBedrag)} toe -- laat de mens dit oplossen (escaleer).`
+        );
+      }
     }
     if (uitstelEnabled && maxUitstelDagen != null && maxUitstelDagen <= 0) {
       rangeRemarks.push('UITSTEL is gedeactiveerd door max_dagen_total=0 -- zelf voorstellen verboden.');

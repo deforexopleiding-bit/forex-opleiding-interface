@@ -279,6 +279,37 @@ export default async function handler(req, res) {
           error: `Som van parts (${sumParts.toFixed(2)}) komt niet overeen met som factuurbedrag (${sumInv.toFixed(2)})`,
         });
       }
+      // #787 — harde min_termijn_bedrag_eur uit joost_config.autonomy_config.
+      // arrangement_mandate. Deze grens is HARDE regel, niet alleen een prompt-
+      // instructie: een taalmodel kan er altijd overheen, dus valideren we
+      // hier server-side. Fail-soft op config-lookup (bv. joost_config
+      // ontbreekt in DB): grens wordt genegeerd. Kan later verder gedwongen
+      // worden via allowed_types + explicit config, maar voor het beleid
+      // "geen termijn onder EUR X" is deze check leidend.
+      try {
+        const { data: cfg } = await supabaseAdmin
+          .from('joost_config')
+          .select('autonomy_config')
+          .eq('module', 'finance')
+          .maybeSingle();
+        const mandate = cfg?.autonomy_config?.arrangement_mandate || {};
+        const minTermijnBedrag = Number(mandate.min_termijn_bedrag_eur);
+        if (Number.isFinite(minTermijnBedrag) && minTermijnBedrag > 0) {
+          const tooSmall = details.parts.find(p => Number(p.amount || 0) < minTermijnBedrag);
+          if (tooSmall) {
+            return res.status(400).json({
+              error: `Termijn van EUR ${Number(tooSmall.amount).toFixed(2)} ligt onder de minimum-termijn ` +
+                     `EUR ${minTermijnBedrag.toFixed(2)}. Splits over minder termijnen of laat een medewerker ` +
+                     `deze afspraak beoordelen.`,
+              violation:   'MIN_TERMIJN_BEDRAG',
+              min_termijn_bedrag_eur: minTermijnBedrag,
+              offending_amount_eur:   Number(tooSmall.amount),
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('[arrangements-propose] min_termijn_bedrag lookup fail-soft:', e?.message || e);
+      }
     }
 
     // ---- UITSTEL (consolidate + restart): server-side enrichment ----
