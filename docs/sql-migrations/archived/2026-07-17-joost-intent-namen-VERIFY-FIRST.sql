@@ -1,3 +1,13 @@
+-- ⛔ NIET DRAAIEN
+-- Deze migratie is nooit nodig geweest: productie had 0 oude intent-sleutels.
+-- De code-fix uit #792 (INTENT_TO_CONFIG_KEY weg) volstaat.
+-- De eerste versie draaide GEDEELTELIJK in de Supabase SQL-editor (TEMP TABLE
+-- + meerdere DO-blocks worden daar los uitgevoerd) en overschreef
+-- productieconfig: escalation_needed disabled → draft, general_question
+-- verloor confidence_threshold 0.75. Handmatig hersteld op 17-07-2026.
+-- Les: geen TEMP-tabellen of meerdere DO-blocks in migraties die via de
+-- Supabase-editor gedraaid worden.
+
 -- 2026-07-17 — Joost intent-namen: VERIFY-FIRST (READ-ONLY).
 --
 -- Doel: laat zien WAT er nu in autonomy_config.intents staat voor ALLE
