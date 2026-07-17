@@ -97,6 +97,30 @@ const JOOST_TOOL = {
         description:
           'Korte uitleg (1-2 zinnen) waarom je dit intent + antwoord hebt gekozen. Voor audit en latere eval.',
       },
+      // #789 — gestructureerde proposal-velden. Vul deze in ALS je in
+      // suggested_reply een concreet betalingsvoorstel doet (bedragen, aantal
+      // termijnen, dagen uitstel). Zonder deze velden kan het systeem je
+      // voorstel niet toetsen aan het mandaat → autonome verzending wordt
+      // geblokkeerd en gaat naar een medewerker.
+      //
+      // BELANGRIJK: dit zijn OUTPUT-velden. Vul ze ALLEEN in als je zelf een
+      // concreet voorstel doet. Als je een verhelderende vraag stelt ("over
+      // hoeveel termijnen dacht je?"), laat ze op null — dat is GEEN voorstel.
+      proposal_termijnen: {
+        type: ['integer', 'null'],
+        description:
+          'Aantal termijnen bij SPLITSING-voorstel. Null als je geen splitsing voorstelt of een verhelderende vraag stelt. Voorbeeld: bij "we splitsen dit over 3 termijnen van EUR 80" → 3.',
+      },
+      proposal_uitstel_dagen: {
+        type: ['integer', 'null'],
+        description:
+          'Aantal dagen uitstel bij UITSTEL-voorstel. Null als je geen uitstel voorstelt. Voorbeeld: bij "je krijgt 30 dagen extra tijd" → 30.',
+      },
+      proposal_termijn_bedrag_eur: {
+        type: ['number', 'null'],
+        description:
+          'EUR per termijn (concreet bedrag dat je aan de klant belooft). Null bij verhelderende vraag of geen voorstel. Voorbeeld: bij "3 termijnen van EUR 80" → 80.',
+      },
     },
     required: ['suggested_reply', 'detected_intent', 'confidence', 'reasoning'],
   },
@@ -682,6 +706,16 @@ export async function runJoostSuggest({
   ctxLines.push('---');
   ctxLines.push('BELANGRIJK: Stel NOOIT een arrangement voor buiten het bovenstaande mandaat.');
   ctxLines.push('Bij twijfel: stel geen arrangement voor maar verwijs naar een medewerker.');
+  // #789 — voorstel-verplichting voor gestructureerde output. Zonder deze
+  // velden kan de mandaat-check niet vuren en escaleert het systeem automatisch
+  // in autonome mode. Draft-mode blijft onaangetast (Jeffrey leest mee).
+  ctxLines.push('---');
+  ctxLines.push('VERPLICHT bij een CONCREET voorstel (bedrag/aantal termijnen/dagen uitstel):');
+  ctxLines.push('  * proposal_termijnen           = aantal termijnen (bij SPLITSING)');
+  ctxLines.push('  * proposal_uitstel_dagen       = aantal dagen (bij UITSTEL)');
+  ctxLines.push('  * proposal_termijn_bedrag_eur  = EUR per termijn (bij SPLITSING) of totaal (bij UITSTEL)');
+  ctxLines.push('Zonder deze velden kan het mandaat niet gecheckt worden en escaleert je voorstel automatisch.');
+  ctxLines.push('Bij een VERHELDERENDE VRAAG ("over hoeveel termijnen dacht je?") laat je ze op null — dat is GEEN voorstel.');
   ctxLines.push('---');
 
   const fullSystemPrompt = `${systemPrompt}\n\n${ctxLines.join('\n')}`;
@@ -776,6 +810,24 @@ export async function runJoostSuggest({
   const confidence     = clamp01(toolInput.confidence);
   const reasoning      = typeof toolInput.reasoning === 'string' ? toolInput.reasoning.trim() : '';
 
+  // #789 — parse gestructureerde proposal-velden. Alle 3 optioneel: null =
+  // "geen concreet voorstel" (verhelderende vraag, algemene reactie, etc).
+  // Positieve integers/nummers → we vertrouwen ze en geven ze door aan
+  // evaluateAutonomy voor de mandaat-checks. Negatieve/0/NaN → null (geen
+  // half-informatie in de DB).
+  function _posInt(v) {
+    const n = Number(v);
+    return (Number.isFinite(n) && Number.isInteger(n) && n > 0) ? n : null;
+  }
+  function _posNum(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return Math.round(n * 100) / 100; // 2 decimalen voor bedragen
+  }
+  const proposalTermijnen        = _posInt(toolInput.proposal_termijnen);
+  const proposalUitstelDagen     = _posInt(toolInput.proposal_uitstel_dagen);
+  const proposalTermijnBedragEur = _posNum(toolInput.proposal_termijn_bedrag_eur);
+
   if (!suggestedReply) {
     return { status: 502, body: { error: 'Anthropic gaf een lege suggested_reply terug' } };
   }
@@ -784,23 +836,30 @@ export async function runJoostSuggest({
   // STAP 7: Save suggestion
   // ========================================================================
   const insertRow = {
-    conversation_id:          conversationId,
-    triggered_by_message_id:  triggeredByMessageId || null,
-    module:                   config.module,
-    suggested_reply:          suggestedReply,
-    detected_intent:          detectedIntent,
+    conversation_id:              conversationId,
+    triggered_by_message_id:      triggeredByMessageId || null,
+    module:                       config.module,
+    suggested_reply:              suggestedReply,
+    detected_intent:              detectedIntent,
     confidence,
     reasoning,
-    context_snapshot:         contextSnapshot,
-    status:                   'PROPOSED',
-    requested_by_user_id:     requestedByUserId || null,
-    auto_triggered:           autoTriggered === true,
+    context_snapshot:             contextSnapshot,
+    status:                       'PROPOSED',
+    requested_by_user_id:         requestedByUserId || null,
+    auto_triggered:               autoTriggered === true,
+    // #789 — gestructureerde proposal-velden (nullable).
+    proposal_termijnen:           proposalTermijnen,
+    proposal_uitstel_dagen:       proposalUitstelDagen,
+    proposal_termijn_bedrag_eur:  proposalTermijnBedragEur,
   };
 
   const { data: sugg, error: insErr } = await supabase
     .from('joost_suggestions')
     .insert(insertRow)
-    .select('id, conversation_id, suggested_reply, detected_intent, confidence, reasoning, status, created_at')
+    .select(
+      'id, conversation_id, suggested_reply, detected_intent, confidence, reasoning, status, ' +
+      'proposal_termijnen, proposal_uitstel_dagen, proposal_termijn_bedrag_eur, created_at'
+    )
     .single();
   if (insErr) throw new Error('joost_suggestions insert: ' + insErr.message);
 
@@ -836,12 +895,17 @@ export async function runJoostSuggest({
     status: 200,
     body: {
       suggestion: {
-        id:              sugg.id,
-        suggested_reply: sugg.suggested_reply,
-        detected_intent: sugg.detected_intent,
-        confidence:      sugg.confidence,
-        reasoning:       sugg.reasoning,
-        created_at:      sugg.created_at,
+        id:                          sugg.id,
+        suggested_reply:             sugg.suggested_reply,
+        detected_intent:             sugg.detected_intent,
+        confidence:                  sugg.confidence,
+        reasoning:                   sugg.reasoning,
+        // #789 — proposal-velden meesturen zodat callers ze kunnen tonen /
+        // audit-loggen zonder extra DB-round-trip.
+        proposal_termijnen:          sugg.proposal_termijnen ?? null,
+        proposal_uitstel_dagen:      sugg.proposal_uitstel_dagen ?? null,
+        proposal_termijn_bedrag_eur: sugg.proposal_termijn_bedrag_eur ?? null,
+        created_at:                  sugg.created_at,
       },
     },
   };

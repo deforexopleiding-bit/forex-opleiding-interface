@@ -472,6 +472,62 @@ export function evaluateAutonomy({
         return decision;
       }
     }
+
+    // #789 — Termijn-bedrag onder mandaat-ondergrens? Vóór #789 werd deze
+    // volgorde-bug pas door arrangements-propose gevangen (bij vastleggen),
+    // waardoor Joost's toezegging al de deur uit was. Nu ook vóór de send.
+    //
+    // Ondergrens-bronnen (in volgorde):
+    //   1. customer_context.min_termijn_bedrag_eur  — DYNAMISCHE per-klant
+    //      grens uit #788 (maandbedrag klant, laagste actieve abo).
+    //      Caller berekent en geeft door.
+    //   2. mandate.min_termijn_bedrag_eur           — statische config-bodem
+    //      (gedeprecateerd in #788, mag nog fallback zijn voor callers die
+    //      de nieuwe helper niet gebruiken).
+    const requestedTermijnBedrag = num(suggestion.proposal_termijn_bedrag_eur, 0);
+    const dynMinPerTermijn = num(
+      customer_context && customer_context.min_termijn_bedrag_eur,
+      0,
+    );
+    const cfgMinPerTermijn = num(mandate.min_termijn_bedrag_eur, 0);
+    const effectiveMinPerTermijn = dynMinPerTermijn > 0 ? dynMinPerTermijn : cfgMinPerTermijn;
+    if (requestedTermijnBedrag > 0 && effectiveMinPerTermijn > 0
+        && requestedTermijnBedrag < effectiveMinPerTermijn) {
+      log.push(
+        `Voorgesteld termijn-bedrag (EUR ${requestedTermijnBedrag.toFixed(2)}) ` +
+        `< ondergrens (EUR ${effectiveMinPerTermijn.toFixed(2)}) -> BLOCKED_OUT_OF_MANDATE.`
+      );
+      decision.blocked_reason = 'BLOCKED_OUT_OF_MANDATE';
+      decision.stop_action    = 'task_create';
+      decision.stop_task_type = 'MANUAL_PROPOSE_ARRANGEMENT';
+      return decision;
+    }
+
+    // #789 — Fail-safe: als de LLM een arrangement-intent oplevert maar
+    // GEEN gestructureerde proposal-velden invult, kan het mandaat niet
+    // gecheckt worden. In AUTONOMOUS-mode betekent dat: geen rem op wat er
+    // naar de klant gaat → onacceptabel. Escaleer naar mens.
+    //
+    // In DRAFT-mode gebeurt dit niet: Jeffrey leest sowieso mee (via de
+    // suggestion-card), dus het risico is nul. Ook voorkomt dat een
+    // verhelderende vraag ("over hoeveel termijnen dacht je?") onnodig een
+    // taak in Open Acties dropt.
+    if (mode === 'autonomous') {
+      const anyProposalField =
+        (num(suggestion.proposal_termijnen, 0) > 0)
+        || (num(suggestion.proposal_uitstel_dagen, 0) > 0)
+        || (num(suggestion.proposal_termijn_bedrag_eur, 0) > 0);
+      if (!anyProposalField) {
+        log.push(
+          'Arrangement-intent in AUTONOMOUS-mode ZONDER gestructureerde proposal-velden ' +
+          '-> geen mandaat-check mogelijk -> task_create MANUAL_PROPOSE_ARRANGEMENT.'
+        );
+        decision.stop_action    = 'task_create';
+        decision.stop_task_type = 'MANUAL_PROPOSE_ARRANGEMENT';
+        decision.blocked_reason = 'NO_STRUCTURED_PROPOSAL';
+        return decision;
+      }
+    }
     log.push('Mandate-check ok (binnen bedrags- + type- + sub-cap-grenzen).');
   }
 
