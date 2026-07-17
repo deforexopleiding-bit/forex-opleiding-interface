@@ -121,23 +121,27 @@ const JOOST_TOOL = {
         description:
           'EUR per termijn (concreet bedrag dat je aan de klant belooft). Null bij verhelderende vraag of geen voorstel. Voorbeeld: bij "3 termijnen van EUR 80" → 80.',
       },
-      // #801 — betaal-toezegging velden. Uitsluitend bij intent=payment_promise.
-      // Bij andere intents op null laten.
+      // #801 + #802 — betaal-toezegging velden. Uitsluitend bij
+      // intent=payment_promise. Bij andere intents op null laten.
       //
       // KRITIEK — LEES OOK JE SYSTEM-PROMPT:
       //   * promised_date_raw = het LETTERLIJKE klantwoord ("vrijdag", "eind
       //     van de maand", "na mijn salaris"). Niet door jou herformuleerd.
-      //     Voor jou is 't context; voor de mens die het straks bevestigt is
-      //     't bewijs waarom je een datum voorstelt.
+      //     Voor de mens die het straks bevestigt is 't bewijs waarom je een
+      //     datum voorstelt.
       //   * promised_date_hint = YYYY-MM-DD als je 'em ONDUBBELZINNIG kunt
       //     afleiden. Je krijgt de huidige datum + weekdag in je CONTEXT-
-      //     block. Bv. vandaag = 2026-11-19 (donderdag), klant zegt "vrijdag"
-      //     → hint = 2026-11-20.
+      //     block. Bv. vandaag = 2026-07-24 (donderdag), klant zegt "vrijdag"
+      //     → hint = 2026-07-25.
       //   * Bij vaag ("zsm", "na mijn salaris", "volgende week ergens") →
-      //     BEIDE null of alleen raw gevuld, hint = null.
-      //   * ZEG DE AFGELEIDE DATUM NOOIT HARDOP TEGEN DE KLANT — die hint
-      //     is voor de mens die het bevestigt. Als je fout gokt en dat toch
-      //     zegt, heeft de klant een bevestiging met een verkeerde datum.
+      //     hint = null. Raw mag wel gevuld met het klantcitaat.
+      //   * #802 — Als je een hint invult, NOEM de datum in suggested_reply
+      //     als BEVESTIGINGSVRAAG ("klopt die datum?"). Zwijgen laat een
+      //     misverstand staan tot de betaling uitblijft; hardop vragen laat
+      //     de klant meteen corrigeren als je fout gokte.
+      //   * ZAKELIJK ondubbelzinnig blijft: doen alsof je hebt VASTGELEGD is
+      //     verboden ("genoteerd", "geregeld", "staat erin"). Je vraagt,
+      //     een collega bevestigt.
       promised_date_raw: {
         type: ['string', 'null'],
         description:
@@ -146,7 +150,7 @@ const JOOST_TOOL = {
       promised_date_hint: {
         type: ['string', 'null'],
         description:
-          'YYYY-MM-DD als je datum ondubbelzinnig kunt afleiden uit klantwoord + huidige datum (staat in context-block). Null bij vaag ("zsm", "na mijn salaris") of geen datum. #802 — Als je de hint invult, NOEM de datum in je suggested_reply als bevestigingsvraag (bv. "vrijdag 24 juli — klopt dat?"). Zwijgen laat een misverstand staan; hardop vragen laat de klant corrigeren.',
+          'Datum die je afleidt uit wat de klant zegt, in YYYY-MM-DD. Huidige datum staat in je context-block (Vandaag: <weekdag> <datum>). Null als je de datum niet ondubbelzinnig kunt afleiden. Noem deze datum in je suggested_reply als BEVESTIGINGSVRAAG ("klopt die datum?") zodat de klant kan corrigeren als je fout gokt. Leg nooit zelf iets vast — een collega bevestigt.',
       },
     },
     required: ['suggested_reply', 'detected_intent', 'confidence', 'reasoning'],
