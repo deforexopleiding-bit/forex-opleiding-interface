@@ -14,25 +14,35 @@
 --   De LLM-set is leidend (het is het enige contract dat het model kent). De
 --   evaluator brugde de LLM-set naar de seed-set via INTENT_TO_CONFIG_KEY —
 --   waardoor UI-instellingen onder een derde set (payment_promise etc.)
---   effectief werden GENEGEERD door de evaluator (die de seed-set leest).
+--   effectief werden GENEGEERD door de evaluator (die de seed-set las).
+--
+-- SCOPE: alleen module='finance'. events (Simone) en onboarding hebben
+--   eigen intent-sets in hun agent-cores en zijn NIET betrokken.
 --
 -- WAT DEZE MIGRATIE DOET
---   1. Snapshot van de PRE-state.
---   2. Renamet oude keys naar LLM-set, met "UI-waarde wint bij conflict":
+--   1. PRE-STATE snapshot in een TEMP-tabel (voor pre/post-vergelijking).
+--   2. Rename oude keys naar LLM-set met "UI-waarde wint bij conflict":
 --        UI arrangement_request  || seed tegenvoorstel_termijn  -> arrangement_request
 --        UI payment_promise      || seed ja_op_uitstel           -> payment_promise
 --        seed al_betaald_claim                                    -> verify_payment
 --        UI question             || seed vraag_om_kopie_factuur   -> general_question
 --        UI dispute              || seed boos_of_klacht           -> escalation_needed
 --        UI other                                                 -> other (identity)
---      Waarden (confidence, max_messages_per_conv) worden meegenomen; extra
---      seed-velden (bv. max_termijn_dagen) blijven behouden.
+--      confidence_threshold / max_messages_per_conv / enabled etc worden
+--      compleet meegenomen van de gekozen source-value.
 --
---   3. HARDE MODE-REGEL: elke nieuwe intent-key wordt geforceerd op mode='draft'.
---      Als er ergens (UI of seed) mode='autonomous' stond, wordt dat teruggezet.
---      Dit is een expliciete keuze — Jeffrey heeft bevestigd "alles staat nu op
---      draft, dat moet zo blijven". De VERIFY-FIRST query waarschuwt vooraf
---      als er ergens autonomous stond.
+--   3. MODE-PRESERVE per intent, met één safety-conversie:
+--        source mode = 'disabled'   -> BLIJFT 'disabled' (bewuste keuze
+--                                                          klant/beleid;
+--                                                          bv. escalation_needed
+--                                                          hoort bij een mens,
+--                                                          niet bij Joost)
+--        source mode = 'draft'      -> blijft 'draft'
+--        source mode = 'autonomous' -> WORDT 'draft'      (safety: geen enkel
+--                                                          intent mag door de
+--                                                          rename autonoom
+--                                                          worden)
+--        source mode ontbreekt      -> 'draft'            (default)
 --
 --   4. Dropt de dode keys:
 --        - unsubscribe             (UI-key zonder LLM-tegenhanger)
@@ -42,123 +52,213 @@
 --        - ja_op_uitstel / tegenvoorstel_termijn / al_betaald_claim /
 --          boos_of_klacht / vraag_om_kopie_factuur (seed-oud, na hun rename)
 --
---   5. Post-state RAISE NOTICE + assertion: geen intent-key mag na afloop
---      op mode='autonomous' staan. Als de assertion faalt: ROLLBACK.
+--   5. POST-STATE snapshot + 6 asserties. Bij gefaalde assertie:
+--      RAISE EXCEPTION → automatische ROLLBACK.
+--        A. Geen intent op mode='autonomous'.
+--        B. Alle 6 LLM-keys aanwezig.
+--        C. Geen enkele oude key over.
+--        D. Elke intent die PRE 'disabled' was, is POST 'disabled'.
+--        E. Elke intent met PRE confidence_threshold heeft POST identieke waarde.
+--        F. Elke intent met PRE max_messages_per_conv heeft POST identieke waarde.
 --
--- IDEMPOTENT: elke rename kijkt eerst of de doel-key al bestaat en overschrijft
---   die dan niet — 2e run verandert niets.
---
--- ROLLBACK-STRATEGIE: alles binnen 1 transactie. Bij een assertion-fout doet
---   PostgreSQL automatisch ROLLBACK. Voor debuggen kun je de RAISE NOTICE-
---   regels lezen in de query-output.
+-- IDEMPOTENT: bij een 2e run zijn alle nieuwe keys al aanwezig, oude keys al
+--   weg. Rename is dan een identity-transformatie; asserties slagen; commit ok.
 
 BEGIN;
 
--- 1. PRE-STATE RAPPORTAGE ----------------------------------------------------
-DO $$
-DECLARE
-  v_intents  jsonb;
-  v_k        text;
-  v_val      jsonb;
-BEGIN
-  SELECT autonomy_config -> 'intents'
-    INTO v_intents
+-- ===========================================================================
+-- 1. PRE-STATE snapshot in TEMP-tabel (ON COMMIT DROP)
+-- ===========================================================================
+-- Per doel-key: bewaar de EFFECTIEVE source-values (na COALESCE UI-oud →
+-- seed-oud). Dit is wat de UPDATE zou gebruiken, en tegelijk waar we de
+-- post-state tegenaan gaan verifiëren.
+CREATE TEMP TABLE _intent_migration_prestate ON COMMIT DROP AS
+WITH cfg AS (
+  SELECT autonomy_config -> 'intents' AS intents
     FROM public.joost_config
-    WHERE module = 'finance';
+    WHERE module = 'finance'
+)
+SELECT 'payment_promise' AS target_key,
+       COALESCE(intents -> 'payment_promise' ->> 'mode',
+                intents -> 'ja_op_uitstel'    ->> 'mode') AS src_mode,
+       COALESCE(intents -> 'payment_promise' ->> 'confidence_threshold',
+                intents -> 'ja_op_uitstel'    ->> 'confidence_threshold',
+                intents -> 'payment_promise' ->> 'min_confidence',
+                intents -> 'ja_op_uitstel'    ->> 'min_confidence') AS src_conf,
+       COALESCE(intents -> 'payment_promise' ->> 'max_messages_per_conv',
+                intents -> 'ja_op_uitstel'    ->> 'max_messages_per_conv') AS src_maxmsg
+FROM cfg
+UNION ALL
+SELECT 'arrangement_request',
+       COALESCE(intents -> 'arrangement_request' ->> 'mode',
+                intents -> 'tegenvoorstel_termijn' ->> 'mode'),
+       COALESCE(intents -> 'arrangement_request'  ->> 'confidence_threshold',
+                intents -> 'tegenvoorstel_termijn' ->> 'confidence_threshold',
+                intents -> 'arrangement_request'  ->> 'min_confidence',
+                intents -> 'tegenvoorstel_termijn' ->> 'min_confidence'),
+       COALESCE(intents -> 'arrangement_request'  ->> 'max_messages_per_conv',
+                intents -> 'tegenvoorstel_termijn' ->> 'max_messages_per_conv')
+FROM cfg
+UNION ALL
+SELECT 'verify_payment',
+       intents -> 'al_betaald_claim' ->> 'mode',
+       COALESCE(intents -> 'al_betaald_claim' ->> 'confidence_threshold',
+                intents -> 'al_betaald_claim' ->> 'min_confidence'),
+       intents -> 'al_betaald_claim' ->> 'max_messages_per_conv'
+FROM cfg
+UNION ALL
+SELECT 'general_question',
+       COALESCE(intents -> 'question' ->> 'mode',
+                intents -> 'vraag_om_kopie_factuur' ->> 'mode'),
+       COALESCE(intents -> 'question'               ->> 'confidence_threshold',
+                intents -> 'vraag_om_kopie_factuur' ->> 'confidence_threshold',
+                intents -> 'question'               ->> 'min_confidence',
+                intents -> 'vraag_om_kopie_factuur' ->> 'min_confidence'),
+       COALESCE(intents -> 'question'               ->> 'max_messages_per_conv',
+                intents -> 'vraag_om_kopie_factuur' ->> 'max_messages_per_conv')
+FROM cfg
+UNION ALL
+SELECT 'escalation_needed',
+       COALESCE(intents -> 'dispute' ->> 'mode',
+                intents -> 'boos_of_klacht' ->> 'mode'),
+       COALESCE(intents -> 'dispute'        ->> 'confidence_threshold',
+                intents -> 'boos_of_klacht' ->> 'confidence_threshold',
+                intents -> 'dispute'        ->> 'min_confidence',
+                intents -> 'boos_of_klacht' ->> 'min_confidence'),
+       COALESCE(intents -> 'dispute'        ->> 'max_messages_per_conv',
+                intents -> 'boos_of_klacht' ->> 'max_messages_per_conv')
+FROM cfg
+UNION ALL
+SELECT 'other',
+       intents -> 'other' ->> 'mode',
+       COALESCE(intents -> 'other' ->> 'confidence_threshold',
+                intents -> 'other' ->> 'min_confidence'),
+       intents -> 'other' ->> 'max_messages_per_conv'
+FROM cfg;
 
-  IF v_intents IS NULL THEN
-    RAISE NOTICE '[intent-namen] PRE-state: intents-object bestaat niet voor finance. Niets te migreren.';
-    RETURN;
-  END IF;
-
-  RAISE NOTICE '[intent-namen] PRE-state (voor rename):';
-  FOR v_k IN SELECT jsonb_object_keys(v_intents) LOOP
-    v_val := v_intents -> v_k;
-    RAISE NOTICE '  intent=%  mode=%  confidence=%  max_msg=%',
-      v_k,
-      COALESCE(v_val->>'mode', '(null)'),
-      COALESCE(v_val->>'confidence_threshold', v_val->>'min_confidence', '(null)'),
-      COALESCE(v_val->>'max_messages_per_conv', '(null)');
+-- Debug: PRE-state rapportage
+DO $$
+DECLARE r RECORD;
+BEGIN
+  RAISE NOTICE '[intent-namen] PRE-state snapshot (effectieve source per doel-key):';
+  FOR r IN SELECT * FROM _intent_migration_prestate ORDER BY target_key LOOP
+    RAISE NOTICE '  target=%  src_mode=%  src_conf=%  src_maxmsg=%',
+      r.target_key,
+      COALESCE(r.src_mode,   '(null)'),
+      COALESCE(r.src_conf,   '(null)'),
+      COALESCE(r.src_maxmsg, '(null)');
+    IF r.src_mode = 'autonomous' THEN
+      RAISE NOTICE '    ⚠ source-mode is ''autonomous'' — wordt door safety-conversie ''draft'' na de rename.';
+    END IF;
   END LOOP;
 END $$;
 
--- 2. RENAME + MERGE ---------------------------------------------------------
--- Helper-CTE: bouw nieuwe intents-blob op basis van bestaande.
+-- ===========================================================================
+-- 2. RENAME + MODE-PRESERVE (met safety-conversie autonomous->draft)
+-- ===========================================================================
 UPDATE public.joost_config AS jc
    SET autonomy_config = jsonb_set(
      COALESCE(autonomy_config, '{}'::jsonb),
      '{intents}',
      (
-       WITH old AS (
-         SELECT autonomy_config -> 'intents' AS intents FROM public.joost_config WHERE module = 'finance'
+       WITH src AS (
+         SELECT autonomy_config -> 'intents' AS intents
+           FROM public.joost_config WHERE module = 'finance'
        ),
-       -- Per doel-key: kies bron-waarde. Prioriteit: (a) nieuwe key als al bestaat
-       -- (idempotency); (b) UI-oude key; (c) seed-oude key. Force mode='draft'
-       -- op elke doel-key.
        merged AS (
-         SELECT jsonb_strip_nulls(
-           jsonb_build_object(
-             -- payment_promise: UI 'payment_promise' | seed 'ja_op_uitstel'
-             'payment_promise', jsonb_set(
-               COALESCE(
-                 old.intents -> 'payment_promise',
-                 old.intents -> 'ja_op_uitstel',
-                 '{}'::jsonb
+         SELECT jsonb_build_object(
+           -- payment_promise: UI payment_promise | seed ja_op_uitstel
+           'payment_promise',
+             jsonb_set(
+               COALESCE(src.intents -> 'payment_promise',
+                        src.intents -> 'ja_op_uitstel',
+                        '{}'::jsonb),
+               '{mode}',
+               to_jsonb(
+                 CASE COALESCE(src.intents -> 'payment_promise' ->> 'mode',
+                               src.intents -> 'ja_op_uitstel'    ->> 'mode', '')
+                   WHEN 'disabled' THEN 'disabled'
+                   ELSE 'draft'
+                 END
                ),
-               '{mode}',
-               '"draft"'::jsonb,
                true
              ),
-             -- arrangement_request: UI 'arrangement_request' | seed 'tegenvoorstel_termijn'
-             'arrangement_request', jsonb_set(
-               COALESCE(
-                 old.intents -> 'arrangement_request',
-                 old.intents -> 'tegenvoorstel_termijn',
-                 '{}'::jsonb
+           -- arrangement_request: UI arrangement_request | seed tegenvoorstel_termijn
+           'arrangement_request',
+             jsonb_set(
+               COALESCE(src.intents -> 'arrangement_request',
+                        src.intents -> 'tegenvoorstel_termijn',
+                        '{}'::jsonb),
+               '{mode}',
+               to_jsonb(
+                 CASE COALESCE(src.intents -> 'arrangement_request'  ->> 'mode',
+                               src.intents -> 'tegenvoorstel_termijn' ->> 'mode', '')
+                   WHEN 'disabled' THEN 'disabled'
+                   ELSE 'draft'
+                 END
                ),
-               '{mode}',
-               '"draft"'::jsonb,
                true
              ),
-             -- verify_payment: alleen seed 'al_betaald_claim' (geen UI-key)
-             'verify_payment', jsonb_set(
-               COALESCE(old.intents -> 'al_betaald_claim', '{}'::jsonb),
+           -- verify_payment: alleen seed al_betaald_claim
+           'verify_payment',
+             jsonb_set(
+               COALESCE(src.intents -> 'al_betaald_claim', '{}'::jsonb),
                '{mode}',
-               '"draft"'::jsonb,
-               true
-             ),
-             -- general_question: UI 'question' | seed 'vraag_om_kopie_factuur'
-             'general_question', jsonb_set(
-               COALESCE(
-                 old.intents -> 'question',
-                 old.intents -> 'vraag_om_kopie_factuur',
-                 '{}'::jsonb
+               to_jsonb(
+                 CASE COALESCE(src.intents -> 'al_betaald_claim' ->> 'mode', '')
+                   WHEN 'disabled' THEN 'disabled'
+                   ELSE 'draft'
+                 END
                ),
-               '{mode}',
-               '"draft"'::jsonb,
                true
              ),
-             -- escalation_needed: UI 'dispute' | seed 'boos_of_klacht'
-             'escalation_needed', jsonb_set(
-               COALESCE(
-                 old.intents -> 'dispute',
-                 old.intents -> 'boos_of_klacht',
-                 '{}'::jsonb
+           -- general_question: UI question | seed vraag_om_kopie_factuur
+           'general_question',
+             jsonb_set(
+               COALESCE(src.intents -> 'question',
+                        src.intents -> 'vraag_om_kopie_factuur',
+                        '{}'::jsonb),
+               '{mode}',
+               to_jsonb(
+                 CASE COALESCE(src.intents -> 'question'               ->> 'mode',
+                               src.intents -> 'vraag_om_kopie_factuur' ->> 'mode', '')
+                   WHEN 'disabled' THEN 'disabled'
+                   ELSE 'draft'
+                 END
                ),
-               '{mode}',
-               '"draft"'::jsonb,
                true
              ),
-             -- other: UI 'other' (identity)
-             'other', jsonb_set(
-               COALESCE(old.intents -> 'other', '{}'::jsonb),
+           -- escalation_needed: UI dispute | seed boos_of_klacht
+           'escalation_needed',
+             jsonb_set(
+               COALESCE(src.intents -> 'dispute',
+                        src.intents -> 'boos_of_klacht',
+                        '{}'::jsonb),
                '{mode}',
-               '"draft"'::jsonb,
+               to_jsonb(
+                 CASE COALESCE(src.intents -> 'dispute'        ->> 'mode',
+                               src.intents -> 'boos_of_klacht' ->> 'mode', '')
+                   WHEN 'disabled' THEN 'disabled'
+                   ELSE 'draft'
+                 END
+               ),
+               true
+             ),
+           -- other: UI other (identity)
+           'other',
+             jsonb_set(
+               COALESCE(src.intents -> 'other', '{}'::jsonb),
+               '{mode}',
+               to_jsonb(
+                 CASE COALESCE(src.intents -> 'other' ->> 'mode', '')
+                   WHEN 'disabled' THEN 'disabled'
+                   ELSE 'draft'
+                 END
+               ),
                true
              )
-           )
          ) AS new_intents
-         FROM old
+         FROM src
        )
        SELECT new_intents FROM merged
      ),
@@ -167,13 +267,20 @@ UPDATE public.joost_config AS jc
    updated_at = now()
  WHERE module = 'finance';
 
--- 3. POST-STATE RAPPORTAGE + ASSERTIE ---------------------------------------
+-- ===========================================================================
+-- 3. POST-STATE + ASSERTIES A/B/C/D/E/F
+-- ===========================================================================
 DO $$
 DECLARE
   v_intents          jsonb;
   v_k                text;
   v_val              jsonb;
   v_autonomous_count int := 0;
+  r                  RECORD;
+  v_post_val         jsonb;
+  v_post_mode        text;
+  v_post_conf        text;
+  v_post_maxmsg      text;
 BEGIN
   SELECT autonomy_config -> 'intents'
     INTO v_intents
@@ -193,44 +300,63 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- ASSERTIE: geen enkele intent mag op autonomous staan.
+  -- ---- ASSERTIE A: geen enkele intent mag op autonomous staan. --------------
   IF v_autonomous_count > 0 THEN
-    RAISE EXCEPTION
-      '[intent-namen] ASSERTIE-FOUT: % intent(s) staat/staan nu op mode=autonomous. Rename mag dat NIET introduceren. ROLLBACK.',
-      v_autonomous_count;
+    RAISE EXCEPTION '[intent-namen] ASSERTIE A FOUT: % intent(s) op mode=autonomous. ROLLBACK.', v_autonomous_count;
   END IF;
 
-  -- ASSERTIE: alle LLM-keys moeten aanwezig zijn.
-  FOR v_k IN
-    SELECT k FROM (VALUES
-      ('payment_promise'), ('verify_payment'), ('arrangement_request'),
-      ('general_question'), ('escalation_needed'), ('other')
-    ) AS t(k)
-  LOOP
+  -- ---- ASSERTIE B: alle 6 LLM-keys aanwezig. --------------------------------
+  FOR v_k IN SELECT k FROM (VALUES
+    ('payment_promise'), ('verify_payment'), ('arrangement_request'),
+    ('general_question'), ('escalation_needed'), ('other')
+  ) AS t(k) LOOP
     IF NOT (v_intents ? v_k) THEN
-      RAISE EXCEPTION '[intent-namen] ASSERTIE-FOUT: LLM-key % ontbreekt in POST-state. ROLLBACK.', v_k;
+      RAISE EXCEPTION '[intent-namen] ASSERTIE B FOUT: LLM-key % ontbreekt. ROLLBACK.', v_k;
     END IF;
   END LOOP;
 
-  -- ASSERTIE: geen enkele oude key mag nog bestaan.
-  FOR v_k IN
-    SELECT k FROM (VALUES
-      ('ja_op_uitstel'), ('tegenvoorstel_termijn'), ('gespreid_betalen'),
-      ('kan_niet_betalen'), ('al_betaald_claim'), ('boos_of_klacht'),
-      ('vraag_om_kopie_factuur'), ('dispute'), ('question'), ('unsubscribe')
-    ) AS t(k)
-  LOOP
+  -- ---- ASSERTIE C: geen enkele oude key over. -------------------------------
+  FOR v_k IN SELECT k FROM (VALUES
+    ('ja_op_uitstel'), ('tegenvoorstel_termijn'), ('gespreid_betalen'),
+    ('kan_niet_betalen'), ('al_betaald_claim'), ('boos_of_klacht'),
+    ('vraag_om_kopie_factuur'), ('dispute'), ('question'), ('unsubscribe')
+  ) AS t(k) LOOP
     IF v_intents ? v_k THEN
-      RAISE EXCEPTION '[intent-namen] ASSERTIE-FOUT: oude key % bestaat nog in POST-state. ROLLBACK.', v_k;
+      RAISE EXCEPTION '[intent-namen] ASSERTIE C FOUT: oude key % bestaat nog. ROLLBACK.', v_k;
     END IF;
   END LOOP;
 
-  RAISE NOTICE '[intent-namen] Alle asserties geslaagd. % intent(s) actief, geen op autonomous.',
-    jsonb_object_keys_count(v_intents);
-EXCEPTION
-  WHEN undefined_function THEN
-    -- jsonb_object_keys_count bestaat niet standaard; alleen NOTICE-gebruik.
-    RAISE NOTICE '[intent-namen] Alle asserties geslaagd. Geen intent op autonomous.';
+  -- ---- ASSERTIES D/E/F: pre/post-vergelijking per doel-key. -----------------
+  FOR r IN SELECT * FROM _intent_migration_prestate LOOP
+    v_post_val    := v_intents -> r.target_key;
+    v_post_mode   := v_post_val ->> 'mode';
+    v_post_conf   := COALESCE(v_post_val ->> 'confidence_threshold',
+                              v_post_val ->> 'min_confidence');
+    v_post_maxmsg := v_post_val ->> 'max_messages_per_conv';
+
+    -- D: was PRE 'disabled', moet POST 'disabled' zijn.
+    IF r.src_mode = 'disabled' AND COALESCE(v_post_mode, '') <> 'disabled' THEN
+      RAISE EXCEPTION
+        '[intent-namen] ASSERTIE D FOUT: % was PRE ''disabled'', POST is ''%''. mode-preserve gefaald. ROLLBACK.',
+        r.target_key, COALESCE(v_post_mode, '(null)');
+    END IF;
+
+    -- E: confidence_threshold moet behouden blijven als 'ie in PRE bestond.
+    IF r.src_conf IS NOT NULL AND COALESCE(v_post_conf, '') <> r.src_conf THEN
+      RAISE EXCEPTION
+        '[intent-namen] ASSERTIE E FOUT: % PRE confidence=% POST confidence=%. Waarde-preserve gefaald. ROLLBACK.',
+        r.target_key, r.src_conf, COALESCE(v_post_conf, '(null)');
+    END IF;
+
+    -- F: max_messages_per_conv moet behouden blijven als 'ie in PRE bestond.
+    IF r.src_maxmsg IS NOT NULL AND COALESCE(v_post_maxmsg, '') <> r.src_maxmsg THEN
+      RAISE EXCEPTION
+        '[intent-namen] ASSERTIE F FOUT: % PRE max_msg=% POST max_msg=%. Waarde-preserve gefaald. ROLLBACK.',
+        r.target_key, r.src_maxmsg, COALESCE(v_post_maxmsg, '(null)');
+    END IF;
+  END LOOP;
+
+  RAISE NOTICE '[intent-namen] Alle 6 asserties (A/B/C/D/E/F) geslaagd. Geen autonomous, disabled-modes behouden, confidence + max_msg intact.';
 END $$;
 
 COMMIT;
