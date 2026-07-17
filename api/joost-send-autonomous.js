@@ -165,7 +165,12 @@ export default async function handler(req, res) {
       .select(
         'id, conversation_id, module, suggested_reply, detected_intent, ' +
         'confidence, reasoning, status, context_snapshot, triggered_by_message_id, ' +
-        'auto_triggered, created_at',
+        'auto_triggered, created_at, ' +
+        // #789 — gestructureerde proposal-velden voor mandaat-checks in
+        // evaluateAutonomy. Nullable — nieuwe rijen krijgen deze automatisch
+        // gevuld door joost-suggest-core; oude rijen hebben ze op null en
+        // vallen in de fail-safe-tak (task_create).
+        'proposal_termijnen, proposal_uitstel_dagen, proposal_termijn_bedrag_eur',
       )
       .eq('id', suggestionId)
       .maybeSingle();
@@ -268,6 +273,29 @@ export default async function handler(req, res) {
       }
     }
 
+    // #789 — dynamische ondergrens per termijn opzoeken zodat
+    // evaluateAutonomy 'em kan checken tegen proposal_termijn_bedrag_eur.
+    // Volgorde: (1) #788 helper (per-klant maandbedrag), fail-soft; (2)
+    // mandate.min_termijn_bedrag_eur uit joost_config. Als geen van beide:
+    // null → check wordt overgeslagen (bewust; geen valse positive).
+    let minTermijnBedrag = null;
+    if (conv.customer_id) {
+      try {
+        const { getCustomerMonthlyPayment } = await import('./_lib/customer-monthly-payment.js');
+        const mp = await getCustomerMonthlyPayment(supabaseAdmin, conv.customer_id);
+        if (mp && mp.hasSubscription && mp.monthlyAmount > 0) {
+          minTermijnBedrag = Number(mp.monthlyAmount);
+        }
+      } catch (e) {
+        // Helper bestaat nog niet vóór #788 merge — fallback naar config.
+        console.warn('[joost-send-autonomous] monthly-payment helper unavailable:', e?.message);
+      }
+    }
+    if (minTermijnBedrag == null) {
+      const cfgVal = Number(cfg?.autonomy_config?.arrangement_mandate?.min_termijn_bedrag_eur);
+      if (Number.isFinite(cfgVal) && cfgVal > 0) minTermijnBedrag = cfgVal;
+    }
+
     // ========================================================================
     // STAP 4: evaluateAutonomy
     // ========================================================================
@@ -275,7 +303,10 @@ export default async function handler(req, res) {
       suggestion:       sugg,
       conv_state:       convStateRaw || null,
       joost_config:     cfg,
-      customer_context: { open_amount: openAmount },
+      customer_context: {
+        open_amount:            openAmount,
+        min_termijn_bedrag_eur: minTermijnBedrag, // #789 — null als niet beschikbaar
+      },
       now:              new Date(),
     });
 
