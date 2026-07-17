@@ -275,10 +275,17 @@ export default async function handler(req, res) {
 
     // #789 — dynamische ondergrens per termijn opzoeken zodat
     // evaluateAutonomy 'em kan checken tegen proposal_termijn_bedrag_eur.
-    // Volgorde: (1) #788 helper (per-klant maandbedrag), fail-soft; (2)
-    // mandate.min_termijn_bedrag_eur uit joost_config. Als geen van beide:
-    // null → check wordt overgeslagen (bewust; geen valse positive).
+    // Volgorde: (1) #788 helper (per-klant maandbedrag); (2)
+    // mandate.min_termijn_bedrag_eur uit joost_config.
+    //
+    // Fail-CLOSED (#790-fix, deze PR): een helper-crash mag NIET stilzwijgend
+    // leiden tot minTermijnBedrag=null, want dat betekent voor
+    // evaluateAutonomy: check overgeslagen -> Joost mag een willekeurig laag
+    // termijn-bedrag beloven. In arrangement-intent + autonomous-mode wordt
+    // dat verderop hard geblokkeerd (STAP 4b), maar we willen de lookup-fout
+    // óók zichtbaar zijn in de logs (stack, niet alleen message).
     let minTermijnBedrag = null;
+    let minTermijnLookupFailed = false;
     if (conv.customer_id) {
       try {
         const { getCustomerMonthlyPayment } = await import('./_lib/customer-monthly-payment.js');
@@ -287,8 +294,12 @@ export default async function handler(req, res) {
           minTermijnBedrag = Number(mp.monthlyAmount);
         }
       } catch (e) {
-        // Helper bestaat nog niet vóór #788 merge — fallback naar config.
-        console.warn('[joost-send-autonomous] monthly-payment helper unavailable:', e?.message);
+        minTermijnLookupFailed = true;
+        console.error(
+          '[joost-send-autonomous] monthly-payment helper crashed:',
+          e && (e.stack || e.message || String(e)),
+          { conv_id: convId, suggestion_id: suggestionId, customer_id: conv.customer_id },
+        );
       }
     }
     if (minTermijnBedrag == null) {
@@ -309,6 +320,58 @@ export default async function handler(req, res) {
       },
       now:              new Date(),
     });
+
+    // ========================================================================
+    // STAP 4b (#790-fix) — FAIL-CLOSED: geen ondergrens voor arrangement-send
+    // ========================================================================
+    // Als evaluateAutonomy een arrangement-intent AUTONOOM zou laten passeren
+    // terwijl wij geen ondergrens per termijn konden vaststellen (noch dynamisch
+    // per-klant via het abo, noch statisch uit joost_config), dan MAG Joost
+    // GEEN concreet bedrag toezeggen. De ondergrens-check binnen evaluate wordt
+    // stilzwijgend overgeslagen bij effectiveMinPerTermijn===0 (regel 483
+    // joost-autonomy-evaluate.js) → gat waardoor een fantasie-bedrag richting
+    // de klant kan.
+    //
+    // Beleid Jeffrey (#790): een onterechte belofte kost geld én
+    // geloofwaardigheid. Alleen actief voor arrangement-intents in
+    // autonomous-mode (draft leest Jeffrey sowieso mee → allow_autonomous
+    // is dan al false). Escalatie: task_create MANUAL_PROPOSE_ARRANGEMENT
+    // met eigen reden 'GEEN_ONDERGRENS_BEKEND' (spiegelt de
+    // NO_STRUCTURED_PROPOSAL-fail-safe uit #789).
+    //
+    // Non-arrangement-intents (payment_promise / verify_payment /
+    // general_question / escalation_needed / other): passeren ongestoord —
+    // Joost zegt daar niets toe over geld.
+    const ARRANGEMENT_DETECTED_INTENTS = new Set(['arrangement_request']);
+    const isArrangementSend =
+      decision.allow_autonomous
+      && ARRANGEMENT_DETECTED_INTENTS.has(String(decision.intent || ''));
+    if (isArrangementSend && minTermijnBedrag == null) {
+      console.error(
+        '[joost-send-autonomous] FAIL-CLOSED: geen ondergrens per termijn beschikbaar ' +
+        '(dynamisch én config-fallback ontbreken) voor arrangement-intent in autonomous-mode. ' +
+        'Escaleer naar mens (task_create MANUAL_PROPOSE_ARRANGEMENT / GEEN_ONDERGRENS_BEKEND).',
+        {
+          conv_id:               convId,
+          suggestion_id:         suggestionId,
+          customer_id:           conv.customer_id,
+          intent:                decision.intent,
+          min_termijn_lookup_failed: minTermijnLookupFailed,
+          proposal_termijn_bedrag_eur: sugg.proposal_termijn_bedrag_eur,
+        },
+      );
+      decision.allow_autonomous = false;
+      decision.stop_action      = 'task_create';
+      decision.stop_task_type   = 'MANUAL_PROPOSE_ARRANGEMENT';
+      decision.blocked_reason   = 'GEEN_ONDERGRENS_BEKEND';
+      decision.decision_log     = [
+        ...(Array.isArray(decision.decision_log) ? decision.decision_log : []),
+        'FAIL-CLOSED (send-autonomous): min_termijn_bedrag_eur onbekend — ' +
+        'geen dyn per-klant grens EN geen config-fallback -> task_create ' +
+        'MANUAL_PROPOSE_ARRANGEMENT (GEEN_ONDERGRENS_BEKEND).'
+        + (minTermijnLookupFailed ? ' (helper-lookup crashte)' : ''),
+      ];
+    }
 
     // Sandbox test-override: bij is_test-conversatie + test_bypass geven we
     // Joost's antwoord ALTIJD door de send-flow, ook als de beslis-engine
