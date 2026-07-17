@@ -20595,6 +20595,15 @@
             <input id="sbxSeedAmount" class="fin-input" type="number" min="1" max="10000" value="250" placeholder="€ per factuur">
             <input id="sbxSeedDays"  class="fin-input" type="number" min="1" max="365" value="30" placeholder="Dagen te laat">
           </div>
+          <!-- #806 — optioneel maandbedrag abonnement voor #788-ondergrens.
+               Leeg = geen abo (escalatie-pad blijft testbaar). Vrij veld met
+               2 suggesties: 80 (membership) en 300 (1-op-1). Incl. BTW. -->
+          <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+            <input id="sbxSeedMonthly" class="fin-input" type="number" min="0" max="10000" step="1" placeholder="Maandbedrag abo (leeg = geen abo)" style="flex:1">
+            <button type="button" class="sr-abtn" data-sbx-monthly="80"  style="padding:4px 10px;font-size:11.5px">€80</button>
+            <button type="button" class="sr-abtn" data-sbx-monthly="300" style="padding:4px 10px;font-size:11.5px">€300</button>
+          </div>
+          <div style="margin-top:4px;font-size:11px;color:var(--text-faint)">Optioneel. Vult subscriptions + deals zodat de #788-ondergrens per termijn werkt. Leeg = escalatie-pad ("geen abo bekend").</div>
           <button id="sbxSeedBtn" class="sr-abtn primary" type="button" style="margin-top:10px"><i class="ti ti-user-plus"></i> Seed / refresh test-persoon</button>
         </div>
 
@@ -20694,7 +20703,21 @@
       }
     });
 
+    // #806 — suggestie-knoppen voor maandbedrag abo (80 / 300).
+    document.querySelectorAll('[data-sbx-monthly]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const inp = document.getElementById('sbxSeedMonthly');
+        if (inp) inp.value = btn.getAttribute('data-sbx-monthly') || '';
+      });
+    });
+
     document.getElementById('sbxSeedBtn')?.addEventListener('click', async () => {
+      // #806 — maandbedrag abo optioneel. NaN of 0 = null-through (endpoint
+      // maakt dan geen deal/sub aan, escalatie-pad blijft testbaar).
+      const monthlyRaw = document.getElementById('sbxSeedMonthly')?.value;
+      const monthlyNum = monthlyRaw ? Number(monthlyRaw) : 0;
+      const monthlyAmount = (Number.isFinite(monthlyNum) && monthlyNum > 0) ? monthlyNum : null;
+
       const body = {
         name : document.getElementById('sbxSeedName')?.value.trim(),
         phone: document.getElementById('sbxSeedPhone')?.value.trim(),
@@ -20702,6 +20725,7 @@
         invoice_count         : Number(document.getElementById('sbxSeedCount')?.value)  || 2,
         amount_per_invoice_eur: Number(document.getElementById('sbxSeedAmount')?.value) || 250,
         days_overdue          : Number(document.getElementById('sbxSeedDays')?.value)   || 30,
+        monthly_amount_eur    : monthlyAmount,
       };
       try {
         await _sbxCall('/api/wanbetalers-sandbox-seed', body);
