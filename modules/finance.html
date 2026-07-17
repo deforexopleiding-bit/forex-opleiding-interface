@@ -16499,17 +16499,10 @@
     loading:     false,
     lastJoost:   null,
   };
-  // Mapping van suggestion.detected_intent -> autonomy_config.intents.key.
-  // Spiegel van api/joost-autonomy-evaluate.js r111-118. Zonder deze mapping
-  // kunnen we mode-per-intent niet uit joost_config lezen.
-  const JOOST_OG_INTENT_KEY = {
-    payment_promise:     'ja_op_uitstel',
-    verify_payment:      'al_betaald_claim',
-    arrangement_request: 'tegenvoorstel_termijn',
-    general_question:    'vraag_om_kopie_factuur',
-    escalation_needed:   'boos_of_klacht',
-    other:               null,
-  };
+  // Sinds intent-namen-consolidatie (2026-07-17): intent-keys in
+  // autonomy_config.intents komen 1-op-1 uit DETECTED_INTENTS van het LLM.
+  // Geen mapping meer nodig — lees `intents[detected_intent]` direct.
+  // Alleen labels blijven voor UI-weergave.
   const JOOST_OG_INTENT_LABEL = {
     payment_promise:     'betaal-belofte',
     verify_payment:      'al betaald',
@@ -16610,9 +16603,10 @@
       const intents = (auto.intents && typeof auto.intents === 'object') ? auto.intents : {};
       const globalAuto = (flags.e2_auto_send_text === true) ? 'autonomous' : 'draft';
       const modes = {};
-      for (const [intentKey, cfgKey] of Object.entries(JOOST_OG_INTENT_KEY)) {
-        if (!cfgKey) { modes[intentKey] = 'n.v.t.'; continue; }
-        const iCfg = intents[cfgKey] || null;
+      // Sinds intent-namen-consolidatie: config-keys = LLM-keys (identity).
+      // De labels-tabel definieert nog steeds welke intents we in de UI tonen.
+      for (const intentKey of Object.keys(JOOST_OG_INTENT_LABEL)) {
+        const iCfg = intents[intentKey] || null;
         if (!iCfg) { modes[intentKey] = globalAuto; continue; }
         if (iCfg.enabled === false) { modes[intentKey] = 'disabled'; continue; }
         if (typeof iCfg.mode === 'string' && ['draft','autonomous','disabled'].includes(iCfg.mode)) {

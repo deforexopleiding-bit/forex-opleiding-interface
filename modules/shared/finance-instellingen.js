@@ -78,13 +78,18 @@
     decisionsTimer: null,
   };
 
+  // KEY-CONTRACT: intent-keys komen 1-op-1 uit joost-suggest-core.js
+  // DETECTED_INTENTS (het tool-schema van het LLM). Zowel de evaluator
+  // (api/joost-autonomy-evaluate.js) als de config-blob (autonomy_config.
+  // intents.<key>) gebruiken exact deze set. Nederlandse LABELS voor Jeffrey,
+  // Engelse KEYS onder de motorkap.
   const JOOST_INTENTS = [
-    { key: 'payment_promise',     label: 'payment_promise',     hasMaxMsg: true  },
-    { key: 'arrangement_request', label: 'arrangement_request', hasMaxMsg: true  },
-    { key: 'dispute',             label: 'dispute',             hasMaxMsg: false },
-    { key: 'question',            label: 'question',            hasMaxMsg: true  },
-    { key: 'unsubscribe',         label: 'unsubscribe',         hasMaxMsg: false },
-    { key: 'other',               label: 'other',               hasMaxMsg: true  },
+    { key: 'payment_promise',     label: 'Betaal-belofte',         hasMaxMsg: true  },
+    { key: 'verify_payment',      label: 'Al betaald / verificatie', hasMaxMsg: true },
+    { key: 'arrangement_request', label: 'Regeling / uitstel',     hasMaxMsg: true  },
+    { key: 'general_question',    label: 'Vraag',                  hasMaxMsg: true  },
+    { key: 'escalation_needed',   label: 'Escalatie',              hasMaxMsg: false },
+    { key: 'other',               label: 'Anders',                 hasMaxMsg: true  },
   ];
 
   // ── Public API: mount() ────────────────────────────────────────────────────
