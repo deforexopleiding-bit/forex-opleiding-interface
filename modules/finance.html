@@ -623,6 +623,21 @@
       text-decoration:underline dotted; cursor:help; font-size:10.5px; font-family:inherit;
     }
 
+    /* Prod-rij: apart en prominent zodat je in het oefengesprek altijd ziet
+       wat productie zou doen met dit antwoord (sandbox omzeilt blokkades). */
+    .joost-og-prod-row {
+      align-self:flex-start; max-width:70%;
+      margin:0 0 12px 6px; padding:5px 8px;
+      display:inline-flex; align-items:center; gap:6px;
+      font-size:11.5px; font-weight:500; border-radius:6px; border:1px solid;
+    }
+    .joost-og-prod-row.prod-ok    { background:#ecfdf5; color:#065f46; border-color:#a7f3d0; }
+    .joost-og-prod-row.prod-block { background:#fff7ed; color:#7c2d12; border-color:#fed7aa; }
+    .joost-og-prod-dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+    .joost-og-prod-row.prod-ok    .joost-og-prod-dot { background:#059669; }
+    .joost-og-prod-row.prod-block .joost-og-prod-dot { background:#c2410c; }
+    .joost-og-prod-row.prod-block strong { font-weight:700; }
+
     /* Compose */
     .joost-og-compose { position:static; background:transparent; border-top:0; padding:0; box-shadow:none; }
     .joost-og-compose .inbox-c-compose-textarea { background:#fff; }
@@ -16511,6 +16526,30 @@
     escalation_needed:   'escalatie',
     other:               'anders',
   };
+  // NL-vertaling van decision.blocked_reason / DB-status naar mensentaal
+  // voor de "In productie: gezwegen — <reden>"-badge in het oefengesprek.
+  // Values komen uit joost-autonomy-evaluate.js + mapDecisionToDbStatus in
+  // joost-send-autonomous.js.
+  const JOOST_OG_BLOCK_REASON_NL = {
+    BLOCKED_LOW_CONFIDENCE:      'te onzeker over antwoord',
+    BLOCKED_OFFICE_HOURS:        'buiten kantooruren',
+    BLOCKED_RATE_LIMIT:          'te veel berichten in dit gesprek',
+    BLOCKED_COMMUNICATION_LIMIT: 'te veel berichten in dit gesprek',
+    BLOCKED_PAUSED:              'autonomie gepauzeerd',
+    BLOCKED_AUTONOMY_PAUSED:     'autonomie gepauzeerd',
+    BLOCKED_OUT_OF_MANDATE:      'buiten mandaat',
+    BLOCKED_MANDATE_EXCEEDED:    'buiten mandaat',
+    BLOCKED_INTENT_DISABLED:     'dit onderwerp staat uit',
+    NO_STRUCTURED_PROPOSAL:      'geen concreet voorstel — mens moet meekijken',
+    GEEN_ONDERGRENS_BEKEND:      'geen ondergrens per termijn bekend',
+    MODE_DRAFT:                  'staat op concept (niet-autonoom)',
+    INTENT_DISABLED:             'dit onderwerp staat uit',
+    MANDATE_EXCEEDED:            'buiten mandaat',
+  };
+  function _joostOgBlockReasonNl(code) {
+    if (!code) return null;
+    return JOOST_OG_BLOCK_REASON_NL[String(code)] || String(code);
+  }
 
   function _joostOgFocusInputSafely() {
     const inp = document.getElementById('joostOgInput');
@@ -16696,7 +16735,13 @@
       // gescoped op #joostOgThread override — zie style-blok r462+.
       const rows = items.map((m, idx) => {
         const dir  = String(m.direction || '').toLowerCase();
-        const isKlant = (dir === 'in' || dir === 'inbound');   // Jeffrey
+        // Bewuste whitelist: alleen expliciet 'out'/'outbound' rendert links
+        // (Joost-kant). Alle andere waardes — incl. lege/null/onbekend —
+        // behandelen we defensief als klant-bericht, zodat een via curl
+        // toegevoegd bericht zonder direction niet per ongeluk aan Joost's
+        // kant belandt.
+        const isJoost = (dir === 'out' || dir === 'outbound');
+        const isKlant = !isJoost;
         const outClass = isKlant ? 'outbound' : 'inbound';
         const body = (m.body || (m.template_name ? `[template] ${m.template_name}` : '')).trim();
         const time = _joostOgFmtTime(m.sent_at || m.created_at);
@@ -16755,7 +16800,24 @@
     const reasoning = j.reasoning
       ? `<button type="button" class="joost-og-meta-why" title="${esc(j.reasoning)}">waarom?</button>`
       : '';
-    return `<div class="joost-og-meta-row">${bits.join('<span class="joost-og-meta-sep">·</span>')}${reasoning}</div>`;
+    // Productie-rij: expliciet zichtbaar maken wat prod GEDAAN zou hebben.
+    // Sandbox omzeilt de blokkades zodat je Joost's toon kunt leren kennen,
+    // maar zonder deze rij lijkt elk antwoord "goed" in productie — en dat
+    // is misleidend voor bv. escalaties (disabled) of low-confidence.
+    let prodRow = '';
+    if (j.prod_would_send === true) {
+      prodRow = `<div class="joost-og-prod-row prod-ok">
+        <span class="joost-og-prod-dot"></span>
+        <span class="joost-og-prod-text">In productie: dit bericht was verstuurd</span>
+      </div>`;
+    } else if (j.prod_would_send === false) {
+      const reasonNl = _joostOgBlockReasonNl(j.prod_block_reason || j.blocked_reason) || 'onbekende reden';
+      prodRow = `<div class="joost-og-prod-row prod-block">
+        <span class="joost-og-prod-dot"></span>
+        <span class="joost-og-prod-text">In productie: Joost had gezwegen — <strong>${esc(reasonNl)}</strong></span>
+      </div>`;
+    }
+    return `<div class="joost-og-meta-row">${bits.join('<span class="joost-og-meta-sep">·</span>')}${reasoning}</div>${prodRow}`;
   }
 
   async function _joostOgSend() {
@@ -16786,9 +16848,21 @@
       _joostOg.lastJoost = d?.joost || null;
       await _joostOgReloadMessages();
       if (status) {
-        if (d?.joost?.blocked_reason) status.textContent = 'Joost geblokkeerd: ' + d.joost.blocked_reason;
-        else if (d?.joost?.autonomy_sent) status.textContent = 'Joost heeft autonoom geantwoord (dry-run).';
-        else status.textContent = 'Joost heeft geantwoord.';
+        // Statusregel gaat over de PRODUCTIE-uitkomst — dat is wat Jeffrey
+        // wil weten. In het sandbox-oefengesprek zie je Joost's antwoord
+        // altijd (zodat je de toon kunt beoordelen); of prod 'em ook echt
+        // had gestuurd is een aparte vraag.
+        const jo = d?.joost || {};
+        if (!jo.ran) {
+          status.textContent = 'Joost heeft niet gereageerd — ' + (jo.note || 'onbekende reden');
+        } else if (jo.prod_would_send === true) {
+          status.textContent = 'Joost antwoordt — in productie was dit verstuurd.';
+        } else if (jo.prod_would_send === false) {
+          const reasonNl = _joostOgBlockReasonNl(jo.prod_block_reason || jo.blocked_reason) || 'onbekende reden';
+          status.textContent = 'Joost antwoordt in oefengesprek — in productie had Joost gezwegen (' + reasonNl + ').';
+        } else {
+          status.textContent = 'Joost heeft geantwoord.';
+        }
       }
     } catch (e) {
       if (status) status.textContent = 'Fout: ' + (e?.message || 'onbekend');
