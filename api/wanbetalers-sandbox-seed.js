@@ -31,6 +31,12 @@ export default async function handler(req, res) {
   const invoiceCount   = Math.max(1, Math.min(10, Number(body.invoice_count) || 2));
   const amountEur      = Math.max(1, Math.min(10_000, Number(body.amount_per_invoice_eur) || 250));
   const daysOverdue    = Math.max(1, Math.min(365, Number(body.days_overdue) || 30));
+  // #806 — optioneel maandbedrag abo INCL BTW. null/0/negatief → geen abo
+  // aanmaken. De #788-ondergrens-check ziet dan hasSubscription=false en
+  // Joost escaleert bij regeling-vragen. Dat is een geldig test-pad.
+  const monthlyRaw = Number(body.monthly_amount_eur);
+  const monthlyAmountEur = (Number.isFinite(monthlyRaw) && monthlyRaw > 0)
+    ? Math.min(10_000, monthlyRaw) : null;
 
   if (!rawName || !phone || !email) {
     return res.status(400).json({ error: 'name, phone en email zijn verplicht' });
@@ -184,6 +190,95 @@ export default async function handler(req, res) {
       console.warn('[sandbox-seed] test-sub soft-fail:', e?.message || e);
     }
 
+    // 7) #806 — Regeling-abo (voor #788 ondergrens-check).
+    //
+    // getCustomerMonthlyPayment (api/_lib/customer-monthly-payment.js) verwacht:
+    //   * deal.customer_id = customer.id
+    //   * subscription.deal_id = deal.id
+    //   * subscription.status = 'active' (Engels, niet 'actief')
+    //   * subscription.billing_cycle = 'per_month' | 'per_year' | ...
+    //   * subscription.amount + vat_percentage → monthly = incl / cycleMonths
+    //
+    // Als monthlyAmountEur = null → verwijder eventueel bestaand regel-abo
+    // (opdat het escalatie-pad testbaar blijft). Anders idempotent
+    // upsert op description='TEST-regeling-abo'.
+    //
+    // Fail-soft: fout hier verstoort niet de klant/facturen-seed.
+    let regelingSubscription = null;
+    let regelingDeal = null;
+    try {
+      // Bestaande regeling-abo + deal opsporen (op description-marker).
+      const { data: existingRegSub } = await supabaseAdmin
+        .from('subscriptions')
+        .select('id, deal_id')
+        .eq('description', 'TEST-regeling-abo')
+        .maybeSingle();
+
+      if (monthlyAmountEur == null) {
+        // Geen abo gewenst — wis bestaande regeling-abo + deal (indien any).
+        if (existingRegSub?.id) {
+          await supabaseAdmin.from('subscriptions').delete().eq('id', existingRegSub.id);
+        }
+        if (existingRegSub?.deal_id) {
+          await supabaseAdmin.from('deals').delete().eq('id', existingRegSub.deal_id);
+        }
+      } else {
+        // Wél abo gewenst. Deal opzoeken/aanmaken, dan sub.
+        let dealId = existingRegSub?.deal_id || null;
+        if (!dealId) {
+          const { data: newDeal, error: dErr } = await supabaseAdmin
+            .from('deals')
+            .insert({
+              customer_id: customer.id,
+              source:      'sandbox_seed',
+            })
+            .select('id, customer_id')
+            .single();
+          if (dErr) throw new Error('deal insert: ' + dErr.message);
+          dealId = newDeal.id;
+          regelingDeal = newDeal;
+        } else {
+          const { data: dGet } = await supabaseAdmin
+            .from('deals').select('id, customer_id').eq('id', dealId).maybeSingle();
+          regelingDeal = dGet;
+        }
+
+        // Sub-payload. Amount = value / 1.21 zodat incl. BTW = value.
+        // Rond naar 2 decimalen; kleine round-trip-drift is voor sandbox oké.
+        const VAT = 21;
+        const amountExVat = Math.round((monthlyAmountEur / (1 + VAT / 100)) * 100) / 100;
+        const iso = (d) => d.toISOString().slice(0, 10);
+        const today = new Date();
+        const startD = new Date(today); startD.setMonth(startD.getMonth() - 3);
+        const subPayload = {
+          deal_id:        dealId,
+          description:    'TEST-regeling-abo',
+          amount:         amountExVat,
+          vat_percentage: VAT,
+          billing_cycle:  'per_month',
+          status:         'active',
+          start_date:     iso(startD),
+        };
+        if (existingRegSub?.id) {
+          const { data: upd, error: upErr } = await supabaseAdmin
+            .from('subscriptions').update(subPayload).eq('id', existingRegSub.id)
+            .select('id, deal_id, amount, vat_percentage, billing_cycle, status, description')
+            .single();
+          if (upErr) throw new Error('regeling-sub update: ' + upErr.message);
+          regelingSubscription = upd;
+        } else {
+          const { data: ins, error: iErr } = await supabaseAdmin
+            .from('subscriptions').insert(subPayload)
+            .select('id, deal_id, amount, vat_percentage, billing_cycle, status, description')
+            .single();
+          if (iErr) throw new Error('regeling-sub insert: ' + iErr.message);
+          regelingSubscription = ins;
+        }
+      }
+    } catch (e) {
+      console.warn('[sandbox-seed] regeling-abo soft-fail:', e?.message || e);
+    }
+
     return res.status(200).json({
       ok       : true,
       customer,
@@ -191,6 +286,9 @@ export default async function handler(req, res) {
       contact,
       pipeline_stage: 'nieuw',
       subscription,
+      regeling_deal:         regelingDeal,
+      regeling_subscription: regelingSubscription,
+      monthly_amount_eur:    monthlyAmountEur,
     });
   } catch (e) {
     console.error('[sandbox-seed]', e?.message || e);

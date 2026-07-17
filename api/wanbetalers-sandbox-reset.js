@@ -34,6 +34,7 @@ export default async function handler(req, res) {
     bulk_jobs             : 0,
     credited_debt_rows    : 0,
     subscriptions_deleted : 0,
+    deals_deleted         : 0,
   };
 
   try {
@@ -97,14 +98,31 @@ export default async function handler(req, res) {
         summary.credited_debt_rows = cdCount || 0;
       } catch (e) { console.warn('[sandbox-reset] dunning_credited_debt soft-fail:', e?.message || e); }
 
-      // 5c) Test-subscriptions — geïdentificeerd op customer_id (test-persoon).
-      //     Deals van test-klanten hebben we sowieso niet, dus alle subs op
-      //     die customer_id zijn per definitie sandbox-artefacten.
+      // 5c) Test-subscriptions.
+      //     Twee bronnen:
+      //     - LEGACY test-sub op customer_id (credit-round-sandbox).
+      //     - #806 regeling-abo op deal_id (via deals van test-klanten).
+      //     Beide wissen. Idem deals (nieuw sinds #806).
       try {
-        const { count: sCount } = await supabaseAdmin.from('subscriptions')
+        // Sub-set A: op customer_id (legacy test-sub, PR-4 credit-round).
+        const { count: sCountA } = await supabaseAdmin.from('subscriptions')
           .delete({ count: 'exact' }).in('customer_id', custIds);
-        summary.subscriptions_deleted = sCount || 0;
-      } catch (e) { console.warn('[sandbox-reset] subscriptions soft-fail:', e?.message || e); }
+
+        // Deals van test-klanten (#806). Eerst subs op die deal_ids wissen
+        // omdat er anders FK-conflicten kunnen optreden.
+        const { data: testDeals } = await supabaseAdmin
+          .from('deals').select('id').in('customer_id', custIds);
+        const dealIds = (testDeals || []).map((d) => d.id);
+        let sCountB = 0;
+        if (dealIds.length > 0) {
+          const { count } = await supabaseAdmin.from('subscriptions')
+            .delete({ count: 'exact' }).in('deal_id', dealIds);
+          sCountB = count || 0;
+          await supabaseAdmin.from('deals').delete().in('id', dealIds);
+        }
+        summary.subscriptions_deleted = (sCountA || 0) + sCountB;
+        summary.deals_deleted = dealIds.length;
+      } catch (e) { console.warn('[sandbox-reset] subscriptions/deals soft-fail:', e?.message || e); }
     }
 
     // 6) Invoices + customers (in die volgorde vanwege FK).
