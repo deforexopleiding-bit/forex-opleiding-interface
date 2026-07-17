@@ -254,26 +254,43 @@ export default async function handler(req, res) {
               joost.sent_message_id = j2.message_id || null;
               // Mode en blocked_reason uit de decision-block naar de UI
               // (oefengesprek #783).
+              let rateLimitReason = null;
               if (j2.decision && typeof j2.decision === 'object') {
                 joost.mode = j2.decision.mode || null;
                 if (j2.decision.blocked_reason) joost.blocked_reason = j2.decision.blocked_reason;
+                // #800 — evaluateAutonomy zet decision.rate_limit_reason
+                // op 'day' | 'total' | 'cooldown' bij BLOCKED_RATE_LIMIT.
+                // Zonder dit subtype vertaalt de UI alle drie de gevallen
+                // als "te veel berichten" — misleidend bij cooldown/day.
+                if (j2.decision.rate_limit_reason) rateLimitReason = j2.decision.rate_limit_reason;
               }
+              // Helper: verfijn een BLOCKED_RATE_LIMIT naar een subtype-
+              // specifieke code zodat de UI-tabel per subtype vertaalt.
+              const _refineRateLimit = (base) => {
+                if (base === 'BLOCKED_RATE_LIMIT' && rateLimitReason) {
+                  if (rateLimitReason === 'cooldown') return 'BLOCKED_RATE_LIMIT_COOLDOWN';
+                  if (rateLimitReason === 'day')      return 'BLOCKED_RATE_LIMIT_DAY';
+                  if (rateLimitReason === 'total')    return 'BLOCKED_RATE_LIMIT_TOTAL';
+                }
+                return base;
+              };
+
               // Productie-uitkomst afleiden. Sandbox laat de send bewust
               // door (test-override) → j2.sent kan true zijn terwijl prod
               // 'em zou blokkeren. j2.prod_block_reason bevat dan de echte
               // reden.
               if (j2.sent === true && j2.prod_block_reason) {
                 joost.prod_would_send = false;
-                joost.prod_block_reason = j2.prod_block_reason;
-                if (!joost.blocked_reason) joost.blocked_reason = j2.prod_block_reason;
-                joost.note = 'prod zou blokkeren: ' + j2.prod_block_reason;
+                joost.prod_block_reason = _refineRateLimit(j2.prod_block_reason);
+                if (!joost.blocked_reason) joost.blocked_reason = joost.prod_block_reason;
+                joost.note = 'prod zou blokkeren: ' + joost.prod_block_reason;
               } else if (j2.sent === true) {
                 joost.prod_would_send = true;
                 joost.prod_block_reason = null;
               } else {
                 // sent=false: prod blokkeerde ook echt (geen sandbox-override).
                 joost.prod_would_send = false;
-                joost.prod_block_reason = j2.blocked_reason || j2.db_status || 'onbekend';
+                joost.prod_block_reason = _refineRateLimit(j2.blocked_reason || j2.db_status || 'onbekend');
                 if (!joost.blocked_reason) joost.blocked_reason = joost.prod_block_reason;
                 joost.note = 'geblokkeerd: ' + joost.blocked_reason;
               }

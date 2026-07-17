@@ -16552,8 +16552,16 @@
   const JOOST_OG_BLOCK_REASON_NL = {
     BLOCKED_LOW_CONFIDENCE:      'te onzeker over antwoord',
     BLOCKED_OFFICE_HOURS:        'buiten kantooruren',
-    BLOCKED_RATE_LIMIT:          'te veel berichten in dit gesprek',
-    BLOCKED_COMMUNICATION_LIMIT: 'te veel berichten in dit gesprek',
+    // #800 — subtype-specifieke rate-limit-teksten. De sandbox verfijnt
+    // BLOCKED_RATE_LIMIT tot deze codes op basis van
+    // decision.rate_limit_reason ('cooldown' | 'day' | 'total').
+    BLOCKED_RATE_LIMIT_COOLDOWN: 'Joost wacht 30 sec tussen berichten',
+    BLOCKED_RATE_LIMIT_DAY:      'dagcap bereikt (10 per dag)',
+    BLOCKED_RATE_LIMIT_TOTAL:    'te veel berichten in dit gesprek (10) — er staat een taak voor je klaar',
+    // Fallback voor het geval het subtype ontbreekt (oude sandbox-response,
+    // andere caller). Neutraal generiek — beter dan misleidend cooldown.
+    BLOCKED_RATE_LIMIT:          'rate-limit bereikt',
+    BLOCKED_COMMUNICATION_LIMIT: 'rate-limit bereikt',
     BLOCKED_PAUSED:              'autonomie gepauzeerd',
     BLOCKED_AUTONOMY_PAUSED:     'autonomie gepauzeerd',
     BLOCKED_OUT_OF_MANDATE:      'buiten mandaat',
