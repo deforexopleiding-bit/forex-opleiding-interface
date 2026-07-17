@@ -43,22 +43,43 @@ import { deleteZoomMeeting } from './_lib/zoom-meeting.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// NB: outcome-namensets divergeren bewust tussen twee endpoints:
+//   * follow-up-appointment-outcome.js (cockpit-flow, deze file):
+//     'gesprek_gehad' / 'sale' / 'wilt_niet_meer' (mét t) / 'niet_geschikt' / ...
+//   * follow-up-outcomes.js (klassieke Leads-tab, GET+POST met eigen VALID_OUTCOMES):
+//     'klant_geworden' / 'wil_niet_meer' (zónder t) / 'geen_interesse' / ...
+// Beide paden zijn onafhankelijk actief. NIET consolideren zonder aparte
+// refactor-PR — het risico op silent-drift raakt live-CRM-data. Zie AUDIT
+// lesson 20 mei 2026 ("no_show wordt onverwacht gezet") — daar veroorzaakte
+// een soortgelijke drift al eerder productie-fouten.
 const OUTCOMES = new Set([
   'gesprek_gehad', 'sale', 'wilt_niet_meer', 'niet_geschikt', 'no_show',
   'later_opnieuw', 'terugbel', 'verzetten', 'annuleren',
 ]);
 
 // Mapping van interne outcome → GHL appointmentStatus.
-//   'gesprek_gehad'/'sale'/'wilt_niet_meer' → 'cancelled' (haalt de
-//   afspraak UIT Dave's agenda; call heeft plaatsgevonden of is niet
-//   meer relevant). 'later_opnieuw'/'terugbel' → 'showed' (de call
-//   vond wel plaats — attendance-tag). 'no_show' → 'noshow'.
-//   'annuleren'/'verzetten' zijn delegatie (eigen endpoint).
+//
+// Grondregel (Jeffrey, 17 juli 2026): de GHL-status beantwoordt de vraag
+// "vond de afspraak plaats?", NIET "wat was het resultaat?". Het resultaat
+// hoort in tags/notes te zitten (tagsFromOutcome, snelle_notitie). Alle
+// outcomes waarbij de call daadwerkelijk plaatsvond → 'showed'. Alleen
+// 'no_show' (klant kwam niet opdagen) en 'annuleren' (afspraak ging niet
+// door) verdienen 'noshow' resp. 'cancelled'.
+//
+// Historisch (tot commit vóór deze fix): gesprek_gehad/sale/wilt_niet_meer/
+// niet_geschikt stonden allemaal op 'cancelled' vanuit een agenda-cleanup-
+// motief ("haalt uit Dave's agenda"). Dat veroorzaakte dat sales (bv. Ian
+// Poplemon) en niet-geschikte klanten (bv. Philip Lucie) in GHL als
+// GEANNULEERD in de rapportage terechtkwamen — verkeerd salessignaal. De
+// agenda-cleanup wordt bovendien al gedaan door deleteZoomMeeting op de
+// AGENDA_REMOVING_OUTCOMES-set (zie hieronder), dus 'showed' laat de call
+// wel op de kalender staan als attendance-record maar zonder dat Dave er
+// dubbel op geboekt lijkt (Zoom-meeting is weg).
 const GHL_STATUS_FOR_OUTCOME = {
-  gesprek_gehad : 'cancelled',
-  sale          : 'cancelled',
-  wilt_niet_meer: 'cancelled',
-  niet_geschikt : 'cancelled',
+  gesprek_gehad : 'showed',
+  sale          : 'showed',
+  wilt_niet_meer: 'showed',
+  niet_geschikt : 'showed',
   later_opnieuw : 'showed',
   terugbel      : 'showed',
   no_show       : 'noshow',
