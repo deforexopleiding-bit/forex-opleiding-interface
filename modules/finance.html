@@ -5616,7 +5616,7 @@
   const _acWbxState = {
     tab      : 'open',   // 'open' | 'done' | 'rej'
     filter   : 'all',    // 'all' | 'verify' | 'plan' | 'esc'
-    kind     : 'all',    // 'all' | 'call' | 'letter' | 'joost' | 'other' — filter op payload.kind
+    kind     : 'all',    // 'all' | 'call' | 'letter' | 'joost' | 'promise' | 'other' — filter op payload.kind (#801)
     loading  : false,
     error    : null,
     items    : [],
@@ -5652,12 +5652,14 @@
         <button class="wbx-chip"        type="button" data-acfilt="plan">Regelingen</button>
         <button class="wbx-chip"        type="button" data-acfilt="esc">Escalaties</button>
       </div>
-      <!-- Kind-filter: soort taak binnen MANUAL_FOLLOWUP (bel / brief / joost / overig). -->
+      <!-- Kind-filter: soort taak binnen MANUAL_FOLLOWUP + MANUAL_CONFIRM_PROMISE.
+           #801 voegt 'promise' toe voor betaal-toezeggingen die Joost signaleert. -->
       <div class="wbx-chips" id="acWbxKindChips" style="margin-top:6px">
         <button class="wbx-chip active" type="button" data-ackind="all">Alle soorten</button>
         <button class="wbx-chip"        type="button" data-ackind="call">Bellen</button>
         <button class="wbx-chip"        type="button" data-ackind="letter">Brieven</button>
         <button class="wbx-chip"        type="button" data-ackind="joost">Joost</button>
+        <button class="wbx-chip"        type="button" data-ackind="promise">Betaal-toezegging</button>
         <button class="wbx-chip"        type="button" data-ackind="other">Overig</button>
       </div>
       <div class="wbx-alist" id="acWbxList"></div>

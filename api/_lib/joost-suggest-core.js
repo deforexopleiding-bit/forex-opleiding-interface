@@ -121,6 +121,33 @@ const JOOST_TOOL = {
         description:
           'EUR per termijn (concreet bedrag dat je aan de klant belooft). Null bij verhelderende vraag of geen voorstel. Voorbeeld: bij "3 termijnen van EUR 80" → 80.',
       },
+      // #801 — betaal-toezegging velden. Uitsluitend bij intent=payment_promise.
+      // Bij andere intents op null laten.
+      //
+      // KRITIEK — LEES OOK JE SYSTEM-PROMPT:
+      //   * promised_date_raw = het LETTERLIJKE klantwoord ("vrijdag", "eind
+      //     van de maand", "na mijn salaris"). Niet door jou herformuleerd.
+      //     Voor jou is 't context; voor de mens die het straks bevestigt is
+      //     't bewijs waarom je een datum voorstelt.
+      //   * promised_date_hint = YYYY-MM-DD als je 'em ONDUBBELZINNIG kunt
+      //     afleiden. Je krijgt de huidige datum + weekdag in je CONTEXT-
+      //     block. Bv. vandaag = 2026-11-19 (donderdag), klant zegt "vrijdag"
+      //     → hint = 2026-11-20.
+      //   * Bij vaag ("zsm", "na mijn salaris", "volgende week ergens") →
+      //     BEIDE null of alleen raw gevuld, hint = null.
+      //   * ZEG DE AFGELEIDE DATUM NOOIT HARDOP TEGEN DE KLANT — die hint
+      //     is voor de mens die het bevestigt. Als je fout gokt en dat toch
+      //     zegt, heeft de klant een bevestiging met een verkeerde datum.
+      promised_date_raw: {
+        type: ['string', 'null'],
+        description:
+          'LETTERLIJK klantcitaat van date-indicatie ("vrijdag" / "eind van de maand" / "na mijn salaris"). Alleen bij payment_promise. Null bij andere intents of als de klant geen datum-indicatie gaf.',
+      },
+      promised_date_hint: {
+        type: ['string', 'null'],
+        description:
+          'YYYY-MM-DD als je datum ondubbelzinnig kunt afleiden uit klantwoord + huidige datum (staat in context-block). Null bij vaag ("zsm", "na mijn salaris") of geen datum. NOOIT hardop noemen tegen klant — is voor de mens die bevestigt.',
+      },
     },
     required: ['suggested_reply', 'detected_intent', 'confidence', 'reasoning'],
   },
@@ -511,6 +538,31 @@ export async function runJoostSuggest({
   const ctxLines = [];
   ctxLines.push('---');
   ctxLines.push('CONTEXT (server-side opgehaald):');
+  // #801 — huidige datum + weekdag + tijdzone. Nodig om klantwoorden als
+  // "vrijdag" / "eind van de maand" / "volgende week" om te kunnen zetten
+  // naar YYYY-MM-DD in promised_date_hint. LLM's kennen hun training-cutoff
+  // maar niet de dag waarop ze draaien — zonder deze regel gokken ze.
+  // Ook algemeen nuttig: bij "X dagen te laat" berekent onze server-code
+  // days_overdue al, maar Joost's uitspraken over "over 2 weken" ed. hadden
+  // een anker nodig.
+  try {
+    const nowNl = new Date();
+    const fmtDate = new Intl.DateTimeFormat('nl-NL', {
+      timeZone: 'Europe/Amsterdam',
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    }).format(nowNl);
+    const ymd = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Amsterdam',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(nowNl); // en-CA formatter → YYYY-MM-DD
+    ctxLines.push(`Vandaag: ${fmtDate} (${ymd}, Europe/Amsterdam)`);
+  } catch (_) {
+    // Fallback: alleen ISO-datum (zonder weekdag) als Intl faalt.
+    ctxLines.push(`Vandaag: ${new Date().toISOString().slice(0, 10)} (UTC)`);
+  }
   ctxLines.push(`Klant: ${klantNaam}${customerOut?.is_company ? ' (zakelijk)' : ''}`);
   if (customerOut?.email)  ctxLines.push(`E-mail: ${customerOut.email}`);
   if (customerOut?.phone)  ctxLines.push(`Telefoon: ${customerOut.phone}`);
@@ -750,6 +802,23 @@ export async function runJoostSuggest({
   ctxLines.push('Zonder deze velden kan het mandaat niet gecheckt worden en escaleert je voorstel automatisch.');
   ctxLines.push('Bij een VERHELDERENDE VRAAG ("over hoeveel termijnen dacht je?") laat je ze op null — dat is GEEN voorstel.');
   ctxLines.push('---');
+  // #801 — Anti-hallucinatie framing voor payment_promise + arrangement_request.
+  // Twee harde regels: (1) nooit doen alsof je iets vastlegt; (2) bij een
+  // datum-hint die je afleidt: NOOIT hardop tegen de klant.
+  ctxLines.push('GEEN VALSE TOEZEGGINGEN (payment_promise + arrangement_request):');
+  ctxLines.push('  * Bij payment_promise (klant belooft te betalen) mag je NOOIT suggereren dat je iets hebt vastgelegd.');
+  ctxLines.push('    Verboden woorden: "genoteerd", "vastgelegd", "geregeld", "staat genoteerd", "ik heb het erin gezet".');
+  ctxLines.push('    Wel: herhaal wat de klant zei en zeg dat een collega het vastlegt. Voorbeeld:');
+  ctxLines.push('      Klant: "vrijdag betaal ik hem"');
+  ctxLines.push('      Jij:   "Ik geef door dat je vrijdag betaalt — een collega legt het vast en houdt het bij."');
+  ctxLines.push('  * Bij arrangement_request STEL je een regeling VOOR, je zegt NIET dat het al geregeld is.');
+  ctxLines.push('    Verboden: "afgesproken", "geregeld", "je krijgt X dagen uitstel" (klinkt als toezegging).');
+  ctxLines.push('    Wel: "Mijn voorstel is X termijnen van Y — een collega bevestigt dit."');
+  ctxLines.push('  * DATUM-HINT NOOIT HARDOP: als je promised_date_hint invult (bv. 2026-11-22), NOEM die datum NIET');
+  ctxLines.push('    in suggested_reply. Herhaal het letterlijke klantwoord ("vrijdag", "eind van de maand"). Reden:');
+  ctxLines.push('    de hint is voor de mens die het straks bevestigt. Als je fout gokt en dat toch zegt, heeft de klant');
+  ctxLines.push('    een bevestiging met een verkeerde datum — erger dan geen datum.');
+  ctxLines.push('---');
 
   const fullSystemPrompt = `${systemPrompt}\n\n${ctxLines.join('\n')}`;
 
@@ -861,6 +930,29 @@ export async function runJoostSuggest({
   const proposalUitstelDagen     = _posInt(toolInput.proposal_uitstel_dagen);
   const proposalTermijnBedragEur = _posNum(toolInput.proposal_termijn_bedrag_eur);
 
+  // #801 — parse betaal-toezegging velden. Beide optioneel; alleen bij
+  // intent=payment_promise semantisch relevant, maar we bewaren ze ook bij
+  // andere intents als de LLM ze per ongeluk zet — dan zijn ze in audit
+  // zichtbaar. Fase 2 UI filtert op detected_intent+action_type, niet op
+  // aanwezigheid alleen.
+  function _validDate(s) {
+    if (typeof s !== 'string') return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.trim());
+    if (!m) return null;
+    // Sanity: valide kalenderdatum (voorkomt "2026-02-31").
+    const d = new Date(s + 'T00:00:00Z');
+    if (isNaN(d.getTime())) return null;
+    if (d.toISOString().slice(0, 10) !== s.trim()) return null;
+    return s.trim();
+  }
+  function _trimStr(v, max = 200) {
+    if (typeof v !== 'string') return null;
+    const s = v.trim();
+    return s ? s.slice(0, max) : null;
+  }
+  const promisedDateRaw  = _trimStr(toolInput.promised_date_raw, 200);
+  const promisedDateHint = _validDate(toolInput.promised_date_hint);
+
   if (!suggestedReply) {
     return { status: 502, body: { error: 'Anthropic gaf een lege suggested_reply terug' } };
   }
@@ -884,6 +976,9 @@ export async function runJoostSuggest({
     proposal_termijnen:           proposalTermijnen,
     proposal_uitstel_dagen:       proposalUitstelDagen,
     proposal_termijn_bedrag_eur:  proposalTermijnBedragEur,
+    // #801 — betaal-toezegging velden (nullable).
+    promised_date_raw:            promisedDateRaw,
+    promised_date_hint:           promisedDateHint,
   };
 
   const { data: sugg, error: insErr } = await supabase
@@ -922,6 +1017,39 @@ export async function runJoostSuggest({
   }
 
   // ========================================================================
+  // STAP 7b (#801): Taak aanmaken bij payment_promise
+  // ========================================================================
+  // Bij intent=payment_promise willen we een MANUAL_CONFIRM_PROMISE-taak in
+  // Open Acties zodat Jeffrey de klant-belofte kan bevestigen (Fase 2 modal).
+  // Idempotent per conversation: bestaande PENDING/APPROVED-taak voor deze
+  // conv → UPDATE payload (history-append + nieuwste raw/hint bovenaan).
+  // Anders → INSERT. Fail-soft: taak-fout mag suggestie niet laten klappen.
+  //
+  // Klantcitaat: we pakken het laatste inbound bericht uit whatsapp_messages
+  // (via lastInbound uit STAP 5). Dat is precies wat de LLM classificeerde.
+  //
+  // BELANGRIJKE VOORWAARDEN:
+  //   * detectedIntent === 'payment_promise'
+  //   * conv.customer_id niet null (kan bij unmatched conversation zijn NULL —
+  //     dan geen taak want pending_actions.customer_id is NOT NULL)
+  //   * Fail-soft: DB-fout → warning + door.
+  if (detectedIntent === 'payment_promise' && conv?.customer_id) {
+    try {
+      await _maybeCreateOrUpdatePromiseTask({
+        supabase,
+        customerId:       conv.customer_id,
+        conversationId,
+        suggestionId:     sugg.id,
+        promisedDateRaw,
+        promisedDateHint,
+        klantcitaat:      lastInbound?.body ? String(lastInbound.body).slice(0, 500) : null,
+      });
+    } catch (e) {
+      console.warn('[joost-suggest-core promise-task] fail-soft:', e?.message || e);
+    }
+  }
+
+  // ========================================================================
   // STAP 8: Response
   // ========================================================================
   return {
@@ -938,8 +1066,144 @@ export async function runJoostSuggest({
         proposal_termijnen:          sugg.proposal_termijnen ?? null,
         proposal_uitstel_dagen:      sugg.proposal_uitstel_dagen ?? null,
         proposal_termijn_bedrag_eur: sugg.proposal_termijn_bedrag_eur ?? null,
+        // #801 — betaal-toezegging velden. Sandbox toont raw in oefengesprek
+        // zodat Jeffrey ziet dat 'ie is opgepakt zonder Open Acties te openen.
+        promised_date_raw:           promisedDateRaw,
+        promised_date_hint:          promisedDateHint,
         created_at:                  sugg.created_at,
       },
     },
   };
+}
+
+// ============================================================================
+// #801 — Helper: MANUAL_CONFIRM_PROMISE taak aanmaken/bijwerken
+// ============================================================================
+// Idempotent per conversation: één open taak per gesprek. Bestaande PENDING/
+// APPROVED-taak → UPDATE payload met nieuwste raw/hint bovenaan + history-
+// append. Anders → INSERT.
+//
+// Spiegel het maybeCreateTotalCapTask-patroon uit joost-autonomy-evaluate.js:
+// idempotency via payload->>'source' + payload->>'conversation_id'.
+//
+// payload-schema:
+//   {
+//     kind:                'promise',
+//     source:              'joost',
+//     conversation_id:     <uuid>,
+//     joost_suggestion_id: <uuid>,             ← MEEST RECENTE
+//     promised_date_raw:   'vrijdag',          ← MEEST RECENTE
+//     promised_date_hint:  '2026-11-20',       ← MEEST RECENTE (of null)
+//     klantcitaat:         '...',              ← MEEST RECENTE
+//     history: [
+//       { at: '<iso>', suggestion_id, raw, hint, klantcitaat },
+//       ...
+//     ],
+//   }
+//
+// Fail-soft: caller wrapt in try/catch.
+async function _maybeCreateOrUpdatePromiseTask({
+  supabase,
+  customerId,
+  conversationId,
+  suggestionId,
+  promisedDateRaw,
+  promisedDateHint,
+  klantcitaat,
+}) {
+  const nowIso = new Date().toISOString();
+
+  // Idempotency-check: bestaande open taak?
+  const { data: existing, error: exErr } = await supabase
+    .from('pending_actions')
+    .select('id, payload')
+    .eq('customer_id', customerId)
+    .eq('action_type', 'MANUAL_CONFIRM_PROMISE')
+    .in('status', ['PENDING', 'APPROVED'])
+    .filter('payload->>source', 'eq', 'joost')
+    .filter('payload->>conversation_id', 'eq', conversationId)
+    .limit(1)
+    .maybeSingle();
+  if (exErr) {
+    console.warn('[promise-task] idempotency select fail:', exErr.message);
+    return;
+  }
+
+  // History-entry voor de nieuwe belofte.
+  const newHistoryEntry = {
+    at:              nowIso,
+    suggestion_id:   suggestionId || null,
+    raw:             promisedDateRaw || null,
+    hint:            promisedDateHint || null,
+    klantcitaat:     klantcitaat || null,
+  };
+
+  if (existing) {
+    // UPDATE: nieuwste bovenaan, oude naar history-array.
+    const prevPayload = (existing.payload && typeof existing.payload === 'object')
+      ? existing.payload : {};
+    const prevHistory = Array.isArray(prevPayload.history) ? prevPayload.history : [];
+    // Bewaar de VORIGE waarden als extra history-entry (want die worden nu
+    // overschreven). Alleen als er ook echt iets stond.
+    if (prevPayload.promised_date_raw || prevPayload.promised_date_hint || prevPayload.klantcitaat) {
+      prevHistory.push({
+        at:              prevPayload.updated_at || null,
+        suggestion_id:   prevPayload.joost_suggestion_id || null,
+        raw:             prevPayload.promised_date_raw || null,
+        hint:            prevPayload.promised_date_hint || null,
+        klantcitaat:     prevPayload.klantcitaat || null,
+      });
+    }
+    const newPayload = {
+      ...prevPayload,
+      kind:                'promise',
+      source:              'joost',
+      conversation_id:     conversationId,
+      joost_suggestion_id: suggestionId,
+      promised_date_raw:   promisedDateRaw,
+      promised_date_hint:  promisedDateHint,
+      klantcitaat:         klantcitaat,
+      updated_at:          nowIso,
+      history:             prevHistory,
+    };
+    const { error: updErr } = await supabase
+      .from('pending_actions')
+      .update({ payload: newPayload, updated_at: nowIso })
+      .eq('id', existing.id);
+    if (updErr) {
+      console.warn('[promise-task] update fail:', updErr.message);
+    } else {
+      console.log('[promise-task] updated existing task', existing.id, 'for conv', conversationId);
+    }
+    return;
+  }
+
+  // INSERT: geen bestaande taak.
+  const insertPayload = {
+    kind:                'promise',
+    source:              'joost',
+    conversation_id:     conversationId,
+    joost_suggestion_id: suggestionId,
+    promised_date_raw:   promisedDateRaw,
+    promised_date_hint:  promisedDateHint,
+    klantcitaat:         klantcitaat,
+    created_via:         'joost_suggest_core',
+    history:             [newHistoryEntry],
+  };
+  const { error: insErr } = await supabase
+    .from('pending_actions')
+    .insert({
+      customer_id:         customerId,
+      arrangement_id:      null,
+      invoice_id:          null,
+      action_type:         'MANUAL_CONFIRM_PROMISE',
+      status:              'PENDING',
+      proposed_by_user_id: null,
+      payload:             insertPayload,
+    });
+  if (insErr) {
+    console.warn('[promise-task] insert fail:', insErr.message);
+  } else {
+    console.log('[promise-task] inserted for customer', customerId, 'conv', conversationId);
+  }
 }
