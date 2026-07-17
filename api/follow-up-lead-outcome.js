@@ -412,37 +412,46 @@ export default async function handler(req, res) {
   // 'bevestigd'/'komt_niet' verderop en (b) undo-restore. Fail-soft —
   // als de fetch faalt, blijft attendeeBeforeSnapshot null en gaat de
   // outcome gewoon door (write-back doet dan alleen called=true).
+  // Warnings-collector — verzamelt fail-soft issues zodat de UI ze na de
+  // 200-response kan tonen als toast/pill. Voorkomt silent-fail-open:
+  // status wordt naar de gebruiker gepropageerd i.p.v. alleen naar de
+  // Vercel-logs (les uit Eddy Delmoitie 17 juli — PGRST204 op call_status
+  // liet de badge onzichtbaar staan omdat de retry-tak 'em niet ving).
+  const warnings = [];
   let attendeeBeforeSnapshot = null;
   if (isEventLead && sourceRef.attendee_id) {
-    try {
-      const { data: ab } = await supabaseAdmin
-        .from('event_attendees')
-        .select('id, status, called, call_status, call_status_at')
-        .eq('id', sourceRef.attendee_id)
-        .maybeSingle();
-      if (ab) {
-        attendeeBeforeSnapshot = {
-          status         : ab.status || null,
-          called         : ab.called === true,
-          call_status    : ab.call_status || null,
-          call_status_at : ab.call_status_at || null,
-        };
-      }
-    } catch (e) {
-      // 42703 → kolom call_status/call_status_at ontbreekt (migratie 023
-      // nog niet gedraaid). Herprobeer met minimale set zodat de outcome
-      // door kan; call_status wordt dan niet meegeschreven.
-      if (e?.code === '42703' || /column .* does not exist/i.test(e?.message || '')) {
-        try {
-          const { data: ab2 } = await supabaseAdmin
-            .from('event_attendees')
-            .select('id, status, called')
-            .eq('id', sourceRef.attendee_id)
-            .maybeSingle();
-          if (ab2) attendeeBeforeSnapshot = { status: ab2.status || null, called: ab2.called === true };
-        } catch (_) { /* fail-soft */ }
+    // Destructureer ZOWEL data ALS error — supabase-js gooit geen exception
+    // bij PostgREST-cache-miss (PGRST204), maar geeft een error-object terug.
+    // Voorheen werd alleen data uitgelezen → error-tak nooit geraakt → stil
+    // gefaald. Nu vangen we alle "kolom mist"-varianten (42703 én PGRST204)
+    // via de shared isMissingColumnError-helper en retry-en met minimale set.
+    const { data: ab, error: abErr } = await supabaseAdmin
+      .from('event_attendees')
+      .select('id, status, called, call_status, call_status_at')
+      .eq('id', sourceRef.attendee_id)
+      .maybeSingle();
+    if (ab) {
+      attendeeBeforeSnapshot = {
+        status         : ab.status || null,
+        called         : ab.called === true,
+        call_status    : ab.call_status || null,
+        call_status_at : ab.call_status_at || null,
+      };
+    } else if (abErr) {
+      if (isMissingColumnError(abErr)) {
+        console.warn('[follow-up-lead-outcome] attendee-before fetch — call_status/at kolom niet in schema-cache, retry zonder:', abErr.message);
+        const { data: ab2, error: ab2Err } = await supabaseAdmin
+          .from('event_attendees')
+          .select('id, status, called')
+          .eq('id', sourceRef.attendee_id)
+          .maybeSingle();
+        if (ab2) attendeeBeforeSnapshot = { status: ab2.status || null, called: ab2.called === true };
+        else if (ab2Err) console.warn('[follow-up-lead-outcome] attendee-before fetch (fallback):', ab2Err.message);
       } else {
-        console.warn('[follow-up-lead-outcome] attendee-before fetch:', e?.message || e);
+        // Onbekende fout — snapshot blijft null; outcome kan door, maar undo
+        // van attendee-state werkt niet en dat is een user-visible verlies.
+        console.warn('[follow-up-lead-outcome] attendee-before fetch faalde:', abErr.message);
+        warnings.push('Kon attendee-state niet ophalen voor undo-snapshot (' + abErr.message + ')');
       }
     }
   }
@@ -758,20 +767,37 @@ export default async function handler(req, res) {
             .update(patchAttendee)
             .eq('id', sourceRef.attendee_id);
           if (aErr) {
-            // 42703 → migratie 023 nog niet gedraaid. Retry zonder de nieuwe
-            // kolommen zodat de bestaande write-back (called/status) blijft
-            // werken totdat de kolom bestaat.
-            if (aErr.code === '42703' || /column .* does not exist/i.test(aErr.message || '')) {
+            // Retry-scope: alleen "kolom mist"-fouten (42703 PG + PGRST204
+            // PostgREST cache-miss + "could not find the / schema cache"-
+            // varianten) worden opgevat als "migratie 023 ontbreekt of cache
+            // stale" en krijgen een fallback zonder call_status/at. Alle
+            // andere fouten (trigger-fail, constraint, RLS-fluke) → warning
+            // naar de UI in plaats van silent console.warn.
+            //
+            // Les uit Eddy Delmoitie 17 juli: het oude regex-patroon
+            // /column .* does not exist/i matcht PGRST204 níet ("Could not
+            // find the ... column ... in the schema cache"). Daardoor
+            // vielen cache-misses in de else-tak en werd 'call_status'
+            // stil niet bijgewerkt.
+            if (isMissingColumnError(aErr)) {
+              console.warn('[follow-up-lead-outcome] event_attendees write-back — call_status/at kolom niet in schema-cache, retry zonder:', aErr.message);
               const fallback = {};
               if (Object.prototype.hasOwnProperty.call(patchAttendee, 'called')) fallback.called = patchAttendee.called;
               if (Object.prototype.hasOwnProperty.call(patchAttendee, 'status')) fallback.status = patchAttendee.status;
               if (Object.keys(fallback).length > 0) {
                 const { error: fErr } = await supabaseAdmin
                   .from('event_attendees').update(fallback).eq('id', sourceRef.attendee_id);
-                if (fErr) console.warn('[follow-up-lead-outcome] event_attendees write-back (fallback):', fErr.message);
+                if (fErr) {
+                  console.warn('[follow-up-lead-outcome] event_attendees write-back (fallback):', fErr.message);
+                  warnings.push('Belstatus-badge kon niet worden bijgewerkt (' + fErr.message + ')');
+                }
               }
+              // De schema-cache moet ververst worden (NOTIFY pgrst, 'reload schema')
+              // om de badge weer werkend te krijgen. Geef expliciete warning.
+              warnings.push('Belstatus-badge niet bijgewerkt — PostgREST schema-cache stale voor call_status. Vraag beheerder om schema-reload.');
             } else {
               console.warn('[follow-up-lead-outcome] event_attendees write-back:', aErr.message);
+              warnings.push('Belstatus-badge kon niet worden bijgewerkt (' + aErr.message + ')');
             }
           }
         }
@@ -794,7 +820,11 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ ok: true, lead: updated });
+    return res.status(200).json({
+      ok      : true,
+      lead    : updated,
+      warnings: warnings.length ? warnings : undefined,
+    });
   } catch (e) {
     console.error('[follow-up-lead-outcome]', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });

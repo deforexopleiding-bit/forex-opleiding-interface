@@ -6479,6 +6479,16 @@
         } else if (outcome === 'komt_niet') {
           try { window.AgentShared?.showToast?.('Afgemeld — naar Afgeboekt', 'success'); } catch (_) {}
         }
+        // Server-side warnings tonen (bv. call_status niet bijgewerkt door
+        // PostgREST-cache-miss). Voorheen bleven zulke problemen silent in
+        // de Vercel-logs staan — les uit Eddy Delmoitie 17 juli.
+        if (Array.isArray(d.warnings) && d.warnings.length) {
+          try {
+            window.AgentShared?.showToast?.('Uitkomst opgeslagen — ' + d.warnings.join(' · '), 'warn');
+          } catch (_) {
+            alert('Uitkomst opgeslagen, met waarschuwing:\n' + d.warnings.join('\n'));
+          }
+        }
         // Werk wachtrij + counts + tijdlijn bij. loadLeadsTab herkent
         // dat de vorige selectie niet meer in de lijst zit (bij sale /
         // snooze / geen_interesse / bevestigd / komt_niet) en opent
