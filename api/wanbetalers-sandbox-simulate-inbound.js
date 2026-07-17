@@ -185,6 +185,12 @@ export default async function handler(req, res) {
       // z'n eigen outbound al persisteerde krijgen we z'n message-id terug
       // en slaan we onze eigen fallback over.
       sent_message_id:     null,
+      // #796 — 429 rate-limit info. Sandbox skipt de per-conv 30s rate-limit
+      // via skipRateLimit=true, dus een 429 hier is ongebruikelijk (Anthropic
+      // eigen rate-limit / DB-race). Propaggeren zodat de UI 't als nette
+      // melding kan tonen ipv als stilte.
+      rate_limited:        false,
+      retry_after_seconds: null,
       note:                null,
     };
     try {
@@ -198,6 +204,14 @@ export default async function handler(req, res) {
         clientIp              : null,
         // Sandbox-bypass: honoreerd door core alleen bij is_test-klant.
         allowDisabledForTest  : true,
+        // #796 — sla de 30s per-conv rate-limit over in het oefengesprek
+        // (RATE_LIMIT_WINDOW_MS uit joost-suggest-core). Alleen actief als
+        // conv-klant is_test=true; anders logt de core een warning en houdt
+        // 'ie de rate-limit alsnog aan. Sandbox-klant is per definitie
+        // is_test=true (getSandboxCustomer r22), dus deze skip pakt hier
+        // altijd — maar de dubbele borg staat er om verkeerd gebruik door
+        // toekomstige callers te detecteren.
+        skipRateLimit         : true,
       });
       if (sug?.status === 200 && sug.body?.suggestion?.id) {
         joost.ran = true;
@@ -270,6 +284,14 @@ export default async function handler(req, res) {
         } else {
           joost.note = 'INTERNAL_API_TOKEN ontbreekt — alleen concept, geen autonome send';
         }
+      } else if (sug?.status === 429) {
+        // Rate-limit hit ondanks skipRateLimit — kan gebeuren als de klant
+        // (om onduidelijke reden) niet is_test is, of bij een Anthropic-
+        // rate-limit die verder in de stack gegooid wordt. UI toont dit als
+        // nette inline-melding onder het klantbericht.
+        joost.rate_limited        = true;
+        joost.retry_after_seconds = Number(sug?.body?.retry_after_seconds) || 30;
+        joost.note = 'rate-limit: nog ' + joost.retry_after_seconds + ' seconden';
       } else {
         joost.note = 'suggest status ' + (sug?.status) + ': ' + (sug?.body?.error || sug?.body?.message || '');
       }

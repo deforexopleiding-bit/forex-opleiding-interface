@@ -137,43 +137,16 @@ export async function runJoostSuggest({
   // is_test=true. Voor echte klanten of afwezige param → exact het bestaande
   // 503-gedrag bij is_enabled=false. Zie #691/#692.
   allowDisabledForTest = false,
+  // Sandbox-bypass voor de 30s per-conv rate-limit (RATE_LIMIT_WINDOW_MS).
+  // Alleen actief als (a) caller expliciet true doorgeeft EN (b) de conv-
+  // klant is_test=true. Productie-callers (webhook, joost-suggest.js HTTP)
+  // geven 'em NIET mee → default false → rate-limit blijft actief.
+  // Extra vangnet: als caller true meegeeft maar de klant NIET is_test is,
+  // logt de core een warning en houdt de rate-limit alsnog aan.
+  skipRateLimit = false,
 }) {
   // ========================================================================
-  // STAP 1: Rate-limit (per conv: max 1 suggestie per 30 sec, ongeacht status)
-  // ========================================================================
-  const { data: recentSugg, error: rateErr } = await supabase
-    .from('joost_suggestions')
-    .select('id, created_at')
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (rateErr) {
-    console.error('[joost-suggest-core] rate-limit select error:', rateErr.message);
-    // Soft-fail: laat rate-limit niet de hoofdflow blokkeren bij DB-glitch.
-  } else if (recentSugg && recentSugg.created_at) {
-    const lastMs = new Date(recentSugg.created_at).getTime();
-    if (Number.isFinite(lastMs)) {
-      const ageSeconds = (Date.now() - lastMs) / 1000;
-      const windowSeconds = RATE_LIMIT_WINDOW_MS / 1000;
-      if (ageSeconds < windowSeconds) {
-        const retryAfter = Math.max(1, Math.ceil(windowSeconds - ageSeconds));
-        return {
-          status: 429,
-          body: {
-            error: 'rate_limit',
-            message: 'Wacht 30 seconden voor je een nieuwe suggestie vraagt',
-            retry_after_seconds: retryAfter,
-            previous_suggestion_id: recentSugg.id,
-            previous_created_at:    recentSugg.created_at,
-          },
-        };
-      }
-    }
-  }
-
-  // ========================================================================
-  // STAP 2: Conversation ophalen + module bepalen + joost_config laden
+  // STAP 1: Conversation ophalen (nodig voor rate-limit skip-check + module)
   // ========================================================================
   const { data: conv, error: convErr } = await supabase
     .from('whatsapp_conversations')
@@ -182,6 +155,66 @@ export async function runJoostSuggest({
     .maybeSingle();
   if (convErr) throw new Error('conversation lookup: ' + convErr.message);
   if (!conv) return { status: 404, body: { error: 'Conversation niet gevonden' } };
+
+  // ========================================================================
+  // STAP 1b: Rate-limit (per conv: max 1 suggestie per 30 sec, ongeacht status)
+  // Skip alleen bij expliciete sandbox-request + is_test-klant. De is_test
+  // check gaat via de customer-lookup — als die faalt of de klant is niet-test,
+  // hanteren we de rate-limit alsnog en loggen een warning zodat een verkeerd
+  // gebruik van skipRateLimit detecteerbaar is.
+  // ========================================================================
+  let rateLimitSkipped = false;
+  if (skipRateLimit && conv.customer_id) {
+    const { data: cRow, error: cErr } = await supabase
+      .from('customers').select('is_test').eq('id', conv.customer_id).maybeSingle();
+    if (cErr) {
+      console.warn('[joost-suggest-core] skipRateLimit klant-lookup fail — rate-limit blijft aan:', cErr.message);
+    } else if (cRow && cRow.is_test === true) {
+      rateLimitSkipped = true;
+      console.log('[joost-suggest-core] rate-limit skip (is_test sandbox) conv=' + conversationId);
+    } else {
+      console.warn('[joost-suggest-core] skipRateLimit=true op NIET-test klant — genegeerd, rate-limit blijft aan conv=' + conversationId);
+    }
+  } else if (skipRateLimit && !conv.customer_id) {
+    console.warn('[joost-suggest-core] skipRateLimit=true op conv zonder customer_id — genegeerd, rate-limit blijft aan conv=' + conversationId);
+  }
+
+  if (!rateLimitSkipped) {
+    const { data: recentSugg, error: rateErr } = await supabase
+      .from('joost_suggestions')
+      .select('id, created_at')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (rateErr) {
+      console.error('[joost-suggest-core] rate-limit select error:', rateErr.message);
+      // Soft-fail: laat rate-limit niet de hoofdflow blokkeren bij DB-glitch.
+    } else if (recentSugg && recentSugg.created_at) {
+      const lastMs = new Date(recentSugg.created_at).getTime();
+      if (Number.isFinite(lastMs)) {
+        const ageSeconds = (Date.now() - lastMs) / 1000;
+        const windowSeconds = RATE_LIMIT_WINDOW_MS / 1000;
+        if (ageSeconds < windowSeconds) {
+          const retryAfter = Math.max(1, Math.ceil(windowSeconds - ageSeconds));
+          return {
+            status: 429,
+            body: {
+              error: 'rate_limit',
+              message: 'Wacht 30 seconden voor je een nieuwe suggestie vraagt',
+              retry_after_seconds: retryAfter,
+              previous_suggestion_id: recentSugg.id,
+              previous_created_at:    recentSugg.created_at,
+            },
+          };
+        }
+      }
+    }
+  }
+
+  // ========================================================================
+  // STAP 2: Module bepalen + joost_config laden
+  // ========================================================================
 
   // Module-resolve via whatsapp_module_config (exact phone_number_id match).
   // Fase 2 stap 2c hardening: Joost opereert ALLEEN op finance — geen stille
