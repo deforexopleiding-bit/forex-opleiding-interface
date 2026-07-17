@@ -237,6 +237,13 @@ export async function runJoostSuggest({
     : false;
 
   let customerOut = null;
+  // #788 — maandbedrag van de klant (laagste actieve abo) als dynamische
+  // ondergrens per termijn. Wordt aan de LLM-prompt meegegeven in de
+  // mandate-alinea zodat Joost geen splitsing voorstelt onder z'n eigen
+  // maand-ritme, en aan de context zodat toekomstige callers 'em kunnen
+  // hergebruiken. Fail-soft: helper returnt { hasSubscription:false,
+  // monthlyAmount:null } bij DB-glitch — Joost escaleert dan.
+  let customerMonthlyPayment = { hasSubscription: false, monthlyAmount: null, subscriptions: [] };
   if (conv.customer_id) {
     const { data: cust, error: custErr } = await supabase
       .from('customers')
@@ -254,6 +261,14 @@ export async function runJoostSuggest({
         is_company: !!cust.is_company,
         created_at: cust.created_at || null,
       };
+      // Maandbedrag ophalen — na customer bevestiging, vóór de open-invoices
+      // lookup zodat de mandate-alinea 'em straks kan gebruiken.
+      try {
+        const { getCustomerMonthlyPayment } = await import('./customer-monthly-payment.js');
+        customerMonthlyPayment = await getCustomerMonthlyPayment(supabase, cust.id);
+      } catch (e) {
+        console.warn('[joost-suggest-core] monthly-payment lookup fail-soft:', e?.message || e);
+      }
     }
   }
 
@@ -389,6 +404,9 @@ export async function runJoostSuggest({
       last_inbound_body:  lastInbound ? String(lastInbound.body).slice(0, 1000) : null,
     },
     customer: customerOut,
+    // #788 — maandbedrag voor audit-doeleinden zodat je later kunt zien
+    // waarop Joost z'n regeling-grens baseerde.
+    monthly_payment: customerMonthlyPayment,
     open_facturen: {
       totaal_open_bedrag: totalOpen,
       aantal:             openInvoices.length,
@@ -427,6 +445,15 @@ export async function runJoostSuggest({
   if (customerOut?.email)  ctxLines.push(`E-mail: ${customerOut.email}`);
   if (customerOut?.phone)  ctxLines.push(`Telefoon: ${customerOut.phone}`);
   ctxLines.push('');
+  // #788 — abo-info toegevoegd aan klantregel zodat Joost 'em zeker meeneemt.
+  if (customerMonthlyPayment.hasSubscription) {
+    const cntStr = customerMonthlyPayment.subscriptions.length > 1
+      ? ` (${customerMonthlyPayment.subscriptions.length} actief; laagste)`
+      : '';
+    ctxLines.push(`Maandbedrag klant: EUR ${fmtEur(customerMonthlyPayment.monthlyAmount)}${cntStr}`);
+  } else {
+    ctxLines.push('Maandbedrag klant: onbekend (geen actief abonnement).');
+  }
   ctxLines.push(`Openstaande facturen: ${openFacturenCount} stuks, totaal ${openFacturenTotaal}`);
   if (openInvoices.length > 0) {
     const top = openInvoices.slice(0, 5);
@@ -490,15 +517,14 @@ export async function runJoostSuggest({
   const minEersteTermijnPct = Number.isFinite(Number(splitsingM.min_eerste_termijn_pct))
     ? Number(splitsingM.min_eerste_termijn_pct) : null;
 
-  // #787 — harde ondergrens per termijn uit joost_config.autonomy_config.
-  // arrangement_mandate.min_termijn_bedrag_eur. Standaard 300 (beleid Jeffrey:
-  // onder EUR 300/mnd is het geen regeling maar een gesprek voor een mens).
-  // Voorheen was dit veld dood; deze release wél gelezen in prompt-hint hier
-  // én afgedwongen in api/arrangements-propose.js server-side.
-  const minTermijnBedrag = Number.isFinite(Number(mandate.min_termijn_bedrag_eur))
-    ? Number(mandate.min_termijn_bedrag_eur) : null;
-  // Maximaal haalbare termijnen bij deze min_termijn_bedrag (integer).
-  // 0 of 1 → SPLITSING onmogelijk (SPLITSING vereist ≥2 parts).
+  // #788 — DYNAMISCHE ondergrens per termijn = maandbedrag van deze klant
+  // (laagste actieve abo, uit customerMonthlyPayment hierboven). Vervangt de
+  // vaste config-grens uit #787 die per definitie fout was voor
+  // membership-klanten. Geen abo → SPLITSING onmogelijk, Joost escaleert.
+  const minTermijnBedrag = (customerMonthlyPayment && customerMonthlyPayment.hasSubscription && customerMonthlyPayment.monthlyAmount > 0)
+    ? Number(customerMonthlyPayment.monthlyAmount) : null;
+  // Maximaal haalbare termijnen bij dit maandbedrag (integer).
+  // < 2 → SPLITSING onmogelijk (SPLITSING vereist ≥2 parts).
   const maxHaalbaarTermijnen = (minTermijnBedrag && minTermijnBedrag > 0 && totalOpen > 0)
     ? Math.floor(totalOpen / minTermijnBedrag) : null;
 
@@ -533,7 +559,14 @@ export async function runJoostSuggest({
         : maxHaalbaarTermijnen;
     }
     const termijnenStr = effMaxTermijnen != null ? String(effMaxTermijnen) : '?';
-    const hardMinStr = minTermijnBedrag != null ? ` HARDE ONDERGRENS per termijn: EUR ${fmtEur(minTermijnBedrag)}.` : '';
+    // #788 — HARDE ondergrens = maandbedrag klant. Geen abo → SPLITSING
+    // verboden (Joost moet escaleren, geen voorstel doen).
+    let hardMinStr = '';
+    if (customerMonthlyPayment.hasSubscription && minTermijnBedrag != null) {
+      hardMinStr = ` HARDE ONDERGRENS per termijn: EUR ${fmtEur(minTermijnBedrag)} (het maandbedrag van deze klant — z'n eigen betaal-ritme). Termijnen die daaronder liggen zijn VERBODEN.`;
+    } else {
+      hardMinStr = ` LET OP: deze klant heeft geen actief abonnement — SPLITSING is voor deze klant NIET toegestaan. Bied GEEN regeling, verwijs naar een medewerker.`;
+    }
     mandateLines.push(
       `SPLITSING: max ${termijnenStr} termijnen. ` +
       `Min eerste termijn: ${pctStr} van openstaand bedrag (richtlijn min EUR per termijn: ${minBedragStr}).${hardMinStr}`
@@ -550,14 +583,22 @@ export async function runJoostSuggest({
         `(EUR ${fmtEur(minBedragPerTermijn)}) -- zelf SPLITSING voorstellen verboden.`
       );
     }
-    // #787 harde min_termijn_bedrag: als het openstaand bedrag geen 2 termijnen
-    // toelaat boven de ondergrens → SPLITSING is per definitie onmogelijk;
-    // Joost mag geen splitsing voorstellen en moet escaleren.
-    if (splitsingEnabled && minTermijnBedrag != null && minTermijnBedrag > 0) {
+    // #788 dynamische ondergrens: 2 scenario's waarin SPLITSING VERBODEN is:
+    //   (a) klant heeft geen actief abonnement — geen betaal-ritme om op te
+    //       baseren. Joost escaleert.
+    //   (b) openstaand bedrag laat geen 2 termijnen ≥ maandbedrag toe.
+    //       Bijv. klant EUR 300/maand + EUR 250 open → floor(250/300)=0<2.
+    if (splitsingEnabled && !customerMonthlyPayment.hasSubscription) {
+      rangeRemarks.push(
+        'SPLITSING onmogelijk: deze klant heeft geen actief abonnement -- ' +
+        'bied GEEN regeling. Verwijs naar een medewerker (escaleer).'
+      );
+    } else if (splitsingEnabled && minTermijnBedrag != null && minTermijnBedrag > 0) {
       if (maxHaalbaarTermijnen == null || maxHaalbaarTermijnen < 2) {
         rangeRemarks.push(
           `SPLITSING onmogelijk: openstaand bedrag (EUR ${fmtEur(totalOpen)}) laat geen 2 termijnen ` +
-          `van minimaal EUR ${fmtEur(minTermijnBedrag)} toe -- laat de mens dit oplossen (escaleer).`
+          `van minimaal EUR ${fmtEur(minTermijnBedrag)} (het maandbedrag van deze klant) toe -- ` +
+          `bied GEEN regeling, escaleer naar mens.`
         );
       }
     }

@@ -279,36 +279,42 @@ export default async function handler(req, res) {
           error: `Som van parts (${sumParts.toFixed(2)}) komt niet overeen met som factuurbedrag (${sumInv.toFixed(2)})`,
         });
       }
-      // #787 — harde min_termijn_bedrag_eur uit joost_config.autonomy_config.
-      // arrangement_mandate. Deze grens is HARDE regel, niet alleen een prompt-
-      // instructie: een taalmodel kan er altijd overheen, dus valideren we
-      // hier server-side. Fail-soft op config-lookup (bv. joost_config
-      // ontbreekt in DB): grens wordt genegeerd. Kan later verder gedwongen
-      // worden via allowed_types + explicit config, maar voor het beleid
-      // "geen termijn onder EUR X" is deze check leidend.
+      // #788 — DYNAMISCHE ondergrens per termijn: het maandbedrag van deze
+      // klant (laagste actieve abonnement). Vervangt de vaste
+      // min_termijn_bedrag_eur uit #787. Beleid Jeffrey: elke termijn moet
+      // >= wat de klant al aantoonbaar per maand betaalt. Geen abo → geen
+      // regeling, escaleren.
+      //
+      // Fail-soft: als de lookup faalt (DB-glitch), stuur geen valse
+      // ondergrens; log warning en laat de propose doorlopen. Beter geen
+      // false positive dan een terecht arrangement blokkeren op een
+      // infrastructuur-hik.
       try {
-        const { data: cfg } = await supabaseAdmin
-          .from('joost_config')
-          .select('autonomy_config')
-          .eq('module', 'finance')
-          .maybeSingle();
-        const mandate = cfg?.autonomy_config?.arrangement_mandate || {};
-        const minTermijnBedrag = Number(mandate.min_termijn_bedrag_eur);
-        if (Number.isFinite(minTermijnBedrag) && minTermijnBedrag > 0) {
-          const tooSmall = details.parts.find(p => Number(p.amount || 0) < minTermijnBedrag);
+        const { getCustomerMonthlyPayment } = await import('./_lib/customer-monthly-payment.js');
+        const mp = await getCustomerMonthlyPayment(supabaseAdmin, customerId);
+        if (!mp.hasSubscription) {
+          return res.status(400).json({
+            error: 'Deze klant heeft geen actief abonnement — SPLITSING vereist een lopend maand-ritme. ' +
+                   'Laat een medewerker deze afspraak beoordelen (bijvoorbeeld UITSTEL of KWIJTSCHELDING).',
+            violation:            'NO_ACTIVE_SUBSCRIPTION',
+          });
+        }
+        const minPerTermijn = Number(mp.monthlyAmount);
+        if (Number.isFinite(minPerTermijn) && minPerTermijn > 0) {
+          const tooSmall = details.parts.find(p => Number(p.amount || 0) < minPerTermijn);
           if (tooSmall) {
             return res.status(400).json({
-              error: `Termijn van EUR ${Number(tooSmall.amount).toFixed(2)} ligt onder de minimum-termijn ` +
-                     `EUR ${minTermijnBedrag.toFixed(2)}. Splits over minder termijnen of laat een medewerker ` +
-                     `deze afspraak beoordelen.`,
-              violation:   'MIN_TERMIJN_BEDRAG',
-              min_termijn_bedrag_eur: minTermijnBedrag,
-              offending_amount_eur:   Number(tooSmall.amount),
+              error: `Termijn van EUR ${Number(tooSmall.amount).toFixed(2)} ligt onder het maandbedrag ` +
+                     `van deze klant (EUR ${minPerTermijn.toFixed(2)}). Splits over minder termijnen ` +
+                     `of laat een medewerker deze afspraak beoordelen.`,
+              violation:            'MIN_TERMIJN_ONDER_MAANDBEDRAG',
+              maand_bedrag_eur:     minPerTermijn,
+              offending_amount_eur: Number(tooSmall.amount),
             });
           }
         }
       } catch (e) {
-        console.warn('[arrangements-propose] min_termijn_bedrag lookup fail-soft:', e?.message || e);
+        console.warn('[arrangements-propose] maandbedrag lookup fail-soft:', e?.message || e);
       }
     }
 
