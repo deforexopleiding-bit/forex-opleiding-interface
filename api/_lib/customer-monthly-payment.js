@@ -93,7 +93,14 @@ export async function getCustomerMonthlyPayment(supabase, customerId) {
       return {
         id:              s.id,
         description:     s.description || '(zonder omschrijving)',
-        monthly_amount:  Math.round(monthlyAmount * 100) / 100,
+        // #808 — Math.floor i.p.v. Math.round op cent-niveau. BTW-round-trip
+        // (Teamleader amount excl -> incl / cycleMonths) levert vaak drift
+        // op (bv. 66.12 * 1.21 = 80.0052 -> Math.round = 80.01). Dat maakt
+        // de ondergrens 0.5-1 cent scherper dan het echte klant-ritme.
+        // Gevolg: Math.floor(240 / 80.01) = 2 termijnen, terwijl 3 x 80.00
+        // exact matcht met wat de klant al betaalt. Naar beneden afronden
+        // compenseert de drift; 80.00 >= 80.00 in de server-check gaat door.
+        monthly_amount:  Math.floor(monthlyAmount * 100) / 100,
         billing_cycle:   s.billing_cycle || 'per_month',
       };
     }).filter((s) => s.monthly_amount > 0);
@@ -101,10 +108,11 @@ export async function getCustomerMonthlyPayment(supabase, customerId) {
     if (!monthly.length) return empty;
 
     // Laagste maandbedrag = z'n zwakste ritme = strengste ondergrens.
+    // Waarden zijn al op cent (Math.floor hierboven); geen extra rounding.
     const lowest = monthly.reduce((min, s) => (s.monthly_amount < min ? s.monthly_amount : min), monthly[0].monthly_amount);
     return {
       hasSubscription: true,
-      monthlyAmount:   Math.round(lowest * 100) / 100,
+      monthlyAmount:   lowest,
       currency:        'EUR',
       subscriptions:   monthly,
     };
