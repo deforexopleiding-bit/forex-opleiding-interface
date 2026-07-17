@@ -8960,20 +8960,52 @@
         listEl.innerHTML = '<div class="fu-eb-empty"><i class="ti ti-users-off"></i>Geen deelnemers voor dit event.</div>';
         return;
       }
+      // LOKALE label+kleur-map voor event-bellijst. Bron is
+      // event_attendees.call_status (event-specifieke bel-uitkomst,
+      // migratie 023). NIET gedeeld met LEAD_STATUS_LABEL (r5253) —
+      // daar betekent 'verlengd' iets anders ("abonnement verlengd"
+      // in retentie-context). Twee contexten, twee maps.
+      //
+      // Klas-namen hergebruiken de bestaande .fu-eb-row .status-badge
+      // CSS-klassen (r1842-1847) om geen nieuw palet te introduceren:
+      //   bevestigd      → verlengd (groen success)
+      //   komt_niet      → verloren (rood danger)
+      //   geen_gehoor    → benaderd (oranje warning)
+      //   voicemail      → terugbellen (blauw info)
+      //   terugbellen    → terugbellen (blauw info)
+      //   foutief_nummer → niet_bereikbaar (grijs neutral)
+      //
+      // Val NIET terug op lead_status als call_status NULL is; dat is
+      // juist de verwarrende bron. NULL → "Nog niet gebeld".
+      const CALL_STATUS_LABEL = {
+        bevestigd     : { label: 'Bevestigd',    cls: 'verlengd' },
+        komt_niet     : { label: 'Komt niet',    cls: 'verloren' },
+        geen_gehoor   : { label: 'Geen gehoor',  cls: 'benaderd' },
+        voicemail     : { label: 'Voicemail',    cls: 'terugbellen' },
+        terugbellen   : { label: 'Terugbellen',  cls: 'terugbellen' },
+        foutief_nummer: { label: 'Fout nummer',  cls: 'niet_bereikbaar' },
+      };
+      const DONE_CALL_STATUSES = new Set(['bevestigd', 'komt_niet', 'foutief_nummer']);
+
       listEl.innerHTML = arr.map((a) => {
-        const initials = _leadInitials(a.name);
-        const status = String(a.lead_status || '').toLowerCase();
-        const avaCls = (status === 'verlengd' || status === 'verloren' || status === 'benaderd') ? 'done' : '';
-        const statusLabel = a.lead_id
-          ? (status === 'nieuw'          ? 'Nieuw'
-           : status === 'benaderd'       ? 'Al benaderd'
-           : status === 'terugbellen'    ? 'Terugbellen'
-           : status === 'niet_bereikbaar'? 'Niet bereikbaar'
-           : status === 'verlengd'       ? 'Verlengd'
-           : status === 'verloren'       ? 'Verloren'
-           : (status || 'Bekend'))
-          : 'Nog niet gebeld';
-        const statusCls = a.lead_id ? status : 'nieuw';
+        const initials  = _leadInitials(a.name);
+        const callSt    = String(a.call_status || '').toLowerCase();
+        const callMeta  = CALL_STATUS_LABEL[callSt] || null;
+        const avaCls    = DONE_CALL_STATUSES.has(callSt) ? 'done' : '';
+        const statusLabel = callMeta ? callMeta.label : 'Nog niet gebeld';
+        const statusCls   = callMeta ? callMeta.cls   : 'nieuw';
+        // Tooltip: wanneer is er gebeld? Alleen als er een call_status is.
+        let statusTitle = '';
+        if (callMeta && a.call_status_at) {
+          try {
+            const dt = new Date(a.call_status_at);
+            if (!isNaN(dt.getTime())) {
+              statusTitle = 'Gebeld op ' + dt.toLocaleString('nl-NL', {
+                day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit',
+              });
+            }
+          } catch (_) {}
+        }
         const phone = a.phone ? esc(a.phone) : '<span style="opacity:.5">— geen tel —</span>';
         const email = a.email ? `<a href="mailto:${esc(a.email)}"><i class="ti ti-mail"></i> ${esc(a.email)}</a>` : '';
         const canCall = !!a.phone;
@@ -8986,7 +9018,7 @@
             <div class="name">${esc(a.name)}</div>
             <div class="sub"><span><i class="ti ti-phone"></i> ${phone}</span>${email ? '<span>·</span>' + email : ''}</div>
           </div>
-          <span class="status-badge ${esc(statusCls)}">${esc(statusLabel)}</span>
+          <span class="status-badge ${esc(statusCls)}"${statusTitle ? ` title="${esc(statusTitle)}"` : ''}>${esc(statusLabel)}</span>
           <div style="opacity:0"></div>
           <div class="actions">
             <button type="button" class="fu-lead-btn primary" data-eb-call="${esc(a.id)}" data-phone="${esc(a.phone || '')}" title="${esc(btnTitle)}"><i class="ti ${btnIcon}"></i> ${esc(btnLabel)}</button>

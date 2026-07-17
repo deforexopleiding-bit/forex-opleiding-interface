@@ -9,7 +9,14 @@
 //   { event: { id, title, starts_at, attendee_count } | null,
 //     attendees: [
 //       { id, name, email, phone, customer_id,
-//         lead_id | null, lead_status | null } ] }
+//         lead_id | null, lead_status | null,
+//         call_status | null, call_status_at | null } ] }
+//
+// call_status is de PRIMAIRE bron voor de UI-badge in de event-bellijst
+// (event-specifieke bel-uitkomst: bevestigd/komt_niet/geen_gehoor/
+// voicemail/terugbellen/foutief_nummer). lead_status blijft in de payload
+// voor legacy-callers maar de renderer valt daar NIET meer op terug — zie
+// _renderEventBellijst() in modules/follow-up.html.
 //
 // 42P01/42703 fail-soft (lege lijst / event=null).
 
@@ -59,10 +66,14 @@ export default async function handler(req, res) {
     }
     if (!eventRow) return res.status(200).json({ event: null, attendees: [] });
 
-    // 2) Deelnemers van dat event.
+    // 2) Deelnemers van dat event. call_status/-_at (migratie 023) is
+    //    de event-specifieke bel-uitkomst en de primaire bron voor de
+    //    UI-badge; lead_status van de gekoppelde follow_up_lead is de
+    //    generieke "afgehandeld"-sentinel en misleidend als label ("verlengd"
+    //    = "abonnement verlengd" in de retentie-oorsprong).
     const { data: attendees, error: attErr } = await supabaseAdmin
       .from('event_attendees')
-      .select('id, event_id, customer_id, first_name, last_name, email, phone, assessment_response_id')
+      .select('id, event_id, customer_id, first_name, last_name, email, phone, assessment_response_id, call_status, call_status_at')
       .eq('event_id', eventRow.id);
 
     if (attErr) {
@@ -118,6 +129,8 @@ export default async function handler(req, res) {
           customer_id           : a.customer_id || null,
           lead_id               : matchedLead?.id || null,
           lead_status           : matchedLead?.lead_status || null,
+          call_status           : a.call_status || null,
+          call_status_at        : a.call_status_at || null,
           assessment_response_id: a.assessment_response_id || null,
           questionnaire_filled  : !!a.assessment_response_id,
         };
