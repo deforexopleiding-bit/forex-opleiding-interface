@@ -165,16 +165,27 @@ export default async function handler(req, res) {
     // confidence, reasoning) en joost-send-autonomous HTTP-response
     // (decision.mode, blocked_reason).
     const joost = {
-      ran:               false,
-      suggestion_id:     null,
-      suggested_reply:   null,
-      detected_intent:   null,
-      confidence:        null,
-      reasoning:         null,
-      mode:              null,
-      blocked_reason:    null,
-      autonomy_sent:     false,
-      note:              null,
+      ran:                 false,
+      suggestion_id:       null,
+      suggested_reply:     null,
+      detected_intent:     null,
+      confidence:          null,
+      reasoning:           null,
+      mode:                null,
+      blocked_reason:      null,
+      autonomy_sent:       false,
+      // Sandbox laat productie-blokkades bewust omzeilen zodat je Joost's
+      // toon ook bij "geblokkeerde" intents kan zien. Twee extra velden voor
+      // de UI zodat 't zichtbaar is wat prod GEDAAN zou hebben:
+      //   prod_would_send=true  → in productie was 't autonoom verstuurd
+      //   prod_would_send=false → prod had gezwegen; prod_block_reason bevat waarom
+      prod_would_send:     null,
+      prod_block_reason:   null,
+      // #786 — voor de fallback-insert-check verderop: als joost-send-autonomous
+      // z'n eigen outbound al persisteerde krijgen we z'n message-id terug
+      // en slaan we onze eigen fallback over.
+      sent_message_id:     null,
+      note:                null,
     };
     try {
       const { runJoostSuggest } = await import('./_lib/joost-suggest-core.js');
@@ -220,21 +231,36 @@ export default async function handler(req, res) {
             if (!r2.ok) {
               const txt = await r2.text().catch(() => '');
               joost.autonomy_sent = false;
+              joost.prod_would_send = false;
+              joost.prod_block_reason = 'HTTP ' + r2.status;
               joost.note = 'autonomie HTTP ' + r2.status + ': ' + (txt || '').slice(0, 160);
             } else {
               const j2 = await r2.json().catch(() => ({}));
-              joost.autonomy_sent = (j2.sent === true);
+              joost.autonomy_sent   = (j2.sent === true);
+              joost.sent_message_id = j2.message_id || null;
               // Mode en blocked_reason uit de decision-block naar de UI
               // (oefengesprek #783).
               if (j2.decision && typeof j2.decision === 'object') {
                 joost.mode = j2.decision.mode || null;
                 if (j2.decision.blocked_reason) joost.blocked_reason = j2.decision.blocked_reason;
               }
+              // Productie-uitkomst afleiden. Sandbox laat de send bewust
+              // door (test-override) → j2.sent kan true zijn terwijl prod
+              // 'em zou blokkeren. j2.prod_block_reason bevat dan de echte
+              // reden.
               if (j2.sent === true && j2.prod_block_reason) {
-                joost.note = 'prod zou blokkeren: ' + j2.prod_block_reason;
+                joost.prod_would_send = false;
+                joost.prod_block_reason = j2.prod_block_reason;
                 if (!joost.blocked_reason) joost.blocked_reason = j2.prod_block_reason;
-              } else if (j2.sent === false) {
-                if (!joost.blocked_reason) joost.blocked_reason = j2.blocked_reason || j2.db_status || 'onbekend';
+                joost.note = 'prod zou blokkeren: ' + j2.prod_block_reason;
+              } else if (j2.sent === true) {
+                joost.prod_would_send = true;
+                joost.prod_block_reason = null;
+              } else {
+                // sent=false: prod blokkeerde ook echt (geen sandbox-override).
+                joost.prod_would_send = false;
+                joost.prod_block_reason = j2.blocked_reason || j2.db_status || 'onbekend';
+                if (!joost.blocked_reason) joost.blocked_reason = joost.prod_block_reason;
                 joost.note = 'geblokkeerd: ' + joost.blocked_reason;
               }
             }
@@ -251,14 +277,21 @@ export default async function handler(req, res) {
       joost.note = 'joost fail-soft: ' + (e?.message || e);
     }
 
-    // Oefengesprek-fallback (#783): als de autonome send GEBLOKKEERD was
-    // (mode=draft, low confidence, out-of-mandate, …) is de suggested_reply
-    // wél gegenereerd maar staat 'ie NIET in whatsapp_messages. Voor het
-    // chat-oefengesprek moet Joost's antwoord vanaf de volgende turn wél
-    // context vormen. We loggen 'm daarom expliciet als direction='out' met
-    // een dry-run wamid. Alleen voor de sandbox-klant (customer.is_test) —
-    // dit gedrag bestaat in productie NIET.
-    if (joost.ran && joost.suggested_reply && !joost.autonomy_sent) {
+    // Oefengesprek-fallback (#783/#786): als er GEEN outbound-message
+    // geregistreerd is door joost-send-autonomous (sent_message_id ontbreekt),
+    // dan is Joost's antwoord wél gegenereerd maar staat 'ie NIET in
+    // whatsapp_messages. Kan bij:
+    //   * geblokkeerde send (mode=draft / low-conf / out-of-mandate)
+    //     → joost-send-autonomous returnt sent=false, geen insert
+    //   * autonome-send-fout tussen decision en insert (24u-window, Meta 502)
+    //     → dan willen we óók de suggested_reply zichtbaar hebben in de chat
+    //       zodat het gesprek context houdt.
+    // De check is `!sent_message_id` (i.p.v. de oudere `!autonomy_sent`)
+    // zodat we niet afgaan op een boolean die door de test-override wordt
+    // opgevuld terwijl de insert-stap tussenin nooit gehaald werd.
+    // Alleen voor de sandbox-klant (customer.is_test) — dit gedrag bestaat
+    // in productie NIET.
+    if (joost.ran && joost.suggested_reply && !joost.sent_message_id) {
       try {
         const outIso = new Date().toISOString();
         const outBody = String(joost.suggested_reply).trim().slice(0, 4096);
