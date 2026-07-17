@@ -26,6 +26,7 @@ import {
   executeResumeDunningStep,
 } from './dunning-step-executors.js';
 import { markOverdue } from './mentor-ledger-engine.js';
+import { resetJoostCountersForCustomer } from './dunning-arrangement-hooks.js';
 
 const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
 
@@ -546,6 +547,13 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
           .single();
         if (insErr) throw insErr;
 
+        // #798 — Nieuwe run = nieuwe incident-cap-budget. Reset Joost's per-
+        // conv-tellers voor deze klant zodat de 10-berichten-cap opnieuw
+        // begint bij dit incident. Fail-safe: geen reset bij twijfel (zie
+        // resetJoostCountersForCustomer).
+        try { await resetJoostCountersForCustomer(customerId); }
+        catch (e) { console.warn('[dunning-engine] joost-counter-reset fail-soft (new run):', customerId, e?.message || e); }
+
         const { error: logErr } = await supabaseAdmin
           .from('dunning_log')
           .insert({
@@ -646,6 +654,9 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
           event_type: 'completed',
           payload: { reason: 'paid' },
         });
+        // #798 — Incident is voorbij; reset Joost-tellers.
+        try { await resetJoostCountersForCustomer(run.customer_id); }
+        catch (e) { console.warn('[dunning-engine] joost-counter-reset fail-soft (paid):', run.customer_id, e?.message || e); }
         advanced++;
         continue;
       }
@@ -675,6 +686,9 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
           event_type: 'completed',
           payload: { reason: 'step_missing' },
         });
+        // #798 — Ook step_missing is een completion; reset Joost-tellers.
+        try { await resetJoostCountersForCustomer(run.customer_id); }
+        catch (e) { console.warn('[dunning-engine] joost-counter-reset fail-soft (step_missing):', run.customer_id, e?.message || e); }
         advanced++;
         continue;
       }
@@ -749,6 +763,14 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
         .from('dunning_workflow_runs')
         .update(update)
         .eq('id', run.id);
+
+      // #798 — Als deze step-advance de run heeft afgesloten (no_more_steps
+      // of stop_step), reset Joost-tellers alsnog. update.status === 'completed'
+      // is de enige robuuste signaal-check hier — dekt beide paden.
+      if (update.status === 'completed') {
+        try { await resetJoostCountersForCustomer(run.customer_id); }
+        catch (e) { console.warn('[dunning-engine] joost-counter-reset fail-soft (' + (update.completion_reason || 'step_advance') + '):', run.customer_id, e?.message || e); }
+      }
 
       advanced++;
     } catch (e) {

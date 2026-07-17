@@ -14,6 +14,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getClientIp } from './_lib/audit-customer.js';
+import { resetJoostCountersForCustomer } from './_lib/dunning-arrangement-hooks.js';
 
 const VALID_ACTIONS = ['pause', 'resume', 'cancel'];
 
@@ -85,6 +86,14 @@ export default async function handler(req, res) {
       .select('id, workflow_id, customer_id, status, current_step_id, next_action_at, started_at, completed_at, completion_reason, updated_at')
       .single();
     if (updErr) throw new Error('update: ' + updErr.message);
+
+    // #798 — Reset Joost's per-conv-tellers zodra deze run definitief dicht
+    // is (cancelled). Pause/resume-transities laten de tellers met rust; die
+    // gaan over ONDERBREKING van de run, niet over afsluiting van 't incident.
+    if (afterStatus === 'cancelled' && run.customer_id) {
+      try { await resetJoostCountersForCustomer(run.customer_id); }
+      catch (e) { console.warn('[dunning-run-control] joost-counter-reset fail-soft (cancel):', run.customer_id, e?.message || e); }
+    }
 
     // dunning_log entry (informatief, falen mag niet de actie breken).
     try {

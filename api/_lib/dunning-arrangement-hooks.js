@@ -132,11 +132,18 @@ export async function completeRunsFromArrangement(arrangementId) {
       })
       .eq('paused_by_arrangement_id', arrangementId)
       .eq('status', 'paused')
-      .select('id');
+      .select('id, customer_id');
     if (error) throw error;
     const count = Array.isArray(data) ? data.length : 0;
     if (count > 0) {
       console.log(`[arrangement-hook] afgesloten ${count} runs (arrangement ${arrangementId} nagekomen)`);
+      // #798 — reset Joost-tellers voor élke unieke klant wiens run
+      // is afgesloten. Fail-safe: eventuele fout blokkeert de completion niet.
+      const uniqueCustomers = Array.from(new Set(data.map((r) => r.customer_id).filter(Boolean)));
+      for (const cid of uniqueCustomers) {
+        try { await resetJoostCountersForCustomer(cid); }
+        catch (e) { console.warn('[arrangement-hook] joost-counter-reset fail-soft:', cid, e?.message || e); }
+      }
     }
     return { ok: true, completed_count: count };
   } catch (e) {
@@ -367,5 +374,108 @@ export async function unpauseRunsForConversation(conversationId) {
   } catch (e) {
     console.warn('[conv-hook unpauseRunsForConversation] fail-soft:', e?.message || e);
     return { ok: false, resumed_count: 0, still_paused_count: 0, error: e?.message || String(e) };
+  }
+}
+
+/**
+ * Reset Joost's per-conversation counters voor deze klant. Bedoeld om aan te
+ * roepen bij dunning-run-start (nieuwe run = nieuwe incident-cap-budget van
+ * 10 berichten) en bij dunning-run-completion (paid / arrangement_nagekomen /
+ * manual_cancel / no_more_steps).
+ *
+ * SCOPE: ALLEEN finance-conversations. joost_conversation_state is een
+ * gedeelde tabel — Simone (events) leest en schrijft dezelfde velden voor
+ * conversations die aan het events-WABA-nummer hangen. Zonder module-scope
+ * zou een dunning-run-completion Simone's cap wegpoetsen.
+ *
+ * FAIL-SAFE (bewust anders dan andere hooks hier):
+ *   Bij een module-lookup fout resetten we NIETS en loggen we een warning.
+ *   We vallen NOOIT terug op "reset dan maar alle conversations van deze
+ *   klant" — dat zou Simone's teller kunnen wegpoetsen. Semantiek: een
+ *   gemiste reset betekent hooguit dat Joost eerder stilvalt, wat vervelend
+ *   is maar niet gevaarlijk. Een over-brede reset kan Simone kapotmaken.
+ *
+ * Reset-velden (autonomy_paused_until / _reason WORDEN NIET GERAAKT — dat
+ * is een expliciete beslissing die niet als bijproduct van een run-flip
+ * mag verdwijnen):
+ *   - messages_sent_today      → 0
+ *   - messages_sent_today_date → NULL (eerstvolgende send seedt 'em)
+ *   - messages_sent_total      → 0 (de kern van #798)
+ *   - last_message_sent_at     → NULL (cooldown-teller weg)
+ *   - no_reply_streak_count    → 0
+ *   - updated_at               → now()
+ *
+ * @param {string} customerId  uuid — klant wiens finance-conversations
+ *                             gereset moeten worden.
+ * @returns {Promise<{ ok:boolean, conversations_reset:number, error?:string }>}
+ */
+export async function resetJoostCountersForCustomer(customerId) {
+  if (!customerId) return { ok: false, conversations_reset: 0, error: 'customerId vereist' };
+  try {
+    // Stap 1 — bepaal welke phone_number_ids finance-lijnen zijn. Bij een
+    // lookup-fout (of 0 finance-lijnen actief) → NIETS resetten. Simone-veilig.
+    const { data: financeCfg, error: cfgErr } = await supabaseAdmin
+      .from('whatsapp_module_config')
+      .select('phone_number_id')
+      .eq('module', 'finance')
+      .eq('is_active', true);
+    if (cfgErr) {
+      console.warn('[joost-counter-reset] whatsapp_module_config lookup fail — NIETS resetten (Simone-safe):', cfgErr.message);
+      return { ok: false, conversations_reset: 0, error: cfgErr.message };
+    }
+    const financePnIds = (Array.isArray(financeCfg) ? financeCfg : [])
+      .map((r) => r?.phone_number_id)
+      .filter(Boolean);
+    if (financePnIds.length === 0) {
+      console.warn('[joost-counter-reset] geen actieve finance-lijnen in whatsapp_module_config — NIETS resetten (Simone-safe) customer', customerId);
+      return { ok: false, conversations_reset: 0, error: 'no_active_finance_lines' };
+    }
+
+    // Stap 2 — vind de finance-conversations van deze klant. Bewust NIET
+    // ook conversations met NULL phone_number_id meepakken: die zouden in
+    // theorie via een adopt-bug bij events-inbound kunnen zijn ontstaan.
+    // Bij twijfel niet resetten.
+    const { data: convs, error: convErr } = await supabaseAdmin
+      .from('whatsapp_conversations')
+      .select('id')
+      .eq('customer_id', customerId)
+      .in('phone_number_id', financePnIds);
+    if (convErr) {
+      console.warn('[joost-counter-reset] whatsapp_conversations lookup fail — NIETS resetten:', convErr.message);
+      return { ok: false, conversations_reset: 0, error: convErr.message };
+    }
+    const convIds = (Array.isArray(convs) ? convs : []).map((r) => r?.id).filter(Boolean);
+    if (convIds.length === 0) {
+      // Geen finance-conv voor deze klant — niet ongewoon, gewoon skip.
+      return { ok: true, conversations_reset: 0 };
+    }
+
+    // Stap 3 — reset de counters. Als er nog geen state-rij is voor een
+    // conversation, is er ook niets te resetten (defaults zijn 0 / NULL).
+    const nowIso = new Date().toISOString();
+    const { data: updated, error: updErr } = await supabaseAdmin
+      .from('joost_conversation_state')
+      .update({
+        messages_sent_today:      0,
+        messages_sent_today_date: null,
+        messages_sent_total:      0,
+        last_message_sent_at:     null,
+        no_reply_streak_count:    0,
+        updated_at:               nowIso,
+      })
+      .in('conversation_id', convIds)
+      .select('conversation_id');
+    if (updErr) {
+      console.warn('[joost-counter-reset] joost_conversation_state update fail:', updErr.message);
+      return { ok: false, conversations_reset: 0, error: updErr.message };
+    }
+    const count = Array.isArray(updated) ? updated.length : 0;
+    if (count > 0) {
+      console.log(`[joost-counter-reset] reset ${count} finance-conv(s) voor klant ${customerId}`);
+    }
+    return { ok: true, conversations_reset: count };
+  } catch (e) {
+    console.warn('[joost-counter-reset] fail-soft:', e?.message || e);
+    return { ok: false, conversations_reset: 0, error: e?.message || String(e) };
   }
 }
