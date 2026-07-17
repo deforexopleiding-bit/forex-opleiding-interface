@@ -150,7 +150,7 @@ const JOOST_TOOL = {
       promised_date_hint: {
         type: ['string', 'null'],
         description:
-          'Datum die je afleidt uit wat de klant zegt, in YYYY-MM-DD. Huidige datum staat in je context-block (Vandaag: <weekdag> <datum>). Null als je de datum niet ondubbelzinnig kunt afleiden. Noem deze datum in je suggested_reply als BEVESTIGINGSVRAAG ("klopt die datum?") zodat de klant kan corrigeren als je fout gokt. Leg nooit zelf iets vast — een collega bevestigt.',
+          'Datum die je afleidt uit wat de klant zegt, in YYYY-MM-DD. Huidige datum staat in je context-block (Vandaag: <weekdag> <datum>). Null als je de datum niet ondubbelzinnig kunt afleiden. Noem deze datum in je suggested_reply als BEVESTIGINGSVRAAG ("klopt die datum?") zodat de klant kan corrigeren als je fout gokt. Leg nooit zelf iets vast. Een collega bevestigt.',
       },
     },
     required: ['suggested_reply', 'detected_intent', 'confidence', 'reasoning'],
@@ -689,9 +689,9 @@ export async function runJoostSuggest({
     // verboden (Joost moet escaleren, geen voorstel doen).
     let hardMinStr = '';
     if (customerMonthlyPayment.hasSubscription && minTermijnBedrag != null) {
-      hardMinStr = ` HARDE ONDERGRENS per termijn: EUR ${fmtEur(minTermijnBedrag)} (het maandbedrag van deze klant — z'n eigen betaal-ritme). Termijnen die daaronder liggen zijn VERBODEN.`;
+      hardMinStr = ` HARDE ONDERGRENS per termijn: EUR ${fmtEur(minTermijnBedrag)} (het maandbedrag van deze klant, z'n eigen betaal-ritme). Termijnen die daaronder liggen zijn VERBODEN.`;
     } else {
-      hardMinStr = ` LET OP: deze klant heeft geen actief abonnement — SPLITSING is voor deze klant NIET toegestaan. Bied GEEN regeling, verwijs naar een medewerker.`;
+      hardMinStr = ` LET OP: deze klant heeft geen actief abonnement. SPLITSING is voor deze klant NIET toegestaan. Bied GEEN regeling, verwijs naar een medewerker.`;
     }
     mandateLines.push(
       `SPLITSING: max ${termijnenStr} termijnen. ` +
@@ -804,7 +804,7 @@ export async function runJoostSuggest({
   ctxLines.push('  * proposal_uitstel_dagen       = aantal dagen (bij UITSTEL)');
   ctxLines.push('  * proposal_termijn_bedrag_eur  = EUR per termijn (bij SPLITSING) of totaal (bij UITSTEL)');
   ctxLines.push('Zonder deze velden kan het mandaat niet gecheckt worden en escaleert je voorstel automatisch.');
-  ctxLines.push('Bij een VERHELDERENDE VRAAG ("over hoeveel termijnen dacht je?") laat je ze op null — dat is GEEN voorstel.');
+  ctxLines.push('Bij een VERHELDERENDE VRAAG ("over hoeveel termijnen dacht je?") laat je ze op null. Dat is GEEN voorstel.');
   ctxLines.push('---');
   // #801 + #802 — Anti-hallucinatie framing voor payment_promise +
   // arrangement_request. Twee regels: (1) nooit doen alsof je iets VASTLEGT;
@@ -817,15 +817,15 @@ export async function runJoostSuggest({
   ctxLines.push('    Verboden woorden: "genoteerd", "vastgelegd", "geregeld", "staat genoteerd", "ik heb het erin gezet".');
   ctxLines.push('    Wel: herhaal wat de klant zei en zeg dat een collega het vastlegt. Voorbeeld:');
   ctxLines.push('      Klant: "vrijdag betaal ik hem"');
-  ctxLines.push('      Jij:   "Ik geef door dat je vrijdag betaalt — een collega legt het vast en houdt het bij."');
+  ctxLines.push('      Jij:   "Ik geef door dat je vrijdag betaalt. Een collega legt het vast en houdt het bij."');
   ctxLines.push('  * Bij arrangement_request STEL je een regeling VOOR, je zegt NIET dat het al geregeld is.');
   ctxLines.push('    Verboden: "afgesproken", "geregeld", "je krijgt X dagen uitstel" (klinkt als toezegging).');
-  ctxLines.push('    Wel: "Mijn voorstel is X termijnen van Y — een collega bevestigt dit."');
+  ctxLines.push('    Wel: "Mijn voorstel is X termijnen van Y. Een collega bevestigt dit."');
   ctxLines.push('  * DATUM ALS BEVESTIGINGSVRAAG (payment_promise): als je promised_date_hint kunt afleiden');
   ctxLines.push('    (bv. klant zegt "vrijdag" en vandaag is donderdag 24 juli → hint = 2026-07-25), NOEM je die');
-  ctxLines.push('    datum WEL in suggested_reply — maar als CONTROLEVRAAG, niet als toezegging. Voorbeeld:');
+  ctxLines.push('    datum WEL in suggested_reply, maar als CONTROLEVRAAG en niet als toezegging. Voorbeeld:');
   ctxLines.push('      Klant: "vrijdag betaal ik"');
-  ctxLines.push('      Jij:   "Ik geef door dat je vrijdag 25 juli betaalt — klopt die datum? Een collega legt het vast."');
+  ctxLines.push('      Jij:   "Ik geef door dat je vrijdag 25 juli betaalt. Klopt die datum? Een collega legt het vast."');
   ctxLines.push('    Zwijgen laat een misverstand staan tot de betaling uitblijft. Hardop vragen laat de klant meteen');
   ctxLines.push('    corrigeren als je fout gokte. Corrigeert de klant ("nee, volgende week"): neem in je');
   ctxLines.push('    VOLGENDE antwoord de nieuwe datum over in raw + hint en bevestig die opnieuw.');
@@ -850,7 +850,7 @@ export async function runJoostSuggest({
   if (anthropicMessages.length === 0) {
     anthropicMessages.push({
       role: 'user',
-      content: '[Geen recente klant-berichten beschikbaar — geef een open vraag terug.]',
+      content: '[Geen recente klant-berichten beschikbaar. Geef een open vraag terug.]',
     });
   } else if (anthropicMessages[anthropicMessages.length - 1].role === 'assistant') {
     anthropicMessages.push({
