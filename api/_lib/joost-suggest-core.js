@@ -146,7 +146,7 @@ const JOOST_TOOL = {
       promised_date_hint: {
         type: ['string', 'null'],
         description:
-          'YYYY-MM-DD als je datum ondubbelzinnig kunt afleiden uit klantwoord + huidige datum (staat in context-block). Null bij vaag ("zsm", "na mijn salaris") of geen datum. NOOIT hardop noemen tegen klant — is voor de mens die bevestigt.',
+          'YYYY-MM-DD als je datum ondubbelzinnig kunt afleiden uit klantwoord + huidige datum (staat in context-block). Null bij vaag ("zsm", "na mijn salaris") of geen datum. #802 — Als je de hint invult, NOEM de datum in je suggested_reply als bevestigingsvraag (bv. "vrijdag 24 juli — klopt dat?"). Zwijgen laat een misverstand staan; hardop vragen laat de klant corrigeren.',
       },
     },
     required: ['suggested_reply', 'detected_intent', 'confidence', 'reasoning'],
@@ -802,9 +802,12 @@ export async function runJoostSuggest({
   ctxLines.push('Zonder deze velden kan het mandaat niet gecheckt worden en escaleert je voorstel automatisch.');
   ctxLines.push('Bij een VERHELDERENDE VRAAG ("over hoeveel termijnen dacht je?") laat je ze op null — dat is GEEN voorstel.');
   ctxLines.push('---');
-  // #801 — Anti-hallucinatie framing voor payment_promise + arrangement_request.
-  // Twee harde regels: (1) nooit doen alsof je iets vastlegt; (2) bij een
-  // datum-hint die je afleidt: NOOIT hardop tegen de klant.
+  // #801 + #802 — Anti-hallucinatie framing voor payment_promise +
+  // arrangement_request. Twee regels: (1) nooit doen alsof je iets VASTLEGT;
+  // (2) een datum die je AFLEIDT mag je WEL hardop noemen — als
+  // BEVESTIGINGSVRAAG, niet als toezegging. Zwijgen laat een misverstand
+  // staan tot de betaling uitblijft; hardop vragen laat de klant meteen
+  // corrigeren.
   ctxLines.push('GEEN VALSE TOEZEGGINGEN (payment_promise + arrangement_request):');
   ctxLines.push('  * Bij payment_promise (klant belooft te betalen) mag je NOOIT suggereren dat je iets hebt vastgelegd.');
   ctxLines.push('    Verboden woorden: "genoteerd", "vastgelegd", "geregeld", "staat genoteerd", "ik heb het erin gezet".');
@@ -814,10 +817,18 @@ export async function runJoostSuggest({
   ctxLines.push('  * Bij arrangement_request STEL je een regeling VOOR, je zegt NIET dat het al geregeld is.');
   ctxLines.push('    Verboden: "afgesproken", "geregeld", "je krijgt X dagen uitstel" (klinkt als toezegging).');
   ctxLines.push('    Wel: "Mijn voorstel is X termijnen van Y — een collega bevestigt dit."');
-  ctxLines.push('  * DATUM-HINT NOOIT HARDOP: als je promised_date_hint invult (bv. 2026-11-22), NOEM die datum NIET');
-  ctxLines.push('    in suggested_reply. Herhaal het letterlijke klantwoord ("vrijdag", "eind van de maand"). Reden:');
-  ctxLines.push('    de hint is voor de mens die het straks bevestigt. Als je fout gokt en dat toch zegt, heeft de klant');
-  ctxLines.push('    een bevestiging met een verkeerde datum — erger dan geen datum.');
+  ctxLines.push('  * DATUM ALS BEVESTIGINGSVRAAG (payment_promise): als je promised_date_hint kunt afleiden');
+  ctxLines.push('    (bv. klant zegt "vrijdag" en vandaag is donderdag 24 juli → hint = 2026-07-25), NOEM je die');
+  ctxLines.push('    datum WEL in suggested_reply — maar als CONTROLEVRAAG, niet als toezegging. Voorbeeld:');
+  ctxLines.push('      Klant: "vrijdag betaal ik"');
+  ctxLines.push('      Jij:   "Ik geef door dat je vrijdag 25 juli betaalt — klopt die datum? Een collega legt het vast."');
+  ctxLines.push('    Zwijgen laat een misverstand staan tot de betaling uitblijft. Hardop vragen laat de klant meteen');
+  ctxLines.push('    corrigeren als je fout gokte. Corrigeert de klant ("nee, volgende week"): neem in je');
+  ctxLines.push('    VOLGENDE antwoord de nieuwe datum over in raw + hint en bevestig die opnieuw.');
+  ctxLines.push('  * GEEN DATUM AFLEIDBAAR (hint = null): NIET zelf een datum verzinnen. Vraag om een concrete dag.');
+  ctxLines.push('    Voorbeeld:');
+  ctxLines.push('      Klant: "ik betaal na mijn salaris"');
+  ctxLines.push('      Jij:   "Wanneer verwacht je dat ongeveer? Dan geef ik dat door aan een collega."');
   ctxLines.push('---');
 
   const fullSystemPrompt = `${systemPrompt}\n\n${ctxLines.join('\n')}`;
