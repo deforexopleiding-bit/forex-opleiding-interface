@@ -638,6 +638,18 @@
     .joost-og-prod-row.prod-block .joost-og-prod-dot { background:#c2410c; }
     .joost-og-prod-row.prod-block strong { font-weight:700; }
 
+    /* Inline rate-limit-melding onder klantbubbel (#796). Rendert rechts
+       uitgelijnd zodat 't visueel aan Jeffrey's kant hangt, niet aan Joost. */
+    .joost-og-rate-limit {
+      align-self:flex-end; max-width:70%;
+      margin:2px 6px 12px 0; padding:5px 8px;
+      display:inline-flex; align-items:center; gap:6px;
+      font-size:11.5px; font-weight:500;
+      background:#fff7ed; color:#7c2d12; border:1px solid #fed7aa; border-radius:6px;
+    }
+    .joost-og-rate-limit .joost-og-prod-dot { background:#c2410c; }
+    .joost-og-rate-limit strong { font-weight:700; }
+
     /* Compose */
     .joost-og-compose { position:static; background:transparent; border-top:0; padding:0; box-shadow:none; }
     .joost-og-compose .inbox-c-compose-textarea { background:#fff; }
@@ -16513,6 +16525,9 @@
     intentModes: {},       // { arrangement_request: 'draft', payment_promise: 'autonomous', ... }
     loading:     false,
     lastJoost:   null,
+    // #796 — setInterval handle voor de rate-limit countdown; opgeruimd bij
+    // reload/reset zodat er niet meerdere tellers naast elkaar draaien.
+    rateLimitTimerId: null,
   };
   // Sinds intent-namen-consolidatie (2026-07-17): intent-keys in
   // autonomy_config.intents komen 1-op-1 uit DETECTED_INTENTS van het LLM.
@@ -16733,6 +16748,13 @@
       // (rechts, groen); DB `direction='out'` (Joost) als inbound (links,
       // grijs). De sender-labels ("Jij (klant)" / "Joost") worden via CSS
       // gescoped op #joostOgThread override — zie style-blok r462+.
+      // #796 — Rate-limit-melding: als Joost niet reageerde omdat de suggest-
+      // rate-limit sloeg (429), toon dat inline onder het laatste klant-
+      // bericht in plaats van als stilte. Sandbox-endpoint zet
+      // rate_limited=true + retry_after_seconds als joost-suggest-core een
+      // 429 gooit ondanks skipRateLimit (bv. Anthropic zelf).
+      const rateLimitedJoost = _joostOg.lastJoost && _joostOg.lastJoost.rate_limited === true
+        ? _joostOg.lastJoost : null;
       const rows = items.map((m, idx) => {
         const dir  = String(m.direction || '').toLowerCase();
         // Bewuste whitelist: alleen expliciet 'out'/'outbound' rendert links
@@ -16754,6 +16776,11 @@
         // scope voor #784).
         const isLatestOut = (!isKlant) && (idx === items.length - 1);
         const metaHtml = isLatestOut ? _joostOgJoostMetaHtml(_joostOg.lastJoost) : '';
+        // Rate-limit inline-melding onder het LAATSTE klant-bericht (zodat
+        // je meteen ziet waarom Joost niet reageert).
+        const isLatestIn = isKlant && (idx === items.length - 1);
+        const rateLimitHtml = (isLatestIn && rateLimitedJoost)
+          ? _joostOgRateLimitHtml(rateLimitedJoost.retry_after_seconds) : '';
         return `
           <div class="inbox-c-msg ${outClass}${sameSender ? ' same-sender' : ''}">
             <div class="inbox-c-msg-bubble">
@@ -16761,10 +16788,11 @@
               <span class="bubble-meta">${esc(time)}</span>
             </div>
           </div>
-          ${metaHtml}`;
+          ${metaHtml}${rateLimitHtml}`;
       }).join('');
       thread.innerHTML = rows;
       thread.scrollTop = thread.scrollHeight;
+      _joostOgBindRateLimitCountdown();
     } catch (e) {
       console.warn('[joost-og reload]', e?.message || e);
       thread.innerHTML = `<div class="joost-og-empty" style="color:#dc2626">Kon berichten niet laden: ${esc(e?.message || 'onbekend')}</div>`;
@@ -16776,6 +16804,45 @@
     try {
       return new Intl.DateTimeFormat('nl-NL', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
     } catch (_) { return ''; }
+  }
+
+  // #796 — Inline melding "Joost wacht — nog X sec." onder klantbubbel bij
+  // een 429 uit joost-suggest-core. Rendert een compacte oranje pill die
+  // aftikt naar 0; de timer zit in _joostOg.rateLimitTimerId zodat 'ie
+  // opgeruimd wordt bij reload/reset.
+  function _joostOgRateLimitHtml(retryAfterSec) {
+    const s = Math.max(1, parseInt(retryAfterSec, 10) || 30);
+    return `
+      <div class="joost-og-rate-limit" data-rate-limit-timer="${s}">
+        <span class="joost-og-prod-dot"></span>
+        <span>Joost wacht even — nog <strong data-rate-limit-count>${s}</strong> seconden.</span>
+      </div>`;
+  }
+
+  // Bind de countdown na render. Wordt aangeroepen door _joostOgReloadMessages
+  // ná thread.innerHTML=rows. Zoekt het [data-rate-limit-timer]-element en
+  // laat de teller aftellen tot 0; daarna verandert de tekst.
+  function _joostOgBindRateLimitCountdown() {
+    if (_joostOg.rateLimitTimerId) {
+      clearInterval(_joostOg.rateLimitTimerId);
+      _joostOg.rateLimitTimerId = null;
+    }
+    const thread = document.getElementById('joostOgThread');
+    if (!thread) return;
+    const el = thread.querySelector('[data-rate-limit-timer]');
+    if (!el) return;
+    let remaining = parseInt(el.getAttribute('data-rate-limit-timer'), 10) || 30;
+    const countEl = el.querySelector('[data-rate-limit-count]');
+    _joostOg.rateLimitTimerId = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        clearInterval(_joostOg.rateLimitTimerId);
+        _joostOg.rateLimitTimerId = null;
+        el.innerHTML = '<span class="joost-og-prod-dot"></span><span>Rate-limit voorbij — typ nog een bericht.</span>';
+        return;
+      }
+      if (countEl) countEl.textContent = String(remaining);
+    }, 1000);
   }
 
   function _joostOgJoostMetaHtml(j) {
@@ -16853,7 +16920,9 @@
         // altijd (zodat je de toon kunt beoordelen); of prod 'em ook echt
         // had gestuurd is een aparte vraag.
         const jo = d?.joost || {};
-        if (!jo.ran) {
+        if (jo.rate_limited === true) {
+          status.textContent = 'Joost wacht — rate-limit (' + (jo.retry_after_seconds || 30) + 's).';
+        } else if (!jo.ran) {
           status.textContent = 'Joost heeft niet gereageerd — ' + (jo.note || 'onbekende reden');
         } else if (jo.prod_would_send === true) {
           status.textContent = 'Joost antwoordt — in productie was dit verstuurd.';
