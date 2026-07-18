@@ -11054,6 +11054,16 @@
         drop.innerHTML = '<div style="padding:10px 12px;font-size:12.5px;color:var(--text-faint)">' + html + '</div>';
       }
 
+      // Per source: icoon-glyph + korte badge-label + kleurtint. Wordt in de
+      // dropdown-render onder de naam getoond zodat de user meteen ziet uit
+      // welke bron (lead/afspraak/event/retentie) de hit komt.
+      const SOURCE_META = {
+        lead:        { icon: 'ti-user',           label: 'Werklijst',  bg: 'rgba(14,124,107,0.10)',  color: '#0e7c6b' },
+        appointment: { icon: 'ti-calendar-event', label: 'Afspraak',   bg: 'rgba(59,130,246,0.10)',  color: '#2563eb' },
+        event:       { icon: 'ti-presentation',   label: 'Event',      bg: 'rgba(139,92,246,0.10)',  color: '#7c3aed' },
+        retention:   { icon: 'ti-refresh',        label: 'Retentie',   bg: 'rgba(234,179,8,0.12)',   color: '#a16207' },
+      };
+
       function _fuGsRenderResults(items) {
         if (!items.length) { _fuGsShowMessage('Geen resultaten.'); return; }
         drop.style.display = 'block';
@@ -11062,16 +11072,18 @@
           const phone = it.lead_phone ? esc(it.lead_phone) : '';
           const email = it.lead_email ? esc(it.lead_email) : '';
           const meta  = [phone, email].filter(Boolean).join(' · ');
+          const sMeta = SOURCE_META[it.source] || SOURCE_META.lead;
           const stLbl = it.source === 'lead'
-            ? (it.lead_status ? esc(it.lead_status) : 'lead')
-            : (it.status ? 'afspraak · ' + esc(it.status) : 'afspraak');
+            ? (it.lead_status ? esc(it.lead_status) : sMeta.label)
+            : (it.source === 'appointment' && it.status ? sMeta.label + ' · ' + esc(it.status) : sMeta.label);
+          const stBadge = '<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:' + sMeta.bg + ';color:' + sMeta.color + ';white-space:nowrap">' + stLbl + '</span>';
           return '<div class="fu-gs-item" role="option" data-fu-gs-idx="' + idx + '"' +
             ' style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:10px;align-items:center">' +
             '<div style="min-width:0"><div style="font-weight:600;font-size:13px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
-              '<i class="ti ' + (it.source === 'appointment' ? 'ti-calendar-event' : 'ti-user') + '" style="color:#0891b2;margin-right:4px"></i>' + esc(nm) + '</div>' +
+              '<i class="ti ' + sMeta.icon + '" style="color:' + sMeta.color + ';margin-right:4px"></i>' + esc(nm) + '</div>' +
               (meta ? '<div style="font-size:11.5px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + meta + '</div>' : '') +
             '</div>' +
-            '<span style="font-size:11px;color:var(--text-faint);white-space:nowrap">' + stLbl + '</span>' +
+            stBadge +
           '</div>';
         }).join('');
         // Hover-styling via inline JS (kort blok, geen extra CSS).
@@ -11137,30 +11149,91 @@
       });
 
       // Open resultaat in werklijst via pending-lead-open handshake (r5203/5422).
-      // Zowel lead-hit als appointment-hit gaan door dezelfde flow: we bouwen
-      // een leadObj-vorm die loadLeadsTab kan her-injecteren, zetten de vars,
-      // en schakelen naar de leads-tab. loadLeadsTab consumeert de handshake
-      // NA de server-fetch en roept selectLead(lid) — zelfde patroon als
-      // _nsCallItem en _ebCallAttendee.
-      function _fuGsOpenInWorklist(hit) {
+      // Vier scenario's:
+      //   - hit.source === 'lead'        → open_target.lead_id direct → handshake.
+      //   - hit.source === 'appointment' → geen lead_id (appointment is een
+      //     eigen entiteit). Synthetisch object re-injecteren; UI toont 'em
+      //     zoals #822 al deed.
+      //   - hit.source === 'event'       → lazy-create lead via
+      //     /api/event-followup-to-lead met attendee_id → nieuw lead_id →
+      //     handshake. Idempotent server-side (already-check).
+      //   - hit.source === 'retention'   → lazy-create lead via
+      //     /api/sales-retention-to-followup met customer_id → nieuw lead_id
+      //     → handshake. Idempotent server-side (already-check).
+      //
+      // Voor scenario 3/4 tonen we tijdens de lazy-create een loading-state
+      // in het inp-veld (kort '...') zodat de user weet dat er iets gebeurt.
+      // De synthetische leadObj wordt ook voor die scenario's alvast klaar-
+      // gezet zodat loadLeadsTab z'n her-injectie kan doen als de server-
+      // fetch de lead nog niet toont (RLS-cache / snelle round-trip).
+      async function _fuGsOpenInWorklist(hit) {
         _fuGsCloseDropdown();
-        // Vorm de leadObj die _leadsState.items verwacht (minimale set voor
-        // renderCockpitCard). Appointment-hits krijgen source='appointment'
-        // en __worklistKind='bel' zodat ze in de bel-branch vallen.
-        const leadObj = {
-          id:               hit.id,
-          lead_name:        hit.lead_name || '',
-          lead_email:       hit.lead_email || null,
-          lead_phone:       hit.lead_phone || null,
-          source:           hit.source === 'appointment' ? 'appointment' : (hit.lead_source || 'manual'),
-          lead_status:      hit.lead_status || null,
-          lead_kind:        'call',
-          __worklistKind:   'bel',
+        const src = String(hit.source || 'lead');
+        let leadId = hit.open_target?.lead_id || (src === 'lead' ? hit.id : null);
+
+        // Synthetisch leadObj voor re-injectie (renderCockpitCard heeft
+        // minimaal id/naam/telefoon nodig).
+        const buildLeadObj = (id) => ({
+          id,
+          lead_name:         hit.lead_name || '',
+          lead_email:        hit.lead_email || null,
+          lead_phone:        hit.lead_phone || null,
+          source:            src === 'appointment' ? 'appointment'
+                              : src === 'event' ? 'event'
+                              : src === 'retention' ? 'retention'
+                              : (hit.lead_source || 'manual'),
+          lead_status:       hit.lead_status || 'nieuw',
+          lead_kind:         'call',
+          __worklistKind:    'bel',
           _fromGlobalSearch: true,
-        };
+        });
+
+        // Lazy-create-scenario: event/retention zonder bekende lead_id.
+        if (!leadId && (src === 'event' || src === 'retention')) {
+          const prevPh = inp.placeholder;
+          try {
+            inp.disabled = true;
+            inp.placeholder = 'Lead voorbereiden…';
+            if (src === 'event') {
+              const attendeeId = hit.open_target?.attendee_id || hit.id;
+              if (!attendeeId) throw new Error('attendee_id ontbreekt');
+              const r = await window.AgentShared.apiFetch('/api/event-followup-to-lead', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ attendee_id: attendeeId }),
+              });
+              const d = await r.json().catch(() => ({}));
+              if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+              leadId = d.lead_id || null;
+            } else if (src === 'retention') {
+              const customerId = hit.open_target?.customer_id || null;
+              if (!customerId) throw new Error('customer_id ontbreekt');
+              const r = await window.AgentShared.apiFetch('/api/sales-retention-to-followup', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ customer_id: customerId }),
+              });
+              const d = await r.json().catch(() => ({}));
+              if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+              leadId = d.lead_id || null;
+            }
+          } catch (e) {
+            console.error('[fu-globalsearch] lazy-create-lead:', e?.message || e);
+            window.AgentShared?.showToast?.('Kon geen lead maken: ' + (e?.message || 'onbekend'), 'error');
+            inp.disabled = false;
+            inp.placeholder = prevPh;
+            return;
+          } finally {
+            inp.disabled = false;
+            inp.placeholder = prevPh;
+          }
+        }
+
+        // Fallback: appointment-hit → gebruik appointment-id als synthetisch
+        // "lead"-id (bestaand #822-gedrag). loadLeadsTab her-injecteert 'em.
+        if (!leadId) leadId = hit.id;
+
         try {
-          _pendingLeadOpen = hit.id;
-          _pendingLeadObj  = leadObj;
+          _pendingLeadOpen = leadId;
+          _pendingLeadObj  = buildLeadObj(leadId);
         } catch (_) { /* setters bestaan altijd in dezelfde scope */ }
         try {
           if (typeof switchTab === 'function') switchTab('leads');
