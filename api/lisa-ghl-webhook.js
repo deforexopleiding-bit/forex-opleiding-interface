@@ -67,6 +67,24 @@ export default async function handler(req, res) {
     if (type !== 'IG' || direction !== 'inbound') return res.status(200).json({ skipped: 'not_ig_inbound' });
     if (!contactId || !message) return res.status(200).json({ skipped: 'missing_fields' });
 
+    // Meta/UTM-attributie vangen — body.contact bevat de attributionSource +
+    // lastAttributionSource al vanuit GHL's webhook, dus geen extra fetch.
+    // Best-effort + dynamic import (helper is nog niet overal beschikbaar
+    // bij eerste deploy zonder de #820-lead-attribution migratie).
+    if (body?.contact) {
+      try {
+        const { upsertLeadAttribution } = await import('./_lib/lead-attribution.js');
+        await upsertLeadAttribution({
+          ghl_contact_id: contactId,
+          email:          body.contact.email || null,
+          phone:          body.contact.phone || null,
+          attr:           body.contact,
+        });
+      } catch (e) {
+        console.warn('[lisa-webhook] attribution upsert:', e?.message || e);
+      }
+    }
+
     // 3. Settings + webhook-tracking
     const { data: settings } = await supabaseAdmin.from('lisa_settings')
       .select('*')
