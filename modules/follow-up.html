@@ -11097,12 +11097,20 @@
     })();
 
     // ═══════════════════════════════════════════════════════════════════
-    // Globale zoekbalk (boven de tabs) — zoek klant op naam/tel/e-mail
-    // → klik opent 'em in de werklijst-cockpit via de pending-lead-open
-    // handshake. Setter #3 na _nsCallItem (Opvolglijst) en _ebCallAttendee
-    // (Event-bellijst). Endpoint: /api/follow-up-search (RBAC-gated).
+    // Globale zoekbalk in de werklijst-listbar — zoek klant op naam/tel/
+    // e-mail. Klik opent 'em in de werklijst-cockpit via de pending-lead-
+    // open handshake. Setter #3 na _nsCallItem (Opvolglijst) en
+    // _ebCallAttendee (Event-bellijst). Endpoint: /api/follow-up-search
+    // (RBAC-gated).
+    //
+    // WAAROM DOMContentLoaded-wrap: sinds #825 staat de dropdown-div
+    // #fu-globalsearch-results body-level (na dit script-blok in de HTML).
+    // Als we deze setup direct als IIFE zouden draaien tijdens parse,
+    // bestaat #fu-globalsearch-results nog niet → getElementById returnt
+    // null → guard `if (!inp || !drop) return;` slaat de setup over →
+    // geen input-handler → nooit suggesties. Zie regressie-fix na #825.
     // ═══════════════════════════════════════════════════════════════════
-    (function setupGlobalSearch() {
+    function setupGlobalSearch() {
       const inp    = document.getElementById('fu-globalsearch-input');
       const drop   = document.getElementById('fu-globalsearch-results');
       const clrBtn = document.getElementById('fu-globalsearch-clear');
@@ -11328,7 +11336,17 @@
           if (typeof switchTab === 'function') switchTab('leads');
         } catch (e) { console.error('[fu-globalsearch] switchTab:', e?.message || e); }
       }
-    })();
+    }
+    // Fire setupGlobalSearch pas als de body-level #fu-globalsearch-results
+    // dropdown-div bestaat. Bij script-parse is die er nog niet (staat verderop
+    // in de HTML sinds #825). readyState-check zodat we niet onnodig een
+    // DOMContentLoaded round-trip afwachten als dit script al vlak vóór
+    // </body> parsed wordt terwijl document.readyState !== 'loading'.
+    if (document.readyState !== 'loading') {
+      setupGlobalSearch();
+    } else {
+      document.addEventListener('DOMContentLoaded', setupGlobalSearch, { once: true });
+    }
 
     init();
 
