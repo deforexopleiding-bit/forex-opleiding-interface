@@ -38,6 +38,10 @@
     contracten: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
     finance: '<path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
     sales: '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>',
+    // lucide "megaphone" — Meta Ads dashboard (fase 2). Kies bewust
+    // megaphone i.p.v. chart-bar zodat de icoon "advertising" uitstraalt
+    // (chart-bar hebben we al gebruikt voor follow-up in de tab-count).
+    'meta-ads': '<path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
     // lucide "calendar-event" — visueel duidelijk onderscheid van meetings (people-group).
     events: '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><rect x="8" y="14" width="8" height="5" rx="1"/>',
     tickets: '<path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 11v2"/><path d="M13 17v2"/>',
@@ -126,6 +130,9 @@
           '</a>' +
           navLink('sales', '/modules/sales.html', 'Sales') +
           navLink('events', '/modules/events.html', 'Events') +
+          // Meta Ads dashboard (fase 2) — leest sync-tabellen uit fase 1.
+          // Gated via ads.module.access; verborgen als user geen permissie heeft.
+          navLink('meta-ads', '/modules/meta-ads.html', 'Meta Ads') +
           // PR-A — mentor-grootboek is verhuisd naar Events → Mentor-grootboek-tab.
           // Sidebar-entry verwijderd; deeplink events.html#mentor-grootboek werkt.
           // Mentor-dashboard PR-1 — self-service voor mentor-rol; gated via
@@ -616,6 +623,9 @@
     'tickets': 'tickets.module.access',
     'sales': 'sales.module.access',
     'events': 'events.module.access',
+    // Meta Ads dashboard (fase 2) — page-gate + endpoint-gate delen dezelfde key.
+    // Toggle per rol via admin.html PERMISSION_CATALOG (ads-block).
+    'meta-ads': 'ads.module.access',
     // PR-A — mentor-grootboek-key verwijderd; pagina is verhuisd naar
     // Events → Mentor-grootboek-tab. RBAC mentor.ledger.view blijft als
     // endpoint-gate; sidebar-entry bestaat niet meer dus geen module-gating.
@@ -874,6 +884,7 @@
     'finance':             'Sales & Events',
     'events':              'Sales & Events',
     'follow-up':           'Sales & Events',
+    'meta-ads':            'Sales & Events',
     'email':               'Klanten & Support',
     'tickets':             'Klanten & Support',
     'taken':               'Klanten & Support',
