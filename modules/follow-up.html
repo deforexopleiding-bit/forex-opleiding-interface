@@ -3093,6 +3093,21 @@
       <div class="fu-metrics-row" id="fu-metrics-row"></div>
     </div>
 
+    <!-- Globale zoekbalk (boven de tabs). Zoekt in follow_up_leads +
+         follow_up_appointments op naam/email/telefoon; klik-flow opent
+         de persoon in de werklijst-cockpit via pending-lead-open handshake. -->
+    <div class="fu-globalsearch" style="position:relative;margin:8px 0 12px;max-width:520px">
+      <div style="position:relative">
+        <i class="ti ti-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-faint);font-size:15px;pointer-events:none"></i>
+        <input type="search" id="fu-globalsearch-input" placeholder="Zoek klant op naam, telefoon of e-mail…" autocomplete="off"
+               style="width:100%;padding:8px 30px 8px 32px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elev);font-size:13px" />
+        <button type="button" id="fu-globalsearch-clear" title="Wissen"
+                style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-faint);cursor:pointer;padding:4px 8px;display:none">&#x2715;</button>
+      </div>
+      <div id="fu-globalsearch-results" role="listbox"
+           style="display:none;position:absolute;top:100%;left:0;right:0;margin-top:4px;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,0.10);max-height:340px;overflow-y:auto;z-index:120"></div>
+    </div>
+
     <nav class="fu-tabs" role="tablist">
       <!-- PRIMAIR — cockpit-hoofdnavigatie -->
       <button class="fu-tab fu-tab--primary active" data-tab="leads" role="tab" aria-selected="true">
@@ -11012,6 +11027,145 @@
         }
       }, true);
       console.log('[no-show] click-delegation actief (capture-fase)');
+    })();
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Globale zoekbalk (boven de tabs) — zoek klant op naam/tel/e-mail
+    // → klik opent 'em in de werklijst-cockpit via de pending-lead-open
+    // handshake. Setter #3 na _nsCallItem (Opvolglijst) en _ebCallAttendee
+    // (Event-bellijst). Endpoint: /api/follow-up-search (RBAC-gated).
+    // ═══════════════════════════════════════════════════════════════════
+    (function setupGlobalSearch() {
+      const inp    = document.getElementById('fu-globalsearch-input');
+      const drop   = document.getElementById('fu-globalsearch-results');
+      const clrBtn = document.getElementById('fu-globalsearch-clear');
+      if (!inp || !drop) return;
+
+      let _fuGsTimer = null;
+      let _fuGsAbort = null;
+      let _fuGsLastResults = [];
+
+      function _fuGsCloseDropdown() {
+        drop.style.display = 'none';
+        drop.innerHTML = '';
+      }
+      function _fuGsShowMessage(html) {
+        drop.style.display = 'block';
+        drop.innerHTML = '<div style="padding:10px 12px;font-size:12.5px;color:var(--text-faint)">' + html + '</div>';
+      }
+
+      function _fuGsRenderResults(items) {
+        if (!items.length) { _fuGsShowMessage('Geen resultaten.'); return; }
+        drop.style.display = 'block';
+        drop.innerHTML = items.map((it, idx) => {
+          const nm    = String(it.lead_name || '(zonder naam)');
+          const phone = it.lead_phone ? esc(it.lead_phone) : '';
+          const email = it.lead_email ? esc(it.lead_email) : '';
+          const meta  = [phone, email].filter(Boolean).join(' · ');
+          const stLbl = it.source === 'lead'
+            ? (it.lead_status ? esc(it.lead_status) : 'lead')
+            : (it.status ? 'afspraak · ' + esc(it.status) : 'afspraak');
+          return '<div class="fu-gs-item" role="option" data-fu-gs-idx="' + idx + '"' +
+            ' style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:10px;align-items:center">' +
+            '<div style="min-width:0"><div style="font-weight:600;font-size:13px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
+              '<i class="ti ' + (it.source === 'appointment' ? 'ti-calendar-event' : 'ti-user') + '" style="color:#0891b2;margin-right:4px"></i>' + esc(nm) + '</div>' +
+              (meta ? '<div style="font-size:11.5px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + meta + '</div>' : '') +
+            '</div>' +
+            '<span style="font-size:11px;color:var(--text-faint);white-space:nowrap">' + stLbl + '</span>' +
+          '</div>';
+        }).join('');
+        // Hover-styling via inline JS (kort blok, geen extra CSS).
+        drop.querySelectorAll('.fu-gs-item').forEach((el) => {
+          el.addEventListener('mouseover', () => { el.style.background = 'var(--bg-elev-2, rgba(0,0,0,0.03))'; });
+          el.addEventListener('mouseout',  () => { el.style.background = ''; });
+        });
+      }
+
+      async function _fuGsSearch(q) {
+        try {
+          if (_fuGsAbort) _fuGsAbort.abort();
+          _fuGsAbort = ('AbortController' in window) ? new AbortController() : null;
+          const url = '/api/follow-up-search?q=' + encodeURIComponent(q) + '&limit=20';
+          const r = await window.AgentShared.apiFetch(url, _fuGsAbort ? { signal: _fuGsAbort.signal } : {});
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const d = await r.json();
+          _fuGsLastResults = Array.isArray(d.results) ? d.results : [];
+          _fuGsRenderResults(_fuGsLastResults);
+        } catch (e) {
+          if (e?.name === 'AbortError') return;
+          _fuGsShowMessage('Zoeken mislukt: ' + esc(e?.message || 'onbekend'));
+        }
+      }
+
+      inp.addEventListener('input', () => {
+        const q = String(inp.value || '').trim();
+        clrBtn.style.display = q ? '' : 'none';
+        clearTimeout(_fuGsTimer);
+        if (q.length < 2) { _fuGsCloseDropdown(); return; }
+        _fuGsShowMessage('Zoeken…');
+        _fuGsTimer = setTimeout(() => _fuGsSearch(q), 250);
+      });
+
+      clrBtn.addEventListener('click', () => {
+        inp.value = '';
+        clrBtn.style.display = 'none';
+        _fuGsCloseDropdown();
+        inp.focus();
+      });
+
+      // Klik-in-dropdown: open persoon in werklijst-cockpit via handshake.
+      drop.addEventListener('click', (e) => {
+        const item = e.target && e.target.closest ? e.target.closest('[data-fu-gs-idx]') : null;
+        if (!item) return;
+        const idx = parseInt(item.getAttribute('data-fu-gs-idx'), 10);
+        const hit = _fuGsLastResults[idx];
+        if (!hit) return;
+        _fuGsOpenInWorklist(hit);
+      });
+
+      // Escape / klik-buiten sluit dropdown.
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && drop.style.display !== 'none') {
+          _fuGsCloseDropdown();
+          inp.blur();
+        }
+      });
+      document.addEventListener('click', (e) => {
+        if (drop.style.display === 'none') return;
+        if (e.target === inp || drop.contains(e.target) || (clrBtn && clrBtn.contains(e.target))) return;
+        _fuGsCloseDropdown();
+      });
+
+      // Open resultaat in werklijst via pending-lead-open handshake (r5203/5422).
+      // Zowel lead-hit als appointment-hit gaan door dezelfde flow: we bouwen
+      // een leadObj-vorm die loadLeadsTab kan her-injecteren, zetten de vars,
+      // en schakelen naar de leads-tab. loadLeadsTab consumeert de handshake
+      // NA de server-fetch en roept selectLead(lid) — zelfde patroon als
+      // _nsCallItem en _ebCallAttendee.
+      function _fuGsOpenInWorklist(hit) {
+        _fuGsCloseDropdown();
+        // Vorm de leadObj die _leadsState.items verwacht (minimale set voor
+        // renderCockpitCard). Appointment-hits krijgen source='appointment'
+        // en __worklistKind='bel' zodat ze in de bel-branch vallen.
+        const leadObj = {
+          id:               hit.id,
+          lead_name:        hit.lead_name || '',
+          lead_email:       hit.lead_email || null,
+          lead_phone:       hit.lead_phone || null,
+          source:           hit.source === 'appointment' ? 'appointment' : (hit.lead_source || 'manual'),
+          lead_status:      hit.lead_status || null,
+          lead_kind:        'call',
+          __worklistKind:   'bel',
+          _fromGlobalSearch: true,
+        };
+        try {
+          _pendingLeadOpen = hit.id;
+          _pendingLeadObj  = leadObj;
+        } catch (_) { /* setters bestaan altijd in dezelfde scope */ }
+        try {
+          if (typeof switchTab === 'function') switchTab('leads');
+        } catch (e) { console.error('[fu-globalsearch] switchTab:', e?.message || e); }
+      }
     })();
 
     init();
