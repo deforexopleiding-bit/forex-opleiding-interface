@@ -20,6 +20,7 @@ import { supabaseAdmin, verifyAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { logCustomerAudit } from './_lib/audit-customer.js';
 import { tlFetch } from './_lib/teamleader-token.js';
+import { isMissingColumnError, customerLabel } from './_lib/customer-link.js';
 
 const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -113,6 +114,63 @@ async function handleGet(req, res) {
       .eq('entity_type', 'customer').eq('entity_id', id);
     if (aErr) throw new Error('audit count: ' + aErr.message);
 
+    // Bedrijf ↔ persoon koppeling (v1 lokaal). Defensief: als de kolom
+    // company_customer_id nog niet bestaat (migratie 2026-07-18 niet
+    // gedraaid), skippen we deze lookups fail-soft. GET blijft functioneel.
+    let linkedCompany = null;
+    let linkedPersons = [];
+    let linkAvailable = true;
+    const cci = Object.prototype.hasOwnProperty.call(customer, 'company_customer_id')
+      ? customer.company_customer_id
+      : undefined;
+    if (cci === undefined) {
+      // customer.select('*') gaf de kolom niet terug → kolom bestaat niet.
+      linkAvailable = false;
+    } else {
+      // Persoon → hoort deze bij een bedrijf?
+      if (customer.is_company === false && cci) {
+        const { data: comp, error: compErr } = await supabaseAdmin
+          .from('customers')
+          .select('id, is_company, company_name, first_name, last_name, email, phone')
+          .eq('id', cci)
+          .maybeSingle();
+        if (compErr && !isMissingColumnError(compErr)) {
+          console.warn('[customer GET] linked_company fetch:', compErr.message);
+        } else if (comp && comp.is_company === true) {
+          linkedCompany = {
+            id: comp.id,
+            name: customerLabel(comp),
+            email: comp.email || null,
+            phone: comp.phone || null,
+          };
+        }
+      }
+      // Bedrijf → welke personen zijn eraan gekoppeld?
+      if (customer.is_company === true) {
+        const { data: personRows, error: prErr } = await supabaseAdmin
+          .from('customers')
+          .select('id, is_company, first_name, last_name, email, phone')
+          .eq('company_customer_id', id)
+          .order('last_name', { ascending: true, nullsFirst: false });
+        if (prErr) {
+          if (isMissingColumnError(prErr)) {
+            linkAvailable = false;
+          } else {
+            console.warn('[customer GET] linked_persons fetch:', prErr.message);
+          }
+        } else {
+          linkedPersons = (personRows || [])
+            .filter((r) => r && r.is_company === false)
+            .map((r) => ({
+              id: r.id,
+              name: customerLabel(r),
+              email: r.email || null,
+              phone: r.phone || null,
+            }));
+        }
+      }
+    }
+
     return res.status(200).json({
       customer: {
         ...customer,
@@ -121,6 +179,9 @@ async function handleGet(req, res) {
         notes_count: notesCount || 0,
         audit_count: auditCount || 0,
       },
+      linked_company: linkedCompany,
+      linked_persons: linkedPersons,
+      link_available: linkAvailable,
     });
   } catch (err) {
     console.error('[customer GET] handler error:', err);

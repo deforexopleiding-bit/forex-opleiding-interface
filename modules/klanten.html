@@ -624,6 +624,12 @@
                 <div class="prop-section-h">Contact</div>
                 <div class="prop-row"><span class="prop-lbl">Email</span><span class="prop-val" id="prof-email">—</span></div>
                 <div class="prop-row"><span class="prop-lbl">Telefoon</span><span class="prop-val" id="prof-phone">—</span></div>
+                <!-- Bedrijf ↔ persoon koppeling (v1 lokaal, migratie 2026-07-18). -->
+                <!-- Zichtbaar op persoon-detail: toont gekoppeld bedrijf (of "Geen") + koppel-knop. -->
+                <div class="prop-row" id="prof-row-linked-company" style="display:none">
+                  <span class="prop-lbl">Bedrijf</span>
+                  <span class="prop-val" id="prof-linked-company">—</span>
+                </div>
                 <div class="prop-divider"></div>
                 <div class="prop-section-h">Adres</div>
                 <div class="prop-row"><span class="prop-lbl">Straat + nr.</span><span class="prop-val" id="prof-address-line1">—</span></div>
@@ -632,6 +638,14 @@
               <div class="sr-grid sr-grid-2" style="margin-bottom:12px">
                 <div class="detail-card" id="prof-onboarding-card"><h3><i class="ti ti-user-check"></i> Onboarding</h3><div id="prof-onboarding"><span class="cust-empty">Laden…</span></div></div>
                 <div class="detail-card" id="prof-abo-card" style="cursor:pointer" title="Naar abonnementen" onclick="activateDetailTab('abonnementen', true)"><h3 class="with-action"><i class="ti ti-credit-card"></i> Abonnement <span id="prof-abo-status"></span></h3><div id="prof-abo"><span class="cust-empty">Laden…</span></div></div>
+              </div>
+              <!-- Bedrijf-detail: lijst van gekoppelde personen. Alleen zichtbaar
+                   voor is_company=true rijen. Gevuld door renderLinkedPersonsCard(). -->
+              <div class="sr-card" id="prof-linked-persons-card" style="display:none;padding:12px 14px;margin-bottom:12px">
+                <div class="prop-section-h" style="margin-top:0;display:flex;justify-content:space-between;align-items:center">
+                  <span><i class="ti ti-users"></i> Gekoppelde personen <span id="prof-linked-persons-count" style="color:var(--text-faint);font-weight:400"></span></span>
+                </div>
+                <div id="prof-linked-persons-list"><span class="cust-empty">Geen personen gekoppeld.</span></div>
               </div>
               <div class="sr-card" style="padding:10px 14px">
                 <div class="prop-section-h" style="margin-top:0">Metadata</div>
@@ -859,6 +873,35 @@
   </div>
 </div>
 
+<!-- Bedrijf-picker modal — koppelt een persoon-klant aan een bedrijf-klant.
+     v1: alleen lokale DB-koppeling (geen TL-sync). Zoekt via
+     /api/customers?search=X&is_company=true en toont de resultaten. -->
+<div class="modal-overlay hidden" id="linkCompanyModal" role="dialog" aria-modal="true" aria-labelledby="linkCompanyModalTitle">
+  <div class="modal-card modal-sm">
+    <div class="modal-header">
+      <div class="modal-title" id="linkCompanyModalTitle">Koppel aan bedrijf</div>
+      <button class="modal-close" type="button" onclick="closeLinkCompanyModal()" aria-label="Sluiten">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-banner" id="linkCompanyBanner"></div>
+      <p style="font-size:12.5px;color:var(--text-faint);margin:0 0 8px">
+        Zoek een bedrijf-klant (B2B) waaraan <strong id="link-company-person-name">deze persoon</strong>
+        gekoppeld moet worden. Alleen lokale koppeling; TL-sync volgt in fase 2.
+      </p>
+      <div class="form-field form-field-full">
+        <label for="link-company-search">Zoek bedrijf</label>
+        <input id="link-company-search" type="search" placeholder="Zoek op bedrijfsnaam, email of KvK…" autocomplete="off"/>
+      </div>
+      <div id="link-company-results" style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:4px">
+        <div style="padding:12px;color:var(--text-faint);font-size:12px">Typ een zoekterm om bedrijven te zien.</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" type="button" onclick="closeLinkCompanyModal()">Annuleren</button>
+    </div>
+  </div>
+</div>
+
 <!-- Bulk-tag modal (Fase 2A.4) -->
 <div class="modal-overlay hidden" id="bulkTagModal" role="dialog" aria-modal="true" aria-labelledby="bulkTagModalTitle">
   <div class="modal-card modal-sm">
@@ -1050,6 +1093,12 @@ async function showDetailView(customerId) {
     }
     const data = await res.json();
     detailState.customer = data.customer;
+    // Bedrijf ↔ persoon koppeling (v1 lokaal). Undefined = pre-migratie
+    // response; behandel als niet beschikbaar zodat UI-secties verborgen
+    // blijven i.p.v. te crashen.
+    detailState.linkedCompany = data.linked_company || null;
+    detailState.linkedPersons = Array.isArray(data.linked_persons) ? data.linked_persons : [];
+    detailState.linkAvailable = data.link_available !== false;
     renderDetail();
   } catch (err) {
     console.error('[klanten] detail load failed:', err);
@@ -2255,6 +2304,12 @@ function renderProfielTab() {
   if ($('#prof-vat')) $('#prof-vat').textContent = c.vat_number || '—';
   ['prof-row-company', 'prof-row-kvk', 'prof-row-vat'].forEach((id) => { const el = document.getElementById(id); if (el) el.style.display = c.is_company ? '' : 'none'; });
 
+  // Bedrijf ↔ persoon koppeling (v1 lokaal, migratie 2026-07-18).
+  // detailState.linkedCompany + detailState.linkedPersons + detailState.linkAvailable
+  // worden gezet door loadCustomerDetail nadat /api/customer returnt.
+  renderLinkedCompanyRow(c);
+  renderLinkedPersonsCard(c);
+
   // Contact: mailto:/tel: links (encodeURIComponent op user-input)
   const emailEl = $('#prof-email');
   if (c.email) emailEl.innerHTML = `<a href="mailto:${encodeURIComponent(c.email)}">${escapeHtml(c.email)}</a>`;
@@ -2350,6 +2405,184 @@ async function renderOnboardingCard() {
       wrap.innerHTML = '<span class="cust-empty">Wordt zichtbaar na offerte-ondertekening.</span>';
     }
   } catch { wrap.innerHTML = '<span class="cust-empty">Wordt zichtbaar na offerte-ondertekening.</span>'; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Bedrijf ↔ persoon koppeling (v1 lokaal, migratie 2026-07-18)
+// ═══════════════════════════════════════════════════════════════════════
+// GET /api/customer levert linked_company / linked_persons / link_available
+// mee zodra migratie 2026-07-18-customer-link-company.sql is gedraaid.
+// Pre-migratie: link_available=false → UI-secties verborgen (geen crash).
+// POST /api/customer-link-company doet de koppel/ontkoppel-mutatie.
+// TL-sync (contacts.linkToCompany) is fase 2, buiten deze UI.
+
+function renderLinkedCompanyRow(c) {
+  const row = document.getElementById('prof-row-linked-company');
+  const cell = document.getElementById('prof-linked-company');
+  if (!row || !cell) return;
+  // Alleen tonen op persoon-detail (is_company=false) + kolom aanwezig.
+  if (c.is_company === true || !detailState.linkAvailable) {
+    row.style.display = 'none';
+    return;
+  }
+  row.style.display = '';
+  const linked = detailState.linkedCompany;
+  if (linked && linked.id) {
+    const nm = linked.name || '(zonder naam)';
+    cell.innerHTML =
+      `<a href="/modules/klanten.html?id=${encodeURIComponent(linked.id)}" style="color:inherit;text-decoration:none">` +
+      `<i class="ti ti-building" style="color:#0891b2"></i> ${escapeHtml(nm)}</a>` +
+      ` <button type="button" class="btn btn-sm" style="margin-left:8px" onclick="unlinkCompanyFromPerson()"` +
+      ` title="Ontkoppel dit bedrijf van deze persoon">Ontkoppelen</button>`;
+  } else {
+    cell.innerHTML =
+      `<span class="cust-empty">Geen</span>` +
+      ` <button type="button" class="btn btn-sm" style="margin-left:8px" onclick="openLinkCompanyModal()">` +
+      `<i class="ti ti-link"></i> Koppel aan bedrijf</button>`;
+  }
+}
+
+function renderLinkedPersonsCard(c) {
+  const card = document.getElementById('prof-linked-persons-card');
+  const list = document.getElementById('prof-linked-persons-list');
+  const cnt  = document.getElementById('prof-linked-persons-count');
+  if (!card || !list) return;
+  // Alleen tonen op bedrijf-detail (is_company=true) + kolom aanwezig.
+  if (c.is_company !== true || !detailState.linkAvailable) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+  const persons = detailState.linkedPersons || [];
+  if (cnt) cnt.textContent = persons.length ? '· ' + persons.length : '';
+  if (!persons.length) {
+    list.innerHTML = '<span class="cust-empty">Geen personen gekoppeld.</span>';
+    return;
+  }
+  list.innerHTML = persons.map((p) => {
+    const nm = p.name || '(zonder naam)';
+    const meta = [];
+    if (p.email) meta.push(`<i class="ti ti-mail"></i> ${escapeHtml(p.email)}`);
+    if (p.phone) meta.push(`<i class="ti ti-phone"></i> ${escapeHtml(p.phone)}`);
+    return `<div style="padding:6px 0;border-bottom:1px solid var(--border)">` +
+      `<a href="/modules/klanten.html?id=${encodeURIComponent(p.id)}" style="color:inherit;text-decoration:none;font-weight:600">` +
+      `<i class="ti ti-user" style="color:#0891b2"></i> ${escapeHtml(nm)}</a>` +
+      (meta.length ? `<div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">${meta.join(' · ')}</div>` : '') +
+    `</div>`;
+  }).join('');
+}
+
+// ── Modal open/close + zoek/select-flow ────────────────────────────────
+
+function openLinkCompanyModal() {
+  const c = detailState.customer;
+  if (!c || c.is_company === true) return;
+  if (!detailState.linkAvailable) {
+    window.AgentShared?.showToast?.('Koppel-functie niet beschikbaar — migratie draait nog.', 'error');
+    return;
+  }
+  const nameEl = document.getElementById('link-company-person-name');
+  if (nameEl) nameEl.textContent = customerDisplayName(c, 'deze persoon');
+  const search = document.getElementById('link-company-search');
+  const results = document.getElementById('link-company-results');
+  if (search) search.value = '';
+  if (results) results.innerHTML = '<div style="padding:12px;color:var(--text-faint);font-size:12px">Typ een zoekterm om bedrijven te zien.</div>';
+  const banner = document.getElementById('linkCompanyBanner');
+  if (banner) banner.textContent = '';
+  openModal('linkCompanyModal');
+  if (search) setTimeout(() => search.focus(), 50);
+}
+
+function closeLinkCompanyModal() { closeModal('linkCompanyModal'); }
+
+let _linkCompanySearchTimer = null;
+document.addEventListener('input', (e) => {
+  if (!e.target || e.target.id !== 'link-company-search') return;
+  clearTimeout(_linkCompanySearchTimer);
+  const q = String(e.target.value || '').trim();
+  const results = document.getElementById('link-company-results');
+  if (!results) return;
+  if (q.length < 2) {
+    results.innerHTML = '<div style="padding:12px;color:var(--text-faint);font-size:12px">Typ minstens 2 tekens.</div>';
+    return;
+  }
+  _linkCompanySearchTimer = setTimeout(() => _searchCompaniesForLink(q), 220);
+});
+
+async function _searchCompaniesForLink(q) {
+  const results = document.getElementById('link-company-results');
+  if (!results) return;
+  results.innerHTML = '<div style="padding:12px;color:var(--text-faint);font-size:12px">Zoeken…</div>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/customers?search=' + encodeURIComponent(q) + '&is_company=true&limit=20');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    const rows = (d.customers || d.data || []).filter((row) => row && row.is_company === true);
+    if (!rows.length) {
+      results.innerHTML = '<div style="padding:12px;color:var(--text-faint);font-size:12px">Geen bedrijven gevonden.</div>';
+      return;
+    }
+    results.innerHTML = rows.map((row) => {
+      const nm = (row.company_name || '').trim() || '(zonder naam)';
+      const meta = [];
+      if (row.email) meta.push(escapeHtml(row.email));
+      if (row.kvk_number) meta.push('KvK ' + escapeHtml(row.kvk_number));
+      return `<button type="button" class="btn btn-ghost btn-sm" style="width:100%;text-align:left;justify-content:flex-start;padding:8px 10px;margin:2px 0" data-link-company-id="${escapeHtml(row.id)}">` +
+        `<i class="ti ti-building" style="color:#0891b2"></i> <strong>${escapeHtml(nm)}</strong>` +
+        (meta.length ? `<span style="color:var(--text-faint);font-weight:400;margin-left:8px;font-size:11.5px">${meta.join(' · ')}</span>` : '') +
+      `</button>`;
+    }).join('');
+  } catch (e) {
+    results.innerHTML = '<div style="padding:12px;color:#b91c1c;font-size:12px">Zoeken mislukt: ' + escapeHtml(e.message || '') + '</div>';
+  }
+}
+
+document.addEventListener('click', async (e) => {
+  const btn = e.target && e.target.closest ? e.target.closest('[data-link-company-id]') : null;
+  if (!btn) return;
+  const companyId = btn.getAttribute('data-link-company-id');
+  if (!companyId) return;
+  await _submitLinkCompany(companyId);
+});
+
+async function _submitLinkCompany(companyId) {
+  const personId = detailState.customerId;
+  if (!personId) return;
+  const banner = document.getElementById('linkCompanyBanner');
+  if (banner) banner.textContent = 'Koppelen…';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/customer-link-company', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ person_customer_id: personId, company_customer_id: companyId }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+    detailState.linkedCompany = d.linked_company || null;
+    closeLinkCompanyModal();
+    renderLinkedCompanyRow(detailState.customer);
+    window.AgentShared?.showToast?.('Gekoppeld aan bedrijf.', 'success');
+  } catch (e) {
+    if (banner) banner.textContent = 'Mislukt: ' + (e.message || 'onbekend');
+  }
+}
+
+async function unlinkCompanyFromPerson() {
+  const personId = detailState.customerId;
+  if (!personId) return;
+  if (!confirm('Ontkoppel dit bedrijf van deze persoon?')) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/customer-link-company', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ person_customer_id: personId, company_customer_id: null }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+    detailState.linkedCompany = null;
+    renderLinkedCompanyRow(detailState.customer);
+    window.AgentShared?.showToast?.('Ontkoppeld.', 'success');
+  } catch (e) {
+    window.AgentShared?.showToast?.('Ontkoppelen mislukt: ' + (e.message || 'onbekend'), 'error');
+  }
 }
 
 async function renderCommunicatieTab() {
