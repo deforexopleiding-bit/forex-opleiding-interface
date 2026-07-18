@@ -32,11 +32,18 @@ export async function fetchGhlContact(contactId) {
     const data = await res.json();
     const contact = data.contact || data;
 
+    // Backward-compat: bestaande callers ({email,phone,firstName,lastName})
+    // blijven werken. Extra velden (attributionSource, lastAttributionSource,
+    // raw) meesturen zodat de lead-attribution-vang de UTM/Meta-velden kan
+    // opslaan zonder een tweede GHL-fetch (fase 2 ROAS).
     return {
-      email: contact.email || null,
-      phone: contact.phone || null,
+      email:     contact.email     || null,
+      phone:     contact.phone     || null,
       firstName: contact.firstName || null,
-      lastName: contact.lastName || null,
+      lastName:  contact.lastName  || null,
+      attributionSource:     contact.attributionSource     || null,
+      lastAttributionSource: contact.lastAttributionSource || null,
+      raw:       contact,
     };
   } catch (err) {
     console.error('[ghl-contact] error', err.message);

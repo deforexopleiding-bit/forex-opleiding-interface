@@ -9,6 +9,7 @@
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
 import { fetchGhlContact } from './_lib/ghl-contact.js';
+import { upsertLeadAttribution } from './_lib/lead-attribution.js';
 import { listUpcomingZoomMeetings } from './_lib/zoom-meeting.js';
 
 const GHL_API_BASE = 'https://services.leadconnectorhq.com';
@@ -118,6 +119,19 @@ export default async function handler(req, res) {
         if (contact) {
           if (!leadEmail && contact.email) leadEmail = contact.email;
           if (!leadPhone && contact.phone) leadPhone = contact.phone;
+          // Meta/UTM/GHL-attributie vangen (fase 2 ROAS-fundering). Best-effort:
+          // een fout hier mag NOOIT de poll breken — helper is defensief
+          // (isMissingRelationError → skip; try/catch omheen als vangnet).
+          try {
+            await upsertLeadAttribution({
+              ghl_contact_id: event.contactId,
+              email:          contact.email || leadEmail,
+              phone:          contact.phone || leadPhone,
+              attr:           contact, // helper leest .attributionSource + .lastAttributionSource
+            });
+          } catch (e) {
+            console.warn('[follow-up-ghl-poll] attribution upsert:', e?.message || e);
+          }
         }
       }
 

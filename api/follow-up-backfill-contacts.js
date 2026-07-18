@@ -8,6 +8,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { fetchGhlContact } from './_lib/ghl-contact.js';
+import { upsertLeadAttribution } from './_lib/lead-attribution.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -63,6 +64,20 @@ export default async function handler(req, res) {
     if (!contact) {
       errors++;
       continue;
+    }
+
+    // Historische attributie vangen tijdens backfill — deze appointments zijn
+    // vóór de vang-hook ontstaan, dus de lead_attribution-tabel mist ze anders.
+    // Best-effort; helper is defensief bij ontbrekende migratie.
+    try {
+      await upsertLeadAttribution({
+        ghl_contact_id: appt.lead_ghl_contact_id,
+        email:          contact.email || appt.lead_email || null,
+        phone:          contact.phone || appt.lead_phone || null,
+        attr:           contact,
+      });
+    } catch (e) {
+      console.warn('[backfill-contacts] attribution upsert:', e?.message || e);
     }
 
     const update = {};
