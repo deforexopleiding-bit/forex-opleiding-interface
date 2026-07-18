@@ -922,6 +922,11 @@ const FEATURE_REGISTRY = [
     { key:'customer.avg.export', label:'AVG inzage-export' },
     { key:'customer.avg.anonymize', label:'AVG anonimiseren' },
   ]},
+  { moduleKey:'ads', moduleLabel:'Meta Ads', moduleIcon:'ti-brand-meta', features:[
+    // Fase 2 Meta Ads dashboard. Page-gate + endpoint-gate delen dezelfde key.
+    // Fase 3/4 (alerts / creatives) breiden dit uit met extra feature-keys.
+    { key:'ads.module.access', label:'Module zichtbaar' },
+  ]},
   { moduleKey:'whatsapp', moduleLabel:'WhatsApp', moduleIcon:'ti-brand-whatsapp', features:[
     { key:'whatsapp.send_manual', label:'Handmatig WA sturen' },
     { key:'whatsapp.inbox.view', label:'Inbox bekijken' },
