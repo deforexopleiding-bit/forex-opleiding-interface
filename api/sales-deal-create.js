@@ -10,6 +10,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getActiveToken } from './_lib/teamleader-token.js';
 import { pushQuotationToTl } from './_lib/teamleader-quotation.js';
+import { assertStartDateNotTooEarly, assertDateNotInPast } from './_lib/onboarding-start-date.js';
 
 // Lege string / undefined → null (voorkomt 'invalid input syntax for type uuid').
 const emptyToNull = (v) => (v === '' || v === undefined ? null : v);
@@ -40,6 +41,45 @@ export default async function handler(req, res) {
 
   // Lead-bron is optioneel geworden (P2): geen verplichting meer.
   if (!Array.isArray(products) || products.length === 0) return res.status(400).json({ error: 'minimaal 1 product vereist' });
+
+  // Ondergrens-gate op de startdatums: payment_start_date >= vandaag+3
+  // (SEPA + Rogier-buffer maakt afgeleide betaaldatums start-3d — die
+  // liggen anders zelf al in het verleden). payment_term_start_date en
+  // payment_downpayment_date mogen wél vandaag zijn (bij startdatum=
+  // vandaag+3 is start-3d = vandaag), maar niet gisteren of eerder.
+  // NIET stil clampen — front-end en back-end moeten dezelfde ondergrens
+  // afdwingen zodat een verkeerde datum zichtbaar wordt.
+  const startDateForCheck = deal_data.payment_start_date;
+  const startTooEarly = assertStartDateNotTooEarly(startDateForCheck);
+  if (startTooEarly) {
+    return res.status(400).json({
+      error: 'Cursus-startdatum: ' + startTooEarly.message,
+      code:  startTooEarly.code,
+      field: 'payment_start_date',
+      min:   startTooEarly.min,
+      got:   startTooEarly.got,
+    });
+  }
+  const termInPast = assertDateNotInPast(deal_data.payment_term_start_date, 'Datum 1e termijn');
+  if (termInPast) {
+    return res.status(400).json({
+      error: termInPast.message,
+      code:  termInPast.code,
+      field: 'payment_term_start_date',
+      today: termInPast.today,
+      got:   termInPast.got,
+    });
+  }
+  const downInPast = assertDateNotInPast(deal_data.payment_downpayment_date, 'Aanbetaling-datum');
+  if (downInPast) {
+    return res.status(400).json({
+      error: downInPast.message,
+      code:  downInPast.code,
+      field: 'payment_downpayment_date',
+      today: downInPast.today,
+      got:   downInPast.got,
+    });
+  }
 
   try {
     // 0. Bedrijfsentiteit valideren (indien meegegeven) tegen company_entities.

@@ -11,6 +11,8 @@ import {
   compareYmd,
   assertStartDateNotTooEarly,
   ONBOARDING_START_DATE_MIN_OFFSET_DAYS,
+  getTodayNL,
+  assertDateNotInPast,
 } from '../api/_lib/onboarding-start-date.js';
 
 // Vaste NOW voor determinisme: 2026-07-18 12:00 UTC = 14:00 Europe/Amsterdam
@@ -100,4 +102,60 @@ test('assertStartDateNotTooEarly: ongeldig formaat → INVALID (geen crash)', ()
   const err = assertStartDateNotTooEarly('18-07-2026', NOW);
   assert.ok(err);
   assert.equal(err.code, 'START_DATE_INVALID');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getTodayNL + assertDateNotInPast — nieuwe helpers voor sales-deal-create's
+// payment_term_start_date en payment_downpayment_date validatie (mogen wél
+// vandaag zijn maar niet gisteren).
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('getTodayNL: 12:00 UTC → 2026-07-18 (NL zomertijd = UTC+02:00)', () => {
+  assert.equal(getTodayNL(NOW), '2026-07-18');
+});
+
+test('getTodayNL: laat NL (23:30) blijft dezelfde NL-dag', () => {
+  const late = new Date('2026-07-18T21:30:00.000Z');
+  assert.equal(getTodayNL(late), '2026-07-18');
+});
+
+test('getTodayNL: net over middernacht NL (00:15) = nieuwe dag', () => {
+  const justPastMidnight = new Date('2026-07-18T22:15:00.000Z');
+  assert.equal(getTodayNL(justPastMidnight), '2026-07-19');
+});
+
+test('assertDateNotInPast: null/leeg → OK (backward-compat)', () => {
+  assert.equal(assertDateNotInPast(null, 'Aanbetaling-datum', NOW), null);
+  assert.equal(assertDateNotInPast('', 'Aanbetaling-datum', NOW), null);
+  assert.equal(assertDateNotInPast(undefined, 'Aanbetaling-datum', NOW), null);
+});
+
+test('assertDateNotInPast: vandaag (2026-07-18) → OK', () => {
+  assert.equal(assertDateNotInPast('2026-07-18', 'Datum 1e termijn', NOW), null);
+});
+
+test('assertDateNotInPast: morgen → OK', () => {
+  assert.equal(assertDateNotInPast('2026-07-19', 'Datum 1e termijn', NOW), null);
+});
+
+test('assertDateNotInPast: gisteren → DATE_IN_PAST', () => {
+  const err = assertDateNotInPast('2026-07-17', 'Datum 1e termijn', NOW);
+  assert.ok(err);
+  assert.equal(err.code, 'DATE_IN_PAST');
+  assert.equal(err.today, '2026-07-18');
+  assert.equal(err.got, '2026-07-17');
+  assert.equal(err.field, 'Datum 1e termijn');
+});
+
+test('assertDateNotInPast: vorige eeuw → DATE_IN_PAST', () => {
+  const err = assertDateNotInPast('1999-12-31', 'Aanbetaling-datum', NOW);
+  assert.ok(err);
+  assert.equal(err.code, 'DATE_IN_PAST');
+  assert.equal(err.field, 'Aanbetaling-datum');
+});
+
+test('assertDateNotInPast: ongeldig formaat → DATE_INVALID', () => {
+  const err = assertDateNotInPast('18-07-2026', 'Aanbetaling-datum', NOW);
+  assert.ok(err);
+  assert.equal(err.code, 'DATE_INVALID');
 });

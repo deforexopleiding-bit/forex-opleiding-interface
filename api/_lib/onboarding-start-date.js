@@ -1,15 +1,22 @@
 // api/_lib/onboarding-start-date.js
 //
-// Pure helper voor de ondergrens op onboarding.start_date. Gedeeld door
-// het create-endpoint (server-side validatie) en getest via unit-tests.
+// Pure helpers voor start-date-ondergrenzen. Ondanks de historisch
+// onboarding-scoped bestandsnaam wordt deze module gedeeld door:
+//   - api/onboarding-create.js       — payment_start_date / start_date
+//   - api/sales-deal-create.js       — payment_start_date +
+//                                       payment_term_start_date +
+//                                       payment_downpayment_date
+// (bestandsnaam behouden om bestaande imports niet te breken; refactor
+// naar `api/_lib/start-date.js` is aparte opschoning voor later).
 //
-// Beleid Jeffrey (18 juli 2026): een onboarding-startdatum mag niet in het
-// verleden of vandaag liggen. Minimum = vandaag + 3 KALENDERdagen in NL-tijd
-// (Europe/Amsterdam). Reden: bij startdatum=vandaag belandde het abbo in
-// Bubble 3 dagen in het verleden — Bubble past een payment-buffer toe die
-// de membership_state_date_date terug-shift. Door aan de bron te dwingen dat
-// er minimaal 3 kalenderdagen buffer zit, kan Bubble geen retro-actief abbo
-// meer aanmaken.
+// Beleid Jeffrey (18 juli 2026): een cursus/onboarding-startdatum mag
+// niet in het verleden of vandaag liggen. Minimum = vandaag + 3
+// KALENDERdagen in NL-tijd (Europe/Amsterdam). Reden:
+//   - Onboarding: Bubble past een payment-buffer toe die terug-shift;
+//     zonder 3d buffer belandt het abbo in het verleden.
+//   - Sales-wizard: afgeleide betaaldatums (aanbetaling = start-3d,
+//     1e termijn zonder aanbetaling = start-3d) worden anders zelf
+//     al historisch bij startdatum=vandaag.
 //
 // KALENDERdagen (niet werkdagen) — matcht de UI-eis en is voorspelbaar
 // rondom weekend/feestdagen (geen calendar-service nodig).
@@ -92,6 +99,60 @@ export function assertStartDateNotTooEarly(startDate, now = new Date()) {
       message: `start_date moet minimaal ${ONBOARDING_START_DATE_MIN_OFFSET_DAYS} kalenderdagen in de toekomst liggen (>= ${min})`,
       min,
       got: startDate,
+    };
+  }
+  return null;
+}
+
+/**
+ * Vandaag als yyyy-mm-dd in NL-tijd (Europe/Amsterdam). Gebruikt door
+ * assertDateNotInPast om te vergelijken zonder server-timezone-afhankelijkheid.
+ *
+ * @param {Date} [now=new Date()]
+ * @returns {string} yyyy-mm-dd
+ */
+export function getTodayNL(now = new Date()) {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Amsterdam',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+  return fmt.format(now);
+}
+
+/**
+ * Assert dat een datum-string niet in het VERLEDEN ligt (t.o.v. vandaag NL).
+ * Vandaag zelf is toegestaan (vergelijking is strict <, niet <=). Gebruikt door
+ * sales-deal-create voor payment_term_start_date en payment_downpayment_date —
+ * die mogen wél vandaag zijn (past vaak voor SEPA-buffer met start = vandaag+3),
+ * maar niet gisteren of eerder.
+ *
+ * Retourneert null als OK / leeg, anders {code,message,today,got}.
+ *
+ * @param {string|null|undefined} dateStr  yyyy-mm-dd of falsy
+ * @param {string} fieldLabel              menselijke veldnaam voor de foutmelding
+ * @param {Date} [now=new Date()]
+ * @returns {null|{code:string,message:string,today:string,got:string,field:string}}
+ */
+export function assertDateNotInPast(dateStr, fieldLabel, now = new Date()) {
+  if (!dateStr) return null;
+  const today = getTodayNL(now);
+  const cmp = compareYmd(dateStr, today);
+  if (cmp === null) {
+    return {
+      code: 'DATE_INVALID',
+      message: `${fieldLabel} moet yyyy-mm-dd zijn`,
+      today,
+      got: String(dateStr),
+      field: fieldLabel,
+    };
+  }
+  if (cmp < 0) {
+    return {
+      code: 'DATE_IN_PAST',
+      message: `${fieldLabel} mag niet in het verleden liggen (>= ${today})`,
+      today,
+      got: dateStr,
+      field: fieldLabel,
     };
   }
   return null;

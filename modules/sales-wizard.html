@@ -562,6 +562,31 @@ function _shiftDaysIso(startIso, deltaDays){
   dt.setUTCDate(dt.getUTCDate() + deltaDays);
   return dt.toISOString().slice(0,10);
 }
+// Vandaag in NL-tijd (Europe/Amsterdam) als yyyy-mm-dd. Vermijdt de
+// server-tz-drift die je met een kale UTC-slice rond middernacht krijgt.
+function _swTodayNL(){
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Amsterdam',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+}
+// Vroegst-toegestane cursus-startdatum: vandaag NL + 3 kalenderdagen.
+// Spiegelt de server-side gate in api/_lib/onboarding-start-date.js
+// (getMinOnboardingStartDate) zodat client en server dezelfde ondergrens
+// afdwingen. Reden voor +3: de afgeleide betaaldatums (aanbetaling en
+// 1e termijn zonder aanbetaling) zijn start-3d — bij startdatum=vandaag
+// zouden die in het verleden vallen.
+function _swMinStartDateNL(){
+  return _shiftDaysIso(_swTodayNL(), 3);
+}
+// Kies de hoogste (=later gelegen) van twee yyyy-mm-dd waarden. Beide
+// mogen null zijn; null-args tellen als "geen extra grens". Gebruikt om
+// een today-floor op de bestaande dynamische min te leggen.
+function _maxYmd(a, b){
+  if(!a) return b || null;
+  if(!b) return a || null;
+  return a > b ? a : b;
+}
 // Backward-compat: _termStartMaxFor stond nog gebruikt in updateNextEnabled.
 // Retourneert start-3d (max VÓÓR-start deadline).
 function _termStartMaxFor(startIso){ return _shiftDaysIso(startIso, -3); }
@@ -587,21 +612,30 @@ function _applyTermStartBounds(explainOnClamp){
   const el = document.getElementById('payTermStartDate');
   if(!el) return;
   const b = _termStartBounds(w.payment_start_date, _hasDownpayment());
-  if(b.max) el.setAttribute('max', b.max); else el.removeAttribute('max');
-  if(b.min) el.setAttribute('min', b.min); else el.removeAttribute('min');
+  // Defensieve today-floor: 1e termijndatum mag nooit in het verleden.
+  // Als de startdatum-gate goed werkt is dit meestal een no-op (bestaande
+  // min ligt sowieso in de toekomst), maar bij legacy-drafts of hand-edits
+  // vangt deze floor 'em alsnog af.
+  const today = _swTodayNL();
+  const effMin = _maxYmd(b.min, today);
+  if(b.max)  el.setAttribute('max', b.max);  else el.removeAttribute('max');
+  if(effMin) el.setAttribute('min', effMin); else el.removeAttribute('min');
   // Clamp state als de huidige datum buiten de nieuwe range valt.
   const cur = w.payment_term_start_date || '';
-  if(!cur || !b.max) return;
+  if(!cur) return;
   let clamped = cur;
   if(b.max && cur > b.max) clamped = b.max;
-  if(b.min && cur < b.min) clamped = b.min;
+  if(effMin && cur < effMin) clamped = effMin;
   if(clamped !== cur){
     w.payment_term_start_date = clamped;
     el.value = clamped;
     if(explainOnClamp){
-      const msg = _hasDownpayment()
-        ? '1e termijndatum aangepast: met aanbetaling mag de termijn tot 30 dagen ná de startdatum.'
-        : '1e termijndatum aangepast: zonder aanbetaling moet de termijn minstens 3 dagen vóór de startdatum liggen.';
+      const wasPast = effMin && cur < effMin;
+      const msg = wasPast
+        ? '1e termijndatum aangepast: datum mocht niet in het verleden liggen.'
+        : _hasDownpayment()
+          ? '1e termijndatum aangepast: met aanbetaling mag de termijn tot 30 dagen ná de startdatum.'
+          : '1e termijndatum aangepast: zonder aanbetaling moet de termijn minstens 3 dagen vóór de startdatum liggen.';
       toast(msg, '');
     }
   }
@@ -616,19 +650,45 @@ function _applyDownDateBounds(explainOnClamp){
   const el = document.getElementById('payDownDate');
   if(!el) return;
   const max = _shiftDaysIso(w.payment_start_date, -3);
+  // Defensieve today-floor: aanbetaling-datum mag nooit in het verleden.
+  // Bij een geldige cursus-startdatum (>= vandaag+3) is max = vandaag of
+  // later, dus dit is meestal een no-op — maar legacy-drafts of hand-edits
+  // op de start-datum-input worden zo alsnog gebufferd.
+  const today = _swTodayNL();
   if(max) el.setAttribute('max', max); else el.removeAttribute('max');
+  el.setAttribute('min', today);
   const cur = w.payment_downpayment_date || '';
-  if(!cur || !max) return;
-  if(cur > max){
-    w.payment_downpayment_date = max;
-    el.value = max;
+  if(!cur) return;
+  let clamped = cur;
+  if(max && cur > max) clamped = max;
+  if(cur < today) clamped = today;
+  if(clamped !== cur){
+    w.payment_downpayment_date = clamped;
+    el.value = clamped;
     if(explainOnClamp){
-      toast('Aanbetaling-datum aangepast: moet minstens 3 dagen vóór de startdatum liggen.', '');
+      const msg = (cur < today)
+        ? 'Aanbetaling-datum aangepast: datum mocht niet in het verleden liggen.'
+        : 'Aanbetaling-datum aangepast: moet minstens 3 dagen vóór de startdatum liggen.';
+      toast(msg, '');
     }
   }
 }
 function renderPaymentStep() {
   const w = state.wizard;
+  // Cursus-startdatum ondergrens = vandaag NL + 3 kalenderdagen. Zonder
+  // deze gate belanden de afgeleide betaaldatums (aanbetaling = start-3d,
+  // 1e termijn zonder aanbetaling = start-3d) automatisch in het verleden
+  // bij startdatum=vandaag. Prefill die te laag is → clamp naar min zodat
+  // sales meteen een geldige datum ziet i.p.v. een submit-error later.
+  const minStart = _swMinStartDateNL();
+  const startEl = document.getElementById('payStartDate');
+  if(startEl){
+    startEl.setAttribute('min', minStart);
+    if(w.payment_start_date && w.payment_start_date < minStart){
+      w.payment_start_date = minStart;
+      markDirty();
+    }
+  }
   document.getElementById('payStartDate').value = w.payment_start_date || '';
   document.getElementById('payDownAmount').value = w.payment_downpayment_amount || '';
   document.getElementById('payDownDate').value = w.payment_downpayment_date || '';
@@ -1564,6 +1624,15 @@ function updateNextEnabled() {
   } else if (state.step === 4) {
     const miss = [];
     if (!w.payment_start_date) miss.push('Startdatum cursus');
+    // Startdatum-ondergrens: vandaag + 3 kalenderdagen (NL). Spiegelt de
+    // server-side gate in sales-deal-create — blokkeer submit lokaal zodat
+    // de user geen 400 round-trip krijgt.
+    else {
+      const minStart = _swMinStartDateNL();
+      if (minStart && w.payment_start_date < minStart) {
+        miss.push('Startdatum cursus moet minimaal 3 kalenderdagen in de toekomst liggen (>= ' + minStart + ')');
+      }
+    }
     if (Number(w.payment_downpayment_amount) > 0 && !w.payment_downpayment_date) miss.push('Aanbetaling-datum');
     // Aanbetaling-datum moet ≥3 kalenderdagen vóór de cursus-startdatum
     // liggen (SEPA + Rogier-buffer). Zelfde regel als de aanbetaling-sub
