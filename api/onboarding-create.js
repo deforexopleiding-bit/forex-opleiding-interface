@@ -28,6 +28,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { provisionOnboardingStudent } from './_lib/onboarding-provision.js';
 import { sendOnboardingInvite } from './_lib/onboarding-invite.js';
 import { enrollForTrigger as enrollOnboardingAutomations } from './_lib/onboarding-automation-engine.js';
+import { assertStartDateNotTooEarly } from './_lib/onboarding-start-date.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -88,6 +89,21 @@ export default async function handler(req, res) {
   const startDate  = normalizeStartDate(body.start_date);
   if (!UUID_RE.test(customerId)) return res.status(400).json({ error: 'customer_id (uuid) vereist' });
   if (!UUID_RE.test(trajectId))  return res.status(400).json({ error: 'traject_id (uuid) vereist' });
+
+  // Ondergrens: startdatum moet >= vandaag + 3 kalenderdagen (NL-tijd) liggen.
+  // Zonder deze gate belandde het abbo in Bubble op start = aanmeldmoment,
+  // en Bubble past een payment-buffer toe die de membership_state_date_date
+  // terug-shift → abbo in het verleden. Niet stil clampen: de user moet zien
+  // dat 'ie te vroeg koos zodat 'ie bewust een andere datum kiest.
+  const startTooEarly = assertStartDateNotTooEarly(startDate);
+  if (startTooEarly) {
+    return res.status(400).json({
+      error: startTooEarly.message,
+      code:  startTooEarly.code,
+      min:   startTooEarly.min,
+      got:   startTooEarly.got,
+    });
+  }
 
   try {
     // 1) Customer bestaat?
