@@ -3093,20 +3093,10 @@
       <div class="fu-metrics-row" id="fu-metrics-row"></div>
     </div>
 
-    <!-- Globale zoekbalk (boven de tabs). Zoekt in follow_up_leads +
-         follow_up_appointments op naam/email/telefoon; klik-flow opent
-         de persoon in de werklijst-cockpit via pending-lead-open handshake. -->
-    <div class="fu-globalsearch" style="position:relative;margin:8px 0 12px;max-width:520px">
-      <div style="position:relative">
-        <i class="ti ti-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-faint);font-size:15px;pointer-events:none"></i>
-        <input type="search" id="fu-globalsearch-input" placeholder="Zoek klant op naam, telefoon of e-mail…" autocomplete="off"
-               style="width:100%;padding:8px 30px 8px 32px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elev);font-size:13px" />
-        <button type="button" id="fu-globalsearch-clear" title="Wissen"
-                style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-faint);cursor:pointer;padding:4px 8px;display:none">&#x2715;</button>
-      </div>
-      <div id="fu-globalsearch-results" role="listbox"
-           style="display:none;position:absolute;top:100%;left:0;right:0;margin-top:4px;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,0.10);max-height:340px;overflow-y:auto;z-index:120"></div>
-    </div>
+    <!-- Globale zoekbalk verhuisd naar de werklijst-listbar (r3413+). De
+         suggesties-dropdown #fu-globalsearch-results staat verderop als
+         body-level overlay (position:fixed) zodat 'ie niet geclipt wordt
+         door de overflow:hidden van .fu-cockpit-list. -->
 
     <nav class="fu-tabs" role="tablist">
       <!-- PRIMAIR — cockpit-hoofdnavigatie -->
@@ -3411,10 +3401,18 @@
                + refresh. De uitgebreide filters zijn verhuisd naar de popover
                zodat de lijst zelf meer verticale ruimte krijgt. -->
           <div class="fu-cockpit-listbar" style="display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--border);position:relative">
+            <!-- Globale zoek verhuisd hierheen (was: boven de tabs). Zoekt in
+                 4 bronnen (lead/appointment/event/retention) + opent klik-
+                 resultaat in de werklijst via de pending-lead-open handshake.
+                 Suggesties-dropdown #fu-globalsearch-results staat body-level
+                 (position:fixed) om clipping door .fu-cockpit-list overflow:
+                 hidden te vermijden. -->
             <div style="flex:1;position:relative">
               <i class="ti ti-search" style="position:absolute;left:8px;top:50%;transform:translateY(-50%);color:var(--text-faint);font-size:13px;pointer-events:none"></i>
-              <input type="search" id="cockpit-list-query" placeholder="Filter lijst op naam, tel of e-mail…" autocomplete="off"
-                     style="width:100%;padding:6px 8px 6px 28px;border:1px solid var(--border);border-radius:6px;background:var(--bg-elev);font-size:12.5px" />
+              <input type="search" id="fu-globalsearch-input" placeholder="Zoek klant op naam, telefoon of e-mail…" autocomplete="off"
+                     style="width:100%;padding:6px 28px 6px 28px;border:1px solid var(--border);border-radius:6px;background:var(--bg-elev);font-size:12.5px" />
+              <button type="button" id="fu-globalsearch-clear" title="Wissen"
+                      style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-faint);cursor:pointer;padding:2px 6px;display:none;font-size:12px">&#x2715;</button>
             </div>
             <button type="button" class="fu-lead-btn" id="cockpit-filter-toggle" title="Filters" aria-expanded="false"
                     style="position:relative;padding:6px 10px">
@@ -5249,10 +5247,8 @@
       // één keer per page-load wordt gebonden ondanks meerdere renders.
       // Zie _renderAfspraken.
       teamLoaded  : false,
-      // Filters. `listQuery` is client-side lijst-filter (naam/tel/e-mail) op
-      // de al-geladen items; onafhankelijk van de globale zoekbalk (die zoekt
-      // over 4 bronnen en switcht tabs).
-      filter: { source: 'all', mine: false, snoozed: false, quick: null, listQuery: '' },
+      // Filters.
+      filter: { source: 'all', mine: false, snoozed: false, quick: null },
       // UI-state
       selectedId  : null,
       timelineCache: {},         // { leadId: [items] }
@@ -5388,25 +5384,9 @@
           return true;
         });
       }
-      // Lijst-filter-zoek (client-side, alleen op de al-geladen items).
-      // Onafhankelijk van de globale zoekbalk boven de tabs. Case-insensitive
-      // substring-match op naam/telefoon/e-mail; phone-normalize zodat
-      // "0612..." ook "+3161..." matcht binnen de al-geladen set.
-      const listQ = String(f.listQuery || '').trim().toLowerCase();
-      if (listQ) {
-        const digits = listQ.replace(/\D/g, '');
-        const l9 = digits.length >= 9 ? digits.slice(-9) : null;
-        out = out.filter((x) => {
-          const nm = String(x.lead_name || '').toLowerCase();
-          const em = String(x.lead_email || '').toLowerCase();
-          const phDig = String(x.lead_phone || '').replace(/\D/g, '');
-          if (nm.includes(listQ)) return true;
-          if (em.includes(listQ)) return true;
-          if (digits.length >= 3 && phDig.includes(digits)) return true;
-          if (l9 && phDig.length >= 9 && phDig.slice(-9) === l9) return true;
-          return false;
-        });
-      }
+      // (listQuery is verwijderd — de globale zoek in de listbar vervangt
+      // deze pure lijst-narrowing. Suggesties + tab-switch dekken de use-case
+      // beter dan een client-side filter op alleen de zichtbare items.)
       return out;
     }
 
@@ -7411,17 +7391,9 @@
       if (mine) mine.addEventListener('change', () => { _leadsState.filter.mine = mine.checked; loadLeadsTab(); _updateCockpitFilterBadge(); });
       const sn   = document.getElementById('cockpit-snoozed');
       if (sn) sn.addEventListener('change', () => { _leadsState.filter.snoozed = sn.checked; loadLeadsTab(); _updateCockpitFilterBadge(); });
-      // Lijst-filter-zoek (client-side, alleen op de al-geladen items).
-      // Debounced 120ms zodat renderCockpitList niet op elke keystroke draait.
-      const lq = document.getElementById('cockpit-list-query');
-      let _lqTimer = null;
-      if (lq) lq.addEventListener('input', () => {
-        clearTimeout(_lqTimer);
-        _lqTimer = setTimeout(() => {
-          _leadsState.filter.listQuery = String(lq.value || '').trim();
-          renderCockpitList();
-        }, 120);
-      });
+      // (Lijst-filter-zoek is vervangen door de globale zoek in de listbar —
+      // zie setupGlobalSearch. Die zoekt over 4 bronnen + opent klik-resultaat
+      // in de werklijst via de pending-lead-open handshake.)
       // Filter-popover: open/close op klik-op-icoon. Klik-buiten / Escape sluit.
       const fToggle = document.getElementById('cockpit-filter-toggle');
       const fPop    = document.getElementById('cockpit-filter-popover');
@@ -11140,11 +11112,22 @@
       let _fuGsAbort = null;
       let _fuGsLastResults = [];
 
+      // Positioneer de body-level dropdown onder de listbar-input via
+      // getBoundingClientRect. Nodig sinds de zoek in de werklijst-listbar
+      // zit — .fu-cockpit-list heeft overflow:hidden, en absolute-positioned
+      // zou geclipt worden. Fixed + herberekening op elke show = veilig.
+      function _fuGsPositionDropdown() {
+        const rect = inp.getBoundingClientRect();
+        drop.style.top   = (rect.bottom + 4) + 'px';
+        drop.style.left  = rect.left + 'px';
+        drop.style.width = rect.width + 'px';
+      }
       function _fuGsCloseDropdown() {
         drop.style.display = 'none';
         drop.innerHTML = '';
       }
       function _fuGsShowMessage(html) {
+        _fuGsPositionDropdown();
         drop.style.display = 'block';
         drop.innerHTML = '<div style="padding:10px 12px;font-size:12.5px;color:var(--text-faint)">' + html + '</div>';
       }
@@ -11161,6 +11144,7 @@
 
       function _fuGsRenderResults(items) {
         if (!items.length) { _fuGsShowMessage('Geen resultaten.'); return; }
+        _fuGsPositionDropdown();
         drop.style.display = 'block';
         drop.innerHTML = items.map((it, idx) => {
           const nm    = String(it.lead_name || '(zonder naam)');
@@ -11241,6 +11225,16 @@
         if (drop.style.display === 'none') return;
         if (e.target === inp || drop.contains(e.target) || (clrBtn && clrBtn.contains(e.target))) return;
         _fuGsCloseDropdown();
+      });
+      // Sluit op scroll — de dropdown is position:fixed, dus zonder deze
+      // listener zou 'ie op z'n oude schermpositie blijven "kleven" terwijl
+      // de input onder 'em wegscrollt. Bekend patroon in deze module
+      // (zie r10870+ 3-dots menu positioning).
+      window.addEventListener('scroll', () => {
+        if (drop.style.display !== 'none') _fuGsCloseDropdown();
+      }, { passive: true, capture: true });
+      window.addEventListener('resize', () => {
+        if (drop.style.display !== 'none') _fuGsPositionDropdown();
       });
 
       // Open resultaat in werklijst via pending-lead-open handshake (r5203/5422).
@@ -11883,6 +11877,13 @@
   applyRbacGating();
 })();
 </script>
+<!-- Globale zoek-suggesties dropdown — body-level overlay met position:fixed
+     zodat 'ie niet geclipt wordt door de overflow:hidden van .fu-cockpit-list.
+     Positie wordt bij elke show/render dynamisch bepaald via
+     getBoundingClientRect() van #fu-globalsearch-input. Sluit op scroll,
+     Escape, en klik-buiten (zie setupGlobalSearch IIFE). -->
+<div id="fu-globalsearch-results" role="listbox"
+     style="display:none;position:fixed;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,0.10);max-height:340px;overflow-y:auto;z-index:200"></div>
 <script src="/modules/shared/permissions.js"></script>
 <script src="/modules/shared/sidebar.js"></script>
 <script src="/modules/shared/quick-task-button.js" data-module="Follow-up" defer></script>
