@@ -141,6 +141,15 @@ async function respondList(req, res) {
   }
 
   if (tagFilteredIds) query = query.in('id', tagFilteredIds);
+  // is_company filter — gebruikt door de bedrijf-picker in de klant-detail
+  // "Koppel aan bedrijf"-flow (v1 lokaal, migratie 2026-07-18). Waarde 'true'
+  // filtert op bedrijf-klanten, 'false' op personen. Ontbreekt/anders → geen
+  // filter (backward-compat).
+  if (typeof q.is_company === 'string') {
+    const v = q.is_company.toLowerCase().trim();
+    if (v === 'true')  query = query.eq('is_company', true);
+    if (v === 'false') query = query.eq('is_company', false);
+  }
   if (createdFrom) query = query.gte('created_at', createdFrom);
   if (createdTo)   query = query.lte('created_at', createdTo);
 
