@@ -7,6 +7,9 @@
   "engines": {
     "node": ">=20"
   },
+  "scripts": {
+    "test": "node --import ./tests/setup.js --test tests/*.test.js"
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.0",
     "@supabase/supabase-js": "^2.105.4",
