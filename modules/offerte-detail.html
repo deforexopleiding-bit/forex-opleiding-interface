@@ -104,8 +104,8 @@
         <label for="obStartDate">Startdatum</label>
         <input type="date" id="obStartDate" />
         <div style="font-size:11.5px;color:var(--text-faint);margin:-8px 0 14px;line-height:1.45">
-          Vooringevuld uit de offerte. Aanpasbaar. De looptijd in Bubble loopt vanaf deze datum
-          (of vanaf nu als de datum in het verleden ligt) — toegang start direct.
+          Minimaal vandaag + 3 kalenderdagen. Vooringevuld uit de offerte (clamped naar het minimum).
+          De looptijd in Bubble loopt vanaf deze datum — toegang start direct.
         </div>
         <div id="obError" class="ob-error" hidden></div>
       </div>
@@ -614,14 +614,41 @@ async function _ensureObTrajectenLoaded(){
   }
 }
 
+// Vroegst-toegestane onboarding-startdatum als yyyy-mm-dd in NL-tijd
+// (Europe/Amsterdam) = vandaag + 3 kalenderdagen. Spiegelt de server-side
+// gate in api/_lib/onboarding-start-date.js zodat de UI dezelfde ondergrens
+// gebruikt zonder een aparte round-trip.
+function _obMinStartDateNL(){
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Amsterdam',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+  const nlDateStr = fmt.format(new Date()); // yyyy-mm-dd (en-CA = ISO)
+  const [y, m, d] = nlDateStr.split('-').map((s) => parseInt(s, 10));
+  const anchor = new Date(Date.UTC(y, m - 1, d));
+  anchor.setUTCDate(anchor.getUTCDate() + 3);
+  const yy = anchor.getUTCFullYear();
+  const mm = String(anchor.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(anchor.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
 function openObModal(){
   if (!_obCtx.customerId) { toast('Geen klant-id beschikbaar', 'error'); return; }
   _resetObModal();
   document.getElementById('obCustomerLabel').textContent = _obCtx.customerName || _obCtx.customerId;
-  // Prefill startdatum uit de offerte (payment_start_date / start_date). Leeg
-  // → veld blijft leeg en de admin kan handmatig invullen of laten staan.
+  // Prefill startdatum uit de offerte (payment_start_date / start_date).
+  // Clamp naar minimum (vandaag+3): een lagere prefill zou de user bij
+  // submit een 400 opleveren, wat verwarrend voelt als 'ie het veld niet
+  // heeft aangeraakt. Min-attribuut op de input voorkomt browser-side dat
+  // 'ie een eerdere datum kan kiezen via de native date-picker.
   const dt = document.getElementById('obStartDate');
-  if (dt) dt.value = _obCtx.startDate || '';
+  const min = _obMinStartDateNL();
+  if (dt) {
+    dt.min = min;
+    const prefill = _obCtx.startDate || '';
+    dt.value = (prefill && prefill >= min) ? prefill : min;
+  }
   const m = document.getElementById('obModal');
   m.removeAttribute('hidden');
   m.classList.add('open');
@@ -642,10 +669,21 @@ async function submitObCreate(){
   document.getElementById('obError').hidden = true;
   sb.disabled = true;
   sb.textContent = 'Bezig…';
-  // Optionele startdatum uit het input-veld. Leeg → null (server valt
-  // dan terug op now in de provisioning-stap, identiek aan oud gedrag).
+  // Startdatum uit het input-veld. Leeg → null (server valt dan terug op
+  // now in de provisioning-stap, identiek aan oud gedrag). Als gevuld:
+  // client-side check tegen vandaag+3 (spiegel van server-side gate) —
+  // voorkomt een 400 round-trip bij zichtbaar te vroege input.
   const dtEl = document.getElementById('obStartDate');
   const startDate = dtEl && dtEl.value ? dtEl.value : null;
+  if (startDate) {
+    const min = _obMinStartDateNL();
+    if (startDate < min) {
+      _showObError('Startdatum moet minimaal 3 kalenderdagen in de toekomst liggen (vanaf ' + min + ').');
+      sb.disabled = false;
+      sb.textContent = 'Aanmelden';
+      return;
+    }
+  }
   const payload = { customer_id: _obCtx.customerId, traject_id: trajectId };
   if (startDate) payload.start_date = startDate;
   try {

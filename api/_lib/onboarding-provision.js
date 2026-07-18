@@ -274,6 +274,18 @@ export async function provisionOnboardingStudent(onboardingId) {
     ? addMonths(basis, durationMonths).toISOString()
     : basis.toISOString(); // Defensieve fallback: 0/NULL → einddatum gelijk aan basis.
 
+  // Membership-start (Bubble abbo-startdatum): stuur de door de user gekozen
+  // start_date 1-op-1 door. Fallback op nowIso als er geen start_date is
+  // (backward-compat met bestaand gedrag: create-endpoint accepteert dan
+  // start_date=null). onboarding-create dwingt start_date >= vandaag+3 af,
+  // dus de basis staat altijd in de toekomst wanneer 'ie is opgegeven.
+  //
+  // Waarom niet gewoon nowIso? Bubble past een payment-buffer toe die het
+  // membership-start-veld terug-shift; met nowIso als input belandt het abbo
+  // 3 dagen in het verleden. Door de gebruiker-gekozen (toekomstige) datum
+  // door te sturen, wordt de eindstand op Bubble = user-input.
+  const membershipStateIso = basis.toISOString();
+
   const patch = {
     name_text                                           : firstName,
     last_name_text                                      : lastName,
@@ -283,7 +295,7 @@ export async function provisionOnboardingStudent(onboardingId) {
     role_option_os___roles                              : 'student',
     onboarding_status_option_os___onboarding_status     : 'Onboarding niet klaar',
     onboarding_date_date                                : nowIso,
-    membership_state_date_date                          : nowIso,
+    membership_state_date_date                          : membershipStateIso,
     membership_end_date_date                            : endIso,
   };
   const alpha = Number(traject.alpha_calls_total);
