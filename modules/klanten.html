@@ -371,6 +371,97 @@
     .klx.klx-call-callbar .klx-call-callbar-btn.hangup { background:#ef4444; border-color:#b91c1c; }
     .klx.klx-call-callbar .klx-call-callbar-btn.hangup:hover { background:#dc2626; }
     .contact-link.klx-call-btn:disabled { opacity:.55; cursor:not-allowed; }
+    /* Rich floating belvenster (v1) — geadapteerd van finance wbx-call-cockpit.
+       Niet-blokkerend, zwevend rechts-onder, sluitbaar via × of Escape.
+       Callbar-fallback (r328+) blijft actief tijdens gesprek zodat de user
+       ook na dichtklappen kan mute/ophangen. */
+    .klx.klx-call-sheet {
+      position:fixed; right:24px; bottom:24px; z-index:9998;
+      width:340px; max-width:calc(100vw - 32px);
+      background:linear-gradient(180deg, rgba(14,124,107,.98), rgba(10,90,78,.95));
+      border:1px solid rgba(255,255,255,.18);
+      border-radius:14px;
+      color:#fff;
+      box-shadow:0 20px 50px rgba(0,0,0,0.45);
+      font-family:'Inter', system-ui, sans-serif;
+      animation:klxSheetSlideIn .18s ease-out;
+    }
+    @keyframes klxSheetSlideIn {
+      from { transform:translateY(20px); opacity:0; }
+      to   { transform:translateY(0);    opacity:1; }
+    }
+    .klx.klx-call-sheet[hidden] { display:none !important; }
+    @media (max-width:720px) {
+      .klx.klx-call-sheet { left:12px; right:12px; bottom:12px; width:auto; }
+    }
+    .klx-call-sheet-header {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:12px 14px 6px; border-bottom:1px solid rgba(255,255,255,.10);
+    }
+    .klx-call-sheet-title { font-size:13px; font-weight:600; letter-spacing:.2px; }
+    .klx-call-sheet-close {
+      background:none; border:none; color:rgba(255,255,255,.7);
+      cursor:pointer; font-size:14px; padding:2px 6px; border-radius:6px;
+    }
+    .klx-call-sheet-close:hover { background:rgba(255,255,255,.10); color:#fff; }
+    .klx-call-sheet-body { padding:12px 14px 14px; display:flex; flex-direction:column; gap:10px; }
+    .klx-call-sheet-top { display:flex; flex-direction:column; gap:4px; }
+    .klx-call-sheet-label {
+      font-size:10.5px; text-transform:uppercase; letter-spacing:.05em;
+      color:rgba(255,255,255,.65); display:flex; align-items:center; gap:6px;
+    }
+    .klx-call-sheet-lineselect {
+      width:100%; padding:6px 8px; border-radius:6px;
+      background:rgba(0,0,0,.20); color:#fff;
+      border:1px solid rgba(255,255,255,.14); font-size:12.5px;
+    }
+    .klx-call-sheet-lineselect:disabled { opacity:.6; cursor:not-allowed; }
+    .klx-call-sheet-conn {
+      display:flex; align-items:center; gap:8px; font-size:11.5px;
+    }
+    .klx-call-sheet-conn.connected   .klx-call-sheet-conn-label { color:#a7f3d0; }
+    .klx-call-sheet-conn.connecting  .klx-call-sheet-conn-label { color:#fde68a; }
+    .klx-call-sheet-conn.failed      .klx-call-sheet-conn-label,
+    .klx-call-sheet-conn.disabled    .klx-call-sheet-conn-label { color:#fca5a5; }
+    .klx-call-sheet-conn.idle        .klx-call-sheet-conn-label { color:rgba(255,255,255,.65); }
+    .klx-call-sheet-conn-retry {
+      background:rgba(255,255,255,.10); color:#fff; border:1px solid rgba(255,255,255,.14);
+      border-radius:6px; padding:2px 6px; cursor:pointer;
+    }
+    .klx-call-sheet-conn-retry:hover { background:rgba(255,255,255,.18); }
+    .klx-call-sheet-conn-retry[hidden] { display:none !important; }
+    .klx-call-sheet-number, .klx-call-sheet-numinput {
+      width:100%; padding:8px 10px; border-radius:8px;
+      font-size:15px; letter-spacing:.5px;
+      background:rgba(0,0,0,.20); color:#fff;
+      border:1px solid rgba(255,255,255,.14);
+    }
+    .klx-call-sheet-numinput:focus { outline:none; border-color:#a7f3d0; }
+    .klx-call-sheet-number { font-variant-numeric:tabular-nums; }
+    .klx-mono { font-variant-numeric:tabular-nums; }
+    .klx-call-sheet-state {
+      font-size:11.5px; color:rgba(255,255,255,.75);
+      min-height:16px; text-align:center;
+    }
+    .klx-call-sheet-state.connected { color:#a7f3d0; font-weight:600; }
+    .klx-call-sheet-state.error     { color:#fca5a5; }
+    .klx-call-sheet-actions {
+      display:flex; gap:8px; justify-content:center; flex-wrap:wrap;
+    }
+    .klx-call-sheet-btn {
+      background:rgba(255,255,255,.14); color:#fff;
+      border:1px solid rgba(255,255,255,.20);
+      border-radius:8px; padding:8px 14px; cursor:pointer;
+      font-size:13px; font-weight:600; transition:background .15s;
+      display:inline-flex; align-items:center; gap:6px;
+    }
+    .klx-call-sheet-btn:hover:not(:disabled) { background:rgba(255,255,255,.22); }
+    .klx-call-sheet-btn:disabled { opacity:.55; cursor:not-allowed; }
+    .klx-call-sheet-btn.dial    { background:#0f766e; border-color:#0f766e; }
+    .klx-call-sheet-btn.dial:hover:not(:disabled) { background:#115e59; }
+    .klx-call-sheet-btn.hangup  { background:#ef4444; border-color:#b91c1c; }
+    .klx-call-sheet-btn.hangup:hover { background:#dc2626; }
+    .klx-call-sheet-btn.mute.on { background:#eab308; color:#111; border-color:#ca8a04; }
   </style>
 </head>
 <body>
@@ -4343,6 +4434,10 @@ init();
     uaByLine    : {},
     regByLine   : {},
     accByLine   : {},
+    // configuredLines: welke lijnen server-side ingesteld zijn. Gebruikt
+    // door de UI om de BE-optie in de lijn-select te tonen zodra BE
+    // CONFIGURED is (i.p.v. wachten tot registered).
+    configuredLines: { nl: false, be: false },
     session     : null,
     audioEl     : null,
     activeLine  : null,
@@ -4351,6 +4446,14 @@ init();
     muted       : false,
     timerStart  : 0,
     timerHandle : null,
+    // Overrides — user kan lijn en/of nummer wijzigen via de sheet.
+    // lineOverride: 'auto' | 'nl' | 'be' (default auto = _klxDetectLine).
+    // numberOverride: string of null (default = klantnummer uit sheet-open).
+    lineOverride  : 'auto',
+    numberOverride: null,
+    // Actieve klant-context (naam + telefoon) voor de sheet-header. Wordt
+    // gezet bij _klxOpenSheet en gewist bij _klxCloseSheet.
+    activeCustomer: null,
   };
 
   // NL/BE line-detectie op basis van nummer (E.164). +32 = BE, alles anders = NL.
@@ -4363,6 +4466,34 @@ init();
 
   function _klxDigitsFor(phone) {
     return String(phone || '').replace(/[^\d+]/g, '');
+  }
+
+  // Resolve het effectieve nummer: user-override wint van klant-nummer.
+  function _klxResolveEffectivePhone(customerPhone) {
+    const p = String(_klxSoftphone.numberOverride != null ? _klxSoftphone.numberOverride : (customerPhone || '')).trim();
+    return p;
+  }
+  // Resolve de effectieve lijn: user-override ('nl'|'be') wint van
+  // auto-detectie op basis van het nummer. availability-check gebeurt in
+  // _klxPlaceCall zodat de UI de gekozen lijn meteen kan tonen.
+  function _klxResolveEffectiveLine(customerPhone) {
+    const ov = String(_klxSoftphone.lineOverride || 'auto').toLowerCase();
+    if (ov === 'nl' || ov === 'be') return ov;
+    return _klxDetectLine(customerPhone);
+  }
+  // BE-beschikbaarheid: alleen tonen als BE server-side configured is.
+  function _klxIsBeAvailable() {
+    return _klxSoftphone.config ? !!_klxSoftphone.configuredLines?.be : false;
+  }
+  // Registratie-status per lijn — spiegelt _wbxRegistrationStatusForLine
+  // in finance. 5 states: idle / connecting / connected / failed / disabled.
+  function _klxRegistrationStatusForLine(line) {
+    const sp = _klxSoftphone;
+    if (sp.uaByLine?.[line]) return 'connected';
+    if (sp.initPromise && sp.config) return 'disabled';
+    if (sp.lastError) return 'failed';
+    if (sp.initPromise) return 'connecting';
+    return 'idle';
   }
 
   function _klxEnsureCallbar() {
@@ -4485,6 +4616,13 @@ init();
       } else if (cfg.user) {
         accounts = [{ key: 'nl', ...cfg }];
       }
+      // configuredLines vullen VOORDAT de register-loop draait, zodat de
+      // UI-gate ('BE-optie tonen') per lijn onafhankelijk is van of de
+      // register-poging al klaar is (matcht finance-parity).
+      _klxSoftphone.configuredLines = {
+        nl: accounts.some((a) => (a.key || 'nl') === 'nl'),
+        be: accounts.some((a) => a.key === 'be'),
+      };
       for (const acc of accounts) {
         if (!acc?.user || !acc?.password || !acc?.domain) continue;
         try {
@@ -4519,8 +4657,11 @@ init();
   }
 
   async function _klxPlaceCall(customerPhone, opts = {}) {
-    const line   = _klxDetectLine(customerPhone);
-    const digits = _klxDigitsFor(customerPhone);
+    // Effectief nummer + lijn resolven: user-overrides winnen van default.
+    // Zo bel je met de handmatige lijn-select ('BE') zelfs een NL-nummer.
+    const effPhone = _klxResolveEffectivePhone(customerPhone);
+    const line     = _klxResolveEffectiveLine(effPhone);
+    const digits   = _klxDigitsFor(effPhone);
     if (!digits) {
       window.AgentShared?.showToast?.('Geen telefoonnummer om te bellen.', 'error');
       return { ok: false, line };
@@ -4529,14 +4670,21 @@ init();
     try {
       await _klxInitSoftphone();
     } catch (e) {
+      _klxSoftphone.lastError = e?.message || String(e);
       window.AgentShared?.showToast?.('SIP niet beschikbaar: ' + (e?.message || 'onbekend'), 'error');
+      _klxRenderSheet();
       return { ok: false, line, error: e?.message || 'init' };
     }
 
+    // Strikt: geen silent-fallback wanneer de gekozen lijn geen UA heeft.
+    // User heeft bewust NL of BE gekozen — als die niet geregistreerd is,
+    // toon een duidelijke fout i.p.v. via de andere lijn uitbellen.
     const ua = _klxSoftphone.uaByLine[line];
     if (!ua) {
       const msg = `${line.toUpperCase()}-lijn niet geregistreerd. Check VOYS_SIP_*_${line.toUpperCase()} env vars.`;
+      _klxSoftphone.lastError = msg;
       window.AgentShared?.showToast?.(msg, 'error');
+      _klxRenderSheet();
       return { ok: false, line };
     }
 
@@ -4544,9 +4692,12 @@ init();
     _klxSoftphone.lastState  = 'dialing';
     _klxSoftphone.lastError  = null;
     _klxSoftphone.muted      = false;
+    _klxRenderSheet();
 
     const displayName = opts?.displayName || '';
-    _klxShowCallbar(true, 'Kiezen…', displayName ? `${displayName} — ${customerPhone}` : customerPhone);
+    // Callbar-fallback in beeld houden zodat de body-level callbar zijn timer
+    // + mute/hangup blijft tonen als user het sheet dichtklapt tijdens gesprek.
+    _klxShowCallbar(true, 'Kiezen…', displayName ? `${displayName} — ${effPhone}` : effPhone);
     const muteBtn = document.getElementById('klxSoftphoneMuteBtn');
     if (muteBtn) { muteBtn.classList.remove('on'); muteBtn.innerHTML = '<i class="ti ti-microphone"></i>'; muteBtn.title = 'Mute microfoon'; }
 
@@ -4565,7 +4716,8 @@ init();
       inviter.stateChange.addListener((state) => {
         if (state === 'Establishing') {
           _klxSoftphone.lastState = 'ringing';
-          _klxUpdateCallbarStatus('Gaat over…', displayName ? `${displayName} — ${customerPhone}` : customerPhone);
+          _klxUpdateCallbarStatus('Gaat over…', displayName ? `${displayName} — ${effPhone}` : effPhone);
+          _klxRenderSheet();
         } else if (state === 'Established') {
           _klxSoftphone.lastState = 'connected';
           const pc = inviter.sessionDescriptionHandler?.peerConnection;
@@ -4575,8 +4727,9 @@ init();
             _klxSoftphone.audioEl.srcObject = stream;
             try { _klxSoftphone.audioEl.play(); } catch (_) { /* autoplay policy */ }
           }
-          _klxUpdateCallbarStatus('In gesprek', displayName ? `${displayName} — ${customerPhone}` : customerPhone);
+          _klxUpdateCallbarStatus('In gesprek', displayName ? `${displayName} — ${effPhone}` : effPhone);
           _klxStartCallTimer();
+          _klxRenderSheet();
         } else if (state === 'Terminated') {
           _klxSoftphone.lastState = 'ended';
           _klxStopCallTimer();
@@ -4584,6 +4737,7 @@ init();
           const audioEl = _klxSoftphone.audioEl;
           if (audioEl) audioEl.srcObject = null;
           _klxSoftphone.session = null;
+          _klxRenderSheet();
         }
       });
       await inviter.invite();
@@ -4595,13 +4749,14 @@ init();
       _klxShowCallbar(false);
       _klxSoftphone.session = null;
       window.AgentShared?.showToast?.('Bellen mislukt: ' + (e?.message || 'onbekend'), 'error');
+      _klxRenderSheet();
       return { ok: false, line, error: e?.message || 'invite' };
     }
   }
 
   async function _klxHangup() {
     const s = _klxSoftphone.session;
-    if (!s) { _klxShowCallbar(false); _klxStopCallTimer(); return; }
+    if (!s) { _klxShowCallbar(false); _klxStopCallTimer(); _klxRenderSheet(); return; }
     try {
       const state = s.state;
       if (state === 'Established')       await s.bye();
@@ -4614,21 +4769,201 @@ init();
     _klxSoftphone.lastState = 'ended';
     _klxStopCallTimer();
     _klxShowCallbar(false);
+    _klxRenderSheet();
+  }
+
+  // ═════════════════════════════════════════════════════════════════════
+  // klx-softphone RICH SHEET (v1)
+  // ─────────────────────────────────────────────────────────────────────
+  // Floating, niet-blokkerend belvenster. Geadapteerd van finance-wbx-
+  // call-cockpit (r18992-19031). Toont:
+  //   - UITBELLEN VIA + lijn-select (auto/NL/BE, BE alleen als configured)
+  //   - Registratie-status (dot + label + retry-knop bij failed/disabled)
+  //   - Bewerkbaar nummer-veld (default gevuld met klantnummer)
+  //   - Bel-knop / Ophangen / Mute / in-call-timer
+  // Sluitbaar via × of Escape. Callbar-fallback blijft body-level zodat
+  // een lopend gesprek zichtbaar blijft als user het venster sluit.
+  //
+  // v2 (buiten scope): "Uitkomst noteren" → wegschrijven naar contact-
+  // geschiedenis/notities.
+  // ═════════════════════════════════════════════════════════════════════
+  function _klxEnsureSheet() {
+    let sheet = document.getElementById('klxSoftphoneSheet');
+    if (sheet) return sheet;
+    sheet = document.createElement('div');
+    sheet.id = 'klxSoftphoneSheet';
+    sheet.className = 'klx klx-call-sheet';
+    sheet.hidden = true;
+    // Body-content wordt door _klxRenderSheet gevuld. Zelf alleen frame.
+    sheet.innerHTML = `
+      <div class="klx-call-sheet-header">
+        <div class="klx-call-sheet-title" id="klxCallSheetTitle">Bellen</div>
+        <button type="button" class="klx-call-sheet-close" id="klxCallSheetClose" aria-label="Sluiten">&#x2715;</button>
+      </div>
+      <div class="klx-call-sheet-body" id="klxCallSheetBody"></div>
+    `;
+    document.body.appendChild(sheet);
+    sheet.querySelector('#klxCallSheetClose')?.addEventListener('click', _klxCloseSheet);
+    // Escape sluit alleen als sheet zichtbaar is.
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !sheet.hidden) _klxCloseSheet();
+    });
+    return sheet;
+  }
+
+  function _klxOpenSheet(customer) {
+    const sheet = _klxEnsureSheet();
+    _klxSoftphone.activeCustomer = customer || null;
+    // Reset overrides bij nieuwe klant zodat vorige call niet lekt naar
+    // deze sessie (bv. numberOverride van een andere klant, of BE-lijn
+    // die niet meer nodig is).
+    _klxSoftphone.numberOverride = null;
+    _klxSoftphone.lineOverride   = 'auto';
+    _klxSoftphone.lastError      = null;
+    // Titel: klantnaam als aanwezig, anders neutraal.
+    const nm = String(customer?.name || '').trim();
+    const t = document.getElementById('klxCallSheetTitle');
+    if (t) t.textContent = nm ? `Bellen · ${nm}` : 'Bellen';
+    sheet.hidden = false;
+    _klxRenderSheet();
+    // Eager init on sheet-open (fire-and-forget). Geeft direct de
+    // 'Verbinden…' → 'Verbonden' feedback zonder dat de gebruiker eerst
+    // 'Bel nu' hoeft te klikken. Alleen kicken als er nog geen poging is.
+    if (!_klxSoftphone.initPromise
+        && !Object.keys(_klxSoftphone.uaByLine).length
+        && !_klxSoftphone.lastError) {
+      _klxInitSoftphone().catch(() => {}).finally(() => _klxRenderSheet());
+    }
+  }
+
+  function _klxCloseSheet() {
+    const sheet = document.getElementById('klxSoftphoneSheet');
+    if (sheet) sheet.hidden = true;
+    _klxSoftphone.activeCustomer = null;
+    // Numer/lijn-overrides niet resetten hier: user kan sheet dichtklappen
+    // tijdens gesprek en de callbar-fallback blijft de call door-tonen.
+  }
+
+  function _klxRenderSheet() {
+    const sheet = document.getElementById('klxSoftphoneSheet');
+    if (!sheet || sheet.hidden) return;
+    const body = sheet.querySelector('#klxCallSheetBody');
+    if (!body) return;
+    const cust    = _klxSoftphone.activeCustomer || {};
+    const phone   = cust.phone || '';
+    const effPhone = _klxResolveEffectivePhone(phone);
+    const line    = _klxResolveEffectiveLine(effPhone);
+    const detected = _klxDetectLine(effPhone);
+    const detectedLbl = detected === 'be' ? 'BE-lijn' : 'NL-lijn';
+    const autoOptLabel = effPhone ? `Lijn · automatisch (→ ${detectedLbl})` : 'Lijn · automatisch';
+    const beAvailable = _klxIsBeAvailable();
+    const ov = _klxSoftphone.lineOverride || 'auto';
+    const connState = _klxRegistrationStatusForLine(line);
+    const connLabelMap = {
+      idle       : '○ Nog niet verbonden',
+      connecting : '○ Verbinden…',
+      connected  : '● Verbonden',
+      failed     : '● Verbinding mislukt',
+      disabled   : `● ${line.toUpperCase()}-lijn niet beschikbaar`,
+    };
+    const connLabel = connLabelMap[connState] || connLabelMap.idle;
+    const showConnRetry = (connState === 'failed' || connState === 'disabled');
+    const state = _klxSoftphone.lastState;
+    const stateLabel =
+      state === 'dialing'   ? 'Bellen…' :
+      state === 'ringing'   ? 'Gaat over…' :
+      state === 'connected' ? 'Verbonden' :
+      state === 'ended'     ? 'Beëindigd' :
+      state === 'error'     ? 'Fout: ' + (_klxSoftphone.lastError || 'onbekend') :
+      'Klaar';
+    const inCall = state === 'dialing' || state === 'ringing' || state === 'connected';
+    const canCall = !!effPhone;
+    const esc = (s) => String(s || '').replace(/[&<>"']/g, (c) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+    body.innerHTML = `
+      <div class="klx-call-sheet-top">
+        <div class="klx-call-sheet-label"><i class="ti ti-phone"></i> Uitbellen via</div>
+        <select class="klx-call-sheet-lineselect" id="klxCallLineSel" ${inCall ? 'disabled' : ''} title="Kies handmatig NL/BE of laat automatisch bepalen op basis van het klantnummer">
+          <option value="auto" ${ov === 'auto' ? 'selected' : ''}>${esc(autoOptLabel)}</option>
+          <option value="nl"   ${ov === 'nl'   ? 'selected' : ''}>NL-lijn (+31)</option>
+          ${beAvailable ? `<option value="be" ${ov === 'be' ? 'selected' : ''}>BE-lijn (+32)</option>` : ''}
+        </select>
+      </div>
+      <div class="klx-call-sheet-conn ${connState}" aria-live="polite">
+        <span class="klx-call-sheet-conn-label">${esc(connLabel)}</span>
+        <button type="button" class="klx-call-sheet-conn-retry" id="klxCallConnRetry" ${showConnRetry ? '' : 'hidden'} title="Opnieuw verbinden"><i class="ti ti-refresh"></i></button>
+      </div>
+      ${inCall
+        ? `<div class="klx-call-sheet-number klx-mono">${esc(effPhone || 'geen nummer')}</div>`
+        : `<input type="tel" class="klx-call-sheet-numinput klx-mono" id="klxCallNumberInput" value="${esc(effPhone)}" placeholder="+31 6..." />`
+      }
+      <div class="klx-call-sheet-state ${state}">${esc(stateLabel)}</div>
+      <div class="klx-call-sheet-actions">
+        ${inCall
+          ? `<button class="klx-call-sheet-btn hangup" type="button" id="klxCallHangup"><i class="ti ti-phone-off"></i> Ophangen</button>
+             <button class="klx-call-sheet-btn mute${_klxSoftphone.muted ? ' on' : ''}" type="button" id="klxCallMute" title="${_klxSoftphone.muted ? 'Microfoon aan' : 'Mute microfoon'}"><i class="ti ${_klxSoftphone.muted ? 'ti-microphone-off' : 'ti-microphone'}"></i></button>`
+          : `<button class="klx-call-sheet-btn dial" type="button" id="klxCallDial" ${!canCall ? 'disabled' : ''}>${canCall ? '📞 Bel nu' : 'Vul nummer in'}</button>`
+        }
+      </div>
+    `;
+    _klxBindSheet();
+  }
+
+  function _klxBindSheet() {
+    const body = document.querySelector('#klxCallSheetBody');
+    if (!body) return;
+    const numIn = body.querySelector('#klxCallNumberInput');
+    if (numIn) {
+      numIn.addEventListener('input', (e) => {
+        _klxSoftphone.numberOverride = String(e.target.value || '').trim() || null;
+        // Bel-knop enabled/disabled bijwerken zonder full re-render (behoudt
+        // focus). Auto-detect label + lijn-status vernieuwen op blur.
+        const dialBtn = body.querySelector('#klxCallDial');
+        if (dialBtn) dialBtn.disabled = !_klxSoftphone.numberOverride;
+      });
+      numIn.addEventListener('blur', () => _klxRenderSheet());
+    }
+    const lineSel = body.querySelector('#klxCallLineSel');
+    if (lineSel) {
+      lineSel.addEventListener('change', (e) => {
+        _klxSoftphone.lineOverride = String(e.target.value || 'auto');
+        _klxRenderSheet();
+      });
+    }
+    const retryBtn = body.querySelector('#klxCallConnRetry');
+    if (retryBtn) {
+      retryBtn.addEventListener('click', () => {
+        _klxSoftphone.initPromise = null;
+        _klxSoftphone.lastError   = null;
+        _klxRenderSheet();
+        _klxInitSoftphone().catch(() => {}).finally(() => _klxRenderSheet());
+      });
+    }
+    const dialBtn = body.querySelector('#klxCallDial');
+    if (dialBtn) {
+      dialBtn.addEventListener('click', () => {
+        const cust = _klxSoftphone.activeCustomer || {};
+        _klxPlaceCall(cust.phone || '', { displayName: cust.name || '' });
+      });
+    }
+    body.querySelector('#klxCallHangup')?.addEventListener('click', () => _klxHangup());
+    body.querySelector('#klxCallMute')?.addEventListener('click', () => {
+      _klxToggleMute();
+      _klxRenderSheet(); // sync mute-button icon
+    });
   }
 
   // Bel-knop in klant-detail-panel. data-phone + data-name geset door
-  // renderCustomerDetail (r2177+).
+  // renderCustomerDetail (r2177+). Opent nu de RICH SHEET i.p.v. direct
+  // te bellen — user krijgt line-override + bewerkbaar nummer in beeld.
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest ? e.target.closest('#prof-klx-call-btn') : null;
     if (!btn) return;
     if (btn.disabled) return;
     const phone = btn.dataset?.phone || '';
     const name  = btn.dataset?.name  || '';
-    if (!phone) {
-      window.AgentShared?.showToast?.('Deze klant heeft geen telefoonnummer.', 'error');
-      return;
-    }
-    _klxPlaceCall(phone, { displayName: name });
+    _klxOpenSheet({ phone, name });
   });
 })();
 </script>
