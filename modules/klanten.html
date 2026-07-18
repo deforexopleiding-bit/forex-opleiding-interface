@@ -2545,6 +2545,15 @@ document.addEventListener('click', async (e) => {
   await _submitLinkCompany(companyId);
 });
 
+// Toon TL-sync-warning subtiel bij een geslaagde lokale mutatie waarvan
+// de TL-push faalde. Best-effort-contract van fase 2: lokale koppeling
+// blijft staan, maar de user moet weten dat TL nog niet in sync is.
+function _tlSyncWarnMsg(tl_sync) {
+  if (!tl_sync || tl_sync.ok === true) return null;
+  const err = tl_sync.error || 'onbekende TL-fout';
+  return 'TL-sync mislukt: ' + err + ' — lokale koppeling is wel opgeslagen.';
+}
+
 async function _submitLinkCompany(companyId) {
   const personId = detailState.customerId;
   if (!personId) return;
@@ -2558,9 +2567,12 @@ async function _submitLinkCompany(companyId) {
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
     detailState.linkedCompany = d.linked_company || null;
+    detailState.lastTlSync    = d.tl_sync || null;
     closeLinkCompanyModal();
     renderLinkedCompanyRow(detailState.customer);
-    window.AgentShared?.showToast?.('Gekoppeld aan bedrijf.', 'success');
+    const tlWarn = _tlSyncWarnMsg(d.tl_sync);
+    if (tlWarn) window.AgentShared?.showToast?.('Gekoppeld — ' + tlWarn, 'warn');
+    else window.AgentShared?.showToast?.('Gekoppeld aan bedrijf.', 'success');
   } catch (e) {
     if (banner) banner.textContent = 'Mislukt: ' + (e.message || 'onbekend');
   }
@@ -2578,8 +2590,11 @@ async function unlinkCompanyFromPerson() {
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
     detailState.linkedCompany = null;
+    detailState.lastTlSync    = d.tl_sync || null;
     renderLinkedCompanyRow(detailState.customer);
-    window.AgentShared?.showToast?.('Ontkoppeld.', 'success');
+    const tlWarn = _tlSyncWarnMsg(d.tl_sync);
+    if (tlWarn) window.AgentShared?.showToast?.('Ontkoppeld — ' + tlWarn, 'warn');
+    else window.AgentShared?.showToast?.('Ontkoppeld.', 'success');
   } catch (e) {
     window.AgentShared?.showToast?.('Ontkoppelen mislukt: ' + (e.message || 'onbekend'), 'error');
   }
