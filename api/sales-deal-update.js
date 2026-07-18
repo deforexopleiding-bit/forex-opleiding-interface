@@ -7,6 +7,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { assertStartDateNotTooEarly, assertDateNotInPast } from './_lib/onboarding-start-date.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -58,6 +59,47 @@ export default async function handler(req, res) {
       const { data: ent } = await supabaseAdmin.from('company_entities')
         .select('tl_department_id').eq('tl_department_id', deal_data.tl_department_id).eq('is_active', true).maybeSingle();
       if (!ent) return res.status(400).json({ error: 'Ongeldige bedrijfsentiteit' });
+    }
+
+    // Ondergrens-gate (spiegelt sales-deal-create): alleen valideren als de
+    // wizard de datum-velden expliciet meestuurt. Bij een edit die deze
+    // velden ongewijzigd laat (undefined), NIET valideren tegen een
+    // legacy-waarde uit de DB — dat zou bestaande deals ineens 400 geven.
+    if (deal_data.payment_start_date !== undefined && deal_data.payment_start_date) {
+      const startTooEarly = assertStartDateNotTooEarly(deal_data.payment_start_date);
+      if (startTooEarly) {
+        return res.status(400).json({
+          error: 'Cursus-startdatum: ' + startTooEarly.message,
+          code:  startTooEarly.code,
+          field: 'payment_start_date',
+          min:   startTooEarly.min,
+          got:   startTooEarly.got,
+        });
+      }
+    }
+    if (deal_data.payment_term_start_date !== undefined && deal_data.payment_term_start_date) {
+      const termInPast = assertDateNotInPast(deal_data.payment_term_start_date, 'Datum 1e termijn');
+      if (termInPast) {
+        return res.status(400).json({
+          error: termInPast.message,
+          code:  termInPast.code,
+          field: 'payment_term_start_date',
+          today: termInPast.today,
+          got:   termInPast.got,
+        });
+      }
+    }
+    if (deal_data.payment_downpayment_date !== undefined && deal_data.payment_downpayment_date) {
+      const downInPast = assertDateNotInPast(deal_data.payment_downpayment_date, 'Aanbetaling-datum');
+      if (downInPast) {
+        return res.status(400).json({
+          error: downInPast.message,
+          code:  downInPast.code,
+          field: 'payment_downpayment_date',
+          today: downInPast.today,
+          got:   downInPast.got,
+        });
+      }
     }
 
     const totalAmount = products.reduce((s, p) => s + (Number(p.price_per_unit) * Number(p.quantity)), 0);

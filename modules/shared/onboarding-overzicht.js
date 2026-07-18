@@ -921,7 +921,7 @@
         <div>
           <div class="oa-section-label">Startdatum</div>
           <div class="oa-row">
-            <input type="date" id="adStartDate" data-id="${id}" value="${esc(startVal)}" class="oa-input">
+            <input type="date" id="adStartDate" data-id="${id}" value="${esc(startVal)}" min="${_ovMinStartDateNL()}" class="oa-input">
             <button type="button" class="oa-btn oa-btn-secondary" id="adStartBtn" data-id="${id}"><i class="ti ti-calendar-event"></i> Opslaan</button>
             <span id="adStartStatus" class="oa-status"></span>
           </div>
@@ -995,6 +995,26 @@
     el.textContent = msg || '';
   }
 
+  // Vroegst-toegestane onboarding-startdatum: vandaag NL + 3 kalenderdagen.
+  // Spiegelt api/_lib/onboarding-start-date.js (getMinOnboardingStartDate)
+  // + de client-helpers in offerte-detail.html (_obMinStartDateNL) en
+  // sales-wizard.html (_swMinStartDateNL). DST-safe via Intl.DateTimeFormat
+  // + UTC-midnight-anker.
+  function _ovMinStartDateNL() {
+    const fmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Amsterdam',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    });
+    const nlDateStr = fmt.format(new Date());
+    const [y, m, d] = nlDateStr.split('-').map((s) => parseInt(s, 10));
+    const anchor = new Date(Date.UTC(y, m - 1, d));
+    anchor.setUTCDate(anchor.getUTCDate() + 3);
+    const yy = anchor.getUTCFullYear();
+    const mm = String(anchor.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(anchor.getUTCDate()).padStart(2, '0');
+    return `${yy}-${mm}-${dd}`;
+  }
+
   function _wireAdminActions(o, refresh) {
     // `refresh` is een callback die na elke geslaagde actie wordt aangeroepen
     // om de host (modal of drawer) z'n inhoud te laten herladen. Default valt
@@ -1059,6 +1079,14 @@
         const inp = document.getElementById('adStartDate');
         const val = String(inp?.value || '').trim();
         if (!val) { _setStatus('adStartStatus', 'Kies een datum.', true); return; }
+        // Client-side ondergrens (#816-consistent): vandaag+3 kalenderdagen NL.
+        // Server-side gate in api/admin-onboarding-start-date.js is de finale
+        // bewaker; deze check voorkomt de round-trip bij zichtbaar te-vroege input.
+        const minStart = _ovMinStartDateNL();
+        if (val < minStart) {
+          _setStatus('adStartStatus', 'Startdatum moet minimaal 3 kalenderdagen in de toekomst liggen (>= ' + minStart + ').', true);
+          return;
+        }
         sdBtn.disabled = true;
         _setStatus('adStartStatus', 'Opslaan…', false);
         try {

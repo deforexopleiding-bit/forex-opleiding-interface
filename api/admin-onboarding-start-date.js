@@ -14,6 +14,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
 import { createNotification } from './_lib/notify.js';
+import { assertStartDateNotTooEarly } from './_lib/onboarding-start-date.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // YYYY-MM-DD (Postgres date kolom). Voor losse ISO-timestamps slicen we
@@ -60,6 +61,20 @@ export default async function handler(req, res) {
   const parsed = new Date(raw + 'T00:00:00Z');
   if (Number.isNaN(parsed.getTime()) || parsed.getUTCFullYear() < 1900 || parsed.getUTCFullYear() > 2100) {
     return res.status(400).json({ error: 'start_date buiten verwacht bereik.' });
+  }
+
+  // Ondergrens-gate (#816/#818-conform): startdatum >= vandaag+3 kalenderdagen
+  // in NL-tijd. Voorkomt dat een admin de startdatum handmatig terug-zet naar
+  // vandaag en Bubble's payment-buffer 'm 3 dagen in het verleden trekt.
+  const startTooEarly = assertStartDateNotTooEarly(raw);
+  if (startTooEarly) {
+    return res.status(400).json({
+      error: startTooEarly.message,
+      code:  startTooEarly.code,
+      field: 'start_date',
+      min:   startTooEarly.min,
+      got:   startTooEarly.got,
+    });
   }
 
   try {

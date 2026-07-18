@@ -158,6 +158,25 @@ function _hasDownpaymentSub(){
 function _maxSubStartIso(){
   return _shiftDaysIso(_courseStartIso(), -3);
 }
+// Vroegst-toegestane subscription-startdatum: vandaag NL + 3 kalenderdagen.
+// Spiegelt api/_lib/onboarding-start-date.js (getMinOnboardingStartDate) +
+// de andere front-end helpers (_obMinStartDateNL / sales-wizard._swMinStartDateNL).
+// Reden: bij startdatum in het verleden trekt Bubble's payment-buffer 't nog
+// verder terug + de -3d factuur-buffer valt anders in het verleden.
+function _swMinStartDateNL(){
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Amsterdam',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+  const nlDateStr = fmt.format(new Date());
+  const [y, m, d] = nlDateStr.split('-').map((s) => parseInt(s, 10));
+  const anchor = new Date(Date.UTC(y, m - 1, d));
+  anchor.setUTCDate(anchor.getUTCDate() + 3);
+  const yy = anchor.getUTCFullYear();
+  const mm = String(anchor.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(anchor.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
 // kind: 'downpayment' | 'term' — bepaalt de bovengrens per sub.
 function _maxSubStartFor(kind){
   const course = _courseStartIso();
@@ -578,7 +597,7 @@ function renderSubs(){
       ${state.subs.length>1?`<button class="btn btn-danger btn-sm" data-rm="${i}" style="position:absolute;top:10px;right:10px">×</button>`:''}
       <div class="field"><label>Omschrijving abonnement</label>${descSelect(s,i)}</div>
       <div class="row3">
-        <div class="field"><label>Startdatum</label><input type="date" data-f="start_date" data-i="${i}" value="${esc(s.start_date)}"${_maxSubStartFor(_subKindOf(s))?` max="${_maxSubStartFor(_subKindOf(s))}"`:''} /></div>
+        <div class="field"><label>Startdatum</label><input type="date" data-f="start_date" data-i="${i}" value="${esc(s.start_date)}" min="${_swMinStartDateNL()}"${_maxSubStartFor(_subKindOf(s))?` max="${_maxSubStartFor(_subKindOf(s))}"`:''} /></div>
         <div class="field"><label>Aantal termijnen <span style="color:var(--danger,#dc2626)">*</span></label><input type="number" min="1" required data-f="term_count" data-i="${i}" value="${esc(s.term_count)}" title="Verplicht — minimaal 1 termijn" /></div>
         <div class="field"><label>Einddatum (auto)</label><input type="date" readonly data-end="${i}" style="background:var(--bg-elev-2)" value="${calcEnd(s.start_date,s.term_count)}" /></div>
       </div>
@@ -696,9 +715,18 @@ function validateSubs(){
   //     * met aanbetaling in de wizard: mag tot start + 30d.
   //     * zonder aanbetaling: ≥3d vóór cursus-start.
   const courseStart = _courseStartIso();
+  const minStart = _swMinStartDateNL();
   for(const s of state.subs){
     if(!(Number(s.term_count)>=1)) return 'Aantal termijnen is verplicht, minimaal 1';
     if(!s.start_date) return 'Startdatum verplicht bij elk abonnement';
+    // Ondergrens-gate (#816-consistent): elke sub-startdatum >= vandaag+3
+    // kalenderdagen NL. Spiegelt de server-side gate in
+    // sales-subscription-create. NIET te bypassen via overrideStartDateRule
+    // -- die override is voor de cursus-startdatum-check (correcties op
+    // legacy abbo's), niet voor "abbo mag in het verleden starten".
+    if(minStart && s.start_date < minStart){
+      return `Startdatum van "${s.description||'abonnement'}" moet minimaal 3 kalenderdagen in de toekomst liggen (>= ${minStart})`;
+    }
     // Startdatum-vs-cursusdatum-check. Kan opt-in overgeslagen worden voor
     // het CORRIGEREN van bestaande abonnementen (state.overrideStartDateRule).
     // Alle andere validaties blijven ALTIJD gelden.
