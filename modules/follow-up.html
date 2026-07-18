@@ -3407,29 +3407,51 @@
       <div class="fu-cockpit">
         <!-- LINKS: werklijst -->
         <aside class="fu-cockpit-list" id="cockpit-list">
-          <div class="fu-cockpit-filters">
-            <div class="fu-filter-row" role="group" aria-label="Bron">
-              <span class="fu-filter-row-lbl">Bron</span>
-              <div class="fu-cockpit-pillgroup">
-                <button class="fu-cockpit-pill active" data-filter="source" data-value="all">Alle bronnen</button>
-                <button class="fu-cockpit-pill"        data-filter="source" data-value="retention">Retentie</button>
-                <button class="fu-cockpit-pill"        data-filter="source" data-value="event">Event</button>
-                <button class="fu-cockpit-pill"        data-filter="source" data-value="zoom"><i class="ti ti-video"></i> Zoom</button>
-              </div>
+          <!-- Compacte bar: lijst-filter-zoek + filter-icoon (popover-trigger)
+               + refresh. De uitgebreide filters zijn verhuisd naar de popover
+               zodat de lijst zelf meer verticale ruimte krijgt. -->
+          <div class="fu-cockpit-listbar" style="display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--border);position:relative">
+            <div style="flex:1;position:relative">
+              <i class="ti ti-search" style="position:absolute;left:8px;top:50%;transform:translateY(-50%);color:var(--text-faint);font-size:13px;pointer-events:none"></i>
+              <input type="search" id="cockpit-list-query" placeholder="Filter lijst op naam, tel of e-mail…" autocomplete="off"
+                     style="width:100%;padding:6px 8px 6px 28px;border:1px solid var(--border);border-radius:6px;background:var(--bg-elev);font-size:12.5px" />
             </div>
-            <div class="fu-filter-row" role="group" aria-label="Snelfilters">
-              <span class="fu-filter-row-lbl">Snelfilter</span>
-              <div class="fu-cockpit-pillgroup">
-                <button class="fu-cockpit-pill" data-quick="hot">🔥 Hotleads</button>
-                <button class="fu-cockpit-pill" data-quick="te_laat">⏰ Te laat</button>
-                <button class="fu-cockpit-pill" data-quick="vandaag">📅 Vandaag</button>
-                <button class="fu-cockpit-pill" data-quick="reschedule">💤 Wacht op reschedule</button>
+            <button type="button" class="fu-lead-btn" id="cockpit-filter-toggle" title="Filters" aria-expanded="false"
+                    style="position:relative;padding:6px 10px">
+              <i class="ti ti-filter"></i>
+              <span id="cockpit-filter-badge"
+                    style="display:none;position:absolute;top:2px;right:2px;width:8px;height:8px;background:#0e7c6b;border-radius:50%;border:2px solid var(--bg-elev)"></span>
+            </button>
+            <button class="fu-lead-btn" id="cockpit-refresh" title="Vernieuwen" style="padding:6px 10px"><i class="ti ti-refresh"></i></button>
+            <!-- Popover: bestaande filter-markup (IDs + data-attrs onaangeraakt
+                 zodat _bindCockpitDetail-handlers ongewijzigd blijven). Open/
+                 close-logica in setupCockpitFilterPopover. -->
+            <div id="cockpit-filter-popover" role="dialog" aria-label="Werklijst-filters" hidden
+                 style="position:absolute;top:100%;right:6px;margin-top:6px;z-index:130;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,0.12);padding:12px;min-width:300px;max-width:calc(100vw - 32px)">
+              <div class="fu-cockpit-filters" style="display:flex;flex-direction:column;gap:10px">
+                <div class="fu-filter-row" role="group" aria-label="Bron">
+                  <span class="fu-filter-row-lbl">Bron</span>
+                  <div class="fu-cockpit-pillgroup">
+                    <button class="fu-cockpit-pill active" data-filter="source" data-value="all">Alle bronnen</button>
+                    <button class="fu-cockpit-pill"        data-filter="source" data-value="retention">Retentie</button>
+                    <button class="fu-cockpit-pill"        data-filter="source" data-value="event">Event</button>
+                    <button class="fu-cockpit-pill"        data-filter="source" data-value="zoom"><i class="ti ti-video"></i> Zoom</button>
+                  </div>
+                </div>
+                <div class="fu-filter-row" role="group" aria-label="Snelfilters">
+                  <span class="fu-filter-row-lbl">Snelfilter</span>
+                  <div class="fu-cockpit-pillgroup">
+                    <button class="fu-cockpit-pill" data-quick="hot">🔥 Hotleads</button>
+                    <button class="fu-cockpit-pill" data-quick="te_laat">⏰ Te laat</button>
+                    <button class="fu-cockpit-pill" data-quick="vandaag">📅 Vandaag</button>
+                    <button class="fu-cockpit-pill" data-quick="reschedule">💤 Wacht op reschedule</button>
+                  </div>
+                </div>
+                <div class="fu-cockpit-toggles">
+                  <label class="fu-cockpit-toggle"><input type="checkbox" id="cockpit-mine"> Mijn leads</label>
+                  <label class="fu-cockpit-toggle"><input type="checkbox" id="cockpit-snoozed"> 💤 Later opnieuw</label>
+                </div>
               </div>
-            </div>
-            <div class="fu-cockpit-toggles">
-              <label class="fu-cockpit-toggle"><input type="checkbox" id="cockpit-mine"> Mijn leads</label>
-              <label class="fu-cockpit-toggle"><input type="checkbox" id="cockpit-snoozed"> 💤 Later opnieuw</label>
-              <button class="fu-lead-btn" id="cockpit-refresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
             </div>
           </div>
           <div class="fu-cockpit-buckets" id="cockpit-buckets">
@@ -5227,8 +5249,10 @@
       // één keer per page-load wordt gebonden ondanks meerdere renders.
       // Zie _renderAfspraken.
       teamLoaded  : false,
-      // Filters
-      filter: { source: 'all', mine: false, snoozed: false, quick: null },
+      // Filters. `listQuery` is client-side lijst-filter (naam/tel/e-mail) op
+      // de al-geladen items; onafhankelijk van de globale zoekbalk (die zoekt
+      // over 4 bronnen en switcht tabs).
+      filter: { source: 'all', mine: false, snoozed: false, quick: null, listQuery: '' },
       // UI-state
       selectedId  : null,
       timelineCache: {},         // { leadId: [items] }
@@ -5362,6 +5386,25 @@
           if (q === 'te_laat') return t < now;
           if (q === 'vandaag') return t >= startToday.getTime() && t <= endToday.getTime();
           return true;
+        });
+      }
+      // Lijst-filter-zoek (client-side, alleen op de al-geladen items).
+      // Onafhankelijk van de globale zoekbalk boven de tabs. Case-insensitive
+      // substring-match op naam/telefoon/e-mail; phone-normalize zodat
+      // "0612..." ook "+3161..." matcht binnen de al-geladen set.
+      const listQ = String(f.listQuery || '').trim().toLowerCase();
+      if (listQ) {
+        const digits = listQ.replace(/\D/g, '');
+        const l9 = digits.length >= 9 ? digits.slice(-9) : null;
+        out = out.filter((x) => {
+          const nm = String(x.lead_name || '').toLowerCase();
+          const em = String(x.lead_email || '').toLowerCase();
+          const phDig = String(x.lead_phone || '').replace(/\D/g, '');
+          if (nm.includes(listQ)) return true;
+          if (em.includes(listQ)) return true;
+          if (digits.length >= 3 && phDig.includes(digits)) return true;
+          if (l9 && phDig.length >= 9 && phDig.slice(-9) === l9) return true;
+          return false;
         });
       }
       return out;
@@ -7310,6 +7353,20 @@
       }
     }
 
+    // Zet/verberg de dot-badge op #cockpit-filter-toggle als er ≥1 niet-
+    // default filter actief is (source!=all, mine, snoozed, of quick gezet).
+    // ListQuery telt niet mee — die heeft z'n eigen zichtbare input-veld.
+    function _updateCockpitFilterBadge() {
+      const dot = document.getElementById('cockpit-filter-badge');
+      if (!dot) return;
+      const f = _leadsState.filter;
+      const active = (f.source && f.source !== 'all')
+        || !!f.mine
+        || !!f.snoozed
+        || !!f.quick;
+      dot.style.display = active ? '' : 'none';
+    }
+
     function _bindCockpitDetail() {
       // Bron-pillen (data-filter="source"): server-side voor
       // retention/event/all (kleinere payload), client-side voor zoom
@@ -7330,6 +7387,7 @@
           } else {
             loadLeadsTab();
           }
+          _updateCockpitFilterBadge();
         });
       });
       // Snelfilter-pillen (data-quick="hot|te_laat|vandaag|reschedule"):
@@ -7345,13 +7403,50 @@
             b.classList.toggle('active', !wasActive && b === btn);
           });
           renderCockpitList();
+          _updateCockpitFilterBadge();
         });
       });
       // Toggles: Mijn leads + Snoozed
       const mine = document.getElementById('cockpit-mine');
-      if (mine) mine.addEventListener('change', () => { _leadsState.filter.mine = mine.checked; loadLeadsTab(); });
+      if (mine) mine.addEventListener('change', () => { _leadsState.filter.mine = mine.checked; loadLeadsTab(); _updateCockpitFilterBadge(); });
       const sn   = document.getElementById('cockpit-snoozed');
-      if (sn) sn.addEventListener('change', () => { _leadsState.filter.snoozed = sn.checked; loadLeadsTab(); });
+      if (sn) sn.addEventListener('change', () => { _leadsState.filter.snoozed = sn.checked; loadLeadsTab(); _updateCockpitFilterBadge(); });
+      // Lijst-filter-zoek (client-side, alleen op de al-geladen items).
+      // Debounced 120ms zodat renderCockpitList niet op elke keystroke draait.
+      const lq = document.getElementById('cockpit-list-query');
+      let _lqTimer = null;
+      if (lq) lq.addEventListener('input', () => {
+        clearTimeout(_lqTimer);
+        _lqTimer = setTimeout(() => {
+          _leadsState.filter.listQuery = String(lq.value || '').trim();
+          renderCockpitList();
+        }, 120);
+      });
+      // Filter-popover: open/close op klik-op-icoon. Klik-buiten / Escape sluit.
+      const fToggle = document.getElementById('cockpit-filter-toggle');
+      const fPop    = document.getElementById('cockpit-filter-popover');
+      if (fToggle && fPop) {
+        fToggle.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const open = !fPop.hidden;
+          fPop.hidden = open;
+          fToggle.setAttribute('aria-expanded', String(!open));
+        });
+        document.addEventListener('click', (e) => {
+          if (fPop.hidden) return;
+          if (fPop.contains(e.target) || fToggle.contains(e.target)) return;
+          fPop.hidden = true;
+          fToggle.setAttribute('aria-expanded', 'false');
+        });
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && !fPop.hidden) {
+            fPop.hidden = true;
+            fToggle.setAttribute('aria-expanded', 'false');
+          }
+        });
+      }
+      // Initieel de badge zetten (bv. bij herladen met actieve filter-state).
+      _updateCockpitFilterBadge();
       // Refresh
       const rf = document.getElementById('cockpit-refresh');
       if (rf) rf.addEventListener('click', () => loadLeadsTab());
