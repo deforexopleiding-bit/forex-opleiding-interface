@@ -321,6 +321,56 @@
     /* Row-click factuur-detail in Facturen-tab (Fase 5): hover-feedback */
     .sr-table tbody tr.clickable-row { cursor: pointer; }
     .sr-table tbody tr.clickable-row:hover { background: var(--bg-elev-2, #f9fafb); }
+    /* klx-softphone: floating callbar (duplicaat van wbx-callbar in finance.html).
+       Aparte namespace zodat wanbetaler- en klanten-softphone naast elkaar kunnen
+       leven; z-index boven overlays. Body-level DOM = blijft zichtbaar als de
+       klant-detail-view sluit tijdens een lopend gesprek. */
+    .klx.klx-call-callbar {
+      position:fixed; bottom:20px; right:20px; z-index:9999;
+      display:flex; align-items:center; gap:14px;
+      background:linear-gradient(180deg, rgba(14,124,107,.95), rgba(10,90,78,.9));
+      border:1px solid rgba(255,255,255,.18);
+      border-radius:12px; padding:12px 16px;
+      color:#fff; box-shadow:0 12px 40px rgba(0,0,0,0.45);
+      min-width:320px; max-width:calc(100vw - 40px);
+      font-family:'Inter', system-ui, sans-serif;
+      animation:klxCallbarSlideIn .18s ease-out;
+    }
+    @keyframes klxCallbarSlideIn {
+      from { transform:translateY(20px); opacity:0; }
+      to   { transform:translateY(0);    opacity:1; }
+    }
+    .klx.klx-call-callbar[hidden] { display:none !important; }
+    @media (max-width:720px) {
+      .klx.klx-call-callbar { left:12px; right:12px; bottom:12px; min-width:0; }
+    }
+    .klx.klx-call-callbar .klx-call-callbar-status {
+      display:flex; flex-direction:column; gap:2px; flex:1; min-width:0;
+    }
+    .klx.klx-call-callbar .klx-call-callbar-title {
+      font-size:14px; font-weight:600; letter-spacing:.2px;
+    }
+    .klx.klx-call-callbar .klx-call-callbar-sub {
+      font-size:11.5px; color:rgba(255,255,255,.7);
+      overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+    .klx.klx-call-callbar .klx-call-callbar-timer {
+      font-size:16px; font-weight:600; letter-spacing:1px;
+      font-variant-numeric:tabular-nums; color:#a7f3d0;
+    }
+    .klx.klx-call-callbar .klx-call-callbar-actions { display:flex; gap:8px; }
+    .klx.klx-call-callbar .klx-call-callbar-btn {
+      background:rgba(255,255,255,.08); color:#fff;
+      border:1px solid rgba(255,255,255,.14);
+      border-radius:999px; width:40px; height:40px;
+      display:inline-flex; align-items:center; justify-content:center;
+      cursor:pointer; font-size:15px; transition:background .15s;
+    }
+    .klx.klx-call-callbar .klx-call-callbar-btn:hover { background:rgba(255,255,255,.16); }
+    .klx.klx-call-callbar .klx-call-callbar-btn.mute.on { background:#eab308; color:#111; border-color:#ca8a04; }
+    .klx.klx-call-callbar .klx-call-callbar-btn.hangup { background:#ef4444; border-color:#b91c1c; }
+    .klx.klx-call-callbar .klx-call-callbar-btn.hangup:hover { background:#dc2626; }
+    .contact-link.klx-call-btn:disabled { opacity:.55; cursor:not-allowed; }
   </style>
 </head>
 <body>
@@ -546,6 +596,9 @@
                 <div class="prop-section-h" style="margin-top:0">Contact</div>
                 <a class="contact-link" id="prof-link-email" href="#"><i class="ti ti-mail" style="color:#0891b2"></i><span>—</span></a>
                 <a class="contact-link" id="prof-link-phone" href="#"><i class="ti ti-phone" style="color:#0891b2"></i><span>—</span></a>
+                <button type="button" class="contact-link klx-call-btn" id="prof-klx-call-btn" style="display:none;background:none;border:none;padding:6px 0;font:inherit;color:inherit;cursor:pointer;text-align:left;width:100%" disabled title="Bel deze klant via de softphone">
+                  <i class="ti ti-phone-outgoing" style="color:#059669"></i><span>Bel via softphone</span>
+                </button>
                 <a class="contact-link" id="prof-link-wa" href="#" target="_blank" rel="noopener"><i class="ti ti-brand-whatsapp" style="color:#059669"></i><span>WhatsApp</span></a>
               </div>
               <div class="sidebar-card">
@@ -838,6 +891,9 @@
 <script src="/modules/shared/agent-shared.js"></script>
 <script src="/modules/shared/wanbetalers-timeline.js"></script>
 <script src="/modules/shared/theme-shared.js"></script>
+<!-- SIP.js voor de klx-softphone (WebRTC-bellen via Voys). Lokaal
+     gebundeld — zelfde library als finance.html en follow-up.html. -->
+<script src="/modules/shared/sip.min.js"></script>
 <script>
 // ============================================================================
 // State + helpers
@@ -2172,6 +2228,23 @@ function renderProfielTab() {
   if ($('#prof-sidebar-since')) $('#prof-sidebar-since').textContent = c.created_at ? 'Klant sinds ' + fmtDate(c.created_at) : '';
   const le = $('#prof-link-email'); if (le) { if (c.email) { le.href = 'mailto:' + c.email; le.querySelector('span').textContent = c.email; le.style.display = ''; } else le.style.display = 'none'; }
   const lp = $('#prof-link-phone'); if (lp) { if (c.phone) { lp.href = 'tel:' + c.phone; lp.querySelector('span').textContent = c.phone; lp.style.display = ''; } else lp.style.display = 'none'; }
+  // Softphone-knop: alleen zichtbaar bij telefoonnummer + user heeft
+  // Voys/SIP-permissies (klx-softphone init controleert dat lazy). data-phone
+  // wordt door de handler op klx-softphone gelezen.
+  const lc = $('#prof-klx-call-btn');
+  if (lc) {
+    if (c.phone) {
+      lc.style.display = '';
+      lc.disabled = false;
+      lc.dataset.phone = c.phone;
+      lc.dataset.name  = fullName || '';
+    } else {
+      lc.style.display = 'none';
+      lc.disabled = true;
+      delete lc.dataset.phone;
+      delete lc.dataset.name;
+    }
+  }
   const lw = $('#prof-link-wa'); if (lw) { if (c.phone) { lw.href = 'https://wa.me/' + String(c.phone).replace(/[^0-9]/g, ''); lw.style.display = ''; } else lw.style.display = 'none'; }
 
   $('#prof-first-name').textContent = c.first_name || '—';
@@ -3998,6 +4071,318 @@ function confirmDuplicateAndProceed() {
 })();
 
 init();
+</script>
+<!-- ═══════════════════════════════════════════════════════════════════
+     klx-softphone — dupliceert het _wbxSoftphone-patroon uit finance.html
+     (r18478-18872). Aparte namespace + eigen SIP-registratie zodat de
+     wanbetaler-softphone en klanten-softphone niet in de weg zitten van
+     elkaar wanneer beide tabs open zijn. Zelfde /api/voys-sip-config +
+     /api/voys-call endpoints; zelfde sip.min.js library.
+
+     Bewuste scope-simplificatie t.o.v. finance:
+       - Geen NL/BE line-override UI (auto-detect op nummer via detectLine).
+       - Geen call-log tracker, geen outcome-modal, geen belronde-focus.
+       - Alleen: init → invite → callbar (timer/mute/hangup) → hangup.
+
+     RBAC: /api/voys-sip-config + /api/voys-call gate al op
+     'sales.tab.retentie' / 'sales.customer.view' (zelfde als finance).
+     ═══════════════════════════════════════════════════════════════════ -->
+<script>
+(function initKlxSoftphone(){
+  const _klxSoftphone = {
+    initPromise : null,
+    config      : null,
+    uaByLine    : {},
+    regByLine   : {},
+    accByLine   : {},
+    session     : null,
+    audioEl     : null,
+    activeLine  : null,
+    lastState   : 'idle',
+    lastError   : null,
+    muted       : false,
+    timerStart  : 0,
+    timerHandle : null,
+  };
+
+  // NL/BE line-detectie op basis van nummer (E.164). +32 = BE, alles anders = NL.
+  // Zelfde regel als _wbxDetectLine in finance.html en fu-softphone in follow-up.
+  function _klxDetectLine(phone) {
+    const p = String(phone || '').trim();
+    if (/^\+?32/.test(p) || /^0032/.test(p)) return 'be';
+    return 'nl';
+  }
+
+  function _klxDigitsFor(phone) {
+    return String(phone || '').replace(/[^\d+]/g, '');
+  }
+
+  function _klxEnsureCallbar() {
+    let bar = document.getElementById('klxSoftphoneCallbar');
+    if (bar) return bar;
+    bar = document.createElement('div');
+    bar.id = 'klxSoftphoneCallbar';
+    bar.className = 'klx klx-call-callbar';
+    bar.hidden = true;
+    bar.innerHTML = `
+      <div class="klx-call-callbar-status">
+        <div class="klx-call-callbar-title" id="klxSoftphoneCallbarTitle">Kiezen…</div>
+        <div class="klx-call-callbar-sub" id="klxSoftphoneCallbarSub"></div>
+      </div>
+      <div class="klx-call-callbar-timer" id="klxSoftphoneCallbarTimer">00:00</div>
+      <div class="klx-call-callbar-actions">
+        <button type="button" class="klx-call-callbar-btn mute" id="klxSoftphoneMuteBtn" title="Mute microfoon"><i class="ti ti-microphone"></i></button>
+        <button type="button" class="klx-call-callbar-btn hangup" id="klxSoftphoneHangupBtn" title="Ophangen"><i class="ti ti-phone-off"></i></button>
+      </div>
+    `;
+    document.body.appendChild(bar);
+    bar.querySelector('#klxSoftphoneMuteBtn')?.addEventListener('click', _klxToggleMute);
+    bar.querySelector('#klxSoftphoneHangupBtn')?.addEventListener('click', _klxHangup);
+    return bar;
+  }
+
+  function _klxShowCallbar(show, title, sub) {
+    const bar = _klxEnsureCallbar();
+    if (title != null) {
+      const t = bar.querySelector('#klxSoftphoneCallbarTitle');
+      if (t) t.textContent = title;
+    }
+    if (sub != null) {
+      const s = bar.querySelector('#klxSoftphoneCallbarSub');
+      if (s) s.textContent = sub;
+    }
+    bar.hidden = !show;
+  }
+
+  function _klxUpdateCallbarStatus(title, sub) {
+    const bar = document.getElementById('klxSoftphoneCallbar');
+    if (!bar) return;
+    if (title != null) { const t = bar.querySelector('#klxSoftphoneCallbarTitle'); if (t) t.textContent = title; }
+    if (sub   != null) { const s = bar.querySelector('#klxSoftphoneCallbarSub');   if (s) s.textContent = sub; }
+  }
+
+  function _klxStartCallTimer() {
+    _klxSoftphone.timerStart = Date.now();
+    const el = document.getElementById('klxSoftphoneCallbarTimer');
+    if (el) el.textContent = '00:00';
+    _klxSoftphone.timerHandle = setInterval(() => {
+      const secs = Math.max(0, Math.floor((Date.now() - _klxSoftphone.timerStart) / 1000));
+      const mm = String(Math.floor(secs / 60)).padStart(2, '0');
+      const ss = String(secs % 60).padStart(2, '0');
+      const t = document.getElementById('klxSoftphoneCallbarTimer');
+      if (t) t.textContent = mm + ':' + ss;
+    }, 1000);
+  }
+
+  function _klxStopCallTimer() {
+    if (_klxSoftphone.timerHandle) { clearInterval(_klxSoftphone.timerHandle); _klxSoftphone.timerHandle = null; }
+  }
+
+  function _klxToggleMute() {
+    const session = _klxSoftphone.session;
+    if (!session) return;
+    const pc = session?.sessionDescriptionHandler?.peerConnection;
+    if (!pc) return;
+    _klxSoftphone.muted = !_klxSoftphone.muted;
+    const senders = pc.getSenders ? pc.getSenders() : [];
+    for (const s of senders) {
+      if (s.track && s.track.kind === 'audio') s.track.enabled = !_klxSoftphone.muted;
+    }
+    const btn = document.getElementById('klxSoftphoneMuteBtn');
+    if (btn) {
+      btn.classList.toggle('on', _klxSoftphone.muted);
+      btn.innerHTML = _klxSoftphone.muted
+        ? '<i class="ti ti-microphone-off"></i>'
+        : '<i class="ti ti-microphone"></i>';
+      btn.title = _klxSoftphone.muted ? 'Microfoon aan' : 'Mute microfoon';
+    }
+  }
+
+  // Lazy SIP.js UA-init. Fetcht /api/voys-sip-config + registreert. Zelfde
+  // pattern als _wbxInitSoftphone in finance.html; singleton via initPromise.
+  async function _klxInitSoftphone() {
+    if (_klxSoftphone.initPromise) return _klxSoftphone.initPromise;
+    _klxSoftphone.initPromise = (async () => {
+      let SIPLib = window.SIP;
+      for (let i = 0; !SIPLib?.UserAgent && i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        SIPLib = window.SIP;
+      }
+      if (!SIPLib?.UserAgent) throw new Error('SIP.js niet geladen');
+
+      const r = await window.AgentShared.apiFetch('/api/voys-sip-config');
+      if (!r.ok) throw new Error('voys-sip-config HTTP ' + r.status);
+      const cfg = await r.json();
+      _klxSoftphone.config = cfg;
+
+      if (!_klxSoftphone.audioEl) {
+        const a = document.createElement('audio');
+        a.id = 'klxSoftphoneAudio';
+        a.autoplay = true;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        _klxSoftphone.audioEl = a;
+      }
+
+      // Bouw UA + Registerer per account. Ondersteun beide shapes die de
+      // endpoint kan retourneren (object {nl,be} / array / top-level cfg.user).
+      let accounts = [];
+      if (cfg.accounts && typeof cfg.accounts === 'object' && !Array.isArray(cfg.accounts)) {
+        for (const key of ['nl', 'be']) {
+          const acc = cfg.accounts[key];
+          if (acc && acc.configured) accounts.push({ key, ...acc });
+        }
+      } else if (Array.isArray(cfg.accounts) && cfg.accounts.length) {
+        accounts = cfg.accounts;
+      } else if (cfg.user) {
+        accounts = [{ key: 'nl', ...cfg }];
+      }
+      for (const acc of accounts) {
+        if (!acc?.user || !acc?.password || !acc?.domain) continue;
+        try {
+          const uri = SIPLib.UserAgent.makeURI('sip:' + acc.user + '@' + acc.domain);
+          const ua  = new SIPLib.UserAgent({
+            uri,
+            transportOptions    : { server: acc.wss || 'wss://websocket.voipgrid.nl' },
+            authorizationUsername: acc.user,
+            authorizationPassword: acc.password,
+            displayName          : acc.display_name || 'Klanten',
+          });
+          await ua.start();
+          const reg = new SIPLib.Registerer(ua);
+          await reg.register();
+          _klxSoftphone.uaByLine[acc.key || 'nl']  = ua;
+          _klxSoftphone.regByLine[acc.key || 'nl'] = reg;
+          _klxSoftphone.accByLine[acc.key || 'nl'] = acc;
+        } catch (e) {
+          console.warn('[klx-softphone] account ' + (acc.key || 'nl') + ' init failed:', e?.message || e);
+        }
+      }
+      if (!Object.keys(_klxSoftphone.uaByLine).length) {
+        throw new Error('Geen SIP-account geregistreerd. Check VOYS_SIP_* env vars.');
+      }
+      return true;
+    })().catch((e) => {
+      _klxSoftphone.lastError = e?.message || String(e);
+      _klxSoftphone.initPromise = null; // retry mogelijk
+      throw e;
+    });
+    return _klxSoftphone.initPromise;
+  }
+
+  async function _klxPlaceCall(customerPhone, opts = {}) {
+    const line   = _klxDetectLine(customerPhone);
+    const digits = _klxDigitsFor(customerPhone);
+    if (!digits) {
+      window.AgentShared?.showToast?.('Geen telefoonnummer om te bellen.', 'error');
+      return { ok: false, line };
+    }
+
+    try {
+      await _klxInitSoftphone();
+    } catch (e) {
+      window.AgentShared?.showToast?.('SIP niet beschikbaar: ' + (e?.message || 'onbekend'), 'error');
+      return { ok: false, line, error: e?.message || 'init' };
+    }
+
+    const ua = _klxSoftphone.uaByLine[line];
+    if (!ua) {
+      const msg = `${line.toUpperCase()}-lijn niet geregistreerd. Check VOYS_SIP_*_${line.toUpperCase()} env vars.`;
+      window.AgentShared?.showToast?.(msg, 'error');
+      return { ok: false, line };
+    }
+
+    _klxSoftphone.activeLine = line;
+    _klxSoftphone.lastState  = 'dialing';
+    _klxSoftphone.lastError  = null;
+    _klxSoftphone.muted      = false;
+
+    const displayName = opts?.displayName || '';
+    _klxShowCallbar(true, 'Kiezen…', displayName ? `${displayName} — ${customerPhone}` : customerPhone);
+    const muteBtn = document.getElementById('klxSoftphoneMuteBtn');
+    if (muteBtn) { muteBtn.classList.remove('on'); muteBtn.innerHTML = '<i class="ti ti-microphone"></i>'; muteBtn.title = 'Mute microfoon'; }
+
+    try {
+      // Per-lijn domein: BE-UA → BE-domein, NL-UA → NL-domein. Top-level
+      // config.domain is het NL-domein (backward-compat).
+      const acc    = _klxSoftphone.accByLine?.[line];
+      const domain = acc?.domain || _klxSoftphone.config?.domain || 'voipgrid.nl';
+      const target = window.SIP.UserAgent.makeURI('sip:' + digits + '@' + domain);
+      const inviter = new window.SIP.Inviter(ua, target, {
+        sessionDescriptionHandlerOptions: {
+          constraints: { audio: true, video: false },
+        },
+      });
+      _klxSoftphone.session = inviter;
+      inviter.stateChange.addListener((state) => {
+        if (state === 'Establishing') {
+          _klxSoftphone.lastState = 'ringing';
+          _klxUpdateCallbarStatus('Gaat over…', displayName ? `${displayName} — ${customerPhone}` : customerPhone);
+        } else if (state === 'Established') {
+          _klxSoftphone.lastState = 'connected';
+          const pc = inviter.sessionDescriptionHandler?.peerConnection;
+          if (pc && _klxSoftphone.audioEl) {
+            const stream = new MediaStream();
+            pc.getReceivers().forEach((rr) => { if (rr.track) stream.addTrack(rr.track); });
+            _klxSoftphone.audioEl.srcObject = stream;
+            try { _klxSoftphone.audioEl.play(); } catch (_) { /* autoplay policy */ }
+          }
+          _klxUpdateCallbarStatus('In gesprek', displayName ? `${displayName} — ${customerPhone}` : customerPhone);
+          _klxStartCallTimer();
+        } else if (state === 'Terminated') {
+          _klxSoftphone.lastState = 'ended';
+          _klxStopCallTimer();
+          _klxShowCallbar(false);
+          const audioEl = _klxSoftphone.audioEl;
+          if (audioEl) audioEl.srcObject = null;
+          _klxSoftphone.session = null;
+        }
+      });
+      await inviter.invite();
+      return { ok: true, line };
+    } catch (e) {
+      _klxSoftphone.lastState = 'error';
+      _klxSoftphone.lastError = e?.message || String(e);
+      _klxStopCallTimer();
+      _klxShowCallbar(false);
+      _klxSoftphone.session = null;
+      window.AgentShared?.showToast?.('Bellen mislukt: ' + (e?.message || 'onbekend'), 'error');
+      return { ok: false, line, error: e?.message || 'invite' };
+    }
+  }
+
+  async function _klxHangup() {
+    const s = _klxSoftphone.session;
+    if (!s) { _klxShowCallbar(false); _klxStopCallTimer(); return; }
+    try {
+      const state = s.state;
+      if (state === 'Established')       await s.bye();
+      else if (state === 'Establishing') await s.cancel();
+      else if (typeof s.dispose === 'function') await s.dispose();
+    } catch (e) {
+      console.warn('[klx-softphone] hangup:', e?.message || e);
+    }
+    _klxSoftphone.session = null;
+    _klxSoftphone.lastState = 'ended';
+    _klxStopCallTimer();
+    _klxShowCallbar(false);
+  }
+
+  // Bel-knop in klant-detail-panel. data-phone + data-name geset door
+  // renderCustomerDetail (r2177+).
+  document.addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest ? e.target.closest('#prof-klx-call-btn') : null;
+    if (!btn) return;
+    if (btn.disabled) return;
+    const phone = btn.dataset?.phone || '';
+    const name  = btn.dataset?.name  || '';
+    if (!phone) {
+      window.AgentShared?.showToast?.('Deze klant heeft geen telefoonnummer.', 'error');
+      return;
+    }
+    _klxPlaceCall(phone, { displayName: name });
+  });
+})();
 </script>
 <script src="/modules/shared/permissions.js"></script>
 <script src="/modules/shared/sidebar.js"></script>
