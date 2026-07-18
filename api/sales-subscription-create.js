@@ -16,6 +16,7 @@ import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 import { getOrCreateTlCustomer } from './_lib/teamleader-contact.js';
 import { taxRateIdFor } from './_lib/teamleader-quotation.js';
 import { createTlInvoice } from './_lib/invoice-create-core.js';
+import { assertStartDateNotTooEarly } from './_lib/onboarding-start-date.js';
 
 // Offerte-beveiliging bouwstap 2/2 — €100 reserveringsfee bij late-start-
 // uitzondering met fee-akkoord. Fee is INCL. btw; excl. wordt afgeleid van
@@ -95,6 +96,32 @@ export default async function handler(req, res) {
     const subsNorm = subscriptions.map(s => ({ ...s, _lines: normalizeLineItems(s) }));
     for (const s of subsNorm) {
       if (!s._lines.length) return res.status(400).json({ error: `Abonnement "${s.description || ''}" heeft geen regel met bedrag > 0` });
+    }
+
+    // Ondergrens-gate (#816-consistent): elke sub-startdatum >= vandaag+3
+    // kalenderdagen NL. Voorkomt dat een subscription in het verleden start
+    // (Bubble payment-buffer + factuur-buffer -3d zouden anders historisch
+    // vallen). Bewuste keuze: NIET stil clampen, 400 met sub-index zodat de
+    // wizard-user weet welke sub aangepast moet worden.
+    for (let i = 0; i < subsNorm.length; i++) {
+      const s = subsNorm[i];
+      if (!s.start_date) {
+        return res.status(400).json({
+          error: `Abonnement "${s.description || ''}" (index ${i}) mist start_date`,
+          field: 'subscriptions[' + i + '].start_date',
+          code:  'START_DATE_MISSING',
+        });
+      }
+      const tooEarly = assertStartDateNotTooEarly(s.start_date);
+      if (tooEarly) {
+        return res.status(400).json({
+          error: `Abonnement "${s.description || ''}" (index ${i}): ${tooEarly.message}`,
+          code:  tooEarly.code,
+          field: 'subscriptions[' + i + '].start_date',
+          min:   tooEarly.min,
+          got:   tooEarly.got,
+        });
+      }
     }
 
     // ── Late-start-server-side guard ──
