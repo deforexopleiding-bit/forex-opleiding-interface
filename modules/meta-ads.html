@@ -11,7 +11,9 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
   <link rel="stylesheet" href="/styles/sales-redesign.css" />
   <style>
-    .app-wrap { padding: 20px 24px 60px; }
+    /* Layout-offset (margin-left:var(--sidebar-w) + padding) komt uit
+       agent-shared.css .main + .main-inner — géén eigen .app-wrap meer, want
+       die zat direct na #sidebar-mount zonder offset en viel over de sidebar. */
     .page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; flex-wrap:wrap }
     .page-head h1 { font-size:22px; font-weight:700; color:var(--text-primary); margin:0 }
     .page-head .sub { color:var(--text-dim); font-size:13px; margin-top:4px }
@@ -107,8 +109,8 @@
 </head>
 <body>
 <div id="sidebar-mount"></div>
-<div class="app" id="app">
-  <div class="app-wrap">
+<div class="main">
+  <div class="main-inner">
     <div class="page-head">
       <div>
         <h1><i class="ti ti-brand-meta"></i> Meta Ads</h1>
