@@ -1,12 +1,14 @@
 // api/lms-whoami.js
 //
-// GET → geeft de rol van de ingelogde gebruiker terug aan het externe LMS.
-// Extern-facing endpoint met AUTH: fail-CLOSED overal. Nooit een rol
-// teruggeven zonder geldige, geverifieerde Supabase-JWT + actief profiel.
+// GET → geeft de rol EN naam van de ingelogde gebruiker terug aan het
+// externe LMS. Extern-facing endpoint met AUTH: fail-CLOSED overal. Nooit
+// rol of naam teruggeven zonder geldige, geverifieerde Supabase-JWT +
+// actief profiel.
 //
-// Contract (LMS): antwoord is UITSLUITEND { "role": "<rol>" | null } — geen
-// e-mail, naam, id, permissions of andere velden. Bij fout: standaard
-// error-shape { error: '...' } met passende status.
+// Contract (LMS): antwoord is UITSLUITEND
+//   { "role": "<rol>" | null, "name": "<full_name>" | null }
+// — geen e-mail, id, permissions, avatar of andere profielvelden. Bij fout:
+// standaard error-shape { error: '...' } met passende status.
 //
 // CORS: strict op het LMS-origin (geen '*') omdat de browser er een
 // Bearer-token overheen stuurt. Preflight OPTIONS wordt netjes afgehandeld.
@@ -15,6 +17,7 @@
 // api/admin-users.js VALID_ROLES):
 //   super_admin | admin | manager | sales | mentor | marketing |
 //   administratie | viewer   — of NULL (geen profiel / niet actief).
+// Naam: profile.full_name (text) — mag NULL zijn als niet ingevuld.
 
 import { supabase, supabaseAdmin } from './supabase.js';
 
@@ -58,14 +61,18 @@ export default async function handler(req, res) {
   try {
     const { data: profile } = await supabaseAdmin
       .from('profiles')
-      .select('role, is_active')
+      .select('role, is_active, full_name')
       .eq('id', user.id)
       .maybeSingle();
-    // Geen profiel of gedeactiveerd account → { role: null }. LMS leidt
-    // 'geen toegang' hieruit af (200 zodat de client een deterministische
-    // shape leest, niet in error-handling belandt voor een verwachte case).
-    if (!profile || !profile.is_active) return res.status(200).json({ role: null });
-    return res.status(200).json({ role: profile.role || null });
+    // Geen profiel of gedeactiveerd account → { role: null, name: null }.
+    // LMS leidt 'geen toegang' hieruit af (200 zodat de client een
+    // deterministische shape leest, niet in error-handling belandt voor
+    // een verwachte case).
+    if (!profile || !profile.is_active) return res.status(200).json({ role: null, name: null });
+    return res.status(200).json({
+      role: profile.role || null,
+      name: profile.full_name || null,
+    });
   } catch (_) {
     // Databasefout mag NIET stilzwijgend als 'geen rol' worden gepresenteerd
     // — dat zou fail-open zijn richting een LMS-fallback. 500 zodat het LMS
