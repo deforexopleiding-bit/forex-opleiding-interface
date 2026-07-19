@@ -174,6 +174,17 @@
     .roas-mid  { color:var(--text-primary); font-weight:600 }
     .roas-bad  { color:#b91c1c; font-weight:700 }
 
+    /* Sale-modus eerlijkheids-note (rustige info, geen alert-styling). */
+    .sale-note {
+      margin:0 0 14px; padding:10px 14px;
+      background:var(--color-info-soft, #dbeafe); color:var(--color-info-text, #1e40af);
+      border-left:3px solid var(--color-info, #2563eb);
+      border-radius:6px;
+      font-size:12px; line-height:1.5;
+      display:flex; gap:8px; align-items:flex-start;
+    }
+    .sale-note i { font-size:15px; margin-top:1px; flex-shrink:0 }
+
     /* Niet-toegewezen-rij */
     .ads-table tbody tr.unattr-row {
       background:rgba(148,163,184,0.05);
@@ -214,7 +225,19 @@
       <div class="funnel-step"><div class="fs-label">Leads</div><div class="fs-value" id="funLeads">—</div><div class="fs-sub" id="funLeadsSub"></div></div>
       <div class="funnel-step"><div class="fs-label">Afspraken</div><div class="fs-value" id="funAppts">—</div><div class="fs-sub" id="funApptsSub"></div></div>
       <div class="funnel-step"><div class="fs-label">Sales</div><div class="fs-value" id="funSales">—</div><div class="fs-sub" id="funSalesSub"></div></div>
-      <div class="funnel-step"><div class="fs-label">Omzet</div><div class="fs-value" id="funRevenue">—</div><div class="fs-sub" id="funRevenueSub"></div></div>
+      <div class="funnel-step" title="o.b.v. contractwaarde (deals.total_amount, bruto)"><div class="fs-label">Omzet</div><div class="fs-value" id="funRevenue">—</div><div class="fs-sub" id="funRevenueSub"></div></div>
+    </div>
+
+    <!-- Eerlijkheids-note (fase 5) — alleen in sale-modus, óók als er data is. -->
+    <div class="sale-note" id="saleNote" hidden>
+      <i class="ti ti-info-circle"></i>
+      <div>
+        <strong>ROAS en funnel worden nauwkeuriger naarmate er meer attributie-data is verzameld.</strong>
+        Recente periodes onderschatten de ROAS: leads worden vaak pas na verloop van tijd klant
+        (salescyclus van weken), terwijl de advertentiekosten al volledig meetellen.
+        <span style="opacity:.8">Omzet-cijfers zijn <strong>contractwaarde</strong> (bruto,
+        <code>deals.total_amount</code>) — niet netto.</span>
+      </div>
     </div>
 
     <!-- KPI-strip -->
@@ -537,21 +560,30 @@
 
   function renderSaleKPIs(totals) {
     // Hergebruik de bestaande KPI-cards maar met andere velden.
+    const cardOmzet = document.querySelector('#kpiStrip .kpi-card:nth-child(1)');
+    const cardSales = document.querySelector('#kpiStrip .kpi-card:nth-child(2)');
+    const cardRoas  = document.querySelector('#kpiStrip .kpi-card:nth-child(3)');
+    const cardCPC   = document.querySelector('#kpiStrip .kpi-card:nth-child(4)');
+
     $('kpiSpend').textContent = fmtEur(totals?.revenue, 2);
-    document.querySelector('#kpiStrip .kpi-card:nth-child(1) .kpi-label').textContent = 'Omzet';
+    cardOmzet.querySelector('.kpi-label').textContent = 'Omzet';
+    // Tooltip + zichtbaar sub-label: contractwaarde-disclaimer (fase-5 eis).
+    cardOmzet.setAttribute('title', 'o.b.v. contractwaarde (deals.total_amount, bruto)');
     $('kpiLeads').textContent = fmtInt(totals?.sales);
-    document.querySelector('#kpiStrip .kpi-card:nth-child(2) .kpi-label').textContent = 'Sales';
+    cardSales.querySelector('.kpi-label').textContent = 'Sales';
     // ROAS-card
     const roas = totals?.roas;
-    const cel3 = document.querySelector('#kpiStrip .kpi-card:nth-child(3) .kpi-value');
+    const cel3 = cardRoas.querySelector('.kpi-value');
     cel3.textContent = roas == null ? '—' : (roas.toFixed(2) + '×');
     cel3.className = 'kpi-value ' + roasClass(roas);
-    document.querySelector('#kpiStrip .kpi-card:nth-child(3) .kpi-label').textContent = 'ROAS';
+    cardRoas.querySelector('.kpi-label').textContent = 'ROAS';
+    cardRoas.setAttribute('title', 'o.b.v. contractwaarde (deals.total_amount, bruto)');
     // Cost per customer
     $('kpiCtr').textContent = fmtEur(totals?.cost_per_customer, 2);
-    document.querySelector('#kpiStrip .kpi-card:nth-child(4) .kpi-label').textContent = 'Kosten per klant';
+    cardCPC.querySelector('.kpi-label').textContent = 'Kosten per klant';
     // Subs
-    $('kpiSpendSub').textContent = totals?.spend > 0 ? ('spend ' + fmtEur(totals.spend, 0)) : '';
+    const spendLbl = totals?.spend > 0 ? (' · spend ' + fmtEur(totals.spend, 0)) : '';
+    $('kpiSpendSub').textContent = 'o.b.v. contractwaarde' + spendLbl;
     $('kpiLeadsSub').textContent = totals?.leads > 0 ? (fmtInt(totals.leads) + ' leads') : '';
     $('kpiCplSub').textContent   = '';
     $('kpiCtrSub').textContent   = totals?.customers > 0 ? (fmtInt(totals.customers) + ' klanten') : '';
@@ -562,8 +594,10 @@
     document.querySelector('#kpiStrip .kpi-card:nth-child(2) .kpi-label').textContent = 'Leads';
     document.querySelector('#kpiStrip .kpi-card:nth-child(3) .kpi-label').textContent = 'Kosten per lead';
     document.querySelector('#kpiStrip .kpi-card:nth-child(4) .kpi-label').textContent = 'CTR';
-    // Reset kpiValue class (zonder roas-klasse).
+    // Reset kpiValue class (zonder roas-klasse) + title-attributen weer weg.
     document.querySelector('#kpiStrip .kpi-card:nth-child(3) .kpi-value').className = 'kpi-value';
+    document.querySelector('#kpiStrip .kpi-card:nth-child(1)').removeAttribute('title');
+    document.querySelector('#kpiStrip .kpi-card:nth-child(3)').removeAttribute('title');
   }
 
   function renderSaleTable(data) {
@@ -642,6 +676,7 @@
       state.level = 'campaign';
       state.parentMetaId = null; state.parentName = null; state.grandparentName = null;
       $('roasFunnel').hidden = false;
+      $('saleNote').hidden = false;
       // Trend-card + breadcrumb verbergen — niet relevant voor sale-view.
       document.querySelectorAll('.card').forEach((c, i) => {
         // 1e card = trend, 2e = tabel, 3e = alerts. Verberg alleen de 1e.
@@ -650,6 +685,7 @@
       $('breadcrumb').hidden = true;
     } else {
       $('roasFunnel').hidden = true;
+      $('saleNote').hidden = true;
       document.querySelectorAll('.card').forEach((c, i) => { if (i === 0) c.style.display = ''; });
       restoreMetaKPILabels();
     }
