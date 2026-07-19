@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Creative Studio · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css"/>
+  <link rel="stylesheet" href="/styles/sales-redesign.css"/>
+  <style>
+    /* Layout — .main/.main-inner uit agent-shared.css regelt de sidebar-offset. */
+    .page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; flex-wrap:wrap }
+    .page-head h1 { font-size:22px; font-weight:700; color:var(--text-primary); margin:0; display:flex; align-items:center; gap:8px }
+    .page-head .sub { color:var(--text-dim); font-size:13px; margin-top:4px; max-width:640px }
+
+    .studio-grid {
+      display:grid; grid-template-columns: 280px 1fr 300px; gap:16px;
+      align-items:start;
+    }
+    @media (max-width:1100px) { .studio-grid { grid-template-columns: 1fr } }
+
+    .studio-panel {
+      background:var(--bg-elev); border:1px solid var(--border);
+      border-radius:12px; padding:14px 16px;
+    }
+    .studio-panel h3 {
+      font-size:11px; color:var(--text-faint); text-transform:uppercase;
+      letter-spacing:.05em; margin-bottom:10px; font-weight:600;
+    }
+    .studio-panel h3 .h3-sub { font-weight:400; color:var(--text-dim); text-transform:none; letter-spacing:0; margin-left:8px }
+
+    /* Dropzone */
+    .drop-zone {
+      border:2px dashed var(--border-default, #d1d5db); border-radius:10px;
+      padding:22px 12px; text-align:center; cursor:pointer;
+      background:var(--surface-2, #f8fafc); transition:border-color .12s, background .12s;
+    }
+    .drop-zone:hover, .drop-zone.hover {
+      border-color:var(--brand-primary, #093d54);
+      background:var(--brand-primary-soft, rgba(9,61,84,0.05));
+    }
+    .drop-zone.has-image { padding:8px }
+    .dz-hint { color:var(--text-dim); font-size:12.5px }
+    .dz-hint i { font-size:28px; color:var(--text-faint); display:block; margin-bottom:6px }
+    .dz-preview { max-width:100%; max-height:180px; border-radius:6px; display:block; margin:0 auto }
+    .dz-remove {
+      display:block; margin:6px auto 0; padding:3px 10px; font-size:11px;
+      background:transparent; border:1px solid var(--border); border-radius:6px;
+      color:var(--text-dim); cursor:pointer;
+    }
+    .dz-remove:hover { color:var(--color-danger, #dc2626); border-color:var(--color-danger, #dc2626) }
+
+    /* Format picker */
+    .format-picker { margin-top:14px; display:flex; flex-direction:column; gap:6px }
+    .format-picker label {
+      display:flex; align-items:center; gap:8px; padding:8px 10px;
+      border:1px solid var(--border); border-radius:8px; cursor:pointer;
+      font-size:12.5px; color:var(--text-primary);
+      background:var(--surface-1, #fff); transition:border-color .12s;
+    }
+    .format-picker label:hover { border-color:var(--border-strong, #9ca3af) }
+    .format-picker label input { accent-color:var(--brand-primary, #093d54) }
+    .format-picker label.active {
+      border-color:var(--brand-primary, #093d54);
+      background:var(--brand-primary-soft, rgba(9,61,84,0.05));
+    }
+    .format-dim { color:var(--text-faint); font-size:11px; margin-left:auto }
+
+    /* Preview */
+    .studio-preview {
+      background:var(--bg-elev); border:1px solid var(--border);
+      border-radius:12px; padding:14px; display:flex; flex-direction:column; align-items:center; gap:12px;
+      min-height:400px;
+    }
+    .preview-canvas-wrap {
+      width:100%; max-width:520px; display:flex; justify-content:center; align-items:center;
+      background:
+        repeating-conic-gradient(#f1f5f9 0% 25%, #ffffff 0% 50%) 50% / 20px 20px;
+      border-radius:10px; padding:14px; min-height:340px;
+    }
+    [data-theme="dark"] .preview-canvas-wrap {
+      background: repeating-conic-gradient(#1a1d26 0% 25%, #13151c 0% 50%) 50% / 20px 20px;
+    }
+    #previewCanvas {
+      max-width:100%; max-height:70vh; border-radius:4px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+      background:#111;
+    }
+    .preview-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:center }
+    .btn {
+      padding:8px 16px; border:1px solid var(--brand-primary, #093d54);
+      background:var(--brand-primary, #093d54); color:#fff; border-radius:8px;
+      font-size:13px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px;
+    }
+    .btn:hover { background:var(--brand-primary-hover, #0b4d6c); border-color:var(--brand-primary-hover, #0b4d6c) }
+    .btn.secondary { background:transparent; color:var(--brand-primary, #093d54) }
+    .btn.secondary:hover { background:var(--brand-primary-soft, rgba(9,61,84,0.05)) }
+    .btn:disabled { opacity:.5; cursor:not-allowed }
+
+    /* Text/brand panel */
+    .field-lbl {
+      display:block; font-size:11px; color:var(--text-faint); font-weight:600;
+      text-transform:uppercase; letter-spacing:.04em; margin:10px 0 4px;
+    }
+    .studio-panel input[type=text] {
+      width:100%; padding:8px 10px; font-size:13px;
+      border:1px solid var(--border); border-radius:8px;
+      background:var(--surface-1, #fff); color:var(--text-primary);
+      font-family:inherit;
+    }
+    .studio-panel input[type=text]:focus {
+      outline:none; border-color:var(--brand-primary, #093d54);
+      box-shadow:0 0 0 3px var(--brand-primary-soft, rgba(9,61,84,0.1));
+    }
+    .swatches { display:flex; gap:6px; flex-wrap:wrap }
+    .sw {
+      width:28px; height:28px; border-radius:50%;
+      border:2px solid var(--border); cursor:pointer; padding:0;
+    }
+    .sw:hover { transform:scale(1.08) }
+    .sw.active { border-color:var(--text-primary); box-shadow:0 0 0 2px var(--surface-1) inset }
+
+    /* Gallery */
+    .gallery { margin-top:16px }
+    .gallery-grid {
+      display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr));
+      gap:10px; margin-top:6px;
+    }
+    .gallery-empty {
+      grid-column:1/-1; padding:20px; text-align:center;
+      color:var(--text-faint); font-size:12.5px;
+      border:1px dashed var(--border); border-radius:10px;
+    }
+    .gallery-item {
+      position:relative; background:var(--surface-2, #f8fafc);
+      border:1px solid var(--border); border-radius:8px;
+      overflow:hidden; cursor:pointer; aspect-ratio:1; display:flex; align-items:center; justify-content:center;
+    }
+    .gallery-item img { max-width:100%; max-height:100%; display:block }
+    .gallery-item .gi-badge {
+      position:absolute; top:4px; left:4px; background:rgba(0,0,0,0.65);
+      color:#fff; font-size:10px; padding:2px 6px; border-radius:4px;
+    }
+    .gallery-item .gi-download {
+      position:absolute; bottom:4px; right:4px; background:rgba(255,255,255,0.9);
+      color:#0f172a; border:none; border-radius:4px; padding:4px 6px;
+      font-size:11px; cursor:pointer; opacity:0; transition:opacity .12s;
+      display:flex; align-items:center; gap:4px;
+    }
+    .gallery-item:hover .gi-download { opacity:1 }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main">
+  <div class="main-inner">
+    <div class="page-head">
+      <div>
+        <h1><i class="ti ti-sparkles"></i> Creative Studio</h1>
+        <div class="sub">
+          Compose in de browser: upload een foto, kies formaat en download een kant-en-klare
+          ad-creative. Geen server, geen opslag &mdash; alles gebeurt lokaal.
+        </div>
+      </div>
+    </div>
+
+    <div class="studio-grid">
+      <!-- LINKS: beeld + formaat -->
+      <div class="studio-panel">
+        <h3>Beeld</h3>
+        <div id="dropZone" class="drop-zone">
+          <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" hidden/>
+          <div class="dz-hint" id="dzHint">
+            <i class="ti ti-photo-plus"></i>
+            <div><strong>Sleep een foto hierheen</strong></div>
+            <div>of klik om te uploaden (PNG, JPG, WebP)</div>
+          </div>
+        </div>
+
+        <div class="format-picker" role="radiogroup" aria-label="Formaat">
+          <h3 style="margin-bottom:6px">Formaat</h3>
+          <label class="active" data-format="feed-1x1">
+            <input type="radio" name="format" value="feed-1x1" checked/>
+            <span>Feed 1:1</span>
+            <span class="format-dim">1080</span>
+          </label>
+          <label data-format="feed-4x5">
+            <input type="radio" name="format" value="feed-4x5"/>
+            <span>Feed 4:5</span>
+            <span class="format-dim">1080&times;1350</span>
+          </label>
+          <label data-format="story-9x16">
+            <input type="radio" name="format" value="story-9x16"/>
+            <span>Story / Reel 9:16</span>
+            <span class="format-dim">1080&times;1920</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- MIDDEN: preview + acties -->
+      <div class="studio-preview">
+        <div class="preview-canvas-wrap">
+          <canvas id="previewCanvas" width="1080" height="1080"></canvas>
+        </div>
+        <div class="preview-actions">
+          <button type="button" class="btn" id="downloadBtn">
+            <i class="ti ti-download"></i> Download PNG
+          </button>
+          <button type="button" class="btn secondary" id="variationBtn">
+            <i class="ti ti-refresh"></i> Volgende accent
+          </button>
+        </div>
+      </div>
+
+      <!-- RECHTS: tekst + merk -->
+      <div class="studio-panel">
+        <h3>Tekst</h3>
+        <label class="field-lbl" for="txtHeadline">Kop</label>
+        <input type="text" id="txtHeadline" value="Word Funded Trader." maxlength="60"/>
+        <label class="field-lbl" for="txtSub">Sub / aanbod</label>
+        <input type="text" id="txtSub" value="30% korting op onze 100K challenge" maxlength="80"/>
+        <label class="field-lbl" for="txtCta">CTA-knop</label>
+        <input type="text" id="txtCta" value="Meld je aan" maxlength="24"/>
+
+        <h3 style="margin-top:20px">Merk</h3>
+        <label class="field-lbl">Accentkleur</label>
+        <div class="swatches" id="swatches" role="radiogroup" aria-label="Accentkleur">
+          <button type="button" class="sw active" data-color="#093d54" style="background:#093d54" title="DFO Navy" aria-label="DFO Navy"></button>
+          <button type="button" class="sw" data-color="#0e7c6b" style="background:#0e7c6b" title="Teal" aria-label="Teal"></button>
+          <button type="button" class="sw" data-color="#b45309" style="background:#b45309" title="Amber" aria-label="Amber"></button>
+          <button type="button" class="sw" data-color="#dc2626" style="background:#dc2626" title="Rood" aria-label="Rood"></button>
+          <button type="button" class="sw" data-color="#7c3aed" style="background:#7c3aed" title="Paars" aria-label="Paars"></button>
+          <button type="button" class="sw" data-color="#0f172a" style="background:#0f172a" title="Zwart" aria-label="Zwart"></button>
+        </div>
+        <label class="field-lbl" for="txtWordmark">Woordmerk</label>
+        <input type="text" id="txtWordmark" value="DE FOREX OPLEIDING" maxlength="40"/>
+      </div>
+    </div>
+
+    <!-- GALERIJ (in-sessie) -->
+    <div class="studio-panel gallery">
+      <h3>Gemaakt in deze sessie <span class="h3-sub">Wordt niet opgeslagen &mdash; sluit tab = weg</span></h3>
+      <div class="gallery-grid" id="galleryGrid">
+        <div class="gallery-empty">Nog geen creaties. Klik Download om er &eacute;&eacute;n toe te voegen.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script>
+(async function initStudio(){
+  // Auth-gate: RBAC-page-gate wordt door sidebar.js afgedwongen op
+  // 'ads.studio.access' (MODULE_FEATURE_MAP). Deze IIFE hoeft dus geen eigen
+  // canSync-check; wel de reguliere requireAuth-guard voor sessie.
+  try {
+    await (window._authSharedReady || Promise.resolve());
+    if (window.AuthShared?.requireAuth) {
+      const ok = await window.AuthShared.requireAuth();
+      if (!ok) return;
+    }
+  } catch (_) {}
+
+  // ── Formaten en state ───────────────────────────────────────────────────
+  const FORMATS = {
+    'feed-1x1':   { w: 1080, h: 1080, label: 'feed-1x1' },
+    'feed-4x5':   { w: 1080, h: 1350, label: 'feed-4x5' },
+    'story-9x16': { w: 1080, h: 1920, label: 'story-9x16' },
+  };
+  const ACCENT_COLORS = ['#093d54', '#0e7c6b', '#b45309', '#dc2626', '#7c3aed', '#0f172a'];
+
+  const state = {
+    image: null,       // HTMLImageElement of null
+    imageName: '',
+    format: 'feed-1x1',
+    accent: '#093d54',
+    headline: 'Word Funded Trader.',
+    sub:      '30% korting op onze 100K challenge',
+    cta:      'Meld je aan',
+    wordmark: 'DE FOREX OPLEIDING',
+    gallery: [], // [{ blobUrl, format, ts }]
+  };
+
+  const $  = (id) => document.getElementById(id);
+  const canvas = $('previewCanvas');
+  const ctx    = canvas.getContext('2d');
+
+  // ── Rendering ───────────────────────────────────────────────────────────
+  function setCanvasDims() {
+    const f = FORMATS[state.format];
+    canvas.width  = f.w;
+    canvas.height = f.h;
+  }
+
+  // Cover-fit: schaal img zodat 'ie het hele frame vult, teveel wordt gecropt.
+  function coverFit(imgW, imgH, boxW, boxH) {
+    const scale = Math.max(boxW / imgW, boxH / imgH);
+    const w = imgW * scale;
+    const h = imgH * scale;
+    return { x: (boxW - w) / 2, y: (boxH - h) / 2, w, h };
+  }
+
+  function drawBackground() {
+    const { w, h } = canvas;
+    if (state.image) {
+      const fit = coverFit(state.image.naturalWidth, state.image.naturalHeight, w, h);
+      ctx.drawImage(state.image, fit.x, fit.y, fit.w, fit.h);
+    } else {
+      // Gradient fallback: accent → donkere variant.
+      const g = ctx.createLinearGradient(0, 0, w, h);
+      g.addColorStop(0, state.accent);
+      g.addColorStop(1, '#0a0b10');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+      // Placeholder-tekst midden.
+      ctx.fillStyle = 'rgba(255,255,255,.55)';
+      ctx.font = '500 ' + Math.round(w * 0.025) + 'px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Upload een foto in het linker paneel', w / 2, h / 2);
+      ctx.textAlign = 'start';
+    }
+  }
+
+  function drawTopAccentBar() {
+    const { w } = canvas;
+    const barH  = Math.round(w * 0.10);
+    ctx.fillStyle = state.accent;
+    ctx.fillRect(0, 0, w, barH);
+    // Woordmerk in de bar.
+    if (state.wordmark && state.wordmark.trim()) {
+      ctx.fillStyle = '#fff';
+      const fontSize = Math.round(barH * 0.34);
+      ctx.font = '700 ' + fontSize + 'px Inter, sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+      ctx.fillText(state.wordmark.trim(), Math.round(w * 0.05), barH / 2);
+      ctx.textBaseline = 'alphabetic';
+    }
+  }
+
+  function drawBottomScrim() {
+    const { w, h } = canvas;
+    const scrimH = Math.round(h * 0.55);
+    const grad = ctx.createLinearGradient(0, h - scrimH, 0, h);
+    grad.addColorStop(0,   'rgba(0,0,0,0)');
+    grad.addColorStop(0.4, 'rgba(0,0,0,0.35)');
+    grad.addColorStop(1,   'rgba(0,0,0,0.82)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, h - scrimH, w, scrimH);
+  }
+
+  // Word-wrap tekst op basis van beschikbare breedte.
+  // Returnt [{text, width}, ...] regel-array — caller kan lineHeight bepalen.
+  function wrapText(text, maxWidth) {
+    if (!text) return [];
+    const words = String(text).trim().split(/\s+/);
+    const lines = [];
+    let cur = '';
+    for (const w of words) {
+      const trial = cur ? cur + ' ' + w : w;
+      if (ctx.measureText(trial).width > maxWidth && cur) {
+        lines.push(cur);
+        cur = w;
+      } else {
+        cur = trial;
+      }
+    }
+    if (cur) lines.push(cur);
+    return lines;
+  }
+
+  function drawHeadline() {
+    const { w, h } = canvas;
+    const padX = Math.round(w * 0.06);
+    const maxW = w - padX * 2;
+
+    // Headline: groot, wit, vet.
+    const headlineFontSize = Math.round(w * 0.075);
+    ctx.font = '800 ' + headlineFontSize + 'px Inter, sans-serif';
+    ctx.fillStyle = '#fff';
+    const headlineLines = wrapText(state.headline, maxW);
+    const lineH = headlineFontSize * 1.1;
+
+    // Sub-tekst: kleiner.
+    const subFontSize = Math.round(w * 0.033);
+    const subLineH    = subFontSize * 1.25;
+
+    // CTA-hoogte reserveren.
+    const ctaText = (state.cta || '').trim();
+    const ctaH    = ctaText ? Math.round(w * 0.075) : 0;
+    const ctaMt   = ctaText ? Math.round(w * 0.03)  : 0;
+
+    // Sub-tekst breken (in de sub-font).
+    ctx.font = '500 ' + subFontSize + 'px Inter, sans-serif';
+    const subLines = wrapText(state.sub, maxW);
+
+    // Verticaal uitlijnen: totale block bereken → van onder plaatsen.
+    const totalH = headlineLines.length * lineH
+                 + (subLines.length ? Math.round(w * 0.02) : 0)
+                 + subLines.length * subLineH
+                 + ctaMt + ctaH;
+    const bottomPad = Math.round(h * 0.06);
+    let y = h - bottomPad - totalH;
+
+    // Draw headline
+    ctx.font = '800 ' + headlineFontSize + 'px Inter, sans-serif';
+    ctx.fillStyle = '#fff';
+    for (const line of headlineLines) {
+      y += lineH * 0.85;
+      ctx.fillText(line, padX, y);
+      y += lineH * 0.15;
+    }
+
+    // Sub
+    if (subLines.length) {
+      y += Math.round(w * 0.02);
+      ctx.font = '500 ' + subFontSize + 'px Inter, sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      for (const line of subLines) {
+        y += subLineH * 0.8;
+        ctx.fillText(line, padX, y);
+        y += subLineH * 0.2;
+      }
+    }
+
+    // CTA-pill
+    if (ctaText) {
+      y += ctaMt;
+      const ctaFontSize = Math.round(w * 0.036);
+      ctx.font = '700 ' + ctaFontSize + 'px Inter, sans-serif';
+      const textW = ctx.measureText(ctaText).width;
+      const pillPadX = Math.round(w * 0.045);
+      const pillW = textW + pillPadX * 2;
+      const pillH = ctaH;
+      const radius = pillH / 2;
+      ctx.fillStyle = state.accent;
+      // Rounded rect
+      roundedRect(ctx, padX, y, pillW, pillH, radius);
+      ctx.fill();
+      // Tekst midden in pill
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(ctaText, padX + pillPadX, y + pillH / 2);
+      ctx.textBaseline = 'alphabetic';
+    }
+  }
+
+  function roundedRect(c, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.arcTo(x + w, y,     x + w, y + h, r);
+    c.arcTo(x + w, y + h, x,     y + h, r);
+    c.arcTo(x,     y + h, x,     y,     r);
+    c.arcTo(x,     y,     x + w, y,     r);
+    c.closePath();
+  }
+
+  function render() {
+    setCanvasDims();
+    drawBackground();
+    drawBottomScrim();
+    drawTopAccentBar();
+    drawHeadline();
+  }
+
+  // ── Uploader ────────────────────────────────────────────────────────────
+  function loadImageFromFile(file) {
+    if (!file || !file.type || !/^image\//i.test(file.type)) {
+      window.AgentShared?.showToast?.('Kies een afbeeldingsbestand (PNG, JPG, WebP).', 'error');
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      state.image = img;
+      state.imageName = (file.name || 'foto').replace(/\.[^.]+$/, '');
+      renderDropZonePreview(url, file.name || 'foto');
+      render();
+    };
+    img.onerror = () => {
+      window.AgentShared?.showToast?.('Kon de afbeelding niet laden.', 'error');
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  }
+
+  function renderDropZonePreview(url, name) {
+    const dz = $('dropZone');
+    dz.classList.add('has-image');
+    dz.innerHTML = '<img class="dz-preview" alt="" src="' + escAttr(url) + '"/>' +
+                   '<button type="button" class="dz-remove" id="dzRemoveBtn"><i class="ti ti-trash"></i> ' + escHtml(name) + ' verwijderen</button>' +
+                   '<input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" hidden/>';
+    wireDropZoneInput();
+    $('dzRemoveBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.image = null; state.imageName = '';
+      resetDropZone();
+      render();
+    });
+  }
+
+  function resetDropZone() {
+    const dz = $('dropZone');
+    dz.classList.remove('has-image');
+    dz.innerHTML = '<input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" hidden/>' +
+      '<div class="dz-hint" id="dzHint">' +
+        '<i class="ti ti-photo-plus"></i>' +
+        '<div><strong>Sleep een foto hierheen</strong></div>' +
+        '<div>of klik om te uploaden (PNG, JPG, WebP)</div>' +
+      '</div>';
+    wireDropZoneInput();
+  }
+
+  function wireDropZoneInput() {
+    const dz = $('dropZone');
+    const inp = $('fileInput');
+    // Click-anywhere-in-dropzone → open file dialog (behalve de remove-knop, die stopt propagation zelf).
+    dz.addEventListener('click', () => inp.click(), { once: false });
+    inp.addEventListener('change', () => {
+      if (inp.files && inp.files[0]) loadImageFromFile(inp.files[0]);
+    });
+  }
+
+  // Drag-and-drop
+  function wireDragDrop() {
+    const dz = $('dropZone');
+    ['dragenter', 'dragover'].forEach((evt) => dz.addEventListener(evt, (e) => {
+      e.preventDefault(); e.stopPropagation();
+      dz.classList.add('hover');
+    }));
+    ['dragleave', 'drop'].forEach((evt) => dz.addEventListener(evt, (e) => {
+      e.preventDefault(); e.stopPropagation();
+      dz.classList.remove('hover');
+    }));
+    dz.addEventListener('drop', (e) => {
+      const files = e.dataTransfer?.files;
+      if (files && files[0]) loadImageFromFile(files[0]);
+    });
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────────────────
+  function escHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function escAttr(s) { return escHtml(s).replace(/`/g, '&#96;'); }
+
+  function fileSafeName(s) {
+    return String(s || 'creative').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'creative';
+  }
+
+  function timestampStr() {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+  }
+
+  // ── Download & gallery ──────────────────────────────────────────────────
+  function download() {
+    const base = fileSafeName(state.imageName || 'dfo-creative');
+    const fmt  = FORMATS[state.format].label;
+    const name = base + '-' + fmt + '-' + timestampStr() + '.png';
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        window.AgentShared?.showToast?.('Export mislukt: kon PNG niet genereren.', 'error');
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      // Trigger download
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      // Voeg toe aan galerij (blob-URL laten leven zolang de tab open is).
+      addToGallery(url, fmt, name);
+    }, 'image/png', 1.0);
+  }
+
+  function addToGallery(url, fmt, name) {
+    state.gallery.unshift({ url, fmt, name, ts: Date.now() });
+    renderGallery();
+  }
+
+  function renderGallery() {
+    const g = $('galleryGrid');
+    if (!state.gallery.length) {
+      g.innerHTML = '<div class="gallery-empty">Nog geen creaties. Klik Download om er &eacute;&eacute;n toe te voegen.</div>';
+      return;
+    }
+    g.innerHTML = state.gallery.map((item, i) => (
+      '<div class="gallery-item" data-i="' + i + '" title="' + escAttr(item.name) + '">' +
+        '<img alt="' + escAttr(item.name) + '" src="' + escAttr(item.url) + '"/>' +
+        '<span class="gi-badge">' + escHtml(item.fmt) + '</span>' +
+        '<button type="button" class="gi-download" data-i="' + i + '">' +
+          '<i class="ti ti-download"></i> PNG' +
+        '</button>' +
+      '</div>'
+    )).join('');
+    g.querySelectorAll('.gi-download').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = Number(btn.getAttribute('data-i'));
+        const item = state.gallery[idx]; if (!item) return;
+        const a = document.createElement('a');
+        a.href = item.url; a.download = item.name;
+        document.body.appendChild(a); a.click(); a.remove();
+      });
+    });
+  }
+
+  // ── Wire-up ─────────────────────────────────────────────────────────────
+  wireDropZoneInput();
+  wireDragDrop();
+
+  document.querySelectorAll('.format-picker label').forEach((el) => {
+    el.addEventListener('click', () => {
+      const val = el.getAttribute('data-format');
+      if (!FORMATS[val]) return;
+      state.format = val;
+      document.querySelectorAll('.format-picker label').forEach((l) => l.classList.remove('active'));
+      el.classList.add('active');
+      const radio = el.querySelector('input[type=radio]');
+      if (radio) radio.checked = true;
+      render();
+    });
+  });
+
+  document.querySelectorAll('.sw').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.accent = btn.getAttribute('data-color') || '#093d54';
+      document.querySelectorAll('.sw').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      render();
+    });
+  });
+
+  ['txtHeadline', 'txtSub', 'txtCta', 'txtWordmark'].forEach((id) => {
+    $(id).addEventListener('input', (e) => {
+      const map = { txtHeadline: 'headline', txtSub: 'sub', txtCta: 'cta', txtWordmark: 'wordmark' };
+      state[map[id]] = e.target.value;
+      render();
+    });
+  });
+
+  $('downloadBtn').addEventListener('click', download);
+  $('variationBtn').addEventListener('click', () => {
+    // Volgende accent-swatch in rotatie.
+    const idx = ACCENT_COLORS.indexOf(state.accent);
+    const nextIdx = (idx + 1) % ACCENT_COLORS.length;
+    state.accent = ACCENT_COLORS[nextIdx];
+    document.querySelectorAll('.sw').forEach((b) => {
+      b.classList.toggle('active', b.getAttribute('data-color') === state.accent);
+    });
+    render();
+  });
+
+  // Initial render (lege staat).
+  render();
+})();
+</script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+</body>
+</html>

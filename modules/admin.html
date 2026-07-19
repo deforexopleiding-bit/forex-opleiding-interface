@@ -924,8 +924,11 @@ const FEATURE_REGISTRY = [
   ]},
   { moduleKey:'ads', moduleLabel:'Meta Ads', moduleIcon:'ti-brand-meta', features:[
     // Fase 2 Meta Ads dashboard. Page-gate + endpoint-gate delen dezelfde key.
-    // Fase 3/4 (alerts / creatives) breiden dit uit met extra feature-keys.
-    { key:'ads.module.access', label:'Module zichtbaar' },
+    // Fase 3 (alerts) haakt op ads.module.access voor de doelgroep van alerts.
+    { key:'ads.module.access', label:'Dashboard zichtbaar' },
+    // Fase 4 — Creative Studio (browser-compositor). Aparte permissie zodat
+    // teams die alleen creatives maken geen dashboard-toegang nodig hebben.
+    { key:'ads.studio.access', label:'Creative Studio' },
   ]},
   { moduleKey:'whatsapp', moduleLabel:'WhatsApp', moduleIcon:'ti-brand-whatsapp', features:[
     { key:'whatsapp.send_manual', label:'Handmatig WA sturen' },
