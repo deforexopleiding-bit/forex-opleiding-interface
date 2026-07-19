@@ -105,6 +105,45 @@
     .empty-state .es-sub { font-size:12.5px }
 
     .status-line { font-size:11.5px; color:var(--text-faint); text-align:right; margin-top:4px }
+
+    /* Alerts-instellingen (fase 3) — compact, collapsible onder de tabel. */
+    .alerts-card { margin-top:8px }
+    .alerts-summary {
+      cursor:pointer; list-style:none; display:flex; align-items:center; gap:8px;
+      font-size:12.5px; color:var(--text-primary); font-weight:600;
+    }
+    .alerts-summary::-webkit-details-marker { display:none }
+    .alerts-summary::before {
+      content:'▸'; display:inline-block; color:var(--text-faint); font-size:11px;
+      transition:transform .12s ease;
+    }
+    details[open] > .alerts-summary::before { transform:rotate(90deg) }
+    .alerts-summary .h3-sub { font-weight:400; color:var(--text-dim); margin-left:4px }
+    .alerts-body { margin-top:14px; display:flex; flex-direction:column; gap:10px }
+    .alert-row {
+      display:grid; grid-template-columns:24px 1fr auto; gap:10px; align-items:center;
+      padding:10px 12px; border:1px solid var(--border); border-radius:10px;
+      background:var(--bg-elev);
+    }
+    .alert-row .ar-name { font-size:12.5px; font-weight:600; color:var(--text-primary) }
+    .alert-row .ar-sub  { font-size:11.5px; color:var(--text-dim); margin-top:2px }
+    .alert-row input[type=number] {
+      width:80px; padding:5px 8px; font-size:12.5px; text-align:right;
+      border:1px solid var(--border); border-radius:6px; background:var(--bg-input, #fff);
+      color:var(--text-primary); font-variant-numeric:tabular-nums;
+    }
+    .alert-row input[type=checkbox] { width:16px; height:16px; cursor:pointer; accent-color:#0e7c6b }
+    .alerts-footer {
+      display:flex; justify-content:space-between; align-items:center; margin-top:8px;
+      gap:12px; flex-wrap:wrap;
+    }
+    .alerts-hint { font-size:11.5px; color:var(--text-faint) }
+    .alerts-save {
+      padding:7px 14px; background:#0e7c6b; color:#fff; border:none; border-radius:8px;
+      font-size:12.5px; font-weight:600; cursor:pointer;
+    }
+    .alerts-save:disabled { opacity:.5; cursor:not-allowed }
+    .alerts-save:hover:not(:disabled) { background:#0b6b5c }
   </style>
 </head>
 <body>
@@ -154,6 +193,56 @@
           <div class="es-title">Laden…</div>
         </div>
       </div>
+    </div>
+
+    <!-- Alerts-instellingen (fase 3) — collapsible; cron uurlijks op :10. -->
+    <div class="card alerts-card">
+      <details>
+        <summary class="alerts-summary">
+          <i class="ti ti-bell"></i>
+          Alerts-instellingen
+          <span class="h3-sub" id="alertsStatusLabel"></span>
+        </summary>
+        <div class="alerts-body" id="alertsBody">
+          <div class="alert-row" data-rule="cpl">
+            <input type="checkbox" id="alrtCplEnabled" aria-label="Kosten-per-lead alert aan/uit"/>
+            <div>
+              <div class="ar-name">Kosten per lead te hoog</div>
+              <div class="ar-sub">Alert als spend / leads (venster ≥ no_leads_hours) boven de drempel komt.</div>
+            </div>
+            <label class="ar-input">
+              <span style="font-size:11.5px;color:var(--text-dim);margin-right:6px">Drempel €</span>
+              <input type="number" id="alrtCplThreshold" min="0" step="1"/>
+            </label>
+          </div>
+          <div class="alert-row" data-rule="no_leads">
+            <input type="checkbox" id="alrtNoLeadsEnabled" aria-label="No-leads alert aan/uit"/>
+            <div>
+              <div class="ar-name">Geen leads / campagne staat stil</div>
+              <div class="ar-sub">Alert als er spend is maar 0 leads over de laatste N uur.</div>
+            </div>
+            <label class="ar-input">
+              <span style="font-size:11.5px;color:var(--text-dim);margin-right:6px">Uren</span>
+              <input type="number" id="alrtNoLeadsHours" min="1" step="1"/>
+            </label>
+          </div>
+          <div class="alert-row" data-rule="cost_spike">
+            <input type="checkbox" id="alrtSpikeEnabled" aria-label="Kostenpiek alert aan/uit"/>
+            <div>
+              <div class="ar-name">Kostenpiek dag-op-dag</div>
+              <div class="ar-sub">Alert als spend gisteren meer dan X% hoger is dan eergisteren (min. spend €<span id="alrtSpikeMinLabel">50</span>).</div>
+            </div>
+            <label class="ar-input">
+              <span style="font-size:11.5px;color:var(--text-dim);margin-right:6px">%</span>
+              <input type="number" id="alrtSpikePct" min="0" step="1"/>
+            </label>
+          </div>
+          <div class="alerts-footer">
+            <div class="alerts-hint" id="alertsHint">Meldingen verschijnen in het notificatie-centrum. Dedup per campagne per type: 24u.</div>
+            <button type="button" id="alertsSaveBtn" class="alerts-save">Opslaan</button>
+          </div>
+        </div>
+      </details>
     </div>
   </div>
 </div>
@@ -411,7 +500,101 @@
     });
   });
 
-  await load();
+  // ── Alerts-instellingen (fase 3) ─────────────────────────────────────
+  // Load via /api/app-settings?key=meta_ads_alert_rules. 404 = geen custom
+  // config → val terug op ALERT_DEFAULTS. Save via PUT (super_admin only;
+  // niet-super_admin krijgen 403, UI toont hint + disabled-knop).
+  const ALERT_DEFAULTS = {
+    cpl_enabled: true,   cpl_threshold_eur: 35,
+    no_leads_enabled: true, no_leads_hours: 24,
+    cost_spike_enabled: true, cost_spike_pct: 40, cost_spike_min_spend_eur: 50,
+  };
+
+  function applyRulesToUI(rules) {
+    $('alrtCplEnabled').checked      = !!rules.cpl_enabled;
+    $('alrtCplThreshold').value      = String(rules.cpl_threshold_eur ?? ALERT_DEFAULTS.cpl_threshold_eur);
+    $('alrtNoLeadsEnabled').checked  = !!rules.no_leads_enabled;
+    $('alrtNoLeadsHours').value      = String(rules.no_leads_hours ?? ALERT_DEFAULTS.no_leads_hours);
+    $('alrtSpikeEnabled').checked    = !!rules.cost_spike_enabled;
+    $('alrtSpikePct').value          = String(rules.cost_spike_pct ?? ALERT_DEFAULTS.cost_spike_pct);
+    $('alrtSpikeMinLabel').textContent = String(rules.cost_spike_min_spend_eur ?? ALERT_DEFAULTS.cost_spike_min_spend_eur);
+    const enabledCount = [rules.cpl_enabled, rules.no_leads_enabled, rules.cost_spike_enabled].filter(Boolean).length;
+    $('alertsStatusLabel').textContent = '(' + enabledCount + '/3 actief)';
+  }
+
+  function readRulesFromUI(current) {
+    return {
+      cpl_enabled:              $('alrtCplEnabled').checked,
+      cpl_threshold_eur:        Math.max(0, Number($('alrtCplThreshold').value) || 0),
+      no_leads_enabled:         $('alrtNoLeadsEnabled').checked,
+      no_leads_hours:           Math.max(1, Number($('alrtNoLeadsHours').value) || 1),
+      cost_spike_enabled:       $('alrtSpikeEnabled').checked,
+      cost_spike_pct:           Math.max(0, Number($('alrtSpikePct').value) || 0),
+      // min_spend blijft op wat er stond (of default). Geen UI-input in v1 —
+      // toonbaar in de sub-label; wijziging via SQL/super_admin-tool.
+      cost_spike_min_spend_eur: (current && current.cost_spike_min_spend_eur != null)
+        ? current.cost_spike_min_spend_eur : ALERT_DEFAULTS.cost_spike_min_spend_eur,
+    };
+  }
+
+  async function loadAlertRules() {
+    try {
+      const r = await window.AgentShared.apiFetch('/api/app-settings?key=meta_ads_alert_rules');
+      if (r.status === 404) return { ...ALERT_DEFAULTS };
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      return { ...ALERT_DEFAULTS, ...(d.value || {}) };
+    } catch (e) {
+      console.warn('[alerts] load faalde, val terug op defaults:', e?.message || e);
+      return { ...ALERT_DEFAULTS };
+    }
+  }
+
+  async function saveAlertRules(rules) {
+    const r = await window.AgentShared.apiFetch('/api/app-settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'meta_ads_alert_rules', value: rules }),
+    });
+    if (r.status === 403) throw new Error('Alleen super_admin mag deze instellingen wijzigen.');
+    if (!r.ok) {
+      let msg = 'HTTP ' + r.status;
+      try { const d = await r.json(); if (d?.error) msg = d.error; } catch (_) {}
+      throw new Error(msg);
+    }
+  }
+
+  async function initAlertsUI() {
+    let current = await loadAlertRules();
+    applyRulesToUI(current);
+    // Rol-check voor de save-knop. Fail-open bij fout (UI enabled) — server
+    // valideert alsnog (403 op PUT), UI toont dan de foutmelding.
+    try {
+      const prof = await window.AuthShared?.getProfile?.();
+      if (prof && prof.role !== 'super_admin') {
+        $('alertsSaveBtn').disabled = true;
+        $('alertsSaveBtn').title = 'Alleen super_admin mag opslaan';
+        $('alertsHint').textContent = 'Alleen super_admin kan deze instellingen wijzigen. Meldingen komen in het notificatie-centrum. Dedup 24u per campagne per type.';
+      }
+    } catch (_) {}
+    $('alertsSaveBtn').addEventListener('click', async () => {
+      const btn = $('alertsSaveBtn');
+      const next = readRulesFromUI(current);
+      btn.disabled = true; btn.textContent = 'Opslaan…';
+      try {
+        await saveAlertRules(next);
+        current = next;
+        applyRulesToUI(current);
+        window.AgentShared?.showToast?.('Alerts-instellingen opgeslagen.', 'success');
+      } catch (e) {
+        window.AgentShared?.showToast?.(e.message || 'Opslaan mislukt', 'error');
+      } finally {
+        btn.disabled = false; btn.textContent = 'Opslaan';
+      }
+    });
+  }
+
+  await Promise.all([ load(), initAlertsUI().catch((e) => console.warn('[alerts] init faalde:', e?.message)) ]);
 })();
 </script>
 <script src="/modules/shared/permissions.js"></script>
