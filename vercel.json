@@ -113,6 +113,10 @@
       "schedule": "10 * * * *"
     },
     {
+      "path": "/api/cron-meta-capi",
+      "schedule": "20 * * * *"
+    },
+    {
       "path": "/api/cron/generate-monthly-concepts",
       "schedule": "0 6 * * *"
     },
