@@ -42,6 +42,9 @@
     // megaphone i.p.v. chart-bar zodat de icoon "advertising" uitstraalt
     // (chart-bar hebben we al gebruikt voor follow-up in de tab-count).
     'meta-ads': '<path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
+    // lucide "sparkles" — Creative Studio (fase 4). Browser-compositor
+    // voor ad-creatives; onderscheidend van megaphone (dashboard).
+    'meta-ads-studio': '<path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/>',
     // lucide "calendar-event" — visueel duidelijk onderscheid van meetings (people-group).
     events: '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><rect x="8" y="14" width="8" height="5" rx="1"/>',
     tickets: '<path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 11v2"/><path d="M13 17v2"/>',
@@ -135,6 +138,10 @@
           // Meta Ads dashboard (fase 2) — leest sync-tabellen uit fase 1.
           // Gated via ads.module.access; verborgen als user geen permissie heeft.
           navLink('meta-ads', '/modules/meta-ads.html', 'Meta Ads') +
+          // Fase 4 — Creative Studio (foto -> ad-creative in de browser).
+          // Aparte permissie ads.studio.access zodat teams die alleen
+          // creatives mogen maken geen dashboard-toegang nodig hebben.
+          navLink('meta-ads-studio', '/modules/meta-ads-studio.html', 'Creative Studio') +
           // PR-A — mentor-grootboek is verhuisd naar Events → Mentor-grootboek-tab.
           // Sidebar-entry verwijderd; deeplink events.html#mentor-grootboek werkt.
           // Mentor-dashboard PR-1 — self-service voor mentor-rol; gated via
@@ -632,6 +639,10 @@
     // Meta Ads dashboard (fase 2) — page-gate + endpoint-gate delen dezelfde key.
     // Toggle per rol via admin.html PERMISSION_CATALOG (ads-block).
     'meta-ads': 'ads.module.access',
+    // Creative Studio (fase 4) — client-side compositor, geen backend.
+    // Aparte permissie zodat teams die alleen creatives mogen maken los
+    // van dashboard-toegang bediend kunnen worden.
+    'meta-ads-studio': 'ads.studio.access',
     // PR-A — mentor-grootboek-key verwijderd; pagina is verhuisd naar
     // Events → Mentor-grootboek-tab. RBAC mentor.ledger.view blijft als
     // endpoint-gate; sidebar-entry bestaat niet meer dus geen module-gating.
@@ -893,6 +904,7 @@
     'events':              'Sales & Events',
     'follow-up':           'Sales & Events',
     'meta-ads':            'Sales & Events',
+    'meta-ads-studio':     'Sales & Events',
     'email':               'Klanten & Support',
     'tickets':             'Klanten & Support',
     'taken':               'Klanten & Support',
