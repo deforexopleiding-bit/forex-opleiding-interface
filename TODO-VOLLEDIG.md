@@ -6,6 +6,25 @@
 
 ---
 
+## 🔗 LMS-koppeling (extern LMS ↔ CRM) — status & openstaande afspraken
+
+### CRM-kant VOLTOOID (live op main)
+- Sidebar "LMS"-knop voor mentors (gated via `mentor.module.access`), opent https://dfo-lms-prototype.vercel.app/mentor.
+- `api/lms-whoami.js` — extern-facing endpoint, GET, fail-CLOSED, CORS strikt op `LMS_ORIGIN`. Geeft `{ role, name }` van de ingelogde gebruiker terug (alleen eigen user, via geverifieerd Supabase-Bearer-token). Rol-set: super_admin / admin / manager / sales / mentor / marketing / administratie / viewer of `null`.
+
+### Openstaand aan LMS-kant (compagnon, geen CRM-code)
+- LMS-login bouwen op het GEDEELDE Supabase-project + aansluiten op `/api/lms-whoami` (401 / 500 / `{role:null,name:null}` afhandelen zoals gedocumenteerd).
+- Redirect-URLs toevoegen in Supabase dashboard (Authentication → URL Configuration): LMS productie-URL + (tijdelijk) preview-URLs.
+- Losse Supabase-sleutel uit het LMS-prototype verwijderen zodra de login via het endpoint werkt (uit code, `.env` én Vercel-env).
+
+### ⚠️ BEVEILIGINGSAFSPRAKEN — niet vergeten (bewuste volgorde)
+- **PREVIEW-WILDCARD** in de redirect-URLs (`https://dfo-lms-prototype-*.vercel.app`) is alleen voor de BOUWFASE. Vóór echte livegang vervangen door alleen de vaste productie-URL. Een permanente wildcard-redirect is een risico.
+- **RLS-STATUS**: RLS staat nog niet volledig op orde (17 tabellen met policies, maar bewuste uitzonderingen o.a. `customers` / PII; CLAUDE.md waarschuwt: RLS-uitbreiding gefaseerd, eerst inventariseren).
+- **FASE 2** (later, per functie met expliciete go): mentor read-only toegang tot ZIJN EIGEN studenten + eigen 1-op-1 sessies. Vóór Fase 2 GERICHTE RLS-policies opzetten op precies die tabellen (eigen-data-only), NIET breed openzetten. Schrijftoegang vanuit LMS bewust NOG NIET aan — pas na expliciet akkoord per functie.
+- **Principe**: LMS krijgt alleen wat een functie nodig heeft, read-only tijdens bouwen, Bubble blijft live bron tot getest.
+
+---
+
 ## ✅ Sessie juli 2026 — Wanbetalers-module + Pipeline + nav-herontwerp
 
 ### Voltooid — LIVE op main (laatste hoofd-SHA: 462816c)
