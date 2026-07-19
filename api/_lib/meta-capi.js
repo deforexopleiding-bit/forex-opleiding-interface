@@ -29,6 +29,21 @@ import crypto from 'node:crypto';
 export const META_API_VERSION = 'v20.0';
 export const DEFAULT_EVENT_NAME = 'CRMCustomer';
 
+// Meta accepteert CAPI-events tot 7 dagen terug. Wij hanteren 6.5 dagen
+// zodat een deal die net binnen viel bij fetch, niet net over de 7d-grens
+// tikt tijdens processing (Meta gooit dan een 400 met 'event too old').
+export const CAPI_MAX_AGE_MS = 6.5 * 24 * 3600 * 1000;
+
+/**
+ * True als `createdAt` binnen het CAPI-venster valt (jonger dan 6.5 dagen
+ * geleden op tijdstip `nowMs`). Invalid dates → false (skippen).
+ */
+export function isWithinCapiWindow(createdAt, nowMs) {
+  const ms = new Date(createdAt).getTime();
+  if (!Number.isFinite(ms)) return false;
+  return (nowMs - ms) <= CAPI_MAX_AGE_MS;
+}
+
 export class MetaCapiNotConfiguredError extends Error {
   constructor(missing) {
     super('Meta CAPI niet geconfigureerd: ' + missing.join(', '));

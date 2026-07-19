@@ -25,7 +25,9 @@ import {
   getMetaCapiConfig,
   buildCapiEvent,
   hasUsableMatchKey,
+  isWithinCapiWindow,
   postCapiEvents,
+  CAPI_MAX_AGE_MS,
   DEFAULT_EVENT_NAME,
 } from './_lib/meta-capi.js';
 
@@ -126,12 +128,18 @@ export default async function handler(req, res) {
       throw e;
     }
 
-    // 2) Deals die NOT IN sentIds, oldest-first, gelimiteerd.
+    // 2) Deals binnen het CAPI-venster (6.5d, marge onder Meta's 7d-limiet),
+    //    NOT IN sentIds. Newest-first: als er ooit >50 in een uur zijn krijgen
+    //    de meest recente conversies voorrang (oudere binnen venster komen
+    //    volgende run vanzelf, nog steeds tijdig).
+    const windowStartIso = new Date(Date.now() - CAPI_MAX_AGE_MS).toISOString();
+    summary.window_start = windowStartIso;
     let q = supabaseAdmin
       .from('deals')
       .select('id, customer_id, total_amount, created_at, archived_at')
       .is('archived_at', null)
-      .order('created_at', { ascending: true })
+      .gte('created_at', windowStartIso)
+      .order('created_at', { ascending: false })
       .limit(PER_RUN_LIMIT);
     if (sentIds.length) {
       // PostgREST accepteert alleen simpele lijsten in .not('id','in','(...)').
@@ -156,8 +164,29 @@ export default async function handler(req, res) {
   }
 
   // Per-deal: haal customer + lead_attribution → bouw event → POST → log.
+  const nowMs = Date.now();
   for (const deal of deals) {
     try {
+      // Boundary-guard (vangnet): een deal die bij de query nog binnen 6.5d
+      // viel maar tijdens processing over de 7d-grens tikt, willen we niet
+      // alsnog naar Meta sturen (dat geeft een failure). Log 'skipped'.
+      if (!isWithinCapiWindow(deal.created_at, nowMs)) {
+        const r = await logCapiRow({
+          deal_id:     deal.id,
+          event_name:  DEFAULT_EVENT_NAME,
+          event_id:    'crm_customer_' + deal.id,
+          status:      'skipped',
+          value:       Number(deal.total_amount || 0),
+          currency:    'EUR',
+          match_keys:  null,
+          skip_reason: 'too_old',
+          test_mode:   summary.test_mode,
+        });
+        if (r.ok) summary.skipped += 1;
+        else summary.errors.push({ phase: 'log_skip_old', deal_id: deal.id, error: r.error || r.skipped });
+        continue;
+      }
+
       // Customer (email + phone + ghl_contact_id).
       let customer = null;
       try {

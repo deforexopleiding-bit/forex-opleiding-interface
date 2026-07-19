@@ -27,6 +27,8 @@ import {
   buildCapiEvent,
   computeAppsecretProof,
   getMetaCapiConfigStatus,
+  isWithinCapiWindow,
+  CAPI_MAX_AGE_MS,
   META_API_VERSION,
   DEFAULT_EVENT_NAME,
 } from '../api/_lib/meta-capi.js';
@@ -269,4 +271,45 @@ test('getMetaCapiConfigStatus: alle env gezet → configured:true; test_mode vol
 
 test('META_API_VERSION = v20.0', () => {
   assert.equal(META_API_VERSION, 'v20.0');
+});
+
+// ─── isWithinCapiWindow (7d-venster met 6.5d marge) ──────────────────────
+
+test('CAPI_MAX_AGE_MS = 6.5 dagen (marge onder Meta 7d)', () => {
+  assert.equal(CAPI_MAX_AGE_MS, 6.5 * 24 * 3600 * 1000);
+});
+
+test('isWithinCapiWindow: nu → true', () => {
+  const now = 1_800_000_000_000; // vaste referentie
+  assert.equal(isWithinCapiWindow(new Date(now).toISOString(), now), true);
+});
+
+test('isWithinCapiWindow: 3 dagen oud → true (binnen venster)', () => {
+  const now  = 1_800_000_000_000;
+  const then = now - 3 * 24 * 3600 * 1000;
+  assert.equal(isWithinCapiWindow(new Date(then).toISOString(), now), true);
+});
+
+test('isWithinCapiWindow: 7 dagen oud → false (buiten 6.5d marge)', () => {
+  const now  = 1_800_000_000_000;
+  const then = now - 7 * 24 * 3600 * 1000;
+  assert.equal(isWithinCapiWindow(new Date(then).toISOString(), now), false);
+});
+
+test('isWithinCapiWindow: precies op de grens (6.5d) → true (inclusive)', () => {
+  const now  = 1_800_000_000_000;
+  const then = now - CAPI_MAX_AGE_MS;
+  assert.equal(isWithinCapiWindow(new Date(then).toISOString(), now), true);
+});
+
+test('isWithinCapiWindow: net over de grens (6.5d + 1ms) → false', () => {
+  const now  = 1_800_000_000_000;
+  const then = now - CAPI_MAX_AGE_MS - 1;
+  assert.equal(isWithinCapiWindow(new Date(then).toISOString(), now), false);
+});
+
+test('isWithinCapiWindow: ongeldige datum → false (defensief)', () => {
+  assert.equal(isWithinCapiWindow(null, Date.now()), false);
+  assert.equal(isWithinCapiWindow('not-a-date', Date.now()), false);
+  assert.equal(isWithinCapiWindow(undefined, Date.now()), false);
 });
