@@ -24,7 +24,10 @@ import { supabaseAdmin } from '../supabase.js';
 const ATTR_FIELDS = {
   utm_source:     ['utmSource', 'utm_source'],
   utm_medium:     ['utmMedium', 'utm_medium'],
-  utm_campaign:   ['utmCampaign', 'utm_campaign'],
+  // 'campaign': GHL levert de campagne-id van Meta-attributed leads onder
+  // deze key (i.p.v. utmCampaign). Fase-5 capture-fix — zonder deze alias
+  // bleef utm_campaign NULL en viel de campagne-fallback-join weg.
+  utm_campaign:   ['utmCampaign', 'utm_campaign', 'campaign'],
   utm_content:    ['utmContent', 'utm_content'],
   utm_term:       ['utmTerm', 'utm_term'],
   fbclid:         ['fbclid', 'fbCid'],

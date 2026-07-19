@@ -144,6 +144,43 @@
     }
     .alerts-save:disabled { opacity:.5; cursor:not-allowed }
     .alerts-save:hover:not(:disabled) { background:#0b6b5c }
+
+    /* Mode-toggle (fase 5) — Meta-cijfers vs Tot-en-met-sale */
+    .mode-toggle { display:flex; gap:2px; border:1px solid var(--border); border-radius:999px; padding:2px; background:var(--bg-elev) }
+    .mode-toggle button {
+      padding:6px 14px; border:none; background:transparent;
+      color:var(--text-dim); font-size:12.5px; font-weight:600;
+      border-radius:999px; cursor:pointer;
+    }
+    .mode-toggle button:hover { color:var(--text-primary) }
+    .mode-toggle button.active { background:#0e7c6b; color:#fff }
+
+    /* Funnel-strip (fase 5) */
+    .roas-funnel { display:grid; grid-template-columns:repeat(5, 1fr) auto; gap:0; margin:14px 0; align-items:stretch }
+    @media (max-width:900px) { .roas-funnel { grid-template-columns:repeat(2, 1fr) } }
+    .funnel-step {
+      background:var(--bg-elev); border:1px solid var(--border);
+      border-right:none; padding:12px 14px; position:relative;
+    }
+    .funnel-step:first-child { border-radius:10px 0 0 10px }
+    .funnel-step:last-of-type { border-radius:0 10px 10px 0; border-right:1px solid var(--border) }
+    .funnel-step .fs-label { font-size:10.5px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.06em; font-weight:600; margin-bottom:4px }
+    .funnel-step .fs-value { font-size:20px; font-weight:700; color:var(--text-primary); font-variant-numeric:tabular-nums; letter-spacing:-.3px }
+    .funnel-step .fs-sub { font-size:11px; color:var(--text-dim); margin-top:2px }
+    @media (max-width:900px) { .roas-funnel .funnel-step { border-radius:10px !important; border-right:1px solid var(--border) } }
+
+    /* ROAS-kleur */
+    .roas-good { color:#0e7c6b; font-weight:700 }
+    .roas-mid  { color:var(--text-primary); font-weight:600 }
+    .roas-bad  { color:#b91c1c; font-weight:700 }
+
+    /* Niet-toegewezen-rij */
+    .ads-table tbody tr.unattr-row {
+      background:rgba(148,163,184,0.05);
+      border-top:2px solid var(--border);
+    }
+    .ads-table tbody tr.unattr-row td { color:var(--text-dim); font-style:italic }
+    .ads-table tbody tr.unattr-row .ads-name { font-style:normal; color:var(--text-primary) }
   </style>
 </head>
 <body>
@@ -155,15 +192,30 @@
         <h1><i class="ti ti-brand-meta"></i> Meta Ads</h1>
         <div class="sub">Overzicht, campagne-prestaties en drill-down. Data ververst elke 30 min.</div>
       </div>
-      <div class="range-chips" id="rangeChips" role="tablist">
-        <button class="range-chip" data-range="today" role="tab">Vandaag</button>
-        <button class="range-chip active" data-range="7d" role="tab">7 dagen</button>
-        <button class="range-chip" data-range="30d" role="tab">30 dagen</button>
-        <button class="range-chip" data-range="month" role="tab">Deze maand</button>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <div class="mode-toggle" role="tablist" aria-label="Weergave-modus">
+          <button type="button" class="active" data-mode="meta" role="tab" aria-selected="true">Meta-cijfers</button>
+          <button type="button" data-mode="sale" role="tab" aria-selected="false">Tot en met sale</button>
+        </div>
+        <div class="range-chips" id="rangeChips" role="tablist">
+          <button class="range-chip" data-range="today" role="tab">Vandaag</button>
+          <button class="range-chip active" data-range="7d" role="tab">7 dagen</button>
+          <button class="range-chip" data-range="30d" role="tab">30 dagen</button>
+          <button class="range-chip" data-range="month" role="tab">Deze maand</button>
+        </div>
       </div>
     </div>
 
     <div class="status-line" id="statusLine"></div>
+
+    <!-- Funnel-strip (alleen zichtbaar in sale-modus) -->
+    <div class="roas-funnel" id="roasFunnel" hidden>
+      <div class="funnel-step"><div class="fs-label">Spend</div><div class="fs-value" id="funSpend">—</div><div class="fs-sub" id="funSpendSub"></div></div>
+      <div class="funnel-step"><div class="fs-label">Leads</div><div class="fs-value" id="funLeads">—</div><div class="fs-sub" id="funLeadsSub"></div></div>
+      <div class="funnel-step"><div class="fs-label">Afspraken</div><div class="fs-value" id="funAppts">—</div><div class="fs-sub" id="funApptsSub"></div></div>
+      <div class="funnel-step"><div class="fs-label">Sales</div><div class="fs-value" id="funSales">—</div><div class="fs-sub" id="funSalesSub"></div></div>
+      <div class="funnel-step"><div class="fs-label">Omzet</div><div class="fs-value" id="funRevenue">—</div><div class="fs-sub" id="funRevenueSub"></div></div>
+    </div>
 
     <!-- KPI-strip -->
     <div class="kpi-strip" id="kpiStrip">
@@ -266,6 +318,7 @@
   // ── State ─────────────────────────────────────────────────────────────
   const state = {
     range: '7d',      // today | 7d | 30d | month
+    mode:  'meta',    // 'meta' (dashboard) | 'sale' (attributie×spend×sales)
     level: 'campaign',
     parentMetaId: null,
     parentName: null,   // voor breadcrumb (campagne-naam bij adset-drill; adset-naam bij ad-drill)
@@ -273,6 +326,10 @@
     loading: false,
     last: null,
   };
+
+  // ROAS-kleur cutoffs (spec: groen ≥8×, rood <4×, neutraal daartussen).
+  const ROAS_GOOD_CUTOFF = 8;
+  const ROAS_BAD_CUTOFF  = 4;
 
   const $ = (id) => document.getElementById(id);
   const fmtEur = (v, dec = 2) => v == null ? '—'
@@ -453,21 +510,159 @@
     load();
   }
 
+  // ── Sale-mode rendering (fase 5) ──────────────────────────────────────
+  function roasClass(v) {
+    if (v == null) return '';
+    if (v >= ROAS_GOOD_CUTOFF) return 'roas-good';
+    if (v <  ROAS_BAD_CUTOFF)  return 'roas-bad';
+    return 'roas-mid';
+  }
+
+  function renderFunnel(totals) {
+    $('funSpend').textContent   = fmtEur(totals?.spend, 0);
+    $('funLeads').textContent   = fmtInt(totals?.leads);
+    $('funAppts').textContent   = fmtInt(totals?.appointments);
+    $('funSales').textContent   = fmtInt(totals?.sales);
+    $('funRevenue').textContent = fmtEur(totals?.revenue, 0);
+    // Conversie-percentages: elke stap uitgedrukt in de vorige.
+    const pct = (num, den) => (den > 0 ? ' (' + ((num/den)*100).toFixed(0) + '% van leads)' : '');
+    $('funSpendSub').textContent   = (totals?.cost_per_customer != null)
+      ? ('€/klant ' + fmtEur(totals.cost_per_customer, 0))
+      : '';
+    $('funLeadsSub').textContent   = '';
+    $('funApptsSub').textContent   = totals?.leads > 0 ? pct(totals.appointments, totals.leads) : '';
+    $('funSalesSub').textContent   = totals?.leads > 0 ? pct(totals.sales, totals.leads) : '';
+    $('funRevenueSub').textContent = totals?.roas != null ? ('ROAS ' + totals.roas.toFixed(2) + '×') : '';
+  }
+
+  function renderSaleKPIs(totals) {
+    // Hergebruik de bestaande KPI-cards maar met andere velden.
+    $('kpiSpend').textContent = fmtEur(totals?.revenue, 2);
+    document.querySelector('#kpiStrip .kpi-card:nth-child(1) .kpi-label').textContent = 'Omzet';
+    $('kpiLeads').textContent = fmtInt(totals?.sales);
+    document.querySelector('#kpiStrip .kpi-card:nth-child(2) .kpi-label').textContent = 'Sales';
+    // ROAS-card
+    const roas = totals?.roas;
+    const cel3 = document.querySelector('#kpiStrip .kpi-card:nth-child(3) .kpi-value');
+    cel3.textContent = roas == null ? '—' : (roas.toFixed(2) + '×');
+    cel3.className = 'kpi-value ' + roasClass(roas);
+    document.querySelector('#kpiStrip .kpi-card:nth-child(3) .kpi-label').textContent = 'ROAS';
+    // Cost per customer
+    $('kpiCtr').textContent = fmtEur(totals?.cost_per_customer, 2);
+    document.querySelector('#kpiStrip .kpi-card:nth-child(4) .kpi-label').textContent = 'Kosten per klant';
+    // Subs
+    $('kpiSpendSub').textContent = totals?.spend > 0 ? ('spend ' + fmtEur(totals.spend, 0)) : '';
+    $('kpiLeadsSub').textContent = totals?.leads > 0 ? (fmtInt(totals.leads) + ' leads') : '';
+    $('kpiCplSub').textContent   = '';
+    $('kpiCtrSub').textContent   = totals?.customers > 0 ? (fmtInt(totals.customers) + ' klanten') : '';
+  }
+
+  function restoreMetaKPILabels() {
+    document.querySelector('#kpiStrip .kpi-card:nth-child(1) .kpi-label').textContent = 'Uitgegeven';
+    document.querySelector('#kpiStrip .kpi-card:nth-child(2) .kpi-label').textContent = 'Leads';
+    document.querySelector('#kpiStrip .kpi-card:nth-child(3) .kpi-label').textContent = 'Kosten per lead';
+    document.querySelector('#kpiStrip .kpi-card:nth-child(4) .kpi-label').textContent = 'CTR';
+    // Reset kpiValue class (zonder roas-klasse).
+    document.querySelector('#kpiStrip .kpi-card:nth-child(3) .kpi-value').className = 'kpi-value';
+  }
+
+  function renderSaleTable(data) {
+    const c = $('tableContainer');
+    $('tableHeader').textContent = 'Campagnes — attributie × spend × sales';
+    const rows   = data.perCampaign || [];
+    const unattr = data.unattributed || null;
+
+    if (!rows.length && (!unattr || (unattr.leads + unattr.sales === 0))) {
+      const isEmptyDB = !data.data_available;
+      c.innerHTML = '<div class="empty-state">' +
+        '<div class="es-icon"><i class="ti ' + (isEmptyDB ? 'ti-cloud-off' : 'ti-inbox') + '"></i></div>' +
+        '<div class="es-title">' + (isEmptyDB
+          ? 'Nog geen attributie-data — leads binnen deze periode zijn nog niet aan campagnes gekoppeld.'
+          : 'Geen sales binnen deze periode.') + '</div>' +
+        '<div class="es-sub">Controleer of leads met utm_content of utm_campaign binnenkwamen; anders zie je ze in de niet-toegewezen-bak.</div>' +
+      '</div>';
+      return;
+    }
+
+    let html = '<table class="ads-table"><thead><tr>' +
+      '<th>Campagne</th>' +
+      '<th class="n">Spend</th>' +
+      '<th class="n">Leads</th>' +
+      '<th class="n">Afspr.</th>' +
+      '<th class="n">Sales</th>' +
+      '<th class="n">€ / klant</th>' +
+      '<th class="n">ROAS</th>' +
+      '<th class="n">Omzet</th>' +
+      '</tr></thead><tbody>';
+    for (const r of rows) {
+      const cls = roasClass(r.roas);
+      html += '<tr>' +
+        '<td><div class="ads-name">' + escHtml(r.name || r.campaign_meta_id || '(zonder naam)') + ' ' + statusPill(r.effective_status) + '</div></td>' +
+        '<td class="n">' + fmtEur(r.spend, 2) + '</td>' +
+        '<td class="n">' + fmtInt(r.leads) + '</td>' +
+        '<td class="n">' + fmtInt(r.appointments) + '</td>' +
+        '<td class="n">' + fmtInt(r.sales) + '</td>' +
+        '<td class="n">' + fmtEur(r.cost_per_customer, 2) + '</td>' +
+        '<td class="n ' + cls + '">' + (r.roas == null ? '—' : (r.roas.toFixed(2) + '×')) + '</td>' +
+        '<td class="n">' + fmtEur(r.revenue, 2) + '</td>' +
+      '</tr>';
+    }
+    // Niet-toegewezen-rij.
+    if (unattr && (unattr.leads + unattr.sales + unattr.revenue > 0)) {
+      html += '<tr class="unattr-row">' +
+        '<td><div class="ads-name"><i class="ti ti-question-mark"></i> Niet-toegewezen</div></td>' +
+        '<td class="n">—</td>' +
+        '<td class="n">' + fmtInt(unattr.leads) + '</td>' +
+        '<td class="n">' + fmtInt(unattr.appointments) + '</td>' +
+        '<td class="n">' + fmtInt(unattr.sales) + '</td>' +
+        '<td class="n">—</td>' +
+        '<td class="n">—</td>' +
+        '<td class="n">' + fmtEur(unattr.revenue, 2) + '</td>' +
+      '</tr>';
+    }
+    html += '</tbody></table>';
+    c.innerHTML = html;
+  }
+
   // ── Data-load ─────────────────────────────────────────────────────────
   async function load() {
     if (state.loading) return;
     state.loading = true;
     $('statusLine').textContent = 'Laden…';
-    // Update range chips.
     document.querySelectorAll('.range-chip').forEach((el) => {
       el.classList.toggle('active', el.getAttribute('data-range') === state.range);
     });
+    document.querySelectorAll('.mode-toggle button').forEach((el) => {
+      el.classList.toggle('active', el.getAttribute('data-mode') === state.mode);
+      el.setAttribute('aria-selected', el.getAttribute('data-mode') === state.mode ? 'true' : 'false');
+    });
 
-    const params = new URLSearchParams({ range: state.range, level: state.level });
-    if (state.parentMetaId) params.set('parent_meta_id', state.parentMetaId);
+    // Sale-mode: forceer campaign-niveau (geen drill in v1) + verberg trend.
+    if (state.mode === 'sale') {
+      state.level = 'campaign';
+      state.parentMetaId = null; state.parentName = null; state.grandparentName = null;
+      $('roasFunnel').hidden = false;
+      // Trend-card + breadcrumb verbergen — niet relevant voor sale-view.
+      document.querySelectorAll('.card').forEach((c, i) => {
+        // 1e card = trend, 2e = tabel, 3e = alerts. Verberg alleen de 1e.
+        if (i === 0) c.style.display = 'none';
+      });
+      $('breadcrumb').hidden = true;
+    } else {
+      $('roasFunnel').hidden = true;
+      document.querySelectorAll('.card').forEach((c, i) => { if (i === 0) c.style.display = ''; });
+      restoreMetaKPILabels();
+    }
+
+    const endpoint = state.mode === 'sale' ? '/api/meta-ads-roas' : '/api/meta-ads-insights';
+    const params = new URLSearchParams({ range: state.range });
+    if (state.mode === 'meta') {
+      params.set('level', state.level);
+      if (state.parentMetaId) params.set('parent_meta_id', state.parentMetaId);
+    }
 
     try {
-      const r = await window.AgentShared.apiFetch('/api/meta-ads-insights?' + params.toString());
+      const r = await window.AgentShared.apiFetch(endpoint + '?' + params.toString());
       if (r.status === 403) {
         $('tableContainer').innerHTML = '<div class="empty-state"><div class="es-icon"><i class="ti ti-lock"></i></div><div class="es-title">Geen toegang tot deze module.</div><div class="es-sub">Vraag een admin om ads.module.access voor jouw rol in te schakelen.</div></div>';
         renderKPIs({}); renderTrend([], '');
@@ -476,14 +671,24 @@
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const d = await r.json();
       state.last = d;
-      renderKPIs(d.totals || {});
       const rangeLabel = (d.range?.from && d.range?.to) ? (d.range.from + ' → ' + d.range.to) : '';
-      renderTrend(d.trend || [], rangeLabel);
-      renderBreadcrumb();
-      renderTable(d);
-      $('statusLine').textContent = d.data_available
-        ? ('Data van ' + rangeLabel + '. Automatisch ververst elke 30 min.')
-        : 'Geen data beschikbaar. Sync draait elke 30 min zodra de token is ingesteld.';
+
+      if (state.mode === 'sale') {
+        renderFunnel(d.totals || {});
+        renderSaleKPIs(d.totals || {});
+        renderSaleTable(d);
+        $('statusLine').textContent = d.data_available
+          ? ('Attributie-data van ' + rangeLabel + ' (leads first-seen). Ververst met de sync.')
+          : 'Nog geen attributie-data in deze periode.';
+      } else {
+        renderKPIs(d.totals || {});
+        renderTrend(d.trend || [], rangeLabel);
+        renderBreadcrumb();
+        renderTable(d);
+        $('statusLine').textContent = d.data_available
+          ? ('Data van ' + rangeLabel + '. Automatisch ververst elke 30 min.')
+          : 'Geen data beschikbaar. Sync draait elke 30 min zodra de token is ingesteld.';
+      }
     } catch (e) {
       $('tableContainer').innerHTML = '<div class="empty-state"><div class="es-icon"><i class="ti ti-alert-triangle" style="color:#b91c1c"></i></div><div class="es-title">Laden mislukt: ' + escHtml(e.message || 'onbekend') + '</div><div class="es-sub">Check Vercel-logs voor details.</div></div>';
       $('statusLine').textContent = '';
@@ -496,6 +701,16 @@
   document.querySelectorAll('.range-chip').forEach((el) => {
     el.addEventListener('click', () => {
       state.range = el.getAttribute('data-range');
+      load();
+    });
+  });
+
+  document.querySelectorAll('.mode-toggle button').forEach((el) => {
+    el.addEventListener('click', () => {
+      const nm = el.getAttribute('data-mode');
+      if (nm !== 'meta' && nm !== 'sale') return;
+      if (state.mode === nm) return;
+      state.mode = nm;
       load();
     });
   });
