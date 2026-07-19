@@ -59,6 +59,8 @@
     // Mentor-onboarding (Fase B) — eigen self-scoped instroom-pagina,
     // symmetrisch met de admin-hub. Icoon: user-plus (nieuwe instroom).
     'mentor-onboarding': '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/>',
+    // lucide "book-open" — externe LMS-omgeving voor mentor-rol (opent in nieuw tabblad).
+    'lms': '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',
     // lucide "users-shield" — admin per-mentor meekijken; eenvoudige user+shield.
     'mentor-detail': '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 16l3 1.5V21l-3 1.5-3-1.5v-3.5z"/>',
     // lucide "receipt" — payout-rapport admin (finance/strateeg).
@@ -142,6 +144,10 @@
           // Studenten-pagina (Fase A2) — aparte hub voor de mentor met Mijn studenten,
           // Toekomstige studenten, en 1-op-1 sessies. Page-gate: mentor.module.access.
           navLink('mentor-students', '/modules/mentor-students.html', 'Studenten') +
+          // Externe LMS-omgeving voor de mentor-rol (prototype). Opent in nieuw
+          // tabblad; gated identiek aan de andere mentor-items via
+          // mentor.module.access in MODULE_FEATURE_MAP.
+          navLink('lms', 'https://dfo-lms-prototype.vercel.app/mentor', 'LMS', ' target="_blank" rel="noopener"') +
           // Mentor-onboarding (Fase B) — eigen self-scoped instroom-lijst.
           // Mijn studenten = actieve set; Onboarding = pijplijn-vorm (intake +
           // tijdlijn + acties). Page-gate identiek aan mentor-students.
@@ -641,6 +647,8 @@
     'mentor-students': 'mentor.module.access',
     // Fase B — Mentor-onboarding-pagina; zelfde page-gate als mentor-students.
     'mentor-onboarding': 'mentor.module.access',
+    // Externe LMS-link — zelfde gating als andere mentor-nav-items.
+    'lms': 'mentor.module.access',
     // Mentor-detail PR-4 — admin per-mentor meekijken. Manager+ rollen krijgen
     // mentor.admin.view via de role_permissions grant; mentors zelf niet.
     'mentor-detail': 'mentor.admin.view',
