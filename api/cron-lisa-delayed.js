@@ -23,8 +23,29 @@ dayjs.extend(timezone);
 
 const BATCH_LIMIT = 20;
 
+// Instagram-venster: Meta accepteert berichten aan een volger alleen binnen
+// 24u na hun LAATSTE INKOMENDE bericht. Lisa's uitgaande berichten resetten
+// dat venster niet. Buiten venster → CONVERSATIONS_MSG_CHAT_NO_LONGER_ACTIVE.
+// Marge onder 24u om scheduling/processing-drift te absorberen.
+const INSTAGRAM_MESSAGING_WINDOW_HOURS = 23;
+
 async function cancelFollowup(id, reason) {
   await supabaseAdmin.from('lisa_followups').update({ status: 'cancelled', cancelled_reason: String(reason).slice(0, 300) }).eq('id', id);
+}
+
+// Uren sinds het laatste INKOMENDE bericht van de volger. Return null bij
+// (a) DB-fout — caller logt, valt terug op bestaand gedrag; (b) nooit inbound
+// gezien in deze conversatie — dan is er geen venster te toetsen.
+async function hoursSinceLastInbound(conversationId) {
+  const { data, error } = await supabaseAdmin.from('lisa_messages')
+    .select('sent_at')
+    .eq('conversation_id', conversationId)
+    .eq('direction', 'in')
+    .order('sent_at', { ascending: false })
+    .limit(1).maybeSingle();
+  if (error) { console.warn('[cron-lisa-delayed] last-inbound lookup:', error.message); return null; }
+  if (!data?.sent_at) return null;
+  return (Date.now() - new Date(data.sent_at).getTime()) / 3_600_000;
 }
 
 export default async function handler(req, res) {
@@ -102,6 +123,16 @@ export default async function handler(req, res) {
       // ── Delayed response ────────────────────────────────────────────────────
       if (fu.is_delayed_response) {
         if (!fu.pre_generated_response) { await cancelFollowup(fu.id, 'missing_response'); delayedResolved++; results.push({ id: fu.id, status: 'cancelled', reason: 'missing_response' }); continue; }
+        // Instagram-venster: als de laatste inbound > 23u geleden is, zou Meta
+        // het weigeren (CONVERSATIONS_MSG_CHAT_NO_LONGER_ACTIVE). Bewust
+        // overslaan i.p.v. failen — houdt error-logs schoon.
+        const hrsD = await hoursSinceLastInbound(conv.id);
+        if (hrsD != null && hrsD > INSTAGRAM_MESSAGING_WINDOW_HOURS) {
+          await cancelFollowup(fu.id, `skipped_window_closed:${hrsD.toFixed(1)}h`);
+          delayedResolved++;
+          results.push({ id: fu.id, status: 'cancelled', reason: 'window_closed', hours_since_inbound: Number(hrsD.toFixed(1)) });
+          continue;
+        }
         const sr = await sendToGhl(conv.ghl_contact_id, fu.pre_generated_response, { conversationId: conv.ghl_conversation_id, locationId: conv.ghl_location_id });
         if (sr.ok) {
           await supabaseAdmin.from('lisa_messages').insert({
@@ -166,6 +197,16 @@ export default async function handler(req, res) {
 
       // Guard C: condities her-evalueren tegen huidige fase.
       if (!evaluateConditions(fu.conditions_snapshot, conv)) { await cancelFollowup(fu.id, 'conditions_not_met'); results.push({ id: fu.id, status: 'cancelled', reason: 'conditions_not_met' }); continue; }
+
+      // Guard D: Instagram 24u-venster. Regular follow-ups plannen 1-720u
+      // delay; buiten venster weigert Meta. Skip zonder retry — bewuste
+      // cancel, geen error (houdt logs schoon).
+      const hrsR = await hoursSinceLastInbound(conv.id);
+      if (hrsR != null && hrsR > INSTAGRAM_MESSAGING_WINDOW_HOURS) {
+        await cancelFollowup(fu.id, `skipped_window_closed:${hrsR.toFixed(1)}h`);
+        results.push({ id: fu.id, status: 'cancelled', reason: 'window_closed', hours_since_inbound: Number(hrsR.toFixed(1)) });
+        continue;
+      }
 
       // Router: AI of letterlijk.
       let content = fu.template_at_schedule || '';
