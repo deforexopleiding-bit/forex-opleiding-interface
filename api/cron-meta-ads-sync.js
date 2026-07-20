@@ -129,26 +129,31 @@ async function touchSyncState(key, summary) {
   }
 }
 
-export default async function handler(req, res) {
-  res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('Content-Type', 'application/json');
-
-  const auth = checkCronAuth(req);
-  if (!auth.ok) return res.status(auth.status).json(auth.body);
-
-  // Env-gate: no-op als Meta Ads niet geconfigureerd is. Log + 200 zodat
-  // Vercel-cron niet als 'failing' rood kleurt.
+/**
+ * Sync-orkestratie als geëxporteerde functie zodat zowel de cron-handler
+ * (Bearer CRON_SECRET) als het RBAC-endpoint (api/meta-ads-sync-run-now.js)
+ * dezelfde logica hergebruiken. Return-shape identiek aan het oude handler-
+ * gedrag zodat callers 1-op-1 kunnen wrappen naar HTTP.
+ *
+ * Return-shape:
+ *   { ok: true, summary }                              — normaal
+ *   { ok: true, skipped: 'not_configured', missing }   — env-gate
+ *
+ * Gooit NIET; fouten per level landen in summary.errors[] (best-effort).
+ */
+export async function runAdsSync() {
   const status = getMetaAdsConfigStatus();
   if (!status.configured) {
     console.log('[cron-meta-ads-sync] SKIP: niet geconfigureerd, missing=', status.missing);
-    return res.status(200).json({ ok: true, skipped: 'not_configured', missing: status.missing });
+    return { ok: true, skipped: 'not_configured', missing: status.missing };
   }
 
   const cfg = getMetaAdsConfig();
   const accountId = cfg.accountId;
   const timeRange = computeTimeRange(cfg.lookbackDays);
+  const startedMs = Date.now();
   const summary = {
-    started_at: new Date().toISOString(),
+    started_at: new Date(startedMs).toISOString(),
     time_range: timeRange,
     lookback_days: cfg.lookbackDays,
     entities:   {},
@@ -178,7 +183,19 @@ export default async function handler(req, res) {
   }
 
   summary.finished_at = new Date().toISOString();
+  summary.duration_ms = Date.now() - startedMs;
   await touchSyncState('meta_ads_sync', summary);
 
-  return res.status(200).json({ ok: true, summary });
+  return { ok: true, summary };
+}
+
+export default async function handler(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Type', 'application/json');
+
+  const auth = checkCronAuth(req);
+  if (!auth.ok) return res.status(auth.status).json(auth.body);
+
+  const result = await runAdsSync();
+  return res.status(200).json(result);
 }
