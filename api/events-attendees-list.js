@@ -150,16 +150,20 @@ export default async function handler(req, res) {
       (rows || []).map((r) => r.switched_to_event_id).filter(Boolean)
     ));
     const targetTitleById = new Map();
+    const targetDateById  = new Map();
     if (targetEventIds.length > 0) {
       try {
         const { data: tRows, error: tErr } = await supabaseAdmin
           .from('events')
-          .select('id, title')
+          .select('id, title, starts_at')
           .in('id', targetEventIds);
         if (tErr) {
           console.error('[attendees-list target-titles]', tErr.message);
         } else {
-          for (const t of tRows || []) targetTitleById.set(t.id, t.title || null);
+          for (const t of tRows || []) {
+            targetTitleById.set(t.id, t.title || null);
+            targetDateById.set(t.id, t.starts_at || null);
+          }
         }
       } catch (e) {
         console.error('[attendees-list target-titles-catch]', e?.message || e);
@@ -483,6 +487,11 @@ export default async function handler(req, res) {
         // voor legacy-rijen zonder switched_to_event_id.
         switched_to_event_title: r.switched_to_event_id
           ? (targetTitleById.get(r.switched_to_event_id) || null)
+          : null,
+        // Bestemmings-datum (starts_at) zodat de UI "→ titel · datum" kan
+        // tonen — nuttig sinds alle events dezelfde titel dragen.
+        switched_to_event_date: r.switched_to_event_id
+          ? (targetDateById.get(r.switched_to_event_id) || null)
           : null,
       };
     });

@@ -903,10 +903,23 @@ function renderAttendeesTab() {
           statusCell = `<span class="tag-chip">${esc(ATT_STATUS_LABELS[a.status] || a.status)}</span>`;
         }
         // Verplaatst-bestemming (sinds migratie 026 + list-endpoint update):
-        // toon "→ [naam doel-event]" onder de status. Legacy verplaatsingen
-        // zonder switched_to_event_title: alleen 'Verplaatst' zoals nu.
+        // toon "→ [naam doel-event] · [datum]" onder de status. Sinds alle
+        // events "Forex Masterclass event Gent" heten is de titel alleen niet
+        // meer onderscheidend — de datum maakt zichtbaar naar wélk event.
+        // Legacy verplaatsingen zonder title/date vallen terug op titel-only
+        // of alleen 'Verplaatst' (bovenstaande tak).
         if (a.status === 'switched_to_other_event' && a.switched_to_event_title) {
-          statusCell += `<div style="margin-top:3px;font-size:11px;color:var(--text-dim);line-height:1.3" title="Verplaatst naar: ${esc(a.switched_to_event_title)}">→ ${esc(a.switched_to_event_title)}</div>`;
+          const _dt = (() => {
+            try {
+              const d = a.switched_to_event_date ? new Date(a.switched_to_event_date) : null;
+              return (d && Number.isFinite(d.getTime()))
+                ? d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' })
+                : '';
+            } catch (_) { return ''; }
+          })();
+          const _label   = _dt ? `${a.switched_to_event_title} · ${_dt}` : a.switched_to_event_title;
+          const _tooltip = _dt ? `Verplaatst naar: ${a.switched_to_event_title} · ${_dt}` : `Verplaatst naar: ${a.switched_to_event_title}`;
+          statusCell += `<div style="margin-top:3px;font-size:11px;color:var(--text-dim);line-height:1.3" title="${esc(_tooltip)}">→ ${esc(_label)}</div>`;
         }
 
         // Fase 1: telt-mee-laag bovenop de status — assessment_response_id
