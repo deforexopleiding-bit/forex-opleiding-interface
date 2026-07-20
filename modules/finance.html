@@ -2983,6 +2983,7 @@
       <button                data-wb-sub="open-acties" type="button" title="Acties">Acties<span class="wbx-badge" id="wbxNavActiesBadge" hidden>0</span></button>
       <button                data-wb-sub="inbox"       type="button" title="Gesprekken">Gesprekken</button>
       <button                data-wb-sub="facturen"    type="button" title="Facturen">Facturen</button>
+      <button                data-wb-sub="opruimen"    type="button" title="Opruimen">Opruimen</button>
       <div class="wbx-nav-spacer"></div>
       <!-- Verversen: alleen zichtbaar op de Te doen-sub (getoggled door
            setSubView). Geen data-wb-sub attribuut → sub-nav-handler pikt 'm
@@ -17012,72 +17013,97 @@
         <h1>Opruimen</h1>
         <p>De eenmalige opruiming van de achterstand. Klanten met meerdere open facturen krijg je hier weg via crediteren of incasso — allebei met preview en dry-run.</p>
       </div>
-      <div class="wbx-cleanup-note">💡 Klanten met ≥2 open facturen horen bij de opruimactie. Crediteren houdt de restschuld in beeld; incasso maakt een dossier aan (met WIK-brief indien nodig).</div>
-      <div class="wbx-cleanup-grid">
-        <div class="wbx-cleanup-card">
-          <h2>Crediteren</h2>
-          <p>Volledige per-rij editor met abo-keuze — dry-run / live schakelaar, restschuld-vastlegging.</p>
-          <button type="button" class="wbx-btn wbx-primary" data-opruim-go="crediteren">Open crediteer-overzicht →</button>
+
+      <!-- Subtab-balk (segmented control, zelfde patroon als #invStatusSeg). -->
+      <div class="sr-segments" id="opruimSubTabs" style="margin-bottom:14px">
+        <button type="button" class="sr-seg active" data-opruim-tab="opruim">Opruimen</button>
+        <button type="button" class="sr-seg"        data-opruim-tab="runs">Lopende aanmaningen</button>
+      </div>
+
+      <!-- Subtab 1: Opruimen (bestaande inhoud). -->
+      <div id="opruimSubOpruim">
+        <div class="wbx-cleanup-note">💡 Klanten met ≥2 open facturen horen bij de opruimactie. Crediteren houdt de restschuld in beeld; incasso maakt een dossier aan (met WIK-brief indien nodig).</div>
+        <div class="wbx-cleanup-grid">
+          <div class="wbx-cleanup-card">
+            <h2>Crediteren</h2>
+            <p>Volledige per-rij editor met abo-keuze — dry-run / live schakelaar, restschuld-vastlegging.</p>
+            <button type="button" class="wbx-btn wbx-primary" data-opruim-go="crediteren">Open crediteer-overzicht →</button>
+          </div>
+          <div class="wbx-cleanup-card">
+            <h2>Incasso</h2>
+            <p>Alle dossiers, auto-route, PDF, e-mail naar bureau, WIK/BE-brief, bureau-beheer.</p>
+            <button type="button" class="wbx-btn wbx-primary" data-opruim-go="incasso">Open incasso-dossiers →</button>
+          </div>
         </div>
-        <div class="wbx-cleanup-card">
-          <h2>Incasso</h2>
-          <p>Alle dossiers, auto-route, PDF, e-mail naar bureau, WIK/BE-brief, bureau-beheer.</p>
-          <button type="button" class="wbx-btn wbx-primary" data-opruim-go="incasso">Open incasso-dossiers →</button>
+
+        <!-- Bulk multi-select — klanten met ≥2 open facturen. Zelfde
+             preview→confirm→execute flow als op Facturen (Per klant); de
+             sticky bulk-bar verschijnt onderaan zodra >=1 selectie. -->
+        <div class="wbx-cleanup-list">
+          <div class="wbx-cleanup-list-head">
+            <h2>Klanten met achterstand</h2>
+            <span class="wbx-c" id="opruimListCount"></span>
+            <div class="wbx-flex1"></div>
+            <button class="wbx-btn wbx-sm" type="button" id="opruimEngineRunBtn"
+                    title="Verstuurt aanmaningen voor klanten die vandaag aan de beurt zijn (workflow-engine, idempotent).">
+              Engine nu draaien
+            </button>
+            <button class="wbx-btn wbx-sm" type="button" id="opruimReloadBtn">Herlaad</button>
+          </div>
+          <div id="opruimListBody"></div>
         </div>
       </div>
 
-      <!-- Read-only statuspaneel — lopende dunning-runs + recente sends.
+      <!-- Subtab 2: Lopende aanmaningen (read-only overzicht). VERPLAATST
+           uit de opruim-lijst: KPI's + actieve runs + recent verzonden.
            Data via /api/finance-dunning-overview + /api/finance-dunning-history
-           (beide RBAC finance.dunning.view). Ververst óók na 'Engine nu
-           draaien'. Geen writes. -->
-      <div class="wbx-cleanup-list" id="opruimRunsCard">
-        <div class="wbx-cleanup-list-head">
-          <h2>Lopende aanmaningen</h2>
-          <span class="wbx-c" id="opruimRunsCount"></span>
-          <div class="wbx-flex1"></div>
-          <button class="wbx-btn wbx-sm" type="button" id="opruimRunsReloadBtn">Ververs</button>
-        </div>
-        <div class="wbx-runs-kpis" id="opruimRunsKpis" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:8px 12px 0">
-          <div class="wbx-runs-kpi" style="background:var(--wbx-card,#fff);border:1px solid var(--wbx-line,#e5e7eb);border-radius:8px;padding:10px 12px">
-            <div style="font-size:11px;color:var(--wbx-faint,#6b7280);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Actieve runs</div>
-            <div id="opruimKpiActive" style="font-size:20px;font-weight:700;color:var(--wbx-text,#0f172a);font-variant-numeric:tabular-nums;margin-top:2px">—</div>
+           (beide RBAC finance.dunning.view). Lazy laden bij eerste opening;
+           ververst óók na 'Engine nu draaien' (via stale-flag). -->
+      <div id="opruimSubRuns" hidden>
+        <div class="wbx-cleanup-list" id="opruimRunsCard">
+          <div class="wbx-cleanup-list-head">
+            <h2>Lopende aanmaningen</h2>
+            <span class="wbx-c" id="opruimRunsCount"></span>
+            <div class="wbx-flex1"></div>
+            <button class="wbx-btn wbx-sm" type="button" id="opruimRunsReloadBtn">Ververs</button>
           </div>
-          <div class="wbx-runs-kpi" style="background:var(--wbx-card,#fff);border:1px solid var(--wbx-line,#e5e7eb);border-radius:8px;padding:10px 12px">
-            <div style="font-size:11px;color:var(--wbx-faint,#6b7280);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Totaal openstaand</div>
-            <div id="opruimKpiOpen" style="font-size:20px;font-weight:700;color:var(--wbx-text,#0f172a);font-variant-numeric:tabular-nums;margin-top:2px">—</div>
+          <div class="wbx-runs-kpis" id="opruimRunsKpis" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:8px 12px 0">
+            <div class="wbx-runs-kpi" style="background:var(--wbx-card,#fff);border:1px solid var(--wbx-line,#e5e7eb);border-radius:8px;padding:10px 12px">
+              <div style="font-size:11px;color:var(--wbx-faint,#6b7280);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Actieve runs</div>
+              <div id="opruimKpiActive" style="font-size:20px;font-weight:700;color:var(--wbx-text,#0f172a);font-variant-numeric:tabular-nums;margin-top:2px">—</div>
+            </div>
+            <div class="wbx-runs-kpi" style="background:var(--wbx-card,#fff);border:1px solid var(--wbx-line,#e5e7eb);border-radius:8px;padding:10px 12px">
+              <div style="font-size:11px;color:var(--wbx-faint,#6b7280);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Totaal openstaand</div>
+              <div id="opruimKpiOpen" style="font-size:20px;font-weight:700;color:var(--wbx-text,#0f172a);font-variant-numeric:tabular-nums;margin-top:2px">—</div>
+            </div>
+            <div class="wbx-runs-kpi" style="background:var(--wbx-card,#fff);border:1px solid var(--wbx-line,#e5e7eb);border-radius:8px;padding:10px 12px">
+              <div style="font-size:11px;color:var(--wbx-faint,#6b7280);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Afgerond (30d)</div>
+              <div id="opruimKpiCompl30" style="font-size:20px;font-weight:700;color:var(--wbx-text,#0f172a);font-variant-numeric:tabular-nums;margin-top:2px">—</div>
+            </div>
           </div>
-          <div class="wbx-runs-kpi" style="background:var(--wbx-card,#fff);border:1px solid var(--wbx-line,#e5e7eb);border-radius:8px;padding:10px 12px">
-            <div style="font-size:11px;color:var(--wbx-faint,#6b7280);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Afgerond (30d)</div>
-            <div id="opruimKpiCompl30" style="font-size:20px;font-weight:700;color:var(--wbx-text,#0f172a);font-variant-numeric:tabular-nums;margin-top:2px">—</div>
-          </div>
+          <div id="opruimRunsBody" style="margin:12px"></div>
+          <div style="margin:14px 12px 4px;font-weight:700;font-size:12.5px;color:var(--wbx-text,#0f172a)">Recent verzonden</div>
+          <div id="opruimRunsRecent" style="margin:0 12px 12px"></div>
         </div>
-        <div id="opruimRunsBody" style="margin:12px"></div>
-        <div style="margin:14px 12px 4px;font-weight:700;font-size:12.5px;color:var(--wbx-text,#0f172a)">Recent verzonden</div>
-        <div id="opruimRunsRecent" style="margin:0 12px 12px"></div>
-      </div>
-
-      <!-- Bulk multi-select — klanten met ≥2 open facturen. Zelfde
-           preview→confirm→execute flow als op Facturen (Per klant); de
-           sticky bulk-bar verschijnt onderaan zodra >=1 selectie. -->
-      <div class="wbx-cleanup-list">
-        <div class="wbx-cleanup-list-head">
-          <h2>Klanten met achterstand</h2>
-          <span class="wbx-c" id="opruimListCount"></span>
-          <div class="wbx-flex1"></div>
-          <button class="wbx-btn wbx-sm" type="button" id="opruimEngineRunBtn"
-                  title="Verstuurt aanmaningen voor klanten die vandaag aan de beurt zijn (workflow-engine, idempotent).">
-            Engine nu draaien
-          </button>
-          <button class="wbx-btn wbx-sm" type="button" id="opruimReloadBtn">Herlaad</button>
-        </div>
-        <div id="opruimListBody"></div>
       </div>
     `;
     host.querySelectorAll('[data-opruim-go]').forEach((btn) => {
       btn.addEventListener('click', () => setSubView(btn.getAttribute('data-opruim-go')));
     });
     host.querySelector('#opruimReloadBtn')?.addEventListener('click', () => _opruimLoadList());
-    host.querySelector('#opruimRunsReloadBtn')?.addEventListener('click', () => _opruimLoadRuns());
+    host.querySelector('#opruimRunsReloadBtn')?.addEventListener('click', () => {
+      // Manuele reload: subtab is al 'runs' (knop staat in dat paneel).
+      // Direct fetchen + stale-flag terugzetten zodat een volgende opening
+      // niet nog eens laadt.
+      _opruimRunsStale = false;
+      _opruimLoadRuns();
+    });
+
+    // Subtab-switch (segmented control) — lazy fetch voor 'runs' bij eerste
+    // opening OF na een engine-run (stale-flag). Geen dubbele fetches.
+    host.querySelectorAll('#opruimSubTabs [data-opruim-tab]').forEach((btn) => {
+      btn.addEventListener('click', () => _opruimShowSubtab(btn.getAttribute('data-opruim-tab')));
+    });
 
     // "Engine nu draaien" — handmatige trigger van de dunning-engine (zelfde
     // effect als de dagelijkse cron). Endpoint: POST
@@ -17108,9 +17134,13 @@
         // Ververs de opruimen-lijst zodat fase-wijzigingen meteen zichtbaar
         // worden (bv. klant net ingeschreven verdwijnt uit "achterstand").
         _opruimLoadList();
-        // Ook het lopende-aanmaningen-paneel: nieuwe runs / doorgeschoven
-        // stappen / recent verzonden events moeten meteen kloppen.
-        _opruimLoadRuns();
+        // Runs-paneel staat nu in een aparte subtab. Markeer stale zodat 'ie
+        // bij openen (of direct als 'ie al zichtbaar is) opnieuw laadt.
+        _opruimRunsStale = true;
+        if (_opruimActiveTab === 'runs') {
+          _opruimRunsStale = false;
+          _opruimLoadRuns();
+        }
       } catch (e) {
         window.AgentShared?.showToast?.('Engine mislukt: ' + (e?.message || 'onbekend'), 'error');
       } finally {
@@ -17120,7 +17150,33 @@
     });
 
     _opruimLoadList();
-    _opruimLoadRuns();
+    // Runs-paneel is lazy — laadt pas als de user op de subtab klikt (of
+    // via de engine-success stale-flag).
+  }
+
+  // Subtab-state (per mount reset via mountOpruimenHost). 'runs' start stale
+  // zodat de eerste opening triggeer een fetch; daarna false tot een engine-
+  // run 'em weer stale maakt.
+  let _opruimActiveTab = 'opruim';
+  let _opruimRunsStale = true;
+
+  function _opruimShowSubtab(name) {
+    const tab = (name === 'runs') ? 'runs' : 'opruim';
+    _opruimActiveTab = tab;
+    // Toggle segmented control active-state.
+    document.querySelectorAll('#opruimSubTabs [data-opruim-tab]').forEach((btn) => {
+      btn.classList.toggle('active', btn.getAttribute('data-opruim-tab') === tab);
+    });
+    // Toggle panelen.
+    const pOp = document.getElementById('opruimSubOpruim');
+    const pRn = document.getElementById('opruimSubRuns');
+    if (pOp) pOp.hidden = (tab !== 'opruim');
+    if (pRn) pRn.hidden = (tab !== 'runs');
+    // Lazy fetch voor 'runs' — alleen bij eerste opening of stale (engine-run).
+    if (tab === 'runs' && _opruimRunsStale) {
+      _opruimRunsStale = false;
+      _opruimLoadRuns();
+    }
   }
 
   // ── Lopende aanmaningen (read-only paneel) ──────────────────────────────
