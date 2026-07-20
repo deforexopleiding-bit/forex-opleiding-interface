@@ -17034,6 +17034,10 @@
           <h2>Klanten met achterstand</h2>
           <span class="wbx-c" id="opruimListCount"></span>
           <div class="wbx-flex1"></div>
+          <button class="wbx-btn wbx-sm" type="button" id="opruimEngineRunBtn"
+                  title="Verstuurt aanmaningen voor klanten die vandaag aan de beurt zijn (workflow-engine, idempotent).">
+            Engine nu draaien
+          </button>
           <button class="wbx-btn wbx-sm" type="button" id="opruimReloadBtn">Herlaad</button>
         </div>
         <div id="opruimListBody"></div>
@@ -17043,6 +17047,44 @@
       btn.addEventListener('click', () => setSubView(btn.getAttribute('data-opruim-go')));
     });
     host.querySelector('#opruimReloadBtn')?.addEventListener('click', () => _opruimLoadList());
+
+    // "Engine nu draaien" — handmatige trigger van de dunning-engine (zelfde
+    // effect als de dagelijkse cron). Endpoint: POST
+    // /api/finance-dunning-engine-run-now (RBAC finance.dunning.execute,
+    // Bearer-JWT — CRON_SECRET nooit naar de client). Engine is idempotent:
+    // dubbel-klik of dubbele runs versturen niet dubbel (next_action_at wordt
+    // doorgeschoven; detectAndStartRuns skipt already_active_run). UI-side
+    // extra laag: knop disabled tijdens de fetch.
+    host.querySelector('#opruimEngineRunBtn')?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      if (btn.disabled) return;
+      const origLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Bezig…';
+      try {
+        const r = await window.AgentShared.apiFetch('/api/finance-dunning-engine-run-now', { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        if (r.status === 403) {
+          window.AgentShared?.showToast?.('Geen rechten (finance.dunning.execute).', 'error');
+          return;
+        }
+        if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+        const errs = Array.isArray(d.errors) ? d.errors.length : 0;
+        const msg = `Engine klaar: ${Number(d.detected || 0)} nieuwe run(s), ${Number(d.runs_advanced || 0)} doorgeschoven`
+                  + (errs ? ` — ${errs} fout(en)` : '')
+                  + ` · ${Number(d.duration_ms || 0)}ms`;
+        window.AgentShared?.showToast?.(msg, errs ? 'error' : 'success');
+        // Ververs de opruimen-lijst zodat fase-wijzigingen meteen zichtbaar
+        // worden (bv. klant net ingeschreven verdwijnt uit "achterstand").
+        _opruimLoadList();
+      } catch (e) {
+        window.AgentShared?.showToast?.('Engine mislukt: ' + (e?.message || 'onbekend'), 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = origLabel;
+      }
+    });
+
     _opruimLoadList();
   }
 
