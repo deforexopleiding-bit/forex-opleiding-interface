@@ -17657,82 +17657,184 @@
   }
 
   // ── ACTIE 1: Aanmaning sturen ──────────────────────────────────────
-  // Preview: POST /api/wanbetalers-bulk-preview (draft-job aanmaken).
-  // Execute: POST /api/wanbetalers-bulk-approve (draft → approved; cron
-  // verstuurt in batches van 10 per 3 min). Standaard-kanaal 'whatsapp'
-  // + template null (backend valt terug op eerste approved template).
+  // Schrijft geselecteerde klanten in de dunning-WORKFLOW-ladder in via
+  // POST /api/wanbetalers-bulk-start-workflow. De engine stuurt daarna
+  // step 0 (eerste aanmaning) via de workflow-templates — GEEN losse
+  // eenmalige bulk meer (was: bulk-preview → bulk-approve → cron bulk-send,
+  // kapot: hardcoded channel='whatsapp' zonder template).
+  //
+  // Preview-flow (geen server-side side-effects):
+  //   1. GET workflow-lijst voor de weer te geven workflow-naam.
+  //   2. Per geselecteerde klant: GET /api/finance-invoices?customer_id=X
+  //      → open invoice_ids (filter client-side op OPEN_STATUSES). Pure
+  //      read; geen draft-job in dunning_bulk_jobs.
+  //   3. Toon per klant: naam / openstaand € / #facturen + skip-hints
+  //      (al in incasso, geen open facturen).
+  //   4. Bij bevestigen: POST bulk-start-workflow met alle verzamelde
+  //      invoice_ids in chunks van 100. Endpoint aggregeert per klant.
+  //   5. Toon added/skipped/errors-samenvatting.
+  //
+  // DUBBEL-BERICHT-AFVANG: preview-fetch heeft geen write. Confirm doet
+  // enrollment (dunning_workflow_runs); workflow-engine detecteert
+  // already_active_run bij een tweede trigger. Oude eenmalige-bulk-pad
+  // (bulk-approve) wordt NIET meer aangeroepen — geen dubbel-bericht risico.
+  const OPEN_STATUSES_UI = new Set(['open', 'partially_paid', 'overdue']);
+  const BULK_START_CHUNK = 100; // endpoint MAX_BULK
+
   async function _bulkActionAanmaan() {
     const rows = _bulkSelectedRows();
     if (!rows.length) return;
-    // Client-side heuristiek: skip klanten die al 'incasso' als fase hebben
-    // (de bulk-preview server-side heeft dit gedrag niet ingebouwd; we
-    // waarschuwen). Aangezien de server-side per-recipient status ook uitzet
-    // (channel_email/no_contact), is dit alleen een UI-hint.
     const inIncasso = rows.filter((r) => String(r.stage_slug || '').toLowerCase() === 'incasso');
-    const previewIds = rows.map((r) => r.customer_id);
+
+    // Preview-cache; wordt in de fetch-fase gevuld en door onConfirm gebruikt.
+    let workflowName = 'Actieve dunning-workflow';
+    let invoiceIdsAll = [];
+    const perCustomer = []; // [{customer_id, customer_name, total_open_cents, invoice_ids, will_enroll, skip_reason}]
+
     _bulkOpenActionModal({
-      title       : 'Aanmaning sturen — preview',
-      subtitle    : `${rows.length} geselecteerd. We maken eerst een concept-bulkjob en tonen wie een aanmaning krijgt. Pas na "Bevestigen" wordt de job goedgekeurd; verzenden gebeurt vervolgens in de reguliere cron (batches van 10 per 3 min).`,
-      previewHtml : `<div class="wbx-bulk-loading">Concept-job aanmaken…</div>`,
-      confirmLabel: 'Bevestig & goedkeuren',
+      title       : 'Aanmaning sturen — inschrijven in workflow',
+      subtitle    : `${rows.length} geselecteerd. We schrijven ze in de multi-factuur-dunning-workflow. De engine stuurt daarna step 0 via de workflow-templates — één ladder per klant, geen aparte losse bulk.`,
+      previewHtml : `<div class="wbx-bulk-loading">Voorbereiden…</div>`,
+      confirmLabel: 'Bevestig & inschrijven',
       onConfirm   : async () => {
-        // Guard: preview moet succesvol een job-id hebben opgeleverd. Ontstaat
-        // een gebruiker toch nog kans de knop te klikken (bv. race), dan
-        // faalt confirm netjes met een banner ipv random gedrag.
-        // We calling approve HIER — de preview zelf gebeurt vóór opening, dus
-        // we vervangen previewHtml na fetch. Voor eenvoud: doe alles binnen
-        // onConfirm zou fout zijn — de bedoeling is preview EERST, DAN bevestig.
-        // Gebruiker heeft nu de preview gezien in de modal-body.
-        const jobId = _bulkState.lastJobId;
-        if (!jobId) throw new Error('Geen concept-job (preview eerst); herstart.');
-        await _bulkCall('/api/wanbetalers-bulk-approve', { job_id: jobId });
-        _bulkState.lastJobId = null;
-        return `<div class="wbx-bulk-ok">
-          <strong>Job goedgekeurd</strong>
-          <div style="margin-top:6px">De cron (elke 3 min, batches van 10) verstuurt nu de aanmaningen. Volg de voortgang bij Instellingen → Berichten of via de bestaande bulk-job-status.</div>
-        </div>`;
+        if (!invoiceIdsAll.length) throw new Error('Niks in te schrijven — geen open facturen in selectie.');
+        // Chunk-loop: endpoint MAX_BULK=100.
+        const added   = [];
+        const skipped = [];
+        const errors  = [];
+        for (let i = 0; i < invoiceIdsAll.length; i += BULK_START_CHUNK) {
+          const chunk = invoiceIdsAll.slice(i, i + BULK_START_CHUNK);
+          const d = await _bulkCall('/api/wanbetalers-bulk-start-workflow', { invoice_ids: chunk });
+          if (Array.isArray(d?.added))   added.push(...d.added);
+          if (Array.isArray(d?.skipped)) skipped.push(...d.skipped);
+          if (Array.isArray(d?.errors))  errors.push(...d.errors);
+        }
+        // Unieke customer_ids per bucket (skipped/errors zijn invoice-based
+        // → dedupe naar klant voor leesbaar overzicht).
+        const uniqCust = (arr, key = 'customer_id') => {
+          const seen = new Set(); const out = [];
+          for (const x of arr) { const k = x?.[key]; if (!k || seen.has(k)) continue; seen.add(k); out.push(x); }
+          return out;
+        };
+        const skippedCust = uniqCust(skipped);
+        // Errors zonder customer_id (bv. invoice_not_found) blijven per-invoice
+        // getoond, dedupe op reason zodat 5x "no_workflow_match" niet 5 regels wordt.
+        const errorLines = Object.entries(errors.reduce((acc, e) => {
+          const r = String(e?.reason || 'unknown');
+          acc[r] = (acc[r] || 0) + 1; return acc;
+        }, {})).map(([r, n]) => `${esc(r)}: ${n}`);
+
+        const nameFor = (cid) => {
+          const row = _bulkState.rowIndex.get(cid);
+          return row?.customer_name || cid || '—';
+        };
+        const addedRows = added.map((a) =>
+          `<tr><td>${esc(nameFor(a.customer_id))}</td><td class="wbx-mono wbx-r">${Number(a.invoice_count || 0)}</td></tr>`,
+        ).join('') || '<tr><td colspan="2" style="text-align:center;color:var(--wbx-faint)">—</td></tr>';
+        const skippedRows = skippedCust.map((s) =>
+          `<tr><td>${esc(nameFor(s.customer_id))}</td><td>${esc(s.reason || '—')}</td></tr>`,
+        ).join('') || '<tr><td colspan="2" style="text-align:center;color:var(--wbx-faint)">—</td></tr>';
+
+        return `
+          <div class="wbx-bulk-ok">
+            <strong>${added.length} klant(en) ingeschreven</strong> in <em>${esc(workflowName)}</em>.
+            <div style="margin-top:6px;font-size:12px;color:var(--wbx-faint)">
+              De engine stuurt de eerste aanmaning via de workflow-templates bij de volgende cron-run.
+            </div>
+          </div>
+          <div style="display:grid;gap:12px;grid-template-columns:1fr 1fr;margin-top:12px">
+            <div>
+              <div style="font-weight:600;margin-bottom:4px">Ingeschreven (${added.length})</div>
+              <table class="wbx-inc-preview-tbl">
+                <thead><tr><th>Klant</th><th class="wbx-r">#fact.</th></tr></thead>
+                <tbody>${addedRows}</tbody>
+              </table>
+            </div>
+            <div>
+              <div style="font-weight:600;margin-bottom:4px">Overgeslagen (${skippedCust.length})</div>
+              <table class="wbx-inc-preview-tbl">
+                <thead><tr><th>Klant</th><th>Reden</th></tr></thead>
+                <tbody>${skippedRows}</tbody>
+              </table>
+            </div>
+          </div>
+          ${errorLines.length
+            ? `<div class="wbx-bulk-warn" style="margin-top:10px"><strong>Fouten (${errors.length})</strong>: ${errorLines.join(' · ')}</div>`
+            : ''}
+        `;
       },
     });
-    // Bevestig-knop pas actief maken NADAT preview succesvol een job-id gaf.
+
     const confirmBtn = document.querySelector('#wbxBulkModal [data-bulk-confirm]');
     if (confirmBtn) confirmBtn.disabled = true;
-    // Preview-fetch: doe dit ná modal-open zodat de loading-state zichtbaar is.
+
     try {
-      const d = await _bulkCall('/api/wanbetalers-bulk-preview', {
-        customer_ids : previewIds,
-        channel      : 'whatsapp',
-      });
-      _bulkState.lastJobId = d.job_id || null;
-      if (confirmBtn && _bulkState.lastJobId) confirmBtn.disabled = false;
-      const s = d.summary || {};
-      const skipMap = s.skipped_breakdown || {};
-      const skipLine = Object.entries(skipMap).map(([k, v]) => `${esc(k)}: ${v}`).join(' · ') || '—';
-      const recipRows = (d.recipients || []).map((r) => {
-        const isSkip = r.status === 'skipped';
-        return `<tr${isSkip ? ' class="wbx-bulk-skip"' : ''}>
-          <td>${esc(r.customer_name || '—')}</td>
-          <td class="wbx-mono wbx-r">${_bulkFmtEurCents(r.total_open_cents)}</td>
-          <td class="wbx-mono">${Number(r.open_invoice_count) || 0}</td>
-          <td>${r.channel_whatsapp ? 'WA' : ''}${r.channel_email ? ' · Mail' : ''}${isSkip ? ' · <em>skip: ' + esc(r.skip_reason || '') + '</em>' : ''}</td>
-        </tr>`;
-      }).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--wbx-faint)">Geen ontvangers</td></tr>';
+      // 1) Workflow-naam ophalen (best-effort — bij fout fallback op default).
+      try {
+        const wfd = await _bulkCall('/api/finance-dunning-workflows-list?active=true');
+        const items = Array.isArray(wfd?.items) ? wfd.items.slice() : [];
+        items.sort((a, b) => (Number(a.priority) || 0) - (Number(b.priority) || 0));
+        if (items[0]?.name) workflowName = String(items[0].name);
+      } catch (_wfErr) { /* houd default; niet blocking voor de preview */ }
+
+      // 2) Per-klant open invoice_ids parallel ophalen (pure read).
+      const results = await Promise.all(rows.map(async (row) => {
+        try {
+          const d = await _bulkCall('/api/finance-invoices?customer_id=' + encodeURIComponent(row.customer_id) + '&per_page=100');
+          const invs = Array.isArray(d?.invoices) ? d.invoices : (Array.isArray(d?.items) ? d.items : []);
+          const openInvs = invs.filter((inv) => OPEN_STATUSES_UI.has(String(inv?.status || '').toLowerCase()));
+          return { row, invoice_ids: openInvs.map((inv) => inv.id).filter(Boolean) };
+        } catch (e) {
+          return { row, invoice_ids: [], error: e?.message || 'lookup failed' };
+        }
+      }));
+
+      for (const { row, invoice_ids, error } of results) {
+        const willEnroll = !error && invoice_ids.length > 0;
+        let skipReason = null;
+        if (error) skipReason = 'lookup mislukt: ' + error;
+        else if (invoice_ids.length === 0) skipReason = 'geen open facturen';
+        perCustomer.push({
+          customer_id:      row.customer_id,
+          customer_name:    row.customer_name,
+          total_open_cents: row.total_open_cents,
+          invoice_count:    invoice_ids.length,
+          invoice_ids,
+          will_enroll:      willEnroll,
+          skip_reason:      skipReason,
+        });
+        if (willEnroll) invoiceIdsAll.push(...invoice_ids);
+      }
+
+      const willEnrollCount = perCustomer.filter((p) => p.will_enroll).length;
+      const skipCount       = perCustomer.length - willEnrollCount;
+
+      const previewRows = perCustomer.map((p) =>
+        `<tr${p.will_enroll ? '' : ' class="wbx-bulk-skip"'}>
+          <td>${esc(p.customer_name || '—')}</td>
+          <td class="wbx-mono wbx-r">${_bulkFmtEurCents(p.total_open_cents)}</td>
+          <td class="wbx-mono">${p.invoice_count}</td>
+          <td>${p.will_enroll ? 'inschrijven' : '<em>skip: ' + esc(p.skip_reason || '') + '</em>'}</td>
+        </tr>`,
+      ).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--wbx-faint)">Geen selectie</td></tr>';
+
       const body = document.querySelector('#wbxBulkModalBody');
       if (body) {
         body.innerHTML = `
           <div class="wbx-bulk-note">
-            Voorbeeld · <strong>${s.total || 0}</strong> totaal · <strong>${s.will_send || 0}</strong> ontvangt bericht · <strong>${s.skipped || 0}</strong> overgeslagen (${skipLine}).
-            ${inIncasso.length ? `<div class="wbx-bulk-warn">Let op: <strong>${inIncasso.length}</strong> geselecteerde klant(en) staan al in fase incasso. Bevestig alleen als je zeker weet dat ze een extra aanmaning moeten krijgen.</div>` : ''}
+            Workflow: <strong>${esc(workflowName)}</strong> · <strong>${willEnrollCount}</strong> in te schrijven · <strong>${skipCount}</strong> overgeslagen.
+            ${inIncasso.length ? `<div class="wbx-bulk-warn">Let op: <strong>${inIncasso.length}</strong> klant(en) staan al in fase <em>incasso</em>. De engine kan ze alsnog in een workflow-run zetten; bevestig alleen bewust.</div>` : ''}
           </div>
           <table class="wbx-inc-preview-tbl">
-            <thead><tr><th>Klant</th><th class="wbx-r">Open</th><th>Facturen</th><th>Kanaal</th></tr></thead>
-            <tbody>${recipRows}</tbody>
+            <thead><tr><th>Klant</th><th class="wbx-r">Open</th><th>#fact.</th><th>Actie</th></tr></thead>
+            <tbody>${previewRows}</tbody>
           </table>
         `;
       }
+      if (confirmBtn && willEnrollCount > 0) confirmBtn.disabled = false;
     } catch (e) {
       const body = document.querySelector('#wbxBulkModalBody');
       if (body) body.innerHTML = `<div class="wbx-bulk-err">Preview mislukt: ${esc(e?.message || 'onbekend')}</div>`;
-      _bulkState.lastJobId = null;
     }
   }
 
