@@ -204,6 +204,10 @@
         <div class="sub">Overzicht, campagne-prestaties en drill-down. Data ververst elke 30 min.</div>
       </div>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button type="button" class="range-chip" id="adsSyncNowBtn"
+                title="Haal nu de laatste Meta-data op (zelfde als de */30-cron, RBAC ads.module.access, idempotent).">
+          Ads-data nu ophalen
+        </button>
         <div class="mode-toggle" role="tablist" aria-label="Weergave-modus">
           <button type="button" class="active" data-mode="meta" role="tab" aria-selected="true">Meta-cijfers</button>
           <button type="button" data-mode="sale" role="tab" aria-selected="false">Tot en met sale</button>
@@ -734,7 +738,9 @@
   }
 
   // ── Wire-up ───────────────────────────────────────────────────────────
-  document.querySelectorAll('.range-chip').forEach((el) => {
+  // Selector filtert op [data-range] zodat andere .range-chip-gestyleerde
+  // knoppen (bv. #adsSyncNowBtn) niet per ongeluk state.range=null zetten.
+  document.querySelectorAll('.range-chip[data-range]').forEach((el) => {
     el.addEventListener('click', () => {
       state.range = el.getAttribute('data-range');
       load();
@@ -750,6 +756,52 @@
       load();
     });
   });
+
+  // "Ads-data nu ophalen" — handmatige trigger van de Meta Ads-sync (zelfde
+  // effect als de */30-cron). Endpoint: POST /api/meta-ads-sync-run-now
+  // (RBAC ads.module.access, Bearer-JWT — CRON_SECRET nooit naar de client).
+  // Sync is idempotent (upsert op meta_insights_daily); dubbel-klik of dubbel
+  // draaien schrijft niet dubbel. UI-side extra laag: knop disabled tijdens
+  // fetch.
+  const syncNowBtn = document.getElementById('adsSyncNowBtn');
+  if (syncNowBtn) {
+    syncNowBtn.addEventListener('click', async () => {
+      if (syncNowBtn.disabled) return;
+      const origLabel = syncNowBtn.textContent;
+      syncNowBtn.disabled = true;
+      syncNowBtn.textContent = 'Bezig…';
+      try {
+        const r = await window.AgentShared.apiFetch('/api/meta-ads-sync-run-now', { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        if (r.status === 403) {
+          window.AgentShared?.showToast?.('Geen rechten (ads.module.access).', 'error');
+          return;
+        }
+        if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+        if (d.skipped === 'not_configured') {
+          const missing = Array.isArray(d.missing) ? d.missing.join(', ') : '?';
+          window.AgentShared?.showToast?.('Meta Ads niet geconfigureerd (mist ' + missing + ').', 'error');
+          return;
+        }
+        // Summary: som de insights-counts + entities-counts + errors op.
+        const s = d.summary || {};
+        const insTotal = ['campaign','adset','ad'].reduce((n, lvl) => n + (Number(s.insights?.[lvl]?.count) || 0), 0);
+        const entTotal = ['campaign','adset','ad'].reduce((n, lvl) => n + (Number(s.entities?.[lvl]?.count) || 0), 0);
+        const errs = Array.isArray(s.errors) ? s.errors.length : 0;
+        const msg = `Sync klaar: ${insTotal} insights · ${entTotal} entities`
+                  + (errs ? ` — ${errs} fout(en)` : '')
+                  + ` · ${Number(s.duration_ms || 0)}ms`;
+        window.AgentShared?.showToast?.(msg, errs ? 'error' : 'success');
+        // Ververs het dashboard met de zojuist opgehaalde data.
+        load();
+      } catch (e) {
+        window.AgentShared?.showToast?.('Sync mislukt: ' + (e?.message || 'onbekend'), 'error');
+      } finally {
+        syncNowBtn.disabled = false;
+        syncNowBtn.textContent = origLabel;
+      }
+    });
+  }
 
   // ── Alerts-instellingen (fase 3) ─────────────────────────────────────
   // Load via /api/app-settings?key=meta_ads_alert_rules. 404 = geen custom
