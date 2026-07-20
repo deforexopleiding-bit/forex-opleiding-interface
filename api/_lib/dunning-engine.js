@@ -626,42 +626,19 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
 
   let advanced = 0;
 
+  // Harde cap op de binnenlus (workflow zonder wait/stop zou anders oneindig
+  // kunnen lopen). 50 dekt ruim ook de langste actieve workflow (10-15 stappen
+  // in productie). Bij bereiken: log + errors[], next_action_at blijft op nu,
+  // volgende invocatie hervat.
+  const MAX_STEPS_PER_RUN = 50;
+
   for (const run of runs || []) {
     if (elapsed(startedAt) > abortMs) break;
 
     try {
-      // 1) Re-fetch open invoices for stop-condition + executor context.
-      const customerRows = await fetchOpenInvoices(run.customer_id);
-      const aggMap = aggregatePerCustomer(customerRows);
-      const agg = aggMap.get(run.customer_id);
-      const customer = agg?.customer || await fetchCustomerOnly(run.customer_id);
-      const openInvoices = agg?.openInvoices || [];
-
-      // STOP-CONDITIE: geen open invoices meer = klant heeft betaald.
-      if (openInvoices.length === 0) {
-        await supabaseAdmin
-          .from('dunning_workflow_runs')
-          .update({
-            status: 'completed',
-            completed_at: nowIso(),
-            completion_reason: 'paid',
-            updated_at: nowIso(),
-          })
-          .eq('id', run.id);
-        await supabaseAdmin.from('dunning_log').insert({
-          run_id: run.id,
-          step_id: run.current_step_id,
-          event_type: 'completed',
-          payload: { reason: 'paid' },
-        });
-        // #798 — Incident is voorbij; reset Joost-tellers.
-        try { await resetJoostCountersForCustomer(run.customer_id); }
-        catch (e) { console.warn('[dunning-engine] joost-counter-reset fail-soft (paid):', run.customer_id, e?.message || e); }
-        advanced++;
-        continue;
-      }
-
-      // 2) Current step + all steps for workflow.
+      // Fetch alle steps ÉÉN keer per run (workflow-config muteert niet tijdens
+      // de run). Zonder deze pre-fetch zou de binnenlus per iteratie een query
+      // doen voor dezelfde workflow_id.
       const { data: steps, error: stepsErr } = await supabaseAdmin
         .from('dunning_workflow_steps')
         .select('id, workflow_id, step_order, step_type, config')
@@ -669,110 +646,183 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
         .order('step_order', { ascending: true });
       if (stepsErr) throw stepsErr;
 
-      const currentStep = (steps || []).find((s) => s.id === run.current_step_id);
-      if (!currentStep) {
-        await supabaseAdmin
-          .from('dunning_workflow_runs')
-          .update({
-            status: 'completed',
-            completed_at: nowIso(),
-            completion_reason: 'step_missing',
-            updated_at: nowIso(),
-          })
-          .eq('id', run.id);
+      // ── BINNENLUS: verwerk opeenvolgende NIET-wait stappen in één keer.
+      //    Effect: email + whatsapp van dezelfde ronde gaan samen de deur uit.
+      //    De wait-stap bepaalt daarna de dagen tot de volgende ronde.
+      //    Stop-condities: wait / stop / paid / step_missing / no_more_steps
+      //    / cap / time-budget.
+      let currentStepId = run.current_step_id;
+      let stepsExecuted = 0;
+      let runAdvanced   = false;
+
+      while (stepsExecuted < MAX_STEPS_PER_RUN) {
+        // Time-budget-check vóór elke iteratie — laat next_action_at op de
+        // laatste update staan (nu), volgende invocatie hervat vanzelf.
+        if (elapsed(startedAt) > abortMs) break;
+
+        // Betaal-hercheck vóór ELKE stap. Cruciaal voor multi-stap-rondes:
+        // als de klant tussen email en whatsapp betaalt, stopt de lus hier
+        // en wordt de whatsapp NIET verstuurd.
+        const customerRows = await fetchOpenInvoices(run.customer_id);
+        const aggMap = aggregatePerCustomer(customerRows);
+        const agg = aggMap.get(run.customer_id);
+        const customer = agg?.customer || await fetchCustomerOnly(run.customer_id);
+        const openInvoices = agg?.openInvoices || [];
+
+        if (openInvoices.length === 0) {
+          await supabaseAdmin
+            .from('dunning_workflow_runs')
+            .update({
+              status: 'completed',
+              completed_at: nowIso(),
+              completion_reason: 'paid',
+              updated_at: nowIso(),
+            })
+            .eq('id', run.id);
+          await supabaseAdmin.from('dunning_log').insert({
+            run_id: run.id,
+            step_id: currentStepId,
+            event_type: 'completed',
+            payload: { reason: 'paid' },
+          });
+          // #798 — Incident is voorbij; reset Joost-tellers.
+          try { await resetJoostCountersForCustomer(run.customer_id); }
+          catch (e) { console.warn('[dunning-engine] joost-counter-reset fail-soft (paid):', run.customer_id, e?.message || e); }
+          runAdvanced = true;
+          break;
+        }
+
+        const currentStep = (steps || []).find((s) => s.id === currentStepId);
+        if (!currentStep) {
+          await supabaseAdmin
+            .from('dunning_workflow_runs')
+            .update({
+              status: 'completed',
+              completed_at: nowIso(),
+              completion_reason: 'step_missing',
+              updated_at: nowIso(),
+            })
+            .eq('id', run.id);
+          await supabaseAdmin.from('dunning_log').insert({
+            run_id: run.id,
+            step_id: currentStepId,
+            event_type: 'completed',
+            payload: { reason: 'step_missing' },
+          });
+          // #798 — Ook step_missing is een completion; reset Joost-tellers.
+          try { await resetJoostCountersForCustomer(run.customer_id); }
+          catch (e) { console.warn('[dunning-engine] joost-counter-reset fail-soft (step_missing):', run.customer_id, e?.message || e); }
+          runAdvanced = true;
+          break;
+        }
+
+        const nextStep = (steps || []).find((s) => s.step_order > currentStep.step_order) || null;
+
+        // Execute step.
+        const execArgs = { supabaseAdmin, run, step: currentStep, customer, openInvoices };
+        let stepResult;
+        switch (currentStep.step_type) {
+          case 'email':
+            stepResult = await executeEmailStep(execArgs);
+            break;
+          case 'whatsapp':
+            stepResult = await executeWhatsappStep(execArgs);
+            break;
+          case 'wait':
+            stepResult = await executeWaitStep(execArgs);
+            break;
+          case 'task':
+            stepResult = await executeTaskStep(execArgs);
+            break;
+          case 'resume_dunning':
+            stepResult = await executeResumeDunningStep(execArgs);
+            break;
+          case 'stop':
+            stepResult = { status: 'ok', log_event: 'stop_step', log_payload: {} };
+            break;
+          default:
+            stepResult = {
+              status: 'failed',
+              log_event: 'unknown_step_type',
+              log_payload: { step_type: currentStep.step_type },
+            };
+        }
+
+        // Log resultaat (1 regel per uitgevoerde stap — gedrag ongewijzigd).
+        // Error/skip-status van de executor laat de run doorgaan naar de
+        // volgende stap; huidig gedrag replicieren.
         await supabaseAdmin.from('dunning_log').insert({
           run_id: run.id,
-          step_id: run.current_step_id,
-          event_type: 'completed',
-          payload: { reason: 'step_missing' },
+          step_id: currentStep.id,
+          event_type: stepResult.log_event,
+          payload: stepResult.log_payload || {},
         });
-        // #798 — Ook step_missing is een completion; reset Joost-tellers.
-        try { await resetJoostCountersForCustomer(run.customer_id); }
-        catch (e) { console.warn('[dunning-engine] joost-counter-reset fail-soft (step_missing):', run.customer_id, e?.message || e); }
-        advanced++;
-        continue;
-      }
+        stepsExecuted++;
+        runAdvanced = true;
 
-      const nextStep = (steps || []).find((s) => s.step_order > currentStep.step_order) || null;
-
-      // 3) Execute current step.
-      const execArgs = { supabaseAdmin, run, step: currentStep, customer, openInvoices };
-      let stepResult;
-      switch (currentStep.step_type) {
-        case 'email':
-          stepResult = await executeEmailStep(execArgs);
-          break;
-        case 'whatsapp':
-          stepResult = await executeWhatsappStep(execArgs);
-          break;
-        case 'wait':
-          stepResult = await executeWaitStep(execArgs);
-          break;
-        case 'task':
-          stepResult = await executeTaskStep(execArgs);
-          break;
-        case 'resume_dunning':
-          stepResult = await executeResumeDunningStep(execArgs);
-          break;
-        case 'stop':
-          stepResult = { status: 'ok', log_event: 'stop_step', log_payload: {} };
-          break;
-        default:
-          stepResult = {
-            status: 'failed',
-            log_event: 'unknown_step_type',
-            log_payload: { step_type: currentStep.step_type },
-          };
-      }
-
-      // 4) Log result.
-      await supabaseAdmin.from('dunning_log').insert({
-        run_id: run.id,
-        step_id: currentStep.id,
-        event_type: stepResult.log_event,
-        payload: stepResult.log_payload || {},
-      });
-
-      // 5) Advance pointer.
-      const update = { updated_at: nowIso() };
-      if (currentStep.step_type === 'wait') {
-        const days = Number(currentStep?.config?.days) || 0;
-        const nextMs = Date.now() + days * 86400000;
-        update.next_action_at = new Date(nextMs).toISOString();
-        update.current_step_id = nextStep ? nextStep.id : null;
-        if (!nextStep) {
+        // Advance pointer (semantiek ongewijzigd; nu geïntegreerd in de lus).
+        const update = { updated_at: nowIso() };
+        let breakLoop = false;
+        if (currentStep.step_type === 'wait') {
+          const days = Number(currentStep?.config?.days) || 0;
+          const nextMs = Date.now() + days * 86400000;
+          update.next_action_at = new Date(nextMs).toISOString();
+          update.current_step_id = nextStep ? nextStep.id : null;
+          if (!nextStep) {
+            update.status = 'completed';
+            update.completed_at = nowIso();
+            update.completion_reason = 'no_more_steps';
+          }
+          breakLoop = true;   // WAIT stopt de binnenlus — kern van deze PR.
+        } else if (currentStep.step_type === 'stop') {
           update.status = 'completed';
           update.completed_at = nowIso();
-          update.completion_reason = 'no_more_steps';
+          update.completion_reason = 'stop_step';
+          breakLoop = true;
+        } else {
+          update.next_action_at = nowIso();
+          update.current_step_id = nextStep ? nextStep.id : null;
+          if (!nextStep) {
+            update.status = 'completed';
+            update.completed_at = nowIso();
+            update.completion_reason = 'no_more_steps';
+            breakLoop = true;
+          }
         }
-      } else if (currentStep.step_type === 'stop') {
-        update.status = 'completed';
-        update.completed_at = nowIso();
-        update.completion_reason = 'stop_step';
-      } else {
-        update.next_action_at = nowIso();
-        update.current_step_id = nextStep ? nextStep.id : null;
-        if (!nextStep) {
-          update.status = 'completed';
-          update.completed_at = nowIso();
-          update.completion_reason = 'no_more_steps';
+
+        await supabaseAdmin
+          .from('dunning_workflow_runs')
+          .update(update)
+          .eq('id', run.id);
+
+        // #798 — Als deze step-advance de run heeft afgesloten (no_more_steps
+        // of stop_step), reset Joost-tellers alsnog.
+        if (update.status === 'completed') {
+          try { await resetJoostCountersForCustomer(run.customer_id); }
+          catch (e) { console.warn('[dunning-engine] joost-counter-reset fail-soft (' + (update.completion_reason || 'step_advance') + '):', run.customer_id, e?.message || e); }
         }
+
+        if (breakLoop) break;
+
+        // Volgende iteratie: schuif pointer door.
+        currentStepId = nextStep ? nextStep.id : null;
+        if (!currentStepId) break;
       }
 
-      await supabaseAdmin
-        .from('dunning_workflow_runs')
-        .update(update)
-        .eq('id', run.id);
-
-      // #798 — Als deze step-advance de run heeft afgesloten (no_more_steps
-      // of stop_step), reset Joost-tellers alsnog. update.status === 'completed'
-      // is de enige robuuste signaal-check hier — dekt beide paden.
-      if (update.status === 'completed') {
-        try { await resetJoostCountersForCustomer(run.customer_id); }
-        catch (e) { console.warn('[dunning-engine] joost-counter-reset fail-soft (' + (update.completion_reason || 'step_advance') + '):', run.customer_id, e?.message || e); }
+      // Cap-warning: workflow zonder wait/stop zou anders oneindig lopen.
+      // next_action_at staat op nu (via de laatste update), dus volgende
+      // invocatie hervat de run vanzelf.
+      if (stepsExecuted >= MAX_STEPS_PER_RUN) {
+        console.warn('[dunning-engine] MAX_STEPS_PER_RUN cap bereikt voor run', run.id, '— volgende invocatie hervat.');
+        errors.push({
+          phase: 'advance',
+          run_id: run.id,
+          customer_id: run.customer_id,
+          error: 'MAX_STEPS_PER_RUN cap (' + MAX_STEPS_PER_RUN + ') bereikt binnen 1 invocatie',
+        });
       }
 
-      advanced++;
+      if (runAdvanced) advanced++;
     } catch (e) {
       errors.push({
         phase: 'advance',
