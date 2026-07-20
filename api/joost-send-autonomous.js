@@ -252,6 +252,10 @@ export default async function handler(req, res) {
     if (stateErr) throw new Error('joost_conversation_state lookup: ' + stateErr.message);
 
     let openAmount = 0;
+    // Multi-factuur-canary: aantal openstaande invoice-rijen. Null = lookup
+    // faalde of geen customer_id — evaluateAutonomy grijpt dan de fail-closed
+    // default (escaleren) via de multi-invoice-gate.
+    let openFacturenCount = null;
     if (conv.customer_id) {
       const { data: invs, error: invErr } = await supabaseAdmin
         .from('invoices')
@@ -261,6 +265,7 @@ export default async function handler(req, res) {
       if (invErr) {
         console.error('[joost-send-autonomous] invoices lookup:', invErr.message);
       } else if (Array.isArray(invs)) {
+        openFacturenCount = invs.length;
         for (const inv of invs) {
           // Openstaand = amount_total − amount_paid − credited_amount
           // (kolom amount_open bestaat niet in de invoices-tabel).
@@ -317,6 +322,11 @@ export default async function handler(req, res) {
       customer_context: {
         open_amount:            openAmount,
         min_termijn_bedrag_eur: minTermijnBedrag, // #789 — null als niet beschikbaar
+        // Multi-factuur-canary (Fase 1): aantal open/partially_paid/overdue
+        // invoice-rijen. Gebruikt door de multi-invoice-gate in
+        // evaluateAutonomy. Null als de invoices-lookup faalde — dan grijpt
+        // de fail-closed safe default (escaleren).
+        open_facturen_count:    openFacturenCount,
       },
       now:              new Date(),
     });

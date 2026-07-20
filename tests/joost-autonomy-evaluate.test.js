@@ -81,7 +81,10 @@ function baselineArgs(overrides = {}) {
     suggestion:       baselineSuggestion(),
     conv_state:       {},
     joost_config:     baselineConfig(),
-    customer_context: { open_amount: 500 },
+    // Enkel-factuur baseline — multi-invoice-gate laat door.
+    // Bevestigt: bestaande scenario's die "gate open"-gedrag testen blijven
+    // valide (open_facturen_count=1 = single-invoice = pass).
+    customer_context: { open_amount: 500, open_facturen_count: 1 },
     now:              NOW,
     ...overrides,
   };
@@ -265,4 +268,75 @@ test('isWithinOfficeHours: zo 10:00 NL → false (dag niet toegestaan)', () => {
 test('isWithinOfficeHours: ma 07:00 NL → false (voor venster)', () => {
   const when = new Date('2026-07-13T05:00:00.000Z'); // ma 07:00 NL
   assert.equal(isWithinOfficeHours(OFFICE_HOURS, when), false);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCENARIO'S 18-22 — Multi-factuur-canary (Fase 1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('18. enkel-factuur (count=1, arrangement, autonomous, binnen mandaat) → allow=true (canary stuurt écht)', () => {
+  // Positieve confirmatie: de gate klapt NIET alles dicht bij enkel-factuur.
+  const args = baselineArgs({
+    customer_context: { open_amount: 500, open_facturen_count: 1 },
+  });
+  const d = evaluateAutonomy(args);
+  assert.equal(d.allow_autonomous, true, 'enkel-factuur pad moet autonomous laten');
+  assert.equal(d.blocked_reason, null);
+  assert.equal(d.stop_action, null);
+});
+
+test('19. multi-factuur (count=2, flag off, arrangement) → BLOCKED_MULTI_INVOICE + MANUAL_PROPOSE_ARRANGEMENT', () => {
+  const args = baselineArgs({
+    customer_context: { open_amount: 500, open_facturen_count: 2 },
+  });
+  const d = evaluateAutonomy(args);
+  assert.equal(d.allow_autonomous, false);
+  assert.equal(d.blocked_reason, 'BLOCKED_MULTI_INVOICE');
+  assert.equal(d.stop_action, 'task_create');
+  assert.equal(d.stop_task_type, 'MANUAL_PROPOSE_ARRANGEMENT');
+});
+
+test('20. open_facturen_count=undefined (flag off) → BLOCKED_MULTI_INVOICE (safe default = escaleren)', () => {
+  const args = baselineArgs({
+    customer_context: { open_amount: 500 }, // count ontbreekt
+  });
+  const d = evaluateAutonomy(args);
+  assert.equal(d.allow_autonomous, false);
+  assert.equal(d.blocked_reason, 'BLOCKED_MULTI_INVOICE');
+  assert.equal(d.stop_action, 'task_create');
+});
+
+test('21. multi-factuur (count=3) + feature_flags.allow_multi_invoice_autonomous=true → allow=true (gate uit)', () => {
+  const args = baselineArgs({
+    customer_context: { open_amount: 500, open_facturen_count: 3 },
+  });
+  args.joost_config.feature_flags.allow_multi_invoice_autonomous = true;
+  const d = evaluateAutonomy(args);
+  assert.equal(d.allow_autonomous, true);
+  assert.equal(d.blocked_reason, null);
+});
+
+test('22. multi-factuur (count=2) + intent=other (non-arrangement) → BLOCKED_MULTI_INVOICE + MANUAL_ESCALATION', () => {
+  const args = baselineArgs({
+    suggestion:       { detected_intent: 'other', confidence: 0.95 },
+    customer_context: { open_amount: 500, open_facturen_count: 2 },
+  });
+  const d = evaluateAutonomy(args);
+  assert.equal(d.allow_autonomous, false);
+  assert.equal(d.blocked_reason, 'BLOCKED_MULTI_INVOICE');
+  assert.equal(d.stop_action, 'task_create');
+  // Non-arrangement-intent → task-type MANUAL_ESCALATION (niet MANUAL_PROPOSE_ARRANGEMENT).
+  assert.equal(d.stop_task_type, 'MANUAL_ESCALATION');
+});
+
+test('23. draft-modus (mode=draft) → multi-invoice-gate NIET actief (allow=false via mode, geen BLOCKED_MULTI_INVOICE)', () => {
+  // Bevestigt: gate slaat alleen aan bij mode=autonomous. Draft is per definitie
+  // mens-in-loop; gate zou noise geven.
+  const args = baselineArgs({
+    customer_context: { open_amount: 500, open_facturen_count: 5 }, // multi
+  });
+  args.joost_config.autonomy_config.intents.arrangement_request.mode = 'draft';
+  const d = evaluateAutonomy(args);
+  assert.equal(d.allow_autonomous, false);
+  assert.equal(d.blocked_reason, null, 'draft-modus → geen BLOCKED-reden, allow is gewoon false via mode');
 });
