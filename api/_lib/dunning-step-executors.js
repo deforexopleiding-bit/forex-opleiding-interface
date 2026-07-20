@@ -36,6 +36,53 @@
 
 import { renderTemplate } from './dunning-template-render.js';
 
+// Placeholder-regex: matcht zowel legacy HOOFDLETTER-keys ({{NAAM}},
+// {{TOTAAL_BEDRAG}}) als nieuwe dot-notation ({{klant.voornaam}},
+// {{factuur.nummer}}). Alignt met de regex-varianten in
+// dunning-template-render.js (hoofdletter-pass) + template-variables.js
+// (dot-pass).
+const DUNNING_PLACEHOLDER_RE = /\{\{([A-Z][A-Z_]*|[a-z_]+\.[a-z_]+)\}\}/g;
+
+/**
+ * Bouw de positionele Meta-template-parameters uit de template-body zelf.
+ *
+ * De N-de UNIEKE placeholder (in volgorde van eerste voorkomen in de body)
+ * wordt de N-de positionele parameter ({{N}}) die Meta bij goedkeuring
+ * heeft vastgelegd. `variables_used` (van dunning-template-render) levert
+ * de gerenderde waarden. Ontbrekende waarden → lege string zodat het
+ * AANTAL kloppend blijft en Meta geen #132000 gooit.
+ *
+ * Dedupe = "unique keys, first-occurrence order". Als de body `{{voornaam}}`
+ * twee keer bevat, sturen we 1 waarde (matcht een sensible Meta-template
+ * die daarvoor 1 `{{1}}`-slot heeft hergebruikt).
+ *
+ * Bron van waarheid: `template.body`. Op dunning_templates bestaat GEEN
+ * meta_param_mapping-kolom (die zit alleen op whatsapp_meta_templates),
+ * dus body-scan is de enige route naar volgorde.
+ *
+ * PURE — geen DB, geen HTTP; unit-testbaar.
+ *
+ * @param {string|null|undefined} bodyText  template.body
+ * @param {object|null|undefined} variablesUsed  rendered.variables_used
+ * @returns {string[]}  positionele parameters (in volgorde)
+ */
+export function buildMetaTemplateVariables(bodyText, variablesUsed) {
+  const body = String(bodyText || '');
+  const vals = (variablesUsed && typeof variablesUsed === 'object') ? variablesUsed : {};
+  const seen = new Set();
+  const out  = [];
+  DUNNING_PLACEHOLDER_RE.lastIndex = 0;
+  let m;
+  while ((m = DUNNING_PLACEHOLDER_RE.exec(body))) {
+    const key = m[1];
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const v = Object.prototype.hasOwnProperty.call(vals, key) ? vals[key] : '';
+    out.push(String(v == null ? '' : v));
+  }
+  return out;
+}
+
 async function loadTemplate(supabaseAdmin, templateId, expectedKind) {
   if (!templateId) {
     return { error: { code: 'no_template_id', message: 'step.config.template_id ontbreekt' } };
@@ -612,17 +659,16 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
   // de bron van het adres. Zie tuple-lookup hierboven.
   const sendTo = phoneE164Plus;
 
-  // Positionele variables volgens dezelfde volgorde als joost-outbound-send:
-  //   1=NAAM, 2=FACTUUR_NR, 3=TOTAAL_BEDRAG, 4=DAGEN_OVERDUE, 5=VERVAL_DATUM.
-  // Alleen keys die daadwerkelijk in de template body vervangen zijn worden
-  // meegestuurd; dat matcht het aantal {{N}}-placeholders in de approved
-  // Meta-template. Templates met andere/extra vars behoeven mapping-support
-  // in een latere PR (dunning_templates.meta_param_mapping kolom).
-  const variablesUsed = rendered.variables_used || {};
-  const orderedKeys = ['NAAM', 'FACTUUR_NR', 'TOTAAL_BEDRAG', 'DAGEN_OVERDUE', 'VERVAL_DATUM'];
-  const variables = orderedKeys
-    .filter(k => Object.prototype.hasOwnProperty.call(variablesUsed, k))
-    .map(k => String(variablesUsed[k] || ''));
+  // Positionele Meta-parameters — afgeleid uit de template-body zelf zodat
+  // AANTAL en VOLGORDE matchen wat Meta bij goedkeuring vastlegde. Werkt
+  // voor legacy hoofdletter-keys ({{NAAM}}, {{TOTAAL_BEDRAG}}) én nieuwe
+  // dot-notation ({{klant.voornaam}}, {{klant.totaal_open}}, …). Zie
+  // buildMetaTemplateVariables() bovenaan dit bestand.
+  //
+  // Waarom niet de oude 5-key hardcoded filter? Dat brak zodra een template
+  // dot-notation gebruikte (klant.*/factuur.*) — 0 params meegestuurd terwijl
+  // Meta N verwachtte → #132000 "Number of parameters does not match".
+  const variables = buildMetaTemplateVariables(template.body, rendered.variables_used || {});
 
   let metaResult;
   try {
