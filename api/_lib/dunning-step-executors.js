@@ -222,12 +222,33 @@ export async function executeEmailStep({ supabaseAdmin, run, step, customer, ope
   }
 
   try {
-    const html = wrapEmailHtml(rendered.subject, escapeBodyToHtml(rendered.body));
+    // Klant-facing footer: dit is een aanmaning van De Forex Opleiding zelf,
+    // niet iets van de agency-tooling. Default footer ("Agency Command
+    // Center — Follow-up Module") is voor interne modules; dunning-mails
+    // krijgen een eigen, klant-gerichte footer.
+    const html = wrapEmailHtml(
+      rendered.subject,
+      escapeBodyToHtml(rendered.body),
+      {
+        footerHtml:
+          '<p style="margin:0; color:#6b7280; font-size:12px;">' +
+          'De Forex Opleiding NL B.V.<br>' +
+          'administratie@deforexopleiding.nl' +
+          '</p>',
+      },
+    );
+    // Verstuur vanaf administratie@ (i.p.v. default info@). Strato SMTP-
+    // transport blijft op het info@-account (auth), header From: krijgt
+    // administratie@. Standaard SPF/DKIM domain-alignment blijft valide
+    // (envelope-sender = info@ + header-From-domein = deforexopleiding.nl).
+    // Werkt zolang Strato "send-as" voor dit domein-alias toestaat.
     const result = await sendMail({
       to,
       subject: rendered.subject,
       text: rendered.body,
       html,
+      from:     'administratie@deforexopleiding.nl',
+      fromName: 'De Forex Opleiding',
     });
     if (!result || !result.success) {
       return {
