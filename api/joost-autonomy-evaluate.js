@@ -184,7 +184,10 @@ export function isWithinOfficeHours({ tz, days, startHHMM, endHHMM }, when = new
  * @param {Object} args.suggestion         Joost-suggestie ({ detected_intent, confidence, ... })
  * @param {Object} args.conv_state         joost_conversation_state-rij (mag null/leeg zijn)
  * @param {Object} args.joost_config       joost_config-rij incl. autonomy_config + feature_flags
- * @param {Object} args.customer_context   { open_amount } voor arrangement-mandate
+ * @param {Object} args.customer_context   { open_amount, open_facturen_count?, min_termijn_bedrag_eur? }
+ *                                         - open_amount:          SUM open invoice-balances (arrangement-mandate)
+ *                                         - open_facturen_count:  N open invoices — multi-invoice canary (Fase 1)
+ *                                         - min_termijn_bedrag_eur: dynamische termijn-ondergrens (#789)
  * @param {Date}   [args.now]              Override voor tests (default new Date())
  * @returns {{
  *   allow_autonomous: boolean,
@@ -561,6 +564,43 @@ export function evaluateAutonomy({
       decision.stop_action    = 'task_create';
       decision.stop_task_type = 'MANUAL_PROPOSE_ARRANGEMENT';
       return decision;
+    }
+  }
+
+  // ---- g2. Multi-factuur-canary (Fase 1) ----
+  // In AUTONOME modus mag Joost in Fase 1 alleen zelfstandig versturen bij
+  // enkel-factuur-klanten. Bij open_facturen_count > 1 → escaleren naar mens
+  // (multi-factuur-scenario vereist andere afwegingen: welke factuur eerst,
+  // deelbetaling, alloceren over meerdere invoices). Later ontgrendelbaar via
+  // feature_flags.allow_multi_invoice_autonomous (default false) zónder code.
+  //
+  // SAFE DEFAULT: onbekend/ontbrekend aantal → ESCALEREN (fail-closed). Zonder
+  // dit expliciet zou een niet-updated caller stilzwijgend blijven doorlaten.
+  //
+  // Gate wordt overgeslagen in draft-mode — daar leest een mens sowieso mee.
+  if (mode === 'autonomous') {
+    const allowMulti = featureFlags.allow_multi_invoice_autonomous === true;
+    if (!allowMulti) {
+      const rawCount = customer_context && customer_context.open_facturen_count;
+      const parsedCount = Number(rawCount);
+      const countKnown  = rawCount != null && Number.isFinite(parsedCount);
+      if (!countKnown) {
+        log.push('open_facturen_count ontbreekt/onbekend -> BLOCKED_MULTI_INVOICE (safe default; feature_flags.allow_multi_invoice_autonomous=false).');
+        decision.blocked_reason = 'BLOCKED_MULTI_INVOICE';
+        decision.stop_action    = 'task_create';
+        decision.stop_task_type = isArrangementIntent ? 'MANUAL_PROPOSE_ARRANGEMENT' : 'MANUAL_ESCALATION';
+        return decision;
+      }
+      if (parsedCount > 1) {
+        log.push(`open_facturen_count=${parsedCount} > 1 -> BLOCKED_MULTI_INVOICE (feature_flags.allow_multi_invoice_autonomous=false).`);
+        decision.blocked_reason = 'BLOCKED_MULTI_INVOICE';
+        decision.stop_action    = 'task_create';
+        decision.stop_task_type = isArrangementIntent ? 'MANUAL_PROPOSE_ARRANGEMENT' : 'MANUAL_ESCALATION';
+        return decision;
+      }
+      log.push(`open_facturen_count=${parsedCount} <= 1 -> enkel-factuur, gate open.`);
+    } else {
+      log.push('feature_flags.allow_multi_invoice_autonomous=true -> multi-invoice-gate uit.');
     }
   }
 

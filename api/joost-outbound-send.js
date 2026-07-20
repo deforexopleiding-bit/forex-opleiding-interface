@@ -316,7 +316,13 @@ export default async function handler(req, res) {
       suggestion:       syntheticSuggestion,
       conv_state:       convStateRaw || null,
       joost_config:     cfg,
-      customer_context: { open_amount: openAmount },
+      customer_context: {
+        open_amount:         openAmount,
+        // Multi-factuur-canary (Fase 1): aantal openstaande invoice-rijen.
+        // openInvoices is al gefilterd op OPEN_STATUSES én non-empty
+        // (stop-conditie hierboven), dus 1+ = enkel of multi.
+        open_facturen_count: openInvoices.length,
+      },
       now:              new Date(),
     });
 
