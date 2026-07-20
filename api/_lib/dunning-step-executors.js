@@ -468,16 +468,23 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
 
   // ─── CONVERSATION lookup + auto-create ─────────────────────────────
   // Zoek/maak een whatsapp_conversation zodat we het outbound-template kunnen
-  // persistieren (whatsapp_messages.conversation_id NOT NULL). Drie stappen:
-  //   1) SELECT bestaande op customer_id (recentste). Als er een gekoppelde
-  //      conv is: gebruik die.
-  //   2) Fallback SELECT op (phone_number, phone_number_id) — vindt een conv
-  //      die de webhook heeft aangemaakt maar nog niet aan de klant is
-  //      gekoppeld; koppel 'm dan alsnog.
-  //   3) Bestaat helemaal niks: INSERT nieuwe conv (spiegel het webhook-
-  //      insertPayload, r237-247, met status='open' + unread_count=0 want er
-  //      is nog geen inbound). Race-safe: bij 23505 unique-violation
-  //      → re-SELECT op tuple (spiegel webhook r257-266).
+  // persistieren (whatsapp_messages.conversation_id NOT NULL). Sinds de fix
+  // "actuele phone + finance-lijn" GEEN customer_id-lookup meer — die pakte
+  // de meest-recente conv van de klant, die op een OUDER nummer of ANDERE
+  // lijn kon staan (bv. Lisa-lijn) en zo de rest van de send saboteerde
+  // (verkeerd to-nummer + verkeerde outbound-lijn).
+  //
+  // Twee stappen:
+  //   1) SELECT op EXACT tuple (phone_number=phoneE164Plus,
+  //      phone_number_id=outboundPnId). Bevestigt de finance-thread.
+  //      Losse tuple-conv zonder customer_id → best-effort koppelen.
+  //   2) Niet gevonden → INSERT nieuwe conv op ditzelfde tuple (spiegel
+  //      webhook-insertPayload). Race-safe: 23505 unique-violation →
+  //      re-SELECT.
+  //
+  // Effect: klanten met een oudere conv op ander nummer/lijn krijgen een
+  // NIEUWE conv-rij op het correcte finance-tuple. Oude conv blijft
+  // ongewijzigd (historisch archief).
   const phoneE164Plus = toE164Plus(customerPhone);
   if (!phoneE164Plus) {
     return {
@@ -492,27 +499,8 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
     };
   }
   let conv = null;
-  // Stap 1: bestaande conv-koppeling via customer_id
-  if (customer?.id) {
-    try {
-      const { data: convRow, error: convErr } = await supabaseAdmin
-        .from('whatsapp_conversations')
-        .select('id, customer_id, phone_number, phone_number_id, last_message_at')
-        .eq('customer_id', customer.id)
-        .order('last_message_at', { ascending: false, nullsFirst: false })
-        .limit(1)
-        .maybeSingle();
-      if (convErr) {
-        console.warn('[dunning-executor whatsapp] conv lookup fail:', convErr.message);
-      } else if (convRow) {
-        conv = convRow;
-      }
-    } catch (e) {
-      console.warn('[dunning-executor whatsapp] conv exception:', e?.message);
-    }
-  }
-  // Stap 2: fallback op (phone_number, phone_number_id) — kan bestaan zonder customer-koppeling
-  if (!conv && outboundPnId) {
+  // Stap 1: SELECT op het correcte tuple (phoneE164Plus × finance-lijn).
+  if (outboundPnId) {
     try {
       const { data: convRow, error: convErr } = await supabaseAdmin
         .from('whatsapp_conversations')
@@ -524,7 +512,7 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
         console.warn('[dunning-executor whatsapp] conv tuple-lookup fail:', convErr.message);
       } else if (convRow) {
         conv = convRow;
-        // Best-effort: koppel bestaande conv aan klant als 'ie nog los hangt.
+        // Best-effort: koppel losse tuple-conv aan klant.
         if (customer?.id && !conv.customer_id) {
           try {
             await supabaseAdmin
@@ -542,7 +530,7 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
       console.warn('[dunning-executor whatsapp] conv tuple exception:', e?.message);
     }
   }
-  // Stap 3: INSERT nieuwe conv (auto-create) — de kern van deze PR
+  // Stap 2: INSERT nieuwe conv (auto-create) op het correcte tuple.
   if (!conv) {
     if (!outboundPnId) {
       return {
@@ -600,7 +588,7 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
     }
   }
   if (!conv) {
-    // Alle 3 stappen faalden — skip fail-soft (run klapt niet).
+    // Zowel tuple-lookup als auto-insert faalden — skip fail-soft (run klapt niet).
     return {
       status: 'skipped',
       log_event: 'whatsapp_skipped_conv_create_failed',
@@ -614,11 +602,15 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
     };
   }
 
-  // Autoritatief: gebruik conversation.phone_number (webhook/insert-genormaliseerd)
-  // boven customer.phone voor de Meta-call.
-  const sendTo = conv.phone_number || phoneE164Plus;
-  // Als de bestaande conv al een phone_number_id had, wint die (multi-line correctness).
-  if (conv.phone_number_id) outboundPnId = conv.phone_number_id;
+  // Verzendnummer + lijn zijn autoritatief bepaald VÓÓR de conv-lookup:
+  //   - sendTo         = phoneE164Plus (uit customers.phone, genormaliseerd)
+  //   - phoneNumberId  = outboundPnId (finance-lijn uit whatsapp_module_config)
+  // We overschrijven ze bewust NIET met conv.phone_number / .phone_number_id —
+  // een oude conv op ander nummer / andere lijn mocht eerder de rest van de
+  // flow saboteren (verkeerd nummer, verkeerde outbound-lijn). De conv is
+  // hier puur persist-target voor whatsapp_messages.conversation_id, niet
+  // de bron van het adres. Zie tuple-lookup hierboven.
+  const sendTo = phoneE164Plus;
 
   // Positionele variables volgens dezelfde volgorde als joost-outbound-send:
   //   1=NAAM, 2=FACTUUR_NR, 3=TOTAAL_BEDRAG, 4=DAGEN_OVERDUE, 5=VERVAL_DATUM.
