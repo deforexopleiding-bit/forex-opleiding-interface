@@ -17246,7 +17246,7 @@
           <td>${esc(r.customer_name || '—')}</td>
           <td>${esc(r.workflow_name || '—')}</td>
           <td>${stepLbl}</td>
-          <td class="wbx-mono">${_opruimFmtDateNl(r.next_action_at)}</td>
+          <td class="wbx-mono">${_opruimFmtNextAction(r.next_action_at)}</td>
           <td class="wbx-mono wbx-r">${openBedrag}</td>
         </tr>`;
       }).join('');
@@ -17298,6 +17298,22 @@
         day: '2-digit', month: '2-digit', year: '2-digit',
         hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Amsterdam',
       }).format(d);
+    } catch (_) { return '—'; }
+  }
+
+  // Speciaal voor de "Volgende actie"-kolom in het Lopende-aanmaningen-
+  // overzicht. Een next_action_at in het VERLEDEN betekent semantisch:
+  // "run staat klaar; wordt opgepakt door de eerstvolgende engine-cyclus".
+  // Het letterlijke tijdstip tonen is verwarrend (leest als 'was gisteren
+  // gepland maar niet gedaan') — dus we tonen een label. Toekomst-tijdstip
+  // is een echte geplande wait; die tonen we gewoon.
+  function _opruimFmtNextAction(iso) {
+    if (!iso) return 'Wacht op verwerking';
+    try {
+      const d = new Date(iso);
+      if (!Number.isFinite(d.getTime())) return '—';
+      if (d.getTime() <= Date.now()) return 'Wacht op verwerking';
+      return _opruimFmtDateNl(iso);
     } catch (_) { return '—'; }
   }
   function _opruimEventLabel(evt) {
