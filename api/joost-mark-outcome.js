@@ -170,9 +170,23 @@ export default async function handler(req, res) {
     if (!current) {
       return res.status(404).json({ error: 'Suggestion niet gevonden' });
     }
-    if (current.status !== 'PROPOSED') {
+    // Toegestaan om een outcome te zetten op elke suggestie waar de LLM een
+    // bruikbare draft aanleverde — PROPOSED of één van de 5 BLOCKED_*-
+    // statussen die de autonomy-gate blokkeerde (mens ziet 'em als draft
+    // via joost-suggestions-recent en kan 'm alsnog USED_AS_IS/USED_EDITED-
+    // versturen of IGNORED/DISMISSED zetten). Statussen zonder bruikbare
+    // draft (bv. SENT_AUTONOMOUSLY, USED_*) blijven ongewijzigd geweigerd.
+    const OUTCOMEABLE_CURRENT_STATUSES = new Set([
+      'PROPOSED',
+      'BLOCKED_LOW_CONFIDENCE',
+      'BLOCKED_INTENT_DISABLED',
+      'BLOCKED_COMMUNICATION_LIMIT',
+      'BLOCKED_MANDATE_EXCEEDED',
+      'BLOCKED_AUTONOMY_PAUSED',
+    ]);
+    if (!OUTCOMEABLE_CURRENT_STATUSES.has(current.status)) {
       return res.status(409).json({
-        error: 'Suggestion is niet in PROPOSED state',
+        error: 'Suggestion is niet in een outcome-bare state (PROPOSED of BLOCKED_*)',
         current_status: current.status,
       });
     }
