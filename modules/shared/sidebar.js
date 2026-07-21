@@ -132,6 +132,32 @@
         // Class .user-section = renderUserSection-target; .app-topbar-user =
         // topbar-context-styling-hook.
         '<div class="user-section app-topbar-user" id="app-topbar-user"></div>' +
+        // Stap 3b: notif-bel + panel verhuisd uit .sidebar-logo naar de
+        // topbar. IDs identiek (sbNotifBtn/sbNotifBadge/sbNotifPanel) zodat
+        // alle 8 call-sites (_setNotifBadge/_renderNotifList/_toggleNotifPanel/
+        // _wireNotifPanel/initNotifications) DOM-parent-onafhankelijk blijven
+        // werken. Panel is fixed-positioned; nieuwe anchor (right:16px;
+        // top:52px) staat in _ensureNotifStyles hieronder. Panel-markup
+        // hangt binnen #app-topbar — de closest("#app-topbar") overlay-guard
+        // ziet panel-klikken als "in de topbar" en sluit de sidebar-drawer
+        // niet (correct gedrag).
+        '<button type="button" id="sbNotifBtn" class="sb-notif-btn" aria-label="Meldingen" aria-haspopup="true" aria-expanded="false">' +
+          '<i class="ti ti-bell"></i>' +
+          '<span id="sbNotifBadge" class="sb-notif-badge" hidden>0</span>' +
+        '</button>' +
+        '<div id="sbNotifPanel" class="sb-notif-panel" hidden>' +
+          '<div class="sb-notif-head">' +
+            '<div class="sb-notif-title">Meldingen</div>' +
+            '<div class="sb-notif-filter" role="tablist">' +
+              '<button type="button" class="sb-notif-tab active" data-sb-filter="all">Alle</button>' +
+              '<button type="button" class="sb-notif-tab" data-sb-filter="unread">Ongelezen</button>' +
+            '</div>' +
+            '<button type="button" id="sbNotifMarkAll" class="sb-notif-mark-all">Alles gelezen</button>' +
+          '</div>' +
+          '<div id="sbNotifList" class="sb-notif-list">' +
+            '<div class="sb-notif-empty">Laden…</div>' +
+          '</div>' +
+        '</div>' +
         '<div class="app-topbar-actions" id="app-topbar-actions"></div>' +
         '<button type="button" class="ds-icon-button app-topbar-logout" id="appTopbarLogout" aria-label="Uitloggen" title="Uitloggen">' +
           '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
@@ -206,27 +232,12 @@
   function buildSidebarHtml() {
     return '' +
       '<nav class="sidebar">' +
+        // Stap 3b: notif-bel + panel zijn verhuisd naar de topbar
+        // (buildTopbarHtml). .sidebar-logo bevat nu alleen nog de logo-imgs.
         '<div class="sidebar-logo">' +
           '<div class="sidebar-logo-imgs">' +
             '<img src="/img/logo-dark.png"  alt="De Forex Opleiding" class="logo-dark">' +
             '<img src="/img/logo-light.png" alt="De Forex Opleiding" class="logo-light">' +
-          '</div>' +
-          '<button type="button" id="sbNotifBtn" class="sb-notif-btn" aria-label="Meldingen" aria-haspopup="true" aria-expanded="false">' +
-            '<i class="ti ti-bell"></i>' +
-            '<span id="sbNotifBadge" class="sb-notif-badge" hidden>0</span>' +
-          '</button>' +
-        '</div>' +
-        '<div id="sbNotifPanel" class="sb-notif-panel" hidden>' +
-          '<div class="sb-notif-head">' +
-            '<div class="sb-notif-title">Meldingen</div>' +
-            '<div class="sb-notif-filter" role="tablist">' +
-              '<button type="button" class="sb-notif-tab active" data-sb-filter="all">Alle</button>' +
-              '<button type="button" class="sb-notif-tab" data-sb-filter="unread">Ongelezen</button>' +
-            '</div>' +
-            '<button type="button" id="sbNotifMarkAll" class="sb-notif-mark-all">Alles gelezen</button>' +
-          '</div>' +
-          '<div id="sbNotifList" class="sb-notif-list">' +
-            '<div class="sb-notif-empty">Laden…</div>' +
           '</div>' +
         '</div>' +
         '<div class="sidebar-clock"><span class="sidebar-clock-date" id="sbClockDate"></span>' +
@@ -1347,17 +1358,20 @@
       '.sb-notif-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text-dim);cursor:pointer;font:inherit;flex-shrink:0;transition:background-color .12s,color .12s;}' +
       '.sb-notif-btn:hover{background:var(--brand-primary-soft);color:var(--text);}' +
       '.sb-notif-btn .ti{font-size:18px;line-height:1;}' +
+      /* Stap 3b: topbar-context override -- bel harmoniseert met de
+         topbar-icon-buttons (.ds-icon-button = 36x36). Verhoogde size,
+         zelfde badge-overlap (badge is absolute t.o.v. de bel). */
+      '.app-topbar .sb-notif-btn{width:36px;height:36px;}' +
       '.sb-notif-badge{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;line-height:16px;padding:0 5px;border-radius:9px;background:#dc2626;color:#fff;font-size:10.5px;font-weight:700;text-align:center;border:1.5px solid var(--bg);box-sizing:border-box;}' +
       '.sb-notif-badge[hidden]{display:none;}' +
-      /* position:fixed omdat .sidebar overflow-y:auto heeft — een          */
-      /* absolute-positioned kind zou geclipt worden door de sidebar-      */
-      /* scroll-box, ongeacht de z-index. Fixed t.o.v. viewport, net       */
-      /* rechts van de sidebar (var(--sidebar-w)), boven alles behalve de  */
-      /* mobiele overlay (z-index:10000). Bij de mobiele slide-out (< md)  */
-      /* zit de sidebar links-buiten viewport; het paneel blijft dan       */
-      /* zichtbaar links op left:calc(var(--sidebar-w)+8px) omdat de bel   */
-      /* daar sowieso onbereikbaar is tot de sidebar geopend wordt.        */
-      '.sb-notif-panel{position:fixed;left:calc(var(--sidebar-w, 220px) + 8px);top:14px;width:380px;max-width:92vw;max-height:520px;background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,0.22);z-index:10001;display:flex;flex-direction:column;overflow:hidden;}' +
+      /* Stap 3b: panel-anchor gemigreerd van links (sidebar-w+8px, top:14) */
+      /* naar RECHTS onder de topbar (right:16px, top:52px = 48 topbar + 4 */
+      /* gap onder border-bottom). Fixed behouden voor rendering-garantie  */
+      /* onafhankelijk van parent-overflow. z-index:10001 blijft.          */
+      '.sb-notif-panel{position:fixed;right:16px;top:52px;width:380px;max-width:92vw;max-height:520px;background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,0.22);z-index:10001;display:flex;flex-direction:column;overflow:hidden;}' +
+      /* Mobile: panel wordt full-width-minus-marges zodat 380px niet buiten */
+      /* het 375px-scherm valt.                                              */
+      '@media(max-width:720px){.sb-notif-panel{left:8px;right:8px;top:52px;width:auto;max-width:calc(100vw - 16px);}}' +
       '.sb-notif-panel[hidden]{display:none;}' +
       '.sb-notif-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);flex-wrap:wrap;}' +
       '.sb-notif-title{font-size:13px;font-weight:700;color:var(--text);margin-right:auto;}' +
