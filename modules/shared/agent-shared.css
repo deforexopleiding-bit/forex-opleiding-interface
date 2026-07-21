@@ -296,50 +296,62 @@ body::before {
   padding:0 14px;
   background:var(--ds-surface, #ffffff);
   border-bottom:1px solid var(--ds-border, #dfe8ec);
+  color:var(--ds-text, #06181f);
   z-index:250;                 /* boven .sidebar (z:200) zodat toggle klikbaar blijft */
 }
 .app-topbar-spacer { flex:1 1 auto; }
 .app-topbar-actions { display:inline-flex; align-items:center; gap:6px; }
 
-/* Hamburger — 3 lijnen; klikbaar tap-target min 40x40. Verborgen op desktop. */
+/* Hamburger — 3 lijnen; klikbaar tap-target min 40x40. Verborgen op desktop.
+   Direct op --ds-* met fallback (i.p.v. via de bridge-tokens --surface-1
+   /--sidebar-border/--text-primary) zodat de knop leesbaar is ook als
+   design-system.css nog niet resolvet is. Dark-override is niet meer
+   nodig want --ds-surface / --ds-border / --ds-text worden onder
+   [data-theme="dark"] al ge-override door design-system.css. */
 .app-hamburger {
   display:none;
   width:40px; height:40px;
   align-items:center; justify-content:center;
   gap:0;
   padding:0;
-  background:var(--surface-1);
-  border:1px solid var(--sidebar-border);
+  background:var(--ds-surface, #ffffff);
+  border:1px solid var(--ds-border, #dfe8ec);
   border-radius:8px;
   cursor:pointer;
-  transition:background .12s;
+  transition:background .12s, border-color .12s;
   flex-direction:column;
   row-gap:4px;
 }
-.app-hamburger:hover { background:var(--sidebar-item-hover); }
+.app-hamburger:hover { background:var(--ds-surface-2, #f9fbfc); border-color:var(--ds-border-strong, #c1d0d7); }
 .app-hamburger span {
   display:block;
   width:18px; height:2px;
-  background:var(--text-primary);
+  background:var(--ds-text, #06181f);
   border-radius:2px;
 }
-[data-theme="dark"] .app-hamburger { background:var(--surface-1); }
 
-/* Theme-toggle (maan/zon) — cirkelvormig, min 40x40 tap-target. */
+/* Theme-toggle (maan/zon) — cirkelvormig, min 40x40 tap-target. Zelfde
+   ds-fallback pattern als de hamburger; dark-override overbodig. */
 .app-theme-toggle {
   width:40px; height:40px;
   display:inline-flex; align-items:center; justify-content:center;
-  background:var(--surface-1);
-  color:var(--text-primary);
-  border:1px solid var(--sidebar-border);
+  background:var(--ds-surface, #ffffff);
+  color:var(--ds-text, #06181f);
+  border:1px solid var(--ds-border, #dfe8ec);
   border-radius:50%;
   cursor:pointer;
   font-size:17px;
   transition:background .12s, color .12s, border-color .12s;
 }
-.app-theme-toggle:hover { background:var(--sidebar-item-hover); border-color:var(--brand-primary); color:var(--brand-primary); }
-.app-theme-toggle:focus-visible { outline:none; box-shadow:0 0 0 3px var(--brand-primary-soft); }
-[data-theme="dark"] .app-theme-toggle { background:var(--surface-1); }
+.app-theme-toggle:hover {
+  background:var(--ds-surface-2, #f9fbfc);
+  border-color:var(--ds-brand, #0a5178);
+  color:var(--ds-brand, #0a5178);
+}
+.app-theme-toggle:focus-visible {
+  outline:none;
+  box-shadow:0 0 0 3px var(--ds-brand-soft, rgba(10, 81, 120, 0.25));
+}
 
 /* ── Fase-shell: bridging naar --ds-* tokens ─────────────────────────────
    Zodra styles/design-system.css is geladen, worden de bestaande
