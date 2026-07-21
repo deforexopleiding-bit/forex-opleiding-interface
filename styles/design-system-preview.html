@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Design System — Preview (De Forex Opleiding)</title>
+  <!-- Preview-only. Laadt UITSLUITEND design-system.css + theme-toggle.js.
+       Raakt geen bestaande module of shared CSS. -->
+  <script src="./theme-toggle.js"></script>
+  <link rel="stylesheet" href="./design-system.css">
+  <style>
+    /* Preview-only layout — geen ds-* overschrijvingen, alleen scaffolding. */
+    html, body { margin: 0; padding: 0; background: var(--ds-page); color: var(--ds-text); font-family: var(--ds-font-sans); font-size: var(--ds-fs-md); }
+    .prev-shell    { display: grid; grid-template-columns: var(--ds-sidebar-width) 1fr; min-height: 100vh; }
+    .prev-main     { display: flex; flex-direction: column; min-width: 0; }
+    .prev-content  { padding: var(--ds-pad-xl) var(--ds-pad-xl); display: flex; flex-direction: column; gap: var(--ds-gap-xl); }
+    .prev-section-title { font-size: var(--ds-fs-lg); font-weight: var(--ds-fw-semibold); color: var(--ds-text); letter-spacing: -0.005em; }
+    .prev-section-sub   { font-size: var(--ds-fs-sm); color: var(--ds-text-muted); margin-top: -8px; }
+    .prev-swatch-grid   { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--ds-gap-md); }
+    .prev-swatch        { border: 1px solid var(--ds-border); border-radius: var(--ds-radius); background: var(--ds-surface); overflow: hidden; }
+    .prev-swatch-color  { height: 60px; }
+    .prev-swatch-body   { padding: 8px 10px; font-size: var(--ds-fs-xs); color: var(--ds-text-muted); }
+    .prev-swatch-name   { font-weight: var(--ds-fw-semibold); color: var(--ds-text); font-size: var(--ds-fs-sm); }
+    @media (max-width: 720px) {
+      .prev-shell { grid-template-columns: 1fr; }
+      .prev-content { padding: var(--ds-pad-lg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="prev-shell">
+
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="ds-sidebar">
+      <div class="ds-sidebar-brand">DFO Command</div>
+
+      <div class="ds-sidebar-section">Overzicht</div>
+      <a class="ds-nav-item is-active"><span class="ds-nav-item-icon">■</span> Dashboard</a>
+      <a class="ds-nav-item"><span class="ds-nav-item-icon">◆</span> Klanten</a>
+      <a class="ds-nav-item"><span class="ds-nav-item-icon">▲</span> Sales</a>
+
+      <div class="ds-sidebar-section">Financieel</div>
+      <a class="ds-nav-item"><span class="ds-nav-item-icon">●</span> Facturatie</a>
+      <a class="ds-nav-item"><span class="ds-nav-item-icon">●</span> Wanbetalers</a>
+
+      <div class="ds-sidebar-section">Team</div>
+      <a class="ds-nav-item"><span class="ds-nav-item-icon">◇</span> Mentors</a>
+      <a class="ds-nav-item"><span class="ds-nav-item-icon">◇</span> Admin</a>
+    </aside>
+
+    <!-- ============ MAIN ============ -->
+    <div class="prev-main">
+
+      <!-- Topbar -->
+      <header class="ds-topbar">
+        <div class="ds-topbar-title">Design System — Preview</div>
+        <div class="ds-topbar-spacer"></div>
+        <div class="ds-topbar-actions">
+          <button class="ds-notif-btn" aria-label="Notificaties">🔔<span class="ds-notif-badge">3</span></button>
+          <button class="ds-theme-toggle" id="dsThemeToggle" aria-label="Wissel tussen licht en donker"></button>
+          <span class="ds-user-badge">
+            <span class="ds-user-avatar">JB</span>
+            Jeffrey Biemold
+          </span>
+        </div>
+      </header>
+
+      <!-- Content -->
+      <main class="prev-content">
+
+        <!-- KPI-strip -->
+        <div>
+          <div class="prev-section-title">KPI-kaarten</div>
+          <div class="prev-section-sub">.ds-kpi — met label / value / delta</div>
+          <div class="ds-grid ds-grid-4" style="margin-top:var(--ds-gap-md)">
+            <div class="ds-kpi">
+              <span class="ds-kpi-label">Actieve klanten</span>
+              <span class="ds-kpi-value">1.284</span>
+              <span class="ds-kpi-delta is-up">+42 deze week</span>
+            </div>
+            <div class="ds-kpi">
+              <span class="ds-kpi-label">Omzet MTD</span>
+              <span class="ds-kpi-value">€ 87.420</span>
+              <span class="ds-kpi-delta is-up">+12% vs vorige maand</span>
+            </div>
+            <div class="ds-kpi">
+              <span class="ds-kpi-label">Openstaand</span>
+              <span class="ds-kpi-value">€ 14.960</span>
+              <span class="ds-kpi-delta is-down">-3% vs vorige week</span>
+            </div>
+            <div class="ds-kpi">
+              <span class="ds-kpi-label">Open acties</span>
+              <span class="ds-kpi-value">17</span>
+              <span class="ds-kpi-delta">6 wachten &gt; 24u</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Kaart met tabel -->
+        <div class="ds-card">
+          <div class="ds-card-header">
+            <div class="ds-card-title">Recente wanbetalers</div>
+            <div style="display:flex;gap:var(--ds-gap-sm)">
+              <button class="ds-btn ds-btn-ghost ds-btn-sm">Filter</button>
+              <button class="ds-btn ds-btn-sm">Aanmaan-ronde starten</button>
+            </div>
+          </div>
+
+          <table class="ds-table">
+            <thead>
+              <tr>
+                <th>Klant</th>
+                <th>Fase</th>
+                <th>Open facturen</th>
+                <th class="ds-td-num">Totaal open</th>
+                <th class="ds-td-num">Oudste</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Karl Bakker</td>
+                <td><span class="ds-pill">Aangemaand</span></td>
+                <td>2</td>
+                <td class="ds-td-num">€ 1.240,00</td>
+                <td class="ds-td-num">18 d</td>
+              </tr>
+              <tr>
+                <td>Yasmin Peters</td>
+                <td><span class="ds-pill is-warning">In gesprek</span></td>
+                <td>1</td>
+                <td class="ds-td-num">€ 320,00</td>
+                <td class="ds-td-num">6 d</td>
+              </tr>
+              <tr>
+                <td>Lars Vermeer B.V.</td>
+                <td><span class="ds-pill is-danger">Incasso</span></td>
+                <td>4</td>
+                <td class="ds-td-num">€ 3.860,00</td>
+                <td class="ds-td-num">62 d</td>
+              </tr>
+              <tr>
+                <td>Sofie de Jong</td>
+                <td><span class="ds-pill is-success">Opgelost</span></td>
+                <td>0</td>
+                <td class="ds-td-num">€ 0,00</td>
+                <td class="ds-td-num">—</td>
+              </tr>
+              <tr>
+                <td>Test Klant</td>
+                <td><span class="ds-pill is-muted">Nieuw</span></td>
+                <td>1</td>
+                <td class="ds-td-num">€ 89,00</td>
+                <td class="ds-td-num">2 d</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Componenten-galerij: buttons + pills + inputs -->
+        <div class="ds-grid ds-grid-2">
+
+          <div class="ds-card">
+            <div class="ds-card-header"><div class="ds-card-title">Buttons</div></div>
+            <div class="ds-row">
+              <button class="ds-btn">Primair</button>
+              <button class="ds-btn ds-btn-ghost">Ghost</button>
+              <button class="ds-btn ds-btn-danger">Verwijder</button>
+              <button class="ds-btn ds-btn-sm">Klein</button>
+              <button class="ds-btn" disabled>Uitgeschakeld</button>
+            </div>
+
+            <hr class="ds-hr">
+
+            <div class="ds-card-title" style="font-size:var(--ds-fs-md);margin-bottom:var(--ds-gap-sm)">Pills</div>
+            <div class="ds-row">
+              <span class="ds-pill">Neutraal</span>
+              <span class="ds-pill is-success">Betaald</span>
+              <span class="ds-pill is-warning">In gesprek</span>
+              <span class="ds-pill is-danger">Overdue</span>
+              <span class="ds-pill is-muted">Concept</span>
+            </div>
+          </div>
+
+          <div class="ds-card">
+            <div class="ds-card-header"><div class="ds-card-title">Formulier-controls</div></div>
+            <div class="ds-stack">
+              <div>
+                <label class="ds-label" for="prevName">Klantnaam</label>
+                <input class="ds-input" id="prevName" type="text" placeholder="Voor- en achternaam">
+              </div>
+              <div>
+                <label class="ds-label" for="prevStage">Fase</label>
+                <select class="ds-select" id="prevStage">
+                  <option>Nieuw</option>
+                  <option>Aangemaand</option>
+                  <option>In gesprek</option>
+                  <option>Opgelost</option>
+                </select>
+              </div>
+              <div>
+                <label class="ds-label" for="prevNote">Interne notitie</label>
+                <textarea class="ds-textarea" id="prevNote" placeholder="Optionele context (min. 10 tekens)…"></textarea>
+              </div>
+              <div class="ds-row">
+                <button class="ds-btn" id="prevOpenModal">Open modal</button>
+                <span class="ds-faint" style="font-size:var(--ds-fs-sm)">Werkt in light én dark</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Kleur-swatches (toont álle tokens) -->
+        <div>
+          <div class="prev-section-title">Kleur-tokens</div>
+          <div class="prev-section-sub">Alle waarden komen uit CSS custom properties — automatisch light/dark</div>
+          <div class="prev-swatch-grid" style="margin-top:var(--ds-gap-md)">
+            <div class="prev-swatch"><div class="prev-swatch-color" style="background:var(--ds-brand)"></div><div class="prev-swatch-body"><div class="prev-swatch-name">--ds-brand</div>Primaire brand-kleur</div></div>
+            <div class="prev-swatch"><div class="prev-swatch-color" style="background:var(--ds-brand-strong)"></div><div class="prev-swatch-body"><div class="prev-swatch-name">--ds-brand-strong</div>Hover / accent-strong</div></div>
+            <div class="prev-swatch"><div class="prev-swatch-color" style="background:var(--ds-brand-soft)"></div><div class="prev-swatch-body"><div class="prev-swatch-name">--ds-brand-soft</div>Selected-state / pill-bg</div></div>
+            <div class="prev-swatch"><div class="prev-swatch-color" style="background:var(--ds-accent)"></div><div class="prev-swatch-body"><div class="prev-swatch-name">--ds-accent</div>Focus / highlight</div></div>
+            <div class="prev-swatch"><div class="prev-swatch-color" style="background:var(--ds-success)"></div><div class="prev-swatch-body"><div class="prev-swatch-name">--ds-success</div></div></div>
+            <div class="prev-swatch"><div class="prev-swatch-color" style="background:var(--ds-warning)"></div><div class="prev-swatch-body"><div class="prev-swatch-name">--ds-warning</div></div></div>
+            <div class="prev-swatch"><div class="prev-swatch-color" style="background:var(--ds-danger)"></div><div class="prev-swatch-body"><div class="prev-swatch-name">--ds-danger</div></div></div>
+            <div class="prev-swatch"><div class="prev-swatch-color" style="background:var(--ds-page);border-bottom:1px solid var(--ds-border)"></div><div class="prev-swatch-body"><div class="prev-swatch-name">--ds-page</div>App-achtergrond</div></div>
+            <div class="prev-swatch"><div class="prev-swatch-color" style="background:var(--ds-surface);border-bottom:1px solid var(--ds-border)"></div><div class="prev-swatch-body"><div class="prev-swatch-name">--ds-surface</div>Kaart / paneel</div></div>
+            <div class="prev-swatch"><div class="prev-swatch-color" style="background:var(--ds-surface-2);border-bottom:1px solid var(--ds-border)"></div><div class="prev-swatch-body"><div class="prev-swatch-name">--ds-surface-2</div>Subtiele nesting</div></div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- ============ MODAL ============ -->
+  <div class="ds-modal-overlay is-hidden" id="prevModal" role="dialog" aria-modal="true" aria-labelledby="prevModalTitle">
+    <div class="ds-modal">
+      <div class="ds-modal-header">
+        <div class="ds-modal-title" id="prevModalTitle">Voorbeeld-modal</div>
+        <button class="ds-btn ds-btn-ghost ds-btn-sm" id="prevModalClose" aria-label="Sluiten">✕</button>
+      </div>
+      <div>
+        <p class="ds-muted" style="margin:0 0 var(--ds-gap-md)">
+          Alle componenten gebruiken tokens uit <code>styles/design-system.css</code>. In donkere modus
+          worden dezelfde tokens ge-overrided via <code>[data-theme="dark"]</code> — geen enkel
+          component hoeft aparte dark-code te bevatten.
+        </p>
+        <label class="ds-label" for="prevModalReason">Reden</label>
+        <textarea class="ds-textarea" id="prevModalReason" placeholder="Bijvoorbeeld: klant boos, incasso overwegen…"></textarea>
+      </div>
+      <div class="ds-modal-footer">
+        <button class="ds-btn ds-btn-ghost" data-modal-close>Annuleren</button>
+        <button class="ds-btn">Bevestigen</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Preview-only wiring — buiten scope van het design-system zelf.
+    (function () {
+      var toggleBtn = document.getElementById('dsThemeToggle');
+      if (toggleBtn && window.DFOTheme) {
+        toggleBtn.addEventListener('click', function () { window.DFOTheme.toggle(); });
+      }
+      var openBtn = document.getElementById('prevOpenModal');
+      var modal   = document.getElementById('prevModal');
+      var close   = document.getElementById('prevModalClose');
+      function show() { if (modal) modal.classList.remove('is-hidden'); }
+      function hide() { if (modal) modal.classList.add('is-hidden'); }
+      if (openBtn) openBtn.addEventListener('click', show);
+      if (close)   close.addEventListener('click', hide);
+      document.querySelectorAll('[data-modal-close]').forEach(function (b) { b.addEventListener('click', hide); });
+      if (modal) modal.addEventListener('click', function (e) { if (e.target === modal) hide(); });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape') hide(); });
+    })();
+  </script>
+</body>
+</html>
