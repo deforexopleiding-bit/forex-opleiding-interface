@@ -361,6 +361,8 @@
 
     injectThemeToggle();
     wireTopbarLogout();
+    wireTopbarSearch();
+    wireCmdKShortcut();
   }
 
   // ── Topbar-logout wiring (Stap 3a) ───────────────────────────────────────
@@ -376,6 +378,159 @@
       try { if (window.AuthShared) await window.AuthShared.signOut(); }
       catch (_e) { /* fail-soft: alsnog naar login */ }
       window.location.href = '/login.html';
+    });
+  }
+
+  // ── Topbar-search wiring (Stap 4bc) ─────────────────────────────────────
+  // Debounced input op #appTopbarSearch → /api/topbar-search → dropdown
+  // (one-off in de .ds-search wrapper). Race-guard: laatste-response-wint via
+  // seq-counter. Keyboard-nav: ArrowUp/Down/Enter/Esc. Outside-click sluit.
+  // Endpoint is STRIKT rol-gescoped (mentor ziet alleen eigen students +
+  // hun facturen). Deeplinks: customer → /modules/klanten.html?id=<uuid>,
+  // invoice → /modules/finance.html?tab=facturen&invoice_id=<uuid>.
+  function wireTopbarSearch() {
+    const input = document.getElementById('appTopbarSearch');
+    if (!input || input.dataset.wired === '1') return;
+    input.dataset.wired = '1';
+
+    // Wrapper = .ds-search (position:relative). Dropdown wordt daar-in
+    // absoluut gepositioneerd zodat 'ie onder de input hangt.
+    const wrapper = input.closest('.ds-search') || input.parentElement;
+    if (!wrapper) return;
+    const dropdown = document.createElement('div');
+    dropdown.className = 'app-topbar-search-dropdown';
+    dropdown.setAttribute('role', 'listbox');
+    dropdown.hidden = true;
+    wrapper.appendChild(dropdown);
+
+    let debounceTimer = null;
+    let latestSeq = 0;
+    let activeIndex = -1;
+    let currentItems = [];
+
+    function closeDropdown() { dropdown.hidden = true; activeIndex = -1; }
+    function openDropdown()  { dropdown.hidden = false; }
+
+    function syncActive() {
+      const els = dropdown.querySelectorAll('.app-search-item');
+      els.forEach((el, i) => el.classList.toggle('is-active', i === activeIndex));
+      if (activeIndex >= 0 && els[activeIndex]) {
+        try { els[activeIndex].scrollIntoView({ block: 'nearest' }); } catch (_e) {}
+      }
+    }
+
+    function renderHint(text) {
+      dropdown.innerHTML = '<div class="app-search-hint">' + esc(text) + '</div>';
+      currentItems = [];
+      activeIndex = -1;
+      openDropdown();
+    }
+
+    function renderEmpty() {
+      dropdown.innerHTML = '<div class="app-search-empty">Geen resultaten</div>';
+      currentItems = [];
+      activeIndex = -1;
+      openDropdown();
+    }
+
+    function renderResults(items) {
+      currentItems = items;
+      activeIndex = -1;
+      dropdown.innerHTML = items.map((it, i) => {
+        const icon = it.type === 'customer' ? '👤' : '📄';
+        return '<a class="app-search-item" role="option" data-idx="' + i + '" href="' + esc(it.deeplink) + '">' +
+                 '<span class="app-search-type" aria-hidden="true">' + icon + '</span>' +
+                 '<span class="app-search-body">' +
+                   '<span class="app-search-label">' + esc(it.label) + '</span>' +
+                   '<span class="app-search-sub">' + esc(it.sublabel) + '</span>' +
+                 '</span>' +
+               '</a>';
+      }).join('');
+      openDropdown();
+    }
+
+    async function doSearch(q) {
+      if (q.length < 2) { renderHint('Type minimaal 2 tekens'); return; }
+      const mySeq = ++latestSeq;
+      // Toon loading-hint alleen als het al even duurt (voorkomt flicker).
+      const loadingTimer = setTimeout(() => {
+        if (mySeq === latestSeq) renderHint('Zoeken…');
+      }, 150);
+      try {
+        const r = await apiFetch('/api/topbar-search?q=' + encodeURIComponent(q));
+        clearTimeout(loadingTimer);
+        if (mySeq !== latestSeq) return; // stale
+        if (r.status === 403) { renderHint('Geen zoek-toegang'); return; }
+        if (!r.ok) { renderHint('Zoeken mislukt'); return; }
+        const d = await r.json().catch(() => ({}));
+        const items = Array.isArray(d.items) ? d.items : [];
+        if (items.length === 0) renderEmpty();
+        else                    renderResults(items);
+      } catch (_e) {
+        clearTimeout(loadingTimer);
+        if (mySeq === latestSeq) renderHint('Netwerkfout');
+      }
+    }
+
+    input.addEventListener('input', () => {
+      const q = input.value.trim();
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (q.length === 0) { closeDropdown(); return; }
+      debounceTimer = setTimeout(() => doSearch(q), 250);
+    });
+
+    input.addEventListener('focus', () => {
+      const q = input.value.trim();
+      if (q.length >= 2 && currentItems.length > 0) openDropdown();
+    });
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (!dropdown.hidden) { e.preventDefault(); closeDropdown(); }
+        else { input.blur(); }
+        return;
+      }
+      if (dropdown.hidden || currentItems.length === 0) return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        activeIndex = (activeIndex + 1) % currentItems.length;
+        syncActive();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        activeIndex = activeIndex <= 0 ? currentItems.length - 1 : activeIndex - 1;
+        syncActive();
+      } else if (e.key === 'Enter') {
+        // Als een item geselecteerd is: navigeer daar; anders eerste hit (indien aanwezig).
+        e.preventDefault();
+        const idx = activeIndex >= 0 ? activeIndex : 0;
+        const it = currentItems[idx];
+        if (it && it.deeplink) window.location.href = it.deeplink;
+      }
+    });
+
+    // Outside-click sluit dropdown.
+    document.addEventListener('click', (e) => {
+      if (dropdown.hidden) return;
+      const t = e.target;
+      if (t === input || dropdown.contains(t)) return;
+      closeDropdown();
+    });
+  }
+
+  // ── ⌘K / Ctrl+K keyboard-shortcut (idempotent) ──────────────────────────
+  // Document-level keydown-listener: ⌘K (Mac) / Ctrl+K (Windows/Linux)
+  // focust #appTopbarSearch. Idempotent via document.dataset.dfoCmdKWired.
+  function wireCmdKShortcut() {
+    if (document.documentElement.dataset.dfoCmdKWired === '1') return;
+    document.documentElement.dataset.dfoCmdKWired = '1';
+    document.addEventListener('keydown', (e) => {
+      if ((e.key === 'k' || e.key === 'K') && (e.metaKey || e.ctrlKey)) {
+        const input = document.getElementById('appTopbarSearch');
+        if (!input) return;
+        e.preventDefault();
+        input.focus();
+        try { input.select(); } catch (_e) {}
+      }
     });
   }
 
