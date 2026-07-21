@@ -1,14 +1,26 @@
 // api/joost-suggestions-recent.js
-// GET -> haal de meest recente PROPOSED Joost-suggestie voor een conversatie op.
+// GET -> haal de meest recente bruikbare Joost-suggestie voor een conversatie op.
 //
 // Doel (E1.1 UX): zodra een medewerker een conv opent in de Finance Inbox kunnen
 // we de "auto-suggested" suggestie die door de webhook is gegenereerd direct
 // tonen, zonder dat hij eerst op "Vraag Joost om suggestie" hoeft te klikken.
 //
-// Filter: alleen suggesties met status='PROPOSED' (anders is er al een outcome
-// geregistreerd en willen we die niet opnieuw aanbieden) EN binnen het
-// `max_age_minutes`-venster (default 10 minuten — past bij de versheid van een
-// inbox-conversatie zonder eindeloos oude suggesties te tonen).
+// Statussen die worden teruggegeven (voorrangsvolgorde):
+//   1) PROPOSED                       — nog geen outcome, klaar voor mens
+//   2) BLOCKED_LOW_CONFIDENCE         — LLM twijfelde; suggested_reply zit er wel
+//   3) BLOCKED_INTENT_DISABLED        — intent staat uit; draft is bruikbaar
+//   4) BLOCKED_COMMUNICATION_LIMIT    — buiten kantooruren / rate-limit; draft bruikbaar
+//   5) BLOCKED_MANDATE_EXCEEDED       — voorstel buiten mandaat; mens controleert
+//   6) BLOCKED_AUTONOMY_PAUSED        — autonomy gepauzeerd; mens beslist
+//
+// PROPOSED heeft altijd voorrang; als die er niet is pakken we de meest recente
+// BLOCKED_* (met suggested_reply). Response bevat status + is_blocked_draft +
+// blocked_reason_label zodat de UI een waarschuwings-badge kan tonen.
+//
+// Filter: binnen `max_age_minutes`-venster (default 10 minuten — past bij de
+// versheid van een inbox-conversatie zonder eindeloos oude suggesties te tonen)
+// EN suggested_reply IS NOT NULL / niet-leeg (edge: BLOCKED_LOW_CONFIDENCE-
+// fallback bij no_decision heeft geen tekst; die willen we niet tonen).
 //
 // Permission per module:
 //   finance     → finance.joost.use      (consistent met joost-suggest)
@@ -37,6 +49,26 @@ import { checkOnboardingConvAccess } from './_lib/onboardingScope.js';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DEFAULT_MAX_AGE_MIN = 10;
 const HARD_MAX_AGE_MIN    = 60;
+
+// Statussen waar de LLM een bruikbare suggested_reply heeft geproduceerd —
+// PROPOSED én de 5 BLOCKED_*-drafts die de autonomy-gate blokkeerde. Zie
+// header-comment voor rationale.
+const OUTCOMEABLE_STATUSES = [
+  'PROPOSED',
+  'BLOCKED_LOW_CONFIDENCE',
+  'BLOCKED_INTENT_DISABLED',
+  'BLOCKED_COMMUNICATION_LIMIT',
+  'BLOCKED_MANDATE_EXCEEDED',
+  'BLOCKED_AUTONOMY_PAUSED',
+];
+
+const BLOCKED_REASON_LABELS = {
+  BLOCKED_LOW_CONFIDENCE:      'Joost twijfelde (lage confidence)',
+  BLOCKED_INTENT_DISABLED:     'Intent staat uit — controleer voor je stuurt',
+  BLOCKED_COMMUNICATION_LIMIT: 'Buiten kantooruren of rate-limit — bewust bevestigen',
+  BLOCKED_MANDATE_EXCEEDED:    'Voorstel buiten mandaat — controleer bedrag/termijnen',
+  BLOCKED_AUTONOMY_PAUSED:     'Autonomy gepauzeerd — mens beslist',
+};
 
 function isUuid(s) { return typeof s === 'string' && UUID_RE.test(s); }
 
@@ -121,36 +153,50 @@ export default async function handler(req, res) {
     // zodat byte-identiek pre-stap-2c gedrag behouden blijft (legacy rijen
     // zonder module-discriminator matchen gewoon mee — backwards-compat met
     // de pre-E1.x history).
+    // Fetch alle OUTCOMEABLE-statussen binnen het venster; client-side kiezen
+    // we met voorrang PROPOSED. Limit 10 = ruim: normaal is er 1 PROPOSED per
+    // conv; blocked drafts stacken zelden. suggested_reply NOT NULL filtert
+    // de defensieve BLOCKED_LOW_CONFIDENCE-fallback (no_decision zonder tekst).
     let q = supabaseAdmin
       .from('joost_suggestions')
       .select(`
-        id, conversation_id, suggested_reply, detected_intent, confidence,
+        id, conversation_id, status, suggested_reply, detected_intent, confidence,
         reasoning, auto_triggered, created_at, module
       `)
       .eq('conversation_id', convId)
-      .eq('status', 'PROPOSED')
+      .in('status', OUTCOMEABLE_STATUSES)
+      .not('suggested_reply', 'is', null)
       .gte('created_at', cutoffIso)
       .order('created_at', { ascending: false })
-      .limit(1);
+      .limit(10);
     if (moduleKey === 'events')     q = q.eq('module', 'events');
     if (moduleKey === 'onboarding') q = q.eq('module', 'onboarding');
     const { data, error } = await q;
 
     if (error) throw new Error('joost-suggestions-lookup: ' + error.message);
 
-    const row = Array.isArray(data) && data.length > 0 ? data[0] : null;
-    if (!row) return res.status(200).json({ suggestion: null });
+    const rows = (Array.isArray(data) ? data : []).filter(
+      (r) => r.suggested_reply && String(r.suggested_reply).trim() !== '',
+    );
+    if (!rows.length) return res.status(200).json({ suggestion: null });
+
+    // PROPOSED heeft voorrang; anders de recentste bruikbare BLOCKED_*.
+    const row = rows.find((r) => r.status === 'PROPOSED') || rows[0];
+    const isBlockedDraft = row.status !== 'PROPOSED';
 
     return res.status(200).json({
       suggestion: {
-        id:              row.id,
-        conversation_id: row.conversation_id,
-        suggested_reply: row.suggested_reply,
-        detected_intent: row.detected_intent,
-        confidence:      row.confidence,
-        reasoning:       row.reasoning,
-        auto_triggered:  !!row.auto_triggered,
-        created_at:      row.created_at,
+        id:                  row.id,
+        conversation_id:     row.conversation_id,
+        status:              row.status,
+        suggested_reply:     row.suggested_reply,
+        detected_intent:     row.detected_intent,
+        confidence:          row.confidence,
+        reasoning:           row.reasoning,
+        auto_triggered:      !!row.auto_triggered,
+        created_at:          row.created_at,
+        is_blocked_draft:    isBlockedDraft,
+        blocked_reason_label: isBlockedDraft ? (BLOCKED_REASON_LABELS[row.status] || row.status) : null,
       },
     });
   } catch (e) {
