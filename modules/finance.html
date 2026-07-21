@@ -10220,6 +10220,16 @@
       list.innerHTML = '<div style="padding:30px 20px;text-align:center;color:var(--text-faint);font-size:12.5px">Geen gesprekken die aan de filters voldoen.</div>';
       return;
     }
+    // Footer: 'Meer laden…' tijdens paginatie-fetch, 'einde lijst' als
+    // laatste pagina getoond is; leeg als er nog niks te doen valt.
+    const paginationFooter =
+      _inboxConvLoadingMore
+        ? '<div style="padding:14px 12px;text-align:center;color:var(--text-faint);font-size:12px">Meer laden…</div>'
+        : (_inboxConvHasMore
+            ? ''  // scroll-handler pakt 'em vanzelf; geen ruis onderaan
+            : (_inboxConvs.length > INBOX_CONV_PAGE_SIZE
+                ? '<div style="padding:14px 12px;text-align:center;color:var(--text-faint);font-size:11.5px">Einde van de lijst · ' + _inboxConvs.length + ' gesprekken</div>'
+                : ''));
     list.innerHTML = sorted.map((c) => {
       const isActive = (c.id === _inboxActiveConvId);
       const name = c.customer_name || c.display_name || c.phone_number || 'Onbekend';
@@ -10261,7 +10271,7 @@
           </div>
         </div>
       </div>`;
-    }).join('');
+    }).join('') + paginationFooter;
     list.querySelectorAll('[data-conv-id]').forEach((row) => {
       row.addEventListener('click', () => openInboxConv(row.dataset.convId));
     });
@@ -10349,12 +10359,29 @@
     }
   }
 
+  // Paginering (infinite-scroll). PAGE_SIZE = 50 matcht endpoint-default;
+  // endpoint cap is 100 dus we blijven ruim binnen server-limits. Total
+  // uit endpoint-response (count:'exact') laat ons has_more afleiden.
+  const INBOX_CONV_PAGE_SIZE = 50;
+  let _inboxConvOffset       = 0;
+  let _inboxConvHasMore      = false;
+  let _inboxConvLoadingMore  = false;
+  let _inboxConvScrollWired  = false;
+
   async function loadInboxConvList() {
+    // FRESH load: reset offset + state. Callers zijn: init, filter-wissel,
+    // status-tab-wissel, search-input-change, na 'markeer ongelezen' /
+    // 'set-status' / 'engine-run'. Al deze acties moeten de lijst opnieuw
+    // opbouwen vanaf de eerste pagina.
+    _inboxConvOffset      = 0;
+    _inboxConvHasMore     = false;
+    _inboxConvLoadingMore = false;
     const list = document.getElementById('inboxConvList');
     if (!list) return;
     try {
       const params = new URLSearchParams();
-      params.set('limit', '50');
+      params.set('limit',  String(INBOX_CONV_PAGE_SIZE));
+      params.set('offset', '0');
       params.set('status_filter', _inboxUiState.statusFilter);
       if (_inboxConvFilter) params.set('search', _inboxConvFilter);
       const r = await window.AgentShared.apiFetch('/api/inbox-conversations-list?' + params.toString());
@@ -10364,12 +10391,72 @@
           + esc(d.error || ('HTTP ' + r.status)) + '</div>';
         return;
       }
-      _inboxConvs = Array.isArray(d.items) ? d.items : [];
+      const items = Array.isArray(d.items) ? d.items : [];
+      _inboxConvs        = items;
+      _inboxConvOffset   = items.length;
+      _inboxConvHasMore  = _inboxConvOffset < Number(d.total || 0);
       _inboxRenderConvList();
+      _wireInboxConvScrollOnce();
     } catch (e) {
       console.error('[loadInboxConvList]', e);
       list.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:12px">Fout: ' + esc(e.message) + '</div>';
     }
+  }
+
+  // Volgende pagina appenden. Guard tegen dubbele triggers (scroll firet
+  // vaak achter elkaar) via _inboxConvLoadingMore. Stopt zodra endpoint
+  // een korte pagina levert (has_more=false).
+  async function loadInboxConvListMore() {
+    if (_inboxConvLoadingMore || !_inboxConvHasMore) return;
+    const list = document.getElementById('inboxConvList');
+    if (!list) return;
+    _inboxConvLoadingMore = true;
+    try {
+      const params = new URLSearchParams();
+      params.set('limit',  String(INBOX_CONV_PAGE_SIZE));
+      params.set('offset', String(_inboxConvOffset));
+      params.set('status_filter', _inboxUiState.statusFilter);
+      if (_inboxConvFilter) params.set('search', _inboxConvFilter);
+      const r = await window.AgentShared.apiFetch('/api/inbox-conversations-list?' + params.toString());
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        // Fail-soft: laat huidige lijst staan, toon toast, has_more blijft
+        // waar 'ie was zodat retry mogelijk is.
+        window.AgentShared?.showToast?.('Volgende pagina laden mislukt: ' + (d?.error || 'HTTP ' + r.status), 'error');
+        return;
+      }
+      const items = Array.isArray(d.items) ? d.items : [];
+      if (items.length) {
+        // Append (dedupe op id — voorkomt duplicates bij race met
+        // status-updates die de sortering hebben verschoven).
+        const seen = new Set(_inboxConvs.map((c) => c.id));
+        for (const it of items) if (!seen.has(it.id)) { _inboxConvs.push(it); seen.add(it.id); }
+        _inboxConvOffset += items.length;
+      }
+      _inboxConvHasMore = _inboxConvOffset < Number(d.total || 0);
+      _inboxRenderConvList();
+    } catch (e) {
+      console.error('[loadInboxConvListMore]', e);
+      window.AgentShared?.showToast?.('Volgende pagina laden mislukt: ' + (e?.message || 'onbekend'), 'error');
+    } finally {
+      _inboxConvLoadingMore = false;
+    }
+  }
+
+  // Scroll-listener wire 1x per session. Guard via _inboxConvScrollWired
+  // zodat re-mount/loadInboxConvList niet meerdere listeners stapelt.
+  // Threshold 120px = triggert ruim vóór de bodem zodat de volgende
+  // pagina klaar is als de user 'em bereikt.
+  function _wireInboxConvScrollOnce() {
+    if (_inboxConvScrollWired) return;
+    const list = document.getElementById('inboxConvList');
+    if (!list) return;
+    _inboxConvScrollWired = true;
+    list.addEventListener('scroll', () => {
+      if (_inboxConvLoadingMore || !_inboxConvHasMore) return;
+      const dist = list.scrollHeight - list.scrollTop - list.clientHeight;
+      if (dist < 120) loadInboxConvListMore();
+    });
   }
 
   function _inboxStatusIcon(status) {
