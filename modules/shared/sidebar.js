@@ -94,13 +94,43 @@
   // bestaande hooks (sbNotifBtn, sbNotifPanel, sidebar-logo) ongewijzigd
   // werken. Idempotent: dubbele mount doet niks.
   function buildTopbarHtml() {
+    // Stap 2/4 topbar-consolidatie: markup uitgebreid met .ds-search
+    // (zoekbalk met leading icoon + ⌘K-chip) en een .ds-icon-button voor
+    // logout. GEEN handlers in deze PR -- input + logout zijn puur markup
+    // (Stap 4 hangt daar de listeners aan via de gereserveerde ids
+    // #appTopbarSearch + #appTopbarLogout).
+    //
+    // Volgorde-eis: theme-toggle wordt door agent-shared.js runtime in
+    // .app-topbar-actions ge-appendChild. Om te zorgen dat logout RECHTS
+    // van de toggle uitkomt staat de logout-knop als SIBLING NA
+    // .app-topbar-actions, niet erin. Resultaat: [hamburger] [search]
+    // [spacer] [actions(runtime toggle)] [logout].
+    //
+    // Alle 4 kritieke hooks blijven 1:1: #app-topbar (idempotency +
+    // closest overlay-guard), #appHamburger (drawer toggle),
+    // .app-topbar-actions / #app-topbar-actions (theme-toggle inject-
+    // target — blijft leeg starten zodat de injectie ongewijzigd werkt).
     return '' +
       '<div class="app-topbar" id="app-topbar">' +
         '<button type="button" class="app-hamburger" id="appHamburger" aria-label="Open menu" aria-expanded="false">' +
           '<span></span><span></span><span></span>' +
         '</button>' +
+        '<label class="ds-search app-topbar-search" aria-label="Zoeken">' +
+          '<span class="ds-search-icon" aria-hidden="true">' +
+            '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+              '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>' +
+            '</svg>' +
+          '</span>' +
+          '<input class="ds-search-input" id="appTopbarSearch" type="search" placeholder="Zoek klanten of facturen…" autocomplete="off" />' +
+          '<span class="ds-search-kbd" aria-hidden="true">⌘K</span>' +
+        '</label>' +
         '<div class="app-topbar-spacer"></div>' +
         '<div class="app-topbar-actions" id="app-topbar-actions"></div>' +
+        '<button type="button" class="ds-icon-button app-topbar-logout" id="appTopbarLogout" aria-label="Uitloggen" title="Uitloggen">' +
+          '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+            '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>' +
+          '</svg>' +
+        '</button>' +
       '</div>';
   }
 
