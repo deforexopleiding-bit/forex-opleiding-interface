@@ -10,7 +10,8 @@
 //   - kpis.completed_runs_30d    : runs met status='completed' en completed_at >= today-30d
 //
 // Lists:
-//   - active_runs   : tot 50 lopende runs incl. customer + workflow + step-info + open-invoices agg
+//   - active_runs   : tot 500 lopende runs incl. customer + workflow + step-info + open-invoices agg
+//                     (kpis.active_runs is een aparte exact-count — altijd het echte totaal)
 //   - recent_events : tot 20 meest recente dunning_log entries incl. customer + step + workflow
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
@@ -88,7 +89,11 @@ export default async function handler(req, res) {
       .gte('completed_at', thirtyDaysAgoIso);
     if (c30Err) throw new Error('completed 30d: ' + c30Err.message);
 
-    // ---- 3) Active runs list (limit 50) ----
+    // ---- 3) Active runs list (limit 500) ----
+    // Ruim genoeg voor de voorzienbare backlog; blijft één lichte query
+    // (indexen op status + next_action_at). KPI kpis.active_runs zit in
+    // een aparte exact-count query hierboven — die blijft altijd het echte
+    // totaal, ook als de list-limit ooit onder het werkelijke aantal ligt.
     const { data: runs, error: runsErr } = await supabaseAdmin
       .from('dunning_workflow_runs')
       .select(`
@@ -100,7 +105,7 @@ export default async function handler(req, res) {
       `)
       .eq('status', 'active')
       .order('next_action_at', { ascending: true, nullsFirst: true })
-      .limit(50);
+      .limit(500);
     if (runsErr) throw new Error('active runs list: ' + runsErr.message);
 
     // Per active-run: aggregate open invoices voor die customer.
