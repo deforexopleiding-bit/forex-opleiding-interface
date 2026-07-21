@@ -87,6 +87,85 @@
       svg(mod) + label + '</a>';
   }
 
+  // ── Topbar (Fase-shell) ────────────────────────────────────────────────
+  // Dunne, fixed strip rechtsboven met alleen de hamburger (mobile) en een
+  // actions-container waar agent-shared.js injectThemeToggle() de maan/zon-
+  // knop plaatst. Notif-bell + logo blijven bewust in de sidebar zodat
+  // bestaande hooks (sbNotifBtn, sbNotifPanel, sidebar-logo) ongewijzigd
+  // werken. Idempotent: dubbele mount doet niks.
+  function buildTopbarHtml() {
+    return '' +
+      '<div class="app-topbar" id="app-topbar">' +
+        '<button type="button" class="app-hamburger" id="appHamburger" aria-label="Open menu" aria-expanded="false">' +
+          '<span></span><span></span><span></span>' +
+        '</button>' +
+        '<div class="app-topbar-spacer"></div>' +
+        '<div class="app-topbar-actions" id="app-topbar-actions"></div>' +
+      '</div>';
+  }
+
+  function ensureDesignSystemCss() {
+    // Injecteer /styles/design-system.css exact 1x in <head>. Absolute path
+    // zodat het vanaf elke module (index + modules/*.html) resolvet. Marker-
+    // attribute maakt de check idempotent.
+    if (document.querySelector('link[data-dfo-design-system]')) return;
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = '/styles/design-system.css';
+    link.setAttribute('data-dfo-design-system', '1');
+    document.head.appendChild(link);
+  }
+
+  function ensureThemeSharedJs() {
+    // theme-shared.js is de enige dark-mode-broker (key 'agency-cc-theme').
+    // 48/54 modules laden 't al; hier borgen we het voor de overige 6 én
+    // toekomstige nieuwe modules. Idempotent via marker-attribute.
+    if (window.ThemeShared) return;
+    if (document.querySelector('script[data-dfo-theme-shared]')) return;
+    var s = document.createElement('script');
+    s.src = '/modules/shared/theme-shared.js';
+    s.setAttribute('data-dfo-theme-shared', '1');
+    document.head.appendChild(s);
+  }
+
+  function mountTopbar() {
+    if (document.getElementById('app-topbar')) return; // idempotent
+    var wrap = document.createElement('div');
+    wrap.innerHTML = buildTopbarHtml();
+    var topbar = wrap.firstChild;
+    if (topbar) document.body.appendChild(topbar);
+
+    var burger = document.getElementById('appHamburger');
+    if (burger) {
+      burger.addEventListener('click', function () {
+        var isOpen = document.body.classList.toggle('sidebar-open');
+        burger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+      });
+    }
+    // Klik op de overlay (buiten de sidebar) sluit 'm weer.
+    document.addEventListener('click', function (e) {
+      if (!document.body.classList.contains('sidebar-open')) return;
+      var t = e.target;
+      if (t && (t.closest && (t.closest('.sidebar') || t.closest('#app-topbar')))) return;
+      document.body.classList.remove('sidebar-open');
+      if (burger) burger.setAttribute('aria-expanded', 'false');
+    });
+    // ESC sluit de drawer.
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && document.body.classList.contains('sidebar-open')) {
+        document.body.classList.remove('sidebar-open');
+        if (burger) burger.setAttribute('aria-expanded', 'false');
+      }
+    });
+    // Bij resize naar desktop: sidebar-open state opheffen (niet meer nodig).
+    window.addEventListener('resize', function () {
+      if (window.innerWidth > 1024) {
+        document.body.classList.remove('sidebar-open');
+        if (burger) burger.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
+
   function buildSidebarHtml() {
     return '' +
       '<nav class="sidebar">' +
@@ -1519,6 +1598,12 @@
   function mountSidebar() {
     var mount = document.getElementById('sidebar-mount');
     if (!mount || mount.dataset.mounted === '1') return;
+    // Shell-laag: design-system tokens + theme-shared broker garanderen (Fase
+    // Shell). Idempotent — safe voor modules die het al zelf inladen.
+    try { ensureDesignSystemCss(); } catch (e) { console.warn('[sidebar] ds-css:', e && e.message); }
+    try { ensureThemeSharedJs();   } catch (e) { console.warn('[sidebar] theme-shared:', e && e.message); }
+    // Topbar rechtsboven met hamburger (mobile) + slot voor de theme-toggle.
+    try { mountTopbar(); } catch (e) { console.warn('[sidebar] topbar:', e && e.message); }
     mount.innerHTML = buildSidebarHtml();
     mount.dataset.mounted = '1';
 

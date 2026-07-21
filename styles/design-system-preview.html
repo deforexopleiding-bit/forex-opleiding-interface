@@ -4,9 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Design System — Preview (De Forex Opleiding)</title>
-  <!-- Preview-only. Laadt UITSLUITEND design-system.css + theme-toggle.js.
-       Raakt geen bestaande module of shared CSS. -->
-  <script src="./theme-toggle.js"></script>
+  <!-- Preview laadt design-system.css + theme-shared.js (het canonieke
+       dark-mode-systeem uit modules/shared/). Fase 0's theme-toggle.js
+       is bewust NIET geladen om dubbele toggle-listeners te voorkomen. -->
+  <script src="../modules/shared/theme-shared.js"></script>
   <link rel="stylesheet" href="./design-system.css">
   <style>
     /* Preview-only layout — geen ds-* overschrijvingen, alleen scaffolding. */
@@ -57,7 +58,7 @@
         <div class="ds-topbar-spacer"></div>
         <div class="ds-topbar-actions">
           <button class="ds-notif-btn" aria-label="Notificaties">🔔<span class="ds-notif-badge">3</span></button>
-          <button class="ds-theme-toggle" id="dsThemeToggle" aria-label="Wissel tussen licht en donker"></button>
+          <button class="ds-theme-toggle" id="dsThemeToggle" data-theme-toggle aria-label="Wissel tussen licht en donker"></button>
           <span class="ds-user-badge">
             <span class="ds-user-avatar">JB</span>
             Jeffrey Biemold
@@ -257,11 +258,9 @@
 
   <script>
     // Preview-only wiring — buiten scope van het design-system zelf.
+    // De theme-toggle-knop draagt data-theme-toggle en wordt door
+    // theme-shared.js zelf afgehandeld (delegated click op <document>).
     (function () {
-      var toggleBtn = document.getElementById('dsThemeToggle');
-      if (toggleBtn && window.DFOTheme) {
-        toggleBtn.addEventListener('click', function () { window.DFOTheme.toggle(); });
-      }
       var openBtn = document.getElementById('prevOpenModal');
       var modal   = document.getElementById('prevModal');
       var close   = document.getElementById('prevModalClose');
