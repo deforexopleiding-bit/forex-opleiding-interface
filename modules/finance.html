@@ -4511,6 +4511,7 @@
             <a class="sr-abtn" id="inboxCustPanelInvoice" href="#" target="_blank" rel="noopener" style="font-size:12.5px"><i class="ti ti-file-invoice"></i> Maak factuur aan</a>
             <button class="sr-abtn secondary" id="inboxClaimPaidBtn" type="button" style="font-size:12.5px" disabled title="Eerst klant koppelen"><i class="ti ti-cash-check"></i> Klant claimt betaald</button>
             <button class="sr-abtn secondary" id="inboxToezeggingBtn" type="button" style="font-size:12.5px" disabled title="Eerst klant koppelen"><i class="ti ti-calendar-check"></i> Leg afspraak vast</button>
+            <button class="sr-abtn secondary" id="inboxEscalateBtn" type="button" style="font-size:12.5px" disabled title="Eerst klant koppelen"><i class="ti ti-alert-triangle"></i> Escaleren</button>
           </div>
         </div>
       </div>
@@ -11387,12 +11388,20 @@
       return;
     }
     _joostEscalationPendingSuggestion = suggestion;
-    openJoostEscalationModal(suggestion);
+    openEscalationModal({ suggestion });
   }
 
-  // Open de escalatie quick-modal en pre-fill de reason-textarea met Joost's
-  // reasoning (of fallback op suggested_reply). Severity default 'medium'.
-  function openJoostEscalationModal(suggestion) {
+  // Open de escalatie quick-modal. Twee paden:
+  //   { suggestion }       — vanuit Joost-card (pre-fill met reasoning).
+  //   { manual: true }     — handmatige knop in klant-paneel (leeg starten,
+  //                          geen Joost-linkage bij submit).
+  function openEscalationModal(opts) {
+    const suggestion = opts && opts.suggestion ? opts.suggestion : null;
+    const manual     = !!(opts && opts.manual);
+    // Module-scope var stuurt het submit-pad. manual=true betekent: geen
+    // joost_suggestion_id in body, geen _joostClearPanel na success.
+    _joostEscalationPendingSuggestion = suggestion || null;
+
     const modal     = document.getElementById('joostEscalationModal');
     const reasonEl  = document.getElementById('joostEscReason');
     const sevEl     = document.getElementById('joostEscSeverity');
@@ -11400,10 +11409,10 @@
     const submitBtn = document.getElementById('joostEscSubmit');
     if (!modal || !reasonEl || !sevEl) return;
 
-    // Pre-fill reason met reasoning (of suggested_reply als reasoning leeg is).
-    const preFill = String(
-      (suggestion && (suggestion.reasoning || suggestion.suggested_reply)) || ''
-    ).trim().slice(0, 500);
+    // Pre-fill reason: Joost-pad met reasoning/suggested_reply; manual-pad leeg.
+    const preFill = suggestion
+      ? String((suggestion.reasoning || suggestion.suggested_reply) || '').trim().slice(0, 500)
+      : '';
     reasonEl.value = preFill;
     sevEl.value = 'medium';
     if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
@@ -11412,18 +11421,18 @@
     setTimeout(() => { try { reasonEl.focus(); reasonEl.setSelectionRange(reasonEl.value.length, reasonEl.value.length); } catch (_e) {} }, 50);
   }
 
+  // Back-compat wrapper — bestaande Joost-flow blijft werken zonder callers aan te passen.
+  function openJoostEscalationModal(suggestion) { openEscalationModal({ suggestion }); }
+
   function closeJoostEscalationModal() {
     const modal = document.getElementById('joostEscalationModal');
     if (modal) modal.classList.add('hidden');
     _joostEscalationPendingSuggestion = null;
   }
 
-  async function submitJoostEscalation() {
+  async function submitEscalationModal() {
+    // suggestion == null => manual-pad (handmatige knop in klant-paneel).
     const suggestion = _joostEscalationPendingSuggestion;
-    if (!suggestion || !suggestion.id) {
-      closeJoostEscalationModal();
-      return;
-    }
     const conversationId = _inboxActiveConvId;
     if (!conversationId) {
       window.AgentShared?.showToast('Geen actief gesprek geselecteerd', 'error');
@@ -11459,12 +11468,12 @@
 
     try {
       const body = {
-        conversation_id:         conversationId,
+        conversation_id: conversationId,
         reason,
         severity,
-        joost_suggestion_id:     suggestion.id,
       };
-      if (triggeredById) body.triggered_by_message_id = triggeredById;
+      if (suggestion && suggestion.id) body.joost_suggestion_id = suggestion.id;
+      if (triggeredById)               body.triggered_by_message_id = triggeredById;
 
       const r = await window.AgentShared.apiFetch('/api/tasks-create-escalation', {
         method:  'POST',
@@ -11474,14 +11483,21 @@
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
 
-      window.AgentShared?.showToast('Escalatie aangemaakt', 'success');
+      const dupToast = d && d.duplicate ? 'Escalatie bestond al voor dit gesprek' : 'Escalatie aangemaakt';
+      window.AgentShared?.showToast(dupToast, d && d.duplicate ? 'info' : 'success');
       closeJoostEscalationModal();
-      // Verberg Joost-paneel: suggestion is server-side gemarkeerd USED_TASK_CREATED.
-      _joostCurrentSuggestion = null;
-      _joostEditMode = false;
-      _joostClearPanel();
+      // Alleen bij Joost-pad: Joost-paneel opruimen (server heeft suggestion
+      // op USED_TASK_CREATED gezet). Bij manual-pad: niets aan Joost te doen.
+      if (suggestion && suggestion.id) {
+        _joostCurrentSuggestion = null;
+        _joostEditMode = false;
+        _joostClearPanel();
+      }
+      // Ververs de Te-doen-teller (nav-badge + sumstrip) zodat de nieuwe
+      // escalatie direct meetelt. Fail-soft: functie kan nog niet gemount zijn.
+      try { if (typeof loadTeDoenActiesCount === 'function') loadTeDoenActiesCount(); } catch (_e) {}
     } catch (e) {
-      console.error('[submitJoostEscalation]', e);
+      console.error('[submitEscalationModal]', e);
       if (errEl) {
         errEl.textContent = 'Escalatie aanmaken mislukt: ' + (e.message || 'onbekende fout');
         errEl.style.display = 'block';
@@ -11491,6 +11507,9 @@
       if (submitBtn) submitBtn.disabled = false;
     }
   }
+
+  // Back-compat wrapper voor bestaande wire.
+  async function submitJoostEscalation() { return submitEscalationModal(); }
 
   async function requestJoostSuggestion() {
     if (!_inboxActiveConvId) {
@@ -12619,6 +12638,7 @@
     const invLnk   = document.getElementById('inboxCustPanelInvoice');
     const claimBtn = document.getElementById('inboxClaimPaidBtn');
     const toezeggingBtn = document.getElementById('inboxToezeggingBtn');
+    const escBtn   = document.getElementById('inboxEscalateBtn');
     const infoSec  = document.getElementById('inboxCustPanelInfoSection');
     // Openstaand-strip (kern-info in één regel): bedrag / factuur-count /
     // oudste dagen te laat. Alleen zichtbaar bij >=1 open factuur.
@@ -12797,6 +12817,25 @@
           claimBtn.title = hasOpen ? 'Eerst klant koppelen' : 'Geen open factuur om te claimen';
         }
       }
+      // F3 — Escaleren. Enabled zodra de conversatie aan een klant gekoppeld
+      // is (escalation is klant-breed, niet factuur-gebonden — endpoint
+      // r10 vermeldt invoice_id NULL). Open facturen zijn niet vereist:
+      // een klant die klaagt zonder open factuur kan alsnog geëscaleerd worden.
+      if (escBtn) {
+        if (cust && cust.id) {
+          escBtn.disabled = false;
+          escBtn.classList.remove('dim');
+          escBtn.style.pointerEvents = '';
+          escBtn.title = 'Escaleer deze conversatie (handmatige opvolging)';
+          escBtn.onclick = () => openEscalationModal({ manual: true });
+        } else {
+          escBtn.disabled = true;
+          escBtn.classList.add('dim');
+          escBtn.style.pointerEvents = 'none';
+          escBtn.title = 'Eerst klant koppelen';
+          escBtn.onclick = null;
+        }
+      }
       // Fase 1 — Leg betaalafspraak vast (TOEZEGGING). Enabled bij matched
       // klant met >=1 open factuur (breach-check heeft facturen nodig als
       // bewijs-anker). Wordt opgeslagen als light arrangement zonder TL-actie.
@@ -12881,6 +12920,14 @@
         toezeggingBtn.style.pointerEvents = 'none';
         toezeggingBtn.title = 'Eerst klant koppelen';
         toezeggingBtn.onclick = null;
+      }
+      // F3 — zonder gekoppelde klant geen escalation (endpoint eist customer).
+      if (escBtn) {
+        escBtn.disabled = true;
+        escBtn.classList.add('dim');
+        escBtn.style.pointerEvents = 'none';
+        escBtn.title = 'Eerst klant koppelen';
+        escBtn.onclick = null;
       }
     }
   }
