@@ -280,6 +280,13 @@ body::before {
      + logout in een 48px-strip. Verbergen; Stap 4 kan later een zoek-icon-
      button als collapsed variant toevoegen. */
   .app-topbar-search { display:none; }
+  /* User-badge collapse naar avatar-only op mobiel. Naam + email verbergen;
+     avatar 30px + gap blijft over. Signout blijft bereikbaar via
+     #appTopbarLogout (aparte 36px icon-button rechts). */
+  .app-topbar-user .user-name,
+  .app-topbar-user .user-email { display:none; }
+  .app-topbar-user .user-badge-inner { gap:0; }
+  .app-topbar-user { max-width:none; }
 }
 @media(max-width:640px) {
   .app-topbar { padding:0 10px; }
@@ -313,6 +320,23 @@ body::before {
    blijven op ruime schermen. min-width:0 voorkomt input-overflow. */
 .app-topbar-search { flex:1 1 auto; max-width:420px; min-width:0; }
 .app-topbar-logout { flex:0 0 auto; }
+
+/* Stap 3a: user-badge in de topbar. renderUserSection injecteert een
+   .user-badge-inner met .user-avatar/.user-name/.user-email hooks. Op
+   mobiel <=720px collapsen naam+email naar avatar-only zodat het geheel
+   past naast hamburger + toggle + logout. Signout blijft altijd bereikbaar
+   via het aparte #appTopbarLogout (geen dropdown-fallback nodig). */
+.app-topbar-user {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  max-width: 220px;
+  color: var(--ds-text, #06181f);
+}
+.app-topbar-user .user-badge-inner {
+  max-width: 100%;
+}
 
 /* Hamburger — 3 lijnen; klikbaar tap-target min 40x40. Verborgen op desktop.
    Direct op --ds-* met fallback (i.p.v. via de bridge-tokens --surface-1
