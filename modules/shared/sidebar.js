@@ -125,6 +125,13 @@
           '<span class="ds-search-kbd" aria-hidden="true">⌘K</span>' +
         '</label>' +
         '<div class="app-topbar-spacer"></div>' +
+        // Stap 3a: user-badge-slot LINKS van .app-topbar-actions. Container
+        // start LEEG; window.AgentShared.renderUserSection() vult 'm runtime
+        // (target-selector .user-section wint via DOM-order over de eerdere
+        // .footer-user, die in deze PR uit de sidebar verwijderd is).
+        // Class .user-section = renderUserSection-target; .app-topbar-user =
+        // topbar-context-styling-hook.
+        '<div class="user-section app-topbar-user" id="app-topbar-user"></div>' +
         '<div class="app-topbar-actions" id="app-topbar-actions"></div>' +
         '<button type="button" class="ds-icon-button app-topbar-logout" id="appTopbarLogout" aria-label="Uitloggen" title="Uitloggen">' +
           '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
@@ -317,9 +324,13 @@
             '<i class="ti ti-lock-square"></i>Secret Area' +
           '</a>' +
         '</div>' +
-        '<div class="sidebar-footer">' +
-          '<div class="footer-user"></div>' +
-        '</div>' +
+        // Stap 3a: .footer-user verwijderd — user-badge staat nu in de
+        // topbar (renderUserSection target `.user-section` wint via
+        // DOM-order). Sidebar-footer blijft leeg staan als "afsluiter"
+        // (border-top hairline geeft nog visueel de sidebar-onderkant);
+        // CSS in agent-shared.css r175-177 blijft ongewijzigd. Verwijderen
+        // vs behouden: bewust behouden om churn te beperken.
+        '<div class="sidebar-footer"></div>' +
       '</nav>';
   }
 

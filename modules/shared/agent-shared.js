@@ -332,33 +332,51 @@
       ? profile.email.slice(0, 21) + '…'
       : profile.email;
 
+    // Stap 3a: interne signout-knop is verwijderd — logout gaat via de
+    // aparte #appTopbarLogout in de topbar (uit #870, gewired in wireTopbarLogout
+    // hieronder). Précies één signout-pad, mobile-safe (aparte icon-button
+    // blijft altijd bereikbaar ook als user-badge inklapt naar avatar-only).
+    // Class-hooks `.user-avatar`, `.user-name`, `.user-email` maken CSS-
+    // targeting mogelijk (mobile collapse hides .user-name + .user-email
+    // via @media in agent-shared.css).
     target.innerHTML = `
-      <div style="display:flex;align-items:center;gap:9px">
-        <div style="width:30px;height:30px;border-radius:50%;
+      <div class="user-badge-inner" style="display:flex;align-items:center;gap:9px">
+        <div class="user-avatar" style="width:30px;height:30px;border-radius:50%;
           background:linear-gradient(135deg,#093d54,#688b9b);
           display:flex;align-items:center;justify-content:center;
           color:#fff;font-weight:700;font-size:11px;flex-shrink:0">
           ${esc(initials)}
         </div>
-        <div style="flex:1;min-width:0;overflow:hidden">
-          <div style="font-size:12px;font-weight:600;color:var(--text);
+        <div class="user-text" style="flex:1;min-width:0;overflow:hidden">
+          <div class="user-name" style="font-size:12px;font-weight:600;color:var(--text);
             white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
             ${esc(profile.full_name || profile.email)}
           </div>
-          <div style="font-size:10px;color:var(--text-faint);
+          <div class="user-email" style="font-size:10px;color:var(--text-faint);
             white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
             ${esc(shortEmail)}
           </div>
         </div>
-        <button
-          onclick="(async()=>{if(window.AuthShared)await window.AuthShared.signOut();window.location.href='/login.html';})()"
-          style="background:transparent;border:none;color:var(--text-faint);
-            cursor:pointer;padding:3px;border-radius:4px;flex-shrink:0;
-            line-height:1;font-size:14px"
-          title="Uitloggen">&#8617;</button>
       </div>`;
 
     injectThemeToggle();
+    wireTopbarLogout();
+  }
+
+  // ── Topbar-logout wiring (Stap 3a) ───────────────────────────────────────
+  // Wire #appTopbarLogout (uit #870) aan de bestaande signout-flow.
+  // Idempotent via dataset.wired zodat re-mount / dubbele renderUserSection-
+  // aanroepen geen dubbele listener geven. Exact dezelfde actie als de oude
+  // interne signout-knop: AuthShared.signOut() + redirect naar /login.html.
+  function wireTopbarLogout() {
+    const btn = document.getElementById('appTopbarLogout');
+    if (!btn || btn.dataset.wired === '1') return;
+    btn.dataset.wired = '1';
+    btn.addEventListener('click', async () => {
+      try { if (window.AuthShared) await window.AuthShared.signOut(); }
+      catch (_e) { /* fail-soft: alsnog naar login */ }
+      window.location.href = '/login.html';
+    });
   }
 
   // ── Theme-toggle injectie in sidebar footer ──────────────────────────────────
