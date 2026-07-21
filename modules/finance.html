@@ -17364,6 +17364,15 @@
             </button>
             <button class="wbx-btn wbx-sm" type="button" id="opruimReloadBtn">Herlaad</button>
           </div>
+          <!-- Filter tussen "nog aanmanen" en "al in workflow" (op pipeline-stage).
+               Client-side over de reeds-geladen dataset; _bulkSetActiveScope
+               snijdt de selectie automatisch op zichtbare rijen (r18104-18106)
+               dus verborgen rijen kunnen niet meer geselecteerd blijven. -->
+          <div class="sr-segments" id="opruimFilterSeg" style="margin:8px 12px 4px">
+            <button type="button" class="sr-seg active" data-opruim-filter="all">Alle <span data-opruim-filter-count="all" style="opacity:.7">(0)</span></button>
+            <button type="button" class="sr-seg"        data-opruim-filter="todo">Nog aanmanen <span data-opruim-filter-count="todo" style="opacity:.7">(0)</span></button>
+            <button type="button" class="sr-seg"        data-opruim-filter="active">Al in workflow <span data-opruim-filter-count="active" style="opacity:.7">(0)</span></button>
+          </div>
           <div id="opruimListBody"></div>
         </div>
       </div>
@@ -17417,6 +17426,20 @@
     // opening OF na een engine-run (stale-flag). Geen dubbele fetches.
     host.querySelectorAll('#opruimSubTabs [data-opruim-tab]').forEach((btn) => {
       btn.addEventListener('click', () => _opruimShowSubtab(btn.getAttribute('data-opruim-tab')));
+    });
+
+    // Filter-pills (nog aanmanen / al in workflow / alle) — client-side over
+    // de reeds-geladen lijst. Stage_slug 'nieuw' = todo; alle andere = active.
+    host.querySelectorAll('#opruimFilterSeg [data-opruim-filter]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const f = btn.getAttribute('data-opruim-filter');
+        if (!f || f === _opruimFilter) return;
+        _opruimFilter = f;
+        host.querySelectorAll('#opruimFilterSeg [data-opruim-filter]').forEach((b) => {
+          b.classList.toggle('active', b.getAttribute('data-opruim-filter') === f);
+        });
+        _opruimRenderList();
+      });
     });
 
     // "Engine nu draaien" — handmatige trigger van de dunning-engine (zelfde
@@ -17473,6 +17496,14 @@
   // run 'em weer stale maakt.
   let _opruimActiveTab = 'opruim';
   let _opruimRunsStale = true;
+
+  // Opruim-list state: volledige dataset (voor filter-toggle zonder refetch)
+  // + actief filter. 'all' = alle klanten met achterstand; 'todo' = stage
+  // 'nieuw' (nog niet aangemaand); 'active' = stage != 'nieuw' (al in workflow).
+  // Sinds #861 schuift de engine stage automatisch naar 'aangemaand' na eerste
+  // send, dus stage_slug is een betrouwbare proxy voor "in workflow".
+  let _opruimAllList = [];
+  let _opruimFilter  = 'all';
 
   function _opruimShowSubtab(name) {
     const tab = (name === 'runs') ? 'runs' : 'opruim';
@@ -17665,32 +17696,70 @@
         throw new Error(msg);
       }
       const d = await r.json();
-      const list = Array.isArray(d.by_customer) ? d.by_customer : [];
-      if (cnt) cnt.textContent = list.length + ' klant' + (list.length === 1 ? '' : 'en');
-      if (!list.length) {
-        body.innerHTML = `<div class="wbx-empty"><h3>Geen achterstand</h3>Alle klanten hebben maximaal één open factuur.</div>`;
-        if (typeof _bulkResetSelection === 'function') _bulkResetSelection();
-        return;
-      }
-      body.innerHTML = `
-        <table class="wbx-table wbx-bulk-tbl" id="opruimTable">
-          <thead>
-            <tr>
-              <th class="wbx-bulk-cb-cell" data-bulk-cell><input type="checkbox" data-bulk-cb-all title="Selecteer alle zichtbare klanten"></th>
-              <th>Klant</th>
-              <th class="wbx-r">Open facturen</th>
-              <th class="wbx-r">Totaal open</th>
-              <th class="wbx-r">Oudste</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>${list.map(_opruimCustRowHtml).join('')}</tbody>
-        </table>
-      `;
-      _opruimWireRows(list);
+      _opruimAllList = Array.isArray(d.by_customer) ? d.by_customer : [];
+      _opruimRenderList();
     } catch (e) {
       body.innerHTML = `<div class="wbx-empty" style="color:var(--wbx-s-inc-tx)"><h3>Fout</h3>${esc(e?.message || String(e))}</div>`;
     }
+  }
+
+  // Predicates + filter helper. Stage 'nieuw' (of leeg/onbekend) = todo,
+  // want auto-instroom zet een klant automatisch in 'nieuw' bij eerste
+  // detectie; alles daarna (aangemaand/in_gesprek/regeling/brief_verstuurd/
+  // incasso/afschrijven/opgelost) telt als "al in workflow".
+  function _opruimIsTodo(r)   { return String(r?.stage_slug || 'nieuw') === 'nieuw'; }
+  function _opruimIsActive(r) { return !_opruimIsTodo(r); }
+  function _opruimFilterList(list) {
+    if (_opruimFilter === 'todo')   return list.filter(_opruimIsTodo);
+    if (_opruimFilter === 'active') return list.filter(_opruimIsActive);
+    return list.slice();
+  }
+  function _opruimUpdateFilterCounts(list) {
+    const cAll    = list.length;
+    const cTodo   = list.filter(_opruimIsTodo).length;
+    const cActive = cAll - cTodo;
+    const bAll    = document.querySelector('#opruimFilterSeg [data-opruim-filter-count="all"]');
+    const bTodo   = document.querySelector('#opruimFilterSeg [data-opruim-filter-count="todo"]');
+    const bActive = document.querySelector('#opruimFilterSeg [data-opruim-filter-count="active"]');
+    if (bAll)    bAll.textContent    = '(' + cAll + ')';
+    if (bTodo)   bTodo.textContent   = '(' + cTodo + ')';
+    if (bActive) bActive.textContent = '(' + cActive + ')';
+  }
+
+  function _opruimRenderList() {
+    const body = document.getElementById('opruimListBody');
+    const cnt  = document.getElementById('opruimListCount');
+    if (!body) return;
+    _opruimUpdateFilterCounts(_opruimAllList);
+    const visible = _opruimFilterList(_opruimAllList);
+    if (cnt) cnt.textContent = visible.length + ' klant' + (visible.length === 1 ? '' : 'en');
+    if (!_opruimAllList.length) {
+      body.innerHTML = `<div class="wbx-empty"><h3>Geen achterstand</h3>Alle klanten hebben maximaal één open factuur.</div>`;
+      if (typeof _bulkResetSelection === 'function') _bulkResetSelection();
+      return;
+    }
+    if (!visible.length) {
+      body.innerHTML = `<div class="wbx-empty"><h3>Geen resultaten voor dit filter</h3>Wissel het filter of ververs de lijst.</div>`;
+      // Rowindex leeg -> selectie wordt gesneden op zichtbare rijen (0).
+      _bulkSetActiveScope('opruimen', []);
+      return;
+    }
+    body.innerHTML = `
+      <table class="wbx-table wbx-bulk-tbl" id="opruimTable">
+        <thead>
+          <tr>
+            <th class="wbx-bulk-cb-cell" data-bulk-cell><input type="checkbox" data-bulk-cb-all title="Selecteer alle zichtbare klanten"></th>
+            <th>Klant</th>
+            <th class="wbx-r">Open facturen</th>
+            <th class="wbx-r">Totaal open</th>
+            <th class="wbx-r">Oudste</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>${visible.map(_opruimCustRowHtml).join('')}</tbody>
+      </table>
+    `;
+    _opruimWireRows(visible);
   }
 
   function _opruimCustRowHtml(r) {
