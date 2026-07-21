@@ -3432,6 +3432,7 @@
                 <button class="sr-ibtn" id="inboxThreadArchiveBtn" type="button" title="Gesprek archiveren (komt NIET terug bij nieuw bericht)" hidden style="color:#b45309"><i class="ti ti-archive"></i></button>
                 <button class="sr-ibtn" id="inboxThreadReopenBtn"  type="button" title="Gesprek heropenen"        hidden style="color:var(--accent-cyan)"><i class="ti ti-refresh"></i></button>
                 <button class="sr-ibtn" id="inboxThreadUnarchiveBtn" type="button" title="Uit archief halen"      hidden style="color:var(--accent-cyan)"><i class="ti ti-archive-off"></i></button>
+                <button class="sr-ibtn" id="inboxThreadMarkUnreadBtn" type="button" title="Markeer als ongelezen"><i class="ti ti-mail"></i></button>
                 <button class="sr-ibtn" id="inboxThreadCustomerBtn" type="button" title="Klant-info"><i class="ti ti-user"></i></button>
               </div>
             </div>
@@ -4437,6 +4438,15 @@
             <div class="inbox-c-customer-phone incm-phone" id="inboxCustPanelPhone">—</div>
           </div>
           <span class="inbox-c-window-badge-large incm-badge open" id="inboxCustPanelWindow" hidden>24h open</span>
+        </div>
+
+        <!-- Actie-strip: hergebruik de bestaande finance-belfunctie (_wbxPlaceCall).
+             Disabled zonder telefoonnummer. Bel-flow inclusief call-sheet /
+             statusbalk is identiek aan de Klanten-tab (geen tweede implementatie). -->
+        <div id="inboxCustPanelActions" style="display:flex;gap:8px;padding:6px 12px 10px">
+          <button type="button" class="wbx-btn wbx-sm" id="inboxCustPanelCallBtn" disabled title="Bel deze klant">
+            <i class="ti ti-phone"></i> Bel nu
+          </button>
         </div>
 
         <!-- Openstaand-strip: kern-info in één regel, prominent. Alleen bij >0 open facturen. -->
@@ -12393,6 +12403,20 @@
       avatarEl.style.background = _inboxAvatarColor(phone || displayName);
     }
 
+    // Bel-knop: enable alleen bij aanwezig telefoonnummer. Gebruikt de
+    // bestaande finance-belfunctie _wbxPlaceCall (identieke flow als de
+    // Klanten-tab) via een dataset-carrier zodat de globale click-handler
+    // altijd het meest recente nummer + naam pakt.
+    const callBtn = document.getElementById('inboxCustPanelCallBtn');
+    if (callBtn) {
+      callBtn.dataset.phone = phone || '';
+      callBtn.dataset.name  = displayName || '';
+      callBtn.disabled = !phone;
+      callBtn.title = phone
+        ? ('Bel ' + (displayName || phone))
+        : 'Geen telefoonnummer beschikbaar';
+    }
+
     // 24h window badge — alleen tonen als we een conv hebben.
     if (badgeEl) {
       if (!conv) {
@@ -13564,6 +13588,57 @@
     });
     document.getElementById('inboxThreadUnarchiveBtn')?.addEventListener('click', () => {
       if (_inboxActiveConvId) _inboxSetConvStatus(_inboxActiveConvId, 'open');
+    });
+
+    // Bel-knop in klant-info-panel: gebruikt de bestaande finance-belfunctie
+    // _wbxPlaceCall (identieke flow als Klanten-tab). Nummer + naam komen
+    // uit dataset zoals renderInboxCustomerPanel die per klant zet. Geen
+    // duplicate belstack: hetzelfde _wbxSoftphone + callbar wordt gebruikt.
+    document.getElementById('inboxCustPanelCallBtn')?.addEventListener('click', async () => {
+      const btn = document.getElementById('inboxCustPanelCallBtn');
+      if (!btn || btn.disabled) return;
+      const phone = btn.dataset.phone || '';
+      const displayName = btn.dataset.name || '';
+      if (!phone) return;
+      if (typeof _wbxPlaceCall !== 'function') {
+        window.AgentShared?.showToast?.('Belfunctie niet beschikbaar in deze context.', 'error');
+        return;
+      }
+      try {
+        await _wbxPlaceCall(phone, { displayName });
+      } catch (e) {
+        window.AgentShared?.showToast?.('Bellen mislukt: ' + (e?.message || 'onbekend'), 'error');
+      }
+    });
+
+    // Markeer-als-ongelezen: zet unread_count > 0 via POST /api/inbox-mark-unread
+    // (fail-CLOSED RBAC finance.inbox.view). Gesprek blijft open; alleen de
+    // conv-list wordt herladen zodat indicator + 'Ongelezen'-filter meteen
+    // kloppen. Bewust GÉÉN Meta-call: WhatsApp heeft geen markAsUnread —
+    // dit is puur een lokale UX-vlag.
+    document.getElementById('inboxThreadMarkUnreadBtn')?.addEventListener('click', async () => {
+      if (!_inboxActiveConvId) return;
+      const btn = document.getElementById('inboxThreadMarkUnreadBtn');
+      if (btn) btn.disabled = true;
+      try {
+        const r = await window.AgentShared.apiFetch('/api/inbox-mark-unread', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conversation_id: _inboxActiveConvId }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.status === 403) {
+          window.AgentShared?.showToast?.('Geen rechten (finance.inbox.view).', 'error');
+          return;
+        }
+        if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+        window.AgentShared?.showToast?.('Gemarkeerd als ongelezen.', 'success');
+        loadInboxConvList();
+      } catch (e) {
+        window.AgentShared?.showToast?.('Ongelezen markeren mislukt: ' + (e?.message || 'onbekend'), 'error');
+      } finally {
+        if (btn) btn.disabled = false;
+      }
     });
 
     // Zoek-input met 300ms debounce.
