@@ -242,12 +242,134 @@ body::before {
 ::-webkit-scrollbar-thumb { background:var(--border-strong); border-radius:3px; }
 
 /* ── Responsive ── */
-@media(max-width:680px) {
-  /* Mobiele sidebar wordt een overlay BOVEN de content. Daar moet de
-     achtergrond opaak zijn — anders schemert de pagina-content erdoorheen
-     als de sidebar weer in beeld wordt gezet. */
-  .sidebar { transform:translateX(-100%); background:var(--bg); }
-  .main { margin-left:0; }
+/* Bewuste driedeling — desktop ~1025px+: sidebar + geen topbar-hamburger;
+   tablet 641-1024px: topbar-hamburger zichtbaar, sidebar off-canvas via
+   .sidebar-open; mobile <=640px: identiek gedrag maar smallere paddings. */
+@media(max-width:1024px) {
+  .sidebar {
+    transform:translateX(-100%);
+    background:var(--sidebar-bg);
+    transition:transform .22s ease;
+    box-shadow:var(--shadow-lg);
+  }
+  body.sidebar-open .sidebar { transform:translateX(0); }
+  body.sidebar-open::after {
+    content:"";
+    position:fixed; inset:0;
+    background:rgba(6,24,31,.45);
+    z-index:150;
+    pointer-events:auto;
+  }
+  [data-theme="dark"] body.sidebar-open::after { background:rgba(0,0,0,.6); }
+  .main { margin-left:0; padding-top:56px; }
+  /* Hamburger toont in de topbar; theme-toggle blijft rechtsboven bereikbaar. */
+  .app-hamburger { display:inline-flex; }
+}
+@media(max-width:640px) {
+  .app-topbar { padding:0 10px; }
+  .sidebar    { width:min(280px, 84vw); }
+}
+
+/* ── Fase-shell: app-topbar (fixed strip rechtsboven) ────────────────────
+   Dunne balk over de volle breedte, boven de sidebar. Bevat hamburger
+   (mobile) + spacer + actions (waar injectThemeToggle de maan/zon plaatst).
+   Op desktop is de balk transparant en visueel discreet; alleen de toggle
+   is zichtbaar. Op tablet/mobile schijnt de balk met een subtiele
+   surface-tint zodat de hamburger goed leesbaar is. */
+.app-topbar {
+  position:fixed;
+  top:0; left:0; right:0;
+  height:48px;
+  display:flex; align-items:center; gap:8px;
+  padding:0 14px;
+  background:transparent;
+  z-index:250;                 /* boven .sidebar (z:200) zodat toggle klikbaar blijft */
+  pointer-events:none;         /* achtergrond niet-klikbaar; children weer wel */
+}
+.app-topbar > * { pointer-events:auto; }
+.app-topbar-spacer { flex:1 1 auto; }
+.app-topbar-actions { display:inline-flex; align-items:center; gap:6px; }
+
+/* Hamburger — 3 lijnen; klikbaar tap-target min 40x40. Verborgen op desktop. */
+.app-hamburger {
+  display:none;
+  width:40px; height:40px;
+  align-items:center; justify-content:center;
+  gap:0;
+  padding:0;
+  background:var(--surface-1);
+  border:1px solid var(--sidebar-border);
+  border-radius:8px;
+  cursor:pointer;
+  transition:background .12s;
+  flex-direction:column;
+  row-gap:4px;
+}
+.app-hamburger:hover { background:var(--sidebar-item-hover); }
+.app-hamburger span {
+  display:block;
+  width:18px; height:2px;
+  background:var(--text-primary);
+  border-radius:2px;
+}
+[data-theme="dark"] .app-hamburger { background:var(--surface-1); }
+
+/* Theme-toggle (maan/zon) — cirkelvormig, min 40x40 tap-target. */
+.app-theme-toggle {
+  width:40px; height:40px;
+  display:inline-flex; align-items:center; justify-content:center;
+  background:var(--surface-1);
+  color:var(--text-primary);
+  border:1px solid var(--sidebar-border);
+  border-radius:50%;
+  cursor:pointer;
+  font-size:17px;
+  transition:background .12s, color .12s, border-color .12s;
+}
+.app-theme-toggle:hover { background:var(--sidebar-item-hover); border-color:var(--brand-primary); color:var(--brand-primary); }
+.app-theme-toggle:focus-visible { outline:none; box-shadow:0 0 0 3px var(--brand-primary-soft); }
+[data-theme="dark"] .app-theme-toggle { background:var(--surface-1); }
+
+/* ── Fase-shell: bridging naar --ds-* tokens ─────────────────────────────
+   Zodra styles/design-system.css is geladen, worden de bestaande
+   sidebar-tokens gemapt naar de nieuwe --ds-* waardes (krachtig-blauw
+   light+dark). Fallback op de originele waardes wanneer design-system.css
+   NIET geladen is — backward-compat gegarandeerd. Deze block staat aan
+   het einde zodat 'ie de eerdere :root / [data-theme="dark"] declaraties
+   overschrijft (last-declaration-wins). */
+:root {
+  --sidebar-bg:               var(--ds-surface,          #ffffff);
+  --sidebar-border:           var(--ds-border,           #e5e7eb);
+  --sidebar-item-hover:       var(--ds-surface-2,        #f3f4f6);
+  --sidebar-item-active:      var(--ds-brand-soft,       rgba(9, 61, 84, 0.10));
+  --sidebar-item-active-text: var(--ds-brand-strong,     #093d54);
+  --brand-primary:            var(--ds-brand,            #093d54);
+  --brand-primary-hover:      var(--ds-brand-strong,     #0b4d6c);
+  --brand-primary-soft:       var(--ds-brand-soft,       rgba(9, 61, 84, 0.08));
+  --border-subtle:            var(--ds-border,           #e5e7eb);
+  --surface-page:             var(--ds-page,             #fafafa);
+  --surface-1:                var(--ds-surface,          #ffffff);
+  --surface-2:                var(--ds-surface-2,        #f8fafc);
+  --text-primary:             var(--ds-text,             #0f172a);
+  --text-secondary:           var(--ds-text-muted,       #475569);
+  --text-tertiary:            var(--ds-text-faint,       #94a3b8);
+}
+[data-theme="dark"] {
+  --sidebar-bg:               var(--ds-surface,          #0d1922);
+  --sidebar-border:           var(--ds-border,           #1b2d38);
+  --sidebar-item-hover:       var(--ds-surface-2,        #12222d);
+  --sidebar-item-active:      var(--ds-brand-soft,       #082f45);
+  --sidebar-item-active-text: var(--ds-brand,            #38bdf8);
+  --brand-primary:            var(--ds-brand,            #38bdf8);
+  --brand-primary-hover:      var(--ds-brand-strong,     #5fcdfa);
+  --brand-primary-soft:       var(--ds-brand-soft,       #082f45);
+  --border-subtle:            var(--ds-border,           #1b2d38);
+  --surface-page:             var(--ds-page,             #070f14);
+  --surface-1:                var(--ds-surface,          #0d1922);
+  --surface-2:                var(--ds-surface-2,        #12222d);
+  --text-primary:             var(--ds-text,             #e9f5fb);
+  --text-secondary:           var(--ds-text-muted,       #90a8b4);
+  --text-tertiary:            var(--ds-text-faint,       #5d7681);
 }
 
 /* ── Tooltips (CSS-only via data-tooltip="...") ──────────────────────────
