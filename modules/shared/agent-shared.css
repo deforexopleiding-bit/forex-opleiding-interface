@@ -146,11 +146,25 @@ body::before {
   pointer-events: none; z-index: 0;
 }
 
-/* ── Sidebar (Pearl) ── */
-/* Transparante backdrop zodat body (--bg) + body::before-glow ononderbroken
-   doorlopen onder de sidebar én de content. Alleen de hairline border-right
-   markeert de kolom-grens. Mobile (overlay) zet 'm hieronder weer opaak. */
-.sidebar { position:fixed; top:0; left:0; bottom:0; width:var(--sidebar-w); background:transparent; border-right:1px solid var(--sidebar-border); display:flex; flex-direction:column; z-index:200; overflow-y:auto; }
+/* ── Sidebar (full-width-topbar-layout) ──────────────────────────────────
+   Sinds de full-width-topbar-migratie begint de sidebar ONDER de topbar
+   (top:48px matcht .app-topbar height). Achtergrond opaque via --ds-surface
+   zodat topbar + sidebar één doorlopend shell-oppervlak zijn (LMS-stijl);
+   de eerdere transparant-keuze (body-glow doorloopt onder sidebar) is
+   bewust ingeruild voor visueel-één-shell — glow blijft zichtbaar onder
+   .main-content. */
+.sidebar {
+  position:fixed;
+  top:48px; left:0; bottom:0;
+  width:var(--sidebar-w);
+  background:var(--ds-surface, #ffffff);
+  border-right:1px solid var(--sidebar-border);
+  display:flex; flex-direction:column;
+  z-index:200;
+  overflow-y:auto;
+}
+/* .sidebar-logo styling behouden voor backward-compat als een module 'm
+   nog zelf-renderd (defensief no-op sinds de shell-versie leeg is). */
 .sidebar-logo { display:flex; align-items:center; justify-content:flex-start; padding:16px; border-bottom:1px solid var(--sidebar-border); flex-shrink:0; }
 .sidebar-logo img { max-height:52px; width:auto; max-width:180px; object-fit:contain; display:block; }
 .sidebar-logo .logo-dark  { display:block; }
@@ -256,7 +270,6 @@ body::before {
 @media(max-width:1024px) {
   .sidebar {
     transform:translateX(-100%);
-    background:var(--sidebar-bg);
     transition:transform .22s ease;
     box-shadow:var(--shadow-lg);
   }
@@ -271,9 +284,9 @@ body::before {
   [data-theme="dark"] body.sidebar-open::after { background:rgba(0,0,0,.6); }
   .main { margin-left:0; padding-top:0; }
   /* Hamburger toont in de topbar; theme-toggle blijft rechtsboven bereikbaar.
-     Op tablet/mobile is de sidebar off-canvas, dus topbar loopt door tot 0. */
+     Topbar is sinds de full-width-migratie sowieso left:0 op alle
+     breakpoints — vroegere mobile-only override is redundant. */
   .app-hamburger { display:inline-flex; }
-  .app-topbar    { left:0; }
 }
 @media(max-width:720px) {
   /* Op smal scherm past een 420px-zoekbalk niet tussen hamburger + toggle
@@ -293,24 +306,23 @@ body::before {
   .sidebar    { width:min(280px, 84vw); }
 }
 
-/* ── Fase-shell: app-topbar (fixed strip rechtsboven) ────────────────────
-   Zichtbare balk NAAST de sidebar op desktop (left:var(--sidebar-w) — anders
-   dekt de topbar het sidebar-logo af). Op tablet/mobile is de sidebar off-
-   canvas, dus daar loopt de topbar door tot left:0.
-   Background + border via --ds-* tokens met expliciete fallback zodat de
-   balk zichtbaar is ongeacht of/wanneer design-system.css resolvet
-   (rgba(0,0,0,0) was de bug in #865 — pointer-events:none maakte de strip
-   ook nog eens onzichtbaar-klikbaar zodat je erdoorheen keek). */
+/* ── Fase-shell: app-topbar (full-width strip bovenaan) ─────────────────
+   Sinds de full-width-migratie loopt de topbar DOORLOPEND over de volle
+   breedte (left:0) en begint de sidebar eronder (top:48px). Logo staat
+   links in de topbar. Background + border via --ds-* tokens met expliciete
+   hex-fallback (pattern #868). z:250 blijft boven sidebar (z:200) — hoewel
+   ze niet meer overlappen sinds de sidebar top:48px is, behouden we het
+   voor eventuele mobile-overlay-edge-cases. */
 .app-topbar {
   position:fixed;
-  top:0; left:var(--sidebar-w); right:0;
+  top:0; left:0; right:0;
   height:48px;
   display:flex; align-items:center; gap:8px;
   padding:0 14px;
   background:var(--ds-surface, #ffffff);
   border-bottom:1px solid var(--ds-border, #dfe8ec);
   color:var(--ds-text, #06181f);
-  z-index:250;                 /* boven .sidebar (z:200) zodat toggle klikbaar blijft */
+  z-index:250;
 }
 .app-topbar-spacer { flex:1 1 auto; }
 .app-topbar-actions { display:inline-flex; align-items:center; gap:6px; }
@@ -318,6 +330,21 @@ body::before {
 /* Stap 2/4 topbar-consolidatie: zoekbalk-slot in de flex-rij. Groeit met
    de topbar maar wordt gecapt op 420px zodat de acties rechts leesbaar
    blijven op ruime schermen. min-width:0 voorkomt input-overflow. */
+/* Logo links in de topbar (verhuisd uit .sidebar-logo). Twee <img>-varianten
+   voor light/dark; theme-flip via CSS (identiek aan het oude .sidebar-logo-
+   patroon). max-height matcht de 48px topbar met wat marge. */
+.app-topbar-logo {
+  flex:0 0 auto;
+  display:flex; align-items:center;
+  padding:0 6px 0 4px;
+  min-width:0;
+}
+.app-topbar-logo img { max-height:32px; width:auto; max-width:150px; object-fit:contain; display:block; }
+.app-topbar-logo .logo-dark  { display:block; }
+.app-topbar-logo .logo-light { display:none; }
+[data-theme="dark"] .app-topbar-logo .logo-dark  { display:none; }
+[data-theme="dark"] .app-topbar-logo .logo-light { display:block; }
+
 .app-topbar-search { flex:1 1 auto; max-width:420px; min-width:0; }
 .app-topbar-logout { flex:0 0 auto; }
 

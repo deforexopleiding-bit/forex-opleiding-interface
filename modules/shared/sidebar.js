@@ -115,6 +115,12 @@
         '<button type="button" class="app-hamburger" id="appHamburger" aria-label="Open menu" aria-expanded="false">' +
           '<span></span><span></span><span></span>' +
         '</button>' +
+        // Logo verhuisd uit .sidebar-logo naar de topbar-links (LMS-stijl).
+        // Twee <img>-varianten voor light/dark; theme-flip via CSS.
+        '<div class="app-topbar-logo">' +
+          '<img src="/img/logo-dark.png"  alt="De Forex Opleiding" class="logo-dark">' +
+          '<img src="/img/logo-light.png" alt="De Forex Opleiding" class="logo-light">' +
+        '</div>' +
         '<label class="ds-search app-topbar-search" aria-label="Zoeken">' +
           '<span class="ds-search-icon" aria-hidden="true">' +
             '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
@@ -142,7 +148,12 @@
         // ziet panel-klikken als "in de topbar" en sluit de sidebar-drawer
         // niet (correct gedrag).
         '<button type="button" id="sbNotifBtn" class="sb-notif-btn" aria-label="Meldingen" aria-haspopup="true" aria-expanded="false">' +
-          '<i class="ti ti-bell"></i>' +
+          // Inline SVG (feather-bell) — geen tabler-webfont afhankelijkheid;
+          // zichtbaar op index.html + modules die de webfont niet laden.
+          '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>' +
+            '<path d="M13.73 21a2 2 0 0 1-3.46 0"/>' +
+          '</svg>' +
           '<span id="sbNotifBadge" class="sb-notif-badge" hidden>0</span>' +
         '</button>' +
         '<div id="sbNotifPanel" class="sb-notif-panel" hidden>' +
@@ -232,14 +243,8 @@
   function buildSidebarHtml() {
     return '' +
       '<nav class="sidebar">' +
-        // Stap 3b: notif-bel + panel zijn verhuisd naar de topbar
-        // (buildTopbarHtml). .sidebar-logo bevat nu alleen nog de logo-imgs.
-        '<div class="sidebar-logo">' +
-          '<div class="sidebar-logo-imgs">' +
-            '<img src="/img/logo-dark.png"  alt="De Forex Opleiding" class="logo-dark">' +
-            '<img src="/img/logo-light.png" alt="De Forex Opleiding" class="logo-light">' +
-          '</div>' +
-        '</div>' +
+        // Logo is verhuisd naar de topbar (full-width layout). .sidebar-logo
+        // markup weg; .sidebar-clock hieronder krijgt nu de top-positie.
         '<div class="sidebar-clock"><span class="sidebar-clock-date" id="sbClockDate"></span>' +
         '<span class="sidebar-clock-time" id="sbClockTime"></span></div>' +
         '<div class="sidebar-nav">' +

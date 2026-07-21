@@ -552,7 +552,25 @@
     btn.setAttribute('aria-label', currentTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
     btn.title = currentTheme === 'dark' ? 'Light mode' : 'Dark mode';
     btn.type = 'button';
-    btn.innerHTML = `<i class="${currentTheme === 'dark' ? 'ti ti-sun' : 'ti ti-moon'}"></i>`;
+    // Inline SVG i.p.v. tabler-webfont zodat de toggle zichtbaar is op
+    // pagina's die de webfont niet laden (bv. index.html). theme-shared.js
+    // swapt de svg.innerHTML tussen MOON en SUN paths via data-theme-icon.
+    const MOON_PATHS = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+    const SUN_PATHS =
+      '<circle cx="12" cy="12" r="5"/>' +
+      '<line x1="12" y1="1" x2="12" y2="3"/>' +
+      '<line x1="12" y1="21" x2="12" y2="23"/>' +
+      '<line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>' +
+      '<line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>' +
+      '<line x1="1" y1="12" x2="3" y2="12"/>' +
+      '<line x1="21" y1="12" x2="23" y2="12"/>' +
+      '<line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>' +
+      '<line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>';
+    const initialPaths = currentTheme === 'dark' ? SUN_PATHS : MOON_PATHS;
+    btn.innerHTML =
+      '<svg data-theme-icon viewBox="0 0 24 24" width="17" height="17" fill="none" ' +
+      'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+      'stroke-linejoin="round" aria-hidden="true">' + initialPaths + '</svg>';
     host.appendChild(btn);
   }
 
