@@ -115,6 +115,57 @@ export default async function handler(req, res) {
       });
     }
 
+    // ---- Idempotency-check ----
+    // Eén open MANUAL_ESCALATION per (customer_id, conversation_id) is genoeg
+    // om dubbelklik + concurrent tabs af te vangen. Bij hit → 200 met
+    // duplicate:true + het bestaande item (UI toont "escalatie bestaat al").
+    // payload->>conversation_id is een jsonb text-cast (PostgREST filter-syntax).
+    const { data: existingRows, error: existingErr } = await supabaseAdmin
+      .from('pending_actions')
+      .select(`
+        id, customer_id, arrangement_id, invoice_id, action_type, status, payload,
+        proposed_by_user_id, approved_by_user_id, approved_at, executed_at,
+        execution_result, rejection_reason, scheduled_for, expires_at,
+        created_at, updated_at
+      `)
+      .eq('customer_id', conv.customer_id)
+      .eq('action_type', 'MANUAL_ESCALATION')
+      .eq('status', 'PENDING')
+      .filter('payload->>conversation_id', 'eq', conversationId)
+      .limit(1);
+    if (existingErr) {
+      // Fail-soft: bij lookup-fout gaan we door met de INSERT (worst-case
+      // duplicaat, wat handmatig af te sluiten is). Niet blokkeren.
+      console.error('[tasks-create-escalation dup-check]', existingErr.message);
+    } else if (Array.isArray(existingRows) && existingRows.length > 0) {
+      const existing = existingRows[0];
+      const dupItem = {
+        id:               existing.id,
+        customer_id:      existing.customer_id,
+        arrangement_id:   existing.arrangement_id,
+        invoice_id:       existing.invoice_id,
+        action_type:      existing.action_type,
+        status:           existing.status,
+        payload:          existing.payload || {},
+        proposed_by:      existing.proposed_by_user_id,
+        approved_by:      existing.approved_by_user_id,
+        approved_at:      existing.approved_at,
+        executed_at:      existing.executed_at,
+        execution_result: existing.execution_result,
+        reject_reason:    existing.rejection_reason,
+        scheduled_for:    existing.scheduled_for,
+        expires_at:       existing.expires_at,
+        created_at:       existing.created_at,
+        updated_at:       existing.updated_at,
+      };
+      return res.status(200).json({
+        item:         dupItem,
+        task_id:      existing.id,
+        joost_linked: false,
+        duplicate:    true,
+      });
+    }
+
     // ---- INSERT pending_action ----
     // Source: 'joost' als de escalation via een Joost-suggestie is getriggerd,
     // anders 'manual' (admin klikte zelf op escaleer-knop zonder Joost-card).
