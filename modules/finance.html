@@ -2666,6 +2666,13 @@
       background:#9ca3af; box-shadow:0 0 0 3px rgba(156,163,175,.20);
       transition: background-color .15s ease, box-shadow .15s ease;
     }
+    /* Idle = lazy-registratie, klaar om te bellen. Expliciet neutraal grijs
+       zodat balletje + tekst (labelMap.idle) consistent zijn (voorheen
+       viel .idle impliciet op default; nu semantisch expliciet + veilig
+       tegen toekomstige default-wijziging). */
+    :where(.wbx, .wbx-sheet) .wbx-call-conn-status.idle .wbx-call-conn-dot {
+      background:#9ca3af; box-shadow:0 0 0 3px rgba(156,163,175,.20);
+    }
     :where(.wbx, .wbx-sheet) .wbx-call-conn-status.connecting .wbx-call-conn-dot {
       background:#eab308; box-shadow:0 0 0 3px rgba(234,179,8,.24);
     }
@@ -12436,8 +12443,10 @@
       const state = (typeof _wbxRegistrationStatusForLine === 'function')
         ? _wbxRegistrationStatusForLine(chosenLine)
         : 'idle';
+      // 'idle' = lazy-registratie (init draait pas bij eerste dial). NIET
+      // alarmerend labelen — bellen werkt gewoon. 'connected' = geregistreerd.
       const labelMap = {
-        idle: 'Nog niet verbonden', connecting: 'Verbinden…', ready: 'Verbonden',
+        idle: 'Klaar om te bellen', connecting: 'Verbinden…', connected: 'Verbonden',
         failed: 'Verbinding mislukt', disabled: 'Lijn niet geconfigureerd',
       };
       statusEl.className = 'wbx-call-conn-status ' + state;
@@ -19591,7 +19600,9 @@
     const showBeOpt    = beAvailable;
     const connState    = _wbxRegistrationStatusForLine(line);
     const connLabelMap = {
-      idle       : '○ Nog niet verbonden',
+      // 'idle' = lazy-registratie (init draait pas bij eerste dial). NIET
+      // alarmerend labelen — bellen werkt gewoon.
+      idle       : '○ Klaar om te bellen',
       connecting : '○ Verbinden…',
       connected  : '● Verbonden',
       failed     : '● Verbinding mislukt',
