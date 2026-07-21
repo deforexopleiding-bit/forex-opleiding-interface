@@ -4440,12 +4440,17 @@
           <span class="inbox-c-window-badge-large incm-badge open" id="inboxCustPanelWindow" hidden>24h open</span>
         </div>
 
-        <!-- Actie-strip: hergebruik de bestaande finance-belfunctie (_wbxPlaceCall).
-             Disabled zonder telefoonnummer. Bel-flow inclusief call-sheet /
-             statusbalk is identiek aan de Klanten-tab (geen tweede implementatie). -->
+        <!-- Actie-strip: opent de _wbxCall-cockpit-sheet (lijn-keuze +
+             bevestiging). De daadwerkelijke bel-flow via _wbxPlaceCall is
+             identiek aan de klant-detail-cockpit + Klanten-tab. -->
         <div id="inboxCustPanelActions" style="display:flex;gap:8px;padding:6px 12px 10px">
-          <button type="button" class="wbx-btn wbx-sm" id="inboxCustPanelCallBtn" disabled title="Bel deze klant">
-            <i class="ti ti-phone"></i> Bel nu
+          <button type="button" id="inboxCustPanelCallBtn" disabled title="Bel deze klant" style="
+            display:inline-flex;align-items:center;gap:6px;padding:7px 14px;
+            font-size:12.5px;font-weight:600;
+            background:#0e7c6b;color:#fff;border:1px solid #0e7c6b;
+            border-radius:8px;cursor:pointer;transition:background .12s">
+            <i class="ti ti-phone" style="font-size:14px"></i>
+            <span>Bel nu</span>
           </button>
         </div>
 
@@ -12362,6 +12367,120 @@
   //
   // state: 'empty' | 'matched' | 'unknown'
   // data:  context-response van /api/inbox-conversation-context (mag null zijn bij 'empty').
+  // Confirm-sheet voor de inbox-belknop. Hergebruikt de bestaande finance
+  // wbx-call-cockpit-styling (.wbx-call-cockpit / .wbx-call-line-select /
+  // .wbx-call-number-input / .wbx-call-btn / .wbx-call-conn-status). Modal-
+  // shell spiegelt _caseOpenOutcomeModal (wbx-call-outcome-scrim). Op "Bel
+  // nu": zet _wbxSoftphone.lineOverride + .numberOverride en delegeer naar
+  // _wbxPlaceCall(phone, {displayName}) — dezelfde belflow als de klant-
+  // detail-cockpit + Klanten-tab.
+  function _inboxOpenCallSheet(customerPhone, displayName) {
+    document.getElementById('inboxCallSheet')?.remove();
+
+    // Bepaal beschikbare lijnen + huidige registratie-status.
+    const beAvail = (typeof _wbxIsBeAvailable === 'function') ? _wbxIsBeAvailable() : false;
+    const initialLine = (customerPhone && String(customerPhone).replace(/\D/g, '').startsWith('32')) ? 'be' : 'nl';
+    const startLine = (typeof _wbxResolveEffectiveLine === 'function')
+      ? _wbxResolveEffectiveLine(customerPhone)
+      : initialLine;
+
+    const wrap = document.createElement('div');
+    wrap.id = 'inboxCallSheet';
+    wrap.className = 'wbx wbx-call-outcome-scrim';
+    wrap.innerHTML =
+      '<div class="wbx-call-outcome-modal" style="max-width:440px">' +
+        '<div class="wbx-call-outcome-head">' +
+          '<div>' +
+            '<div style="font-weight:600">Bellen · ' + esc(displayName || 'klant') + '</div>' +
+            '<div style="font-size:12px;color:var(--wbx-muted);margin-top:2px">' + esc(customerPhone || 'geen nummer') + '</div>' +
+          '</div>' +
+          '<button class="wbx-inc-close" type="button" data-inbox-call-close>✕</button>' +
+        '</div>' +
+        '<div class="wbx-call-outcome-body">' +
+          '<div class="wbx-call-cockpit">' +
+            '<div class="wbx-call-cockpit-top">' +
+              '<div class="wbx-call-cockpit-label"><i class="ti ti-phone"></i> Uitbellen via</div>' +
+              '<select class="wbx-call-line-select" id="inboxCallLineSel" title="Kies handmatig NL/BE of laat automatisch bepalen op basis van het klantnummer">' +
+                '<option value="auto"' + (startLine === 'auto' ? ' selected' : '') + '>Automatisch</option>' +
+                '<option value="nl"' + (startLine === 'nl'   ? ' selected' : '') + '>NL-lijn (+31)</option>' +
+                (beAvail ? '<option value="be"' + (startLine === 'be' ? ' selected' : '') + '>BE-lijn (+32)</option>' : '') +
+              '</select>' +
+            '</div>' +
+            '<div class="wbx-call-conn-status idle" id="inboxCallConnStatus" aria-live="polite">' +
+              '<span class="wbx-call-conn-dot"></span>' +
+              '<span class="wbx-call-conn-label" id="inboxCallConnLabel">Status controleren…</span>' +
+            '</div>' +
+            '<input type="tel" class="wbx-call-number-input wbx-mono" id="inboxCallNumberInput" value="' + esc(customerPhone || '') + '" placeholder="+31 6..." />' +
+            '<div style="display:flex;gap:8px;justify-content:center;margin-top:12px;flex-wrap:wrap">' +
+              '<button class="wbx-call-btn wbx-call-dial" type="button" id="inboxCallDialBtn"><i class="ti ti-phone"></i> Bel nu</button>' +
+              '<button class="wbx-btn" type="button" data-inbox-call-close>Annuleren</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(wrap);
+
+    const close = () => wrap.remove();
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+    wrap.querySelectorAll('[data-inbox-call-close]').forEach((b) => b.addEventListener('click', close));
+
+    // Reflect registratie-status van de geselecteerde lijn.
+    function refreshConnStatus() {
+      const sel = document.getElementById('inboxCallLineSel');
+      const statusEl = document.getElementById('inboxCallConnStatus');
+      const labelEl  = document.getElementById('inboxCallConnLabel');
+      if (!sel || !statusEl || !labelEl) return;
+      const chosenLine = sel.value === 'auto'
+        ? ((typeof _wbxResolveEffectiveLine === 'function') ? _wbxResolveEffectiveLine(customerPhone) : 'nl')
+        : sel.value;
+      const state = (typeof _wbxRegistrationStatusForLine === 'function')
+        ? _wbxRegistrationStatusForLine(chosenLine)
+        : 'idle';
+      const labelMap = {
+        idle: 'Nog niet verbonden', connecting: 'Verbinden…', ready: 'Verbonden',
+        failed: 'Verbinding mislukt', disabled: 'Lijn niet geconfigureerd',
+      };
+      statusEl.className = 'wbx-call-conn-status ' + state;
+      labelEl.textContent = labelMap[state] || labelMap.idle;
+    }
+    document.getElementById('inboxCallLineSel')?.addEventListener('change', refreshConnStatus);
+    refreshConnStatus();
+
+    // "Bel nu" — pas dán bellen.
+    document.getElementById('inboxCallDialBtn')?.addEventListener('click', async () => {
+      const sel = document.getElementById('inboxCallLineSel');
+      const num = document.getElementById('inboxCallNumberInput');
+      const chosenLine = sel ? sel.value : 'auto';
+      const chosenNumber = num ? String(num.value || '').trim() : (customerPhone || '');
+      if (!chosenNumber) {
+        window.AgentShared?.showToast?.('Vul een nummer in.', 'error');
+        return;
+      }
+      // Zet _wbxSoftphone-overrides zodat _wbxPlaceCall exact het gekozen
+      // nummer + de gekozen lijn gebruikt. numberOverride wordt door
+      // _wbxResolveEffectivePhone opgepikt; lineOverride door
+      // _wbxResolveEffectiveLine. Beide worden gereset na de call door
+      // de bestaande cockpit-cleanup — voor de zekerheid resetten we
+      // in het finally-blok hieronder ook expliciet.
+      const prevNumOverride  = _wbxSoftphone.numberOverride;
+      const prevLineOverride = _wbxSoftphone.lineOverride;
+      _wbxSoftphone.numberOverride = chosenNumber;
+      _wbxSoftphone.lineOverride   = (chosenLine === 'nl' || chosenLine === 'be') ? chosenLine : 'auto';
+      close();
+      try {
+        await _wbxPlaceCall(chosenNumber, { displayName });
+      } catch (e) {
+        window.AgentShared?.showToast?.('Bellen mislukt: ' + (e?.message || 'onbekend'), 'error');
+      } finally {
+        // Overrides teruggeven aan de vorige waarde zodat de klant-detail-
+        // cockpit niet per ongeluk het inbox-nummer onthoudt. lineOverride
+        // = 'auto' laten staan is normaal defaultgedrag.
+        _wbxSoftphone.numberOverride = prevNumOverride;
+        _wbxSoftphone.lineOverride   = prevLineOverride;
+      }
+    });
+  }
+
   function renderInboxCustomerPanel(state, data) {
     const emptyEl   = document.getElementById('inboxCustomerPanelEmpty');
     const contentEl = document.getElementById('inboxCustomerPanelContent');
@@ -12422,10 +12541,10 @@
       avatarEl.style.background = _inboxAvatarColor(phone || displayName);
     }
 
-    // Bel-knop: enable alleen bij aanwezig telefoonnummer. Gebruikt de
-    // bestaande finance-belfunctie _wbxPlaceCall (identieke flow als de
-    // Klanten-tab) via een dataset-carrier zodat de globale click-handler
-    // altijd het meest recente nummer + naam pakt.
+    // Bel-knop: enable alleen bij aanwezig telefoonnummer. Opent de wbx-
+    // call-cockpit confirm-sheet (lijn-keuze + Bel nu); pas dán belt _wbx
+    // PlaceCall. Dataset-carrier zodat de globale click-handler altijd het
+    // meest recente nummer + naam pakt.
     const callBtn = document.getElementById('inboxCustPanelCallBtn');
     if (callBtn) {
       callBtn.dataset.phone = phone || '';
@@ -12434,6 +12553,14 @@
       callBtn.title = phone
         ? ('Bel ' + (displayName || phone))
         : 'Geen telefoonnummer beschikbaar';
+      // Inline styling kent geen :disabled-pseudo — zet visueel per state.
+      if (callBtn.disabled) {
+        callBtn.style.opacity = '0.5';
+        callBtn.style.cursor  = 'not-allowed';
+      } else {
+        callBtn.style.opacity = '1';
+        callBtn.style.cursor  = 'pointer';
+      }
     }
 
     // 24h window badge — alleen tonen als we een conv hebben.
@@ -13609,11 +13736,12 @@
       if (_inboxActiveConvId) _inboxSetConvStatus(_inboxActiveConvId, 'open');
     });
 
-    // Bel-knop in klant-info-panel: gebruikt de bestaande finance-belfunctie
-    // _wbxPlaceCall (identieke flow als Klanten-tab). Nummer + naam komen
-    // uit dataset zoals renderInboxCustomerPanel die per klant zet. Geen
-    // duplicate belstack: hetzelfde _wbxSoftphone + callbar wordt gebruikt.
-    document.getElementById('inboxCustPanelCallBtn')?.addEventListener('click', async () => {
+    // Bel-knop in klant-info-panel: opent een confirm-sheet (UITBELLEN VIA
+    // lijn-select + nummer + 'Bel nu'-knop), zodat de gebruiker eerst de
+    // lijn kan kiezen. De bel-flow zelf gebruikt de bestaande finance-
+    // belstack (_wbxPlaceCall + _wbxSoftphone-overrides) — identiek aan
+    // de klant-detail-cockpit. Geen tweede belfunctie.
+    document.getElementById('inboxCustPanelCallBtn')?.addEventListener('click', () => {
       const btn = document.getElementById('inboxCustPanelCallBtn');
       if (!btn || btn.disabled) return;
       const phone = btn.dataset.phone || '';
@@ -13623,11 +13751,7 @@
         window.AgentShared?.showToast?.('Belfunctie niet beschikbaar in deze context.', 'error');
         return;
       }
-      try {
-        await _wbxPlaceCall(phone, { displayName });
-      } catch (e) {
-        window.AgentShared?.showToast?.('Bellen mislukt: ' + (e?.message || 'onbekend'), 'error');
-      }
+      _inboxOpenCallSheet(phone, displayName);
     });
 
     // Markeer-als-ongelezen: zet unread_count > 0 via POST /api/inbox-mark-unread
