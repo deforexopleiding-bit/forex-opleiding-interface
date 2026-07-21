@@ -11,6 +11,10 @@
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
   <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <!-- Fase 1: --ds-* design-tokens (light + [data-theme="dark"]).
+       Laad NA agent-shared.css/sales-redesign.css zodat de bridging in
+       de .wbx-scope hieronder de --ds-* waardes kan resolven. -->
+  <link rel="stylesheet" href="/styles/design-system.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1882,25 +1886,65 @@
        blijven bestaan tot Ronde 2/3.
        ================================================================ -->
   <style id="wbx-scoped-styles">
-    /* Design tokens — 1-op-1 uit prototype. Op alle .wbx-scopes zodat
-       body-level overlays (sheet/modal/toast) ze ook krijgen. */
+    /* Design tokens — Fase 1: gebridged naar --ds-* WAARDES (Fase 0 design-
+       system-tokens). Namen (--wbx-*) blijven identiek zodat alle bestaande
+       selectors ongewijzigd blijven werken; alleen de rechterkant refereert
+       naar --ds-*. Elke waarde heeft de originele hex als fallback zodat
+       gedrag identiek is als design-system.css NIET geladen zou zijn (edge).
+       Dark-mode gaat automatisch: theme-shared.js zet data-theme="dark"
+       op <html> en design-system.css swapt de --ds-* waardes onder die
+       selector — de --wbx-* volgen mee zonder extra werk hier.
+       Status-pill mapping (semantische equivalenten):
+         s-paid / ok        -> --ds-success (groen)
+         s-inc  / s-back    -> --ds-danger  (rood — beide zijn faal-toestanden)
+         s-new              -> --ds-warning (amber — nog niet aangepakt)
+         no                 -> --ds-surface-2 + --ds-text-muted (neutraal)
+       UI-fase-kleuren zonder --ds-match (s-remind / s-talk / s-plan) houden
+       hun eigen accent — dat zijn workflow-fase-signalen, geen semantiek. */
     .wbx, .wbx-sheet, .wbx-scrim, .wbx-mscrim, .wbx-toast {
-      --wbx-bg:#F4F6F8; --wbx-surface:#FFF; --wbx-ink:#161D29;
-      --wbx-muted:#66717F; --wbx-faint:#98A2B0;
-      --wbx-border:#E6E9EF; --wbx-border-strong:#D6DBE4;
-      --wbx-accent:#0E7C6B; --wbx-accent-soft:#E1F1EE; --wbx-accent-ink:#0A5A4E;
-      --wbx-s-new-bg:#FDF3E3; --wbx-s-new-tx:#986412;
+      --wbx-bg:            var(--ds-page,          #F4F6F8);
+      --wbx-surface:       var(--ds-surface,       #FFF);
+      --wbx-ink:           var(--ds-text,          #161D29);
+      --wbx-muted:         var(--ds-text-muted,    #66717F);
+      --wbx-faint:         var(--ds-text-faint,    #98A2B0);
+      --wbx-border:        var(--ds-border,        #E6E9EF);
+      --wbx-border-strong: var(--ds-border-strong, #D6DBE4);
+      --wbx-accent:        var(--ds-brand,         #0E7C6B);
+      --wbx-accent-soft:   var(--ds-brand-soft,    #E1F1EE);
+      --wbx-accent-ink:    var(--ds-brand-strong,  #0A5A4E);
+      --wbx-s-new-bg:      var(--ds-warning-bg,    #FDF3E3);
+      --wbx-s-new-tx:      var(--ds-warning,       #986412);
       --wbx-s-remind-bg:#E9F0FB; --wbx-s-remind-tx:#2B5FA8;
       --wbx-s-talk-bg:#E1F1EE; --wbx-s-talk-tx:#0A5A4E;
       --wbx-s-plan-bg:#EEEAFA; --wbx-s-plan-tx:#5B44A8;
-      --wbx-s-paid-bg:#E5F3EA; --wbx-s-paid-tx:#2A7047;
-      --wbx-s-inc-bg:#FBE9E9; --wbx-s-inc-tx:#B23434;
-      --wbx-s-back-bg:#FBEAE7; --wbx-s-back-tx:#B24A2E;
-      --wbx-ok-bg:#E5F3EA; --wbx-ok-tx:#2A7047;
-      --wbx-no-bg:#F0F2F5; --wbx-no-tx:#66717F;
+      --wbx-s-paid-bg:     var(--ds-success-bg,    #E5F3EA);
+      --wbx-s-paid-tx:     var(--ds-success,       #2A7047);
+      --wbx-s-inc-bg:      var(--ds-danger-bg,     #FBE9E9);
+      --wbx-s-inc-tx:      var(--ds-danger,        #B23434);
+      --wbx-s-back-bg:     var(--ds-danger-bg,     #FBEAE7);
+      --wbx-s-back-tx:     var(--ds-danger,        #B24A2E);
+      --wbx-ok-bg:         var(--ds-success-bg,    #E5F3EA);
+      --wbx-ok-tx:         var(--ds-success,       #2A7047);
+      --wbx-no-bg:         var(--ds-surface-2,     #F0F2F5);
+      --wbx-no-tx:         var(--ds-text-muted,    #66717F);
       --wbx-radius:14px;
       --wbx-mono:'JetBrains Mono', ui-monospace, monospace;
       --wbx-shadow:0 1px 2px rgba(20,25,35,.05), 0 12px 34px rgba(20,25,35,.08);
+    }
+
+    /* Dark-overrides voor UI-fase-kleuren die géén --ds-* semantische match
+       hebben (s-remind/s-talk/s-plan). Zonder deze zouden ze in dark hun
+       lichte pastel-achtergronden houden — te fel/onleesbaar. Shadow ook
+       zwarter op donker voor betere kaart-diepte. */
+    [data-theme="dark"] .wbx,
+    [data-theme="dark"] .wbx-sheet,
+    [data-theme="dark"] .wbx-scrim,
+    [data-theme="dark"] .wbx-mscrim,
+    [data-theme="dark"] .wbx-toast {
+      --wbx-s-remind-bg: #082F45; --wbx-s-remind-tx: #7DD3FC;
+      --wbx-s-talk-bg:   #0A2F2A; --wbx-s-talk-tx:   #6EE7B7;
+      --wbx-s-plan-bg:   #1F1A3A; --wbx-s-plan-tx:   #C4B5FD;
+      --wbx-shadow:0 1px 2px rgba(0,0,0,.35), 0 12px 34px rgba(0,0,0,.5);
     }
 
     /* Basis-scope. .wbx is de wrapper rond alle wanbetalers-UI. */
@@ -2945,6 +2989,34 @@
       .wbx *, .wbx-sheet *, .wbx-scrim, .wbx-mscrim, .wbx-toast {
         animation:none !important; transition:none !important;
       }
+    }
+
+    /* ── Fase 1 responsive (aanvullend op de 7 bestaande @media-queries) ──
+       Tablet <=1024: brede tabellen scrollen horizontaal binnen hun eigen
+       oppervlak (display:block + overflow-x:auto) i.p.v. de pagina. Cellen
+       krijgen white-space:nowrap zodat de kolommen niet naar wraps klappen.
+       Mobile <=640: bekende KPI/cleanup/settings/outcome-grids vouwen naar
+       één kolom; touch-doelen (wbx-btn/wbx-tab) minimaal 40px hoog. */
+    @media (max-width: 1024px) {
+      .wbx table.wbx-table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        max-width: 100%;
+      }
+      .wbx table.wbx-table thead,
+      .wbx table.wbx-table tbody,
+      .wbx table.wbx-table tr { display: table; width: 100%; table-layout: auto; }
+      .wbx table.wbx-table th,
+      .wbx table.wbx-table td { white-space: nowrap; }
+    }
+    @media (max-width: 640px) {
+      .wbx .wbx-cleanup-grid,
+      .wbx .wbx-runs-kpis,
+      .wbx .wbx-set-grid,
+      .wbx .wbx-call-outcome-grid { grid-template-columns: 1fr; }
+      .wbx .wbx-btn,
+      .wbx .wbx-tab { min-height: 40px; }
     }
   </style>
 </head>
