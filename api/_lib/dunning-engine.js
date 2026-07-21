@@ -30,6 +30,41 @@ import { resetJoostCountersForCustomer } from './dunning-arrangement-hooks.js';
 
 const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
 
+// PostgREST-default max-rows is 1000. Bij grotere sets moet je via .range()
+// pagineren, anders wordt de resultaatset stil afgekapt — precies wat de
+// multi-factuur-doorlek veroorzaakte (klant met 4 open facturen telde er
+// nog maar 1 als andere klanten samen al richting de 1000-cap namen).
+const PAGE_SIZE = 1000;
+const PAGE_HARD_CAP = 100 * PAGE_SIZE; // 100k rijen — vangnet tegen runaway.
+
+/**
+ * Loop chunked SELECT tot de laatste chunk kleiner is dan PAGE_SIZE (of
+ * PAGE_HARD_CAP is bereikt). buildQuery is een callback die per iteratie
+ * een VERSE query-builder oplevert — supabase-js query-objecten mogen niet
+ * hergebruikt worden na een uitvoering.
+ *
+ * PURE tegenover een fake buildQuery (voor tests): geen supabase-koppeling
+ * in deze helper zelf.
+ *
+ * Gooit alle DB-fouten door (fail-fast, consistent met callers).
+ *
+ * @param {() => any} buildQuery  Callback die een supabase queryBuilder
+ *                                terugkeeft (zonder .range()/limit).
+ * @returns {Promise<Array<object>>}  Alle rijen achter elkaar geplakt.
+ */
+export async function fetchAllRows(buildQuery) {
+  const out = [];
+  for (let from = 0; from < PAGE_HARD_CAP; from += PAGE_SIZE) {
+    const q = buildQuery();
+    const { data, error } = await q.range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    const rows = Array.isArray(data) ? data : [];
+    if (rows.length) out.push(...rows);
+    if (rows.length < PAGE_SIZE) break;
+  }
+  return out;
+}
+
 /**
  * Entry-point. Wordt aangeroepen vanuit api/cron-dunning-engine.js
  * en (optioneel) vanuit een handmatige debug-endpoint met mode="manual".
@@ -126,21 +161,25 @@ async function fetchOpenInvoices(customerId = null, opts = {}) {
   //   scope='test'                  → alleen is_test=true rijen (sandbox-run)
   //   scope=null / unset            → geen is_test-filter (back-compat)
   const scope = opts?.scope || null;
-  let q = supabaseAdmin
-    .from('invoices')
-    .select(
-      'id, customer_id, amount_total, amount_paid, credited_amount, due_date, issue_date, status, invoice_number, is_test, customers!inner(id, first_name, last_name, company_name, is_company, email, archived_at, anonymized_at, is_test)'
-    )
-    .in('status', OPEN_STATUSES);
-  if (customerId) q = q.eq('customer_id', customerId);
-  if (scope === 'production') {
-    q = q.eq('is_test', false).eq('customers.is_test', false);
-  } else if (scope === 'test') {
-    q = q.eq('is_test', true).eq('customers.is_test', true);
-  }
-  const { data, error } = await q;
-  if (error) throw error;
-  const rows = Array.isArray(data) ? data : [];
+  // Gepagineerd via fetchAllRows — zonder .range() knipt PostgREST op 1000
+  // rijen en misten we facturen (multi-factuur-doorlek naar enkel-factuur
+  // workflow-instroom). Bij een per-customer scope is de set typisch klein
+  // en doet de paginering feitelijk 1 chunk; hetzelfde codepad blijft.
+  const rows = await fetchAllRows(() => {
+    let q = supabaseAdmin
+      .from('invoices')
+      .select(
+        'id, customer_id, amount_total, amount_paid, credited_amount, due_date, issue_date, status, invoice_number, is_test, customers!inner(id, first_name, last_name, company_name, is_company, email, archived_at, anonymized_at, is_test)'
+      )
+      .in('status', OPEN_STATUSES);
+    if (customerId) q = q.eq('customer_id', customerId);
+    if (scope === 'production') {
+      q = q.eq('is_test', false).eq('customers.is_test', false);
+    } else if (scope === 'test') {
+      q = q.eq('is_test', true).eq('customers.is_test', true);
+    }
+    return q;
+  });
   if (rows.length === 0) return rows;
 
   // D5 — auto-pause: bouw set van invoice_ids die in een ACTIEF arrangement
@@ -292,14 +331,19 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
     const { isAutoEnabled, ensurePipelineCustomer } = await import('./dunning-pipeline.js');
     if (await isAutoEnabled('on_overdue_to_nieuw')) {
       const today = new Date().toISOString().slice(0, 10);
-      let overdueQ = supabaseAdmin
-        .from('invoices')
-        .select('customer_id')
-        .in('status', OPEN_STATUSES)
-        .lt('due_date', today);
-      if      (scope === 'production') overdueQ = overdueQ.eq('is_test', false);
-      else if (scope === 'test')       overdueQ = overdueQ.eq('is_test', true);
-      const { data: overdueRows } = await overdueQ;
+      // Gepagineerd via fetchAllRows — bij >1000 overdue-rijen mistten we
+      // customer_ids die verderop nooit door de count-query zouden komen,
+      // dus die klanten stroomden nooit in.
+      const overdueRows = await fetchAllRows(() => {
+        let q = supabaseAdmin
+          .from('invoices')
+          .select('customer_id')
+          .in('status', OPEN_STATUSES)
+          .lt('due_date', today);
+        if      (scope === 'production') q = q.eq('is_test', false);
+        else if (scope === 'test')       q = q.eq('is_test', true);
+        return q;
+      });
       const uniqueCustIds = Array.from(new Set(
         (overdueRows || []).map((r) => r.customer_id).filter(Boolean)
       ));
@@ -307,16 +351,21 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
       let addedCount = 0, skippedMulti = 0, skippedIncasso = 0;
 
       if (uniqueCustIds.length > 0) {
-        // Aantal open facturen per klant — één query op invoices, client-side
-        // tellen. Zelfde is_test-scope als de overdue-query hierboven.
-        let countQ = supabaseAdmin
-          .from('invoices')
-          .select('customer_id')
-          .in('customer_id', uniqueCustIds)
-          .in('status', OPEN_STATUSES);
-        if      (scope === 'production') countQ = countQ.eq('is_test', false);
-        else if (scope === 'test')       countQ = countQ.eq('is_test', true);
-        const { data: openInvRows } = await countQ;
+        // Aantal open facturen per klant — gepagineerd via fetchAllRows.
+        // Dit was DE bron van de multi-factuur-doorlek: bij >1000 open-
+        // factuurrijen wereldwijd knipte PostgREST er af → klant met 4
+        // open telde er nog maar 1 → verkeerde workflow-instroom.
+        // Zelfde is_test-scope als de overdue-query hierboven.
+        const openInvRows = await fetchAllRows(() => {
+          let q = supabaseAdmin
+            .from('invoices')
+            .select('customer_id')
+            .in('customer_id', uniqueCustIds)
+            .in('status', OPEN_STATUSES);
+          if      (scope === 'production') q = q.eq('is_test', false);
+          else if (scope === 'test')       q = q.eq('is_test', true);
+          return q;
+        });
         const openCountByCust = new Map();
         for (const r of openInvRows || []) {
           if (!r?.customer_id) continue;
