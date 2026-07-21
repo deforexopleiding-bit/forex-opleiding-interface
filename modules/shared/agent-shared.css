@@ -131,6 +131,12 @@ body {
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
+  /* Fase-shell topbar-offset (universeel over alle modules): 48px ruimte
+     voor de fixed .app-topbar zodat content niet onder de balk verdwijnt.
+     box-sizing:border-box rekent de padding binnen de min-height zodat
+     er geen 48px extra scroll ontstaat op korte pagina's. */
+  padding-top: 48px;
+  box-sizing: border-box;
 }
 body::before {
   content: ''; position: fixed; inset: 0;
@@ -172,7 +178,9 @@ body::before {
 .footer-avatar { width:26px; height:26px; flex-shrink:0; border-radius:50%; background:var(--accent-grad); display:grid; place-items:center; font-size:10px; font-weight:800; color:#0a0b10; }
 
 /* ── Main ── */
-.main { margin-left:var(--sidebar-w); min-height:100vh; position:relative; z-index:1; }
+/* min-height compenseert de body padding-top (48px topbar-offset) zodat
+   .main precies de resterende viewport-hoogte vult zonder overhang. */
+.main { margin-left:var(--sidebar-w); min-height:calc(100vh - 48px); position:relative; z-index:1; }
 .main-inner { padding:28px 28px 64px; max-width:1200px; }
 .hidden { display:none!important; }
 
@@ -261,9 +269,11 @@ body::before {
     pointer-events:auto;
   }
   [data-theme="dark"] body.sidebar-open::after { background:rgba(0,0,0,.6); }
-  .main { margin-left:0; padding-top:56px; }
-  /* Hamburger toont in de topbar; theme-toggle blijft rechtsboven bereikbaar. */
+  .main { margin-left:0; padding-top:0; }
+  /* Hamburger toont in de topbar; theme-toggle blijft rechtsboven bereikbaar.
+     Op tablet/mobile is de sidebar off-canvas, dus topbar loopt door tot 0. */
   .app-hamburger { display:inline-flex; }
+  .app-topbar    { left:0; }
 }
 @media(max-width:640px) {
   .app-topbar { padding:0 10px; }
@@ -271,22 +281,23 @@ body::before {
 }
 
 /* ── Fase-shell: app-topbar (fixed strip rechtsboven) ────────────────────
-   Dunne balk over de volle breedte, boven de sidebar. Bevat hamburger
-   (mobile) + spacer + actions (waar injectThemeToggle de maan/zon plaatst).
-   Op desktop is de balk transparant en visueel discreet; alleen de toggle
-   is zichtbaar. Op tablet/mobile schijnt de balk met een subtiele
-   surface-tint zodat de hamburger goed leesbaar is. */
+   Zichtbare balk NAAST de sidebar op desktop (left:var(--sidebar-w) — anders
+   dekt de topbar het sidebar-logo af). Op tablet/mobile is de sidebar off-
+   canvas, dus daar loopt de topbar door tot left:0.
+   Background + border via --ds-* tokens met expliciete fallback zodat de
+   balk zichtbaar is ongeacht of/wanneer design-system.css resolvet
+   (rgba(0,0,0,0) was de bug in #865 — pointer-events:none maakte de strip
+   ook nog eens onzichtbaar-klikbaar zodat je erdoorheen keek). */
 .app-topbar {
   position:fixed;
-  top:0; left:0; right:0;
+  top:0; left:var(--sidebar-w); right:0;
   height:48px;
   display:flex; align-items:center; gap:8px;
   padding:0 14px;
-  background:transparent;
+  background:var(--ds-surface, #ffffff);
+  border-bottom:1px solid var(--ds-border, #dfe8ec);
   z-index:250;                 /* boven .sidebar (z:200) zodat toggle klikbaar blijft */
-  pointer-events:none;         /* achtergrond niet-klikbaar; children weer wel */
 }
-.app-topbar > * { pointer-events:auto; }
 .app-topbar-spacer { flex:1 1 auto; }
 .app-topbar-actions { display:inline-flex; align-items:center; gap:6px; }
 
