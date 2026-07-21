@@ -34,7 +34,8 @@
 // met een harde conflict-guard om dubbele-send te voorkomen. Zie de
 // conflict-headers in die twee bestanden.
 
-import { renderTemplate } from './dunning-template-render.js';
+import { renderTemplate, pickOldestInvoice } from './dunning-template-render.js';
+import { ensureInvoicePaymentLink, InvoicePaymentLinkError } from './invoice-payment-link.js';
 
 // Placeholder-regex: matcht zowel legacy HOOFDLETTER-keys ({{NAAM}},
 // {{TOTAAL_BEDRAG}}) als nieuwe dot-notation ({{klant.voornaam}},
@@ -349,6 +350,62 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
       log_event: 'whatsapp_skipped_template_error',
       log_payload: { template_id: templateId, ...tplError },
     };
+  }
+
+  // ── Betaal-link pre-fetch (fail-CLOSED) ──────────────────────────────
+  // renderTemplate is synchroon; template-variables.js resolveVariables
+  // leest invoice.payment_url voor {{factuur.betaal_link}} maar fetcht 'em
+  // NIET zelf. Wij vullen 'em VÓÓR de render via ensureInvoicePaymentLink
+  // (zelfde pattern als inbox-send-template.js r375).
+  //
+  // Fail-CLOSED: als de body de placeholder gebruikt maar we kunnen geen
+  // link ophalen, sturen we het bericht NIET — een leeg link-slot geeft
+  // Meta #132000 of een kaal bericht met "…te betalen ." Skip + log
+  // zodat een mens 't opvangt via Open Acties.
+  const bodyStr = String(template.body || '');
+  if (bodyStr.includes('{{factuur.betaal_link}}')) {
+    const oudsteInvoice = pickOldestInvoice(Array.isArray(openInvoices) ? openInvoices : []);
+    if (!oudsteInvoice?.id) {
+      return {
+        status: 'skipped',
+        log_event: 'whatsapp_skipped_no_payment_link',
+        log_payload: {
+          template_id: template.id,
+          meta_template_name: template.meta_template_name,
+          reason: 'template gebruikt {{factuur.betaal_link}} maar er is geen open invoice om een link voor te fetchen',
+        },
+      };
+    }
+    try {
+      const linkResult = await ensureInvoicePaymentLink(oudsteInvoice.id);
+      if (linkResult && linkResult.payment_url) {
+        oudsteInvoice.payment_url = linkResult.payment_url;
+      } else {
+        return {
+          status: 'skipped',
+          log_event: 'whatsapp_skipped_no_payment_link',
+          log_payload: {
+            template_id: template.id,
+            meta_template_name: template.meta_template_name,
+            invoice_id: oudsteInvoice.id,
+            reason: 'ensureInvoicePaymentLink leverde geen payment_url',
+          },
+        };
+      }
+    } catch (linkErr) {
+      const code = linkErr instanceof InvoicePaymentLinkError ? linkErr.code : 'UNKNOWN';
+      console.warn('[dunning-executor whatsapp] payment-link fetch fail:', oudsteInvoice.id, code, linkErr?.message);
+      return {
+        status: 'skipped',
+        log_event: 'whatsapp_skipped_no_payment_link',
+        log_payload: {
+          template_id: template.id,
+          meta_template_name: template.meta_template_name,
+          invoice_id: oudsteInvoice.id,
+          reason: 'ensureInvoicePaymentLink fout: ' + code + ' — ' + (linkErr?.message || 'onbekend'),
+        },
+      };
+    }
   }
 
   const rendered = renderTemplate({
