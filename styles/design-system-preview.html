@@ -55,9 +55,18 @@
       <!-- Topbar -->
       <header class="ds-topbar">
         <div class="ds-topbar-title">Design System — Preview</div>
+        <!-- ds-search — LMS-referentie: leading zoek-icoon + ⌘K-chip rechts.
+             In deze preview krijgt de wrapper flex:1 zodat 'ie stretcht;
+             in de shell-topbar (Stap 2) gebruiken we een max-width. -->
+        <label class="ds-search" style="flex:1;max-width:420px" aria-label="Zoeken">
+          <span class="ds-search-icon" aria-hidden="true">⌕</span>
+          <input class="ds-search-input" type="search" placeholder="Zoek klant, factuur, taak…" />
+          <span class="ds-search-kbd" aria-hidden="true">⌘K</span>
+        </label>
         <div class="ds-topbar-spacer"></div>
         <div class="ds-topbar-actions">
           <button class="ds-notif-btn" aria-label="Notificaties">🔔<span class="ds-notif-badge">3</span></button>
+          <button class="ds-icon-button" aria-label="Uitloggen" title="Uitloggen">⎋</button>
           <button class="ds-theme-toggle" id="dsThemeToggle" data-theme-toggle aria-label="Wissel tussen licht en donker"></button>
           <span class="ds-user-badge">
             <span class="ds-user-avatar">JB</span>
