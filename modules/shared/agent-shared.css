@@ -321,6 +321,61 @@ body::before {
 .app-topbar-search { flex:1 1 auto; max-width:420px; min-width:0; }
 .app-topbar-logout { flex:0 0 auto; }
 
+/* Stap 4bc: dropdown onder de zoekbalk. Absolute t.o.v. .ds-search
+   (position:relative) — hangt onder de input met een kleine gap. Alle
+   waardes via --ds-* met expliciete fallback (patroon #868). */
+.app-topbar-search-dropdown {
+  position:absolute;
+  top:calc(100% + 4px);
+  left:0; right:0;
+  background:var(--ds-surface, #ffffff);
+  color:var(--ds-text, #06181f);
+  border:1px solid var(--ds-border, #dfe8ec);
+  border-radius:8px;
+  box-shadow:0 8px 24px rgba(6,24,31,.15);
+  max-height:400px;
+  overflow-y:auto;
+  z-index:10001;
+}
+.app-topbar-search-dropdown[hidden] { display:none; }
+.app-search-item {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 12px;
+  color:var(--ds-text, #06181f);
+  text-decoration:none;
+  border-bottom:1px solid var(--ds-border, #dfe8ec);
+}
+.app-search-item:last-child { border-bottom:0; }
+.app-search-item:hover,
+.app-search-item.is-active { background:var(--ds-surface-2, #f9fbfc); }
+.app-search-type { font-size:14px; flex:0 0 auto; }
+.app-search-body { flex:1 1 auto; min-width:0; }
+.app-search-label {
+  display:block;
+  font-size:13px;
+  font-weight:500;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.app-search-sub {
+  display:block;
+  font-size:11px;
+  color:var(--ds-text-muted, #48585f);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.app-search-hint,
+.app-search-empty {
+  padding:12px;
+  font-size:12.5px;
+  color:var(--ds-text-faint, #7a8b92);
+  text-align:center;
+}
+
 /* Stap 3a: user-badge in de topbar. renderUserSection injecteert een
    .user-badge-inner met .user-avatar/.user-name/.user-email hooks. Op
    mobiel <=720px collapsen naam+email naar avatar-only zodat het geheel
