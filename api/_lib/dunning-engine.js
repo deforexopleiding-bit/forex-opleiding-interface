@@ -69,6 +69,21 @@ export async function fetchAllRows(buildQuery) {
  * Entry-point. Wordt aangeroepen vanuit api/cron-dunning-engine.js
  * en (optioneel) vanuit een handmatige debug-endpoint met mode="manual".
  */
+/**
+ * True als deze step-exec een succesvolle aanmaning-send is (email of
+ * whatsapp met status='ok'). Gebruikt door de stage-hook in
+ * advanceActiveRuns om na de eerste engine-send de pipeline-stage
+ * 'nieuw' → 'aangemaand' te schuiven (spiegelt bulk-send-flow).
+ *
+ * PURE — geen DB/HTTP, unit-testbaar.
+ */
+export function isAanmaningSendSuccess(stepResult) {
+  if (!stepResult || typeof stepResult !== 'object') return false;
+  if (stepResult.status !== 'ok') return false;
+  const evt = String(stepResult.log_event || '');
+  return evt === 'email_sent' || evt === 'whatsapp_sent';
+}
+
 export async function runEngine({ mode = 'cron', abortMs = 50_000, scope = 'production' } = {}) {
   const startedAt = Date.now();
   const result = {
@@ -808,6 +823,25 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
         });
         stepsExecuted++;
         runAdvanced = true;
+
+        // Pipeline-hook: eerste succesvolle aanmaning-send (email/whatsapp)
+        // schuift de stage 'nieuw' → 'aangemaand'. Zelfde trigger-key als
+        // bulk-send (on_bulk_sent_to_aangemaand — één toggle, consistent
+        // gedrag voor beide send-paden). onlyIfFrom:'nieuw' maakt vervolg-
+        // sends binnen dezelfde run no-op én voorkomt dat 'in_gesprek'/
+        // 'opgelost' teruggezet worden. Fail-soft: stage-update mag de
+        // engine niet omvallen.
+        if (isAanmaningSendSuccess(stepResult)) {
+          try {
+            const { isAutoEnabled, ensurePipelineCustomer, setStage } = await import('./dunning-pipeline.js');
+            if (await isAutoEnabled('on_bulk_sent_to_aangemaand')) {
+              await ensurePipelineCustomer(run.customer_id);
+              await setStage(run.customer_id, 'aangemaand', 'engine_sent', 'auto:engine', { onlyIfFrom: 'nieuw' });
+            }
+          } catch (e) {
+            console.warn('[dunning-engine] stage-hook engine_sent fail-soft:', run.customer_id, e?.message || e);
+          }
+        }
 
         // Advance pointer (semantiek ongewijzigd; nu geïntegreerd in de lus).
         const update = { updated_at: nowIso() };
