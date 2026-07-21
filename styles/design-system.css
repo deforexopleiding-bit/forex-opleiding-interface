@@ -225,6 +225,103 @@
 }
 .ds-theme-toggle:focus-visible { outline: none; box-shadow: var(--ds-focus); }
 
+/* ---------- Search (topbar-ready) ------------------------------------------ */
+/* Wrapper met leading zoek-icoon + optionele trailing ⌘K-chip. Leunt op de
+   .ds-input-tokens (border/radius/focus) maar met een subtiel oplichtende
+   surface-2 achtergrond zodat de balk visueel oplicht tegen de topbar-
+   surface (LMS-referentie). De wrapper legt géén breedte op — de topbar
+   mag hem stretchen met flex:1. Focus-ring hangt op :focus-within van de
+   wrapper (niet op de kale input) zodat icoon + chip meebewegen.
+   Puur presentatie — de echte ⌘K-listener komt in Stap 4. */
+.ds-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;                 /* voorkomt overflow in flex-contexten */
+}
+.ds-search-input {
+  width: 100%;
+  padding: 7px 44px 7px 34px;   /* ruimte voor icoon (links) + chip (rechts) */
+  background: var(--ds-surface-2, #f9fbfc);
+  color: var(--ds-text, #06181f);
+  border: 1px solid var(--ds-border, #dfe8ec);
+  border-radius: var(--ds-radius, 6px);
+  font-family: inherit;
+  font-size: var(--ds-fs-sm, 12.5px);
+  line-height: 1.4;
+  transition: background .12s, border-color .12s;
+}
+.ds-search-input::placeholder { color: var(--ds-text-faint, #7a8b92); }
+.ds-search-input:focus { outline: none; }
+.ds-search:focus-within {
+  border-radius: var(--ds-radius, 6px);
+  box-shadow: var(--ds-focus, 0 0 0 3px rgba(8, 145, 207, 0.35));
+}
+.ds-search:focus-within .ds-search-input {
+  background: var(--ds-surface, #ffffff);
+  border-color: var(--ds-brand, #0a5178);
+}
+.ds-search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px; height: 16px;
+  color: var(--ds-text-faint, #7a8b92);
+  pointer-events: none;         /* icoon nooit klikbaar; input eronder */
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 16px;
+}
+.ds-search-kbd {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 2px 6px;
+  background: var(--ds-surface, #ffffff);
+  color: var(--ds-text-faint, #7a8b92);
+  border: 1px solid var(--ds-border, #dfe8ec);
+  border-radius: var(--ds-radius, 6px);
+  font-family: var(--ds-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: var(--ds-fw-semibold, 600);
+  line-height: 1.2;
+  pointer-events: none;         /* visuele hint, geen knop */
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* ---------- Icon-button (generiek) ----------------------------------------- */
+/* 36×36 icoon-only knop met border + hover surface-2 + focus-ring. Zelfde
+   maat/tokens als .ds-notif-btn maar zonder de badge-specifieke position/
+   overflow — bedoeld voor logout, verversen, meer-menu, etc. Bewust NIET
+   .ds-notif-btn refactoren om Stap 2/3 niet te raken. */
+.ds-icon-button {
+  width: 36px; height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  color: var(--ds-text-muted, #48585f);
+  border: 1px solid var(--ds-border, #dfe8ec);
+  border-radius: var(--ds-radius, 6px);
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+  font-size: 16px;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.ds-icon-button:hover {
+  background: var(--ds-surface-2, #f9fbfc);
+  color: var(--ds-text, #06181f);
+}
+.ds-icon-button:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus, 0 0 0 3px rgba(8, 145, 207, 0.35));
+}
+.ds-icon-button:disabled, .ds-icon-button[disabled] {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
 /* ---------- Sidebar --------------------------------------------------------- */
 .ds-sidebar {
   width: var(--ds-sidebar-width);
@@ -517,4 +614,8 @@
   .ds-topbar { padding: 0 var(--ds-pad-md); gap: var(--ds-gap-sm); }
   .ds-topbar-title { font-size: var(--ds-fs-md); }
   .ds-container { padding: 0 var(--ds-pad-md); }
+  /* ⌘K-chip verbergen op touch (geen keyboard) — input-padding rechts
+     wordt strakker zodat de placeholder-tekst niet afgekapt raakt. */
+  .ds-search-kbd { display: none; }
+  .ds-search-input { padding-right: 12px; }
 }
