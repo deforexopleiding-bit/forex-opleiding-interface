@@ -35,6 +35,13 @@ function formatEur(amount) {
   return `EUR ${EUR_FORMATTER.format(n)}`;
 }
 
+// Kale variant (zonder EUR-prefix) voor placeholders die in de template-body
+// al een hardcoded "EUR " prefix ervoor hebben staan.
+function formatEurAmountOnly(amount) {
+  const n = Number(amount) || 0;
+  return EUR_FORMATTER.format(n);
+}
+
 function formatDateNl(isoDate) {
   if (!isoDate) return '';
   const ymd = String(isoDate).slice(0, 10);
@@ -96,7 +103,12 @@ export const AVAILABLE_VARIABLES = [
 
   // ── invoice (oudste open factuur) ──────────────────────────────────────
   { key: 'factuur.nummer',       label: 'Factuurnummer',         category: 'invoice', example: '2026-0001',         requires_context: 'invoice' },
-  { key: 'factuur.bedrag',       label: 'Factuurbedrag (totaal)', category: 'invoice', example: 'EUR 1.234,56',     requires_context: 'invoice' },
+  // factuur.bedrag levert KAAL bedrag "1.234,56" (zonder EUR-prefix).
+  // Meta-templates hebben "EUR " typisch al HARDCODED vóór de placeholder
+  // in de body — dubbele "EUR EUR ..." vermijden. Callers die alsnog een
+  // EUR-prefixed bedrag willen (zeldzaam): gebruik "EUR {{factuur.bedrag}}"
+  // in de body zelf.
+  { key: 'factuur.bedrag',       label: 'Factuurbedrag (kaal, zonder EUR-prefix)', category: 'invoice', example: '1.234,56', requires_context: 'invoice' },
   { key: 'factuur.bedrag_open',  label: 'Openstaand bedrag',     category: 'invoice', example: 'EUR 80,00',         requires_context: 'invoice' },
   { key: 'factuur.vervaldatum',  label: 'Vervaldatum',           category: 'invoice', example: '15-06-2026',        requires_context: 'invoice' },
   { key: 'factuur.dagen_overdue', label: 'Dagen te laat',        category: 'invoice', example: '12',                requires_context: 'invoice' },
@@ -365,7 +377,9 @@ function getInvoiceValue(invoice, key) {
   if (!invoice) return '';
   switch (key) {
     case 'factuur.nummer':         return invoice.invoice_number || '';
-    case 'factuur.bedrag':         return formatEur(invoice.amount_total);
+    // Kaal bedrag (zonder EUR-prefix) — Meta-templates hebben "EUR " typisch
+    // al hardcoded vóór de placeholder in de body; dubbele EUR vermijden.
+    case 'factuur.bedrag':         return formatEurAmountOnly(invoice.amount_total);
     case 'factuur.bedrag_open':    return formatEur(openAmount(invoice));
     case 'factuur.vervaldatum':    return formatDateNl(invoice.due_date);
     case 'factuur.factuur_datum':  return formatDateNl(invoice.issue_date);

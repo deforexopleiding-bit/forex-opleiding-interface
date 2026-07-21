@@ -48,7 +48,7 @@ wordt, anders de oudste open factuur van de klant (status in `open`,
 | Key | Voorbeeld | Betekenis |
 |---|---|---|
 | `factuur.nummer` | `2026-0001` | invoices.invoice_number |
-| `factuur.bedrag` | `EUR 1.234,56` | invoices.amount_total (totaal) |
+| `factuur.bedrag` | `1.234,56` (kaal, zonder EUR-prefix — sinds 2026-07-21; template-body moet zelf "EUR " ervoor plaatsen indien gewenst) | invoices.amount_total (totaal) |
 | `factuur.bedrag_open` | `EUR 80,00` | amount_total − amount_paid − credited_amount |
 | `factuur.vervaldatum` | `15-06-2026` | invoices.due_date in NL-formaat (dd-mm-jjjj) |
 | `factuur.factuur_datum` | `01-06-2026` | invoices.issue_date in NL-formaat |
