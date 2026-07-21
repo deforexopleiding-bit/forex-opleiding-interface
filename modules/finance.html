@@ -17228,16 +17228,20 @@
     if (kpiOpen)    kpiOpen.textContent    = _bulkFmtEurCents(Number(kpi.total_open_cents || 0));
     if (kpiCompl30) kpiCompl30.textContent = Number(kpi.completed_runs_30d || 0).toLocaleString('nl-NL');
 
-    if (cntEl) cntEl.textContent = runs.length + ' run' + (runs.length === 1 ? '' : 's');
+    // KPI kpis.active_runs is een aparte exact-count uit het endpoint —
+    // altijd het echte totaal. Toon dat i.p.v. de lijst-lengte (die is
+    // gelimiteerd op 500 server-side); zo klopt het aantal ook als er
+    // ooit >500 actieve runs zijn.
+    const actualActive = Number(kpi.active_runs || 0);
+    if (cntEl) cntEl.textContent = actualActive.toLocaleString('nl-NL') + ' run' + (actualActive === 1 ? '' : 's');
 
-    // Actieve runs tabel (cap 25).
-    const CAP = 25;
-    const visible = runs.slice(0, CAP);
-    const restCount = Math.max(0, runs.length - visible.length);
+    // Toon ALLE actieve runs. Server-limit is 500 (praktisch ruim); de
+    // tabel-container krijgt max-height + scroll zodat een lange lijst
+    // het scherm niet volledig vult.
     if (!runs.length) {
       bodyEl.innerHTML = '<div class="wbx-empty" style="padding:16px"><em>Nog geen lopende aanmaningen.</em></div>';
     } else {
-      const rowsHtml = visible.map((r) => {
+      const rowsHtml = runs.map((r) => {
         const stepLbl = (r.current_step_order != null)
           ? ('stap ' + r.current_step_order + (r.current_step_type ? ' · ' + esc(r.current_step_type) : ''))
           : (r.current_step_type ? esc(r.current_step_type) : '—');
@@ -17250,14 +17254,22 @@
           <td class="wbx-mono wbx-r">${openBedrag}</td>
         </tr>`;
       }).join('');
+      // Fallback-note: als het werkelijke totaal boven de server-limit
+      // uitkomt (edge). Voor de gewone case (list.length == active-count)
+      // wordt niks getoond.
+      const capNote = (actualActive > runs.length)
+        ? `<div style="margin-top:6px;font-size:12px;color:var(--wbx-faint,#6b7280);text-align:right">Toont eerste ${runs.length.toLocaleString('nl-NL')} van ${actualActive.toLocaleString('nl-NL')}.</div>`
+        : '';
       bodyEl.innerHTML = `
-        <table class="wbx-table" style="width:100%">
-          <thead><tr>
-            <th>Klant</th><th>Workflow</th><th>Stap</th><th>Volgende actie</th><th class="wbx-r">Openstaand</th>
-          </tr></thead>
-          <tbody>${rowsHtml}</tbody>
-        </table>
-        ${restCount > 0 ? `<div style="margin-top:6px;font-size:12px;color:var(--wbx-faint,#6b7280);text-align:right">… en ${restCount} meer</div>` : ''}
+        <div style="max-height:480px;overflow-y:auto;border:1px solid var(--wbx-line,#e5e7eb);border-radius:6px">
+          <table class="wbx-table" style="width:100%">
+            <thead><tr>
+              <th>Klant</th><th>Workflow</th><th>Stap</th><th>Volgende actie</th><th class="wbx-r">Openstaand</th>
+            </tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+        ${capNote}
       `;
     }
 
