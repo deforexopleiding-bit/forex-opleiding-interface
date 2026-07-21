@@ -275,6 +275,12 @@ body::before {
   .app-hamburger { display:inline-flex; }
   .app-topbar    { left:0; }
 }
+@media(max-width:720px) {
+  /* Op smal scherm past een 420px-zoekbalk niet tussen hamburger + toggle
+     + logout in een 48px-strip. Verbergen; Stap 4 kan later een zoek-icon-
+     button als collapsed variant toevoegen. */
+  .app-topbar-search { display:none; }
+}
 @media(max-width:640px) {
   .app-topbar { padding:0 10px; }
   .sidebar    { width:min(280px, 84vw); }
@@ -301,6 +307,12 @@ body::before {
 }
 .app-topbar-spacer { flex:1 1 auto; }
 .app-topbar-actions { display:inline-flex; align-items:center; gap:6px; }
+
+/* Stap 2/4 topbar-consolidatie: zoekbalk-slot in de flex-rij. Groeit met
+   de topbar maar wordt gecapt op 420px zodat de acties rechts leesbaar
+   blijven op ruime schermen. min-width:0 voorkomt input-overflow. */
+.app-topbar-search { flex:1 1 auto; max-width:420px; min-width:0; }
+.app-topbar-logout { flex:0 0 auto; }
 
 /* Hamburger — 3 lijnen; klikbaar tap-target min 40x40. Verborgen op desktop.
    Direct op --ds-* met fallback (i.p.v. via de bridge-tokens --surface-1
