@@ -212,23 +212,36 @@ async function fetchOpenInvoices(customerId = null, opts = {}) {
 }
 
 /**
- * Reply-stop helper (spoedfix): returnt true als de klant via WhatsApp
- * heeft gereageerd NA de laatste engine-send in DEZE run. Wordt in
- * advanceActiveRuns vóór iedere stap aangeroepen.
+ * Reply-stop helper: returnt { replied: bool, channel?: 'whatsapp'|'email'|'both' }
+ * op basis van of de klant via WhatsApp OF e-mail heeft gereageerd NA de
+ * laatste engine-send in DEZE run.
  *
- * "Gereageerd" = inbound WhatsApp-bericht op ENIGE conversatie van deze
- * klant met last_inbound_at > lastSentAt van de run. WA-only voor deze
- * spoedfix (dominant kanaal + directe customer_id-koppeling op
- * whatsapp_conversations). E-mail-reply-detectie kan later toegevoegd.
+ * BRONNEN:
+ *   - WhatsApp: whatsapp_conversations.last_inbound_at (customer_id-koppeling,
+ *     direct; klant kan meerdere convs hebben over modules -> recentste wint).
+ *   - E-mail:   email_messages.from_address ILIKE customers.email (case-
+ *     insensitive exact-match). email_messages heeft géén customer_id-kolom
+ *     en géén direction-veld (alle rijen zijn per definitie inbound via
+ *     sync-emails IMAP-poll). Zwakte: reply vanaf een ander adres dan
+ *     customers.email wordt gemist. Beste haalbare koppeling zonder
+ *     message_id-threading (dat vereist een sync-emails.js refactor).
  *
- * Als de run nog geen enkele send heeft (lastSentAt == null): return
- * false (kan sowieso niet "gereageerd op wat we niet hebben verstuurd").
+ * MAIL-SYNC-GAT: sync-emails draait elke 5 min; dunning-engine draait
+ * dagelijks om 07:00 UTC. Reply tussen 06:57-07:00 kan nog niet gesynct
+ * zijn -> mist die tick, pauzeert op de volgende. Bewuste keuze: geen
+ * workaround.
  *
- * Bij DB-fout gooit deze functie -- caller vangt fail-open (oud gedrag)
- * zodat een tijdelijke DB-glitch niet de hele engine stopt.
+ * "Geen send yet" (lastSentAt null) -> replied:false zonder bron-check
+ * (kan sowieso niet gereageerd hebben op iets dat we niet hebben verstuurd).
+ *
+ * Bij DB-fout gooit deze functie. Caller vangt en beslist fail-open vs
+ * fail-closed (huidig: fail-open, zie caller-comment).
+ *
+ * DI: optionele `db`-parameter (default: module-scoped supabaseAdmin) maakt
+ * unit-testen mogelijk zonder DB-mocking op modulescope.
  */
-async function hasReplyAfterLastSend(customerId, runId) {
-  const { data: lastSendRows, error: sendErr } = await supabaseAdmin
+export async function hasReplyAfterLastSend(customerId, runId, db = supabaseAdmin) {
+  const { data: lastSendRows, error: sendErr } = await db
     .from('dunning_log')
     .select('created_at')
     .eq('run_id', runId)
@@ -237,25 +250,51 @@ async function hasReplyAfterLastSend(customerId, runId) {
     .limit(1);
   if (sendErr) throw sendErr;
   const lastSentAt = lastSendRows?.[0]?.created_at || null;
-  if (!lastSentAt) return false;
+  if (!lastSentAt) return { replied: false };
 
-  const { data: convRows, error: convErr } = await supabaseAdmin
+  // ── WhatsApp-tak ─────────────────────────────────────────────────────
+  const { data: convRows, error: convErr } = await db
     .from('whatsapp_conversations')
     .select('last_inbound_at')
     .eq('customer_id', customerId)
     .not('last_inbound_at', 'is', null);
   if (convErr) throw convErr;
-  if (!convRows || convRows.length === 0) return false;
-
-  // Klant kan meerdere conversaties hebben (verschillende modules) — pak
-  // de recentste inbound.
-  let mostRecent = '';
-  for (const row of convRows) {
-    if (row.last_inbound_at && row.last_inbound_at > mostRecent) {
-      mostRecent = row.last_inbound_at;
+  let mostRecentWa = '';
+  for (const row of convRows || []) {
+    if (row.last_inbound_at && row.last_inbound_at > mostRecentWa) {
+      mostRecentWa = row.last_inbound_at;
     }
   }
-  return mostRecent && mostRecent > lastSentAt;
+  const waReplied = !!(mostRecentWa && mostRecentWa > lastSentAt);
+
+  // ── E-mail-tak ───────────────────────────────────────────────────────
+  // customers.email lookup (case-insensitive match op from_address).
+  const { data: custRow, error: custErr } = await db
+    .from('customers')
+    .select('email')
+    .eq('id', customerId)
+    .maybeSingle();
+  if (custErr) throw custErr;
+  const custEmail = String(custRow?.email || '').trim().toLowerCase();
+  let mailReplied = false;
+  if (custEmail) {
+    // ILIKE zonder wildcards = case-insensitive exact-match. Voorkomt
+    // hoofdletter-mismatch (Klant@Domein.NL vs klant@domein.nl).
+    const { data: mailRows, error: mailErr } = await db
+      .from('email_messages')
+      .select('date_received')
+      .ilike('from_address', custEmail)
+      .gt('date_received', lastSentAt)
+      .order('date_received', { ascending: false })
+      .limit(1);
+    if (mailErr) throw mailErr;
+    mailReplied = !!(mailRows && mailRows.length > 0);
+  }
+
+  if (waReplied && mailReplied) return { replied: true, channel: 'both' };
+  if (waReplied)                 return { replied: true, channel: 'whatsapp' };
+  if (mailReplied)               return { replied: true, channel: 'email' };
+  return { replied: false };
 }
 
 /**
@@ -816,15 +855,19 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
           break;
         }
 
-        // ── Reply-stop guard (spoedfix): klant heeft gereageerd NA de
-        // laatste engine-send in deze run -> pauzeer, verstuur NIETS meer.
-        // Fail-open bij DB-fout (oud gedrag): tijdelijke glitch mag de
-        // engine niet volledig stoppen. Alleen actief als run al minstens
-        // 1 send heeft; nieuw-gestarte runs (geen sends yet) skippen deze
-        // check.
+        // ── Reply-stop guard: klant heeft gereageerd NA de laatste
+        // engine-send in deze run -> pauzeer, verstuur NIETS meer.
+        // Detecteert BEIDE kanalen: whatsapp_conversations.last_inbound_at
+        // en email_messages.from_address (case-insensitive customers.email).
+        // Log-payload bevat channel voor auditability.
+        // Fail-open bij DB-fout (bewuste keuze uit #875): tijdelijke glitch
+        // mag de engine niet volledig stoppen. Kan later fail-closed worden
+        // als product-beslissing (zie PR-body comment).
+        // Alleen actief als run al minstens 1 send heeft; nieuw-gestarte
+        // runs (geen sends yet) skippen deze check.
         try {
-          const replied = await hasReplyAfterLastSend(run.customer_id, run.id);
-          if (replied) {
+          const reply = await hasReplyAfterLastSend(run.customer_id, run.id);
+          if (reply?.replied) {
             await supabaseAdmin
               .from('dunning_workflow_runs')
               .update({ status: 'paused', updated_at: nowIso() })
@@ -833,7 +876,7 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
               run_id: run.id,
               step_id: currentStepId,
               event_type: 'paused_customer_replied',
-              payload: { reason: 'klant_reageerde' },
+              payload: { reason: 'klant_reageerde', channel: reply.channel || 'unknown' },
             });
             runAdvanced = true;
             break; // stop binnenlus; run is paused
