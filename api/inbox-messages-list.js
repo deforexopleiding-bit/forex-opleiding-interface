@@ -70,7 +70,7 @@ export default async function handler(req, res) {
       .select(
         'id, phone_number, display_name, phone_number_id, customer_id, attendee_id, status, last_message_at, ' +
         'last_inbound_at, unread_count, ' +
-        'customer:customers(id, first_name, last_name, company_name), ' +
+        'customer:customers(id, first_name, last_name, company_name, is_company), ' +
         'attendee:event_attendees!attendee_id(id, first_name, last_name, email, ' +
           'event:event_id(id, title, starts_at))'
       )
@@ -113,7 +113,11 @@ export default async function handler(req, res) {
     let customerName = null;
     if (cust) {
       const parts = [cust.first_name, cust.last_name].filter(Boolean).join(' ').trim();
-      customerName = parts || cust.company_name || null;
+      // Bedrijven: bedrijfsnaam als primair label; contactpersoon als fallback.
+      // Particulieren: eerst voor+achternaam, company_name alleen als leeg.
+      customerName = cust.is_company
+        ? (cust.company_name || parts || null)
+        : (parts || cust.company_name || null);
     }
     const att = conv.attendee || null;
     let attendeeName = null;
