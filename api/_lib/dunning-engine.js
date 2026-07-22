@@ -212,6 +212,53 @@ async function fetchOpenInvoices(customerId = null, opts = {}) {
 }
 
 /**
+ * Reply-stop helper (spoedfix): returnt true als de klant via WhatsApp
+ * heeft gereageerd NA de laatste engine-send in DEZE run. Wordt in
+ * advanceActiveRuns vóór iedere stap aangeroepen.
+ *
+ * "Gereageerd" = inbound WhatsApp-bericht op ENIGE conversatie van deze
+ * klant met last_inbound_at > lastSentAt van de run. WA-only voor deze
+ * spoedfix (dominant kanaal + directe customer_id-koppeling op
+ * whatsapp_conversations). E-mail-reply-detectie kan later toegevoegd.
+ *
+ * Als de run nog geen enkele send heeft (lastSentAt == null): return
+ * false (kan sowieso niet "gereageerd op wat we niet hebben verstuurd").
+ *
+ * Bij DB-fout gooit deze functie -- caller vangt fail-open (oud gedrag)
+ * zodat een tijdelijke DB-glitch niet de hele engine stopt.
+ */
+async function hasReplyAfterLastSend(customerId, runId) {
+  const { data: lastSendRows, error: sendErr } = await supabaseAdmin
+    .from('dunning_log')
+    .select('created_at')
+    .eq('run_id', runId)
+    .in('event_type', ['email_sent', 'whatsapp_sent'])
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (sendErr) throw sendErr;
+  const lastSentAt = lastSendRows?.[0]?.created_at || null;
+  if (!lastSentAt) return false;
+
+  const { data: convRows, error: convErr } = await supabaseAdmin
+    .from('whatsapp_conversations')
+    .select('last_inbound_at')
+    .eq('customer_id', customerId)
+    .not('last_inbound_at', 'is', null);
+  if (convErr) throw convErr;
+  if (!convRows || convRows.length === 0) return false;
+
+  // Klant kan meerdere conversaties hebben (verschillende modules) — pak
+  // de recentste inbound.
+  let mostRecent = '';
+  for (const row of convRows) {
+    if (row.last_inbound_at && row.last_inbound_at > mostRecent) {
+      mostRecent = row.last_inbound_at;
+    }
+  }
+  return mostRecent && mostRecent > lastSentAt;
+}
+
+/**
  * D5 helper: verzamel invoice_ids uit alle ACTIEF payment_arrangements.
  * Optioneel gescoped per customer_id voor de advance-fase (kleinere query).
  */
@@ -544,11 +591,17 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
       if (agg.total_open_eur < minTotal) continue;
 
       try {
+        // Spoedfix her-inschrijvings-lus: blokkeer nieuwe run bij ELKE
+        // niet-terminale status. Alleen 'completed' en 'cancelled' zijn
+        // terminaal; 'active' + 'paused' blokkeren re-enrollment zodat
+        // een gepauzeerde klant NOOIT automatisch opnieuw ingeschreven
+        // wordt. Zonder deze verbreding zou een paused run direct door
+        // een verse run bij stap 0 vervangen worden -> zelfde bug.
         const { data: existing, error: exErr } = await supabaseAdmin
           .from('dunning_workflow_runs')
-          .select('id')
+          .select('id, status')
           .eq('customer_id', customerId)
-          .eq('status', 'active')
+          .in('status', ['active', 'paused'])
           .limit(1)
           .maybeSingle();
         if (exErr) throw exErr;
@@ -573,27 +626,34 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
           if (everRan) continue;
         }
 
-        // COOLDOWN-check: sla klant over als recent (< cooldownDays) al
-        // een bulk_reminder_sent-log voor deze klant bestaat. Bewuste
-        // scope: alleen bulk-entries. Engine-dubbeling wordt al gedekt
-        // door de actieve-run-check hierboven. Een gecombineerde join
-        // engine-logs → runs.customer_id zou een aparte round-trip per
-        // klant vereisen; niet nodig voor deze cooldown-doel.
+        // COOLDOWN-check (spoedfix): sla klant over als er binnen de
+        // cooldown-periode al een ECHTE engine-send (email/whatsapp) voor
+        // deze klant is geweest. De oude check keek naar 'bulk_reminder_sent'
+        // events die de engine zelf NOOIT schrijft (alleen bulk-send +
+        // sandbox schrijven dat) -- dat was dode code en verklaarde de
+        // her-inschrijvings-lus (5-11 runs per klant).
+        // Bewuste 2-step lookup i.p.v. join: runs-per-klant is typisch <20,
+        // dus 2 kleine queries scoren beter dan een dure jsonb-scan.
         try {
-          const { data: recentBulk } = await supabaseAdmin
-            .from('dunning_log')
-            .select('id, created_at')
-            .eq('event_type', 'bulk_reminder_sent')
-            .eq('payload->>customer_id', customerId)
-            .gte('created_at', cooldownCutoffIso)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          if (recentBulk) continue;
+          const { data: recentRuns } = await supabaseAdmin
+            .from('dunning_workflow_runs')
+            .select('id')
+            .eq('customer_id', customerId);
+          const runIds = (recentRuns || []).map((r) => r.id).filter(Boolean);
+          if (runIds.length > 0) {
+            const { data: recentSend } = await supabaseAdmin
+              .from('dunning_log')
+              .select('id')
+              .in('run_id', runIds)
+              .in('event_type', ['email_sent', 'whatsapp_sent'])
+              .gte('created_at', cooldownCutoffIso)
+              .limit(1);
+            if (recentSend && recentSend.length > 0) continue;
+          }
         } catch (e) {
           console.warn('[dunning-engine] cooldown-check fail-soft:', customerId, e?.message || e);
           // Fail-open: bij DB-fout NIET skippen (anders schaadt een tijdelijke
-          // glitch de aanmaan-flow). We laten 'm gewoon door.
+          // glitch de aanmaan-flow). Oud gedrag behouden.
         }
 
         const triggerCount = agg.openInvoices.length;
@@ -754,6 +814,32 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
           catch (e) { console.warn('[dunning-engine] joost-counter-reset fail-soft (paid):', run.customer_id, e?.message || e); }
           runAdvanced = true;
           break;
+        }
+
+        // ── Reply-stop guard (spoedfix): klant heeft gereageerd NA de
+        // laatste engine-send in deze run -> pauzeer, verstuur NIETS meer.
+        // Fail-open bij DB-fout (oud gedrag): tijdelijke glitch mag de
+        // engine niet volledig stoppen. Alleen actief als run al minstens
+        // 1 send heeft; nieuw-gestarte runs (geen sends yet) skippen deze
+        // check.
+        try {
+          const replied = await hasReplyAfterLastSend(run.customer_id, run.id);
+          if (replied) {
+            await supabaseAdmin
+              .from('dunning_workflow_runs')
+              .update({ status: 'paused', updated_at: nowIso() })
+              .eq('id', run.id);
+            await supabaseAdmin.from('dunning_log').insert({
+              run_id: run.id,
+              step_id: currentStepId,
+              event_type: 'paused_customer_replied',
+              payload: { reason: 'klant_reageerde' },
+            });
+            runAdvanced = true;
+            break; // stop binnenlus; run is paused
+          }
+        } catch (e) {
+          console.warn('[dunning-engine] reply-check fail-soft, doorgaan:', run.customer_id, e?.message || e);
         }
 
         const currentStep = (steps || []).find((s) => s.id === currentStepId);
