@@ -3063,6 +3063,7 @@
       <button                data-wb-sub="inbox"       type="button" title="Gesprekken">Gesprekken</button>
       <button                data-wb-sub="facturen"    type="button" title="Facturen">Facturen</button>
       <button                data-wb-sub="opruimen"    type="button" title="Opruimen">Opruimen</button>
+      <button                data-wb-sub="arrangements" type="button" title="Betalingsregelingen">Afspraken</button>
       <div class="wbx-nav-spacer"></div>
       <!-- Verversen: alleen zichtbaar op de Te doen-sub (getoggled door
            setSubView). Geen data-wb-sub attribuut → sub-nav-handler pikt 'm
@@ -4053,6 +4054,52 @@
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
       <button class="sr-abtn" id="arrangDetailCloseBtn" type="button">Sluiten</button>
     </div>
+  </div>
+</div>
+
+<style>
+  /* Actie-detailmodal — sectie-styling via --ds-* met fallback. */
+  #pendingActionDetailModal .pa-section {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--ds-border, #dfe8ec);
+  }
+  #pendingActionDetailModal .pa-section:last-child { border-bottom: 0; }
+  #pendingActionDetailModal .pa-section h4 {
+    margin: 0 0 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ds-text-muted, #48585f);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+  }
+  @media (max-width: 640px) {
+    #pendingActionDetailModal .modal-card { max-width: 100% !important; max-height: 100vh !important; border-radius: 0; }
+    #pendingActionDetailModal #paDetailFooter .sr-abtn { flex: 1 1 auto; min-height: 40px; }
+  }
+</style>
+
+<!-- Actie-detailmodal (PR 1/2): opent bij klik op een rij in Wanbetalers → Acties.
+     Toont alle context (klant + facturen + arrangements + dunning-run + abo + berichten)
+     en hergebruikt de bestaande approve/reject/mark-executed/mark-not-executed endpoints.
+     Alle secties fail-soft: één DB-fout verbergt alleen dat blok, niet de hele modal. -->
+<div class="modal-overlay hidden" id="pendingActionDetailModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:760px;max-height:92vh;overflow-y:auto;background:var(--ds-surface,#ffffff);color:var(--ds-text,#06181f);border:1px solid var(--ds-border,#dfe8ec)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div style="min-width:0;flex:1">
+        <div id="paDetailIcon" style="font-size:20px;margin-bottom:4px" aria-hidden="true">📋</div>
+        <h3 id="paDetailTitle" style="margin:0;font-size:17px;font-weight:600;color:var(--ds-text,#06181f)">Laden…</h3>
+        <div id="paDetailSubtitle" style="font-size:12px;color:var(--ds-text-faint,#7a8b92);margin-top:3px">—</div>
+      </div>
+      <button class="sr-ibtn" id="paDetailCloseBtn" type="button" title="Sluiten" style="margin-top:-4px;background:transparent;border:0;color:var(--ds-text-muted,#48585f);cursor:pointer;font-size:16px;padding:4px 8px">✕</button>
+    </div>
+
+    <div id="paDetailBody" style="margin-top:16px;display:flex;flex-direction:column;gap:14px">
+      <div style="text-align:center;padding:24px;color:var(--ds-text-faint,#7a8b92);font-size:13px">Laden…</div>
+    </div>
+
+    <div id="paDetailError" style="display:none;margin-top:12px;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:12px"></div>
+
+    <div id="paDetailFooter" style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap"></div>
   </div>
 </div>
 
@@ -5926,10 +5973,26 @@
 
     // Bind approve/reject-knoppen.
     list.querySelectorAll('[data-ac-approve]').forEach((btn) => {
-      btn.addEventListener('click', () => _acWbxDoApprove(btn.getAttribute('data-ac-approve')));
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _acWbxDoApprove(btn.getAttribute('data-ac-approve'));
+      });
     });
     list.querySelectorAll('[data-ac-reject]').forEach((btn) => {
-      btn.addEventListener('click', () => _acWbxDoReject(btn.getAttribute('data-ac-reject')));
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _acWbxDoReject(btn.getAttribute('data-ac-reject'));
+      });
+    });
+    // Row-click opent detail-modal. Knop-klikken worden opgevangen door
+    // stopPropagation hierboven zodat ze niet OOK de modal triggeren.
+    list.querySelectorAll('.wbx-arow[data-ac-id]').forEach((row) => {
+      row.style.cursor = 'pointer';
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return; // extra safety-net
+        const id = row.getAttribute('data-ac-id');
+        if (id) openPaDetailModal(id);
+      });
     });
   }
 
@@ -6027,6 +6090,394 @@
     } catch (e) {
       window.AgentShared?.showToast?.('Afwijzen mislukt: ' + (e?.message || 'onbekend'), 'error');
     }
+  }
+
+  // ─── Actie-detailmodal (PR 1/2) ─────────────────────────────────────────
+  // Klik op een rij in Wanbetalers -> Acties opent deze modal met alle
+  // context: klant + facturen + arrangements + dunning-run + abonnement +
+  // recente berichten. Elke sectie fail-soft: 1 DB-fout verbergt alleen dat
+  // blok, niet de hele modal. Knoppen in de footer hergebruiken de bestaande
+  // approve/reject/mark-executed/mark-not-executed endpoints (recon-4:
+  // allemaal finance.arrangements.approve permission).
+  let _paDetailCurrentId = null;
+  let _paDetailWired = false;
+
+  function _paDetailWireOnce() {
+    if (_paDetailWired) return;
+    _paDetailWired = true;
+    const modal = document.getElementById('pendingActionDetailModal');
+    document.getElementById('paDetailCloseBtn')?.addEventListener('click', closePaDetailModal);
+    if (modal) {
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) closePaDetailModal();
+      });
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      const m = document.getElementById('pendingActionDetailModal');
+      if (m && !m.classList.contains('hidden')) closePaDetailModal();
+    });
+  }
+
+  function closePaDetailModal() {
+    _paDetailCurrentId = null;
+    const modal = document.getElementById('pendingActionDetailModal');
+    if (modal) modal.classList.add('hidden');
+  }
+
+  function _paDetailFmtEur(cents) {
+    const eur = Number(cents || 0) / 100;
+    return '€ ' + eur.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function _paDetailFmtEurFromNum(n) {
+    return '€ ' + (Number(n) || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function _paDetailFmtDate(iso) {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch (_) { return iso; }
+  }
+  function _paDetailFmtDateTime(iso) {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    } catch (_) { return iso; }
+  }
+
+  async function openPaDetailModal(id) {
+    if (!id) return;
+    _paDetailWireOnce();
+    _paDetailCurrentId = id;
+    const modal = document.getElementById('pendingActionDetailModal');
+    const body  = document.getElementById('paDetailBody');
+    const foot  = document.getElementById('paDetailFooter');
+    const err   = document.getElementById('paDetailError');
+    const title = document.getElementById('paDetailTitle');
+    const sub   = document.getElementById('paDetailSubtitle');
+    const icon  = document.getElementById('paDetailIcon');
+    if (!modal || !body) return;
+    modal.classList.remove('hidden');
+    if (err) { err.style.display = 'none'; err.textContent = ''; }
+    if (foot) foot.innerHTML = '';
+    if (title) title.textContent = 'Laden…';
+    if (sub) sub.textContent = '—';
+    body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--ds-text-faint,#7a8b92);font-size:13px">Laden…</div>';
+
+    // Hoofdfetch: pending-actions-detail bevat item + customer + arrangement + invoices.
+    let detail = null;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-detail?id=' + encodeURIComponent(id));
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      detail = d;
+    } catch (e) {
+      if (err) { err.textContent = 'Kan actie niet laden: ' + (e?.message || 'onbekend'); err.style.display = 'block'; }
+      body.innerHTML = '';
+      return;
+    }
+    if (_paDetailCurrentId !== id) return; // stale (user opende andere)
+
+    const item = detail.item || {};
+    const cust = detail.customer || null;
+    const arr  = detail.arrangement || null;
+    const invs = Array.isArray(detail.invoices) ? detail.invoices : [];
+
+    // Kop-info.
+    const cat = _acWbxCategoryFor(item.action_type);
+    const meta = _AC_WBX_TYPE_META[cat] || _AC_WBX_TYPE_META.plan;
+    if (icon) icon.textContent = meta.ic;
+    if (title) title.textContent = meta.label + (cust?.name ? ' — ' + cust.name : '');
+    if (sub) {
+      const kind = item.payload?.kind ? ' · ' + item.payload.kind : '';
+      const age  = _acWbxAgeText(item);
+      sub.textContent = (item.action_type || '') + kind + (age ? ' · ' + age + ' open' : '');
+    }
+
+    // Volledige notitie/omschrijving (payload.reason / context_summary / notitie).
+    const fullNote = (item.payload && (item.payload.reason || item.payload.context_summary || item.payload.notitie)) || null;
+    const rejectReason = item.rejection_reason || null;
+    const executionResult = item.execution_result || null;
+
+    // Bouw de body-secties. Iedere sectie fail-soft; blokken die niet
+    // gevuld kunnen worden tonen een korte "geen data" ipv de hele modal
+    // te breken.
+    const sections = [];
+    if (fullNote) {
+      sections.push(
+        '<section class="pa-section"><h4>Notitie</h4><p style="white-space:pre-wrap;margin:0">' + esc(fullNote) + '</p></section>'
+      );
+    }
+    if (rejectReason) {
+      sections.push(
+        '<section class="pa-section"><h4>Reden afwijzing</h4><p style="white-space:pre-wrap;margin:0;color:var(--ds-danger,#dc2626)">' + esc(rejectReason) + '</p></section>'
+      );
+    }
+    if (executionResult && (executionResult.failure_reason || executionResult.error)) {
+      const errTxt = executionResult.failure_reason || executionResult.error;
+      sections.push(
+        '<section class="pa-section"><h4>Uitvoeringsresultaat</h4><p style="white-space:pre-wrap;margin:0;color:var(--ds-warning,#d97706)">' + esc(errTxt) + '</p></section>'
+      );
+    }
+
+    // Klant-sectie.
+    if (cust) {
+      const link = '/modules/klanten.html?id=' + encodeURIComponent(cust.id || '');
+      sections.push(
+        '<section class="pa-section"><h4>Klant</h4>' +
+        '<div style="display:flex;flex-direction:column;gap:2px;font-size:12.5px">' +
+          '<div><strong>' + esc(cust.name || '(zonder naam)') + '</strong></div>' +
+          (cust.email ? '<div>' + esc(cust.email) + '</div>' : '') +
+          (cust.phone ? '<div>' + esc(cust.phone) + '</div>' : '') +
+          '<div style="margin-top:6px"><a href="' + link + '" target="_blank" rel="noopener" style="color:var(--ds-brand,#0a5178);text-decoration:none;font-size:11.5px">Klant-profiel openen →</a></div>' +
+        '</div></section>'
+      );
+    }
+
+    // Facturen (uit detail-response).
+    if (invs.length > 0) {
+      let totalCents = 0;
+      const rows = invs.map((iv) => {
+        const total = Number(iv.amount_total) || 0;
+        const paid  = Number(iv.amount_paid)  || 0;
+        const cred  = Number(iv.credited_amount) || 0;
+        const open  = Math.max(0, total - paid - cred);
+        totalCents += Math.round(open * 100);
+        return '<tr>' +
+          '<td>' + esc(iv.invoice_number || iv.id?.slice(0, 8) || '—') + '</td>' +
+          '<td>' + esc(iv.status || '—') + '</td>' +
+          '<td style="text-align:right;font-family:var(--ds-font-mono, ui-monospace)">' + _paDetailFmtEurFromNum(open) + '</td>' +
+        '</tr>';
+      }).join('');
+      sections.push(
+        '<section class="pa-section"><h4>Facturen (' + invs.length + ' · totaal open ' + _paDetailFmtEur(totalCents) + ')</h4>' +
+        '<table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr>' +
+          '<th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--ds-border,#dfe8ec)">Nummer</th>' +
+          '<th style="text-align:left;padding:4px 6px;border-bottom:1px solid var(--ds-border,#dfe8ec)">Status</th>' +
+          '<th style="text-align:right;padding:4px 6px;border-bottom:1px solid var(--ds-border,#dfe8ec)">Open</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table></section>'
+      );
+    }
+
+    // Arrangement (uit detail-response) — deze specifieke arrangement waar
+    // de action bij hoort. Plus link naar alle arrangements van de klant.
+    if (arr) {
+      const arrLink = '/modules/finance.html?tab=wanbetalers&sub=arrangements';
+      sections.push(
+        '<section class="pa-section"><h4>Bijhorende afspraak</h4>' +
+        '<div style="font-size:12.5px">' +
+          '<div>Type: <strong>' + esc(arr.type || '—') + '</strong></div>' +
+          '<div>Status: <strong>' + esc(arr.status || '—') + '</strong></div>' +
+          '<div style="margin-top:6px"><a href="' + arrLink + '" style="color:var(--ds-brand,#0a5178);text-decoration:none;font-size:11.5px">Alle afspraken →</a></div>' +
+        '</div></section>'
+      );
+    }
+
+    // Placeholder-blokken die parallel gevuld worden:
+    sections.push('<section class="pa-section" id="paSectionRuns"><h4>Dunning-run</h4><div style="font-size:12px;color:var(--ds-text-faint,#7a8b92)">Laden…</div></section>');
+    sections.push('<section class="pa-section" id="paSectionSubs"><h4>Abonnement</h4><div style="font-size:12px;color:var(--ds-text-faint,#7a8b92)">Laden…</div></section>');
+    sections.push('<section class="pa-section" id="paSectionMsgs"><h4>Recente berichten</h4><div style="font-size:12px;color:var(--ds-text-faint,#7a8b92)">Laden…</div></section>');
+
+    body.innerHTML = sections.join('');
+
+    // Footer-knoppen op basis van status + permissie.
+    _paDetailRenderFooter(item);
+
+    // Parallelle side-fetches (fail-soft per blok).
+    if (cust && cust.id) {
+      _paDetailFillRuns(cust.id);
+      _paDetailFillSubs(cust.id);
+      _paDetailFillMessages(cust.id);
+    } else {
+      const r = document.getElementById('paSectionRuns');
+      const s = document.getElementById('paSectionSubs');
+      const m = document.getElementById('paSectionMsgs');
+      if (r) r.innerHTML = '<h4>Dunning-run</h4><div style="font-size:12px;color:var(--ds-text-faint,#7a8b92)">Geen klant gekoppeld</div>';
+      if (s) s.innerHTML = '<h4>Abonnement</h4><div style="font-size:12px;color:var(--ds-text-faint,#7a8b92)">Geen klant gekoppeld</div>';
+      if (m) m.innerHTML = '<h4>Recente berichten</h4><div style="font-size:12px;color:var(--ds-text-faint,#7a8b92)">Geen klant gekoppeld</div>';
+    }
+  }
+
+  async function _paDetailFillRuns(customerId) {
+    const box = document.getElementById('paSectionRuns');
+    if (!box) return;
+    try {
+      // Direct via supabase-anon (RLS-aware). ADMIN_ROLES hebben toegang.
+      const supa = window.supabase;
+      if (!supa) throw new Error('supabase-client onbeschikbaar');
+      const { data, error } = await supa
+        .from('dunning_workflow_runs')
+        .select('id, status, paused_by_conversation_id, paused_by_arrangement_id, next_action_at, updated_at, workflow_id')
+        .eq('customer_id', customerId)
+        .order('updated_at', { ascending: false })
+        .limit(5);
+      if (error) throw error;
+      const rows = data || [];
+      const active = rows.find((r) => r.status === 'active');
+      const paused = rows.find((r) => r.status === 'paused');
+      let html = '<h4>Dunning-run</h4><div style="font-size:12.5px">';
+      if (active) {
+        html += '<div>✅ <strong>Actief</strong> — volgende actie: ' + esc(_paDetailFmtDateTime(active.next_action_at)) + '</div>';
+      } else if (paused) {
+        const reasons = [];
+        if (paused.paused_by_conversation_id) reasons.push('gesprek');
+        if (paused.paused_by_arrangement_id) reasons.push('afspraak');
+        const why = reasons.length ? reasons.join(' + ') : 'reply-stop (klant reageerde)';
+        html += '<div>⏸ <strong>Gepauzeerd</strong> — reden: ' + esc(why) + '</div>';
+      } else if (rows.length > 0) {
+        html += '<div>Laatste run: ' + esc(rows[0].status) + ' — ' + esc(_paDetailFmtDateTime(rows[0].updated_at)) + '</div>';
+      } else {
+        html += '<div style="color:var(--ds-text-faint,#7a8b92)">Geen run gevonden voor deze klant</div>';
+      }
+      html += '</div>';
+      box.innerHTML = html;
+    } catch (e) {
+      box.innerHTML = '<h4>Dunning-run</h4><div style="font-size:12px;color:var(--ds-text-faint,#7a8b92)">Kon runs niet laden: ' + esc(e?.message || 'onbekend') + '</div>';
+    }
+  }
+
+  async function _paDetailFillSubs(customerId) {
+    const box = document.getElementById('paSectionSubs');
+    if (!box) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/sales-customer-subscriptions?customer_id=' + encodeURIComponent(customerId));
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      const subs = Array.isArray(d?.subscriptions) ? d.subscriptions : (Array.isArray(d?.items) ? d.items : []);
+      const link = '/modules/klanten.html?id=' + encodeURIComponent(customerId) + '&tab=abonnementen';
+      const active = subs.filter((s) => s && s.status === 'active');
+      let html = '<h4>Abonnement</h4><div style="font-size:12.5px">';
+      if (active.length > 0) {
+        html += active.map((s) => {
+          const bedrag = s.amount != null ? _paDetailFmtEurFromNum(s.amount) : '—';
+          const start  = s.start_date ? _paDetailFmtDate(s.start_date) : '—';
+          const term   = s.term_count != null ? (' · ' + s.term_count + ' termijnen') : '';
+          return '<div>💳 <strong>Actief</strong> · ' + esc(bedrag) + ' · start ' + esc(start) + esc(term) + '</div>';
+        }).join('');
+      } else if (subs.length > 0) {
+        html += '<div>Geen actief abonnement (' + subs.length + ' historisch)</div>';
+      } else {
+        html += '<div style="color:var(--ds-text-faint,#7a8b92)">Geen abonnement</div>';
+      }
+      html += '<div style="margin-top:6px"><a href="' + link + '" target="_blank" rel="noopener" style="color:var(--ds-brand,#0a5178);text-decoration:none;font-size:11.5px">Abonnement-tab openen →</a></div>';
+      html += '</div>';
+      box.innerHTML = html;
+    } catch (e) {
+      box.innerHTML = '<h4>Abonnement</h4><div style="font-size:12px;color:var(--ds-text-faint,#7a8b92)">Kon abonnement niet laden: ' + esc(e?.message || 'onbekend') + '</div>';
+    }
+  }
+
+  async function _paDetailFillMessages(customerId) {
+    const box = document.getElementById('paSectionMsgs');
+    if (!box) return;
+    try {
+      const supa = window.supabase;
+      if (!supa) throw new Error('supabase-client onbeschikbaar');
+      // 1) Laatste 3 WhatsApp-berichten via conversation-lookup.
+      const { data: convRows } = await supa
+        .from('whatsapp_conversations')
+        .select('id, phone_number')
+        .eq('customer_id', customerId)
+        .order('last_message_at', { ascending: false })
+        .limit(1);
+      let waHtml = '<div style="color:var(--ds-text-faint,#7a8b92)">Geen WhatsApp-gesprek</div>';
+      if (convRows && convRows.length > 0) {
+        const { data: msgs } = await supa
+          .from('whatsapp_messages')
+          .select('direction, body, template_name, sent_at, created_at')
+          .eq('conversation_id', convRows[0].id)
+          .order('created_at', { ascending: false })
+          .limit(3);
+        if (msgs && msgs.length > 0) {
+          waHtml = msgs.map((m) => {
+            const dir = m.direction === 'out' || m.direction === 'outbound' ? '→' : '←';
+            const when = _paDetailFmtDateTime(m.sent_at || m.created_at);
+            const body = m.template_name ? '[template] ' + m.template_name : (m.body || '').slice(0, 100);
+            return '<div style="font-size:11.5px;padding:3px 0;border-bottom:1px solid var(--ds-border,#dfe8ec)">' +
+              '<span style="color:var(--ds-text-faint,#7a8b92)">' + dir + ' ' + esc(when) + '</span> — ' + esc(body) +
+              '</div>';
+          }).join('');
+        }
+      }
+      // 2) Laatste 3 e-mails via from_address = customer.email.
+      let mailHtml = '<div style="color:var(--ds-text-faint,#7a8b92)">Geen e-mail-adres bekend</div>';
+      const custR = await supa.from('customers').select('email').eq('id', customerId).maybeSingle();
+      const custEmail = (custR?.data?.email || '').trim().toLowerCase();
+      if (custEmail) {
+        const { data: mails } = await supa
+          .from('email_messages')
+          .select('subject, from_address, date_received')
+          .ilike('from_address', custEmail)
+          .order('date_received', { ascending: false })
+          .limit(3);
+        if (mails && mails.length > 0) {
+          mailHtml = mails.map((m) => {
+            return '<div style="font-size:11.5px;padding:3px 0;border-bottom:1px solid var(--ds-border,#dfe8ec)">' +
+              '<span style="color:var(--ds-text-faint,#7a8b92)">✉ ' + esc(_paDetailFmtDateTime(m.date_received)) + '</span> — ' + esc(m.subject || '(geen onderwerp)') +
+              '</div>';
+          }).join('');
+        } else {
+          mailHtml = '<div style="color:var(--ds-text-faint,#7a8b92)">Geen inbound e-mail van ' + esc(custEmail) + '</div>';
+        }
+      }
+      box.innerHTML = '<h4>Recente berichten</h4>' +
+        '<div style="font-size:12px"><div style="font-weight:600;margin-bottom:4px">WhatsApp</div>' + waHtml + '</div>' +
+        '<div style="font-size:12px;margin-top:8px"><div style="font-weight:600;margin-bottom:4px">E-mail</div>' + mailHtml + '</div>';
+    } catch (e) {
+      box.innerHTML = '<h4>Recente berichten</h4><div style="font-size:12px;color:var(--ds-text-faint,#7a8b92)">Kon berichten niet laden: ' + esc(e?.message || 'onbekend') + '</div>';
+    }
+  }
+
+  function _paDetailRenderFooter(item) {
+    const foot = document.getElementById('paDetailFooter');
+    if (!foot) return;
+    // Permissie-gate: alle actie-knoppen achter finance.arrangements.approve.
+    // Fail-open: als RBAC-lookup faalt, tonen we de knoppen (server-side 403
+    // is de definitieve gate — consistent met bestaande UI-patronen).
+    let canApprove = true;
+    try {
+      const perms = window.RBAC && window.RBAC._permissionsCache;
+      if (perms && typeof perms.has === 'function') {
+        canApprove = perms.has('*') || perms.has('finance.arrangements.approve');
+      }
+    } catch (_) { /* fail-open */ }
+
+    const btns = [];
+    btns.push('<button class="sr-abtn" type="button" data-pa-detail-close>Sluiten</button>');
+    const status = String(item.status || '').toUpperCase();
+    if (canApprove) {
+      if (status === 'PENDING') {
+        const cat = _acWbxCategoryFor(item.action_type);
+        const primaryLbl = cat === 'esc' ? 'Oppakken' : 'Goedkeuren';
+        btns.push('<button class="sr-abtn danger" type="button" data-pa-detail-reject>Afwijzen</button>');
+        btns.push('<button class="sr-abtn primary" type="button" data-pa-detail-approve>' + esc(primaryLbl) + '</button>');
+      } else if (status === 'APPROVED') {
+        btns.push('<button class="sr-abtn danger" type="button" data-pa-detail-not-executed>Niet door te voeren</button>');
+        btns.push('<button class="sr-abtn primary" type="button" data-pa-detail-executed>Verwerkt</button>');
+      }
+    }
+    foot.innerHTML = btns.join('');
+
+    // Bind knoppen (idempotent — footer wordt bij elke render overschreven).
+    foot.querySelector('[data-pa-detail-close]')?.addEventListener('click', closePaDetailModal);
+    foot.querySelector('[data-pa-detail-approve]')?.addEventListener('click', async () => {
+      await _acWbxDoApprove(item.id);
+      closePaDetailModal();
+    });
+    foot.querySelector('[data-pa-detail-reject]')?.addEventListener('click', async () => {
+      await _acWbxDoReject(item.id);
+      closePaDetailModal();
+    });
+    foot.querySelector('[data-pa-detail-executed]')?.addEventListener('click', () => {
+      closePaDetailModal();
+      if (typeof openMarkExecutedModalFin === 'function') openMarkExecutedModalFin(item.id);
+    });
+    foot.querySelector('[data-pa-detail-not-executed]')?.addEventListener('click', () => {
+      closePaDetailModal();
+      if (typeof openMarkNotExecutedModalFin === 'function') openMarkNotExecutedModalFin(item.id);
+    });
   }
 
   // Activeer een specifieke sub binnen view-dunning's dunningSubNav. Triggert
