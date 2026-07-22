@@ -860,9 +860,13 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
         // Detecteert BEIDE kanalen: whatsapp_conversations.last_inbound_at
         // en email_messages.from_address (case-insensitive customers.email).
         // Log-payload bevat channel voor auditability.
-        // Fail-open bij DB-fout (bewuste keuze uit #875): tijdelijke glitch
-        // mag de engine niet volledig stoppen. Kan later fail-closed worden
-        // als product-beslissing (zie PR-body comment).
+        //
+        // Fail-CLOSED (aanvulling op #875/#876): bij DB-fout wordt DEZE run
+        // overgeslagen in deze tick -- geen send, geen status-update. Volgende
+        // cron-tick probeert opnieuw. Andere runs in dezelfde tick worden
+        // NIET geraakt (granulaire skip via break uit de binnenlus zonder
+        // runAdvanced=true en zonder update-write).
+        //
         // Alleen actief als run al minstens 1 send heeft; nieuw-gestarte
         // runs (geen sends yet) skippen deze check.
         try {
@@ -882,7 +886,35 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
             break; // stop binnenlus; run is paused
           }
         } catch (e) {
-          console.warn('[dunning-engine] reply-check fail-soft, doorgaan:', run.customer_id, e?.message || e);
+          // Fail-closed: één klant met een DB-glitch mag de rest van deze
+          // tick niet beïnvloeden -> skip alleen DEZE run. Status NIET
+          // wijzigen (next_action_at blijft; volgende tick pakt 'm gewoon
+          // weer op). Loggen in dunning_log zodat een herhaald falen
+          // opvalt via de UI -- anders staat de dunning stil zonder alarm.
+          const errMsg = e?.message || String(e);
+          console.error('[dunning-engine] reply-check FAILED -> run overgeslagen deze tick:', run.customer_id, run.id, errMsg);
+          try {
+            await supabaseAdmin.from('dunning_log').insert({
+              run_id: run.id,
+              step_id: currentStepId,
+              event_type: 'reply_check_failed',
+              payload: {
+                reason: 'reply_check_error',
+                error:  errMsg,
+                customer_id: run.customer_id,
+              },
+            });
+          } catch (logErr) {
+            // Best-effort: als zelfs de log-insert faalt, niet cascaderen.
+            console.error('[dunning-engine] reply_check_failed log-insert ook mislukt:', logErr?.message || logErr);
+          }
+          errors.push({
+            phase: 'advance_reply_check',
+            run_id: run.id,
+            customer_id: run.customer_id,
+            error: errMsg,
+          });
+          break; // stop binnenlus; geen runAdvanced -> geen advanced++
         }
 
         const currentStep = (steps || []).find((s) => s.id === currentStepId);
