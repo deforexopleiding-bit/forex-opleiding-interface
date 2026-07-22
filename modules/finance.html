@@ -4103,6 +4103,111 @@
   </div>
 </div>
 
+<!-- PR 2/2: Snel-regeling aanmaken vanuit actie-detailmodal.
+     Compact formulier voor UITSTEL (1 arrangement, N termijnen) of SPLITSING
+     (per factuur N termijnen). Roept /api/arrangements-propose aan. Voor
+     complexere cases: link naar Afspraken-wizard. -->
+<div class="modal-overlay hidden" id="paCreateArrangementModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:560px;max-height:90vh;overflow-y:auto;background:var(--ds-surface,#ffffff);color:var(--ds-text,#06181f);border:1px solid var(--ds-border,#dfe8ec)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div>
+        <h3 style="margin:0;font-size:16px;font-weight:600">Snel-regeling aanmaken</h3>
+        <div id="paArrCustomerLine" style="font-size:12px;color:var(--ds-text-faint,#7a8b92);margin-top:3px">—</div>
+      </div>
+      <button class="sr-ibtn" id="paArrCloseBtn" type="button" title="Sluiten" style="background:transparent;border:0;color:var(--ds-text-muted,#48585f);cursor:pointer;font-size:16px;padding:4px 8px">✕</button>
+    </div>
+    <div style="margin-top:14px;display:flex;flex-direction:column;gap:12px;font-size:12.5px">
+      <div>
+        <label style="display:block;font-size:11px;color:var(--ds-text-muted,#48585f);margin-bottom:4px;text-transform:uppercase;font-weight:600">Type</label>
+        <div id="paArrTypeSeg" style="display:inline-flex;gap:0;border:1px solid var(--ds-border,#dfe8ec);border-radius:6px;padding:2px">
+          <button type="button" data-pa-arr-type="UITSTEL"   class="active" style="padding:5px 12px;border:0;background:var(--ds-brand,#0a5178);color:#fff;border-radius:4px;cursor:pointer;font:inherit;font-size:12px">Uitstel</button>
+          <button type="button" data-pa-arr-type="SPLITSING"           style="padding:5px 12px;border:0;background:transparent;color:var(--ds-text,#06181f);cursor:pointer;font:inherit;font-size:12px">Splitsing</button>
+        </div>
+        <div style="font-size:11px;color:var(--ds-text-faint,#7a8b92);margin-top:4px" id="paArrTypeHint">Uitstel: alle facturen samengevoegd, in N gelijke termijnen.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <label style="display:block">
+          <span style="display:block;font-size:11px;color:var(--ds-text-muted,#48585f);margin-bottom:4px;text-transform:uppercase;font-weight:600">Aantal termijnen</span>
+          <input type="number" id="paArrTermijnen" min="2" max="60" value="3" class="fin-input" style="width:100%;padding:6px 10px;background:var(--ds-surface-2,#f9fbfc);color:var(--ds-text,#06181f);border:1px solid var(--ds-border-strong,#c1d0d7);border-radius:6px;font:inherit;font-size:13px" />
+        </label>
+        <label style="display:block">
+          <span style="display:block;font-size:11px;color:var(--ds-text-muted,#48585f);margin-bottom:4px;text-transform:uppercase;font-weight:600">Startdatum</span>
+          <input type="date" id="paArrStartDate" class="fin-input" style="width:100%;padding:6px 10px;background:var(--ds-surface-2,#f9fbfc);color:var(--ds-text,#06181f);border:1px solid var(--ds-border-strong,#c1d0d7);border-radius:6px;font:inherit;font-size:13px" />
+        </label>
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;color:var(--ds-text-muted,#48585f);margin-bottom:4px;text-transform:uppercase;font-weight:600">Facturen</label>
+        <div id="paArrInvoiceList" style="max-height:140px;overflow-y:auto;border:1px solid var(--ds-border,#dfe8ec);border-radius:6px;padding:6px">
+          <div style="font-size:11.5px;color:var(--ds-text-faint,#7a8b92);text-align:center;padding:10px">Geen facturen geladen</div>
+        </div>
+        <div id="paArrTotalLine" style="font-size:11.5px;color:var(--ds-text-muted,#48585f);margin-top:4px;text-align:right">Totaal: €0,00 · per termijn: €0,00</div>
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;color:var(--ds-text-muted,#48585f);margin-bottom:4px;text-transform:uppercase;font-weight:600">Toelichting (opgeslagen in audit)</label>
+        <textarea id="paArrRationale" rows="3" class="fin-input" style="width:100%;padding:6px 10px;background:var(--ds-surface-2,#f9fbfc);color:var(--ds-text,#06181f);border:1px solid var(--ds-border-strong,#c1d0d7);border-radius:6px;font:inherit;font-size:13px;resize:vertical" placeholder="bv. betaling naar 150/maand — uit gesprek met klant"></textarea>
+      </div>
+      <div id="paArrError" style="display:none;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:12px"></div>
+      <div style="font-size:11px;color:var(--ds-text-faint,#7a8b92);padding:6px 10px;background:var(--ds-surface-2,#f9fbfc);border-radius:6px;line-height:1.4">
+        ℹ️ Regeling start op status <strong>VOORGESTELD</strong>. Dunning-run stopt pas nadat alle stappen zijn goedgekeurd + verwerkt (arrangement → ACTIEF).
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:space-between;margin-top:14px;flex-wrap:wrap">
+      <a id="paArrAdvancedLink" href="/modules/finance.html?tab=wanbetalers&sub=arrangements" style="align-self:center;font-size:11.5px;color:var(--ds-brand,#0a5178);text-decoration:none">Uitgebreid instellen →</a>
+      <div style="display:flex;gap:8px">
+        <button class="sr-abtn" type="button" id="paArrCancelBtn">Annuleren</button>
+        <button class="sr-abtn primary" type="button" id="paArrSubmitBtn" style="background:var(--ds-brand,#0a5178);color:#fff;border:0">Regeling voorstellen</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PR 2/2: Taak aanmaken + toewijzen vanuit actie-detailmodal.
+     Voorvult titel + omschrijving + deadline uit de actie-context. Roept
+     /api/taken aan. Aparte tabel taken_items — assignee via assigned_to_id.
+     Terugverwijzing naar bron-actie via de omschrijving-tekst (geen kolom-
+     migratie op taken_items). Task-afvinken beïnvloedt de actie NIET. -->
+<div class="modal-overlay hidden" id="paCreateTaskModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:560px;max-height:90vh;overflow-y:auto;background:var(--ds-surface,#ffffff);color:var(--ds-text,#06181f);border:1px solid var(--ds-border,#dfe8ec)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div>
+        <h3 style="margin:0;font-size:16px;font-weight:600">Taak aanmaken</h3>
+        <div id="paTaskCustomerLine" style="font-size:12px;color:var(--ds-text-faint,#7a8b92);margin-top:3px">—</div>
+      </div>
+      <button class="sr-ibtn" id="paTaskCloseBtn" type="button" title="Sluiten" style="background:transparent;border:0;color:var(--ds-text-muted,#48585f);cursor:pointer;font-size:16px;padding:4px 8px">✕</button>
+    </div>
+    <div style="margin-top:14px;display:flex;flex-direction:column;gap:12px;font-size:12.5px">
+      <label style="display:block">
+        <span style="display:block;font-size:11px;color:var(--ds-text-muted,#48585f);margin-bottom:4px;text-transform:uppercase;font-weight:600">Titel</span>
+        <input type="text" id="paTaskTitle" class="fin-input" style="width:100%;padding:6px 10px;background:var(--ds-surface-2,#f9fbfc);color:var(--ds-text,#06181f);border:1px solid var(--ds-border-strong,#c1d0d7);border-radius:6px;font:inherit;font-size:13px" placeholder="Voorvulling volgt..." />
+      </label>
+      <label style="display:block">
+        <span style="display:block;font-size:11px;color:var(--ds-text-muted,#48585f);margin-bottom:4px;text-transform:uppercase;font-weight:600">Omschrijving</span>
+        <textarea id="paTaskDesc" rows="5" class="fin-input" style="width:100%;padding:6px 10px;background:var(--ds-surface-2,#f9fbfc);color:var(--ds-text,#06181f);border:1px solid var(--ds-border-strong,#c1d0d7);border-radius:6px;font:inherit;font-size:13px;resize:vertical"></textarea>
+      </label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <label style="display:block">
+          <span style="display:block;font-size:11px;color:var(--ds-text-muted,#48585f);margin-bottom:4px;text-transform:uppercase;font-weight:600">Deadline</span>
+          <input type="date" id="paTaskDeadline" class="fin-input" style="width:100%;padding:6px 10px;background:var(--ds-surface-2,#f9fbfc);color:var(--ds-text,#06181f);border:1px solid var(--ds-border-strong,#c1d0d7);border-radius:6px;font:inherit;font-size:13px" />
+        </label>
+        <label style="display:block">
+          <span style="display:block;font-size:11px;color:var(--ds-text-muted,#48585f);margin-bottom:4px;text-transform:uppercase;font-weight:600">Toewijzen aan</span>
+          <select id="paTaskAssignee" class="fin-input" style="width:100%;padding:6px 10px;background:var(--ds-surface-2,#f9fbfc);color:var(--ds-text,#06181f);border:1px solid var(--ds-border-strong,#c1d0d7);border-radius:6px;font:inherit;font-size:13px">
+            <option value="">— Laden…</option>
+          </select>
+        </label>
+      </div>
+      <div id="paTaskError" style="display:none;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:12px"></div>
+      <div style="font-size:11px;color:var(--ds-text-faint,#7a8b92);padding:6px 10px;background:var(--ds-surface-2,#f9fbfc);border-radius:6px;line-height:1.4">
+        ℹ️ Taak verschijnt bij de collega onder "Toegewezen aan mij" in Takenbeheer. De bron-actie blijft <strong>PENDING</strong> — taak afvinken vinkt de actie niet automatisch af (bewust: taak = operationele stap, actie = beslissing).
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="sr-abtn" type="button" id="paTaskCancelBtn">Annuleren</button>
+      <button class="sr-abtn primary" type="button" id="paTaskSubmitBtn" style="background:var(--ds-brand,#0a5178);color:#fff;border:0">Taak aanmaken</button>
+    </div>
+  </div>
+</div>
+
 <!-- D1.6: Mark-as-executed modal (TL-resultaat invoeren, in finance/Wanbetalers) -->
 <div class="modal-overlay hidden" id="markExecutedModalFin" role="dialog" aria-modal="true">
   <div class="modal-card" style="max-width:620px;max-height:90vh;overflow-y:auto">
@@ -6101,6 +6206,10 @@
   // allemaal finance.arrangements.approve permission).
   let _paDetailCurrentId = null;
   let _paDetailWired = false;
+  // PR 2/2: cache van huidige actie-context (item + customer + invoices) zodat
+  // de sub-modals (snel-regeling + taak) 'em kunnen voorvullen zonder opnieuw
+  // te fetchen.
+  let _paDetailCtx = { item: null, customer: null, invoices: [], subscriptions: [] };
 
   function _paDetailWireOnce() {
     if (_paDetailWired) return;
@@ -6184,6 +6293,9 @@
     const cust = detail.customer || null;
     const arr  = detail.arrangement || null;
     const invs = Array.isArray(detail.invoices) ? detail.invoices : [];
+    // Cache context voor sub-modals (regeling + taak). subscriptions worden
+    // door _paDetailFillSubs bijgevuld.
+    _paDetailCtx = { item, customer: cust, invoices: invs, subscriptions: [] };
 
     // Kop-info.
     const cat = _acWbxCategoryFor(item.action_type);
@@ -6346,6 +6458,8 @@
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
       const subs = Array.isArray(d?.subscriptions) ? d.subscriptions : (Array.isArray(d?.items) ? d.items : []);
+      // Cache voor de "Uitstel"-knop in de sub-modal.
+      _paDetailCtx.subscriptions = subs;
       const link = '/modules/klanten.html?id=' + encodeURIComponent(customerId) + '&tab=abonnementen';
       const active = subs.filter((s) => s && s.status === 'active');
       let html = '<h4>Abonnement</h4><div style="font-size:12.5px">';
@@ -6354,7 +6468,8 @@
           const bedrag = s.amount != null ? _paDetailFmtEurFromNum(s.amount) : '—';
           const start  = s.start_date ? _paDetailFmtDate(s.start_date) : '—';
           const term   = s.term_count != null ? (' · ' + s.term_count + ' termijnen') : '';
-          return '<div>💳 <strong>Actief</strong> · ' + esc(bedrag) + ' · start ' + esc(start) + esc(term) + '</div>';
+          return '<div>💳 <strong>Actief</strong> · ' + esc(bedrag) + ' · start ' + esc(start) + esc(term) +
+                 ' <button type="button" data-pa-abo-postpone="' + esc(s.id) + '" style="margin-left:6px;padding:2px 8px;font-size:11px;background:var(--ds-surface-2,#f9fbfc);border:1px solid var(--ds-border,#dfe8ec);border-radius:4px;color:var(--ds-text,#06181f);cursor:pointer">Uitstel…</button></div>';
         }).join('');
       } else if (subs.length > 0) {
         html += '<div>Geen actief abonnement (' + subs.length + ' historisch)</div>';
@@ -6364,6 +6479,37 @@
       html += '<div style="margin-top:6px"><a href="' + link + '" target="_blank" rel="noopener" style="color:var(--ds-brand,#0a5178);text-decoration:none;font-size:11.5px">Abonnement-tab openen →</a></div>';
       html += '</div>';
       box.innerHTML = html;
+      // Bind Uitstel-knop (native prompt voor maanden — compact + geen extra modal).
+      box.querySelectorAll('[data-pa-abo-postpone]').forEach((btn) => {
+        btn.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          const subId = btn.getAttribute('data-pa-abo-postpone');
+          const raw = window.prompt('Aantal maanden uitstellen (1-12):', '1');
+          if (raw == null) return;
+          const months = Number(raw);
+          if (!Number.isInteger(months) || months < 1 || months > 12) {
+            window.AgentShared?.showToast?.('Aantal maanden moet 1-12 zijn', 'error');
+            return;
+          }
+          try {
+            const r2 = await window.AgentShared.apiFetch('/api/sales-subscription-postpone', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ subscription_id: subId, months }),
+            });
+            const d2 = await r2.json().catch(() => ({}));
+            if (r2.status === 403) {
+              window.AgentShared?.showToast?.('Geen sales-rechten — gebruik de doorlink om via Sales-module uit te stellen', 'error');
+              return;
+            }
+            if (!r2.ok) throw new Error(d2?.error || ('HTTP ' + r2.status));
+            window.AgentShared?.showToast?.('Abonnement uitgesteld met ' + months + ' maand' + (months === 1 ? '' : 'en'), 'success');
+            _paDetailFillSubs(customerId); // ververs alleen deze sectie
+          } catch (e) {
+            window.AgentShared?.showToast?.('Uitstellen mislukt: ' + (e?.message || 'onbekend'), 'error');
+          }
+        });
+      });
     } catch (e) {
       box.innerHTML = '<h4>Abonnement</h4><div style="font-size:12px;color:var(--ds-text-faint,#7a8b92)">Kon abonnement niet laden: ' + esc(e?.message || 'onbekend') + '</div>';
     }
@@ -6445,20 +6591,36 @@
     } catch (_) { /* fail-open */ }
 
     const btns = [];
-    btns.push('<button class="sr-abtn" type="button" data-pa-detail-close>Sluiten</button>');
+    // Links: "aanmaken"-knoppen (regeling + taak). Alleen als er een klant
+    // gekoppeld is (arrangements + taken vereisen customer_id). Regeling
+    // achter finance.arrangements.propose; taak achter taken.task.create
+    // (server-side gate is de definitieve — UI toont knoppen als de klant
+    // er is, 403 komt netjes terug als toast).
+    const hasCustomer = !!(_paDetailCtx?.customer && _paDetailCtx.customer.id);
+    const leftBtns = [];
+    if (hasCustomer) {
+      leftBtns.push('<button class="sr-abtn" type="button" data-pa-detail-open-arr style="background:var(--ds-surface-2,#f9fbfc);border:1px solid var(--ds-border,#dfe8ec);color:var(--ds-text,#06181f)">+ Regeling</button>');
+      leftBtns.push('<button class="sr-abtn" type="button" data-pa-detail-open-task style="background:var(--ds-surface-2,#f9fbfc);border:1px solid var(--ds-border,#dfe8ec);color:var(--ds-text,#06181f)">+ Taak</button>');
+    }
+    // Rechts: status-afhankelijke actie-knoppen (bestaand gedrag).
+    const rightBtns = [];
+    rightBtns.push('<button class="sr-abtn" type="button" data-pa-detail-close>Sluiten</button>');
     const status = String(item.status || '').toUpperCase();
     if (canApprove) {
       if (status === 'PENDING') {
         const cat = _acWbxCategoryFor(item.action_type);
         const primaryLbl = cat === 'esc' ? 'Oppakken' : 'Goedkeuren';
-        btns.push('<button class="sr-abtn danger" type="button" data-pa-detail-reject>Afwijzen</button>');
-        btns.push('<button class="sr-abtn primary" type="button" data-pa-detail-approve>' + esc(primaryLbl) + '</button>');
+        rightBtns.push('<button class="sr-abtn danger" type="button" data-pa-detail-reject>Afwijzen</button>');
+        rightBtns.push('<button class="sr-abtn primary" type="button" data-pa-detail-approve>' + esc(primaryLbl) + '</button>');
       } else if (status === 'APPROVED') {
-        btns.push('<button class="sr-abtn danger" type="button" data-pa-detail-not-executed>Niet door te voeren</button>');
-        btns.push('<button class="sr-abtn primary" type="button" data-pa-detail-executed>Verwerkt</button>');
+        rightBtns.push('<button class="sr-abtn danger" type="button" data-pa-detail-not-executed>Niet door te voeren</button>');
+        rightBtns.push('<button class="sr-abtn primary" type="button" data-pa-detail-executed>Verwerkt</button>');
       }
     }
-    foot.innerHTML = btns.join('');
+    foot.style.justifyContent = leftBtns.length ? 'space-between' : 'flex-end';
+    foot.innerHTML =
+      (leftBtns.length ? '<div style="display:flex;gap:8px;flex-wrap:wrap">' + leftBtns.join('') + '</div>' : '') +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' + rightBtns.join('') + '</div>';
 
     // Bind knoppen (idempotent — footer wordt bij elke render overschreven).
     foot.querySelector('[data-pa-detail-close]')?.addEventListener('click', closePaDetailModal);
@@ -6478,6 +6640,376 @@
       closePaDetailModal();
       if (typeof openMarkNotExecutedModalFin === 'function') openMarkNotExecutedModalFin(item.id);
     });
+    foot.querySelector('[data-pa-detail-open-arr]')?.addEventListener('click', () => openPaArrangementModal());
+    foot.querySelector('[data-pa-detail-open-task]')?.addEventListener('click', () => openPaTaskModal());
+  }
+
+  // ─── Sub-modal 1: Snel-regeling (arrangements-propose) ────────────────
+  let _paArrWired = false;
+  function _paArrWireOnce() {
+    if (_paArrWired) return;
+    _paArrWired = true;
+    const modal = document.getElementById('paCreateArrangementModal');
+    document.getElementById('paArrCloseBtn')?.addEventListener('click', closePaArrangementModal);
+    document.getElementById('paArrCancelBtn')?.addEventListener('click', closePaArrangementModal);
+    document.getElementById('paArrSubmitBtn')?.addEventListener('click', submitPaArrangement);
+    if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) closePaArrangementModal(); });
+    document.querySelectorAll('#paArrTypeSeg [data-pa-arr-type]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const t = btn.getAttribute('data-pa-arr-type');
+        document.querySelectorAll('#paArrTypeSeg [data-pa-arr-type]').forEach((b) => {
+          const isActive = b === btn;
+          b.classList.toggle('active', isActive);
+          b.style.background = isActive ? 'var(--ds-brand,#0a5178)' : 'transparent';
+          b.style.color      = isActive ? '#fff' : 'var(--ds-text,#06181f)';
+        });
+        const hint = document.getElementById('paArrTypeHint');
+        if (hint) hint.textContent = t === 'UITSTEL'
+          ? 'Uitstel: alle facturen samengevoegd, in N gelijke termijnen.'
+          : 'Splitsing: per factuur N gelijke termijnen (server splitst automatisch).';
+        _paArrUpdateTotals();
+      });
+    });
+    document.getElementById('paArrTermijnen')?.addEventListener('input', _paArrUpdateTotals);
+  }
+
+  function closePaArrangementModal() {
+    document.getElementById('paCreateArrangementModal')?.classList.add('hidden');
+    const err = document.getElementById('paArrError');
+    if (err) { err.style.display = 'none'; err.textContent = ''; }
+  }
+
+  function _paArrSelectedType() {
+    const active = document.querySelector('#paArrTypeSeg [data-pa-arr-type].active');
+    return active ? active.getAttribute('data-pa-arr-type') : 'UITSTEL';
+  }
+  function _paArrSelectedInvoiceIds() {
+    return Array.from(document.querySelectorAll('#paArrInvoiceList [data-pa-arr-inv]:checked'))
+      .map((cb) => cb.getAttribute('data-pa-arr-inv'));
+  }
+  function _paArrUpdateTotals() {
+    const line = document.getElementById('paArrTotalLine');
+    if (!line) return;
+    const selIds = new Set(_paArrSelectedInvoiceIds());
+    let total = 0;
+    for (const inv of _paDetailCtx.invoices || []) {
+      if (!selIds.has(inv.id)) continue;
+      const t = Number(inv.amount_total) || 0;
+      const p = Number(inv.amount_paid)  || 0;
+      const c = Number(inv.credited_amount) || 0;
+      total += Math.max(0, t - p - c);
+    }
+    const termijnen = Math.max(1, Number(document.getElementById('paArrTermijnen')?.value) || 1);
+    const perTerm = total / termijnen;
+    line.textContent = 'Totaal: ' + _paDetailFmtEurFromNum(total) + ' · per termijn: ' + _paDetailFmtEurFromNum(perTerm);
+  }
+
+  function openPaArrangementModal() {
+    _paArrWireOnce();
+    const modal = document.getElementById('paCreateArrangementModal');
+    if (!modal) return;
+    const cust = _paDetailCtx.customer;
+    if (!cust) return;
+    const custLine = document.getElementById('paArrCustomerLine');
+    if (custLine) custLine.textContent = cust.name || cust.email || cust.id;
+
+    // Voorgevulde rationale: bron-actie payload.reason of context_summary.
+    const ratEl = document.getElementById('paArrRationale');
+    if (ratEl) {
+      const payload = _paDetailCtx.item?.payload || {};
+      ratEl.value = payload.reason || payload.context_summary || payload.notitie || '';
+    }
+
+    // Default startdatum: over 7 dagen (compact keuze; klant kan wijzigen).
+    const startEl = document.getElementById('paArrStartDate');
+    if (startEl) {
+      const d = new Date();
+      d.setDate(d.getDate() + 7);
+      startEl.value = d.toISOString().slice(0, 10);
+    }
+
+    // Facturen-lijst voorvullen met alle openstaande van deze klant, standaard alles aangevinkt.
+    const invBox = document.getElementById('paArrInvoiceList');
+    const invs = _paDetailCtx.invoices || [];
+    if (invBox) {
+      if (invs.length === 0) {
+        invBox.innerHTML = '<div style="font-size:11.5px;color:var(--ds-text-faint,#7a8b92);text-align:center;padding:10px">Geen openstaande facturen voor deze klant</div>';
+      } else {
+        invBox.innerHTML = invs.map((iv) => {
+          const total = Number(iv.amount_total) || 0;
+          const paid  = Number(iv.amount_paid)  || 0;
+          const cred  = Number(iv.credited_amount) || 0;
+          const open  = Math.max(0, total - paid - cred);
+          const nr = iv.invoice_number || (iv.id?.slice(0, 8) || '—');
+          return '<label style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px;cursor:pointer">' +
+            '<input type="checkbox" data-pa-arr-inv="' + esc(iv.id) + '" checked style="cursor:pointer" />' +
+            '<span style="flex:1">' + esc(nr) + ' — ' + esc(iv.status || '') + '</span>' +
+            '<span style="font-family:var(--ds-font-mono,ui-monospace);font-variant-numeric:tabular-nums">' + _paDetailFmtEurFromNum(open) + '</span>' +
+          '</label>';
+        }).join('');
+        invBox.querySelectorAll('[data-pa-arr-inv]').forEach((cb) => cb.addEventListener('change', _paArrUpdateTotals));
+      }
+    }
+
+    modal.classList.remove('hidden');
+    _paArrUpdateTotals();
+  }
+
+  async function submitPaArrangement() {
+    const cust = _paDetailCtx.customer;
+    const err = document.getElementById('paArrError');
+    const btn = document.getElementById('paArrSubmitBtn');
+    if (err) { err.style.display = 'none'; err.textContent = ''; }
+    if (!cust || !cust.id) {
+      if (err) { err.textContent = 'Geen klant gekoppeld'; err.style.display = 'block'; }
+      return;
+    }
+    const type = _paArrSelectedType();
+    const termijnen = Number(document.getElementById('paArrTermijnen')?.value) || 0;
+    const startsOn  = document.getElementById('paArrStartDate')?.value || null;
+    const invoiceIds = _paArrSelectedInvoiceIds();
+    const rationale  = document.getElementById('paArrRationale')?.value?.trim() || null;
+
+    if (!Number.isInteger(termijnen) || termijnen < 2 || termijnen > 60) {
+      if (err) { err.textContent = 'Aantal termijnen moet 2-60 zijn'; err.style.display = 'block'; }
+      return;
+    }
+    if (invoiceIds.length === 0) {
+      if (err) { err.textContent = 'Selecteer minstens 1 factuur'; err.style.display = 'block'; }
+      return;
+    }
+    if (!startsOn) {
+      if (err) { err.textContent = 'Startdatum vereist'; err.style.display = 'block'; }
+      return;
+    }
+
+    // Bouw details per type.
+    let details;
+    if (type === 'UITSTEL') {
+      details = { termijnen, starts_on: startsOn };
+    } else {
+      // SPLITSING: parts[] per factuur berekenen. Elke factuur wordt in
+      // N gelijke termijnen gesplitst met maandelijkse due_dates vanaf startsOn.
+      const parts = [];
+      const startDate = new Date(startsOn + 'T00:00:00');
+      const selectedInvs = (_paDetailCtx.invoices || []).filter((iv) => invoiceIds.includes(iv.id));
+      for (const iv of selectedInvs) {
+        const total = Number(iv.amount_total) || 0;
+        const paid  = Number(iv.amount_paid)  || 0;
+        const cred  = Number(iv.credited_amount) || 0;
+        const open  = Math.max(0, total - paid - cred);
+        // Per factuur: N gelijke termijnen, laatste vangt afrondings-rest op.
+        const perTerm = Math.floor((open * 100) / termijnen) / 100;
+        let running = 0;
+        for (let i = 0; i < termijnen; i++) {
+          const isLast = i === termijnen - 1;
+          const amt = isLast ? (open - running) : perTerm;
+          running += amt;
+          const d = new Date(startDate);
+          d.setMonth(d.getMonth() + i);
+          parts.push({ amount: Number(amt.toFixed(2)), due_date: d.toISOString().slice(0, 10) });
+        }
+      }
+      // Server verwacht sum(parts.amount) == sum(invoice.amount_total) (server-side).
+      // Bij SPLITSING met meerdere facturen moet propose per factuur splitten;
+      // voor MVP sturen we alle parts en laten de server aggregeren indien nodig.
+      details = { parts };
+    }
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/arrangements-propose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_id: cust.id,
+          invoice_ids: invoiceIds,
+          type,
+          details,
+          rationale,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 403) throw new Error('Geen rechten (finance.arrangements.propose)');
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast?.('Regeling voorgesteld', 'success');
+      closePaArrangementModal();
+      // Ververs de detail-modal (voor de arrangement-sectie) én de lijst.
+      if (_paDetailCurrentId) openPaDetailModal(_paDetailCurrentId);
+      if (typeof _acWbxLoad === 'function') _acWbxLoad();
+    } catch (e) {
+      if (err) { err.textContent = 'Voorstellen mislukt: ' + (e?.message || 'onbekend'); err.style.display = 'block'; }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Regeling voorstellen'; }
+    }
+  }
+
+  // ─── Sub-modal 2: Taak aanmaken (POST /api/taken) ─────────────────────
+  let _paTaskWired = false;
+  let _paTaskProfilesLoaded = false;
+
+  function _paTaskWireOnce() {
+    if (_paTaskWired) return;
+    _paTaskWired = true;
+    const modal = document.getElementById('paCreateTaskModal');
+    document.getElementById('paTaskCloseBtn')?.addEventListener('click', closePaTaskModal);
+    document.getElementById('paTaskCancelBtn')?.addEventListener('click', closePaTaskModal);
+    document.getElementById('paTaskSubmitBtn')?.addEventListener('click', submitPaTask);
+    if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) closePaTaskModal(); });
+  }
+  function closePaTaskModal() {
+    document.getElementById('paCreateTaskModal')?.classList.add('hidden');
+    const err = document.getElementById('paTaskError');
+    if (err) { err.style.display = 'none'; err.textContent = ''; }
+  }
+
+  async function _paTaskLoadProfiles() {
+    if (_paTaskProfilesLoaded) return;
+    const sel = document.getElementById('paTaskAssignee');
+    if (!sel) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/profiles-list');
+      const d = await r.json().catch(() => ({}));
+      const members = Array.isArray(d?.members) ? d.members : [];
+      sel.innerHTML = '<option value="">— Kies collega —</option>' + members.map((m) => {
+        const label = m.full_name || m.email || m.id;
+        return '<option value="' + esc(m.id) + '">' + esc(label) + '</option>';
+      }).join('');
+      _paTaskProfilesLoaded = true;
+    } catch (e) {
+      sel.innerHTML = '<option value="">— Kon collega\'s niet laden —</option>';
+    }
+  }
+
+  function _paTaskGenUuid() {
+    // Simpele UUIDv4 client-side (voor task.id — server accepteert die).
+    if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+  function _paTaskDefaultDeadline() {
+    // +3 werkdagen (skip weekend).
+    const d = new Date();
+    let added = 0;
+    while (added < 3) {
+      d.setDate(d.getDate() + 1);
+      const dow = d.getDay();
+      if (dow !== 0 && dow !== 6) added++;
+    }
+    return d.toISOString().slice(0, 10);
+  }
+
+  function openPaTaskModal() {
+    _paTaskWireOnce();
+    _paTaskLoadProfiles();
+    const modal = document.getElementById('paCreateTaskModal');
+    if (!modal) return;
+    const cust = _paDetailCtx.customer;
+    const item = _paDetailCtx.item;
+    if (!cust) return;
+
+    // Voorvulling: titel + omschrijving uit actie-context.
+    const custLine = document.getElementById('paTaskCustomerLine');
+    if (custLine) custLine.textContent = cust.name || cust.email || cust.id;
+
+    const titleEl = document.getElementById('paTaskTitle');
+    const descEl  = document.getElementById('paTaskDesc');
+    const dlEl    = document.getElementById('paTaskDeadline');
+
+    const cat = _acWbxCategoryFor(item?.action_type || '');
+    const catLabel = _AC_WBX_TYPE_META[cat]?.label || 'Actie';
+    if (titleEl) titleEl.value = catLabel + ' — ' + (cust.name || cust.email || 'klant');
+
+    // Omschrijving: notitie + facturen + terugverwijzing.
+    const payload = item?.payload || {};
+    const noteText = payload.reason || payload.context_summary || payload.notitie || '';
+    const invs = _paDetailCtx.invoices || [];
+    let totalOpen = 0;
+    for (const iv of invs) {
+      const t = Number(iv.amount_total) || 0;
+      const p = Number(iv.amount_paid)  || 0;
+      const c = Number(iv.credited_amount) || 0;
+      totalOpen += Math.max(0, t - p - c);
+    }
+    const invLine = invs.length > 0
+      ? '\nOpen facturen (' + invs.length + ' · ' + _paDetailFmtEurFromNum(totalOpen) + '): ' +
+        invs.map((i) => i.invoice_number || i.id?.slice(0, 8)).join(', ')
+      : '';
+    const contact = [cust.email, cust.phone].filter(Boolean).join(' · ');
+    const contactLine = contact ? '\nContact: ' + contact : '';
+    const backRef = item?.id
+      ? '\n\nBron-actie: ' + item.id + ' (Wanbetalers → Acties)'
+      : '';
+    if (descEl) descEl.value = (noteText || catLabel) + contactLine + invLine + backRef;
+
+    if (dlEl) dlEl.value = _paTaskDefaultDeadline();
+
+    // Reset select to first option en error.
+    const err = document.getElementById('paTaskError');
+    if (err) { err.style.display = 'none'; err.textContent = ''; }
+    const sel = document.getElementById('paTaskAssignee');
+    if (sel) sel.value = '';
+
+    modal.classList.remove('hidden');
+  }
+
+  async function submitPaTask() {
+    const err = document.getElementById('paTaskError');
+    const btn = document.getElementById('paTaskSubmitBtn');
+    if (err) { err.style.display = 'none'; err.textContent = ''; }
+    const cust = _paDetailCtx.customer;
+    if (!cust) {
+      if (err) { err.textContent = 'Geen klant gekoppeld'; err.style.display = 'block'; }
+      return;
+    }
+    const titel = document.getElementById('paTaskTitle')?.value?.trim() || '';
+    const omschrijving = document.getElementById('paTaskDesc')?.value?.trim() || '';
+    const deadline = document.getElementById('paTaskDeadline')?.value || null;
+    const assignedToId = document.getElementById('paTaskAssignee')?.value || null;
+
+    if (!titel) {
+      if (err) { err.textContent = 'Titel vereist'; err.style.display = 'block'; }
+      return;
+    }
+    if (!assignedToId) {
+      if (err) { err.textContent = 'Wijs een collega toe'; err.style.display = 'block'; }
+      return;
+    }
+
+    const task = {
+      id: _paTaskGenUuid(),
+      titel,
+      omschrijving,
+      prioriteit: 'Normaal',
+      categorie: 'Wanbetalers',
+      assignedToId,
+      deadline,
+      status: 'todo',
+      notities: '',
+      aangemaakt: new Date().toISOString(),
+    };
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/taken', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 403) throw new Error('Geen rechten (taken.task.create)');
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast?.('Taak aangemaakt', 'success');
+      closePaTaskModal();
+      try { window.AgentShared?.refreshTakenBadge?.(); } catch (_) {}
+    } catch (e) {
+      if (err) { err.textContent = 'Aanmaken mislukt: ' + (e?.message || 'onbekend'); err.style.display = 'block'; }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Taak aanmaken'; }
+    }
   }
 
   // Activeer een specifieke sub binnen view-dunning's dunningSubNav. Triggert
