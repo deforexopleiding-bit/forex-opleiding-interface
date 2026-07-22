@@ -98,7 +98,7 @@
     },
     {
       "path": "/api/cron-dunning-conversation-reminders",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 0 29 2 *"
     },
     {
       "path": "/api/cron-events-automations",
