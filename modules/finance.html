@@ -6468,8 +6468,7 @@
           const bedrag = s.amount != null ? _paDetailFmtEurFromNum(s.amount) : '—';
           const start  = s.start_date ? _paDetailFmtDate(s.start_date) : '—';
           const term   = s.term_count != null ? (' · ' + s.term_count + ' termijnen') : '';
-          return '<div>💳 <strong>Actief</strong> · ' + esc(bedrag) + ' · start ' + esc(start) + esc(term) +
-                 ' <button type="button" data-pa-abo-postpone="' + esc(s.id) + '" style="margin-left:6px;padding:2px 8px;font-size:11px;background:var(--ds-surface-2,#f9fbfc);border:1px solid var(--ds-border,#dfe8ec);border-radius:4px;color:var(--ds-text,#06181f);cursor:pointer">Uitstel…</button></div>';
+          return '<div>💳 <strong>Actief</strong> · ' + esc(bedrag) + ' · start ' + esc(start) + esc(term) + '</div>';
         }).join('');
       } else if (subs.length > 0) {
         html += '<div>Geen actief abonnement (' + subs.length + ' historisch)</div>';
@@ -6479,37 +6478,6 @@
       html += '<div style="margin-top:6px"><a href="' + link + '" target="_blank" rel="noopener" style="color:var(--ds-brand,#0a5178);text-decoration:none;font-size:11.5px">Abonnement-tab openen →</a></div>';
       html += '</div>';
       box.innerHTML = html;
-      // Bind Uitstel-knop (native prompt voor maanden — compact + geen extra modal).
-      box.querySelectorAll('[data-pa-abo-postpone]').forEach((btn) => {
-        btn.addEventListener('click', async (ev) => {
-          ev.stopPropagation();
-          const subId = btn.getAttribute('data-pa-abo-postpone');
-          const raw = window.prompt('Aantal maanden uitstellen (1-12):', '1');
-          if (raw == null) return;
-          const months = Number(raw);
-          if (!Number.isInteger(months) || months < 1 || months > 12) {
-            window.AgentShared?.showToast?.('Aantal maanden moet 1-12 zijn', 'error');
-            return;
-          }
-          try {
-            const r2 = await window.AgentShared.apiFetch('/api/sales-subscription-postpone', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ subscription_id: subId, months }),
-            });
-            const d2 = await r2.json().catch(() => ({}));
-            if (r2.status === 403) {
-              window.AgentShared?.showToast?.('Geen sales-rechten — gebruik de doorlink om via Sales-module uit te stellen', 'error');
-              return;
-            }
-            if (!r2.ok) throw new Error(d2?.error || ('HTTP ' + r2.status));
-            window.AgentShared?.showToast?.('Abonnement uitgesteld met ' + months + ' maand' + (months === 1 ? '' : 'en'), 'success');
-            _paDetailFillSubs(customerId); // ververs alleen deze sectie
-          } catch (e) {
-            window.AgentShared?.showToast?.('Uitstellen mislukt: ' + (e?.message || 'onbekend'), 'error');
-          }
-        });
-      });
     } catch (e) {
       box.innerHTML = '<h4>Abonnement</h4><div style="font-size:12px;color:var(--ds-text-faint,#7a8b92)">Kon abonnement niet laden: ' + esc(e?.message || 'onbekend') + '</div>';
     }
