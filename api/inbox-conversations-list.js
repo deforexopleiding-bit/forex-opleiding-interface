@@ -122,7 +122,7 @@ export default async function handler(req, res) {
       .select(
         'id, phone_number, display_name, customer_id, attendee_id, status, last_message_at, ' +
         'last_message_preview, unread_count, last_inbound_at, ' +
-        'customer:customers(id, first_name, last_name, company_name), ' +
+        'customer:customers(id, first_name, last_name, company_name, is_company), ' +
         'attendee:event_attendees!attendee_id(id, first_name, last_name, email, ' +
           'event:event_id(id, title, starts_at))',
         { count: 'exact' }
@@ -142,8 +142,38 @@ export default async function handler(req, res) {
 
     if (search) {
       const like = '%' + search.replace(/[%_]/g, m => '\\' + m) + '%';
-      // PostgREST OR-filter: phone_number / display_name (customer-naam doen we client-side).
-      query = query.or(`phone_number.ilike.${like},display_name.ilike.${like}`);
+      // PostgREST OR-filter: phone_number / display_name + gekoppelde klantnaam.
+      // Voor klantnaam-match doen we een 2-step lookup: eerst customer_ids ophalen
+      // die matchen op first_name/last_name/company_name, dan die inzetten via
+      // customer_id.in.(...) als extra OR-clause. Zelfde patroon als
+      // finance-invoices.js:126-135. Reden: PostgREST kan .or() niet direct over
+      // een embedded relation doen, en display_name blijft op veel outbound-
+      // initiated conversations NULL (WhatsApp-profiel pas na klant-reply gezet).
+      const orParts = [
+        `phone_number.ilike.${like}`,
+        `display_name.ilike.${like}`,
+      ];
+      if (search.length >= 2) {
+        try {
+          const { data: matchCust, error: mcErr } = await supabaseAdmin
+            .from('customers')
+            .select('id')
+            .or(`first_name.ilike.${like},last_name.ilike.${like},company_name.ilike.${like}`)
+            .limit(500);
+          if (mcErr) {
+            console.error('[inbox-conversations-list] customer-search lookup:', mcErr.message);
+          } else if (matchCust && matchCust.length > 0) {
+            const custIds = matchCust.map(c => c.id).filter(Boolean);
+            if (custIds.length > 0) {
+              orParts.push(`customer_id.in.(${custIds.join(',')})`);
+            }
+          }
+        } catch (e) {
+          // Fail-soft: als de klant-lookup faalt, zoek dan enkel op phone/display_name.
+          console.error('[inbox-conversations-list] customer-search fail:', e?.message || e);
+        }
+      }
+      query = query.or(orParts.join(','));
     }
 
     const { data, error, count } = await query;
@@ -192,7 +222,11 @@ export default async function handler(req, res) {
       let customerName = null;
       if (cust) {
         const parts = [cust.first_name, cust.last_name].filter(Boolean).join(' ').trim();
-        customerName = parts || cust.company_name || null;
+        // Bedrijven: bedrijfsnaam als primair label; contactpersoon als fallback.
+        // Particulieren: eerst voor+achternaam, company_name alleen als leeg.
+        customerName = cust.is_company
+          ? (cust.company_name || parts || null)
+          : (parts || cust.company_name || null);
       }
       const att = row.attendee || null;
       let attendeeName = null;
