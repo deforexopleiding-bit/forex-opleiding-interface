@@ -185,6 +185,82 @@ test('WA + mail beide reageren -> channel:both', async () => {
   assert.equal(r.channel, 'both');
 });
 
+// ── Fail-closed contract: helper GOOIT bij DB-fout ─────────────────────
+// De caller (advanceActiveRuns) catcht deze throw, logt 'reply_check_failed',
+// en breakt de binnenlus zonder de run te muteren. Dat garandeert dat een
+// glitch niet leidt tot een ongewenste send. Scenario's:
+//   - dunning_log query faalt -> throw
+//   - whatsapp_conversations query faalt -> throw (na dunning_log OK)
+// Deze tests bevestigen de contract-kant; de caller-kant (skip + log + next
+// run wordt normaal verwerkt) is via code-inspectie geverifieerd: break is
+// binnen de outer for-loop over runs, dus outer-iteratie gaat door.
+
+function makeThrowingDb(failTable) {
+  return {
+    from(table) {
+      if (table === failTable) {
+        // Chain die pas bij await gooit — mimict PostgREST-error-return.
+        return {
+          select() { return this; },
+          eq()     { return this; },
+          in()     { return this; },
+          not()    { return this; },
+          ilike()  { return this; },
+          gt()     { return this; },
+          order()  { return this; },
+          limit()  { return this; },
+          maybeSingle() { return Promise.resolve({ data: null, error: { message: 'simulated ' + failTable + ' failure' } }); },
+          then(resolve) { resolve({ data: null, error: { message: 'simulated ' + failTable + ' failure' } }); },
+        };
+      }
+      // Fallback: happy-path met 1 email_sent-row zodat lastSentAt != null
+      // (anders retourneert helper vroeg {replied:false} zonder fouten).
+      const happyRows = table === 'dunning_log'
+        ? [{ run_id: RUN_ID, event_type: 'email_sent', created_at: T_SEND }]
+        : (table === 'customers'
+          ? [{ id: CUST_ID, email: CUST_MAIL }]
+          : []);
+      const chain = {
+        select() { return chain; },
+        eq()     { return chain; },
+        in()     { return chain; },
+        not()    { return chain; },
+        ilike()  { return chain; },
+        gt()     { return chain; },
+        order()  { return chain; },
+        limit()  { return chain; },
+        maybeSingle() { return Promise.resolve({ data: happyRows[0] || null, error: null }); },
+        then(resolve) { resolve({ data: happyRows, error: null }); },
+      };
+      return chain;
+    },
+  };
+}
+
+test('fail-closed: dunning_log-query faalt -> gooit (caller skipt run)', async () => {
+  const db = makeThrowingDb('dunning_log');
+  await assert.rejects(
+    () => hasReplyAfterLastSend(CUST_ID, RUN_ID, db),
+    (err) => /simulated dunning_log failure/.test(err?.message || String(err))
+  );
+});
+
+test('fail-closed: whatsapp_conversations-query faalt -> gooit', async () => {
+  const db = makeThrowingDb('whatsapp_conversations');
+  await assert.rejects(
+    () => hasReplyAfterLastSend(CUST_ID, RUN_ID, db),
+    (err) => /simulated whatsapp_conversations failure/.test(err?.message || String(err))
+  );
+});
+
+test('fail-closed: email_messages-query faalt -> gooit', async () => {
+  const db = makeThrowingDb('email_messages');
+  await assert.rejects(
+    () => hasReplyAfterLastSend(CUST_ID, RUN_ID, db),
+    (err) => /simulated email_messages failure/.test(err?.message || String(err))
+  );
+});
+
 // ── Extra: klant zonder e-mail → alleen WA-check ─────────────────────
 test('klant zonder e-mail -> alleen WA-check, mail overgeslagen', async () => {
   const db = makeMockDb({
