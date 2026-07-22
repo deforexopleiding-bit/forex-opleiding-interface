@@ -133,11 +133,18 @@ export function determineStage({ run, convLastInboundAt, noReplyCfg, nowMs }) {
   }
   if (count === 1) {
     if (!lastReminderAt) return null;
+    // Guard (reply-respect): als klant NA onze r1-reminder heeft
+    // gereageerd, geen r2 sturen. determineStage voor count=0 kijkt al
+    // naar last_inbound; voor count>=1 miste die check.
+    if (lastInboundMs && lastInboundMs > lastReminderAt) return null;
     if (nowMs - lastReminderAt >= r2h * HOUR) return 'r2';
     return null;
   }
   if (count >= 2) {
     if (!lastReminderAt) return null;
+    // Rz is een resume-actie (geen send) -- reply-guard hier niet nodig;
+    // een klant die net gereageerd heeft wordt op de VOLGENDE inbound-hook
+    // sowieso opnieuw pauseRunsForConversation'd, dus geen kwaad.
     if (nowMs - lastReminderAt >= rzh * HOUR) return 'rz';
     return null;
   }
@@ -520,7 +527,39 @@ export async function processReminderRun({
           return;
         }
 
-        // ── DRY-RUN pad: log intent, geen Meta-call, geen state-mutatie ──
+        // ── ATOMIC CLAIM (spoedfix Ayoub/David bug) ──────────────────
+        // Verhoog paused_conversation_reminder_count met een conditie op
+        // de CURRENT waarde. 0 rijen terug -> andere tick was ons voor
+        // -> SKIP. Claim ALTIJD vóór de send zodat 2 gelijktijdige
+        // invocaties niet allebei sturen. Bij een send die daarna faalt:
+        // claim blijft staan (spec: liever gemiste reminder dan dubbele).
+        // Zelfde patroon als cron-dunning-bulk-send.js:154-166.
+        const expectedCount = stage === 'r1' ? 0 : 1;
+        const newCount      = stage === 'r1' ? 1 : 2;
+        const claimAtIso    = nowIso();
+        const { data: claimed, error: claimErr } = await supabaseAdmin
+          .from('dunning_workflow_runs')
+          .update({
+            paused_conversation_reminder_count:  newCount,
+            paused_conversation_last_reminder_at: claimAtIso,
+            updated_at:                           claimAtIso,
+          })
+          .eq('id', run.id)
+          .eq('paused_conversation_reminder_count', expectedCount)
+          .select('id');
+        if (claimErr) {
+          summary.errors.push({ run_id: run.id, stage, error: 'claim: ' + claimErr.message });
+          return;
+        }
+        if (!claimed || claimed.length === 0) {
+          // Andere tick was ons voor -> geen dubbele send.
+          summary.skipped.push({ run_id: run.id, reason: `CLAIM_LOST: expected count=${expectedCount}` });
+          return;
+        }
+
+        // ── DRY-RUN pad: log intent, geen Meta-call, geen extra state-mutatie ──
+        // De claim hierboven heeft de reminder-teller al opgehoogd (was voorheen
+        // een aparte post-log update); dry-run gedraagt zich verder identiek.
         if (dryRunOn) {
           console.log('[conv-reminder-cron DRY-RUN]', {
             run_id: run.id,
@@ -539,20 +578,6 @@ export async function processReminderRun({
             variables,
             dry_run: true,
           });
-          // Toch de reminder-teller ophogen op dunning_workflow_runs zodat
-          // de volgende tick de VOLGENDE stage ziet — anders blijft dry-run
-          // in dezelfde stage hangen en zie je geen r2/rz progressie in
-          // test-runs. joost_conversation_state wordt in dry-run BEWUST NIET
-          // bijgewerkt — anders zou een test-run de echte caps opeten en
-          // zou live-verkeer daarna vroegtijdig geblokkeerd worden.
-          await supabaseAdmin
-            .from('dunning_workflow_runs')
-            .update({
-              paused_conversation_reminder_count: stage === 'r1' ? 1 : 2,
-              paused_conversation_last_reminder_at: nowIso(),
-              updated_at: nowIso(),
-            })
-            .eq('id', run.id);
           if (stage === 'r1') summary.r1_sent++;
           if (stage === 'r2') summary.r2_sent++;
           return;
@@ -659,15 +684,10 @@ export async function processReminderRun({
             .eq('id', conv.id);
         } catch (_) { /* fail-soft */ }
 
-        // ── State-update dunning_workflow_runs: reminder-teller ──
-        await supabaseAdmin
-          .from('dunning_workflow_runs')
-          .update({
-            paused_conversation_reminder_count: stage === 'r1' ? 1 : 2,
-            paused_conversation_last_reminder_at: sentAt,
-            updated_at: sentAt,
-          })
-          .eq('id', run.id);
+        // ── State-update dunning_workflow_runs: teller is al door de
+        // atomic claim gezet met last_reminder_at=claimAtIso. Geen extra
+        // update meer nodig; dat zou het risico op idempotentie-issues
+        // introduceren als sentAt/claimAtIso microseconden verschillen.
 
         // ── State-update joost_conversation_state: caps + cooldown tellers ──
         // Zonder deze update zouden de caps uit de pas lopen met wat andere
