@@ -285,14 +285,24 @@ body::before {
   .main { margin-left:0; padding-top:0; }
   /* Hamburger toont in de topbar; theme-toggle blijft rechtsboven bereikbaar.
      Topbar is sinds de full-width-migratie sowieso left:0 op alle
-     breakpoints — vroegere mobile-only override is redundant. */
-  .app-hamburger { display:inline-flex; }
+     breakpoints — vroegere mobile-only override is redundant.
+     Specificiteit VERHOOGD (.app-topbar .app-hamburger = 2 klassen) omdat
+     de hoofd-regel .app-hamburger{display:none} verderop in het bestand
+     staat en anders qua source-order zou winnen -- klassieke cascade-bug
+     die op mobiel de hamburger permanent verborg. */
+  .app-topbar .app-hamburger { display:inline-flex; }
 }
 @media(max-width:720px) {
   /* Op smal scherm past een 420px-zoekbalk niet tussen hamburger + toggle
      + logout in een 48px-strip. Verbergen; Stap 4 kan later een zoek-icon-
-     button als collapsed variant toevoegen. */
-  .app-topbar-search { display:none; }
+     button als collapsed variant toevoegen.
+     Specificiteit VERHOOGD (.app-topbar .app-topbar-search = 2 klassen)
+     omdat design-system.css later in de <link>-volgorde geladen wordt
+     dan agent-shared.css en daar .ds-search{display:flex} zet -- de
+     markup gebruikt beide klassen (class="ds-search app-topbar-search"),
+     dus zonder specificiteit-boost overrulet de latere file de media-
+     query en blijft de zoekbalk zichtbaar op mobiel. */
+  .app-topbar .app-topbar-search { display:none; }
   /* User-badge collapse naar avatar-only op mobiel. Naam + email verbergen;
      avatar 30px + gap blijft over. Signout blijft bereikbaar via
      #appTopbarLogout (aparte 36px icon-button rechts). */
