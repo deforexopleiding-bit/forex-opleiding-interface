@@ -20,9 +20,13 @@
 //   1) Lookup invoice (id, customer_id, status, amount_total, amount_paid,
 //      credited_amount). Niet gevonden → errors[].
 //   2) Status ∉ OPEN_STATUSES → skipped[] reason='invoice_not_open'.
-//   3) Customer al actieve run → skipped[] reason='already_active_run'.
+//   3) Customer al niet-terminale run (active|paused) → skipped[] met
+//      reason='already_active_run' resp. 'already_paused_run'.
 //      (Eén klant kan meerdere geselecteerde facturen hebben; tweede hit
 //      voor dezelfde customer in dezelfde call valt ook hieronder.)
+//      Zonder de paused-tak zou een handmatige klik voor een gepauzeerde
+//      klant een tweede run bij stap 0 maken -> mail+WA opnieuw (was de
+//      Ayoub Stitou-bug). Guard-verbreding spiegelt #875 op detectAndStartRuns.
 //   4) Workflow-match: eerste is_active dunning_workflows op priority asc
 //      die customer_type voldoet (b2b/b2c/any). Geen match → errors[]
 //      reason='no_workflow_match'.
@@ -207,24 +211,34 @@ export default async function handler(req, res) {
       perCustomer.set(inv.customer_id, agg);
     }
 
-    // 7) Per customer: check actieve run + match workflow + insert run/log.
+    // 7) Per customer: check niet-terminale run + match workflow + insert run/log.
     for (const [customerId, agg] of perCustomer) {
       try {
-        // a) Actieve run-check (hard gate uit dunning-engine).
+        // a) Non-terminale run-check: verbreed naar active + paused
+        //    (spiegelt de #875-fix in detectAndStartRuns). Zonder deze
+        //    verbreding maakt een handmatige "Aanmaning sturen"-klik voor
+        //    een klant met een GEPAUZEERDE run een tweede run bij stap 0
+        //    -> mail + WhatsApp opnieuw. Skip-reason onderscheidt
+        //    'already_active_run' vs 'already_paused_run' zodat de UI
+        //    (finance.html toont s.reason letterlijk) duidelijk maakt dat
+        //    de admin de bestaande run eerst moet hervatten of annuleren.
         const { data: existing, error: exErr } = await supabaseAdmin
           .from('dunning_workflow_runs')
-          .select('id')
+          .select('id, status')
           .eq('customer_id', customerId)
-          .eq('status', 'active')
+          .in('status', ['active', 'paused'])
           .limit(1)
           .maybeSingle();
-        if (exErr) throw new Error('active-run lookup: ' + exErr.message);
+        if (exErr) throw new Error('non-terminal-run lookup: ' + exErr.message);
         if (existing) {
+          const skipReason = existing.status === 'paused'
+            ? 'already_paused_run'
+            : 'already_active_run';
           for (const invId of agg.invoice_ids) {
             skipped.push({
               invoice_id: invId,
               customer_id: customerId,
-              reason: 'already_active_run',
+              reason: skipReason,
             });
           }
           continue;
