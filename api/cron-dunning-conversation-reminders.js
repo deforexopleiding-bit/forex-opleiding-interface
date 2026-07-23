@@ -156,6 +156,93 @@ export function determineStage({ run, convLastInboundAt, noReplyCfg, nowMs }) {
  * Fail-soft: bij fout returnt lege waarden zodat de reminder een minimale
  * bericht kan sturen ("Hoi daar, ...").
  */
+/**
+ * Dedup runs op paused_by_conversation_id: hou 1 winnaar per conversatie aan
+ * (de oudste updated_at, want de handler-query ordent al ascending). De rest
+ * gaat als `duplicates` terug voor observability-log.
+ *
+ * Rationale: een klant kan meerdere gepauzeerde runs hebben op dezelfde
+ * conversation-id (bulk-start-workflow enrolde 'em meerdere keren, of een
+ * handmatige run bovenop een automatische). Zonder dedup krijgt elke run z'n
+ * eigen reminder -> N identieke berichten (bewijs Benny Veys: 2 runs op
+ * dezelfde conv, beide teller 1, reminders op 07:15+07:30 UTC).
+ *
+ * De atomic claim op paused_conversation_reminder_count werkt per RUN en
+ * beschermt hier niet tegen. Deze functie is de conv-level guard; de
+ * run-claim blijft cross-tick vangnet.
+ */
+export function dedupRunsByConversation(runs) {
+  const winners = [];
+  const duplicates = [];
+  const seen = new Set();
+  for (const r of Array.isArray(runs) ? runs : []) {
+    const convId = r?.paused_by_conversation_id || null;
+    if (!convId) { winners.push(r); continue; }
+    if (seen.has(convId)) { duplicates.push(r); continue; }
+    seen.add(convId);
+    winners.push(r);
+  }
+  return { winners, duplicates };
+}
+
+/**
+ * Statussen die BLOKKEREN — mens is met de zaak bezig, bot moet zwijgen:
+ *   - pending   : wacht op approve/reject
+ *   - approved  : goedgekeurd, wacht op executor (D2)
+ *   - executed  : uitgevoerd (bot-reminder zou dubbelop zijn)
+ *   - failed    : executor viel om, mens moet ingrijpen
+ * Statussen die DOORLATEN (geen open actie):
+ *   - rejected  : expliciet afgekeurd
+ *   - cancelled : ingetrokken
+ */
+const BLOCKING_ACTION_STATUSES = new Set([
+  'pending', 'approved', 'executed', 'failed',
+]);
+
+/**
+ * True als er >=1 pending_action bestaat met een blokkerende status. Pure
+ * functie zodat de guard direct getestbaar is.
+ */
+export function hasOpenBlockingAction(actions) {
+  if (!Array.isArray(actions) || actions.length === 0) return false;
+  return actions.some(a => BLOCKING_ACTION_STATUSES.has(
+    String(a?.status || '').toLowerCase()
+  ));
+}
+
+/**
+ * Batch-query pending_actions per customer. Returnt Map(customer_id ->
+ * [{status}, ...]) van alle acties die NIET rejected/cancelled zijn.
+ * Fail-soft: bij DB-fout returnt lege map en logt warning; de cron-run
+ * loopt door zonder guard i.p.v. om te vallen.
+ */
+export async function loadOpenActionsByCustomer(customerIds) {
+  const byCustomer = new Map();
+  const ids = (Array.isArray(customerIds) ? customerIds : []).filter(Boolean);
+  if (ids.length === 0) return byCustomer;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('pending_actions')
+      .select('customer_id, status')
+      .in('customer_id', ids)
+      .not('status', 'in', '(rejected,cancelled)');
+    if (error) {
+      console.warn('[conv-reminder-cron] pending_actions batch fail:', error.message);
+      return byCustomer;
+    }
+    for (const row of data || []) {
+      const cid = row.customer_id;
+      if (!cid) continue;
+      const arr = byCustomer.get(cid) || [];
+      arr.push({ status: row.status });
+      byCustomer.set(cid, arr);
+    }
+  } catch (e) {
+    console.warn('[conv-reminder-cron] pending_actions batch exception:', e?.message);
+  }
+  return byCustomer;
+}
+
 export async function loadRenderContext(customerId) {
   const ctx = { customer: null, openInvoices: [] };
   try {
@@ -279,17 +366,50 @@ export default async function handler(req, res) {
       return res.status(200).json(summary);
     }
 
+    // ── Dedup op conversatie-niveau ────────────────────────────────────────
+    // Meerdere runs op dezelfde conv -> hooguit 1 reminder per gesprek per
+    // tick. De atomic run-claim in processReminderRun blijft cross-tick
+    // vangnet, maar per-tick moeten we het conv-niveau bewaken want die
+    // claim werkt per RUN.
+    const { winners: dedupedRuns, duplicates: dupRuns } =
+      dedupRunsByConversation(runList);
+    for (const dup of dupRuns) {
+      summary.skipped.push({ run_id: dup.id, reason: 'DUPLICATE_CONV_RUN' });
+    }
+
+    // ── Actie-guard: batch-lookup pending_actions per klant ────────────────
+    // Als een mens al bezig is met de klant (pending/approved/executed/failed
+    // action op klant-niveau) -> bot zwijgt. rejected/cancelled tellen niet.
+    const winnerCustIds = Array.from(new Set(
+      dedupedRuns.map(r => r.customer_id).filter(Boolean)
+    ));
+    const openActionsByCustomer = await loadOpenActionsByCustomer(winnerCustIds);
+
     // ── Deps + dry-run laden via shared loader ────────────────────────────
     const deps = await loadConversationReminderDeps();
     const dryRunOn = deps.isDryRunEnabled ? await deps.isDryRunEnabled() : true; // fail-safe: dry-run AAN
 
     // ── Per-run afwerken via shared processor ─────────────────────────────
     const nowMs = Date.now();
-    for (const run of runList) {
+    for (const run of dedupedRuns) {
       if (elapsed(startedAt) > ABORT_MS) {
         console.warn('[conv-reminder-cron] abort budget overschreden');
         break;
       }
+
+      // Actie-guard: klant heeft open handmatige actie -> geen reminder.
+      const custActions = run.customer_id
+        ? openActionsByCustomer.get(run.customer_id)
+        : null;
+      if (hasOpenBlockingAction(custActions || [])) {
+        summary.processed_count++;
+        summary.skipped.push({
+          run_id: run.id,
+          reason: 'BLOCKED_BY_OPEN_ACTION',
+        });
+        continue;
+      }
+
       await processReminderRun({
         run,
         autonomyCfg,
