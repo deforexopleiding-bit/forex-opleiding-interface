@@ -1929,6 +1929,45 @@
       /* Verstuur-knop min-height 44px voor duim-target. */
       #view-inbox #inboxComposeSendBtn { min-height: 44px; padding: 10px 14px; }
     }
+    /* Mobiele nav-scroll (≤720px): finance-hoofdtabs, Wanbetalers-subnav,
+       Afspraken-status-pills en Acties-tabs allemaal ÉÉN regel + horizontaal
+       scrollbaar. Alle tabs blijven bereikbaar (geen dropdown, geen display:none).
+       Actieve tab wordt door _ensureActiveNavInView() in beeld gescrolld bij
+       eerste render. Fade-mask maakt zichtbaar dat er meer inhoud is. Touch-
+       target min-height 44px op alle knoppen (Apple HIG). */
+    @media (max-width: 720px) {
+      #financeNav,
+      #view-wanbetalers #wanbetalersSubNav,
+      #view-arrangements #arrangStatusNav,
+      #view-wanbetalers #acWbxTabs {
+        flex-wrap: nowrap !important;
+        overflow-x: auto;
+        overflow-y: visible;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        max-width: 100%;
+        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+                mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+      }
+      #financeNav::-webkit-scrollbar,
+      #view-wanbetalers #wanbetalersSubNav::-webkit-scrollbar,
+      #view-arrangements #arrangStatusNav::-webkit-scrollbar,
+      #view-wanbetalers #acWbxTabs::-webkit-scrollbar { display: none; }
+      #financeNav > *,
+      #view-wanbetalers #wanbetalersSubNav > *,
+      #view-arrangements #arrangStatusNav > *,
+      #view-wanbetalers #acWbxTabs > * { flex: 0 0 auto; }
+      /* Touch-target 44px op alle nav-knoppen. */
+      #financeNav > button,
+      #view-wanbetalers #wanbetalersSubNav > button,
+      #view-arrangements #arrangStatusNav > button,
+      #view-wanbetalers #acWbxTabs > button { min-height: 44px; }
+      /* .wbx-nav-spacer neemt flex:1 wat in nowrap-modus de rest wegduwt.
+         Op mobiel geen ruimte-verdelend element: fix breedte op 4px zodat
+         'ie geen ruimte grijpt maar wél in DOM aanwezig blijft. */
+      #view-wanbetalers #wanbetalersSubNav .wbx-nav-spacer { flex: 0 0 4px; }
+    }
+
     /* Klikbare KPI-cell (bv. Probleemklanten in Overzicht → Probleemklanten-tab). */
     .fin-kpi-clickable:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(15,23,42,0.10); }
     .fin-kpi-clickable:active { transform: translateY(0); }
@@ -5497,6 +5536,23 @@
     const sr = document.getElementById('invSearch'); if (sr) sr.value = state.q || '';
   }
 
+  // Helper voor mobile-scrollable-nav (≤720px): scrollt de actieve tab
+  // in beeld binnen een horizontaal-scrollbare nav-container. Wordt
+  // aangeroepen na elke setView/setSubView/tab-wissel zodat de gebruiker
+  // altijd ziet welke tab actief is. Pure method-call, geen click-handler
+  // toegevoegd — function-diff blijft ongewijzigd.
+  function _ensureActiveNavInView(navEl) {
+    if (!navEl) return;
+    // Alleen zin op mobiel; op desktop past alles.
+    try {
+      if (window.matchMedia && !window.matchMedia('(max-width: 720px)').matches) return;
+    } catch (_) { return; }
+    const active = navEl.querySelector('.active');
+    if (!active || typeof active.scrollIntoView !== 'function') return;
+    try { active.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); }
+    catch (_) { try { active.scrollIntoView(); } catch (__) {} }
+  }
+
   // Wanbetalers sub-tab state (Groep A — nested under view-wanbetalers).
   // Mogelijke waardes: 'overzicht' | 'inbox' | 'arrangements' | 'open-acties'.
   let _wbActiveSub = null;
@@ -5526,6 +5582,7 @@
       document.getElementById('view-dunning').hidden = true;
     }
     document.querySelectorAll('#financeNav .sr-seg').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+    _ensureActiveNavInView(document.getElementById('financeNav'));
 
     if (view === 'wanbetalers') {
       wireWanbetalersOnce();
@@ -5663,6 +5720,7 @@
       else if (btnTgl === 'instellingen') active = INST_SUBS.includes(sub);
       b.classList.toggle('active', active);
     });
+    _ensureActiveNavInView(document.getElementById('wanbetalersSubNav'));
     // Verversen-knop alleen zinvol op de Te doen-sub. Expliciet inline-flex
     // bij reveal (matcht de nav-styling met gap tussen icon en label) i.p.v.
     // .hidden — voorkomt de [hidden]-valkuil met inline display uit #744/#751.
@@ -6090,6 +6148,7 @@
         document.querySelectorAll('#acWbxTabs [data-actab]').forEach((b) => {
           b.classList.toggle('active', b.dataset.actab === _acWbxState.tab);
         });
+        _ensureActiveNavInView(document.getElementById('acWbxTabs'));
         _acWbxLoad();
       });
     });
@@ -9606,6 +9665,7 @@
     document.querySelectorAll('#arrangStatusNav .sr-seg').forEach(b => {
       b.classList.toggle('active', b.dataset.arrangStatus === s);
     });
+    _ensureActiveNavInView(document.getElementById('arrangStatusNav'));
     loadArrangements();
   }
 
