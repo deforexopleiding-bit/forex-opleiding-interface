@@ -1902,32 +1902,40 @@
        UI-fase-kleuren zonder --ds-match (s-remind / s-talk / s-plan) houden
        hun eigen accent — dat zijn workflow-fase-signalen, geen semantiek. */
     .wbx, .wbx-sheet, .wbx-scrim, .wbx-mscrim, .wbx-toast {
-      --wbx-bg:            var(--ds-page,          #F4F6F8);
-      --wbx-surface:       var(--ds-surface,       #FFF);
-      --wbx-ink:           var(--ds-text,          #161D29);
-      --wbx-muted:         var(--ds-text-muted,    #66717F);
-      --wbx-faint:         var(--ds-text-faint,    #98A2B0);
-      --wbx-border:        var(--ds-border,        #E6E9EF);
-      --wbx-border-strong: var(--ds-border-strong, #D6DBE4);
-      --wbx-accent:        var(--ds-brand,         #0E7C6B);
-      --wbx-accent-soft:   var(--ds-brand-soft,    #E1F1EE);
-      --wbx-accent-ink:    var(--ds-brand-strong,  #0A5A4E);
-      --wbx-s-new-bg:      var(--ds-warning-bg,    #FDF3E3);
-      --wbx-s-new-tx:      var(--ds-warning,       #986412);
+      /* Fallback-waarden gelijkgetrokken met de ds-tokens uit
+         styles/design-system.css (:root). Voorheen stonden hier oude
+         teal-huisstijl-hex (bv. #0E7C6B, #0A5A4E) — die worden nooit
+         zichtbaar zolang design-system.css laadt, maar bij het uitvallen
+         daarvan viel de hele module terug op verkeerde kleuren. Ook
+         --wbx-radius stond hard op 14px; nu alias van --ds-radius-lg
+         (10px). Andere tokens (surface/text/border/status) idem: de
+         fallback matcht nu 1-op-1 de ds-hex. */
+      --wbx-bg:            var(--ds-page,          #f4f7f9);
+      --wbx-surface:       var(--ds-surface,       #ffffff);
+      --wbx-ink:           var(--ds-text,          #06181f);
+      --wbx-muted:         var(--ds-text-muted,    #48585f);
+      --wbx-faint:         var(--ds-text-faint,    #7a8b92);
+      --wbx-border:        var(--ds-border,        #dfe8ec);
+      --wbx-border-strong: var(--ds-border-strong, #c1d0d7);
+      --wbx-accent:        var(--ds-brand,         #0a5178);
+      --wbx-accent-soft:   var(--ds-brand-soft,    #dceaf2);
+      --wbx-accent-ink:    var(--ds-brand-strong,  #083b52);
+      --wbx-s-new-bg:      var(--ds-warning-bg,    #fdf0dd);
+      --wbx-s-new-tx:      var(--ds-warning,       #d97706);
       --wbx-s-remind-bg:#E9F0FB; --wbx-s-remind-tx:#2B5FA8;
       --wbx-s-talk-bg:#E1F1EE; --wbx-s-talk-tx:#0A5A4E;
       --wbx-s-plan-bg:#EEEAFA; --wbx-s-plan-tx:#5B44A8;
-      --wbx-s-paid-bg:     var(--ds-success-bg,    #E5F3EA);
-      --wbx-s-paid-tx:     var(--ds-success,       #2A7047);
-      --wbx-s-inc-bg:      var(--ds-danger-bg,     #FBE9E9);
-      --wbx-s-inc-tx:      var(--ds-danger,        #B23434);
-      --wbx-s-back-bg:     var(--ds-danger-bg,     #FBEAE7);
-      --wbx-s-back-tx:     var(--ds-danger,        #B24A2E);
-      --wbx-ok-bg:         var(--ds-success-bg,    #E5F3EA);
-      --wbx-ok-tx:         var(--ds-success,       #2A7047);
-      --wbx-no-bg:         var(--ds-surface-2,     #F0F2F5);
-      --wbx-no-tx:         var(--ds-text-muted,    #66717F);
-      --wbx-radius:14px;
+      --wbx-s-paid-bg:     var(--ds-success-bg,    #d6f5f0);
+      --wbx-s-paid-tx:     var(--ds-success,       #0d9488);
+      --wbx-s-inc-bg:      var(--ds-danger-bg,     #fdeaea);
+      --wbx-s-inc-tx:      var(--ds-danger,        #dc2626);
+      --wbx-s-back-bg:     var(--ds-danger-bg,     #fdeaea);
+      --wbx-s-back-tx:     var(--ds-danger,        #dc2626);
+      --wbx-ok-bg:         var(--ds-success-bg,    #d6f5f0);
+      --wbx-ok-tx:         var(--ds-success,       #0d9488);
+      --wbx-no-bg:         var(--ds-surface-2,     #f9fbfc);
+      --wbx-no-tx:         var(--ds-text-muted,    #48585f);
+      --wbx-radius:        var(--ds-radius-lg,     10px);
       --wbx-mono:'JetBrains Mono', ui-monospace, monospace;
       --wbx-shadow:0 1px 2px rgba(20,25,35,.05), 0 12px 34px rgba(20,25,35,.08);
     }
