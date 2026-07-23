@@ -1928,6 +1928,30 @@
       #view-inbox .inbox-c-actions-left > * { flex: 0 0 auto; }
       /* Verstuur-knop min-height 44px voor duim-target. */
       #view-inbox #inboxComposeSendBtn { min-height: 44px; padding: 10px 14px; }
+      /* Thread-header in 2 rijen op mobiel: bovenste rij back + avatar +
+         naam/nummer; onderste rij badge + alle icoon-knoppen (horizontaal
+         scrollbaar uit #900). Voorkomt dat de "24h open"-badge over het
+         telefoonnummer valt en dat de icoonknoppen buiten de rand steken. */
+      #view-inbox .inbox-c-thread-header {
+        display: grid;
+        grid-template-columns: auto auto minmax(0, 1fr);
+        grid-template-rows: auto auto;
+        grid-template-areas:
+          "back  avatar  info"
+          "act   act     act";
+        column-gap: 10px;
+        row-gap: 8px;
+        align-items: center;
+      }
+      #view-inbox .inbox-c-back-btn { grid-area: back; }
+      #view-inbox .inbox-c-thread-avatar { grid-area: avatar; }
+      #view-inbox .inbox-c-thread-info { grid-area: info; min-width: 0; }
+      #view-inbox .inbox-c-thread-actions {
+        grid-area: act;
+        justify-content: flex-start;
+      }
+      /* Icoon-knoppen zelf krijgen 40px min-hoogte zodat ze aantikbaar zijn. */
+      #view-inbox .inbox-c-thread-actions .sr-ibtn { min-width: 40px; min-height: 40px; }
     }
     /* Mobiele nav-scroll (≤720px): finance-hoofdtabs, Wanbetalers-subnav,
        Afspraken-status-pills en Acties-tabs allemaal ÉÉN regel + horizontaal
@@ -2203,14 +2227,22 @@
        (Apple HIG touch-target). Breakpoint hard geschreven — geen CSS-var in
        de @media-conditie (die zou stil genegeerd worden). --ds-*-tokens met
        hex-fallback per patroon #868. */
+    /* Mobiel (≤720px): kaart naar 3-rijen-grid met grid-template-areas.
+       Row 1: klantnaam + factuurnr (full-width).
+       Row 2: bedrag (prominent) + dagen-te-laat (subtiel ernaast).
+       Row 3: pill + knop op eigen rij (full-width), pill links, knop rechts.
+       Voorheen (#894) stond .wbx-right rechts spans 2 rijen, maar op 390px
+       kreeg de knop onvoldoende ruimte en werd afgesneden aan de rand.
+       Nu vol-breed op row 3 met knop min-height 44px (Apple HIG). */
     @media(max-width:720px) {
       .wbx .wbx-case {
-        grid-template-columns: auto auto minmax(0, 1fr) auto;
-        grid-template-rows: auto auto;
+        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-rows: auto auto auto;
         grid-template-areas:
-          "who  who   who    right"
-          "amt  late  .      right";
-        row-gap: 4px;
+          "who    who"
+          "amt    late"
+          "right  right";
+        row-gap: 6px;
         column-gap: 10px;
         padding: 12px 14px 12px 20px;
         align-items: center;
@@ -2225,11 +2257,12 @@
       }
       .wbx .wbx-case .wbx-late  {
         grid-area: late;
-        text-align: left;
+        text-align: right;
         font: 600 13px/1 var(--wbx-mono);
         color: var(--ds-text-dim, var(--wbx-muted));
         align-self: end;
         white-space: nowrap;
+        justify-self: end;
       }
       .wbx .wbx-case .wbx-late small {
         display: inline;
@@ -2238,12 +2271,17 @@
         color: var(--ds-text-faint, var(--wbx-faint));
         letter-spacing: .02em;
       }
+      /* .wbx-right krijgt eigen vol-breed rij met pill links + knop rechts. */
       .wbx .wbx-case .wbx-right {
         grid-area: right;
-        align-self: center;
+        justify-content: space-between;
+        align-items: center;
         gap: 10px;
+        margin-top: 4px;
+        padding-top: 8px;
+        border-top: 1px solid var(--ds-border, #dfe8ec);
       }
-      .wbx .wbx-case .wbx-right .wbx-btn { min-height: 44px; padding: 10px 14px; }
+      .wbx .wbx-case .wbx-right .wbx-btn { min-height: 44px; padding: 10px 16px; }
     }
 
     /* Status-pills */
@@ -2571,6 +2609,29 @@
       margin-right:6px; vertical-align:1px;
     }
 
+    /* Mobiel (≤720px): Facturen status-strip vol-breed 2-koloms grid.
+       Voorheen 2 smalle pillen naast elkaar met veel loze ruimte en
+       kleine cijfers. Nu 2-koloms grid dat de rij vult, met groter
+       cijfer en duidelijker label. Alle 6 tegels blijven zichtbaar. */
+    @media (max-width: 720px) {
+      .wbx .wbx-strip {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .wbx .wbx-strip button {
+        min-width: 0;
+        padding: 12px 14px;
+        min-height: 44px;
+      }
+      .wbx .wbx-strip .wbx-strip-n {
+        font: 700 24px/1 var(--wbx-mono);
+      }
+      .wbx .wbx-strip .wbx-strip-l {
+        font-size: 12.5px;
+      }
+    }
+
     .wbx .wbx-toolbar {
       display:flex; align-items:center; gap:12px;
       flex-wrap:wrap; margin-bottom:13px;
@@ -2600,6 +2661,16 @@
     .wbx .wbx-sub-inv {
       color:var(--wbx-faint);
       font:500 12px/1.3 var(--wbx-mono);
+    }
+    /* Klantnaam-cell in wbx-table: max-width + ellipsis zodat lange
+       bedrijfsnamen (bv. "Bouwonderneming Helsmoortel BV Dwight
+       Helsmoortel") de andere kolommen niet wegduwen. Volledige naam
+       blijft opvraagbaar via het title-attribuut (tooltip). */
+    .wbx .wbx-table td.wbx-cust-cell {
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     /* ======================================================
@@ -19140,10 +19211,11 @@
   function _opruimCustRowHtml(r) {
     const pill   = _fcPillFor(r.stage_slug, r.has_backlog);
     const oldest = (Number(r.oldest_days_overdue) > 0) ? `${r.oldest_days_overdue} d` : '—';
+    const cname  = r.customer_name || '—';
     return `
       <tr data-cid="${esc(r.customer_id)}">
         <td class="wbx-bulk-cb-cell" data-bulk-cell><input type="checkbox" data-bulk-cb="${esc(r.customer_id)}"></td>
-        <td>${esc(r.customer_name || '—')}</td>
+        <td class="wbx-cust-cell" title="${esc(cname)}">${esc(cname)}</td>
         <td class="wbx-mono wbx-r">${r.open_invoice_count}</td>
         <td class="wbx-mono wbx-r">${_tdFmtEurCents(r.total_open_cents)}</td>
         <td class="wbx-mono wbx-r">${esc(oldest)}</td>
@@ -19451,9 +19523,10 @@
 
   function _fcInvRowHtml(r) {
     const pill = _fcPillFor(r.stage_slug, r.has_backlog);
+    const cname = r.customer_name || '—';
     return `
       <tr data-cid="${esc(r.customer_id)}" data-invid="${esc(r.invoice_id || '')}" data-days="${esc(r.days_overdue)}" data-invnr="${esc(r.invoice_number || '')}">
-        <td>${esc(r.customer_name || '—')}</td>
+        <td class="wbx-cust-cell" title="${esc(cname)}">${esc(cname)}</td>
         <td class="wbx-mono wbx-sub-inv">${esc(r.invoice_number || String(r.invoice_id || '').slice(0, 8))}</td>
         <td class="wbx-mono wbx-r">${_tdFmtEurCents(r.open_amount_cents)}</td>
         <td class="wbx-mono wbx-r">${r.days_overdue} d</td>
@@ -19464,10 +19537,11 @@
   function _fcCustRowHtml(r) {
     const pill = _fcPillFor(r.stage_slug, r.has_backlog);
     const oldest = (Number(r.oldest_days_overdue) > 0) ? `${r.oldest_days_overdue} d` : '—';
+    const cname = r.customer_name || '—';
     return `
       <tr data-cid="${esc(r.customer_id)}">
         <td class="wbx-bulk-cb-cell" data-bulk-cell><input type="checkbox" data-bulk-cb="${esc(r.customer_id)}"></td>
-        <td>${esc(r.customer_name || '—')}</td>
+        <td class="wbx-cust-cell" title="${esc(cname)}">${esc(cname)}</td>
         <td class="wbx-mono wbx-r">${r.open_invoice_count}</td>
         <td class="wbx-mono wbx-r">${_tdFmtEurCents(r.total_open_cents)}</td>
         <td class="wbx-mono wbx-r">${esc(oldest)}</td>
