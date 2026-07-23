@@ -1857,6 +1857,16 @@
        ══════════════════════════════════════════════════════════════════ */
     #inboxTplPickerModal [hidden] { display: none !important; }
 
+    /* Reparatie: hier stond een orphan `.inbox-layout-c { ... }` rule +
+       weeskind `}` (git-history: `@media (max-width: 1100px) {` opening
+       is bij commit ad6d1982 vervangen door de template-picker-comment
+       hierboven, maar de inhoud + sluitende `}` bleven staan). Effect:
+       de CSS-parser gooide error-recovery in, waardoor de @media
+       (max-width: 800px) hieronder niet meer betrouwbaar geëvalueerd
+       werd — de Gesprekken-view stapelde daardoor niet op mobiel.
+       Nu hersteld naar de originele bedoeling: tablet-fallback op 1100px
+       met smallere linker-kolom. */
+    @media (max-width: 1100px) {
       .inbox-layout-c {
         grid-template-columns: minmax(240px, 33%) minmax(0, 1fr);
       }
@@ -1867,6 +1877,57 @@
         grid-template-rows: minmax(0, 1fr);
       }
       .inbox-c-col-left { max-width: none; }
+    }
+
+    /* Óf/óf-modus op mobiel (≤720px): master-detail patroon.
+       Default → conv-list vult scherm, thread-kolom verborgen.
+       body.inbox-thread-open (gezet door openInboxConv) → thread vult
+       scherm, lijst verborgen. Terug-knop (.inbox-c-back-btn) wist de
+       klasse. `display:none` op één panel is bewust geaccepteerd omdat
+       de terug-knop het andere panel altijd bereikbaar houdt (standaard
+       master-detail patroon iOS/Android). Desktop >720px: beide panelen
+       naast elkaar zoals voorheen. */
+    .inbox-c-back-btn { display: none; }
+    @media (max-width: 720px) {
+      #view-inbox .inbox-c-col-thread { display: none; }
+      body.inbox-thread-open #view-inbox .inbox-c-col-left { display: none; }
+      body.inbox-thread-open #view-inbox .inbox-c-col-thread { display: flex; }
+      /* Terug-knop zichtbaar en aanraakbaar (Apple HIG 44px). */
+      .inbox-c-back-btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        min-width: 40px; min-height: 40px;
+        border: 0; background: transparent; color: var(--ds-text, #06181f);
+        cursor: pointer; font-size: 18px;
+        border-radius: var(--ds-radius, 6px);
+      }
+      .inbox-c-back-btn:hover { background: var(--ds-surface-2, #f9fbfc); }
+      /* Thread-header knoppen: horizontaal scrollbaar zodat alle
+         actie-knoppen (resolve/archive/reopen/unarchive/mark-unread/customer)
+         bereikbaar blijven ook als het smal wordt. */
+      #view-inbox .inbox-c-thread-actions {
+        overflow-x: auto; overflow-y: visible;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        flex-wrap: nowrap;
+        max-width: 100%;
+      }
+      #view-inbox .inbox-c-thread-actions::-webkit-scrollbar { display: none; }
+      #view-inbox .inbox-c-thread-actions > * { flex: 0 0 auto; }
+      /* Compose textarea: font-size 16px voorkomt iOS-inzoomen bij focus. */
+      #view-inbox .inbox-c-compose-textarea { font-size: 16px; }
+      /* Compose-actie-rij: knoppen horizontaal scrollbaar (Bijlage/Template/
+         Snel antwoord/Vraag Joost); Verstuur blijft rechts vast. */
+      #view-inbox .inbox-c-actions-left {
+        overflow-x: auto; overflow-y: visible;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        flex-wrap: nowrap;
+        min-width: 0;
+      }
+      #view-inbox .inbox-c-actions-left::-webkit-scrollbar { display: none; }
+      #view-inbox .inbox-c-actions-left > * { flex: 0 0 auto; }
+      /* Verstuur-knop min-height 44px voor duim-target. */
+      #view-inbox #inboxComposeSendBtn { min-height: 44px; padding: 10px 14px; }
     }
     /* Klikbare KPI-cell (bv. Probleemklanten in Overzicht → Probleemklanten-tab). */
     .fin-kpi-clickable:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(15,23,42,0.10); }
@@ -3593,6 +3654,10 @@
           <div id="inboxThread" hidden style="display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0">
             <!-- Thread header -->
             <div class="inbox-c-thread-header">
+              <!-- Terug-knop (mobiel-only via CSS). Wist body.inbox-thread-open
+                   -klasse zodat de conv-list weer zichtbaar wordt. Op desktop
+                   verborgen omdat daar beide panelen naast elkaar staan. -->
+              <button class="sr-ibtn inbox-c-back-btn" id="inboxBackToListBtn" type="button" title="Terug naar gesprekken-lijst"><i class="ti ti-arrow-left"></i></button>
               <div class="inbox-c-thread-avatar" id="inboxThreadAvatar" style="background:hsl(210,55%,42%)">??</div>
               <div class="inbox-c-thread-info">
                 <div id="inboxThreadName" style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</div>
@@ -11797,6 +11862,9 @@
   async function openInboxConv(convId) {
     if (!convId) return;
     _inboxActiveConvId = convId;
+    // Mobiel óf/óf-mode: body-klasse verbergt conv-list en toont thread.
+    // Op desktop is de klasse effectloos (beide panelen blijven zichtbaar).
+    document.body.classList.add('inbox-thread-open');
     // Highlight active conv direct — toggle klasse zodat de teal
     // .inbox-conv-row-active-styling wint (PR #740). Inline bg zetten
     // zou de CSS-klasse overschrijven en de rij blauw kleuren.
@@ -15072,6 +15140,13 @@
         return;
       }
       _inboxOpenCallSheet(phone, displayName);
+    });
+
+    // Terug-knop (mobiel-only, via CSS verborgen op desktop). Wist
+    // body.inbox-thread-open zodat de conv-list weer zichtbaar wordt.
+    // Master-detail navigatie: één klik van thread → lijst.
+    document.getElementById('inboxBackToListBtn')?.addEventListener('click', () => {
+      document.body.classList.remove('inbox-thread-open');
     });
 
     // Markeer-als-ongelezen: zet unread_count > 0 via POST /api/inbox-mark-unread
