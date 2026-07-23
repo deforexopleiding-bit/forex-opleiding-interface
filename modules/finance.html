@@ -1992,6 +1992,48 @@
       #view-wanbetalers #wanbetalersSubNav .wbx-nav-spacer { flex: 0 0 4px; }
     }
 
+    /* Wanbetalers → Afspraken mobile-polish (≤720px). Statusfilters zijn
+       al scrollbaar via de #901-regel. Klantnaam-cel krijgt line-clamp 2
+       (patroon #903/#904). Actie-knoppen (Details/Annuleer) stapelen
+       verticaal, 44px raakbaar. Header-knoppen (Stel afspraak voor +
+       Vernieuw) 44px. Scope strikt op #view-arrangements. */
+    @media (max-width: 720px) {
+      /* Klantnaam-cel: line-clamp 2 op de link + max-width zodat lange
+         bedrijfsnamen de tabelbreedte niet oprekken. E-mail eronder blijft
+         zichtbaar in kleine tekst. */
+      #view-arrangements #arrangementsTable td.arrang-cust-cell {
+        max-width: 220px;
+      }
+      #view-arrangements #arrangementsTable td.arrang-cust-cell a,
+      #view-arrangements #arrangementsTable td.arrang-cust-cell > span {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+                line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        line-height: 1.3;
+        word-break: break-word;
+      }
+      /* Actie-cel: knoppen verticaal stapelen + 44px raakbaar. */
+      #view-arrangements #arrangementsTable td.arrang-actions-cell {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        align-items: stretch;
+        padding: 8px;
+      }
+      #view-arrangements #arrangementsTable td.arrang-actions-cell .sr-abtn {
+        min-height: 44px;
+        justify-content: center;
+        padding: 10px 12px !important;
+        font-size: 12.5px !important;
+        border-radius: var(--ds-radius, 6px);
+      }
+      /* Header-knoppen (Stel afspraak voor + Vernieuw) 44px hoog. */
+      #view-arrangements #arrangProposeBtn,
+      #view-arrangements #arrangRefreshBtn { min-height: 44px; padding: 10px 14px; }
+    }
+
     /* Wanbetalers → Instellingen sub-views mobile-polish (≤720px):
        hub-grid al mobile-ok (auto-fill); filter-strips van Probleemklanten
        + Geschiedenis + Templates naar 1-regel scrollbaar; tabellen zijn al
@@ -10249,7 +10291,7 @@
     tb.innerHTML = items.map(it => {
       const custName = it.customer?.name || '—';
       const custCell = it.customer_id
-        ? `<a href="/modules/klanten.html?id=${esc(it.customer_id)}&tab=facturen" style="color:var(--accent-cyan);text-decoration:none;font-weight:600">${esc(custName)}</a>`
+        ? `<a href="/modules/klanten.html?id=${esc(it.customer_id)}&tab=facturen" style="color:var(--ds-brand, #0a5178);text-decoration:none;font-weight:600">${esc(custName)}</a>`
         : `<span style="font-weight:600">${esc(custName)}</span>`;
       const emailLine = it.customer?.email
         ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px">${esc(it.customer.email)}</div>`
@@ -10266,12 +10308,12 @@
         ? `<button class="sr-abtn danger" data-arrang-cancel="${esc(it.id)}" type="button" style="font-size:11px;padding:4px 8px"><i class="ti ti-x"></i> Annuleer</button>`
         : '';
       return `<tr data-arrang-id="${esc(it.id)}" class="clickable-row" style="cursor:pointer">
-        <td>${custCell}${emailLine}</td>
+        <td class="arrang-cust-cell">${custCell}${emailLine}</td>
         <td>${typeBadge}</td>
         <td style="text-align:center">${invoiceCount}</td>
         <td style="font-size:11.5px">${effCell}</td>
         <td>${statusBadge}</td>
-        <td>
+        <td class="arrang-actions-cell">
           <button class="sr-abtn" data-arrang-detail="${esc(it.id)}" type="button" style="font-size:11px;padding:4px 8px"><i class="ti ti-eye"></i> Details</button>
           ${cancelBtn}
         </td>
