@@ -282,7 +282,24 @@ body::before {
     pointer-events:auto;
   }
   [data-theme="dark"] body.sidebar-open::after { background:rgba(0,0,0,.6); }
+  /* Reset content-offset op mobiel. Twee wrapper-conventies naast elkaar:
+     - .main   (agents/meetings/meta-ads/lisa/...): shell-default.
+     - .app    (finance/email/events/sales/mentor/kennisbank/... — 31 pagina's):
+       eigen legacy-wrapper met hardcoded `margin-left:220px` inline per
+       pagina, ZONDER eigen mobile-override op de meeste pagina's. Voor
+       #874 stond dit onopgemerkt omdat de topbar op mobiel toch overlapte;
+       na de full-width topbar viel op dat de content 220px naar rechts stond.
+
+     Specificiteit-boost `body .app` (2 klassen) is nodig omdat per-page
+     inline `<style>` in de <head> NA agent-shared.css laadt en met gelijke
+     specificity (single class) door source-order zou winnen — klassieke
+     cascade-bug zoals #870/#874. Pagina's die zelf een `.app`-override in
+     eigen media-query hebben (bv. events-automations `.app { padding:14px }`)
+     krijgen padding via die eigen regel; margin-left komt uit deze
+     shared-regel. Padding-top-reset alleen op `.main` — pagina's die eigen
+     `.app { padding:X }` zetten worden zo niet ongewild ontpadded. */
   .main { margin-left:0; padding-top:0; }
+  body .app { margin-left:0; }
   /* Hamburger toont in de topbar; theme-toggle blijft rechtsboven bereikbaar.
      Topbar is sinds de full-width-migratie sowieso left:0 op alle
      breakpoints — vroegere mobile-only override is redundant.
