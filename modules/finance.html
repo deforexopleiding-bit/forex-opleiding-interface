@@ -1975,43 +1975,58 @@
 
     /* Page-head */
     .wbx .wbx-page-head { padding:6px 2px 16px; }
-    .wbx .wbx-page-head h1 { margin:0; font-size:25px; letter-spacing:-.02em; font-weight:700; }
-    .wbx .wbx-page-head p { margin:5px 0 0; color:var(--wbx-muted); font-size:14px; max-width:660px; }
-
-    /* Sumstrip (teal gradient) — acties-melding op Te doen */
-    .wbx .wbx-sumstrip {
-      display:flex; align-items:center; gap:16px;
-      background:linear-gradient(90deg, #0E7C6B, #0A5A4E); color:#fff;
-      border-radius:var(--wbx-radius); padding:15px 20px; margin-bottom:14px;
+    .wbx .wbx-page-head h1 {
+      margin:0; font-size:25px; letter-spacing:-.02em; font-weight:600;
+      color:var(--ds-text, #06181f);
     }
-    .wbx .wbx-sumstrip .wbx-big { font:600 26px/1 var(--wbx-mono); }
-    .wbx .wbx-sumstrip .wbx-lbl { font-size:13px; color:#CDE7E1; margin-top:3px; }
-    .wbx .wbx-sumstrip .wbx-split { display:flex; gap:18px; margin-left:6px; }
-    .wbx .wbx-sumstrip .wbx-split div { font-size:13px; }
-    .wbx .wbx-sumstrip .wbx-split b { font-family:var(--wbx-mono); }
-    .wbx .wbx-sumstrip .wbx-flex1 { flex:1; }
-    .wbx .wbx-sumstrip button {
-      border:0; background:#fff; color:var(--wbx-accent-ink);
-      font-weight:600; padding:9px 15px; border-radius:9px; cursor:pointer; white-space:nowrap;
+    .wbx .wbx-page-head p { margin:5px 0 0; color:var(--ds-text-muted, #48585f); font-size:14px; max-width:660px; }
+
+    /* Te doen — Openstaande acties card. Kaart-in-ds-vormtaal: witte
+       surface, hairline rand, 10px radius, KPI-strip binnenin met 3
+       tegels via .ds-kpi + herbruikbare .ds-kpi-strip. Kleuren via
+       --ds-* met hex-fallback (patroon #868). */
+    .wbx .fin-todo-acties-card {
+      background:var(--ds-surface, #ffffff);
+      border:1px solid var(--ds-border, #dfe8ec);
+      border-radius:var(--ds-radius-lg, 10px);
+      padding:16px 18px; margin-bottom:14px;
+      color:var(--ds-text, #06181f);
+    }
+    .wbx .fin-todo-acties-head {
+      display:flex; align-items:flex-start; justify-content:space-between;
+      gap:14px; margin-bottom:12px; flex-wrap:wrap;
+    }
+    .wbx .fin-todo-acties-title {
+      font-size:11px; text-transform:uppercase; letter-spacing:.08em;
+      font-weight:600; color:var(--ds-text-faint, #7a8b92);
+    }
+    .wbx .fin-todo-acties-count {
+      font:600 28px/1.05 var(--wbx-mono);
+      font-variant-numeric: tabular-nums;
+      color:var(--ds-text, #06181f); margin-top:4px;
     }
 
-    /* Campagne-banner (dark, achterstand → Crediteren) */
+    /* Campagne-banner (achterstand → Crediteren). Behoudt dark accent-
+       karakter maar via --ds-brand-strong / --ds-brand tokens ipv losse
+       hex. Radius 10px conform ds. */
     .wbx .wbx-campaign {
       display:flex; align-items:center; gap:15px;
-      background:linear-gradient(90deg, #122536, #1B3A53); color:#fff;
-      border-radius:var(--wbx-radius); padding:14px 18px; margin-bottom:18px;
+      background:linear-gradient(90deg, var(--ds-brand-strong, #083b52), var(--ds-brand, #0a5178));
+      color:#ffffff;
+      border-radius:var(--ds-radius-lg, 10px);
+      padding:14px 18px; margin-bottom:18px;
     }
     .wbx .wbx-campaign .wbx-ic {
-      width:36px; height:36px; border-radius:10px;
-      background:rgba(255,255,255,.12);
+      width:36px; height:36px; border-radius:var(--ds-radius, 6px);
+      background:rgba(255,255,255,.14);
       display:grid; place-items:center; font-size:18px; flex:none;
     }
     .wbx .wbx-campaign b { font-weight:600; }
-    .wbx .wbx-campaign .wbx-sub { color:#B7C4D4; font-size:12.5px; margin-top:2px; }
+    .wbx .wbx-campaign .wbx-sub { color:rgba(255,255,255,.72); font-size:12.5px; margin-top:2px; }
     .wbx .wbx-campaign .wbx-flex1 { flex:1; }
     .wbx .wbx-campaign button {
-      border:0; background:#fff; color:#132a3d;
-      font-weight:600; padding:9px 16px; border-radius:9px; cursor:pointer;
+      border:0; background:#ffffff; color:var(--ds-brand-strong, #083b52);
+      font-weight:600; padding:9px 16px; border-radius:var(--ds-radius, 6px); cursor:pointer;
     }
 
     /* Sec-head + segmented control */
@@ -2027,28 +2042,50 @@
       box-shadow:0 1px 2px rgba(0,0,0,.06);
     }
 
-    /* Worklist — case-cards */
+    /* Worklist — case-cards. ds-vormtaal: 10px radius, hairline rand
+       (--ds-border), brand-focus, tabular-nums op cijfers. Knop-scope
+       binnen .wbx-case krijgt --ds-brand (navy) + 6px radius; andere
+       .wbx-primary knoppen in andere views blijven ongewijzigd. */
     .wbx .wbx-worklist { display:flex; flex-direction:column; gap:8px; }
     .wbx .wbx-case {
       display:grid; grid-template-columns:minmax(0, 1.5fr) .8fr .95fr auto;
       align-items:center; gap:16px;
-      background:var(--wbx-surface); border:1px solid var(--wbx-border);
-      border-radius:var(--wbx-radius);
+      background:var(--ds-surface, #ffffff);
+      border:1px solid var(--ds-border, #dfe8ec);
+      border-radius:var(--ds-radius-lg, 10px);
       padding:0 16px 0 0; cursor:pointer; overflow:hidden; position:relative;
+      color:var(--ds-text, #06181f);
     }
-    .wbx .wbx-case:hover { border-color:var(--wbx-border-strong); }
-    .wbx .wbx-case:focus-visible { outline:2px solid var(--wbx-accent); outline-offset:2px; }
+    .wbx .wbx-case:hover { border-color:var(--ds-border-strong, #c1d0d7); }
+    .wbx .wbx-case:focus-visible { outline:2px solid var(--ds-brand, #0a5178); outline-offset:2px; }
     .wbx .wbx-case .wbx-urg { position:absolute; left:0; top:0; bottom:0; width:5px; }
     .wbx .wbx-case .wbx-who { padding:14px 0 14px 20px; min-width:0; }
     .wbx .wbx-case .wbx-who .wbx-name { font-weight:600; letter-spacing:-.01em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .wbx .wbx-case .wbx-who .wbx-inv  { color:var(--wbx-faint); font:500 12px/1.4 var(--wbx-mono); margin-top:3px; }
-    .wbx .wbx-case .wbx-amt  { font:600 15px/1 var(--wbx-mono); text-align:right; }
-    .wbx .wbx-case .wbx-late { font:600 13.5px/1 var(--wbx-mono); color:var(--wbx-muted); text-align:right; }
+    .wbx .wbx-case .wbx-who .wbx-inv  { color:var(--ds-text-faint, #7a8b92); font:500 12px/1.4 var(--wbx-mono); margin-top:3px; font-variant-numeric: tabular-nums; }
+    .wbx .wbx-case .wbx-amt  {
+      font:600 15px/1 var(--wbx-mono); text-align:right;
+      font-variant-numeric: tabular-nums;
+      color:var(--ds-text, #06181f);
+    }
+    .wbx .wbx-case .wbx-late {
+      font:600 13.5px/1 var(--wbx-mono); text-align:right;
+      font-variant-numeric: tabular-nums;
+      color:var(--ds-text-muted, #48585f);
+    }
     .wbx .wbx-case .wbx-late small {
       display:block; font:500 10.5px/1.4 'Inter', sans-serif;
-      color:var(--wbx-faint); margin-top:4px; letter-spacing:.02em;
+      color:var(--ds-text-faint, #7a8b92); margin-top:4px; letter-spacing:.02em;
     }
     .wbx .wbx-case .wbx-right { display:flex; align-items:center; gap:13px; justify-content:flex-end; padding-right:0; }
+    /* Scoped binnen .wbx-case: primaire actie in ds-brand + 6px radius.
+       Andere .wbx-btn.wbx-primary elders (Acties/inbox/…) blijven ongemoeid. */
+    .wbx .wbx-case .wbx-btn.wbx-primary {
+      background:var(--ds-brand, #0a5178); border-color:var(--ds-brand, #0a5178);
+      border-radius:var(--ds-radius, 6px);
+    }
+    .wbx .wbx-case .wbx-btn.wbx-primary:hover {
+      background:var(--ds-brand-strong, #083b52); border-color:var(--ds-brand-strong, #083b52);
+    }
     /* Mobiel (≤720px): kaart naar 2-rijen-grid met grid-template-areas.
        Row 1: klantnaam + factuurnr | pill+knop (rechts, spans 2 rijen).
        Row 2: bedrag (prominent) + dagen-te-laat (subtiel ernaast).
@@ -17660,19 +17697,35 @@
     if (!box) return;
     const a = _tdState.acties;
     if (!a || !a.loaded || a.open <= 0) { box.innerHTML = ''; return; }
+    // ds-vormtaal: card met header (label boven groot cijfer + "Bekijk alle"-
+    // knop rechts) en 3 .ds-kpi-tegels in .ds-kpi-strip (--ds-kpi-cols:3 op
+    // desktop; automatisch 2 op ≤720px, 1 op ≤480px via shared media-queries
+    // in design-system.css). Alle waarden blijven zichtbaar; niks verborgen.
+    // Function-diff: 1 button + 1 click-handler (tdActiesGoBtn) —
+    // identiek aan pre-fix.
     box.innerHTML = `
-      <div class="wbx-sumstrip">
-        <div>
-          <div class="wbx-big">${a.open}</div>
-          <div class="wbx-lbl">openstaande acties</div>
+      <div class="fin-todo-acties-card">
+        <div class="fin-todo-acties-head">
+          <div>
+            <div class="fin-todo-acties-title">Openstaande acties</div>
+            <div class="fin-todo-acties-count">${a.open}</div>
+          </div>
+          <button type="button" id="tdActiesGoBtn" class="wbx-btn">Bekijk alle →</button>
         </div>
-        <div class="wbx-split">
-          <div><b>${a.verify}</b> betaalcontroles</div>
-          <div><b>${a.plan}</b> regelingen</div>
-          <div><b>${a.esc}</b> escalaties</div>
+        <div class="ds-kpi-strip" style="--ds-kpi-cols:3">
+          <div class="ds-kpi">
+            <div class="ds-kpi-label">Betaalcontroles</div>
+            <div class="ds-kpi-value">${a.verify}</div>
+          </div>
+          <div class="ds-kpi">
+            <div class="ds-kpi-label">Regelingen</div>
+            <div class="ds-kpi-value">${a.plan}</div>
+          </div>
+          <div class="ds-kpi">
+            <div class="ds-kpi-label">Escalaties</div>
+            <div class="ds-kpi-value">${a.esc}</div>
+          </div>
         </div>
-        <div class="wbx-flex1"></div>
-        <button type="button" id="tdActiesGoBtn">Bekijk alle →</button>
       </div>
     `;
     document.getElementById('tdActiesGoBtn')?.addEventListener('click', () => setSubView('open-acties'));
