@@ -1992,6 +1992,88 @@
       #view-wanbetalers #wanbetalersSubNav .wbx-nav-spacer { flex: 0 0 4px; }
     }
 
+    /* Creditnota's + Bank (CAMT/Match/eBoekh) mobile-polish. Filter-strips
+       naar 1-regel scrollbaar; Match-acties stapelen op mobiel; klantnaam
+       in Creditnota's over 2 regels (patroon uit #903/#904). Alle knoppen
+       min 44px raakbaar. Scope strikt op de view-IDs zodat andere views
+       niet raken. */
+    @media (max-width: 720px) {
+      /* Creditnota's filter-toolbar */
+      #view-creditnotes .fin-toolbar {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: visible;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+      }
+      #view-creditnotes .fin-toolbar::-webkit-scrollbar { display: none; }
+      #view-creditnotes .fin-toolbar > * { flex: 0 0 auto; }
+      #view-creditnotes .fin-toolbar #cnSearch { min-width: 200px; flex: 1 0 200px; }
+      #view-creditnotes .fin-toolbar .fin-input,
+      #view-creditnotes .fin-toolbar .fin-btn { min-height: 40px; }
+      /* Creditnota's klantnaam over 2 regels — patroon uit #903 */
+      #view-creditnotes .fin-table td.fin-cn-cust-cell {
+        max-width: 200px;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+                line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        line-height: 1.3;
+        word-break: break-word;
+      }
+
+      /* CAMT-Bank + Bank filter-strips */
+      #view-camtbank .sr-filterstrip,
+      #view-bank    .sr-filterstrip {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: visible;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+      }
+      #view-camtbank .sr-filterstrip::-webkit-scrollbar,
+      #view-bank    .sr-filterstrip::-webkit-scrollbar { display: none; }
+      #view-camtbank .sr-filterstrip > *,
+      #view-bank    .sr-filterstrip > * { flex: 0 0 auto; }
+      #view-camtbank .sr-filterstrip input[type="search"],
+      #view-bank    .sr-filterstrip input[type="search"] { min-width: 200px; flex: 1 0 200px; }
+      #view-camtbank .sr-filterstrip .fin-input,
+      #view-camtbank .sr-filterstrip .sr-ibtn,
+      #view-bank    .sr-filterstrip .fin-input,
+      #view-bank    .sr-filterstrip .sr-ibtn { min-height: 40px; }
+
+      /* CAMT sub-nav (Transacties/Matches/Config) horizontaal scrollbaar */
+      #view-camtbank #camtSubNav {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: visible;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+      }
+      #view-camtbank #camtSubNav::-webkit-scrollbar { display: none; }
+      #view-camtbank #camtSubNav > * { flex: 0 0 auto; }
+      #view-camtbank #camtSubNav > button { min-height: 44px; }
+
+      /* Matches acties-cel: knoppen stapelen (verticaal) + 44px hoog. */
+      #view-camtbank #matchTable td:last-child {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        align-items: stretch;
+        padding: 8px;
+      }
+      #view-camtbank #matchTable td:last-child .sr-abtn {
+        min-height: 44px;
+        justify-content: center;
+        padding: 10px 12px !important;
+        font-size: 12.5px !important;
+      }
+
+      /* CAMT saldo-card compacter op mobiel */
+      #view-camtbank #camtBalanceVal { font-size: 24px; }
+    }
+
     /* Klikbare KPI-cell (bv. Probleemklanten in Overzicht → Probleemklanten-tab). */
     .fin-kpi-clickable:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(15,23,42,0.10); }
     .fin-kpi-clickable:active { transform: translateY(0); }
@@ -3557,14 +3639,14 @@
       <input id="cnPeriodEnd"   class="fin-input" type="date" title="T/m datum" />
       <button id="cnRefreshBtn" class="fin-btn" type="button">Vernieuwen</button>
     </div>
-    <div id="cnKpi" class="fin-kpi-strip" style="display:grid;grid-template-columns:repeat(2, 1fr);gap:12px;margin-bottom:16px">
-      <div class="fin-kpi-cell" style="padding:14px 16px;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px">
-        <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px">Aantal creditnota's</div>
-        <div id="cnKpiCount" style="font-size:22px;font-weight:700;margin-top:4px">—</div>
+    <div id="cnKpi" class="ds-kpi-strip" style="--ds-kpi-cols:2;margin-bottom:16px">
+      <div class="ds-kpi">
+        <div class="ds-kpi-label">Aantal creditnota's</div>
+        <div class="ds-kpi-value" id="cnKpiCount">—</div>
       </div>
-      <div class="fin-kpi-cell" style="padding:14px 16px;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px">
-        <div style="font-size:11.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px">Totaal gecrediteerd</div>
-        <div id="cnKpiSum" style="font-size:22px;font-weight:700;margin-top:4px;color:#dc2626">—</div>
+      <div class="ds-kpi">
+        <div class="ds-kpi-label">Totaal gecrediteerd</div>
+        <div class="ds-kpi-value" id="cnKpiSum" style="color:var(--ds-danger, #dc2626)">—</div>
       </div>
     </div>
     <div id="cnLoading" style="display:none;padding:12px;text-align:center;color:var(--text-dim);font-size:13px">Laden…</div>
@@ -6120,12 +6202,13 @@
         const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
         $tbody.innerHTML = items.map((c) => {
           const invLabel = c.invoice_number ? esc(c.invoice_number) : '—';
-          const custLabel = c.customer_name && c.customer_name !== '—' ? esc(c.customer_name) : '—';
+          const custRaw = (c.customer_name && c.customer_name !== '—') ? c.customer_name : '';
+          const custLabel = custRaw ? esc(custRaw) : '—';
           const statusLabel = c.status ? esc(c.status) : '—';
           return `<tr style="border-top:1px solid var(--border)">
             <td style="padding:9px 12px;font-weight:600">${esc(c.credit_note_number || '—')}</td>
             <td style="padding:9px 12px">${fmtDate(c.credit_note_date)}</td>
-            <td style="padding:9px 12px">${custLabel}</td>
+            <td class="fin-cn-cust-cell" title="${esc(custRaw || '—')}" style="padding:9px 12px">${custLabel}</td>
             <td style="padding:9px 12px">${invLabel}</td>
             <td style="padding:9px 12px;text-align:right;color:#dc2626;font-weight:600">− ${eur(c.amount_total || 0)}</td>
             <td style="padding:9px 12px"><span style="display:inline-block;padding:2px 9px;background:var(--bg-elev);border:1px solid var(--border);border-radius:99px;font-size:11px">${statusLabel}</span></td>
