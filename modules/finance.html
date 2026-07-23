@@ -5566,6 +5566,18 @@
       if (vDunning) vDunning.hidden = false;
       ensureDunningLoaded();
       activateDunningSub('arrangements');
+      // Defensieve direct-invoke: click-cascade via activateDunningSub zet
+      // _arrangLoadedOnce=true VÓÓR de wire-calls (r7094). Als een van die
+      // wire-calls ooit throwt (early-render race op een DOM-node), blijft
+      // _arrangLoadedOnce=true maar is de wiring incompleet → knoppen dood.
+      // Roep de wire-funcs hier expliciet aan (allemaal idempotent via hun
+      // _*Wired-guard) en laad de lijst opnieuw bij ELKE entry zodat data
+      // verse is en de tbody-delegation gegarandeerd hangt.
+      if (canDunningView) {
+        try { wireArrangOnce();        } catch (e) { console.error('[arrangements] wire fail:',        e); }
+        try { wireArrangProposeOnce(); } catch (e) { console.error('[arrangements] wire-propose fail:', e); }
+        try { loadArrangements();      } catch (e) { console.error('[arrangements] load fail:',        e); }
+      }
     } else if (sub === 'probleemklanten') {
       // Probleemklanten zit óók binnen view-dunning > dunningSubNav. De
       // dunningSubNav zelf blijft verborgen (Wanbetalers-nav vervangt 'm);
