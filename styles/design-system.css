@@ -470,6 +470,23 @@
 .ds-kpi-delta.is-up   { color: var(--ds-success); }
 .ds-kpi-delta.is-down { color: var(--ds-danger); }
 
+/* Herbruikbare KPI-grid met responsive fallback. Kolom-aantal via CSS-var
+   `--ds-kpi-cols` (default 4). Op ≤720px altijd 2, op ≤480px 1. Bedoeld
+   voor de finance-KPI-strips (Facturen / Creditnota's / Dunning-overzicht /
+   Vandaag / Acties / Opruimen / Te-doen) zodat één class overal dezelfde
+   mobiele fallback geeft. Introduced door de Te-doen ds-mobile PR. */
+.ds-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(var(--ds-kpi-cols, 4), minmax(0, 1fr));
+  gap: var(--ds-gap-md, 12px);
+}
+@media (max-width: 720px) {
+  .ds-kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  .ds-kpi-strip { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* ---------- Pills ----------------------------------------------------------- */
 .ds-pill {
   display: inline-flex; align-items: center; gap: 4px;
