@@ -1,6 +1,6 @@
 // api/arrangements-cancel.js
 // POST -> annuleer een payment_arrangement (VOORGESTELD | ACTIEF -> GEANNULEERD) +
-// markeer alle openstaande pending_actions als cancelled. Permission:
+// markeer alle openstaande pending_actions als REJECTED. Permission:
 // finance.arrangements.propose (annuleren is de inverse van voorstellen).
 //
 // Body: { id: uuid, cancellation_reason?: string, reject_reason?: string (legacy alias), reason?: string (legacy alias) }
@@ -81,24 +81,43 @@ export default async function handler(req, res) {
       .single();
     if (updErr) throw new Error('update: ' + updErr.message);
 
-    // ---- UPDATE pending_actions -> CANCELLED (alleen PENDING) ----
-    // pending_actions-kolom heet rejection_reason en status-enum is UPPERCASE
-    // in deployed DB (PENDING/APPROVED/REJECTED/EXECUTED/FAILED/CANCELLED).
+    // ---- UPDATE pending_actions -> REJECTED (alleen PENDING) ----
+    // DB CHECK-constraint op pending_actions.status:
+    //   PENDING, APPROVED, REJECTED, EXECUTED, FAILED, ROLLED_BACK.
+    // 'CANCELLED' bestaat niet in dit schema — eerdere versie schreef
+    // die waarde, wat door de constraint werd geweigerd (23514). De
+    // fout werd stil geslikt (alleen console.error) waardoor
+    // cancelled_pending_actions=0 werd geretourneerd terwijl de acties
+    // nog op PENDING stonden. Sinds #888 blokkeren die de dunning-engine
+    // → klant valt permanent stil zonder dat iemand het merkt.
+    //
+    // REJECTED past semantisch: 'actie is niet doorgegaan omdat de
+    // parent-arrangement is ingetrokken'. rejection_reason bevat de
+    // context. ROLLED_BACK is bedoeld voor teruggedraaide EXECUTED-
+    // acties en past hier semantisch minder.
     let cancelledCount = 0;
+    let cancelledError = null; // {code, message} als de update faalde
     try {
       const { data: paUpd, error: paErr } = await supabaseAdmin
         .from('pending_actions')
         .update({
-          status:           'CANCELLED',
-          rejection_reason: reason || 'arrangement cancelled',
+          status:           'REJECTED',
+          rejection_reason: 'Arrangement geannuleerd' + (reason ? ': ' + reason : ''),
           updated_at:       nowIso,
         })
         .eq('arrangement_id', id)
         .eq('status', 'PENDING')
         .select('id');
-      if (paErr) console.error('[arrangements-cancel pending_actions]', paErr.message);
-      else cancelledCount = (paUpd || []).length;
-    } catch (e) { console.error('[arrangements-cancel pending_actions ex]', e.message); }
+      if (paErr) {
+        console.error('[arrangements-cancel pending_actions]', paErr.message);
+        cancelledError = { code: paErr.code || null, message: paErr.message };
+      } else {
+        cancelledCount = (paUpd || []).length;
+      }
+    } catch (e) {
+      console.error('[arrangements-cancel pending_actions ex]', e.message);
+      cancelledError = { code: null, message: e.message };
+    }
 
     // ---- Fase 2b hook: hervat de door dit arrangement gepauzeerde runs ----
     // De afspraak is van tafel; de aanmaan-flow moet weer draaien. Fail-soft.
@@ -119,11 +138,12 @@ export default async function handler(req, res) {
         entity_type: 'payment_arrangement',
         entity_id:   id,
         after_json:  {
-          arrangement_id:            id,
-          status:                    'GEANNULEERD',
-          cancellation_reason:       reason,
-          cancelled_pending_actions: cancelledCount,
-          resumed_workflow_runs:     resumedRunCount,
+          arrangement_id:              id,
+          status:                      'GEANNULEERD',
+          cancellation_reason:         reason,
+          cancelled_pending_actions:   cancelledCount,
+          cancelled_pending_actions_error: cancelledError,
+          resumed_workflow_runs:       resumedRunCount,
         },
         reason_text: reason,
         ip_address:  getClientIp(req),
@@ -131,11 +151,17 @@ export default async function handler(req, res) {
     } catch (e) { console.error('[arrangements-cancel audit]', e.message); }
 
     return res.status(200).json({
-      id:                        updated.id,
-      status:                    updated.status,
-      cancellation_reason:       updated.cancellation_reason,
-      cancelled_pending_actions: cancelledCount,
-      resumed_workflow_runs:     resumedRunCount,
+      id:                              updated.id,
+      status:                          updated.status,
+      cancellation_reason:             updated.cancellation_reason,
+      cancelled_pending_actions:       cancelledCount,
+      // Als de pending_actions-update faalde (constraint-violation of anders):
+      // meegeven in de response zodat frontend/oncall het NIET stil krijgt.
+      // Arrangement zelf is dan wél GEANNULEERD (r72-82 lukte), maar de
+      // sub-actions staan mogelijk nog op PENDING — vraag om handmatig
+      // ingrijpen (bv. via pending-actions-reject per row).
+      cancelled_pending_actions_error: cancelledError,
+      resumed_workflow_runs:           resumedRunCount,
     });
   } catch (e) {
     console.error('[arrangements-cancel]', e.message);
