@@ -1992,6 +1992,56 @@
       #view-wanbetalers #wanbetalersSubNav .wbx-nav-spacer { flex: 0 0 4px; }
     }
 
+    /* Wanbetalers → Instellingen sub-views mobile-polish (≤720px):
+       hub-grid al mobile-ok (auto-fill); filter-strips van Probleemklanten
+       + Geschiedenis + Templates naar 1-regel scrollbaar; tabellen zijn al
+       scrollbaar via .sr-tablewrap sinds #899. Datumvelden 16px + 44px op
+       mobiel. Scope strikt op de sub-view-ID's om andere views ongemoeid
+       te laten. */
+    @media (max-width: 720px) {
+      /* Hub-grid: 1 kolom expliciet vanaf 720px (was 640px). Kaarten
+         compacter zodat de scroll-hoogte binnen redelijk blijft. */
+      #view-wanbetalers .wbx-set-grid { grid-template-columns: 1fr; gap: 10px; }
+      #view-wanbetalers .wbx-set-card { padding: 14px 16px; min-height: 44px; }
+      #view-wanbetalers .wbx-set-card h3 { font-size: 14px; }
+
+      /* Probleemklanten filter-strip: 1-regel scrollbaar. Alle 5 controls
+         + reset + info-span blijven bereikbaar. */
+      #dunProbFilters {
+        flex-wrap: nowrap !important;
+        overflow-x: auto;
+        overflow-y: visible;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+      }
+      #dunProbFilters::-webkit-scrollbar { display: none; }
+      #dunProbFilters > * { flex: 0 0 auto; }
+      #dunProbFilters #dunProbSearch { min-width: 200px; flex: 1 0 200px; }
+      #dunProbFilters .fin-input,
+      #dunProbFilters .sr-abtn { min-height: 44px; font-size: 16px; }
+      /* Info-span aan het eind mag verborgen op mobiel (decoratief). */
+      #dunProbFilters #dunProbFilterInfo { display: none; }
+      /* Probleemklanten header bulk-actie-knoppen 44px raakbaar. */
+      #dunningSubProbleemklanten .sr-abtn { min-height: 44px; }
+      #dunProbSelectAll { min-width: 20px; min-height: 20px; }
+
+      /* Geschiedenis filter-strip: van 4-koloms grid naar 1-koloms met
+         verticale stacking. Elk label + input full-width. */
+      #dunningSubGeschiedenis > div[style*="grid-template-columns:1fr 220px 180px auto"] {
+        display: flex !important;
+        flex-direction: column;
+        gap: 10px !important;
+        grid-template-columns: 1fr !important;
+      }
+      #dunHistSearch,
+      #dunHistEventType,
+      #dunHistFromDate { min-height: 44px; font-size: 16px; width: 100%; }
+      #dunHistRefreshBtn { min-height: 44px; width: 100%; }
+
+      /* Templates header: knop 44px hoog voor duim-target. */
+      #dunTplNewBtn { min-height: 44px; }
+    }
+
     /* Facturen-hoofdtab mobile-polish (≤720px). Filterstrip in 2 rijen:
        status-pills bovenaan horizontaal scrollbaar, rest (entity + dates
        + zoek + refresh + Nieuwe factuur) op eigen regel eronder. Klantnaam
