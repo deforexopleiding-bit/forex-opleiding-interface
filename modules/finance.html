@@ -1992,6 +1992,60 @@
       #view-wanbetalers #wanbetalersSubNav .wbx-nav-spacer { flex: 0 0 4px; }
     }
 
+    /* Facturen-hoofdtab mobile-polish (≤720px). Filterstrip in 2 rijen:
+       status-pills bovenaan horizontaal scrollbaar, rest (entity + dates
+       + zoek + refresh + Nieuwe factuur) op eigen regel eronder. Klantnaam
+       over 2 regels (patroon #903). Datumvelden 16px font (voorkomt iOS-
+       inzoomen) + 44px hoog. #invKpis gebruikt al .ds-kpi-strip → auto
+       responsive via shared. */
+    @media (max-width: 720px) {
+      #view-facturen #invFilters {
+        display: grid;
+        grid-template-columns: 1fr;
+        row-gap: 8px;
+        column-gap: 8px;
+      }
+      #view-facturen #invFilters > span[style*="flex:1"] { display: none; }
+      /* Status-pills op eigen regel, horizontaal scrollbaar. */
+      #view-facturen #invFilters #invStatusSeg {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: visible;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        max-width: 100%;
+      }
+      #view-facturen #invFilters #invStatusSeg::-webkit-scrollbar { display: none; }
+      #view-facturen #invFilters #invStatusSeg > * { flex: 0 0 auto; }
+      #view-facturen #invFilters #invStatusSeg .sr-seg { min-height: 40px; }
+      /* Overige controls: laat ze in flex-rij achter de pills wrap-en naar 2
+         regels; ze zijn kleiner en passen samen op 2 regels max. */
+      #view-facturen #invFilters #invEntity,
+      #view-facturen #invFilters #invPeriodStart,
+      #view-facturen #invFilters #invPeriodEnd,
+      #view-facturen #invFilters #invSearch {
+        min-height: 44px;
+        font-size: 16px;  /* voorkomt iOS-inzoomen bij focus */
+      }
+      #view-facturen #invFilters #invSearch { min-width: 200px; flex: 1 0 200px; }
+      #view-facturen #invFilters #invRefresh,
+      #view-facturen #invFilters #invNewBtn { min-height: 44px; }
+      /* Klantnaam-cell in facturen-tabel over 2 regels ipv wrap-verbergen. */
+      #view-facturen #invTable td:nth-child(3) {
+        max-width: 180px;
+        white-space: normal !important;
+        word-break: break-word;
+      }
+      #view-facturen #invTable td:nth-child(3) .sr-uname {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+                line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        line-height: 1.3;
+      }
+    }
+
     /* Creditnota's + Bank (CAMT/Match/eBoekh) mobile-polish. Filter-strips
        naar 1-regel scrollbaar; Match-acties stapelen op mobiel; klantnaam
        in Creditnota's over 2 regels (patroon uit #903/#904). Alle knoppen
@@ -3598,7 +3652,7 @@
           </div>
         </div>
       </details>
-      <div class="kpi-strip" id="invKpis" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px"></div>
+      <div class="ds-kpi-strip" id="invKpis" style="--ds-kpi-cols:4;margin-bottom:16px"></div>
       <div class="sr-filterstrip" id="invFilters" style="margin-bottom:12px;flex-wrap:wrap;gap:8px;align-items:center">
         <div class="sr-segments" id="invStatusSeg">
           <button class="sr-seg active" data-status="open" type="button">Open</button>
@@ -15790,7 +15844,10 @@
   }
 
   function renderKpis(k) {
-    const cell = (lbl, val, sub) => `<div class="kpi-cell"><div class="kpi-lbl">${lbl}</div><div class="kpi-val">${val}</div>${sub ? `<div class="kpi-lbl" style="margin-top:2px">${sub}</div>` : ''}</div>`;
+    // ds-vormtaal (klein hoofdletter-label + groot cijfer + delta-sub) via
+    // .ds-kpi-strip + .ds-kpi. IDs voor JS-updaters zijn niet nodig (invKpis
+    // wordt bij elke load() volledig herschreven).
+    const cell = (lbl, val, sub) => `<div class="ds-kpi"><div class="ds-kpi-label">${lbl}</div><div class="ds-kpi-value">${val}</div>${sub ? `<div class="ds-kpi-delta">${sub}</div>` : ''}</div>`;
     document.getElementById('invKpis').innerHTML =
       cell('Openstaand', eur(k.open_total), `${k.open_count} facturen`) +
       cell('Te laat', eur(k.overdue_total), `${k.overdue_count} facturen`) +
