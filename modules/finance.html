@@ -2748,6 +2748,22 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    /* Op mobiel bestaat hover-tooltip niet -> volledige naam onbereikbaar.
+       Daarom naar 2-regel line-clamp: normaal wrappen, na 2 regels visueel
+       afkappen. title-attribuut blijft staan voor desktop. */
+    @media (max-width: 720px) {
+      .wbx .wbx-table td.wbx-cust-cell {
+        max-width: 200px;
+        white-space: normal;
+        overflow: hidden;
+        text-overflow: clip;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+                line-clamp: 2;
+        -webkit-box-orient: vertical;
+        line-height: 1.3;
+      }
+    }
 
     /* ======================================================
        Incasso-sub — scoped .wbx-huid voor het incasso-scherm.
@@ -3302,6 +3318,29 @@
     .wbx .wbx-cleanup-card ul {
       margin:0 0 14px 20px; padding:0;
       color:var(--wbx-muted); font-size:13px; line-height:1.75;
+    }
+    /* Mobiel (≤720px): landingskaarten compacter zodat de klantenlijst
+       eerder in beeld komt. Alle tekst + knop blijven zichtbaar; alleen
+       padding/kopgrootte/regelafstand strakker gezet. Note-strook idem. */
+    @media (max-width: 720px) {
+      .wbx .wbx-cleanup-note {
+        padding: 10px 12px;
+        font-size: 13px;
+        margin-bottom: 12px;
+      }
+      .wbx .wbx-cleanup-card {
+        padding: 14px 16px;
+      }
+      .wbx .wbx-cleanup-card h2 {
+        font-size: 15px;
+        margin-bottom: 4px;
+      }
+      .wbx .wbx-cleanup-card p {
+        font-size: 13px;
+        line-height: 1.4;
+        margin-bottom: 10px;
+      }
+      .wbx .wbx-cleanup-card .wbx-btn { min-height: 44px; }
     }
 
     /* Gesprekken (view-inbox) minimale .wbx-scope overrides — geeft de
@@ -18912,18 +18951,18 @@
             <div class="wbx-flex1"></div>
             <button class="wbx-btn wbx-sm" type="button" id="opruimRunsReloadBtn">Ververs</button>
           </div>
-          <div class="wbx-runs-kpis" id="opruimRunsKpis" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:8px 12px 0">
-            <div class="wbx-runs-kpi" style="background:var(--wbx-card,#fff);border:1px solid var(--wbx-line,#e5e7eb);border-radius:8px;padding:10px 12px">
-              <div style="font-size:11px;color:var(--wbx-faint,#6b7280);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Actieve runs</div>
-              <div id="opruimKpiActive" style="font-size:20px;font-weight:700;color:var(--wbx-text,#0f172a);font-variant-numeric:tabular-nums;margin-top:2px">—</div>
+          <div class="ds-kpi-strip" id="opruimRunsKpis" style="--ds-kpi-cols:3;margin:8px 12px 0">
+            <div class="ds-kpi">
+              <div class="ds-kpi-label">Actieve runs</div>
+              <div class="ds-kpi-value" id="opruimKpiActive">—</div>
             </div>
-            <div class="wbx-runs-kpi" style="background:var(--wbx-card,#fff);border:1px solid var(--wbx-line,#e5e7eb);border-radius:8px;padding:10px 12px">
-              <div style="font-size:11px;color:var(--wbx-faint,#6b7280);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Totaal openstaand</div>
-              <div id="opruimKpiOpen" style="font-size:20px;font-weight:700;color:var(--wbx-text,#0f172a);font-variant-numeric:tabular-nums;margin-top:2px">—</div>
+            <div class="ds-kpi">
+              <div class="ds-kpi-label">Totaal openstaand</div>
+              <div class="ds-kpi-value" id="opruimKpiOpen">—</div>
             </div>
-            <div class="wbx-runs-kpi" style="background:var(--wbx-card,#fff);border:1px solid var(--wbx-line,#e5e7eb);border-radius:8px;padding:10px 12px">
-              <div style="font-size:11px;color:var(--wbx-faint,#6b7280);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Afgerond (30d)</div>
-              <div id="opruimKpiCompl30" style="font-size:20px;font-weight:700;color:var(--wbx-text,#0f172a);font-variant-numeric:tabular-nums;margin-top:2px">—</div>
+            <div class="ds-kpi">
+              <div class="ds-kpi-label">Afgerond (30d)</div>
+              <div class="ds-kpi-value" id="opruimKpiCompl30">—</div>
             </div>
           </div>
           <div id="opruimRunsBody" style="margin:12px"></div>
