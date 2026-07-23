@@ -5,7 +5,7 @@
 //
 //   customer_notes         → note              (handmatige notitie, met author)
 //   dunning_call_log       → call              (belpoging + outcome)
-//   pending_actions        → task_*            (created/executed/rejected/cancelled)
+//   pending_actions        → task_*            (created/executed/rejected/failed/rolled_back)
 //   payment_arrangements   → arrangement_*     (proposed / accepted / broken / done)
 //   dunning_workflow_runs  → run_*             (started/paused/resumed/completed)
 //   dunning_log            → send_email/send_wa/wait/step/…
