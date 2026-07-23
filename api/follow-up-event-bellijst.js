@@ -1,11 +1,25 @@
 // api/follow-up-event-bellijst.js
 //
-// GET — deelnemers van het EERSTVOLGENDE aankomende event, met per
-// attendee een indicatie of er al een follow_up_lead bestaat
-// (source='event' met matching source_ref.attendee_id, of match op
-// customer_id). Voor de cockpit-'Event-bellijst'-tab.
+// GET — deelnemers van een aankomend event, met per attendee een
+// indicatie of er al een follow_up_lead bestaat (source='event' met
+// matching source_ref.attendee_id, of match op customer_id).
+// Voor de cockpit-'Event-bellijst'-tab.
 //
-// Response:
+// Query-params:
+//   list=upcoming  → returnt { events: [{id,title,starts_at}, ...] }
+//                    (aankomende events voor de picker, max 50).
+//                    Bewust in dít endpoint i.p.v. /api/events-list omdat
+//                    events-list alleen events.event.view accepteert,
+//                    terwijl deze bellijst ook door sales.tab.retentie /
+//                    sales.customer.view gebruikers wordt bezocht — zij
+//                    zouden anders een 403 krijgen op de picker.
+//   event_id=<uuid> (optioneel) → toon de bellijst voor dat specifieke
+//                    event i.p.v. het eerstvolgende. Valideert UUID +
+//                    bestaan + status ∈ (published, draft). Onbekend of
+//                    verkeerde status → 400.
+//   (default)      → eerstvolgende aankomende event.
+//
+// Response (default / event_id):
 //   { event: { id, title, starts_at, attendee_count } | null,
 //     attendees: [
 //       { id, name, email, phone, customer_id,
@@ -18,10 +32,12 @@
 // voor legacy-callers maar de renderer valt daar NIET meer op terug — zie
 // _renderEventBellijst() in modules/follow-up.html.
 //
-// 42P01/42703 fail-soft (lege lijst / event=null).
+// 42P01/42703 fail-soft (lege lijst / event=null / events=[]).
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function displayName(a) {
   const parts = [a?.first_name, a?.last_name].filter(Boolean).map((s) => String(s).trim()).filter(Boolean);
@@ -45,26 +61,80 @@ export default async function handler(req, res) {
   if (!allowed) allowed = await requirePermission(req, 'sales.customer.view');
   if (!allowed) return res.status(403).json({ error: 'Geen rechten' });
 
+  const q = req.query || {};
+
+  // Sub-endpoint: picker-opties. Geeft alleen id/title/starts_at terug
+  // van maximaal 50 aankomende events (status IN published/draft,
+  // starts_at >= now, oplopend). Zelfde RBAC-triple als de bellijst
+  // zelf — geen mismatch met /api/events-list.
+  if (String(q.list || '').toLowerCase() === 'upcoming') {
+    try {
+      const nowIso = new Date().toISOString();
+      const { data: rows, error: listErr } = await supabaseAdmin
+        .from('events')
+        .select('id, title, starts_at')
+        .in('status', ['published', 'draft'])
+        .gte('starts_at', nowIso)
+        .order('starts_at', { ascending: true })
+        .limit(50);
+      if (listErr) {
+        if (listErr.code === '42P01' || listErr.code === '42703') {
+          return res.status(200).json({ events: [] });
+        }
+        throw new Error('events list: ' + listErr.message);
+      }
+      return res.status(200).json({ events: rows || [] });
+    } catch (e) {
+      console.error('[follow-up-event-bellijst list=upcoming]', e?.message || e);
+      return res.status(500).json({ error: e?.message || 'Interne fout' });
+    }
+  }
+
   try {
     const nowIso = new Date().toISOString();
 
-    // 1) Eerstvolgende aankomende event.
-    const { data: eventRow, error: eventErr } = await supabaseAdmin
-      .from('events')
-      .select('id, title, starts_at, status')
-      .in('status', ['published', 'draft'])
-      .gte('starts_at', nowIso)
-      .order('starts_at', { ascending: true })
-      .limit(1)
-      .maybeSingle();
-
-    if (eventErr) {
-      if (eventErr.code === '42P01' || eventErr.code === '42703') {
-        return res.status(200).json({ event: null, attendees: [] });
+    // 1) Event-selectie: expliciet event_id-param, anders de eerstvolgende.
+    let eventRow = null;
+    const rawEventId = q.event_id ? String(q.event_id).trim() : '';
+    if (rawEventId) {
+      if (!UUID_RE.test(rawEventId)) {
+        return res.status(400).json({ error: 'Ongeldig event_id (geen uuid)' });
       }
-      throw new Error('events fetch: ' + eventErr.message);
+      const { data: row, error: byIdErr } = await supabaseAdmin
+        .from('events')
+        .select('id, title, starts_at, status')
+        .eq('id', rawEventId)
+        .maybeSingle();
+      if (byIdErr) {
+        if (byIdErr.code === '42P01' || byIdErr.code === '42703') {
+          return res.status(200).json({ event: null, attendees: [] });
+        }
+        throw new Error('events fetch (by id): ' + byIdErr.message);
+      }
+      if (!row) return res.status(404).json({ error: 'Event niet gevonden' });
+      if (!['published', 'draft'].includes(String(row.status || '').toLowerCase())) {
+        return res.status(400).json({ error: 'Event heeft geen zichtbare status (published/draft)' });
+      }
+      eventRow = row;
+    } else {
+      const { data: firstRow, error: eventErr } = await supabaseAdmin
+        .from('events')
+        .select('id, title, starts_at, status')
+        .in('status', ['published', 'draft'])
+        .gte('starts_at', nowIso)
+        .order('starts_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (eventErr) {
+        if (eventErr.code === '42P01' || eventErr.code === '42703') {
+          return res.status(200).json({ event: null, attendees: [] });
+        }
+        throw new Error('events fetch: ' + eventErr.message);
+      }
+      if (!firstRow) return res.status(200).json({ event: null, attendees: [] });
+      eventRow = firstRow;
     }
-    if (!eventRow) return res.status(200).json({ event: null, attendees: [] });
 
     // 2) Deelnemers van dat event. call_status/-_at (migratie 023) is
     //    de event-specifieke bel-uitkomst en de primaire bron voor de
