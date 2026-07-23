@@ -2515,51 +2515,69 @@
        Ronde 2 — Acties (open-acties) + Facturen scoped styling.
        ====================================================== */
 
-    /* Acties: tabs + type-filter chips + rij-lijst */
+    /* Acties (sub=open-acties): tabs + type/kind-filter-chips + rij-lijst.
+       ds-vormtaal: hairline randen, 10px radius op kaarten, 6px radius op
+       controls, brand-accent op actieve tab + primaire knop, ronde pills
+       met zachte statuskleur. Tokens via --ds-* met hex-fallback zodat
+       andere subs die --wbx-* gebruiken ongewijzigd blijven (scoped op
+       .wbx .wbx-arow / .wbx .wbx-tabs / .wbx .wbx-chip). */
     .wbx .wbx-tabs {
       display:flex; gap:4px;
-      border-bottom:1px solid var(--wbx-border);
+      border-bottom:1px solid var(--ds-border, #dfe8ec);
       margin-bottom:14px;
     }
     .wbx .wbx-tabs button {
-      border:0; background:transparent; color:var(--wbx-muted);
+      border:0; background:transparent; color:var(--ds-text-muted, #48585f);
       font-weight:600; font-size:14px; padding:10px 14px;
       cursor:pointer; border-bottom:2px solid transparent;
       margin-bottom:-1px; font-family:inherit;
     }
-    .wbx .wbx-tabs button:hover { color:var(--wbx-ink); }
+    .wbx .wbx-tabs button:hover { color:var(--ds-text, #06181f); }
     .wbx .wbx-tabs button.active {
-      color:var(--wbx-accent-ink);
-      border-bottom-color:var(--wbx-accent);
+      color:var(--ds-brand-strong, #083b52);
+      border-bottom-color:var(--ds-brand, #0a5178);
     }
     .wbx .wbx-tabs button .wbx-c {
       font:600 11px/1 var(--wbx-mono);
-      background:#E9EBEF; color:var(--wbx-muted);
-      padding:2px 6px; border-radius:999px; margin-left:6px;
+      background:var(--ds-surface-2, #f9fbfc); color:var(--ds-text-muted, #48585f);
+      padding:2px 6px; border-radius:var(--ds-radius-pill, 999px); margin-left:6px;
+      font-variant-numeric: tabular-nums;
+      border:1px solid var(--ds-border, #dfe8ec);
     }
     .wbx .wbx-tabs button.active .wbx-c {
-      background:var(--wbx-accent-soft); color:var(--wbx-accent-ink);
+      background:var(--ds-brand-soft, #dceaf2); color:var(--ds-brand-strong, #083b52);
+      border-color:var(--ds-brand-soft, #dceaf2);
     }
 
+    /* Chip-rijen: op mobiel horizontaal scrollbaar (i.p.v. wrappen over
+       3-4 regels). Alle chips blijven bereikbaar via touch-swipe; visuele
+       scrollbar verborgen (native touch-scroll blijft actief). */
     .wbx .wbx-chips { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:14px; }
     .wbx .wbx-chip {
-      border:1px solid var(--wbx-border); background:#fff;
-      color:var(--wbx-muted); font-weight:500; font-size:13px;
-      padding:6px 12px; border-radius:999px; cursor:pointer;
-      font-family:inherit;
+      border:1px solid var(--ds-border, #dfe8ec); background:var(--ds-surface, #ffffff);
+      color:var(--ds-text-muted, #48585f); font-weight:500; font-size:13px;
+      padding:6px 12px; border-radius:var(--ds-radius-pill, 999px); cursor:pointer;
+      font-family:inherit; white-space:nowrap;
     }
+    .wbx .wbx-chip:hover { border-color:var(--ds-border-strong, #c1d0d7); color:var(--ds-text, #06181f); }
     .wbx .wbx-chip.active {
-      background:var(--wbx-ink); color:#fff; border-color:var(--wbx-ink);
+      background:var(--ds-brand, #0a5178); color:#ffffff;
+      border-color:var(--ds-brand, #0a5178);
     }
 
     .wbx .wbx-alist { display:flex; flex-direction:column; gap:8px; }
     .wbx .wbx-arow {
       display:flex; align-items:center; gap:14px;
-      background:var(--wbx-surface); border:1px solid var(--wbx-border);
-      border-radius:var(--wbx-radius); padding:12px 16px;
+      background:var(--ds-surface, #ffffff);
+      border:1px solid var(--ds-border, #dfe8ec);
+      border-radius:var(--ds-radius-lg, 10px); padding:12px 16px;
+      color:var(--ds-text, #06181f);
+      transition:border-color .12s ease;
     }
+    .wbx .wbx-arow:hover { border-color:var(--ds-border-strong, #c1d0d7); }
+    .wbx .wbx-arow:focus-visible { outline:2px solid var(--ds-brand, #0a5178); outline-offset:2px; }
     .wbx .wbx-arow .wbx-aic {
-      width:34px; height:34px; border-radius:9px;
+      width:34px; height:34px; border-radius:var(--ds-radius, 6px);
       display:grid; place-items:center;
       font-size:16px; flex:none;
     }
@@ -2567,23 +2585,81 @@
     .wbx .wbx-aic.wbx-plan   { background:var(--wbx-s-plan-bg);   color:var(--wbx-s-plan-tx); }
     .wbx .wbx-aic.wbx-esc    { background:var(--wbx-s-inc-bg);    color:var(--wbx-s-inc-tx); }
     .wbx .wbx-arow .wbx-abody { flex:1; min-width:0; }
-    .wbx .wbx-arow .wbx-atitle { font-weight:600; font-size:14px; }
+    .wbx .wbx-arow .wbx-atitle { font-weight:600; font-size:14px; color:var(--ds-text, #06181f); }
     .wbx .wbx-arow .wbx-asub {
-      color:var(--wbx-muted); font-size:12.5px; margin-top:1px;
+      color:var(--ds-text-muted, #48585f); font-size:12.5px; margin-top:1px;
       overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
     }
     .wbx .wbx-arow .wbx-aage {
       font:600 12px/1 var(--wbx-mono);
-      color:var(--wbx-faint); flex:none; margin-right:4px;
+      color:var(--ds-text-faint, #7a8b92); flex:none; margin-right:4px;
+      font-variant-numeric: tabular-nums;
     }
     .wbx .wbx-arow .wbx-abtns { display:flex; gap:8px; flex:none; }
+    /* Scoped: primaire knop binnen .wbx-arow krijgt --ds-brand + 6px.
+       Andere .wbx-primary knoppen (Te-doen, andere subs) blijven zoals ze
+       zijn (Te-doen krijgt eigen scoped override in .wbx-case-block). */
+    .wbx .wbx-arow .wbx-btn.wbx-primary {
+      background:var(--ds-brand, #0a5178); border-color:var(--ds-brand, #0a5178);
+      border-radius:var(--ds-radius, 6px);
+    }
+    .wbx .wbx-arow .wbx-btn.wbx-primary:hover {
+      background:var(--ds-brand-strong, #083b52); border-color:var(--ds-brand-strong, #083b52);
+    }
+    .wbx .wbx-arow .wbx-btn { border-radius:var(--ds-radius, 6px); }
 
     .wbx .wbx-tag {
       display:inline-block; font-size:11px; font-weight:600;
-      padding:3px 9px; border-radius:999px;
+      padding:3px 9px; border-radius:var(--ds-radius-pill, 999px);
     }
-    .wbx .wbx-tag.wbx-ok { background:var(--wbx-ok-bg); color:var(--wbx-ok-tx); }
-    .wbx .wbx-tag.wbx-no { background:var(--wbx-no-bg); color:var(--wbx-no-tx); }
+    .wbx .wbx-tag.wbx-ok { background:var(--ds-success-bg, #e5f3ea); color:var(--ds-success, #2a7047); }
+    .wbx .wbx-tag.wbx-no { background:var(--ds-surface-2, #f0f2f5); color:var(--ds-text-muted, #48585f); }
+
+    /* Acties mobiel — ≤720px. Chips scrollbaar horizontaal (alle blijven
+       bereikbaar). Kaart stapelt inhoud verticaal: title/subtitle boven,
+       age + knoppen onder, min-height 44px op knoppen (Apple HIG). Rij-
+       klik + button-stopPropagation blijven werken — geen markup-diff. */
+    @media (max-width: 720px) {
+      .wbx .wbx-chips {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding-bottom: 4px;
+        margin-left: -2px; padding-left: 2px;   /* focus-outline ruimte */
+        margin-right: -2px; padding-right: 2px;
+      }
+      .wbx .wbx-chips::-webkit-scrollbar { display: none; }
+      .wbx .wbx-chip { flex: 0 0 auto; }
+
+      .wbx .wbx-arow {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-rows: auto auto;
+        grid-template-areas:
+          "aic  abody"
+          "aic  actions";
+        column-gap: 12px; row-gap: 8px;
+        align-items: start;
+      }
+      .wbx .wbx-arow .wbx-aic   { grid-area: aic; align-self: start; }
+      .wbx .wbx-arow .wbx-abody { grid-area: abody; }
+      /* Right-slot children (age + tag + abtns) landen in row 2 kolom 2.
+         Flex-layout zodat age links en knoppen rechts uitgevlucht zijn. */
+      .wbx .wbx-arow .wbx-aage,
+      .wbx .wbx-arow .wbx-abtns,
+      .wbx .wbx-arow .wbx-tag {
+        grid-area: actions;
+        align-self: center;
+        justify-self: end;
+      }
+      /* Als er zowel .wbx-aage als .wbx-abtns is (open-tab), stack ze
+         horizontaal: age links, knoppen rechts. Grid stapelt ze anders
+         op elkaar in dezelfde cel. */
+      .wbx .wbx-arow .wbx-aage   { justify-self: start; }
+      .wbx .wbx-arow .wbx-abtns  { justify-self: end; }
+      .wbx .wbx-arow .wbx-btn    { min-height: 44px; padding: 10px 14px; }
+    }
 
     /* Facturen: status-strip + toolbar + tabel */
     .wbx .wbx-strip {
