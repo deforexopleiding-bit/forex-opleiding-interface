@@ -30,7 +30,20 @@
 .sr-seg.warning.active { background:rgba(245,158,11,.16); color:#b45309; }
 
 /* ── Tabel ──────────────────────────────────────────────────────────────── */
-.sr-tablewrap { background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+/* overflow-x:auto zodat brede tabellen op smalle schermen horizontaal
+   scrollbaar zijn i.p.v. afgekapt zonder scroll-mogelijkheid. Body heeft
+   overflow-x:hidden om page-scroll te voorkomen; deze wrapper vangt de
+   overflow op container-niveau via touch-swipe. overflow-y:visible zorgt
+   dat row-menu dropdowns die uit de tabel steken zichtbaar blijven (die
+   openen sowieso via position:fixed + getBoundingClientRect, dus geen
+   parent-clip). Scrollbar visueel verborgen conform .data-table-wrap. */
+.sr-tablewrap {
+  background:var(--bg-elev); border:1px solid var(--border); border-radius:12px;
+  overflow-x:auto; overflow-y:visible;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+}
+.sr-tablewrap::-webkit-scrollbar { display:none; }
 table.sr-table { width:100%; border-collapse:collapse; font-size:13px; }
 .sr-table th { text-align:left; padding:10px 12px; font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-faint); font-weight:600; background:var(--bg-elev-2); white-space:nowrap; }
 .sr-table td { padding:10px 12px; border-bottom:.5px solid var(--border); vertical-align:middle; }

@@ -104,7 +104,16 @@
       .fk-toggle input { margin:0; cursor:pointer; }
       .fk-toggle.active { background:var(--brand-primary-soft, rgba(6,182,212,.12)); color:var(--brand-primary, var(--accent-cyan, #06b6d4)); border-color:var(--brand-primary, var(--accent-cyan, #06b6d4)); }
 
-      .fk-tablewrap { background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+      /* overflow-x:auto zodat de klanten-tabel op mobiel horizontaal
+         scrollbaar is (consistent met .sr-tablewrap-fix). Scrollbar
+         visueel verborgen; touch-scroll blijft actief. */
+      .fk-tablewrap {
+        background:var(--bg-elev); border:1px solid var(--border); border-radius:12px;
+        overflow-x:auto; overflow-y:visible;
+        -webkit-overflow-scrolling:touch;
+        scrollbar-width:none;
+      }
+      .fk-tablewrap::-webkit-scrollbar { display:none; }
       .fk-table { width:100%; border-collapse:collapse; font-size:13px; }
       .fk-table th, .fk-table td { padding:11px 12px; text-align:left; border-bottom:0.5px solid var(--border-subtle, var(--border)); vertical-align:middle; }
       .fk-table th { font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-faint); background:var(--bg); user-select:none; white-space:nowrap; }

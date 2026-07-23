@@ -487,6 +487,21 @@
   .ds-kpi-strip { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* Herbruikbare tabel-scroll-wrapper voor brede data-tabellen die op
+   smalle schermen niet passen. Body heeft overflow-x:hidden om page-
+   scroll te voorkomen; deze utility maakt de tabel BINNEN de container
+   horizontaal scrollbaar via touch-swipe. Scrollbar visueel verborgen
+   (touch-scroll blijft actief; op desktop veegt de gebruiker met
+   trackpad of shift+wheel). Toepassen op elke wrapper-div rond een
+   tabel die breder kan worden dan de viewport. */
+.data-table-wrap {
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.data-table-wrap::-webkit-scrollbar { display: none; }
+
 /* ---------- Pills ----------------------------------------------------------- */
 .ds-pill {
   display: inline-flex; align-items: center; gap: 4px;
