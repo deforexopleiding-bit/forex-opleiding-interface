@@ -91,6 +91,15 @@
     /* Finance Fase 2A — Facturen-view */
     .fin-input { background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 10px; font-size: 12.5px; font-family: inherit; }
     .fin-input:focus { outline: none; border-color: var(--accent-cyan); }
+    /* iOS zoom-fix: onder 16px zoomt Safari in bij focus. Op mobiel
+       zetten we de font-size van elk .fin-input-veld verplicht op 16px.
+       Desktop blijft 12.5px — daar is inzoomen geen probleem en de
+       dichte layout van filterstrips/toolbars is bewust.
+       Zonder !important zodat scoped overrides met eigen font-size
+       (bv. #909 modal-card met !important) blijven werken. */
+    @media (max-width: 720px) {
+      .fin-input { font-size: 16px; }
+    }
 
     /* Oefengesprek met Joost (#783) — sandbox-chat in Testmodus-kaart. */
     /* .sbx-og-* CSS uit #783 verwijderd — oefengesprek is verhuisd naar
@@ -2355,10 +2364,14 @@
     .dunwf-triggers  { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
     .dunwf-step-cfg  { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
 
+    /* Terug-knop bovenaan de editor. Standaard verborgen; op mobiel
+       tonen we 'em als tap-target om terug naar de lijst te navigeren.
+       PR B (master-detail-toggle) — desktop toont zowel lijst als
+       editor tegelijk, dan is deze knop overbodig. */
+    .dunwf-back-btn { display:none; }
+
     @media (max-width: 720px) {
-      /* Alle grids naar één kolom. Buiten-grid: lijst boven, editor
-         eronder. De master-detail-toggle (óf lijst óf editor) volgt
-         in PR B — voor nu levert stapelen al de belangrijkste winst. */
+      /* Alle grids naar één kolom. */
       .dunwf-outer,
       .dunwf-meta,
       .dunwf-triggers,
@@ -2368,11 +2381,6 @@
          wraps op mobiel — auto-cols worden 1fr zodat de knop niet
          wegvalt. */
       .dunwf-header   { grid-template-columns:1fr; }
-
-      /* iOS zoom-fix — alleen scoped binnen deze view; de globale
-         .fin-input (r92) blijft ongewijzigd zodat andere views hun
-         layout niet zien verschuiven. */
-      #dunningSubWorkflows .fin-input { font-size:16px; }
 
       /* Touch-targets — de omhoog/omlaag/verwijder-knopjes in
          #dunWfSteps zijn standaard klein (.sr-ibtn). Op mobiel
@@ -2393,6 +2401,30 @@
         background:var(--ds-surface, #ffffff);
         border-top:1px solid var(--ds-border, #dfe8ec);
         z-index:1;
+      }
+
+      /* PR B — master-detail-toggle:
+         Zonder class → lijst-view (editor-kolom verbergen).
+         Met class `dunwf-detail-open` → detail-view (lijst verbergen,
+         editor vult scherm, terug-knop zichtbaar).
+         De data-state (_dunWfEditingId) is losgekoppeld van de UI-
+         class: bij sub-nav-switch weg van deze view resetten we beide
+         zodat je altijd op de lijst begint bij terugkomst. */
+      #dunningSubWorkflows                          .dunwf-outer > *:nth-child(2) { display:none; }
+      #dunningSubWorkflows.dunwf-detail-open        .dunwf-outer > *:nth-child(1) { display:none; }
+      #dunningSubWorkflows.dunwf-detail-open        .dunwf-outer > *:nth-child(2) { display:block; }
+      #dunningSubWorkflows.dunwf-detail-open        .dunwf-back-btn {
+        display:inline-flex; align-items:center; gap:6px;
+        min-height:44px; padding:8px 14px;
+        margin-bottom:12px;
+        font-size:14px; font-weight:500;
+        background:var(--ds-surface-2, #f9fbfc);
+        color:var(--ds-text, #06181f);
+        border:1px solid var(--ds-border, #dfe8ec);
+        border-radius:8px; cursor:pointer;
+      }
+      #dunningSubWorkflows.dunwf-detail-open        .dunwf-back-btn:hover {
+        border-color:var(--ds-border-strong, #c1d0d7);
       }
     }
   </style>
@@ -4592,6 +4624,11 @@
               Selecteer een workflow links of klik <strong>+ Nieuw</strong>.
             </div>
             <div id="dunWfForm" hidden>
+              <!-- Mobiel-only terug-knop (master-detail-toggle PR B).
+                   Op desktop verborgen via .dunwf-back-btn base-CSS. -->
+              <button type="button" id="dunWfBackBtn" class="dunwf-back-btn" title="Terug naar workflow-lijst">
+                <i class="ti ti-arrow-left"></i> Terug naar lijst
+              </button>
               <!-- Header: naam + toggles + verwijder -->
               <div class="dunwf-header">
                 <input id="dunWfName" type="text" class="fin-input" maxlength="200" placeholder="Workflow-naam"/>
@@ -7983,6 +8020,13 @@
         const el = document.getElementById(SUB_IDS[s]);
         if (el) el.hidden = (s !== target);
       }
+      // Master-detail-toggle reset: bij wissel weg VAN workflows (of
+      // erheen) resetten we de mobile-view-class zodat je altijd op
+      // de lijst-view landt. Voorkomt "hang" waarbij een half-verlaten
+      // editor de lijst blijft verbergen na tab-terugkomst.
+      if (target !== 'workflows' && typeof showDunWfEmptyState === 'function') {
+        try { showDunWfEmptyState(); } catch (_) {}
+      }
       if (target === 'overzicht' && !_dunOvLoadedOnce) {
         _dunOvLoadedOnce = true;
         loadDunOverview();
@@ -8359,10 +8403,16 @@
     document.getElementById('dunWfForm').hidden  = true;
     _dunWfEditingId = null;
     _dunWfCurrent   = null;
+    // Master-detail-toggle: verwijder detail-open class zodat op mobiel
+    // de lijst weer verschijnt (op desktop is de class puur decoratief).
+    document.getElementById('dunningSubWorkflows')?.classList.remove('dunwf-detail-open');
   }
   function showDunWfForm() {
     document.getElementById('dunWfEmpty').hidden = true;
     document.getElementById('dunWfForm').hidden  = false;
+    // Master-detail-toggle: activeer detail-view zodat op mobiel de
+    // editor het scherm vult en de lijst verbergt.
+    document.getElementById('dunningSubWorkflows')?.classList.add('dunwf-detail-open');
   }
 
   function fillDunWfForm(workflow, steps) {
@@ -8833,6 +8883,9 @@
     document.getElementById('dunWfAddStepBtn')?.addEventListener('click', addDunWfStep);
     document.getElementById('dunWfSave')?.addEventListener('click', saveDunWf);
     document.getElementById('dunWfCancel')?.addEventListener('click', showDunWfEmptyState);
+    // Mobiel-only terug-knop bovenaan editor — zelfde effect als
+    // Annuleren: reset naar lijst-view + wist edit-state.
+    document.getElementById('dunWfBackBtn')?.addEventListener('click', showDunWfEmptyState);
   }
 
   // ─── Dunning Overzicht sub-tab (PR B5) ─────────────────────────────────────
