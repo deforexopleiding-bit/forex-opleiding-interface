@@ -1992,6 +1992,118 @@
       #view-wanbetalers #wanbetalersSubNav .wbx-nav-spacer { flex: 0 0 4px; }
     }
 
+    /* Modals mobile-polish (≤720px). Universeel fundament voor ALLE
+       .modal-card + scoped fixes voor content-heavy modals.
+
+       Deel 1 (gedeeld): overlay full-bleed, card full-viewport, alle
+       inputs 16px (iOS-zoom fix), touch-targets 44px, sluitknop 44px.
+       Overschrijft ook de #pendingActionDetailModal-override (die was
+       onvolledig — overlay-padding bleef 20px). */
+    @media (max-width: 720px) {
+      /* Full-bleed overlay + full-viewport card. */
+      .modal-overlay { padding: 0 !important; }
+      .modal-card {
+        max-width: 100% !important;
+        width: 100% !important;
+        max-height: 100vh !important;
+        min-height: 100vh;
+        border-radius: 0 !important;
+        padding: 16px !important;
+      }
+      /* Alle form-controls in een modal: 16px font (voorkomt iOS-inzoomen
+         bij focus) + 44px min-height voor touch. */
+      .modal-card input,
+      .modal-card select,
+      .modal-card textarea,
+      .modal-card .fin-input {
+        font-size: 16px !important;
+        min-height: 44px;
+      }
+      .modal-card textarea { min-height: 88px; }
+      /* Sluitknop rechtsboven 44x44px (was 28x28 in .sr-ibtn). */
+      .modal-card .sr-ibtn {
+        width: 44px !important;
+        height: 44px !important;
+        font-size: 20px;
+      }
+      /* Alle footer/action-knoppen 44px raakbaar. */
+      .modal-card .sr-abtn,
+      .modal-card .ds-btn,
+      .modal-card .wbx-btn { min-height: 44px; }
+      /* Sticky-footer voor #arrangProposeModal (heeft al position:sticky
+         in de source): wrap knoppen zodat 4 knoppen niet buiten scherm
+         vallen. */
+      #arrangProposeModal .modal-card > div[style*="sticky"]:last-child,
+      #arrangProposeModal #arrangWizFooter {
+        flex-wrap: wrap !important;
+        gap: 8px !important;
+      }
+
+      /* Deel 2 — scoped content-refactor voor 8 zware modals: 1fr 1fr
+         grids op mobiel naar 1fr (stack). Alle grids die in de recon
+         gevonden zijn krijgen hier hun mobile-override. */
+
+      /* #arrangProposeModal wizard-body 2-koloms grids stacken.
+         Attribute-selectors omdat ze inline style hebben. */
+      #arrangProposeModal [style*="grid-template-columns: 1fr 1fr"],
+      #arrangProposeModal [style*="grid-template-columns:1fr 1fr"],
+      #arrangProposeModal [style*="grid-template-columns: 160px 1fr"],
+      #arrangProposeModal [style*="grid-template-columns:160px 1fr"] {
+        grid-template-columns: 1fr !important;
+      }
+      /* Date-inputs in wizard full-width. */
+      #arrangProposeModal input[type="date"] { width: 100% !important; }
+      /* Split-tabel date-cel volle breedte. */
+      #arrangWizSplitTable input[type="date"] { width: 100% !important; min-width: 140px; }
+
+      /* #dunTplModal — 1fr 1fr grid + grote textarea compacter. */
+      #dunTplModal [style*="grid-template-columns: 1fr 1fr"],
+      #dunTplModal [style*="grid-template-columns:1fr 1fr"] {
+        grid-template-columns: 1fr !important;
+      }
+      #dunTplBody { min-height: 160px !important; }
+
+      /* #newInvModal — 2 grids en dyn lines. */
+      #newInvModal [style*="grid-template-columns: 1fr 1fr"],
+      #newInvModal [style*="grid-template-columns:1fr 1fr"] {
+        grid-template-columns: 1fr !important;
+      }
+      /* Dynamische lines: grid van vaste kol-breedtes op smal scherm → stack. */
+      #newInvModal #newLines > div[style*="grid-template-columns"] {
+        grid-template-columns: 1fr !important;
+      }
+
+      /* #updModal — dyn 5-kol grid line-editor stack. */
+      #updModal [style*="grid-template-columns"] {
+        grid-template-columns: 1fr !important;
+      }
+
+      /* #newCustCreateModal — 4 grid-blokken. */
+      #newCustCreateModal [style*="grid-template-columns"] {
+        grid-template-columns: 1fr !important;
+      }
+
+      /* #inboxTplPickerModal — stap 2 preview-splitsing 1fr 280px. */
+      #inboxTplPickerModal [style*="grid-template-columns: 1fr 280px"],
+      #inboxTplPickerModal [style*="grid-template-columns:1fr 280px"] {
+        grid-template-columns: 1fr !important;
+      }
+
+      /* #paCreateArrangementModal + #paCreateTaskModal — 1fr 1fr grids. */
+      #paCreateArrangementModal [style*="grid-template-columns: 1fr 1fr"],
+      #paCreateArrangementModal [style*="grid-template-columns:1fr 1fr"],
+      #paCreateTaskModal [style*="grid-template-columns: 1fr 1fr"],
+      #paCreateTaskModal [style*="grid-template-columns:1fr 1fr"] {
+        grid-template-columns: 1fr !important;
+      }
+
+      /* #bankTxModal — label/waarde 120px 1fr grid stack. */
+      #bankTxModal [style*="grid-template-columns: 120px 1fr"],
+      #bankTxModal [style*="grid-template-columns:120px 1fr"] {
+        grid-template-columns: 1fr !important;
+      }
+    }
+
     /* Wanbetalers → Afspraken mobile-polish (≤720px). Statusfilters zijn
        al scrollbaar via de #901-regel. Klantnaam-cel krijgt line-clamp 2
        (patroon #903/#904). Actie-knoppen (Details/Annuleer) stapelen
