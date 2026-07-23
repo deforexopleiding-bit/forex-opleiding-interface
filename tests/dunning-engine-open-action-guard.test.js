@@ -55,15 +55,19 @@ test('(c) klant met alleen rejected action -> guard laat door', () => {
   assert.equal(hasOpenBlockingAction(actions), false);
 });
 
-test('(c-cancelled) klant met alleen cancelled action -> guard laat door', () => {
-  const actions = [{ status: 'cancelled', action_type: 'MANUAL_PROPOSE_ARRANGEMENT' }];
+test('(c-rolled_back) klant met alleen rolled_back action -> guard laat door', () => {
+  // ROLLED_BACK is een afgesloten toestand — uitvoering teruggedraaid,
+  // dunning mag doorlopen. DB CHECK-constraint:
+  //   PENDING/APPROVED/REJECTED/EXECUTED/FAILED/ROLLED_BACK
+  // (CANCELLED bestaat niet in dit schema.)
+  const actions = [{ status: 'rolled_back', action_type: 'TL_INVOICE_UPDATE_DUE' }];
   assert.equal(hasOpenBlockingAction(actions), false);
 });
 
-test('(c-mix-safe) rejected + cancelled -> guard laat door', () => {
+test('(c-mix-safe) rejected + rolled_back -> guard laat door', () => {
   const actions = [
-    { status: 'rejected',  action_type: 'MANUAL_ESCALATION' },
-    { status: 'cancelled', action_type: 'TL_INVOICE_WRITEOFF' },
+    { status: 'rejected',     action_type: 'MANUAL_ESCALATION' },
+    { status: 'rolled_back',  action_type: 'TL_INVOICE_WRITEOFF' },
   ];
   assert.equal(hasOpenBlockingAction(actions), false);
 });
@@ -75,13 +79,17 @@ test('(d) klant zonder acties -> guard laat door (regressie-anker)', () => {
   assert.equal(hasOpenBlockingAction(undefined), false);
 });
 
-// ── Set-integriteit: dezelfde blocking-set als in #887 ────────────────
+// ── Set-integriteit: match DB CHECK-constraint ────────────────────────
+// DB kolom pending_actions.status heeft CHECK IN (PENDING, APPROVED,
+// REJECTED, EXECUTED, FAILED, ROLLED_BACK). CANCELLED bestaat NIET in
+// dit schema. Blocking-set = pending/approved/executed/failed;
+// afgesloten-set = rejected/rolled_back.
 test('BLOCKING_ACTION_STATUSES bevat exact pending/approved/executed/failed', () => {
   assert.equal(BLOCKING_ACTION_STATUSES.size, 4);
   for (const s of ['pending', 'approved', 'executed', 'failed']) {
     assert.equal(BLOCKING_ACTION_STATUSES.has(s), true, `blocking set moet ${s} bevatten`);
   }
-  for (const s of ['rejected', 'cancelled']) {
+  for (const s of ['rejected', 'rolled_back']) {
     assert.equal(BLOCKING_ACTION_STATUSES.has(s), false, `blocking set mag ${s} NIET bevatten`);
   }
 });
@@ -113,10 +121,19 @@ test('case-mix: UPPERCASE APPROVED + REJECTED -> BLOKKEERT (approved wint)', () 
   ]), true);
 });
 
-test('case-mix: UPPERCASE CANCELLED + FAILED -> BLOKKEERT (failed wint)', () => {
+test('case-mix: UPPERCASE ROLLED_BACK + FAILED -> BLOKKEERT (failed wint)', () => {
   assert.equal(hasOpenBlockingAction([
-    { status: 'CANCELLED' }, { status: 'FAILED' },
+    { status: 'ROLLED_BACK' }, { status: 'FAILED' },
   ]), true);
+});
+
+// ROLLED_BACK is expliciet niet-blokkerend (afgesloten toestand).
+test('(case-e) UPPERCASE ROLLED_BACK blokkeert NIET (DB-shape)', () => {
+  assert.equal(hasOpenBlockingAction([{ status: 'ROLLED_BACK' }]), false);
+});
+
+test('(case-f) lowercase rolled_back blokkeert NIET (legacy/UI-shape)', () => {
+  assert.equal(hasOpenBlockingAction([{ status: 'rolled_back' }]), false);
 });
 
 // ── loadOpenActionsByCustomer: batch-query + case-insensitive filter ──
@@ -129,7 +146,7 @@ test('loadOpenActionsByCustomer: DB UPPERCASE fixture, filter case-insensitief',
     { customer_id: 'A', status: 'PENDING',   action_type: 'MANUAL_ESCALATION' },
     { customer_id: 'B', status: 'EXECUTED',  action_type: 'TL_INVOICE_UPDATE_DUE' },
     { customer_id: 'C', status: 'REJECTED',  action_type: 'MANUAL_PROPOSE_ARRANGEMENT' }, // eruit
-    { customer_id: 'D', status: 'CANCELLED', action_type: 'TL_SUBSCRIPTION_PAUSE' },      // eruit
+    { customer_id: 'D', status: 'ROLLED_BACK', action_type: 'TL_SUBSCRIPTION_PAUSE' },    // eruit (afgesloten)
     { customer_id: 'A', status: 'APPROVED',  action_type: 'TL_INVOICE_SPLIT' },
     { customer_id: 'E', status: 'FAILED',    action_type: 'TL_INVOICE_WRITEOFF' },
   ];
@@ -154,7 +171,7 @@ test('loadOpenActionsByCustomer: DB UPPERCASE fixture, filter case-insensitief',
   assert.equal(map.get('A')?.length, 2, 'klant A heeft PENDING + APPROVED');
   assert.equal(map.get('B')?.length, 1, 'klant B heeft EXECUTED');
   assert.equal(map.has('C'), false, 'klant C had alleen REJECTED -> geen entry');
-  assert.equal(map.has('D'), false, 'klant D had alleen CANCELLED -> geen entry');
+  assert.equal(map.has('D'), false, 'klant D had alleen ROLLED_BACK -> geen entry');
   assert.equal(map.get('E')?.length, 1, 'klant E heeft FAILED');
   assert.equal(map.get('A')[0].action_type, 'MANUAL_ESCALATION');
   // Originele DB-status blijft bewaard (niet gemuteerd naar lowercase).

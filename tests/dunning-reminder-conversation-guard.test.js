@@ -9,7 +9,7 @@
 //   (b) 2 runs op VERSCHILLENDE conversaties -> beide zijn winnaar.
 //   (c) klant met open pending_action (status='pending')  -> guard blokkeert.
 //   (d) klant met afgehandelde pending_action (executed)  -> guard blokkeert.
-//   (e) klant met alleen rejected/cancelled -> guard laat door.
+//   (e) klant met alleen rejected/rolled_back -> guard laat door.
 //   (f) klant zonder acties + solo-run -> guard + dedup allebei doorloop.
 //
 // De handler-integratie (die dedup + guard aanroept) is code-inspectie
@@ -105,14 +105,17 @@ test('(e) alleen rejected action -> laat door (geen bezig-signaal)', () => {
   assert.equal(hasOpenBlockingAction([{ status: 'rejected' }]), false);
 });
 
-test('(e-cancelled) alleen cancelled action -> laat door', () => {
-  assert.equal(hasOpenBlockingAction([{ status: 'cancelled' }]), false);
+test('(e-rolled_back) alleen rolled_back action -> laat door', () => {
+  // ROLLED_BACK is een afgesloten toestand (uitvoering teruggedraaid):
+  // dunning mag gewoon doorlopen. CANCELLED bestaat niet in het schema
+  // (DB CHECK-constraint: PENDING/APPROVED/REJECTED/EXECUTED/FAILED/ROLLED_BACK).
+  assert.equal(hasOpenBlockingAction([{ status: 'rolled_back' }]), false);
 });
 
-test('(e-mixed-safe) mix rejected+cancelled -> laat door', () => {
+test('(e-mixed-safe) mix rejected+rolled_back -> laat door', () => {
   assert.equal(hasOpenBlockingAction([
     { status: 'rejected' },
-    { status: 'cancelled' },
+    { status: 'rolled_back' },
   ]), false);
 });
 

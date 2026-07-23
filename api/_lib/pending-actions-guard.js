@@ -4,14 +4,21 @@
 // dunning-engine. Bepaalt of een klant een openstaande handmatige actie
 // heeft die de bot moet doen zwijgen.
 //
+// DB CHECK-constraint op pending_actions.status:
+//   PENDING, APPROVED, REJECTED, EXECUTED, FAILED, ROLLED_BACK
+// (CANCELLED bestaat NIET in dit schema — eerdere versies hadden 'em
+// abusievelijk in de blocking-set staan; dat blokkeerde in de praktijk
+// niks, maar was misleidend.)
+//
 // Statussen die BLOKKEREN — mens is met de zaak bezig, bot moet niks doen:
-//   - pending   : wacht op approve/reject
-//   - approved  : goedgekeurd, wacht op executor (D2)
-//   - executed  : uitgevoerd (bot-actie zou dubbelop zijn)
-//   - failed    : executor viel om, mens moet ingrijpen
-// Statussen die DOORLATEN (geen open actie):
-//   - rejected  : expliciet afgekeurd
-//   - cancelled : ingetrokken
+//   - pending      : wacht op approve/reject
+//   - approved     : goedgekeurd, wacht op executor (D2)
+//   - executed     : uitgevoerd (bot-actie zou dubbelop zijn)
+//   - failed       : executor viel om, mens moet ingrijpen
+// Statussen die DOORLATEN (afgesloten toestand — geen open actie):
+//   - rejected     : expliciet afgekeurd
+//   - rolled_back  : uitvoering teruggedraaid; zaak is afgesloten en
+//                    dunning mag gewoon doorlopen
 //
 // Extracted uit cron-dunning-conversation-reminders.js (#887) zodat de
 // dunning-engine dezelfde regels hanteert. Één plek, één set constanten,
