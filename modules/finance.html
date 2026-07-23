@@ -2338,6 +2338,63 @@
     /* Sorteer-pijltjes in Probleemklanten-tabel. */
     #dunProbTable th[data-sort-key]:hover { background: rgba(100,116,139,0.08); }
     .fin-sort-arrow { font-size: 10px; margin-left: 3px; }
+
+    /* ================================================================
+       Wanbetalers → Instellingen → "Wanneer starten & regels"
+       (workflows-editor, #dunningSubWorkflows). PR A — mobiel-basis.
+
+       De vijf grids in deze view stonden voorheen als inline
+       style="grid-template-columns:…". Inline slaat @media in de
+       cascade, dus mobiel stapelen kon niet zonder eerst de grids
+       naar klassen te verhuizen. Waarden hieronder zijn 1-op-1
+       gelijk aan de inline-versies zodat desktop identiek blijft.
+       ================================================================ */
+    .dunwf-outer     { display:grid; grid-template-columns:320px 1fr; gap:18px; align-items:start; }
+    .dunwf-header    { display:grid; grid-template-columns:1fr auto auto; gap:12px; align-items:center; margin-bottom:14px; }
+    .dunwf-meta      { display:grid; grid-template-columns:1fr 120px; gap:12px; margin-bottom:14px; }
+    .dunwf-triggers  { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+    .dunwf-step-cfg  { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+
+    @media (max-width: 720px) {
+      /* Alle grids naar één kolom. Buiten-grid: lijst boven, editor
+         eronder. De master-detail-toggle (óf lijst óf editor) volgt
+         in PR B — voor nu levert stapelen al de belangrijkste winst. */
+      .dunwf-outer,
+      .dunwf-meta,
+      .dunwf-triggers,
+      .dunwf-step-cfg { grid-template-columns:1fr; }
+
+      /* Header (naam + Actief + Verwijder) blijft functioneel maar
+         wraps op mobiel — auto-cols worden 1fr zodat de knop niet
+         wegvalt. */
+      .dunwf-header   { grid-template-columns:1fr; }
+
+      /* iOS zoom-fix — alleen scoped binnen deze view; de globale
+         .fin-input (r92) blijft ongewijzigd zodat andere views hun
+         layout niet zien verschuiven. */
+      #dunningSubWorkflows .fin-input { font-size:16px; }
+
+      /* Touch-targets — de omhoog/omlaag/verwijder-knopjes in
+         #dunWfSteps zijn standaard klein (.sr-ibtn). Op mobiel
+         verplicht 44px zodat 'ie met een vinger raakbaar is. */
+      #dunWfSteps .sr-ibtn {
+        min-width:44px; min-height:44px;
+        display:inline-flex; align-items:center; justify-content:center;
+      }
+
+      /* Sticky opslag-strip: bij 5+ stappen ligt de Opslaan-knop
+         ver onder de vouw. Sticky-bottom houdt 'em altijd in beeld.
+         Achtergrondkleur + bovenrand voorkomen dat achterliggende
+         stap-rijen erdoor schijnen bij scroll. */
+      #dunWfForm .dunwf-actions {
+        position:sticky; bottom:0;
+        margin:0 -18px -18px;  /* over de card-padding heen laten lopen */
+        padding:10px 18px;
+        background:var(--ds-surface, #ffffff);
+        border-top:1px solid var(--ds-border, #dfe8ec);
+        z-index:1;
+      }
+    }
   </style>
 
   <!-- ================================================================
@@ -4518,7 +4575,7 @@
             <span id="dunCooldownFeedback" style="font-size:11px;color:var(--text-faint)"></span>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:320px 1fr;gap:18px;align-items:start">
+        <div class="dunwf-outer">
           <!-- Links: workflows-lijst -->
           <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #e5e7eb);border-radius:10px;padding:14px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -4536,14 +4593,14 @@
             </div>
             <div id="dunWfForm" hidden>
               <!-- Header: naam + toggles + verwijder -->
-              <div style="display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;margin-bottom:14px">
+              <div class="dunwf-header">
                 <input id="dunWfName" type="text" class="fin-input" maxlength="200" placeholder="Workflow-naam"/>
                 <label style="display:flex;align-items:center;gap:6px;font-size:12px">
                   <input id="dunWfActive" type="checkbox" style="width:auto"/> Actief
                 </label>
                 <button class="sr-abtn danger" id="dunWfDeleteBtn" type="button" style="font-size:11px;padding:4px 10px" hidden><i class="ti ti-trash"></i> Verwijder</button>
               </div>
-              <div style="display:grid;grid-template-columns:1fr 120px;gap:12px;margin-bottom:14px">
+              <div class="dunwf-meta">
                 <textarea id="dunWfDescription" class="fin-input" rows="2" placeholder="Beschrijving (optioneel)" style="resize:vertical"></textarea>
                 <label style="font-size:11px;color:var(--text-dim)">
                   Priority
@@ -4554,7 +4611,7 @@
               <!-- Trigger-condities -->
               <div style="background:rgba(255,255,255,0.02);border:1px dashed var(--border-subtle, #e5e7eb);border-radius:8px;padding:12px;margin-bottom:14px">
                 <div style="font-size:12px;font-weight:600;margin-bottom:8px">Trigger-condities</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+                <div class="dunwf-triggers">
                   <label style="font-size:11px;color:var(--text-dim)">
                     Min dagen overdue
                     <input id="dunWfTrgMinDays" type="number" class="fin-input" min="0" placeholder="leeg = geen" value="14"/>
@@ -4595,7 +4652,7 @@
               </div>
               <!-- Error + actions -->
               <div id="dunWfError" style="display:none;margin-bottom:10px;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:12px"></div>
-              <div style="display:flex;gap:8px;justify-content:flex-end">
+              <div class="dunwf-actions" style="display:flex;gap:8px;justify-content:flex-end">
                 <button class="sr-abtn" id="dunWfCancel" type="button">Annuleer</button>
                 <button class="sr-abtn primary" id="dunWfSave" type="button">Opslaan</button>
               </div>
@@ -8499,7 +8556,7 @@
             <button class="sr-ibtn" type="button" data-step-del="${idx}"  title="Verwijder"><i class="ti ti-trash"></i></button>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">${cfgHtml}</div>
+        <div class="dunwf-step-cfg">${cfgHtml}</div>
       </div>`;
     }).join('');
     // Bind step-type change → re-render zodat cfg-UI mee verandert (huidige DOM-waarden collecten).
