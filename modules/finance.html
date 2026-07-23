@@ -2435,8 +2435,11 @@
       cursor:pointer; font-weight:500; padding:9px 14px; border-radius:9px;
       font-size:14px;
     }
-    .wbx .wbx-nav button:hover { background:#EAEDF1; color:var(--wbx-ink); }
-    .wbx .wbx-nav button.active { background:var(--wbx-ink); color:#fff; }
+    .wbx .wbx-nav button:hover {
+      background:var(--ds-surface-2, #EAEDF1);
+      color:var(--ds-text, #06181f);
+    }
+    .wbx .wbx-nav button.active { background:#0e131c; color:#fff; }
     .wbx .wbx-nav button .wbx-badge {
       background:#DC5B3E; color:#fff;
       font:600 11px/1 var(--wbx-mono);
@@ -2504,13 +2507,20 @@
     /* Sec-head + segmented control */
     .wbx .wbx-sec-head { display:flex; align-items:center; justify-content:space-between; margin:20px 2px 11px; }
     .wbx .wbx-sec-head h2 { margin:0; font-size:15px; font-weight:600; }
-    .wbx .wbx-seg { display:inline-flex; background:#E9EBEF; border-radius:10px; padding:3px; }
+    .wbx .wbx-seg {
+      display:inline-flex;
+      background:var(--ds-surface-2, #f9fbfc);
+      border:1px solid var(--ds-border, #dfe8ec);
+      border-radius:10px; padding:3px;
+    }
     .wbx .wbx-seg button {
-      border:0; background:transparent; font-weight:500; color:var(--wbx-muted);
+      border:0; background:transparent; font-weight:500;
+      color:var(--ds-text-muted, #48585f);
       padding:6px 13px; border-radius:8px; cursor:pointer; font-size:13.5px;
     }
     .wbx .wbx-seg button.active {
-      background:#fff; color:var(--wbx-ink);
+      background:var(--ds-surface, #ffffff);
+      color:var(--ds-text, #06181f);
       box-shadow:0 1px 2px rgba(0,0,0,.06);
     }
 
@@ -2641,12 +2651,14 @@
     /* Buttons */
     .wbx .wbx-btn,
     .wbx-sheet .wbx-btn, .wbx-mscrim .wbx-btn {
-      border:1px solid var(--wbx-border-strong); background:#fff; color:var(--wbx-ink);
+      border:1px solid var(--ds-border, #dfe8ec);
+      background:var(--ds-surface, #ffffff);
+      color:var(--ds-text, #06181f);
       font-weight:600; font-size:13px; padding:7px 13px; border-radius:9px;
       cursor:pointer; white-space:nowrap; font-family:inherit;
     }
     .wbx .wbx-btn:hover,
-    .wbx-sheet .wbx-btn:hover, .wbx-mscrim .wbx-btn:hover { border-color:var(--wbx-muted); }
+    .wbx-sheet .wbx-btn:hover, .wbx-mscrim .wbx-btn:hover { border-color:var(--ds-border-strong, #c1d0d7); }
     .wbx .wbx-btn.wbx-primary,
     .wbx-sheet .wbx-btn.wbx-primary, .wbx-mscrim .wbx-btn.wbx-primary {
       background:var(--wbx-accent); border-color:var(--wbx-accent); color:#fff;
@@ -2662,12 +2674,14 @@
 
     /* Empty state */
     .wbx .wbx-empty {
-      text-align:center; padding:54px 20px; color:var(--wbx-muted);
-      background:#fff; border:1px solid var(--wbx-border);
+      text-align:center; padding:54px 20px;
+      color:var(--ds-text-muted, #48585f);
+      background:var(--ds-surface, #ffffff);
+      border:1px solid var(--ds-border, #dfe8ec);
       border-radius:var(--wbx-radius);
     }
     .wbx .wbx-empty .wbx-big { font-size:38px; margin-bottom:6px; }
-    .wbx .wbx-empty h3 { margin:0 0 4px; color:var(--wbx-ink); font-weight:600; }
+    .wbx .wbx-empty h3 { margin:0 0 4px; color:var(--ds-text, #06181f); font-weight:600; }
 
     /* ======================================================
        Body-level overlays: case-sheet + scrim + modal + toast
@@ -2700,11 +2714,16 @@
     }
     .wbx-sheet .wbx-sheet-top .wbx-row { display:flex; align-items:center; gap:12px; }
     .wbx-sheet .wbx-icon-btn {
-      border:1px solid var(--wbx-border); background:#fff;
+      border:1px solid var(--ds-border, #dfe8ec);
+      background:var(--ds-surface, #ffffff);
       width:34px; height:34px; border-radius:9px;
-      cursor:pointer; font-size:15px; color:var(--wbx-muted);
+      cursor:pointer; font-size:15px;
+      color:var(--ds-text-muted, #48585f);
     }
-    .wbx-sheet .wbx-icon-btn:hover { border-color:var(--wbx-border-strong); color:var(--wbx-ink); }
+    .wbx-sheet .wbx-icon-btn:hover {
+      border-color:var(--ds-border-strong, #c1d0d7);
+      color:var(--ds-text, #06181f);
+    }
     .wbx-sheet h2 { margin:0; font-size:19px; letter-spacing:-.01em; font-weight:600; }
     .wbx-sheet .wbx-sub { color:var(--wbx-faint); font:500 12px/1.4 var(--wbx-mono); }
 
@@ -3006,18 +3025,20 @@
       display:flex; gap:9px; flex-wrap:wrap; margin-bottom:16px;
     }
     .wbx .wbx-strip button {
-      border:1px solid var(--wbx-border); background:#fff;
+      border:1px solid var(--ds-border, #dfe8ec);
+      background:var(--ds-surface, #ffffff);
+      color:var(--ds-text, #06181f);
       border-radius:12px; padding:11px 15px; cursor:pointer;
       text-align:left; min-width:118px; font-family:inherit;
     }
-    .wbx .wbx-strip button:hover { border-color:var(--wbx-border-strong); }
+    .wbx .wbx-strip button:hover { border-color:var(--ds-border-strong, #c1d0d7); }
     .wbx .wbx-strip button.active {
-      border-color:var(--wbx-ink);
-      box-shadow:0 0 0 1px var(--wbx-ink);
+      border-color:var(--ds-brand, #0a5178);
+      box-shadow:0 0 0 1px var(--ds-brand, #0a5178);
     }
     .wbx .wbx-strip .wbx-strip-n { font:600 20px/1 var(--wbx-mono); display:block; }
     .wbx .wbx-strip .wbx-strip-l {
-      display:block; font-size:12px; color:var(--wbx-muted);
+      display:block; font-size:12px; color:var(--ds-text-muted, #48585f);
       margin-top:5px; font-weight:500;
     }
     .wbx .wbx-strip .wbx-strip-dot {
@@ -3056,23 +3077,26 @@
 
     .wbx .wbx-table {
       width:100%; border-collapse:separate; border-spacing:0;
-      background:#fff; border:1px solid var(--wbx-border);
+      background:var(--ds-surface, #ffffff);
+      color:var(--ds-text, #06181f);
+      border:1px solid var(--ds-border, #dfe8ec);
       border-radius:var(--wbx-radius); overflow:hidden;
     }
     .wbx .wbx-table thead th {
       text-align:left; font-size:11px; letter-spacing:.05em;
-      text-transform:uppercase; color:var(--wbx-faint); font-weight:600;
-      padding:12px 16px; background:#FAFBFC;
-      border-bottom:1px solid var(--wbx-border);
+      text-transform:uppercase; color:var(--ds-text-faint, #7a8b92); font-weight:600;
+      padding:12px 16px;
+      background:var(--ds-surface-2, #f9fbfc);
+      border-bottom:1px solid var(--ds-border, #dfe8ec);
     }
     .wbx .wbx-table th.wbx-r, .wbx .wbx-table td.wbx-r { text-align:right; }
     .wbx .wbx-table tbody td {
-      padding:13px 16px; border-bottom:1px solid var(--wbx-border);
+      padding:13px 16px; border-bottom:1px solid var(--ds-border, #dfe8ec);
       font-size:14px;
     }
     .wbx .wbx-table tbody tr:last-child td { border-bottom:0; }
     .wbx .wbx-table tbody tr { cursor:pointer; }
-    .wbx .wbx-table tbody tr:hover td { background:#FAFBFC; }
+    .wbx .wbx-table tbody tr:hover td { background:var(--ds-surface-2, #f9fbfc); }
     .wbx .wbx-table td.wbx-mono { font-family:var(--wbx-mono); font-weight:600; }
     .wbx .wbx-sub-inv {
       color:var(--wbx-faint);
@@ -3111,7 +3135,9 @@
        ====================================================== */
     .wbx .wbx-inc-filters { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:13px; }
     .wbx .wbx-inc-filter {
-      border:1px solid var(--wbx-border-strong); background:#fff; color:var(--wbx-ink);
+      border:1px solid var(--ds-border, #dfe8ec);
+      background:var(--ds-surface, #ffffff);
+      color:var(--ds-text, #06181f);
       font:600 12.5px/1 inherit; padding:6px 11px; border-radius:9px;
       cursor:pointer; white-space:nowrap; display:inline-flex; align-items:center; gap:6px;
     }
@@ -3133,12 +3159,15 @@
     }
     .wbx .wbx-inc-form select, .wbx .wbx-inc-form input, .wbx .wbx-inc-form textarea {
       width:100%; box-sizing:border-box; margin-top:4px; padding:8px 10px;
-      border:1px solid var(--wbx-border-strong); border-radius:8px; background:#fff;
-      color:var(--wbx-ink); font:inherit;
+      border:1px solid var(--ds-border, #dfe8ec); border-radius:8px;
+      background:var(--ds-surface, #ffffff);
+      color:var(--ds-text, #06181f); font:inherit;
     }
     .wbx .wbx-inc-form textarea { min-height:80px; resize:vertical; }
     .wbx .wbx-inc-kv {
-      background:#FAFBFC; border:1px solid var(--wbx-border); border-radius:10px;
+      background:var(--ds-surface-2, #f9fbfc);
+      color:var(--ds-text, #06181f);
+      border:1px solid var(--ds-border, #dfe8ec); border-radius:10px;
       padding:12px 14px; margin-bottom:12px; font-size:13px; line-height:1.5;
     }
     .wbx .wbx-inc-kv strong { color:var(--wbx-ink); }
@@ -3150,19 +3179,23 @@
       color:var(--wbx-faint); font-weight:600; margin:14px 0 6px;
     }
     .wbx .wbx-inc-list {
-      background:#fff; border:1px solid var(--wbx-border); border-radius:10px;
+      background:var(--ds-surface, #ffffff);
+      color:var(--ds-text, #06181f);
+      border:1px solid var(--ds-border, #dfe8ec); border-radius:10px;
       overflow:hidden; margin-bottom:10px;
     }
     .wbx .wbx-inc-list-row {
       display:flex; justify-content:space-between; gap:10px; align-items:center;
-      padding:9px 14px; border-bottom:1px solid var(--wbx-border); font-size:13px;
+      padding:9px 14px; border-bottom:1px solid var(--ds-border, #dfe8ec); font-size:13px;
     }
     .wbx .wbx-inc-list-row:last-child { border-bottom:0; }
     .wbx .wbx-inc-list-empty {
-      padding:14px; text-align:center; color:var(--wbx-muted); font-size:12.5px;
+      padding:14px; text-align:center; color:var(--ds-text-muted, #48585f); font-size:12.5px;
     }
     .wbx .wbx-inc-auto {
-      background:#fff; border:1px solid var(--wbx-border);
+      background:var(--ds-surface, #ffffff);
+      color:var(--ds-text, #06181f);
+      border:1px solid var(--ds-border, #dfe8ec);
       border-radius:var(--wbx-radius); padding:16px; margin-top:6px;
     }
     .wbx .wbx-inc-auto > summary {
@@ -3186,15 +3219,18 @@
     }
     .wbx .wbx-inc-preview-tbl {
       width:100%; border-collapse:separate; border-spacing:0;
-      background:#fff; border:1px solid var(--wbx-border); border-radius:10px; overflow:hidden;
+      background:var(--ds-surface, #ffffff);
+      color:var(--ds-text, #06181f);
+      border:1px solid var(--ds-border, #dfe8ec); border-radius:10px; overflow:hidden;
     }
     .wbx .wbx-inc-preview-tbl th {
       text-align:left; font-size:11px; letter-spacing:.05em; text-transform:uppercase;
-      color:var(--wbx-faint); font-weight:600; padding:10px 12px; background:#FAFBFC;
-      border-bottom:1px solid var(--wbx-border);
+      color:var(--ds-text-faint, #7a8b92); font-weight:600; padding:10px 12px;
+      background:var(--ds-surface-2, #f9fbfc);
+      border-bottom:1px solid var(--ds-border, #dfe8ec);
     }
     .wbx .wbx-inc-preview-tbl td {
-      padding:10px 12px; border-bottom:1px solid var(--wbx-border); font-size:13px;
+      padding:10px 12px; border-bottom:1px solid var(--ds-border, #dfe8ec); font-size:13px;
     }
     .wbx .wbx-inc-preview-tbl tr:last-child td { border-bottom:0; }
     .wbx .wbx-inc-preview-tbl td.wbx-r { text-align:right; }
@@ -3221,7 +3257,10 @@
       border:none; background:transparent; color:var(--wbx-muted);
       cursor:pointer; font-size:18px; padding:4px 8px; border-radius:6px;
     }
-    .wbx .wbx-inc-close:hover { background:#FAFBFC; color:var(--wbx-ink); }
+    .wbx .wbx-inc-close:hover {
+      background:var(--ds-surface-2, #f9fbfc);
+      color:var(--ds-text, #06181f);
+    }
 
     /* ======================================================
        Bulk multi-select — Facturen (Per klant) + Opruimen.
@@ -3235,7 +3274,7 @@
        zodat de scope-check bevat: adjacent class-combinator .wbx.wbx-bulk-bar. */
     .wbx.wbx-bulk-bar {
       position:fixed; left:50%; bottom:20px; transform:translateX(-50%);
-      background:var(--wbx-ink); color:#fff;
+      background:#0e131c; color:#fff;
       border-radius:12px; box-shadow:0 12px 40px rgba(14,19,28,.28);
       padding:10px 14px; z-index:1150;
       display:flex; align-items:center; gap:16px; flex-wrap:wrap;
@@ -3246,7 +3285,7 @@
     .wbx.wbx-bulk-bar .wbx-bulk-info strong { color:#fff; }
     .wbx.wbx-bulk-bar .wbx-bulk-actions { display:flex; gap:6px; flex-wrap:wrap; }
     .wbx.wbx-bulk-bar .wbx-btn {
-      background:#fff; color:var(--wbx-ink); border:1px solid var(--wbx-border-strong);
+      background:#ffffff; color:#06181f; border:1px solid #c1d0d7;
     }
     .wbx.wbx-bulk-bar .wbx-btn:hover { border-color:var(--wbx-accent); color:var(--wbx-accent-ink); }
     .wbx.wbx-bulk-bar .wbx-btn.wbx-sm { padding:6px 10px; font-size:12.5px; }
@@ -3275,10 +3314,13 @@
     .wbx.wbx-bulk-scrim .wbx-bulk-modal-body { padding:16px 18px; overflow-y:auto; flex:1; font-size:13.5px; }
     .wbx.wbx-bulk-scrim .wbx-bulk-modal-foot {
       display:flex; justify-content:flex-end; gap:8px;
-      padding:12px 18px; border-top:1px solid var(--wbx-border); background:#FAFBFC;
+      padding:12px 18px; border-top:1px solid var(--ds-border, #dfe8ec);
+      background:var(--ds-surface-2, #f9fbfc);
     }
     .wbx.wbx-bulk-scrim .wbx-bulk-note {
-      background:#FAFBFC; border:1px solid var(--wbx-border); border-radius:8px;
+      background:var(--ds-surface-2, #f9fbfc);
+      color:var(--ds-text, #06181f);
+      border:1px solid var(--ds-border, #dfe8ec); border-radius:8px;
       padding:10px 12px; font-size:13px; line-height:1.5; margin-bottom:12px;
     }
     .wbx.wbx-bulk-scrim .wbx-bulk-warn {
@@ -3543,20 +3585,25 @@
     }
 
     :where(.wbx, .wbx-sheet) .wbx-call-remind {
-      background:#FAFBFC; border:1px solid var(--wbx-border); border-radius:8px;
+      background:var(--ds-surface-2, #f9fbfc);
+      color:var(--ds-text, #06181f);
+      border:1px solid var(--ds-border, #dfe8ec); border-radius:8px;
       padding:8px 12px; font-size:12.5px; margin-bottom:10px;
     }
 
     :where(.wbx, .wbx-sheet) .wbx-call-log { display:flex; flex-direction:column; gap:8px; }
     :where(.wbx, .wbx-sheet) .wbx-call-log-row {
-      background:#FAFBFC; border:1px solid var(--wbx-border); border-radius:8px;
+      background:var(--ds-surface-2, #f9fbfc);
+      color:var(--ds-text, #06181f);
+      border:1px solid var(--ds-border, #dfe8ec); border-radius:8px;
       padding:8px 10px; display:flex; flex-wrap:wrap; align-items:center; gap:8px;
       font-size:12.5px;
     }
-    :where(.wbx, .wbx-sheet) .wbx-call-log-time { color:var(--wbx-faint); }
+    :where(.wbx, .wbx-sheet) .wbx-call-log-time { color:var(--ds-text-faint, #7a8b92); }
     :where(.wbx, .wbx-sheet) .wbx-call-log-note {
-      flex-basis:100%; font-size:12px; color:var(--wbx-muted);
-      background:#fff; border:1px solid var(--wbx-border); border-radius:6px;
+      flex-basis:100%; font-size:12px; color:var(--ds-text-muted, #48585f);
+      background:var(--ds-surface, #ffffff);
+      border:1px solid var(--ds-border, #dfe8ec); border-radius:6px;
       padding:6px 8px; margin-top:4px;
     }
 
@@ -3583,13 +3630,16 @@
     .wbx.wbx-call-outcome-scrim .wbx-call-outcome-body { padding:16px 18px; overflow-y:auto; flex:1; }
     .wbx.wbx-call-outcome-scrim .wbx-call-outcome-foot {
       display:flex; justify-content:flex-end; gap:8px;
-      padding:12px 18px; border-top:1px solid var(--wbx-border); background:#FAFBFC;
+      padding:12px 18px; border-top:1px solid var(--ds-border, #dfe8ec);
+      background:var(--ds-surface-2, #f9fbfc);
     }
     .wbx.wbx-call-outcome-scrim .wbx-call-outcome-grid {
       display:grid; grid-template-columns:1fr 1fr; gap:6px;
     }
     .wbx.wbx-call-outcome-scrim .wbx-call-outcome-opt {
-      background:#fff; border:1px solid var(--wbx-border-strong); border-radius:8px;
+      background:var(--ds-surface, #ffffff);
+      color:var(--ds-text, #06181f);
+      border:1px solid var(--ds-border, #dfe8ec); border-radius:8px;
       padding:10px; cursor:pointer; text-align:left; font-family:inherit;
     }
     .wbx.wbx-call-outcome-scrim .wbx-call-outcome-opt:hover {
@@ -3609,12 +3659,14 @@
       gap:14px;
     }
     .wbx .wbx-set-card {
-      background:#fff; border:1px solid var(--wbx-border);
+      background:var(--ds-surface, #ffffff);
+      color:var(--ds-text, #06181f);
+      border:1px solid var(--ds-border, #dfe8ec);
       border-radius:var(--wbx-radius); padding:18px;
       cursor:pointer; transition:border-color .12s;
       text-align:left; font-family:inherit;
     }
-    .wbx .wbx-set-card:hover { border-color:var(--wbx-border-strong); }
+    .wbx .wbx-set-card:hover { border-color:var(--ds-border-strong, #c1d0d7); }
     .wbx .wbx-set-card .wbx-set-ico {
       width:38px; height:38px; border-radius:10px;
       background:var(--wbx-accent-soft); color:var(--wbx-accent-ink);
@@ -3646,18 +3698,22 @@
       gap:14px;
     }
     .wbx .wbx-cleanup-card {
-      background:#fff; border:1px solid var(--wbx-border);
+      background:var(--ds-surface, #ffffff);
+      color:var(--ds-text, #06181f);
+      border:1px solid var(--ds-border, #dfe8ec);
       border-radius:var(--wbx-radius); padding:20px;
     }
     .wbx .wbx-cleanup-card h2 {
-      margin:0 0 6px; font-size:17px; color:var(--wbx-ink); font-weight:600;
+      margin:0 0 6px; font-size:17px;
+      color:var(--ds-text, #06181f); font-weight:600;
     }
     .wbx .wbx-cleanup-card p {
-      margin:0 0 14px; color:var(--wbx-muted); font-size:13.5px; line-height:1.55;
+      margin:0 0 14px;
+      color:var(--ds-text-muted, #48585f); font-size:13.5px; line-height:1.55;
     }
     .wbx .wbx-cleanup-card ul {
       margin:0 0 14px 20px; padding:0;
-      color:var(--wbx-muted); font-size:13px; line-height:1.75;
+      color:var(--ds-text-muted, #48585f); font-size:13px; line-height:1.75;
     }
     /* Mobiel (≤720px): landingskaarten compacter zodat de klantenlijst
        eerder in beeld komt. Alle tekst + knop blijven zichtbaar; alleen
@@ -19310,7 +19366,7 @@
             </div>
           </div>
           <div id="opruimRunsBody" style="margin:12px"></div>
-          <div style="margin:14px 12px 4px;font-weight:700;font-size:12.5px;color:var(--wbx-text,#0f172a)">Recent verzonden</div>
+          <div style="margin:14px 12px 4px;font-weight:700;font-size:12.5px;color:var(--ds-text,#06181f)">Recent verzonden</div>
           <div id="opruimRunsRecent" style="margin:0 12px 12px"></div>
         </div>
       </div>
@@ -21738,11 +21794,11 @@
             ${CALL_OUTCOMES.map((o) => `<button class="wbx-call-outcome-opt" type="button" data-outcome="${esc(o.key)}"><span class="wbx-pill" style="background:${o.tint}22;color:${o.tint}">${esc(o.label)}</span></button>`).join('')}
           </div>
           <label id="wbxCallOutcomeCallbackWrap" style="display:none;margin-top:14px;font-size:12px;color:var(--wbx-muted)">Terugbellen op <span style="color:var(--wbx-s-inc-tx)">*</span>
-            <input id="wbxCallOutcomeCallbackAt" type="datetime-local" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:#fff;color:var(--wbx-ink);font:inherit"/>
+            <input id="wbxCallOutcomeCallbackAt" type="datetime-local" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit"/>
             <span style="display:block;font-size:11px;color:var(--wbx-muted);margin-top:3px">Verplicht bij Teruggebeld worden — verschijnt automatisch als taak in Open Acties op de gekozen datum.</span>
           </label>
           <label style="display:block;margin-top:14px;font-size:12px;color:var(--wbx-muted)">Notitie (optioneel)
-            <textarea id="wbxCallOutcomeNote" rows="3" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:#fff;color:var(--wbx-ink);font:inherit;min-height:70px;resize:vertical"></textarea>
+            <textarea id="wbxCallOutcomeNote" rows="3" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit;min-height:70px;resize:vertical"></textarea>
           </label>
           <div id="wbxCallOutcomeErr" style="display:none;margin-top:8px;color:var(--wbx-s-inc-tx);font-size:12.5px"></div>
         </div>
@@ -21906,18 +21962,18 @@
       const factuurCell = showFactuur
         ? `<label style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:180px">
             <span style="font-size:11px;color:var(--wbx-muted);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Factuur (optioneel)</span>
-            <select data-toezegging-inv="${idx}" style="padding:7px 9px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:#fff;color:var(--wbx-ink);font:inherit;font-size:12.5px">${invoiceOptions(part.invoice_id || '')}</select>
+            <select data-toezegging-inv="${idx}" style="padding:7px 9px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit;font-size:12.5px">${invoiceOptions(part.invoice_id || '')}</select>
           </label>`
         : '';
-      return `<div class="wbx-toezegging-part" data-toezegging-part="${idx}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;padding:10px;border:1px solid var(--wbx-border);border-radius:8px;background:#fff">
+      return `<div class="wbx-toezegging-part" data-toezegging-part="${idx}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;padding:10px;border:1px solid var(--ds-border,#dfe8ec);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f)">
         <label style="display:flex;flex-direction:column;gap:3px">
           <span style="font-size:11px;color:var(--wbx-muted);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Wanneer *</span>
-          <input type="date" required data-toezegging-date="${idx}" value="${esc(part.due_date || '')}" style="padding:7px 9px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:#fff;color:var(--wbx-ink);font:inherit;font-size:12.5px"/>
+          <input type="date" required data-toezegging-date="${idx}" value="${esc(part.due_date || '')}" style="padding:7px 9px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit;font-size:12.5px"/>
         </label>
         ${factuurCell}
         <label style="display:flex;flex-direction:column;gap:3px;width:120px">
           <span style="font-size:11px;color:var(--wbx-muted);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Bedrag (opt.)</span>
-          <input type="number" min="0" step="0.01" data-toezegging-amt="${idx}" value="${esc(part.amount_euros || '')}" placeholder="€" style="padding:7px 9px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:#fff;color:var(--wbx-ink);font:inherit;font-size:12.5px;font-family:var(--wbx-mono, ui-monospace, monospace)"/>
+          <input type="number" min="0" step="0.01" data-toezegging-amt="${idx}" value="${esc(part.amount_euros || '')}" placeholder="€" style="padding:7px 9px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit;font-size:12.5px;font-family:var(--wbx-mono, ui-monospace, monospace)"/>
         </label>
         ${rmBtn}
       </div>`;
@@ -21938,7 +21994,7 @@
             <div id="wbxToezeggingParts" style="display:flex;flex-direction:column;gap:8px">${partsHtml}</div>
             <button class="wbx-btn wbx-sm" type="button" data-toezegging-add style="align-self:flex-start;font-size:12px"><i class="ti ti-plus"></i> Termijn toevoegen</button>
             <label style="display:block;font-size:12px;color:var(--wbx-muted)">Notitie (optioneel)
-              <textarea id="wbxToezeggingNote" rows="2" placeholder="Bv. 'Klant belde, betaalt maandag'" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:#fff;color:var(--wbx-ink);font:inherit;min-height:52px;resize:vertical">${esc(initialNote)}</textarea>
+              <textarea id="wbxToezeggingNote" rows="2" placeholder="Bv. 'Klant belde, betaalt maandag'" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit;min-height:52px;resize:vertical">${esc(initialNote)}</textarea>
             </label>
             <div id="wbxToezeggingErr" style="display:none;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#b23434;font-size:12.5px"></div>
           </div>
@@ -22727,7 +22783,7 @@
       const items = d.candidates || [];
       if (!wrap) return;
       if (!items.length) {
-        wrap.innerHTML = '<div class="wbx-inc-list-empty" style="background:#FAFBFC;border:1px solid var(--wbx-border);border-radius:10px">Geen kandidaten met de huidige instellingen.</div>';
+        wrap.innerHTML = '<div class="wbx-inc-list-empty" style="background:var(--ds-surface-2,#f9fbfc);color:var(--ds-text-muted,#48585f);border:1px solid var(--ds-border,#dfe8ec);border-radius:10px">Geen kandidaten met de huidige instellingen.</div>';
         return;
       }
       const rows = items.map((c) => {
@@ -22993,7 +23049,7 @@
             </label>
           </div>
           <label style="display:block;font-size:12px;color:var(--wbx-muted);font-weight:500">Notities
-            <textarea id="incEditNotes" rows="4" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:#fff;color:var(--wbx-ink);font:inherit;min-height:80px;resize:vertical">${esc(dossier.notes || '')}</textarea>
+            <textarea id="incEditNotes" rows="4" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit;min-height:80px;resize:vertical">${esc(dossier.notes || '')}</textarea>
           </label>
           <div class="wbx-inc-actions">
             <button id="incSaveBtn"     class="wbx-btn wbx-primary" type="button">Opslaan</button>
@@ -23013,7 +23069,7 @@
                   <div class="wbx-mono" style="font-weight:700;color:var(--wbx-s-inc-tx)">€ ${(Number(iv.amount_total)||0).toFixed(2).replace('.',',')}</div>
                 </div>`).join('')}
             </div>
-          ` : '<div class="wbx-inc-list-empty" style="background:#FAFBFC;border:1px solid var(--wbx-border);border-radius:10px">Geen facturen</div>'}
+          ` : '<div class="wbx-inc-list-empty" style="background:var(--ds-surface-2,#f9fbfc);color:var(--ds-text-muted,#48585f);border:1px solid var(--ds-border,#dfe8ec);border-radius:10px">Geen facturen</div>'}
         </div>
 
         <div>
@@ -23039,7 +23095,7 @@
                 <div class="wbx-inc-list-row"><div><strong>${esc(a.type)}</strong></div><div style="color:var(--wbx-muted)">${esc(a.status)}</div></div>
               `).join('')}
             </div>
-          ` : '<div class="wbx-inc-list-empty" style="background:#FAFBFC;border:1px solid var(--wbx-border);border-radius:10px;margin-bottom:10px">Geen regelingen</div>'}
+          ` : '<div class="wbx-inc-list-empty" style="background:var(--ds-surface-2,#f9fbfc);color:var(--ds-text-muted,#48585f);border:1px solid var(--ds-border,#dfe8ec);border-radius:10px;margin-bottom:10px">Geen regelingen</div>'}
 
           <div class="wbx-inc-h">WhatsApp-gesprek(ken)</div>
           ${(conversations || []).length ? `
@@ -23048,7 +23104,7 @@
                 <div class="wbx-inc-list-row"><div class="wbx-mono">${esc(c.phone_number)}</div><div class="wbx-mono" style="color:var(--wbx-faint)">${esc(_incFmtDate(c.last_message_at))}</div></div>
               `).join('')}
             </div>
-          ` : '<div class="wbx-inc-list-empty" style="background:#FAFBFC;border:1px solid var(--wbx-border);border-radius:10px;margin-bottom:10px">Geen gesprekken</div>'}
+          ` : '<div class="wbx-inc-list-empty" style="background:var(--ds-surface-2,#f9fbfc);color:var(--ds-text-muted,#48585f);border:1px solid var(--ds-border,#dfe8ec);border-radius:10px;margin-bottom:10px">Geen gesprekken</div>'}
 
           <div class="wbx-inc-h">Aanmaan-historie</div>
           ${(dunning_log || []).length ? `
@@ -23057,7 +23113,7 @@
                 <div class="wbx-inc-list-row"><div>${esc(l.event_type)}</div><div class="wbx-mono" style="color:var(--wbx-faint)">${esc(_incFmtDate(l.created_at))}</div></div>
               `).join('')}
             </div>
-          ` : '<div class="wbx-inc-list-empty" style="background:#FAFBFC;border:1px solid var(--wbx-border);border-radius:10px">Geen historie</div>'}
+          ` : '<div class="wbx-inc-list-empty" style="background:var(--ds-surface-2,#f9fbfc);color:var(--ds-text-muted,#48585f);border:1px solid var(--ds-border,#dfe8ec);border-radius:10px">Geen historie</div>'}
         </div>
       </div>
     `;
