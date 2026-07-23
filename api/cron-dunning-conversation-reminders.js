@@ -66,6 +66,15 @@ import {
   isWithinOfficeHours,
   maybeCreateTotalCapTask,
 } from './joost-autonomy-evaluate.js';
+import {
+  hasOpenBlockingAction,
+  loadOpenActionsByCustomer,
+} from './_lib/pending-actions-guard.js';
+
+// Re-export voor backward-compat met tests die deze helpers vanuit deze
+// file importeerden (pre-#888 opsplitsing). Nieuwe callers importeren
+// rechtstreeks uit `_lib/pending-actions-guard.js`.
+export { hasOpenBlockingAction, loadOpenActionsByCustomer };
 
 const ABORT_MS = 50_000;
 const MAX_RUNS_PER_TICK = 100;
@@ -183,64 +192,6 @@ export function dedupRunsByConversation(runs) {
     winners.push(r);
   }
   return { winners, duplicates };
-}
-
-/**
- * Statussen die BLOKKEREN — mens is met de zaak bezig, bot moet zwijgen:
- *   - pending   : wacht op approve/reject
- *   - approved  : goedgekeurd, wacht op executor (D2)
- *   - executed  : uitgevoerd (bot-reminder zou dubbelop zijn)
- *   - failed    : executor viel om, mens moet ingrijpen
- * Statussen die DOORLATEN (geen open actie):
- *   - rejected  : expliciet afgekeurd
- *   - cancelled : ingetrokken
- */
-const BLOCKING_ACTION_STATUSES = new Set([
-  'pending', 'approved', 'executed', 'failed',
-]);
-
-/**
- * True als er >=1 pending_action bestaat met een blokkerende status. Pure
- * functie zodat de guard direct getestbaar is.
- */
-export function hasOpenBlockingAction(actions) {
-  if (!Array.isArray(actions) || actions.length === 0) return false;
-  return actions.some(a => BLOCKING_ACTION_STATUSES.has(
-    String(a?.status || '').toLowerCase()
-  ));
-}
-
-/**
- * Batch-query pending_actions per customer. Returnt Map(customer_id ->
- * [{status}, ...]) van alle acties die NIET rejected/cancelled zijn.
- * Fail-soft: bij DB-fout returnt lege map en logt warning; de cron-run
- * loopt door zonder guard i.p.v. om te vallen.
- */
-export async function loadOpenActionsByCustomer(customerIds) {
-  const byCustomer = new Map();
-  const ids = (Array.isArray(customerIds) ? customerIds : []).filter(Boolean);
-  if (ids.length === 0) return byCustomer;
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('pending_actions')
-      .select('customer_id, status')
-      .in('customer_id', ids)
-      .not('status', 'in', '(rejected,cancelled)');
-    if (error) {
-      console.warn('[conv-reminder-cron] pending_actions batch fail:', error.message);
-      return byCustomer;
-    }
-    for (const row of data || []) {
-      const cid = row.customer_id;
-      if (!cid) continue;
-      const arr = byCustomer.get(cid) || [];
-      arr.push({ status: row.status });
-      byCustomer.set(cid, arr);
-    }
-  } catch (e) {
-    console.warn('[conv-reminder-cron] pending_actions batch exception:', e?.message);
-  }
-  return byCustomer;
 }
 
 export async function loadRenderContext(customerId) {

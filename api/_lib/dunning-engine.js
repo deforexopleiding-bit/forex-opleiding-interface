@@ -27,6 +27,10 @@ import {
 } from './dunning-step-executors.js';
 import { markOverdue } from './mentor-ledger-engine.js';
 import { resetJoostCountersForCustomer } from './dunning-arrangement-hooks.js';
+import {
+  hasOpenBlockingAction,
+  loadOpenActionsByCustomer,
+} from './pending-actions-guard.js';
 
 const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
 
@@ -795,6 +799,20 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
   // volgende invocatie hervat.
   const MAX_STEPS_PER_RUN = 50;
 
+  // ── Actie-guard batch-lookup: één query voor ALLE runs tegelijk ─────────
+  // Als een mens een openstaande/afgehandelde pending_action heeft op deze
+  // klant (pending/approved/executed/failed), slaan we de stap over. Zodra
+  // de actie rejected/cancelled wordt, pikt de dagcron 'em de volgende dag
+  // gewoon weer op — geen pauze, geen unpause-hook nodig.
+  //
+  // Fail-soft: bij lookup-fout leeft de map als leeg en de guard laat alles
+  // door — engine blijft draaien i.p.v. om te vallen. Zie #887 voor de
+  // rationale achter deze status-set.
+  const runCustomerIds = Array.from(new Set(
+    (runs || []).map(r => r.customer_id).filter(Boolean)
+  ));
+  const openActionsByCustomer = await loadOpenActionsByCustomer(runCustomerIds);
+
   for (const run of runs || []) {
     if (elapsed(startedAt) > abortMs) break;
 
@@ -883,6 +901,38 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
           }
         } catch (e) {
           console.warn('[dunning-engine] reply-check fail-soft, doorgaan:', run.customer_id, e?.message || e);
+        }
+
+        // ── Actie-guard: mens is bezig met deze klant -> stap overslaan.
+        // Overslaan (geen statuswijziging) i.p.v. pauzeren, zodat de run bij
+        // de volgende dagcron opnieuw wordt gepikt en vanzelf doorgaat zodra
+        // de actie rejected/cancelled is. Voorkomt "Helsmoortel"-scenario
+        // waarbij een klant weken stil staat door een vergeten regeling —
+        // dunning_log-regel maakt het zichtbaar in de pipeline-detail.
+        // Log 1× per skip (dagcron: max 1 regel/dag/klant).
+        const openActions = run.customer_id
+          ? (openActionsByCustomer.get(run.customer_id) || [])
+          : [];
+        if (hasOpenBlockingAction(openActions)) {
+          const blockingActionTypes = Array.from(new Set(
+            openActions
+              .filter(a => a && String(a.status || '').toLowerCase() !== 'rejected'
+                        && String(a.status || '').toLowerCase() !== 'cancelled')
+              .map(a => a.action_type)
+              .filter(Boolean)
+          ));
+          await supabaseAdmin.from('dunning_log').insert({
+            run_id: run.id,
+            step_id: currentStepId,
+            event_type: 'skipped_open_action',
+            payload: {
+              reason: 'open_pending_action',
+              action_types: blockingActionTypes,
+              count: openActions.length,
+            },
+          });
+          runAdvanced = true;
+          break; // stop binnenlus; run blijft active, volgende dagcron pikt 'em op
         }
 
         const currentStep = (steps || []).find((s) => s.id === currentStepId);

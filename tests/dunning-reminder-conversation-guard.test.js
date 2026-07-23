@@ -18,10 +18,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  dedupRunsByConversation,
-  hasOpenBlockingAction,
-} from '../api/cron-dunning-conversation-reminders.js';
+import { dedupRunsByConversation } from '../api/cron-dunning-conversation-reminders.js';
+import { hasOpenBlockingAction } from '../api/_lib/pending-actions-guard.js';
 
 // ── dedupRunsByConversation ──────────────────────────────────────────
 test('(a) 2 runs op dezelfde conversatie -> 1 winnaar + 1 duplicate', () => {
