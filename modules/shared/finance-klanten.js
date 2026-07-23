@@ -94,15 +94,55 @@
     const style = document.createElement('style');
     style.id = 'finance-klanten-styles';
     style.textContent = `
-      .fk-filters { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; padding:12px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; }
-      .fk-filters .fk-label { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-faint); font-weight:600; margin-right:4px; }
-      .fk-select, .fk-search { padding:7px 10px; background:var(--bg-elev-2,var(--bg)); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; font-family:inherit; }
-      .fk-select:focus, .fk-search:focus { outline:none; border-color:var(--brand-primary, var(--accent-cyan, #06b6d4)); }
+      .fk-filters {
+        display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px;
+        padding:12px; background:var(--bg-elev);
+        border:1px solid var(--ds-border, var(--border, #dfe8ec));
+        border-radius:var(--ds-radius-lg, 10px);
+      }
+      .fk-filters .fk-label { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--ds-text-faint, var(--text-faint, #7a8b92)); font-weight:600; margin-right:4px; }
+      .fk-select, .fk-search {
+        padding:7px 10px; background:var(--bg-elev-2, var(--bg));
+        border:1px solid var(--ds-border, var(--border, #dfe8ec));
+        border-radius:var(--ds-radius, 6px);
+        color:var(--ds-text, var(--text, #06181f));
+        font-size:13px; font-family:inherit;
+      }
+      .fk-select:focus, .fk-search:focus { outline:none; border-color:var(--ds-brand, #0a5178); }
       .fk-search { min-width:240px; }
       .fk-spacer { flex:1; }
-      .fk-toggle { display:inline-flex; align-items:center; gap:6px; padding:6px 12px; background:var(--bg-elev-2,var(--bg)); border:1px solid var(--border); border-radius:999px; font-size:12px; cursor:pointer; user-select:none; color:var(--text-dim); }
+      .fk-toggle {
+        display:inline-flex; align-items:center; gap:6px; padding:6px 12px;
+        background:var(--bg-elev-2, var(--bg));
+        border:1px solid var(--ds-border, var(--border, #dfe8ec));
+        border-radius:var(--ds-radius-pill, 999px);
+        font-size:12px; cursor:pointer; user-select:none;
+        color:var(--ds-text-muted, var(--text-dim, #48585f));
+      }
       .fk-toggle input { margin:0; cursor:pointer; }
-      .fk-toggle.active { background:var(--brand-primary-soft, rgba(6,182,212,.12)); color:var(--brand-primary, var(--accent-cyan, #06b6d4)); border-color:var(--brand-primary, var(--accent-cyan, #06b6d4)); }
+      .fk-toggle.active {
+        background:var(--ds-brand-soft, #dceaf2);
+        color:var(--ds-brand-strong, #083b52);
+        border-color:var(--ds-brand, #0a5178);
+      }
+      /* Mobiel (≤720px): filter-strip 1 regel, horizontaal scrollbaar zodat
+         geen wrap over 3 regels. Zelfde patroon als .ds-scroll-row uit #901
+         (verborgen scrollbar + touch). Zoekbalk krijgt full-width flex-row
+         onderaan zodat 'ie makkelijk aantikbaar blijft. */
+      @media (max-width: 720px) {
+        .fk-filters {
+          flex-wrap: nowrap;
+          overflow-x: auto;
+          overflow-y: visible;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
+          padding: 10px 12px;
+        }
+        .fk-filters::-webkit-scrollbar { display: none; }
+        .fk-filters > * { flex: 0 0 auto; }
+        .fk-filters .fk-search { min-width: 200px; flex: 1 0 200px; }
+        .fk-select, .fk-toggle { min-height: 40px; }
+      }
 
       /* overflow-x:auto zodat de klanten-tabel op mobiel horizontaal
          scrollbaar is (consistent met .sr-tablewrap-fix). Scrollbar
@@ -126,9 +166,25 @@
       .fk-table tbody tr:last-child td { border-bottom:none; }
       .fk-table td.num { text-align:right; font-variant-numeric:tabular-nums; }
       .fk-table th.num { text-align:right; }
-      .fk-name { font-weight:600; color:var(--text); }
-      .fk-email { color:var(--text-dim); font-size:12px; }
-      .fk-dim { color:var(--text-faint); }
+      .fk-name { font-weight:600; color:var(--ds-text, var(--text, #06181f)); }
+      .fk-email { color:var(--ds-text-muted, var(--text-dim, #48585f)); font-size:12px; }
+      .fk-dim { color:var(--ds-text-faint, var(--text-faint, #7a8b92)); }
+      /* Mobiel: klantnaam en e-mail over 2 regels ipv nowrap-ellipsis.
+         Voorkomt dat lange bedrijfsnamen ("Bouwonderneming Helsmoortel BV")
+         de andere kolommen wegduwen. Patroon uit #903. */
+      @media (max-width: 720px) {
+        .fk-table td .fk-name,
+        .fk-table td .fk-email {
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+                  line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+          line-height: 1.3;
+          max-width: 200px;
+          word-break: break-word;
+        }
+      }
 
       .fk-arr-badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:500; }
       .fk-arr-proposed { background:rgba(245,158,11,.15); color:#f59e0b; }
@@ -163,14 +219,38 @@
       .fk-action-link:hover { background:var(--brand-primary-soft, rgba(6,182,212,.12)); }
 
       .fk-actions-wrap { display:inline-flex; align-items:center; gap:6px; position:relative; }
-      .fk-kebab { background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text-dim); cursor:pointer; padding:4px 8px; font-size:14px; line-height:1; }
-      .fk-kebab:hover { background:var(--bg); color:var(--text); }
-      .fk-menu { position:fixed; min-width:220px; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.25); z-index:1200; padding:4px; display:none; }
+      .fk-kebab {
+        background:transparent;
+        border:1px solid var(--ds-border, var(--border, #dfe8ec));
+        border-radius:var(--ds-radius, 6px);
+        color:var(--ds-text-muted, var(--text-dim, #48585f));
+        cursor:pointer; padding:4px 8px; font-size:14px; line-height:1;
+      }
+      .fk-kebab:hover { background:var(--bg); color:var(--ds-text, var(--text, #06181f)); }
+      .fk-menu {
+        position:fixed; min-width:220px;
+        background:var(--bg-elev);
+        border:1px solid var(--ds-border, var(--border, #dfe8ec));
+        border-radius:var(--ds-radius, 6px);
+        box-shadow:0 8px 24px rgba(6,24,31,.15);
+        z-index:1200; padding:4px; display:none;
+      }
       .fk-menu.open { display:block; }
-      .fk-menu-item { display:flex; align-items:center; gap:8px; padding:8px 10px; font-size:13px; color:var(--text); cursor:pointer; border-radius:6px; text-decoration:none; }
+      .fk-menu-item {
+        display:flex; align-items:center; gap:8px; padding:8px 10px;
+        font-size:13px; color:var(--ds-text, var(--text, #06181f));
+        cursor:pointer; border-radius:var(--ds-radius, 6px); text-decoration:none;
+      }
       .fk-menu-item:hover:not(.disabled) { background:var(--bg); }
-      .fk-menu-item.disabled { color:var(--text-faint); cursor:not-allowed; opacity:.65; }
+      .fk-menu-item.disabled { color:var(--ds-text-faint, var(--text-faint, #7a8b92)); cursor:not-allowed; opacity:.65; }
       .fk-menu-item i { font-size:14px; }
+      /* Mobiel: kebab en menu-items 44px raakbaar (Apple HIG). */
+      @media (max-width: 720px) {
+        .fk-kebab { min-width: 40px; min-height: 40px; padding: 8px 10px; }
+        .fk-menu { min-width: 240px; }
+        .fk-menu-item { padding: 12px 12px; font-size: 14px; }
+        .fk-action-link { min-height: 40px; padding: 8px 10px; }
+      }
     `;
     document.head.appendChild(style);
   }
