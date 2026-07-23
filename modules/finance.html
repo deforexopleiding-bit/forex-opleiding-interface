@@ -5980,6 +5980,53 @@
     esc   : { ic: '⚠️', cls: 'wbx-esc',    label: 'Escalatie'     },
   };
 
+  // Action-specifieke meta (icon + label + kleur-cls). Verfijnt de 3 buckets
+  // uit _AC_WBX_TYPE_META zodat MANUAL_FOLLOWUP niet als "Regeling" wordt
+  // gelabeld en TL_-arrangements een herkenbaar label krijgen. `cls` blijft
+  // op de bucket-kleur (verify/plan/esc) zodat de visuele grouping in de
+  // lijst intact blijft — alleen icon+label worden specifieker.
+  const _AC_WBX_ACTION_META = {
+    MANUAL_FOLLOWUP:                    { ic: '📞', cls: 'wbx-plan',   label: 'Belmoment'            },
+    MANUAL_VERIFY_PAYMENT:              { ic: '💶', cls: 'wbx-verify', label: 'Betaalcontrole'       },
+    MANUAL_ESCALATION:                  { ic: '⚠️', cls: 'wbx-esc',    label: 'Escalatie'            },
+    MANUAL_PROPOSE_ARRANGEMENT:         { ic: '📅', cls: 'wbx-plan',   label: 'Regeling voorstellen' },
+    TL_INVOICE_UPDATE_DUE:              { ic: '📅', cls: 'wbx-plan',   label: 'Uitstel'              },
+    TL_INVOICE_CONSOLIDATE_AND_RESTART: { ic: '📅', cls: 'wbx-plan',   label: 'Uitstel + consolideer' },
+    TL_INVOICE_SPLIT:                   { ic: '📅', cls: 'wbx-plan',   label: 'Splitsing'            },
+    TL_SUBSCRIPTION_PAUSE:              { ic: '⏸️', cls: 'wbx-plan',   label: 'Abonnement pauzeren'  },
+    TL_SUBSCRIPTION_STOP:               { ic: '⏹️', cls: 'wbx-plan',   label: 'Abonnement stoppen'   },
+    TL_INVOICE_WRITEOFF:                { ic: '✂️', cls: 'wbx-plan',   label: 'Kwijtschelding'       },
+  };
+
+  // Bereken icon/label/cls voor één actie. Voorrang:
+  //   1) payload.title (indien aanwezig) -> gebruikt als label
+  //      + action-specifieke icon/cls voor kleurcontinuïteit.
+  //      (bv. MANUAL_FOLLOWUP met payload.title "Belmoment 1 (multi-factuur)"
+  //      krijgt icon 📞 + label "Belmoment 1 (multi-factuur)".)
+  //   2) MANUAL_FOLLOWUP + payload.kind='letter' -> briefkopje (✉️ Brief).
+  //   3) Action-specifieke meta uit _AC_WBX_ACTION_META.
+  //   4) Bucket-fallback uit _AC_WBX_TYPE_META (verify/plan/esc).
+  function _acWbxLabelForRow(it) {
+    const at   = String(it?.action_type || '');
+    const kind = String(it?.payload?.kind || '').toLowerCase();
+    const payloadTitle = (it?.payload && typeof it.payload.title === 'string' && it.payload.title.trim())
+      ? it.payload.title.trim()
+      : null;
+
+    // Speciaal: MANUAL_FOLLOWUP met payload.kind='letter' is een briefopdracht.
+    if (at === 'MANUAL_FOLLOWUP' && kind === 'letter') {
+      return { ic: '✉️', cls: 'wbx-plan', label: payloadTitle || 'Brief' };
+    }
+    const specific = _AC_WBX_ACTION_META[at];
+    if (specific) {
+      return { ic: specific.ic, cls: specific.cls, label: payloadTitle || specific.label };
+    }
+    // Onbekend action_type -> val terug op bucket-meta.
+    const cat = _acWbxCategoryFor(at);
+    const meta = _AC_WBX_TYPE_META[cat] || _AC_WBX_TYPE_META.plan;
+    return { ic: meta.ic, cls: meta.cls, label: payloadTitle || meta.label };
+  }
+
   async function _acWbxLoad() {
     _acWbxState.loading = true;
     _acWbxState.error = null;
@@ -6143,7 +6190,7 @@
   }
   function _acWbxRowHtml(it) {
     const cat = _acWbxCategoryFor(it.action_type);
-    const meta = _AC_WBX_TYPE_META[cat] || _AC_WBX_TYPE_META.plan;
+    const specific = _acWbxLabelForRow(it);
     const cust = it?.customer?.name || '(onbekende klant)';
     const sub  = _acWbxSubtitle(it);
     const age  = _acWbxAgeText(it);
@@ -6164,9 +6211,9 @@
     }
     return `
       <div class="wbx-arow" data-ac-id="${esc(it.id)}">
-        <div class="wbx-aic ${meta.cls}">${meta.ic}</div>
+        <div class="wbx-aic ${specific.cls}">${specific.ic}</div>
         <div class="wbx-abody">
-          <div class="wbx-atitle">${esc(meta.label)} — ${esc(cust)}</div>
+          <div class="wbx-atitle">${esc(specific.label)} — ${esc(cust)}</div>
           <div class="wbx-asub">${esc(sub)}</div>
         </div>
         ${right}
@@ -6309,11 +6356,12 @@
     // door _paDetailFillSubs bijgevuld.
     _paDetailCtx = { item, customer: cust, invoices: invs, subscriptions: [] };
 
-    // Kop-info.
-    const cat = _acWbxCategoryFor(item.action_type);
-    const meta = _AC_WBX_TYPE_META[cat] || _AC_WBX_TYPE_META.plan;
-    if (icon) icon.textContent = meta.ic;
-    if (title) title.textContent = meta.label + (cust?.name ? ' — ' + cust.name : '');
+    // Kop-info. Gebruik _acWbxLabelForRow zodat modal en lijst hetzelfde
+    // label + icon tonen (payload.title krijgt voorrang; anders action-
+    // specifieke fallback, dan bucket-fallback).
+    const specific = _acWbxLabelForRow(item);
+    if (icon) icon.textContent = specific.ic;
+    if (title) title.textContent = specific.label + (cust?.name ? ' — ' + cust.name : '');
     if (sub) {
       const kind = item.payload?.kind ? ' · ' + item.payload.kind : '';
       const age  = _acWbxAgeText(item);
@@ -6899,9 +6947,11 @@
     const descEl  = document.getElementById('paTaskDesc');
     const dlEl    = document.getElementById('paTaskDeadline');
 
-    const cat = _acWbxCategoryFor(item?.action_type || '');
-    const catLabel = _AC_WBX_TYPE_META[cat]?.label || 'Actie';
-    if (titleEl) titleEl.value = catLabel + ' — ' + (cust.name || cust.email || 'klant');
+    // Task-titel voorvullen met het bron-actie-label (bv. "Belmoment 1
+    // (multi-factuur) — Klant" i.p.v. "Regeling — Klant"). Zelfde helper
+    // als lijst-row + detail-modal zodat titel consistent oogt.
+    const specific = _acWbxLabelForRow(item || {});
+    if (titleEl) titleEl.value = specific.label + ' — ' + (cust.name || cust.email || 'klant');
 
     // Omschrijving: notitie + facturen + terugverwijzing.
     const payload = item?.payload || {};
