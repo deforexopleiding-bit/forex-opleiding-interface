@@ -3713,6 +3713,16 @@
          aangemaakt via event-followup-to-lead (source='event') zodat de
          uitkomst-cadans identiek werkt aan de rest van de cockpit. -->
     <div class="fu-tab-panel" data-panel="event-bellijst" id="panel-event-bellijst">
+      <!-- Event-picker: kies een ander aankomend event. Vult zich via
+           _loadUpcomingEventsForBellijst() (endpoint ?list=upcoming).
+           min-height 44px + font-size 16px voor iOS-touch (voorkomt
+           auto-zoom bij tikken). -->
+      <div class="fu-eb-picker-wrap" style="margin-bottom:10px">
+        <label for="eb-event-picker" style="display:block;font-size:12px;font-weight:600;color:var(--text-secondary,#64748b);margin-bottom:4px">Event</label>
+        <select id="eb-event-picker" style="width:100%;box-sizing:border-box;min-height:44px;padding:8px 12px;border:1px solid var(--border-default,#dfe8ec);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font-size:16px;font-family:inherit;cursor:pointer">
+          <option value="">Laden…</option>
+        </select>
+      </div>
       <div class="fu-cockpit-filters" style="flex-direction:row;flex-wrap:wrap;gap:12px;margin-bottom:12px">
         <div id="eb-eventheader" class="fu-eb-header"><div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div></div>
         <button class="fu-lead-btn" id="eb-refresh" title="Vernieuwen" style="margin-left:auto"><i class="ti ti-refresh"></i></button>
@@ -7788,7 +7798,16 @@
       voicememo  : { leads: [], counts: null, today: null, autoOpenedFor: null },
       afgeboekt   : { items: [], counts: null, filter: 'all', loading: false },
       oudeRetenties: { items: [], counts: null, filter: 'nieuw', loading: false },
-      eventBellijst: { event: null, attendees: [], loading: false },
+      eventBellijst: {
+        event: null, attendees: [], loading: false,
+        // event-picker: selectedEventId = null → laat backend het
+        // eerstvolgende event kiezen. upcomingEvents = cache van
+        // aankomende events voor de <select>, 60s TTL identiek aan
+        // _loadUpcomingEventsForMove().
+        selectedEventId: null,
+        upcomingEvents: null,
+        upcomingEventsLoadedAt: 0,
+      },
       noShow       : { items: [], counts: {}, filter: 'all', loading: false, upcomingEvents: null, upcomingEventsLoadedAt: 0 },
     };
 
@@ -8997,7 +9016,7 @@
     // /api/event-followup-to-lead (source='event') en start dan
     // _softphoneCallLead met die lead + attendee-telefoon. Uitkomst-panel
     // uit Fase 2 blijft ongewijzigd — cadans + logging identiek.
-    async function loadEventBellijstTab() {
+    async function loadEventBellijstTab(eventIdArg) {
       const headEl = document.getElementById('eb-eventheader');
       const listEl = document.getElementById('eb-list');
       if (!headEl || !listEl) return;
@@ -9005,12 +9024,21 @@
       _fase3State.eventBellijst.loading = true;
       headEl.innerHTML = '<div class="fu-empty"><i class="ti ti-loader-2 fu-empty-icon"></i>Laden…</div>';
       listEl.innerHTML = '';
+      // Trigger de picker-fetch parallel — heeft eigen 60s cache dus
+      // blokkeert niets bij snelle wisselingen.
+      _loadUpcomingEventsForBellijst().catch(() => {});
+      // Event-selectie: expliciet argument > eerder geselecteerd > default (eerstvolgende).
+      const eventId = (typeof eventIdArg === 'string' && eventIdArg)
+        ? eventIdArg
+        : (_fase3State.eventBellijst.selectedEventId || null);
+      const url = '/api/follow-up-event-bellijst' + (eventId ? ('?event_id=' + encodeURIComponent(eventId)) : '');
       try {
-        const r = await window.AgentShared.apiFetch('/api/follow-up-event-bellijst');
+        const r = await window.AgentShared.apiFetch(url);
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
-        _fase3State.eventBellijst.event     = d.event || null;
-        _fase3State.eventBellijst.attendees = d.attendees || [];
+        _fase3State.eventBellijst.event           = d.event || null;
+        _fase3State.eventBellijst.attendees       = d.attendees || [];
+        _fase3State.eventBellijst.selectedEventId = d.event?.id || null;
         const cntEl = document.getElementById('tab-count-event-bellijst');
         if (cntEl) cntEl.textContent = String(d.event?.attendee_count ?? d.attendees?.length ?? '—');
         _renderEventBellijst();
@@ -9026,6 +9054,81 @@
       } finally {
         _fase3State.eventBellijst.loading = false;
       }
+    }
+
+    // Haal (of hergebruik uit cache) de lijst met aankomende events voor
+    // de event-picker bovenaan het paneel. Bewust NIET /api/events-list
+    // (dat vraagt events.event.view en zou dus falen voor gebruikers die
+    // alleen sales.tab.retentie/sales.customer.view hebben). Het
+    // ?list=upcoming sub-endpoint van follow-up-event-bellijst gebruikt
+    // exact dezelfde RBAC-triple als de bellijst zelf.
+    async function _loadUpcomingEventsForBellijst() {
+      const state = _fase3State.eventBellijst;
+      const now = Date.now();
+      if (state.upcomingEvents && (now - state.upcomingEventsLoadedAt) < 60_000) {
+        _renderEventBellijstPicker();
+        return state.upcomingEvents;
+      }
+      try {
+        const r = await window.AgentShared.apiFetch('/api/follow-up-event-bellijst?list=upcoming');
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+        state.upcomingEvents         = Array.isArray(d.events) ? d.events : [];
+        state.upcomingEventsLoadedAt = now;
+        _renderEventBellijstPicker();
+        return state.upcomingEvents;
+      } catch (e) {
+        console.warn('[event-bellijst picker] fetch:', e?.message || e);
+        return [];
+      }
+    }
+
+    // Vul de <select id="eb-event-picker"> met de opties uit state.
+    // Selecteer het event dat nu getoond wordt (state.selectedEventId of
+    // state.event.id). Change-handler zit op de globale delegated
+    // listener — zie onder.
+    function _renderEventBellijstPicker() {
+      const sel = document.getElementById('eb-event-picker');
+      if (!sel) return;
+      const events = _fase3State.eventBellijst.upcomingEvents || [];
+      const currentId = _fase3State.eventBellijst.selectedEventId
+        || _fase3State.eventBellijst.event?.id
+        || '';
+      if (!events.length) {
+        sel.innerHTML = '<option value="">Geen aankomende events</option>';
+        sel.disabled = true;
+        return;
+      }
+      // Als het huidige event niet in de picker-lijst zit (bv. inmiddels
+      // in het verleden), voeg 'em bovenaan toe zodat de select-waarde
+      // consistent blijft — dan ziet de gebruiker wél waar 'ie zit.
+      const inList = events.some((ev) => ev.id === currentId);
+      const extraOpt = (!inList && currentId && _fase3State.eventBellijst.event)
+        ? `<option value="${esc(currentId)}" selected>${esc(_fmtEventPickerLabel(_fase3State.eventBellijst.event))}</option>`
+        : '';
+      const opts = events.map((ev) => {
+        const label = _fmtEventPickerLabel(ev);
+        const selected = ev.id === currentId ? ' selected' : '';
+        return `<option value="${esc(ev.id)}"${selected}>${esc(label)}</option>`;
+      }).join('');
+      sel.innerHTML = extraOpt + opts;
+      sel.disabled = false;
+    }
+
+    // "za 26 jul · 10:00 — Trading Bootcamp"
+    function _fmtEventPickerLabel(ev) {
+      let datePart = '';
+      if (ev?.starts_at) {
+        try {
+          const dt = new Date(ev.starts_at);
+          if (!isNaN(dt.getTime())) {
+            datePart = dt.toLocaleDateString('nl-NL', { weekday:'short', day:'2-digit', month:'short' })
+              + ' · ' + dt.toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' });
+          }
+        } catch (_) {}
+      }
+      const title = String(ev?.title || 'Event').trim();
+      return datePart ? (datePart + ' — ' + title) : title;
     }
 
     function _renderEventBellijst() {
@@ -10240,9 +10343,20 @@
       const dbRf = document.getElementById('db-refresh');
       if (dbRf) dbRf.addEventListener('click', () => loadDashboardTab());
 
-      // Event-bellijst refresh
+      // Event-bellijst refresh — leeg-arg → state.selectedEventId wordt
+      // hergebruikt in loadEventBellijstTab (dus refresh blijft op het
+      // gekozen event, niet altijd terug naar het eerstvolgende).
       const ebRf = document.getElementById('eb-refresh');
       if (ebRf) ebRf.addEventListener('click', () => loadEventBellijstTab());
+
+      // Event-bellijst picker — bij wisselen: laad de bellijst voor het
+      // geselecteerde event. Lege waarde ("") → default eerstvolgende.
+      const ebPicker = document.getElementById('eb-event-picker');
+      if (ebPicker) ebPicker.addEventListener('change', (e) => {
+        const v = String(e.target.value || '');
+        _fase3State.eventBellijst.selectedEventId = v || null;
+        loadEventBellijstTab(v || undefined);
+      });
 
       // Afgeboekt refresh
       const afgbRf = document.getElementById('afgb-refresh');
