@@ -38,10 +38,21 @@ export function hasOpenBlockingAction(actions) {
 
 /**
  * Batch-query pending_actions per customer. Returnt Map(customer_id ->
- * [{status, action_type}]) van alle acties die NIET rejected/cancelled zijn.
+ * [{status, action_type}]) van alleen de acties met een BLOKKERENDE status
+ * (rejected/cancelled worden hier al uit gefilterd).
  *
  * `action_type` gaat mee zodat callers een informatieve log-regel kunnen
  * schrijven (welk type actie blokkeerde de bot).
+ *
+ * Case-insensitief tegenover de DB: `pending_actions.status` staat in
+ * PRODUCTIE in UPPERCASE (PENDING/APPROVED/EXECUTED/FAILED/REJECTED/
+ * CANCELLED). Eerdere versies gebruikten `.not('status','in','(rejected,
+ * cancelled)')` op PostgREST-niveau — die is case-sensitive en matchte
+ * DB-uppercase NIET, waardoor rejected/cancelled-rijen door de filter
+ * kwamen. `hasOpenBlockingAction` ving dat wel op, maar de log-`count`
+ * werd verkeerd. Nu doen we NIETS meer op DB-niveau qua status-filter
+ * en filteren in JS via de canonieke lowercase blocking-set — één
+ * consistente normalisatie voor alle callers en scenarios.
  *
  * Fail-soft: bij DB-fout returnt lege map + warning; caller loopt door
  * zonder guard i.p.v. om te vallen.
@@ -57,8 +68,7 @@ export async function loadOpenActionsByCustomer(customerIds, db = defaultSupabas
     const { data, error } = await db
       .from('pending_actions')
       .select('customer_id, status, action_type')
-      .in('customer_id', ids)
-      .not('status', 'in', '(rejected,cancelled)');
+      .in('customer_id', ids);
     if (error) {
       console.warn('[pending-actions-guard] batch lookup fail:', error.message);
       return byCustomer;
@@ -66,6 +76,11 @@ export async function loadOpenActionsByCustomer(customerIds, db = defaultSupabas
     for (const row of data || []) {
       const cid = row.customer_id;
       if (!cid) continue;
+      // Case-insensitieve filter via de canonieke lowercase set.
+      // rejected/cancelled worden hier al eruit gehaald zodat de map
+      // alleen blokkerende acties bevat.
+      const s = String(row.status || '').toLowerCase();
+      if (!BLOCKING_ACTION_STATUSES.has(s)) continue;
       const arr = byCustomer.get(cid) || [];
       arr.push({ status: row.status, action_type: row.action_type });
       byCustomer.set(cid, arr);

@@ -86,17 +86,52 @@ test('BLOCKING_ACTION_STATUSES bevat exact pending/approved/executed/failed', ()
   }
 });
 
-// ── loadOpenActionsByCustomer: batch-query + filter ───────────────────
-test('loadOpenActionsByCustomer batcht correct + filtert rejected/cancelled', async () => {
-  // Fake-db die exact de subset van de Supabase-chain implementeert die
-  // loadOpenActionsByCustomer aanroept. Verifieert dat de guard-query
-  // rejected/cancelled uitsluit via .not('status','in','(rejected,cancelled)').
+// ── case-guard: DB heeft UPPERCASE statussen (PENDING/REJECTED/...) ───
+// Regressie-anker voor de case-mismatch fix: DB-productie gebruikt
+// hoofdletters. De guard normaliseert via .toLowerCase() zodat beide
+// case-varianten correct worden herkend zonder de constanten-lijst te
+// muteren (dan zou lowercase input weer breken).
+test('(case-a) UPPERCASE PENDING blokkeert (DB-shape)', () => {
+  assert.equal(hasOpenBlockingAction([{ status: 'PENDING' }]), true);
+});
+
+test('(case-b) lowercase pending blokkeert (legacy/UI-shape)', () => {
+  assert.equal(hasOpenBlockingAction([{ status: 'pending' }]), true);
+});
+
+test('(case-c) UPPERCASE REJECTED blokkeert NIET (DB-shape)', () => {
+  assert.equal(hasOpenBlockingAction([{ status: 'REJECTED' }]), false);
+});
+
+test('(case-d) lowercase rejected blokkeert NIET (legacy/UI-shape)', () => {
+  assert.equal(hasOpenBlockingAction([{ status: 'rejected' }]), false);
+});
+
+test('case-mix: UPPERCASE APPROVED + REJECTED -> BLOKKEERT (approved wint)', () => {
+  assert.equal(hasOpenBlockingAction([
+    { status: 'APPROVED' }, { status: 'REJECTED' },
+  ]), true);
+});
+
+test('case-mix: UPPERCASE CANCELLED + FAILED -> BLOKKEERT (failed wint)', () => {
+  assert.equal(hasOpenBlockingAction([
+    { status: 'CANCELLED' }, { status: 'FAILED' },
+  ]), true);
+});
+
+// ── loadOpenActionsByCustomer: batch-query + case-insensitive filter ──
+test('loadOpenActionsByCustomer: DB UPPERCASE fixture, filter case-insensitief', async () => {
+  // Fake-db die de subset van Supabase-chain implementeert die
+  // loadOpenActionsByCustomer aanroept. GEEN .not() meer — filter zit nu
+  // in JS via BLOCKING_ACTION_STATUSES + .toLowerCase(). Fixture-rows
+  // gebruiken DB-shape (UPPERCASE) om de case-fix te bewijzen.
   const fakeRows = [
-    { customer_id: 'A', status: 'pending',   action_type: 'MANUAL_ESCALATION' },
-    { customer_id: 'B', status: 'executed',  action_type: 'TL_INVOICE_UPDATE_DUE' },
-    { customer_id: 'C', status: 'rejected',  action_type: 'MANUAL_PROPOSE_ARRANGEMENT' }, // eruit
-    { customer_id: 'D', status: 'cancelled', action_type: 'TL_SUBSCRIPTION_PAUSE' },      // eruit
-    { customer_id: 'A', status: 'approved',  action_type: 'TL_INVOICE_SPLIT' },
+    { customer_id: 'A', status: 'PENDING',   action_type: 'MANUAL_ESCALATION' },
+    { customer_id: 'B', status: 'EXECUTED',  action_type: 'TL_INVOICE_UPDATE_DUE' },
+    { customer_id: 'C', status: 'REJECTED',  action_type: 'MANUAL_PROPOSE_ARRANGEMENT' }, // eruit
+    { customer_id: 'D', status: 'CANCELLED', action_type: 'TL_SUBSCRIPTION_PAUSE' },      // eruit
+    { customer_id: 'A', status: 'APPROVED',  action_type: 'TL_INVOICE_SPLIT' },
+    { customer_id: 'E', status: 'FAILED',    action_type: 'TL_INVOICE_WRITEOFF' },
   ];
   const db = {
     from(table) {
@@ -109,26 +144,47 @@ test('loadOpenActionsByCustomer batcht correct + filtert rejected/cancelled', as
           rows = rows.filter(r => s.has(r[col]));
           return chain;
         },
-        not(col, op, val) {
-          if (op === 'in') {
-            const list = String(val).replace(/[()]/g, '').split(',').map(s => s.trim());
-            const s = new Set(list);
-            rows = rows.filter(r => !s.has(r[col]));
-          }
-          return chain;
-        },
         then(resolve) { resolve({ data: rows, error: null }); },
       };
       return chain;
     },
   };
 
-  const map = await loadOpenActionsByCustomer(['A', 'B', 'C', 'D'], db);
-  assert.equal(map.get('A')?.length, 2, 'klant A heeft pending + approved');
-  assert.equal(map.get('B')?.length, 1, 'klant B heeft executed');
-  assert.equal(map.has('C'), false, 'klant C had alleen rejected -> geen entry');
-  assert.equal(map.has('D'), false, 'klant D had alleen cancelled -> geen entry');
+  const map = await loadOpenActionsByCustomer(['A', 'B', 'C', 'D', 'E'], db);
+  assert.equal(map.get('A')?.length, 2, 'klant A heeft PENDING + APPROVED');
+  assert.equal(map.get('B')?.length, 1, 'klant B heeft EXECUTED');
+  assert.equal(map.has('C'), false, 'klant C had alleen REJECTED -> geen entry');
+  assert.equal(map.has('D'), false, 'klant D had alleen CANCELLED -> geen entry');
+  assert.equal(map.get('E')?.length, 1, 'klant E heeft FAILED');
   assert.equal(map.get('A')[0].action_type, 'MANUAL_ESCALATION');
+  // Originele DB-status blijft bewaard (niet gemuteerd naar lowercase).
+  assert.equal(map.get('A')[0].status, 'PENDING');
+});
+
+test('loadOpenActionsByCustomer: mixed case in DB -> beide worden herkend', async () => {
+  // Defensive: als een pad ooit een lowercase-rij schrijft (bv. via een
+  // legacy migration), moet de filter die ook correct pakken.
+  const fakeRows = [
+    { customer_id: 'X', status: 'pending',   action_type: 'MANUAL_ESCALATION' },
+    { customer_id: 'X', status: 'PENDING',   action_type: 'MANUAL_FOLLOWUP' },
+    { customer_id: 'X', status: 'Rejected',  action_type: 'MANUAL_ESCALATION' }, // eruit
+  ];
+  const db = {
+    from() {
+      let rows = fakeRows.slice();
+      return {
+        select()  { return this; },
+        in(col, vals) {
+          const s = new Set(vals);
+          rows = rows.filter(r => s.has(r[col]));
+          return this;
+        },
+        then(resolve) { resolve({ data: rows, error: null }); },
+      };
+    },
+  };
+  const map = await loadOpenActionsByCustomer(['X'], db);
+  assert.equal(map.get('X')?.length, 2, 'beide pending-varianten worden geblokkeerd');
 });
 
 test('loadOpenActionsByCustomer: lege input -> lege map (geen DB-call)', async () => {
@@ -147,7 +203,6 @@ test('loadOpenActionsByCustomer: DB-error -> lege map (fail-soft)', async () => 
       return {
         select() { return this; },
         in()     { return this; },
-        not()    { return this; },
         then(resolve) { resolve({ data: null, error: { message: 'boom' } }); },
       };
     },
