@@ -2049,9 +2049,56 @@
       color:var(--wbx-faint); margin-top:4px; letter-spacing:.02em;
     }
     .wbx .wbx-case .wbx-right { display:flex; align-items:center; gap:13px; justify-content:flex-end; padding-right:0; }
+    /* Mobiel (≤720px): kaart naar 2-rijen-grid met grid-template-areas.
+       Row 1: klantnaam + factuurnr | pill+knop (rechts, spans 2 rijen).
+       Row 2: bedrag (prominent) + dagen-te-laat (subtiel ernaast).
+       Voorheen werden .wbx-amt/.wbx-late verborgen op mobiel — dat verstopte
+       precies de twee cijfers waar de lijst om draait. Nu blijven ze zichtbaar
+       via herschikking, zonder markup-diff. Knop krijgt 44px min-hoogte
+       (Apple HIG touch-target). Breakpoint hard geschreven — geen CSS-var in
+       de @media-conditie (die zou stil genegeerd worden). --ds-*-tokens met
+       hex-fallback per patroon #868. */
     @media(max-width:720px) {
-      .wbx .wbx-case { grid-template-columns:1fr auto; }
-      .wbx .wbx-case .wbx-amt, .wbx .wbx-case .wbx-late { display:none; }
+      .wbx .wbx-case {
+        grid-template-columns: auto auto minmax(0, 1fr) auto;
+        grid-template-rows: auto auto;
+        grid-template-areas:
+          "who  who   who    right"
+          "amt  late  .      right";
+        row-gap: 4px;
+        column-gap: 10px;
+        padding: 12px 14px 12px 20px;
+        align-items: center;
+      }
+      .wbx .wbx-case .wbx-who   { grid-area: who; padding: 0; }
+      .wbx .wbx-case .wbx-amt   {
+        grid-area: amt;
+        text-align: left;
+        font: 700 16px/1 var(--wbx-mono);
+        color: var(--ds-text, #06181f);
+        align-self: end;
+      }
+      .wbx .wbx-case .wbx-late  {
+        grid-area: late;
+        text-align: left;
+        font: 600 13px/1 var(--wbx-mono);
+        color: var(--ds-text-dim, var(--wbx-muted));
+        align-self: end;
+        white-space: nowrap;
+      }
+      .wbx .wbx-case .wbx-late small {
+        display: inline;
+        margin: 0 0 0 4px;
+        font: 500 10.5px/1 'Inter', sans-serif;
+        color: var(--ds-text-faint, var(--wbx-faint));
+        letter-spacing: .02em;
+      }
+      .wbx .wbx-case .wbx-right {
+        grid-area: right;
+        align-self: center;
+        gap: 10px;
+      }
+      .wbx .wbx-case .wbx-right .wbx-btn { min-height: 44px; padding: 10px 14px; }
     }
 
     /* Status-pills */
