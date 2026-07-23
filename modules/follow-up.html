@@ -6185,6 +6185,26 @@
 
     // Verplaats-naar-ander-event blok voor event-leads. Async: haalt de
     // upcoming events op en rendert een select + verzend-knop.
+    //
+    // Vier UI-states (zichtbaar onderscheiden — geen silent-empty meer):
+    //   1. Ontbrekende write-permissie ('events.attendee.create') → gedempte
+    //      uitleg-regel, geen select/knop. Verplaatsen is bewust een write-
+    //      op-doel-event (technisch: attendee toevoegen aan een ander event),
+    //      dus strenger dan de leestriple die de omliggende cockpit doet.
+    //      Verlaging van deze gate zou sales-users deelnemer-creatie-rechten
+    //      geven — buiten scope; UI blokkeert vooraf i.p.v. 403 bij klik.
+    //   2. Laden mislukt (sentinel: upcoming === null) → foutmelding in
+    //      de dropdown + disabled verzendknop, expliciet "kon events niet
+    //      laden" — NIET "geen aankomende events".
+    //   3. Écht geen events (upcoming.length === 0) → "geen aankomende
+    //      events" + disabled verzendknop.
+    //   4. Normaal → gevulde select + actieve verzendknop.
+    //
+    // seats_remaining ("N plekken vrij") is per deze PR verwijderd uit
+    // de option-labels: het nieuwe endpoint returnt alleen id/title/
+    // starts_at (bewuste ruil voor de RBAC-triple). Voor de move-beslissing
+    // is de plekken-hint nuttig maar niet kritiek; kan later terug via
+    // een ?include=seats-uitbreiding op het endpoint.
     async function _renderMoveToEventBlock(ctxEl, it, attendeeId) {
       const parent = ctxEl?.parentNode;
       if (!parent) return;
@@ -6192,30 +6212,69 @@
       const oldBlock = parent.querySelector('[data-ns-move-block]');
       if (oldBlock) oldBlock.remove();
 
+      // Permission-gate voor de daadwerkelijke move-actie
+      // (api/events-attendee-move.js vereist events.attendee.create).
+      // Fail-open bij RBAC-shim afwezig zodat de knop niet stilletjes
+      // verdwijnt bij een load-race — als de call écht 403 geeft, ziet
+      // de gebruiker alsnog de bestaande alert-toast in _moveAttendeeToEvent.
+      let canMove = true;
+      if (window.RBAC && typeof window.RBAC.can === 'function') {
+        try { canMove = await window.RBAC.can('events.attendee.create'); }
+        catch (_) { canMove = true; }
+      }
+
       const upcoming = await _loadUpcomingEventsForMove();
       // Race-guard: alleen appenden als deze lead nog geselecteerd is.
       if (_leadsState.selectedId !== it.id) return;
 
-      const options = upcoming.length === 0
-        ? '<option value="">— geen aankomende events —</option>'
-        : ['<option value="">— kies een event —</option>']
-            .concat(upcoming.map((ev) => {
-              const dt = ev.starts_at ? new Date(ev.starts_at) : null;
-              const dtLbl = dt && !isNaN(dt.getTime())
-                ? dt.toLocaleDateString('nl-NL', { weekday:'short', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })
-                : '';
-              const cap = (typeof ev.seats_remaining === 'number') ? ` — ${ev.seats_remaining} plek${ev.seats_remaining === 1 ? '' : 'ken'} vrij` : '';
-              return `<option value="${esc(ev.id)}">${esc(ev.title || 'Event')}${dtLbl ? ' · ' + esc(dtLbl) : ''}${cap}</option>`;
-            }))
-            .join('');
-      const disabled = upcoming.length === 0 ? 'disabled' : '';
       const block = document.createElement('div');
       block.setAttribute('data-ns-move-block', '1');
       block.style.cssText = 'margin-top:10px;padding:10px;border:1px solid var(--border-default);border-radius:8px;background:var(--surface-card)';
-      block.innerHTML = `
-        <div style="font-size:12px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px">
+
+      const header = `<div style="font-size:12px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px">
           <i class="ti ti-calendar-plus"></i> Verplaats naar ander event
-        </div>
+        </div>`;
+
+      if (!canMove) {
+        // State 1: geen write-permissie → uitleg-regel, geen bedieningselementen.
+        block.innerHTML = header + `
+          <div style="font-size:12px;color:var(--text-dim);display:flex;align-items:flex-start;gap:6px;padding:6px 0">
+            <i class="ti ti-lock" style="margin-top:2px"></i>
+            <span>Je hebt de rechten voor <em>Deelnemer toevoegen</em> (<code>events.attendee.create</code>) nodig om deelnemers te verplaatsen. Vraag een admin om die toe te wijzen.</span>
+          </div>`;
+        parent.insertBefore(block, ctxEl.nextSibling);
+        return;
+      }
+
+      // State 2 (fout) vs 3 (leeg) vs 4 (normaal): options + disabled bepalen.
+      const isError   = upcoming === null;
+      const arr       = Array.isArray(upcoming) ? upcoming : [];
+      const isEmpty   = !isError && arr.length === 0;
+      const disabled  = (isError || isEmpty) ? 'disabled' : '';
+
+      let options;
+      if (isError) {
+        options = '<option value="">⚠ Kon events niet laden — probeer opnieuw</option>';
+      } else if (isEmpty) {
+        options = '<option value="">— geen aankomende events —</option>';
+      } else {
+        options = ['<option value="">— kies een event —</option>']
+          .concat(arr.map((ev) => {
+            const dt = ev.starts_at ? new Date(ev.starts_at) : null;
+            const dtLbl = dt && !isNaN(dt.getTime())
+              ? dt.toLocaleDateString('nl-NL', { weekday:'short', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })
+              : '';
+            // seats_remaining vervalt — endpoint geeft die niet terug.
+            return `<option value="${esc(ev.id)}">${esc(ev.title || 'Event')}${dtLbl ? ' · ' + esc(dtLbl) : ''}</option>`;
+          }))
+          .join('');
+      }
+
+      const footNote = isError
+        ? '<div style="font-size:11px;color:#b45309;margin-top:4px"><i class="ti ti-alert-triangle"></i> Neem contact op met een admin als dit blijft gebeuren.</div>'
+        : '<div style="font-size:11px;opacity:.7;margin-top:4px">Uitnodiging (WhatsApp + e-mail) wordt automatisch verstuurd.</div>';
+
+      block.innerHTML = header + `
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <select data-ns-move-select data-attendee-id="${esc(attendeeId)}" class="fu-lead-inline" style="flex:1;min-width:220px" ${disabled}>
             ${options}
@@ -6224,7 +6283,7 @@
             <i class="ti ti-arrow-right"></i> Verplaats + invite
           </button>
         </div>
-        <div style="font-size:11px;opacity:.7;margin-top:4px">Uitnodiging (WhatsApp + e-mail) wordt automatisch verstuurd.</div>`;
+        ${footNote}`;
       parent.insertBefore(block, ctxEl.nextSibling);
     }
 
@@ -9908,6 +9967,18 @@
     // Haal (of hergebruik uit cache) de lijst met aankomende events voor
     // de "Verplaats naar ander event"-dropdown. Cache 60s zodat we niet
     // bij elke lead-select een nieuwe HTTP-call doen.
+    //
+    // Bewust NIET /api/events-list (dat vraagt events.event.view en zou
+    // dus falen voor sales-users die alléén sales.tab.retentie /
+    // sales.customer.view hebben — analoog aan #911). We gebruiken de
+    // list-mode van /api/follow-up-event-bellijst die dezelfde
+    // permissie-triple accepteert als de omliggende cockpit.
+    //
+    // Rendement:
+    //   Array = geladen lijst (kan leeg zijn = écht 0 aankomende events)
+    //   null  = laden mislukt (netwerk / server-fout / 403 op iets anders)
+    // De caller onderscheidt op deze sentinel zodat "0 events" en
+    // "laden mislukt" nooit dezelfde melding krijgen.
     async function _loadUpcomingEventsForMove() {
       const state = _fase3State.noShow;
       const now = Date.now();
@@ -9915,18 +9986,26 @@
         return state.upcomingEvents;
       }
       try {
-        const r = await window.AgentShared.apiFetch('/api/events-list?status=published&limit=50');
+        const r = await window.AgentShared.apiFetch('/api/follow-up-event-bellijst?list=upcoming');
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
         const nowIso = new Date().toISOString();
-        const upcoming = (d.items || []).filter((ev) => ev.starts_at && ev.starts_at > nowIso);
+        // Endpoint returnt al alleen aankomende events (starts_at >= now,
+        // ascending, max 50), maar we filteren defensief nog een keer voor
+        // het edge-case waar het cache-item de starts_at-cutoff overleefde.
+        const upcoming = (Array.isArray(d.events) ? d.events : [])
+          .filter((ev) => ev && ev.starts_at && ev.starts_at > nowIso);
         upcoming.sort((a, b) => (a.starts_at || '').localeCompare(b.starts_at || ''));
         state.upcomingEvents = upcoming;
         state.upcomingEventsLoadedAt = now;
         return upcoming;
       } catch (e) {
-        console.warn('[no-show] upcoming events fetch:', e?.message || e);
-        return [];
+        // Fail-loud: eerder werd hier stil `[]` geretourneerd, wat de UI
+        // liet zien als "geen aankomende events" terwijl de call was
+        // gecrashed. Nu returnen we een sentinel + console.error zodat
+        // "leeg" en "mislukt" te onderscheiden zijn.
+        console.error('[move-to-event] upcoming events fetch mislukt:', e?.message || e);
+        return null;
       }
     }
 
