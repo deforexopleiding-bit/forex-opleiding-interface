@@ -487,6 +487,27 @@
   .ds-kpi-strip { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* Herbruikbare horizontale scroll-rij voor tab-navigaties, chip-rijen en
+   filter-strips die op smalle schermen niet passen. Alle items blijven
+   bereikbaar via touch-swipe; scrollbar visueel verborgen; subtiele
+   fade-mask aan de rechterkant maakt zichtbaar dat er meer inhoud is.
+   Direct children krijgen automatisch flex:0 0 auto zodat ze niet
+   krimpen. Introduced door de mobile-scrollable-nav PR (was voorheen
+   scoped op .wbx-chips in Acties-view). */
+.ds-scroll-row {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  /* Fade-mask op de rechter-edge — subtiel signaal dat er meer tabs zijn. */
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+          mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+}
+.ds-scroll-row::-webkit-scrollbar { display: none; }
+.ds-scroll-row > * { flex: 0 0 auto; }
+
 /* Herbruikbare tabel-scroll-wrapper voor brede data-tabellen die op
    smalle schermen niet passen. Body heeft overflow-x:hidden om page-
    scroll te voorkomen; deze utility maakt de tabel BINNEN de container
