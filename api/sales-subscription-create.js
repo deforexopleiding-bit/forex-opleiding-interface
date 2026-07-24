@@ -16,7 +16,10 @@ import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 import { getOrCreateTlCustomer } from './_lib/teamleader-contact.js';
 import { taxRateIdFor } from './_lib/teamleader-quotation.js';
 import { createTlInvoice } from './_lib/invoice-create-core.js';
-import { assertStartDateNotTooEarly } from './_lib/onboarding-start-date.js';
+// Voor subscription.start_date gebruiken we BEWUST de zwakkere gate:
+// "niet in het verleden" i.p.v. de onboarding-regel "vandaag+3d". Zie
+// motivering in de comment bij de gate-plek verderop (r~118).
+import { assertDateNotInPast } from './_lib/onboarding-start-date.js';
 
 // Offerte-beveiliging bouwstap 2/2 — €100 reserveringsfee bij late-start-
 // uitzondering met fee-akkoord. Fee is INCL. btw; excl. wordt afgeleid van
@@ -98,11 +101,40 @@ export default async function handler(req, res) {
       if (!s._lines.length) return res.status(400).json({ error: `Abonnement "${s.description || ''}" heeft geen regel met bedrag > 0` });
     }
 
-    // Ondergrens-gate (#816-consistent): elke sub-startdatum >= vandaag+3
-    // kalenderdagen NL. Voorkomt dat een subscription in het verleden start
-    // (Bubble payment-buffer + factuur-buffer -3d zouden anders historisch
-    // vallen). Bewuste keuze: NIET stil clampen, 400 met sub-index zodat de
-    // wizard-user weet welke sub aangepast moet worden.
+    // Ondergrens-gate voor subscription.start_date: "niet in het verleden".
+    //
+    // GESCHIEDENIS (belangrijk om NIET terug te consolideren):
+    //   PR #819 (18 jul 2026) zette hier de onboarding-regel "vandaag+3d"
+    //   neer, als spiegel-consolidatie van #816/#818. Achteraf bleek dat
+    //   dezelfde regel niet inhoudelijk geldt voor abonnementen. Fix (deze
+    //   PR): losgekoppeld, vandaag mag.
+    //
+    // WAAROM abonnementen géén +3d nodig hebben:
+    //   1. Bubble krijgt subscription.start_date NIET — Bubble-shift geldt
+    //      alleen op onboarding.start_date via _lib/onboarding-provision.js
+    //      (membership_state_date_date). Bubble.js heeft 0 verwijzingen
+    //      naar 'subscription' of 'starts_on'.
+    //   2. Nergens in onze code wordt subscription.start_date − N dagen
+    //      berekend. Alle -3d-shifts zitten op DEAL-velden
+    //      (payment_downpayment_date, payment_term_start_date), die de
+    //      sales-wizard afleidt van payment_start_date en die BLIJVEN
+    //      onder de +3d regel (sales-deal-create.js / sales-deal-update.js
+    //      onaangeroerd in deze PR).
+    //   3. Empirisch geverifieerd (Jeffrey, jul 2026): subscription
+    //      ff40e1af-04c8-4de2-8167-22eb2db7c5be had start_date 2026-07-04
+    //      bij created_at 2026-07-08 (4 dagen retroactief) en leverde
+    //      factuur 2026/1305 op met vervaldag 11 juli, volledig betaald.
+    //      Een startdatum op of vóór aanmaakdatum breekt de facturatie
+    //      dus niet.
+    //
+    // GEBRUIKSCASE die de losere regel oplost:
+    //   Cursus over 3 dagen + wens "klant heeft 3d betaaltijd vóór cursus"
+    //   → sub-start = vandaag. Onder de oude +3d gate was dat onmogelijk
+    //   (min=vandaag+3d viel na max=cursus−3d).
+    //
+    // BEHOUDEN: onboarding-endpoints, sales-deal-create/update,
+    // admin-onboarding-start-date houden assertStartDateNotTooEarly. Alleen
+    // sales-subscription-create versoepelt.
     for (let i = 0; i < subsNorm.length; i++) {
       const s = subsNorm[i];
       if (!s.start_date) {
@@ -112,14 +144,14 @@ export default async function handler(req, res) {
           code:  'START_DATE_MISSING',
         });
       }
-      const tooEarly = assertStartDateNotTooEarly(s.start_date);
-      if (tooEarly) {
+      const inPast = assertDateNotInPast(s.start_date, `Abonnement "${s.description || ''}" (index ${i}) start_date`);
+      if (inPast) {
         return res.status(400).json({
-          error: `Abonnement "${s.description || ''}" (index ${i}): ${tooEarly.message}`,
-          code:  tooEarly.code,
+          error: `Abonnement "${s.description || ''}" (index ${i}): ${inPast.message}`,
+          code:  inPast.code,
           field: 'subscriptions[' + i + '].start_date',
-          min:   tooEarly.min,
-          got:   tooEarly.got,
+          today: inPast.today,
+          got:   inPast.got,
         });
       }
     }
