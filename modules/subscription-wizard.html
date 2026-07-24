@@ -10,36 +10,61 @@
   <link rel="stylesheet" href="/styles/sales-redesign.css" />
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+    body{font-family:'Inter',system-ui,sans-serif;background:var(--ds-page, var(--bg));color:var(--ds-text, var(--text));min-height:100vh}
     .app{margin-left:220px;padding:24px 28px 60px;max-width:920px}
     h1{font-size:20px;font-weight:800;margin-bottom:2px}
-    .sub{font-size:12.5px;color:var(--text-dim)}
-    .progress{display:flex;gap:8px;margin:18px 0}
-    .progress .st{flex:1;text-align:center;font-size:11.5px;padding:6px;border-radius:6px;background:var(--bg-elev);border:1px solid var(--border);color:var(--text-faint)}
-    .progress .st.active{background:var(--accent-cyan,#0891b2);color:#fff;border-color:transparent}
+    .sub{font-size:12.5px;color:var(--ds-text-muted, var(--text-dim))}
+    .progress{display:flex;gap:8px;margin:18px 0;overflow-x:auto;scrollbar-width:none}
+    .progress::-webkit-scrollbar{display:none}
+    .progress .st{flex:1;text-align:center;font-size:11.5px;padding:6px;border-radius:6px;background:var(--ds-surface, var(--bg-elev));border:1px solid var(--ds-border, var(--border));color:var(--ds-text-faint, var(--text-faint));min-width:100px;flex:0 0 auto}
+    .progress .st.active{background:var(--ds-brand, var(--accent-cyan,#0891b2));color:#fff;border-color:transparent}
     .panel{display:none}.panel.active{display:block}
-    .card{background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:12px}
+    .card{background:var(--ds-surface, var(--bg-elev));border:1px solid var(--ds-border, var(--border));border-radius:10px;padding:16px;margin-bottom:12px}
     .field{margin-bottom:12px}
-    label{display:block;font-size:11.5px;font-weight:600;color:var(--text-dim);margin-bottom:4px}
-    input,select{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:13px}
+    label{display:block;font-size:11.5px;font-weight:600;color:var(--ds-text-muted, var(--text-dim));margin-bottom:4px}
+    input,select{width:100%;padding:8px 10px;border:1px solid var(--ds-border, var(--border));border-radius:6px;background:var(--ds-page, var(--bg));color:var(--ds-text, var(--text));font:inherit;font-size:13px}
     .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
-    .sub-card{border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;position:relative}
-    .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:600;background:var(--accent,#093d54);color:#fff;border:none}
-    .btn-ghost{background:var(--bg-elev);color:var(--text-dim);border:1px solid var(--border)}
-    .btn-success{background:#059669;color:#fff}
-    .btn-danger{background:var(--red,#dc2626);color:#fff}
+    .sub-card{border:1px solid var(--ds-border, var(--border));border-radius:8px;padding:12px;margin-bottom:10px;position:relative}
+    .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:6px;cursor:pointer;font:inherit;font-size:13px;font-weight:600;background:var(--ds-brand, var(--accent,#093d54));color:#fff;border:none}
+    .btn-ghost{background:var(--ds-surface, var(--bg-elev));color:var(--ds-text-muted, var(--text-dim));border:1px solid var(--ds-border, var(--border))}
+    .btn-success{background:var(--ds-success, #059669);color:#fff}
+    .btn-danger{background:var(--ds-danger, var(--red,#dc2626));color:#fff}
     .btn-sm{padding:4px 10px;font-size:11.5px}
-    .footer{display:flex;justify-content:space-between;margin-top:18px}
+    .footer{display:flex;justify-content:space-between;margin-top:18px;gap:10px;flex-wrap:wrap}
     .bonus{padding:14px;border-radius:8px;font-size:13px;line-height:1.5}
-    .bonus.green{background:rgba(5,150,105,.12);color:#059669}
-    .bonus.gray{background:var(--bg-elev-2);color:var(--text-dim)}
-    .preview{background:var(--bg-elev-2);border:1px solid var(--border);border-radius:6px;padding:14px;font-family:'Menlo',monospace;font-size:12px;white-space:pre-wrap;line-height:1.6}
-    .cust-result{padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:5px;cursor:pointer;font-size:12.5px}
-    .cust-result:hover{background:var(--bg-elev-2)}
-    .li-head{display:grid;grid-template-columns:1fr 1.1fr 92px 92px 68px 24px;gap:5px;font-size:10px;color:var(--text-faint);margin-bottom:3px;text-transform:uppercase}
+    .bonus.green{background:rgba(5,150,105,.12);color:var(--ds-success, #059669)}
+    .bonus.gray{background:var(--ds-surface-2, var(--bg-elev-2));color:var(--ds-text-muted, var(--text-dim))}
+    .preview{background:var(--ds-surface-2, var(--bg-elev-2));border:1px solid var(--ds-border, var(--border));border-radius:6px;padding:14px;font-family:'Menlo',monospace;font-size:12px;white-space:pre-wrap;line-height:1.6}
+    .cust-result{padding:8px 10px;border:1px solid var(--ds-border, var(--border));border-radius:6px;margin-bottom:5px;cursor:pointer;font-size:12.5px}
+    .cust-result:hover{background:var(--ds-surface-2, var(--bg-elev-2))}
+    .li-head{display:grid;grid-template-columns:1fr 1.1fr 92px 92px 68px 24px;gap:5px;font-size:10px;color:var(--ds-text-faint, var(--text-faint));margin-bottom:3px;text-transform:uppercase}
     .li-row{display:grid;grid-template-columns:1fr 1.1fr 92px 92px 68px 24px;gap:5px;align-items:center;margin-bottom:6px}
     .li-row input,.li-row select{padding:6px 7px;font-size:12px}
+
+    /* ── Mobile + DS pass (Module 3) ── */
+    @media (max-width: 720px) {
+      .app { margin-left: 0; padding: 14px; }
+      /* Alle inputs 16px + 44px hoog (iOS zoom-fix). */
+      input, select { font-size: 16px; padding: 12px; }
+      .li-row input, .li-row select { font-size: 15px; padding: 10px; }
+      .btn { padding: 12px 16px; min-height: 44px; }
+      .btn-sm { padding: 10px 14px; font-size: 12px; min-height: 44px; }
+      /* Grids stapelen. */
+      .row, .row3 { grid-template-columns: 1fr; }
+      /* Line-items: horizontaal scrollbaar zodat 6 kolommen bereikbaar
+         blijven zonder verbergen. Wrapt de li-head en li-row's samen
+         in dezelfde scroll-viewport door parent overflow-x:auto. */
+      .li-head, .li-row { min-width: 620px; }
+      .card:has(.li-row) { overflow-x: auto; scrollbar-width: none; }
+      .card:has(.li-row)::-webkit-scrollbar { display: none; }
+      /* Wizard-footer sticky. */
+      .footer { position: sticky; bottom: 0; background: var(--ds-page, var(--bg)); padding: 14px 0; margin: 0 -14px; padding-left: 14px; padding-right: 14px; z-index: 10; border-top: 1px solid var(--ds-border, var(--border)); }
+    }
+    @media (max-width: 480px) {
+      h1 { font-size: 18px; }
+      .progress .st { min-width: 88px; }
+    }
   </style>
 </head>
 <body>
