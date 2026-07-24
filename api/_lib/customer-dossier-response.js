@@ -155,23 +155,30 @@ function pendingActionToTimelineItems(pa) {
 function arrangementToTimelineItems(arr) {
   const items = [];
   const type = arr.type;
+  // VOORGESTELD tijdstip: live-schema heeft dedicated proposed_at kolom
+  // (gezet door arrangements-propose bij aanmaak). Val terug op created_at
+  // voor arrangements van vóór die kolom bestond.
   items.push({
     id:     'arr-create:' + arr.id,
     source: 'payment_arrangements',
-    at:     arr.created_at,
+    at:     arr.proposed_at || arr.created_at,
     ...labelForArrangementEvent(type, 'VOORGESTELD'),
     detail: null,
     actor:  arr.proposed_by ? { user_id: arr.proposed_by } : null,
     raw_type: `arr_${type}_voorgesteld`,
   });
-  if (arr.approved_at && String(arr.status || '').toUpperCase() !== 'VOORGESTELD') {
+  // ACTIEF-event: kolom heet in de live-DB `accepted_at` (niet approved_at
+  // zoals ooit in D1-spec). approved_by BESTAAT NIET op arrangements — de
+  // "wie approvde"-info hoort op de gekoppelde pending_action; hier laten
+  // we actor daarom null (arrangement zelf houdt 't niet bij).
+  if (arr.accepted_at && String(arr.status || '').toUpperCase() !== 'VOORGESTELD') {
     items.push({
       id:     'arr-appr:' + arr.id,
       source: 'payment_arrangements',
-      at:     arr.approved_at,
+      at:     arr.accepted_at,
       ...labelForArrangementEvent(type, 'ACTIEF'),
       detail: null,
-      actor:  arr.approved_by ? { user_id: arr.approved_by } : null,
+      actor:  null,
       raw_type: `arr_${type}_actief`,
     });
   }
