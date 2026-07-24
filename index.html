@@ -11,14 +11,20 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     /* ───────────────────────────────────────────────────────────────
-       Bento-dashboard Fase A — layout volgens docs/bento-mockup.png.png.
-       Grid: 6 kolommen op desktop, gestapeld op mobile.
+       Dashboard (bento-layout) — mobiel + design-system pass (PR 1).
+       Basisregels eerst, media-queries onderaan. Kleuren via --ds-*
+       met fallback op de shared/agent-shared bridge-tokens uit #932,
+       zodat 'ie nooit onleesbaar wordt als design-system.css om welke
+       reden dan ook uit de cascade valt.
+
+       Alle .card-varianten (span-2/-3/-4/-6, row-2) blijven werken op
+       desktop. Op ≤720 klappen ze naar 2 kolommen, op ≤480 naar 1.
        ─────────────────────────────────────────────────────────────── */
     html, body { height: 100%; }
     body {
       font-family: 'Inter', system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
+      background: var(--ds-page, var(--bg));
+      color: var(--ds-text, var(--text));
       min-height: 100vh;
       -webkit-font-smoothing: antialiased;
       line-height: 1.5;
@@ -50,42 +56,42 @@
       gap: 16px; flex-wrap: wrap;
       padding-bottom: 16px; margin-bottom: 18px;
     }
-    .greet-block { display: flex; flex-direction: column; gap: 2px; }
+    .greet-block { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .greet-title { font-size: 22px; font-weight: 800; letter-spacing: -.3px; }
-    .greet-sub   { font-size: 12.5px; color: var(--text-dim); }
-    .header-actions { display: flex; gap: 10px; align-items: center; }
+    .greet-sub   { font-size: 12.5px; color: var(--ds-text-muted, var(--text-dim)); }
+    .header-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
     .seg {
       display: inline-flex; padding: 3px;
-      background: var(--bg-elev-2);
-      border: 1px solid var(--border);
-      border-radius: 9px;
+      background: var(--ds-surface-2, var(--bg-elev-2));
+      border: 1px solid var(--ds-border, var(--border));
+      border-radius: 6px;
     }
     .seg button {
       background: transparent; border: none;
       padding: 6px 14px;
       font: inherit; font-size: 12px; font-weight: 600;
-      color: var(--text-dim); cursor: pointer;
-      border-radius: 7px;
+      color: var(--ds-text-muted, var(--text-dim)); cursor: pointer;
+      border-radius: 6px;
       transition: background .15s, color .15s;
     }
-    .seg button:hover { color: var(--text); }
+    .seg button:hover { color: var(--ds-text, var(--text)); }
     .seg button.active {
-      background: var(--bg-elev); color: var(--text);
+      background: var(--ds-surface, var(--bg-elev)); color: var(--ds-text, var(--text));
       box-shadow: 0 1px 2px rgba(0,0,0,0.08);
     }
     .seg button:disabled { opacity: .4; cursor: not-allowed; }
 
     .icon-btn {
       width: 36px; height: 36px;
-      background: var(--bg-elev);
-      border: 1px solid var(--border);
-      border-radius: 9px;
+      background: var(--ds-surface, var(--bg-elev));
+      border: 1px solid var(--ds-border, var(--border));
+      border-radius: 6px;
       display: grid; place-items: center;
-      cursor: pointer; color: var(--text-dim);
+      cursor: pointer; color: var(--ds-text-muted, var(--text-dim));
       transition: background .15s, color .15s;
     }
-    .icon-btn:hover { background: var(--bg-elev-2); color: var(--text); }
+    .icon-btn:hover { background: var(--ds-surface-2, var(--bg-elev-2)); color: var(--ds-text, var(--text)); }
     .icon-btn svg { width: 16px; height: 16px; }
     .icon-btn.spinning svg { animation: spin 1s linear infinite; }
     @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
@@ -97,11 +103,12 @@
       gap: 14px;
     }
     .card {
-      background: var(--bg-elev);
-      border: 1px solid var(--border);
-      border-radius: 14px;
+      background: var(--ds-surface, var(--bg-elev));
+      border: 1px solid var(--ds-border, var(--border));
+      border-radius: 10px;
       padding: 16px 18px;
       min-height: 100px;
+      min-width: 0;                  /* prevent grid-child from oprekken door lange strings of chart-canvas */
       display: flex; flex-direction: column; gap: 10px;
       position: relative;
     }
@@ -117,87 +124,94 @@
     }
     .card-title {
       font-size: 10.5px; font-weight: 700; letter-spacing: .08em;
-      text-transform: uppercase; color: var(--text-faint);
+      text-transform: uppercase; color: var(--ds-text-faint, var(--text-faint));
     }
-    .card-meta { font-size: 11px; color: var(--text-faint); }
-    .card-action { font-size: 11px; color: var(--accent-cyan); text-decoration: none; font-weight: 600; }
+    .card-meta { font-size: 11px; color: var(--ds-text-faint, var(--text-faint)); }
+    .card-action { font-size: 11px; color: var(--ds-brand, var(--accent-cyan)); text-decoration: none; font-weight: 600; }
     .card-action:hover { text-decoration: underline; }
 
     /* KPI cards met subtle gradient accents (light + dark, behoud onderscheid) */
-    .card.accent-blue   { background: linear-gradient(135deg, rgba(34,211,238,0.08),  transparent 80%), var(--bg-elev); }
-    .card.accent-violet { background: linear-gradient(135deg, rgba(168,85,247,0.08),  transparent 80%), var(--bg-elev); }
-    .card.accent-amber  { background: linear-gradient(135deg, rgba(245,158,11,0.10),  transparent 80%), var(--bg-elev); }
-    .card.accent-green  { background: linear-gradient(135deg, rgba(5,150,105,0.10),   transparent 80%), var(--bg-elev); }
-    .card.accent-rose   { background: linear-gradient(135deg, rgba(244,114,182,0.08), transparent 80%), var(--bg-elev); }
-    .card.accent-sky    { background: linear-gradient(135deg, rgba(125,211,252,0.10), transparent 80%), var(--bg-elev); }
+    .card.accent-blue   { background: linear-gradient(135deg, rgba(34,211,238,0.08),  transparent 80%), var(--ds-surface, var(--bg-elev)); }
+    .card.accent-violet { background: linear-gradient(135deg, rgba(168,85,247,0.08),  transparent 80%), var(--ds-surface, var(--bg-elev)); }
+    .card.accent-amber  { background: linear-gradient(135deg, rgba(245,158,11,0.10),  transparent 80%), var(--ds-surface, var(--bg-elev)); }
+    .card.accent-green  { background: linear-gradient(135deg, rgba(5,150,105,0.10),   transparent 80%), var(--ds-surface, var(--bg-elev)); }
+    .card.accent-rose   { background: linear-gradient(135deg, rgba(244,114,182,0.08), transparent 80%), var(--ds-surface, var(--bg-elev)); }
+    .card.accent-sky    { background: linear-gradient(135deg, rgba(125,211,252,0.10), transparent 80%), var(--ds-surface, var(--bg-elev)); }
 
-    .stat-big { font-size: 30px; font-weight: 800; letter-spacing: -.6px; line-height: 1.05; }
-    .stat-sub { font-size: 11.5px; color: var(--text-dim); margin-top: -2px; }
-    .stat-delta { font-size: 11px; color: var(--green); margin-top: 4px; }
+    .stat-big { font-size: 30px; font-weight: 800; letter-spacing: -.6px; line-height: 1.05; font-variant-numeric: tabular-nums; }
+    .stat-sub { font-size: 11.5px; color: var(--ds-text-muted, var(--text-dim)); margin-top: -2px; }
+    .stat-delta { font-size: 11px; color: var(--ds-success, var(--green)); margin-top: 4px; }
 
-    /* Row 1: KPI-trio. Drie cijfers in horizontal flex. */
+    /* Row 1: KPI-trio. Drie cijfers in horizontal flex; wrap op mobiel. */
     .kpi-trio {
       display: flex; gap: 18px;
       align-items: flex-end; margin-top: 4px;
+      flex-wrap: wrap;
     }
     .kpi-trio .one {
       display: flex; flex-direction: column; gap: 1px;
       min-width: 0;
     }
-    .kpi-trio .one .v { font-size: 22px; font-weight: 800; letter-spacing: -.3px; }
-    .kpi-trio .one .k { font-size: 10px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .07em; font-weight: 600; }
+    .kpi-trio .one .v { font-size: 22px; font-weight: 800; letter-spacing: -.3px; font-variant-numeric: tabular-nums; }
+    .kpi-trio .one .k { font-size: 10px; color: var(--ds-text-faint, var(--text-faint)); text-transform: uppercase; letter-spacing: .07em; font-weight: 600; }
 
     /* Email-big inline KPIs (46 / 2.4u / 37) */
-    .email-kpis { display: flex; gap: 24px; align-items: flex-end; }
-    .email-kpis .ek { display: flex; flex-direction: column; gap: 1px; }
-    .email-kpis .ek .v { font-size: 26px; font-weight: 800; letter-spacing: -.4px; }
-    .email-kpis .ek .k { font-size: 11px; color: var(--text-dim); }
+    .email-kpis { display: flex; gap: 24px; align-items: flex-end; flex-wrap: wrap; }
+    .email-kpis .ek { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+    .email-kpis .ek .v { font-size: 26px; font-weight: 800; letter-spacing: -.4px; font-variant-numeric: tabular-nums; }
+    .email-kpis .ek .k { font-size: 11px; color: var(--ds-text-muted, var(--text-dim)); }
     .email-kpis .placeholder-val { font-size: 26px; }
 
     /* Sub-stats (e.g. Lisa Detail) */
     .substat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
-    .substat .v { font-size: 20px; font-weight: 800; line-height: 1.1; }
-    .substat .k { font-size: 10.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; margin-top: 2px; }
+    .substat .v { font-size: 20px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .substat .k { font-size: 10.5px; color: var(--ds-text-faint, var(--text-faint)); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; margin-top: 2px; }
 
     /* Sentiment bar (placeholder Fase C) */
     .sentbar {
       display: flex; height: 8px; border-radius: 4px; overflow: hidden;
-      background: var(--bg-elev-2);
+      background: var(--ds-surface-2, var(--bg-elev-2));
     }
     .sentbar .seg-bar { transition: width .3s; }
-    .sentbar-legend { font-size: 10.5px; color: var(--text-dim); display: flex; gap: 12px; margin-top: 5px; }
+    .sentbar-legend { font-size: 10.5px; color: var(--ds-text-muted, var(--text-dim)); display: flex; gap: 12px; margin-top: 5px; flex-wrap: wrap; }
 
-    /* Outcome horizontal bars (matchen mockup) */
+    /* Outcome horizontal bars (matchen mockup). Kleuren via DS-status-tokens
+       met fallback op vaste kleuren zodat visueel-onderscheid intact blijft
+       ook als design-system.css niet laadt. */
     .outcome-rows { display: flex; flex-direction: column; gap: 7px; }
     .outcome-row {
       display: grid; grid-template-columns: 90px 1fr 44px;
       align-items: center; gap: 10px; font-size: 11.5px;
     }
-    .outcome-row .or-label { color: var(--text-dim); }
-    .outcome-row .or-bar { height: 8px; background: var(--bg-elev-2); border-radius: 4px; overflow: hidden; }
+    .outcome-row .or-label { color: var(--ds-text-muted, var(--text-dim)); }
+    .outcome-row .or-bar { height: 8px; background: var(--ds-surface-2, var(--bg-elev-2)); border-radius: 4px; overflow: hidden; }
     .outcome-row .or-fill { height: 100%; border-radius: 4px; transition: width .3s; }
-    .outcome-row .or-val  { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-dim); }
-    .outcome-row.klant     .or-fill { background: #059669; }
-    .outcome-row.verplaatst .or-fill { background: #6d28d9; }
-    .outcome-row.geen      .or-fill { background: #dc2626; }
-    .outcome-row.noshow    .or-fill { background: #f59e0b; }
+    .outcome-row .or-val  { text-align: right; font-variant-numeric: tabular-nums; color: var(--ds-text-muted, var(--text-dim)); }
+    .outcome-row.klant     .or-fill { background: var(--ds-success, #059669); }
+    .outcome-row.verplaatst .or-fill { background: var(--ds-info, #6d28d9); }
+    .outcome-row.geen      .or-fill { background: var(--ds-danger, #dc2626); }
+    .outcome-row.noshow    .or-fill { background: var(--ds-warning, #f59e0b); }
 
     /* Tickets-tabel */
     table.tix-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
     table.tix-table th {
       text-align: left; padding: 6px 6px;
       font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
-      color: var(--text-faint);
-      border-bottom: 1px solid var(--border);
+      color: var(--ds-text-faint, var(--text-faint));
+      border-bottom: 1px solid var(--ds-border, var(--border));
     }
     table.tix-table td {
-      padding: 7px 6px; border-bottom: 1px solid var(--border);
+      padding: 7px 6px; border-bottom: 1px solid var(--ds-border, var(--border));
       vertical-align: middle;
     }
     table.tix-table tr:last-child td { border-bottom: none; }
-    table.tix-table .tx-id { color: var(--text-faint); font-variant-numeric: tabular-nums; width: 32px; }
-    table.tix-table .tx-title { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 0; }
-    table.tix-table .tx-mod, table.tix-table .tx-time { color: var(--text-dim); white-space: nowrap; font-size: 11px; }
+    table.tix-table .tx-id { color: var(--ds-text-faint, var(--text-faint)); font-variant-numeric: tabular-nums; width: 32px; }
+    /* Titel-cel: op desktop 1 regel met ellipsis (behoud gedrag), op ≤720
+       twee regels toestaan zodat afkorting niet totaal onleesbaar wordt
+       (valkuil finance-reeks: "Klantnaam-cellen op twee regels i.p.v.
+       afkappen"). */
+    table.tix-table .tx-title { color: var(--ds-text, var(--text)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 0; }
+    table.tix-table .tx-mod, table.tix-table .tx-time { color: var(--ds-text-muted, var(--text-dim)); white-space: nowrap; font-size: 11px; }
 
     /* Lijsten (Activity / Top 5) */
     .list { display: flex; flex-direction: column; gap: 3px; }
@@ -205,18 +219,18 @@
       display: flex; align-items: center; gap: 10px;
       padding: 7px 4px;
       font-size: 12.5px;
-      border-bottom: 1px solid var(--border);
+      border-bottom: 1px solid var(--ds-border, var(--border));
     }
     .list-row:last-child { border-bottom: none; }
     .list-row .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
     .list-row .row-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .list-row .row-meta { color: var(--text-faint); font-size: 11px; white-space: nowrap; }
-    .list-row .row-strong { font-weight: 600; color: var(--text); }
-    .list-empty { color: var(--text-faint); font-size: 12px; padding: 12px 0; text-align: center; }
+    .list-row .row-meta { color: var(--ds-text-faint, var(--text-faint)); font-size: 11px; white-space: nowrap; }
+    .list-row .row-strong { font-weight: 600; color: var(--ds-text, var(--text)); }
+    .list-empty { color: var(--ds-text-faint, var(--text-faint)); font-size: 12px; padding: 12px 0; text-align: center; }
     .row-emoji { font-size: 14px; flex-shrink: 0; }
 
     /* Badges */
-    .badge { display: inline-block; padding: 1px 8px; border-radius: 8px; font-size: 10px; font-weight: 700; line-height: 1.5; }
+    .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 1.5; }
     .badge.lead { background: rgba(34,197,94,0.15); color: #15803d; }
     .badge.fact { background: rgba(234,179,8,0.18);  color: #a16207; }
     .badge.over { background: rgba(99,102,241,0.15); color: #4338ca; }
@@ -232,7 +246,7 @@
 
     /* Skeleton placeholders */
     .skel {
-      background: linear-gradient(90deg, var(--bg-elev-2) 0%, var(--bg) 50%, var(--bg-elev-2) 100%);
+      background: linear-gradient(90deg, var(--ds-surface-2, var(--bg-elev-2)) 0%, var(--ds-page, var(--bg)) 50%, var(--ds-surface-2, var(--bg-elev-2)) 100%);
       background-size: 200% 100%;
       animation: shimmer 1.4s linear infinite;
       border-radius: 6px;
@@ -243,14 +257,14 @@
 
     /* Placeholder waarde (Fase B/C) */
     .placeholder-val {
-      color: var(--text-faint);
+      color: var(--ds-text-faint, var(--text-faint));
       cursor: help;
-      border-bottom: 1px dotted var(--text-faint);
+      border-bottom: 1px dotted var(--ds-text-faint, var(--text-faint));
     }
 
     /* Error banner */
     .err {
-      font-size: 11.5px; color: #b91c1c;
+      font-size: 11.5px; color: var(--ds-danger, #b91c1c);
       background: rgba(220,38,38,0.08);
       border: 1px solid rgba(220,38,38,0.2);
       padding: 6px 10px; border-radius: 6px;
@@ -258,21 +272,42 @@
     [data-theme="dark"] .err { color: #fca5a5; background: rgba(220,38,38,0.12); }
 
     /* Email chart */
-    .chart-wrap { width: 100%; min-height: 160px; flex: 1; }
+    .chart-wrap { width: 100%; min-width: 0; min-height: 160px; flex: 1; }
 
-    /* Responsive */
+    /* ── Responsive — media queries NA de basisregels (bekende valkuil) ── */
     @media (max-width: 1280px) {
       .bento { grid-template-columns: repeat(4, 1fr); }
       .card.span-3 { grid-column: span 2; }
       .card.span-4 { grid-column: span 4; }
       .card.span-6 { grid-column: span 4; }
     }
-    @media (max-width: 880px) {
-      .app { margin-left: 0; padding: 14px; }
+    /* Tablet / smalle laptop — 2 kolommen bento, .app-offset komt uit
+       agent-shared.css (@1024px, PR #898). */
+    @media (max-width: 720px) {
+      .app { padding: 14px; }
       .bento { grid-template-columns: repeat(2, 1fr); gap: 10px; }
       .card.span-2, .card.span-3, .card.span-4, .card.span-6 { grid-column: span 2; }
       .card.row-2 { grid-row: span 1; }
       .email-kpis { gap: 14px; }
+      /* Header-actions naar volle breedte onder greet zodat de seg + refresh
+         niet uit de viewport duwt (390 gemeten: header-actions=430px). */
+      .dash-header { gap: 12px; }
+      .header-actions { width: 100%; justify-content: space-between; }
+      /* Touch-targets ≥44px (Apple HIG). */
+      .icon-btn { width: 44px; height: 44px; }
+      .seg button { padding: 10px 14px; min-height: 44px; }
+      /* Tickets-titel mag 2 regels wrappen — afgekapte titel is nutteloos. */
+      table.tix-table .tx-title { white-space: normal; max-width: none; }
+    }
+    /* Telefoon — 1 kolom, geen span-effect meer. */
+    @media (max-width: 480px) {
+      .bento { grid-template-columns: 1fr; }
+      .card.span-2, .card.span-3, .card.span-4, .card.span-6 { grid-column: span 1; }
+      .stat-big { font-size: 26px; }
+      .kpi-trio .one .v, .email-kpis .ek .v { font-size: 20px; }
+      /* .outcome-row label-kolom smaller op zeer smal scherm zodat de bar
+         nog een zinvolle breedte overhoudt. */
+      .outcome-row { grid-template-columns: 72px 1fr 40px; gap: 8px; }
     }
   </style>
 </head>
@@ -384,9 +419,9 @@
       <div style="border-top:1px solid var(--border); padding-top:10px; margin-top:auto">
         <div class="card-title" style="margin-bottom:6px">Sentiment <span style="text-transform:none;color:var(--text-faint);font-weight:500"> (komt in Fase C)</span></div>
         <div class="sentbar">
-          <div class="seg-bar" style="width:0%; background:#059669"></div>
-          <div class="seg-bar" style="width:0%; background:#9ca3af"></div>
-          <div class="seg-bar" style="width:0%; background:#dc2626"></div>
+          <div class="seg-bar" style="width:0%; background:var(--ds-success, #059669)"></div>
+          <div class="seg-bar" style="width:0%; background:var(--ds-text-faint, #9ca3af)"></div>
+          <div class="seg-bar" style="width:0%; background:var(--ds-danger, #dc2626)"></div>
         </div>
         <div class="sentbar-legend">
           <span>— positief</span><span>— neutraal</span><span>— negatief</span>
@@ -399,22 +434,24 @@
         <div class="card-title">Tickets</div>
         <div class="card-meta" id="tixHeadMeta">— open · — opgelost (wk)</div>
       </div>
-      <table class="tix-table">
-        <thead>
-          <tr>
-            <th class="tx-id">#</th>
-            <th>Titel</th>
-            <th>Type</th>
-            <th>Mod.</th>
-            <th>Tijd</th>
-          </tr>
-        </thead>
-        <tbody id="tixTbody">
-          <tr><td colspan="5"><div class="skel line"></div></td></tr>
-          <tr><td colspan="5"><div class="skel line"></div></td></tr>
-          <tr><td colspan="5"><div class="skel line"></div></td></tr>
-        </tbody>
-      </table>
+      <div class="data-table-wrap">
+        <table class="tix-table">
+          <thead>
+            <tr>
+              <th class="tx-id">#</th>
+              <th>Titel</th>
+              <th>Type</th>
+              <th>Mod.</th>
+              <th>Tijd</th>
+            </tr>
+          </thead>
+          <tbody id="tixTbody">
+            <tr><td colspan="5"><div class="skel line"></div></td></tr>
+            <tr><td colspan="5"><div class="skel line"></div></td></tr>
+            <tr><td colspan="5"><div class="skel line"></div></td></tr>
+          </tbody>
+        </table>
+      </div>
       <div class="card-meta" id="tixFooter" style="margin-top:auto; padding-top:6px; border-top:1px solid var(--border);">
         Avg: <span class="placeholder-val" data-tooltip="Komt binnenkort (Fase B)">—</span> · per module: <span id="tixPerMod">—</span>
       </div>
