@@ -1047,13 +1047,41 @@
       .info-row { padding: 14px 12px; }
       .info-row-check { width: 22px; height: 22px; }
 
-      /* Modals fullscreen op telefoon zodat content ruim past. */
+      /* Modals fullscreen op telefoon zodat content ruim past. iOS-fix:
+         dvh + safe-area (zie fix #937 voor tickets/sales-cluster). 100vh
+         op iOS Safari rekent inclusief toolbar → footer valt achter
+         Safari-balk; 100dvh rekent alleen de zichtbare viewport. */
       .modal-overlay { padding: 0; align-items: stretch; }
       .modal-overlay .modal-card,
       .modal-overlay > div:not(.modal-overlay) {
         max-width: 100% !important; width: 100% !important;
-        max-height: 100vh !important; height: 100vh !important;
+        max-height: 100vh !important;
+        max-height: 100dvh !important;
+        height: 100vh !important;
+        height: 100dvh !important;
         border-radius: 0 !important; margin: 0 !important;
+        display: flex !important; flex-direction: column !important;
+      }
+      /* Body-slot: elke direct-child <div> in de modal-card die niet
+         header/footer is, wordt de scrollende body via last-of-many-type
+         heuristiek. Email.html modals hebben géén uniforme .modal-body
+         class — sommige heten .taak-form-body, .lr-body, etc. Deze
+         :not-selector pakt alle child-divs behalve degenen met een
+         herkenbare header/footer-rol; die krijgen flex 1 + overflow-y. */
+      .modal-overlay .modal-card > *:not(.modal-header):not(.modal-footer):not(.modal-head):not(.modal-foot):not(header):not(footer) {
+        flex: 1 1 auto !important;
+        min-height: 0 !important;
+        overflow-y: auto !important;
+      }
+      /* Elke footer-achtige element krijgt flex-shrink:0 + safe-area
+         padding zodat knoppen niet achter home-indicator vallen. Sticky
+         is niet nodig binnen flex-column parent (footer wordt onderaan
+         geplaatst door de flex-layout). */
+      .modal-overlay .modal-footer,
+      .modal-overlay .modal-foot,
+      .modal-overlay footer {
+        flex-shrink: 0;
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
       }
 
       /* Bulk-selectie-bar op mobiel iets compacter. */
