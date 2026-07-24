@@ -4146,6 +4146,7 @@
       <button                data-wb-sub="facturen"    type="button" title="Facturen">Facturen</button>
       <button                data-wb-sub="opruimen"    type="button" title="Opruimen">Opruimen</button>
       <button                data-wb-sub="arrangements" type="button" title="Betalingsregelingen">Afspraken</button>
+      <button                data-wb-sub="pipeline"    type="button" title="Pipeline-overzicht van alle aanmaan-runs">Pipeline</button>
       <div class="wbx-nav-spacer"></div>
       <!-- Verversen: alleen zichtbaar op de Te doen-sub (getoggled door
            setSubView). Geen data-wb-sub attribuut → sub-nav-handler pikt 'm
@@ -4689,7 +4690,6 @@
       <!-- Sub-tab strip -->
       <div class="sr-segments" id="dunningSubNav" style="margin-bottom:18px">
         <button class="sr-seg active" data-dunning-sub="overzicht" type="button">Overzicht</button>
-        <button class="sr-seg" data-dunning-sub="pipeline" type="button">Pipeline</button>
         <button class="sr-seg" data-dunning-sub="probleemklanten" type="button">Probleemklanten</button>
         <button class="sr-seg" data-dunning-sub="workflows" type="button">Workflows</button>
         <button class="sr-seg" data-dunning-sub="templates" type="button">Templates</button>
@@ -5004,37 +5004,6 @@
           <button class="sr-abtn" id="dunHistMoreBtn" type="button" style="font-size:11.5px;padding:5px 12px" hidden>
             <i class="ti ti-chevron-down" style="margin-right:4px"></i>Meer laden
           </button>
-        </div>
-      </div>
-
-      <!-- Sub-view: Pipeline (PR C — hangt op /api/finance-pipeline-overview
-           uit PR A #927 + /api/finance-dunning-run-skip-step uit PR B #928). -->
-      <div id="dunningSubPipeline" hidden>
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:10px">
-          <div>
-            <h2 style="margin:0;font-size:18px;font-weight:700">Pipeline</h2>
-            <div style="font-size:11.5px;color:var(--ds-text-faint,#7a8b92);margin-top:2px">Alle lopende, gepauzeerde en recent afgeronde aanmaan-runs. Klik een filter om te focussen; combineer voor kruisdoorsnedes.</div>
-          </div>
-          <button class="sr-abtn" id="dunPlRefreshBtn" type="button" style="font-size:11.5px;padding:6px 12px"><i class="ti ti-refresh" style="margin-right:4px"></i>Vernieuwen</button>
-        </div>
-
-        <!-- KPI-strip: 9 klikbare tellers. Op mobiel horizontaal scrollbaar
-             (patroon van #dunProbFilters). Klik = multi-select toggle. -->
-        <div class="pl-kpis-wrap">
-          <div class="pl-kpis" id="dunPlKpis" role="tablist" aria-label="Pipeline-filters">
-            <div class="pl-kpi-empty" style="grid-column:1/-1;text-align:center;padding:24px 0;color:var(--ds-text-faint,#7a8b92);font-size:13px">Laden…</div>
-          </div>
-        </div>
-
-        <!-- Lijst-header + toon-aantal + reset-filter link -->
-        <div id="dunPlListHeader" style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px;font-size:12.5px;color:var(--ds-text-muted,#48585f)">
-          <span id="dunPlListCount">—</span>
-          <button type="button" id="dunPlResetFilters" class="pl-reset-btn" hidden><i class="ti ti-x" style="margin-right:3px"></i>Filters wissen</button>
-        </div>
-
-        <!-- De lijst zelf. Renderer bouwt kaart-per-run met acties. -->
-        <div id="dunPlList">
-          <div style="text-align:center;padding:24px;color:var(--ds-text-faint,#7a8b92);font-size:13px">Laden…</div>
         </div>
       </div>
 
@@ -6638,7 +6607,7 @@
     // in de bijbehorende groep zit.
     // Ronde 1 herontwerp: Acties (open-acties) en Gesprekken (inbox) zijn nu
     // primair in de .wbx-nav; ze zitten daarom niet meer onder Meer ▾.
-    const MEER_SUBS  = ['vandaag', 'pipeline', 'arrangements', 'probleemklanten', 'crediteren', 'incasso'];
+    const MEER_SUBS  = ['vandaag', 'arrangements', 'probleemklanten', 'crediteren', 'incasso'];
     const INST_SUBS  = ['templates', 'workflows', 'geschiedenis', 'sandbox'];
     // Selector werkt zowel voor de nieuwe .wbx-nav-knoppen (direct kind,
     // data-wb-sub/data-wb-toggle) als voor de bestaande .wb-menu-btn's.
@@ -8265,7 +8234,6 @@
     }
     const SUB_IDS = {
       overzicht:        'dunningSubOverzicht',
-      pipeline:         'dunningSubPipeline',
       probleemklanten:  'dunningSubProbleemklanten',
       workflows:        'dunningSubWorkflows',
       templates:        'dunningSubTemplates',
@@ -8317,16 +8285,6 @@
         wireArrangOnce();
         wireArrangProposeOnce();
         loadArrangements();
-      }
-      // Pipeline sub-tab (PR C) — laadt overview-endpoint + wired filter/actions.
-      if (target === 'pipeline' && !_dunPipelineLoadedOnce) {
-        _dunPipelineLoadedOnce = true;
-        wireDunPipelineOnce();
-      }
-      if (target === 'pipeline') {
-        // Altijd verversen bij tab-open (data is snel verouderd door
-        // pause/resume/skip-acties uit andere sub-tabs).
-        loadDunPipeline();
       }
     }));
     wireDunTplModal();
@@ -9402,11 +9360,11 @@
   // kan bijv. "wacht op klant" + "wacht op regeling" tegelijk zien om alle
   // stilstanden in beeld te krijgen. Consistent met approv-pill-patroon
   // elders in finance-tasks.
-  let _dunPipelineLoadedOnce = false;
   const _dunPl = {
-    data:   null,
-    filter: new Set(),   // actieve bucket-keys; leeg = alle tonen
+    data:    null,
+    filter:  new Set(),   // actieve bucket-keys; leeg = alle tonen
     loading: false,
+    mounted: false,       // shell in #wb-sub-pipeline geïnjecteerd?
   };
   const PL_BUCKET_META = [
     { key: 'vandaag',                 label: 'Vandaag',        group: 'tijd'  },
@@ -24662,15 +24620,39 @@
     chat           : { convId: null, messages: [], loading: false, canSend: false, phone: null },
   };
 
+  // Fix #929: mount PR-C-overview (KPI-strip + lijst) in #wb-sub-pipeline.
+  // De oude _pipeState/_pipeShellHtml/_pipeWireShell-kanban was intern werk
+  // dat via de wanbetalers-nav niet bereikbaar was; deze host is de canonieke
+  // pipeline-mount voor de Pipeline sub-tab.
   function mountDunPipelineHost() {
     const host = document.getElementById('wb-sub-pipeline');
     if (!host) return;
-    if (!_pipeState.mounted) {
-      host.innerHTML = _pipeShellHtml();
-      _pipeWireShell();
-      _pipeState.mounted = true;
+    if (!_dunPl.mounted) {
+      host.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <div>
+            <h2 style="margin:0;font-size:18px;font-weight:700">Pipeline</h2>
+            <div style="font-size:11.5px;color:var(--ds-text-faint,#7a8b92);margin-top:2px">Alle lopende, gepauzeerde en recent afgeronde aanmaan-runs. Klik een filter om te focussen; combineer voor kruisdoorsnedes.</div>
+          </div>
+          <button class="sr-abtn" id="dunPlRefreshBtn" type="button" style="font-size:11.5px;padding:6px 12px"><i class="ti ti-refresh" style="margin-right:4px"></i>Vernieuwen</button>
+        </div>
+        <div class="pl-kpis-wrap">
+          <div class="pl-kpis" id="dunPlKpis" role="tablist" aria-label="Pipeline-filters">
+            <div class="pl-kpi-empty" style="grid-column:1/-1;text-align:center;padding:24px 0;color:var(--ds-text-faint,#7a8b92);font-size:13px">Laden…</div>
+          </div>
+        </div>
+        <div id="dunPlListHeader" style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px;font-size:12.5px;color:var(--ds-text-muted,#48585f)">
+          <span id="dunPlListCount">—</span>
+          <button type="button" id="dunPlResetFilters" class="pl-reset-btn" hidden><i class="ti ti-x" style="margin-right:3px"></i>Filters wissen</button>
+        </div>
+        <div id="dunPlList">
+          <div style="text-align:center;padding:24px;color:var(--ds-text-faint,#7a8b92);font-size:13px">Laden…</div>
+        </div>
+      `;
+      wireDunPipelineOnce();
+      _dunPl.mounted = true;
     }
-    loadPipelineData({ background: false });
+    loadDunPipeline();
   }
 
   function _pipeShellHtml() {
