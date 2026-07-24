@@ -158,24 +158,45 @@ function _hasDownpaymentSub(){
 function _maxSubStartIso(){
   return _shiftDaysIso(_courseStartIso(), -3);
 }
-// Vroegst-toegestane subscription-startdatum: vandaag NL + 3 kalenderdagen.
-// Spiegelt api/_lib/onboarding-start-date.js (getMinOnboardingStartDate) +
-// de andere front-end helpers (_obMinStartDateNL / sales-wizard._swMinStartDateNL).
-// Reden: bij startdatum in het verleden trekt Bubble's payment-buffer 't nog
-// verder terug + de -3d factuur-buffer valt anders in het verleden.
+// Vroegst-toegestane subscription-startdatum: VANDAAG NL (geen +3d).
+//
+// LET OP — waarom hier ANDERS dan sales-wizard / offerte-detail /
+// onboarding-overzicht (die WEL +3d gebruiken):
+//
+// Deze helper geldt voor SUBSCRIPTION-startdatums (abbo-veld). De +3d-
+// regel die elders hangt, is een spiegel-consolidatie uit PR #819 die
+// achteraf niet inhoudelijk van toepassing bleek op abonnementen:
+//   1. Bubble krijgt subscription.start_date NIET (alleen
+//      onboarding.start_date via onboarding-provision.js
+//      membership_state_date_date). De -3d-shift van Bubble raakt
+//      onboardings, geen subscriptions.
+//   2. Er wordt nergens een (sub.start_date - N) berekend. Alle -3d-
+//      shifts zitten op DEAL-velden (payment_downpayment_date,
+//      payment_term_start_date) — die BLIJVEN onder de +3d regel.
+//   3. Empirisch geverifieerd: subscription ff40e1af-04c8-4de2-8167-
+//      22eb2db7c5be had start_date 2026-07-04 bij created_at 2026-07-08
+//      (4 dagen retroactief) en leverde factuur 2026/1305 op met
+//      vervaldag 11 juli, volledig betaald. Een startdatum op of vóór
+//      aanmaakdatum breekt de facturatie dus niet.
+//
+// GEBRUIKSCASE: cursus over 3 dagen + wens "klant heeft 3d betaaltijd
+// vóór cursus" → sub-start = vandaag. Onder de oude +3d regel was dat
+// onmogelijk (min=vandaag+3d viel na max=cursus−3d).
+//
+// SERVER-ZIJDIG spiegelt dit: api/sales-subscription-create.js gebruikt
+// assertDateNotInPast (geen +3d), terwijl onboarding-create /
+// admin-onboarding-start-date / sales-deal-create / sales-deal-update
+// assertStartDateNotTooEarly (+3d) BEHOUDEN.
+//
+// Bij WIJZIGEN: raak ook api/sales-subscription-create.js aan; beide
+// moeten gelijk blijven aan elkaar (client + server), maar apart van
+// de onboarding/deal-regel.
 function _swMinStartDateNL(){
   const fmt = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/Amsterdam',
     year: 'numeric', month: '2-digit', day: '2-digit',
   });
-  const nlDateStr = fmt.format(new Date());
-  const [y, m, d] = nlDateStr.split('-').map((s) => parseInt(s, 10));
-  const anchor = new Date(Date.UTC(y, m - 1, d));
-  anchor.setUTCDate(anchor.getUTCDate() + 3);
-  const yy = anchor.getUTCFullYear();
-  const mm = String(anchor.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(anchor.getUTCDate()).padStart(2, '0');
-  return `${yy}-${mm}-${dd}`;
+  return fmt.format(new Date());
 }
 // kind: 'downpayment' | 'term' — bepaalt de bovengrens per sub.
 // Kern-fix (jul 2026): als de berekende max ONDER de min zou vallen (cursus
