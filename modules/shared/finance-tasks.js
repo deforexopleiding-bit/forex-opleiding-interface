@@ -790,6 +790,7 @@
       const cust = it.customer;
       const custCell = (cust && cust.id)
         ? '<a href="/modules/klanten.html?id=' + esc(cust.id) + '" style="color:var(--brand-secondary,var(--accent-cyan,#06b6d4));text-decoration:none;font-weight:500" onclick="event.stopPropagation()">' + esc(cust.name || '(onbekend)') + '</a>'
+          + ' <button type="button" class="approv-mini-btn" data-task-dossier="' + esc(cust.id) + '" title="Bekijk status — klantdossier openen" onclick="event.stopPropagation()" style="margin-left:6px;padding:2px 6px;font-size:11px"><i class="ti ti-layout-sidebar-right-expand"></i></button>'
         : esc((cust && cust.name) ? cust.name : '(geen klant)');
 
       const inv = it.invoice;
@@ -847,6 +848,19 @@
     });
     tbody.querySelectorAll('[data-task-mark-not-executed]').forEach(btn => {
       btn.addEventListener('click', () => openMarkNotExecutedModal(btn.getAttribute('data-task-mark-not-executed')));
+    });
+    // PR C — klantdossier-knop naast klantnaam. stopPropagation zit al
+    // inline op de <button> zodat rij-klik (openTaskDetail) niet ook triggert.
+    // Fail-loud: als shared helper ontbreekt → toast.
+    tbody.querySelectorAll('[data-task-dossier]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const custId = btn.getAttribute('data-task-dossier');
+        if (typeof window.AgentShared?.openCustomerDossier === 'function') {
+          window.AgentShared.openCustomerDossier(custId);
+        } else {
+          window.AgentShared?.showToast?.('Dossier-module niet geladen — herlaad de pagina', 'error');
+        }
+      });
     });
   }
 
