@@ -32,9 +32,12 @@ function baseInput() {
     ],
     runs: [{ id: 'r1', status: 'paused', paused_by_conversation_id: null, paused_by_arrangement_id: null, updated_at: iso(-3600000) }],
     arrangements: [
+      // Echte live-schema: proposed_at + accepted_at (GEEN approved_by/approved_at).
+      // Zie api/arrangements-detail.js:44-49 als canonical select-ref.
       { id: 'a1', type: 'UITSTEL', status: 'VOORGESTELD',
-        created_at: iso(-2 * 86400000), updated_at: iso(-2 * 86400000), approved_at: null,
-        proposed_by: 'u1', approved_by: null },
+        created_at: iso(-2 * 86400000), updated_at: iso(-2 * 86400000),
+        proposed_at: iso(-2 * 86400000), accepted_at: null,
+        proposed_by: 'u1', cancellation_reason: null },
     ],
     subscriptions: [
       { id: 's1', status: 'active', start_date: '2026-01-01', amount: 99, term_count: 12 },
@@ -389,6 +392,66 @@ test('notes: admin met notes-fetch fout → status=error (niet reason=admin_only
   const n = resp.blocks.gebeurd.data.notes;
   assert.equal(n.granted, true);
   assert.equal(n.status, 'error');
+});
+
+// ── Arrangement-timeline: proposed_at / accepted_at (live-schema) ─────────
+
+test('arrangement-timeline: proposed_at gebruikt als VOORGESTELD-tijdstip (met fallback naar created_at)', () => {
+  const input = baseInput();
+  input.arrangements = [
+    // Met proposed_at expliciet gezet — moet dat als 'at' krijgen.
+    { id: 'a1', type: 'UITSTEL', status: 'ACTIEF',
+      created_at: iso(-10 * 86400000),   // ouder
+      proposed_at: iso(-2 * 86400000),   // recenter → deze moet gewinnen
+      accepted_at: iso(-1 * 86400000),
+      proposed_by: 'u1' },
+  ];
+  const resp = buildDossierResponse(input, { canBase: true, canFinance: true, canAdmin: true }, { nowMs: NOW_MS });
+  const voorgesteld = resp.blocks.gebeurd.data.timeline.find((i) => i.raw_type === 'arr_UITSTEL_voorgesteld');
+  assert.ok(voorgesteld);
+  assert.equal(voorgesteld.at, iso(-2 * 86400000));
+});
+
+test('arrangement-timeline: created_at fallback als proposed_at ontbreekt', () => {
+  const input = baseInput();
+  input.arrangements = [
+    { id: 'a1', type: 'UITSTEL', status: 'ACTIEF',
+      created_at: iso(-5 * 86400000),
+      proposed_at: null, accepted_at: iso(-1 * 86400000),
+      proposed_by: 'u1' },
+  ];
+  const resp = buildDossierResponse(input, { canBase: true, canFinance: true, canAdmin: true }, { nowMs: NOW_MS });
+  const voorgesteld = resp.blocks.gebeurd.data.timeline.find((i) => i.raw_type === 'arr_UITSTEL_voorgesteld');
+  assert.equal(voorgesteld.at, iso(-5 * 86400000));
+});
+
+test('arrangement-timeline: accepted_at → ACTIEF-event met actor=null (approved_by bestaat niet)', () => {
+  const input = baseInput();
+  input.arrangements = [
+    { id: 'a1', type: 'SPLITSING', status: 'ACTIEF',
+      created_at: iso(-5 * 86400000),
+      proposed_at: iso(-5 * 86400000),
+      accepted_at: iso(-2 * 86400000),
+      proposed_by: 'u1' },
+  ];
+  const resp = buildDossierResponse(input, { canBase: true, canFinance: true, canAdmin: true }, { nowMs: NOW_MS });
+  const actief = resp.blocks.gebeurd.data.timeline.find((i) => i.raw_type === 'arr_SPLITSING_actief');
+  assert.ok(actief);
+  assert.equal(actief.at, iso(-2 * 86400000));
+  // approved_by bestaat niet op arrangement — actor MOET null zijn.
+  assert.equal(actief.actor, null);
+});
+
+test('arrangement-timeline: geen accepted_at → géén ACTIEF-event (alleen VOORGESTELD)', () => {
+  const input = baseInput();
+  input.arrangements = [
+    { id: 'a1', type: 'UITSTEL', status: 'VOORGESTELD',
+      created_at: iso(-2 * 86400000), proposed_at: iso(-2 * 86400000),
+      accepted_at: null, proposed_by: 'u1' },
+  ];
+  const resp = buildDossierResponse(input, { canBase: true, canFinance: true, canAdmin: true }, { nowMs: NOW_MS });
+  const actief = resp.blocks.gebeurd.data.timeline.find((i) => i.raw_type === 'arr_UITSTEL_actief');
+  assert.equal(actief, undefined);
 });
 
 test('drie-way onderscheid: leeg ≠ geblokkeerd ≠ mislukt (canFinance=true, geen fout, lege lijsten)', () => {
