@@ -178,20 +178,51 @@ function _swMinStartDateNL(){
   return `${yy}-${mm}-${dd}`;
 }
 // kind: 'downpayment' | 'term' — bepaalt de bovengrens per sub.
+// Kern-fix (jul 2026): als de berekende max ONDER de min zou vallen (cursus
+// begint binnen 6 dagen), laat max weg. De ondergrens (vandaag+3d) is een
+// harde SEPA-eis; de bovengrens (cursus−3d) is een streven dat botst zodra
+// er te weinig tijd tot cursusstart is. Voorheen: min > max → datumveld
+// dood; nu: min als enige grens, gebruiker kan gewoon een datum kiezen.
 function _maxSubStartFor(kind){
   const course = _courseStartIso();
   if(!course) return null;
-  if(kind === 'term' && _hasDownpaymentSub()) return _shiftDaysIso(course, +30);
-  return _shiftDaysIso(course, -3);
+  const rawMax = (kind === 'term' && _hasDownpaymentSub())
+    ? _shiftDaysIso(course, +30)
+    : _shiftDaysIso(course, -3);
+  const min = _swMinStartDateNL();
+  if (rawMax && min && rawMax < min) return null;   // safety: min > max = kapot bereik
+  return rawMax;
+}
+// Diagnose-helper: is de cursus-buffer losgelaten (rawMax < min)? De UI
+// toont dan een uitleg-hint zodat de gebruiker weet waarom er geen boven-
+// grens is en wat het gevolg is voor de eerste incasso.
+function _maxSubReleasedFor(kind){
+  const course = _courseStartIso();
+  if(!course) return false;
+  const rawMax = (kind === 'term' && _hasDownpaymentSub())
+    ? _shiftDaysIso(course, +30)
+    : _shiftDaysIso(course, -3);
+  const min = _swMinStartDateNL();
+  return !!(rawMax && min && rawMax < min);
 }
 function _subKindOf(sub){
   const desc = String(sub?.description||'').toLowerCase();
   return desc.startsWith('aanbetaling') ? 'downpayment' : 'term';
 }
+// Prefill-clamp: houdt de voorgevulde waarde binnen [min, max]. Voorheen
+// werd blind naar max geklampt (cursus−3d), waardoor de prefill onder de
+// min (vandaag+3d) kon vallen — dan toonde het datumveld een waarde die
+// buiten z'n eigen bereik lag. Nu: éérst boven-clampen (indien max bestaat),
+// dan onder-clampen naar min. Als de cursus-buffer is losgelaten
+// (_maxSubReleasedFor=true), telt alleen de min.
 function _clampSubStartFor(iso, kind){
-  const max = _maxSubStartFor(kind);
-  if(!max || !iso) return iso;
-  return (iso > max) ? max : iso;
+  if(!iso) return iso;
+  const rawMax = _maxSubStartFor(kind);   // null als bovengrens is losgelaten
+  const min    = _swMinStartDateNL();
+  let out = iso;
+  if (rawMax && out > rawMax) out = rawMax;
+  if (min   && out < min)     out = min;
+  return out;
 }
 // Legacy naam (was: altijd op start−3d clampen). Behouden voor
 // terugvalgevallen die geen kind kunnen bepalen; klemt op de STRENGSTE
@@ -597,7 +628,7 @@ function renderSubs(){
       ${state.subs.length>1?`<button class="btn btn-danger btn-sm" data-rm="${i}" style="position:absolute;top:10px;right:10px">×</button>`:''}
       <div class="field"><label>Omschrijving abonnement</label>${descSelect(s,i)}</div>
       <div class="row3">
-        <div class="field"><label>Startdatum</label><input type="date" data-f="start_date" data-i="${i}" value="${esc(s.start_date)}" min="${_swMinStartDateNL()}"${_maxSubStartFor(_subKindOf(s))?` max="${_maxSubStartFor(_subKindOf(s))}"`:''} /></div>
+        <div class="field"><label>Startdatum</label><input type="date" data-f="start_date" data-i="${i}" value="${esc(s.start_date)}" min="${_swMinStartDateNL()}"${_maxSubStartFor(_subKindOf(s))?` max="${_maxSubStartFor(_subKindOf(s))}"`:''} />${_maxSubReleasedFor(_subKindOf(s))?`<div style="margin-top:4px;font-size:11.5px;color:#b45309;line-height:1.4">De cursus start binnenkort. De eerste incasso valt daardoor op of net na de startdatum.</div>`:''}</div>
         <div class="field"><label>Aantal termijnen <span style="color:var(--danger,#dc2626)">*</span></label><input type="number" min="1" required data-f="term_count" data-i="${i}" value="${esc(s.term_count)}" title="Verplicht — minimaal 1 termijn" /></div>
         <div class="field"><label>Einddatum (auto)</label><input type="date" readonly data-end="${i}" style="background:var(--bg-elev-2)" value="${calcEnd(s.start_date,s.term_count)}" /></div>
       </div>
