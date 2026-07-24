@@ -1,6 +1,14 @@
 /* ─── agent-shared.css ───────────────────────────────────────────────────────
    Gedeelde stijlen voor agents.html, meetings.html, control-center.html
-   ──────────────────────────────────────────────────────────────────────────── */
+   ────────────────────────────────────────────────────────────────────────────
+
+   PR 0 preflight (feat/shared-css-preflight): design-system.css wordt hier
+   ge-imported. Vóór deze PR laadde alleen finance.html 'em expliciet via een
+   <link>-tag; alle andere modules laden agent-shared.css maar niet
+   design-system.css, waardoor .ds-kpi-strip / .ds-modal-* / .data-table-wrap
+   etc. buiten finance dode letter waren. @import moet de eerste regel zijn
+   (CSS-spec) — vandaar boven de reset-regel. */
+@import url("../../styles/design-system.css");
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -298,7 +306,10 @@ body::before {
      krijgen padding via die eigen regel; margin-left komt uit deze
      shared-regel. Padding-top-reset alleen op `.main` — pagina's die eigen
      `.app { padding:X }` zetten worden zo niet ongewild ontpadded. */
-  .main { margin-left:0; padding-top:0; }
+  /* PR 0 preflight: .main-content erbij — follow-up.html / follow-up-admin.html
+     / follow-up-lead.html gebruiken .main-content i.p.v. .main, misten daardoor
+     de mobile-offset-reset en klemden op 390px 220px opzij tegen de sidebar. */
+  .main, .main-content { margin-left:0; padding-top:0; }
   body .app { margin-left:0; }
   /* Hamburger toont in de topbar; theme-toggle blijft rechtsboven bereikbaar.
      Topbar is sinds de full-width-migratie sowieso left:0 op alle

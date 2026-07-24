@@ -672,3 +672,95 @@
   .ds-search-kbd { display: none; }
   .ds-search-input { padding-right: 12px; }
 }
+
+/* ---------- PR 0 preflight utilities ---------------------------------------
+   Opt-in helpers voor de aankomende module-mobiel-PR's. Bewust NIET breed
+   op bestaande selectors (.modal-card, input, .sr-abtn) getarget om
+   finance.html en andere reeds werkende schermen niet te breken. Modules
+   voegen deze classes toe waar ze het patroon nodig hebben. ---------- */
+
+/* K3 — modal fullscreen op mobiel. Opt-in door aan een bestaande modal-card
+   deze class toe te voegen: <div class="modal-card ds-modal-full-mobile">.
+   Onder 640px pakt 'ie de volle viewport-hoogte + geen radius, zodat de
+   modal op telefoon werkt als een aparte pagina. Op tablet/desktop is 'ie
+   een no-op. */
+@media (max-width: 640px) {
+  .ds-modal-full-mobile {
+    max-width: 100% !important;
+    width:     100% !important;
+    max-height: 100vh !important;
+    height:     100vh !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+    display: flex;
+    flex-direction: column;
+  }
+  /* Sticky action-strip binnen een fullscreen-modal — plaats knoppen in
+     <div class="ds-modal-actions-sticky"> onderaan zodat ze altijd zichtbaar
+     blijven als de body scrollt. */
+  .ds-modal-actions-sticky {
+    position: sticky;
+    bottom: 0;
+    background: var(--ds-surface, var(--surface-card, #fff));
+    border-top: 1px solid var(--ds-border, var(--border-subtle, #e5e7eb));
+    padding: 12px 16px;
+    margin-top: auto;
+    display: flex;
+    gap: 8px;
+    z-index: 2;
+  }
+}
+
+/* K4 — touch-target ≥44px opt-in. Voeg .ds-tap toe aan een knop/link die
+   op mobiel bereikbaar moet blijven (iOS Human Interface Guideline). */
+@media (max-width: 640px) {
+  .ds-tap {
+    min-height: 44px;
+    min-width:  44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+/* K5 — iOS zoom-fix opt-in. Voeg .ds-input-mobile toe aan input/select/
+   textarea die op mobiel bewerkt worden zonder dat iOS in-zoomt bij focus.
+   Safari zoomt in als input font-size <16px is; max(...) houdt desktop
+   ongewijzigd. */
+@media (max-width: 640px) {
+  input.ds-input-mobile,
+  select.ds-input-mobile,
+  textarea.ds-input-mobile { font-size: max(16px, 1rem); }
+}
+
+/* K6 — kaart-per-rij fallback voor tabellen die op mobiel niet passen.
+   Gebruikspatroon: markup blijft <table>, maar op ≤640px wordt elke rij
+   een verticale kaart met label:value-pairs. Vereist data-label-attr op
+   elke <td> (die naast de mobile-view onzichtbaar is op desktop). Nette
+   opt-in via <table class="ds-stack-mobile"> op de tabel-node. */
+@media (max-width: 640px) {
+  .ds-stack-mobile,
+  .ds-stack-mobile thead,
+  .ds-stack-mobile tbody,
+  .ds-stack-mobile tr,
+  .ds-stack-mobile td { display: block; width: 100%; }
+  .ds-stack-mobile thead { position: absolute; left: -9999px; top: -9999px; }
+  .ds-stack-mobile tr {
+    border: 1px solid var(--ds-border, var(--border-subtle, #e5e7eb));
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 10px;
+    background: var(--ds-surface, var(--surface-card, #fff));
+  }
+  .ds-stack-mobile td {
+    padding: 4px 0;
+    border: 0;
+    text-align: left;
+  }
+  .ds-stack-mobile td[data-label]::before {
+    content: attr(data-label) ": ";
+    font-weight: 600;
+    color: var(--ds-text-muted, var(--text-muted, #64748b));
+    margin-right: 6px;
+  }
+}
