@@ -109,6 +109,7 @@ export default async function handler(req, res) {
       whatsappRes,
       pendingActionsRes,
       customerNotesRes,
+      freeTasksRes,
     ] = await Promise.all([
       fetchCustomer(customerId),
       canFinance ? fetchOpenInvoices(customerId) : Promise.resolve([]),
@@ -119,6 +120,12 @@ export default async function handler(req, res) {
       fetchWhatsappMessages(customerId),
       canFinance ? fetchPendingActions(customerId) : Promise.resolve([]),
       canAdmin   ? fetchCustomerNotes(customerId) : Promise.resolve([]),
+      // PR D — vrije taken (taken_items) gekoppeld via customer_id.
+      // Beschikbaar voor iedereen met dossier-toegang (canBase); taken zijn
+      // operationeel en bevatten geen financiële gegevens, dus geen extra
+      // gate op canFinance. Filter op status <> 'done' zodat alleen open
+      // taken meekomen (in lijn met partial index taken_items_customer_open_idx).
+      fetchFreeTasks(customerId),
     ]);
 
     if (!customerRes) {
@@ -155,6 +162,7 @@ export default async function handler(req, res) {
         whatsappMessages: whatsappRes,
         signals,
         customerNotes:    customerNotesRes,
+        freeTasks:        freeTasksRes,
       },
       { canBase, canFinance, canAdmin },
       { beforeCursor: before, timelineLimit }
@@ -298,4 +306,38 @@ async function fetchCustomerNotes(cid) {
     .limit(BRON_CAP);
   if (error) { console.warn('[dossier] customer_notes:', error.message); return []; }
   return data || [];
+}
+
+// PR D — open vrije taken (taken_items.customer_id). Alleen niet-afgeronde
+// taken (status <> 'done') — de partial index taken_items_customer_open_idx
+// dekt precies deze query. Fail-soft bij 42P01/42703 zodat het endpoint niet
+// crasht als de migratie nog niet is gedraaid.
+async function fetchFreeTasks(cid) {
+  const { data, error } = await supabaseAdmin
+    .from('taken_items')
+    .select('id, titel, omschrijving, prioriteit, categorie, status, deadline, assigned_to_id, aangemaakt')
+    .eq('customer_id', cid)
+    .neq('status', 'done')
+    .order('deadline', { ascending: true, nullsFirst: false })
+    .limit(BRON_CAP);
+  if (error) {
+    if (error.code === '42P01' || error.code === '42703') return [];
+    console.warn('[dossier] free_tasks:', error.message);
+    return [];
+  }
+  // Assignee-namen batch-lookup (identiek patroon aan api/taken.js).
+  const rows = data || [];
+  const assigneeIds = Array.from(new Set(rows.map((r) => r.assigned_to_id).filter(Boolean)));
+  let nameMap = {};
+  if (assigneeIds.length) {
+    const { data: profiles } = await supabaseAdmin
+      .from('profiles')
+      .select('id, full_name, email')
+      .in('id', assigneeIds);
+    for (const p of profiles || []) nameMap[p.id] = p.full_name || p.email || null;
+  }
+  return rows.map((r) => ({
+    ...r,
+    assigned_to_name: r.assigned_to_id ? (nameMap[r.assigned_to_id] || null) : null,
+  }));
 }
