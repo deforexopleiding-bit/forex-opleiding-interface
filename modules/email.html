@@ -14,12 +14,18 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
       /* === LIGHT THEME (default) === */
-      --bg: #fafafa; --bg-elev: #ffffff; --bg-elev-2: #f8fafc; --bg-elev-3: #f1f5f9;
-      --border: #e5e7eb; --border-strong: #d1d5db;
-      --text: #0f172a; --text-dim: #475569; --text-faint: #94a3b8;
-      --accent-cyan: #2563eb; --accent-violet: #6d28d9;
+      /* Alle basis-tokens hier krijgen een DS-fallback via var(--ds-X, <legacy>).
+         Zo gebruikt de hele file (350+ selectors die --bg/--text/etc lezen)
+         automatisch design-system tokens waar beschikbaar, zonder dat elke
+         property individueel gepatcht hoeft — één plek voor de fallback.
+         Bij aanwezigheid van design-system.css (nu overal via #932 @import)
+         wint --ds-X; anders valt 'ie terug op de originele legacy hex. */
+      --bg: var(--ds-page, #fafafa); --bg-elev: var(--ds-surface, #ffffff); --bg-elev-2: var(--ds-surface-2, #f8fafc); --bg-elev-3: #f1f5f9;
+      --border: var(--ds-border, #e5e7eb); --border-strong: #d1d5db;
+      --text: var(--ds-text, #0f172a); --text-dim: var(--ds-text-muted, #475569); --text-faint: var(--ds-text-faint, #94a3b8);
+      --accent-cyan: var(--ds-brand, #2563eb); --accent-violet: #6d28d9;
       --accent-grad: linear-gradient(135deg, #093d54 0%, #688b9b 100%);
-      --green: #059669; --amber: #d97706; --red: #dc2626;
+      --green: var(--ds-success, #059669); --amber: var(--ds-warning, #d97706); --red: var(--ds-danger, #dc2626);
       --hero-blue-from: #042C53; --hero-blue-to: #0C447C;
       --hero-green-from: #173404; --hero-green-to: #27500A;
       --nav-item-hover: rgba(0,0,0,0.04);
@@ -27,12 +33,12 @@
       --nav-item-active-text: #093d54;
     }
     [data-theme="dark"] {
-      --bg: #0a0b10; --bg-elev: #13151c; --bg-elev-2: #181b25; --bg-elev-3: #1f2330;
-      --border: rgba(255,255,255,0.08); --border-strong: rgba(255,255,255,0.14);
-      --text: rgba(255,255,255,0.95); --text-dim: rgba(255,255,255,0.72); --text-faint: rgba(255,255,255,0.6);
-      --accent-cyan: #22d3ee; --accent-violet: #a855f7;
+      --bg: var(--ds-page, #0a0b10); --bg-elev: var(--ds-surface, #13151c); --bg-elev-2: var(--ds-surface-2, #181b25); --bg-elev-3: #1f2330;
+      --border: var(--ds-border, rgba(255,255,255,0.08)); --border-strong: rgba(255,255,255,0.14);
+      --text: var(--ds-text, rgba(255,255,255,0.95)); --text-dim: var(--ds-text-muted, rgba(255,255,255,0.72)); --text-faint: var(--ds-text-faint, rgba(255,255,255,0.6));
+      --accent-cyan: var(--ds-brand, #22d3ee); --accent-violet: #a855f7;
       --accent-grad: linear-gradient(135deg, #22d3ee 0%, #a855f7 100%);
-      --green: #10b981; --amber: #f59e0b; --red: #ef4444;
+      --green: var(--ds-success, #10b981); --amber: var(--ds-warning, #f59e0b); --red: var(--ds-danger, #ef4444);
       --hero-blue-from: #0C447C; --hero-blue-to: #185FA5;
       --hero-green-from: #27500A; --hero-green-to: #3B6D11;
       --nav-item-hover: rgba(255,255,255,0.05);
@@ -985,6 +991,113 @@
       .info-row { grid-template-columns: auto 1fr auto; }
       .info-row--sel { grid-template-columns: auto auto 1fr auto; }
       .reclame-row { grid-template-columns: 1fr auto; }
+    }
+
+    /* ── Mobile + DS pass (Module 4) — media NA basisregels (bekende valkuil) ─ */
+    @media (max-width: 720px) {
+      /* Header-actions is 6 knoppen op flex-row — 860px op 390 vóór fix.
+         Wrap zodat alle knoppen zichtbaar/aantikbaar zijn en de pagina niet
+         horizontaal uit viewport valt. */
+      .header-actions { flex-wrap: wrap; width: 100%; gap: 6px; }
+      .header-actions .btn { flex: 1 1 auto; min-width: 0; }
+
+      /* Tab-bar: 5+ tabs met tekst+count passen niet op 390 met flex:1.
+         Horizontaal scrollen (nowrap + overflow-x:auto), tab-btn white-space
+         nowrap + flex:0 0 auto zodat labels leesbaar blijven en geen tab
+         verborgen wordt. Zelfde patroon als .tabs-scroll-wrap uit tickets. */
+      .tab-bar { overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; }
+      .tab-bar::-webkit-scrollbar { display: none; }
+      .tab { flex: 0 0 auto; white-space: nowrap; padding: 12px 14px; min-height: 44px; font-size: 13px; }
+
+      /* Alle knoppen 44px touch-target. */
+      .btn { padding: 12px 14px; min-height: 44px; font-size: 13px; }
+
+      /* Filter-bar: al flex-wrap:wrap in basis; controls 16px + 44 hoog. */
+      .filter-bar select, .filter-bar input { font-size: 16px; padding: 10px 12px; min-height: 44px; }
+
+      /* COMPOSE — kern van deze module. Textarea 16px (iOS zoom-fix),
+         hoger min-height voor comfortabel typen. Meta-inputs (To/Cc/Bcc)
+         idem 16px. */
+      .reply-box { font-size: 16px; min-height: 220px; padding: 14px; }
+      .reply-meta-input, .reply-meta-select { font-size: 16px !important; padding: 12px 10px !important; min-height: 44px; }
+      .reply-meta-label { width: 44px; font-size: 12px; }
+      .reply-meta-btns .btn { padding: 10px 12px; min-height: 44px; }
+
+      /* Reply-actions (verzenden/annuleren) sticky onderaan de detail-pane.
+         Zo blijven Verzend/Ongedaan bereikbaar terwijl je door de textarea
+         scrolt. -14px negatieve marge lijnt met .app padding op 720. */
+      .reply-actions {
+        position: sticky; bottom: 0; z-index: 20;
+        background: var(--bg-elev); border-top: 1px solid var(--border);
+        padding: 10px 14px; margin: 10px -14px -16px;
+        gap: 8px;
+      }
+      .reply-actions .btn { min-height: 44px; padding: 12px 16px; flex: 1 1 auto; }
+
+      /* Bijlage-bar 44px hoog. */
+      .attach-bar-label { padding: 10px 14px; min-height: 44px; font-size: 13px; }
+      .attach-item, .attach-preview-item { padding: 10px 12px; font-size: 13px; }
+
+      /* Email-list-pane niet meer beperkt tot 320px — laat 'em vol zijn zodat
+         gebruiker kan scrollen door alle mails. Detail-pane komt eronder
+         doordat @900 al split naar 1 kolom heeft geklapt. */
+      .email-list-pane { max-height: 60vh; }
+
+      /* Info-row: al @640 naar 3 kolommen; touch-cellen groter. */
+      .info-row { padding: 14px 12px; }
+      .info-row-check { width: 22px; height: 22px; }
+
+      /* Modals fullscreen op telefoon zodat content ruim past. iOS-fix:
+         dvh + safe-area (zie fix #937 voor tickets/sales-cluster). 100vh
+         op iOS Safari rekent inclusief toolbar → footer valt achter
+         Safari-balk; 100dvh rekent alleen de zichtbare viewport. */
+      .modal-overlay { padding: 0; align-items: stretch; }
+      .modal-overlay .modal-card,
+      .modal-overlay > div:not(.modal-overlay) {
+        max-width: 100% !important; width: 100% !important;
+        max-height: 100vh !important;
+        max-height: 100dvh !important;
+        height: 100vh !important;
+        height: 100dvh !important;
+        border-radius: 0 !important; margin: 0 !important;
+        display: flex !important; flex-direction: column !important;
+      }
+      /* Body-slot: elke direct-child <div> in de modal-card die niet
+         header/footer is, wordt de scrollende body via last-of-many-type
+         heuristiek. Email.html modals hebben géén uniforme .modal-body
+         class — sommige heten .taak-form-body, .lr-body, etc. Deze
+         :not-selector pakt alle child-divs behalve degenen met een
+         herkenbare header/footer-rol; die krijgen flex 1 + overflow-y. */
+      .modal-overlay .modal-card > *:not(.modal-header):not(.modal-footer):not(.modal-head):not(.modal-foot):not(header):not(footer) {
+        flex: 1 1 auto !important;
+        min-height: 0 !important;
+        overflow-y: auto !important;
+      }
+      /* Elke footer-achtige element krijgt flex-shrink:0 + safe-area
+         padding zodat knoppen niet achter home-indicator vallen. Sticky
+         is niet nodig binnen flex-column parent (footer wordt onderaan
+         geplaatst door de flex-layout). */
+      .modal-overlay .modal-footer,
+      .modal-overlay .modal-foot,
+      .modal-overlay footer {
+        flex-shrink: 0;
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+      }
+
+      /* Bulk-selectie-bar op mobiel iets compacter. */
+      .bulk-selectie-bar { padding: 10px 12px; gap: 8px; }
+      .bulk-vt-chip { padding: 10px 14px; min-height: 44px; font-size: 13px; }
+      .bulk-selectie-bar .bulk-count { flex-basis: 100%; }
+    }
+    @media (max-width: 480px) {
+      /* Sub-header krimp. */
+      .brand h1 { font-size: 16px; }
+      .brand .crumb { font-size: 11px; }
+      /* Attach-name niet meer 180px cappen op klein scherm; ellipsis pakt over
+         volle beschikbare breedte in de rij. */
+      .attach-name { max-width: none; flex: 1 1 auto; }
+      /* Card-subject compacter. */
+      .card-subject { font-size: 14px; }
     }
   </style>
 </head>
