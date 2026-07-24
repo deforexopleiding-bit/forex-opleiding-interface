@@ -276,7 +276,7 @@ function emptyResponse(nowMs) {
   return {
     generated_at: new Date(nowMs).toISOString(),
     counts: {
-      deze_week: 0, loopt: 0,
+      vandaag: 0, morgen: 0, later: 0,
       wacht_klant: 0, wacht_regeling: 0, wacht_gesprek: 0, wacht_handmatig: 0,
       wacht_openstaande_actie: 0,
       klaar: 0,

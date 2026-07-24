@@ -10,9 +10,16 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // ── Constanten ─────────────────────────────────────────────────────────────
+//
+// De actieve buckets zijn granulair op basis van NL-kalenderdag (niet op
+// 7-daagse window — dat bleek in productie geen onderscheid te maken want
+// alle ~79 actieve runs vielen binnen een week). Vandaag / morgen / later
+// geven de eigenaar direct zicht op wat er over enkele uren gebeurt en
+// wat morgen aan de beurt komt.
 
-const BUCKET_DEZE_WEEK              = 'deze_week';
-const BUCKET_LOOPT                  = 'loopt';
+const BUCKET_VANDAAG                = 'vandaag';
+const BUCKET_MORGEN                 = 'morgen';
+const BUCKET_LATER                  = 'later';
 const BUCKET_WACHT_KLANT            = 'wacht_klant';
 const BUCKET_WACHT_REGELING         = 'wacht_regeling';
 const BUCKET_WACHT_GESPREK          = 'wacht_gesprek';
@@ -22,8 +29,9 @@ const BUCKET_KLAAR                  = 'klaar';
 
 // Menselijk-leesbare labels voor de UI (KPI-strip-labels).
 const BUCKET_LABELS = Object.freeze({
-  [BUCKET_DEZE_WEEK]:               'Deze week',
-  [BUCKET_LOOPT]:                   'Loopt',
+  [BUCKET_VANDAAG]:                 'Vandaag',
+  [BUCKET_MORGEN]:                  'Morgen',
+  [BUCKET_LATER]:                   'Later',
   [BUCKET_WACHT_KLANT]:             'Wacht op klant',
   [BUCKET_WACHT_REGELING]:          'Wacht op regeling',
   [BUCKET_WACHT_GESPREK]:           'Wacht op gesprek',
@@ -31,6 +39,34 @@ const BUCKET_LABELS = Object.freeze({
   [BUCKET_WACHT_OPENSTAANDE_ACTIE]: 'Wacht op openstaande actie',
   [BUCKET_KLAAR]:                   'Klaar (laatste 30 dagen)',
 });
+
+// Formatteer een timestamp (ms of ISO-string) naar yyyy-mm-dd in NL-tijd
+// (Europe/Amsterdam). Consistent met api/_lib/onboarding-start-date.js.
+// Retourneert null bij invalid input.
+function nlDateOf(input) {
+  const d = (typeof input === 'number') ? new Date(input)
+          : (input instanceof Date) ? input
+          : (typeof input === 'string') ? new Date(input)
+          : null;
+  if (!d || isNaN(d.getTime())) return null;
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Amsterdam',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+  return fmt.format(d);   // "yyyy-mm-dd"
+}
+
+// yyyy-mm-dd + N kalenderdagen. UTC-anker om DST-drift te vermijden.
+function shiftNlDate(ymd, deltaDays) {
+  if (typeof ymd !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null;
+  const [y, m, d] = ymd.split('-').map(Number);
+  const anchor = new Date(Date.UTC(y, m - 1, d));
+  anchor.setUTCDate(anchor.getUTCDate() + (Number(deltaDays) || 0));
+  const yy = anchor.getUTCFullYear();
+  const mm = String(anchor.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(anchor.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
 
 // ── classifyRunBucket ──────────────────────────────────────────────────────
 //
@@ -47,8 +83,13 @@ const BUCKET_LABELS = Object.freeze({
 //                                             niet nog eens hoeven te doen)
 //   status='paused' → sub-tak op basis van reden (kolom + log-fallback)
 //   status='active' + latestLog.event_type='skipped_open_action' → 'wacht_openstaande_actie'
-//   status='active' + next_action_at ≤ nu+7d → 'deze_week'
-//   status='active' → 'loopt'
+//   status='active' → vandaag / morgen / later op basis van NL-datum van
+//                     next_action_at. Grens ligt op middernacht Europe/
+//                     Amsterdam (niet op nu+24u); 22:59 UTC = 00:59 NL
+//                     valt in "morgen" ook al is dat maar 3 uur weg.
+//                     Vandaag/morgen/later i.p.v. deze-week/loopt omdat
+//                     die eerste indeling in productie geen onderscheid
+//                     maakte (~79 actieve runs allemaal binnen een week).
 export function classifyRunBucket(run, latestLog, nowMs) {
   if (!run) return null;
   const status = String(run.status || '').toLowerCase();
@@ -76,11 +117,15 @@ export function classifyRunBucket(run, latestLog, nowMs) {
     const evt = String(latestLog?.event_type || '').toLowerCase();
     if (evt === 'skipped_open_action') return BUCKET_WACHT_OPENSTAANDE_ACTIE;
 
-    // Deze week vs verderop.
-    const naTs = run.next_action_at ? Date.parse(run.next_action_at) : null;
-    if (!Number.isFinite(naTs))       return BUCKET_LOOPT;
-    if (naTs <= now + 7 * DAY_MS)     return BUCKET_DEZE_WEEK;
-    return BUCKET_LOOPT;
+    // Vandaag / morgen / later op basis van NL-kalenderdag.
+    // Runs zonder next_action_at vallen in 'later' (kunnen niet ingeschat).
+    if (!run.next_action_at) return BUCKET_LATER;
+    const naNlDate  = nlDateOf(run.next_action_at);
+    const todayNl   = nlDateOf(now);
+    if (!naNlDate || !todayNl) return BUCKET_LATER;
+    if (naNlDate <= todayNl)        return BUCKET_VANDAAG;   // ook verleden = "vandaag actie"
+    if (naNlDate === shiftNlDate(todayNl, 1)) return BUCKET_MORGEN;
+    return BUCKET_LATER;
   }
 
   return null;
@@ -291,8 +336,9 @@ export function incassoCondition(arrangements, refusalFlagged, settings) {
 // run._bucket staat (mutatie door caller).
 export function buildBucketCounts(runsWithBucket) {
   const counts = {
-    [BUCKET_DEZE_WEEK]:               0,
-    [BUCKET_LOOPT]:                   0,
+    [BUCKET_VANDAAG]:                 0,
+    [BUCKET_MORGEN]:                  0,
+    [BUCKET_LATER]:                   0,
     [BUCKET_WACHT_KLANT]:             0,
     [BUCKET_WACHT_REGELING]:          0,
     [BUCKET_WACHT_GESPREK]:           0,
@@ -313,8 +359,9 @@ export function buildBucketCounts(runsWithBucket) {
 }
 
 export {
-  BUCKET_DEZE_WEEK,
-  BUCKET_LOOPT,
+  BUCKET_VANDAAG,
+  BUCKET_MORGEN,
+  BUCKET_LATER,
   BUCKET_WACHT_KLANT,
   BUCKET_WACHT_REGELING,
   BUCKET_WACHT_GESPREK,
@@ -322,4 +369,6 @@ export {
   BUCKET_WACHT_OPENSTAANDE_ACTIE,
   BUCKET_KLAAR,
   BUCKET_LABELS,
+  nlDateOf,
+  shiftNlDate,
 };

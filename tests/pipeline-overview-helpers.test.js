@@ -18,8 +18,9 @@ import {
   projectRunTimeline,
   incassoCondition,
   buildBucketCounts,
-  BUCKET_DEZE_WEEK,
-  BUCKET_LOOPT,
+  BUCKET_VANDAAG,
+  BUCKET_MORGEN,
+  BUCKET_LATER,
   BUCKET_WACHT_KLANT,
   BUCKET_WACHT_REGELING,
   BUCKET_WACHT_GESPREK,
@@ -28,26 +29,87 @@ import {
   BUCKET_KLAAR,
 } from '../api/_lib/pipeline-overview-helpers.js';
 
+// NOW = vr 24 juli 2026 12:00 NL (10:00 UTC, CEST +2). Vandaag NL = 24 jul.
 const NOW_MS = Date.parse('2026-07-24T10:00:00Z');
 const iso    = (offsetMs) => new Date(NOW_MS + offsetMs).toISOString();
 const days   = (n) => n * 86400000;
 
 // ═══════════ classifyRunBucket ═════════════════════════════════════════
 
-test('bucket: active met next_action_at binnen 7d → deze_week', () => {
-  const run = { status: 'active', next_action_at: iso(days(3)) };
-  assert.equal(classifyRunBucket(run, null, NOW_MS), BUCKET_DEZE_WEEK);
+// ── vandaag / morgen / later — NL-kalenderdag-buckets ────────────────────
+
+test('bucket: active met next_action_at = vandaag 14:00 NL → vandaag', () => {
+  // 12:00 UTC = 14:00 NL op 24 juli
+  const run = { status: 'active', next_action_at: '2026-07-24T12:00:00Z' };
+  assert.equal(classifyRunBucket(run, null, NOW_MS), BUCKET_VANDAAG);
 });
 
-test('bucket: active met next_action_at > 7d → loopt', () => {
+test('bucket: active met next_action_at in het verleden → vandaag (moet nu opgepakt worden)', () => {
+  const run = { status: 'active', next_action_at: iso(-days(3)) };
+  assert.equal(classifyRunBucket(run, null, NOW_MS), BUCKET_VANDAAG);
+});
+
+test('bucket: active met next_action_at = morgen 09:00 NL → morgen', () => {
+  // 07:00 UTC 25 juli = 09:00 NL op 25 juli
+  const run = { status: 'active', next_action_at: '2026-07-25T07:00:00Z' };
+  assert.equal(classifyRunBucket(run, null, NOW_MS), BUCKET_MORGEN);
+});
+
+test('bucket: active met next_action_at = overmorgen → later', () => {
+  const run = { status: 'active', next_action_at: '2026-07-26T09:00:00Z' };
+  assert.equal(classifyRunBucket(run, null, NOW_MS), BUCKET_LATER);
+});
+
+test('bucket: active met next_action_at = 14 dagen weg → later', () => {
   const run = { status: 'active', next_action_at: iso(days(14)) };
-  assert.equal(classifyRunBucket(run, null, NOW_MS), BUCKET_LOOPT);
+  assert.equal(classifyRunBucket(run, null, NOW_MS), BUCKET_LATER);
 });
 
-test('bucket: active zonder next_action_at → loopt (defensief)', () => {
+test('bucket: active zonder next_action_at → later (defensief)', () => {
   const run = { status: 'active', next_action_at: null };
-  assert.equal(classifyRunBucket(run, null, NOW_MS), BUCKET_LOOPT);
+  assert.equal(classifyRunBucket(run, null, NOW_MS), BUCKET_LATER);
 });
+
+// ── Middernacht-overgang NL-tijd (kritiek edge-case) ─────────────────────
+
+test('bucket: 23:59 NL vandaag → vandaag (net vóór middernacht)', () => {
+  // 21:59 UTC 24 juli = 23:59 NL 24 juli (CEST +2 in juli)
+  const run = { status: 'active', next_action_at: '2026-07-24T21:59:00Z' };
+  assert.equal(classifyRunBucket(run, null, NOW_MS), BUCKET_VANDAAG);
+});
+
+test('bucket: 00:00 NL morgen → morgen (net na middernacht)', () => {
+  // 22:00 UTC 24 juli = 00:00 NL 25 juli
+  const run = { status: 'active', next_action_at: '2026-07-24T22:00:00Z' };
+  assert.equal(classifyRunBucket(run, null, NOW_MS), BUCKET_MORGEN);
+});
+
+test('bucket: 00:01 NL morgen → morgen', () => {
+  // 22:01 UTC 24 juli = 00:01 NL 25 juli
+  const run = { status: 'active', next_action_at: '2026-07-24T22:01:00Z' };
+  assert.equal(classifyRunBucket(run, null, NOW_MS), BUCKET_MORGEN);
+});
+
+test('bucket: 23:59 NL morgen → morgen (net vóór einde morgen)', () => {
+  // 21:59 UTC 25 juli = 23:59 NL 25 juli
+  const run = { status: 'active', next_action_at: '2026-07-25T21:59:00Z' };
+  assert.equal(classifyRunBucket(run, null, NOW_MS), BUCKET_MORGEN);
+});
+
+test('bucket: 00:00 NL overmorgen → later (net na einde morgen)', () => {
+  // 22:00 UTC 25 juli = 00:00 NL 26 juli
+  const run = { status: 'active', next_action_at: '2026-07-25T22:00:00Z' };
+  assert.equal(classifyRunBucket(run, null, NOW_MS), BUCKET_LATER);
+});
+
+test('bucket: NL-tijd wordt CORRECT bepaald bij DST-grens — winter (CET +1)', () => {
+  // Winter: 23:00 UTC = 00:00 NL. NOW in januari CET +1.
+  const winterNow = Date.parse('2026-01-15T12:00:00Z');   // vandaag NL = 15 jan
+  const run = { status: 'active', next_action_at: '2026-01-15T23:00:00Z' };  // = 00:00 NL 16 jan
+  assert.equal(classifyRunBucket(run, null, winterNow), BUCKET_MORGEN);
+});
+
+// ── Overige bucket-tests ──────────────────────────────────────────────────
 
 test('bucket: active + laatste log skipped_open_action → wacht_openstaande_actie', () => {
   const run = { status: 'active', next_action_at: iso(days(3)) };
@@ -250,9 +312,10 @@ test('incasso: settings leeg → default 14 dagen in tekst', () => {
 
 test('counts: mixed runs → juiste tellers per bucket + klaar_by_reason', () => {
   const runs = [
-    { _bucket: BUCKET_DEZE_WEEK },
-    { _bucket: BUCKET_DEZE_WEEK },
-    { _bucket: BUCKET_LOOPT },
+    { _bucket: BUCKET_VANDAAG },
+    { _bucket: BUCKET_VANDAAG },
+    { _bucket: BUCKET_MORGEN },
+    { _bucket: BUCKET_LATER },
     { _bucket: BUCKET_WACHT_KLANT },
     { _bucket: BUCKET_WACHT_REGELING },
     { _bucket: BUCKET_KLAAR, completion_reason: 'paid' },
@@ -260,8 +323,9 @@ test('counts: mixed runs → juiste tellers per bucket + klaar_by_reason', () =>
     { _bucket: BUCKET_KLAAR, completion_reason: 'manual_cancel_by_user' },
   ];
   const { counts, klaar_by_reason } = buildBucketCounts(runs);
-  assert.equal(counts[BUCKET_DEZE_WEEK], 2);
-  assert.equal(counts[BUCKET_LOOPT], 1);
+  assert.equal(counts[BUCKET_VANDAAG], 2);
+  assert.equal(counts[BUCKET_MORGEN], 1);
+  assert.equal(counts[BUCKET_LATER], 1);
   assert.equal(counts[BUCKET_WACHT_KLANT], 1);
   assert.equal(counts[BUCKET_WACHT_REGELING], 1);
   assert.equal(counts[BUCKET_KLAAR], 3);
@@ -277,7 +341,9 @@ test('counts: klaar zonder completion_reason → key "onbekend"', () => {
 
 test('counts: lege input → alle tellers 0, klaar_by_reason={}', () => {
   const { counts, klaar_by_reason } = buildBucketCounts([]);
-  assert.equal(counts[BUCKET_DEZE_WEEK], 0);
+  assert.equal(counts[BUCKET_VANDAAG], 0);
+  assert.equal(counts[BUCKET_MORGEN], 0);
+  assert.equal(counts[BUCKET_LATER], 0);
   assert.equal(counts[BUCKET_KLAAR], 0);
   assert.deepEqual(klaar_by_reason, {});
 });
