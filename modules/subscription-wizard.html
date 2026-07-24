@@ -548,9 +548,30 @@ function recalcLine(li){
   }
 }
 function subExcl(s){ return (s.line_items||[]).reduce((sum,li)=>sum+(Number(li.amount)||0),0); }
+// Incl-per-termijn: gebruik li.amount_incl waar 'ie bestaat. Terug-rekenen
+// via (li.amount × (1+rate)) verliest centen — li.amount is de op 2
+// decimalen afgeronde excl-waarde, dus li.amount × (1+rate) matcht niet
+// exact met de oorspronkelijke incl-target die splitFromOffer had gezet.
+// Concreet voorbeeld (deal 74ec7e58): splitFromOffer(80) → 27,22 + 52,78
+// = 80,00; recalcLine leidt excl af: 24,97 + 43,62. Terug-rekenen zonder
+// amount_incl: 24,97×1,09 + 43,62×1,21 = 27,2173 + 52,7802 = 79,9975 per
+// termijn. 36 termijnen = 2.879,91 in plaats van de correcte 2.880,00.
+//
+// TeamLeader krijgt li.amount (excl) per regel + tax_rate_id, en rondt
+// zelf per regel af naar 27,22 en 52,78 → factureert 80,00. amount_incl
+// (die splitFromOffer én recalcLine altijd op ronde-decimalen zetten)
+// matcht dus met wat TL uiteindelijk factureert.
+//
+// amount_incl is betrouwbaar bijgewerkt door recalcLine bij elke
+// handmatige aanpassing via onAmt (zowel excl- als incl-invoer).
 function subInclPerTerm(s){
   if(isZeroVat()) return subExcl(s);
-  return (s.line_items||[]).reduce((sum,li)=>sum+(Number(li.amount)||0)*(1+(Number(li.vat_percentage)||0)/100),0);
+  return (s.line_items||[]).reduce((sum,li)=>{
+    const inc = (li.amount_incl !== '' && li.amount_incl != null)
+      ? Number(li.amount_incl)
+      : Number(li.amount || 0) * (1 + (Number(li.vat_percentage) || 0) / 100);
+    return sum + (Number(inc) || 0);
+  }, 0);
 }
 
 function prefillSubs(){
