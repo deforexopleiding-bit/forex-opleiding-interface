@@ -267,7 +267,13 @@ async function fetchRuns(cid) {
 async function fetchArrangements(cid) {
   const { data, error } = await supabaseAdmin
     .from('payment_arrangements')
-    .select('id, type, status, details, invoice_ids, created_at, updated_at, proposed_by, approved_by, approved_at, cancellation_reason')
+    // approved_by / approved_at bestaan NIET op payment_arrangements — de
+    // "wie heeft goedgekeurd"-state hoort op pending_actions (bewuste
+    // ontwerp-keuze, zie inline comments in api/arrangements-detail.js:39-41
+    // en api/arrangements-list.js:100-104). Live-schema heeft in plaats
+    // daarvan proposed_at + accepted_at voor lifecycle-tijden. Zelfde
+    // kolom-set als api/arrangements-detail.js:44-49.
+    .select('id, type, status, details, invoice_ids, created_at, updated_at, proposed_by, proposed_at, accepted_at, cancellation_reason')
     .eq('customer_id', cid)
     .order('created_at', { ascending: false })
     .limit(BRON_CAP);
