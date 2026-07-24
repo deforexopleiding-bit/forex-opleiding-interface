@@ -683,28 +683,49 @@
    deze class toe te voegen: <div class="modal-card ds-modal-full-mobile">.
    Onder 640px pakt 'ie de volle viewport-hoogte + geen radius, zodat de
    modal op telefoon werkt als een aparte pagina. Op tablet/desktop is 'ie
-   een no-op. */
+   een no-op.
+
+   iOS-fix (dvh + safe-area): 100vh op iOS Safari rekent inclusief de
+   dynamische toolbar-ruimte — een bottom-gepinde footer valt DAARachter en
+   is niet aantikbaar. 100dvh (dynamic viewport height, iOS 15.4+, Chrome
+   108+, Firefox 101+) rekent alleen de zichtbare viewport. 100vh blijft
+   staan als fallback voor iOS <15.4. env(safe-area-inset-bottom) reserveert
+   ruimte voor de home-indicator op iPhone X+. */
 @media (max-width: 640px) {
   .ds-modal-full-mobile {
     max-width: 100% !important;
     width:     100% !important;
     max-height: 100vh !important;
+    max-height: 100dvh !important;
     height:     100vh !important;
+    height:     100dvh !important;
     border-radius: 0 !important;
     margin: 0 !important;
     display: flex;
     flex-direction: column;
   }
+  /* Body binnen fullscreen-modal moet flex:1 + min-height:0 + overflow-y:auto
+     zodat de content scrolt en de footer BINNEN de zichtbare hoogte blijft.
+     Als de body geen aparte class heeft, voeg .ds-modal-body toe. */
+  .ds-modal-full-mobile .ds-modal-body,
+  .ds-modal-full-mobile > .modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
   /* Sticky action-strip binnen een fullscreen-modal — plaats knoppen in
      <div class="ds-modal-actions-sticky"> onderaan zodat ze altijd zichtbaar
-     blijven als de body scrollt. */
+     blijven als de body scrollt. flex-shrink:0 voorkomt dat de footer krimpt
+     bij korte content; safe-area-inset-bottom reserveert home-indicator-ruimte. */
   .ds-modal-actions-sticky {
     position: sticky;
     bottom: 0;
     background: var(--ds-surface, var(--surface-card, #fff));
     border-top: 1px solid var(--ds-border, var(--border-subtle, #e5e7eb));
     padding: 12px 16px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
     margin-top: auto;
+    flex-shrink: 0;
     display: flex;
     gap: 8px;
     z-index: 2;
