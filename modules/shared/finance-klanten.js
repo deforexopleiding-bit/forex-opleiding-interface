@@ -362,7 +362,7 @@
             + '<td>'
             + '  <div class="fk-actions-wrap">'
             + '    <a class="fk-action-link" href="/modules/klanten.html?id=' + encodeURIComponent(it.id) + '" data-fk-action="dossier"><i class="ti ti-user"></i> Dossier</a>'
-            + '    <button type="button" class="fk-action-link" data-fk-quick-dossier="' + esc(it.id) + '" title="Snel-dossier in popup"><i class="ti ti-layout-sidebar-right-expand"></i> Snel</button>'
+            + '    <button type="button" class="fk-action-link" data-fk-quick-dossier="' + esc(it.id) + '" title="Snel-dossier in popup"><i class="ti ti-layout-sidebar-right-expand"></i> Bekijk status</button>'
             + '    <button type="button" class="fk-kebab" data-fk-kebab="' + esc(it.id) + '" title="Meer acties" aria-label="Meer acties">&#8942;</button>'
             + '  </div>'
             + '</td>'
