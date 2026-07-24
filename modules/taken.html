@@ -867,6 +867,10 @@ function fromRow(r) {
     // Creator (server enrich: created_by + name).
     createdById:    r.created_by      || '',
     createdByName:  r.created_by_name || '',
+    // PR D — customer_id (nullable). Enige taken met een gekoppelde klant
+    // krijgen de "Bekijk status"-knop op de kaart; bestaande taken zonder
+    // koppeling blijven onaangetast.
+    customerId:     r.customer_id    || '',
     deadline:       r.deadline       || '',
     emailId:        r.email_id       || '',
     emailSubject:   r.email_subject  || '',
@@ -1053,7 +1057,28 @@ function render() {
       if (!el) return;
       el.addEventListener('dragstart', e => { dragId = t.id; el.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
       el.addEventListener('dragend', () => el.classList.remove('dragging'));
-      el.addEventListener('click', () => openDetail(t.id));
+      el.addEventListener('click', (e) => {
+        // PR D — dossier-knop mag NIET openDetail triggeren; stopPropagation
+        // op de klik zelf hier zodat de card-click alleen doorloopt bij een
+        // andere target dan de dossier-button.
+        if (e.target.closest('[data-task-dossier]')) return;
+        openDetail(t.id);
+      });
+      // PR D — dossier-knop (alleen bij taken met customerId). Fail-loud:
+      // als de shared helper niet geladen is (script-tag ontbreekt) tonen we
+      // een alert i.p.v. stilzwijgend niets doen.
+      const dossierBtn = el.querySelector('[data-task-dossier]');
+      if (dossierBtn) {
+        dossierBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const custId = dossierBtn.getAttribute('data-task-dossier');
+          if (typeof window.AgentShared?.openCustomerDossier === 'function') {
+            window.AgentShared.openCustomerDossier(custId);
+          } else {
+            alert('Dossier-module niet geladen — herlaad de pagina.');
+          }
+        });
+      }
     });
   });
 }
@@ -1082,6 +1107,14 @@ function taskCard(t) {
   const overdueBadge = od ? '<span class="overdue-badge">VERLOPEN</span>' : '';
   const deadline = t.deadline ? `<span class="task-deadline">📅 ${fmtDate(t.deadline)}</span>` : '';
 
+  // PR D — "Bekijk status"-knop opent klantdossier via shared helper.
+  // Alleen zichtbaar bij taken met een gekoppelde klant (customerId). Taken
+  // zonder koppeling (alle bestaande + agent-created zonder klant-context)
+  // krijgen géén knop — voorkomt suggestie dat er een dossier is waar niks is.
+  const dossierBtn = t.customerId
+    ? `<button type="button" class="task-dossier-btn" data-task-dossier="${escHtml(t.customerId)}" title="Bekijk status — klantdossier openen" style="margin-left:auto;padding:4px 8px;font-size:11px;background:transparent;border:1px solid var(--border-subtle,#dfe8ec);border-radius:6px;cursor:pointer;color:inherit"><i class="ti ti-layout-sidebar-right-expand"></i> Dossier</button>`
+    : '';
+
   return `
     <div class="task-card prio-${prioClass}${od ? ' overdue' : ''}" id="card-${t.id}" draggable="true">
       <div class="task-top">
@@ -1096,6 +1129,7 @@ function taskCard(t) {
       <div class="task-footer">
         ${avatar}${assigneeChip}
         ${overdueBadge}
+        ${dossierBtn}
       </div>
     </div>`;
 }
@@ -1710,5 +1744,9 @@ init();
 </script>
 <script src="/modules/shared/permissions.js"></script>
 <script src="/modules/shared/sidebar.js"></script>
+<!-- PR D — klantdossier-modal: opent bij klik op "Dossier"-knop op taakkaarten
+     die een customer_id hebben. Fail-loud als de tag ontbreekt: taken.html
+     valt terug op een alert("Dossier-module niet geladen"). -->
+<script src="/modules/shared/customer-dossier-modal.js"></script>
 </body>
 </html>

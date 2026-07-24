@@ -128,14 +128,66 @@ test('LEEG (canFinance=true, geen facturen) → granted:true met lege items — 
   assert.deepEqual(b3.open_invoices.items, []);
 });
 
-// ── Free-tasks placeholder (taken_items ontbreekt customer_id) ────────────
+// ── Free-tasks (PR D: taken_items.customer_id gekoppeld) ─────────────────
 
-test('free_tasks: altijd granted:false met reason=not_supported_yet', () => {
+test('free_tasks: leeg (geen input.freeTasks) → granted:true, items:[]', () => {
   const resp = buildDossierResponse(baseInput(), { canBase: true, canFinance: true, canAdmin: true }, { nowMs: NOW_MS });
   const ft = resp.blocks.nog_te_doen.data.free_tasks;
-  assert.equal(ft.granted, false);
-  assert.equal(ft.reason, 'not_supported_yet');
-  assert.match(ft.note, /PR D/);
+  // LEEG (geen taken gekoppeld), niet GEBLOKKEERD.
+  assert.equal(ft.granted, true);
+  assert.deepEqual(ft.items, []);
+});
+
+test('free_tasks: input met taken → items met velden + days_open berekend', () => {
+  const input = baseInput();
+  input.freeTasks = [
+    {
+      id: 't1',
+      titel: 'Bel klant terug',
+      omschrijving: 'context',
+      prioriteit: 'Hoog',
+      categorie: 'Wanbetalers',
+      status: 'todo',
+      deadline: '2026-08-01',
+      assigned_to_id: 'u1',
+      assigned_to_name: 'Jeffrey',
+      aangemaakt: iso(-3 * 86400000),
+    },
+    {
+      id: 't2',
+      titel: 'Notitie updaten',
+      status: 'progress',
+      assigned_to_id: null,
+      assigned_to_name: null,
+      aangemaakt: iso(-10 * 86400000),
+    },
+  ];
+  const resp = buildDossierResponse(input, { canBase: true, canFinance: true, canAdmin: true }, { nowMs: NOW_MS });
+  const ft = resp.blocks.nog_te_doen.data.free_tasks;
+  assert.equal(ft.granted, true);
+  assert.equal(ft.items.length, 2);
+  assert.equal(ft.items[0].titel, 'Bel klant terug');
+  assert.equal(ft.items[0].assigned_to_name, 'Jeffrey');
+  assert.equal(ft.items[0].days_open, 3);
+  assert.equal(ft.items[1].days_open, 10);
+});
+
+test('free_tasks: canBase=true canFinance=false → nog steeds granted:true', () => {
+  // Taken zijn operationeel, geen financiële data — geen extra permissie-gate.
+  // Een user met alleen customer.module.access moet de taken kunnen zien.
+  const input = baseInput();
+  input.freeTasks = [{ id: 't1', titel: 'x', status: 'todo', aangemaakt: iso(-1 * 86400000) }];
+  const resp = buildDossierResponse(input, { canBase: true, canFinance: false, canAdmin: false }, { nowMs: NOW_MS });
+  const ft = resp.blocks.nog_te_doen.data.free_tasks;
+  assert.equal(ft.granted, true);
+  assert.equal(ft.items.length, 1);
+});
+
+test('free_tasks: taak zonder aangemaakt → days_open=null (geen crash)', () => {
+  const input = baseInput();
+  input.freeTasks = [{ id: 't1', titel: 'x', status: 'todo', aangemaakt: null }];
+  const resp = buildDossierResponse(input, { canBase: true, canFinance: true, canAdmin: true }, { nowMs: NOW_MS });
+  assert.equal(resp.blocks.nog_te_doen.data.free_tasks.items[0].days_open, null);
 });
 
 // ── Timeline-merge + paginering ───────────────────────────────────────────

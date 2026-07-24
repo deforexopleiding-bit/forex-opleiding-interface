@@ -434,13 +434,30 @@ export function buildDossierResponse(input, perms, opts) {
       signals: canFinance
         ? { granted: true, items: input?.signals || [] }
         : { granted: false, reason: 'no_permission' },
-      // TAKEN — expliciet uitleg: taken_items heeft (nog) geen customer_id
-      // (zie PR D roadmap). We geven een placeholder-blok terug zodat de UI
-      // het onderscheid kan maken tussen "leeg" en "nog niet ondersteund".
+      // TAKEN (PR D) — vrije taken uit taken_items met customer_id-koppeling.
+      // Sinds de 2026-07-24-taken-customer-link migratie kunnen taken die
+      // vanuit een klantcontext zijn aangemaakt (bv. _paTaskSubmit) meekomen.
+      // Bestaande taken zonder customer_id blijven onzichtbaar in het dossier
+      // (bewuste keuze — geen tekstmatch-backfill, zie PR D commit-message).
+      // Permissie: geen extra gate. Taken zijn operationeel en bevatten
+      // geen financiële data; canBase is voldoende (elke user met dossier-
+      // toegang mag de taken zien).
       free_tasks: {
-        granted: false,
-        reason:  'not_supported_yet',
-        note:    'taken_items.customer_id ontbreekt — volgt in PR D',
+        granted: true,
+        items: (input?.freeTasks || []).map((t) => ({
+          id:               t.id,
+          titel:            t.titel || null,
+          omschrijving:     t.omschrijving || null,
+          prioriteit:       t.prioriteit || null,
+          status:           t.status || 'todo',
+          deadline:         t.deadline || null,
+          assigned_to_id:   t.assigned_to_id || null,
+          assigned_to_name: t.assigned_to_name || null,
+          aangemaakt:       t.aangemaakt || null,
+          days_open:        t.aangemaakt
+            ? Math.floor((nowMs - Date.parse(t.aangemaakt)) / 86400000)
+            : null,
+        })),
       },
     },
   };

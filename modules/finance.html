@@ -7913,6 +7913,10 @@
       prioriteit: 'Normaal',
       categorie: 'Wanbetalers',
       assignedToId,
+      // PR D — customer_id meesturen zodat de taak in het klantdossier
+      // (blok "Nog te doen" > free_tasks) verschijnt. cust komt uit
+      // _paDetailCtx.customer, hier al gevalideerd via de vroege guard.
+      customerId: cust.id,
       deadline,
       status: 'todo',
       notities: '',

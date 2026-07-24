@@ -64,6 +64,10 @@ function toRow(task) {
     prioriteit:     task.prioriteit    || 'Normaal',
     categorie:      task.categorie     || 'Overige',
     assigned_to_id: toUuidOrNull(task.assignedToId),
+    // PR D — customer_id nullable FK naar customers. UUID-validatie via
+    // toUuidOrNull; ongeldige waarden vallen stil terug naar NULL (bestaande
+    // taken zonder klant blijven werken).
+    customer_id:    toUuidOrNull(task.customerId),
     deadline:       task.deadline      || null,
     email_id:       task.emailId       || null,
     email_subject:  task.emailSubject  || null,
@@ -112,7 +116,7 @@ export default async function handler(req, res) {
       if (scope === 'assigned_by_me') {
         const { data, error } = await supabaseAdmin
           .from('taken_items')
-          .select('id,titel,omschrijving,prioriteit,categorie,assigned_to_id,deadline,email_id,email_subject,status,notities,aangemaakt,afgerond_op,updated_at,created_by,created_by_agent')
+          .select('id,titel,omschrijving,prioriteit,categorie,assigned_to_id,customer_id,deadline,email_id,email_subject,status,notities,aangemaakt,afgerond_op,updated_at,created_by,created_by_agent')
           .eq('created_by', userId)
           .order('aangemaakt', { ascending: false })
           .limit(500);
@@ -123,7 +127,7 @@ export default async function handler(req, res) {
         // te voorkomen.
         const [directRes, joinRes] = await Promise.all([
           supabaseAdmin.from('taken_items')
-            .select('id,titel,omschrijving,prioriteit,categorie,assigned_to_id,deadline,email_id,email_subject,status,notities,aangemaakt,afgerond_op,updated_at,created_by,created_by_agent')
+            .select('id,titel,omschrijving,prioriteit,categorie,assigned_to_id,customer_id,deadline,email_id,email_subject,status,notities,aangemaakt,afgerond_op,updated_at,created_by,created_by_agent')
             .eq('assigned_to_id', userId)
             .order('aangemaakt', { ascending: false })
             .limit(500),
@@ -141,7 +145,7 @@ export default async function handler(req, res) {
         if (joinTaskIds.length > 0) {
           const { data: joinTasks, error: jErr } = await supabaseAdmin
             .from('taken_items')
-            .select('id,titel,omschrijving,prioriteit,categorie,assigned_to_id,deadline,email_id,email_subject,status,notities,aangemaakt,afgerond_op,updated_at,created_by,created_by_agent')
+            .select('id,titel,omschrijving,prioriteit,categorie,assigned_to_id,customer_id,deadline,email_id,email_subject,status,notities,aangemaakt,afgerond_op,updated_at,created_by,created_by_agent')
             .in('id', joinTaskIds);
           if (jErr) throw jErr;
           for (const r of (joinTasks || [])) {
