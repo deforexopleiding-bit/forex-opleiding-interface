@@ -4380,6 +4380,7 @@
                 <button class="sr-ibtn" id="inboxThreadReopenBtn"  type="button" title="Gesprek heropenen"        hidden style="color:var(--accent-cyan)"><i class="ti ti-refresh"></i></button>
                 <button class="sr-ibtn" id="inboxThreadUnarchiveBtn" type="button" title="Uit archief halen"      hidden style="color:var(--accent-cyan)"><i class="ti ti-archive-off"></i></button>
                 <button class="sr-ibtn" id="inboxThreadMarkUnreadBtn" type="button" title="Markeer als ongelezen"><i class="ti ti-mail"></i></button>
+                <button class="sr-ibtn" id="inboxThreadDossierBtn" type="button" title="Bekijk status — klantdossier openen" disabled><i class="ti ti-layout-sidebar-right-expand"></i></button>
                 <button class="sr-ibtn" id="inboxThreadCustomerBtn" type="button" title="Klant-info"><i class="ti ti-user"></i></button>
               </div>
             </div>
@@ -14605,6 +14606,18 @@
     // Skeleton altijd verbergen (loadXxx toggle't 'm aan vóór de fetch).
     if (skelEl) skelEl.hidden = true;
 
+    // PR C — sync klantdossier-knop in thread-header. Enabled zodra
+    // state='matched' met een customer.id; disabled bij empty/unknown zodat
+    // de user niet op een dead-end klikt (Bekijk-status heeft een klant nodig).
+    const dossierBtnEl = document.getElementById('inboxThreadDossierBtn');
+    if (dossierBtnEl) {
+      const hasCustomer = state === 'matched' && !!(data && data.customer && data.customer.id);
+      dossierBtnEl.disabled = !hasCustomer;
+      dossierBtnEl.title = hasCustomer
+        ? 'Bekijk status — klantdossier openen'
+        : 'Geen klant gekoppeld aan dit gesprek';
+    }
+
     // STATE 1: empty — geen conv geselecteerd. Toon placeholder, verberg content.
     if (state === 'empty') {
       if (emptyEl)   emptyEl.hidden = false;
@@ -16129,6 +16142,23 @@
     // Klant-info knop in thread-header + delegated klik op customer-link in naam.
     const custBtn = document.getElementById('inboxThreadCustomerBtn');
     if (custBtn) custBtn.addEventListener('click', () => openInboxCustomerModal());
+    // Klantdossier-knop (PR C). Fail-loud: als de shared helper (nog) niet
+    // geladen is, tonen we een toast i.p.v. stil niets doen. De disabled-
+    // state wordt beheerd via _updateInboxThreadDossierBtn() aan het einde
+    // van loadInboxCustomerContext.
+    const dossierBtn = document.getElementById('inboxThreadDossierBtn');
+    if (dossierBtn) dossierBtn.addEventListener('click', () => {
+      const custId = _inboxCustomerContext?.customer?.id;
+      if (!custId) {
+        window.AgentShared?.showToast?.('Geen klant gekoppeld aan dit gesprek', 'info');
+        return;
+      }
+      if (typeof window.AgentShared?.openCustomerDossier === 'function') {
+        window.AgentShared.openCustomerDossier(custId);
+      } else {
+        window.AgentShared?.showToast?.('Dossier-module niet geladen — herlaad de pagina', 'error');
+      }
+    });
     const headerName = document.getElementById('inboxThreadName');
     if (headerName) {
       headerName.addEventListener('click', (e) => {
