@@ -68,6 +68,20 @@ export default async function handler(req, res) {
       }
       update.status = 'active';
       update.next_action_at = nowIso;
+      // Fix #931: resume wist ALLE pauze-relicten. Semantisch: "de reden
+      // geldt niet meer". Zonder deze reset blijven paused_by_*-flags
+      // achter en zou het vangnet in advanceActiveRuns (dunning-engine.js)
+      // de run alsnog wegfilteren, of zou de reply-stop-teller
+      // (paused_conversation_reminder_count) verstoord raken.
+      // Óók paused_by_arrangement_id wissen: bewuste keuze. Hervatten via
+      // de pipeline-UI is een expliciete gebruikersactie met bevestigings-
+      // dialog (zie _dunPlDoAction in modules/finance.html); we willen
+      // niet dat de flow half-hervat blijft door een achtergebleven
+      // arrangement-relict.
+      update.paused_by_conversation_id            = null;
+      update.paused_conversation_reminder_count   = 0;
+      update.paused_conversation_last_reminder_at = null;
+      update.paused_by_arrangement_id             = null;
       afterStatus   = 'active';
     } else if (action === 'cancel') {
       if (!['active', 'paused'].includes(run.status)) {

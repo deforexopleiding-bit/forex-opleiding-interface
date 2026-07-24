@@ -788,6 +788,15 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
       'id, workflow_id, customer_id, status, current_step_id, next_action_at, started_at, trigger_invoice_count'
     )
     .eq('status', 'active')
+    // Fix #931: vangnet tegen "active + pauze-relict". Beide paused_by_*-
+    // flags moeten NULL zijn voordat we een run oppikken. In productie
+    // worden deze flags alleen niet-null gezet op runs die tegelijk
+    // status='paused' krijgen (via pauseRunsForConversation /
+    // pauseRunsForArrangement); dit filter raakt daarom geen legitieme
+    // actieve runs, maar vangt bugs in andere resume-paden op. Zie
+    // finance-dunning-run-control.js resume-branch die deze flags wist.
+    .is('paused_by_conversation_id', null)
+    .is('paused_by_arrangement_id', null)
     .or(`next_action_at.is.null,next_action_at.lte.${now}`);
   if (runsErr) throw runsErr;
 

@@ -9527,8 +9527,11 @@
         `<button type="button" class="pl-act danger" data-pl-action="cancel" data-run-id="${esc(it.run_id)}" title="Annuleer run"><i class="ti ti-x"></i>Annuleer</button>`,
       ].join('');
     } else if (it.status === 'paused') {
+      // Fix #931: bucket-attr op resume-knop zodat _dunPlDoAction een
+      // waarschuwing kan tonen bij gesprek/regeling (aanmaan-workflow
+      // zou anders doorlopen terwijl de reden nog leeft).
       actions = [
-        `<button type="button" class="pl-act primary" data-pl-action="resume" data-run-id="${esc(it.run_id)}" title="Hervat run"><i class="ti ti-player-play"></i>Hervat</button>`,
+        `<button type="button" class="pl-act primary" data-pl-action="resume" data-run-id="${esc(it.run_id)}" data-pl-bucket="${esc(it.bucket || '')}" title="Hervat run"><i class="ti ti-player-play"></i>Hervat</button>`,
         `<button type="button" class="pl-act danger" data-pl-action="cancel" data-run-id="${esc(it.run_id)}" title="Annuleer run"><i class="ti ti-x"></i>Annuleer</button>`,
       ].join('');
     } else {
@@ -9563,6 +9566,19 @@
     const labels = { pause: 'Pauzeren', resume: 'Hervatten', cancel: 'Annuleren', skip: 'Overslaan' };
     const label  = labels[action] || action;
     if (action === 'cancel' && !confirm('Run definitief annuleren?')) return;
+    // Fix #931: waarschuw als hervatten een bericht kan uitsturen boven een
+    // lopende conversatie of actieve regeling. Handmatig gepauzeerde runs
+    // (wacht_handmatig) gaan zonder confirm door — die pauze had geen
+    // externe reden, dus geen risico op onverwachte outbound.
+    if (action === 'resume') {
+      const bucket = btnEl?.getAttribute('data-pl-bucket') || '';
+      const RESUME_WARN = {
+        wacht_gesprek:  'Deze run is gepauzeerd omdat er nog een WhatsApp-gesprek met de klant loopt. Als je nu hervat, gaat de aanmaan-workflow verder en kan er automatisch een bericht uitgaan terwijl het gesprek nog open staat.\n\nDoorgaan?',
+        wacht_regeling: 'Deze run is gepauzeerd omdat er een actieve betalingsregeling loopt. Als je nu hervat, gaat de aanmaan-workflow verder en kan er automatisch een bericht uitgaan terwijl de regeling nog van kracht is.\n\nDoorgaan?',
+      };
+      const warn = RESUME_WARN[bucket];
+      if (warn && !confirm(warn)) return;
+    }
     if (btnEl) { btnEl.disabled = true; btnEl.style.opacity = '0.6'; }
     try {
       let url, body;
