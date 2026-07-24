@@ -38,9 +38,16 @@ import { supabase, supabaseAdmin, verifyAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { buildDossierResponse } from './_lib/customer-dossier-response.js';
 import { detectSignals } from './_lib/customer-dossier-signals.js';
+import { customerDisplayName } from './_lib/customer-name.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BRON_CAP = 200;   // per-source cap, voorkomt runaway-query bij extreme klanten
+
+// Uniforme fetcher-return shape: { data, error }. Zorgt dat LEEG en MISLUKT
+// nooit meer verward worden zoals bij fetchCustomer.name (jul 2026). De
+// response-builder leest error om per blok status:'error' te renderen.
+function ok(data)   { return { data, error: null }; }
+function fail(msg)  { return { data: null, error: String(msg || 'Onbekende DB-fout') }; }
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -96,9 +103,10 @@ export default async function handler(req, res) {
 
   try {
     // ── STAP 3: parallel fetch — één keer alles ──────────────────────────
-    // Financiële bronnen worden ALLEEN opgehaald bij canFinance zodat we
-    // service-role-data niet in-memory houden voor users die 'r geen recht
-    // op hebben.
+    // Elke fetcher returnt { data, error }. Financiële bronnen worden
+    // ALLEEN opgehaald bij canFinance zodat we service-role-data niet
+    // in-memory houden voor users die 'r geen recht op hebben.
+    const EMPTY = ok([]);
     const [
       customerRes,
       invoicesRes,
@@ -112,57 +120,82 @@ export default async function handler(req, res) {
       freeTasksRes,
     ] = await Promise.all([
       fetchCustomer(customerId),
-      canFinance ? fetchOpenInvoices(customerId) : Promise.resolve([]),
+      canFinance ? fetchOpenInvoices(customerId) : Promise.resolve(EMPTY),
       fetchRuns(customerId),
-      canFinance ? fetchArrangements(customerId) : Promise.resolve([]),
-      canFinance ? fetchSubscriptions(customerId) : Promise.resolve([]),
+      canFinance ? fetchArrangements(customerId) : Promise.resolve(EMPTY),
+      canFinance ? fetchSubscriptions(customerId) : Promise.resolve(EMPTY),
       fetchConversations(customerId),
       fetchWhatsappMessages(customerId),
-      canFinance ? fetchPendingActions(customerId) : Promise.resolve([]),
-      canAdmin   ? fetchCustomerNotes(customerId) : Promise.resolve([]),
-      // PR D — vrije taken (taken_items) gekoppeld via customer_id.
-      // Beschikbaar voor iedereen met dossier-toegang (canBase); taken zijn
-      // operationeel en bevatten geen financiële gegevens, dus geen extra
-      // gate op canFinance. Filter op status <> 'done' zodat alleen open
-      // taken meekomen (in lijn met partial index taken_items_customer_open_idx).
+      canFinance ? fetchPendingActions(customerId) : Promise.resolve(EMPTY),
+      canAdmin   ? fetchCustomerNotes(customerId) : Promise.resolve(EMPTY),
+      // PR D — vrije taken (taken_items) via customer_id. canBase volstaat
+      // (operationele data, geen bedragen). Filter status<>'done' zodat
+      // alleen open taken meekomen; partial index taken_items_customer_open_idx
+      // dekt precies deze query.
       fetchFreeTasks(customerId),
     ]);
 
-    if (!customerRes) {
+    // Customer: query-fout → 500 (geen 404). 404 alleen als de klant ECHT
+    // niet bestaat (data null zonder error).
+    if (customerRes.error) {
+      return res.status(500).json({
+        error: 'Klant-query mislukte: ' + customerRes.error,
+      });
+    }
+    if (!customerRes.data) {
       return res.status(404).json({ error: 'Klant niet gevonden' });
     }
 
-    // dunning_log is 2-staps: runs → log op run_ids.
-    const runIds = runsRes.map((r) => r.id);
-    const dunningLog = runIds.length ? await fetchDunningLog(runIds) : [];
+    // dunning_log is 2-staps: runs → log op run_ids. Als runs-fetcher zelf
+    // faalt, log gaat leeg — maar signals detecteren dan óók niets omdat
+    // runs=[] is. Beide fetch-errors landen in de per-blok status.
+    const runIds = (runsRes.data || []).map((r) => r.id);
+    const dunningLog = runIds.length ? await fetchDunningLog(runIds) : ok([]);
 
     // ── STAP 4: signalen (pure functie, canFinance-only) ─────────────────
     const signals = canFinance
       ? detectSignals({
-          arrangements:     arrangementsRes,
-          pendingActions:   pendingActionsRes,
-          runs:             runsRes,
-          invoices:         invoicesRes,
-          dunningLog,
-          whatsappMessages: whatsappRes,
+          arrangements:     arrangementsRes.data || [],
+          pendingActions:   pendingActionsRes.data || [],
+          runs:             runsRes.data || [],
+          invoices:         invoicesRes.data || [],
+          dunningLog:       dunningLog.data || [],
+          whatsappMessages: whatsappRes.data || [],
         })
       : [];
 
     // ── STAP 5: response bouwen (pure functie) ────────────────────────────
+    // fetch-errors per bron worden aan de builder doorgegeven zodat elk
+    // blok status:'error' + message kan tonen i.p.v. stilte-en-lege-lijst.
     const response = buildDossierResponse(
       {
-        customer:         customerRes,
-        invoices:         invoicesRes,
-        runs:             runsRes,
-        arrangements:     arrangementsRes,
-        subscriptions:    subscriptionsRes,
-        conversations:    conversationsRes,
-        dunningLog,
-        pendingActions:   pendingActionsRes,
-        whatsappMessages: whatsappRes,
+        customer:         customerRes.data,
+        customerDisplayName: customerDisplayName(customerRes.data, 'Klant'),
+        invoices:         invoicesRes.data || [],
+        runs:             runsRes.data || [],
+        arrangements:     arrangementsRes.data || [],
+        subscriptions:    subscriptionsRes.data || [],
+        conversations:    conversationsRes.data || [],
+        dunningLog:       dunningLog.data || [],
+        pendingActions:   pendingActionsRes.data || [],
+        whatsappMessages: whatsappRes.data || [],
         signals,
-        customerNotes:    customerNotesRes,
-        freeTasks:        freeTasksRes,
+        customerNotes:    customerNotesRes.data || [],
+        freeTasks:        freeTasksRes.data || [],
+        // Fetch-error map: gebruikt door builder om per blok status:'error'
+        // te renderen. Sleutel = interne bron-naam.
+        fetchErrors: {
+          invoices:       invoicesRes.error,
+          runs:           runsRes.error,
+          arrangements:   arrangementsRes.error,
+          subscriptions:  subscriptionsRes.error,
+          conversations:  conversationsRes.error,
+          whatsapp:       whatsappRes.error,
+          pendingActions: pendingActionsRes.error,
+          customerNotes:  customerNotesRes.error,
+          freeTasks:      freeTasksRes.error,
+          dunningLog:     dunningLog.error,
+        },
       },
       { canBase, canFinance, canAdmin },
       { beforeCursor: before, timelineLimit }
@@ -177,17 +210,25 @@ export default async function handler(req, res) {
 
 // ── Bron-fetchers ──────────────────────────────────────────────────────────
 // Alle via supabaseAdmin (service-role) — RBAC-check is BOVENAAN gedaan.
-// Elk fetch is fail-soft: bij DB-error returnt lege array (behalve customer,
-// die is null bij niet-gevonden → 404).
+// Elke fetcher returnt { data, error }: error=null bij succes (data mag []
+// zijn = LEEG), error=string bij DB-fout (data=null = MISLUKT). De builder
+// bepaalt per blok hoe die twee cases visueel worden onderscheiden.
 
+// customers (bevestigd schema via migration 012 + 2026-06-04-customers-b2b.sql):
+// id, first_name, last_name, is_company, company_name, email, phone,
+// address_*, notes, archived_at, anonymized_at, ...
+// GEEN kolom 'name' — display-naam wordt samengesteld via customerDisplayName.
 async function fetchCustomer(cid) {
   const { data, error } = await supabaseAdmin
     .from('customers')
-    .select('id, name, email, phone, company_name')
+    .select('id, first_name, last_name, is_company, company_name, email, phone, archived_at, anonymized_at')
     .eq('id', cid)
     .maybeSingle();
-  if (error) { console.warn('[dossier] customer:', error.message); return null; }
-  return data || null;
+  if (error) {
+    console.error('[dossier] customer:', error.message);
+    return fail(error.message);
+  }
+  return ok(data || null);
 }
 
 async function fetchOpenInvoices(cid) {
@@ -197,12 +238,16 @@ async function fetchOpenInvoices(cid) {
     .eq('customer_id', cid)
     .order('due_date', { ascending: true })
     .limit(BRON_CAP);
-  if (error) { console.warn('[dossier] invoices:', error.message); return []; }
+  if (error) {
+    console.error('[dossier] invoices:', error.message);
+    return fail(error.message);
+  }
   // Verrijk met amount_open zodat de builder en signaal-detectie 't gebruiken.
-  return (data || []).map((iv) => ({
+  const rows = (data || []).map((iv) => ({
     ...iv,
     amount_open: Math.max(0, (Number(iv.amount_total) || 0) - (Number(iv.amount_paid) || 0) - (Number(iv.credited_amount) || 0)),
   }));
+  return ok(rows);
 }
 
 async function fetchRuns(cid) {
@@ -212,8 +257,11 @@ async function fetchRuns(cid) {
     .eq('customer_id', cid)
     .order('updated_at', { ascending: false })
     .limit(BRON_CAP);
-  if (error) { console.warn('[dossier] runs:', error.message); return []; }
-  return data || [];
+  if (error) {
+    console.error('[dossier] runs:', error.message);
+    return fail(error.message);
+  }
+  return ok(data || []);
 }
 
 async function fetchArrangements(cid) {
@@ -223,55 +271,83 @@ async function fetchArrangements(cid) {
     .eq('customer_id', cid)
     .order('created_at', { ascending: false })
     .limit(BRON_CAP);
-  if (error) { console.warn('[dossier] arrangements:', error.message); return []; }
-  return data || [];
+  if (error) {
+    console.error('[dossier] arrangements:', error.message);
+    return fail(error.message);
+  }
+  return ok(data || []);
 }
 
+// subscriptions HEEFT GEEN customer_id-kolom — koppeling loopt via deals.
+// Zelfde 2-staps pattern als api/sales-customer-subscriptions.js.
+// Kolommen bevestigd via 2026-05-30-finance-fase-1-fundament.sql r54-65.
 async function fetchSubscriptions(cid) {
-  // Kolomselectie defensief — sommige installaties hebben andere velden dan
-  // andere. We pakken de basisset die de UI nodig heeft.
+  const { data: deals, error: dealsErr } = await supabaseAdmin
+    .from('deals')
+    .select('id')
+    .eq('customer_id', cid)
+    .is('archived_at', null);
+  if (dealsErr) {
+    console.error('[dossier] subscriptions deals-step:', dealsErr.message);
+    return fail(dealsErr.message);
+  }
+  const dealIds = (deals || []).map((d) => d.id);
+  if (dealIds.length === 0) return ok([]);
+
   const { data, error } = await supabaseAdmin
     .from('subscriptions')
-    .select('id, status, start_date, amount, term_count, billing_cycle')
-    .eq('customer_id', cid)
+    .select('id, deal_id, status, start_date, amount, term_count, description, teamleader_subscription_id')
+    .in('deal_id', dealIds)
     .order('start_date', { ascending: false })
     .limit(BRON_CAP);
   if (error) {
-    if (error.code === '42P01' || error.code === '42703') return [];
-    console.warn('[dossier] subscriptions:', error.message);
-    return [];
+    console.error('[dossier] subscriptions:', error.message);
+    return fail(error.message);
   }
-  return data || [];
+  return ok(data || []);
 }
 
+// whatsapp_conversations kolommen bevestigd via
+// 2026-06-07-whatsapp-inbox-foundation.sql. GEEN kolom 'module' — die is
+// een afgeleide via phone_number_id → whatsapp_module_config.module. Voor
+// de dossier-modal is de conversation-status voldoende; module wordt hier
+// niet getoond (kan later als de UI 't nodig heeft).
 async function fetchConversations(cid) {
   const { data, error } = await supabaseAdmin
     .from('whatsapp_conversations')
-    .select('id, status, phone_number, module, last_message_at, updated_at')
+    .select('id, status, phone_number, last_message_at, updated_at')
     .eq('customer_id', cid)
     .order('last_message_at', { ascending: false })
     .limit(BRON_CAP);
-  if (error) { console.warn('[dossier] conversations:', error.message); return []; }
-  return data || [];
+  if (error) {
+    console.error('[dossier] conversations:', error.message);
+    return fail(error.message);
+  }
+  return ok(data || []);
 }
 
 async function fetchWhatsappMessages(cid) {
-  // via conversation-lookup (2-staps zoals in de bestaande modal).
   const { data: convs, error: cErr } = await supabaseAdmin
     .from('whatsapp_conversations')
     .select('id')
     .eq('customer_id', cid);
-  if (cErr) { console.warn('[dossier] wa-convs:', cErr.message); return []; }
+  if (cErr) {
+    console.error('[dossier] wa-convs (msg-step):', cErr.message);
+    return fail(cErr.message);
+  }
   const convIds = (convs || []).map((c) => c.id);
-  if (convIds.length === 0) return [];
+  if (convIds.length === 0) return ok([]);
   const { data, error } = await supabaseAdmin
     .from('whatsapp_messages')
     .select('id, conversation_id, direction, body, template_name, sent_at, created_at')
     .in('conversation_id', convIds)
     .order('created_at', { ascending: false })
     .limit(BRON_CAP);
-  if (error) { console.warn('[dossier] wa-messages:', error.message); return []; }
-  return data || [];
+  if (error) {
+    console.error('[dossier] wa-messages:', error.message);
+    return fail(error.message);
+  }
+  return ok(data || []);
 }
 
 async function fetchPendingActions(cid) {
@@ -281,8 +357,11 @@ async function fetchPendingActions(cid) {
     .eq('customer_id', cid)
     .order('created_at', { ascending: false })
     .limit(BRON_CAP);
-  if (error) { console.warn('[dossier] pending_actions:', error.message); return []; }
-  return data || [];
+  if (error) {
+    console.error('[dossier] pending_actions:', error.message);
+    return fail(error.message);
+  }
+  return ok(data || []);
 }
 
 async function fetchDunningLog(runIds) {
@@ -292,8 +371,11 @@ async function fetchDunningLog(runIds) {
     .in('run_id', runIds)
     .order('created_at', { ascending: false })
     .limit(BRON_CAP);
-  if (error) { console.warn('[dossier] dunning_log:', error.message); return []; }
-  return data || [];
+  if (error) {
+    console.error('[dossier] dunning_log:', error.message);
+    return fail(error.message);
+  }
+  return ok(data || []);
 }
 
 async function fetchCustomerNotes(cid) {
@@ -304,14 +386,18 @@ async function fetchCustomerNotes(cid) {
     .is('archived_at', null)
     .order('created_at', { ascending: false })
     .limit(BRON_CAP);
-  if (error) { console.warn('[dossier] customer_notes:', error.message); return []; }
-  return data || [];
+  if (error) {
+    console.error('[dossier] customer_notes:', error.message);
+    return fail(error.message);
+  }
+  return ok(data || []);
 }
 
 // PR D — open vrije taken (taken_items.customer_id). Alleen niet-afgeronde
 // taken (status <> 'done') — de partial index taken_items_customer_open_idx
 // dekt precies deze query. Fail-soft bij 42P01/42703 zodat het endpoint niet
-// crasht als de migratie nog niet is gedraaid.
+// crasht als de migratie nog niet is gedraaid (dan is de "kolom bestaat niet"
+// een tolereerbare toestand tot ops de SQL heeft gedraaid).
 async function fetchFreeTasks(cid) {
   const { data, error } = await supabaseAdmin
     .from('taken_items')
@@ -321,9 +407,9 @@ async function fetchFreeTasks(cid) {
     .order('deadline', { ascending: true, nullsFirst: false })
     .limit(BRON_CAP);
   if (error) {
-    if (error.code === '42P01' || error.code === '42703') return [];
-    console.warn('[dossier] free_tasks:', error.message);
-    return [];
+    if (error.code === '42P01' || error.code === '42703') return ok([]);
+    console.error('[dossier] free_tasks:', error.message);
+    return fail(error.message);
   }
   // Assignee-namen batch-lookup (identiek patroon aan api/taken.js).
   const rows = data || [];
@@ -336,8 +422,8 @@ async function fetchFreeTasks(cid) {
       .in('id', assigneeIds);
     for (const p of profiles || []) nameMap[p.id] = p.full_name || p.email || null;
   }
-  return rows.map((r) => ({
+  return ok(rows.map((r) => ({
     ...r,
     assigned_to_name: r.assigned_to_id ? (nameMap[r.assigned_to_id] || null) : null,
-  }));
+  })));
 }
