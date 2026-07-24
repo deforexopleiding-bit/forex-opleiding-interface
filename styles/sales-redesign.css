@@ -193,3 +193,62 @@ a.sr-stat:hover { border-color:var(--accent-cyan); }
 /* icon-kleuren voor stat-labels */
 .sr-i-blue i { color:#0891b2; } .sr-i-amber i { color:#f59e0b; }
 .sr-i-purple i { color:#7c3aed; } .sr-i-pink i { color:#db2777; } .sr-i-green i { color:#059669; }
+
+/* ── Mobile + design-system pass (Module 3 sales-cluster) ────────────────
+   Touch-targets ≥44px op alle interactieve sr-* controls, form-inputs
+   16px (iOS zoom-fix), sr-grid-2/-3/-4 en kpi-strip stapelen op mobiel.
+   Media-blok NA basisregels (bekende valkuil #885). Werkt voor sales.html,
+   sales-wizard.html, offerte-detail.html, subscription-wizard.html —
+   allevier laden deze file en delen de .sr-*-classes. */
+@media (max-width: 720px) {
+  /* Filter-/search-strip controls: 44px hoog + 16px font (iOS-zoom-fix). */
+  .sr-search input,
+  .sr-select,
+  .sr-toggle,
+  .sr-iconbtn { height: 44px; font-size: 16px; padding: 0 14px; }
+  .sr-search input { min-width: 0; width: 100%; padding: 0 12px 0 34px; }
+  .sr-select { min-width: 0; }
+  .sr-iconbtn { width: 44px; }
+  .sr-filterstrip { gap: 10px; }
+  .sr-filterstrip .sr-search { flex: 1 1 100%; }
+  .sr-filterstrip .sr-select,
+  .sr-filterstrip .sr-toggle { flex: 1 1 auto; }
+  /* Tabs / segments: min-height 44 + wrap zodat 5+ tabs stapelen. */
+  .sr-seg { padding: 12px 14px; min-height: 44px; }
+  .sr-segments { flex-wrap: wrap; }
+  /* Sub-tabs (Aanbod, retentie): horizontaal scrollbare rij zodat ze
+     één regel blijven en compleet bereikbaar zijn. */
+  .sr-subtabs { overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; }
+  .sr-subtabs::-webkit-scrollbar { display: none; }
+  .sr-subtab { padding: 12px 14px; min-height: 44px; white-space: nowrap; flex: 0 0 auto; }
+  /* Actie-knoppen in tabellen / headers: 44px hoog. */
+  .sr-abtn { padding: 10px 14px; min-height: 44px; }
+  .sr-ibtn { width: 44px; height: 44px; }
+  /* KPI-strip: op 720 max 2 kolommen. Overruled inline
+     grid-template-columns via !important (inline zonder !important verliest). */
+  .kpi-strip { grid-template-columns: repeat(2, 1fr) !important; }
+  /* Grids stapelen agressiever op 720 (was al @880 → 1fr; behouden). */
+  .sr-grid-2, .sr-grid-3 { grid-template-columns: 1fr; }
+  /* Wizard-stepper op mobiel: horizontaal scrollbaar zodat 5 stappen
+     niet op elkaar drukken. Labels blijven leesbaar. */
+  .sr-steps { overflow-x: auto; scrollbar-width: none; }
+  .sr-steps::-webkit-scrollbar { display: none; }
+  .sr-step { min-width: 90px; }
+  /* Wizard-footer sticky onderaan zodat Vorige/Volgende altijd bereikbaar. */
+  .sr-wizfooter { position: sticky; bottom: 0; background: var(--ds-surface, var(--bg-elev)); padding: 12px 0; margin: 0 -14px; padding-left: 14px; padding-right: 14px; z-index: 5; }
+  /* Klant-detail sidebar-card: op mobiel geen sticky, gewoon block onder de content. */
+  .sidebar-card { position: static; }
+  /* Dash-grid al @880 → 1fr, blijft correct op 720. */
+  /* Quick-actions in header: wrap zodat 2+ knoppen niet uit viewport duwen. */
+  .sr-quick { flex-wrap: wrap; }
+  .sr-quick .sr-abtn { padding: 10px 12px; min-height: 44px; }
+}
+@media (max-width: 480px) {
+  /* Telefoon: alle N-koloms grids naar 1 kolom. */
+  .sr-grid-2, .sr-grid-3, .sr-grid-4 { grid-template-columns: 1fr; }
+  .kpi-strip { grid-template-columns: 1fr !important; }
+  .kpi-cell { border-right: none; border-bottom: .5px solid var(--ds-border, var(--border)); }
+  .kpi-cell:last-child { border-bottom: none; }
+  /* Wizard step-progress: nog compacter zodat labels leesbaar blijven. */
+  .sr-step-l { font-size: 10px; }
+}
