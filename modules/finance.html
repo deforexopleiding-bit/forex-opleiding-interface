@@ -2427,6 +2427,225 @@
         border-color:var(--ds-border-strong, #c1d0d7);
       }
     }
+
+    /* ================================================================
+       PIPELINE SUB-TAB (PR C).  Hangt aan #dunningSubPipeline en gebruikt
+       de bestaande finance-scope tokens (--ds-*). Design-doel: eigenaar
+       ziet in één oogopslag wat er vandaag / morgen aan zit te komen,
+       waar het stilstaat en waarom.
+       ================================================================ */
+    .pl-kpis-wrap {
+      /* Op mobiel horizontaal scrollen — patroon van #dunProbFilters. */
+    }
+    .pl-kpis {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 10px;
+    }
+    .pl-kpi {
+      background: var(--ds-surface, #ffffff);
+      border: 1px solid var(--ds-border, #dfe8ec);
+      border-radius: 10px;
+      padding: 12px 14px;
+      cursor: pointer;
+      text-align: left;
+      font-family: inherit;
+      color: inherit;
+      transition: border-color .12s, background .12s;
+    }
+    .pl-kpi:hover { border-color: var(--ds-border-strong, #c1d0d7); }
+    .pl-kpi.active {
+      border-color: var(--ds-brand, #0a5178);
+      background: var(--ds-brand-soft, rgba(10, 81, 120, .08));
+      box-shadow: 0 0 0 1px var(--ds-brand, #0a5178) inset;
+    }
+    .pl-kpi-lbl {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: var(--ds-text-muted, #48585f);
+      margin-bottom: 4px;
+    }
+    .pl-kpi-val {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--ds-text, #06181f);
+      font-variant-numeric: tabular-nums;
+    }
+    /* Groepen: tijd / stilstand / klaar krijgen accent-kleuren op de val
+       zodat je in de strip meteen ziet welk type actie waar zit. */
+    .pl-kpi[data-group="tijd"] .pl-kpi-val    { color: var(--ds-brand-strong, #083b52); }
+    .pl-kpi[data-group="wacht"] .pl-kpi-val   { color: var(--ds-warning, #92400e); }
+    .pl-kpi[data-group="klaar"] .pl-kpi-val   { color: var(--ds-text-muted, #48585f); }
+
+    .pl-reset-btn {
+      background: transparent;
+      border: 0;
+      color: var(--ds-brand, #0a5178);
+      cursor: pointer;
+      font-size: 12px;
+      font-family: inherit;
+      padding: 4px 8px;
+      border-radius: 6px;
+    }
+    .pl-reset-btn:hover { background: var(--ds-surface-2, #f9fbfc); }
+
+    /* Rijen. Elke rij is een klikbare kaart. */
+    .pl-row {
+      background: var(--ds-surface, #ffffff);
+      border: 1px solid var(--ds-border, #dfe8ec);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: start;
+    }
+    .pl-row-head {
+      display: flex; align-items: center; gap: 10px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+    .pl-row-name {
+      font-weight: 600;
+      color: var(--ds-text, #06181f);
+      font-size: 14px;
+    }
+    .pl-row-amount {
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-weight: 600;
+      color: var(--ds-danger, #b91c1c);
+      font-size: 13px;
+    }
+    .pl-row-wf {
+      font-size: 11.5px;
+      color: var(--ds-text-faint, #7a8b92);
+    }
+    .pl-row-body {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 16px;
+      font-size: 12.5px;
+      color: var(--ds-text-muted, #48585f);
+      margin-top: 4px;
+    }
+    .pl-row-body dt {
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: var(--ds-text-faint, #7a8b92);
+      font-weight: 600;
+    }
+    .pl-row-body dd { margin: 0 0 6px; color: var(--ds-text, #06181f); }
+
+    /* Geschatte datum: gedempte kleur + tilde-prefix + info-icoon.
+       Onmiskenbaar visueel onderscheiden van exacte datums. */
+    .pl-est {
+      color: var(--ds-text-muted, #48585f);
+      font-style: italic;
+      cursor: help;
+    }
+    .pl-est::before { content: "~ "; opacity: .7; }
+    .pl-est::after {
+      content: "ⓘ";
+      font-size: 10.5px;
+      margin-left: 4px;
+      opacity: .6;
+    }
+
+    /* Pauze-reden / incasso-status als coloured tag. */
+    .pl-tag {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 10px;
+      font-size: 11.5px;
+      font-weight: 600;
+    }
+    .pl-tag.wait  {
+      background: rgba(217, 119, 6, .1);
+      color: var(--ds-warning, #92400e);
+      border: 1px solid rgba(217, 119, 6, .32);
+    }
+    .pl-tag.done  { background: rgba(34, 197, 94, .1); color: #166534; border: 1px solid rgba(34, 197, 94, .28); }
+    .pl-tag.today { background: var(--ds-brand-soft, rgba(10, 81, 120, .08)); color: var(--ds-brand-strong, #083b52); border: 1px solid var(--ds-border, #dfe8ec); }
+    .pl-tag.risk  { background: rgba(220, 38, 38, .08); color: var(--ds-danger, #b91c1c); border: 1px solid rgba(220, 38, 38, .28); }
+
+    /* Rij-actie-knoppen. Rechts uitgelijnd, klein maar tapbaar op mobiel. */
+    .pl-row-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .pl-act {
+      background: var(--ds-surface-2, #f9fbfc);
+      border: 1px solid var(--ds-border, #dfe8ec);
+      color: var(--ds-text, #06181f);
+      border-radius: 6px;
+      padding: 5px 10px;
+      cursor: pointer;
+      font-size: 11.5px;
+      font-family: inherit;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .pl-act:hover:not(:disabled) { border-color: var(--ds-border-strong, #c1d0d7); }
+    .pl-act:disabled { opacity: .5; cursor: default; }
+    .pl-act.primary {
+      background: var(--ds-brand, #0a5178);
+      color: #fff;
+      border-color: var(--ds-brand, #0a5178);
+    }
+    .pl-act.primary:hover:not(:disabled) { background: var(--ds-brand-strong, #083b52); }
+    .pl-act.danger { color: var(--ds-danger, #b91c1c); }
+
+    /* Empty-state. */
+    .pl-empty {
+      background: var(--ds-surface-2, #f9fbfc);
+      border: 1px dashed var(--ds-border, #dfe8ec);
+      border-radius: 10px;
+      padding: 32px 20px;
+      text-align: center;
+      color: var(--ds-text-faint, #7a8b92);
+      font-size: 13px;
+    }
+
+    /* Mobiel — @media letterlijk geschreven (geen CSS-var). */
+    @media (max-width: 720px) {
+      /* KPI-strip: horizontaal scrollen ipv wrap zodat de rijen niet
+         hun ruimte kwijt zijn aan een gigantisch KPI-blok. */
+      .pl-kpis-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        margin: 0 -12px;
+        padding: 0 12px;
+      }
+      .pl-kpis-wrap::-webkit-scrollbar { display: none; }
+      .pl-kpis {
+        grid-template-columns: none;
+        display: flex;
+        gap: 8px;
+      }
+      .pl-kpi {
+        flex: 0 0 140px;
+        min-height: 44px;
+        padding: 10px 12px;
+      }
+      /* Rij: naam-blok volle breedte, acties op eigen rij, body ook 1 kolom. */
+      .pl-row {
+        grid-template-columns: 1fr;
+      }
+      .pl-row-actions {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+        margin-top: 6px;
+      }
+      .pl-act { min-height: 44px; padding: 8px 12px; font-size: 13px; }
+      .pl-row-body { grid-template-columns: 1fr; }
+    }
   </style>
 
   <!-- ================================================================
@@ -4470,6 +4689,7 @@
       <!-- Sub-tab strip -->
       <div class="sr-segments" id="dunningSubNav" style="margin-bottom:18px">
         <button class="sr-seg active" data-dunning-sub="overzicht" type="button">Overzicht</button>
+        <button class="sr-seg" data-dunning-sub="pipeline" type="button">Pipeline</button>
         <button class="sr-seg" data-dunning-sub="probleemklanten" type="button">Probleemklanten</button>
         <button class="sr-seg" data-dunning-sub="workflows" type="button">Workflows</button>
         <button class="sr-seg" data-dunning-sub="templates" type="button">Templates</button>
@@ -4784,6 +5004,37 @@
           <button class="sr-abtn" id="dunHistMoreBtn" type="button" style="font-size:11.5px;padding:5px 12px" hidden>
             <i class="ti ti-chevron-down" style="margin-right:4px"></i>Meer laden
           </button>
+        </div>
+      </div>
+
+      <!-- Sub-view: Pipeline (PR C — hangt op /api/finance-pipeline-overview
+           uit PR A #927 + /api/finance-dunning-run-skip-step uit PR B #928). -->
+      <div id="dunningSubPipeline" hidden>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <div>
+            <h2 style="margin:0;font-size:18px;font-weight:700">Pipeline</h2>
+            <div style="font-size:11.5px;color:var(--ds-text-faint,#7a8b92);margin-top:2px">Alle lopende, gepauzeerde en recent afgeronde aanmaan-runs. Klik een filter om te focussen; combineer voor kruisdoorsnedes.</div>
+          </div>
+          <button class="sr-abtn" id="dunPlRefreshBtn" type="button" style="font-size:11.5px;padding:6px 12px"><i class="ti ti-refresh" style="margin-right:4px"></i>Vernieuwen</button>
+        </div>
+
+        <!-- KPI-strip: 9 klikbare tellers. Op mobiel horizontaal scrollbaar
+             (patroon van #dunProbFilters). Klik = multi-select toggle. -->
+        <div class="pl-kpis-wrap">
+          <div class="pl-kpis" id="dunPlKpis" role="tablist" aria-label="Pipeline-filters">
+            <div class="pl-kpi-empty" style="grid-column:1/-1;text-align:center;padding:24px 0;color:var(--ds-text-faint,#7a8b92);font-size:13px">Laden…</div>
+          </div>
+        </div>
+
+        <!-- Lijst-header + toon-aantal + reset-filter link -->
+        <div id="dunPlListHeader" style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px;font-size:12.5px;color:var(--ds-text-muted,#48585f)">
+          <span id="dunPlListCount">—</span>
+          <button type="button" id="dunPlResetFilters" class="pl-reset-btn" hidden><i class="ti ti-x" style="margin-right:3px"></i>Filters wissen</button>
+        </div>
+
+        <!-- De lijst zelf. Renderer bouwt kaart-per-run met acties. -->
+        <div id="dunPlList">
+          <div style="text-align:center;padding:24px;color:var(--ds-text-faint,#7a8b92);font-size:13px">Laden…</div>
         </div>
       </div>
 
@@ -8014,6 +8265,7 @@
     }
     const SUB_IDS = {
       overzicht:        'dunningSubOverzicht',
+      pipeline:         'dunningSubPipeline',
       probleemklanten:  'dunningSubProbleemklanten',
       workflows:        'dunningSubWorkflows',
       templates:        'dunningSubTemplates',
@@ -8065,6 +8317,16 @@
         wireArrangOnce();
         wireArrangProposeOnce();
         loadArrangements();
+      }
+      // Pipeline sub-tab (PR C) — laadt overview-endpoint + wired filter/actions.
+      if (target === 'pipeline' && !_dunPipelineLoadedOnce) {
+        _dunPipelineLoadedOnce = true;
+        wireDunPipelineOnce();
+      }
+      if (target === 'pipeline') {
+        // Altijd verversen bij tab-open (data is snel verouderd door
+        // pause/resume/skip-acties uit andere sub-tabs).
+        loadDunPipeline();
       }
     }));
     wireDunTplModal();
@@ -9129,6 +9391,261 @@
       console.error('[dunOv run-control]', e);
       window.AgentShared.showToast(`${label} mislukt: ${e.message}`, 'error');
     }
+  }
+
+  // ─── Pipeline sub-tab (PR C) ───────────────────────────────────────────────
+  // Hangt op /api/finance-pipeline-overview (PR A #927) + skip via
+  // /api/finance-dunning-run-skip-step (PR B #928) + pause/resume/cancel via
+  // bestaande /api/finance-dunning-run-control.
+  //
+  // Filter-keuze: MULTI-SELECT — meerdere buckets tegelijk aan/uit. User
+  // kan bijv. "wacht op klant" + "wacht op regeling" tegelijk zien om alle
+  // stilstanden in beeld te krijgen. Consistent met approv-pill-patroon
+  // elders in finance-tasks.
+  let _dunPipelineLoadedOnce = false;
+  const _dunPl = {
+    data:   null,
+    filter: new Set(),   // actieve bucket-keys; leeg = alle tonen
+    loading: false,
+  };
+  const PL_BUCKET_META = [
+    { key: 'vandaag',                 label: 'Vandaag',        group: 'tijd'  },
+    { key: 'morgen',                  label: 'Morgen',         group: 'tijd'  },
+    { key: 'later',                   label: 'Later',          group: 'tijd'  },
+    { key: 'wacht_klant',             label: 'Wacht op klant', group: 'wacht' },
+    { key: 'wacht_regeling',          label: 'Wacht op regeling', group: 'wacht' },
+    { key: 'wacht_gesprek',           label: 'Wacht op gesprek',  group: 'wacht' },
+    { key: 'wacht_handmatig',         label: 'Handmatig gepauzeerd', group: 'wacht' },
+    { key: 'wacht_openstaande_actie', label: 'Openstaande actie', group: 'wacht' },
+    { key: 'klaar',                   label: 'Klaar (30d)',    group: 'klaar' },
+  ];
+
+  function wireDunPipelineOnce() {
+    document.getElementById('dunPlRefreshBtn')?.addEventListener('click', () => loadDunPipeline());
+    document.getElementById('dunPlResetFilters')?.addEventListener('click', () => {
+      _dunPl.filter.clear();
+      _renderDunPlKpis();
+      _renderDunPlList();
+    });
+    // Delegated: filter-pill clicks (via #dunPlKpis) én rij-actie-clicks
+    // (via #dunPlList) om N-listener-registratie te vermijden.
+    document.getElementById('dunPlKpis')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-pl-filter]');
+      if (!btn) return;
+      const key = btn.getAttribute('data-pl-filter');
+      if (_dunPl.filter.has(key)) _dunPl.filter.delete(key);
+      else _dunPl.filter.add(key);
+      _renderDunPlKpis();
+      _renderDunPlList();
+    });
+    document.getElementById('dunPlList')?.addEventListener('click', (e) => {
+      const dossierBtn = e.target.closest('[data-pl-dossier]');
+      if (dossierBtn) {
+        const custId = dossierBtn.getAttribute('data-pl-dossier');
+        if (typeof window.AgentShared?.openCustomerDossier === 'function') {
+          window.AgentShared.openCustomerDossier(custId);
+        } else {
+          window.AgentShared?.showToast?.('Dossier-module niet geladen — herlaad de pagina', 'error');
+        }
+        return;
+      }
+      const actionBtn = e.target.closest('[data-pl-action]');
+      if (actionBtn) {
+        const action = actionBtn.getAttribute('data-pl-action');   // pause|resume|cancel|skip
+        const runId  = actionBtn.getAttribute('data-run-id');
+        if (!runId) return;
+        _dunPlDoAction(runId, action, actionBtn);
+      }
+    });
+  }
+
+  async function loadDunPipeline() {
+    if (_dunPl.loading) return;
+    _dunPl.loading = true;
+    const listEl = document.getElementById('dunPlList');
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-pipeline-overview');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      _dunPl.data = d;
+      _renderDunPlKpis();
+      _renderDunPlList();
+    } catch (e) {
+      console.error('[pipeline] load:', e);
+      if (listEl) listEl.innerHTML = `<div class="pl-empty" style="color:var(--ds-danger,#b91c1c);border-color:rgba(220,38,38,.28)">Kon pipeline niet laden — ${esc(e?.message || 'onbekende fout')}</div>`;
+    } finally {
+      _dunPl.loading = false;
+    }
+  }
+
+  function _renderDunPlKpis() {
+    const wrap = document.getElementById('dunPlKpis');
+    if (!wrap || !_dunPl.data) return;
+    const counts = _dunPl.data.counts || {};
+    wrap.innerHTML = PL_BUCKET_META.map((b) => {
+      const cnt = Number(counts[b.key] || 0);
+      const active = _dunPl.filter.has(b.key) ? ' active' : '';
+      return `<button type="button" class="pl-kpi${active}" data-pl-filter="${b.key}" data-group="${b.group}" aria-pressed="${_dunPl.filter.has(b.key)}">
+        <div class="pl-kpi-lbl">${esc(b.label)}</div>
+        <div class="pl-kpi-val">${cnt}</div>
+      </button>`;
+    }).join('');
+    // Toon "reset filters"-knop alleen als er iets aan staat.
+    const reset = document.getElementById('dunPlResetFilters');
+    if (reset) reset.hidden = _dunPl.filter.size === 0;
+  }
+
+  function _renderDunPlList() {
+    const listEl = document.getElementById('dunPlList');
+    const cntEl  = document.getElementById('dunPlListCount');
+    if (!listEl || !_dunPl.data) return;
+    const all = Array.isArray(_dunPl.data.items) ? _dunPl.data.items : [];
+    const items = _dunPl.filter.size === 0
+      ? all
+      : all.filter((it) => _dunPl.filter.has(it.bucket));
+
+    if (cntEl) cntEl.textContent = _dunPl.filter.size === 0
+      ? `${items.length} klant${items.length === 1 ? '' : 'en'}`
+      : `${items.length} van ${all.length} klant${all.length === 1 ? '' : 'en'} (${_dunPl.filter.size} filter${_dunPl.filter.size === 1 ? '' : 's'})`;
+
+    if (items.length === 0) {
+      const msg = all.length === 0
+        ? 'Nog geen runs geladen.'
+        : 'Geen klanten in de geselecteerde filter(s).';
+      listEl.innerHTML = `<div class="pl-empty">${esc(msg)}</div>`;
+      return;
+    }
+    listEl.innerHTML = items.map(_renderDunPlRow).join('');
+  }
+
+  function _renderDunPlRow(it) {
+    const cust = it.customer || {};
+    const wf   = it.workflow || {};
+    const cs   = it.current_step || {};
+    const openAmt = Number(it.open_invoices?.total_amount) || 0;
+    const openCnt = Number(it.open_invoices?.count) || 0;
+    const openStr = openAmt > 0
+      ? `€ ${openAmt.toLocaleString('nl-NL', {minimumFractionDigits:2, maximumFractionDigits:2})}${openCnt ? ' · ' + openCnt + ' fact.' : ''}`
+      : '';
+
+    // Volgende actie — met is_estimate onderscheid.
+    let nextActionCell = '<span style="color:var(--ds-text-faint,#7a8b92)">—</span>';
+    if (it.next_action?.at) {
+      const dt = _dunPlFmtDate(it.next_action.at);
+      const type = it.next_action.type ? ` (${it.next_action.type})` : '';
+      nextActionCell = `<strong>${esc(dt)}</strong>${esc(type)}`;
+    } else if (it.pause_reason?.message) {
+      // Gepauzeerd → toon reden i.p.v. datum.
+      const at = it.pause_reason.at ? ` · ${_dunPlFmtDate(it.pause_reason.at)}` : '';
+      nextActionCell = `<span class="pl-tag wait">${esc(it.pause_reason.message)}</span><div style="font-size:11px;color:var(--ds-text-faint,#7a8b92);margin-top:3px">${esc(at.replace(/^ · /, ''))}</div>`;
+    }
+
+    // Vooruitblik "eerstvolgend contact" — geschat, ~-prefix + info-icoon.
+    let contactCell = '';
+    if (it.next_contact?.at) {
+      const dt = _dunPlFmtDate(it.next_contact.at);
+      contactCell = `<span class="pl-est" title="Als er niets tussenkomt (geen reactie, geen nieuwe actie, geen betaling)">${esc(dt)}</span>`;
+    }
+
+    // Incasso-tag.
+    const incTag = it.incasso?.is_candidate
+      ? `<span class="pl-tag risk" title="${esc(it.incasso.message)}">Kandidaat incasso</span>`
+      : `<span style="font-size:11px;color:var(--ds-text-faint,#7a8b92)" title="${esc(it.incasso?.message || '')}">${esc(it.incasso?.message || '')}</span>`;
+
+    // Bucket-tag (klein) om binnen de rij te tonen bij welk filter 'ie hoort.
+    const bucketMeta = PL_BUCKET_META.find((b) => b.key === it.bucket);
+    const bucketTagCls = bucketMeta?.group === 'wacht' ? 'wait'
+      : (it.bucket === 'vandaag' ? 'today' : (it.bucket === 'klaar' ? 'done' : ''));
+    const bucketTag = bucketMeta
+      ? `<span class="pl-tag ${bucketTagCls}">${esc(bucketMeta.label)}</span>`
+      : '';
+
+    // Rij-acties (context-afhankelijk op status).
+    let actions;
+    if (it.status === 'active') {
+      actions = [
+        `<button type="button" class="pl-act" data-pl-action="skip" data-run-id="${esc(it.run_id)}" title="Sla huidige stap over"><i class="ti ti-player-track-next"></i>Skip</button>`,
+        `<button type="button" class="pl-act" data-pl-action="pause" data-run-id="${esc(it.run_id)}" title="Pauzeer run"><i class="ti ti-player-pause"></i>Pauzeer</button>`,
+        `<button type="button" class="pl-act danger" data-pl-action="cancel" data-run-id="${esc(it.run_id)}" title="Annuleer run"><i class="ti ti-x"></i>Annuleer</button>`,
+      ].join('');
+    } else if (it.status === 'paused') {
+      actions = [
+        `<button type="button" class="pl-act primary" data-pl-action="resume" data-run-id="${esc(it.run_id)}" title="Hervat run"><i class="ti ti-player-play"></i>Hervat</button>`,
+        `<button type="button" class="pl-act danger" data-pl-action="cancel" data-run-id="${esc(it.run_id)}" title="Annuleer run"><i class="ti ti-x"></i>Annuleer</button>`,
+      ].join('');
+    } else {
+      // completed / cancelled → geen mutaties meer mogelijk
+      actions = `<span style="font-size:11px;color:var(--ds-text-faint,#7a8b92)">${esc(it.status)}${it.completion_reason ? ' · ' + it.completion_reason : ''}</span>`;
+    }
+    // Dossier-knop staat altijd, ook bij afgeronde runs.
+    actions += `<button type="button" class="pl-act" data-pl-dossier="${esc(cust.id || '')}" title="Bekijk klantdossier"><i class="ti ti-layout-sidebar-right-expand"></i>Dossier</button>`;
+
+    return `<div class="pl-row" data-run-id="${esc(it.run_id)}">
+      <div>
+        <div class="pl-row-head">
+          <span class="pl-row-name">${esc(cust.name || '(onbekend)')}</span>
+          ${openStr ? `<span class="pl-row-amount">${esc(openStr)}</span>` : ''}
+          ${bucketTag}
+        </div>
+        <div class="pl-row-wf">${esc(wf.name || 'Workflow')}${cs.order ? ` · stap ${cs.order} van ${it.total_steps || '?'}` : ''}${cs.type ? ` · ${esc(cs.type)}` : ''}</div>
+        <dl class="pl-row-body">
+          <dt>Volgende actie</dt>
+          <dd>${nextActionCell}</dd>
+          ${contactCell ? `<dt>Eerstvolgend contact</dt><dd>${contactCell}</dd>` : ''}
+          <dt>Incasso</dt>
+          <dd>${incTag}</dd>
+        </dl>
+      </div>
+      <div class="pl-row-actions">${actions}</div>
+    </div>`;
+  }
+
+  async function _dunPlDoAction(runId, action, btnEl) {
+    if (!runId || !action) return;
+    const labels = { pause: 'Pauzeren', resume: 'Hervatten', cancel: 'Annuleren', skip: 'Overslaan' };
+    const label  = labels[action] || action;
+    if (action === 'cancel' && !confirm('Run definitief annuleren?')) return;
+    if (btnEl) { btnEl.disabled = true; btnEl.style.opacity = '0.6'; }
+    try {
+      let url, body;
+      if (action === 'skip') {
+        url = '/api/finance-dunning-run-skip-step';
+        body = { run_id: runId };
+      } else {
+        url = '/api/finance-dunning-run-control';
+        body = { run_id: runId, action };
+      }
+      const r = await window.AgentShared.apiFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast?.(`${label} gelukt`, 'success');
+      // Herlaad de hele pipeline zodat aantallen én rijen bijwerken.
+      loadDunPipeline();
+    } catch (e) {
+      console.error('[pipeline action]', e);
+      window.AgentShared?.showToast?.(`${label} mislukt: ${e?.message || 'onbekend'}`, 'error');
+      if (btnEl) { btnEl.disabled = false; btnEl.style.opacity = ''; }
+    }
+  }
+
+  function _dunPlFmtDate(iso) {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso);
+      const now = new Date();
+      const sameDay = d.toDateString() === now.toDateString();
+      const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+      const isTomorrow = d.toDateString() === tomorrow.toDateString();
+      const hm = d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+      if (sameDay)   return `vandaag ${hm}`;
+      if (isTomorrow) return `morgen ${hm}`;
+      return d.toLocaleDateString('nl-NL', { weekday: 'short', day: '2-digit', month: 'short' }) + ' ' + hm;
+    } catch { return String(iso); }
   }
 
   // ─── Dunning Probleemklanten sub-tab (PR B5) ───────────────────────────────
