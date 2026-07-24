@@ -294,6 +294,7 @@ export function buildDossierResponse(input, perms, opts) {
   }
 
   const customer = input?.customer || null;
+  const fetchErrors = input?.fetchErrors || {};
 
   // ── BLOK 1 — NU ─────────────────────────────────────────────────────────
   // Klant-basis is always toegankelijk bij canBase (naam/email/phone/bedrijf).
@@ -310,36 +311,74 @@ export function buildDossierResponse(input, perms, opts) {
   const openInvoices = (input?.invoices || []).filter((iv) => Number(iv.amount_open) > 0);
   const openTotal = openInvoices.reduce((sum, iv) => sum + (Number(iv.amount_open) || 0), 0);
 
+  // Display-name samengesteld door handler via customerDisplayName-helper;
+  // fallback naar '(zonder naam)' als de input 'em niet meegaf.
+  const displayName = input?.customerDisplayName
+    || (customer ? (customer.first_name || customer.last_name || customer.company_name || null) : null);
+
+  // Archived/anonymized markeringen — dossier is naslag, dus we tonen deze
+  // klanten wél, maar zichtbaar met een badge zodat de UI kan waarschuwen.
+  const isArchived    = !!(customer && customer.archived_at);
+  const isAnonymized  = !!(customer && customer.anonymized_at);
+
   const nuBlock = {
     granted: true,
     data: {
       customer: customer ? {
-        id:      customer.id,
-        name:    customer.name || null,
-        email:   customer.email || null,
-        phone:   customer.phone || null,
-        company: customer.company_name || null,
+        id:          customer.id,
+        name:        displayName || null,
+        first_name:  customer.first_name || null,
+        last_name:   customer.last_name  || null,
+        email:       customer.email || null,
+        phone:       customer.phone || null,
+        company:     customer.company_name || null,
+        is_company:  customer.is_company === true,
+        // Zichtbare markering voor de UI ("naslagwerk, klant is gearchiveerd").
+        archived_at: customer.archived_at || null,
+        anonymized_at: customer.anonymized_at || null,
+        is_archived: isArchived,
+        is_anonymized: isAnonymized,
       } : null,
       // Dunning-run stand:
-      dunning: activeRun
-        ? { state: 'active',  next_action_at: activeRun.next_action_at || null, run_id: activeRun.id }
-        : pausedRun
-          ? {
-              state: 'paused',
-              reason: pauseReasonLabel(pausedRun),
-              paused_at: pausedRun.updated_at || null,
-              run_id: pausedRun.id,
-            }
-          : { state: 'none' },
+      dunning: fetchErrors.runs
+        ? { status: 'error', message: 'Kon aanmaan-status niet laden: ' + fetchErrors.runs }
+        : activeRun
+          ? { state: 'active',  next_action_at: activeRun.next_action_at || null, run_id: activeRun.id }
+          : pausedRun
+            ? {
+                state: 'paused',
+                reason: pauseReasonLabel(pausedRun),
+                paused_at: pausedRun.updated_at || null,
+                run_id: pausedRun.id,
+              }
+            : { state: 'none' },
       // Gesprek-status:
-      conversation: latestConv
-        ? { state: latestConv.status || 'unknown', conversation_id: latestConv.id }
-        : { state: 'none' },
+      conversation: fetchErrors.conversations
+        ? { status: 'error', message: 'Kon gesprek niet laden: ' + fetchErrors.conversations }
+        : latestConv
+          ? { state: latestConv.status || 'unknown', conversation_id: latestConv.id }
+          : { state: 'none' },
     },
   };
 
   // Financiële velden apart onder canFinance:
-  if (canFinance) {
+  if (!canFinance) {
+    nuBlock.data.financial = { granted: false, reason: 'no_permission' };
+  } else if (fetchErrors.invoices || fetchErrors.arrangements || fetchErrors.subscriptions) {
+    // MISLUKT-state onderscheiden van LEEG: als één van de financial-bronnen
+    // een DB-fout gaf, tonen we status:'error' met alle fout-berichten
+    // (accumulatief) i.p.v. €0,00 die verdachte leegheid suggereert.
+    const errs = [
+      fetchErrors.invoices     && ('facturen: ' + fetchErrors.invoices),
+      fetchErrors.arrangements && ('regelingen: ' + fetchErrors.arrangements),
+      fetchErrors.subscriptions&& ('abonnement: ' + fetchErrors.subscriptions),
+    ].filter(Boolean);
+    nuBlock.data.financial = {
+      granted: true,
+      status:  'error',
+      message: 'Kon financiële gegevens niet volledig laden — ' + errs.join('; '),
+    };
+  } else {
     nuBlock.data.financial = {
       granted: true,
       open_invoice_count: openInvoices.length,
@@ -363,8 +402,6 @@ export function buildDossierResponse(input, perms, opts) {
           }
         : null,
     };
-  } else {
-    nuBlock.data.financial = { granted: false, reason: 'no_permission' };
   }
 
   // ── BLOK 2 — GEBEURD (timeline) ─────────────────────────────────────────
@@ -390,9 +427,11 @@ export function buildDossierResponse(input, perms, opts) {
         total_available: timeline.total_available,
       },
       // Notes + audit alleen bij admin — zichtbare afscherming voor non-admin.
-      notes: canAdmin
-        ? { granted: true, items: input?.customerNotes || [] }
-        : { granted: false, reason: 'admin_only' },
+      notes: !canAdmin
+        ? { granted: false, reason: 'admin_only' }
+        : fetchErrors.customerNotes
+          ? { granted: true, status: 'error', message: 'Kon notities niet laden: ' + fetchErrors.customerNotes }
+          : { granted: true, items: input?.customerNotes || [] },
     },
   };
 
@@ -405,35 +444,45 @@ export function buildDossierResponse(input, perms, opts) {
   const nogTeDoenBlock = {
     granted: true,
     data: {
-      open_actions: canFinance
-        ? {
-            granted: true,
-            items: openPendingActions.map((pa) => ({
-              id:            pa.id,
-              action_type:   pa.action_type,
-              action_label:  ACTION_TYPE_LABELS[pa.action_type] || pa.action_type,
-              status:        pa.status,
-              status_label:  PENDING_ACTION_STATUS_LABELS[pa.status] || pa.status,
-              created_at:    pa.created_at,
-              proposed_by_user_id: pa.proposed_by_user_id || null,
-              days_open:     pa.created_at
-                ? Math.floor((nowMs - Date.parse(pa.created_at)) / 86400000)
-                : null,
-            })),
-          }
-        : { granted: false, reason: 'no_permission' },
-      open_invoices: canFinance
-        ? {
-            granted: true,
-            items: openInvoices.map((iv) => invoiceView(iv, nowMs)),
-          }
-        : { granted: false, reason: 'no_permission' },
+      open_actions: !canFinance
+        ? { granted: false, reason: 'no_permission' }
+        : fetchErrors.pendingActions
+          ? { granted: true, status: 'error', message: 'Kon acties niet laden: ' + fetchErrors.pendingActions }
+          : {
+              granted: true,
+              items: openPendingActions.map((pa) => ({
+                id:            pa.id,
+                action_type:   pa.action_type,
+                action_label:  ACTION_TYPE_LABELS[pa.action_type] || pa.action_type,
+                status:        pa.status,
+                status_label:  PENDING_ACTION_STATUS_LABELS[pa.status] || pa.status,
+                created_at:    pa.created_at,
+                proposed_by_user_id: pa.proposed_by_user_id || null,
+                days_open:     pa.created_at
+                  ? Math.floor((nowMs - Date.parse(pa.created_at)) / 86400000)
+                  : null,
+              })),
+            },
+      open_invoices: !canFinance
+        ? { granted: false, reason: 'no_permission' }
+        : fetchErrors.invoices
+          ? { granted: true, status: 'error', message: 'Kon facturen niet laden: ' + fetchErrors.invoices }
+          : {
+              granted: true,
+              items: openInvoices.map((iv) => invoiceView(iv, nowMs)),
+            },
       // Signalen: alleen bij canFinance (de meeste condities gaan over
       // financiële state; zonder canFinance ontstaat een leeg / onbetrouwbaar
       // beeld). Non-finance krijgt granted:false zichtbaar.
-      signals: canFinance
-        ? { granted: true, items: input?.signals || [] }
-        : { granted: false, reason: 'no_permission' },
+      // Signalen worden pas berekend na alle fetches — als een van de
+      // financial-bronnen faalde is het signaal-beeld sowieso onbetrouwbaar,
+      // dus we tonen dan status:'error' i.p.v. gedeeltelijke signalen.
+      signals: !canFinance
+        ? { granted: false, reason: 'no_permission' }
+        : (fetchErrors.invoices || fetchErrors.runs || fetchErrors.arrangements
+           || fetchErrors.pendingActions || fetchErrors.dunningLog || fetchErrors.whatsapp)
+          ? { granted: true, status: 'error', message: 'Signalen incompleet — één van de bron-queries faalde.' }
+          : { granted: true, items: input?.signals || [] },
       // TAKEN (PR D) — vrije taken uit taken_items met customer_id-koppeling.
       // Sinds de 2026-07-24-taken-customer-link migratie kunnen taken die
       // vanuit een klantcontext zijn aangemaakt (bv. _paTaskSubmit) meekomen.
@@ -442,23 +491,25 @@ export function buildDossierResponse(input, perms, opts) {
       // Permissie: geen extra gate. Taken zijn operationeel en bevatten
       // geen financiële data; canBase is voldoende (elke user met dossier-
       // toegang mag de taken zien).
-      free_tasks: {
-        granted: true,
-        items: (input?.freeTasks || []).map((t) => ({
-          id:               t.id,
-          titel:            t.titel || null,
-          omschrijving:     t.omschrijving || null,
-          prioriteit:       t.prioriteit || null,
-          status:           t.status || 'todo',
-          deadline:         t.deadline || null,
-          assigned_to_id:   t.assigned_to_id || null,
-          assigned_to_name: t.assigned_to_name || null,
-          aangemaakt:       t.aangemaakt || null,
-          days_open:        t.aangemaakt
-            ? Math.floor((nowMs - Date.parse(t.aangemaakt)) / 86400000)
-            : null,
-        })),
-      },
+      free_tasks: fetchErrors.freeTasks
+        ? { granted: true, status: 'error', message: 'Kon taken niet laden: ' + fetchErrors.freeTasks }
+        : {
+            granted: true,
+            items: (input?.freeTasks || []).map((t) => ({
+              id:               t.id,
+              titel:            t.titel || null,
+              omschrijving:     t.omschrijving || null,
+              prioriteit:       t.prioriteit || null,
+              status:           t.status || 'todo',
+              deadline:         t.deadline || null,
+              assigned_to_id:   t.assigned_to_id || null,
+              assigned_to_name: t.assigned_to_name || null,
+              aangemaakt:       t.aangemaakt || null,
+              days_open:        t.aangemaakt
+                ? Math.floor((nowMs - Date.parse(t.aangemaakt)) / 86400000)
+                : null,
+            })),
+          },
     },
   };
 
