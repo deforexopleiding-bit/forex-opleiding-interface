@@ -70,17 +70,37 @@
       /* Actie-knoppen 44px hoog en volle breedte-friendly. */
       .actions { gap: 8px; }
       .actions .btn { min-height: 44px; padding: 12px 16px; }
-      /* Onboarding-modal fullscreen op telefoon zodat form ruim past. */
+      /* Onboarding-modal fullscreen op telefoon zodat form ruim past.
+         iOS-fix: dvh + safe-area (zie fix #937). Zonder 100dvh valt de
+         footer achter de Safari-bottom-balk en zijn de knoppen niet
+         aantikbaar. Flex-column + body scroll + footer flex-shrink:0
+         zorgt dat footer altijd binnen viewport blijft. */
       .ob-modal { padding: 0; }
-      .ob-modal-card { max-width: 100%; height: 100vh; max-height: 100vh; border-radius: 0; border: 0; }
-      .ob-modal-body { flex: 1; }
+      .ob-modal-card {
+        max-width: 100%;
+        height: 100vh;
+        height: 100dvh;
+        max-height: 100vh;
+        max-height: 100dvh;
+        border-radius: 0;
+        border: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .ob-modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
       .ob-modal-body select,
       .ob-modal-body input[type="date"],
       .ob-modal-body .ob-link-input { font-size: 16px; padding: 12px; }
       .ob-modal-body .read-only { font-size: 15px; padding: 12px; }
       .ob-type-switch button { padding: 12px 14px; min-height: 44px; font-size: 13px; }
       .ob-modal-x { min-width: 44px; min-height: 44px; }
-      .ob-modal-f { position: sticky; bottom: 0; z-index: 2; }
+      .ob-modal-f {
+        position: sticky;
+        bottom: 0;
+        z-index: 2;
+        flex-shrink: 0;
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+      }
     }
     @media (max-width: 480px) {
       h1 { font-size: 18px; }

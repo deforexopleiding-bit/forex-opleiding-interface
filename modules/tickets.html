@@ -122,12 +122,33 @@
       .filter-row { gap:8px; }
       .chip-group { width:100%; }
       .module-select { width:100%; min-width:0; }
-      /* Modal fullscreen op telefoon zodat form ruim past. */
+      /* Modal fullscreen op telefoon zodat form ruim past. iOS-fix: dvh +
+         safe-area (zie fix #937). 100vh op iOS Safari rekent inclusief
+         toolbar → footer valt achter Safari-balk; 100dvh rekent alleen
+         de zichtbare viewport. Flex-column + body overflow-y:auto zorgt
+         dat de content scrolt en footer altijd binnen viewport blijft. */
       .modal-overlay { padding:0; }
-      .modal-card { max-width:100%; max-height:100vh; height:100vh; width:100vw; border-radius:0; border:0; }
-      .modal-body { flex:1; }
-      /* Sticky action-strip zodat Opslaan altijd bereikbaar blijft. */
-      .modal-footer { position:sticky; bottom:0; background:var(--ds-surface, var(--bg-elev)); z-index:2; }
+      .modal-card {
+        max-width:100%;
+        max-height:100vh;
+        max-height:100dvh;
+        height:100vh;
+        height:100dvh;
+        width:100vw;
+        border-radius:0;
+        border:0;
+      }
+      .modal-body { flex:1 1 auto; min-height:0; overflow-y:auto; }
+      /* Sticky action-strip zodat Opslaan altijd bereikbaar blijft, ook
+         achter de home-indicator op iPhone X+. */
+      .modal-footer {
+        position:sticky;
+        bottom:0;
+        background:var(--ds-surface, var(--bg-elev));
+        z-index:2;
+        flex-shrink:0;
+        padding-bottom: max(14px, env(safe-area-inset-bottom));
+      }
       /* Form-row-2 op mobiel naar 1-kolom (Type / Prioriteit stapelen). */
       .form-row-2 { grid-template-columns:1fr; }
     }
