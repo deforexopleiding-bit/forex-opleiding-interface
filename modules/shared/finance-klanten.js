@@ -362,6 +362,7 @@
             + '<td>'
             + '  <div class="fk-actions-wrap">'
             + '    <a class="fk-action-link" href="/modules/klanten.html?id=' + encodeURIComponent(it.id) + '" data-fk-action="dossier"><i class="ti ti-user"></i> Dossier</a>'
+            + '    <button type="button" class="fk-action-link" data-fk-quick-dossier="' + esc(it.id) + '" title="Snel-dossier in popup"><i class="ti ti-layout-sidebar-right-expand"></i> Snel</button>'
             + '    <button type="button" class="fk-kebab" data-fk-kebab="' + esc(it.id) + '" title="Meer acties" aria-label="Meer acties">&#8942;</button>'
             + '  </div>'
             + '</td>'
@@ -386,6 +387,22 @@
         e.stopPropagation();
         const customerId = btn.getAttribute('data-fk-kebab');
         openKebabMenu(btn, customerId);
+      });
+    });
+
+    // Snel-dossier: opent de gedeelde klantdossier-modal (PR B). Fail-soft
+    // als de shared module (nog) niet geladen is — navigeer dan naar de
+    // volledige page zodat de user niet vastloopt.
+    tbody.querySelectorAll('button[data-fk-quick-dossier]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const customerId = btn.getAttribute('data-fk-quick-dossier');
+        if (window.AgentShared && typeof window.AgentShared.openCustomerDossier === 'function') {
+          window.AgentShared.openCustomerDossier(customerId);
+        } else {
+          window.location.href = '/modules/klanten.html?id=' + encodeURIComponent(customerId);
+        }
       });
     });
   }
