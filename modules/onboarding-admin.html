@@ -182,6 +182,74 @@
     .ob-modal-body pre { background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; padding:10px 12px; font-size:12px; overflow:auto; max-height:300px; }
 
     @media (max-width: 880px) { .app { margin-left:0; padding:14px; } }
+
+    /* ── Mobile pass (Module 8C — admin) — media NA basis (bekende valkuil) ──
+       0 sr-*-classes gebruikt → alle mobile-fixes lokaal. Deelt modal-families
+       met hub (patroon uit #943). */
+    @media (max-width: 720px) {
+      /* 2 modal-families .oi-modal + .ob-modal — fullscreen + iOS-veilig
+         (dvh + safe-area, patroon #937). */
+      .oi-modal-overlay { padding: 0 !important; align-items: stretch !important; overflow: hidden; }
+      .oi-modal-card {
+        max-width: 100% !important;
+        max-height: 100vh !important;
+        max-height: 100dvh !important;
+        height: 100vh !important;
+        height: 100dvh !important;
+        border-radius: 0 !important;
+        margin: 0 !important;
+        overflow-y: auto;
+        padding-bottom: max(16px, env(safe-area-inset-bottom));
+      }
+      .oi-modal-list { max-height: 100%; }
+      .oi-modal-search { font-size: 16px; padding: 12px; min-height: 44px; }
+
+      .ob-modal { padding: 0; }
+      .ob-modal-card {
+        max-width: 100%;
+        max-height: 100vh;
+        max-height: 100dvh;
+        height: 100vh;
+        height: 100dvh;
+        border-radius: 0;
+        border: 0;
+      }
+      .ob-modal-body dl { grid-template-columns: 1fr; gap: 4px 0; }
+      .ob-modal-body dt { margin-top: 8px; }
+      .ob-modal-body { padding-bottom: max(18px, env(safe-area-inset-bottom)); }
+      .ob-modal-x { min-width: 44px; min-height: 44px; font-size: 20px; }
+
+      /* Data-table: horizontaal scrollbaar via wrapper. Table zelf blijft
+         table (kolom-alignment behouden), maar de PARENT-container krijgt
+         scroll. Aangezien de tabel direct in .app zit, wrappen we via
+         parent-selector .app > .data-table (indien de tabel niet in een
+         eigen wrapper zit). Fallback: display:block met white-space:nowrap. */
+      .data-table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;
+      }
+      .data-table th, .data-table td { white-space: nowrap; }
+
+      /* Config-forms (2 inputs, 1 textarea, 3 selects verspreid): scoped
+         inputs 16px + 44px. Beperkt scope tot direct-children van forms
+         binnen de admin-view — laat sidebar/modal-search-inputs met rust. */
+      .app > form input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+      .app > form textarea,
+      .app > form select {
+        font-size: 16px;
+        min-height: 44px;
+        padding: 10px 12px;
+      }
+
+      /* Mentor-cell inputs + save-btn (patroon uit 8B hub). */
+      .ob-mentor-cell input, .ob-mentor-cell select { font-size: 16px; padding: 10px 12px; min-height: 44px; max-width: 100%; }
+      .ob-mentor-cell .save-btn { min-height: 44px; padding: 10px 14px; font-size: 13px; }
+    }
+    @media (max-width: 480px) {
+      .ob-modal-h h2 { font-size: 14px; }
+    }
   </style>
 </head>
 <body>
