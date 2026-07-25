@@ -83,6 +83,41 @@
     /* Tab content */
     .tab-panel { display:none; }
     .tab-panel.active { display:block; }
+
+    /* ── Mobile pass (Module 9B — activity-log) — media NA basis ──
+       0 bestaande @media, 0 sr-classes. Log-feed met 2 tables + filter-
+       panel met 3 selects + 1 text-input + 1 date-input. */
+    @media (max-width: 720px) {
+      /* Filter-panel: op smal stapelen naar 1 kolom (was flex-wrap; nu
+         explicit stack zodat elk filter volle breedte krijgt). */
+      .filter-panel { flex-direction: column; align-items: stretch; }
+      .filter-panel .filter-field { width: 100%; }
+      .filter-panel select,
+      .filter-panel input[type="text"],
+      .filter-panel input[type="date"] {
+        font-size: 16px;
+        min-height: 44px;
+        padding: 10px 12px;
+        min-width: 0;
+        width: 100%;
+      }
+
+      /* Tables: dynamisch JS-gerenderd (innerHTML), geen wrapper-HTML.
+         display:block + overflow-x:auto op de tabel — patroon uit
+         #943/#944/#945/meta-ads. Alle kolommen bereikbaar via swipe. */
+      .main table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;
+      }
+      .main table th, .main table td { white-space: nowrap; }
+      /* Tijd-kolom tabular-nums voor uitlijning. */
+      .main table td.log-time, .main table td.log-when { font-variant-numeric: tabular-nums; }
+    }
+    @media (max-width: 480px) {
+      .filter-panel { padding: 10px; }
+    }
   </style>
 </head>
 <body>
