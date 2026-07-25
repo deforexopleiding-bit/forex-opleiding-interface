@@ -146,6 +146,66 @@
       .a-card { grid-template-columns: 1fr; }
       .a-actions { justify-content: flex-start; }
     }
+
+    /* ── Mobile pass (Module 8B — automations) — media NA basis ──
+       0 sr-*-classes gebruikt → sales-redesign.css @720/@480 raakt hier
+       niks; alle mobile-fixes lokaal. Config-forms hebben editable
+       automation-rules; scoped input-selector op .form-field zodat
+       niks buiten de editor lekt. */
+    @media (max-width: 720px) {
+      /* Form-inputs 16px + 44px (iOS zoom-fix + touch). Scope op
+         .form-field — de canonieke config-container in dit bestand. */
+      .form-field input, .form-field textarea, .form-field select {
+        font-size: 16px;
+        padding: 12px;
+        min-height: 44px;
+      }
+      .form-field textarea { min-height: 100px; }
+
+      /* Modal fullscreen + iOS-veilig (patroon #937): .modal-card is de
+         gedeelde class (max-width 760 op desktop → 100% op mobiel). */
+      .modal-overlay { padding: 0; align-items: stretch; }
+      .modal-card {
+        max-width: 100%;
+        max-height: 100vh;
+        max-height: 100dvh;
+        height: 100vh;
+        height: 100dvh;
+        border-radius: 0;
+        border: 0;
+      }
+      /* Body-slot binnen modal moet scrollen (bestaande modal-body class
+         is niet uniform in dit bestand — target :not-heuristic op card
+         direct-children die niet header/footer zijn). */
+      .modal-card > *:not(.modal-header):not(.modal-footer):not(header):not(footer) {
+        overflow-y: auto;
+      }
+      /* Footer touch-safe + safe-area op iPhone X+. */
+      .modal-card footer, .modal-card .modal-footer {
+        flex-shrink: 0;
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+      }
+
+      /* Tables (2 in dit bestand) in horizontaal scrollbare wrapper via
+         parent-selector — geen HTML wijziging. */
+      .app table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;
+      }
+
+      /* Actie-knoppen touch. */
+      .a-actions button, .modal-card button { min-height: 44px; padding: 12px 16px; }
+
+      /* Log-row pre-blok compacter zodat lange log-entries niet uit
+         viewport duwen. */
+      .log-row pre { font-size: 11px; padding: 8px; }
+    }
+    @media (max-width: 480px) {
+      .app { padding: 10px; }
+      .form-field textarea { min-height: 90px; }
+    }
   </style>
 </head>
 <body>

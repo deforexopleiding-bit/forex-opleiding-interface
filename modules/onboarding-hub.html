@@ -221,6 +221,49 @@
     .ob-modal-body pre { background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; padding:10px 12px; font-size:12px; overflow:auto; max-height:300px; }
 
     @media (max-width: 880px) { .app { margin-left:0; padding:14px; } }
+
+    /* ── Mobile pass (Module 8B — hub) — media NA basis (bekende valkuil) ──
+       0 sr-*-classes gebruikt → sales-redesign.css @720/@480 raakt hier
+       niks; alle mobile-fixes lokaal. */
+    @media (max-width: 720px) {
+      /* 2 modal-families: .oi-modal (klein confirmation) + .ob-modal (info).
+         iOS-veilig fullscreen (patroon #937) — beide krijgen dvh + safe-area. */
+      .oi-modal-overlay { padding: 0 !important; align-items: stretch !important; overflow: hidden; }
+      .oi-modal-card {
+        max-width: 100% !important;
+        max-height: 100vh !important;
+        max-height: 100dvh !important;
+        height: 100vh !important;
+        height: 100dvh !important;
+        border-radius: 0 !important;
+        margin: 0 !important;
+        overflow-y: auto;
+        padding-bottom: max(16px, env(safe-area-inset-bottom));
+      }
+      .ob-modal { padding: 0; }
+      .ob-modal-card {
+        max-width: 100%;
+        max-height: 100vh;
+        max-height: 100dvh;
+        height: 100vh;
+        height: 100dvh;
+        border-radius: 0;
+        border: 0;
+      }
+      /* .ob-modal-body dl grid-cols 180 1fr op mobiel stapelen zodat de
+         labels + values leesbaar blijven. */
+      .ob-modal-body dl { grid-template-columns: 1fr; gap: 4px 0; }
+      .ob-modal-body dt { margin-top: 8px; }
+      .ob-modal-body { padding-bottom: max(18px, env(safe-area-inset-bottom)); }
+      /* Modal-close 44x44 touch. */
+      .ob-modal-x { min-width: 44px; min-height: 44px; font-size: 20px; }
+      /* Mentor-cell inputs 16px op mobiel. */
+      .ob-mentor-cell input, .ob-mentor-cell select { font-size: 16px; padding: 10px 12px; min-height: 44px; max-width: 100%; }
+      .ob-mentor-cell .save-btn { min-height: 44px; padding: 10px 14px; font-size: 13px; }
+    }
+    @media (max-width: 480px) {
+      .ob-modal-h h2 { font-size: 14px; }
+    }
   </style>
 </head>
 <body>
