@@ -151,6 +151,53 @@
       display:flex; align-items:center; gap:4px;
     }
     .gallery-item:hover .gi-download { opacity:1 }
+
+    /* ── Mobile pass (Module 9B — studio) — media NA basis ──
+       Creative-editor met live preview. Chart-/canvas-render-JS
+       ONGEWIJZIGD (CSS-only PR). #previewCanvas heeft al max-width:100%
+       + max-height:70vh in basis, dus schalen werkt. Op mobiel:
+       preview-canvas-wrap compacter zodat de container niet 340px+
+       verticaal ruimte pakt. */
+    @media (max-width: 720px) {
+      /* Studio-grid @1100 al 1 kol; op 720 blijft dat gelden. Preview-
+         canvas-wrap compacter zodat de creative-editor niet halve pagina
+         vult voordat je bij de controls komt. */
+      .studio-preview { min-height: 260px; padding: 10px; }
+      .preview-canvas-wrap { min-height: 220px; padding: 10px; max-width: 100%; }
+      #previewCanvas { max-height: 50vh; max-height: 50dvh; }
+      .preview-actions { gap: 8px; }
+      .preview-actions .btn { min-height: 44px; padding: 12px 16px; }
+
+      /* Studio-panel input[type=text] 16px + 44px (iOS zoom-fix, scoped
+         op .studio-panel = editor-container). */
+      .studio-panel input[type="text"] {
+        font-size: 16px;
+        padding: 12px;
+        min-height: 44px;
+      }
+
+      /* Dropzone/hint bruikbaar op mobiel. */
+      .dz-hint { font-size: 13px; }
+      .dz-hint i { font-size: 32px; }
+      .dz-preview { max-height: 160px; }
+      .dz-remove { min-height: 44px; padding: 10px 14px; }
+
+      /* Format-picker labels touch-target — radio-labels moeten
+         voldoende clickzone hebben. */
+      .format-picker label { min-height: 44px; padding: 10px 12px; }
+
+      /* Swatch-kleurpicker: min 44x44 zodat er niet mis-getikt wordt. */
+      .sw { min-width: 44px; min-height: 44px; }
+
+      /* Gallery-download-knop op mobiel altijd zichtbaar (hover werkt
+         niet op touch), zodat de user 'em kan tikken. */
+      .gi-download { opacity: 1; min-height: 36px; padding: 8px 10px; font-size: 12px; }
+    }
+    @media (max-width: 480px) {
+      .studio-preview { min-height: 220px; }
+      .preview-canvas-wrap { min-height: 180px; }
+      #previewCanvas { max-height: 45vh; max-height: 45dvh; }
+    }
   </style>
 </head>
 <body>

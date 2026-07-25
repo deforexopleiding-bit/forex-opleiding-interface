@@ -192,6 +192,39 @@
     }
     .ads-table tbody tr.unattr-row td { color:var(--text-dim); font-style:italic }
     .ads-table tbody tr.unattr-row .ads-name { font-style:normal; color:var(--text-primary) }
+
+    /* ── Mobile pass (Module 9B — meta-ads) — media NA basis ── */
+    @media (max-width: 720px) {
+      /* KPI-strip @900 al 2 kol; @480 → 1 kol (patroon Module 1 Dashboard). */
+      .kpi-strip { gap: 10px; }
+      /* Tables (.ads-table) horizontaal scrollbaar — dynamisch JS-gerenderd
+         via innerHTML, dus geen wrapper-HTML. Truc: display:block +
+         overflow-x:auto op de tabel zelf (patroon #943/#944/#945). */
+      .ads-table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;
+      }
+      .ads-table th, .ads-table td { white-space: nowrap; }
+      /* Roas-funnel @900 al 2 kol; @480 → 1 kol. */
+      .roas-funnel { gap: 8px; }
+      /* Inputs (6 stuks — filter/search): 16px + 44px scoped op filter/
+         search containers als aanwezig. Val terug op alle .main input
+         maar exclusief checkbox/radio. */
+      .main input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+      .main select {
+        font-size: 16px;
+        min-height: 44px;
+        padding: 10px 12px;
+      }
+      /* KPI-getallen tabular-nums (voor uitlijning). */
+      .kpi-strip .kpi-value, .ads-table td.num { font-variant-numeric: tabular-nums; }
+    }
+    @media (max-width: 480px) {
+      .kpi-strip { grid-template-columns: 1fr; }
+      .roas-funnel { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
