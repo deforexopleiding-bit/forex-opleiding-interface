@@ -314,6 +314,25 @@
     }
     .ld-notitie-form button:hover { opacity: 0.9; }
     .ld-notitie-form button:disabled { opacity: 0.4; cursor: default; }
+
+    /* ── Mobile pass (Module 5) — media NA basis (bekende valkuil) ── */
+    @media (max-width: 720px) {
+      /* .main-content offset via shared body-selector agent-shared.css @1024. */
+      .main-content { padding: 14px !important; max-width: 100% !important; }
+      .ld-lead-name { font-size: 22px; }
+      .ld-lead-meta { gap: 12px; font-size: 13px; }
+      /* Tabs: horizontaal scrollbaar (4 tabs met tekst). */
+      .ld-tabs { overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; }
+      .ld-tabs::-webkit-scrollbar { display: none; }
+      .ld-tab { padding: 12px 16px; min-height: 44px; white-space: nowrap; flex: 0 0 auto; }
+      /* Alle knoppen touch-target. Formulier-inputs 16px (iOS zoom-fix). */
+      .ld-notitie-form textarea, .ld-notitie-form input { font-size: 16px !important; padding: 12px !important; }
+      .ld-notitie-form button { min-height: 44px; padding: 12px 18px; }
+      #screenshot-upload-btn { min-height: 44px; padding: 12px 18px; }
+    }
+    @media (max-width: 480px) {
+      .ld-lead-name { font-size: 20px; }
+    }
   </style>
 </head>
 <body>

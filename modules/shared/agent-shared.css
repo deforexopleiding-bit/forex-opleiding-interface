@@ -308,8 +308,14 @@ body::before {
      `.app { padding:X }` zetten worden zo niet ongewild ontpadded. */
   /* PR 0 preflight: .main-content erbij — follow-up.html / follow-up-admin.html
      / follow-up-lead.html gebruiken .main-content i.p.v. .main, misten daardoor
-     de mobile-offset-reset en klemden op 390px 220px opzij tegen de sidebar. */
-  .main, .main-content { margin-left:0; padding-top:0; }
+     de mobile-offset-reset en klemden op 390px 220px opzij tegen de sidebar.
+     Fix #938: specificity-boost `body .main-content` (2 klassen) — deze 3
+     files hebben een eigen inline `<style>` die `.main-content { margin-left:
+     var(--sidebar-w, 220px) }` opnieuw declareert NA agent-shared.css. Zonder
+     de body-prefix wint per-page inline door source-order (zelfde patroon als
+     `body .app` uit #870/#874). */
+  .main { margin-left:0; padding-top:0; }
+  body .main-content { margin-left:0; padding-top:0; }
   body .app { margin-left:0; }
   /* Hamburger toont in de topbar; theme-toggle blijft rechtsboven bereikbaar.
      Topbar is sinds de full-width-migratie sowieso left:0 op alle

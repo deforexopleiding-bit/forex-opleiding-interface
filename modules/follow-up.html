@@ -3067,6 +3067,80 @@
     }
     #appt-modal .fu-cockpit-ctx-cell .k { font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted-2); font-weight:700; }
     #appt-modal .fu-cockpit-ctx-cell .v { color: var(--text); font-size:13px; font-weight:600; margin-top:2px; }
+
+    /* ── Module 5 aggregate mobile pass — media NA basis (bekende valkuil) ──
+       12k-regel-file heeft al 12 @media-blocks maar mist:
+       (a) .main-content offset (was 220px op mobiel, shared body-selector
+           doet 't nu via specificity-boost — hier padding aanpassen);
+       (b) alle input/textarea/select 16px (iOS zoom-fix; er zaten 143 hard-
+           coded kleuren zonder inputs-16px-regel);
+       (c) modal fullscreen op telefoon met iOS-veilig dvh + safe-area (patroon
+           #937); .fu-modal is de canonieke modal-class hier;
+       (d) touch-targets ≥44px op knoppen/tabs die dat nog niet hebben. */
+    @media (max-width: 720px) {
+      /* Content-padding vriendelijker (was 20px 28px, wordt 14px). */
+      .main-content { padding: 14px !important; max-width: 100% !important; }
+
+      /* iOS zoom-fix: alle inputs 16px overall. Aangezien deze file 43
+         inputs heeft verspreid over talloze forms, is de attribute-selector
+         de veiligste catch-all. Padding gelijktrekken naar 12px voor
+         touch-target ≥44px. */
+      input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+      textarea, select {
+        font-size: 16px !important;
+        min-height: 44px;
+      }
+      /* Uitzondering: bulk-check inputs blijven native-size. Al gedekt door
+         :not([type="checkbox"]) hierboven. */
+
+      /* Fu-modal fullscreen + iOS-veilig (patroon uit #937). */
+      .fu-modal-overlay { padding: 0; align-items: stretch; }
+      .fu-modal {
+        max-width: 100% !important;
+        max-height: 100vh !important;
+        max-height: 100dvh !important;
+        height: 100vh !important;
+        height: 100dvh !important;
+        border-radius: 0 !important;
+        display: flex;
+        flex-direction: column;
+      }
+      .fu-modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+      .fu-modal-header, .fu-modal-head { flex-shrink: 0; }
+      .fu-modal-footer, .fu-modal-foot, .fu-modal-actions {
+        flex-shrink: 0;
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+      }
+
+      /* Touch-targets: knoppen/tabs die de 44px missen. .fu-btn-* familie
+         is de canonieke knop-class. */
+      .fu-btn, .fu-btn-primary, .fu-btn-secondary, .fu-btn-ghost,
+      .fu-tab, .fu-tab-btn {
+        min-height: 44px;
+      }
+      /* Tab-bar / tabs-container horizontaal scrollbaar zodat 5+ tabs
+         niet buiten viewport vallen (in recon: fu-tab + fu-tab-more
+         drukten body naar 580px). Cockpit-detail max-width:100% zodat
+         detail-kaart binnen viewport blijft. */
+      .fu-tabs, .fu-tabs-bar, .fu-cockpit-tabs {
+        overflow-x: auto;
+        scrollbar-width: none;
+        flex-wrap: nowrap;
+      }
+      .fu-tabs::-webkit-scrollbar,
+      .fu-tabs-bar::-webkit-scrollbar,
+      .fu-cockpit-tabs::-webkit-scrollbar { display: none; }
+      .fu-tab, .fu-tab-btn, .fu-tab-more {
+        white-space: nowrap;
+        flex: 0 0 auto;
+      }
+      .fu-cockpit-detail { max-width: 100%; min-width: 0; }
+    }
+    @media (max-width: 480px) {
+      /* Op zeer smal scherm: extra reductie voor cockpit-ctx (kans op
+         6-koloms grid). */
+      #appt-modal .fu-cockpit-ctx { grid-template-columns: 1fr 1fr; }
+    }
   </style>
 </head>
 <body>
