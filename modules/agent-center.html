@@ -1180,6 +1180,91 @@
       .ac-status { justify-self: center; }
       .ed-row-2 { grid-template-columns: 1fr; }
     }
+
+    /* ── Mobile + DS pass (Module 7B — CSS-ONLY, scoped per sub-view) ──
+       Gevoelig bestand: 82 form-elements over 3 agent-config-secties
+       (Simone / Joost / Lisa). Elke input-selector is GESCOPED binnen
+       #acEditor of #kanalenView zodat styling niet naar andere delen
+       lekt. GEEN HTML/JS wijziging (CSS-only PR, gate #937). */
+    @media (max-width: 720px) {
+      /* iOS zoom-fix + touch-target op ALLE form-elementen in de config-
+         editor + kanalen-view. Scope: BINNEN #acEditor of #kanalenView —
+         .app / sidebar / topbar inputs (buiten deze containers) blijven
+         onaangeraakt. Uitzonderingen: checkbox/radio/hidden houden native
+         formaat (anders krijgen ze onlogische padding). */
+      #acEditor input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+      #acEditor textarea,
+      #acEditor select,
+      #kanalenView input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+      #kanalenView textarea,
+      #kanalenView select {
+        font-size: 16px;
+        min-height: 44px;
+        padding: 10px 12px;
+      }
+      /* Textareas krijgen extra ademruimte — persona-prompts zijn lang. */
+      #acEditor textarea, #kanalenView textarea {
+        min-height: 120px;
+        padding: 12px;
+      }
+
+      /* Sub-tab-schakelaars per agent horizontaal scrollbaar (analoog
+         aan #940 kb-edit-tabs). Elke agent heeft eigen scope: styling
+         lekt niet tussen agents. */
+      .joost-subtabs, .simone-subtabs {
+        overflow-x: auto;
+        scrollbar-width: none;
+        flex-wrap: nowrap;
+      }
+      .joost-subtabs::-webkit-scrollbar,
+      .simone-subtabs::-webkit-scrollbar { display: none; }
+      .joost-subtab, .simone-subtab {
+        white-space: nowrap;
+        flex: 0 0 auto;
+        min-height: 44px;
+        padding: 12px 14px;
+        font-size: 13px;
+      }
+
+      /* Hoofd-view-schakelaar agents/kanalen (r1695-96 [data-view]).
+         Knoppen touch-target zonder in de forms te lekken. */
+      button[data-view] { min-height: 44px; padding: 12px 16px; }
+
+      /* Joost decisions-table horizontaal scrollbaar zodat brede kolommen
+         bereikbaar blijven. Wrap via parent-selector op de sub-section
+         die de decisions-tabel bevat. */
+      .joost-sub-section[data-joost-sub="decisions"] {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+      .joost-decisions-table { min-width: 640px; font-size: 12.5px; }
+
+      /* Config-grids die label|input opdelen: op mobiel stapelen ze naar
+         1 kolom. .ed-row-2 is @880 al gefixt; .ed-section body waar grids
+         label|input hebben komen automatisch als block door de default
+         flex-column layout. Extra safety: min-width:0 op sub-section
+         children zodat lange strings/inputs geen container oprekken. */
+      .joost-sub-section > *,
+      .simone-sub-section > *,
+      .lisa-sub-section > * {
+        min-width: 0;
+      }
+
+      /* Ed-section (config-forms): touch-target op action-buttons binnen. */
+      .ed-section button:not([data-view]):not(.joost-subtab):not(.simone-subtab) {
+        min-height: 44px;
+      }
+
+      /* Autonomy-caps (getal-velden): tabular-nums voor uitlijning. */
+      #acEditor input[type="number"] {
+        font-variant-numeric: tabular-nums;
+      }
+    }
+    @media (max-width: 480px) {
+      /* Zeer smal: nog wat compactere padding, sub-tab-tekst behoud. */
+      #acEditor .ed-section { margin-bottom: 14px; }
+      #acEditor textarea { min-height: 100px; }
+    }
   </style>
 </head>
 <body>
