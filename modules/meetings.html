@@ -155,6 +155,81 @@
     .page-controls button.active{background:var(--brand-secondary);color:var(--text-inverse);border-color:var(--brand-secondary);}
 
     @media(max-width:1024px){.meeting-setup-card,.archive-card{max-width:100%;}}
+
+    /* ── Mobile pass (Module 6) — media NA basis (bekende valkuil) ──
+       Vergaderruimte is een multi-agent CHAT-room (met U-shape visualisatie
+       van agents rond een tafel), GEEN kalender met dagen×tijdslots. Focus:
+       (a) archive-tabs horizontaal scrollbaar (in recon 500px right op 390),
+       (b) alle inputs 16px + 44px hoog (13 inputs: agenda/chat/review/ext),
+       (c) meeting-room-layout height:100vh → 100dvh (iOS toolbar-fix),
+       (d) meeting-u-shape scale-down zodat U-tafel op smal scherm past,
+       (e) ext-input-popover fullscreen op mobiel ipv 320px card. */
+    @media (max-width:720px) {
+      /* Setup-card compacter + volle breedte op mobiel. */
+      .meeting-setup-card { padding: 16px; margin: 0; }
+      .meeting-setup-title { font-size: 17px; }
+
+      /* Alle text-inputs 16px + touch-target (iOS zoom-fix). */
+      .agenda-input, .chat-input, .review-input {
+        font-size: 16px;
+        padding: 12px 14px;
+        min-height: 44px;
+      }
+
+      /* Archive-tabs horizontaal scrollbaar (5 tabs met tekst, was
+         500+px right op 390 → verborgen achter viewport). */
+      .archive-tabs {
+        overflow-x: auto;
+        scrollbar-width: none;
+        flex-wrap: nowrap;
+      }
+      .archive-tabs::-webkit-scrollbar { display: none; }
+      .tab-btn {
+        white-space: nowrap;
+        flex: 0 0 auto;
+        min-height: 44px;
+        padding: 12px 14px;
+        font-size: 13px;
+      }
+
+      /* Meeting-room: 100vh → 100dvh (iOS Safari toolbar-aware). */
+      .meeting-room-layout {
+        height: calc(100vh - 140px);
+        height: calc(100dvh - 120px);
+      }
+
+      /* U-shape (podium-visualisatie): op mobiel schaalt de tafel-height
+         mee met viewport-breedte zodat de agent-avatars nog leesbaar zijn
+         en de tafel-vorm behouden blijft. */
+      .meeting-u-shape { height: 200px; max-width: 100%; }
+      .meeting-stage {
+        padding: 1rem 1.25rem;
+        max-height: 320px;
+        border-radius: 10px 10px 0 0;
+      }
+
+      /* Chat-input row: send-button niet krimpen. */
+      .chat-input-row { gap: 6px; }
+      .chat-input-row button { min-height: 44px; padding: 12px 16px; }
+
+      /* Ext-input popover fullscreen zodat 320px-card niet uit view valt. */
+      .ext-input-popover {
+        position: fixed !important;
+        inset: auto 8px 76px 8px !important;
+        width: auto !important;
+        max-height: 60vh;
+        overflow-y: auto;
+      }
+
+      /* Cards padding + input-area compacter. */
+      .meeting-input-area { padding: 10px 12px; }
+    }
+    @media (max-width:480px) {
+      .meeting-setup-card { padding: 14px; border-radius: 10px; }
+      .meeting-setup-title { font-size: 16px; }
+      .meeting-u-shape { height: 180px; }
+      .meeting-stage-title { font-size: 13px; }
+    }
   </style>
 </head>
 <body>
