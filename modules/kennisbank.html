@@ -337,6 +337,80 @@
       .app { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; height: auto; overflow: visible; }
       .kb-col { border-right: none; border-bottom: 1px solid var(--border); max-height: 400px; }
     }
+
+    /* ── Mobile + DS pass (Module 7A) — media NA basis (bekende valkuil) ── */
+    @media (max-width: 720px) {
+      /* .app is 3-koloms grid; @1024 al gestapeld naar 1 kolom. Op mobiel
+         hoogte-fix: 100vh → 100dvh (iOS Safari toolbar-fix uit #937). */
+      .app { height: auto; overflow: visible; }
+      body { min-height: 100dvh; }
+
+      /* Editor: textarea markdown 16px (iOS zoom-fix), min-height comfortabel. */
+      .kb-edit-textarea { font-size: 16px; padding: 14px 14px; }
+      .kb-edit-title-input { font-size: 16px; padding: 12px; }
+      /* Edit-wrap height op mobiel dvh-veilig; kb-edit-tabs (edit/preview
+         switcher) horizontaal scrollbaar bij extra tabs. */
+      .kb-edit-wrap {
+        height: calc(100vh - 240px);
+        height: calc(100dvh - 220px);
+        min-height: 320px;
+      }
+      .kb-edit-tabs { overflow-x: auto; scrollbar-width: none; }
+      .kb-edit-tabs::-webkit-scrollbar { display: none; }
+      .kb-edit-tab { min-height: 44px; padding: 12px 16px; font-size: 13px; white-space: nowrap; flex: 0 0 auto; }
+
+      /* Edit-actions sticky onderaan zodat Opslaan/Publiceren bereikbaar
+         blijft tijdens editor-scroll. */
+      .kb-edit-actions {
+        position: sticky;
+        bottom: 0;
+        background: var(--bg);
+        padding: 12px 0;
+        margin: 12px -14px 0;
+        padding-left: 14px;
+        padding-right: 14px;
+        border-top: 1px solid var(--border);
+        z-index: 10;
+      }
+      .kb-edit-actions button { min-height: 44px; padding: 12px 16px; flex: 1 1 auto; }
+
+      /* List-toolbar (zoek + import + nieuw) full-width, wrap. */
+      .kb-list-toolbar { flex-wrap: wrap; gap: 8px; }
+      .kb-list-toolbar .kb-search { flex: 1 1 100%; font-size: 16px; padding: 12px 14px; min-height: 44px; }
+      .kb-list-toolbar .btn { min-height: 44px; padding: 12px 16px; }
+
+      /* Modals fullscreen + iOS-veilig dvh + safe-area (patroon #937).
+         Dekt versionModal, tagModal, importModal — alle 3 delen .modal-overlay
+         + .modal-card. */
+      .modal-overlay { padding: 0; align-items: stretch; }
+      .modal-card {
+        max-width: 100% !important;
+        max-height: 100vh !important;
+        max-height: 100dvh !important;
+        height: 100vh !important;
+        height: 100dvh !important;
+        border-radius: 0 !important;
+        border: 0 !important;
+      }
+      .modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+      .modal-head, .modal-foot {
+        flex-shrink: 0;
+      }
+      .modal-foot {
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+      }
+      .modal-close { min-width: 44px; min-height: 44px; }
+
+      /* Import-modal textareas 16px (waren 12.5px monospace). */
+      #importModal textarea { font-size: 16px !important; padding: 12px !important; }
+
+      /* Touch-targets op agent-toggle en bucket-lijst. */
+      .agent-toggle, .kb-bucket { min-height: 44px; }
+    }
+    @media (max-width: 480px) {
+      .kb-edit-textarea { padding: 12px 10px; }
+      .kb-list-toolbar { gap: 6px; }
+    }
   </style>
 </head>
 <body>

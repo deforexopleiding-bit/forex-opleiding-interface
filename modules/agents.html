@@ -78,6 +78,44 @@
     .chat-train-textarea:focus{border-color:rgba(168,85,247,0.5);}
     @media(max-width:1024px){.agents-grid{grid-template-columns:1fr 1fr;}.chat-layout{grid-template-columns:1fr;height:auto;}}
     @media(max-width:680px){.agents-grid{grid-template-columns:1fr;}}
+
+    /* ── Mobile + DS pass (Module 7A) — media NA basis (bekende valkuil) ── */
+    @media (max-width: 720px) {
+      /* Chat-input textarea 16px (iOS zoom-fix), 44px hoog. */
+      .chat-input {
+        font-size: 16px;
+        padding: 12px 14px;
+        min-height: 44px;
+      }
+      .chat-send { min-height: 44px; padding: 12px 18px; font-size: 14px; }
+      /* Chat-input-area sticky onderaan zodat input + verzendknop altijd
+         bereikbaar zijn tijdens scroll door berichten (iPhone toolbar-aware
+         via safe-area). */
+      .chat-input-area {
+        padding: 10px 14px;
+        padding-bottom: max(10px, env(safe-area-inset-bottom));
+      }
+      /* Chat-layout: 100vh basis → 100dvh op mobiel zodat de layout binnen
+         de iOS Safari-viewport blijft (patroon #937 / #939). */
+      .chat-layout {
+        height: calc(100vh - 112px);
+        height: calc(100dvh - 112px);
+        min-height: 400px;
+      }
+      /* Chat-sidebar (agent-info + capabilities): op mobiel stacket bovenop
+         via @1024 al; radius aanpassen zodat visueel netter. */
+      .chat-sidebar { border-radius: 14px 14px 0 0; padding: 14px; }
+      .chat-main { border-radius: 0 0 14px 14px; border-left: 1px solid var(--border); }
+      /* Chat-msg-actions touch-target. */
+      .chat-like-btn, .chat-train-btn { min-height: 44px; padding: 10px 14px; }
+      .chat-train-textarea { font-size: 16px; padding: 12px; }
+    }
+    @media (max-width: 480px) {
+      .chat-header { padding: 12px 14px; }
+      .chat-title { font-size: 13px; }
+      .chat-messages { padding: 12px; }
+      .chat-input-area { padding: 8px 12px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+    }
   </style>
 </head>
 <body>
