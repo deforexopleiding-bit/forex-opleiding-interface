@@ -27,6 +27,18 @@
     .filter-select:focus { border-color:var(--accent-violet); }
 
     @media(max-width:1024px) { .kpi-grid { grid-template-columns:repeat(2,1fr); } }
+
+    /* ── Mobile pass (Module 6) — media NA basis (bekende valkuil) ── */
+    @media (max-width:720px) {
+      /* KPI-grid al @1024 → 2 kolommen, @720 blijft 2. .filter-select touch. */
+      .filter-select { font-size: 16px; padding: 12px; min-height: 44px; }
+      /* Cards wat compacter op mobiel voor betere content-density. */
+      .cc-card { padding: 16px; }
+    }
+    @media (max-width:480px) {
+      /* Telefoon: KPI-grid 1 kolom. */
+      .kpi-grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
