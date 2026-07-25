@@ -303,6 +303,102 @@
     .wa-features-preview ul { list-style:none; padding:0; margin:0; }
     .wa-features-preview li { padding:4px 0; color:var(--text-dim); font-size:13px; }
     .wa-eta { font-size:12px; color:var(--text-faint); }
+
+    /* ── Mobile pass (Module 9A — lisa) — media NA basis (bekende valkuil) ──
+       Gevoelig config-file (persona/prompts sturen agent-gedrag aan).
+       STRIKT CSS-ONLY. Alle input-selectors gescoped op .cfg-editor of
+       .lisa-settings-panel of .cfg-sub-panel — nooit naakt.
+       Bestaande @media (1100/900/560/700/760) intact gelaten; deze
+       @720/@480 block werkt additief. */
+    @media (max-width: 720px) {
+      /* Hoofd-tabs (Live/Stats/Config/Sandbox/Logs) horizontaal scrollbaar.
+         Flex-wrap:wrap in basis stapelt anders naar 2+ rijen; hier
+         nowrap + scroll voor consistente uitlijning met touch. */
+      .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+      .tabs::-webkit-scrollbar { display: none; }
+      .tab { white-space: nowrap; flex: 0 0 auto; min-height: 44px; padding: 12px 14px; font-size: 13px; }
+
+      /* Cfg-subtabs (persona-sub-sectie schakelaar binnen config) —
+         horizontaal scrollbaar, elke sub-tab 44px touch. */
+      .cfg-subtabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+      .cfg-subtabs::-webkit-scrollbar { display: none; }
+      .cfg-subtab { white-space: nowrap; flex: 0 0 auto; min-height: 44px; padding: 12px 14px; }
+
+      /* Alle 130 form-elementen: 16px + 44px + padding 12. SCOPED op de
+         canonieke config-containers (.cfg-editor / .cfg-sub-panel /
+         .lisa-settings-panel). Uitzonderingen op checkbox/radio/hidden
+         zodat native-controls hun formaat houden. */
+      .cfg-editor input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+      .cfg-editor textarea,
+      .cfg-editor select,
+      .cfg-sub-panel input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+      .cfg-sub-panel textarea,
+      .cfg-sub-panel select,
+      .lisa-settings-panel input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+      .lisa-settings-panel textarea,
+      .lisa-settings-panel select {
+        font-size: 16px;
+        min-height: 44px;
+        padding: 10px 12px;
+      }
+      /* Textareas (persona-prompts): comfortabele hoogte. */
+      .cfg-editor textarea, .cfg-sub-panel textarea, .lisa-settings-panel textarea {
+        min-height: 120px;
+        padding: 12px;
+      }
+
+      /* Number-inputs: tabular-nums voor autonomy-caps e.d. */
+      .cfg-editor input[type="number"], .cfg-sub-panel input[type="number"] {
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Sub-panel/sectie children krijgen min-width:0 — voorkomt dat een
+         lange string in de ene sectie een andere sectie oprekt via de
+         gemeenschappelijke parent grid/flex layout. */
+      .cfg-sub-panel > *, .cfg-editor > * { min-width: 0; }
+
+      /* Lisa-modal iOS-veilig fullscreen (patroon #937). Modal is niet
+         fullscreen op main — max-width 640, geen 100vh; op mobiel wél
+         fullscreen zodat lange config-forms in de modal ruim passen. */
+      .lisa-modal { padding: 0; align-items: stretch; overflow: hidden; }
+      .lisa-modal-card {
+        max-width: 100%;
+        max-height: 100vh;
+        max-height: 100dvh;
+        height: 100vh;
+        height: 100dvh;
+        border-radius: 0;
+        border: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .lisa-modal-head { flex-shrink: 0; }
+      .lisa-modal-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        padding-bottom: max(14px, env(safe-area-inset-bottom));
+      }
+      .lisa-modal-close { min-width: 44px; min-height: 44px; font-size: 22px; }
+
+      /* Hist-table (in modal) horizontaal scrollbaar zonder HTML-wrapper.
+         Zelfde patroon als #943 automations. */
+      .hist-table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;
+      }
+
+      /* Cfg-toolbar action-buttons touch. */
+      .cfg-toolbar button { min-height: 44px; padding: 12px 14px; }
+    }
+    @media (max-width: 480px) {
+      .tab { padding: 12px 12px; font-size: 12.5px; }
+      .cfg-subtab { padding: 12px 12px; font-size: 12.5px; }
+      .cfg-editor textarea, .cfg-sub-panel textarea { min-height: 100px; }
+      .lisa-modal-body { padding: 12px 14px; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+    }
   </style>
 </head>
 <body>
