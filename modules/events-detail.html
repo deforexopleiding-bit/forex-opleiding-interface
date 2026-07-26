@@ -179,6 +179,153 @@
     .kebab-item.danger { color: var(--red, #dc2626); }
 
     @media (max-width: 880px) { .app { margin-left: 0; padding: 14px; } .info-grid { grid-template-columns: 1fr; } }
+
+    /* ── Mobiel + iOS-veilig (Module 10D) — scoped op .app/.ev-*/.info-*/
+       .form-field/.modal-* + id-scoped op inline-styled inputs.
+       .sr-tablewrap heeft al overflow-x:auto (sales-redesign.css) → 3 tabellen
+       veegbaar zonder extra CSS. .sr-search input + .sr-ibtn krijgen al 44+16
+       via bestaande @720 in sales-redesign.css.
+       Geen HTML/JS-wijziging; 7 modals collectief iOS-veilig + fullscreen op
+       smal; 2 modals met inline modal-card overrides via id-scope + !important. ── */
+    @media (max-width: 720px) {
+      html, body { min-height: 100vh; min-height: 100dvh; }
+      .app { padding: 14px 14px calc(24px + env(safe-area-inset-bottom, 0px)); }
+
+      .ev-head { gap: 10px; padding-bottom: 12px; margin-bottom: 14px; }
+      .ev-title { font-size: 20px; }
+      .ev-actions { width: 100%; }
+      .ev-actions .btn-primary,
+      .ev-actions .btn-secondary,
+      .ev-actions .btn-danger { flex: 1 1 auto; justify-content: center; }
+
+      .ev-meta { gap: 10px; }
+
+      .sync-strip { gap: 6px; padding-bottom: 8px; margin-bottom: 12px; }
+
+      .signups-closed-banner { flex-wrap: wrap; padding: 10px 12px; }
+
+      /* Tabs: horizontaal scrollbaar op mobiel zodat alle tabs bereikbaar
+         blijven; behoud onderrand + underline. */
+      .tabs {
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        flex-wrap: nowrap;
+      }
+      .tabs::-webkit-scrollbar { display: none; }
+      .tab {
+        padding: 12px 14px;
+        min-height: 44px;
+        white-space: nowrap;
+        flex: 0 0 auto;
+      }
+
+      /* Split-grid al @880 → 1fr; hier alleen padding + inline knop-fullwidth. */
+      .ev-card { padding: 14px 14px; }
+      .ev-detail-row { font-size: 13.5px; }
+      .ev-detail-row .label { min-width: 52px; }
+
+      .ev-actions-vert .btn-primary,
+      .ev-actions-vert .btn-secondary,
+      .ev-actions-vert .btn-danger { min-height: 44px; padding: 10px 14px; }
+
+      .ev-icon-row > button { min-height: 40px; padding: 8px 0; }
+      .btn-retry { min-height: 40px; padding: 8px 12px; }
+
+      /* Info-tab: 140px|1fr grid stapelt op smal zodat labels+values
+         niet overlopen. */
+      .info-row {
+        grid-template-columns: 1fr;
+        gap: 2px;
+        padding: 8px 0;
+      }
+      .info-label {
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .05em;
+      }
+      .info-card { padding: 14px 12px; }
+
+      /* Attendees toolbar + chips: bereikbaar op smal. */
+      .att-toolbar { gap: 8px; }
+      .chip { padding: 8px 12px; font-size: 12.5px; min-height: 36px; }
+
+      /* Mentor-cards: bereikbaar avatar + remove-knop. */
+      .mentor-grid { grid-template-columns: 1fr; gap: 10px; }
+      .mentor-card { padding: 12px 14px; gap: 12px; }
+      .mentor-remove { min-width: 40px; min-height: 40px; padding: 8px; }
+
+      /* Kebab-menu items: tap-target op mobiel. */
+      .kebab-menu { min-width: 200px; padding: 6px; }
+      .kebab-item { padding: 12px 12px; font-size: 14px; min-height: 44px; }
+
+      /* Standaard buttons */
+      .btn-primary, .btn-secondary, .btn-danger {
+        min-height: 44px;
+        padding: 10px 14px;
+        font-size: 14px;
+      }
+
+      /* Form-controls scoped op .form-field (nooit naakt) */
+      .form-field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+      .form-field textarea,
+      .form-field select {
+        font-size: 16px;
+        padding: 12px 14px;
+        min-height: 44px;
+        border-radius: 8px;
+      }
+      .form-field textarea { min-height: 96px; }
+      .form-field input[type="file"] { font-size: 14px; padding: 10px 12px; min-height: 44px; }
+      .form-row-2 { grid-template-columns: 1fr; gap: 10px; }
+
+      /* Inline-styled inputs in modals (id-scoped, veilig via !important
+         omdat inline-style class-selectors verslaat) */
+      #evcLinkSaleSearch,
+      #evcSummary {
+        font-size: 16px !important;
+        min-height: 44px !important;
+        padding: 12px 14px !important;
+        border-radius: 8px !important;
+      }
+      #evcSummary { min-height: 96px !important; }
+
+      /* Modal-familie iOS-veilig fullscreen op smal + dvh + safe-area.
+         Werkt voor alle 7 modals (#attAddModal / #attMoveModal /
+         #mentorAddModal / #tagAddModal / #evEditModal / #evCompleteModal /
+         #evcLinkSaleModal). */
+      .modal-overlay { padding: 0; align-items: stretch; }
+      .modal-card {
+        max-width: 100%;
+        width: 100%;
+        height: 100%;
+        max-height: 100vh;
+        max-height: 100dvh;
+        border-radius: 0;
+      }
+      .modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+      .modal-footer { padding-bottom: max(14px, env(safe-area-inset-bottom, 14px)); }
+
+      /* 2 modals hebben inline modal-card overrides (max-height:calc(100vh - 40px)
+         + max-width:720/640) die de klasse-@media zouden verslaan zonder
+         id-scoped !important. */
+      #evCompleteModal > .modal-card,
+      #evcLinkSaleModal > .modal-card {
+        max-width: 100% !important;
+        width: 100% !important;
+        height: 100% !important;
+        max-height: 100vh !important;
+        max-height: 100dvh !important;
+        border-radius: 0 !important;
+      }
+    }
+    @media (max-width: 480px) {
+      .ev-title { font-size: 18px; }
+      .tab { padding: 10px 12px; }
+      .ev-detail-row { font-size: 13px; }
+      .ev-detail-row .label { min-width: 48px; font-size: 11px; }
+      .kebab-item { font-size: 13.5px; padding: 12px 10px; }
+    }
   </style>
 </head>
 <body>
