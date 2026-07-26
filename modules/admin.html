@@ -189,6 +189,170 @@
     .rbac-role-all { font-size:9px; padding:1px 6px; background:transparent; border:1px solid var(--border); border-radius:3px; color:var(--text-faint); cursor:pointer; font-family:inherit; text-transform:none; letter-spacing:0; }
     .rbac-role-all:hover { background:var(--bg-elev); color:var(--text); }
     /* WhatsApp Meta-editor + Connection styles VERHUISD naar modules/shared/finance-instellingen.js (PR-4). */
+
+    /* ── Mobiel + iOS-veilig (admin.html — laatste top-sidebar-entry) —
+       scoped, invariance-regime (RBAC-matrix + rol-toewijzing + feature-
+       toggles = gevoelige config). Geen HTML/JS-wijziging.
+       Respecteert bestaande dekking:
+       - .rbac-matrix-wrap heeft al overflow-x:auto (r175) → grote matrix
+         al horizontaal veegbaar.
+       - #pendingActionDetailModal .modal-card heeft CSS-level override
+         (max-width:760, max-height:90vh) op r159 — id-scoped @media
+         override met !important overrules dat op mobiel. ── */
+    @media (max-width: 720px) {
+      /* Body-viewport-fix niet nodig — .main uit agent-shared.css gebruikt
+         al calc(100vh - 48px); geen lokale 100vh in dit bestand. Wel
+         defensieve safe-area op main-inner. */
+      .main-inner { padding: 14px 14px calc(24px + env(safe-area-inset-bottom, 0px)); max-width: none; }
+
+      .page-header { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 16px; }
+      .page-header .btn,
+      .page-header .btn-primary { min-height: 44px; padding: 10px 14px; font-size: 14px; }
+      .page-title { font-size: 20px; }
+
+      .admin-stats { gap: 8px; margin-bottom: 14px; }
+      .stat-chip { min-width: 0; flex: 1 1 calc(50% - 4px); padding: 10px 12px; }
+      .stat-chip-value { font-size: 20px; }
+
+      /* Tabs (6 stuks: Gebruikers / Rechten / Integraties / Approval-queue /
+         Menu beheer / Historische events) horizontaal veegbaar op mobiel. */
+      .admin-tabs {
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        flex-wrap: nowrap !important;
+        margin-bottom: 16px;
+      }
+      .admin-tabs::-webkit-scrollbar { display: none; }
+      .admin-tab {
+        padding: 12px 14px;
+        min-height: 44px;
+        white-space: nowrap;
+        flex: 0 0 auto;
+      }
+
+      .section-card { padding: 16px 14px; margin-bottom: 14px; }
+      .section-header { font-size: 13.5px; }
+
+      /* Ongewrapte tabellen (.users-table + .approv-table): self-scroll
+         via display:block. .rbac-matrix zit al in .rbac-matrix-wrap
+         (overflow-x:auto) — niet dubbel. */
+      .users-table,
+      .approv-table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;
+      }
+
+      /* Rechten-tab layout: 210px + matrix stapelt naar 1-kol */
+      .rbac-layout { grid-template-columns: 1fr; gap: 12px; }
+      .rbac-modules { flex-direction: row; overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; padding-bottom: 6px; }
+      .rbac-modules::-webkit-scrollbar { display: none; }
+      .rbac-mod-btn { flex: 0 0 auto; padding: 12px 14px; min-height: 44px; white-space: nowrap; }
+      .rbac-toolbar { flex-wrap: wrap; gap: 8px; }
+      .rbac-toolbar .form-input { max-width: 100% !important; flex: 1 1 100%; }
+      .rbac-btn-sm { min-height: 40px; padding: 8px 12px; font-size: 12.5px; }
+      .rbac-role-all { min-height: 32px; padding: 4px 8px; }
+
+      /* Approval-detail grid label|value stapelt op smal (uit 10D-pattern) */
+      .approv-detail-grid { grid-template-columns: 1fr; gap: 2px 0; }
+      .approv-detail-grid > div:nth-child(odd) {
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .05em;
+        font-size: 11px;
+        margin-top: 8px;
+      }
+
+      /* Approv-filter-strip + bulk-strip zijn al flex-wrap; extra tap. */
+      .approv-pill { min-height: 40px; padding: 10px 14px; font-size: 12.5px; }
+      .approv-mini-btn { min-height: 40px; padding: 8px 12px; font-size: 12.5px; }
+
+      /* Menu-manager rijen: grip + label + group-select + toggle bereikbaar */
+      .mm-row { gap: 8px; padding: 12px; }
+      .mm-toggle { width: 44px; height: 24px; }
+      .mm-toggle .mm-toggle-ball { width: 18px; height: 18px; top: 2px; left: 2px; }
+      .mm-toggle.on .mm-toggle-ball { transform: translateX(20px); }
+      .mm-group { width: 100%; min-height: 40px; padding: 8px 10px; font-size: 13px; }
+
+      /* Form-controls scoped op .form-group + .form-input klasse */
+      .form-group .form-input {
+        font-size: 16px;
+        padding: 12px 14px;
+        min-height: 44px;
+      }
+      textarea.form-input { min-height: 96px; }
+
+      /* Rol-badges / actie-knoppen: comfortabele tap-target */
+      .role-badge.editable { padding: 6px 12px; min-height: 32px; display: inline-flex; align-items: center; }
+      .role-chip { padding: 4px 10px; min-height: 28px; }
+      .role-chip-remove { min-width: 24px; min-height: 24px; }
+      .role-add-btn { padding: 4px 10px; min-height: 28px; }
+      .action-btn { padding: 8px 12px; min-height: 40px; }
+
+      /* Inline-styled inputs id-scoped 16px !important (inline verslaat class) */
+      #waRegPnId,
+      #waRegPin,
+      #menuMgrRoleSelect,
+      #rbacSearch {
+        font-size: 16px !important;
+        min-height: 44px !important;
+        padding: 10px 12px !important;
+      }
+      #rbacSearch { max-width: 100% !important; }
+
+      /* WhatsApp-register 2-kol inline grid → 1-kol via attribute-substring
+         selector (geen HTML-mutatie) */
+      #card-whatsapp-register div[style*="grid-template-columns:1fr 1fr auto"] {
+        grid-template-columns: 1fr !important;
+      }
+
+      /* Modal-familie iOS-veilig fullscreen op smal (6 modals in .modal-
+         overlay + .modal-card familie: #pendingActionDetailModal /
+         #rejectActionModal / #markExecutedModal / #markNotExecutedModal /
+         #inviteModal / #editUserModal). Vijf hebben inline max-width; ééntje
+         (#pendingActionDetailModal) heeft CSS-level override op r159 → id-
+         scoped !important overrules alles. */
+      .modal-overlay { padding: 0 !important; align-items: stretch; }
+      .modal-card {
+        max-width: 100%;
+        width: 100%;
+        height: 100%;
+        max-height: 100vh;
+        max-height: 100dvh;
+        border-radius: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+      .modal-footer { padding-bottom: max(14px, env(safe-area-inset-bottom, 14px)); }
+
+      /* Id-scoped overrides — inline max-width op 5 modals + CSS-level
+         override op #pendingActionDetailModal (r159). */
+      #pendingActionDetailModal .modal-card,
+      #rejectActionModal > .modal-card,
+      #markExecutedModal > .modal-card,
+      #markNotExecutedModal > .modal-card,
+      #inviteModal > .modal-card,
+      #editUserModal > .modal-card {
+        max-width: 100% !important;
+        width: 100% !important;
+        height: 100% !important;
+        max-height: 100vh !important;
+        max-height: 100dvh !important;
+        margin: 0 !important;
+        border-radius: 0 !important;
+      }
+    }
+    @media (max-width: 480px) {
+      .page-title { font-size: 18px; }
+      .stat-chip { flex: 1 1 100%; }
+      .admin-tab { padding: 10px 12px; font-size: 12.5px; }
+      .approv-mini-btn { min-height: 36px; padding: 6px 10px; font-size: 12px; }
+      .rbac-mod-btn { padding: 10px 12px; font-size: 12.5px; }
+    }
   </style>
 </head>
 <body>
