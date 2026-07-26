@@ -2,7 +2,7 @@
 <html lang="nl">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Mijn deelname - De Forex Opleiding</title>
   <meta name="robots" content="noindex, nofollow" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -29,10 +29,19 @@
       --warn-text   : #b45309;
       --warn-bord   : rgba(245,158,11,0.3);
       --focus       : rgba(20, 115, 214, 0.18);
+      /* Safe-area vars voor notch/home-indicator (viewport-fit=cover
+         staat aan). Fallback op 0px als env() niet ondersteund. */
+      --safe-top    : env(safe-area-inset-top, 0px);
+      --safe-bot    : env(safe-area-inset-bottom, 0px);
     }
     * { box-sizing: border-box; }
     html, body {
-      margin: 0; padding: 0; min-height: 100vh;
+      margin: 0; padding: 0;
+      /* iOS Safari-toolbar-fix: 100dvh houdt rekening met dynamische
+         toolbar (100vh telt de toolbar-ruimte mee); vh blijft fallback
+         voor iOS <15.4. Zelfde patroon als 8A onboarding. */
+      min-height: 100vh;
+      min-height: 100dvh;
       font-family: 'Inter', system-ui, sans-serif;
       background: var(--bg); color: var(--text);
       -webkit-font-smoothing: antialiased;
@@ -40,7 +49,9 @@
     }
     .page {
       max-width: 720px; margin: 0 auto;
-      padding: 32px 20px 80px;
+      /* padding-bottom = 80 + home-indicator-ruimte (iPhone X+) zodat de
+         event-lijst niet achter de indicator eindigt. */
+      padding: calc(var(--safe-top) + 32px) 20px calc(80px + var(--safe-bot));
     }
     .intro h1 {
       font-size: 26px; font-weight: 700; margin: 0 0 8px;
@@ -158,6 +169,27 @@
     .confirm strong { color: #047857; }
     .footer-note { color: var(--text-mute); font-size: 12px; text-align: center; margin-top: 28px; }
     .intro.hero h1, .event-title { font-family: var(--font-display); }
+
+    /* Touch-target: .event-card is de enige interactieve node (tap = kies
+       event). Compact content zou 'em anders <44px hoog maken. Padding
+       en gap zorgen dat de kaart altijd comfortabel aantikbaar is. */
+    .event-card { min-height: 60px; }
+
+    /* Smalle telefoons (bv. Android 360×640) — defensieve compactie,
+       geen visuele redesign. */
+    @media (max-width: 380px) {
+      .page { padding: calc(var(--safe-top) + 20px) 14px calc(68px + var(--safe-bot)); }
+      .intro.hero { padding: 24px 20px; }
+      .intro.hero h1 { font-size: 22px; }
+      .intro h1 { font-size: 22px; }
+      .card { padding: 18px 16px; }
+      .event-card { padding: 14px 16px; }
+      .event-title { font-size: 15px; }
+      .event-meta { font-size: 13px; gap: 8px; }
+      .hero-logo { width: 108px; margin-bottom: 14px; }
+      .banner-warn { padding: 12px 14px; font-size: 14px; }
+      .confirm { padding: 16px 18px; font-size: 14.5px; }
+    }
   </style>
 </head>
 <body>
