@@ -124,6 +124,91 @@
     .sd-inv-status.draft, .sd-inv-status.concept { background:var(--bg-elev); color:var(--text-dim); border:1px solid var(--border); }
     .sd-call-done   { color:#15803d; font-weight:600; }
     .sd-call-noshow { color:#991b1b; font-weight:600; }
+
+    /* ── Mobiel + iOS-veilig (mentor-admin cluster 2). Grootste van cluster
+       (1580r). Editable admin-tool (mentor-reassign POST → user_roles/
+       mentor-mapping writes) → INVARIANCE-REGIME.
+       Scoped op .so-wrap / .so-* / .ap-* / .sd-*. Kritiek: .so-table-wrap
+       heeft basis 'overflow:hidden' → op mobiel naar 'auto' zodat de
+       8-koloms tabellen horizontaal veegbaar zijn. ── */
+    @media (max-width: 720px) {
+      html, body { min-height: 100vh; min-height: 100dvh; }
+
+      .so-wrap { padding: 14px 14px calc(24px + env(safe-area-inset-bottom, 0px)); max-width: none; }
+      .so-header { margin-bottom: 12px; }
+      .so-header h1 { font-size: 17px; }
+      .so-actions { width: 100%; }
+      .so-actions .so-btn { flex: 1 1 auto; justify-content: center; min-height: 44px; padding: 10px 14px; font-size: 13px; }
+
+      /* KPI-strip: 5-kol → 2-kol op smal (compacter dan 1-kol; behoud
+         glance-baarheid), 1-kol op @480. */
+      .so-kpis { grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
+      .so-kpi-value { font-size: 17px; }
+
+      /* Filters: 4-kol grid → 1-kol op smal, controls 16+44 */
+      .so-filters { grid-template-columns: 1fr; gap: 8px; }
+      .so-filters input,
+      .so-filters select {
+        font-size: 16px;
+        min-height: 44px;
+        padding: 12px 14px;
+        border-radius: 8px;
+      }
+      .so-toggle { min-height: 36px; padding: 8px 12px; font-size: 12.5px; }
+
+      /* Kritieke fix: .so-table-wrap heeft basis 'overflow:hidden' die
+         horizontale scroll blokkeert. Op mobiel 'auto' + touch-scroll
+         zodat 8-koloms tabellen bereikbaar zijn. */
+      .so-table-wrap {
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+      }
+      /* Zorg dat brede tabellen niet auto-shrink'en tot 1 kolom */
+      table.so-table { min-width: 640px; }
+
+      /* Tabs (2 stuks, minimaal) — al flex-basis wrap OK; tap-target */
+      .so-tab { padding: 12px 14px; min-height: 44px; font-size: 13px; }
+
+      /* Mentor-edit inline knop bereikbaar */
+      .so-mentor-edit { padding: 6px 8px; font-size: 13px; }
+
+      /* Archive/restore buttons bereikbaar */
+      .so-archive-btn, .so-restore-btn { min-height: 36px; padding: 8px 12px; font-size: 12px; }
+
+      /* Modal .so-mb → fullscreen op smal + dvh */
+      .so-mb { padding: 0; align-items: stretch; }
+      .so-mw {
+        width: 100% !important;
+        max-width: 100% !important;
+        height: 100%;
+        max-height: 100vh;
+        max-height: 100dvh;
+        border-radius: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .so-mc {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 14px;
+      }
+      .so-mc select {
+        font-size: 16px;
+        min-height: 44px;
+        padding: 12px 14px;
+      }
+      .so-mf { padding-bottom: max(10px, env(safe-area-inset-bottom, 10px)); }
+
+      /* Toast: verplaats iets omhoog zodat 'ie niet achter home-indicator valt */
+      .so-toast { bottom: max(18px, env(safe-area-inset-bottom, 18px)); }
+    }
+    @media (max-width: 480px) {
+      .so-header h1 { font-size: 16px; }
+      .so-kpis { grid-template-columns: 1fr; }
+      .so-kpi-value { font-size: 18px; }
+    }
   </style>
 </head>
 <body>
