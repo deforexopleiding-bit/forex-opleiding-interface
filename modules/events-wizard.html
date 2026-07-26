@@ -86,6 +86,52 @@
     .forbidden-card a:hover { text-decoration: underline; }
 
     @media (max-width: 880px) { .app { margin-left: 0; padding: 14px; } .form-row-2 { grid-template-columns: 1fr; } .review-row { grid-template-columns: 1fr; } .review-label { font-weight: 600; } }
+
+    /* ── Mobiel + iOS-veilig (Module 10B) — scoped op .app/.card/.form-field/.nav-row.
+       Geen HTML/JS-wijziging; alle 3 stappen (Basis/Niveau/Review) bereikbaar en
+       zonder iOS-zoom (font 16px scoped op form-controls), touch-targets ≥44. ── */
+    @media (max-width: 720px) {
+      html, body { min-height: 100vh; min-height: 100dvh; }
+      .app { padding: 14px 14px calc(24px + env(safe-area-inset-bottom, 0px)); }
+
+      .stepper { flex-wrap: wrap; gap: 6px; padding-bottom: 12px; margin-bottom: 16px; }
+      .step { font-size: 11.5px; padding: 8px 10px; }
+
+      .card { padding: 18px 16px; }
+      .card h2 { font-size: 15px; }
+
+      /* Scoped op .form-field — geen naakte input-regel */
+      .form-field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+      .form-field textarea,
+      .form-field select {
+        font-size: 16px;
+        padding: 12px 14px;
+        min-height: 44px;
+        border-radius: 8px;
+      }
+      .form-field textarea { min-height: 120px; }
+      .form-field input[type="file"] { font-size: 14px; padding: 10px 12px; min-height: 44px; }
+
+      .btn-primary, .btn-secondary {
+        min-height: 44px;
+        padding: 10px 18px;
+        font-size: 14px;
+      }
+      .nav-row { flex-wrap: wrap; gap: 8px; }
+      .nav-row .btn-primary, .nav-row .btn-secondary {
+        flex: 1 1 140px;
+        justify-content: center;
+      }
+
+      .mentor-pick { min-height: 48px; padding: 12px 14px; }
+      .mentor-pick input[type=checkbox] { width: 20px; height: 20px; }
+    }
+    @media (max-width: 480px) {
+      h1 { font-size: 20px; }
+      .card { padding: 16px 14px; }
+      .step { flex-basis: calc(50% - 4px); }
+      .stepper { padding-bottom: 10px; margin-bottom: 14px; }
+    }
   </style>
 </head>
 <body>
