@@ -13,7 +13,7 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
-    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; min-height: 100dvh; -webkit-font-smoothing: antialiased; }
     .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1280px; }
 
     .page-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px; gap: 12px; flex-wrap: wrap; }
@@ -208,6 +208,54 @@
       .student-head { grid-template-columns: 1fr auto; }
       .student-stat { display: none; }
       .student-stat:first-of-type { display: inline; }
+    }
+
+    /* ── Mobiel + iOS-veilig (mentor-portal cluster 3). Financiën-dashboard
+       met 7 tabellen + travel-days-editor. Scoped op .app / .page-header /
+       .kpi-row / .data-table / .bonus-table / .bonus-term-table. Body-dvh
+       zit al ingebouwd in body-rule hierboven. ── */
+    @media (max-width: 720px) {
+      .app { padding: 14px 14px calc(24px + env(safe-area-inset-bottom, 0px)); max-width: none; }
+
+      .page-header { gap: 10px; margin-bottom: 14px; }
+      .page-header h1 { font-size: 20px; }
+
+      /* KPI-row: al 2-kol @880, hier 1-kol @480 */
+      .kpi-card { padding: 12px 14px; }
+      .kpi-value { font-size: 20px; }
+
+      /* Tabellen zonder wrapper — self-scroll display:block (HTML-vrij).
+         Alle .data-table / .bonus-table / .bonus-term-table (7 stuks in
+         totaal) veegbaar met alle kolommen. */
+      .data-table,
+      .bonus-table,
+      .bonus-term-table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;
+      }
+
+      /* Travel-days editor (JS-rendered .tc-card in 2e style-block).
+         Id-scoped mobile-fix zodat maand-input + dagen-input 16+44 zijn. */
+      #travelCardWrap .tc-row { flex-wrap: wrap; gap: 10px; }
+      #travelCardWrap input[type=month],
+      #travelCardWrap input[type=number] {
+        font-size: 16px !important;
+        min-height: 44px !important;
+        padding: 10px 12px !important;
+      }
+      #travelCardWrap .tc-btn {
+        min-height: 44px;
+        padding: 10px 14px;
+        font-size: 13px;
+      }
+      #travelCardWrap .tc-amount { margin-left: 0; }
+    }
+    @media (max-width: 480px) {
+      .page-header h1 { font-size: 18px; }
+      .kpi-row { grid-template-columns: 1fr; }
+      .kpi-value { font-size: 20px; }
     }
   </style>
 </head>

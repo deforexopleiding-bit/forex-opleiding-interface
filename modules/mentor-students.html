@@ -13,7 +13,7 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
-    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; min-height: 100dvh; -webkit-font-smoothing: antialiased; }
     .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1280px; }
     .page-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px; gap: 12px; flex-wrap: wrap; }
     .page-header h1 { font-size: 22px; font-weight: 700; color: var(--text); }
@@ -132,6 +132,55 @@
       background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.30);
       color: #b45309; padding: 8px 12px; border-radius: 8px;
       font-size: 12.5px; margin-bottom: 12px;
+    }
+
+    /* ── Mobiel + iOS-veilig (mentor-portal cluster 3). Studenten-lijst
+       met 4 tabellen + no-show acties + invoice-resend. Scoped op .app /
+       .page-header / .data-table / .search-bar / .sort-bar / .stu-*.
+       Body-dvh zit al ingebouwd in body-rule hierboven. ── */
+    @media (max-width: 720px) {
+      .app { padding: 14px 14px calc(24px + env(safe-area-inset-bottom, 0px)); max-width: none; }
+
+      .page-header { gap: 10px; margin-bottom: 14px; }
+      .page-header h1 { font-size: 20px; }
+
+      /* Search-bar fullwidth + 16+44 op input */
+      .search-bar input[type="search"] {
+        max-width: 100%;
+        flex: 1 1 100%;
+        font-size: 16px;
+        min-height: 44px;
+        padding: 12px 14px;
+      }
+
+      /* Sort-chips tap-target */
+      .sort-chip { min-height: 36px; padding: 8px 12px; font-size: 12.5px; }
+
+      /* 4 tabellen (2 static + 2 inline) → self-scroll display:block */
+      .data-table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;
+      }
+
+      /* Assess-form (no-show reden invulveld) — scoped op .stu-assess-form */
+      .stu-assess-form input,
+      .stu-assess-form textarea,
+      .stu-assess-form select {
+        font-size: 16px;
+        min-height: 44px;
+        padding: 12px 14px;
+        width: 100%;
+        max-width: 100%;
+      }
+      .stu-assess-form textarea { min-height: 88px; }
+
+      /* Student-header en actie-knoppen */
+      .stu-act-btn, .stu-act-link { min-height: 40px; padding: 8px 12px; font-size: 13px; display: inline-flex; align-items: center; }
+    }
+    @media (max-width: 480px) {
+      .page-header h1 { font-size: 18px; }
     }
   </style>
 </head>
