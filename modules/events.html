@@ -320,6 +320,203 @@
     }
     .sc-tip:hover > .sc-tip-bubble,
     .sc-tip:focus-within > .sc-tip-bubble { opacity: 1; visibility: visible; }
+
+    /* ── Mobiel + iOS-veilig (Module 10E, afsluiter Events-cluster) — scoped
+       per family, geen HTML/JS-wijziging, respecteert bestaande .sr-*-dekking
+       uit sales-redesign.css @720 (sr-tablewrap / sr-search / sr-ibtn /
+       sr-iconbtn / sr-abtn — allen al 44+16 op mobiel).
+
+       Doel-scope PER onderdeel:
+       - .ev-tabs (6 tabs): horizontaal scrollbaar
+       - .evs-sub-tabs / .qq-subtabs: flex-wrap zit al in basisregel
+       - .kpi-strip: al 2-col @880; hier 1-col @480
+       - table.lt (mentor-grootboek 2× tabellen): self-scroll display:block
+       - .ev-afg-detail (afgerond-pane): inline 2-col grid → 1-col via
+         attribute-substring; inline-styled child-tabellen self-scroll
+       - .evx-modal-* familie (3 modals: template-picker + attendee-link +
+         customer-link): iOS-veilig fullscreen op smal + dvh
+       - .aq-modal-* familie (1 modal: assessmentQuestionEditModal, met
+         inline max-width:720 op card + inline max-height:70vh op body):
+         iOS-veilig fullscreen + id-scoped override
+       - .modal-overlay legacy (2 modals: evSignupResolveModal +
+         evNiveauPhotoModal, alles inline): id-scoped padding-reset op
+         smal zodat ze op mobiel niet uit viewport groeien
+       - .form-input / .form-field controls + form-row-2 → 16+44 scoped
+       - Buttons btn-primary/-secondary/aq-modal-close en icon-knoppen: ≥44
+     ── */
+    @media (max-width: 720px) {
+      html, body { min-height: 100vh; min-height: 100dvh; }
+      .app { padding: 14px 14px calc(24px + env(safe-area-inset-bottom, 0px)); }
+
+      .page-head { gap: 10px; padding-bottom: 12px; margin-bottom: 14px; }
+      .page-head h1 { font-size: 20px; }
+
+      /* Ev-tabs: 6 tabs (Overzicht / mentor-grootboek / inbox /
+         signup-inbox / afgerond / settings) horizontaal scrollbaar zodat
+         alle bereikbaar blijven op 390px. Behoud onderrand + underline. */
+      .ev-tabs {
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        flex-wrap: nowrap !important;
+      }
+      .ev-tabs::-webkit-scrollbar { display: none; }
+      .ev-tab {
+        padding: 12px 14px;
+        min-height: 44px;
+        white-space: nowrap;
+        flex: 0 0 auto;
+      }
+      /* evs-sub-tabs + qq-subtabs (settings sub-nav): al flex-wrap in
+         basisregel; op smal alleen extra tap-target. */
+      .evs-sub-tab { padding: 12px 14px; min-height: 44px; }
+      .qq-subtab { padding: 10px 12px; min-height: 40px; }
+
+      /* Buttons */
+      .btn-primary, .btn-secondary {
+        min-height: 44px;
+        padding: 10px 14px;
+        font-size: 14px;
+      }
+      .aq-modal-close { min-width: 44px; min-height: 44px; padding: 8px; }
+
+      /* Form-controls scoped op .form-field (nooit naakt) */
+      .form-field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+      .form-field textarea,
+      .form-field select {
+        font-size: 16px;
+        padding: 12px 14px;
+        min-height: 44px;
+        border-radius: 8px;
+      }
+      .form-field textarea { min-height: 96px; }
+      .form-field input[type="file"] { font-size: 14px; padding: 10px 12px; min-height: 44px; }
+      /* .form-input (klasse voor de verhuisde admin-form controls) */
+      .form-input {
+        font-size: 16px;
+        padding: 12px 14px;
+        min-height: 44px;
+      }
+      textarea.form-input { min-height: 96px; }
+      .form-row-2 { grid-template-columns: 1fr; gap: 10px; }
+
+      /* Tabellen zonder wrapper: self-scroll via display:block. Behoudt
+         alle kolommen, maakt de tabel horizontaal veegbaar. */
+      table.lt {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;
+      }
+      /* Afgerond-pane detail: inline grid 1fr 1fr → 1-kol via attribute-
+         substring selector (geen HTML-mutatie), en de child-tabellen
+         zelf-scrollbaar. */
+      .ev-afg-detail[style*="grid-template-columns:1fr 1fr"] {
+        grid-template-columns: 1fr !important;
+      }
+      .ev-afg-detail table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;
+      }
+
+      /* Ev-tabs sub-header ev-list header + attendees toolbar niks te
+         doen: .sr-filterstrip + .sr-search zijn al @720-gedekt via
+         sales-redesign.css (44+16 + fullwidth). */
+
+      /* ── Modal-family A: .evx-modal-* (3 modals). Basisregel had al
+         overflow-y:auto + padding 60x16 + max-width 560. Op mobiel
+         fullscreen + dvh + safe-area zodat lijsten volledig scrollen. */
+      .evx-modal-overlay {
+        padding: 0 !important;
+        align-items: stretch;
+      }
+      .evx-modal-overlay.show { display: flex; }
+      .evx-modal-card {
+        max-width: 100%;
+        width: 100%;
+        height: 100%;
+        max-height: 100vh;
+        max-height: 100dvh;
+        border-radius: 0;
+        display: flex;
+        flex-direction: column;
+        padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+      }
+      .evx-modal-list { max-height: none; flex: 1 1 auto; min-height: 0; }
+      .evx-modal-search {
+        font-size: 16px;
+        padding: 12px 14px;
+        min-height: 44px;
+      }
+      .evx-modal-item { padding: 12px; min-height: 48px; }
+      .evx-modal-footer {
+        margin-top: auto;
+        padding-top: 12px;
+      }
+
+      /* ── Modal-family B: .aq-modal-* (1 modal). Basisregel: max-width 440
+         + margin 20. #assessmentQuestionEditModal heeft inline
+         max-width:720 op .aq-modal-card en inline max-height:70vh op
+         .aq-modal-body — die inline-styles zouden de klasse-@media
+         verslaan, dus id-scoped !important. */
+      .aq-modal-overlay {
+        padding: 0;
+        align-items: stretch;
+      }
+      .aq-modal-card {
+        max-width: 100%;
+        width: 100%;
+        height: 100%;
+        max-height: 100vh;
+        max-height: 100dvh;
+        border-radius: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .aq-modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+      .aq-modal-footer { padding-bottom: max(14px, env(safe-area-inset-bottom, 14px)); }
+      /* Id-scoped override: verslaat inline max-width:720 + max-height:70vh */
+      #assessmentQuestionEditModal > .aq-modal-card {
+        max-width: 100% !important;
+        max-height: 100dvh !important;
+      }
+      #assessmentQuestionEditModal .aq-modal-body[style*="max-height:70vh"] {
+        max-height: none !important;
+        height: 100% !important;
+      }
+      /* Inline 2-kol grid binnen aq-modal-body → 1-kol (uit 10C-pattern) */
+      #assessmentQuestionEditModal .aq-modal-body div[style*="grid-template-columns:1fr 1fr"] {
+        grid-template-columns: 1fr !important;
+      }
+
+      /* ── Modal-familie C (legacy): #evSignupResolveModal +
+         #evNiveauPhotoModal — alles inline (position:fixed;inset:0;
+         padding:24px). Reset padding op smal zodat content niet
+         wegschrompelt naast de 24px overlay-padding. Beide zijn
+         center-modals; op mobiel liever fullscreen-feel. */
+      #evSignupResolveModal[style*="position:fixed"],
+      #evNiveauPhotoModal[style*="position:fixed"] {
+        padding: 12px !important;
+      }
+      /* Modal-card child (rendered JS/inline): geef ruimte om te ademen */
+      #evSignupResolveModal > *, #evNiveauPhotoModal > * {
+        max-width: 100%;
+        width: 100%;
+      }
+
+      /* .kpi-strip al @880 → 2 kol; overige polish nvt hier. */
+      .evx-shell { height: auto; }
+    }
+    @media (max-width: 480px) {
+      .page-head h1 { font-size: 18px; }
+      .kpi-strip { grid-template-columns: 1fr !important; }
+      .ev-tab { padding: 10px 12px; font-size: 13px; }
+      .evx-modal-item { padding: 10px 12px; }
+      .form-label { font-size: 11.5px; }
+    }
   </style>
 </head>
 <body>
