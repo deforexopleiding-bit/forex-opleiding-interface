@@ -99,6 +99,62 @@
       .term-row { grid-template-columns: 40px 1fr 100px; }
       .term-row .amt { grid-column: 2; }
     }
+
+    /* ── Mobiel + iOS-veilig (mentor-admin cluster 2). Editable admin-tool
+       met POST → mentor-ledger writes → INVARIANCE-REGIME.
+       Bestaand @880-blok stapelt al .metrics + .tc-body naar 1-kol; hier
+       fixen we form-controls + modal iOS-dvh + tap-targets. Scoped op
+       .app / .modal-overlay / .modal / .field / .row2 / .btn. ── */
+    @media (max-width: 720px) {
+      html, body { min-height: 100vh; min-height: 100dvh; }
+      .app { padding: 14px 14px calc(24px + env(safe-area-inset-bottom, 0px)); }
+
+      .page-header h1 { font-size: 18px; }
+
+      /* Standaard buttons + primary tap-target */
+      .btn { min-height: 44px; padding: 10px 14px; font-size: 14px; }
+      .btn-sm { min-height: 36px; padding: 8px 12px; font-size: 12.5px; }
+
+      /* Traject-card acties op nieuwe rij wrap netjes */
+      .tc-actions { gap: 8px; }
+      .tc-terms-toggle { margin-left: 0; }
+
+      /* Modal iOS-veilig fullscreen op smal.
+         .modal-overlay had inline padding:20; op smal reset naar 0 zodat
+         de card volle viewport gebruikt (bevat form met veel velden). */
+      .modal-overlay { padding: 0 !important; align-items: stretch; }
+      .modal {
+        max-width: 100% !important;
+        width: 100% !important;
+        height: 100%;
+        max-height: 100vh;
+        max-height: 100dvh;
+        border-radius: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px 14px; }
+      .modal-f { padding-bottom: max(12px, env(safe-area-inset-bottom, 12px)); }
+      .modal-h h2 { font-size: 14.5px; }
+
+      /* Form-controls scoped op .field (nooit naakt). Modal-inputs krijgen
+         16px + 44px voor iOS-zoom-fix + touch. */
+      .field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+      .field select,
+      .field textarea {
+        font-size: 16px;
+        min-height: 44px;
+        padding: 12px 14px;
+        border-radius: 8px;
+      }
+      .field textarea { min-height: 96px; }
+      .row2 { grid-template-columns: 1fr; gap: 10px; }
+    }
+    @media (max-width: 480px) {
+      .page-header h1 { font-size: 17px; }
+      .metric-card .val { font-size: 20px; }
+    }
   </style>
 </head>
 <body>

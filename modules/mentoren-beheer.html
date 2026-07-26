@@ -51,6 +51,47 @@
       .app { margin-left: 0; padding: 14px; }
       .mb-frame { height: calc(100vh - 240px); }
     }
+
+    /* ── Mobiel + iOS-veilig (mentor-admin cluster 2). Hub met 5 iframe-
+       tabs; embed-styles worden per iframe geïnjecteerd post-load (zie
+       injectEmbedStyles). Alleen de outer-shell fixen hier: body-dvh, tabs
+       horizontal-scroll (>3), iframe-height dvh. ── */
+    @media (max-width: 720px) {
+      html, body { min-height: 100vh; min-height: 100dvh; }
+      .app { padding: 14px 14px calc(24px + env(safe-area-inset-bottom, 0px)); }
+
+      .page-header { margin-bottom: 12px; }
+      .page-header h1 { font-size: 20px; }
+
+      /* 5 tabs horizontal scroll (bewezen pattern uit 10D) — labels blijven
+         leesbaar; scrollbar hidden. */
+      .mb-tabs {
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        flex-wrap: nowrap !important;
+      }
+      .mb-tabs::-webkit-scrollbar { display: none; }
+      .mb-tab {
+        padding: 12px 14px;
+        min-height: 44px;
+        white-space: nowrap;
+        flex: 0 0 auto;
+      }
+
+      /* Iframe-hoogte: dvh-fallback zodat de geneste content niet achter
+         de iOS-toolbar valt. Berekening 200px conservatief (header + tabs
+         + padding). */
+      .mb-frame {
+        height: calc(100vh - 200px);
+        height: calc(100dvh - 200px);
+        min-height: 420px;
+      }
+    }
+    @media (max-width: 480px) {
+      .page-header h1 { font-size: 18px; }
+      .mb-tab { padding: 10px 12px; font-size: 12.5px; }
+    }
   </style>
 </head>
 <body>

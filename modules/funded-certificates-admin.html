@@ -45,6 +45,41 @@
     .dl-btn[disabled], .dl-btn.disabled { opacity:0.5; cursor:not-allowed; }
 
     @media (max-width: 880px) { .app { margin-left:0; padding:14px; } }
+
+    /* ── Mobiel + iOS-veilig (mentor-admin cluster 2). Scoped op .app /
+       .toolbar / .data-table. Geen .sr-* dekking in dit bestand → alle
+       mobiele treatment lokaal. ── */
+    @media (max-width: 720px) {
+      html, body { min-height: 100vh; min-height: 100dvh; }
+      .app { padding: 14px 14px calc(24px + env(safe-area-inset-bottom, 0px)); max-width: none; }
+      .page-header { margin-bottom: 14px; }
+      .page-header h1 { font-size: 20px; }
+
+      /* Toolbar controls 16+44 scoped (iOS-zoom-fix + touch-target) */
+      .toolbar { padding: 10px 12px; gap: 10px; }
+      .toolbar select,
+      .toolbar input[type=search] {
+        font-size: 16px;
+        min-height: 44px;
+        padding: 10px 12px;
+        min-width: 0;
+        width: 100%;
+      }
+      .toolbar label { flex: 1 1 100%; }
+
+      /* Data-table zonder wrapper → self-scroll (HTML-vrij pattern uit 10E) */
+      .data-table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;
+      }
+
+      .dl-btn { min-height: 40px; padding: 8px 12px; font-size: 12.5px; }
+    }
+    @media (max-width: 480px) {
+      .page-header h1 { font-size: 18px; }
+    }
   </style>
 </head>
 <body>
