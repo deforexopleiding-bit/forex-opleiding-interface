@@ -158,6 +158,107 @@
     body.embed-mode [data-role="theme-toggle"] {
       display: none !important;
     }
+
+    /* ── Mobiel + iOS-veilig (Module 10C) — scoped op .app/.editor-card/
+       .form-field/.modal-card + id-scoped op inline-styled inputs.
+       Geen HTML/JS-wijziging; rules-editor bruikbaar op 390px zonder iOS-zoom,
+       modals fullscreen + dvh + safe-area, tabel scrollt binnen modal-body. ── */
+    @media (max-width: 720px) {
+      html, body { min-height: 100vh; min-height: 100dvh; }
+      .app { padding: 14px 14px calc(24px + env(safe-area-inset-bottom, 0px)); }
+
+      .page-head { gap: 10px; padding-bottom: 12px; margin-bottom: 14px; }
+      .page-title { font-size: 20px; }
+      .page-actions { width: 100%; }
+      .page-actions .btn-primary,
+      .page-actions .btn-secondary { flex: 1 1 auto; justify-content: center; }
+
+      .a-card { padding: 14px 14px; }
+      .a-actions { justify-content: flex-start; }
+      .a-name { font-size: 14.5px; }
+
+      .editor-card { padding: 16px 14px; }
+      .editor-section { margin-bottom: 16px; }
+
+      /* Scoped: alleen form-controls binnen .form-field (nooit naakt) */
+      .form-field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+      .form-field textarea,
+      .form-field select {
+        font-size: 16px;
+        padding: 12px 14px;
+        min-height: 44px;
+        border-radius: 8px;
+      }
+      .form-field textarea { min-height: 96px; }
+      .form-field input[type="file"] { font-size: 14px; padding: 10px 12px; min-height: 44px; }
+
+      /* Scoped: inline-styled inputs in test- en attachment-lib-modal (id-scope,
+         raakt niks buiten deze specifieke controls). */
+      #atFirstName, #atLastName, #atEmail, #atPhone, #atEventSel,
+      #attUrlLabel, #attUrlValue, #attUpLabel, #attUpFile {
+        font-size: 16px !important;
+        min-height: 44px !important;
+        padding: 10px 12px !important;
+        border-radius: 8px !important;
+      }
+
+      .btn-primary, .btn-secondary, .btn-danger {
+        min-height: 44px;
+        padding: 10px 14px;
+        font-size: 14px;
+      }
+      .btn-ghost { min-height: 36px; padding: 7px 12px; }
+      .step-tool { min-height: 36px; padding: 6px 10px; font-size: 13px; }
+      .vp-chip { min-height: 34px; padding: 6px 10px; font-size: 12.5px; }
+
+      /* Toggle groter tappable */
+      .toggle { width: 44px; height: 24px; }
+      .toggle::after { width: 18px; height: 18px; top: 2px; left: 2px; }
+      .toggle.on::after { left: 22px; }
+
+      .editor-footer { flex-wrap: wrap; gap: 8px; }
+      .editor-footer .right { flex-wrap: wrap; gap: 8px; }
+      .editor-footer .right .btn-primary,
+      .editor-footer .right .btn-secondary { flex: 1 1 auto; justify-content: center; }
+      .step-add-row { gap: 8px; }
+
+      .radio-row label { min-height: 40px; padding: 6px 0; }
+      .radio-row input[type=radio] { width: 20px; height: 20px; }
+
+      .multi-select label { padding: 8px 6px; font-size: 13.5px; }
+      .multi-select input[type=checkbox] { width: 18px; height: 18px; }
+
+      /* Runs-tabel scrollt horizontaal binnen modal-body */
+      .runs-table { min-width: 560px; }
+      .modal-body { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+      /* Modals iOS-veilig fullscreen op smal + dvh + safe-area */
+      .modal-overlay { padding: 0; align-items: stretch; }
+      .modal-card {
+        max-width: 100%;
+        width: 100%;
+        height: 100%;
+        max-height: 100vh;
+        max-height: 100dvh;
+        border-radius: 0;
+      }
+      .modal-body { flex: 1 1 auto; min-height: 0; }
+      .modal-footer { padding-bottom: max(14px, env(safe-area-inset-bottom, 14px)); }
+
+      /* Attachment-lib + test-modal 2-kol grid → 1 kol op smal
+         (attribute-substring matcht bestaande inline-styles zonder HTML-mutatie). */
+      #attLibModal .modal-body > div[style*="grid-template-columns:1fr 1fr"],
+      #automationTestModal .modal-body > div[style*="grid-template-columns:1fr 1fr"] {
+        grid-template-columns: 1fr !important;
+      }
+    }
+    @media (max-width: 480px) {
+      .page-title { font-size: 18px; }
+      .editor-section h3 { font-size: 11.5px; }
+      .step-add-row .btn-secondary,
+      .step-add-row .btn-ghost { flex: 1 1 auto; justify-content: center; }
+      .a-card .a-desc { font-size: 12px; }
+    }
   </style>
 </head>
 <body>
