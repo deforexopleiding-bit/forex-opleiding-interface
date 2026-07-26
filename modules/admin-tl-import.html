@@ -18,6 +18,27 @@
     label.cfg{display:block;font-size:11.5px;font-weight:600;color:var(--text-dim);margin-bottom:4px}
     .ov{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:9999}
     .ov.show{display:flex}
+
+    /* ── Mobiel + iOS-veilig (admin-sub cluster 1). Scoped op .app / .ov.
+       .sr-* controls (sr-select/sr-toggle/sr-abtn/sr-ibtn/sr-tablewrap)
+       zijn al @720-gedekt via sales-redesign.css (#935) → NIET dupliceren.
+       Alleen body-dvh, .app padding + safe-area, confirm-modal iOS-veilig. ── */
+    @media (max-width: 720px) {
+      html, body { min-height: 100vh; min-height: 100dvh; }
+      .app { margin-left: 0; padding: 14px 14px calc(24px + env(safe-area-inset-bottom, 0px)); max-width: none; }
+      .page-head { padding-bottom: 12px; margin-bottom: 14px; }
+      h1 { font-size: 20px; }
+
+      /* Confirm-overlay iOS-veilig — was fixed inset:0 + center; op smal
+         geeft padding 0 + align-items stretch een fullscreen-feel zodat
+         de card niet rand-tegen-rand geknepen wordt. */
+      .ov { padding: 12px; }
+      .ov .sr-card { max-width: 100% !important; width: 100% !important; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); display: flex; flex-direction: column; overflow-y: auto; }
+    }
+    @media (max-width: 480px) {
+      h1 { font-size: 18px; }
+      .sub { font-size: 12px; }
+    }
   </style>
 </head>
 <body>
