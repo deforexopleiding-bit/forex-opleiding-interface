@@ -9361,11 +9361,33 @@
   // stilstanden in beeld te krijgen. Consistent met approv-pill-patroon
   // elders in finance-tasks.
   const _dunPl = {
-    data:    null,
-    filter:  new Set(),   // actieve bucket-keys; leeg = alle tonen
-    loading: false,
-    mounted: false,       // shell in #wb-sub-pipeline geïnjecteerd?
+    data:        null,
+    filter:      new Set(),   // actieve bucket-keys; leeg = alle tonen
+    searchQuery: '',          // live zoekfilter — case-insensitive op naam/email/telefoon
+    loading:     false,
+    mounted:     false,       // shell in #wb-sub-pipeline geïnjecteerd?
   };
+  // Telefoon-normalisatie: strip alles behalve cijfers zodat "06 12" ook
+  // "06-12" en "+31 6 12" matcht. Case-insensitive delen doen via
+  // toLowerCase() in de match-functie.
+  function _dunPlNormalizePhone(s) {
+    return String(s || '').replace(/\D+/g, '');
+  }
+  // Match één item tegen een lowercase-genormaliseerde query. Query kan
+  // deels cijfers zijn (telefoon-fragment) of tekst (naam/email); we
+  // proberen beide: text-match op naam/email + digit-match op telefoon.
+  function _dunPlMatchesSearch(item, qLower, qDigits) {
+    if (!qLower) return true;   // lege query = alles tonen
+    const c = item.customer || {};
+    const name  = String(c.name  || '').toLowerCase();
+    const email = String(c.email || '').toLowerCase();
+    if (name.includes(qLower) || email.includes(qLower)) return true;
+    if (qDigits) {
+      const phoneDigits = _dunPlNormalizePhone(c.phone);
+      if (phoneDigits && phoneDigits.includes(qDigits)) return true;
+    }
+    return false;
+  }
   const PL_BUCKET_META = [
     { key: 'vandaag',                 label: 'Vandaag',        group: 'tijd'  },
     { key: 'morgen',                  label: 'Morgen',         group: 'tijd'  },
@@ -9385,6 +9407,45 @@
       _renderDunPlKpis();
       _renderDunPlList();
     });
+    // ── Live search-veld ─────────────────────────────────────────────
+    // Debounce ~150ms zodat we niet bij elke keystroke de hele lijst
+    // opnieuw renderen. Filter grijpt aan in _renderDunPlList (client-
+    // side); geen extra API-call bij typen.
+    const searchIn  = document.getElementById('dunPlSearchInput');
+    const searchClr = document.getElementById('dunPlSearchClear');
+    let _searchDebounce = null;
+    if (searchIn) {
+      searchIn.addEventListener('input', (ev) => {
+        const v = ev.target.value || '';
+        if (searchClr) searchClr.hidden = v.length === 0;
+        clearTimeout(_searchDebounce);
+        _searchDebounce = setTimeout(() => {
+          _dunPl.searchQuery = v.trim();
+          _renderDunPlList();
+        }, 150);
+      });
+      // Escape wist het veld direct.
+      searchIn.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape' && searchIn.value !== '') {
+          searchIn.value = '';
+          if (searchClr) searchClr.hidden = true;
+          clearTimeout(_searchDebounce);
+          _dunPl.searchQuery = '';
+          _renderDunPlList();
+        }
+      });
+    }
+    if (searchClr) {
+      searchClr.addEventListener('click', () => {
+        if (!searchIn) return;
+        searchIn.value = '';
+        searchClr.hidden = true;
+        clearTimeout(_searchDebounce);
+        _dunPl.searchQuery = '';
+        _renderDunPlList();
+        searchIn.focus();
+      });
+    }
     // Delegated: filter-pill clicks (via #dunPlKpis) én rij-actie-clicks
     // (via #dunPlList) om N-listener-registratie te vermijden.
     document.getElementById('dunPlKpis')?.addEventListener('click', (e) => {
@@ -9458,18 +9519,39 @@
     const cntEl  = document.getElementById('dunPlListCount');
     if (!listEl || !_dunPl.data) return;
     const all = Array.isArray(_dunPl.data.items) ? _dunPl.data.items : [];
-    const items = _dunPl.filter.size === 0
+
+    // Filter-cascade: bucket-filter EERST, dan search-filter. KPI-counts
+    // reflecteren de originele totalen per bucket (blijven stabiel tijdens
+    // typen); alleen deze lijst en de list-count veranderen bij zoeken.
+    const bucketFiltered = _dunPl.filter.size === 0
       ? all
       : all.filter((it) => _dunPl.filter.has(it.bucket));
 
-    if (cntEl) cntEl.textContent = _dunPl.filter.size === 0
-      ? `${items.length} klant${items.length === 1 ? '' : 'en'}`
-      : `${items.length} van ${all.length} klant${all.length === 1 ? '' : 'en'} (${_dunPl.filter.size} filter${_dunPl.filter.size === 1 ? '' : 's'})`;
+    const q = String(_dunPl.searchQuery || '').trim();
+    const qLower  = q.toLowerCase();
+    const qDigits = _dunPlNormalizePhone(q);
+    const items = q === ''
+      ? bucketFiltered
+      : bucketFiltered.filter((it) => _dunPlMatchesSearch(it, qLower, qDigits));
+
+    if (cntEl) {
+      // Toon 3-lagen count: total → bucket-gefilterd → search-gefilterd.
+      const parts = [];
+      if (q) {
+        parts.push(`${items.length} van ${bucketFiltered.length} klant${bucketFiltered.length === 1 ? '' : 'en'} · zoekterm "${esc(q)}"`);
+      } else if (_dunPl.filter.size > 0) {
+        parts.push(`${items.length} van ${all.length} klant${all.length === 1 ? '' : 'en'} (${_dunPl.filter.size} filter${_dunPl.filter.size === 1 ? '' : 's'})`);
+      } else {
+        parts.push(`${items.length} klant${items.length === 1 ? '' : 'en'}`);
+      }
+      cntEl.textContent = parts.join('');
+    }
 
     if (items.length === 0) {
-      const msg = all.length === 0
-        ? 'Nog geen runs geladen.'
-        : 'Geen klanten in de geselecteerde filter(s).';
+      let msg;
+      if (all.length === 0) msg = 'Nog geen runs geladen.';
+      else if (q) msg = `Geen klanten gevonden voor "${q}". Wis de zoekterm of pas de filters aan.`;
+      else msg = 'Geen klanten in de geselecteerde filter(s).';
       listEl.innerHTML = `<div class="pl-empty">${esc(msg)}</div>`;
       return;
     }
@@ -24652,6 +24734,19 @@
           </div>
           <button class="sr-abtn" id="dunPlRefreshBtn" type="button" style="font-size:11.5px;padding:6px 12px"><i class="ti ti-refresh" style="margin-right:4px"></i>Vernieuwen</button>
         </div>
+        <!-- Live search-veld: matcht case-insensitive op klantnaam / email
+             (tekst) en telefoon (cijfer-only na normalisatie). 44px hoog +
+             16px font zodat iOS Safari niet in-zoomt bij focus. -->
+        <div class="pl-search-wrap" style="position:relative;margin-bottom:12px">
+          <i class="ti ti-search" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--ds-text-faint,#7a8b92);font-size:16px;pointer-events:none"></i>
+          <input type="search" id="dunPlSearchInput" autocomplete="off" spellcheck="false"
+            placeholder="Zoek op naam, e-mail of telefoon…"
+            style="width:100%;min-height:44px;padding:10px 40px 10px 38px;border:1px solid var(--ds-border,var(--border));border-radius:8px;background:var(--ds-surface,var(--bg-elev));color:var(--ds-text,var(--text));font-family:inherit;font-size:16px;outline:none;box-sizing:border-box"/>
+          <button type="button" id="dunPlSearchClear" hidden aria-label="Zoekopdracht wissen"
+            style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:transparent;border:0;padding:8px;cursor:pointer;color:var(--ds-text-faint,#7a8b92);border-radius:6px;line-height:1;min-width:32px;min-height:32px;display:inline-flex;align-items:center;justify-content:center">
+            <i class="ti ti-x" style="font-size:16px"></i>
+          </button>
+        </div>
         <div class="pl-kpis-wrap">
           <div class="pl-kpis" id="dunPlKpis" role="tablist" aria-label="Pipeline-filters">
             <div class="pl-kpi-empty" style="grid-column:1/-1;text-align:center;padding:24px 0;color:var(--ds-text-faint,#7a8b92);font-size:13px">Laden…</div>
@@ -24667,6 +24762,14 @@
       `;
       wireDunPipelineOnce();
       _dunPl.mounted = true;
+    }
+    // Herstel: zoek-input-waarde uit state na re-mount (search overleeft
+    // refresh; state.searchQuery blijft leven in _dunPl).
+    const searchIn = document.getElementById('dunPlSearchInput');
+    if (searchIn && _dunPl.searchQuery && searchIn.value !== _dunPl.searchQuery) {
+      searchIn.value = _dunPl.searchQuery;
+      const clr = document.getElementById('dunPlSearchClear');
+      if (clr) clr.hidden = false;
     }
     loadDunPipeline();
   }

@@ -122,7 +122,7 @@ export default async function handler(req, res) {
             .order('step_order', { ascending: true })
         : Promise.resolve({ data: [], error: null }),
       customerIds.length
-        ? supabaseAdmin.from('customers').select('id, first_name, last_name, is_company, company_name, email').in('id', customerIds)
+        ? supabaseAdmin.from('customers').select('id, first_name, last_name, is_company, company_name, email, phone').in('id', customerIds)
         : Promise.resolve({ data: [], error: null }),
       customerIds.length
         ? supabaseAdmin.from('invoices')
@@ -232,7 +232,8 @@ export default async function handler(req, res) {
           id:    customer.id,
           name:  custName,
           email: customer.email || null,
-        } : { id: run.customer_id, name: '(onbekend)', email: null },
+          phone: customer.phone || null,
+        } : { id: run.customer_id, name: '(onbekend)', email: null, phone: null },
         workflow: workflow ? { id: workflow.id, name: workflow.name } : null,
         status:              run.status,
         completion_reason:   run.completion_reason || null,
