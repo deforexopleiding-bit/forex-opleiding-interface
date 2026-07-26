@@ -13,7 +13,7 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
-    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; min-height: 100dvh; -webkit-font-smoothing: antialiased; }
     .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1280px; }
 
     .page-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px; gap: 12px; flex-wrap: wrap; }
@@ -59,6 +59,74 @@
     .month-bar .bar.zero { background: var(--bg-elev-2, rgba(100,116,139,0.18)); }
     .month-bar .bar-label { font-size: 10.5px; color: var(--text-faint); margin-top: 2px; text-transform: uppercase; }
     .month-bar .bar-amount { font-size: 10.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+    /* ── Mobiel + iOS-veilig (mentor-portal cluster 3). Read-only detail-
+       viewer met 5 tabellen + KPI-row + picker + payout-settings (JS-
+       rendered 2e style-block, id-scoped mobile-fix). Body-dvh zit al
+       ingebouwd in body-rule hierboven. ── */
+    @media (max-width: 720px) {
+      .app { padding: 14px 14px calc(24px + env(safe-area-inset-bottom, 0px)); max-width: none; }
+
+      .page-header { gap: 10px; margin-bottom: 14px; }
+      .page-header h1 { font-size: 20px; }
+
+      /* Picker-row: mentor-select fullwidth op smal */
+      .picker-row { padding: 10px 12px; gap: 8px; }
+      .picker-row label { flex: 1 1 100%; }
+      .picker-row select {
+        font-size: 16px;
+        min-height: 44px;
+        padding: 10px 12px;
+        min-width: 0;
+        width: 100%;
+      }
+
+      /* KPI-row al 2-kol @880; hier compacter */
+      .kpi-card { padding: 12px 14px; }
+      .kpi-value { font-size: 20px; }
+
+      /* 5 tabellen self-scroll (HTML-vrij) */
+      .data-table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;
+      }
+
+      /* Month-bars: 12 kolommen worden onleesbaar op smal.
+         Halveer naar 6-kol op mobiel (2 rijen) zodat elke bar zichtbaar
+         blijft; labels stapelen. */
+      .month-bars {
+        grid-template-columns: repeat(6, 1fr);
+        gap: 6px;
+        row-gap: 12px;
+        padding: 12px 10px 8px;
+        min-height: 0;
+      }
+
+      /* Payout-settings inline styles (2e style-block r500+):
+         id-scoped 16px + 44px voor de reiskosten-toggle inputs. */
+      #payoutSettingsWrap input[type=number],
+      #payoutSettingsWrap input[type=text] {
+        font-size: 16px !important;
+        min-height: 44px !important;
+        padding: 10px 12px !important;
+        min-width: 0;
+      }
+      #payoutSettingsWrap .ps-btn-primary,
+      #payoutSettingsWrap .ps-btn-secondary {
+        min-height: 40px;
+        padding: 10px 14px;
+        font-size: 13px;
+        margin-left: 0;
+      }
+      #payoutSettingsWrap .ps-row { flex-wrap: wrap; gap: 8px; }
+    }
+    @media (max-width: 480px) {
+      .page-header h1 { font-size: 18px; }
+      .kpi-row { grid-template-columns: 1fr; }
+      .month-bars { grid-template-columns: repeat(4, 1fr); }
+    }
   </style>
 </head>
 <body>

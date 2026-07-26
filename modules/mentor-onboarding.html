@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.30.0/tabler-icons.min.css" />
   <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
   <style>
-    body { background: var(--bg); color: var(--text); }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; min-height: 100dvh; }
     .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1280px; }
     @media (max-width: 880px) { .app { margin-left: 0; padding: 14px; } }
     .page-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:24px; }
@@ -145,6 +145,93 @@
       .oi-list-pane { border-right:none; }
       .oi-shell.thread-open .oi-list-pane { display:none; }
       .oi-shell:not(.thread-open) .oi-thread-pane { display:none; }
+    }
+
+    /* ── Mobiel + iOS-veilig (mentor-portal cluster 3, COMPLEXST).
+       7 write-endpoints + 2 modal-families STRIKT APART gescoped:
+       .mo-modal-* (onboarding-detail modal) én .oi-modal-* (template/
+       intake modal). Elke familie krijgt eigen fullscreen-recipe zodat
+       er GEEN selector-lekken tussen families of andere files ontstaan.
+       Body-dvh zit al in body-rule hierboven. ── */
+    @media (max-width: 720px) {
+      .app { padding: 14px 14px calc(24px + env(safe-area-inset-bottom, 0px)); max-width: none; }
+
+      .page-header { gap: 10px; margin-bottom: 16px; }
+      .page-header h1 { font-size: 20px; }
+
+      /* Filter-chips tap-target */
+      .filter-chip { min-height: 36px; padding: 8px 12px; font-size: 12.5px; }
+
+      /* Onboarding-tabel: .mo-table-wrap heeft al overflow:auto ✓.
+         Zorg alleen dat tabel niet auto-shrinkt naar 1-kol. */
+      table.mo-table { min-width: 640px; font-size: 12.5px; }
+
+      /* Refresh-knop tap */
+      .refresh-btn { min-height: 40px; padding: 8px 12px; font-size: 12.5px; }
+
+      /* ─── Modal-familie A: .mo-modal-* (onboarding-detail) ─── */
+      .mo-modal-overlay { padding: 0 !important; align-items: stretch; overflow: hidden; }
+      .mo-modal {
+        max-width: 100% !important;
+        width: 100% !important;
+        height: 100% !important;
+        max-height: 100vh;
+        max-height: 100dvh;
+        border-radius: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .mo-modal-head { padding: 12px 14px; }
+      .mo-modal-title { font-size: 15px; }
+      .mo-modal-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 14px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+      }
+      /* .mo-dl grid label|value → 1-kol op smal (bewezen 10D-pattern) */
+      .mo-dl { grid-template-columns: 1fr; gap: 4px 0; }
+      .mo-dl dt { font-size: 11px; text-transform: uppercase; font-weight: 700; letter-spacing: .05em; margin-top: 6px; }
+      /* Action-knoppen in modal: tap-target */
+      .mo-btn { min-height: 40px; padding: 10px 14px; font-size: 13px; }
+      .mo-clear-btn { min-height: 32px; padding: 7px 10px; }
+      .mo-status-btns { gap: 8px; }
+      /* mo-section padding compact op mobiel */
+      .mo-section { padding: 10px 12px; margin-bottom: 12px; }
+
+      /* ─── Modal-familie B: .oi-modal-* (template/intake picker) ─── */
+      .oi-modal-overlay { padding: 0 !important; align-items: stretch; overflow: hidden; }
+      .oi-modal-card {
+        max-width: 100% !important;
+        width: 100% !important;
+        height: 100% !important;
+        max-height: 100vh;
+        max-height: 100dvh;
+        border-radius: 0;
+        padding: 14px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+        display: flex;
+        flex-direction: column;
+      }
+      .oi-modal-title { font-size: 14.5px; }
+      .oi-modal-search {
+        font-size: 16px;
+        min-height: 44px;
+        padding: 12px 14px;
+      }
+      /* .oi-modal-list scrollt binnen kaart (was max-height 360 → flex fill) */
+      .oi-modal-list {
+        max-height: none;
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+      .oi-modal-item { padding: 12px; min-height: 48px; }
+
+      /* Toast bottom safe-area */
+      .mo-toast { bottom: max(20px, env(safe-area-inset-bottom, 20px)); }
+    }
+    @media (max-width: 480px) {
+      .page-header h1 { font-size: 18px; }
+      .filter-chip { padding: 8px 10px; font-size: 12px; }
     }
   </style>
 </head>

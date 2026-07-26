@@ -17,7 +17,7 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
-    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; min-height: 100dvh; -webkit-font-smoothing: antialiased; }
     .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1400px; }
     @media (max-width:880px) { .app { margin-left:0; padding:14px; } }
 
@@ -198,6 +198,65 @@
 
     /* Helper: tabular num */
     .num { font-variant-numeric:tabular-nums; }
+
+    /* ── Mobiel + iOS-veilig (mentor-portal cluster 3, LANDING).
+       Eerste scherm dat een mentor op telefoon ziet → hero + KPI + CTA +
+       periode-picker allen bereikbaar. Scoped op .app / .mh-*. Body-dvh
+       zit al ingebouwd in body-rule hierboven. ── */
+    @media (max-width: 720px) {
+      .app { padding: 14px 14px calc(24px + env(safe-area-inset-bottom, 0px)); max-width: none; }
+
+      /* Header stapelt op smal: greeting boven, CTA-knoppen fullwidth eronder. */
+      .mh-header { gap: 12px; margin-bottom: 14px; }
+      .mh-greet h1 { font-size: 18px; }
+      .mh-actions { width: 100%; }
+      .mh-actions .mh-act-btn { flex: 1 1 auto; justify-content: center; min-height: 44px; padding: 10px 14px; font-size: 13.5px; }
+
+      /* Periode-picker: 4 tabs (Dag/Week/Maand/Aangepast) blijven binnen
+         viewport door segment iets kleiner + horizontal scroll fallback. */
+      .mh-period { gap: 8px; margin-bottom: 14px; }
+      .mh-seg {
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        flex-wrap: nowrap;
+        max-width: 100%;
+      }
+      .mh-seg::-webkit-scrollbar { display: none; }
+      .mh-seg button {
+        padding: 10px 14px;
+        min-height: 40px;
+        white-space: nowrap;
+        flex: 0 0 auto;
+        font-size: 13px;
+      }
+      .mh-custom-pickers { flex-wrap: wrap; }
+      .mh-custom-pickers input[type=date] {
+        font-size: 16px;
+        min-height: 44px;
+        padding: 10px 12px;
+        flex: 1 1 auto;
+        min-width: 120px;
+      }
+
+      /* KPI-rij is al auto-fit minmax(135) → responsive; forceer op mobiel
+         2-kol max zodat waarden leesbaar blijven. */
+      .mh-kpi-row { grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 16px; }
+      .mh-kpi { padding: 10px 12px; }
+      .mh-kpi-value { font-size: 18px; }
+
+      /* Hero-card fullwidth (mh-grid is al auto-fit); iets compacter. */
+      .mh-hero .mh-hero-title { font-size: 16px; }
+      .mh-hero .mh-hero-meta { font-size: 12.5px; margin-bottom: 12px; }
+      .mh-card { padding: 12px 14px; }
+      .mh-card-title { font-size: 13px; }
+    }
+    @media (max-width: 480px) {
+      .mh-greet h1 { font-size: 17px; }
+      .mh-kpi-row { grid-template-columns: 1fr; }
+      .mh-kpi-value { font-size: 20px; }
+      .mh-seg button { padding: 10px 12px; font-size: 12.5px; }
+    }
   </style>
 </head>
 <body>
