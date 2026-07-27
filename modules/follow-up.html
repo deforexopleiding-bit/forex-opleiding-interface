@@ -3141,6 +3141,158 @@
          6-koloms grid). */
       #appt-modal .fu-cockpit-ctx { grid-template-columns: 1fr 1fr; }
     }
+
+    /* ══════════════════════════════════════════════════════════════════
+       DEVICE-TEST FIX (Jeffrey iPhone 390px) — Werklijst sub-view is
+       niet door #938 gedekt. 3 concrete problemen:
+
+       1) Bel-overlay (.fu-callcard binnen #cockpit-detailbody) onbereik-
+          baar: op mobiel toont master-detail beide panelen naast/onder
+          elkaar; de bel-actieknoppen vallen achter of onder de lijst.
+          Fix: master-detail toggle op mobiel — bij lead-selectie tonen
+          we ALLEEN het detail-paneel + terug-knop; lijst verborgen.
+
+       2) Master-detail 2-koloms op mobiel: bestaande @900 stapelt naar
+          1-kol maar toont beide panelen; we willen 1-panel-per-keer.
+          Fix: via :has() + attribute-selector op inline
+          #cockpit-detailbody style="display:none" bepalen we of lead
+          geselecteerd is (detailbody NIET display:none → lijst verbergen).
+          Toegevoegde .fu-cockpit-back-knop opent bestaande
+          clearLeadDetail() — geen JS-file wijziging.
+
+       3) .fu-af-row/.fu-sp-row-kaarten: 6 cellen (120 36 1fr auto auto
+          auto) → op @720 naar 60 1fr auto (3 cellen) → overlap. Fix:
+          harde 1-koloms stapeling met alle cellen op eigen regel.
+
+       Callbar (.fu-softphone-callbar) had al @720 fullwidth; extra
+       hardening met max-width en z-index zodat 'ie boven detailbody
+       blijft ook bij horizontal-scroll. ══════════════════════════════ */
+
+    /* Back-knop: standaard verborgen (desktop). Wordt op mobiel getoond
+       via het @720-blok hieronder. */
+    .fu-cockpit-back {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.14);
+      color: var(--text-primary, #fff);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      margin-bottom: 12px;
+      min-height: 40px;
+    }
+    .fu-cockpit-back:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.28); }
+
+    @media (max-width: 720px) {
+      /* ── Master-detail toggle via :has() + attribute-selector.
+         detailbody INLINE style="display:none" = default (empty view);
+         renderLeadDetail() zet 'em op display:'' (leeg) → NIET matcht
+         [style*="display:none"]. Zo detecteren we "lead-open" pure via CSS.
+         Fallback op iOS <15.4 zonder :has(): user ziet lijst + detail
+         onder elkaar (huidige @900 gedrag) — geen regressie. */
+
+      /* Lead-open: verberg lijst, toon terug-knop */
+      .fu-cockpit:has(#cockpit-detailbody:not([style*="display: none"])) .fu-cockpit-list,
+      .fu-cockpit:has(#cockpit-detailbody:not([style*="display:none"])) .fu-cockpit-list {
+        display: none;
+      }
+      .fu-cockpit:has(#cockpit-detailbody:not([style*="display: none"])) .fu-cockpit-back,
+      .fu-cockpit:has(#cockpit-detailbody:not([style*="display:none"])) .fu-cockpit-back {
+        display: inline-flex;
+      }
+      /* Ook wanneer apptbody open is (afspraak-detail flow) */
+      .fu-cockpit:has(#cockpit-apptbody:not([style*="display: none"])) .fu-cockpit-list,
+      .fu-cockpit:has(#cockpit-apptbody:not([style*="display:none"])) .fu-cockpit-list {
+        display: none;
+      }
+      .fu-cockpit:has(#cockpit-apptbody:not([style*="display: none"])) .fu-cockpit-back,
+      .fu-cockpit:has(#cockpit-apptbody:not([style*="display:none"])) .fu-cockpit-back {
+        display: inline-flex;
+      }
+
+      /* Detail-paneel: compacter padding op mobiel zodat callcard-actions
+         binnen viewport blijven. */
+      .fu-cockpit-detail { padding: 12px !important; min-height: 0; }
+
+      /* Bel-callcard: actieknoppen forceer stapel op smal.
+         Primary-knop fullwidth (was flex:1 min-width:160 → op 390 minus
+         padding kwam 'ie krap uit). Actie-dropdown eronder fullwidth.
+         Zo zijn "Bel nu" én "Actie" én hangup altijd volledig aantikbaar. */
+      .fu-callcard { padding: 14px 14px; margin-bottom: 12px; }
+      .fu-callcard-top { flex-wrap: wrap; gap: 8px; }
+      .fu-callcard-actions { flex-direction: column; align-items: stretch; gap: 8px; }
+      .fu-callcard-primary,
+      .fu-callcard-secondary {
+        flex: 1 1 100%;
+        min-width: 0;
+        min-height: 48px;
+        width: 100%;
+        justify-content: center;
+      }
+      .fu-callcard-dropdown { width: 100%; }
+      .fu-callcard-menu {
+        position: absolute;
+        left: 0; right: 0;
+        min-width: 0;
+      }
+
+      /* Softphone-callbar extra hardening: z-index boven detailbody +
+         max-width zodat 'ie nooit off-screen valt bij horizontal-scroll
+         van andere content. */
+      .fu-softphone-callbar {
+        left: 12px !important;
+        right: 12px !important;
+        bottom: max(12px, env(safe-area-inset-bottom, 12px)) !important;
+        max-width: calc(100vw - 24px) !important;
+        z-index: 10000 !important;
+        flex-wrap: wrap;
+      }
+      .fu-softphone-callbar-actions { margin-left: auto; }
+      .fu-softphone-callbar-btn { min-height: 44px; min-width: 44px; }
+
+      /* Afspraken/Sluimerpot-kaarten: 6 cellen in bestaande 3-koloms
+         @720 grid → overlap. Force echte 1-koloms stapeling met alle
+         cellen op eigen regel. */
+      .fu-af-row, .fu-sp-row {
+        grid-template-columns: 1fr !important;
+        row-gap: 6px !important;
+        padding: 12px !important;
+      }
+      .fu-af-row .avatar,
+      .fu-sp-row .avatar { display: none !important; }
+      .fu-af-row .time, .fu-sp-row .time {
+        font-size: 16px;
+        order: -1; /* tijd bovenaan */
+      }
+      .fu-af-row .name, .fu-sp-row .name {
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: initial !important;
+        display: block !important;
+        font-weight: 600;
+      }
+      .fu-af-row .sub, .fu-sp-row .sub {
+        white-space: normal;
+        margin-top: 0;
+      }
+      .fu-af-row .owner,
+      .fu-af-row .kind-badge,
+      .fu-sp-row .owner { align-self: flex-start; }
+      /* Bel nu-knop krijgt eigen regel + fullwidth zodat 'ie niet over
+         de naam-badge valt. */
+      .fu-af-row .fu-lead-btn,
+      .fu-sp-row .fu-lead-btn {
+        width: 100%;
+        justify-content: center;
+        min-height: 44px;
+        margin-top: 4px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -3533,6 +3685,11 @@
 
         <!-- RECHTS: lead-detail -->
         <section class="fu-cockpit-detail" id="cockpit-detail">
+          <!-- Mobiele terug-naar-werklijst link — verborgen op desktop,
+               zichtbaar op ≤720px wanneer detailbody open is (via CSS
+               :has()-selector op inline style hieronder). Roept bestaande
+               clearLeadDetail() aan; geen JS-mutatie in dit bestand. -->
+          <button type="button" class="fu-cockpit-back" onclick="clearLeadDetail()" aria-label="Terug naar werklijst"><i class="ti ti-arrow-left"></i> Terug naar werklijst</button>
           <div class="fu-cockpit-empty" id="cockpit-detail-empty">
             <i class="ti ti-user-search"></i>
             <div class="fu-cockpit-empty-title">Selecteer een lead</div>
