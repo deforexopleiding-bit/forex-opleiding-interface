@@ -356,3 +356,79 @@ test('constants: INTERNAL_NAMES bevat exact "(intern PayPal)"', () => {
 test('constants: EMPTY_NAME = "(leeg)"', () => {
   assert.equal(EMPTY_NAME, '(leeg)');
 });
+
+// ── Internal transfers (is_internal category-flag) ───────────────────────
+
+const CAT_META_WITH_INTERNAL = new Map([
+  ...CAT_META_ROWS.map(c => [c.id, c]),
+  ['cat-internal', { id: 'cat-internal', slug: 'intern-overboeking', label: 'Interne overboeking', color: '#94a3b8', is_internal: true }],
+]);
+
+test('buildCounterpartyRows: default verbergt counterparties met is_internal category (ING→PayPal)', () => {
+  const groups = new Map([
+    ['Meta',           { total: -100, count: 1, first: null, last: null, catCounts: new Map([['cat-marketing', 1]]), manualCount: 0 }],
+    ['PayPal Europe',  { total: -50000, count: 10, first: null, last: null, catCounts: new Map([['cat-internal', 10]]), manualCount: 0 }],
+  ]);
+  const rows = buildCounterpartyRows(groups, CAT_META_WITH_INTERNAL, {});
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].name, 'Meta');
+});
+
+test('buildCounterpartyRows: includeInternalTransfers=true toont ook ING→PayPal', () => {
+  const groups = new Map([
+    ['Meta',           { total: -100, count: 1, first: null, last: null, catCounts: new Map([['cat-marketing', 1]]), manualCount: 0 }],
+    ['PayPal Europe',  { total: -50000, count: 10, first: null, last: null, catCounts: new Map([['cat-internal', 10]]), manualCount: 0 }],
+  ]);
+  const rows = buildCounterpartyRows(groups, CAT_META_WITH_INTERNAL, { includeInternalTransfers: true });
+  assert.equal(rows.length, 2);
+});
+
+test('filterTransactionsForBreakdown: default excludeert tx met is_internal category', () => {
+  const txs = [
+    mkTx('t1', 'Meta',          -10000, '2026-01-01'),
+    mkTx('t2', 'PayPal Europe', -50000, '2026-01-02'),
+  ];
+  const catByTxId = new Map([
+    ['t1', { category_id: 'cat-marketing' }],
+    ['t2', { category_id: 'cat-internal' }],
+  ]);
+  const out = filterTransactionsForBreakdown(txs, catByTxId, CAT_META_WITH_INTERNAL, {});
+  assert.equal(out.length, 1);
+  assert.equal(out[0].id, 't1');
+});
+
+test('filterTransactionsForBreakdown: includeInternalTransfers=true laat interne tx binnen', () => {
+  const txs = [
+    mkTx('t1', 'Meta',          -10000, '2026-01-01'),
+    mkTx('t2', 'PayPal Europe', -50000, '2026-01-02'),
+  ];
+  const catByTxId = new Map([
+    ['t1', { category_id: 'cat-marketing' }],
+    ['t2', { category_id: 'cat-internal' }],
+  ]);
+  const out = filterTransactionsForBreakdown(txs, catByTxId, CAT_META_WITH_INTERNAL, { includeInternalTransfers: true });
+  assert.equal(out.length, 2);
+});
+
+test('filterTransactionsForBreakdown: oude signature (2e arg = filters-object) blijft werken', () => {
+  const txs = [
+    mkTx('t1', 'Meta',           -100, '2026-01-01'),
+    mkTx('t2', '(intern PayPal)', -50, '2026-01-01'),
+  ];
+  const out = filterTransactionsForBreakdown(txs, { includeInternal: true });
+  assert.equal(out.length, 2);
+});
+
+test('computeBreakdown: interne categorie verschijnt NIET in de output-lijst', () => {
+  const txs = [
+    mkTx('t1', 'Meta', -10000, '2026-01-01'),
+    // Interne tx zou al gefilterd zijn door filterTransactionsForBreakdown;
+    // deze test bewijst dat óók als 'ie er zou zijn, hij niet in output komt.
+  ];
+  const catByTxId = new Map([['t1', { category_id: 'cat-marketing' }]]);
+  const bd = computeBreakdown(txs, catByTxId, [...CAT_META_WITH_INTERNAL.values()]);
+  const internal = bd.categories.find(c => c.slug === 'intern-overboeking');
+  assert.equal(internal, undefined, 'is_internal categorie mag niet in breakdown output');
+  const mkt = bd.categories.find(c => c.id === 'cat-marketing');
+  assert.equal(mkt.total_cents, -10000);
+});

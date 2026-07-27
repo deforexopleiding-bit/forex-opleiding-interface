@@ -63,8 +63,9 @@ export default async function handler(req, res) {
   const source = ['all','camt','paypal'].includes(String(q.source || 'all')) ? String(q.source || 'all') : 'all';
   const categoryFilter = q.category ? String(q.category) : null;
   const onlyUncategorized = String(q.uncategorized || '') === '1';
-  const includeInternal   = String(q.include_internal || '') === '1';
-  const includeIncoming   = String(q.include_incoming || '') === '1';
+  const includeInternal          = String(q.include_internal || '') === '1';
+  const includeInternalTransfers = String(q.include_internal_transfers || '') === '1';
+  const includeIncoming          = String(q.include_incoming || '') === '1';
   const sort = ['total_desc','total_abs_desc','count_desc','name_asc'].includes(String(q.sort || '')) ? String(q.sort) : 'total_desc';
 
   try {
@@ -114,10 +115,10 @@ export default async function handler(req, res) {
     }
     const catByTxId = new Map(cats.map(c => [c.camt_transaction_id, c]));
 
-    // Stap 3: fetch categorie-metadata (labels/colors) voor het weergaveniveau.
+    // Stap 3: fetch categorie-metadata (labels/colors + is_internal-flag).
     const { data: allCats, error: catMetaErr } = await supabaseAdmin
       .from('expense_categories')
-      .select('id, slug, label, color');
+      .select('id, slug, label, color, is_internal');
     if (catMetaErr) throw new Error('expense_categories fetch: ' + catMetaErr.message);
     const catMetaById = new Map((allCats || []).map(c => [c.id, c]));
 
@@ -127,6 +128,7 @@ export default async function handler(req, res) {
     // Stap 5: build + filter response-rijen (pure helper).
     const rowsUnsorted = buildCounterpartyRows(groups, catMetaById, {
       includeInternal,
+      includeInternalTransfers,
       includeIncoming,
       onlyUncategorized,
       categoryFilter,
@@ -138,7 +140,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       counterparties: rows,
       total_count: rows.length,
-      filters_applied: { from, to, source, category: categoryFilter, uncategorized: onlyUncategorized, include_internal: includeInternal, include_incoming: includeIncoming, sort },
+      filters_applied: { from, to, source, category: categoryFilter, uncategorized: onlyUncategorized, include_internal: includeInternal, include_internal_transfers: includeInternalTransfers, include_incoming: includeIncoming, sort },
     });
   } catch (e) {
     console.error('[finance-expenses-counterparties]', e.message);

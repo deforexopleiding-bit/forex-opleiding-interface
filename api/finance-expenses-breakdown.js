@@ -43,8 +43,9 @@ export default async function handler(req, res) {
   const from = ISO_DATE_RE.test(String(q.from || '')) ? String(q.from) : null;
   const to   = ISO_DATE_RE.test(String(q.to   || '')) ? String(q.to)   : null;
   const source = ['all','camt','paypal'].includes(String(q.source || 'all')) ? String(q.source || 'all') : 'all';
-  const includeInternal = String(q.include_internal || '') === '1';
-  const includeIncoming = String(q.include_incoming || '') === '1';
+  const includeInternal          = String(q.include_internal || '') === '1';
+  const includeInternalTransfers = String(q.include_internal_transfers || '') === '1';
+  const includeIncoming          = String(q.include_incoming || '') === '1';
 
   try {
     // Fetch alle relevante tx (chunked). Alleen non-Memo want die zijn al
@@ -69,13 +70,11 @@ export default async function handler(req, res) {
       offset += CHUNK;
     }
 
-    // Filter: intern + incoming (pure helper — uitgaven-only default).
-    const filteredTxs = filterTransactionsForBreakdown(txs, { includeInternal, includeIncoming });
-
-    // Fetch categorisaties.
+    // Fetch categorisaties (VÓÓR filter, want interne-overboeking-filter heeft
+    // categorie-info nodig om tx te herkennen).
     const cats = [];
-    if (filteredTxs.length) {
-      const ids = filteredTxs.map(t => t.id);
+    if (txs.length) {
+      const ids = txs.map(t => t.id);
       for (let i = 0; i < ids.length; i += 500) {
         const slice = ids.slice(i, i + 500);
         const { data } = await supabaseAdmin
@@ -85,17 +84,23 @@ export default async function handler(req, res) {
         cats.push(...(data || []));
       }
     }
-    // computeBreakdown wilt cat.category_id, dus normalize {camt_transaction_id, category_id}.
     const catByTxId = new Map(cats.map(c => [c.camt_transaction_id, { category_id: c.category_id }]));
 
-    // Alle categorieën (voor labels + zero-buckets).
+    // Alle categorieën met is_internal-flag (voor labels + interne-filter).
     const { data: allCats } = await supabaseAdmin
       .from('expense_categories')
-      .select('id, slug, label, color')
+      .select('id, slug, label, color, is_internal')
       .eq('is_active', true)
       .order('label');
+    const catMetaById = new Map((allCats || []).map(c => [c.id, c]));
 
-    // Aggregeer (pure helper).
+    // Filter: intern + interne overboekingen + incoming (pure helper — uitgaven-only default).
+    const filteredTxs = filterTransactionsForBreakdown(
+      txs, catByTxId, catMetaById,
+      { includeInternal, includeInternalTransfers, includeIncoming }
+    );
+
+    // Aggregeer (pure helper — filtert interne categorieën uit output-lijst).
     const bd = computeBreakdown(filteredTxs, catByTxId, allCats || []);
 
     return res.status(200).json({
