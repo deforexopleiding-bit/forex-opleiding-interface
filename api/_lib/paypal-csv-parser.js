@@ -134,6 +134,35 @@ function buildHeaderIndex(header) {
   return idx;
 }
 
+// ── Description-cascade (bewezen tegen 1936-rijen sample) ─────────────────
+// Doel: geef per PayPal-tx de meest bruikbare menselijke omschrijving.
+// De 'Naam' zit al in counterparty_name (aparte kolom + zichtbaar in UI);
+// description is de "wat/waarom"-info, niet de "van wie".
+//
+// Volgorde + dekking uit analyse (%vulling op non-Memo rijen):
+//   1) Onderwerp     — 37.6%  (bv Meta→"Ads", Upwork→"Upwork Services",
+//                              klant→"Factuur 2025 / 844")
+//   2) Item Title    — 15.8%  (product/dienst-titel)
+//   3) Factuurnummer — 16.9%  ("Factuur <nr>" — prefix voor context)
+//   4) Note          — 0.1%   (zeldzaam maar nuttig als het er is)
+//   5) Type          — fallback ("Vastgehouden - algemeen" e.d.)
+//
+// Werkt op óf een raw-row array + header-index (parser-tijd), óf op een
+// JSON-object (backfill-tijd, waarbij raw_xml als JSON is bewaard).
+export function buildPaypalDescription({ Onderwerp, ItemTitle, Factuurnummer, Note, Type }) {
+  const onderwerp = String(Onderwerp || '').trim();
+  if (onderwerp) return onderwerp;
+  const itemTitle = String(ItemTitle || '').trim();
+  if (itemTitle) return itemTitle;
+  const factuur = String(Factuurnummer || '').trim();
+  if (factuur) return 'Factuur ' + factuur;
+  const note = String(Note || '').trim();
+  if (note) return note;
+  const type = String(Type || '').trim();
+  if (type) return type;
+  return '';
+}
+
 // ── Counterparty-resolutie (3-staps) ───────────────────────────────────────
 // Bouwt eerst een lookup Transactiereferentie → Naam.trim() (alleen voor
 // rijen met niet-lege Naam, want die zijn parent-kandidaten). Daarna
@@ -231,9 +260,15 @@ export function parsePaypalCsv(csvText, opts = {}) {
       const txRef = String(r[H['Transactiereferentie']] || '').trim() || null;
       const parentRef = String(r[H['Reference Txn ID']] || '').trim() || null;
 
-      // Description: menselijk-leesbare combinatie van Type + counterparty
-      // zodat je in de UI zonder verdere lookup ziet wat het is.
-      const description = `[${type}] ${counterparty}`;
+      // Description: cascade uit de meest-vulde velden (zie
+      // buildPaypalDescription). counterparty_name staat al in eigen kolom.
+      const description = buildPaypalDescription({
+        Onderwerp:     r[H['Onderwerp']],
+        ItemTitle:     r[H['Item Title']],
+        Factuurnummer: r[H['Factuurnummer']],
+        Note:          r[H['Note']],
+        Type:          type,
+      });
 
       // Raw JSON van de hele CSV-rij (kolom-naam → waarde), voor audit +
       // future-proofing (kolommen die we nu niet mappen zoals Factuurnummer,

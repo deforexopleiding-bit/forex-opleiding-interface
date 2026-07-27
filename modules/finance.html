@@ -19061,6 +19061,7 @@
         <thead><tr style="background:var(--bg-elev)">
           <th style="text-align:left;padding:7px 10px;font-size:10.5px;text-transform:uppercase;color:var(--text-dim)">Datum</th>
           <th style="text-align:right;padding:7px 10px;font-size:10.5px;text-transform:uppercase;color:var(--text-dim)">Bedrag</th>
+          <th style="text-align:left;padding:7px 10px;font-size:10.5px;text-transform:uppercase;color:var(--text-dim);min-width:200px">Omschrijving</th>
           <th style="text-align:left;padding:7px 10px;font-size:10.5px;text-transform:uppercase;color:var(--text-dim)">Type</th>
           <th style="text-align:left;padding:7px 10px;font-size:10.5px;text-transform:uppercase;color:var(--text-dim)">Bron</th>
           <th style="text-align:left;padding:7px 10px;font-size:10.5px;text-transform:uppercase;color:var(--text-dim)">Categorie${canExpensesEdit ? ' (override per tx)' : ''}</th>
@@ -19076,9 +19077,14 @@
             const cell = canExpensesEdit
               ? `<div style="display:flex;gap:6px;align-items:center">${badge}<select class="fin-input exp-tx-picker" data-tx="${t.id}" style="min-width:160px;font-size:11.5px">${catOptions.replace('value="' + currentId + '"', 'value="' + currentId + '" selected')}</select></div>`
               : badge;
+            const descText = String(t.description || '').trim();
+            const descCell = descText
+              ? `<span title="${_esc(descText)}">${_esc(descText)}</span>`
+              : `<span style="color:var(--text-faint);font-size:11px">—</span>`;
             return `<tr>
-              <td style="padding:6px 10px;border-bottom:1px solid var(--border)">${_esc(t.booking_date)}</td>
-              <td style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums;${sign}">${_fmtEurCents(t.amount_cents)} ${_esc(t.currency || '')}</td>
+              <td style="padding:6px 10px;border-bottom:1px solid var(--border);white-space:nowrap">${_esc(t.booking_date)}</td>
+              <td style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;${sign}">${_fmtEurCents(t.amount_cents)} ${_esc(t.currency || '')}</td>
+              <td style="padding:6px 10px;border-bottom:1px solid var(--border);word-break:break-word;max-width:320px">${descCell}</td>
               <td style="padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-dim);font-size:11.5px">${_esc(t.transaction_code || '')}</td>
               <td style="padding:6px 10px;border-bottom:1px solid var(--border);font-size:11.5px"><span style="text-transform:uppercase;font-weight:600;color:var(--text-dim)">${_esc(t.source)}</span></td>
               <td style="padding:6px 10px;border-bottom:1px solid var(--border)">${cell}</td>
