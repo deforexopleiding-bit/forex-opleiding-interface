@@ -31,12 +31,59 @@ export function groupByCounterparty(txs, catByTxId) {
     if (!g.last  || t.booking_date > g.last)  g.last  = t.booking_date;
     const cat = catByTxId?.get?.(t.id);
     if (cat) {
+      // ai_suggest telt NIET mee in consensus — dat is een voorstel, geen
+      // bevestigde categorisatie. Alleen source in {rule, manual} (of legacy
+      // undefined) draagt bij aan catCounts.
+      if (cat.source === 'ai_suggest') continue;
       const catId = cat.category_id;
       g.catCounts.set(catId, (g.catCounts.get(catId) || 0) + 1);
       if (cat.source === 'manual') g.manualCount++;
     }
   }
   return groups;
+}
+
+/**
+ * Bepaal per counterparty de AI-suggestie (mode-category over alle ai_suggest-
+ * rijen). Retourneert Map: name → { category_id, avg_confidence, sample_reason, tx_count }.
+ * De caller haalt ai_suggest-rijen apart op (zonder ze in catByTxId te stoppen
+ * voor groupByCounterparty) en geeft ze hier door.
+ */
+export function aiSuggestionsByCounterparty(txs, aiSuggestByTxId) {
+  const acc = new Map();  // name → { catId → { cnt, sumConf, firstReason } }
+  for (const t of txs || []) {
+    const name = String(t.counterparty_name || EMPTY_NAME).trim() || EMPTY_NAME;
+    const sug = aiSuggestByTxId?.get?.(t.id);
+    if (!sug) continue;
+    if (!acc.has(name)) acc.set(name, new Map());
+    const byCat = acc.get(name);
+    const catId = sug.category_id;
+    if (!byCat.has(catId)) byCat.set(catId, { cnt: 0, sumConf: 0, firstReason: null });
+    const bucket = byCat.get(catId);
+    bucket.cnt += 1;
+    bucket.sumConf += Number(sug.ai_confidence) || 0;
+    if (!bucket.firstReason && sug.ai_reason) bucket.firstReason = sug.ai_reason;
+  }
+  const out = new Map();
+  for (const [name, byCat] of acc) {
+    // Winnaar per counterparty: hoogste cnt (bij tie: hoogste avg conf).
+    let bestCatId = null, bestCnt = 0, bestConf = 0, bestReason = null;
+    for (const [catId, b] of byCat) {
+      const avgConf = b.sumConf / Math.max(1, b.cnt);
+      if (b.cnt > bestCnt || (b.cnt === bestCnt && avgConf > bestConf)) {
+        bestCatId = catId; bestCnt = b.cnt; bestConf = avgConf; bestReason = b.firstReason;
+      }
+    }
+    if (bestCatId) {
+      out.set(name, {
+        category_id:    bestCatId,
+        avg_confidence: Math.round(bestConf * 100) / 100,
+        sample_reason:  bestReason,
+        tx_count:       bestCnt,
+      });
+    }
+  }
+  return out;
 }
 
 /**

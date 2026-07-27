@@ -4600,10 +4600,15 @@
 
       <!-- Tegenpartijen-lijst (hoofdweergave) -->
       <div class="exp-cp-wrap" style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:22px">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg-elev);border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg-elev);border-bottom:1px solid var(--border);gap:8px;flex-wrap:wrap">
           <div style="font-size:13px;font-weight:600">Tegenpartijen <span id="expCpCount" style="font-weight:400;color:var(--text-dim);font-size:12px"></span></div>
-          <button class="sr-abtn" id="expRefreshBtn" type="button"><i class="ti ti-refresh"></i> Vernieuwen</button>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="sr-abtn" id="expAiSuggestBtn" type="button" title="AI classificeert alle ongecategoriseerde tegenpartijen. Suggesties tellen NIET mee — bevestig per stuk of via bulk." style="background:#a855f7;color:white;border-color:#9333ea"><i class="ti ti-sparkles"></i> AI-suggesties genereren</button>
+            <button class="sr-abtn" id="expAiBulkConfirmBtn" type="button" title="Bevestig alle AI-suggesties met confidence >= drempel. Standaard uit — kies bewust." style="display:none"><i class="ti ti-check-all"></i> Bulk bevestigen</button>
+            <button class="sr-abtn" id="expRefreshBtn" type="button"><i class="ti ti-refresh"></i> Vernieuwen</button>
+          </div>
         </div>
+        <div id="expAiStatus" style="display:none;padding:10px 14px;background:#faf5ff;border-bottom:1px solid var(--border);font-size:12px;color:#6b21a8"></div>
         <div class="data-table-wrap" data-exp-table-wrap style="overflow-x:auto;-webkit-overflow-scrolling:touch">
           <table class="exp-cp-table" style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
@@ -18863,7 +18868,88 @@
       input.addEventListener('change', onPaypalFile);
     }
 
+    // Wire AI-suggest knoppen.
+    const aiBtn = document.getElementById('expAiSuggestBtn');
+    if (aiBtn && !aiBtn._expWired) { aiBtn._expWired = true; aiBtn.addEventListener('click', onExpAiSuggestGenerate); }
+    const aiBulk = document.getElementById('expAiBulkConfirmBtn');
+    if (aiBulk && !aiBulk._expWired) { aiBulk._expWired = true; aiBulk.addEventListener('click', onExpAiBulkConfirm); }
+
     await loadExpensesData();
+  }
+
+  // ─── AI-suggest handlers ─────────────────────────────────────────────────
+
+  async function onExpAiSuggestGenerate() {
+    const btn = document.getElementById('expAiSuggestBtn');
+    const status = document.getElementById('expAiStatus');
+    if (!confirm('AI classificeert alle ongecategoriseerde tegenpartijen. Suggesties tellen NIET mee tot bevestigd. Doorgaan?')) return;
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Genereren…'; }
+    if (status) { status.style.display = ''; status.textContent = 'AI-suggesties worden gegenereerd — dit kan 10-30 seconden duren…'; }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-expenses-ai-suggest', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      const msg = `Klaar: ${d.counterparties_suggested} tegenpartijen voorzien van suggestie (${d.calls} API-calls, ~${d.tokens_used_estimate} tokens). ${d.invalid_slug_fallback_count} fallbacks op 'overig'. ${(d.errors && d.errors.length) ? d.errors.length + ' fout(en) — check console.' : ''}`;
+      if (status) status.textContent = msg;
+      window.AgentShared?.showToast?.('AI-suggesties gegenereerd', 'success');
+      if (d.errors && d.errors.length) console.warn('[ai-suggest] errors:', d.errors);
+      await loadExpensesData();
+    } catch (err) {
+      if (status) status.textContent = 'Fout: ' + err.message;
+      window.AgentShared?.showToast?.('Fout: ' + err.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-sparkles"></i> AI-suggesties genereren'; }
+    }
+  }
+
+  async function onExpAiConfirmSingle(e) {
+    const btn = e.currentTarget;
+    const cp = btn.getAttribute('data-cp');
+    if (!cp) return;
+    btn.disabled = true;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-expenses-confirm-suggestion', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ counterparty: cp }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast?.(`Bevestigd: ${d.tx_rows_updated} tx + rule aangemaakt`, 'success');
+      await loadExpensesData();
+    } catch (err) {
+      window.AgentShared?.showToast?.('Fout: ' + err.message, 'error');
+      btn.disabled = false;
+    }
+  }
+
+  async function onExpAiBulkConfirm() {
+    const thrStr = prompt('⚠ BULK-BEVESTIGEN\n\nBevestig alle AI-suggesties met confidence >= X.\nAlle bevestigde tellen dan meteen in totaal/breakdown mee\n+ worden counterparty-rules voor toekomstige imports.\n\nMinimum confidence (0.00 - 1.00):', '0.90');
+    if (thrStr === null) return;
+    const thr = parseFloat(thrStr);
+    if (isNaN(thr) || thr < 0 || thr > 1) {
+      window.AgentShared?.showToast?.('Ongeldige waarde — geef getal tussen 0 en 1', 'error');
+      return;
+    }
+    if (!confirm(`Bevestig ALLE AI-suggesties met confidence ≥ ${thr}? Dit is niet terug te draaien behalve door handmatig per tegenpartij een andere categorie te kiezen.`)) return;
+    const btn = document.getElementById('expAiBulkConfirmBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Bevestigen…'; }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-expenses-confirm-suggestion', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ min_confidence: thr }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast?.(`Bulk bevestigd: ${d.confirmed_counterparties.length} tegenpartijen, ${d.tx_rows_updated} tx, ${d.rules_created} rules`, 'success');
+      if (d.errors && d.errors.length) console.warn('[ai-bulk-confirm] errors:', d.errors);
+      await loadExpensesData();
+    } catch (err) {
+      window.AgentShared?.showToast?.('Fout: ' + err.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-check-all"></i> Bulk bevestigen'; }
+    }
   }
 
   function _expensesFilterParams() {
@@ -18949,12 +19035,24 @@
       .join('');
     tb.innerHTML = rows.map(r => {
       const sign = r.total_cents < 0 ? 'color:#dc2626' : 'color:#059669';
+      const hasAi = r.ai_suggestion && r.ai_suggestion.category && !r.category;
+      const aiCat = hasAi ? r.ai_suggestion.category : null;
+      const aiConf = hasAi ? r.ai_suggestion.confidence : null;
+      const aiReason = hasAi ? String(r.ai_suggestion.reason || '') : '';
+      const aiHint = hasAi
+        ? `<div class="exp-ai-hint" title="${_esc(aiReason)} (confidence ${Math.round((aiConf || 0) * 100)}%)" style="margin-top:4px;font-size:11px;color:#7e22ce;display:flex;align-items:center;gap:4px;flex-wrap:wrap"><span>&#10024; AI: <strong>${_esc(aiCat.label)}</strong></span><button class="sr-abtn exp-ai-confirm" data-cp="${_esc(r.name)}" data-cat="${aiCat.id}" type="button" style="padding:2px 8px;font-size:11px;min-height:22px;background:#a855f7;color:white;border-color:#9333ea">Bevestig</button></div>`
+        : '';
       const catBadge = r.category
         ? `<span style="display:inline-block;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600;background:${r.category.color}22;color:${r.category.color};border:1px solid ${r.category.color}55">${_esc(r.category.label)}${r.category_source === 'manual' ? ' <span title="Manual override">*</span>' : ''}</span>`
         : `<span style="font-size:11.5px;color:var(--text-dim)">niet gecategoriseerd</span>`;
-      const currentId = r.category ? r.category.id : '';
+      // Voorselecteer AI-suggestie in de dropdown (visueel: paarse rand).
+      const preselectId = r.category ? r.category.id : (hasAi ? aiCat.id : '');
+      const pickerCls = hasAi ? 'fin-input exp-cp-picker exp-cp-picker-ai' : 'fin-input exp-cp-picker';
+      const pickerStyle = hasAi
+        ? 'min-width:200px;font-size:12.5px;border-color:#a855f7;background:#faf5ff'
+        : 'min-width:200px;font-size:12.5px';
       const picker = canExpensesEdit
-        ? `<select class="fin-input exp-cp-picker" data-cp="${_esc(r.name)}" style="min-width:200px;font-size:12.5px">${catOptions.replace('value="' + currentId + '"', 'value="' + currentId + '" selected')}</select>`
+        ? `<select class="${pickerCls}" data-cp="${_esc(r.name)}" data-ai="${hasAi ? '1' : '0'}" style="${pickerStyle}">${catOptions.replace('value="' + preselectId + '"', 'value="' + preselectId + '" selected')}</select>${aiHint}`
         : catBadge;
       return `<tr data-cp="${_esc(r.name)}">
         <td style="padding:10px 12px;border-bottom:1px solid var(--border);"><a href="#" class="exp-cp-open" data-cp="${_esc(r.name)}" style="color:var(--text);text-decoration:none;font-weight:500">${_esc(r.name)}</a><div style="font-size:11px;color:var(--text-faint)">${_esc(r.first_date || '')} → ${_esc(r.last_date || '')}</div></td>
@@ -18964,6 +19062,14 @@
         <td style="padding:10px 12px;border-bottom:1px solid var(--border);text-align:right"><button class="sr-abtn exp-cp-open" data-cp="${_esc(r.name)}" type="button" title="Toon transacties"><i class="ti ti-list"></i></button></td>
       </tr>`;
     }).join('');
+    // Wire AI-bevestig knoppen (per row).
+    tb.querySelectorAll('.exp-ai-confirm').forEach(btn => {
+      btn.addEventListener('click', onExpAiConfirmSingle);
+    });
+    // Show bulk-confirm knop als er ≥1 AI-suggestie zichtbaar is.
+    const bulkBtn = document.getElementById('expAiBulkConfirmBtn');
+    const anyAi = rows.some(r => r.ai_suggestion && !r.category);
+    if (bulkBtn) bulkBtn.style.display = anyAi ? '' : 'none';
     // Wire pickers + open-buttons.
     tb.querySelectorAll('.exp-cp-picker').forEach(sel => {
       sel.addEventListener('change', onExpCpCategoryChange);

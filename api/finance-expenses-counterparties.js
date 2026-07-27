@@ -41,6 +41,8 @@ import {
   groupByCounterparty,
   buildCounterpartyRows,
   sortCounterparties,
+  aiSuggestionsByCounterparty,
+  EMPTY_NAME,
 } from './_lib/expenses-grouping.js';
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -103,7 +105,7 @@ export default async function handler(req, res) {
         const slice = ids.slice(i, i + 500);
         const { data, error } = await supabaseAdmin
           .from('transaction_categorizations')
-          .select('camt_transaction_id, category_id, source')
+          .select('camt_transaction_id, category_id, source, ai_confidence, ai_reason')
           .in('camt_transaction_id', slice);
         if (error) {
           console.warn('[expenses-counterparties] tx_cat chunk fout:', error.message);
@@ -113,7 +115,15 @@ export default async function handler(req, res) {
       }
       cats = catChunks;
     }
-    const catByTxId = new Map(cats.map(c => [c.camt_transaction_id, c]));
+    // Split: bevestigde categorisaties (rule/manual) vs ai_suggest.
+    // catByTxId gaat naar groupByCounterparty (consensus) — bevat GEEN ai_suggest.
+    // aiSuggestByTxId gaat naar aiSuggestionsByCounterparty (weergave-alleen).
+    const catByTxId       = new Map();
+    const aiSuggestByTxId = new Map();
+    for (const c of cats) {
+      if (c.source === 'ai_suggest') aiSuggestByTxId.set(c.camt_transaction_id, c);
+      else                            catByTxId.set(c.camt_transaction_id, c);
+    }
 
     // Stap 3: fetch categorie-metadata (labels/colors + is_internal-flag).
     const { data: allCats, error: catMetaErr } = await supabaseAdmin
@@ -136,6 +146,29 @@ export default async function handler(req, res) {
 
     // Stap 6: sort (pure helper).
     const rows = sortCounterparties(rowsUnsorted, sort);
+
+    // Stap 7: hang AI-suggesties aan de output. Alleen counterparties die nog
+    // niet bevestigd zijn (category=null in row) krijgen een ai_suggestion-veld.
+    // Rijen die al een 'echte' categorie hebben tonen die; de suggestie is dan
+    // irrelevant (er is al een keuze).
+    const aiByName = aiSuggestionsByCounterparty(
+      // Filter tx op zichtbare counterparties (efficiency).
+      txs.filter(t => rows.some(r => r.name === String(t.counterparty_name || EMPTY_NAME).trim())),
+      aiSuggestByTxId
+    );
+    for (const row of rows) {
+      if (row.category) { row.ai_suggestion = null; continue; }
+      const sug = aiByName.get(row.name);
+      if (!sug) { row.ai_suggestion = null; continue; }
+      const meta = catMetaById.get(sug.category_id);
+      if (!meta) { row.ai_suggestion = null; continue; }
+      row.ai_suggestion = {
+        category:       meta,
+        confidence:     sug.avg_confidence,
+        reason:         sug.sample_reason,
+        tx_count:       sug.tx_count,
+      };
+    }
 
     return res.status(200).json({
       counterparties: rows,
