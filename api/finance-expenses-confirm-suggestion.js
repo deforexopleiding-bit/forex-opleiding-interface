@@ -2,16 +2,18 @@
 // POST → bevestig een AI-suggestie voor 1 counterparty (of bulk boven een
 // confidence-drempel). Permission: finance.expenses.category.edit.
 //
-// Twee modes:
+// Drie modes:
 //   1) Single: { counterparty: 'Meta Platforms, Inc.' }
 //        Bevestig de bestaande ai_suggest-rijen van die counterparty →
 //        source='manual' + maak (indien niet bestaand) een expense_
 //        counterparty_rule zodat toekomstige imports automatisch getagd
 //        worden.
-//   2) Bulk:   { min_confidence: 0.85 }
+//   2) Bulk-by-threshold: { min_confidence: 0.85 }
 //        Bevestig ALLE ai_suggest-rijen waarvan de counterparty een
-//        gemiddelde confidence >= threshold heeft. Zelfde flow per
-//        counterparty.
+//        gemiddelde confidence >= threshold heeft.
+//   3) Bulk-by-selection: { counterparties: ['Meta ...', 'Zoom ...', ...] }
+//        Bevestig exact deze counterparties, ongeacht confidence. Voor
+//        checkbox-selectie in de UI: user kiest bewust welke.
 //
 // Response:
 //   { confirmed_counterparties: [...],
@@ -37,12 +39,13 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Geen rechten (finance.expenses.category.edit)' });
   }
 
-  const { counterparty, min_confidence } = req.body || {};
+  const { counterparty, min_confidence, counterparties } = req.body || {};
   const isSingle = typeof counterparty === 'string' && counterparty.trim().length > 0;
-  const isBulk   = typeof min_confidence === 'number' && min_confidence >= 0 && min_confidence <= 1;
+  const isBulkByThreshold = typeof min_confidence === 'number' && min_confidence >= 0 && min_confidence <= 1;
+  const isBulkBySelection = Array.isArray(counterparties) && counterparties.length > 0;
 
-  if (!isSingle && !isBulk) {
-    return res.status(400).json({ error: 'Geef counterparty (string) of min_confidence (0..1) mee' });
+  if (!isSingle && !isBulkByThreshold && !isBulkBySelection) {
+    return res.status(400).json({ error: 'Geef counterparty (string), min_confidence (0..1) OF counterparties (string[]) mee' });
   }
 
   try {
@@ -51,6 +54,15 @@ export default async function handler(req, res) {
 
     if (isSingle) {
       targetCounterparties = [counterparty.trim()];
+    } else if (isBulkBySelection) {
+      // Expliciete lijst — user heeft in de UI checkboxes aangevinkt. Trim +
+      // dedupe + drop lege. Geen threshold-check: user heeft bewust gekozen.
+      targetCounterparties = Array.from(new Set(
+        counterparties.map(s => String(s || '').trim()).filter(Boolean)
+      ));
+      if (targetCounterparties.length > 500) {
+        return res.status(400).json({ error: 'Selectie te groot (>500). Splits in kleinere batches.' });
+      }
     } else {
       // Bulk: fetch alle ai_suggest-rijen + join op counterparty_name.
       // Groepeer per name, bereken gemiddelde confidence, filter >= threshold.
