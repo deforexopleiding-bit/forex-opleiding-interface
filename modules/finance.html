@@ -18899,21 +18899,86 @@
     return d;
   }
 
+  // CHUNK-SIZE voor client-orchestrated AI-suggest. Server accepteert max 50;
+  // 25 is fijne balans: per-call ~3-5s, ruim binnen 60s cap, en 8 chunks
+  // voor ~200 counterparties → gebruiker ziet snel voortgang.
+  const AI_SUGGEST_CHUNK_SIZE = 25;
+
   async function onExpAiSuggestGenerate() {
     const btn = document.getElementById('expAiSuggestBtn');
     const status = document.getElementById('expAiStatus');
-    if (!confirm('AI classificeert alle ongecategoriseerde tegenpartijen. Suggesties tellen NIET mee tot bevestigd. Doorgaan?')) return;
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Genereren…'; }
-    if (status) { status.style.display = ''; status.textContent = 'AI-suggesties worden gegenereerd — dit kan 10-30 seconden duren…'; }
+    if (!confirm('AI classificeert alle ongecategoriseerde tegenpartijen in chunks. Suggesties tellen NIET mee tot bevestigd. Doorgaan?')) return;
+
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Voorbereiden…'; }
+    if (status) { status.style.display = ''; status.textContent = 'Ongecategoriseerde tegenpartijen ophalen…'; }
+
     try {
-      const r = await window.AgentShared.apiFetch('/api/finance-expenses-ai-suggest', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-      });
-      const d = await _expApiJson(r);
-      const msg = `Klaar: ${d.counterparties_suggested} tegenpartijen voorzien van suggestie (${d.calls} API-calls, ~${d.tokens_used_estimate} tokens). ${d.invalid_slug_fallback_count} fallbacks op 'overig'. ${(d.errors && d.errors.length) ? d.errors.length + ' fout(en) — check console.' : ''}`;
-      if (status) status.textContent = msg;
-      window.AgentShared?.showToast?.('AI-suggesties gegenereerd', 'success');
-      if (d.errors && d.errors.length) console.warn('[ai-suggest] errors:', d.errors);
+      // Stap 1: fetch alle ongecategoriseerde counterparty_names.
+      // Hergebruikt bestaande counterparties-endpoint met uncategorized=1.
+      // Filters van de user (from/to/source) worden NIET meegegeven — we
+      // classificeren over de volle set zodat 1 rondje alles dekt.
+      const listR = await window.AgentShared.apiFetch(
+        '/api/finance-expenses-counterparties?uncategorized=1&sort=name_asc'
+      );
+      const listD = await _expApiJson(listR);
+      const allNames = (listD.counterparties || [])
+        .map(c => String(c.name || '').trim())
+        .filter(Boolean);
+
+      if (allNames.length === 0) {
+        if (status) status.textContent = 'Niks te doen — geen ongecategoriseerde tegenpartijen.';
+        window.AgentShared?.showToast?.('Geen ongecategoriseerde tegenpartijen', 'info');
+        return;
+      }
+
+      // Stap 2: chunks maken.
+      const chunks = [];
+      for (let i = 0; i < allNames.length; i += AI_SUGGEST_CHUNK_SIZE) {
+        chunks.push(allNames.slice(i, i + AI_SUGGEST_CHUNK_SIZE));
+      }
+
+      // Stap 3: lus sequentieel door de chunks + voortgang-UX.
+      let processed = 0;
+      let classified = 0;
+      let txWritten = 0;
+      let invalidSlug = 0;
+      let tokensEst = 0;
+      const failedChunks = [];
+
+      for (let ci = 0; ci < chunks.length; ci++) {
+        const chunk = chunks[ci];
+        if (status) {
+          status.textContent = `Chunk ${ci + 1}/${chunks.length} verzenden (${processed}/${allNames.length} verwerkt)…`;
+        }
+        try {
+          const r = await window.AgentShared.apiFetch('/api/finance-expenses-ai-suggest', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ counterparties: chunk }),
+          });
+          const d = await _expApiJson(r);
+          processed  += chunk.length;
+          classified += d.counterparties_suggested || 0;
+          txWritten  += d.tx_rows_written || 0;
+          invalidSlug += d.invalid_slug_fallback_count || 0;
+          tokensEst  += d.tokens_used_estimate || 0;
+          if (d.errors && d.errors.length) {
+            console.warn(`[ai-suggest chunk ${ci + 1}] errors:`, d.errors);
+            failedChunks.push({ chunk: ci + 1, errors: d.errors });
+          }
+        } catch (chunkErr) {
+          console.error(`[ai-suggest chunk ${ci + 1}] fout:`, chunkErr);
+          failedChunks.push({ chunk: ci + 1, message: chunkErr.message });
+          // Ga door met volgende chunks — partial success is beter dan alles droppen.
+        }
+      }
+
+      // Stap 4: afronding + eind-status.
+      const doneMsg = `Klaar: ${classified} tegenpartijen voorzien van suggestie (${chunks.length} chunks, ~${tokensEst} tokens). ${invalidSlug} fallbacks op 'overig'. ${failedChunks.length ? failedChunks.length + ' chunk(s) faalden — check console.' : ''}`;
+      if (status) status.textContent = doneMsg;
+      window.AgentShared?.showToast?.(
+        `AI klaar: ${classified} suggesties (${failedChunks.length} chunks faalden)`,
+        failedChunks.length ? 'warning' : 'success'
+      );
       await loadExpensesData();
     } catch (err) {
       if (status) status.textContent = 'Fout: ' + err.message;
