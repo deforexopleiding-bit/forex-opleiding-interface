@@ -24,8 +24,19 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { anthropicStructuredOutput, AnthropicClientError } from './_lib/anthropic-client.js';
 
-const BATCH_SIZE = 30;
-const MAX_TOKENS_PER_CALL = 4096;
+// Vercel Pro-plan hard timeout override: max 60s. Zonder dit knipt Vercel
+// de function af bij 10s (Hobby-plan default) OF 60s (Pro default) en
+// returnt een platte-tekst "An error occurred with your deployment"
+// i.p.v. onze JSON. Explicit=60 borgt Pro-cap.
+export const config = { maxDuration: 60 };
+
+// Kleinere batches (was 30): kortere per-call latency (~2-4s ipv 5-10s),
+// zodat de parallel-run comfortabel binnen 60s past.
+const BATCH_SIZE = 15;
+const MAX_TOKENS_PER_CALL = 3000;
+// Concurrency-cap: parallel calls tegelijkertijd. Anthropic accepteert
+// ruimschoots >10 concurrent, maar we blijven safe onder rate-limits.
+const MAX_CONCURRENT_CALLS = 8;
 
 // System prompt beschrijft de taak strak.
 const SYSTEM_PROMPT = `Je bent een boekhoud-assistent die zakelijke tegenpartijen (leveranciers, diensten) classificeert in vaste uitgaven-categorieën.
@@ -90,20 +101,26 @@ function buildToolSchema(allowedSlugs) {
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
-  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
-  const supabase = createUserClient(req);
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  if (!(await requirePermission(req, 'finance.expenses.category.edit'))) {
-    return res.status(403).json({ error: 'Geen rechten (finance.expenses.category.edit)' });
-  }
-
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return res.status(503).json({ error: 'ANTHROPIC_API_KEY niet geconfigureerd' });
-  }
-
+  // Top-level try/catch borgt dat ELKE fout (auth, permission, imports,
+  // Anthropic-crash, DB, timeout-adjacent, netwerk) JSON teruggeeft.
+  // Zonder deze wrap knalt een uncaught throw naar Vercel's default
+  // platte-tekst "An error occurred with your deployment", en de frontend
+  // crasht dan op JSON.parse.
   try {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+
+    const supabase = createUserClient(req);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
+    if (!(await requirePermission(req, 'finance.expenses.category.edit'))) {
+      return res.status(403).json({ error: 'Geen rechten (finance.expenses.category.edit)' });
+    }
+
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(503).json({ error: 'ANTHROPIC_API_KEY niet geconfigureerd' });
+    }
+
     // Stap 1: fetch alle categorieën (voor de toegestane slug-set).
     const { data: allCats, error: catErr } = await supabaseAdmin
       .from('expense_categories')
@@ -190,13 +207,14 @@ export default async function handler(req, res) {
       batches.push(uniqueNames.slice(i, i + BATCH_SIZE));
     }
 
-    // Stap 4: elke batch → Anthropic call → verzamel suggesties.
+    // Stap 4: batches parallel afvuren via Promise.allSettled met concurrency-cap.
+    // Sequentieel × 7 calls × ~3-10s = 21-70s → overschrijdt Vercel-timeout.
+    // Parallel met cap = ~3-10s wall-clock, comfortabel binnen 60s.
     const allSuggestions = new Map();  // counterparty_name → { category_slug, confidence, reason }
     const errors = [];
     let invalidSlugFallback = 0;
 
-    for (let bi = 0; bi < batches.length; bi++) {
-      const batch = batches[bi];
+    async function runBatch(batch, batchIdx) {
       try {
         const output = await anthropicStructuredOutput({
           system:            SYSTEM_PROMPT,
@@ -206,14 +224,32 @@ export default async function handler(req, res) {
           max_tokens:        MAX_TOKENS_PER_CALL,
           temperature:       0.2,
         });
+        return { ok: true, output, batchIdx };
+      } catch (e) {
+        const msg = e instanceof AnthropicClientError ? `${e.code}: ${e.message}` : (e?.message || 'onbekend');
+        console.error(`[ai-suggest] batch ${batchIdx + 1}/${batches.length} fout:`, msg);
+        return { ok: false, error: msg, batchIdx };
+      }
+    }
+
+    // Concurrency-cap: max N calls tegelijk. Simpele windowed dispatch.
+    for (let start = 0; start < batches.length; start += MAX_CONCURRENT_CALLS) {
+      const slice = batches.slice(start, start + MAX_CONCURRENT_CALLS);
+      const promises = slice.map((batch, i) => runBatch(batch, start + i));
+      const results = await Promise.allSettled(promises);
+      for (const r of results) {
+        if (r.status !== 'fulfilled') {
+          errors.push({ batch: '?', message: 'Promise rejected: ' + (r.reason?.message || 'onbekend') });
+          continue;
+        }
+        const { ok, output, error, batchIdx } = r.value;
+        if (!ok) { errors.push({ batch: batchIdx + 1, message: error }); continue; }
         const suggestions = Array.isArray(output?.suggestions) ? output.suggestions : [];
         for (const s of suggestions) {
           const name = String(s.counterparty || '').trim();
-          if (!name || !namesToSuggest.has(name)) continue;  // model wijkt af → skip
-
+          if (!name || !namesToSuggest.has(name)) continue;
           let slug = String(s.category_slug || '').trim();
           if (!catBySlug.has(slug)) {
-            // Model gaf onbekende slug → fallback op 'overig'.
             invalidSlugFallback++;
             slug = 'overig';
           }
@@ -221,11 +257,6 @@ export default async function handler(req, res) {
           const reason = String(s.reason || '').slice(0, 200);
           allSuggestions.set(name, { slug, confidence: conf, reason });
         }
-      } catch (e) {
-        const msg = e instanceof AnthropicClientError ? `${e.code}: ${e.message}` : (e?.message || 'onbekend');
-        console.error(`[ai-suggest] batch ${bi + 1}/${batches.length} fout:`, msg);
-        errors.push({ batch: bi + 1, message: msg });
-        // Ga door met volgende batches; partial success is beter dan alles droppen.
       }
     }
 
