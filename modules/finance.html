@@ -18879,6 +18879,26 @@
 
   // ─── AI-suggest handlers ─────────────────────────────────────────────────
 
+  // Helper: parse response robuust. Als de server GEEN JSON teruggeeft
+  // (bv. Vercel platte-tekst "An error occurred with your deployment" bij
+  // function-timeout of infra-crash), fall back op text() + throw met
+  // leesbare foutmelding. Voorkomt "Unexpected token 'A'"-crashes.
+  async function _expApiJson(r) {
+    const ctype = r.headers.get('content-type') || '';
+    if (!ctype.toLowerCase().includes('application/json')) {
+      const txt = await r.text().catch(() => '');
+      const short = txt.length > 200 ? txt.slice(0, 200) + '…' : txt;
+      if (r.status === 504) throw new Error('Serverless-timeout (60s). Endpoint is te lang bezig — probeer opnieuw of split het werk.');
+      if (r.status >= 500)  throw new Error(`Server-fout ${r.status}: ${short || 'geen body'}`);
+      throw new Error(`Onverwacht response-formaat (HTTP ${r.status}, content-type=${ctype}): ${short}`);
+    }
+    let d;
+    try { d = await r.json(); }
+    catch (e) { throw new Error('Response is geen geldig JSON: ' + e.message); }
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    return d;
+  }
+
   async function onExpAiSuggestGenerate() {
     const btn = document.getElementById('expAiSuggestBtn');
     const status = document.getElementById('expAiStatus');
@@ -18889,8 +18909,7 @@
       const r = await window.AgentShared.apiFetch('/api/finance-expenses-ai-suggest', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
       });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      const d = await _expApiJson(r);
       const msg = `Klaar: ${d.counterparties_suggested} tegenpartijen voorzien van suggestie (${d.calls} API-calls, ~${d.tokens_used_estimate} tokens). ${d.invalid_slug_fallback_count} fallbacks op 'overig'. ${(d.errors && d.errors.length) ? d.errors.length + ' fout(en) — check console.' : ''}`;
       if (status) status.textContent = msg;
       window.AgentShared?.showToast?.('AI-suggesties gegenereerd', 'success');
@@ -18914,8 +18933,7 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ counterparty: cp }),
       });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      const d = await _expApiJson(r);
       window.AgentShared?.showToast?.(`Bevestigd: ${d.tx_rows_updated} tx + rule aangemaakt`, 'success');
       await loadExpensesData();
     } catch (err) {
@@ -18940,8 +18958,7 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ min_confidence: thr }),
       });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      const d = await _expApiJson(r);
       window.AgentShared?.showToast?.(`Bulk bevestigd: ${d.confirmed_counterparties.length} tegenpartijen, ${d.tx_rows_updated} tx, ${d.rules_created} rules`, 'success');
       if (d.errors && d.errors.length) console.warn('[ai-bulk-confirm] errors:', d.errors);
       await loadExpensesData();
