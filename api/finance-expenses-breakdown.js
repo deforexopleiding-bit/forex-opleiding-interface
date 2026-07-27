@@ -71,7 +71,8 @@ export default async function handler(req, res) {
     }
 
     // Fetch categorisaties (VÓÓR filter, want interne-overboeking-filter heeft
-    // categorie-info nodig om tx te herkennen).
+    // categorie-info nodig om tx te herkennen). ai_suggest EXPLICIET UITSLUITEN:
+    // die zijn voorstellen, tellen niet mee in totaal/breakdown.
     const cats = [];
     if (txs.length) {
       const ids = txs.map(t => t.id);
@@ -79,8 +80,9 @@ export default async function handler(req, res) {
         const slice = ids.slice(i, i + 500);
         const { data } = await supabaseAdmin
           .from('transaction_categorizations')
-          .select('camt_transaction_id, category_id')
-          .in('camt_transaction_id', slice);
+          .select('camt_transaction_id, category_id, source')
+          .in('camt_transaction_id', slice)
+          .in('source', ['rule', 'manual']);   // ← geen ai_suggest
         cats.push(...(data || []));
       }
     }

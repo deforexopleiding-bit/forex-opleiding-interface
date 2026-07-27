@@ -16,6 +16,7 @@ import {
   sortCounterparties,
   filterTransactionsForBreakdown,
   computeBreakdown,
+  aiSuggestionsByCounterparty,
 } from '../api/_lib/expenses-grouping.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────
@@ -431,4 +432,78 @@ test('computeBreakdown: interne categorie verschijnt NIET in de output-lijst', (
   assert.equal(internal, undefined, 'is_internal categorie mag niet in breakdown output');
   const mkt = bd.categories.find(c => c.id === 'cat-marketing');
   assert.equal(mkt.total_cents, -10000);
+});
+
+// ── AI-suggest: ai_suggest telt NIET mee in consensus ─────────────────────
+
+test('groupByCounterparty: ai_suggest wordt overgeslagen in catCounts', () => {
+  const txs = [
+    mkTx('t1', 'Meta', -100, '2026-01-01'),
+    mkTx('t2', 'Meta', -200, '2026-01-02'),
+    mkTx('t3', 'Meta', -300, '2026-01-03'),
+  ];
+  const catByTxId = new Map([
+    ['t1', { category_id: 'cat-marketing', source: 'ai_suggest' }],
+    ['t2', { category_id: 'cat-marketing', source: 'ai_suggest' }],
+    ['t3', { category_id: 'cat-marketing', source: 'ai_suggest' }],
+  ]);
+  const groups = groupByCounterparty(txs, catByTxId);
+  const g = groups.get('Meta');
+  assert.equal(g.catCounts.size, 0, 'ai_suggest mag niet in catCounts komen');
+  assert.equal(g.count, 3, 'tx-count blijft correct (aggregatie werkt)');
+  assert.equal(g.total, -600);
+});
+
+test('buildCounterpartyRows: rij zonder rule/manual (alleen ai_suggest) heeft category=null', () => {
+  const txs = [mkTx('t1', 'Meta', -100, '2026-01-01')];
+  const catByTxId = new Map([
+    ['t1', { category_id: 'cat-marketing', source: 'ai_suggest' }],
+  ]);
+  const groups = groupByCounterparty(txs, catByTxId);
+  const rows = buildCounterpartyRows(groups, CAT_META, {});
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].category, null, 'ai_suggest telt NIET als bevestigde categorie');
+});
+
+// ── aiSuggestionsByCounterparty: aggregatie per counterparty ──────────────
+
+test('aiSuggestionsByCounterparty: mode-category + avg confidence per counterparty', () => {
+  const txs = [
+    mkTx('t1', 'Meta', -100, '2026-01-01'),
+    mkTx('t2', 'Meta', -200, '2026-01-02'),
+    mkTx('t3', 'Meta', -300, '2026-01-03'),
+  ];
+  const aiSuggestByTxId = new Map([
+    ['t1', { category_id: 'cat-marketing', ai_confidence: 0.9, ai_reason: 'Meta = ads platform' }],
+    ['t2', { category_id: 'cat-marketing', ai_confidence: 0.8, ai_reason: 'Meta = ads platform' }],
+    ['t3', { category_id: 'cat-marketing', ai_confidence: 0.85, ai_reason: 'Meta = ads platform' }],
+  ]);
+  const out = aiSuggestionsByCounterparty(txs, aiSuggestByTxId);
+  assert.equal(out.size, 1);
+  const meta = out.get('Meta');
+  assert.equal(meta.category_id, 'cat-marketing');
+  assert.equal(meta.tx_count, 3);
+  assert.ok(meta.avg_confidence >= 0.84 && meta.avg_confidence <= 0.86);
+  assert.equal(meta.sample_reason, 'Meta = ads platform');
+});
+
+test('aiSuggestionsByCounterparty: tegenpartijen zonder ai_suggest zijn niet in output', () => {
+  const txs = [mkTx('t1', 'Meta', -100, '2026-01-01')];
+  const aiSuggestByTxId = new Map();
+  const out = aiSuggestionsByCounterparty(txs, aiSuggestByTxId);
+  assert.equal(out.size, 0);
+});
+
+test('aiSuggestionsByCounterparty: bij tie op cnt wint hoogste avg confidence', () => {
+  const txs = [
+    mkTx('t1', 'X', -1, '2026-01-01'),
+    mkTx('t2', 'X', -1, '2026-01-01'),
+  ];
+  const aiSuggestByTxId = new Map([
+    ['t1', { category_id: 'cat-a', ai_confidence: 0.6, ai_reason: 'A' }],
+    ['t2', { category_id: 'cat-b', ai_confidence: 0.9, ai_reason: 'B' }],
+  ]);
+  const out = aiSuggestionsByCounterparty(txs, aiSuggestByTxId);
+  const x = out.get('X');
+  assert.equal(x.category_id, 'cat-b', 'tie → hoogste confidence wint');
 });
