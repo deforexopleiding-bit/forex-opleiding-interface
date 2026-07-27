@@ -2649,6 +2649,78 @@
       .pl-act { min-height: 44px; padding: 8px 12px; font-size: 13px; }
       .pl-row-body { grid-template-columns: 1fr; }
     }
+
+    /* ── Uitgaven-view (PR 1b) — desktop-basis. Mobiel verderop scoped. ── */
+    #view-uitgaven .exp-cp-picker,
+    #view-uitgaven .exp-tx-picker {
+      background: var(--bg-elev, #fff);
+      border: 1px solid var(--border, #d8dee2);
+      border-radius: 8px;
+      padding: 4px 8px;
+      color: var(--text, #1a2229);
+    }
+    #view-uitgaven .exp-cp-picker:disabled,
+    #view-uitgaven .exp-tx-picker:disabled { opacity: 0.5; cursor: wait; }
+
+    /* Mobiel — scope ALLEEN naar #view-uitgaven, laat andere finance-tabs met rust. */
+    @media (max-width: 720px) {
+      #view-uitgaven { padding: 12px 12px calc(env(safe-area-inset-bottom) + 20px); }
+      #view-uitgaven #expKpiStrip {
+        grid-template-columns: none !important;
+        display: flex !important;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        gap: 8px;
+        margin: 0 -12px;
+        padding: 0 12px 4px;
+      }
+      #view-uitgaven #expKpiStrip::-webkit-scrollbar { display: none; }
+      #view-uitgaven #expKpiStrip > div {
+        flex: 0 0 160px !important;
+        min-height: 64px;
+      }
+      #view-uitgaven .fin-input,
+      #view-uitgaven .exp-cp-picker,
+      #view-uitgaven .exp-tx-picker,
+      #view-uitgaven select,
+      #view-uitgaven input[type="date"],
+      #view-uitgaven input[type="text"] {
+        min-height: 44px;
+        font-size: 16px;   /* iOS zoom-preventie */
+        padding: 8px 12px;
+      }
+      #view-uitgaven button,
+      #view-uitgaven .sr-abtn { min-height: 44px; }
+      /* Filter-rij: wrap netjes. */
+      #view-uitgaven [data-exp-filters] {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      #view-uitgaven [data-exp-filters] > * { flex: 1 1 140px; min-width: 0; }
+      /* Tabellen: horizontaal scroll ipv overflow van de pagina. */
+      #view-uitgaven .data-table-wrap,
+      #view-uitgaven [data-exp-table-wrap] {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 -12px;
+        padding: 0 12px;
+      }
+      #view-uitgaven [data-exp-table-wrap] table { min-width: 620px; }
+      /* Detail-modal: full-screen bottom-sheet stijl. */
+      #expDetailModal .modal-content,
+      #expDetailModal .sr-modal-content,
+      #expDetailModal > div {
+        max-width: 100vw !important;
+        max-height: 100dvh !important;
+        width: 100vw !important;
+        height: 100dvh !important;
+        border-radius: 0 !important;
+        margin: 0 !important;
+      }
+      #expDetailBody { max-height: calc(100dvh - 60px); overflow-y: auto; }
+    }
   </style>
 
   <!-- ================================================================
@@ -4119,6 +4191,7 @@
     <button class="sr-seg" id="navKlanten" data-view="klanten" type="button">Klanten</button>
     <button class="sr-seg" id="navWanbetalers" data-view="wanbetalers" type="button" style="display:none">Wanbetalers</button>
     <button class="sr-seg" id="navCamtBank" data-view="camtbank" type="button" style="display:none">Bank</button>
+    <button class="sr-seg" id="navExpenses" data-view="uitgaven" type="button" style="display:none">Uitgaven</button>
     <button class="sr-seg" data-view="roadmap" type="button">Roadmap</button>
     <!-- Groep D: Instellingen — knop verborgen sinds Agent center. Joost AI /
          WhatsApp Templates / Afdeling-config staan nu in /modules/agent-center.html
@@ -4460,6 +4533,122 @@
             </button>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Uitgaven-view (PR 1b — zakelijke uitgaven-analyse) =====
+       Sub-view voor het categoriseren van CAMT + PayPal-transacties per
+       tegenpartij. Bewezen data via saldo-validatie in PR 1a (#960).
+       Gate: finance.expenses.view / finance.expenses.category.edit. -->
+  <div id="view-uitgaven" hidden>
+    <div id="expensesLocked" hidden style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:14px 16px;margin-bottom:14px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:6px">Geen toegang tot uitgaven-analyse</div>
+      <div style="font-size:12.5px">Je mist de rechten <code>finance.expenses.view</code>. Vraag een beheerder om toegang.</div>
+    </div>
+    <div id="expensesMain" hidden>
+      <!-- Header + PayPal-upload knop -->
+      <div class="exp-header" style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+        <div>
+          <h2 style="margin:0;font-size:20px;font-weight:700">Zakelijke uitgaven</h2>
+          <p style="margin:2px 0 0;font-size:12.5px;color:var(--text-dim)">Categoriseer per tegenpartij — regels worden ook op toekomstige transacties toegepast.</p>
+        </div>
+        <div class="exp-upload-wrap" id="expUploadWrap" hidden style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <input type="file" id="paypalUploadInput" accept=".csv,.CSV,text/csv" style="display:none" />
+          <button class="sr-abtn primary" id="paypalUploadBtn" type="button"><i class="ti ti-upload"></i> PayPal-CSV uploaden</button>
+          <span id="paypalUploadStatus" style="font-size:12.5px;color:var(--text-dim)"></span>
+        </div>
+      </div>
+
+      <!-- KPI-strip: totaal uitgaven / totaal ongecategoriseerd / #tegenpartijen -->
+      <div class="exp-kpi-strip" id="expKpiStrip" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
+        <div class="exp-kpi-card"><div class="exp-kpi-lbl">Totaal uitgaven</div><div class="exp-kpi-val" id="expKpiTotal">—</div><div class="exp-kpi-sub" id="expKpiPeriod">—</div></div>
+        <div class="exp-kpi-card"><div class="exp-kpi-lbl">Nog te categoriseren</div><div class="exp-kpi-val" id="expKpiUncat">—</div><div class="exp-kpi-sub" id="expKpiUncatSub">—</div></div>
+        <div class="exp-kpi-card"><div class="exp-kpi-lbl">Tegenpartijen</div><div class="exp-kpi-val" id="expKpiCpCount">—</div><div class="exp-kpi-sub">unieke</div></div>
+      </div>
+
+      <!-- Filters -->
+      <div class="exp-filters" id="expFilters" data-exp-filters style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px">
+        <label class="exp-filter-lbl">Periode:
+          <input type="date" id="expFilterFrom" class="fin-input" />
+          <span style="color:var(--text-faint);font-size:11px">tot</span>
+          <input type="date" id="expFilterTo" class="fin-input" />
+        </label>
+        <label class="exp-filter-lbl">Bron:
+          <select id="expFilterSource" class="fin-input">
+            <option value="all">Alle</option>
+            <option value="camt">CAMT (ING)</option>
+            <option value="paypal">PayPal</option>
+          </select>
+        </label>
+        <label class="exp-filter-lbl">Categorie:
+          <select id="expFilterCategory" class="fin-input"><option value="">Alle</option></select>
+        </label>
+        <label class="exp-filter-lbl" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="expFilterUncat" /> Alleen ongecategoriseerd
+        </label>
+        <label class="exp-filter-lbl" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="expFilterInternal" /> Toon vasthoudingen/intern
+        </label>
+        <label class="exp-filter-lbl" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="expFilterIncoming" /> Toon inkomsten
+        </label>
+      </div>
+
+      <!-- Tegenpartijen-lijst (hoofdweergave) -->
+      <div class="exp-cp-wrap" style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:22px">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg-elev);border-bottom:1px solid var(--border)">
+          <div style="font-size:13px;font-weight:600">Tegenpartijen <span id="expCpCount" style="font-weight:400;color:var(--text-dim);font-size:12px"></span></div>
+          <button class="sr-abtn" id="expRefreshBtn" type="button"><i class="ti ti-refresh"></i> Vernieuwen</button>
+        </div>
+        <div class="data-table-wrap" data-exp-table-wrap style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+          <table class="exp-cp-table" style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--bg-elev-2,var(--bg-elev))">
+                <th style="text-align:left;padding:8px 12px;font-size:11px;text-transform:uppercase;color:var(--text-dim);font-weight:600">Tegenpartij</th>
+                <th style="text-align:right;padding:8px 12px;font-size:11px;text-transform:uppercase;color:var(--text-dim);font-weight:600;white-space:nowrap">Totaal</th>
+                <th style="text-align:right;padding:8px 12px;font-size:11px;text-transform:uppercase;color:var(--text-dim);font-weight:600">Aantal</th>
+                <th style="text-align:left;padding:8px 12px;font-size:11px;text-transform:uppercase;color:var(--text-dim);font-weight:600;min-width:200px">Categorie</th>
+                <th style="width:80px;padding:8px 12px"></th>
+              </tr>
+            </thead>
+            <tbody id="expCpTbody"><tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-dim)">Laden…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Breakdown per categorie -->
+      <div class="exp-breakdown-wrap" style="border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <div style="padding:10px 14px;background:var(--bg-elev);border-bottom:1px solid var(--border);font-size:13px;font-weight:600">Breakdown per categorie</div>
+        <div class="data-table-wrap" data-exp-table-wrap style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--bg-elev-2,var(--bg-elev))">
+                <th style="text-align:left;padding:8px 12px;font-size:11px;text-transform:uppercase;color:var(--text-dim);font-weight:600">Categorie</th>
+                <th style="text-align:right;padding:8px 12px;font-size:11px;text-transform:uppercase;color:var(--text-dim);font-weight:600;white-space:nowrap">Bedrag</th>
+                <th style="text-align:right;padding:8px 12px;font-size:11px;text-transform:uppercase;color:var(--text-dim);font-weight:600">%</th>
+                <th style="text-align:right;padding:8px 12px;font-size:11px;text-transform:uppercase;color:var(--text-dim);font-weight:600">Aantal</th>
+              </tr>
+            </thead>
+            <tbody id="expBreakdownTbody"><tr><td colspan="4" style="padding:24px;text-align:center;color:var(--text-dim)">Laden…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Uitgaven-detail-modal: transacties per tegenpartij + manual override -->
+  <div id="expDetailModal" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal-card" style="max-width:900px">
+      <div class="modal-header">
+        <div class="modal-title" id="expDetailTitle">Transacties</div>
+        <button class="modal-close" type="button" onclick="closeExpDetailModal()">&#x2715;</button>
+      </div>
+      <div class="modal-body" id="expDetailBody" style="max-height:70vh;overflow-y:auto">
+        <div style="color:var(--text-faint);padding:14px;text-align:center;font-size:12.5px">Laden…</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" type="button" onclick="closeExpDetailModal()">Sluiten</button>
       </div>
     </div>
   </div>
@@ -6474,6 +6663,7 @@
     document.getElementById('view-facturen').hidden = (view !== 'facturen');
     { const el = document.getElementById('view-creditnotes'); if (el) el.hidden = (view !== 'creditnotes'); }
     document.getElementById('view-camtbank').hidden = (view !== 'camtbank');
+    { const el = document.getElementById('view-uitgaven'); if (el) el.hidden = (view !== 'uitgaven'); }
     document.getElementById('view-bank').hidden = (view !== 'bank');
     document.getElementById('view-roadmap').hidden = (view !== 'roadmap');
     if (wbWrap) wbWrap.hidden = (view !== 'wanbetalers');
@@ -6537,6 +6727,11 @@
       _camtBankLoadedOnce = true;
       if (canBankBalanceView) loadCamtBalance();
       if (canBankTxView) { loadCamtBank(); loadCamtStatementsList(); }
+    }
+    // Uitgaven-view (PR 1b): lazy-init bij eerste opening.
+    if (view === 'uitgaven' && !_expensesInited) {
+      _expensesInited = true;
+      if (canExpensesView) initExpensesView();
     }
   }
 
@@ -18610,6 +18805,350 @@
   let _inboxLoadedOnce = false;
   let canDunningView = false, canDunningConfig = false, canDunningExecute = false;
   let _dunningLoadedOnce = false;
+  // PR 1b — Uitgaven-view permissies + lazy-init guard
+  let canExpensesView = false, canExpensesEdit = false;
+  let _expensesInited = false;
+  const _expensesState = { categories: [], counterparties: [], currentCp: null };
+
+  // ── Uitgaven-view: init + rendering ────────────────────────────────────────
+  async function initExpensesView() {
+    const locked = document.getElementById('expensesLocked');
+    const main   = document.getElementById('expensesMain');
+    if (!canExpensesView) {
+      if (locked) locked.hidden = false;
+      if (main) main.hidden = true;
+      return;
+    }
+    if (locked) locked.hidden = true;
+    if (main) main.hidden = false;
+
+    // Upload-knop alleen tonen als edit-permissie aanwezig.
+    const upWrap = document.getElementById('expUploadWrap');
+    if (upWrap) upWrap.hidden = !canExpensesEdit;
+
+    // Categorieën lazy-load (voor de picker + breakdown-labels).
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-expenses-categories');
+      const d = await r.json();
+      if (r.ok) _expensesState.categories = d.categories || [];
+      // Vul filter-select.
+      const sel = document.getElementById('expFilterCategory');
+      if (sel) {
+        sel.innerHTML = '<option value="">Alle</option>' +
+          _expensesState.categories.map(c => `<option value="${c.id}">${_esc(c.label)}</option>`).join('');
+      }
+    } catch (e) { console.warn('[expenses] categories load:', e.message); }
+
+    // Wire filters + buttons (1x).
+    ['expFilterFrom','expFilterTo','expFilterSource','expFilterCategory','expFilterUncat','expFilterInternal','expFilterIncoming']
+      .forEach(id => {
+        const el = document.getElementById(id);
+        if (el && !el._expWired) { el._expWired = true; el.addEventListener('change', loadExpensesData); }
+      });
+    const refresh = document.getElementById('expRefreshBtn');
+    if (refresh && !refresh._expWired) { refresh._expWired = true; refresh.addEventListener('click', loadExpensesData); }
+
+    // Wire PayPal-upload.
+    const btn = document.getElementById('paypalUploadBtn');
+    const input = document.getElementById('paypalUploadInput');
+    if (btn && !btn._expWired) {
+      btn._expWired = true;
+      btn.addEventListener('click', () => input && input.click());
+    }
+    if (input && !input._expWired) {
+      input._expWired = true;
+      input.addEventListener('change', onPaypalFile);
+    }
+
+    await loadExpensesData();
+  }
+
+  function _expensesFilterParams() {
+    const p = new URLSearchParams();
+    const from = document.getElementById('expFilterFrom')?.value;
+    const to   = document.getElementById('expFilterTo')?.value;
+    const src  = document.getElementById('expFilterSource')?.value || 'all';
+    const cat  = document.getElementById('expFilterCategory')?.value || '';
+    const unc  = document.getElementById('expFilterUncat')?.checked;
+    const inte = document.getElementById('expFilterInternal')?.checked;
+    const inc  = document.getElementById('expFilterIncoming')?.checked;
+    if (from) p.set('from', from);
+    if (to)   p.set('to', to);
+    if (src && src !== 'all') p.set('source', src);
+    if (cat)  p.set('category', cat);
+    if (unc)  p.set('uncategorized', '1');
+    if (inte) p.set('include_internal', '1');
+    if (inc)  p.set('include_incoming', '1');
+    return p;
+  }
+
+  async function loadExpensesData() {
+    const params = _expensesFilterParams();
+    try {
+      const [cpR, brR] = await Promise.all([
+        window.AgentShared.apiFetch('/api/finance-expenses-counterparties?' + params.toString()),
+        window.AgentShared.apiFetch('/api/finance-expenses-breakdown?' + params.toString()),
+      ]);
+      const cpD = await cpR.json();
+      const brD = await brR.json();
+      if (!cpR.ok) throw new Error(cpD?.error || 'counterparties fetch');
+      if (!brR.ok) throw new Error(brD?.error || 'breakdown fetch');
+      _expensesState.counterparties = cpD.counterparties || [];
+      renderExpCounterparties(cpD);
+      renderExpBreakdown(brD);
+      renderExpKpis(cpD, brD);
+    } catch (e) {
+      console.error('[expenses] load:', e);
+      const tb = document.getElementById('expCpTbody');
+      if (tb) tb.innerHTML = `<tr><td colspan="5" style="padding:20px;color:#dc2626">Fout: ${_esc(e.message)}</td></tr>`;
+    }
+  }
+
+  function _fmtEurCents(c) {
+    const n = Number(c) || 0;
+    return '€ ' + (n / 100).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function _esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[ch]));
+  }
+
+  function renderExpKpis(cpD, brD) {
+    const total = document.getElementById('expKpiTotal');
+    const uncat = document.getElementById('expKpiUncat');
+    const uncatSub = document.getElementById('expKpiUncatSub');
+    const cpCount = document.getElementById('expKpiCpCount');
+    const period = document.getElementById('expKpiPeriod');
+    if (total) total.textContent = _fmtEurCents(brD.total_expenses_cents || 0);
+    if (uncat) uncat.textContent = _fmtEurCents(brD.uncategorized?.total_cents || 0);
+    if (uncatSub) uncatSub.textContent = (brD.uncategorized?.tx_count || 0) + ' tx (' + (brD.uncategorized?.pct || 0) + '%)';
+    if (cpCount) cpCount.textContent = (cpD.total_count || 0);
+    if (period) {
+      const p = brD.period || {};
+      period.textContent = (p.from || '—') + ' → ' + (p.to || '—');
+    }
+    const cpCountLbl = document.getElementById('expCpCount');
+    if (cpCountLbl) cpCountLbl.textContent = '(' + (cpD.total_count || 0) + ')';
+  }
+
+  function renderExpCounterparties(d) {
+    const tb = document.getElementById('expCpTbody');
+    if (!tb) return;
+    const rows = d.counterparties || [];
+    if (!rows.length) {
+      tb.innerHTML = `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-dim)">Geen tegenpartijen.</td></tr>`;
+      return;
+    }
+    const cats = _expensesState.categories;
+    const catOptions = ['<option value="">— kies —</option>']
+      .concat(cats.map(c => `<option value="${c.id}">${_esc(c.label)}</option>`))
+      .join('');
+    tb.innerHTML = rows.map(r => {
+      const sign = r.total_cents < 0 ? 'color:#dc2626' : 'color:#059669';
+      const catBadge = r.category
+        ? `<span style="display:inline-block;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600;background:${r.category.color}22;color:${r.category.color};border:1px solid ${r.category.color}55">${_esc(r.category.label)}${r.category_source === 'manual' ? ' <span title="Manual override">*</span>' : ''}</span>`
+        : `<span style="font-size:11.5px;color:var(--text-dim)">niet gecategoriseerd</span>`;
+      const currentId = r.category ? r.category.id : '';
+      const picker = canExpensesEdit
+        ? `<select class="fin-input exp-cp-picker" data-cp="${_esc(r.name)}" style="min-width:200px;font-size:12.5px">${catOptions.replace('value="' + currentId + '"', 'value="' + currentId + '" selected')}</select>`
+        : catBadge;
+      return `<tr data-cp="${_esc(r.name)}">
+        <td style="padding:10px 12px;border-bottom:1px solid var(--border);"><a href="#" class="exp-cp-open" data-cp="${_esc(r.name)}" style="color:var(--text);text-decoration:none;font-weight:500">${_esc(r.name)}</a><div style="font-size:11px;color:var(--text-faint)">${_esc(r.first_date || '')} → ${_esc(r.last_date || '')}</div></td>
+        <td style="padding:10px 12px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums;font-weight:600;${sign}">${_fmtEurCents(r.total_cents)}</td>
+        <td style="padding:10px 12px;border-bottom:1px solid var(--border);text-align:right;color:var(--text-dim)">${r.tx_count}</td>
+        <td style="padding:10px 12px;border-bottom:1px solid var(--border);">${picker}</td>
+        <td style="padding:10px 12px;border-bottom:1px solid var(--border);text-align:right"><button class="sr-abtn exp-cp-open" data-cp="${_esc(r.name)}" type="button" title="Toon transacties"><i class="ti ti-list"></i></button></td>
+      </tr>`;
+    }).join('');
+    // Wire pickers + open-buttons.
+    tb.querySelectorAll('.exp-cp-picker').forEach(sel => {
+      sel.addEventListener('change', onExpCpCategoryChange);
+    });
+    tb.querySelectorAll('.exp-cp-open').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        openExpDetailModal(el.getAttribute('data-cp'));
+      });
+    });
+  }
+
+  function renderExpBreakdown(d) {
+    const tb = document.getElementById('expBreakdownTbody');
+    if (!tb) return;
+    const cats = d.categories || [];
+    const uncat = d.uncategorized || { total_cents: 0, tx_count: 0, pct: 0 };
+    const rows = cats.map(c => {
+      const sign = c.total_cents < 0 ? 'color:#dc2626' : 'color:var(--text)';
+      return `<tr>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border)"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${c.color || '#94a3b8'};margin-right:8px;vertical-align:middle"></span>${_esc(c.label)}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums;${sign}">${_fmtEurCents(c.total_cents)}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border);text-align:right;color:var(--text-dim)">${c.pct}%</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border);text-align:right;color:var(--text-dim)">${c.tx_count}</td>
+      </tr>`;
+    }).join('');
+    const uncatRow = `<tr style="background:rgba(245,158,11,0.06)">
+      <td style="padding:8px 12px;font-weight:600"><i class="ti ti-alert-circle" style="color:#f59e0b;margin-right:6px"></i>Nog te categoriseren</td>
+      <td style="padding:8px 12px;text-align:right;font-variant-numeric:tabular-nums;color:#b45309;font-weight:600">${_fmtEurCents(uncat.total_cents)}</td>
+      <td style="padding:8px 12px;text-align:right;color:#b45309">${uncat.pct}%</td>
+      <td style="padding:8px 12px;text-align:right;color:#b45309">${uncat.tx_count}</td>
+    </tr>`;
+    tb.innerHTML = uncatRow + rows;
+  }
+
+  async function onExpCpCategoryChange(e) {
+    const sel = e.currentTarget;
+    const cp = sel.getAttribute('data-cp');
+    const catId = sel.value || null;
+    sel.disabled = true;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-expenses-set-counterparty-category', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ counterparty: cp, category_id: catId }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast?.(`Categorie toegepast op ${d.applied_to_transactions} tx (${d.preserved_manual_overrides || 0} manual overrides behouden)`, 'success');
+      await loadExpensesData();
+    } catch (err) {
+      window.AgentShared?.showToast?.('Fout: ' + err.message, 'error');
+    } finally {
+      sel.disabled = false;
+    }
+  }
+
+  async function openExpDetailModal(cpName) {
+    _expensesState.currentCp = cpName;
+    const modal = document.getElementById('expDetailModal');
+    const title = document.getElementById('expDetailTitle');
+    const body  = document.getElementById('expDetailBody');
+    if (title) title.textContent = 'Transacties · ' + cpName;
+    if (body)  body.innerHTML = '<div style="padding:14px;text-align:center;color:var(--text-dim)">Laden…</div>';
+    if (modal) modal.classList.remove('hidden');
+
+    const params = _expensesFilterParams();
+    params.set('counterparty', cpName);
+    params.set('limit', '500');
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-expenses-list?' + params.toString());
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      renderExpDetailBody(d);
+    } catch (e) {
+      if (body) body.innerHTML = `<div style="padding:14px;color:#dc2626">Fout: ${_esc(e.message)}</div>`;
+    }
+  }
+  function closeExpDetailModal() {
+    const modal = document.getElementById('expDetailModal');
+    if (modal) modal.classList.add('hidden');
+    _expensesState.currentCp = null;
+  }
+  // Expose voor onclick-attribuut in HTML.
+  window.closeExpDetailModal = closeExpDetailModal;
+
+  function renderExpDetailBody(d) {
+    const body = document.getElementById('expDetailBody');
+    if (!body) return;
+    const items = d.items || [];
+    if (!items.length) {
+      body.innerHTML = '<div style="padding:14px;text-align:center;color:var(--text-dim)">Geen transacties.</div>';
+      return;
+    }
+    const cats = _expensesState.categories;
+    const catOptions = ['<option value="">— geen override —</option>']
+      .concat(cats.map(c => `<option value="${c.id}">${_esc(c.label)}</option>`))
+      .join('');
+    body.innerHTML = `<div class="data-table-wrap" style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+        <thead><tr style="background:var(--bg-elev)">
+          <th style="text-align:left;padding:7px 10px;font-size:10.5px;text-transform:uppercase;color:var(--text-dim)">Datum</th>
+          <th style="text-align:right;padding:7px 10px;font-size:10.5px;text-transform:uppercase;color:var(--text-dim)">Bedrag</th>
+          <th style="text-align:left;padding:7px 10px;font-size:10.5px;text-transform:uppercase;color:var(--text-dim)">Type</th>
+          <th style="text-align:left;padding:7px 10px;font-size:10.5px;text-transform:uppercase;color:var(--text-dim)">Bron</th>
+          <th style="text-align:left;padding:7px 10px;font-size:10.5px;text-transform:uppercase;color:var(--text-dim)">Categorie${canExpensesEdit ? ' (override per tx)' : ''}</th>
+        </tr></thead>
+        <tbody>
+          ${items.map(t => {
+            const sign = t.amount_cents < 0 ? 'color:#dc2626' : 'color:#059669';
+            const currentId = t.category ? t.category.id : '';
+            const isManual = t.category_source === 'manual';
+            const badge = t.category
+              ? `<span style="display:inline-block;padding:1px 7px;border-radius:8px;font-size:10.5px;font-weight:600;background:${t.category.color}22;color:${t.category.color}">${_esc(t.category.label)}${isManual ? ' *' : ''}</span>`
+              : '<span style="color:var(--text-faint);font-size:11px">—</span>';
+            const cell = canExpensesEdit
+              ? `<div style="display:flex;gap:6px;align-items:center">${badge}<select class="fin-input exp-tx-picker" data-tx="${t.id}" style="min-width:160px;font-size:11.5px">${catOptions.replace('value="' + currentId + '"', 'value="' + currentId + '" selected')}</select></div>`
+              : badge;
+            return `<tr>
+              <td style="padding:6px 10px;border-bottom:1px solid var(--border)">${_esc(t.booking_date)}</td>
+              <td style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums;${sign}">${_fmtEurCents(t.amount_cents)} ${_esc(t.currency || '')}</td>
+              <td style="padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-dim);font-size:11.5px">${_esc(t.transaction_code || '')}</td>
+              <td style="padding:6px 10px;border-bottom:1px solid var(--border);font-size:11.5px"><span style="text-transform:uppercase;font-weight:600;color:var(--text-dim)">${_esc(t.source)}</span></td>
+              <td style="padding:6px 10px;border-bottom:1px solid var(--border)">${cell}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+    body.querySelectorAll('.exp-tx-picker').forEach(sel => {
+      sel.addEventListener('change', onExpTxCategoryChange);
+    });
+  }
+
+  async function onExpTxCategoryChange(e) {
+    const sel = e.currentTarget;
+    const txId = sel.getAttribute('data-tx');
+    const catId = sel.value || null;
+    sel.disabled = true;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-expenses-set-category', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ camt_transaction_id: txId, category_id: catId }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast?.('Override opgeslagen', 'success');
+      // Refresh detail-modal + counterparties-lijst.
+      if (_expensesState.currentCp) await openExpDetailModal(_expensesState.currentCp);
+      await loadExpensesData();
+    } catch (err) {
+      window.AgentShared?.showToast?.('Fout: ' + err.message, 'error');
+    } finally {
+      sel.disabled = false;
+    }
+  }
+
+  async function onPaypalFile(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const status = document.getElementById('paypalUploadStatus');
+    if (status) status.textContent = 'Uploaden…';
+    try {
+      const b64 = await new Promise((resolve, reject) => {
+        const rd = new FileReader();
+        rd.onload = () => resolve(String(rd.result || '').split(',')[1] || '');
+        rd.onerror = () => reject(new Error('Bestand lezen mislukt'));
+        rd.readAsDataURL(file);
+      });
+      const r = await window.AgentShared.apiFetch('/api/finance-bank-paypal-upload', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_name: file.name, csv_content_base64: b64 }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      const sv = d.saldo_validation || {};
+      const okMsg = sv.ok
+        ? `✓ Saldo klopt (diff €0,00)`
+        : `⚠️ Saldo diff: €${((sv.diff_cents || 0) / 100).toFixed(2)}`;
+      if (status) {
+        status.innerHTML = `<span style="color:${sv.ok ? '#059669' : '#dc2626'};font-weight:600">${okMsg}</span> · geïmporteerd ${d.num_inserted}, dedupe ${d.num_skipped_dedupe}, memo ${d.num_skipped_memo}, auto-cat ${d.auto_categorized || 0}`;
+      }
+      // Reset input zodat 2x zelfde bestand opnieuw upload'baar is.
+      e.target.value = '';
+      await loadExpensesData();
+    } catch (err) {
+      if (status) status.innerHTML = `<span style="color:#dc2626">Fout: ${_esc(err.message)}</span>`;
+      e.target.value = '';
+    }
+  }
+
   async function init() {
     try {
       await window._authSharedReady;
@@ -18635,6 +19174,12 @@
       canDunningView    = can('finance.dunning.view');
       canDunningConfig  = can('finance.dunning.config');
       canDunningExecute = can('finance.dunning.execute');
+      // PR 1b — Uitgaven-view
+      canExpensesView = can('finance.expenses.view');
+      canExpensesEdit = can('finance.expenses.category.edit');
+      if (canExpensesView) {
+        const ne = document.getElementById('navExpenses'); if (ne) ne.style.display = '';
+      }
       // Beide Bank-tab buttons zichtbaar zodra de gebruiker minimaal één van beide heeft.
       if (canBankBalanceView || canBankTxView) {
         const ncb = document.getElementById('navCamtBank'); if (ncb) ncb.style.display = '';
@@ -18722,7 +19267,7 @@
           // ?conversation=<uuid> impliciet richten op inbox sub-tab.
           if (!initialSub && params.get('conversation')) _wbActiveSub = 'inbox';
           setView('wanbetalers');
-        } else if (initialTab && ['dashboard','facturen','klanten','camtbank','bank','roadmap'].includes(initialTab)) {
+        } else if (initialTab && ['dashboard','facturen','klanten','camtbank','uitgaven','bank','roadmap'].includes(initialTab)) {
           setView(initialTab);
         } else {
           // Geen tab OF onbekende/verborgen tab (waaronder legacy ?tab=instellingen

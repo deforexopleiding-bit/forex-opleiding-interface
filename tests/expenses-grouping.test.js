@@ -1,0 +1,358 @@
+// tests/expenses-grouping.test.js
+//
+// Unit-tests voor api/_lib/expenses-grouping.js. Pure functies zonder
+// Supabase — deterministisch en snel. Deze helpers dragen de belangrijkste
+// business-logica van de uitgaven-analyse (grouping + consensus + filters
+// + sort + breakdown). Regressie hier = onjuiste bedragen in UI.
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  INTERNAL_NAMES,
+  EMPTY_NAME,
+  groupByCounterparty,
+  consensusCategoryForGroup,
+  buildCounterpartyRows,
+  sortCounterparties,
+  filterTransactionsForBreakdown,
+  computeBreakdown,
+} from '../api/_lib/expenses-grouping.js';
+
+// ── Fixtures ──────────────────────────────────────────────────────────────
+
+const CAT_META_ROWS = [
+  { id: 'cat-marketing', slug: 'marketing', label: 'Marketing & advertenties', color: '#f97316' },
+  { id: 'cat-software',  slug: 'software',  label: 'Software & abonnementen',  color: '#3b82f6' },
+  { id: 'cat-reis',      slug: 'reis',      label: 'Reis & verblijf',          color: '#10b981' },
+];
+const CAT_META = new Map(CAT_META_ROWS.map(c => [c.id, c]));
+
+function mkTx(id, name, cents, date, source = 'camt') {
+  return { id, counterparty_name: name, amount_cents: cents, booking_date: date, source };
+}
+
+// ── groupByCounterparty ───────────────────────────────────────────────────
+
+test('groupByCounterparty: 3 tx van dezelfde tegenpartij → 1 groep met total + count + date-range', () => {
+  const txs = [
+    mkTx('t1', 'Meta Platforms', -10000, '2026-01-05'),
+    mkTx('t2', 'Meta Platforms', -20000, '2026-01-12'),
+    mkTx('t3', 'Meta Platforms', -5000,  '2026-01-20'),
+  ];
+  const groups = groupByCounterparty(txs, new Map());
+  assert.equal(groups.size, 1);
+  const g = groups.get('Meta Platforms');
+  assert.equal(g.total, -35000);
+  assert.equal(g.count, 3);
+  assert.equal(g.first, '2026-01-05');
+  assert.equal(g.last,  '2026-01-20');
+});
+
+test('groupByCounterparty: 2 tegenpartijen → 2 groepen apart', () => {
+  const txs = [
+    mkTx('t1', 'Meta', -100, '2026-01-01'),
+    mkTx('t2', 'Google', -200, '2026-01-02'),
+    mkTx('t3', 'Meta', -50, '2026-01-03'),
+  ];
+  const groups = groupByCounterparty(txs, new Map());
+  assert.equal(groups.size, 2);
+  assert.equal(groups.get('Meta').total, -150);
+  assert.equal(groups.get('Google').total, -200);
+});
+
+test('groupByCounterparty: null/empty naam valt in "(leeg)"-bucket', () => {
+  const txs = [
+    mkTx('t1', null, -100, '2026-01-01'),
+    mkTx('t2', '',   -200, '2026-01-02'),
+    mkTx('t3', '   ', -300, '2026-01-03'),   // alleen whitespace
+  ];
+  const groups = groupByCounterparty(txs, new Map());
+  assert.equal(groups.size, 1);
+  assert.equal(groups.get(EMPTY_NAME).total, -600);
+  assert.equal(groups.get(EMPTY_NAME).count, 3);
+});
+
+test('groupByCounterparty: cat-counts + manualCount worden bijgehouden', () => {
+  const txs = [
+    mkTx('t1', 'Meta', -100, '2026-01-01'),
+    mkTx('t2', 'Meta', -100, '2026-01-02'),
+    mkTx('t3', 'Meta', -100, '2026-01-03'),
+  ];
+  const catByTxId = new Map([
+    ['t1', { category_id: 'cat-marketing', source: 'rule' }],
+    ['t2', { category_id: 'cat-marketing', source: 'rule' }],
+    ['t3', { category_id: 'cat-reis',      source: 'manual' }],  // uitzondering
+  ]);
+  const groups = groupByCounterparty(txs, catByTxId);
+  const g = groups.get('Meta');
+  assert.equal(g.catCounts.get('cat-marketing'), 2);
+  assert.equal(g.catCounts.get('cat-reis'), 1);
+  assert.equal(g.manualCount, 1);
+});
+
+// ── consensusCategoryForGroup ─────────────────────────────────────────────
+
+test('consensus: 3/3 zelfde categorie → 100% coverage, rule-source', () => {
+  const g = { count: 3, manualCount: 0, catCounts: new Map([['cat-marketing', 3]]) };
+  const c = consensusCategoryForGroup(g);
+  assert.equal(c.categoryId, 'cat-marketing');
+  assert.equal(c.source, 'rule');
+  assert.equal(c.coverage, 1);
+});
+
+test('consensus: 2/3 zelfde + 1 andere → 66% > 50%, wint', () => {
+  const g = { count: 3, manualCount: 0, catCounts: new Map([['cat-marketing', 2], ['cat-reis', 1]]) };
+  const c = consensusCategoryForGroup(g);
+  assert.equal(c.categoryId, 'cat-marketing');
+  assert.ok(c.coverage > 0.5);
+});
+
+test('consensus: 1/3 + 1/3 + 1/3 → geen consensus → null', () => {
+  const g = { count: 3, manualCount: 0, catCounts: new Map([['a', 1], ['b', 1], ['c', 1]]) };
+  const c = consensusCategoryForGroup(g);
+  assert.equal(c.categoryId, null);
+  assert.equal(c.source, null);
+});
+
+test('consensus: 3/3 en alle zijn manual → source=manual', () => {
+  const g = { count: 3, manualCount: 3, catCounts: new Map([['cat-reis', 3]]) };
+  const c = consensusCategoryForGroup(g);
+  assert.equal(c.source, 'manual');
+});
+
+test('consensus: 2 rule + 1 manual → source=rule (want manual != winning-count)', () => {
+  const g = { count: 3, manualCount: 1, catCounts: new Map([['cat-marketing', 2], ['cat-reis', 1]]) };
+  const c = consensusCategoryForGroup(g);
+  assert.equal(c.categoryId, 'cat-marketing');
+  assert.equal(c.source, 'rule');
+});
+
+test('consensus: lege catCounts → null', () => {
+  const g = { count: 5, manualCount: 0, catCounts: new Map() };
+  const c = consensusCategoryForGroup(g);
+  assert.equal(c.categoryId, null);
+  assert.equal(c.coverage, 0);
+});
+
+// ── buildCounterpartyRows: filters ────────────────────────────────────────
+
+test('filter default: verbergt (intern PayPal) + (leeg) + positieve netto', () => {
+  const groups = new Map([
+    ['Meta',            { total: -100, count: 1, first: '2026-01-01', last: '2026-01-01', catCounts: new Map(), manualCount: 0 }],
+    ['(intern PayPal)', { total: -500, count: 3, first: '2026-01-01', last: '2026-01-05', catCounts: new Map(), manualCount: 0 }],
+    ['(leeg)',          { total: -50,  count: 1, first: '2026-01-01', last: '2026-01-01', catCounts: new Map(), manualCount: 0 }],
+    ['Klant X',         { total: +2000, count: 1, first: '2026-01-01', last: '2026-01-01', catCounts: new Map(), manualCount: 0 }],
+  ]);
+  const rows = buildCounterpartyRows(groups, CAT_META, {});
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].name, 'Meta');
+});
+
+test('filter include_internal: toont ook (intern PayPal) + (leeg)', () => {
+  const groups = new Map([
+    ['Meta',            { total: -100, count: 1, first: null, last: null, catCounts: new Map(), manualCount: 0 }],
+    ['(intern PayPal)', { total: -500, count: 3, first: null, last: null, catCounts: new Map(), manualCount: 0 }],
+    ['(leeg)',          { total: -50,  count: 1, first: null, last: null, catCounts: new Map(), manualCount: 0 }],
+  ]);
+  const rows = buildCounterpartyRows(groups, CAT_META, { includeInternal: true });
+  assert.equal(rows.length, 3);
+});
+
+test('filter include_incoming: toont ook counterparties met netto positief', () => {
+  const groups = new Map([
+    ['Meta',    { total: -100, count: 1, first: null, last: null, catCounts: new Map(), manualCount: 0 }],
+    ['Klant X', { total: +2000, count: 1, first: null, last: null, catCounts: new Map(), manualCount: 0 }],
+  ]);
+  const rows = buildCounterpartyRows(groups, CAT_META, { includeIncoming: true });
+  assert.equal(rows.length, 2);
+});
+
+test('filter onlyUncategorized: toont alleen counterparties zonder categorie', () => {
+  const groups = new Map([
+    ['Meta',   { total: -100, count: 2, first: null, last: null, catCounts: new Map([['cat-marketing', 2]]), manualCount: 0 }],
+    ['Google', { total: -200, count: 1, first: null, last: null, catCounts: new Map(), manualCount: 0 }],
+  ]);
+  const rows = buildCounterpartyRows(groups, CAT_META, { onlyUncategorized: true });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].name, 'Google');
+});
+
+test('filter categoryFilter: toont alleen counterparties met specifieke categorie', () => {
+  const groups = new Map([
+    ['Meta',   { total: -100, count: 2, first: null, last: null, catCounts: new Map([['cat-marketing', 2]]), manualCount: 0 }],
+    ['GitHub', { total: -200, count: 1, first: null, last: null, catCounts: new Map([['cat-software', 1]]),  manualCount: 0 }],
+  ]);
+  const rows = buildCounterpartyRows(groups, CAT_META, { categoryFilter: 'cat-marketing' });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].name, 'Meta');
+  assert.equal(rows[0].category.id, 'cat-marketing');
+});
+
+test('build: rijen bevatten juist category-object uit catMetaById', () => {
+  const groups = new Map([
+    ['Meta', { total: -100, count: 2, first: '2026-01-01', last: '2026-01-05', catCounts: new Map([['cat-marketing', 2]]), manualCount: 0 }],
+  ]);
+  const rows = buildCounterpartyRows(groups, CAT_META, {});
+  assert.equal(rows[0].category.label, 'Marketing & advertenties');
+  assert.equal(rows[0].category.color, '#f97316');
+  assert.equal(rows[0].category_source, 'rule');
+});
+
+// ── sortCounterparties ────────────────────────────────────────────────────
+
+test('sort total_desc (default): meest-negatief eerst', () => {
+  const rows = [
+    { name: 'a', total_cents: -100, tx_count: 1 },
+    { name: 'b', total_cents: -500, tx_count: 1 },
+    { name: 'c', total_cents: -50,  tx_count: 1 },
+  ];
+  const sorted = sortCounterparties(rows, 'total_desc');
+  assert.deepEqual(sorted.map(r => r.name), ['b', 'a', 'c']);
+});
+
+test('sort total_abs_desc: grootste absoluut eerst (ook positief)', () => {
+  const rows = [
+    { name: 'a', total_cents: -100, tx_count: 1 },
+    { name: 'b', total_cents: +500, tx_count: 1 },
+    { name: 'c', total_cents: -50,  tx_count: 1 },
+  ];
+  const sorted = sortCounterparties(rows, 'total_abs_desc');
+  assert.deepEqual(sorted.map(r => r.name), ['b', 'a', 'c']);
+});
+
+test('sort count_desc: meeste transacties eerst', () => {
+  const rows = [
+    { name: 'a', total_cents: -10, tx_count: 3 },
+    { name: 'b', total_cents: -10, tx_count: 10 },
+    { name: 'c', total_cents: -10, tx_count: 1 },
+  ];
+  const sorted = sortCounterparties(rows, 'count_desc');
+  assert.deepEqual(sorted.map(r => r.name), ['b', 'a', 'c']);
+});
+
+test('sort name_asc: alfabetisch nl-locale', () => {
+  const rows = [
+    { name: 'Édouard', total_cents: -10, tx_count: 1 },
+    { name: 'Anna',    total_cents: -10, tx_count: 1 },
+    { name: 'Zara',    total_cents: -10, tx_count: 1 },
+  ];
+  const sorted = sortCounterparties(rows, 'name_asc');
+  assert.equal(sorted[0].name, 'Anna');
+  assert.equal(sorted[2].name, 'Zara');
+});
+
+test('sort: onbekende key → val terug op total_desc', () => {
+  const rows = [
+    { name: 'a', total_cents: -100, tx_count: 1 },
+    { name: 'b', total_cents: -500, tx_count: 1 },
+  ];
+  const sorted = sortCounterparties(rows, 'onzin');
+  assert.deepEqual(sorted.map(r => r.name), ['b', 'a']);
+});
+
+test('sort: input-array wordt niet gemuteerd', () => {
+  const rows = [
+    { name: 'a', total_cents: -100 },
+    { name: 'b', total_cents: -500 },
+  ];
+  const orig = [...rows];
+  sortCounterparties(rows, 'total_desc');
+  assert.deepEqual(rows, orig);
+});
+
+// ── filterTransactionsForBreakdown ────────────────────────────────────────
+
+test('breakdown-filter default: verbergt intern + inkomsten', () => {
+  const txs = [
+    mkTx('t1', 'Meta', -100, '2026-01-01'),
+    mkTx('t2', '(intern PayPal)', -50, '2026-01-01'),
+    mkTx('t3', 'Klant', +1000, '2026-01-01'),
+  ];
+  const out = filterTransactionsForBreakdown(txs, {});
+  assert.equal(out.length, 1);
+  assert.equal(out[0].id, 't1');
+});
+
+test('breakdown-filter includeInternal: laat intern binnen', () => {
+  const txs = [
+    mkTx('t1', 'Meta', -100, '2026-01-01'),
+    mkTx('t2', '(intern PayPal)', -50, '2026-01-01'),
+  ];
+  const out = filterTransactionsForBreakdown(txs, { includeInternal: true });
+  assert.equal(out.length, 2);
+});
+
+// ── computeBreakdown ──────────────────────────────────────────────────────
+
+test('breakdown: 2 gecategoriseerde tx + 1 uncategorized → 2 buckets + uncat', () => {
+  const txs = [
+    mkTx('t1', 'Meta',   -10000, '2026-01-01'),
+    mkTx('t2', 'GitHub', -5000,  '2026-01-01'),
+    mkTx('t3', 'Anders', -1000,  '2026-01-01'),
+  ];
+  const catByTxId = new Map([
+    ['t1', { category_id: 'cat-marketing' }],
+    ['t2', { category_id: 'cat-software'  }],
+    // t3 heeft geen categorisatie
+  ]);
+  const bd = computeBreakdown(txs, catByTxId, CAT_META_ROWS);
+  const mkt = bd.categories.find(c => c.id === 'cat-marketing');
+  const sft = bd.categories.find(c => c.id === 'cat-software');
+  const reis = bd.categories.find(c => c.id === 'cat-reis');
+  assert.equal(mkt.total_cents, -10000);
+  assert.equal(mkt.tx_count, 1);
+  assert.equal(sft.total_cents, -5000);
+  assert.equal(reis.total_cents, 0);           // zero-bucket voor unused cat
+  assert.equal(reis.tx_count, 0);
+  assert.equal(bd.uncategorized.total_cents, -1000);
+  assert.equal(bd.uncategorized.tx_count, 1);
+  assert.equal(bd.totalAll, -16000);
+});
+
+test('breakdown: pct berekend op absolute som', () => {
+  const txs = [
+    mkTx('t1', 'Meta',   -10000, '2026-01-01'),
+    mkTx('t2', 'GitHub', -10000, '2026-01-01'),
+  ];
+  const catByTxId = new Map([
+    ['t1', { category_id: 'cat-marketing' }],
+    ['t2', { category_id: 'cat-software'  }],
+  ]);
+  const bd = computeBreakdown(txs, catByTxId, CAT_META_ROWS);
+  const mkt = bd.categories.find(c => c.id === 'cat-marketing');
+  const sft = bd.categories.find(c => c.id === 'cat-software');
+  assert.equal(mkt.pct, 50);
+  assert.equal(sft.pct, 50);
+});
+
+test('breakdown: sort meest-negatief eerst (grootste uitgave bovenaan)', () => {
+  const txs = [
+    mkTx('t1', 'Meta',   -1000, '2026-01-01'),
+    mkTx('t2', 'GitHub', -5000, '2026-01-01'),
+  ];
+  const catByTxId = new Map([
+    ['t1', { category_id: 'cat-marketing' }],
+    ['t2', { category_id: 'cat-software'  }],
+  ]);
+  const bd = computeBreakdown(txs, catByTxId, CAT_META_ROWS);
+  const nonZero = bd.categories.filter(c => c.total_cents !== 0);
+  assert.equal(nonZero[0].id, 'cat-software');  // -5000 komt eerst
+  assert.equal(nonZero[1].id, 'cat-marketing'); // -1000 daarna
+});
+
+test('breakdown: totalAbs=0 → pct=0 (geen div-by-zero)', () => {
+  const bd = computeBreakdown([], new Map(), CAT_META_ROWS);
+  bd.categories.forEach(c => assert.equal(c.pct, 0));
+  assert.equal(bd.uncategorized.pct, 0);
+});
+
+// ── INTERNAL_NAMES + EMPTY_NAME constants (public API) ────────────────────
+
+test('constants: INTERNAL_NAMES bevat exact "(intern PayPal)"', () => {
+  assert.ok(INTERNAL_NAMES.has('(intern PayPal)'));
+  assert.equal(INTERNAL_NAMES.size, 1);
+});
+
+test('constants: EMPTY_NAME = "(leeg)"', () => {
+  assert.equal(EMPTY_NAME, '(leeg)');
+});
