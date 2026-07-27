@@ -58,15 +58,23 @@ export function consensusCategoryForGroup(g) {
 
 /**
  * Bouw eindrijen voor de counterparties-endpoint met alle filters
- * toegepast. filters = { includeInternal, includeIncoming, onlyUncategorized,
- * categoryFilter }.
+ * toegepast. filters = { includeInternal, includeInternalTransfers,
+ * includeIncoming, onlyUncategorized, categoryFilter }.
+ *
+ * - includeInternal          — PayPal-CSV interne rijen ("(intern PayPal)" +
+ *                              "(leeg)"). Bewaard-vasthouding-tegenboekingen.
+ * - includeInternalTransfers — interne overboekingen tussen eigen rekeningen
+ *                              (bv. ING → PayPal-oplaad). Bepaald via
+ *                              category.is_internal=true. Default UIT om
+ *                              dubbeltelling met PayPal-uitgaven te voorkomen.
  */
 export function buildCounterpartyRows(groups, catMetaById, filters = {}) {
   const {
-    includeInternal   = false,
-    includeIncoming   = false,
-    onlyUncategorized = false,
-    categoryFilter    = null,
+    includeInternal          = false,
+    includeInternalTransfers = false,
+    includeIncoming          = false,
+    onlyUncategorized        = false,
+    categoryFilter           = null,
   } = filters;
   const rows = [];
   for (const [name, g] of groups) {
@@ -74,6 +82,9 @@ export function buildCounterpartyRows(groups, catMetaById, filters = {}) {
     if (!includeIncoming && g.total >= 0) continue;
     const { categoryId, source } = consensusCategoryForGroup(g);
     const category = categoryId ? (catMetaById?.get?.(categoryId) || null) : null;
+    // Interne overboekingen (bv. ING → PayPal) verbergen tenzij expliciet gevraagd.
+    // Signaal: de counterparty-categorie is gemarkeerd als is_internal.
+    if (!includeInternalTransfers && category && category.is_internal === true) continue;
     if (onlyUncategorized && category) continue;
     if (categoryFilter && (!category || category.id !== categoryFilter)) continue;
     rows.push({
@@ -113,18 +124,39 @@ export function sortCounterparties(rows, sortKey = 'total_desc') {
 /**
  * Filter transactie-lijst analoog aan buildCounterpartyRows (voor breakdown).
  * Retourneert alleen tx die zichtbaar moeten zijn na intern/incoming-filter.
+ * Als includeInternalTransfers=false én er is een catByTxId met is_internal-
+ * categorie-info, worden interne overboekingen ook gefilterd — dan telt hun
+ * bedrag NIET mee in totalAll/breakdown.
  */
-export function filterTransactionsForBreakdown(txs, { includeInternal = false, includeIncoming = false } = {}) {
+export function filterTransactionsForBreakdown(txs, catByTxId, catMetaById, filters = {}) {
+  // Backward-compat: als de 2e/3e arg een filters-object is (oude signature),
+  // shuffle 'em door zodat oude callers blijven werken.
+  if (catByTxId && !(catByTxId instanceof Map) && typeof catByTxId === 'object') {
+    filters = catByTxId;
+    catByTxId = null;
+    catMetaById = null;
+  }
+  const {
+    includeInternal          = false,
+    includeInternalTransfers = false,
+    includeIncoming          = false,
+  } = filters || {};
   return (txs || []).filter(t => {
     const name = String(t.counterparty_name || EMPTY_NAME).trim() || EMPTY_NAME;
     if (!includeInternal && (INTERNAL_NAMES.has(name) || name === EMPTY_NAME)) return false;
     if (!includeIncoming && Number(t.amount_cents) >= 0) return false;
+    if (!includeInternalTransfers && catByTxId && catMetaById) {
+      const cat = catByTxId.get?.(t.id);
+      const meta = cat ? catMetaById.get?.(cat.category_id) : null;
+      if (meta && meta.is_internal === true) return false;
+    }
     return true;
   });
 }
 
 /**
  * Aggregeer uitgaven per categorie (voor breakdown-endpoint).
+ * Interne categorieën (is_internal=true) worden overgeslagen in de output.
  * Retourneert { categories: [...], uncategorized, totalAll, totalAbs }.
  */
 export function computeBreakdown(txs, catByTxId, allCats) {
@@ -145,7 +177,12 @@ export function computeBreakdown(txs, catByTxId, allCats) {
   }
   const totalAll = (txs || []).reduce((s, t) => s + (Number(t.amount_cents) || 0), 0);
   const totalAbs = Math.abs(totalAll);
-  const categories = (allCats || []).map(cat => {
+  // Interne categorieën (is_internal=true) worden niet in de breakdown
+  // getoond — dat zijn overboekingen, geen echte uitgaven. Callers zorgen dat
+  // die tx sowieso al gefilterd waren via filterTransactionsForBreakdown,
+  // dus buckets voor interne categorieën staan hier op 0. We droppen ze uit
+  // de output-lijst zodat de UI ze niet als lege rij toont.
+  const categories = (allCats || []).filter(cat => cat.is_internal !== true).map(cat => {
     const b = bucketByCat.get(cat.id) || { total: 0, count: 0 };
     return {
       id:          cat.id,

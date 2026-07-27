@@ -4593,6 +4593,9 @@
         <label class="exp-filter-lbl" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
           <input type="checkbox" id="expFilterIncoming" /> Toon inkomsten
         </label>
+        <label class="exp-filter-lbl" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer" title="Interne overboekingen tussen eigen rekeningen (bv. ING → PayPal-oplaad). Default verborgen om dubbeltelling met PayPal-uitgaven te voorkomen.">
+          <input type="checkbox" id="expFilterInternalTransfers" /> Toon interne overboekingen
+        </label>
       </div>
 
       <!-- Tegenpartijen-lijst (hoofdweergave) -->
@@ -18840,7 +18843,7 @@
     } catch (e) { console.warn('[expenses] categories load:', e.message); }
 
     // Wire filters + buttons (1x).
-    ['expFilterFrom','expFilterTo','expFilterSource','expFilterCategory','expFilterUncat','expFilterInternal','expFilterIncoming']
+    ['expFilterFrom','expFilterTo','expFilterSource','expFilterCategory','expFilterUncat','expFilterInternal','expFilterIncoming','expFilterInternalTransfers']
       .forEach(id => {
         const el = document.getElementById(id);
         if (el && !el._expWired) { el._expWired = true; el.addEventListener('change', loadExpensesData); }
@@ -18872,6 +18875,7 @@
     const unc  = document.getElementById('expFilterUncat')?.checked;
     const inte = document.getElementById('expFilterInternal')?.checked;
     const inc  = document.getElementById('expFilterIncoming')?.checked;
+    const it   = document.getElementById('expFilterInternalTransfers')?.checked;
     if (from) p.set('from', from);
     if (to)   p.set('to', to);
     if (src && src !== 'all') p.set('source', src);
@@ -18879,6 +18883,7 @@
     if (unc)  p.set('uncategorized', '1');
     if (inte) p.set('include_internal', '1');
     if (inc)  p.set('include_incoming', '1');
+    if (it)   p.set('include_internal_transfers', '1');
     return p;
   }
 

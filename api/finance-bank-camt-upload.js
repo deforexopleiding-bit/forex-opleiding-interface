@@ -294,6 +294,65 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── 7. Rule-based auto-categorisatie voor uitgaven-analyse ──────────────
+    // Zelfde patroon als in finance-bank-paypal-upload.js. Belangrijkste win:
+    // ING→PayPal-oplaadtransacties krijgen automatisch de "Interne overboeking"-
+    // categorie via de rule op counterparty_name='PayPal Europe S.a.r.l. et Cie
+    // S.C.A' (seed in 2026-07-27-expenses-internal-transfers.sql). Manual
+    // overrides worden gerespecteerd.
+    let autoCategorized = 0;
+    if (insertedRows.length) {
+      try {
+        const cpNames = Array.from(new Set(
+          insertedRows.map(r => r.counterparty_name).filter(Boolean)
+        ));
+        if (cpNames.length) {
+          const { data: rules } = await supabaseAdmin
+            .from('expense_counterparty_rules')
+            .select('id, match_counterparty, category_id')
+            .in('match_counterparty', cpNames);
+          if (rules && rules.length) {
+            const cpToRule = new Map(rules.map(r => [r.match_counterparty, r]));
+            const catRows = [];
+            for (const t of insertedRows) {
+              const rule = cpToRule.get(t.counterparty_name);
+              if (!rule) continue;
+              catRows.push({
+                camt_transaction_id: t.id,
+                category_id:         rule.category_id,
+                source:              'rule',
+                rule_id:             rule.id,
+                set_by_user_id:      user.id,
+              });
+            }
+            if (catRows.length) {
+              // Respecteer manual overrides bij UPSERT.
+              const { data: existingCats } = await supabaseAdmin
+                .from('transaction_categorizations')
+                .select('camt_transaction_id, source')
+                .in('camt_transaction_id', catRows.map(c => c.camt_transaction_id));
+              const manualSet = new Set(
+                (existingCats || [])
+                  .filter(c => c.source === 'manual')
+                  .map(c => c.camt_transaction_id)
+              );
+              const finalCatRows = catRows.filter(c => !manualSet.has(c.camt_transaction_id));
+              if (finalCatRows.length) {
+                const { error: catErr } = await supabaseAdmin
+                  .from('transaction_categorizations')
+                  .upsert(finalCatRows, { onConflict: 'camt_transaction_id' });
+                if (catErr) console.warn('[camt-upload] auto-cat upsert:', catErr.message);
+                else autoCategorized = finalCatRows.length;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        // Auto-categorisatie mag de upload NIET kapotmaken.
+        console.error('[camt-upload] auto-categorize fout:', e.message);
+      }
+    }
+
     // Statement num_entries bijwerken naar werkelijk-ingeschreven aantal.
     if (inserted !== txs.length) {
       await supabaseAdmin
@@ -302,7 +361,7 @@ export default async function handler(req, res) {
         .eq('id', statementId);
     }
 
-    console.log(`[camt-upload] ${file_name} | ${stmt.account_iban} | parsed=${txs.length} inserted=${inserted} skipped=${skipped} matches=${matchesGenerated} auto_confirmed=${autoConfirmed} auto_failed=${autoConfirmFailed}`);
+    console.log(`[camt-upload] ${file_name} | ${stmt.account_iban} | parsed=${txs.length} inserted=${inserted} skipped=${skipped} matches=${matchesGenerated} auto_confirmed=${autoConfirmed} auto_failed=${autoConfirmFailed} auto_cat=${autoCategorized}`);
 
     return res.status(200).json({
       statement_id:           statementId,

@@ -3,7 +3,10 @@
 // Permission: finance.expenses.view.
 //
 // Response:
-//   { categories: [{ id, slug, label, color, is_active }] }
+//   { categories: [{ id, slug, label, color, is_active, is_internal }] }
+//
+// is_internal=true → categorie voor interne overboekingen (bv. ING→PayPal).
+// Default UIT gefilterd in de uitgaven-analyse.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -22,7 +25,7 @@ export default async function handler(req, res) {
 
   const { data, error } = await supabaseAdmin
     .from('expense_categories')
-    .select('id, slug, label, color, is_active')
+    .select('id, slug, label, color, is_active, is_internal')
     .eq('is_active', true)
     .order('label', { ascending: true });
 
