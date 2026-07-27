@@ -3189,31 +3189,24 @@
     .fu-cockpit-back:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.28); }
 
     @media (max-width: 720px) {
-      /* ── Master-detail toggle via :has() + attribute-selector.
-         detailbody INLINE style="display:none" = default (empty view);
-         renderLeadDetail() zet 'em op display:'' (leeg) → NIET matcht
-         [style*="display:none"]. Zo detecteren we "lead-open" pure via CSS.
-         Fallback op iOS <15.4 zonder :has(): user ziet lijst + detail
-         onder elkaar (huidige @900 gedrag) — geen regressie. */
+      /* ── Master-detail toggle via CLASS (was :has()+attribute-selector
+         in #957; die faalde op format-mismatch tussen HTML source
+         "display:none" en JS-output "display: none;"). Nu robuust via
+         .cockpit-detail-open class die door de wrapper-onclick +
+         terug-knop-onclick geset/gecleared wordt (zie HTML hierboven).
 
-      /* Lead-open: verberg lijst, toon terug-knop */
-      .fu-cockpit:has(#cockpit-detailbody:not([style*="display: none"])) .fu-cockpit-list,
-      .fu-cockpit:has(#cockpit-detailbody:not([style*="display:none"])) .fu-cockpit-list {
-        display: none;
-      }
-      .fu-cockpit:has(#cockpit-detailbody:not([style*="display: none"])) .fu-cockpit-back,
-      .fu-cockpit:has(#cockpit-detailbody:not([style*="display:none"])) .fu-cockpit-back {
-        display: inline-flex;
-      }
-      /* Ook wanneer apptbody open is (afspraak-detail flow) */
-      .fu-cockpit:has(#cockpit-apptbody:not([style*="display: none"])) .fu-cockpit-list,
-      .fu-cockpit:has(#cockpit-apptbody:not([style*="display:none"])) .fu-cockpit-list {
-        display: none;
-      }
-      .fu-cockpit:has(#cockpit-apptbody:not([style*="display: none"])) .fu-cockpit-back,
-      .fu-cockpit:has(#cockpit-apptbody:not([style*="display:none"])) .fu-cockpit-back {
-        display: inline-flex;
-      }
+         Default op mobiel: alleen lijst zichtbaar; detail-panel + back-
+         knop verborgen. Auto-select op init zet .active op eerste card
+         maar VERANDERT DE UI NIET — user ziet lijst, moet zelf tikken
+         om detail te openen. */
+      .fu-cockpit-detail { display: none; }
+      .fu-cockpit-back   { display: none; }
+
+      /* Lead-open (na user-tap op card): verberg lijst, toon detail +
+         terug-knop. */
+      .fu-cockpit.cockpit-detail-open .fu-cockpit-list { display: none; }
+      .fu-cockpit.cockpit-detail-open .fu-cockpit-detail { display: block; }
+      .fu-cockpit.cockpit-detail-open .fu-cockpit-back { display: inline-flex; }
 
       /* Detail-paneel: compacter padding op mobiel zodat callcard-actions
          binnen viewport blijven. */
@@ -3240,6 +3233,34 @@
         left: 0; right: 0;
         min-width: 0;
       }
+
+      /* Voicememo-modal + andere .fu-modal-backdrop modals (voicememo,
+         appt-detail, ns-afschrijf, etc): #938 target'de .fu-modal-overlay
+         maar deze modals gebruiken .fu-modal-backdrop → backdrop hield
+         padding:20 + centering → sluitknop buiten viewport op smal.
+         Fix: zelfde recipe als #938 maar dan op .fu-modal-backdrop. De
+         .fu-modal card zelf krijgt al max-width:100% + max-height:100dvh
+         via de #938-regel op .fu-modal (die op deze cards ook fireren). */
+      .fu-modal-backdrop { padding: 0 !important; align-items: stretch !important; }
+      .fu-modal-backdrop .fu-modal {
+        max-width: 100% !important;
+        max-height: 100vh !important;
+        max-height: 100dvh !important;
+        height: 100vh !important;
+        height: 100dvh !important;
+        border-radius: 0 !important;
+        display: flex;
+        flex-direction: column;
+      }
+      .fu-modal-backdrop .fu-modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+      .fu-modal-backdrop .fu-modal-header { flex-shrink: 0; }
+      .fu-modal-backdrop .fu-modal-actions,
+      .fu-modal-backdrop .fu-modal-footer {
+        flex-shrink: 0;
+        padding-bottom: max(12px, env(safe-area-inset-bottom, 12px));
+      }
+      /* .fu-modal-close (× top-right): comfortabele tap-target */
+      .fu-modal-close { min-width: 44px; min-height: 44px; }
 
       /* Softphone-callbar extra hardening: z-index boven detailbody +
          max-width zodat 'ie nooit off-screen valt bij horizontal-scroll
@@ -3620,7 +3641,14 @@
          Te laat / Vandaag / Deze week). RECHTS: lead-detail met
          belkaart (#093d54), Actie-dropdown, context + tijdlijn. -->
     <div class="fu-tab-panel active" data-panel="leads" id="panel-leads">
-      <div class="fu-cockpit">
+      <!-- MOBIEL master-detail: klik op een lead-kaart voegt de
+           .cockpit-detail-open class toe zodat @720-CSS naar detail-
+           view schakelt (lijst verborgen + terug-knop zichtbaar). De
+           .fu-cockpit-back-knop (uit #957) verwijdert de class weer.
+           Attribuut-only mutatie op deze bestaande wrapper — geen JS-
+           file wijziging; wint bewust boven het #957-:has()-patroon
+           dat op inline-style-format-mismatch faalde. -->
+      <div class="fu-cockpit" onclick="if (event.target.closest('.fu-cockpit-leadcard')) this.classList.add('cockpit-detail-open')">
         <!-- LINKS: werklijst -->
         <aside class="fu-cockpit-list" id="cockpit-list">
           <!-- Compacte bar: lijst-filter-zoek + filter-icoon (popover-trigger)
@@ -3689,7 +3717,7 @@
                zichtbaar op ≤720px wanneer detailbody open is (via CSS
                :has()-selector op inline style hieronder). Roept bestaande
                clearLeadDetail() aan; geen JS-mutatie in dit bestand. -->
-          <button type="button" class="fu-cockpit-back" onclick="clearLeadDetail()" aria-label="Terug naar werklijst"><i class="ti ti-arrow-left"></i> Terug naar werklijst</button>
+          <button type="button" class="fu-cockpit-back" onclick="document.querySelector('.fu-cockpit')?.classList.remove('cockpit-detail-open'); clearLeadDetail();" aria-label="Terug naar werklijst"><i class="ti ti-arrow-left"></i> Terug naar werklijst</button>
           <div class="fu-cockpit-empty" id="cockpit-detail-empty">
             <i class="ti ti-user-search"></i>
             <div class="fu-cockpit-empty-title">Selecteer een lead</div>
