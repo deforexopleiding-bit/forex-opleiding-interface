@@ -21,6 +21,7 @@ import {
   parseDate,
   parsePaypalCsv,
   validateSaldo,
+  buildPaypalDescription,
 } from '../api/_lib/paypal-csv-parser.js';
 
 // ─── parseCsv: CSV-basisgedrag ──────────────────────────────────────────────
@@ -102,12 +103,12 @@ function makeMiniCsv(rows) {
   const headers = [
     'Datum','Tijd','Tijdzone','Naam','Type','Status','Valuta','Bruto','Kosten','Net',
     'Van e-mailadres','Naar e-mailadres','Transactiereferentie',
-    // fillers tot Reference Txn ID (index 24)
-    'F13','F14','F15','F16','F17','F18','F19','F20','F21','F22','F23','Reference Txn ID',
-    // fillers tot Saldo (index 29)
-    'F25','F26','F27','F28','Saldo',
-    // fillers tot Effect op saldo (index 40)
-    'F30','F31','F32','F33','F34','F35','F36','F37','F38','F39','Effect op saldo',
+    // 13-14 filler, 15 = Item Title, 16-23 filler, 24 = Reference Txn ID
+    'F13','F14','Item Title','F16','F17','F18','F19','F20','F21','F22','F23','Reference Txn ID',
+    // 25 = Factuurnummer, 26-28 filler, 29 = Saldo
+    'Factuurnummer','F26','F27','F28','Saldo',
+    // 30-36 filler, 37 = Onderwerp, 38 = Note, 39 = filler, 40 = Effect op saldo
+    'F30','F31','F32','F33','F34','F35','F36','Onderwerp','Note','F39','Effect op saldo',
   ];
   const csvHeader = headers.map(h => '"'+h+'"').join(',');
   const csvRows = rows.map(r => headers.map(h => '"'+(r[h] || '')+'"').join(','));
@@ -171,7 +172,8 @@ test('parsePaypalCsv: trailing/leading spaces getrimd', () => {
   assert.strictEqual(p.transactions[0].counterparty_name, 'BOTLOBBIES.COM');
 });
 
-test('parsePaypalCsv: source=paypal + description = [Type] counterparty + raw_xml is JSON', () => {
+test('parsePaypalCsv: source=paypal + description fallback op Type + raw_xml is JSON', () => {
+  // Zonder Onderwerp/Item Title/Factuurnummer/Note → cascade valt op Type.
   const csv = makeMiniCsv([
     { Datum:'28-07-2025', Naam:'Adobe', Type:'Sub', Valuta:'EUR', Net:'-19,99',
       Transactiereferentie:'T1', 'Reference Txn ID':'', Saldo:'0,00', 'Effect op saldo':'Af' },
@@ -179,7 +181,7 @@ test('parsePaypalCsv: source=paypal + description = [Type] counterparty + raw_xm
   const p = parsePaypalCsv(csv);
   const tx = p.transactions[0];
   assert.strictEqual(tx.source, 'paypal');
-  assert.strictEqual(tx.description, '[Sub] Adobe');
+  assert.strictEqual(tx.description, 'Sub');
   assert.ok(tx.raw_xml && tx.raw_xml.startsWith('{'));
   const raw = JSON.parse(tx.raw_xml);
   assert.strictEqual(raw.Naam, 'Adobe');
@@ -282,4 +284,103 @@ test('parsePaypalCsv: geen in-parser dedupe — upload-endpoint doet dat DB-side
   assert.strictEqual(p.transactions.length, 2);
   assert.strictEqual(p.transactions[0].entry_reference, 'DUP1');
   assert.strictEqual(p.transactions[1].entry_reference, 'DUP1');
+});
+
+// ─── buildPaypalDescription: cascade — bevestigt volgorde per veld ─────────
+
+test('buildPaypalDescription: Onderwerp wint boven al het andere', () => {
+  assert.strictEqual(
+    buildPaypalDescription({ Onderwerp:'Ads', ItemTitle:'Foo', Factuurnummer:'123', Note:'x', Type:'PPCard' }),
+    'Ads'
+  );
+});
+
+test('buildPaypalDescription: geen Onderwerp → Item Title', () => {
+  assert.strictEqual(
+    buildPaypalDescription({ Onderwerp:'', ItemTitle:'Nitro Monthly', Factuurnummer:'', Note:'', Type:'PPCard' }),
+    'Nitro Monthly'
+  );
+});
+
+test('buildPaypalDescription: geen Onderwerp+ItemTitle → Factuurnummer met "Factuur "-prefix', () => {
+  assert.strictEqual(
+    buildPaypalDescription({ Onderwerp:'', ItemTitle:'', Factuurnummer:'2025 / 844', Note:'', Type:'Express' }),
+    'Factuur 2025 / 844'
+  );
+});
+
+test('buildPaypalDescription: alleen Note → Note', () => {
+  assert.strictEqual(
+    buildPaypalDescription({ Onderwerp:'', ItemTitle:'', Factuurnummer:'', Note:'private notitie', Type:'PPCard' }),
+    'private notitie'
+  );
+});
+
+test('buildPaypalDescription: alles leeg behalve Type → Type als laatste fallback', () => {
+  assert.strictEqual(
+    buildPaypalDescription({ Onderwerp:'', ItemTitle:'', Factuurnummer:'', Note:'', Type:'Vastgehouden - algemeen' }),
+    'Vastgehouden - algemeen'
+  );
+});
+
+test('buildPaypalDescription: alles leeg → lege string (geen crash)', () => {
+  assert.strictEqual(buildPaypalDescription({}), '');
+  assert.strictEqual(buildPaypalDescription({ Onderwerp:'', ItemTitle:'', Factuurnummer:'', Note:'', Type:'' }), '');
+});
+
+test('buildPaypalDescription: whitespace-only telt als leeg', () => {
+  assert.strictEqual(
+    buildPaypalDescription({ Onderwerp:'   ', ItemTitle:'Real Title', Factuurnummer:'', Note:'', Type:'X' }),
+    'Real Title'
+  );
+});
+
+test('buildPaypalDescription: null/undefined-inputs zijn safe', () => {
+  assert.strictEqual(
+    buildPaypalDescription({ Onderwerp: null, ItemTitle: undefined, Factuurnummer: null, Note: undefined, Type: 'PP' }),
+    'PP'
+  );
+});
+
+// ─── parsePaypalCsv: description-cascade end-to-end op mini-CSV ────────────
+
+test('parsePaypalCsv: description = Onderwerp als aanwezig (echte Meta-scenario)', () => {
+  const csv = makeMiniCsv([
+    { Datum:'28-07-2025', Naam:'Meta Platforms, Inc.', Type:'Vooraf goedgekeurde betaling',
+      Valuta:'EUR', Net:'-100,00', Transactiereferentie:'TX1', 'Reference Txn ID':'',
+      Saldo:'0,00', Onderwerp:'Ads', 'Effect op saldo':'Af' },
+  ]);
+  const p = parsePaypalCsv(csv);
+  assert.strictEqual(p.transactions[0].description, 'Ads');
+});
+
+test('parsePaypalCsv: description = "Factuur X" als alleen Factuurnummer', () => {
+  const csv = makeMiniCsv([
+    { Datum:'28-07-2025', Naam:'Klant Bas', Type:'Express Checkout',
+      Valuta:'EUR', Net:'250,00', Transactiereferentie:'TX2', 'Reference Txn ID':'',
+      Saldo:'250,00', Factuurnummer:'2025 / 844', 'Effect op saldo':'Bij' },
+  ]);
+  const p = parsePaypalCsv(csv);
+  assert.strictEqual(p.transactions[0].description, 'Factuur 2025 / 844');
+});
+
+test('parsePaypalCsv: description = Item Title als geen Onderwerp', () => {
+  const csv = makeMiniCsv([
+    { Datum:'28-07-2025', Naam:'Discord', Type:'Vooraf goedgekeurde betaling',
+      Valuta:'EUR', Net:'-9,99', Transactiereferentie:'TX3', 'Reference Txn ID':'',
+      Saldo:'0,00', 'Item Title':'Nitro Monthly', 'Effect op saldo':'Af' },
+  ]);
+  const p = parsePaypalCsv(csv);
+  assert.strictEqual(p.transactions[0].description, 'Nitro Monthly');
+});
+
+test('parsePaypalCsv: prioriteit — Onderwerp overschrijft Item Title + Factuurnummer', () => {
+  const csv = makeMiniCsv([
+    { Datum:'28-07-2025', Naam:'X', Type:'Y', Valuta:'EUR', Net:'-1,00',
+      Transactiereferentie:'TX4', 'Reference Txn ID':'', Saldo:'0,00',
+      Onderwerp:'ONDERWERP', 'Item Title':'ITEM', Factuurnummer:'999',
+      'Effect op saldo':'Af' },
+  ]);
+  const p = parsePaypalCsv(csv);
+  assert.strictEqual(p.transactions[0].description, 'ONDERWERP');
 });
