@@ -1,44 +1,43 @@
 // api/finance-expenses-ai-suggest.js
-// POST → run AI-categorisatie op alle ongecategoriseerde tegenpartijen.
+// POST → classificeer 1 chunk (≤50 counterparty_names) via Anthropic en
+// schrijf de suggesties naar transaction_categorizations (source='ai_suggest').
 // Permission: finance.expenses.category.edit.
 //
-// Wat: fetch alle unieke counterparty_names die geen bestaande categorisatie
-// hebben (source='rule' of 'manual'), batch ze in groepen van ~30, roep
-// Anthropic aan met een strikte prompt + toegestane slug-set, valideer output,
-// insert als source='ai_suggest' via UPSERT (idempotent — herhaald runnen
-// overschrijft oude ai_suggest, laat manual/rule met rust).
+// CHUNKED-BY-CLIENT: dit endpoint doet EEN chunk per call. De frontend
+// orchestreert de lus (fetch alle ongecategoriseerde → chunk in 25 → post één
+// voor één met voortgang-UX). Dit voorkomt de Vercel 60s serverless-timeout
+// die #966 nog niet volledig oploste voor ~200 tegenpartijen — geen enkele
+// call nadert nu de cap (1 Anthropic-call = 2-5s).
 //
-// KERN: 'ai_suggest'-rijen TELLEN NIET MEE in totaal/breakdown.
-//       Endpoints filteren source != 'ai_suggest' waar aggregatie plaatsvindt.
+// Body:
+//   { counterparties: string[]  // verplicht, min 1, max 50
+//   }
+//
+// Response 200:
+//   { chunk_size, counterparties_suggested, tx_rows_written,
+//     invalid_slug_fallback_count, skipped_already_categorized,
+//     tokens_used_estimate, errors: [] }
+//
+// KERN: 'ai_suggest'-rijen tellen NIET mee in totaal/breakdown.
 //       Bevestigen door user (aparte confirm-endpoint) → source='manual'.
 //
-// Body: {} (geen input — draait op alle ongecategoriseerde)
-// Response:
-//   { batches_run, calls, tokens_used_estimate, counterparties_suggested,
-//     tx_rows_written, invalid_slug_fallback_count, errors: [] }
-//
-// Idempotent: bestaande ai_suggest-rijen worden overschreven bij re-run
-// (UPSERT op UNIQUE camt_transaction_id). Manual/rule blijft ongemoeid.
+// Idempotent: skipt namen waarvan alle tx al rule/manual hebben; bestaande
+// ai_suggest voor de gegeven counterparties wordt overschreven via UPSERT.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { anthropicStructuredOutput, AnthropicClientError } from './_lib/anthropic-client.js';
 
-// Vercel Pro-plan hard timeout override: max 60s. Zonder dit knipt Vercel
-// de function af bij 10s (Hobby-plan default) OF 60s (Pro default) en
-// returnt een platte-tekst "An error occurred with your deployment"
-// i.p.v. onze JSON. Explicit=60 borgt Pro-cap.
+// Vercel Pro-plan hard timeout cap. Met 1 Anthropic-call per chunk (~2-5s)
+// zit elke request ruim onder deze cap, maar we borgen 'em expliciet zodat
+// een edge-case (trage API, retry) niet op de 10s Hobby-default valt.
 export const config = { maxDuration: 60 };
 
-// Kleinere batches (was 30): kortere per-call latency (~2-4s ipv 5-10s),
-// zodat de parallel-run comfortabel binnen 60s past.
-const BATCH_SIZE = 15;
+// Hard cap op chunk-grootte — anti-abuse + latency-guard. Frontend hoort in
+// chunks van ~25 te versturen; server accepteert tot 50 als slack.
+const MAX_CHUNK_SIZE = 50;
 const MAX_TOKENS_PER_CALL = 3000;
-// Concurrency-cap: parallel calls tegelijkertijd. Anthropic accepteert
-// ruimschoots >10 concurrent, maar we blijven safe onder rate-limits.
-const MAX_CONCURRENT_CALLS = 8;
 
-// System prompt beschrijft de taak strak.
 const SYSTEM_PROMPT = `Je bent een boekhoud-assistent die zakelijke tegenpartijen (leveranciers, diensten) classificeert in vaste uitgaven-categorieën.
 
 Regels:
@@ -50,17 +49,9 @@ Regels:
 - Confidence <0.50 = kies 'overig' i.p.v. te gokken.
 - Reden is 1 korte zin (Nederlandse taal, max 100 tekens).`;
 
-/**
- * Bouw de prompt voor 1 batch. Toegestane slugs komen als lijst mee met korte
- * beschrijvingen zodat het model context heeft.
- */
 function buildBatchPrompt(counterparties, categoryList) {
-  const categorieBlok = categoryList
-    .map(c => `- ${c.slug}: ${c.label}`)
-    .join('\n');
-  const namenBlok = counterparties
-    .map((n, i) => `${i + 1}. "${n}"`)
-    .join('\n');
+  const categorieBlok = categoryList.map(c => `- ${c.slug}: ${c.label}`).join('\n');
+  const namenBlok = counterparties.map((n, i) => `${i + 1}. "${n}"`).join('\n');
   return `Classificeer elke tegenpartij hieronder in EXACT één categorie uit de gegeven set.
 
 TOEGESTANE CATEGORIEËN (kies ALLEEN uit deze slugs):
@@ -72,9 +63,6 @@ ${namenBlok}
 Antwoord met exact ${counterparties.length} suggesties, in dezelfde volgorde als de tegenpartijen hierboven.`;
 }
 
-/**
- * JSONSchema voor de tool-output. Anthropic dwingt het model dit shape af.
- */
 function buildToolSchema(allowedSlugs) {
   return {
     type: 'object',
@@ -87,8 +75,8 @@ function buildToolSchema(allowedSlugs) {
           type: 'object',
           required: ['counterparty', 'category_slug', 'confidence', 'reason'],
           properties: {
-            counterparty:  { type: 'string', description: 'Exacte counterparty-naam uit input' },
-            category_slug: { type: 'string', enum: allowedSlugs, description: 'Slug uit de toegestane set' },
+            counterparty:  { type: 'string' },
+            category_slug: { type: 'string', enum: allowedSlugs },
             confidence:    { type: 'number', minimum: 0, maximum: 1 },
             reason:        { type: 'string', maxLength: 120 },
           },
@@ -102,11 +90,8 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
 
-  // Top-level try/catch borgt dat ELKE fout (auth, permission, imports,
-  // Anthropic-crash, DB, timeout-adjacent, netwerk) JSON teruggeeft.
-  // Zonder deze wrap knalt een uncaught throw naar Vercel's default
-  // platte-tekst "An error occurred with your deployment", en de frontend
-  // crasht dan op JSON.parse.
+  // Top-level try/catch borgt dat ELKE fout (auth/permission/imports/DB/
+  // Anthropic/netwerk) JSON teruggeeft, niet Vercel's platte-tekst wrapper.
   try {
     if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
@@ -116,12 +101,31 @@ export default async function handler(req, res) {
     if (!(await requirePermission(req, 'finance.expenses.category.edit'))) {
       return res.status(403).json({ error: 'Geen rechten (finance.expenses.category.edit)' });
     }
-
     if (!process.env.ANTHROPIC_API_KEY) {
       return res.status(503).json({ error: 'ANTHROPIC_API_KEY niet geconfigureerd' });
     }
 
-    // Stap 1: fetch alle categorieën (voor de toegestane slug-set).
+    // ── Input-validatie ──
+    const { counterparties: inputCps } = req.body || {};
+    if (!Array.isArray(inputCps) || inputCps.length === 0) {
+      return res.status(400).json({
+        error: 'counterparties[] is verplicht (lijst counterparty_names om te classificeren; typisch 25 per call)',
+      });
+    }
+    // Trim + dedupe + drop lege strings.
+    const requestedNames = Array.from(new Set(
+      inputCps.map(s => String(s || '').trim()).filter(Boolean)
+    ));
+    if (requestedNames.length === 0) {
+      return res.status(400).json({ error: 'counterparties[] bevat geen geldige namen' });
+    }
+    if (requestedNames.length > MAX_CHUNK_SIZE) {
+      return res.status(400).json({
+        error: `Chunk te groot (${requestedNames.length} > ${MAX_CHUNK_SIZE}). Splits in kleinere chunks.`,
+      });
+    }
+
+    // ── Stap 1: fetch categorieën (whitelist) ──
     const { data: allCats, error: catErr } = await supabaseAdmin
       .from('expense_categories')
       .select('id, slug, label')
@@ -129,145 +133,108 @@ export default async function handler(req, res) {
     if (catErr) throw new Error('categories fetch: ' + catErr.message);
     const catBySlug = new Map((allCats || []).map(c => [c.slug, c]));
     const allowedSlugs = Array.from(catBySlug.keys());
-    if (!allowedSlugs.length) {
-      return res.status(500).json({ error: 'Geen actieve categorieën in DB' });
-    }
-    const overigCat = catBySlug.get('overig');
-    if (!overigCat) {
+    if (!allowedSlugs.length) return res.status(500).json({ error: 'Geen actieve categorieën in DB' });
+    if (!catBySlug.get('overig')) {
       return res.status(500).json({ error: 'Categorie "overig" ontbreekt — nodig als fallback' });
     }
 
-    // Stap 2: fetch alle unieke ongecategoriseerde counterparty_names.
-    // "Ongecategoriseerd" = geen enkele tx heeft een rule/manual-categorisatie.
-    // ai_suggest telt hier NIET als gecategoriseerd, zodat re-run bestaande
-    // suggesties overschrijft.
-    const CHUNK = 1000;
-    const allTxs = [];
-    let offset = 0;
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const { data, error } = await supabaseAdmin
-        .from('camt_transactions')
-        .select('id, counterparty_name')
-        .not('counterparty_name', 'is', null)
-        .range(offset, offset + CHUNK - 1);
-      if (error) throw new Error('camt_transactions fetch: ' + error.message);
-      if (!data || !data.length) break;
-      allTxs.push(...data);
-      if (data.length < CHUNK) break;
-      offset += CHUNK;
-    }
+    // ── Stap 2: fetch tx-ids VOOR de gegeven counterparties (in-clause, snel) ──
+    const { data: txRows, error: txErr } = await supabaseAdmin
+      .from('camt_transactions')
+      .select('id, counterparty_name')
+      .in('counterparty_name', requestedNames);
+    if (txErr) throw new Error('camt_transactions fetch: ' + txErr.message);
+    const txs = txRows || [];
 
-    // Fetch bestaande categorisaties (source rule/manual — die skippen we).
-    const existingCatByTx = new Map();
-    if (allTxs.length) {
-      const ids = allTxs.map(t => t.id);
-      for (let i = 0; i < ids.length; i += 500) {
-        const slice = ids.slice(i, i + 500);
-        const { data } = await supabaseAdmin
-          .from('transaction_categorizations')
-          .select('camt_transaction_id, source')
-          .in('camt_transaction_id', slice)
-          .in('source', ['rule', 'manual']);
-        for (const r of (data || [])) existingCatByTx.set(r.camt_transaction_id, r.source);
-      }
-    }
-
-    // Groepeer per counterparty_name: welke names hebben minstens 1 tx zonder
-    // rule/manual? Die krijgen suggestie. Names waarvan ALLE tx al getagd zijn,
-    // worden geskipt (efficiënt: dan is er niks toe te voegen).
-    const namesToSuggest = new Set();
-    const txsByName = new Map();  // name → [tx-ids die geen rule/manual hebben]
-    for (const t of allTxs) {
-      const name = String(t.counterparty_name || '').trim();
-      if (!name) continue;
-      if (existingCatByTx.has(t.id)) continue;  // al gecategoriseerd
-      namesToSuggest.add(name);
-      if (!txsByName.has(name)) txsByName.set(name, []);
-      txsByName.get(name).push(t.id);
-    }
-    const uniqueNames = Array.from(namesToSuggest).sort();
-
-    if (uniqueNames.length === 0) {
+    if (txs.length === 0) {
+      // Onbekende counterparty-names → niks te doen, wel 200 met info.
       return res.status(200).json({
-        batches_run: 0,
-        calls: 0,
-        tokens_used_estimate: 0,
+        chunk_size: requestedNames.length,
         counterparties_suggested: 0,
         tx_rows_written: 0,
         invalid_slug_fallback_count: 0,
+        skipped_already_categorized: 0,
+        tokens_used_estimate: 0,
         errors: [],
-        note: 'Geen ongecategoriseerde tegenpartijen gevonden — niks te doen.',
+        note: 'Geen tx gevonden voor de opgegeven counterparties.',
       });
     }
 
-    // Stap 3: batches maken.
-    const batches = [];
-    for (let i = 0; i < uniqueNames.length; i += BATCH_SIZE) {
-      batches.push(uniqueNames.slice(i, i + BATCH_SIZE));
+    // ── Stap 3: filter tx die al rule/manual-categorisatie hebben ──
+    const ids = txs.map(t => t.id);
+    const existingBySrc = new Map();  // tx_id → source
+    for (let i = 0; i < ids.length; i += 500) {
+      const slice = ids.slice(i, i + 500);
+      const { data } = await supabaseAdmin
+        .from('transaction_categorizations')
+        .select('camt_transaction_id, source')
+        .in('camt_transaction_id', slice)
+        .in('source', ['rule', 'manual']);
+      for (const r of (data || [])) existingBySrc.set(r.camt_transaction_id, r.source);
     }
 
-    // Stap 4: batches parallel afvuren via Promise.allSettled met concurrency-cap.
-    // Sequentieel × 7 calls × ~3-10s = 21-70s → overschrijdt Vercel-timeout.
-    // Parallel met cap = ~3-10s wall-clock, comfortabel binnen 60s.
-    const allSuggestions = new Map();  // counterparty_name → { category_slug, confidence, reason }
-    const errors = [];
+    // Groepeer nog-te-suggesteren tx per counterparty.
+    const txsByName = new Map();  // name → tx-ids
+    const namesToClassify = new Set();
+    let skippedAlreadyCategorized = 0;
+    for (const t of txs) {
+      const name = String(t.counterparty_name || '').trim();
+      if (!name) continue;
+      if (existingBySrc.has(t.id)) { skippedAlreadyCategorized++; continue; }
+      if (!txsByName.has(name)) txsByName.set(name, []);
+      txsByName.get(name).push(t.id);
+      namesToClassify.add(name);
+    }
+    const namesList = Array.from(namesToClassify).sort();
+
+    if (namesList.length === 0) {
+      return res.status(200).json({
+        chunk_size: requestedNames.length,
+        counterparties_suggested: 0,
+        tx_rows_written: 0,
+        invalid_slug_fallback_count: 0,
+        skipped_already_categorized: skippedAlreadyCategorized,
+        tokens_used_estimate: 0,
+        errors: [],
+        note: 'Alle gevraagde counterparties zijn al gecategoriseerd (rule/manual).',
+      });
+    }
+
+    // ── Stap 4: ÉÉN Anthropic-call voor deze chunk ──
     let invalidSlugFallback = 0;
-
-    async function runBatch(batch, batchIdx) {
-      try {
-        const output = await anthropicStructuredOutput({
-          system:            SYSTEM_PROMPT,
-          messages:          [{ role: 'user', content: buildBatchPrompt(batch, allCats) }],
-          tool_name:         'classify_counterparties',
-          tool_input_schema: buildToolSchema(allowedSlugs),
-          max_tokens:        MAX_TOKENS_PER_CALL,
-          temperature:       0.2,
-        });
-        return { ok: true, output, batchIdx };
-      } catch (e) {
-        const msg = e instanceof AnthropicClientError ? `${e.code}: ${e.message}` : (e?.message || 'onbekend');
-        console.error(`[ai-suggest] batch ${batchIdx + 1}/${batches.length} fout:`, msg);
-        return { ok: false, error: msg, batchIdx };
+    const suggestions = new Map();  // name → { slug, confidence, reason }
+    const errors = [];
+    try {
+      const output = await anthropicStructuredOutput({
+        system:            SYSTEM_PROMPT,
+        messages:          [{ role: 'user', content: buildBatchPrompt(namesList, allCats) }],
+        tool_name:         'classify_counterparties',
+        tool_input_schema: buildToolSchema(allowedSlugs),
+        max_tokens:        MAX_TOKENS_PER_CALL,
+        temperature:       0.2,
+      });
+      const arr = Array.isArray(output?.suggestions) ? output.suggestions : [];
+      for (const s of arr) {
+        const name = String(s.counterparty || '').trim();
+        if (!name || !namesToClassify.has(name)) continue;
+        let slug = String(s.category_slug || '').trim();
+        if (!catBySlug.has(slug)) { invalidSlugFallback++; slug = 'overig'; }
+        const conf = Math.max(0, Math.min(1, Number(s.confidence) || 0));
+        const reason = String(s.reason || '').slice(0, 200);
+        suggestions.set(name, { slug, confidence: conf, reason });
       }
+    } catch (e) {
+      const msg = e instanceof AnthropicClientError ? `${e.code}: ${e.message}` : (e?.message || 'onbekend');
+      console.error('[ai-suggest] anthropic call fout:', msg);
+      errors.push({ message: msg });
+      // Return 200 met errors zodat de client-lus 't kan tonen en doorgaan.
     }
 
-    // Concurrency-cap: max N calls tegelijk. Simpele windowed dispatch.
-    for (let start = 0; start < batches.length; start += MAX_CONCURRENT_CALLS) {
-      const slice = batches.slice(start, start + MAX_CONCURRENT_CALLS);
-      const promises = slice.map((batch, i) => runBatch(batch, start + i));
-      const results = await Promise.allSettled(promises);
-      for (const r of results) {
-        if (r.status !== 'fulfilled') {
-          errors.push({ batch: '?', message: 'Promise rejected: ' + (r.reason?.message || 'onbekend') });
-          continue;
-        }
-        const { ok, output, error, batchIdx } = r.value;
-        if (!ok) { errors.push({ batch: batchIdx + 1, message: error }); continue; }
-        const suggestions = Array.isArray(output?.suggestions) ? output.suggestions : [];
-        for (const s of suggestions) {
-          const name = String(s.counterparty || '').trim();
-          if (!name || !namesToSuggest.has(name)) continue;
-          let slug = String(s.category_slug || '').trim();
-          if (!catBySlug.has(slug)) {
-            invalidSlugFallback++;
-            slug = 'overig';
-          }
-          const conf = Math.max(0, Math.min(1, Number(s.confidence) || 0));
-          const reason = String(s.reason || '').slice(0, 200);
-          allSuggestions.set(name, { slug, confidence: conf, reason });
-        }
-      }
-    }
-
-    // Stap 5: schrijf suggesties naar transaction_categorizations.
-    // 1 tx per counterparty krijgt de suggestie? Nee — per counterparty krijgen
-    // ALLE tx zonder rule/manual een 'ai_suggest'-rij, zodat de counterparty-
-    // consensus in de UI die suggestie ziet.
+    // ── Stap 5: UPSERT suggesties ──
     let txRowsWritten = 0;
-    if (allSuggestions.size) {
+    if (suggestions.size) {
       const rowsToUpsert = [];
-      for (const [name, sug] of allSuggestions) {
+      for (const [name, sug] of suggestions) {
         const catId = catBySlug.get(sug.slug).id;
         const txIds = txsByName.get(name) || [];
         for (const txId of txIds) {
@@ -276,13 +243,13 @@ export default async function handler(req, res) {
             category_id:         catId,
             source:              'ai_suggest',
             rule_id:             null,
-            set_by_user_id:      null,        // system
+            set_by_user_id:      null,
             ai_confidence:       sug.confidence,
             ai_reason:           sug.reason,
           });
         }
       }
-      // UPSERT chunked.
+      // Chunked upsert (Supabase-limits).
       for (let i = 0; i < rowsToUpsert.length; i += 500) {
         const slice = rowsToUpsert.slice(i, i + 500);
         const { error: upErr } = await supabaseAdmin
@@ -297,23 +264,18 @@ export default async function handler(req, res) {
       }
     }
 
-    // Stap 6: tokens-schatting (ruwe indicatie voor kosten-bewustzijn).
-    // ~100 tokens per counterparty input + ~50 tokens per suggestie output +
-    // ~500 tokens overhead per call. Bij Sonnet 4.6 ~$3/1M input, $15/1M output.
-    const inputTokensEst  = batches.length * 500 + uniqueNames.length * 100;
-    const outputTokensEst = allSuggestions.size * 50;
-    const tokensEst = inputTokensEst + outputTokensEst;
+    // Ruwe token-schatting: ~100 in/counterparty + ~50 out/suggestie + ~500 overhead.
+    const tokensEst = 500 + namesList.length * 100 + suggestions.size * 50;
 
-    console.log(`[ai-suggest] batches=${batches.length} calls=${batches.length} counterparties=${allSuggestions.size} rows=${txRowsWritten} invalid_slug=${invalidSlugFallback} tokens~${tokensEst}`);
+    console.log(`[ai-suggest] chunk_size=${requestedNames.length} classified=${suggestions.size} rows=${txRowsWritten} skipped_existing=${skippedAlreadyCategorized} invalid_slug=${invalidSlugFallback} tokens~${tokensEst}`);
 
     return res.status(200).json({
-      batches_run: batches.length,
-      calls: batches.length,
-      tokens_used_estimate: tokensEst,
-      counterparties_suggested: allSuggestions.size,
-      tx_rows_written: txRowsWritten,
-      invalid_slug_fallback_count: invalidSlugFallback,
-      unique_names_total: uniqueNames.length,
+      chunk_size:                     requestedNames.length,
+      counterparties_suggested:       suggestions.size,
+      tx_rows_written:                txRowsWritten,
+      invalid_slug_fallback_count:    invalidSlugFallback,
+      skipped_already_categorized:    skippedAlreadyCategorized,
+      tokens_used_estimate:           tokensEst,
       errors,
     });
   } catch (e) {
