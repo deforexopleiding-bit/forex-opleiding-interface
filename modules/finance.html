@@ -4560,6 +4560,27 @@
         </div>
       </div>
 
+<!-- Dashboard-blok: 3 grafieken (categorie, maand-trend, 3-way split) -->
+      <div id="expDashboardWrap" style="margin-bottom:16px;display:none">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px" data-exp-dashboard-grid>
+          <!-- 1. Per categorie -->
+          <div class="exp-chart-card" style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:var(--bg-elev);min-width:0">
+            <div style="font-size:12px;font-weight:600;color:var(--text-dim);text-transform:uppercase;margin-bottom:10px">Uitgaven per categorie</div>
+            <div id="expChartCategories" style="width:100%;max-width:100%;overflow:hidden"><div style="color:var(--text-faint);font-size:12px;padding:20px 0;text-align:center">Laden…</div></div>
+          </div>
+          <!-- 2. Per maand (trend) -->
+          <div class="exp-chart-card" style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:var(--bg-elev);min-width:0">
+            <div style="font-size:12px;font-weight:600;color:var(--text-dim);text-transform:uppercase;margin-bottom:10px">Uitgaven per maand</div>
+            <div id="expChartMonths" style="width:100%;max-width:100%;overflow:hidden"><div style="color:var(--text-faint);font-size:12px;padding:20px 0;text-align:center">Laden…</div></div>
+          </div>
+          <!-- 3. Operationeel vs vennoten vs belasting -->
+          <div class="exp-chart-card" style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:var(--bg-elev);min-width:0">
+            <div style="font-size:12px;font-weight:600;color:var(--text-dim);text-transform:uppercase;margin-bottom:10px">Operationeel · vennoten · belasting</div>
+            <div id="expChartGroups" style="width:100%;max-width:100%;overflow:hidden"><div style="color:var(--text-faint);font-size:12px;padding:20px 0;text-align:center">Laden…</div></div>
+          </div>
+        </div>
+      </div>
+
       <!-- KPI-strip: totaal uitgaven / totaal ongecategoriseerd / #tegenpartijen -->
       <div class="exp-kpi-strip" id="expKpiStrip" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
         <div class="exp-kpi-card"><div class="exp-kpi-lbl">Totaal uitgaven</div><div class="exp-kpi-val" id="expKpiTotal">—</div><div class="exp-kpi-sub" id="expKpiPeriod">—</div></div>
@@ -19110,14 +19131,16 @@
     if (params.get('from')) recParams.set('from', params.get('from'));
     if (params.get('to'))   recParams.set('to',   params.get('to'));
     try {
-      const [cpR, brR, recR] = await Promise.all([
+      const [cpR, brR, recR, dashR] = await Promise.all([
         window.AgentShared.apiFetch('/api/finance-expenses-counterparties?' + params.toString()),
         window.AgentShared.apiFetch('/api/finance-expenses-breakdown?' + params.toString()),
         window.AgentShared.apiFetch('/api/finance-expenses-recurring?' + recParams.toString()),
+        window.AgentShared.apiFetch('/api/finance-expenses-dashboard?' + params.toString()),
       ]);
       const cpD = await cpR.json();
       const brD = await brR.json();
       const recD = recR.ok ? await recR.json() : null;
+      const dashD = dashR.ok ? await dashR.json() : null;
       if (!cpR.ok) throw new Error(cpD?.error || 'counterparties fetch');
       if (!brR.ok) throw new Error(brD?.error || 'breakdown fetch');
       _expensesState.counterparties = cpD.counterparties || [];
@@ -19127,6 +19150,9 @@
       // Recurring is best-effort — een fout mag de rest van de view niet blokkeren.
       if (recD) renderExpRecurring(recD);
       else console.warn('[expenses] recurring endpoint faalde');
+      // Dashboard is best-effort.
+      if (dashD) renderExpDashboard(dashD);
+      else console.warn('[expenses] dashboard endpoint faalde');
     } catch (e) {
       console.error('[expenses] load:', e);
       const tb = document.getElementById('expCpTbody');
@@ -19135,6 +19161,127 @@
   }
 
   // ── Vaste lasten & besparen — renderer ──────────────────────────────────
+  // ── Dashboard: 3 grafieken (inline SVG, geen dependency) ────────────────
+  function renderExpDashboard(d) {
+    const wrap = document.getElementById('expDashboardWrap');
+    if (!wrap) return;
+    const total = Math.abs(d.total_expenses_cents || 0);
+    if (!total) { wrap.style.display = 'none'; return; }
+    wrap.style.display = '';
+    _renderChartCategories(d.by_category);
+    _renderChartMonths(d.by_month);
+    _renderChartGroups(d.by_group);
+  }
+
+  // Grafiek 1 — horizontale staaf per categorie (top 8 + rest gebundeld).
+  function _renderChartCategories(byCat) {
+    const el = document.getElementById('expChartCategories');
+    if (!el) return;
+    const cats = (byCat?.categories || []).filter(c => c.total_cents !== 0);
+    const uncat = byCat?.uncategorized;
+    if (uncat && uncat.total_cents !== 0) {
+      cats.push({ id: '__uncat__', label: 'Nog te categoriseren', color: '#94a3b8', total_cents: uncat.total_cents, tx_count: uncat.tx_count });
+    }
+    if (!cats.length) { el.innerHTML = '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px 0">Geen data</div>'; return; }
+    // Sorteer meest-negatief eerst (grootste uitgave bovenaan).
+    cats.sort((a, b) => a.total_cents - b.total_cents);
+    // Top 8 + rest bundelen als "Overig (N categorieën)".
+    let rows = cats;
+    if (cats.length > 9) {
+      const top = cats.slice(0, 8);
+      const rest = cats.slice(8);
+      const restSum = rest.reduce((s, c) => s + c.total_cents, 0);
+      const restCnt = rest.reduce((s, c) => s + (c.tx_count || 0), 0);
+      rows = [...top, { id: '__rest__', label: `Rest (${rest.length}×)`, color: '#cbd5e1', total_cents: restSum, tx_count: restCnt }];
+    }
+    const maxAbs = Math.max(...rows.map(r => Math.abs(r.total_cents)));
+    const total = rows.reduce((s, r) => s + Math.abs(r.total_cents), 0);
+    const rowH = 22;
+    const labelW = 130;
+    const valueW = 90;
+    const svgH = rows.length * rowH + 10;
+    const svgW = 620;   // viewBox — schaalt via width:100%
+    const barMaxW = svgW - labelW - valueW - 20;
+    const bars = rows.map((r, i) => {
+      const y = 5 + i * rowH;
+      const w = maxAbs > 0 ? Math.max(1, (Math.abs(r.total_cents) / maxAbs) * barMaxW) : 0;
+      const pct = total > 0 ? Math.round((Math.abs(r.total_cents) / total) * 1000) / 10 : 0;
+      const lbl = _esc(r.label || '');
+      const val = _fmtEurCents(-Math.abs(r.total_cents));
+      const clr = r.color || '#94a3b8';
+      return `<g>
+        <text x="0" y="${y + 14}" font-size="11" fill="var(--text)" style="font-family:system-ui,-apple-system,sans-serif">${lbl}</text>
+        <rect x="${labelW}" y="${y + 4}" width="${w}" height="14" rx="3" fill="${clr}" opacity="0.85"></rect>
+        <text x="${svgW - 4}" y="${y + 14}" text-anchor="end" font-size="11" font-variant-numeric="tabular-nums" fill="var(--text-dim)">${val} · ${pct}%</text>
+      </g>`;
+    }).join('');
+    el.innerHTML = `<svg viewBox="0 0 ${svgW} ${svgH}" width="100%" style="max-width:100%;height:auto;display:block" preserveAspectRatio="xMinYMin meet" aria-label="Uitgaven per categorie">${bars}</svg>`;
+  }
+
+  // Grafiek 2 — verticale staven per maand (trend over de tijd).
+  function _renderChartMonths(byMonth) {
+    const el = document.getElementById('expChartMonths');
+    if (!el) return;
+    const arr = (byMonth || []).slice();
+    if (!arr.length) { el.innerHTML = '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px 0">Geen data</div>'; return; }
+    const maxAbs = Math.max(...arr.map(m => Math.abs(m.total_cents)));
+    const svgW = 620, svgH = 200;
+    const padL = 8, padR = 8, padT = 10, padB = 40;
+    const chartW = svgW - padL - padR;
+    const chartH = svgH - padT - padB;
+    const barGap = 4;
+    const barW = Math.max(3, (chartW / arr.length) - barGap);
+    const showLabelEvery = Math.max(1, Math.ceil(arr.length / 8));
+    const bars = arr.map((m, i) => {
+      const h = maxAbs > 0 ? (Math.abs(m.total_cents) / maxAbs) * chartH : 0;
+      const x = padL + i * (barW + barGap);
+      const y = padT + (chartH - h);
+      const showLbl = (i === arr.length - 1) || (i % showLabelEvery === 0);
+      const lblShort = m.month.slice(2);   // 'YY-MM'
+      return `<g>
+        <rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="#dc2626" opacity="0.75" rx="1">
+          <title>${_esc(m.month)}: ${_fmtEurCents(m.total_cents)} (${m.tx_count} tx)</title>
+        </rect>
+        ${showLbl ? `<text x="${x + barW / 2}" y="${svgH - padB + 14}" text-anchor="middle" font-size="10" fill="var(--text-dim)">${lblShort}</text>` : ''}
+      </g>`;
+    }).join('');
+    // Y-as gridlines op 25/50/75/100% van maxAbs
+    const gridlines = [0.25, 0.5, 0.75, 1].map(f => {
+      const y = padT + chartH * (1 - f);
+      const val = _fmtEurCents(-Math.round(maxAbs * f));
+      return `<g>
+        <line x1="${padL}" y1="${y}" x2="${svgW - padR}" y2="${y}" stroke="var(--border)" stroke-dasharray="2,3" opacity="0.4"></line>
+        <text x="${padL + 2}" y="${y - 2}" font-size="9" fill="var(--text-faint)">${val}</text>
+      </g>`;
+    }).join('');
+    el.innerHTML = `<svg viewBox="0 0 ${svgW} ${svgH}" width="100%" style="max-width:100%;height:auto;display:block" preserveAspectRatio="xMinYMin meet" aria-label="Uitgaven per maand">${gridlines}${bars}</svg>`;
+  }
+
+  // Grafiek 3 — 3 grote KPI-blokken: operationeel · vennoten · belasting.
+  function _renderChartGroups(g) {
+    const el = document.getElementById('expChartGroups');
+    if (!el) return;
+    if (!g) { el.innerHTML = '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px 0">Geen data</div>'; return; }
+    const blocks = [
+      { key: 'op', label: 'Operationeel', color: '#dc2626', cents: g.operational_cents || 0, count: g.operational_count || 0 },
+      { key: 'vn', label: 'Vennoten',     color: '#a855f7', cents: g.partners_cents    || 0, count: g.partners_count    || 0 },
+      { key: 'bl', label: 'Belasting',    color: '#f97316', cents: g.taxes_cents       || 0, count: g.taxes_count       || 0 },
+    ];
+    const total = blocks.reduce((s, b) => s + Math.abs(b.cents), 0);
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+        ${blocks.map(b => {
+          const pct = total > 0 ? Math.round((Math.abs(b.cents) / total) * 1000) / 10 : 0;
+          return `<div style="border-left:4px solid ${b.color};padding:8px 10px;background:var(--bg);border-radius:6px;min-width:0">
+            <div style="font-size:10.5px;text-transform:uppercase;color:var(--text-dim);font-weight:600;letter-spacing:0.02em">${_esc(b.label)}</div>
+            <div style="font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;color:${b.cents < 0 ? '#dc2626' : 'var(--text)'};margin-top:2px;line-height:1.15">${_fmtEurCents(b.cents)}</div>
+            <div style="font-size:11px;color:var(--text-dim);margin-top:2px">${pct}% · ${b.count} tx</div>
+          </div>`;
+        }).join('')}
+      </div>
+    `;
+  }
+
   function renderExpRecurring(d) {
     const tb = document.getElementById('expRecurringTbody');
     if (!tb) return;
