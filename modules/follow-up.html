@@ -3262,6 +3262,22 @@
       /* .fu-modal-close (× top-right): comfortabele tap-target */
       .fu-modal-close { min-width: 44px; min-height: 44px; }
 
+      /* Verberg de globale "+ Taak" FAB (.qt-float uit shared/quick-task-
+         button.js, fixed right:20 bottom:20) op ≤720px tijdens:
+         (a) actieve bel-overlay — .fu-softphone-callbar heeft [hidden]
+             attribute default; bij actief gesprek wordt 'ie verwijderd
+             (JS: hidden = false), dus :not([hidden]) matcht dán.
+         (b) elke open fullscreen-modal (.fu-modal-backdrop met inline
+             display niet 'none', of .fu-modal-overlay zonder .hidden).
+         Zo blijft de FAB overal beschikbaar buiten deze gevallen, en
+         zijn ophang-/actieknoppen (bel) + sluitknoppen (modals) altijd
+         onbelemmerd. Desktop >720px ongewijzigd. */
+      body:has(.fu-softphone-callbar:not([hidden])) .qt-float,
+      body:has(.fu-modal-backdrop:not([style*="display: none"])) .qt-float,
+      body:has(.fu-modal-overlay:not(.hidden)) .qt-float {
+        display: none !important;
+      }
+
       /* Softphone-callbar extra hardening: z-index boven detailbody +
          max-width zodat 'ie nooit off-screen valt bij horizontal-scroll
          van andere content. */
