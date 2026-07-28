@@ -4617,6 +4617,9 @@
         <label class="exp-filter-lbl" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer" title="Interne overboekingen tussen eigen rekeningen (bv. ING → PayPal-oplaad). Default verborgen om dubbeltelling met PayPal-uitgaven te voorkomen.">
           <input type="checkbox" id="expFilterInternalTransfers" /> Toon interne overboekingen
         </label>
+        <label class="exp-filter-lbl" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer" title="PayPal-terugbetalingen/credits die bij uitgaven horen (bv. Twilio-refund). Default verborgen omdat ze de echte uitgaven wegstreepten.">
+          <input type="checkbox" id="expFilterCredits" /> Toon terugbetalingen
+        </label>
         <label class="exp-filter-lbl" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer" title="Toon alleen tegenpartijen met een openstaande AI-suggestie (paarse voorselectie in de picker).">
           <input type="checkbox" id="expFilterOnlyAiSuggest" /> Alleen AI-suggesties
         </label>
@@ -18910,7 +18913,7 @@
     } catch (e) { console.warn('[expenses] categories load:', e.message); }
 
     // Wire filters + buttons (1x).
-    ['expFilterFrom','expFilterTo','expFilterSource','expFilterCategory','expFilterUncat','expFilterInternal','expFilterIncoming','expFilterInternalTransfers']
+    ['expFilterFrom','expFilterTo','expFilterSource','expFilterCategory','expFilterUncat','expFilterInternal','expFilterIncoming','expFilterInternalTransfers','expFilterCredits']
       .forEach(id => {
         const el = document.getElementById(id);
         if (el && !el._expWired) { el._expWired = true; el.addEventListener('change', loadExpensesData); }
@@ -19112,6 +19115,7 @@
     const inte = document.getElementById('expFilterInternal')?.checked;
     const inc  = document.getElementById('expFilterIncoming')?.checked;
     const it   = document.getElementById('expFilterInternalTransfers')?.checked;
+    const cr   = document.getElementById('expFilterCredits')?.checked;
     if (from) p.set('from', from);
     if (to)   p.set('to', to);
     if (src && src !== 'all') p.set('source', src);
@@ -19120,6 +19124,7 @@
     if (inte) p.set('include_internal', '1');
     if (inc)  p.set('include_incoming', '1');
     if (it)   p.set('include_internal_transfers', '1');
+    if (cr)   p.set('include_credits', '1');
     return p;
   }
 
