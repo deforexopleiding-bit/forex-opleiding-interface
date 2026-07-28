@@ -120,6 +120,7 @@ export function buildCounterpartyRows(groups, catMetaById, filters = {}) {
     includeInternal          = false,
     includeInternalTransfers = false,
     includeIncoming          = false,
+    includeCredits           = false,
     onlyUncategorized        = false,
     categoryFilter           = null,
   } = filters;
@@ -130,8 +131,10 @@ export function buildCounterpartyRows(groups, catMetaById, filters = {}) {
     const { categoryId, source } = consensusCategoryForGroup(g);
     const category = categoryId ? (catMetaById?.get?.(categoryId) || null) : null;
     // Interne overboekingen (bv. ING → PayPal) verbergen tenzij expliciet gevraagd.
-    // Signaal: de counterparty-categorie is gemarkeerd als is_internal.
     if (!includeInternalTransfers && category && category.is_internal === true) continue;
+    // PayPal-terugbetalingen/credits verbergen tenzij expliciet gevraagd.
+    // Signaal: category.is_credit=true (systeem-cat 'terugbetalingen-credits').
+    if (!includeCredits && category && category.is_credit === true) continue;
     if (onlyUncategorized && category) continue;
     if (categoryFilter && (!category || category.id !== categoryFilter)) continue;
     rows.push({
@@ -187,15 +190,19 @@ export function filterTransactionsForBreakdown(txs, catByTxId, catMetaById, filt
     includeInternal          = false,
     includeInternalTransfers = false,
     includeIncoming          = false,
+    includeCredits           = false,
   } = filters || {};
   return (txs || []).filter(t => {
     const name = String(t.counterparty_name || EMPTY_NAME).trim() || EMPTY_NAME;
     if (!includeInternal && (INTERNAL_NAMES.has(name) || name === EMPTY_NAME)) return false;
     if (!includeIncoming && Number(t.amount_cents) >= 0) return false;
-    if (!includeInternalTransfers && catByTxId && catMetaById) {
+    if (catByTxId && catMetaById) {
       const cat = catByTxId.get?.(t.id);
       const meta = cat ? catMetaById.get?.(cat.category_id) : null;
-      if (meta && meta.is_internal === true) return false;
+      if (meta) {
+        if (!includeInternalTransfers && meta.is_internal === true) return false;
+        if (!includeCredits          && meta.is_credit   === true) return false;
+      }
     }
     return true;
   });
@@ -229,7 +236,12 @@ export function computeBreakdown(txs, catByTxId, allCats) {
   // die tx sowieso al gefilterd waren via filterTransactionsForBreakdown,
   // dus buckets voor interne categorieën staan hier op 0. We droppen ze uit
   // de output-lijst zodat de UI ze niet als lege rij toont.
-  const categories = (allCats || []).filter(cat => cat.is_internal !== true).map(cat => {
+  // Interne + credit-categorieën verbergen we uit de breakdown-output (die
+  // stromen tellen niet mee als operationele uitgave). Callers zorgen dat de
+  // tx ook al gefilterd zijn via filterTransactionsForBreakdown.
+  const categories = (allCats || [])
+    .filter(cat => cat.is_internal !== true && cat.is_credit !== true)
+    .map(cat => {
     const b = bucketByCat.get(cat.id) || { total: 0, count: 0 };
     return {
       id:          cat.id,

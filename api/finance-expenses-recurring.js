@@ -103,18 +103,22 @@ export default async function handler(req, res) {
       for (const c of (data || [])) catByTxId.set(c.camt_transaction_id, c);
     }
 
-    // Stap 4: fetch category-metadata (voor is_internal check + display).
+    // Stap 4: fetch category-metadata (voor is_internal + is_credit check + display).
     const { data: allCats } = await supabaseAdmin
       .from('expense_categories')
-      .select('id, slug, label, color, is_internal');
+      .select('id, slug, label, color, is_internal, is_credit');
     const catMetaById = new Map((allCats || []).map(c => [c.id, c]));
 
-    // Stap 5: filter interne overboekingen (categorie is_internal=true).
+    // Stap 5: filter interne overboekingen + PayPal-credits.
+    // Credits zijn per definitie geen terugkerende uitgave; interne
+    // overboekingen ook niet.
     const nonInternalTxs = cleanTxs.filter(t => {
       const cat = catByTxId.get(t.id);
       if (!cat) return true;  // ongecategoriseerd = wél meenemen
       const meta = catMetaById.get(cat.category_id);
-      return !(meta && meta.is_internal === true);
+      if (meta && meta.is_internal === true) return false;
+      if (meta && meta.is_credit   === true) return false;
+      return true;
     });
 
     // Stap 6: draai de detector.

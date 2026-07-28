@@ -46,6 +46,7 @@ export default async function handler(req, res) {
   const includeInternal          = String(q.include_internal || '') === '1';
   const includeInternalTransfers = String(q.include_internal_transfers || '') === '1';
   const includeIncoming          = String(q.include_incoming || '') === '1';
+  const includeCredits           = String(q.include_credits || '') === '1';
 
   try {
     // Fetch alle relevante tx (chunked). Alleen non-Memo want die zijn al
@@ -91,15 +92,15 @@ export default async function handler(req, res) {
     // Alle categorieën met is_internal-flag (voor labels + interne-filter).
     const { data: allCats } = await supabaseAdmin
       .from('expense_categories')
-      .select('id, slug, label, color, is_internal')
+      .select('id, slug, label, color, is_internal, is_credit')
       .eq('is_active', true)
       .order('label');
     const catMetaById = new Map((allCats || []).map(c => [c.id, c]));
 
-    // Filter: intern + interne overboekingen + incoming (pure helper — uitgaven-only default).
+    // Filter: intern + interne overboekingen + credits + incoming (pure helper — uitgaven-only default).
     const filteredTxs = filterTransactionsForBreakdown(
       txs, catByTxId, catMetaById,
-      { includeInternal, includeInternalTransfers, includeIncoming }
+      { includeInternal, includeInternalTransfers, includeIncoming, includeCredits }
     );
 
     // Aggregeer (pure helper — filtert interne categorieën uit output-lijst).
