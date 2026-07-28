@@ -23,6 +23,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { netPaypalAuthorizations } from './_lib/expenses-grouping.js';
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -89,21 +90,29 @@ export default async function handler(req, res) {
 
     // Post-filter voor uncategorized / category (in-app want camt_transactions
     // heeft geen categorisation-FK; we joinen in JS).
-    const items = txs
-      .map(t => {
-        const cat = catByTxId.get(t.id);
-        return {
-          ...t,
-          category:        cat ? (catMetaById.get(cat.category_id) || null) : null,
-          category_source: cat ? cat.source : null,
-          rule_id:         cat ? cat.rule_id : null,
-        };
-      })
-      .filter(t => {
-        if (onlyUncategorized && t.category) return false;
-        if (categoryFilter && (!t.category || t.category.id !== categoryFilter)) return false;
-        return true;
-      });
+    const enrichedTxs = txs.map(t => {
+      const cat = catByTxId.get(t.id);
+      return {
+        ...t,
+        category:        cat ? (catMetaById.get(cat.category_id) || null) : null,
+        category_source: cat ? cat.source : null,
+        rule_id:         cat ? cat.rule_id : null,
+      };
+    });
+
+    // ── PayPal-autorisatie-netting ──
+    // Net "-Af + +Overige-Bij" op zelfde (counterparty, datum, source) samen
+    // tot één netto-regel. Groepen met netto €0 (autorisatie 100% teruggeboekt)
+    // verdwijnen uit de lijst. Zo is de detail-popup consistent met de
+    // tegenpartijen-lijst (en toont niet meer de misleidende +regels als
+    // "inkomst"). Signaal: source='paypal' + amount>0 + code='Overige'.
+    const nettedTxs = netPaypalAuthorizations(enrichedTxs);
+
+    const items = nettedTxs.filter(t => {
+      if (onlyUncategorized && t.category) return false;
+      if (categoryFilter && (!t.category || t.category.id !== categoryFilter)) return false;
+      return true;
+    });
 
     return res.status(200).json({
       items,

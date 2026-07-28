@@ -17,6 +17,7 @@ import {
   filterTransactionsForBreakdown,
   computeBreakdown,
   aiSuggestionsByCounterparty,
+  netPaypalAuthorizations,
 } from '../api/_lib/expenses-grouping.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────
@@ -561,4 +562,94 @@ test('aiSuggestionsByCounterparty: bij tie op cnt wint hoogste avg confidence', 
   const out = aiSuggestionsByCounterparty(txs, aiSuggestByTxId);
   const x = out.get('X');
   assert.equal(x.category_id, 'cat-b', 'tie → hoogste confidence wint');
+});
+
+// ── netPaypalAuthorizations — netting voor detail-popup ──────────────────
+
+function mkPayTx(id, name, cents, date, code = 'Algemene PayPal-bankpastransactie') {
+  return { id, counterparty_name: name, amount_cents: cents, booking_date: date, source: 'paypal', transaction_code: code };
+}
+
+test('netPaypalAuthorizations: Twilio Apr → -Af + +Overige-Bij netten tot -€0,48', () => {
+  const items = [
+    mkPayTx('a1', 'TWILIO.COM', -3831, '2026-04-24', 'Algemene PayPal-bankpastransactie'),
+    mkPayTx('b1', 'TWILIO.COM',  3783, '2026-04-24', 'Overige'),
+  ];
+  const out = netPaypalAuthorizations(items);
+  assert.equal(out.length, 1, 'twee tx samengevoegd tot één');
+  assert.equal(out[0].amount_cents, -48);
+  assert.equal(out[0]._netted_from, 2);
+  assert.equal(out[0].id, 'a1', 'anchor is de -Af tx (voor category-picker)');
+});
+
+test('netPaypalAuthorizations: Twilio Nov (100% teruggeboekt) verdwijnt uit lijst', () => {
+  const items = [
+    mkPayTx('a1', 'TWILIO.COM', -3514, '2025-11-24'),
+    mkPayTx('b1', 'TWILIO.COM',  3514, '2025-11-24', 'Overige'),
+  ];
+  const out = netPaypalAuthorizations(items);
+  assert.equal(out.length, 0, 'netto €0 → geen echte uitgave → weggelaten');
+});
+
+test('netPaypalAuthorizations: solo tx (geen paar) blijft ongewijzigd', () => {
+  const items = [
+    mkPayTx('a1', 'Meta', -100000, '2026-01-15', 'Vooraf goedgekeurde betaling'),
+  ];
+  const out = netPaypalAuthorizations(items);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].amount_cents, -100000);
+  assert.equal(out[0]._netted_from, undefined, 'geen netting-metadata want geen groep');
+});
+
+test('netPaypalAuthorizations: klant-inkomst (Express Checkout) niet netten (geen Af in groep)', () => {
+  const items = [
+    { id: 'k1', counterparty_name: 'Bas Van Leijden', amount_cents: 9625, booking_date: '2026-01-15', source: 'paypal', transaction_code: 'Express Checkout-betaling' },
+  ];
+  const out = netPaypalAuthorizations(items);
+  assert.equal(out.length, 1, 'klant-inkomst blijft zichtbaar');
+  assert.equal(out[0].amount_cents, 9625);
+});
+
+test('netPaypalAuthorizations: CAMT-tx (source=camt) niet netten', () => {
+  const items = [
+    { id: 'c1', counterparty_name: 'Huurbaas', amount_cents: -100000, booking_date: '2026-01-01', source: 'camt', transaction_code: null },
+    { id: 'c2', counterparty_name: 'Huurbaas', amount_cents:  50000,  booking_date: '2026-01-01', source: 'camt', transaction_code: null },
+  ];
+  const out = netPaypalAuthorizations(items);
+  // Geen +Overige Bij (want geen paypal), dus geen netting.
+  assert.equal(out.length, 2);
+});
+
+test('netPaypalAuthorizations: gemengde groep (Af + Overige + andere Bij) — nette + andere apart', () => {
+  const items = [
+    mkPayTx('a1', 'Merchant', -1000, '2026-03-10'),
+    mkPayTx('b1', 'Merchant',   800, '2026-03-10', 'Overige'),               // netting
+    mkPayTx('c1', 'Merchant',   500, '2026-03-10', 'Terugbetaling'),          // apart (echte refund)
+  ];
+  const out = netPaypalAuthorizations(items);
+  assert.equal(out.length, 2, '1 genette (Af+Overige) + 1 aparte Terugbetaling');
+  const netted = out.find(t => t._netted_from);
+  assert.equal(netted.amount_cents, -200);
+  const refund = out.find(t => !t._netted_from);
+  assert.equal(refund.transaction_code, 'Terugbetaling');
+});
+
+test('netPaypalAuthorizations: lege input → lege output', () => {
+  assert.deepEqual(netPaypalAuthorizations([]), []);
+  assert.deepEqual(netPaypalAuthorizations(null), []);
+});
+
+test('netPaypalAuthorizations: som van output == som van input (invariant, behalve €0-groepen)', () => {
+  // Twilio Apr netto -0,48 blijft; Twilio Nov netto 0 verdwijnt.
+  const items = [
+    mkPayTx('a1', 'TWILIO', -3831, '2026-04-24'),
+    mkPayTx('b1', 'TWILIO',  3783, '2026-04-24', 'Overige'),
+    mkPayTx('a2', 'TWILIO', -3514, '2025-11-24'),
+    mkPayTx('b2', 'TWILIO',  3514, '2025-11-24', 'Overige'),
+    mkPayTx('m1', 'Meta',   -50000, '2026-02-01', 'Vooraf goedgekeurde betaling'),
+  ];
+  const inSum  = items.reduce((s, t) => s + t.amount_cents, 0);
+  const outSum = netPaypalAuthorizations(items).reduce((s, t) => s + t.amount_cents, 0);
+  // Nov-Twilio (€0) verdwijnt, inSum en outSum verschillen daar niet in (want +0).
+  assert.equal(outSum, inSum);
 });

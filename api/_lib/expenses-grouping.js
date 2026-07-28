@@ -14,6 +14,79 @@ export const INTERNAL_NAMES = new Set(['(intern PayPal)']);
 export const EMPTY_NAME = '(leeg)';
 
 /**
+ * Net PayPal-autorisatie-terugboekingen tegen hun -Af-parent binnen dezelfde
+ * (counterparty, booking_date, source)-groep. Alleen groepen die een
+ * "Overige"-Bij bevatten worden gemerged; andere tx blijven onaangeroerd.
+ *
+ * Signaal (bewezen, 100% precisie): `source='paypal' AND amount>0 AND
+ * transaction_code='Overige'` matcht via `end_to_end_id → entry_reference` een
+ * -Af-parent. In de praktijk zit die parent op dezelfde datum, dus we
+ * groeperen simpelweg op (counterparty, booking_date, source).
+ *
+ * Output-shape per genette rij:
+ *   - Alle Af-velden van de anchor (eerste -Af in groep)
+ *   - `amount_cents` = SOM van alle Af's + Bij Overige in de groep
+ *   - `_netted_from` = aantal originele raw tx die zijn samengevoegd
+ *   - `_raw_tx_ids` = array met alle originele tx-id's
+ *
+ * Groepen die netto €0 zijn (autorisatie 100% teruggeboekt) worden
+ * WEGGELATEN — die zijn geen echte uitgave meer.
+ *
+ * Klant-inkomsten (+Express Checkout etc.) blijven onaangeroerd — die zitten
+ * niet in een groep met een Af.
+ */
+export function netPaypalAuthorizations(items) {
+  if (!Array.isArray(items) || items.length === 0) return items || [];
+  const groupKey = (t) => `${t.counterparty_name || ''}|${t.booking_date || ''}|${t.source || ''}`;
+  const groups = new Map();
+  for (const t of items) {
+    const k = groupKey(t);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(t);
+  }
+  const out = [];
+  for (const [, arr] of groups) {
+    if (arr.length === 1) { out.push(arr[0]); continue; }
+    // Kandidaten voor netting: alle "Overige"-Bij van source=paypal met amount>0.
+    const overigeBij = arr.filter(t =>
+      t.source === 'paypal' &&
+      Number(t.amount_cents) > 0 &&
+      t.transaction_code === 'Overige'
+    );
+    if (overigeBij.length === 0) {
+      // Geen +Overige in deze groep → geen netting nodig, alles apart.
+      for (const t of arr) out.push(t);
+      continue;
+    }
+    // Netting: alle Af's + alle +Overige samen; overige tx (bv. Express
+    // Checkout klant-inkomst) apart.
+    const afs = arr.filter(t => Number(t.amount_cents) < 0);
+    if (afs.length === 0) {
+      // Alleen +Overige zonder Af — zeldzame edge, laat maar door.
+      for (const t of arr) out.push(t);
+      continue;
+    }
+    const others = arr.filter(t => !afs.includes(t) && !overigeBij.includes(t));
+    const nettingTxs = [...afs, ...overigeBij];
+    const netto = nettingTxs.reduce((s, t) => s + (Number(t.amount_cents) || 0), 0);
+    if (netto !== 0) {
+      const anchor = afs[0];
+      out.push({
+        ...anchor,
+        amount_cents:   netto,
+        _netted_from:   nettingTxs.length,
+        _raw_tx_ids:    nettingTxs.map(t => t.id),
+      });
+    }
+    // Netto €0 → autorisatie volledig teruggeboekt, groep verdwijnt uit lijst.
+    for (const t of others) out.push(t);
+  }
+  // Sorteer op booking_date desc (behoud origineel ordening-gedrag).
+  out.sort((a, b) => String(b.booking_date || '').localeCompare(String(a.booking_date || '')));
+  return out;
+}
+
+/**
  * Groepeer transacties per counterparty_name (getrimd; leeg → '(leeg)').
  * Retourneert een Map: name → { total, count, first, last, catCounts, manualCount }
  */
