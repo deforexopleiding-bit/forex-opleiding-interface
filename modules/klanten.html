@@ -1404,7 +1404,7 @@ function bindKoOffSegs() {
 
 const KO_SUB_COLOR = { active: '#059669', paused: '#f59e0b', cancelled: '#94a3b8' };
 const KO_SUB_BADGE = { active: 'green', paused: 'warning', cancelled: 'gray' };
-let koSubs = [], koAboPending = null, koAboSeg = 'active';
+let koSubs = [], koAboPending = null, koAboSeg = 'active', koBypassEvents = [];
 function koSubInclPerTerm(s) { const lis = Array.isArray(s.line_items) ? s.line_items : []; return lis.length ? lis.reduce((a, li) => a + (Number(li.amount) || 0) * (1 + (Number(li.vat_percentage) || 0) / 100), 0) : (Number(s.amount) || 0) * (1 + (Number(s.vat_percentage) || 0) / 100); }
 // === Facturen sub-tab (read-only TL-spiegel, Finance Fase 2A) ===
 const KO_INV_TAG = { concept: 'gray', open: 'blue', partially_paid: 'warning', paid: 'green', overdue: 'danger', credited: 'purple', partially_credited: 'purple', writeoff: 'gray' };
@@ -2184,6 +2184,7 @@ async function renderAbonnementenTab() {
     const d = await res.json();
     koSubs = d.subscriptions || [];
     koAboPending = d.pending_deal_id || null;
+    koBypassEvents = Array.isArray(d.bypass_events) ? d.bypass_events : [];
     renderKoAbos();
   } catch (e) { wrap.innerHTML = '<div class="placeholder-card">Laden mislukt: ' + escapeHtml(e.message) + '</div>'; }
 }
@@ -2205,6 +2206,19 @@ function renderKoAbos() {
     <div class="kpi-cell"><div class="kpi-lbl">Lifetime value</div><div class="kpi-val">${eur2(ltv)}</div></div>
     <div class="kpi-cell"><div class="kpi-lbl">Loopt t/m</div><div class="kpi-val">${loptTm ? fmtDate(loptTm) : '—'}</div></div>
   </div>`;
+  // Bypass-banner: als bij één of meer deals van deze klant de €100
+  // reserveringsfee is omzeild, tonen we dat expliciet. Multiple events →
+  // meerdere regels (elke deal apart). Zichtbaar voor iedereen die de
+  // abo-tab kan openen — het is een transparantie-signaal, geen actie-knop.
+  const bypassBanner = (koBypassEvents && koBypassEvents.length) ? `<div class="card" style="border:1px solid #b45309;background:rgba(180,83,9,.06);padding:12px;margin-bottom:12px">
+    ${koBypassEvents.map(ev => `<div style="display:flex;gap:8px;align-items:flex-start;font-size:13px${koBypassEvents.length > 1 ? ';padding:4px 0;border-top:1px dashed rgba(180,83,9,.2)' : ''}">
+      <i class="ti ti-alert-triangle" style="color:#b45309;font-size:16px;margin-top:1px"></i>
+      <div style="flex:1">
+        <div><strong style="color:#b45309">Reserveringsfee omzeild</strong> door ${escapeHtml(ev.by_name || 'onbekend')} op ${ev.at ? fmtDate(ev.at) : '—'}</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-top:2px">Reden: "${escapeHtml(ev.reason || '—')}"</div>
+      </div>
+    </div>`).join('')}
+  </div>` : '';
   const segCount = (k) => k === 'alle' ? subs.length : subs.filter(s => (s.status || 'active') === k).length;
   const SEGS = [['active', 'Actief'], ['paused', 'Gepauzeerd'], ['alle', 'Alle'], ['cancelled', 'Gedeactiveerd']];
   const bulkBtn = active.length > 1 ? `<button class="sr-abtn warning" id="postpone-all-btn">Stel alle abo's uit (${active.length})</button>` : '';
@@ -2213,7 +2227,7 @@ function renderKoAbos() {
     <div class="sr-segments" id="koAboSegments" style="margin-bottom:0">${SEGS.map(([k, l]) => `<button class="sr-seg${koAboSeg === k ? ' active' : ''}" data-seg="${k}">${l} <span class="sr-seg-n">${segCount(k)}</span></button>`).join('')}</div>
     <div style="display:flex;gap:8px">${bulkBtn}${newBtn}</div></div>`;
   const list = subs.filter(s => koAboSeg === 'alle' || (s.status || 'active') === koAboSeg);
-  if (!list.length) { wrap.innerHTML = kpi + pills + '<div class="placeholder-card">Geen abonnementen in deze selectie.</div>'; bindKoAbo(); return; }
+  if (!list.length) { wrap.innerHTML = kpi + bypassBanner + pills + '<div class="placeholder-card">Geen abonnementen in deze selectie.</div>'; bindKoAbo(); return; }
   const rows = list.map((s, i) => {
     const st = s.status || 'active';
     const lis = Array.isArray(s.line_items) ? s.line_items : [];
@@ -2242,7 +2256,7 @@ function renderKoAbos() {
       <td>${actions}</td>
     </tr>${detail}`;
   }).join('');
-  wrap.innerHTML = kpi + pills + `<div class="sr-tablewrap"><table class="sr-table">
+  wrap.innerHTML = kpi + bypassBanner + pills + `<div class="sr-tablewrap"><table class="sr-table">
     <thead><tr><th class="statusstrip"></th><th></th><th>Omschrijving</th><th class="num">Bedrag</th><th class="center">Termijnen</th><th>Periode</th><th class="center">TL</th><th>Status</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table></div>`;
   bindKoAbo();

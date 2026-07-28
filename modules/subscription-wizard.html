@@ -108,6 +108,27 @@
   <section class="panel" id="p3">
     <div class="card"><div id="bonusBlock"></div></div>
     <div class="card"><div class="preview" id="subPreview"></div></div>
+
+    <!-- Reserveringsfee-bypass. Standaard verborgen; getoond alleen als de
+         gebruiker de permission `sales.reservation_fee.bypass` bezit. Puur
+         cosmetisch: de endpoint checkt de permission zelf en weigert de bypass
+         met 403 als 'ie in de body zit zonder rechten. -->
+    <div id="bypassFeeCard" class="card" style="display:none;border:1px solid #b45309;background:rgba(180,83,9,.06)">
+      <div style="font-size:12px;text-transform:uppercase;color:#b45309;font-weight:600;margin-bottom:8px">⚠ Financiële uitzondering</div>
+      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+        <input type="checkbox" id="bypassFeeChk" style="margin-top:3px">
+        <span style="flex:1">
+          <strong>Omzeil de €100 reserveringsfee</strong> — laat de late-start-blokkade én de €100-factuur over.
+          <div style="font-size:11.5px;color:var(--text-dim);margin-top:3px">Alleen gebruiken bij vooraf besproken uitzonderingen (bv. klant kwam uit 3 maanden on-hold en start opnieuw). Deze actie wordt gelogd met jouw naam, tijd en reden.</div>
+        </span>
+      </label>
+      <div id="bypassFeeReasonWrap" style="display:none;margin-top:10px">
+        <label style="display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px">Reden (verplicht, min. 10 tekens)</label>
+        <textarea id="bypassFeeReason" rows="2" style="width:100%;padding:8px;font-size:13px;border:1px solid var(--border-default,rgba(255,255,255,.12));border-radius:6px;background:var(--input-bg,rgba(255,255,255,.02));color:var(--text-main);resize:vertical" placeholder="Bv. Klant 3 maanden on-hold gehad, restart afgesproken op 2026-09-15"></textarea>
+        <div id="bypassFeeReasonHint" style="font-size:11px;color:var(--text-faint);margin-top:3px"></div>
+      </div>
+    </div>
+
     <div id="submitBlock" style="display:flex;flex-direction:column;gap:8px"></div>
   </section>
 
@@ -875,7 +896,61 @@ document.getElementById('nextBtn').addEventListener('click',()=>{
   if(state.step<3) showStep(state.step+1);
 });
 
+// ── Reserveringsfee-bypass wire-up ───────────────────────────────────────
+// Zichtbaarheid + reden-toggle + client-side reden-check. De echte poortwachter
+// is de server (api/sales-subscription-create.js) — die verifieert de
+// permission opnieuw en weigert met 403 als 'ie ontbreekt, ook als de payload
+// bypass_reservation_fee:true bevat.
+async function _initBypassFeeCard(){
+  try{
+    if(!window.RBAC || typeof window.RBAC.ensurePermissionsLoaded !== 'function') return;
+    const perms = await window.RBAC.ensurePermissionsLoaded();
+    const hasBypass = perms && (typeof perms.has === 'function' ? perms.has('sales.reservation_fee.bypass') : (perms['sales.reservation_fee.bypass'] === true));
+    if(!hasBypass) return;
+    const card = document.getElementById('bypassFeeCard');
+    if(card) card.style.display = 'block';
+    const chk    = document.getElementById('bypassFeeChk');
+    const wrap   = document.getElementById('bypassFeeReasonWrap');
+    const ta     = document.getElementById('bypassFeeReason');
+    const hint   = document.getElementById('bypassFeeReasonHint');
+    if(!chk || !wrap || !ta || !hint) return;
+    const refreshHint = () => {
+      const n = String(ta.value || '').trim().length;
+      if(n === 0)      { hint.textContent = ''; hint.style.color = 'var(--text-faint)'; }
+      else if(n < 10)  { hint.textContent = `Nog ${10 - n} teken(s) nodig`; hint.style.color = 'var(--danger,#dc2626)'; }
+      else             { hint.textContent = `${n} tekens — ok`; hint.style.color = 'var(--success,#059669)'; }
+    };
+    chk.addEventListener('change', () => {
+      wrap.style.display = chk.checked ? 'block' : 'none';
+      if(!chk.checked){ ta.value=''; refreshHint(); }
+      else{ setTimeout(()=>ta.focus(), 30); }
+    });
+    ta.addEventListener('input', refreshHint);
+  }catch(e){ /* stil — vinkje blijft verborgen bij failure, endpoint blijft veilig */ }
+}
+_initBypassFeeCard();
+
+// Getter die de bypass-payload-velden verzamelt op basis van UI-staat.
+// Returnt { bypass:false } als 'ie niet aan staat of de card niet zichtbaar
+// is (bij user zonder perm). Bij aan-vinkje + geldige reden: bypass:true.
+// Bij aan-vinkje + reden < 10 chars: bypass:'invalid-reason' (caller toont toast).
+function _collectBypassPayload(){
+  const card = document.getElementById('bypassFeeCard');
+  if(!card || card.style.display === 'none') return { bypass:false };
+  const chk = document.getElementById('bypassFeeChk');
+  if(!chk || !chk.checked) return { bypass:false };
+  const reason = String(document.getElementById('bypassFeeReason').value || '').trim();
+  if(reason.length < 10) return { bypass:'invalid-reason' };
+  return { bypass:true, reason };
+}
+
 async function submit(syncToTl){
+  // Pre-check bypass: als vinkje aan + reden < 10 chars → toast + niet submitten.
+  const bp = _collectBypassPayload();
+  if(bp.bypass === 'invalid-reason'){
+    toast('Vul een reden in van minimaal 10 tekens voor de reserveringsfee-bypass', 'error');
+    return;
+  }
   const btn=document.querySelector('#submitBlock .btn'); if(btn){btn.disabled=true;btn.textContent='Bezig…';}
   try{
     const subsPayload=state.subs.map(s=>({
@@ -893,6 +968,10 @@ async function submit(syncToTl){
       sync_to_tl:!!syncToTl,
       subscriptions:subsPayload,
     };
+    if(bp.bypass === true){
+      payload.bypass_reservation_fee = true;
+      payload.bypass_reason = bp.reason;
+    }
     if(state.mode==='standalone'){
       payload.mode='standalone';
       payload.sale_type=state.saleType||'domestic';
