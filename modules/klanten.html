@@ -1405,6 +1405,12 @@ function bindKoOffSegs() {
 const KO_SUB_COLOR = { active: '#059669', paused: '#f59e0b', cancelled: '#94a3b8' };
 const KO_SUB_BADGE = { active: 'green', paused: 'warning', cancelled: 'gray' };
 let koSubs = [], koAboPending = null, koAboSeg = 'active', koBypassEvents = [];
+// Cache voor "mag deze user een nieuw abonnement aanmaken?" — hydrateert bij
+// eerste renderAbonnementenTab-call via RBAC.can('sales.deal.create'). Server-
+// side is de gate op sales-subscription-create.js zelf de bron van waarheid;
+// deze flag verbergt alleen de knop bij users zonder recht. Default false
+// zodat we niet-geautoriseerden nooit per ongeluk een knop tonen.
+let koCanCreateSub = false;
 function koSubInclPerTerm(s) { const lis = Array.isArray(s.line_items) ? s.line_items : []; return lis.length ? lis.reduce((a, li) => a + (Number(li.amount) || 0) * (1 + (Number(li.vat_percentage) || 0) / 100), 0) : (Number(s.amount) || 0) * (1 + (Number(s.vat_percentage) || 0) / 100); }
 // === Facturen sub-tab (read-only TL-spiegel, Finance Fase 2A) ===
 const KO_INV_TAG = { concept: 'gray', open: 'blue', partially_paid: 'warning', paid: 'green', overdue: 'danger', credited: 'purple', partially_credited: 'purple', writeoff: 'gray' };
@@ -2185,6 +2191,12 @@ async function renderAbonnementenTab() {
     koSubs = d.subscriptions || [];
     koAboPending = d.pending_deal_id || null;
     koBypassEvents = Array.isArray(d.bypass_events) ? d.bypass_events : [];
+    // Hydrateer perm-flag voor de "Nieuw abonnement"-knop. RBAC.can() honoreert
+    // super_admin's '*' wildcard automatisch (permissions.js:80). Zonder RBAC
+    // (bv. permissions.js nog niet geladen): default false, knop blijft weg —
+    // fail-secure. Server-side is de gate op sales-subscription-create.js
+    // (sales.deal.create); dit is puur UI-hiding.
+    koCanCreateSub = await koCan('sales.deal.create');
     renderKoAbos();
   } catch (e) { wrap.innerHTML = '<div class="placeholder-card">Laden mislukt: ' + escapeHtml(e.message) + '</div>'; }
 }
@@ -2222,7 +2234,19 @@ function renderKoAbos() {
   const segCount = (k) => k === 'alle' ? subs.length : subs.filter(s => (s.status || 'active') === k).length;
   const SEGS = [['active', 'Actief'], ['paused', 'Gepauzeerd'], ['alle', 'Alle'], ['cancelled', 'Gedeactiveerd']];
   const bulkBtn = active.length > 1 ? `<button class="sr-abtn warning" id="postpone-all-btn">Stel alle abo's uit (${active.length})</button>` : '';
-  const newBtn = koAboPending ? `<a class="sr-abtn primary" href="/modules/subscription-wizard.html?deal_id=${encodeURIComponent(koAboPending)}"><i class="ti ti-plus"></i> Nieuw abonnement</a>` : '';
+  // "Nieuw abonnement"-knop: URL adaptief.
+  //   - pending_deal_id (getekende offerte zonder subs): koppel aan die deal → wizard 2.
+  //   - Anders: standalone-modus met klant voorgeselecteerd (dekt óók de case waar
+  //     de klant alleen gedeactiveerde/gepauzeerde subs heeft en geen accepted deal
+  //     zonder subs meer over is; die verborg de knop voorheen).
+  const _cust = detailState.customer || {};
+  const _custName = customerDisplayName(_cust, '');
+  const newBtnHref = koAboPending
+    ? `/modules/subscription-wizard.html?deal_id=${encodeURIComponent(koAboPending)}`
+    : `/modules/subscription-wizard.html?mode=standalone&customer_id=${encodeURIComponent(detailState.customerId || '')}${_custName ? '&customer_name=' + encodeURIComponent(_custName) : ''}`;
+  const newBtn = koCanCreateSub
+    ? `<a class="sr-abtn primary" href="${newBtnHref}"><i class="ti ti-plus"></i> Nieuw abonnement</a>`
+    : '';
   const pills = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
     <div class="sr-segments" id="koAboSegments" style="margin-bottom:0">${SEGS.map(([k, l]) => `<button class="sr-seg${koAboSeg === k ? ' active' : ''}" data-seg="${k}">${l} <span class="sr-seg-n">${segCount(k)}</span></button>`).join('')}</div>
     <div style="display:flex;gap:8px">${bulkBtn}${newBtn}</div></div>`;
@@ -2461,8 +2485,16 @@ async function renderProfielAboCard() {
     const eur2 = (v) => '€' + Number(v || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     if (!active.length) {
       if (stEl) stEl.innerHTML = '<span class="sr-tag gray">Geen actief</span>';
-      box.innerHTML = d.pending_deal_id
-        ? `<div class="cust-empty">Geen actief abonnement.</div><a class="sr-abtn primary" style="margin-top:6px" href="/modules/subscription-wizard.html?deal_id=${encodeURIComponent(d.pending_deal_id)}">Aanmaken</a>`
+      // "Aanmaken"-knop: URL adaptief zoals op de abonnementen-tab.
+      // pending_deal_id → koppel aan getekende offerte; anders standalone
+      // met klant voorgeselecteerd (dekt klant met alleen cancelled subs).
+      const _wc = detailState.customer || {};
+      const _wname = customerDisplayName(_wc, '');
+      const _href = d.pending_deal_id
+        ? `/modules/subscription-wizard.html?deal_id=${encodeURIComponent(d.pending_deal_id)}`
+        : `/modules/subscription-wizard.html?mode=standalone&customer_id=${encodeURIComponent(detailState.customerId || '')}${_wname ? '&customer_name=' + encodeURIComponent(_wname) : ''}`;
+      box.innerHTML = koCanCreateSub
+        ? `<div class="cust-empty">Geen actief abonnement.</div><a class="sr-abtn primary" style="margin-top:6px" href="${_href}">Aanmaken</a>`
         : '<div class="cust-empty">Geen actief abonnement.</div>';
       return;
     }
