@@ -494,65 +494,59 @@ test('aiSuggestionsByCounterparty: tegenpartijen zonder ai_suggest zijn niet in 
   assert.equal(out.size, 0);
 });
 
-// ── PayPal-credits (is_credit=true) ──────────────────────────────────────
+// ── PayPal-autorisatie-netting via counterparty-groep-niveau filter ─────
 
-const CAT_META_WITH_CREDIT = new Map([
-  ...CAT_META_ROWS.map(c => [c.id, c]),
-  ['cat-credit', { id: 'cat-credit', slug: 'terugbetalingen-credits', label: 'Terugbetalingen & credits', color: '#06b6d4', is_credit: true }],
-]);
-
-test('buildCounterpartyRows: default verbergt counterparties met is_credit category (PayPal-refund)', () => {
-  const groups = new Map([
-    ['Meta',           { total: -100, count: 1, first: null, last: null, catCounts: new Map([['cat-marketing', 1]]), manualCount: 0 }],
-    ['Twilio-credit',  { total: +5000, count: 3, first: null, last: null, catCounts: new Map([['cat-credit', 3]]), manualCount: 0 }],
-  ]);
-  const rows = buildCounterpartyRows(groups, CAT_META_WITH_CREDIT, { includeIncoming: true });
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].name, 'Meta');
-});
-
-test('buildCounterpartyRows: includeCredits=true toont ook credits', () => {
-  const groups = new Map([
-    ['Meta',           { total: -100, count: 1, first: null, last: null, catCounts: new Map([['cat-marketing', 1]]), manualCount: 0 }],
-    ['Twilio-credit',  { total: +5000, count: 3, first: null, last: null, catCounts: new Map([['cat-credit', 3]]), manualCount: 0 }],
-  ]);
-  const rows = buildCounterpartyRows(groups, CAT_META_WITH_CREDIT, { includeIncoming: true, includeCredits: true });
-  assert.equal(rows.length, 2);
-});
-
-test('filterTransactionsForBreakdown: default excludeert tx met is_credit category', () => {
+test('filterTransactionsForBreakdown: PayPal-Bij bij uitgave-groep NIET gefilterd (netting werkt)', () => {
+  // Twilio-case: Af -38,31 + Bij +37,83 = netto uitgave -0,48. Beide tx
+  // moeten door de filter komen zodat de aggregatie netto klopt.
   const txs = [
-    mkTx('t1', 'Meta',    -10000, '2026-01-01'),
-    mkTx('t2', 'Twilio',   +3800, '2026-01-02'),
+    mkTx('t1', 'Twilio', -3831, '2026-04-24'),
+    mkTx('t2', 'Twilio',  3783, '2026-04-24'),
   ];
-  const catByTxId = new Map([
-    ['t1', { category_id: 'cat-marketing' }],
-    ['t2', { category_id: 'cat-credit' }],
-  ]);
-  const out = filterTransactionsForBreakdown(txs, catByTxId, CAT_META_WITH_CREDIT, { includeIncoming: true });
+  const out = filterTransactionsForBreakdown(txs, null, null, { includeIncoming: false });
+  assert.equal(out.length, 2, 'zowel -Af als +Bij moeten door filter — groep-totaal is uitgave');
+});
+
+test('filterTransactionsForBreakdown: klant-inkomst-groep (alleen +) wordt uitgefilterd', () => {
+  // Bas Van Leijden: alleen +Bij (Express Checkout klant-betaling). Groep-
+  // totaal is positief → inkomst-groep → skip (default includeIncoming=false).
+  const txs = [
+    mkTx('t1', 'Bas Van Leijden', 9625, '2026-01-15'),
+  ];
+  const out = filterTransactionsForBreakdown(txs, null, null, { includeIncoming: false });
+  assert.equal(out.length, 0);
+});
+
+test('filterTransactionsForBreakdown: klant-inkomst-groep met includeIncoming=true blijft', () => {
+  const txs = [
+    mkTx('t1', 'Bas Van Leijden', 9625, '2026-01-15'),
+  ];
+  const out = filterTransactionsForBreakdown(txs, null, null, { includeIncoming: true });
   assert.equal(out.length, 1);
-  assert.equal(out[0].id, 't1');
 });
 
-test('filterTransactionsForBreakdown: includeCredits=true laat credit-tx binnen', () => {
+test('filterTransactionsForBreakdown: gemengd (uitgave-groep + inkomst-groep) — alleen uitgave-groep', () => {
   const txs = [
-    mkTx('t1', 'Meta',    -10000, '2026-01-01'),
-    mkTx('t2', 'Twilio',   +3800, '2026-01-02'),
+    mkTx('t1', 'Twilio', -3831, '2026-04-24'),       // uitgave-groep
+    mkTx('t2', 'Twilio',  3783, '2026-04-24'),       // (zelfde groep)
+    mkTx('t3', 'Bas',     9625, '2026-01-15'),       // inkomst-groep
+    mkTx('t4', 'OpenAI', -2068, '2025-07-28'),
+    mkTx('t5', 'OpenAI',  1880, '2025-07-28'),
   ];
-  const catByTxId = new Map([
-    ['t1', { category_id: 'cat-marketing' }],
-    ['t2', { category_id: 'cat-credit' }],
-  ]);
-  const out = filterTransactionsForBreakdown(txs, catByTxId, CAT_META_WITH_CREDIT, { includeIncoming: true, includeCredits: true });
-  assert.equal(out.length, 2);
+  const out = filterTransactionsForBreakdown(txs, null, null, { includeIncoming: false });
+  assert.equal(out.length, 4, 'Twilio (2) + OpenAI (2) blijven, Bas verdwijnt');
+  assert.equal(out.some(t => t.counterparty_name === 'Bas'), false);
 });
 
-test('computeBreakdown: is_credit categorie verschijnt NIET in de output-lijst', () => {
-  const txs = [mkTx('t1', 'Meta', -10000, '2026-01-01')];
-  const catByTxId = new Map([['t1', { category_id: 'cat-marketing' }]]);
-  const bd = computeBreakdown(txs, catByTxId, [...CAT_META_WITH_CREDIT.values()]);
-  const credit = bd.categories.find(c => c.slug === 'terugbetalingen-credits');
-  assert.equal(credit, undefined, 'is_credit categorie mag niet in breakdown output');
+test('buildCounterpartyRows: Twilio-scenario (net €-0,48) blijft, 100%-teruggeboekt (net €0) valt weg', () => {
+  const groups = new Map([
+    ['Twilio-partial', { total: -48,  count: 2, first: '2026-04-24', last: '2026-04-24', catCounts: new Map(), manualCount: 0 }],
+    ['Twilio-full',    { total: 0,    count: 2, first: '2025-11-24', last: '2025-11-24', catCounts: new Map(), manualCount: 0 }],
+  ]);
+  const rows = buildCounterpartyRows(groups, CAT_META, {});
+  assert.equal(rows.length, 1, 'alleen negatieve-netto blijft (100% teruggeboekt = geen uitgave)');
+  assert.equal(rows[0].name, 'Twilio-partial');
+  assert.equal(rows[0].total_cents, -48);
 });
 
 test('aiSuggestionsByCounterparty: bij tie op cnt wint hoogste avg confidence', () => {

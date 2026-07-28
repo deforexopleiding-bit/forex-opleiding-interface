@@ -68,7 +68,6 @@ export default async function handler(req, res) {
   const includeInternal          = String(q.include_internal || '') === '1';
   const includeInternalTransfers = String(q.include_internal_transfers || '') === '1';
   const includeIncoming          = String(q.include_incoming || '') === '1';
-  const includeCredits           = String(q.include_credits || '') === '1';
   const sort = ['total_desc','total_abs_desc','count_desc','name_asc'].includes(String(q.sort || '')) ? String(q.sort) : 'total_desc';
 
   try {
@@ -129,7 +128,7 @@ export default async function handler(req, res) {
     // Stap 3: fetch categorie-metadata (labels/colors + is_internal-flag).
     const { data: allCats, error: catMetaErr } = await supabaseAdmin
       .from('expense_categories')
-      .select('id, slug, label, color, is_internal, is_credit');
+      .select('id, slug, label, color, is_internal');
     if (catMetaErr) throw new Error('expense_categories fetch: ' + catMetaErr.message);
     const catMetaById = new Map((allCats || []).map(c => [c.id, c]));
 
@@ -141,7 +140,6 @@ export default async function handler(req, res) {
       includeInternal,
       includeInternalTransfers,
       includeIncoming,
-      includeCredits,
       onlyUncategorized,
       categoryFilter,
     });

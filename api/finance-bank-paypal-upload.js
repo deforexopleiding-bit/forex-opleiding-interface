@@ -247,81 +247,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // ── Credit-detection: tag "Overige"-Bij rijen als terugbetalingen ──
-    // Signaal: source='paypal' AND amount>0 AND transaction_code='Overige' AND
-    // end_to_end_id koppelt aan entry_reference van een Af-parent (uit alle
-    // paypal-tx, incl. eerdere uploads). Zelfde logica als de backfill-SQL.
-    // Respecteert manual/rule overrides (skip als tx al gecategoriseerd is).
-    let creditsTagged = 0;
-    if (inserted > 0) {
-      try {
-        // 1. Vind de credit-cat id.
-        const { data: creditCatRow } = await supabaseAdmin
-          .from('expense_categories')
-          .select('id')
-          .eq('slug', 'terugbetalingen-credits')
-          .maybeSingle();
-        if (creditCatRow?.id) {
-          // 2. Kandidaten uit rowsToInsert: "Overige"-Bij met end_to_end_id.
-          const candidates = rowsToInsert.filter(r =>
-            Number(r.amount_cents) > 0 &&
-            r.transaction_code === 'Overige' &&
-            r.end_to_end_id &&
-            r.entry_reference
-          );
-          if (candidates.length) {
-            // 3. Check welke end_to_end_ids matchen een paypal-Af.
-            const parentRefs = Array.from(new Set(candidates.map(c => c.end_to_end_id)));
-            const { data: parents } = await supabaseAdmin
-              .from('camt_transactions')
-              .select('entry_reference')
-              .in('entry_reference', parentRefs)
-              .eq('source', 'paypal')
-              .lt('amount_cents', 0);
-            const parentRefSet = new Set((parents || []).map(p => p.entry_reference));
-            const matched = candidates.filter(c => parentRefSet.has(c.end_to_end_id));
-            // 4. Re-fetch DB-IDs voor deze credits via entry_reference.
-            if (matched.length) {
-              const { data: txRows } = await supabaseAdmin
-                .from('camt_transactions')
-                .select('id, entry_reference')
-                .in('entry_reference', matched.map(c => c.entry_reference))
-                .eq('source', 'paypal');
-              const catRows = (txRows || []).map(t => ({
-                camt_transaction_id: t.id,
-                category_id:         creditCatRow.id,
-                source:              'rule',
-                rule_id:             null,
-                set_by_user_id:      user.id,
-              }));
-              if (catRows.length) {
-                // Skip tx die al 'manual' overrides hebben.
-                const { data: existingCats } = await supabaseAdmin
-                  .from('transaction_categorizations')
-                  .select('camt_transaction_id, source')
-                  .in('camt_transaction_id', catRows.map(c => c.camt_transaction_id));
-                const manualSet = new Set(
-                  (existingCats || [])
-                    .filter(c => c.source === 'manual')
-                    .map(c => c.camt_transaction_id)
-                );
-                const finalRows = catRows.filter(c => !manualSet.has(c.camt_transaction_id));
-                if (finalRows.length) {
-                  const { error: crErr } = await supabaseAdmin
-                    .from('transaction_categorizations')
-                    .upsert(finalRows, { onConflict: 'camt_transaction_id' });
-                  if (crErr) console.warn('[paypal-upload] credit-tag upsert:', crErr.message);
-                  else creditsTagged = finalRows.length;
-                }
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.error('[paypal-upload] credit-detection fout:', e.message);
-      }
-    }
-
     // Statement num_entries corrigeren.
     if (inserted !== txs.length) {
       await supabaseAdmin
@@ -330,7 +255,7 @@ export default async function handler(req, res) {
         .eq('id', statementId);
     }
 
-    console.log(`[paypal-upload] ${file_name} | parsed=${txs.length} inserted=${inserted} skipped_dedupe=${skippedDedupe} skipped_memo=${stats.skipped_memo} auto_cat=${autoCategorized} credits=${creditsTagged} saldo_ok=${saldoCheck.ok} diff=${saldoCheck.diff_cents}`);
+    console.log(`[paypal-upload] ${file_name} | parsed=${txs.length} inserted=${inserted} skipped_dedupe=${skippedDedupe} skipped_memo=${stats.skipped_memo} auto_cat=${autoCategorized} saldo_ok=${saldoCheck.ok} diff=${saldoCheck.diff_cents}`);
 
     return res.status(200).json({
       statement_id:           statementId,

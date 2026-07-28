@@ -275,6 +275,41 @@ test('detectAll: trailing-id-varianten (SUMUP*111 vs SUMUP*222 vs SUMUP) → 1 g
   assert.equal(r.recurring[0].normalized_name, 'sumup');
 });
 
+// ── PayPal-autorisatie-netting per dag ──────────────────────────────────
+
+test('detect: PayPal +/- paren op zelfde dag netten tot 1 datapunt (Twilio-scenario)', () => {
+  // 4 rijen over 3 maanden: 3 paren van Af+Bij op zelfde datum.
+  // Zonder netting: 6 tx, mediaan-diff onbetrouwbaar door zelfde-dag-paren.
+  // Met netting per dag: 3 datapunten van elk netto -€0,48.
+  const txs = [
+    mkTx('a1', '2025-01-15', -3831),  // Af
+    mkTx('b1', '2025-01-15',  3783),  // Bij (zelfde dag)
+    mkTx('a2', '2025-02-15', -3831),
+    mkTx('b2', '2025-02-15',  3783),
+    mkTx('a3', '2025-03-15', -3831),
+    mkTx('b3', '2025-03-15',  3783),
+  ];
+  const r = detectRecurringForGroup(txs);
+  assert.equal(r.interval, 'monthly', 'na netting: 3 datapunten met ~30d diff = monthly');
+  assert.equal(r.tx_count, 3, 'validTxs = 3 unieke dagen (na netting)');
+  assert.equal(r.avg_amount_cents, 48, 'netto per dag = 38.31-37.83 = 0.48');
+  assert.equal(r.monthly_cents, 48);
+});
+
+test('detect: 100% teruggeboekte autorisatie (Twilio-Nov-scenario) telt NIET als recurring', () => {
+  // Elke dag Af + Bij = €0 netto → geen uitgave-datapunten over → null.
+  const txs = [
+    mkTx('a1', '2025-01-15', -3514),
+    mkTx('b1', '2025-01-15',  3514),
+    mkTx('a2', '2025-02-15', -3514),
+    mkTx('b2', '2025-02-15',  3514),
+    mkTx('a3', '2025-03-15', -3514),
+    mkTx('b3', '2025-03-15',  3514),
+  ];
+  const r = detectRecurringForGroup(txs);
+  assert.equal(r, null, 'volledig teruggeboekte autorisaties zijn geen uitgave');
+});
+
 test('detectAll: insights-counts kloppen', () => {
   const mk = (name, prefix, dates, cents) => dates.map((d, i) => ({
     id: prefix + i, counterparty_name: name, booking_date: d, amount_cents: cents,

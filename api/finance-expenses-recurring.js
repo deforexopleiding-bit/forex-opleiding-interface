@@ -52,7 +52,10 @@ export default async function handler(req, res) {
     const from = ISO_DATE_RE.test(String(q.from || '')) ? String(q.from) : null;
     const to   = ISO_DATE_RE.test(String(q.to   || '')) ? String(q.to)   : null;
 
-    // Stap 1: fetch uitgaven-tx (amount<0). Chunked-pagination want kan groot zijn.
+    // Stap 1: fetch ALLE tx (niet alleen amount<0) zodat PayPal +Bij samen
+    // met -Af netto in dezelfde tegenpartij-groep valt en Twilio-achtige
+    // gevallen (waar autorisatie grotendeels teruggeboekt wordt) correct
+    // als netto-uitgave (of geen uitgave) worden herkend.
     const CHUNK = 1000;
     const txs = [];
     let offset = 0;
@@ -61,7 +64,6 @@ export default async function handler(req, res) {
       let qy = supabaseAdmin
         .from('camt_transactions')
         .select('id, counterparty_name, amount_cents, booking_date')
-        .lt('amount_cents', 0)  // alleen uitgaven
         .order('booking_date', { ascending: true })
         .range(offset, offset + CHUNK - 1);
       if (from) qy = qy.gte('booking_date', from);
@@ -74,11 +76,22 @@ export default async function handler(req, res) {
       offset += CHUNK;
     }
 
-    // Stap 2: filter interne PayPal-namen + lege naam.
+    // Stap 2: filter interne PayPal-namen + lege naam + inkomst-groepen.
+    // Group-based filter (via counterparty_name): totaal >= 0 = inkomst-groep,
+    // skip. Zo verdwijnen klant-inkomsten en compenseren PayPal +Bij's binnen
+    // uitgave-groepen (Twilio: -Af + +Bij = netto -0,48 = uitgave-groep, blijft).
+    const groupTotals = new Map();
+    for (const t of txs) {
+      const name = String(t.counterparty_name || '').trim();
+      if (!name) continue;
+      groupTotals.set(name, (groupTotals.get(name) || 0) + (Number(t.amount_cents) || 0));
+    }
     const cleanTxs = txs.filter(t => {
       const name = String(t.counterparty_name || '').trim();
       if (!name) return false;
       if (INTERNAL_NAMES.has(name)) return false;
+      // Inkomst-groepen (Bas Express Checkout etc) skippen.
+      if ((groupTotals.get(name) || 0) >= 0) return false;
       return true;
     });
     if (cleanTxs.length === 0) {
@@ -103,22 +116,18 @@ export default async function handler(req, res) {
       for (const c of (data || [])) catByTxId.set(c.camt_transaction_id, c);
     }
 
-    // Stap 4: fetch category-metadata (voor is_internal + is_credit check + display).
+    // Stap 4: fetch category-metadata (voor is_internal check + display).
     const { data: allCats } = await supabaseAdmin
       .from('expense_categories')
-      .select('id, slug, label, color, is_internal, is_credit');
+      .select('id, slug, label, color, is_internal');
     const catMetaById = new Map((allCats || []).map(c => [c.id, c]));
 
-    // Stap 5: filter interne overboekingen + PayPal-credits.
-    // Credits zijn per definitie geen terugkerende uitgave; interne
-    // overboekingen ook niet.
+    // Stap 5: filter interne overboekingen (categorie is_internal=true).
     const nonInternalTxs = cleanTxs.filter(t => {
       const cat = catByTxId.get(t.id);
-      if (!cat) return true;  // ongecategoriseerd = wél meenemen
+      if (!cat) return true;
       const meta = catMetaById.get(cat.category_id);
-      if (meta && meta.is_internal === true) return false;
-      if (meta && meta.is_credit   === true) return false;
-      return true;
+      return !(meta && meta.is_internal === true);
     });
 
     // Stap 6: draai de detector.

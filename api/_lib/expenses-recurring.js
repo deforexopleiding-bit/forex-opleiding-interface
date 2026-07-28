@@ -75,10 +75,24 @@ const INTERVAL_MONTHLY_FACTOR = { monthly: 1, quarterly: 1 / 3, yearly: 1 / 12 }
  */
 export function detectRecurringForGroup(txs, opts = {}) {
   const { minTxCount = 3, minDistinctMonths = 3, todayDayNum = null } = opts;
-  const validTxs = (txs || [])
+  // Verzamel valid tx + parse dagen.
+  const rawTxs = (txs || [])
     .filter(t => t && typeof t.booking_date === 'string')
     .map(t => ({ ...t, _dayNum: daysSinceEpoch(t.booking_date) }))
-    .filter(t => Number.isFinite(t._dayNum))
+    .filter(t => Number.isFinite(t._dayNum));
+  if (!rawTxs.length) return null;
+
+  // NETTING per dag: PayPal +Bij (autorisatie-terugboeking) op zelfde dag
+  // als -Af moet ÉÉN datapunt zijn (netto uitgave), niet twee losse.
+  // Groepeer per booking_date, som amount_cents → 1 datapunt per unieke dag.
+  const byDate = new Map();  // 'YYYY-MM-DD' → { _dayNum, sumCents }
+  for (const t of rawTxs) {
+    const d = t.booking_date;
+    if (!byDate.has(d)) byDate.set(d, { booking_date: d, _dayNum: t._dayNum, amount_cents: 0 });
+    byDate.get(d).amount_cents += Number(t.amount_cents) || 0;
+  }
+  const validTxs = Array.from(byDate.values())
+    .filter(t => t.amount_cents < 0)  // netto-uitgave-datapunten
     .sort((a, b) => a._dayNum - b._dayNum);
   if (validTxs.length < minTxCount) return null;
 
@@ -95,8 +109,8 @@ export function detectRecurringForGroup(txs, opts = {}) {
   const interval = classifyInterval(medianDiff);
   if (!interval) return null;
 
-  // Gemiddeld bedrag (absolute, want uitgaven zijn negatief).
-  const amounts = validTxs.map(t => Math.abs(Number(t.amount_cents) || 0));
+  // Gemiddeld bedrag (netto per dag, absolute — netting heeft al plaatsgevonden).
+  const amounts = validTxs.map(t => Math.abs(t.amount_cents));
   const totalCents = amounts.reduce((s, n) => s + n, 0);
   const avgCents = Math.round(totalCents / amounts.length);
   const monthlyCents = Math.round(avgCents * (INTERVAL_MONTHLY_FACTOR[interval] || 0));

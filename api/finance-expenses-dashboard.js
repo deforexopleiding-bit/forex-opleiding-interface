@@ -58,7 +58,6 @@ export default async function handler(req, res) {
     const includeInternal          = String(q.include_internal || '') === '1';
     const includeInternalTransfers = String(q.include_internal_transfers || '') === '1';
     const includeIncoming          = String(q.include_incoming || '') === '1';
-    const includeCredits           = String(q.include_credits || '') === '1';
 
     // Stap 1: fetch tx (chunked). Zelfde query-shape als breakdown.
     const CHUNK = 1000;
@@ -100,17 +99,17 @@ export default async function handler(req, res) {
     // Stap 3: category-metadata (voor is_internal + slug + label + color).
     const { data: allCats } = await supabaseAdmin
       .from('expense_categories')
-      .select('id, slug, label, color, is_internal, is_credit')
+      .select('id, slug, label, color, is_internal')
       .eq('is_active', true)
       .order('label');
     const catMetaById = new Map((allCats || []).map(c => [c.id, c]));
 
     // Stap 4: filter — IDENTIEK aan breakdown-endpoint. Interne overboekingen
-    // uit (via is_internal), credits uit (via is_credit), incoming uit,
-    // PayPal-CSV interne rijen uit.
+    // uit (via is_internal), inkomst-groepen uit (via counterparty-groep-niveau
+    // netting — zodat PayPal +Bij samen met -Af netto in uitgave-groep valt).
     const filteredTxs = filterTransactionsForBreakdown(
       txs, catByTxId, catMetaById,
-      { includeInternal, includeInternalTransfers, includeIncoming, includeCredits }
+      { includeInternal, includeInternalTransfers, includeIncoming }
     );
 
     // Stap 5: drie aggregaties op dezelfde tx-set — totalen matchen exact.
