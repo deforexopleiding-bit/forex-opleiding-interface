@@ -122,6 +122,17 @@
     </div>
   </main>
 
+<!-- Shared scripts MOETEN vóór het inline-script laden — anders is
+     window._authSharedReady undefined op het moment dat init() awaited,
+     wat een silent no-op is (init() returnt vroeg, loadList() draait
+     nooit, tabel blijft eeuwig op "Laden..."). Zelfde patroon-issue als
+     PR #978 op subscription-wizard, nu voor supabase-client.js. -->
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+
 <script>
 'use strict';
 
@@ -246,10 +257,5 @@ async function init(){
 }
 init();
 </script>
-<script src="/modules/shared/supabase-client.js"></script>
-<script src="/modules/shared/agent-shared.js"></script>
-<script src="/modules/shared/theme-shared.js"></script>
-<script src="/modules/shared/permissions.js"></script>
-<script src="/modules/shared/sidebar.js"></script>
 </body>
 </html>
