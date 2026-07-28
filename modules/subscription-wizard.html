@@ -113,17 +113,15 @@
          gebruiker de permission `sales.reservation_fee.bypass` bezit. Puur
          cosmetisch: de endpoint checkt de permission zelf en weigert de bypass
          met 403 als 'ie in de body zit zonder rechten. -->
-    <div id="bypassFeeCard" class="card" style="display:none;border:1px solid #b45309;background:rgba(180,83,9,.06)">
-      <div style="font-size:12px;text-transform:uppercase;color:#b45309;font-weight:600;margin-bottom:8px">⚠ Financiële uitzondering</div>
-      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
-        <input type="checkbox" id="bypassFeeChk" style="margin-top:3px">
-        <span style="flex:1">
-          <strong>Omzeil de €100 reserveringsfee</strong> — laat de late-start-blokkade én de €100-factuur over.
-          <div style="font-size:11.5px;color:var(--text-dim);margin-top:3px">Alleen gebruiken bij vooraf besproken uitzonderingen (bv. klant kwam uit 3 maanden on-hold en start opnieuw). Deze actie wordt gelogd met jouw naam, tijd en reden.</div>
-        </span>
+    <div id="bypassFeeCard" class="card" style="display:none;border:1px solid #b45309;background:rgba(180,83,9,.06);padding:12px">
+      <div style="font-size:11px;text-transform:uppercase;color:#b45309;font-weight:600;letter-spacing:.4px;margin-bottom:8px">⚠ Financiële uitzondering</div>
+      <label for="bypassFeeChk" style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;font-size:14px">
+        <input type="checkbox" id="bypassFeeChk">
+        Omzeil de €100 reserveringsfee
       </label>
+      <p style="margin:6px 0 0;font-size:12px;color:var(--text-dim);line-height:1.4">Slaat de late-start-blokkade én de €100-factuur over. Alleen gebruiken bij vooraf besproken uitzonderingen (bv. klant kwam uit 3 maanden on-hold en start opnieuw). Actie wordt gelogd met jouw naam, tijd en reden.</p>
       <div id="bypassFeeReasonWrap" style="display:none;margin-top:10px">
-        <label style="display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px">Reden (verplicht, min. 10 tekens)</label>
+        <label for="bypassFeeReason" style="display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px">Reden (verplicht, min. 10 tekens)</label>
         <textarea id="bypassFeeReason" rows="2" style="width:100%;padding:8px;font-size:13px;border:1px solid var(--border-default,rgba(255,255,255,.12));border-radius:6px;background:var(--input-bg,rgba(255,255,255,.02));color:var(--text-main);resize:vertical" placeholder="Bv. Klant 3 maanden on-hold gehad, restart afgesproken op 2026-09-15"></textarea>
         <div id="bypassFeeReasonHint" style="font-size:11px;color:var(--text-faint);margin-top:3px"></div>
       </div>
