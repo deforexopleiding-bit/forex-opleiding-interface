@@ -292,7 +292,7 @@ async function init(){
   if(!profile) return;
   if(window.AgentShared) await window.AgentShared.renderUserSection(profile);
   // Bypass-vinkje initialiseren NA authSharedReady EN nadat permissions.js
-  // door de HTML is geladen (permissions.js hangt onder de </script>-blok en
+  // door de HTML is geladen (permissions.js zit onder dit inline blok en
   // is dus tegen de tijd dat init() draait al beschikbaar via window.RBAC).
   // Als het BUITEN init() staat draait 'ie tijdens inline-script-load,
   // wanneer permissions.js nog niet is geladen → RBAC undefined → blok
