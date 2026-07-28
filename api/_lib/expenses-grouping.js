@@ -120,21 +120,22 @@ export function buildCounterpartyRows(groups, catMetaById, filters = {}) {
     includeInternal          = false,
     includeInternalTransfers = false,
     includeIncoming          = false,
-    includeCredits           = false,
     onlyUncategorized        = false,
     categoryFilter           = null,
   } = filters;
   const rows = [];
   for (const [name, g] of groups) {
     if (!includeInternal && (INTERNAL_NAMES.has(name) || name === EMPTY_NAME)) continue;
+    // Filter op groep-niveau (na netting): totaal>=0 = inkomst-groep. Bij
+    // uitgave-tegenpartijen waar +Bij (PayPal-autorisatie-terugboeking)
+    // meetelt: die netten samen met -Af → groep-totaal is netto uitgave,
+    // meestal <0. Alleen 100% teruggeboekte autorisatie (Twilio-case, netto
+    // €0) wordt zo ook uitgefilterd — dat is correct want er is €0 uitgegeven.
     if (!includeIncoming && g.total >= 0) continue;
     const { categoryId, source } = consensusCategoryForGroup(g);
     const category = categoryId ? (catMetaById?.get?.(categoryId) || null) : null;
     // Interne overboekingen (bv. ING → PayPal) verbergen tenzij expliciet gevraagd.
     if (!includeInternalTransfers && category && category.is_internal === true) continue;
-    // PayPal-terugbetalingen/credits verbergen tenzij expliciet gevraagd.
-    // Signaal: category.is_credit=true (systeem-cat 'terugbetalingen-credits').
-    if (!includeCredits && category && category.is_credit === true) continue;
     if (onlyUncategorized && category) continue;
     if (categoryFilter && (!category || category.id !== categoryFilter)) continue;
     rows.push({
@@ -190,19 +191,30 @@ export function filterTransactionsForBreakdown(txs, catByTxId, catMetaById, filt
     includeInternal          = false,
     includeInternalTransfers = false,
     includeIncoming          = false,
-    includeCredits           = false,
   } = filters || {};
+
+  // Stap 1: bepaal per counterparty_name of het een uitgave- of inkomst-groep is
+  // (op basis van netto = som amount_cents). PayPal +Bij (autorisatie-terugboeking)
+  // netten hierdoor automatisch met -Af van dezelfde tegenpartij → uitgave-groep.
+  // Echte klant-inkomsten (Bas Express Checkout: alleen +tx) blijven inkomst-groep.
+  const groupTotals = new Map();
+  for (const t of txs || []) {
+    const name = String(t.counterparty_name || EMPTY_NAME).trim() || EMPTY_NAME;
+    groupTotals.set(name, (groupTotals.get(name) || 0) + (Number(t.amount_cents) || 0));
+  }
+
   return (txs || []).filter(t => {
     const name = String(t.counterparty_name || EMPTY_NAME).trim() || EMPTY_NAME;
     if (!includeInternal && (INTERNAL_NAMES.has(name) || name === EMPTY_NAME)) return false;
-    if (!includeIncoming && Number(t.amount_cents) >= 0) return false;
+    // Filter op counterparty-groep-niveau: als de tegenpartij netto POSITIEF is
+    // (= inkomst-groep), skip alle tx tenzij includeIncoming. Dit vervangt
+    // de oude per-tx `amount>=0`-filter die de PayPal-netting kapot maakte.
+    const groupTotal = groupTotals.get(name);
+    if (!includeIncoming && groupTotal >= 0) return false;
     if (catByTxId && catMetaById) {
       const cat = catByTxId.get?.(t.id);
       const meta = cat ? catMetaById.get?.(cat.category_id) : null;
-      if (meta) {
-        if (!includeInternalTransfers && meta.is_internal === true) return false;
-        if (!includeCredits          && meta.is_credit   === true) return false;
-      }
+      if (meta && !includeInternalTransfers && meta.is_internal === true) return false;
     }
     return true;
   });
@@ -236,11 +248,11 @@ export function computeBreakdown(txs, catByTxId, allCats) {
   // die tx sowieso al gefilterd waren via filterTransactionsForBreakdown,
   // dus buckets voor interne categorieën staan hier op 0. We droppen ze uit
   // de output-lijst zodat de UI ze niet als lege rij toont.
-  // Interne + credit-categorieën verbergen we uit de breakdown-output (die
-  // stromen tellen niet mee als operationele uitgave). Callers zorgen dat de
-  // tx ook al gefilterd zijn via filterTransactionsForBreakdown.
+  // Interne categorieën verbergen we uit de breakdown-output (die stromen
+  // tellen niet mee als operationele uitgave). Callers zorgen dat de tx ook
+  // al gefilterd zijn via filterTransactionsForBreakdown.
   const categories = (allCats || [])
-    .filter(cat => cat.is_internal !== true && cat.is_credit !== true)
+    .filter(cat => cat.is_internal !== true)
     .map(cat => {
     const b = bucketByCat.get(cat.id) || { total: 0, count: 0 };
     return {

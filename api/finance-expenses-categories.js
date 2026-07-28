@@ -25,7 +25,7 @@ export default async function handler(req, res) {
 
   const { data, error } = await supabaseAdmin
     .from('expense_categories')
-    .select('id, slug, label, color, is_active, is_internal, is_credit')
+    .select('id, slug, label, color, is_active, is_internal')
     .eq('is_active', true)
     .order('label', { ascending: true });
 
