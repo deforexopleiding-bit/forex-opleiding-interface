@@ -20,6 +20,7 @@ import { createTlInvoice } from './_lib/invoice-create-core.js';
 // "niet in het verleden" i.p.v. de onboarding-regel "vandaag+3d". Zie
 // motivering in de comment bij de gate-plek verderop (r~118).
 import { assertDateNotInPast } from './_lib/onboarding-start-date.js';
+import { validateBypassRequest } from './_lib/reservation-fee-bypass.js';
 
 // Offerte-beveiliging bouwstap 2/2 — €100 reserveringsfee bij late-start-
 // uitzondering met fee-akkoord. Fee is INCL. btw; excl. wordt afgeleid van
@@ -93,6 +94,24 @@ export default async function handler(req, res) {
           sale_type, tl_department_id, first_call_at, subscriptions = [], sync_to_tl = false } = req.body || {};
   const standalone = mode === 'standalone' || !deal_id;
   if (!Array.isArray(subscriptions) || subscriptions.length === 0) return res.status(400).json({ error: 'minimaal 1 abonnement vereist' });
+
+  // ── Reserveringsfee-bypass (fail-secure) ─────────────────────────────────
+  // Als de body om bypass vraagt, checken we de aparte permission
+  // `sales.reservation_fee.bypass`. Die is los intrekbaar van sales.deal.create
+  // zodat een sales-user dit recht individueel kwijt kan raken zonder z'n
+  // abbo-invoer-rechten te verliezen. Het frontend-vinkje in subscription-
+  // wizard.html is puur cosmetisch — deze server-side check is load-bearing.
+  // Wat de bypass ALLEEN skipt: Guard A (late-start) + Guard B (fee-factuur).
+  // Alle andere validaties draaien onveranderd door.
+  const hasBypassPerm = req.body?.bypass_reservation_fee === true
+    ? await requirePermission(req, 'sales.reservation_fee.bypass')
+    : false;
+  const bypassResult = validateBypassRequest(req.body, hasBypassPerm);
+  if (bypassResult.error) {
+    return res.status(bypassResult.status).json({ error: bypassResult.message, code: bypassResult.error });
+  }
+  const bypassApproved = bypassResult.bypassApproved === true;
+  const bypassReason   = bypassApproved ? bypassResult.reason : null;
 
   try {
     // Elke sub naar regels normaliseren + valideren dat er een bedrag in zit.
@@ -170,6 +189,10 @@ export default async function handler(req, res) {
     // dichten we hier. De bestaande fee-logica hieronder is de ENIGE plek
     // die de €100 boekt; deze guard voegt niets extra toe qua geld.
     let deal = null, dealId = null;
+    // Wordt true als de late-start-guard werd omzeild door bypassApproved.
+    // Bepaalt (samen met feeDue-omzeiling verderop) of we straks audit-rijen
+    // schrijven — audit alleen als de bypass daadwerkelijk effect had.
+    let bypassSkippedLateStart = false;
     {
       const earliestStartIso = subsNorm
         .map((s) => (typeof s.start_date === 'string' && s.start_date) ? String(s.start_date).slice(0, 10) : null)
@@ -180,23 +203,32 @@ export default async function handler(req, res) {
         const daysToStart = _daysBetweenTodayAnd(earliestStartIso);
         const isLateStart = Number.isFinite(daysToStart) && daysToStart > maxDays;
         if (isLateStart) {
-          const errMsg  = `Late start (>${maxDays} dagen) gedetecteerd maar geen reserveringsfee afgesproken — bevestig de €100 in de offerte of pas de startdatum aan.`;
-          const errBody = { error: errMsg, code: 'LATE_START_NO_FEE', details: { earliest_start_date: earliestStartIso, days_to_start: daysToStart, max_days: maxDays } };
-          if (standalone) {
-            // Standalone-abo heeft geen offerte-context met exception-vlag →
-            // altijd blokkeren zodra late start.
-            return res.status(422).json(errBody);
+          if (bypassApproved) {
+            // Guard A wordt overgeslagen — log direct zodat 'ie ook zonder
+            // audit-tabel-write in Vercel-logs terug te vinden is.
+            console.log('[sub-create] Guard A (late-start) SKIPPED via reservation-fee bypass', {
+              user_id: user.id, earliest_start_date: earliestStartIso, days_to_start: daysToStart, max_days: maxDays,
+            });
+            bypassSkippedLateStart = true;
+          } else {
+            const errMsg  = `Late start (>${maxDays} dagen) gedetecteerd maar geen reserveringsfee afgesproken — bevestig de €100 in de offerte of pas de startdatum aan.`;
+            const errBody = { error: errMsg, code: 'LATE_START_NO_FEE', details: { earliest_start_date: earliestStartIso, days_to_start: daysToStart, max_days: maxDays } };
+            if (standalone) {
+              // Standalone-abo heeft geen offerte-context met exception-vlag →
+              // altijd blokkeren zodra late start (tenzij bypass, zie hierboven).
+              return res.status(422).json(errBody);
+            }
+            // Deal-modus: fetch de deal om de vlag te checken. We hergebruiken
+            // dit `deal`-object hieronder zodat we niet nogmaals fetchen.
+            const { data: d } = await supabaseAdmin.from('deals').select('*').eq('id', deal_id).maybeSingle();
+            if (!d) return res.status(404).json({ error: 'Deal niet gevonden' });
+            deal = d; dealId = d.id;
+            const reasons = String(d.exception_reasons || '');
+            const feeAgreedForLate = !!d.exception_flagged
+              && reasons.split(',').map((r) => r.trim()).includes('late_start')
+              && !!d.exception_fee_agreed;
+            if (!feeAgreedForLate) return res.status(422).json(errBody);
           }
-          // Deal-modus: fetch de deal om de vlag te checken. We hergebruiken
-          // dit `deal`-object hieronder zodat we niet nogmaals fetchen.
-          const { data: d } = await supabaseAdmin.from('deals').select('*').eq('id', deal_id).maybeSingle();
-          if (!d) return res.status(404).json({ error: 'Deal niet gevonden' });
-          deal = d; dealId = d.id;
-          const reasons = String(d.exception_reasons || '');
-          const feeAgreedForLate = !!d.exception_flagged
-            && reasons.split(',').map((r) => r.trim()).includes('late_start')
-            && !!d.exception_fee_agreed;
-          if (!feeAgreedForLate) return res.status(422).json(errBody);
         }
       }
     }
@@ -268,12 +300,25 @@ export default async function handler(req, res) {
     // deals.reservation_fee_invoice_id: bij retry wordt geen tweede factuur
     // gemaakt. Alleen bij deal-modus (standalone-abbo heeft geen offerte
     // met exception-context).
+    // Onthoud of Guard B (fee-factuur) werd omzeild door bypassApproved —
+    // gebruikt door de audit-write hieronder om het scope-B (isLateStart ||
+    // feeDue) te bepalen (audit alleen bij daadwerkelijke omzeiling).
+    let bypassSkippedFeeInvoice = false;
     if (!standalone) {
-      const reasons  = String(deal?.exception_reasons || '');
-      const feeDue   = !!deal?.exception_flagged
-                    && reasons.split(',').map(s => s.trim()).includes('late_start')
-                    && !!deal?.exception_fee_agreed
-                    && !deal?.reservation_fee_invoice_id;
+      const reasons     = String(deal?.exception_reasons || '');
+      const feeWasDue   = !!deal?.exception_flagged
+                       && reasons.split(',').map(s => s.trim()).includes('late_start')
+                       && !!deal?.exception_fee_agreed
+                       && !deal?.reservation_fee_invoice_id;
+      // Bypass onderdrukt de fee-factuur ongeacht de vlaggen. We loggen 'em
+      // apart zodat de bypass in de logs te traceren is los van de audit-write.
+      if (feeWasDue && bypassApproved) {
+        console.log('[sub-create] Guard B (fee-factuur) SKIPPED via reservation-fee bypass', {
+          user_id: user.id, deal_id: dealId,
+        });
+        bypassSkippedFeeInvoice = true;
+      }
+      const feeDue = feeWasDue && !bypassApproved;
       if (feeDue) {
         // 1. Hoogste btw-tarief uit de deal-regels (fallback 21).
         const { data: dealLines } = await supabaseAdmin.from('deal_line_items')
@@ -355,6 +400,45 @@ export default async function handler(req, res) {
         status:            'active',
       }).select('*').single();
       if (row) subRows.push(row);
+    }
+
+    // ── Audit-write voor bypass (best-effort, luid loggen bij fout) ──
+    // Scope: alleen als de bypass ook echt effect had (Guard A skipped OF
+    // Guard B skipped). Anders is er niks omzeild en zou de audit-rij ruis
+    // zijn (afgesproken option B in plan-2).
+    if (bypassApproved && (bypassSkippedLateStart || bypassSkippedFeeInvoice) && dealId) {
+      const auditPayload = {
+        deal_id:                 dealId,
+        standalone,
+        bypass_skipped_late_start: bypassSkippedLateStart,
+        bypass_skipped_fee_invoice: bypassSkippedFeeInvoice,
+        earliest_start_date:     subsNorm.map(s => s.start_date).filter(Boolean).sort()[0] || null,
+        subscriptions_count:     subRows.length,
+        reason:                  bypassReason,
+      };
+      try {
+        const { error: colErr } = await supabaseAdmin.from('deals').update({
+          reservation_fee_bypassed_by:   user.id,
+          reservation_fee_bypassed_at:   new Date().toISOString(),
+          reservation_fee_bypass_reason: bypassReason,
+        }).eq('id', dealId);
+        if (colErr) console.error('[sub-create] bypass audit-columns update FAIL (bypass zonder DB-spoor):', colErr.message, auditPayload);
+      } catch (e) {
+        console.error('[sub-create] bypass audit-columns exception (bypass zonder DB-spoor):', e.message, auditPayload);
+      }
+      try {
+        const { error: logErr } = await supabaseAdmin.from('agent_audit_log').insert({
+          agent_name:    'sales',
+          action:        'sales.reservation_fee.bypass',
+          payload:       auditPayload,
+          result:        {},
+          status:        'success',
+          triggered_by:  user.id,
+        });
+        if (logErr) console.error('[sub-create] bypass audit-log insert FAIL (bypass zonder audit-log-entry):', logErr.message, auditPayload);
+      } catch (e) {
+        console.error('[sub-create] bypass audit-log exception (bypass zonder audit-log-entry):', e.message, auditPayload);
+      }
     }
 
     // 3. Bonus op de eerste 1-termijn-sub (aanbetaling): over het totaalbedrag.

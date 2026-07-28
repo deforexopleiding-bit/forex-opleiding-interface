@@ -22,8 +22,12 @@ export default async function handler(req, res) {
   if (!customerId) return res.status(400).json({ error: 'customer_id vereist' });
 
   try {
+    // Bypass-audit-kolommen mee-fetchen (nullable) zodat de klantpagina een
+    // banner kan tonen wanneer bij een van de deals de €100-reserveringsfee
+    // is omzeild. Als een deal geen bypass had blijven de velden NULL.
     const { data: deals } = await supabaseAdmin.from('deals')
-      .select('id, tl_quotation_status').eq('customer_id', customerId).is('archived_at', null);
+      .select('id, tl_quotation_status, reservation_fee_bypassed_by, reservation_fee_bypassed_at, reservation_fee_bypass_reason')
+      .eq('customer_id', customerId).is('archived_at', null);
     const dealIds = (deals || []).map(d => d.id);
     let subscriptions = [];
     const dealsWithSubs = new Set();
@@ -37,9 +41,28 @@ export default async function handler(req, res) {
     // Getekende offerte zonder subs → Wizard 2 mogelijk.
     const acceptedWithoutSubs = (deals || []).find(d => d.tl_quotation_status === 'accepted' && !dealsWithSubs.has(d.id));
 
+    // Verzamel bypass-events (alleen deals waar bypass daadwerkelijk is
+    // toegepast). Voeg naam van de gebruiker toe via profiles-lookup.
+    const bypassRows = (deals || []).filter(d => d.reservation_fee_bypassed_by);
+    let bypassEvents = [];
+    if (bypassRows.length) {
+      const userIds = Array.from(new Set(bypassRows.map(d => d.reservation_fee_bypassed_by)));
+      const { data: profs } = await supabaseAdmin.from('profiles')
+        .select('id, full_name, email').in('id', userIds);
+      const nameById = new Map((profs || []).map(p => [p.id, p.full_name || p.email || 'onbekend']));
+      bypassEvents = bypassRows.map(d => ({
+        deal_id:    d.id,
+        by_user_id: d.reservation_fee_bypassed_by,
+        by_name:    nameById.get(d.reservation_fee_bypassed_by) || 'onbekend',
+        at:         d.reservation_fee_bypassed_at,
+        reason:     d.reservation_fee_bypass_reason,
+      }));
+    }
+
     return res.status(200).json({
       subscriptions,
       pending_deal_id: acceptedWithoutSubs ? acceptedWithoutSubs.id : null,
+      bypass_events:   bypassEvents,
     });
   } catch (e) {
     console.error('[sales-customer-subscriptions]', e.message);
