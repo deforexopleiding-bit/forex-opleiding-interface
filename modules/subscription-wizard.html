@@ -903,9 +903,12 @@ document.getElementById('nextBtn').addEventListener('click',()=>{
 // bypass_reservation_fee:true bevat.
 async function _initBypassFeeCard(){
   try{
-    if(!window.RBAC || typeof window.RBAC.ensurePermissionsLoaded !== 'function') return;
-    const perms = await window.RBAC.ensurePermissionsLoaded();
-    const hasBypass = perms && (typeof perms.has === 'function' ? perms.has('sales.reservation_fee.bypass') : (perms['sales.reservation_fee.bypass'] === true));
+    // Gebruik de canonieke RBAC.can() — die honoreert super_admin's '*'
+    // wildcard (permissions.js regel 80). Een handmatige perms.has(key)-check
+    // zou super_admin buitensluiten want die krijgt Set(['*']) terug, niet
+    // de individuele feature-key.
+    if(!window.RBAC || typeof window.RBAC.can !== 'function') return;
+    const hasBypass = await window.RBAC.can('sales.reservation_fee.bypass');
     if(!hasBypass) return;
     const card = document.getElementById('bypassFeeCard');
     if(card) card.style.display = 'block';
