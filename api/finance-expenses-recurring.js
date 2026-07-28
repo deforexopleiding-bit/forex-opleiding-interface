@@ -30,6 +30,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { detectRecurringAll, daysSinceEpoch } from './_lib/expenses-recurring.js';
+import { excludePaypalFundingLegs } from './_lib/expenses-grouping.js';
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const INTERNAL_NAMES = new Set(['(intern PayPal)', '(leeg)']);
@@ -52,18 +53,19 @@ export default async function handler(req, res) {
     const from = ISO_DATE_RE.test(String(q.from || '')) ? String(q.from) : null;
     const to   = ISO_DATE_RE.test(String(q.to   || '')) ? String(q.to)   : null;
 
-    // Stap 1: fetch ALLE tx (niet alleen amount<0) zodat PayPal +Bij samen
-    // met -Af netto in dezelfde tegenpartij-groep valt en Twilio-achtige
-    // gevallen (waar autorisatie grotendeels teruggeboekt wordt) correct
-    // als netto-uitgave (of geen uitgave) worden herkend.
+    // Stap 1: fetch ALLE tx (inclusief PayPal-detectievelden voor exclude-helper).
+    // Financieringslegs (+Overige met -Af-parent) en vasthoudingen worden
+    // hierna via excludePaypalFundingLegs weggehaald. Wat overblijft aan +tx
+    // op een counterparty is dan een echte klant-inkomst → gefilterd via per-tx
+    // amount<0 zodat alleen echte uitgaven de detector ingaan.
     const CHUNK = 1000;
-    const txs = [];
+    const rawTxs = [];
     let offset = 0;
     // eslint-disable-next-line no-constant-condition
     while (true) {
       let qy = supabaseAdmin
         .from('camt_transactions')
-        .select('id, counterparty_name, amount_cents, booking_date')
+        .select('id, counterparty_name, amount_cents, booking_date, source, transaction_code, entry_reference, end_to_end_id')
         .order('booking_date', { ascending: true })
         .range(offset, offset + CHUNK - 1);
       if (from) qy = qy.gte('booking_date', from);
@@ -71,27 +73,20 @@ export default async function handler(req, res) {
       const { data, error } = await qy;
       if (error) throw new Error('camt_transactions: ' + error.message);
       if (!data || !data.length) break;
-      txs.push(...data);
+      rawTxs.push(...data);
       if (data.length < CHUNK) break;
       offset += CHUNK;
     }
+    const txs = excludePaypalFundingLegs(rawTxs);
 
-    // Stap 2: filter interne PayPal-namen + lege naam + inkomst-groepen.
-    // Group-based filter (via counterparty_name): totaal >= 0 = inkomst-groep,
-    // skip. Zo verdwijnen klant-inkomsten en compenseren PayPal +Bij's binnen
-    // uitgave-groepen (Twilio: -Af + +Bij = netto -0,48 = uitgave-groep, blijft).
-    const groupTotals = new Map();
-    for (const t of txs) {
-      const name = String(t.counterparty_name || '').trim();
-      if (!name) continue;
-      groupTotals.set(name, (groupTotals.get(name) || 0) + (Number(t.amount_cents) || 0));
-    }
+    // Stap 2: filter interne PayPal-namen + lege naam + inkomsten (per-tx
+    // amount>=0). Financieringslegs zijn al uit; wat als +tx overblijft is
+    // een echte klant-inkomst en telt niet als terugkerende uitgave.
     const cleanTxs = txs.filter(t => {
       const name = String(t.counterparty_name || '').trim();
       if (!name) return false;
       if (INTERNAL_NAMES.has(name)) return false;
-      // Inkomst-groepen (Bas Express Checkout etc) skippen.
-      if ((groupTotals.get(name) || 0) >= 0) return false;
+      if ((Number(t.amount_cents) || 0) >= 0) return false;
       return true;
     });
     if (cleanTxs.length === 0) {
