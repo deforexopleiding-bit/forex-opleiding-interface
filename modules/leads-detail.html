@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lead-detail · Agency Command Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Inter',system-ui,sans-serif;background:var(--bg-page,#fafafa);color:var(--text-main,#0f172a);min-height:100vh}
+    .page-wrap{max-width:1200px;margin:0 auto;padding:24px}
+    .top-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px;flex-wrap:wrap}
+    .back-link{color:var(--text-dim);text-decoration:none;font-size:13px;display:inline-flex;align-items:center;gap:6px}
+    .back-link:hover{color:var(--text-main)}
+
+    .card{background:var(--bg-elev,#fff);border:1px solid var(--border-default,#e5e7eb);border-radius:8px;padding:16px;margin-bottom:14px}
+    .card h2{font-size:14px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.4px;margin-bottom:10px}
+
+    /* Grid: linkerkolom (info + antwoorden) / rechterkolom (acties + tijdlijn) */
+    .grid-2{display:grid;grid-template-columns:1fr 340px;gap:16px}
+
+    /* Lead-header (naam/email/telefoon) */
+    .lead-hdr .naam{font-size:22px;font-weight:700;margin-bottom:4px}
+    .lead-hdr .contact{color:var(--text-dim);font-size:13px}
+    .lead-hdr .meta{margin-top:8px;font-size:12px;color:var(--text-faint);display:flex;gap:12px;flex-wrap:wrap}
+
+    /* Score-blok */
+    .score-box{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+    .score-num{font-size:26px;font-weight:700}
+    .score-drem{font-size:14px;color:var(--text-dim)}
+    .score-status{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+    .score-status.pass{color:#059669}
+    .score-status.fail{color:#b45309}
+    .score-status.none{color:#64748b}
+
+    .banner-afwijzer{padding:10px 12px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.3);border-radius:6px;color:#dc2626;font-size:13px;font-weight:500;margin-top:10px;display:flex;gap:8px;align-items:flex-start}
+
+    /* Antwoorden-lijst */
+    .ans{border-top:1px solid var(--border-default,#e5e7eb);padding:10px 0}
+    .ans:first-child{border-top:none;padding-top:0}
+    .ans .q{font-weight:600;font-size:13px;color:var(--text-main);margin-bottom:2px}
+    .ans .a{font-size:13px;color:var(--text-dim);display:flex;justify-content:space-between;gap:12px}
+    .ans .pt{color:var(--text-faint);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+
+    /* Acties */
+    .field{margin-bottom:12px}
+    .field label{display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px;font-weight:600}
+    .field select,.field textarea,.field input{width:100%;padding:8px 10px;font-size:13px;border:1px solid var(--border-default,#e5e7eb);border-radius:6px;background:var(--bg-elev,#fff);color:var(--text-main);font-family:inherit}
+    .field textarea{resize:vertical;min-height:70px}
+    .btn{display:inline-block;padding:9px 14px;font-size:13px;font-weight:600;border-radius:6px;border:none;cursor:pointer;background:var(--accent-cyan,#2563eb);color:#fff}
+    .btn:hover{filter:brightness(.95)}
+    .btn.primary{background:#059669}
+    .btn.secondary{background:transparent;color:var(--text-main);border:1px solid var(--border-default,#e5e7eb)}
+    .btn:disabled{opacity:.5;cursor:not-allowed}
+    .row-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+
+    .placeholder{padding:20px;text-align:center;color:var(--text-faint);font-size:13px;border:1px dashed var(--border-default,#e5e7eb);border-radius:6px}
+    .placeholder-title{font-weight:600;color:var(--text-dim);margin-bottom:4px}
+
+    .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:10px 16px;background:#059669;color:#fff;font-size:13px;font-weight:600;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);z-index:9999;display:none}
+    .toast.error{background:#dc2626}
+
+    .err-banner{padding:12px 14px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.3);border-radius:6px;color:#dc2626;font-size:13px;margin-bottom:14px}
+
+    @media (max-width:900px){
+      .grid-2{grid-template-columns:1fr}
+      .page-wrap{padding:14px}
+    }
+  </style>
+</head>
+<body>
+  <div id="sidebar-mount"></div>
+
+  <main class="page-wrap">
+    <div class="top-bar">
+      <a class="back-link" href="/modules/leads.html">← Terug naar leads</a>
+      <span id="topRight" style="font-size:12px;color:var(--text-faint)"></span>
+    </div>
+
+    <div id="err" class="err-banner" style="display:none"></div>
+    <div id="content"><div class="card"><em>Laden…</em></div></div>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+<script>
+'use strict';
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function fmtDate(iso){
+  if(!iso) return '—';
+  const d = new Date(iso); if(isNaN(d.getTime())) return '—';
+  return String(d.getDate()).padStart(2,'0')+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+d.getFullYear()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+function toast(msg, isErr){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast'+(isErr?' error':'');
+  t.style.display = 'block';
+  setTimeout(()=>{ t.style.display = 'none'; }, 3000);
+}
+function apiFetch(url,opts){
+  if(window.AgentShared && typeof window.AgentShared.apiFetch === 'function') return window.AgentShared.apiFetch(url,opts);
+  return fetch(url,opts);
+}
+
+const _params = new URLSearchParams(window.location.search);
+const _leadId = _params.get('id');
+let _state = { lead:null, antwoorden:[], afwijzer:false, notitie:null, eigenaar:null };
+let _canUpdate = false;
+let _canPromote = false;
+let _profiles = [];   // {id, naam, email} — voor eigenaar-picker
+
+async function loadDetail(){
+  if(!_leadId){
+    document.getElementById('err').textContent = 'Geen lead-id in URL.';
+    document.getElementById('err').style.display = 'block';
+    return;
+  }
+  try{
+    const r = await apiFetch('/api/leads-detail?id='+encodeURIComponent(_leadId));
+    if(!r.ok){ throw new Error('HTTP '+r.status+(r.status===404?': lead niet gevonden':'')); }
+    const d = await r.json();
+    _state = { lead: d.lead, antwoorden: d.antwoorden||[], afwijzer: d.afwijzer===true, notitie: d.notitie, eigenaar: d.eigenaar };
+    render();
+  }catch(e){
+    document.getElementById('err').textContent = 'Laden mislukt: '+e.message;
+    document.getElementById('err').style.display = 'block';
+    document.getElementById('content').innerHTML = '';
+  }
+}
+
+async function loadProfiles(){
+  // Voor eigenaar-picker. Best-effort — als endpoint ontbreekt of geen perm,
+  // valt de picker terug op alleen "geen eigenaar" + de huidige eigenaar.
+  try{
+    const r = await apiFetch('/api/admin-users?active=1');
+    if(!r.ok) return;
+    const d = await r.json();
+    const list = Array.isArray(d.users) ? d.users : (Array.isArray(d) ? d : []);
+    _profiles = list
+      .filter(u => u && u.id && (u.is_active !== false))
+      .map(u => ({ id: u.id, naam: u.full_name || u.email || u.id, email: u.email || null }));
+  }catch(e){ /* ok — picker beperkt zich */ }
+}
+
+function scoreBox(l){
+  const s = l.score, d = l.drempel;
+  if(s == null && d == null){
+    return '<div class="score-box"><span class="score-status none">Geen vragenlijst</span></div>';
+  }
+  const passed = (typeof s === 'number' && typeof d === 'number' && s >= d);
+  const cls = passed ? 'pass' : 'fail';
+  const lbl = passed ? 'Gekwalificeerd' : 'Onder drempel';
+  return '<div class="score-box">'+
+    '<span class="score-num">'+esc(s ?? '—')+'</span>'+
+    '<span class="score-drem">/ '+esc(d ?? '—')+' drempel</span>'+
+    '<span class="score-status '+cls+'">'+lbl+'</span>'+
+    '</div>';
+}
+
+function render(){
+  const l = _state.lead;
+  const canWrite = _canUpdate;
+
+  const antwoordenHtml = _state.antwoorden.length ? _state.antwoorden.map(a =>
+    '<div class="ans">'+
+      '<div class="q">'+esc(a.vraag||'Vraag')+'</div>'+
+      '<div class="a"><span>'+esc(a.antwoord||'—')+'</span><span class="pt">'+esc(a.punten==null?'—':a.punten)+' pt</span></div>'+
+    '</div>'
+  ).join('') : '<div class="placeholder"><div class="placeholder-title">Geen antwoorden</div>Deze lead heeft geen vragenlijst ingevuld.</div>';
+
+  const afwijzerBanner = _state.afwijzer
+    ? '<div class="banner-afwijzer"><strong>⚠ Direct afwijzend antwoord gegeven</strong><br>Dit is anders dan net te weinig punten — de lead gaf een antwoord dat expliciet uitsluit.</div>'
+    : '';
+
+  const eigenaarOptions = ['<option value="">(geen eigenaar)</option>']
+    .concat(_profiles.map(p =>
+      '<option value="'+esc(p.id)+'"'+(_state.eigenaar && _state.eigenaar.id === p.id ? ' selected' : '')+'>'+esc(p.naam)+'</option>'
+    ))
+    .join('');
+  // Fallback: als _profiles leeg is maar er is een eigenaar, toon 'em toch.
+  const eigenaarFallback = (_profiles.length === 0 && _state.eigenaar)
+    ? '<option value="'+esc(_state.eigenaar.id)+'" selected>'+esc(_state.eigenaar.naam)+'</option>'
+    : '';
+
+  document.getElementById('content').innerHTML =
+    '<div class="grid-2">'+
+      '<div>'+
+        '<div class="card lead-hdr">'+
+          '<div class="naam">'+esc(l.naam||'—')+'</div>'+
+          '<div class="contact">'+esc(l.email||'—')+' · '+esc(l.telefoon||'—')+'</div>'+
+          '<div class="meta">'+
+            '<span>Soort: <strong>'+esc(l.soort||'—')+'</strong></span>'+
+            '<span>Bron: <strong>'+esc(l.bron||'—')+'</strong></span>'+
+            '<span>Traject: <strong>'+esc(l.traject||'—')+'</strong></span>'+
+            '<span>Aangemaakt: <strong>'+esc(fmtDate(l.aangemaakt))+'</strong></span>'+
+          '</div>'+
+        '</div>'+
+
+        '<div class="card">'+
+          '<h2>Kwalificatie</h2>'+
+          scoreBox(l)+
+          afwijzerBanner+
+        '</div>'+
+
+        '<div class="card">'+
+          '<h2>Antwoorden</h2>'+
+          antwoordenHtml+
+        '</div>'+
+
+        // Placeholder-sectie voor toekomstige tijdlijn (berichten + toestemming).
+        // Uit spec: "houd het detailscherm zo dat daar later een tijdlijn onder past".
+        '<div class="card">'+
+          '<h2>Berichten &amp; activiteit</h2>'+
+          '<div class="placeholder"><div class="placeholder-title">Tijdlijn — komt binnenkort</div>Zodra het berichtenlogboek + toestemming-registratie (mail/WhatsApp) live komt, verschijnt hier de volledige communicatie-historie per lead.</div>'+
+        '</div>'+
+      '</div>'+
+
+      '<div>'+
+        '<div class="card">'+
+          '<h2>Acties</h2>'+
+          '<div class="field">'+
+            '<label for="fStatus">Status</label>'+
+            '<select id="fStatus" '+(canWrite?'':'disabled')+'>'+
+              ['nieuw','opgevolgd','gewonnen','verloren'].map(s =>
+                '<option value="'+s+'"'+(l.status===s?' selected':'')+'>'+s+'</option>'
+              ).join('')+
+            '</select>'+
+          '</div>'+
+          '<div class="field">'+
+            '<label for="fEigenaar">Toewijzen aan</label>'+
+            '<select id="fEigenaar" '+(canWrite?'':'disabled')+'>'+eigenaarOptions+eigenaarFallback+'</select>'+
+          '</div>'+
+          '<div class="field">'+
+            '<label for="fNotitie">Notitie</label>'+
+            '<textarea id="fNotitie" placeholder="Interne notitie…" '+(canWrite?'':'disabled')+'>'+esc(_state.notitie||'')+'</textarea>'+
+          '</div>'+
+          '<div class="row-btns">'+
+            '<button type="button" class="btn primary" id="btnSave" '+(canWrite?'':'disabled')+'>Opslaan</button>'+
+            (_canPromote
+              ? '<button type="button" class="btn secondary" id="btnPromote" '+((l.status==='gewonnen')?'disabled title="Reeds doorgezet"':'')+'>Doorzetten naar klant</button>'
+              : '')+
+          '</div>'+
+        '</div>'+
+
+        '<div class="card">'+
+          '<h2>Details vastleg</h2>'+
+          '<div style="font-size:12px;color:var(--text-dim);line-height:1.5">'+
+            '<div><strong>Kwalificatie:</strong> '+esc(l.kwalificatie||'—')+'</div>'+
+            '<div><strong>Score:</strong> '+esc(l.score==null?'—':l.score)+'</div>'+
+            '<div><strong>Drempel:</strong> '+esc(l.drempel==null?'—':l.drempel)+'</div>'+
+            '<div><strong>Afwijzer:</strong> '+(_state.afwijzer?'ja':'nee')+'</div>'+
+            '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border-default,#e5e7eb);color:var(--text-faint);font-size:11px">Deze velden zijn vastgelegd bij aanmelding en kunnen niet gewijzigd worden.</div>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+
+  if(canWrite){
+    document.getElementById('btnSave').addEventListener('click', onSave);
+  }
+  if(_canPromote){
+    const bp = document.getElementById('btnPromote');
+    if(bp && !bp.disabled) bp.addEventListener('click', onPromote);
+  }
+}
+
+async function onSave(){
+  const btn = document.getElementById('btnSave'); btn.disabled = true;
+  const payload = {
+    id: _leadId,
+    status: document.getElementById('fStatus').value,
+    eigenaar_id: document.getElementById('fEigenaar').value || null,
+    notitie: document.getElementById('fNotitie').value,
+  };
+  try{
+    const r = await apiFetch('/api/leads-update', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if(!r.ok || d.ok === false) throw new Error(d.error || ('HTTP '+r.status));
+    toast('Opgeslagen');
+    await loadDetail();
+  }catch(e){ toast('Opslaan mislukt: '+e.message, true); btn.disabled = false; }
+}
+
+async function onPromote(){
+  const btn = document.getElementById('btnPromote'); btn.disabled = true;
+  if(!confirm('Deze lead doorzetten naar customers?\n\nWordt gelinkt aan bestaande klant als het e-mailadres al bekend is, anders wordt een nieuwe klant aangemaakt.')){
+    btn.disabled = false; return;
+  }
+  try{
+    const r = await apiFetch('/api/leads-promote', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ id: _leadId }),
+    });
+    const d = await r.json();
+    if(!r.ok || d.ok === false){
+      if(d.code === 'email-required'){
+        toast('Kan niet doorzetten: lead heeft geen (geldig) e-mailadres', true);
+      } else {
+        toast('Doorzetten mislukt: '+(d.error || ('HTTP '+r.status)), true);
+      }
+      btn.disabled = false; return;
+    }
+    const msg = d.action === 'linked' ? 'Gelinkt aan bestaande klant' : 'Nieuwe klant aangemaakt';
+    toast(msg + (d.was_no_op ? ' (al gedaan)' : ''));
+    setTimeout(()=>{ window.location.href = '/modules/klanten.html?id='+encodeURIComponent(d.customer_id); }, 900);
+  }catch(e){ toast('Doorzetten mislukt: '+e.message, true); btn.disabled = false; }
+}
+
+async function init(){
+  await window._authSharedReady;
+  const profile = await (window.AuthShared && window.AuthShared.requireAuth ? window.AuthShared.requireAuth() : null);
+  if(!profile) return;
+  if(window.AgentShared && window.AgentShared.renderUserSection) await window.AgentShared.renderUserSection(profile);
+
+  // RBAC-check via RBAC.can() — honoreert super_admin-wildcard automatisch
+  // (les van fix/reservation-fee-bypass-wildcard). Draait binnen init() na
+  // permissions.js-load (les van #978/#979).
+  if(window.RBAC && typeof window.RBAC.can === 'function'){
+    try{
+      _canUpdate  = await window.RBAC.can('leads.update');
+      _canPromote = await window.RBAC.can('leads.promote');
+    }catch(e){ /* stil — knoppen blijven disabled */ }
+  }
+
+  await Promise.all([loadProfiles(), loadDetail()]);
+}
+init();
+</script>
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+</body>
+</html>

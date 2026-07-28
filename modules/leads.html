@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Leads · Agency Command Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Inter',system-ui,sans-serif;background:var(--bg-page,#fafafa);color:var(--text-main,#0f172a);min-height:100vh}
+    .page-wrap{max-width:1400px;margin:0 auto;padding:24px}
+    .page-h{font-size:22px;font-weight:700;margin-bottom:16px}
+
+    /* KPI-strip */
+    .kpi-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
+    .kpi-cell{background:var(--bg-elev,#fff);border:1px solid var(--border-default,#e5e7eb);border-radius:8px;padding:14px 16px}
+    .kpi-lbl{font-size:11px;text-transform:uppercase;color:var(--text-dim);letter-spacing:.4px;margin-bottom:6px;font-weight:600}
+    .kpi-val{font-size:24px;font-weight:700}
+
+    /* Filter-rij */
+    .filter-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;align-items:center}
+    .filter-row select,.filter-row input{padding:7px 10px;font-size:13px;border:1px solid var(--border-default,#e5e7eb);border-radius:6px;background:var(--bg-elev,#fff);color:var(--text-main);min-height:34px}
+    .filter-row input[type="search"]{flex:1;min-width:200px;max-width:340px}
+    .filter-row .btn-refresh{background:transparent;border:1px solid var(--border-default,#e5e7eb);cursor:pointer;padding:7px 12px;border-radius:6px;font-size:13px;color:var(--text-dim)}
+    .filter-row .btn-refresh:hover{background:var(--bg-elev-2,#f8fafc)}
+
+    /* Tabel */
+    .tbl-wrap{background:var(--bg-elev,#fff);border:1px solid var(--border-default,#e5e7eb);border-radius:8px;overflow:auto}
+    .tbl{width:100%;border-collapse:collapse;font-size:13px}
+    .tbl th{text-align:left;padding:10px 12px;background:var(--bg-elev-2,#f8fafc);color:var(--text-dim);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.3px;border-bottom:1px solid var(--border-default,#e5e7eb)}
+    .tbl td{padding:10px 12px;border-bottom:1px solid var(--border-default,#e5e7eb)}
+    .tbl tr:last-child td{border-bottom:none}
+    .tbl tr:hover td{background:var(--bg-elev-2,#f8fafc);cursor:pointer}
+    .tbl .col-score{text-align:right;font-variant-numeric:tabular-nums}
+
+    /* Tag-badge */
+    .tag{display:inline-block;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:600;letter-spacing:.2px}
+    .tag-gekwalificeerd{background:rgba(5,150,105,.15);color:#059669}
+    .tag-minder-geschikt{background:rgba(180,83,9,.15);color:#b45309}
+    .tag-geen-vragenlijst{background:rgba(148,163,184,.2);color:#64748b}
+
+    /* Status-badge */
+    .status{display:inline-block;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+    .status-nieuw{background:rgba(37,99,235,.15);color:#2563eb}
+    .status-opgevolgd{background:rgba(217,119,6,.15);color:#d97706}
+    .status-gewonnen{background:rgba(5,150,105,.2);color:#047857}
+    .status-verloren{background:rgba(148,163,184,.2);color:#64748b}
+
+    .empty{padding:40px;text-align:center;color:var(--text-dim);font-size:14px}
+    .empty i{display:block;font-size:32px;margin-bottom:8px;color:var(--text-faint)}
+
+    .err-banner{padding:12px 14px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.3);border-radius:6px;color:#dc2626;font-size:13px;margin-bottom:14px}
+
+    @media (max-width:720px){
+      .kpi-strip{grid-template-columns:1fr;gap:8px}
+      .kpi-val{font-size:20px}
+      .filter-row input[type="search"]{max-width:100%}
+      .page-wrap{padding:14px}
+    }
+  </style>
+</head>
+<body>
+  <div id="sidebar-mount"></div>
+
+  <main class="page-wrap">
+    <h1 class="page-h">Leads</h1>
+
+    <div id="err" class="err-banner" style="display:none"></div>
+
+    <div id="kpiStrip" class="kpi-strip">
+      <div class="kpi-cell"><div class="kpi-lbl">Vandaag binnengekomen</div><div class="kpi-val" id="kpiVandaag">—</div></div>
+      <div class="kpi-cell"><div class="kpi-lbl">Nog niet opgevolgd</div><div class="kpi-val" id="kpiNieuw">—</div></div>
+      <div class="kpi-cell"><div class="kpi-lbl">Deze week gekwalificeerd</div><div class="kpi-val" id="kpiWeek">—</div></div>
+    </div>
+
+    <div class="filter-row">
+      <select id="fSoort"><option value="">Soort: alle</option><option>7-daagse</option><option>student</option></select>
+      <select id="fKwal">
+        <option value="">Kwalificatie: alle</option>
+        <option value="toegang">toegang</option>
+        <option value="geen toegang">geen toegang</option>
+        <option value="geen">geen vragenlijst</option>
+      </select>
+      <select id="fBron">
+        <option value="">Bron: alle</option>
+        <option value="website">website</option>
+        <option value="funnel">funnel</option>
+        <option value="meta">meta</option>
+        <option value="handmatig">handmatig</option>
+      </select>
+      <select id="fStatus">
+        <option value="">Status: alle</option>
+        <option value="nieuw">nieuw</option>
+        <option value="opgevolgd">opgevolgd</option>
+        <option value="gewonnen">gewonnen</option>
+        <option value="verloren">verloren</option>
+      </select>
+      <input type="search" id="fQ" placeholder="Zoek op naam of e-mail…" />
+      <button type="button" class="btn-refresh" id="btnRefresh">Vernieuwen</button>
+    </div>
+
+    <div class="tbl-wrap">
+      <table class="tbl" id="tbl">
+        <thead><tr>
+          <th>Naam</th>
+          <th>E-mail</th>
+          <th>Soort</th>
+          <th>Bron</th>
+          <th>Traject</th>
+          <th>Tag</th>
+          <th class="col-score">Score / drempel</th>
+          <th>Status</th>
+          <th>Aangemaakt</th>
+        </tr></thead>
+        <tbody id="tblBody">
+          <tr><td colspan="9" class="empty">Laden…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+<script>
+'use strict';
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function fmtDate(iso){
+  if(!iso) return '—';
+  const d = new Date(iso); if(isNaN(d.getTime())) return '—';
+  const day = String(d.getDate()).padStart(2,'0'), mo = String(d.getMonth()+1).padStart(2,'0');
+  return day+'-'+mo+'-'+d.getFullYear()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+function tagClass(tag){
+  if(tag==='gekwalificeerd')   return 'tag-gekwalificeerd';
+  if(tag==='minder geschikt')  return 'tag-minder-geschikt';
+  return 'tag-geen-vragenlijst';
+}
+function tagLabel(tag){
+  if(tag==='gekwalificeerd')   return 'gekwalificeerd';
+  if(tag==='minder geschikt')  return 'minder geschikt';
+  return 'geen vragenlijst';
+}
+function statusClass(s){
+  if(s==='nieuw')     return 'status-nieuw';
+  if(s==='opgevolgd') return 'status-opgevolgd';
+  if(s==='gewonnen')  return 'status-gewonnen';
+  if(s==='verloren')  return 'status-verloren';
+  return '';
+}
+
+function apiFetch(url,opts){
+  if(window.AgentShared && typeof window.AgentShared.apiFetch === 'function') return window.AgentShared.apiFetch(url,opts);
+  return fetch(url,opts);
+}
+
+let _state = { rows: [] };
+
+async function loadStats(){
+  try{
+    const r = await apiFetch('/api/leads-stats');
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+    document.getElementById('kpiVandaag').textContent = d.vandaag ?? 0;
+    document.getElementById('kpiNieuw').textContent   = d.nieuw ?? 0;
+    document.getElementById('kpiWeek').textContent    = d.week_gekwalificeerd ?? 0;
+  }catch(e){ /* niet-fataal, laat streepjes staan */ console.warn('[leads] stats:', e.message); }
+}
+
+async function loadList(){
+  const body = document.getElementById('tblBody');
+  const err  = document.getElementById('err');
+  err.style.display = 'none';
+  body.innerHTML = '<tr><td colspan="9" class="empty">Laden…</td></tr>';
+  try{
+    const p = new URLSearchParams();
+    const sel = (id)=>document.getElementById(id).value.trim();
+    if(sel('fSoort'))  p.set('soort',  sel('fSoort'));
+    if(sel('fKwal'))   p.set('kwalificatie', sel('fKwal'));
+    if(sel('fBron'))   p.set('bron',   sel('fBron'));
+    if(sel('fStatus')) p.set('status', sel('fStatus'));
+    if(sel('fQ'))      p.set('q',      sel('fQ'));
+    const r = await apiFetch('/api/leads-list?'+p.toString());
+    if(!r.ok){
+      const t = await r.text();
+      throw new Error(t || ('HTTP '+r.status));
+    }
+    const d = await r.json();
+    _state.rows = Array.isArray(d.items) ? d.items : [];
+    render();
+  }catch(e){
+    err.textContent = 'Laden mislukt: '+e.message;
+    err.style.display = 'block';
+    body.innerHTML = '<tr><td colspan="9" class="empty">—</td></tr>';
+  }
+}
+
+function render(){
+  const body = document.getElementById('tblBody');
+  if(!_state.rows.length){
+    body.innerHTML = '<tr><td colspan="9" class="empty">Geen leads gevonden met deze filters.</td></tr>';
+    return;
+  }
+  body.innerHTML = _state.rows.map(r => {
+    const scoreCell = (r.score != null && r.drempel != null)
+      ? esc(r.score)+' / '+esc(r.drempel)
+      : '—';
+    return '<tr data-id="'+esc(r.id)+'">'+
+      '<td><strong>'+esc(r.naam||'—')+'</strong></td>'+
+      '<td>'+esc(r.email||'—')+'</td>'+
+      '<td>'+esc(r.soort||'—')+'</td>'+
+      '<td>'+esc(r.bron||'—')+'</td>'+
+      '<td>'+esc(r.traject||'—')+'</td>'+
+      '<td><span class="tag '+tagClass(r.tag)+'">'+esc(tagLabel(r.tag))+'</span></td>'+
+      '<td class="col-score">'+scoreCell+'</td>'+
+      '<td><span class="status '+statusClass(r.status)+'">'+esc(r.status||'—')+'</span></td>'+
+      '<td>'+esc(fmtDate(r.aangemaakt))+'</td>'+
+    '</tr>';
+  }).join('');
+  body.querySelectorAll('tr[data-id]').forEach(tr => {
+    tr.addEventListener('click', () => {
+      window.location.href = '/modules/leads-detail.html?id='+encodeURIComponent(tr.getAttribute('data-id'));
+    });
+  });
+}
+
+let _searchTimer = null;
+async function init(){
+  await window._authSharedReady;
+  const profile = await (window.AuthShared && window.AuthShared.requireAuth ? window.AuthShared.requireAuth() : null);
+  if(!profile) return;
+  if(window.AgentShared && window.AgentShared.renderUserSection) await window.AgentShared.renderUserSection(profile);
+
+  document.getElementById('fSoort').addEventListener('change', loadList);
+  document.getElementById('fKwal').addEventListener('change', loadList);
+  document.getElementById('fBron').addEventListener('change', loadList);
+  document.getElementById('fStatus').addEventListener('change', loadList);
+  document.getElementById('fQ').addEventListener('input', () => {
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(loadList, 250);
+  });
+  document.getElementById('btnRefresh').addEventListener('click', () => { loadStats(); loadList(); });
+
+  await Promise.all([loadStats(), loadList()]);
+}
+init();
+</script>
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+</body>
+</html>

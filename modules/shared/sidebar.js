@@ -75,7 +75,11 @@
     // lucide "users-cog" — Mentoren beheer (consolidatie van 3 admin-modules).
     'mentoren-beheer': '<circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><circle cx="18" cy="14" r="2"/><path d="M18 9v2M18 17v2M22 14h-2M14 14h2"/>',
     // lucide "history" — activiteitenlogboek (PR2). Kloklijn met terugpijl.
-    'activity-log': '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/><line x1="12" y1="7" x2="12" y2="12"/><line x1="12" y1="12" x2="15" y2="14"/>'
+    'activity-log': '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/><line x1="12" y1="7" x2="12" y2="12"/><line x1="12" y1="12" x2="15" y2="14"/>',
+    // lucide "user-check" — leads-module (Fase 1: eigen top-level afdeling).
+    // Icon-keuze: user met vinkje = inkomende contactverzoeken die door de
+    // vragenlijst wel/niet kwamen.
+    leads: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/>'
   };
 
   function svg(key) {
@@ -250,6 +254,12 @@
         '<div class="sidebar-nav">' +
           navLink('dashboard', '/index.html', 'Dashboard') +
           // 'Klanten' verwijderd: klantenlijst leeft nu in Sales > tab Klanten.
+          // Leads-afdeling (Fase 1) — inkomende contactverzoeken uit website-
+          // vragenlijst, later uitgebreid met funnel/meta/handmatig. Server-
+          // side gate't via leads.view op elk endpoint; nav-item is altijd
+          // zichtbaar (users zonder perm zien de pagina "Geen rechten"). Kan
+          // later verborgen worden via het adminNavLink-patroon.
+          navLink('leads', '/modules/leads.html', 'Leads') +
           '<a class="nav-item" data-module="email" href="/modules/email.html">' + svg('email') + 'E-mail<span class="nav-badge" id="navEmailBadge"></span></a>' +
           navLink('lisa', '/modules/lisa.html', 'Appointment setting') +
           '<a class="nav-item" data-module="taken" href="/modules/taken.html">' + svg('taken') + 'Takenbeheer<span class="nav-badge" id="navTakenBadge"></span></a>' +
