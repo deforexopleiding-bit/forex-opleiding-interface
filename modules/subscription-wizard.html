@@ -291,6 +291,13 @@ async function init(){
   const profile = await window.AuthShared?.requireAuth();
   if(!profile) return;
   if(window.AgentShared) await window.AgentShared.renderUserSection(profile);
+  // Bypass-vinkje initialiseren NA authSharedReady EN nadat permissions.js
+  // door de HTML is geladen (permissions.js hangt onder de </script>-blok en
+  // is dus tegen de tijd dat init() draait al beschikbaar via window.RBAC).
+  // Als het BUITEN init() staat draait 'ie tijdens inline-script-load,
+  // wanneer permissions.js nog niet is geladen → RBAC undefined → blok
+  // blijft verborgen voor iedereen (ook super_admin).
+  _initBypassFeeCard();
   try{
     // Gedeelde data (beide modes): entiteiten, producten (PUNT 5), trajecten (PUNT 6).
     const [eRes,pRes,tRes] = await Promise.all([
@@ -931,7 +938,8 @@ async function _initBypassFeeCard(){
     ta.addEventListener('input', refreshHint);
   }catch(e){ /* stil — vinkje blijft verborgen bij failure, endpoint blijft veilig */ }
 }
-_initBypassFeeCard();
+// Aanroep zit in init() (regel ~295) zodat permissions.js én _authSharedReady
+// gegarandeerd geladen zijn vóór de RBAC-check draait.
 
 // Getter die de bypass-payload-velden verzamelt op basis van UI-staat.
 // Returnt { bypass:false } als 'ie niet aan staat of de card niet zichtbaar
