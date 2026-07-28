@@ -17,7 +17,7 @@ import {
   filterTransactionsForBreakdown,
   computeBreakdown,
   aiSuggestionsByCounterparty,
-  netPaypalAuthorizations,
+  excludePaypalFundingLegs,
 } from '../api/_lib/expenses-grouping.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────
@@ -495,59 +495,57 @@ test('aiSuggestionsByCounterparty: tegenpartijen zonder ai_suggest zijn niet in 
   assert.equal(out.size, 0);
 });
 
-// ── PayPal-autorisatie-netting via counterparty-groep-niveau filter ─────
+// ── filterTransactionsForBreakdown: per-tx incoming filter ──────────────
+// PayPal-financieringslegs zijn al door excludePaypalFundingLegs eruit
+// gehaald voordat deze filter draait. Wat als +tx binnenkomt is een echte
+// klant-inkomst (Bas Express Checkout, 360dialog refund, etc.) en wordt
+// standaard geskipt tenzij includeIncoming=true.
 
-test('filterTransactionsForBreakdown: PayPal-Bij bij uitgave-groep NIET gefilterd (netting werkt)', () => {
-  // Twilio-case: Af -38,31 + Bij +37,83 = netto uitgave -0,48. Beide tx
-  // moeten door de filter komen zodat de aggregatie netto klopt.
+test('filterTransactionsForBreakdown: per-tx amount>=0 wordt geskipt (default)', () => {
+  const txs = [
+    mkTx('t1', 'Twilio', -3831, '2026-04-24'),   // echte pasbetaling
+    mkTx('t2', 'Bas Van Leijden', 9625, '2026-01-15'),   // klant-inkomst
+  ];
+  const out = filterTransactionsForBreakdown(txs, null, null, { includeIncoming: false });
+  assert.equal(out.length, 1, 'alleen -Af blijft');
+  assert.equal(out[0].id, 't1');
+});
+
+test('filterTransactionsForBreakdown: includeIncoming=true laat +tx binnen', () => {
   const txs = [
     mkTx('t1', 'Twilio', -3831, '2026-04-24'),
-    mkTx('t2', 'Twilio',  3783, '2026-04-24'),
-  ];
-  const out = filterTransactionsForBreakdown(txs, null, null, { includeIncoming: false });
-  assert.equal(out.length, 2, 'zowel -Af als +Bij moeten door filter — groep-totaal is uitgave');
-});
-
-test('filterTransactionsForBreakdown: klant-inkomst-groep (alleen +) wordt uitgefilterd', () => {
-  // Bas Van Leijden: alleen +Bij (Express Checkout klant-betaling). Groep-
-  // totaal is positief → inkomst-groep → skip (default includeIncoming=false).
-  const txs = [
-    mkTx('t1', 'Bas Van Leijden', 9625, '2026-01-15'),
-  ];
-  const out = filterTransactionsForBreakdown(txs, null, null, { includeIncoming: false });
-  assert.equal(out.length, 0);
-});
-
-test('filterTransactionsForBreakdown: klant-inkomst-groep met includeIncoming=true blijft', () => {
-  const txs = [
-    mkTx('t1', 'Bas Van Leijden', 9625, '2026-01-15'),
+    mkTx('t2', 'Bas Van Leijden', 9625, '2026-01-15'),
   ];
   const out = filterTransactionsForBreakdown(txs, null, null, { includeIncoming: true });
-  assert.equal(out.length, 1);
+  assert.equal(out.length, 2);
 });
 
-test('filterTransactionsForBreakdown: gemengd (uitgave-groep + inkomst-groep) — alleen uitgave-groep', () => {
+test('filterTransactionsForBreakdown: -Af telt VOL (geen groep-som-netting meer)', () => {
+  // Regressie-guard voor #973/#974: die netten -Af + +Bij van dezelfde
+  // counterparty tot netto ~€0, waardoor Twilio als "geen uitgave" werd
+  // geclassificeerd. Dit test bewijst dat -Af NU vol telt.
   const txs = [
-    mkTx('t1', 'Twilio', -3831, '2026-04-24'),       // uitgave-groep
-    mkTx('t2', 'Twilio',  3783, '2026-04-24'),       // (zelfde groep)
-    mkTx('t3', 'Bas',     9625, '2026-01-15'),       // inkomst-groep
-    mkTx('t4', 'OpenAI', -2068, '2025-07-28'),
-    mkTx('t5', 'OpenAI',  1880, '2025-07-28'),
+    mkTx('t1', 'Twilio', -3831, '2026-04-24'),
+    mkTx('t2', 'Twilio', -3514, '2025-11-24'),
+    mkTx('t3', 'Twilio', -4305, '2025-08-24'),
   ];
   const out = filterTransactionsForBreakdown(txs, null, null, { includeIncoming: false });
-  assert.equal(out.length, 4, 'Twilio (2) + OpenAI (2) blijven, Bas verdwijnt');
-  assert.equal(out.some(t => t.counterparty_name === 'Bas'), false);
+  assert.equal(out.length, 3, 'alle 3 -Af pasbetalingen blijven zichtbaar');
+  const sum = out.reduce((s, t) => s + t.amount_cents, 0);
+  assert.equal(sum, -11650, 'som = -€116,50 (grondwaarheid Twilio)');
 });
 
-test('buildCounterpartyRows: Twilio-scenario (net €-0,48) blijft, 100%-teruggeboekt (net €0) valt weg', () => {
+test('buildCounterpartyRows: uitgave-groep (negatieve g.total) blijft, inkomst-groep (positief) verdwijnt', () => {
+  // Na excludePaypalFundingLegs bevat de groep alleen echte -Af of echte +Bij.
+  // Twilio (na exclude): g.total = -11650 → blijft. Bas: g.total = +9625 → weg.
   const groups = new Map([
-    ['Twilio-partial', { total: -48,  count: 2, first: '2026-04-24', last: '2026-04-24', catCounts: new Map(), manualCount: 0 }],
-    ['Twilio-full',    { total: 0,    count: 2, first: '2025-11-24', last: '2025-11-24', catCounts: new Map(), manualCount: 0 }],
+    ['Twilio', { total: -11650, count: 3, first: '2025-08-24', last: '2026-04-24', catCounts: new Map(), manualCount: 0 }],
+    ['Bas',    { total:   9625, count: 1, first: '2026-01-15', last: '2026-01-15', catCounts: new Map(), manualCount: 0 }],
   ]);
   const rows = buildCounterpartyRows(groups, CAT_META, {});
-  assert.equal(rows.length, 1, 'alleen negatieve-netto blijft (100% teruggeboekt = geen uitgave)');
-  assert.equal(rows[0].name, 'Twilio-partial');
-  assert.equal(rows[0].total_cents, -48);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].name, 'Twilio');
+  assert.equal(rows[0].total_cents, -11650, 'Twilio staat vol als -€116,50 uitgave (geen netting)');
 });
 
 test('aiSuggestionsByCounterparty: bij tie op cnt wint hoogste avg confidence', () => {
@@ -564,92 +562,143 @@ test('aiSuggestionsByCounterparty: bij tie op cnt wint hoogste avg confidence', 
   assert.equal(x.category_id, 'cat-b', 'tie → hoogste confidence wint');
 });
 
-// ── netPaypalAuthorizations — netting voor detail-popup ──────────────────
+// ── excludePaypalFundingLegs — financierings-leg + vasthouding uitsluiten ─
+//
+// Grondwaarheid (2860 rijen productie-data, bewezen tegen PayPal's eigen
+// transactie-overzicht):
+//   Twilio (3 pasbetalingen):  -€116,50 = -€38,31 + -€35,14 + -€43,05
+//   Financieringslegs op Twilio: 3× +Overige (ref-join anchor) → uit
+//   Netto na exclude:           -€116,50 (NIET €0,48, NIET €0)
+//
+// De -Af-pasbetaling TELT VOL. De +Overige-financieringsleg wordt UIT-
+// gesloten (niet weggestreept). Detail-popup laat dus de 3 pasbetalingen
+// apart zien.
 
-function mkPayTx(id, name, cents, date, code = 'Algemene PayPal-bankpastransactie') {
-  return { id, counterparty_name: name, amount_cents: cents, booking_date: date, source: 'paypal', transaction_code: code };
+function mkPayTx(id, name, cents, date, code, entryRef, endToEndId) {
+  return {
+    id,
+    counterparty_name: name,
+    amount_cents:      cents,
+    booking_date:      date,
+    source:            'paypal',
+    transaction_code:  code || 'Algemene PayPal-bankpastransactie',
+    entry_reference:   entryRef || null,
+    end_to_end_id:     endToEndId || null,
+  };
 }
 
-test('netPaypalAuthorizations: Twilio Apr → -Af + +Overige-Bij netten tot -€0,48', () => {
+test('excludePaypalFundingLegs: Twilio Apr → -Af blijft VOL (€38,31), +Overige-leg weg', () => {
   const items = [
-    mkPayTx('a1', 'TWILIO.COM', -3831, '2026-04-24', 'Algemene PayPal-bankpastransactie'),
-    mkPayTx('b1', 'TWILIO.COM',  3783, '2026-04-24', 'Overige'),
+    mkPayTx('a1', 'TWILIO.COM', -3831, '2026-04-24', 'Algemene PayPal-bankpastransactie', 'REF-APR-24', null),
+    mkPayTx('b1', 'TWILIO.COM',  3783, '2026-04-24', 'Overige',                             null,       'REF-APR-24'),
   ];
-  const out = netPaypalAuthorizations(items);
-  assert.equal(out.length, 1, 'twee tx samengevoegd tot één');
-  assert.equal(out[0].amount_cents, -48);
-  assert.equal(out[0]._netted_from, 2);
-  assert.equal(out[0].id, 'a1', 'anchor is de -Af tx (voor category-picker)');
+  const out = excludePaypalFundingLegs(items);
+  assert.equal(out.length, 1, 'financieringsleg weg, -Af blijft');
+  assert.equal(out[0].id, 'a1');
+  assert.equal(out[0].amount_cents, -3831, '-Af TELT VOL (geen netting naar €0,48)');
 });
 
-test('netPaypalAuthorizations: Twilio Nov (100% teruggeboekt) verdwijnt uit lijst', () => {
+test('excludePaypalFundingLegs: Twilio grondwaarheid = -€116,50 na exclude (3 pasbetalingen)', () => {
+  // Regressie-guard tegen #972/#973/#974: die maakten hier respectievelijk
+  // ~€116 (te veel), €0,48 en €0 van. Correcte antwoord = -€116,50.
   const items = [
-    mkPayTx('a1', 'TWILIO.COM', -3514, '2025-11-24'),
-    mkPayTx('b1', 'TWILIO.COM',  3514, '2025-11-24', 'Overige'),
+    mkPayTx('af1', 'TWILIO.COM', -3831, '2026-04-24', 'Algemene PayPal-bankpastransactie', 'R-APR', null),
+    mkPayTx('bg1', 'TWILIO.COM',  3783, '2026-04-24', 'Overige',                             null,   'R-APR'),
+    mkPayTx('af2', 'TWILIO.COM', -3514, '2025-11-24', 'Algemene PayPal-bankpastransactie', 'R-NOV', null),
+    mkPayTx('bg2', 'TWILIO.COM',  3514, '2025-11-24', 'Overige',                             null,   'R-NOV'),
+    mkPayTx('af3', 'TWILIO.COM', -4305, '2025-08-24', 'Algemene PayPal-bankpastransactie', 'R-AUG', null),
+    mkPayTx('bg3', 'TWILIO.COM',  4243, '2025-08-24', 'Overige',                             null,   'R-AUG'),
   ];
-  const out = netPaypalAuthorizations(items);
-  assert.equal(out.length, 0, 'netto €0 → geen echte uitgave → weggelaten');
+  const out = excludePaypalFundingLegs(items);
+  assert.equal(out.length, 3, '3 pasbetalingen blijven, 3 financieringslegs weg');
+  const sum = out.reduce((s, t) => s + t.amount_cents, 0);
+  assert.equal(sum, -11650, 'totaal Twilio uitgaven = -€116,50 (grondwaarheid)');
+  assert.ok(out.every(t => t.amount_cents < 0), 'alle overgebleven rijen zijn -Af');
 });
 
-test('netPaypalAuthorizations: solo tx (geen paar) blijft ongewijzigd', () => {
+test('excludePaypalFundingLegs: echte klant-inkomst (+Overige zonder -Af-parent) BLIJFT', () => {
+  // 6 echte inkomsten op main-PayPal (2860-rijs analyse): 360dialog, Walmart,
+  // Vercel, Linktree, Facebook. Signaal: +Overige met end_to_end_id dat GEEN
+  // enkele -Af.entry_reference matcht → blijft doorgaan.
   const items = [
-    mkPayTx('a1', 'Meta', -100000, '2026-01-15', 'Vooraf goedgekeurde betaling'),
+    mkPayTx('inc1', '360dialog GmbH', 1500, '2026-05-10', 'Overige', null, 'EXTERNAL-REF-XYZ'),
+    mkPayTx('af1',  'Meta Platforms', -50000, '2026-05-10', 'Algemene PayPal-bankpastransactie', 'META-REF', null),
   ];
-  const out = netPaypalAuthorizations(items);
+  const out = excludePaypalFundingLegs(items);
+  assert.equal(out.length, 2, 'echte inkomst en -Af blijven beide');
+  assert.ok(out.some(t => t.id === 'inc1'), '360dialog +Overige (geen -Af-parent) blijft');
+  assert.ok(out.some(t => t.id === 'af1'), 'Meta -Af blijft');
+});
+
+test('excludePaypalFundingLegs: vasthouding uit — BEIDE zijden weg', () => {
+  const items = [
+    mkPayTx('hold1', 'PayPal', -20000, '2026-03-01', 'Vastgehouden - algemeen', 'HOLD-A', null),
+    mkPayTx('rel1',  'PayPal',  20000, '2026-03-05', 'Terugboeking algemene vasthouding op rekeningniveau', 'HOLD-B', null),
+    mkPayTx('af1',   'Zoom',   -10000, '2026-03-02', 'Algemene PayPal-bankpastransactie', 'ZOOM-REF', null),
+  ];
+  const out = excludePaypalFundingLegs(items);
+  assert.equal(out.length, 1, 'vasthouding + terugboeking allebei weg');
+  assert.equal(out[0].id, 'af1', 'echte -Af blijft');
+});
+
+test('excludePaypalFundingLegs: klant-inkomst Express Checkout blijft (geen -Af-parent)', () => {
+  const items = [
+    mkPayTx('k1', 'Bas Van Leijden', 9625, '2026-01-15', 'Express Checkout-betaling', null, null),
+  ];
+  const out = excludePaypalFundingLegs(items);
   assert.equal(out.length, 1);
-  assert.equal(out[0].amount_cents, -100000);
-  assert.equal(out[0]._netted_from, undefined, 'geen netting-metadata want geen groep');
+  assert.equal(out[0].amount_cents, 9625, 'Express Checkout blijft — geen "Overige"-code, geen ref-join');
 });
 
-test('netPaypalAuthorizations: klant-inkomst (Express Checkout) niet netten (geen Af in groep)', () => {
+test('excludePaypalFundingLegs: CAMT-tx (source=camt) volledig onaangeroerd', () => {
   const items = [
-    { id: 'k1', counterparty_name: 'Bas Van Leijden', amount_cents: 9625, booking_date: '2026-01-15', source: 'paypal', transaction_code: 'Express Checkout-betaling' },
+    { id: 'c1', counterparty_name: 'Huurbaas', amount_cents: -100000, booking_date: '2026-01-01', source: 'camt', transaction_code: null, entry_reference: null, end_to_end_id: null },
+    { id: 'c2', counterparty_name: 'ING klant', amount_cents: 50000,  booking_date: '2026-01-01', source: 'camt', transaction_code: null, entry_reference: null, end_to_end_id: null },
   ];
-  const out = netPaypalAuthorizations(items);
-  assert.equal(out.length, 1, 'klant-inkomst blijft zichtbaar');
-  assert.equal(out[0].amount_cents, 9625);
+  const out = excludePaypalFundingLegs(items);
+  assert.equal(out.length, 2, 'CAMT nooit gefilterd — dat is bank-data, geen PayPal-mechaniek');
 });
 
-test('netPaypalAuthorizations: CAMT-tx (source=camt) niet netten', () => {
+test('excludePaypalFundingLegs: +Overige ZONDER end_to_end_id blijft (geen ref-join mogelijk)', () => {
   const items = [
-    { id: 'c1', counterparty_name: 'Huurbaas', amount_cents: -100000, booking_date: '2026-01-01', source: 'camt', transaction_code: null },
-    { id: 'c2', counterparty_name: 'Huurbaas', amount_cents:  50000,  booking_date: '2026-01-01', source: 'camt', transaction_code: null },
+    mkPayTx('af1',  'Merchant', -1000, '2026-03-10', 'Algemene PayPal-bankpastransactie', 'REF-A', null),
+    mkPayTx('inc1', 'Anoniem',   500, '2026-03-11', 'Overige', null, null),   // geen ref
   ];
-  const out = netPaypalAuthorizations(items);
-  // Geen +Overige Bij (want geen paypal), dus geen netting.
-  assert.equal(out.length, 2);
+  const out = excludePaypalFundingLegs(items);
+  assert.equal(out.length, 2, 'zonder ref kan geen leg-koppeling → blijft als (mogelijk) inkomst');
 });
 
-test('netPaypalAuthorizations: gemengde groep (Af + Overige + andere Bij) — nette + andere apart', () => {
+test('excludePaypalFundingLegs: vasthouding wordt GEEN anchor (voorkomt vals-positief)', () => {
+  // Een +Overige met end_to_end_id gelijk aan een vasthouding's entry_reference
+  // zou anders per ongeluk als "financieringsleg" worden uitgesloten. Test
+  // bewijst dat de anchor-set alleen echte pasbetalingen bevat.
   const items = [
-    mkPayTx('a1', 'Merchant', -1000, '2026-03-10'),
-    mkPayTx('b1', 'Merchant',   800, '2026-03-10', 'Overige'),               // netting
-    mkPayTx('c1', 'Merchant',   500, '2026-03-10', 'Terugbetaling'),          // apart (echte refund)
+    mkPayTx('hold1', 'PayPal',  -5000, '2026-02-01', 'Vastgehouden - algemeen', 'HOLD-REF', null),
+    mkPayTx('inc1',  'Klant X',  3000, '2026-02-02', 'Overige', null, 'HOLD-REF'),
   ];
-  const out = netPaypalAuthorizations(items);
-  assert.equal(out.length, 2, '1 genette (Af+Overige) + 1 aparte Terugbetaling');
-  const netted = out.find(t => t._netted_from);
-  assert.equal(netted.amount_cents, -200);
-  const refund = out.find(t => !t._netted_from);
-  assert.equal(refund.transaction_code, 'Terugbetaling');
+  const out = excludePaypalFundingLegs(items);
+  // Hold zelf weg (transaction_code check), maar inc1 blijft want vasthouding
+  // is geen valid anchor voor de ref-join.
+  assert.equal(out.length, 1);
+  assert.equal(out[0].id, 'inc1', 'inkomst NIET verward met financieringsleg');
 });
 
-test('netPaypalAuthorizations: lege input → lege output', () => {
-  assert.deepEqual(netPaypalAuthorizations([]), []);
-  assert.deepEqual(netPaypalAuthorizations(null), []);
+test('excludePaypalFundingLegs: lege input → lege output', () => {
+  assert.deepEqual(excludePaypalFundingLegs([]), []);
+  assert.deepEqual(excludePaypalFundingLegs(null), []);
 });
 
-test('netPaypalAuthorizations: som van output == som van input (invariant, behalve €0-groepen)', () => {
-  // Twilio Apr netto -0,48 blijft; Twilio Nov netto 0 verdwijnt.
+test('excludePaypalFundingLegs: gemengde set (financiering + echte refund) — refund blijft', () => {
+  // Refund via "Terugbetaling"-code (echte credit-terugbetaling, geen leg)
+  // moet blijven. Alleen +Overige met -Af-parent is een financieringsleg.
   const items = [
-    mkPayTx('a1', 'TWILIO', -3831, '2026-04-24'),
-    mkPayTx('b1', 'TWILIO',  3783, '2026-04-24', 'Overige'),
-    mkPayTx('a2', 'TWILIO', -3514, '2025-11-24'),
-    mkPayTx('b2', 'TWILIO',  3514, '2025-11-24', 'Overige'),
-    mkPayTx('m1', 'Meta',   -50000, '2026-02-01', 'Vooraf goedgekeurde betaling'),
+    mkPayTx('af1',  'Merchant', -1000, '2026-03-10', 'Algemene PayPal-bankpastransactie', 'REF-A', null),
+    mkPayTx('leg1', 'Merchant',   800, '2026-03-10', 'Overige',      null, 'REF-A'),      // leg → weg
+    mkPayTx('ref1', 'Merchant',   500, '2026-03-15', 'Terugbetaling', null, null),         // echte refund → blijft
   ];
-  const inSum  = items.reduce((s, t) => s + t.amount_cents, 0);
-  const outSum = netPaypalAuthorizations(items).reduce((s, t) => s + t.amount_cents, 0);
-  // Nov-Twilio (€0) verdwijnt, inSum en outSum verschillen daar niet in (want +0).
-  assert.equal(outSum, inSum);
+  const out = excludePaypalFundingLegs(items);
+  assert.equal(out.length, 2, '-Af blijft + refund blijft; alleen leg weg');
+  assert.ok(out.some(t => t.id === 'af1'));
+  assert.ok(out.some(t => t.id === 'ref1'));
+  assert.ok(!out.some(t => t.id === 'leg1'));
 });

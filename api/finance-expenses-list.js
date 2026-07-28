@@ -23,7 +23,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { netPaypalAuthorizations } from './_lib/expenses-grouping.js';
+import { excludePaypalFundingLegs } from './_lib/expenses-grouping.js';
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -53,7 +53,7 @@ export default async function handler(req, res) {
     // Base query op camt_transactions.
     let qy = supabaseAdmin
       .from('camt_transactions')
-      .select('id, booking_date, amount_cents, currency, description, counterparty_name, source, transaction_code, entry_reference', { count: 'exact' })
+      .select('id, booking_date, amount_cents, currency, description, counterparty_name, source, transaction_code, entry_reference, end_to_end_id', { count: 'exact' })
       .order('booking_date', { ascending: false })
       .range(offset, offset + limit - 1);
     if (counterparty)     qy = qy.eq('counterparty_name', counterparty);
@@ -100,15 +100,23 @@ export default async function handler(req, res) {
       };
     });
 
-    // ── PayPal-autorisatie-netting ──
-    // Net "-Af + +Overige-Bij" op zelfde (counterparty, datum, source) samen
-    // tot één netto-regel. Groepen met netto €0 (autorisatie 100% teruggeboekt)
-    // verdwijnen uit de lijst. Zo is de detail-popup consistent met de
-    // tegenpartijen-lijst (en toont niet meer de misleidende +regels als
-    // "inkomst"). Signaal: source='paypal' + amount>0 + code='Overige'.
-    const nettedTxs = netPaypalAuthorizations(enrichedTxs);
+    // ── PayPal-financieringslegs uitsluiten (GEEN netting) ──
+    // Detail-popup toont dus de echte -Af-pasbetalingen (Twilio: -€38,31,
+    // -€35,14, -€43,05 apart) zonder de +Overige-financierings-regels die
+    // ernaast op de rekening staan. Vasthoudings-tegenboekingen worden aan
+    // beide zijden verwijderd. Zie excludePaypalFundingLegs voor het exacte
+    // signaal (ref-join via end_to_end_id → entry_reference).
+    //
+    // Wanneer counterparty gefilterd is (detail-view) werkt de ref-join binnen
+    // die counterparty's tx-set. Voor de algemene lijst (zonder counterparty)
+    // werkt de ref-join alleen als parent + child in dezelfde page-batch zitten;
+    // dat is bijna altijd het geval want beide dragen dezelfde booking_date en
+    // sorteren aan elkaar. Edge-case (leg buiten batch): leg blijft zichtbaar
+    // maar staat expliciet als "PayPal – Overige (Bij)" naast een tegenpartij,
+    // dus verwarring is beperkt.
+    const filteredTxs = excludePaypalFundingLegs(enrichedTxs);
 
-    const items = nettedTxs.filter(t => {
+    const items = filteredTxs.filter(t => {
       if (onlyUncategorized && t.category) return false;
       if (categoryFilter && (!t.category || t.category.id !== categoryFilter)) return false;
       return true;

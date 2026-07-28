@@ -23,6 +23,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import {
   filterTransactionsForBreakdown,
   computeBreakdown,
+  excludePaypalFundingLegs,
 } from './_lib/expenses-grouping.js';
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -49,15 +50,16 @@ export default async function handler(req, res) {
 
   try {
     // Fetch alle relevante tx (chunked). Alleen non-Memo want die zijn al
-    // niet in DB (parser filtert).
+    // niet in DB (parser filtert). Select bevat PayPal-detectievelden
+    // (transaction_code, entry_reference, end_to_end_id) voor de exclude-helper.
     const CHUNK = 1000;
-    const txs = [];
+    const rawTxs = [];
     let offset = 0;
     // eslint-disable-next-line no-constant-condition
     while (true) {
       let qy = supabaseAdmin
         .from('camt_transactions')
-        .select('id, amount_cents, counterparty_name, source')
+        .select('id, amount_cents, counterparty_name, source, transaction_code, entry_reference, end_to_end_id')
         .range(offset, offset + CHUNK - 1);
       if (from)             qy = qy.gte('booking_date', from);
       if (to)               qy = qy.lte('booking_date', to);
@@ -65,10 +67,14 @@ export default async function handler(req, res) {
       const { data, error } = await qy;
       if (error) throw new Error('camt_transactions: ' + error.message);
       if (!data || data.length === 0) break;
-      txs.push(...data);
+      rawTxs.push(...data);
       if (data.length < CHUNK) break;
       offset += CHUNK;
     }
+    // Sluit PayPal-financieringslegs + beide zijden van vasthoudingen uit.
+    // Deze wonen in de raw-lijst als +Overige/± Vastgehouden en zouden
+    // anders de breakdown-totalen verstoren (uitgave-onderrapportage).
+    const txs = excludePaypalFundingLegs(rawTxs);
 
     // Fetch categorisaties (VÓÓR filter, want interne-overboeking-filter heeft
     // categorie-info nodig om tx te herkennen). ai_suggest EXPLICIET UITSLUITEN:
@@ -96,8 +102,10 @@ export default async function handler(req, res) {
       .order('label');
     const catMetaById = new Map((allCats || []).map(c => [c.id, c]));
 
-    // Filter: intern + interne overboekingen + counterparty-groep incoming
-    // (helper filtert nu op groep-niveau ipv per-tx zodat PayPal +Bij mee-net).
+    // Filter: intern + interne overboekingen + per-tx incoming (amount>=0).
+    // PayPal-financieringslegs zijn al vóór aggregatie uitgesloten, dus wat
+    // hier als amount>=0 doorkomt is een echte klant-inkomst (uit tenzij
+    // includeIncoming). -Af-pasbetalingen blijven vol tellen.
     const filteredTxs = filterTransactionsForBreakdown(
       txs, catByTxId, catMetaById,
       { includeInternal, includeInternalTransfers, includeIncoming }

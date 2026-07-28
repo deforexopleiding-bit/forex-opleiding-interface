@@ -4,91 +4,92 @@
 // deterministisch kunnen valideren. Gebruikt door:
 //   - api/finance-expenses-counterparties.js
 //   - api/finance-expenses-breakdown.js
+//   - api/finance-expenses-dashboard.js
+//   - api/finance-expenses-list.js
+//   - api/finance-expenses-recurring.js
 //
 // Contract:
-//   tx-shape: { id, counterparty_name, amount_cents, booking_date, source }
+//   tx-shape: { id, counterparty_name, amount_cents, booking_date, source,
+//               transaction_code, entry_reference, end_to_end_id }
 //   cat-shape (per tx-id, indien gezet): { camt_transaction_id, category_id, source }
-//   catMeta-shape (per category-id): { id, slug, label, color }
+//   catMeta-shape (per category-id): { id, slug, label, color, is_internal }
 
 export const INTERNAL_NAMES = new Set(['(intern PayPal)']);
 export const EMPTY_NAME = '(leeg)';
 
 /**
- * Net PayPal-autorisatie-terugboekingen tegen hun -Af-parent binnen dezelfde
- * (counterparty, booking_date, source)-groep. Alleen groepen die een
- * "Overige"-Bij bevatten worden gemerged; andere tx blijven onaangeroerd.
+ * Sluit PayPal-financieringslegs en beide zijden van vasthoudingen uit,
+ * ZONDER samen te vatten of te netten. Behoudt de -Af-pasbetalingen intact
+ * en behoudt echte +Overige-inkomsten (die geen -Af-parent hebben).
  *
- * Signaal (bewezen, 100% precisie): `source='paypal' AND amount>0 AND
- * transaction_code='Overige'` matcht via `end_to_end_id → entry_reference` een
- * -Af-parent. In de praktijk zit die parent op dezelfde datum, dus we
- * groeperen simpelweg op (counterparty, booking_date, source).
+ * Achtergrond (bewezen op 2860 rijen productie-data):
+ *   PayPal's CSV bevat drie soorten "onechte" bewegingen die de echte
+ *   uitgave verstoren als je ze meerekent:
  *
- * Output-shape per genette rij:
- *   - Alle Af-velden van de anchor (eerste -Af in groep)
- *   - `amount_cents` = SOM van alle Af's + Bij Overige in de groep
- *   - `_netted_from` = aantal originele raw tx die zijn samengevoegd
- *   - `_raw_tx_ids` = array met alle originele tx-id's
+ *   1) Financieringsleg (+Overige, "General Currency Conversion" e.d.):
+ *      dit is PayPal's eigen geld dat de -Af-pasbetaling funded. Het is
+ *      GEEN echte inkomst en het is GEEN teruggeboekte autorisatie.
+ *      Signaal (100% precisie): source='paypal' AND amount>0 AND
+ *      transaction_code='Overige' AND end_to_end_id matcht via ref-join
+ *      een -Af.entry_reference. 515 rijen (som ~+€27K).
  *
- * Groepen die netto €0 zijn (autorisatie 100% teruggeboekt) worden
- * WEGGELATEN — die zijn geen echte uitgave meer.
+ *   2) Vasthouding (-"Vastgehouden - algemeen"): PayPal-mechanisme voor
+ *      pending autorisaties. Beweegt saldo maar is geen uitgave. 374 rijen.
  *
- * Klant-inkomsten (+Express Checkout etc.) blijven onaangeroerd — die zitten
- * niet in een groep met een Af.
+ *   3) Terugboeking vasthouding (+"Terugboeking algemene vasthouding op
+ *      rekeningniveau"): tegenboeking van #2. Ook geen inkomst. 490 rijen.
+ *
+ * Wat WEL blijft:
+ *   - Alle -Af-pasbetalingen (Twilio -€38,31 / -€35,14 / -€43,05 blijven
+ *     apart zichtbaar in detail-popup; niet samengevoegd).
+ *   - +Overige zonder -Af-parent = echte inkomsten (360dialog, Walmart,
+ *     Vercel, Linktree, Facebook — 6 rijen, +€111). Die blijven staan.
+ *   - Alle andere source-types (bank/camt) onaangeroerd.
+ *
+ * Anders dan de vorige aanpak (netPaypalAuthorizations uit #972-#974):
+ * we NETTEN NIET. Twilio komt volledig tevoorschijn met €116,50 uitgave
+ * (3 pasbetalingen), niet €0,48. De financieringsleg is puur ballast en
+ * mag weg; hem tegen de betaling wegstrepen zou de betaling verbergen.
  */
-export function netPaypalAuthorizations(items) {
-  if (!Array.isArray(items) || items.length === 0) return items || [];
-  const groupKey = (t) => `${t.counterparty_name || ''}|${t.booking_date || ''}|${t.source || ''}`;
-  const groups = new Map();
-  for (const t of items) {
-    const k = groupKey(t);
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k).push(t);
+export function excludePaypalFundingLegs(txs) {
+  if (!Array.isArray(txs) || txs.length === 0) return txs || [];
+
+  // Bouw set van entry_references van paypal-Af-pasbetalingen (parent-anchors).
+  // Vasthouding-negatief slaan we over als anchor — die is zelf uit te sluiten
+  // en zou anders per ongeluk een +Overige uitsluiten die naar 'em verwijst.
+  const afEntryRefs = new Set();
+  for (const t of txs) {
+    if (t.source !== 'paypal') continue;
+    if (Number(t.amount_cents) >= 0) continue;
+    if (t.transaction_code === 'Vastgehouden - algemeen') continue;
+    if (t.entry_reference) afEntryRefs.add(t.entry_reference);
   }
-  const out = [];
-  for (const [, arr] of groups) {
-    if (arr.length === 1) { out.push(arr[0]); continue; }
-    // Kandidaten voor netting: alle "Overige"-Bij van source=paypal met amount>0.
-    const overigeBij = arr.filter(t =>
-      t.source === 'paypal' &&
-      Number(t.amount_cents) > 0 &&
-      t.transaction_code === 'Overige'
-    );
-    if (overigeBij.length === 0) {
-      // Geen +Overige in deze groep → geen netting nodig, alles apart.
-      for (const t of arr) out.push(t);
-      continue;
+
+  return txs.filter(t => {
+    if (t.source !== 'paypal') return true;
+    const cents = Number(t.amount_cents) || 0;
+    const code  = t.transaction_code || '';
+
+    // Vasthouding: BEIDE zijden uitsluiten (autorisatie-mechaniek, geen kost).
+    if (code === 'Vastgehouden - algemeen') return false;                            // -zijde
+    if (code === 'Terugboeking algemene vasthouding op rekeningniveau') return false; // +zijde
+
+    // Financieringsleg: +Overige met -Af-parent via ref-join.
+    if (cents > 0 && code === 'Overige' && t.end_to_end_id && afEntryRefs.has(t.end_to_end_id)) {
+      return false;
     }
-    // Netting: alle Af's + alle +Overige samen; overige tx (bv. Express
-    // Checkout klant-inkomst) apart.
-    const afs = arr.filter(t => Number(t.amount_cents) < 0);
-    if (afs.length === 0) {
-      // Alleen +Overige zonder Af — zeldzame edge, laat maar door.
-      for (const t of arr) out.push(t);
-      continue;
-    }
-    const others = arr.filter(t => !afs.includes(t) && !overigeBij.includes(t));
-    const nettingTxs = [...afs, ...overigeBij];
-    const netto = nettingTxs.reduce((s, t) => s + (Number(t.amount_cents) || 0), 0);
-    if (netto !== 0) {
-      const anchor = afs[0];
-      out.push({
-        ...anchor,
-        amount_cents:   netto,
-        _netted_from:   nettingTxs.length,
-        _raw_tx_ids:    nettingTxs.map(t => t.id),
-      });
-    }
-    // Netto €0 → autorisatie volledig teruggeboekt, groep verdwijnt uit lijst.
-    for (const t of others) out.push(t);
-  }
-  // Sorteer op booking_date desc (behoud origineel ordening-gedrag).
-  out.sort((a, b) => String(b.booking_date || '').localeCompare(String(a.booking_date || '')));
-  return out;
+
+    return true;  // -Af betaling of +Overige zonder parent (echte inkomst) → behouden
+  });
 }
 
 /**
  * Groepeer transacties per counterparty_name (getrimd; leeg → '(leeg)').
  * Retourneert een Map: name → { total, count, first, last, catCounts, manualCount }
+ *
+ * Belangrijk: callers MOETEN eerst excludePaypalFundingLegs draaien op de tx-
+ * lijst. Anders sommeert deze functie financieringslegs mee in `g.total` en
+ * dat verstoort de uitgave/inkomst-classificatie op groep-niveau.
  */
 export function groupByCounterparty(txs, catByTxId) {
   const groups = new Map();
@@ -182,11 +183,16 @@ export function consensusCategoryForGroup(g) {
  * includeIncoming, onlyUncategorized, categoryFilter }.
  *
  * - includeInternal          — PayPal-CSV interne rijen ("(intern PayPal)" +
- *                              "(leeg)"). Bewaard-vasthouding-tegenboekingen.
+ *                              "(leeg)").
  * - includeInternalTransfers — interne overboekingen tussen eigen rekeningen
  *                              (bv. ING → PayPal-oplaad). Bepaald via
  *                              category.is_internal=true. Default UIT om
  *                              dubbeltelling met PayPal-uitgaven te voorkomen.
+ *
+ * Belangrijk: caller MOET eerst excludePaypalFundingLegs draaien. Anders
+ * zit een financieringsleg (+€116,50 Twilio) in g.total en netto ~€0 zorgt
+ * dat Twilio als "geen uitgave" wordt geclassificeerd. Na exclusie is
+ * g.total = som van -Af-pasbetalingen = correcte uitgave (Twilio -€116,50).
  */
 export function buildCounterpartyRows(groups, catMetaById, filters = {}) {
   const {
@@ -199,11 +205,9 @@ export function buildCounterpartyRows(groups, catMetaById, filters = {}) {
   const rows = [];
   for (const [name, g] of groups) {
     if (!includeInternal && (INTERNAL_NAMES.has(name) || name === EMPTY_NAME)) continue;
-    // Filter op groep-niveau (na netting): totaal>=0 = inkomst-groep. Bij
-    // uitgave-tegenpartijen waar +Bij (PayPal-autorisatie-terugboeking)
-    // meetelt: die netten samen met -Af → groep-totaal is netto uitgave,
-    // meestal <0. Alleen 100% teruggeboekte autorisatie (Twilio-case, netto
-    // €0) wordt zo ook uitgefilterd — dat is correct want er is €0 uitgegeven.
+    // Groep-totaal >= 0 = klant-inkomst-groep (bv. Bas alleen +Bij Express
+    // Checkout). Verbergen tenzij includeIncoming. Financieringslegs zijn al
+    // door de caller uitgesloten, dus g.total reflecteert echte uitgave.
     if (!includeIncoming && g.total >= 0) continue;
     const { categoryId, source } = consensusCategoryForGroup(g);
     const category = categoryId ? (catMetaById?.get?.(categoryId) || null) : null;
@@ -246,11 +250,11 @@ export function sortCounterparties(rows, sortKey = 'total_desc') {
 }
 
 /**
- * Filter transactie-lijst analoog aan buildCounterpartyRows (voor breakdown).
- * Retourneert alleen tx die zichtbaar moeten zijn na intern/incoming-filter.
- * Als includeInternalTransfers=false én er is een catByTxId met is_internal-
- * categorie-info, worden interne overboekingen ook gefilterd — dan telt hun
- * bedrag NIET mee in totalAll/breakdown.
+ * Filter transactie-lijst voor breakdown/dashboard: per-tx filter op
+ * intern-tegenpartij, incoming (amount>=0) en interne-overboek-categorieën.
+ *
+ * NOTE: caller MOET eerst excludePaypalFundingLegs draaien. Deze functie
+ * doet zelf GEEN PayPal-specifieke filtering — die zit in de exclude-helper.
  */
 export function filterTransactionsForBreakdown(txs, catByTxId, catMetaById, filters = {}) {
   // Backward-compat: als de 2e/3e arg een filters-object is (oude signature),
@@ -266,24 +270,13 @@ export function filterTransactionsForBreakdown(txs, catByTxId, catMetaById, filt
     includeIncoming          = false,
   } = filters || {};
 
-  // Stap 1: bepaal per counterparty_name of het een uitgave- of inkomst-groep is
-  // (op basis van netto = som amount_cents). PayPal +Bij (autorisatie-terugboeking)
-  // netten hierdoor automatisch met -Af van dezelfde tegenpartij → uitgave-groep.
-  // Echte klant-inkomsten (Bas Express Checkout: alleen +tx) blijven inkomst-groep.
-  const groupTotals = new Map();
-  for (const t of txs || []) {
-    const name = String(t.counterparty_name || EMPTY_NAME).trim() || EMPTY_NAME;
-    groupTotals.set(name, (groupTotals.get(name) || 0) + (Number(t.amount_cents) || 0));
-  }
-
   return (txs || []).filter(t => {
     const name = String(t.counterparty_name || EMPTY_NAME).trim() || EMPTY_NAME;
     if (!includeInternal && (INTERNAL_NAMES.has(name) || name === EMPTY_NAME)) return false;
-    // Filter op counterparty-groep-niveau: als de tegenpartij netto POSITIEF is
-    // (= inkomst-groep), skip alle tx tenzij includeIncoming. Dit vervangt
-    // de oude per-tx `amount>=0`-filter die de PayPal-netting kapot maakte.
-    const groupTotal = groupTotals.get(name);
-    if (!includeIncoming && groupTotal >= 0) return false;
+    // Per-tx incoming-filter: amount >= 0 is een inkomst-tx, verbergen tenzij
+    // includeIncoming. Financieringslegs zijn al door de caller uitgesloten,
+    // dus wat hier als amount>=0 doorkomt is een echte inkomst.
+    if (!includeIncoming && (Number(t.amount_cents) || 0) >= 0) return false;
     if (catByTxId && catMetaById) {
       const cat = catByTxId.get?.(t.id);
       const meta = cat ? catMetaById.get?.(cat.category_id) : null;
@@ -321,9 +314,6 @@ export function computeBreakdown(txs, catByTxId, allCats) {
   // die tx sowieso al gefilterd waren via filterTransactionsForBreakdown,
   // dus buckets voor interne categorieën staan hier op 0. We droppen ze uit
   // de output-lijst zodat de UI ze niet als lege rij toont.
-  // Interne categorieën verbergen we uit de breakdown-output (die stromen
-  // tellen niet mee als operationele uitgave). Callers zorgen dat de tx ook
-  // al gefilterd zijn via filterTransactionsForBreakdown.
   const categories = (allCats || [])
     .filter(cat => cat.is_internal !== true)
     .map(cat => {

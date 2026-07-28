@@ -42,6 +42,7 @@ import {
   buildCounterpartyRows,
   sortCounterparties,
   aiSuggestionsByCounterparty,
+  excludePaypalFundingLegs,
   EMPTY_NAME,
 } from './_lib/expenses-grouping.js';
 
@@ -71,17 +72,17 @@ export default async function handler(req, res) {
   const sort = ['total_desc','total_abs_desc','count_desc','name_asc'].includes(String(q.sort || '')) ? String(q.sort) : 'total_desc';
 
   try {
-    // Stap 1: fetch tx-rijen (id, counterparty_name, amount_cents, booking_date, source).
-    // Chunked-fetch via .range() met max-safe cap (500 per call is genoeg voor
-    // een jaar PayPal-import ~2k rijen; groter → verhogen).
+    // Stap 1: fetch tx-rijen (id, counterparty_name, amount_cents, booking_date,
+    // source + PayPal-detectievelden voor financierings-leg-uitsluiting).
+    // Chunked-fetch via .range() met max-safe cap.
     const CHUNK = 1000;
-    const txs = [];
+    const rawTxs = [];
     let offset = 0;
     // eslint-disable-next-line no-constant-condition
     while (true) {
       let qy = supabaseAdmin
         .from('camt_transactions')
-        .select('id, counterparty_name, amount_cents, booking_date, source')
+        .select('id, counterparty_name, amount_cents, booking_date, source, transaction_code, entry_reference, end_to_end_id')
         .order('booking_date', { ascending: false })
         .range(offset, offset + CHUNK - 1);
       if (from)             qy = qy.gte('booking_date', from);
@@ -90,10 +91,16 @@ export default async function handler(req, res) {
       const { data, error } = await qy;
       if (error) throw new Error('camt_transactions fetch: ' + error.message);
       if (!data || data.length === 0) break;
-      txs.push(...data);
+      rawTxs.push(...data);
       if (data.length < CHUNK) break;
       offset += CHUNK;
     }
+
+    // Stap 1b: sluit PayPal-financieringslegs + beide zijden van vasthoudingen
+    // uit VÓÓR aggregatie. Zonder deze stap zou een +Overige-Bij (funding leg)
+    // g.total van Twilio richting €0 duwen en de groep als "geen uitgave"
+    // classificeren. Na exclude reflecteert g.total de echte -Af-pasbetalingen.
+    const txs = excludePaypalFundingLegs(rawTxs);
 
     // Stap 2: fetch alle categorisaties voor deze tx-ids.
     let cats = [];

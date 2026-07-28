@@ -26,7 +26,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { filterTransactionsForBreakdown } from './_lib/expenses-grouping.js';
+import { filterTransactionsForBreakdown, excludePaypalFundingLegs } from './_lib/expenses-grouping.js';
 import {
   aggregateByMonth,
   aggregateByGroup,
@@ -59,15 +59,16 @@ export default async function handler(req, res) {
     const includeInternalTransfers = String(q.include_internal_transfers || '') === '1';
     const includeIncoming          = String(q.include_incoming || '') === '1';
 
-    // Stap 1: fetch tx (chunked). Zelfde query-shape als breakdown.
+    // Stap 1: fetch tx (chunked). Zelfde query-shape als breakdown, inclusief
+    // PayPal-detectievelden voor de exclude-helper.
     const CHUNK = 1000;
-    const txs = [];
+    const rawTxs = [];
     let offset = 0;
     // eslint-disable-next-line no-constant-condition
     while (true) {
       let qy = supabaseAdmin
         .from('camt_transactions')
-        .select('id, booking_date, amount_cents, counterparty_name, source')
+        .select('id, booking_date, amount_cents, counterparty_name, source, transaction_code, entry_reference, end_to_end_id')
         .range(offset, offset + CHUNK - 1);
       if (from)             qy = qy.gte('booking_date', from);
       if (to)               qy = qy.lte('booking_date', to);
@@ -75,10 +76,13 @@ export default async function handler(req, res) {
       const { data, error } = await qy;
       if (error) throw new Error('camt_transactions: ' + error.message);
       if (!data || data.length === 0) break;
-      txs.push(...data);
+      rawTxs.push(...data);
       if (data.length < CHUNK) break;
       offset += CHUNK;
     }
+    // Sluit PayPal-financieringslegs + beide zijden van vasthoudingen uit
+    // (identiek aan breakdown-endpoint — anders wijken totalen af).
+    const txs = excludePaypalFundingLegs(rawTxs);
 
     // Stap 2: categorisaties (rule/manual only — ai_suggest telt niet).
     const cats = [];
@@ -105,8 +109,9 @@ export default async function handler(req, res) {
     const catMetaById = new Map((allCats || []).map(c => [c.id, c]));
 
     // Stap 4: filter — IDENTIEK aan breakdown-endpoint. Interne overboekingen
-    // uit (via is_internal), inkomst-groepen uit (via counterparty-groep-niveau
-    // netting — zodat PayPal +Bij samen met -Af netto in uitgave-groep valt).
+    // uit (via is_internal), inkomst-tx (amount>=0) uit tenzij includeIncoming.
+    // Financieringslegs zijn al voor deze stap uitgesloten; wat overblijft
+    // aan +tx is echte klant-inkomst.
     const filteredTxs = filterTransactionsForBreakdown(
       txs, catByTxId, catMetaById,
       { includeInternal, includeInternalTransfers, includeIncoming }
