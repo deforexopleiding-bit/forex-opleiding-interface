@@ -99,10 +99,42 @@ export default async function handler(req, res) {
     // lege Map bij DB-fout of ontbrekende tabel). Alleen aggregate, geen rows[].
     const creditedByCust = await getCreditedDebtBatch(custIds);
 
+    // Batch 6: needs_attention-runs per klant. Verzamelt reden + last_failure_at
+    // zodat de pipeline-UI een "aandacht nodig"-badge kan tonen op klanten
+    // waarvan minstens 1 workflow-run 3x achtereenvolgens gefaald is (bv.
+    // template-drift zoals dag7 132000). Fail-soft: bij DB-fout leeft de Map
+    // als leeg en de UI toont geen badge — no-op.
+    const attentionByCust = new Map();
+    try {
+      const { data: attnRows, error: attnErr } = await supabaseAdmin
+        .from('dunning_workflow_runs')
+        .select('id, customer_id, last_failure_reason, last_failure_at, step_failure_count')
+        .in('customer_id', custIds)
+        .eq('needs_attention', true);
+      if (attnErr) {
+        console.warn('[dunning-pipeline-list] attention-batch fail-soft:', attnErr.message);
+      } else {
+        for (const row of attnRows || []) {
+          const cur = attentionByCust.get(row.customer_id) || { count: 0, reasons: [], last_failure_at: null };
+          cur.count++;
+          if (row.last_failure_reason && !cur.reasons.includes(row.last_failure_reason)) {
+            cur.reasons.push(row.last_failure_reason);
+          }
+          if (!cur.last_failure_at || (row.last_failure_at && row.last_failure_at > cur.last_failure_at)) {
+            cur.last_failure_at = row.last_failure_at;
+          }
+          attentionByCust.set(row.customer_id, cur);
+        }
+      }
+    } catch (e) {
+      console.warn('[dunning-pipeline-list] attention-batch exception fail-soft:', e?.message || e);
+    }
+
     const items = rows.map((r) => {
       const c = custById.get(r.customer_id) || null;
       const agg = openByCust.get(r.customer_id) || { count: 0, cents: 0 };
       const cd = creditedByCust.get(r.customer_id) || null;
+      const attn = attentionByCust.get(r.customer_id) || null;
       return {
         pipeline_id       : r.id,
         customer_id       : r.customer_id,
@@ -120,6 +152,11 @@ export default async function handler(req, res) {
           count            : cd.count,
           total_incl_cents : Math.round((cd.total_incl || 0) * 100),
           last_credited_on : cd.last_credited_on,
+        } : null,
+        needs_attention   : attn ? {
+          count           : attn.count,
+          reasons         : attn.reasons,
+          last_failure_at : attn.last_failure_at,
         } : null,
       };
     });

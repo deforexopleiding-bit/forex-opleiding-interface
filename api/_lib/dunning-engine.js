@@ -28,6 +28,10 @@ import {
 import { markOverdue } from './mentor-ledger-engine.js';
 import { resetJoostCountersForCustomer } from './dunning-arrangement-hooks.js';
 import {
+  evaluateStepFailure,
+  evaluateSuccessAfterFailure,
+} from './dunning-step-failure-handler.js';
+import {
   hasOpenBlockingAction,
   loadOpenActionsByCustomer,
 } from './pending-actions-guard.js';
@@ -785,7 +789,10 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
   const { data: runs, error: runsErr } = await supabaseAdmin
     .from('dunning_workflow_runs')
     .select(
-      'id, workflow_id, customer_id, status, current_step_id, next_action_at, started_at, trigger_invoice_count'
+      // step_failure_count / needs_attention / last_failure_reason meegevraagd
+      // voor het retry+escalatie-pad (zie evaluateStepFailure +
+      // evaluateSuccessAfterFailure in _lib/dunning-step-failure-handler.js).
+      'id, workflow_id, customer_id, status, current_step_id, next_action_at, started_at, trigger_invoice_count, step_failure_count, needs_attention, last_failure_reason'
     )
     .eq('status', 'active')
     // Fix #931: vangnet tegen "active + pauze-relict". Beide paused_by_*-
@@ -797,6 +804,13 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
     // finance-dunning-run-control.js resume-branch die deze flags wist.
     .is('paused_by_conversation_id', null)
     .is('paused_by_arrangement_id', null)
+    // Retry+escalatie: runs met needs_attention=true worden geskipt door de
+    // engine tot een mens de vlag reset (of tot een auto-clear via een
+    // geslaagde send in evaluateSuccessAfterFailure). Voorkomt dat de engine
+    // eeuwig blijft hameren op een fundamentally-gebroken template (zoals
+    // dag7-drift). Fail-open: bestaande rijen kregen needs_attention=false
+    // via de migratie-default, dus GEEN active run wordt onbedoeld geskipt.
+    .eq('needs_attention', false)
     .or(`next_action_at.is.null,next_action_at.lte.${now}`);
   if (runsErr) throw runsErr;
 
@@ -1000,9 +1014,12 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
             };
         }
 
-        // Log resultaat (1 regel per uitgevoerde stap — gedrag ongewijzigd).
-        // Error/skip-status van de executor laat de run doorgaan naar de
-        // volgende stap; huidig gedrag replicieren.
+        // Log resultaat (1 regel per uitgevoerde stap). Voor SUCCESS-events
+        // is dit de canonical send-log. Voor FAILED-events schrijven we óók
+        // deze base-log (achterwaarts-compat: bestaande dashboards + queries
+        // filteren nog op event_type='whatsapp_send_failed'), en daarnaast
+        // hieronder een 2e log-regel 'step_failed_retry' / 'step_failed_final'
+        // met attempt-count + reden voor het nieuwe retry-pad.
         await supabaseAdmin.from('dunning_log').insert({
           run_id: run.id,
           step_id: currentStep.id,
@@ -1011,6 +1028,68 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
         });
         stepsExecuted++;
         runAdvanced = true;
+
+        // ── Retry + escalatie op stepResult.status === 'failed' ──
+        // Bij een gefaalde send: NIET doorschuiven naar de volgende step
+        // (klant miste anders die aanmaning stil). In plaats daarvan:
+        // 1e-2e fail  → retry over 24u op DEZELFDE step
+        // 3e fail     → needs_attention=true, engine skipt tot mens ingrijpt
+        // Zie evaluateStepFailure voor de exacte regels + tests in
+        // tests/dunning-step-failure-handler.test.js.
+        if (stepResult?.status === 'failed') {
+          const decision = evaluateStepFailure({
+            currentCount: run.step_failure_count,
+            stepResult,
+            nowIso: nowIso(),
+          });
+          await supabaseAdmin
+            .from('dunning_workflow_runs')
+            .update(decision.update)
+            .eq('id', run.id);
+          await supabaseAdmin.from('dunning_log').insert({
+            run_id:     run.id,
+            step_id:    currentStep.id,
+            event_type: decision.log_event,
+            payload:    decision.log_payload,
+          });
+          if (decision.action === 'escalate') {
+            console.warn('[dunning-engine] step_failed_final — needs_attention', {
+              run_id: run.id, customer_id: run.customer_id, step_id: currentStep.id,
+              reason: decision.log_payload.reason,
+            });
+          }
+          break;   // stop binnenlus voor deze run; volgende cron pikt op (retry) of mens moet ingrijpen (escalate)
+        }
+
+        // ── Auto-clear needs_attention/step_failure_count na een succesvolle send ──
+        // Als de run VÓÓR deze iteratie op needs_attention stond of nog
+        // step_failure_count > 0 had, betekent een succesvolle stap dat het
+        // onderliggende probleem opgelost is (bv. mens fixte template). Reset
+        // + log 'needs_attention_resolved' met eerdere faalreden — spoor
+        // blijft compleet voor audit, geen stille recovery.
+        try {
+          const recovery = evaluateSuccessAfterFailure({ run });
+          if (recovery.should_clear) {
+            await supabaseAdmin
+              .from('dunning_workflow_runs')
+              .update({ ...recovery.update_patch, updated_at: nowIso() })
+              .eq('id', run.id);
+            if (recovery.log_event) {
+              await supabaseAdmin.from('dunning_log').insert({
+                run_id:     run.id,
+                step_id:    currentStep.id,
+                event_type: recovery.log_event,
+                payload:    recovery.log_payload,
+              });
+            }
+            // Bijwerken van in-memory run zodat downstream-code (bv. pipeline-hook)
+            // niet de stale waardes ziet.
+            run.needs_attention    = false;
+            run.step_failure_count = 0;
+          }
+        } catch (e) {
+          console.warn('[dunning-engine] needs_attention auto-clear fail-soft:', run.id, e?.message || e);
+        }
 
         // Pipeline-hook: eerste succesvolle aanmaning-send (email/whatsapp)
         // schuift de stage 'nieuw' → 'aangemaand'. Zelfde trigger-key als

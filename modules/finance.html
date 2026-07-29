@@ -9659,6 +9659,9 @@
     { key: 'wacht_gesprek',           label: 'Wacht op gesprek',  group: 'wacht' },
     { key: 'wacht_handmatig',         label: 'Handmatig gepauzeerd', group: 'wacht' },
     { key: 'wacht_openstaande_actie', label: 'Openstaande actie', group: 'wacht' },
+    // Virtuele bucket: matcht op it.needs_attention === true i.p.v. it.bucket.
+    // Zie speciale filter-tak in _renderDunPlList.
+    { key: 'aandacht_nodig',          label: '⚠ Aandacht nodig', group: 'attention' },
     { key: 'klaar',                   label: 'Klaar (30d)',    group: 'klaar' },
   ];
 
@@ -9785,9 +9788,22 @@
     // Filter-cascade: bucket-filter EERST, dan search-filter. KPI-counts
     // reflecteren de originele totalen per bucket (blijven stabiel tijdens
     // typen); alleen deze lijst en de list-count veranderen bij zoeken.
+    // Virtuele "aandacht_nodig"-bucket matcht op it.needs_attention === true
+    // (i.p.v. it.bucket). Runs met needs_attention worden door de engine
+    // geskipt en blijven typisch in hun oude bucket zitten — daarom een
+    // OR-tak zodat filter-pill "⚠ Aandacht nodig" ze naar boven haalt.
     const bucketFiltered = _dunPl.filter.size === 0
       ? all
-      : all.filter((it) => _dunPl.filter.has(it.bucket));
+      : all.filter((it) => {
+          for (const key of _dunPl.filter) {
+            if (key === 'aandacht_nodig') {
+              if (it.needs_attention === true) return true;
+            } else if (it.bucket === key) {
+              return true;
+            }
+          }
+          return false;
+        });
 
     const q = String(_dunPl.searchQuery || '').trim();
     const qLower  = q.toLowerCase();
@@ -9862,6 +9878,24 @@
       ? `<span class="pl-tag ${bucketTagCls}">${esc(bucketMeta.label)}</span>`
       : '';
 
+    // Aandacht-badge — verschijnt zodra de engine 3x achtereen faalde op de
+    // huidige stap (needs_attention=true). Tooltip toont de laatste reden +
+    // hoeveel pogingen zijn geweest, zodat een mens direct ziet wat te doen.
+    let attentionTag = '';
+    if (it.needs_attention === true) {
+      const reason  = it.last_failure_reason || 'onbekende fout';
+      const tries   = Number(it.step_failure_count) || 0;
+      const whenRaw = it.last_failure_at ? _dunPlFmtDate(it.last_failure_at) : '';
+      const tip     = `${tries}x mislukt op deze stap — laatste reden: ${reason}${whenRaw ? ' · ' + whenRaw : ''}`;
+      attentionTag  = `<span class="pl-tag risk" title="${esc(tip)}">⚠ Aandacht nodig</span>`;
+    } else if ((Number(it.step_failure_count) || 0) > 0) {
+      // Retry-in-progress: sub-tekst zodat operators zien dat de run zichzelf
+      // wél nog aan het proberen is, maar bij 3 fails eskaleert. Niet als
+      // "risk"-tag — dat is voor de escalatie-staat.
+      const tries = Number(it.step_failure_count) || 0;
+      attentionTag = `<span class="pl-tag wait" title="Engine probeert opnieuw, over 24u volgende poging (${tries}/3)">Retry ${tries}/3</span>`;
+    }
+
     // Rij-acties (context-afhankelijk op status).
     let actions;
     if (it.status === 'active') {
@@ -9891,6 +9925,7 @@
           <span class="pl-row-name">${esc(cust.name || '(onbekend)')}</span>
           ${openStr ? `<span class="pl-row-amount">${esc(openStr)}</span>` : ''}
           ${bucketTag}
+          ${attentionTag}
         </div>
         <div class="pl-row-wf">${esc(wf.name || 'Workflow')}${cs.order ? ` · stap ${cs.order} van ${it.total_steps || '?'}` : ''}${cs.type ? ` · ${esc(cs.type)}` : ''}</div>
         <dl class="pl-row-body">

@@ -79,12 +79,12 @@ export default async function handler(req, res) {
     // string met datum-quoting).
     const [openRunsRes, klaarRunsRes] = await Promise.all([
       supabaseAdmin.from('dunning_workflow_runs')
-        .select('id, workflow_id, customer_id, status, current_step_id, next_action_at, started_at, completed_at, completion_reason, updated_at, paused_by_conversation_id, paused_by_arrangement_id, trigger_invoice_count')
+        .select('id, workflow_id, customer_id, status, current_step_id, next_action_at, started_at, completed_at, completion_reason, updated_at, paused_by_conversation_id, paused_by_arrangement_id, trigger_invoice_count, step_failure_count, needs_attention, last_failure_at, last_failure_reason')
         .in('status', ['active', 'paused'])
         .order('next_action_at', { ascending: true, nullsFirst: true })
         .limit(BRON_CAP),
       supabaseAdmin.from('dunning_workflow_runs')
-        .select('id, workflow_id, customer_id, status, current_step_id, next_action_at, started_at, completed_at, completion_reason, updated_at, paused_by_conversation_id, paused_by_arrangement_id, trigger_invoice_count')
+        .select('id, workflow_id, customer_id, status, current_step_id, next_action_at, started_at, completed_at, completion_reason, updated_at, paused_by_conversation_id, paused_by_arrangement_id, trigger_invoice_count, step_failure_count, needs_attention, last_failure_at, last_failure_reason')
         .in('status', ['completed', 'cancelled'])
         .gte('completed_at', klaarSinceIso)
         .order('completed_at', { ascending: false })
@@ -251,15 +251,28 @@ export default async function handler(req, res) {
         },
         pause_reason:        pauseReason,
         incasso,
+        // Retry+escalatie-signalen (2026-07-29). Runs met needs_attention=true
+        // worden door de engine geskipt — UI toont "⚠ Aandacht nodig"-badge
+        // + laat de reden zien. step_failure_count > 0 (zonder needs_attention)
+        // = zit in retry-cyclus, informatief in de UI.
+        needs_attention:     run.needs_attention === true,
+        step_failure_count:  Number(run.step_failure_count) || 0,
+        last_failure_at:     run.last_failure_at || null,
+        last_failure_reason: run.last_failure_reason || null,
       };
     });
 
     // ── Fase 5: KPI-tellers ─────────────────────────────────────────
     const { counts, klaar_by_reason } = buildBucketCounts(runs);
 
+    // Aparte teller voor needs_attention — telt runs waar de engine 3x heeft
+    // gefaald op de huidige step. Frontend gebruikt dit voor een filter-pill
+    // "⚠ Aandacht nodig (N)" en per-rij-badge.
+    const needsAttentionCount = items.filter((it) => it.needs_attention === true).length;
+
     return res.status(200).json({
       generated_at: new Date(nowMs).toISOString(),
-      counts,
+      counts: { ...counts, needs_attention: needsAttentionCount },
       klaar_by_reason,
       items,
       _meta: {
