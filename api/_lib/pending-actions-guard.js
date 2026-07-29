@@ -30,17 +30,47 @@ export const BLOCKING_ACTION_STATUSES = new Set([
   'pending', 'approved', 'executed', 'failed',
 ]);
 
+// Type+status-combinaties die EXPLICIET DOORLATEN, ook al zit hun status
+// in BLOCKING_ACTION_STATUSES. Semantiek: "de actie is gedaan, er is geen
+// wachtstand meer — de bot mag door."
+//
+// MANUAL_FOLLOWUP:executed — Belactie is afgerond (belletje gepleegd +
+// uitkomst gelogd in dunning_call_log). De taak zelf is EXECUTED zodat
+// de UI 'm netjes toont bij "Afgehandeld", maar er is geen operationele
+// reden meer om de dunning-flow te blokkeren: de mens heeft het gesprek
+// gedaan en de engine mag de volgende template versturen. Andere
+// action_types op EXECUTED blijven WEL blokkeren (verify_payment,
+// arrangement-uitvoer, escalation — die vragen andere follow-up).
+export const NON_BLOCKING_COMBOS = new Set([
+  'MANUAL_FOLLOWUP:executed',
+]);
+
 /**
- * True als er >=1 pending_action bestaat met een blokkerende status. Pure
- * functie zodat de guard direct getestbaar is. Case-insensitive op status,
- * fail-safe op null/undefined-input, en onbekende statussen laten door
- * (liever een gemist blok dan een over-blokkade).
+ * True als een enkele actie de bot moet doen zwijgen. Pure functie zodat
+ * de per-actie logica getestbaar blijft. Case-insensitive op status,
+ * fail-safe op null/undefined, onbekende statussen laten door (liever
+ * gemist blok dan over-blokkade).
+ *
+ * Regels:
+ *  1) Als (action_type + ':' + status_lower) in NON_BLOCKING_COMBOS zit
+ *     → NIET blokkerend (whitelist wint).
+ *  2) Anders: blokkerend iff status_lower in BLOCKING_ACTION_STATUSES.
+ */
+export function isBlockingAction(action) {
+  const status = String(action?.status || '').toLowerCase();
+  if (!BLOCKING_ACTION_STATUSES.has(status)) return false;
+  const type = String(action?.action_type || '');
+  if (type && NON_BLOCKING_COMBOS.has(type + ':' + status)) return false;
+  return true;
+}
+
+/**
+ * True als er >=1 pending_action bestaat met een blokkerende (type,status).
+ * Fail-safe op null/undefined-input.
  */
 export function hasOpenBlockingAction(actions) {
   if (!Array.isArray(actions) || actions.length === 0) return false;
-  return actions.some(a => BLOCKING_ACTION_STATUSES.has(
-    String(a?.status || '').toLowerCase()
-  ));
+  return actions.some(isBlockingAction);
 }
 
 /**
@@ -83,11 +113,11 @@ export async function loadOpenActionsByCustomer(customerIds, db = defaultSupabas
     for (const row of data || []) {
       const cid = row.customer_id;
       if (!cid) continue;
-      // Case-insensitieve filter via de canonieke lowercase set.
-      // rejected/cancelled worden hier al eruit gehaald zodat de map
-      // alleen blokkerende acties bevat.
-      const s = String(row.status || '').toLowerCase();
-      if (!BLOCKING_ACTION_STATUSES.has(s)) continue;
+      // Case-insensitieve filter via isBlockingAction — hanteert zowel
+      // BLOCKING_ACTION_STATUSES als de NON_BLOCKING_COMBOS-whitelist
+      // (MANUAL_FOLLOWUP:executed laat door). Rejected/cancelled +
+      // MANUAL_FOLLOWUP-executed komen zo niet meer in de map.
+      if (!isBlockingAction(row)) continue;
       const arr = byCustomer.get(cid) || [];
       arr.push({ status: row.status, action_type: row.action_type });
       byCustomer.set(cid, arr);

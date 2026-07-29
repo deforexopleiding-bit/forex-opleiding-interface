@@ -1,7 +1,14 @@
 // api/dunning-call-log-create.js
-// POST { customer_id, invoice_id?, sip_line?, outcome, note?, callback_at? }
+// POST { customer_id, invoice_id?, sip_line?, outcome, note?, callback_at?,
+//        pending_action_id? }
 // → insert een belpoging in dunning_call_log. Wordt aangeroepen na de
-// "Bel nu"-flow in het case-paneel (finance.html #caseSheet Bellen-kaart).
+// "Bel nu"-flow in het case-paneel (finance.html #caseSheet Bellen-kaart)
+// EN vanuit de belknop op de MANUAL_FOLLOWUP actie-rij (FIX 3). In dat
+// laatste geval wordt pending_action_id meegegeven, waarna de bijbehorende
+// PENDING MANUAL_FOLLOWUP-taak fail-soft PENDING -> EXECUTED wordt gezet.
+// De engine-guard laat MANUAL_FOLLOWUP:executed door (zie
+// api/_lib/pending-actions-guard.js), dus de dunning-flow tikt direct door
+// zonder handmatige goedkeuring.
 //
 // Uitkomsten (must match CHECK-constraint in migratie):
 //   no_answer / voicemail / callback / payment_promise / payment_plan /
@@ -54,6 +61,16 @@ export default async function handler(req, res) {
   const outcome    = typeof body.outcome     === 'string' && VALID_OUTCOMES.has(body.outcome) ? body.outcome    : null;
   const note       = typeof body.note        === 'string' ? body.note.trim().slice(0, 2000) : null;
   const callbackAtRaw = typeof body.callback_at === 'string' ? body.callback_at.trim() : null;
+  // FIX 3 — koppeling naar bestaande MANUAL_FOLLOWUP taak. Als gezet:
+  // sluit die taak fail-soft PENDING -> EXECUTED na een succesvolle
+  // dunning_call_log-insert. UUID-validatie hier zodat een malformed
+  // ID direct 400 geeft i.p.v. stil op de mark-executed te blijven hangen.
+  const pendingActionId = typeof body.pending_action_id === 'string' && UUID_RE.test(body.pending_action_id)
+    ? body.pending_action_id
+    : null;
+  if (body.pending_action_id != null && !pendingActionId) {
+    return res.status(400).json({ error: 'pending_action_id moet een uuid zijn' });
+  }
 
   if (!customerId) return res.status(400).json({ error: 'customer_id (uuid) verplicht' });
   if (!outcome)    return res.status(400).json({ error: `outcome verplicht; verwacht ${Array.from(VALID_OUTCOMES).join('|')}` });
@@ -141,11 +158,61 @@ export default async function handler(req, res) {
       }
     }
 
+    // ─── Sluit gekoppelde MANUAL_FOLLOWUP-taak (fail-soft) ──────────────
+    // FIX 3: als de belknop op de actie-rij deze call gestart heeft, komt
+    // pending_action_id mee. Sluit die taak PENDING -> EXECUTED zodat de
+    // engine-guard 'em doorlaat (NON_BLOCKING_COMBOS in
+    // api/_lib/pending-actions-guard.js) en de dunning-flow direct doortikt.
+    //
+    // Concurrency-guard op action_type='MANUAL_FOLLOWUP' + status='PENDING'
+    // voorkomt dat we een andere action-row of een reeds gesloten taak per
+    // ongeluk raken. execution_result krijgt de call_log_id + outcome + note
+    // zodat de audit-trail bidirectioneel is (call_log <-> pending_action).
+    let closedPendingActionId = null;
+    let closedActionWarning = null;
+    if (pendingActionId) {
+      try {
+        const executionResult = {
+          outcome,
+          call_log_id:        data.id,
+          manual_notes:       note || 'Afgerond via belknop op actie-rij',
+          executed_by_user_id: user.id,
+          marked_manually_at: new Date().toISOString(),
+          closed_by_call_flow: true,
+        };
+        const nowIso = new Date().toISOString();
+        const { data: updRow, error: updErr } = await supabaseAdmin
+          .from('pending_actions')
+          .update({
+            status:              'EXECUTED',
+            executed_at:         nowIso,
+            executed_by_user_id: user.id,
+            execution_result:    executionResult,
+            updated_at:          nowIso,
+          })
+          .eq('id', pendingActionId)
+          .eq('action_type', 'MANUAL_FOLLOWUP')
+          .eq('status', 'PENDING')
+          .select('id')
+          .maybeSingle();
+        if (updErr) throw new Error(updErr.message);
+        if (!updRow) {
+          closedActionWarning = 'Bel-taak niet gesloten: id niet gevonden, verkeerd type, of al afgehandeld.';
+        } else {
+          closedPendingActionId = updRow.id;
+        }
+      } catch (e) {
+        console.warn('[dunning-call-log-create] mark-executed fail:', e?.message);
+        closedActionWarning = 'Belpoging opgeslagen, maar de bel-taak kon niet automatisch worden gesloten. Sluit ‘m handmatig in Open Acties.';
+      }
+    }
+
     return res.status(200).json({
       ok: true,
       entry: data,
       scheduled_task_id: scheduledTaskId,
-      warning,
+      closed_pending_action_id: closedPendingActionId,
+      warning: warning || closedActionWarning || null,
     });
   } catch (e) {
     console.error('[dunning-call-log-create]', e?.message || e);
