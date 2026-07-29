@@ -180,3 +180,52 @@ export async function setStage(customerId, toSlug, reason, byUser, opts) {
 }
 
 export const PIPELINE_TERMINAL_STAGES = TERMINAL_STAGES;
+
+/**
+ * FIX 4 — Pure guard-helper voor de engine-detectie: mag een klant
+ * overgeslagen worden omdat 'ie handmatig is afgesloten (pipeline-stage
+ * terminal)?
+ *
+ * KRITIEKE EDGE: een klant die op 'opgelost' staat maar een NIEUWE
+ * factuur krijgt (nieuwe deal, latere issue_date) MAG NIET permanent
+ * uitgesloten blijven — anders sluiten we mensen levenslang uit de
+ * dunning-flow. Regel:
+ *   - Niet-terminale stage → NIET skippen (huidige gedrag intact).
+ *   - Terminale stage + alle open facturen dateren van vóór of op
+ *     stage_changed_at → skippen (klant is echt afgesloten).
+ *   - Terminale stage + minstens 1 factuur met issue_date NA
+ *     stage_changed_at → NIET skippen (nieuwe factuur = nieuwe case,
+ *     engine mag weer draaien).
+ *   - Terminale stage zonder stage_changed_at, of geen invoice-datums:
+ *     conservatief SKIP (defense-in-depth — een handmatig gemarkeerde
+ *     klant sluit zichzelf niet per ongeluk open door datum-hiaten).
+ *
+ * Vergelijking gebeurt op datum-string niveau (YYYY-MM-DD) zodat
+ * timezone-drift niet meetelt. issue_date is de canonieke facuurdatum
+ * (matches invoices-schema; niet due_date, want dat kan willekeurig
+ * ver in de toekomst liggen bij TL-imports).
+ *
+ * Pure functie — geen DB, geen I/O. Testbaar.
+ *
+ * @param {object} args
+ * @param {string} args.stageSlug         huidige pipeline-stage van de klant
+ * @param {string|null} args.stageChangedAt   ISO timestamp of null
+ * @param {Array<{issue_date?:string}>} args.openInvoices   open facturen uit agg.openInvoices
+ * @returns {boolean}  true = engine moet klant overslaan
+ */
+export function shouldSkipDueToTerminalStage({ stageSlug, stageChangedAt, openInvoices }) {
+  if (!TERMINAL_STAGES.has(stageSlug)) return false;
+  if (!stageChangedAt) return true;                   // conservatief
+  const stageChangedDate = String(stageChangedAt).slice(0, 10);
+  const invs = Array.isArray(openInvoices) ? openInvoices : [];
+  let newestIssueIso = null;
+  for (const inv of invs) {
+    const iso = inv?.issue_date ? String(inv.issue_date).slice(0, 10) : null;
+    if (!iso) continue;
+    if (!newestIssueIso || iso > newestIssueIso) newestIssueIso = iso;
+  }
+  if (!newestIssueIso) return true;                   // conservatief
+  // Nieuwste factuur ná stage-afsluiting → klant heeft NIEUWE cases,
+  // engine mag draaien. Op-of-vóór → alles is "oud", skippen.
+  return newestIssueIso <= stageChangedDate;
+}
