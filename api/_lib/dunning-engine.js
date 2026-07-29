@@ -35,6 +35,7 @@ import {
   hasOpenBlockingAction,
   loadOpenActionsByCustomer,
 } from './pending-actions-guard.js';
+import { shouldSkipDueToTerminalStage } from './dunning-pipeline.js';
 
 const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
 
@@ -636,6 +637,31 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
 
       if (!matchesCustomerType(agg.customer, customerType)) continue;
       if (agg.total_open_eur < minTotal) continue;
+
+      // FIX 4 — Handmatig afgesloten dossier (pipeline-terminal): sla
+      // over TENZIJ er een NIEUWE factuur ligt met issue_date NA de
+      // stage-transitie. Zonder deze guard start de engine bij de
+      // volgende cron gewoon een nieuwe run — dan is de hele afsluit-
+      // flow zinloos. Fail-soft: bij DB-fout skippen we NIET (oude
+      // gedrag). Zie shouldSkipDueToTerminalStage voor de precieze
+      // semantiek + tests/dunning-terminal-stage-skip.test.js.
+      try {
+        const { data: pcRow, error: pcErr } = await supabaseAdmin
+          .from('dunning_pipeline_customers')
+          .select('stage_slug, stage_changed_at')
+          .eq('customer_id', customerId)
+          .maybeSingle();
+        if (pcErr) throw pcErr;
+        if (pcRow && shouldSkipDueToTerminalStage({
+          stageSlug:      pcRow.stage_slug,
+          stageChangedAt: pcRow.stage_changed_at,
+          openInvoices:   agg.openInvoices,
+        })) continue;
+      } catch (e) {
+        console.warn('[dunning-engine] terminal-stage-check fail-soft:', customerId, e?.message || e);
+        // Fail-open: bij DB-fout NIET skippen (anders kan een tijdelijke
+        // pipeline-lookup-glitch legitieme wanbetalers stilhouden).
+      }
 
       try {
         // Spoedfix her-inschrijvings-lus: blokkeer nieuwe run bij ELKE

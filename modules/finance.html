@@ -22979,6 +22979,7 @@
         <button class="wbx-btn"              type="button" data-case-action="toezegging">Betaalafspraak vastleggen</button>
         <button class="wbx-btn"              type="button" data-case-action="reminder">Herinnering sturen</button>
         <button class="wbx-btn"              type="button" data-case-action="ask_joost" ${_caseState.joostBusy ? 'disabled' : ''}>Vraag Joost</button>
+        ${_caseCanCloseDossier() ? `<button class="wbx-btn"              type="button" data-case-action="close_dossier" title="Markeer klant als afgehandeld/betaald en stop de dunning-flow">✓ Sluit dossier</button>` : ''}
         <button class="wbx-btn wbx-danger"   type="button" data-case-action="to_incasso">Naar incasso</button>
       </div>
     `;
@@ -23702,6 +23703,143 @@
   }
 
   // Uitkomst-modal.
+  // FIX 4 — RBAC-gate voor "Sluit dossier"-knop. Fail-SECURE (in tegenstelling
+  // tot _acWbxCanBellen dat fail-OPEN is): dit is een betekenisvolle mutatie
+  // die of de klant nog aangemaand wordt. Bij ontbrekende RBAC-cache verbergen
+  // we de knop; server-side gate op finance.dunning.execute is de definitieve
+  // poort (endpoint returnt 403), maar we willen de knop niet accidenteel
+  // aanbieden voor rollen zonder recht.
+  function _caseCanCloseDossier() {
+    try {
+      const perms = window.RBAC && window.RBAC._permissionsCache;
+      if (perms && typeof perms.has === 'function') {
+        return perms.has('*') || perms.has('finance.dunning.execute');
+      }
+    } catch (_) { /* fail-secure hieronder */ }
+    return false;
+  }
+
+  // FIX 4 — Close-dossier modal met verplichte reden + soepele betaald-check.
+  // Flow:
+  //   1) User klikt "Sluit dossier" → modal opent, toont openstaand bedrag
+  //      (indien >0) als waarschuwing.
+  //   2) User vult reden (min 5) + klikt Opslaan.
+  //   3) POST /api/finance-dunning-close-customer.
+  //   4a) 409 HAS_OPEN_INVOICES → toon expliciete confirm ("€X open, toch
+  //       afsluiten?"). Bij ja → force=true herzendt.
+  //   4b) 200 → toast + herlaad detail + sluit case-sheet.
+  // opts.presetReason (optioneel): pre-fillt textarea (bv. bij paid_during_call).
+  function _caseOpenCloseDossierModal(opts) {
+    if (!_caseCanCloseDossier()) {
+      window.AgentShared?.showToast?.('Geen rechten om dossiers te sluiten (finance.dunning.execute)', 'error');
+      return;
+    }
+    document.getElementById('wbxCloseDossierModal')?.remove();
+    const cust    = _caseState.detail?.customer || null;
+    const cid     = cust?.id || _caseState.cid;
+    if (!cid) { window.AgentShared?.showToast?.('Geen klant geladen', 'error'); return; }
+    const openInvs = Array.isArray(_caseState.detail?.open_invoices) ? _caseState.detail.open_invoices : [];
+    let openTotal = 0;
+    for (const inv of openInvs) {
+      const t = Number(inv?.amount_total) || 0;
+      const p = Number(inv?.amount_paid)  || 0;
+      const c = Number(inv?.credited_amount) || 0;
+      openTotal += Math.max(0, t - p - c);
+    }
+    const openFmt = openTotal > 0
+      ? '€ ' + openTotal.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : null;
+    const custName = cust?.display_name || _pipeCustomerDisplayName?.(cust) || '(klant)';
+    const presetReason = (opts && typeof opts.presetReason === 'string') ? opts.presetReason : '';
+
+    const wrap = document.createElement('div');
+    wrap.id = 'wbxCloseDossierModal';
+    wrap.className = 'wbx wbx-call-outcome-scrim';
+    // Hergebruikt de outcome-modal-styling (zelfde scrim + modal-klasse) zodat
+    // visueel consistent met de andere case-sheet-modals.
+    wrap.innerHTML = `
+      <div class="wbx-call-outcome-modal">
+        <div class="wbx-call-outcome-head">
+          <div>
+            <div style="font-weight:600">Sluit dossier</div>
+            <div style="font-size:12px;color:var(--wbx-muted);margin-top:2px">${esc(custName)}</div>
+          </div>
+          <button class="wbx-inc-close" type="button" data-close-cancel>✕</button>
+        </div>
+        <div class="wbx-call-outcome-body">
+          ${openFmt ? `<div style="padding:10px 12px;border:1px solid #f59e0b;background:#fef3c7;color:#78350f;border-radius:8px;font-size:13px;margin-bottom:12px"><strong>Let op:</strong> Er staat nog <strong>${esc(openFmt)}</strong> open (${openInvs.length} factuur${openInvs.length === 1 ? '' : 'en'}). Je kunt toch afsluiten; log de reden zodat het spoor bewaard blijft.</div>` : `<div style="padding:10px 12px;border:1px solid #10b981;background:#ecfdf5;color:#065f46;border-radius:8px;font-size:13px;margin-bottom:12px">Geen openstaand bedrag — veilig af te sluiten.</div>`}
+          <label style="display:block;font-size:12px;color:var(--wbx-muted)">Reden <span style="color:var(--wbx-s-inc-tx)">*</span>
+            <textarea id="wbxCloseReason" rows="3" placeholder="Bijv. betaald tijdens gesprek / kwijtgescholden / afspraak met klant" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit;min-height:70px;resize:vertical">${esc(presetReason)}</textarea>
+            <span style="display:block;font-size:11px;color:var(--wbx-muted);margin-top:3px">Min. 5 tekens. Verplicht — verschijnt in de audit-log en dunning-timeline.</span>
+          </label>
+          <div id="wbxCloseErr" style="display:none;margin-top:8px;color:var(--wbx-s-inc-tx);font-size:12.5px"></div>
+        </div>
+        <div class="wbx-call-outcome-foot">
+          <button class="wbx-btn" type="button" data-close-cancel>Annuleer</button>
+          <button class="wbx-btn wbx-primary" type="button" data-close-save>Sluit dossier</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+    const err       = wrap.querySelector('#wbxCloseErr');
+    const reasonEl  = wrap.querySelector('#wbxCloseReason');
+    const saveBtn   = wrap.querySelector('[data-close-save]');
+    const close     = () => wrap.remove();
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+    wrap.querySelectorAll('[data-close-cancel]').forEach((b) => b.addEventListener('click', close));
+    if (presetReason) { setTimeout(() => reasonEl?.focus(), 30); }
+
+    async function doClose(force) {
+      const reason = (reasonEl?.value || '').trim();
+      if (reason.length < 5) {
+        if (err) { err.style.display = ''; err.textContent = 'Reden vereist (min. 5 tekens).'; }
+        reasonEl?.focus();
+        return;
+      }
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Bezig…';
+      try {
+        const r = await window.AgentShared.apiFetch('/api/finance-dunning-close-customer', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ customer_id: cid, reason, force: !!force }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.status === 409 && d?.code === 'HAS_OPEN_INVOICES') {
+          // Confirm-loop: expliciete "toch afsluiten"-vraag met het bedrag.
+          const ok = window.confirm(d.warning + '\n\nBevestig: toch afsluiten?');
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Sluit dossier';
+          if (ok) return doClose(true);
+          return;
+        }
+        if (!r.ok || !d?.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+        // Succes-toast, met warning als er per-stap-failures waren (halve staat).
+        const warns = Array.isArray(d.warnings) ? d.warnings.filter(Boolean) : [];
+        if (warns.length > 0) {
+          window.AgentShared?.showToast?.('Dossier gesloten met waarschuwingen — zie console', 'warning');
+          console.warn('[close-dossier warnings]', warns);
+        } else {
+          window.AgentShared?.showToast?.(`Dossier gesloten (${d.closed_runs} run(s), ${d.rejected_actions} taak(en) afgewezen)`, 'success');
+        }
+        close();
+        closeCaseSheet();
+        // Verse pipeline-load zodat de rij naar "opgelost" schuift.
+        try { loadDunPipeline(); } catch (_) { /* fail-soft */ }
+        // Verse acties-load zodat de afgewezen taken direct verdwijnen.
+        try { _acWbxLoad(); } catch (_) { /* fail-soft */ }
+      } catch (e) {
+        if (err) { err.style.display = ''; err.textContent = 'Fout: ' + (e?.message || 'onbekend'); }
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Sluit dossier';
+      }
+    }
+    saveBtn.addEventListener('click', () => doClose(false));
+    // Enter in textarea → geen submit (multiline). Cmd/Ctrl+Enter = submit.
+    reasonEl?.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') doClose(false);
+    });
+  }
+
   function _caseOpenOutcomeModal(cust, opts) {
     document.getElementById('wbxCallOutcomeModal')?.remove();
     const focusInv = _caseState.detail?.open_invoices?.[0] || null;
@@ -23806,14 +23944,20 @@
         } else {
           window.AgentShared?.showToast?.('Belpoging gelogd', 'success');
         }
-        // Als paid_during_call: expliciet waarschuwen dat de flow NIET
-        // automatisch stopt (fix 4 gaat dat regelen). Geen stille no-op:
-        // Jeffrey vroeg specifiek om dit signaal.
+        // Bij paid_during_call: bied ANS meteen "Sluit dossier"-modal aan.
+        // De belactie is nu gelogd; nu de flow definitief afsluiten via het
+        // dual-close endpoint (FIX 4). Reden pre-fill zodat de operator
+        // alleen hoeft te bevestigen. Registratie van de betaling in CAMT/
+        // register-payment blijft daarna nog aparte administratie, maar de
+        // dunning-flow stopt hier al.
         if (chosen === 'paid_during_call') {
-          window.AgentShared?.showToast?.(
-            'Klant zegt "betaald tijdens gesprek": registreer de betaling via CAMT/register-payment; de dunning-flow stopt pas als de factuur op paid staat.',
-            'info',
-          );
+          const note = (wrap.querySelector('#wbxCallOutcomeNote')?.value || '').trim();
+          const presetReason = note
+            ? 'Betaald tijdens gesprek — ' + note
+            : 'Klant zegt betaald tijdens gesprek (nog te bevestigen in CAMT/bank)';
+          // Klein timeout zodat de outcome-modal netjes weg is voor we de
+          // close-modal openen (voorkomt visueel dubbel-scrim).
+          setTimeout(() => _caseOpenCloseDossierModal({ presetReason }), 120);
         }
         // Als de belknop vanuit acties-tab is gestart, herlaad die zodat de
         // afgesloten taak direct naar "Afgehandeld" schuift. Detectie via
@@ -24374,6 +24518,13 @@
           note:         'Betaalafspraak vastgelegd via dossier',
           onSaved:      () => _caseLoadDetail(cid).catch(() => {}),
         });
+        break;
+      }
+      case 'close_dossier': {
+        // FIX 4 — Sluit dossier (dual-close: runs → completed + pipeline
+        // → opgelost + pending_actions → REJECTED). Modal met verplichte
+        // reden + soepele betaald-check + confirm bij openstaand bedrag.
+        _caseOpenCloseDossierModal();
         break;
       }
       case 'noop':
