@@ -28,6 +28,26 @@
 //   afgehandeld, alleen met negatieve uitkomst). Voor "kan niet verifieren /
 //   nog niet duidelijk" gebruik mark-not-executed (-> FAILED).
 //
+// Body voor MANUAL_FOLLOWUP (Belmoment, FIX 3 — belknop op actie-rij):
+//   {
+//     id: uuid (required),
+//     execution_result: {
+//       outcome:      'no_answer' | 'voicemail' | 'callback' | 'payment_promise' |
+//                     'payment_plan' | 'refused' | 'wrong_number' | 'paid_during_call'
+//                     (required — matcht dunning_call_log.outcome-enum),
+//       call_log_id?: uuid    (optioneel — koppeling naar dunning_call_log row),
+//       manual_notes: string  (min 10 chars, required)
+//     }
+//   }
+//   Semantiek: MANUAL_FOLLOWUP starts in PENDING. Bij een afgerond belletje
+//   (via de belknop op de actie-rij OF direct in het case-sheet softphone-
+//   paneel) wordt de taak PENDING -> EXECUTED gezet. De guard laat
+//   MANUAL_FOLLOWUP:executed door (zie api/_lib/pending-actions-guard.js),
+//   dus de dunning-engine kan meteen weer doortikken. Callback-outcome met
+//   nieuwe scheduled_for maakt automatisch een NIEUWE MANUAL_FOLLOWUP-rij
+//   in dunning-call-log-create (self-loop) — deze afsluit-tak raakt die
+//   niet aan.
+//
 // Body voor MANUAL_ESCALATION (Finance Inbox escalatie, F3):
 //   {
 //     id: uuid (required),
@@ -51,6 +71,9 @@
 //   - MANUAL_ESCALATION             : alleen vanuit PENDING. Bij outcome=ongoing
 //                                     blijft status=PENDING; bij resolved /
 //                                     handed_over wordt PENDING -> EXECUTED.
+//   - MANUAL_FOLLOWUP               : alleen vanuit PENDING -> EXECUTED (geen
+//                                     approve-stap voor bel-taken; het bellen
+//                                     zelf IS de handeling).
 //   Andere statussen -> 409 met huidige status.
 //
 // Cascade naar payment_arrangements:
@@ -91,6 +114,17 @@ const MANUAL_ESCALATION_OUTCOMES = new Set([
   'resolved',
   'handed_over',
   'ongoing',
+]);
+
+// MANUAL_FOLLOWUP (FIX 3) outcome-enum — 1:1 met dunning_call_log.outcome
+// CHECK-constraint (migratie 2026-07-14-dunning-call-log.sql). Alle uitkomsten
+// sluiten de taak PENDING -> EXECUTED. Callback-tak maakt in
+// dunning-call-log-create.js automatisch een nieuwe MANUAL_FOLLOWUP-rij
+// aan met scheduled_for=callback_at (self-loop), volledig los van deze
+// afsluit-actie.
+const MANUAL_FOLLOWUP_OUTCOMES = new Set([
+  'no_answer', 'voicemail', 'callback', 'payment_promise', 'payment_plan',
+  'refused', 'wrong_number', 'paid_during_call',
 ]);
 
 function isStringArray(x) {
@@ -137,10 +171,12 @@ export default async function handler(req, res) {
     if (lookupErr) throw new Error('lookup: ' + lookupErr.message);
     if (!row)      return res.status(404).json({ error: 'Pending action niet gevonden' });
 
-    // State-machine guard: MANUAL_ESCALATION start in PENDING (geen approve-stap),
-    // andere action_types vereisen APPROVED.
+    // State-machine guard: MANUAL_ESCALATION + MANUAL_FOLLOWUP starten in
+    // PENDING (geen approve-stap — belactie/escalatie IS de handeling).
+    // Andere action_types vereisen APPROVED.
     const isEscalation = row.action_type === 'MANUAL_ESCALATION';
-    const requiredStatus = isEscalation ? 'PENDING' : 'APPROVED';
+    const isFollowup   = row.action_type === 'MANUAL_FOLLOWUP';
+    const requiredStatus = (isEscalation || isFollowup) ? 'PENDING' : 'APPROVED';
     if (row.status !== requiredStatus) {
       return res.status(409).json({
         error: `Action is niet in ${requiredStatus} state (huidige status: ${row.status})`,
@@ -177,6 +213,31 @@ export default async function handler(req, res) {
         }
         if (handedOverTo.length > 0) {
           cleanExecutionResult.handed_over_to = handedOverTo;
+        }
+      }
+    } else if (row.action_type === 'MANUAL_FOLLOWUP') {
+      // FIX 3 — Belmoment afsluiten na een afgerond belletje. Outcome-enum
+      // matcht 1:1 met dunning_call_log.outcome. Sluit PENDING -> EXECUTED.
+      const outcome = typeof er.outcome === 'string' ? er.outcome.trim() : '';
+      if (!MANUAL_FOLLOWUP_OUTCOMES.has(outcome)) {
+        return res.status(400).json({
+          error: 'execution_result.outcome vereist (' + Array.from(MANUAL_FOLLOWUP_OUTCOMES).join(' | ') + ')',
+        });
+      }
+      cleanExecutionResult.outcome = outcome;
+
+      // Optionele koppeling naar dunning_call_log — gezet door de belknop-
+      // flow zodat de audit-trail bidirectioneel is (taak -> call_log EN
+      // call_log.payload -> pending_action_id via -create endpoint).
+      if (er.call_log_id != null) {
+        const clId = String(er.call_log_id).trim();
+        if (clId.length > 0) {
+          if (!UUID_RE.test(clId)) {
+            return res.status(400).json({
+              error: 'execution_result.call_log_id moet een uuid zijn',
+            });
+          }
+          cleanExecutionResult.call_log_id = clId;
         }
       }
     } else if (row.action_type === 'MANUAL_VERIFY_PAYMENT') {

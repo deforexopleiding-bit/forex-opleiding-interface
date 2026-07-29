@@ -7527,6 +7527,24 @@
         _acWbxDoReject(btn.getAttribute('data-ac-reject'));
       });
     });
+    // FIX 3 — Belknop op MANUAL_FOLLOWUP-rijen. Opent case-sheet met
+    // auto-open van de outcome-modal; die stuurt pending_action_id mee
+    // naar dunning-call-log-create zodat de taak fail-soft PENDING ->
+    // EXECUTED wordt.
+    list.querySelectorAll('[data-ac-bellen]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const paId = btn.getAttribute('data-ac-bellen');
+        const cid  = btn.getAttribute('data-ac-bellen-cid');
+        if (!paId || !cid) return;
+        try {
+          openCaseSheet(cid, { autoOpenCallOutcomeForPendingActionId: paId });
+        } catch (err) {
+          console.warn('[wbx-acties bel-knop]', err?.message || err);
+          window.AgentShared?.showToast?.('Kon dossier niet openen: ' + (err?.message || 'onbekend'), 'error');
+        }
+      });
+    });
     // Row-click opent detail-modal. Knop-klikken worden opgevangen door
     // stopPropagation hierboven zodat ze niet OOK de modal triggeren.
     list.querySelectorAll('.wbx-arow[data-ac-id]').forEach((row) => {
@@ -7567,18 +7585,42 @@
     }
     return cust;
   }
+  // FIX 3 — RBAC-check voor de belknop op MANUAL_FOLLOWUP-rijen. Fail-open:
+  // als RBAC-lookup faalt tonen we de knop (server-side 403 is definitieve
+  // gate — zelfde patroon als canApprove elders in dit bestand, r7994).
+  function _acWbxCanBellen() {
+    try {
+      const perms = window.RBAC && window.RBAC._permissionsCache;
+      if (perms && typeof perms.has === 'function') {
+        return perms.has('*') || perms.has('finance.dunning.execute');
+      }
+    } catch (_) { /* fail-open */ }
+    return true;
+  }
+
   function _acWbxRowHtml(it) {
     const cat = _acWbxCategoryFor(it.action_type);
     const specific = _acWbxLabelForRow(it);
     const cust = it?.customer?.name || '(onbekende klant)';
     const sub  = _acWbxSubtitle(it);
     const age  = _acWbxAgeText(it);
+    // FIX 3 — Belknop alleen op MANUAL_FOLLOWUP-taken zonder expliciete
+    // 'letter'/'joost'-kind (call is de default en de intent van een bel-
+    // moment). RBAC-gate op finance.dunning.execute (zelfde als de rest
+    // van de dunning-mutaties).
+    const kind = String(it?.payload?.kind || '').toLowerCase();
+    const isBelTaak = it.action_type === 'MANUAL_FOLLOWUP'
+      && (kind === '' || kind === 'call');
+    const belKnop = (isBelTaak && it?.customer?.id && _acWbxCanBellen())
+      ? `<button class="wbx-btn wbx-sm" type="button" data-ac-bellen="${esc(it.id)}" data-ac-bellen-cid="${esc(it.customer.id)}" title="Open dossier + softphone">📞 Bellen</button>`
+      : '';
     let right;
     if (_acWbxState.tab === 'open') {
       const primaryLbl = cat === 'esc' ? 'Oppakken' : 'Goedkeuren';
       right = `
         <span class="wbx-aage">${esc(age)}</span>
         <div class="wbx-abtns">
+          ${belKnop}
           <button class="wbx-btn wbx-primary wbx-sm" type="button" data-ac-approve="${esc(it.id)}">${primaryLbl}</button>
           <button class="wbx-btn wbx-sm wbx-danger" type="button" data-ac-reject="${esc(it.id)}">Afwijzen</button>
         </div>
@@ -22657,6 +22699,12 @@
     _caseState.focusInvoiceId  = opts.invoiceId   || null;
     _caseState.focusInvoiceNr  = opts.invoiceNr   || null;
     _caseState.focusDaysOverdue= (opts.daysOverdue != null) ? opts.daysOverdue : null;
+    // FIX 3 — belknop op MANUAL_FOLLOWUP actie-rij geeft
+    // opts.autoOpenCallOutcomeForPendingActionId mee. Na de eerste render
+    // opent _caseOpenOutcomeModal automatisch en zet de pending_action_id
+    // door zodat dunning-call-log-create de taak fail-soft afsluit.
+    _caseState.autoOpenCallOutcomeForPendingActionId =
+      opts.autoOpenCallOutcomeForPendingActionId || null;
     _caseState.detail          = null;
     _caseState.chat            = { convId: null, messages: [], canSend: false, phone: null, reason: null, loading: true };
     _caseState.suggestion      = null;
@@ -22683,6 +22731,19 @@
     _caseRender();
     // Tijdlijn parallel na eerste render (blokkeert de sheet niet).
     _caseLoadTimeline(customerId).catch(() => {});
+    // FIX 3 — auto-open outcome-modal als de sheet vanuit de belknop op
+    // een MANUAL_FOLLOWUP-rij is gestart. cust komt uit de detail-fetch
+    // die net gelukt is; kan null zijn bij een fout — in dat geval slaan
+    // we de auto-open over (de sheet zelf toont dan een error).
+    if (_caseState.autoOpenCallOutcomeForPendingActionId) {
+      const paId = _caseState.autoOpenCallOutcomeForPendingActionId;
+      _caseState.autoOpenCallOutcomeForPendingActionId = null; // eenmalig
+      const cust = _caseState.detail?.customer || null;
+      if (cust) {
+        try { _caseOpenOutcomeModal(cust, { pendingActionId: paId }); }
+        catch (e) { console.warn('[case-sheet auto-open outcome]', e?.message || e); }
+      }
+    }
   }
 
   function closeCaseSheet() {
@@ -23728,11 +23789,38 @@
             outcome    : chosen,
             note       : wrap.querySelector('#wbxCallOutcomeNote').value.trim() || null,
             callback_at: callbackAtIso,
+            // FIX 3 — als de outcome-modal geopend is vanuit de belknop op
+            // een MANUAL_FOLLOWUP actie-rij, geven we de taak-id mee. Endpoint
+            // sluit die taak fail-soft PENDING -> EXECUTED zodat de dunning-
+            // engine direct doortikt (guard laat MANUAL_FOLLOWUP:executed door).
+            pending_action_id: opts?.pendingActionId || null,
           }),
         });
         const d = await r.json();
         if (!r.ok || d.error) throw new Error(d.error || 'HTTP ' + r.status);
-        window.AgentShared?.showToast?.('Belpoging gelogd', 'success');
+        // Toast reflecteert of de gekoppelde bel-taak ook meteen dicht is.
+        if (opts?.pendingActionId && d.closed_pending_action_id) {
+          window.AgentShared?.showToast?.('Belpoging gelogd — bel-taak afgesloten', 'success');
+        } else if (opts?.pendingActionId && d.warning) {
+          window.AgentShared?.showToast?.(d.warning, 'warning');
+        } else {
+          window.AgentShared?.showToast?.('Belpoging gelogd', 'success');
+        }
+        // Als paid_during_call: expliciet waarschuwen dat de flow NIET
+        // automatisch stopt (fix 4 gaat dat regelen). Geen stille no-op:
+        // Jeffrey vroeg specifiek om dit signaal.
+        if (chosen === 'paid_during_call') {
+          window.AgentShared?.showToast?.(
+            'Klant zegt "betaald tijdens gesprek": registreer de betaling via CAMT/register-payment; de dunning-flow stopt pas als de factuur op paid staat.',
+            'info',
+          );
+        }
+        // Als de belknop vanuit acties-tab is gestart, herlaad die zodat de
+        // afgesloten taak direct naar "Afgehandeld" schuift. Detectie via
+        // aanwezigheid van pendingActionId (alleen belknop-flow zet 'em).
+        if (opts?.pendingActionId && typeof _acWbxLoad === 'function') {
+          try { _acWbxLoad(); } catch (_) { /* fail-soft */ }
+        }
         // Bij payment_promise / payment_plan: bied direct de kans de
         // afgesproken datum vast te leggen als TOEZEGGING (Fase 1). De
         // uitkomst-modal sluit + de toezegging-modal opent met 1 (promise)
