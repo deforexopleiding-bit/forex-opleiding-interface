@@ -7521,17 +7521,32 @@
 
     list.innerHTML = items.map((it) => _acWbxRowHtml(it)).join('');
 
-    // Bind approve/reject-knoppen.
+    // Bind approve/reject/restore-knoppen — nu via wbxOpenConfirm + per-type
+    // routing zodat bug-1 (MANUAL_FOLLOWUP → EXECUTED via mark-executed, niet
+    // APPROVED via approve) en bug-2 (MANUAL_ESCALATION "Afgehandeld" ==
+    // resolved-outcome, niet reject) semantisch correct zijn.
     list.querySelectorAll('[data-ac-approve]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        _acWbxDoApprove(btn.getAttribute('data-ac-approve'));
+        const id = btn.getAttribute('data-ac-approve');
+        const it = _acWbxState.items.find((x) => x?.id === id) || {};
+        _acWbxConfirmPrimary(it);
       });
     });
     list.querySelectorAll('[data-ac-reject]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        _acWbxDoReject(btn.getAttribute('data-ac-reject'));
+        const id = btn.getAttribute('data-ac-reject');
+        const it = _acWbxState.items.find((x) => x?.id === id) || {};
+        _acWbxConfirmSecondary(it);
+      });
+    });
+    list.querySelectorAll('[data-ac-restore]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = btn.getAttribute('data-ac-restore');
+        const it = _acWbxState.items.find((x) => x?.id === id) || {};
+        _acWbxConfirmRestore(it);
       });
     });
     // FIX 3 — Belknop op MANUAL_FOLLOWUP-rijen. Opent case-sheet met
@@ -7667,8 +7682,23 @@
         <span class="wbx-aage">${esc(age)}</span>
         <div class="wbx-abtns">${btns.filter(Boolean).join('')}</div>
       `;
-    } else if (_acWbxState.tab === 'done') {
-      right = `<span class="wbx-tag wbx-ok">Afgehandeld</span>`;
+    } else if (_acWbxState.tab === 'done' || _acWbxState.tab === 'rej') {
+      // Acties-tab confirms/undo PR — restore-knop op afgehandelde/afgewezen
+      // rijen. TL_* + EXECUTED is server-side geblokkeerd; UI verbergt de
+      // knop dan ook (halve staat is destructief). Voor MANUAL_* +
+      // EXECUTED: wel toegestaan, semantiek "per-ongeluk-fix".
+      const st = String(it.status || '').toUpperCase();
+      const at = String(it.action_type || '');
+      const isTL       = at.startsWith('TL_');
+      const isExecuted = st === 'EXECUTED';
+      const canRestore = _acWbxCanRestore() && !(isTL && isExecuted);
+      const restoreBtn = canRestore
+        ? `<button class="wbx-btn wbx-sm" type="button" data-ac-restore="${esc(it.id)}" title="Zet terug naar Te doen">↺ Terugzetten</button>`
+        : '';
+      const tag = _acWbxState.tab === 'done'
+        ? '<span class="wbx-tag wbx-ok">Afgehandeld</span>'
+        : '<span class="wbx-tag wbx-no">Afgewezen</span>';
+      right = `${tag}${restoreBtn ? `<div class="wbx-abtns" style="margin-left:8px">${restoreBtn}</div>` : ''}`;
     } else {
       right = `<span class="wbx-tag wbx-no">Afgewezen</span>`;
     }
@@ -7717,6 +7747,293 @@
     } catch (e) {
       window.AgentShared?.showToast?.('Afwijzen mislukt: ' + (e?.message || 'onbekend'), 'error');
     }
+  }
+
+  // ─── Acties-tab confirms/undo PR ──────────────────────────────────────
+  // Per-type routing via wbxOpenConfirm. Vervangt/wraps de oude
+  // _acWbxDoApprove/_acWbxDoReject-directe-calls zodat elke actie:
+  //   1) De juiste ENDPOINT aanroept (bug-fix 1+2: MANUAL_FOLLOWUP →
+  //      mark-executed met outcome=closed_manually i.p.v. approve;
+  //      MANUAL_ESCALATION "Afgehandeld" → mark-executed outcome=resolved
+  //      i.p.v. reject).
+  //   2) Achter een confirm-dialog zit met "wat gebeurt er" + "vervolg".
+  //   3) Danger-tint krijgt bij ingrijpende acties (writeoff, escalation).
+
+  // Fail-secure permission-check voor restore-knop op done/rej tabs.
+  function _acWbxCanRestore() {
+    try {
+      const perms = window.RBAC && window.RBAC._permissionsCache;
+      if (perms && typeof perms.has === 'function') {
+        return perms.has('*') || perms.has('finance.arrangements.approve');
+      }
+    } catch (_) { /* fail-secure */ }
+    return false;
+  }
+
+  // Lichte endpoint-wrappers zonder toast-side-effect zodat wbxOpenConfirm
+  // ze in zijn onConfirm-flow kan aanroepen en fouten kan bubbelen.
+  async function _acWbxCallApprove(id) {
+    const r = await window.AgentShared.apiFetch('/api/pending-actions-approve', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    return d;
+  }
+  async function _acWbxCallReject(id, reason) {
+    const r = await window.AgentShared.apiFetch('/api/pending-actions-reject', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, reason }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    return d;
+  }
+  async function _acWbxCallMarkExecuted(id, executionResult) {
+    const r = await window.AgentShared.apiFetch('/api/pending-actions-mark-executed', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, execution_result: executionResult }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    return d;
+  }
+  async function _acWbxCallRestore(id, reason) {
+    const r = await window.AgentShared.apiFetch('/api/pending-actions-restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, reason }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    return d;
+  }
+
+  // Primaire knop (Goedkeuren/Klopt/Bevestigen/Oppakken/Afgehandeld) —
+  // per action_type de juiste endpoint + confirm-tekst.
+  function _acWbxConfirmPrimary(it) {
+    if (!it?.id) return;
+    const at = String(it.action_type || '');
+    const cust = it?.customer?.name || 'klant';
+    const isWriteoff = at === 'TL_INVOICE_WRITEOFF';
+    if (at === 'MANUAL_FOLLOWUP') {
+      // BUG-FIX 1: NIET meer approve → APPROVED (blokkeert engine).
+      // In plaats daarvan direct PENDING → EXECUTED via mark-executed
+      // met outcome=closed_manually. Guard laat MANUAL_FOLLOWUP:executed
+      // door (NON_BLOCKING_COMBOS) → engine tikt door.
+      wbxOpenConfirm({
+        title:       'Beltaak afhandelen',
+        subtitle:    cust,
+        dangerLevel: 'neutral',
+        whatHappens: ['Beltaak wordt gesloten (status → EXECUTED).', 'Er wordt géén bel-log aangemaakt (voor bellen: gebruik de 📞-knop).'],
+        nextStep:    'Klant blijft in de flow; volgende aanmaning volgens schema.',
+        requireReason: { minLen: 0, placeholder: 'Optioneel — bv. "Al betaald, mail gestuurd"' },
+        primaryLabel: 'Afhandelen',
+        onConfirm: async (reason) => {
+          await _acWbxCallMarkExecuted(it.id, {
+            outcome:      'closed_manually',
+            manual_notes: (reason && reason.length >= 10) ? reason : 'Handmatig afgesloten via actie-rij',
+          });
+          window.AgentShared?.showToast?.('Beltaak afgehandeld', 'success');
+          _acWbxLoad();
+        },
+      });
+      return;
+    }
+    if (at === 'MANUAL_ESCALATION') {
+      // "Oppakken" — mark-executed met outcome=ongoing (voortgang loggen,
+      // taak blijft PENDING). Detail-modal is de juiste plek voor
+      // resolved/handed_over — hier is "Oppakken" de lichtgewicht optie.
+      wbxOpenConfirm({
+        title:       'Escalatie oppakken',
+        subtitle:    cust,
+        dangerLevel: 'warn',
+        whatHappens: ['Voortgang wordt gelogd (taak blijft PENDING zodat je later kunt afronden met "Afgehandeld").'],
+        nextStep:    'Escalatie blijft open in de takenlijst.',
+        requireReason: { minLen: 10, placeholder: 'Wat heb je opgepakt? Min. 10 tekens' },
+        primaryLabel: 'Oppakken',
+        onConfirm: async (reason) => {
+          await _acWbxCallMarkExecuted(it.id, { outcome: 'ongoing', manual_notes: reason });
+          window.AgentShared?.showToast?.('Voortgang gelogd', 'success');
+          _acWbxLoad();
+        },
+      });
+      return;
+    }
+    if (at === 'MANUAL_VERIFY_PAYMENT') {
+      // "Klopt (betaald)" — via approve → APPROVED → detail-modal doet
+      // mark-executed met outcome=confirmed_paid. Voor UX-eenvoud op de
+      // rij doen we alleen approve; de detail-modal-flow blijft intact.
+      // ⚠ EXPLICIETE WAARSCHUWING: dit registreert de betaling NIET.
+      wbxOpenConfirm({
+        title:       'Betaling klopt (betaald)',
+        subtitle:    cust,
+        dangerLevel: 'warn',
+        whatHappens: [
+          'Taak wordt goedgekeurd (verhuist naar "Afgehandeld").',
+          'De factuur-status wordt NIET aangepast en er wordt GEEN betaling in de DB geregistreerd.',
+        ],
+        nextStep:    'Koppel de betaling apart via de bankmatch (CAMT/PayPal). Anders blijft de factuur open en gaat de aanmaning-flow gewoon door.',
+        primaryLabel: 'Ja, taak sluiten',
+        onConfirm: async () => {
+          await _acWbxCallApprove(it.id);
+          window.AgentShared?.showToast?.('Goedgekeurd', 'success');
+          _acWbxLoad();
+        },
+      });
+      return;
+    }
+    if (at === 'MANUAL_CONFIRM_PROMISE') {
+      wbxOpenConfirm({
+        title:       'Belofte bevestigen',
+        subtitle:    cust,
+        dangerLevel: 'neutral',
+        whatHappens: ['Toezegging wordt bevestigd (taak → APPROVED).'],
+        nextStep:    'Klant blijft in wachtstand tot de toezeggingsdatum.',
+        primaryLabel: 'Bevestigen',
+        onConfirm: async () => {
+          await _acWbxCallApprove(it.id);
+          window.AgentShared?.showToast?.('Bevestigd', 'success');
+          _acWbxLoad();
+        },
+      });
+      return;
+    }
+    // TL_* — echte 2-stap approve → executor. TL_INVOICE_WRITEOFF krijgt
+    // danger-tint want credit-nota is (zonder handmatige TL-storno) niet
+    // omkeerbaar.
+    wbxOpenConfirm({
+      title:       isWriteoff ? 'Kwijtschelding goedkeuren' : 'Voorstel goedkeuren',
+      subtitle:    cust,
+      dangerLevel: isWriteoff ? 'danger' : 'neutral',
+      whatHappens: isWriteoff
+        ? ['Bij uitvoering wordt in TeamLeader een credit-nota aangemaakt.', 'Het openstaande bedrag verdwijnt.']
+        : ['Voorstel wordt goedgekeurd (taak → APPROVED).', 'Executor (of jij handmatig) voert daarna de TL-mutatie door.'],
+      nextStep:    isWriteoff
+        ? 'Onomkeerbaar zonder handmatige credit-storno in TeamLeader.'
+        : 'Klant wacht op executor; nog geen wijziging in TL.',
+      primaryLabel: 'Goedkeuren',
+      onConfirm: async () => {
+        await _acWbxCallApprove(it.id);
+        window.AgentShared?.showToast?.('Goedgekeurd', 'success');
+        _acWbxLoad();
+      },
+    });
+  }
+
+  // Secundaire knop (Afwijzen/Overslaan/Niet nagekomen/Klopt niet/Afgehandeld
+  // bij escalation). Bevestiging + per-type routing.
+  function _acWbxConfirmSecondary(it) {
+    if (!it?.id) return;
+    const at = String(it.action_type || '');
+    const cust = it?.customer?.name || 'klant';
+    if (at === 'MANUAL_ESCALATION') {
+      // BUG-FIX 2: "Afgehandeld" op escalatie = resolved (mark-executed),
+      // NIET reject. Semantisch: "escalatie is netjes afgesloten".
+      wbxOpenConfirm({
+        title:       'Escalatie afhandelen',
+        subtitle:    cust,
+        dangerLevel: 'neutral',
+        whatHappens: ['Escalatie wordt afgesloten (status → EXECUTED met uitkomst "resolved").'],
+        nextStep:    'Taak verhuist naar "Afgehandeld".',
+        requireReason: { minLen: 10, placeholder: 'Hoe is de escalatie opgelost? Min. 10 tekens' },
+        primaryLabel: 'Afhandelen',
+        onConfirm: async (reason) => {
+          await _acWbxCallMarkExecuted(it.id, { outcome: 'resolved', manual_notes: reason });
+          window.AgentShared?.showToast?.('Escalatie afgehandeld', 'success');
+          _acWbxLoad();
+        },
+      });
+      return;
+    }
+    if (at === 'MANUAL_FOLLOWUP') {
+      wbxOpenConfirm({
+        title:       'Beltaak overslaan',
+        subtitle:    cust,
+        dangerLevel: 'neutral',
+        whatHappens: ['Taak wordt afgewezen (status → REJECTED).'],
+        nextStep:    'Engine tikt door; klant krijgt de eerstvolgende geplande aanmaning.',
+        requireReason: { minLen: 5, placeholder: 'Waarom overslaan? Min. 5 tekens' },
+        primaryLabel: 'Overslaan',
+        onConfirm: async (reason) => {
+          await _acWbxCallReject(it.id, reason);
+          window.AgentShared?.showToast?.('Overgeslagen', 'success');
+          _acWbxLoad();
+        },
+      });
+      return;
+    }
+    if (at === 'MANUAL_CONFIRM_PROMISE') {
+      wbxOpenConfirm({
+        title:       'Belofte niet nagekomen',
+        subtitle:    cust,
+        dangerLevel: 'warn',
+        whatHappens: ['Taak wordt afgewezen; wachtstand breekt.'],
+        nextStep:    'Engine hervat aanmaningen; volgende template bij eerstvolgende run.',
+        requireReason: { minLen: 5, placeholder: 'Wat is er gebeurd? Min. 5 tekens' },
+        primaryLabel: 'Niet nagekomen',
+        onConfirm: async (reason) => {
+          await _acWbxCallReject(it.id, reason);
+          window.AgentShared?.showToast?.('Belofte gebroken — engine hervat', 'success');
+          _acWbxLoad();
+        },
+      });
+      return;
+    }
+    if (at === 'MANUAL_VERIFY_PAYMENT') {
+      wbxOpenConfirm({
+        title:       'Betaling klopt niet',
+        subtitle:    cust,
+        dangerLevel: 'neutral',
+        whatHappens: ['Taak wordt afgewezen (klant-claim niet gevonden in bank).'],
+        nextStep:    'Engine gaat door met de volgende aanmaning volgens workflow.',
+        requireReason: { minLen: 5, placeholder: 'Wat heb je gecontroleerd? Min. 5 tekens' },
+        primaryLabel: 'Klopt niet',
+        onConfirm: async (reason) => {
+          await _acWbxCallReject(it.id, reason);
+          window.AgentShared?.showToast?.('Afgewezen', 'success');
+          _acWbxLoad();
+        },
+      });
+      return;
+    }
+    // TL_* — Afwijzen (voorstel verwerpen).
+    wbxOpenConfirm({
+      title:       'Voorstel afwijzen',
+      subtitle:    cust,
+      dangerLevel: 'neutral',
+      whatHappens: ['Taak wordt afgewezen (status → REJECTED). Geen TL-mutatie.'],
+      nextStep:    'Klant blijft in flow; engine stuurt volgende aanmaning.',
+      requireReason: { minLen: 5, placeholder: 'Waarom afwijzen? Min. 5 tekens' },
+      primaryLabel: 'Afwijzen',
+      onConfirm: async (reason) => {
+        await _acWbxCallReject(it.id, reason);
+        window.AgentShared?.showToast?.('Afgewezen', 'success');
+        _acWbxLoad();
+      },
+    });
+  }
+
+  // Restore-knop op done/rej tabs. Server-side gate blokkeert TL_* EXECUTED
+  // (TL_EXECUTED_LOCKED); UI verbergt de knop dan ook via _acWbxRowHtml.
+  function _acWbxConfirmRestore(it) {
+    if (!it?.id) return;
+    const cust = it?.customer?.name || 'klant';
+    const fromSt = String(it.status || '').toUpperCase();
+    wbxOpenConfirm({
+      title:       'Taak terugzetten naar Te doen?',
+      subtitle:    cust,
+      dangerLevel: 'neutral',
+      whatHappens: [`Status: ${fromSt} → PENDING.`, 'Downstream-effecten (bv. TL-mutaties, dunning_call_log) blijven staan — dit is een UI-per-ongeluk-fix, geen volledige reverse.'],
+      nextStep:    'Taak verschijnt weer op de "Te doen"-tab.',
+      requireReason: { minLen: 5, placeholder: 'Waarom terugzetten? Min. 5 tekens' },
+      primaryLabel: 'Terugzetten',
+      onConfirm: async (reason) => {
+        await _acWbxCallRestore(it.id, reason);
+        window.AgentShared?.showToast?.('Teruggezet naar Te doen', 'success');
+        _acWbxLoad();
+      },
+    });
   }
 
   // ─── Actie-detailmodal (PR 1/2) ─────────────────────────────────────────
@@ -8115,13 +8432,17 @@
 
     // Bind knoppen (idempotent — footer wordt bij elke render overschreven).
     foot.querySelector('[data-pa-detail-close]')?.addEventListener('click', closePaDetailModal);
-    foot.querySelector('[data-pa-detail-approve]')?.addEventListener('click', async () => {
-      await _acWbxDoApprove(item.id);
+    // Detail-modal-footer routes via de nieuwe per-type confirm-handlers
+    // zodat bug-fixes 1 (MANUAL_FOLLOWUP → EXECUTED, niet APPROVED) en 2
+    // (MANUAL_ESCALATION "Afgehandeld" → resolved-outcome) ook via detail-
+    // modal correct zijn.
+    foot.querySelector('[data-pa-detail-approve]')?.addEventListener('click', () => {
       closePaDetailModal();
+      _acWbxConfirmPrimary(item);
     });
-    foot.querySelector('[data-pa-detail-reject]')?.addEventListener('click', async () => {
-      await _acWbxDoReject(item.id);
+    foot.querySelector('[data-pa-detail-reject]')?.addEventListener('click', () => {
       closePaDetailModal();
+      _acWbxConfirmSecondary(item);
     });
     foot.querySelector('[data-pa-detail-executed]')?.addEventListener('click', () => {
       closePaDetailModal();
@@ -23760,6 +24081,132 @@
     </div>`;
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // Acties-tab confirms/undo PR — Generieke bevestigingsmodal.
+  //
+  // wbxOpenConfirm({ title, subtitle?, dangerLevel?, bodyHtml?,
+  //                  whatHappens: string|string[], nextStep?: string,
+  //                  requireReason?: bool|{ minLen?:number, placeholder?:string, presetValue?:string },
+  //                  primaryLabel?, primaryClass?, onConfirm: async(reason?)=>void })
+  //
+  // Vervangt de 4 native window.confirm() calls + hangt aan alle acties.
+  // Hergebruikt wbx-call-outcome-scrim/-modal/-head/-body/-foot styling van de
+  // FIX 4 close-dossier-modal zodat visueel consistent.
+  //
+  // dangerLevel: 'neutral' (default) | 'warn' (amber) | 'danger' (rood) |
+  //              'bewind' (paars). Bepaalt het waarschuwingsblok bovenaan.
+  //
+  // onConfirm: async callback met de ingevulde reason als argument (of null).
+  // Modal blijft open tot onConfirm resolvet zonder gooien. Fout → toast +
+  // modal blijft open zodat user opnieuw kan proberen.
+  function wbxOpenConfirm(opts) {
+    if (!opts || typeof opts.onConfirm !== 'function') {
+      console.warn('[wbxOpenConfirm] geen onConfirm callback');
+      return;
+    }
+    document.getElementById('wbxConfirmModal')?.remove();
+    const title       = String(opts.title || 'Weet je het zeker?');
+    const subtitle    = opts.subtitle || '';
+    const level       = String(opts.dangerLevel || 'neutral');
+    const primaryLbl  = String(opts.primaryLabel || 'Bevestigen');
+    const primaryCls  = (level === 'danger' || level === 'bewind')
+      ? 'wbx-btn wbx-primary wbx-danger'
+      : 'wbx-btn wbx-primary';
+    const whatArr = Array.isArray(opts.whatHappens)
+      ? opts.whatHappens
+      : (opts.whatHappens ? [String(opts.whatHappens)] : []);
+    const nextStep = opts.nextStep ? String(opts.nextStep) : '';
+    const bodyHtml = opts.bodyHtml || '';
+    const reqCfg   = opts.requireReason || null;
+    const minLen   = (reqCfg && typeof reqCfg === 'object' && reqCfg.minLen != null)
+      ? Number(reqCfg.minLen) : (reqCfg ? 5 : 0);
+    const reasonPh = (reqCfg && typeof reqCfg === 'object' && reqCfg.placeholder)
+      ? String(reqCfg.placeholder)
+      : 'Optioneel — leg vast waarom';
+    const reasonPreset = (reqCfg && typeof reqCfg === 'object' && reqCfg.presetValue)
+      ? String(reqCfg.presetValue) : '';
+
+    // Waarschuwingsblok-styling per level. Neutral toont niets extra.
+    let alertBlock = '';
+    if (level === 'danger') {
+      alertBlock = `<div style="padding:10px 12px;border:1px solid #dc2626;background:#fef2f2;color:#7f1d1d;border-radius:8px;font-size:13px;margin-bottom:12px"><strong>Let op:</strong> deze actie is ingrijpend en (deels) onomkeerbaar.</div>`;
+    } else if (level === 'warn') {
+      alertBlock = `<div style="padding:10px 12px;border:1px solid #f59e0b;background:#fef3c7;color:#78350f;border-radius:8px;font-size:13px;margin-bottom:12px"><strong>Let op:</strong> lees eerst wat er gebeurt.</div>`;
+    } else if (level === 'bewind') {
+      alertBlock = `<div style="padding:10px 12px;border:1px solid #7c3aed;background:#faf5ff;color:#4c1d95;border-radius:8px;font-size:13px;margin-bottom:12px"><strong>Let op:</strong> juridisch traject, klant zelf krijgt geen contact meer.</div>`;
+    }
+
+    const whatBlock = whatArr.length
+      ? `<div style="font-size:13px;color:var(--ds-text,#06181f);margin-bottom:10px"><strong>Wat gebeurt er:</strong><ul style="margin:6px 0 0 18px;padding:0">${whatArr.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></div>`
+      : '';
+    const nextBlock = nextStep
+      ? `<div style="font-size:13px;color:var(--wbx-muted);margin-bottom:10px"><strong>Vervolg:</strong> ${esc(nextStep)}</div>`
+      : '';
+    const reasonBlock = reqCfg
+      ? `<label style="display:block;font-size:12px;color:var(--wbx-muted)">Reden${minLen > 0 ? ' <span style="color:var(--wbx-s-inc-tx)">*</span>' : ''}
+        <textarea id="wbxConfirmReason" rows="2" placeholder="${esc(reasonPh)}" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit;min-height:56px;resize:vertical">${esc(reasonPreset)}</textarea>
+        ${minLen > 0 ? `<span style="display:block;font-size:11px;color:var(--wbx-muted);margin-top:3px">Min. ${minLen} tekens. Verplicht.</span>` : ''}
+      </label>`
+      : '';
+
+    const wrap = document.createElement('div');
+    wrap.id = 'wbxConfirmModal';
+    wrap.className = 'wbx wbx-call-outcome-scrim';
+    wrap.innerHTML = `
+      <div class="wbx-call-outcome-modal">
+        <div class="wbx-call-outcome-head">
+          <div>
+            <div style="font-weight:600">${esc(title)}</div>
+            ${subtitle ? `<div style="font-size:12px;color:var(--wbx-muted);margin-top:2px">${esc(subtitle)}</div>` : ''}
+          </div>
+          <button class="wbx-inc-close" type="button" data-wbx-cf-cancel>✕</button>
+        </div>
+        <div class="wbx-call-outcome-body">
+          ${alertBlock}
+          ${whatBlock}
+          ${nextBlock}
+          ${bodyHtml}
+          ${reasonBlock}
+          <div id="wbxConfirmErr" style="display:none;margin-top:8px;color:var(--wbx-s-inc-tx);font-size:12.5px"></div>
+        </div>
+        <div class="wbx-call-outcome-foot">
+          <button class="wbx-btn" type="button" data-wbx-cf-cancel>Annuleer</button>
+          <button class="${primaryCls}" type="button" data-wbx-cf-ok>${esc(primaryLbl)}</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+    const err     = wrap.querySelector('#wbxConfirmErr');
+    const okBtn   = wrap.querySelector('[data-wbx-cf-ok]');
+    const reasonEl = wrap.querySelector('#wbxConfirmReason');
+    const close   = () => wrap.remove();
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+    wrap.querySelectorAll('[data-wbx-cf-cancel]').forEach((b) => b.addEventListener('click', close));
+
+    okBtn.addEventListener('click', async () => {
+      let reasonVal = null;
+      if (reqCfg) {
+        reasonVal = (reasonEl?.value || '').trim();
+        if (minLen > 0 && reasonVal.length < minLen) {
+          if (err) { err.style.display = ''; err.textContent = `Reden vereist (min. ${minLen} tekens).`; }
+          reasonEl?.focus();
+          return;
+        }
+      }
+      okBtn.disabled = true;
+      const origLbl  = okBtn.textContent;
+      okBtn.textContent = 'Bezig…';
+      try {
+        await opts.onConfirm(reasonVal);
+        close();
+      } catch (e) {
+        if (err) { err.style.display = ''; err.textContent = 'Fout: ' + (e?.message || 'onbekend'); }
+        okBtn.disabled = false;
+        okBtn.textContent = origLbl;
+      }
+    });
+  }
+
   // Uitkomst-modal.
   // FIX 4 — RBAC-gate voor "Sluit dossier"-knop. Fail-SECURE (in tegenstelling
   // tot _acWbxCanBellen dat fail-OPEN is): dit is een betekenisvolle mutatie
@@ -24915,9 +25362,21 @@
         setSubView('arrangements');
         break;
       case 'to_incasso':
+        // Acties-tab confirms/undo PR — Naar-incasso was voorheen
+        // zonder confirm. Nu danger-confirm ("kosten, extern kantoor").
         if (typeof window._openNaarIncassoDialog === 'function') {
-          closeCaseSheet();
-          window._openNaarIncassoDialog(cid);
+          wbxOpenConfirm({
+            title:       'Naar incasso',
+            subtitle:    _caseState.detail?.customer?.display_name || 'Klant',
+            dangerLevel: 'danger',
+            whatHappens: ['Extern incasso-dossier wordt aangemaakt.', 'Voor NL/BE-particulieren: verplichte WIK-brief eerst.'],
+            nextStep:    'Extern kantoor neemt over. Dit brengt kosten mee en is nauwelijks omkeerbaar.',
+            primaryLabel: 'Naar incasso',
+            onConfirm: async () => {
+              closeCaseSheet();
+              window._openNaarIncassoDialog(cid);
+            },
+          });
         } else {
           window.AgentShared?.showToast?.('Incasso-dialog niet beschikbaar', 'warning');
         }
