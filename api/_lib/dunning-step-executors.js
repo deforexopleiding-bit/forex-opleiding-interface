@@ -42,7 +42,13 @@ import { ensureInvoicePaymentLink, InvoicePaymentLinkError } from './invoice-pay
 // {{factuur.nummer}}). Alignt met de regex-varianten in
 // dunning-template-render.js (hoofdletter-pass) + template-variables.js
 // (dot-pass).
-const DUNNING_PLACEHOLDER_RE = /\{\{([A-Z][A-Z_]*|[a-z_]+\.[a-z_]+)\}\}/g;
+// Regex + pure helpers zitten in _lib/dunning-template-placeholders.js
+// (test-baar zonder Supabase-boot). Re-export voor bestaande callers die
+// buildMetaTemplateVariables uit deze file importeren.
+import {
+  buildMetaTemplateVariables as _buildMetaTemplateVariables,
+  diagnoseTemplatePlaceholders as _diagnoseTemplatePlaceholders,
+} from './dunning-template-placeholders.js';
 
 /**
  * Bouw de positionele Meta-template-parameters uit de template-body zelf.
@@ -67,22 +73,8 @@ const DUNNING_PLACEHOLDER_RE = /\{\{([A-Z][A-Z_]*|[a-z_]+\.[a-z_]+)\}\}/g;
  * @param {object|null|undefined} variablesUsed  rendered.variables_used
  * @returns {string[]}  positionele parameters (in volgorde)
  */
-export function buildMetaTemplateVariables(bodyText, variablesUsed) {
-  const body = String(bodyText || '');
-  const vals = (variablesUsed && typeof variablesUsed === 'object') ? variablesUsed : {};
-  const seen = new Set();
-  const out  = [];
-  DUNNING_PLACEHOLDER_RE.lastIndex = 0;
-  let m;
-  while ((m = DUNNING_PLACEHOLDER_RE.exec(body))) {
-    const key = m[1];
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const v = Object.prototype.hasOwnProperty.call(vals, key) ? vals[key] : '';
-    out.push(String(v == null ? '' : v));
-  }
-  return out;
-}
+export const buildMetaTemplateVariables   = _buildMetaTemplateVariables;
+export const diagnoseTemplatePlaceholders = _diagnoseTemplatePlaceholders;
 
 async function loadTemplate(supabaseAdmin, templateId, expectedKind) {
   if (!templateId) {
@@ -747,6 +739,25 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
   // dot-notation gebruikte (klant.*/factuur.*) — 0 params meegestuurd terwijl
   // Meta N verwachtte → #132000 "Number of parameters does not match".
   const variables = buildMetaTemplateVariables(template.body, rendered.variables_used || {});
+
+  // Fail-loud diagnose: warn zichtbaar in Vercel-logs als er placeholders
+  // in body zitten die de nauwe regex NIET matcht. Dat is 100% de bug-bron
+  // voor Meta #132000 — Meta verwacht het totale aantal placeholders,
+  // wij sturen alleen wat matched. Log verandert GEEN gedrag; het maakt
+  // toekomstige 132000-onderzoeken 1-query-in-plaats-van-uren.
+  try {
+    const diag = diagnoseTemplatePlaceholders(template.body);
+    if (diag.n_missing > 0) {
+      console.warn('[dunning-executor whatsapp] UNMATCHED PLACEHOLDERS — Meta zal #132000 gooien', {
+        template_id:        template.id,
+        meta_template_name: template.meta_template_name,
+        matched:            diag.matched,
+        unmatched:          diag.unmatched,
+        n_sent_to_meta:     diag.total_count,
+        n_expected_in_body: diag.raw_count,
+      });
+    }
+  } catch (_) { /* diag mag nooit send blokkeren */ }
 
   let metaResult;
   try {
