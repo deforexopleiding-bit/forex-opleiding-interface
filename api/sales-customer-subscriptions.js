@@ -37,6 +37,41 @@ export default async function handler(req, res) {
         .in('deal_id', dealIds).order('start_date', { ascending: true });
       subscriptions = subs || [];
       for (const s of subscriptions) dealsWithSubs.add(s.deal_id);
+
+      // Per sub: heeft-al-facturen-vlag zodat de UI de "Aanpassen"-knop kan
+      // gate-en. Waterdichte definitie: alleen als teamleader_subscription_id
+      // NOT NULL EN >=1 invoice-rij bestaat met tl_subscription_id gelijk aan
+      // die TL-id (identiek aan de check in sales-subscription-update.js).
+      // Zonder TL-koppeling is er sowieso geen factuur (TL genereert ze, wij
+      // spiegelen ze read-only via cron-finance-sync).
+      const tlSubIds = subscriptions.map((s) => s.teamleader_subscription_id).filter(Boolean);
+      const hasInvoiceByTlId = new Map();
+      if (tlSubIds.length) {
+        try {
+          const { data: invRows, error: invErr } = await supabaseAdmin
+            .from('invoices')
+            .select('tl_subscription_id')
+            .in('tl_subscription_id', tlSubIds);
+          if (invErr) throw new Error(invErr.message);
+          for (const r of invRows || []) {
+            if (r?.tl_subscription_id) hasInvoiceByTlId.set(r.tl_subscription_id, true);
+          }
+        } catch (e) {
+          console.warn('[customer-subs] invoice-lookup fail-open:', e.message);
+          // Fail-secure zou "alle subs → gefactureerd markeren" zijn (edit
+          // blokkeren). Fail-open zou "alles editeerbaar" zijn (risico op
+          // corrupte edit). We kiezen FAIL-SECURE: server-side endpoint
+          // controleert nog een keer bij daadwerkelijke edit-poging, dus
+          // een verkeerde UI-flag hier is niet catastrofaal — maar toch
+          // voorzichtig: bij DB-fout markeren we alle TL-gekoppelde subs
+          // als "gefactureerd" (edit-knop verborgen).
+          for (const id of tlSubIds) hasInvoiceByTlId.set(id, true);
+        }
+      }
+      subscriptions = subscriptions.map((s) => ({
+        ...s,
+        has_any_invoice: !!(s.teamleader_subscription_id && hasInvoiceByTlId.get(s.teamleader_subscription_id)),
+      }));
     }
     // Getekende offerte zonder subs → Wizard 2 mogelijk.
     const acceptedWithoutSubs = (deals || []).find(d => d.tl_quotation_status === 'accepted' && !dealsWithSubs.has(d.id));

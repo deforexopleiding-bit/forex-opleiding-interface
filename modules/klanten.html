@@ -2265,7 +2265,18 @@ function renderKoAbos() {
       <button class="sr-menu-item" onclick="renderAbonnementenTab()"><i class="ti ti-refresh"></i> Status vernieuwen</button>
       ${s.teamleader_subscription_id ? `<a class="sr-menu-item" href="https://focus.teamleader.eu/subscriptions/${escapeHtml(s.teamleader_subscription_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : ''}
       <button class="sr-menu-item danger" data-sub-delete="${escapeHtml(s.id)}"><i class="ti ti-ban"></i> Deactiveren</button></div></div>`;
-    const actions = cancelled ? '<span class="sr-cellsub">—</span>' : `<div class="sr-actions"><button class="sr-abtn warning" data-sub-postpone="${escapeHtml(s.id)}" data-sub-running="${isRunning(s) ? '1' : '0'}">Uitstellen</button>${menu}</div>`;
+    // "Aanpassen"-knop alleen als het abo nog NIET gefactureerd is
+    // (has_any_invoice=false). Zodra TL een factuur heeft aangemaakt is
+    // bewerken geblokkeerd — historische facturen mogen nooit corrupt
+    // worden door een abo-mutatie. Server-side endpoint doet dezelfde
+    // check als defense-in-depth (409 HAS_INVOICES bij directe POST).
+    const hasInv = !!s.has_any_invoice;
+    const editBtn = cancelled
+      ? ''
+      : (hasInv
+          ? `<button class="sr-abtn" disabled title="Al gefactureerd — wijzig via crediteren + nieuw abonnement" style="opacity:0.55;cursor:not-allowed">Aanpassen</button>`
+          : `<button class="sr-abtn" data-sub-edit="${escapeHtml(s.id)}" title="Aanpassen (nog geen factuur)">Aanpassen</button>`);
+    const actions = cancelled ? '<span class="sr-cellsub">—</span>' : `<div class="sr-actions">${editBtn}<button class="sr-abtn warning" data-sub-postpone="${escapeHtml(s.id)}" data-sub-running="${isRunning(s) ? '1' : '0'}">Uitstellen</button>${menu}</div>`;
     const ppBadge = s.postponed_months ? ` <span class="sr-tag warning" title="uitgesteld">+${s.postponed_months}m${isExtended(s) ? ' verlengd' : ''}</span>` : '';
     const perTerm = (Number(s.term_count) || 1) === 1 ? 'eenmalig' : 'incl. /termijn';
     return `<tr>
@@ -2291,6 +2302,7 @@ function bindKoAbo() {
   wrap.querySelectorAll('[data-sub-toggle]').forEach(btn => btn.addEventListener('click', () => { const row = document.getElementById('sub-detail-' + btn.dataset.subToggle); if (!row) return; row.hidden = !row.hidden; btn.querySelector('i').className = row.hidden ? 'ti ti-chevron-right' : 'ti ti-chevron-down'; }));
   wrap.querySelectorAll('[data-sub-postpone]').forEach(btn => btn.addEventListener('click', () => openPostponeModal(btn.dataset.subPostpone, btn.dataset.subRunning === '1')));
   wrap.querySelectorAll('[data-sub-delete]').forEach(btn => btn.addEventListener('click', () => deleteSubscription(btn.dataset.subDelete)));
+  wrap.querySelectorAll('[data-sub-edit]').forEach(btn => btn.addEventListener('click', () => openSubscriptionEditModal(btn.dataset.subEdit)));
   const pab = document.getElementById('postpone-all-btn');
   if (pab) pab.addEventListener('click', () => openPostponeAllModal(detailState.customerId, koSubs.filter(s => s.status === 'active').length));
 }
@@ -2372,6 +2384,127 @@ function openPostponeAllModal(customerId, count) {
       window.AgentShared?.showToast(`${d.ok} van ${d.total} abo's uitgesteld${d.failed ? ` (${d.failed} mislukt)` : ''}`, d.failed ? 'error' : 'success');
       renderAbonnementenTab();
     } catch (e) { document.getElementById('postpone-err').textContent = e.message; okBtn.disabled = false; okBtn.textContent = 'Alle uitstellen'; }
+  });
+}
+
+// Abonnement bewerken — ALLEEN als er nog geen factuur voor is (server-side
+// hard block via 409 HAS_INVOICES; UI verbergt/disableert de knop ook).
+// Bedragvelden worden READ-ONLY getoond als er een TL-koppeling is — TL v2
+// heeft geen bewezen amount-update endpoint, dus wijziging zou CRM/TL laten
+// drift (cron-sync spiegelt TL-bedrag terug over onze wijziging heen).
+function openSubscriptionEditModal(subId) {
+  const sub = (koSubs || []).find((s) => s?.id === subId);
+  if (!sub) { window.AgentShared?.showToast?.('Abo niet gevonden', 'error'); return; }
+  if (sub.has_any_invoice) {
+    window.AgentShared?.showToast?.('Al gefactureerd — bewerken niet toegestaan. Gebruik crediteren + nieuw abo.', 'error');
+    return;
+  }
+  document.getElementById('sub-edit-overlay')?.remove();
+  const hasTl = !!sub.teamleader_subscription_id;
+  const amountReadonly = hasTl;   // bedrag naar TL kan niet, dus disabled bij TL-koppeling
+  const amountHint = hasTl
+    ? '<span style="color:#92400e">Bedrag readonly — TL heeft geen amount-update endpoint. Voor bedrag-wijziging: deactiveer + maak nieuw abo via de wizard.</span>'
+    : '<span style="color:var(--text-dim,#666)">Nog geen TL-koppeling; bedrag mag lokaal.</span>';
+
+  const ov = document.createElement('div');
+  ov.id = 'sub-edit-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999';
+  ov.innerHTML = `<div style="background:var(--bg-elev,#fff);border:1px solid var(--border,#ddd);border-radius:12px;padding:22px;max-width:520px;width:92%;max-height:88vh;overflow:auto">
+    <h3 style="margin:0 0 4px;font-size:16px">Abonnement aanpassen</h3>
+    <p style="font-size:12px;color:var(--text-dim,#666);margin:0 0 12px">${escapeHtml(sub.description || '—')} · nog geen factuur (${hasTl ? 'TL-gekoppeld' : 'lokaal-only'})</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <label style="font-size:11.5px;font-weight:600;color:var(--text-dim,#666);grid-column:1/-1">Omschrijving
+        <input id="se-description" type="text" maxlength="500" value="${escapeHtml(sub.description || '')}" style="width:100%;padding:8px 10px;border:1px solid var(--border,#ddd);border-radius:6px;margin-top:4px;background:var(--bg,#fff);color:var(--text,#000);box-sizing:border-box" /></label>
+      <label style="font-size:11.5px;font-weight:600;color:var(--text-dim,#666)">Bedrag per termijn (excl.)
+        <input id="se-amount" type="number" step="0.01" min="0" value="${Number(sub.amount) || 0}" ${amountReadonly ? 'disabled' : ''} style="width:100%;padding:8px 10px;border:1px solid var(--border,#ddd);border-radius:6px;margin-top:4px;background:${amountReadonly ? 'var(--bg-elev-2,#f5f5f5)' : 'var(--bg,#fff)'};color:var(--text,#000);box-sizing:border-box" /></label>
+      <label style="font-size:11.5px;font-weight:600;color:var(--text-dim,#666)">BTW %
+        <input id="se-vat" type="number" step="1" min="0" max="100" value="${Number(sub.vat_percentage) || 21}" ${amountReadonly ? 'disabled' : ''} style="width:100%;padding:8px 10px;border:1px solid var(--border,#ddd);border-radius:6px;margin-top:4px;background:${amountReadonly ? 'var(--bg-elev-2,#f5f5f5)' : 'var(--bg,#fff)'};color:var(--text,#000);box-sizing:border-box" /></label>
+      <label style="font-size:11.5px;font-weight:600;color:var(--text-dim,#666)">Termijnen
+        <input id="se-terms" type="number" step="1" min="1" max="240" value="${Number(sub.term_count) || 1}" ${amountReadonly ? 'disabled' : ''} style="width:100%;padding:8px 10px;border:1px solid var(--border,#ddd);border-radius:6px;margin-top:4px;background:${amountReadonly ? 'var(--bg-elev-2,#f5f5f5)' : 'var(--bg,#fff)'};color:var(--text,#000);box-sizing:border-box" /></label>
+      <label style="font-size:11.5px;font-weight:600;color:var(--text-dim,#666)">Startdatum
+        <input id="se-start" type="date" value="${sub.start_date || ''}" style="width:100%;padding:8px 10px;border:1px solid var(--border,#ddd);border-radius:6px;margin-top:4px;background:var(--bg,#fff);color:var(--text,#000);box-sizing:border-box" /></label>
+      <label style="font-size:11.5px;font-weight:600;color:var(--text-dim,#666)">Einddatum
+        <input id="se-end" type="date" value="${sub.end_date || ''}" style="width:100%;padding:8px 10px;border:1px solid var(--border,#ddd);border-radius:6px;margin-top:4px;background:var(--bg,#fff);color:var(--text,#000);box-sizing:border-box" /></label>
+    </div>
+    <p style="font-size:11.5px;color:var(--text-dim,#666);margin:10px 0 0">${amountHint}</p>
+    <div id="se-err" style="color:#dc2626;font-size:12px;margin-top:8px;display:none"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+      <button class="btn btn-sm btn-ghost" id="se-cancel">Annuleren</button>
+      <button class="btn btn-sm" id="se-save" style="background:#0ea5e9;color:#fff">Bevestig wijzigingen…</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+  document.getElementById('se-cancel').addEventListener('click', close);
+
+  document.getElementById('se-save').addEventListener('click', async () => {
+    const err = document.getElementById('se-err');
+    const patch = {};
+    const val = (id) => document.getElementById(id)?.value;
+    const desc = (val('se-description') || '').trim();
+    if (desc !== (sub.description || '').trim()) patch.description = desc;
+    if (!amountReadonly) {
+      const a = Number(val('se-amount'));
+      const v = Number(val('se-vat'));
+      const t = Number(val('se-terms'));
+      if (Number.isFinite(a) && a !== Number(sub.amount)) patch.amount = a;
+      if (Number.isInteger(v) && v !== Number(sub.vat_percentage)) patch.vat_percentage = v;
+      if (Number.isInteger(t) && t !== Number(sub.term_count)) patch.term_count = t;
+    }
+    const sd = val('se-start');
+    const ed = val('se-end');
+    if (sd !== (sub.start_date || '')) patch.start_date = sd || null;
+    if (ed !== (sub.end_date || '')) patch.end_date = ed || null;
+
+    if (Object.keys(patch).length === 0) {
+      err.style.display = ''; err.textContent = 'Niets gewijzigd.';
+      return;
+    }
+
+    // Confirm-scherm: diff oud→nieuw + TL-sync-notitie.
+    const diffRows = Object.entries(patch).map(([k, newV]) => {
+      const oldV = sub[k];
+      return `<tr><td style="padding:3px 8px;color:var(--text-dim,#666)">${escapeHtml(k)}</td><td style="padding:3px 8px">${escapeHtml(String(oldV ?? '—'))}</td><td style="padding:3px 8px;color:#0ea5e9">→ ${escapeHtml(String(newV ?? '—'))}</td></tr>`;
+    }).join('');
+    const tlNote = hasTl
+      ? (Object.keys(patch).some((k) => k === 'start_date' || k === 'end_date')
+          ? '<p style="color:#065f46;font-size:12px;margin:8px 0 0">✓ Start/einddatum wordt naar TeamLeader gepusht.</p>'
+          : '<p style="color:#78350f;font-size:12px;margin:8px 0 0">⚠ Geen TL-sync voor deze velden.</p>')
+      : '<p style="color:var(--text-dim,#666);font-size:12px;margin:8px 0 0">Lokaal-only (geen TL-koppeling).</p>';
+    const confirmMsg = `Bevestig:\n\n${Object.entries(patch).map(([k, v]) => `${k}: ${sub[k] ?? '—'} → ${v ?? '—'}`).join('\n')}\n\n${hasTl && (patch.start_date || patch.end_date) ? 'Wordt naar TL gepusht.' : ''}`;
+    if (!window.confirm(confirmMsg)) return;
+
+    const saveBtn = document.getElementById('se-save');
+    saveBtn.disabled = true; saveBtn.textContent = 'Bezig…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/sales-subscription-update', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subscription_id: subId, patch }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 409 && d?.code === 'HAS_INVOICES') {
+        err.style.display = ''; err.textContent = 'Abo is inmiddels gefactureerd — bewerken geblokkeerd. Verniewd de lijst.';
+        setTimeout(() => renderAbonnementenTab(), 800);
+        return;
+      }
+      if (r.status === 502 && d?.code === 'TL_SYNC_FAIL') {
+        err.style.display = ''; err.textContent = 'TL-sync faalde: ' + (d.error || 'onbekend') + '. Wijziging NIET opgeslagen.';
+        saveBtn.disabled = false; saveBtn.textContent = 'Bevestig wijzigingen…';
+        return;
+      }
+      if (!r.ok || !d?.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+      if (d.warning) {
+        window.AgentShared?.showToast?.(d.warning, 'warning');
+      } else {
+        window.AgentShared?.showToast?.('Abo bijgewerkt' + (d.tl?.pushed ? ' + TL gesynced' : ''), 'success');
+      }
+      close();
+      renderAbonnementenTab();
+    } catch (e) {
+      err.style.display = ''; err.textContent = 'Fout: ' + (e?.message || 'onbekend');
+      saveBtn.disabled = false; saveBtn.textContent = 'Bevestig wijzigingen…';
+    }
   });
 }
 
