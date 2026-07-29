@@ -33,9 +33,13 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Acties-tab v1: 2 nieuwe outcomes (disputed / info_sent). CHECK-constraint
+// wordt uitgebreid in migratie 2026-07-29-dunning-call-log-add-outcomes.sql —
+// die MOET vóór deze code-deploy draaien anders faalt de insert met 23514.
 const VALID_OUTCOMES = new Set([
   'no_answer','voicemail','callback','payment_promise','payment_plan',
   'refused','wrong_number','paid_during_call',
+  'disputed','info_sent',
 ]);
 const VALID_LINES = new Set(['nl','be']);
 

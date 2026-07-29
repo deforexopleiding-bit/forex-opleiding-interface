@@ -11,7 +11,21 @@
 import { supabaseAdmin } from '../supabase.js';
 
 const AUTO_SETTINGS_KEY = 'dunning_pipeline_auto';
+// TERMINAL = "definitief afgerond" (opgelost/afschrijven). Blijft bestaan
+// voor de setStage() auto-lock (auto-callers mogen een terminal-klant NIET
+// per ongeluk uit terminal weghalen) en voor semantische UI-labels.
 const TERMINAL_STAGES = new Set(['opgelost', 'afschrijven']);
+// SKIP = bredere set die de dunning-engine-detectie moet OVERSLAAN:
+// terminal + 'dispuut' (klant betwist factuur, geparkeerd) + 'bewind'
+// (schuldbewind/curator loopt). Alle 4 zijn stages waar de engine geen
+// nieuwe run mag starten TENZIJ er een verse factuur bij komt met een
+// issue_date ná stage_changed_at (zie shouldSkipDueToPipelineStage — die
+// dekt de "nieuwe deal na afsluiting"-edge zodat mensen niet permanent
+// worden uitgesloten). dispuut/bewind zijn dus GEKOPPELD aan de engine-
+// skip zonder is_terminal=true te hoeven zijn — verschil met TERMINAL:
+// dispuut/bewind kunnen door de gebruiker weer teruggezet worden naar
+// 'nieuw' zonder terminal-lock.
+const SKIP_STAGES = new Set(['opgelost', 'afschrijven', 'dispuut', 'bewind']);
 
 let _autoCache = { at: 0, value: null };
 const AUTO_CACHE_TTL_MS = 30_000; // 30s — een kort tijdvenster verlaagt query-druk zonder settings-UI vertraging
@@ -180,23 +194,27 @@ export async function setStage(customerId, toSlug, reason, byUser, opts) {
 }
 
 export const PIPELINE_TERMINAL_STAGES = TERMINAL_STAGES;
+export const PIPELINE_SKIP_STAGES     = SKIP_STAGES;
 
 /**
- * FIX 4 — Pure guard-helper voor de engine-detectie: mag een klant
- * overgeslagen worden omdat 'ie handmatig is afgesloten (pipeline-stage
- * terminal)?
+ * FIX 4 + acties-tab v1 — Pure guard-helper voor de engine-detectie:
+ * mag een klant overgeslagen worden omdat 'ie in een "flow-parkeer"-
+ * stage staat (opgelost/afschrijven = definitief afgesloten, of
+ * dispuut/bewind = geparkeerd, geen aanmaanpogingen zolang de situatie
+ * loopt)?
  *
- * KRITIEKE EDGE: een klant die op 'opgelost' staat maar een NIEUWE
- * factuur krijgt (nieuwe deal, latere issue_date) MAG NIET permanent
- * uitgesloten blijven — anders sluiten we mensen levenslang uit de
- * dunning-flow. Regel:
- *   - Niet-terminale stage → NIET skippen (huidige gedrag intact).
- *   - Terminale stage + alle open facturen dateren van vóór of op
- *     stage_changed_at → skippen (klant is echt afgesloten).
- *   - Terminale stage + minstens 1 factuur met issue_date NA
- *     stage_changed_at → NIET skippen (nieuwe factuur = nieuwe case,
- *     engine mag weer draaien).
- *   - Terminale stage zonder stage_changed_at, of geen invoice-datums:
+ * KRITIEKE EDGE: een klant die in EEN VAN DIE 4 STAGES staat maar een
+ * NIEUWE factuur krijgt (nieuwe deal, latere issue_date) MAG NIET
+ * permanent uitgesloten blijven — anders sluiten we mensen levenslang
+ * uit de dunning-flow. Regel:
+ *   - Niet-skip stage (nieuw/aangemaand/in_gesprek/regeling/brief_verstuurd/
+ *     incasso) → NIET skippen (huidige gedrag intact).
+ *   - Skip-stage + alle open facturen dateren van vóór of op
+ *     stage_changed_at → skippen (klant is echt geparkeerd/afgesloten).
+ *   - Skip-stage + minstens 1 factuur met issue_date NA stage_changed_at
+ *     → NIET skippen (nieuwe factuur = nieuwe case, engine mag weer
+ *     draaien).
+ *   - Skip-stage zonder stage_changed_at, of geen invoice-datums:
  *     conservatief SKIP (defense-in-depth — een handmatig gemarkeerde
  *     klant sluit zichzelf niet per ongeluk open door datum-hiaten).
  *
@@ -204,6 +222,12 @@ export const PIPELINE_TERMINAL_STAGES = TERMINAL_STAGES;
  * timezone-drift niet meetelt. issue_date is de canonieke facuurdatum
  * (matches invoices-schema; niet due_date, want dat kan willekeurig
  * ver in de toekomst liggen bij TL-imports).
+ *
+ * NAAMKEUZE: functie heet nog `shouldSkipDueToTerminalStage` voor
+ * backward-compat met bestaande call-sites (dunning-engine.js). Nieuwe
+ * semantiek dekt óók dispuut/bewind — checkt tegen SKIP_STAGES i.p.v.
+ * TERMINAL_STAGES. Alias `shouldSkipDueToPipelineStage` als duidelijker
+ * naam voor nieuwe callers.
  *
  * Pure functie — geen DB, geen I/O. Testbaar.
  *
@@ -214,7 +238,7 @@ export const PIPELINE_TERMINAL_STAGES = TERMINAL_STAGES;
  * @returns {boolean}  true = engine moet klant overslaan
  */
 export function shouldSkipDueToTerminalStage({ stageSlug, stageChangedAt, openInvoices }) {
-  if (!TERMINAL_STAGES.has(stageSlug)) return false;
+  if (!SKIP_STAGES.has(stageSlug)) return false;
   if (!stageChangedAt) return true;                   // conservatief
   const stageChangedDate = String(stageChangedAt).slice(0, 10);
   const invs = Array.isArray(openInvoices) ? openInvoices : [];
@@ -225,7 +249,10 @@ export function shouldSkipDueToTerminalStage({ stageSlug, stageChangedAt, openIn
     if (!newestIssueIso || iso > newestIssueIso) newestIssueIso = iso;
   }
   if (!newestIssueIso) return true;                   // conservatief
-  // Nieuwste factuur ná stage-afsluiting → klant heeft NIEUWE cases,
+  // Nieuwste factuur ná stage-parkering → klant heeft NIEUWE cases,
   // engine mag draaien. Op-of-vóór → alles is "oud", skippen.
   return newestIssueIso <= stageChangedDate;
 }
+
+// Duidelijker naam voor nieuwe callers. Zelfde functie.
+export const shouldSkipDueToPipelineStage = shouldSkipDueToTerminalStage;

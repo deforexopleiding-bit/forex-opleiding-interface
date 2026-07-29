@@ -7346,17 +7346,24 @@
   }
   function _acWbxCategoryFor(actionType) {
     const t = String(actionType || '');
-    if (t === 'MANUAL_VERIFY_PAYMENT') return 'verify';
+    if (t === 'MANUAL_VERIFY_PAYMENT')  return 'verify';
     if (t === 'MANUAL_ESCALATION')      return 'esc';
+    // Acties-tab v1: MANUAL_FOLLOWUP + MANUAL_CONFIRM_PROMISE krijgen
+    // eigen 'call'-bucket (📞) i.p.v. de 'plan'-kleur — visueel duidelijk
+    // onderscheid tussen "actie waar de mens iets doet" vs "regeling die
+    // door TL heen moet".
+    if (t === 'MANUAL_FOLLOWUP')        return 'call';
+    if (t === 'MANUAL_CONFIRM_PROMISE') return 'call';
     // TL_INVOICE_UPDATE_DUE / TL_INVOICE_SPLIT / TL_SUBSCRIPTION_PAUSE /
-    // TL_SUBSCRIPTION_STOP / TL_INVOICE_WRITEOFF / MANUAL_PROPOSE_* /
-    // MANUAL_FOLLOWUP → regelingen-bucket.
+    // TL_SUBSCRIPTION_STOP / TL_INVOICE_WRITEOFF / MANUAL_PROPOSE_ARRANGEMENT
+    // → regelingen-bucket.
     return 'plan';
   }
   const _AC_WBX_TYPE_META = {
     verify: { ic: '💶', cls: 'wbx-verify', label: 'Betaalcontrole' },
     plan  : { ic: '📅', cls: 'wbx-plan',   label: 'Regeling'      },
     esc   : { ic: '⚠️', cls: 'wbx-esc',    label: 'Escalatie'     },
+    call  : { ic: '📞', cls: 'wbx-plan',   label: 'Actie'         }, // hergebruikt 'plan' CSS-class voor tint; icon+label onderscheiden
   };
 
   // Action-specifieke meta (icon + label + kleur-cls). Verfijnt de 3 buckets
@@ -7614,16 +7621,51 @@
     const belKnop = (isBelTaak && it?.customer?.id && _acWbxCanBellen())
       ? `<button class="wbx-btn wbx-sm" type="button" data-ac-bellen="${esc(it.id)}" data-ac-bellen-cid="${esc(it.customer.id)}" title="Open dossier + softphone">📞 Bellen</button>`
       : '';
+    // Acties-tab v1 — per-type knop-mapping. TL_* houdt echte
+    // Goedkeuren/Afwijzen (approve→execute-flow). MANUAL_* krijgt
+    // semantisch juiste knoppen — geen misleidend "Goedkeuren" op
+    // taken zonder approval-stap.
     let right;
     if (_acWbxState.tab === 'open') {
-      const primaryLbl = cat === 'esc' ? 'Oppakken' : 'Goedkeuren';
+      const at = String(it.action_type || '');
+      const isTL = at.startsWith('TL_');
+      const btns = [belKnop];
+      if (isTL) {
+        // Echte 2-stap TL-arrangements: Goedkeuren + Afwijzen blijven — die
+        // hebben een echte approve→executor-flow. Niet aankomen.
+        btns.push(`<button class="wbx-btn wbx-primary wbx-sm" type="button" data-ac-approve="${esc(it.id)}">Goedkeuren</button>`);
+        btns.push(`<button class="wbx-btn wbx-sm wbx-danger" type="button" data-ac-reject="${esc(it.id)}">Afwijzen</button>`);
+      } else if (at === 'MANUAL_VERIFY_PAYMENT') {
+        // Betaalcontrole: klopt of klopt niet. Beide leiden via
+        // mark-executed naar EXECUTED; outcome bepaalt de semantiek.
+        btns.push(`<button class="wbx-btn wbx-primary wbx-sm" type="button" data-ac-approve="${esc(it.id)}">Klopt (betaald)</button>`);
+        btns.push(`<button class="wbx-btn wbx-sm wbx-danger" type="button" data-ac-reject="${esc(it.id)}">Klopt niet</button>`);
+      } else if (at === 'MANUAL_CONFIRM_PROMISE') {
+        // Betaal-toezegging: bevestigen (klant kwam belofte na) of
+        // niet nagekomen (breach — reject stopt de wachtstand).
+        btns.push(`<button class="wbx-btn wbx-primary wbx-sm" type="button" data-ac-approve="${esc(it.id)}">Bevestigen</button>`);
+        btns.push(`<button class="wbx-btn wbx-sm wbx-danger" type="button" data-ac-reject="${esc(it.id)}">Niet nagekomen</button>`);
+      } else if (at === 'MANUAL_ESCALATION') {
+        // Escalation is opgepakt/afgehandeld; "Afgehandeld" = mark-
+        // executed met resolved-outcome (detail-modal vraagt om reden).
+        btns.push(`<button class="wbx-btn wbx-primary wbx-sm" type="button" data-ac-approve="${esc(it.id)}">Oppakken</button>`);
+        btns.push(`<button class="wbx-btn wbx-sm wbx-danger" type="button" data-ac-reject="${esc(it.id)}">Afgehandeld</button>`);
+      } else if (at === 'MANUAL_FOLLOWUP') {
+        // Belmoment / brief: bellen (via belknop) is primair. Verdere
+        // acties: "Later" (schuif scheduled_for; opent detail-modal) en
+        // "Overslaan" (reject — engine tikt door dankzij NON_BLOCKING).
+        btns.push(`<button class="wbx-btn wbx-sm" type="button" data-ac-approve="${esc(it.id)}">Afgehandeld</button>`);
+        btns.push(`<button class="wbx-btn wbx-sm wbx-danger" type="button" data-ac-reject="${esc(it.id)}">Overslaan</button>`);
+      } else {
+        // Onbekend type (MANUAL_PROPOSE_ARRANGEMENT en toekomstige):
+        // val terug op oude Goedkeuren/Afwijzen zodat we niet op een
+        // dood scherm eindigen als iemand alsnog dit type inserts.
+        btns.push(`<button class="wbx-btn wbx-primary wbx-sm" type="button" data-ac-approve="${esc(it.id)}">Goedkeuren</button>`);
+        btns.push(`<button class="wbx-btn wbx-sm wbx-danger" type="button" data-ac-reject="${esc(it.id)}">Afwijzen</button>`);
+      }
       right = `
         <span class="wbx-aage">${esc(age)}</span>
-        <div class="wbx-abtns">
-          ${belKnop}
-          <button class="wbx-btn wbx-primary wbx-sm" type="button" data-ac-approve="${esc(it.id)}">${primaryLbl}</button>
-          <button class="wbx-btn wbx-sm wbx-danger" type="button" data-ac-reject="${esc(it.id)}">Afwijzen</button>
-        </div>
+        <div class="wbx-abtns">${btns.filter(Boolean).join('')}</div>
       `;
     } else if (_acWbxState.tab === 'done') {
       right = `<span class="wbx-tag wbx-ok">Afgehandeld</span>`;
@@ -22980,6 +23022,12 @@
         <button class="wbx-btn"              type="button" data-case-action="reminder">Herinnering sturen</button>
         <button class="wbx-btn"              type="button" data-case-action="ask_joost" ${_caseState.joostBusy ? 'disabled' : ''}>Vraag Joost</button>
         ${_caseCanCloseDossier() ? `<button class="wbx-btn"              type="button" data-case-action="close_dossier" title="Markeer klant als afgehandeld/betaald en stop de dunning-flow">✓ Sluit dossier</button>` : ''}
+        ${_caseCanCloseDossier() ? (
+          _caseState.detail?.pipeline?.stage_slug === 'dispuut'
+            ? `<button class="wbx-btn"              type="button" data-case-action="resolve_dispute" title="Geschil is opgelost — hervat aanmanen of sluit dossier">⚖ Geschil opgelost</button>`
+            : `<button class="wbx-btn"              type="button" data-case-action="mark_disputed" title="Klant betwist factuur — parkeer, geen aanmaningen tot opgelost">⚖ Geschil</button>`
+        ) : ''}
+        ${_caseCanCloseDossier() ? `<button class="wbx-btn"              type="button" data-case-action="mark_bewind" title="Klant in schuldbewind/faillissement — leg curator vast">🛡 Bewind</button>` : ''}
         <button class="wbx-btn wbx-danger"   type="button" data-case-action="to_incasso">Naar incasso</button>
       </div>
     `;
@@ -23189,9 +23237,19 @@
     { key: 'callback',         label: 'Terugbelafspraak',         tint: '#64748b' },
     { key: 'payment_promise',  label: 'Toezegging tot betaling',  tint: '#10b981' },
     { key: 'payment_plan',     label: 'Betalingsregeling',        tint: '#8b5cf6' },
-    { key: 'refused',          label: 'Weigert / betwist',        tint: '#dc2626' },
+    { key: 'refused',          label: 'Weigert te betalen',       tint: '#dc2626' },
+    // Acties-tab v1: expliciete 'disputed' naast 'refused'. Weigert =
+    // klant kan wel maar wil niet (escalatie naar incasso). Disputed =
+    // klant zegt factuur is niet terecht (park als geschil, geen incasso
+    // tot opgelost). Save-handler routet disputed → mark-disputed-modal.
+    { key: 'disputed',         label: 'Betwist factuur',          tint: '#f59e0b' },
     { key: 'wrong_number',     label: 'Verkeerd nummer',          tint: '#dc2626' },
     { key: 'paid_during_call', label: 'Betaald tijdens gesprek',  tint: '#10b981' },
+    // Acties-tab v1: 'info_sent' — klant vroeg om kopie factuur/info.
+    // Save-handler triggert een confirm om finance-invoice-send te doen +
+    // maakt automatisch een MANUAL_FOLLOWUP over 3 dagen (analoog aan
+    // de callback-self-loop maar met vaste offset).
+    { key: 'info_sent',        label: 'Info toegestuurd',         tint: '#10b981' },
   ];
 
   function _callOutcomeMeta(key) {
@@ -23840,6 +23898,347 @@
     });
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // Acties-tab v1 — 3 modals: mark-disputed, mark-bewind, resolve-dispute.
+  // Zelfde scrim/modal-styling als de close-dossier-modal voor visuele
+  // consistentie. Alle 3 vereisen RBAC `finance.dunning.execute`
+  // (fail-secure via _caseCanCloseDossier — hergebruikt want zelfde key).
+  // ────────────────────────────────────────────────────────────────
+
+  function _caseOpenMarkDisputedModal() {
+    if (!_caseCanCloseDossier()) {
+      window.AgentShared?.showToast?.('Geen rechten (finance.dunning.execute)', 'error');
+      return;
+    }
+    document.getElementById('wbxMarkDisputedModal')?.remove();
+    const cust = _caseState.detail?.customer || null;
+    const cid  = cust?.id || _caseState.cid;
+    if (!cid) return;
+    const custName = cust?.display_name || _pipeCustomerDisplayName?.(cust) || '(klant)';
+    const wrap = document.createElement('div');
+    wrap.id = 'wbxMarkDisputedModal';
+    wrap.className = 'wbx wbx-call-outcome-scrim';
+    wrap.innerHTML = `
+      <div class="wbx-call-outcome-modal">
+        <div class="wbx-call-outcome-head">
+          <div>
+            <div style="font-weight:600">Markeer als geschil</div>
+            <div style="font-size:12px;color:var(--wbx-muted);margin-top:2px">${esc(custName)}</div>
+          </div>
+          <button class="wbx-inc-close" type="button" data-md-cancel>✕</button>
+        </div>
+        <div class="wbx-call-outcome-body">
+          <div style="padding:10px 12px;border:1px solid #f59e0b;background:#fef3c7;color:#78350f;border-radius:8px;font-size:13px;margin-bottom:12px"><strong>Let op:</strong> aanmaningen STOPPEN zolang het geschil loopt. Open pending-taken worden afgewezen. Deze markering is OMKEERBAAR — via "Geschil opgelost" kun je later hervatten of definitief sluiten.</div>
+          <label style="display:block;font-size:12px;color:var(--wbx-muted)">Reden <span style="color:var(--wbx-s-inc-tx)">*</span>
+            <textarea id="wbxMdReason" rows="3" placeholder="Bijv. klant betwist bedrag / factuurregel / dienst niet geleverd" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit;min-height:70px;resize:vertical"></textarea>
+            <span style="display:block;font-size:11px;color:var(--wbx-muted);margin-top:3px">Min. 5 tekens. Verplicht — verschijnt in audit-log en dunning-timeline.</span>
+          </label>
+          <div id="wbxMdErr" style="display:none;margin-top:8px;color:var(--wbx-s-inc-tx);font-size:12.5px"></div>
+        </div>
+        <div class="wbx-call-outcome-foot">
+          <button class="wbx-btn" type="button" data-md-cancel>Annuleer</button>
+          <button class="wbx-btn wbx-primary" type="button" data-md-save>Markeer geschil</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+    const err = wrap.querySelector('#wbxMdErr');
+    const reasonEl = wrap.querySelector('#wbxMdReason');
+    const saveBtn = wrap.querySelector('[data-md-save]');
+    const close = () => wrap.remove();
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+    wrap.querySelectorAll('[data-md-cancel]').forEach((b) => b.addEventListener('click', close));
+    saveBtn.addEventListener('click', async () => {
+      const reason = (reasonEl?.value || '').trim();
+      if (reason.length < 5) {
+        if (err) { err.style.display = ''; err.textContent = 'Reden vereist (min. 5 tekens).'; }
+        reasonEl?.focus();
+        return;
+      }
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Bezig…';
+      try {
+        const r = await window.AgentShared.apiFetch('/api/finance-dunning-mark-disputed', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ customer_id: cid, reason }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d?.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+        const warns = Array.isArray(d.warnings) ? d.warnings.filter(Boolean) : [];
+        if (warns.length > 0) {
+          window.AgentShared?.showToast?.('Gemarkeerd als geschil met waarschuwingen — zie console', 'warning');
+          console.warn('[mark-disputed warnings]', warns);
+        } else {
+          window.AgentShared?.showToast?.(`Gemarkeerd als geschil (${d.rejected_actions} open taak(en) afgewezen)`, 'success');
+        }
+        close();
+        closeCaseSheet();
+        try { loadDunPipeline(); } catch (_) {}
+        try { _acWbxLoad(); } catch (_) {}
+      } catch (e) {
+        if (err) { err.style.display = ''; err.textContent = 'Fout: ' + (e?.message || 'onbekend'); }
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Markeer geschil';
+      }
+    });
+  }
+
+  function _caseOpenMarkBewindModal() {
+    if (!_caseCanCloseDossier()) {
+      window.AgentShared?.showToast?.('Geen rechten (finance.dunning.execute)', 'error');
+      return;
+    }
+    document.getElementById('wbxMarkBewindModal')?.remove();
+    const cust = _caseState.detail?.customer || null;
+    const cid  = cust?.id || _caseState.cid;
+    if (!cid) return;
+    const custName = cust?.display_name || _pipeCustomerDisplayName?.(cust) || '(klant)';
+    const wrap = document.createElement('div');
+    wrap.id = 'wbxMarkBewindModal';
+    wrap.className = 'wbx wbx-call-outcome-scrim';
+    wrap.innerHTML = `
+      <div class="wbx-call-outcome-modal" style="max-width:520px">
+        <div class="wbx-call-outcome-head">
+          <div>
+            <div style="font-weight:600">Markeer bewind / faillissement</div>
+            <div style="font-size:12px;color:var(--wbx-muted);margin-top:2px">${esc(custName)}</div>
+          </div>
+          <button class="wbx-inc-close" type="button" data-mb-cancel>✕</button>
+        </div>
+        <div class="wbx-call-outcome-body">
+          <div style="padding:10px 12px;border:1px solid #7c3aed;background:#faf5ff;color:#4c1d95;border-radius:8px;font-size:13px;margin-bottom:12px"><strong>Let op:</strong> aanmaningen naar de KLANT stoppen. Contact loopt via de bewindvoerder/curator. Open pending-taken worden afgewezen.</div>
+          <label style="display:block;font-size:12px;color:var(--wbx-muted);margin-bottom:10px">Reden <span style="color:var(--wbx-s-inc-tx)">*</span>
+            <textarea id="wbxMbReason" rows="2" placeholder="Bijv. schuldbewind aangevraagd, WSNP toegewezen, faillissement uitgesproken" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit;min-height:56px;resize:vertical"></textarea>
+          </label>
+          <div style="border-top:1px solid var(--wbx-border);padding-top:10px;margin-top:6px">
+            <div style="font-size:12px;font-weight:600;color:var(--ds-text,#06181f);margin-bottom:6px">Curator / bewindvoerder</div>
+            <label style="display:block;font-size:12px;color:var(--wbx-muted)">Naam <span style="color:var(--wbx-s-inc-tx)">*</span>
+              <input id="wbxMbName" type="text" maxlength="200" placeholder="Naam of kantoor" style="width:100%;box-sizing:border-box;margin-top:2px;padding:6px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit"/>
+            </label>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+              <label style="display:block;font-size:12px;color:var(--wbx-muted)">E-mail
+                <input id="wbxMbEmail" type="email" maxlength="200" placeholder="contact@…" style="width:100%;box-sizing:border-box;margin-top:2px;padding:6px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit"/>
+              </label>
+              <label style="display:block;font-size:12px;color:var(--wbx-muted)">Telefoon
+                <input id="wbxMbPhone" type="tel" maxlength="60" placeholder="+31…" style="width:100%;box-sizing:border-box;margin-top:2px;padding:6px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit"/>
+              </label>
+            </div>
+            <label style="display:block;font-size:12px;color:var(--wbx-muted);margin-top:8px">Dossiernummer / referentie
+              <input id="wbxMbRef" type="text" maxlength="200" placeholder="Optioneel" style="width:100%;box-sizing:border-box;margin-top:2px;padding:6px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit"/>
+            </label>
+            <label style="display:block;font-size:12px;color:var(--wbx-muted);margin-top:8px">Notitie
+              <textarea id="wbxMbNote" rows="2" maxlength="500" placeholder="Optioneel — bijv. correspondentie-voorkeur" style="width:100%;box-sizing:border-box;margin-top:2px;padding:6px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit;min-height:40px;resize:vertical"></textarea>
+            </label>
+          </div>
+          <div id="wbxMbErr" style="display:none;margin-top:8px;color:var(--wbx-s-inc-tx);font-size:12.5px"></div>
+        </div>
+        <div class="wbx-call-outcome-foot">
+          <button class="wbx-btn" type="button" data-mb-cancel>Annuleer</button>
+          <button class="wbx-btn wbx-primary" type="button" data-mb-save>Markeer bewind</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+    const err = wrap.querySelector('#wbxMbErr');
+    const saveBtn = wrap.querySelector('[data-mb-save]');
+    const close = () => wrap.remove();
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+    wrap.querySelectorAll('[data-mb-cancel]').forEach((b) => b.addEventListener('click', close));
+    saveBtn.addEventListener('click', async () => {
+      const reason = (wrap.querySelector('#wbxMbReason')?.value || '').trim();
+      const name   = (wrap.querySelector('#wbxMbName')?.value || '').trim();
+      const email  = (wrap.querySelector('#wbxMbEmail')?.value || '').trim();
+      const phone  = (wrap.querySelector('#wbxMbPhone')?.value || '').trim();
+      const ref    = (wrap.querySelector('#wbxMbRef')?.value || '').trim();
+      const note   = (wrap.querySelector('#wbxMbNote')?.value || '').trim();
+      if (reason.length < 5) {
+        if (err) { err.style.display = ''; err.textContent = 'Reden vereist (min. 5 tekens).'; }
+        return;
+      }
+      if (name.length < 2) {
+        if (err) { err.style.display = ''; err.textContent = 'Naam bewindvoerder/curator vereist (min. 2 tekens).'; }
+        return;
+      }
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Bezig…';
+      try {
+        const r = await window.AgentShared.apiFetch('/api/finance-dunning-mark-bewind', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customer_id: cid,
+            reason,
+            curator_contact: { name, email, phone, reference: ref, note },
+          }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d?.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+        const warns = Array.isArray(d.warnings) ? d.warnings.filter(Boolean) : [];
+        if (warns.length > 0) {
+          window.AgentShared?.showToast?.('Gemarkeerd als bewind met waarschuwingen — zie console', 'warning');
+          console.warn('[mark-bewind warnings]', warns);
+        } else {
+          window.AgentShared?.showToast?.(`Gemarkeerd als bewind (${d.rejected_actions} open taak(en) afgewezen)`, 'success');
+        }
+        close();
+        closeCaseSheet();
+        try { loadDunPipeline(); } catch (_) {}
+        try { _acWbxLoad(); } catch (_) {}
+      } catch (e) {
+        if (err) { err.style.display = ''; err.textContent = 'Fout: ' + (e?.message || 'onbekend'); }
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Markeer bewind';
+      }
+    });
+  }
+
+  function _caseOpenResolveDisputeModal() {
+    if (!_caseCanCloseDossier()) {
+      window.AgentShared?.showToast?.('Geen rechten (finance.dunning.execute)', 'error');
+      return;
+    }
+    document.getElementById('wbxResolveDisputeModal')?.remove();
+    const cust = _caseState.detail?.customer || null;
+    const cid  = cust?.id || _caseState.cid;
+    if (!cid) return;
+    const custName = cust?.display_name || _pipeCustomerDisplayName?.(cust) || '(klant)';
+    const wrap = document.createElement('div');
+    wrap.id = 'wbxResolveDisputeModal';
+    wrap.className = 'wbx wbx-call-outcome-scrim';
+    wrap.innerHTML = `
+      <div class="wbx-call-outcome-modal">
+        <div class="wbx-call-outcome-head">
+          <div>
+            <div style="font-weight:600">Geschil opgelost</div>
+            <div style="font-size:12px;color:var(--wbx-muted);margin-top:2px">${esc(custName)}</div>
+          </div>
+          <button class="wbx-inc-close" type="button" data-rd-cancel>✕</button>
+        </div>
+        <div class="wbx-call-outcome-body">
+          <div style="font-size:13px;color:var(--wbx-muted);margin-bottom:10px">Kies wat er nu moet gebeuren:</div>
+          <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid var(--wbx-border);border-radius:8px;margin-bottom:6px;cursor:pointer">
+            <input type="radio" name="wbxRdResolution" value="resume" checked style="margin-top:3px"/>
+            <span><strong>Aanmanen hervatten</strong> — klant had ongelijk, factuur staat, engine pakt de klant weer op (stage → nieuw).</span>
+          </label>
+          <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid var(--wbx-border);border-radius:8px;cursor:pointer">
+            <input type="radio" name="wbxRdResolution" value="close" style="margin-top:3px"/>
+            <span><strong>Dossier sluiten</strong> — klant had gelijk (of factuur gecrediteerd), runs → completed + stage → opgelost.</span>
+          </label>
+          <label style="display:block;font-size:12px;color:var(--wbx-muted);margin-top:12px">Reden <span style="color:var(--wbx-s-inc-tx)">*</span>
+            <textarea id="wbxRdReason" rows="2" placeholder="Bijv. klant akkoord na uitleg / factuur gecrediteerd" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit;min-height:56px;resize:vertical"></textarea>
+          </label>
+          <div id="wbxRdErr" style="display:none;margin-top:8px;color:var(--wbx-s-inc-tx);font-size:12.5px"></div>
+        </div>
+        <div class="wbx-call-outcome-foot">
+          <button class="wbx-btn" type="button" data-rd-cancel>Annuleer</button>
+          <button class="wbx-btn wbx-primary" type="button" data-rd-save>Opslaan</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+    const err = wrap.querySelector('#wbxRdErr');
+    const saveBtn = wrap.querySelector('[data-rd-save]');
+    const close = () => wrap.remove();
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+    wrap.querySelectorAll('[data-rd-cancel]').forEach((b) => b.addEventListener('click', close));
+    saveBtn.addEventListener('click', async () => {
+      const reason = (wrap.querySelector('#wbxRdReason')?.value || '').trim();
+      const resolution = wrap.querySelector('input[name="wbxRdResolution"]:checked')?.value || 'resume';
+      if (reason.length < 5) {
+        if (err) { err.style.display = ''; err.textContent = 'Reden vereist (min. 5 tekens).'; }
+        return;
+      }
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Bezig…';
+      try {
+        const r = await window.AgentShared.apiFetch('/api/finance-dunning-resolve-dispute', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ customer_id: cid, resolution, reason }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d?.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+        const label = resolution === 'resume' ? 'Aanmanen hervat' : 'Dossier gesloten';
+        window.AgentShared?.showToast?.(`${label} (stage → ${d.target_stage})`, 'success');
+        close();
+        closeCaseSheet();
+        try { loadDunPipeline(); } catch (_) {}
+      } catch (e) {
+        if (err) { err.style.display = ''; err.textContent = 'Fout: ' + (e?.message || 'onbekend'); }
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Opslaan';
+      }
+    });
+  }
+
+  // Acties-tab v1 — info_sent vervolg-flow.
+  // Fase 1 (confirm): "Kopie factuur mailen aan klant?" — als ja én er is
+  //   precies 1 open factuur, direct via finance-invoice-send. Bij meerdere
+  //   facturen: laat operator kiezen via window.prompt met factuurnummers.
+  //   Fail-soft: mail-fout blokkeert fase 2 niet.
+  // Fase 2 (altijd): maak een MANUAL_FOLLOWUP over 3 dagen. Herbruikt de
+  //   bestaande callback-self-loop van dunning-call-log-create door een
+  //   nieuwe call-log-insert te doen met outcome='callback' + callback_at
+  //   = now + 3 dagen. Notitie meegegeven ("Info toegestuurd — checken of
+  //   klant contact opneemt / betaalt binnen 3 dagen").
+  async function _caseInfoSentFollowup({ customerId, openInvoices, note }) {
+    if (!customerId) return;
+    // Fase 1 — factuur-mail confirm.
+    const invs = Array.isArray(openInvoices) ? openInvoices.filter((i) => i?.id) : [];
+    const doSend = window.confirm(
+      invs.length > 0
+        ? `Kopie factuur ${invs.length === 1 ? invs[0].invoice_number || '' : '(kies zo)'} mailen naar klant?`
+        : 'Geen open factuur gevonden om te mailen — sla deze stap over.',
+    );
+    if (doSend && invs.length > 0) {
+      let invId = invs[0].id;
+      if (invs.length > 1) {
+        const choices = invs.map((i, idx) => `${idx + 1}. ${i.invoice_number || i.id.slice(0, 8)} (€${(Number(i.amount_total) || 0).toFixed(2)})`).join('\n');
+        const raw = window.prompt('Meerdere open facturen. Typ het nummer (1..' + invs.length + ') van de factuur die je wilt mailen:\n\n' + choices);
+        const idx = Number(raw) - 1;
+        if (Number.isInteger(idx) && idx >= 0 && idx < invs.length) invId = invs[idx].id;
+        else { window.AgentShared?.showToast?.('Geen geldige keuze — mail overgeslagen', 'warning'); invId = null; }
+      }
+      if (invId) {
+        try {
+          const r = await window.AgentShared.apiFetch('/api/finance-invoice-send', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ invoice_id: invId }),
+          });
+          if (r.ok) {
+            window.AgentShared?.showToast?.('Factuur gemaild', 'success');
+          } else {
+            const d = await r.json().catch(() => ({}));
+            window.AgentShared?.showToast?.('Mail-fout: ' + (d?.error || 'HTTP ' + r.status), 'warning');
+          }
+        } catch (e) {
+          window.AgentShared?.showToast?.('Mail-fout: ' + (e?.message || 'onbekend'), 'warning');
+        }
+      }
+    }
+    // Fase 2 — automatische MANUAL_FOLLOWUP over 3 dagen via de bestaande
+    // callback-self-loop in dunning-call-log-create (outcome=callback +
+    // callback_at = now+3d). De vorige call-log-insert (outcome=info_sent)
+    // is al gebeurd door _caseOpenOutcomeModal; deze insert is de
+    // vervolg-taak. Fail-soft.
+    try {
+      const in3d = new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString();
+      const bodyNote = note
+        ? `Auto-followup na info_sent: ${note}`
+        : 'Auto-followup na info_sent — check of klant contact opneemt of betaalt.';
+      const r = await window.AgentShared.apiFetch('/api/dunning-call-log-create', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_id: customerId,
+          outcome:     'callback',
+          note:        bodyNote,
+          callback_at: in3d,
+        }),
+      });
+      if (r.ok) {
+        window.AgentShared?.showToast?.('Vervolg-taak over 3 dagen ingepland', 'success');
+      }
+    } catch (_) { /* fail-soft */ }
+  }
+
   function _caseOpenOutcomeModal(cust, opts) {
     document.getElementById('wbxCallOutcomeModal')?.remove();
     const focusInv = _caseState.detail?.open_invoices?.[0] || null;
@@ -23958,6 +24357,34 @@
           // Klein timeout zodat de outcome-modal netjes weg is voor we de
           // close-modal openen (voorkomt visueel dubbel-scrim).
           setTimeout(() => _caseOpenCloseDossierModal({ presetReason }), 120);
+        }
+        // Acties-tab v1: 'disputed' → mark-disputed modal met preset reason.
+        // De bel-log is opgeslagen (outcome=disputed voor rapportage); de
+        // vervolg-actie (stage=dispuut + pending_actions REJECT + engine-stop)
+        // gebeurt via de dedicated modal die om een geverifieerde reden vraagt.
+        if (chosen === 'disputed') {
+          const note = (wrap.querySelector('#wbxCallOutcomeNote')?.value || '').trim();
+          // presetReason op mark-disputed-modal wordt momenteel niet meegegeven
+          // (die modal heeft geen presetReason-param). We openen 'em kaal en
+          // laten de operator de reden invullen — de bel-log heeft de notitie
+          // al bewaard. Uitbreiding met presetReason kan in een polish-PR.
+          setTimeout(() => _caseOpenMarkDisputedModal(), 120);
+          if (note) console.log('[wbx call disputed note]', note);
+        }
+        // Acties-tab v1: 'info_sent' → confirm om factuurkopie te sturen
+        // en maak automatisch een MANUAL_FOLLOWUP over 3 dagen zodat de
+        // operator niet vergeet om terug te bellen. finance-invoice-send
+        // vereist een invoice-id; als er meerdere open facturen zijn opent
+        // dit een simpele picker via window.prompt (best-effort — een
+        // volledige picker-modal kan in polish-PR). Auto-followup gaat
+        // sowieso door, ook als de operator afziet van de mail.
+        if (chosen === 'info_sent') {
+          const openInvs = _caseState.detail?.open_invoices || [];
+          setTimeout(() => _caseInfoSentFollowup({
+            customerId: cust?.id || _caseState.cid,
+            openInvoices: openInvs,
+            note: (wrap.querySelector('#wbxCallOutcomeNote')?.value || '').trim(),
+          }), 120);
         }
         // Als de belknop vanuit acties-tab is gestart, herlaad die zodat de
         // afgesloten taak direct naar "Afgehandeld" schuift. Detectie via
@@ -24525,6 +24952,26 @@
         // → opgelost + pending_actions → REJECTED). Modal met verplichte
         // reden + soepele betaald-check + confirm bij openstaand bedrag.
         _caseOpenCloseDossierModal();
+        break;
+      }
+      case 'mark_disputed': {
+        // Acties-tab v1 — Klant betwist factuur → stage='dispuut'.
+        // Engine slaat over via PIPELINE_SKIP_STAGES, geen aanmaningen
+        // tot geschil opgelost. Omkeerbaar (resolve_dispute-actie).
+        _caseOpenMarkDisputedModal();
+        break;
+      }
+      case 'resolve_dispute': {
+        // Terug-route uit dispuut: 'resume' → stage='nieuw' (engine pakt
+        // op als er open facturen zijn) OF 'close' → stage='opgelost'.
+        _caseOpenResolveDisputeModal();
+        break;
+      }
+      case 'mark_bewind': {
+        // Acties-tab v1 — Klant in schuldbewind/faillissement/curator.
+        // Vraagt curator_contact-payload (naam verplicht) en zet
+        // stage='bewind' + curator_contact-jsonb op pipeline-rij.
+        _caseOpenMarkBewindModal();
         break;
       }
       case 'noop':
