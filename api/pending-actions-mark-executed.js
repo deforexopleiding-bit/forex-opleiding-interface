@@ -116,15 +116,24 @@ const MANUAL_ESCALATION_OUTCOMES = new Set([
   'ongoing',
 ]);
 
-// MANUAL_FOLLOWUP (FIX 3) outcome-enum — 1:1 met dunning_call_log.outcome
-// CHECK-constraint (migratie 2026-07-14-dunning-call-log.sql). Alle uitkomsten
-// sluiten de taak PENDING -> EXECUTED. Callback-tak maakt in
-// dunning-call-log-create.js automatisch een nieuwe MANUAL_FOLLOWUP-rij
-// aan met scheduled_for=callback_at (self-loop), volledig los van deze
-// afsluit-actie.
+// MANUAL_FOLLOWUP (FIX 3) outcome-enum — matcht 1:1 met dunning_call_log.outcome
+// CHECK-constraint (migraties 2026-07-14 + 2026-07-29-add-outcomes.sql) PLUS
+// een sentinel-waarde 'closed_manually'. Callback-tak maakt in
+// dunning-call-log-create.js automatisch een nieuwe MANUAL_FOLLOWUP-rij aan
+// met scheduled_for=callback_at (self-loop), volledig los van deze afsluit-actie.
+//
+// BUG-FIX (acties-tab confirms PR): 'closed_manually' toegevoegd voor het
+// "Afgehandeld"-knopje op de rij zonder dat er een belactie geregistreerd is.
+// Wordt NIET in dunning_call_log geschreven (die tabel eist een echte
+// bel-outcome); dient alleen als pending_actions.execution_result.outcome
+// zodat het audit-spoor "handmatig afgesloten zonder gesprek" bewaart.
+// Voorheen zette "Afgehandeld" de taak naar APPROVED via approve-endpoint,
+// wat de engine ONEINDIG blokkeerde (mark-executed eist PENDING én guard
+// blokkeert APPROVED). Nu direct PENDING -> EXECUTED.
 const MANUAL_FOLLOWUP_OUTCOMES = new Set([
   'no_answer', 'voicemail', 'callback', 'payment_promise', 'payment_plan',
   'refused', 'wrong_number', 'paid_during_call',
+  'closed_manually',
 ]);
 
 function isStringArray(x) {
