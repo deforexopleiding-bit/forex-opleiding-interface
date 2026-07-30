@@ -50,7 +50,7 @@ $h$<div style="background:#f4f5f7;padding:24px 0;font-family:Arial,Helvetica,san
 <p>Je bent toegelaten tot de 7-daagse. Vanaf nu heb je zeven dagen volledige toegang tot onze leeromgeving.</p>
 <p>Klik op de knop hieronder en je bent binnen. Je hoeft geen wachtwoord in te vullen.</p>
 <p style="margin:22px 0"><a href="{inloglink}" style="display:inline-block;background:#5B5BD6;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:bold">Open mijn leeromgeving</a></p>
-<p>Deze link is een uur geldig en werkt één keer. Ben je te laat, vraag dan gewoon een nieuwe aan op deforexopleiding.nl/lms.</p>
+<p>Deze link is een uur geldig en werkt één keer; op dit apparaat blijf je daarna ingelogd. Wissel je vaker van apparaat? Stel dan in de leeromgeving een wachtwoord in, dan hoef je geen nieuwe link aan te vragen.</p>
 <p>Drie dingen voor je eerste dag:</p>
 <ol><li>Kijk Market Structure, twintig minuten. Dat is de basis waar de rest op rust.</li>
 <li>Join onze Discord. Daar staan de links naar de live sessies.</li>
@@ -66,7 +66,7 @@ $t$Hoi {voornaam},
 Je bent toegelaten tot de 7-daagse. Vanaf nu heb je zeven dagen volledige toegang tot onze leeromgeving.
 
 Open de leeromgeving via deze link (een uur geldig, werkt één keer): {inloglink}
-Te laat? Vraag een nieuwe aan op deforexopleiding.nl/lms.
+Op dit apparaat blijf je daarna ingelogd. Wissel je vaker van apparaat? Stel dan in de leeromgeving een wachtwoord in, dan hoef je geen nieuwe link aan te vragen.
 
 Drie dingen voor je eerste dag:
 1. Kijk Market Structure, twintig minuten.
