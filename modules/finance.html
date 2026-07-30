@@ -4216,27 +4216,41 @@
          ze zijn bereikbaar via Instellingen (config-schermen) en Opruimen
          (crediteren + incasso). Vandaag is opgegaan in Te doen. -->
     <div id="wanbetalersSubNav" class="wbx-nav" style="margin-bottom:18px">
-      <button class="active" data-wb-sub="te-doen"     type="button" title="Te doen">Te doen</button>
-      <button                data-wb-sub="open-acties" type="button" title="Acties">Acties<span class="wbx-badge" id="wbxNavActiesBadge" hidden>0</span></button>
-      <button                data-wb-sub="inbox"       type="button" title="Gesprekken">Gesprekken</button>
-      <button                data-wb-sub="facturen"    type="button" title="Facturen">Facturen</button>
-      <button                data-wb-sub="opruimen"    type="button" title="Opruimen">Opruimen</button>
-      <button                data-wb-sub="arrangements" type="button" title="Betalingsregelingen">Afspraken</button>
-      <button                data-wb-sub="pipeline"    type="button" title="Pipeline-overzicht van alle aanmaan-runs">Pipeline</button>
-      <!-- FASE 1 herontwerp: nieuwe alleen-lezen Overzicht-plek, naast het
-           bestaande. sub=overzicht-nieuw zodat deep-links naar het oude
-           ?sub=overzicht ongewijzigd blijven. -->
-      <button                data-wb-sub="overzicht-nieuw" type="button" title="Alleen-lezen overzicht van alle wanbetalers (nieuw)">Overzicht <span class="wbx-badge" style="background:#0ea5e9;color:#fff">nieuw</span></button>
-      <!-- FASE 3 herontwerp: nieuw Acties-werkcentrum met tabs (Te doen /
-           Later / Afgehandeld / Afgewezen), snooze-knop, paused-sectie.
-           Bestaande sub=open-acties blijft onaangeroerd. -->
-      <button                data-wb-sub="openacties-nieuw" type="button" title="Acties-werkcentrum: Te doen · Later · Afgehandeld · Afgewezen (nieuw)">Acties-werk <span class="wbx-badge" style="background:#0ea5e9;color:#fff">nieuw</span></button>
-      <div class="wbx-nav-spacer"></div>
-      <!-- Verversen: alleen zichtbaar op de Te doen-sub (getoggled door
-           setSubView). Geen data-wb-sub attribuut → sub-nav-handler pikt 'm
-           NIET op als tab (voorkomt actieve-tab-verwarring). -->
-      <button                id="tdRefreshBtn"           type="button" title="Ververs de Te doen-lijst" style="display:none;align-items:center;gap:5px"><i class="ti ti-refresh" style="font-size:14px"></i>Verversen</button>
+      <!-- FASE 8 herontwerp: schone 4-tab structuur.
+           Gesprekken → Acties → Overzicht → Instellingen.
+           De 6 oude tabs (te-doen / open-acties / facturen / opruimen /
+           arrangements / pipeline) zijn HIDDEN (attribute), NIET verwijderd —
+           deep-links ?sub=... blijven werken want validSubs + setSubView
+           takken zijn onaangeroerd. Terugzetten = hidden weghalen. -->
+
+      <!-- 1) GESPREKKEN — was al inbox-sub, nu default active tab -->
+      <button class="active" data-wb-sub="inbox"       type="button" title="Gesprekken">Gesprekken</button>
+
+      <!-- 2) ACTIES — de nieuwe (fase 3), was "Acties-werk". Label + tooltip
+             opgeschoond, nieuw-badge weg. Bestaande sub-key blijft
+             openacties-nieuw zodat de mount-functie en deep-links werken. -->
+      <button                data-wb-sub="openacties-nieuw" type="button" title="Acties: Te doen · Later · Afgehandeld · Afgewezen">Acties</button>
+
+      <!-- 3) OVERZICHT — de nieuwe (fase 1), was "Overzicht [nieuw]".
+             Nieuw-badge weg, label onaangeroerd. -->
+      <button                data-wb-sub="overzicht-nieuw" type="button" title="Alleen-lezen overzicht van alle wanbetalers">Overzicht</button>
+
+      <!-- 4) INSTELLINGEN — hub met 6 kaarten -->
       <button                data-wb-sub="instellingen" type="button" title="Instellingen — Joost · Workflows · Berichten · Bureaus · Sandbox · Geschiedenis">Instellingen</button>
+
+      <!-- ── VERBORGEN (fase 8) — code + sub-views blijven, deep-links werken ── -->
+      <button hidden data-wb-sub="te-doen"     type="button" title="Te doen (verborgen in fase 8; ?sub=te-doen werkt nog)">Te doen</button>
+      <button hidden data-wb-sub="open-acties" type="button" title="Oude Acties-tab (verborgen in fase 8; ?sub=open-acties werkt nog)">Acties<span class="wbx-badge" id="wbxNavActiesBadge" hidden>0</span></button>
+      <button hidden data-wb-sub="facturen"    type="button" title="Facturen (verborgen in fase 8)">Facturen</button>
+      <button hidden data-wb-sub="opruimen"    type="button" title="Opruimen (verborgen in fase 8)">Opruimen</button>
+      <button hidden data-wb-sub="arrangements" type="button" title="Afspraken (verborgen in fase 8)">Afspraken</button>
+      <button hidden data-wb-sub="pipeline"    type="button" title="Pipeline (verborgen in fase 8)">Pipeline</button>
+
+      <div class="wbx-nav-spacer"></div>
+      <!-- Verversen: was alleen zichtbaar op de Te doen-sub. Te doen is nu
+           verborgen uit de 4-tab-nav; knop blijft in de DOM (setSubView
+           toggelt display) maar wordt in de praktijk niet meer getoond. -->
+      <button                id="tdRefreshBtn"           type="button" title="Ververs de Te doen-lijst" style="display:none;align-items:center;gap:5px"><i class="ti ti-refresh" style="font-size:14px"></i>Verversen</button>
     </div>
     <style>
       .wb-menu-btn { display:inline-flex; align-items:center; gap:4px; }
@@ -6898,7 +6912,10 @@
   // blijft volledig intact onder de 'overzicht' sub-tab.
   function setSubView(sub) {
     const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis', 'sandbox', 'incasso', 'crediteren', 'te-doen', 'facturen', 'instellingen', 'opruimen', 'joost', 'overzicht-nieuw', 'openacties-nieuw'];
-    if (!validSubs.includes(sub)) sub = 'vandaag';
+    // FASE 8: default landing = 'inbox' (Gesprekken) i.p.v. 'vandaag' — de
+    // Te doen-tab is verborgen uit de nav, dus daar landen zou een lege UI
+    // geven. Alle oude sub-keys blijven in validSubs zodat deep-links werken.
+    if (!validSubs.includes(sub)) sub = 'inbox';
     // Backward-compat: deep-link ?sub=actie is nu opgenomen in Vandaag —
     // redirect naar 'vandaag' zodat de zichtbare view klopt. 'overzicht'
     // blijft functioneel (deep-links naar oude overzicht renderen gewoon
