@@ -101,13 +101,22 @@ export default async function handler(req, res) {
     if (!conv) return res.status(404).json({ error: 'Conversation niet gevonden' });
 
     // Joost-config voor persona + model (finance-module).
-    const { data: cfg } = await supabaseAdmin
+    // ⚠ Kolomnamen MOETEN identiek zijn aan wat joost-suggest-core.js gebruikt
+    // (r280-287): 'model', NIET 'model_name'; 'temperature' zit erbij. Anders
+    // gooit Postgres een 42703 en maybeSingle() returnt null → valse "cfg
+    // ontbreekt"-response terwijl de rij bestaat. Selecteer defensief alle
+    // velden die de bestaande core ook selecteert.
+    const { data: cfg, error: cfgErr } = await supabaseAdmin
       .from('joost_config')
-      .select('persona_name, persona_tone, system_prompt_template, model_name, is_enabled')
+      .select('module, persona_name, persona_tone, system_prompt_template, model, temperature, is_enabled')
       .eq('module', 'finance')
       .maybeSingle();
+    if (cfgErr) {
+      console.error('[joost-suggest-revise] joost_config lookup', cfgErr.message);
+      return res.status(500).json({ error: 'joost_config lookup: ' + cfgErr.message });
+    }
     if (!cfg) {
-      return res.status(503).json({ error: 'joost_config voor finance ontbreekt' });
+      return res.status(503).json({ error: 'Joost is nog niet geconfigureerd. Maak eerst een joost_config-rij aan voor module=finance.' });
     }
     if (cfg.is_enabled === false) {
       return res.status(503).json({ error: 'Joost is uitgeschakeld voor finance-module' });
@@ -137,14 +146,19 @@ export default async function handler(req, res) {
       `Herschrijf de reply op basis van de instructie. Behoud toon en persona.`,
     ].join('\n');
 
-    const model = cfg.model_name || 'claude-sonnet-5';
+    const model = cfg.model || 'claude-sonnet-5';
+    // Temperatuur licht warmer dan default suggest (bewust: revisies mogen wat
+    // creatiever binnen de instructie); fallback op cfg.temperature als gezet.
+    const temperature = Number.isFinite(Number(cfg.temperature))
+      ? Math.max(0.2, Number(cfg.temperature))
+      : 0.4;
     const result = await anthropicStructuredOutput({
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
       tool_name: REVISE_TOOL.name,
       tool_input_schema: REVISE_TOOL.input_schema,
       model,
-      temperature: 0.4,
+      temperature,
       max_tokens: 1200,
     });
 
