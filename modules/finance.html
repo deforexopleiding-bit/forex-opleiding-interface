@@ -27084,6 +27084,14 @@
     incasso: 'Incasso', afschrijven: 'Afschrijven', opgelost: 'Opgelost',
     dispuut: 'Dispuut', bewind: 'Bewind',
   };
+  // Logische stage-volgorde voor sortering (spiegelt sort_order uit
+  // dunning_pipeline_stages seed migratie 034 + de 2 nieuwe stages uit
+  // 2026-07-29-dunning-pipeline-add-dispute-bewind-stages.sql). NIET
+  // alfabetisch — matcht het traject dat een klant doorloopt.
+  const _OZN_STAGE_SORT = {
+    nieuw: 1, aangemaand: 2, in_gesprek: 3, regeling: 4, brief_verstuurd: 5,
+    incasso: 6, afschrijven: 7, opgelost: 8, dispuut: 9, bewind: 10,
+  };
   const _OZN_STAGE_COLOR = {
     nieuw: '#64748b', aangemaand: '#f59e0b', in_gesprek: '#0ea5e9',
     regeling: '#8b5cf6', brief_verstuurd: '#ec4899',
@@ -27225,13 +27233,30 @@
       return true;
     });
 
-    // Sort.
+    // Sort — stage sorteert op logische stage-volgorde (niet alfabetisch);
+    // next-action sorteert op datum (afwezig = eind van de lijst ongeacht
+    // richting zodat "geen actie geagendeerd" niet bovenaan verschijnt).
     const dir = _oznState.sortDir === 'asc' ? 1 : -1;
     rows.sort((a, b) => {
       let av, bv;
       switch (_oznState.sortKey) {
-        case 'open': av = a.total_open_cents || 0; bv = b.total_open_cents || 0; break;
-        case 'days': av = a.days_overdue     || 0; bv = b.days_overdue     || 0; break;
+        case 'open':  av = a.total_open_cents || 0; bv = b.total_open_cents || 0; break;
+        case 'days':  av = a.days_overdue     || 0; bv = b.days_overdue     || 0; break;
+        case 'stage':
+          av = _OZN_STAGE_SORT[a.stage_slug] || 999;
+          bv = _OZN_STAGE_SORT[b.stage_slug] || 999;
+          break;
+        case 'next': {
+          // Rijen zonder next_action_at altijd onderaan, ongeacht dir.
+          const aHas = !!a.next_action_at;
+          const bHas = !!b.next_action_at;
+          if (!aHas && !bHas) { av = 0; bv = 0; break; }
+          if (!aHas) return 1;   // a onderaan
+          if (!bHas) return -1;  // b onderaan
+          av = new Date(a.next_action_at).getTime();
+          bv = new Date(b.next_action_at).getTime();
+          break;
+        }
         default: // created = last_activity_at (of stage_changed_at fallback)
           av = new Date(a.last_activity_at || a.stage_changed_at || 0).getTime();
           bv = new Date(b.last_activity_at || b.stage_changed_at || 0).getTime();
@@ -27255,9 +27280,9 @@
               <th title="Aantal openstaande facturen">#</th>
               <th class="sortable" data-oznsort="open" title="Totaal openstaand bedrag (excl. gecrediteerd) — klik om te sorteren">Open${arrow('open')}</th>
               <th class="sortable" data-oznsort="days" title="Dagen dat de oudste factuur te laat is — klik om te sorteren">Dagen${arrow('days')}</th>
-              <th title="Huidige pipeline-fase — klik voor read-only fase-info">Fase</th>
-              <th title="Type + geplande datum van de volgende automatische engine-stap">Volgende actie</th>
-              <th title="Actief WhatsApp-gesprek open? Klik voor Inbox" style="text-align:center">💬</th>
+              <th class="sortable" data-oznsort="stage" title="Huidige pipeline-fase — klik om te sorteren op logische fase-volgorde (nieuw → aangemaand → … → bewind)">Fase${arrow('stage')}</th>
+              <th class="sortable" data-oznsort="next" title="Datum van de volgende automatische engine-stap — klik om te sorteren; klanten zonder geplande actie zakken naar beneden">Volgende actie${arrow('next')}</th>
+              <th title="Actief WhatsApp-gesprek open? Klik voor het gesprek van deze klant" style="text-align:center">💬</th>
             </tr>
           </thead>
           <tbody>
@@ -27296,17 +27321,22 @@
         if (it) _oznOpenStageModal(it);
       });
     });
-    // Gesprek-icoon → Inbox deep-link.
+    // Gesprek-icoon → Inbox deep-link naar de specifieke conversation
+    // van deze klant. Gebruikt de kanonieke openInboxConv(convId) die de
+    // Inbox intern ook aanroept bij klik op de conv-list. Als er geen
+    // conversation_id is (klant heeft geen actief gesprek): fallback op
+    // gewone tab-switch naar Inbox (zelfde gedrag als voorheen).
     body.querySelectorAll('.ozn-conv-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const cid = btn.getAttribute('data-cid');
-        if (!cid) return;
+        const convId = btn.getAttribute('data-conv-id') || null;
         try { setSubView('inbox'); } catch (_) {}
-        // Best-effort: als de inbox een openConversation-helper heeft die
-        // per customer_id opent, gebruik die; anders sluit deep-linking
-        // aan bij de bestaande handler die inbox-conversations-list
-        // filtert. Fallback: alleen tab-switch.
-        try { if (typeof _inboxOpenByCustomerId === 'function') _inboxOpenByCustomerId(cid); } catch (_) {}
+        if (convId && typeof openInboxConv === 'function') {
+          // Kleine timeout zodat setSubView eerst de inbox-DOM mount
+          // en de conv-list gerenderd is voordat openInboxConv de
+          // highlight zoekt (spiegelt hoe de inbox's eigen click-handler
+          // werkt na tab-switch).
+          setTimeout(() => { try { openInboxConv(convId); } catch (_) {} }, 60);
+        }
       });
     });
   }
@@ -27323,7 +27353,7 @@
     const nextAction = it.next_action_at
       ? `<span title="${esc(it.next_action_step_title || '—')}">${esc(_OZN_STEP_LABEL[it.next_action_step_type] || it.next_action_step_type || '—')} · ${esc(_oznFmtDateTime(it.next_action_at))}</span>`
       : (it.run_status ? `<span style="color:var(--wbx-muted)" title="Run status: ${esc(it.run_status)}">${esc(it.run_status)}</span>` : '<span style="color:var(--wbx-muted)">—</span>');
-    const convBtn = `<button class="ozn-conv-btn ${it.has_active_conversation ? 'on' : ''}" data-cid="${esc(it.customer_id)}" title="${it.has_active_conversation ? 'Actief gesprek — klik voor Inbox' : 'Geen actief gesprek — klik voor Inbox'}">${it.has_active_conversation ? '💬' : '○'}</button>`;
+    const convBtn = `<button class="ozn-conv-btn ${it.has_active_conversation ? 'on' : ''}" data-cid="${esc(it.customer_id)}" data-conv-id="${esc(it.conversation_id || '')}" title="${it.has_active_conversation ? 'Actief gesprek — klik om het te openen in Inbox' : 'Geen actief gesprek — klik voor Inbox'}">${it.has_active_conversation ? '💬' : '○'}</button>`;
     return `
       <tr>
         <td>${nameBtn}${attnFlag}</td>
