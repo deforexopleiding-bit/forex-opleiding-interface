@@ -35,6 +35,10 @@ export default async function handler(req, res) {
     credited_debt_rows    : 0,
     subscriptions_deleted : 0,
     deals_deleted         : 0,
+    pending_actions_deleted   : 0,
+    dunning_briefs_deleted    : 0,
+    dunning_brief_files_removed : 0,
+    dunning_brief_files_errors  : 0,
   };
 
   try {
@@ -123,6 +127,54 @@ export default async function handler(req, res) {
         summary.subscriptions_deleted = (sCountA || 0) + sCountB;
         summary.deals_deleted = dealIds.length;
       } catch (e) { console.warn('[sandbox-reset] subscriptions/deals soft-fail:', e?.message || e); }
+
+      // 5d) pending_actions — hangen via customer_id (+ soms invoice_id) aan
+      //     test-klanten. MOETEN vóór invoices/customers delete (FK).
+      //     Guard: .in('customer_id', custIds) — custIds komt hard uit
+      //     WHERE is_test=true, geen manier om niet-test rows te raken.
+      try {
+        const { count: paCount } = await supabaseAdmin.from('pending_actions')
+          .delete({ count: 'exact' }).in('customer_id', custIds);
+        summary.pending_actions_deleted = paCount || 0;
+      } catch (e) {
+        console.warn('[sandbox-reset] pending_actions soft-fail:', e?.message || e);
+      }
+
+      // 5e) dunning_briefs — juridisch-bewijs-tabel uit fase 6.
+      //     Volgorde: eerst pdf_paths verzamelen → storage-bestanden verwijderen
+      //     (fail-soft per bestand) → dan DB-rijen wissen. Rijen MOETEN vóór
+      //     customers-delete vanwege FK ON DELETE RESTRICT.
+      try {
+        const { data: briefs } = await supabaseAdmin
+          .from('dunning_briefs')
+          .select('id, pdf_path')
+          .in('customer_id', custIds);
+        const pdfPaths = (briefs || []).map((b) => b.pdf_path).filter(Boolean);
+        // Storage-cleanup: verwijder de PDF-bestanden. Fail-soft per bestand
+        // via bulk-remove; als 1 file al weg is, de rest gaat gewoon door.
+        if (pdfPaths.length > 0) {
+          try {
+            const { data: rmData, error: rmErr } = await supabaseAdmin.storage
+              .from('dunning-briefs')
+              .remove(pdfPaths);
+            if (rmErr) {
+              console.warn('[sandbox-reset] storage.remove partial-fail:', rmErr.message);
+              summary.dunning_brief_files_errors = pdfPaths.length;
+            } else {
+              summary.dunning_brief_files_removed = Array.isArray(rmData) ? rmData.length : pdfPaths.length;
+            }
+          } catch (e) {
+            console.warn('[sandbox-reset] storage.remove exception:', e?.message || e);
+            summary.dunning_brief_files_errors = pdfPaths.length;
+          }
+        }
+        // DB-rijen wissen (via customer_id, guard).
+        const { count: dbCount } = await supabaseAdmin.from('dunning_briefs')
+          .delete({ count: 'exact' }).in('customer_id', custIds);
+        summary.dunning_briefs_deleted = dbCount || 0;
+      } catch (e) {
+        console.warn('[sandbox-reset] dunning_briefs soft-fail:', e?.message || e);
+      }
     }
 
     // 6) Invoices + customers (in die volgorde vanwege FK).
