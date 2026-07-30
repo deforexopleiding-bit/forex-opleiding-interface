@@ -47,6 +47,12 @@ import { sendTemplate, getConfigStatus, MetaNotConfiguredError } from './_lib/me
 import { buildMetaVariablesFromMapping, AVAILABLE_VARIABLES } from './_lib/template-variables.js';
 import { ensureInvoicePaymentLink, InvoicePaymentLinkError } from './_lib/invoice-payment-link.js';
 import { getModuleContextByPhoneNumberId } from './_lib/module-context.js';
+// FIX A no-reply-reminder-bug: onze uitgaande template-reply moet de dunning-
+// run ontpauzeren + reminder-teller resetten (zelfde als inbox-send.js). Bij
+// een normale WA-conversatie waar wij een template sturen (bv. bevestiging /
+// herinnering die geen 24u-venster nodig heeft) telt dat óók als "wij hebben
+// gereageerd" — de no-reply-cron mag daarna geen r1 sturen. Fail-soft.
+import { unpauseRunsForConversation } from './_lib/dunning-arrangement-hooks.js';
 import { buildSendComponents } from './_lib/meta-template-components-builder.js';
 
 const MEDIA_HEADER_TYPES = new Set(['IMAGE', 'VIDEO', 'DOCUMENT']);
@@ -654,6 +660,17 @@ export default async function handler(req, res) {
       });
     } catch (auditErr) {
       console.error('[inbox-send-template] audit insert exception:', auditErr.message);
+    }
+
+    // FIX A no-reply-reminder-bug: onze template-reply ontpauzeert de dunning-
+    // run + reset reminder-teller (zelfde als inbox-send.js). Fail-soft.
+    try {
+      const r = await unpauseRunsForConversation(convId);
+      if (r && !r.ok && r.error) {
+        console.warn('[inbox-send-template] unpause soft-fail:', r.error);
+      }
+    } catch (unpauseErr) {
+      console.warn('[inbox-send-template] unpause exception (fail-soft):', unpauseErr?.message || unpauseErr);
     }
 
     return res.status(200).json({
