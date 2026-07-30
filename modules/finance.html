@@ -4223,6 +4223,10 @@
       <button                data-wb-sub="opruimen"    type="button" title="Opruimen">Opruimen</button>
       <button                data-wb-sub="arrangements" type="button" title="Betalingsregelingen">Afspraken</button>
       <button                data-wb-sub="pipeline"    type="button" title="Pipeline-overzicht van alle aanmaan-runs">Pipeline</button>
+      <!-- FASE 1 herontwerp: nieuwe alleen-lezen Overzicht-plek, naast het
+           bestaande. sub=overzicht-nieuw zodat deep-links naar het oude
+           ?sub=overzicht ongewijzigd blijven. -->
+      <button                data-wb-sub="overzicht-nieuw" type="button" title="Alleen-lezen overzicht van alle wanbetalers (nieuw)">Overzicht <span class="wbx-badge" style="background:#0ea5e9;color:#fff">nieuw</span></button>
       <div class="wbx-nav-spacer"></div>
       <!-- Verversen: alleen zichtbaar op de Te doen-sub (getoggled door
            setSubView). Geen data-wb-sub attribuut → sub-nav-handler pikt 'm
@@ -4257,6 +4261,9 @@
     <div id="wb-sub-instellingen" hidden></div>
     <div id="wb-sub-opruimen"     hidden></div>
     <div id="wb-sub-joost"        hidden></div>
+    <!-- FASE 1 herontwerp: nieuwe alleen-lezen Overzicht-host. Bestaande
+         sub=overzicht (in view-dunning) blijft onaangeroerd. -->
+    <div id="wb-sub-overzicht-nieuw" hidden></div>
   </div>
 
   <!-- ===== Klanten-view (Groep B: thin view binnen Finance) =====
@@ -6855,7 +6862,7 @@
   // (overzicht/probleemklanten/workflows/templates/geschiedenis/arrangements)
   // blijft volledig intact onder de 'overzicht' sub-tab.
   function setSubView(sub) {
-    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis', 'sandbox', 'incasso', 'crediteren', 'te-doen', 'facturen', 'instellingen', 'opruimen', 'joost'];
+    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis', 'sandbox', 'incasso', 'crediteren', 'te-doen', 'facturen', 'instellingen', 'opruimen', 'joost', 'overzicht-nieuw'];
     if (!validSubs.includes(sub)) sub = 'vandaag';
     // Backward-compat: deep-link ?sub=actie is nu opgenomen in Vandaag —
     // redirect naar 'vandaag' zodat de zichtbare view klopt. 'overzicht'
@@ -6907,6 +6914,7 @@
     const vInstellingen = document.getElementById('wb-sub-instellingen');
     const vOpruimen     = document.getElementById('wb-sub-opruimen');
     const vJoost        = document.getElementById('wb-sub-joost');
+    const vOverzichtNw  = document.getElementById('wb-sub-overzicht-nieuw');
     if (vInbox)        vInbox.hidden        = true;
     if (vDunning)      vDunning.hidden      = true;
     if (vOpenActies)   vOpenActies.hidden   = true;
@@ -6920,6 +6928,7 @@
     if (vInstellingen) vInstellingen.hidden = true;
     if (vOpruimen)     vOpruimen.hidden     = true;
     if (vJoost)        vJoost.hidden        = true;
+    if (vOverzichtNw)  vOverzichtNw.hidden  = true;
 
     // Bulk-multiselect leeft alleen binnen 'facturen' (Per klant) en
     // 'opruimen'. Bij switch naar een andere sub clearen we selectie +
@@ -7020,6 +7029,12 @@
       // agency center → wijzigingen synchroniseren automatisch.
       if (vJoost) vJoost.hidden = false;
       mountJoostConfigHost();
+    } else if (sub === 'overzicht-nieuw') {
+      // FASE 1 herontwerp — nieuwe alleen-lezen Overzicht. Naast bestaande
+      // sub=overzicht, breekt geen deep-link. mountOverzichtNieuwHost()
+      // is idempotent + fetcht via /api/wanbetalers-overzicht-list.
+      if (vOverzichtNw) vOverzichtNw.hidden = false;
+      mountOverzichtNieuwHost();
     } else { // overzicht (deep-link backward-compat: niet meer in de nav,
              // maar blijft functioneel).
       if (vDunning) vDunning.hidden = false;
@@ -27015,6 +27030,378 @@
     // Chat-substate:
     chat           : { convId: null, messages: [], loading: false, canSend: false, phone: null },
   };
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // FASE 1 herontwerp — NIEUW alleen-lezen "Overzicht" (naast bestaande subs).
+  //
+  // Bouwt een compacte tabel met alle wanbetalers uit
+  // /api/wanbetalers-overzicht-list. Zelfde waarheid als de bestaande tabs
+  // (herbruikt invoices/dunning_pipeline_customers/dunning_workflow_runs/
+  // whatsapp_conversations — geen aparte tellingen).
+  //
+  // 100% alleen-lezen in deze fase. Klant-klik opent de bestaande
+  // openCaseSheet(customerId). Pipeline-badge → read-only mini-modal.
+  // Gesprek-icoon → deep-link naar Inbox met conv-id.
+  //
+  // State: sortering + tab (1/multi) + sub-tab (actief/afgerond) blijven
+  // client-side. Search-input is minimalistisch (naam/email/tel).
+  const _oznState = {
+    mounted: false,
+    loading: false,
+    error:   null,
+    items:   [],
+    totals:  { open_cents: 0, customers: 0, avg_days_overdue: 0, active_conversations: 0 },
+    tab:     'one',     // 'one' | 'multi' — '1 factuur' als default
+    subTab:  'actief',  // 'actief' | 'afgerond'
+    sortKey: 'created', // 'created' | 'open' | 'days'  (created = last_activity_at desc = "nieuwste bovenaan")
+    sortDir: 'desc',    // 'asc' | 'desc'
+    search:  '',
+  };
+
+  function _oznFmtEur(cents) {
+    const n = (Number(cents) || 0) / 100;
+    return '€ ' + n.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function _oznFmtDate(iso) {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '—';
+      return d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    } catch (_) { return '—'; }
+  }
+  function _oznFmtDateTime(iso) {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '—';
+      return d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+    } catch (_) { return '—'; }
+  }
+  const _OZN_STAGE_LABEL = {
+    nieuw: 'Nieuw', aangemaand: 'Aangemaand', in_gesprek: 'In gesprek',
+    regeling: 'Regeling', brief_verstuurd: 'Brief verstuurd',
+    incasso: 'Incasso', afschrijven: 'Afschrijven', opgelost: 'Opgelost',
+    dispuut: 'Dispuut', bewind: 'Bewind',
+  };
+  // Logische stage-volgorde voor sortering (spiegelt sort_order uit
+  // dunning_pipeline_stages seed migratie 034 + de 2 nieuwe stages uit
+  // 2026-07-29-dunning-pipeline-add-dispute-bewind-stages.sql). NIET
+  // alfabetisch — matcht het traject dat een klant doorloopt.
+  const _OZN_STAGE_SORT = {
+    nieuw: 1, aangemaand: 2, in_gesprek: 3, regeling: 4, brief_verstuurd: 5,
+    incasso: 6, afschrijven: 7, opgelost: 8, dispuut: 9, bewind: 10,
+  };
+  const _OZN_STAGE_COLOR = {
+    nieuw: '#64748b', aangemaand: '#f59e0b', in_gesprek: '#0ea5e9',
+    regeling: '#8b5cf6', brief_verstuurd: '#ec4899',
+    incasso: '#dc2626', afschrijven: '#78716c', opgelost: '#10b981',
+    dispuut: '#f59e0b', bewind: '#7c3aed',
+  };
+  const _OZN_STEP_LABEL = {
+    email: '✉️ E-mail', whatsapp: '💬 WhatsApp', wait: '⏳ Wacht',
+    task: '📞 Taak', stop: '⏹️ Stop', resume: '▶️ Hervat',
+  };
+
+  function mountOverzichtNieuwHost() {
+    const host = document.getElementById('wb-sub-overzicht-nieuw');
+    if (!host) return;
+    if (!_oznState.mounted) {
+      host.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+            <h2 style="margin:0;font-size:18px">Overzicht wanbetalers</h2>
+            <span class="wbx-badge" style="background:#0ea5e9;color:#fff">nieuw — alleen-lezen</span>
+            <span style="font-size:12px;color:var(--wbx-muted)">Zelfde data als de bestaande tabs; nieuwe vorm.</span>
+            <div style="flex:1"></div>
+            <button id="oznRefresh" type="button" class="wbx-btn wbx-sm" title="Ververs de lijst">↻ Verversen</button>
+          </div>
+
+          <!-- KPI-strip: totaal, aantal, gem. dagen, actieve gesprekken -->
+          <div id="oznKpis" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+            <div class="ozn-kpi" data-kpi="total"    title="Som van alle openstaande bedragen van wanbetalers zonder testklanten"><div class="ozn-kpi-lbl">Totaal open</div><div class="ozn-kpi-val" id="oznKpiOpen">—</div></div>
+            <div class="ozn-kpi" data-kpi="count"    title="Aantal unieke wanbetalers met ≥1 openstaande factuur"><div class="ozn-kpi-lbl">Wanbetalers</div><div class="ozn-kpi-val" id="oznKpiCount">—</div></div>
+            <div class="ozn-kpi" data-kpi="days"     title="Gemiddeld aantal dagen dat de oudste factuur te laat is (per klant)"><div class="ozn-kpi-lbl">Gem. dagen te laat</div><div class="ozn-kpi-val" id="oznKpiDays">—</div></div>
+            <div class="ozn-kpi" data-kpi="convs"    title="Aantal klanten met een actief WhatsApp-gesprek (status = open)"><div class="ozn-kpi-lbl">Actieve gesprekken</div><div class="ozn-kpi-val" id="oznKpiConvs">—</div></div>
+          </div>
+
+          <!-- Zoek + filters -->
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <input id="oznSearch" type="search" placeholder="Zoek op naam / e-mail / telefoon…" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit"/>
+            <div class="wbx-tabs" id="oznTabs" title="Klanten met 1 open factuur vs. meerdere">
+              <button data-oznt="one"   class="active" type="button">1 factuur</button>
+              <button data-oznt="multi"                type="button">Meerdere facturen</button>
+            </div>
+            <div class="wbx-tabs" id="oznSubTabs" title="Actief = klant zit in een lopende flow; Afgerond = terminal-stage of geen actieve run">
+              <button data-oznst="actief" class="active" type="button">Actief</button>
+              <button data-oznst="afgerond"             type="button">Afgerond</button>
+            </div>
+          </div>
+
+          <!-- Tabel -->
+          <div id="oznBody"><div style="padding:24px;text-align:center;color:var(--wbx-muted)">Laden…</div></div>
+        </div>
+        <style>
+          .ozn-kpi { padding:10px 12px;border:1px solid var(--wbx-border);border-radius:8px;background:var(--ds-surface,#fff);cursor:default; }
+          .ozn-kpi-lbl { font-size:11px;color:var(--wbx-muted);text-transform:uppercase;letter-spacing:.04em; }
+          .ozn-kpi-val { font-size:18px;font-weight:600;margin-top:2px;color:var(--ds-text,#06181f); }
+          .ozn-table { width:100%;border-collapse:collapse;font-size:13px; }
+          .ozn-table thead th { text-align:left;padding:8px 10px;border-bottom:1px solid var(--wbx-border);color:var(--wbx-muted);font-weight:600;background:var(--ds-surface-2,#f9fbfc);position:sticky;top:0;z-index:1; }
+          .ozn-table th.sortable { cursor:pointer;user-select:none; }
+          .ozn-table th.sortable:hover { color:var(--ds-text,#06181f); }
+          .ozn-table th .ozn-sort-arrow { font-size:10px;opacity:.6;margin-left:4px; }
+          .ozn-table tbody tr { border-bottom:1px solid var(--wbx-border);transition:background .12s ease; }
+          .ozn-table tbody tr:hover { background:var(--ds-surface-2,#f9fbfc); }
+          .ozn-table td { padding:8px 10px;vertical-align:top; }
+          .ozn-name-btn { background:none;border:none;padding:0;color:var(--ds-brand,#0ea5e9);font:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:2px; }
+          .ozn-name-btn:hover { color:#0369a1; }
+          .ozn-stage-badge { display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:#fff;cursor:pointer; }
+          .ozn-attn-flag { display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;background:#fef3c7;color:#78350f;font-size:10px;font-weight:600; }
+          .ozn-conv-btn { background:none;border:none;padding:2px 6px;font-size:16px;cursor:pointer;color:var(--wbx-muted); }
+          .ozn-conv-btn.on { color:#10b981; }
+          .ozn-conv-btn:hover { color:var(--ds-text,#06181f); }
+          .ozn-empty { padding:24px;text-align:center;color:var(--wbx-muted);font-size:13px; }
+        </style>
+      `;
+      // Wire — één keer.
+      host.querySelector('#oznRefresh')?.addEventListener('click', () => _oznLoad());
+      host.querySelector('#oznSearch')?.addEventListener('input', (e) => {
+        _oznState.search = String(e.target.value || '').trim().toLowerCase();
+        _oznRender();
+      });
+      host.querySelectorAll('#oznTabs [data-oznt]').forEach((b) => {
+        b.addEventListener('click', () => {
+          _oznState.tab = b.dataset.oznt;
+          host.querySelectorAll('#oznTabs [data-oznt]').forEach((x) => x.classList.toggle('active', x.dataset.oznt === _oznState.tab));
+          _oznRender();
+        });
+      });
+      host.querySelectorAll('#oznSubTabs [data-oznst]').forEach((b) => {
+        b.addEventListener('click', () => {
+          _oznState.subTab = b.dataset.oznst;
+          host.querySelectorAll('#oznSubTabs [data-oznst]').forEach((x) => x.classList.toggle('active', x.dataset.oznst === _oznState.subTab));
+          _oznRender();
+        });
+      });
+      _oznState.mounted = true;
+    }
+    _oznLoad();
+  }
+
+  async function _oznLoad() {
+    _oznState.loading = true; _oznState.error = null;
+    _oznRender();
+    try {
+      const r = await window.AgentShared.apiFetch('/api/wanbetalers-overzicht-list');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      _oznState.items  = Array.isArray(d.items) ? d.items : [];
+      _oznState.totals = d.totals || { open_cents: 0, customers: 0, avg_days_overdue: 0, active_conversations: 0 };
+    } catch (e) {
+      _oznState.error = e?.message || String(e);
+      _oznState.items = [];
+    } finally {
+      _oznState.loading = false;
+      _oznRender();
+    }
+  }
+
+  function _oznRender() {
+    // KPI's — altijd tonen (aggregate uit endpoint, niet filter-afhankelijk).
+    const t = _oznState.totals;
+    document.getElementById('oznKpiOpen')  && (document.getElementById('oznKpiOpen').textContent  = _oznFmtEur(t.open_cents));
+    document.getElementById('oznKpiCount') && (document.getElementById('oznKpiCount').textContent = String(t.customers));
+    document.getElementById('oznKpiDays')  && (document.getElementById('oznKpiDays').textContent  = String(t.avg_days_overdue));
+    document.getElementById('oznKpiConvs') && (document.getElementById('oznKpiConvs').textContent = String(t.active_conversations));
+
+    const body = document.getElementById('oznBody');
+    if (!body) return;
+    if (_oznState.loading) { body.innerHTML = '<div class="ozn-empty">Laden…</div>'; return; }
+    if (_oznState.error)   { body.innerHTML = `<div class="ozn-empty" style="color:#dc2626">Fout: ${esc(_oznState.error)}</div>`; return; }
+
+    // Filter: tab (1/multi) + sub-tab (actief/afgerond) + search.
+    const q = _oznState.search;
+    let rows = (_oznState.items || []).filter((it) => {
+      if (_oznState.tab === 'one'   && it.is_multi_invoice) return false;
+      if (_oznState.tab === 'multi' && !it.is_multi_invoice) return false;
+      if (_oznState.subTab === 'actief'  && it.is_closed) return false;
+      if (_oznState.subTab === 'afgerond' && !it.is_closed) return false;
+      if (q) {
+        const hay = (String(it.customer_name || '') + ' ' + String(it.customer_email || '') + ' ' + String(it.customer_phone || '')).toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    // Sort — stage sorteert op logische stage-volgorde (niet alfabetisch);
+    // next-action sorteert op datum (afwezig = eind van de lijst ongeacht
+    // richting zodat "geen actie geagendeerd" niet bovenaan verschijnt).
+    const dir = _oznState.sortDir === 'asc' ? 1 : -1;
+    rows.sort((a, b) => {
+      let av, bv;
+      switch (_oznState.sortKey) {
+        case 'open':  av = a.total_open_cents || 0; bv = b.total_open_cents || 0; break;
+        case 'days':  av = a.days_overdue     || 0; bv = b.days_overdue     || 0; break;
+        case 'stage':
+          av = _OZN_STAGE_SORT[a.stage_slug] || 999;
+          bv = _OZN_STAGE_SORT[b.stage_slug] || 999;
+          break;
+        case 'next': {
+          // Rijen zonder next_action_at altijd onderaan, ongeacht dir.
+          const aHas = !!a.next_action_at;
+          const bHas = !!b.next_action_at;
+          if (!aHas && !bHas) { av = 0; bv = 0; break; }
+          if (!aHas) return 1;   // a onderaan
+          if (!bHas) return -1;  // b onderaan
+          av = new Date(a.next_action_at).getTime();
+          bv = new Date(b.next_action_at).getTime();
+          break;
+        }
+        default: // created = last_activity_at (of stage_changed_at fallback)
+          av = new Date(a.last_activity_at || a.stage_changed_at || 0).getTime();
+          bv = new Date(b.last_activity_at || b.stage_changed_at || 0).getTime();
+      }
+      return (av < bv ? -1 : av > bv ? 1 : 0) * dir;
+    });
+
+    if (rows.length === 0) {
+      body.innerHTML = `<div class="ozn-empty">Geen wanbetalers in deze filter${q ? ` (zoekterm "${esc(q)}")` : ''}.</div>`;
+      return;
+    }
+
+    const arrow = (key) => _oznState.sortKey === key ? `<span class="ozn-sort-arrow">${_oznState.sortDir === 'asc' ? '▲' : '▼'}</span>` : '';
+    body.innerHTML = `
+      <div style="font-size:12px;color:var(--wbx-muted);margin-bottom:6px">${rows.length} klant${rows.length === 1 ? '' : 'en'} in weergave</div>
+      <div style="overflow:auto;max-height:70vh;border:1px solid var(--wbx-border);border-radius:8px">
+        <table class="ozn-table">
+          <thead>
+            <tr>
+              <th title="Klantnaam — klik voor dossier">Klant</th>
+              <th title="Aantal openstaande facturen">#</th>
+              <th class="sortable" data-oznsort="open" title="Totaal openstaand bedrag (excl. gecrediteerd) — klik om te sorteren">Open${arrow('open')}</th>
+              <th class="sortable" data-oznsort="days" title="Dagen dat de oudste factuur te laat is — klik om te sorteren">Dagen${arrow('days')}</th>
+              <th class="sortable" data-oznsort="stage" title="Huidige pipeline-fase — klik om te sorteren op logische fase-volgorde (nieuw → aangemaand → … → bewind)">Fase${arrow('stage')}</th>
+              <th class="sortable" data-oznsort="next" title="Datum van de volgende automatische engine-stap — klik om te sorteren; klanten zonder geplande actie zakken naar beneden">Volgende actie${arrow('next')}</th>
+              <th title="Actief WhatsApp-gesprek open? Klik voor het gesprek van deze klant" style="text-align:center">💬</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(_oznRowHtml).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    // Wire kolomsortering.
+    body.querySelectorAll('th.sortable').forEach((th) => {
+      th.addEventListener('click', () => {
+        const key = th.dataset.oznsort;
+        if (!key) return;
+        if (_oznState.sortKey === key) {
+          _oznState.sortDir = _oznState.sortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          _oznState.sortKey = key;
+          _oznState.sortDir = 'desc';
+        }
+        _oznRender();
+      });
+    });
+    // Klant-naam → case-sheet dossier.
+    body.querySelectorAll('.ozn-name-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const cid = btn.getAttribute('data-cid');
+        if (cid && typeof openCaseSheet === 'function') openCaseSheet(cid);
+      });
+    });
+    // Pipeline-badge → mini-modal.
+    body.querySelectorAll('.ozn-stage-badge').forEach((el) => {
+      el.addEventListener('click', () => {
+        const cid = el.getAttribute('data-cid');
+        const it = rows.find((x) => x.customer_id === cid);
+        if (it) _oznOpenStageModal(it);
+      });
+    });
+    // Gesprek-icoon → Inbox deep-link naar de specifieke conversation
+    // van deze klant. Gebruikt de kanonieke openInboxConv(convId) die de
+    // Inbox intern ook aanroept bij klik op de conv-list. Als er geen
+    // conversation_id is (klant heeft geen actief gesprek): fallback op
+    // gewone tab-switch naar Inbox (zelfde gedrag als voorheen).
+    body.querySelectorAll('.ozn-conv-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const convId = btn.getAttribute('data-conv-id') || null;
+        try { setSubView('inbox'); } catch (_) {}
+        if (convId && typeof openInboxConv === 'function') {
+          // Kleine timeout zodat setSubView eerst de inbox-DOM mount
+          // en de conv-list gerenderd is voordat openInboxConv de
+          // highlight zoekt (spiegelt hoe de inbox's eigen click-handler
+          // werkt na tab-switch).
+          setTimeout(() => { try { openInboxConv(convId); } catch (_) {} }, 60);
+        }
+      });
+    });
+  }
+
+  function _oznRowHtml(it) {
+    const nameBtn  = `<button class="ozn-name-btn" data-cid="${esc(it.customer_id)}" title="Open klant-dossier">${esc(it.customer_name)}</button>`;
+    const attnFlag = it.needs_attention ? '<span class="ozn-attn-flag" title="Engine-run heeft aandacht nodig (3× gefaald)">⚠ aandacht</span>' : '';
+    const stage    = it.stage_slug || '';
+    const stageLbl = _OZN_STAGE_LABEL[stage] || stage || '—';
+    const stageBg  = _OZN_STAGE_COLOR[stage] || '#94a3b8';
+    const stagePart = stage
+      ? `<span class="ozn-stage-badge" style="background:${stageBg}" data-cid="${esc(it.customer_id)}" title="Klik voor read-only fase-info">${esc(stageLbl)}</span>`
+      : '<span style="color:var(--wbx-muted);font-size:12px">—</span>';
+    const nextAction = it.next_action_at
+      ? `<span title="${esc(it.next_action_step_title || '—')}">${esc(_OZN_STEP_LABEL[it.next_action_step_type] || it.next_action_step_type || '—')} · ${esc(_oznFmtDateTime(it.next_action_at))}</span>`
+      : (it.run_status ? `<span style="color:var(--wbx-muted)" title="Run status: ${esc(it.run_status)}">${esc(it.run_status)}</span>` : '<span style="color:var(--wbx-muted)">—</span>');
+    const convBtn = `<button class="ozn-conv-btn ${it.has_active_conversation ? 'on' : ''}" data-cid="${esc(it.customer_id)}" data-conv-id="${esc(it.conversation_id || '')}" title="${it.has_active_conversation ? 'Actief gesprek — klik om het te openen in Inbox' : 'Geen actief gesprek — klik voor Inbox'}">${it.has_active_conversation ? '💬' : '○'}</button>`;
+    return `
+      <tr>
+        <td>${nameBtn}${attnFlag}</td>
+        <td>${it.open_invoice_count}</td>
+        <td style="font-variant-numeric:tabular-nums">${_oznFmtEur(it.total_open_cents)}</td>
+        <td style="font-variant-numeric:tabular-nums">${it.days_overdue}</td>
+        <td>${stagePart}</td>
+        <td>${nextAction}</td>
+        <td style="text-align:center">${convBtn}</td>
+      </tr>
+    `;
+  }
+
+  // Read-only mini-modal met fase-info. Bewuste beperking: geen fase-wijziging
+  // vanuit deze fase 1 — dat komt in fase 2. Wel: alle relevante velden
+  // getoond zodat operator context heeft.
+  function _oznOpenStageModal(it) {
+    document.getElementById('oznStageModal')?.remove();
+    const wrap = document.createElement('div');
+    wrap.id = 'oznStageModal';
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999';
+    const stage = it.stage_slug || '—';
+    const stageLbl = _OZN_STAGE_LABEL[stage] || stage;
+    const stageBg  = _OZN_STAGE_COLOR[stage] || '#94a3b8';
+    wrap.innerHTML = `
+      <div style="background:var(--ds-surface,#fff);border:1px solid var(--wbx-border);border-radius:12px;padding:20px;max-width:440px;width:92%">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <span class="ozn-stage-badge" style="background:${stageBg}">${esc(stageLbl)}</span>
+          <div style="flex:1;font-weight:600">${esc(it.customer_name)}</div>
+          <button id="oznStageClose" type="button" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--wbx-muted)">✕</button>
+        </div>
+        <table style="width:100%;font-size:13px;border-collapse:collapse">
+          <tr><td style="padding:4px 0;color:var(--wbx-muted);width:150px">Fase sinds</td><td>${esc(_oznFmtDate(it.stage_changed_at))}</td></tr>
+          <tr><td style="padding:4px 0;color:var(--wbx-muted)">Laatste activiteit</td><td>${esc(_oznFmtDateTime(it.last_activity_at))}</td></tr>
+          <tr><td style="padding:4px 0;color:var(--wbx-muted)">Open facturen</td><td>${it.open_invoice_count} · ${esc(_oznFmtEur(it.total_open_cents))}</td></tr>
+          <tr><td style="padding:4px 0;color:var(--wbx-muted)">Oudste vervaldatum</td><td>${esc(_oznFmtDate(it.oldest_due_iso))} (${it.days_overdue} dagen)</td></tr>
+          <tr><td style="padding:4px 0;color:var(--wbx-muted)">Workflow-run</td><td>${esc(it.run_status || 'geen actieve run')}</td></tr>
+          <tr><td style="padding:4px 0;color:var(--wbx-muted)">Volgende actie</td><td>${it.next_action_at ? esc(_OZN_STEP_LABEL[it.next_action_step_type] || it.next_action_step_type || '—') + ' · ' + esc(_oznFmtDateTime(it.next_action_at)) : '—'}</td></tr>
+          ${it.needs_attention ? `<tr><td style="padding:4px 0;color:#dc2626">Aandacht nodig</td><td>${esc(it.last_failure_reason || 'onbekend')}</td></tr>` : ''}
+        </table>
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--wbx-border);font-size:11px;color:var(--wbx-muted)">Alleen-lezen (fase 1). Fase-wijzigingen: gebruik het bestaande dossier.</div>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+    const close = () => wrap.remove();
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+    wrap.querySelector('#oznStageClose')?.addEventListener('click', close);
+  }
 
   // Fix #929: mount PR-C-overview (KPI-strip + lijst) in #wb-sub-pipeline.
   // De oude _pipeState/_pipeShellHtml/_pipeWireShell-kanban was intern werk
