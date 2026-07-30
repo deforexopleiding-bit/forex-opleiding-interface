@@ -27051,7 +27051,7 @@
     error:   null,
     items:   [],
     totals:  { open_cents: 0, customers: 0, avg_days_overdue: 0, active_conversations: 0 },
-    tab:     'multi',   // 'one' | 'multi' — 'Meerdere facturen' als default
+    tab:     'one',     // 'one' | 'multi' — '1 factuur' als default
     subTab:  'actief',  // 'actief' | 'afgerond'
     sortKey: 'created', // 'created' | 'open' | 'days'  (created = last_activity_at desc = "nieuwste bovenaan")
     sortDir: 'desc',    // 'asc' | 'desc'
@@ -27129,8 +27129,8 @@
           <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
             <input id="oznSearch" type="search" placeholder="Zoek op naam / e-mail / telefoon…" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit"/>
             <div class="wbx-tabs" id="oznTabs" title="Klanten met 1 open factuur vs. meerdere">
-              <button data-oznt="multi" class="active" type="button">Meerdere facturen</button>
-              <button data-oznt="one"                type="button">1 factuur</button>
+              <button data-oznt="one"   class="active" type="button">1 factuur</button>
+              <button data-oznt="multi"                type="button">Meerdere facturen</button>
             </div>
             <div class="wbx-tabs" id="oznSubTabs" title="Actief = klant zit in een lopende flow; Afgerond = terminal-stage of geen actieve run">
               <button data-oznst="actief" class="active" type="button">Actief</button>
