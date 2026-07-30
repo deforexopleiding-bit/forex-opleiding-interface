@@ -242,6 +242,7 @@ function voorbeeld(id){
 }
 function toonVoorbeeld(s, formaat){
   var v = loNepData();
+  v.logo = S.logoUrl || '';   // logo-URL uit de instelling
   var isMail = s.kanaal === 'mail';
   var body;
   if (isMail && formaat === 'html') {
@@ -578,7 +579,7 @@ async function schermBerichten(){
   var inst = {};
   try { inst = await haal('/api/leadsonderhoud-instellingen'); } catch (e) { inst = {}; }
   var live = inst.live === true, noodstop = inst.noodstop === true, omg = inst.omgeving || 'onbekend';
-  if (!S.sjablonen) { try { S.sjablonen = (await haal('/api/leadsonderhoud-sjablonen')).items || []; } catch (e) { S.sjablonen = []; } }
+  if (!S.sjablonen) { try { var sjResp = await haal('/api/leadsonderhoud-sjablonen'); S.sjablonen = sjResp.items || []; S.logoUrl = sjResp.logo_url || ''; } catch (e) { S.sjablonen = []; } }
   var mailSjablonen = (S.sjablonen || []).filter(function(s){ return s.kanaal === 'mail'; });
 
   // Toon duidelijk in welke omgeving je zit; de schuif geldt per omgeving.

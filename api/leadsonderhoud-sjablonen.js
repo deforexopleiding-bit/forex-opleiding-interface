@@ -28,7 +28,9 @@ export default async function handler(req, res) {
       .order('kanaal', { ascending: true })
       .order('soort', { ascending: true });
     if (error) throw error;
-    return res.status(200).json({ items: data });
+    const { data: logoRow } = await supabaseAdmin
+      .from('app_settings').select('value').eq('key', 'leadsonderhoud_logo_url').maybeSingle();
+    return res.status(200).json({ items: data, logo_url: (logoRow && logoRow.value) || '' });
   } catch (e) {
     console.error('sjablonen laden mislukt:', e.message);
     return res.status(500).json({ error: 'Sjablonen laden mislukt' });

@@ -83,6 +83,11 @@ export default async function handler(req, res) {
       .from('app_settings').select('value').eq('key', 'leadsonderhoud_live_' + omgeving).maybeSingle();
     const droogloop = !(setting && setting.value === 'true');
 
+    // Logo-URL uit de instelling (niet hardgecodeerd in de sjablonen).
+    const { data: logoRow } = await supabaseAdmin
+      .from('app_settings').select('value').eq('key', 'leadsonderhoud_logo_url').maybeSingle();
+    const logoUrl = (logoRow && logoRow.value) || '';
+
     // 1) De wachtrij, over alle trajecten heen. De view zit alle voorwaarden al
     //    in (toestemming, welk bericht, of het al gestuurd is).
     const { data: wachtrij, error: wErr } = await supabaseAdmin
@@ -171,8 +176,9 @@ export default async function handler(req, res) {
       const sjabloon = await haalSjabloon(r.traject, r.soort, r.score);
       if (!sjabloon) { rapport.overgeslagen++; meld('overgeslagen', 'geen sjabloon in de tabel'); continue; }
 
-      // Eén invul-functie voor beide kanalen; de agendalink komt uit het traject.
-      const ingevuld = vulSjabloon(sjabloon, r, { agendalink: r.agenda_link });
+      // Eén invul-functie voor beide kanalen; de agendalink komt uit het traject,
+      // de logo-URL uit de instelling.
+      const ingevuld = vulSjabloon(sjabloon, r, { agendalink: r.agenda_link, logo: logoUrl });
 
       // Staat er onverhoopt nog een {inloglink} in, dan hoort dit bericht bij de
       // website — niet met een lege link versturen.

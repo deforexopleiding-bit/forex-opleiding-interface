@@ -44,7 +44,7 @@ insert into public.onderhoud_sjablonen (traject_slug, soort, kanaal, onderwerp, 
 $h$<div style="background:#f4f5f7;padding:24px 0;font-family:Arial,Helvetica,sans-serif">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center">
 <table role="presentation" width="560" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fff;border-radius:10px">
-<tr><td style="padding:28px 32px 4px"><img src="https://www.deforexopleiding.nl/img/merk/logo.png" alt="De Forex Opleiding" width="150" style="display:block;border:0"></td></tr>
+<tr><td style="padding:28px 32px 4px"><img src="{logo}" alt="De Forex Opleiding" width="150" style="display:block;border:0"></td></tr>
 <tr><td style="padding:8px 32px 28px;color:#1b2430;font-size:15px;line-height:1.6">
 <p>Hoi {voornaam},</p>
 <p>Je bent toegelaten tot de 7-daagse. Vanaf nu heb je zeven dagen volledige toegang tot onze leeromgeving.</p>
@@ -83,7 +83,7 @@ insert into public.onderhoud_sjablonen (traject_slug, soort, kanaal, onderwerp, 
 $h$<div style="background:#f4f5f7;padding:24px 0;font-family:Arial,Helvetica,sans-serif">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center">
 <table role="presentation" width="560" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fff;border-radius:10px">
-<tr><td style="padding:28px 32px 4px"><img src="https://www.deforexopleiding.nl/img/merk/logo.png" alt="De Forex Opleiding" width="150" style="display:block;border:0"></td></tr>
+<tr><td style="padding:28px 32px 4px"><img src="{logo}" alt="De Forex Opleiding" width="150" style="display:block;border:0"></td></tr>
 <tr><td style="padding:8px 32px 28px;color:#1b2430;font-size:15px;line-height:1.6">
 <p>Hoi {voornaam},</p>
 <p>Bedankt voor je aanmelding. We hebben je antwoorden gelezen en gaan je deze keer niet toelaten.</p>
@@ -113,7 +113,7 @@ insert into public.onderhoud_sjablonen (traject_slug, soort, kanaal, onderwerp, 
 $h$<div style="background:#f4f5f7;padding:24px 0;font-family:Arial,Helvetica,sans-serif">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center">
 <table role="presentation" width="560" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fff;border-radius:10px">
-<tr><td style="padding:28px 32px 4px"><img src="https://www.deforexopleiding.nl/img/merk/logo.png" alt="De Forex Opleiding" width="150" style="display:block;border:0"></td></tr>
+<tr><td style="padding:28px 32px 4px"><img src="{logo}" alt="De Forex Opleiding" width="150" style="display:block;border:0"></td></tr>
 <tr><td style="padding:8px 32px 28px;color:#1b2430;font-size:15px;line-height:1.6">
 <p>Hoi {voornaam},</p>
 <p>Je week zit er over twee dagen op. Voordat het zover is: laten we samen doornemen wat je hebt gedaan.</p>
@@ -143,7 +143,7 @@ insert into public.onderhoud_sjablonen (traject_slug, soort, kanaal, onderwerp, 
 $h$<div style="background:#f4f5f7;padding:24px 0;font-family:Arial,Helvetica,sans-serif">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center">
 <table role="presentation" width="560" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fff;border-radius:10px">
-<tr><td style="padding:28px 32px 4px"><img src="https://www.deforexopleiding.nl/img/merk/logo.png" alt="De Forex Opleiding" width="150" style="display:block;border:0"></td></tr>
+<tr><td style="padding:28px 32px 4px"><img src="{logo}" alt="De Forex Opleiding" width="150" style="display:block;border:0"></td></tr>
 <tr><td style="padding:8px 32px 28px;color:#1b2430;font-size:15px;line-height:1.6">
 <p>Hoi {voornaam},</p>
 <p>Je zeven dagen zijn voorbij. Je hebt er echt iets mee gedaan: {lessen} lessen bekeken en {trades} trades vastgelegd.</p>
@@ -170,7 +170,7 @@ insert into public.onderhoud_sjablonen (traject_slug, soort, kanaal, onderwerp, 
 $h$<div style="background:#f4f5f7;padding:24px 0;font-family:Arial,Helvetica,sans-serif">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center">
 <table role="presentation" width="560" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fff;border-radius:10px">
-<tr><td style="padding:28px 32px 4px"><img src="https://www.deforexopleiding.nl/img/merk/logo.png" alt="De Forex Opleiding" width="150" style="display:block;border:0"></td></tr>
+<tr><td style="padding:28px 32px 4px"><img src="{logo}" alt="De Forex Opleiding" width="150" style="display:block;border:0"></td></tr>
 <tr><td style="padding:8px 32px 28px;color:#1b2430;font-size:15px;line-height:1.6">
 <p>Hoi {voornaam},</p>
 <p>Je zeven dagen zijn voorbij, en je bent er niet echt aan toegekomen. Dat gebeurt: het is een drukke week, of het moment klopte niet.</p>
@@ -196,7 +196,7 @@ insert into public.onderhoud_sjablonen (traject_slug, soort, kanaal, onderwerp, 
 $h$<div style="background:#f4f5f7;padding:24px 0;font-family:Arial,Helvetica,sans-serif">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center">
 <table role="presentation" width="560" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fff;border-radius:10px">
-<tr><td style="padding:28px 32px 4px"><img src="https://www.deforexopleiding.nl/img/merk/logo.png" alt="De Forex Opleiding" width="150" style="display:block;border:0"></td></tr>
+<tr><td style="padding:28px 32px 4px"><img src="{logo}" alt="De Forex Opleiding" width="150" style="display:block;border:0"></td></tr>
 <tr><td style="padding:8px 32px 28px;color:#1b2430;font-size:15px;line-height:1.6">
 <p>Hoi {voornaam},</p>
 <p>Je gesprek staat ingepland op <strong>{datum} om {tijd}</strong>. Reken op twintig minuten.</p>
@@ -267,4 +267,11 @@ $t$Hoi {{1}}, vandaag om {{2}} hebben we ons gesprek. Twintig minuten via Zoom, 
 insert into public.app_settings (key, value) values
   ('leadsonderhoud_live_production', 'false'),
   ('leadsonderhoud_live_preview', 'false')
+on conflict (key) do nothing;
+
+-- Logo-URL op één plek. De sjablonen gebruiken de {logo}-variabele; hier stel je
+-- het adres in. De website staat (nog) op het Vercel-adres, want deforexopleiding.nl
+-- wijst naar Webflow. Verhuist het domein, dan pas je alleen deze rij aan.
+insert into public.app_settings (key, value)
+values ('leadsonderhoud_logo_url', 'https://dfo-website-three.vercel.app/img/merk/logo.png')
 on conflict (key) do nothing;

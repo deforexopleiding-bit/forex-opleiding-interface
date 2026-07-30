@@ -21,6 +21,7 @@ export function bouwVariabelen(lead, extra = {}) {
     inloglink:  extra.inloglink || '',
     datum:      extra.datum || '',
     tijd:       extra.tijd || '',
+    logo:       extra.logo || '',   // logo-URL uit de instelling, niet hardgecodeerd
     ...extra,
   };
 }

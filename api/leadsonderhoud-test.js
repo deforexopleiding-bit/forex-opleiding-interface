@@ -46,7 +46,9 @@ export default async function handler(req, res) {
       .from('onderhoud_sjablonen').select('*').eq('id', b.sjabloon_id).maybeSingle();
     if (error || !sjabloon) return res.status(404).json({ error: 'Sjabloon niet gevonden' });
     if (sjabloon.kanaal !== 'mail') return res.status(400).json({ error: 'Alleen mail-sjablonen kun je als testmail sturen (WhatsApp bekijk je via Voorbeeld)' });
-    const ingevuld = vulSjabloon(sjabloon, NEP_LEAD, NEP_EXTRA);
+    const { data: logoRow } = await supabaseAdmin
+      .from('app_settings').select('value').eq('key', 'leadsonderhoud_logo_url').maybeSingle();
+    const ingevuld = vulSjabloon(sjabloon, NEP_LEAD, { ...NEP_EXTRA, logo: (logoRow && logoRow.value) || '' });
     onderwerp = ingevuld.onderwerp || onderwerp;
     tekst = ingevuld.tekst || tekst;
     html = ingevuld.html || null;
