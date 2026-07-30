@@ -220,9 +220,13 @@ function melding(tekst){
     + '<div class="lo-vk-voet"><span></span><button class="k k-p" id="ml_ok">OK</button></div>');
   $('ml_ok').onclick = sluitModal;
 }
-/** Zelfde afleiding als de server (voor de live-hint in het stapformulier). */
+/** Zelfde afleiding als de server. De soort vult automatisch mee terwijl je de
+ *  naam typt — maar alleen tot je het soort-veld zelf aanraakt, en niet bij het
+ *  bewerken van een bestaande stap (dan staat er al een slug). */
+var loSoortHandmatig = false;
 function loSlug(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,''); }
-function loSoortHint(){ var n=$('sf_naam'), so=$('sf_soort'); if(n&&so&&!so.value) so.placeholder = n.value ? loSlug(n.value) : 'wordt automatisch afgeleid'; }
+function loNaamGetypt(){ if(loSoortHandmatig) return; var n=$('sf_naam'), so=$('sf_soort'); if(n&&so) so.value = loSlug(n.value); }
+function loSoortGetypt(){ loSoortHandmatig = true; }
 
 // ---- raamwerk ----
 function tabs(){
@@ -477,15 +481,16 @@ function trajectVerwijderen(id){
 // ---- stap-formulier ----
 function stapForm(traject_id, s){
   s = s || {};
+  loSoortHandmatig = !!s.soort; // bij bewerken de bestaande slug met rust laten
   var aanl = AANLEIDINGEN.map(function(a){ return '<option value="'+a[0]+'"'+(s.aanleiding===a[0]?' selected':'')+'>'+esc(a[1])+'</option>'; }).join('');
   var kan = ['mail','whatsapp'].map(function(k){ return '<option value="'+k+'"'+(s.kanaal===k?' selected':'')+'>'+(k==='mail'?'Mail':'WhatsApp')+'</option>'; }).join('');
   var dagen=['','0','1','2','3','4','5','6'], dagLabels=['—','zo','ma','di','wo','do','vr','za'];
   var wk = dagen.map(function(d,i){ return '<option value="'+d+'"'+(String(s.weekdag==null?'':s.weekdag)===d?' selected':'')+'>'+dagLabels[i]+'</option>'; }).join('');
   openModal('<h2>'+(s.id?'Stap bewerken':'Nieuwe stap')+'</h2>'
     + '<div class="lo-vel-rij">'
-    + '<div class="lo-vel"><label>Naam</label><input id="sf_naam" type="text" value="'+esc(s.naam||'')+'" oninput="loSoortHint()"></div>'
-    + '<div class="lo-vel"><label>Soort <span style="color:var(--text-faint);font-weight:400">(optioneel — leeg = uit de naam)</span></label>'
-    + '<input id="sf_soort" type="text" value="'+esc(s.soort||'')+'" placeholder="'+esc(s.soort?'':(s.naam?loSlug(s.naam):'wordt automatisch afgeleid'))+'"></div>'
+    + '<div class="lo-vel"><label>Naam</label><input id="sf_naam" type="text" value="'+esc(s.naam||'')+'" oninput="loNaamGetypt()"></div>'
+    + '<div class="lo-vel"><label>Soort <span style="color:var(--text-faint);font-weight:400">(optioneel — vult zich uit de naam)</span></label>'
+    + '<input id="sf_soort" type="text" value="'+esc(s.soort||'')+'" placeholder="wordt automatisch afgeleid" oninput="loSoortGetypt()"></div>'
     + '</div>'
     + '<div class="lo-vel-rij"><div class="lo-vel"><label>Kanaal</label><select id="sf_kanaal">'+kan+'</select></div>'
     + '<div class="lo-vel"><label>Aanleiding</label><select id="sf_aanl">'+aanl+'</select></div></div>'
