@@ -4875,6 +4875,16 @@
               </div>
             </div>
 
+            <!-- FASE 4 blok 1 — No-reply banner. Zichtbaar wanneer conv gepauzeerd
+                 is via dunning_workflow_runs.paused_by_conversation_id met
+                 reminder_count > 0. Toont r1/r2/hervat-timing berekend uit
+                 joost_config.autonomy_config.no_reply + last_reminder_at.
+                 Alleen-lezen. Fail-soft — verborgen bij fout of geen paused-run. -->
+            <div id="inboxNoReplyBanner" hidden style="padding:8px 14px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:6px;margin:0 12px 8px;font-size:12px;color:#78350f;display:flex;align-items:center;gap:8px">
+              <i class="ti ti-clock-hour-4" style="flex-shrink:0"></i>
+              <div id="inboxNoReplyBannerText" style="flex:1"></div>
+            </div>
+
             <!-- Joost autonomy info-strip (E2.x) — toont status + berichten vandaag + pauzeer/hervat.
                  Hidden tot loadJoostConvState() autonomy_enabled bevestigt voor deze conv. -->
             <div class="joost-autonomy-strip" id="inboxJoostAutonomyStrip" hidden>
@@ -4934,6 +4944,12 @@
                        (recente auto-suggestion uit E1.1 webhook beschikbaar). Hidden tot
                        finance.joost.use permission via _joostInit() zichtbaar maakt. -->
                   <button class="sr-abtn inbox-joost-btn" id="inboxJoostBtn" type="button" disabled hidden data-disabled-tip="Eerst gesprek selecteren" title="AI assistent suggesties" style="font-size:12px;padding:6px 10px"><i class="ti ti-sparkles" style="color:#7c3aed"></i> Vraag Joost</button>
+                  <!-- FASE 4 blok 1 — Naar-acties knoppen. Alleen zichtbaar bij een
+                       gekoppelde klant. Hergebruikt bestaande endpoints/flows;
+                       maakt geen nieuwe schrijf-acties buiten die bestaande. -->
+                  <button class="sr-abtn" id="inboxFollowupBtn" type="button" disabled hidden data-disabled-tip="Eerst gesprek selecteren" title="Maak een bel-taak in de acties-lijst voor deze klant" style="font-size:12px;padding:6px 10px"><i class="ti ti-phone-plus"></i> Bel-taak</button>
+                  <button class="sr-abtn" id="inboxArrangementBtn" type="button" disabled hidden data-disabled-tip="Eerst gesprek selecteren" title="Open klant-dossier — daar staat 'Betaalafspraak vastleggen' + regeling voorstellen" style="font-size:12px;padding:6px 10px"><i class="ti ti-notes"></i> Regeling</button>
+                  <button class="sr-abtn" id="inboxPauseDunningBtn" type="button" disabled hidden data-disabled-tip="Eerst gesprek selecteren" title="Pauzeer de aanmaan-flow voor deze klant (dunning-run status → paused)" style="font-size:12px;padding:6px 10px;color:#b45309"><i class="ti ti-player-pause"></i> Pauzeer flow</button>
                 </div>
                 <div class="inbox-c-actions-right">
                   <span id="inboxComposeWindowHint" class="inbox-c-window-hint" hidden></span>
@@ -28794,6 +28810,473 @@
       _awnLoad();
     } catch (e) {
       window.AgentShared?.showToast?.('Fout: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════
+  //   FASE 4 — Blok 1: no-reply banner + 3 naar-acties knoppen in de inbox.
+  //   Hergebruikt bestaande endpoints (approve/reject/etc via andere flows);
+  //   nieuwe endpoints: tasks-create-followup, finance-dunning-pause-by-
+  //   customer, inbox-noreply-context.
+  //
+  //   Bestaande inbox-render onaangeroerd. We hooken alleen aan:
+  //     - openInboxConv (via post-mount MutationObserver hier: nee, we roepen
+  //       gewoon _wbxFase4OnConvOpen aan met een simpele wrapper).
+  //     - closeInboxConv / conv-switch (verberg banner + disable knoppen).
+  // ═════════════════════════════════════════════════════════════════════
+  let _wbxF4CurrentConvId  = null;
+  let _wbxF4CurrentCustId  = null;
+
+  // Publieke haakjes die de bestaande openInboxConv-code aanroept indien we die
+  // niet monkey-patchen. In deze PR gebruiken we een lichte polling+hook via
+  // MutationObserver op #inboxThreadName omdat de bestaande openInboxConv-code
+  // dat element vult zodra een conv geladen is.
+  function _wbxF4WireInboxObserver() {
+    const name = document.getElementById('inboxThreadName');
+    if (!name || name.dataset.f4Wired === '1') return;
+    name.dataset.f4Wired = '1';
+    const obs = new MutationObserver(() => _wbxF4OnConvChanged());
+    obs.observe(name, { childList: true, subtree: true, characterData: true });
+    // Ook bij back-button (mobiel) resetten.
+    const back = document.getElementById('inboxBackToListBtn');
+    back?.addEventListener('click', () => _wbxF4ResetInboxUi());
+  }
+
+  function _wbxF4OnConvChanged() {
+    const convId = typeof _inboxActiveConvId !== 'undefined' ? _inboxActiveConvId : null;
+    if (convId === _wbxF4CurrentConvId) return; // niks nieuws
+    _wbxF4CurrentConvId = convId;
+    if (!convId) return _wbxF4ResetInboxUi();
+    // Zoek customer_id uit bestaande _inboxConvs cache.
+    const conv = (typeof _inboxConvs !== 'undefined' ? _inboxConvs : []).find((c) => c && c.id === convId);
+    _wbxF4CurrentCustId = conv?.customer_id || null;
+    _wbxF4ApplyButtonState();
+    _wbxF4LoadNoReplyBanner(convId);
+  }
+
+  function _wbxF4ResetInboxUi() {
+    _wbxF4CurrentConvId = null;
+    _wbxF4CurrentCustId = null;
+    const banner = document.getElementById('inboxNoReplyBanner');
+    if (banner) banner.hidden = true;
+    _wbxF4ApplyButtonState();
+  }
+
+  function _wbxF4ApplyButtonState() {
+    const hasCust = !!_wbxF4CurrentCustId;
+    for (const id of ['inboxFollowupBtn', 'inboxArrangementBtn', 'inboxPauseDunningBtn']) {
+      const btn = document.getElementById(id);
+      if (!btn) continue;
+      btn.hidden   = !hasCust;
+      btn.disabled = !hasCust;
+    }
+  }
+
+  async function _wbxF4LoadNoReplyBanner(convId) {
+    const banner = document.getElementById('inboxNoReplyBanner');
+    const textEl = document.getElementById('inboxNoReplyBannerText');
+    if (!banner || !textEl) return;
+    banner.hidden = true;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-noreply-context?conversation_id=' + encodeURIComponent(convId));
+      if (!r.ok) return; // 403/500 fail-soft
+      const d = await r.json().catch(() => ({}));
+      if (!d?.is_paused || Number(d.reminder_count || 0) === 0 && !d.next_reminder_at) return;
+      // Bouw tekst.
+      const parts = [];
+      const fmt = (iso) => iso ? new Date(iso).toLocaleString('nl-NL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+      if (d.reminder_count > 0 && d.last_reminder_at) {
+        const kind = d.reminder_count === 1 ? 'r1' : (d.reminder_count === 2 ? 'r2' : `r${d.reminder_count}`);
+        parts.push(`${kind} verstuurd ${fmt(d.last_reminder_at)}`);
+      }
+      if (d.next_reminder_at && d.next_reminder_kind) {
+        parts.push(`${d.next_reminder_kind} volgt ${fmt(d.next_reminder_at)}`);
+      }
+      if (d.resume_at) parts.push(`hervat ${fmt(d.resume_at)}`);
+      if (parts.length === 0) parts.push('Gesprek gepauzeerd — geen reminders verstuurd');
+      textEl.textContent = 'No-reply cyclus: ' + parts.join(' · ');
+      banner.hidden = false;
+    } catch (_) { /* fail-soft */ }
+  }
+
+  // Wire de 3 knoppen — één keer bij mount (delegated aan window omdat we vroeg
+  // in de sessie kunnen zitten zonder alle inbox-elementen).
+  document.addEventListener('click', (e) => {
+    const followBtn = e.target.closest('#inboxFollowupBtn');
+    if (followBtn) return _wbxF4CreateFollowup();
+    const arrBtn = e.target.closest('#inboxArrangementBtn');
+    if (arrBtn) return _wbxF4OpenArrangement();
+    const pauseBtn = e.target.closest('#inboxPauseDunningBtn');
+    if (pauseBtn) return _wbxF4PauseDunning();
+  });
+
+  async function _wbxF4CreateFollowup() {
+    const cid = _wbxF4CurrentCustId;
+    if (!cid) return window.AgentShared?.showToast?.('Geen gekoppelde klant', 'error');
+    if (typeof wbxOpenConfirm !== 'function') {
+      // Fallback zonder confirm-modal.
+      return _wbxF4DoCreateFollowup(cid, '');
+    }
+    wbxOpenConfirm({
+      title: 'Bel-taak aanmaken',
+      body: 'Dit maakt een MANUAL_FOLLOWUP-taak in het Acties-werkcentrum voor deze klant. Geen bericht wordt verstuurd.',
+      confirmLabel: 'Aanmaken',
+      dangerLevel: 'neutral',
+      onConfirm: () => _wbxF4DoCreateFollowup(cid, 'Vanuit gesprek'),
+    });
+  }
+  async function _wbxF4DoCreateFollowup(cid, reason) {
+    try {
+      const r = await window.AgentShared.apiFetch('/api/tasks-create-followup', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_id: cid, source: 'inbox', reason }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast?.('Bel-taak aangemaakt', 'success');
+    } catch (e) {
+      window.AgentShared?.showToast?.('Bel-taak aanmaken mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+
+  function _wbxF4OpenArrangement() {
+    const cid = _wbxF4CurrentCustId;
+    if (!cid) return window.AgentShared?.showToast?.('Geen gekoppelde klant', 'error');
+    // Open klant-dossier in brede drawer — daar staat "Betaalafspraak vastleggen"
+    // + "Vraag Joost" + "Sluit dossier" (bestaande case-sheet actie-balk).
+    if (typeof openCaseSheet === 'function') {
+      openCaseSheet(cid, { wideDrawerMode: true });
+    } else {
+      window.AgentShared?.showToast?.('Kan klant-dossier niet openen', 'error');
+    }
+  }
+
+  async function _wbxF4PauseDunning() {
+    const cid = _wbxF4CurrentCustId;
+    if (!cid) return window.AgentShared?.showToast?.('Geen gekoppelde klant', 'error');
+    if (typeof wbxOpenConfirm !== 'function') {
+      return _wbxF4DoPauseDunning(cid);
+    }
+    wbxOpenConfirm({
+      title: 'Aanmaan-flow pauzeren',
+      body: 'De actieve dunning-run voor deze klant wordt gepauzeerd (status → paused). Geen aanmaningen worden verstuurd tot je hervat via klant-dossier of via de acties-flow.',
+      confirmLabel: 'Pauzeren',
+      dangerLevel: 'warn',
+      onConfirm: () => _wbxF4DoPauseDunning(cid),
+    });
+  }
+  async function _wbxF4DoPauseDunning(cid) {
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-dunning-pause-by-customer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_id: cid, reason: 'manual_pause_from_inbox' }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      const msg = d.previous_status === 'paused' ? 'Was al gepauzeerd' : 'Aanmaan-flow gepauzeerd';
+      window.AgentShared?.showToast?.(msg, 'success');
+    } catch (e) {
+      window.AgentShared?.showToast?.('Pauzeren mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+
+  // Init: wire observer zodra DOM klaar is.
+  function _wbxF4Init() {
+    _wbxF4WireInboxObserver();
+    // Als de user van tab wisselt naar inbox, is de observer al gewired en
+    // vuurt 'ie zodra inboxThreadName gevuld wordt.
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _wbxF4Init);
+  else _wbxF4Init();
+
+  // ═════════════════════════════════════════════════════════════════════
+  //   FASE 4 — Blok 3: unified inbox (WhatsApp + e-mail) achter feature-flag.
+  //
+  //   Gedrag:
+  //   • Flag UIT (default) → EXACT huidige inbox. Deze code doet NIETS.
+  //   • Flag AAN + conv.customer_id present → na de bestaande WA-render
+  //     wordt #inboxMessages vervangen door een unified thread (WA + e-mail
+  //     chronologisch door elkaar, kanaal-indicator per bubble).
+  //   • Compose-balk blijft de bestaande WA-send gebruiken. E-mail-bubbles
+  //     krijgen een "↩ Reply per e-mail"-knop die een mailto: opent
+  //     (SMTP-send bestaat niet in de codebase; expliciet als vervolg-PR).
+  //
+  //   Kill-switch is server-side: /api/finance-inbox-feature-flags leest
+  //   joost_config.feature_flags.unified_inbox_enabled. Zet 'em terug naar
+  //   false in Supabase → volgende UI-refresh valt terug op de bestaande
+  //   inbox. Geen code-deploy nodig.
+  // ═════════════════════════════════════════════════════════════════════
+  let _wbxF4UnifiedFlag = null; // null = nog niet gefetched; true/false = bekend
+  let _wbxF4UnifiedFlagFetchedAt = 0;
+
+  async function _wbxF4EnsureUnifiedFlag() {
+    // Cache flag 60s in-memory zodat we niet elke conv-switch een fetch doen.
+    if (_wbxF4UnifiedFlag !== null && (Date.now() - _wbxF4UnifiedFlagFetchedAt) < 60_000) {
+      return _wbxF4UnifiedFlag;
+    }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-inbox-feature-flags');
+      if (!r.ok) { _wbxF4UnifiedFlag = false; _wbxF4UnifiedFlagFetchedAt = Date.now(); return false; }
+      const d = await r.json().catch(() => ({}));
+      _wbxF4UnifiedFlag = d?.unified_inbox_enabled === true;
+      _wbxF4UnifiedFlagFetchedAt = Date.now();
+      return _wbxF4UnifiedFlag;
+    } catch (_) {
+      _wbxF4UnifiedFlag = false;
+      _wbxF4UnifiedFlagFetchedAt = Date.now();
+      return false;
+    }
+  }
+
+  // Hook in het bestaande _wbxF4OnConvChanged: als flag AAN, doe unified render.
+  // We patchen niet het bestaande openInboxConv — we wachten tot de WA-render
+  // klaar is, checken de flag, en vervangen dan de inhoud van #inboxMessages
+  // door de unified render. Bij flag UIT: no-op = bestaande inbox intact.
+  const _origWbxF4OnConvChanged = _wbxF4OnConvChanged;
+  _wbxF4OnConvChanged = async function () {
+    _origWbxF4OnConvChanged();
+    // Wacht kort tot de bestaande WA-render klaar is (loadInboxMessages doet 'em
+    // asynchroon; we polling-triggeren pas nadat #inboxMessages ge-render'd is).
+    const convId = typeof _inboxActiveConvId !== 'undefined' ? _inboxActiveConvId : null;
+    if (!convId || !_wbxF4CurrentCustId) return;
+    const enabled = await _wbxF4EnsureUnifiedFlag();
+    if (!enabled) return; // flag UIT = geen override
+    // Delay 250ms zodat de bestaande WA-render zijn eerste paint heeft gedaan.
+    setTimeout(() => _wbxF4LoadUnifiedThread(convId), 250);
+  };
+
+  async function _wbxF4LoadUnifiedThread(convId) {
+    if (!convId) return;
+    // Extra guard: als user ondertussen switched, niet renderen.
+    if (typeof _inboxActiveConvId !== 'undefined' && _inboxActiveConvId !== convId) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-thread-unified?conversation_id=' + encodeURIComponent(convId));
+      if (!r.ok) return; // fail-soft — bestaande WA-render blijft staan
+      const d = await r.json().catch(() => ({}));
+      if (typeof _inboxActiveConvId !== 'undefined' && _inboxActiveConvId !== convId) return;
+      _wbxF4RenderUnifiedThread(d?.items || [], d?.counts || {});
+    } catch (_) { /* fail-soft */ }
+  }
+
+  function _wbxF4RenderUnifiedThread(items, counts) {
+    const container = document.getElementById('inboxMessages');
+    if (!container) return;
+    // Als er 0 e-mails zijn, laat de bestaande WA-render met rust (geen
+    // toegevoegde waarde in unified mode).
+    if (!Number(counts.email || 0)) return;
+
+    const escHtml = (typeof esc === 'function') ? esc : ((s) => String(s ?? ''));
+    const fmt = (iso) => iso ? new Date(iso).toLocaleString('nl-NL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+
+    const html = items.map((it) => {
+      const isEmail = it.channel === 'email';
+      const align = it.direction === 'outbound' ? 'flex-end' : 'flex-start';
+      const bg = it.direction === 'outbound' ? 'var(--accent-cyan-soft, #e0f2fe)' : 'var(--bg-elev, #f3f4f6)';
+      const chanIcon = isEmail ? '✉️' : '💬';
+      const chanLabel = isEmail ? 'E-mail' : 'WhatsApp';
+      const subject = isEmail && it.meta?.subject ? `<div style="font-size:11.5px;font-weight:600;color:var(--text);margin-bottom:4px">${escHtml(it.meta.subject)}</div>` : '';
+      const bodyLen = (it.body || '').length;
+      const bodyTrunc = bodyLen > 800 ? (it.body.slice(0, 800) + '…') : it.body;
+      const emailFrom = isEmail && it.meta?.from_address ? `<div style="font-size:11px;color:var(--text-faint);margin-bottom:4px">van ${escHtml(it.meta.from_name || it.meta.from_address)}</div>` : '';
+      // Reply-knop op elke email-bubble. Echte SMTP-send via /api/send-email
+      // (Strato) als de user email.reply.send permission heeft; anders val
+      // terug op mailto: link. RBAC-check gebeurt lazy in de click-handler
+      // zodat we niet elke render blokkeren op permissions-load.
+      const replyBtn = isEmail
+        ? `<div style="margin-top:6px"><button class="sr-abtn"
+             type="button"
+             data-f4-email-reply="1"
+             data-f4-to="${escHtml(it.meta?.from_address || '')}"
+             data-f4-from-name="${escHtml(it.meta?.from_name || '')}"
+             data-f4-subject="${escHtml(it.meta?.subject || '')}"
+             data-f4-src-mailbox="${escHtml(it.meta?.mailbox || '')}"
+             data-f4-src-imap-uid="${escHtml(it.meta?.imap_uid || '')}"
+             data-f4-src-composite="${escHtml(it.meta?.email_id_composite || '')}"
+             data-f4-msg-id="${escHtml(it.id)}"
+             data-f4-quote-body="${escHtml((it.body || '').slice(0, 2000))}"
+             data-f4-quote-at="${escHtml(fmt(it.at))}"
+             style="font-size:11px;padding:4px 8px"
+             title="Beantwoord per e-mail via administratie@ (Strato SMTP)"
+           ><i class="ti ti-mail-forward"></i> Beantwoord per e-mail</button></div>`
+        : '';
+
+      return `
+        <div style="display:flex;flex-direction:column;align-items:${align};margin:8px 12px">
+          <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">${chanIcon} ${escHtml(chanLabel)} · ${escHtml(fmt(it.at))}</div>
+          <div style="max-width:82%;background:${bg};padding:10px 13px;border-radius:12px;font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word">
+            ${emailFrom}${subject}${escHtml(bodyTrunc)}
+            ${replyBtn}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Header-badge om te tonen dat unified mode actief is.
+    const header = `<div style="padding:6px 12px;background:var(--bg-elev,#f3f4f6);border-bottom:1px solid var(--border);font-size:11px;color:var(--text-dim);text-align:center">
+      Unified inbox actief · WhatsApp: ${counts.whatsapp || 0} · E-mail: ${counts.email || 0}
+    </div>`;
+    container.innerHTML = header + html;
+    // Scroll naar laatste bericht.
+    container.scrollTop = container.scrollHeight;
+  }
+
+  // ── Reply-flow (fase 4G) ───────────────────────────────────────────
+  // Delegated click op "Beantwoord per e-mail". Twee paden:
+  //   1. Als user email.reply.send permission heeft → open reply-compose
+  //      modal, verstuur via echte SMTP (Strato) via /api/send-email.
+  //   2. Als geen permission of RBAC-load faalt → fallback naar mailto:
+  //      (huidig gedrag pre-fase-4G).
+  // Permissie wordt LAZY gecheckt bij klik (niet elke render) zodat de
+  // knop altijd render'd wordt ongeacht permission-load-timing.
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-f4-email-reply]');
+    if (!btn) return;
+    const to           = btn.getAttribute('data-f4-to') || '';
+    const fromName     = btn.getAttribute('data-f4-from-name') || '';
+    const subjectRaw   = btn.getAttribute('data-f4-subject') || '';
+    const srcMailbox   = btn.getAttribute('data-f4-src-mailbox') || '';
+    const srcImapUid   = btn.getAttribute('data-f4-src-imap-uid') || '';
+    const srcComposite = btn.getAttribute('data-f4-src-composite') || '';
+    const msgId        = btn.getAttribute('data-f4-msg-id') || '';
+    const quoteBody    = btn.getAttribute('data-f4-quote-body') || '';
+    const quoteAt      = btn.getAttribute('data-f4-quote-at') || '';
+    if (!to) {
+      window.AgentShared?.showToast?.('Geen e-mailadres beschikbaar', 'error');
+      return;
+    }
+    const subject = (subjectRaw.startsWith('RE:') || subjectRaw.startsWith('Re:')) ? subjectRaw : ('Re: ' + subjectRaw);
+
+    // Bepaal composite email_id (bij voorkeur uit endpoint-meta; fallback bouwen).
+    const emailIdComposite = srcComposite || (srcMailbox && srcImapUid ? `${srcMailbox}:${srcImapUid}` : '');
+
+    // RBAC-check. Fail-open in de zin dat we ALTIJD naar mailto: vallen als
+    // we niet kunnen bevestigen dat de user de permission heeft — de mailto
+    // is de veilige fallback (opent alleen mailclient, geen SMTP).
+    let canSend = false;
+    try {
+      if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
+        await window.RBAC.ensurePermissionsLoaded();
+        canSend = !!(window.RBAC.canSync && window.RBAC.canSync('email.reply.send'));
+      }
+    } catch (_) { canSend = false; }
+
+    if (canSend && emailIdComposite) {
+      _wbxF4OpenReplyModal({
+        to, fromName, subject, emailIdComposite, quoteBody, quoteAt, msgId,
+      });
+    } else {
+      // Fallback: mailto:-link (huidig gedrag, veilig).
+      const mailtoUrl = 'mailto:' + encodeURIComponent(to) + '?subject=' + encodeURIComponent(subject);
+      window.open(mailtoUrl, '_blank');
+      if (msgId) {
+        window.AgentShared.apiFetch('/api/email-actions', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email_id: msgId, action: 'reply_sent' }),
+        }).catch(() => { /* fail-soft */ });
+      }
+    }
+  });
+
+  // Reply-compose modal (SMTP via /api/send-email, mailbox = administratie@).
+  function _wbxF4OpenReplyModal({ to, fromName, subject, emailIdComposite, quoteBody, quoteAt, msgId }) {
+    const FROM_MAILBOX = 'administratie@deforexopleiding.nl';
+    // Quote-block: standaard body-prefill met een quote van het origineel.
+    const quoteLine = quoteAt ? `Op ${quoteAt} schreef ${fromName || to}:` : `Origineel bericht van ${fromName || to}:`;
+    const quoted = (quoteBody || '')
+      .split('\n')
+      .map((line) => '> ' + line)
+      .join('\n');
+    const initialBody = `\n\n${quoteLine}\n${quoted}\n`;
+
+    const scrim = document.createElement('div');
+    scrim.style.cssText = 'position:fixed;inset:0;background:rgba(14,19,28,.44);z-index:2100;display:flex;align-items:center;justify-content:center;padding:20px';
+    scrim.innerHTML = `
+      <div style="background:var(--wbx-bg,#fff);color:var(--wbx-ink,#06181f);border-radius:12px;padding:22px 24px;max-width:640px;width:100%;box-shadow:0 24px 64px rgba(0,0,0,.28);font-family:'Inter',system-ui,sans-serif;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <i class="ti ti-mail-forward" style="font-size:20px;color:#0ea5e9"></i>
+          <h3 style="margin:0;font-size:17px;font-weight:600;flex:1">Beantwoord per e-mail</h3>
+          <button type="button" data-f4r-cancel style="background:transparent;border:none;font-size:18px;cursor:pointer;color:var(--wbx-muted,#48585f)" title="Sluiten (Esc)">✕</button>
+        </div>
+        <div style="font-size:12.5px;color:var(--wbx-muted,#48585f);line-height:1.5">
+          <div><strong>Van:</strong> ${esc(FROM_MAILBOX)} (Strato)</div>
+          <div><strong>Naar:</strong> ${esc(to)}</div>
+          <div><strong>Onderwerp:</strong> <span id="f4rSubject">${esc(subject)}</span></div>
+        </div>
+        <label style="font-size:12px;color:var(--wbx-muted,#48585f)">Onderwerp aanpassen (optioneel):</label>
+        <input type="text" id="f4rSubjectInput" value="${esc(subject)}" style="width:100%;padding:8px 10px;border:1px solid var(--wbx-border,#dfe8ec);border-radius:6px;font-size:13px;font-family:inherit;color:inherit;background:var(--wbx-surface,#fff)" />
+        <label style="font-size:12px;color:var(--wbx-muted,#48585f)">Bericht:</label>
+        <textarea id="f4rBody" rows="10" placeholder="Type je antwoord…" style="width:100%;padding:10px 12px;border:1px solid var(--wbx-border,#dfe8ec);border-radius:6px;font-size:13.5px;line-height:1.5;resize:vertical;font-family:inherit;color:inherit;background:var(--wbx-surface,#fff)"></textarea>
+        <div style="font-size:11px;color:var(--wbx-faint,#8896a0);line-height:1.4">
+          Verstuurd via Strato SMTP. De originele mail wordt automatisch als "beantwoord" gemarkeerd.
+          Threading-headers (In-Reply-To / References) zorgen dat het antwoord in Gmail/Outlook onder het origineel groepeert.
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
+          <button type="button" data-f4r-cancel style="padding:9px 14px;border:1px solid var(--wbx-border,#dfe8ec);border-radius:6px;background:var(--wbx-surface,#fff);cursor:pointer;font-size:13px">Annuleren</button>
+          <button type="button" data-f4r-send class="wbx-primary" style="padding:9px 16px;border:1px solid #0ea5e9;border-radius:6px;background:#0ea5e9;color:#fff;cursor:pointer;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px"><i class="ti ti-send"></i> Versturen</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(scrim);
+    const bodyEl    = scrim.querySelector('#f4rBody');
+    const subjectEl = scrim.querySelector('#f4rSubjectInput');
+    const sendBtn   = scrim.querySelector('[data-f4r-send]');
+    bodyEl.value = initialBody;
+    // Focus op body en cursor bovenaan (vóór de quote).
+    setTimeout(() => { bodyEl.focus(); bodyEl.setSelectionRange(0, 0); }, 30);
+
+    const close = () => { try { document.body.removeChild(scrim); } catch (_) {} };
+    scrim.addEventListener('click', (ev) => {
+      if (ev.target === scrim) return close();
+      if (ev.target.closest('[data-f4r-cancel]')) return close();
+      if (ev.target.closest('[data-f4r-send]')) return _wbxF4DoSendReply({
+        FROM_MAILBOX, to, subjectEl, bodyEl, sendBtn, emailIdComposite, msgId, close,
+      });
+    });
+    const escHandler = (ev) => {
+      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escHandler); }
+    };
+    document.addEventListener('keydown', escHandler);
+  }
+
+  async function _wbxF4DoSendReply({ FROM_MAILBOX, to, subjectEl, bodyEl, sendBtn, emailIdComposite, msgId, close }) {
+    const subject = String(subjectEl.value || '').trim();
+    const text    = String(bodyEl.value || '').trim();
+    if (!subject) { window.AgentShared?.showToast?.('Onderwerp mag niet leeg zijn', 'error'); subjectEl.focus(); return; }
+    if (!text)    { window.AgentShared?.showToast?.('Bericht mag niet leeg zijn', 'error'); bodyEl.focus(); return; }
+
+    sendBtn.disabled = true;
+    const originalHtml = sendBtn.innerHTML;
+    sendBtn.innerHTML = '<i class="ti ti-loader-2"></i> Versturen…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from_mailbox: FROM_MAILBOX,
+          to,
+          subject,
+          text,
+          email_id: emailIdComposite || null,   // triggert reply-modus + threading + requires_action=false
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast?.('E-mail verstuurd via ' + FROM_MAILBOX, 'success');
+      // Best-effort marker (voor legacy email-actions filter).
+      if (msgId) {
+        window.AgentShared.apiFetch('/api/email-actions', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email_id: msgId, action: 'reply_sent' }),
+        }).catch(() => { /* fail-soft */ });
+      }
+      close();
+      // Refresh unified thread zodat de gebruiker de update ziet.
+      const convId = typeof _inboxActiveConvId !== 'undefined' ? _inboxActiveConvId : null;
+      if (convId && _wbxF4CurrentCustId) setTimeout(() => _wbxF4LoadUnifiedThread(convId), 500);
+    } catch (e) {
+      window.AgentShared?.showToast?.('Versturen mislukt: ' + (e?.message || 'onbekend'), 'error');
+      sendBtn.disabled = false;
+      sendBtn.innerHTML = originalHtml;
     }
   }
 
