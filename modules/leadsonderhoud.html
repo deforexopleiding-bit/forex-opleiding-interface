@@ -25,12 +25,15 @@
     .lo-kop p { font-size:13px; color:var(--text-dim); margin-top:2px; }
     .lo-kop-r { margin-left:auto; display:flex; gap:8px; align-items:center; }
 
-    /* schermwissel */
-    .lo-tabs { display:flex; gap:4px; border-bottom:1px solid var(--border); margin-bottom:18px; flex-wrap:wrap; }
-    .lo-tab { padding:9px 14px; font-size:13.5px; color:var(--text-dim); border-bottom:2px solid transparent;
-      cursor:pointer; background:none; }
+    /* schermwissel — zelfde onderstreep-stijl als de tabs elders in het CRM
+       (ev-tab in events.html): transparante achtergrond, geen rand, alleen een
+       gekleurde onderlijn onder de actieve tab. */
+    .lo-tabs { display:flex; gap:6px; border-bottom:1px solid var(--border); margin-bottom:18px; flex-wrap:wrap; align-items:center; }
+    .lo-tab { background:transparent; border:none; padding:10px 14px; font-size:13.5px; font-weight:600;
+      color:var(--text-dim); cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px;
+      display:inline-flex; align-items:center; gap:6px; font-family:inherit; }
     .lo-tab:hover { color:var(--text); }
-    .lo-tab.on { color:var(--brand-azure, #1e6cd6); border-bottom-color:var(--brand-azure, #1e6cd6); font-weight:600; }
+    .lo-tab.on { color:var(--brand-primary, #093d54); border-bottom-color:var(--brand-primary, #093d54); }
 
     /* kpi's */
     .lo-kpis { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin-bottom:16px; }
