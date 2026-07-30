@@ -23125,6 +23125,7 @@
     _caseState.suggestion      = null;
     _caseState.suggestionAge   = null;
     _caseState.timeline        = { items: [], loading: false, error: null, submitting: false, showAll: false };
+    _caseState.wik             = { briefs: [], loading: false, error: null, busy: false };
     _caseState.open            = true;
 
     _caseEnsurePanel();
@@ -23146,6 +23147,8 @@
     _caseRender();
     // Tijdlijn parallel na eerste render (blokkeert de sheet niet).
     _caseLoadTimeline(customerId).catch(() => {});
+    // FASE 6: WIK-brieven parallel laden voor de status-widget (fail-soft).
+    _caseLoadWik(customerId).catch(() => {});
     // FIX 3 — auto-open outcome-modal als de sheet vanuit de belknop op
     // een MANUAL_FOLLOWUP-rij is gestart. cust komt uit de detail-fetch
     // die net gelukt is; kan null zijn bij een fout — in dat geval slaan
@@ -23386,6 +23389,7 @@
             ${joostBlock}
           </div>
         </div>
+        ${_caseWikCardHtml()}
         ${_caseTimelineCardHtml()}
       </div>
 
@@ -23423,6 +23427,7 @@
     _caseWireBellenCard();
     // Tijdlijn-kaart handlers (notitie posten, refresh).
     _caseWireTimelineCard();
+    _caseWireWikCard();
   }
 
   // ═════════════════════════════════════════════════════════════════════════
@@ -23508,6 +23513,219 @@
         else if (act === 'less')    { _caseState.timeline.showAll = false; _caseRender(); }
       });
     });
+  }
+
+  // ═════════════════════════════════════════════════════════════════════
+  //   FASE 6 — WIK-brief status-widget in case-sheet
+  //   Toont de bewaarde WIK-brief(en) voor deze klant + acties:
+  //     - Genereer WIK-brief (NL/BE) → download + persistent bewaren
+  //     - Mail bewaarde brief via Strato (administratie@)
+  //     - Markeer verstuurd per post
+  //     - Download bewijs (signed URL naar bewaarde PDF)
+  //   Bron: /api/dunning-briefs-list, /api/incasso-pre-brief,
+  //         /api/dunning-brief-email-send, /api/dunning-brief-mark-post.
+  // ═════════════════════════════════════════════════════════════════════
+  async function _caseLoadWik(cid) {
+    if (!cid) return;
+    _caseState.wik = { briefs: [], loading: true, error: null, busy: false };
+    _caseRender();
+    try {
+      const r = await window.AgentShared.apiFetch('/api/dunning-briefs-list?customer_id=' + encodeURIComponent(cid));
+      const d = await r.json().catch(() => ({}));
+      if (_caseState.cid !== cid) return;
+      if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+      _caseState.wik = {
+        briefs : Array.isArray(d.items) ? d.items : [],
+        loading: false, error: null, busy: false,
+      };
+    } catch (e) {
+      _caseState.wik = { briefs: [], loading: false, error: e?.message || 'Onbekende fout', busy: false };
+    }
+    _caseRender();
+  }
+
+  function _caseWikCardHtml() {
+    const w = _caseState.wik || { briefs: [], loading: false, error: null };
+    const busy = w.busy ? 'disabled' : '';
+    let inner;
+    if (w.loading) {
+      inner = `<div style="color:var(--wbx-faint);font-size:13px;padding:4px 0">WIK-bewijs laden…</div>`;
+    } else if (w.error) {
+      inner = `<div style="color:var(--wbx-s-inc-tx);font-size:13px">Fout: ${esc(w.error)}</div>`;
+    } else if (!w.briefs.length) {
+      inner = `
+        <p style="color:var(--wbx-faint);font-size:13px;margin:0 0 8px">Nog geen WIK-brief verstuurd voor deze klant.</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="wbx-btn wbx-primary wbx-sm" type="button" data-wbx-wik="gen-nl" ${busy} title="Genereer WIK-14-dagenbrief (NL), download + bewaar als bewijs">📄 Genereer NL</button>
+          <button class="wbx-btn wbx-sm" type="button" data-wbx-wik="gen-be" ${busy} title="Genereer eerste (kosteloze) herinnering (BE), download + bewaar als bewijs">📄 Genereer BE</button>
+        </div>`;
+    } else {
+      // Toon de meest recente brief prominent + evt. eerdere als kleine lijst.
+      const [latest, ...rest] = w.briefs;
+      const genAt = latest.generated_at ? new Date(latest.generated_at).toLocaleString('nl-NL') : '—';
+      let statusLine;
+      if (latest.sent_via === 'email') {
+        statusLine = `<span style="color:var(--wbx-s-paid-tx)">✓ Verstuurd per e-mail op ${esc(new Date(latest.sent_at).toLocaleString('nl-NL'))} naar ${esc(latest.sent_to_email || '?')}</span>`;
+      } else if (latest.sent_via === 'post') {
+        statusLine = `<span style="color:var(--wbx-s-paid-tx)">✓ Verstuurd per post op ${esc(new Date(latest.sent_at).toLocaleString('nl-NL'))}</span>`;
+      } else {
+        statusLine = `<span style="color:var(--wbx-muted)">Nog niet verstuurd — alleen gedownload</span>`;
+      }
+      const errLine = latest.send_error
+        ? `<div style="color:var(--wbx-s-inc-tx);font-size:12px;margin-top:4px">⚠ Laatste mail-poging faalde: ${esc(latest.send_error)}</div>`
+        : '';
+      const dl = latest.download_url
+        ? `<a href="${esc(latest.download_url)}" target="_blank" rel="noopener" class="wbx-btn wbx-sm" title="Download het BEWAARDE bewijs (exact-verstuurde PDF)">↓ Bewijs</a>`
+        : `<span style="color:var(--wbx-s-inc-tx);font-size:12px">bewijs niet ophaalbaar</span>`;
+      const emailBtn = latest.sent_via
+        ? ''
+        : `<button class="wbx-btn wbx-primary wbx-sm" type="button" data-wbx-wik="email" data-wbx-wik-id="${esc(latest.id)}" ${busy} title="Mail de bewaarde PDF via administratie@ (Strato)">✉ Mail via administratie@</button>`;
+      const markBtn = latest.sent_via
+        ? ''
+        : `<button class="wbx-btn wbx-sm" type="button" data-wbx-wik="mark-post" data-wbx-wik-id="${esc(latest.id)}" ${busy} title="Ik heb 'm zelf verstuurd per post — markeer verstuurd">✉ Verstuurd per post</button>`;
+      const restList = rest.length
+        ? `<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--wbx-faint)">${rest.length} eerdere brief(en)</summary>` +
+          rest.map((b) => {
+            const at = b.generated_at ? new Date(b.generated_at).toLocaleDateString('nl-NL') : '—';
+            const via = b.sent_via ? `via ${b.sent_via}` : 'niet verstuurd';
+            const link = b.download_url ? `<a href="${esc(b.download_url)}" target="_blank" rel="noopener">↓ PDF</a>` : '';
+            return `<div style="font-size:12px;color:var(--wbx-muted);padding:4px 0">${esc(at)} · ${esc(b.country)} · ${esc(via)} ${link}</div>`;
+          }).join('') + `</details>`
+        : '';
+      inner = `
+        <div style="font-size:13px;line-height:1.5">
+          <div>Laatst gegenereerd: <strong>${esc(genAt)}</strong> · land <strong>${esc(latest.country)}</strong></div>
+          <div style="margin-top:4px">${statusLine}</div>
+          ${errLine}
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+          ${dl}
+          ${emailBtn}
+          ${markBtn}
+          <button class="wbx-btn wbx-sm" type="button" data-wbx-wik="gen-nl" ${busy} title="Genereer een NIEUWE WIK-brief (NL) — vervangt niet, is een extra bewijs">↻ Nieuwe NL</button>
+          <button class="wbx-btn wbx-sm" type="button" data-wbx-wik="gen-be" ${busy} title="Genereer een NIEUWE WIK-brief (BE) — vervangt niet, is een extra bewijs">↻ Nieuwe BE</button>
+        </div>
+        ${restList}`;
+    }
+    return `
+      <div class="wbx-card">
+        <h4>WIK-brief — bewijs</h4>
+        ${inner}
+      </div>`;
+  }
+
+  function _caseWireWikCard() {
+    const sheet = document.getElementById('caseSheet');
+    if (!sheet) return;
+    sheet.querySelectorAll('[data-wbx-wik]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const act = btn.getAttribute('data-wbx-wik');
+        const bid = btn.getAttribute('data-wbx-wik-id') || null;
+        if      (act === 'gen-nl')    _caseGenerateWikBrief('NL');
+        else if (act === 'gen-be')    _caseGenerateWikBrief('BE');
+        else if (act === 'email')     _caseEmailWikBrief(bid);
+        else if (act === 'mark-post') _caseMarkPostWikBrief(bid);
+      });
+    });
+  }
+
+  async function _caseGenerateWikBrief(country) {
+    const cid = _caseState.cid;
+    if (!cid) return;
+    if (typeof wbxOpenConfirm !== 'function') return _caseDoGenerateWik(cid, country);
+    wbxOpenConfirm({
+      title: `WIK-brief ${country} genereren`,
+      body: `Genereert de brief, slaat 'm op als juridisch bewijs én downloadt de PDF. Er wordt nog niks verstuurd — pas na "Mail" of "Markeer per post" telt 'ie als verzonden.`,
+      confirmLabel: 'Genereer + download',
+      dangerLevel: 'neutral',
+      onConfirm: () => _caseDoGenerateWik(cid, country),
+    });
+  }
+  async function _caseDoGenerateWik(cid, country) {
+    _caseState.wik.busy = true; _caseRender();
+    try {
+      const r = await window.AgentShared.apiFetch('/api/incasso-pre-brief', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_id: cid, country }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d?.error || 'HTTP ' + r.status);
+      }
+      // PDF binnenhalen en downloaden.
+      const blob = await r.blob();
+      const briefId = r.headers.get('X-Brief-Id') || '';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `WIK-brief_${country}_${cid.slice(0, 8)}.pdf`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      window.AgentShared?.showToast?.('WIK-brief gegenereerd + bewaard' + (briefId ? ` (id: ${briefId.slice(0, 8)})` : ''), 'success');
+      _caseLoadWik(cid).catch(() => {});
+    } catch (e) {
+      _caseState.wik.busy = false; _caseRender();
+      window.AgentShared?.showToast?.('Genereren mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+
+  async function _caseEmailWikBrief(briefId) {
+    if (!briefId) return;
+    const cid = _caseState.cid;
+    const custEmail = _caseState.detail?.customer?.email || '(geen mailadres)';
+    if (typeof wbxOpenConfirm !== 'function') return _caseDoEmailWik(briefId, cid);
+    wbxOpenConfirm({
+      title: 'WIK-brief mailen',
+      body: `De BEWAARDE PDF wordt via administratie@deforexopleiding.nl verstuurd naar ${custEmail}. Er wordt géén nieuwe brief gemaakt — de exact-bewaarde PDF gaat als bijlage.`,
+      confirmLabel: 'Verstuur nu',
+      dangerLevel: 'warn',
+      onConfirm: () => _caseDoEmailWik(briefId, cid),
+    });
+  }
+  async function _caseDoEmailWik(briefId, cid) {
+    _caseState.wik.busy = true; _caseRender();
+    try {
+      const r = await window.AgentShared.apiFetch('/api/dunning-brief-email-send', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brief_id: briefId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+      window.AgentShared?.showToast?.('Mail verstuurd naar ' + (d.sent_to_email || '?'), 'success');
+      _caseLoadWik(cid).catch(() => {});
+    } catch (e) {
+      _caseState.wik.busy = false; _caseRender();
+      window.AgentShared?.showToast?.('Mail mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+
+  async function _caseMarkPostWikBrief(briefId) {
+    if (!briefId) return;
+    const cid = _caseState.cid;
+    if (typeof wbxOpenConfirm !== 'function') return _caseDoMarkPost(briefId, cid);
+    wbxOpenConfirm({
+      title: 'Verstuurd per post markeren',
+      body: `Bevestig dat je de bewaarde PDF hebt geprint en verstuurd per reguliere post. Dit zet sent_via='post' + sent_at=nu.`,
+      confirmLabel: 'Ja, gemarkeerd',
+      dangerLevel: 'warn',
+      onConfirm: () => _caseDoMarkPost(briefId, cid),
+    });
+  }
+  async function _caseDoMarkPost(briefId, cid) {
+    _caseState.wik.busy = true; _caseRender();
+    try {
+      const r = await window.AgentShared.apiFetch('/api/dunning-brief-mark-post', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brief_id: briefId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+      window.AgentShared?.showToast?.('Gemarkeerd als verstuurd per post', 'success');
+      _caseLoadWik(cid).catch(() => {});
+    } catch (e) {
+      _caseState.wik.busy = false; _caseRender();
+      window.AgentShared?.showToast?.('Markeren mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
   }
 
   async function _caseLoadTimeline(cid) {
