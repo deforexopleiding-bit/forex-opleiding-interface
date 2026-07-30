@@ -63,6 +63,28 @@ export default async function handler(req, res) {
     },
   });
 
+  // ── Threading-headers (fase 4G) ──────────────────────────────────────
+  // Als email_id de composite '<mailbox>:<imap_uid>' is, zoek de message_id
+  // van de bronmail op zodat we In-Reply-To + References kunnen zetten. Gmail/
+  // Outlook groeperen antwoorden dan onder het origineel. Fail-soft: bij
+  // ontbrekende message_id of DB-fout gaan we door zonder headers (huidig
+  // gedrag).
+  let inReplyToMid = null;
+  if (email_id && typeof email_id === 'string' && email_id.includes(':')) {
+    try {
+      const lastColon    = email_id.lastIndexOf(':');
+      const srcMailbox   = email_id.slice(0, lastColon);
+      const srcImapUid   = email_id.slice(lastColon + 1);
+      const { data: srcRow } = await supabase
+        .from('email_messages')
+        .select('message_id')
+        .eq('mailbox', srcMailbox)
+        .eq('imap_uid', srcImapUid)
+        .maybeSingle();
+      if (srcRow?.message_id) inReplyToMid = String(srcRow.message_id);
+    } catch (_) { /* fail-soft */ }
+  }
+
   try {
     const mailOpts = {
       from:    `"De Forex Opleiding" <${from_mailbox}>`,
@@ -74,6 +96,7 @@ export default async function handler(req, res) {
     if (html) mailOpts.html = html;
     if (cc)   mailOpts.cc   = cc;
     if (bcc)  mailOpts.bcc  = bcc;
+    if (inReplyToMid) { mailOpts.inReplyTo = inReplyToMid; mailOpts.references = inReplyToMid; }
 
     // Bijlagen meesturen als MIME-attachments
     if (Array.isArray(attachments) && attachments.length > 0) {

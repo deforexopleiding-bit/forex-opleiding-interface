@@ -84,11 +84,15 @@ export default async function handler(req, res) {
     if (waErr) throw new Error('whatsapp: ' + waErr.message);
 
     // 3) Email-messages voor gekoppelde klant (indien any).
+    // imap_uid + message_id worden meegegeven zodat de client de composite
+    // email_id ('<mailbox>:<imap_uid>') kan bouwen voor /api/send-email
+    // reply-modus, en het endpoint threading-headers kan zetten op basis van
+    // message_id.
     let emailMsgs = [];
     if (includeEmail && conv.customer_id) {
       const { data: eMsgs, error: eErr } = await supabaseAdmin
         .from('email_messages')
-        .select('id, mailbox, from_address, from_name, subject, snippet, body_text, body_html, date_received, message_id, category')
+        .select('id, mailbox, imap_uid, from_address, from_name, subject, snippet, body_text, body_html, date_received, message_id, category')
         .eq('customer_id', conv.customer_id)
         .order('date_received', { ascending: true });
       if (eErr) {
@@ -131,10 +135,12 @@ export default async function handler(req, res) {
         meta: {
           subject: m.subject,
           mailbox: m.mailbox,
+          imap_uid: m.imap_uid,                    // voor composite email_id
+          email_id_composite: (m.mailbox && m.imap_uid) ? `${m.mailbox}:${m.imap_uid}` : null,
           from_address: m.from_address,
           from_name: m.from_name,
           category: m.category,
-          message_id: m.message_id,
+          message_id: m.message_id,                // voor In-Reply-To / References
           has_html: !!m.body_html,
         },
       });

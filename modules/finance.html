@@ -29078,8 +29078,26 @@
       const bodyLen = (it.body || '').length;
       const bodyTrunc = bodyLen > 800 ? (it.body.slice(0, 800) + '…') : it.body;
       const emailFrom = isEmail && it.meta?.from_address ? `<div style="font-size:11px;color:var(--text-faint);margin-bottom:4px">van ${escHtml(it.meta.from_name || it.meta.from_address)}</div>` : '';
+      // Reply-knop op elke email-bubble. Echte SMTP-send via /api/send-email
+      // (Strato) als de user email.reply.send permission heeft; anders val
+      // terug op mailto: link. RBAC-check gebeurt lazy in de click-handler
+      // zodat we niet elke render blokkeren op permissions-load.
       const replyBtn = isEmail
-        ? `<div style="margin-top:6px"><button class="sr-abtn" type="button" data-f4-mailto="${escHtml(it.meta?.from_address || '')}" data-f4-subject="${escHtml(it.meta?.subject || '')}" data-f4-msg-id="${escHtml(it.id)}" style="font-size:11px;padding:4px 8px" title="Opent je mailclient met een concept-reply. SMTP-send zit niet in het platform."><i class="ti ti-mail-forward"></i> Reply per e-mail</button></div>`
+        ? `<div style="margin-top:6px"><button class="sr-abtn"
+             type="button"
+             data-f4-email-reply="1"
+             data-f4-to="${escHtml(it.meta?.from_address || '')}"
+             data-f4-from-name="${escHtml(it.meta?.from_name || '')}"
+             data-f4-subject="${escHtml(it.meta?.subject || '')}"
+             data-f4-src-mailbox="${escHtml(it.meta?.mailbox || '')}"
+             data-f4-src-imap-uid="${escHtml(it.meta?.imap_uid || '')}"
+             data-f4-src-composite="${escHtml(it.meta?.email_id_composite || '')}"
+             data-f4-msg-id="${escHtml(it.id)}"
+             data-f4-quote-body="${escHtml((it.body || '').slice(0, 2000))}"
+             data-f4-quote-at="${escHtml(fmt(it.at))}"
+             style="font-size:11px;padding:4px 8px"
+             title="Beantwoord per e-mail via administratie@ (Strato SMTP)"
+           ><i class="ti ti-mail-forward"></i> Beantwoord per e-mail</button></div>`
         : '';
 
       return `
@@ -29102,30 +29120,165 @@
     container.scrollTop = container.scrollHeight;
   }
 
-  // Delegated: klik op "Reply per e-mail" → mailto: openen + best-effort
-  // POST /api/email-actions {action:'reply_sent'} als marker.
-  document.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-f4-mailto]');
+  // ── Reply-flow (fase 4G) ───────────────────────────────────────────
+  // Delegated click op "Beantwoord per e-mail". Twee paden:
+  //   1. Als user email.reply.send permission heeft → open reply-compose
+  //      modal, verstuur via echte SMTP (Strato) via /api/send-email.
+  //   2. Als geen permission of RBAC-load faalt → fallback naar mailto:
+  //      (huidig gedrag pre-fase-4G).
+  // Permissie wordt LAZY gecheckt bij klik (niet elke render) zodat de
+  // knop altijd render'd wordt ongeacht permission-load-timing.
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-f4-email-reply]');
     if (!btn) return;
-    const to = btn.getAttribute('data-f4-mailto') || '';
-    const subjectRaw = btn.getAttribute('data-f4-subject') || '';
-    const msgId = btn.getAttribute('data-f4-msg-id') || '';
+    const to           = btn.getAttribute('data-f4-to') || '';
+    const fromName     = btn.getAttribute('data-f4-from-name') || '';
+    const subjectRaw   = btn.getAttribute('data-f4-subject') || '';
+    const srcMailbox   = btn.getAttribute('data-f4-src-mailbox') || '';
+    const srcImapUid   = btn.getAttribute('data-f4-src-imap-uid') || '';
+    const srcComposite = btn.getAttribute('data-f4-src-composite') || '';
+    const msgId        = btn.getAttribute('data-f4-msg-id') || '';
+    const quoteBody    = btn.getAttribute('data-f4-quote-body') || '';
+    const quoteAt      = btn.getAttribute('data-f4-quote-at') || '';
     if (!to) {
       window.AgentShared?.showToast?.('Geen e-mailadres beschikbaar', 'error');
       return;
     }
-    const subject = subjectRaw.startsWith('RE:') || subjectRaw.startsWith('Re:') ? subjectRaw : ('Re: ' + subjectRaw);
-    const mailtoUrl = 'mailto:' + encodeURIComponent(to) + '?subject=' + encodeURIComponent(subject);
-    // Open in nieuw tab; als mailclient niet reageert, gebruiker ziet niks — geen crash.
-    window.open(mailtoUrl, '_blank');
-    // Best-effort: markeer dat we een reply-poging deden (voor later filteren).
-    if (msgId) {
-      window.AgentShared.apiFetch('/api/email-actions', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email_id: msgId, action: 'reply_sent' }),
-      }).catch(() => { /* fail-soft */ });
+    const subject = (subjectRaw.startsWith('RE:') || subjectRaw.startsWith('Re:')) ? subjectRaw : ('Re: ' + subjectRaw);
+
+    // Bepaal composite email_id (bij voorkeur uit endpoint-meta; fallback bouwen).
+    const emailIdComposite = srcComposite || (srcMailbox && srcImapUid ? `${srcMailbox}:${srcImapUid}` : '');
+
+    // RBAC-check. Fail-open in de zin dat we ALTIJD naar mailto: vallen als
+    // we niet kunnen bevestigen dat de user de permission heeft — de mailto
+    // is de veilige fallback (opent alleen mailclient, geen SMTP).
+    let canSend = false;
+    try {
+      if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
+        await window.RBAC.ensurePermissionsLoaded();
+        canSend = !!(window.RBAC.canSync && window.RBAC.canSync('email.reply.send'));
+      }
+    } catch (_) { canSend = false; }
+
+    if (canSend && emailIdComposite) {
+      _wbxF4OpenReplyModal({
+        to, fromName, subject, emailIdComposite, quoteBody, quoteAt, msgId,
+      });
+    } else {
+      // Fallback: mailto:-link (huidig gedrag, veilig).
+      const mailtoUrl = 'mailto:' + encodeURIComponent(to) + '?subject=' + encodeURIComponent(subject);
+      window.open(mailtoUrl, '_blank');
+      if (msgId) {
+        window.AgentShared.apiFetch('/api/email-actions', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email_id: msgId, action: 'reply_sent' }),
+        }).catch(() => { /* fail-soft */ });
+      }
     }
   });
+
+  // Reply-compose modal (SMTP via /api/send-email, mailbox = administratie@).
+  function _wbxF4OpenReplyModal({ to, fromName, subject, emailIdComposite, quoteBody, quoteAt, msgId }) {
+    const FROM_MAILBOX = 'administratie@deforexopleiding.nl';
+    // Quote-block: standaard body-prefill met een quote van het origineel.
+    const quoteLine = quoteAt ? `Op ${quoteAt} schreef ${fromName || to}:` : `Origineel bericht van ${fromName || to}:`;
+    const quoted = (quoteBody || '')
+      .split('\n')
+      .map((line) => '> ' + line)
+      .join('\n');
+    const initialBody = `\n\n${quoteLine}\n${quoted}\n`;
+
+    const scrim = document.createElement('div');
+    scrim.style.cssText = 'position:fixed;inset:0;background:rgba(14,19,28,.44);z-index:2100;display:flex;align-items:center;justify-content:center;padding:20px';
+    scrim.innerHTML = `
+      <div style="background:var(--wbx-bg,#fff);color:var(--wbx-ink,#06181f);border-radius:12px;padding:22px 24px;max-width:640px;width:100%;box-shadow:0 24px 64px rgba(0,0,0,.28);font-family:'Inter',system-ui,sans-serif;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <i class="ti ti-mail-forward" style="font-size:20px;color:#0ea5e9"></i>
+          <h3 style="margin:0;font-size:17px;font-weight:600;flex:1">Beantwoord per e-mail</h3>
+          <button type="button" data-f4r-cancel style="background:transparent;border:none;font-size:18px;cursor:pointer;color:var(--wbx-muted,#48585f)" title="Sluiten (Esc)">✕</button>
+        </div>
+        <div style="font-size:12.5px;color:var(--wbx-muted,#48585f);line-height:1.5">
+          <div><strong>Van:</strong> ${esc(FROM_MAILBOX)} (Strato)</div>
+          <div><strong>Naar:</strong> ${esc(to)}</div>
+          <div><strong>Onderwerp:</strong> <span id="f4rSubject">${esc(subject)}</span></div>
+        </div>
+        <label style="font-size:12px;color:var(--wbx-muted,#48585f)">Onderwerp aanpassen (optioneel):</label>
+        <input type="text" id="f4rSubjectInput" value="${esc(subject)}" style="width:100%;padding:8px 10px;border:1px solid var(--wbx-border,#dfe8ec);border-radius:6px;font-size:13px;font-family:inherit;color:inherit;background:var(--wbx-surface,#fff)" />
+        <label style="font-size:12px;color:var(--wbx-muted,#48585f)">Bericht:</label>
+        <textarea id="f4rBody" rows="10" placeholder="Type je antwoord…" style="width:100%;padding:10px 12px;border:1px solid var(--wbx-border,#dfe8ec);border-radius:6px;font-size:13.5px;line-height:1.5;resize:vertical;font-family:inherit;color:inherit;background:var(--wbx-surface,#fff)"></textarea>
+        <div style="font-size:11px;color:var(--wbx-faint,#8896a0);line-height:1.4">
+          Verstuurd via Strato SMTP. De originele mail wordt automatisch als "beantwoord" gemarkeerd.
+          Threading-headers (In-Reply-To / References) zorgen dat het antwoord in Gmail/Outlook onder het origineel groepeert.
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
+          <button type="button" data-f4r-cancel style="padding:9px 14px;border:1px solid var(--wbx-border,#dfe8ec);border-radius:6px;background:var(--wbx-surface,#fff);cursor:pointer;font-size:13px">Annuleren</button>
+          <button type="button" data-f4r-send class="wbx-primary" style="padding:9px 16px;border:1px solid #0ea5e9;border-radius:6px;background:#0ea5e9;color:#fff;cursor:pointer;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px"><i class="ti ti-send"></i> Versturen</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(scrim);
+    const bodyEl    = scrim.querySelector('#f4rBody');
+    const subjectEl = scrim.querySelector('#f4rSubjectInput');
+    const sendBtn   = scrim.querySelector('[data-f4r-send]');
+    bodyEl.value = initialBody;
+    // Focus op body en cursor bovenaan (vóór de quote).
+    setTimeout(() => { bodyEl.focus(); bodyEl.setSelectionRange(0, 0); }, 30);
+
+    const close = () => { try { document.body.removeChild(scrim); } catch (_) {} };
+    scrim.addEventListener('click', (ev) => {
+      if (ev.target === scrim) return close();
+      if (ev.target.closest('[data-f4r-cancel]')) return close();
+      if (ev.target.closest('[data-f4r-send]')) return _wbxF4DoSendReply({
+        FROM_MAILBOX, to, subjectEl, bodyEl, sendBtn, emailIdComposite, msgId, close,
+      });
+    });
+    const escHandler = (ev) => {
+      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escHandler); }
+    };
+    document.addEventListener('keydown', escHandler);
+  }
+
+  async function _wbxF4DoSendReply({ FROM_MAILBOX, to, subjectEl, bodyEl, sendBtn, emailIdComposite, msgId, close }) {
+    const subject = String(subjectEl.value || '').trim();
+    const text    = String(bodyEl.value || '').trim();
+    if (!subject) { window.AgentShared?.showToast?.('Onderwerp mag niet leeg zijn', 'error'); subjectEl.focus(); return; }
+    if (!text)    { window.AgentShared?.showToast?.('Bericht mag niet leeg zijn', 'error'); bodyEl.focus(); return; }
+
+    sendBtn.disabled = true;
+    const originalHtml = sendBtn.innerHTML;
+    sendBtn.innerHTML = '<i class="ti ti-loader-2"></i> Versturen…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from_mailbox: FROM_MAILBOX,
+          to,
+          subject,
+          text,
+          email_id: emailIdComposite || null,   // triggert reply-modus + threading + requires_action=false
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast?.('E-mail verstuurd via ' + FROM_MAILBOX, 'success');
+      // Best-effort marker (voor legacy email-actions filter).
+      if (msgId) {
+        window.AgentShared.apiFetch('/api/email-actions', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email_id: msgId, action: 'reply_sent' }),
+        }).catch(() => { /* fail-soft */ });
+      }
+      close();
+      // Refresh unified thread zodat de gebruiker de update ziet.
+      const convId = typeof _inboxActiveConvId !== 'undefined' ? _inboxActiveConvId : null;
+      if (convId && _wbxF4CurrentCustId) setTimeout(() => _wbxF4LoadUnifiedThread(convId), 500);
+    } catch (e) {
+      window.AgentShared?.showToast?.('Versturen mislukt: ' + (e?.message || 'onbekend'), 'error');
+      sendBtn.disabled = false;
+      sendBtn.innerHTML = originalHtml;
+    }
+  }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
