@@ -152,7 +152,61 @@ export default async function handler(req, res) {
       } catch (e) { reject(e); }
     });
 
-    // 5) Log — de create-guard checkt op dit event.
+    // 5) PERSISTENT BEWAREN (fase 6 kern-eis — juridisch bewijs).
+    // Upload de exact-verstuurde PDF naar Supabase Storage EN maak een
+    // dunning_briefs-rij zodat we altijd kunnen bewijzen wat er destijds
+    // is gestuurd. Fail-loud bij fout: bewijs-opslag mag NIET stilletjes
+    // falen — zonder bewaarde PDF is er geen bewijs.
+    const BUCKET = 'dunning-briefs';
+    const generatedAtIso = new Date().toISOString();
+    const shortId = Math.random().toString(36).slice(2, 8);
+    const storagePath = `${customerId}/${generatedAtIso.replace(/[:.]/g, '-')}-${shortId}.pdf`;
+
+    const { error: upErr } = await supabaseAdmin.storage
+      .from(BUCKET)
+      .upload(storagePath, buffer, {
+        contentType: 'application/pdf',
+        cacheControl: '3600',
+        upsert: false,
+      });
+    if (upErr) {
+      console.error('[incasso-pre-brief] storage upload failed:', upErr.message);
+      res.setHeader('Content-Type', 'application/json');
+      return res.status(500).json({
+        error: 'PDF-opslag mislukt (bewijs kon niet bewaard worden): ' + upErr.message,
+        code: 'STORAGE_UPLOAD_FAILED',
+      });
+    }
+
+    // dunning_briefs-rij: koppelt bewaarde PDF aan klant + template + user.
+    const { data: brief, error: brErr } = await supabaseAdmin
+      .from('dunning_briefs')
+      .insert({
+        customer_id          : customerId,
+        invoice_id           : null,
+        template_code        : templateCode,
+        country              : country,
+        pdf_path             : storagePath,
+        pdf_size_bytes       : buffer.length,
+        generated_at         : generatedAtIso,
+        generated_by_user_id : user.id,
+      })
+      .select('id, pdf_path')
+      .maybeSingle();
+    if (brErr || !brief) {
+      // PDF is in storage, maar rij mislukt → verwijder de storage-file
+      // (voorkomt weeskopieën in de bucket zonder rij).
+      try { await supabaseAdmin.storage.from(BUCKET).remove([storagePath]); } catch {}
+      console.error('[incasso-pre-brief] dunning_briefs insert failed:', brErr?.message);
+      res.setHeader('Content-Type', 'application/json');
+      return res.status(500).json({
+        error: 'Bewijs-rij aanmaken mislukt: ' + (brErr?.message || 'geen rij'),
+        code: 'BRIEF_ROW_FAILED',
+      });
+    }
+
+    // 6) Log — de create-guard checkt op dit event. brief_id + pdf_path
+    // toegevoegd zodat timeline/pipeline direct naar het bewijs kan linken.
     try {
       await supabaseAdmin.from('dunning_log').insert({
         run_id     : null,
@@ -163,16 +217,22 @@ export default async function handler(req, res) {
           country      : country,
           template_code: templateCode,
           template_id  : tpl.id,
+          brief_id     : brief.id,
+          pdf_path     : brief.pdf_path,
         },
       });
     } catch (e) {
       console.warn('[incasso-pre-brief] dunning_log insert soft-fail', e?.message || e);
     }
 
-    // 6) Stream als download.
+    // 7) Stream als download. brief_id in response-header zodat de UI 'em
+    // kan tonen (bv. "Bewijs opgeslagen, id: xxx") + latere email-verzending
+    // dezelfde brief kan hergebruiken.
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="pre-incassobrief_${country}_${customerId.slice(0, 8)}.pdf"`);
+    res.setHeader('X-Brief-Id', brief.id);
+    res.setHeader('X-Brief-Path', brief.pdf_path);
     return res.status(200).send(buffer);
   } catch (e) {
     console.error('[incasso-pre-brief]', e?.message || e);
