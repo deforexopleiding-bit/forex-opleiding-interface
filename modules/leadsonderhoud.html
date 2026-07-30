@@ -148,7 +148,7 @@
 // ====================================================================
 
 // ---- toestand ----
-var S = { scherm: 'overzicht', filter: 'alles', over: null, wachtrij: null, trajecten: null, droog: null };
+var S = { scherm: 'overzicht', filter: 'alles', over: null, wachtrij: null, trajecten: null, droog: null, sjablonen: null };
 
 // ---- hulpjes ----
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
@@ -228,6 +228,44 @@ function melding(tekst){
     + '<div class="lo-vk-voet"><span></span><button class="k k-p" id="ml_ok">OK</button></div>');
   $('ml_ok').onclick = sluitModal;
 }
+// ---- voorbeeld van een sjabloon (in de module, zonder te versturen) ----
+// Neppe gegevens zodat je aanhef, cijfers en knoppen ziet.
+function loNepData(){ return { voornaam:'Sanne', lessen:'5', trades:'3', dagen_over:'2', score:'20',
+  agendalink:'https://deforexopleiding.nl/gesprek', inloglink:'https://deforexopleiding.nl/lms/voorbeeld',
+  datum:'zaterdag 2 augustus', tijd:'14:00' }; }
+function loVulNamen(t, v){ return String(t||'').replace(/\{(\w+)\}/g, function(m,k){ return (k in v)?v[k]:m; }); }
+function loVulWa(t, volg, v){ return String(t||'').replace(/\{\{(\d+)\}\}/g, function(m,n){ var naam=(volg||[])[Number(n)-1]; return (naam && (naam in v))?v[naam]:m; }); }
+
+function voorbeeld(id){
+  var s = (S.sjablonen||[]).filter(function(x){ return x.id===id; })[0];
+  if (s) toonVoorbeeld(s, 'html');
+}
+function toonVoorbeeld(s, formaat){
+  var v = loNepData();
+  var isMail = s.kanaal === 'mail';
+  var body;
+  if (isMail && formaat === 'html') {
+    var html = loVulNamen(s.html||'', v);
+    body = '<iframe style="width:100%;height:56vh;border:1px solid var(--border);border-radius:8px;background:#fff" srcdoc="'+esc(html)+'"></iframe>';
+  } else {
+    var plat = isMail ? loVulNamen(s.tekst||'', v) : loVulWa(s.tekst||'', s.variabele_volgorde, v);
+    body = '<pre style="white-space:pre-wrap;font-family:inherit;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:13px;max-height:56vh;overflow:auto">'+esc(plat)+'</pre>';
+  }
+  var toggle = isMail
+    ? '<div style="display:flex;gap:6px;margin-bottom:10px">'
+      + '<button class="k k-s '+(formaat==='html'?'k-p':'k-o')+'" id="vb-html">HTML</button>'
+      + '<button class="k k-s '+(formaat==='plat'?'k-p':'k-o')+'" id="vb-plat">Platte tekst</button></div>'
+    : '';
+  openModal('<h2>Voorbeeld</h2>'
+    + (isMail
+        ? '<p style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px"><b>Onderwerp:</b> '+esc(loVulNamen(s.onderwerp||'', v))+'</p>'
+        : '<p style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">WhatsApp-bericht (<b>'+esc(s.meta_template||s.soort)+'</b>)</p>')
+    + toggle + body
+    + '<div class="lo-vk-voet"><span style="font-size:12px;color:var(--text-faint)">Neppe gegevens ingevuld</span><button class="k k-p" id="vb-ok">Sluiten</button></div>');
+  $('vb-ok').onclick = sluitModal;
+  if (isMail) { $('vb-html').onclick = function(){ toonVoorbeeld(s, 'html'); }; $('vb-plat').onclick = function(){ toonVoorbeeld(s, 'plat'); }; }
+}
+
 /** Zelfde afleiding als de server. De soort vult automatisch mee terwijl je de
  *  naam typt — maar alleen tot je het soort-veld zelf aanraakt, en niet bij het
  *  bewerken van een bestaande stap (dan staat er al een slug). */
@@ -537,13 +575,11 @@ function stapVerwijderen(id){
 // aan/uit-schakelaars komen in een latere stap (die schrijven naar de database);
 // nu is dit het leesbare overzicht uit onderhoud_stappen.
 async function schermBerichten(){
-  if (!S.trajecten) S.trajecten = (await haal('/api/leadsonderhoud-trajecten')).trajecten || [];
   var inst = {};
   try { inst = await haal('/api/leadsonderhoud-instellingen'); } catch (e) { inst = {}; }
   var live = inst.live === true, noodstop = inst.noodstop === true, omg = inst.omgeving || 'onbekend';
-
-  var alle = [];
-  S.trajecten.forEach(function(tr){ (tr.stappen||[]).forEach(function(s){ alle.push({ tr: tr.naam, s: s }); }); });
+  if (!S.sjablonen) { try { S.sjablonen = (await haal('/api/leadsonderhoud-sjablonen')).items || []; } catch (e) { S.sjablonen = []; } }
+  var mailSjablonen = (S.sjablonen || []).filter(function(s){ return s.kanaal === 'mail'; });
 
   // Toon duidelijk in welke omgeving je zit; de schuif geldt per omgeving.
   var omgBanner = omg === 'production'
@@ -559,25 +595,31 @@ async function schermBerichten(){
     + '<div class="lo-inst"><div class="lo-inst-t"><b>Live versturen</b>'
     + '<span>Uit = droogloop (alleen loggen wat er zou gaan). Aan = de motor stuurt echt.</span></div>'
     + '<span class="lo-schuif'+(live?' aan':'')+'" id="lo-live"'+(noodstop?' style="opacity:.5;cursor:not-allowed"':'')+'></span></div>'
-    + '<div class="lo-inst"><div class="lo-inst-t"><b>Testmail</b>'
-    + '<span>Stuur een testmail naar je eigen adres om te controleren dat verzenden werkt.</span></div>'
-    + '<span style="display:flex;gap:8px"><input id="lo-test-adres" type="email" placeholder="jij@voorbeeld.nl" style="min-height:34px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">'
-    + '<button class="k k-o" id="lo-test-knop">Verstuur test</button></span></div>'
+    + '<div style="padding:13px 0 2px;border-top:1px solid var(--border)">'
+    + '<div class="lo-inst-t" style="margin-bottom:8px"><b>Testmail met echte opmaak</b>'
+    + '<span>Kies een mail-sjabloon; hij gaat met neppe gegevens naar je eigen adres.</span></div>'
+    + '<div class="lo-vel-rij"><div class="lo-vel"><label>Sjabloon</label><select id="lo-test-sj">'
+    + (mailSjablonen.length ? mailSjablonen.map(function(s){ return '<option value="'+s.id+'">'+esc((s.onderwerp||s.soort)+' — '+s.traject_slug)+'</option>'; }).join('') : '<option value="">(geen mail-sjablonen)</option>')
+    + '</select></div>'
+    + '<div class="lo-vel" style="flex:0 0 170px"><label>Versie</label><select id="lo-test-fmt"><option value="html">HTML (opmaak)</option><option value="plat">Platte tekst</option></select></div></div>'
+    + '<div style="display:flex;gap:8px"><input id="lo-test-adres" type="email" placeholder="jij@voorbeeld.nl" style="flex:1;min-height:36px;padding:8px 11px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">'
+    + '<button class="k k-p" id="lo-test-knop">Verstuur test</button></div></div>'
     + '</div>';
 
   var tabel = '<div class="lo-tabwrap"><table class="lo"><thead><tr>'
-    + '<th>Bericht</th><th>Traject</th><th>Kanaal</th><th>Aanleiding</th><th>Status</th>'
+    + '<th>Sjabloon</th><th>Traject</th><th>Kanaal</th><th>Variant</th><th></th>'
     + '</tr></thead><tbody>'
-    + (alle.length ? alle.map(function(x){
-        return '<tr><td class="lo-naam"><b>'+esc(x.s.naam||x.s.soort)+'</b><span class="mono">'+esc(x.s.soort||'')+'</span></td>'
-          + '<td><span class="m m-gy">'+esc(x.tr)+'</span></td>'
-          + '<td>'+(x.s.kanaal==='whatsapp'?'<span class="m m-wa">WhatsApp</span>':'<span class="m m-bl">Mail</span>')+'</td>'
-          + '<td>'+esc(x.s.aanleiding||'')+'</td>'
-          + '<td>'+(x.s.actief?'<span class="m m-gr">aan</span>':'<span class="m m-gy">uit</span>')+'</td></tr>';
-      }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">Nog geen berichten.</td></tr>')
+    + ((S.sjablonen||[]).length ? S.sjablonen.map(function(s){
+        var variant = (s.score_min!=null?'score ≥ '+s.score_min:'') + (s.score_max!=null?((s.score_min!=null?' · ':'')+'score < '+s.score_max):'');
+        return '<tr><td class="lo-naam"><b>'+esc(s.kanaal==='mail'?(s.onderwerp||s.soort):s.soort)+'</b><span class="mono">'+esc(s.soort)+'</span></td>'
+          + '<td><span class="m m-gy">'+esc(s.traject_slug)+'</span></td>'
+          + '<td>'+(s.kanaal==='whatsapp'?'<span class="m m-wa">WhatsApp</span>':'<span class="m m-bl">Mail</span>')+'</td>'
+          + '<td style="color:var(--text-dim);font-size:12px">'+esc(variant||'—')+'</td>'
+          + '<td><button class="k k-o k-s" data-vb="'+s.id+'">Voorbeeld</button></td></tr>';
+      }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">Nog geen sjablonen. Draai de SQL-migratie in Supabase.</td></tr>')
     + '</tbody></table></div>';
 
-  zetInhoud(kop('Berichten','De verzend-instellingen en alle berichten per traject.')
+  zetInhoud(kop('Berichten','De verzend-instellingen en alle sjablonen. Bekijk elk sjabloon met "Voorbeeld", zonder te versturen.')
     + verzendkaart
     + '<div class="lo-let"><span>De WhatsApp-sjablonen moeten eerst door Meta worden goedgekeurd; een sjabloon dat nog niet is goedgekeurd slaat de motor zichtbaar over.</span></div>'
     + tabel);
@@ -591,9 +633,12 @@ async function schermBerichten(){
   var tk = $('lo-test-knop');
   if (tk) tk.onclick = async function(){
     var adres = ($('lo-test-adres') || {}).value || '';
-    try { await haalPost('/api/leadsonderhoud-test', { to: adres }); melding('Testmail verstuurd naar ' + adres + '.'); }
+    var sjId = ($('lo-test-sj') || {}).value || '';
+    var fmt = ($('lo-test-fmt') || {}).value || 'html';
+    try { await haalPost('/api/leadsonderhoud-test', { to: adres, sjabloon_id: sjId, formaat: fmt }); melding('Testmail verstuurd naar ' + adres + '.'); }
     catch (e) { melding('Testmail mislukt: ' + e.message); }
   };
+  document.querySelectorAll('[data-vb]').forEach(function(b){ b.onclick = function(){ voorbeeld(b.getAttribute('data-vb')); }; });
 }
 
 // ---- SCHERM: GESPREKKEN (nog te koppelen) ----
