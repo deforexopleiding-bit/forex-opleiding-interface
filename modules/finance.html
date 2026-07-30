@@ -4227,6 +4227,10 @@
            bestaande. sub=overzicht-nieuw zodat deep-links naar het oude
            ?sub=overzicht ongewijzigd blijven. -->
       <button                data-wb-sub="overzicht-nieuw" type="button" title="Alleen-lezen overzicht van alle wanbetalers (nieuw)">Overzicht <span class="wbx-badge" style="background:#0ea5e9;color:#fff">nieuw</span></button>
+      <!-- FASE 3 herontwerp: nieuw Acties-werkcentrum met tabs (Te doen /
+           Later / Afgehandeld / Afgewezen), snooze-knop, paused-sectie.
+           Bestaande sub=open-acties blijft onaangeroerd. -->
+      <button                data-wb-sub="openacties-nieuw" type="button" title="Acties-werkcentrum: Te doen · Later · Afgehandeld · Afgewezen (nieuw)">Acties-werk <span class="wbx-badge" style="background:#0ea5e9;color:#fff">nieuw</span></button>
       <div class="wbx-nav-spacer"></div>
       <!-- Verversen: alleen zichtbaar op de Te doen-sub (getoggled door
            setSubView). Geen data-wb-sub attribuut → sub-nav-handler pikt 'm
@@ -4264,6 +4268,9 @@
     <!-- FASE 1 herontwerp: nieuwe alleen-lezen Overzicht-host. Bestaande
          sub=overzicht (in view-dunning) blijft onaangeroerd. -->
     <div id="wb-sub-overzicht-nieuw" hidden></div>
+    <!-- FASE 3 herontwerp: nieuwe Acties-werkcentrum-host. Bestaande
+         sub=open-acties (wb-sub-open-acties) blijft onaangeroerd. -->
+    <div id="wb-sub-openacties-nieuw" hidden></div>
   </div>
 
   <!-- ===== Klanten-view (Groep B: thin view binnen Finance) =====
@@ -6862,7 +6869,7 @@
   // (overzicht/probleemklanten/workflows/templates/geschiedenis/arrangements)
   // blijft volledig intact onder de 'overzicht' sub-tab.
   function setSubView(sub) {
-    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis', 'sandbox', 'incasso', 'crediteren', 'te-doen', 'facturen', 'instellingen', 'opruimen', 'joost', 'overzicht-nieuw'];
+    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis', 'sandbox', 'incasso', 'crediteren', 'te-doen', 'facturen', 'instellingen', 'opruimen', 'joost', 'overzicht-nieuw', 'openacties-nieuw'];
     if (!validSubs.includes(sub)) sub = 'vandaag';
     // Backward-compat: deep-link ?sub=actie is nu opgenomen in Vandaag —
     // redirect naar 'vandaag' zodat de zichtbare view klopt. 'overzicht'
@@ -6915,6 +6922,7 @@
     const vOpruimen     = document.getElementById('wb-sub-opruimen');
     const vJoost        = document.getElementById('wb-sub-joost');
     const vOverzichtNw  = document.getElementById('wb-sub-overzicht-nieuw');
+    const vOpenActiesNw = document.getElementById('wb-sub-openacties-nieuw');
     if (vInbox)        vInbox.hidden        = true;
     if (vDunning)      vDunning.hidden      = true;
     if (vOpenActies)   vOpenActies.hidden   = true;
@@ -6929,6 +6937,7 @@
     if (vOpruimen)     vOpruimen.hidden     = true;
     if (vJoost)        vJoost.hidden        = true;
     if (vOverzichtNw)  vOverzichtNw.hidden  = true;
+    if (vOpenActiesNw) vOpenActiesNw.hidden = true;
 
     // Bulk-multiselect leeft alleen binnen 'facturen' (Per klant) en
     // 'opruimen'. Bij switch naar een andere sub clearen we selectie +
@@ -7035,6 +7044,12 @@
       // is idempotent + fetcht via /api/wanbetalers-overzicht-list.
       if (vOverzichtNw) vOverzichtNw.hidden = false;
       mountOverzichtNieuwHost();
+    } else if (sub === 'openacties-nieuw') {
+      // FASE 3 herontwerp — nieuwe Acties-werkcentrum. Naast bestaande
+      // sub=open-acties, breekt geen deep-link. Hergebruikt bestaande
+      // approve/reject/restore-endpoints; nieuwe snooze-endpoint.
+      if (vOpenActiesNw) vOpenActiesNw.hidden = false;
+      mountActiesWerkcentrumHost();
     } else { // overzicht (deep-link backward-compat: niet meer in de nav,
              // maar blijft functioneel).
       if (vDunning) vDunning.hidden = false;
@@ -28368,6 +28383,417 @@
       window.AgentShared?.showToast?.('Gesprek gearchiveerd', 'success');
     } catch (e) {
       window.AgentShared?.showToast?.('Archiveren mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════
+  //   FASE 3 — Acties-werkcentrum (sub=openacties-nieuw)
+  //   Naast bestaande sub=open-acties (mountActiesWbx). Herbruikt endpoints
+  //   pending-actions-list / -approve / -reject / -restore; nieuw endpoint
+  //   pending-action-snooze voor "Later"-knop. Paused-sectie via
+  //   finance-dunning-paused-list. Alle 3-dagen-oranje / bron-labels /
+  //   snooze-modal / confirm-modals via bestaand wbxOpenConfirm-patroon.
+  // ═════════════════════════════════════════════════════════════════════
+  const _awnState = {
+    tab: 'todo',   // 'todo' | 'later' | 'done' | 'rej'
+    items: [],
+    paused: [],
+    loading: false,
+    error: null,
+  };
+
+  function mountActiesWerkcentrumHost() {
+    const host = document.getElementById('wb-sub-openacties-nieuw');
+    if (!host) return;
+    if (host.dataset.awnMounted !== '1') {
+      host.dataset.awnMounted = '1';
+      host.innerHTML = `
+        <div class="wbx" style="padding:14px 0 4px">
+          <div class="wbx-nav" style="gap:6px;margin-bottom:14px;flex-wrap:wrap">
+            <button data-awn-tab="todo"  class="active" type="button" title="Openstaande taken die vandaag opgepakt kunnen worden">Te doen <span class="wbx-badge" data-awn-count="todo">0</span></button>
+            <button data-awn-tab="later"           type="button" title="Uitgestelde taken (snoozed) — komen automatisch terug op hun datum">Later <span class="wbx-badge" data-awn-count="later">0</span></button>
+            <button data-awn-tab="done"            type="button" title="Reeds afgehandelde taken (kan terugzetten)">Afgehandeld <span class="wbx-badge" data-awn-count="done">0</span></button>
+            <button data-awn-tab="rej"             type="button" title="Afgewezen taken (kan terugzetten)">Afgewezen <span class="wbx-badge" data-awn-count="rej">0</span></button>
+            <span style="flex:1"></span>
+            <button data-awn-refresh type="button" title="Ververs de lijst"><i class="ti ti-refresh"></i></button>
+          </div>
+          <div data-awn-body>
+            <div style="color:var(--wbx-faint);font-size:13px;padding:14px 0">Laden…</div>
+          </div>
+        </div>
+      `;
+      host.addEventListener('click', (e) => {
+        const tabBtn = e.target.closest('[data-awn-tab]');
+        if (tabBtn) {
+          _awnState.tab = tabBtn.getAttribute('data-awn-tab');
+          host.querySelectorAll('[data-awn-tab]').forEach((b) => b.classList.toggle('active', b === tabBtn));
+          _awnLoad();
+          return;
+        }
+        if (e.target.closest('[data-awn-refresh]')) { _awnLoad(); return; }
+        const snoozeBtn  = e.target.closest('[data-awn-snooze]');
+        if (snoozeBtn)  { _awnOpenSnoozeModal(snoozeBtn.getAttribute('data-awn-snooze')); return; }
+        const approveBtn = e.target.closest('[data-awn-approve]');
+        if (approveBtn) { _awnApprove(approveBtn.getAttribute('data-awn-approve')); return; }
+        const rejectBtn  = e.target.closest('[data-awn-reject]');
+        if (rejectBtn)  { _awnReject(rejectBtn.getAttribute('data-awn-reject')); return; }
+        const restoreBtn = e.target.closest('[data-awn-restore]');
+        if (restoreBtn) { _awnRestore(restoreBtn.getAttribute('data-awn-restore')); return; }
+        const callBtn    = e.target.closest('[data-awn-call]');
+        if (callBtn) {
+          const cid = callBtn.getAttribute('data-awn-cid');
+          const paId = callBtn.getAttribute('data-awn-call');
+          if (cid && typeof openCaseSheet === 'function') {
+            openCaseSheet(cid, { autoOpenCallOutcomeForPendingActionId: paId });
+          }
+          return;
+        }
+      });
+    }
+    _awnLoad();
+  }
+
+  async function _awnLoad() {
+    const host = document.getElementById('wb-sub-openacties-nieuw');
+    if (!host) return;
+    const bodyEl = host.querySelector('[data-awn-body]');
+    _awnState.loading = true; _awnState.error = null;
+    if (bodyEl) bodyEl.innerHTML = `<div style="color:var(--wbx-faint);font-size:13px;padding:14px 0">Laden…</div>`;
+    try {
+      // Map tab → status + include_scheduled.
+      const tab = _awnState.tab;
+      const statusByTab = { todo: 'PENDING', later: 'PENDING', done: 'EXECUTED', rej: 'REJECTED' };
+      const includeScheduled = (tab === 'later') ? '1' : '0';
+      const st = statusByTab[tab] || 'PENDING';
+      const url = '/api/pending-actions-list?status=' + encodeURIComponent(st)
+                + '&limit=200&include_scheduled=' + includeScheduled;
+      const [rActs, rPaused] = await Promise.all([
+        window.AgentShared.apiFetch(url).then((r) => r.json()).catch(() => ({ items: [] })),
+        tab === 'todo'
+          ? window.AgentShared.apiFetch('/api/finance-dunning-paused-list').then((r) => r.json()).catch(() => ({ items: [] }))
+          : Promise.resolve({ items: [] }),
+      ]);
+      let items = Array.isArray(rActs?.items) ? rActs.items : [];
+      // Later-tab: alleen taken met scheduled_for > now client-side filteren.
+      if (tab === 'later') {
+        const nowIso = new Date().toISOString();
+        items = items.filter((it) => it.scheduled_for && String(it.scheduled_for) > nowIso);
+      } else if (tab === 'todo') {
+        // Defense-in-depth: server filtert al scheduled_for <= now, maar
+        // check nogmaals dat er geen future scheduled_for tussen glipt.
+        const nowIso = new Date().toISOString();
+        items = items.filter((it) => !it.scheduled_for || String(it.scheduled_for) <= nowIso);
+      }
+      _awnState.items  = items;
+      _awnState.paused = Array.isArray(rPaused?.items) ? rPaused.items : [];
+      _awnState.loading = false;
+      // Sync badges via 4 counts-calls (lichte HEAD-alike).
+      _awnUpdateBadges();
+      _awnRender();
+    } catch (e) {
+      _awnState.loading = false;
+      _awnState.error = e?.message || 'Onbekende fout';
+      if (bodyEl) bodyEl.innerHTML = `<div style="color:var(--wbx-s-inc-tx);font-size:13px;padding:14px 0">Fout: ${esc(_awnState.error)}</div>`;
+    }
+  }
+
+  async function _awnUpdateBadges() {
+    const host = document.getElementById('wb-sub-openacties-nieuw');
+    if (!host) return;
+    const setBadge = (key, n) => {
+      const el = host.querySelector(`[data-awn-count="${key}"]`);
+      if (el) { el.textContent = String(n || 0); el.hidden = !n; }
+    };
+    // Zelfde endpoints; count-only via limit=1 (endpoint returnt total/counts).
+    try {
+      const [todo, later, done, rej] = await Promise.all([
+        window.AgentShared.apiFetch('/api/pending-actions-list?status=PENDING&limit=1').then((r) => r.json()).catch(() => ({})),
+        window.AgentShared.apiFetch('/api/pending-actions-list?status=PENDING&include_scheduled=1&limit=200').then((r) => r.json()).catch(() => ({})),
+        window.AgentShared.apiFetch('/api/pending-actions-list?status=EXECUTED&limit=1').then((r) => r.json()).catch(() => ({})),
+        window.AgentShared.apiFetch('/api/pending-actions-list?status=REJECTED&limit=1').then((r) => r.json()).catch(() => ({})),
+      ]);
+      const nowIso = new Date().toISOString();
+      const laterN = (Array.isArray(later?.items) ? later.items : []).filter((it) => it.scheduled_for && String(it.scheduled_for) > nowIso).length;
+      setBadge('todo',  Number(todo?.total)  || (Array.isArray(todo?.items)  ? todo.items.length  : 0));
+      setBadge('later', laterN);
+      setBadge('done',  Number(done?.total)  || 0);
+      setBadge('rej',   Number(rej?.total)   || 0);
+    } catch (_) { /* fail-soft */ }
+  }
+
+  function _awnRender() {
+    const host = document.getElementById('wb-sub-openacties-nieuw');
+    const bodyEl = host?.querySelector('[data-awn-body]');
+    if (!bodyEl) return;
+    const rows = (_awnState.items || []).map((it) => _awnRenderRow(it)).join('');
+    const empty = _awnState.items.length
+      ? ''
+      : `<div style="color:var(--wbx-faint);font-size:13px;padding:14px 0">Niets in deze tab.</div>`;
+    let pausedBlock = '';
+    if (_awnState.tab === 'todo' && _awnState.paused.length > 0) {
+      pausedBlock = `
+        <div style="margin-top:26px;padding-top:16px;border-top:1px solid var(--wbx-border)">
+          <h4 style="margin:0 0 10px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--wbx-faint);font-weight:600">
+            Gepauzeerd (in gesprek) — ${_awnState.paused.length}
+            <span style="text-transform:none;letter-spacing:0;color:var(--wbx-faint);font-weight:400;font-size:11px;margin-left:6px">Read-only. Deze klanten zijn gepauzeerd omdat er een WhatsApp-gesprek loopt.</span>
+          </h4>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            ${_awnState.paused.map((p) => _awnRenderPausedRow(p)).join('')}
+          </div>
+        </div>
+      `;
+    }
+    bodyEl.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px">${rows || empty}</div>${pausedBlock}`;
+  }
+
+  function _awnRenderRow(it) {
+    const at = String(it.action_type || '');
+    const status = String(it.status || '').toUpperCase();
+    const src = _awnSourceLabel(it);
+    const typeIcon = _awnActionIcon(at);
+    const typeLbl  = _awnActionLabel(at);
+    const custName = esc(it.customer?.name || '(zonder klant)');
+    const ageMs = it.created_at ? (Date.now() - new Date(it.created_at).getTime()) : 0;
+    const ageDays = ageMs / 86400000;
+    const isOld = ageDays >= 3;
+    const ageStr = ageDays >= 1 ? Math.floor(ageDays) + ' dg' : (ageMs > 0 ? Math.max(1, Math.floor(ageMs / 3600000)) + ' u' : '—');
+    // Snooze-info voor Later-tab.
+    const scheduledStr = it.scheduled_for
+      ? new Date(it.scheduled_for).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' })
+      : '';
+    // Buttons per tab.
+    const btns = [];
+    if (status === 'PENDING') {
+      // Bel-knop op MANUAL_FOLLOWUP (hergebruik case-sheet auto-open).
+      if (at === 'MANUAL_FOLLOWUP' && it.customer_id) {
+        btns.push(`<button class="wbx-btn wbx-sm" type="button" data-awn-call="${esc(it.id)}" data-awn-cid="${esc(it.customer_id)}" title="Bel deze klant en registreer uitkomst">📞 Bel</button>`);
+      }
+      // Per-type primaire actie — HERGEBRUIKT dezelfde endpoints als oude tab.
+      if (at === 'MANUAL_CONFIRM_PROMISE') {
+        btns.push(`<button class="wbx-btn wbx-primary wbx-sm" type="button" data-awn-approve="${esc(it.id)}" title="Klant heeft betaald zoals beloofd">Bevestigen</button>`);
+        btns.push(`<button class="wbx-btn wbx-sm wbx-danger" type="button" data-awn-reject="${esc(it.id)}" title="Klant is toezegging niet nagekomen">Niet nagekomen</button>`);
+      } else if (at === 'MANUAL_ESCALATION') {
+        btns.push(`<button class="wbx-btn wbx-primary wbx-sm" type="button" data-awn-approve="${esc(it.id)}" title="Escalatie oppakken">Oppakken</button>`);
+        btns.push(`<button class="wbx-btn wbx-sm wbx-danger" type="button" data-awn-reject="${esc(it.id)}" title="Escalatie afgehandeld/opgelost">Afgehandeld</button>`);
+      } else if (at === 'MANUAL_FOLLOWUP') {
+        btns.push(`<button class="wbx-btn wbx-sm" type="button" data-awn-approve="${esc(it.id)}" title="Belafspraak afgehandeld — dunning-engine tikt door">Afgehandeld</button>`);
+        btns.push(`<button class="wbx-btn wbx-sm wbx-danger" type="button" data-awn-reject="${esc(it.id)}" title="Overslaan — dunning-engine tikt door">Overslaan</button>`);
+      } else if (at === 'MANUAL_VERIFY_PAYMENT') {
+        btns.push(`<button class="wbx-btn wbx-primary wbx-sm" type="button" data-awn-approve="${esc(it.id)}" title="Betaling geverifieerd">Bevestigen</button>`);
+        btns.push(`<button class="wbx-btn wbx-sm wbx-danger" type="button" data-awn-reject="${esc(it.id)}" title="Geen betaling ontvangen">Afwijzen</button>`);
+      } else {
+        btns.push(`<button class="wbx-btn wbx-primary wbx-sm" type="button" data-awn-approve="${esc(it.id)}">Goedkeuren</button>`);
+        btns.push(`<button class="wbx-btn wbx-sm wbx-danger" type="button" data-awn-reject="${esc(it.id)}">Afwijzen</button>`);
+      }
+      // Snooze-knop (nieuw in fase 3) — voor beide todo én later.
+      btns.push(`<button class="wbx-btn wbx-sm" type="button" data-awn-snooze="${esc(it.id)}" title="Verplaats deze taak naar een latere datum">🕒 Later…</button>`);
+    } else {
+      // done / rej: restore-knop, tenzij TL_*+EXECUTED (server-side geblokkeerd).
+      const isTLexec = at.startsWith('TL_') && status === 'EXECUTED';
+      if (!isTLexec) {
+        btns.push(`<button class="wbx-btn wbx-sm" type="button" data-awn-restore="${esc(it.id)}" title="Zet terug naar Te doen (undo)">↺ Terug naar Te doen</button>`);
+      }
+    }
+    const rowStyle = isOld
+      ? 'border:1px solid var(--wbx-border);border-left:3px solid #f59e0b;background:var(--wbx-surface);border-radius:8px;padding:10px 14px'
+      : 'border:1px solid var(--wbx-border);background:var(--wbx-surface);border-radius:8px;padding:10px 14px';
+    const ageBadge = isOld
+      ? `<span style="background:#fef3c7;color:#92400e;font-size:11px;padding:2px 6px;border-radius:4px;font-weight:600" title="Deze taak staat al 3+ dagen open">${esc(ageStr)}</span>`
+      : `<span style="color:var(--wbx-faint);font-size:11px" title="Sinds aangemaakt">${esc(ageStr)}</span>`;
+    const scheduledBadge = scheduledStr
+      ? `<span style="background:var(--wbx-accent-soft);color:var(--wbx-accent-ink);font-size:11px;padding:2px 6px;border-radius:4px;font-weight:600" title="Ingepland voor ${esc(new Date(it.scheduled_for).toLocaleString('nl-NL'))}">🕒 ${esc(scheduledStr)}</span>`
+      : '';
+    return `
+      <div style="${rowStyle};display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="font-size:16px" title="${esc(typeLbl)}">${typeIcon}</span>
+        <div style="min-width:0;flex:1">
+          <div style="font-weight:600;font-size:13.5px;color:var(--wbx-ink)">${custName}</div>
+          <div style="font-size:12px;color:var(--wbx-faint);display:flex;gap:8px;flex-wrap:wrap">
+            <span>${esc(typeLbl)}</span>
+            ${src ? `<span style="border-left:1px solid var(--wbx-border);padding-left:8px" title="Bron van deze taak">${src}</span>` : ''}
+          </div>
+        </div>
+        ${scheduledBadge}
+        ${ageBadge}
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${btns.join('')}</div>
+      </div>
+    `;
+  }
+
+  function _awnRenderPausedRow(p) {
+    const since = p.paused_since ? new Date(p.paused_since).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' }) : '—';
+    const reminderTxt = (p.reminder_count > 0)
+      ? `${p.reminder_count} reminder(s) verstuurd`
+      : 'nog geen reminders';
+    return `
+      <div style="border:1px solid var(--wbx-border);background:var(--wbx-surface);border-radius:8px;padding:8px 14px;display:flex;align-items:center;gap:12px" title="Klant zit in een lopend gesprek — dunning-engine skipt deze klant. Wordt hervat na antwoord of no-reply-reminder-flow.">
+        <span style="font-size:14px">💬</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:500;font-size:13px;color:var(--wbx-ink)">${esc(p.customer_name)}</div>
+          <div style="font-size:11px;color:var(--wbx-faint)">gepauzeerd sinds ${esc(since)} · ${esc(reminderTxt)}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  function _awnSourceLabel(it) {
+    const src = it?.payload?.source || null;
+    if (src === 'joost')   return `<span style="color:#8b5cf6">Joost</span>`;
+    if (src === 'system')  return `<span style="color:#0ea5e9">systeem</span>`;
+    if (src === 'manual')  return `<span style="color:#059669">handmatig</span>`;
+    if (src === 'engine')  return `<span style="color:#0ea5e9">engine</span>`;
+    return '';
+  }
+
+  function _awnActionIcon(at) {
+    switch (at) {
+      case 'MANUAL_FOLLOWUP':          return '📞';
+      case 'MANUAL_CONFIRM_PROMISE':   return '🤝';
+      case 'MANUAL_ESCALATION':        return '🚨';
+      case 'MANUAL_VERIFY_PAYMENT':    return '💰';
+      case 'MANUAL_PROPOSE_ARRANGEMENT': return '📝';
+      case 'TL_INVOICE_UPDATE_DUE':    return '📅';
+      case 'TL_INVOICE_SPLIT':         return '🔀';
+      case 'TL_SUBSCRIPTION_PAUSE':    return '⏸';
+      case 'TL_SUBSCRIPTION_STOP':     return '⏹';
+      case 'TL_INVOICE_WRITEOFF':      return '❌';
+      default:                          return '•';
+    }
+  }
+
+  function _awnActionLabel(at) {
+    switch (at) {
+      case 'MANUAL_FOLLOWUP':          return 'Belafspraak';
+      case 'MANUAL_CONFIRM_PROMISE':   return 'Betaaltoezegging bevestigen';
+      case 'MANUAL_ESCALATION':        return 'Escalatie';
+      case 'MANUAL_VERIFY_PAYMENT':    return 'Betaling verifiëren';
+      case 'MANUAL_PROPOSE_ARRANGEMENT': return 'Regeling voorstellen';
+      case 'TL_INVOICE_UPDATE_DUE':    return 'Vervaldatum aanpassen (TL)';
+      case 'TL_INVOICE_SPLIT':         return 'Factuur splitsen (TL)';
+      case 'TL_SUBSCRIPTION_PAUSE':    return 'Abonnement pauzeren (TL)';
+      case 'TL_SUBSCRIPTION_STOP':     return 'Abonnement stoppen (TL)';
+      case 'TL_INVOICE_WRITEOFF':      return 'Kwijtschelding (TL)';
+      default:                          return at || 'Actie';
+    }
+  }
+
+  // ── Snooze-modal ─────────────────────────────────────────────────────
+  function _awnOpenSnoozeModal(id) {
+    if (!id) return;
+    // Default suggesties: morgen / over 3 dagen / volgende week / eigen datum.
+    const nowMs = Date.now();
+    const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
+    const tomorrow  = iso(nowMs + 24 * 3600 * 1000);
+    const in3days   = iso(nowMs + 3 * 24 * 3600 * 1000);
+    const nextWeek  = iso(nowMs + 7 * 24 * 3600 * 1000);
+    // Reuse wbxOpenConfirm-patroon met custom body via prompt-modal.
+    const scrim = document.createElement('div');
+    scrim.style.cssText = 'position:fixed;inset:0;background:rgba(14,19,28,.44);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px';
+    scrim.innerHTML = `
+      <div style="background:var(--wbx-bg);color:var(--wbx-ink);border-radius:12px;padding:20px 22px;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.25);font-family:'Inter',system-ui,sans-serif">
+        <h3 style="margin:0 0 6px;font-size:16px;font-weight:600">Later oppakken</h3>
+        <p style="margin:0 0 14px;font-size:13px;color:var(--wbx-muted);line-height:1.45">Kies wanneer deze taak weer in "Te doen" moet verschijnen. De taak zelf verandert niet — alleen de datum.</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+          <button type="button" data-awn-pick="${tomorrow}" style="padding:6px 12px;border:1px solid var(--wbx-border);border-radius:6px;background:var(--wbx-surface);cursor:pointer;font-size:13px">Morgen</button>
+          <button type="button" data-awn-pick="${in3days}"  style="padding:6px 12px;border:1px solid var(--wbx-border);border-radius:6px;background:var(--wbx-surface);cursor:pointer;font-size:13px">Over 3 dagen</button>
+          <button type="button" data-awn-pick="${nextWeek}" style="padding:6px 12px;border:1px solid var(--wbx-border);border-radius:6px;background:var(--wbx-surface);cursor:pointer;font-size:13px">Volgende week</button>
+        </div>
+        <label style="display:block;font-size:12px;color:var(--wbx-muted);margin-bottom:4px">Of kies zelf een datum:</label>
+        <input type="date" id="awnSnoozeDate" min="${tomorrow}" value="${tomorrow}" style="width:100%;padding:8px 10px;border:1px solid var(--wbx-border);border-radius:6px;font-size:14px;font-family:inherit;color:var(--wbx-ink);background:var(--wbx-surface)" />
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+          <button type="button" data-awn-cancel style="padding:8px 14px;border:1px solid var(--wbx-border);border-radius:6px;background:var(--wbx-surface);cursor:pointer;font-size:13px">Annuleren</button>
+          <button type="button" data-awn-confirm class="wbx-primary" style="padding:8px 14px;border:1px solid var(--wbx-accent);border-radius:6px;background:var(--wbx-accent);color:#fff;cursor:pointer;font-size:13px;font-weight:500">Verplaats</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(scrim);
+    const dateInput = scrim.querySelector('#awnSnoozeDate');
+    const close = () => { document.body.removeChild(scrim); };
+    scrim.addEventListener('click', (e) => {
+      if (e.target === scrim || e.target.closest('[data-awn-cancel]')) { close(); return; }
+      const pickBtn = e.target.closest('[data-awn-pick]');
+      if (pickBtn) {
+        dateInput.value = pickBtn.getAttribute('data-awn-pick');
+        return;
+      }
+      if (e.target.closest('[data-awn-confirm]')) {
+        _awnDoSnooze(id, dateInput.value, close);
+      }
+    });
+    document.addEventListener('keydown', function esc(ev) {
+      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
+    });
+  }
+
+  async function _awnDoSnooze(id, ymd, closeFn) {
+    if (!id || !ymd) return;
+    // Client-side veiligheid: datum → 09:00 lokale tijd van gekozen dag,
+    // altijd 60s+ vooruit (endpoint controleert nogmaals).
+    const chosen = new Date(ymd + 'T09:00:00');
+    if (Number.isNaN(chosen.getTime()) || chosen.getTime() < Date.now() + 60000) {
+      window.AgentShared?.showToast?.('Kies een datum in de toekomst', 'error');
+      return;
+    }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-action-snooze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, scheduled_for: chosen.toISOString() }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast?.('Taak verplaatst naar ' + chosen.toLocaleDateString('nl-NL'), 'success');
+      closeFn && closeFn();
+      _awnLoad();
+    } catch (e) {
+      window.AgentShared?.showToast?.('Verplaatsen mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+
+  // ── Approve / Reject / Restore — HERGEBRUIKT bestaande endpoints ─────
+  async function _awnApprove(id) {
+    if (!id) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-approve', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast?.('Bevestigd', 'success');
+      _awnLoad();
+    } catch (e) {
+      window.AgentShared?.showToast?.('Fout: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+  async function _awnReject(id) {
+    if (!id) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-reject', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, reason: 'via acties-werkcentrum' }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast?.('Afgewezen', 'success');
+      _awnLoad();
+    } catch (e) {
+      window.AgentShared?.showToast?.('Fout: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+  async function _awnRestore(id) {
+    if (!id) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-restore', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast?.('Teruggezet naar Te doen', 'success');
+      _awnLoad();
+    } catch (e) {
+      window.AgentShared?.showToast?.('Fout: ' + (e?.message || 'onbekend'), 'error');
     }
   }
 
