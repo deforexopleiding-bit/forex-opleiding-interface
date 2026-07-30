@@ -30,6 +30,10 @@ import { requirePermission } from './_lib/requirePermission.js';
 // blijft de enige gate per conv-module.
 import { getClientIp } from './_lib/audit-customer.js';
 import { sendText, sendTemplate, sendMedia, getConfigStatus, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
+// FIX A no-reply-reminder-bug: onze uitgaande WA-reply moet de dunning-run
+// ontpauzeren + reminder-teller resetten zodat de no-reply-cron pas opnieuw
+// begint na een NIEUWE klant-inbound. Fail-soft.
+import { unpauseRunsForConversation } from './_lib/dunning-arrangement-hooks.js';
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -314,6 +318,20 @@ export default async function handler(req, res) {
       });
     } catch (auditErr) {
       console.error('[inbox-send] audit insert exception:', auditErr.message);
+    }
+
+    // FIX A no-reply-reminder-bug: onze reply ontpauzeert de dunning-run
+    // (indien paused-by-conversation) + reset de reminder-teller. De cron
+    // begint zo pas opnieuw bij een NIEUWE klant-inbound (die het via de
+    // inbox-webhook opnieuw pauseert). Fail-soft — een fout hier mag de
+    // succesvolle WA-verzending NIET blokkeren (het bericht is al bij Meta).
+    try {
+      const r = await unpauseRunsForConversation(convId);
+      if (r && !r.ok && r.error) {
+        console.warn('[inbox-send] unpause soft-fail:', r.error);
+      }
+    } catch (unpauseErr) {
+      console.warn('[inbox-send] unpause exception (fail-soft):', unpauseErr?.message || unpauseErr);
     }
 
     return res.status(200).json({

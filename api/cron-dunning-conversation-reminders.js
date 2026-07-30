@@ -70,6 +70,7 @@ import {
   hasOpenBlockingAction,
   loadOpenActionsByCustomer,
 } from './_lib/pending-actions-guard.js';
+import { determineStage as _determineStageHelper } from './_lib/conv-reminder-stage.js';
 
 // Re-export voor backward-compat met tests die deze helpers vanuit deze
 // file importeerden (pre-#888 opsplitsing). Nieuwe callers importeren
@@ -115,50 +116,29 @@ export async function isWithin24hWindow(supabase, convId) {
 
 /**
  * Bepaal stage per run:
- *   stage 'r1'  → reminder 1 moet gestuurd (nooit gestuurd + stil >= reminder_1_hours)
+ *   stage 'r1'  → reminder 1 moet gestuurd (nooit gestuurd + stil >= reminder_1_hours
+ *                  + WIJ hebben niet al recenter geantwoord dan de klant)
  *   stage 'r2'  → reminder 2 moet gestuurd (1 gestuurd + stil-na-r1 >= reminder_2_hours)
  *   stage 'rz'  → resume (2 gestuurd + stil-na-r2 >= resume_after_hours)
- *   stage null  → niets doen (nog te vroeg of al voltooid)
+ *   stage null  → niets doen (nog te vroeg, al voltooid, of wij hebben al geantwoord)
+ *
+ * `convLastOutboundAt` (optioneel — FIX B no-reply-bug): tijdstip van laatste
+ * outbound-bericht van ons in deze conv. Op count=0: als lastOutboundMs >
+ * lastInboundMs → wij hebben al geantwoord op de klant → geen r1-reminder
+ * (die zou onterecht zijn — de reminder-tekst zegt "nog geen reactie van mij"
+ * terwijl er WEL gereageerd is). Fix A ontpauzeert de run bij een succesvolle
+ * outbound-send al, deze check is het vangnet voor:
+ *   - runs die vóór fix A gepauzeerd waren (backlog)
+ *   - outbound via kanalen die (nog) niet unpauseRunsForConversation aanroepen
+ *   - race-condities tussen outbound-persist en cron-tick
+ * Bij count=1: bestaande r2-guard (lastInboundMs > lastReminderAt) blijft de
+ * relevante check — nadat wij r1 stuurden en de klant reageert, is r2 al
+ * geblokkeerd door die bestaande guard.
  */
-export function determineStage({ run, convLastInboundAt, noReplyCfg, nowMs }) {
-  const count = Number(run.paused_conversation_reminder_count || 0);
-  const lastReminderAt = run.paused_conversation_last_reminder_at
-    ? new Date(run.paused_conversation_last_reminder_at).getTime()
-    : null;
-  const lastInboundMs = convLastInboundAt
-    ? new Date(convLastInboundAt).getTime()
-    : null;
-
-  const r1h = Number(noReplyCfg?.reminder_1_hours ?? 20);
-  const r2h = Number(noReplyCfg?.reminder_2_hours ?? 24);
-  const rzh = Number(noReplyCfg?.resume_after_hours ?? 24);
-
-  const HOUR = 60 * 60 * 1000;
-
-  if (count === 0) {
-    if (!lastInboundMs) return null; // zonder inbound-ankerpunt niet zinnig
-    if (nowMs - lastInboundMs >= r1h * HOUR) return 'r1';
-    return null;
-  }
-  if (count === 1) {
-    if (!lastReminderAt) return null;
-    // Guard (reply-respect): als klant NA onze r1-reminder heeft
-    // gereageerd, geen r2 sturen. determineStage voor count=0 kijkt al
-    // naar last_inbound; voor count>=1 miste die check.
-    if (lastInboundMs && lastInboundMs > lastReminderAt) return null;
-    if (nowMs - lastReminderAt >= r2h * HOUR) return 'r2';
-    return null;
-  }
-  if (count >= 2) {
-    if (!lastReminderAt) return null;
-    // Rz is een resume-actie (geen send) -- reply-guard hier niet nodig;
-    // een klant die net gereageerd heeft wordt op de VOLGENDE inbound-hook
-    // sowieso opnieuw pauseRunsForConversation'd, dus geen kwaad.
-    if (nowMs - lastReminderAt >= rzh * HOUR) return 'rz';
-    return null;
-  }
-  return null;
-}
+// determineStage geëxtraheerd naar _lib/conv-reminder-stage.js zodat de pure
+// helper zonder supabase-init getest kan worden. Backward-compat re-export
+// zodat oudere tests die 'em vanuit deze file importeren blijven werken.
+export const determineStage = _determineStageHelper;
 
 /**
  * Laadt render-context (customer + openInvoices) voor de reminder-tekst.
@@ -442,9 +422,30 @@ export async function processReminderRun({
           return;
         }
 
+        // FIX B no-reply-bug: laatste OUTBOUND van ons in deze conv ophalen.
+        // determineStage gebruikt dit om te checken of wij al gereageerd
+        // hebben — dan géén r1/r2. Fail-soft: bij DB-fout lastOutboundMs=null
+        // → gedrag valt terug op oud (alleen last_inbound-check), fix A geeft
+        // dan alsnog dekking.
+        let lastOutboundAt = null;
+        try {
+          const { data: outMsg } = await supabaseAdmin
+            .from('whatsapp_messages')
+            .select('created_at')
+            .eq('conversation_id', conv.id)
+            .eq('direction', 'out')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          lastOutboundAt = outMsg?.created_at || null;
+        } catch (outErr) {
+          console.warn(`[conv-reminder-cron] last-outbound lookup fail-soft:`, outErr?.message || outErr);
+        }
+
         const stage = determineStage({
           run,
           convLastInboundAt: conv.last_inbound_at,
+          convLastOutboundAt: lastOutboundAt,
           noReplyCfg,
           nowMs,
         });
