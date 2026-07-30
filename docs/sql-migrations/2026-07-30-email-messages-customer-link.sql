@@ -48,6 +48,11 @@ CREATE INDEX IF NOT EXISTS idx_email_messages_from_address_lower
 -- dus veilig meerdere keren draaien.
 -- ═════════════════════════════════════════════════════════════════════
 
+-- Herschreven zonder gecorreleerde subquery in HAVING (die faalde met 42803
+-- "subquery uses ungrouped column"). Twee CTE's:
+--   1. cust_per_addr — 1 rij per unieke lower(email) met aantal actieve klanten
+--      (GROUP BY of window function, afhankelijk van de stap).
+--   2. em_null_addrs / singles — filters op de kant van de emails/klanten.
 DO $$
 DECLARE
   v_before_null   int;
@@ -55,53 +60,60 @@ DECLARE
   v_updated       int;
   v_dupes         int;
 BEGIN
-  -- PRE-count: hoeveel email_messages zonder customer_id?
+  -- 1) VOOR-tel.
   SELECT count(*) INTO v_before_null
     FROM public.email_messages
     WHERE customer_id IS NULL;
 
-  -- Count ambiguous: hoeveel from_address'en hebben >1 matchende actieve klant?
-  SELECT count(*) INTO v_dupes
-    FROM (
-      SELECT lower(em.from_address) AS addr
-        FROM public.email_messages em
-        WHERE em.customer_id IS NULL
-          AND em.from_address IS NOT NULL
-          AND em.from_address <> ''
-        GROUP BY lower(em.from_address)
-        HAVING (
-          SELECT count(*) FROM public.customers c
-            WHERE lower(c.email) = lower(em.from_address)
-              AND c.archived_at IS NULL
-              AND c.anonymized_at IS NULL
-        ) > 1
-    ) x;
-
-  -- BACKFILL: alleen exacte-1-hit gevallen.
-  WITH match AS (
-    SELECT em.id AS email_id,
-           (SELECT c.id FROM public.customers c
-              WHERE lower(c.email) = lower(em.from_address)
-                AND c.archived_at IS NULL
-                AND c.anonymized_at IS NULL
-              LIMIT 2) AS first_cust_id,
-           (SELECT count(*) FROM public.customers c
-              WHERE lower(c.email) = lower(em.from_address)
-                AND c.archived_at IS NULL
-                AND c.anonymized_at IS NULL) AS hit_count
+  -- 2) Ambigue-tel via CTE (geen correlated subquery in HAVING → 42803-vrij).
+  WITH cust_per_addr AS (
+    SELECT lower(c.email) AS addr, count(*) AS n_cust
+      FROM public.customers c
+      WHERE c.email IS NOT NULL
+        AND c.email <> ''
+        AND c.archived_at IS NULL
+        AND c.anonymized_at IS NULL
+      GROUP BY lower(c.email)
+  ),
+  em_null_addrs AS (
+    SELECT DISTINCT lower(em.from_address) AS addr
       FROM public.email_messages em
       WHERE em.customer_id IS NULL
         AND em.from_address IS NOT NULL
         AND em.from_address <> ''
   )
+  SELECT count(*) INTO v_dupes
+    FROM em_null_addrs e
+    JOIN cust_per_addr c ON c.addr = e.addr
+    WHERE c.n_cust > 1;
+
+  -- 3) BACKFILL: alleen exact 1 matchende actieve klant.
+  --    Window-function count(*) OVER (PARTITION BY ...) geeft n_cust per row →
+  --    singles CTE filtert de ambigue rows eruit → UPDATE joint alleen die.
+  WITH cust_per_addr AS (
+    SELECT lower(c.email)                            AS addr,
+           c.id                                       AS cust_id,
+           count(*) OVER (PARTITION BY lower(c.email)) AS n_cust
+      FROM public.customers c
+      WHERE c.email IS NOT NULL
+        AND c.email <> ''
+        AND c.archived_at IS NULL
+        AND c.anonymized_at IS NULL
+  ),
+  singles AS (
+    SELECT addr, cust_id FROM cust_per_addr WHERE n_cust = 1
+  )
   UPDATE public.email_messages em
-     SET customer_id = m.first_cust_id
-    FROM match m
-    WHERE em.id = m.email_id
-      AND m.hit_count = 1;
+     SET customer_id = s.cust_id
+    FROM singles s
+   WHERE em.customer_id IS NULL
+     AND em.from_address IS NOT NULL
+     AND em.from_address <> ''
+     AND lower(em.from_address) = s.addr;
 
   GET DIAGNOSTICS v_updated = ROW_COUNT;
 
+  -- 4) NA-tel.
   SELECT count(*) INTO v_after_null
     FROM public.email_messages
     WHERE customer_id IS NULL;
@@ -112,6 +124,6 @@ BEGIN
   RAISE NOTICE '  Rijen NIEUW gekoppeld:          %', v_updated;
   RAISE NOTICE '  Rijen zonder customer_id NA:    %', v_after_null;
   RAISE NOTICE '  From_address ambiguous (>1 hit): %', v_dupes;
-  RAISE NOTICE '  → Ambiguous rijen blijven NULL — koppel handmatig via UI.';
+  RAISE NOTICE '  → Ambigue rijen blijven NULL — koppel handmatig via endpoint.';
   RAISE NOTICE '════════════════════════════════════════';
 END $$;
