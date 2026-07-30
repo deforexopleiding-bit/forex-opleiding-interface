@@ -104,12 +104,38 @@ export default async function handler(req, res) {
     }
 
     // 4) Merge chronologisch.
+    // ⚠ BUG-FIX: whatsapp_messages.direction is DB-kolom met CHECK IN ('in','out')
+    // — NIET 'inbound'/'outbound' (zie migratie 2026-06-07-whatsapp-inbox-
+    // foundation.sql:65). De endpoint-spec belooft 'inbound'|'outbound' zodat
+    // de UI daar zonder ambiguïteit tegen kan checken. Normaliseer hier.
+    const normalizeWaDirection = (d) => {
+      const s = String(d || '').toLowerCase();
+      if (s === 'out' || s === 'outbound') return 'outbound';
+      return 'inbound';
+    };
+    // ⚠ Voor e-mail: from_address = onze SMTP-mailbox → outbound (wij hebben
+    // dit verstuurd, IMAP heeft 'em ge-Sent-Items gemirrord); anders → inbound
+    // (klant heeft naar ons gemaild). Hardcoded set van onze 6 mailboxen —
+    // consistent met SMTP_ACCOUNTS in api/send-email.js.
+    const OUR_MAILBOXES = new Set([
+      'leads@deforexopleiding.nl',
+      'info@deforexopleiding.nl',
+      'partners@deforexopleiding.nl',
+      'administratie@deforexopleiding.nl',
+      'onboarding@deforexopleiding.nl',
+      'events@deforexopleiding.nl',
+    ]);
+    const emailDirection = (fromAddr) => {
+      const addr = String(fromAddr || '').toLowerCase().trim();
+      return addr && OUR_MAILBOXES.has(addr) ? 'outbound' : 'inbound';
+    };
+
     const items = [];
     for (const m of waMsgs || []) {
       items.push({
         channel: 'whatsapp',
         id: m.id,
-        direction: m.direction, // 'inbound' | 'outbound'
+        direction: normalizeWaDirection(m.direction), // 'in'/'out' → 'inbound'/'outbound'
         body: m.body || (m.template_name ? `[template] ${m.template_name}` : (m.media_type ? `[${m.media_type}]` : '')),
         at: m.created_at || m.sent_at,
         meta: {
@@ -118,6 +144,7 @@ export default async function handler(req, res) {
           template_name: m.template_name,
           status: m.status,
           wamid: m.meta_wamid,
+          raw_direction: m.direction, // voor debugging
         },
       });
     }
@@ -125,11 +152,11 @@ export default async function handler(req, res) {
       items.push({
         channel: 'email',
         id: m.id,
-        // Inbound = van klant naar ons. Wij hebben nu geen email-outbound-registratie
-        // in email_messages (die tabel is IMAP-only inbound), dus alle rijen zijn
-        // per definitie inbound. Later: outbound via SMTP → aparte tabel of
-        // direction-flag.
-        direction: 'inbound',
+        // BUG-FIX: was hardcoded 'inbound'. E-mail_messages is IMAP-source
+        // waaraan óók onze verzonden mail meelift (Strato mirrort Sent-items
+        // via IMAP naar de bijbehorende INBOX). Als from_address = onze
+        // mailbox → dat is een outbound (door ons verstuurde) mail.
+        direction: emailDirection(m.from_address),
         body: (m.snippet || m.body_text || '').slice(0, 4000),
         at: m.date_received,
         meta: {
