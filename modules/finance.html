@@ -29058,6 +29058,107 @@
     } catch (_) { /* fail-soft */ }
   }
 
+  // Scoped CSS voor de unified thread — één keer injecten. Prefix .f4u-*
+  // voorkomt conflicten met bestaande WA/case-sheet bubble-styling.
+  function _wbxF4EnsureUnifiedStyles() {
+    if (document.getElementById('f4u-styles')) return;
+    const st = document.createElement('style');
+    st.id = 'f4u-styles';
+    st.textContent = `
+      .f4u-thread { display:flex; flex-direction:column; gap:10px; padding:12px 14px; }
+      .f4u-header {
+        padding:6px 12px; background:var(--bg-elev,#f3f4f6);
+        border:1px solid var(--border,#e5e7eb); border-radius:6px;
+        font-size:11px; color:var(--text-dim,#48585f);
+        text-align:center; margin-bottom:6px;
+      }
+      /* Bubble-wrapper: uitlijning per direction (inbound=links, outbound=rechts). */
+      .f4u-row { display:flex; flex-direction:column; max-width:78%; }
+      .f4u-row.in  { align-self:flex-start; align-items:flex-start; }
+      .f4u-row.out { align-self:flex-end;   align-items:flex-end;   }
+      /* Kanaal-meta boven de bubble: klein label + tijd. */
+      .f4u-meta {
+        font-size:10.5px; color:var(--text-faint,#8896a0);
+        letter-spacing:.03em; padding:0 4px 3px;
+        display:flex; align-items:center; gap:6px;
+      }
+      .f4u-meta .f4u-chan {
+        font-weight:600; text-transform:uppercase; letter-spacing:.06em;
+      }
+      .f4u-meta .f4u-chan.whatsapp { color:#059669; }
+      .f4u-meta .f4u-chan.email    { color:#0369a1; }
+      .f4u-meta .f4u-sep { opacity:.45; }
+      /* Bubble zelf. */
+      .f4u-bubble {
+        padding:10px 13px; border-radius:14px;
+        font-size:13.5px; line-height:1.5;
+        border:1px solid transparent;
+      }
+      .f4u-row.in .f4u-bubble {
+        background:#eef1f4; color:#1f2937;
+        border-bottom-left-radius:6px;
+      }
+      .f4u-row.out .f4u-bubble {
+        background:var(--accent-cyan-soft,#dbeafe); color:#0c4a6e;
+        border-bottom-right-radius:6px;
+      }
+      [data-theme="dark"] .f4u-row.in .f4u-bubble {
+        background:rgba(255,255,255,.06); color:var(--text,#e5e7eb);
+      }
+      [data-theme="dark"] .f4u-row.out .f4u-bubble {
+        background:rgba(14,165,233,.18); color:var(--text,#e5e7eb);
+      }
+      /* Bubble-content — WhatsApp: pre-wrap voor line-breaks. */
+      .f4u-bubble-body { white-space:pre-wrap; word-wrap:break-word; }
+      /* E-mail-specifieke bubble: <details>-toggle. Standaard ingeklapt. */
+      .f4u-email-details { padding:0; margin:0; }
+      .f4u-email-details > summary {
+        list-style:none; cursor:pointer;
+        display:grid;
+        grid-template-columns:auto minmax(0,1fr) auto;
+        column-gap:10px; align-items:center;
+        padding:10px 13px; margin:-10px -13px;
+      }
+      .f4u-email-details > summary::-webkit-details-marker { display:none; }
+      .f4u-email-details > summary::after {
+        content:"▸"; color:var(--text-faint,#8896a0); font-size:11px;
+        transition:transform .18s;
+      }
+      .f4u-email-details[open] > summary::after { transform:rotate(90deg); }
+      .f4u-email-from {
+        font-weight:600; font-size:12.5px; color:var(--text,#1f2937);
+        overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+        min-width:0;
+      }
+      .f4u-email-subject {
+        font-size:12.5px; color:var(--text-dim,#48585f); font-weight:500;
+        overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+        min-width:0;
+      }
+      .f4u-email-body {
+        margin-top:10px; padding-top:10px;
+        border-top:1px solid rgba(0,0,0,.08);
+        white-space:pre-wrap; word-wrap:break-word;
+        font-size:13.5px; line-height:1.55;
+      }
+      [data-theme="dark"] .f4u-email-body { border-top-color:rgba(255,255,255,.1); }
+      .f4u-email-actions {
+        margin-top:12px; padding-top:10px;
+        border-top:1px solid rgba(0,0,0,.06);
+        display:flex; gap:6px; flex-wrap:wrap;
+      }
+      [data-theme="dark"] .f4u-email-actions { border-top-color:rgba(255,255,255,.08); }
+      .f4u-reply-btn {
+        display:inline-flex; align-items:center; gap:5px;
+        padding:6px 12px; border-radius:6px;
+        border:1px solid #0ea5e9; background:#0ea5e9; color:#fff;
+        cursor:pointer; font-size:12px; font-weight:500;
+      }
+      .f4u-reply-btn:hover { background:#0284c7; border-color:#0284c7; }
+    `;
+    document.head.appendChild(st);
+  }
+
   function _wbxF4RenderUnifiedThread(items, counts) {
     const container = document.getElementById('inboxMessages');
     if (!container) return;
@@ -29065,26 +29166,31 @@
     // toegevoegde waarde in unified mode).
     if (!Number(counts.email || 0)) return;
 
+    _wbxF4EnsureUnifiedStyles();
+
     const escHtml = (typeof esc === 'function') ? esc : ((s) => String(s ?? ''));
     const fmt = (iso) => iso ? new Date(iso).toLocaleString('nl-NL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
 
     const html = items.map((it) => {
-      const isEmail = it.channel === 'email';
-      const align = it.direction === 'outbound' ? 'flex-end' : 'flex-start';
-      const bg = it.direction === 'outbound' ? 'var(--accent-cyan-soft, #e0f2fe)' : 'var(--bg-elev, #f3f4f6)';
-      const chanIcon = isEmail ? '✉️' : '💬';
-      const chanLabel = isEmail ? 'E-mail' : 'WhatsApp';
-      const subject = isEmail && it.meta?.subject ? `<div style="font-size:11.5px;font-weight:600;color:var(--text);margin-bottom:4px">${escHtml(it.meta.subject)}</div>` : '';
-      const bodyLen = (it.body || '').length;
-      const bodyTrunc = bodyLen > 800 ? (it.body.slice(0, 800) + '…') : it.body;
-      const emailFrom = isEmail && it.meta?.from_address ? `<div style="font-size:11px;color:var(--text-faint);margin-bottom:4px">van ${escHtml(it.meta.from_name || it.meta.from_address)}</div>` : '';
-      // Reply-knop op elke email-bubble. Echte SMTP-send via /api/send-email
-      // (Strato) als de user email.reply.send permission heeft; anders val
-      // terug op mailto: link. RBAC-check gebeurt lazy in de click-handler
-      // zodat we niet elke render blokkeren op permissions-load.
-      const replyBtn = isEmail
-        ? `<div style="margin-top:6px"><button class="sr-abtn"
-             type="button"
+      const isEmail  = it.channel === 'email';
+      const dirClass = it.direction === 'outbound' ? 'out' : 'in';
+      const chanLbl  = isEmail ? 'E-mail' : 'WhatsApp';
+      const chanCls  = isEmail ? 'email'  : 'whatsapp';
+      const meta = `
+        <div class="f4u-meta">
+          <span class="f4u-chan ${chanCls}">${escHtml(chanLbl)}</span>
+          <span class="f4u-sep">·</span>
+          <span>${escHtml(fmt(it.at))}</span>
+        </div>`;
+
+      if (isEmail) {
+        // Compacte header + inklapbare body via native <details>. Standaard
+        // dicht — klik = open, nog eens = dicht. Geen JS-toggle nodig.
+        const fromLabel = escHtml(it.meta?.from_name || it.meta?.from_address || '(onbekend)');
+        const subjectLabel = escHtml(it.meta?.subject || '(zonder onderwerp)');
+        const bodyText = (it.body || '(lege body)');
+        const replyBtn = `
+          <button type="button" class="f4u-reply-btn"
              data-f4-email-reply="1"
              data-f4-to="${escHtml(it.meta?.from_address || '')}"
              data-f4-from-name="${escHtml(it.meta?.from_name || '')}"
@@ -29095,27 +29201,40 @@
              data-f4-msg-id="${escHtml(it.id)}"
              data-f4-quote-body="${escHtml((it.body || '').slice(0, 2000))}"
              data-f4-quote-at="${escHtml(fmt(it.at))}"
-             style="font-size:11px;padding:4px 8px"
              title="Beantwoord per e-mail via administratie@ (Strato SMTP)"
-           ><i class="ti ti-mail-forward"></i> Beantwoord per e-mail</button></div>`
-        : '';
+          ><i class="ti ti-mail-forward"></i> Beantwoord per e-mail</button>`;
 
+        return `
+          <div class="f4u-row ${dirClass}">
+            ${meta}
+            <div class="f4u-bubble">
+              <details class="f4u-email-details">
+                <summary>
+                  <span class="f4u-email-from" title="${fromLabel}">${fromLabel}</span>
+                  <span class="f4u-email-subject" title="${subjectLabel}">${subjectLabel}</span>
+                </summary>
+                <div class="f4u-email-body">${escHtml(bodyText)}</div>
+                <div class="f4u-email-actions">${replyBtn}</div>
+              </details>
+            </div>
+          </div>`;
+      }
+      // WhatsApp: gewone bubble met body (pre-wrap voor line-breaks).
       return `
-        <div style="display:flex;flex-direction:column;align-items:${align};margin:8px 12px">
-          <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">${chanIcon} ${escHtml(chanLabel)} · ${escHtml(fmt(it.at))}</div>
-          <div style="max-width:82%;background:${bg};padding:10px 13px;border-radius:12px;font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word">
-            ${emailFrom}${subject}${escHtml(bodyTrunc)}
-            ${replyBtn}
+        <div class="f4u-row ${dirClass}">
+          ${meta}
+          <div class="f4u-bubble">
+            <div class="f4u-bubble-body">${escHtml(it.body || '')}</div>
           </div>
-        </div>
-      `;
+        </div>`;
     }).join('');
 
-    // Header-badge om te tonen dat unified mode actief is.
-    const header = `<div style="padding:6px 12px;background:var(--bg-elev,#f3f4f6);border-bottom:1px solid var(--border);font-size:11px;color:var(--text-dim);text-align:center">
-      Unified inbox actief · WhatsApp: ${counts.whatsapp || 0} · E-mail: ${counts.email || 0}
-    </div>`;
-    container.innerHTML = header + html;
+    container.innerHTML = `
+      <div class="f4u-thread">
+        <div class="f4u-header">Unified inbox · WhatsApp: ${counts.whatsapp || 0} · E-mail: ${counts.email || 0}</div>
+        ${html}
+      </div>
+    `;
     // Scroll naar laatste bericht.
     container.scrollTop = container.scrollHeight;
   }
