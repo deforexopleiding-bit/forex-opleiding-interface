@@ -74,10 +74,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Live of droogloop? Uit de database (app_settings.leadsonderhoud_live), zodat
-    // de UI-schuif het dagelijkse aan/uit bedient. Standaard droogloop.
+    // Live of droogloop? Uit de database, maar met een eigen schuif PER OMGEVING
+    // (leadsonderhoud_live_production / _preview). Zo zet je live op de preview
+    // niet per ongeluk productie aan — de cron draait immers alleen op productie.
+    // Standaard droogloop als de rij ontbreekt.
+    const omgeving = process.env.VERCEL_ENV || 'development';
     const { data: setting } = await supabaseAdmin
-      .from('app_settings').select('value').eq('key', 'leadsonderhoud_live').maybeSingle();
+      .from('app_settings').select('value').eq('key', 'leadsonderhoud_live_' + omgeving).maybeSingle();
     const droogloop = !(setting && setting.value === 'true');
 
     // 1) De wachtrij, over alle trajecten heen. De view zit alle voorwaarden al

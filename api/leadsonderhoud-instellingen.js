@@ -26,24 +26,27 @@ export default async function handler(req, res) {
   }
 
   const noodstop = aanUit(process.env.LEADSONDERHOUD_UIT);
+  // Eigen schuif per omgeving, zodat live op de preview productie niet raakt.
+  const omgeving = process.env.VERCEL_ENV || 'development';
+  const sleutel = 'leadsonderhoud_live_' + omgeving;
 
   if (req.method === 'GET') {
     const { data } = await supabaseAdmin
-      .from('app_settings').select('value').eq('key', 'leadsonderhoud_live').maybeSingle();
-    return res.status(200).json({ live: !!(data && data.value === 'true'), noodstop });
+      .from('app_settings').select('value').eq('key', sleutel).maybeSingle();
+    return res.status(200).json({ live: !!(data && data.value === 'true'), noodstop, omgeving });
   }
 
   if (req.method === 'POST') {
     const live = (req.body || {}).live === true;
     const { error } = await supabaseAdmin
       .from('app_settings')
-      .upsert({ key: 'leadsonderhoud_live', value: live ? 'true' : 'false', updated_by_user_id: user.id },
+      .upsert({ key: sleutel, value: live ? 'true' : 'false', updated_by_user_id: user.id },
               { onConflict: 'key' });
     if (error) {
       console.error('instellingen opslaan mislukt:', error.message);
       return res.status(500).json({ error: 'Opslaan mislukt' });
     }
-    return res.status(200).json({ live, noodstop });
+    return res.status(200).json({ live, noodstop, omgeving });
   }
 
   return res.status(405).json({ error: 'GET of POST' });

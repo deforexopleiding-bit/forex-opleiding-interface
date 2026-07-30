@@ -540,13 +540,21 @@ async function schermBerichten(){
   if (!S.trajecten) S.trajecten = (await haal('/api/leadsonderhoud-trajecten')).trajecten || [];
   var inst = {};
   try { inst = await haal('/api/leadsonderhoud-instellingen'); } catch (e) { inst = {}; }
-  var live = inst.live === true, noodstop = inst.noodstop === true;
+  var live = inst.live === true, noodstop = inst.noodstop === true, omg = inst.omgeving || 'onbekend';
 
   var alle = [];
   S.trajecten.forEach(function(tr){ (tr.stappen||[]).forEach(function(s){ alle.push({ tr: tr.naam, s: s }); }); });
 
+  // Toon duidelijk in welke omgeving je zit; de schuif geldt per omgeving.
+  var omgBanner = omg === 'production'
+    ? '<div class="lo-let" style="background:rgba(194,69,45,.12);border-color:rgba(194,69,45,.35);color:#C2452D;margin-bottom:10px"><span><b>Productie.</b> Deze schuif stuurt echt naar klanten.</span></div>'
+    : omg === 'preview'
+      ? '<div class="lo-let" style="margin-bottom:10px"><span>Je zit op de <b>preview</b> — deze schuif geldt alleen hier, niet op productie.</span></div>'
+      : '<div class="lo-let" style="margin-bottom:10px"><span>Ontwikkelomgeving (<b>'+esc(omg)+'</b>) — deze schuif geldt alleen hier.</span></div>';
+
   var verzendkaart = '<div class="lo-kaart" style="margin-bottom:16px">'
     + '<div class="lo-traj-k" style="margin-bottom:10px"><h3>Verzending</h3></div>'
+    + omgBanner
     + (noodstop ? '<div class="lo-let" style="margin-bottom:10px"><span><b>Noodstop staat aan</b> (LEADSONDERHOUD_UIT). De motor verstuurt niets, ongeacht de schuif hieronder. Zet de env-vlag uit om weer te kunnen versturen.</span></div>' : '')
     + '<div class="lo-inst"><div class="lo-inst-t"><b>Live versturen</b>'
     + '<span>Uit = droogloop (alleen loggen wat er zou gaan). Aan = de motor stuurt echt.</span></div>'

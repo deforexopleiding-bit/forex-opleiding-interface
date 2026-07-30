@@ -261,8 +261,10 @@ $t$Hoi {{1}}, morgen loopt je toegang af. Heb je meer tijd nodig, dan kun je een
 $t$Hoi {{1}}, vandaag om {{2}} hebben we ons gesprek. Twintig minuten via Zoom, de link staat in je agenda. Neem je journaal er even bij. Komt het niet uit? Laat het me hier weten, dan zetten we het om.$t$,
 'gesprek_herinnering', array['voornaam','tijd']);
 
--- Live-schakelaar: standaard uit (droogloop). De motor leest deze rij; de UI-
--- schuif in het Instellingen-scherm zet 'm op 'true' of 'false'.
-insert into public.app_settings (key, value)
-values ('leadsonderhoud_live', 'false')
+-- Live-schakelaar PER OMGEVING: standaard uit (droogloop). Zo zet je live op de
+-- preview niet per ongeluk productie aan. De motor leest de sleutel van de
+-- omgeving waarin hij draait; de UI-schuif zet 'm op 'true' of 'false'.
+insert into public.app_settings (key, value) values
+  ('leadsonderhoud_live_production', 'false'),
+  ('leadsonderhoud_live_preview', 'false')
 on conflict (key) do nothing;
