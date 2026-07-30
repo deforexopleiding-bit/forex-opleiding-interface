@@ -14585,6 +14585,20 @@
           '<button class="sr-abtn primary" id="joostUseAsIs" type="button" style="font-size:12px;padding:6px 10px"><i class="ti ti-send"></i> Verstuur als-is</button>' +
           intentBtnHtml +
         '</div>' +
+        // FASE — instructie-veld voor Joost-herschrijf. Onder de acties zodat
+        // 'ie de bestaande knoppen niet verdringt. Puur additief; niks wordt
+        // automatisch verstuurd. Meerdere revisies mogelijk (input blijft na
+        // rerender leeg zodat volgende instructie vers ingetypt kan worden).
+        '<div class="joost-revise-row" style="display:flex;gap:6px;align-items:flex-start;margin-top:10px;padding-top:10px;border-top:1px dashed var(--border,#e5e7eb)">' +
+          '<input type="text" id="joostReviseInstruction" class="fin-input" ' +
+                 'placeholder="Stuur Joost bij (bv. \'maak er 3 termijnen van\', \'iets vriendelijker\', \'korter\')" ' +
+                 'style="flex:1;min-width:0;font-size:12.5px" />' +
+          '<button class="sr-abtn" id="joostReviseBtn" type="button" ' +
+                 'style="font-size:12px;padding:6px 12px;white-space:nowrap" ' +
+                 'title="Joost herschrijft de suggestie op basis van jouw instructie. Er wordt niks verstuurd."' +
+                 '><i class="ti ti-sparkles" style="color:#7c3aed;margin-right:4px"></i>Pas aan</button>' +
+        '</div>' +
+        '<div id="joostReviseStatus" style="margin-top:6px;font-size:11.5px;color:var(--text-faint);min-height:14px"></div>' +
       '</div>';
     results.innerHTML = html;
 
@@ -14595,6 +14609,18 @@
     if (editBtn) editBtn.addEventListener('click', () => applyJoostEdit());
     const ignoreBtn = document.getElementById('joostIgnore');
     if (ignoreBtn) ignoreBtn.addEventListener('click', () => applyJoostIgnore());
+    // FASE — herschrijf-op-instructie wire. POST naar joost-suggest-revise,
+    // vervangt de textarea + reasoning in de gerenderde card. Meerdere rondes
+    // mogelijk. Fail-soft: originele suggestie blijft staan bij fout.
+    const reviseBtn = document.getElementById('joostReviseBtn');
+    const reviseInp = document.getElementById('joostReviseInstruction');
+    if (reviseBtn && reviseInp) {
+      reviseBtn.addEventListener('click', () => _joostRevise());
+      // Enter in het input-veld triggert ook de revise (handig snel typen).
+      reviseInp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _joostRevise(); }
+      });
+    }
     // Wire intent-action knop (indien gerendered).
     if (intentAction) {
       const intentBtn = document.getElementById('joostIntentAction');
@@ -14930,6 +14956,82 @@
       }
     } catch (e) {
       console.error('[joost mark-outcome]', e);
+    }
+  }
+
+  // FASE — Herschrijf-op-instructie. Neemt de HUIDIGE suggestie-tekst uit de
+  // (bewerkte) textarea + de instructie uit het input-veld en stuurt naar
+  // /api/joost-suggest-revise. Vervangt textarea + reasoning + reset input
+  // zodat volgende ronde vers ingetypt kan worden. NIETS wordt verstuurd —
+  // gebruiker klikt daarna zelf op Verstuur/Bewerk/Negeer.
+  let _joostReviseBusy = false;
+  async function _joostRevise() {
+    if (_joostReviseBusy) return;
+    if (!_joostCurrentSuggestion) return;
+    const inp    = document.getElementById('joostReviseInstruction');
+    const btn    = document.getElementById('joostReviseBtn');
+    const status = document.getElementById('joostReviseStatus');
+    const ta     = document.getElementById('joostReplyText');
+    const convId = (_inboxActiveConvId || _joostCurrentSuggestion.conversation_id || null);
+    const instruction = String(inp?.value || '').trim();
+    // Huidige tekst = wat er NU in de textarea staat (kan door user bewerkt
+    // zijn). Zo werkt "iets korter" op de laatste versie, niet op het
+    // originele voorstel.
+    const previousReply = String(ta?.value || _joostCurrentSuggestion.suggested_reply || '').trim();
+    if (!instruction) {
+      if (status) status.textContent = 'Typ eerst een instructie (bv. "iets korter").';
+      inp?.focus();
+      return;
+    }
+    if (!convId) {
+      if (status) status.textContent = 'Geen actief gesprek.';
+      return;
+    }
+    if (!previousReply) {
+      if (status) status.textContent = 'Suggestie is leeg — geen basis om te herschrijven.';
+      return;
+    }
+    _joostReviseBusy = true;
+    if (btn) { btn.disabled = true; btn.style.opacity = '.6'; }
+    if (status) { status.style.color = 'var(--text-faint)'; status.textContent = 'Joost herschrijft…'; }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/joost-suggest-revise', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversation_id: convId,
+          previous_reply : previousReply,
+          instruction    : instruction,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      const revised = String(d?.suggested_reply || '').trim();
+      const reasoning = String(d?.reasoning || '').trim();
+      if (!revised) throw new Error('Lege reply van Joost');
+      // Vervang textarea + in-memory suggestion. Bewaar oorspronkelijk id +
+      // intent + confidence — het is dezelfde suggestie, alleen herschreven.
+      if (ta) { ta.value = revised; ta.dispatchEvent(new Event('input', { bubbles: true })); }
+      _joostCurrentSuggestion = Object.assign({}, _joostCurrentSuggestion, {
+        suggested_reply: revised,
+        // reasoning updaten wanneer de LLM er een geeft — anders behouden.
+        reasoning: reasoning || _joostCurrentSuggestion.reasoning,
+      });
+      // Reasoning-details veld verversen (indien aanwezig).
+      const reasoningEl = document.querySelector('.inbox-c-joost-reasoning .inbox-c-joost-reasoning-text');
+      if (reasoningEl && reasoning) reasoningEl.textContent = reasoning;
+      if (inp) inp.value = '';
+      if (status) {
+        status.style.color = '#059669';
+        status.textContent = '✓ Suggestie herschreven. Meer bijsturen? Typ opnieuw en klik "Pas aan".';
+      }
+    } catch (e) {
+      if (status) {
+        status.style.color = 'var(--wbx-s-inc-tx, #dc2626)';
+        status.textContent = 'Herschrijven mislukt: ' + (e?.message || 'onbekend') + ' — originele suggestie blijft staan.';
+      }
+    } finally {
+      _joostReviseBusy = false;
+      if (btn) { btn.disabled = false; btn.style.opacity = ''; }
     }
   }
 
