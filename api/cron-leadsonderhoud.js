@@ -21,7 +21,7 @@
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
 import { sendEmailViaSmtp } from './_lib/send-email-core.js';
 import { sendTemplate } from './_lib/meta-whatsapp.js';
-import { vulSjabloon } from './_lib/leadsonderhoud-sjabloon.js';
+import { vulSjabloon, instelWaarde } from './_lib/leadsonderhoud-sjabloon.js';
 
 // Afzender-mailbox voor deze module (opdracht: onboarding@, of info@).
 const MAIL_AFZENDER = 'onboarding@deforexopleiding.nl';
@@ -81,12 +81,12 @@ export default async function handler(req, res) {
     const omgeving = process.env.VERCEL_ENV || 'development';
     const { data: setting } = await supabaseAdmin
       .from('app_settings').select('value').eq('key', 'leadsonderhoud_live_' + omgeving).maybeSingle();
-    const droogloop = !(setting && setting.value === 'true');
+    const droogloop = !(instelWaarde(setting) === 'true');
 
     // Logo-URL uit de instelling (niet hardgecodeerd in de sjablonen).
     const { data: logoRow } = await supabaseAdmin
       .from('app_settings').select('value').eq('key', 'leadsonderhoud_logo_url').maybeSingle();
-    const logoUrl = (logoRow && logoRow.value) || '';
+    const logoUrl = instelWaarde(logoRow);
 
     // 1) De wachtrij, over alle trajecten heen. De view zit alle voorwaarden al
     //    in (toestemming, welk bericht, of het al gestuurd is).

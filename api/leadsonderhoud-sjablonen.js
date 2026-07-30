@@ -7,6 +7,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { instelWaarde } from './_lib/leadsonderhoud-sjabloon.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -30,7 +31,7 @@ export default async function handler(req, res) {
     if (error) throw error;
     const { data: logoRow } = await supabaseAdmin
       .from('app_settings').select('value').eq('key', 'leadsonderhoud_logo_url').maybeSingle();
-    return res.status(200).json({ items: data, logo_url: (logoRow && logoRow.value) || '' });
+    return res.status(200).json({ items: data, logo_url: instelWaarde(logoRow) });
   } catch (e) {
     console.error('sjablonen laden mislukt:', e.message);
     return res.status(500).json({ error: 'Sjablonen laden mislukt' });

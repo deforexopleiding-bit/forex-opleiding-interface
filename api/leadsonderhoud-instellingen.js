@@ -9,6 +9,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { instelWaarde } from './_lib/leadsonderhoud-sjabloon.js';
 
 function aanUit(v) {
   return ['1', 'true', 'aan', 'on', 'ja'].includes(String(v || '').trim().toLowerCase());
@@ -33,7 +34,7 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     const { data } = await supabaseAdmin
       .from('app_settings').select('value').eq('key', sleutel).maybeSingle();
-    return res.status(200).json({ live: !!(data && data.value === 'true'), noodstop, omgeving });
+    return res.status(200).json({ live: instelWaarde(data) === 'true', noodstop, omgeving });
   }
 
   if (req.method === 'POST') {

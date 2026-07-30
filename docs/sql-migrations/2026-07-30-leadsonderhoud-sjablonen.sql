@@ -264,14 +264,16 @@ $t$Hoi {{1}}, vandaag om {{2}} hebben we ons gesprek. Twintig minuten via Zoom, 
 -- Live-schakelaar PER OMGEVING: standaard uit (droogloop). Zo zet je live op de
 -- preview niet per ongeluk productie aan. De motor leest de sleutel van de
 -- omgeving waarin hij draait; de UI-schuif zet 'm op 'true' of 'false'.
+-- value is jsonb: schrijf geldige JSON (to_jsonb), anders faalt de insert of komt
+-- de waarde er met aanhalingstekens uit.
 insert into public.app_settings (key, value) values
-  ('leadsonderhoud_live_production', 'false'),
-  ('leadsonderhoud_live_preview', 'false')
+  ('leadsonderhoud_live_production', to_jsonb('false'::text)),
+  ('leadsonderhoud_live_preview', to_jsonb('false'::text))
 on conflict (key) do nothing;
 
 -- Logo-URL op één plek. De sjablonen gebruiken de {logo}-variabele; hier stel je
 -- het adres in. De website staat (nog) op het Vercel-adres, want deforexopleiding.nl
 -- wijst naar Webflow. Verhuist het domein, dan pas je alleen deze rij aan.
 insert into public.app_settings (key, value)
-values ('leadsonderhoud_logo_url', 'https://dfo-website-three.vercel.app/img/merk/logo.png')
+values ('leadsonderhoud_logo_url', to_jsonb('https://dfo-website-three.vercel.app/img/merk/logo.png'::text))
 on conflict (key) do nothing;

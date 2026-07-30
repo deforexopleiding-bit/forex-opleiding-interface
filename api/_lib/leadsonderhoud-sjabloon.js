@@ -5,6 +5,18 @@
 // bewerking, alleen een ander formaat. Zo hoef je niet in de code te zoeken
 // welke variabele op welke plek hoort.
 
+// app_settings.value is een jsonb-kolom. Via supabase-js komt een jsonb-string
+// meestal al als gewone JS-string binnen, maar we normaliseren defensief: niet-
+// strings naar string, en één laag omringende JSON-quotes eraf. Zo belandt een
+// URL nooit mét aanhalingstekens in de HTML (waardoor het logo niet zou laden).
+export function instelWaarde(row) {
+  let v = row && row.value;
+  if (v == null) return '';
+  if (typeof v !== 'string') v = String(v);
+  const m = v.match(/^"([\s\S]*)"$/);
+  return m ? m[1] : v;
+}
+
 // Alle variabelen die een sjabloon kan gebruiken, afgeleid uit de lead/wachtrij-
 // rij plus wat de motor aanreikt (inloglink, gespreksdatum/-tijd).
 export function bouwVariabelen(lead, extra = {}) {

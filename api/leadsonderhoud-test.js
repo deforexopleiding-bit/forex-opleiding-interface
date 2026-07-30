@@ -11,7 +11,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { sendEmailViaSmtp } from './_lib/send-email-core.js';
-import { vulSjabloon } from './_lib/leadsonderhoud-sjabloon.js';
+import { vulSjabloon, instelWaarde } from './_lib/leadsonderhoud-sjabloon.js';
 
 const MAIL_AFZENDER = 'onboarding@deforexopleiding.nl';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -48,7 +48,7 @@ export default async function handler(req, res) {
     if (sjabloon.kanaal !== 'mail') return res.status(400).json({ error: 'Alleen mail-sjablonen kun je als testmail sturen (WhatsApp bekijk je via Voorbeeld)' });
     const { data: logoRow } = await supabaseAdmin
       .from('app_settings').select('value').eq('key', 'leadsonderhoud_logo_url').maybeSingle();
-    const ingevuld = vulSjabloon(sjabloon, NEP_LEAD, { ...NEP_EXTRA, logo: (logoRow && logoRow.value) || '' });
+    const ingevuld = vulSjabloon(sjabloon, NEP_LEAD, { ...NEP_EXTRA, logo: instelWaarde(logoRow) });
     onderwerp = ingevuld.onderwerp || onderwerp;
     tekst = ingevuld.tekst || tekst;
     html = ingevuld.html || null;
