@@ -7373,12 +7373,18 @@
   // lijst intact blijft — alleen icon+label worden specifieker.
   const _AC_WBX_ACTION_META = {
     MANUAL_FOLLOWUP:                    { ic: '📞', cls: 'wbx-plan',   label: 'Belmoment'            },
+    // BUG-FIX (cosmetisch): MANUAL_CONFIRM_PROMISE ontbrak — viel terug op
+    // de call-bucket-default (📞). Semantisch fout — een betaal-toezegging
+    // is geen belmoment. 🤝 (handdruk) past bij "belofte tussen partijen".
+    MANUAL_CONFIRM_PROMISE:             { ic: '🤝', cls: 'wbx-plan',   label: 'Betaal-toezegging'    },
     MANUAL_VERIFY_PAYMENT:              { ic: '💶', cls: 'wbx-verify', label: 'Betaalcontrole'       },
     MANUAL_ESCALATION:                  { ic: '⚠️', cls: 'wbx-esc',    label: 'Escalatie'            },
     MANUAL_PROPOSE_ARRANGEMENT:         { ic: '📅', cls: 'wbx-plan',   label: 'Regeling voorstellen' },
     TL_INVOICE_UPDATE_DUE:              { ic: '📅', cls: 'wbx-plan',   label: 'Uitstel'              },
     TL_INVOICE_CONSOLIDATE_AND_RESTART: { ic: '📅', cls: 'wbx-plan',   label: 'Uitstel + consolideer' },
-    TL_INVOICE_SPLIT:                   { ic: '📅', cls: 'wbx-plan',   label: 'Splitsing'            },
+    // Splitsing was 📅 (dubbelop met UPDATE_DUE); 🔀 is duidelijker voor
+    // "in stukken hakken over meerdere termijnen".
+    TL_INVOICE_SPLIT:                   { ic: '🔀', cls: 'wbx-plan',   label: 'Splitsing'            },
     TL_SUBSCRIPTION_PAUSE:              { ic: '⏸️', cls: 'wbx-plan',   label: 'Abonnement pauzeren'  },
     TL_SUBSCRIPTION_STOP:               { ic: '⏹️', cls: 'wbx-plan',   label: 'Abonnement stoppen'   },
     TL_INVOICE_WRITEOFF:                { ic: '✂️', cls: 'wbx-plan',   label: 'Kwijtschelding'       },
