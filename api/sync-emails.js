@@ -233,6 +233,50 @@ async function syncMailbox({ account, host, port, boxStart }) {
         }
       }
 
+      // ── Pass 3.5 (fase 4 blok 2): koppel mail aan klant via from_address ──
+      // Match-regel: lower(from_address) = lower(customers.email) waarbij de
+      // klant niet gearchiveerd/geanonimiseerd is. EXACT 1 hit → customer_id;
+      // 0 of >1 hits → NULL (correctie via /api/email-message-link-customer).
+      // Fail-soft: elke lookup-fout laat customer_id NULL en logt door.
+      //
+      // Batch-optimized: alle unieke from_addresses in 1 query ophalen zodat we
+      // niet N lookups doen per invocation. Bij 50 mails = 1 extra query max.
+      try {
+        const uniqAddrs = Array.from(new Set(
+          rows.map((r) => (r.from_address || '').toLowerCase()).filter(Boolean)
+        ));
+        if (uniqAddrs.length > 0) {
+          const { data: matched, error: matchErr } = await supabase
+            .from('customers')
+            .select('id, email')
+            .in('email', uniqAddrs)  // Supabase kan case-insensitive niet met .in — we filteren client-side
+            .is('archived_at', null)
+            .is('anonymized_at', null);
+          if (!matchErr && Array.isArray(matched)) {
+            // Group by lower-email → array van customer_ids. >1 = ambigu.
+            const byAddr = new Map();
+            for (const c of matched) {
+              const key = String(c.email || '').toLowerCase();
+              if (!key) continue;
+              if (!byAddr.has(key)) byAddr.set(key, []);
+              byAddr.get(key).push(c.id);
+            }
+            for (const r of rows) {
+              const key = String(r.from_address || '').toLowerCase();
+              const list = byAddr.get(key);
+              if (list && list.length === 1) {
+                r.customer_id = list[0];
+              } else {
+                r.customer_id = null; // 0 of >1 hits
+              }
+            }
+          }
+        }
+      } catch (matchLookupErr) {
+        console.warn(`[sync-emails] customer-match lookup failed ${account.mailbox}:`, matchLookupErr?.message || matchLookupErr);
+        // Fail-soft: laat customer_id impliciet NULL (kolom is nullable).
+      }
+
       // ── Batch-insert — idempotent via ON CONFLICT DO NOTHING ───────────
       if (rows.length > 0) {
         const { error: insertErr } = await supabase
