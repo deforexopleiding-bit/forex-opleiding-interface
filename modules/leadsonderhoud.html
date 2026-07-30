@@ -140,7 +140,7 @@
 // ====================================================================
 
 // ---- toestand ----
-var S = { scherm: 'overzicht', filter: 'alles', over: null, wachtrij: null, trajecten: null };
+var S = { scherm: 'overzicht', filter: 'alles', over: null, wachtrij: null, trajecten: null, droog: null };
 
 // ---- hulpjes ----
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
@@ -166,6 +166,13 @@ function geleden(iso){
   if (min < 60) return min+' min';
   var u = Math.floor(min/60); if (u < 24) return u+' uur';
   return Math.floor(u/24)+' dagen';
+}
+/** Kort moment "DD-MM HH:MM" in de tijd van de kijker (voor de droogloop-log). */
+function kortMoment(iso){
+  if (!iso) return '';
+  var d = new Date(iso); if (isNaN(d.getTime())) return '';
+  var p = function(n){ return (n<10?'0':'')+n; };
+  return p(d.getDate())+'-'+p(d.getMonth()+1)+' '+p(d.getHours())+':'+p(d.getMinutes());
 }
 
 /** Gedeelde fetch met het ingelogde token; geeft {} terug bij een fout. */
@@ -322,9 +329,43 @@ async function schermWachtrij(){
     + regels.map(function(r){ return '<div class="lo-inst"><div class="lo-inst-t"><b>'+esc(r[0])+'</b><span>'+esc(r[1])+'</span></div><span class="m m-gr">actief</span></div>'; }).join('')
     + '</div>';
 
-  zetInhoud(kop('Wachtrij','Wat de motor bij de volgende ronde zou versturen. Elke regel is één bericht.')
-    + '<div class="lo-let"><span>Zolang de droogloopstand aanstaat, wordt er niets echt verstuurd — je ziet alleen wat er zou gaan.</span></div>'
-    + tabel + regelkaart);
+  // De droogloop-log: wat de motor de afgelopen dagen zou hebben verstuurd.
+  if (!S.droog) { try { S.droog = (await haal('/api/leadsonderhoud-droogloop-log')).items || []; } catch (e) { S.droog = []; } }
+  var droogTabel = '<div class="lo-kaart" style="margin-top:18px"><div class="lo-traj-k" style="margin-bottom:8px">'
+    + '<h3>Langsgekomen in droogloop</h3><span class="m m-or">laatste 7 dagen · ' + S.droog.length + '</span></div>'
+    + '<p style="font-size:12.5px;color:var(--text-dim);margin-bottom:12px">Wat de motor in droogloopstand zou hebben verstuurd — zo zie je of de juiste mensen het juiste bericht krijgen. Deze regels blokkeren de wachtrij niet.</p>'
+    + (S.droog.length
+        ? '<div class="lo-tabwrap"><table class="lo"><thead><tr><th>Naar</th><th>Traject</th><th>Bericht</th><th>Kanaal</th><th>Afzender</th><th>Wanneer</th></tr></thead><tbody>'
+          + S.droog.map(function(d){
+              return '<tr><td class="mono" style="font-size:12px">'+esc(d.naar||'')+'</td>'
+                + '<td><span class="m m-gy">'+esc(d.traject||'')+'</span></td>'
+                + '<td>'+esc(d.soort||'')+'</td>'
+                + '<td>'+(d.kanaal==='whatsapp'?'<span class="m m-wa">WhatsApp</span>':'<span class="m m-bl">Mail</span>')+'</td>'
+                + '<td>'+esc(d.agent||'')+'</td>'
+                + '<td style="color:var(--text-faint);font-size:12px">'+esc(kortMoment(d.verstuurd_op))+'</td></tr>';
+            }).join('')
+          + '</tbody></table></div>'
+        : '<div class="lo-leeg" style="padding:20px">Nog niets in droogloop langsgekomen. Zodra de motor draait (op productie) verschijnen hier de regels.</div>')
+    + '</div>';
+
+  var header = '<div class="lo-kop"><div><h1>Wachtrij</h1>'
+    + '<p>Wat de motor bij de volgende ronde zou versturen. Elke regel is één bericht.</p></div>'
+    + '<div class="lo-kop-r"><button class="k k-o" id="wq-opruim">Droogloopregels opruimen</button></div></div>';
+
+  zetInhoud(header
+    + '<div class="lo-let"><span>Zolang de droogloopstand aanstaat, wordt er niets echt verstuurd — de motor logt alleen wat er zou gaan (onderaan).</span></div>'
+    + tabel + regelkaart + droogTabel);
+  var opruim = $('wq-opruim');
+  if (opruim) opruim.onclick = droogloopOpruimen;
+}
+async function droogloopOpruimen(){
+  if (!confirm('Alle droogloop-regels verwijderen? De echte verzendingen (verstuurd en mislukt) blijven staan.')) return;
+  try {
+    var r = await haalPost('/api/leadsonderhoud-droogloop-opruimen', {});
+    S.droog = null;
+    alert((r.verwijderd || 0) + ' droogloop-regels opgeruimd.');
+    teken();
+  } catch (e) { alert('Opruimen mislukt: ' + e.message); }
 }
 
 // ---- SCHERM: TRAJECTEN (met beheer) ----

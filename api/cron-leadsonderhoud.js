@@ -67,22 +67,34 @@ export default async function handler(req, res) {
     if (wErr) throw wErr;
 
     // 2) Wie kreeg vandaag (Amsterdamse dag) al een bericht? Voor de één-per-dag-
-    //    regel. We halen de recente log op en vergelijken de Amsterdamse datum.
+    //    regel. In droogloop tellen de 'droog'-regels mee als "zou zijn gegaan",
+    //    zodat het rapport precies laat zien wat er live zou gebeuren.
     const sinds = new Date(nu.getTime() - 36 * 3600 * 1000).toISOString();
     const { data: recent } = await supabaseAdmin
       .from('berichten_log')
       .select('gebruiker_id, soort, status, verstuurd_op')
       .gte('verstuurd_op', sinds);
+    const teltAlsVerstuurd = droogloop ? ['verstuurd', 'droog'] : ['verstuurd'];
     const alVandaag = new Set();
     const foutenVandaag = {}; // key gebruiker_id|soort -> aantal 'fout' vandaag
     for (const r of recent || []) {
       const d = amsterdam(new Date(r.verstuurd_op)).datum;
       if (d !== datum) continue;
-      if (r.status === 'verstuurd') alVandaag.add(r.gebruiker_id);
+      if (teltAlsVerstuurd.includes(r.status)) alVandaag.add(r.gebruiker_id);
       if (r.status === 'fout') {
         const k = r.gebruiker_id + '|' + r.soort;
         foutenVandaag[k] = (foutenVandaag[k] || 0) + 1;
       }
+    }
+
+    // In droogloop: welke (wie|soort) al een 'droog'-regel hebben. Zo schrijven
+    // we niet elke ronde opnieuw dezelfde regel — spiegel van de view, die
+    // alleen 'verstuurd' uitsluit; wij sluiten hier 'droog' uit voor de simulatie.
+    const alDroog = new Set();
+    if (droogloop) {
+      const { data: droogRijen } = await supabaseAdmin
+        .from('berichten_log').select('gebruiker_id, lead_id, soort').eq('status', 'droog');
+      for (const r of droogRijen || []) alDroog.add((r.gebruiker_id || r.lead_id) + '|' + r.soort);
     }
 
     // 3) Goedgekeurde WhatsApp-sjablonen, voor de template-gate.
@@ -108,8 +120,22 @@ export default async function handler(req, res) {
       // te vaak gefaald vandaag -> definitief mislukt, niet blijven proberen
       if ((foutenVandaag[r.gebruiker_id + '|' + r.soort] || 0) >= 2) { rapport.overgeslagen++; meld('overgeslagen', 'na herhaalde fout gestopt'); continue; }
 
-      // DROOGLOOP: niets versturen, niets in de log; alleen rapporteren.
-      if (droogloop) { rapport.verstuurd++; meld('zou versturen'); continue; }
+      // DROOGLOOP: niet echt versturen, maar wél een 'droog'-regel loggen zodat
+      // je kunt terugkijken wat er zou zijn gegaan. Die regel blokkeert de
+      // wachtrij niet (de view sluit alleen 'verstuurd' uit). Precies één keer
+      // per (persoon, soort), zodat het beeld gelijk is aan live.
+      if (droogloop) {
+        const sleutel = (r.gebruiker_id || r.lead_id) + '|' + r.soort;
+        if (alDroog.has(sleutel)) { rapport.overgeslagen++; meld('overgeslagen', 'al in droogloop gelogd'); continue; }
+        await supabaseAdmin.from('berichten_log').insert({
+          gebruiker_id: r.gebruiker_id, lead_id: r.lead_id, soort: r.soort, kanaal: r.kanaal,
+          naar, agent: r.agent, traject: r.traject, status: 'droog', verstuurd_op: new Date().toISOString(),
+        });
+        alDroog.add(sleutel);
+        alVandaag.add(r.gebruiker_id); // ook in droog de één-per-dag-grens respecteren
+        rapport.verstuurd++; meld('zou versturen');
+        continue;
+      }
 
       // LIVE: de tekst komt uit de sjabloontabel (stap 4/5). Nog niet aanwezig?
       // Dan zichtbaar overslaan i.p.v. iets leegs te sturen.
