@@ -203,6 +203,27 @@ async function haalPost(pad, body){
 function openModal(html){ $('loModalIn').innerHTML = html; $('loModal').hidden = false; }
 function sluitModal(){ $('loModal').hidden = true; $('loModalIn').innerHTML = ''; }
 
+/** Bevestig-venster in de modulestijl (vervangt window.confirm — dat blokkeert
+ *  ook geautomatiseerd testen). Roept opJa() aan bij bevestigen. */
+function bevestig(titel, tekst, knopLabel, opJa){
+  openModal('<h2>'+esc(titel)+'</h2>'
+    + '<p style="font-size:13.5px;color:var(--text-dim);line-height:1.55">'+esc(tekst)+'</p>'
+    + '<div class="lo-vk-voet"><span></span><span>'
+    + '<button class="k k-o" id="bv_nee">Annuleren</button> '
+    + '<button class="k k-ro" id="bv_ja">'+esc(knopLabel||'Verwijderen')+'</button></span></div>');
+  $('bv_nee').onclick = sluitModal;
+  $('bv_ja').onclick = function(){ sluitModal(); opJa(); };
+}
+/** Kort meldingsvenster in de modulestijl (vervangt window.alert). */
+function melding(tekst){
+  openModal('<p style="font-size:13.5px;color:var(--text);line-height:1.55;margin-bottom:6px">'+esc(tekst)+'</p>'
+    + '<div class="lo-vk-voet"><span></span><button class="k k-p" id="ml_ok">OK</button></div>');
+  $('ml_ok').onclick = sluitModal;
+}
+/** Zelfde afleiding als de server (voor de live-hint in het stapformulier). */
+function loSlug(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,''); }
+function loSoortHint(){ var n=$('sf_naam'), so=$('sf_soort'); if(n&&so&&!so.value) so.placeholder = n.value ? loSlug(n.value) : 'wordt automatisch afgeleid'; }
+
 // ---- raamwerk ----
 function tabs(){
   var items = [['overzicht','Overzicht'],['wachtrij','Wachtrij'],['gesprekken','Gesprekken'],
@@ -358,14 +379,15 @@ async function schermWachtrij(){
   var opruim = $('wq-opruim');
   if (opruim) opruim.onclick = droogloopOpruimen;
 }
-async function droogloopOpruimen(){
-  if (!confirm('Alle droogloop-regels verwijderen? De echte verzendingen (verstuurd en mislukt) blijven staan.')) return;
-  try {
-    var r = await haalPost('/api/leadsonderhoud-droogloop-opruimen', {});
-    S.droog = null;
-    alert((r.verwijderd || 0) + ' droogloop-regels opgeruimd.');
-    teken();
-  } catch (e) { alert('Opruimen mislukt: ' + e.message); }
+function droogloopOpruimen(){
+  bevestig('Droogloopregels opruimen', 'Alle droogloop-regels verwijderen? De echte verzendingen (verstuurd en mislukt) blijven staan.', 'Opruimen', async function(){
+    try {
+      var r = await haalPost('/api/leadsonderhoud-droogloop-opruimen', {});
+      S.droog = null;
+      await teken();
+      melding((r.verwijderd || 0) + ' droogloop-regels opgeruimd.');
+    } catch (e) { melding('Opruimen mislukt: ' + e.message); }
+  });
 }
 
 // ---- SCHERM: TRAJECTEN (met beheer) ----
@@ -444,11 +466,12 @@ async function trajectOpslaan(id){
   try { await haalPost('/api/leadsonderhoud-traject-opslaan', body); sluitModal(); await verversTrajecten(); }
   catch(e){ $('tf_fout').textContent = e.message; }
 }
-async function trajectVerwijderen(id){
+function trajectVerwijderen(id){
   var tr = vindTraject(id);
-  if (!confirm('Traject "'+(tr?tr.naam:'')+'" en al zijn stappen verwijderen? Dit kan niet ongedaan gemaakt worden.')) return;
-  try { await haalPost('/api/leadsonderhoud-traject-verwijderen', { id:id }); await verversTrajecten(); }
-  catch(e){ alert('Verwijderen mislukt: '+e.message); }
+  bevestig('Traject verwijderen', 'Traject "'+(tr?tr.naam:'')+'" en al zijn stappen verwijderen? Dit kan niet ongedaan gemaakt worden.', 'Verwijderen', async function(){
+    try { await haalPost('/api/leadsonderhoud-traject-verwijderen', { id:id }); await verversTrajecten(); }
+    catch(e){ melding('Verwijderen mislukt: '+e.message); }
+  });
 }
 
 // ---- stap-formulier ----
@@ -459,7 +482,11 @@ function stapForm(traject_id, s){
   var dagen=['','0','1','2','3','4','5','6'], dagLabels=['—','zo','ma','di','wo','do','vr','za'];
   var wk = dagen.map(function(d,i){ return '<option value="'+d+'"'+(String(s.weekdag==null?'':s.weekdag)===d?' selected':'')+'>'+dagLabels[i]+'</option>'; }).join('');
   openModal('<h2>'+(s.id?'Stap bewerken':'Nieuwe stap')+'</h2>'
-    + '<div class="lo-vel-rij">'+veld('sf_naam','Naam', s.naam)+veld('sf_soort','Soort (uniek label, bv. welkom)', s.soort)+'</div>'
+    + '<div class="lo-vel-rij">'
+    + '<div class="lo-vel"><label>Naam</label><input id="sf_naam" type="text" value="'+esc(s.naam||'')+'" oninput="loSoortHint()"></div>'
+    + '<div class="lo-vel"><label>Soort <span style="color:var(--text-faint);font-weight:400">(optioneel — leeg = uit de naam)</span></label>'
+    + '<input id="sf_soort" type="text" value="'+esc(s.soort||'')+'" placeholder="'+esc(s.soort?'':(s.naam?loSlug(s.naam):'wordt automatisch afgeleid'))+'"></div>'
+    + '</div>'
     + '<div class="lo-vel-rij"><div class="lo-vel"><label>Kanaal</label><select id="sf_kanaal">'+kan+'</select></div>'
     + '<div class="lo-vel"><label>Aanleiding</label><select id="sf_aanl">'+aanl+'</select></div></div>'
     + '<div class="lo-vel-rij">'+veld('sf_waarde','Waarde (dag/aantal, bij dag-aanleidingen)', s.waarde,'number')+veld('sf_urg','Urgentie (1 = hoog)', s.urgentie==null?3:s.urgentie,'number')+'</div>'
@@ -485,10 +512,11 @@ async function stapOpslaan(traject_id, id){
   try { await haalPost('/api/leadsonderhoud-stap-opslaan', body); sluitModal(); await verversTrajecten(); }
   catch(e){ $('sf_fout').textContent = e.message; }
 }
-async function stapVerwijderen(id){
-  if (!confirm('Deze stap verwijderen?')) return;
-  try { await haalPost('/api/leadsonderhoud-stap-verwijderen', { id:id }); await verversTrajecten(); }
-  catch(e){ alert('Verwijderen mislukt: '+e.message); }
+function stapVerwijderen(id){
+  bevestig('Stap verwijderen', 'Deze stap verwijderen?', 'Verwijderen', async function(){
+    try { await haalPost('/api/leadsonderhoud-stap-verwijderen', { id:id }); await verversTrajecten(); }
+    catch(e){ melding('Verwijderen mislukt: '+e.message); }
+  });
 }
 
 // ---- SCHERM: BERICHTEN ----
