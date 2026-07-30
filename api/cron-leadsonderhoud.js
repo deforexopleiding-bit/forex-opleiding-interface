@@ -21,9 +21,15 @@
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
 import { sendEmailViaSmtp } from './_lib/send-email-core.js';
 import { sendTemplate } from './_lib/meta-whatsapp.js';
+import { vulSjabloon } from './_lib/leadsonderhoud-sjabloon.js';
 
 // Afzender-mailbox voor deze module (opdracht: onboarding@, of info@).
 const MAIL_AFZENDER = 'onboarding@deforexopleiding.nl';
+
+// Is een env-vlag "aan"? Ruim: 1/true/aan/on/ja tellen als aan.
+function aanUit(v) {
+  return ['1', 'true', 'aan', 'on', 'ja'].includes(String(v || '').trim().toLowerCase());
+}
 
 // Amsterdamse klok — nodig voor de stille uren en de "één per dag"-grens.
 function amsterdam(nu) {
@@ -33,30 +39,47 @@ function amsterdam(nu) {
 }
 
 /**
- * De sjabloontekst per soort. Die staat straks in een sjabloontabel in de
- * database (stap 4/5), zodat de teksten aanpasbaar zijn zonder uitrol. Zolang
- * die tabel er niet is, geeft dit null terug en slaat de live-motor het bericht
- * zichtbaar over (status 'geen sjabloontekst'). De droogloop heeft dit niet
- * nodig — die verstuurt toch niets.
+ * Haal het sjabloon voor (traject, soort) uit onderhoud_sjablonen en kies de
+ * variant die bij de warmtescore past (score_min <= score < score_max). Geeft
+ * null als er geen actief sjabloon is.
  */
-async function haalSjabloon(/* soort, kanaal */) {
-  return null;
+async function haalSjabloon(traject, soort, score) {
+  const { data } = await supabaseAdmin
+    .from('onderhoud_sjablonen').select('*')
+    .eq('traject_slug', traject).eq('soort', soort).eq('actief', true);
+  const rijen = data || [];
+  const s = Number(score) || 0;
+  const past = rijen.filter((r) =>
+    (r.score_min == null || s >= r.score_min) && (r.score_max == null || s < r.score_max));
+  return past[0] || rijen[0] || null;
 }
 
 export default async function handler(req, res) {
   const cronAuth = checkCronAuth(req);
   if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
 
-  const droogloop = process.env.LEADSONDERHOUD_LIVE !== '1';
+  // Noodstop: een env-vlag die alles blokkeert, ongeacht de database. Zo kun je
+  // bij een probleem alles stilzetten zonder in te loggen; de UI-schuif blijft
+  // voor het dagelijkse aan/uit.
+  if (aanUit(process.env.LEADSONDERHOUD_UIT)) {
+    return res.status(200).json({ ok: true, overgeslagen: 'noodstop (LEADSONDERHOUD_UIT)' });
+  }
+
   const nu = new Date();
   const { uur, datum } = amsterdam(nu);
 
   // Stille uren: tussen 21:00 en 08:00 sturen we niets.
   if (uur >= 21 || uur < 8) {
-    return res.status(200).json({ ok: true, overgeslagen: 'stille uren', uur, droogloop });
+    return res.status(200).json({ ok: true, overgeslagen: 'stille uren', uur });
   }
 
   try {
+    // Live of droogloop? Uit de database (app_settings.leadsonderhoud_live), zodat
+    // de UI-schuif het dagelijkse aan/uit bedient. Standaard droogloop.
+    const { data: setting } = await supabaseAdmin
+      .from('app_settings').select('value').eq('key', 'leadsonderhoud_live').maybeSingle();
+    const droogloop = !(setting && setting.value === 'true');
+
     // 1) De wachtrij, over alle trajecten heen. De view zit alle voorwaarden al
     //    in (toestemming, welk bericht, of het al gestuurd is).
     const { data: wachtrij, error: wErr } = await supabaseAdmin
@@ -137,10 +160,23 @@ export default async function handler(req, res) {
         continue;
       }
 
-      // LIVE: de tekst komt uit de sjabloontabel (stap 4/5). Nog niet aanwezig?
-      // Dan zichtbaar overslaan i.p.v. iets leegs te sturen.
-      const sjabloon = await haalSjabloon(r.soort, r.kanaal);
-      if (!sjabloon) { rapport.overgeslagen++; meld('overgeslagen', 'geen sjabloontekst (sjabloontabel volgt)'); continue; }
+      // LIVE. De toelatingsmail stuurt de website zelf — die heeft een inloglink
+      // van maar een uur, dus die moet direct bij goedkeuring de deur uit, niet
+      // als de cron toevallig draait. De motor doet alleen de opvolging.
+      if (r.soort === 'toelating') { rapport.overgeslagen++; meld('overgeslagen', 'toelating: de website stuurt deze'); continue; }
+
+      const sjabloon = await haalSjabloon(r.traject, r.soort, r.score);
+      if (!sjabloon) { rapport.overgeslagen++; meld('overgeslagen', 'geen sjabloon in de tabel'); continue; }
+
+      // Eén invul-functie voor beide kanalen; de agendalink komt uit het traject.
+      const ingevuld = vulSjabloon(sjabloon, r, { agendalink: r.agenda_link });
+
+      // Staat er onverhoopt nog een {inloglink} in, dan hoort dit bericht bij de
+      // website — niet met een lege link versturen.
+      if (ingevuld.kanaal === 'mail' &&
+          (String(ingevuld.tekst || '').includes('{inloglink}') || String(ingevuld.html || '').includes('{inloglink}'))) {
+        rapport.overgeslagen++; meld('overgeslagen', 'bevat inloglink — hoort bij de website'); continue;
+      }
 
       // Versturen via de bestaande kanaal-code, en het resultaat wegschrijven.
       const logRij = {
@@ -148,12 +184,12 @@ export default async function handler(req, res) {
         kanaal: r.kanaal, naar, agent: r.agent, traject: r.traject, verstuurd_op: new Date().toISOString(),
       };
       try {
-        if (r.kanaal === 'mail') {
-          const res2 = await sendEmailViaSmtp({ fromMailbox: MAIL_AFZENDER, to: naar, subject: sjabloon.onderwerp, text: sjabloon.tekst, html: sjabloon.html || null });
+        if (ingevuld.kanaal === 'mail') {
+          const res2 = await sendEmailViaSmtp({ fromMailbox: MAIL_AFZENDER, to: naar, subject: ingevuld.onderwerp, text: ingevuld.tekst, html: ingevuld.html });
           if (!res2.ok) throw new Error(res2.reason || 'mail mislukt');
           logRij.extern_id = res2.messageId || null;
         } else {
-          const res2 = await sendTemplate({ to: naar, templateName: r.soort, variables: sjabloon.variabelen || [] });
+          const res2 = await sendTemplate({ to: naar, templateName: ingevuld.meta_template, variables: ingevuld.variabelen });
           logRij.extern_id = res2.wamid || null;
         }
         logRij.status = 'verstuurd';

@@ -115,6 +115,14 @@
     .lo-check { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text); margin-bottom:8px; }
     .lo-check input { width:auto; min-height:0; }
     .lo-fout { color:#C2452D; font-size:12.5px; margin-top:8px; }
+
+    /* aan/uit-schuif */
+    .lo-schuif { width:40px; height:22px; border-radius:100px; background:var(--lijn2,#c9d2dd);
+      position:relative; flex:none; cursor:pointer; transition:.16s; }
+    .lo-schuif::after { content:""; position:absolute; left:2px; top:2px; width:18px; height:18px;
+      border-radius:50%; background:#fff; transition:.16s; }
+    .lo-schuif.aan { background:#177A4C; }
+    .lo-schuif.aan::after { left:20px; }
   </style>
 </head>
 <body>
@@ -530,8 +538,25 @@ function stapVerwijderen(id){
 // nu is dit het leesbare overzicht uit onderhoud_stappen.
 async function schermBerichten(){
   if (!S.trajecten) S.trajecten = (await haal('/api/leadsonderhoud-trajecten')).trajecten || [];
+  var inst = {};
+  try { inst = await haal('/api/leadsonderhoud-instellingen'); } catch (e) { inst = {}; }
+  var live = inst.live === true, noodstop = inst.noodstop === true;
+
   var alle = [];
   S.trajecten.forEach(function(tr){ (tr.stappen||[]).forEach(function(s){ alle.push({ tr: tr.naam, s: s }); }); });
+
+  var verzendkaart = '<div class="lo-kaart" style="margin-bottom:16px">'
+    + '<div class="lo-traj-k" style="margin-bottom:10px"><h3>Verzending</h3></div>'
+    + (noodstop ? '<div class="lo-let" style="margin-bottom:10px"><span><b>Noodstop staat aan</b> (LEADSONDERHOUD_UIT). De motor verstuurt niets, ongeacht de schuif hieronder. Zet de env-vlag uit om weer te kunnen versturen.</span></div>' : '')
+    + '<div class="lo-inst"><div class="lo-inst-t"><b>Live versturen</b>'
+    + '<span>Uit = droogloop (alleen loggen wat er zou gaan). Aan = de motor stuurt echt.</span></div>'
+    + '<span class="lo-schuif'+(live?' aan':'')+'" id="lo-live"'+(noodstop?' style="opacity:.5;cursor:not-allowed"':'')+'></span></div>'
+    + '<div class="lo-inst"><div class="lo-inst-t"><b>Testmail</b>'
+    + '<span>Stuur een testmail naar je eigen adres om te controleren dat verzenden werkt.</span></div>'
+    + '<span style="display:flex;gap:8px"><input id="lo-test-adres" type="email" placeholder="jij@voorbeeld.nl" style="min-height:34px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">'
+    + '<button class="k k-o" id="lo-test-knop">Verstuur test</button></span></div>'
+    + '</div>';
+
   var tabel = '<div class="lo-tabwrap"><table class="lo"><thead><tr>'
     + '<th>Bericht</th><th>Traject</th><th>Kanaal</th><th>Aanleiding</th><th>Status</th>'
     + '</tr></thead><tbody>'
@@ -543,9 +568,24 @@ async function schermBerichten(){
           + '<td>'+(x.s.actief?'<span class="m m-gr">aan</span>':'<span class="m m-gy">uit</span>')+'</td></tr>';
       }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">Nog geen berichten.</td></tr>')
     + '</tbody></table></div>';
-  zetInhoud(kop('Berichten','Alle berichten per traject. De teksten aanpassen en aan/uit zetten kan zodra de motor er is.')
-    + '<div class="lo-let"><span>De WhatsApp-sjablonen moeten eerst door Meta worden goedgekeurd; een sjabloon dat nog niet is goedgekeurd slaat de motor straks zichtbaar over.</span></div>'
+
+  zetInhoud(kop('Berichten','De verzend-instellingen en alle berichten per traject.')
+    + verzendkaart
+    + '<div class="lo-let"><span>De WhatsApp-sjablonen moeten eerst door Meta worden goedgekeurd; een sjabloon dat nog niet is goedgekeurd slaat de motor zichtbaar over.</span></div>'
     + tabel);
+
+  var sw = $('lo-live');
+  if (sw && !noodstop) sw.onclick = async function(){
+    var nieuw = !sw.classList.contains('aan');
+    try { await haalPost('/api/leadsonderhoud-instellingen', { live: nieuw }); sw.classList.toggle('aan', nieuw); }
+    catch (e) { melding('Kon de schuif niet omzetten: ' + e.message); }
+  };
+  var tk = $('lo-test-knop');
+  if (tk) tk.onclick = async function(){
+    var adres = ($('lo-test-adres') || {}).value || '';
+    try { await haalPost('/api/leadsonderhoud-test', { to: adres }); melding('Testmail verstuurd naar ' + adres + '.'); }
+    catch (e) { melding('Testmail mislukt: ' + e.message); }
+  };
 }
 
 // ---- SCHERM: GESPREKKEN (nog te koppelen) ----
