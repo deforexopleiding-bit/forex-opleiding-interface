@@ -277,3 +277,12 @@ on conflict (key) do nothing;
 insert into public.app_settings (key, value)
 values ('leadsonderhoud_logo_url', to_jsonb('https://dfo-website-three.vercel.app/img/merk/logo.png'::text))
 on conflict (key) do nothing;
+
+-- WhatsApp-lijn van de module. Noemt een module uit whatsapp_module_config; het
+-- Gesprekken-scherm gebruikt diens phone_number_id. Voorlopig hangt leadsonderhoud
+-- aan de onboarding-lijn. Komt het eigen Esmee-nummer bij Meta, zet dan een rij
+-- 'leadsonderhoud' in whatsapp_module_config en deze waarde op 'leadsonderhoud' —
+-- geen codewijziging nodig, de module verhuist mee.
+insert into public.app_settings (key, value)
+values ('leadsonderhoud_wa_module', to_jsonb('onboarding'::text))
+on conflict (key) do nothing;

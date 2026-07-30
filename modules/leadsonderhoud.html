@@ -126,6 +126,64 @@
       border-radius:50%; background:#fff; transition:.16s; }
     .lo-schuif.aan { background:#177A4C; }
     .lo-schuif.aan::after { left:20px; }
+
+    /* ---- Gesprekken (WhatsApp-inbox) ---- */
+    .lo-inbox { display:grid; grid-template-columns:320px 1fr; gap:0; border:1px solid var(--border);
+      border-radius:12px; overflow:hidden; background:var(--bg-elev); height:calc(100vh - 210px); min-height:420px; }
+    .lo-glijst { border-right:1px solid var(--border); display:flex; flex-direction:column; min-width:0; }
+    .lo-glijst-k { padding:11px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center;
+      justify-content:space-between; gap:8px; }
+    .lo-glijst-k b { font-size:13px; }
+    .lo-glijst-b { overflow-y:auto; flex:1; }
+    .lo-grow { display:flex; gap:10px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--border);
+      cursor:pointer; }
+    .lo-grow:hover { background:var(--bg); }
+    .lo-grow.on { background:rgba(30,108,214,.08); }
+    .lo-grow-av { width:34px; height:34px; border-radius:50%; flex:none; display:grid; place-items:center;
+      background:var(--bg); color:var(--text-dim); font-size:13px; font-weight:600; }
+    .lo-grow-t { flex:1; min-width:0; }
+    .lo-grow-t b { display:block; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .lo-grow-t span { display:block; font-size:11.5px; color:var(--text-faint); white-space:nowrap; overflow:hidden;
+      text-overflow:ellipsis; margin-top:1px; }
+    .lo-grow-r { display:flex; flex-direction:column; align-items:flex-end; gap:4px; flex:none; }
+    .lo-grow-r time { font-size:10.5px; color:var(--text-faint); }
+    .lo-dot { width:8px; height:8px; border-radius:50%; flex:none; }
+    .lo-dot.open { background:#177A4C; }
+    .lo-dot.dicht { background:#C2452D; }
+    .lo-onread { min-width:18px; height:18px; padding:0 5px; border-radius:100px; background:#1e6cd6; color:#fff;
+      font-size:10.5px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; }
+
+    .lo-thread { display:flex; flex-direction:column; min-width:0; }
+    .lo-thread-k { padding:11px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
+    .lo-thread-k b { font-size:13.5px; }
+    .lo-thread-k .mono { font-size:11.5px; color:var(--text-faint); }
+    .lo-badge { margin-left:auto; font-size:11px; font-weight:600; padding:3px 9px; border-radius:100px; }
+    .lo-badge.open { background:rgba(23,122,76,.14); color:#177A4C; }
+    .lo-badge.dicht { background:rgba(194,69,45,.14); color:#C2452D; }
+    .lo-thread-b { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:8px;
+      background:var(--bg); }
+    .lo-bub { max-width:74%; padding:8px 12px; border-radius:12px; font-size:13px; line-height:1.45;
+      white-space:pre-wrap; word-break:break-word; }
+    .lo-bub time { display:block; font-size:10px; opacity:.65; margin-top:3px; }
+    .lo-bub.in { align-self:flex-start; background:var(--bg-elev); border:1px solid var(--border);
+      border-bottom-left-radius:3px; }
+    .lo-bub.uit { align-self:flex-end; background:var(--brand-primary,#093d54); color:#fff; border-bottom-right-radius:3px; }
+    .lo-thread-v { border-top:1px solid var(--border); padding:11px 14px; display:flex; flex-direction:column; gap:8px; }
+    .lo-thread-v textarea { width:100%; min-height:44px; max-height:140px; resize:vertical; padding:9px 12px;
+      border:1px solid var(--border); border-radius:9px; font-size:13.5px; font-family:inherit; background:var(--bg);
+      color:var(--text); }
+    .lo-thread-v textarea:disabled { opacity:.55; }
+    .lo-thread-v-r { display:flex; align-items:center; gap:8px; justify-content:space-between; }
+    .lo-thread-v-r .hint { font-size:11.5px; color:var(--text-faint); flex:1; }
+    .k:disabled { opacity:.5; cursor:not-allowed; }
+
+    @media(max-width:760px){
+      .lo-inbox { grid-template-columns:1fr; height:auto; }
+      .lo-inbox.thread-open .lo-glijst { display:none; }
+      .lo-inbox:not(.thread-open) .lo-thread { display:none; }
+      .lo-glijst { border-right:0; border-bottom:1px solid var(--border); max-height:none; }
+      .lo-thread-b { min-height:50vh; }
+    }
   </style>
 </head>
 <body>
@@ -151,7 +209,8 @@
 // ====================================================================
 
 // ---- toestand ----
-var S = { scherm: 'overzicht', filter: 'alles', over: null, wachtrij: null, trajecten: null, droog: null, sjablonen: null };
+var S = { scherm: 'overzicht', filter: 'alles', over: null, wachtrij: null, trajecten: null, droog: null, sjablonen: null,
+          gesp: null, gActief: null, gConfig: null };
 
 // ---- hulpjes ----
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
@@ -645,15 +704,166 @@ async function schermBerichten(){
   document.querySelectorAll('[data-vb]').forEach(function(b){ b.onclick = function(){ voorbeeld(b.getAttribute('data-vb')); }; });
 }
 
-// ---- SCHERM: GESPREKKEN (nog te koppelen) ----
-function schermGesprekken(){
-  zetInhoud(kop('Gesprekken','Antwoorden van proefgebruikers, in de bestaande WhatsApp-inbox.')
-    + '<div class="lo-kaart"><div class="lo-leeg" style="gap:10px">'
-    + '<i class="ti ti-message-2" style="font-size:26px;color:var(--text-faint)"></i>'
-    + '<b style="font-size:14px;color:var(--text)">De inbox wordt hier ingebed</b>'
-    + '<span style="max-width:460px">Dit scherm hergebruikt straks de bestaande WhatsApp-inbox, gefilterd op het '
-    + 'leadsonderhoud-nummer uit <span class="mono">whatsapp_module_config</span>. Dat nummer en de inbox-port '
-    + 'zijn een volgende stap, samen met de motor.</span></div></div>');
+// ---- SCHERM: GESPREKKEN (WhatsApp-inbox) ----
+// De inbox van leadsonderhoud: de WhatsApp-gesprekken op de ingestelde lijn
+// (app_settings.leadsonderhoud_wa_module -> whatsapp_module_config), gefilterd op
+// nummers die bij een lead-in-een-traject horen. Server-side gefilterd; hier
+// alleen tonen + antwoorden binnen het 24-uurs venster.
+async function schermGesprekken(){
+  var titel = 'Gesprekken';
+  var j;
+  try { j = await haal('/api/leadsonderhoud-gesprekken'); }
+  catch (e) {
+    zetInhoud(kop(titel, 'WhatsApp-antwoorden van leads met een traject.')
+      + '<div class="lo-kaart"><div class="lo-leeg">Kon de gesprekken niet laden. Ververs de pagina of controleer je rechten.</div></div>');
+    return;
+  }
+  S.gConfig = j;
+  S.gesp = j.items || [];
+
+  if (!j.configured) {
+    zetInhoud(kop(titel, 'WhatsApp-antwoorden van leads met een traject.')
+      + '<div class="lo-kaart"><div class="lo-leeg" style="gap:10px">'
+      + '<b style="font-size:14px;color:var(--text)">Nog geen WhatsApp-lijn ingesteld</b>'
+      + '<span style="max-width:480px">De module <span class="mono">' + esc(j.module || '?') + '</span> heeft geen '
+      + 'actieve lijn in <span class="mono">whatsapp_module_config</span>. Zet daar het nummer neer (of pas de instelling '
+      + '<span class="mono">leadsonderhoud_wa_module</span> aan), dan verschijnen de gesprekken hier vanzelf.</span></div></div>');
+    return;
+  }
+
+  var sub = 'WhatsApp-antwoorden van leads met een traject'
+    + (j.label ? ' · lijn: ' + esc(j.label) : '') + '.';
+  zetInhoud(kop(titel, sub)
+    + '<div class="lo-inbox" id="loInbox">'
+    +   '<aside class="lo-glijst">'
+    +     '<div class="lo-glijst-k"><b>' + S.gesp.length + ' gesprek' + (S.gesp.length === 1 ? '' : 'ken')
+    +       '</b><button class="k k-o k-s" id="loGVervers">Verversen</button></div>'
+    +     '<div class="lo-glijst-b" id="loGlijst"></div>'
+    +   '</aside>'
+    +   '<section class="lo-thread" id="loThread">'
+    +     '<div class="lo-leeg" style="height:100%" id="loThreadLeeg">Kies links een gesprek om te lezen en te antwoorden.</div>'
+    +   '</section>'
+    + '</div>');
+
+  var v = $('loGVervers'); if (v) v.onclick = function(){ S.gesp = null; schermGesprekken(); };
+  tekenGlijst();
+  if (S.gActief && S.gesp.some(function(c){ return c.id === S.gActief; })) kiesGesprek(S.gActief);
+}
+
+/** De gesprekkenlijst links opbouwen en de klikacties koppelen. */
+function tekenGlijst(){
+  var box = $('loGlijst'); if (!box) return;
+  if (!S.gesp.length) {
+    box.innerHTML = '<div class="lo-leeg" style="padding:34px 16px;text-align:center">'
+      + 'Nog geen gesprekken met leads die in een traject zitten.</div>';
+    return;
+  }
+  box.innerHTML = S.gesp.map(gRij).join('');
+  box.querySelectorAll('[data-gid]').forEach(function(r){
+    r.onclick = function(){ kiesGesprek(r.getAttribute('data-gid')); };
+  });
+}
+function gRij(c){
+  var naam = c.display_name || c.phone_number || 'Onbekend';
+  var init = (String(naam).replace(/[^A-Za-z0-9]/g, '').charAt(0) || '#').toUpperCase();
+  var t = c.last_message_at ? geleden(c.last_message_at) : '';
+  var rechts = c.unread_count
+    ? '<span class="lo-onread">' + c.unread_count + '</span>'
+    : '<span class="lo-dot ' + (c.can_send_text ? 'open' : 'dicht') + '" title="'
+        + (c.can_send_text ? '24-uurs venster open' : 'buiten 24-uurs venster') + '"></span>';
+  return '<div class="lo-grow' + (S.gActief === c.id ? ' on' : '') + '" data-gid="' + esc(c.id) + '">'
+    + '<span class="lo-grow-av">' + esc(init) + '</span>'
+    + '<span class="lo-grow-t"><b>' + esc(naam) + '</b><span>' + esc(c.last_message_preview || '') + '</span></span>'
+    + '<span class="lo-grow-r">' + (t ? '<time>' + esc(t) + '</time>' : '') + rechts + '</span></div>';
+}
+
+/** Een gesprek openen: berichten laden, thread tonen, als gelezen markeren. */
+async function kiesGesprek(id){
+  S.gActief = id;
+  document.querySelectorAll('.lo-grow').forEach(function(r){
+    r.classList.toggle('on', r.getAttribute('data-gid') === id);
+  });
+  var inbox = $('loInbox'); if (inbox) inbox.classList.add('thread-open');
+  var pane = $('loThread'); if (!pane) return;
+  pane.innerHTML = '<div class="lo-leeg" style="height:100%">Laden…</div>';
+  var j;
+  try { j = await haal('/api/leadsonderhoud-gesprek-berichten?conversation_id=' + encodeURIComponent(id) + '&mark_as_read=true'); }
+  catch (e) { pane.innerHTML = '<div class="lo-leeg" style="height:100%">Kon dit gesprek niet laden.</div>'; return; }
+  var c = (S.gesp || []).find(function(x){ return x.id === id; });
+  if (c) c.unread_count = 0;
+  tekenThread(j.conversation || {}, j.items || []);
+  tekenGlijst(); // teller/stip bijwerken (ongelezen -> 0)
+}
+
+/** De berichten-thread rechts opbouwen, met de antwoordbalk eronder. */
+function tekenThread(conv, items){
+  var pane = $('loThread'); if (!pane) return;
+  var naam = conv.display_name || conv.phone_number || 'Gesprek';
+  var open = !!conv.can_send_text;
+  var bubbels = items.map(function(m){
+    var uit = m.direction === 'out';
+    var tijd = m.created_at ? kortMoment(m.created_at) : '';
+    var tekst = m.body || (m.template_name ? '[sjabloon] ' + m.template_name : '')
+      || (m.media_type ? '[' + m.media_type + ']' : '') || '';
+    return '<div class="lo-bub ' + (uit ? 'uit' : 'in') + '">' + esc(tekst)
+      + (tijd ? '<time>' + esc(tijd) + '</time>' : '') + '</div>';
+  }).join('') || '<div class="lo-leeg" style="margin:auto">Nog geen berichten in dit gesprek.</div>';
+
+  var hint = open
+    ? 'Vrije tekst kan zolang de lead binnen 24 uur iets stuurde.'
+    : 'Buiten het 24-uurs venster. Alleen een goedgekeurde template kan nog — die knop wacht op Meta.';
+
+  pane.innerHTML =
+    '<div class="lo-thread-k"><button class="k k-o k-s" id="loGterug" style="display:none">← Terug</button>'
+    + '<span><b>' + esc(naam) + '</b><span class="mono" style="display:block">' + esc(conv.phone_number || '') + '</span></span>'
+    + '<span class="lo-badge ' + (open ? 'open' : 'dicht') + '">' + (open ? '24u open' : '24u verlopen') + '</span></div>'
+    + '<div class="lo-thread-b" id="loThreadB">' + bubbels + '</div>'
+    + '<div class="lo-thread-v">'
+    +   '<textarea id="loAntw" placeholder="' + (open ? 'Typ een antwoord… (Ctrl/Cmd+Enter verstuurt)' : 'Buiten 24 uur — alleen een template kan nog') + '"' + (open ? '' : ' disabled') + '></textarea>'
+    +   '<div class="lo-thread-v-r"><span class="hint">' + esc(hint) + '</span>'
+    +     '<button class="k k-o k-s" id="loSjabloon">Start met sjabloon</button>'
+    +     '<button class="k k-p k-s" id="loStuur"' + (open ? '' : ' disabled') + '>Versturen</button></div>'
+    + '</div>';
+
+  var b = $('loThreadB'); if (b) b.scrollTop = b.scrollHeight;
+  var terug = $('loGterug');
+  if (terug) {
+    terug.onclick = function(){ var ib = $('loInbox'); if (ib) ib.classList.remove('thread-open'); };
+    if (window.matchMedia && window.matchMedia('(max-width:760px)').matches) terug.style.display = '';
+  }
+  var stuur = $('loStuur'); if (stuur) stuur.onclick = stuurAntwoord;
+  var ta = $('loAntw'); if (ta) ta.onkeydown = function(e){ if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') stuurAntwoord(); };
+  var sj = $('loSjabloon');
+  if (sj) sj.onclick = function(){
+    melding('Een gesprek met een sjabloon starten wacht nog op goedkeuring van Meta. '
+      + 'Zodra de templates zijn goedgekeurd, komt deze knop tot leven.');
+  };
+}
+
+/** Vrije-tekst antwoord versturen (binnen het 24-uurs venster). */
+async function stuurAntwoord(){
+  var ta = $('loAntw'); if (!ta) return;
+  var tekst = (ta.value || '').trim(); if (!tekst) return;
+  var stuur = $('loStuur');
+  if (stuur) { stuur.disabled = true; stuur.textContent = 'Bezig…'; }
+  try {
+    await haalPost('/api/leadsonderhoud-gesprek-antwoord', { conversation_id: S.gActief, body: tekst });
+    ta.value = '';
+    var b = $('loThreadB');
+    if (b) {
+      var leeg = b.querySelector('.lo-leeg'); if (leeg) leeg.remove();
+      var d = document.createElement('div');
+      d.className = 'lo-bub uit';
+      d.innerHTML = esc(tekst) + '<time>' + esc(kortMoment(new Date().toISOString())) + '</time>';
+      b.appendChild(d); b.scrollTop = b.scrollHeight;
+    }
+    var c = (S.gesp || []).find(function(x){ return x.id === S.gActief; });
+    if (c) { c.last_message_preview = tekst; c.last_message_at = new Date().toISOString(); }
+  } catch (e) {
+    melding('Versturen mislukt: ' + e.message);
+  } finally {
+    if (stuur) { stuur.disabled = false; stuur.textContent = 'Versturen'; }
+  }
 }
 
 // ---- kleine bouwstenen ----
