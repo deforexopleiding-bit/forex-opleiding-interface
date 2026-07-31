@@ -27,15 +27,13 @@ import {
   buildAddressBlockLines,
   mmToPt,
 } from './_lib/wik-brief-layout.js';
+// Base64-embedded logo — WERKT op Vercel serverless. Zie kop-comment in
+// wik-brief-logo.js waarom dit patroon nodig is (img/ wordt niet meegebundeld
+// door Vercel; alleen JS-modules geïmporteerd vanuit een function komen mee).
+import { WIK_LOGO_BUFFER } from './_lib/wik-brief-logo.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
-
-// WIK_LOGO_PATH override in env → anders default naar het bestaande brand-logo
-// dat ook op login.html / sidebar wordt gebruikt. Als het bestand niet bestaat
-// slaat _tryLogoBuffer() fail-soft de logo-render over (brief zonder logo, geen
-// crash). Zo blijft de brief werken ook als het assetpad ooit wijzigt.
-const WIK_LOGO_DEFAULT = 'img/logo-dark.png';
 
 function fmtDateNl(d) {
   const dt = d instanceof Date ? d : new Date(d || Date.now());
@@ -44,20 +42,33 @@ function fmtDateNl(d) {
 }
 
 /**
- * Probeer het logo-bestand in te laden voor doc.image(). Fail-soft:
- * ontbrekend/onleesbaar bestand → null → generator slaat het logo over.
- * Env-override WIK_LOGO_PATH (relatief aan process.cwd()) wint van default.
+ * Kies het logo-buffer voor pdfkit doc.image().
+ *
+ * Prio:
+ *   1. env WIK_LOGO_PATH → filesystem-read (Vercel-vriendelijk als je bestand
+ *      binnen de function-bundle plaatst, bv. api/_lib/*.png; anders faalt de
+ *      fs-read fail-soft). Handig voor lokale dev of alt-logo experimenten.
+ *   2. WIK_LOGO_BUFFER — base64-embedded default (img/logo-dark.png). Werkt
+ *      GEGARANDEERD op productie omdat de module met de functie mee-gebundeld
+ *      wordt door Vercel — geen filesystem-lookup nodig.
+ *
+ * Returns Buffer of null. null → generator slaat logo over (fail-soft).
  */
-function _tryLogoBuffer() {
-  const rel = process.env.WIK_LOGO_PATH || WIK_LOGO_DEFAULT;
-  try {
-    const abs = path.isAbsolute(rel) ? rel : path.join(process.cwd(), rel);
-    if (!fs.existsSync(abs)) return null;
-    return fs.readFileSync(abs);
-  } catch (e) {
-    console.warn('[incasso-pre-brief] logo-load faalde (skip):', e?.message || e);
-    return null;
+function _resolveLogoBuffer() {
+  const override = process.env.WIK_LOGO_PATH;
+  if (override) {
+    try {
+      const abs = path.isAbsolute(override) ? override : path.join(process.cwd(), override);
+      if (fs.existsSync(abs)) return fs.readFileSync(abs);
+      console.warn('[incasso-pre-brief] WIK_LOGO_PATH bestaat niet, fallback naar embedded:', abs);
+    } catch (e) {
+      console.warn('[incasso-pre-brief] WIK_LOGO_PATH read-fout, fallback naar embedded:', e?.message || e);
+    }
   }
+  // Embedded default — altijd beschikbaar want de import verifieert 't al
+  // op module-load. Als de import faalt crasht de function bij startup en
+  // dat is een deployment-config-fout, geen runtime-condition.
+  return WIK_LOGO_BUFFER || null;
 }
 
 export default async function handler(req, res) {
@@ -149,10 +160,9 @@ export default async function handler(req, res) {
         doc.on('end',  () => resolve(Buffer.concat(chunks)));
         doc.on('error', reject);
 
-        // ── Logo linksboven — fail-soft: bestaand branding-asset (img/logo-dark.png)
-        //    of WIK_LOGO_PATH override. Als het bestand ontbreekt: skip
-        //    (brief gaat door zonder logo, geen crash).
-        const logoBuf = _tryLogoBuffer();
+        // ── Logo linksboven — base64-embedded (Vercel-compat, zie
+        //    _resolveLogoBuffer). Fail-soft render bij pdfkit-fout.
+        const logoBuf = _resolveLogoBuffer();
         if (logoBuf) {
           try {
             doc.image(logoBuf, mmToPt(15), mmToPt(15), {
@@ -213,12 +223,9 @@ export default async function handler(req, res) {
           doc.moveDown(0.6);
         }
 
-        // Voetnoot.
-        doc.moveDown(1);
-        doc.fontSize(8).fillColor('#64748b').text(
-          'Gegenereerd op ' + fmtDateNl(new Date()) + ' door het Agency Command Center.',
-          60, doc.y, { width: 475 }
-        );
+        // Bewuste keuze: GEEN "Gegenereerd door ..."-voetnoot op de brief.
+        // WIK is een formeel juridisch document naar de klant — interne
+        // systeem-info hoort er niet op.
 
         doc.end();
       } catch (e) { reject(e); }
