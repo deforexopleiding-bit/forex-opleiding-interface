@@ -26,6 +26,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { pickEmailPreviewBody } from './_lib/email-body-strip.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -158,7 +159,13 @@ export default async function handler(req, res) {
         // via IMAP naar de bijbehorende INBOX). Als from_address = onze
         // mailbox → dat is een outbound (door ons verstuurde) mail.
         direction: emailDirection(m.from_address),
-        body: (m.snippet || m.body_text || '').slice(0, 4000),
+        // BUG-FIX (2026-07-31): fallback via pickEmailPreviewBody op body_html
+        // → gestripte plain text als snippet én body_text beide NULL zijn.
+        // Moderne HTML-only mails (Outlook, marketing, veel bedrijfsmail)
+        // hebben geen text/plain part → rawText leeg in sync-emails.js:207 →
+        // snippet + body_text staan op NULL, alleen body_html is gevuld.
+        // Zonder deze fallback toonde de unified UI "(lege body)".
+        body: pickEmailPreviewBody(m, { maxLen: 4000 }),
         at: m.date_received,
         meta: {
           subject: m.subject,
