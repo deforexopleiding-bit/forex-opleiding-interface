@@ -22,7 +22,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import {
-  haalLijn, leadsInTraject, normNummer, binnenVenster, postvakNaam, adresUit,
+  haalLijn, leadsInTraject, normNummer, binnenVenster, postvakNaam, adresUit, mailAfzender,
 } from './_lib/leadsonderhoud-gesprekken.js';
 
 export default async function handler(req, res) {
@@ -139,6 +139,7 @@ export default async function handler(req, res) {
       module: lijn.module,
       label: lijn.label,
       postvak,
+      afzender: mailAfzender(),
       items: schoon,
     });
   } catch (e) {

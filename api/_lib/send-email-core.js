@@ -33,6 +33,8 @@ const SMTP_PORT = 465;
  * @param {string} [opts.html]
  * @param {string|string[]} [opts.cc]
  * @param {string|string[]} [opts.bcc]
+ * @param {string} [opts.inReplyTo]   Message-ID van de bronmail (threading).
+ * @param {string} [opts.references]  Idem; default gelijk aan inReplyTo.
  * @returns {Promise<{ ok:true, messageId:string, accepted:string[] } |
  *                    { ok:false, reason:string, code?:string }>}
  */
@@ -41,9 +43,11 @@ export async function sendEmailViaSmtp({
   to,
   subject,
   text,
-  html   = null,
-  cc     = null,
-  bcc    = null,
+  html      = null,
+  cc        = null,
+  bcc       = null,
+  inReplyTo = null,
+  references = null,
 } = {}) {
   const mailbox = String(fromMailbox || '').toLowerCase();
   if (!mailbox || !SMTP_ACCOUNTS[mailbox]) {
@@ -81,6 +85,11 @@ export async function sendEmailViaSmtp({
     if (html) mailOpts.html = html;
     if (cc)   mailOpts.cc   = cc;
     if (bcc)  mailOpts.bcc  = bcc;
+    // Threading: Gmail/Outlook groeperen het antwoord onder het origineel.
+    if (inReplyTo) {
+      mailOpts.inReplyTo  = inReplyTo;
+      mailOpts.references = references || inReplyTo;
+    }
     const info = await transporter.sendMail(mailOpts);
     return { ok: true, messageId: info?.messageId || null, accepted: info?.accepted || [] };
   } catch (e) {

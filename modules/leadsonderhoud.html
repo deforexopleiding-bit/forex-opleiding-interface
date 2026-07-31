@@ -832,19 +832,38 @@ function tekenThread(conv, items){
       + '<time>' + esc(tijd) + badge + '</time></div>';
   }).join('') || '<div class="lo-leeg" style="margin:auto">Nog geen berichten in deze draad.</div>';
 
-  // De antwoordbalk stuurt WhatsApp. Zonder WhatsApp-gesprek: uit, met verwijzing
-  // naar de e-mailmodule; binnen 24u: aan; daarbuiten: uit (alleen template).
-  var hint, plek, uit;
-  if (!heeftWa) {
-    hint = 'Deze lead heeft (nog) geen WhatsApp-gesprek. Antwoord per mail vanuit de e-mailmodule (welkom@).';
-    plek = 'Geen WhatsApp-gesprek — antwoord per mail'; uit = true;
-  } else if (open) {
-    hint = 'Vrije tekst kan zolang de lead binnen 24 uur iets stuurde.';
-    plek = 'Typ een WhatsApp-antwoord… (Ctrl/Cmd+Enter verstuurt)'; uit = false;
-  } else {
-    hint = 'Buiten het 24-uurs venster. Alleen een goedgekeurde template kan nog — die knop wacht op Meta.';
-    plek = 'Buiten 24 uur — alleen een template kan nog'; uit = true;
+  // Antwoordkanalen. WhatsApp (24u-regel) blijft voor leads mét een gesprek;
+  // daarnaast een directe "Beantwoord per e-mail"-knop voor leads met een
+  // e-mailadres (vervangt de oude verwijzing naar de e-mailmodule).
+  var heeftMail = !!conv.email;
+  // De laatste inkomende mail = waar we standaard op antwoorden (Re: + citaat).
+  var laatsteMail = null;
+  for (var im = items.length - 1; im >= 0; im--) {
+    if (items[im].channel === 'mail' && items[im].direction === 'in') { laatsteMail = items[im]; break; }
   }
+  S.gMailCtx = {
+    lead_email: conv.email || '',
+    naam: naam,
+    afzender: (S.gConfig && S.gConfig.afzender) || 'welkom@deforexopleiding.nl',
+    orig: laatsteMail,
+  };
+
+  var waBalk = '';
+  if (heeftWa) {
+    var plek = open ? 'Typ een WhatsApp-antwoord… (Ctrl/Cmd+Enter verstuurt)' : 'Buiten 24 uur — alleen een template kan nog';
+    waBalk = '<textarea id="loAntw" placeholder="' + esc(plek) + '"' + (open ? '' : ' disabled') + '></textarea>';
+  }
+
+  var hint;
+  if (heeftWa && open) hint = 'WhatsApp kan zolang de lead binnen 24 uur iets stuurde — of antwoord per e-mail.';
+  else if (heeftWa)    hint = 'Buiten het 24-uurs WhatsApp-venster (alleen template, wacht op Meta). Per e-mail kan wel.';
+  else if (heeftMail)  hint = 'Antwoord de lead per e-mail, vanaf ' + esc(S.gMailCtx.afzender) + '.';
+  else                 hint = 'Deze lead heeft geen e-mailadres of WhatsApp-gesprek om op te antwoorden.';
+
+  var knoppen = '';
+  if (heeftWa)   knoppen += '<button class="k k-o k-s" id="loSjabloon">Start met sjabloon</button>';
+  if (heeftMail) knoppen += '<button class="k k-o k-s" id="loMailBtn"><i class="ti ti-mail"></i> Beantwoord per e-mail</button>';
+  if (heeftWa)   knoppen += '<button class="k k-p k-s" id="loStuur"' + (open ? '' : ' disabled') + '>Versturen</button>';
 
   pane.innerHTML =
     '<div class="lo-thread-k"><button class="k k-o k-s" id="loGterug" style="display:none">← Terug</button>'
@@ -853,10 +872,8 @@ function tekenThread(conv, items){
     + '</div>'
     + '<div class="lo-thread-b" id="loThreadB">' + bubbels + '</div>'
     + '<div class="lo-thread-v">'
-    +   '<textarea id="loAntw" placeholder="' + esc(plek) + '"' + (uit ? ' disabled' : '') + '></textarea>'
-    +   '<div class="lo-thread-v-r"><span class="hint">' + esc(hint) + '</span>'
-    +     '<button class="k k-o k-s" id="loSjabloon">Start met sjabloon</button>'
-    +     '<button class="k k-p k-s" id="loStuur"' + (uit ? ' disabled' : '') + '>Versturen</button></div>'
+    +   waBalk
+    +   '<div class="lo-thread-v-r"><span class="hint">' + hint + '</span>' + knoppen + '</div>'
     + '</div>';
 
   var b = $('loThreadB'); if (b) b.scrollTop = b.scrollHeight;
@@ -872,6 +889,7 @@ function tekenThread(conv, items){
     melding('Een gesprek met een sjabloon starten wacht nog op goedkeuring van Meta. '
       + 'Zodra de templates zijn goedgekeurd, komt deze knop tot leven.');
   };
+  var mb = $('loMailBtn'); if (mb) mb.onclick = openMailAntwoord;
 }
 
 /** Vrije-tekst WhatsApp-antwoord versturen (binnen het 24-uurs venster). */
@@ -897,6 +915,71 @@ async function stuurAntwoord(){
     melding('Versturen mislukt: ' + e.message);
   } finally {
     if (stuur) { stuur.disabled = false; stuur.textContent = 'Versturen'; }
+  }
+}
+
+/** Modal om per e-mail te antwoorden — overgenomen uit de wanbetalers-module,
+ *  maar met welkom@ als afzender. Vult Re:-onderwerp + geciteerd origineel voor. */
+function openMailAntwoord(){
+  var ctx = S.gMailCtx || {};
+  if (!ctx.lead_email) { melding('Deze lead heeft geen e-mailadres.'); return; }
+  var orig = ctx.orig;
+  var subj = orig && orig.subject ? String(orig.subject) : '';
+  var reSubj = subj ? (/^re:/i.test(subj) ? subj : 'Re: ' + subj) : 'Bericht van De Forex Opleiding';
+
+  var initialBody = '';
+  if (orig) {
+    var wie = ctx.naam || ctx.lead_email;
+    var wanneer = orig.ts ? kortMoment(orig.ts) : '';
+    var quoteLine = wanneer ? ('Op ' + wanneer + ' schreef ' + wie + ':') : ('Origineel bericht van ' + wie + ':');
+    var quoted = String(orig.body || '').split('\n').map(function(l){ return '> ' + l; }).join('\n');
+    initialBody = '\n\n' + quoteLine + '\n' + quoted + '\n';
+  }
+
+  openModal(
+    '<h2>Beantwoord per e-mail</h2>'
+    + '<div class="lo-vel"><label>Van</label><input type="text" value="' + esc(ctx.afzender || 'welkom@deforexopleiding.nl') + '" readonly></div>'
+    + '<div class="lo-vel"><label>Naar</label><input type="text" value="' + esc(ctx.lead_email) + '" readonly></div>'
+    + '<div class="lo-vel"><label>Onderwerp</label><input type="text" id="loMailSubj" value="' + esc(reSubj) + '"></div>'
+    + '<div class="lo-vel"><label>Bericht</label><textarea id="loMailBody" style="min-height:200px">' + esc(initialBody) + '</textarea></div>'
+    + '<div class="lo-vk-voet"><span></span><span>'
+    + '<button class="k k-o" id="loMailAnnul">Annuleren</button> '
+    + '<button class="k k-p" id="loMailStuur">Versturen</button></span></div>'
+  );
+  var an = $('loMailAnnul'); if (an) an.onclick = sluitModal;
+  var st = $('loMailStuur'); if (st) st.onclick = stuurMailAntwoord;
+}
+
+/** Het mailantwoord versturen via het leadsonderhoud-endpoint (welkom@ + threading). */
+async function stuurMailAntwoord(){
+  var subj = (($('loMailSubj') || {}).value || '').trim();
+  var body = ($('loMailBody') || {}).value || '';
+  if (!subj) { melding('Vul een onderwerp in.'); return; }
+  if (!body.trim()) { melding('Het bericht is leeg.'); return; }
+  var ctx = S.gMailCtx || {};
+  var st = $('loMailStuur'); if (st) { st.disabled = true; st.textContent = 'Bezig…'; }
+  try {
+    var payload = { lead_id: S.gActief, subject: subj, text: body };
+    if (ctx.orig && ctx.orig.id) payload.origineel_email_id = String(ctx.orig.id).replace(/^mail:/, '');
+    await haalPost('/api/leadsonderhoud-gesprek-mailantwoord', payload);
+
+    // Bubbel meteen tonen in de draad.
+    var b = $('loThreadB');
+    if (b) {
+      var leeg = b.querySelector('.lo-leeg'); if (leeg) leeg.remove();
+      var d = document.createElement('div');
+      d.className = 'lo-bub uit mail';
+      d.innerHTML = '<span class="subj">' + esc(subj) + '</span>' + esc(body)
+        + '<time>' + esc(kortMoment(new Date().toISOString())) + '<span class="lo-kanaal">mail · antwoord</span></time>';
+      b.appendChild(d); b.scrollTop = b.scrollHeight;
+    }
+    var c = (S.gesp || []).find(function(x){ return x.lead_id === S.gActief; });
+    if (c) { c.last_preview = subj; c.last_activity_at = new Date().toISOString(); }
+
+    melding('Je e-mail is verstuurd naar ' + ctx.lead_email + '.');
+  } catch (e) {
+    if (st) { st.disabled = false; st.textContent = 'Versturen'; }
+    melding('Versturen mislukt: ' + e.message);
   }
 }
 

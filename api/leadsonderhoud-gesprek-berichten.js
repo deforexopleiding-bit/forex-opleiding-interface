@@ -16,7 +16,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import {
-  haalLijn, trajectSlugs, normNummer, binnenVenster, postvakNaam, adresUit,
+  haalLijn, trajectSlugs, normNummer, binnenVenster, postvakNaam, adresUit, mailAfzender,
 } from './_lib/leadsonderhoud-gesprekken.js';
 import { vulSjabloon } from './_lib/leadsonderhoud-sjabloon.js';
 
@@ -128,6 +128,7 @@ export default async function handler(req, res) {
         .select('id, soort, traject, verstuurd_op, naar')
         .eq('kanaal', 'mail')
         .eq('status', 'verstuurd')
+        .neq('soort', 'handmatig-antwoord') // die bubbel komt uit email_replies (met body)
         .ilike('naar', email)
         .order('verstuurd_op', { ascending: true })
         .limit(200);
@@ -163,6 +164,29 @@ export default async function handler(req, res) {
             ts: row.verstuurd_op,
           });
         }
+      }
+
+      // Uitgaand: handmatige mailantwoorden vanuit dit postvak. Die staan in
+      // email_replies (mét body), verstuurd vanaf de leadsonderhoud-afzender naar
+      // de lead. Zo verschijnt een verstuurd antwoord meteen in de draad.
+      const { data: replies } = await supabaseAdmin
+        .from('email_replies')
+        .select('id, email_subject, final_reply, from_address, to_address, sent_at')
+        .ilike('from_address', mailAfzender())
+        .ilike('to_address', '%' + email + '%')
+        .order('sent_at', { ascending: true })
+        .limit(200);
+      for (const r of replies || []) {
+        if (adresUit(r.to_address) !== email) continue; // precieze match
+        items.push({
+          id: 'reply:' + r.id,
+          channel: 'mail',
+          direction: 'out',
+          body: r.final_reply || '',
+          subject: r.email_subject || null,
+          template_name: 'antwoord',
+          ts: r.sent_at,
+        });
       }
 
       // Inkomende mail op gelezen zetten (drijft de ongelezen-mailteller in de
