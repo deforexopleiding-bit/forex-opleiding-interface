@@ -29511,22 +29511,65 @@
   }
   async function _awnRestore(id) {
     if (!id) return;
-    // FIX punt D: /api/pending-actions-restore vereist reason (min 5 chars).
-    // Zonder reden-input krijg je de doodlopende 400. Nu wbxOpenConfirm-modal
-    // met requireReason (min 5) — spiegelt de oude Acties-tab-flow.
+    const it = _awnFindItem(id);
+    const at = String(it?.action_type || '');
+    const status = String(it?.status || '').toUpperCase();
+    const isTL = at.startsWith('TL_');
+    // Per-type + per-status uitleg. Voorheen werd APPROVED serverside
+    // geweigerd — dat is nu toegestaan (zie pending-actions-restore.js) maar
+    // de betekenis verschilt van EXECUTED/REJECTED:
+    //   - REJECTED terug: "toch niet afgewezen, terug naar Te doen".
+    //   - EXECUTED terug (MANUAL_*): "toch niet afgehandeld".
+    //   - APPROVED terug (MANUAL_*): "goedkeuring intrekken, terug in wachtrij".
+    //   - APPROVED terug (TL_*): "goedkeuring intrekken vóór de D2-executor
+    //     de TL-mutatie uitvoert; executor filtert op APPROVED, PENDING wordt
+    //     genegeerd".
+    //   - EXECUTED (TL_*): serverside geblokkeerd — TL-mutatie is al gedaan
+    //     (client verbergt de knop al via isTLexec-check).
+    let whatHappens;
+    if (status === 'APPROVED' && isTL) {
+      whatHappens = [
+        `Deze TL-taak (${_awnActionLabel(at)}) staat op APPROVED en wacht op de TeamLeader-executor-cron. Die pakt alleen APPROVED-rijen op.`,
+        `Door terug te zetten naar Te doen (PENDING) trek je de goedkeuring in — de executor slaat de rij over en er wordt GEEN TL-mutatie uitgevoerd.`,
+        `Race-guard: als de executor JUIST tussen jouw klik en de update de rij oppakt, faalt het terugzetten (server ziet dan al EXECUTED). In dat geval is de TL-mutatie al gedaan en is een DB-restore niet meer mogelijk.`,
+      ];
+    } else if (status === 'APPROVED') {
+      whatHappens = [
+        `Deze taak (${_awnActionLabel(at)}) staat op APPROVED — dat betekent "handmatig goedgekeurd, verder niks in gang gezet".`,
+        `Door terug te zetten gaat 'ie naar "Te doen" (PENDING). Er wordt niks anders geraakt.`,
+        `Handig voor per-ongeluk-klikken: iemand die dacht dat 'ie op de juiste knop klikte kan het zonder gevolgen ongedaan maken.`,
+      ];
+    } else if (status === 'EXECUTED' && !isTL) {
+      whatHappens = [
+        `Deze taak was gemarkeerd als afgehandeld (EXECUTED) — dat is meestal een handmatige "klaar"-klik geweest.`,
+        `Terugzetten brengt de status weer op PENDING. execution_result (JSONB) blijft bewaard als historisch spoor.`,
+        `Als deze afhandeling een arrangement of andere flow op ACTIEF heeft gezet, wordt DAT NIET automatisch teruggedraaid — check via het klantdossier of extra actie nodig is.`,
+      ];
+    } else if (status === 'REJECTED') {
+      whatHappens = [
+        `Deze taak was afgewezen. Terugzetten brengt 'em weer op "Te doen" (PENDING).`,
+        `rejection_reason wordt gecleared. De reden die je nu opgeeft wordt in de audit-trail bewaard.`,
+      ];
+    } else if (status === 'FAILED') {
+      whatHappens = [
+        `Deze taak was gemarkeerd als FAILED (kon niet uitgevoerd worden).`,
+        `Terugzetten brengt de status op PENDING zodat je 'em opnieuw kunt proberen.`,
+      ];
+    } else {
+      whatHappens = [
+        `Deze taak gaat terug naar "Te doen" (PENDING).`,
+        `De reden wordt in de audit-trail bewaard.`,
+      ];
+    }
     if (typeof wbxOpenConfirm !== 'function') {
       return _awnDoRestore(id, 'terugzetten via acties-werkcentrum');
     }
     wbxOpenConfirm({
       title: 'Terugzetten naar Te doen',
-      whatHappens: [
-        `Deze taak gaat terug van "Afgewezen"/"Afgehandeld" naar "Te doen" (status PENDING).`,
-        `De reden wordt bewaard in de audit-trail.`,
-        `Let op: TL-mutaties die al EXECUTED zijn worden serverside GEBLOKKEERD (die kun je niet meer terugzetten — dat zou destructief zijn). Als de terugzet-poging faalt, is de actie waarschijnlijk al onherstelbaar uitgevoerd.`,
-      ],
+      whatHappens,
       requireReason: { minLen: 5, placeholder: 'Waarom terugzetten? Min. 5 tekens' },
       primaryLabel: 'Ja, terugzetten',
-      dangerLevel: 'warn',
+      dangerLevel: (status === 'APPROVED' && isTL) ? 'warn' : 'neutral',
       onConfirm: (reason) => _awnDoRestore(id, reason),
     });
   }
