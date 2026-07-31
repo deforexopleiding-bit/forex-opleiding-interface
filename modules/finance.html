@@ -3091,6 +3091,84 @@
     .wbx-sheet button { font:inherit; }
     .wbx-sheet.open { transform:none; }
 
+    /* Fase-2 brede drawer — geopend vanuit het nieuwe Overzicht.
+       Puur CSS-uitbreiding: alle bestaande render/actie-code werkt onveranderd,
+       alleen de container-breedte + body-layout wijzigen. Bestaande smalle
+       openCaseSheet-aanroepen (Pipeline, Facturen, MANUAL_FOLLOWUP) blijven
+       exact als voorheen: die krijgen de class .wbx-sheet-wide NIET.
+
+       LAYOUT: brede drawer wordt binnen de content-area gepositioneerd
+       (rechts van de sidebar, onder de topbar). Sidebar (z-index 200) en
+       topbar (z-index 250) blijven bereikbaar en niets van de drawer valt
+       er achter. Geen z-index-oorlog nodig. De smalle sheet ligt zoals
+       altijd tegen right:0 vanaf top:0 en heeft z'n eigen z-index-51 —
+       die is smal genoeg om nooit onder de sidebar te belanden. */
+    .wbx-sheet.wbx-sheet-wide {
+      top:var(--topbar-h, 48px);
+      left:var(--sidebar-w, 240px);
+      right:0;
+      width:auto;
+      height:calc(100vh - var(--topbar-h, 48px));
+      max-height:calc(100vh - var(--topbar-h, 48px));
+    }
+    .wbx-sheet.wbx-sheet-wide .wbx-sheet-body {
+      display:grid;
+      grid-template-columns:minmax(0, 1.55fr) minmax(0, 1fr);
+      gap:16px;
+      align-items:start;
+    }
+    /* De 3 werk-kaarten (factuur / bellen / gesprek) stapelen in kolom 1. */
+    .wbx-sheet.wbx-sheet-wide .wbx-sheet-body > .wbx-card { grid-column:1; }
+    /* De tijdlijn springt naar kolom 2 en beslaat de volle hoogte. */
+    .wbx-sheet.wbx-sheet-wide .wbx-sheet-body > .wbx-card-timeline {
+      grid-column:2;
+      grid-row:1 / span 20;
+      position:sticky; top:16px;
+      max-height:calc(100vh - var(--topbar-h, 48px) - 120px);
+      overflow-y:auto;
+    }
+    /* Terug-knop in de top-row — alleen zichtbaar in wide-mode. */
+    .wbx-sheet .wbx-back-btn { display:none; }
+    .wbx-sheet.wbx-sheet-wide .wbx-back-btn {
+      display:inline-flex; align-items:center; gap:6px;
+      border:1px solid var(--ds-border, #dfe8ec);
+      background:var(--ds-surface, #ffffff);
+      height:34px; padding:0 12px; border-radius:9px;
+      cursor:pointer; font-size:13px; font-weight:500;
+      color:var(--ds-text-muted, #48585f);
+    }
+    .wbx-sheet.wbx-sheet-wide .wbx-back-btn:hover {
+      border-color:var(--ds-border-strong, #c1d0d7);
+      color:var(--ds-text, #06181f);
+    }
+    /* In smalle mode: de ✕-knop blijft de sluiter. In wide-mode: ✕ tonen we
+       niet meer, want de Terug-knop dekt dat af — voorkomt dubbele controls. */
+    .wbx-sheet.wbx-sheet-wide .wbx-sheet-top .wbx-icon-btn[data-case-close] { display:none; }
+
+    /* Tablet-achtig: onder 1100px teruggevallen op single-column zodat de
+       drawer bruikbaar blijft op smallere laptops. Sidebar-offset behouden
+       zolang die zichtbaar is; onder 720px verdwijnt de sidebar sowieso via
+       agent-shared.css (transform:translateX(-100%)) — dan mag de drawer
+       weer full-width. */
+    @media (max-width: 1100px) {
+      .wbx-sheet.wbx-sheet-wide .wbx-sheet-body {
+        display:flex; flex-direction:column;
+      }
+      .wbx-sheet.wbx-sheet-wide .wbx-sheet-body > .wbx-card-timeline {
+        grid-column:auto; grid-row:auto;
+        position:static; max-height:none; overflow-y:visible;
+      }
+      /* Op smal scherm de ✕ tonen én de Terug-knop verbergen — één control. */
+      .wbx-sheet.wbx-sheet-wide .wbx-sheet-top .wbx-icon-btn[data-case-close] { display:inline-block; }
+      .wbx-sheet.wbx-sheet-wide .wbx-back-btn { display:none; }
+    }
+    @media (max-width: 720px) {
+      .wbx-sheet.wbx-sheet-wide {
+        top:0; left:0; right:0; width:100%;
+        height:100%; max-height:100%;
+      }
+    }
+
     .wbx-sheet .wbx-sheet-top {
       position:sticky; top:0; background:var(--wbx-bg);
       padding:18px 24px 6px; z-index:2;
@@ -23263,6 +23341,10 @@
     // door zodat dunning-call-log-create de taak fail-soft afsluit.
     _caseState.autoOpenCallOutcomeForPendingActionId =
       opts.autoOpenCallOutcomeForPendingActionId || null;
+    // Fase-2 brede drawer — opt-in. Bestaande smalle aanroepen laten dit
+    // ongezet, gedrag identiek. Vanuit het nieuwe Overzicht wordt true
+    // meegegeven zodat de sheet in 2-koloms brede layout opent.
+    _caseState.wideDrawerMode  = !!opts.wideDrawerMode;
     _caseState.detail          = null;
     _caseState.chat            = { convId: null, messages: [], canSend: false, phone: null, reason: null, loading: true };
     _caseState.suggestion      = null;
@@ -23275,7 +23357,11 @@
     // Toon scrim + sheet via .open class-toggle (prototype-mechanisme).
     document.getElementById('caseScrim')?.classList.add('open');
     const sheet = document.getElementById('caseSheet');
-    if (sheet) { sheet.classList.add('open'); sheet.setAttribute('aria-hidden', 'false'); }
+    if (sheet) {
+      sheet.classList.add('open');
+      sheet.classList.toggle('wbx-sheet-wide', _caseState.wideDrawerMode);
+      sheet.setAttribute('aria-hidden', 'false');
+    }
     _caseRenderLoading();
 
     // Escape-toets → sluiten (herregistreren zodat we niet blijven stapelen).
@@ -23313,13 +23399,18 @@
     _caseState.detail = null;
     _caseState.chat = { convId: null, messages: [], canSend: false, phone: null, reason: null, loading: false };
     _caseState.suggestion = null;
+    _caseState.wideDrawerMode = false;
     if (_caseState.escHandler) {
       document.removeEventListener('keydown', _caseState.escHandler);
       _caseState.escHandler = null;
     }
     document.getElementById('caseScrim')?.classList.remove('open');
     const sheet = document.getElementById('caseSheet');
-    if (sheet) { sheet.classList.remove('open'); sheet.setAttribute('aria-hidden', 'true'); }
+    if (sheet) {
+      sheet.classList.remove('open');
+      sheet.classList.remove('wbx-sheet-wide');
+      sheet.setAttribute('aria-hidden', 'true');
+    }
   }
 
   async function _caseLoadDetail(cid) {
@@ -23398,6 +23489,7 @@
       sheet.innerHTML = `
         <div class="wbx-sheet-top">
           <div class="wbx-row">
+            <button class="wbx-back-btn" type="button" data-case-close aria-label="Terug naar Overzicht (Escape)" title="Terug naar Overzicht (Escape)">← Terug</button>
             <button class="wbx-icon-btn" type="button" data-case-close aria-label="Sluiten">✕</button>
             <div><h2>Klant-dossier</h2></div>
           </div>
@@ -23405,7 +23497,7 @@
         <div class="wbx-sheet-body">
           <div class="wbx-card" style="color:var(--wbx-s-inc-tx)">Fout: ${esc(_caseState.detail._error)}</div>
         </div>`;
-      sheet.querySelector('[data-case-close]')?.addEventListener('click', closeCaseSheet);
+      sheet.querySelectorAll('[data-case-close]').forEach((b) => b.addEventListener('click', closeCaseSheet));
       return;
     }
 
@@ -23504,6 +23596,7 @@
     sheet.innerHTML = `
       <div class="wbx-sheet-top">
         <div class="wbx-row">
+          <button class="wbx-back-btn" type="button" data-case-close aria-label="Terug naar Overzicht (Escape)" title="Terug naar Overzicht (Escape)">← Terug</button>
           <button class="wbx-icon-btn" type="button" data-case-close aria-label="Sluiten (Escape)" title="Sluiten (Escape)">✕</button>
           <div style="min-width:0">
             <h2>${esc(name || 'Klant')}</h2>
@@ -23608,7 +23701,7 @@
     }
     const submitDisabled = tl.submitting ? 'disabled' : '';
     return `
-      <div class="wbx-card">
+      <div class="wbx-card wbx-card-timeline">
         <h4>Tijdlijn &amp; notities</h4>
         <div class="wbx-tl-note-form">
           <textarea id="wbxTlNoteInput" placeholder="Notitie toevoegen…" rows="3" ${submitDisabled}></textarea>
@@ -27698,11 +27791,12 @@
         _oznRender();
       });
     });
-    // Klant-naam → case-sheet dossier.
+    // Klant-naam → case-sheet dossier in de brede drawer-mode (fase 2).
+    // Bestaande openCaseSheet-aanroepen buiten deze view blijven smal.
     body.querySelectorAll('.ozn-name-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const cid = btn.getAttribute('data-cid');
-        if (cid && typeof openCaseSheet === 'function') openCaseSheet(cid);
+        if (cid && typeof openCaseSheet === 'function') openCaseSheet(cid, { wideDrawerMode: true });
       });
     });
     // Pipeline-badge → mini-modal.
