@@ -30059,14 +30059,16 @@
 
   const _WBX_ACTIE_TYPES = [
     { key: 'bel',        label: 'Bellen',           icon: 'ti-phone-plus',      hint: 'Bel-taak — voor mij of collega' },
-    { key: 'verify',     label: 'Betaling checken', icon: 'ti-cash-banknote',   hint: 'Open dossier → kies factuur' },
+    { key: 'verify',     label: 'Betaling checken', icon: 'ti-cash-banknote',   hint: 'Verify-taak voor deze klant' },
     { key: 'escalatie',  label: 'Escalatie',        icon: 'ti-alert-triangle',  hint: 'Escalatie-taak in finance-Acties' },
     { key: 'vrije_taak', label: 'Vrije taak',       icon: 'ti-clipboard-plus',  hint: 'Eigen titel + notitie' },
     { key: 'regeling',   label: 'Regeling doorlink', icon: 'ti-notes',          hint: 'Open dossier → betaalafspraak' },
     { key: 'wik',        label: 'WIK doorlink',     icon: 'ti-file-invoice',    hint: 'Open dossier → WIK-brief' },
   ];
-  const _WBX_ACTIE_TAAK_TYPES = new Set(['bel', 'escalatie', 'vrije_taak']);
-  const _WBX_ACTIE_DOORLINK_TYPES = new Set(['verify', 'regeling', 'wik']);
+  // verify is nu een taak-type (was doorlink). Fetch open invoices + auto-pick
+  // gebeurt in _wbxActieCreatePendingAction (zie kop-comment daar).
+  const _WBX_ACTIE_TAAK_TYPES = new Set(['bel', 'verify', 'escalatie', 'vrije_taak']);
+  const _WBX_ACTIE_DOORLINK_TYPES = new Set(['regeling', 'wik']);
 
   async function _wbxGesprekActieOpen() {
     const cid = _wbxF4CurrentCustId;
@@ -30127,7 +30129,7 @@
             <label style="display:block;font-size:12px;color:var(--wbx-muted);margin-bottom:4px">Notitie <span style="color:var(--wbx-s-inc-tx)">*</span></label>
             <textarea id="wbxActieNoteInput" rows="3" placeholder="Beschrijf de actie / context"
                       style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit;min-height:72px;resize:vertical"></textarea>
-            <div id="wbxActieNoteHint" style="font-size:11px;color:var(--wbx-muted);margin-top:3px">Min. 5 tekens. Bij escalatie min. 10 tekens.</div>
+            <div id="wbxActieNoteHint" style="font-size:11px;color:var(--wbx-muted);margin-top:3px">Min. 5 tekens. Bij escalatie of betaling checken min. 10 tekens.</div>
           </div>
 
           <div id="wbxActieAssigneeWrap" style="border-top:1px solid var(--wbx-border);padding-top:10px">
@@ -30242,7 +30244,9 @@
 
       // Taak-types: valideer notitie.
       const note = (noteEl.value || '').trim();
-      const minLen = (selectedType === 'escalatie') ? 10 : 5;
+      // verify: endpoint tasks-create-verify-payment eist claim_text min 10 chars.
+      // escalatie: min 10 (bestond al). Anderen: min 5.
+      const minLen = (selectedType === 'escalatie' || selectedType === 'verify') ? 10 : 5;
       if (note.length < minLen) {
         errEl.textContent = `Notitie is verplicht (min. ${minLen} tekens).`;
         errEl.style.display = '';
@@ -30286,6 +30290,13 @@
   }
 
   // Case 1 — Voor mij (pending_actions).
+  //
+  // verify (MANUAL_VERIFY_PAYMENT): endpoint tasks-create-verify-payment eist
+  // invoice_id + claimed_amount + claim_text (min 10). We halen automatisch de
+  // OUDSTE open factuur op zodat de user niks hoeft te kiezen (consistent met
+  // de andere directe types). Fallback wanneer geen open factuur bestaat:
+  // tasks-create-followup met kind='verify_payment_no_invoice' zodat er alsnog
+  // een taak komt met notitie-context.
   async function _wbxActieCreatePendingAction({ cid, convId, selectedType, note, titleVal, custName }) {
     if (selectedType === 'escalatie') {
       // Escalatie heeft eigen endpoint met conversation_id.
@@ -30296,6 +30307,39 @@
           conversation_id: convId,
           reason: note,
           severity: 'medium',
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      return d;
+    }
+    if (selectedType === 'verify') {
+      // Auto-pick open factuur voor verify-taak. Geen keuze-UI in de popup.
+      const inv = await _wbxActieFetchOldestOpenInvoice(cid);
+      if (inv) {
+        const r = await window.AgentShared.apiFetch('/api/tasks-create-verify-payment', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            invoice_id: inv.id,
+            customer_id: cid,
+            claimed_amount: inv.open_amount,
+            claim_text: note,
+          }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+        return d;
+      }
+      // 0 open facturen → fallback op MANUAL_FOLLOWUP met kind='verify_payment_no_invoice'.
+      const r = await window.AgentShared.apiFetch('/api/tasks-create-followup', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_id: cid,
+          source: 'inbox',
+          reason: note.slice(0, 500),
+          title: `Betaling checken — ${custName}`,
+          note,
+          kind: 'verify_payment_no_invoice',
         }),
       });
       const d = await r.json().catch(() => ({}));
@@ -30322,6 +30366,31 @@
     return d;
   }
 
+  // Fetch de oudste open factuur voor een klant. Returnt { id, open_amount } of null.
+  // Gebruikt door de verify-flow om automatisch een factuur te koppelen zonder
+  // keuze-UI. open_amount = amount_total - amount_paid - credited_amount.
+  async function _wbxActieFetchOldestOpenInvoice(cid) {
+    try {
+      const r = await window.AgentShared.apiFetch(
+        '/api/finance-invoices?customer_id=' + encodeURIComponent(cid) + '&status=open&sort=issue_date&direction=asc'
+      );
+      if (!r.ok) return null;
+      const d = await r.json().catch(() => ({}));
+      const list = Array.isArray(d.items) ? d.items : (Array.isArray(d.invoices) ? d.invoices : []);
+      for (const inv of list) {
+        const total = Number(inv.amount_total) || 0;
+        const paid  = Number(inv.amount_paid)  || 0;
+        const cred  = Number(inv.credited_amount) || 0;
+        const open  = Math.max(0, total - paid - cred);
+        if (inv.id && open > 0) return { id: inv.id, open_amount: Math.round(open * 100) / 100 };
+      }
+      return null;
+    } catch (e) {
+      console.warn('[wbxActieFetchOldestOpenInvoice]', e?.message || e);
+      return null;
+    }
+  }
+
   // Case 2 — Toewijzen aan teamlid (taken_items via /api/taken).
   // Body-shape: /api/taken verwacht { task: { id, titel, omschrijving, prioriteit,
   // categorie, assignedToId (camelCase!), customerId (camelCase!), status } }.
@@ -30329,13 +30398,15 @@
   async function _wbxActieCreateTakenItem({ cid, selectedType, note, titleVal, assignedToId, custName }) {
     const title = titleVal
       || (selectedType === 'bel'       ? `Bel-taak — ${custName}` :
+          selectedType === 'verify'    ? `Betaling checken — ${custName}` :
           selectedType === 'escalatie' ? `Escalatie — ${custName}` :
                                          `Taak — ${custName}`);
     // Categorie moet één van de valide waarden zijn (Sales/Onboarding/Mentoring/
     // Finance/Klant/Marketing/Intern/Overige). Finance-inbox → 'Finance'.
     const cat   = 'Finance';
     // Prioriteit: valide waarden Urgent/Hoog/Normaal/Laag.
-    const prio  = (selectedType === 'escalatie') ? 'Hoog' : 'Normaal';
+    // verify + escalatie krijgen Hoog want ze zijn tijdgebonden.
+    const prio  = (selectedType === 'escalatie' || selectedType === 'verify') ? 'Hoog' : 'Normaal';
     const newId = (typeof crypto !== 'undefined' && crypto.randomUUID)
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
