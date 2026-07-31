@@ -20454,9 +20454,13 @@
       // PR 1b — Uitgaven-view
       canExpensesView = can('finance.expenses.view');
       canExpensesEdit = can('finance.expenses.category.edit');
-      if (canExpensesView) {
-        const ne = document.getElementById('navExpenses'); if (ne) ne.style.display = '';
-      }
+      // Nav-knop bewust verborgen (2026-07-31): tab uit beeld voor de
+      // dagelijkse gebruikers. Sub-view (#view-uitgaven) + code + deep-link
+      // (?view=uitgaven) blijven werken. Terug-aanzetten: onderstaande regel
+      // uit-commenten weer aanzetten.
+      // if (canExpensesView) {
+      //   const ne = document.getElementById('navExpenses'); if (ne) ne.style.display = '';
+      // }
       // Beide Bank-tab buttons zichtbaar zodra de gebruiker minimaal één van beide heeft.
       if (canBankBalanceView || canBankTxView) {
         const ncb = document.getElementById('navCamtBank'); if (ncb) ncb.style.display = '';
