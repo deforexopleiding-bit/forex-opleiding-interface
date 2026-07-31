@@ -31,8 +31,11 @@ export function bouwVariabelen(lead, extra = {}) {
     score:      l.score != null ? String(l.score) : '',
     agendalink: extra.agendalink || l.agenda_link || '',
     inloglink:  extra.inloglink || '',
-    datum:      extra.datum || '',
-    tijd:       extra.tijd || '',
+    datum:      extra.datum || l.gesprek_datum || '',
+    // tijd: eerst uit extra (motor-side lookup), anders uit de view-kolom
+    // gesprek_tijd (of legacy 'tijd'). Zo hoeft de motor geen aparte
+    // follow_up_appointments-fetch te doen als de view die info al levert.
+    tijd:       extra.tijd || l.gesprek_tijd || l.tijd || '',
     logo:       extra.logo || '',   // logo-URL uit de instelling, niet hardgecodeerd
     ...extra,
   };

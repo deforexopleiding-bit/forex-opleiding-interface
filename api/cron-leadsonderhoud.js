@@ -213,6 +213,24 @@ export default async function handler(req, res) {
         rapport.overgeslagen++; meld('overgeslagen', 'bevat inloglink — hoort bij de website'); continue;
       }
 
+      // Defensieve guard: WhatsApp-templates weigert Meta bij een lege
+      // parameter ("param {{N}} is empty"). Voorkom crash-sends en log
+      // welke variabele-index leeg was + welke naam die had volgens
+      // variabele_volgorde, zodat het rapport zichtbaar maakt welke
+      // template-variabele nog gevuld moet worden (bv. lessen_gezien /
+      // trades in de wachtrij-view, of tijd voor gesprek_herinnering).
+      if (ingevuld.kanaal === 'whatsapp') {
+        const varr = Array.isArray(ingevuld.variabelen) ? ingevuld.variabelen : [];
+        const leegIdx = varr.findIndex((v) => v == null || String(v).trim() === '');
+        if (leegIdx >= 0) {
+          const volgorde = Array.isArray(sjabloon.variabele_volgorde) ? sjabloon.variabele_volgorde : [];
+          const naam = volgorde[leegIdx] || `#${leegIdx + 1}`;
+          rapport.overgeslagen++;
+          meld('overgeslagen', `template-variabele leeg: {{${leegIdx + 1}}} (${naam}) — vul de bron in wachtrij/motor`);
+          continue;
+        }
+      }
+
       // Versturen via de bestaande kanaal-code, en het resultaat wegschrijven.
       const logRij = {
         gebruiker_id: r.gebruiker_id, lead_id: r.lead_id, soort: r.soort,
