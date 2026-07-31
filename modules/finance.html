@@ -4879,13 +4879,25 @@
               </div>
               <div class="inbox-c-thread-actions">
                 <span id="inboxThreadWindowBadge" class="inbox-c-window-badge open" title="">24h open</span>
+                <!-- Compacte header — Blok 1: alleen Afhandelen + "Actie maken" + Klant-info + ⋮ zichtbaar.
+                     Secundaire acties (Archiveren/Heropenen/Uit-archief/Markeer-ongelezen/Dossier/Pauzeren)
+                     staan onder ⋮. Bestaande hide/show-logica op #inboxThreadResolveBtn e.a. blijft
+                     werken (hidden-attribute werkt ook binnen de dropdown; item verbergt individueel). -->
                 <button class="sr-ibtn" id="inboxThreadResolveBtn" type="button" title="Gesprek afhandelen (komt terug bij nieuw bericht)" hidden style="color:#059669"><i class="ti ti-check"></i></button>
-                <button class="sr-ibtn" id="inboxThreadArchiveBtn" type="button" title="Gesprek archiveren (komt NIET terug bij nieuw bericht)" hidden style="color:#b45309"><i class="ti ti-archive"></i></button>
-                <button class="sr-ibtn" id="inboxThreadReopenBtn"  type="button" title="Gesprek heropenen"        hidden style="color:var(--accent-cyan)"><i class="ti ti-refresh"></i></button>
-                <button class="sr-ibtn" id="inboxThreadUnarchiveBtn" type="button" title="Uit archief halen"      hidden style="color:var(--accent-cyan)"><i class="ti ti-archive-off"></i></button>
-                <button class="sr-ibtn" id="inboxThreadMarkUnreadBtn" type="button" title="Markeer als ongelezen"><i class="ti ti-mail"></i></button>
-                <button class="sr-ibtn" id="inboxThreadDossierBtn" type="button" title="Bekijk status — klantdossier openen" disabled><i class="ti ti-layout-sidebar-right-expand"></i></button>
+                <button class="sr-ibtn" id="inboxThreadOpenActionBtn" type="button" title="Actie maken vanuit dit gesprek" style="color:var(--accent-cyan)"><i class="ti ti-plus"></i></button>
                 <button class="sr-ibtn" id="inboxThreadCustomerBtn" type="button" title="Klant-info"><i class="ti ti-user"></i></button>
+                <!-- ⋮ menu — bevat: Archiveren, Heropenen, Uit archief, Markeer ongelezen, Dossier, Pauzeer aanmaan-flow -->
+                <div class="wb-menu-btn" id="inboxThreadMoreWrap" style="position:relative;display:inline-flex">
+                  <button class="sr-ibtn" id="inboxThreadMoreBtn" type="button" title="Meer acties" aria-haspopup="menu" aria-expanded="false"><i class="ti ti-dots-vertical"></i></button>
+                  <div class="wb-menu-panel wb-menu-panel-right" id="inboxThreadMoreMenu" hidden style="top:calc(100% + 4px)">
+                    <button class="wb-menu-item" id="inboxThreadArchiveBtn"   type="button" title="Gesprek archiveren (komt NIET terug bij nieuw bericht)" hidden style="color:#b45309"><i class="ti ti-archive"></i> Archiveren</button>
+                    <button class="wb-menu-item" id="inboxThreadReopenBtn"    type="button" title="Gesprek heropenen" hidden><i class="ti ti-refresh"></i> Heropenen</button>
+                    <button class="wb-menu-item" id="inboxThreadUnarchiveBtn" type="button" title="Uit archief halen"  hidden><i class="ti ti-archive-off"></i> Uit archief halen</button>
+                    <button class="wb-menu-item" id="inboxThreadMarkUnreadBtn" type="button" title="Markeer als ongelezen"><i class="ti ti-mail"></i> Markeer ongelezen</button>
+                    <button class="wb-menu-item" id="inboxThreadDossierBtn" type="button" title="Bekijk status — klantdossier openen" disabled><i class="ti ti-layout-sidebar-right-expand"></i> Dossier openen</button>
+                    <button class="wb-menu-item" id="inboxThreadPauseBtn" type="button" title="Pauzeer de aanmaan-flow voor deze klant" style="color:#b45309"><i class="ti ti-player-pause"></i> Pauzeer aanmaan-flow</button>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -29729,6 +29741,49 @@
     if (arrBtn) return _wbxF4OpenArrangement();
     const pauseBtn = e.target.closest('#inboxPauseDunningBtn');
     if (pauseBtn) return _wbxF4PauseDunning();
+    // Blok 1: zelfde pauzeer-flow vanuit thread-header ⋮ menu.
+    const pauseHdrBtn = e.target.closest('#inboxThreadPauseBtn');
+    if (pauseHdrBtn) return _wbxF4PauseDunning();
+    // Blok 2: "→ Actie maken"-knop in thread-header opent de type-keuze popup.
+    const openActionBtn = e.target.closest('#inboxThreadOpenActionBtn');
+    if (openActionBtn) return _wbxGesprekActieOpen();
+  });
+
+  // Blok 1: ⋮ dropdown in thread-header — eigen open/close (aparte namespace
+  // van #inboxMoreActionsMenu in compose-strip zodat beide onafhankelijk werken).
+  function _wbxThreadMoreOpen() {
+    const btn  = document.getElementById('inboxThreadMoreBtn');
+    const menu = document.getElementById('inboxThreadMoreMenu');
+    if (!btn || !menu) return;
+    menu.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+  }
+  function _wbxThreadMoreClose() {
+    const btn  = document.getElementById('inboxThreadMoreBtn');
+    const menu = document.getElementById('inboxThreadMoreMenu');
+    if (!btn || !menu) return;
+    menu.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+  }
+  document.addEventListener('click', (e) => {
+    const openBtn = e.target.closest('#inboxThreadMoreBtn');
+    if (openBtn) {
+      e.preventDefault();
+      const menu = document.getElementById('inboxThreadMoreMenu');
+      if (menu && menu.hidden) _wbxThreadMoreOpen(); else _wbxThreadMoreClose();
+      return;
+    }
+    // Klik binnen een menu-item → bestaande handler doet zijn werk, sluit menu.
+    const inItem = e.target.closest('#inboxThreadMoreMenu .wb-menu-item');
+    if (inItem) { _wbxThreadMoreClose(); return; }
+    // Klik-buiten: sluit menu.
+    const menu = document.getElementById('inboxThreadMoreMenu');
+    if (menu && !menu.hidden && !e.target.closest('#inboxThreadMoreWrap')) {
+      _wbxThreadMoreClose();
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') _wbxThreadMoreClose();
   });
 
   async function _wbxF4CreateFollowup() {
@@ -29776,21 +29831,31 @@
     const cid = _wbxF4CurrentCustId;
     if (!cid) return window.AgentShared?.showToast?.('Geen gekoppelde klant', 'error');
     if (typeof wbxOpenConfirm !== 'function') {
-      return _wbxF4DoPauseDunning(cid);
+      return _wbxF4DoPauseDunning(cid, 'manual_pause_from_inbox');
     }
     wbxOpenConfirm({
       title: 'Aanmaan-flow pauzeren',
-      body: 'De actieve dunning-run voor deze klant wordt gepauzeerd (status → paused). Geen aanmaningen worden verstuurd tot je hervat via klant-dossier of via de acties-flow.',
-      confirmLabel: 'Pauzeren',
+      subtitle: 'Voor deze klant. Geen aanmaningen worden verstuurd tot iemand hervat.',
+      whatHappens: [
+        'Actieve dunning-run voor deze klant → status paused',
+        'r1/r2/hervat-timing loopt niet meer af',
+        'Reden wordt vastgelegd in audit-log en zichtbaar in klant-dossier',
+      ],
+      nextStep: 'Hervatten kan later via klant-dossier of het Acties-werkcentrum.',
       dangerLevel: 'warn',
-      onConfirm: () => _wbxF4DoPauseDunning(cid),
+      primaryLabel: 'Pauzeren',
+      requireReason: {
+        minLen: 5,
+        placeholder: 'Bv. klant is met vakantie, komt eind september terug',
+      },
+      onConfirm: (reasonVal) => _wbxF4DoPauseDunning(cid, reasonVal),
     });
   }
-  async function _wbxF4DoPauseDunning(cid) {
+  async function _wbxF4DoPauseDunning(cid, reason) {
     try {
       const r = await window.AgentShared.apiFetch('/api/finance-dunning-pause-by-customer', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customer_id: cid, reason: 'manual_pause_from_inbox' }),
+        body: JSON.stringify({ customer_id: cid, reason: reason || 'manual_pause_from_inbox' }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
@@ -29809,6 +29874,347 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _wbxF4Init);
   else _wbxF4Init();
+
+  // ═════════════════════════════════════════════════════════════════════
+  //   Blok 2 + 3 — "→ Actie maken"-popup vanuit Gesprekken thread-header.
+  //
+  //   Type-keuze (6 opties):
+  //     bel         — MANUAL_FOLLOWUP, payload.kind='bel'         (finance-Acties)
+  //     verify      — MANUAL_VERIFY_PAYMENT (case-sheet doorlink; vereist factuur+bedrag)
+  //     escalatie   — MANUAL_ESCALATION                            (finance-Acties)
+  //     vrije_taak  — MANUAL_FOLLOWUP, payload.kind='free_task'    (finance-Acties)
+  //     regeling    — doorlink klant-dossier (arrangement-wizard)
+  //     wik         — doorlink klant-dossier (WIK-brief-flow)
+  //
+  //   Voor taak-types (bel/escalatie/vrije_taak) staat de assignee-picker aan:
+  //     "Voor mij (in finance-Acties)" → pending_actions insert (bestaande flow)
+  //     "Toewijzen aan teamlid (Takenbeheer)" → POST /api/taken met assigned_to_id
+  //
+  //   Voor doorlinks (verify/regeling/wik) → gewoon openCaseSheet openen; geen
+  //   taak-aanmaak in deze popup. De user kiest de factuur/brief in het dossier.
+  // ═════════════════════════════════════════════════════════════════════
+  let _wbxActieProfilesCache = null;
+  let _wbxActieProfilesFetchedAt = 0;
+
+  async function _wbxActieLoadProfiles() {
+    // 5 min cache — voorkomt round-trip bij elke popup-open.
+    if (_wbxActieProfilesCache && (Date.now() - _wbxActieProfilesFetchedAt) < 5 * 60_000) {
+      return _wbxActieProfilesCache;
+    }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-active-profiles-list');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json().catch(() => ({}));
+      _wbxActieProfilesCache = Array.isArray(d.items) ? d.items : [];
+      _wbxActieProfilesFetchedAt = Date.now();
+      return _wbxActieProfilesCache;
+    } catch (e) {
+      console.warn('[wbxActieLoadProfiles]', e?.message || e);
+      return [];
+    }
+  }
+
+  const _WBX_ACTIE_TYPES = [
+    { key: 'bel',        label: 'Bellen',           icon: 'ti-phone-plus',      hint: 'Bel-taak — voor mij of collega' },
+    { key: 'verify',     label: 'Betaling checken', icon: 'ti-cash-banknote',   hint: 'Open dossier → kies factuur' },
+    { key: 'escalatie',  label: 'Escalatie',        icon: 'ti-alert-triangle',  hint: 'Escalatie-taak in finance-Acties' },
+    { key: 'vrije_taak', label: 'Vrije taak',       icon: 'ti-clipboard-plus',  hint: 'Eigen titel + notitie' },
+    { key: 'regeling',   label: 'Regeling doorlink', icon: 'ti-notes',          hint: 'Open dossier → betaalafspraak' },
+    { key: 'wik',        label: 'WIK doorlink',     icon: 'ti-file-invoice',    hint: 'Open dossier → WIK-brief' },
+  ];
+  const _WBX_ACTIE_TAAK_TYPES = new Set(['bel', 'escalatie', 'vrije_taak']);
+  const _WBX_ACTIE_DOORLINK_TYPES = new Set(['verify', 'regeling', 'wik']);
+
+  async function _wbxGesprekActieOpen() {
+    const cid = _wbxF4CurrentCustId;
+    if (!cid) return window.AgentShared?.showToast?.('Geen gekoppelde klant', 'error');
+
+    // Klant-naam voor context in de header.
+    const conv     = (typeof _inboxActiveConv !== 'undefined') ? _inboxActiveConv : null;
+    const custName = conv?.customer_name || conv?.display_name || conv?.phone_number || 'klant';
+    const convId   = conv?.id || null;
+
+    // Bestaande popup opruimen (dubbel-open guard).
+    document.getElementById('wbxGesprekActieModal')?.remove();
+
+    const profiles = await _wbxActieLoadProfiles();
+
+    const typeButtons = _WBX_ACTIE_TYPES.map((t, idx) => `
+      <button type="button" class="wbx-actie-type-btn" data-actie-type="${t.key}" ${idx === 0 ? 'data-active="1"' : ''}
+              style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 12px;border:1px solid var(--wbx-border-strong,#d1d5db);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);cursor:pointer;text-align:left;font:inherit">
+        <span style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600">
+          <i class="ti ${t.icon}" style="font-size:15px"></i>${esc(t.label)}
+        </span>
+        <span style="font-size:11.5px;color:var(--wbx-muted,#6b7280)">${esc(t.hint)}</span>
+      </button>
+    `).join('');
+
+    const assigneeOptions = profiles.map(p => `
+      <option value="${esc(p.id)}">${esc(p.full_name)}${p.role ? ' — ' + esc(p.role) : ''}</option>
+    `).join('');
+
+    const wrap = document.createElement('div');
+    wrap.id = 'wbxGesprekActieModal';
+    wrap.className = 'wbx wbx-call-outcome-scrim';
+    wrap.innerHTML = `
+      <div class="wbx-call-outcome-modal" style="max-width:560px">
+        <div class="wbx-call-outcome-head">
+          <div>
+            <div style="font-weight:600">→ Actie maken</div>
+            <div style="font-size:12px;color:var(--wbx-muted);margin-top:2px">Vanuit gesprek met ${esc(custName)}</div>
+          </div>
+          <button class="wbx-inc-close" type="button" data-actie-cancel>✕</button>
+        </div>
+        <div class="wbx-call-outcome-body" style="display:flex;flex-direction:column;gap:14px">
+
+          <div>
+            <div style="font-size:12px;color:var(--wbx-muted);margin-bottom:6px">Wat wil je doen?</div>
+            <div id="wbxActieTypeGrid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px">
+              ${typeButtons}
+            </div>
+          </div>
+
+          <div id="wbxActieTitleWrap" hidden>
+            <label style="display:block;font-size:12px;color:var(--wbx-muted);margin-bottom:4px">Titel</label>
+            <input type="text" id="wbxActieTitleInput" maxlength="200" placeholder="Bv. Uitleg factuur vragen"
+                   style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit">
+          </div>
+
+          <div id="wbxActieNoteWrap">
+            <label style="display:block;font-size:12px;color:var(--wbx-muted);margin-bottom:4px">Notitie <span style="color:var(--wbx-s-inc-tx)">*</span></label>
+            <textarea id="wbxActieNoteInput" rows="3" placeholder="Beschrijf de actie / context"
+                      style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit;min-height:72px;resize:vertical"></textarea>
+            <div id="wbxActieNoteHint" style="font-size:11px;color:var(--wbx-muted);margin-top:3px">Min. 5 tekens. Bij escalatie min. 10 tekens.</div>
+          </div>
+
+          <div id="wbxActieAssigneeWrap" style="border-top:1px solid var(--wbx-border);padding-top:10px">
+            <div style="font-size:12px;color:var(--wbx-muted);margin-bottom:6px">Voor wie is deze taak?</div>
+            <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;cursor:pointer">
+              <input type="radio" name="wbxActieAssignee" value="self" checked>
+              <span>Voor mij <span style="color:var(--wbx-muted);font-size:12px">(verschijnt in finance → Acties)</span></span>
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;cursor:pointer">
+              <input type="radio" name="wbxActieAssignee" value="team">
+              <span>Toewijzen aan teamlid <span style="color:var(--wbx-muted);font-size:12px">(verschijnt in Takenbeheer)</span></span>
+            </label>
+            <select id="wbxActieAssigneeSelect" disabled
+                    style="width:100%;margin-top:6px;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit">
+              <option value="">— Kies teamlid —</option>
+              ${assigneeOptions}
+            </select>
+            ${profiles.length === 0 ? '<div style="font-size:11.5px;color:var(--wbx-s-inc-tx);margin-top:4px">Geen actieve profielen gevonden of geen rechten om ze op te halen.</div>' : ''}
+          </div>
+
+          <div id="wbxActieDoorlinkInfo" hidden style="padding:10px 12px;background:var(--wbx-info-bg,#eff6ff);border-left:3px solid var(--accent-cyan);border-radius:6px;font-size:12.5px;color:var(--ds-text,#06181f)">
+            Deze optie opent het klant-dossier waar je de actie afrondt (factuur kiezen, brief downloaden of regeling voorstellen).
+          </div>
+
+          <div id="wbxActieErr" style="display:none;color:var(--wbx-s-inc-tx);font-size:12.5px"></div>
+        </div>
+        <div class="wbx-call-outcome-foot">
+          <button class="wbx-btn" type="button" data-actie-cancel>Annuleer</button>
+          <button class="wbx-btn wbx-primary" type="button" data-actie-ok>Aanmaken</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+
+    // ── State + wiring ────────────────────────────────────────────────
+    let selectedType = 'bel';
+    const titleWrap  = wrap.querySelector('#wbxActieTitleWrap');
+    const noteWrap   = wrap.querySelector('#wbxActieNoteWrap');
+    const asgWrap    = wrap.querySelector('#wbxActieAssigneeWrap');
+    const doorlink   = wrap.querySelector('#wbxActieDoorlinkInfo');
+    const asgSelect  = wrap.querySelector('#wbxActieAssigneeSelect');
+    const noteEl     = wrap.querySelector('#wbxActieNoteInput');
+    const titleEl    = wrap.querySelector('#wbxActieTitleInput');
+    const okBtn      = wrap.querySelector('[data-actie-ok]');
+    const errEl      = wrap.querySelector('#wbxActieErr');
+
+    function applyTypeVisibility() {
+      const isTaak = _WBX_ACTIE_TAAK_TYPES.has(selectedType);
+      const isDoor = _WBX_ACTIE_DOORLINK_TYPES.has(selectedType);
+      // Titel-veld alleen bij vrije_taak.
+      titleWrap.hidden = (selectedType !== 'vrije_taak');
+      // Notitie alleen bij taak-type; verplicht met andere min-lengte per type.
+      noteWrap.hidden  = !isTaak;
+      // Assignee alleen bij taak-type.
+      asgWrap.hidden   = !isTaak;
+      // Doorlink info alleen bij doorlink-type.
+      doorlink.hidden  = !isDoor;
+      // Confirm-label kort passen aan actie-context.
+      okBtn.textContent = isDoor ? 'Open dossier' : 'Aanmaken';
+    }
+    applyTypeVisibility();
+
+    // Type-picker wiring.
+    wrap.querySelectorAll('.wbx-actie-type-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        wrap.querySelectorAll('.wbx-actie-type-btn').forEach(b => {
+          b.removeAttribute('data-active');
+          b.style.borderColor = 'var(--wbx-border-strong,#d1d5db)';
+          b.style.background  = 'var(--ds-surface,#fff)';
+        });
+        btn.setAttribute('data-active', '1');
+        btn.style.borderColor = 'var(--accent-cyan)';
+        btn.style.background  = 'var(--wbx-info-bg,#eff6ff)';
+        selectedType = btn.getAttribute('data-actie-type');
+        errEl.style.display = 'none';
+        applyTypeVisibility();
+      });
+    });
+    // Kick de default (bel) visueel actief.
+    const defaultBtn = wrap.querySelector('.wbx-actie-type-btn[data-actie-type="bel"]');
+    if (defaultBtn) {
+      defaultBtn.style.borderColor = 'var(--accent-cyan)';
+      defaultBtn.style.background  = 'var(--wbx-info-bg,#eff6ff)';
+    }
+
+    // Assignee-radio wiring — enable/disable de select.
+    wrap.querySelectorAll('input[name="wbxActieAssignee"]').forEach(r => {
+      r.addEventListener('change', () => {
+        asgSelect.disabled = (r.value !== 'team');
+        if (r.value !== 'team') asgSelect.value = '';
+      });
+    });
+
+    // Sluiters.
+    const close = () => wrap.remove();
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+    wrap.querySelectorAll('[data-actie-cancel]').forEach(b => b.addEventListener('click', close));
+
+    // Bevestiger.
+    okBtn.addEventListener('click', async () => {
+      errEl.style.display = 'none';
+      // Doorlink types: geen validatie, geen taak — open dossier + sluit.
+      if (_WBX_ACTIE_DOORLINK_TYPES.has(selectedType)) {
+        close();
+        if (typeof openCaseSheet === 'function') {
+          openCaseSheet(cid, { wideDrawerMode: true });
+        } else {
+          window.AgentShared?.showToast?.('Kan klant-dossier niet openen', 'error');
+        }
+        return;
+      }
+
+      // Taak-types: valideer notitie.
+      const note = (noteEl.value || '').trim();
+      const minLen = (selectedType === 'escalatie') ? 10 : 5;
+      if (note.length < minLen) {
+        errEl.textContent = `Notitie is verplicht (min. ${minLen} tekens).`;
+        errEl.style.display = '';
+        noteEl.focus();
+        return;
+      }
+
+      // Assignee-modus + validatie.
+      const asgMode = (wrap.querySelector('input[name="wbxActieAssignee"]:checked')?.value) || 'self';
+      const asgId   = asgSelect.value || null;
+      if (asgMode === 'team' && !asgId) {
+        errEl.textContent = 'Kies een teamlid.';
+        errEl.style.display = '';
+        asgSelect.focus();
+        return;
+      }
+
+      // Titel (alleen bij vrije_taak).
+      const titleVal = (selectedType === 'vrije_taak') ? (titleEl.value || '').trim() : '';
+
+      okBtn.disabled = true;
+      const origLbl  = okBtn.textContent;
+      okBtn.textContent = 'Bezig…';
+      try {
+        if (asgMode === 'team') {
+          // Toewijzen aan teamlid → /api/taken (taken_items).
+          await _wbxActieCreateTakenItem({ cid, selectedType, note, titleVal, assignedToId: asgId, custName });
+        } else {
+          // Voor mij → pending_actions (finance-Acties).
+          await _wbxActieCreatePendingAction({ cid, convId, selectedType, note, titleVal, custName });
+        }
+        window.AgentShared?.showToast?.('Actie aangemaakt', 'success');
+        close();
+      } catch (e) {
+        errEl.textContent = 'Aanmaken mislukt: ' + (e?.message || 'onbekend');
+        errEl.style.display = '';
+        okBtn.disabled = false;
+        okBtn.textContent = origLbl;
+      }
+    });
+  }
+
+  // Case 1 — Voor mij (pending_actions).
+  async function _wbxActieCreatePendingAction({ cid, convId, selectedType, note, titleVal, custName }) {
+    if (selectedType === 'escalatie') {
+      // Escalatie heeft eigen endpoint met conversation_id.
+      if (!convId) throw new Error('Geen conversation_id — kan geen escalatie aanmaken');
+      const r = await window.AgentShared.apiFetch('/api/tasks-create-escalation', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversation_id: convId,
+          reason: note,
+          severity: 'medium',
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      return d;
+    }
+    // Bel + Vrije taak → tasks-create-followup met payload-verrijking.
+    const kind = (selectedType === 'bel') ? 'bel' : 'free_task';
+    const title = titleVal
+      || (selectedType === 'bel' ? `Bel-taak — ${custName}` : `Taak — ${custName}`);
+    const r = await window.AgentShared.apiFetch('/api/tasks-create-followup', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customer_id: cid,
+        source: 'inbox',
+        reason: note.slice(0, 500),
+        title,
+        note,
+        kind,
+      }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    return d;
+  }
+
+  // Case 2 — Toewijzen aan teamlid (taken_items via /api/taken).
+  // Body-shape: /api/taken verwacht { task: { id, titel, omschrijving, prioriteit,
+  // categorie, assignedToId (camelCase!), customerId (camelCase!), status } }.
+  // toRow() genereert geen id-fallback → wij moeten er een aanleveren.
+  async function _wbxActieCreateTakenItem({ cid, selectedType, note, titleVal, assignedToId, custName }) {
+    const title = titleVal
+      || (selectedType === 'bel'       ? `Bel-taak — ${custName}` :
+          selectedType === 'escalatie' ? `Escalatie — ${custName}` :
+                                         `Taak — ${custName}`);
+    // Categorie moet één van de valide waarden zijn (Sales/Onboarding/Mentoring/
+    // Finance/Klant/Marketing/Intern/Overige). Finance-inbox → 'Finance'.
+    const cat   = 'Finance';
+    // Prioriteit: valide waarden Urgent/Hoog/Normaal/Laag.
+    const prio  = (selectedType === 'escalatie') ? 'Hoog' : 'Normaal';
+    const newId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+    const r = await window.AgentShared.apiFetch('/api/taken', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        task: {
+          id:            newId,
+          titel:         title,
+          omschrijving:  note,
+          prioriteit:    prio,
+          categorie:     cat,
+          assignedToId:  assignedToId,
+          customerId:    cid,
+          status:        'todo',
+        },
+      }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    return d;
+  }
 
   // ═════════════════════════════════════════════════════════════════════
   //   FASE 4 — Blok 3: unified inbox (WhatsApp + e-mail) achter feature-flag.

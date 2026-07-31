@@ -6,7 +6,12 @@
 // FASE 4 herontwerp — Blok 1 — deel van de "naar-acties" knoppen in de compose-rij.
 //
 // Request:
-//   POST { customer_id: uuid, source?: string, reason?: string, invoice_id?: uuid|null }
+//   POST { customer_id: uuid, source?: string, reason?: string, invoice_id?: uuid|null,
+//          title?: string, note?: string, kind?: string }
+//
+// title / note / kind zijn optionele payload-verrijking voor de "vrije taak"-
+// variant vanuit de Gesprekken-tab popup (Blok 2). Ze belanden in payload jsonb
+// zonder breaking-change voor bestaande callers.
 //
 // Response 200:
 //   { ok: true, item: { id, action_type, customer_id, status, created_at } }
@@ -17,6 +22,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { buildFollowupPayload } from './_lib/gesprek-actie-helpers.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -47,8 +53,6 @@ export default async function handler(req, res) {
   if (!customerId || !UUID_RE.test(customerId)) {
     return res.status(400).json({ error: 'customer_id (uuid) vereist', code: 'MISSING_CUSTOMER_ID' });
   }
-  const source    = body.source ? String(body.source).trim() : 'inbox';
-  const reason    = body.reason ? String(body.reason).trim().slice(0, 500) : '';
   const invoiceId = body.invoice_id && UUID_RE.test(String(body.invoice_id)) ? String(body.invoice_id) : null;
 
   // Klant moet bestaan.
@@ -63,12 +67,7 @@ export default async function handler(req, res) {
     return res.status(409).json({ error: 'Klant is gearchiveerd/geanonimiseerd' });
   }
 
-  const payload = {
-    source,
-    reason: reason || null,
-    created_from: 'inbox',
-    created_by_user_id: user.id,
-  };
+  const payload = buildFollowupPayload(body, user.id);
 
   const { data: inserted, error: insErr } = await supabaseAdmin
     .from('pending_actions')
