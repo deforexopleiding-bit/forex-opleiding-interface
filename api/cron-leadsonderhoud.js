@@ -154,8 +154,11 @@ export default async function handler(req, res) {
       if (alVandaag.has(r.gebruiker_id)) { rapport.overgeslagen++; meld('overgeslagen', 'al bericht vandaag'); continue; }
       // toestemming (dubbelcheck; de view doet dit ook al)
       if (r.kanaal === 'whatsapp' && !r.toestemming) { rapport.overgeslagen++; meld('overgeslagen', 'geen toestemming'); continue; }
-      // WhatsApp-sjabloon moet goedgekeurd zijn
-      if (r.kanaal === 'whatsapp' && !goedgekeurd.has(r.soort)) { rapport.overgeslagen++; meld('overgeslagen', 'sjabloon niet goedgekeurd'); continue; }
+      // WhatsApp-sjabloon-gate is verhuisd naar NA haalSjabloon (line ~192)
+      // zodat we op sjabloon.meta_template kunnen matchen i.p.v. r.soort.
+      // Reden: r.soort heeft streepjes ('niet-ingelogd'); meta_template
+      // heeft underscores ('niet_ingelogd'). Meta-templates in de DB staan
+      // op de underscore-naam, dus de oude gate op r.soort miste 7 van de 8.
       // te vaak gefaald vandaag -> definitief mislukt, niet blijven proberen
       if ((foutenVandaag[r.gebruiker_id + '|' + r.soort] || 0) >= 2) { rapport.overgeslagen++; meld('overgeslagen', 'na herhaalde fout gestopt'); continue; }
 
@@ -183,6 +186,21 @@ export default async function handler(req, res) {
 
       const sjabloon = await haalSjabloon(r.traject, r.soort, r.score);
       if (!sjabloon) { rapport.overgeslagen++; meld('overgeslagen', 'geen sjabloon in de tabel'); continue; }
+
+      // WhatsApp-goedkeurings-gate op meta_template (post-haalSjabloon).
+      // sjabloon.meta_template is de underscore-naam ('niet_ingelogd') die
+      // matcht met whatsapp_meta_templates.name; r.soort heeft streepjes
+      // ('niet-ingelogd') dus die matchte niet. Fallback op sjabloon.soort
+      // voor sjablonen zonder expliciete meta_template (identiek aan de
+      // fallback in vulSjabloon).
+      if (r.kanaal === 'whatsapp') {
+        const metaNaam = sjabloon.meta_template || sjabloon.soort;
+        if (!goedgekeurd.has(metaNaam)) {
+          rapport.overgeslagen++;
+          meld('overgeslagen', 'sjabloon niet goedgekeurd (' + metaNaam + ')');
+          continue;
+        }
+      }
 
       // Eén invul-functie voor beide kanalen; de agendalink komt uit het traject,
       // de logo-URL uit de instelling.
