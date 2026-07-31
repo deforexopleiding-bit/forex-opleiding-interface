@@ -29324,6 +29324,10 @@
         toast: 'Escalatie opgepakt',
       };
     } else if (at === 'MANUAL_FOLLOWUP') {
+      // FIX: mark-executed endpoint eist execution_result.{outcome,manual_notes}.
+      // We vragen een optionele korte reden (net als de belkaart-flow in het
+      // case-sheet met requireReason minLen:0). Bij leeg gebruikt _awnDoApprove
+      // een fallback-tekst zodat manual_notes ≥10 chars is.
       cfg = {
         title: 'Bel-taak afhandelen',
         whatHappens: [
@@ -29335,6 +29339,7 @@
         endpoint: 'pending-actions-mark-executed',
         markOutcome: 'closed_manually',
         toast: 'Bel-taak afgehandeld',
+        requireReason: { minLen: 0, placeholder: 'Optioneel — bv. "Al betaald, mail gestuurd"' },
       };
     } else if (at === 'MANUAL_VERIFY_PAYMENT') {
       cfg = {
@@ -29363,20 +29368,39 @@
         toast: 'Goedgekeurd',
       };
     }
-    if (typeof wbxOpenConfirm !== 'function') return _awnDoApprove(id, cfg);
+    if (typeof wbxOpenConfirm !== 'function') return _awnDoApprove(id, cfg, null);
     wbxOpenConfirm({
       title: cfg.title,
       whatHappens: cfg.whatHappens,
       primaryLabel: cfg.primaryLabel,
       dangerLevel: 'neutral',
-      onConfirm: () => _awnDoApprove(id, cfg),
+      ...(cfg.requireReason ? { requireReason: cfg.requireReason } : {}),
+      onConfirm: (reason) => _awnDoApprove(id, cfg, reason),
     });
   }
-  async function _awnDoApprove(id, cfg) {
+  async function _awnDoApprove(id, cfg, reason) {
     try {
-      const body = cfg.endpoint === 'pending-actions-mark-executed'
-        ? { id, outcome: cfg.markOutcome || 'closed_manually' }
-        : { id };
+      // FIX: pending-actions-mark-executed eist execution_result.{outcome,manual_notes}
+      // (min 10 chars). Voorheen stuurde deze code { id, outcome } op top-level →
+      // endpoint blokkeerde met "execution_result (object) vereist". manual_notes
+      // wordt gevuld uit reason (uit wbxOpenConfirm requireReason) met fallback-tekst
+      // wanneer de user niks intypt of <10 chars levert, zodat de valide taak-flow
+      // niet strandt op tekstlengte.
+      let body;
+      if (cfg.endpoint === 'pending-actions-mark-executed') {
+        const notes = (typeof reason === 'string' && reason.trim().length >= 10)
+          ? reason.trim()
+          : 'Handmatig afgesloten via acties-werkcentrum';
+        body = {
+          id,
+          execution_result: {
+            outcome:      cfg.markOutcome || 'closed_manually',
+            manual_notes: notes,
+          },
+        };
+      } else {
+        body = { id };
+      }
       const r = await window.AgentShared.apiFetch('/api/' + cfg.endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -29495,8 +29519,19 @@
   }
   async function _awnDoMarkExecuted(id, outcome, toastMsg, reason) {
     try {
-      const body = { id, outcome };
-      if (reason) body.reason = reason;
+      // FIX: endpoint verwacht { id, execution_result: { outcome, manual_notes } }
+      // (min 10 chars). Voorheen stuurde deze functie { id, outcome, reason } op
+      // top-level → 400 "execution_result (object) vereist". manual_notes wordt
+      // gevuld uit `reason` (wbxOpenConfirm met minLen:10) met een fallback-tekst
+      // als de caller geen reden meestuurde, zodat het endpoint niet klaagt.
+      const notes = (typeof reason === 'string' && reason.trim().length >= 10)
+        ? reason.trim()
+        : `${toastMsg || 'Handmatig afgehandeld via acties-werkcentrum'}`;
+      // Fallback-string is exact 43 chars (>=10) → veilige default.
+      const body = {
+        id,
+        execution_result: { outcome, manual_notes: notes },
+      };
       const r = await window.AgentShared.apiFetch('/api/pending-actions-mark-executed', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
