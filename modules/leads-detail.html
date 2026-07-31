@@ -11,7 +11,10 @@
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     body{font-family:'Inter',system-ui,sans-serif;background:var(--bg-page,#fafafa);color:var(--text-main,#0f172a);min-height:100vh}
-    .page-wrap{max-width:1200px;margin:0 auto;padding:24px}
+    /* Sidebar-offset — zelfde patroon als andere modules (margin-left 220px).
+       Zonder dit schuift de content deels onder de sidebar. Mobile @media
+       hieronder zet 'em op 0 wanneer de sidebar inklapt. */
+    .page-wrap{max-width:1200px;margin-left:var(--sidebar-w,220px);padding:24px}
     .top-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px;flex-wrap:wrap}
     .back-link{color:var(--text-dim);text-decoration:none;font-size:13px;display:inline-flex;align-items:center;gap:6px}
     .back-link:hover{color:var(--text-main)}
@@ -67,7 +70,7 @@
 
     @media (max-width:900px){
       .grid-2{grid-template-columns:1fr}
-      .page-wrap{padding:14px}
+      .page-wrap{margin-left:0;padding:14px}
     }
   </style>
 </head>
