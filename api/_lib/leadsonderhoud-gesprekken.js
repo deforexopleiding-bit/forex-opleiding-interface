@@ -46,24 +46,47 @@ export async function haalLijn() {
   };
 }
 
-// De genormaliseerde telefoonnummers van leads die in een traject zitten.
+// De slugs van de trajecten (voor "zit deze lead in een traject?").
+export async function trajectSlugs() {
+  const { data } = await supabaseAdmin.from('onderhoud_trajecten').select('slug');
+  return new Set((data || []).map((t) => t.slug).filter(Boolean));
+}
+
+// De leads die in een traject zitten, met de velden die het postvak nodig heeft.
 // "In een traject" = lead.soort komt overeen met een slug uit onderhoud_trajecten.
-// Zo zie je in het Gesprekken-scherm alleen leads-met-traject, niet elk
-// onboarding-gesprek dat toevallig op dezelfde lijn binnenkwam.
-export async function leadNummers() {
-  const { data: trs } = await supabaseAdmin.from('onderhoud_trajecten').select('slug');
-  const slugs = (trs || []).map((t) => t.slug).filter(Boolean);
-  if (!slugs.length) return new Set();
-  const { data: leads } = await supabaseAdmin
+export async function leadsInTraject() {
+  const slugs = [...(await trajectSlugs())];
+  if (!slugs.length) return [];
+  const { data } = await supabaseAdmin
     .from('leads')
-    .select('telefoon_e164')
+    .select('id, voornaam, achternaam, email, telefoon_e164, soort')
     .in('soort', slugs)
-    .not('telefoon_e164', 'is', null)
     .limit(10000);
+  return data || [];
+}
+
+// De genormaliseerde telefoonnummers van leads-in-een-traject (voor de
+// WhatsApp-kant van het filter).
+export async function leadNummers() {
   const set = new Set();
-  for (const l of leads || []) {
+  for (const l of await leadsInTraject()) {
     const n = normNummer(l.telefoon_e164);
     if (n) set.add(n);
   }
   return set;
+}
+
+// Het mail-postvak (IMAP short-name) waarin de antwoorden op de motor-mails
+// binnenkomen. Afgeleid uit hetzelfde afzenderadres als de motor gebruikt, zodat
+// het meeverhuist als je LEADSONDERHOUD_MAIL_AFZENDER omzet. welkom@… -> 'welkom'.
+export function postvakNaam() {
+  const afz = process.env.LEADSONDERHOUD_MAIL_AFZENDER || 'welkom@deforexopleiding.nl';
+  return String(afz).split('@')[0].trim().toLowerCase() || 'welkom';
+}
+
+// Het kale e-mailadres uit een From-veld ("Naam <adres>" of "adres"), kleine letters.
+export function adresUit(from) {
+  const s = String(from || '');
+  const m = s.match(/<([^>]+)>/);
+  return (m ? m[1] : s).trim().toLowerCase();
 }

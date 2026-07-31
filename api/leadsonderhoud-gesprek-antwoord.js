@@ -1,19 +1,18 @@
 // api/leadsonderhoud-gesprek-antwoord.js
-// POST { conversation_id, body } -> stuur een vrij-tekst antwoord in een lopend
-// gesprek, via de Meta Cloud API.
+// POST { lead_id, body } -> stuur een vrij-tekst WhatsApp-antwoord aan de lead.
 //
-// Gate: leads.view. Extra check: het gesprek moet op de ingestelde lijn staan én
-// bij een lead-in-een-traject horen (zelfde filter als de lijst). Vrije tekst mag
-// alleen binnen het 24-uurs venster; daarbuiten hoort een goedgekeurde template —
-// die knop komt zodra Meta de sjablonen goedkeurt.
+// Gate: leads.view. De lead moet in een traject zitten. Vrije tekst mag alleen
+// binnen het 24-uurs venster; daarbuiten hoort een goedgekeurde template (die knop
+// wacht op Meta). Mail-antwoorden lopen niet via dit endpoint — die stuur je vanuit
+// de e-mailmodule vanaf welkom@.
 //
 // Response: 200 { ok:true, wamid }
+//           409 { error } als er geen WhatsApp-lijn/gesprek is
 //           422 { error:'24u-venster verlopen' } buiten venster
-//           502 { error } bij Meta-fout
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { haalLijn, leadNummers, normNummer, binnenVenster } from './_lib/leadsonderhoud-gesprekken.js';
+import { haalLijn, trajectSlugs, normNummer, binnenVenster } from './_lib/leadsonderhoud-gesprekken.js';
 import { sendText, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -32,29 +31,35 @@ export default async function handler(req, res) {
   }
 
   const body = req.body || {};
-  const convId = String(body.conversation_id || '');
+  const leadId = String(body.lead_id || '');
   const tekst = String(body.body || '').trim();
-  if (!UUID_RE.test(convId)) return res.status(400).json({ error: 'conversation_id ontbreekt of ongeldig' });
+  if (!UUID_RE.test(leadId)) return res.status(400).json({ error: 'lead_id ontbreekt of ongeldig' });
   if (!tekst) return res.status(400).json({ error: 'Bericht is leeg' });
   if (tekst.length > MAX_BODY) return res.status(400).json({ error: 'Bericht te lang' });
 
   try {
+    const { data: lead, error: leadErr } = await supabaseAdmin
+      .from('leads').select('id, telefoon_e164, soort').eq('id', leadId).maybeSingle();
+    if (leadErr) throw leadErr;
+    if (!lead) return res.status(404).json({ error: 'Lead niet gevonden' });
+
+    const slugs = await trajectSlugs();
+    if (!slugs.has(lead.soort)) return res.status(403).json({ error: 'Deze lead zit niet in een traject' });
+
     const lijn = await haalLijn();
     if (!lijn.phoneNumberId) return res.status(409).json({ error: 'Geen WhatsApp-lijn ingesteld' });
+    if (!lead.telefoon_e164) return res.status(409).json({ error: 'Deze lead heeft geen telefoonnummer' });
 
-    const { data: conv, error: convErr } = await supabaseAdmin
+    // Het gesprek van deze lead op de lijn.
+    const { data: convs } = await supabaseAdmin
       .from('whatsapp_conversations')
       .select('id, phone_number, phone_number_id, last_inbound_at')
-      .eq('id', convId).maybeSingle();
-    if (convErr) throw convErr;
-    if (!conv) return res.status(404).json({ error: 'Gesprek niet gevonden' });
+      .eq('phone_number_id', lijn.phoneNumberId)
+      .limit(500);
+    const doel = normNummer(lead.telefoon_e164);
+    const conv = (convs || []).find((c) => normNummer(c.phone_number) === doel) || null;
+    if (!conv) return res.status(409).json({ error: 'Nog geen WhatsApp-gesprek met deze lead' });
 
-    const toegestaan = await leadNummers();
-    if (conv.phone_number_id !== lijn.phoneNumberId || !toegestaan.has(normNummer(conv.phone_number))) {
-      return res.status(403).json({ error: 'Dit gesprek hoort niet bij leadsonderhoud' });
-    }
-
-    // Vrije tekst mag alleen binnen 24u sinds het laatste inkomende bericht.
     if (!binnenVenster(conv.last_inbound_at)) {
       return res.status(422).json({
         error: '24u-venster verlopen',
@@ -62,7 +67,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // Verstuur via de lijn waarop het gesprek binnenkwam.
     let metaResult;
     try {
       metaResult = await sendText({ to: conv.phone_number, body: tekst, phoneNumberId: conv.phone_number_id || lijn.phoneNumberId });
@@ -82,28 +86,26 @@ export default async function handler(req, res) {
     const wamid = metaResult && metaResult.wamid ? String(metaResult.wamid) : null;
     const nu = new Date().toISOString();
 
-    const { data: inserted, error: insErr } = await supabaseAdmin
+    const { error: insErr } = await supabaseAdmin
       .from('whatsapp_messages')
       .insert({
-        conversation_id: convId,
+        conversation_id: conv.id,
         direction: 'out',
         meta_wamid: wamid,
         body: tekst,
         status: 'queued',
         sent_at: nu,
         sent_by_user_id: user.id,
-      })
-      .select('id, meta_wamid, status, sent_at, created_at, direction, body')
-      .single();
+      });
     if (insErr) throw new Error('bericht opslaan: ' + insErr.message);
 
     const { error: updErr } = await supabaseAdmin
       .from('whatsapp_conversations')
       .update({ last_message_at: nu, last_message_preview: tekst.slice(0, 120) })
-      .eq('id', convId);
+      .eq('id', conv.id);
     if (updErr) console.error('[leadsonderhoud-gesprek-antwoord] conv-update faalde:', updErr.message);
 
-    return res.status(200).json({ ok: true, wamid, message: inserted });
+    return res.status(200).json({ ok: true, wamid });
   } catch (e) {
     console.error('leadsonderhoud-gesprek-antwoord mislukt:', e.message);
     return res.status(500).json({ error: 'Versturen mislukt' });

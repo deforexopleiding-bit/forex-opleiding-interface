@@ -23,13 +23,16 @@ import { sendEmailViaSmtp } from './_lib/send-email-core.js';
 import { sendTemplate } from './_lib/meta-whatsapp.js';
 import { vulSjabloon, instelWaarde } from './_lib/leadsonderhoud-sjabloon.js';
 
-// Afzender-mailbox voor deze module: welkom@deforexopleiding.nl. sendEmailViaSmtp
+// Afzender-mailbox voor deze module. Standaard welkom@deforexopleiding.nl, maar
+// via env LEADSONDERHOUD_MAIL_AFZENDER later om te zetten zonder codewijziging
+// (zelfde gedachte als het WhatsApp-nummer als instelling). sendEmailViaSmtp
 // gebruikt deze mailbox als SMTP-inloggebruiker én als From én als reply-to — de
 // mail gaat dus écht via deze bus (goed voor SPF/DMARC), niet alleen als label.
-// Vereist: welkom@ staat in SMTP_ACCOUNTS (send-email-core.js) en het wachtwoord
-// staat in env IMAP_PASS_WELKOM. Ontbreekt dat, dan faalt de send zichtbaar
-// (SMTP_NOT_CONFIGURED) en belandt dat in berichten_log — geen stille misser.
-const MAIL_AFZENDER = 'welkom@deforexopleiding.nl';
+// Vereist: de mailbox staat in SMTP_ACCOUNTS (send-email-core.js) en het
+// wachtwoord in de bijbehorende env (welkom@ -> IMAP_PASS_WELKOM). Ontbreekt dat,
+// dan faalt de send zichtbaar (SMTP_NOT_CONFIGURED) en belandt in berichten_log.
+const MAIL_AFZENDER =
+  process.env.LEADSONDERHOUD_MAIL_AFZENDER || 'welkom@deforexopleiding.nl';
 
 // Is een env-vlag "aan"? Ruim: 1/true/aan/on/ja tellen als aan.
 function aanUit(v) {
