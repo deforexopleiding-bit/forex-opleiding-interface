@@ -1050,10 +1050,18 @@ function renderAttendeesTab() {
           statusCell = `<span class="tag-chip">${esc(ATT_STATUS_LABELS[a.status] || a.status)}</span>`;
         }
         // Verplaatst-bestemming (sinds migratie 026 + list-endpoint update):
-        // toon "→ [naam doel-event]" onder de status. Legacy verplaatsingen
-        // zonder switched_to_event_title: alleen 'Verplaatst' zoals nu.
+        // toon "→ [naam doel-event] op [datum]" onder de status. Datum leest
+        // switched_at (bestaat al op event_attendees; endpoint stuurt 'em al
+        // mee). Format kort: "12 aug 2026" — geen tijd want die is weinig
+        // relevant voor een verplaats-audit. Legacy verplaatsingen zonder
+        // switched_to_event_title: alleen 'Verplaatst' zoals nu (zonder datum-
+        // suffix wanneer 'title en at ontbreken).
         if (a.status === 'switched_to_other_event' && a.switched_to_event_title) {
-          statusCell += `<div style="margin-top:3px;font-size:11px;color:var(--text-dim);line-height:1.3" title="Verplaatst naar: ${esc(a.switched_to_event_title)}">→ ${esc(a.switched_to_event_title)}</div>`;
+          const movedDate = a.switched_at
+            ? new Date(a.switched_at).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' })
+            : '';
+          const dateSuffix = movedDate ? ` op ${movedDate}` : '';
+          statusCell += `<div style="margin-top:3px;font-size:11px;color:var(--text-dim);line-height:1.3" title="Verplaatst naar: ${esc(a.switched_to_event_title)}${esc(dateSuffix)}">→ ${esc(a.switched_to_event_title)}${esc(dateSuffix)}</div>`;
         }
 
         // Fase 1: telt-mee-laag bovenop de status — assessment_response_id
