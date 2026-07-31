@@ -46,9 +46,9 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { getConfirmedCount } from './_lib/event-registration.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const ACTIVE_STATUSES = ['aangemeld', 'aanwezig', 'sale'];
 
 function clampInt(v, def, min, max) {
   const n = Number(v);
@@ -195,16 +195,16 @@ export default async function handler(req, res) {
     const candidateIds = (rows || []).map((r) => r.id);
     const activeCountById = new Map();
     if (candidateIds.length > 0) {
-      // Per event count actieve attendees (parallel). Voor F1 acceptabel; verfijnen
-      // naar 1 group-by query met RPC kan later.
+      // Fase 1 canonical: telt alleen inschrijvingen met ingevulde vragenlijst
+      // (status IN ('aangemeld','aanwezig') AND assessment_response_id IS NOT
+      // NULL AND is_test=false). Consistent met PR #1017 (move/add) +
+      // events-list/detail/auto-close. Voorheen: inline count met
+      // ACTIVE_STATUSES incl. 'sale' zonder assessment-filter → bel-overlay
+      // toonde events als vol terwijl er nog vrije vragenlijst-plekken waren.
       await Promise.all(candidateIds.map(async (eid) => {
         try {
-          const { count } = await supabaseAdmin
-            .from('event_attendees')
-            .select('id', { count: 'exact', head: true })
-            .eq('event_id', eid)
-            .in('status', ACTIVE_STATUSES);
-          activeCountById.set(eid, typeof count === 'number' ? count : 0);
+          const cnt = await getConfirmedCount(eid);
+          activeCountById.set(eid, cnt);
         } catch (e) {
           console.error('[events-alternatives count]', eid, e.message);
           activeCountById.set(eid, 0);
