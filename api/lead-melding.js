@@ -30,6 +30,9 @@ import { sendTemplate, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 const TEMPLATE_NAAM = 'nieuwe_lead';
 const TAAL = 'nl';
 const STANDAARD_NUMMER = '+31655270212';
+// Verzendlijn: standaard de bestaande Esmee-lijn (leadsonderhoud, actief onder
+// WABA 990429800401598). Override via env LEAD_MELDING_AFZENDLIJN.
+const STANDAARD_AFZENDLIJN = '1232908829908396';
 const MAX_LEN = 200; // knip absurd lange waarden af (WhatsApp-param-limiet + hygiëne)
 
 function schoon(v) {
@@ -63,14 +66,15 @@ export default async function handler(req, res) {
   if (!traject) return res.status(400).json({ error: 'traject vereist' });
 
   const to = process.env.LEAD_MELDING_NUMMER || STANDAARD_NUMMER;
+  const phoneNumberId = process.env.LEAD_MELDING_AFZENDLIJN || STANDAARD_AFZENDLIJN;
 
   try {
     const { wamid } = await sendTemplate({
       to,
       templateName: TEMPLATE_NAAM,
       languageCode: TAAL,
-      variables: [naam, traject],
-      // geen phoneNumberId: gebruikt de env-default afzendlijn
+      variables: [naam, traject], // exact 2 params: {{1}}=naam, {{2}}=traject
+      phoneNumberId,              // Esmee-lijn (of env-override)
     });
     return res.status(200).json({ ok: true, wamid });
   } catch (e) {
