@@ -29051,23 +29051,36 @@
     const tomorrow  = iso(nowMs + 24 * 3600 * 1000);
     const in3days   = iso(nowMs + 3 * 24 * 3600 * 1000);
     const nextWeek  = iso(nowMs + 7 * 24 * 3600 * 1000);
-    // Reuse wbxOpenConfirm-patroon met custom body via prompt-modal.
+    // Hergebruikt EXACT dezelfde CSS-classes als wbxOpenConfirm zodat de
+    // snooze-modal er identiek uitziet — ondoorzichtige surface + duidelijke
+    // border + shadow + dimmed backdrop-scrim + light/dark-mode-support.
+    // Voorkomt de half-transparante look van de oude inline-styled versie.
+    document.getElementById('awnSnoozeModal')?.remove();
     const scrim = document.createElement('div');
-    scrim.style.cssText = 'position:fixed;inset:0;background:rgba(14,19,28,.44);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px';
+    scrim.id = 'awnSnoozeModal';
+    scrim.className = 'wbx wbx-call-outcome-scrim';
     scrim.innerHTML = `
-      <div style="background:var(--wbx-bg);color:var(--wbx-ink);border-radius:12px;padding:20px 22px;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.25);font-family:'Inter',system-ui,sans-serif">
-        <h3 style="margin:0 0 6px;font-size:16px;font-weight:600">Later oppakken</h3>
-        <p style="margin:0 0 14px;font-size:13px;color:var(--wbx-muted);line-height:1.45">Kies wanneer deze taak weer in "Te doen" moet verschijnen. De taak zelf verandert niet — alleen de datum.</p>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-          <button type="button" data-awn-pick="${tomorrow}" style="padding:6px 12px;border:1px solid var(--wbx-border);border-radius:6px;background:var(--wbx-surface);cursor:pointer;font-size:13px">Morgen</button>
-          <button type="button" data-awn-pick="${in3days}"  style="padding:6px 12px;border:1px solid var(--wbx-border);border-radius:6px;background:var(--wbx-surface);cursor:pointer;font-size:13px">Over 3 dagen</button>
-          <button type="button" data-awn-pick="${nextWeek}" style="padding:6px 12px;border:1px solid var(--wbx-border);border-radius:6px;background:var(--wbx-surface);cursor:pointer;font-size:13px">Volgende week</button>
+      <div class="wbx-call-outcome-modal">
+        <div class="wbx-call-outcome-head">
+          <div>
+            <div style="font-weight:600">Later oppakken</div>
+            <div style="font-size:12px;color:var(--wbx-muted);margin-top:2px">Kies wanneer deze taak weer in "Te doen" moet verschijnen. De taak zelf verandert niet — alleen de datum.</div>
+          </div>
+          <button class="wbx-inc-close" type="button" data-awn-cancel aria-label="Sluiten">✕</button>
         </div>
-        <label style="display:block;font-size:12px;color:var(--wbx-muted);margin-bottom:4px">Of kies zelf een datum:</label>
-        <input type="date" id="awnSnoozeDate" min="${tomorrow}" value="${tomorrow}" style="width:100%;padding:8px 10px;border:1px solid var(--wbx-border);border-radius:6px;font-size:14px;font-family:inherit;color:var(--wbx-ink);background:var(--wbx-surface)" />
-        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
-          <button type="button" data-awn-cancel style="padding:8px 14px;border:1px solid var(--wbx-border);border-radius:6px;background:var(--wbx-surface);cursor:pointer;font-size:13px">Annuleren</button>
-          <button type="button" data-awn-confirm class="wbx-primary" style="padding:8px 14px;border:1px solid var(--wbx-accent);border-radius:6px;background:var(--wbx-accent);color:#fff;cursor:pointer;font-size:13px;font-weight:500">Verplaats</button>
+        <div class="wbx-call-outcome-body">
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">
+            <button class="wbx-btn wbx-sm" type="button" data-awn-pick="${tomorrow}">Morgen</button>
+            <button class="wbx-btn wbx-sm" type="button" data-awn-pick="${in3days}">Over 3 dagen</button>
+            <button class="wbx-btn wbx-sm" type="button" data-awn-pick="${nextWeek}">Volgende week</button>
+          </div>
+          <label style="display:block;font-size:12px;color:var(--wbx-muted);margin-bottom:4px">Of kies zelf een datum:</label>
+          <input type="date" id="awnSnoozeDate" min="${tomorrow}" value="${tomorrow}"
+                 style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--wbx-border-strong);border-radius:8px;background:var(--ds-surface,#fff);color:var(--ds-text,#06181f);font:inherit" />
+        </div>
+        <div class="wbx-call-outcome-foot">
+          <button class="wbx-btn" type="button" data-awn-cancel>Annuleren</button>
+          <button class="wbx-btn wbx-primary" type="button" data-awn-confirm>Verplaats</button>
         </div>
       </div>
     `;
