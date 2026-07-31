@@ -38,6 +38,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { sendEventAttendeeInvite } from './_lib/events-invite.js';
+import { getConfirmedCount } from './_lib/event-registration.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACTIVE_STATUSES = ['aangemeld', 'aanwezig', 'sale'];
@@ -104,18 +105,22 @@ export default async function handler(req, res) {
       });
     }
 
-    // Capacity-check op doel-event.
-    const { count: activeCnt, error: cErr } = await supabaseAdmin
-      .from('event_attendees')
-      .select('id', { count: 'exact', head: true })
-      .eq('event_id', targetEventId)
-      .in('status', ACTIVE_STATUSES);
-    if (cErr) throw new Error('capacity-count: ' + cErr.message);
-    const cnt = typeof activeCnt === 'number' ? activeCnt : 0;
-    if (cnt >= targetEvent.capacity) {
+    // Capacity-check op doel-event — telt alleen inschrijvingen die de
+    // vragenlijst hebben ingevuld (assessment_response_id IS NOT NULL).
+    // Fase 1 canonical semantiek: gebruikt de shared helper getConfirmedCount
+    // zodat move/add/list/detail/auto-close allemaal dezelfde regel volgen.
+    // Voorheen: inline count met ACTIVE_STATUSES (incl. 'sale') ZONDER
+    // assessment-filter → 8 inschrijvingen met 6 vragenlijsten telde als 8
+    // → onterecht 'vol'. Nu telt 't als 6 en zijn er nog 2 plekken.
+    //
+    // Aanvaard overboek-risico: als N late vragenlijsten binnenkomen ná deze
+    // move, kan confirmed_count > capacity worden. Bewuste keuze — gebeurt
+    // zelden en admin-actie moet niet blokkeren op toekomstige gebeurtenissen.
+    const cnt = await getConfirmedCount(targetEventId);
+    if (targetEvent.capacity != null && cnt >= targetEvent.capacity) {
       return res.status(409).json({
         code:  'SEATS_FULL',
-        error: `Doel-event is vol (${cnt}/${targetEvent.capacity})`,
+        error: `Doel-event is vol (${cnt}/${targetEvent.capacity} met ingevulde vragenlijst)`,
       });
     }
 
