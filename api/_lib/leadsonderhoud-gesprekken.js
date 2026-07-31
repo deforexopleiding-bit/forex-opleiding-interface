@@ -76,12 +76,17 @@ export async function leadNummers() {
   return set;
 }
 
+// Het volledige afzenderadres van de module (zelfde bron als de motor). Standaard
+// welkom@deforexopleiding.nl, via env om te zetten zonder codewijziging.
+export function mailAfzender() {
+  return (process.env.LEADSONDERHOUD_MAIL_AFZENDER || 'welkom@deforexopleiding.nl').trim().toLowerCase();
+}
+
 // Het mail-postvak (IMAP short-name) waarin de antwoorden op de motor-mails
-// binnenkomen. Afgeleid uit hetzelfde afzenderadres als de motor gebruikt, zodat
-// het meeverhuist als je LEADSONDERHOUD_MAIL_AFZENDER omzet. welkom@… -> 'welkom'.
+// binnenkomen. Afgeleid uit hetzelfde afzenderadres, zodat het meeverhuist als je
+// de afzender omzet. welkom@… -> 'welkom'.
 export function postvakNaam() {
-  const afz = process.env.LEADSONDERHOUD_MAIL_AFZENDER || 'welkom@deforexopleiding.nl';
-  return String(afz).split('@')[0].trim().toLowerCase() || 'welkom';
+  return mailAfzender().split('@')[0].trim() || 'welkom';
 }
 
 // Het kale e-mailadres uit een From-veld ("Naam <adres>" of "adres"), kleine letters.

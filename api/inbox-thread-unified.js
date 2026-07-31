@@ -124,6 +124,7 @@ export default async function handler(req, res) {
       'administratie@deforexopleiding.nl',
       'onboarding@deforexopleiding.nl',
       'events@deforexopleiding.nl',
+      'welkom@deforexopleiding.nl',
     ]);
     const emailDirection = (fromAddr) => {
       const addr = String(fromAddr || '').toLowerCase().trim();
