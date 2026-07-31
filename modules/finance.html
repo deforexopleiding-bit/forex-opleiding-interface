@@ -30684,7 +30684,11 @@
       .split('\n')
       .map((line) => '> ' + line)
       .join('\n');
-    const initialBody = `\n\n${quoteLine}\n${quoted}\n`;
+    // Platte-tekst-handtekening voorgevuld onder een lege regel; de gebruiker
+    // typt erboven. Het logo komt er bij verzenden (HTML) automatisch bij
+    // (server-side, via de handtekening-flag) — precies één keer.
+    const sigTekst = 'Met vriendelijke groet,\nTeam - De Forex Opleiding';
+    const initialBody = `\n\n${sigTekst}\n\n${quoteLine}\n${quoted}\n`;
 
     const scrim = document.createElement('div');
     scrim.style.cssText = 'position:fixed;inset:0;background:rgba(14,19,28,.44);z-index:2100;display:flex;align-items:center;justify-content:center;padding:20px';
@@ -30704,6 +30708,7 @@
         <input type="text" id="f4rSubjectInput" value="${esc(subject)}" style="width:100%;padding:8px 10px;border:1px solid var(--wbx-border,#dfe8ec);border-radius:6px;font-size:13px;font-family:inherit;color:inherit;background:var(--wbx-surface,#fff)" />
         <label style="font-size:12px;color:var(--wbx-muted,#48585f)">Bericht:</label>
         <textarea id="f4rBody" rows="10" placeholder="Type je antwoord…" style="width:100%;padding:10px 12px;border:1px solid var(--wbx-border,#dfe8ec);border-radius:6px;font-size:13.5px;line-height:1.5;resize:vertical;font-family:inherit;color:inherit;background:var(--wbx-surface,#fff)"></textarea>
+        <div style="font-size:11px;color:var(--wbx-faint,#8896a0);line-height:1.4">De handtekening met logo wordt automatisch toegevoegd:<br><img src="https://forex-opleiding-interface.vercel.app/dfo-logo-email.png" alt="De Forex Opleiding" width="140" style="height:auto;margin-top:4px;opacity:.9"></div>
         <div style="font-size:11px;color:var(--wbx-faint,#8896a0);line-height:1.4">
           Verstuurd via Strato SMTP. De originele mail wordt automatisch als "beantwoord" gemarkeerd.
           Threading-headers (In-Reply-To / References) zorgen dat het antwoord in Gmail/Outlook onder het origineel groepeert.
@@ -30755,6 +30760,7 @@
           subject,
           text,
           email_id: emailIdComposite || null,   // triggert reply-modus + threading + requires_action=false
+          handtekening: true,                    // vaste handtekening + logo (server-side, één keer)
         }),
       });
       const d = await r.json().catch(() => ({}));

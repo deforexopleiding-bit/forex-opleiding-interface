@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
 import { createUserClient } from './supabase.js';
 import { requirePermissionFailOpen } from './_lib/requirePermission.js';
+import { metHandtekening } from './_lib/email-handtekening.js';
 
 // Mailbox → wachtwoord env-var (zelfde als IMAP)
 const SMTP_ACCOUNTS = {
@@ -28,7 +29,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { from_mailbox, to, subject, text, html, cc, bcc, email_id, category, attachments } = req.body || {};
+  const { from_mailbox, to, subject, text, html, cc, bcc, email_id, category, attachments, handtekening } = req.body || {};
 
   // RBAC (fail-open): reply heeft email_id, doorsturen niet → andere permission.
   const featureKey = email_id ? 'email.reply.send' : 'email.forward.send';
@@ -39,6 +40,11 @@ export default async function handler(req, res) {
   if (!from_mailbox || !to || !subject || !text) {
     return res.status(400).json({ error: 'from_mailbox, to, subject en text zijn vereist' });
   }
+
+  // Opt-in vaste handtekening (o.a. de wanbetalers-antwoordmodal). De
+  // e-mailmodule ondertekent zelf al client-side en stuurt deze flag NIET mee —
+  // zo blijft het één handtekening. Idempotent: dubbele wordt voorkomen.
+  const sig = handtekening ? metHandtekening(text, html) : { text, html: html || null };
 
   const passEnv = SMTP_ACCOUNTS[from_mailbox.toLowerCase()];
   if (!passEnv) {
@@ -91,10 +97,10 @@ export default async function handler(req, res) {
       from:    `"De Forex Opleiding" <${from_mailbox}>`,
       to,
       subject,
-      text,
+      text: sig.text,
       replyTo: from_mailbox,
     };
-    if (html) mailOpts.html = html;
+    if (sig.html) mailOpts.html = sig.html;
     if (cc)   mailOpts.cc   = cc;
     if (bcc)  mailOpts.bcc  = bcc;
     if (inReplyToMid) { mailOpts.inReplyTo = inReplyToMid; mailOpts.references = inReplyToMid; }
@@ -127,7 +133,7 @@ export default async function handler(req, res) {
     const insertPayload = {
       email_id:      email_id || null,
       email_subject: subject,
-      final_reply:   text,
+      final_reply:   sig.text,
       from_address:  from_mailbox,
       to_address:    to,
       cc_address:    cc  || null,
