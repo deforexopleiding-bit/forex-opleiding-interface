@@ -13,30 +13,51 @@
 //
 // Permission: finance.incasso.manage.
 
+import fs from 'node:fs';
+import path from 'node:path';
 import PDFDocument from 'pdfkit';
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { customerDisplayName } from './_lib/customer-name.js';
 import { resolveVariables } from './_lib/template-variables.js';
 import { sanitizeForPdf } from './_lib/incasso-pdf.js';
+import {
+  validateCustomerAddress,
+  buildAddressBlockPosition,
+  buildAddressBlockLines,
+  mmToPt,
+} from './_lib/wik-brief-layout.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
+
+// WIK_LOGO_PATH override in env → anders default naar het bestaande brand-logo
+// dat ook op login.html / sidebar wordt gebruikt. Als het bestand niet bestaat
+// slaat _tryLogoBuffer() fail-soft de logo-render over (brief zonder logo, geen
+// crash). Zo blijft de brief werken ook als het assetpad ooit wijzigt.
+const WIK_LOGO_DEFAULT = 'img/logo-dark.png';
 
 function fmtDateNl(d) {
   const dt = d instanceof Date ? d : new Date(d || Date.now());
   const mm = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'];
   return `${dt.getDate()} ${mm[dt.getMonth()]} ${dt.getFullYear()}`;
 }
-function buildAddressLines(cust) {
-  const s = (cust?.address_street || '').trim();
-  const n = (cust?.address_number || '').trim();
-  const p = (cust?.address_postal || '').trim();
-  const c = (cust?.address_city   || '').trim();
-  return {
-    line1: [s, n].filter(Boolean).join(' '),
-    line2: [p, c].filter(Boolean).join(' '),
-  };
+
+/**
+ * Probeer het logo-bestand in te laden voor doc.image(). Fail-soft:
+ * ontbrekend/onleesbaar bestand → null → generator slaat het logo over.
+ * Env-override WIK_LOGO_PATH (relatief aan process.cwd()) wint van default.
+ */
+function _tryLogoBuffer() {
+  const rel = process.env.WIK_LOGO_PATH || WIK_LOGO_DEFAULT;
+  try {
+    const abs = path.isAbsolute(rel) ? rel : path.join(process.cwd(), rel);
+    if (!fs.existsSync(abs)) return null;
+    return fs.readFileSync(abs);
+  } catch (e) {
+    console.warn('[incasso-pre-brief] logo-load faalde (skip):', e?.message || e);
+    return null;
+  }
 }
 
 export default async function handler(req, res) {
@@ -70,14 +91,30 @@ export default async function handler(req, res) {
     }
 
     // 2) Klant + open invoices ophalen voor variabele-context.
+    // address_country toegevoegd voor de landregel in het C5-adresblok (NL/BE).
     const { data: customer, error: cErr } = await supabaseAdmin
       .from('customers')
-      .select('id, first_name, last_name, company_name, is_company, email, phone, address_street, address_number, address_postal, address_city, archived_at, anonymized_at')
+      .select('id, first_name, last_name, company_name, is_company, email, phone, address_street, address_number, address_postal, address_city, address_country, archived_at, anonymized_at')
       .eq('id', customerId).maybeSingle();
     if (cErr) throw new Error('customers lookup: ' + cErr.message);
     if (!customer) {
       res.setHeader('Content-Type', 'application/json');
       return res.status(404).json({ error: 'Klant niet gevonden' });
+    }
+
+    // 2b) ADRES-SLOT (juridische veiligheids-gate — nieuw sinds fase C5).
+    // WIK-brief zonder compleet adres is niet aantoonbaar afleverbaar → geen
+    // rechtsgeldige start van de 14-dagen-termijn. Fail-loud vóór PDF-render
+    // en vóór storage-upload zodat we GEEN dunning_briefs-rij OF weeskopie in
+    // de bucket achterlaten bij onvolledig adres.
+    const addrCheck = validateCustomerAddress(customer);
+    if (!addrCheck.ok) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.status(422).json({
+        code: 'ADDRESS_INCOMPLETE',
+        error: `Adres onvolledig — ontbreekt: ${addrCheck.missing.join(', ')}. Vul aan in TeamLeader (sync haalt 'm binnen een uur op) of via het klantdossier.`,
+        missing_fields: addrCheck.missing,
+      });
     }
 
     const { data: invs } = await supabaseAdmin
@@ -96,6 +133,14 @@ export default async function handler(req, res) {
     const { text: resolvedBody }    = resolveVariables(tpl.body    || '', null, { customer, openInvoices });
 
     // 4) PDF renderen (zelfstandig, NIET wanbetalers-brief-pdf refactoren).
+    // Layout — fase C5 (envelop-standaard):
+    //   - Logo linksboven (op briefpapier-positie).
+    //   - Afzender-blok rechtsboven (bedrijfsdata).
+    //   - Geadresseerde in C5-vensterenvelop-slot (~50mm × ~55mm van
+    //     linksboven, binnen 90mm × 40mm venster) → past bij 1x dubbelvouwen
+    //     A4 in het venster van een standaard NL C5-envelop.
+    //   - Landregel toegevoegd (Nederland/België) — verplicht voor BE-adressen.
+    //   - Body-tekst begint onder het adresblok met veilige margin.
     const buffer = await new Promise((resolve, reject) => {
       try {
         const doc = new PDFDocument({ size: 'A4', margin: 60 });
@@ -103,6 +148,22 @@ export default async function handler(req, res) {
         doc.on('data', (c) => chunks.push(c));
         doc.on('end',  () => resolve(Buffer.concat(chunks)));
         doc.on('error', reject);
+
+        // ── Logo linksboven — fail-soft: bestaand branding-asset (img/logo-dark.png)
+        //    of WIK_LOGO_PATH override. Als het bestand ontbreekt: skip
+        //    (brief gaat door zonder logo, geen crash).
+        const logoBuf = _tryLogoBuffer();
+        if (logoBuf) {
+          try {
+            doc.image(logoBuf, mmToPt(15), mmToPt(15), {
+              fit: [mmToPt(45), mmToPt(20)], // max 45mm × 20mm — houdt het logo klein/professioneel
+              align: 'left',
+              valign: 'top',
+            });
+          } catch (e) {
+            console.warn('[incasso-pre-brief] logo-render faalde (skip):', e?.message || e);
+          }
+        }
 
         // Afzender-blok rechtsboven.
         const companyName    = process.env.COMPANY_NAME    || 'De Forex Opleiding NL B.V.';
@@ -115,20 +176,31 @@ export default async function handler(req, res) {
         if (companyPhone)   doc.text(companyPhone,   320, doc.y, { width: 220, align: 'right' });
         doc.text(companyEmail, 320, doc.y, { width: 220, align: 'right' });
 
-        // Geadresseerde linksboven.
+        // ── Geadresseerde in C5-vensterenvelop-slot ────────────────────────
+        // Positie exact berekend uit C5_ENVELOPE (safe-margin 5mm binnen 90×40mm venster).
+        const adrPos = buildAddressBlockPosition();
         const geadresseerdeRaw = customer.is_company
           ? (customer.company_name || customerDisplayName(customer, ''))
           : customerDisplayName(customer, '');
-        const geadresseerde = sanitizeForPdf(geadresseerdeRaw);
-        const addr = buildAddressLines(customer);
-        doc.font('Helvetica').fontSize(10).fillColor('#0f172a')
-          .text(geadresseerde || '(zonder naam)', 60, 150);
-        if (addr.line1) doc.text(sanitizeForPdf(addr.line1), 60, doc.y);
-        if (addr.line2) doc.text(sanitizeForPdf(addr.line2), 60, doc.y);
+        const addrLines = buildAddressBlockLines(customer, geadresseerdeRaw);
+        doc.font('Helvetica').fontSize(10).fillColor('#0f172a');
+        let addrY = adrPos.y;
+        const lineHeight = 12; // pt; past ~4-5 regels in 30mm safe-area
+        for (const line of addrLines) {
+          doc.text(sanitizeForPdf(line), adrPos.x, addrY, {
+            width: adrPos.width,
+            lineBreak: false,
+          });
+          addrY += lineHeight;
+        }
 
-        // Datum + onderwerp.
-        doc.moveDown(2);
-        doc.text('Datum: ' + fmtDateNl(new Date()), 60);
+        // Body-tekst begint ruim onder het venster (voorkom overlap bij lange
+        // adresregels). Bewuste marge van 20mm onder venster-bottom.
+        const bodyStartY = mmToPt(50 + 40 + 20); // window_top + window_height + margin
+
+        // Datum + onderwerp — start onder het adresblok.
+        doc.font('Helvetica').fontSize(10).fillColor('#0f172a');
+        doc.text('Datum: ' + fmtDateNl(new Date()), 60, bodyStartY);
         doc.moveDown(0.5);
         doc.font('Helvetica-Bold').fontSize(11).text('Onderwerp: ' + (resolvedSubject || ''), 60);
         doc.font('Helvetica').fontSize(10).fillColor('#0f172a');
