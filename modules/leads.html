@@ -11,7 +11,12 @@
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     body{font-family:'Inter',system-ui,sans-serif;background:var(--bg-page,#fafafa);color:var(--text-main,#0f172a);min-height:100vh}
-    .page-wrap{max-width:1400px;margin:0 auto;padding:24px}
+    /* Sidebar-offset: 220px links vrijhouden voor .sidebar (zelfde patroon
+       als alle andere modules met .app { margin-left: 220px }). Zonder deze
+       offset schuift de titel/eerste KPI-kaart/eerste tabelkolom onder de
+       sidebar. Op mobiel (< 720px, media-query onder) wordt margin-left:0
+       zodat de sidebar-inklap-toestand geen dode ruimte overhoudt. */
+    .page-wrap{max-width:1400px;margin-left:var(--sidebar-w,220px);padding:24px}
     .page-h{font-size:22px;font-weight:700;margin-bottom:16px}
 
     /* KPI-strip */
@@ -58,7 +63,7 @@
       .kpi-strip{grid-template-columns:1fr;gap:8px}
       .kpi-val{font-size:20px}
       .filter-row input[type="search"]{max-width:100%}
-      .page-wrap{padding:14px}
+      .page-wrap{margin-left:0;padding:14px}
     }
   </style>
 </head>
