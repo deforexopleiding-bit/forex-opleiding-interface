@@ -30687,7 +30687,7 @@
     // Platte-tekst-handtekening voorgevuld onder een lege regel; de gebruiker
     // typt erboven. Het logo komt er bij verzenden (HTML) automatisch bij
     // (server-side, via de handtekening-flag) — precies één keer.
-    const sigTekst = 'Met vriendelijke groet,\nTeam - De Forex Opleiding';
+    const sigTekst = 'Met vriendelijke groet,\n\nTeam - De Forex Opleiding';
     const initialBody = `\n\n${sigTekst}\n\n${quoteLine}\n${quoted}\n`;
 
     const scrim = document.createElement('div');

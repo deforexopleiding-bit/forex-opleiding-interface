@@ -21,7 +21,8 @@ const LOGO_URL = process.env.MAIL_LOGO_URL
 export const HANDTEKENING_MARKER = 'Team - De Forex Opleiding';
 
 // Platte-tekst-handtekening (voor het voorvullen van de modals en de tekstmail).
-export const HANDTEKENING_TEKST = 'Met vriendelijke groet,\nTeam - De Forex Opleiding';
+// Lege regel tussen de aanhef en de naam (correctie: witregel in de handtekening).
+export const HANDTEKENING_TEKST = 'Met vriendelijke groet,\n\nTeam - De Forex Opleiding';
 
 // Alleen het logo (als de tekstregels al in de HTML-body staan).
 export function handtekeningLogoHtml() {
@@ -29,11 +30,12 @@ export function handtekeningLogoHtml() {
     + 'style="height:auto;display:block;margin-top:8px">';
 }
 
-// Volledige HTML-handtekening: de tekstregels + het logo.
+// Volledige HTML-handtekening: de tekstregels + het logo. Witregel (<br><br>)
+// tussen de aanhef en de naam; het logo staat direct onder de naam.
 export function handtekeningHtml() {
   return '<div style="margin-top:16px;font-family:Arial,Helvetica,sans-serif;'
     + 'font-size:14px;color:#1b2430;line-height:1.5">'
-    + 'Met vriendelijke groet,<br>Team - De Forex Opleiding'
+    + 'Met vriendelijke groet,<br><br>Team - De Forex Opleiding'
     + handtekeningLogoHtml()
     + '</div>';
 }
@@ -67,18 +69,30 @@ export function htmlMetHandtekening(html) {
   return h + handtekeningHtml();
 }
 
+// Bouw HTML uit platte tekst en plaats het logo DIRECT ná de handtekeningregel
+// ("Team - De Forex Opleiding"), niet aan het einde. Zo staat het logo bij een
+// reply als onderdeel van het handtekening-blok, vóór het geciteerde origineel.
+function htmlUitTekstMetLogoBijHandtekening(signedText) {
+  const html = tekstNaarHtml(signedText);
+  // Eerste voorkomen = de handtekening (die vóór een eventueel citaat staat).
+  if (html.includes(HANDTEKENING_MARKER)) {
+    return html.replace(HANDTEKENING_MARKER, HANDTEKENING_MARKER + handtekeningLogoHtml());
+  }
+  return html + handtekeningLogoHtml(); // fallback: geen handtekening gevonden
+}
+
 /**
  * Kern: zorg dat {text, html} beide de handtekening precies één keer hebben.
  *  - text  -> platte-tekst-handtekening (idempotent).
- *  - html  -> volledige HTML-handtekening (idempotent). Ontbreekt html, dan
- *             bouwen we 'm uit de ondertekende tekst en voegen we alleen het
- *             logo toe (de tekstregels staan dan al in de body).
+ *  - html meegegeven (bv. motor-sjabloon) -> volledige HTML-handtekening eronder.
+ *  - geen html (bv. een reply) -> HTML uit de tekst, met het logo direct ná de
+ *    handtekeningregel, dus vóór het citaat.
  * Geeft altijd zowel text als html terug (HTML-mail met platte-tekst-fallback).
  */
 export function metHandtekening(text, html) {
   const signedText = tekstMetHandtekening(text);
   const signedHtml = html
     ? htmlMetHandtekening(html)
-    : (tekstNaarHtml(signedText) + handtekeningLogoHtml());
+    : htmlUitTekstMetLogoBijHandtekening(signedText);
   return { text: signedText, html: signedHtml };
 }
