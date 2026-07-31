@@ -23886,6 +23886,20 @@
       });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
+        // Bijzondere afhandeling voor ADDRESS_INCOMPLETE (fase C5) — de brief is
+        // NIET aangemaakt en NIET opgeslagen. Actionable toast i.p.v. generieke
+        // fout zodat medewerker weet dat 'ie het adres moet aanvullen in TL of
+        // via klantdossier.
+        if (d?.code === 'ADDRESS_INCOMPLETE') {
+          _caseState.wik.busy = false; _caseRender();
+          const missing = Array.isArray(d.missing_fields) ? d.missing_fields.join(', ') : '';
+          window.AgentShared?.showToast?.(
+            'Adres onvolledig — ' + (missing ? 'ontbreekt: ' + missing + '. ' : '') +
+            'Vul aan in TeamLeader (hourly sync) of via klantdossier > adres.',
+            'warning'
+          );
+          return;
+        }
         throw new Error(d?.error || 'HTTP ' + r.status);
       }
       // PDF binnenhalen en downloaden.
