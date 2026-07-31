@@ -188,7 +188,10 @@ export const AVAILABLE_VARIABLES = [
   //   wachtrij-kolommen, zodat de body-volgorde (→ meta_param_mapping) 1-op-1 is
   //   met wat de motor positioneel meestuurt. Callers zonder context.lead
   //   (bv. handmatige inbox-send) krijgen lege strings — geen crash.
-  { key: 'lead.voornaam',      label: 'Voornaam',       category: 'lead', example: 'Jeffrey',    requires_context: 'lead' },
+  { key: 'lead.voornaam',      label: 'Voornaam',        category: 'lead', example: 'Jeffrey',     requires_context: 'lead' },
+  // naam = voornaam + achternaam (afgeleid in getLeadValue). traject = kolom.
+  { key: 'lead.naam',          label: 'Naam (volledig)', category: 'lead', example: 'Bram Jansen', requires_context: 'lead' },
+  { key: 'lead.traject',       label: 'Traject',         category: 'lead', example: '7-daagse',    requires_context: 'lead' },
   { key: 'lead.dagen_over',    label: 'Dagen over',     category: 'lead', example: '3',          requires_context: 'lead' },
   { key: 'lead.lessen_gezien', label: 'Lessen bekeken', category: 'lead', example: '5',          requires_context: 'lead' },
   { key: 'lead.trades',        label: 'Trades',         category: 'lead', example: '4',          requires_context: 'lead' },
@@ -632,6 +635,13 @@ export function resolveVariableValue(key, context) {
 function getLeadValue(lead, key) {
   if (!lead) return '';
   const field = String(key).slice('lead.'.length);
+  // naam is afgeleid: voor- + achternaam. Als de wachtrij-view achternaam nog
+  // niet levert, valt 'ie terug op alleen voornaam — nooit een lege chip.
+  if (field === 'naam') {
+    return [lead.voornaam, lead.achternaam]
+      .filter((d) => d != null && String(d).trim() !== '')
+      .join(' ');
+  }
   const val = lead[field];
   return val == null ? '' : String(val);
 }

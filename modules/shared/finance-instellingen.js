@@ -2142,7 +2142,10 @@
     // bij het verzenden van leadsonderhoud-templates. Named keys = exact de
     // wachtrij-kolommen, zodat de volgorde in de body (→ meta_param_mapping) 1-op-1
     // is met wat de motor meestuurt.
-    { key: 'lead.voornaam',      label: 'Voornaam',       category: 'lead', example: 'Jeffrey' },
+    { key: 'lead.voornaam',      label: 'Voornaam',        category: 'lead', example: 'Jeffrey' },
+    // naam = voor- + achternaam (afgeleid), traject = kolom. Voor nieuwe_lead.
+    { key: 'lead.naam',          label: 'Naam (volledig)', category: 'lead', example: 'Bram Jansen' },
+    { key: 'lead.traject',       label: 'Traject',         category: 'lead', example: '7-daagse' },
     { key: 'lead.dagen_over',    label: 'Dagen over',     category: 'lead', example: '3' },
     { key: 'lead.lessen_gezien', label: 'Lessen bekeken', category: 'lead', example: '5' },
     { key: 'lead.trades',        label: 'Trades',         category: 'lead', example: '4' },
