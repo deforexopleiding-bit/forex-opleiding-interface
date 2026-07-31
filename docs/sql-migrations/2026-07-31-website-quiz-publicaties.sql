@@ -59,7 +59,7 @@ select
                'label',       qq.label,
                'options',     qq.options
              )
-             order by qq.order_index, qq.created_at
+             order by qq.order_index
            )
     from public.website_quiz_questions qq
     where qq.quiz_id = q.id and qq.active
