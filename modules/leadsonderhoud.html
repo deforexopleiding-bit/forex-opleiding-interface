@@ -130,11 +130,11 @@
     /* ---- Gesprekken (WhatsApp-inbox) ---- */
     .lo-inbox { display:grid; grid-template-columns:320px 1fr; gap:0; border:1px solid var(--border);
       border-radius:12px; overflow:hidden; background:var(--bg-elev); height:calc(100vh - 210px); min-height:420px; }
-    .lo-glijst { border-right:1px solid var(--border); display:flex; flex-direction:column; min-width:0; }
+    .lo-glijst { border-right:1px solid var(--border); display:flex; flex-direction:column; min-width:0; min-height:0; }
     .lo-glijst-k { padding:11px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center;
       justify-content:space-between; gap:8px; }
     .lo-glijst-k b { font-size:13px; }
-    .lo-glijst-b { overflow-y:auto; flex:1; }
+    .lo-glijst-b { overflow-y:auto; flex:1; min-height:0; }
     .lo-grow { display:flex; gap:10px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--border);
       cursor:pointer; }
     .lo-grow:hover { background:var(--bg); }
@@ -153,14 +153,14 @@
     .lo-onread { min-width:18px; height:18px; padding:0 5px; border-radius:100px; background:#1e6cd6; color:#fff;
       font-size:10.5px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; }
 
-    .lo-thread { display:flex; flex-direction:column; min-width:0; }
+    .lo-thread { display:flex; flex-direction:column; min-width:0; min-height:0; }
     .lo-thread-k { padding:11px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
     .lo-thread-k b { font-size:13.5px; }
     .lo-thread-k .mono { font-size:11.5px; color:var(--text-faint); }
     .lo-badge { margin-left:auto; font-size:11px; font-weight:600; padding:3px 9px; border-radius:100px; }
     .lo-badge.open { background:rgba(23,122,76,.14); color:#177A4C; }
     .lo-badge.dicht { background:rgba(194,69,45,.14); color:#C2452D; }
-    .lo-thread-b { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:8px;
+    .lo-thread-b { flex:1; min-height:0; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:8px;
       background:var(--bg); }
     .lo-bub { max-width:74%; padding:8px 12px; border-radius:12px; font-size:13px; line-height:1.45;
       white-space:pre-wrap; word-break:break-word; }
@@ -168,7 +168,7 @@
     .lo-bub.in { align-self:flex-start; background:var(--bg-elev); border:1px solid var(--border);
       border-bottom-left-radius:3px; }
     .lo-bub.uit { align-self:flex-end; background:var(--brand-primary,#093d54); color:#fff; border-bottom-right-radius:3px; }
-    .lo-thread-v { border-top:1px solid var(--border); padding:11px 14px; display:flex; flex-direction:column; gap:8px; }
+    .lo-thread-v { border-top:1px solid var(--border); padding:11px 14px; display:flex; flex-direction:column; gap:8px; flex:none; }
     .lo-thread-v textarea { width:100%; min-height:44px; max-height:140px; resize:vertical; padding:9px 12px;
       border:1px solid var(--border); border-radius:9px; font-size:13.5px; font-family:inherit; background:var(--bg);
       color:var(--text); }
