@@ -10,6 +10,7 @@
 // From-header = `"De Forex Opleiding" <mailbox>`, reply-to = mailbox.
 
 import nodemailer from 'nodemailer';
+import { metHandtekening } from './email-handtekening.js';
 
 const SMTP_ACCOUNTS = {
   'leads@deforexopleiding.nl':         'IMAP_PASS',
@@ -48,6 +49,7 @@ export async function sendEmailViaSmtp({
   bcc       = null,
   inReplyTo = null,
   references = null,
+  handtekening = false, // opt-in: voeg de vaste handtekening (HTML+tekst) toe
 } = {}) {
   const mailbox = String(fromMailbox || '').toLowerCase();
   if (!mailbox || !SMTP_ACCOUNTS[mailbox]) {
@@ -75,14 +77,24 @@ export async function sendEmailViaSmtp({
   }
 
   try {
+    // Opt-in handtekening: één keer, HTML + platte-tekst-fallback. Idempotent —
+    // staat de handtekening al in de body (bv. door een modal-voorvulling), dan
+    // wordt hij niet nog eens toegevoegd.
+    let bodyText = text;
+    let bodyHtml = html;
+    if (handtekening) {
+      const s = metHandtekening(text, html);
+      bodyText = s.text;
+      bodyHtml = s.html;
+    }
     const mailOpts = {
       from   : `"De Forex Opleiding" <${mailbox}>`,
       to,
       subject,
-      text,
+      text: bodyText,
       replyTo: mailbox,
     };
-    if (html) mailOpts.html = html;
+    if (bodyHtml) mailOpts.html = bodyHtml;
     if (cc)   mailOpts.cc   = cc;
     if (bcc)  mailOpts.bcc  = bcc;
     // Threading: Gmail/Outlook groeperen het antwoord onder het origineel.

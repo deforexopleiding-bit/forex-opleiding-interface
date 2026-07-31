@@ -927,21 +927,29 @@ function openMailAntwoord(){
   var subj = orig && orig.subject ? String(orig.subject) : '';
   var reSubj = subj ? (/^re:/i.test(subj) ? subj : 'Re: ' + subj) : 'Bericht van De Forex Opleiding';
 
-  var initialBody = '';
+  // De platte-tekst-handtekening staat voorgevuld onder een lege regel; de
+  // gebruiker typt erboven en ziet 'm staan. Het logo komt er bij verzenden
+  // (HTML) automatisch bij — de send-core zet de handtekening één keer.
+  var sigTekst = 'Met vriendelijke groet,\nTeam - De Forex Opleiding';
+  var logoUrl = 'https://forex-opleiding-interface.vercel.app/dfo-logo-email.png';
+  var quoteBlok = '';
   if (orig) {
     var wie = ctx.naam || ctx.lead_email;
     var wanneer = orig.ts ? kortMoment(orig.ts) : '';
     var quoteLine = wanneer ? ('Op ' + wanneer + ' schreef ' + wie + ':') : ('Origineel bericht van ' + wie + ':');
     var quoted = String(orig.body || '').split('\n').map(function(l){ return '> ' + l; }).join('\n');
-    initialBody = '\n\n' + quoteLine + '\n' + quoted + '\n';
+    quoteBlok = '\n\n' + quoteLine + '\n' + quoted;
   }
+  var initialBody = '\n\n' + sigTekst + quoteBlok + '\n';
 
   openModal(
     '<h2>Beantwoord per e-mail</h2>'
     + '<div class="lo-vel"><label>Van</label><input type="text" value="' + esc(ctx.afzender || 'welkom@deforexopleiding.nl') + '" readonly></div>'
     + '<div class="lo-vel"><label>Naar</label><input type="text" value="' + esc(ctx.lead_email) + '" readonly></div>'
     + '<div class="lo-vel"><label>Onderwerp</label><input type="text" id="loMailSubj" value="' + esc(reSubj) + '"></div>'
-    + '<div class="lo-vel"><label>Bericht</label><textarea id="loMailBody" style="min-height:200px">' + esc(initialBody) + '</textarea></div>'
+    + '<div class="lo-vel"><label>Bericht</label><textarea id="loMailBody" style="min-height:200px">' + esc(initialBody) + '</textarea>'
+    + '<div style="margin-top:6px;font-size:11.5px;color:var(--text-faint)">De handtekening met logo wordt automatisch toegevoegd:'
+    + '<br><img src="' + logoUrl + '" alt="De Forex Opleiding" width="140" style="height:auto;margin-top:4px;opacity:.9"></div></div>'
     + '<div class="lo-vk-voet"><span></span><span>'
     + '<button class="k k-o" id="loMailAnnul">Annuleren</button> '
     + '<button class="k k-p" id="loMailStuur">Versturen</button></span></div>'

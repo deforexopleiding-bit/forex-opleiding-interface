@@ -19,6 +19,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { trajectSlugs, mailAfzender } from './_lib/leadsonderhoud-gesprekken.js';
 import { sendEmailViaSmtp } from './_lib/send-email-core.js';
+import { tekstMetHandtekening } from './_lib/email-handtekening.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_BODY = 50000;
@@ -76,7 +77,10 @@ export default async function handler(req, res) {
 
     // Versturen via de gedeelde SMTP-kern, als welkom@ (SMTP-gebruiker + From +
     // reply-to), met threading-headers.
-    const res2 = await sendEmailViaSmtp({ fromMailbox: afzender, to: naar, subject, text: tekst, html, inReplyTo });
+    // handtekening:true -> de send-core zet de vaste handtekening (HTML + logo)
+    // er één keer onder. De modal heeft de platte-tekst-handtekening al voorgevuld;
+    // de idempotente check voorkomt een dubbele.
+    const res2 = await sendEmailViaSmtp({ fromMailbox: afzender, to: naar, subject, text: tekst, html, inReplyTo, handtekening: true });
     if (!res2.ok) {
       if (res2.code === 'SMTP_NOT_CONFIGURED') {
         return res.status(503).json({ error: 'Afzender-mailbox niet geconfigureerd', detail: res2.reason });
@@ -87,10 +91,11 @@ export default async function handler(req, res) {
     const nu = new Date().toISOString();
 
     // 1) email_replies: de uitgaande reply mét body — dit is wat de draad toont.
+    //    Sla de ondertekende tekst op zodat de bubbel gelijk is aan de mail.
     const { error: erErr } = await supabaseAdmin.from('email_replies').insert({
       email_id: composite,
       email_subject: subject,
-      final_reply: tekst,
+      final_reply: tekstMetHandtekening(tekst),
       from_address: afzender,
       to_address: naar,
       sent_at: nu,

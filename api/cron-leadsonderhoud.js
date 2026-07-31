@@ -202,7 +202,7 @@ export default async function handler(req, res) {
       };
       try {
         if (ingevuld.kanaal === 'mail') {
-          const res2 = await sendEmailViaSmtp({ fromMailbox: MAIL_AFZENDER, to: naar, subject: ingevuld.onderwerp, text: ingevuld.tekst, html: ingevuld.html });
+          const res2 = await sendEmailViaSmtp({ fromMailbox: MAIL_AFZENDER, to: naar, subject: ingevuld.onderwerp, text: ingevuld.tekst, html: ingevuld.html, handtekening: true });
           if (!res2.ok) throw new Error(res2.reason || 'mail mislukt');
           logRij.extern_id = res2.messageId || null;
         } else {
