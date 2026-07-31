@@ -2138,6 +2138,17 @@
     { key: 'datum.vandaag',     label: 'Datum vandaag', category: 'datum', example: '09-06-2026' },
     { key: 'datum.deze_maand',  label: 'Deze maand',    category: 'datum', example: 'juni 2026' },
     { key: 'datum.dit_jaar',    label: 'Dit jaar',      category: 'datum', example: '2026' },
+    // lead / leadsonderhoud — bron: onderhoud_wachtrij-view. De motor vult deze
+    // bij het verzenden van leadsonderhoud-templates. Named keys = exact de
+    // wachtrij-kolommen, zodat de volgorde in de body (→ meta_param_mapping) 1-op-1
+    // is met wat de motor meestuurt.
+    { key: 'lead.voornaam',      label: 'Voornaam',       category: 'lead', example: 'Jeffrey' },
+    { key: 'lead.dagen_over',    label: 'Dagen over',     category: 'lead', example: '3' },
+    { key: 'lead.lessen_gezien', label: 'Lessen bekeken', category: 'lead', example: '5' },
+    { key: 'lead.trades',        label: 'Trades',         category: 'lead', example: '4' },
+    { key: 'lead.gesprek_tijd',  label: 'Gesprekstijd',   category: 'lead', example: '14:30' },
+    { key: 'lead.gesprek_datum', label: 'Gesprekdatum',   category: 'lead', example: '20-06-2026' },
+    { key: 'lead.dag',           label: 'Dag (7-daagse)', category: 'lead', example: '4' },
   ];
 
   const WA_VAR_CATEGORY_LABELS = {
@@ -2150,12 +2161,13 @@
     attendee:   'Deelnemer',
     onboarding: 'Onboarding',
     datum:      'Datum',
+    lead:       'Lead / Leadsonderhoud',
   };
   // Voorkeursvolgorde voor bekende categorieën. Onbekende categorieën uit
   // WA_VAR_REGISTRY worden bij render automatisch achter de bekende geplakt
   // (in volgorde van eerste verschijning), zodat toekomstige categorieën
   // direct in de picker verschijnen zonder code-wijziging.
-  const WA_VAR_CATEGORY_ORDER = ['customer', 'invoice', 'klant', 'afdeling', 'bedrijf', 'event', 'attendee', 'onboarding', 'datum'];
+  const WA_VAR_CATEGORY_ORDER = ['customer', 'invoice', 'klant', 'afdeling', 'bedrijf', 'event', 'attendee', 'onboarding', 'lead', 'datum'];
   // Groep-structuur (afdelings-koppen) boven de categorie-secties. Elke
   // groep heeft een title (NL-label, getoond als kop) en categories[]
   // (welke categorie-keys eronder vallen). Een categorie die in geen groep
@@ -2166,6 +2178,7 @@
     { title: 'Klant & facturatie', categories: ['customer', 'invoice', 'klant'] },
     { title: 'Events',             categories: ['event', 'attendee'] },
     { title: 'Onboarding',         categories: ['onboarding'] },
+    { title: 'Lead / Leadsonderhoud', categories: ['lead'] },
     { title: 'Algemeen',           categories: ['afdeling', 'bedrijf', 'datum'] },
   ];
   const WA_VAR_GROUPS_FALLBACK_TITLE = 'Overig';

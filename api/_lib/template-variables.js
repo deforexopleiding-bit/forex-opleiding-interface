@@ -180,6 +180,21 @@ export const AVAILABLE_VARIABLES = [
   { key: 'datum.vandaag',     label: 'Datum vandaag', category: 'datum', example: '09-06-2026',  requires_context: null },
   { key: 'datum.deze_maand',  label: 'Deze maand',    category: 'datum', example: 'juni 2026',   requires_context: null },
   { key: 'datum.dit_jaar',    label: 'Dit jaar',      category: 'datum', example: '2026',         requires_context: null },
+
+  // ── lead / leadsonderhoud — vereist context.lead (een onderhoud_wachtrij-rij).
+  //   De MOTOR (cron-leadsonderhoud) is de echte zender en leest de waarden
+  //   rechtstreeks uit de wachtrij-rij; deze registry-entries maken de keys
+  //   bekend in de manager (chooser + submit-mapping). Named keys = exact de
+  //   wachtrij-kolommen, zodat de body-volgorde (→ meta_param_mapping) 1-op-1 is
+  //   met wat de motor positioneel meestuurt. Callers zonder context.lead
+  //   (bv. handmatige inbox-send) krijgen lege strings — geen crash.
+  { key: 'lead.voornaam',      label: 'Voornaam',       category: 'lead', example: 'Jeffrey',    requires_context: 'lead' },
+  { key: 'lead.dagen_over',    label: 'Dagen over',     category: 'lead', example: '3',          requires_context: 'lead' },
+  { key: 'lead.lessen_gezien', label: 'Lessen bekeken', category: 'lead', example: '5',          requires_context: 'lead' },
+  { key: 'lead.trades',        label: 'Trades',         category: 'lead', example: '4',          requires_context: 'lead' },
+  { key: 'lead.gesprek_tijd',  label: 'Gesprekstijd',   category: 'lead', example: '14:30',      requires_context: 'lead' },
+  { key: 'lead.gesprek_datum', label: 'Gesprekdatum',   category: 'lead', example: '20-06-2026', requires_context: 'lead' },
+  { key: 'lead.dag',           label: 'Dag (7-daagse)', category: 'lead', example: '4',          requires_context: 'lead' },
 ];
 
 // Snelle key-lookup map (one-shot bij module-load).
@@ -606,8 +621,19 @@ export function resolveVariableValue(key, context) {
     case 'event':      return getEventValue(context && context.event, key);
     case 'attendee':   return getAttendeeValue(context && context.attendee, key);
     case 'onboarding': return getOnboardingValue(context && context.onboarding, key);
+    case 'lead':       return getLeadValue(context && context.lead, key);
     default: return '';
   }
+}
+
+// lead.* — leest rechtstreeks uit een onderhoud_wachtrij-rij (context.lead).
+// De key is 'lead.<kolom>'; we lezen exact die kolom uit de rij. Geen context
+// (bv. handmatige inbox-send zonder lead) → lege string, geen crash.
+function getLeadValue(lead, key) {
+  if (!lead) return '';
+  const field = String(key).slice('lead.'.length);
+  const val = lead[field];
+  return val == null ? '' : String(val);
 }
 
 /**

@@ -47,20 +47,51 @@ function vulNamen(tekst, vars) {
   return String(tekst || '').replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
 }
 
+// Resolve een mapping-key naar een waarde. 'lead.<kolom>' leest rechtstreeks uit
+// de wachtrij-rij (de bron waar de motor mee werkt); elke andere key valt terug
+// op de bouwVariabelen-namen (legacy 'voornaam','lessen','tijd',...).
+function keyWaarde(key, lead, vars) {
+  const m = /^lead\.(\w+)$/.exec(String(key || ''));
+  if (m) {
+    const v = (lead || {})[m[1]];
+    return v == null ? '' : String(v);
+  }
+  return vars[key] != null ? String(vars[key]) : '';
+}
+
 /**
  * Vul een sjabloon in voor deze lead.
  *   Mail     -> { kanaal:'mail', onderwerp, html, tekst }   (alle {naam} ingevuld)
- *   WhatsApp -> { kanaal:'whatsapp', meta_template, variabelen }
- *               (variabelen in de volgorde van variabele_volgorde, voor sendTemplate)
+ *   WhatsApp -> { kanaal:'whatsapp', meta_template, variabelen, namen }
+ *
+ * WhatsApp — positional-volgorde, ÉÉN bron van waarheid:
+ *   1) metaMapping = meta_param_mapping.body van het goedgekeurde Meta-template
+ *      (bv. { "1":"lead.voornaam", "2":"lead.gesprek_tijd" }). Dit is exact de
+ *      body-volgorde die Meta heeft vastgelegd, dus manager en motor kunnen niet
+ *      driften. De waarden komen rechtstreeks uit de wachtrij-rij.
+ *   2) Ontbreekt die (bootstrap/legacy): terugval op variabele_volgorde.
+ * `namen` bevat de gebruikte keys in volgorde (voor diagnostiek bij lege params).
  */
-export function vulSjabloon(sjabloon, lead, extra = {}) {
+export function vulSjabloon(sjabloon, lead, extra = {}, metaMapping = null) {
   const vars = bouwVariabelen(lead, extra);
   if (sjabloon.kanaal === 'whatsapp') {
-    const volgorde = Array.isArray(sjabloon.variabele_volgorde) ? sjabloon.variabele_volgorde : [];
+    const posities = metaMapping && typeof metaMapping === 'object'
+      ? Object.keys(metaMapping).filter((k) => /^\d+$/.test(k)).sort((a, b) => Number(a) - Number(b))
+      : [];
+    let namen;
+    let variabelen;
+    if (posities.length) {
+      namen = posities.map((p) => metaMapping[p]);
+      variabelen = namen.map((key) => keyWaarde(key, lead, vars));
+    } else {
+      namen = Array.isArray(sjabloon.variabele_volgorde) ? sjabloon.variabele_volgorde : [];
+      variabelen = namen.map((naam) => (vars[naam] != null ? String(vars[naam]) : ''));
+    }
     return {
       kanaal: 'whatsapp',
       meta_template: sjabloon.meta_template || sjabloon.soort,
-      variabelen: volgorde.map((naam) => (vars[naam] != null ? String(vars[naam]) : '')),
+      variabelen,
+      namen,
     };
   }
   return {

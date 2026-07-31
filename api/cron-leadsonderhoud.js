@@ -139,8 +139,19 @@ export default async function handler(req, res) {
     // 3) Goedgekeurde WhatsApp-sjablonen, voor de template-gate.
     const { data: templates } = await supabaseAdmin
       .from('whatsapp_meta_templates')
-      .select('name, status');
+      .select('name, status, meta_param_mapping');
     const goedgekeurd = new Set((templates || []).filter((t) => t.status === 'APPROVED').map((t) => t.name));
+    // ÉÉN bron van waarheid voor de positional-volgorde: de goedgekeurde
+    // Meta-template-body (meta_param_mapping.body). De motor leidt de volgorde
+    // hieruit af i.p.v. uit variabele_volgorde, zodat de manager (die de body-
+    // volgorde bepaalt) en de motor niet uit elkaar kunnen lopen. Naam ->
+    // { "1":"lead.voornaam", ... }. Ontbreekt de mapping, dan valt vulSjabloon
+    // terug op variabele_volgorde.
+    const mappingByName = new Map();
+    for (const t of templates || []) {
+      const body = t && t.meta_param_mapping && t.meta_param_mapping.body;
+      if (body && typeof body === 'object') mappingByName.set(t.name, body);
+    }
 
     const rapport = { verstuurd: 0, overgeslagen: 0, mislukt: 0, regels: [] };
 
@@ -193,8 +204,8 @@ export default async function handler(req, res) {
       // ('niet-ingelogd') dus die matchte niet. Fallback op sjabloon.soort
       // voor sjablonen zonder expliciete meta_template (identiek aan de
       // fallback in vulSjabloon).
+      const metaNaam = sjabloon.meta_template || sjabloon.soort;
       if (r.kanaal === 'whatsapp') {
-        const metaNaam = sjabloon.meta_template || sjabloon.soort;
         if (!goedgekeurd.has(metaNaam)) {
           rapport.overgeslagen++;
           meld('overgeslagen', 'sjabloon niet goedgekeurd (' + metaNaam + ')');
@@ -203,8 +214,11 @@ export default async function handler(req, res) {
       }
 
       // Eén invul-functie voor beide kanalen; de agendalink komt uit het traject,
-      // de logo-URL uit de instelling.
-      const ingevuld = vulSjabloon(sjabloon, r, { agendalink: r.agenda_link, logo: logoUrl });
+      // de logo-URL uit de instelling. Voor WhatsApp bepaalt de goedgekeurde
+      // Meta-template-body (meta_param_mapping) de volgorde; ontbreekt die, dan
+      // valt vulSjabloon terug op variabele_volgorde.
+      const metaMap = r.kanaal === 'whatsapp' ? (mappingByName.get(metaNaam) || null) : null;
+      const ingevuld = vulSjabloon(sjabloon, r, { agendalink: r.agenda_link, logo: logoUrl }, metaMap);
 
       // Staat er onverhoopt nog een {inloglink} in, dan hoort dit bericht bij de
       // website — niet met een lege link versturen.
@@ -223,8 +237,10 @@ export default async function handler(req, res) {
         const varr = Array.isArray(ingevuld.variabelen) ? ingevuld.variabelen : [];
         const leegIdx = varr.findIndex((v) => v == null || String(v).trim() === '');
         if (leegIdx >= 0) {
-          const volgorde = Array.isArray(sjabloon.variabele_volgorde) ? sjabloon.variabele_volgorde : [];
-          const naam = volgorde[leegIdx] || `#${leegIdx + 1}`;
+          // Naam van de lege variabele volgens de gebruikte volgorde-bron
+          // (meta_param_mapping of variabele_volgorde) — via ingevuld.namen.
+          const namen = Array.isArray(ingevuld.namen) ? ingevuld.namen : [];
+          const naam = namen[leegIdx] || `#${leegIdx + 1}`;
           rapport.overgeslagen++;
           meld('overgeslagen', `template-variabele leeg: {{${leegIdx + 1}}} (${naam}) — vul de bron in wachtrij/motor`);
           continue;
