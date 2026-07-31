@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Leadsonderhoud · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <style>
+    /* Scoped op lo- (leadsonderhoud) zodat niets in andere modules botst.
+       Kleuren komen uit de gedeelde thema-variabelen (agent-shared.css), zodat
+       licht en donker meelopen met de rest van het CRM. */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text);
+      min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .app { margin-left: 220px; padding: 22px 26px 60px; max-width: 1320px; }
+
+    .lo-kop { display:flex; align-items:flex-start; gap:16px; margin-bottom:16px; flex-wrap:wrap; }
+    .lo-kop h1 { font-size:22px; font-weight:700; }
+    .lo-kop p { font-size:13px; color:var(--text-dim); margin-top:2px; }
+    .lo-kop-r { margin-left:auto; display:flex; gap:8px; align-items:center; }
+
+    /* schermwissel — zelfde onderstreep-stijl als de tabs elders in het CRM
+       (ev-tab in events.html): transparante achtergrond, geen rand, alleen een
+       gekleurde onderlijn onder de actieve tab. */
+    .lo-tabs { display:flex; gap:6px; border-bottom:1px solid var(--border); margin-bottom:18px; flex-wrap:wrap; align-items:center; }
+    .lo-tab { background:transparent; border:none; padding:10px 14px; font-size:13.5px; font-weight:600;
+      color:var(--text-dim); cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px;
+      display:inline-flex; align-items:center; gap:6px; font-family:inherit; }
+    .lo-tab:hover { color:var(--text); }
+    .lo-tab.on { color:var(--brand-primary, #093d54); border-bottom-color:var(--brand-primary, #093d54); }
+
+    /* kpi's */
+    .lo-kpis { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin-bottom:16px; }
+    @media(min-width:900px){ .lo-kpis { grid-template-columns:repeat(4,1fr); } }
+    .lo-kaart { background:var(--bg-elev); border:1px solid var(--border); border-radius:11px; padding:15px; }
+    .lo-kpi span { display:block; font-size:11.5px; color:var(--text-dim); margin-bottom:3px; }
+    .lo-kpi b { display:block; font-size:23px; letter-spacing:-.03em; }
+    .lo-kpi i { display:block; font-style:normal; font-size:11px; color:var(--text-faint); margin-top:2px; }
+
+    /* filters */
+    .lo-filters { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:14px; }
+    .lo-fl { border:1px solid var(--border); background:var(--bg-elev); border-radius:8px; padding:6px 11px;
+      font-size:12.5px; color:var(--text-dim); cursor:pointer; }
+    .lo-fl.on { border-color:var(--brand-azure,#1e6cd6); color:var(--brand-azure,#1e6cd6); font-weight:600; }
+
+    /* tabel */
+    .lo-tabwrap { overflow-x:auto; border:1px solid var(--border); border-radius:11px; background:var(--bg-elev); }
+    table.lo { width:100%; border-collapse:collapse; font-size:13px; }
+    table.lo th { text-align:left; font-size:10.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+      color:var(--text-faint); padding:10px 12px; border-bottom:1px solid var(--border); white-space:nowrap; background:var(--bg); }
+    table.lo td { padding:11px 12px; border-bottom:1px solid var(--border); white-space:nowrap; }
+    table.lo tr:last-child td { border-bottom:0; }
+    .lo-naam b { display:block; font-size:13.5px; }
+    .lo-naam span { display:block; font-size:11.5px; color:var(--text-faint); }
+    .mono { font-family:'IBM Plex Mono', ui-monospace, monospace; }
+
+    /* merkjes */
+    .m { display:inline-flex; align-items:center; gap:4px; border-radius:100px; padding:2px 8px; font-size:11px;
+      font-weight:600; white-space:nowrap; }
+    .m-gr { background:rgba(23,122,76,.14); color:#177A4C; }
+    .m-ro { background:rgba(194,69,45,.14); color:#C2452D; }
+    .m-or { background:rgba(180,112,15,.16); color:#B4700F; }
+    .m-bl { background:rgba(44,92,158,.14); color:#2C5C9E; }
+    .m-gy { background:var(--bg); color:var(--text-dim); }
+    .m-wa { background:rgba(37,211,102,.16); color:#0F7A3D; }
+
+    /* warmtebalk */
+    .warm { display:inline-flex; align-items:center; gap:8px; }
+    .warm-b { width:52px; height:5px; border-radius:100px; background:var(--border); overflow:hidden; flex:none; }
+    .warm-b i { display:block; height:100%; border-radius:100px; }
+    .warm-n { font-family:'IBM Plex Mono', monospace; font-size:12px; width:22px; text-align:right; }
+
+    .lo-let { display:flex; align-items:center; gap:8px; background:rgba(180,112,15,.12);
+      border:1px solid rgba(180,112,15,.3); border-radius:8px; padding:9px 12px; font-size:12.5px;
+      color:#B4700F; margin-bottom:16px; line-height:1.45; }
+    .lo-inst { display:flex; align-items:center; gap:14px; padding:13px 0; border-bottom:1px solid var(--border); }
+    .lo-inst:last-child { border-bottom:0; }
+    .lo-inst-t { flex:1; min-width:0; }
+    .lo-inst-t b { display:block; font-size:13.5px; }
+    .lo-inst-t span { display:block; font-size:12px; color:var(--text-dim); margin-top:1px; }
+    .lo-leeg { display:grid; place-items:center; padding:48px 20px; text-align:center; color:var(--text-faint);
+      font-size:13.5px; }
+    .lo-traj { margin-bottom:14px; }
+    .lo-traj-k { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+    .lo-traj-k h3 { font-size:15px; }
+
+    /* knoppen */
+    .k { display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:7px 13px;
+      border-radius:8px; font-size:13px; font-weight:500; cursor:pointer; white-space:nowrap;
+      border:1px solid transparent; }
+    .k-p { background:var(--brand-azure,#1e6cd6); color:#fff; }
+    .k-o { border-color:var(--border); background:var(--bg-elev); color:var(--text-dim); }
+    .k-o:hover { color:var(--text); }
+    .k-ro { border-color:rgba(194,69,45,.4); background:transparent; color:#C2452D; }
+    .k-s { padding:5px 10px; font-size:12px; }
+
+    /* modal */
+    .lo-vs { position:fixed; inset:0; z-index:80; display:grid; place-items:center; padding:16px;
+      background:rgba(10,20,35,.55); }
+    .lo-vs[hidden] { display:none; }
+    .lo-vk { width:min(560px,100%); max-height:90vh; overflow-y:auto; background:var(--bg-elev);
+      border:1px solid var(--border); border-radius:13px; padding:20px; }
+    .lo-vk h2 { font-size:18px; margin-bottom:14px; }
+    .lo-vk-voet { display:flex; gap:8px; justify-content:space-between; margin-top:18px; align-items:center; }
+    .lo-vel { margin-bottom:12px; }
+    .lo-vel label { display:block; font-size:12px; font-weight:500; color:var(--text-dim); margin-bottom:4px; }
+    .lo-vel input, .lo-vel select, .lo-vel textarea { width:100%; min-height:36px; padding:8px 11px;
+      border:1px solid var(--border); border-radius:8px; font-size:13.5px; background:var(--bg); color:var(--text); }
+    .lo-vel textarea { min-height:70px; resize:vertical; }
+    .lo-vel-rij { display:flex; gap:12px; }
+    .lo-vel-rij > .lo-vel { flex:1; }
+    .lo-check { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text); margin-bottom:8px; }
+    .lo-check input { width:auto; min-height:0; }
+    .lo-fout { color:#C2452D; font-size:12.5px; margin-top:8px; }
+
+    /* aan/uit-schuif */
+    .lo-schuif { width:40px; height:22px; border-radius:100px; background:var(--lijn2,#c9d2dd);
+      position:relative; flex:none; cursor:pointer; transition:.16s; }
+    .lo-schuif::after { content:""; position:absolute; left:2px; top:2px; width:18px; height:18px;
+      border-radius:50%; background:#fff; transition:.16s; }
+    .lo-schuif.aan { background:#177A4C; }
+    .lo-schuif.aan::after { left:20px; }
+
+    /* ---- Gesprekken (WhatsApp-inbox) ---- */
+    .lo-inbox { display:grid; grid-template-columns:320px 1fr; gap:0; border:1px solid var(--border);
+      border-radius:12px; overflow:hidden; background:var(--bg-elev); height:calc(100vh - 210px); min-height:420px; }
+    .lo-glijst { border-right:1px solid var(--border); display:flex; flex-direction:column; min-width:0; min-height:0; }
+    .lo-glijst-k { padding:11px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center;
+      justify-content:space-between; gap:8px; }
+    .lo-glijst-k b { font-size:13px; }
+    .lo-glijst-b { overflow-y:auto; flex:1; min-height:0; }
+    .lo-grow { display:flex; gap:10px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--border);
+      cursor:pointer; }
+    .lo-grow:hover { background:var(--bg); }
+    .lo-grow.on { background:rgba(30,108,214,.08); }
+    .lo-grow-av { width:34px; height:34px; border-radius:50%; flex:none; display:grid; place-items:center;
+      background:var(--bg); color:var(--text-dim); font-size:13px; font-weight:600; }
+    .lo-grow-t { flex:1; min-width:0; }
+    .lo-grow-t b { display:block; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .lo-grow-t span { display:block; font-size:11.5px; color:var(--text-faint); white-space:nowrap; overflow:hidden;
+      text-overflow:ellipsis; margin-top:1px; }
+    .lo-grow-r { display:flex; flex-direction:column; align-items:flex-end; gap:4px; flex:none; }
+    .lo-grow-r time { font-size:10.5px; color:var(--text-faint); }
+    .lo-dot { width:8px; height:8px; border-radius:50%; flex:none; }
+    .lo-dot.open { background:#177A4C; }
+    .lo-dot.dicht { background:#C2452D; }
+    .lo-onread { min-width:18px; height:18px; padding:0 5px; border-radius:100px; background:#1e6cd6; color:#fff;
+      font-size:10.5px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; }
+
+    .lo-thread { display:flex; flex-direction:column; min-width:0; min-height:0; }
+    .lo-thread-k { padding:11px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
+    .lo-thread-k b { font-size:13.5px; }
+    .lo-thread-k .mono { font-size:11.5px; color:var(--text-faint); }
+    .lo-badge { margin-left:auto; font-size:11px; font-weight:600; padding:3px 9px; border-radius:100px; }
+    .lo-badge.open { background:rgba(23,122,76,.14); color:#177A4C; }
+    .lo-badge.dicht { background:rgba(194,69,45,.14); color:#C2452D; }
+    .lo-thread-b { flex:1; min-height:0; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:8px;
+      background:var(--bg); }
+    .lo-bub { max-width:74%; padding:8px 12px; border-radius:12px; font-size:13px; line-height:1.45;
+      white-space:pre-wrap; word-break:break-word; }
+    .lo-bub time { display:block; font-size:10px; opacity:.65; margin-top:3px; }
+    .lo-bub.in { align-self:flex-start; background:var(--bg-elev); border:1px solid var(--border);
+      border-bottom-left-radius:3px; }
+    .lo-bub.uit { align-self:flex-end; background:var(--brand-primary,#093d54); color:#fff; border-bottom-right-radius:3px; }
+    .lo-bub.mail { border-left:3px solid #C08A2E; }         /* mail-bericht: warme accentrand */
+    .lo-bub .subj { display:block; font-weight:700; font-size:12px; margin-bottom:3px; }
+    .lo-kanaal { display:inline-block; font-size:9px; text-transform:uppercase; letter-spacing:.04em;
+      padding:1px 5px; border-radius:3px; margin-left:6px; background:rgba(120,120,120,.18); vertical-align:middle; }
+    .lo-bub.uit .lo-kanaal { background:rgba(255,255,255,.22); }
+    .lo-chip { font-size:9.5px; text-transform:uppercase; letter-spacing:.03em; padding:1px 5px; border-radius:100px;
+      border:1px solid var(--border); color:var(--text-dim); }
+    .lo-chip.wa { color:#0F7A3D; border-color:rgba(37,211,102,.45); }
+    .lo-chip.mail { color:#2C5C9E; border-color:rgba(44,92,158,.4); }
+    .lo-thread-v { border-top:1px solid var(--border); padding:11px 14px; display:flex; flex-direction:column; gap:8px; flex:none; }
+    .lo-thread-v textarea { width:100%; min-height:44px; max-height:140px; resize:vertical; padding:9px 12px;
+      border:1px solid var(--border); border-radius:9px; font-size:13.5px; font-family:inherit; background:var(--bg);
+      color:var(--text); }
+    .lo-thread-v textarea:disabled { opacity:.55; }
+    .lo-thread-v-r { display:flex; align-items:center; gap:8px; justify-content:space-between; }
+    .lo-thread-v-r .hint { font-size:11.5px; color:var(--text-faint); flex:1; }
+    .k:disabled { opacity:.5; cursor:not-allowed; }
+
+    @media(max-width:760px){
+      .lo-inbox { grid-template-columns:1fr; height:auto; }
+      .lo-inbox.thread-open .lo-glijst { display:none; }
+      .lo-inbox:not(.thread-open) .lo-thread { display:none; }
+      .lo-glijst { border-right:0; border-bottom:1px solid var(--border); max-height:none; }
+      .lo-thread-b { min-height:50vh; }
+    }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<main class="app" id="app">
+  <div class="lo-leeg">Laden…</div>
+</main>
+<div class="lo-vs" id="loModal" hidden><div class="lo-vk" id="loModalIn"></div></div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+<script>
+// ====================================================================
+// Leadsonderhoud — de schermen. Alleen lezen uit de views; niets wordt
+// hier verstuurd of gewijzigd (dat komt in de motor, een latere stap).
+// De toegang wordt server-side afgedwongen: elk endpoint gate't op
+// leads.view en geeft 403 als iemand geen recht heeft. De nav-zichtbaarheid
+// regelt sidebar.js. Daarom geen inline RBAC-check die vóór permissions.js
+// zou kunnen draaien (de valkuil uit #978).
+// ====================================================================
+
+// ---- toestand ----
+var S = { scherm: 'overzicht', filter: 'alles', over: null, wachtrij: null, trajecten: null, droog: null, sjablonen: null,
+          gesp: null, gActief: null, gConfig: null };
+
+// ---- hulpjes ----
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function $(id){ return document.getElementById(id); }
+
+/** Warm boven 15 (zelf bellen), midden 5–15, koud onder 5 (laat de motor het doen). */
+function warmte(score){
+  if (score >= 15) return { kleur:'#C2452D', label:'warm', merk:'m-ro' };
+  if (score >= 5)  return { kleur:'#B4700F', label:'midden', merk:'m-or' };
+  return { kleur:'var(--border)', label:'koud', merk:'m-gy' };
+}
+function warmBalk(score){
+  var w = warmte(score||0);
+  var pct = Math.min(Math.round((score||0)/45*100), 100);
+  return '<span class="warm"><span class="warm-b"><i style="width:'+pct+'%;background:'+w.kleur+'"></i></span>'
+    + '<span class="warm-n mono">'+(score||0)+'</span></span>';
+}
+function geleden(iso){
+  if (!iso) return null;
+  var d = (Date.parse(iso)); if (isNaN(d)) return null;
+  var min = Math.floor((Date.now()-d)/60000);
+  if (min < 60) return min+' min';
+  var u = Math.floor(min/60); if (u < 24) return u+' uur';
+  return Math.floor(u/24)+' dagen';
+}
+/** Kort moment "DD-MM HH:MM" in Amsterdamse tijd. De opgeslagen tijdstippen zijn
+ *  UTC (timestamptz/ISO); we sorteren in UTC en formatteren pas hier naar
+ *  Europe/Amsterdam, zodat de tijden kloppen ongeacht waar de kijker zit. */
+function kortMoment(iso){
+  if (!iso) return '';
+  var d = new Date(iso); if (isNaN(d.getTime())) return '';
+  try {
+    var f = new Intl.DateTimeFormat('nl-NL', { timeZone: 'Europe/Amsterdam',
+      day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+    var o = {}; f.formatToParts(d).forEach(function(x){ o[x.type] = x.value; });
+    return o.day + '-' + o.month + ' ' + o.hour + ':' + o.minute;
+  } catch (e) {
+    var p = function(n){ return (n<10?'0':'')+n; };
+    return p(d.getDate())+'-'+p(d.getMonth()+1)+' '+p(d.getHours())+':'+p(d.getMinutes());
+  }
+}
+
+/** Gedeelde fetch met het ingelogde token; geeft {} terug bij een fout. */
+async function haal(pad){
+  var token = '';
+  try { token = await window.AuthShared.getAccessToken(); } catch (e) {}
+  var r = await fetch(pad, { headers: token ? { Authorization: 'Bearer ' + token } : {} });
+  if (!r.ok) throw new Error(pad + ' → ' + r.status);
+  return r.json();
+}
+
+/** POST met het ingelogde token; gooit een fout met de servermelding als het misgaat. */
+async function haalPost(pad, body){
+  var token = '';
+  try { token = await window.AuthShared.getAccessToken(); } catch (e) {}
+  var r = await fetch(pad, {
+    method: 'POST',
+    headers: Object.assign({ 'Content-Type': 'application/json' }, token ? { Authorization: 'Bearer ' + token } : {}),
+    body: JSON.stringify(body || {}),
+  });
+  var j = {};
+  try { j = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error(j.error || (pad + ' → ' + r.status));
+  return j;
+}
+
+// ---- modal ----
+function openModal(html){ $('loModalIn').innerHTML = html; $('loModal').hidden = false; }
+function sluitModal(){ $('loModal').hidden = true; $('loModalIn').innerHTML = ''; }
+
+/** Bevestig-venster in de modulestijl (vervangt window.confirm — dat blokkeert
+ *  ook geautomatiseerd testen). Roept opJa() aan bij bevestigen. */
+function bevestig(titel, tekst, knopLabel, opJa){
+  openModal('<h2>'+esc(titel)+'</h2>'
+    + '<p style="font-size:13.5px;color:var(--text-dim);line-height:1.55">'+esc(tekst)+'</p>'
+    + '<div class="lo-vk-voet"><span></span><span>'
+    + '<button class="k k-o" id="bv_nee">Annuleren</button> '
+    + '<button class="k k-ro" id="bv_ja">'+esc(knopLabel||'Verwijderen')+'</button></span></div>');
+  $('bv_nee').onclick = sluitModal;
+  $('bv_ja').onclick = function(){ sluitModal(); opJa(); };
+}
+/** Kort meldingsvenster in de modulestijl (vervangt window.alert). */
+function melding(tekst){
+  openModal('<p style="font-size:13.5px;color:var(--text);line-height:1.55;margin-bottom:6px">'+esc(tekst)+'</p>'
+    + '<div class="lo-vk-voet"><span></span><button class="k k-p" id="ml_ok">OK</button></div>');
+  $('ml_ok').onclick = sluitModal;
+}
+// ---- voorbeeld van een sjabloon (in de module, zonder te versturen) ----
+// Neppe gegevens zodat je aanhef, cijfers en knoppen ziet.
+function loNepData(){ return { voornaam:'Sanne', lessen:'5', trades:'3', dagen_over:'2', score:'20',
+  agendalink:'https://deforexopleiding.nl/gesprek', inloglink:'https://deforexopleiding.nl/lms/voorbeeld',
+  datum:'zaterdag 2 augustus', tijd:'14:00' }; }
+function loVulNamen(t, v){ return String(t||'').replace(/\{(\w+)\}/g, function(m,k){ return (k in v)?v[k]:m; }); }
+function loVulWa(t, volg, v){ return String(t||'').replace(/\{\{(\d+)\}\}/g, function(m,n){ var naam=(volg||[])[Number(n)-1]; return (naam && (naam in v))?v[naam]:m; }); }
+
+function voorbeeld(id){
+  var s = (S.sjablonen||[]).filter(function(x){ return x.id===id; })[0];
+  if (s) toonVoorbeeld(s, 'html');
+}
+function toonVoorbeeld(s, formaat){
+  var v = loNepData();
+  v.logo = S.logoUrl || '';   // logo-URL uit de instelling
+  var isMail = s.kanaal === 'mail';
+  var body;
+  if (isMail && formaat === 'html') {
+    var html = loVulNamen(s.html||'', v);
+    body = '<iframe style="width:100%;height:56vh;border:1px solid var(--border);border-radius:8px;background:#fff" srcdoc="'+esc(html)+'"></iframe>';
+  } else {
+    var plat = isMail ? loVulNamen(s.tekst||'', v) : loVulWa(s.tekst||'', s.variabele_volgorde, v);
+    body = '<pre style="white-space:pre-wrap;font-family:inherit;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:13px;max-height:56vh;overflow:auto">'+esc(plat)+'</pre>';
+  }
+  var toggle = isMail
+    ? '<div style="display:flex;gap:6px;margin-bottom:10px">'
+      + '<button class="k k-s '+(formaat==='html'?'k-p':'k-o')+'" id="vb-html">HTML</button>'
+      + '<button class="k k-s '+(formaat==='plat'?'k-p':'k-o')+'" id="vb-plat">Platte tekst</button></div>'
+    : '';
+  openModal('<h2>Voorbeeld</h2>'
+    + (isMail
+        ? '<p style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px"><b>Onderwerp:</b> '+esc(loVulNamen(s.onderwerp||'', v))+'</p>'
+        : '<p style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">WhatsApp-bericht (<b>'+esc(s.meta_template||s.soort)+'</b>)</p>')
+    + toggle + body
+    + '<div class="lo-vk-voet"><span style="font-size:12px;color:var(--text-faint)">Neppe gegevens ingevuld</span><button class="k k-p" id="vb-ok">Sluiten</button></div>');
+  $('vb-ok').onclick = sluitModal;
+  if (isMail) { $('vb-html').onclick = function(){ toonVoorbeeld(s, 'html'); }; $('vb-plat').onclick = function(){ toonVoorbeeld(s, 'plat'); }; }
+}
+
+/** Zelfde afleiding als de server. De soort vult automatisch mee terwijl je de
+ *  naam typt — maar alleen tot je het soort-veld zelf aanraakt, en niet bij het
+ *  bewerken van een bestaande stap (dan staat er al een slug). */
+var loSoortHandmatig = false;
+function loSlug(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,''); }
+function loNaamGetypt(){ if(loSoortHandmatig) return; var n=$('sf_naam'), so=$('sf_soort'); if(n&&so) so.value = loSlug(n.value); }
+function loSoortGetypt(){ loSoortHandmatig = true; }
+
+// ---- raamwerk ----
+function tabs(){
+  var items = [['overzicht','Overzicht'],['wachtrij','Wachtrij'],['gesprekken','Gesprekken'],
+               ['trajecten','Trajecten'],['berichten','Berichten']];
+  return '<div class="lo-tabs">' + items.map(function(t){
+    return '<button class="lo-tab'+(S.scherm===t[0]?' on':'')+'" data-tab="'+t[0]+'">'+t[1]+'</button>';
+  }).join('') + '</div>';
+}
+
+async function teken(){
+  var app = $('app');
+  app.innerHTML = tabs() + '<div class="lo-leeg">Laden…</div>';
+  bindTabs();
+  try {
+    if (S.scherm === 'overzicht')  await schermOverzicht();
+    else if (S.scherm === 'wachtrij')  await schermWachtrij();
+    else if (S.scherm === 'trajecten') await schermTrajecten();
+    else if (S.scherm === 'berichten') await schermBerichten();
+    else schermGesprekken();
+  } catch (e) {
+    var body = app.querySelector('.lo-leeg');
+    if (body) body.textContent = 'Kon dit scherm niet laden. Ververs de pagina of controleer je rechten.';
+    console.error(e);
+  }
+}
+function bindTabs(){
+  document.querySelectorAll('[data-tab]').forEach(function(b){
+    b.onclick = function(){ S.scherm = b.getAttribute('data-tab'); teken(); };
+  });
+}
+function zetInhoud(html){
+  var app = $('app');
+  app.innerHTML = tabs() + html;
+  bindTabs();
+}
+
+// ---- SCHERM: OVERZICHT ----
+async function schermOverzicht(){
+  if (!S.over) S.over = (await haal('/api/leadsonderhoud-overzicht')).items || [];
+  var rijen = S.over.slice();
+  if (S.filter === 'warm')  rijen = rijen.filter(function(t){ return t.score >= 15; });
+  if (S.filter === 'koud')  rijen = rijen.filter(function(t){ return t.score < 5; });
+  if (S.filter === 'geen-gesprek') rijen = rijen.filter(function(t){ return !t.gesprek_op; });
+  if (S.filter === 'pauze') rijen = rijen.filter(function(t){ return t.onderhoud_pauze; });
+
+  var warm = S.over.filter(function(t){ return t.score >= 15; }).length;
+  var koud = S.over.filter(function(t){ return t.score < 5; }).length;
+  var geen = S.over.filter(function(t){ return !t.gesprek_op; }).length;
+
+  var kpis = '<div class="lo-kpis">'
+    + kpi('Lopende leads', S.over.length, S.over.filter(function(t){return t.dagen_over>0;}).length + ' actief')
+    + kpi('Warm, score 15+', warm, 'zelf bellen', '#C2452D')
+    + kpi('Koud, score onder 5', koud, 'laat de motor het doen')
+    + kpi('Nog geen gesprek', geen, 'van de ' + S.over.length, '#B4700F')
+    + '</div>';
+
+  var filters = '<div class="lo-filters">' + [['alles','Alles'],['warm','Warm'],['koud','Koud'],
+      ['geen-gesprek','Geen gesprek ingepland'],['pauze','Automatisering gepauzeerd']]
+    .map(function(f){ return '<button class="lo-fl'+(S.filter===f[0]?' on':'')+'" data-filter="'+f[0]+'">'+f[1]+'</button>'; }).join('')
+    + '</div>';
+
+  var tabel = '<div class="lo-tabwrap"><table class="lo"><thead><tr>'
+    + '<th>Naam</th><th>Traject</th><th>Dag</th><th>Over</th><th>Lessen</th><th>Trades</th>'
+    + '<th>Discord</th><th>Sessie</th><th>Warmte</th><th>Gesprek</th><th>Laatste contact</th><th></th>'
+    + '</tr></thead><tbody>'
+    + (rijen.length ? rijen.map(rij).join('') : '<tr><td colspan="12" style="text-align:center;color:var(--text-faint);padding:24px">Niemand in deze filter.</td></tr>')
+    + '</tbody></table></div>';
+
+  zetInhoud(kop('Leadsonderhoud','Alle lopende leads, over alle trajecten heen, gesorteerd op hoe warm iemand is.')
+    + kpis + filters + tabel);
+  document.querySelectorAll('[data-filter]').forEach(function(b){
+    b.onclick = function(){ S.filter = b.getAttribute('data-filter'); teken(); };
+  });
+}
+function rij(t){
+  var contact = geleden(t.laatste_contact);
+  return '<tr>'
+    + '<td class="lo-naam"><b>'+esc((t.voornaam||'')+' '+(t.achternaam||''))+'</b><span>'+esc(t.email||'')+'</span></td>'
+    + '<td><span class="m m-gy">'+esc(t.traject || '7-daagse')+'</span></td>'
+    + '<td class="mono">'+(t.dag!=null?t.dag:'–')+'</td>'
+    + '<td>'+(t.dagen_over===0 ? '<span class="m m-gy">verlopen</span>'
+        : '<span class="mono">'+t.dagen_over+' dgn</span>'+(t.verlengd?' <span class="m m-bl">verlengd</span>':''))+'</td>'
+    + '<td class="mono">'+(t.lessen_gezien!=null?t.lessen_gezien:0)+'</td>'
+    + '<td class="mono">'+(t.trades!=null?t.trades:0)+'</td>'
+    + '<td>'+(t.discord?'<span class="m m-wa">ja</span>':'<span class="m m-gy">nee</span>')+'</td>'
+    + '<td>'+(t.sessie_bijgewoond?'<span class="m m-gr">ja</span>':'<span class="m m-gy">nee</span>')+'</td>'
+    + '<td>'+warmBalk(t.score)+'</td>'
+    + '<td>'+(t.gesprek_op?'<span class="m m-gr">staat</span>':'<span class="m m-or">nee</span>')+'</td>'
+    + '<td style="color:var(--text-faint);font-size:12px">'+(contact?esc(contact)+' geleden':'nog geen contact')+'</td>'
+    + '<td>'+(!t.toestemming?'<span class="m m-gy">geen toestemming</span>':t.onderhoud_pauze?'<span class="m m-or">gepauzeerd</span>':'')+'</td>'
+    + '</tr>';
+}
+
+// ---- SCHERM: WACHTRIJ ----
+async function schermWachtrij(){
+  if (!S.wachtrij) S.wachtrij = (await haal('/api/leadsonderhoud-wachtrij')).items || [];
+  var regels = [
+    ['Niets tussen 21:00 en 08:00','Berichten die dan zouden gaan, wachten tot de ochtend.'],
+    ['Maximaal één bericht per persoon per dag','Over alle kanalen samen.'],
+    ['Nooit WhatsApp zonder toestemming','Wordt in de database al afgedwongen.'],
+    ['Eén keer opnieuw bij een fout','Na vijf minuten. Daarna loggen als mislukt.'],
+    ['Buiten 24 uur alleen een sjabloon','Meta weigert vrije tekst; het bericht gaat dan verloren.'],
+  ];
+  var tabel = '<div class="lo-tabwrap"><table class="lo"><thead><tr>'
+    + '<th>Naar</th><th>Traject</th><th>Bericht</th><th>Kanaal</th><th>Afzender</th><th>Dag</th><th>Warmte</th><th>Urgentie</th><th></th>'
+    + '</tr></thead><tbody>'
+    + (S.wachtrij.length ? S.wachtrij.map(function(r){
+        var blok = !r.toestemming && r.kanaal === 'whatsapp';
+        return '<tr>'
+          + '<td class="lo-naam"><b>'+esc(r.voornaam||'')+'</b><span>'+esc(r.kanaal==='mail'?(r.email||''):(r.telefoon_e164||''))+'</span></td>'
+          + '<td><span class="m m-gy">'+esc(r.traject||'')+'</span></td>'
+          + '<td>'+esc(r.bericht_naam||r.soort||'')+'<br><span class="mono" style="font-size:11px;color:var(--text-faint)">'+esc(r.soort||'')+'</span></td>'
+          + '<td>'+(r.kanaal==='whatsapp'?'<span class="m m-wa">WhatsApp</span>':'<span class="m m-bl">Mail</span>')+'</td>'
+          + '<td>'+esc(r.agent||'')+'</td>'
+          + '<td class="mono">'+(r.dag!=null?r.dag:'–')+'</td>'
+          + '<td>'+warmBalk(r.score)+'</td>'
+          + '<td class="mono">'+(r.urgentie!=null?r.urgentie:'')+'</td>'
+          + '<td>'+(blok?'<span class="m m-ro">geen toestemming</span>':'<span class="m m-gr">klaar</span>')+'</td>'
+          + '</tr>';
+      }).join('') : '<tr><td colspan="9" style="text-align:center;color:var(--text-faint);padding:24px">De wachtrij is leeg.</td></tr>')
+    + '</tbody></table></div>';
+
+  var regelkaart = '<div class="lo-kaart" style="margin-top:16px"><h3 style="font-size:14.5px;margin-bottom:10px">Regels die de motor aanhoudt</h3>'
+    + regels.map(function(r){ return '<div class="lo-inst"><div class="lo-inst-t"><b>'+esc(r[0])+'</b><span>'+esc(r[1])+'</span></div><span class="m m-gr">actief</span></div>'; }).join('')
+    + '</div>';
+
+  // De droogloop-log: wat de motor de afgelopen dagen zou hebben verstuurd.
+  if (!S.droog) { try { S.droog = (await haal('/api/leadsonderhoud-droogloop-log')).items || []; } catch (e) { S.droog = []; } }
+  var droogTabel = '<div class="lo-kaart" style="margin-top:18px"><div class="lo-traj-k" style="margin-bottom:8px">'
+    + '<h3>Langsgekomen in droogloop</h3><span class="m m-or">laatste 7 dagen · ' + S.droog.length + '</span></div>'
+    + '<p style="font-size:12.5px;color:var(--text-dim);margin-bottom:12px">Wat de motor in droogloopstand zou hebben verstuurd — zo zie je of de juiste mensen het juiste bericht krijgen. Deze regels blokkeren de wachtrij niet.</p>'
+    + (S.droog.length
+        ? '<div class="lo-tabwrap"><table class="lo"><thead><tr><th>Naar</th><th>Traject</th><th>Bericht</th><th>Kanaal</th><th>Afzender</th><th>Wanneer</th></tr></thead><tbody>'
+          + S.droog.map(function(d){
+              return '<tr><td class="mono" style="font-size:12px">'+esc(d.naar||'')+'</td>'
+                + '<td><span class="m m-gy">'+esc(d.traject||'')+'</span></td>'
+                + '<td>'+esc(d.soort||'')+'</td>'
+                + '<td>'+(d.kanaal==='whatsapp'?'<span class="m m-wa">WhatsApp</span>':'<span class="m m-bl">Mail</span>')+'</td>'
+                + '<td>'+esc(d.agent||'')+'</td>'
+                + '<td style="color:var(--text-faint);font-size:12px">'+esc(kortMoment(d.verstuurd_op))+'</td></tr>';
+            }).join('')
+          + '</tbody></table></div>'
+        : '<div class="lo-leeg" style="padding:20px">Nog niets in droogloop langsgekomen. Zodra de motor draait (op productie) verschijnen hier de regels.</div>')
+    + '</div>';
+
+  var header = '<div class="lo-kop"><div><h1>Wachtrij</h1>'
+    + '<p>Wat de motor bij de volgende ronde zou versturen. Elke regel is één bericht.</p></div>'
+    + '<div class="lo-kop-r"><button class="k k-o" id="wq-opruim">Droogloopregels opruimen</button></div></div>';
+
+  zetInhoud(header
+    + '<div class="lo-let"><span>Zolang de droogloopstand aanstaat, wordt er niets echt verstuurd — de motor logt alleen wat er zou gaan (onderaan).</span></div>'
+    + tabel + regelkaart + droogTabel);
+  var opruim = $('wq-opruim');
+  if (opruim) opruim.onclick = droogloopOpruimen;
+}
+function droogloopOpruimen(){
+  bevestig('Droogloopregels opruimen', 'Alle droogloop-regels verwijderen? De echte verzendingen (verstuurd en mislukt) blijven staan.', 'Opruimen', async function(){
+    try {
+      var r = await haalPost('/api/leadsonderhoud-droogloop-opruimen', {});
+      S.droog = null;
+      await teken();
+      melding((r.verwijderd || 0) + ' droogloop-regels opgeruimd.');
+    } catch (e) { melding('Opruimen mislukt: ' + e.message); }
+  });
+}
+
+// ---- SCHERM: TRAJECTEN (met beheer) ----
+// De zes vaste aanleidingen (opdracht: bewust een korte lijst, geen losse SQL).
+var AANLEIDINGEN = [
+  ['na_start','Na de start (dag X)'],
+  ['dag_van_periode','Op een vaste dag in de periode'],
+  ['dagen_voor_einde','Aantal dagen voor het einde'],
+  ['na_einde','Na het einde'],
+  ['geen_activiteit','Bij geen activiteit'],
+  ['vast_moment','Vast moment (weekdag + tijd)'],
+];
+function aanleidingLabel(v){ var x = AANLEIDINGEN.filter(function(a){return a[0]===v;})[0]; return x?x[1]:v; }
+function vindTraject(id){ return S.trajecten.filter(function(t){return t.id===id;})[0]; }
+function vindStap(id){ for (var i=0;i<S.trajecten.length;i++){ var s=(S.trajecten[i].stappen||[]).filter(function(x){return x.id===id;})[0]; if(s)return s; } return null; }
+async function verversTrajecten(){ S.trajecten = (await haal('/api/leadsonderhoud-trajecten')).trajecten || []; teken(); }
+
+async function schermTrajecten(){
+  if (!S.trajecten) S.trajecten = (await haal('/api/leadsonderhoud-trajecten')).trajecten || [];
+  var body = S.trajecten.map(function(tr){
+    var stappen = (tr.stappen||[]).map(function(s){
+      return '<div class="lo-inst"><div class="lo-inst-t"><b>'+esc(s.naam||s.soort)+'</b>'
+        + '<span>'+(s.kanaal==='whatsapp'?'WhatsApp':'Mail')+' · '+esc(aanleidingLabel(s.aanleiding))
+        + (s.waarde!=null?' ('+s.waarde+')':'')+(s.score_min!=null?' · score ≥ '+s.score_min:'')
+        + (s.score_max!=null?' · score < '+s.score_max:'')+'</span></div>'
+        + '<span class="m '+(s.actief?'m-gr':'m-gy')+'">'+(s.actief?'aan':'uit')+'</span>'
+        + '<button class="k k-o k-s" data-stap-edit="'+s.id+'">Aanpassen</button>'
+        + '<button class="k k-ro k-s" data-stap-del="'+s.id+'">×</button></div>';
+    }).join('') || '<div class="lo-leeg" style="padding:18px">Nog geen stappen.</div>';
+    return '<div class="lo-kaart lo-traj"><div class="lo-traj-k"><h3>'+esc(tr.naam)+'</h3>'
+      + '<span class="m m-gy">'+esc(tr.slug)+'</span>'+(tr.actief?'':' <span class="m m-or">inactief</span>')
+      + '<span style="margin-left:auto;font-size:12px;color:var(--text-dim)">archief na '+(tr.archief_na||30)+' dagen stilte</span>'
+      + '<button class="k k-o k-s" data-traj-edit="'+tr.id+'">Bewerken</button>'
+      + '<button class="k k-ro k-s" data-traj-del="'+tr.id+'">Verwijderen</button></div>'
+      + '<p style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">'+esc(tr.omschrijving||'')+'</p>'
+      + stappen
+      + '<div style="margin-top:10px"><button class="k k-o k-s" data-stap-add="'+tr.id+'">+ Stap toevoegen</button></div></div>';
+  }).join('');
+
+  var header = '<div class="lo-kop"><div><h1>Trajecten</h1>'
+    + '<p>Per soort lead de reeks berichten, met hun aanleiding en voorwaarde. Zo kun je zelf een nieuw traject inrichten.</p></div>'
+    + '<div class="lo-kop-r"><button class="k k-p" data-traj-add="1">+ Nieuw traject</button></div></div>';
+
+  zetInhoud(header + (body || '<div class="lo-leeg">Nog geen trajecten. Maak er één aan met "Nieuw traject".</div>'));
+  document.querySelectorAll('[data-traj-add]').forEach(function(b){ b.onclick=function(){ trajectForm(null); }; });
+  document.querySelectorAll('[data-traj-edit]').forEach(function(b){ b.onclick=function(){ trajectForm(vindTraject(b.getAttribute('data-traj-edit'))); }; });
+  document.querySelectorAll('[data-traj-del]').forEach(function(b){ b.onclick=function(){ trajectVerwijderen(b.getAttribute('data-traj-del')); }; });
+  document.querySelectorAll('[data-stap-add]').forEach(function(b){ b.onclick=function(){ stapForm(b.getAttribute('data-stap-add'), null); }; });
+  document.querySelectorAll('[data-stap-edit]').forEach(function(b){ b.onclick=function(){ var s=vindStap(b.getAttribute('data-stap-edit')); stapForm(s.traject_id, s); }; });
+  document.querySelectorAll('[data-stap-del]').forEach(function(b){ b.onclick=function(){ stapVerwijderen(b.getAttribute('data-stap-del')); }; });
+}
+
+// kleine veld-bouwer voor de formulieren
+function veld(id,label,val,type){ return '<div class="lo-vel"><label>'+esc(label)+'</label><input id="'+id+'" type="'+(type||'text')+'" value="'+esc(val==null?'':val)+'"></div>'; }
+
+// ---- traject-formulier ----
+function trajectForm(tr){
+  tr = tr || {};
+  openModal('<h2>'+(tr.id?'Traject bewerken':'Nieuw traject')+'</h2>'
+    + veld('tf_naam','Naam', tr.naam)
+    + veld('tf_slug','Slug (uniek, bv. minicursus)', tr.slug)
+    + '<div class="lo-vel"><label>Omschrijving</label><textarea id="tf_oms">'+esc(tr.omschrijving||'')+'</textarea></div>'
+    + '<div class="lo-vel-rij">'+veld('tf_agent','Agent (bv. Esmee)', tr.agent)+veld('tf_link','Agendalink', tr.agenda_link)+'</div>'
+    + '<div class="lo-vel-rij">'+veld('tf_archief','Archief na (dagen stilte)', tr.archief_na==null?30:tr.archief_na,'number')+veld('tf_volg','Volgorde', tr.volgorde==null?1:tr.volgorde,'number')+'</div>'
+    + '<label class="lo-check"><input type="checkbox" id="tf_actief"'+(tr.actief!==false?' checked':'')+'> Actief</label>'
+    + '<div class="lo-fout" id="tf_fout"></div>'
+    + '<div class="lo-vk-voet"><span></span><span><button class="k k-o" id="tf_annuleer">Annuleren</button> '
+    + '<button class="k k-p" id="tf_opslaan">Opslaan</button></span></div>');
+  $('tf_annuleer').onclick = sluitModal;
+  $('tf_opslaan').onclick = function(){ trajectOpslaan(tr.id); };
+}
+async function trajectOpslaan(id){
+  var body = { id:id||undefined, naam:$('tf_naam').value.trim(), slug:$('tf_slug').value.trim(),
+    omschrijving:$('tf_oms').value, agent:$('tf_agent').value, agenda_link:$('tf_link').value,
+    archief_na:$('tf_archief').value, volgorde:$('tf_volg').value, actief:$('tf_actief').checked };
+  try { await haalPost('/api/leadsonderhoud-traject-opslaan', body); sluitModal(); await verversTrajecten(); }
+  catch(e){ $('tf_fout').textContent = e.message; }
+}
+function trajectVerwijderen(id){
+  var tr = vindTraject(id);
+  bevestig('Traject verwijderen', 'Traject "'+(tr?tr.naam:'')+'" en al zijn stappen verwijderen? Dit kan niet ongedaan gemaakt worden.', 'Verwijderen', async function(){
+    try { await haalPost('/api/leadsonderhoud-traject-verwijderen', { id:id }); await verversTrajecten(); }
+    catch(e){ melding('Verwijderen mislukt: '+e.message); }
+  });
+}
+
+// ---- stap-formulier ----
+function stapForm(traject_id, s){
+  s = s || {};
+  loSoortHandmatig = !!s.soort; // bij bewerken de bestaande slug met rust laten
+  var aanl = AANLEIDINGEN.map(function(a){ return '<option value="'+a[0]+'"'+(s.aanleiding===a[0]?' selected':'')+'>'+esc(a[1])+'</option>'; }).join('');
+  var kan = ['mail','whatsapp'].map(function(k){ return '<option value="'+k+'"'+(s.kanaal===k?' selected':'')+'>'+(k==='mail'?'Mail':'WhatsApp')+'</option>'; }).join('');
+  var dagen=['','0','1','2','3','4','5','6'], dagLabels=['—','zo','ma','di','wo','do','vr','za'];
+  var wk = dagen.map(function(d,i){ return '<option value="'+d+'"'+(String(s.weekdag==null?'':s.weekdag)===d?' selected':'')+'>'+dagLabels[i]+'</option>'; }).join('');
+  openModal('<h2>'+(s.id?'Stap bewerken':'Nieuwe stap')+'</h2>'
+    + '<div class="lo-vel-rij">'
+    + '<div class="lo-vel"><label>Naam</label><input id="sf_naam" type="text" value="'+esc(s.naam||'')+'" oninput="loNaamGetypt()"></div>'
+    + '<div class="lo-vel"><label>Soort <span style="color:var(--text-faint);font-weight:400">(optioneel — vult zich uit de naam)</span></label>'
+    + '<input id="sf_soort" type="text" value="'+esc(s.soort||'')+'" placeholder="wordt automatisch afgeleid" oninput="loSoortGetypt()"></div>'
+    + '</div>'
+    + '<div class="lo-vel-rij"><div class="lo-vel"><label>Kanaal</label><select id="sf_kanaal">'+kan+'</select></div>'
+    + '<div class="lo-vel"><label>Aanleiding</label><select id="sf_aanl">'+aanl+'</select></div></div>'
+    + '<div class="lo-vel-rij">'+veld('sf_waarde','Waarde (dag/aantal, bij dag-aanleidingen)', s.waarde,'number')+veld('sf_urg','Urgentie (1 = hoog)', s.urgentie==null?3:s.urgentie,'number')+'</div>'
+    + '<div class="lo-vel-rij"><div class="lo-vel"><label>Weekdag (alleen vast moment)</label><select id="sf_wk">'+wk+'</select></div>'
+    + veld('sf_tijd','Tijdstip (alleen vast moment)', s.tijdstip,'time')+'</div>'
+    + '<div class="lo-vel-rij">'+veld('sf_smin','Score minimaal', s.score_min,'number')+veld('sf_smax','Score maximaal (exclusief)', s.score_max,'number')+'</div>'
+    + veld('sf_volg','Volgorde', s.volgorde==null?1:s.volgorde,'number')
+    + '<label class="lo-check"><input type="checkbox" id="sf_zg"'+(s.alleen_zonder_gesprek?' checked':'')+'> Alleen als er nog geen gesprek staat</label>'
+    + '<label class="lo-check"><input type="checkbox" id="sf_herh"'+(s.herhaalbaar?' checked':'')+'> Mag vaker naar dezelfde persoon</label>'
+    + '<label class="lo-check"><input type="checkbox" id="sf_actief"'+(s.actief!==false?' checked':'')+'> Actief</label>'
+    + '<div class="lo-fout" id="sf_fout"></div>'
+    + '<div class="lo-vk-voet"><span></span><span><button class="k k-o" id="sf_annuleer">Annuleren</button> '
+    + '<button class="k k-p" id="sf_opslaan">Opslaan</button></span></div>');
+  $('sf_annuleer').onclick = sluitModal;
+  $('sf_opslaan').onclick = function(){ stapOpslaan(traject_id, s.id); };
+}
+async function stapOpslaan(traject_id, id){
+  var body = { id:id||undefined, traject_id:traject_id, naam:$('sf_naam').value, soort:$('sf_soort').value.trim(),
+    kanaal:$('sf_kanaal').value, aanleiding:$('sf_aanl').value, waarde:$('sf_waarde').value,
+    weekdag:$('sf_wk').value, tijdstip:$('sf_tijd').value, score_min:$('sf_smin').value, score_max:$('sf_smax').value,
+    urgentie:$('sf_urg').value, volgorde:$('sf_volg').value,
+    alleen_zonder_gesprek:$('sf_zg').checked, herhaalbaar:$('sf_herh').checked, actief:$('sf_actief').checked };
+  try { await haalPost('/api/leadsonderhoud-stap-opslaan', body); sluitModal(); await verversTrajecten(); }
+  catch(e){ $('sf_fout').textContent = e.message; }
+}
+function stapVerwijderen(id){
+  bevestig('Stap verwijderen', 'Deze stap verwijderen?', 'Verwijderen', async function(){
+    try { await haalPost('/api/leadsonderhoud-stap-verwijderen', { id:id }); await verversTrajecten(); }
+    catch(e){ melding('Verwijderen mislukt: '+e.message); }
+  });
+}
+
+// ---- SCHERM: BERICHTEN ----
+// Toont per traject welke berichten er zijn en via welk kanaal. De teksten en
+// aan/uit-schakelaars komen in een latere stap (die schrijven naar de database);
+// nu is dit het leesbare overzicht uit onderhoud_stappen.
+async function schermBerichten(){
+  var inst = {};
+  try { inst = await haal('/api/leadsonderhoud-instellingen'); } catch (e) { inst = {}; }
+  var live = inst.live === true, noodstop = inst.noodstop === true, omg = inst.omgeving || 'onbekend';
+  if (!S.sjablonen) { try { var sjResp = await haal('/api/leadsonderhoud-sjablonen'); S.sjablonen = sjResp.items || []; S.logoUrl = sjResp.logo_url || ''; } catch (e) { S.sjablonen = []; } }
+  var mailSjablonen = (S.sjablonen || []).filter(function(s){ return s.kanaal === 'mail'; });
+
+  // Toon duidelijk in welke omgeving je zit; de schuif geldt per omgeving.
+  var omgBanner = omg === 'production'
+    ? '<div class="lo-let" style="background:rgba(194,69,45,.12);border-color:rgba(194,69,45,.35);color:#C2452D;margin-bottom:10px"><span><b>Productie.</b> Deze schuif stuurt echt naar klanten.</span></div>'
+    : omg === 'preview'
+      ? '<div class="lo-let" style="margin-bottom:10px"><span>Je zit op de <b>preview</b> — deze schuif geldt alleen hier, niet op productie.</span></div>'
+      : '<div class="lo-let" style="margin-bottom:10px"><span>Ontwikkelomgeving (<b>'+esc(omg)+'</b>) — deze schuif geldt alleen hier.</span></div>';
+
+  var verzendkaart = '<div class="lo-kaart" style="margin-bottom:16px">'
+    + '<div class="lo-traj-k" style="margin-bottom:10px"><h3>Verzending</h3></div>'
+    + omgBanner
+    + (noodstop ? '<div class="lo-let" style="margin-bottom:10px"><span><b>Noodstop staat aan</b> (LEADSONDERHOUD_UIT). De motor verstuurt niets, ongeacht de schuif hieronder. Zet de env-vlag uit om weer te kunnen versturen.</span></div>' : '')
+    + '<div class="lo-inst"><div class="lo-inst-t"><b>Live versturen</b>'
+    + '<span>Uit = droogloop (alleen loggen wat er zou gaan). Aan = de motor stuurt echt.</span></div>'
+    + '<span class="lo-schuif'+(live?' aan':'')+'" id="lo-live"'+(noodstop?' style="opacity:.5;cursor:not-allowed"':'')+'></span></div>'
+    + '<div style="padding:13px 0 2px;border-top:1px solid var(--border)">'
+    + '<div class="lo-inst-t" style="margin-bottom:8px"><b>Testmail met echte opmaak</b>'
+    + '<span>Kies een mail-sjabloon; hij gaat met neppe gegevens naar je eigen adres.</span></div>'
+    + '<div class="lo-vel-rij"><div class="lo-vel"><label>Sjabloon</label><select id="lo-test-sj">'
+    + (mailSjablonen.length ? mailSjablonen.map(function(s){ return '<option value="'+s.id+'">'+esc((s.onderwerp||s.soort)+' — '+s.traject_slug)+'</option>'; }).join('') : '<option value="">(geen mail-sjablonen)</option>')
+    + '</select></div>'
+    + '<div class="lo-vel" style="flex:0 0 170px"><label>Versie</label><select id="lo-test-fmt"><option value="html">HTML (opmaak)</option><option value="plat">Platte tekst</option></select></div></div>'
+    + '<div style="display:flex;gap:8px"><input id="lo-test-adres" type="email" placeholder="jij@voorbeeld.nl" style="flex:1;min-height:36px;padding:8px 11px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">'
+    + '<button class="k k-p" id="lo-test-knop">Verstuur test</button></div></div>'
+    + '</div>';
+
+  var tabel = '<div class="lo-tabwrap"><table class="lo"><thead><tr>'
+    + '<th>Sjabloon</th><th>Traject</th><th>Kanaal</th><th>Variant</th><th></th>'
+    + '</tr></thead><tbody>'
+    + ((S.sjablonen||[]).length ? S.sjablonen.map(function(s){
+        var variant = (s.score_min!=null?'score ≥ '+s.score_min:'') + (s.score_max!=null?((s.score_min!=null?' · ':'')+'score < '+s.score_max):'');
+        return '<tr><td class="lo-naam"><b>'+esc(s.kanaal==='mail'?(s.onderwerp||s.soort):s.soort)+'</b><span class="mono">'+esc(s.soort)+'</span></td>'
+          + '<td><span class="m m-gy">'+esc(s.traject_slug)+'</span></td>'
+          + '<td>'+(s.kanaal==='whatsapp'?'<span class="m m-wa">WhatsApp</span>':'<span class="m m-bl">Mail</span>')+'</td>'
+          + '<td style="color:var(--text-dim);font-size:12px">'+esc(variant||'—')+'</td>'
+          + '<td><button class="k k-o k-s" data-vb="'+s.id+'">Voorbeeld</button></td></tr>';
+      }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">Nog geen sjablonen. Draai de SQL-migratie in Supabase.</td></tr>')
+    + '</tbody></table></div>';
+
+  zetInhoud(kop('Berichten','De verzend-instellingen en alle sjablonen. Bekijk elk sjabloon met "Voorbeeld", zonder te versturen.')
+    + verzendkaart
+    + '<div class="lo-let"><span>De WhatsApp-sjablonen moeten eerst door Meta worden goedgekeurd; een sjabloon dat nog niet is goedgekeurd slaat de motor zichtbaar over.</span></div>'
+    + tabel);
+
+  var sw = $('lo-live');
+  if (sw && !noodstop) sw.onclick = async function(){
+    var nieuw = !sw.classList.contains('aan');
+    try { await haalPost('/api/leadsonderhoud-instellingen', { live: nieuw }); sw.classList.toggle('aan', nieuw); }
+    catch (e) { melding('Kon de schuif niet omzetten: ' + e.message); }
+  };
+  var tk = $('lo-test-knop');
+  if (tk) tk.onclick = async function(){
+    var adres = ($('lo-test-adres') || {}).value || '';
+    var sjId = ($('lo-test-sj') || {}).value || '';
+    var fmt = ($('lo-test-fmt') || {}).value || 'html';
+    try { await haalPost('/api/leadsonderhoud-test', { to: adres, sjabloon_id: sjId, formaat: fmt }); melding('Testmail verstuurd naar ' + adres + '.'); }
+    catch (e) { melding('Testmail mislukt: ' + e.message); }
+  };
+  document.querySelectorAll('[data-vb]').forEach(function(b){ b.onclick = function(){ voorbeeld(b.getAttribute('data-vb')); }; });
+}
+
+// ---- SCHERM: GESPREKKEN (WhatsApp-inbox) ----
+// De inbox van leadsonderhoud: de WhatsApp-gesprekken op de ingestelde lijn
+// (app_settings.leadsonderhoud_wa_module -> whatsapp_module_config), gefilterd op
+// nummers die bij een lead-in-een-traject horen. Server-side gefilterd; hier
+// alleen tonen + antwoorden binnen het 24-uurs venster.
+async function schermGesprekken(){
+  var titel = 'Gesprekken';
+  var j;
+  try { j = await haal('/api/leadsonderhoud-gesprekken'); }
+  catch (e) {
+    zetInhoud(kop(titel, 'Mail- en WhatsApp-antwoorden van leads met een traject.')
+      + '<div class="lo-kaart"><div class="lo-leeg">Kon de gesprekken niet laden. Ververs de pagina of controleer je rechten.</div></div>');
+    return;
+  }
+  S.gConfig = j;
+  S.gesp = j.items || [];
+
+  // Eén postvak, twee kanalen: WhatsApp én de mailantwoorden op welkom@.
+  var sub = 'Mail- en WhatsApp-antwoorden van leads met een traject'
+    + (j.label ? ' · WhatsApp-lijn: ' + esc(j.label) : '') + '.';
+  // Als de WhatsApp-lijn niet is ingesteld werkt de mailkant gewoon door.
+  var waNote = j.wa_configured ? '' :
+    '<div class="lo-let" style="margin:0 0 12px">Geen WhatsApp-lijn ingesteld — je ziet nu alleen de mailkant. '
+    + 'Zet een lijn in <span class="mono">whatsapp_module_config</span> (of pas <span class="mono">leadsonderhoud_wa_module</span> aan) voor WhatsApp erbij.</div>';
+
+  zetInhoud(kop(titel, sub) + waNote
+    + '<div class="lo-inbox" id="loInbox">'
+    +   '<aside class="lo-glijst">'
+    +     '<div class="lo-glijst-k"><b>' + S.gesp.length + ' gesprek' + (S.gesp.length === 1 ? '' : 'ken')
+    +       '</b><button class="k k-o k-s" id="loGVervers">Verversen</button></div>'
+    +     '<div class="lo-glijst-b" id="loGlijst"></div>'
+    +   '</aside>'
+    +   '<section class="lo-thread" id="loThread">'
+    +     '<div class="lo-leeg" style="height:100%" id="loThreadLeeg">Kies links een lead om de draad te lezen en te antwoorden.</div>'
+    +   '</section>'
+    + '</div>');
+
+  var v = $('loGVervers'); if (v) v.onclick = function(){ S.gesp = null; schermGesprekken(); };
+  tekenGlijst();
+  if (S.gActief && S.gesp.some(function(c){ return c.lead_id === S.gActief; })) kiesGesprek(S.gActief);
+}
+
+/** De lijst links opbouwen (één regel per lead) en de klikacties koppelen. */
+function tekenGlijst(){
+  var box = $('loGlijst'); if (!box) return;
+  if (!S.gesp.length) {
+    box.innerHTML = '<div class="lo-leeg" style="padding:34px 16px;text-align:center">'
+      + 'Nog geen mail- of WhatsApp-contact met leads die in een traject zitten.</div>';
+    return;
+  }
+  box.innerHTML = S.gesp.map(gRij).join('');
+  box.querySelectorAll('[data-gid]').forEach(function(r){
+    r.onclick = function(){ kiesGesprek(r.getAttribute('data-gid')); };
+  });
+}
+function gRij(c){
+  var naam = c.naam || c.email || c.phone_number || 'Onbekend';
+  var init = (String(naam).replace(/[^A-Za-z0-9]/g, '').charAt(0) || '#').toUpperCase();
+  var t = c.last_activity_at ? geleden(c.last_activity_at) : '';
+  var chips = (c.has_wa ? '<span class="lo-chip wa">WA</span>' : '')
+            + (c.has_mail ? '<span class="lo-chip mail">mail</span>' : '');
+  var rechts = c.unread
+    ? '<span class="lo-onread">' + c.unread + '</span>'
+    : (c.has_wa ? '<span class="lo-dot ' + (c.can_send_text ? 'open' : 'dicht') + '" title="'
+        + (c.can_send_text ? '24-uurs venster open' : 'buiten 24-uurs venster') + '"></span>' : '');
+  return '<div class="lo-grow' + (S.gActief === c.lead_id ? ' on' : '') + '" data-gid="' + esc(c.lead_id) + '">'
+    + '<span class="lo-grow-av">' + esc(init) + '</span>'
+    + '<span class="lo-grow-t"><b>' + esc(naam) + '</b><span>' + esc(c.last_preview || '') + '</span></span>'
+    + '<span class="lo-grow-r">' + (t ? '<time>' + esc(t) + '</time>' : '')
+    + '<span style="display:flex;gap:4px;align-items:center">' + chips + rechts + '</span></span></div>';
+}
+
+/** Een lead openen: de samengevoegde draad laden en tonen. */
+async function kiesGesprek(id){
+  S.gActief = id;
+  document.querySelectorAll('.lo-grow').forEach(function(r){
+    r.classList.toggle('on', r.getAttribute('data-gid') === id);
+  });
+  var inbox = $('loInbox'); if (inbox) inbox.classList.add('thread-open');
+  var pane = $('loThread'); if (!pane) return;
+  pane.innerHTML = '<div class="lo-leeg" style="height:100%">Laden…</div>';
+  var j;
+  try { j = await haal('/api/leadsonderhoud-gesprek-berichten?lead_id=' + encodeURIComponent(id) + '&mark_as_read=true'); }
+  catch (e) { pane.innerHTML = '<div class="lo-leeg" style="height:100%">Kon deze draad niet laden.</div>'; return; }
+  var c = (S.gesp || []).find(function(x){ return x.lead_id === id; });
+  if (c) c.unread = 0;
+  tekenThread(j.conversation || {}, j.items || []);
+  tekenGlijst(); // teller/stip bijwerken (ongelezen -> 0)
+}
+
+/** De samengevoegde draad rechts opbouwen (mail + WhatsApp), met antwoordbalk. */
+function tekenThread(conv, items){
+  var pane = $('loThread'); if (!pane) return;
+  var naam = conv.naam || conv.phone_number || conv.email || 'Lead';
+  var heeftWa = !!conv.has_wa;
+  var open = heeftWa && !!conv.can_send_text;
+  var subregel = [conv.phone_number, conv.email].filter(Boolean).join(' · ');
+
+  var bubbels = items.map(function(m){
+    var uit = m.direction === 'out';
+    var mail = m.channel === 'mail';
+    var tijd = m.ts ? kortMoment(m.ts) : '';
+    var kanaalNaam = mail ? (m.template_name ? 'mail · ' + m.template_name : 'mail') : 'whatsapp';
+    var badge = '<span class="lo-kanaal">' + esc(kanaalNaam) + '</span>';
+    var subj = (mail && m.subject) ? '<span class="subj">' + esc(m.subject) + '</span>' : '';
+    var cls = 'lo-bub ' + (uit ? 'uit' : 'in') + (mail ? ' mail' : '');
+    return '<div class="' + cls + '">' + subj + esc(m.body || '')
+      + '<time>' + esc(tijd) + badge + '</time></div>';
+  }).join('') || '<div class="lo-leeg" style="margin:auto">Nog geen berichten in deze draad.</div>';
+
+  // De antwoordbalk stuurt WhatsApp. Zonder WhatsApp-gesprek: uit, met verwijzing
+  // naar de e-mailmodule; binnen 24u: aan; daarbuiten: uit (alleen template).
+  var hint, plek, uit;
+  if (!heeftWa) {
+    hint = 'Deze lead heeft (nog) geen WhatsApp-gesprek. Antwoord per mail vanuit de e-mailmodule (welkom@).';
+    plek = 'Geen WhatsApp-gesprek — antwoord per mail'; uit = true;
+  } else if (open) {
+    hint = 'Vrije tekst kan zolang de lead binnen 24 uur iets stuurde.';
+    plek = 'Typ een WhatsApp-antwoord… (Ctrl/Cmd+Enter verstuurt)'; uit = false;
+  } else {
+    hint = 'Buiten het 24-uurs venster. Alleen een goedgekeurde template kan nog — die knop wacht op Meta.';
+    plek = 'Buiten 24 uur — alleen een template kan nog'; uit = true;
+  }
+
+  pane.innerHTML =
+    '<div class="lo-thread-k"><button class="k k-o k-s" id="loGterug" style="display:none">← Terug</button>'
+    + '<span><b>' + esc(naam) + '</b><span class="mono" style="display:block">' + esc(subregel) + '</span></span>'
+    + (heeftWa ? '<span class="lo-badge ' + (conv.can_send_text ? 'open' : 'dicht') + '">' + (conv.can_send_text ? '24u open' : '24u verlopen') + '</span>' : '')
+    + '</div>'
+    + '<div class="lo-thread-b" id="loThreadB">' + bubbels + '</div>'
+    + '<div class="lo-thread-v">'
+    +   '<textarea id="loAntw" placeholder="' + esc(plek) + '"' + (uit ? ' disabled' : '') + '></textarea>'
+    +   '<div class="lo-thread-v-r"><span class="hint">' + esc(hint) + '</span>'
+    +     '<button class="k k-o k-s" id="loSjabloon">Start met sjabloon</button>'
+    +     '<button class="k k-p k-s" id="loStuur"' + (uit ? ' disabled' : '') + '>Versturen</button></div>'
+    + '</div>';
+
+  var b = $('loThreadB'); if (b) b.scrollTop = b.scrollHeight;
+  var terug = $('loGterug');
+  if (terug) {
+    terug.onclick = function(){ var ib = $('loInbox'); if (ib) ib.classList.remove('thread-open'); };
+    if (window.matchMedia && window.matchMedia('(max-width:760px)').matches) terug.style.display = '';
+  }
+  var stuur = $('loStuur'); if (stuur) stuur.onclick = stuurAntwoord;
+  var ta = $('loAntw'); if (ta) ta.onkeydown = function(e){ if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') stuurAntwoord(); };
+  var sj = $('loSjabloon');
+  if (sj) sj.onclick = function(){
+    melding('Een gesprek met een sjabloon starten wacht nog op goedkeuring van Meta. '
+      + 'Zodra de templates zijn goedgekeurd, komt deze knop tot leven.');
+  };
+}
+
+/** Vrije-tekst WhatsApp-antwoord versturen (binnen het 24-uurs venster). */
+async function stuurAntwoord(){
+  var ta = $('loAntw'); if (!ta) return;
+  var tekst = (ta.value || '').trim(); if (!tekst) return;
+  var stuur = $('loStuur');
+  if (stuur) { stuur.disabled = true; stuur.textContent = 'Bezig…'; }
+  try {
+    await haalPost('/api/leadsonderhoud-gesprek-antwoord', { lead_id: S.gActief, body: tekst });
+    ta.value = '';
+    var b = $('loThreadB');
+    if (b) {
+      var leeg = b.querySelector('.lo-leeg'); if (leeg) leeg.remove();
+      var d = document.createElement('div');
+      d.className = 'lo-bub uit';
+      d.innerHTML = esc(tekst) + '<time>' + esc(kortMoment(new Date().toISOString())) + '<span class="lo-kanaal">whatsapp</span></time>';
+      b.appendChild(d); b.scrollTop = b.scrollHeight;
+    }
+    var c = (S.gesp || []).find(function(x){ return x.lead_id === S.gActief; });
+    if (c) { c.last_preview = tekst; c.last_activity_at = new Date().toISOString(); }
+  } catch (e) {
+    melding('Versturen mislukt: ' + e.message);
+  } finally {
+    if (stuur) { stuur.disabled = false; stuur.textContent = 'Versturen'; }
+  }
+}
+
+// ---- kleine bouwstenen ----
+function kop(titel, sub){
+  return '<div class="lo-kop"><div><h1>'+esc(titel)+'</h1><p>'+esc(sub)+'</p></div></div>';
+}
+function kpi(label, waarde, onder, kleur){
+  return '<div class="lo-kaart lo-kpi"><span>'+esc(label)+'</span>'
+    + '<b'+(kleur?' style="color:'+kleur+'"':'')+'>'+waarde+'</b><i>'+esc(onder||'')+'</i></div>';
+}
+
+// ---- start ----
+(async function init(){
+  try { if (window._authSharedReady) await window._authSharedReady; } catch (e) {}
+  teken();
+})();
+</script>
+</body>
+</html>

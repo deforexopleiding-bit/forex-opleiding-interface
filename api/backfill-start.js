@@ -6,6 +6,7 @@ const ACCOUNTS = [
   { mailbox: 'info',          user: 'info@deforexopleiding.nl',          passEnv: 'IMAP_PASS_INFO' },
   { mailbox: 'partners',      user: 'partners@deforexopleiding.nl',      passEnv: 'IMAP_PASS_PARTNERS' },
   { mailbox: 'administratie', user: 'administratie@deforexopleiding.nl', passEnv: 'IMAP_PASS_ADMINISTRATIE' },
+  { mailbox: 'welkom',        user: 'welkom@deforexopleiding.nl',        passEnv: 'IMAP_PASS_WELKOM' },
 ];
 
 const BACKFILL_START_DATE = new Date('2026-01-01T00:00:00.000Z');

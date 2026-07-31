@@ -6,7 +6,8 @@ const ACCOUNTS = [
   { user: 'leads@deforexopleiding.nl',         passEnv: 'IMAP_PASS' },
   { user: 'info@deforexopleiding.nl',          passEnv: 'IMAP_PASS_INFO' },
   { user: 'partners@deforexopleiding.nl',      passEnv: 'IMAP_PASS_PARTNERS' },
-  { user: 'administratie@deforexopleiding.nl', passEnv: 'IMAP_PASS_ADMINISTRATIE' }
+  { user: 'administratie@deforexopleiding.nl', passEnv: 'IMAP_PASS_ADMINISTRATIE' },
+  { user: 'welkom@deforexopleiding.nl',        passEnv: 'IMAP_PASS_WELKOM' }
 ];
 
 export default async function handler(req, res) {

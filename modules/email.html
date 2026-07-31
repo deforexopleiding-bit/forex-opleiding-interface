@@ -1231,6 +1231,7 @@
         <option value="administratie@deforexopleiding.nl">administratie@deforexopleiding.nl</option>
         <option value="onboarding@deforexopleiding.nl">onboarding@deforexopleiding.nl</option>
         <option value="events@deforexopleiding.nl">events@deforexopleiding.nl</option>
+        <option value="welkom@deforexopleiding.nl">welkom@deforexopleiding.nl</option>
       </select>
     </div>
     <div class="filter-group">
@@ -4080,6 +4081,7 @@
     'administratie@deforexopleiding.nl',
     'onboarding@deforexopleiding.nl',
     'events@deforexopleiding.nl',
+    'welkom@deforexopleiding.nl',
   ];
 
   const KB_CATEGORIES  = ['Klantvraag', 'Factuurvraag', 'Klacht', 'Compliment', 'Algemeen', 'FAQ'];
@@ -5562,7 +5564,7 @@
   function loadDemo() {
     const now = new Date();
     const m   = (mins) => new Date(now.getTime() - mins*60000).toISOString();
-    const MB  = { leads:'leads@deforexopleiding.nl', info:'info@deforexopleiding.nl', partn:'partners@deforexopleiding.nl', admin:'administratie@deforexopleiding.nl' };
+    const MB  = { leads:'leads@deforexopleiding.nl', info:'info@deforexopleiding.nl', partn:'partners@deforexopleiding.nl', admin:'administratie@deforexopleiding.nl', welkom:'welkom@deforexopleiding.nl' };
     state.emails = [
       { uid:MB.leads+':1',  mailbox:MB.leads, fromName:'Mark Janssen',    from:'Mark Janssen <mark@example.com>',       toAddress:MB.leads, subject:'Nieuwe Lead – aanvraag uitlegsessie',       date:m(8),   category:'Nieuwe Lead',      unread:true  },
       { uid:MB.leads+':2',  mailbox:MB.leads, fromName:'Calendly',        from:'Calendly <no-reply@calendly.com>',      toAddress:MB.leads, subject:'Nieuwe uitlegsessie ingepland: Sara de Wit',    date:m(45),  category:'Appointment',      unread:false },
