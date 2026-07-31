@@ -104,19 +104,18 @@ export default async function handler(req, res) {
       return res.status(409).json({ error: 'Event is gearchiveerd' });
     }
 
-    // Capacity-check: alleen voor actieve statussen.
+    // Capacity-check: alleen voor actieve statussen. Telt Fase 1 canonical
+    // (status IN ('aangemeld','aanwezig') AND assessment_response_id IS NOT NULL)
+    // via de shared getConfirmedCount — consistent met move/list/detail/auto-close.
+    // Voorheen: inline count met ACTIVE_STATUSES ZONDER assessment-filter →
+    // 8 inschrijvingen met 6 vragenlijsten telde als 8 → onterecht 'vol'.
+    // Aanvaard overboek-risico bij late vragenlijst-invullers (bewuste keuze).
     if (ACTIVE_STATUSES.includes(status)) {
-      const { count: active, error: cErr } = await supabaseAdmin
-        .from('event_attendees')
-        .select('id', { count: 'exact', head: true })
-        .eq('event_id', eventId)
-        .in('status', ACTIVE_STATUSES);
-      if (cErr) throw new Error('capacity-count: ' + cErr.message);
-      const cnt = typeof active === 'number' ? active : 0;
-      if (cnt >= ev.capacity) {
+      const cnt = await getConfirmedCount(eventId);
+      if (ev.capacity != null && cnt >= ev.capacity) {
         return res.status(409).json({
           code:  'SEATS_FULL',
-          error: `Event is vol (${cnt}/${ev.capacity}); kies status='no_show' of verhoog capacity`,
+          error: `Event is vol (${cnt}/${ev.capacity} met ingevulde vragenlijst); kies status='no_show' of verhoog capacity`,
         });
       }
     }
