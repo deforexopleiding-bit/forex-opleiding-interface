@@ -246,12 +246,21 @@ function geleden(iso){
   var u = Math.floor(min/60); if (u < 24) return u+' uur';
   return Math.floor(u/24)+' dagen';
 }
-/** Kort moment "DD-MM HH:MM" in de tijd van de kijker (voor de droogloop-log). */
+/** Kort moment "DD-MM HH:MM" in Amsterdamse tijd. De opgeslagen tijdstippen zijn
+ *  UTC (timestamptz/ISO); we sorteren in UTC en formatteren pas hier naar
+ *  Europe/Amsterdam, zodat de tijden kloppen ongeacht waar de kijker zit. */
 function kortMoment(iso){
   if (!iso) return '';
   var d = new Date(iso); if (isNaN(d.getTime())) return '';
-  var p = function(n){ return (n<10?'0':'')+n; };
-  return p(d.getDate())+'-'+p(d.getMonth()+1)+' '+p(d.getHours())+':'+p(d.getMinutes());
+  try {
+    var f = new Intl.DateTimeFormat('nl-NL', { timeZone: 'Europe/Amsterdam',
+      day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+    var o = {}; f.formatToParts(d).forEach(function(x){ o[x.type] = x.value; });
+    return o.day + '-' + o.month + ' ' + o.hour + ':' + o.minute;
+  } catch (e) {
+    var p = function(n){ return (n<10?'0':'')+n; };
+    return p(d.getDate())+'-'+p(d.getMonth()+1)+' '+p(d.getHours())+':'+p(d.getMinutes());
+  }
 }
 
 /** Gedeelde fetch met het ingelogde token; geeft {} terug bij een fout. */
@@ -815,7 +824,8 @@ function tekenThread(conv, items){
     var uit = m.direction === 'out';
     var mail = m.channel === 'mail';
     var tijd = m.ts ? kortMoment(m.ts) : '';
-    var badge = '<span class="lo-kanaal">' + (mail ? 'mail' : 'whatsapp') + '</span>';
+    var kanaalNaam = mail ? (m.template_name ? 'mail · ' + m.template_name : 'mail') : 'whatsapp';
+    var badge = '<span class="lo-kanaal">' + esc(kanaalNaam) + '</span>';
     var subj = (mail && m.subject) ? '<span class="subj">' + esc(m.subject) + '</span>' : '';
     var cls = 'lo-bub ' + (uit ? 'uit' : 'in') + (mail ? ' mail' : '');
     return '<div class="' + cls + '">' + subj + esc(m.body || '')

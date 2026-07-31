@@ -18,6 +18,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import {
   haalLijn, trajectSlugs, normNummer, binnenVenster, postvakNaam, adresUit,
 } from './_lib/leadsonderhoud-gesprekken.js';
+import { vulSjabloon } from './_lib/leadsonderhoud-sjabloon.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -89,9 +90,12 @@ export default async function handler(req, res) {
       }
     }
 
-    // ── Mail (inkomende antwoorden in het motor-postvak) ──────────────────
+    // ── Mail: inkomende antwoorden (email_messages) + uitgaande motor-mails
+    //    (berichten_log). Beide gekoppeld aan de lead op het e-mailadres. ──
     if (lead.email) {
       const email = lead.email.toLowerCase();
+
+      // Inkomend: de antwoorden die in het motor-postvak (welkom@) binnenkwamen.
       const { data: mails } = await supabaseAdmin
         .from('email_messages')
         .select('id, from_address, subject, snippet, body_text, date_received, is_read')
@@ -99,21 +103,81 @@ export default async function handler(req, res) {
         .ilike('from_address', '%' + email + '%')
         .order('date_received', { ascending: true })
         .limit(200);
+      const teMarkeren = [];
       for (const m of mails || []) {
         if (adresUit(m.from_address) !== email) continue; // precieze match
+        if (!m.is_read) teMarkeren.push(m.id);
         items.push({
           id: 'mail:' + m.id,
           channel: 'mail',
-          direction: 'in', // alleen inkomende antwoorden staan in dit postvak
+          direction: 'in',
           body: m.body_text || m.snippet || '',
           subject: m.subject || null,
           ts: m.date_received,
           is_read: !!m.is_read,
         });
       }
+
+      // Uitgaand: wat de motor per mail verstuurde (berichten_log, status
+      // 'verstuurd'). De body staat niet in de log; we verrijken met de
+      // sjabloontekst uit onderhoud_sjablonen, zodat de bubbel toont wat er ging.
+      // (Toelatings-/afwijzingsmail komen van de website, niet van de motor, en
+      // staan dus niet in berichten_log — die laten we hier weg.)
+      const { data: logs } = await supabaseAdmin
+        .from('berichten_log')
+        .select('id, soort, traject, verstuurd_op, naar')
+        .eq('kanaal', 'mail')
+        .eq('status', 'verstuurd')
+        .ilike('naar', email)
+        .order('verstuurd_op', { ascending: true })
+        .limit(200);
+      if (logs && logs.length) {
+        const trajecten = [...new Set(logs.map((l) => l.traject).filter(Boolean))];
+        const { data: sjabs } = await supabaseAdmin
+          .from('onderhoud_sjablonen')
+          .select('traject_slug, soort, onderwerp, tekst, html')
+          .in('traject_slug', trajecten.length ? trajecten : ['-'])
+          .eq('kanaal', 'mail')
+          .eq('actief', true);
+        const sjabOp = new Map();
+        for (const s of sjabs || []) {
+          const k = s.traject_slug + '|' + s.soort;
+          if (!sjabOp.has(k)) sjabOp.set(k, s);
+        }
+        for (const row of logs) {
+          const sj = sjabOp.get(row.traject + '|' + row.soort);
+          let onderwerp = row.soort;
+          let tekst = '';
+          if (sj) {
+            const v = vulSjabloon(sj, lead, {}); // best-effort invullen (voornaam etc.)
+            onderwerp = v.onderwerp || row.soort;
+            tekst = v.tekst || '';
+          }
+          items.push({
+            id: 'log:' + row.id,
+            channel: 'mail',
+            direction: 'out',
+            body: tekst,
+            subject: onderwerp,
+            template_name: row.soort,
+            ts: row.verstuurd_op,
+          });
+        }
+      }
+
+      // Inkomende mail op gelezen zetten (drijft de ongelezen-mailteller in de
+      // lijst, die op email_messages.is_read leunt). De sync overschrijft dit niet
+      // (upsert met ignoreDuplicates), dus het blijft staan.
+      if (markRead && teMarkeren.length) {
+        const { error: mErr } = await supabaseAdmin
+          .from('email_messages').update({ is_read: true }).in('id', teMarkeren);
+        if (mErr) console.error('[leadsonderhoud-gesprek-berichten] mail mark-read faalde:', mErr.message);
+      }
     }
 
-    // Samenvoegen op tijd (oudste eerst).
+    // Samenvoegen op tijd (oudste eerst). Alle tijdstippen zijn timestamptz/ISO
+    // (UTC), dus deze vergelijking is tijdzone-veilig; pas bij het TONEN wordt
+    // naar Europe/Amsterdam geformatteerd (frontend kortMoment).
     items.sort((a, b) => new Date(a.ts) - new Date(b.ts));
 
     return res.status(200).json({
