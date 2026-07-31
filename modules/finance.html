@@ -28765,7 +28765,17 @@
     paused: [],
     loading: false,
     error: null,
+    // Enrichment-cache: customer_id → { total_open_cents, open_invoice_count,
+    // days_overdue }. Gevuld door parallelle fetch op wanbetalers-overzicht-
+    // list bij _awnLoad. Elke rij in _awnRenderRow gebruikt dit voor de
+    // context-regel (bedrag / facturen / dagen te laat).
+    custMap: new Map(),
   };
+  // Helper: euro-format uit cents (bedrag → "€ 1.234,56").
+  function _awnFmtCents(cents) {
+    const n = Number(cents) || 0;
+    return (n / 100).toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' });
+  }
 
   function mountActiesWerkcentrumHost() {
     const host = document.getElementById('wb-sub-openacties-nieuw');
@@ -28813,7 +28823,30 @@
           }
           return;
         }
+        // FIX punt A: klantnaam-link → brede dossier-drawer.
+        const custLink = e.target.closest('[data-awn-open-cust]');
+        if (custLink) {
+          const cid = custLink.getAttribute('data-awn-open-cust');
+          if (cid && typeof openCaseSheet === 'function') {
+            openCaseSheet(cid, { wideDrawerMode: true });
+          }
+          return;
+        }
       });
+      // Klant-link styling (klein & subtiel — geen underline default).
+      if (!document.getElementById('awn-cust-link-style')) {
+        const st = document.createElement('style');
+        st.id = 'awn-cust-link-style';
+        st.textContent = `
+          .awn-cust-link {
+            background:none; border:none; padding:0; margin:0;
+            font:inherit; color:var(--wbx-accent-ink, #0369a1);
+            cursor:pointer; text-align:left;
+          }
+          .awn-cust-link:hover { text-decoration:underline; }
+        `;
+        document.head.appendChild(st);
+      }
     }
     _awnLoad();
   }
@@ -28826,19 +28859,50 @@
     if (bodyEl) bodyEl.innerHTML = `<div style="color:var(--wbx-faint);font-size:13px;padding:14px 0">Laden…</div>`;
     try {
       // Map tab → status + include_scheduled.
+      // FIX punt 5: Afgehandeld-tab moet BEIDE statussen tonen (APPROVED én
+      // EXECUTED). Recon-bevinding: pending-actions-approve zet 'APPROVED'
+      // maar pending-actions-mark-executed zet 'EXECUTED' — beide zijn
+      // "afgehandeld" vanuit user-perspectief. Zonder deze fix verdwenen
+      // APPROVED-rijen effectief uit alle tabs.
       const tab = _awnState.tab;
-      const statusByTab = { todo: 'PENDING', later: 'PENDING', done: 'EXECUTED', rej: 'REJECTED' };
       const includeScheduled = (tab === 'later') ? '1' : '0';
-      const st = statusByTab[tab] || 'PENDING';
-      const url = '/api/pending-actions-list?status=' + encodeURIComponent(st)
-                + '&limit=200&include_scheduled=' + includeScheduled;
-      const [rActs, rPaused] = await Promise.all([
-        window.AgentShared.apiFetch(url).then((r) => r.json()).catch(() => ({ items: [] })),
+      const includeParam = '&include_scheduled=' + includeScheduled;
+
+      // Build 1-of-2 URL(s) afhankelijk van tab.
+      const buildUrl = (st) => '/api/pending-actions-list?status=' + encodeURIComponent(st)
+                             + '&limit=200' + includeParam;
+      const fetchUrl = (u) => window.AgentShared.apiFetch(u)
+        .then((r) => r.json()).catch(() => ({ items: [] }));
+
+      const primaryStatus = { todo: 'PENDING', later: 'PENDING', done: 'EXECUTED', rej: 'REJECTED' }[tab] || 'PENDING';
+      const actionPromises = [fetchUrl(buildUrl(primaryStatus))];
+      // done-tab extra fetch voor APPROVED.
+      if (tab === 'done') actionPromises.push(fetchUrl(buildUrl('APPROVED')));
+
+      const [rActs1, rActs2, rPaused, rOverzicht] = await Promise.all([
+        actionPromises[0],
+        actionPromises[1] || Promise.resolve({ items: [] }),
         tab === 'todo'
           ? window.AgentShared.apiFetch('/api/finance-dunning-paused-list').then((r) => r.json()).catch(() => ({ items: [] }))
           : Promise.resolve({ items: [] }),
+        // Context-enrichment (punt A): één parallelle fetch die per klant
+        // total_open_cents / open_invoice_count / days_overdue geeft. Voor
+        // done/rej tabs is dit vaak leeg (klanten al opgelost) — fail-soft.
+        window.AgentShared.apiFetch('/api/wanbetalers-overzicht-list')
+          .then((r) => r.json()).catch(() => ({ items: [] })),
       ]);
-      let items = Array.isArray(rActs?.items) ? rActs.items : [];
+
+      // Merge items uit beide fetches (done: EXECUTED + APPROVED).
+      let items = [
+        ...(Array.isArray(rActs1?.items) ? rActs1.items : []),
+        ...(Array.isArray(rActs2?.items) ? rActs2.items : []),
+      ];
+      // Bouw custMap voor context-enrichment.
+      _awnState.custMap = new Map();
+      const ovItems = Array.isArray(rOverzicht?.items) ? rOverzicht.items : [];
+      for (const c of ovItems) {
+        if (c && c.customer_id) _awnState.custMap.set(c.customer_id, c);
+      }
       // Later-tab: alleen taken met scheduled_for > now client-side filteren.
       if (tab === 'later') {
         const nowIso = new Date().toISOString();
@@ -28871,17 +28935,20 @@
     };
     // Zelfde endpoints; count-only via limit=1 (endpoint returnt total/counts).
     try {
-      const [todo, later, done, rej] = await Promise.all([
+      // FIX punt 5: done-tel APPROVED + EXECUTED. Voegt 1 extra call toe.
+      const [todo, later, doneExec, doneApp, rej] = await Promise.all([
         window.AgentShared.apiFetch('/api/pending-actions-list?status=PENDING&limit=1').then((r) => r.json()).catch(() => ({})),
         window.AgentShared.apiFetch('/api/pending-actions-list?status=PENDING&include_scheduled=1&limit=200').then((r) => r.json()).catch(() => ({})),
         window.AgentShared.apiFetch('/api/pending-actions-list?status=EXECUTED&limit=1').then((r) => r.json()).catch(() => ({})),
+        window.AgentShared.apiFetch('/api/pending-actions-list?status=APPROVED&limit=1').then((r) => r.json()).catch(() => ({})),
         window.AgentShared.apiFetch('/api/pending-actions-list?status=REJECTED&limit=1').then((r) => r.json()).catch(() => ({})),
       ]);
       const nowIso = new Date().toISOString();
       const laterN = (Array.isArray(later?.items) ? later.items : []).filter((it) => it.scheduled_for && String(it.scheduled_for) > nowIso).length;
+      const doneN = (Number(doneExec?.total) || 0) + (Number(doneApp?.total) || 0);
       setBadge('todo',  Number(todo?.total)  || (Array.isArray(todo?.items)  ? todo.items.length  : 0));
       setBadge('later', laterN);
-      setBadge('done',  Number(done?.total)  || 0);
+      setBadge('done',  doneN);
       setBadge('rej',   Number(rej?.total)   || 0);
     } catch (_) { /* fail-soft */ }
   }
@@ -28890,10 +28957,54 @@
     const host = document.getElementById('wb-sub-openacties-nieuw');
     const bodyEl = host?.querySelector('[data-awn-body]');
     if (!bodyEl) return;
-    const rows = (_awnState.items || []).map((it) => _awnRenderRow(it)).join('');
-    const empty = _awnState.items.length
+    const items = _awnState.items || [];
+    const empty = items.length
       ? ''
       : `<div style="color:var(--wbx-faint);font-size:13px;padding:14px 0">Niets in deze tab.</div>`;
+
+    // FIX punt B: groepeer per action_type met kopjes. Volgorde: primaire
+    // klant-acties (Bellen / Betaling verifiëren / Betaaltoezegging) →
+    // escalatie → TL-taken → overig. Types binnen dezelfde groep behouden
+    // hun serverorder (created_at DESC).
+    const GROUP_ORDER = [
+      'MANUAL_FOLLOWUP',
+      'MANUAL_VERIFY_PAYMENT',
+      'MANUAL_CONFIRM_PROMISE',
+      'MANUAL_PROPOSE_ARRANGEMENT',
+      'MANUAL_ESCALATION',
+      'TL_INVOICE_UPDATE_DUE',
+      'TL_INVOICE_SPLIT',
+      'TL_SUBSCRIPTION_PAUSE',
+      'TL_SUBSCRIPTION_STOP',
+      'TL_INVOICE_WRITEOFF',
+    ];
+    const grouped = new Map();
+    for (const it of items) {
+      const at = String(it.action_type || 'OTHER');
+      if (!grouped.has(at)) grouped.set(at, []);
+      grouped.get(at).push(it);
+    }
+    // Sorteer keys op GROUP_ORDER; onbekende types achteraan alfabetisch.
+    const orderedKeys = [
+      ...GROUP_ORDER.filter((k) => grouped.has(k)),
+      ...Array.from(grouped.keys()).filter((k) => !GROUP_ORDER.includes(k)).sort(),
+    ];
+    const groupsHtml = orderedKeys.map((at) => {
+      const rows = grouped.get(at).map((it) => _awnRenderRow(it)).join('');
+      const label = _awnActionLabel(at);
+      const icon  = _awnActionIcon(at);
+      const count = grouped.get(at).length;
+      return `
+        <div style="margin-top:14px">
+          <h4 style="margin:0 0 8px;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--wbx-faint);font-weight:600;display:flex;align-items:center;gap:8px">
+            <span style="font-size:14px">${icon}</span>
+            <span>${esc(label)}</span>
+            <span style="color:var(--wbx-faint);font-weight:500">· ${count}</span>
+          </h4>
+          <div style="display:flex;flex-direction:column;gap:6px">${rows}</div>
+        </div>`;
+    }).join('');
+
     let pausedBlock = '';
     if (_awnState.tab === 'todo' && _awnState.paused.length > 0) {
       pausedBlock = `
@@ -28908,7 +29019,7 @@
         </div>
       `;
     }
-    bodyEl.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px">${rows || empty}</div>${pausedBlock}`;
+    bodyEl.innerHTML = (groupsHtml || empty) + pausedBlock;
   }
 
   function _awnRenderRow(it) {
@@ -28968,19 +29079,51 @@
     const scheduledBadge = scheduledStr
       ? `<span style="background:var(--wbx-accent-soft);color:var(--wbx-accent-ink);font-size:11px;padding:2px 6px;border-radius:4px;font-weight:600" title="Ingepland voor ${esc(new Date(it.scheduled_for).toLocaleString('nl-NL'))}">🕒 ${esc(scheduledStr)}</span>`
       : '';
+    // FIX punt A: context per taak uit custMap (wanbetalers-overzicht-list).
+    // Toont bedrag / #facturen / dagen te laat als beschikbaar. Voor
+    // klanten zonder open facturen (opgeloste dossiers in done/rej-tabs)
+    // blijven de context-badges leeg.
+    const cust = it.customer_id ? _awnState.custMap.get(it.customer_id) : null;
+    const contextBits = [];
+    if (cust) {
+      if (cust.total_open_cents) contextBits.push(`<span title="Totaal openstaand">${esc(_awnFmtCents(cust.total_open_cents))}</span>`);
+      if (cust.open_invoice_count) contextBits.push(`<span title="Aantal openstaande facturen">${cust.open_invoice_count} fact.</span>`);
+      if (cust.days_overdue) contextBits.push(`<span title="Dagen te laat sinds oudste vervaldatum">${cust.days_overdue} dg te laat</span>`);
+    }
+    // Reden/omschrijving uit payload (bij Joost / manual / ander bron).
+    const reasonTxt = String(
+      it.payload?.reason ||
+      it.payload?.context_summary ||
+      it.payload?.description ||
+      ''
+    ).trim();
+    const reasonBlock = reasonTxt
+      ? `<div style="font-size:12px;color:var(--wbx-muted);margin-top:4px;padding:6px 8px;background:var(--bg-elev,rgba(0,0,0,.03));border-radius:6px;border-left:2px solid var(--wbx-border);font-style:italic">${esc(reasonTxt.length > 200 ? reasonTxt.slice(0, 200) + '…' : reasonTxt)}</div>`
+      : '';
+    // Klantnaam klikbaar → wide-drawer case-sheet.
+    const custNameLink = it.customer_id
+      ? `<button type="button" class="awn-cust-link" data-awn-open-cust="${esc(it.customer_id)}" title="Open klantdossier">${custName}</button>`
+      : `<span>${custName}</span>`;
+    const contextRow = contextBits.length
+      ? `<div style="font-size:12px;color:var(--wbx-muted);display:flex;gap:10px;flex-wrap:wrap;margin-top:3px">${contextBits.join('<span style="color:var(--wbx-faint);opacity:.5">·</span>')}</div>`
+      : '';
     return `
-      <div style="${rowStyle};display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-        <span style="font-size:16px" title="${esc(typeLbl)}">${typeIcon}</span>
+      <div style="${rowStyle};display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap">
+        <span style="font-size:16px;padding-top:1px" title="${esc(typeLbl)}">${typeIcon}</span>
         <div style="min-width:0;flex:1">
-          <div style="font-weight:600;font-size:13.5px;color:var(--wbx-ink)">${custName}</div>
-          <div style="font-size:12px;color:var(--wbx-faint);display:flex;gap:8px;flex-wrap:wrap">
+          <div style="font-weight:600;font-size:13.5px;color:var(--wbx-ink)">${custNameLink}</div>
+          <div style="font-size:12px;color:var(--wbx-faint);display:flex;gap:8px;flex-wrap:wrap;margin-top:2px">
             <span>${esc(typeLbl)}</span>
             ${src ? `<span style="border-left:1px solid var(--wbx-border);padding-left:8px" title="Bron van deze taak">${src}</span>` : ''}
           </div>
+          ${contextRow}
+          ${reasonBlock}
         </div>
-        ${scheduledBadge}
-        ${ageBadge}
-        <div style="display:flex;gap:6px;flex-wrap:wrap">${btns.join('')}</div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;padding-top:1px">
+          ${scheduledBadge}
+          ${ageBadge}
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;width:100%;justify-content:flex-end">${btns.join('')}</div>
       </div>
     `;
   }
@@ -29128,17 +29271,119 @@
     }
   }
 
-  // ── Approve / Reject / Restore — HERGEBRUIKT bestaande endpoints ─────
+  // ── Approve / Reject / Restore ─────────────────────────────────────────
+  // FIX punt C+D+E: elk actie-pad krijgt eerst een wbxOpenConfirm-modal met
+  // per-type uitleg wat er gebeurt + gevolgen. Correcte endpoint per type:
+  //   MANUAL_FOLLOWUP  "Afgehandeld" → mark-executed outcome=closed_manually
+  //                    "Overslaan"   → reject (pattern uit fase 3 PR #990)
+  //   MANUAL_ESCALATION"Oppakken"    → approve (status APPROVED = opgepakt)
+  //                    "Afgehandeld" → mark-executed outcome=resolved
+  //                                    (fix: was reject, semantisch fout)
+  //   MANUAL_CONFIRM_PROMISE "Bevestigen" → approve (status APPROVED)
+  //                          "Niet nagekomen" → reject
+  //   MANUAL_VERIFY_PAYMENT  "Bevestigen" → approve
+  //                          "Afwijzen"   → reject
+  //   TL_* / overige         "Goedkeuren" → approve / "Afwijzen" → reject
+  // Alle acties komen NA success in de "Afgehandeld" of "Afgewezen" tab
+  // (de tab-filter toont zowel APPROVED als EXECUTED — zie _awnLoad).
+  function _awnFindItem(id) {
+    return (_awnState.items || []).find((it) => it.id === id) || null;
+  }
+  function _awnActionLabelFor(it) {
+    return it?.customer?.name || _awnActionLabel(String(it?.action_type || 'Actie'));
+  }
   async function _awnApprove(id) {
     if (!id) return;
+    const it = _awnFindItem(id);
+    const at = String(it?.action_type || '');
+    const cust = it?.customer?.name || 'de klant';
+    // Bepaal endpoint + confirm-uitleg per type.
+    let cfg;
+    if (at === 'MANUAL_CONFIRM_PROMISE') {
+      cfg = {
+        title: 'Bevestig: klant heeft betaald',
+        whatHappens: [
+          `Je bevestigt dat ${cust} de betaaltoezegging is nagekomen.`,
+          `De taak gaat naar de tab "Afgehandeld" (status APPROVED).`,
+          `De dunning-flow tikt door — als alle facturen betaald zijn ruimt de auto-cascade openstaande bel-taken op.`,
+        ],
+        primaryLabel: 'Ja, bevestigen',
+        endpoint: 'pending-actions-approve',
+        toast: 'Betaling bevestigd',
+      };
+    } else if (at === 'MANUAL_ESCALATION') {
+      cfg = {
+        title: 'Escalatie oppakken',
+        whatHappens: [
+          `Je markeert deze escalatie als opgepakt (status APPROVED).`,
+          `De taak gaat naar "Afgehandeld".`,
+          `Als de escalatie later ook echt opgelost is, gebruik dan de "Afgehandeld"-knop met een reden — dat sluit em definitief.`,
+        ],
+        primaryLabel: 'Ja, oppakken',
+        endpoint: 'pending-actions-approve',
+        toast: 'Escalatie opgepakt',
+      };
+    } else if (at === 'MANUAL_FOLLOWUP') {
+      cfg = {
+        title: 'Bel-taak afhandelen',
+        whatHappens: [
+          `Je markeert deze bel-taak als afgehandeld (status EXECUTED).`,
+          `De dunning-engine tikt door — de klant blijft in de flow zoals normaal.`,
+          `Verdwijnt uit "Te doen", verschijnt in "Afgehandeld".`,
+        ],
+        primaryLabel: 'Ja, afhandelen',
+        endpoint: 'pending-actions-mark-executed',
+        markOutcome: 'closed_manually',
+        toast: 'Bel-taak afgehandeld',
+      };
+    } else if (at === 'MANUAL_VERIFY_PAYMENT') {
+      cfg = {
+        title: 'Betaling bevestigen',
+        whatHappens: [
+          `Je bevestigt dat de betaling van ${cust} is ontvangen en gecontroleerd.`,
+          `De taak gaat naar "Afgehandeld" (status APPROVED).`,
+          `De factuur-status en dunning-flow worden niet automatisch bijgewerkt door deze actie — als de factuur nog niet op "betaald" staat, doe dat handmatig via de factuur-registratie.`,
+        ],
+        primaryLabel: 'Ja, bevestigen',
+        endpoint: 'pending-actions-approve',
+        toast: 'Betaling bevestigd',
+      };
+    } else {
+      cfg = {
+        title: 'Actie goedkeuren',
+        whatHappens: [
+          `Je keurt deze actie (${_awnActionLabel(at)}) goed.`,
+          `De taak krijgt status APPROVED en verschijnt in "Afgehandeld".`,
+          at.startsWith('TL_')
+            ? `Let op: TL-mutaties worden pas uitgevoerd door de executor-cron; goedkeuring hier stuurt niet direct de TL-call.`
+            : `De onderliggende flow (arrangement/engine) tikt door zoals bij deze actie hoort.`,
+        ],
+        primaryLabel: 'Ja, goedkeuren',
+        endpoint: 'pending-actions-approve',
+        toast: 'Goedgekeurd',
+      };
+    }
+    if (typeof wbxOpenConfirm !== 'function') return _awnDoApprove(id, cfg);
+    wbxOpenConfirm({
+      title: cfg.title,
+      whatHappens: cfg.whatHappens,
+      primaryLabel: cfg.primaryLabel,
+      dangerLevel: 'neutral',
+      onConfirm: () => _awnDoApprove(id, cfg),
+    });
+  }
+  async function _awnDoApprove(id, cfg) {
     try {
-      const r = await window.AgentShared.apiFetch('/api/pending-actions-approve', {
+      const body = cfg.endpoint === 'pending-actions-mark-executed'
+        ? { id, outcome: cfg.markOutcome || 'closed_manually' }
+        : { id };
+      const r = await window.AgentShared.apiFetch('/api/' + cfg.endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify(body),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
-      window.AgentShared?.showToast?.('Bevestigd', 'success');
+      window.AgentShared?.showToast?.(cfg.toast || 'Bevestigd', 'success');
       _awnLoad();
     } catch (e) {
       window.AgentShared?.showToast?.('Fout: ' + (e?.message || 'onbekend'), 'error');
@@ -29146,14 +29391,119 @@
   }
   async function _awnReject(id) {
     if (!id) return;
+    const it = _awnFindItem(id);
+    const at = String(it?.action_type || '');
+    const cust = it?.customer?.name || 'de klant';
+    // Speciaal geval: MANUAL_ESCALATION "Afgehandeld" is semantisch een
+    // resolved-mark-executed, geen reject. Was fout in fase 3 (bug 2 uit
+    // #990). Route naar mark-executed met outcome=resolved.
+    if (at === 'MANUAL_ESCALATION') {
+      if (typeof wbxOpenConfirm !== 'function') {
+        return _awnDoMarkExecuted(id, 'resolved', 'Escalatie afgehandeld');
+      }
+      wbxOpenConfirm({
+        title: 'Escalatie afhandelen',
+        whatHappens: [
+          `Je markeert deze escalatie als opgelost (status EXECUTED).`,
+          `De taak verdwijnt uit "Te doen" en verschijnt in "Afgehandeld".`,
+          `Er wordt niks anders geraakt in de dunning-flow.`,
+        ],
+        requireReason: { minLen: 10, placeholder: 'Hoe is de escalatie opgelost? Min. 10 tekens' },
+        primaryLabel: 'Ja, afhandelen',
+        dangerLevel: 'neutral',
+        onConfirm: (reason) => _awnDoMarkExecuted(id, 'resolved', 'Escalatie afgehandeld', reason),
+      });
+      return;
+    }
+    // MANUAL_FOLLOWUP "Overslaan": engine tikt door via NON_BLOCKING_COMBOS.
+    // Andere types: reject met reden.
+    let cfg;
+    if (at === 'MANUAL_CONFIRM_PROMISE') {
+      cfg = {
+        title: 'Toezegging niet nagekomen',
+        whatHappens: [
+          `Je markeert dat ${cust} de betaaltoezegging niet is nagekomen.`,
+          `De taak gaat naar "Afgewezen" (status REJECTED).`,
+          `De dunning-flow gaat door — er wordt geen extra aanmaning automatisch getriggerd door deze actie.`,
+        ],
+        placeholder: 'Optioneel — bv. "geen betaling ontvangen na 3 dagen"',
+        minLen: 0,
+        toast: 'Gemarkeerd als niet nagekomen',
+      };
+    } else if (at === 'MANUAL_FOLLOWUP') {
+      cfg = {
+        title: 'Bel-taak overslaan',
+        whatHappens: [
+          `Je slaat deze bel-taak over — de taak verdwijnt uit "Te doen".`,
+          `De dunning-engine tikt door dankzij de NON_BLOCKING-regel voor MANUAL_FOLLOWUP.`,
+          `Belangrijk: als je later toch nog wil bellen, kun je 'em terugzetten vanuit de Afgewezen-tab.`,
+        ],
+        placeholder: 'Waarom overslaan? Min. 5 tekens',
+        minLen: 5,
+        toast: 'Overgeslagen',
+      };
+    } else if (at === 'MANUAL_VERIFY_PAYMENT') {
+      cfg = {
+        title: 'Betaling afwijzen',
+        whatHappens: [
+          `Je bevestigt dat er GEEN betaling van ${cust} is ontvangen (of niet controleerbaar is).`,
+          `De taak gaat naar "Afgewezen".`,
+          `De dunning-engine tikt door — als er wel een dunning-run loopt, blijft die actief.`,
+        ],
+        placeholder: 'Wat heb je gecontroleerd? Min. 5 tekens',
+        minLen: 5,
+        toast: 'Afgewezen',
+      };
+    } else {
+      cfg = {
+        title: 'Actie afwijzen',
+        whatHappens: [
+          `Je wijst deze actie (${_awnActionLabel(at)}) af.`,
+          `De taak gaat naar "Afgewezen" (status REJECTED).`,
+          at.startsWith('TL_')
+            ? `Belangrijk: onderliggende arrangement-cascade wordt hierdoor niet automatisch geannuleerd — check via het klantdossier of dat nodig is.`
+            : `De onderliggende flow tikt door.`,
+        ],
+        placeholder: 'Waarom afwijzen? Min. 5 tekens',
+        minLen: 5,
+        toast: 'Afgewezen',
+      };
+    }
+    if (typeof wbxOpenConfirm !== 'function') return _awnDoReject(id, cfg, 'via acties-werkcentrum');
+    wbxOpenConfirm({
+      title: cfg.title,
+      whatHappens: cfg.whatHappens,
+      requireReason: { minLen: cfg.minLen, placeholder: cfg.placeholder },
+      primaryLabel: 'Ja, afwijzen',
+      dangerLevel: 'warn',
+      onConfirm: (reason) => _awnDoReject(id, cfg, reason || 'via acties-werkcentrum'),
+    });
+  }
+  async function _awnDoReject(id, cfg, reason) {
     try {
       const r = await window.AgentShared.apiFetch('/api/pending-actions-reject', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, reason: 'via acties-werkcentrum' }),
+        body: JSON.stringify({ id, reason: reason || 'via acties-werkcentrum' }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
-      window.AgentShared?.showToast?.('Afgewezen', 'success');
+      window.AgentShared?.showToast?.(cfg.toast || 'Afgewezen', 'success');
+      _awnLoad();
+    } catch (e) {
+      window.AgentShared?.showToast?.('Fout: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+  async function _awnDoMarkExecuted(id, outcome, toastMsg, reason) {
+    try {
+      const body = { id, outcome };
+      if (reason) body.reason = reason;
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-mark-executed', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast?.(toastMsg || 'Afgehandeld', 'success');
       _awnLoad();
     } catch (e) {
       window.AgentShared?.showToast?.('Fout: ' + (e?.message || 'onbekend'), 'error');
@@ -29161,10 +29511,73 @@
   }
   async function _awnRestore(id) {
     if (!id) return;
+    const it = _awnFindItem(id);
+    const at = String(it?.action_type || '');
+    const status = String(it?.status || '').toUpperCase();
+    const isTL = at.startsWith('TL_');
+    // Per-type + per-status uitleg. Voorheen werd APPROVED serverside
+    // geweigerd — dat is nu toegestaan (zie pending-actions-restore.js) maar
+    // de betekenis verschilt van EXECUTED/REJECTED:
+    //   - REJECTED terug: "toch niet afgewezen, terug naar Te doen".
+    //   - EXECUTED terug (MANUAL_*): "toch niet afgehandeld".
+    //   - APPROVED terug (MANUAL_*): "goedkeuring intrekken, terug in wachtrij".
+    //   - APPROVED terug (TL_*): "goedkeuring intrekken vóór de D2-executor
+    //     de TL-mutatie uitvoert; executor filtert op APPROVED, PENDING wordt
+    //     genegeerd".
+    //   - EXECUTED (TL_*): serverside geblokkeerd — TL-mutatie is al gedaan
+    //     (client verbergt de knop al via isTLexec-check).
+    let whatHappens;
+    if (status === 'APPROVED' && isTL) {
+      whatHappens = [
+        `Deze TL-taak (${_awnActionLabel(at)}) staat op APPROVED en wacht op de TeamLeader-executor-cron. Die pakt alleen APPROVED-rijen op.`,
+        `Door terug te zetten naar Te doen (PENDING) trek je de goedkeuring in — de executor slaat de rij over en er wordt GEEN TL-mutatie uitgevoerd.`,
+        `Race-guard: als de executor JUIST tussen jouw klik en de update de rij oppakt, faalt het terugzetten (server ziet dan al EXECUTED). In dat geval is de TL-mutatie al gedaan en is een DB-restore niet meer mogelijk.`,
+      ];
+    } else if (status === 'APPROVED') {
+      whatHappens = [
+        `Deze taak (${_awnActionLabel(at)}) staat op APPROVED — dat betekent "handmatig goedgekeurd, verder niks in gang gezet".`,
+        `Door terug te zetten gaat 'ie naar "Te doen" (PENDING). Er wordt niks anders geraakt.`,
+        `Handig voor per-ongeluk-klikken: iemand die dacht dat 'ie op de juiste knop klikte kan het zonder gevolgen ongedaan maken.`,
+      ];
+    } else if (status === 'EXECUTED' && !isTL) {
+      whatHappens = [
+        `Deze taak was gemarkeerd als afgehandeld (EXECUTED) — dat is meestal een handmatige "klaar"-klik geweest.`,
+        `Terugzetten brengt de status weer op PENDING. execution_result (JSONB) blijft bewaard als historisch spoor.`,
+        `Als deze afhandeling een arrangement of andere flow op ACTIEF heeft gezet, wordt DAT NIET automatisch teruggedraaid — check via het klantdossier of extra actie nodig is.`,
+      ];
+    } else if (status === 'REJECTED') {
+      whatHappens = [
+        `Deze taak was afgewezen. Terugzetten brengt 'em weer op "Te doen" (PENDING).`,
+        `rejection_reason wordt gecleared. De reden die je nu opgeeft wordt in de audit-trail bewaard.`,
+      ];
+    } else if (status === 'FAILED') {
+      whatHappens = [
+        `Deze taak was gemarkeerd als FAILED (kon niet uitgevoerd worden).`,
+        `Terugzetten brengt de status op PENDING zodat je 'em opnieuw kunt proberen.`,
+      ];
+    } else {
+      whatHappens = [
+        `Deze taak gaat terug naar "Te doen" (PENDING).`,
+        `De reden wordt in de audit-trail bewaard.`,
+      ];
+    }
+    if (typeof wbxOpenConfirm !== 'function') {
+      return _awnDoRestore(id, 'terugzetten via acties-werkcentrum');
+    }
+    wbxOpenConfirm({
+      title: 'Terugzetten naar Te doen',
+      whatHappens,
+      requireReason: { minLen: 5, placeholder: 'Waarom terugzetten? Min. 5 tekens' },
+      primaryLabel: 'Ja, terugzetten',
+      dangerLevel: (status === 'APPROVED' && isTL) ? 'warn' : 'neutral',
+      onConfirm: (reason) => _awnDoRestore(id, reason),
+    });
+  }
+  async function _awnDoRestore(id, reason) {
     try {
       const r = await window.AgentShared.apiFetch('/api/pending-actions-restore', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({ id, reason: reason || 'terugzetten via acties-werkcentrum' }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));

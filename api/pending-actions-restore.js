@@ -11,7 +11,18 @@
 //   }
 //
 // Toegestane transities (whitelist):
-//   REJECTED / EXECUTED / FAILED  ->  PENDING
+//   REJECTED / EXECUTED / FAILED / APPROVED  ->  PENDING
+//
+// APPROVED-restore (fix — was voorheen geblokkeerd):
+//   APPROVED = "gebruiker heeft handmatig goedgekeurd, wacht op vervolg".
+//   Voor MANUAL_* is dat een eindstaat (geen automatische executie).
+//   Voor TL_* leest de TeamLeader-executor (D2) exact status='APPROVED'
+//   en voert dan de TL-mutatie uit. Restore naar PENDING = "trek de
+//   goedkeuring in": executor pakt de rij niet meer op (die filtert
+//   op APPROVED). Race met executor is afgevangen door de bestaande
+//   optimistic concurrency guard (.eq('status', fromStatus) in de
+//   update) — als executor tussen check en update 'em al naar EXECUTED
+//   heeft gezet, faalt de update en krijgt de user een duidelijke error.
 //
 // GEBLOKKEERDE COMBINATIE (kritiek):
 //   TL_* + EXECUTED → 409 met code TL_EXECUTED_LOCKED. Semantiek: de TL-
@@ -19,7 +30,8 @@
 //   stop, invoice-due-verplaatst). Onze DB terugzetten geeft een halve
 //   staat — systeem zegt "PENDING" terwijl TL de mutatie al heeft. UI
 //   moet voor die gevallen geen restore-knop tonen; deze server-side
-//   check is de definitieve poort.
+//   check is de definitieve poort. APPROVED heeft die lock NIET — daar
+//   is de mutatie nog niet uitgevoerd.
 //
 // Cascade-veiligheid:
 //   Bij een succesvolle restore wordt payment_arrangements NIET
@@ -40,7 +52,9 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { getClientIp } from './_lib/audit-customer.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const RESTORABLE_STATUSES = new Set(['REJECTED', 'EXECUTED', 'FAILED']);
+// FIX: APPROVED toegevoegd — zie kop-comment. TL_* + EXECUTED blijft geblokkeerd
+// door de aparte lock-check verderop.
+const RESTORABLE_STATUSES = new Set(['REJECTED', 'EXECUTED', 'FAILED', 'APPROVED']);
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
