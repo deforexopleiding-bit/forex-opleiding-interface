@@ -193,6 +193,17 @@
       .lo-glijst { border-right:0; border-bottom:1px solid var(--border); max-height:none; }
       .lo-thread-b { min-height:50vh; }
     }
+
+    /* ---- Vragenlijst-editor ---- */
+    .lo-q-vraag input[type=text], .lo-q-vraag input[type=number] {
+      min-height:34px; padding:7px 10px; border:1px solid var(--border); border-radius:8px;
+      font-size:13px; background:var(--bg); color:var(--text); font-family:inherit; }
+    .lo-q-vkop { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+    .lo-q-nr { flex:none; width:22px; height:22px; border-radius:50%; background:var(--bg);
+      display:grid; place-items:center; font-size:11.5px; font-weight:700; }
+    .lo-q-opts { display:flex; flex-direction:column; gap:6px; }
+    .lo-q-opt { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .lo-q-opt input[type=text] { flex:1; min-width:150px; }
   </style>
 </head>
 <body>
@@ -219,7 +230,8 @@
 
 // ---- toestand ----
 var S = { scherm: 'overzicht', filter: 'alles', over: null, wachtrij: null, trajecten: null, droog: null, sjablonen: null,
-          gesp: null, gActief: null, gConfig: null };
+          gesp: null, gActief: null, gConfig: null,
+          quizLijst: null, quizSlug: null, quiz: null };
 
 // ---- hulpjes ----
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
@@ -358,7 +370,7 @@ function loSoortGetypt(){ loSoortHandmatig = true; }
 // ---- raamwerk ----
 function tabs(){
   var items = [['overzicht','Overzicht'],['wachtrij','Wachtrij'],['gesprekken','Gesprekken'],
-               ['trajecten','Trajecten'],['berichten','Berichten']];
+               ['trajecten','Trajecten'],['berichten','Berichten'],['vragenlijst','Vragenlijst']];
   return '<div class="lo-tabs">' + items.map(function(t){
     return '<button class="lo-tab'+(S.scherm===t[0]?' on':'')+'" data-tab="'+t[0]+'">'+t[1]+'</button>';
   }).join('') + '</div>';
@@ -373,6 +385,7 @@ async function teken(){
     else if (S.scherm === 'wachtrij')  await schermWachtrij();
     else if (S.scherm === 'trajecten') await schermTrajecten();
     else if (S.scherm === 'berichten') await schermBerichten();
+    else if (S.scherm === 'vragenlijst') await schermVragenlijst();
     else schermGesprekken();
   } catch (e) {
     var body = app.querySelector('.lo-leeg');
@@ -989,6 +1002,197 @@ async function stuurMailAntwoord(){
     if (st) { st.disabled = false; st.textContent = 'Versturen'; }
     melding('Versturen mislukt: ' + e.message);
   }
+}
+
+// ---- SCHERM: VRAGENLIJST & TOELATING ----
+// Bewerkt de WERK-versie (website_quizzes/_questions). De website leest alleen de
+// GEPUBLICEERDE versie; "Publiceren" zet de werk-versie live, "Versies" toont de
+// geschiedenis met rollback. De editor leest de waarden uit de DOM (leesQuizDom)
+// zodat tekstinvoer niet verspringt bij een her-render.
+async function schermVragenlijst(){
+  if (!S.quizLijst) {
+    try { S.quizLijst = (await haal('/api/leadsonderhoud-quiz-lijst')).items || []; }
+    catch (e) {
+      zetInhoud(kop('Vragenlijst & toelating', '') + '<div class="lo-kaart"><div class="lo-leeg">Kon de vragenlijsten niet laden. Controleer je rechten.</div></div>');
+      return;
+    }
+  }
+  if (!S.quizLijst.length) {
+    zetInhoud(kop('Vragenlijst & toelating', '') + '<div class="lo-kaart"><div class="lo-leeg">Geen vragenlijsten gevonden.</div></div>');
+    return;
+  }
+  if (!S.quizSlug || !S.quizLijst.some(function(q){ return q.slug === S.quizSlug; })) S.quizSlug = S.quizLijst[0].slug;
+
+  var kiezer = '<div class="lo-filters" style="margin-bottom:14px">' + S.quizLijst.map(function(q){
+    var live = q.live_versie ? ('live v' + q.live_versie) : 'niet gepubliceerd';
+    return '<button class="lo-fl' + (S.quizSlug === q.slug ? ' on' : '') + '" data-quiz="' + esc(q.slug) + '">'
+      + esc(q.naam) + ' · <span class="mono">' + esc(live) + '</span></button>';
+  }).join('') + '</div>';
+
+  zetInhoud(kop('Vragenlijst & toelating', 'Bewerk de vragen, opties, punten en de drempel. De website gaat pas live na Publiceren.')
+    + kiezer + '<div id="loQuizEditor"><div class="lo-leeg">Laden…</div></div>');
+
+  document.querySelectorAll('[data-quiz]').forEach(function(b){
+    b.onclick = function(){ S.quizSlug = b.getAttribute('data-quiz'); schermVragenlijst(); };
+  });
+  await laadQuiz(S.quizSlug);
+}
+
+async function laadQuiz(slug){
+  var box = $('loQuizEditor'); if (!box) return;
+  box.innerHTML = '<div class="lo-leeg">Laden…</div>';
+  try { S.quiz = await haal('/api/leadsonderhoud-quiz?slug=' + encodeURIComponent(slug)); }
+  catch (e) { box.innerHTML = '<div class="lo-leeg">Kon deze vragenlijst niet laden.</div>'; return; }
+  tekenQuizEditor();
+}
+
+function tekenQuizEditor(){
+  var box = $('loQuizEditor'); if (!box || !S.quiz) return;
+  var q = S.quiz.quiz, live = S.quiz.live, vragen = S.quiz.vragen || [];
+
+  var kopHtml = '<div class="lo-kaart" style="margin-bottom:14px">'
+    + '<div class="lo-vel-rij">'
+    +   '<div class="lo-vel"><label>Naam</label><input id="qNaam" type="text" value="' + esc(q.naam || '') + '"></div>'
+    +   '<div class="lo-vel" style="max-width:170px"><label>Drempel (toegang bij score ≥)</label><input id="qDrempel" type="number" value="' + esc(q.drempel) + '"></div>'
+    + '</div>'
+    + '<label class="lo-check"><input id="qActive" type="checkbox"' + (q.is_active !== false ? ' checked' : '') + '> Vragenlijst actief</label>'
+    + '<div class="lo-thread-v-r" style="margin-top:8px"><span class="hint">'
+    +   (live ? ('Live: versie ' + live.versie + ' (' + esc(kortMoment(live.op)) + ')') : 'Nog niet gepubliceerd')
+    + '</span>'
+    +   '<button class="k k-o k-s" id="qVersies">Versies</button>'
+    +   '<button class="k k-o k-s" id="qBewaar">Opslaan (werk-versie)</button>'
+    +   '<button class="k k-p k-s" id="qPubliceer">Publiceren</button></div>'
+    + '</div>';
+
+  var lijst = vragen.map(function(v, vi){ return tekenVraag(v, vi, vragen.length); }).join('');
+  box.innerHTML = kopHtml + '<div id="loQvragen">' + lijst + '</div>'
+    + '<button class="k k-o" data-act="add-vraag" style="margin-top:6px">+ Vraag toevoegen</button>';
+
+  var b1 = $('qBewaar'); if (b1) b1.onclick = bewaarQuiz;
+  var b2 = $('qPubliceer'); if (b2) b2.onclick = publiceerQuiz;
+  var b3 = $('qVersies'); if (b3) b3.onclick = toonVersies;
+  // Gedelegeerde acties op de vragen/opties (add/del/omhoog/omlaag).
+  box.onclick = function(e){
+    var el = e.target && e.target.closest ? e.target.closest('[data-act]') : null;
+    if (!el || !box.contains(el)) return;
+    var i = el.hasAttribute('data-i') ? Number(el.getAttribute('data-i')) : -1;
+    var oi = el.hasAttribute('data-oi') ? Number(el.getAttribute('data-oi')) : -1;
+    quizActie(el.getAttribute('data-act'), i, oi);
+  };
+}
+
+function tekenVraag(v, vi, n){
+  var opties = (v.options || []).map(function(o, oi){
+    return '<div class="lo-q-opt" data-opt="' + oi + '">'
+      + '<input type="text" data-opt-label placeholder="Antwoordtekst" value="' + esc(o.label || '') + '">'
+      + '<input type="number" data-opt-punten title="Punten" value="' + esc(o.punten != null ? o.punten : 0) + '" style="width:72px">'
+      + '<label class="lo-check" style="margin:0" title="Afwijzer: knockout ongeacht de score">'
+      + '<input type="checkbox" data-opt-afwijzer' + (o.afwijzer ? ' checked' : '') + '> afwijzer</label>'
+      + '<button class="k k-ro k-s" data-act="del-opt" data-i="' + vi + '" data-oi="' + oi + '" title="Optie weg">×</button>'
+      + '</div>';
+  }).join('');
+  return '<div class="lo-kaart lo-q-vraag" data-vraag="' + vi + '" style="margin-bottom:10px">'
+    + '<div class="lo-q-vkop">'
+    +   '<span class="lo-q-nr">' + (vi + 1) + '</span>'
+    +   '<input type="text" data-vraag-label placeholder="Vraagtekst" value="' + esc(v.label || '') + '" style="flex:1;min-width:180px">'
+    +   '<button class="k k-o k-s" data-act="up" data-i="' + vi + '"' + (vi === 0 ? ' disabled' : '') + ' title="Omhoog">↑</button>'
+    +   '<button class="k k-o k-s" data-act="down" data-i="' + vi + '"' + (vi === n - 1 ? ' disabled' : '') + ' title="Omlaag">↓</button>'
+    +   '<label class="lo-check" style="margin:0"><input type="checkbox" data-vraag-active' + (v.active !== false ? ' checked' : '') + '> actief</label>'
+    +   '<button class="k k-ro k-s" data-act="del-vraag" data-i="' + vi + '">Verwijderen</button>'
+    + '</div>'
+    + '<div class="lo-q-opts">' + opties + '</div>'
+    + '<button class="k k-o k-s" data-act="add-opt" data-i="' + vi + '" style="margin-top:6px">+ Optie</button>'
+    + '</div>';
+}
+
+function quizActie(act, i, oi){
+  leesQuizDom();
+  var vragen = S.quiz.vragen;
+  if (act === 'add-vraag') vragen.push({ id: null, label: '', options: [{ label: '', punten: 0, afwijzer: false }], active: true });
+  else if (act === 'del-vraag') vragen.splice(i, 1);
+  else if (act === 'up' && i > 0) { var t = vragen[i - 1]; vragen[i - 1] = vragen[i]; vragen[i] = t; }
+  else if (act === 'down' && i < vragen.length - 1) { var t2 = vragen[i + 1]; vragen[i + 1] = vragen[i]; vragen[i] = t2; }
+  else if (act === 'add-opt') vragen[i].options.push({ label: '', punten: 0, afwijzer: false });
+  else if (act === 'del-opt') vragen[i].options.splice(oi, 1);
+  tekenQuizEditor();
+}
+
+// Lees de huidige DOM-invoer terug in S.quiz, zodat tekstwijzigingen niet
+// verloren gaan bij een structurele her-render. Behoudt de vraag-id's op index.
+function leesQuizDom(){
+  if (!S.quiz) return;
+  var q = S.quiz.quiz;
+  if ($('qNaam')) q.naam = $('qNaam').value;
+  if ($('qDrempel')) q.drempel = Number($('qDrempel').value);
+  if ($('qActive')) q.is_active = $('qActive').checked;
+  var vragen = [];
+  document.querySelectorAll('[data-vraag]').forEach(function(vEl){
+    var vi = Number(vEl.getAttribute('data-vraag'));
+    var oud = S.quiz.vragen[vi] || {};
+    var opties = [];
+    vEl.querySelectorAll('[data-opt]').forEach(function(oEl){
+      var lab = oEl.querySelector('[data-opt-label]'), pnt = oEl.querySelector('[data-opt-punten]'), afw = oEl.querySelector('[data-opt-afwijzer]');
+      opties.push({ label: lab ? lab.value : '', punten: Number(pnt ? pnt.value : 0) || 0, afwijzer: !!(afw && afw.checked) });
+    });
+    var lbl = vEl.querySelector('[data-vraag-label]'), act = vEl.querySelector('[data-vraag-active]');
+    vragen.push({ id: oud.id || null, label: lbl ? lbl.value : '', active: !!(act && act.checked), options: opties });
+  });
+  S.quiz.vragen = vragen;
+}
+
+async function bewaarQuiz(){
+  leesQuizDom();
+  var q = S.quiz.quiz;
+  try {
+    await haalPost('/api/leadsonderhoud-quiz-opslaan', {
+      slug: q.slug, naam: q.naam, drempel: q.drempel, is_active: q.is_active,
+      vragen: S.quiz.vragen.map(function(v){ return { id: v.id, label: v.label, active: v.active, options: v.options }; }),
+    });
+    S.quizLijst = null; // teller/live-status verversen bij terugkeer
+    melding('Opgeslagen als werk-versie. Klik "Publiceren" om het live te zetten op de website.');
+  } catch (e) { melding('Opslaan mislukt: ' + e.message); }
+}
+
+function publiceerQuiz(){
+  leesQuizDom();
+  var slug = S.quiz.quiz.slug;
+  bevestig('Publiceren', 'De huidige werk-versie wordt live gezet op de website. Sla eerst op als je je laatste wijzigingen wilt meepubliceren.', 'Publiceren', async function(){
+    try {
+      var r = await haalPost('/api/leadsonderhoud-quiz-publiceren', { slug: slug });
+      S.quizLijst = null;
+      melding('Gepubliceerd als versie ' + r.versie + '. De website toont nu deze vragenlijst.');
+      await laadQuiz(slug);
+    } catch (e) { melding('Publiceren mislukt: ' + e.message); }
+  });
+}
+
+async function toonVersies(){
+  var slug = S.quiz.quiz.slug;
+  var j;
+  try { j = await haal('/api/leadsonderhoud-quiz-versies?slug=' + encodeURIComponent(slug)); }
+  catch (e) { melding('Versies laden mislukt: ' + e.message); return; }
+  var rijen = (j.items || []).map(function(v){
+    return '<tr><td>v' + v.versie + '</td><td class="mono">' + esc(kortMoment(v.op)) + '</td><td>' + v.vragen + ' vragen</td><td>'
+      + (v.actueel ? '<span class="m m-gr">live</span>' : '<button class="k k-o k-s" data-rb="' + v.versie + '">Terugzetten</button>') + '</td></tr>';
+  }).join('') || '<tr><td colspan="4" style="color:var(--text-faint)">Nog geen gepubliceerde versies.</td></tr>';
+  openModal('<h2>Gepubliceerde versies</h2>'
+    + '<div class="lo-tabwrap"><table class="lo"><thead><tr><th>Versie</th><th>Gepubliceerd</th><th>Vragen</th><th></th></tr></thead>'
+    + '<tbody>' + rijen + '</tbody></table></div>'
+    + '<div class="lo-vk-voet"><span></span><button class="k k-o" id="qVSluit">Sluiten</button></div>');
+  var s = $('qVSluit'); if (s) s.onclick = sluitModal;
+  document.querySelectorAll('[data-rb]').forEach(function(b){
+    b.onclick = function(){
+      var versie = Number(b.getAttribute('data-rb'));
+      bevestig('Terugzetten', 'Versie ' + versie + ' wordt weer de live-versie op de website. De werk-versie blijft ongewijzigd.', 'Terugzetten', async function(){
+        try {
+          await haalPost('/api/leadsonderhoud-quiz-rollback', { slug: slug, versie: versie });
+          S.quizLijst = null;
+          melding('Versie ' + versie + ' staat weer live.');
+          await laadQuiz(slug);
+        } catch (e) { melding('Terugzetten mislukt: ' + e.message); }
+      });
+    };
+  });
 }
 
 // ---- kleine bouwstenen ----
