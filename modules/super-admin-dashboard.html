@@ -178,6 +178,25 @@
   /* Events-card placeholder */
   .sad-ev-placeholder{padding:30px;text-align:center;color:var(--sad-faint);font-size:12.5px;font-style:italic;background:var(--sad-surface-2);border:1px dashed var(--sad-border);border-radius:12px}
 
+  /* Events-status rijen (echte data) */
+  .sad-evrow{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;gap:14px;align-items:center;padding:12px 14px;background:var(--sad-surface-2);border:1px solid var(--sad-border);border-radius:11px;margin-bottom:8px;text-decoration:none;color:inherit;transition:.2s var(--ease)}
+  .sad-evrow:hover{border-color:var(--sad-border-glow);transform:translateX(3px)}
+  .sad-evrow .sad-ev-t{font-size:13.5px;font-weight:700;letter-spacing:-.2px;line-height:1.2}
+  .sad-evrow .sad-ev-when{font-size:11px;color:var(--sad-dim);margin-top:2px}
+  .sad-evrow .sad-ev-cell{text-align:center}
+  .sad-evrow .sad-ev-num{font-family:var(--fd);font-size:18px;font-weight:800;line-height:1}
+  .sad-evrow .sad-ev-lbl{font-size:10.5px;color:var(--sad-dim);text-transform:uppercase;letter-spacing:.8px;margin-top:3px}
+  .sad-evrow .sad-ev-bar{height:4px;background:rgba(0,0,0,.08);border-radius:3px;margin-top:5px;overflow:hidden}
+  .sad-evrow .sad-ev-bar span{display:block;height:100%;background:linear-gradient(90deg,var(--brand-500),var(--accent));border-radius:3px}
+  @media(max-width:720px){
+    .sad-evrow{grid-template-columns:1fr 1fr 1fr;gap:8px}
+    .sad-evrow>a:first-child,.sad-evrow>.sad-ev-t-wrap{grid-column:1/-1}
+  }
+
+  /* Leads-tile hover-state (nu klikbare a-tag) */
+  .sad-ltile{cursor:pointer}
+  .sad-ltile:hover{border-color:var(--sad-border-glow);transform:translateY(-2px)}
+
   /* Load-state */
   .sad-loading{color:var(--sad-faint);font-size:11px;font-style:italic}
   .sad-err{color:var(--danger);font-size:11.5px;padding:8px 0}
@@ -265,11 +284,12 @@
     <div class="sad-leadstrip">
       <div class="sad-ch"><h3><span class="sad-d"></span> Leads per traject <span style="font-size:11px;color:var(--sad-faint);margin-left:8px" id="sadLeadsPeriodLbl">deze maand</span></h3></div>
       <div class="sad-lgrid" id="sadLeadsGrid">
-        <div class="sad-ltile"><div class="sad-lname">7-daagse</div><div class="sad-lnum">—</div><div class="sad-lbar"></div><div class="sad-lchg">binnenkort (PR2)</div></div>
-        <div class="sad-ltile"><div class="sad-lname">Event</div><div class="sad-lnum">—</div><div class="sad-lbar"></div><div class="sad-lchg">binnenkort (PR2)</div></div>
-        <div class="sad-ltile"><div class="sad-lname">Webinar</div><div class="sad-lnum">—</div><div class="sad-lbar"></div><div class="sad-lchg">binnenkort (PR2)</div></div>
-        <div class="sad-ltile"><div class="sad-lname">Mini cursus</div><div class="sad-lnum">—</div><div class="sad-lbar"></div><div class="sad-lchg">binnenkort (PR2)</div></div>
+        <a class="sad-ltile" data-key="7-daagse"   href="/modules/leads.html?soort=7-daagse"   style="text-decoration:none;color:inherit"><div class="sad-lname">7-daagse</div><div class="sad-lnum">—</div><div class="sad-lbar"></div><div class="sad-lchg">laden…</div></a>
+        <a class="sad-ltile" data-key="event"      href="/modules/follow-up.html?tab=leads&amp;source=event" style="text-decoration:none;color:inherit"><div class="sad-lname">Event</div><div class="sad-lnum">—</div><div class="sad-lbar"></div><div class="sad-lchg">laden…</div></a>
+        <a class="sad-ltile" data-key="webinar"    href="/modules/leads.html?soort=webinar"    style="text-decoration:none;color:inherit"><div class="sad-lname">Webinar</div><div class="sad-lnum">—</div><div class="sad-lbar"></div><div class="sad-lchg">laden…</div></a>
+        <a class="sad-ltile" data-key="minicursus" href="/modules/leads.html?soort=minicursus" style="text-decoration:none;color:inherit"><div class="sad-lname">Mini cursus</div><div class="sad-lnum">—</div><div class="sad-lbar"></div><div class="sad-lchg">laden…</div></a>
       </div>
+      <a id="sadLeadsOverig" href="/modules/leads.html" style="display:none;margin-top:10px;font-size:11px;color:var(--accent-2);text-decoration:none">⚠ <span id="sadLeadsOverigCount">0</span> leads zonder traject — klik om op te schonen</a>
     </div>
 
     <div class="sad-aicard">
@@ -340,7 +360,7 @@
 
     <div class="sad-card">
       <div class="sad-ch"><h3><span class="sad-d"></span> Postvakken</h3></div>
-      <div class="sad-placeholder" style="text-align:left;padding:14px 0">Deep-links per inbox + tellers komen in PR2 (Joost/Lisa/e-mail-per-mailbox count-endpoints ontbreken nog).</div>
+      <div id="sadInboxList"><div class="sad-loading">Laden…</div></div>
     </div>
 
     <div class="sad-card">
@@ -354,7 +374,7 @@
   <div class="sad-grid" style="grid-template-columns:1fr">
     <div class="sad-card">
       <div class="sad-ch"><h3><span class="sad-d"></span> Eerstkomende events — status aanmeldingen</h3><a href="/modules/events.html" style="font-size:11px;color:var(--brand-500);text-decoration:none">Events →</a></div>
-      <div class="sad-ev-placeholder">Events-status-kaart komt in PR2 (endpoint <code>events-followup-stats</code> moet nog gebouwd — cross-join events × attendees × follow-up-calls).</div>
+      <div id="sadEventsList"><div class="sad-loading">Laden…</div></div>
     </div>
   </div>
 
@@ -628,6 +648,125 @@ function sadEsc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 
+// ── PR2: Leads per traject (page-brede period-picker stuurt deze kaart) ──
+async function sadLoadLeads() {
+  const period = sadState.period;
+  const range = period === 'custom' && sadState.customFrom
+    ? { from: sadState.customFrom, to: sadState.customTo }
+    : sadPeriodRange(period);
+  try {
+    const d = await sadFetch(`/api/super-admin-leads-by-soort?from=${range.from}&to=${range.to}`);
+    const total = (d.buckets || []).reduce((a, b) => a + (b.count || 0), 0);
+    // Vul 4 tegels op key.
+    for (const b of (d.buckets || [])) {
+      const tile = document.querySelector(`.sad-ltile[data-key="${b.key}"]`);
+      if (!tile) continue;
+      tile.querySelector('.sad-lnum').textContent = b.count;
+      const pct = total > 0 ? Math.round((b.count / total) * 100) : 0;
+      tile.querySelector('.sad-lbar').innerHTML = `<span style="display:block;height:100%;width:${pct}%;background:linear-gradient(90deg,var(--brand-500),var(--accent));border-radius:3px"></span>`;
+      tile.querySelector('.sad-lchg').textContent = `${pct}% van totaal`;
+    }
+    // Overig-badge: alleen tonen als > 0 (subtiele bewaker, zoals BTW-warning).
+    const overigCount = d.overig?.count ?? 0;
+    const badge = document.getElementById('sadLeadsOverig');
+    const num = document.getElementById('sadLeadsOverigCount');
+    if (badge && num) {
+      if (overigCount > 0) {
+        num.textContent = overigCount;
+        badge.style.display = '';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+  } catch (e) {
+    console.warn('[sad-leads]', e?.message || e);
+    document.querySelectorAll('.sad-ltile .sad-lchg').forEach(el => { el.textContent = 'fout bij laden'; });
+  }
+}
+
+// ── PR2: Postvakken (6 inboxen + email-per-mailbox) ────────────────────
+async function sadLoadInboxes() {
+  const container = document.getElementById('sadInboxList');
+  try {
+    const d = await sadFetch('/api/super-admin-inbox-counts');
+    const c = d?.counts || {};
+    const rows = [
+      { key: 'wanbetalers',    ic: '💸', nm: 'Wanbetalers' },
+      { key: 'leadsonderhoud', ic: '🌱', nm: 'Leadsonderhoud' },
+      { key: 'onboarding',     ic: '🎓', nm: 'Onboarding' },
+      { key: 'lisa',           ic: '🤖', nm: 'Lisa AI' },
+      { key: 'events',         ic: '📅', nm: 'Events' },
+      { key: 'email',          ic: '✉️', nm: 'E-mail' },
+    ];
+    container.innerHTML = rows.map(r => {
+      const row = c[r.key] || {};
+      const count = row.count;
+      const ctxt = (count === null || count === undefined) ? '?' : count;
+      const badgeClass = (count === null || count === undefined) ? 'zero' : (count > 0 ? 'has' : 'zero');
+      return `
+        <a class="sad-ibx" href="${sadEsc(row.deep_link || '#')}" title="${sadEsc(row.error || row.note || r.nm)}">
+          <div class="sad-ic">${r.ic}</div>
+          <div class="sad-nm">${r.nm}</div>
+          <div class="sad-ct ${badgeClass}">${ctxt}</div>
+        </a>`;
+    }).join('');
+  } catch (e) {
+    console.warn('[sad-inbox]', e?.message || e);
+    container.innerHTML = '<div class="sad-err">Postvakken laden mislukt</div>';
+  }
+}
+
+// ── PR2: Events-status (eerstkomende 5) ────────────────────────────────
+async function sadLoadEvents() {
+  const container = document.getElementById('sadEventsList');
+  try {
+    const d = await sadFetch('/api/super-admin-events-status?limit=5');
+    const evs = d?.events || [];
+    if (evs.length === 0) {
+      container.innerHTML = '<div class="sad-ev-placeholder">Geen aankomende events gepland.</div>';
+      return;
+    }
+    container.innerHTML = evs.map(e => {
+      const dt = new Date(e.starts_at);
+      const when = dt.toLocaleDateString('nl-NL', { weekday: 'short', day: 'numeric', month: 'short' }) + ' · ' +
+                   dt.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+      const q = e.counts?.vragenlijst_ingevuld;
+      const i = e.counts?.ingeschreven;
+      const g = e.counts?.gebeld;
+      const cap = e.capacity || 0;
+      const qNum = (q === null || q === undefined) ? '?' : q;
+      const iNum = (i === null || i === undefined) ? '?' : i;
+      const gNum = (g === null || g === undefined) ? '?' : g;
+      const qPct = (typeof q === 'number' && cap > 0) ? Math.min(100, Math.round((q / cap) * 100)) : 0;
+      const gPct = (typeof g === 'number' && typeof i === 'number' && i > 0) ? Math.min(100, Math.round((g / i) * 100)) : 0;
+      return `
+        <a class="sad-evrow" href="${sadEsc(e.deep_link)}">
+          <div class="sad-ev-t-wrap">
+            <div class="sad-ev-t">${sadEsc(e.title || '(zonder titel)')}</div>
+            <div class="sad-ev-when">${when}${e.location ? ' · ' + sadEsc(e.location) : ''}</div>
+          </div>
+          <div class="sad-ev-cell" title="Vragenlijst ingevuld / capaciteit">
+            <div class="sad-ev-num">${qNum}<span style="font-size:11px;color:var(--sad-dim);font-weight:600">/${cap}</span></div>
+            <div class="sad-ev-lbl">Vragenlijst</div>
+            <div class="sad-ev-bar"><span style="width:${qPct}%"></span></div>
+          </div>
+          <div class="sad-ev-cell" title="Totaal ingeschreven (aangemeld + aanwezig, Fase 1 actieve statussen)">
+            <div class="sad-ev-num">${iNum}</div>
+            <div class="sad-ev-lbl">Ingeschreven</div>
+          </div>
+          <div class="sad-ev-cell" title="Gebeld door Dave (event_attendees.call_status)">
+            <div class="sad-ev-num">${gNum}<span style="font-size:11px;color:var(--sad-dim);font-weight:600">/${iNum}</span></div>
+            <div class="sad-ev-lbl">Gebeld</div>
+            <div class="sad-ev-bar"><span style="width:${gPct}%"></span></div>
+          </div>
+        </a>`;
+    }).join('');
+  } catch (e) {
+    console.warn('[sad-events]', e?.message || e);
+    container.innerHTML = '<div class="sad-err">Events-status laden mislukt</div>';
+  }
+}
+
 // ── Nieuwe-taak modal ─────────────────────────────────────────────────
 function sadOpenTaskModal() {
   document.getElementById('sadTaskTitle').value = '';
@@ -688,6 +827,7 @@ function sadWirePeriod() {
       const lbl = sadPeriodLabel(p);
       document.getElementById('sadLeadsPeriodLbl').textContent = lbl;
       sadLoadOmzet();
+      sadLoadLeads();
     });
   });
   document.getElementById('sadPdApply').addEventListener('click', () => {
@@ -701,6 +841,7 @@ function sadWirePeriod() {
     document.getElementById('sadPageCustom').classList.add('on');
     document.getElementById('sadDatePop').classList.remove('on');
     sadLoadOmzet();
+    sadLoadLeads();
   });
   document.addEventListener('click', (e) => {
     const pop = document.getElementById('sadDatePop');
@@ -762,6 +903,9 @@ function init() {
   sadLoadZoom();
   sadLoadUrgentie();
   sadLoadTaken();
+  sadLoadLeads();
+  sadLoadInboxes();
+  sadLoadEvents();
 }
 </script>
 </body>
