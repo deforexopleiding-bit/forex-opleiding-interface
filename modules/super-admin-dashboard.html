@@ -104,6 +104,28 @@
   .sad-ai-inbar button{width:34px;height:34px;border-radius:10px;border:1px solid var(--sad-border);background:var(--sad-surface);color:var(--sad-text);cursor:pointer;flex:none}
   .sad-ai-inbar button.send{background:linear-gradient(135deg,var(--accent),var(--brand-500));color:#032;font-weight:800;border-color:transparent}
   .sad-ai-hint{font-size:11px;color:var(--accent-2);margin-top:6px;position:relative;z-index:1;min-height:14px}
+  .sad-ai-chips span{cursor:pointer}
+  .sad-ai-chips span:hover{background:var(--sad-surface-hover);border-color:var(--sad-border-glow);color:var(--sad-text)}
+  .sad-ai-answer{margin-top:12px;background:var(--sad-surface-2);border:1px solid var(--sad-border);border-radius:12px;padding:14px;position:relative;z-index:1}
+  .sad-ai-answer-text{font-size:13.5px;line-height:1.5;color:var(--sad-text);white-space:pre-wrap;margin-bottom:10px}
+  .sad-ai-details{margin-top:6px;font-size:12px;color:var(--sad-dim)}
+  .sad-ai-details summary{cursor:pointer;padding:6px 0;font-weight:600;user-select:none;display:flex;align-items:center;gap:6px}
+  .sad-ai-details summary::-webkit-details-marker{display:none}
+  .sad-ai-details summary::before{content:'▶';font-size:9px;transition:transform .15s}
+  .sad-ai-details[open] summary::before{transform:rotate(90deg)}
+  .sad-ai-details pre{background:var(--sad-bg);border:1px solid var(--sad-border);border-radius:8px;padding:10px;font-family:var(--fm);font-size:11.5px;overflow-x:auto;margin:6px 0;color:var(--sad-text);white-space:pre-wrap;word-break:break-word}
+  .sad-ai-copy{background:none;border:none;color:var(--sad-dim);cursor:pointer;font-size:11px;padding:2px 4px;margin-left:auto;border-radius:4px;width:auto;height:auto}
+  .sad-ai-copy:hover{color:var(--sad-text);background:var(--sad-surface-hover)}
+  .sad-ai-datatable{overflow-x:auto;max-height:280px;overflow-y:auto;border:1px solid var(--sad-border);border-radius:6px;margin-top:4px}
+  .sad-ai-datatable table{width:100%;border-collapse:collapse;font-size:11.5px}
+  .sad-ai-datatable th,.sad-ai-datatable td{padding:5px 8px;text-align:left;border-bottom:1px solid var(--sad-border);white-space:nowrap}
+  .sad-ai-datatable th{background:var(--sad-bg);font-weight:700;color:var(--sad-dim);position:sticky;top:0}
+  .sad-ai-loading{font-size:12px;color:var(--sad-dim);font-style:italic;padding:8px 0}
+  .sad-ai-loading::after{content:'…';animation:sadDots 1.5s infinite}
+  @keyframes sadDots{0%,20%{content:''}40%{content:'.'}60%{content:'..'}80%,100%{content:'...'}}
+  .sad-ai-error{font-size:12px;color:var(--danger);padding:8px 0}
+  .sad-ai-inbar input:disabled{opacity:.5;cursor:not-allowed}
+  .sad-ai-inbar button:disabled{opacity:.4;cursor:not-allowed;transform:none !important}
 
   /* Grid */
   .sad-grid{display:grid;gap:18px}
@@ -298,15 +320,30 @@
         <div><h3>AI Manager</h3><p>Vraag alles over je bedrijf</p></div>
       </div>
       <div class="sad-ai-chips">
-        <span>Hoeveel wanbetalers open?</span>
-        <span>Omzet deze week?</span>
-        <span>Wie heeft geen mentor?</span>
+        <span data-ai-suggest="Hoeveel wanbetalers hebben we openstaan?">Hoeveel wanbetalers open?</span>
+        <span data-ai-suggest="Wat was de omzet deze week (aantal deals + totaal)?">Omzet deze week?</span>
+        <span data-ai-suggest="Welke klanten hebben nog geen mentor toegewezen?">Wie heeft geen mentor?</span>
       </div>
-      <div class="sad-ai-hint" id="sadAiHint">AI-motor komt in PR5 — nu nog niet actief</div>
+      <div class="sad-ai-hint" id="sadAiHint">Beta — antwoord + query + ruwe data zijn zichtbaar zodat je elk cijfer kunt controleren.</div>
       <div class="sad-ai-inbar">
-        <input id="sadAiInput" placeholder="Typ of spreek je vraag in…" disabled>
+        <input id="sadAiInput" placeholder="Stel je vraag in gewone taal…">
         <button title="Inspreken (binnenkort)" disabled>🎤</button>
-        <button class="send" id="sadAiSend" title="Verstuur (binnenkort)" disabled>↑</button>
+        <button class="send" id="sadAiSend" title="Verstuur (Enter)">↑</button>
+      </div>
+      <div class="sad-ai-answer" id="sadAiAnswer" style="display:none">
+        <div class="sad-ai-answer-text" id="sadAiAnswerText"></div>
+        <details class="sad-ai-details" id="sadAiDetailsUitleg">
+          <summary>Uitleg query</summary>
+          <div id="sadAiUitleg"></div>
+        </details>
+        <details class="sad-ai-details" id="sadAiDetailsSql">
+          <summary>Gebruikte SQL <button class="sad-ai-copy" id="sadAiCopy" type="button">📋</button></summary>
+          <pre id="sadAiSql"></pre>
+        </details>
+        <details class="sad-ai-details" id="sadAiDetailsData">
+          <summary>Ruwe data (<span id="sadAiRowCount">0</span>)</summary>
+          <div id="sadAiData" class="sad-ai-datatable"></div>
+        </details>
       </div>
     </div>
   </div>
@@ -892,10 +929,119 @@ function sadMountTopbarClock() {
   tryMount();
 }
 
+// ── AI Manager ────────────────────────────────────────────────────────
+async function sadAiSubmit() {
+  const input   = document.getElementById('sadAiInput');
+  const sendBtn = document.getElementById('sadAiSend');
+  const answerBox   = document.getElementById('sadAiAnswer');
+  const answerText  = document.getElementById('sadAiAnswerText');
+  const uitlegBox   = document.getElementById('sadAiUitleg');
+  const sqlBox      = document.getElementById('sadAiSql');
+  const dataBox     = document.getElementById('sadAiData');
+  const rowCountBox = document.getElementById('sadAiRowCount');
+
+  const question = (input.value || '').trim();
+  if (!question) return;
+  if (question.length > 2000) {
+    answerBox.style.display = '';
+    answerText.className = 'sad-ai-error';
+    answerText.textContent = 'Vraag is te lang (max 2000 tekens).';
+    return;
+  }
+
+  input.disabled = true;
+  sendBtn.disabled = true;
+  answerBox.style.display = '';
+  answerText.className = 'sad-ai-loading';
+  answerText.textContent = 'AI denkt na';
+  uitlegBox.textContent = '';
+  sqlBox.textContent = '';
+  dataBox.innerHTML = '';
+  rowCountBox.textContent = '0';
+
+  try {
+    const r = await window.AgentShared.apiFetch('/api/super-admin-ai-manager', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question }),
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      answerText.className = 'sad-ai-error';
+      answerText.textContent = 'Fout: ' + (d?.error || `HTTP ${r.status}`) + (d?.detail ? ` — ${d.detail}` : '');
+      if (d?.gebruikte_query) {
+        sqlBox.textContent = d.gebruikte_query;
+        document.getElementById('sadAiDetailsSql').open = true;
+      }
+      return;
+    }
+    answerText.className = 'sad-ai-answer-text';
+    answerText.textContent = d.antwoord || '(geen samenvatting)';
+    uitlegBox.textContent = d.uitleg || '';
+    sqlBox.textContent = d.gebruikte_query || '';
+    rowCountBox.textContent = d.row_count + (d.truncated ? ` — top ${(d.ruwe_data||[]).length} getoond` : '');
+    dataBox.innerHTML = sadRenderAiDataTable(d.ruwe_data || []);
+  } catch (e) {
+    answerText.className = 'sad-ai-error';
+    answerText.textContent = 'Netwerkfout: ' + (e?.message || 'onbekend');
+  } finally {
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+  }
+}
+
+function sadRenderAiDataTable(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return '<div style="padding:12px;color:var(--sad-faint);font-style:italic">Geen rijen.</div>';
+  }
+  const cols = Array.from(new Set(rows.flatMap(r => Object.keys(r || {}))));
+  const th = cols.map(c => `<th>${sadEsc(c)}</th>`).join('');
+  const body = rows.map(row => {
+    const tds = cols.map(c => {
+      const v = row?.[c];
+      const s = v === null || v === undefined ? '' :
+                (typeof v === 'object' ? JSON.stringify(v) : String(v));
+      return `<td>${sadEsc(s)}</td>`;
+    }).join('');
+    return `<tr>${tds}</tr>`;
+  }).join('');
+  return `<table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function sadWireAi() {
+  const input   = document.getElementById('sadAiInput');
+  const sendBtn = document.getElementById('sadAiSend');
+  const copyBtn = document.getElementById('sadAiCopy');
+  if (!input || !sendBtn) return;
+  sendBtn.addEventListener('click', sadAiSubmit);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sadAiSubmit(); }
+  });
+  document.querySelectorAll('.sad-ai-chips span[data-ai-suggest]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      input.value = chip.dataset.aiSuggest;
+      input.focus();
+    });
+  });
+  if (copyBtn) {
+    copyBtn.addEventListener('click', async (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const sql = document.getElementById('sadAiSql').textContent;
+      if (!sql) return;
+      try {
+        await navigator.clipboard.writeText(sql);
+        copyBtn.textContent = '✓';
+        setTimeout(() => { copyBtn.textContent = '📋'; }, 1500);
+      } catch { /* clipboard-denied — negeer */ }
+    });
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────
 function init() {
   sadWirePeriod();
   sadMountTopbarClock();
+  sadWireAi();
   document.getElementById('sadNewTaskBtn').addEventListener('click', sadOpenTaskModal);
   document.getElementById('sadTaskCancel').addEventListener('click', sadCloseTaskModal);
   document.getElementById('sadTaskCreate').addEventListener('click', sadCreateTask);
