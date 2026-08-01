@@ -146,21 +146,23 @@ COMMENT ON VIEW ai_readonly.v_deals_per_klant IS
 
 
 -- 2c. Verkoop per producttype (traject-variant)
--- Bron: deals + deal_line_items + traject_variant_products + traject_variants.
--- Groepering op traject_variant zodat je "6-mnd" / "12-mnd" / "24-mnd" kunt zien.
+-- Bron: deals.traject_variant_id (directe FK, sinds mig 2026-06-01-trajecten:43)
+-- → traject_variants → trajects. Simpelere + betrouwbaardere join dan via
+-- deal_line_items × traject_variant_products (dat is 1:N en zou dubbeltellingen
+-- kunnen geven als een deal meerdere line-items in dezelfde variant heeft).
+-- Deals zonder traject_variant_id (bv. oude of geïmporteerde deals) vallen
+-- automatisch weg via INNER JOIN — acceptabele filter voor product-analyse.
 CREATE OR REPLACE VIEW ai_readonly.v_verkoop_per_producttype AS
 SELECT
-  tv.id                                          AS traject_variant_id,
-  t.slug                                         AS traject_slug,
-  tv.label                                       AS variant_label,
+  tv.id                                                  AS traject_variant_id,
+  t.slug                                                 AS traject_slug,
+  tv.label                                               AS variant_label,
   tv.default_duration_months,
   date_trunc('month', d.tl_quotation_accepted_at)::date  AS maand_start,
-  COUNT(DISTINCT d.id)                           AS aantal_verkopen,
-  COALESCE(SUM(dli.amount * COALESCE(dli.quantity, 1)), 0)  AS totaal_omzet_excl_btw
+  COUNT(*)                                               AS aantal_verkopen,
+  COALESCE(SUM(d.total_amount), 0)                       AS totaal_omzet_excl_btw
 FROM public.deals d
-JOIN public.deal_line_items dli ON dli.deal_id = d.id
-JOIN public.traject_variant_products tvp ON tvp.product_id = dli.product_id
-JOIN public.traject_variants tv ON tv.id = tvp.traject_variant_id
+JOIN public.traject_variants tv ON tv.id = d.traject_variant_id
 JOIN public.trajects t ON t.id = tv.traject_id
 WHERE d.tl_quotation_accepted_at IS NOT NULL
   AND d.tl_quotation_accepted_at >= now() - interval '24 months'
@@ -169,7 +171,7 @@ GROUP BY tv.id, t.slug, tv.label, tv.default_duration_months, date_trunc('month'
 ORDER BY maand_start DESC, totaal_omzet_excl_btw DESC;
 
 COMMENT ON VIEW ai_readonly.v_verkoop_per_producttype IS
-  'Verkoop per traject-variant per maand (laatste 24 mnd). Kolommen: traject_variant_id, traject_slug, variant_label, default_duration_months, maand_start, aantal_verkopen, totaal_omzet_excl_btw. EXCL BTW; sluit ghost-deals uit.';
+  'Verkoop per traject-variant per maand (laatste 24 mnd). Directe join via deals.traject_variant_id — 1 deal = 1 variant, geen dubbeltellingen. EXCL BTW; sluit ghost-deals uit; deals zonder variant vallen weg.';
 
 
 -- ═══════════════════════════════════════════════════════════════════════════
