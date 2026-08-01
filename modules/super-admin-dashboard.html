@@ -324,7 +324,11 @@
         <span data-ai-suggest="Wat was de omzet deze week (aantal deals + totaal)?">Omzet deze week?</span>
         <span data-ai-suggest="Welke klanten hebben nog geen mentor toegewezen?">Wie heeft geen mentor?</span>
       </div>
-      <div class="sad-ai-hint" id="sadAiHint">Beta — antwoord + query + ruwe data zijn zichtbaar zodat je elk cijfer kunt controleren.</div>
+      <!-- Beta-hint + uitklap-details (Uitleg / SQL / Ruwe data) bewust
+           verborgen op verzoek. Endpoint blijft die info terugsturen en
+           logt alles in agent_audit_log voor controle achteraf. Om de UI
+           terug te zetten: haal het aangepaste blok hierboven weg en
+           herstel uit git-historie (commit vóór deze). -->
       <div class="sad-ai-inbar">
         <input id="sadAiInput" placeholder="Stel je vraag in gewone taal…">
         <button title="Inspreken (binnenkort)" disabled>🎤</button>
@@ -332,18 +336,6 @@
       </div>
       <div class="sad-ai-answer" id="sadAiAnswer" style="display:none">
         <div class="sad-ai-answer-text" id="sadAiAnswerText"></div>
-        <details class="sad-ai-details" id="sadAiDetailsUitleg">
-          <summary>Uitleg query</summary>
-          <div id="sadAiUitleg"></div>
-        </details>
-        <details class="sad-ai-details" id="sadAiDetailsSql">
-          <summary>Gebruikte SQL <button class="sad-ai-copy" id="sadAiCopy" type="button">📋</button></summary>
-          <pre id="sadAiSql"></pre>
-        </details>
-        <details class="sad-ai-details" id="sadAiDetailsData">
-          <summary>Ruwe data (<span id="sadAiRowCount">0</span>)</summary>
-          <div id="sadAiData" class="sad-ai-datatable"></div>
-        </details>
       </div>
     </div>
   </div>
@@ -930,15 +922,18 @@ function sadMountTopbarClock() {
 }
 
 // ── AI Manager ────────────────────────────────────────────────────────
+// Uitklap-details (uitleg/SQL/data) + copy-btn zijn UI-gate weggehaald;
+// endpoint blijft ze meesturen en agent_audit_log logt alles. Alle refs
+// naar die elementen zijn null-safe zodat re-enable puur een HTML-add is.
 async function sadAiSubmit() {
   const input   = document.getElementById('sadAiInput');
   const sendBtn = document.getElementById('sadAiSend');
   const answerBox   = document.getElementById('sadAiAnswer');
   const answerText  = document.getElementById('sadAiAnswerText');
-  const uitlegBox   = document.getElementById('sadAiUitleg');
-  const sqlBox      = document.getElementById('sadAiSql');
-  const dataBox     = document.getElementById('sadAiData');
-  const rowCountBox = document.getElementById('sadAiRowCount');
+  const uitlegBox   = document.getElementById('sadAiUitleg');    // kan null zijn
+  const sqlBox      = document.getElementById('sadAiSql');       // kan null zijn
+  const dataBox     = document.getElementById('sadAiData');      // kan null zijn
+  const rowCountBox = document.getElementById('sadAiRowCount');  // kan null zijn
 
   const question = (input.value || '').trim();
   if (!question) return;
@@ -954,10 +949,10 @@ async function sadAiSubmit() {
   answerBox.style.display = '';
   answerText.className = 'sad-ai-loading';
   answerText.textContent = 'AI denkt na';
-  uitlegBox.textContent = '';
-  sqlBox.textContent = '';
-  dataBox.innerHTML = '';
-  rowCountBox.textContent = '0';
+  if (uitlegBox)   uitlegBox.textContent = '';
+  if (sqlBox)      sqlBox.textContent = '';
+  if (dataBox)     dataBox.innerHTML = '';
+  if (rowCountBox) rowCountBox.textContent = '0';
 
   try {
     const r = await window.AgentShared.apiFetch('/api/super-admin-ai-manager', {
@@ -968,18 +963,19 @@ async function sadAiSubmit() {
     if (!r.ok) {
       answerText.className = 'sad-ai-error';
       answerText.textContent = 'Fout: ' + (d?.error || `HTTP ${r.status}`) + (d?.detail ? ` — ${d.detail}` : '');
-      if (d?.gebruikte_query) {
+      if (d?.gebruikte_query && sqlBox) {
         sqlBox.textContent = d.gebruikte_query;
-        document.getElementById('sadAiDetailsSql').open = true;
+        const det = document.getElementById('sadAiDetailsSql');
+        if (det) det.open = true;
       }
       return;
     }
     answerText.className = 'sad-ai-answer-text';
     answerText.textContent = d.antwoord || '(geen samenvatting)';
-    uitlegBox.textContent = d.uitleg || '';
-    sqlBox.textContent = d.gebruikte_query || '';
-    rowCountBox.textContent = d.row_count + (d.truncated ? ` — top ${(d.ruwe_data||[]).length} getoond` : '');
-    dataBox.innerHTML = sadRenderAiDataTable(d.ruwe_data || []);
+    if (uitlegBox)   uitlegBox.textContent = d.uitleg || '';
+    if (sqlBox)      sqlBox.textContent = d.gebruikte_query || '';
+    if (rowCountBox) rowCountBox.textContent = d.row_count + (d.truncated ? ` — top ${(d.ruwe_data||[]).length} getoond` : '');
+    if (dataBox)     dataBox.innerHTML = sadRenderAiDataTable(d.ruwe_data || []);
   } catch (e) {
     answerText.className = 'sad-ai-error';
     answerText.textContent = 'Netwerkfout: ' + (e?.message || 'onbekend');
