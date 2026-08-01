@@ -33,11 +33,14 @@ SELECT name, length(body) AS body_len_before, meta_template_name
 FROM public.dunning_templates
 WHERE name = 'aanmaning_dag7' AND kind = 'whatsapp';
 
--- Update naar 4-var canonical (matcht Meta-approval).
+-- Update naar 4-var canonical (matcht Meta-approval — body letterlijk gelijk
+-- aan Meta Business Manager op 2026-08-02, geverifieerd door Jeffrey).
+-- BELANGRIJK: zin "of bevestig het eventjes" is onderdeel van de Meta-body.
+-- Meta accepteert templates op body-hash-match; één woord afwijking = reject.
 UPDATE public.dunning_templates
 SET body = E'Hoi {{klant.voornaam}},\n' ||
            E'Misschien had je het gemist: factuur {{factuur.nummer}} van EUR {{factuur.bedrag}} staat nog open. De vervaldatum was {{factuur.vervaldatum}}.\n' ||
-           E'Zou je er even naar willen kijken? Als je al betaald hebt, mag je dit bericht negeren.\n' ||
+           E'Zou je er even naar willen kijken? Als je al betaald hebt, mag je dit bericht negeren of bevestig het eventjes.\n' ||
            E'Met vriendelijke groeten,\n' ||
            E'Team De Forex Opleiding'
 WHERE name = 'aanmaning_dag7'
