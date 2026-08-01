@@ -79,7 +79,7 @@ COMMENT ON ROLE ai_readonly IS
 -- ───────────────────────────────────────────────────────────────────────────
 -- Deze rol mag NERGENS anders bij dan ai_readonly. We herroepen expliciet
 -- alle rechten op de belangrijke schemas voor het geval Supabase default
--- iets gunt (bv. PUBLIC-inherit).
+-- iets gunt.
 REVOKE ALL ON SCHEMA public   FROM ai_readonly;
 REVOKE ALL ON SCHEMA auth     FROM ai_readonly;
 REVOKE ALL ON SCHEMA storage  FROM ai_readonly;
@@ -95,11 +95,35 @@ REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public  FROM ai_readonly;
 REVOKE ALL ON ALL TABLES    IN SCHEMA auth    FROM ai_readonly;
 REVOKE ALL ON ALL TABLES    IN SCHEMA storage FROM ai_readonly;
 
--- Blokkeer ook toekomstige defaults (bv. tabellen die door postgres-user
--- worden aangemaakt — die krijgen anders soms USAGE via PUBLIC)
+-- Blokkeer ook toekomstige defaults
 ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES    FROM ai_readonly;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM ai_readonly;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM ai_readonly;
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- 3b. PUBLIC-schema: haal USAGE weg van pseudo-rol PUBLIC, geef expliciet
+--     aan alle bestaande rollen behalve ai_readonly. Zonder deze stap houdt
+--     ai_readonly impliciete USAGE op public via PUBLIC-inheritance (Supabase
+--     default) — geen data-lek (SELECT/DML blijven geblokkeerd zoals bewezen
+--     door tests 4/5), maar wél schema-introspection via information_schema.
+-- ───────────────────────────────────────────────────────────────────────────
+DO $$
+DECLARE
+  r record;
+BEGIN
+  FOR r IN
+    SELECT rolname
+    FROM pg_roles
+    WHERE rolname <> 'ai_readonly'
+      AND rolname NOT LIKE 'pg\_%' ESCAPE '\'
+      AND has_schema_privilege(rolname, 'public', 'USAGE')
+  LOOP
+    EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', r.rolname);
+  END LOOP;
+END $$;
+
+REVOKE USAGE  ON SCHEMA public FROM PUBLIC;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 
 
 -- ───────────────────────────────────────────────────────────────────────────
