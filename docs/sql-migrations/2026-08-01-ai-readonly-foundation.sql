@@ -264,7 +264,8 @@ SELECT
   c.created_at                                               AS klant_sinds,
   EXISTS (
     SELECT 1 FROM public.subscriptions s
-    WHERE s.customer_id = c.id AND s.status = 'active'
+    JOIN public.deals d ON d.id = s.deal_id
+    WHERE d.customer_id = c.id AND s.status = 'active'
   )                                                          AS heeft_actief_abonnement
 FROM public.customers c
 WHERE c.anonymized_at IS NULL
