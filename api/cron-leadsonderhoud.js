@@ -96,6 +96,24 @@ export default async function handler(req, res) {
       .from('app_settings').select('value').eq('key', 'leadsonderhoud_logo_url').maybeSingle();
     const logoUrl = instelWaarde(logoRow);
 
+    // WhatsApp-afzendlijn voor leadsonderhoud: de Esmee/leads-lijn uit
+    // whatsapp_module_config (module='leadsonderhoud'), consistent met hoe
+    // onboarding-invite/-template-send hun modCfg.phone_number_id gebruiken.
+    // BEWUST geen terugval op de globale (finance) default: is de lijn niet
+    // geconfigureerd, dan slaan we WhatsApp-sends over met een zichtbare fout
+    // (zie de guard in de loop), zodat een misconfig opvalt i.p.v. dat er
+    // stilletjes van de finance-lijn wordt gestuurd.
+    const { data: waCfg } = await supabaseAdmin
+      .from('whatsapp_module_config')
+      .select('phone_number_id')
+      .eq('module', 'leadsonderhoud')
+      .eq('is_active', true)
+      .maybeSingle();
+    const leadsonderhoudPnId = waCfg?.phone_number_id || null;
+    if (!leadsonderhoudPnId) {
+      console.error('[cron-leadsonderhoud] Geen actieve leadsonderhoud-afzendlijn in whatsapp_module_config (module=leadsonderhoud) — WhatsApp-sends worden overgeslagen; GEEN finance-fallback.');
+    }
+
     // 1) De wachtrij, over alle trajecten heen. De view zit alle voorwaarden al
     //    in (toestemming, welk bericht, of het al gestuurd is).
     const { data: wachtrij, error: wErr } = await supabaseAdmin
@@ -227,6 +245,14 @@ export default async function handler(req, res) {
         rapport.overgeslagen++; meld('overgeslagen', 'bevat inloglink — hoort bij de website'); continue;
       }
 
+      // WhatsApp kan alleen via de geconfigureerde leadsonderhoud-lijn. Ontbreekt
+      // die, dan NIET van de globale (finance) default sturen — overslaan + loggen.
+      if (ingevuld.kanaal === 'whatsapp' && !leadsonderhoudPnId) {
+        rapport.overgeslagen++;
+        meld('overgeslagen', 'leadsonderhoud-afzendlijn niet geconfigureerd (whatsapp_module_config) — geen finance-fallback');
+        continue;
+      }
+
       // Defensieve guard: WhatsApp-templates weigert Meta bij een lege
       // parameter ("param {{N}} is empty"). Voorkom crash-sends en log
       // welke variabele-index leeg was + welke naam die had volgens
@@ -258,7 +284,7 @@ export default async function handler(req, res) {
           if (!res2.ok) throw new Error(res2.reason || 'mail mislukt');
           logRij.extern_id = res2.messageId || null;
         } else {
-          const res2 = await sendTemplate({ to: naar, templateName: ingevuld.meta_template, variables: ingevuld.variabelen });
+          const res2 = await sendTemplate({ to: naar, templateName: ingevuld.meta_template, variables: ingevuld.variabelen, phoneNumberId: leadsonderhoudPnId });
           logRij.extern_id = res2.wamid || null;
         }
         logRij.status = 'verstuurd';
