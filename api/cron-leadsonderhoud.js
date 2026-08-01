@@ -76,11 +76,6 @@ export default async function handler(req, res) {
   const nu = new Date();
   const { uur, datum } = amsterdam(nu);
 
-  // Stille uren: tussen 21:00 en 08:00 sturen we niets.
-  if (uur >= 21 || uur < 8) {
-    return res.status(200).json({ ok: true, overgeslagen: 'stille uren', uur });
-  }
-
   try {
     // Live of droogloop? Uit de database, maar met een eigen schuif PER OMGEVING
     // (leadsonderhoud_live_production / _preview). Zo zet je live op de preview
@@ -95,6 +90,17 @@ export default async function handler(req, res) {
     const { data: logoRow } = await supabaseAdmin
       .from('app_settings').select('value').eq('key', 'leadsonderhoud_logo_url').maybeSingle();
     const logoUrl = instelWaarde(logoRow);
+
+    // Stille uren (21:00–08:00 Amsterdamse tijd) zijn standaard AAN, maar via
+    // app_settings.leadsonderhoud_stille_uren = false 24/7 uit te zetten zonder
+    // deploy. Afwezig of 'true' → venster blijft aan (huidige gedrag). Consistent
+    // met hoe de live-/logo-instellingen hierboven gelezen worden.
+    const { data: stilleSetting } = await supabaseAdmin
+      .from('app_settings').select('value').eq('key', 'leadsonderhoud_stille_uren').maybeSingle();
+    const stilleUrenAan = !(instelWaarde(stilleSetting) === 'false');
+    if (stilleUrenAan && (uur >= 21 || uur < 8)) {
+      return res.status(200).json({ ok: true, overgeslagen: 'stille uren', uur });
+    }
 
     // WhatsApp-afzendlijn voor leadsonderhoud: de Esmee/leads-lijn uit
     // whatsapp_module_config (module='leadsonderhoud'), consistent met hoe
