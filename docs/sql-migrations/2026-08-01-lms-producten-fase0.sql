@@ -11,8 +11,14 @@
 --
 -- Producten: gebruiker↔product is many-to-many (meerdere producten per persoon);
 -- toegang is TIJDELIJK met vervaldatum (grant.toegang_tot).
---   * 7-daagse : trial, venster 7 dagen  (opvolger van de gratis-vlag)
---   * minicursus: venster 14 dagen, eigen quiz + eigen desk
+--   * 7-daagse : gratis trial, venster 7 dagen  (opvolger van de gratis-vlag)
+--   * minicursus: gratis instapcursus (lead-magnet, geen betaalstap), venster 14 dagen,
+--                 eigen quiz + eigen desk
+--
+-- is_trial: descriptief label "gratis lead-magnet (geen betaalstap)", GEEN gating-input.
+-- Toegang wordt bepaald door een actieve grant (lms_toegang) + de content-junctions;
+-- welke content bij welk product hoort doet de junction, niet is_trial. Beide producten
+-- zijn gratis tasters -> beide is_trial = true. (Zie ontwerp-doc.)
 --
 -- NB: draai NA deze DDL "NOTIFY pgrst, 'reload schema';" (of de dashboard-knop
 -- "Reload schema cache"), anders kent PostgREST de nieuwe tabellen nog niet.
@@ -76,8 +82,8 @@ INSERT INTO public.lms_producten (slug, naam, omschrijving, is_trial, duur_dagen
 VALUES
   ('7-daagse',  '7 dagen meekijken', 'Gratis 7-daagse trial (opvolger van de gratis-vlag).',
      true,  7,  '7-daagse',  '/lms/studydesk',  NULL,          10),
-  ('minicursus','Mini cursus',       'Betaalde mini-cursus met tijdelijke toegang (14 dagen).',
-     false, 14, 'minicursus','/lms/minicursus', 'Mini cursus', 20)
+  ('minicursus','Mini cursus',       'Gratis kennismakings-/instapcursus (lead-magnet, geen betaalstap) met 14 dagen toegang.',
+     true,  14, 'minicursus','/lms/minicursus', 'Mini cursus', 20)
 ON CONFLICT (slug) DO NOTHING;
 
 -- ── 6) Verificatie ───────────────────────────────────────────────────────────

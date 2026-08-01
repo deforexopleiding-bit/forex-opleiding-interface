@@ -7,6 +7,7 @@ Fase 0 als concrete migratie-SQL: `docs/sql-migrations/2026-08-01-lms-producten-
 - **Many-to-many:** meerdere producten per gebruiker (bv. 7-daagse + mini-cursus tegelijk).
 - **Eigen funnel** per product. Vragenlijst mini-cursus = **kopie van de 7-daagse** onder eigen slug `minicursus`, met **vraag 2 herschreven** naar de mini-cursus, **drempel 13**, afwijzers gelijk (zie §5).
 - **Tijdelijke toegang met vervaldatum.** Mini-cursus = **14 dagen** (`grant.toegang_tot = toegang_van + 14d`).
+- **Mini-cursus is GRATIS** — lead-magnet/instapcursus, géén betaalstap (net als de 7-daagse trial).
 - **Eigen berichtenreeks** per product (welkom + herinneringen).
 - **Product-bewuste sidebar:** een "Mini cursus"-link die alleen verschijnt bij een actieve mini-cursus-grant.
 - **Eigen desk-pagina** voor de mini-cursus in de stijl van de bestaande studydesk (layout hergebruiken, eigen content-pool).
@@ -30,7 +31,7 @@ Fase 0 als concrete migratie-SQL: `docs/sql-migrations/2026-08-01-lms-producten-
 | slug | text UNIQUE | `7-daagse`, `minicursus` |
 | naam | text | "Mini cursus" |
 | omschrijving | text | |
-| is_trial | boolean | 7-daagse = true |
+| is_trial | boolean | descriptief label "gratis lead-magnet, geen betaalstap" (géén gating-input). Beide gratis tasters → **7-daagse = true, minicursus = true** |
 | duur_dagen | integer | 7 / 14 / NULL(onbeperkt) |
 | quiz_slug | text | → `website_quizzes.slug` (geen FK) |
 | desk_pad | text | eigen desk-route |
