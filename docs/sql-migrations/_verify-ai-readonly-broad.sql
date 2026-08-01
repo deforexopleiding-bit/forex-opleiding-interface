@@ -7,7 +7,7 @@
 
 
 -- TEST 1 — view-count in ai_readonly
-SELECT count(*) AS test_1_totaal_views  -- EXPECTED: 21 (7 uit PR-A + 14 nieuwe)
+SELECT count(*) AS test_1_totaal_views  -- EXPECTED: 23 (7 uit PR-A + 16 nieuwe)
 FROM information_schema.views
 WHERE table_schema = 'ai_readonly';
 
