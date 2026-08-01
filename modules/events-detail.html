@@ -326,6 +326,23 @@
       .ev-detail-row .label { min-width: 48px; font-size: 11px; }
       .kebab-item { font-size: 13.5px; padding: 12px 10px; }
     }
+
+    /* Attendee-rij: subtiele amber-tint voor "verplaatst naar ander event".
+       Geen fout/alarm — informatief signaal. Werkt in light + dark; hover-state
+       iets versterkt zodat feedback merkbaar blijft. Alleen de hoofd-<tr>; de
+       uitklap-comms-rij eronder (.att-comms-row) blijft ongewijzigd. */
+    .sr-table tr.att-row-switched > td {
+      background: rgba(245, 158, 11, 0.06);
+    }
+    .sr-table tr.att-row-switched:hover > td {
+      background: rgba(245, 158, 11, 0.11);
+    }
+    html[data-theme="dark"] .sr-table tr.att-row-switched > td {
+      background: rgba(245, 158, 11, 0.10);
+    }
+    html[data-theme="dark"] .sr-table tr.att-row-switched:hover > td {
+      background: rgba(245, 158, 11, 0.16);
+    }
   </style>
 </head>
 <body>
@@ -1155,8 +1172,12 @@ function renderAttendeesTab() {
           autoOffBadge = `<span title="Uitgesloten van automation-flow (geen automatische bevestiging/vragenlijst/reminders)" style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:10px;font-size:10.5px;font-weight:700;background:rgba(100,116,139,0.18);color:#475569;border:1px solid rgba(100,116,139,0.3);margin-left:6px"><i class="ti ti-bell-off" style="font-size:11px"></i> Auto: uit</span>`;
         }
 
+        // Visuele markering: rijen die naar een ander event zijn verplaatst
+        // krijgen subtiele amber-tint (CSS in .att-row-switched). Puur
+        // informatief — telling/logica ongewijzigd.
+        const rowClass = a.status === 'switched_to_other_event' ? 'att-row-switched' : '';
         return `
-          <tr>
+          <tr${rowClass ? ` class="${rowClass}"` : ''}>
             <td>
               <button class="att-name-btn" data-id="${esc(a.id)}" type="button" title="Toon verzonden en geplande communicatie" style="background:transparent;border:none;padding:0;cursor:pointer;color:inherit;font:inherit;display:inline-flex;align-items:center;gap:5px">
                 <i class="ti ti-chevron-right att-name-caret" id="att-caret-${esc(a.id)}" style="color:var(--text-faint);font-size:14px;transition:transform .15s"></i>
