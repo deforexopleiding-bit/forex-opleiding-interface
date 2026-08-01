@@ -5,7 +5,7 @@ Fase 0 als concrete migratie-SQL: `docs/sql-migrations/2026-08-01-lms-producten-
 
 ## Bevestigde uitgangspunten
 - **Many-to-many:** meerdere producten per gebruiker (bv. 7-daagse + mini-cursus tegelijk).
-- **Eigen funnel + eigen vragenlijst** per product (eigen slug, eigen vragen, eigen drempel).
+- **Eigen funnel** per product. Vragenlijst mini-cursus = **kopie van de 7-daagse** onder eigen slug `minicursus`, met **vraag 2 herschreven** naar de mini-cursus, **drempel 13**, afwijzers gelijk (zie §5).
 - **Tijdelijke toegang met vervaldatum.** Mini-cursus = **14 dagen** (`grant.toegang_tot = toegang_van + 14d`).
 - **Eigen berichtenreeks** per product (welkom + herinneringen).
 - **Product-bewuste sidebar:** een "Mini cursus"-link die alleen verschijnt bij een actieve mini-cursus-grant.
@@ -83,8 +83,14 @@ video's waarvoor EXISTS lms_toegang t
 - `geefToegang` doet een **UPSERT op `lms_toegang (gebruiker_id, product_id)`**: bestaand → `toegang_tot` verversen (nieuwe 14 dagen); nieuw → aanmaken. **Product erbij, nooit het venster van een ander product overschrijven.**
 - Backward-compat (fase 3): blijft voorlopig óók `lms_gebruikers.toegang_van/tot` schrijven (dual-write).
 
-## 5. Quiz — eigen mini-cursus-vragenlijst
-Nieuwe slug **`minicursus`** in `website_quizzes` (eigen naam, eigen **drempel**), eigen `website_quiz_questions`, gepubliceerd via de bestaande `website_quiz_publicaties`-laag. `lms_producten.quiz_slug = 'minicursus'` koppelt product→quiz. Geen nieuwe quiz-infra.
+## 5. Quiz — mini-cursus-vragenlijst (BESLIST)
+**Besluit:** de mini-cursus **neemt de 7-daagse-vragenlijst over** — een eigen kopie onder een **nieuwe slug `minicursus`**, met:
+- **Vraag 2 herschreven naar de mini-cursus-context** (bv. "Waarom wil je de **mini-cursus** volgen?" i.p.v. "…de 7-daagse aanvragen?"), met dezelfde punten (3/2/1/0) en dezelfde afwijzer op de laatste optie. Exacte formulering wordt bij het bouwen vastgezet.
+- **Drempel = 13** (gelijk aan de 7-daagse).
+- **Afwijzers identiek** aan de 7-daagse (vraag 2 "snel geld…", vraag 3 "bijna geen tijd", vraag 4 "alleen gratis dingen", vraag 6 "snel en gegarandeerd geld").
+- De overige 6 vragen + opties + punten worden **ongewijzigd** overgenomen.
+
+Praktisch (fase 3): kopieer de actuele `website_quiz_publicaties`-inhoud van slug `7-daagse` naar een nieuwe `website_quizzes`-rij (slug `minicursus`, drempel 13) + `website_quiz_questions`, pas alleen de tekst van vraag 2 aan, en publiceer via de bestaande `website_quiz_publicaties`-laag. `lms_producten.quiz_slug = 'minicursus'` koppelt product→quiz. **Geen nieuwe quiz-infra.**
 
 ## 6. Motor: enkelvoudig traject → per-inschrijving (VOORZICHTIGSTE, LAATSTE fase)
 - `onderhoud_trajecten` heeft al een `minicursus`-slug; voeg `onderhoud_stappen` toe voor de eigen reeks (welkom `na_start`=0 + herinneringen op dag N).
