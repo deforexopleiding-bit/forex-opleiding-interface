@@ -23,6 +23,11 @@ import { supabaseAdmin } from './supabase.js';
 import { requireSuperAdmin, getSandboxCustomer } from './_lib/wanbetalers-sandbox.js';
 import { isDryRunEnabled, assertRecipientMatchesSandbox } from './_lib/dunning-dry-run.js';
 import { isAutoEnabled, ensurePipelineCustomer, setStage } from './_lib/dunning-pipeline.js';
+import { renderTemplate }              from './_lib/dunning-template-render.js';
+import { buildMetaTemplateVariables,
+         diagnoseTemplatePlaceholders } from './_lib/dunning-template-placeholders.js';
+import { ensureInvoicePaymentLink,
+         InvoicePaymentLinkError }      from './_lib/invoice-payment-link.js';
 
 const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
 
@@ -129,19 +134,110 @@ export default async function handler(req, res) {
       if (channel === 'whatsapp') {
         const phonePlus = normPhonePlus(customer.phone);
         if (!phonePlus) throw new Error('Test-persoon heeft geen telefoonnummer.');
+        // Guard 1 (behouden): recipient MUST match dunning_sandbox_contact.phone.
+        // Onmogelijk dat send naar een niet-sandbox-nummer gaat.
         await assertRecipientMatchesSandbox({ isTest: true, actual: phonePlus, channel: 'whatsapp' });
-        // ─────────────── 3) Verzenden (of dry-run) ───────────────
+
+        // ─────────────── 3) Verzenden — REPRESENTATIEVE FLOW ───────────────
+        // Sinds Optie B: sandbox gebruikt EXACT dezelfde params-opbouw als
+        // dunning-step-executors.js (buildMetaTemplateVariables + resolvers
+        // + betaal_link pre-fetch). Zonder deze inline flow stuurde sandbox
+        // 0 params → altijd Meta #132000, ongeacht body-fix.
+        //
+        // Guard 2 (behouden): tplName is verplicht. Zonder tplName kan de
+        // sandbox geen echte dunning-template testen; oude 'test_template'
+        // fallback is verwijderd — dat verhulde het probleem.
+        if (!tplName) {
+          throw new Error('template_name is verplicht (bv. "aanmaning_dag7" of "aanmaning_dag14")');
+        }
+
+        // Body + meta_template_name uit dunning_templates (net als executor).
+        const { data: tpl, error: tplErr } = await supabaseAdmin
+          .from('dunning_templates')
+          .select('id, name, kind, subject, body, meta_template_name, language, is_active')
+          .eq('name', tplName)
+          .eq('kind', 'whatsapp')
+          .maybeSingle();
+        if (tplErr) throw new Error('dunning_templates fetch: ' + tplErr.message);
+        if (!tpl)   throw new Error(`dunning_templates: geen whatsapp-template met name='${tplName}'`);
+        if (!tpl.meta_template_name) throw new Error(`template '${tplName}': meta_template_name ontbreekt`);
+
+        // Open invoices al gefetcht boven (openInvs) — hergebruik als context.
+        // Fetch volledige invoice-rijen zodat renderTemplate alle velden ziet
+        // (invoice_number, due_date, etc.) die resolvers nodig hebben.
+        const { data: fullInvs } = await supabaseAdmin
+          .from('invoices')
+          .select('id, invoice_number, amount_total, amount_paid, credited_amount, status, due_date, issue_date, payment_url')
+          .in('id', invoiceIds.length ? invoiceIds : ['00000000-0000-0000-0000-000000000000']);
+        const invoicesForRender = Array.isArray(fullInvs) ? fullInvs : [];
+
+        // Betaal-link pre-fetch (fail-CLOSED, exact zelfde patroon als executor).
+        // Alleen als template.body de placeholder gebruikt.
+        const bodyStr = String(tpl.body || '');
+        if (bodyStr.includes('{{factuur.betaal_link}}')) {
+          const oudsteInv = invoicesForRender[0]; // openInvs was al gefilterd op openAmount>0
+          if (!oudsteInv?.id) {
+            throw new Error('template gebruikt {{factuur.betaal_link}} maar geen open invoice om link voor te fetchen');
+          }
+          try {
+            const linkRes = await ensureInvoicePaymentLink(oudsteInv.id);
+            if (linkRes && linkRes.payment_url) {
+              oudsteInv.payment_url = linkRes.payment_url;
+            } else {
+              throw new Error('ensureInvoicePaymentLink leverde geen payment_url');
+            }
+          } catch (linkErr) {
+            const code = linkErr instanceof InvoicePaymentLinkError ? linkErr.code : 'UNKNOWN';
+            throw new Error('payment-link fetch fout: ' + code + ' — ' + (linkErr?.message || 'onbekend'));
+          }
+        }
+
+        // Render placeholders → variables_used object.
+        const rendered = renderTemplate({
+          body:         tpl.body,
+          subject:      tpl.subject,
+          customer,
+          openInvoices: invoicesForRender,
+        });
+
+        // Positional params in Meta-approved volgorde (uit body-scan).
+        const variables = buildMetaTemplateVariables(tpl.body, rendered.variables_used || {});
+
+        // Empty-param guard (zelfde als executor — voorkomt Meta #131008).
+        const emptyIdx = variables.findIndex(v => v == null || String(v).length === 0);
+        if (emptyIdx >= 0) {
+          let emptyKey = null;
+          try {
+            const diag = diagnoseTemplatePlaceholders(tpl.body);
+            emptyKey = diag.matched[emptyIdx] || null;
+          } catch (_) { /* diag mag nooit blokkeren */ }
+          throw new Error(`Empty param {{${emptyIdx + 1}}} (${emptyKey || 'onbekend'}) — Meta zou #131008 gooien; check sandbox-klant data`);
+        }
+
+        // Diagnose-warn zichtbaar in Vercel-logs bij body-drift.
+        try {
+          const diag = diagnoseTemplatePlaceholders(tpl.body);
+          if (diag.n_missing > 0) {
+            console.warn('[sandbox-run-bulk whatsapp] UNMATCHED PLACEHOLDERS — Meta #132000 risico', {
+              template_id: tpl.id, meta_template_name: tpl.meta_template_name,
+              matched: diag.matched, unmatched: diag.unmatched,
+              n_sent_to_meta: diag.total_count, n_expected_in_body: diag.raw_count,
+            });
+          }
+        } catch (_) { /* fail-soft */ }
+
         if (dry) {
           wamid = 'dry-run:wa:' + rec.id;
           waOk = true;
-          console.log('[sandbox-run-bulk] DRY-RUN WA', rec.id, phonePlus, tplName || 'test_template');
+          console.log('[sandbox-run-bulk] DRY-RUN WA', rec.id, phonePlus, tpl.meta_template_name, 'params:', variables.length);
         } else {
           const { sendTemplate } = await import('./_lib/meta-whatsapp.js');
           const sendRes = await sendTemplate({
-            to           : phonePlus,
-            templateName : tplName || 'test_template',
-            languageCode : 'nl',
-            phoneNumberId: financePnId, // expliciet de finance-lijn (geen impliciete default)
+            to:            phonePlus,
+            templateName:  tpl.meta_template_name,
+            languageCode:  tpl.language || 'nl',
+            variables,     // ← REPRESENTATIEVE FLOW: 4 params voor dag7/dag14
+            phoneNumberId: financePnId,
           });
           wamid = sendRes?.wamid || sendRes?.messages?.[0]?.id || null;
           waOk = true;
