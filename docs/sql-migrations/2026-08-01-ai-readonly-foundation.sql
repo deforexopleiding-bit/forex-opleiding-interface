@@ -120,6 +120,11 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA ai_readonly GRANT SELECT ON TABLES TO ai_read
 -- Kolommen: customer_id, klant_naam (samengesteld), stage_slug, stage_label,
 -- stage_changed_at, aantal_open_facturen, totaal_open_bedrag.
 -- EXPLICIET WEGGELATEN: email, telefoon, adres, IBAN, notes, invoice_number.
+--
+-- Open bedrag = amount_total - amount_paid - credited_amount (MAX 0). Dezelfde
+-- formule als api/customer-dossier.js:248 en api/dunning-pipeline-detail.js.
+-- Open statuses = ('open', 'partially_paid', 'overdue') — conform de app-conventie
+-- (zie api/dunning-pipeline-detail.js:11 OPEN_STATUSES).
 CREATE OR REPLACE VIEW ai_readonly.v_wanbetalers_actief AS
 SELECT
   dpc.customer_id,
@@ -127,8 +132,11 @@ SELECT
   dpc.stage_slug,
   dps.label                                                            AS stage_label,
   dpc.stage_changed_at,
-  COUNT(i.id) FILTER (WHERE i.status = 'overdue')                      AS aantal_open_facturen,
-  COALESCE(SUM(i.amount_open) FILTER (WHERE i.status = 'overdue'), 0)  AS totaal_open_bedrag
+  COUNT(i.id) FILTER (WHERE i.status IN ('open','partially_paid','overdue')) AS aantal_open_facturen,
+  COALESCE(SUM(
+    GREATEST(0::numeric,
+             COALESCE(i.amount_total, 0) - COALESCE(i.amount_paid, 0) - COALESCE(i.credited_amount, 0))
+  ) FILTER (WHERE i.status IN ('open','partially_paid','overdue')), 0)  AS totaal_open_bedrag
 FROM public.dunning_pipeline_customers dpc
 JOIN      public.customers c                    ON c.id = dpc.customer_id
 LEFT JOIN public.dunning_pipeline_stages dps    ON dps.slug = dpc.stage_slug
