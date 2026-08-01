@@ -155,8 +155,8 @@ COMMENT ON VIEW ai_readonly.v_deals_per_klant IS
 CREATE OR REPLACE VIEW ai_readonly.v_verkoop_per_producttype AS
 SELECT
   tv.id                                                  AS traject_variant_id,
-  t.slug                                                 AS traject_slug,
-  tv.label                                               AS variant_label,
+  t.name                                                 AS traject_naam,
+  tv.name                                                AS variant_naam,
   tv.default_duration_months,
   date_trunc('month', d.tl_quotation_accepted_at)::date  AS maand_start,
   COUNT(*)                                               AS aantal_verkopen,
@@ -167,11 +167,11 @@ JOIN public.trajects t ON t.id = tv.traject_id
 WHERE d.tl_quotation_accepted_at IS NOT NULL
   AND d.tl_quotation_accepted_at >= now() - interval '24 months'
   AND (d.source IS NULL OR d.source <> 'tl_import')
-GROUP BY tv.id, t.slug, tv.label, tv.default_duration_months, date_trunc('month', d.tl_quotation_accepted_at)
+GROUP BY tv.id, t.name, tv.name, tv.default_duration_months, date_trunc('month', d.tl_quotation_accepted_at)
 ORDER BY maand_start DESC, totaal_omzet_excl_btw DESC;
 
 COMMENT ON VIEW ai_readonly.v_verkoop_per_producttype IS
-  'Verkoop per traject-variant per maand (laatste 24 mnd). Directe join via deals.traject_variant_id — 1 deal = 1 variant, geen dubbeltellingen. EXCL BTW; sluit ghost-deals uit; deals zonder variant vallen weg.';
+  'Verkoop per traject-variant per maand (laatste 24 mnd). Directe join via deals.traject_variant_id — 1 deal = 1 variant. EXCL BTW; ghost-deals uitgesloten; deals zonder variant vallen weg via INNER JOIN.';
 
 
 -- ═══════════════════════════════════════════════════════════════════════════
