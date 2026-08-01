@@ -378,7 +378,7 @@ SELECT
   t.assigned_to_id,
   COALESCE(p.full_name, '(onbekend)')                                         AS medewerker_naam,
   COUNT(*)                                                                    AS aantal_open,
-  COUNT(*) FILTER (WHERE t.deadline < CURRENT_DATE)                           AS aantal_overdue,
+  COUNT(*) FILTER (WHERE NULLIF(t.deadline, '')::timestamptz::date < CURRENT_DATE)  AS aantal_overdue,
   COUNT(*) FILTER (WHERE t.prioriteit = 'Hoog')                               AS aantal_hoog_prioriteit,
   COUNT(*) FILTER (WHERE t.prioriteit = 'Urgent')                             AS aantal_urgent,
   MIN(t.aangemaakt)                                                           AS oudste_open_sinds
