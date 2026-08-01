@@ -151,15 +151,20 @@ export default async function handler(req, res) {
           throw new Error('template_name is verplicht (bv. "aanmaning_dag7" of "aanmaning_dag14")');
         }
 
-        // Body + meta_template_name uit dunning_templates (net als executor).
+        // Body uit dunning_templates. LOOKUP op meta_template_name (niet 'name'):
+        // - 'name'                = display-label (bv. "Aanmaning dag 7 (WhatsApp)")
+        // - 'meta_template_name'  = de Meta-side approved key (bv. "aanmaning_dag7")
+        // De console-caller geeft de Meta-key mee (die matcht het template in
+        // Meta Business Manager). Vorige lookup op 'name' vond 0 rijen → error
+        // "geen whatsapp-template met name=..." verhulde de echte oorzaak.
         const { data: tpl, error: tplErr } = await supabaseAdmin
           .from('dunning_templates')
           .select('id, name, kind, subject, body, meta_template_name, language, is_active')
-          .eq('name', tplName)
+          .eq('meta_template_name', tplName)
           .eq('kind', 'whatsapp')
           .maybeSingle();
         if (tplErr) throw new Error('dunning_templates fetch: ' + tplErr.message);
-        if (!tpl)   throw new Error(`dunning_templates: geen whatsapp-template met name='${tplName}'`);
+        if (!tpl)   throw new Error(`dunning_templates: geen whatsapp-template met meta_template_name='${tplName}'`);
         if (!tpl.meta_template_name) throw new Error(`template '${tplName}': meta_template_name ontbreekt`);
 
         // Open invoices al gefetcht boven (openInvs) — hergebruik als context.
