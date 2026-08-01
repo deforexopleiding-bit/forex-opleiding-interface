@@ -158,7 +158,7 @@
     },
     {
       "path": "/api/cron-leadsonderhoud",
-      "schedule": "*/15 * * * *"
+      "schedule": "* * * * *"
     }
   ],
   "headers": [
