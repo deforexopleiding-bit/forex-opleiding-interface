@@ -189,6 +189,14 @@
   .sad-datepop input{width:100%;padding:7px 10px;border:1px solid var(--sad-border);border-radius:8px;background:var(--sad-surface-2);color:var(--sad-text);font:inherit;margin-bottom:10px}
   .sad-datepop button{background:linear-gradient(135deg,var(--brand-500),var(--brand-700));color:#fff;border:none;padding:8px 16px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12.5px}
 
+  /* Topbar-klok (prototype .tb-clock) — geïnjecteerd in de shared topbar
+     ná mountTopbar(). Vervangt de sidebar-klok, alleen op deze pagina. */
+  body.sad-body .sidebar-clock { display:none !important; }
+  .tb-clock{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;line-height:1.1;padding:0 12px;min-width:96px;font-family:var(--fd)}
+  .tb-clock #tbTime{font-size:14px;font-weight:700;color:var(--sad-text);letter-spacing:.3px;font-variant-numeric:tabular-nums}
+  .tb-clock #tbDate{font-size:10.5px;color:var(--sad-dim);font-weight:600;text-transform:capitalize;margin-top:1px}
+  @media(max-width:720px){.tb-clock{display:none}}
+
   /* Nieuwe-taak modal */
   .sad-modal-scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:9999;padding:20px}
   .sad-modal-scrim.on{display:flex}
@@ -245,17 +253,9 @@
         <svg class="sad-qic" viewBox="0 0 24 24"><path d="M6 2h9l5 5v13a1 1 0 01-1 1H6a1 1 0 01-1-1V3a1 1 0 011-1z"/><path d="M9 12h6M9 16h6"/></svg>
         Factuur
       </a>
-      <a class="sad-qkbtn" href="/modules/sales-wizard.html" title="Nieuwe klant via sales-wizard (aparte popup komt later)">
-        <svg class="sad-qic" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
-        Klant
-      </a>
-      <div class="sad-qkbtn disabled" title="Komt in PR2 — leads-create endpoint">
-        <svg class="sad-qic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-        Lead
-      </div>
       <button class="sad-qkbtn primary" id="sadNewTaskBtn" title="Nieuwe taak voor mezelf">
         <svg class="sad-qic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-        Taak
+        Nieuw
       </button>
     </div>
   </div>
@@ -710,9 +710,51 @@ function sadWirePeriod() {
   });
 }
 
+// ── Topbar-klok (prototype .tb-clock) ─────────────────────────────────
+// Injecteert klok+datum in de shared topbar, tussen zoekbalk en user-slot.
+// Idempotent: sidebar.js mount is async (event 'sidebar:mounted' bestaat
+// niet), dus we polleren tot #app-topbar-user er is en injecteren dan
+// eenmalig. Als de shared topbar niet verschijnt (bv. door layout-issue)
+// stopt de poll na 20 pogingen (2s). Update-timer draait pas nadat het
+// element hangt — geen orphan-interval bij mislukte mount.
+function sadMountTopbarClock() {
+  let tries = 0;
+  const tickInterval = { handle: null };
+  const tryMount = () => {
+    tries++;
+    const userSlot = document.getElementById('app-topbar-user');
+    if (!userSlot) {
+      if (tries < 20) return setTimeout(tryMount, 100);
+      console.warn('[sad] topbar-user slot niet gevonden — klok wordt niet gerenderd');
+      return;
+    }
+    if (document.getElementById('tbClock')) return; // idempotent
+    const clock = document.createElement('div');
+    clock.className = 'tb-clock';
+    clock.id = 'tbClock';
+    clock.innerHTML = '<span id="tbTime">--:--:--</span><span id="tbDate">—</span>';
+    userSlot.parentNode.insertBefore(clock, userSlot);
+    const tick = () => {
+      const now = new Date();
+      const timeEl = document.getElementById('tbTime');
+      const dateEl = document.getElementById('tbDate');
+      if (!timeEl || !dateEl) {
+        if (tickInterval.handle) { clearInterval(tickInterval.handle); tickInterval.handle = null; }
+        return;
+      }
+      timeEl.textContent = now.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      dateEl.textContent = now.toLocaleDateString('nl-NL', { weekday: 'short', day: 'numeric', month: 'short' });
+    };
+    tick();
+    tickInterval.handle = setInterval(tick, 1000);
+  };
+  tryMount();
+}
+
 // ── Init ──────────────────────────────────────────────────────────────
 function init() {
   sadWirePeriod();
+  sadMountTopbarClock();
   document.getElementById('sadNewTaskBtn').addEventListener('click', sadOpenTaskModal);
   document.getElementById('sadTaskCancel').addEventListener('click', sadCloseTaskModal);
   document.getElementById('sadTaskCreate').addEventListener('click', sadCreateTask);
