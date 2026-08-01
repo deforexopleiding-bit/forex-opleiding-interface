@@ -740,6 +740,42 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
   // Meta N verwachtte → #132000 "Number of parameters does not match".
   const variables = buildMetaTemplateVariables(template.body, rendered.variables_used || {});
 
+  // ─── EMPTY-PARAM GUARD (fail-loud, dekt Meta #131008) ─────────────────
+  // Meta returnt #131008 als een positional parameter een lege string is
+  // (bv. factuur.dagen_overdue = 0 dat naar "" renderde, of een klant
+  // zonder voornaam). Vóór 1 aug 2026 gaven we die lege string toch mee →
+  // 4 fails/dag. Nu: skip send + log welk slot leeg was zodat we het
+  // achterliggende data-issue kunnen fixen ipv Meta 'em laten falen.
+  const emptyIdx = variables.findIndex(v => v == null || String(v).length === 0);
+  if (emptyIdx >= 0) {
+    // Welk placeholder-slot is leeg? Herbouw de body-scan om de KEY-naam
+    // (bv. 'factuur.dagen_overdue') te tonen, niet alleen de index.
+    let emptyKey = null;
+    try {
+      const diag = diagnoseTemplatePlaceholders(template.body);
+      emptyKey = diag.matched[emptyIdx] || null;
+    } catch (_) { /* diag-lookup mag nooit blokkeren */ }
+    console.warn('[dunning-executor whatsapp] EMPTY PARAM — skip send (voorkomt Meta #131008)', {
+      template_id:        template.id,
+      meta_template_name: template.meta_template_name,
+      empty_param_index:  emptyIdx + 1,
+      empty_param_key:    emptyKey,
+      customer_id:        customer?.id,
+    });
+    return {
+      status: 'skipped',
+      log_event: 'whatsapp_skipped_empty_param',
+      log_payload: {
+        template_id:        template.id,
+        meta_template_name: template.meta_template_name,
+        to:                 customerPhone,
+        reason:             `Positional parameter {{${emptyIdx + 1}}} (${emptyKey || 'onbekend'}) is leeg — Meta zou #131008 gooien`,
+        empty_param_index:  emptyIdx + 1,
+        empty_param_key:    emptyKey,
+      },
+    };
+  }
+
   // Fail-loud diagnose: warn zichtbaar in Vercel-logs als er placeholders
   // in body zitten die de nauwe regex NIET matcht. Dat is 100% de bug-bron
   // voor Meta #132000 — Meta verwacht het totale aantal placeholders,
