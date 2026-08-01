@@ -46,7 +46,10 @@ window._authSharedReady = (async function () {
   // mentor-dashboard. Super_admin / admin / marketing / administratie /
   // viewer / anders → '/index.html' (default).
   const ROLE_LANDING = {
-    super_admin:    '/index.html',
+    // super_admin krijgt sinds PR1 (2026-08-01) een eigen dashboard-shell.
+    // Management-groep (admin/manager/marketing/administratie/viewer) blijft
+    // op /index.html — die is expliciet ongemoeid gelaten.
+    super_admin:    '/modules/super-admin-dashboard.html',
     admin:          '/index.html',
     manager:        '/index.html',
     sales:          '/modules/sales-dashboard.html',

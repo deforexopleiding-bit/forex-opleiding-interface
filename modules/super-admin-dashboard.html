@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="nl" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard — De Forex Opleiding</title>
+<link rel="stylesheet" href="/modules/shared/agent-shared.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  /* Prototype-tokens — theme-aware via data-theme. Blijft naast --ds-* tokens
+     bestaan; agent-shared.css levert de CRM-theme-toggle die data-theme op
+     <html> zet, en deze tokens reageren daarop. */
+  :root{
+    --brand-900:#0c2028;--brand-800:#123143;--brand-700:#1b4d63;--brand-600:#216383;
+    --brand-500:#2b81a8;--brand-400:#46a5cc;--brand-300:#7cc6e4;
+    --accent:#46e0c8;--accent-2:#ffb547;--danger:#ff5d6c;--good:#3ddc84;--violet:#9b8cff;--pink:#ff7eb6;
+    --fd:'Segoe UI',system-ui,-apple-system,sans-serif;
+    --fb:system-ui,-apple-system,'Segoe UI',sans-serif;
+    --fm:ui-monospace,'SF Mono','Consolas',monospace;
+    --r:20px;--r-sm:12px;--ease:cubic-bezier(.16,1,.3,1);
+  }
+  html[data-theme="dark"]{
+    --sad-bg:#060d12;--sad-surface:rgba(255,255,255,.035);--sad-surface-2:rgba(255,255,255,.05);
+    --sad-surface-hover:rgba(70,165,204,.10);--sad-border:rgba(255,255,255,.08);--sad-border-glow:rgba(70,224,200,.35);
+    --sad-text:#eaf6fb;--sad-dim:#8fb0c0;--sad-faint:#547082;
+  }
+  html[data-theme="light"]{
+    --sad-bg:#eef4f7;--sad-surface:rgba(255,255,255,.75);--sad-surface-2:#ffffff;
+    --sad-surface-hover:rgba(33,99,131,.07);--sad-border:rgba(18,49,67,.10);--sad-border-glow:rgba(43,129,168,.4);
+    --sad-text:#0c2028;--sad-dim:#3f5a67;--sad-faint:#7e97a3;
+  }
+  html:not([data-theme="dark"]):not([data-theme="light"]){
+    --sad-bg:#eef4f7;--sad-surface:rgba(255,255,255,.75);--sad-surface-2:#ffffff;
+    --sad-surface-hover:rgba(33,99,131,.07);--sad-border:rgba(18,49,67,.10);--sad-border-glow:rgba(43,129,168,.4);
+    --sad-text:#0c2028;--sad-dim:#3f5a67;--sad-faint:#7e97a3;
+  }
+
+  body.sad-body{background:var(--sad-bg);color:var(--sad-text);font-family:var(--fb);min-height:100vh;overflow-x:hidden;transition:background .6s var(--ease),color .4s}
+  .sad-wrap{position:relative;z-index:1;padding:26px 26px 70px;max-width:1400px}
+
+  /* aurora - alleen dark, decoratief */
+  .sad-aurora{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+  .sad-aurora::before,.sad-aurora::after{content:'';position:absolute;border-radius:50%;filter:blur(90px);opacity:.5;animation:sadDrift 22s ease-in-out infinite alternate}
+  .sad-aurora::before{width:55vw;height:55vw;left:-10vw;top:-15vw;background:radial-gradient(circle,var(--brand-500),transparent 65%)}
+  .sad-aurora::after{width:48vw;height:48vw;right:-12vw;bottom:-18vw;background:radial-gradient(circle,var(--accent),transparent 60%);opacity:.28;animation-delay:-8s}
+  .sad-blob3{position:fixed;width:40vw;height:40vw;left:30vw;bottom:-12vw;border-radius:50%;filter:blur(90px);opacity:.2;background:radial-gradient(circle,var(--violet),transparent 60%);animation:sadDrift 28s ease-in-out infinite alternate;z-index:0;pointer-events:none}
+  html:not([data-theme="dark"]) .sad-aurora,html:not([data-theme="dark"]) .sad-blob3{opacity:0 !important}
+  @keyframes sadDrift{0%{transform:translate(0,0) scale(1)}100%{transform:translate(6vw,4vw) scale(1.15)}}
+
+  /* Greet */
+  .sad-greet{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+  .sad-greet h2{font-family:var(--fd);font-size:22px;font-weight:800;letter-spacing:-.4px}
+  .sad-greet p{font-size:12.5px;color:var(--sad-dim);margin-top:2px}
+  .sad-greet-act{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+
+  /* Period-segment */
+  .sad-seg{display:flex;gap:2px;background:var(--sad-surface-2);border:1px solid var(--sad-border);border-radius:10px;padding:3px}
+  .sad-seg button{border:none;background:none;color:var(--sad-dim);font-family:var(--fb);font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:7px;cursor:pointer;transition:.22s}
+  .sad-seg button.on{background:linear-gradient(135deg,var(--brand-500),var(--brand-700));color:#fff}
+  .sad-seg button:hover:not(.on){color:var(--sad-text)}
+
+  /* Snelknop-rail (naast periode) */
+  .sad-qkbtn{display:flex;align-items:center;gap:7px;background:var(--sad-surface);border:1px solid var(--sad-border);border-radius:10px;padding:8px 12px;cursor:pointer;transition:.22s var(--ease);font-size:12.5px;font-weight:600;color:var(--sad-text);text-decoration:none}
+  .sad-qkbtn:hover{border-color:var(--sad-border-glow);background:var(--sad-surface-hover);transform:translateY(-2px)}
+  .sad-qkbtn.primary{background:linear-gradient(135deg,var(--brand-500),var(--brand-700));color:#fff;border-color:transparent}
+  .sad-qkbtn.disabled{opacity:.5;cursor:not-allowed;filter:grayscale(1)}
+  .sad-qic{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+  /* topzone */
+  .sad-topzone{display:grid;grid-template-columns:1.5fr 1fr;gap:18px;margin-bottom:18px}
+  @media(max-width:1050px){.sad-topzone{grid-template-columns:1fr}}
+
+  /* Leads-strip */
+  .sad-leadstrip{background:var(--sad-surface);backdrop-filter:blur(18px);border:1px solid var(--sad-border);border-radius:var(--r);padding:20px;position:relative;overflow:hidden}
+  .sad-ch{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .sad-ch h3{font-family:var(--fd);font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px}
+  .sad-ch h3 .sad-d{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent);animation:sadBlink 2.2s infinite}
+  .sad-ch .sad-tot{font-size:12px;color:var(--sad-dim)}
+  @keyframes sadBlink{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(1.4)}}
+  .sad-lgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  @media(max-width:560px){.sad-lgrid{grid-template-columns:repeat(2,1fr)}}
+  .sad-ltile{background:var(--sad-surface-2);border:1px solid var(--sad-border);border-radius:13px;padding:14px;position:relative;overflow:hidden;transition:.25s var(--ease)}
+  .sad-ltile .sad-lname{font-size:11px;color:var(--sad-dim);font-weight:600;margin-bottom:8px}
+  .sad-ltile .sad-lnum{font-family:var(--fd);font-size:28px;font-weight:800;letter-spacing:-1px;line-height:1}
+  .sad-ltile .sad-lbar{height:4px;border-radius:3px;background:rgba(0,0,0,.08);margin-top:10px}
+  .sad-ltile .sad-lchg{font-size:10.5px;margin-top:7px;color:var(--sad-dim);font-weight:600}
+  .sad-placeholder{color:var(--sad-faint);font-size:11px;font-style:italic;text-align:center;padding:10px 0}
+
+  /* AI-card */
+  .sad-aicard{background:linear-gradient(150deg,var(--brand-800),var(--brand-900) 75%);border:1px solid var(--sad-border-glow);border-radius:var(--r);padding:20px;position:relative;overflow:hidden;display:flex;flex-direction:column}
+  html:not([data-theme="dark"]) .sad-aicard{background:linear-gradient(150deg,#dbe9f0,#eef4f7 75%);color:var(--sad-text)}
+  .sad-aicard::after{content:'';position:absolute;top:-30%;right:-15%;width:60%;height:150%;background:radial-gradient(circle,var(--accent),transparent 60%);opacity:.22;animation:sadBlink 4s infinite}
+  .sad-ai-hd{display:flex;align-items:center;gap:12px;margin-bottom:12px;position:relative;z-index:1}
+  .sad-ai-orb{width:44px;height:44px;border-radius:50%;flex:none;background:radial-gradient(circle at 35% 30%,var(--accent),var(--brand-500) 70%);box-shadow:0 0 30px -4px var(--accent),inset 0 0 12px rgba(255,255,255,.4);animation:sadFloaty 3.5s ease-in-out infinite}
+  @keyframes sadFloaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+  .sad-ai-hd h3{font-family:var(--fd);font-size:16px;font-weight:800}
+  .sad-ai-hd p{font-size:11.5px;color:var(--sad-dim)}
+  html[data-theme="dark"] .sad-ai-hd h3,html[data-theme="dark"] .sad-ai-hd p{color:#eaf6fb}
+  .sad-ai-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;margin-bottom:12px;position:relative;z-index:1}
+  .sad-ai-chips span{font-size:10.5px;color:var(--sad-dim);background:var(--sad-surface-2);border:1px solid var(--sad-border);padding:5px 10px;border-radius:20px;cursor:pointer;transition:.22s}
+  .sad-ai-inbar{display:flex;align-items:center;gap:8px;background:var(--sad-surface-2);border:1px solid var(--sad-border-glow);border-radius:12px;padding:8px 8px 8px 14px;position:relative;z-index:1;margin-top:auto}
+  .sad-ai-inbar input{flex:1;background:none;border:none;color:var(--sad-text);font-family:var(--fb);font-size:13px;outline:none}
+  .sad-ai-inbar input::placeholder{color:var(--sad-faint)}
+  .sad-ai-inbar button{width:34px;height:34px;border-radius:10px;border:1px solid var(--sad-border);background:var(--sad-surface);color:var(--sad-text);cursor:pointer;flex:none}
+  .sad-ai-inbar button.send{background:linear-gradient(135deg,var(--accent),var(--brand-500));color:#032;font-weight:800;border-color:transparent}
+  .sad-ai-hint{font-size:11px;color:var(--accent-2);margin-top:6px;position:relative;z-index:1;min-height:14px}
+
+  /* Grid */
+  .sad-grid{display:grid;gap:18px}
+  .sad-r1{grid-template-columns:1.6fr 1fr}
+  .sad-r2{grid-template-columns:1fr 1fr 1fr}
+  @media(max-width:1050px){.sad-r1,.sad-r2{grid-template-columns:1fr}}
+  .sad-grid+.sad-grid{margin-top:18px}
+  .sad-card{background:var(--sad-surface);backdrop-filter:blur(18px);border:1px solid var(--sad-border);border-radius:var(--r);padding:22px;position:relative;overflow:hidden;box-shadow:0 20px 50px -30px rgba(0,0,0,.4)}
+
+  /* Omzet-card */
+  .sad-otop{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px}
+  .sad-ot{background:var(--sad-surface-2);border:1px solid var(--sad-border);border-radius:12px;padding:12px 14px}
+  .sad-ot .sad-l{font-size:11px;color:var(--sad-dim);font-weight:600;margin-bottom:4px}
+  .sad-ot .sad-v{font-family:var(--fd);font-size:22px;font-weight:800;letter-spacing:-.5px}
+  .sad-ot .sad-chg{font-size:11px;color:var(--sad-dim);margin-top:4px}
+  .sad-ot.mrr{border-color:var(--sad-border-glow)}
+  .sad-chart-wrap{position:relative;height:180px;margin:6px 0 8px}
+  .sad-lg{display:flex;gap:14px;font-size:11px;color:var(--sad-dim);padding:0 4px}
+  .sad-lg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:middle}
+  .sad-prodstrip{background:var(--sad-surface-2);border:1px solid var(--sad-border);border-radius:12px;padding:12px 14px;margin-top:12px}
+  .sad-ps-lbl{font-size:11px;color:var(--sad-dim);text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:8px}
+  .sad-ps-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  @media(max-width:640px){.sad-ps-grid{grid-template-columns:repeat(2,1fr)}}
+  .sad-ps{background:var(--sad-surface);border:1px solid var(--sad-border);border-radius:10px;padding:10px}
+  .sad-ps-top{font-size:11px;font-weight:700;margin-bottom:3px}
+  .sad-ps-num{font-family:var(--fd);font-size:22px;font-weight:800;letter-spacing:-.5px;line-height:1}
+  .sad-ps-rev{font-size:11px;color:var(--sad-dim);margin-top:2px}
+
+  /* Urgentie-lijst */
+  .sad-urg{display:flex;align-items:center;gap:12px;padding:11px 13px;background:var(--sad-surface-2);border:1px solid var(--sad-border);border-radius:11px;margin-bottom:7px;cursor:pointer;transition:.2s var(--ease);text-decoration:none;color:inherit}
+  .sad-urg:hover{transform:translateX(3px);border-color:var(--sad-border-glow)}
+  .sad-urg .sad-b{font-family:var(--fd);font-size:22px;font-weight:800;min-width:34px;text-align:center}
+  .sad-urg.hi .sad-b{color:var(--danger)}
+  .sad-urg.mid .sad-b{color:var(--accent-2)}
+  .sad-urg.lo .sad-b{color:var(--sad-dim)}
+  .sad-urg .sad-tx{flex:1}
+  .sad-urg .sad-t{font-size:13px;font-weight:600;letter-spacing:-.2px}
+  .sad-urg .sad-s{font-size:11px;color:var(--sad-dim);margin-top:2px}
+  .sad-urg .sad-ar{color:var(--sad-faint);font-size:16px}
+
+  /* Zoom-card */
+  .sad-zb{text-align:center;padding:12px 0 8px}
+  .sad-zb .sad-n{font-family:var(--fd);font-size:42px;font-weight:800;letter-spacing:-1.5px;line-height:1;color:var(--brand-500)}
+  .sad-zb .sad-s{font-size:12px;color:var(--sad-dim);margin-top:5px}
+  .sad-zm{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--sad-border)}
+  .sad-zm .sad-x{text-align:center;padding:8px 4px;background:var(--sad-surface-2);border-radius:9px}
+  .sad-zm .sad-n{font-family:var(--fd);font-size:18px;font-weight:800;color:var(--sad-text)}
+  .sad-zm .sad-l{font-size:10.5px;color:var(--sad-dim);text-transform:uppercase;letter-spacing:.8px;margin-top:2px}
+
+  /* Postvakken-card */
+  .sad-ibx{display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--sad-surface-2);border:1px solid var(--sad-border);border-radius:10px;margin-bottom:6px;text-decoration:none;color:inherit;transition:.2s var(--ease)}
+  .sad-ibx:hover{border-color:var(--sad-border-glow);transform:translateX(3px)}
+  .sad-ibx .sad-ic{font-size:16px}
+  .sad-ibx .sad-nm{flex:1;font-size:12.5px;font-weight:600}
+  .sad-ibx .sad-ct{font-family:var(--fd);font-size:13px;font-weight:800;padding:3px 9px;border-radius:8px;background:var(--sad-surface);color:var(--sad-dim)}
+  .sad-ibx .sad-ct.has{background:linear-gradient(135deg,var(--danger),#c8394a);color:#fff}
+  .sad-ibx .sad-ct.zero{color:var(--sad-faint)}
+
+  /* Taken-card */
+  .sad-tk{display:flex;align-items:flex-start;gap:10px;padding:9px 4px;border-bottom:1px solid var(--sad-border);transition:.2s}
+  .sad-tk:last-of-type{border-bottom:none}
+  .sad-tk.done{opacity:.4}
+  .sad-tk.done .sad-tkt{text-decoration:line-through}
+  .sad-tk input[type="checkbox"]{width:18px;height:18px;cursor:pointer;margin-top:2px;accent-color:var(--brand-500)}
+  .sad-tk .sad-tktx{flex:1}
+  .sad-tk .sad-tkt{font-size:13px;font-weight:600}
+  .sad-tk .sad-tks{font-size:10.5px;color:var(--sad-dim);margin-top:2px}
+  .sad-tk-foot{margin-top:10px;padding-top:10px;border-top:1px solid var(--sad-border);font-size:11.5px;color:var(--sad-dim)}
+  .sad-tk-foot b{color:var(--sad-text);font-family:var(--fd)}
+  .sad-tk-empty{text-align:center;padding:20px;color:var(--sad-faint);font-size:12px;font-style:italic}
+
+  /* Events-card placeholder */
+  .sad-ev-placeholder{padding:30px;text-align:center;color:var(--sad-faint);font-size:12.5px;font-style:italic;background:var(--sad-surface-2);border:1px dashed var(--sad-border);border-radius:12px}
+
+  /* Load-state */
+  .sad-loading{color:var(--sad-faint);font-size:11px;font-style:italic}
+  .sad-err{color:var(--danger);font-size:11.5px;padding:8px 0}
+
+  /* Datepicker-popover */
+  .sad-datepop{position:absolute;top:100%;right:0;margin-top:8px;background:var(--sad-surface);backdrop-filter:blur(18px);border:1px solid var(--sad-border);border-radius:12px;padding:14px;box-shadow:0 20px 50px -20px rgba(0,0,0,.4);display:none;z-index:20;min-width:280px}
+  .sad-datepop.on{display:block}
+  .sad-datepop label{display:block;font-size:11px;color:var(--sad-dim);margin-bottom:6px;font-weight:600}
+  .sad-datepop input{width:100%;padding:7px 10px;border:1px solid var(--sad-border);border-radius:8px;background:var(--sad-surface-2);color:var(--sad-text);font:inherit;margin-bottom:10px}
+  .sad-datepop button{background:linear-gradient(135deg,var(--brand-500),var(--brand-700));color:#fff;border:none;padding:8px 16px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12.5px}
+
+  /* Nieuwe-taak modal */
+  .sad-modal-scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:9999;padding:20px}
+  .sad-modal-scrim.on{display:flex}
+  .sad-modal{background:var(--sad-bg);border:1px solid var(--sad-border);border-radius:16px;padding:22px;width:100%;max-width:440px;color:var(--sad-text)}
+  .sad-modal h3{font-family:var(--fd);font-size:16px;margin-bottom:14px}
+  .sad-modal label{display:block;font-size:11px;color:var(--sad-dim);margin-bottom:4px;margin-top:10px;font-weight:600}
+  .sad-modal input,.sad-modal textarea,.sad-modal select{width:100%;padding:8px 10px;border:1px solid var(--sad-border);border-radius:8px;background:var(--sad-surface-2);color:var(--sad-text);font:inherit;box-sizing:border-box}
+  .sad-modal textarea{min-height:70px;resize:vertical}
+  .sad-modal-foot{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+  .sad-modal-foot button{padding:8px 16px;border-radius:8px;border:1px solid var(--sad-border);background:var(--sad-surface-2);color:var(--sad-text);font-weight:600;cursor:pointer;font-size:12.5px}
+  .sad-modal-foot button.primary{background:linear-gradient(135deg,var(--brand-500),var(--brand-700));color:#fff;border-color:transparent}
+</style>
+</head>
+<body class="sad-body" style="visibility:hidden">
+<div class="sad-aurora"></div>
+<div class="sad-blob3"></div>
+
+<!-- Sidebar mount — sidebar.js renderd hier de complete nav met rol-gating -->
+<div id="sidebar-mount"></div>
+
+<!-- Hoofdcontent -->
+<main class="main sad-wrap" id="appRoot">
+
+  <!-- Greet + periode + snelknoppen -->
+  <div class="sad-greet">
+    <div>
+      <h2 id="sadGreetTitle">Goedemorgen, Amigo</h2>
+      <p id="sadGreetSub">— · je hele bedrijf in één oogopslag</p>
+    </div>
+    <div class="sad-greet-act" style="position:relative">
+      <div class="sad-seg" id="sadPageSeg">
+        <button data-p="dag">Dag</button>
+        <button data-p="week">Week</button>
+        <button class="on" data-p="maand">Maand</button>
+        <button data-p="jaar">Jaar</button>
+        <button data-p="custom" id="sadPageCustom">Custom ▾</button>
+      </div>
+      <div class="sad-datepop" id="sadDatePop">
+        <label>Van</label>
+        <input type="date" id="sadPdFrom">
+        <label>T/m</label>
+        <input type="date" id="sadPdTo">
+        <button id="sadPdApply">Toepassen</button>
+      </div>
+      <a class="sad-qkbtn" href="/modules/sales-wizard.html" title="Nieuwe offerte via sales-wizard">
+        <svg class="sad-qic" viewBox="0 0 24 24"><path d="M14 3v5h5"/><path d="M8 3h6l5 5v11a1 1 0 01-1 1H8a1 1 0 01-1-1V4a1 1 0 011-1z"/></svg>
+        Offerte
+      </a>
+      <div class="sad-qkbtn disabled" title="Komt in PR4 — traject-aanmelden popup">
+        <svg class="sad-qic" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M7 10v5c0 1.5 2.5 3 5 3s5-1.5 5-3v-5"/></svg>
+        Traject aanmelden
+      </div>
+      <a class="sad-qkbtn" href="/modules/finance.html?tab=facturen&amp;action=new" title="Nieuwe factuur">
+        <svg class="sad-qic" viewBox="0 0 24 24"><path d="M6 2h9l5 5v13a1 1 0 01-1 1H6a1 1 0 01-1-1V3a1 1 0 011-1z"/><path d="M9 12h6M9 16h6"/></svg>
+        Factuur
+      </a>
+      <a class="sad-qkbtn" href="/modules/sales-wizard.html" title="Nieuwe klant via sales-wizard (aparte popup komt later)">
+        <svg class="sad-qic" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+        Klant
+      </a>
+      <div class="sad-qkbtn disabled" title="Komt in PR2 — leads-create endpoint">
+        <svg class="sad-qic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        Lead
+      </div>
+      <button class="sad-qkbtn primary" id="sadNewTaskBtn" title="Nieuwe taak voor mezelf">
+        <svg class="sad-qic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        Taak
+      </button>
+    </div>
+  </div>
+
+  <!-- TOPZONE: leads (placeholder → PR2) + AI-manager (visueel, geen backend) -->
+  <div class="sad-topzone">
+    <div class="sad-leadstrip">
+      <div class="sad-ch"><h3><span class="sad-d"></span> Leads per traject <span style="font-size:11px;color:var(--sad-faint);margin-left:8px" id="sadLeadsPeriodLbl">deze maand</span></h3></div>
+      <div class="sad-lgrid" id="sadLeadsGrid">
+        <div class="sad-ltile"><div class="sad-lname">7-daagse</div><div class="sad-lnum">—</div><div class="sad-lbar"></div><div class="sad-lchg">binnenkort (PR2)</div></div>
+        <div class="sad-ltile"><div class="sad-lname">Event</div><div class="sad-lnum">—</div><div class="sad-lbar"></div><div class="sad-lchg">binnenkort (PR2)</div></div>
+        <div class="sad-ltile"><div class="sad-lname">Webinar</div><div class="sad-lnum">—</div><div class="sad-lbar"></div><div class="sad-lchg">binnenkort (PR2)</div></div>
+        <div class="sad-ltile"><div class="sad-lname">Mini cursus</div><div class="sad-lnum">—</div><div class="sad-lbar"></div><div class="sad-lchg">binnenkort (PR2)</div></div>
+      </div>
+    </div>
+
+    <div class="sad-aicard">
+      <div class="sad-ai-hd">
+        <div class="sad-ai-orb"></div>
+        <div><h3>AI Manager</h3><p>Vraag alles over je bedrijf</p></div>
+      </div>
+      <div class="sad-ai-chips">
+        <span>Hoeveel wanbetalers open?</span>
+        <span>Omzet deze week?</span>
+        <span>Wie heeft geen mentor?</span>
+      </div>
+      <div class="sad-ai-hint" id="sadAiHint">AI-motor komt in PR5 — nu nog niet actief</div>
+      <div class="sad-ai-inbar">
+        <input id="sadAiInput" placeholder="Typ of spreek je vraag in…" disabled>
+        <button title="Inspreken (binnenkort)" disabled>🎤</button>
+        <button class="send" id="sadAiSend" title="Verstuur (binnenkort)" disabled>↑</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROW 1: OMZET + URGENTIE -->
+  <div class="sad-grid sad-r1">
+    <div class="sad-card">
+      <div class="sad-ch">
+        <h3><span class="sad-d"></span> Omzet — getekende offertes <span style="font-size:11px;color:var(--sad-faint);margin-left:8px">INCL BTW</span></h3>
+        <span id="sadOmzetTag" style="font-size:11px;color:var(--sad-dim)">deze maand</span>
+      </div>
+      <div class="sad-otop">
+        <div class="sad-ot"><div class="sad-l">Losse verkopen</div><div class="sad-v">€<span id="sadKpiLos">—</span></div><div class="sad-chg" id="sadKpiLosSub">—</div></div>
+        <div class="sad-ot mrr"><div class="sad-l">Abonnementen (MRR)</div><div class="sad-v">€<span id="sadKpiMrr">—</span></div><div class="sad-chg" id="sadKpiMrrSub">—</div></div>
+        <div class="sad-ot"><div class="sad-l">Totaal incl. btw</div><div class="sad-v">€<span id="sadKpiTot">—</span></div><div class="sad-chg" id="sadKpiTotSub">— offertes</div></div>
+      </div>
+      <div class="sad-chart-wrap"><canvas id="sadOmzetChart"></canvas></div>
+      <div class="sad-lg"><span><i style="background:var(--brand-400)"></i>Losse verkopen</span><span><i style="background:var(--accent)"></i>Abonnementen (MRR)</span></div>
+      <div class="sad-prodstrip">
+        <div class="sad-ps-lbl">Verkocht <span id="sadPsPeriod">deze maand</span></div>
+        <div class="sad-ps-grid" id="sadPsGrid">
+          <div class="sad-ps"><div class="sad-ps-top" style="color:var(--brand-300)">1-op-1 · 6 mnd</div><div class="sad-ps-num" data-key="m6">—</div><div class="sad-ps-rev" data-key-rev="m6">€—</div></div>
+          <div class="sad-ps"><div class="sad-ps-top" style="color:var(--accent)">1-op-1 · 12 mnd</div><div class="sad-ps-num" data-key="m12">—</div><div class="sad-ps-rev" data-key-rev="m12">€—</div></div>
+          <div class="sad-ps"><div class="sad-ps-top" style="color:var(--accent-2)">1-op-1 · 24 mnd</div><div class="sad-ps-num" data-key="m24">—</div><div class="sad-ps-rev" data-key-rev="m24">€—</div></div>
+          <div class="sad-ps"><div class="sad-ps-top" style="color:var(--violet)">Memberships</div><div class="sad-ps-num" data-key="mem">—</div><div class="sad-ps-rev" data-key-rev="mem">€— MRR</div></div>
+        </div>
+        <div id="sadEdgeWarn" style="font-size:10.5px;color:var(--accent-2);margin-top:6px;display:none"></div>
+      </div>
+    </div>
+
+    <div class="sad-card">
+      <div class="sad-ch"><h3><span class="sad-d" style="background:var(--danger);box-shadow:0 0 10px var(--danger)"></span> Vereist jouw actie</h3></div>
+      <div id="sadUrgList"><div class="sad-loading">Laden…</div></div>
+    </div>
+  </div>
+
+  <!-- ROW 2: ZOOM + POSTVAKKEN + TAKEN -->
+  <div class="sad-grid sad-r2">
+    <div class="sad-card">
+      <div class="sad-ch"><h3><span class="sad-d"></span> Zoom-afspraken</h3></div>
+      <div class="sad-zb">
+        <div class="sad-n" id="sadZoomBigNum">—</div>
+        <div class="sad-s" id="sadZoomBigLbl">vandaag gepland</div>
+      </div>
+      <div class="sad-zm">
+        <div class="sad-x"><div class="sad-n" id="sadZoomToday">—</div><div class="sad-l">Vandaag</div></div>
+        <div class="sad-x"><div class="sad-n" id="sadZoomWeek">—</div><div class="sad-l">Week</div></div>
+        <div class="sad-x"><div class="sad-n" id="sadZoomMonth">—</div><div class="sad-l">Maand</div></div>
+      </div>
+    </div>
+
+    <div class="sad-card">
+      <div class="sad-ch"><h3><span class="sad-d"></span> Postvakken</h3></div>
+      <div class="sad-placeholder" style="text-align:left;padding:14px 0">Deep-links per inbox + tellers komen in PR2 (Joost/Lisa/e-mail-per-mailbox count-endpoints ontbreken nog).</div>
+    </div>
+
+    <div class="sad-card">
+      <div class="sad-ch"><h3><span class="sad-d"></span> Mijn taken</h3><a href="/modules/taken.html" style="font-size:11px;color:var(--brand-500);text-decoration:none">Takenbeheer →</a></div>
+      <div id="sadTakenList"><div class="sad-loading">Laden…</div></div>
+      <div class="sad-tk-foot" id="sadTakenFoot" style="display:none"><span><b id="sadTakenOpen">0</b> open · <span id="sadTakenDone">0</span> vandaag afgerond</span></div>
+    </div>
+  </div>
+
+  <!-- ROW 3: EVENTS placeholder (PR2) -->
+  <div class="sad-grid" style="grid-template-columns:1fr">
+    <div class="sad-card">
+      <div class="sad-ch"><h3><span class="sad-d"></span> Eerstkomende events — status aanmeldingen</h3><a href="/modules/events.html" style="font-size:11px;color:var(--brand-500);text-decoration:none">Events →</a></div>
+      <div class="sad-ev-placeholder">Events-status-kaart komt in PR2 (endpoint <code>events-followup-stats</code> moet nog gebouwd — cross-join events × attendees × follow-up-calls).</div>
+    </div>
+  </div>
+
+</main>
+
+<!-- Nieuwe-taak modal -->
+<div class="sad-modal-scrim" id="sadTaskModal">
+  <div class="sad-modal">
+    <h3>Nieuwe taak voor mezelf</h3>
+    <label>Titel *</label>
+    <input type="text" id="sadTaskTitle" maxlength="200" placeholder="Bv. Volg deal Julian op">
+    <label>Omschrijving</label>
+    <textarea id="sadTaskDesc" maxlength="2000" placeholder="Optioneel — extra context"></textarea>
+    <label>Prioriteit</label>
+    <select id="sadTaskPrio">
+      <option value="Normaal" selected>Normaal</option>
+      <option value="Hoog">Hoog</option>
+      <option value="Urgent">Urgent</option>
+      <option value="Laag">Laag</option>
+    </select>
+    <div id="sadTaskErr" style="color:var(--danger);font-size:11.5px;margin-top:8px;display:none"></div>
+    <div class="sad-modal-foot">
+      <button id="sadTaskCancel">Annuleer</button>
+      <button class="primary" id="sadTaskCreate">Aanmaken</button>
+    </div>
+  </div>
+</div>
+
+<!-- Shared scripts (auth + rbac + sidebar) -->
+<script src="/api/config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js" data-module="Dashboard"></script>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────
+// Super-admin dashboard — PR1 (fundament + omzet + zoom + urgentie + taken).
+// Volgt exact het prototype (dashboard-compleet.html). Kaarten die nog data-
+// endpoints missen tonen een 'binnenkort (PR2/PR4)'-placeholder — geen nepdata.
+// ─────────────────────────────────────────────────────────────────────
+(async () => {
+  await window._authSharedReady;
+  const profile = await window.AuthShared?.requireAuth();
+  if (!profile) return;
+  // Harde rol-check: alleen super_admin op deze pagina.
+  if (profile.role !== 'super_admin') {
+    // Andere rollen bounceren naar hun eigen landing (via de shared helper).
+    const landing = window.AuthShared?.getRoleLandingUrl?.(profile.role) || '/index.html';
+    window.location.replace(landing === '/modules/super-admin-dashboard.html' ? '/index.html' : landing);
+    return;
+  }
+  document.body.style.visibility = '';
+  document.getElementById('sadGreetTitle').textContent = 'Goedemorgen, ' + (profile.full_name?.split(' ')[0] || 'Amigo');
+  const today = new Date().toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  document.getElementById('sadGreetSub').textContent = today + ' · je hele bedrijf in één oogopslag';
+  init();
+})();
+
+// ── State ─────────────────────────────────────────────────────────────
+const sadState = {
+  period: 'maand',
+  customFrom: null,
+  customTo: null,
+  chart: null,
+};
+
+// ── Period-helpers ────────────────────────────────────────────────────
+function sadPeriodRange(period) {
+  const now = new Date();
+  const from = new Date(now);
+  const to = new Date(now);
+  if (period === 'dag')   from.setDate(now.getDate());
+  if (period === 'week')  from.setDate(now.getDate() - 6);
+  if (period === 'maand') { from.setDate(1); }
+  if (period === 'jaar')  { from.setMonth(0); from.setDate(1); }
+  return {
+    from: from.toISOString().slice(0, 10),
+    to:   to.toISOString().slice(0, 10),
+  };
+}
+function sadGroupByFor(period) {
+  if (period === 'dag')  return 'day';
+  if (period === 'week') return 'day';
+  if (period === 'jaar') return 'month';
+  return 'day';   // default voor maand
+}
+function sadPeriodLabel(period, custom) {
+  if (custom) return custom;
+  return ({ dag: 'vandaag', week: 'deze week', maand: 'deze maand', jaar: 'dit jaar' })[period] || 'deze maand';
+}
+function sadFmtEur(n) {
+  const val = Number(n) || 0;
+  return val.toLocaleString('nl-NL', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
+// ── Fetch-helper ──────────────────────────────────────────────────────
+async function sadFetch(url) {
+  const r = await window.AgentShared.apiFetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return await r.json();
+}
+
+// ── Data-loaders per kaart ────────────────────────────────────────────
+async function sadLoadOmzet() {
+  const period = sadState.period;
+  const range = period === 'custom' && sadState.customFrom
+    ? { from: sadState.customFrom, to: sadState.customTo }
+    : sadPeriodRange(period);
+  const group = sadGroupByFor(period === 'custom' ? 'maand' : period);
+  try {
+    const d = await sadFetch(`/api/super-admin-omzet?from=${range.from}&to=${range.to}&group_by=${group}`);
+    const k = d.kpis || {};
+    document.getElementById('sadKpiLos').textContent = sadFmtEur(k.los_incl_btw);
+    document.getElementById('sadKpiMrr').textContent = sadFmtEur(k.abo_mrr_incl_btw);
+    document.getElementById('sadKpiTot').textContent = sadFmtEur(k.totaal_incl_btw);
+    document.getElementById('sadKpiTotSub').textContent = (k.deal_count || 0) + ' offertes';
+    document.getElementById('sadOmzetTag').textContent = sadPeriodLabel(period, sadState.customFrom ? (sadState.customFrom + ' t/m ' + sadState.customTo) : null);
+    document.getElementById('sadPsPeriod').textContent = sadPeriodLabel(period, sadState.customFrom ? '· custom' : null);
+    // Edge-warning bij deals zonder line-items (fallback op x1.21).
+    const ew = document.getElementById('sadEdgeWarn');
+    if (k.edge_deals_zonder_lineitems > 0) {
+      ew.textContent = `⚠ ${k.edge_deals_zonder_lineitems} deal(s) zonder line-items — fallback ×1.21 gebruikt`;
+      ew.style.display = '';
+    } else {
+      ew.style.display = 'none';
+    }
+    // Product-strip
+    const pmap = {};
+    for (const p of (d.per_product || [])) pmap[p.product_key] = p;
+    document.querySelectorAll('.sad-ps-num[data-key]').forEach((el) => {
+      const key = el.dataset.key;
+      el.textContent = pmap[key]?.count ?? 0;
+    });
+    document.querySelectorAll('.sad-ps-rev[data-key-rev]').forEach((el) => {
+      const key = el.dataset.keyRev;
+      const rev = pmap[key]?.revenue_incl_btw ?? 0;
+      el.textContent = '€' + sadFmtEur(rev) + (key === 'mem' ? ' MRR' : '');
+    });
+    // Chart
+    sadRenderChart(d.trend || []);
+  } catch (e) {
+    console.warn('[sad-omzet]', e?.message || e);
+    document.getElementById('sadKpiLos').textContent = 'fout';
+    document.getElementById('sadKpiMrr').textContent = 'fout';
+    document.getElementById('sadKpiTot').textContent = 'fout';
+  }
+}
+
+function sadRenderChart(trend) {
+  const canvas = document.getElementById('sadOmzetChart');
+  if (!canvas || !window.Chart) return;
+  if (sadState.chart) sadState.chart.destroy();
+  const labels = trend.map((t) => t.period);
+  const losData = trend.map((t) => t.los_incl_btw || 0);
+  const abo = trend.map((t) => t.abo_mrr_incl_btw || 0);
+  sadState.chart = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Losse verkopen', data: losData, borderColor: '#46a5cc', backgroundColor: 'rgba(70,165,204,.15)', fill: true, tension: 0.3, borderWidth: 2 },
+        { label: 'Abonnementen (MRR)', data: abo, borderColor: '#46e0c8', backgroundColor: 'rgba(70,224,200,.10)', fill: true, tension: 0.3, borderWidth: 2 },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: 'rgba(128,128,128,.08)' }, ticks: { color: '#8fb0c0', font: { size: 10 } } },
+        y: { grid: { color: 'rgba(128,128,128,.08)' }, ticks: { color: '#8fb0c0', font: { size: 10 }, callback: (v) => '€' + sadFmtEur(v) } },
+      },
+    },
+  });
+}
+
+async function sadLoadZoom() {
+  try {
+    const [t, w, m] = await Promise.all([
+      sadFetch('/api/follow-up-dashboard-metrics?period=today'),
+      sadFetch('/api/follow-up-dashboard-metrics?period=week'),
+      sadFetch('/api/follow-up-dashboard-metrics?period=month'),
+    ]);
+    const tot = t?.metrics?.appointments_total ?? 0;
+    const wk  = w?.metrics?.appointments_total ?? 0;
+    const mn  = m?.metrics?.appointments_total ?? 0;
+    document.getElementById('sadZoomToday').textContent = tot;
+    document.getElementById('sadZoomWeek').textContent  = wk;
+    document.getElementById('sadZoomMonth').textContent = mn;
+    document.getElementById('sadZoomBigNum').textContent = tot;
+  } catch (e) {
+    console.warn('[sad-zoom]', e?.message || e);
+    ['sadZoomToday','sadZoomWeek','sadZoomMonth','sadZoomBigNum'].forEach(id => document.getElementById(id).textContent = '?');
+  }
+}
+
+async function sadLoadUrgentie() {
+  const items = [];
+  const push = (b, t, s, url, tone='mid') => items.push({ b, t, s, url, tone });
+  await Promise.all([
+    sadFetch('/api/finance-dunning-paused-list').then(d => push(d?.count ?? 0, 'Vastgelopen gesprekken', 'Wanbetalers-inbox', '/modules/finance.html?tab=wanbetalers&sub=paused', 'hi')).catch(()=>{}),
+    sadFetch('/api/agent-approval?action=list').then(d => push(d?.count_total ?? 0, 'Goedkeuringen open', 'Control Center', '/modules/control-center.html', 'hi')).catch(()=>{}),
+    sadFetch('/api/tasks-list?status=PENDING&action_type=MANUAL_FOLLOWUP&limit=1').then(d => push(d?.total ?? 0, 'Bel-acties te doen', 'Wanbetalers', '/modules/finance.html?tab=wanbetalers&sub=open-acties', 'mid')).catch(()=>{}),
+    sadFetch('/api/follow-up-leads-badge').then(d => push(d?.te_laat ?? 0, 'Retentie te laat', 'Leadsonderhoud', '/modules/follow-up.html?tab=leads', 'mid')).catch(()=>{}),
+    sadFetch('/api/finance-dashboard-counts?period=month').then(d => push(d?.overdueFacturen ?? 0, 'Openstaande facturen', 'Wanbetalers', '/modules/finance.html?tab=wanbetalers', 'mid')).catch(()=>{}),
+    sadFetch('/api/tickets-badge').then(d => push(d?.count ?? 0, 'Open tickets', 'Support', '/modules/tickets.html', 'lo')).catch(()=>{}),
+  ]);
+  const container = document.getElementById('sadUrgList');
+  container.innerHTML = items.length ? items.map(i => `
+    <a class="sad-urg ${i.tone}" href="${i.url}"><div class="sad-b">${i.b}</div><div class="sad-tx"><div class="sad-t">${i.t}</div><div class="sad-s">${i.s}</div></div><div class="sad-ar">→</div></a>
+  `).join('') : '<div class="sad-placeholder">Geen actie vereist ✓</div>';
+}
+
+async function sadLoadTaken() {
+  const container = document.getElementById('sadTakenList');
+  const foot = document.getElementById('sadTakenFoot');
+  try {
+    const d = await sadFetch('/api/taken?scope=mine');
+    const items = (d?.taken || []).filter(t => t.status !== 'done').slice(0, 6);
+    if (items.length === 0) {
+      container.innerHTML = '<div class="sad-tk-empty">Geen open taken 🎉</div>';
+      foot.style.display = 'none';
+      return;
+    }
+    container.innerHTML = items.map(t => {
+      const prio = t.prioriteit || 'Normaal';
+      const deadline = t.deadline ? new Date(t.deadline).toLocaleDateString('nl-NL', { day:'2-digit', month:'short' }) : '';
+      return `
+        <div class="sad-tk" data-id="${t.id}">
+          <input type="checkbox" data-tk-check>
+          <div class="sad-tktx">
+            <div class="sad-tkt">${sadEsc(t.titel || '(zonder titel)')}</div>
+            <div class="sad-tks">${deadline ? deadline + ' · ' : ''}${prio.toLowerCase()}</div>
+          </div>
+        </div>`;
+    }).join('');
+    document.getElementById('sadTakenOpen').textContent = items.length;
+    document.getElementById('sadTakenDone').textContent = 0;
+    foot.style.display = '';
+    container.querySelectorAll('[data-tk-check]').forEach(cb => {
+      cb.addEventListener('change', async (e) => {
+        const row = e.target.closest('.sad-tk');
+        const id = row?.dataset?.id;
+        if (!id || !cb.checked) return;
+        row.classList.add('done');
+        try {
+          await window.AgentShared.apiFetch('/api/taken', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'status_change', id, status: 'done' }),
+          });
+          const open = container.querySelectorAll('.sad-tk:not(.done)').length;
+          const done = container.querySelectorAll('.sad-tk.done').length;
+          document.getElementById('sadTakenOpen').textContent = open;
+          document.getElementById('sadTakenDone').textContent = done;
+        } catch (err) {
+          console.warn('[sad-taken-check]', err?.message || err);
+          row.classList.remove('done');
+          cb.checked = false;
+        }
+      });
+    });
+  } catch (e) {
+    console.warn('[sad-taken]', e?.message || e);
+    container.innerHTML = '<div class="sad-err">Taken laden mislukt</div>';
+  }
+}
+
+function sadEsc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+// ── Nieuwe-taak modal ─────────────────────────────────────────────────
+function sadOpenTaskModal() {
+  document.getElementById('sadTaskTitle').value = '';
+  document.getElementById('sadTaskDesc').value = '';
+  document.getElementById('sadTaskPrio').value = 'Normaal';
+  document.getElementById('sadTaskErr').style.display = 'none';
+  document.getElementById('sadTaskModal').classList.add('on');
+  setTimeout(() => document.getElementById('sadTaskTitle').focus(), 60);
+}
+function sadCloseTaskModal() { document.getElementById('sadTaskModal').classList.remove('on'); }
+
+async function sadCreateTask() {
+  const title = document.getElementById('sadTaskTitle').value.trim();
+  const desc  = document.getElementById('sadTaskDesc').value.trim();
+  const prio  = document.getElementById('sadTaskPrio').value;
+  const err   = document.getElementById('sadTaskErr');
+  if (!title) {
+    err.textContent = 'Titel is verplicht';
+    err.style.display = '';
+    return;
+  }
+  const user = await window.AuthShared.getUser();
+  const newId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2,10)}`;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/taken', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        task: {
+          id: newId, titel: title, omschrijving: desc,
+          prioriteit: prio, categorie: 'Overige',
+          assignedToId: user?.id, status: 'todo',
+        },
+      }),
+    });
+    if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d?.error || 'HTTP ' + r.status); }
+    window.AgentShared?.showToast?.('Taak aangemaakt', 'success');
+    sadCloseTaskModal();
+    sadLoadTaken();
+  } catch (e) {
+    err.textContent = 'Aanmaken mislukt: ' + (e?.message || 'onbekend');
+    err.style.display = '';
+  }
+}
+
+// ── Period-picker wiring ──────────────────────────────────────────────
+function sadWirePeriod() {
+  document.querySelectorAll('#sadPageSeg button[data-p]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const p = btn.dataset.p;
+      if (p === 'custom') {
+        document.getElementById('sadDatePop').classList.toggle('on');
+        return;
+      }
+      document.querySelectorAll('#sadPageSeg button').forEach(b => b.classList.remove('on'));
+      btn.classList.add('on');
+      sadState.period = p;
+      sadState.customFrom = sadState.customTo = null;
+      const lbl = sadPeriodLabel(p);
+      document.getElementById('sadLeadsPeriodLbl').textContent = lbl;
+      sadLoadOmzet();
+    });
+  });
+  document.getElementById('sadPdApply').addEventListener('click', () => {
+    const f = document.getElementById('sadPdFrom').value;
+    const t = document.getElementById('sadPdTo').value;
+    if (!f || !t) return;
+    sadState.period = 'custom';
+    sadState.customFrom = f;
+    sadState.customTo = t;
+    document.querySelectorAll('#sadPageSeg button').forEach(b => b.classList.remove('on'));
+    document.getElementById('sadPageCustom').classList.add('on');
+    document.getElementById('sadDatePop').classList.remove('on');
+    sadLoadOmzet();
+  });
+  document.addEventListener('click', (e) => {
+    const pop = document.getElementById('sadDatePop');
+    if (pop && !pop.contains(e.target) && !document.getElementById('sadPageCustom').contains(e.target)) {
+      pop.classList.remove('on');
+    }
+  });
+}
+
+// ── Init ──────────────────────────────────────────────────────────────
+function init() {
+  sadWirePeriod();
+  document.getElementById('sadNewTaskBtn').addEventListener('click', sadOpenTaskModal);
+  document.getElementById('sadTaskCancel').addEventListener('click', sadCloseTaskModal);
+  document.getElementById('sadTaskCreate').addEventListener('click', sadCreateTask);
+  sadLoadOmzet();
+  sadLoadZoom();
+  sadLoadUrgentie();
+  sadLoadTaken();
+}
+</script>
+</body>
+</html>
