@@ -68,6 +68,18 @@ export default async function handler(req, res) {
     const dry = await isDryRunEnabled();
     const nowIso = new Date().toISOString();
 
+    // Finance-afzendlijn expliciet uit whatsapp_module_config (module='finance'),
+    // zodat de sandbox niet impliciet op de globale default leunt. Ontbreekt de
+    // config, dan blijft sendTemplate op de globale default vallen — die is óók
+    // finance, dus geen verkeerde-lijn-risico (finance is hier inhoudelijk juist).
+    const { data: finCfg } = await supabaseAdmin
+      .from('whatsapp_module_config')
+      .select('phone_number_id')
+      .eq('module', 'finance')
+      .eq('is_active', true)
+      .maybeSingle();
+    const financePnId = finCfg?.phone_number_id || null;
+
     // ─────────────── 1) Job + recipient aanmaken ───────────────
     // Verrijk realisme: haal de is_test-invoices op voor deze klant.
     const { data: invRows } = await supabaseAdmin
@@ -129,6 +141,7 @@ export default async function handler(req, res) {
             to           : phonePlus,
             templateName : tplName || 'test_template',
             languageCode : 'nl',
+            phoneNumberId: financePnId, // expliciet de finance-lijn (geen impliciete default)
           });
           wamid = sendRes?.wamid || sendRes?.messages?.[0]?.id || null;
           waOk = true;
