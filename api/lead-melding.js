@@ -68,6 +68,17 @@ export default async function handler(req, res) {
   const to = process.env.LEAD_MELDING_NUMMER || STANDAARD_NUMMER;
   const phoneNumberId = process.env.LEAD_MELDING_AFZENDLIJN || STANDAARD_AFZENDLIJN;
 
+  // TIJDELIJKE DIAGNOSTIEK (te verwijderen): welke afzendlijn wordt echt gebruikt?
+  const debug = {
+    afzendlijn_gebruikt: phoneNumberId,
+    standaard_afzendlijn: STANDAARD_AFZENDLIJN,
+    lead_melding_afzendlijn_env_gezet: Object.prototype.hasOwnProperty.call(process.env, 'LEAD_MELDING_AFZENDLIJN'),
+    lead_melding_afzendlijn_env_waarde: process.env.LEAD_MELDING_AFZENDLIJN ?? null,
+    meta_default_phone_number_id: process.env.META_WHATSAPP_PHONE_NUMBER_ID ?? null,
+    build_commit: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+  };
+  console.log('[lead-melding][DEBUG]', JSON.stringify(debug));
+
   try {
     const { wamid } = await sendTemplate({
       to,
@@ -76,7 +87,7 @@ export default async function handler(req, res) {
       variables: [naam, traject], // exact 2 params: {{1}}=naam, {{2}}=traject
       phoneNumberId,              // Esmee-lijn (of env-override)
     });
-    return res.status(200).json({ ok: true, wamid });
+    return res.status(200).json({ ok: true, wamid, debug });
   } catch (e) {
     if (e instanceof MetaNotConfiguredError) {
       console.error('[lead-melding] Meta niet geconfigureerd:', e.message);
