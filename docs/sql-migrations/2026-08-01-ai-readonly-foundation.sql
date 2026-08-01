@@ -142,7 +142,7 @@ JOIN      public.customers c                    ON c.id = dpc.customer_id
 LEFT JOIN public.dunning_pipeline_stages dps    ON dps.slug = dpc.stage_slug
 LEFT JOIN public.invoices i                     ON i.customer_id = dpc.customer_id
 WHERE dpc.stage_slug NOT IN ('opgelost', 'afschrijven')
-  AND (c.anonymization_status IS NULL OR c.anonymization_status <> 'anonymized')
+  AND c.anonymized_at IS NULL
 GROUP BY dpc.customer_id, c.first_name, c.last_name, dpc.stage_slug, dps.label, dpc.stage_changed_at;
 
 COMMENT ON VIEW ai_readonly.v_wanbetalers_actief IS
@@ -267,7 +267,7 @@ SELECT
     WHERE s.customer_id = c.id AND s.status = 'active'
   )                                                          AS heeft_actief_abonnement
 FROM public.customers c
-WHERE (c.anonymization_status IS NULL OR c.anonymization_status <> 'anonymized')
+WHERE c.anonymized_at IS NULL
   AND NOT EXISTS (
     SELECT 1 FROM public.mentor_ledger_entries m
     WHERE m.customer_id = c.id
