@@ -28890,10 +28890,15 @@
     loading: false,
     error: null,
     // Enrichment-cache: customer_id → { total_open_cents, open_invoice_count,
-    // days_overdue }. Gevuld door parallelle fetch op wanbetalers-overzicht-
-    // list bij _awnLoad. Elke rij in _awnRenderRow gebruikt dit voor de
-    // context-regel (bedrag / facturen / dagen te laat).
+    // days_overdue, run_status, next_action_at, next_action_step_type,
+    // next_action_step_title }. Gevuld door parallelle fetch op
+    // wanbetalers-overzicht-list bij _awnLoad. Elke rij in _awnRenderRow
+    // gebruikt dit voor de context-regel én de status-indicator (READ-ONLY,
+    // verandert niks aan engine/verzending).
     custMap: new Map(),
+    // Zoekbalk: filtert de zichtbare lijst op klantnaam (case-insensitive
+    // substring). Puur client-side filter, geen extra fetches.
+    searchQuery: '',
   };
   // Helper: euro-format uit cents (bedrag → "€ 1.234,56").
   function _awnFmtCents(cents) {
@@ -28908,7 +28913,7 @@
       host.dataset.awnMounted = '1';
       host.innerHTML = `
         <div class="wbx" style="padding:14px 0 4px">
-          <div class="wbx-nav" style="gap:6px;margin-bottom:14px;flex-wrap:wrap">
+          <div class="wbx-nav" style="gap:6px;margin-bottom:10px;flex-wrap:wrap">
             <button data-awn-tab="todo"  class="active" type="button" title="Openstaande taken die vandaag opgepakt kunnen worden">Te doen <span class="wbx-badge" data-awn-count="todo">0</span></button>
             <button data-awn-tab="later"           type="button" title="Uitgestelde taken (snoozed) — komen automatisch terug op hun datum">Later <span class="wbx-badge" data-awn-count="later">0</span></button>
             <button data-awn-tab="done"            type="button" title="Reeds afgehandelde taken (kan terugzetten)">Afgehandeld <span class="wbx-badge" data-awn-count="done">0</span></button>
@@ -28916,11 +28921,42 @@
             <span style="flex:1"></span>
             <button data-awn-refresh type="button" title="Ververs de lijst"><i class="ti ti-refresh"></i></button>
           </div>
+          <!-- Zoekbalk (fase-nieuw): filtert de lijst live op klantnaam
+               (case-insensitive substring). Puur client-side, geen fetch,
+               geen writes. Leeg = hele lijst terug. -->
+          <div style="margin-bottom:12px;position:relative">
+            <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--wbx-faint);font-size:14px;pointer-events:none">🔍</span>
+            <input data-awn-search type="text" placeholder="Zoek op klantnaam…"
+              style="width:100%;padding:8px 32px 8px 32px;border:1px solid var(--wbx-border);border-radius:8px;background:var(--wbx-surface);color:var(--wbx-ink);font-size:13.5px;font-family:inherit"
+              autocomplete="off"
+              title="Filter de zichtbare taken op klantnaam" />
+            <button data-awn-search-clear type="button" hidden
+              style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;padding:4px 8px;cursor:pointer;color:var(--wbx-faint);font-size:14px"
+              title="Zoekopdracht leegmaken">✕</button>
+          </div>
           <div data-awn-body>
             <div style="color:var(--wbx-faint);font-size:13px;padding:14px 0">Laden…</div>
           </div>
         </div>
       `;
+      // Zoekbalk-events (live filter, geen fetch): input → filter, ✕ → clear.
+      const searchInp = host.querySelector('[data-awn-search]');
+      const searchClr = host.querySelector('[data-awn-search-clear]');
+      if (searchInp) {
+        searchInp.addEventListener('input', () => {
+          _awnState.searchQuery = String(searchInp.value || '');
+          if (searchClr) searchClr.hidden = !_awnState.searchQuery;
+          _awnRender();
+        });
+      }
+      if (searchClr) {
+        searchClr.addEventListener('click', () => {
+          if (searchInp) { searchInp.value = ''; searchInp.focus(); }
+          _awnState.searchQuery = '';
+          searchClr.hidden = true;
+          _awnRender();
+        });
+      }
       host.addEventListener('click', (e) => {
         const tabBtn = e.target.closest('[data-awn-tab]');
         if (tabBtn) {
@@ -29077,14 +29113,76 @@
     } catch (_) { /* fail-soft */ }
   }
 
+  // Status-indicator helper (READ-ONLY weergave).
+  // Vertaalt run_status uit wanbetalers-overzicht-list naar een NL-badge
+  // met kleur + optionele reden. Bekende statussen (bewezen in code):
+  //   active     → engine draait erop (groen)
+  //   paused     → gepauzeerd (amber); reden onderscheid via velden hieronder
+  //                (klant reageerde = paused_by_conversation_id niet null)
+  //   completed  → voltooid (grijs) — hoort niet in Acties, maar defensief mapped
+  //   cancelled  → geannuleerd (grijs)
+  //   null/onbekend → geen actieve run (grijs)
+  function _awnStatusBadge(cust) {
+    if (!cust) return '<span style="background:var(--bg-elev,rgba(0,0,0,.05));color:var(--wbx-muted);font-size:11px;padding:2px 7px;border-radius:4px;font-weight:600" title="Geen data uit wanbetalers-overzicht">— onbekend —</span>';
+    const s = String(cust.run_status || '').toLowerCase();
+    if (s === 'active') {
+      return '<span style="background:rgba(16,185,129,.15);color:#059669;font-size:11px;padding:2px 7px;border-radius:4px;font-weight:600" title="Dunning-run is actief; engine tikt door">🟢 Actief</span>';
+    }
+    if (s === 'paused') {
+      // Reden inschatten uit context; wanbetalers-overzicht-list levert
+      // run_status maar niet altijd paused-reden — dus we tonen generieke
+      // "gepauzeerd" met tooltip.
+      return '<span style="background:rgba(245,158,11,.18);color:#92400e;font-size:11px;padding:2px 7px;border-radius:4px;font-weight:600" title="Run is gepauzeerd — meestal omdat klant reageerde of een openstaande TL-actie klaarligt">⏸️ Gepauzeerd</span>';
+    }
+    if (s === 'completed') {
+      return '<span style="background:var(--bg-elev,rgba(0,0,0,.05));color:var(--wbx-muted);font-size:11px;padding:2px 7px;border-radius:4px;font-weight:600" title="Run voltooid">✔️ Voltooid</span>';
+    }
+    if (s === 'cancelled') {
+      return '<span style="background:var(--bg-elev,rgba(0,0,0,.05));color:var(--wbx-muted);font-size:11px;padding:2px 7px;border-radius:4px;font-weight:600" title="Run geannuleerd">🚫 Geannuleerd</span>';
+    }
+    // null / onbekend
+    return '<span style="background:var(--bg-elev,rgba(0,0,0,.05));color:var(--wbx-muted);font-size:11px;padding:2px 7px;border-radius:4px;font-weight:600" title="Geen actieve dunning-run voor deze klant">— Geen actieve run —</span>';
+  }
+
+  // "Volgende actie"-formatter (READ-ONLY). Hergebruikt bestaande data
+  // uit custMap: next_action_at + next_action_step_type. Format spiegelt
+  // r27857: "${stepLabel} · ${dd-mm HH:MM}".
+  function _awnNextActionText(cust) {
+    if (!cust || !cust.next_action_at) return '';
+    const stepLabels = {
+      email: '✉️ E-mail', whatsapp: '💬 WhatsApp', wait: '⏳ Wacht',
+      task: '📞 Taak', stop: '⏹️ Stop', resume: '▶️ Hervat',
+    };
+    const stepKey = String(cust.next_action_step_type || '').toLowerCase();
+    const label = stepLabels[stepKey] || (cust.next_action_step_type ? '· ' + cust.next_action_step_type : '');
+    try {
+      const d = new Date(cust.next_action_at);
+      if (isNaN(d.getTime())) return label;
+      const dt = d.toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      return (label ? label + ' · ' : '') + dt;
+    } catch (_) {
+      return label;
+    }
+  }
+
   function _awnRender() {
     const host = document.getElementById('wb-sub-openacties-nieuw');
     const bodyEl = host?.querySelector('[data-awn-body]');
     if (!bodyEl) return;
-    const items = _awnState.items || [];
+    // ── Client-side zoekfilter op klantnaam (case-insensitive substring). ─
+    // Filtert BEIDE lijsten (items + paused) zodat een naam-zoek alles vindt.
+    const rawItems  = _awnState.items  || [];
+    const rawPaused = _awnState.paused || [];
+    const q = String(_awnState.searchQuery || '').trim().toLowerCase();
+    const nameMatch = (name) => !q || String(name || '').toLowerCase().includes(q);
+    const items  = q ? rawItems.filter((it) => nameMatch(it.customer?.name)) : rawItems;
+    const pausedFiltered = q ? rawPaused.filter((p) => nameMatch(p.customer_name || p.customer?.name)) : rawPaused;
+    const emptyMsg = q
+      ? `Geen resultaten voor "${esc(q)}".`
+      : 'Niets in deze tab.';
     const empty = items.length
       ? ''
-      : `<div style="color:var(--wbx-faint);font-size:13px;padding:14px 0">Niets in deze tab.</div>`;
+      : `<div style="color:var(--wbx-faint);font-size:13px;padding:14px 0">${emptyMsg}</div>`;
 
     // FIX punt B: groepeer per action_type met kopjes. Volgorde: primaire
     // klant-acties (Bellen / Betaling verifiëren / Betaaltoezegging) →
@@ -29130,15 +29228,15 @@
     }).join('');
 
     let pausedBlock = '';
-    if (_awnState.tab === 'todo' && _awnState.paused.length > 0) {
+    if (_awnState.tab === 'todo' && pausedFiltered.length > 0) {
       pausedBlock = `
         <div style="margin-top:26px;padding-top:16px;border-top:1px solid var(--wbx-border)">
           <h4 style="margin:0 0 10px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--wbx-faint);font-weight:600">
-            Gepauzeerd (in gesprek) — ${_awnState.paused.length}
+            Gepauzeerd (in gesprek) — ${pausedFiltered.length}
             <span style="text-transform:none;letter-spacing:0;color:var(--wbx-faint);font-weight:400;font-size:11px;margin-left:6px">Read-only. Deze klanten zijn gepauzeerd omdat er een WhatsApp-gesprek loopt.</span>
           </h4>
           <div style="display:flex;flex-direction:column;gap:6px">
-            ${_awnState.paused.map((p) => _awnRenderPausedRow(p)).join('')}
+            ${pausedFiltered.map((p) => _awnRenderPausedRow(p)).join('')}
           </div>
         </div>
       `;
@@ -29231,6 +29329,19 @@
     const contextRow = contextBits.length
       ? `<div style="font-size:12px;color:var(--wbx-muted);display:flex;gap:10px;flex-wrap:wrap;margin-top:3px">${contextBits.join('<span style="color:var(--wbx-faint);opacity:.5">·</span>')}</div>`
       : '';
+    // Status-indicator + volgende actie (READ-ONLY). Hergebruikt custMap
+    // die al door _awnLoad wordt gevuld via /api/wanbetalers-overzicht-list.
+    // Toont per klant: NL-badge met kleur + tekst "Volgende: ...".
+    const statusBadge = _awnStatusBadge(cust);
+    const nextActionTxt = _awnNextActionText(cust);
+    const nextActionLine = nextActionTxt
+      ? `<span style="color:var(--wbx-muted);font-size:11.5px" title="Volgende geplande engine-stap voor deze klant">Volgende: ${esc(nextActionTxt)}</span>`
+      : '';
+    const statusRow = `
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:3px">
+        ${statusBadge}
+        ${nextActionLine}
+      </div>`;
     return `
       <div style="${rowStyle};display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap">
         <span style="font-size:16px;padding-top:1px" title="${esc(typeLbl)}">${typeIcon}</span>
@@ -29240,6 +29351,7 @@
             <span>${esc(typeLbl)}</span>
             ${src ? `<span style="border-left:1px solid var(--wbx-border);padding-left:8px" title="Bron van deze taak">${src}</span>` : ''}
           </div>
+          ${statusRow}
           ${contextRow}
           ${reasonBlock}
         </div>
