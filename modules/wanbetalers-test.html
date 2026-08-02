@@ -358,10 +358,50 @@
       <div id="comboResultBlock" style="margin-top:12px"></div>
     </div>
 
-    <!-- Sectie 4 — Live status -->
+    <!-- Sectie 6 — Flow-overgangen testen (fase 3) -->
     <div class="tp-section">
       <div class="tp-section-h">
-        <span class="idx">6</span> Live status
+        <span class="idx">6</span> Flow-overgangen testen (fase 3 — echte engine)
+      </div>
+      <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:12px">
+        Elke test doet: reset + seed → runEngine (echte productie-engine, scope='test') → transitie triggeren → verifiëren dat de run-status/velden veranderd zijn zoals verwacht. PASS = de flow-logica werkt bij echte klanten ook. Wist voorafgaand aan elke test de test-runs (niet je facturen — die worden opnieuw geseed voor het scenario).
+      </div>
+
+      <div class="tp-actions-grid" id="flowTestGrid">
+        <div class="tp-action">
+          <div class="tp-action-title"><i class="ti ti-message-circle-off"></i> 1 · Inbound → run pauzeert</div>
+          <div class="tp-action-desc">Simuleer WA-inbound van test-klant. Verwacht: status <code>active</code> → <code>paused</code> + <code>paused_by_conversation_id</code> gezet.</div>
+          <div class="tp-action-row">
+            <select id="flowInboundScenario"><option value="single">1-factuur</option><option value="multi">multi-factuur</option></select>
+            <button class="tp-btn" onclick="runFlowTest('inbound', document.getElementById('flowInboundScenario').value, this)">Test</button>
+          </div>
+        </div>
+        <div class="tp-action">
+          <div class="tp-action-title"><i class="ti ti-zzz"></i> 2 · Snooze N dagen → auto-hervat</div>
+          <div class="tp-action-desc">Snooze N dagen, engine mag niks doen, dan fast-forward voorbij snooze, engine hervat. Bewijst dat <code>next_action_at</code>-gate werkt.</div>
+          <div class="tp-action-row">
+            <select id="flowSnoozeScenario"><option value="single">1-factuur</option><option value="multi">multi-factuur</option></select>
+            <input id="flowSnoozeDays" type="number" min="1" max="60" value="3" title="Snooze N dagen" />
+            <button class="tp-btn" onclick="runFlowTest('snooze', document.getElementById('flowSnoozeScenario').value, this, { days: Number(document.getElementById('flowSnoozeDays').value)||3 })">Test</button>
+          </div>
+        </div>
+        <div class="tp-action">
+          <div class="tp-action-title"><i class="ti ti-hand-stop"></i> 3 · Handmatige pauze → engine no-op → hervat</div>
+          <div class="tp-action-desc">Manual pause, fast-forward, engine mag geen advance doen. Manual resume + engine → advance. Bewijst dat <code>status='paused'</code>-filter werkt.</div>
+          <div class="tp-action-row">
+            <select id="flowManualScenario"><option value="single">1-factuur</option><option value="multi">multi-factuur</option></select>
+            <button class="tp-btn" onclick="runFlowTest('manual', document.getElementById('flowManualScenario').value, this)">Test</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="flowTestResults" style="margin-top:14px"></div>
+    </div>
+
+    <!-- Sectie 7 (voorheen 6) — Live status -->
+    <div class="tp-section">
+      <div class="tp-section-h">
+        <span class="idx">7</span> Live status
         <span style="margin-left:auto;font-size:11.5px;color:var(--text-dim);font-weight:400">auto-refresh 5s</span>
       </div>
 
@@ -1128,6 +1168,114 @@ function _combinedResultCard(tpl, resp) {
     </div>
     ${idInfo ? '<div style="font-size:12px;color:var(--text-dim);margin-top:6px">' + idInfo + '</div>' : ''}
     ${hint}${err}
+  </div>`;
+}
+
+// ── FASE 3: flow-overgangen ────────────────────────────────────────────
+const FLOW_TEST_ENDPOINTS = {
+  inbound: '/api/wanbetalers-sandbox-flow-test-inbound',
+  snooze:  '/api/wanbetalers-sandbox-flow-test-snooze',
+  manual:  '/api/wanbetalers-sandbox-flow-test-manual-pause',
+};
+const FLOW_TEST_LABELS = {
+  inbound: '1 · Inbound → run pauzeert',
+  snooze:  '2 · Snooze N dagen → auto-hervat',
+  manual:  '3 · Handmatige pauze → engine no-op → hervat',
+};
+
+async function runFlowTest(kind, flow, btn, extra) {
+  const url = FLOW_TEST_ENDPOINTS[kind];
+  if (!url) return;
+  const label = FLOW_TEST_LABELS[kind] || kind;
+  const box = document.getElementById('flowTestResults');
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Bezig…';
+  // Tijdelijke placeholder bovenaan.
+  const placeholderId = 'flowres_' + Date.now();
+  box.innerHTML = `<div id="${placeholderId}" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;background:var(--surface-2,rgba(0,0,0,.03));font-size:12.5px;color:var(--text-dim)">
+    <i class="ti ti-loader"></i> Bezig met "${esc(label)}" op flow=<code>${esc(flow)}</code>…
+  </div>` + box.innerHTML;
+  const payload = Object.assign({ flow }, extra || {});
+  try {
+    const r = await window.AgentShared.apiFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    const html = _renderFlowTestResult(kind, flow, d, r.status);
+    const el = document.getElementById(placeholderId);
+    if (el) el.outerHTML = html;
+    else box.innerHTML = html + box.innerHTML;
+    await refreshStatus();
+  } catch (e) {
+    const html = _renderFlowTestResult(kind, flow, { ok: false, error: e?.message || 'onbekend' }, 0);
+    const el = document.getElementById(placeholderId);
+    if (el) el.outerHTML = html;
+    else box.innerHTML = html + box.innerHTML;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
+}
+
+function _renderFlowTestResult(kind, flow, d, httpStatus) {
+  const label = FLOW_TEST_LABELS[kind] || kind;
+  const finalPass = d?.final_pass === true;
+  const badge = finalPass
+    ? '<span style="background:rgba(16,185,129,.2);color:#059669;padding:4px 10px;border-radius:6px;font-weight:700;font-size:12px">✓ PASS</span>'
+    : '<span style="background:rgba(220,38,38,.2);color:#dc2626;padding:4px 10px;border-radius:6px;font-weight:700;font-size:12px">✗ FAIL</span>';
+  const bg = finalPass ? 'rgba(16,185,129,.06)' : 'rgba(220,38,38,.05)';
+  const bd = finalPass ? 'rgba(16,185,129,.4)'  : 'rgba(220,38,38,.4)';
+  const time = new Date().toLocaleTimeString('nl-NL');
+  const summary = d?.summary ? '<div style="font-size:13px;margin-top:8px">' + esc(d.summary) + '</div>' : '';
+  const err = (!d?.ok && d?.error) ? '<div style="font-size:12px;color:#dc2626;margin-top:4px;font-family:monospace">' + esc(d.error) + '</div>' : '';
+
+  // Steps-timeline
+  const steps = Array.isArray(d?.steps) ? d.steps : [];
+  const stepsHtml = steps.map(s => {
+    const isAssert = s.pass !== undefined;
+    const isOk    = isAssert ? s.pass === true : s.ok === true;
+    const isFail  = isAssert ? s.pass === false : s.ok === false;
+    const icon = isOk ? '✅' : (isFail ? '❌' : '·');
+    const extraTxt = [];
+    if (s.expected !== undefined) extraTxt.push('verwacht=<code>' + esc(String(s.expected)) + '</code>');
+    if (s.actual   !== undefined) extraTxt.push('kreeg=<code>' + esc(String(s.actual)) + '</code>');
+    if (s.error) extraTxt.push('<span style="color:#dc2626">' + esc(s.error) + '</span>');
+    if (s.days)  extraTxt.push('dagen=' + s.days);
+    if (s.new_next_action_at) extraTxt.push('next_action_at=<code>' + esc(String(s.new_next_action_at)) + '</code>');
+    if (s.conversation_id) extraTxt.push('conv=<code>' + esc(String(s.conversation_id)).slice(0,8) + '…</code>');
+    if (s.state && typeof s.state === 'object') {
+      const ss = s.state;
+      const bits = [];
+      if (ss.status)                       bits.push('status=' + esc(ss.status));
+      if (ss.workflow_name)                bits.push('workflow="' + esc(ss.workflow_name) + '"');
+      if (ss.paused_by_conversation_id)    bits.push('paused_by_conv=<code>' + esc(String(ss.paused_by_conversation_id)).slice(0,8) + '…</code>');
+      if (ss.next_action_at)               bits.push('next_action_at=<code>' + esc(ss.next_action_at) + '</code>');
+      if (ss.current_step_id)              bits.push('step=<code>' + esc(String(ss.current_step_id)).slice(0,8) + '…</code>');
+      if (bits.length) extraTxt.push(bits.join(', '));
+    }
+    return '<div style="padding:5px 8px;font-size:12px;border-bottom:1px solid var(--border-soft,rgba(0,0,0,.05))">' +
+      icon + ' <strong>' + esc(s.name) + '</strong>' +
+      (extraTxt.length ? ' — ' + extraTxt.join(' · ') : '') +
+      '</div>';
+  }).join('');
+
+  const stepsSection = stepsHtml
+    ? `<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12.5px;color:var(--text-dim);font-weight:600">Stappen (${steps.length})</summary>
+        <div style="margin-top:6px;background:var(--bg);border:1px solid var(--border);border-radius:6px;overflow:hidden">${stepsHtml}</div>
+      </details>`
+    : '';
+
+  return `<div style="border:1px solid ${bd};background:${bg};border-radius:8px;padding:12px 14px;margin-bottom:8px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      ${badge}
+      <strong>${esc(label)}</strong>
+      <span style="color:var(--text-dim);font-size:11.5px">flow=<code>${esc(flow)}</code></span>
+      <span style="margin-left:auto;color:var(--text-dim);font-size:11.5px;font-family:'Consolas',monospace">${time}${httpStatus ? ' · HTTP ' + httpStatus : ''}</span>
+    </div>
+    ${summary}${err}${stepsSection}
   </div>`;
 }
 
