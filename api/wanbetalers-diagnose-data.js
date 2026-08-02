@@ -53,7 +53,7 @@ export default async function handler(req, res) {
     const [
       customersRes, allInvoicesRes, runsRes, workflowsRes,
       stepsRes, pipelineRes, arrangementsRes, conversationsRes,
-      profilesRes,
+      profilesRes, analysesRes,
     ] = await Promise.all([
       supabaseAdmin.from('customers')
         .select('id, first_name, last_name, company_name, is_company, email, phone, anonymized_at, archived_at')
@@ -78,6 +78,12 @@ export default async function handler(req, res) {
         .in('customer_id', custIds),
       supabaseAdmin.from('profiles')
         .select('id, full_name, email'),
+      // Bestaande AI-analyses cache (nieuw sinds migratie 2026-08-02).
+      // Fail-soft: catch geeft [] als tabel nog niet bestaat.
+      supabaseAdmin.from('dunning_gesprek_analyse')
+        .select('customer_id, afspraak_gemaakt, samenvatting, termijnen, vertrouwen, actie_nodig, heeft_arrangement, messages_count, customer_msg_count, outbound_msg_count, sufficient_data, geanalyseerd_op, geanalyseerd_door')
+        .in('customer_id', custIds)
+        .then((r) => r, () => ({ data: [], error: null })),
     ]);
     if (customersRes.error) throw new Error('customers: ' + customersRes.error.message);
 
@@ -91,6 +97,8 @@ export default async function handler(req, res) {
     const conversations= conversationsRes.data || [];
     const profiles     = profilesRes.data      || [];
     const profileById  = new Map(profiles.map((p) => [p.id, p]));
+    const analyses     = analysesRes.data      || [];
+    const analysisByCust = new Map(analyses.map((a) => [a.customer_id, a]));
 
     const runIds = runs.map((r) => r.id);
     let logs = [];
@@ -137,6 +145,7 @@ export default async function handler(req, res) {
       conversations: (convByCust[c.id] || []),
       wfById, stepById, profileById,
       logsByRun, msgsByConv,
+      cached_analysis: analysisByCust.get(c.id) || null,
     }));
 
     customerData.sort((a, b) => (b.summary.total_open_eur || 0) - (a.summary.total_open_eur || 0));
@@ -191,7 +200,8 @@ function customerDisplay(c) {
 
 function buildCustomerRecord(ctx) {
   const { customer, invoices, runs, pipe, arrangements, conversations,
-          wfById, stepById, profileById, logsByRun, msgsByConv } = ctx;
+          wfById, stepById, profileById, logsByRun, msgsByConv,
+          cached_analysis } = ctx;
 
   const openInvs = invoices.filter((iv) => OPEN_STATUSES.includes(iv.status) && openAmount(iv) > 0);
   const totalOpenEur = openInvs.reduce((sum, iv) => sum + openAmount(iv), 0);
@@ -410,5 +420,22 @@ function buildCustomerRecord(ctx) {
     })),
     timeline: timeline.slice(0, 100),
     signals,
+    cached_analysis: cached_analysis ? {
+      afspraak_gemaakt:   cached_analysis.afspraak_gemaakt,
+      samenvatting:       cached_analysis.samenvatting,
+      termijnen:          Array.isArray(cached_analysis.termijnen) ? cached_analysis.termijnen : [],
+      vertrouwen:         cached_analysis.vertrouwen,
+      actie_nodig:        cached_analysis.actie_nodig,
+      heeft_arrangement:  cached_analysis.heeft_arrangement,
+      messages_count:     cached_analysis.messages_count,
+      customer_msg_count: cached_analysis.customer_msg_count,
+      outbound_msg_count: cached_analysis.outbound_msg_count,
+      sufficient_data:    cached_analysis.sufficient_data,
+      geanalyseerd_op:    cached_analysis.geanalyseerd_op,
+      geanalyseerd_door_email: (profileById && cached_analysis.geanalyseerd_door)
+        ? (profileById.get(cached_analysis.geanalyseerd_door)?.email || null) : null,
+      geanalyseerd_door_name:  (profileById && cached_analysis.geanalyseerd_door)
+        ? (profileById.get(cached_analysis.geanalyseerd_door)?.full_name || null) : null,
+    } : null,
   };
 }

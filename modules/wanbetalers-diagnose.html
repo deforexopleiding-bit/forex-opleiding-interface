@@ -194,9 +194,22 @@ async function loadData() {
     const d = await r.json();
     if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
     DATA = d;
+    // Bootstrap AI-analyse-cache uit backend zodat filter/verdict direct
+    // beschikbaar zijn na page-reload. Backend levert cached_analysis per klant
+    // met alle velden die het analyse-endpoint zou returnen — behalve customer_id
+    // die we bijvoegen zodat renderTestResult 't kan lezen.
+    state.aiResults.clear();
+    for (const c of d.customers || []) {
+      if (c.cached_analysis) {
+        state.aiResults.set(c.customer_id, {
+          result: Object.assign({ customer_id: c.customer_id, analysed_at: c.cached_analysis.geanalyseerd_op }, c.cached_analysis),
+        });
+      }
+    }
     const gen = d.generated_at ? new Date(d.generated_at).toLocaleString('nl-NL') : '';
     document.getElementById('sub-line').textContent =
-      (d.customers?.length || 0) + ' klant(en) met open factuur · snapshot ' + gen;
+      (d.customers?.length || 0) + ' klant(en) met open factuur · snapshot ' + gen +
+      ' · ' + state.aiResults.size + ' AI-analyse(s) gecached';
     render();
   } catch (e) {
     document.getElementById('list').innerHTML =
@@ -477,8 +490,11 @@ function renderBody(c) {
       + '<div class="ai-result" style="margin-top:6px"><b>Samenvatting:</b> ' + esc(r.samenvatting || '—') + '</div>'
       + termijnenTxt
       + '<div class="ai-result" style="margin-top:6px"><b>Actie nodig:</b> ' + esc(r.actie_nodig || '—') + '</div>'
-      + '<div style="margin-top:6px;font-size:11px;color:var(--text-dim)">Analyse: ' + esc(fmtDT(r.analysed_at)) + '</div>'
-      + '<button class="ai-btn" style="margin-top:6px" onclick="analyseGesprek(\'' + esc(c.customer_id) + '\')">Opnieuw</button>';
+      + '<div style="margin-top:6px;font-size:11px;color:var(--text-dim)">Geanalyseerd op ' + esc(fmtDT(r.analysed_at))
+      + (r.geanalyseerd_door_name ? ' door ' + esc(r.geanalyseerd_door_name)
+         : (r.geanalyseerd_door_email ? ' door ' + esc(r.geanalyseerd_door_email) : ''))
+      + '</div>'
+      + '<button class="ai-btn" style="margin-top:6px" onclick="analyseGesprek(\'' + esc(c.customer_id) + '\')">🔄 Opnieuw analyseren</button>';
   } else if (c.summary.total_messages === 0) {
     aiBlock += '<div class="ai-result no-data">Geen gesprek om te analyseren.</div>';
   } else {
