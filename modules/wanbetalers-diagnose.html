@@ -18,7 +18,9 @@
     .tab{padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;font-size:12.5px;font-weight:600;font-family:inherit}
     .tab.active{background:#0f766e;color:#fff;border-color:#0f766e}
     .btn-dl{padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;font-size:12.5px;font-weight:600;font-family:inherit}
-    .btn-dl:hover{background:var(--surface-2,rgba(0,0,0,.04))}
+    .btn-dl:hover:not(:disabled){background:var(--surface-2,rgba(0,0,0,.04))}
+    .btn-dl:disabled{opacity:.6;cursor:not-allowed}
+    .btn-dl.active{background:#4338ca;color:#fff;border-color:#4338ca}
     .stats{display:flex;gap:8px;font-size:12px;color:var(--text-dim);flex-wrap:wrap}
     .stats button{background:rgba(99,102,241,.14);color:#4338ca;padding:2px 7px;border-radius:5px;font-weight:600;border:1px solid transparent;cursor:pointer;font-family:inherit;font-size:12px}
     .stats button:hover{background:rgba(99,102,241,.24)}
@@ -35,6 +37,18 @@
     .paused-row .preden{color:var(--text-dim);font-size:12px}
     .paused-row .popen{font-variant-numeric:tabular-nums;font-weight:600}
     .paused-row .b-verlopen{background:rgba(220,38,38,.14);color:#b91c1c;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600}
+    .era-hist{background:rgba(107,114,128,.15);color:#4b5563;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;margin-left:6px}
+    .era-act{background:rgba(220,38,38,.14);color:#b91c1c;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;margin-left:6px}
+    /* AI-analyse blok */
+    .ai-block{border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:10px;background:var(--bg)}
+    .ai-block h4{font-size:12px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
+    .ai-btn{padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;font-size:12px;font-weight:600;font-family:inherit}
+    .ai-btn:hover:not(:disabled){background:var(--surface-2,rgba(0,0,0,.04))}
+    .ai-btn:disabled{opacity:.5;cursor:not-allowed}
+    .ai-result{margin-top:8px;font-size:12.5px}
+    .ai-verdict-ja{background:rgba(245,158,11,.18);color:#92400e;padding:2px 8px;border-radius:4px;font-weight:700}
+    .ai-verdict-nee{background:rgba(107,114,128,.15);color:#4b5563;padding:2px 8px;border-radius:4px;font-weight:700}
+    .ai-verdict-onduidelijk{background:rgba(99,102,241,.14);color:#3730a3;padding:2px 8px;border-radius:4px;font-weight:700}
     .cust{background:var(--surface,var(--bg));border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden}
     .cust-head{display:grid;grid-template-columns:1fr auto auto auto 20px;gap:14px;align-items:center;padding:10px 14px;cursor:pointer;user-select:none}
     .cust-head:hover{background:var(--surface-2,rgba(0,0,0,.03))}
@@ -101,6 +115,8 @@
         <button class="tab"       data-tab="issues">Probleemgevallen (<span id="c-issues">0</span>)</button>
       </div>
       <div class="stats" id="signalstats"></div>
+      <button class="btn-dl" id="aiBatchBtn" title="Analyseer alle klanten met gesprek (batched, kan even duren)">🤖 Analyseer alle</button>
+      <button class="btn-dl" id="aiFilterBtn" title="Toon alleen klanten waar AI zegt: afspraak gemaakt maar niet vastgelegd">🔍 Afspraak-niet-vastgelegd</button>
       <button class="btn-dl" id="dlBtn" title="Download deze pagina als los HTML-bestand (offline)">💾 Download snapshot</button>
       <button class="btn-dl" id="reloadBtn" title="Verse data ophalen">↻ Ververs</button>
     </div>
@@ -117,7 +133,9 @@
 'use strict';
 let DATA = { customers: [], signal_counts: {}, generated_at: null };
 // signalFilter is een Set — multi-select. Klik = toggle. Leeg = geen filter.
-const state = { tab: 'all', q: '', signalFilter: new Set() };
+// aiResults: client-only cache van AI-analyses (customer_id → {loading|result|error}).
+// aiFilterUnrecorded: als true, toon alleen klanten met AI-verdict "JA + geen arrangement".
+const state = { tab: 'all', q: '', signalFilter: new Set(), aiResults: new Map(), aiFilterUnrecorded: false };
 
 (async function init() {
   await window._authSharedReady;
@@ -163,6 +181,49 @@ function wireEvents() {
   });
   document.getElementById('reloadBtn').onclick = () => loadData();
   document.getElementById('dlBtn').onclick = () => downloadSnapshot();
+  document.getElementById('aiBatchBtn').onclick = () => analyseAll();
+  document.getElementById('aiFilterBtn').onclick = (e) => {
+    state.aiFilterUnrecorded = !state.aiFilterUnrecorded;
+    e.currentTarget.classList.toggle('active', state.aiFilterUnrecorded);
+    render();
+  };
+}
+
+// Batch: analyseer alle klanten met een gesprek (skip als al geanalyseerd).
+// Serieel om API-rate-limits en UI-flood te voorkomen; 400ms tussen calls.
+async function analyseAll() {
+  const btn = document.getElementById('aiBatchBtn');
+  const orig = btn.textContent;
+  const candidates = (DATA.customers || [])
+    .filter((c) => c.summary.total_messages > 0 && !state.aiResults.get(c.customer_id));
+  if (candidates.length === 0) {
+    alert('Alles is al geanalyseerd of er is niks te analyseren.');
+    return;
+  }
+  if (!confirm('Analyseer ' + candidates.length + ' klant(en) via AI? Kost 1 AI-call per klant.')) return;
+  btn.disabled = true;
+  let done = 0;
+  for (const c of candidates) {
+    btn.textContent = '🤖 Bezig ' + (++done) + '/' + candidates.length + '…';
+    try {
+      state.aiResults.set(c.customer_id, { loading: true });
+      const r = await window.AgentShared.apiFetch('/api/wanbetalers-diagnose-analyse-gesprek', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_id: c.customer_id }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      state.aiResults.set(c.customer_id, { result: d });
+    } catch (e) {
+      state.aiResults.set(c.customer_id, { error: e?.message || 'onbekend' });
+    }
+    // Kleine pauze om Anthropic-rate-limit + UI leefbaar te houden.
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  btn.disabled = false;
+  btn.textContent = orig;
+  render();
 }
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
@@ -205,6 +266,8 @@ function filterCustomers() {
       for (const code of state.signalFilter) { if (codes.has(code)) { hit = true; break; } }
       if (!hit) return false;
     }
+    // AI-filter: alleen klanten waar de AI zegt "JA + geen arrangement".
+    if (state.aiFilterUnrecorded && !hasUnrecordedAgreement(c)) return false;
     return true;
   });
 }
@@ -294,7 +357,7 @@ function renderCust(c) {
     const cls = s.severity === 'high' ? 'b-signal-high' : (s.severity === 'medium' ? 'b-signal-med' : 'b-signal-low');
     return '<span class="badge ' + cls + '" title="' + esc(s.msg) + '">⚠</span>';
   }).join('');
-  return '<div class="cust">' +
+  return '<div class="cust" data-cust-id="' + esc(c.customer_id) + '">' +
     '<div class="cust-head">' +
       '<div><div class="cust-name">' + esc(c.name) + '</div>' +
         '<div class="cust-meta">' + (c.email ? esc(c.email) : '') + (c.phone ? ' · ' + esc(c.phone) : '') + ' · ' +
@@ -342,8 +405,45 @@ function renderBody(c) {
 
   const sends = c.sends && c.sends.length
     ? '<table class="t"><thead><tr><th>Wanneer</th><th>Event</th><th>Template</th><th>Naar</th><th>Meta-code / wamid</th></tr></thead><tbody>' +
-        c.sends.slice(0, 20).map((s) => '<tr><td>' + esc(fmtDT(s.at)) + '</td><td>' + esc(s.event_type) + '</td><td>' + esc(s.meta_template_name || '—') + '</td><td>' + esc(s.to || '—') + '</td><td>' + esc(s.meta_code || s.wamid || s.error || '—') + '</td></tr>').join('') +
+        c.sends.slice(0, 20).map((s) => {
+          let eraBadge = '';
+          if (s.era === 'historisch') eraBadge = '<span class="era-hist" title="Vóór dag7/dag14-fix van 2 aug 09:00 — historisch">vóór fix</span>';
+          else if (s.era === 'actief') eraBadge = '<span class="era-act" title="NA dag7/dag14-fix — actief probleem, verzending faalt nog steeds">na fix</span>';
+          return '<tr><td>' + esc(fmtDT(s.at)) + '</td><td>' + esc(s.event_type) + eraBadge + '</td><td>' + esc(s.meta_template_name || '—') + '</td><td>' + esc(s.to || '—') + '</td><td>' + esc(s.meta_code || s.wamid || s.error || '—') + '</td></tr>';
+        }).join('') +
       '</tbody></table>' : '<div class="no-data">Geen aanmaan-events gelogd.</div>';
+
+  // AI-analyse blok — on-demand knop + resultaat als 't al is opgehaald.
+  const aiState = state.aiResults.get(c.customer_id);
+  let aiBlock = '<div class="ai-block"><h4>🤖 AI-gespreksanalyse</h4>';
+  if (aiState && aiState.loading) {
+    aiBlock += '<div class="ai-result">Bezig met analyseren…</div>';
+  } else if (aiState && aiState.error) {
+    aiBlock += '<div class="ai-result" style="color:#dc2626">Fout: ' + esc(aiState.error) + '</div>' +
+      '<button class="ai-btn" onclick="analyseGesprek(\'' + esc(c.customer_id) + '\')">Opnieuw proberen</button>';
+  } else if (aiState && aiState.result) {
+    const r = aiState.result;
+    const verdictCls = r.afspraak_gemaakt === 'JA' ? 'ai-verdict-ja'
+                     : (r.afspraak_gemaakt === 'NEE' ? 'ai-verdict-nee' : 'ai-verdict-onduidelijk');
+    const termijnenTxt = (r.termijnen && r.termijnen.length)
+      ? '<div class="ai-result" style="margin-top:4px">Termijnen: ' + r.termijnen.map((t) => esc((t.bedrag_eur ? '€' + t.bedrag_eur : '?') + ' op ' + (t.datum || '?'))).join(' · ') + '</div>' : '';
+    aiBlock += '<div class="ai-result">'
+      + '<span class="' + verdictCls + '">Afspraak: ' + esc(r.afspraak_gemaakt) + '</span>'
+      + ' <span style="color:var(--text-dim);font-size:11.5px">vertrouwen: ' + esc(r.vertrouwen) + '</span>'
+      + ' <span style="color:var(--text-dim);font-size:11.5px">· ' + (r.messages_count || 0) + ' berichten geanalyseerd</span>'
+      + '</div>'
+      + '<div class="ai-result" style="margin-top:6px"><b>Samenvatting:</b> ' + esc(r.samenvatting || '—') + '</div>'
+      + termijnenTxt
+      + '<div class="ai-result" style="margin-top:6px"><b>Actie nodig:</b> ' + esc(r.actie_nodig || '—') + '</div>'
+      + '<div style="margin-top:6px;font-size:11px;color:var(--text-dim)">Analyse: ' + esc(fmtDT(r.analysed_at)) + '</div>'
+      + '<button class="ai-btn" style="margin-top:6px" onclick="analyseGesprek(\'' + esc(c.customer_id) + '\')">Opnieuw</button>';
+  } else if (c.summary.total_messages === 0) {
+    aiBlock += '<div class="ai-result no-data">Geen gesprek om te analyseren.</div>';
+  } else {
+    aiBlock += '<button class="ai-btn" onclick="analyseGesprek(\'' + esc(c.customer_id) + '\')">Analyseer dit gesprek</button>'
+      + '<div style="font-size:11px;color:var(--text-dim);margin-top:4px">On-demand — kost 1 AI-call. Alleen samenvatting wordt opgeslagen (geen volledig gesprek).</div>';
+  }
+  aiBlock += '</div>';
 
   const convs = c.conversations && c.conversations.length
     ? c.conversations.map((cv) => {
@@ -371,11 +471,41 @@ function renderBody(c) {
 
   return sigs +
     '<div class="grid2">' + runBlock + arr + '</div>' +
+    aiBlock +
     '<div class="section-h">Open facturen</div>' + invs +
     '<div class="section-h">Betaalhistorie (laatste 15)</div>' + pays +
     '<div class="section-h">Verzonden aanmaningen (log)</div>' + sends +
     '<div class="section-h">WhatsApp-conversatie(s) — laatste 10 per conv</div>' + convs +
     '<div class="section-h">Chronologische tijdlijn (max 60)</div>' + tl;
+}
+
+// AI-analyse state (client-side alleen — geen server-persistence).
+// Map<customer_id, { loading, result, error }>
+async function analyseGesprek(customerId) {
+  state.aiResults.set(customerId, { loading: true });
+  render();
+  try {
+    const r = await window.AgentShared.apiFetch('/api/wanbetalers-diagnose-analyse-gesprek', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customer_id: customerId }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    state.aiResults.set(customerId, { result: d });
+  } catch (e) {
+    state.aiResults.set(customerId, { error: e?.message || 'onbekend' });
+  }
+  render();
+  // Herstel scroll naar dezelfde klant (render()  vervangt DOM).
+  const el = document.querySelector('[data-cust-id="' + customerId + '"]');
+  if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+// Filter-helper: is er een AI-analyse die zegt "afspraak gemaakt maar niet vastgelegd"?
+function hasUnrecordedAgreement(c) {
+  const r = state.aiResults.get(c.customer_id);
+  return r && r.result && r.result.afspraak_gemaakt === 'JA' && !r.result.heeft_arrangement;
 }
 
 // Download huidige rendering als self-contained HTML. Ontkoppelt van de
