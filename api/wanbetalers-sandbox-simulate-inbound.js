@@ -70,6 +70,10 @@ export default async function handler(req, res) {
 
     if (existing) {
       // Adopt: koppel aan de test-klant + registreer inbound-timestamps.
+      // HARD SAFETY GUARD: match ook op customer_id om zeker te weten dat
+      // deze conversation al bij de sandbox-klant hoort (of geen owner heeft;
+      // de hijack-check hierboven blokkeert al conv van een andere klant).
+      // Werken met .or() zodat we ook "geen owner" toestaan (dan claimen we).
       convId = existing.id;
       const currentStatus = String(existing.status || 'open');
       const nextStatus    = (currentStatus === 'archived') ? 'archived' : 'open';
@@ -79,7 +83,9 @@ export default async function handler(req, res) {
         last_inbound_at     : nowIso,
         status              : nextStatus,
         customer_id         : customer.id,
-      }).eq('id', existing.id);
+      })
+      .eq('id', existing.id)
+      .or(`customer_id.eq.${customer.id},customer_id.is.null`);
     } else {
       // Insert; bij dup-key (race of subtiel formaatverschil) opnieuw zoeken
       // op de volledige sleutel en de gevonden rij adopteren.
@@ -103,13 +109,16 @@ export default async function handler(req, res) {
         convId = retry.id;
         const currentStatus = String(retry.status || 'open');
         const nextStatus    = (currentStatus === 'archived') ? 'archived' : 'open';
+        // HARD SAFETY GUARD (zie boven): scope ook op customer_id of null-owner.
         await supabaseAdmin.from('whatsapp_conversations').update({
           last_message_at     : nowIso,
           last_message_preview: messageText.slice(0, 120),
           last_inbound_at     : nowIso,
           status              : nextStatus,
           customer_id         : customer.id,
-        }).eq('id', retry.id);
+        })
+        .eq('id', retry.id)
+        .or(`customer_id.eq.${customer.id},customer_id.is.null`);
       } else {
         convId = inserted.id;
       }
@@ -346,10 +355,12 @@ export default async function handler(req, res) {
           }).select('id').single();
         joost.out_message_id = outMsg?.id || null;
         joost.out_persisted_as = 'oefengesprek_fallback';
+        // HARD SAFETY GUARD: scope UPDATE ook op customer_id (sandbox-klant).
         await supabaseAdmin
           .from('whatsapp_conversations')
           .update({ last_message_at: outIso, last_message_preview: outBody.slice(0, 120) })
-          .eq('id', convId);
+          .eq('id', convId)
+          .eq('customer_id', customer.id);
       } catch (e) {
         console.warn('[sandbox-simulate-inbound] oefengesprek fallback insert soft-fail', e?.message || e);
       }

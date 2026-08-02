@@ -47,6 +47,10 @@ export default async function handler(req, res) {
     const displayName = sandboxDisplayName(rawName);
     let customer = await getSandboxCustomer();
     if (customer) {
+      // HARD SAFETY GUARD: expliciete is_test-eis op de UPDATE zelf.
+      // Zonder deze guard kon een refactor die getSandboxCustomer() aanpast
+      // theoretisch een non-test customer aanraken. Nu matcht de UPDATE 0
+      // rijen als is_test niet true is, en gooien we hard SANDBOX_GUARD_FAILED.
       const { data: upd, error: uErr } = await supabaseAdmin
         .from('customers')
         .update({
@@ -57,10 +61,13 @@ export default async function handler(req, res) {
           is_company: false,
         })
         .eq('id', customer.id)
-        .select('id, first_name, last_name, email, phone, is_test')
-        .single();
+        .eq('is_test', true)
+        .select('id, first_name, last_name, email, phone, is_test');
       if (uErr) throw new Error('customer update: ' + uErr.message);
-      customer = upd;
+      if (!upd || upd.length === 0) {
+        throw new Error(`SANDBOX_GUARD_FAILED: customer ${customer.id} matchte SELECT (is_test=true) maar UPDATE met is_test=true raakte 0 rijen — abort.`);
+      }
+      customer = upd[0];
     } else {
       const { data: ins, error: iErr } = await supabaseAdmin
         .from('customers')
@@ -111,7 +118,13 @@ export default async function handler(req, res) {
       last_activity_at: new Date().toISOString(),
     };
     if (existingPipe) {
-      await supabaseAdmin.from('dunning_pipeline_customers').update(stagePayload).eq('id', existingPipe.id);
+      // HARD SAFETY GUARD: dunning_pipeline_customers heeft geen is_test-kolom;
+      // scope via .eq('customer_id', customer.id) waar customer per definitie
+      // is_test=true is (via de update-guard hierboven bevestigd).
+      await supabaseAdmin.from('dunning_pipeline_customers')
+        .update(stagePayload)
+        .eq('id', existingPipe.id)
+        .eq('customer_id', customer.id);
     } else {
       await supabaseAdmin.from('dunning_pipeline_customers').insert(stagePayload);
     }
@@ -155,12 +168,19 @@ export default async function handler(req, res) {
       if (existingSub) {
         // Refresh — reset counters zodat een re-seed altijd dezelfde
         // start-state oplevert.
+        // HARD SAFETY GUARD: scope UPDATE ook op customer_id + description-
+        // marker zodat een bug in de bovenliggende SELECT geen echt abo raakt.
         const { data: upd, error: uSubErr } = await supabaseAdmin
-          .from('subscriptions').update(subPayload).eq('id', existingSub.id)
-          .select('id, customer_id, description, amount, term_count, start_date, end_date, status, postponed_months')
-          .single();
+          .from('subscriptions').update(subPayload)
+          .eq('id', existingSub.id)
+          .eq('customer_id', customer.id)
+          .eq('description', 'TEST-abonnement')
+          .select('id, customer_id, description, amount, term_count, start_date, end_date, status, postponed_months');
         if (uSubErr) throw new Error('subscription update: ' + uSubErr.message);
-        subscription = upd;
+        if (!upd || upd.length === 0) {
+          throw new Error(`SANDBOX_GUARD_FAILED: sub ${existingSub.id} matchte SELECT maar UPDATE met customer_id+description-marker raakte 0 rijen — abort.`);
+        }
+        subscription = upd[0];
       } else {
         // Poging 1: mét is_test=true (nieuwere migraties).
         const withFlag = { ...subPayload, is_test: true };
@@ -260,12 +280,20 @@ export default async function handler(req, res) {
           start_date:     iso(startD),
         };
         if (existingRegSub?.id) {
+          // HARD SAFETY GUARD: scope UPDATE op deal_id + description-marker.
+          // Deal_id is uit de test-flow (deals.customer_id = sandbox customer),
+          // description='TEST-regeling-abo' is een unieke marker.
           const { data: upd, error: upErr } = await supabaseAdmin
-            .from('subscriptions').update(subPayload).eq('id', existingRegSub.id)
-            .select('id, deal_id, amount, vat_percentage, billing_cycle, status, description')
-            .single();
+            .from('subscriptions').update(subPayload)
+            .eq('id', existingRegSub.id)
+            .eq('deal_id', dealId)
+            .eq('description', 'TEST-regeling-abo')
+            .select('id, deal_id, amount, vat_percentage, billing_cycle, status, description');
           if (upErr) throw new Error('regeling-sub update: ' + upErr.message);
-          regelingSubscription = upd;
+          if (!upd || upd.length === 0) {
+            throw new Error(`SANDBOX_GUARD_FAILED: regeling-sub ${existingRegSub.id} matchte SELECT maar UPDATE met deal_id+description-marker raakte 0 rijen — abort.`);
+          }
+          regelingSubscription = upd[0];
         } else {
           const { data: ins, error: iErr } = await supabaseAdmin
             .from('subscriptions').insert(subPayload)

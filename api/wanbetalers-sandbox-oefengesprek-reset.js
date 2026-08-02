@@ -94,10 +94,14 @@ export default async function handler(req, res) {
       // 500 opleveren. Alle productie-lezers (joost-send-autonomous r345,
       // joost-suggest-core r235, inbox-send r184, dunning-conv-reminders
       // r99) zijn al null-safe, maar we vermijden liever elke race.
+      // HARD SAFETY GUARD: scope UPDATE ook op customer_id (sandbox-klant).
+      // conv.id is uit een SELECT gescoped op customer_id, dus deze filter
+      // matcht altijd voor onze rijen en nooit voor een productie-conv.
       await supabaseAdmin
         .from('whatsapp_conversations')
         .update({ last_message_preview: null, unread_count: 0 })
-        .eq('id', conv.id);
+        .eq('id', conv.id)
+        .eq('customer_id', customer.id);
 
       // #797 — Joost-tellers voor deze conv terug op nul zodat "Nieuw
       // gesprek" ook echt Joost's kant reset. messages_sent_today_date op

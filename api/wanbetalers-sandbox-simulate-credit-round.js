@@ -149,11 +149,18 @@ export default async function handler(req, res) {
           const newEnd    = sub.end_date ? addMonthsStr(sub.end_date, N) : null;
           const newCount  = (Number(sub.term_count) || 0) + N;
           const newPostp  = (Number(sub.postponed_months) || 0) + N;
+          // HARD SAFETY GUARD: scope UPDATE ook op customer_id + description-
+          // marker + teamleader_subscription_id IS NULL. Deze drie samen
+          // garanderen dat het écht de test-sub is (die geen TL-koppeling heeft).
           const { error: subErr } = await supabaseAdmin.from('subscriptions').update({
             end_date        : newEnd,
             term_count      : newCount,
             postponed_months: newPostp,
-          }).eq('id', sub.id);
+          })
+          .eq('id', sub.id)
+          .eq('customer_id', cid)
+          .eq('description', 'TEST-abonnement')
+          .is('teamleader_subscription_id', null);
           if (subErr) {
             console.warn('[sandbox-simulate-credit-round] sub update soft-fail:', subErr.message);
           } else {
