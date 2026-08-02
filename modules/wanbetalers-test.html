@@ -121,6 +121,11 @@
 
   <div id="gate-blocked">Alleen super_admin heeft toegang tot dit paneel.</div>
 
+  <!-- Notice: DRY-RUN werd bij openen automatisch AAN gezet (vorige staat was LIVE) -->
+  <div id="tpAutoOnNotice" style="display:none;background:rgba(16,185,129,.14);color:#065f46;border:1px solid rgba(16,185,129,.4);padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:600">
+    <i class="ti ti-shield-check"></i> DRY-RUN was UIT bij openen — automatisch teruggezet naar AAN (veilige stand). Zet 'em bewust om via de toggle als je live wilt sturen.
+  </div>
+
   <div id="tp-main" style="display:none">
 
     <!-- Sticky topstrip: DRY-RUN + test-ontvanger -->
@@ -425,9 +430,47 @@ let _pendingAction = null;  // { key, payload, btn } bij DRY-OFF-confirm
 
   document.getElementById('tp-main').style.display = '';
   wireEvents();
+  // ── VEILIGHEIDS-INVARIANT: paneel opent ALTIJD in DRY-RUN=AAN. ─────────
+  // Ongeacht de vorige serverstate (kan LIVE zijn achtergelaten door een
+  // eerdere sessie). Als de vorige staat UIT was, tonen we een groene
+  // notice-strip zodat je weet dat de auto-flip is gebeurd. Idempotent:
+  // set-dry-run met enabled:true op een reeds-AAN staat is een no-op.
+  await _forceDryRunOnAtOpen();
   await refreshStatus();
   startPolling();
 })();
+
+// Force DRY-RUN AAN bij openen; toont notice als de vorige staat UIT was.
+async function _forceDryRunOnAtOpen() {
+  try {
+    // 1) Lees huidige staat om te weten of we een flip doen (voor de notice).
+    const rGet = await window.AgentShared.apiFetch('/api/wanbetalers-sandbox-status');
+    const dGet = await rGet.json();
+    const prevWasLive = (dGet && dGet.dry_run === false);
+    // 2) Zet ALTIJD op AAN (idempotent). Bewust unconditional zodat een
+    //    kapotte GET (status-fout) niet stilzwijgend een LIVE-toestand laat.
+    await window.AgentShared.apiFetch('/api/wanbetalers-sandbox-set-dry-run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true }),
+    });
+    if (prevWasLive) {
+      const el = document.getElementById('tpAutoOnNotice');
+      if (el) el.style.display = '';
+      // Auto-hide na 12s zodat de melding niet blijvend afleidt.
+      setTimeout(() => { if (el) el.style.display = 'none'; }, 12000);
+    }
+  } catch (e) {
+    // Fail-safe: als de forced-set faalt, refuse de paneel-actie-oppervlak.
+    // Beter niet openen dan per ongeluk LIVE laten staan.
+    console.error('[testpanel] force DRY-RUN AAN faalde — paneel-acties geblokkeerd:', e?.message || e);
+    document.getElementById('tp-main').style.display = 'none';
+    const gate = document.getElementById('gate-blocked');
+    gate.textContent = 'Kon DRY-RUN-veiligheidsstand niet forceren. Paneel geblokkeerd. Herlaad de pagina of check /api/wanbetalers-sandbox-status handmatig.';
+    gate.style.display = '';
+    throw e; // laat de outer init falen
+  }
+}
 
 function wireEvents() {
   const t = document.getElementById('dryConfirmText');

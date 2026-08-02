@@ -45,6 +45,27 @@ super_admin-only paneel, met sticky DRY-RUN + test-ontvanger indicator.
 - **UIT → AAN** (veiliger): één-staps confirm.
 - Rode pulsende badge blijft bovenaan zichtbaar zolang UIT is.
 
+## Veiligheids-invariant: paneel opent ALTIJD in DRY-RUN=AAN
+
+Bij het openen van het paneel wordt **onvoorwaardelijk** een
+`POST /api/wanbetalers-sandbox-set-dry-run { enabled: true }` uitgevoerd,
+ongeacht wat de serverstate op dat moment was. Idempotent (AAN → AAN is
+no-op). Als de vorige staat UIT was, verschijnt boven het paneel een
+groene notice-strip "DRY-RUN was UIT bij openen — automatisch teruggezet
+naar AAN". Auto-hide na 12s.
+
+Fail-safe: als deze forced-set faalt (netwerkfout, endpoint down), wordt
+het paneel-actieoppervlak verborgen en toont het gate-blok "kon
+veiligheidsstand niet forceren — herlaad de pagina". Beter niet openen
+dan per ongeluk LIVE laten staan.
+
+**Waarom deze extra stap:** de fail-safe in `dunning-dry-run.js` geldt
+alleen bij missende key of DB-fout. Als iemand ooit
+`dunning_dry_run.enabled=false` in `app_settings` heeft laten staan (bv.
+na een live-test en tab geclosed), was dat de staat voor de volgende
+sessie. Met deze force op page-load wordt die staat bij elke fris-open
+weer op AAN gezet.
+
 ## Wat fase 1 NIET doet
 
 - **Geen nieuwe API-endpoints** — hergebruikt alle bestaande
