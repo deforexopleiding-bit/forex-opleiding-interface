@@ -34,24 +34,38 @@ import { anthropicStructuredOutput, AnthropicClientError } from './_lib/anthropi
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_MESSAGES = 30;   // laatste N berichten meesturen naar Claude
-const MIN_CUSTOMER_MSGS = 3;   // <3 klant-berichten = onvoldoende data
+// Drempel op TOTAAL aantal berichten (inbound + outbound). Een afspraak
+// blijkt vaak uit de wisselwerking — vooral uit ons akkoord op een klant-
+// voorstel. Bij Ingrid-scenario: 2 klant-berichten + 7 antwoorden van ons
+// = 9 totaal, dus ruim genoeg voor analyse. Eerder gebruikte MIN_CUSTOMER_MSGS
+// telde alleen inbound → miste de akkoord-momenten. Fix voor #<PR>.
+const MIN_TOTAL_MSGS = 3;
 
 const SYSTEM_PROMPT = `Je bent een assistent voor de finance-afdeling van De Forex Opleiding.
 Je krijgt een WhatsApp-gesprek met een klant die een openstaande factuur heeft.
 Beoordeel of er een CONCRETE BETAALAFSPRAAK is gemaakt.
 
+BELANGRIJK: een betaalafspraak blijkt uit de WISSELWERKING, niet alleen uit wat de klant zegt.
+- Als de klant een voorstel doet ("kan ik in 4×€350 betalen?") én WIJ akkoord gaan ("ja, prima —
+  eerste termijn op ...", "we gaan akkoord", "afgesproken"): dat is een AFSPRAAK JA.
+- Ook een unilateraal duidelijk voorstel van de klant kan JA zijn als er geen tegenspraak volgt
+  en het bedrag+datum concreet zijn.
+- Onze bevestiging telt net zo zwaar als de klantvraag.
+
 Onder een betaalafspraak versta je:
 - een specifiek bedrag OF een specifieke termijn-verdeling
-- met een specifieke datum (of duidelijke termijn zoals "volgende week vrijdag", "eind van de maand")
-- eenzijdig door de klant beloofd OF wederzijds bevestigd
+- met een specifieke datum of duidelijke termijn ("elke 15e", "volgende week vrijdag", "eind van de maand")
+- door één van beide partijen voorgesteld EN door de andere partij bevestigd (of niet tegengesproken)
 
 GEEN afspraak:
 - vage uitingen ("ik betaal snel", "ik regel het") zonder bedrag/datum
 - alleen een intentie zonder concreet moment
-- gesprek loopt nog, geen definitief antwoord
+- gesprek loopt nog, geen definitief antwoord van beide kanten
+- klant stelt iets voor maar WIJ hebben geen antwoord gegeven (nog niet bevestigd)
 
-Bij twijfel: ONDUIDELIJK. Wees streng.
-Samenvatting max 200 chars, in het Nederlands.
+Bij twijfel: ONDUIDELIJK. Wees streng maar herken duidelijk akkoord.
+Samenvatting max 200 chars, in het Nederlands, noem BEIDE partijen als er
+akkoord is (bv. "klant vroeg 4×€350, wij akkoord op 29 juli").
 Termijnen alleen invullen als de afspraak echt is (max 12 items).`;
 
 const TOOL_INPUT_SCHEMA = {
@@ -161,8 +175,12 @@ export default async function handler(req, res) {
       .limit(MAX_MESSAGES);
     const messages = (msgs || []).reverse();  // chronologisch (oud → nieuw)
 
+    // Sufficient-guard op TOTAAL aantal berichten (was: alleen inbound).
+    // De afspraak zit vaak in de wisselwerking — ons akkoord op een klant-
+    // voorstel telt evenveel als de klantvraag zelf.
     const customerMsgCount = messages.filter((m) => m.direction === 'in').length;
-    const sufficient = customerMsgCount >= MIN_CUSTOMER_MSGS;
+    const outboundMsgCount = messages.length - customerMsgCount;
+    const sufficient = messages.length >= MIN_TOTAL_MSGS;
 
     // 4) Bestaat er al een arrangement (om actie_nodig te bepalen).
     const { data: arrs } = await supabaseAdmin
@@ -175,9 +193,12 @@ export default async function handler(req, res) {
     if (!sufficient) {
       return res.status(200).json({
         ok: true, customer_id: customerId, analysed_at: new Date().toISOString(),
-        messages_count: messages.length, sufficient_data: false,
+        messages_count: messages.length,
+        customer_msg_count: customerMsgCount,
+        outbound_msg_count: outboundMsgCount,
+        sufficient_data: false,
         afspraak_gemaakt: 'ONDUIDELIJK',
-        samenvatting: `Onvoldoende data: slechts ${customerMsgCount} bericht(en) van de klant.`,
+        samenvatting: `Onvoldoende data: slechts ${messages.length} bericht(en) totaal (${customerMsgCount} in / ${outboundMsgCount} uit).`,
         vertrouwen: 'laag',
         actie_nodig: 'Geen analyse — te weinig gesprek.',
         heeft_arrangement: hasArrangement,
