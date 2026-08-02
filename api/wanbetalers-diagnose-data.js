@@ -41,9 +41,13 @@ export default async function handler(req, res) {
       return res.status(200).json({ generated_at: new Date().toISOString(), customers: [], signal_counts: {} });
     }
 
+    // Extra: profiles van gebruikers die runs handmatig hebben gepauzeerd,
+    // zodat de UI "Handmatig gepauzeerd door <naam>" kan tonen i.p.v. UUID.
+    // We fetchen ALLE profiles in één keer (kleine tabel, geen N+1).
     const [
       customersRes, allInvoicesRes, runsRes, workflowsRes,
       stepsRes, pipelineRes, arrangementsRes, conversationsRes,
+      profilesRes,
     ] = await Promise.all([
       supabaseAdmin.from('customers')
         .select('id, first_name, last_name, company_name, is_company, email, phone, anonymized_at, archived_at')
@@ -66,6 +70,8 @@ export default async function handler(req, res) {
       supabaseAdmin.from('whatsapp_conversations')
         .select('id, customer_id, status, last_inbound_at, last_message_at, last_message_preview, unread_count')
         .in('customer_id', custIds),
+      supabaseAdmin.from('profiles')
+        .select('id, full_name, email'),
     ]);
     if (customersRes.error) throw new Error('customers: ' + customersRes.error.message);
 
@@ -77,6 +83,8 @@ export default async function handler(req, res) {
     const pipeline     = pipelineRes.data      || [];
     const arrangements = arrangementsRes.data  || [];
     const conversations= conversationsRes.data || [];
+    const profiles     = profilesRes.data      || [];
+    const profileById  = new Map(profiles.map((p) => [p.id, p]));
 
     const runIds = runs.map((r) => r.id);
     let logs = [];
@@ -121,7 +129,7 @@ export default async function handler(req, res) {
       pipe:     pipeByCust.get(c.id) || null,
       arrangements: arrByCust[c.id] || [],
       conversations: (convByCust[c.id] || []),
-      wfById, stepById,
+      wfById, stepById, profileById,
       logsByRun, msgsByConv,
     }));
 
@@ -177,7 +185,7 @@ function customerDisplay(c) {
 
 function buildCustomerRecord(ctx) {
   const { customer, invoices, runs, pipe, arrangements, conversations,
-          wfById, stepById, logsByRun, msgsByConv } = ctx;
+          wfById, stepById, profileById, logsByRun, msgsByConv } = ctx;
 
   const openInvs = invoices.filter((iv) => OPEN_STATUSES.includes(iv.status) && openAmount(iv) > 0);
   const totalOpenEur = openInvs.reduce((sum, iv) => sum + openAmount(iv), 0);
@@ -206,7 +214,14 @@ function buildCustomerRecord(ctx) {
   if (activeRun && activeRun.status === 'paused') {
     if (activeRun.paused_by_conversation_id) { runReason = 'inbox_reply';  runReasonLabel = 'Klant reageerde (WhatsApp)'; }
     else if (activeRun.paused_by_arrangement_id) { runReason = 'arrangement'; runReasonLabel = 'Regeling loopt / breach'; }
-    else if (activeRun.paused_by_manual_user_id) { runReason = 'manual'; runReasonLabel = 'Handmatig gepauzeerd' + (activeRun.paused_manual_reason ? ' (' + activeRun.paused_manual_reason + ')' : ''); }
+    else if (activeRun.paused_by_manual_user_id) {
+      runReason = 'manual';
+      const p = profileById ? profileById.get(activeRun.paused_by_manual_user_id) : null;
+      const who = p ? (p.full_name || p.email || activeRun.paused_by_manual_user_id) : activeRun.paused_by_manual_user_id;
+      runReasonLabel = 'Handmatig gepauzeerd door ' + who
+        + (activeRun.paused_manual_reason ? ' (' + activeRun.paused_manual_reason + ')' : '')
+        + (activeRun.paused_at ? ' — ' + new Date(activeRun.paused_at).toISOString().slice(0,10) : '');
+    }
     else { runReason = 'wees'; runReasonLabel = 'GEEN REDEN (wees-run — pre-fix)'; }
   }
 
@@ -301,6 +316,19 @@ function buildCustomerRecord(ctx) {
     signals.push({ code: 'stille_actieve_run', severity: 'medium',
                    msg: 'Run staat active + next_action_at ligt >3d in het verleden — engine zou moeten oppikken.' });
   }
+
+  // Volgende actie in het verleden (los van run-status). Overlapt gedeeltelijk
+  // met stille_actieve_run maar dekt ook paused runs waar next_action_at
+  // achterhaald is. Threshold 1 dag — kleiner dan stille_actieve_run's 3d
+  // omdat "verstreken" een breder signaal is (paused runs mogen niet ticken,
+  // maar de datum toont wél dat er iets is blijven liggen).
+  const daysPastNextAction = (activeRun && activeRun.next_action_at)
+    ? Math.floor((Date.now() - new Date(activeRun.next_action_at).getTime()) / 86400_000)
+    : null;
+  if (daysPastNextAction !== null && daysPastNextAction >= 1) {
+    signals.push({ code: 'next_action_verstreken', severity: 'medium',
+                   msg: `Volgende actie ligt ${daysPastNextAction} dag(en) in het verleden — flow had moeten doorlopen.` });
+  }
   if (totalOpenEur === 0 && activeRun && ['active','paused'].includes(activeRun.status)) {
     signals.push({ code: 'run_open_zonder_openstaand', severity: 'low',
                    msg: '€0 openstaand maar run staat nog active/paused — kandidaat om te cancellen.' });
@@ -336,6 +364,8 @@ function buildCustomerRecord(ctx) {
       needs_attention: !!activeRun.needs_attention,
       reason:         runReason,
       reason_label:   runReasonLabel,
+      paused_at:      activeRun.paused_at || null,
+      days_past_next_action: daysPastNextAction,
     } : null,
     arrangements: arrangementSummary,
     conversations: convSummaries,

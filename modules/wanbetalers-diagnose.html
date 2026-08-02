@@ -20,7 +20,21 @@
     .btn-dl{padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;font-size:12.5px;font-weight:600;font-family:inherit}
     .btn-dl:hover{background:var(--surface-2,rgba(0,0,0,.04))}
     .stats{display:flex;gap:8px;font-size:12px;color:var(--text-dim);flex-wrap:wrap}
-    .stats span{background:rgba(99,102,241,.14);color:#4338ca;padding:2px 7px;border-radius:5px;font-weight:600}
+    .stats button{background:rgba(99,102,241,.14);color:#4338ca;padding:2px 7px;border-radius:5px;font-weight:600;border:1px solid transparent;cursor:pointer;font-family:inherit;font-size:12px}
+    .stats button:hover{background:rgba(99,102,241,.24)}
+    .stats button.active{background:#4338ca;color:#fff;border-color:#4338ca}
+    .stats .clear{background:transparent;color:var(--text-dim);border:1px dashed var(--border);font-weight:500}
+    .stats .clear:hover{background:var(--surface-2,rgba(0,0,0,.04))}
+    /* Paused-blok bovenaan */
+    .paused-section{background:var(--surface,var(--bg));border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:14px}
+    .paused-section h2{font-size:14px;font-weight:700;margin-bottom:8px;color:#92400e}
+    .paused-section h2 .cnt{background:rgba(245,158,11,.18);color:#92400e;padding:2px 8px;border-radius:5px;font-size:12px;margin-left:6px}
+    .paused-row{display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--border-soft,rgba(0,0,0,.05));font-size:12.5px}
+    .paused-row:last-child{border-bottom:none}
+    .paused-row .pnaam{font-weight:600}
+    .paused-row .preden{color:var(--text-dim);font-size:12px}
+    .paused-row .popen{font-variant-numeric:tabular-nums;font-weight:600}
+    .paused-row .b-verlopen{background:rgba(220,38,38,.14);color:#b91c1c;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600}
     .cust{background:var(--surface,var(--bg));border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden}
     .cust-head{display:grid;grid-template-columns:1fr auto auto auto 20px;gap:14px;align-items:center;padding:10px 14px;cursor:pointer;user-select:none}
     .cust-head:hover{background:var(--surface-2,rgba(0,0,0,.03))}
@@ -90,6 +104,7 @@
       <button class="btn-dl" id="dlBtn" title="Download deze pagina als los HTML-bestand (offline)">💾 Download snapshot</button>
       <button class="btn-dl" id="reloadBtn" title="Verse data ophalen">↻ Ververs</button>
     </div>
+    <div id="pausedSection"></div>
     <div id="list"><div id="loading">Laden…</div></div>
   </div>
 </div>
@@ -101,7 +116,8 @@
 <script>
 'use strict';
 let DATA = { customers: [], signal_counts: {}, generated_at: null };
-const state = { tab: 'all', q: '' };
+// signalFilter is een Set — multi-select. Klik = toggle. Leeg = geen filter.
+const state = { tab: 'all', q: '', signalFilter: new Set() };
 
 (async function init() {
   await window._authSharedReady;
@@ -181,6 +197,14 @@ function filterCustomers() {
     if (state.tab === 'issues') {
       if (!c.signals || c.signals.length === 0) return false;
     }
+    // Signaal-filter (multi-select). Klant moet MINSTENS EEN van de
+    // geselecteerde signalen hebben. Lege set = geen filter.
+    if (state.signalFilter.size > 0) {
+      const codes = new Set((c.signals || []).map((s) => s.code));
+      let hit = false;
+      for (const code of state.signalFilter) { if (codes.has(code)) { hit = true; break; } }
+      if (!hit) return false;
+    }
     return true;
   });
 }
@@ -190,17 +214,81 @@ function render() {
   document.getElementById('c-all').textContent = (DATA.customers || []).length;
   document.getElementById('c-flow').textContent = (DATA.customers || []).filter((c) => c.run && ['active','paused'].includes(c.run.status)).length;
   document.getElementById('c-issues').textContent = (DATA.customers || []).filter((c) => c.signals && c.signals.length > 0).length;
-  const codes = Object.entries(DATA.signal_counts || {}).sort((a, b) => b[1] - a[1]).slice(0, 5);
-  document.getElementById('signalstats').innerHTML = codes.map(([k, v]) => '<span>' + esc(k) + ': ' + v + '</span>').join('');
+
+  // Klikbare signaal-chips — toggle multi-filter.
+  // Toon alle signalen die minstens 1x voorkomen, gesorteerd op aantal DESC.
+  const codes = Object.entries(DATA.signal_counts || {}).sort((a, b) => b[1] - a[1]);
+  const chipsHtml = codes.map(([k, v]) => {
+    const active = state.signalFilter.has(k) ? ' active' : '';
+    return '<button data-sigcode="' + esc(k) + '" class="' + active + '" title="Klik: filter alleen deze; nog eens klikken: uit">' + esc(k) + ': ' + v + '</button>';
+  }).join('');
+  const clearBtn = state.signalFilter.size > 0
+    ? '<button class="clear" id="clearSigFilter" title="Wis signaal-filter">✕ filter wissen (' + state.signalFilter.size + ')</button>'
+    : '';
+  document.getElementById('signalstats').innerHTML = chipsHtml + clearBtn;
+  document.querySelectorAll('#signalstats [data-sigcode]').forEach((b) => {
+    b.onclick = () => {
+      const code = b.dataset.sigcode;
+      if (state.signalFilter.has(code)) state.signalFilter.delete(code);
+      else state.signalFilter.add(code);
+      render();
+    };
+  });
+  const clearEl = document.getElementById('clearSigFilter');
+  if (clearEl) clearEl.onclick = () => { state.signalFilter.clear(); render(); };
+
+  // Paused-blok bovenaan (alleen zichtbaar op tab 'all' of 'flow' als er
+  // paused-klanten zijn en er geen zoekopdracht/filter loopt).
+  renderPausedSection();
+
   document.getElementById('list').innerHTML = filtered.map(renderCust).join('')
     || '<div id="empty">Geen klanten in deze weergave.</div>';
   document.querySelectorAll('.cust-head').forEach((h) => { h.onclick = () => h.parentElement.classList.toggle('open'); });
 }
 
+function renderPausedSection() {
+  const host = document.getElementById('pausedSection');
+  // Alleen tonen op default view (tab=all + geen zoek/signaal-filter),
+  // anders vervuilt 't de filter-view.
+  const isDefault = state.tab === 'all' && !state.q && state.signalFilter.size === 0;
+  if (!isDefault) { host.innerHTML = ''; return; }
+  const paused = (DATA.customers || []).filter((c) => c.run && c.run.status === 'paused');
+  if (paused.length === 0) { host.innerHTML = ''; return; }
+  // Sorteer op openstaand DESC.
+  paused.sort((a, b) => (b.summary.total_open_eur || 0) - (a.summary.total_open_eur || 0));
+  const rows = paused.map((c) => {
+    const r = c.run;
+    let redenBadge = '';
+    if (r.reason === 'wees')        redenBadge = '<span class="badge b-wees">Wees-run (geen reden)</span>';
+    else if (r.reason === 'inbox_reply')  redenBadge = '<span class="badge b-paused">In gesprek (klant reageerde)</span>';
+    else if (r.reason === 'arrangement')  redenBadge = '<span class="badge b-paused">Regeling / breach</span>';
+    else if (r.reason === 'manual')       redenBadge = '<span class="badge b-paused">Handmatig</span>';
+    else                                  redenBadge = '<span class="badge b-paused">Gepauzeerd</span>';
+    const verlopen = (r.days_past_next_action != null && r.days_past_next_action >= 1)
+      ? ' <span class="b-verlopen" title="Volgende actie ligt in het verleden">⚠ ' + r.days_past_next_action + ' dg verlopen</span>' : '';
+    const reasonText = r.reason_label ? esc(r.reason_label) : '';
+    return '<div class="paused-row">'
+      + '<div><div class="pnaam">' + esc(c.name) + '</div><div class="preden">' + reasonText + '</div></div>'
+      + '<div>' + redenBadge + verlopen + '</div>'
+      + '<div class="preden">stap ' + (r.step_order == null ? '—' : r.step_order) + ' · ' + esc(r.step_type || '—') + '</div>'
+      + '<div class="popen">' + fmtEur(c.summary.total_open_eur) + '</div>'
+      + '</div>';
+  }).join('');
+  host.innerHTML = '<div class="paused-section">'
+    + '<h2>⏸ Gepauzeerd <span class="cnt">' + paused.length + '</span></h2>'
+    + rows
+    + '</div>';
+}
+
 function renderCust(c) {
   const r = c.run;
-  const nextAction = r && r.next_action_at
-    ? (fmtDT(r.next_action_at) + (r.step_type ? ' · ' + esc(r.step_type) : ''))
+  const verlopenHtml = (r && r.days_past_next_action != null && r.days_past_next_action >= 1)
+    ? ' <span class="b-verlopen" title="Volgende actie ligt in het verleden">⚠ ' + r.days_past_next_action + ' dg verlopen</span>'
+    : '';
+  // nextActionHtml bevat al veilig-geëscapete data + de verlopen-span.
+  // Niet nog een keer esc() eromheen.
+  const nextActionHtml = r && r.next_action_at
+    ? (esc(fmtDT(r.next_action_at)) + (r.step_type ? ' · ' + esc(r.step_type) : '') + verlopenHtml)
     : (r ? '—' : '—');
   const badges = (c.signals || []).slice(0, 3).map((s) => {
     const cls = s.severity === 'high' ? 'b-signal-high' : (s.severity === 'medium' ? 'b-signal-med' : 'b-signal-low');
@@ -214,7 +302,7 @@ function renderCust(c) {
         (c.summary.pipeline_stage ? ' · fase=' + esc(c.summary.pipeline_stage) : '') +
         '</div></div>' +
       '<div class="cust-open">' + fmtEur(c.summary.total_open_eur) + '</div>' +
-      '<div>' + statusBadge(c) + ' <span class="cust-meta">' + esc(nextAction) + '</span></div>' +
+      '<div>' + statusBadge(c) + ' <span class="cust-meta">' + nextActionHtml + '</span></div>' +
       '<div class="cust-badges">' + badges + '</div>' +
       '<div class="caret">▸</div>' +
     '</div>' +
