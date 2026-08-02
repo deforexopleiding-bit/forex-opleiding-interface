@@ -253,19 +253,53 @@ Analyseer.`;
       actieNodig = 'Geen afspraak → engine mag doorlopen; overweeg extra contact.';
     }
 
+    const analysedAt = new Date().toISOString();
+    const termijnen  = Array.isArray(ai.termijnen) ? ai.termijnen.slice(0, 12) : [];
+
+    // ── UPSERT-cache in dunning_gesprek_analyse ─────────────────────────
+    // Fail-soft: als de tabel/kolom nog ontbreekt (migratie nog niet
+    // gedraaid), returnt het oordeel wél maar zonder persistence. De UI
+    // blijft dan client-only werken. Zodra de migratie draait wordt cache
+    // automatisch bijgewerkt.
+    try {
+      await supabaseAdmin
+        .from('dunning_gesprek_analyse')
+        .upsert({
+          customer_id:        customerId,
+          afspraak_gemaakt:   ai.afspraak_gemaakt,
+          samenvatting:       ai.samenvatting || '',
+          termijnen,
+          vertrouwen:         ai.vertrouwen || 'laag',
+          actie_nodig:        actieNodig,
+          heeft_arrangement:  hasArrangement,
+          messages_count:     messages.length,
+          customer_msg_count: customerMsgCount,
+          outbound_msg_count: outboundMsgCount,
+          sufficient_data:    true,
+          geanalyseerd_op:    analysedAt,
+          geanalyseerd_door:  admin.user.id,
+          updated_at:         analysedAt,
+        }, { onConflict: 'customer_id' });
+    } catch (upErr) {
+      console.warn('[analyse-gesprek] cache upsert soft-fail:', upErr?.message || upErr);
+    }
+
     return res.status(200).json({
       ok:               true,
       customer_id:      customerId,
-      analysed_at:      new Date().toISOString(),
+      analysed_at:      analysedAt,
       messages_count:   messages.length,
       customer_msg_count: customerMsgCount,
+      outbound_msg_count: outboundMsgCount,
       sufficient_data:  true,
       afspraak_gemaakt: ai.afspraak_gemaakt,
       samenvatting:     ai.samenvatting || '',
-      termijnen:        Array.isArray(ai.termijnen) ? ai.termijnen.slice(0, 12) : [],
+      termijnen,
       vertrouwen:       ai.vertrouwen || 'laag',
       actie_nodig:      actieNodig,
       heeft_arrangement: hasArrangement,
+      geanalyseerd_door: admin.user.id,
+      geanalyseerd_door_email: admin.user.email || null,
     });
   } catch (e) {
     console.error('[wanbetalers-diagnose-analyse-gesprek]', e?.message || e);
