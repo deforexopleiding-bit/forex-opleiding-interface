@@ -116,7 +116,7 @@ export default async function handler(req, res) {
     // needs_attention-runs worden apart als vlag getoond.
     const { data: runRows } = await supabaseAdmin
       .from('dunning_workflow_runs')
-      .select('id, customer_id, status, current_step_id, next_action_at, needs_attention, last_failure_reason')
+      .select('id, customer_id, status, current_step_id, next_action_at, needs_attention, last_failure_reason, paused_by_conversation_id, paused_by_arrangement_id, paused_by_manual_user_id, paused_manual_reason, paused_at')
       .in('customer_id', custIds)
       .in('status', ['active', 'paused'])
       .order('next_action_at', { ascending: true });
@@ -180,6 +180,15 @@ export default async function handler(req, res) {
         next_action_step_title:   step?.config?.title || null,
         needs_attention:          !!run?.needs_attention,
         last_failure_reason:      run?.last_failure_reason || null,
+        // Pauze-reden-velden (voor UI-badge "Handmatig gepauzeerd" vs
+        // "Gepauzeerd door inbox-reply" vs "Gepauzeerd door arrangement").
+        // Bij status=='active' allemaal null (server-side eq('status',
+        // ['active','paused']) — dus voor active-rijen is dit no-op).
+        paused_by_conversation_id: run?.paused_by_conversation_id || null,
+        paused_by_arrangement_id:  run?.paused_by_arrangement_id  || null,
+        paused_by_manual_user_id:  run?.paused_by_manual_user_id  || null,
+        paused_manual_reason:      run?.paused_manual_reason      || null,
+        paused_at:                 run?.paused_at                 || null,
         has_active_conversation:  !!conv,
         conversation_id:          conv?.id || null,
         is_multi_invoice:         agg.openInvoices.length > 1,

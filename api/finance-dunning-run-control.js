@@ -60,7 +60,15 @@ export default async function handler(req, res) {
       if (run.status !== 'active') {
         return res.status(409).json({ error: `pause kan alleen vanuit active (huidig: ${run.status})` });
       }
-      update.status = 'paused';
+      // Sinds migratie 2026-08-02: vul reden-velden zodat de run niet
+      // meer als "wees" oogt in overzicht/dossier. Reden komt uit body
+      // (optioneel) — anders default 'manual_pause_via_run_control'.
+      const manualReason = (body.reason ? String(body.reason).trim().slice(0, 300) : '')
+        || 'manual_pause_via_run_control';
+      update.status                    = 'paused';
+      update.paused_by_manual_user_id  = user.id;
+      update.paused_manual_reason      = manualReason;
+      update.paused_at                 = nowIso;
       afterStatus   = 'paused';
     } else if (action === 'resume') {
       if (run.status !== 'paused') {
@@ -82,6 +90,12 @@ export default async function handler(req, res) {
       update.paused_conversation_reminder_count   = 0;
       update.paused_conversation_last_reminder_at = null;
       update.paused_by_arrangement_id             = null;
+      // Sinds migratie 2026-08-02: óók de handmatige-pauze-velden wissen
+      // zodat de reden niet blijft hangen na resume (spiegelt de
+      // conversation/arrangement-cleanup hierboven).
+      update.paused_by_manual_user_id             = null;
+      update.paused_manual_reason                 = null;
+      update.paused_at                            = null;
       afterStatus   = 'active';
     } else if (action === 'cancel') {
       if (!['active', 'paused'].includes(run.status)) {
