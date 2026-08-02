@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Wanbetalers — diagnostisch overzicht</title>
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+    .app{margin-left:220px;padding:16px 16px 60px;max-width:1400px}
+    .page-head h1{font-size:22px;font-weight:800}
+    .sub{color:var(--text-dim);font-size:12.5px;margin-top:2px}
+    .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--surface,var(--bg));padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin:14px 0 12px;position:sticky;top:8px;z-index:20}
+    .toolbar input,.toolbar select{padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13.5px;font-family:inherit;background:var(--bg);color:var(--text)}
+    .toolbar input[type=search]{flex:1;min-width:200px}
+    .tabs{display:flex;gap:6px}
+    .tab{padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;font-size:12.5px;font-weight:600;font-family:inherit}
+    .tab.active{background:#0f766e;color:#fff;border-color:#0f766e}
+    .btn-dl{padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;font-size:12.5px;font-weight:600;font-family:inherit}
+    .btn-dl:hover{background:var(--surface-2,rgba(0,0,0,.04))}
+    .stats{display:flex;gap:8px;font-size:12px;color:var(--text-dim);flex-wrap:wrap}
+    .stats button{background:rgba(99,102,241,.14);color:#4338ca;padding:2px 7px;border-radius:5px;font-weight:600;border:1px solid transparent;cursor:pointer;font-family:inherit;font-size:12px}
+    .stats button:hover{background:rgba(99,102,241,.24)}
+    .stats button.active{background:#4338ca;color:#fff;border-color:#4338ca}
+    .stats .clear{background:transparent;color:var(--text-dim);border:1px dashed var(--border);font-weight:500}
+    .stats .clear:hover{background:var(--surface-2,rgba(0,0,0,.04))}
+    /* Paused-blok bovenaan */
+    .paused-section{background:var(--surface,var(--bg));border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:14px}
+    .paused-section h2{font-size:14px;font-weight:700;margin-bottom:8px;color:#92400e}
+    .paused-section h2 .cnt{background:rgba(245,158,11,.18);color:#92400e;padding:2px 8px;border-radius:5px;font-size:12px;margin-left:6px}
+    .paused-row{display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--border-soft,rgba(0,0,0,.05));font-size:12.5px}
+    .paused-row:last-child{border-bottom:none}
+    .paused-row .pnaam{font-weight:600}
+    .paused-row .preden{color:var(--text-dim);font-size:12px}
+    .paused-row .popen{font-variant-numeric:tabular-nums;font-weight:600}
+    .paused-row .b-verlopen{background:rgba(220,38,38,.14);color:#b91c1c;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600}
+    .cust{background:var(--surface,var(--bg));border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden}
+    .cust-head{display:grid;grid-template-columns:1fr auto auto auto 20px;gap:14px;align-items:center;padding:10px 14px;cursor:pointer;user-select:none}
+    .cust-head:hover{background:var(--surface-2,rgba(0,0,0,.03))}
+    .cust-name{font-weight:700;font-size:14px}
+    .cust-meta{font-size:12px;color:var(--text-dim)}
+    .cust-open{font-variant-numeric:tabular-nums;font-weight:700;font-size:14px;text-align:right;min-width:100px}
+    .cust-badges{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
+    .badge{padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600;white-space:nowrap}
+    .b-active{background:rgba(16,185,129,.15);color:#059669}
+    .b-paused{background:rgba(245,158,11,.18);color:#92400e}
+    .b-wees{background:rgba(220,38,38,.14);color:#b91c1c}
+    .b-none{background:var(--border);color:var(--text-dim)}
+    .b-signal-high{background:rgba(220,38,38,.14);color:#b91c1c}
+    .b-signal-med{background:rgba(245,158,11,.18);color:#92400e}
+    .b-signal-low{background:rgba(99,102,241,.14);color:#3730a3}
+    .caret{transition:transform .15s ease;font-size:14px;color:var(--text-dim)}
+    .cust.open .caret{transform:rotate(90deg)}
+    .cust-body{display:none;padding:0 14px 16px;border-top:1px solid var(--border)}
+    .cust.open .cust-body{display:block}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px}
+    @media (max-width:900px){.grid2{grid-template-columns:1fr}}
+    .section-h{font-size:11.5px;font-weight:700;text-transform:uppercase;color:var(--text-dim);margin:12px 0 6px;letter-spacing:.4px}
+    .kv{font-size:12.5px;color:var(--text);margin-bottom:2px}
+    .kv b{color:var(--text);font-weight:700}
+    table.t{width:100%;border-collapse:collapse;font-size:12.5px}
+    table.t th,table.t td{padding:5px 8px;border-bottom:1px solid var(--border-soft,rgba(0,0,0,.08));text-align:left}
+    table.t th{color:var(--text-dim);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.3px}
+    table.t tr:last-child td{border-bottom:none}
+    .timeline{max-height:400px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;background:var(--bg);padding:6px}
+    .tl-item{display:grid;grid-template-columns:130px 100px 1fr;gap:10px;padding:4px 8px;font-size:12px;border-bottom:1px solid var(--border-soft,rgba(0,0,0,.05))}
+    .tl-item:last-child{border-bottom:none}
+    .tl-time{color:var(--text-dim);font-family:'SF Mono',Consolas,monospace}
+    .tl-kind{font-weight:600}
+    .tl-log{color:var(--text)}
+    .tl-msg-in{color:#065f46}
+    .tl-msg-out{color:#7c3aed}
+    .tl-pay{color:#059669;font-weight:700}
+    .tl-arr{color:#92400e}
+    .msg-body{color:var(--text);font-style:italic;max-height:60px;overflow:hidden}
+    .signals{padding:8px 10px;background:rgba(220,38,38,.06);border:1px solid rgba(220,38,38,.3);border-radius:6px;margin-top:10px}
+    .signals ul{margin-left:16px;font-size:12.5px}
+    .signals li{margin:2px 0}
+    .no-data{color:var(--text-dim);font-style:italic;font-size:12.5px}
+    #loading,#empty{padding:40px;text-align:center;color:var(--text-dim);font-size:14px}
+    #gate-blocked{display:none;padding:40px;text-align:center;color:var(--text-dim)}
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="app">
+  <div class="page-head">
+    <h1>🔍 Wanbetalers — diagnostisch overzicht</h1>
+    <div class="sub" id="sub-line">Bezig met laden…</div>
+  </div>
+
+  <div id="gate-blocked">Alleen super_admin heeft toegang tot deze diagnose.</div>
+
+  <div id="main" style="display:none">
+    <div class="toolbar">
+      <input type="search" id="q" placeholder="Zoek op klantnaam / factuurnummer / e-mail / telefoon…" autocomplete="off" />
+      <div class="tabs">
+        <button class="tab active" data-tab="all">Iedereen (<span id="c-all">0</span>)</button>
+        <button class="tab"       data-tab="flow">Actieve/gepauzeerde flow (<span id="c-flow">0</span>)</button>
+        <button class="tab"       data-tab="issues">Probleemgevallen (<span id="c-issues">0</span>)</button>
+      </div>
+      <div class="stats" id="signalstats"></div>
+      <button class="btn-dl" id="dlBtn" title="Download deze pagina als los HTML-bestand (offline)">💾 Download snapshot</button>
+      <button class="btn-dl" id="reloadBtn" title="Verse data ophalen">↻ Ververs</button>
+    </div>
+    <div id="pausedSection"></div>
+    <div id="list"><div id="loading">Laden…</div></div>
+  </div>
+</div>
+
+<script src="/api/config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script>
+'use strict';
+let DATA = { customers: [], signal_counts: {}, generated_at: null };
+// signalFilter is een Set — multi-select. Klik = toggle. Leeg = geen filter.
+const state = { tab: 'all', q: '', signalFilter: new Set() };
+
+(async function init() {
+  await window._authSharedReady;
+  const profile = await window.AuthShared?.requireAuth();
+  if (!profile) return;
+  if (window.AgentShared) { try { await window.AgentShared.renderUserSection(profile); } catch(_) {} }
+  if (profile.role !== 'super_admin') {
+    document.getElementById('gate-blocked').style.display = '';
+    document.getElementById('sub-line').textContent = 'Toegang geweigerd.';
+    return;
+  }
+  document.getElementById('main').style.display = '';
+  wireEvents();
+  await loadData();
+})();
+
+async function loadData() {
+  document.getElementById('list').innerHTML = '<div id="loading">Data laden…</div>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/wanbetalers-diagnose-data');
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    DATA = d;
+    const gen = d.generated_at ? new Date(d.generated_at).toLocaleString('nl-NL') : '';
+    document.getElementById('sub-line').textContent =
+      (d.customers?.length || 0) + ' klant(en) met open factuur · snapshot ' + gen;
+    render();
+  } catch (e) {
+    document.getElementById('list').innerHTML =
+      '<div id="empty" style="color:#dc2626">Fout: ' + esc(e?.message || 'onbekend') + '</div>';
+  }
+}
+
+function wireEvents() {
+  document.getElementById('q').addEventListener('input', (e) => { state.q = e.target.value; render(); });
+  document.querySelectorAll('.tab').forEach((b) => {
+    b.onclick = () => {
+      document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
+      b.classList.add('active');
+      state.tab = b.dataset.tab;
+      render();
+    };
+  });
+  document.getElementById('reloadBtn').onclick = () => loadData();
+  document.getElementById('dlBtn').onclick = () => downloadSnapshot();
+}
+
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+function fmtEur(n) { return (Number(n) || 0).toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' }); }
+function fmtDate(iso) { if (!iso) return '—'; const d = new Date(iso); if (isNaN(d)) return String(iso); return d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: '2-digit' }); }
+function fmtDT(iso) { if (!iso) return '—'; const d = new Date(iso); if (isNaN(d)) return String(iso); return d.toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+
+function statusBadge(c) {
+  const r = c.run;
+  if (!r) return '<span class="badge b-none">Geen run</span>';
+  if (r.status === 'active') return '<span class="badge b-active">Actief</span>';
+  if (r.status === 'paused') {
+    if (r.reason === 'wees') return '<span class="badge b-wees">Wees-run</span>';
+    if (r.reason === 'inbox_reply') return '<span class="badge b-paused">In gesprek</span>';
+    if (r.reason === 'arrangement') return '<span class="badge b-paused">Regeling</span>';
+    if (r.reason === 'manual') return '<span class="badge b-paused">Handmatig</span>';
+    return '<span class="badge b-paused">Gepauzeerd</span>';
+  }
+  return '<span class="badge b-none">' + esc(r.status) + '</span>';
+}
+
+function filterCustomers() {
+  const q = state.q.trim().toLowerCase();
+  return (DATA.customers || []).filter((c) => {
+    if (q) {
+      const hay = (c.name + ' ' + (c.email || '') + ' ' + (c.phone || '') + ' ' + (c.open_invoices || []).map((i) => i.invoice_number).join(' ')).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    if (state.tab === 'flow') {
+      if (!c.run || !['active', 'paused'].includes(c.run.status)) return false;
+    }
+    if (state.tab === 'issues') {
+      if (!c.signals || c.signals.length === 0) return false;
+    }
+    // Signaal-filter (multi-select). Klant moet MINSTENS EEN van de
+    // geselecteerde signalen hebben. Lege set = geen filter.
+    if (state.signalFilter.size > 0) {
+      const codes = new Set((c.signals || []).map((s) => s.code));
+      let hit = false;
+      for (const code of state.signalFilter) { if (codes.has(code)) { hit = true; break; } }
+      if (!hit) return false;
+    }
+    return true;
+  });
+}
+
+function render() {
+  const filtered = filterCustomers();
+  document.getElementById('c-all').textContent = (DATA.customers || []).length;
+  document.getElementById('c-flow').textContent = (DATA.customers || []).filter((c) => c.run && ['active','paused'].includes(c.run.status)).length;
+  document.getElementById('c-issues').textContent = (DATA.customers || []).filter((c) => c.signals && c.signals.length > 0).length;
+
+  // Klikbare signaal-chips — toggle multi-filter.
+  // Toon alle signalen die minstens 1x voorkomen, gesorteerd op aantal DESC.
+  const codes = Object.entries(DATA.signal_counts || {}).sort((a, b) => b[1] - a[1]);
+  const chipsHtml = codes.map(([k, v]) => {
+    const active = state.signalFilter.has(k) ? ' active' : '';
+    return '<button data-sigcode="' + esc(k) + '" class="' + active + '" title="Klik: filter alleen deze; nog eens klikken: uit">' + esc(k) + ': ' + v + '</button>';
+  }).join('');
+  const clearBtn = state.signalFilter.size > 0
+    ? '<button class="clear" id="clearSigFilter" title="Wis signaal-filter">✕ filter wissen (' + state.signalFilter.size + ')</button>'
+    : '';
+  document.getElementById('signalstats').innerHTML = chipsHtml + clearBtn;
+  document.querySelectorAll('#signalstats [data-sigcode]').forEach((b) => {
+    b.onclick = () => {
+      const code = b.dataset.sigcode;
+      if (state.signalFilter.has(code)) state.signalFilter.delete(code);
+      else state.signalFilter.add(code);
+      render();
+    };
+  });
+  const clearEl = document.getElementById('clearSigFilter');
+  if (clearEl) clearEl.onclick = () => { state.signalFilter.clear(); render(); };
+
+  // Paused-blok bovenaan (alleen zichtbaar op tab 'all' of 'flow' als er
+  // paused-klanten zijn en er geen zoekopdracht/filter loopt).
+  renderPausedSection();
+
+  document.getElementById('list').innerHTML = filtered.map(renderCust).join('')
+    || '<div id="empty">Geen klanten in deze weergave.</div>';
+  document.querySelectorAll('.cust-head').forEach((h) => { h.onclick = () => h.parentElement.classList.toggle('open'); });
+}
+
+function renderPausedSection() {
+  const host = document.getElementById('pausedSection');
+  // Alleen tonen op default view (tab=all + geen zoek/signaal-filter),
+  // anders vervuilt 't de filter-view.
+  const isDefault = state.tab === 'all' && !state.q && state.signalFilter.size === 0;
+  if (!isDefault) { host.innerHTML = ''; return; }
+  const paused = (DATA.customers || []).filter((c) => c.run && c.run.status === 'paused');
+  if (paused.length === 0) { host.innerHTML = ''; return; }
+  // Sorteer op openstaand DESC.
+  paused.sort((a, b) => (b.summary.total_open_eur || 0) - (a.summary.total_open_eur || 0));
+  const rows = paused.map((c) => {
+    const r = c.run;
+    let redenBadge = '';
+    if (r.reason === 'wees')        redenBadge = '<span class="badge b-wees">Wees-run (geen reden)</span>';
+    else if (r.reason === 'inbox_reply')  redenBadge = '<span class="badge b-paused">In gesprek (klant reageerde)</span>';
+    else if (r.reason === 'arrangement')  redenBadge = '<span class="badge b-paused">Regeling / breach</span>';
+    else if (r.reason === 'manual')       redenBadge = '<span class="badge b-paused">Handmatig</span>';
+    else                                  redenBadge = '<span class="badge b-paused">Gepauzeerd</span>';
+    const verlopen = (r.days_past_next_action != null && r.days_past_next_action >= 1)
+      ? ' <span class="b-verlopen" title="Volgende actie ligt in het verleden">⚠ ' + r.days_past_next_action + ' dg verlopen</span>' : '';
+    const reasonText = r.reason_label ? esc(r.reason_label) : '';
+    return '<div class="paused-row">'
+      + '<div><div class="pnaam">' + esc(c.name) + '</div><div class="preden">' + reasonText + '</div></div>'
+      + '<div>' + redenBadge + verlopen + '</div>'
+      + '<div class="preden">stap ' + (r.step_order == null ? '—' : r.step_order) + ' · ' + esc(r.step_type || '—') + '</div>'
+      + '<div class="popen">' + fmtEur(c.summary.total_open_eur) + '</div>'
+      + '</div>';
+  }).join('');
+  host.innerHTML = '<div class="paused-section">'
+    + '<h2>⏸ Gepauzeerd <span class="cnt">' + paused.length + '</span></h2>'
+    + rows
+    + '</div>';
+}
+
+function renderCust(c) {
+  const r = c.run;
+  const verlopenHtml = (r && r.days_past_next_action != null && r.days_past_next_action >= 1)
+    ? ' <span class="b-verlopen" title="Volgende actie ligt in het verleden">⚠ ' + r.days_past_next_action + ' dg verlopen</span>'
+    : '';
+  // nextActionHtml bevat al veilig-geëscapete data + de verlopen-span.
+  // Niet nog een keer esc() eromheen.
+  const nextActionHtml = r && r.next_action_at
+    ? (esc(fmtDT(r.next_action_at)) + (r.step_type ? ' · ' + esc(r.step_type) : '') + verlopenHtml)
+    : (r ? '—' : '—');
+  const badges = (c.signals || []).slice(0, 3).map((s) => {
+    const cls = s.severity === 'high' ? 'b-signal-high' : (s.severity === 'medium' ? 'b-signal-med' : 'b-signal-low');
+    return '<span class="badge ' + cls + '" title="' + esc(s.msg) + '">⚠</span>';
+  }).join('');
+  return '<div class="cust">' +
+    '<div class="cust-head">' +
+      '<div><div class="cust-name">' + esc(c.name) + '</div>' +
+        '<div class="cust-meta">' + (c.email ? esc(c.email) : '') + (c.phone ? ' · ' + esc(c.phone) : '') + ' · ' +
+        (c.summary.open_invoice_count || 0) + ' fact. · ' + (c.summary.days_overdue == null ? '—' : c.summary.days_overdue + ' dg te laat') +
+        (c.summary.pipeline_stage ? ' · fase=' + esc(c.summary.pipeline_stage) : '') +
+        '</div></div>' +
+      '<div class="cust-open">' + fmtEur(c.summary.total_open_eur) + '</div>' +
+      '<div>' + statusBadge(c) + ' <span class="cust-meta">' + nextActionHtml + '</span></div>' +
+      '<div class="cust-badges">' + badges + '</div>' +
+      '<div class="caret">▸</div>' +
+    '</div>' +
+    '<div class="cust-body">' + renderBody(c) + '</div>' +
+  '</div>';
+}
+
+function renderBody(c) {
+  const sigs = c.signals && c.signals.length
+    ? '<div class="signals"><div class="section-h" style="color:#b91c1c;margin-top:0">Signalen</div><ul>' +
+        c.signals.map((s) => '<li><b>' + esc(s.code) + ':</b> ' + esc(s.msg) + '</li>').join('') +
+      '</ul></div>' : '';
+
+  const runBlock = c.run
+    ? '<div><div class="section-h">Dunning run</div>' +
+      '<div class="kv">status=<b>' + esc(c.run.status) + '</b>' + (c.run.reason ? ' · reden=<b>' + esc(c.run.reason_label || c.run.reason) + '</b>' : '') + '</div>' +
+      '<div class="kv">workflow=<b>' + esc(c.run.workflow_name || '—') + '</b> · stap=' + (c.run.step_order == null ? '—' : c.run.step_order) + ' ' + esc(c.run.step_type || '') + (c.run.step_title ? ' ("' + esc(c.run.step_title) + '")' : '') + '</div>' +
+      '<div class="kv">next_action_at=<b>' + esc(fmtDT(c.run.next_action_at)) + '</b> · updated_at=' + esc(fmtDT(c.run.updated_at)) + (c.run.needs_attention ? ' · <b style="color:#b91c1c">NEEDS_ATTENTION</b>' : '') + '</div>' +
+      '</div>'
+    : '<div><div class="section-h">Dunning run</div><div class="no-data">Geen actieve of gepauzeerde run.</div></div>';
+
+  const arr = c.arrangements && c.arrangements.length
+    ? '<div><div class="section-h">Regelingen</div>' +
+        c.arrangements.map((a) => '<div class="kv"><b>' + esc(a.type) + '</b> · ' + esc(a.status) + ' · aangemaakt ' + esc(fmtDate(a.created_at)) + '</div>').join('') +
+      '</div>'
+    : '<div><div class="section-h">Regelingen</div><div class="no-data">Geen vastgelegd (payment_arrangements is leeg voor deze klant).</div></div>';
+
+  const invs = c.open_invoices && c.open_invoices.length
+    ? '<table class="t"><thead><tr><th>Nr</th><th>Vervaldatum</th><th>Status</th><th>Open</th></tr></thead><tbody>' +
+        c.open_invoices.map((i) => '<tr><td>' + esc(i.invoice_number || '—') + '</td><td>' + esc(fmtDate(i.due_date)) + '</td><td>' + esc(i.status) + '</td><td>' + fmtEur(i.bedrag_open) + '</td></tr>').join('') +
+      '</tbody></table>' : '<div class="no-data">Geen open facturen.</div>';
+
+  const pays = c.payments && c.payments.length
+    ? '<table class="t"><thead><tr><th>Nr</th><th>Betaald op</th><th>Bedrag betaald</th><th>Status</th></tr></thead><tbody>' +
+        c.payments.slice(0, 15).map((p) => '<tr><td>' + esc(p.invoice_number || '—') + '</td><td>' + esc(fmtDate(p.paid_date)) + '</td><td>' + fmtEur(p.amount_paid) + '</td><td>' + esc(p.status) + '</td></tr>').join('') +
+      '</tbody></table>' : '<div class="no-data">Geen betaalhistorie in DB.</div>';
+
+  const sends = c.sends && c.sends.length
+    ? '<table class="t"><thead><tr><th>Wanneer</th><th>Event</th><th>Template</th><th>Naar</th><th>Meta-code / wamid</th></tr></thead><tbody>' +
+        c.sends.slice(0, 20).map((s) => '<tr><td>' + esc(fmtDT(s.at)) + '</td><td>' + esc(s.event_type) + '</td><td>' + esc(s.meta_template_name || '—') + '</td><td>' + esc(s.to || '—') + '</td><td>' + esc(s.meta_code || s.wamid || s.error || '—') + '</td></tr>').join('') +
+      '</tbody></table>' : '<div class="no-data">Geen aanmaan-events gelogd.</div>';
+
+  const convs = c.conversations && c.conversations.length
+    ? c.conversations.map((cv) => {
+        const msgs = cv.messages_shown.map((m) =>
+          '<div class="tl-item"><div class="tl-time">' + esc(fmtDT(m.created_at)) + '</div>' +
+          '<div class="tl-kind ' + (m.direction === 'in' ? 'tl-msg-in' : 'tl-msg-out') + '">' + (m.direction === 'in' ? '← klant' : '→ wij') + '</div>' +
+          '<div class="msg-body">' + esc(m.body || '') + '</div></div>'
+        ).join('');
+        return '<div style="margin-bottom:10px"><div class="kv">Status: ' + esc(cv.status) + ' · ' + cv.total_messages + ' berichten · laatst inbound ' + esc(fmtDT(cv.last_inbound_at)) + '</div>' +
+          (msgs ? '<div class="timeline" style="margin-top:6px">' + msgs + '</div>' : '<div class="no-data">Geen recente berichten.</div>') +
+        '</div>';
+      }).join('') : '<div class="no-data">Geen WhatsApp-conversatie.</div>';
+
+  const tl = c.timeline && c.timeline.length
+    ? '<div class="timeline">' + c.timeline.slice(0, 60).map((t) => {
+        let cls = 'tl-log', lbl = t.event;
+        if (t.kind === 'msg') { cls = t.event === 'wa_inbound' ? 'tl-msg-in' : 'tl-msg-out'; lbl = t.event === 'wa_inbound' ? 'WA in' : 'WA uit'; }
+        else if (t.kind === 'payment') { cls = 'tl-pay'; lbl = '€ betaald'; }
+        else if (t.kind === 'arrangement') { cls = 'tl-arr'; lbl = 'regeling'; }
+        const extra = t.body ? ' — ' + esc(String(t.body).slice(0, 140))
+          : (t.invoice ? ' ' + esc(t.invoice) + ' ' + fmtEur(t.amount_paid)
+             : (t.arr_type ? ' ' + esc(t.arr_type) + '/' + esc(t.arr_status) : ''));
+        return '<div class="tl-item"><div class="tl-time">' + esc(fmtDT(t.at)) + '</div><div class="tl-kind ' + cls + '">' + esc(lbl) + '</div><div>' + esc(t.event) + extra + '</div></div>';
+      }).join('') + '</div>' : '<div class="no-data">Geen tijdlijn-events.</div>';
+
+  return sigs +
+    '<div class="grid2">' + runBlock + arr + '</div>' +
+    '<div class="section-h">Open facturen</div>' + invs +
+    '<div class="section-h">Betaalhistorie (laatste 15)</div>' + pays +
+    '<div class="section-h">Verzonden aanmaningen (log)</div>' + sends +
+    '<div class="section-h">WhatsApp-conversatie(s) — laatste 10 per conv</div>' + convs +
+    '<div class="section-h">Chronologische tijdlijn (max 60)</div>' + tl;
+}
+
+// Download huidige rendering als self-contained HTML. Ontkoppelt van de
+// live-app: wat je zag, sla je op. Data wordt embedded als JSON zodat het
+// bestand ook offline werkt (met minimale re-render).
+function downloadSnapshot() {
+  const dataJson = JSON.stringify(DATA).replace(/<\/script>/gi, '<\\/script>');
+  const gen = DATA.generated_at || new Date().toISOString();
+  const cssBlocks = Array.from(document.styleSheets).map((s) => {
+    try {
+      return Array.from(s.cssRules).map((r) => r.cssText).join('\n');
+    } catch (_) { return ''; }
+  }).join('\n');
+  const listHtml = document.getElementById('list').innerHTML;
+  const html = '<!doctype html><html lang="nl"><head><meta charset="utf-8" /><title>Wanbetalers snapshot ' + esc(gen) + '</title>' +
+    '<style>' + cssBlocks + '\nbody{margin:20px;background:#f6f8fa;color:#111} .app{margin-left:0;max-width:1400px;margin-inline:auto}</style>' +
+    '</head><body><div class="app">' +
+    '<h1 style="font-size:22px;font-weight:800">🔍 Wanbetalers snapshot (offline)</h1>' +
+    '<div style="color:#666;font-size:12.5px;margin:4px 0 14px">Gegenereerd: ' + esc(gen) + ' · ' + (DATA.customers?.length || 0) + ' klanten</div>' +
+    '<div id="list">' + listHtml + '</div>' +
+    '<script>document.querySelectorAll(".cust-head").forEach(h=>{h.onclick=()=>h.parentElement.classList.toggle("open")});<\/script>' +
+    '</div></body></html>';
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'wanbetalers-diagnose-' + gen.replace(/[:.]/g, '-').slice(0, 19) + '.html';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+</script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+</body>
+</html>
