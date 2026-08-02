@@ -27785,6 +27785,7 @@
               <th class="sortable" data-oznsort="days" title="Dagen dat de oudste factuur te laat is — klik om te sorteren">Dagen${arrow('days')}</th>
               <th class="sortable" data-oznsort="stage" title="Huidige pipeline-fase — klik om te sorteren op logische fase-volgorde (nieuw → aangemaand → … → bewind)">Fase${arrow('stage')}</th>
               <th class="sortable" data-oznsort="next" title="Datum van de volgende automatische engine-stap — klik om te sorteren; klanten zonder geplande actie zakken naar beneden">Volgende actie${arrow('next')}</th>
+              <th title="Run-status (Actief / Gepauzeerd / Voltooid / Geannuleerd / Geen run)">Status</th>
               <th title="Actief WhatsApp-gesprek open? Klik voor het gesprek van deze klant" style="text-align:center">💬</th>
             </tr>
           </thead>
@@ -27858,6 +27859,14 @@
       ? `<span title="${esc(it.next_action_step_title || '—')}">${esc(_OZN_STEP_LABEL[it.next_action_step_type] || it.next_action_step_type || '—')} · ${esc(_oznFmtDateTime(it.next_action_at))}</span>`
       : (it.run_status ? `<span style="color:var(--wbx-muted)" title="Run status: ${esc(it.run_status)}">${esc(it.run_status)}</span>` : '<span style="color:var(--wbx-muted)">—</span>');
     const convBtn = `<button class="ozn-conv-btn ${it.has_active_conversation ? 'on' : ''}" data-cid="${esc(it.customer_id)}" data-conv-id="${esc(it.conversation_id || '')}" title="${it.has_active_conversation ? 'Actief gesprek — klik om het te openen in Inbox' : 'Geen actief gesprek — klik voor Inbox'}">${it.has_active_conversation ? '💬' : '○'}</button>`;
+    // Status-badge — hergebruikt _awnStatusBadge() uit sub=openacties-nieuw
+    // (fase 1 van deze zoekbalk/status-PR). Zelfde helper, zelfde kleuren,
+    // zelfde NL-labels. Werkt omdat `it.run_status` uit dezelfde
+    // wanbetalers-overzicht-list-endpoint komt die de Acties-tab óók
+    // gebruikt. GEEN nieuwe data-fetch, GEEN nieuwe logica.
+    const statusBadge = (typeof _awnStatusBadge === 'function')
+      ? _awnStatusBadge(it)
+      : ''; // safety-net als de helper (toekomstig) uit de scope wordt gehaald
     return `
       <tr>
         <td>${nameBtn}${attnFlag}</td>
@@ -27866,6 +27875,7 @@
         <td style="font-variant-numeric:tabular-nums">${it.days_overdue}</td>
         <td>${stagePart}</td>
         <td>${nextAction}</td>
+        <td>${statusBadge}</td>
         <td style="text-align:center">${convBtn}</td>
       </tr>
     `;
