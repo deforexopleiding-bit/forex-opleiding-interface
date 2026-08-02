@@ -80,10 +80,21 @@ export default async function handler(req, res) {
     });
   }
 
-  // Update actief → paused.
+  // Update actief → paused. Sinds migratie 2026-08-02: vul óók de nieuwe
+  // reden-velden zodat de run niet als "wees" oogt in overzicht/dossier.
+  // paused_by_manual_user_id = wie klikte de knop.
+  // paused_manual_reason     = context-tekst (default 'manual_pause_from_inbox').
+  // paused_at                = timestamp voor UI-weergave "sinds ...".
+  const nowIso = new Date().toISOString();
   const { data: updated, error: updErr } = await supabaseAdmin
     .from('dunning_workflow_runs')
-    .update({ status: 'paused' })
+    .update({
+      status:                   'paused',
+      paused_by_manual_user_id: user.id,
+      paused_manual_reason:     reason,
+      paused_at:                nowIso,
+      updated_at:               nowIso,
+    })
     .eq('id', run.id)
     .eq('status', 'active') // race-guard
     .select('id, status')
