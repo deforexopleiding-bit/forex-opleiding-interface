@@ -11,6 +11,12 @@ const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
 const MAX_MESSAGES_PER_CONV = 10;
 const MAX_LOG_EVENTS_PER_RUN = 50;
 
+// Cutoff: moment waarop de dag7/dag14-body-fix (#1046) live ging op
+// productie. Sends vóór dit moment die faalden zijn HISTORISCH en dus
+// niet meer relevant voor actie. Ná dit moment = potentieel actief
+// probleem. Hardcoded (ipv env) omdat het een concreet historisch punt is.
+const WA_FIX_CUTOFF_ISO = '2026-08-02T09:00:00Z';
+
 export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
@@ -311,6 +317,18 @@ function buildCustomerRecord(ctx) {
     signals.push({ code: 'aanmaning_faalde', severity: 'medium',
                    msg: `${failedSends.length} gefaalde aanmaning(en) in dunning_log.` });
   }
+  // Specifiek WhatsApp-fails uitsplitsen: historisch (vóór fix) vs actief
+  // (na fix). Actief = real red flag (verzending is nog stuk); historisch =
+  // pre-fix rommel die alleen ter info wordt getoond.
+  const waFailsHist = failedSends.filter((e) => e.event_type === 'whatsapp_send_failed' && e.created_at && e.created_at < WA_FIX_CUTOFF_ISO);
+  const waFailsAct  = failedSends.filter((e) => e.event_type === 'whatsapp_send_failed' && (!e.created_at || e.created_at >= WA_FIX_CUTOFF_ISO));
+  if (waFailsAct.length > 0) {
+    signals.push({ code: 'wa_faalde_actief', severity: 'high',
+                   msg: `${waFailsAct.length} gefaalde WhatsApp-send(s) NA de dag7/14-fix — actief probleem.` });
+  } else if (waFailsHist.length > 0) {
+    signals.push({ code: 'wa_faalde_historisch', severity: 'low',
+                   msg: `${waFailsHist.length} historisch gefaalde WhatsApp-send(s) (vóór dag7/14-fix van 2 aug 09:00).` });
+  }
   if (activeRun && activeRun.status === 'active' && activeRun.next_action_at
       && new Date(activeRun.next_action_at).getTime() < Date.now() - 3*86400_000) {
     signals.push({ code: 'stille_actieve_run', severity: 'medium',
@@ -384,6 +402,11 @@ function buildCustomerRecord(ctx) {
       wamid:              e.payload?.meta_wamid || null,
       error:              e.payload?.error || null,
       meta_code:          e.payload?.meta_code || null,
+      // era: historisch (vóór dag7/14-fix) vs actief (na). Alleen zinvol
+      // voor whatsapp_send_failed — voor sent/email negeren we het (era='n/a').
+      era: (e.event_type === 'whatsapp_send_failed')
+        ? ((e.created_at && e.created_at < WA_FIX_CUTOFF_ISO) ? 'historisch' : 'actief')
+        : 'n/a',
     })),
     timeline: timeline.slice(0, 100),
     signals,
