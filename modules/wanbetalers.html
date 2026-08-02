@@ -90,6 +90,11 @@
         <p class="page-sub">Open facturen met optie om bulk een dunning-workflow te starten.</p>
       </div>
       <div style="display:flex;gap:8px">
+        <!-- Alleen super_admin: link naar het testpaneel. Server-side gate:
+             requireSuperAdmin() op elk sandbox-endpoint. Zonder rol → 403. -->
+        <a id="wanbTestpanelLink" href="/modules/wanbetalers-test.html" class="btn btn-sm" title="Testpaneel (alleen super_admin)" style="display:none">
+          <i class="ti ti-flask"></i> Testpaneel
+        </a>
         <button class="btn btn-sm" onclick="loadWanbInvoices()" title="Lijst opnieuw laden"><i class="ti ti-refresh"></i> Verversen</button>
       </div>
     </div>
@@ -494,6 +499,17 @@
     if (window.AgentShared) {
       try { await window.AgentShared.renderUserSection(profile); } catch (_) {}
     }
+
+    // Testpaneel-link alleen tonen voor super_admin. Server-side gate
+    // (requireSuperAdmin op alle sandbox-endpoints) blijft de harde
+    // waarheid; deze display-toggle voorkomt alleen dat andere rollen
+    // de link zien.
+    try {
+      if (profile?.role === 'super_admin') {
+        const l = document.getElementById('wanbTestpanelLink');
+        if (l) l.style.display = '';
+      }
+    } catch (_) {}
 
     // Modal sluiten bij click op overlay + Escape.
     const modal = document.getElementById('wanbBulkConfirmModal');

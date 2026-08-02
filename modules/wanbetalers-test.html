@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Testpaneel Wanbetalers · De Forex Opleiding</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+    .app{margin-left:220px;padding:24px 28px 60px;max-width:1180px}
+
+    /* Sticky top-strip: DRY-RUN + test-ontvanger, blijft in beeld */
+    .tp-topstrip{position:sticky;top:0;z-index:50;background:var(--bg);border-bottom:1px solid var(--border);padding:14px 0 12px;margin-bottom:18px}
+    .tp-topstrip-inner{display:grid;grid-template-columns:1fr 1fr auto;gap:18px;align-items:center}
+    .tp-badge{display:inline-flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;font-weight:700;font-size:15px}
+    .tp-badge-safe{background:rgba(16,185,129,.14);color:#059669;border:1px solid rgba(16,185,129,.35)}
+    .tp-badge-live{background:rgba(220,38,38,.18);color:#dc2626;border:1px solid rgba(220,38,38,.5);animation:tpPulse 1.6s ease-in-out infinite}
+    @keyframes tpPulse{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,0)}50%{box-shadow:0 0 0 6px rgba(220,38,38,.25)}}
+    .tp-recip{font-size:13px;color:var(--text)}
+    .tp-recip .lbl{color:var(--text-dim);font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;font-weight:600;margin-bottom:3px}
+    .tp-recip .val{font-family:'Consolas',monospace;font-weight:600}
+    .tp-recip .mismatch{display:inline-flex;align-items:center;gap:5px;color:#c2410c;background:rgba(234,88,12,.14);padding:2px 8px;border-radius:6px;font-size:11.5px;font-weight:600;margin-top:4px}
+    .tp-toggle-btn{padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg);cursor:pointer;font-weight:600;font-size:13px;color:var(--text)}
+    .tp-toggle-btn:hover{background:var(--surface-2,rgba(0,0,0,.04))}
+    .tp-toggle-btn.danger{border-color:rgba(220,38,38,.5);color:#dc2626}
+
+    .tp-page-head{padding-bottom:12px;border-bottom:1px solid var(--border);margin-bottom:16px}
+    .tp-page-head h1{font-size:22px;font-weight:800;display:inline-flex;align-items:center;gap:8px}
+    .tp-page-head .sub{font-size:12.5px;color:var(--text-dim);margin-top:3px}
+
+    .tp-section{background:var(--surface,var(--bg));border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:14px}
+    .tp-section-h{font-size:14px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+    .tp-section-h .idx{background:var(--border);color:var(--text-dim);width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+
+    .tp-form-row{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;margin-bottom:8px}
+    .tp-form-row label{display:block;font-size:11.5px;font-weight:600;color:var(--text-dim);margin-bottom:4px}
+    .tp-form-row input,.tp-form-row select{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:14px}
+
+    .tp-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;font-family:inherit}
+    .tp-btn:hover:not(:disabled){background:var(--surface-2,rgba(0,0,0,.04))}
+    .tp-btn:disabled{opacity:.5;cursor:not-allowed}
+    .tp-btn-primary{background:#0f766e;color:#fff;border-color:#0f766e}
+    .tp-btn-primary:hover:not(:disabled){background:#115e59}
+    .tp-btn-danger{background:#dc2626;color:#fff;border-color:#dc2626}
+    .tp-btn-danger:hover:not(:disabled){background:#b91c1c}
+
+    .tp-actions-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+    .tp-action{display:flex;flex-direction:column;gap:6px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg)}
+    .tp-action-title{font-size:13px;font-weight:700;color:var(--text)}
+    .tp-action-desc{font-size:11.5px;color:var(--text-dim);line-height:1.35}
+    .tp-action-row{display:flex;gap:6px;align-items:center;margin-top:6px}
+    .tp-action-row input,.tp-action-row select{flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px}
+
+    .tp-seed-radio{display:block;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;cursor:pointer}
+    .tp-seed-radio:hover{background:var(--surface-2,rgba(0,0,0,.03))}
+    .tp-seed-radio input{margin-right:8px}
+    .tp-seed-radio .lbl{font-weight:600;font-size:13.5px}
+    .tp-seed-radio .desc{font-size:11.5px;color:var(--text-dim);margin-top:3px;margin-left:22px}
+    .tp-seed-custom{margin-top:8px;padding:10px;border:1px dashed var(--border);border-radius:8px;display:none}
+    .tp-seed-custom.show{display:block}
+    .tp-seed-custom-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+    .tp-seed-custom-row label{font-size:11px;color:var(--text-dim);font-weight:600;display:block;margin-bottom:3px}
+    .tp-seed-custom-row input{width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px}
+
+    .tp-status-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+    .tp-status-card{padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg)}
+    .tp-status-card .lbl{font-size:11px;text-transform:uppercase;color:var(--text-dim);font-weight:600;letter-spacing:.4px;margin-bottom:4px}
+    .tp-status-card .val{font-size:15px;font-weight:700}
+    .tp-status-card .sub{font-size:12px;color:var(--text-dim);margin-top:2px}
+
+    .tp-table{width:100%;border-collapse:collapse;font-size:13px}
+    .tp-table th{text-align:left;padding:6px 8px;color:var(--text-dim);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.3px;border-bottom:1px solid var(--border)}
+    .tp-table td{padding:7px 8px;border-bottom:1px solid var(--border-soft,rgba(0,0,0,.06))}
+    .tp-table tr:last-child td{border-bottom:none}
+    .tp-log-row{display:grid;grid-template-columns:110px 180px 1fr;gap:10px;padding:6px 8px;border-bottom:1px solid var(--border-soft,rgba(0,0,0,.06));font-size:12.5px}
+    .tp-log-row .time{color:var(--text-dim);font-family:'Consolas',monospace}
+    .tp-log-row .evt{font-weight:600}
+    .tp-log-row.dry{background:rgba(16,185,129,.06)}
+    .tp-log-row.fail{background:rgba(220,38,38,.08);color:#dc2626}
+
+    .tp-empty{padding:14px;color:var(--text-dim);font-size:13px;text-align:center;font-style:italic}
+    .tp-err{color:#dc2626;font-size:12.5px;margin-top:8px}
+    .tp-ok{color:#059669;font-size:12.5px;margin-top:6px}
+
+    /* Modal overlay */
+    .tp-modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:1000;padding:16px}
+    .tp-modal.show{display:flex}
+    .tp-modal-card{background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:22px 24px;max-width:520px;width:100%;max-height:calc(100vh - 32px);overflow-y:auto}
+    .tp-modal-card h3{font-size:17px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+    .tp-modal-card .warn{color:#dc2626}
+    .tp-modal-card p{font-size:13.5px;color:var(--text);margin-bottom:10px;line-height:1.5}
+    .tp-modal-card .kv{background:var(--surface-2,rgba(0,0,0,.04));padding:10px 12px;border-radius:8px;font-family:'Consolas',monospace;font-size:13px;margin-bottom:12px}
+    .tp-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+    .tp-modal-actions .tp-btn{padding:8px 16px}
+
+    #gate-blocked{display:none;padding:30px;text-align:center;color:var(--text-dim);font-size:14px}
+
+    @media (max-width: 720px) {
+      html, body { min-height: 100vh; min-height: 100dvh; }
+      .app { margin-left: 0; padding: 14px 14px calc(24px + env(safe-area-inset-bottom, 0px)); max-width: none; }
+      .tp-topstrip-inner{grid-template-columns:1fr;gap:10px}
+      .tp-form-row{grid-template-columns:1fr}
+      .tp-status-grid{grid-template-columns:1fr}
+      .tp-seed-custom-row{grid-template-columns:1fr}
+      .tp-modal{padding:12px}
+      .tp-modal-card{max-height:calc(100vh - 24px);max-height:calc(100dvh - 24px)}
+    }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="app">
+
+  <div class="tp-page-head">
+    <h1><i class="ti ti-flask"></i> Testpaneel Wanbetalers</h1>
+    <div class="sub">Alleen super_admin. Bundelt de bestaande sandbox-endpoints. Standaard staat DRY-RUN aan — er wordt niks echt verstuurd tot je bewust wisselt.</div>
+  </div>
+
+  <div id="gate-blocked">Alleen super_admin heeft toegang tot dit paneel.</div>
+
+  <div id="tp-main" style="display:none">
+
+    <!-- Sticky topstrip: DRY-RUN + test-ontvanger -->
+    <div class="tp-topstrip">
+      <div class="tp-topstrip-inner">
+        <div>
+          <div class="tp-recip"><div class="lbl">Dry-run status</div></div>
+          <div id="tpDryBadge" class="tp-badge tp-badge-safe">
+            <i class="ti ti-shield-check"></i> Bezig met laden…
+          </div>
+        </div>
+        <div class="tp-recip">
+          <div class="lbl">Test-ontvanger (sandbox_contact)</div>
+          <div id="tpContactPhone" class="val">—</div>
+          <div id="tpContactEmail" class="val" style="margin-top:2px">—</div>
+          <div id="tpMismatch" class="mismatch" style="display:none">
+            <i class="ti ti-alert-triangle"></i> <span></span>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+          <button id="tpToggleBtn" class="tp-toggle-btn" onclick="openDryToggleModal()">
+            <i class="ti ti-arrows-left-right"></i> Wissel DRY-RUN
+          </button>
+          <button class="tp-btn" onclick="refreshStatus()"><i class="ti ti-refresh"></i> Ververs</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sectie 1 — Test-ontvanger opslaan / bijwerken -->
+    <div class="tp-section">
+      <div class="tp-section-h"><span class="idx">1</span> Test-ontvanger (nummer + e-mail)</div>
+      <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">
+        Slaat op als <code>app_settings.dunning_sandbox_contact</code> én synct naar de test-klant (<code>customers.is_test=true</code>). Beide moeten matchen anders schakelt de recipient-guard elk uitgaand test-bericht af.
+      </div>
+      <div class="tp-form-row">
+        <div>
+          <label>Naam (verschijnt met 🧪 TEST — prefix)</label>
+          <input id="seedName" type="text" placeholder="Jeffrey" />
+        </div>
+        <div>
+          <label>Telefoonnummer (WhatsApp)</label>
+          <input id="seedPhone" type="tel" placeholder="+31612345678" />
+        </div>
+        <div>
+          <label>E-mail</label>
+          <input id="seedEmail" type="email" placeholder="jij@voorbeeld.nl" />
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="tp-btn tp-btn-primary" onclick="saveContact()"><i class="ti ti-device-floppy"></i> Test-ontvanger opslaan</button>
+        <span id="contactSaveMsg" class="tp-ok" style="display:none">Opgeslagen</span>
+        <span id="contactSaveErr" class="tp-err" style="display:none"></span>
+      </div>
+    </div>
+
+    <!-- Sectie 2 — Seed-scenario -->
+    <div class="tp-section">
+      <div class="tp-section-h"><span class="idx">2</span> Seed-scenario (test-data aanmaken)</div>
+      <label class="tp-seed-radio">
+        <input type="radio" name="tpSeedScenario" value="single_1d" checked />
+        <span class="lbl">1 factuur, 1 dag te laat</span>
+        <div class="desc">Enkele openstaande factuur voor het "Aanmaningen"-workflow (dag7-triggers).</div>
+      </label>
+      <label class="tp-seed-radio">
+        <input type="radio" name="tpSeedScenario" value="multi_14d" />
+        <span class="lbl">3 facturen, 14 dagen te laat</span>
+        <div class="desc">Multi-factuur-scenario (multi-factuur-aanmaning workflow, indien geconfigureerd).</div>
+      </label>
+      <label class="tp-seed-radio">
+        <input type="radio" name="tpSeedScenario" value="custom" onchange="toggleSeedCustom()" />
+        <span class="lbl">Custom</span>
+        <div class="desc">Eigen combinatie van aantal / dagen te laat / bedrag.</div>
+      </label>
+      <div id="tpSeedCustom" class="tp-seed-custom">
+        <div class="tp-seed-custom-row">
+          <div>
+            <label>Aantal facturen (1–10)</label>
+            <input id="customInvoiceCount" type="number" min="1" max="10" value="1" />
+          </div>
+          <div>
+            <label>Dagen te laat (1–365)</label>
+            <input id="customDaysOverdue" type="number" min="1" max="365" value="7" />
+          </div>
+          <div>
+            <label>Bedrag per factuur (€)</label>
+            <input id="customAmount" type="number" min="1" max="10000" value="250" />
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
+        <button class="tp-btn tp-btn-primary" onclick="runSeed()"><i class="ti ti-database-plus"></i> Reset + Seed</button>
+        <button class="tp-btn tp-btn-danger" onclick="confirmReset()"><i class="ti ti-trash"></i> Alleen wissen (reset)</button>
+        <span id="seedMsg" class="tp-ok" style="display:none"></span>
+        <span id="seedErr" class="tp-err" style="display:none"></span>
+      </div>
+    </div>
+
+    <!-- Sectie 3 — Stap-voor-stap acties -->
+    <div class="tp-section">
+      <div class="tp-section-h"><span class="idx">3</span> Stap-voor-stap acties</div>
+      <div class="tp-actions-grid">
+        <div class="tp-action">
+          <div class="tp-action-title"><i class="ti ti-player-play"></i> Engine draaien (test-scope)</div>
+          <div class="tp-action-desc">Draait dezelfde <code>runEngine()</code> als productie, maar gescoped op <code>is_test=true</code>. Trigger de dag7-stap.</div>
+          <div class="tp-action-row">
+            <button class="tp-btn tp-btn-primary" onclick="doAction('run-engine', {}, this)">Draaien</button>
+          </div>
+        </div>
+        <div class="tp-action">
+          <div class="tp-action-title"><i class="ti ti-clock-play"></i> Fast-forward tijdlijn</div>
+          <div class="tp-action-desc">Backdate alle relevante velden voor de test-klant met N dagen. Zonder wachten kun je dag14/17/etc. triggeren.</div>
+          <div class="tp-action-row">
+            <input id="ffDays" type="number" min="1" max="365" value="7" title="Aantal dagen terugschuiven" />
+            <button class="tp-btn" onclick="doAction('fast-forward', {days: Number(document.getElementById('ffDays').value)||7}, this)">Fast-forward</button>
+          </div>
+        </div>
+        <div class="tp-action">
+          <div class="tp-action-title"><i class="ti ti-message-circle"></i> Klant reageert (WA-inbound)</div>
+          <div class="tp-action-desc">Simuleert een inbound WhatsApp-bericht → engine pauzeert de run. Zelfde code-pad als de echte webhook.</div>
+          <div class="tp-action-row">
+            <input id="inboundBody" type="text" placeholder="Ik zal deze week betalen." />
+            <button class="tp-btn" onclick="doAction('simulate-inbound', {body: document.getElementById('inboundBody').value.trim() || 'Ik zal deze week betalen.'}, this)">Verstuur</button>
+          </div>
+        </div>
+        <div class="tp-action">
+          <div class="tp-action-title"><i class="ti ti-cash"></i> Mark paid</div>
+          <div class="tp-action-desc">Zet de open test-factu(u)r(en) op betaald. Engine completes run met reason <code>paid</code>.</div>
+          <div class="tp-action-row">
+            <button class="tp-btn" onclick="doAction('mark-paid', {}, this)">Markeer als betaald</button>
+          </div>
+        </div>
+        <div class="tp-action">
+          <div class="tp-action-title"><i class="ti ti-shield-x"></i> Breach-check draaien</div>
+          <div class="tp-action-desc">Draait <code>cron-arrangements-breach-check</code> logica voor de sandbox-klant.</div>
+          <div class="tp-action-row">
+            <button class="tp-btn" onclick="doAction('run-breach-check', {}, this)">Breach-check</button>
+          </div>
+        </div>
+        <div class="tp-action">
+          <div class="tp-action-title"><i class="ti ti-hourglass"></i> Conv-reminders</div>
+          <div class="tp-action-desc">Draait de conversation-reminder-cron voor sandbox-conversation.</div>
+          <div class="tp-action-row">
+            <button class="tp-btn" onclick="doAction('run-conversation-reminders', {}, this)">Reminders</button>
+          </div>
+        </div>
+        <div class="tp-action">
+          <div class="tp-action-title"><i class="ti ti-refresh-alert"></i> Oefengesprek reset</div>
+          <div class="tp-action-desc">Herzet de conversation-state (pauze/topics/counters) op de sandbox-klant.</div>
+          <div class="tp-action-row">
+            <button class="tp-btn" onclick="doAction('oefengesprek-reset', {}, this)">Reset gesprek</button>
+          </div>
+        </div>
+        <div class="tp-action">
+          <div class="tp-action-title"><i class="ti ti-credit-card-refund"></i> Credit-round simuleren</div>
+          <div class="tp-action-desc">Draait de crediteer-ronde-simulator voor sandbox-facturen (test-scope).</div>
+          <div class="tp-action-row">
+            <button class="tp-btn" onclick="doAction('simulate-credit-round', {}, this)">Simuleer credit-ronde</button>
+          </div>
+        </div>
+        <div class="tp-action">
+          <div class="tp-action-title"><i class="ti ti-brand-whatsapp"></i> Bulk-template versturen</div>
+          <div class="tp-action-desc">Kies template. Sandbox-run-bulk stuurt via de echte template-pipeline (representative flow) naar het test-nummer.</div>
+          <div class="tp-action-row">
+            <select id="bulkTemplate">
+              <option value="aanmaning_dag7">aanmaning_dag7</option>
+              <option value="aanmaning_dag14">aanmaning_dag14</option>
+              <option value="aanmaning_dag17">aanmaning_dag17</option>
+              <option value="aanmaning_dag21">aanmaning_dag21</option>
+              <option value="aanmaning_dag37">aanmaning_dag37</option>
+            </select>
+            <button class="tp-btn" onclick="doAction('run-bulk', {template_name: document.getElementById('bulkTemplate').value}, this)">Verstuur</button>
+          </div>
+        </div>
+      </div>
+      <div id="actionResult" style="margin-top:12px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2,rgba(0,0,0,.03));font-family:'Consolas',monospace;font-size:12px;white-space:pre-wrap;max-height:280px;overflow-y:auto;display:none"></div>
+    </div>
+
+    <!-- Sectie 4 — Live status -->
+    <div class="tp-section">
+      <div class="tp-section-h">
+        <span class="idx">4</span> Live status
+        <span style="margin-left:auto;font-size:11.5px;color:var(--text-dim);font-weight:400">auto-refresh 5s</span>
+      </div>
+
+      <div class="tp-status-grid">
+        <div class="tp-status-card">
+          <div class="lbl">Test-klant</div>
+          <div class="val" id="statCustomer">—</div>
+          <div class="sub" id="statCustomerSub"></div>
+        </div>
+        <div class="tp-status-card">
+          <div class="lbl">Pipeline-fase</div>
+          <div class="val" id="statPipeline">—</div>
+          <div class="sub" id="statPipelineSub"></div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Test-facturen</div>
+        <div id="statInvoices" class="tp-empty">Nog geen facturen</div>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Conversations</div>
+        <div id="statConvs" class="tp-empty">Nog geen conversations</div>
+      </div>
+
+      <div>
+        <div style="font-size:12px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Meta-counts (globaal)</div>
+        <div id="statCounts" style="font-size:12.5px;color:var(--text-dim)">—</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Modal: DRY-RUN → UIT (2-staps) -->
+<div id="dryToggleModal" class="tp-modal" role="dialog" aria-modal="true">
+  <div class="tp-modal-card">
+    <h3 id="dryModalTitle"><i class="ti ti-alert-triangle"></i> DRY-RUN wisselen</h3>
+    <div id="dryModalStep1">
+      <p class="warn"><strong>Je staat op het punt DRY-RUN uit te zetten.</strong> Test-berichten worden dan ECHT verstuurd naar de sandbox-ontvanger:</p>
+      <div class="kv" id="dryModalContact">—</div>
+      <p>De recipient-guard blokkeert nog steeds elke send die niet naar dit nummer/e-mail gaat, maar alle sends die wél matchen worden echt afgeleverd bij Meta / mailserver.</p>
+      <div class="tp-modal-actions">
+        <button class="tp-btn" onclick="closeDryToggleModal()">Annuleren</button>
+        <button class="tp-btn tp-btn-danger" onclick="goToStep2()">Ik begrijp het, ga door</button>
+      </div>
+    </div>
+    <div id="dryModalStep2" style="display:none">
+      <p>Typ ter bevestiging <code>LIVE SEND AAN</code>:</p>
+      <input id="dryConfirmText" type="text" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:'Consolas',monospace;font-size:14px" placeholder="LIVE SEND AAN" />
+      <div class="tp-modal-actions">
+        <button class="tp-btn" onclick="closeDryToggleModal()">Annuleren</button>
+        <button class="tp-btn tp-btn-danger" id="dryConfirmBtn" onclick="confirmDryOff()" disabled>Zet DRY-RUN UIT</button>
+      </div>
+    </div>
+    <!-- Zet AAN is 1-staps (veiliger richting, alleen bevestigen) -->
+    <div id="dryModalOn" style="display:none">
+      <p>Zet DRY-RUN weer aan? Dan worden geen echte berichten meer verstuurd — <em>alle</em> sends worden alleen gelogd.</p>
+      <div class="tp-modal-actions">
+        <button class="tp-btn" onclick="closeDryToggleModal()">Annuleren</button>
+        <button class="tp-btn tp-btn-primary" onclick="confirmDryOn()">Zet DRY-RUN AAN</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: bevestig actie bij DRY-RUN=UIT -->
+<div id="actionConfirmModal" class="tp-modal" role="dialog" aria-modal="true">
+  <div class="tp-modal-card">
+    <h3><i class="ti ti-alert-circle warn"></i> Actie bevestigen — DRY-RUN staat UIT</h3>
+    <p>Deze actie kan ECHTE berichten sturen naar de sandbox-ontvanger:</p>
+    <div class="kv" id="actionConfirmContact">—</div>
+    <p id="actionConfirmDetail" style="font-size:13px"></p>
+    <div class="tp-modal-actions">
+      <button class="tp-btn" onclick="closeActionConfirm()">Annuleren</button>
+      <button class="tp-btn tp-btn-danger" id="actionConfirmBtn" onclick="proceedAction()">Ja, uitvoeren</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: bevestig reset -->
+<div id="resetConfirmModal" class="tp-modal" role="dialog" aria-modal="true">
+  <div class="tp-modal-card">
+    <h3><i class="ti ti-trash warn"></i> Alle test-data wissen?</h3>
+    <p>Wist ALLE rijen met <code>is_test=true</code>: customers, invoices, conversations, workflow-runs, pipeline, bulk-jobs. Productie-data blijft ongewijzigd. Actie is niet ongedaan te maken.</p>
+    <div class="tp-modal-actions">
+      <button class="tp-btn" onclick="closeResetModal()">Annuleren</button>
+      <button class="tp-btn tp-btn-danger" onclick="doReset()">Ja, wissen</button>
+    </div>
+  </div>
+</div>
+
+<script src="/api/config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+
+<script>
+'use strict';
+
+// ── State ──────────────────────────────────────────────────────────────
+let _status = null;         // laatste /status response
+let _pollTimer = null;
+let _pendingAction = null;  // { key, payload, btn } bij DRY-OFF-confirm
+
+// ── Init ───────────────────────────────────────────────────────────────
+(async function initTestPanel() {
+  await window._authSharedReady;
+  const profile = await window.AuthShared?.requireAuth();
+  if (!profile) return;
+
+  if (window.AgentShared) {
+    try { await window.AgentShared.renderUserSection(profile); } catch (_) {}
+  }
+
+  if (profile.role !== 'super_admin') {
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+
+  document.getElementById('tp-main').style.display = '';
+  wireEvents();
+  await refreshStatus();
+  startPolling();
+})();
+
+function wireEvents() {
+  const t = document.getElementById('dryConfirmText');
+  if (t) t.addEventListener('input', function () {
+    document.getElementById('dryConfirmBtn').disabled = (this.value.trim() !== 'LIVE SEND AAN');
+  });
+  // Escape sluit alle modals
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    closeDryToggleModal();
+    closeActionConfirm();
+    closeResetModal();
+  });
+}
+
+function startPolling() {
+  if (_pollTimer) clearInterval(_pollTimer);
+  _pollTimer = setInterval(refreshStatus, 5000);
+  window.addEventListener('beforeunload', () => { if (_pollTimer) clearInterval(_pollTimer); });
+}
+
+// ── Status ─────────────────────────────────────────────────────────────
+async function refreshStatus() {
+  try {
+    const r = await window.AgentShared.apiFetch('/api/wanbetalers-sandbox-status');
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    _status = d;
+    renderStatus(d);
+  } catch (e) {
+    console.warn('[testpanel] status refresh fail:', e?.message || e);
+  }
+}
+
+function renderStatus(d) {
+  // DRY-RUN badge (prominent)
+  const badge = document.getElementById('tpDryBadge');
+  const toggleBtn = document.getElementById('tpToggleBtn');
+  if (d.dry_run) {
+    badge.className = 'tp-badge tp-badge-safe';
+    badge.innerHTML = '<i class="ti ti-shield-check"></i> VEILIG — DRY-RUN staat AAN (geen echte sends)';
+    toggleBtn.classList.remove('danger');
+    toggleBtn.innerHTML = '<i class="ti ti-arrows-left-right"></i> Wissel naar LIVE';
+  } else {
+    badge.className = 'tp-badge tp-badge-live';
+    badge.innerHTML = '<i class="ti ti-broadcast"></i> LIVE — echte sends naar sandbox-nummer/email';
+    toggleBtn.classList.add('danger');
+    toggleBtn.innerHTML = '<i class="ti ti-arrows-left-right"></i> Wissel terug naar veilig (DRY-RUN)';
+  }
+
+  // Test-ontvanger
+  const contact = d.contact || {};
+  document.getElementById('tpContactPhone').textContent = contact.phone ? ('📱 ' + contact.phone) : '📱 (geen nummer)';
+  document.getElementById('tpContactEmail').textContent = contact.email ? ('✉️  ' + contact.email) : '✉️  (geen e-mail)';
+
+  // Mismatch-badge
+  const mismatchEl = document.getElementById('tpMismatch');
+  const mismatchTxt = mismatchEl.querySelector('span');
+  if (d.customer) {
+    const cPhone = normPhone(d.customer.phone || '');
+    const sPhone = normPhone(contact.phone || '');
+    const cEmail = String(d.customer.email || '').trim().toLowerCase();
+    const sEmail = String(contact.email || '').trim().toLowerCase();
+    const phoneMatch = cPhone && sPhone && (cPhone === sPhone || cPhone.slice(-9) === sPhone.slice(-9));
+    const emailMatch = cEmail && sEmail && cEmail === sEmail;
+    if (!phoneMatch || !emailMatch) {
+      mismatchEl.style.display = 'inline-flex';
+      const parts = [];
+      if (!phoneMatch) parts.push('nummer');
+      if (!emailMatch) parts.push('e-mail');
+      mismatchTxt.textContent = 'Sandbox-contact matcht niet met test-klant (' + parts.join(' + ') + ')';
+    } else {
+      mismatchEl.style.display = 'none';
+    }
+  } else {
+    mismatchEl.style.display = 'none';
+  }
+
+  // Vul seed-form met huidige customer-data (als leeg)
+  if (d.customer) {
+    if (!document.getElementById('seedName').value) {
+      // Strip prefix voor tonen
+      const raw = String(d.customer.first_name || '').replace(/^🧪\s*TEST\s*—\s*/, '');
+      document.getElementById('seedName').value = raw;
+    }
+    if (!document.getElementById('seedPhone').value) document.getElementById('seedPhone').value = d.customer.phone || contact.phone || '';
+    if (!document.getElementById('seedEmail').value) document.getElementById('seedEmail').value = d.customer.email || contact.email || '';
+  } else if (contact.phone || contact.email) {
+    if (!document.getElementById('seedPhone').value) document.getElementById('seedPhone').value = contact.phone || '';
+    if (!document.getElementById('seedEmail').value) document.getElementById('seedEmail').value = contact.email || '';
+  }
+
+  // Status-cards
+  document.getElementById('statCustomer').textContent = d.customer ? (d.customer.first_name || '(geen naam)') : '(geen test-klant — seed eerst)';
+  document.getElementById('statCustomerSub').textContent = d.customer ? ('id: ' + String(d.customer.id).slice(0, 8) + '…') : '';
+  document.getElementById('statPipeline').textContent = d.pipeline_stage || '(geen pipeline-rij)';
+  const pipe = d.pipeline || {};
+  document.getElementById('statPipelineSub').textContent = pipe.stage_changed_at ? ('fase-wissel: ' + fmtTime(pipe.stage_changed_at)) : '';
+
+  // Facturen
+  const invHtml = renderInvoices(d.invoices || []);
+  document.getElementById('statInvoices').innerHTML = invHtml || '<div class="tp-empty">Nog geen facturen</div>';
+  document.getElementById('statInvoices').className = invHtml ? '' : 'tp-empty';
+
+  // Conversations
+  const cvHtml = renderConvs(d.conversations || []);
+  document.getElementById('statConvs').innerHTML = cvHtml || '<div class="tp-empty">Nog geen conversations</div>';
+  document.getElementById('statConvs').className = cvHtml ? '' : 'tp-empty';
+
+  // Counts
+  const c = d.counts || {};
+  document.getElementById('statCounts').textContent =
+    'is_test customers totaal: ' + (c.test_customers_total ?? '?') +
+    '  ·  is_test invoices totaal: ' + (c.test_invoices_total ?? '?');
+}
+
+function renderInvoices(invs) {
+  if (!invs.length) return '';
+  const rows = invs.map(function (i) {
+    const open = Math.max(0, Number(i.amount_total || 0) - Number(i.amount_paid || 0) - Number(i.credited_amount || 0));
+    return '<tr>' +
+      '<td>' + esc(i.invoice_number || String(i.id).slice(0,8)) + '</td>' +
+      '<td>' + esc(i.status || '—') + '</td>' +
+      '<td>€ ' + open.toFixed(2) + '</td>' +
+      '<td>' + esc(i.due_date || '—') + '</td>' +
+      '<td>' + (i.is_test ? '✅' : '⚠️ geen is_test!') + '</td>' +
+    '</tr>';
+  }).join('');
+  return '<table class="tp-table"><thead><tr><th>Nummer</th><th>Status</th><th>Open</th><th>Vervaldatum</th><th>is_test</th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+function renderConvs(cvs) {
+  if (!cvs.length) return '';
+  const rows = cvs.map(function (c) {
+    return '<tr>' +
+      '<td>' + esc(c.phone_number || '—') + '</td>' +
+      '<td>' + esc(c.status || '—') + '</td>' +
+      '<td>' + esc(fmtTime(c.last_inbound_at)) + '</td>' +
+      '<td>' + esc(fmtTime(c.last_message_at)) + '</td>' +
+    '</tr>';
+  }).join('');
+  return '<table class="tp-table"><thead><tr><th>Nummer</th><th>Status</th><th>Laatst inbound</th><th>Laatst bericht</th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+// ── Contact opslaan (via seed-endpoint, minimum-config) ─────────────────
+async function saveContact() {
+  const name  = document.getElementById('seedName').value.trim();
+  const phone = document.getElementById('seedPhone').value.trim();
+  const email = document.getElementById('seedEmail').value.trim();
+  const okMsg = document.getElementById('contactSaveMsg');
+  const errMsg = document.getElementById('contactSaveErr');
+  okMsg.style.display = 'none'; errMsg.style.display = 'none';
+  if (!name || !phone || !email) {
+    errMsg.textContent = 'Naam, telefoon en e-mail zijn allemaal verplicht.';
+    errMsg.style.display = ''; return;
+  }
+  try {
+    // Bewaart contact + upsert test-customer met defaults (behoudt is_test=true).
+    // days_overdue=30 default is prima; sectie 2 kan later overschrijven met andere seed.
+    const r = await window.AgentShared.apiFetch('/api/wanbetalers-sandbox-seed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, phone, email, invoice_count: 1, days_overdue: 30, amount_per_invoice_eur: 250 }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    okMsg.textContent = 'Opgeslagen';
+    okMsg.style.display = '';
+    await refreshStatus();
+    setTimeout(() => { okMsg.style.display = 'none'; }, 3000);
+  } catch (e) {
+    errMsg.textContent = e?.message || 'Onbekende fout';
+    errMsg.style.display = '';
+  }
+}
+
+// ── Seed uitvoeren (reset + seed volgens gekozen scenario) ─────────────
+function toggleSeedCustom() {
+  const val = document.querySelector('input[name="tpSeedScenario"]:checked')?.value;
+  document.getElementById('tpSeedCustom').classList.toggle('show', val === 'custom');
+}
+document.addEventListener('change', function (e) {
+  if (e.target && e.target.name === 'tpSeedScenario') toggleSeedCustom();
+});
+
+async function runSeed() {
+  const okMsg = document.getElementById('seedMsg');
+  const errMsg = document.getElementById('seedErr');
+  okMsg.style.display = 'none'; errMsg.style.display = 'none';
+  const scenario = document.querySelector('input[name="tpSeedScenario"]:checked')?.value || 'single_1d';
+  let seedBody = { invoice_count: 1, days_overdue: 1, amount_per_invoice_eur: 250 };
+  if (scenario === 'multi_14d') seedBody = { invoice_count: 3, days_overdue: 14, amount_per_invoice_eur: 250 };
+  if (scenario === 'custom') seedBody = {
+    invoice_count: Math.max(1, Math.min(10, Number(document.getElementById('customInvoiceCount').value) || 1)),
+    days_overdue:  Math.max(1, Math.min(365, Number(document.getElementById('customDaysOverdue').value) || 7)),
+    amount_per_invoice_eur: Math.max(1, Math.min(10000, Number(document.getElementById('customAmount').value) || 250)),
+  };
+  const name  = document.getElementById('seedName').value.trim();
+  const phone = document.getElementById('seedPhone').value.trim();
+  const email = document.getElementById('seedEmail').value.trim();
+  if (!name || !phone || !email) {
+    errMsg.textContent = 'Vul eerst naam + telefoon + e-mail in bij sectie 1.';
+    errMsg.style.display = ''; return;
+  }
+  try {
+    // Stap 1: reset alle is_test data
+    let r = await window.AgentShared.apiFetch('/api/wanbetalers-sandbox-reset', { method: 'POST' });
+    let d = await r.json();
+    if (!r.ok) throw new Error('reset: ' + (d?.error || ('HTTP ' + r.status)));
+    // Stap 2: seed nieuwe scenario
+    r = await window.AgentShared.apiFetch('/api/wanbetalers-sandbox-seed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, phone, email, ...seedBody }),
+    });
+    d = await r.json();
+    if (!r.ok) throw new Error('seed: ' + (d?.error || ('HTTP ' + r.status)));
+    okMsg.textContent = '✅ Reset + Seed OK — ' + seedBody.invoice_count + ' factuur/facturen, ' + seedBody.days_overdue + ' dagen te laat';
+    okMsg.style.display = '';
+    await refreshStatus();
+  } catch (e) {
+    errMsg.textContent = e?.message || 'Onbekende fout';
+    errMsg.style.display = '';
+  }
+}
+
+function confirmReset() { document.getElementById('resetConfirmModal').classList.add('show'); }
+function closeResetModal() { document.getElementById('resetConfirmModal').classList.remove('show'); }
+async function doReset() {
+  const okMsg = document.getElementById('seedMsg');
+  const errMsg = document.getElementById('seedErr');
+  okMsg.style.display = 'none'; errMsg.style.display = 'none';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/wanbetalers-sandbox-reset', { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    okMsg.textContent = '✅ Test-data gewist';
+    okMsg.style.display = '';
+    closeResetModal();
+    await refreshStatus();
+  } catch (e) {
+    errMsg.textContent = 'reset: ' + (e?.message || 'Onbekende fout');
+    errMsg.style.display = '';
+    closeResetModal();
+  }
+}
+
+// ── Actie uitvoeren (via kaart-knoppen). Bij DRY-RUN=UIT eerst confirm. ─
+const ACTION_ENDPOINTS = {
+  'run-engine':                 '/api/wanbetalers-sandbox-run-engine',
+  'fast-forward':               '/api/wanbetalers-sandbox-fast-forward',
+  'simulate-inbound':           '/api/wanbetalers-sandbox-simulate-inbound',
+  'mark-paid':                  '/api/wanbetalers-sandbox-mark-paid',
+  'run-breach-check':           '/api/wanbetalers-sandbox-run-breach-check',
+  'run-conversation-reminders': '/api/wanbetalers-sandbox-run-conversation-reminders',
+  'oefengesprek-reset':         '/api/wanbetalers-sandbox-oefengesprek-reset',
+  'simulate-credit-round':      '/api/wanbetalers-sandbox-simulate-credit-round',
+  'run-bulk':                   '/api/wanbetalers-sandbox-run-bulk',
+};
+// Welke acties zetten uiteindelijk een echte send in gang bij DRY-RUN=UIT?
+const SEND_ACTIONS = new Set([
+  'run-engine',
+  'run-bulk',
+  'run-conversation-reminders',
+]);
+
+async function doAction(key, payload, btn) {
+  if (!_status) await refreshStatus();
+  const isSendAction = SEND_ACTIONS.has(key);
+  const isLive = _status && _status.dry_run === false;
+  if (isSendAction && isLive) {
+    _pendingAction = { key, payload, btn };
+    const c = _status?.contact || {};
+    document.getElementById('actionConfirmContact').textContent =
+      '📱 ' + (c.phone || '(geen nummer)') + '\n✉️  ' + (c.email || '(geen e-mail)');
+    document.getElementById('actionConfirmDetail').textContent =
+      'Actie: ' + key + (payload && Object.keys(payload).length ? ' (payload: ' + JSON.stringify(payload) + ')' : '');
+    document.getElementById('actionConfirmModal').classList.add('show');
+    return;
+  }
+  await _executeAction(key, payload, btn);
+}
+
+function closeActionConfirm() {
+  _pendingAction = null;
+  document.getElementById('actionConfirmModal').classList.remove('show');
+}
+async function proceedAction() {
+  const p = _pendingAction; _pendingAction = null;
+  document.getElementById('actionConfirmModal').classList.remove('show');
+  if (p) await _executeAction(p.key, p.payload, p.btn);
+}
+
+async function _executeAction(key, payload, btn) {
+  const url = ACTION_ENDPOINTS[key];
+  if (!url) return;
+  const resultBox = document.getElementById('actionResult');
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Bezig…';
+  try {
+    const r = await window.AgentShared.apiFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+    const d = await r.json();
+    resultBox.style.display = '';
+    resultBox.textContent = '[' + new Date().toLocaleTimeString('nl-NL') + '] ' + key + ' → HTTP ' + r.status + '\n' + JSON.stringify(d, null, 2);
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    await refreshStatus();
+  } catch (e) {
+    resultBox.style.display = '';
+    resultBox.textContent += '\n[ERROR] ' + (e?.message || 'Onbekende fout');
+  } finally {
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+
+// ── DRY-RUN toggle modal ───────────────────────────────────────────────
+function openDryToggleModal() {
+  if (!_status) return;
+  const modal = document.getElementById('dryToggleModal');
+  const step1 = document.getElementById('dryModalStep1');
+  const step2 = document.getElementById('dryModalStep2');
+  const onBlk = document.getElementById('dryModalOn');
+  const title = document.getElementById('dryModalTitle');
+  step1.style.display = 'none'; step2.style.display = 'none'; onBlk.style.display = 'none';
+  document.getElementById('dryConfirmText').value = '';
+  document.getElementById('dryConfirmBtn').disabled = true;
+
+  if (_status.dry_run) {
+    // AAN → UIT (gevaarlijker richting, 2-staps)
+    title.innerHTML = '<i class="ti ti-alert-triangle warn"></i> DRY-RUN uitzetten (LIVE-modus)';
+    const c = _status.contact || {};
+    document.getElementById('dryModalContact').textContent = '📱 ' + (c.phone || '(geen)') + '\n✉️  ' + (c.email || '(geen)');
+    step1.style.display = '';
+  } else {
+    // UIT → AAN (veiliger richting, 1-staps)
+    title.innerHTML = '<i class="ti ti-shield-check"></i> DRY-RUN weer aanzetten';
+    onBlk.style.display = '';
+  }
+  modal.classList.add('show');
+}
+function closeDryToggleModal() { document.getElementById('dryToggleModal').classList.remove('show'); }
+function goToStep2() {
+  document.getElementById('dryModalStep1').style.display = 'none';
+  document.getElementById('dryModalStep2').style.display = '';
+}
+async function confirmDryOff() {
+  try {
+    const r = await window.AgentShared.apiFetch('/api/wanbetalers-sandbox-set-dry-run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: false }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+  } catch (e) {
+    alert('Wisselen faalde: ' + (e?.message || 'onbekend'));
+  }
+  closeDryToggleModal();
+  await refreshStatus();
+}
+async function confirmDryOn() {
+  try {
+    const r = await window.AgentShared.apiFetch('/api/wanbetalers-sandbox-set-dry-run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+  } catch (e) {
+    alert('Wisselen faalde: ' + (e?.message || 'onbekend'));
+  }
+  closeDryToggleModal();
+  await refreshStatus();
+}
+
+// ── Utils ──────────────────────────────────────────────────────────────
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]; }); }
+function normPhone(p) { return String(p || '').replace(/\D+/g, ''); }
+function fmtTime(iso) {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso);
+    return d.toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  } catch (_) { return String(iso); }
+}
+
+// Sluit modals ook bij klik op overlay
+document.addEventListener('click', function (e) {
+  ['dryToggleModal', 'actionConfirmModal', 'resetConfirmModal'].forEach(function (id) {
+    const el = document.getElementById(id);
+    if (el && e.target === el) el.classList.remove('show');
+  });
+});
+</script>
+
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+</body>
+</html>
