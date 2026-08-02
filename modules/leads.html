@@ -59,6 +59,15 @@
 
     .err-banner{padding:12px 14px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.3);border-radius:6px;color:#dc2626;font-size:13px;margin-bottom:14px}
 
+    /* Paginatie */
+    .pager{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:14px;font-size:13px}
+    .pager .pinfo{color:var(--text-dim);margin-right:auto}
+    .pager button{padding:6px 11px;border:1px solid var(--border-default,#e5e7eb);border-radius:6px;background:var(--bg-elev,#fff);color:var(--text-main);cursor:pointer;min-width:34px}
+    .pager button:hover:not(:disabled){background:var(--bg-elev-2,#f8fafc)}
+    .pager button:disabled{opacity:.45;cursor:default}
+    .pager button.on{background:var(--accent,#2563eb);border-color:var(--accent,#2563eb);color:#fff}
+    .pager .ell{color:var(--text-dim);padding:0 2px}
+
     @media (max-width:720px){
       .kpi-strip{grid-template-columns:1fr;gap:8px}
       .kpi-val{font-size:20px}
@@ -82,7 +91,7 @@
     </div>
 
     <div class="filter-row">
-      <select id="fSoort"><option value="">Soort: alle</option><option>7-daagse</option><option>student</option></select>
+      <select id="fSoort"><option value="">Soort: alle</option></select>
       <select id="fKwal">
         <option value="">Kwalificatie: alle</option>
         <option value="toegang">toegang</option>
@@ -112,6 +121,7 @@
         <thead><tr>
           <th>Naam</th>
           <th>E-mail</th>
+          <th>Telefoon</th>
           <th>Soort</th>
           <th>Bron</th>
           <th>Traject</th>
@@ -121,10 +131,12 @@
           <th>Aangemaakt</th>
         </tr></thead>
         <tbody id="tblBody">
-          <tr><td colspan="9" class="empty">Laden…</td></tr>
+          <tr><td colspan="10" class="empty">Laden…</td></tr>
         </tbody>
       </table>
     </div>
+
+    <div class="pager" id="pager" style="display:none"></div>
   </main>
 
 <!-- Shared scripts MOETEN vóór het inline-script laden — anders is
@@ -172,6 +184,7 @@ function apiFetch(url,opts){
 }
 
 let _state = { rows: [] };
+let _page = { offset: 0, limit: 50, total: 0 };
 
 async function loadStats(){
   try{
@@ -188,7 +201,7 @@ async function loadList(){
   const body = document.getElementById('tblBody');
   const err  = document.getElementById('err');
   err.style.display = 'none';
-  body.innerHTML = '<tr><td colspan="9" class="empty">Laden…</td></tr>';
+  body.innerHTML = '<tr><td colspan="10" class="empty">Laden…</td></tr>';
   try{
     const p = new URLSearchParams();
     const sel = (id)=>document.getElementById(id).value.trim();
@@ -197,6 +210,8 @@ async function loadList(){
     if(sel('fBron'))   p.set('bron',   sel('fBron'));
     if(sel('fStatus')) p.set('status', sel('fStatus'));
     if(sel('fQ'))      p.set('q',      sel('fQ'));
+    p.set('limit',  String(_page.limit));
+    p.set('offset', String(_page.offset));
     const r = await apiFetch('/api/leads-list?'+p.toString());
     if(!r.ok){
       const t = await r.text();
@@ -204,18 +219,79 @@ async function loadList(){
     }
     const d = await r.json();
     _state.rows = Array.isArray(d.items) ? d.items : [];
+    _page.total = Number(d.total) || 0;
     render();
+    renderPager();
   }catch(e){
     err.textContent = 'Laden mislukt: '+e.message;
     err.style.display = 'block';
-    body.innerHTML = '<tr><td colspan="9" class="empty">—</td></tr>';
+    body.innerHTML = '<tr><td colspan="10" class="empty">—</td></tr>';
+    document.getElementById('pager').style.display = 'none';
   }
+}
+
+// offset terug naar 0 bij een nieuwe filter/zoekopdracht
+function reload(){ _page.offset = 0; loadList(); }
+
+function renderPager(){
+  const pager = document.getElementById('pager');
+  const total = _page.total, limit = _page.limit;
+  if(!total){ pager.style.display = 'none'; return; }
+  const pages = Math.max(1, Math.ceil(total / limit));
+  const cur   = Math.floor(_page.offset / limit) + 1;
+  const from  = _page.offset + 1;
+  const to    = Math.min(_page.offset + _state.rows.length, total);
+
+  // te tonen paginanummers: 1, huidige ±2, laatste (met ellipsis ertussen)
+  const nums = [];
+  const add = (n)=>{ if(n>=1 && n<=pages && !nums.includes(n)) nums.push(n); };
+  add(1); for(let i=cur-2;i<=cur+2;i++) add(i); add(pages);
+  nums.sort((a,b)=>a-b);
+
+  let html = '<span class="pinfo">'+from+'–'+to+' van '+total+'</span>';
+  html += '<button type="button" data-pg="'+(cur-1)+'"'+(cur<=1?' disabled':'')+'>‹</button>';
+  let prev = 0;
+  for(const n of nums){
+    if(prev && n - prev > 1) html += '<span class="ell">…</span>';
+    html += '<button type="button" data-pg="'+n+'"'+(n===cur?' class="on"':'')+'>'+n+'</button>';
+    prev = n;
+  }
+  html += '<button type="button" data-pg="'+(cur+1)+'"'+(cur>=pages?' disabled':'')+'>›</button>';
+  pager.innerHTML = html;
+  pager.style.display = (pages > 1) ? 'flex' : 'none';
+  pager.querySelectorAll('button[data-pg]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const pg = Number(b.getAttribute('data-pg'));
+      if(pg>=1 && pg<=pages && pg!==cur){
+        _page.offset = (pg-1)*limit;
+        loadList();
+        window.scrollTo({ top:0, behavior:'smooth' });
+      }
+    });
+  });
+}
+
+async function populateSoorten(){
+  try{
+    const r = await apiFetch('/api/leads-soorten');
+    if(!r.ok) return;
+    const d = await r.json();
+    const sel = document.getElementById('fSoort');
+    (d.soorten || []).forEach(s => {
+      const o = document.createElement('option');
+      o.value = s; o.textContent = s;
+      sel.appendChild(o);
+    });
+    // ?soort= uit de URL respecteren (bv. dashboard-tegel deep-link)
+    const urlSoort = new URLSearchParams(location.search).get('soort');
+    if(urlSoort && (d.soorten||[]).includes(urlSoort)) sel.value = urlSoort;
+  }catch(e){ console.warn('[leads] soorten:', e.message); }
 }
 
 function render(){
   const body = document.getElementById('tblBody');
   if(!_state.rows.length){
-    body.innerHTML = '<tr><td colspan="9" class="empty">Geen leads gevonden met deze filters.</td></tr>';
+    body.innerHTML = '<tr><td colspan="10" class="empty">Geen leads gevonden met deze filters.</td></tr>';
     return;
   }
   body.innerHTML = _state.rows.map(r => {
@@ -225,6 +301,7 @@ function render(){
     return '<tr data-id="'+esc(r.id)+'">'+
       '<td><strong>'+esc(r.naam||'—')+'</strong></td>'+
       '<td>'+esc(r.email||'—')+'</td>'+
+      '<td>'+esc(r.telefoon||'—')+'</td>'+
       '<td>'+esc(r.soort||'—')+'</td>'+
       '<td>'+esc(r.bron||'—')+'</td>'+
       '<td>'+esc(r.traject||'—')+'</td>'+
@@ -248,16 +325,17 @@ async function init(){
   if(!profile) return;
   if(window.AgentShared && window.AgentShared.renderUserSection) await window.AgentShared.renderUserSection(profile);
 
-  document.getElementById('fSoort').addEventListener('change', loadList);
-  document.getElementById('fKwal').addEventListener('change', loadList);
-  document.getElementById('fBron').addEventListener('change', loadList);
-  document.getElementById('fStatus').addEventListener('change', loadList);
+  document.getElementById('fSoort').addEventListener('change', reload);
+  document.getElementById('fKwal').addEventListener('change', reload);
+  document.getElementById('fBron').addEventListener('change', reload);
+  document.getElementById('fStatus').addEventListener('change', reload);
   document.getElementById('fQ').addEventListener('input', () => {
     clearTimeout(_searchTimer);
-    _searchTimer = setTimeout(loadList, 250);
+    _searchTimer = setTimeout(reload, 250);
   });
-  document.getElementById('btnRefresh').addEventListener('click', () => { loadStats(); loadList(); });
+  document.getElementById('btnRefresh').addEventListener('click', () => { loadStats(); reload(); });
 
+  await populateSoorten();
   await Promise.all([loadStats(), loadList()]);
 }
 init();
