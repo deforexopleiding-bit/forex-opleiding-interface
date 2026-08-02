@@ -68,6 +68,30 @@
     .pager button.on{background:var(--accent,#2563eb);border-color:var(--accent,#2563eb);color:#fff}
     .pager .ell{color:var(--text-dim);padding:0 2px}
 
+    /* Lead toevoegen */
+    .btn-add{background:var(--accent,#2563eb);border:1px solid var(--accent,#2563eb);color:#fff;cursor:pointer;padding:7px 13px;border-radius:6px;font-size:13px;font-weight:600}
+    .btn-add:hover{filter:brightness(1.05)}
+    .modal-ov{position:fixed;inset:0;background:rgba(15,23,42,.5);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto;z-index:50}
+    .modal{background:var(--bg-elev,#fff);border:1px solid var(--border-default,#e5e7eb);border-radius:10px;width:100%;max-width:560px;padding:22px}
+    .modal h2{font-size:18px;font-weight:700;margin-bottom:4px}
+    .modal .sub{font-size:13px;color:var(--text-dim);margin-bottom:16px}
+    .fld{margin-bottom:12px}
+    .fld label{display:block;font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:5px}
+    .fld input{width:100%;padding:8px 10px;font-size:14px;border:1px solid var(--border-default,#e5e7eb);border-radius:6px;background:var(--bg-page,#fff);color:var(--text-main)}
+    .fld2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .prod-list{border:1px solid var(--border-default,#e5e7eb);border-radius:8px;padding:6px;margin-top:4px}
+    .prod-row{display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center;padding:7px 6px;border-bottom:1px solid var(--border-default,#eef1f4)}
+    .prod-row:last-child{border-bottom:none}
+    .prod-row .pnaam{font-size:13px;font-weight:600}
+    .prod-row input[type="date"]{padding:5px 7px;font-size:12px;border:1px solid var(--border-default,#e5e7eb);border-radius:5px;background:var(--bg-page,#fff);color:var(--text-main)}
+    .prod-row input[type="date"]:disabled{opacity:.4}
+    .modal-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+    .modal-foot button{padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--border-default,#e5e7eb)}
+    .modal-foot .k-annuleer{background:var(--bg-elev,#fff);color:var(--text-main)}
+    .modal-foot .k-opslaan{background:var(--accent,#2563eb);border-color:var(--accent,#2563eb);color:#fff}
+    .modal-foot .k-opslaan:disabled{opacity:.5;cursor:default}
+    .modal .m-err{padding:9px 11px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.3);border-radius:6px;color:#dc2626;font-size:13px;margin-top:12px}
+
     @media (max-width:720px){
       .kpi-strip{grid-template-columns:1fr;gap:8px}
       .kpi-val{font-size:20px}
@@ -114,6 +138,7 @@
       </select>
       <input type="search" id="fQ" placeholder="Zoek op naam of e-mail…" />
       <button type="button" class="btn-refresh" id="btnRefresh">Vernieuwen</button>
+      <button type="button" class="btn-add" id="btnAdd">+ Lead toevoegen</button>
     </div>
 
     <div class="tbl-wrap">
@@ -138,6 +163,28 @@
 
     <div class="pager" id="pager" style="display:none"></div>
   </main>
+
+  <div class="modal-ov" id="addModal" style="display:none">
+    <div class="modal">
+      <h2>Lead toevoegen</h2>
+      <p class="sub">Maakt een lead (bron: handmatig) én een account met directe toegang. De persoon kan meteen inloggen via de code per e-mail.</p>
+      <div class="fld2">
+        <div class="fld"><label>Voornaam</label><input type="text" id="aVoornaam" autocomplete="off" /></div>
+        <div class="fld"><label>Achternaam</label><input type="text" id="aAchternaam" autocomplete="off" /></div>
+      </div>
+      <div class="fld"><label>E-mailadres *</label><input type="email" id="aEmail" autocomplete="off" placeholder="naam@voorbeeld.nl" /></div>
+      <div class="fld"><label>Telefoon</label><input type="text" id="aTelefoon" autocomplete="off" /></div>
+      <div class="fld">
+        <label>Toegang (vink producten aan; eerste = primair traject)</label>
+        <div class="prod-list" id="aProducten"><div class="sub" style="padding:8px">Producten laden…</div></div>
+      </div>
+      <div class="m-err" id="aErr" style="display:none"></div>
+      <div class="modal-foot">
+        <button type="button" class="k-annuleer" id="aAnnuleer">Annuleren</button>
+        <button type="button" class="k-opslaan" id="aOpslaan">Toevoegen</button>
+      </div>
+    </div>
+  </div>
 
 <!-- Shared scripts MOETEN vóór het inline-script laden — anders is
      window._authSharedReady undefined op het moment dat init() awaited,
@@ -288,6 +335,69 @@ async function populateSoorten(){
   }catch(e){ console.warn('[leads] soorten:', e.message); }
 }
 
+// ---- Lead toevoegen (handmatig + directe toegang) ----
+function _today(){ return new Date().toISOString().slice(0,10); }
+function _plusDagen(n){ const d=new Date(); d.setDate(d.getDate()+(Number(n)||14)); return d.toISOString().slice(0,10); }
+
+async function openAdd(){
+  ['aVoornaam','aAchternaam','aEmail','aTelefoon'].forEach(id=>{ document.getElementById(id).value=''; });
+  document.getElementById('aErr').style.display='none';
+  const btn=document.getElementById('aOpslaan'); btn.disabled=false; btn.textContent='Toevoegen';
+  const lijst=document.getElementById('aProducten');
+  lijst.innerHTML='<div class="sub" style="padding:8px">Producten laden…</div>';
+  document.getElementById('addModal').style.display='flex';
+  try{
+    const r=await apiFetch('/api/lms-producten-actief');
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const prods=(await r.json()).producten||[];
+    if(!prods.length){ lijst.innerHTML='<div class="sub" style="padding:8px">Geen actieve producten.</div>'; return; }
+    lijst.innerHTML=prods.map(p=>
+      '<div class="prod-row" data-slug="'+esc(p.slug)+'">'+
+        '<input type="checkbox" class="p-aan" />'+
+        '<span class="pnaam">'+esc(p.naam||p.slug)+'</span>'+
+        '<input type="date" class="p-van" value="'+_today()+'" disabled />'+
+        '<input type="date" class="p-tot" value="'+_plusDagen(p.duur_dagen)+'" disabled />'+
+      '</div>').join('');
+    lijst.querySelectorAll('.prod-row').forEach(row=>{
+      const cb=row.querySelector('.p-aan');
+      cb.addEventListener('change',()=>{
+        row.querySelector('.p-van').disabled=!cb.checked;
+        row.querySelector('.p-tot').disabled=!cb.checked;
+      });
+    });
+  }catch(e){ lijst.innerHTML='<div class="sub" style="padding:8px">Laden mislukt: '+esc(e.message)+'</div>'; }
+}
+function closeAdd(){ document.getElementById('addModal').style.display='none'; }
+
+async function submitAdd(){
+  const err=document.getElementById('aErr'); err.style.display='none';
+  const btn=document.getElementById('aOpslaan');
+  const email=document.getElementById('aEmail').value.trim();
+  if(!/.+@.+\..+/.test(email)){ err.textContent='Vul een geldig e-mailadres in'; err.style.display='block'; return; }
+  const producten=[];
+  document.querySelectorAll('#aProducten .prod-row').forEach(row=>{
+    if(row.querySelector('.p-aan').checked){
+      producten.push({ slug: row.getAttribute('data-slug'),
+        van: row.querySelector('.p-van').value, tot: row.querySelector('.p-tot').value });
+    }
+  });
+  if(!producten.length){ err.textContent='Kies minstens één product'; err.style.display='block'; return; }
+  btn.disabled=true; btn.textContent='Bezig…';
+  try{
+    const r=await apiFetch('/api/lead-handmatig-toevoegen',{ method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        voornaam: document.getElementById('aVoornaam').value.trim()||null,
+        achternaam: document.getElementById('aAchternaam').value.trim()||null,
+        email, telefoon: document.getElementById('aTelefoon').value.trim()||null,
+        producten,
+      }) });
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){ err.textContent=d.error||('HTTP '+r.status); err.style.display='block'; btn.disabled=false; btn.textContent='Toevoegen'; return; }
+    closeAdd(); loadStats(); reload();
+  }catch(e){ err.textContent='Toevoegen mislukt: '+e.message; err.style.display='block'; btn.disabled=false; btn.textContent='Toevoegen'; }
+}
+
 function render(){
   const body = document.getElementById('tblBody');
   if(!_state.rows.length){
@@ -334,6 +444,10 @@ async function init(){
     _searchTimer = setTimeout(reload, 250);
   });
   document.getElementById('btnRefresh').addEventListener('click', () => { loadStats(); reload(); });
+  document.getElementById('btnAdd').addEventListener('click', openAdd);
+  document.getElementById('aAnnuleer').addEventListener('click', closeAdd);
+  document.getElementById('aOpslaan').addEventListener('click', submitAdd);
+  document.getElementById('addModal').addEventListener('click', (e) => { if(e.target.id==='addModal') closeAdd(); });
 
   await populateSoorten();
   await Promise.all([loadStats(), loadList()]);
