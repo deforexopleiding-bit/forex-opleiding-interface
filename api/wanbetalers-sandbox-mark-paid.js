@@ -33,13 +33,42 @@ export default async function handler(req, res) {
     const dateOnly = now.slice(0, 10);
     let updated = 0;
     for (const inv of invs) {
-      const { error: uErr } = await supabaseAdmin.from('invoices').update({
-        amount_paid: Number(inv.amount_total) || 0,
-        status     : 'paid',
-        paid_date  : dateOnly,
-        updated_at : now,
-      }).eq('id', inv.id);
-      if (!uErr) updated++;
+      // HARD SAFETY GUARD (defense-in-depth):
+      //   - .eq('id', inv.id)          → doel-factuur
+      //   - .eq('is_test', true)       → ook op de UPDATE zelf, niet alleen SELECT
+      //   - .eq('customer_id', customer.id) → sandbox-klant, dubbele scope
+      // Als tussen SELECT en UPDATE de `is_test`-vlag toch verandert (RLS-shift,
+      // manuele DB-mutatie, refactor-fout), matcht deze UPDATE 0 rijen ipv per
+      // ongeluk een productie-factuur te raken.
+      //
+      // Fail-loud: als 0 rijen matchen terwijl we wél iets verwachtten te
+      // updaten, gooien we een expliciete SANDBOX_GUARD_FAILED-fout. Beter een
+      // duidelijk foutspoor dan silent success bij een guard-mismatch.
+      const { data: updRows, error: uErr } = await supabaseAdmin
+        .from('invoices')
+        .update({
+          amount_paid: Number(inv.amount_total) || 0,
+          status     : 'paid',
+          paid_date  : dateOnly,
+          updated_at : now,
+        })
+        .eq('id', inv.id)
+        .eq('is_test', true)
+        .eq('customer_id', customer.id)
+        .select('id, is_test, customer_id');
+      if (uErr) {
+        console.error('[sandbox-mark-paid] update fail', inv.id, uErr.message);
+        continue;
+      }
+      if (!updRows || updRows.length === 0) {
+        // 0 rijen geraakt: id-only SELECT vond de rij, maar met is_test+
+        // customer_id guard matcht 'ie niet meer. Iemand heeft die vlag
+        // omgezet tussen SELECT en UPDATE. Faalt hard om ontdekt te worden.
+        return res.status(500).json({
+          error: `SANDBOX_GUARD_FAILED: invoice ${inv.id} matchte SELECT (is_test=true, customer=${customer.id}) maar UPDATE met dezelfde guards raakte 0 rijen. Iets is niet consistent — abort.`,
+        });
+      }
+      updated++;
     }
 
     // Pipeline-trigger 'on_paid_to_opgelost' — alleen als er 0 open facturen

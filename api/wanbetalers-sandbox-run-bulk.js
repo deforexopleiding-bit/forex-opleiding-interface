@@ -274,19 +274,31 @@ export default async function handler(req, res) {
     const successAny = waOk || emOk;
 
     // ─────────────── 4) Recipient + job status ───────────────
+    // HARD SAFETY GUARD: scope recipient-UPDATE ook op customer_id + job_id
+    // (extra defense — de rec-rij is net door ons ingevoegd met customer_id
+    // = sandbox-klant, dus deze filters matchen altijd voor onze rij en
+    // NOOIT voor een niet-test recipient-rij die we per ongeluk zouden raken).
     await supabaseAdmin.from('dunning_bulk_recipients').update({
       status          : successAny ? 'sent' : 'failed',
       sent_at         : successAny ? new Date().toISOString() : null,
       wamid           : wamid || null,
       email_message_id: emailMsgId || null,
       error           : sendError ? sendError.slice(0, 2000) : null,
-    }).eq('id', rec.id);
+    })
+    .eq('id', rec.id)
+    .eq('customer_id', customer.id)
+    .eq('job_id', job.id);
 
+    // HARD SAFETY GUARD: scope job-UPDATE ook op is_test=true. De job is
+    // hierboven ingevoegd met is_test:true, dus dit matcht altijd onze rij
+    // en nooit een productie-job.
     await supabaseAdmin.from('dunning_bulk_jobs').update({
       status       : 'completed',
       sent_count   : successAny ? 1 : 0,
       failed_count : successAny ? 0 : 1,
-    }).eq('id', job.id);
+    })
+    .eq('id', job.id)
+    .eq('is_test', true);
 
     // ─────────────── 5) dunning_log ───────────────
     if (successAny) {
