@@ -49,6 +49,29 @@
     .ai-verdict-ja{background:rgba(245,158,11,.18);color:#92400e;padding:2px 8px;border-radius:4px;font-weight:700}
     .ai-verdict-nee{background:rgba(107,114,128,.15);color:#4b5563;padding:2px 8px;border-radius:4px;font-weight:700}
     .ai-verdict-onduidelijk{background:rgba(99,102,241,.14);color:#3730a3;padding:2px 8px;border-radius:4px;font-weight:700}
+    /* Verplaats-tool modal */
+    .mv-modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:2000;padding:16px}
+    .mv-modal.show{display:flex}
+    .mv-card{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:20px 22px;max-width:720px;width:100%;max-height:calc(100vh - 32px);overflow-y:auto}
+    .mv-card h3{font-size:17px;font-weight:800;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+    .mv-card label{display:block;font-size:12px;font-weight:600;color:var(--text-dim);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.3px}
+    .mv-card select,.mv-card input[type=text]{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:inherit;font-size:14px}
+    .mv-card .mv-check{display:flex;align-items:flex-start;gap:8px;font-size:13px;padding:10px;border:1px solid var(--border);border-radius:6px;margin-top:8px;cursor:pointer}
+    .mv-card .mv-check input{margin-top:2px}
+    .mv-preview{margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2,rgba(0,0,0,.03));font-size:12.5px;line-height:1.5;font-family:'SF Mono',Consolas,monospace;white-space:pre-wrap}
+    .mv-warn-real{background:rgba(220,38,38,.12);color:#b91c1c;padding:8px 10px;border-radius:6px;margin-top:10px;font-weight:600;font-size:13px;border:1px solid rgba(220,38,38,.35)}
+    .mv-warn-live{background:rgba(220,38,38,.18);color:#b91c1c;padding:10px 12px;border-radius:6px;margin-top:10px;font-weight:700;font-size:13.5px;border:2px solid rgba(220,38,38,.6)}
+    .mv-warn-note{background:rgba(245,158,11,.14);color:#92400e;padding:6px 10px;border-radius:6px;margin-top:6px;font-size:12.5px}
+    .mv-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+    .mv-btn{padding:7px 14px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;font-family:inherit}
+    .mv-btn:hover:not(:disabled){background:var(--surface-2,rgba(0,0,0,.04))}
+    .mv-btn:disabled{opacity:.5;cursor:not-allowed}
+    .mv-btn-danger{background:#dc2626;color:#fff;border-color:#dc2626}
+    .mv-btn-danger:hover:not(:disabled){background:#b91c1c}
+    .mv-btn-primary{background:#0f766e;color:#fff;border-color:#0f766e}
+    .mv-btn-primary:hover:not(:disabled){background:#115e59}
+    .mv-tpl-preview{margin-top:8px;padding:10px;border:1px dashed var(--border);border-radius:6px;background:var(--bg);max-height:220px;overflow-y:auto;font-family:'SF Mono',Consolas,monospace;font-size:12px;white-space:pre-wrap}
+    .mv-pa-list{margin-top:6px;padding-left:18px;font-size:12.5px}
     .cust{background:var(--surface,var(--bg));border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden}
     .cust-head{display:grid;grid-template-columns:1fr auto auto auto 20px;gap:14px;align-items:center;padding:10px 14px;cursor:pointer;user-select:none}
     .cust-head:hover{background:var(--surface-2,rgba(0,0,0,.03))}
@@ -122,6 +145,18 @@
     </div>
     <div id="pausedSection"></div>
     <div id="list"><div id="loading">Laden…</div></div>
+  </div>
+</div>
+
+<!-- Verplaats-tool modal: super_admin-only, opent via renderCust "Verplaats stap"-knop -->
+<div id="mvModal" class="mv-modal" role="dialog" aria-modal="true">
+  <div class="mv-card">
+    <h3>↔ Verplaats dunning-run naar andere stap</h3>
+    <div id="mvBody"><div style="color:var(--text-dim);font-size:13px">Laden…</div></div>
+    <div class="mv-actions">
+      <button class="mv-btn" onclick="closeMoveModal()">Annuleren</button>
+      <button class="mv-btn mv-btn-primary" id="mvExecuteBtn" disabled onclick="executeMove()">Uitvoeren</button>
+    </div>
   </div>
 </div>
 
@@ -379,11 +414,18 @@ function renderBody(c) {
         c.signals.map((s) => '<li><b>' + esc(s.code) + ':</b> ' + esc(s.msg) + '</li>').join('') +
       '</ul></div>' : '';
 
+  // Verplaats-knop alleen bij een run in active/paused (server valideert
+  // dat ook, maar UI verbergt 'em bij completed/cancelled).
+  const canMove = c.run && ['active','paused'].includes(c.run.status);
+  const moveBtn = canMove
+    ? '<button class="btn-dl" style="margin-top:6px" onclick="openMoveModal(\'' + esc(c.run.id) + '\',\'' + esc(c.customer_id) + '\')" title="Verplaats deze run naar een andere workflow-stap (super_admin only, ontwerp docs/wanbetalers-verplaats-tool-ontwerp.md)">↔ Verplaats stap</button>'
+    : '';
   const runBlock = c.run
     ? '<div><div class="section-h">Dunning run</div>' +
       '<div class="kv">status=<b>' + esc(c.run.status) + '</b>' + (c.run.reason ? ' · reden=<b>' + esc(c.run.reason_label || c.run.reason) + '</b>' : '') + '</div>' +
       '<div class="kv">workflow=<b>' + esc(c.run.workflow_name || '—') + '</b> · stap=' + (c.run.step_order == null ? '—' : c.run.step_order) + ' ' + esc(c.run.step_type || '') + (c.run.step_title ? ' ("' + esc(c.run.step_title) + '")' : '') + '</div>' +
       '<div class="kv">next_action_at=<b>' + esc(fmtDT(c.run.next_action_at)) + '</b> · updated_at=' + esc(fmtDT(c.run.updated_at)) + (c.run.needs_attention ? ' · <b style="color:#b91c1c">NEEDS_ATTENTION</b>' : '') + '</div>' +
+      moveBtn +
       '</div>'
     : '<div><div class="section-h">Dunning run</div><div class="no-data">Geen actieve of gepauzeerde run.</div></div>';
 
@@ -507,6 +549,237 @@ function hasUnrecordedAgreement(c) {
   const r = state.aiResults.get(c.customer_id);
   return r && r.result && r.result.afspraak_gemaakt === 'JA' && !r.result.heeft_arrangement;
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Verplaats-tool (fase 1) — ontwerp: docs/wanbetalers-verplaats-tool-ontwerp.md
+// Endpoints:
+//   GET  /api/wanbetalers-diagnose-workflow-steps?run_id=...   (steps-lijst)
+//   POST /api/wanbetalers-diagnose-run-verplaats-preview       (dry-run info)
+//   POST /api/wanbetalers-diagnose-run-verplaats               (execute)
+// State is client-only. Modal wordt bij openen gereset.
+// ─────────────────────────────────────────────────────────────────────
+const moveState = {
+  runId:        null,
+  customerId:   null,
+  steps:        [],       // uit workflow-steps endpoint
+  targetStepId: null,
+  triggerNow:   false,
+  cancelPa:     false,
+  preview:      null,     // laatste preview-response
+  loadingPrev:  false,
+  confirmText:  '',       // typ-bevestiging bij live-send
+};
+
+function openMoveModal(runId, customerId) {
+  Object.assign(moveState, {
+    runId, customerId,
+    steps: [], targetStepId: null, triggerNow: false, cancelPa: false,
+    preview: null, loadingPrev: false, confirmText: '',
+  });
+  document.getElementById('mvModal').classList.add('show');
+  document.getElementById('mvBody').innerHTML = '<div style="color:var(--text-dim);font-size:13px">Workflow-stappen laden…</div>';
+  document.getElementById('mvExecuteBtn').disabled = true;
+  loadMoveSteps();
+}
+function closeMoveModal() {
+  document.getElementById('mvModal').classList.remove('show');
+}
+
+async function loadMoveSteps() {
+  try {
+    const r = await window.AgentShared.apiFetch('/api/wanbetalers-diagnose-workflow-steps?run_id=' + encodeURIComponent(moveState.runId));
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    moveState.steps = d.steps || [];
+    // Default: current step preselected (dus 'verplaats naar zichzelf' geeft duidelijke waarschuwing)
+    moveState.targetStepId = d.current_step_id || (moveState.steps[0] && moveState.steps[0].id) || null;
+    renderMoveModalBody();
+    refreshMovePreview();
+  } catch (e) {
+    document.getElementById('mvBody').innerHTML = '<div class="tp-err" style="color:#dc2626">Fout: ' + esc(e?.message || 'onbekend') + '</div>';
+  }
+}
+
+function renderMoveModalBody() {
+  const body = document.getElementById('mvBody');
+  const stepsOpts = moveState.steps.map((s) => {
+    const label = s.step_order + ' · ' + s.step_type + (s.config_title ? ' · "' + s.config_title + '"' : '')
+      + (s.risk === 'risky' ? '  🔴 stuurt bericht' : '  ✅ geen send');
+    return '<option value="' + esc(s.id) + '"' + (s.id === moveState.targetStepId ? ' selected' : '') + '>' + esc(label) + '</option>';
+  }).join('');
+  const p = moveState.preview;
+
+  let previewHtml = '<div class="mv-preview" id="mvPreviewBox">Preview laden…</div>';
+  if (p && p.ok) {
+    previewHtml = renderMovePreview(p);
+  } else if (p && !p.ok) {
+    previewHtml = '<div class="mv-preview" style="color:#dc2626">Fout: ' + esc(p.error || 'onbekend') + '</div>';
+  }
+
+  // Toon typ-input alleen als live-send vereist.
+  const showLiveConfirm = p && p.ok && p.requires_live_send_confirmation;
+  const liveConfirmHtml = showLiveConfirm
+    ? '<div class="mv-warn-live">🔴 LIVE SEND — er gaat NU een bericht naar bovenstaande klant. Typ ter bevestiging exact:</div>'
+      + '<div style="font-family:\'SF Mono\',Consolas,monospace;font-size:13px;background:var(--bg);padding:6px 10px;border-radius:4px;border:1px solid var(--border);margin-top:4px">' + esc(p.expected_confirmation_text) + '</div>'
+      + '<input type="text" id="mvConfirmInput" style="margin-top:6px" placeholder="Typ hier de bevestigingstekst…" oninput="moveState.confirmText = this.value; renderMoveExecuteBtn()" value="' + esc(moveState.confirmText) + '" />'
+    : '';
+
+  body.innerHTML = ''
+    + '<label>Doel-stap</label>'
+    + '<select id="mvTargetStepSelect" onchange="onMoveStepChange(this.value)">' + stepsOpts + '</select>'
+    + '<label class="mv-check"><input type="checkbox" id="mvCancelPa"' + (moveState.cancelPa ? ' checked' : '') + ' onchange="moveState.cancelPa = this.checked; refreshMovePreview()">'
+    + '<span><b>Cancel-cascade:</b> zet open PENDING/APPROVED pending_action(s) van de HUIDIGE stap op CANCELLED (behoud audit-spoor; niet hard verwijderd). Krijgt een aparte log-entry per taak.</span></label>'
+    + '<label class="mv-check"><input type="checkbox" id="mvTriggerNow"' + (moveState.triggerNow ? ' checked' : '') + ' onchange="moveState.triggerNow = this.checked; refreshMovePreview()">'
+    + '<span><b>Trigger direct:</b> zet next_action_at op nu, engine pikt bij volgende cron op. Bij email/whatsapp doel-stap: 2-staps typ-bevestiging vereist.</span></label>'
+    + previewHtml
+    + liveConfirmHtml;
+  renderMoveExecuteBtn();
+}
+
+function renderMovePreview(p) {
+  // Klant-blok
+  const c = p.customer;
+  const isRealCustomer = !c.is_test;
+  const custHeader =
+    '<div style="font-size:13px;line-height:1.6">'
+    + '<b>Klant:</b> ' + esc(c.name) + '<br>'
+    + (c.email  ? '<b>E-mail:</b> ' + esc(c.email) + '<br>' : '')
+    + (c.phone  ? '<b>Telefoon:</b> ' + esc(c.phone) + '<br>' : '')
+    + '<b>Openstaand:</b> ' + fmtEur(c.total_open_eur) + ' (' + c.open_invoice_count + ' factu(u)r(en))'
+    + '</div>';
+
+  const cur = p.current_step;
+  const tgt = p.target_step;
+  const stepsBlock =
+    '<div style="margin-top:10px;font-size:13px;line-height:1.6">'
+    + '<b>Huidige stap:</b> ' + (cur ? cur.step_order + ' · ' + esc(cur.step_type) + (cur.config_title ? ' · "' + esc(cur.config_title) + '"' : '') : '—') + '<br>'
+    + '<b>Nieuwe stap:</b> ' + tgt.step_order + ' · ' + esc(tgt.step_type) + (tgt.config_title ? ' · "' + esc(tgt.config_title) + '"' : '')
+    + (tgt.risk === 'risky' ? ' 🔴' : ' ✅')
+    + '</div>';
+
+  const paBlock = (moveState.cancelPa && p.open_pending_actions_current_step.length > 0)
+    ? '<div style="margin-top:10px;font-size:13px"><b>Wordt gecanceld:</b><ul class="mv-pa-list">'
+      + p.open_pending_actions_current_step.map((pa) => '<li>' + esc(pa.action_type) + (pa.title ? ' — "' + esc(pa.title) + '"' : '') + ' (aangemaakt ' + esc(fmtDate(pa.created_at)) + ', status ' + esc(pa.status) + ')</li>').join('')
+      + '</ul></div>'
+    : (moveState.cancelPa
+        ? '<div style="margin-top:10px;font-size:13px;color:var(--text-dim)">Cancel-cascade aan, maar geen open pending_action gevonden voor huidige stap.</div>'
+        : '');
+
+  const willHappen =
+    '<div style="margin-top:10px;padding:8px 10px;border:1px dashed var(--border);border-radius:6px;font-size:12.5px;line-height:1.5">'
+    + '<b>Wat gaat er gebeuren:</b><br>'
+    + '• current_step_id → ' + esc(tgt.id.slice(0,8)) + '…<br>'
+    + '• next_action_at → ' + (p.trigger_now ? '<b>NU</b> (engine pikt op)' : '<b>NULL</b> (engine pikt NIET automatisch op)') + '<br>'
+    + '• cancel_cascade → ' + (moveState.cancelPa ? 'JA (' + p.open_pending_actions_current_step.length + ' actie(s))' : 'NEE')
+    + '</div>';
+
+  const tplBlock = p.template_preview
+    ? '<div style="margin-top:10px;font-size:12.5px"><b>Template-preview (dit gaat verstuurd worden):</b>'
+      + (p.template_preview.subject ? '<div style="margin-top:4px"><b>Onderwerp:</b> ' + esc(p.template_preview.subject) + '</div>' : '')
+      + '<div class="mv-tpl-preview">' + esc(p.template_preview.body || p.template_preview.render_error || '(geen body)') + '</div>'
+      + (p.template_preview.to ? '<div style="margin-top:4px"><b>Naar:</b> ' + esc(p.template_preview.to) + '</div>' : '')
+      + '</div>'
+    : '';
+
+  const warnBlock = (p.warnings || []).length
+    ? '<div class="mv-warn-note">⚠ ' + p.warnings.map(esc).join('<br>⚠ ') + '</div>'
+    : '';
+  const realCustBlock = isRealCustomer
+    ? '<div class="mv-warn-real">⚠ ECHTE klant (geen test-persoon) — dubbelcheck naam + bedrag bovenaan.</div>'
+    : '<div class="mv-warn-note" style="background:rgba(16,185,129,.14);color:#065f46">✅ Test-klant (is_test=true) — veilig om mee te oefenen.</div>';
+
+  return '<div class="mv-preview">' + custHeader + stepsBlock + paBlock + willHappen + tplBlock + '</div>' + realCustBlock + warnBlock;
+}
+
+function renderMoveExecuteBtn() {
+  const btn = document.getElementById('mvExecuteBtn');
+  if (!btn) return;
+  const p = moveState.preview;
+  if (!p || !p.ok) { btn.disabled = true; btn.textContent = 'Uitvoeren'; return; }
+  if (p.requires_live_send_confirmation) {
+    const expected = String(p.expected_confirmation_text || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const got      = String(moveState.confirmText || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    btn.disabled = (expected !== got);
+    btn.textContent = btn.disabled ? 'Typ eerst bevestiging' : '🔴 LIVE UITVOEREN';
+    btn.className = 'mv-btn ' + (btn.disabled ? '' : 'mv-btn-danger');
+  } else {
+    btn.disabled = false;
+    btn.textContent = 'Uitvoeren';
+    btn.className = 'mv-btn mv-btn-primary';
+  }
+}
+
+function onMoveStepChange(newId) {
+  moveState.targetStepId = newId;
+  refreshMovePreview();
+}
+
+async function refreshMovePreview() {
+  if (!moveState.runId || !moveState.targetStepId) return;
+  moveState.loadingPrev = true;
+  const box = document.getElementById('mvPreviewBox');
+  if (box) box.textContent = 'Preview laden…';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/wanbetalers-diagnose-run-verplaats-preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        run_id:                          moveState.runId,
+        target_step_id:                  moveState.targetStepId,
+        trigger_now:                     moveState.triggerNow,
+        cancel_current_pending_actions:  moveState.cancelPa,
+      }),
+    });
+    const d = await r.json();
+    moveState.preview = r.ok ? d : { ok: false, error: d?.error || ('HTTP ' + r.status) };
+  } catch (e) {
+    moveState.preview = { ok: false, error: e?.message || 'onbekend' };
+  }
+  moveState.loadingPrev = false;
+  renderMoveModalBody();
+}
+
+async function executeMove() {
+  const p = moveState.preview;
+  if (!p || !p.ok) return;
+  const btn = document.getElementById('mvExecuteBtn');
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Bezig…';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/wanbetalers-diagnose-run-verplaats', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        run_id:                          moveState.runId,
+        target_step_id:                  moveState.targetStepId,
+        trigger_now:                     moveState.triggerNow,
+        cancel_current_pending_actions:  moveState.cancelPa,
+        live_send_confirmation:          p.requires_live_send_confirmation ? moveState.confirmText : undefined,
+      }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    // Toon resultaat + auto-refresh na 1s.
+    alert('✓ Verplaatsing OK\n\n' +
+      'Van: ' + (d.from_step_type || '?') + ' → naar: ' + (d.to_step_type || '?') + '\n' +
+      'Cancelled taken: ' + (d.cancelled_pending_actions_count || 0) + '\n' +
+      'Trigger nu: ' + (d.trigger_now ? 'JA' : 'nee') + '\n\n' +
+      (d.note || ''));
+    closeMoveModal();
+    await loadData();  // volledige data-refresh
+  } catch (e) {
+    alert('✗ Fout: ' + (e?.message || 'onbekend'));
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+// Sluit ook bij klik op overlay of ESC.
+document.addEventListener('click', (e) => {
+  const modal = document.getElementById('mvModal');
+  if (modal && e.target === modal) closeMoveModal();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeMoveModal();
+});
 
 // Download huidige rendering als self-contained HTML. Ontkoppelt van de
 // live-app: wat je zag, sla je op. Data wordt embedded als JSON zodat het
