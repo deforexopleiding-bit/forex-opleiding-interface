@@ -140,7 +140,7 @@ export default async function handler(req, res) {
     // 3) Token → attendee
     const { data: attendee, error: attErr } = await supabaseAdmin
       .from('event_attendees')
-      .select('id, event_id, first_name, last_name, email, assessment_response_id')
+      .select('id, event_id, first_name, last_name, email, phone, customer_id, ghl_contact_id, assessment_response_id')
       .eq('choice_token', token)
       .maybeSingle();
     if (attErr) {
@@ -345,6 +345,14 @@ export default async function handler(req, res) {
           first_name            : effectiveFirstName || attendee.first_name,
           last_name             : effectiveLastName  || attendee.last_name,
           email                 : attendee.email,
+          // Per-contact-velden meenemen: dezelfde persoon verhuist naar een
+          // ander event. Zonder phone skipt de WhatsApp-bevestiging met
+          // 'no-phone' (mail ging wél door). customer_id/ghl_contact_id houden
+          // de CRM-/GHL-koppeling intact. (ghl_form_submission_id/deal_id/
+          // subscription_id zijn per-registratie/sale-stage → bewust NIET mee.)
+          phone                 : attendee.phone,
+          customer_id           : attendee.customer_id,
+          ghl_contact_id        : attendee.ghl_contact_id,
           status                : 'aangemeld',
           created_via           : 'choice',
           source                : 'webflow',
