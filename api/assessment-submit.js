@@ -263,7 +263,9 @@ export default async function handler(req, res) {
       const lateLinkNowIso = new Date().toISOString();
       let lookupQ = supabaseAdmin
         .from('event_attendees')
-        .select('id, event_id, first_name, last_name, status, events!inner(starts_at)')
+        // FK-gekwalificeerd: event_attendees heeft 2 FK's naar events; kaal
+        // 'events!inner' is ambigu → PGRST201. Alias blijft 'events'.
+        .select('id, event_id, first_name, last_name, status, events!event_attendees_event_id_fkey!inner(starts_at)')
         .ilike('email', email)
         .is('assessment_response_id', null)
         .gt('events.starts_at', lateLinkNowIso);
