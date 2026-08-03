@@ -71,6 +71,15 @@
     /* Lead toevoegen */
     .btn-add{background:var(--accent,#2563eb);border:1px solid var(--accent,#2563eb);color:#fff;cursor:pointer;padding:7px 13px;border-radius:6px;font-size:13px;font-weight:600}
     .btn-add:hover{filter:brightness(1.05)}
+    .btn-edit{padding:4px 10px;font-size:12px;border:1px solid var(--border-default,#e5e7eb);border-radius:5px;background:var(--bg-elev,#fff);color:var(--text-main);cursor:pointer}
+    .btn-edit:hover{background:var(--bg-elev-2,#f8fafc)}
+    .grant-row{display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center;padding:7px 6px;border-bottom:1px solid var(--border-default,#eef1f4)}
+    .grant-row:last-child{border-bottom:none}
+    .grant-row.ingetrokken{opacity:.5}
+    .grant-row .gnaam{font-size:13px;font-weight:600}
+    .grant-row input[type="date"]{padding:5px 7px;font-size:12px;border:1px solid var(--border-default,#e5e7eb);border-radius:5px;background:var(--bg-page,#fff);color:var(--text-main)}
+    .grant-row .g-trek{padding:4px 9px;font-size:12px;border:1px solid rgba(214,69,69,.5);border-radius:5px;background:#fff;color:#d64545;cursor:pointer;white-space:nowrap}
+    .g-verlopen{font-size:11px;color:var(--text-dim);font-style:italic}
     .modal-ov{position:fixed;inset:0;background:rgba(15,23,42,.5);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto;z-index:50}
     .modal{background:var(--bg-elev,#fff);border:1px solid var(--border-default,#e5e7eb);border-radius:10px;width:100%;max-width:560px;padding:22px}
     .modal h2{font-size:18px;font-weight:700;margin-bottom:4px}
@@ -154,9 +163,10 @@
           <th class="col-score">Score / drempel</th>
           <th>Status</th>
           <th>Aangemaakt</th>
+          <th>Acties</th>
         </tr></thead>
         <tbody id="tblBody">
-          <tr><td colspan="10" class="empty">Laden…</td></tr>
+          <tr><td colspan="11" class="empty">Laden…</td></tr>
         </tbody>
       </table>
     </div>
@@ -182,6 +192,33 @@
       <div class="modal-foot">
         <button type="button" class="k-annuleer" id="aAnnuleer">Annuleren</button>
         <button type="button" class="k-opslaan" id="aOpslaan">Toevoegen</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-ov" id="editModal" style="display:none">
+    <div class="modal">
+      <h2>Lead bewerken</h2>
+      <p class="sub">Wijzig de gegevens en het toegangsbeheer. Een e-mailwijziging synct ook het loginaccount.</p>
+      <input type="hidden" id="eLeadId" />
+      <div class="fld2">
+        <div class="fld"><label>Voornaam</label><input type="text" id="eVoornaam" autocomplete="off" /></div>
+        <div class="fld"><label>Achternaam</label><input type="text" id="eAchternaam" autocomplete="off" /></div>
+      </div>
+      <div class="fld"><label>E-mailadres *</label><input type="email" id="eEmail" autocomplete="off" /></div>
+      <div class="fld"><label>Telefoon</label><input type="text" id="eTelefoon" autocomplete="off" /></div>
+      <div class="fld">
+        <label>Huidige toegang (van/tot bewerkbaar; intrekken = verlopen zetten)</label>
+        <div class="prod-list" id="eGrants"><div class="sub" style="padding:8px">Laden…</div></div>
+      </div>
+      <div class="fld">
+        <label>Product toevoegen</label>
+        <div class="prod-list" id="eNieuw"><div class="sub" style="padding:8px">Laden…</div></div>
+      </div>
+      <div class="m-err" id="eErr" style="display:none"></div>
+      <div class="modal-foot">
+        <button type="button" class="k-annuleer" id="eAnnuleer">Annuleren</button>
+        <button type="button" class="k-opslaan" id="eOpslaan">Opslaan</button>
       </div>
     </div>
   </div>
@@ -248,7 +285,7 @@ async function loadList(){
   const body = document.getElementById('tblBody');
   const err  = document.getElementById('err');
   err.style.display = 'none';
-  body.innerHTML = '<tr><td colspan="10" class="empty">Laden…</td></tr>';
+  body.innerHTML = '<tr><td colspan="11" class="empty">Laden…</td></tr>';
   try{
     const p = new URLSearchParams();
     const sel = (id)=>document.getElementById(id).value.trim();
@@ -272,7 +309,7 @@ async function loadList(){
   }catch(e){
     err.textContent = 'Laden mislukt: '+e.message;
     err.style.display = 'block';
-    body.innerHTML = '<tr><td colspan="10" class="empty">—</td></tr>';
+    body.innerHTML = '<tr><td colspan="11" class="empty">—</td></tr>';
     document.getElementById('pager').style.display = 'none';
   }
 }
@@ -398,10 +435,109 @@ async function submitAdd(){
   }catch(e){ err.textContent='Toevoegen mislukt: '+e.message; err.style.display='block'; btn.disabled=false; btn.textContent='Toevoegen'; }
 }
 
+// ---- Lead bewerken + toegangsbeheer ----
+function closeEdit(){ document.getElementById('editModal').style.display='none'; }
+
+async function openEdit(id){
+  const err=document.getElementById('eErr'); err.style.display='none';
+  const btn=document.getElementById('eOpslaan'); btn.disabled=false; btn.textContent='Opslaan';
+  document.getElementById('eLeadId').value=id;
+  ['eVoornaam','eAchternaam','eEmail','eTelefoon'].forEach(i=>{ document.getElementById(i).value=''; });
+  const gEl=document.getElementById('eGrants'), nEl=document.getElementById('eNieuw');
+  gEl.innerHTML='<div class="sub" style="padding:8px">Laden…</div>';
+  nEl.innerHTML='<div class="sub" style="padding:8px">Laden…</div>';
+  document.getElementById('editModal').style.display='flex';
+  try{
+    const [rg, rp] = await Promise.all([
+      apiFetch('/api/lead-grants?lead_id='+encodeURIComponent(id)),
+      apiFetch('/api/lms-producten-actief'),
+    ]);
+    if(!rg.ok){ const t=await rg.text(); throw new Error(t||('HTTP '+rg.status)); }
+    const dg=await rg.json();
+    const prods=rp.ok ? ((await rp.json()).producten||[]) : [];
+    document.getElementById('eVoornaam').value = dg.lead.voornaam||'';
+    document.getElementById('eAchternaam').value = dg.lead.achternaam||'';
+    document.getElementById('eEmail').value = dg.lead.email||'';
+    document.getElementById('eTelefoon').value = dg.lead.telefoon||'';
+
+    const grants=dg.grants||[];
+    if(!grants.length){ gEl.innerHTML='<div class="sub" style="padding:8px">Nog geen toegang.</div>'; }
+    else {
+      gEl.innerHTML=grants.map(g=>
+        '<div class="grant-row" data-slug="'+esc(g.slug)+'" data-intrekken="0">'+
+          '<span class="gnaam">'+esc(g.naam||g.slug)+(g.verlopen?' <span class="g-verlopen">(verlopen)</span>':'')+'</span>'+
+          '<input type="date" class="g-van" value="'+esc(g.van||'')+'" />'+
+          '<input type="date" class="g-tot" value="'+esc(g.tot||'')+'" />'+
+          '<button type="button" class="g-trek">Intrekken</button>'+
+        '</div>').join('');
+      gEl.querySelectorAll('.grant-row').forEach(row=>{
+        row.querySelector('.g-trek').addEventListener('click',()=>{
+          const on=row.getAttribute('data-intrekken')==='1';
+          row.setAttribute('data-intrekken', on?'0':'1');
+          row.classList.toggle('ingetrokken', !on);
+          row.querySelector('.g-trek').textContent = on?'Intrekken':'Ongedaan maken';
+        });
+      });
+    }
+
+    const alHeeft=new Set(grants.map(g=>g.slug));
+    const toevoegbaar=prods.filter(p=>!alHeeft.has(p.slug));
+    if(!toevoegbaar.length){ nEl.innerHTML='<div class="sub" style="padding:8px">Alle actieve producten al toegekend.</div>'; }
+    else {
+      nEl.innerHTML=toevoegbaar.map(p=>
+        '<div class="prod-row" data-slug="'+esc(p.slug)+'">'+
+          '<input type="checkbox" class="p-aan" />'+
+          '<span class="pnaam">'+esc(p.naam||p.slug)+'</span>'+
+          '<input type="date" class="p-van" value="'+_today()+'" disabled />'+
+          '<input type="date" class="p-tot" value="'+_plusDagen(p.duur_dagen)+'" disabled />'+
+        '</div>').join('');
+      nEl.querySelectorAll('.prod-row').forEach(row=>{
+        const cb=row.querySelector('.p-aan');
+        cb.addEventListener('change',()=>{ row.querySelector('.p-van').disabled=!cb.checked; row.querySelector('.p-tot').disabled=!cb.checked; });
+      });
+    }
+  }catch(e){ gEl.innerHTML='<div class="sub" style="padding:8px">Laden mislukt: '+esc(e.message)+'</div>'; }
+}
+
+async function submitEdit(){
+  const err=document.getElementById('eErr'); err.style.display='none';
+  const btn=document.getElementById('eOpslaan');
+  const email=document.getElementById('eEmail').value.trim();
+  if(!/.+@.+\..+/.test(email)){ err.textContent='Vul een geldig e-mailadres in'; err.style.display='block'; return; }
+  const grants=[];
+  document.querySelectorAll('#eGrants .grant-row').forEach(row=>{
+    grants.push({ slug: row.getAttribute('data-slug'),
+      van: row.querySelector('.g-van').value, tot: row.querySelector('.g-tot').value,
+      intrekken: row.getAttribute('data-intrekken')==='1' });
+  });
+  const nieuw=[];
+  document.querySelectorAll('#eNieuw .prod-row').forEach(row=>{
+    if(row.querySelector('.p-aan').checked){
+      nieuw.push({ slug: row.getAttribute('data-slug'),
+        van: row.querySelector('.p-van').value, tot: row.querySelector('.p-tot').value });
+    }
+  });
+  btn.disabled=true; btn.textContent='Bezig…';
+  try{
+    const r=await apiFetch('/api/lead-bijwerken',{ method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        lead_id: document.getElementById('eLeadId').value,
+        voornaam: document.getElementById('eVoornaam').value.trim()||null,
+        achternaam: document.getElementById('eAchternaam').value.trim()||null,
+        email, telefoon: document.getElementById('eTelefoon').value.trim()||null,
+        grants, nieuw,
+      }) });
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){ err.textContent=d.error||('HTTP '+r.status); err.style.display='block'; btn.disabled=false; btn.textContent='Opslaan'; return; }
+    closeEdit(); loadStats(); loadList();
+  }catch(e){ err.textContent='Opslaan mislukt: '+e.message; err.style.display='block'; btn.disabled=false; btn.textContent='Opslaan'; }
+}
+
 function render(){
   const body = document.getElementById('tblBody');
   if(!_state.rows.length){
-    body.innerHTML = '<tr><td colspan="10" class="empty">Geen leads gevonden met deze filters.</td></tr>';
+    body.innerHTML = '<tr><td colspan="11" class="empty">Geen leads gevonden met deze filters.</td></tr>';
     return;
   }
   body.innerHTML = _state.rows.map(r => {
@@ -419,12 +555,16 @@ function render(){
       '<td class="col-score">'+scoreCell+'</td>'+
       '<td><span class="status '+statusClass(r.status)+'">'+esc(r.status||'—')+'</span></td>'+
       '<td>'+esc(fmtDate(r.aangemaakt))+'</td>'+
+      '<td><button type="button" class="btn-edit" data-edit="'+esc(r.id)+'">Bewerken</button></td>'+
     '</tr>';
   }).join('');
   body.querySelectorAll('tr[data-id]').forEach(tr => {
     tr.addEventListener('click', () => {
       window.location.href = '/modules/leads-detail.html?id='+encodeURIComponent(tr.getAttribute('data-id'));
     });
+  });
+  body.querySelectorAll('.btn-edit').forEach(b => {
+    b.addEventListener('click', (e) => { e.stopPropagation(); openEdit(b.getAttribute('data-edit')); });
   });
 }
 
@@ -448,6 +588,9 @@ async function init(){
   document.getElementById('aAnnuleer').addEventListener('click', closeAdd);
   document.getElementById('aOpslaan').addEventListener('click', submitAdd);
   document.getElementById('addModal').addEventListener('click', (e) => { if(e.target.id==='addModal') closeAdd(); });
+  document.getElementById('eAnnuleer').addEventListener('click', closeEdit);
+  document.getElementById('eOpslaan').addEventListener('click', submitEdit);
+  document.getElementById('editModal').addEventListener('click', (e) => { if(e.target.id==='editModal') closeEdit(); });
 
   await populateSoorten();
   await Promise.all([loadStats(), loadList()]);

@@ -15,12 +15,10 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { vindOfMaakAccount, zetGrant, telefoonE164, vanIso, totIso } from './_lib/lms-provisioning.js';
 
 const EMAIL_RE = /.+@.+\..+/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-const vanIso = (d) => `${d}T00:00:00.000Z`;
-const totIso = (d) => `${d}T23:59:59.999Z`;
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -66,60 +64,27 @@ export default async function handler(req, res) {
 
     // 1) LEAD aanmaken.
     const { data: lead, error: lErr } = await supabaseAdmin.from('leads').insert({
-      voornaam, achternaam, email, telefoon,
+      voornaam, achternaam, email, telefoon, telefoon_e164: telefoonE164(telefoon),
       bron: 'handmatig', soort: primair, traject: primair,
       afwijzer: false, antwoorden: [], status: 'nieuw', toestemming: false,
     }).select('id').single();
     if (lErr) throw new Error('leads insert: ' + lErr.message);
     const leadId = lead.id;
 
-    // 2) ACCOUNT: bestaand lms_gebruikers hergebruiken, anders auth-user + rij.
-    let gebruikerId;
-    const { data: bestaand } = await supabaseAdmin
-      .from('lms_gebruikers').select('id, lead_id').eq('email', email).maybeSingle();
+    // 2) ACCOUNT (venster envelopeert alle grants, voor legacy venster-checks).
+    const van = gekozen.map(p => p.van).sort()[0];
+    const tot = gekozen.map(p => p.tot).sort().slice(-1)[0];
+    const { id: gebruikerId } = await vindOfMaakAccount({
+      email, voornaam, achternaam, leadId, van: vanIso(van), tot: totIso(tot),
+    });
 
-    if (bestaand) {
-      gebruikerId = bestaand.id;
-      if (!bestaand.lead_id) {
-        await supabaseAdmin.from('lms_gebruikers').update({ lead_id: leadId }).eq('id', gebruikerId);
-      }
-    } else {
-      // auth-account (bestaat het adres al bij auth, dan dat oppakken)
-      let authId = null;
-      const { data: gemaakt, error: maakFout } = await supabaseAdmin.auth.admin.createUser({
-        email, email_confirm: true,
-        user_metadata: { voornaam, achternaam },
+    // 3) GRANTS voor elk gekozen product.
+    for (const p of gekozen) {
+      await zetGrant({
+        gebruikerId, productId: bySlug.get(String(p.slug)).id,
+        van: vanIso(p.van), tot: totIso(p.tot),
       });
-      if (gemaakt?.user) {
-        authId = gemaakt.user.id;
-      } else if (maakFout) {
-        const { data: lijst } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 });
-        const gevonden = (lijst?.users || []).find(u => u.email?.toLowerCase() === email);
-        if (!gevonden) throw new Error('auth createUser: ' + maakFout.message);
-        authId = gevonden.id;
-      }
-
-      // venster envelopeert alle grants (voor legacy venster-checks)
-      const van = gekozen.map(p => p.van).sort()[0];
-      const tot = gekozen.map(p => p.tot).sort().slice(-1)[0];
-      const { data: nieuw, error: gErr } = await supabaseAdmin.from('lms_gebruikers').insert({
-        auth_id: authId, lead_id: leadId, voornaam, achternaam, email,
-        toegang_van: vanIso(van), toegang_tot: totIso(tot),
-      }).select('id').single();
-      if (gErr) throw new Error('lms_gebruikers insert: ' + gErr.message);
-      gebruikerId = nieuw.id;
     }
-
-    // 3) GRANTS upserten voor elk gekozen product.
-    const rijen = gekozen.map(p => ({
-      gebruiker_id: gebruikerId,
-      product_id: bySlug.get(String(p.slug)).id,
-      toegang_van: vanIso(p.van),
-      toegang_tot: totIso(p.tot),
-    }));
-    const { error: tErr } = await supabaseAdmin
-      .from('lms_toegang').upsert(rijen, { onConflict: 'gebruiker_id,product_id' });
-    if (tErr) throw new Error('lms_toegang upsert: ' + tErr.message);
 
     return res.status(200).json({ ok: true, lead_id: leadId, gebruiker_id: gebruikerId });
   } catch (e) {
