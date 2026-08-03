@@ -119,14 +119,14 @@ async function findExistingAttendee({ eventId, email, phone }) {
   return null;
 }
 
-async function createAttendee({ event, payload, followUpReason = null, ghlContactId, ghlFormSubmissionId }) {
+async function createAttendee({ event, payload, status = 'aangemeld', followUpReason = null, ghlContactId, ghlFormSubmissionId }) {
   const row = {
     event_id              : event.id,
     first_name            : payload.first_name,
     last_name             : payload.last_name,
     email                 : payload.email,
     phone                 : payload.phone,
-    status                : 'aangemeld',
+    status                : status,
     created_via           : 'ghl_inbound',
     source                : 'ghl',
     ghl_contact_id        : ghlContactId,
@@ -291,10 +291,23 @@ export default async function handler(req, res) {
     attendeeId = existing.id;
     dedupNote  = 'deduplicated: existing attendee re-used';
   } else {
+    // Punt 2 — capaciteitscheck vóór de insert: is het event (strikte telling)
+    // al vol, dan als 'wachtlijst' toevoegen i.p.v. 'aangemeld' (niet weggooien).
+    // Deze persoon heeft nog geen assessment, dus telt zelf nog niet mee.
+    let inschrijfStatus = 'aangemeld';
+    try {
+      const cap = Number(chosenEvent.capacity);
+      if (Number.isInteger(cap) && cap > 0 && (await getConfirmedCount(chosenEvent.id)) >= cap) {
+        inschrijfStatus = 'wachtlijst';
+      }
+    } catch (e) {
+      console.error('[events-signup-inbound] capaciteitscheck (soft):', e.message);
+    }
     try {
       const created = await createAttendee({
         event: chosenEvent,
         payload: { first_name: firstName, last_name: lastName, email, phone },
+        status: inschrijfStatus,
         followUpReason,
         ghlContactId,
         ghlFormSubmissionId,

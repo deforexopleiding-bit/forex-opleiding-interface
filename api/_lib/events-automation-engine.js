@@ -226,6 +226,13 @@ async function loadCandidatesForAutomation(auto, now) {
     if (newOnly) q = q.gte('registered_at', auto.enabled_at);
   } else if (auto.trigger_type === 'on_assessment_completed') {
     q = q.not('assessment_response_id', 'is', null);
+    // Capaciteits-gate: alleen bevestigen wie een bevestigde plek heeft. Overflow-
+    // rijen staan op 'wachtlijst' en vallen hier weg → géén deelnemer-bevestiging.
+    // Raakt UITSLUITEND on_assessment_completed (o.a. "Bevestiging aanmelding");
+    // on_signup/time_before_event (welkom/reminders) blijven ongemoeid. Sluit ook
+    // 'sale'/'no_show'/'geannuleerd' uit; wie eerder als 'aangemeld' al bevestigd
+    // is, krijgt door de isStepDone-idempotency geen dubbele.
+    q = q.in('status', ['aangemeld', 'aanwezig']);
     if (newOnly) q = q.gte('assessment_linked_at', auto.enabled_at);
   } else if (auto.trigger_type === 'time_before_event') {
     if (newOnly) q = q.gte('registered_at', auto.enabled_at);

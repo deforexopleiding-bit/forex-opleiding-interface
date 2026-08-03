@@ -245,6 +245,9 @@ export default async function handler(req, res) {
     // runtime), dus we houden 't in het kritieke pad maar met een strakke
     // timeout. Externe calls (syncGastenlijstWebflow / autoCloseIfFull /
     // customers-lookup) blijven hierdoor niet ~10s hangen.
+    // Punt 3 — wordt true als deze afronder overflow is (event al vol) en dus op
+    // de wachtlijst komt i.p.v. bevestigd. Wordt teruggegeven in de response.
+    let waitlisted = false;
     await withTimeout((async () => {
     // Set van event_id's waar minstens 1 rij hierdoor de confirmed_count laat
     // stijgen (was: status IN CONFIRMED_STATUSES + assessment_response_id NULL;
@@ -278,8 +281,31 @@ export default async function handler(req, res) {
           // Annuleer alleen rijen die nog op 'aangemeld' staan — operator-
           // edits (aanwezig / sale / no_show) blijven intact.
           const willBeCancelled = isIncomplete && att.status === 'aangemeld';
+
+          // Punt 3 — overflow-check: als deze 'aangemeld'-rij zou bevestigen
+          // terwijl de strikte telling EXCLUSIEF deze persoon al >= capaciteit is,
+          // dan op de wachtlijst zetten (geen bevestiging via de engine-scope).
+          // getConfirmedCount telt deze rij nu nog niet (assessment_response_id is
+          // nog NULL), dus dit is de telling zónder deze persoon.
+          let overflow = false;
+          if (!willBeCancelled && !isIncomplete && att.status === 'aangemeld' && att.event_id) {
+            try {
+              const { data: ev } = await supabaseAdmin
+                .from('events').select('capacity').eq('id', att.event_id).maybeSingle();
+              const cap = ev && Number.isInteger(Number(ev.capacity)) ? Number(ev.capacity) : null;
+              if (cap && cap > 0 && (await getConfirmedCount(att.event_id)) >= cap) {
+                overflow = true;
+              }
+            } catch (e) {
+              console.error('[assessment-submit] overflow-check (soft):', att.id, e?.message || e);
+            }
+          }
+
           if (willBeCancelled) {
             patch.status = 'geannuleerd';
+          } else if (overflow) {
+            patch.status = 'wachtlijst';
+            waitlisted = true;
           }
           const { error: updErr } = await supabaseAdmin
             .from('event_attendees')
@@ -290,9 +316,11 @@ export default async function handler(req, res) {
             continue;
           }
           // Rise-check: rij eindigt in CONFIRMED_STATUSES én was daar al vóór
-          // deze patch (dan miste 'ie enkel de assessment_response_id).
+          // deze patch (dan miste 'ie enkel de assessment_response_id). Overflow-
+          // rijen (nu 'wachtlijst') laten we buiten de auto-close-triplet.
           if (att.event_id
               && !willBeCancelled
+              && !overflow
               && CONFIRMED_STATUSES.includes(att.status)) {
             eventIdsToCheck.add(att.event_id);
           }
@@ -385,6 +413,9 @@ export default async function handler(req, res) {
       status        : row.status,
       submitted_at  : row.submitted_at,
       routing_result: row.routing_result,
+      // Punt 3: true als deze afronder op de wachtlijst is gezet (event al vol).
+      // Front-end kan hierop "vol/wachtlijst" tonen i.p.v. bevestiging.
+      waitlist      : waitlisted,
       copy_tier     : scored.copy_tier,
       copy_text     : scored.copy_text,
       skill_score   : scored.skill_score,
