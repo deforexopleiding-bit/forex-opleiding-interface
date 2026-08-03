@@ -125,13 +125,17 @@ export async function getOpenEventsWithSpace({ niveau = null, limit = OPEN_EVENT
   if (evErr) throw new Error('open events select: ' + evErr.message);
   if (!events || events.length === 0) return [];
 
-  // 2) Confirmed counts per event in 1 round-trip — Fase 1 semantiek
-  // (status IN CONFIRMED_STATUSES AND assessment_response_id IS NOT NULL).
+  // 2) Confirmed counts per event in 1 round-trip — Fase 1 semantiek, exact
+  // gelijk aan getConfirmedCount: is_test = false AND status IN
+  // CONFIRMED_STATUSES AND assessment_response_id IS NOT NULL. Zonder de
+  // is_test-filter telde de kiezer test-attendees mee en toonde 'Vol' terwijl
+  // de strikte telling (badge + website_events) nog plek had.
   const eventIds = events.map((e) => e.id);
   const { data: countRows, error: cntErr } = await supabaseAdmin
     .from('event_attendees')
     .select('event_id')
     .in('event_id', eventIds)
+    .eq('is_test', false)
     .in('status', CONFIRMED_STATUSES)
     .not('assessment_response_id', 'is', null);
   if (cntErr) {
