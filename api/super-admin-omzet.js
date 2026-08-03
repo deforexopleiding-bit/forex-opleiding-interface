@@ -34,6 +34,23 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
+// Paginatie-helper (identiek patroon als dunning-engine.fetchAllRows). Inline
+// gehouden om cross-file import naar dunning-scope te vermijden.
+const PAGE_SIZE = 1000;
+const PAGE_HARD_CAP = 20_000;
+async function fetchAllRows(buildQuery) {
+  const out = [];
+  for (let from = 0; from < PAGE_HARD_CAP; from += PAGE_SIZE) {
+    const q = buildQuery();
+    const { data, error } = await q.range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    const rows = Array.isArray(data) ? data : [];
+    if (rows.length) out.push(...rows);
+    if (rows.length < PAGE_SIZE) break;
+  }
+  return out;
+}
+
 function dayStr(d) {
   const yy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -99,15 +116,37 @@ export default async function handler(req, res) {
   const groupBy = ['day', 'week', 'month'].includes(req.query?.group_by) ? req.query.group_by : 'month';
 
   try {
-    // 1) Deals in periode via TL-accepted_at (fallback: signed_at).
-    const { data: deals, error: dErr } = await supabaseAdmin
-      .from('deals')
-      .select('id, customer_id, total_amount, discount_percentage, status, tl_quotation_status, tl_quotation_accepted_at, tl_quotation_signed_at, traject_variant_id, source, archived_at')
-      .is('archived_at', null)
-      .limit(5000);
-    if (dErr) throw new Error('deals: ' + dErr.message);
+    // 1) Deals in periode via TL-accepted_at OF (fallback) signed_at.
+    // ── FIX PUNT 1 (dashboard-cijfer 0-bug, aug 2026) ──
+    // Vóór deze wijziging fetchden we tot 5000 non-archived deals zonder
+    // ORDER BY en filterden client-side op periode. Bij groeiende deals-tabel
+    // (>5000 rijen) viel PostgREST er af op willekeurige rijen → recente
+    // deals vielen soms buiten scope → losse verkopen/trajecten 0 terwijl
+    // de deal wél getekend was in de periode.
+    //
+    // Nu: scope de fetch al server-side op periode-range met een OR-clause
+    // over accepted_at én signed_at. Pagineer voor de zeldzame edge case
+    // dat >1000 deals in één periode getekend zijn (PostgREST default-cap).
+    const rangeFrom = `${from}T00:00:00.000Z`;
+    const rangeToExclusive = new Date(`${to}T23:59:59.999Z`).toISOString();
+    const dealsInPeriod = await fetchAllRows(() =>
+      supabaseAdmin
+        .from('deals')
+        .select('id, customer_id, total_amount, discount_percentage, status, tl_quotation_status, tl_quotation_accepted_at, tl_quotation_signed_at, traject_variant_id, source, archived_at')
+        .is('archived_at', null)
+        .or(
+          `and(tl_quotation_accepted_at.gte.${rangeFrom},tl_quotation_accepted_at.lte.${rangeToExclusive}),` +
+          `and(tl_quotation_signed_at.gte.${rangeFrom},tl_quotation_signed_at.lte.${rangeToExclusive})`
+        )
+        .order('tl_quotation_accepted_at', { ascending: false, nullsFirst: false })
+    );
 
-    const acceptedInPeriod = (deals || []).filter((d) => {
+    // Verdere client-side filter: strict inPeriod op de canonical signed-date
+    // (accepted_at wint) + defensieve check. Dedupt niet — DB-unique-key
+    // (deals.id) garandeert al unieke rijen; de OR-clause kan bij overlap
+    // (beide velden in periode) dezelfde rij returnen maar PostgREST doet
+    // dedup op primary key.
+    const acceptedInPeriod = (dealsInPeriod || []).filter((d) => {
       const signed = d.tl_quotation_accepted_at || d.tl_quotation_signed_at;
       return signed && inPeriod(signed, from, to);
     });

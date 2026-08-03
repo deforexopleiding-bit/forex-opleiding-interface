@@ -17,14 +17,16 @@
 //     overig: { count, deep_link }   // niet in tegel — subtiele bewaker
 //   }
 //
-// Bucket-mapping (goedgekeurd door Jeffrey 2026-08-01):
-//   - 7-daagse   → leads.soort = '7-daagse'
-//   - Event      → follow_up_leads.source = 'event'   (aparte tabel)
-//   - Webinar    → leads.soort = 'webinar'
-//   - Mini cursus → leads.soort = 'minicursus'
-//   - Overig     → alles waar leads.soort NIET in de 3 leads-buckets valt
-//                  (student, NULL, of onbekend). Event zit niet in leads-tabel
-//                  dus valt hier per definitie niet onder.
+// Bucket-mapping (goedgekeurd door Jeffrey 2026-08-01, event-bucket herzien 2026-08-03):
+//   - 7-daagse         → leads.soort = '7-daagse'
+//   - Event-aanmeldingen → event_attendees (echte inschrijvingen — dashboard-fix
+//                          #1069, was voorheen follow_up_leads.source='event' →
+//                          telde sales-followup leads i.p.v. aanmeldingen)
+//   - Webinar          → leads.soort = 'webinar'
+//   - Mini cursus       → leads.soort = 'minicursus'
+//   - Overig           → alles waar leads.soort NIET in de 3 leads-buckets valt
+//                        (student, NULL, of onbekend). Event zit niet in leads-tabel
+//                        dus valt hier per definitie niet onder.
 //
 // Periode-filter: `aangemaakt` op leads, `created_at` op follow_up_leads.
 // Permission: dashboard.module.access (gelijk aan super-admin-omzet).
@@ -51,14 +53,18 @@ async function countLeadsBySoort(soort, fromIso, toIso) {
   return count || 0;
 }
 
-async function countFollowUpLeadsEvent(fromIso, toIso) {
+async function countEventAttendees(fromIso, toIso) {
+  // Telt ECHTE event-aanmeldingen (event_attendees.created_at in periode),
+  // niet meer follow_up_leads met source='event' — dat waren
+  // sales-followup-leads uit events, niet aanmeldingen.
+  // Fix voor de dashboard-verwarring van 3 aug 2026 (getal + link wezen
+  // beide naar de verkeerde entiteit).
   const { count, error } = await supabaseAdmin
-    .from('follow_up_leads')
+    .from('event_attendees')
     .select('id', { head: true, count: 'exact' })
-    .eq('source', 'event')
     .gte('created_at', fromIso)
     .lte('created_at', toIso);
-  if (error) throw new Error(`follow_up_leads[event]: ${error.message}`);
+  if (error) throw new Error(`event_attendees: ${error.message}`);
   return count || 0;
 }
 
@@ -99,7 +105,7 @@ export default async function handler(req, res) {
     // 4 buckets + overig parallel (5 head-count queries totaal).
     const [c7d, cEvent, cWebinar, cMinicursus, cOverig] = await Promise.all([
       countLeadsBySoort('7-daagse', fromIso, toIso),
-      countFollowUpLeadsEvent(fromIso, toIso),
+      countEventAttendees(fromIso, toIso),
       countLeadsBySoort('webinar', fromIso, toIso),
       countLeadsBySoort('minicursus', fromIso, toIso),
       countOverigLeads(fromIso, toIso),
@@ -110,9 +116,9 @@ export default async function handler(req, res) {
       buckets: [
         { key: '7-daagse',   label: '7-daagse',    count: c7d,
           deep_link: `/modules/leads.html?soort=7-daagse` },
-        { key: 'event',      label: 'Event',       count: cEvent,
-          deep_link: `/modules/follow-up.html?tab=leads&source=event`,
-          source: 'follow_up_leads' },
+        { key: 'event',      label: 'Event-aanmeldingen', count: cEvent,
+          deep_link: `/modules/events.html`,
+          source: 'event_attendees' },
         { key: 'webinar',    label: 'Webinar',     count: cWebinar,
           deep_link: `/modules/leads.html?soort=webinar` },
         { key: 'minicursus', label: 'Mini cursus', count: cMinicursus,
