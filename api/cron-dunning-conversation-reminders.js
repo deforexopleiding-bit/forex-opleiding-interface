@@ -71,6 +71,7 @@ import {
   loadOpenActionsByCustomer,
 } from './_lib/pending-actions-guard.js';
 import { determineStage as _determineStageHelper } from './_lib/conv-reminder-stage.js';
+import { buildReminderTemplatePayload } from './_lib/conv-reminder-template.js';
 
 // Re-export voor backward-compat met tests die deze helpers vanuit deze
 // file importeerden (pre-#888 opsplitsing). Nieuwe callers importeren
@@ -629,6 +630,40 @@ export async function processReminderRun({
           return;
         }
 
+        // ── Template-payload bouwen (Bug 2 fix — 3 aug 2026) ────────────
+        // Voor template-sends laten we het aantal params + de variabele-
+        // waarden LEIDEN DOOR whatsapp_meta_templates.meta_param_mapping.body,
+        // exact zoals cron-dunning-bulk-send en inbox-send-template al doen.
+        // Zonder deze laag stuurde de cron altijd 5 hardcoded positional
+        // params, wat 132000/132001 gaf bij templates met minder placeholders
+        // en dubbele-EUR-drift bij templates met "EUR {{n}}" hardcoded.
+        //
+        // Fallback naar oude 5-positional als template niet in DB of geen
+        // mapping — dan behoudt de send het legacy-gedrag.
+        //
+        // r1 als vrij-tekst (venster open) gebruikt dit pad NIET; die zit in
+        // buildReminder1Text hierna. Alleen r2 en r1-fallback-bij-dicht-venster
+        // gaan door de mapping-resolver.
+        let tplPayload = null;
+        if (willSendAs === 'template') {
+          tplPayload = await buildReminderTemplatePayload({
+            templateName,
+            ctx: {
+              customer,
+              openInvoices,
+              // Oudste openstaande = openInvoices[0] (loadRenderContext ordent
+              // op due_date asc). Voor factuur.* single-keys in de mapping.
+              invoice: openInvoices[0] || null,
+            },
+            legacyVars: variables,
+            supabase:   supabaseAdmin,
+          });
+          if (tplPayload.warnings && tplPayload.warnings.length) {
+            console.log('[conv-reminder-cron] template-payload warnings run=' + run.id + ':',
+              tplPayload.warnings.join(' | '));
+          }
+        }
+
         // ── DRY-RUN pad: log intent, geen Meta-call, geen extra state-mutatie ──
         // De claim hierboven heeft de reminder-teller al opgehoogd (was voorheen
         // een aparte post-log update); dry-run gedraagt zich verder identiek.
@@ -647,7 +682,13 @@ export async function processReminderRun({
                   dagen_overdue: variables.DAGEN_OVERDUE,
                 }).slice(0, 200)
               : null,
+            // computeVariables-output (5 hardcoded keys) blijft in de log voor
+            // debug-context; tpl_used_variables toont wat er ECHT verstuurd zou
+            // worden op basis van de template-mapping (of legacy fallback).
             variables,
+            tpl_mode:            tplPayload ? tplPayload.mode          : null,
+            tpl_used_variables:  tplPayload ? tplPayload.usedVariables : null,
+            tpl_language:        tplPayload ? tplPayload.templateLanguage : null,
             dry_run: true,
           });
           if (stage === 'r1') summary.r1_sent++;
@@ -694,16 +735,21 @@ export async function processReminderRun({
             const r = await sendText({ to: sendTo, body, phoneNumberId: outboundPnId });
             wamid = r?.wamid || null;
           } else {
-            // Positional variables volgens KEY-CONTRACT vaste volgorde.
-            const orderedKeys = ['NAAM', 'FACTUUR_NR', 'TOTAAL_BEDRAG', 'DAGEN_OVERDUE', 'VERVAL_DATUM'];
-            const positional = orderedKeys.map(k => String(variables[k] || ''));
-            const r = await sendTemplate({
-              to: sendTo,
+            // Template-send: tplPayload is gegarandeerd niet-null in deze branch
+            // (hij wordt gebouwd wanneer willSendAs === 'template'). Bij mapping-
+            // mode → components; bij legacy-fallback → positional variables.
+            const sendArgs = {
+              to:            sendTo,
               templateName,
-              languageCode: 'nl',
-              variables: positional,
+              languageCode:  tplPayload.templateLanguage || 'nl',
               phoneNumberId: outboundPnId,
-            });
+            };
+            if (tplPayload.mode === 'mapping' && tplPayload.components) {
+              sendArgs.components = tplPayload.components;
+            } else {
+              sendArgs.variables = tplPayload.variables;
+            }
+            const r = await sendTemplate(sendArgs);
             wamid = r?.wamid || null;
           }
         } catch (metaErr) {
@@ -737,9 +783,11 @@ export async function processReminderRun({
             meta_wamid: wamid,
             body: previewBody.slice(0, 1000),
             template_name: willSendAs === 'template' ? templateName : null,
-            template_variables: willSendAs === 'template'
-              ? Object.fromEntries(['NAAM', 'FACTUUR_NR', 'TOTAAL_BEDRAG', 'DAGEN_OVERDUE', 'VERVAL_DATUM']
-                  .map((k, i) => [String(i + 1), String(variables[k] || '')]))
+            // template_variables reflecteert wat er ECHT naar Meta is gestuurd:
+            // in mapping-mode 4 keys, in legacy-mode 5. usedVariables uit de
+            // tpl-payload-helper heeft altijd de shape { '1': v, '2': v, ... }.
+            template_variables: willSendAs === 'template' && tplPayload
+              ? tplPayload.usedVariables
               : null,
             status: 'queued',
             sent_at: sentAt,
