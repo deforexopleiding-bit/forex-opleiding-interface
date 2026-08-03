@@ -62,6 +62,7 @@ import {
   getConfirmedCount,
   syncGastenlijstWebflow,
   autoCloseIfFull,
+  herevalueerCapaciteit,
 } from './_lib/event-registration.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -417,8 +418,9 @@ export default async function handler(req, res) {
 
     // 10) Side-effects.
     //   Target: recount + gastenlijst + auto-close-if-full.
-    //   Oud:    recount + gastenlijst (geen auto-reopen — capaciteit ging
-    //           omlaag; signups_closed handmatig laten staan).
+    //   Oud:    recount + gastenlijst + auto-reopen (de switch-away liet de
+    //           telling zakken; een auto_full-gesloten bron-event kan nu weer
+    //           een plek vrij hebben en moet heropenen).
     const oldEventId = attendee.event_id;
 
     let targetCount        = 0;
@@ -444,6 +446,10 @@ export default async function handler(req, res) {
       if (oldEv) {
         oldGastenlijst = await syncGastenlijstWebflow(oldEv, oldCount);
       }
+      // Auto-reopen: de switch-away maakte mogelijk een plek vrij op het oude
+      // event. herevalueerCapaciteit heropent alleen een auto_full-sluiting die
+      // nu weer plek heeft en de deadline niet is gepasseerd (self-guarded).
+      await herevalueerCapaciteit(oldEventId);
     } catch (e) {
       console.error('[event-choice-submit] old recompute:', e?.message || e);
     }
