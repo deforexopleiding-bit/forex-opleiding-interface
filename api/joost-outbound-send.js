@@ -517,8 +517,12 @@ export default async function handler(req, res) {
     const sentMessageId = inserted.id;
 
     // whatsapp_conversations last_message_at + preview (fail-soft).
+    // Gebruik de gerenderde tekst (previewBody hierboven = rendered.body).
+    // Fallback op legacy-label als render leeg was — defensief.
     {
-      const preview = ('[template] ' + template.meta_template_name).slice(0, 120);
+      const preview = previewBody
+        ? String(previewBody).slice(0, 120)
+        : ('[template] ' + template.meta_template_name).slice(0, 120);
       const { error: convUpdErr } = await supabaseAdmin
         .from('whatsapp_conversations')
         .update({ last_message_at: sentAt, last_message_preview: preview })

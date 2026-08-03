@@ -30,6 +30,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 // blijft de enige gate per conv-module.
 import { getClientIp } from './_lib/audit-customer.js';
 import { sendText, sendTemplate, sendMedia, getConfigStatus, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
+import { renderTemplatePreview } from './_lib/render-template-preview.js';
 // FIX A no-reply-reminder-bug: onze uitgaande WA-reply moet de dunning-run
 // ontpauzeren + reminder-teller resetten zodat de no-reply-cron pas opnieuw
 // begint na een NIEUWE klant-inbound. Fail-soft.
@@ -288,12 +289,34 @@ export default async function handler(req, res) {
       .single();
     if (insErr) throw new Error('message insert: ' + insErr.message);
 
-    // Conversation last_message_at + preview
-    const preview = mode === 'text'
-      ? text.slice(0, 120)
-      : (mediaKind
-          ? ('[' + mediaKind + '] ' + (mediaCaption || mediaFilename || '')).slice(0, 120)
-          : ('[template] ' + templateName).slice(0, 120));
+    // Conversation last_message_at + preview.
+    // Voor template-mode: render de body via render-template-preview zodat
+    // de inbox-lijst een leesbaar fragment toont i.p.v. '[template] naam'.
+    // Fail-soft: helper valt zelf terug op het label als template niet
+    // gevonden. Bij text/media-mode blijft de bestaande logica ongewijzigd.
+    let preview;
+    if (mode === 'text') {
+      preview = text.slice(0, 120);
+    } else if (mediaKind) {
+      preview = ('[' + mediaKind + '] ' + (mediaCaption || mediaFilename || '')).slice(0, 120);
+    } else {
+      // Template-mode: extract body-parameters uit componentendie zelf en
+      // pass ze aan de helper. templateComponents-shape:
+      //   [{ type: 'body', parameters: [{ type:'text', text: '...' }, ...] }]
+      const bodyComp = Array.isArray(templateComponents)
+        ? templateComponents.find((c) => c?.type === 'body')
+        : null;
+      const bodyParams = Array.isArray(bodyComp?.parameters) ? bodyComp.parameters : [];
+      const tplVars = bodyParams.length
+        ? Object.fromEntries(bodyParams.map((p, i) => [String(i + 1), String(p?.text ?? '')]))
+        : null;
+      const rendered = await renderTemplatePreview({
+        templateName,
+        templateVariables: tplVars,
+        supabase: supabaseAdmin,
+      });
+      preview = rendered.body.slice(0, 120);
+    }
     const { error: updErr } = await supabaseAdmin
       .from('whatsapp_conversations')
       .update({ last_message_at: nowIso, last_message_preview: preview })

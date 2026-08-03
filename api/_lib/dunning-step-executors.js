@@ -878,8 +878,14 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
   }
 
   // Conversation-preview updaten (fail-soft).
+  // Gebruik de echt gerenderde template-body (previewBody hierboven) i.p.v.
+  // het legacy-label '[template] naam'. Zo toont de inbox-lijst een leesbaar
+  // fragment van het bericht dat de klant kreeg. Fallback op het label
+  // als de render leeg was (defensief — hoort niet voor te komen).
   try {
-    const preview = ('[template] ' + template.meta_template_name).slice(0, 120);
+    const preview = previewBody
+      ? previewBody.slice(0, 120)
+      : ('[template] ' + template.meta_template_name).slice(0, 120);
     await supabaseAdmin
       .from('whatsapp_conversations')
       .update({ last_message_at: sentAt, last_message_preview: preview })
