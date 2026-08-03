@@ -6,6 +6,7 @@
 //   2. getConfirmedCount(eventId)
 //   3. syncGastenlijstWebflow(event, confirmedCount)
 //   4. autoCloseIfFull(event, confirmedCount)
+//   5. herevalueerCapaciteit(eventId)  — auto-reopen (spiegel van 4)
 //
 // Hergebruikt:
 //   - api/_lib/webflow-client.js (updateLiveFields helper)
@@ -18,7 +19,8 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { updateLiveFields } from './webflow-client.js';
-import { closeSignupsOutbound } from './event-sync-orchestrator.js';
+import { closeSignupsOutbound, reopenSignupsOutbound } from './event-sync-orchestrator.js';
+import { computeReopenDeadlineUtc } from './reopen-deadline.js';
 
 // ── Niveau-matrix ────────────────────────────────────────────────────────────
 //
@@ -285,4 +287,104 @@ export async function autoCloseIfFull(event, confirmedCount) {
     capacity  : cap,
     sync,
   };
+}
+
+// ── Auto-reopen ───────────────────────────────────────────────────────────────
+//
+// Spiegelbeeld van autoCloseIfFull. Aan te roepen wanneer de bevestigde telling
+// van een event kan zijn gezakt (switch-away, annulering / status-uit). Heropent
+// inschrijvingen ALLEEN wanneer aan ALLE voorwaarden is voldaan:
+//   - signups_closed = true
+//   - signups_closed_reason = 'auto_full'  (NOOIT 'manual'/'auto_time' — dat is
+//     een bewuste admin- of deadline-sluiting die dicht moet blijven)
+//   - status = 'published' (niet archived/draft/cancelled)
+//   - reopen-deadline nog niet verstreken (middernacht Europe/Amsterdam op de
+//     dag vóór het event) — exact dezelfde guard als het handmatige endpoint,
+//     via de gedeelde computeReopenDeadlineUtc
+//   - getConfirmedCount(eventId) < capacity  (er is echt weer plek)
+//
+// Idempotent + fail-soft: mag de aanroepende flow nooit breken. Race-safe via
+// .eq('signups_closed', true).eq('signups_closed_reason', 'auto_full') zodat een
+// gelijktijdige (her)sluiting/heropening niet dubbel flipt.
+export async function herevalueerCapaciteit(eventId) {
+  if (!eventId) return { ok: false, skipped: true, reason: 'no event id' };
+
+  const { data: ev, error: fetchErr } = await supabaseAdmin
+    .from('events')
+    .select('id, capacity, status, signups_closed, signups_closed_reason, starts_at')
+    .eq('id', eventId)
+    .maybeSingle();
+  if (fetchErr) {
+    console.error('[event-registration] herevalueerCapaciteit fetch:', fetchErr.message);
+    return { ok: false, error: fetchErr.message };
+  }
+  if (!ev) return { ok: false, skipped: true, reason: 'event not found' };
+
+  // Alleen auto_full-sluitingen heropenen — manual/auto_time blijven dicht.
+  if (ev.signups_closed !== true) {
+    return { ok: true, skipped: true, reason: 'not closed' };
+  }
+  if (ev.signups_closed_reason !== 'auto_full') {
+    return { ok: true, skipped: true, reason: `closed reason=${ev.signups_closed_reason || 'n/a'} (geen auto_full)` };
+  }
+  if (ev.status !== 'published') {
+    return { ok: true, skipped: true, reason: `status=${ev.status} (niet published)` };
+  }
+
+  const cap = Number(ev.capacity);
+  if (!Number.isInteger(cap)) {
+    return { ok: true, skipped: true, reason: 'capacity not integer' };
+  }
+
+  // Deadline-parity met het handmatige reopen-endpoint.
+  const deadlineUtc = computeReopenDeadlineUtc(ev.starts_at);
+  if (!deadlineUtc) {
+    return { ok: true, skipped: true, reason: 'geen geldige starts_at' };
+  }
+  if (new Date() >= deadlineUtc) {
+    return { ok: true, skipped: true, reason: 'reopen-deadline verstreken' };
+  }
+
+  // Er moet echt weer plek zijn.
+  const confirmedCount = await getConfirmedCount(eventId);
+  if (!(confirmedCount < cap)) {
+    return { ok: true, skipped: true, reason: 'nog vol', confirmedCount, capacity: cap };
+  }
+
+  // DB-flip, race-safe: alleen als hij NU nog auto_full-gesloten is. Velden
+  // nullen zoals het handmatige endpoint, zodat een latere close verse audit-
+  // data krijgt.
+  const { data: updated, error: updErr } = await supabaseAdmin
+    .from('events')
+    .update({
+      signups_closed           : false,
+      signups_closed_at        : null,
+      signups_closed_reason    : null,
+      signups_closed_by_user_id: null,
+    })
+    .eq('id', eventId)
+    .eq('signups_closed', true)
+    .eq('signups_closed_reason', 'auto_full')
+    .select('id')
+    .maybeSingle();
+  if (updErr) {
+    console.error('[event-registration] herevalueerCapaciteit db_update:', updErr.message);
+    return { ok: false, error: updErr.message };
+  }
+  if (!updated) {
+    // Race: iemand anders heeft 'm net heropend of (her)gesloten.
+    return { ok: true, skipped: true, reason: 'race lost - other run changed state' };
+  }
+
+  // Outbound sync (Webflow republish + GHL recompute). Fail = log + door;
+  // DB-state is al consistent, retry-cron pakt 'm via event_sync_log.
+  let sync = null;
+  try {
+    sync = await reopenSignupsOutbound(eventId);
+  } catch (syncErr) {
+    console.error('[event-registration] herevalueerCapaciteit sync:', syncErr?.message || syncErr);
+    sync = { error: syncErr?.message || 'sync exception' };
+  }
+
+  return { ok: true, reopened: true, confirmedCount, capacity: cap, sync };
 }

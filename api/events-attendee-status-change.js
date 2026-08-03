@@ -29,6 +29,7 @@ import {
   getConfirmedCount,
   syncGastenlijstWebflow,
   autoCloseIfFull,
+  herevalueerCapaciteit,
 } from './_lib/event-registration.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -176,6 +177,17 @@ export default async function handler(req, res) {
       } catch (e) {
         console.warn('[events-attendee-status-change] auto-close (soft):', e?.message || e);
       }
+    }
+
+    // Auto-reopen (breed): elke statuswijziging kan de bevestigde telling laten
+    // zakken (uit-transitie naar geannuleerd/no_show/switched/…). herevalueer-
+    // Capaciteit heropent uitsluitend een auto_full-gesloten event dat nu weer
+    // plek heeft en de reopen-deadline niet is gepasseerd (self-guarded, dus
+    // veilig om bij élke wijziging aan te roepen). Fail-soft.
+    try {
+      await herevalueerCapaciteit(row.event_id);
+    } catch (e) {
+      console.warn('[events-attendee-status-change] auto-reopen (soft):', e?.message || e);
     }
 
     return res.status(200).json({ attendee: row });
