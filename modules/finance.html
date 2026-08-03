@@ -14082,6 +14082,30 @@
     _inboxScrollToBottom(forceScroll);
   }
 
+  // Mail-mark-read: bij openen van een gesprek zetten we via IMAP het \Seen-
+  // flag op de klant-mails. We werken vanuit het CRM en openen niet meer in
+  // Outlook/webmail, dus zonder deze stap blijft de mail-badge oneindig staan.
+  // Fail-soft; endpoint returnt 200 met warning bij IMAP-issues zodat de UI
+  // nooit hangt. Client-side updaten we lokaal ook direct de teller op de
+  // conv-row zodat de badge instant verdwijnt (in plaats van te wachten op
+  // de 60s-cache-expire in email-unread-per-customer.js).
+  async function _inboxMarkEmailReadForConv(convId) {
+    const conv = (_inboxConvs || []).find((c) => c && c.id === convId);
+    if (!conv || !conv.customer_id) return;
+    const hadUnread = Number(conv.email_unread_count) > 0;
+    if (!hadUnread) return; // niks te markeren; niet unnodig IMAP-fetch
+    try {
+      await window.AgentShared.apiFetch('/api/inbox-email-mark-read', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ customer_id: conv.customer_id, module: 'finance' }),
+      });
+      // Update local state zodat badge instant verdwijnt.
+      conv.email_unread_count = 0;
+      conv.total_unread = Number(conv.unread_count) || 0;
+    } catch (_) { /* fail-soft — bij netwerk-fout blijft badge tot volgende refresh */ }
+  }
+
   async function openInboxConv(convId) {
     if (!convId) return;
     _inboxActiveConvId = convId;
@@ -14256,6 +14280,10 @@
       _inboxRenderMessages({ forceScroll: true });
       // Conv-list opnieuw laden zodat unread_count visueel resetst.
       loadInboxConvList();
+      // Ook e-mail als gelezen markeren in IMAP: we werken vanuit het CRM en
+      // openen niet meer in Outlook/webmail, dus zonder dit blijft de mail-
+      // badge oneindig staan. Fail-soft; endpoint gooit alleen warnings terug.
+      _inboxMarkEmailReadForConv(convId);
       // Klant-paneel (rechter kolom) vullen. Geen await: laat thread-render niet wachten op klant-data.
       loadInboxCustomerContext(convId);
     } catch (e) {

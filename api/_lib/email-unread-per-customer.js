@@ -47,6 +47,31 @@ export function resetEmailUnreadCache() {
 }
 
 /**
+ * Verwijder alleen de entry van 1 klant uit de cache van 1 module. Bedoeld
+ * voor de mark-read-flow: nadat we IMAP \Seen-flag hebben gezet moet de
+ * volgende getEmailUnreadByCustomerEmail-call de nieuwe stand tonen zonder
+ * dat we ALLE andere klanten in dezelfde module opnieuw moeten fetchen.
+ *
+ * Implementatie: de per-module cache-entry bevat een Map van email→count.
+ * Bij een mark-read wissen we simpelweg de count van dat email-adres (zetten
+ * op 0). Zo blijft de rest van de map ontouched en spaart de volgende
+ * getEmailUnreadByCustomerEmail-call een IMAP-fetch voor de andere klanten.
+ *
+ * @param {string} module  finance/onboarding/events
+ * @param {string} email   e-mailadres (case-insensitive)
+ * @returns {boolean}      true als de entry bestond en is gewist, false anders
+ */
+export function invalidateEmailUnreadForCustomer(module, email) {
+  const norm = String(email || '').trim().toLowerCase();
+  if (!module || !norm) return false;
+  const cached = _cache.get(module);
+  if (!cached || !cached.unreadByEmail) return false;
+  if (!cached.unreadByEmail.has(norm)) return false;
+  cached.unreadByEmail.delete(norm);
+  return true;
+}
+
+/**
  * Normaliseer email voor case-insensitive match met customers.email.
  */
 function normalizeEmail(s) {
