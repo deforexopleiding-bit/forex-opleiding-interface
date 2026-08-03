@@ -54,10 +54,9 @@ WHERE e.status = 'published'
 
 
 -- STAP 2 — NÁ-controle (draai na STAP 1). Verwacht voor 5-aug:
---   plekken=8, bezet=8, vrij=0.
--- NB: vrij blijft 0 want de strikte telling (8) = capaciteit (8). Er komt pas
--- een plek vrij als een van de 8 afgeronde-vragenlijst-attendees niet legitiem
--- is (Jeffrey verifieert welke de 8e is t.o.v. zijn eigen 7).
+--   plekken=8, bezet=7, vrij=1.
+-- (Jeffrey's eigen aanmelding staat nu op is_test=true en valt dus uit de
+--  strikte telling; 7 echte afgeronde vragenlijsten < 8 → 1 plek vrij.)
 SELECT id, titel, plekken, bezet, vrij
 FROM public.website_events
 WHERE id = '274e91b8-91da-4f1b-9245-c1620e120e59';
