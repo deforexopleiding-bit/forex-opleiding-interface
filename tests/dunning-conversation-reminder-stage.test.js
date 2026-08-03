@@ -22,7 +22,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { determineStage } from '../api/cron-dunning-conversation-reminders.js';
+// Direct import van de pure helper — de cron re-exporteert 'em, maar laadt
+// óók supabase op module-load, wat SUPABASE_URL vereist in test-env.
+import { determineStage } from '../api/_lib/conv-reminder-stage.js';
 
 const H = 60 * 60 * 1000;
 const NOW = 1_722_500_000_000; // 2024-08-01T~ish; niet relevant, alleen delta's tellen.
