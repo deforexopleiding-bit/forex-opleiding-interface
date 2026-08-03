@@ -345,6 +345,19 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
         summary.cancelled += 1;
         continue;
       }
+      // Switch-guard: is de attendee inmiddels naar een ander event geswitcht,
+      // dan mag deze (oude) run geen bevestigingen meer sturen — sluit 'm af
+      // i.p.v. door te steppen. Vangt ALLE switch-paden (interactief endpoint,
+      // admin-move, follow-up), niet alleen event-choice-submit. Wordt op het
+      // step-moment geëvalueerd, dus vóór enige send-stap draait. Alleen
+      // 'switched_to_other_event' (bewust niet 'no_show'/'geannuleerd').
+      if (attendee.status === 'switched_to_other_event') {
+        await supabaseAdmin.from('event_automation_runs')
+          .update({ status: 'cancelled', next_run_at: null, last_error: 'attendee switched event', updated_at: nowIso })
+          .eq('id', run.id);
+        summary.cancelled += 1;
+        continue;
+      }
       const { data: event } = await supabaseAdmin
         .from('events')
         .select('id, title, starts_at, ends_at, location, niveau, capacity, status')
