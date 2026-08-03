@@ -628,7 +628,13 @@ export default async function handler(req, res) {
     if (insErr) throw new Error('message insert: ' + insErr.message);
 
     // Conversation last_message_at + preview (fail-soft).
-    const preview = ('[template] ' + templateName).slice(0, 120);
+    // Gebruik de gerenderde template-tekst (previewBody hierboven, vervangen
+    // {{N}}-placeholders met resolved values) i.p.v. het legacy-label
+    // '[template] naam'. Bij leeg previewBody (bv. template zonder body_text
+    // of geen variabelen) fallback op label — defensief.
+    const preview = previewBody
+      ? String(previewBody).slice(0, 120)
+      : ('[template] ' + templateName).slice(0, 120);
     const { error: updErr } = await supabaseAdmin
       .from('whatsapp_conversations')
       .update({ last_message_at: nowIso, last_message_preview: preview })

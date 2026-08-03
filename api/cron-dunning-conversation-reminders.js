@@ -72,6 +72,7 @@ import {
 } from './_lib/pending-actions-guard.js';
 import { determineStage as _determineStageHelper } from './_lib/conv-reminder-stage.js';
 import { buildReminderTemplatePayload } from './_lib/conv-reminder-template.js';
+import { renderTemplatePreview } from './_lib/render-template-preview.js';
 
 // Re-export voor backward-compat met tests die deze helpers vanuit deze
 // file importeerden (pre-#888 opsplitsing). Nieuwe callers importeren
@@ -767,15 +768,28 @@ export async function processReminderRun({
         }
 
         // ── Persist whatsapp_messages + conv-preview ──
+        // Voor r1-vrije-tekst: buildReminder1Text is de bron van waarheid.
+        // Voor template-sends: gebruik render-template-preview zodat de body
+        // in de inbox de ECHTE tekst toont die de klant kreeg, niet het
+        // '[template] naam'-label. Fail-soft: bij helper-fout returnt de
+        // helper zelf al het legacy-label — send-flow breekt nooit.
         const sentAt = nowIso();
-        const previewBody = willSendAs === 'text'
-          ? buildReminder1Text({
-              naam: variables.NAAM,
-              factuur_nr: variables.FACTUUR_NR,
-              totaal_bedrag: variables.TOTAAL_BEDRAG,
-              dagen_overdue: variables.DAGEN_OVERDUE,
-            })
-          : ('[template] ' + templateName);
+        let previewBody;
+        if (willSendAs === 'text') {
+          previewBody = buildReminder1Text({
+            naam: variables.NAAM,
+            factuur_nr: variables.FACTUUR_NR,
+            totaal_bedrag: variables.TOTAAL_BEDRAG,
+            dagen_overdue: variables.DAGEN_OVERDUE,
+          });
+        } else {
+          const preview = await renderTemplatePreview({
+            templateName,
+            templateVariables: tplPayload?.usedVariables || null,
+            supabase: supabaseAdmin,
+          });
+          previewBody = preview.body;
+        }
         try {
           const insertRow = {
             conversation_id: conv.id,
