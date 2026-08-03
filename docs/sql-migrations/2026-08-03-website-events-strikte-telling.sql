@@ -9,10 +9,17 @@
 --     AND assessment_response_id IS NOT NULL
 -- ('switched_to_other_event' valt hier vanzelf buiten — die status telt niet mee.)
 --
+-- Twee wijzigingen t.o.v. de huidige (losse) view:
+--   (a) bezet = strikte telling (hierboven);
+--   (b) WHERE ... AND e.signups_closed = false — gesloten events verdwijnen uit
+--       de view, zodat de hoofdsite ze niet meer als boekbaar toont (gelijk aan
+--       getOpenEventsWithSpace, de canonieke funnel-telling).
+--
 -- De view staat DIRECT in Supabase (niet in een repo). Draai daarom STAP 0 eerst
--- en verzoen de SELECT-lijst + WHERE hieronder met die output. ALLEEN de
--- bezet/vrij-berekening is de bedoelde wijziging — laat kolomnamen en filters
--- verder exact gelijk aan de huidige view. Jeffrey draait dit zelf; niets gemerged.
+-- en verzoen de SELECT-lijst + de rest van de WHERE met die output. Laat kolom-
+-- namen en overige filters exact gelijk aan de huidige view; alleen de bezet-
+-- formule en de signups_closed-filter zijn de bedoelde wijziging. Jeffrey draait
+-- dit zelf; niets gemerged.
 -- ============================================================================
 
 
@@ -50,7 +57,9 @@ CROSS JOIN LATERAL (
     AND a.assessment_response_id IS NOT NULL
 ) b
 WHERE e.status = 'published'
-  AND e.starts_at > now();
+  AND e.starts_at > now()
+  AND e.signups_closed = false;   -- gesloten events niet meer als boekbaar tonen
+                                  -- (gelijk aan getOpenEventsWithSpace: .eq('signups_closed', false))
 
 
 -- STAP 2 — NÁ-controle (draai na STAP 1). Verwacht voor 5-aug:
