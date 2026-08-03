@@ -245,6 +245,9 @@ export default async function handler(req, res) {
     // runtime), dus we houden 't in het kritieke pad maar met een strakke
     // timeout. Externe calls (syncGastenlijstWebflow / autoCloseIfFull /
     // customers-lookup) blijven hierdoor niet ~10s hangen.
+    // Punt 3 — wordt true als deze afronder overflow is (event al vol) en dus op
+    // de wachtlijst komt i.p.v. bevestigd. Wordt teruggegeven in de response.
+    let waitlisted = false;
     await withTimeout((async () => {
     // Set van event_id's waar minstens 1 rij hierdoor de confirmed_count laat
     // stijgen (was: status IN CONFIRMED_STATUSES + assessment_response_id NULL;
@@ -253,11 +256,19 @@ export default async function handler(req, res) {
     // per uniek event_id de auto-close-triplet.
     const eventIdsToCheck = new Set();
     try {
-      const { data: existing, error: lookupErr } = await supabaseAdmin
+      // Guard (a) — scope de late-link. Alleen KOMENDE events (events!inner +
+      // starts_at > now), zodat de assessment nooit aan verstreken rijen van
+      // hetzelfde adres wordt gekoppeld. Kent de submit een eventId, dan ook
+      // beperken tot dat event (match op email + event_id).
+      const lateLinkNowIso = new Date().toISOString();
+      let lookupQ = supabaseAdmin
         .from('event_attendees')
-        .select('id, event_id, first_name, last_name, status')
+        .select('id, event_id, first_name, last_name, status, events!inner(starts_at)')
         .ilike('email', email)
-        .is('assessment_response_id', null);
+        .is('assessment_response_id', null)
+        .gt('events.starts_at', lateLinkNowIso);
+      if (eventId) lookupQ = lookupQ.eq('event_id', eventId);
+      const { data: existing, error: lookupErr } = await lookupQ;
       if (lookupErr) {
         console.error('[assessment-submit] late-link lookup:', lookupErr.message);
       } else if (Array.isArray(existing) && existing.length > 0) {
@@ -278,8 +289,31 @@ export default async function handler(req, res) {
           // Annuleer alleen rijen die nog op 'aangemeld' staan — operator-
           // edits (aanwezig / sale / no_show) blijven intact.
           const willBeCancelled = isIncomplete && att.status === 'aangemeld';
+
+          // Punt 3 — overflow-check: als deze 'aangemeld'-rij zou bevestigen
+          // terwijl de strikte telling EXCLUSIEF deze persoon al >= capaciteit is,
+          // dan op de wachtlijst zetten (geen bevestiging via de engine-scope).
+          // getConfirmedCount telt deze rij nu nog niet (assessment_response_id is
+          // nog NULL), dus dit is de telling zónder deze persoon.
+          let overflow = false;
+          if (!willBeCancelled && !isIncomplete && att.status === 'aangemeld' && att.event_id) {
+            try {
+              const { data: ev } = await supabaseAdmin
+                .from('events').select('capacity').eq('id', att.event_id).maybeSingle();
+              const cap = ev && Number.isInteger(Number(ev.capacity)) ? Number(ev.capacity) : null;
+              if (cap && cap > 0 && (await getConfirmedCount(att.event_id)) >= cap) {
+                overflow = true;
+              }
+            } catch (e) {
+              console.error('[assessment-submit] overflow-check (soft):', att.id, e?.message || e);
+            }
+          }
+
           if (willBeCancelled) {
             patch.status = 'geannuleerd';
+          } else if (overflow) {
+            patch.status = 'wachtlijst';
+            waitlisted = true;
           }
           const { error: updErr } = await supabaseAdmin
             .from('event_attendees')
@@ -290,9 +324,11 @@ export default async function handler(req, res) {
             continue;
           }
           // Rise-check: rij eindigt in CONFIRMED_STATUSES én was daar al vóór
-          // deze patch (dan miste 'ie enkel de assessment_response_id).
+          // deze patch (dan miste 'ie enkel de assessment_response_id). Overflow-
+          // rijen (nu 'wachtlijst') laten we buiten de auto-close-triplet.
           if (att.event_id
               && !willBeCancelled
+              && !overflow
               && CONFIRMED_STATUSES.includes(att.status)) {
             eventIdsToCheck.add(att.event_id);
           }
@@ -385,6 +421,9 @@ export default async function handler(req, res) {
       status        : row.status,
       submitted_at  : row.submitted_at,
       routing_result: row.routing_result,
+      // Punt 3: true als deze afronder op de wachtlijst is gezet (event al vol).
+      // Front-end kan hierop "vol/wachtlijst" tonen i.p.v. bevestiging.
+      waitlist      : waitlisted,
       copy_tier     : scored.copy_tier,
       copy_text     : scored.copy_text,
       skill_score   : scored.skill_score,

@@ -211,7 +211,11 @@ async function loadCandidatesForAutomation(auto, now) {
 
   let q = supabaseAdmin
     .from('event_attendees')
-    .select('id, event_id, registered_at, assessment_response_id, assessment_linked_at, status')
+    // events!inner embed: nodig om in de on_assessment_completed-tak op
+    // events.starts_at te filteren (guard b). De inner-join is verder
+    // onschadelijk — elke attendee heeft een geldige event_id-FK, dus er
+    // vallen geen rijen weg voor de overige trigger-types.
+    .select('id, event_id, registered_at, assessment_response_id, assessment_linked_at, status, events!inner(starts_at)')
     // Opt-in herontwerp: attendees met automation_enabled=false zijn stil
     // toegevoegd door admin en mogen geen automation-flow krijgen. Filter
     // hier zodat ALLE trigger-types (on_signup / time_before_event /
@@ -226,6 +230,17 @@ async function loadCandidatesForAutomation(auto, now) {
     if (newOnly) q = q.gte('registered_at', auto.enabled_at);
   } else if (auto.trigger_type === 'on_assessment_completed') {
     q = q.not('assessment_response_id', 'is', null);
+    // Capaciteits-gate: alleen bevestigen wie een bevestigde plek heeft. Overflow-
+    // rijen staan op 'wachtlijst' en vallen hier weg → géén deelnemer-bevestiging.
+    // Raakt UITSLUITEND on_assessment_completed (o.a. "Bevestiging aanmelding");
+    // on_signup/time_before_event (welkom/reminders) blijven ongemoeid. Sluit ook
+    // 'sale'/'no_show'/'geannuleerd' uit; wie eerder als 'aangemeld' al bevestigd
+    // is, krijgt door de isStepDone-idempotency geen dubbele.
+    q = q.in('status', ['aangemeld', 'aanwezig']);
+    // Guard (b) — vangnet: de motor mag NOOIT een verstreken event bevestigen.
+    // Ook als een verstreken rij ondanks guard (a) toch een assessment_response_id
+    // heeft gekregen, valt hij hier weg (events.starts_at > nu).
+    q = q.gt('events.starts_at', nowIso);
     if (newOnly) q = q.gte('assessment_linked_at', auto.enabled_at);
   } else if (auto.trigger_type === 'time_before_event') {
     if (newOnly) q = q.gte('registered_at', auto.enabled_at);
