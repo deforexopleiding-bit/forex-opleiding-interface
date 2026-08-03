@@ -215,7 +215,10 @@ async function loadCandidatesForAutomation(auto, now) {
     // events.starts_at te filteren (guard b). De inner-join is verder
     // onschadelijk — elke attendee heeft een geldige event_id-FK, dus er
     // vallen geen rijen weg voor de overige trigger-types.
-    .select('id, event_id, registered_at, assessment_response_id, assessment_linked_at, status, events!inner(starts_at)')
+    // FK-gekwalificeerd (event_attendees_event_id_fkey): event_attendees heeft
+    // TWEE FK's naar events (event_id + switched_from_event_id), dus een kaal
+    // 'events!inner' is ambigu → PGRST201. Alias blijft 'events'.
+    .select('id, event_id, registered_at, assessment_response_id, assessment_linked_at, status, events!event_attendees_event_id_fkey!inner(starts_at)')
     // Opt-in herontwerp: attendees met automation_enabled=false zijn stil
     // toegevoegd door admin en mogen geen automation-flow krijgen. Filter
     // hier zodat ALLE trigger-types (on_signup / time_before_event /

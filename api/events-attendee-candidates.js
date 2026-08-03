@@ -43,7 +43,10 @@ import { requirePermission } from './_lib/requirePermission.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const SELECT_COLUMNS = 'id, event_id, first_name, last_name, email, phone, choice_token, customer_id, events(id, title, starts_at, status)';
+// FK-gekwalificeerd (event_attendees_event_id_fkey): event_attendees heeft 2
+// FK's naar events (event_id + switched_from_event_id); een kaal 'events(...)'
+// is ambigu → PGRST201. Left-join behouden (geen !inner). Alias blijft 'events'.
+const SELECT_COLUMNS = 'id, event_id, first_name, last_name, email, phone, choice_token, customer_id, events!event_attendees_event_id_fkey(id, title, starts_at, status)';
 
 function mapRowToCandidate(r, nowMs) {
   const ev = r.events || null;
