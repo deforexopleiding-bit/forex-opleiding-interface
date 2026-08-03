@@ -29,6 +29,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { getEmailUnreadByCustomerEmail } from './_lib/email-unread-per-customer.js';
 // NOTE: Fase 2b mentor-scoping op de onboarding-tak is bewust uitgezet:
 // per ontwerp is de onboarding-inbox gedeeld voor iedereen met
 // onboarding.inbox.view (alle mentoren zien elkaars studenten-convs).
@@ -122,7 +123,7 @@ export default async function handler(req, res) {
       .select(
         'id, phone_number, display_name, customer_id, attendee_id, status, last_message_at, ' +
         'last_message_preview, unread_count, last_inbound_at, ' +
-        'customer:customers(id, first_name, last_name, company_name, is_company), ' +
+        'customer:customers(id, first_name, last_name, company_name, is_company, email), ' +
         'attendee:event_attendees!attendee_id(id, first_name, last_name, email, ' +
           'event:event_id(id, title, starts_at))',
         { count: 'exact' }
@@ -216,6 +217,35 @@ export default async function handler(req, res) {
       console.error('[inbox-conversations-list] wanbetaler-agg fail:', e?.message || e);
     }
 
+    // ── E-mail ongelezen-verrijking (gebatcht IMAP-fetch, 60s cached) ──
+    // Voor elke conv met een gekoppelde klant + email-adres: haal via IMAP-
+    // helper op hoeveel ongelezen mails er van dat adres in de module-inbox
+    // staan (\Seen-flag). Fail-safe: bij warning/error blijft email_unread
+    // gewoon 0 en de lijst rendert normaal. IMAP is bron van waarheid; wij
+    // zetten geen \Seen-flags — mailclient/webmail houdt gelezen-status bij.
+    const emailUnreadByEmail = new Map();
+    let emailUnreadWarning = null;
+    try {
+      const uniqueEmails = Array.from(new Set(
+        (data || [])
+          .map((r) => (r.customer?.email || '').trim().toLowerCase())
+          .filter(Boolean)
+      ));
+      if (uniqueEmails.length > 0) {
+        const emUn = await getEmailUnreadByCustomerEmail({
+          module:       moduleRaw,
+          filterEmails: uniqueEmails,
+        });
+        for (const [email, cnt] of emUn.unreadByEmail.entries()) {
+          emailUnreadByEmail.set(email, cnt);
+        }
+        emailUnreadWarning = emUn.warning || null;
+      }
+    } catch (e) {
+      console.error('[inbox-conversations-list] email-unread fail:', e?.message || e);
+      emailUnreadWarning = 'email-unread fetch fail';
+    }
+
     const now = Date.now();
     const items = (data || []).map(row => {
       const cust = row.customer || null;
@@ -244,6 +274,10 @@ export default async function handler(req, res) {
         if (Number.isFinite(t) && (now - t) <= TWENTY_FOUR_HOURS_MS) canSendText = true;
       }
       const agg = row.customer_id ? openInvoicesByCustomer.get(row.customer_id) : null;
+      // E-mail unread lookup — case-insensitive match op customer.email.
+      const custEmail = (cust?.email || '').trim().toLowerCase();
+      const emailUnread = custEmail ? (emailUnreadByEmail.get(custEmail) || 0) : 0;
+      const waUnread = row.unread_count || 0;
       return {
         id: row.id,
         phone_number: row.phone_number,
@@ -257,7 +291,9 @@ export default async function handler(req, res) {
         status: row.status,
         last_message_at: row.last_message_at,
         last_message_preview: row.last_message_preview,
-        unread_count: row.unread_count || 0,
+        unread_count: waUnread,                    // WA-unread (backward-compat)
+        email_unread_count: emailUnread,           // e-mail-unread (nieuw)
+        total_unread: waUnread + emailUnread,      // gecombineerd voor 1 badge
         last_inbound_at: row.last_inbound_at,
         can_send_text: canSendText,
         // Wanbetaler-info (F1). is_debtor is true zodra er >0 open facturen
@@ -273,6 +309,10 @@ export default async function handler(req, res) {
       total: count || items.length,
       configured: true,
       module: moduleRaw,
+      // Diagnostic voor de e-mail-unread-verrijking (fail-soft). Bij lege
+      // items of ontbrekende IMAP-config staat hier de reden — UI kan 'em
+      // negeren of tonen als debug-info.
+      email_unread_warning: emailUnreadWarning || undefined,
     });
   } catch (e) {
     console.error('[inbox-conversations-list]', e.message);
