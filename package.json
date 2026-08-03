@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Agency Command Center — De Forex Opleiding",
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "scripts": {
     "test": "node --import ./tests/setup.js --test tests/*.test.js"
