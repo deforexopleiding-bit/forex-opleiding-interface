@@ -38,9 +38,11 @@ test('count=0: klant stuurde 25u geleden, wij antwoorden 5u geleden → GEEN r1'
   assert.equal(stage, null, 'Wij hebben net gereageerd — reminder mag NIET');
 });
 
-test('count=0: klant stuurde 30u geleden, wij antwoorden 25u geleden → GEEN r1', () => {
-  // Zelfs als onze outbound zelf al 25u oud is, is 'ie recenter dan de
-  // klant-inbound → wij hebben gereageerd, klant is aan zet nu.
+test('count=0: klant stuurde 30u geleden, wij antwoorden 25u geleden → WEL r1 (buiten drempel)', () => {
+  // GAT 5 / Bug 1 fix (3 aug 2026): de "wij hebben net gereageerd"-guard is
+  // tijd-begrensd (default 24u). Onze outbound is 25u oud → BUITEN drempel →
+  // guard geldt niet meer → r1 mag alsnog. Klant is stil gebleven na ons
+  // antwoord, cirkel neemt over. Voorheen bleef deze klant EEUWIG paused.
   const stage = determineStage({
     run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
     convLastInboundAt: new Date(NOW - 30 * HOUR).toISOString(),
@@ -48,7 +50,7 @@ test('count=0: klant stuurde 30u geleden, wij antwoorden 25u geleden → GEEN r1
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
-  assert.equal(stage, null);
+  assert.equal(stage, 'r1', 'outbound 25u oud > 24u drempel → cirkel pakt door');
 });
 
 test('count=1: r1 verstuurd 30u geleden, wij handmatig antwoord 5u geleden → GEEN r2', () => {
@@ -146,6 +148,95 @@ test('count=0: outbound = inbound (exact tijd) → GEEN r1 (equal telt als "wij 
     nowMs: NOW,
   });
   assert.equal(stage, 'r1', 'Equal → geen guard (strikt >); acceptabele race');
+});
+
+// ── GAT 5 / Bug 1 fix: tijd-drempel (suppress_reminder_after_outbound_hours) ─
+
+test('BUG 1 FIX: count=1 + r1 30u geleden + wij antwoord 30u geleden → r2 mag door (buiten default 24u)', () => {
+  // Voorheen (absolute suppress) bleef deze klant EEUWIG paused zodra iemand
+  // via inbox handmatig had geantwoord na r1. Nu: onze outbound is 30u oud →
+  // buiten drempel → r2 vuurt alsnog. Exact het scenario van de ~15 vastzittende
+  // klanten in Query B (GEBLOKKEERD_regel59).
+  const stage = determineStage({
+    run: {
+      paused_conversation_reminder_count: 1,
+      paused_conversation_last_reminder_at: new Date(NOW - 30 * HOUR).toISOString(),
+    },
+    convLastInboundAt:  new Date(NOW - 40 * HOUR).toISOString(),
+    convLastOutboundAt: new Date(NOW - 30 * HOUR).toISOString(),
+    noReplyCfg: DEFAULT_CFG,
+    nowMs: NOW,
+  });
+  assert.equal(stage, 'r2', 'oude outbound (30u > 24u drempel) mag r2 niet meer blokkeren');
+});
+
+test('BUG 1 FIX: count=0 + inbound 25u geleden + outbound 24.5u geleden → r1 mag door (grens)', () => {
+  // Grensgeval net BUITEN de drempel: 24.5u oud > 24u drempel → guard vervalt.
+  const stage = determineStage({
+    run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
+    convLastInboundAt:  new Date(NOW - 25 * HOUR).toISOString(),
+    convLastOutboundAt: new Date(NOW - 24.5 * HOUR).toISOString(),
+    noReplyCfg: DEFAULT_CFG,
+    nowMs: NOW,
+  });
+  assert.equal(stage, 'r1');
+});
+
+test('BUG 1 FIX: count=0 + inbound 25u geleden + outbound 23u geleden → guard actief (binnen drempel)', () => {
+  // Binnen de drempel — mens heeft nog tijd, cirkel wacht.
+  const stage = determineStage({
+    run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
+    convLastInboundAt:  new Date(NOW - 25 * HOUR).toISOString(),
+    convLastOutboundAt: new Date(NOW - 23 * HOUR).toISOString(),
+    noReplyCfg: DEFAULT_CFG,
+    nowMs: NOW,
+  });
+  assert.equal(stage, null, '23u < 24u drempel → nog binnen "wij hebben net gereageerd"-venster');
+});
+
+test('BUG 1 FIX: configureerbaar — drempel op 48u → outbound 20u geleden nog binnen guard', () => {
+  // Outbound NA lastReminder én jonger dan 48u drempel → guard actief.
+  const cfg = { ...DEFAULT_CFG, suppress_reminder_after_outbound_hours: 48 };
+  const stage = determineStage({
+    run: {
+      paused_conversation_reminder_count: 1,
+      paused_conversation_last_reminder_at: new Date(NOW - 30 * HOUR).toISOString(),
+    },
+    convLastInboundAt:  new Date(NOW - 40 * HOUR).toISOString(),
+    convLastOutboundAt: new Date(NOW - 20 * HOUR).toISOString(), // na r1 + < 48u
+    noReplyCfg: cfg,
+    nowMs: NOW,
+  });
+  assert.equal(stage, null, 'met 48u-drempel is 20u-oude outbound nog binnen guard');
+});
+
+test('BUG 1 FIX: drempel 0 → guard uitgeschakeld → altijd door (nog steeds r1 na tijd)', () => {
+  const cfg = { ...DEFAULT_CFG, suppress_reminder_after_outbound_hours: 0 };
+  const stage = determineStage({
+    run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
+    convLastInboundAt:  new Date(NOW - 25 * HOUR).toISOString(),
+    convLastOutboundAt: new Date(NOW - 1 * HOUR).toISOString(), // net gestuurd
+    noReplyCfg: cfg,
+    nowMs: NOW,
+  });
+  assert.equal(stage, 'r1', 'drempel 0 → outbound-recency is irrelevant');
+});
+
+test('BUG 1 FIX: klant reageerde NA r1 blijft blocker (reply-respect is ONVERANDERD)', () => {
+  // De "klant reageerde na r1"-guard staat los van de outbound-guard en
+  // blijft absoluut — als de klant iets zegt na r1, komt er GEEN r2, ongeacht
+  // hoe lang geleden dat was. Alleen menselijke opvolging is dan gepast.
+  const stage = determineStage({
+    run: {
+      paused_conversation_reminder_count: 1,
+      paused_conversation_last_reminder_at: new Date(NOW - 30 * HOUR).toISOString(),
+    },
+    convLastInboundAt:  new Date(NOW - 5 * HOUR).toISOString(), // klant reageerde na r1
+    convLastOutboundAt: new Date(NOW - 100 * HOUR).toISOString(),
+    noReplyCfg: DEFAULT_CFG,
+    nowMs: NOW,
+  });
+  assert.equal(stage, null, 'inbound > lastReminder → altijd null, ongeacht outbound-tijd');
 });
 
 test('count=2: rz onaangeroerd door outbound-guard (resume is puur timing)', () => {
