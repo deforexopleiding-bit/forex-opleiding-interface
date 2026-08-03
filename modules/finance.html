@@ -13627,13 +13627,19 @@
     try { return new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(eur); }
     catch (_) { return '€ ' + eur.toFixed(0); }
   }
+  // Helper: WA + mail gecombineerd unread-count. total_unread wint als 'ie
+  // door de API is meegegeven; anders sommeren we WA + mail (backward-compat).
+  function _inboxUnreadCount(c) {
+    if (c && typeof c.total_unread === 'number') return c.total_unread;
+    return (Number(c?.unread_count) || 0) + (Number(c?.email_unread_count) || 0);
+  }
   function _inboxApplyClientFilters(items) {
     const s = _inboxUiState;
     return (items || []).filter((c) => {
-      if (s.onlyUnread && !(Number(c.unread_count) > 0)) return false;
-      if (s.onlyDebtor && !c.is_debtor)                  return false;
-      if (s.onlyLinked && !c.customer_id)                return false;
-      if (s.onlyUnlinked && c.customer_id)               return false;
+      if (s.onlyUnread && !(_inboxUnreadCount(c) > 0)) return false;
+      if (s.onlyDebtor && !c.is_debtor)                return false;
+      if (s.onlyLinked && !c.customer_id)              return false;
+      if (s.onlyUnlinked && c.customer_id)             return false;
       return true;
     });
   }
@@ -13645,15 +13651,15 @@
     } else if (s.sortMode === 'amount') {
       arr.sort((a, b) => (Number(b.total_open_cents || 0)) - (Number(a.total_open_cents || 0)));
     } else if (s.sortMode === 'unread_only') {
-      // Filter dan alleen unread; sortering last_message_at desc.
+      // Filter dan alleen unread (WA + mail); sortering last_message_at desc.
       return items
-        .filter((c) => Number(c.unread_count) > 0)
+        .filter((c) => _inboxUnreadCount(c) > 0)
         .sort((a, b) => String(b.last_message_at || '').localeCompare(String(a.last_message_at || '')));
     } else {
-      // default: WhatsApp-stijl — ongelezen eerst, dan nieuwste bericht.
+      // default: WhatsApp-stijl — ongelezen eerst (WA + mail), dan nieuwste bericht.
       arr.sort((a, b) => {
-        const ua = Number(a.unread_count) > 0 ? 1 : 0;
-        const ub = Number(b.unread_count) > 0 ? 1 : 0;
+        const ua = _inboxUnreadCount(a) > 0 ? 1 : 0;
+        const ub = _inboxUnreadCount(b) > 0 ? 1 : 0;
         if (ua !== ub) return ub - ua;
         return String(b.last_message_at || '').localeCompare(String(a.last_message_at || ''));
       });
@@ -13686,11 +13692,21 @@
       const phone = c.phone_number || '';
       const preview = (c.last_message_preview || '').slice(0, 80);
       const rel = fmtRelTime(c.last_message_at);
-      const unread = Number(c.unread_count) || 0;
+      // Ongelezen-badge: combineer WA + mail (email_unread_count uit IMAP-
+      // helper). total_unread is de gecombineerde teller voor 1 badge; als
+      // 'ie null is (backward-compat) valt 'ie terug op unread_count.
+      const waUnread   = Number(c.unread_count) || 0;
+      const mailUnread = Number(c.email_unread_count) || 0;
+      const unread     = Number(c.total_unread ?? (waUnread + mailUnread)) || 0;
       const initials = _inboxInitials(name, phone);
       const avColor = _inboxAvatarColor(phone);
+      // Tooltip splitst WA vs mail als er beide zijn, zodat je snel ziet wat
+      // waar staat. Bij alleen WA: bestaande simpele weergave.
+      const unreadTip = (waUnread > 0 && mailUnread > 0)
+        ? `${waUnread} WhatsApp, ${mailUnread} e-mail ongelezen`
+        : (mailUnread > 0 ? `${mailUnread} e-mail ongelezen` : `${waUnread} ongelezen`);
       const unreadBadge = unread > 0
-        ? `<span class="inbox-conv-unread">${unread}</span>`
+        ? `<span class="inbox-conv-unread" title="${esc(unreadTip)}">${unread}</span>`
         : '';
       // Status-indicator: check-icon voor 'closed' (Afgehandeld),
       // archive-icon voor 'archived' (Archief). Zichtbaar in Afgehandeld/
