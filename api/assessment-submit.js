@@ -256,11 +256,19 @@ export default async function handler(req, res) {
     // per uniek event_id de auto-close-triplet.
     const eventIdsToCheck = new Set();
     try {
-      const { data: existing, error: lookupErr } = await supabaseAdmin
+      // Guard (a) — scope de late-link. Alleen KOMENDE events (events!inner +
+      // starts_at > now), zodat de assessment nooit aan verstreken rijen van
+      // hetzelfde adres wordt gekoppeld. Kent de submit een eventId, dan ook
+      // beperken tot dat event (match op email + event_id).
+      const lateLinkNowIso = new Date().toISOString();
+      let lookupQ = supabaseAdmin
         .from('event_attendees')
-        .select('id, event_id, first_name, last_name, status')
+        .select('id, event_id, first_name, last_name, status, events!inner(starts_at)')
         .ilike('email', email)
-        .is('assessment_response_id', null);
+        .is('assessment_response_id', null)
+        .gt('events.starts_at', lateLinkNowIso);
+      if (eventId) lookupQ = lookupQ.eq('event_id', eventId);
+      const { data: existing, error: lookupErr } = await lookupQ;
       if (lookupErr) {
         console.error('[assessment-submit] late-link lookup:', lookupErr.message);
       } else if (Array.isArray(existing) && existing.length > 0) {
