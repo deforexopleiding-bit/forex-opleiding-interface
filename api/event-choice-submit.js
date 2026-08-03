@@ -395,6 +395,26 @@ export default async function handler(req, res) {
       }
     }
 
+    // 9b) Annuleer direct de openstaande automation-runs van de oude rij, zodat
+    // er geen bevestiging voor het oude event in de wachtrij achterblijft. De
+    // engine-guard in stepDueRuns vangt dit ook op (op het step-moment); dit
+    // sluit het venster meteen en houdt de audit netjes. Fail-soft: een fout
+    // hier mag de switch-response niet breken.
+    try {
+      await supabaseAdmin
+        .from('event_automation_runs')
+        .update({
+          status      : 'cancelled',
+          next_run_at : null,
+          last_error  : 'switched via choice-submit',
+          updated_at  : nowIso,
+        })
+        .eq('attendee_id', attendee.id)
+        .eq('status', 'active');
+    } catch (e) {
+      console.error('[event-choice-submit] cancel old runs:', e?.message || e);
+    }
+
     // 10) Side-effects.
     //   Target: recount + gastenlijst + auto-close-if-full.
     //   Oud:    recount + gastenlijst (geen auto-reopen — capaciteit ging
