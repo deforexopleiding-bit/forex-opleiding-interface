@@ -131,6 +131,9 @@ export default async function handler(req, res) {
   });
   let markedCount = 0;
   let warning = null;
+  let foundUids = [];       // debug — welke UIDs matchten het zoekcriterium
+  let searchedFrom = null;  // debug — welk from-adres is gezocht
+  let searchedSince = null; // debug — welke sinds-datum
   try {
     await client.connect();
     try {
@@ -138,11 +141,14 @@ export default async function handler(req, res) {
       try {
         // Zoek alle unseen mails van deze afzender sinds SINCE_DATE.
         // imapflow search syntax: { from: '<email>', unseen: true, since: <Date> }
+        searchedFrom  = custEmail;
+        searchedSince = SINCE_DATE.toISOString();
         const uids = await client.search({
           from:   custEmail,
           unseen: true,
           since:  SINCE_DATE,
         });
+        foundUids = Array.isArray(uids) ? uids.slice(0, 100) : []; // cap voor response-size
         if (Array.isArray(uids) && uids.length > 0) {
           // STORE +FLAGS \Seen op alle gevonden UIDs (batch).
           await client.messageFlagsAdd(uids, ['\\Seen'], { uid: true });
@@ -176,5 +182,15 @@ export default async function handler(req, res) {
     email: custEmail,
     marked_count: markedCount,
     ...(warning ? { warning } : {}),
+    // Debug-info voor UI / dev-tools: welk criterium is gezocht, welke UIDs
+    // zijn geraakt. Bespaart een IMAP-inspectie-ronde als je in productie
+    // ziet dat marked_count=0 terwijl je wél mails verwacht.
+    debug: {
+      searched_from: searchedFrom,
+      searched_since: searchedSince,
+      searched_mailbox: acct.user,
+      found_uids: foundUids,
+      found_uid_count: foundUids.length,
+    },
   });
 }

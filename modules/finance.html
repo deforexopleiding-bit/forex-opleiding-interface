@@ -4971,6 +4971,7 @@
                     <button class="wb-menu-item" id="inboxThreadArchiveBtn"   type="button" title="Gesprek archiveren (komt NIET terug bij nieuw bericht)" hidden style="color:#b45309"><i class="ti ti-archive"></i> Archiveren</button>
                     <button class="wb-menu-item" id="inboxThreadReopenBtn"    type="button" title="Gesprek heropenen" hidden><i class="ti ti-refresh"></i> Heropenen</button>
                     <button class="wb-menu-item" id="inboxThreadUnarchiveBtn" type="button" title="Uit archief halen"  hidden><i class="ti ti-archive-off"></i> Uit archief halen</button>
+                    <button class="wb-menu-item" id="inboxThreadMarkReadBtn"   type="button" title="Markeer alle WhatsApp + e-mail van deze klant als gelezen"><i class="ti ti-mail-check"></i> Markeer gelezen</button>
                     <button class="wb-menu-item" id="inboxThreadMarkUnreadBtn" type="button" title="Markeer als ongelezen"><i class="ti ti-mail"></i> Markeer ongelezen</button>
                     <button class="wb-menu-item" id="inboxThreadDossierBtn" type="button" title="Bekijk status — klantdossier openen" disabled><i class="ti ti-layout-sidebar-right-expand"></i> Dossier openen</button>
                     <button class="wb-menu-item" id="inboxThreadPauseBtn" type="button" title="Pauzeer de aanmaan-flow voor deze klant" style="color:#b45309"><i class="ti ti-player-pause"></i> Pauzeer aanmaan-flow</button>
@@ -14089,21 +14090,36 @@
   // nooit hangt. Client-side updaten we lokaal ook direct de teller op de
   // conv-row zodat de badge instant verdwijnt (in plaats van te wachten op
   // de 60s-cache-expire in email-unread-per-customer.js).
+  //
+  // GUARD-BELEID: we vertrouwen NIET op conv.email_unread_count > 0 als
+  // filter — die kan verouderd zijn in conv-list (60s IMAP-cache) of
+  // ontbreken bij warning-scenarios (IMAP-timeout in list-fetch). Als de
+  // klant een email-adres heeft: gewoon proberen. Server-side is de call
+  // goedkoop (single IMAP-search + optioneel STORE) en volledig fail-safe.
   async function _inboxMarkEmailReadForConv(convId) {
     const conv = (_inboxConvs || []).find((c) => c && c.id === convId);
     if (!conv || !conv.customer_id) return;
-    const hadUnread = Number(conv.email_unread_count) > 0;
-    if (!hadUnread) return; // niks te markeren; niet unnodig IMAP-fetch
     try {
-      await window.AgentShared.apiFetch('/api/inbox-email-mark-read', {
+      const r = await window.AgentShared.apiFetch('/api/inbox-email-mark-read', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ customer_id: conv.customer_id, module: 'finance' }),
       });
-      // Update local state zodat badge instant verdwijnt.
-      conv.email_unread_count = 0;
-      conv.total_unread = Number(conv.unread_count) || 0;
-    } catch (_) { /* fail-soft — bij netwerk-fout blijft badge tot volgende refresh */ }
+      const d = await r.json().catch(() => ({}));
+      // Reset local state alleen bij ok + iets gemarkeerd (of expliciet 0-teller
+      // van server). Bij netwerk-fail: laat conv.email_unread_count staan zodat
+      // volgende conv-list-refresh 'em corrigeert.
+      if (r.ok) {
+        conv.email_unread_count = 0;
+        conv.total_unread = Number(conv.unread_count) || 0;
+      }
+      // Debug in console — nodig voor de "waarom werkt 't niet"-analyses.
+      // Alleen zichtbaar in DevTools; geen UI-verstoring.
+      console.debug('[inbox-mail-mark-read]', { convId, response: d });
+    } catch (e) {
+      console.debug('[inbox-mail-mark-read] netwerk-fail:', e?.message || e);
+      /* fail-soft — badge blijft tot volgende refresh */
+    }
   }
 
   async function openInboxConv(convId) {
@@ -17512,6 +17528,57 @@
     // Master-detail navigatie: één klik van thread → lijst.
     document.getElementById('inboxBackToListBtn')?.addEventListener('click', () => {
       document.body.classList.remove('inbox-thread-open');
+    });
+
+    // Markeer alles-gelezen: WA-mark-read (unread_count → 0) + e-mail-mark-read
+    // (IMAP \Seen op alle unseen mails van deze klant) parallel. Één klik =
+    // alles schoon, ongeacht of de automatische route bij openen faalt (bv.
+    // door verouderde conv-list cache of niet-matching from-adres).
+    // Client-side reset badge instant; server-side cache-invalidate.
+    document.getElementById('inboxThreadMarkReadBtn')?.addEventListener('click', async () => {
+      if (!_inboxActiveConvId) return;
+      const btn = document.getElementById('inboxThreadMarkReadBtn');
+      if (btn) btn.disabled = true;
+      const conv = (_inboxConvs || []).find((c) => c && c.id === _inboxActiveConvId);
+      // Parallel: WA-mark-read (bestaande endpoint) + e-mail-mark-read (nieuw).
+      // Beide fail-soft — één faalt zonder de ander te blokkeren.
+      const waPromise = window.AgentShared.apiFetch('/api/inbox-mark-read', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ conversation_id: _inboxActiveConvId }),
+      }).then((r) => r.json().catch(() => ({}))).catch((e) => ({ error: e?.message || 'wa fail' }));
+
+      const mailPromise = (conv && conv.customer_id)
+        ? window.AgentShared.apiFetch('/api/inbox-email-mark-read', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ customer_id: conv.customer_id, module: 'finance' }),
+          }).then((r) => r.json().catch(() => ({}))).catch((e) => ({ error: e?.message || 'mail fail' }))
+        : Promise.resolve({ skipped: 'geen customer_id' });
+
+      try {
+        const [waRes, mailRes] = await Promise.all([waPromise, mailPromise]);
+        // Client-side reset zodat badge direct naar 0 gaat (ongeacht cache).
+        if (conv) {
+          conv.unread_count       = 0;
+          conv.email_unread_count = 0;
+          conv.total_unread       = 0;
+        }
+        const mailCount = Number(mailRes?.marked_count) || 0;
+        const mailWarn  = mailRes?.warning ? ' (mail: ' + mailRes.warning + ')' : '';
+        window.AgentShared?.showToast?.(
+          `Gemarkeerd als gelezen — WhatsApp + ${mailCount} e-mail${mailCount === 1 ? '' : 's'}.${mailWarn}`,
+          'success',
+        );
+        // Debug in console voor troubleshooting.
+        console.debug('[inbox-mark-read-all]', { waRes, mailRes });
+        // Herlaad de conv-list zodat de badges server-side ook kloppen.
+        loadInboxConvList();
+      } catch (e) {
+        window.AgentShared?.showToast?.('Markeren mislukt: ' + (e?.message || 'onbekend'), 'error');
+      } finally {
+        if (btn) btn.disabled = false;
+      }
     });
 
     // Markeer-als-ongelezen: zet unread_count > 0 via POST /api/inbox-mark-unread
