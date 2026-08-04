@@ -230,6 +230,12 @@ async function loadCandidatesForAutomation(auto, now) {
 
   const newOnly = auto.enroll_mode === 'new_only' && auto.enabled_at;
   if (auto.trigger_type === 'on_signup') {
+    // Alleen wie de vragenlijst NOG NIET afrondde krijgt de welkom/uitnodiging.
+    // Sluit switch-created rijen uit (die hebben assessment_response_id al
+    // gekopieerd bij de switch) en is semantisch correct: een "vul de
+    // vragenlijst in"-welkom heeft geen zin voor wie 'm al invulde. Voorkomt
+    // een tweede welkom met een nieuw choice_token na een datum-switch.
+    q = q.is('assessment_response_id', null);
     if (newOnly) q = q.gte('registered_at', auto.enabled_at);
   } else if (auto.trigger_type === 'on_assessment_completed') {
     q = q.not('assessment_response_id', 'is', null);
