@@ -178,11 +178,11 @@ END $$;
 -- FEATURE 3C — RBAC: permissie 'leads.delete' (admin + super_admin-wildcard)
 -- ============================================================================
 -- Mirror van docs/sql-migrations/2026-07-28-leads-rbac.sql. super_admin heeft
--- geen grant nodig (wildcard in user_has_permission). Voeg admin (+ desgewenst
--- manager) toe. Idempotent.
+-- geen grant nodig (wildcard in user_has_permission). Eis (Jeffrey): verwijderen
+-- is ALLEEN voor admin — manager krijgt 'm dus NIET. Idempotent.
+-- Wil je later manager toch toevoegen: zet 'm los met dezelfde INSERT.
 INSERT INTO public.role_permissions (role, feature_key, allowed) VALUES
-  ('admin',   'leads.delete', true),
-  ('manager', 'leads.delete', true)
+  ('admin', 'leads.delete', true)
 ON CONFLICT (role, feature_key) DO UPDATE SET allowed = EXCLUDED.allowed;
 
 
