@@ -44,10 +44,14 @@ function dayStr(d) {
 
 async function countLeadsBySoort(soort, fromIso, toIso) {
   // head:true + count:exact — geen rows opgehaald, alleen aantal.
+  // NB (herkomst-migratie): het traject-type staat sinds Feature 2 in
+  // leads.traject (leads.soort = herkomst). CASE-INSENSITIVE matchen omdat
+  // trajectwaarden gemengd zijn (bv. 'Membership'). ilike zonder %/_ = exacte,
+  // hoofdletter-ongevoelige match; de bucket-sleutels bevatten geen wildcards.
   const { count, error } = await supabaseAdmin
     .from('leads')
     .select('id', { head: true, count: 'exact' })
-    .eq('soort', soort)
+    .ilike('traject', soort)
     .gte('aangemaakt', fromIso)
     .lte('aangemaakt', toIso);
   if (error) throw new Error(`leads[${soort}]: ${error.message}`);
@@ -70,16 +74,14 @@ async function countEventAttendees(fromIso, toIso) {
 }
 
 async function countOverigLeads(fromIso, toIso) {
-  // Overig = leads waar soort NOT IN (3 bekende buckets in leads-tabel).
-  // NULL telt ook mee (soort ontbreekt = geen traject-koppeling).
-  // NB: filter met .or() voor het NULL-geval, want .not('soort', 'in', ...)
-  // vangt NULL niet op — PostgreSQL semantiek.
-  const known = ['7-daagse', 'webinar', 'minicursus'];
-  const inList = `(${known.map(s => `"${s}"`).join(',')})`;
+  // Overig = leads waar traject NOT IN (3 bekende buckets) OF traject leeg is.
+  // NULL telt ook mee (geen traject-koppeling). Sinds Feature 2 leest dit
+  // leads.traject i.p.v. leads.soort, CASE-INSENSITIVE (not.ilike), consistent
+  // met countLeadsBySoort. Nested and(...) binnen or(...) voor het NULL-geval.
   const { count, error } = await supabaseAdmin
     .from('leads')
     .select('id', { head: true, count: 'exact' })
-    .or(`soort.not.in.${inList},soort.is.null`)
+    .or('traject.is.null,and(traject.not.ilike.7-daagse,traject.not.ilike.webinar,traject.not.ilike.minicursus)')
     .gte('aangemaakt', fromIso)
     .lte('aangemaakt', toIso);
   if (error) throw new Error(`leads[overig]: ${error.message}`);
