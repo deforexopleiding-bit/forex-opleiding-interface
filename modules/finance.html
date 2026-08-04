@@ -4365,6 +4365,9 @@
     <div id="wb-sub-instellingen" hidden></div>
     <div id="wb-sub-opruimen"     hidden></div>
     <div id="wb-sub-joost"        hidden></div>
+    <!-- Brieven-overzicht (verstopt onder Instellingen). Toont alle
+         dunning_briefs met multi-select + bulk-print + bulk-mark-sent. -->
+    <div id="wb-sub-brieven"      hidden></div>
     <!-- FASE 1 herontwerp: nieuwe alleen-lezen Overzicht-host. Bestaande
          sub=overzicht (in view-dunning) blijft onaangeroerd. -->
     <div id="wb-sub-overzicht-nieuw" hidden></div>
@@ -4982,6 +4985,10 @@
                     <button class="wb-menu-item" id="inboxThreadMarkReadBtn"   type="button" title="Markeer alle WhatsApp + e-mail van deze klant als gelezen"><i class="ti ti-mail-check"></i> Markeer gelezen</button>
                     <button class="wb-menu-item" id="inboxThreadMarkUnreadBtn" type="button" title="Markeer als ongelezen"><i class="ti ti-mail"></i> Markeer ongelezen</button>
                     <button class="wb-menu-item" id="inboxThreadDossierBtn" type="button" title="Bekijk status — klantdossier openen" disabled><i class="ti ti-layout-sidebar-right-expand"></i> Dossier openen</button>
+                    <!-- Maakt handmatig een WIK-brief aan voor deze klant via /api/incasso-pre-brief.
+                         Blokkeert fail-loud bij ontbrekend postadres (422 ADDRESS_INCOMPLETE) met een
+                         toast die de missende velden noemt. Zichtbaar in het Brieven-overzicht (Instellingen). -->
+                    <button class="wb-menu-item" id="inboxThreadSendLetterBtn" type="button" title="Maak een WIK-brief aan voor deze klant (opgemaakt met adres in C5-venster)"><i class="ti ti-mail-forward"></i> Stuur een brief</button>
                     <button class="wb-menu-item" id="inboxThreadPauseBtn" type="button" title="Pauzeer de aanmaan-flow voor deze klant" style="color:#b45309"><i class="ti ti-player-pause"></i> Pauzeer aanmaan-flow</button>
                   </div>
                 </div>
@@ -7011,7 +7018,7 @@
   // (overzicht/probleemklanten/workflows/templates/geschiedenis/arrangements)
   // blijft volledig intact onder de 'overzicht' sub-tab.
   function setSubView(sub) {
-    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis', 'sandbox', 'incasso', 'crediteren', 'te-doen', 'facturen', 'instellingen', 'opruimen', 'joost', 'overzicht-nieuw', 'openacties-nieuw'];
+    const validSubs = ['vandaag', 'overzicht', 'probleemklanten', 'templates', 'workflows', 'inbox', 'actie', 'pipeline', 'arrangements', 'open-acties', 'geschiedenis', 'sandbox', 'incasso', 'crediteren', 'te-doen', 'facturen', 'instellingen', 'opruimen', 'joost', 'overzicht-nieuw', 'openacties-nieuw', 'brieven'];
     // FASE 8: default landing = 'inbox' (Gesprekken) i.p.v. 'vandaag' — de
     // Te doen-tab is verborgen uit de nav, dus daar landen zou een lege UI
     // geven. Alle oude sub-keys blijven in validSubs zodat deep-links werken.
@@ -7029,7 +7036,7 @@
     // Ronde 1 herontwerp: Acties (open-acties) en Gesprekken (inbox) zijn nu
     // primair in de .wbx-nav; ze zitten daarom niet meer onder Meer ▾.
     const MEER_SUBS  = ['vandaag', 'arrangements', 'probleemklanten', 'crediteren', 'incasso'];
-    const INST_SUBS  = ['templates', 'workflows', 'geschiedenis', 'sandbox'];
+    const INST_SUBS  = ['templates', 'workflows', 'geschiedenis', 'sandbox', 'brieven'];
     // Selector werkt zowel voor de nieuwe .wbx-nav-knoppen (direct kind,
     // data-wb-sub/data-wb-toggle) als voor de bestaande .wb-menu-btn's.
     document.querySelectorAll('#wanbetalersSubNav [data-wb-sub], #wanbetalersSubNav [data-wb-toggle]').forEach(b => {
@@ -7068,6 +7075,7 @@
     const vJoost        = document.getElementById('wb-sub-joost');
     const vOverzichtNw  = document.getElementById('wb-sub-overzicht-nieuw');
     const vOpenActiesNw = document.getElementById('wb-sub-openacties-nieuw');
+    const vBrieven      = document.getElementById('wb-sub-brieven');
     if (vInbox)        vInbox.hidden        = true;
     if (vDunning)      vDunning.hidden      = true;
     if (vOpenActies)   vOpenActies.hidden   = true;
@@ -7083,6 +7091,7 @@
     if (vJoost)        vJoost.hidden        = true;
     if (vOverzichtNw)  vOverzichtNw.hidden  = true;
     if (vOpenActiesNw) vOpenActiesNw.hidden = true;
+    if (vBrieven)      vBrieven.hidden      = true;
 
     // Bulk-multiselect leeft alleen binnen 'facturen' (Per klant) en
     // 'opruimen'. Bij switch naar een andere sub clearen we selectie +
@@ -7195,6 +7204,11 @@
       // approve/reject/restore-endpoints; nieuwe snooze-endpoint.
       if (vOpenActiesNw) vOpenActiesNw.hidden = false;
       mountActiesWerkcentrumHost();
+    } else if (sub === 'brieven') {
+      // WIK-brieven overzicht (verstopt onder Instellingen → Brieven).
+      // Multi-select tabel met bulk-print (merged PDF) en bulk-mark-sent.
+      if (vBrieven) vBrieven.hidden = false;
+      mountBrievenHost();
     } else { // overzicht (deep-link backward-compat: niet meer in de nav,
              // maar blijft functioneel).
       if (vDunning) vDunning.hidden = false;
@@ -21644,6 +21658,7 @@
     { key:'joost',     ic:'💬', label:'Joost — de toon',      desc:'Hoe Joost klanten aanspreekt en wanneer hij zelf mag antwoorden. Persona, systeem-prompt, model, autonomie per intent, arrangement-mandaat, communicatie-limieten en feature-flags.', target:'joost' },
     { key:'workflows', ic:'⏱️', label:'Wanneer starten & regels', desc:'De automatische stappen: wanneer welke aanmaning of actie afgaat.', target:'workflows' },
     { key:'templates', ic:'✉️', label:'Berichten',            desc:'Aanmaan- en briefteksten (incl. WIK-14-dagen en BE-eerste-herinnering).', target:'templates' },
+    { key:'brieven',   ic:'📬', label:'Brieven',              desc:'Alle aangemaakte WIK-brieven — status, bulk-printen (1 printjob voor N brieven), en verstuurd-markeren.', target:'brieven' },
     { key:'bureaus',   ic:'🏢', label:'Incassobureaus',       desc:'Partners (NL/BE) waar dossiers naartoe gaan. Beheer opent binnen Incasso.', target:'incasso' },
     { key:'sandbox',   ic:'🧪', label:'Testmodus',            desc:'Oefen de hele flow op een testklant — seed, simuleer, bulk, betaald markeren, crediteerronde-simulatie, reset, dry-run-schakelaar.', target:'sandbox', superAdmin:true },
     { key:'log',       ic:'📜', label:'Geschiedenis & log',   desc:'Wat er is verstuurd, gewijzigd en besloten — met tijdstempels.', target:'geschiedenis' },
@@ -21689,6 +21704,292 @@
         const resolved = (target === 'joost-admin') ? 'joost' : target;
         setSubView(resolved);
       });
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // WIK-brieven overzicht (Instellingen → Brieven).
+  // Toont alle dunning_briefs met multi-select + bulk-print (merged PDF)
+  // + bulk-mark-sent. Idempotent — herbouwt zichzelf bij elke setSubView.
+  // Data-bron: /api/dunning-briefs-list-all (met status-filter + search).
+  // ─────────────────────────────────────────────────────────────────
+  const _brievenState = {
+    loading   : false,
+    error     : null,
+    items     : [],
+    counts    : { all: 0, aangemaakt: 0, gedownload: 0, verstuurd: 0 },
+    status    : 'all',
+    search    : '',
+    selection : new Set(),
+  };
+
+  function _brievenStatusLabel(s) {
+    if (s === 'verstuurd')  return 'Verstuurd';
+    if (s === 'gedownload') return 'Gedownload';
+    return 'Aangemaakt';
+  }
+  function _brievenStatusColor(s) {
+    if (s === 'verstuurd')  return 'var(--wbx-s-paid-tx, #059669)';
+    if (s === 'gedownload') return 'var(--accent-cyan, #06b6d4)';
+    return 'var(--wbx-muted, #64748b)';
+  }
+  function _brievenFmtDate(iso) {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleString('nl-NL', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }); }
+    catch { return String(iso).slice(0, 16); }
+  }
+
+  function mountBrievenHost() {
+    const host = document.getElementById('wb-sub-brieven');
+    if (!host) return;
+    host.innerHTML = `
+      <div class="wbx-page-head">
+        <h1>Brieven</h1>
+        <p>Alle aangemaakte WIK-brieven. Vink brieven aan om er meerdere in één keer te printen (1 printjob) of als verstuurd te markeren.</p>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+        <div class="brieven-pills" role="tablist" style="display:flex;gap:6px;flex-wrap:wrap">
+          <button type="button" class="wbx-btn wbx-sm" data-brv-status="all"        aria-pressed="true">Alle <span class="brv-cnt" data-brv-cnt="all">0</span></button>
+          <button type="button" class="wbx-btn wbx-sm" data-brv-status="aangemaakt" aria-pressed="false">Aangemaakt <span class="brv-cnt" data-brv-cnt="aangemaakt">0</span></button>
+          <button type="button" class="wbx-btn wbx-sm" data-brv-status="gedownload" aria-pressed="false">Gedownload <span class="brv-cnt" data-brv-cnt="gedownload">0</span></button>
+          <button type="button" class="wbx-btn wbx-sm" data-brv-status="verstuurd"  aria-pressed="false">Verstuurd <span class="brv-cnt" data-brv-cnt="verstuurd">0</span></button>
+        </div>
+        <div style="flex:1;min-width:200px">
+          <input type="search" id="brvSearchInput" class="fin-input" placeholder="Zoek op klant of e-mail" style="width:100%">
+        </div>
+        <button type="button" id="brvRefreshBtn" class="wbx-btn wbx-sm" title="Herlaad"><i class="ti ti-refresh"></i> Herlaad</button>
+      </div>
+
+      <div id="brvBulkBar" style="display:none;position:sticky;top:0;z-index:5;background:var(--surface-1, #fff);padding:10px 12px;border:1px solid var(--wbx-border, #e2e8f0);border-radius:8px;margin-bottom:10px;box-shadow:0 2px 6px rgba(0,0,0,0.06)">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <span id="brvBulkCount" style="font-weight:600">0 geselecteerd</span>
+          <button type="button" id="brvBulkPrintBtn"    class="wbx-btn wbx-primary wbx-sm"><i class="ti ti-printer"></i> Print / Download selectie</button>
+          <button type="button" id="brvBulkMarkSentBtn" class="wbx-btn wbx-sm"><i class="ti ti-mail-check"></i> Markeer als verstuurd</button>
+          <button type="button" id="brvBulkClearBtn"    class="wbx-btn wbx-sm">Deselecteer</button>
+        </div>
+      </div>
+
+      <div id="brvTableWrap" style="overflow-x:auto;border:1px solid var(--wbx-border, #e2e8f0);border-radius:8px">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead style="background:var(--surface-2, #f8fafc);position:sticky;top:0">
+            <tr>
+              <th style="padding:8px 10px;width:36px;text-align:left"><input type="checkbox" id="brvSelectAll" title="Selecteer alle zichtbare brieven"></th>
+              <th style="padding:8px 10px;text-align:left">Klant</th>
+              <th style="padding:8px 10px;text-align:left">Aangemaakt</th>
+              <th style="padding:8px 10px;text-align:left">Status</th>
+              <th style="padding:8px 10px;text-align:left">Gedownload</th>
+              <th style="padding:8px 10px;text-align:left">Verstuurd</th>
+              <th style="padding:8px 10px;text-align:left">Door</th>
+              <th style="padding:8px 10px;text-align:left">Land</th>
+              <th style="padding:8px 10px;text-align:left">Actie</th>
+            </tr>
+          </thead>
+          <tbody id="brvTbody">
+            <tr><td colspan="9" style="padding:16px;text-align:center;color:var(--wbx-faint)">Laden…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    // Wire pills, search, refresh — allemaal 1x per mount.
+    host.querySelectorAll('[data-brv-status]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        _brievenState.status = btn.getAttribute('data-brv-status') || 'all';
+        _brievenState.selection.clear();
+        host.querySelectorAll('[data-brv-status]').forEach((b) => b.setAttribute('aria-pressed', String(b === btn)));
+        _brievenLoad();
+      });
+    });
+    const searchInput = host.querySelector('#brvSearchInput');
+    if (searchInput) {
+      let t;
+      searchInput.addEventListener('input', () => {
+        clearTimeout(t);
+        t = setTimeout(() => { _brievenState.search = searchInput.value || ''; _brievenLoad(); }, 250);
+      });
+    }
+    const refreshBtn = host.querySelector('#brvRefreshBtn');
+    if (refreshBtn) refreshBtn.addEventListener('click', () => _brievenLoad());
+
+    // Bulk-bar handlers.
+    const printBtn = host.querySelector('#brvBulkPrintBtn');
+    if (printBtn)    printBtn.addEventListener('click', _brievenBulkPrint);
+    const markBtn  = host.querySelector('#brvBulkMarkSentBtn');
+    if (markBtn)     markBtn.addEventListener('click', _brievenBulkMarkSent);
+    const clearBtn = host.querySelector('#brvBulkClearBtn');
+    if (clearBtn)    clearBtn.addEventListener('click', () => { _brievenState.selection.clear(); _brievenRenderRows(); _brievenUpdateBulkBar(); });
+
+    const selectAll = host.querySelector('#brvSelectAll');
+    if (selectAll) selectAll.addEventListener('change', (e) => {
+      const on = !!e.target.checked;
+      _brievenState.selection.clear();
+      if (on) for (const it of _brievenState.items) _brievenState.selection.add(it.id);
+      _brievenRenderRows();
+      _brievenUpdateBulkBar();
+    });
+
+    // Reset selection on mount om oude selection van vorige sub-view te wissen.
+    _brievenState.selection.clear();
+    _brievenLoad();
+  }
+
+  async function _brievenLoad() {
+    const host = document.getElementById('wb-sub-brieven');
+    if (!host) return;
+    _brievenState.loading = true;
+    _brievenState.error = null;
+    _brievenRenderRows();
+    try {
+      const url = new URL('/api/dunning-briefs-list-all', window.location.origin);
+      url.searchParams.set('status', _brievenState.status);
+      if (_brievenState.search) url.searchParams.set('search', _brievenState.search);
+      const r = await window.AgentShared.apiFetch(url.pathname + url.search);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+      _brievenState.loading = false;
+      _brievenState.items = Array.isArray(d.items) ? d.items : [];
+      _brievenState.counts = d.counts || { all: 0, aangemaakt: 0, gedownload: 0, verstuurd: 0 };
+      // Cleanup selection — verwijder items die niet meer in de lijst staan.
+      const validIds = new Set(_brievenState.items.map((i) => i.id));
+      for (const id of Array.from(_brievenState.selection)) if (!validIds.has(id)) _brievenState.selection.delete(id);
+    } catch (e) {
+      _brievenState.loading = false;
+      _brievenState.error = e?.message || 'Onbekende fout';
+    }
+    _brievenRenderCounts();
+    _brievenRenderRows();
+    _brievenUpdateBulkBar();
+  }
+
+  function _brievenRenderCounts() {
+    const host = document.getElementById('wb-sub-brieven');
+    if (!host) return;
+    host.querySelectorAll('[data-brv-cnt]').forEach((el) => {
+      const k = el.getAttribute('data-brv-cnt');
+      el.textContent = String(_brievenState.counts[k] || 0);
+    });
+  }
+
+  function _brievenRenderRows() {
+    const tbody = document.getElementById('brvTbody');
+    if (!tbody) return;
+    if (_brievenState.loading) {
+      tbody.innerHTML = `<tr><td colspan="9" style="padding:16px;text-align:center;color:var(--wbx-faint)">Laden…</td></tr>`;
+      return;
+    }
+    if (_brievenState.error) {
+      tbody.innerHTML = `<tr><td colspan="9" style="padding:16px;text-align:center;color:var(--wbx-s-inc-tx,#dc2626)">Fout: ${esc(_brievenState.error)}</td></tr>`;
+      return;
+    }
+    if (!_brievenState.items.length) {
+      tbody.innerHTML = `<tr><td colspan="9" style="padding:16px;text-align:center;color:var(--wbx-faint)">Geen brieven gevonden.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = _brievenState.items.map((it) => {
+      const checked = _brievenState.selection.has(it.id) ? 'checked' : '';
+      const dlLink  = it.download_url ? `<a href="${esc(it.download_url)}" target="_blank" rel="noopener" class="wbx-btn wbx-sm" title="Download deze brief afzonderlijk (markeert automatisch als gedownload zodra je 'em opent)">↓ PDF</a>` : '<span style="color:var(--wbx-faint);font-size:11px">bewijs niet ophaalbaar</span>';
+      return `
+        <tr data-brv-id="${esc(it.id)}" style="border-top:1px solid var(--wbx-border, #e2e8f0)">
+          <td style="padding:8px 10px"><input type="checkbox" data-brv-select="${esc(it.id)}" ${checked}></td>
+          <td style="padding:8px 10px;font-weight:500">${esc(it.customer_name || '(onbekend)')}</td>
+          <td style="padding:8px 10px;color:var(--wbx-muted)">${esc(_brievenFmtDate(it.generated_at))}</td>
+          <td style="padding:8px 10px;font-weight:600;color:${_brievenStatusColor(it.status)}">${esc(_brievenStatusLabel(it.status))}</td>
+          <td style="padding:8px 10px;color:var(--wbx-muted)">${esc(_brievenFmtDate(it.downloaded_at))}</td>
+          <td style="padding:8px 10px;color:var(--wbx-muted)">${esc(_brievenFmtDate(it.sent_at))}${it.sent_via ? ` <span style="font-size:11px;color:var(--wbx-faint)">(${esc(it.sent_via)})</span>` : ''}</td>
+          <td style="padding:8px 10px;color:var(--wbx-muted)">${esc(it.generated_by_name || '—')}</td>
+          <td style="padding:8px 10px;color:var(--wbx-muted)">${esc(it.country || '—')}</td>
+          <td style="padding:8px 10px">${dlLink}</td>
+        </tr>`;
+    }).join('');
+    // Wire checkboxes (delegation kan ook maar direct is simpeler bij nieuwe render).
+    tbody.querySelectorAll('input[data-brv-select]').forEach((cb) => {
+      cb.addEventListener('change', (e) => {
+        const id = cb.getAttribute('data-brv-select');
+        if (e.target.checked) _brievenState.selection.add(id);
+        else                  _brievenState.selection.delete(id);
+        _brievenUpdateBulkBar();
+        // Update select-all checkbox state.
+        const selectAll = document.getElementById('brvSelectAll');
+        if (selectAll) selectAll.checked = _brievenState.items.length > 0 && _brievenState.items.every((it) => _brievenState.selection.has(it.id));
+      });
+    });
+    // Sync select-all na render.
+    const selectAll = document.getElementById('brvSelectAll');
+    if (selectAll) selectAll.checked = _brievenState.items.length > 0 && _brievenState.items.every((it) => _brievenState.selection.has(it.id));
+  }
+
+  function _brievenUpdateBulkBar() {
+    const bar = document.getElementById('brvBulkBar');
+    if (!bar) return;
+    const n = _brievenState.selection.size;
+    bar.style.display = n > 0 ? '' : 'none';
+    const cnt = document.getElementById('brvBulkCount');
+    if (cnt) cnt.textContent = `${n} geselecteerd`;
+  }
+
+  async function _brievenBulkPrint() {
+    const ids = Array.from(_brievenState.selection);
+    if (ids.length === 0) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/dunning-briefs-bulk-print', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brief_ids: ids }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d?.error || 'HTTP ' + r.status);
+      }
+      // Blob → open in nieuwe tab (browser PDF-viewer → Cmd+P voor 1 printjob).
+      const blob = await r.blob();
+      const merged  = r.headers.get('X-Briefs-Merged')  || String(ids.length);
+      const skipped = r.headers.get('X-Briefs-Skipped') || '0';
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, '_blank', 'noopener');
+      if (!win) {
+        // Pop-up geblokkeerd — val terug op download.
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `wik-brieven-${merged}.pdf`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      window.AgentShared?.showToast?.(
+        `${merged} brief${merged === '1' ? '' : 'en'} klaar om te printen` + (Number(skipped) > 0 ? ` (${skipped} overgeslagen)` : ''),
+        'success'
+      );
+      _brievenState.selection.clear();
+      _brievenLoad();
+    } catch (e) {
+      window.AgentShared?.showToast?.('Print/download mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
+
+  async function _brievenBulkMarkSent() {
+    const ids = Array.from(_brievenState.selection);
+    if (ids.length === 0) return;
+    const doIt = async () => {
+      try {
+        const r = await window.AgentShared.apiFetch('/api/dunning-briefs-bulk-mark-sent', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ brief_ids: ids }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+        window.AgentShared?.showToast?.(`${d.updated || 0} brieven gemarkeerd als verstuurd` + (d.skipped ? ` (${d.skipped} overgeslagen — al eerder gemarkeerd)` : ''), 'success');
+        _brievenState.selection.clear();
+        _brievenLoad();
+      } catch (e) {
+        window.AgentShared?.showToast?.('Markeren mislukt: ' + (e?.message || 'onbekend'), 'error');
+      }
+    };
+    if (typeof wbxOpenConfirm !== 'function') return doIt();
+    wbxOpenConfirm({
+      title: 'Markeer als verstuurd per post',
+      body: `Bevestig dat je ${ids.length} brief${ids.length === 1 ? '' : 'en'} hebt geprint en verstuurd. Al eerder gemarkeerde brieven worden overgeslagen (geen dubbele verzend-datum).`,
+      confirmLabel: 'Ja, gemarkeerd',
+      dangerLevel: 'warn',
+      onConfirm: doIt,
     });
   }
 
@@ -24239,8 +24540,12 @@
         statusLine = `<span style="color:var(--wbx-s-paid-tx)">✓ Verstuurd per e-mail op ${esc(new Date(latest.sent_at).toLocaleString('nl-NL'))} naar ${esc(latest.sent_to_email || '?')}</span>`;
       } else if (latest.sent_via === 'post') {
         statusLine = `<span style="color:var(--wbx-s-paid-tx)">✓ Verstuurd per post op ${esc(new Date(latest.sent_at).toLocaleString('nl-NL'))}</span>`;
+      } else if (latest.downloaded_at) {
+        // Toevoeging: gedownload-status (tussen "aangemaakt" en "verstuurd" in).
+        // Signaal dat de brief in ieder geval geopend/geprint is; nog niet gemarkeerd verstuurd.
+        statusLine = `<span style="color:var(--accent-cyan,#06b6d4)">↓ Gedownload op ${esc(new Date(latest.downloaded_at).toLocaleString('nl-NL'))} — nog niet gemarkeerd verstuurd</span>`;
       } else {
-        statusLine = `<span style="color:var(--wbx-muted)">Nog niet verstuurd — alleen gedownload</span>`;
+        statusLine = `<span style="color:var(--wbx-muted)">Nog niet verstuurd — alleen aangemaakt</span>`;
       }
       const errLine = latest.send_error
         ? `<div style="color:var(--wbx-s-inc-tx);font-size:12px;margin-top:4px">⚠ Laatste mail-poging faalde: ${esc(latest.send_error)}</div>`
@@ -30447,6 +30752,10 @@
     // Blok 2: "→ Actie maken"-knop in thread-header opent de type-keuze popup.
     const openActionBtn = e.target.closest('#inboxThreadOpenActionBtn');
     if (openActionBtn) return _wbxGesprekActieOpen();
+    // WIK-brief handmatig aanmaken vanuit thread-header. Blokkeert fail-loud bij
+    // ontbrekend postadres (422 ADDRESS_INCOMPLETE) via _wbxSendLetterFromInbox.
+    const sendLetterBtn = e.target.closest('#inboxThreadSendLetterBtn');
+    if (sendLetterBtn) return _wbxSendLetterFromInbox();
   });
 
   // Blok 1: ⋮ dropdown in thread-header — eigen open/close (aparte namespace
@@ -30485,6 +30794,98 @@
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') _wbxThreadMoreClose();
   });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //   WIK-brief handmatig aanmaken vanuit het gesprek (thread-header ⋮ menu).
+  //
+  //   Flow:
+  //     1. Check of er een gekoppelde klant is (via _wbxF4CurrentCustId).
+  //     2. Vraag confirm met contextuele info (eerdere brief vandaag?).
+  //     3. Roep /api/incasso-pre-brief aan (bestaande WIK-brief-generator).
+  //     4. Bij 422 ADDRESS_INCOMPLETE → duidelijke actionable toast.
+  //     5. Bij 200 → PDF downloaden + toast met link naar Brieven-overzicht.
+  //
+  //   Blokkade bij ontbrekend adres is fail-loud (endpoint returned 422
+  //   voordat er iets in dunning_briefs/Storage terechtkomt).
+  // ═══════════════════════════════════════════════════════════════════════
+  async function _wbxSendLetterFromInbox() {
+    const cid = _wbxF4CurrentCustId;
+    if (!cid) return window.AgentShared?.showToast?.('Geen gekoppelde klant — koppel de conversatie eerst aan een klant', 'error');
+
+    // Pre-check: was er al een brief voor deze klant vandaag? Voorkomt dubbele
+    // brieven per ongeluk (ook t.o.v. de automatische WIK-stap in de workflow).
+    let earlierToday = null;
+    try {
+      const rl = await window.AgentShared.apiFetch('/api/dunning-briefs-list?customer_id=' + encodeURIComponent(cid));
+      const dl = await rl.json().catch(() => ({}));
+      if (rl.ok && Array.isArray(dl.items) && dl.items.length) {
+        const today = new Date().toISOString().slice(0, 10);
+        earlierToday = dl.items.find((b) => (b.generated_at || '').slice(0, 10) === today) || null;
+      }
+    } catch (_) { /* fail-soft — check is best-effort */ }
+
+    const doIt = () => _wbxSendLetterExecute(cid);
+
+    if (typeof wbxOpenConfirm !== 'function') return doIt();
+
+    const bodyLines = [];
+    if (earlierToday) {
+      const via = earlierToday.sent_via ? ` (verstuurd per ${earlierToday.sent_via})` : ' (nog niet verstuurd)';
+      bodyLines.push(`⚠ Er is vandaag al een WIK-brief voor deze klant aangemaakt${via}. Nog een brief maken kan als je specifiek een tweede exemplaar nodig hebt.`);
+    }
+    bodyLines.push('De brief wordt opgemaakt met logo + afzender + klantadres in het C5-venster + WIK-tekst en opgeslagen als juridisch bewijs. Er wordt NIETS automatisch verstuurd — je kunt hem daarna zelf printen of via het Brieven-overzicht mailen/versturen.');
+
+    wbxOpenConfirm({
+      title: 'WIK-brief aanmaken',
+      body: bodyLines.join('\n\n'),
+      confirmLabel: earlierToday ? 'Toch nog een brief maken' : 'Aanmaken',
+      dangerLevel: earlierToday ? 'warn' : 'neutral',
+      onConfirm: doIt,
+    });
+  }
+  async function _wbxSendLetterExecute(cid) {
+    // Country default NL; endpoint kiest zelf template incasso_pre_nl. We
+    // laten NIET de user kiezen NL/BE hier — de brief past template + adres
+    // aan op basis van klant-record; voor BE-klanten kan Jeffrey via de
+    // case-sheet (WIK-card) een BE-brief triggeren.
+    try {
+      const r = await window.AgentShared.apiFetch('/api/incasso-pre-brief', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_id: cid, country: 'NL' }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        // ADDRESS_INCOMPLETE = duidelijke actionable melding met de missende velden.
+        // Deze case is fail-loud: er is NIETS opgeslagen in dunning_briefs/Storage.
+        if (d?.code === 'ADDRESS_INCOMPLETE') {
+          const missing = Array.isArray(d.missing_fields) ? d.missing_fields.join(', ') : '';
+          window.AgentShared?.showToast?.(
+            'Adres onvolledig — geen brief aangemaakt. ' +
+            (missing ? `Ontbreekt: ${missing}. ` : '') +
+            'Vul aan in TeamLeader (hourly sync) of via het klantdossier > adres.',
+            'warning'
+          );
+          return;
+        }
+        throw new Error(d?.error || 'HTTP ' + r.status);
+      }
+      // Brief bestaat + is bewaard. Download 'em voor gebruiker.
+      const blob = await r.blob();
+      const briefId = r.headers.get('X-Brief-Id') || '';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `WIK-brief_${cid.slice(0, 8)}.pdf`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      window.AgentShared?.showToast?.(
+        'Brief aangemaakt + opgeslagen als bewijs. Zichtbaar in Instellingen → Brieven.',
+        'success'
+      );
+    } catch (e) {
+      window.AgentShared?.showToast?.('Brief aanmaken mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  }
 
   async function _wbxF4CreateFollowup() {
     const cid = _wbxF4CurrentCustId;
