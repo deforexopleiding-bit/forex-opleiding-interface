@@ -14005,6 +14005,30 @@
     if (skelEl) skelEl.hidden = true;
   }
 
+  // Media-type helpers voor bubble-fallback labels. Gebruikt op alle plekken
+  // waar een bericht met alleen media (geen tekst-caption) getoond wordt en
+  // waar er geen inline media-render is (mini-previews in dossier / pipeline
+  // / case-sheet). De main-thread render kent inline `<img>` / `<video>` /
+  // `<audio>` / doc-link — daar wordt `_mediaTypeIcon`/`Label` alléén als
+  // placeholder-fallback gebruikt (Meta media-id verlopen, download failde).
+  function _mediaTypeIcon(t) {
+    const map = { image:'🖼', sticker:'🖼', video:'🎥', audio:'🎵', document:'📄', voice:'🎤' };
+    return map[String(t || '').toLowerCase()] || '📎';
+  }
+  function _mediaTypeLabel(t) {
+    const map = { image:'afbeelding', sticker:'sticker', video:'video', audio:'audio', document:'document', voice:'spraakbericht' };
+    return map[String(t || '').toLowerCase()] || 'bijlage';
+  }
+  // Compacte fallback-tekst voor mini-preview bubbles (dossier/pipeline/
+  // case-sheet). Voor main-thread NIET gebruikt — daar is aparte
+  // mediaHtml-render die de img/doc inline toont.
+  function _messageBodyOrMediaPreview(m) {
+    if (m.body) return m.body;
+    if (m.template_name) return '[template] ' + m.template_name;
+    if (m.media_type) return _mediaTypeIcon(m.media_type) + ' ' + _mediaTypeLabel(m.media_type);
+    return '';
+  }
+
   function _inboxRenderMessages(opts) {
     const forceScroll = !!(opts && opts.forceScroll);
     const wrap = document.getElementById('inboxMessages');
@@ -14033,7 +14057,25 @@
       // ofwel meta_template_name veld in payload. Toon "via template" badge bij outgoing.
       const tplName = m.template_name || m.meta_template_name || null;
       const isTpl = out && (m.type === 'template' || !!tplName);
-      const rawBody = m.body || (tplName ? ('[template] ' + tplName) : (m.media_type ? ('[' + m.media_type + ']') : ''));
+      // Body-fallback: was `m.body || tpl || '[image]'`. Bug: bij media-msgs
+      // zonder caption zag de user `[image]`-tekst ipv de img zelf (mediaBlock
+      // rendert wel, maar de body-tekst blijft óók staan). Fix:
+      //   * heeft media met bruikbare URL → body = m.body || '' (alleen
+      //     caption; mediaHtml doet visuele render)
+      //   * heeft media zonder URL (placeholder / verlopen) → body = m.body
+      //     || '' (mediaHtml-else-branch toont "bijlage laadt/niet meer
+      //     beschikbaar")
+      //   * heeft geen media, wel template → body = '[template] <naam>'
+      //   * default → body = m.body || ''
+      const hasMedia = !!m.media_type;
+      let rawBody;
+      if (hasMedia) {
+        rawBody = m.body || ''; // caption alleen, of leeg (media_html spreekt)
+      } else if (tplName) {
+        rawBody = '[template] ' + tplName;
+      } else {
+        rawBody = m.body || '';
+      }
       // Sanitize: strip \r, collapse 3+ opeenvolgende \n naar maximaal 2, trim.
       // Inbound payload (api/inbox-webhook.js) wordt onbewerkt opgeslagen, dus
       // trailing whitespace/newlines inflated de bubble vertikaal. Client-side
@@ -14084,8 +14126,17 @@
           mediaHtml = `<a href="${esc(url)}" target="_blank" rel="noopener">Bijlage openen (${esc(m.media_type)})</a>`;
         }
       } else if (m.media_type && (!m.media_url || /^meta-media-id:/i.test(m.media_url || ''))) {
-        // Media nog niet gedownload (webhook nog in flight of gefaald).
-        mediaHtml = `<div style="font-size:12px;color:var(--wbx-faint,#94a3b8);font-style:italic">[${esc(m.media_type)}] — bijlage laadt…</div>`;
+        // Media-URL ontbreekt of is nog de `meta-media-id:`-placeholder.
+        // Twee scenario's op basis van berichtouderdom:
+        //   * Vers (< 1u oud): download-cron nog aan het werk → "laadt…"
+        //   * Ouder: Meta CDN heeft de bytes weg (5-7 dagen TTL) → definitief
+        //     verloren. Nette melding i.p.v. eeuwig "laadt…"-hoop.
+        const ageMs = m.created_at ? (Date.now() - new Date(m.created_at).getTime()) : 0;
+        const isFresh = ageMs > 0 && ageMs < 3600_000; // < 1 uur
+        const label = _mediaTypeLabel(m.media_type);
+        mediaHtml = isFresh
+          ? `<div style="font-size:12px;color:var(--wbx-faint,#94a3b8);font-style:italic">${_mediaTypeIcon(m.media_type)} ${esc(label)} — bijlage laadt…</div>`
+          : `<div style="font-size:12px;color:var(--wbx-faint,#94a3b8);font-style:italic">${_mediaTypeIcon(m.media_type)} ${esc(label)} niet meer beschikbaar</div>`;
       }
       const textLine = body
         ? `<span class="bubble-text">${esc(body)}<span class="meta-phantom" aria-hidden="true">${esc(time)}${receiptSpacer}</span></span>`
@@ -23756,7 +23807,7 @@
       chatBubbles = c.messages.slice(-8).map((m) => {
         const dir = m.direction === 'outbound' ? 'wbx-out' : 'wbx-in';
         const time = _pipeFmtDateTime(m.created_at || m.sent_at);
-        const body = m.body || (m.template_name ? `[template] ${m.template_name}` : (m.media_type ? `[${m.media_type}]` : ''));
+        const body = _messageBodyOrMediaPreview(m);
         return `<div class="wbx-msg ${dir}">${esc(body)}<span class="wbx-t">${esc(time)}</span></div>`;
       }).join('');
     }
@@ -25978,7 +26029,7 @@
       const bubbles = lastMsgs.map((m) => {
         const dir = m.direction === 'outbound' ? 'outbound' : 'inbound';
         const time = _pipeFmtDateTime(m.created_at || m.sent_at);
-        const body = m.body || (m.template_name ? `[template] ${m.template_name}` : (m.media_type ? `[${m.media_type}]` : ''));
+        const body = _messageBodyOrMediaPreview(m);
         return `<div class="case-chat-msg ${dir}"><div style="white-space:pre-wrap;word-wrap:break-word">${esc(body)}</div><div class="case-chat-meta">${esc(time)}</div></div>`;
       }).join('');
       const windowBadge = c.canSend
@@ -29021,7 +29072,7 @@
     const bubbles = conv.messages.map((m) => {
       const dir = m.direction === 'outbound' ? 'outbound' : 'inbound';
       const time = _pipeFmtDateTime(m.created_at || m.sent_at);
-      const body = m.body || (m.template_name ? `[template] ${m.template_name}` : (m.media_type ? `[${m.media_type}]` : ''));
+      const body = _messageBodyOrMediaPreview(m);
       return `<div class="pipe-chat-msg ${dir}">
         <div style="white-space:pre-wrap;word-wrap:break-word">${esc(body)}</div>
         <div class="pipe-chat-meta">${esc(time)}</div>
