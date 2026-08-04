@@ -13873,14 +13873,23 @@
     }
   }
 
-  // Paginering (infinite-scroll). PAGE_SIZE = 50 matcht endpoint-default;
-  // endpoint cap is 100 dus we blijven ruim binnen server-limits. Total
-  // uit endpoint-response (count:'exact') laat ons has_more afleiden.
-  const INBOX_CONV_PAGE_SIZE = 50;
-  let _inboxConvOffset       = 0;
-  let _inboxConvHasMore      = false;
+  // "Alles-in-één" fetch — sinds refactor 2026-08-04. Bij 115 conversaties
+  // in productie ≈ 90KB response, geen paginering nodig. Cap = 1000 als
+  // veiligheidsplafond; server logt warning + zet response.cap_overflow_
+  // warning zodra we hier overheen gaan (dan alsnog server-side paging
+  // herbouwen). PAGE_SIZE-naam behouden voor backward-compat met bestaande
+  // referenties elders in dit bestand; waarde is nu de cap.
+  //
+  // Historie: was PAGE_SIZE=50 met infinite-scroll. Dat gaf problemen:
+  //   * sort op MAX(WA, e-mail) werkte alleen binnen top-50
+  //   * delta-refresh had partial-response race (fresh<50 → wipe)
+  //   * initial paint kon 1 item tonen door layout-race
+  // Alles-in-één maakt al die complexiteit weg.
+  const INBOX_CONV_PAGE_SIZE = 1000;
+  let _inboxConvOffset       = 0;      // blijft = items.length na fetch
+  let _inboxConvHasMore      = false;  // altijd false (loadMore = dead code)
   let _inboxConvLoadingMore  = false;
-  let _inboxConvScrollWired  = false;
+  let _inboxConvScrollWired  = false;  // scroll-listener no-op sinds refactor
 
   // ── Diagnostiek (2026-08-04): "1 gesprek zichtbaar bij openen"-bug ────
   // Voegt gescoped console.debug logs toe zodat we kunnen zien welke code-
@@ -13929,7 +13938,18 @@
       _inboxConvs        = items;
       _inboxDiag('loadInboxConvList:ASSIGN_DONE', { convsLen: _inboxConvs.length });
       _inboxConvOffset   = items.length;
-      _inboxConvHasMore  = _inboxConvOffset < Number(d.total || 0);
+      // Cap-overflow: sinds refactor 2026-08-04 fetchen we alles in één
+      // request (cap 1000). Als total > cap, mist de UI conversaties. Toon
+      // banner + hard-set hasMore=false zodat dead-code loadMore-pad geen
+      // dubbele fetches probeert.
+      _inboxConvHasMore = false;
+      if (d.cap_overflow_warning) {
+        console.warn('[inbox-conv-list] cap-overflow:', d.cap_overflow_warning);
+        window.AgentShared?.showToast?.(
+          'Waarschuwing: er zijn meer dan ' + INBOX_CONV_PAGE_SIZE + ' gesprekken; niet alle worden getoond.',
+          'warning',
+        );
+      }
       _inboxRenderConvList();
       _wireInboxConvScrollOnce();
     } catch (e) {
@@ -13939,9 +13959,12 @@
     }
   }
 
-  // Volgende pagina appenden. Guard tegen dubbele triggers (scroll firet
-  // vaak achter elkaar) via _inboxConvLoadingMore. Stopt zodra endpoint
-  // een korte pagina levert (has_more=false).
+  // DEPRECATED sinds refactor 2026-08-04: alles-in-één fetch (cap 1000)
+  // maakt paginering overbodig. `_inboxConvHasMore` staat altijd op false
+  // dus deze functie returnt meteen. Body behouden voor rollback; scroll-
+  // listener triggert 'em nog wel maar heeft geen effect. Bij overschrijden
+  // cap komt cap_overflow_warning boven — dan is server-side paging
+  // herbouwen de juiste stap, niet deze code re-activeren.
   async function loadInboxConvListMore() {
     if (_inboxConvLoadingMore || !_inboxConvHasMore) return;
     const list = document.getElementById('inboxConvList');
@@ -15874,31 +15897,15 @@
     // Empty-response guard: bij een lege fresh-set + bestaande items op scherm
     // NIET wissen. Kan voorkomen bij een server-side race (IMAP-timeout, korte
     // cache-glitch in inbox-conversations-list, of een tussentijdse filter-
-    // mismatch). Volgende poll (6s later) corrigeert vanzelf. Zonder deze
-    // guard "verdween" de lijst en kwam pas terug bij scrollen — bewezen
-    // regressie sinds PR #1081.
+    // mismatch). Volgende poll (6s later) corrigeert vanzelf.
     if (fresh.length === 0 && _inboxConvs.length > 0) return;
 
-    // Partial-response guard: als server significant minder items retourneert
-    // dan we op scherm hebben EN de totale count ruim groter is, is 't een
-    // transient partial (cold-lambda enrichment-batch die faalde, IMAP-
-    // timeout op MAX-email-per-customer query, of race in email-unread cache
-    // priming). Zonder deze guard trok de remove-logic hierna 49 rijen weg
-    // → "gesprekkenlijst leeg bij openen" bug (bewezen: pas na scroll
-    // terug + loadInboxConvListMore werd de lijst opnieuw gevuld).
-    // Threshold: fresh < 50% van huidige top-page ÉN total >= dat huidige
-    // aantal → server is aan het downgraden, negeer deze poll.
-    const totalReported = Number(d.total || 0);
-    const topBefore = Math.min(_inboxConvs.length, INBOX_CONV_PAGE_SIZE);
-    if (
-      topBefore >= 5 &&                                   // pas relevant met >5 items in beeld
-      fresh.length < Math.floor(topBefore * 0.5) &&       // ≥50% van top-page ontbreekt
-      totalReported >= topBefore                          // server WEET dat er meer zijn
-    ) {
-      console.warn('[delta-refresh] partial-response guard: fresh=' + fresh.length + ' vs top=' + topBefore + ' total=' + totalReported + ' — skip');
-      _inboxDiag('delta:GUARD_PARTIAL', { freshLen: fresh.length, topBefore, totalReported });
-      return;
-    }
+    // Partial-response guard uit #1088 IS VERWIJDERD sinds de alles-in-één
+    // refactor (2026-08-04). Reden: er is geen page-boundary meer waardoor
+    // server een partial kan retourneren — cap 1000 dekt de hele lijst. Als
+    // total > cap treedt cap_overflow_warning op (server-side log + UI-toast
+    // bij load), niet stille partial. Delta-refresh mag nu de volledige set
+    // vervangen zonder guards die "top-page missing" detecteren.
 
     // Bouw id-based lookup van de nieuwe top-page.
     const freshById = new Map(fresh.map((it) => [it.id, it]));
