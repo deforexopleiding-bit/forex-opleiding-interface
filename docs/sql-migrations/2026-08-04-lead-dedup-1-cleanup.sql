@@ -6,7 +6,16 @@
 -- verwijzende rijen, ZODAT de UNIEKE index in DOC 2 daarna kan worden gezet.
 --
 -- Survivor per lower(email): ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC.
--- Behouden bij merge (gezette waarde wint): eigenaar_id, notitie, toestemming.
+-- Merge (consistent met upsert_lead) — vult de survivor's velden uit de hele
+-- e-mailgroep vóór de DELETE, zodat de data van de non-survivors niet verdwijnt:
+--   - interactie-data (nieuwste non-null): voornaam, achternaam, telefoon,
+--     telefoon_e164, score, kwalificatie, drempel, afwijzer, antwoorden,
+--     campagne, pagina
+--   - attributie/consent (eerste/oudste behouden): meta_event_id, ip_hash,
+--     toestemming_op; toestemming = sticky OR
+--   - CRM-eigendom: eigenaar_id/notitie = nieuwste gezette waarde;
+--     opgevolgd_op = meest recente; status = non-'nieuw' als survivor='nieuw'
+--   - interactie-DEFINITIE blijft de survivor's (traject, event_id, soort, bron)
 -- Herpoint vóór delete (beide FK's zijn ON DELETE SET NULL → herpointen behoudt
 -- de koppeling): public.lms_gebruikers.lead_id en public.berichten_log.lead_id.
 --
@@ -38,22 +47,70 @@ FROM (
 ) s
 WHERE rn = 1;
 
--- 2) Merge behouden velden van de dups naar de survivor (gezette waarde wint).
---    eigenaar_id/notitie: eerste NIET-lege waarde uit de groep.
---    toestemming: sticky OR over de hele groep.
+-- 2) Merge de non-survivor-data naar de survivor. De survivor (nieuwste
+--    interactie) is vaak een kale event-rij; zonder deze merge zou de DELETE de
+--    7-daagse-data + attributie/consent + agent-status van de dups weggooien.
+--    Omdat de survivor de hoogste bijgewerkt heeft, is de "nieuwste non-null"
+--    over de groep gelijk aan de survivor's eigen waarde als die gezet is, en
+--    anders de eerstvolgende non-null uit de groep (= vul survivor's NULLs).
 WITH agg AS (
   SELECT lower(email) AS k,
-         (array_agg(eigenaar_id) FILTER (WHERE eigenaar_id IS NOT NULL))[1]                       AS eigenaar_id,
-         (array_agg(notitie)     FILTER (WHERE notitie IS NOT NULL AND btrim(notitie) <> ''))[1]  AS notitie,
-         bool_or(COALESCE(toestemming, false))                                                    AS toestemming
+    -- interactie-data: nieuwste non-null wint
+    (array_agg(voornaam      ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE voornaam      IS NOT NULL))[1] AS voornaam,
+    (array_agg(achternaam    ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE achternaam    IS NOT NULL))[1] AS achternaam,
+    (array_agg(telefoon      ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE telefoon      IS NOT NULL))[1] AS telefoon,
+    (array_agg(telefoon_e164 ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE telefoon_e164 IS NOT NULL))[1] AS telefoon_e164,
+    (array_agg(score         ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE score         IS NOT NULL))[1] AS score,
+    (array_agg(kwalificatie  ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE kwalificatie  IS NOT NULL))[1] AS kwalificatie,
+    (array_agg(drempel       ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE drempel       IS NOT NULL))[1] AS drempel,
+    (array_agg(afwijzer      ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE afwijzer      IS NOT NULL))[1] AS afwijzer,
+    (array_agg(antwoorden    ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE antwoorden    IS NOT NULL))[1] AS antwoorden,
+    (array_agg(campagne      ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE campagne      IS NOT NULL))[1] AS campagne,
+    (array_agg(pagina        ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE pagina        IS NOT NULL))[1] AS pagina,
+    -- attributie: eerste (oudste) non-null behouden
+    (array_agg(meta_event_id ORDER BY aangemaakt ASC NULLS LAST, bijgewerkt ASC) FILTER (WHERE meta_event_id IS NOT NULL))[1] AS meta_event_id,
+    (array_agg(ip_hash       ORDER BY aangemaakt ASC NULLS LAST, bijgewerkt ASC) FILTER (WHERE ip_hash       IS NOT NULL))[1] AS ip_hash,
+    -- consent: sticky OR + eerste toestemming_op
+    bool_or(COALESCE(toestemming, false)) AS toestemming,
+    min(toestemming_op)                   AS toestemming_op,
+    -- CRM-eigendom: nieuwste gezette waarde; opgevolgd_op = meest recente
+    (array_agg(eigenaar_id ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE eigenaar_id IS NOT NULL))[1] AS eigenaar_id,
+    (array_agg(notitie     ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE notitie IS NOT NULL AND btrim(notitie) <> ''))[1] AS notitie,
+    max(opgevolgd_op) AS opgevolgd_op,
+    -- status: nieuwste non-'nieuw' uit de groep (agent-progressie behouden)
+    (array_agg(status ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE status IS NOT NULL AND status <> 'nieuw'))[1] AS status_non_nieuw
   FROM public.leads
   WHERE email IS NOT NULL AND btrim(email) <> ''
   GROUP BY lower(email)
+  HAVING count(*) > 1
 )
 UPDATE public.leads keep SET
-  eigenaar_id = COALESCE(keep.eigenaar_id, agg.eigenaar_id),
-  notitie     = COALESCE(NULLIF(btrim(keep.notitie), ''), agg.notitie),
-  toestemming = COALESCE(keep.toestemming, false) OR agg.toestemming
+  -- interactie-data (survivor's waarde blijft; NULLs worden gevuld)
+  voornaam       = agg.voornaam,
+  achternaam     = agg.achternaam,
+  telefoon       = agg.telefoon,
+  telefoon_e164  = agg.telefoon_e164,
+  score          = agg.score,
+  kwalificatie   = agg.kwalificatie,
+  drempel        = agg.drempel,
+  afwijzer       = COALESCE(agg.afwijzer,   keep.afwijzer),
+  antwoorden     = COALESCE(agg.antwoorden, keep.antwoorden),
+  campagne       = agg.campagne,
+  pagina         = agg.pagina,
+  -- attributie/consent (eerste waarde behouden; sticky)
+  meta_event_id  = agg.meta_event_id,
+  ip_hash        = agg.ip_hash,
+  toestemming    = agg.toestemming,
+  toestemming_op = agg.toestemming_op,
+  -- CRM-eigendom
+  eigenaar_id    = agg.eigenaar_id,
+  notitie        = agg.notitie,
+  opgevolgd_op   = agg.opgevolgd_op,
+  status = CASE WHEN keep.status IS DISTINCT FROM 'nieuw'
+                THEN keep.status                          -- survivor al voorbij 'nieuw'
+                ELSE COALESCE(agg.status_non_nieuw, keep.status) END
+  -- interactie-DEFINITIE (traject, event_id, soort, bron) + aangemaakt + bijgewerkt
+  -- NIET in de SET: die blijven de survivor's (nieuwste interactie).
 FROM agg
 JOIN lead_survivor sv ON sv.k = agg.k
 WHERE keep.id = sv.keep_id;
