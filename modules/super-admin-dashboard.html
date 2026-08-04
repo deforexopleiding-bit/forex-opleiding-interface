@@ -356,11 +356,19 @@
       <div class="sad-lg"><span><i style="background:var(--brand-400)"></i>Losse verkopen</span><span><i style="background:var(--accent)"></i>Abonnementen (MRR)</span></div>
       <div class="sad-prodstrip">
         <div class="sad-ps-lbl">Verkocht <span id="sadPsPeriod">deze maand</span></div>
+        <!-- Product-strip 2026-08-04: 6 tiles (was 4). TL-imports die vroeger
+             in Memberships-fallback vielen, komen nu via classifyDeal in
+             hun echte bucket (1-op-1 6/12/24/overig). 'Onbekend' toont
+             wat we niet kunnen plaatsen. Tiles renderen vanaf response;
+             als endpoint een key niet levert blijft de tile op — (0). -->
         <div class="sad-ps-grid" id="sadPsGrid">
           <div class="sad-ps"><div class="sad-ps-top" style="color:var(--brand-300)">1-op-1 · 6 mnd</div><div class="sad-ps-num" data-key="m6">—</div><div class="sad-ps-rev" data-key-rev="m6">€—</div></div>
           <div class="sad-ps"><div class="sad-ps-top" style="color:var(--accent)">1-op-1 · 12 mnd</div><div class="sad-ps-num" data-key="m12">—</div><div class="sad-ps-rev" data-key-rev="m12">€—</div></div>
           <div class="sad-ps"><div class="sad-ps-top" style="color:var(--accent-2)">1-op-1 · 24 mnd</div><div class="sad-ps-num" data-key="m24">—</div><div class="sad-ps-rev" data-key-rev="m24">€—</div></div>
-          <div class="sad-ps"><div class="sad-ps-top" style="color:var(--violet)">Memberships</div><div class="sad-ps-num" data-key="mem">—</div><div class="sad-ps-rev" data-key-rev="mem">€— MRR</div></div>
+          <div class="sad-ps"><div class="sad-ps-top" style="color:var(--brand-500)">1-op-1 · overig</div><div class="sad-ps-num" data-key="m_other">—</div><div class="sad-ps-rev" data-key-rev="m_other">€—</div></div>
+          <div class="sad-ps"><div class="sad-ps-top" style="color:var(--violet)">Membership</div><div class="sad-ps-num" data-key="mem">—</div><div class="sad-ps-rev" data-key-rev="mem">€—</div></div>
+          <div class="sad-ps"><div class="sad-ps-top" style="color:var(--accent-2)">Overig product</div><div class="sad-ps-num" data-key="other_product">—</div><div class="sad-ps-rev" data-key-rev="other_product">€—</div></div>
+          <div class="sad-ps"><div class="sad-ps-top" style="color:var(--sad-dim)">Onbekend</div><div class="sad-ps-num" data-key="unknown">—</div><div class="sad-ps-rev" data-key-rev="unknown">€—</div></div>
         </div>
         <div id="sadEdgeWarn" style="font-size:10.5px;color:var(--accent-2);margin-top:6px;display:none"></div>
       </div>
@@ -549,7 +557,10 @@ async function sadLoadOmzet() {
     document.querySelectorAll('.sad-ps-rev[data-key-rev]').forEach((el) => {
       const key = el.dataset.keyRev;
       const rev = pmap[key]?.revenue_incl_btw ?? 0;
-      el.textContent = '€' + sadFmtEur(rev) + (key === 'mem' ? ' MRR' : '');
+      // Vroeger: `mem`-tegel toonde " MRR"-suffix omdat dat een snapshot
+      // was. Sinds 2026-08-04 is `mem` gewoon de deal-waarde van
+      // membership-verkopen in de periode (event-based) — geen suffix nodig.
+      el.textContent = '€' + sadFmtEur(rev);
     });
     // Chart
     sadRenderChart(d.trend || []);

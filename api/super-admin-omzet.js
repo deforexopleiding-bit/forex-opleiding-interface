@@ -34,6 +34,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { periodRange } from './_lib/nl-period.js';
+import { classifyDeal, CATEGORY_ORDER, CATEGORY_LABELS } from './_lib/deal-classify.js';
 
 // Paginatie-helper (identiek patroon als dunning-engine.fetchAllRows). Inline
 // gehouden om cross-file import naar dunning-scope te vermijden.
@@ -287,26 +288,30 @@ export default async function handler(req, res) {
         .in('id', variantIds);
       for (const v of variants || []) variantsById.set(v.id, v);
     }
-    const productBuckets = { m6: 0, m12: 0, m24: 0, mem: 0 };
-    const productRevenue = { m6: 0, m12: 0, m24: 0, mem: 0 };
+    // Trajecten-strip classificatie (2026-08-04 gerefactored):
+    // Gebruikt shared helper api/_lib/deal-classify.js die twee-sporen doet:
+    //   * traject_variant_id gevuld → variant-lookup (nieuwe deals via wizard)
+    //   * NULL → line-item scan (TL-imports uit legacy Teamleader)
+    // E-book-regels worden genegeerd bij typebepaling; bij >1 traject-cat
+    // in één deal wint de duurste line-item.
+    //
+    // Vóór deze refactor viel elke TL-import in de 'mem'-fallback (want
+    // variant_id NULL + geen membership-naam check op line-items) → 181
+    // memberships die in werkelijkheid 1-op-1 6/12/24-programma's zijn.
+    // Zie tests/deal-classify.test.js voor 21 gedekte scenario's incl.
+    // Alpha/Gamma/Mentorship/1-1/Membership-varianten.
+    const productBuckets = Object.fromEntries(CATEGORY_ORDER.map((k) => [k, 0]));
+    const productRevenue = Object.fromEntries(CATEGORY_ORDER.map((k) => [k, 0]));
+    // Debug-teller: hoeveel deals kwamen via elke route (voor diagnose).
+    const classifySources = { variant: 0, lineitems: 0, fallback: 0 };
     for (const d of acceptedInPeriod) {
-      const v = d.traject_variant_id ? variantsById.get(d.traject_variant_id) : null;
-      const dur = v?.default_duration_months;
-      const hasSubs = (subsByDeal.get(d.id) || []).length > 0;
-      const trajectName = String(v?.trajects?.name || v?.name || '').toLowerCase();
-      const isMembership = hasSubs && (trajectName.includes('membership') || trajectName.includes('lidmaatschap') || !dur);
       const lines = linesByDeal.get(d.id) || [];
       const inclBtw = lines.length > 0 ? sumInclBtw(lines)
         : (Number(d.total_amount) || 0) * (1 - (Number(d.discount_percentage) || 0) / 100) * 1.21;
-      let key = 'mem';
-      if (!isMembership) {
-        if (dur === 6)  key = 'm6';
-        else if (dur === 12) key = 'm12';
-        else if (dur === 24) key = 'm24';
-        else key = 'mem';
-      }
-      productBuckets[key]++;
-      productRevenue[key] += inclBtw;
+      const { category, source } = classifyDeal(d, { lineItems: lines, variantById: variantsById });
+      productBuckets[category] = (productBuckets[category] || 0) + 1;
+      productRevenue[category] = (productRevenue[category] || 0) + inclBtw;
+      classifySources[source] = (classifySources[source] || 0) + 1;
     }
 
     // Trend sortering.
@@ -325,12 +330,13 @@ export default async function handler(req, res) {
         edge_deals_zonder_lineitems:    edgeDealsZonderLineitems,
       },
       trend,
-      per_product: [
-        { product_key: 'm6',  label: '1-op-1 · 6 mnd',   count: productBuckets.m6,  revenue_incl_btw: Math.round(productRevenue.m6  * 100) / 100 },
-        { product_key: 'm12', label: '1-op-1 · 12 mnd',  count: productBuckets.m12, revenue_incl_btw: Math.round(productRevenue.m12 * 100) / 100 },
-        { product_key: 'm24', label: '1-op-1 · 24 mnd',  count: productBuckets.m24, revenue_incl_btw: Math.round(productRevenue.m24 * 100) / 100 },
-        { product_key: 'mem', label: 'Memberships',      count: productBuckets.mem, revenue_incl_btw: Math.round(productRevenue.mem * 100) / 100 },
-      ],
+      // per_product respecteert CATEGORY_ORDER voor deterministische UI-render.
+      per_product: CATEGORY_ORDER.map((key) => ({
+        product_key: key,
+        label: CATEGORY_LABELS[key],
+        count: productBuckets[key] || 0,
+        revenue_incl_btw: Math.round((productRevenue[key] || 0) * 100) / 100,
+      })),
       meta: {
         from, to, group_by: groupBy,
         // NL-tz debug-info: wanneer client `?period=` stuurt, laten we
@@ -339,6 +345,11 @@ export default async function handler(req, res) {
         period: periodParam || null,
         range_from_utc: rangeFrom,
         range_to_exclusive_utc: rangeToExclusiveIso,
+        // Classificatie-diagnose: hoeveel deals kwamen via welke route?
+        // variant   = nieuwe wizard-deals (traject_variant_id gezet)
+        // lineitems = TL-imports geclassificeerd via product_name
+        // fallback  = onbekend (geen variant, geen bruikbare line-items)
+        classify_sources: classifySources,
       },
     });
   } catch (e) {
