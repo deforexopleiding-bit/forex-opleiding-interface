@@ -21,10 +21,13 @@
 -- Jeffrey draait dit. Niets wordt automatisch gedraaid.
 -- ============================================================================
 
--- STAP 0 — DUMP de huidige objecten (verzoen de skip-checks + index-naam hiermee):
+-- STAP 0 — de skip-checks staan nu exact overgenomen; de te droppen index is
+-- bevestigd als leads_event_uniek. Dump ter controle alleen nog dat de trigger
+-- op AFTER INSERT deze functie aanroept en dat de huidige functie geen extra
+-- veld-mapping bevat die verloren zou gaan:
 --   SELECT pg_get_functiondef('public.spiegel_attendee_naar_lead'::regproc);
---   SELECT indexname, indexdef FROM pg_indexes
---   WHERE schemaname='public' AND tablename='leads';
+--   SELECT tgname, tgenabled, pg_get_triggerdef(t.oid) FROM pg_trigger t
+--   WHERE tgrelid='public.event_attendees'::regclass AND NOT tgisinternal;
 
 
 BEGIN;
@@ -93,29 +96,26 @@ CREATE UNIQUE INDEX leads_email_uniek ON public.leads (lower(email));
 
 
 -- ── 3) Mirror-trigger: schrijf via upsert_lead i.p.v. eigen INSERT ──────────
--- BELANGRIJK: neem de skip-checks hieronder EXACT over uit de STAP 0-dump van
--- de huidige functie (is_test / switched / lege email / historical-ZZZ). De
--- guards hieronder zijn een template — vervang ze door je bestaande condities.
+-- Skip-checks 1-op-1 overgenomen uit de huidige functie. Behoud van
+-- SECURITY DEFINER + SET search_path=public + de EXCEPTION-fail-safe; alleen de
+-- WRITE verandert (eigen INSERT -> PERFORM upsert_lead).
 CREATE OR REPLACE FUNCTION public.spiegel_attendee_naar_lead()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
 AS $$
+DECLARE
+  v_ev public.events;
 BEGIN
-  -- ── SKIP-CHECKS (verzoen met STAP 0-dump) ──────────────────────────────
-  -- lege email
-  IF NEW.email IS NULL OR btrim(NEW.email) = '' THEN
-    RETURN NEW;
-  END IF;
-  -- test-attendees
-  IF COALESCE(NEW.is_test, false) THEN
-    RETURN NEW;
-  END IF;
-  -- switch-created rijen (geen tweede lead bij een datum-switch)
-  IF NEW.switched_from_event_id IS NOT NULL THEN
-    RETURN NEW;
-  END IF;
-  -- historical/ZZZ-import  <<< VERVANG door je bestaande conditie uit STAP 0
-  -- IF <historical/ZZZ conditie> THEN RETURN NEW; END IF;
+  -- ── SKIP-CHECKS (exact zoals de bestaande functie) ─────────────────────
+  IF NEW.is_test IS TRUE THEN RETURN NEW; END IF;
+  IF NEW.status = 'switched_to_other_event' THEN RETURN NEW; END IF;
+  IF NEW.email IS NULL OR btrim(NEW.email) = '' THEN RETURN NEW; END IF;
+
+  SELECT * INTO v_ev FROM public.events WHERE id = NEW.event_id;
+  IF NOT FOUND THEN RETURN NEW; END IF;
+  IF v_ev.is_historical IS TRUE OR v_ev.title ILIKE 'ZZZ-TEST%' THEN RETURN NEW; END IF;
 
   -- ── Schrijf via de centrale upsert (i.p.v. eigen INSERT ON CONFLICT) ───
   PERFORM public.upsert_lead(jsonb_build_object(
