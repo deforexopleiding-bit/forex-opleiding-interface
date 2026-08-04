@@ -148,7 +148,15 @@
     .inbox-layout-c {
       display: grid;
       grid-template-columns: minmax(280px, 33%) minmax(0, 1fr);
-      grid-template-rows: minmax(0, 75vh);
+      /* Grid-track min was 0 → "Maximize Tracks"-stap collapse-te de track
+         naar intrinsic-height van de kortste kolom (thread-empty-state ~200px)
+         terwijl #inboxConvList als flex-child met min-height:0 nauwelijks
+         intrinsic contribution levert. Effect: 50 rows in de DOM maar container
+         maar ~1 rij hoog → user zag 1 gesprek tot een scroll-event een reflow
+         forceerde (bewezen via [inbox-diag] logs #1089).
+         Fix: min = 520px (matcht bestaande min-height) zodat de track altijd
+         een definite length heeft en "Maximize Tracks" deterministisch werkt. */
+      grid-template-rows: minmax(520px, 75vh);
       gap: 16px;
       min-height: 520px;
     }
