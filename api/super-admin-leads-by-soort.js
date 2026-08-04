@@ -51,6 +51,7 @@ async function countLeadsBySoort(soort, fromIso, toIso) {
   const { count, error } = await supabaseAdmin
     .from('leads')
     .select('id', { head: true, count: 'exact' })
+    .is('verwijderd_op', null)
     .ilike('traject', soort)
     .gte('aangemaakt', fromIso)
     .lte('aangemaakt', toIso);
@@ -81,6 +82,7 @@ async function countOverigLeads(fromIso, toIso) {
   const { count, error } = await supabaseAdmin
     .from('leads')
     .select('id', { head: true, count: 'exact' })
+    .is('verwijderd_op', null)
     .or('traject.is.null,and(traject.not.ilike.7-daagse,traject.not.ilike.webinar,traject.not.ilike.minicursus)')
     .gte('aangemaakt', fromIso)
     .lte('aangemaakt', toIso);

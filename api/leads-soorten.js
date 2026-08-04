@@ -25,6 +25,7 @@ export default async function handler(req, res) {
     const { data, error } = await supabaseAdmin
       .from('leads_overzicht')
       .select('soort')
+      .is('verwijderd_op', null)
       .not('soort', 'is', null)
       .limit(20000);
     if (error) throw new Error('leads_overzicht: ' + error.message);

@@ -39,6 +39,12 @@ export default async function handler(req, res) {
   const search = q.q ? String(q.q).trim() : null;
   const limit  = Math.max(1, Math.min(500, Number(q.limit)  || 50));
   const offset = Math.max(0, Number(q.offset) || 0);
+  // Soft-delete: standaard alleen actieve leads; ?archief=1 toont het archief.
+  const archief = q.archief === '1' || q.archief === 'true';
+
+  // Mag deze gebruiker leads (de)archiveren? Bepaalt of de UI de knoppen toont
+  // (de echte afdwinging zit server-side in leads-verwijder/-herstel).
+  const canDelete = await requirePermission(req, 'leads.delete');
 
   try {
     let qy = supabaseAdmin
@@ -46,6 +52,9 @@ export default async function handler(req, res) {
       .select('id, naam, email, telefoon, soort, bron, traject, kwalificatie, score, drempel, status, aangemaakt, tag', { count: 'exact' })
       .order('aangemaakt', { ascending: false })
       .range(offset, offset + limit - 1);
+
+    // Actief vs. archief.
+    qy = archief ? qy.not('verwijderd_op', 'is', null) : qy.is('verwijderd_op', null);
 
     if (soort)  qy = qy.eq('soort',  soort);
     if (bron)   qy = qy.eq('bron',   bron);
@@ -65,6 +74,8 @@ export default async function handler(req, res) {
       total: count || items.length,
       has_more: (offset + items.length) < (count || 0),
       limit, offset,
+      can_delete: canDelete,
+      archief,
     });
   } catch (e) {
     console.error('[leads-list]', e.message);
