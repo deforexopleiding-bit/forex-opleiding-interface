@@ -33,6 +33,7 @@
 
 import { supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { periodRange } from './_lib/nl-period.js';
 
 function dayStr(d) {
   const yy = d.getFullYear();
@@ -94,12 +95,25 @@ export default async function handler(req, res) {
   }
 
   // Periode-parse: default = huidige maand.
+  // 2026-08-04: accepteer `?period=dag|week|maand|jaar` en gebruik dan
+  // NL-tijdzone-aware boundaries via nl-period.js (spiegel super-admin-
+  // omzet.js). Backward-compat: from/to blijven werken voor custom ranges.
   const now = new Date();
-  const defaultFrom = new Date(now.getFullYear(), now.getMonth(), 1);
-  const from = String(req.query.from || dayStr(defaultFrom));
-  const to   = String(req.query.to   || dayStr(now));
-  const fromIso = `${from}T00:00:00.000Z`;
-  const toIso   = `${to}T23:59:59.999Z`;
+  const periodParam = typeof req.query?.period === 'string' ? req.query.period.trim().toLowerCase() : null;
+  let from, to, fromIso, toIso;
+  if (periodParam && ['dag','week','maand','jaar'].includes(periodParam)) {
+    const r = periodRange(periodParam, now);
+    from    = r.label;
+    to      = dayStr(new Date(r.endExclusive.getTime() - 1000));
+    fromIso = r.start.toISOString();
+    toIso   = r.endExclusive.toISOString();
+  } else {
+    const defaultFrom = new Date(now.getFullYear(), now.getMonth(), 1);
+    from    = String(req.query.from || dayStr(defaultFrom));
+    to      = String(req.query.to   || dayStr(now));
+    fromIso = `${from}T00:00:00.000Z`;
+    toIso   = `${to}T23:59:59.999Z`;
+  }
 
   try {
     // 4 buckets + overig parallel (5 head-count queries totaal).

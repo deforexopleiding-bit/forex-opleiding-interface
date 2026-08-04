@@ -119,8 +119,18 @@ export default async function handler(req, res) {
                archived_at, created_at, token,
                bubble_provisioned, bubble_provisioned_at, bubble_provision_error, bubble_user_id,
                traject:onboarding_trajecten(label, type, calls)`)
+      // Sortering (2026-08-04): eerstvolgende startdatum bovenaan zodat
+      // de mentor-workflow "wie moet ik als eerste voorbereiden" direct
+      // klopt. Rijen zonder start_date (nog te plannen) onderaan. Tie-break
+      // op created_at DESC (nieuwste aanmelding wint bij zelfde datum).
+      // Was: `.order('created_at', {ascending: false})` — dat is verwarrend
+      // voor mentor + inconsistent met mentor-onboarding.html:616-624 die
+      // al op start_date ASC sorteert.
+      .order('start_date', { ascending: true,  nullsFirst: false })
       .order('created_at', { ascending: false })
-      .limit(1000)
+      .limit(2000) // opgehoogd van 1000 naar 2000 — sortering gebeurt in DB
+                   // vóór limit dus geen risico op verkeerde afsnijding meer.
+                   // Bij groei boven 2000: refactor naar server-side paging.
       // Fase 3b — verberg test-onboardings (automation-tester) uit de echte
       // admin-lijst. Test-rijen zijn herkenbaar aan customer_name-prefix
       // 'TEST · ' maar de is_test boolean is autoritatief.
