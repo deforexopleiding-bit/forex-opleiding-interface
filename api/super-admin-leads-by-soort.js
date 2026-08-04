@@ -132,15 +132,17 @@ export default async function handler(req, res) {
     return res.status(200).json({
       from, to,
       buckets: [
+        // Deep-links filteren op TRAJECT-type (leads.traject), niet op soort:
+        // soort = sinds Feature 2 de herkomst, dus ?soort=7-daagse gaf een lege lijst.
         { key: '7-daagse',   label: '7-daagse',    count: c7d,
-          deep_link: `/modules/leads.html?soort=7-daagse` },
+          deep_link: `/modules/leads.html?traject=7-daagse` },
         { key: 'event',      label: 'Event-aanmeldingen', count: cEvent,
           deep_link: `/modules/events.html`,
           source: 'event_attendees' },
         { key: 'webinar',    label: 'Webinar',     count: cWebinar,
-          deep_link: `/modules/leads.html?soort=webinar` },
+          deep_link: `/modules/leads.html?traject=webinar` },
         { key: 'minicursus', label: 'Mini cursus', count: cMinicursus,
-          deep_link: `/modules/leads.html?soort=minicursus` },
+          deep_link: `/modules/leads.html?traject=minicursus` },
       ],
       overig: {
         count: cOverig,
