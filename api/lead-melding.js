@@ -20,8 +20,9 @@
 // Verstuurt op DEZELFDE trigger twee onafhankelijke, fail-soft kanalen:
 //   1) WhatsApp-template 'nieuwe_lead' (UTILITY, nl, 2 params) naar
 //      LEAD_MELDING_NUMMER (default +31655270212) via de env-default afzendlijn;
-//   2) interne e-mail (verrijkt) naar LEAD_MELDING_EMAIL (default
-//      leads@deforexopleiding.nl) via mailer.sendMail.
+//   2) interne e-mail (verrijkt) VANAF welkom@deforexopleiding.nl NAAR
+//      LEAD_MELDING_EMAIL (default leads@deforexopleiding.nl) via
+//      mailer.sendWelkomMail (welkom@-transport, IMAP_PASS_WELKOM vereist).
 //
 // Response:
 //   200  { ok:true,  whatsapp:{…}, email:{…} }   (>= 1 kanaal geslaagd)
@@ -32,7 +33,7 @@
 //   503  LEAD_MELDING_SECRET niet geconfigureerd
 
 import { sendTemplate, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
-import { sendMail, wrapEmailHtml } from './mailer.js';
+import { sendWelkomMail, wrapEmailHtml } from './mailer.js';
 
 const TEMPLATE_NAAM = 'nieuwe_lead';
 const TAAL = 'nl';
@@ -134,12 +135,12 @@ export default async function handler(req, res) {
     }
   }
 
-  // ---- Kanaal 2: interne e-mail (zelfde trigger, verrijkt). Fail-soft. ----
+  // ---- Kanaal 2: interne e-mail VANAF welkom@ NAAR leads@ (verrijkt). Fail-soft. ----
   let email = { ok: false };
   const mailTo = process.env.LEAD_MELDING_EMAIL || STANDAARD_MAIL;
   try {
     const { subject, text, html } = bouwLeadMail({ naam, traject, score, kwalificatie, drempel });
-    const r = await sendMail({ to: mailTo, subject, text, html });
+    const r = await sendWelkomMail({ to: mailTo, subject, text, html });
     email = (r && r.success)
       ? { ok: true, messageId: r.messageId }
       : { ok: false, error: (r && r.error) || 'onbekende mailfout' };

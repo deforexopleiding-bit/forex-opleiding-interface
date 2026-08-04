@@ -143,6 +143,63 @@ export async function sendEventMail({ to, subject, text, html, attachments }) {
   }
 }
 
+// ── Welkom-afzender (welkom@deforexopleiding.nl) ─────────────────────────────
+// Mirror van getEventsTransport / sendEventMail. Aparte SMTP-auth (auth-account
+// = welkom@) zodat de From-header gelijk is aan het auth-account → SPF/DKIM
+// accepteert het. GEEN fallback naar info@: de caller wil bewust vanaf welkom@;
+// ontbreekt IMAP_PASS_WELKOM, dan faalt de send (fail-soft — success:false).
+const WELKOM_FROM_ADDRESS = 'welkom@deforexopleiding.nl';
+const WELKOM_FROM_NAME = 'De Forex Opleiding';
+let cachedWelkomTransport = null;
+
+function getWelkomTransport() {
+  if (cachedWelkomTransport) return cachedWelkomTransport;
+  const pass = process.env.IMAP_PASS_WELKOM;
+  if (!pass) return null; // niet geconfigureerd → caller krijgt success:false
+  cachedWelkomTransport = nodemailer.createTransport({
+    host: 'smtp.strato.com',
+    port: 465,
+    secure: true,
+    auth: { user: WELKOM_FROM_ADDRESS, pass },
+  });
+  return cachedWelkomTransport;
+}
+
+/**
+ * Verstuur een mail vanaf welkom@deforexopleiding.nl. GEEN fallback: als de
+ * welkom@-transport niet geconfigureerd is (IMAP_PASS_WELKOM ontbreekt), keert
+ * success:false terug i.p.v. vanaf info@ te sturen.
+ *
+ * @returns {Promise<{success:boolean, messageId?:string, from:string, error?:string}>}
+ */
+export async function sendWelkomMail({ to, subject, text, html, attachments } = {}) {
+  if (!to || !subject || (!text && !html)) {
+    return { success: false, from: WELKOM_FROM_ADDRESS, error: 'Missing required fields' };
+  }
+  const transport = getWelkomTransport();
+  if (!transport) {
+    return { success: false, from: WELKOM_FROM_ADDRESS, error: 'IMAP_PASS_WELKOM ontbreekt' };
+  }
+  const recipients = Array.isArray(to) ? to : [to];
+  try {
+    const mail = {
+      from: `"${WELKOM_FROM_NAME}" <${WELKOM_FROM_ADDRESS}>`,
+      to: recipients.join(', '),
+      subject,
+      text: text || stripHtml(html),
+      html,
+    };
+    if (Array.isArray(attachments) && attachments.length > 0) {
+      mail.attachments = attachments;
+    }
+    const info = await transport.sendMail(mail);
+    return { success: true, messageId: info.messageId, from: WELKOM_FROM_ADDRESS };
+  } catch (err) {
+    console.error('[mailer] sendWelkomMail error:', err.message);
+    return { success: false, from: WELKOM_FROM_ADDRESS, error: err.message };
+  }
+}
+
 // ── Onboarding-afzender (onboarding@deforexopleiding.nl) ─────────────────────
 // Mirror van getEventsTransport / sendEventMail. Aparte SMTP-auth zodat de
 // From-header gelijk is aan het auth-account → SPF/DKIM accepteert het en
