@@ -98,7 +98,7 @@ export default async function handler(req, res) {
     if (includeEmail && conv.customer_id) {
       const { data: eMsgs, error: eErr } = await supabaseAdmin
         .from('email_messages')
-        .select('id, mailbox, imap_uid, from_address, from_name, subject, snippet, body_text, body_html, date_received, message_id, category')
+        .select('id, mailbox, imap_uid, from_address, from_name, subject, snippet, body_text, body_html, date_received, message_id, category, attachments')
         .eq('customer_id', conv.customer_id)
         .order('date_received', { ascending: true });
       if (eErr) {
@@ -209,6 +209,11 @@ export default async function handler(req, res) {
           category: m.category,
           message_id: m.message_id,                // voor In-Reply-To / References
           has_html: !!m.body_html,
+          // Attachments — array van {filename, mime_type, size_bytes, path,
+          // public_url, uploaded_at}. NULL = nog niet verwerkt (pre-migratie
+          // rows). [] = expliciet 0 bijlagen. Zie
+          // api/_lib/email-attachment-upload.js voor shape.
+          attachments: Array.isArray(m.attachments) ? m.attachments : null,
         },
       });
     }

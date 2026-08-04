@@ -3,6 +3,7 @@ import { simpleParser } from 'mailparser';
 import { supabaseAdmin as supabase, checkCronAuth } from './supabase.js';
 import { categorize } from './email-agent.js';
 import { resolveCustomerIdsForEmails } from './_lib/email-customer-match.js';
+import { uploadEmailAttachments } from './_lib/email-attachment-upload.js';
 
 // Spiegelt de ACCOUNTS array uit emails.js — voeg nieuwe mailboxen op één plek toe
 const ACCOUNTS = [
@@ -194,6 +195,11 @@ async function syncMailbox({ account, host, port, boxStart }) {
       // body_keywords kan matchen tegen email_patterns (eerder werkte dat
       // niet omdat bodySnippet='' werd doorgegeven).
       const BODY_LIMIT = 100_000;
+      // Sync-deadline voor attachment-uploads: laat 8s marge voor Pass 3
+      // (categorize), Pass 3.5 (customer-match), en insert. Als we die
+      // marge overschrijden, worden resterende bijlagen geskipt met warning
+      // — de mail zelf komt gewoon binnen (fail-soft).
+      const ATTACHMENT_DEADLINE_MS = boxStart + ABORT_MS - 8000;
       for (const row of rows) {
         try {
           const bodyMsg = await client.fetchOne(row.imap_uid, { source: true }, { uid: true });
@@ -206,12 +212,38 @@ async function syncMailbox({ account, host, port, boxStart }) {
             row.body_fetched_at = new Date().toISOString();
             row.body_truncated  = rawText.length > BODY_LIMIT || rawHtml.length > BODY_LIMIT;
             row.snippet         = rawText.slice(0, 300).trim() || null;
+
+            // ── Attachments (2026-08-04) ───────────────────────────────
+            // parsed.attachments = mailparser array van {filename, contentType,
+            // size, content:Buffer}. Uploaden naar bucket `email-attachments`
+            // en metadata naar row.attachments. Fail-soft: als upload valt
+            // krijgt row.attachments = [] + warning-log; mail komt gewoon
+            // binnen. Ook []-set als 0 bijlagen (onderscheidbaar van NULL
+            // = nog niet verwerkt in backfill-flow).
+            try {
+              const { rows: attRows, warnings } = await uploadEmailAttachments(
+                parsed.attachments,
+                {
+                  mailbox: account.mailbox,
+                  imapUid: row.imap_uid,
+                  deadlineMs: ATTACHMENT_DEADLINE_MS,
+                }
+              );
+              row.attachments = attRows; // altijd array — [] = geen bijlagen
+              if (warnings && warnings.length) {
+                console.warn(`[sync-emails] attachment warnings ${account.mailbox}/${row.imap_uid}:`, warnings.slice(0, 3).join(' | '));
+              }
+            } catch (attErr) {
+              console.warn(`[sync-emails] attachment upload exception ${account.mailbox}/${row.imap_uid}:`, attErr?.message);
+              row.attachments = []; // fail-soft; backfill kan opnieuw
+            }
           }
         } catch (bodyErr) {
           console.warn(`[sync-emails] body-fetch fout ${account.mailbox}/${row.imap_uid}:`, bodyErr.message);
           row.body_fetch_error = bodyErr.message.slice(0, 200);
           // Geen body_fetched_at gezet → backfill kan later opnieuw proberen
           // row.snippet blijft null → categorize krijgt '' (fallback gedrag, geen crash)
+          // row.attachments blijft NULL → backfill kandidaat
         }
       }
 
