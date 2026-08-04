@@ -66,6 +66,7 @@ export async function leadsInTraject() {
     .from('leads')
     .select('id, voornaam, achternaam, email, telefoon_e164, traject')
     .or(orFilter)
+    .is('verwijderd_op', null)   // verwijderde leads horen niet in het postvak
     .limit(10000);
   return data || [];
 }

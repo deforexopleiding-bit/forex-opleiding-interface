@@ -43,13 +43,16 @@ export default async function handler(req, res) {
     const [vRes, nRes, wRes] = await Promise.all([
       supabaseAdmin.from('leads_overzicht')
         .select('id', { count: 'exact', head: true })
+        .is('verwijderd_op', null)
         .gte('aangemaakt', today + 'T00:00:00')
         .lte('aangemaakt', today + 'T23:59:59.999'),
       supabaseAdmin.from('leads_overzicht')
         .select('id', { count: 'exact', head: true })
+        .is('verwijderd_op', null)
         .eq('status', 'nieuw'),
       supabaseAdmin.from('leads_overzicht')
         .select('id', { count: 'exact', head: true })
+        .is('verwijderd_op', null)
         .eq('tag', 'gekwalificeerd')
         .gte('aangemaakt', weekStart + 'T00:00:00'),
     ]);

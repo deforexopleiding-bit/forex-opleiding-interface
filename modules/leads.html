@@ -101,6 +101,26 @@
     .modal-foot .k-opslaan:disabled{opacity:.5;cursor:default}
     .modal .m-err{padding:9px 11px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.3);border-radius:6px;color:#dc2626;font-size:13px;margin-top:12px}
 
+    /* Tabs Actief / Gearchiveerd */
+    .tabs{display:flex;gap:4px;margin-bottom:12px}
+    .tabs button{padding:7px 14px;font-size:13px;font-weight:600;border:1px solid var(--border-default,#e5e7eb);border-radius:7px;background:var(--bg-elev,#fff);color:var(--text-dim);cursor:pointer}
+    .tabs button:hover{background:var(--bg-elev-2,#f8fafc)}
+    .tabs button.on{background:var(--accent,#2563eb);border-color:var(--accent,#2563eb);color:#fff}
+
+    /* Multi-select + bulk-balk */
+    .col-check{width:34px;text-align:center}
+    .tbl.hide-check .col-check{display:none}
+    .col-check input{width:16px;height:16px;cursor:pointer;vertical-align:middle}
+    .bulk-bar{display:none;align-items:center;gap:12px;padding:10px 14px;margin-bottom:12px;background:var(--bg-elev-2,#f8fafc);border:1px solid var(--border-default,#e5e7eb);border-radius:8px;font-size:13px}
+    .bulk-bar.show{display:flex}
+    .bulk-bar .bulk-info{color:var(--text-dim);margin-right:auto}
+    .btn-del{padding:6px 13px;font-size:13px;font-weight:600;border:1px solid rgba(214,69,69,.55);border-radius:6px;background:#fff;color:#d64545;cursor:pointer}
+    .btn-del:hover{background:rgba(214,69,69,.08)}
+    .btn-herstel{padding:6px 13px;font-size:13px;font-weight:600;border:1px solid var(--accent,#2563eb);border-radius:6px;background:#fff;color:var(--accent,#2563eb);cursor:pointer}
+    .btn-herstel:hover{background:rgba(37,99,235,.08)}
+    .btn-del-row{padding:4px 9px;font-size:12px;border:1px solid rgba(214,69,69,.4);border-radius:5px;background:var(--bg-elev,#fff);color:#d64545;cursor:pointer;margin-left:6px}
+    .btn-del-row:hover{background:rgba(214,69,69,.08)}
+
     @media (max-width:720px){
       .kpi-strip{grid-template-columns:1fr;gap:8px}
       .kpi-val{font-size:20px}
@@ -150,9 +170,21 @@
       <button type="button" class="btn-add" id="btnAdd">+ Lead toevoegen</button>
     </div>
 
+    <div class="tabs" id="tabs">
+      <button type="button" id="tabActief" class="on">Actief</button>
+      <button type="button" id="tabArchief">Gearchiveerd</button>
+    </div>
+
+    <div class="bulk-bar" id="bulkBar">
+      <span class="bulk-info" id="bulkInfo">0 geselecteerd</span>
+      <button type="button" class="btn-del" id="bulkDel">Verwijderen</button>
+      <button type="button" class="btn-herstel" id="bulkHerstel">Herstellen</button>
+    </div>
+
     <div class="tbl-wrap">
       <table class="tbl" id="tbl">
         <thead><tr>
+          <th class="col-check"><input type="checkbox" id="chkAll" title="Alles selecteren" /></th>
           <th>Naam</th>
           <th>E-mail</th>
           <th>Telefoon</th>
@@ -166,7 +198,7 @@
           <th>Acties</th>
         </tr></thead>
         <tbody id="tblBody">
-          <tr><td colspan="11" class="empty">Laden…</td></tr>
+          <tr><td colspan="12" class="empty">Laden…</td></tr>
         </tbody>
       </table>
     </div>
@@ -275,7 +307,7 @@ function apiFetch(url,opts){
   return fetch(url,opts);
 }
 
-let _state = { rows: [] };
+let _state = { rows: [], canDelete: false, archief: false, selected: new Set() };
 let _page = { offset: 0, limit: 50, total: 0 };
 
 async function loadStats(){
@@ -293,7 +325,7 @@ async function loadList(){
   const body = document.getElementById('tblBody');
   const err  = document.getElementById('err');
   err.style.display = 'none';
-  body.innerHTML = '<tr><td colspan="11" class="empty">Laden…</td></tr>';
+  body.innerHTML = '<tr><td colspan="12" class="empty">Laden…</td></tr>';
   try{
     const p = new URLSearchParams();
     const sel = (id)=>document.getElementById(id).value.trim();
@@ -302,6 +334,7 @@ async function loadList(){
     if(sel('fBron'))   p.set('bron',   sel('fBron'));
     if(sel('fStatus')) p.set('status', sel('fStatus'));
     if(sel('fQ'))      p.set('q',      sel('fQ'));
+    if(_state.archief) p.set('archief', '1');
     p.set('limit',  String(_page.limit));
     p.set('offset', String(_page.offset));
     const r = await apiFetch('/api/leads-list?'+p.toString());
@@ -311,13 +344,17 @@ async function loadList(){
     }
     const d = await r.json();
     _state.rows = Array.isArray(d.items) ? d.items : [];
+    _state.canDelete = !!d.can_delete;
     _page.total = Number(d.total) || 0;
+    _state.selected.clear();             // selectie vervalt bij elke (her)laadactie
+    document.getElementById('tbl').classList.toggle('hide-check', !_state.canDelete);
     render();
     renderPager();
+    updateBulkBar();
   }catch(e){
     err.textContent = 'Laden mislukt: '+e.message;
     err.style.display = 'block';
-    body.innerHTML = '<tr><td colspan="11" class="empty">—</td></tr>';
+    body.innerHTML = '<tr><td colspan="12" class="empty">—</td></tr>';
     document.getElementById('pager').style.display = 'none';
   }
 }
@@ -540,14 +577,29 @@ async function submitEdit(){
 function render(){
   const body = document.getElementById('tblBody');
   if(!_state.rows.length){
-    body.innerHTML = '<tr><td colspan="11" class="empty">Geen leads gevonden met deze filters.</td></tr>';
+    body.innerHTML = '<tr><td colspan="12" class="empty">Geen leads gevonden met deze filters.</td></tr>';
     return;
   }
+  const canDel = _state.canDelete;
   body.innerHTML = _state.rows.map(r => {
     const scoreCell = (r.score != null && r.drempel != null)
       ? esc(r.score)+' / '+esc(r.drempel)
       : '—';
+    const checkCell = '<td class="col-check">'+(canDel
+      ? '<input type="checkbox" class="row-check" data-check="'+esc(r.id)+'"'+(_state.selected.has(r.id)?' checked':'')+' />'
+      : '')+'</td>';
+    // Actie-kolom: in het archief 'Herstellen', anders 'Bewerken' (+ los verwijderen).
+    let actie;
+    if(_state.archief){
+      actie = canDel
+        ? '<button type="button" class="btn-herstel" data-herstel="'+esc(r.id)+'">Herstellen</button>'
+        : '—';
+    } else {
+      actie = '<button type="button" class="btn-edit" data-edit="'+esc(r.id)+'">Bewerken</button>'+
+        (canDel ? '<button type="button" class="btn-del-row" data-del="'+esc(r.id)+'">Verwijderen</button>' : '');
+    }
     return '<tr data-id="'+esc(r.id)+'">'+
+      checkCell+
       '<td><strong>'+esc(r.naam||'—')+'</strong></td>'+
       '<td>'+esc(r.email||'—')+'</td>'+
       '<td>'+esc(r.telefoon||'—')+'</td>'+
@@ -558,7 +610,7 @@ function render(){
       '<td class="col-score">'+scoreCell+'</td>'+
       '<td><span class="status '+statusClass(r.status)+'">'+esc(r.status||'—')+'</span></td>'+
       '<td>'+esc(fmtDate(r.aangemaakt))+'</td>'+
-      '<td><button type="button" class="btn-edit" data-edit="'+esc(r.id)+'">Bewerken</button></td>'+
+      '<td>'+actie+'</td>'+
     '</tr>';
   }).join('');
   body.querySelectorAll('tr[data-id]').forEach(tr => {
@@ -569,6 +621,94 @@ function render(){
   body.querySelectorAll('.btn-edit').forEach(b => {
     b.addEventListener('click', (e) => { e.stopPropagation(); openEdit(b.getAttribute('data-edit')); });
   });
+  // Selectie-checkboxes (klik mag de rij-navigatie niet triggeren).
+  body.querySelectorAll('.row-check').forEach(c => {
+    c.addEventListener('click', (e) => e.stopPropagation());
+    c.addEventListener('change', () => {
+      const id = c.getAttribute('data-check');
+      if(c.checked) _state.selected.add(id); else _state.selected.delete(id);
+      syncSelectAll();
+      updateBulkBar();
+    });
+  });
+  // Losse verwijder-/herstel-knoppen per rij.
+  body.querySelectorAll('.btn-del-row').forEach(b => {
+    b.addEventListener('click', (e) => { e.stopPropagation(); verwijderLeads([b.getAttribute('data-del')]); });
+  });
+  body.querySelectorAll('.btn-herstel').forEach(b => {
+    b.addEventListener('click', (e) => { e.stopPropagation(); herstelLeads([b.getAttribute('data-herstel')]); });
+  });
+  syncSelectAll();
+}
+
+// ---- Multi-select + bulk verwijderen/herstellen ----
+function syncSelectAll(){
+  const all = document.getElementById('chkAll');
+  if(!all) return;
+  const ids = _state.rows.map(r => r.id);
+  const gekozen = ids.filter(id => _state.selected.has(id)).length;
+  all.checked = ids.length > 0 && gekozen === ids.length;
+  all.indeterminate = gekozen > 0 && gekozen < ids.length;
+}
+
+function updateBulkBar(){
+  const bar = document.getElementById('bulkBar');
+  const info = document.getElementById('bulkInfo');
+  const del = document.getElementById('bulkDel');
+  const herstel = document.getElementById('bulkHerstel');
+  const n = _state.selected.size;
+  // Balk alleen tonen als de gebruiker mag (de)archiveren én er iets is gekozen.
+  bar.classList.toggle('show', _state.canDelete && n > 0);
+  info.textContent = n + (n === 1 ? ' geselecteerd' : ' geselecteerd');
+  // In het archief kun je herstellen; in de actieve lijst verwijderen.
+  del.style.display     = _state.archief ? 'none' : '';
+  herstel.style.display = _state.archief ? '' : 'none';
+  del.textContent     = 'Verwijderen ('+n+')';
+  herstel.textContent = 'Herstellen ('+n+')';
+}
+
+async function verwijderLeads(ids){
+  ids = [...new Set(ids)].filter(Boolean);
+  if(!ids.length) return;
+  const woord = ids.length === 1 ? 'deze lead' : ('deze '+ids.length+' leads');
+  if(!confirm(woord.charAt(0).toUpperCase()+woord.slice(1)+' archiveren? Je vindt ze daarna terug onder "Gearchiveerd".')) return;
+  try{
+    const r = await apiFetch('/api/leads-verwijder', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids }),
+    });
+    if(!r.ok){ const t = await r.text(); throw new Error(t || ('HTTP '+r.status)); }
+    await Promise.all([loadStats(), loadList()]);
+  }catch(e){
+    const err = document.getElementById('err');
+    err.textContent = 'Verwijderen mislukt: '+e.message; err.style.display = 'block';
+  }
+}
+
+async function herstelLeads(ids){
+  ids = [...new Set(ids)].filter(Boolean);
+  if(!ids.length) return;
+  try{
+    const r = await apiFetch('/api/leads-herstel', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids }),
+    });
+    if(!r.ok){ const t = await r.text(); throw new Error(t || ('HTTP '+r.status)); }
+    await Promise.all([loadStats(), loadList()]);
+  }catch(e){
+    const err = document.getElementById('err');
+    err.textContent = 'Herstellen mislukt: '+e.message; err.style.display = 'block';
+  }
+}
+
+function switchTab(archief){
+  if(_state.archief === archief) return;
+  _state.archief = archief;
+  _state.selected.clear();
+  document.getElementById('tabActief').classList.toggle('on', !archief);
+  document.getElementById('tabArchief').classList.toggle('on', archief);
+  // Nieuwe leads toevoegen kan alleen in de actieve lijst.
+  document.getElementById('btnAdd').style.display = archief ? 'none' : '';
+  _page.offset = 0;
+  loadList();
 }
 
 let _searchTimer = null;
@@ -588,6 +728,20 @@ async function init(){
   });
   document.getElementById('btnRefresh').addEventListener('click', () => { loadStats(); reload(); });
   document.getElementById('btnAdd').addEventListener('click', openAdd);
+
+  // Tabs actief / archief.
+  document.getElementById('tabActief').addEventListener('click', () => switchTab(false));
+  document.getElementById('tabArchief').addEventListener('click', () => switchTab(true));
+  // Alles-selecteren in de kop.
+  document.getElementById('chkAll').addEventListener('change', (e) => {
+    if(e.target.checked) _state.rows.forEach(r => _state.selected.add(r.id));
+    else _state.selected.clear();
+    render();
+    updateBulkBar();
+  });
+  // Bulk-acties.
+  document.getElementById('bulkDel').addEventListener('click', () => verwijderLeads([..._state.selected]));
+  document.getElementById('bulkHerstel').addEventListener('click', () => herstelLeads([..._state.selected]));
   document.getElementById('aAnnuleer').addEventListener('click', closeAdd);
   document.getElementById('aOpslaan').addEventListener('click', submitAdd);
   document.getElementById('addModal').addEventListener('click', (e) => { if(e.target.id==='addModal') closeAdd(); });
