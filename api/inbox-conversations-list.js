@@ -72,9 +72,18 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: `Geen rechten (${permKey})` });
   }
 
+  // Limit-cap opgehoogd naar 1000 (was 100). Sinds de UI overstapte op
+  // "alles-in-één" (geen paginering meer, PR van 2026-08-04), moet één
+  // fetch de volledige lijst kunnen leveren zodat MAX(WA, e-mail)-sort
+  // correct is over ALLE items — niet alleen binnen de top-50 (Priscilla
+  // Mauricia-bug: verse mail buiten pagina 1 werd gemist).
+  // Bij 115 conversaties in productie ≈ 90KB response. 1000 = ruime cap
+  // die 5-10× headroom geeft zonder response te laten ontsporen. Zie
+  // warning-log verderop als total > cap → dan moeten we alsnog op
+  // server-side sort + paging over gaan.
   let limit = parseInt(q.limit, 10);
-  if (!Number.isFinite(limit) || limit < 1) limit = 50;
-  if (limit > 100) limit = 100;
+  if (!Number.isFinite(limit) || limit < 1) limit = 1000;
+  if (limit > 1000) limit = 1000;
   let offset = parseInt(q.offset, 10);
   if (!Number.isFinite(offset) || offset < 0) offset = 0;
   const search = String(q.search || '').trim();
@@ -118,23 +127,21 @@ export default async function handler(req, res) {
     // Finance- en events-takken zijn ongewijzigd: die houden hun eigen
     // module-permissie (finance.inbox.view / events.inbox.view) als gate.
 
-    // ── Sort-overhaul (2026-08-04) ──────────────────────────────────
+    // ── Sort-overhaul (2026-08-04, gerefactored) ─────────────────────
     // Doel: sorteer op `last_activity_at = MAX(last_message_at,
     // laatste_email_date_received)` zodat een klant met een verse mail (maar
     // oude WA) niet meer wegzakt in de lijst. Priscilla Mauricia-scenario.
     //
-    // Aanpak: fetch **dubbele page** rijen sorted op last_message_at, verrijk
-    // met max email-date per klant, sorteer client-side op last_activity_at,
-    // snijd op de gevraagde `limit`. De 2× headroom vangt de meest voorkomende
-    // "e-mail sleept item vanaf positie 60 naar top 50"-verschuivingen op.
-    // Trade-off: als iemand met verse mail voorbij (offset+limit*2) staat,
-    // wordt 'ie alsnog gemist — voor tijd-kritische inbox is dat acceptabel
-    // (die klanten hebben typisch óók een recente WA).
+    // Aanpak: fetch de VOLLEDIGE lijst (cap 1000) in één request. Sinds de UI
+    // paginering heeft afgeschaft, is de sort altijd correct — er is geen
+    // "top-N page" meer waarbuiten een klant met verse mail kan vallen.
+    // Vroeger fetchte deze endpoint `limit * 2` rijen als dubbele-page-
+    // heuristiek; die is nu onnodig.
     //
     // `last_message_at` blijft OP DE ROW zelf ongewijzigd; dunning-cron leest
     // 'm voor 24u-window en timing en die logica moet puur op WA gebaseerd
     // blijven. Alleen de response-payload krijgt een extra `last_activity_at`.
-    const fetchRange = Math.max(1, limit) * 2; // dubbele page voor sort-margin
+    const fetchRange = Math.max(1, limit); // volledige lijst binnen cap
     let query = supabaseAdmin
       .from('whatsapp_conversations')
       .select(
@@ -369,24 +376,38 @@ export default async function handler(req, res) {
       };
     });
 
-    // Server-side sort op last_activity_at DESC + snijd op gevraagde limit.
-    // Zie header van query-blok voor rationale (dubbele-page heuristiek).
+    // Server-side sort op last_activity_at DESC. Sinds fetchRange = limit
+    // (geen dubbele-page-heuristiek meer), is een expliciete slice niet meer
+    // nodig — de fetch retourneert al max `limit` rijen.
     items.sort((a, b) => {
       const ta = a.last_activity_at ? Date.parse(a.last_activity_at) : 0;
       const tb = b.last_activity_at ? Date.parse(b.last_activity_at) : 0;
       return tb - ta;
     });
-    const itemsPage = items.slice(0, limit);
+
+    // Cap-overflow warning: als er meer conversations bestaan dan we in één
+    // fetch kunnen leveren, moet de UI weten dat 'ie een deel mist. Dan is
+    // dit endpoint aan een re-design toe (server-side sort + paging). Log +
+    // signaleer via response-veld zodat UI een banner kan tonen.
+    const totalCount = Number(count || items.length);
+    let capOverflowWarning = null;
+    if (totalCount > limit) {
+      capOverflowWarning = `total=${totalCount} > cap=${limit} — lijst is niet compleet, overweeg server-side paging`;
+      console.warn(`[inbox-conversations-list] cap-overflow ${moduleRaw}:`, capOverflowWarning);
+    }
 
     return res.status(200).json({
-      items: itemsPage,
-      total: count || itemsPage.length,
+      items,
+      total: totalCount,
       configured: true,
       module: moduleRaw,
       // Diagnostic voor de e-mail-unread-verrijking (fail-soft). Bij lege
       // items of ontbrekende IMAP-config staat hier de reden — UI kan 'em
       // negeren of tonen als debug-info.
       email_unread_warning: emailUnreadWarning || undefined,
+      // Cap-overflow signaal: als total > cap, mist de UI conversaties.
+      // Toon banner. Trigger voor engineering: server-side paging herbouwen.
+      cap_overflow_warning: capOverflowWarning || undefined,
     });
   } catch (e) {
     console.error('[inbox-conversations-list]', e.message);
