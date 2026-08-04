@@ -90,6 +90,11 @@ export default async function handler(req, res) {
     // reply-modus, en het endpoint threading-headers kan zetten op basis van
     // message_id.
     let emailMsgs = [];
+    // 3b) Email-replies (onze eigen verzonden mail). Werd voorheen NIET
+    // meegenomen — sync-emails polt alleen INBOX, dus onze verzonden mail
+    // stond alleen in email_replies (opgeslagen door send-email.js).
+    // Zonder deze fetch was de thread eenzijdig (alleen inkomend).
+    let emailReplies = [];
     if (includeEmail && conv.customer_id) {
       const { data: eMsgs, error: eErr } = await supabaseAdmin
         .from('email_messages')
@@ -101,6 +106,33 @@ export default async function handler(req, res) {
         console.warn('[inbox-thread-unified] email fetch failed:', eErr.message);
       } else {
         emailMsgs = eMsgs || [];
+      }
+
+      // Onze verzonden replies. Match op customer.email (case-insensitive
+      // to_address). Alternatief zou email_id-threading zijn, maar die is
+      // best-effort en pakt geen "cold outbound" (mails die wij als eerste
+      // sturen, niet als antwoord). email-matching is robuuster.
+      try {
+        const { data: custRow } = await supabaseAdmin
+          .from('customers')
+          .select('email')
+          .eq('id', conv.customer_id)
+          .maybeSingle();
+        const custEmail = String(custRow?.email || '').trim().toLowerCase();
+        if (custEmail) {
+          const { data: replies, error: rErr } = await supabaseAdmin
+            .from('email_replies')
+            .select('id, email_id, email_subject, final_reply, from_address, to_address, cc_address, sent_at, sent_by_id, attachments')
+            .ilike('to_address', custEmail)
+            .order('sent_at', { ascending: true });
+          if (rErr) {
+            console.warn('[inbox-thread-unified] email_replies fetch failed:', rErr.message);
+          } else {
+            emailReplies = replies || [];
+          }
+        }
+      } catch (rEx) {
+        console.warn('[inbox-thread-unified] email_replies exception:', rEx?.message || rEx);
       }
     }
 
@@ -180,6 +212,28 @@ export default async function handler(req, res) {
         },
       });
     }
+    // Onze eigen verzonden mails (email_replies). Altijd 'outbound' — deze
+    // rijen worden pas geschreven bij een succesvolle sendMail-call, dus
+    // per definitie door ons uitgestuurd. Body = final_reply (plain text).
+    for (const r of emailReplies) {
+      items.push({
+        channel: 'email',
+        id: `reply:${r.id}`, // prefix om ID-conflict met email_messages te voorkomen
+        direction: 'outbound',
+        body: String(r.final_reply || '').slice(0, 4000),
+        at: r.sent_at,
+        meta: {
+          subject: r.email_subject || null,
+          from_address: r.from_address,
+          to_address: r.to_address,
+          cc_address: r.cc_address || null,
+          sent_by_id: r.sent_by_id || null,
+          in_reply_to_email_id: r.email_id || null, // composite '<mailbox>:<uid>' als reply op iets
+          attachments: Array.isArray(r.attachments) ? r.attachments : null,
+          source: 'email_replies', // onderscheidbaar van INBOX-mirror items
+        },
+      });
+    }
     items.sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
 
     // Truncate op limit — meest recente eerst behouden bij overflow.
@@ -199,6 +253,8 @@ export default async function handler(req, res) {
       counts: {
         whatsapp: (waMsgs || []).length,
         email: emailMsgs.length,
+        email_replies: emailReplies.length,       // onze verzonden mails
+        email_total: emailMsgs.length + emailReplies.length, // inbound + outbound samen
         total: items.length,
         returned: trimmed.length,
       },
