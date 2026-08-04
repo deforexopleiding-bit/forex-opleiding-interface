@@ -31202,8 +31202,43 @@
       .f4u-wa-media-hint {
         font-size:12px; color:var(--wbx-faint,#94a3b8); font-style:italic;
       }
+      /* Bijlagen-block (email) — inline afbeeldingen + doc-links. */
+      .f4u-email-attachments {
+        margin-top:10px; padding-top:10px;
+        border-top:1px solid rgba(0,0,0,.06);
+        display:flex; flex-wrap:wrap; gap:8px;
+      }
+      [data-theme="dark"] .f4u-email-attachments { border-top-color:rgba(255,255,255,.08); }
+      .f4u-att-img { display:inline-block; line-height:0; border-radius:6px; overflow:hidden; }
+      .f4u-att-img img {
+        max-width:200px; max-height:200px; display:block;
+        border:1px solid rgba(0,0,0,.08); border-radius:6px;
+      }
+      [data-theme="dark"] .f4u-att-img img { border-color:rgba(255,255,255,.1); }
+      .f4u-att-doc {
+        display:inline-flex; align-items:center; gap:8px;
+        padding:8px 12px; border-radius:6px;
+        background:rgba(0,0,0,.05); color:var(--text,#1f2937);
+        text-decoration:none; font-size:12.5px;
+        border:1px solid transparent;
+      }
+      .f4u-att-doc:hover { background:rgba(0,0,0,.08); border-color:rgba(0,0,0,.1); }
+      [data-theme="dark"] .f4u-att-doc { background:rgba(255,255,255,.06); color:var(--text,#e5e7eb); }
+      [data-theme="dark"] .f4u-att-doc:hover { background:rgba(255,255,255,.1); border-color:rgba(255,255,255,.15); }
+      .f4u-att-icon { font-size:16px; line-height:1; }
+      .f4u-att-name { font-weight:500; }
+      .f4u-att-size { color:var(--text-faint,#94a3b8); font-size:11.5px; margin-left:4px; }
     `;
     document.head.appendChild(st);
+  }
+
+  // Format bytes → "12 KB", "3.4 MB", etc. Voor bijlagen-groottelabel.
+  function _fmtBytes(n) {
+    const b = Number(n) || 0;
+    if (b <= 0) return '';
+    if (b < 1024) return b + ' B';
+    if (b < 1024 * 1024) return Math.round(b / 1024) + ' KB';
+    return (b / (1024 * 1024)).toFixed(1) + ' MB';
   }
 
   function _wbxF4RenderUnifiedThread(items, counts) {
@@ -31240,6 +31275,30 @@
         const fromLabel = escHtml(it.meta?.from_name || it.meta?.from_address || '(onbekend)');
         const subjectLabel = escHtml(it.meta?.subject || '(zonder onderwerp)');
         const bodyText = (it.body || '(lege body)');
+        // Bijlagen-render (2026-08-04). Afbeeldingen inline (klik = fullscreen),
+        // andere bestanden als download-link met bestandsnaam + grootte.
+        // it.meta.attachments = [{filename, mime_type, size_bytes, public_url,
+        // path, uploaded_at}] uit email_messages.attachments. NULL = pre-migratie
+        // row (backfill nodig); [] = geen bijlagen; array = renderen.
+        let attachmentsBlock = '';
+        const atts = Array.isArray(it.meta?.attachments) ? it.meta.attachments : null;
+        if (atts && atts.length > 0) {
+          const items = atts.map((a) => {
+            const url  = a?.public_url || '';
+            const name = a?.filename || 'bijlage';
+            const mime = String(a?.mime_type || '').toLowerCase();
+            const size = Number(a?.size_bytes || 0);
+            if (!url) return ''; // safety — geen public_url = niet klikbaar
+            if (mime.startsWith('image/')) {
+              return `<a href="${escHtml(url)}" target="_blank" rel="noopener" class="f4u-att-img" title="${escHtml(name)} (${_fmtBytes(size)})"><img src="${escHtml(url)}" alt="${escHtml(name)}"/></a>`;
+            }
+            const icon = _mediaTypeIcon(mime.split('/')[0] || 'document') || '📎';
+            return `<a href="${escHtml(url)}" target="_blank" rel="noopener" class="f4u-att-doc"><span class="f4u-att-icon">${icon}</span><span class="f4u-att-name">${escHtml(name)}</span><span class="f4u-att-size">${_fmtBytes(size)}</span></a>`;
+          }).filter(Boolean).join('');
+          if (items) {
+            attachmentsBlock = `<div class="f4u-email-attachments">${items}</div>`;
+          }
+        }
         const replyBtn = `
           <button type="button" class="f4u-reply-btn"
              data-f4-email-reply="1"
@@ -31265,6 +31324,7 @@
                   <span class="f4u-email-subject" title="${subjectLabel}">${subjectLabel}</span>
                 </summary>
                 <div class="f4u-email-body">${escHtml(bodyText)}</div>
+                ${attachmentsBlock}
                 <div class="f4u-email-actions">${replyBtn}</div>
               </details>
             </div>
