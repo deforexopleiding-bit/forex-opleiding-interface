@@ -44,6 +44,10 @@ BEGIN
     RAISE EXCEPTION 'upsert_lead: lege email';
   END IF;
 
+  -- INSERT: NOT NULL-kolommen krijgen een default als p ze weglaat. In de
+  -- DO UPDATE gebruiken we bewust v_in.* (de ORIGINELE input, null-als-weggelaten)
+  -- i.p.v. EXCLUDED.*, zodat COALESCE-behoud óók klopt voor die NOT NULL-kolommen
+  -- (EXCLUDED zou de default tonen en zo bestaande waarden overschrijven).
   INSERT INTO public.leads AS l (
     email, voornaam, achternaam, telefoon, telefoon_e164,
     bron, soort, campagne, pagina, traject, kwalificatie, score, drempel,
@@ -51,29 +55,29 @@ BEGIN
   ) VALUES (
     v_in.email, v_in.voornaam, v_in.achternaam, v_in.telefoon, v_in.telefoon_e164,
     v_in.bron, v_in.soort, v_in.campagne, v_in.pagina, v_in.traject, v_in.kwalificatie, v_in.score, v_in.drempel,
-    v_in.afwijzer, v_in.antwoorden, v_in.event_id, COALESCE(v_in.toestemming, false),
-    COALESCE(v_in.status, 'nieuw'), now()
+    COALESCE(v_in.afwijzer, false), COALESCE(v_in.antwoorden, '[]'::jsonb), v_in.event_id,
+    COALESCE(v_in.toestemming, false), COALESCE(v_in.status, 'nieuw'), now()
   )
   ON CONFLICT (lower(email)) DO UPDATE SET
     -- interactie-definitie: nieuwste wint
-    traject   = EXCLUDED.traject,
-    event_id  = EXCLUDED.event_id,
-    soort     = EXCLUDED.soort,
-    bron      = EXCLUDED.bron,
+    traject   = v_in.traject,
+    event_id  = v_in.event_id,
+    soort     = v_in.soort,
+    bron      = v_in.bron,
     -- interactie-data: nieuwste NON-NULL wint (wist niets)
-    voornaam      = COALESCE(EXCLUDED.voornaam,      l.voornaam),
-    achternaam    = COALESCE(EXCLUDED.achternaam,    l.achternaam),
-    telefoon      = COALESCE(EXCLUDED.telefoon,      l.telefoon),
-    telefoon_e164 = COALESCE(EXCLUDED.telefoon_e164, l.telefoon_e164),
-    score         = COALESCE(EXCLUDED.score,         l.score),
-    kwalificatie  = COALESCE(EXCLUDED.kwalificatie,  l.kwalificatie),
-    drempel       = COALESCE(EXCLUDED.drempel,       l.drempel),
-    afwijzer      = COALESCE(EXCLUDED.afwijzer,      l.afwijzer),
-    antwoorden    = COALESCE(EXCLUDED.antwoorden,    l.antwoorden),
-    campagne      = COALESCE(EXCLUDED.campagne,      l.campagne),
-    pagina        = COALESCE(EXCLUDED.pagina,        l.pagina),
+    voornaam      = COALESCE(v_in.voornaam,      l.voornaam),
+    achternaam    = COALESCE(v_in.achternaam,    l.achternaam),
+    telefoon      = COALESCE(v_in.telefoon,      l.telefoon),
+    telefoon_e164 = COALESCE(v_in.telefoon_e164, l.telefoon_e164),
+    score         = COALESCE(v_in.score,         l.score),
+    kwalificatie  = COALESCE(v_in.kwalificatie,  l.kwalificatie),
+    drempel       = COALESCE(v_in.drempel,       l.drempel),
+    afwijzer      = COALESCE(v_in.afwijzer,      l.afwijzer),
+    antwoorden    = COALESCE(v_in.antwoorden,    l.antwoorden),
+    campagne      = COALESCE(v_in.campagne,      l.campagne),
+    pagina        = COALESCE(v_in.pagina,        l.pagina),
     -- consent sticky, nooit downgraden
-    toestemming   = COALESCE(l.toestemming, false) OR COALESCE(EXCLUDED.toestemming, false),
+    toestemming   = COALESCE(l.toestemming, false) OR COALESCE(v_in.toestemming, false),
     -- altijd bijwerken
     bijgewerkt    = now()
     -- NIET in de SET (bewust behouden): eigenaar_id, notitie, status, aangemaakt, customer_id
