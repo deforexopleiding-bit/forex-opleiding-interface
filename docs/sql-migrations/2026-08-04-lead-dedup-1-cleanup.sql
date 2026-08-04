@@ -64,7 +64,7 @@ WITH agg AS (
     (array_agg(kwalificatie  ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE kwalificatie  IS NOT NULL))[1] AS kwalificatie,
     (array_agg(drempel       ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE drempel       IS NOT NULL))[1] AS drempel,
     (array_agg(afwijzer      ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE afwijzer      IS NOT NULL))[1] AS afwijzer,
-    (array_agg(antwoorden    ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE antwoorden    IS NOT NULL))[1] AS antwoorden,
+    (array_agg(antwoorden    ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE antwoorden IS NOT NULL AND antwoorden <> '[]'::jsonb))[1] AS antwoorden,
     (array_agg(campagne      ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE campagne      IS NOT NULL))[1] AS campagne,
     (array_agg(pagina        ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE pagina        IS NOT NULL))[1] AS pagina,
     -- attributie: eerste (oudste) non-null behouden
@@ -78,7 +78,9 @@ WITH agg AS (
     (array_agg(notitie     ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE notitie IS NOT NULL AND btrim(notitie) <> ''))[1] AS notitie,
     max(opgevolgd_op) AS opgevolgd_op,
     -- status: nieuwste non-'nieuw' uit de groep (agent-progressie behouden)
-    (array_agg(status ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE status IS NOT NULL AND status <> 'nieuw'))[1] AS status_non_nieuw
+    (array_agg(status ORDER BY bijgewerkt DESC NULLS LAST, aangemaakt DESC) FILTER (WHERE status IS NOT NULL AND status <> 'nieuw'))[1] AS status_non_nieuw,
+    -- eerste-gezien-datum van de hele groep
+    min(aangemaakt) AS min_aangemaakt
   FROM public.leads
   WHERE email IS NOT NULL AND btrim(email) <> ''
   GROUP BY lower(email)
@@ -108,9 +110,11 @@ UPDATE public.leads keep SET
   opgevolgd_op   = agg.opgevolgd_op,
   status = CASE WHEN keep.status IS DISTINCT FROM 'nieuw'
                 THEN keep.status                          -- survivor al voorbij 'nieuw'
-                ELSE COALESCE(agg.status_non_nieuw, keep.status) END
-  -- interactie-DEFINITIE (traject, event_id, soort, bron) + aangemaakt + bijgewerkt
-  -- NIET in de SET: die blijven de survivor's (nieuwste interactie).
+                ELSE COALESCE(agg.status_non_nieuw, keep.status) END,
+  -- eerste-gezien-datum behouden (oudste van de groep)
+  aangemaakt = LEAST(keep.aangemaakt, agg.min_aangemaakt)
+  -- interactie-DEFINITIE (traject, event_id, soort, bron) + bijgewerkt NIET in
+  -- de SET: die blijven de survivor's (nieuwste interactie).
 FROM agg
 JOIN lead_survivor sv ON sv.k = agg.k
 WHERE keep.id = sv.keep_id;
