@@ -13645,25 +13645,31 @@
       return true;
     });
   }
+  // Sort-key: gebruik server-verstrekte `last_activity_at` (= MAX(WA,
+  // e-mail) — zie inbox-conversations-list.js). Fallback op `last_message_at`
+  // voor backward-compat (oude items uit een pre-fix cache-payload).
+  function _inboxSortKey(c) {
+    return c?.last_activity_at || c?.last_message_at || '';
+  }
   function _inboxApplyClientSort(items) {
     const s = _inboxUiState;
     const arr = items.slice();
     if (s.sortMode === 'latest') {
-      arr.sort((a, b) => String(b.last_message_at || '').localeCompare(String(a.last_message_at || '')));
+      arr.sort((a, b) => String(_inboxSortKey(b)).localeCompare(String(_inboxSortKey(a))));
     } else if (s.sortMode === 'amount') {
       arr.sort((a, b) => (Number(b.total_open_cents || 0)) - (Number(a.total_open_cents || 0)));
     } else if (s.sortMode === 'unread_only') {
-      // Filter dan alleen unread (WA + mail); sortering last_message_at desc.
+      // Filter dan alleen unread (WA + mail); sortering last_activity_at desc.
       return items
         .filter((c) => _inboxUnreadCount(c) > 0)
-        .sort((a, b) => String(b.last_message_at || '').localeCompare(String(a.last_message_at || '')));
+        .sort((a, b) => String(_inboxSortKey(b)).localeCompare(String(_inboxSortKey(a))));
     } else {
-      // default: WhatsApp-stijl — ongelezen eerst (WA + mail), dan nieuwste bericht.
+      // default: WhatsApp-stijl — ongelezen eerst (WA + mail), dan nieuwste activiteit.
       arr.sort((a, b) => {
         const ua = _inboxUnreadCount(a) > 0 ? 1 : 0;
         const ub = _inboxUnreadCount(b) > 0 ? 1 : 0;
         if (ua !== ub) return ub - ua;
-        return String(b.last_message_at || '').localeCompare(String(a.last_message_at || ''));
+        return String(_inboxSortKey(b)).localeCompare(String(_inboxSortKey(a)));
       });
     }
     return arr;
@@ -13672,10 +13678,22 @@
   function _inboxRenderConvList() {
     const list = document.getElementById('inboxConvList');
     if (!list) return;
+    // Scroll-preserve rond de innerHTML= replace. Zonder deze save/restore
+    // valt scrollTop terug op 0 elke keer dat de lijst herrenderd wordt —
+    // dus bij elke 6s-poll (refreshInboxConv → delta-refresh → render), bij
+    // elke unread-badge-update en bij elke load-more. Fix uit PR 2026-08-04.
+    // Alle callers profiteren automatisch; user-triggered rebuilds waar
+    // scroll-reset wél gewenst is (filter-wissel, zoeken, refresh-knop)
+    // resetten via een expliciete `list.scrollTop = 0` in de caller (zie
+    // loadInboxConvList, dat vóór ons de scroll al implicit terugzette;
+    // sinds refreshInboxConv delta-refresh gebruikt is die caller-scroll-
+    // reset niet meer schadelijk voor de polling-flow).
+    const savedScrollTop = list.scrollTop;
     const filtered = _inboxApplyClientFilters(_inboxConvs);
     const sorted   = _inboxApplyClientSort(filtered);
     if (!sorted.length) {
       list.innerHTML = '<div style="padding:30px 20px;text-align:center;color:var(--text-faint);font-size:12.5px">Geen gesprekken die aan de filters voldoen.</div>';
+      // Bij lege state geen scroll te restoren.
       return;
     }
     // Footer: 'Meer laden…' tijdens paginatie-fetch, 'einde lijst' als
@@ -13745,6 +13763,10 @@
     });
     // Autonomy-badges per conv (Joost).
     _joostRenderAllConvBadges(sorted);
+    // Scroll-restore ná innerHTML= vervanging. Zonder deze restore springt
+    // de user naar de top bij elke poll-refresh (6s interval) of realtime-
+    // update. Zie header van deze functie voor rationale.
+    list.scrollTop = savedScrollTop;
   }
 
   // Wire filters/sort/tabs/afhandelen. Idempotent.
@@ -15634,8 +15656,89 @@
         console.error('[refreshInboxConv]', e);
       }
     }
-    // Conv-list ook stilletjes herladen voor unread-badges (re-highlight active conv).
-    loadInboxConvList();
+    // Conv-list stilletjes bijwerken zonder de infinite-scroll positie te
+    // wissen. Vroeger: `loadInboxConvList()` — die reset _inboxConvOffset=0
+    // en overschrijft _inboxConvs met alleen de eerste 50 items → alle
+    // bijgeladen pagina's kwijt + scrollTop terug naar 0. Nu: delta-refresh
+    // van de eerste pagina, samensmelten met bestaande array. Zie
+    // _inboxDeltaRefreshTopPage voor merge-strategie.
+    try {
+      await _inboxDeltaRefreshTopPage();
+    } catch (e) {
+      // Fail-soft: bij fout blijft de bestaande lijst staan. Volgende poll
+      // probeert opnieuw. Geen toast — dit is een stille background-refresh.
+      console.warn('[refreshInboxConv] delta-refresh fail:', e?.message);
+    }
+  }
+
+  // Delta-refresh: haal alleen de top-PAGE_SIZE conversations opnieuw op en
+  // merge tegen `_inboxConvs`. Doel: unread-badges + last_activity_at up-to-
+  // date houden zonder de bijgeladen pagina's te vernietigen en zonder de
+  // scrollpositie te resetten.
+  //
+  // Merge-regels:
+  //   * Item met id ∈ oude array → update-in-place (zelfde index behouden;
+  //     alleen mutable velden overschrijven).
+  //   * Item nieuw (niet in oude array) → prepend in de "top-slot" (voor
+  //     de eerste bestaande item die niet in de top-page terugkomt).
+  //   * Item uit oude top-page ontbreekt in nieuwe top-page → verwijder
+  //     (bv. status='archived' geworden, of viel uit top-page door
+  //     activiteit elders). Items voorbij index PAGE_SIZE-1 blijven altijd
+  //     staan; delta-refresh raakt ze niet.
+  //
+  // Gebruikt dezelfde endpoint + query-params als loadInboxConvList (statusFilter,
+  // search) zodat de gemergde array consistent blijft met wat de user zou zien
+  // na een fresh load.
+  async function _inboxDeltaRefreshTopPage() {
+    const list = document.getElementById('inboxConvList');
+    if (!list) return;
+    const params = new URLSearchParams();
+    params.set('limit',  String(INBOX_CONV_PAGE_SIZE));
+    params.set('offset', '0');
+    params.set('status_filter', _inboxUiState.statusFilter);
+    if (_inboxConvFilter) params.set('search', _inboxConvFilter);
+    const r = await window.AgentShared.apiFetch('/api/inbox-conversations-list?' + params.toString());
+    if (!r.ok) return; // stil falen — bestaande lijst blijft staan
+    const d = await r.json().catch(() => ({}));
+    const fresh = Array.isArray(d.items) ? d.items : [];
+
+    // Bouw id-based lookup van de nieuwe top-page.
+    const freshById = new Map(fresh.map((it) => [it.id, it]));
+    // 1) Update-in-place voor bestaande items die in de fresh set zitten.
+    for (let i = 0; i < _inboxConvs.length; i++) {
+      const cur  = _inboxConvs[i];
+      const upd  = freshById.get(cur.id);
+      if (upd) {
+        // Merge — bewaar object-identiteit indien mogelijk zodat externe
+        // referenties niet kapot gaan.
+        _inboxConvs[i] = Object.assign(cur, upd);
+        freshById.delete(cur.id);
+      }
+    }
+    // 2) Verwijder items uit de oude top-page die NIET terugkwamen. Alleen
+    // in de eerste PAGE_SIZE slots opruimen — verder ligt onze delta-bevoegdheid
+    // niet.
+    // Bouw eerst set van ids die in de fresh set zitten voor snelle check.
+    const freshIds = new Set(fresh.map((it) => it.id));
+    // Bepaal welke oude top-page-items verdwenen zijn.
+    const topSlice = _inboxConvs.slice(0, INBOX_CONV_PAGE_SIZE);
+    const toRemove = new Set(
+      topSlice.filter((c) => !freshIds.has(c.id)).map((c) => c.id)
+    );
+    if (toRemove.size) {
+      _inboxConvs = _inboxConvs.filter((c) => !toRemove.has(c.id));
+    }
+    // 3) Nieuwe items (in fresh maar niet in oude array) → prepend in de
+    // volgorde waarin ze in de fresh-response staan (die is al server-side
+    // gesorteerd op last_activity_at DESC).
+    const newItems = fresh.filter((it) => !_inboxConvs.some((c) => c.id === it.id));
+    if (newItems.length) {
+      _inboxConvs = newItems.concat(_inboxConvs);
+    }
+    // Total bijwerken zodat has_more-berekening blijft kloppen na
+    // updates elders in het systeem.
+    _inboxConvHasMore = _inboxConvOffset < Number(d.total || 0);
+    _inboxRenderConvList(); // scroll-preserverend (zie _inboxRenderConvList)
   }
 
   function startInboxPolling() {

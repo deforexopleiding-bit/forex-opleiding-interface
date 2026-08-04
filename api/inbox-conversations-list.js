@@ -118,6 +118,23 @@ export default async function handler(req, res) {
     // Finance- en events-takken zijn ongewijzigd: die houden hun eigen
     // module-permissie (finance.inbox.view / events.inbox.view) als gate.
 
+    // ── Sort-overhaul (2026-08-04) ──────────────────────────────────
+    // Doel: sorteer op `last_activity_at = MAX(last_message_at,
+    // laatste_email_date_received)` zodat een klant met een verse mail (maar
+    // oude WA) niet meer wegzakt in de lijst. Priscilla Mauricia-scenario.
+    //
+    // Aanpak: fetch **dubbele page** rijen sorted op last_message_at, verrijk
+    // met max email-date per klant, sorteer client-side op last_activity_at,
+    // snijd op de gevraagde `limit`. De 2× headroom vangt de meest voorkomende
+    // "e-mail sleept item vanaf positie 60 naar top 50"-verschuivingen op.
+    // Trade-off: als iemand met verse mail voorbij (offset+limit*2) staat,
+    // wordt 'ie alsnog gemist — voor tijd-kritische inbox is dat acceptabel
+    // (die klanten hebben typisch óók een recente WA).
+    //
+    // `last_message_at` blijft OP DE ROW zelf ongewijzigd; dunning-cron leest
+    // 'm voor 24u-window en timing en die logica moet puur op WA gebaseerd
+    // blijven. Alleen de response-payload krijgt een extra `last_activity_at`.
+    const fetchRange = Math.max(1, limit) * 2; // dubbele page voor sort-margin
     let query = supabaseAdmin
       .from('whatsapp_conversations')
       .select(
@@ -132,7 +149,7 @@ export default async function handler(req, res) {
       // Simone-sandbox dummy-convs uitfilteren (cleanup-safety-net).
       .not('phone_number', 'ilike', '+99999%')
       .order('last_message_at', { ascending: false, nullsFirst: false })
-      .range(offset, offset + limit - 1);
+      .range(offset, offset + fetchRange - 1);
 
     // Status-filter server-side. Splitsing 'afgehandeld' (closed, komt terug
     // bij inbound) vs 'archief' (archived, komt NIET terug bij inbound).
@@ -179,6 +196,43 @@ export default async function handler(req, res) {
 
     const { data, error, count } = await query;
     if (error) throw new Error(error.message);
+
+    // ── Email-activity-verrijking (voor last_activity_at-sort) ─────────
+    // Batch-query: max(date_received) per customer_id, gecapt op laatste
+    // 180 dagen zodat we niet héél email_messages doorlopen. Voor de
+    // last_activity_at-sort is oudere activiteit sowieso niet relevant.
+    // Fail-soft: bij error → lege Map, sort valt terug op last_message_at.
+    const maxEmailByCustomer = new Map(); // customer_id → ISO-timestamp
+    try {
+      const custIdsForEmail = Array.from(new Set(
+        (data || []).map((r) => r.customer_id).filter(Boolean)
+      ));
+      if (custIdsForEmail.length > 0) {
+        const cutoffIso = new Date(Date.now() - 180 * 24 * 3600 * 1000).toISOString();
+        // Sort DESC + per customer_id → eerste rij is de MAX. Cap op
+        // custIds.length * 5 als safety net (bij ~500 klanten = 2500 rijen).
+        const { data: emRows, error: emErr } = await supabaseAdmin
+          .from('email_messages')
+          .select('customer_id, date_received')
+          .in('customer_id', custIdsForEmail)
+          .gte('date_received', cutoffIso)
+          .order('date_received', { ascending: false })
+          .limit(Math.max(1000, custIdsForEmail.length * 10));
+        if (emErr) {
+          console.error('[inbox-conversations-list] email-max fetch:', emErr.message);
+        } else {
+          for (const r of emRows || []) {
+            if (!r?.customer_id || !r?.date_received) continue;
+            // Eerste hit per customer_id wint (DESC-sort).
+            if (!maxEmailByCustomer.has(r.customer_id)) {
+              maxEmailByCustomer.set(r.customer_id, r.date_received);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[inbox-conversations-list] email-max agg fail:', e?.message || e);
+    }
 
     // ── Wanbetaler-verrijking (gebatcht, geen N+1) ──────────────────────
     // 1 query op invoices voor alle unieke customer_ids in de lijst; client-
@@ -278,6 +332,15 @@ export default async function handler(req, res) {
       const custEmail = (cust?.email || '').trim().toLowerCase();
       const emailUnread = custEmail ? (emailUnreadByEmail.get(custEmail) || 0) : 0;
       const waUnread = row.unread_count || 0;
+      // Effective sort-timestamp: MAX(WA-last, laatste e-mail). Als geen
+      // van beide → fallback op last_message_at (kan NULL zijn — dan achter
+      // in de lijst).
+      const emailLast = row.customer_id ? maxEmailByCustomer.get(row.customer_id) : null;
+      const waTs      = row.last_message_at ? Date.parse(row.last_message_at) : 0;
+      const emTs      = emailLast ? Date.parse(emailLast) : 0;
+      const lastActivityAt = (emTs > waTs)
+        ? emailLast
+        : (row.last_message_at || null);
       return {
         id: row.id,
         phone_number: row.phone_number,
@@ -290,6 +353,8 @@ export default async function handler(req, res) {
         attendee_event_starts_at: attendeeEventStartsAt,
         status: row.status,
         last_message_at: row.last_message_at,
+        last_activity_at: lastActivityAt,          // MAX(WA, e-mail) — sort-key
+        last_email_at: emailLast || null,          // debug/UI-hint
         last_message_preview: row.last_message_preview,
         unread_count: waUnread,                    // WA-unread (backward-compat)
         email_unread_count: emailUnread,           // e-mail-unread (nieuw)
@@ -304,9 +369,18 @@ export default async function handler(req, res) {
       };
     });
 
+    // Server-side sort op last_activity_at DESC + snijd op gevraagde limit.
+    // Zie header van query-blok voor rationale (dubbele-page heuristiek).
+    items.sort((a, b) => {
+      const ta = a.last_activity_at ? Date.parse(a.last_activity_at) : 0;
+      const tb = b.last_activity_at ? Date.parse(b.last_activity_at) : 0;
+      return tb - ta;
+    });
+    const itemsPage = items.slice(0, limit);
+
     return res.status(200).json({
-      items,
-      total: count || items.length,
+      items: itemsPage,
+      total: count || itemsPage.length,
       configured: true,
       module: moduleRaw,
       // Diagnostic voor de e-mail-unread-verrijking (fail-soft). Bij lege
