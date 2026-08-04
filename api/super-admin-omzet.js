@@ -33,6 +33,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { periodRange } from './_lib/nl-period.js';
 
 // Paginatie-helper (identiek patroon als dunning-engine.fetchAllRows). Inline
 // gehouden om cross-file import naar dunning-scope te vermijden.
@@ -110,9 +111,32 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Geen rechten (dashboard.module.access)' });
   }
 
+  // Periode-resolve (2026-08-04):
+  //   * Als caller een `period=dag|week|maand|jaar` param stuurt: server
+  //     berekent NL-tijdzone-aware boundaries via nl-period.js. Voorkomt
+  //     tijdzone-bug waarbij client `toISOString().slice(0,10)` = UTC-datum
+  //     stuurde → deals na middernacht NL werden gemist.
+  //   * Backward-compat: als caller alleen `from`/`to` (YYYY-MM-DD)
+  //     doorgeeft, gebruiken we die (voor custom ranges + oude callers).
+  //     Deze route zit alsnog met dezelfde tz-schokjes, maar is een
+  //     bewuste custom range dus geen "verkeerde default".
+  const periodParam = typeof req.query?.period === 'string' ? req.query.period.trim().toLowerCase() : null;
   const now = new Date();
-  const from = (req.query?.from || dayStr(new Date(now.getFullYear(), now.getMonth(), 1))).slice(0, 10);
-  const to   = (req.query?.to   || dayStr(now)).slice(0, 10);
+  let from, to, rangeFrom, rangeToExclusiveIso, rangeToLabel;
+  if (periodParam && ['dag', 'week', 'maand', 'jaar'].includes(periodParam)) {
+    const r = periodRange(periodParam, now);
+    from  = r.label;                                             // YYYY-MM-DD (NL) — label voor debug + client
+    to    = dayStr(new Date(r.endExclusive.getTime() - 1000));   // NL-laatste-dag van de periode voor label
+    rangeFrom          = r.start.toISOString();
+    rangeToExclusiveIso = r.endExclusive.toISOString();
+    rangeToLabel        = to;
+  } else {
+    from = (req.query?.from || dayStr(new Date(now.getFullYear(), now.getMonth(), 1))).slice(0, 10);
+    to   = (req.query?.to   || dayStr(now)).slice(0, 10);
+    rangeFrom            = `${from}T00:00:00.000Z`;
+    rangeToExclusiveIso  = new Date(`${to}T23:59:59.999Z`).toISOString();
+    rangeToLabel         = to;
+  }
   const groupBy = ['day', 'week', 'month'].includes(req.query?.group_by) ? req.query.group_by : 'month';
 
   try {
@@ -127,8 +151,7 @@ export default async function handler(req, res) {
     // Nu: scope de fetch al server-side op periode-range met een OR-clause
     // over accepted_at én signed_at. Pagineer voor de zeldzame edge case
     // dat >1000 deals in één periode getekend zijn (PostgREST default-cap).
-    const rangeFrom = `${from}T00:00:00.000Z`;
-    const rangeToExclusive = new Date(`${to}T23:59:59.999Z`).toISOString();
+    const rangeToExclusive = rangeToExclusiveIso;
     const dealsInPeriod = await fetchAllRows(() =>
       supabaseAdmin
         .from('deals')
@@ -142,13 +165,19 @@ export default async function handler(req, res) {
     );
 
     // Verdere client-side filter: strict inPeriod op de canonical signed-date
-    // (accepted_at wint) + defensieve check. Dedupt niet — DB-unique-key
-    // (deals.id) garandeert al unieke rijen; de OR-clause kan bij overlap
-    // (beide velden in periode) dezelfde rij returnen maar PostgREST doet
-    // dedup op primary key.
+    // (accepted_at wint) + defensieve check. Vergelijkt met echte Date-
+    // objecten tegen de UTC-boundaries — voor het period-pad respecteert
+    // dat de NL-tz. String-slice-compare (`d.slice(0,10) >= from`) faalt op
+    // NL-tz omdat 'from' YYYY-MM-DD is voor de NL-dag maar deal.signed
+    // ISO-UTC — deals in de vroege NL-nacht (na middernacht) hadden een
+    // UTC-datum een dag eerder en werden ten onrechte geskipt.
+    const rangeFromDate  = new Date(rangeFrom);
+    const rangeToExclDate = new Date(rangeToExclusiveIso);
     const acceptedInPeriod = (dealsInPeriod || []).filter((d) => {
       const signed = d.tl_quotation_accepted_at || d.tl_quotation_signed_at;
-      return signed && inPeriod(signed, from, to);
+      if (!signed) return false;
+      const s = new Date(signed);
+      return !isNaN(s.getTime()) && s >= rangeFromDate && s < rangeToExclDate;
     });
     const dealIds = acceptedInPeriod.map((d) => d.id);
 
@@ -186,10 +215,18 @@ export default async function handler(req, res) {
       }
     }
 
-    // 4) Aggregatie los vs abo per deal.
+    // 4) Aggregatie per deal (2026-08-04 gerefactored):
+    //   * losInclBtw     — deals ZONDER subs (traditionele losse verkoop)
+    //   * aboNieuwInclBtw — deals MET subs die in de periode getekend zijn
+    //                      (deal-waarde als "nieuwe verkoop" moment)
+    //   * totaal = los + aboNieuw (NIET los + MRR — dat gaf dubbeltelling
+    //     én miste Cabdi's €7.200-scenario waarbij deal wél met subs is
+    //     maar sub nog niet active/started binnen periode).
+    //   * MRR-snapshot (stap 5) blijft aparte tegel voor run-rate-view.
     let losInclBtw = 0;
+    let aboNieuwInclBtw = 0;
     let edgeDealsZonderLineitems = 0;
-    const trendMap = new Map();     // key -> { los, deals }
+    const trendMap = new Map();     // key -> { los, aboNieuw }
     for (const d of acceptedInPeriod) {
       const hasSubs = (subsByDeal.get(d.id) || []).length > 0;
       const lines   = linesByDeal.get(d.id) || [];
@@ -203,13 +240,14 @@ export default async function handler(req, res) {
       } else {
         inclBtw = sumInclBtw(lines);
       }
-      if (!hasSubs) losInclBtw += inclBtw;
-      // Trend: alleen 'los' hier (MRR-trend zit apart — voor snapshot van MRR
-      // is een lange-tijdreeks nodig die we in dit endpoint niet uitrollen).
+      if (hasSubs) aboNieuwInclBtw += inclBtw;
+      else         losInclBtw      += inclBtw;
+      // Trend: los EN aboNieuw als aparte reeksen voor stacked chart.
       const signed = d.tl_quotation_accepted_at || d.tl_quotation_signed_at;
       const pk = periodKey(signed, groupBy);
-      if (!trendMap.has(pk)) trendMap.set(pk, { period: pk, los_incl_btw: 0, abo_mrr_incl_btw: 0 });
-      if (!hasSubs) trendMap.get(pk).los_incl_btw += inclBtw;
+      if (!trendMap.has(pk)) trendMap.set(pk, { period: pk, los_incl_btw: 0, abo_nieuw_incl_btw: 0, abo_mrr_incl_btw: 0 });
+      if (hasSubs) trendMap.get(pk).abo_nieuw_incl_btw += inclBtw;
+      else         trendMap.get(pk).los_incl_btw       += inclBtw;
     }
 
     // 5) MRR-snapshot: actieve subs op einde periode. Per sub: som line_items
@@ -277,8 +315,12 @@ export default async function handler(req, res) {
     return res.status(200).json({
       kpis: {
         los_incl_btw:                   Math.round(losInclBtw * 100) / 100,
-        abo_mrr_incl_btw:               Math.round(mrrInclBtw * 100) / 100,
-        totaal_incl_btw:                Math.round((losInclBtw + mrrInclBtw) * 100) / 100,
+        abo_nieuw_incl_btw:             Math.round(aboNieuwInclBtw * 100) / 100,  // NIEUW: deal-waarde van getekende abo-deals in periode
+        abo_mrr_incl_btw:               Math.round(mrrInclBtw * 100) / 100,       // aparte snapshot voor lopende MRR
+        // Totaal = los + abo-nieuw. NIET los + MRR (bugfix Cabdi-scenario):
+        // MRR-snapshot mist deals waarvan sub nog niet 'active' is of
+        // start_date > to. Nieuwe verkoop = full deal-waarde op tekendatum.
+        totaal_incl_btw:                Math.round((losInclBtw + aboNieuwInclBtw) * 100) / 100,
         deal_count:                     acceptedInPeriod.length,
         edge_deals_zonder_lineitems:    edgeDealsZonderLineitems,
       },
@@ -289,7 +331,15 @@ export default async function handler(req, res) {
         { product_key: 'm24', label: '1-op-1 · 24 mnd',  count: productBuckets.m24, revenue_incl_btw: Math.round(productRevenue.m24 * 100) / 100 },
         { product_key: 'mem', label: 'Memberships',      count: productBuckets.mem, revenue_incl_btw: Math.round(productRevenue.mem * 100) / 100 },
       ],
-      meta: { from, to, group_by: groupBy },
+      meta: {
+        from, to, group_by: groupBy,
+        // NL-tz debug-info: wanneer client `?period=` stuurt, laten we
+        // zien welke exacte UTC-boundaries daaruit voortkwamen zodat
+        // devtools makkelijk kan valideren.
+        period: periodParam || null,
+        range_from_utc: rangeFrom,
+        range_to_exclusive_utc: rangeToExclusiveIso,
+      },
     });
   } catch (e) {
     console.error('[super-admin-omzet]', e?.message || e);

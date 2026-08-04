@@ -511,12 +511,19 @@ async function sadFetch(url) {
 // ── Data-loaders per kaart ────────────────────────────────────────────
 async function sadLoadOmzet() {
   const period = sadState.period;
-  const range = period === 'custom' && sadState.customFrom
-    ? { from: sadState.customFrom, to: sadState.customTo }
-    : sadPeriodRange(period);
   const group = sadGroupByFor(period === 'custom' ? 'maand' : period);
+  // Bij standaard-periodes (dag/week/maand/jaar): stuur `period=` en laat de
+  // server NL-tijdzone-aware boundaries berekenen (2026-08-04 fix). Voorkomt
+  // dat client-side sadPeriodRange (UTC-slice + rolling week) verkeerde
+  // datums levert. Bij 'custom': client stuurt from/to zoals eerst.
+  let qs;
+  if (period === 'custom' && sadState.customFrom) {
+    qs = `from=${encodeURIComponent(sadState.customFrom)}&to=${encodeURIComponent(sadState.customTo)}&group_by=${group}`;
+  } else {
+    qs = `period=${encodeURIComponent(period)}&group_by=${group}`;
+  }
   try {
-    const d = await sadFetch(`/api/super-admin-omzet?from=${range.from}&to=${range.to}&group_by=${group}`);
+    const d = await sadFetch(`/api/super-admin-omzet?${qs}`);
     const k = d.kpis || {};
     document.getElementById('sadKpiLos').textContent = sadFmtEur(k.los_incl_btw);
     document.getElementById('sadKpiMrr').textContent = sadFmtEur(k.abo_mrr_incl_btw);
@@ -680,11 +687,16 @@ function sadEsc(s) {
 // ── PR2: Leads per traject (page-brede period-picker stuurt deze kaart) ──
 async function sadLoadLeads() {
   const period = sadState.period;
-  const range = period === 'custom' && sadState.customFrom
-    ? { from: sadState.customFrom, to: sadState.customTo }
-    : sadPeriodRange(period);
+  // Zelfde pattern als sadLoadOmzet: standaard-periodes via `period=` naar
+  // server (NL-tz correct); custom houdt from/to (2026-08-04 fix).
+  let qs;
+  if (period === 'custom' && sadState.customFrom) {
+    qs = `from=${encodeURIComponent(sadState.customFrom)}&to=${encodeURIComponent(sadState.customTo)}`;
+  } else {
+    qs = `period=${encodeURIComponent(period)}`;
+  }
   try {
-    const d = await sadFetch(`/api/super-admin-leads-by-soort?from=${range.from}&to=${range.to}`);
+    const d = await sadFetch(`/api/super-admin-leads-by-soort?${qs}`);
     const total = (d.buckets || []).reduce((a, b) => a + (b.count || 0), 0);
     // Vul 4 tegels op key.
     for (const b of (d.buckets || [])) {
