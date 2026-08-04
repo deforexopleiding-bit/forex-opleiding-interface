@@ -6890,12 +6890,13 @@
 
     if (view === 'wanbetalers') {
       wireWanbetalersOnce();
-      // Default sub als nog niet gekozen — sinds nav-herontwerp is 'vandaag'
-      // het startscherm (Vandaag combineert KPI + Actie).
-      // Brok B stap 5: default startscherm is 'te-doen' (was 'vandaag').
+      // Default sub als nog niet gekozen. Historie: was 'vandaag' → 'te-doen'
+      // → nu 'inbox' (Gesprekken). Reden: bij openen wil je meteen de laatste
+      // klant-berichten zien; Te doen was voor operators een one-off lijst
+      // die vaak leeg was. Gesprekken is het meest-gebruikte panel.
       // Deep-links (?sub=…) blijven werken; _wbActiveSub wordt eerder gezet
       // in DOMContentLoaded als ?sub aanwezig is (regel ~12840).
-      const initialSub = _wbActiveSub || 'te-doen';
+      const initialSub = _wbActiveSub || 'inbox';
       setSubView(initialSub);
     } else {
       // Stop inbox auto-poll wanneer we de inbox-tab verlaten — bespaart requests.
