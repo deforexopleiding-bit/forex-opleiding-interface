@@ -16,6 +16,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { vindOfMaakAccount, zetGrant, telefoonE164, vanIso, totIso } from './_lib/lms-provisioning.js';
+import { stuurWelkom } from './_lib/welkom.js';
 
 const EMAIL_RE = /.+@.+\..+/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -38,6 +39,8 @@ export default async function handler(req, res) {
   const achternaam = body.achternaam ? String(body.achternaam).trim() : null;
   const telefoon = body.telefoon ? String(body.telefoon).trim() : null;
   const gekozen = Array.isArray(body.producten) ? body.producten : [];
+  // Welkomstbevestiging standaard AAN; alleen uit als expliciet false meegestuurd.
+  const welkomstmail = body.welkomstmail !== false;
 
   if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'Geldig e-mailadres vereist' });
   if (!gekozen.length) return res.status(400).json({ error: 'Kies minstens één product' });
@@ -91,7 +94,20 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(200).json({ ok: true, lead_id: leadId, gebruiker_id: gebruikerId });
+    // 4) Welkomstbevestiging (net als een website-aanmelding). FAIL-SOFT: de lead
+    //    + het account + de grants zijn al opgeslagen; een mailfout mag dit NOOIT
+    //    breken. Alleen e-mail; WhatsApp-haak zit in _lib/welkom.js voor later.
+    let welkom = { verstuurd: false };
+    if (welkomstmail && email) {
+      try {
+        const r = await stuurWelkom({ email, voornaam, kanalen: ['email'] });
+        welkom = { verstuurd: !!r.find((x) => x.kanaal === 'email' && x.ok), resultaten: r };
+      } catch (e) {
+        console.error('[lead-handmatig-toevoegen] welkom (soft):', e?.message || e);
+      }
+    }
+
+    return res.status(200).json({ ok: true, lead_id: leadId, gebruiker_id: gebruikerId, welkom });
   } catch (e) {
     console.error('[lead-handmatig-toevoegen]', e.message);
     return res.status(500).json({ error: e.message });

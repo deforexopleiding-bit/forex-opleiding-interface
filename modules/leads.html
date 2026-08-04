@@ -188,6 +188,12 @@
         <label>Toegang (vink producten aan; eerste = primair traject)</label>
         <div class="prod-list" id="aProducten"><div class="sub" style="padding:8px">Producten laden…</div></div>
       </div>
+      <div class="fld">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal">
+          <input type="checkbox" id="aWelkom" checked style="width:auto" />
+          Stuur welkomstbevestiging per e-mail
+        </label>
+      </div>
       <div class="m-err" id="aErr" style="display:none"></div>
       <div class="modal-foot">
         <button type="button" class="k-annuleer" id="aAnnuleer">Annuleren</button>
@@ -428,6 +434,7 @@ async function submitAdd(){
         achternaam: document.getElementById('aAchternaam').value.trim()||null,
         email, telefoon: document.getElementById('aTelefoon').value.trim()||null,
         producten,
+        welkomstmail: document.getElementById('aWelkom').checked,
       }) });
     const d=await r.json().catch(()=>({}));
     if(!r.ok){ err.textContent=d.error||('HTTP '+r.status); err.style.display='block'; btn.disabled=false; btn.textContent='Toevoegen'; return; }
