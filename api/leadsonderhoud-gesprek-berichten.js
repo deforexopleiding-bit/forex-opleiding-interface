@@ -41,13 +41,15 @@ export default async function handler(req, res) {
   try {
     const { data: lead, error: leadErr } = await supabaseAdmin
       .from('leads')
-      .select('id, voornaam, achternaam, email, telefoon_e164, soort')
+      .select('id, voornaam, achternaam, email, telefoon_e164, traject')
       .eq('id', leadId).maybeSingle();
     if (leadErr) throw leadErr;
     if (!lead) return res.status(404).json({ error: 'Lead niet gevonden' });
 
+    // Traject-type staat sinds Feature 2 in leads.traject (soort = herkomst);
+    // trajectSlugs() is lowercase, dus case-insensitive vergelijken.
     const slugs = await trajectSlugs();
-    if (!slugs.has(lead.soort)) {
+    if (!slugs.has((lead.traject || '').toLowerCase())) {
       return res.status(403).json({ error: 'Deze lead zit niet in een traject' });
     }
 

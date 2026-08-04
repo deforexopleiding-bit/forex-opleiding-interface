@@ -49,12 +49,14 @@ export default async function handler(req, res) {
 
   try {
     const { data: lead, error: leadErr } = await supabaseAdmin
-      .from('leads').select('id, voornaam, achternaam, email, soort').eq('id', leadId).maybeSingle();
+      .from('leads').select('id, voornaam, achternaam, email, traject').eq('id', leadId).maybeSingle();
     if (leadErr) throw leadErr;
     if (!lead) return res.status(404).json({ error: 'Lead niet gevonden' });
 
+    // Traject-type staat sinds Feature 2 in leads.traject (soort = herkomst);
+    // trajectSlugs() is lowercase, dus case-insensitive vergelijken.
     const slugs = await trajectSlugs();
-    if (!slugs.has(lead.soort)) return res.status(403).json({ error: 'Deze lead zit niet in een traject' });
+    if (!slugs.has((lead.traject || '').toLowerCase())) return res.status(403).json({ error: 'Deze lead zit niet in een traject' });
     if (!lead.email) return res.status(409).json({ error: 'Deze lead heeft geen e-mailadres' });
 
     const afzender = mailAfzender();
@@ -118,7 +120,7 @@ export default async function handler(req, res) {
     try {
       await supabaseAdmin.from('berichten_log').insert({
         lead_id: lead.id, soort: 'handmatig-antwoord', kanaal: 'mail', naar,
-        traject: lead.soort, agent: 'handmatig', status: 'verstuurd',
+        traject: lead.traject, agent: 'handmatig', status: 'verstuurd',
         verstuurd_op: nu, extern_id: res2.messageId || null,
       });
     } catch (logEx) {

@@ -47,20 +47,25 @@ export async function haalLijn() {
 }
 
 // De slugs van de trajecten (voor "zit deze lead in een traject?").
+// LOWERCASE: het traject-type op de lead is gemengd van hoofdletter (bv.
+// 'Membership'), dus we vergelijken overal case-insensitive tegen deze set.
 export async function trajectSlugs() {
   const { data } = await supabaseAdmin.from('onderhoud_trajecten').select('slug');
-  return new Set((data || []).map((t) => t.slug).filter(Boolean));
+  return new Set((data || []).map((t) => (t.slug || '').toLowerCase()).filter(Boolean));
 }
 
 // De leads die in een traject zitten, met de velden die het postvak nodig heeft.
-// "In een traject" = lead.soort komt overeen met een slug uit onderhoud_trajecten.
+// "In een traject" = leads.traject komt (case-insensitive) overeen met een slug
+// uit onderhoud_trajecten. Sinds Feature 2 is leads.soort = herkomst en staat het
+// traject-type in leads.traject; ilike per slug = hoofdletter-ongevoelige match.
 export async function leadsInTraject() {
   const slugs = [...(await trajectSlugs())];
   if (!slugs.length) return [];
+  const orFilter = slugs.map((s) => `traject.ilike.${s}`).join(',');
   const { data } = await supabaseAdmin
     .from('leads')
-    .select('id, voornaam, achternaam, email, telefoon_e164, soort')
-    .in('soort', slugs)
+    .select('id, voornaam, achternaam, email, telefoon_e164, traject')
+    .or(orFilter)
     .limit(10000);
   return data || [];
 }
