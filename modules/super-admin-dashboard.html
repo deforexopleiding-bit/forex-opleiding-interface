@@ -348,12 +348,18 @@
         <span id="sadOmzetTag" style="font-size:11px;color:var(--sad-dim)">deze maand</span>
       </div>
       <div class="sad-otop">
-        <div class="sad-ot"><div class="sad-l">Losse verkopen</div><div class="sad-v">€<span id="sadKpiLos">—</span></div><div class="sad-chg" id="sadKpiLosSub">—</div></div>
+        <!-- 'Losse verkopen'-tegel verwijderd (2026-08-04): toonde alleen
+             deals zonder subscription-koppeling, wat bij dag-filter
+             misleidend was (bv. 1 van 2 offertes zichtbaar). 'Totale
+             verkoop offertes incl. btw' hieronder telt los + abo-nieuw
+             (sinds #1094) en dekt het volledige beeld. -->
         <div class="sad-ot mrr"><div class="sad-l">Abonnementen (MRR)</div><div class="sad-v">€<span id="sadKpiMrr">—</span></div><div class="sad-chg" id="sadKpiMrrSub">—</div></div>
-        <div class="sad-ot"><div class="sad-l">Totaal incl. btw</div><div class="sad-v">€<span id="sadKpiTot">—</span></div><div class="sad-chg" id="sadKpiTotSub">— offertes</div></div>
+        <div class="sad-ot"><div class="sad-l">Totale verkoop offertes incl. btw</div><div class="sad-v">€<span id="sadKpiTot">—</span></div><div class="sad-chg" id="sadKpiTotSub">— offertes</div></div>
       </div>
       <div class="sad-chart-wrap"><canvas id="sadOmzetChart"></canvas></div>
-      <div class="sad-lg"><span><i style="background:var(--brand-400)"></i>Losse verkopen</span><span><i style="background:var(--accent)"></i>Abonnementen (MRR)</span></div>
+      <!-- Chart toont los + abo-nieuw (event-based, telt op tot 'Totale
+           verkoop offertes'). MRR is snapshot en zit in aparte tegel. -->
+      <div class="sad-lg"><span><i style="background:var(--brand-400)"></i>Losse verkopen</span><span><i style="background:var(--accent)"></i>Abonnement-nieuw</span></div>
       <div class="sad-prodstrip">
         <div class="sad-ps-lbl">Verkocht <span id="sadPsPeriod">deze maand</span></div>
         <div class="sad-ps-grid" id="sadPsGrid">
@@ -525,7 +531,8 @@ async function sadLoadOmzet() {
   try {
     const d = await sadFetch(`/api/super-admin-omzet?${qs}`);
     const k = d.kpis || {};
-    document.getElementById('sadKpiLos').textContent = sadFmtEur(k.los_incl_btw);
+    // 'sadKpiLos'-element bestaat niet meer (tegel verwijderd 2026-08-04).
+    // los_incl_btw is nog wel in response voor debug; niet UI-gebonden.
     document.getElementById('sadKpiMrr').textContent = sadFmtEur(k.abo_mrr_incl_btw);
     document.getElementById('sadKpiTot').textContent = sadFmtEur(k.totaal_incl_btw);
     document.getElementById('sadKpiTotSub').textContent = (k.deal_count || 0) + ' offertes';
@@ -555,7 +562,7 @@ async function sadLoadOmzet() {
     sadRenderChart(d.trend || []);
   } catch (e) {
     console.warn('[sad-omzet]', e?.message || e);
-    document.getElementById('sadKpiLos').textContent = 'fout';
+    // 'sadKpiLos'-element bestaat niet meer (tegel verwijderd 2026-08-04).
     document.getElementById('sadKpiMrr').textContent = 'fout';
     document.getElementById('sadKpiTot').textContent = 'fout';
   }
@@ -567,14 +574,18 @@ function sadRenderChart(trend) {
   if (sadState.chart) sadState.chart.destroy();
   const labels = trend.map((t) => t.period);
   const losData = trend.map((t) => t.los_incl_btw || 0);
-  const abo = trend.map((t) => t.abo_mrr_incl_btw || 0);
+  // Was `abo_mrr_incl_btw` (snapshot van lopende MRR) — dat is timing-
+  // inconsistent met los_incl_btw (event-based). Nu `abo_nieuw_incl_btw`
+  // (deal-waarde van getekende abo-deals in periode, uit #1094) — beide
+  // event-based, telt op tot totaal_incl_btw dat in de bovenste tegel staat.
+  const aboNieuw = trend.map((t) => t.abo_nieuw_incl_btw || 0);
   sadState.chart = new Chart(canvas, {
     type: 'line',
     data: {
       labels,
       datasets: [
-        { label: 'Losse verkopen', data: losData, borderColor: '#46a5cc', backgroundColor: 'rgba(70,165,204,.15)', fill: true, tension: 0.3, borderWidth: 2 },
-        { label: 'Abonnementen (MRR)', data: abo, borderColor: '#46e0c8', backgroundColor: 'rgba(70,224,200,.10)', fill: true, tension: 0.3, borderWidth: 2 },
+        { label: 'Losse verkopen',   data: losData,  borderColor: '#46a5cc', backgroundColor: 'rgba(70,165,204,.15)', fill: true, tension: 0.3, borderWidth: 2 },
+        { label: 'Abonnement-nieuw', data: aboNieuw, borderColor: '#46e0c8', backgroundColor: 'rgba(70,224,200,.10)', fill: true, tension: 0.3, borderWidth: 2 },
       ],
     },
     options: {
