@@ -62,13 +62,18 @@ export default async function handler(req, res) {
 
     const primair = String(gekozen[0].slug);
 
-    // 1) LEAD aanmaken.
-    const { data: lead, error: lErr } = await supabaseAdmin.from('leads').insert({
-      voornaam, achternaam, email, telefoon, telefoon_e164: telefoonE164(telefoon),
-      bron: 'handmatig', soort: primair, traject: primair,
-      afwijzer: false, antwoorden: [], status: 'nieuw', toestemming: false,
-    }).select('id').single();
-    if (lErr) throw new Error('leads insert: ' + lErr.message);
+    // 1) LEAD aanmaken/bijwerken via de centrale upsert (uniek op lower(email)).
+    // Bestaat het adres al, dan wordt de lead bijgewerkt naar deze interactie
+    // (geen dubbele rij, geen botsing); daarna gaan account + grants gewoon door.
+    // afwijzer/antwoorden/status/toestemming bewust NIET meesturen: op een
+    // bestaande lead moeten die behouden blijven (upsert_lead COALESCE't ze).
+    const { data: lead, error: lErr } = await supabaseAdmin.rpc('upsert_lead', {
+      p: {
+        voornaam, achternaam, email, telefoon, telefoon_e164: telefoonE164(telefoon),
+        bron: 'handmatig', soort: primair, traject: primair,
+      },
+    });
+    if (lErr) throw new Error('upsert_lead: ' + lErr.message);
     const leadId = lead.id;
 
     // 2) ACCOUNT (venster envelopeert alle grants, voor legacy venster-checks).

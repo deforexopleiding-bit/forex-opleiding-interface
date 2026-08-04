@@ -107,11 +107,18 @@ export default async function handler(req, res) {
       }
     }
 
-    // 1) Basisvelden op de lead.
+    // 1) Basisvelden op de lead. Met de unieke index op lower(email) kan een
+    // e-mailwijziging botsen met een andere lead → 23505. Vang dat netjes af
+    // als 409 (zoals de account-collisie hierboven) i.p.v. een generieke 500.
     const { error: uErr } = await supabaseAdmin.from('leads').update({
       voornaam, achternaam, email, telefoon, telefoon_e164: telefoonE164(telefoon),
     }).eq('id', leadId);
-    if (uErr) throw new Error('leads update: ' + uErr.message);
+    if (uErr) {
+      if (uErr.code === '23505' || /duplicate key|leads_email_uniek/i.test(uErr.message || '')) {
+        return res.status(409).json({ error: 'Dit e-mailadres is al in gebruik door een andere lead.' });
+      }
+      throw new Error('leads update: ' + uErr.message);
+    }
 
     // 2) Account bijwerken (email + naam) als het bestaat.
     if (account) {
