@@ -2,6 +2,7 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { supabaseAdmin as supabase, checkCronAuth } from './supabase.js';
 import { categorize } from './email-agent.js';
+import { resolveCustomerIdsForEmails } from './_lib/email-customer-match.js';
 
 // Spiegelt de ACCOUNTS array uit emails.js — voeg nieuwe mailboxen op één plek toe
 const ACCOUNTS = [
@@ -237,41 +238,20 @@ async function syncMailbox({ account, host, port, boxStart }) {
       // ── Pass 3.5 (fase 4 blok 2): koppel mail aan klant via from_address ──
       // Match-regel: lower(from_address) = lower(customers.email) waarbij de
       // klant niet gearchiveerd/geanonimiseerd is. EXACT 1 hit → customer_id;
-      // 0 of >1 hits → NULL (correctie via /api/email-message-link-customer).
-      // Fail-soft: elke lookup-fout laat customer_id NULL en logt door.
-      //
-      // Batch-optimized: alle unieke from_addresses in 1 query ophalen zodat we
-      // niet N lookups doen per invocation. Bij 50 mails = 1 extra query max.
+      // Klant-koppeling delegeren aan shared helper (2026-08-04). Waarom een
+      // aparte module: de exact-case-match + harde ambiguity-guard zetten
+      // 8.580 van 9.155 mails (94%) op customer_id=NULL in productie. De
+      // helper doet case-insensitieve match (ilike) + deterministische
+      // tie-breaker bij dubbele customers. Dezelfde helper wordt gebruikt
+      // door /api/backfill-email-customer-id zodat live-sync en backfill
+      // gegarandeerd hetzelfde antwoord geven. Zie api/_lib/email-customer-match.js
+      // voor rationale + ranking-regels.
       try {
-        const uniqAddrs = Array.from(new Set(
-          rows.map((r) => (r.from_address || '').toLowerCase()).filter(Boolean)
-        ));
-        if (uniqAddrs.length > 0) {
-          const { data: matched, error: matchErr } = await supabase
-            .from('customers')
-            .select('id, email')
-            .in('email', uniqAddrs)  // Supabase kan case-insensitive niet met .in — we filteren client-side
-            .is('archived_at', null)
-            .is('anonymized_at', null);
-          if (!matchErr && Array.isArray(matched)) {
-            // Group by lower-email → array van customer_ids. >1 = ambigu.
-            const byAddr = new Map();
-            for (const c of matched) {
-              const key = String(c.email || '').toLowerCase();
-              if (!key) continue;
-              if (!byAddr.has(key)) byAddr.set(key, []);
-              byAddr.get(key).push(c.id);
-            }
-            for (const r of rows) {
-              const key = String(r.from_address || '').toLowerCase();
-              const list = byAddr.get(key);
-              if (list && list.length === 1) {
-                r.customer_id = list[0];
-              } else {
-                r.customer_id = null; // 0 of >1 hits
-              }
-            }
-          }
+        const fromAddrs = rows.map((r) => r.from_address).filter(Boolean);
+        const idByAddr = await resolveCustomerIdsForEmails(supabase, fromAddrs);
+        for (const r of rows) {
+          const key = String(r.from_address || '').trim().toLowerCase();
+          r.customer_id = key ? (idByAddr.get(key) || null) : null;
         }
       } catch (matchLookupErr) {
         console.warn(`[sync-emails] customer-match lookup failed ${account.mailbox}:`, matchLookupErr?.message || matchLookupErr);
