@@ -15740,6 +15740,41 @@
   // Gebruikt dezelfde endpoint + query-params als loadInboxConvList (statusFilter,
   // search) zodat de gemergde array consistent blijft met wat de user zou zien
   // na een fresh load.
+  // Whitelist van velden die de delta-refresh WEL uit een server-response
+  // mag overschrijven op een bestaand item. Fields NIET in deze lijst blijven
+  // client-side authoritative — met name de unread-counters:
+  //   * `unread_count` (WA) en `email_unread_count` (mail) en `total_unread`
+  //     worden door openInboxConv/mark-read op 0 gezet client-side; de 60s
+  //     IMAP-cache in email-unread-per-customer.js is niet betrouwbaar
+  //     genoeg om die 0 te overschrijven ("badge komt terug" na mark-read
+  //     werd hier veroorzaakt).
+  //   * `customer_name`, `phone_number`, `display_name`, `attendee_*` etc.
+  //     zijn stabiel — geen reden om ze in een poll te herwriten en risico
+  //     op flicker bij re-render.
+  // De whitelist bevat alleen wat *daadwerkelijk* kan veranderen tussen
+  // twee polls: sortering, preview-tekst, status, wanbetaler-tellers.
+  const _INBOX_CONV_MERGE_WHITELIST = new Set([
+    'last_activity_at',
+    'last_message_at',
+    'last_message_preview',
+    'last_inbound_at',
+    'can_send_text',
+    'status',
+    'is_debtor',
+    'open_invoice_count',
+    'total_open_cents',
+  ]);
+
+  function _mergeConvWhitelist(cur, upd) {
+    if (!cur || !upd) return cur;
+    for (const key of _INBOX_CONV_MERGE_WHITELIST) {
+      if (Object.prototype.hasOwnProperty.call(upd, key)) {
+        cur[key] = upd[key];
+      }
+    }
+    return cur;
+  }
+
   async function _inboxDeltaRefreshTopPage() {
     const list = document.getElementById('inboxConvList');
     if (!list) return;
@@ -15753,6 +15788,14 @@
     const d = await r.json().catch(() => ({}));
     const fresh = Array.isArray(d.items) ? d.items : [];
 
+    // Empty-response guard: bij een lege fresh-set + bestaande items op scherm
+    // NIET wissen. Kan voorkomen bij een server-side race (IMAP-timeout, korte
+    // cache-glitch in inbox-conversations-list, of een tussentijdse filter-
+    // mismatch). Volgende poll (6s later) corrigeert vanzelf. Zonder deze
+    // guard "verdween" de lijst en kwam pas terug bij scrollen — bewezen
+    // regressie sinds PR #1081.
+    if (fresh.length === 0 && _inboxConvs.length > 0) return;
+
     // Bouw id-based lookup van de nieuwe top-page.
     const freshById = new Map(fresh.map((it) => [it.id, it]));
     // 1) Update-in-place voor bestaande items die in de fresh set zitten.
@@ -15760,9 +15803,10 @@
       const cur  = _inboxConvs[i];
       const upd  = freshById.get(cur.id);
       if (upd) {
-        // Merge — bewaar object-identiteit indien mogelijk zodat externe
-        // referenties niet kapot gaan.
-        _inboxConvs[i] = Object.assign(cur, upd);
+        // Whitelist-merge i.p.v. Object.assign — voorkomt dat unread_count /
+        // email_unread_count / total_unread door de 60s server-cache
+        // overschreven worden (badge kwam terug na mark-read).
+        _mergeConvWhitelist(cur, upd);
         freshById.delete(cur.id);
       }
     }
@@ -30865,13 +30909,28 @@
   // We patchen niet het bestaande openInboxConv — we wachten tot de WA-render
   // klaar is, checken de flag, en vervangen dan de inhoud van #inboxMessages
   // door de unified render. Bij flag UIT: no-op = bestaande inbox intact.
+  //
+  // Same-conv guard: openInboxConv muteert #inboxThreadName 2× (pre-fill uit
+  // conv-list-cache + real header uit fetch-response). De MutationObserver
+  // triggert dus 2× per open, wat 2 unified-fetches + 2 innerHTML-replaces
+  // veroorzaakte. Track de laatst-verwerkte convId + timestamp; sla over
+  // als binnen dezelfde open (2s throttle) al gedraaid.
   const _origWbxF4OnConvChanged = _wbxF4OnConvChanged;
+  let _wbxF4LastConvId = null;
+  let _wbxF4LastConvAt = 0;
   _wbxF4OnConvChanged = async function () {
     _origWbxF4OnConvChanged();
     // Wacht kort tot de bestaande WA-render klaar is (loadInboxMessages doet 'em
     // asynchroon; we polling-triggeren pas nadat #inboxMessages ge-render'd is).
     const convId = typeof _inboxActiveConvId !== 'undefined' ? _inboxActiveConvId : null;
     if (!convId || !_wbxF4CurrentCustId) return;
+    // Guard: als dezelfde convId binnen 2s opnieuw langskomt (2e header-
+    // mutatie in openInboxConv), skip de unified-fetch — anders overschrijft
+    // 'ie de correcte render 2× kort na elkaar.
+    const nowMs = Date.now();
+    if (convId === _wbxF4LastConvId && (nowMs - _wbxF4LastConvAt) < 2000) return;
+    _wbxF4LastConvId = convId;
+    _wbxF4LastConvAt = nowMs;
     const enabled = await _wbxF4EnsureUnifiedFlag();
     if (!enabled) return; // flag UIT = geen override
     // Delay 250ms zodat de bestaande WA-render zijn eerste paint heeft gedaan.
@@ -31007,6 +31066,28 @@
         cursor:pointer; font-size:12px; font-weight:500;
       }
       .f4u-reply-btn:hover { background:#0284c7; border-color:#0284c7; }
+      /* WA media in unified thread — spiegelt pad A styling (finance.html
+         :14074-14084) zodat img/video/audio/doc consistent tussen paden. */
+      .f4u-wa-media { margin-bottom: 6px; }
+      .f4u-wa-media-img { display:inline-block; line-height:0; border-radius:6px; overflow:hidden; }
+      .f4u-wa-media-img img {
+        max-width:240px; max-height:240px; display:block;
+        border-radius:6px;
+      }
+      .f4u-wa-media-video, .f4u-wa-media-audio {
+        max-width:280px; max-height:220px; display:block; border-radius:6px;
+      }
+      .f4u-wa-media-doc {
+        display:inline-flex; align-items:center; gap:6px;
+        padding:8px 10px; border-radius:6px;
+        background:rgba(0,0,0,0.06); color:inherit;
+        text-decoration:none; font-size:12.5px;
+      }
+      [data-theme="dark"] .f4u-wa-media-doc { background:rgba(255,255,255,0.08); }
+      .f4u-wa-media-icon { font-size:14px; line-height:1; }
+      .f4u-wa-media-hint {
+        font-size:12px; color:var(--wbx-faint,#94a3b8); font-style:italic;
+      }
     `;
     document.head.appendChild(st);
   }
@@ -31075,12 +31156,58 @@
             </div>
           </div>`;
       }
-      // WhatsApp: gewone bubble met body (pre-wrap voor line-breaks).
+      // WhatsApp: media-render + caption. Consistent met pad A
+      // (_inboxRenderMessages regel 14108-14140). Pad B's endpoint plaatst
+      // media_url/media_type in `it.meta.*`, niet top-level. Body-fallback
+      // in endpoint (inbox-thread-unified.js:173) genereert `[image]` als
+      // caption leeg is — die tekst moeten we NIET tonen als er ook media is,
+      // anders zag user "[image]" i.p.v. de img zelf (bewezen bug in
+      // Glenn Akinsola's thread).
+      const mUrl  = it.meta?.media_url  || null;
+      const mType = it.meta?.media_type || null;
+      const hasMediaUrl    = !!(mUrl && !/^meta-media-id:/i.test(mUrl));
+      const hasPlaceholder = !!(mType && (!mUrl || /^meta-media-id:/i.test(mUrl || '')));
+      let waMediaHtml = '';
+      if (hasMediaUrl) {
+        const filename = it.body || '';
+        if (mType === 'image' || mType === 'sticker') {
+          waMediaHtml = `<a href="${escHtml(mUrl)}" target="_blank" rel="noopener" class="f4u-wa-media-img"><img src="${escHtml(mUrl)}" alt="afbeelding"/></a>`;
+        } else if (mType === 'video') {
+          waMediaHtml = `<video controls preload="metadata" class="f4u-wa-media-video"><source src="${escHtml(mUrl)}"/>Video niet af te spelen — <a href="${escHtml(mUrl)}" target="_blank" rel="noopener">download</a></video>`;
+        } else if (mType === 'audio') {
+          waMediaHtml = `<audio controls preload="metadata" class="f4u-wa-media-audio"><source src="${escHtml(mUrl)}"/>Audio niet af te spelen — <a href="${escHtml(mUrl)}" target="_blank" rel="noopener">download</a></audio>`;
+        } else if (mType === 'document') {
+          const displayName = filename || 'Document';
+          waMediaHtml = `<a href="${escHtml(mUrl)}" target="_blank" rel="noopener" class="f4u-wa-media-doc"><span class="f4u-wa-media-icon">${_mediaTypeIcon('document')}</span><span>${escHtml(displayName)}</span></a>`;
+        } else {
+          waMediaHtml = `<a href="${escHtml(mUrl)}" target="_blank" rel="noopener">Bijlage openen (${escHtml(mType)})</a>`;
+        }
+      } else if (hasPlaceholder) {
+        // Media niet gedownload of Meta CDN TTL verlopen. Zelfde tijd-heuristiek
+        // als pad A (< 1u = "laadt…", ouder = "niet meer beschikbaar").
+        const ageMs = it.at ? (Date.now() - new Date(it.at).getTime()) : 0;
+        const isFresh = ageMs > 0 && ageMs < 3600_000;
+        const label = _mediaTypeLabel(mType);
+        waMediaHtml = isFresh
+          ? `<div class="f4u-wa-media-hint">${_mediaTypeIcon(mType)} ${escHtml(label)} — bijlage laadt…</div>`
+          : `<div class="f4u-wa-media-hint">${_mediaTypeIcon(mType)} ${escHtml(label)} niet meer beschikbaar</div>`;
+      }
+      // Body-tekst: als er echte media is (URL of placeholder) → gebruik alleen
+      // caption (of leeg). Anders → toon `it.body` (kan template-label of
+      // klant-tekst zijn). Filter `[image]`-fallback expliciet uit want
+      // die genereert het pad-B endpoint óók bij media-msgs zonder caption.
+      let waBody = it.body || '';
+      if ((hasMediaUrl || hasPlaceholder) && /^\[(image|sticker|video|audio|document|voice)\]$/i.test(waBody)) {
+        waBody = ''; // caption-loze media — mediaHtml doet de visuele render
+      }
+      const waBodyHtml = waBody ? `<div class="f4u-bubble-body">${escHtml(waBody)}</div>` : '';
+      const waMediaBlock = waMediaHtml ? `<div class="f4u-wa-media">${waMediaHtml}</div>` : '';
       return `
         <div class="f4u-row ${dirClass}">
           ${meta}
           <div class="f4u-bubble">
-            <div class="f4u-bubble-body">${escHtml(it.body || '')}</div>
+            ${waMediaBlock}
+            ${waBodyHtml}
           </div>
         </div>`;
     }).join('');
