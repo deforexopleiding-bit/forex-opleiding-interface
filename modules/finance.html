@@ -9024,12 +9024,14 @@
         return;
       }
       wireInboxOnce();
-      loadInboxConvList().then(() => maybeOpenDeepLinkedConversation()).catch(() => {});
+      _inboxDiag('ensureInboxLoaded:INIT_PATH', {});
+      loadInboxConvList('ensureInboxLoaded/init').then(() => maybeOpenDeepLinkedConversation()).catch(() => {});
       startInboxPolling();
       _inboxInitialized = true;
     } else if (canInboxView) {
       // Re-entry: poll opnieuw starten + verse data.
-      loadInboxConvList().then(() => maybeOpenDeepLinkedConversation()).catch(() => {});
+      _inboxDiag('ensureInboxLoaded:REENTRY_PATH', {});
+      loadInboxConvList('ensureInboxLoaded/reentry').then(() => maybeOpenDeepLinkedConversation()).catch(() => {});
       startInboxPolling();
     }
   }
@@ -13691,6 +13693,20 @@
     const savedScrollTop = list.scrollTop;
     const filtered = _inboxApplyClientFilters(_inboxConvs);
     const sorted   = _inboxApplyClientSort(filtered);
+    // DIAG: laat zien of _inboxConvs door filter/sort ineen slinkt.
+    const uiState = _inboxUiState || {};
+    _inboxDiag('render:START', {
+      convsLen: _inboxConvs.length,
+      filteredLen: filtered.length,
+      sortedLen: sorted.length,
+      sortMode: uiState.sortMode,
+      statusFilter: uiState.statusFilter,
+      onlyUnread: !!uiState.onlyUnread,
+      onlyDebtor: !!uiState.onlyDebtor,
+      onlyLinked: !!uiState.onlyLinked,
+      onlyUnlinked: !!uiState.onlyUnlinked,
+      searchFilter: _inboxConvFilter || null,
+    });
     if (!sorted.length) {
       list.innerHTML = '<div style="padding:30px 20px;text-align:center;color:var(--text-faint);font-size:12.5px">Geen gesprekken die aan de filters voldoen.</div>';
       // Bij lege state geen scroll te restoren.
@@ -13858,11 +13874,27 @@
   let _inboxConvLoadingMore  = false;
   let _inboxConvScrollWired  = false;
 
-  async function loadInboxConvList() {
+  // ── Diagnostiek (2026-08-04): "1 gesprek zichtbaar bij openen"-bug ────
+  // Voegt gescoped console.debug logs toe zodat we kunnen zien welke code-
+  // pad `_inboxConvs` op 1 item zet terwijl de server 50 levert. Filter in
+  // DevTools Console op `[inbox-diag]`. Tijd + delta t.o.v. eerste log
+  // maakt races zichtbaar. Bewust `console.debug` (niet log/warn) zodat 't
+  // in productie stil is tenzij "Verbose" aan staat in DevTools.
+  let _inboxDiagStart = 0;
+  function _inboxDiag(step, data) {
+    try {
+      if (!_inboxDiagStart) _inboxDiagStart = Date.now();
+      const dt = Date.now() - _inboxDiagStart;
+      console.debug(`[inbox-diag] +${dt}ms ${step}`, data || '');
+    } catch (_) { /* nooit throwen */ }
+  }
+
+  async function loadInboxConvList(callerHint) {
     // FRESH load: reset offset + state. Callers zijn: init, filter-wissel,
     // status-tab-wissel, search-input-change, na 'markeer ongelezen' /
     // 'set-status' / 'engine-run'. Al deze acties moeten de lijst opnieuw
     // opbouwen vanaf de eerste pagina.
+    _inboxDiag('loadInboxConvList:START', { callerHint: callerHint || '(unknown)', prevLen: _inboxConvs.length });
     _inboxConvOffset      = 0;
     _inboxConvHasMore     = false;
     _inboxConvLoadingMore = false;
@@ -13874,20 +13906,26 @@
       params.set('offset', '0');
       params.set('status_filter', _inboxUiState.statusFilter);
       if (_inboxConvFilter) params.set('search', _inboxConvFilter);
-      const r = await window.AgentShared.apiFetch('/api/inbox-conversations-list?' + params.toString());
+      const url = '/api/inbox-conversations-list?' + params.toString();
+      _inboxDiag('loadInboxConvList:FETCH', { url });
+      const r = await window.AgentShared.apiFetch(url);
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
+        _inboxDiag('loadInboxConvList:HTTP_FAIL', { status: r.status });
         list.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:12px">'
           + esc(d.error || ('HTTP ' + r.status)) + '</div>';
         return;
       }
       const items = Array.isArray(d.items) ? d.items : [];
+      _inboxDiag('loadInboxConvList:RECEIVED', { itemCount: items.length, total: Number(d.total || 0), configured: d.configured });
       _inboxConvs        = items;
+      _inboxDiag('loadInboxConvList:ASSIGN_DONE', { convsLen: _inboxConvs.length });
       _inboxConvOffset   = items.length;
       _inboxConvHasMore  = _inboxConvOffset < Number(d.total || 0);
       _inboxRenderConvList();
       _wireInboxConvScrollOnce();
     } catch (e) {
+      _inboxDiag('loadInboxConvList:EXCEPTION', { message: e?.message });
       console.error('[loadInboxConvList]', e);
       list.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:12px">Fout: ' + esc(e.message) + '</div>';
     }
@@ -13901,6 +13939,7 @@
     const list = document.getElementById('inboxConvList');
     if (!list) return;
     _inboxConvLoadingMore = true;
+    _inboxDiag('loadMore:START', { prevLen: _inboxConvs.length, offset: _inboxConvOffset });
     try {
       const params = new URLSearchParams();
       params.set('limit',  String(INBOX_CONV_PAGE_SIZE));
@@ -13916,13 +13955,15 @@
         return;
       }
       const items = Array.isArray(d.items) ? d.items : [];
+      let appended = 0;
       if (items.length) {
         // Append (dedupe op id — voorkomt duplicates bij race met
         // status-updates die de sortering hebben verschoven).
         const seen = new Set(_inboxConvs.map((c) => c.id));
-        for (const it of items) if (!seen.has(it.id)) { _inboxConvs.push(it); seen.add(it.id); }
+        for (const it of items) if (!seen.has(it.id)) { _inboxConvs.push(it); seen.add(it.id); appended++; }
         _inboxConvOffset += items.length;
       }
+      _inboxDiag('loadMore:APPENDED', { received: items.length, appended, newLen: _inboxConvs.length });
       _inboxConvHasMore = _inboxConvOffset < Number(d.total || 0);
       _inboxRenderConvList();
     } catch (e) {
@@ -15810,15 +15851,17 @@
   async function _inboxDeltaRefreshTopPage() {
     const list = document.getElementById('inboxConvList');
     if (!list) return;
+    _inboxDiag('delta:START', { prevLen: _inboxConvs.length });
     const params = new URLSearchParams();
     params.set('limit',  String(INBOX_CONV_PAGE_SIZE));
     params.set('offset', '0');
     params.set('status_filter', _inboxUiState.statusFilter);
     if (_inboxConvFilter) params.set('search', _inboxConvFilter);
     const r = await window.AgentShared.apiFetch('/api/inbox-conversations-list?' + params.toString());
-    if (!r.ok) return; // stil falen — bestaande lijst blijft staan
+    if (!r.ok) { _inboxDiag('delta:HTTP_FAIL', { status: r.status }); return; }
     const d = await r.json().catch(() => ({}));
     const fresh = Array.isArray(d.items) ? d.items : [];
+    _inboxDiag('delta:RECEIVED', { freshLen: fresh.length, total: Number(d.total || 0), prevLen: _inboxConvs.length });
 
     // Empty-response guard: bij een lege fresh-set + bestaande items op scherm
     // NIET wissen. Kan voorkomen bij een server-side race (IMAP-timeout, korte
@@ -15845,6 +15888,7 @@
       totalReported >= topBefore                          // server WEET dat er meer zijn
     ) {
       console.warn('[delta-refresh] partial-response guard: fresh=' + fresh.length + ' vs top=' + topBefore + ' total=' + totalReported + ' — skip');
+      _inboxDiag('delta:GUARD_PARTIAL', { freshLen: fresh.length, topBefore, totalReported });
       return;
     }
 
@@ -15885,6 +15929,7 @@
     // Total bijwerken zodat has_more-berekening blijft kloppen na
     // updates elders in het systeem.
     _inboxConvHasMore = _inboxConvOffset < Number(d.total || 0);
+    _inboxDiag('delta:MERGE_DONE', { convsLen: _inboxConvs.length, hasMore: _inboxConvHasMore });
     _inboxRenderConvList(); // scroll-preserverend (zie _inboxRenderConvList)
   }
 
