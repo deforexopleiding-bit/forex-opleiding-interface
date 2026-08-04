@@ -40,6 +40,9 @@ export default async function handler(req, res) {
   const voornaam = body.voornaam ? String(body.voornaam).trim() : null;
   const achternaam = body.achternaam ? String(body.achternaam).trim() : null;
   const telefoon = body.telefoon ? String(body.telefoon).trim() : null;
+  // Herkomst (Feature 2) = leads.soort; alleen bijwerken als de dropdown een
+  // waarde meestuurt (leeg -> niet overschrijven).
+  const herkomst = body.herkomst ? String(body.herkomst).trim() : null;
   const grants = Array.isArray(body.grants) ? body.grants : [];
   const nieuw = Array.isArray(body.nieuw) ? body.nieuw : [];
 
@@ -112,6 +115,7 @@ export default async function handler(req, res) {
     // als 409 (zoals de account-collisie hierboven) i.p.v. een generieke 500.
     const { error: uErr } = await supabaseAdmin.from('leads').update({
       voornaam, achternaam, email, telefoon, telefoon_e164: telefoonE164(telefoon),
+      ...(herkomst ? { soort: herkomst } : {}),
     }).eq('id', leadId);
     if (uErr) {
       if (uErr.code === '23505' || /duplicate key|leads_email_uniek/i.test(uErr.message || '')) {

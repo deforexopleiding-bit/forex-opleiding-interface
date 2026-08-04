@@ -39,6 +39,8 @@ export default async function handler(req, res) {
   const achternaam = body.achternaam ? String(body.achternaam).trim() : null;
   const telefoon = body.telefoon ? String(body.telefoon).trim() : null;
   const gekozen = Array.isArray(body.producten) ? body.producten : [];
+  // Herkomst (Feature 2) = leads.soort; het product gaat naar traject.
+  const herkomst = body.herkomst ? String(body.herkomst).trim() : null;
   // Welkomstbevestiging standaard AAN; alleen uit als expliciet false meegestuurd.
   const welkomstmail = body.welkomstmail !== false;
 
@@ -73,7 +75,7 @@ export default async function handler(req, res) {
     const { data: lead, error: lErr } = await supabaseAdmin.rpc('upsert_lead', {
       p: {
         voornaam, achternaam, email, telefoon, telefoon_e164: telefoonE164(telefoon),
-        bron: 'handmatig', soort: primair, traject: primair,
+        bron: 'handmatig', soort: herkomst || 'onbekend', traject: primair,
       },
     });
     if (lErr) throw new Error('upsert_lead: ' + lErr.message);
