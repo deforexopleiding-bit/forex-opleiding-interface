@@ -37,7 +37,6 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { invalidateEmailUnreadForCustomer } from './_lib/email-unread-per-customer.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const SINCE_DATE = new Date('2026-01-01T00:00:00Z');
 
 // Zelfde map als in email-unread-per-customer.js — bewust NIET geëxporteerd
 // via die module om de import-boundary klein te houden. Bij uitbreiding
@@ -124,36 +123,70 @@ export default async function handler(req, res) {
 
   // IMAP-verbinding + STORE \Seen. Fail-safe wrapper zodat we nooit een
   // gebroken IMAP-sessie de UI laten crashen.
+  // ── STRATEGIE-WISSEL (2026-08-03 na Khalid-bug) ─────────────────────
+  // Vroeger: IMAP-search { from: custEmail, unseen: true, since: SINCE_DATE }.
+  // Twee failure-modes:
+  //   1) SINCE_DATE (2026-01-01) sluit oudere mails uit — thread toonde ze
+  //      wel maar mark-read miste ze
+  //   2) 'from'-adres-match faalt als klant vanaf ander adres mailt dan
+  //      customers.email (custEmail = klant-DB, IMAP-from = feitelijke afzender)
+  //   3) 'unseen: true' skipt mails die al eens door mailclient zijn gezien
+  //      maar door user als ongelezen zijn hersteld → thread telt 'em wel
+  //
+  // Nu: gebruik email_messages als authoritatieve bron. Alle rijen waar
+  // customer_id = deze klant zijn ZICHTBAAR in de thread. Hun imap_uid +
+  // mailbox is bekend. Pak die uids en STORE \Seen. Zo markeren we EXACT
+  // wat in de thread staat, ongeacht datum / from-adres / prior-seen-state.
+  const { data: emailRows, error: emErr } = await supabaseAdmin
+    .from('email_messages')
+    .select('mailbox, imap_uid')
+    .eq('customer_id', customerId)
+    .eq('mailbox', acct.user);  // scope op deze module-mailbox
+  if (emErr) {
+    console.error('[inbox-email-mark-read] email_messages lookup:', emErr.message);
+    return res.status(200).json({
+      ok: false, module: moduleRaw, email: custEmail, marked_count: 0,
+      warning: 'email_messages lookup fail: ' + emErr.message,
+    });
+  }
+  const uidsToMark = (emailRows || [])
+    .map((r) => Number(r.imap_uid))
+    .filter((u) => Number.isFinite(u) && u > 0);
+
+  let markedCount = 0;
+  let warning = null;
+  const targetUids = uidsToMark.slice(0, 500); // response-size cap
+  if (uidsToMark.length === 0) {
+    // Geen mail-rijen voor deze klant → niks te markeren. Nog steeds cache
+    // invalideren (misschien stond die op verouderde count).
+    invalidateEmailUnreadForCustomer(moduleRaw, custEmail);
+    return res.status(200).json({
+      ok: true, module: moduleRaw, email: custEmail, marked_count: 0,
+      debug: {
+        source: 'email_messages (0 rows)',
+        searched_mailbox: acct.user,
+        customer_id: customerId,
+        uids_from_db: [],
+      },
+    });
+  }
+
   const client = new ImapFlow({
     host: IMAP_HOST, port, secure: true,
     auth: { user: acct.user, pass },
     logger: false, socketTimeout: 15000,
   });
-  let markedCount = 0;
-  let warning = null;
-  let foundUids = [];       // debug — welke UIDs matchten het zoekcriterium
-  let searchedFrom = null;  // debug — welk from-adres is gezocht
-  let searchedSince = null; // debug — welke sinds-datum
   try {
     await client.connect();
     try {
       const lock = await client.getMailboxLock('INBOX');
       try {
-        // Zoek alle unseen mails van deze afzender sinds SINCE_DATE.
-        // imapflow search syntax: { from: '<email>', unseen: true, since: <Date> }
-        searchedFrom  = custEmail;
-        searchedSince = SINCE_DATE.toISOString();
-        const uids = await client.search({
-          from:   custEmail,
-          unseen: true,
-          since:  SINCE_DATE,
-        });
-        foundUids = Array.isArray(uids) ? uids.slice(0, 100) : []; // cap voor response-size
-        if (Array.isArray(uids) && uids.length > 0) {
-          // STORE +FLAGS \Seen op alle gevonden UIDs (batch).
-          await client.messageFlagsAdd(uids, ['\\Seen'], { uid: true });
-          markedCount = uids.length;
-        }
+        // STORE +FLAGS \Seen op alle uids (batch). imapflow accepteert
+        // een array van UIDs; { uid: true } behandelt ze als UIDs (i.p.v.
+        // sequence numbers). Mails die al \Seen zijn: STORE is idempotent
+        // (no-op). Onbekende UIDs (bv. gedeletede mail) worden genegeerd.
+        await client.messageFlagsAdd(uidsToMark, ['\\Seen'], { uid: true });
+        markedCount = uidsToMark.length;
       } finally {
         lock.release();
       }
@@ -182,15 +215,15 @@ export default async function handler(req, res) {
     email: custEmail,
     marked_count: markedCount,
     ...(warning ? { warning } : {}),
-    // Debug-info voor UI / dev-tools: welk criterium is gezocht, welke UIDs
-    // zijn geraakt. Bespaart een IMAP-inspectie-ronde als je in productie
-    // ziet dat marked_count=0 terwijl je wél mails verwacht.
+    // Debug-info: welke UIDs zijn uit email_messages gehaald voor deze klant
+    // en zijn dus gemarkeerd. Bespaart een IMAP-inspectie als marked_count
+    // niet matcht met wat gebruiker verwacht.
     debug: {
-      searched_from: searchedFrom,
-      searched_since: searchedSince,
+      source: 'email_messages (customer_id-scoped)',
       searched_mailbox: acct.user,
-      found_uids: foundUids,
-      found_uid_count: foundUids.length,
+      customer_id: customerId,
+      uids_from_db: targetUids,
+      uid_count_db: uidsToMark.length,
     },
   });
 }
