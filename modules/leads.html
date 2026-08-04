@@ -124,7 +124,7 @@
     </div>
 
     <div class="filter-row">
-      <select id="fSoort"><option value="">Soort: alle</option></select>
+      <select id="fSoort"><option value="">Herkomst: alle</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="google">Google</option><option value="via-via">Via-via</option><option value="linkedin">LinkedIn</option><option value="tiktok">TikTok</option><option value="overige">Overige</option><option value="onbekend">Onbekend</option></select>
       <select id="fKwal">
         <option value="">Kwalificatie: alle</option>
         <option value="toegang">toegang</option>
@@ -156,7 +156,7 @@
           <th>Naam</th>
           <th>E-mail</th>
           <th>Telefoon</th>
-          <th>Soort</th>
+          <th>Herkomst</th>
           <th>Bron</th>
           <th>Traject</th>
           <th>Tag</th>
@@ -184,6 +184,7 @@
       </div>
       <div class="fld"><label>E-mailadres *</label><input type="email" id="aEmail" autocomplete="off" placeholder="naam@voorbeeld.nl" /></div>
       <div class="fld"><label>Telefoon</label><input type="text" id="aTelefoon" autocomplete="off" /></div>
+      <div class="fld"><label>Herkomst</label><select id="aHerkomst"><option value="">— kies —</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="google">Google</option><option value="via-via">Via-via</option><option value="linkedin">LinkedIn</option><option value="tiktok">TikTok</option><option value="overige">Overige</option><option value="onbekend">Onbekend</option></select></div>
       <div class="fld">
         <label>Toegang (vink producten aan; eerste = primair traject)</label>
         <div class="prod-list" id="aProducten"><div class="sub" style="padding:8px">Producten laden…</div></div>
@@ -213,6 +214,7 @@
       </div>
       <div class="fld"><label>E-mailadres *</label><input type="email" id="eEmail" autocomplete="off" /></div>
       <div class="fld"><label>Telefoon</label><input type="text" id="eTelefoon" autocomplete="off" /></div>
+      <div class="fld"><label>Herkomst</label><select id="eHerkomst"><option value="">— kies —</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="google">Google</option><option value="via-via">Via-via</option><option value="linkedin">LinkedIn</option><option value="tiktok">TikTok</option><option value="overige">Overige</option><option value="onbekend">Onbekend</option></select></div>
       <div class="fld">
         <label>Huidige toegang (van/tot bewerkbaar; intrekken = verlopen zetten)</label>
         <div class="prod-list" id="eGrants"><div class="sub" style="padding:8px">Laden…</div></div>
@@ -361,21 +363,12 @@ function renderPager(){
   });
 }
 
-async function populateSoorten(){
-  try{
-    const r = await apiFetch('/api/leads-soorten');
-    if(!r.ok) return;
-    const d = await r.json();
-    const sel = document.getElementById('fSoort');
-    (d.soorten || []).forEach(s => {
-      const o = document.createElement('option');
-      o.value = s; o.textContent = s;
-      sel.appendChild(o);
-    });
-    // ?soort= uit de URL respecteren (bv. dashboard-tegel deep-link)
-    const urlSoort = new URLSearchParams(location.search).get('soort');
-    if(urlSoort && (d.soorten||[]).includes(urlSoort)) sel.value = urlSoort;
-  }catch(e){ console.warn('[leads] soorten:', e.message); }
+function populateSoorten(){
+  // De herkomst-opties staan vast in de <select> (Feature 2). Alleen de
+  // ?soort=-deeplink (bv. vanaf een dashboard-tegel) nog respecteren.
+  const sel = document.getElementById('fSoort');
+  const urlSoort = new URLSearchParams(location.search).get('soort');
+  if(urlSoort && [...sel.options].some(o => o.value === urlSoort)) sel.value = urlSoort;
 }
 
 // ---- Lead toevoegen (handmatig + directe toegang) ----
@@ -434,6 +427,7 @@ async function submitAdd(){
         achternaam: document.getElementById('aAchternaam').value.trim()||null,
         email, telefoon: document.getElementById('aTelefoon').value.trim()||null,
         producten,
+        herkomst: document.getElementById('aHerkomst').value || null,
         welkomstmail: document.getElementById('aWelkom').checked,
       }) });
     const d=await r.json().catch(()=>({}));
@@ -466,6 +460,7 @@ async function openEdit(id){
     document.getElementById('eAchternaam').value = dg.lead.achternaam||'';
     document.getElementById('eEmail').value = dg.lead.email||'';
     document.getElementById('eTelefoon').value = dg.lead.telefoon||'';
+    document.getElementById('eHerkomst').value = dg.lead.soort||'';
 
     const grants=dg.grants||[];
     if(!grants.length){ gEl.innerHTML='<div class="sub" style="padding:8px">Nog geen toegang.</div>'; }
@@ -533,6 +528,7 @@ async function submitEdit(){
         voornaam: document.getElementById('eVoornaam').value.trim()||null,
         achternaam: document.getElementById('eAchternaam').value.trim()||null,
         email, telefoon: document.getElementById('eTelefoon').value.trim()||null,
+        herkomst: document.getElementById('eHerkomst').value || null,
         grants, nieuw,
       }) });
     const d=await r.json().catch(()=>({}));
