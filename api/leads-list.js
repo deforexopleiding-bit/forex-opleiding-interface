@@ -3,7 +3,8 @@
 // Permission: leads.view.
 //
 // Query-params (alle optioneel):
-//   soort          exacte match ('7-daagse' | 'student' | ...)
+//   soort          herkomst, exacte match ('instagram' | 'facebook' | ...)
+//   traject        traject-type, CASE-INSENSITIVE match ('7-daagse' | 'Membership' | ...)
 //   kwalificatie   'toegang' | 'geen toegang' | 'geen'  ('geen' → leeg-filter)
 //   bron           'website' | 'funnel' | 'meta' | 'handmatig'
 //   status         'nieuw' | 'opgevolgd' | 'gewonnen' | 'verloren'
@@ -33,6 +34,8 @@ export default async function handler(req, res) {
 
   const q = req.query || {};
   const soort = q.soort ? String(q.soort).trim() : null;
+  // traject-type staat sinds Feature 2 los van soort (= herkomst). CI-filter.
+  const traject = q.traject ? String(q.traject).trim() : null;
   const kwal  = q.kwalificatie ? String(q.kwalificatie).trim() : null;
   const bron  = q.bron ? String(q.bron).trim() : null;
   const status = q.status ? String(q.status).trim() : null;
@@ -56,7 +59,10 @@ export default async function handler(req, res) {
     // Actief vs. archief.
     qy = archief ? qy.not('verwijderd_op', 'is', null) : qy.is('verwijderd_op', null);
 
-    if (soort)  qy = qy.eq('soort',  soort);
+    if (soort)   qy = qy.eq('soort', soort);
+    // CASE-INSENSITIVE: trajectwaarden zijn gemengd ('Membership'). ilike zonder
+    // %/_ = exacte, hoofdletter-ongevoelige match. Escape wildcards uit de input.
+    if (traject) qy = qy.ilike('traject', traject.replace(/[%_]/g, m => '\\' + m));
     if (bron)   qy = qy.eq('bron',   bron);
     if (status) qy = qy.eq('status', status);
     if (kwal === 'geen') qy = qy.is('kwalificatie', null);

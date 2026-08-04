@@ -157,6 +157,7 @@
 
     <div class="filter-row">
       <select id="fSoort"><option value="">Herkomst: alle</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="google">Google</option><option value="via-via">Via-via</option><option value="linkedin">LinkedIn</option><option value="tiktok">TikTok</option><option value="overige">Overige</option><option value="onbekend">Onbekend</option></select>
+      <select id="fTraject"><option value="">Traject: alle</option></select>
       <select id="fKwal">
         <option value="">Kwalificatie: alle</option>
         <option value="toegang">toegang</option>
@@ -341,7 +342,8 @@ async function loadList(){
   try{
     const p = new URLSearchParams();
     const sel = (id)=>document.getElementById(id).value.trim();
-    if(sel('fSoort'))  p.set('soort',  sel('fSoort'));
+    if(sel('fSoort'))   p.set('soort',   sel('fSoort'));
+    if(sel('fTraject')) p.set('traject', sel('fTraject'));
     if(sel('fKwal'))   p.set('kwalificatie', sel('fKwal'));
     if(sel('fBron'))   p.set('bron',   sel('fBron'));
     if(sel('fStatus')) p.set('status', sel('fStatus'));
@@ -418,6 +420,32 @@ function populateSoorten(){
   const sel = document.getElementById('fSoort');
   const urlSoort = new URLSearchParams(location.search).get('soort');
   if(urlSoort && [...sel.options].some(o => o.value === urlSoort)) sel.value = urlSoort;
+}
+
+async function populateTrajecten(){
+  // Traject-waarden zijn dynamisch (7-daagse / event / Membership / ...); haal ze
+  // op uit de DB. Honoreer daarna de ?traject=-deeplink (vanaf een dashboard-tegel)
+  // CASE-INSENSITIVE — en voeg de waarde toe als 'ie (nog) niet in de lijst zit,
+  // zodat het filter altijd landt (ook als er 0 leads in dat traject zitten).
+  const sel = document.getElementById('fTraject');
+  try{
+    const r = await apiFetch('/api/leads-trajecten');
+    if(r.ok){
+      const d = await r.json();
+      for(const t of (d.trajecten || [])){
+        const o = document.createElement('option'); o.value = t; o.textContent = t; sel.appendChild(o);
+      }
+    }
+  }catch(e){ console.warn('[leads] trajecten:', e.message); }
+  const urlTraject = new URLSearchParams(location.search).get('traject');
+  if(urlTraject){
+    const match = [...sel.options].find(o => o.value.toLowerCase() === urlTraject.toLowerCase());
+    if(match){ sel.value = match.value; }
+    else {
+      const o = document.createElement('option'); o.value = urlTraject; o.textContent = urlTraject;
+      sel.appendChild(o); sel.value = urlTraject;
+    }
+  }
 }
 
 // ---- Lead toevoegen (handmatig + directe toegang) ----
@@ -739,6 +767,7 @@ async function init(){
   if(window.AgentShared && window.AgentShared.renderUserSection) await window.AgentShared.renderUserSection(profile);
 
   document.getElementById('fSoort').addEventListener('change', reload);
+  document.getElementById('fTraject').addEventListener('change', reload);
   document.getElementById('fKwal').addEventListener('change', reload);
   document.getElementById('fBron').addEventListener('change', reload);
   document.getElementById('fStatus').addEventListener('change', reload);
@@ -769,7 +798,8 @@ async function init(){
   document.getElementById('eOpslaan').addEventListener('click', submitEdit);
   document.getElementById('editModal').addEventListener('click', (e) => { if(e.target.id==='editModal') closeEdit(); });
 
-  await populateSoorten();
+  populateSoorten();
+  await populateTrajecten();
   await Promise.all([loadStats(), loadList()]);
 }
 init();
