@@ -14171,21 +14171,34 @@
   // klant een email-adres heeft: gewoon proberen. Server-side is de call
   // goedkoop (single IMAP-search + optioneel STORE) en volledig fail-safe.
   async function _inboxMarkEmailReadForConv(convId) {
-    const conv = (_inboxConvs || []).find((c) => c && c.id === convId);
-    if (!conv || !conv.customer_id) return;
+    // Snap customer_id vóór de await — de object-ref kan tussentijds
+    // vervangen worden door een parallel loadInboxConvList/deltaRefresh.
+    // Daarom searchen we NA de await opnieuw op id (freshRef pattern) i.p.v.
+    // de captured `conv` te muteren.
+    const preConv = (_inboxConvs || []).find((c) => c && c.id === convId);
+    if (!preConv || !preConv.customer_id) return;
+    const customerId = preConv.customer_id;
     try {
       const r = await window.AgentShared.apiFetch('/api/inbox-email-mark-read', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ customer_id: conv.customer_id, module: 'finance' }),
+        body:    JSON.stringify({ customer_id: customerId, module: 'finance' }),
       });
       const d = await r.json().catch(() => ({}));
-      // Reset local state alleen bij ok + iets gemarkeerd (of expliciet 0-teller
-      // van server). Bij netwerk-fail: laat conv.email_unread_count staan zodat
-      // volgende conv-list-refresh 'em corrigeert.
+      // Reset local state alleen bij ok. Re-find de conv-ref, want een
+      // parallel loadInboxConvList (bv. door mark-all-read-knop of andere
+      // caller) kan _inboxConvs volledig hebben vervangen — dan is preConv
+      // een orphaned object en mutatie is verloren. Zonder deze re-find
+      // bleef de badge ~60s staan tot de volgende manual refresh (bewezen
+      // Sodiq Idowu-scenario). Na mutatie: render triggeren zodat badge
+      // meteen bijwerkt (scroll-preserverend via _inboxRenderConvList).
       if (r.ok) {
-        conv.email_unread_count = 0;
-        conv.total_unread = Number(conv.unread_count) || 0;
+        const freshRef = (_inboxConvs || []).find((c) => c && c.id === convId);
+        if (freshRef) {
+          freshRef.email_unread_count = 0;
+          freshRef.total_unread = Number(freshRef.unread_count) || 0;
+          if (typeof _inboxRenderConvList === 'function') _inboxRenderConvList();
+        }
       }
       // Debug in console — nodig voor de "waarom werkt 't niet"-analyses.
       // Alleen zichtbaar in DevTools; geen UI-verstoring.
@@ -14368,11 +14381,30 @@
 
       // Initial render: forceer scroll naar bottom zodat laatste bericht direct zichtbaar is.
       _inboxRenderMessages({ forceScroll: true });
-      // Conv-list opnieuw laden zodat unread_count visueel resetst.
-      loadInboxConvList();
+      // Unread-badge visueel resetten: MUTEER de bestaande conv-ref i.p.v.
+      // een full loadInboxConvList() te triggeren. Die replace-race was de
+      // bron van de "badge blijft 60s staan"-bug (Sodiq Idowu): de list-
+      // reload vervangt _inboxConvs met server-cache-data (60s stale) én
+      // maakt de object-ref in _inboxMarkEmailReadForConv orphaned. De
+      // whitelist uit #1087 beschermt tegen delta-refresh; deze mutatie
+      // vult de gap voor de user-actie zelf. Render triggeren zodat de
+      // badge instant bijwerkt.
+      const activeConvRef = (_inboxConvs || []).find((c) => c && c.id === convId);
+      if (activeConvRef) {
+        activeConvRef.unread_count = 0;
+        activeConvRef.total_unread = Number(activeConvRef.email_unread_count) || 0;
+        if (typeof _inboxRenderConvList === 'function') _inboxRenderConvList();
+      }
+      // Server-side WA-unread bijwerken via de bestaande thread-fetch's
+      // mark_as_read=true param (zie inbox-messages-list request in dit
+      // blok — reeds gedaan bij initial fetch hierboven).
+
       // Ook e-mail als gelezen markeren in IMAP: we werken vanuit het CRM en
       // openen niet meer in Outlook/webmail, dus zonder dit blijft de mail-
       // badge oneindig staan. Fail-soft; endpoint gooit alleen warnings terug.
+      // Deze helper re-findt de conv-ref NA de await (freshRef pattern) en
+      // triggert eigen render — safe ook als _inboxConvs tussentijds is
+      // gemuteerd door delta-refresh.
       _inboxMarkEmailReadForConv(convId);
       // Klant-paneel (rechter kolom) vullen. Geen await: laat thread-render niet wachten op klant-data.
       loadInboxCustomerContext(convId);
@@ -15795,6 +15827,26 @@
     // guard "verdween" de lijst en kwam pas terug bij scrollen — bewezen
     // regressie sinds PR #1081.
     if (fresh.length === 0 && _inboxConvs.length > 0) return;
+
+    // Partial-response guard: als server significant minder items retourneert
+    // dan we op scherm hebben EN de totale count ruim groter is, is 't een
+    // transient partial (cold-lambda enrichment-batch die faalde, IMAP-
+    // timeout op MAX-email-per-customer query, of race in email-unread cache
+    // priming). Zonder deze guard trok de remove-logic hierna 49 rijen weg
+    // → "gesprekkenlijst leeg bij openen" bug (bewezen: pas na scroll
+    // terug + loadInboxConvListMore werd de lijst opnieuw gevuld).
+    // Threshold: fresh < 50% van huidige top-page ÉN total >= dat huidige
+    // aantal → server is aan het downgraden, negeer deze poll.
+    const totalReported = Number(d.total || 0);
+    const topBefore = Math.min(_inboxConvs.length, INBOX_CONV_PAGE_SIZE);
+    if (
+      topBefore >= 5 &&                                   // pas relevant met >5 items in beeld
+      fresh.length < Math.floor(topBefore * 0.5) &&       // ≥50% van top-page ontbreekt
+      totalReported >= topBefore                          // server WEET dat er meer zijn
+    ) {
+      console.warn('[delta-refresh] partial-response guard: fresh=' + fresh.length + ' vs top=' + topBefore + ' total=' + totalReported + ' — skip');
+      return;
+    }
 
     // Bouw id-based lookup van de nieuwe top-page.
     const freshById = new Map(fresh.map((it) => [it.id, it]));
@@ -17758,11 +17810,17 @@
       try {
         const [waRes, mailRes] = await Promise.all([waPromise, mailPromise]);
         // Client-side reset zodat badge direct naar 0 gaat (ongeacht cache).
-        if (conv) {
-          conv.unread_count       = 0;
-          conv.email_unread_count = 0;
-          conv.total_unread       = 0;
+        // Re-find de conv-ref na de await — een parallel delta-refresh kan
+        // 'em vervangen hebben. De captured `conv` uit regel hierboven kan
+        // dan orphaned zijn (mutatie verloren = badge blijft staan).
+        const freshRef = (_inboxConvs || []).find((c) => c && c.id === _inboxActiveConvId);
+        if (freshRef) {
+          freshRef.unread_count       = 0;
+          freshRef.email_unread_count = 0;
+          freshRef.total_unread       = 0;
         }
+        // Render zodat badge instant bijwerkt (scroll-preserverend).
+        if (typeof _inboxRenderConvList === 'function') _inboxRenderConvList();
         const mailCount = Number(mailRes?.marked_count) || 0;
         const mailWarn  = mailRes?.warning ? ' (mail: ' + mailRes.warning + ')' : '';
         window.AgentShared?.showToast?.(
@@ -17771,8 +17829,11 @@
         );
         // Debug in console voor troubleshooting.
         console.debug('[inbox-mark-read-all]', { waRes, mailRes });
-        // Herlaad de conv-list zodat de badges server-side ook kloppen.
-        loadInboxConvList();
+        // Bewust GEEN loadInboxConvList() meer: die replacete _inboxConvs
+        // volledig met server-cache-data (60s stale email-unread) → badge
+        // ging op 0 en direct daarna weer terug naar oude waarde (Sodiq
+        // Idowu-scenario). Delta-refresh (6s poll) synct andere velden;
+        // whitelist uit #1087 beschermt de unread-tellers.
       } catch (e) {
         window.AgentShared?.showToast?.('Markeren mislukt: ' + (e?.message || 'onbekend'), 'error');
       } finally {
