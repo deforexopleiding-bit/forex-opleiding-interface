@@ -11,7 +11,7 @@
 import { supabaseAdmin } from './supabase.js';
 import { computeResponseDelay, sendTypingIndicator, matchBookingByEmail } from './_lib/lisa-ghl-send.js';
 import { generateLisaResponse } from './lisa-respond.js';
-import { detectStopSignal, containsAgendaLink, schedulePostLinkFollowups, autoQualifyIfTriggered } from './_lib/lisa-followup.js';
+import { detectStopSignal, containsAgendaLink, schedulePostLinkFollowups, autoQualifyIfTriggered, pauseFollowupsForDisqualified } from './_lib/lisa-followup.js';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
@@ -66,6 +66,22 @@ export default async function handler(req, res) {
     const { contactId, conversationId, locationId, message, type, direction, messageId } = payload;
     if (type !== 'IG' || direction !== 'inbound') return res.status(200).json({ skipped: 'not_ig_inbound' });
     if (!contactId || !message) return res.status(200).json({ skipped: 'missing_fields' });
+
+    // Idempotency: als GHL dit bericht al eerder heeft geleverd (retry na timeout
+    // tijdens onze Opus-generatie), skip vóór we een NIEUWE AI-call + response-
+    // delay-item aanmaken. Zonder deze check verdubbelt de burst: 1 inbound →
+    // 2 outbound. Zie migratie 003 index idx_lisa_msg_ghl.
+    if (messageId) {
+      const { data: dupe } = await supabaseAdmin.from('lisa_messages')
+        .select('id, sent_at, conversation_id')
+        .eq('ghl_message_id', messageId)
+        .eq('direction', 'in')
+        .limit(1).maybeSingle();
+      if (dupe) {
+        console.log('[lisa-ghl-webhook] duplicate delivery skipped', { messageId, sent_at: dupe.sent_at });
+        return res.status(200).json({ skipped: 'duplicate_delivery', ghl_message_id: messageId });
+      }
+    }
 
     // Meta/UTM-attributie vangen — body.contact bevat de attributionSource +
     // lastAttributionSource al vanuit GHL's webhook, dus geen extra fetch.
@@ -167,6 +183,23 @@ export default async function handler(req, res) {
 
     // 8. AI genereren (geen persistentie binnen helper)
     const result = await generateLisaResponse({ config, conversation: conv, userMessage: message });
+
+    // 8b. Refusal-guard: als het model geweigerd heeft ('Ik kan dit bericht niet
+    // genereren', 'Kijkend naar dit gesprek zie ik dat Lisa...') is result.ok=false
+    // met refusal_reason. Log inbound + system-note, NIET versturen naar klant.
+    // De burst uit 30-31 juli 2026 bevatte precies zulke weigeringen als DM.
+    if (!result.ok && result.error === 'refusal_detected') {
+      await supabaseAdmin.from('lisa_messages').insert({
+        conversation_id: conv.id, direction: 'in', content: message, ai_generated: false, ghl_message_id: messageId || null,
+      });
+      await supabaseAdmin.from('lisa_messages').insert({
+        conversation_id: conv.id, direction: 'out', is_system: true, ai_generated: false,
+        content: `⚠ AI-weigering geblokkeerd (${result.refusal_reason}). Geen bericht verstuurd. Raw: ${(result.raw_response || '').slice(0, 200)}`,
+      });
+      console.warn('[lisa-ghl-webhook] refusal blocked, no send', { conv_id: conv.id, reason: result.refusal_reason });
+      return res.status(200).json({ ok: false, blocked: 'refusal_detected', reason: result.refusal_reason, conv_id: conv.id });
+    }
+
     if (!result.ok) { await logWebhookError('AI: ' + result.error); return res.status(200).json({ ok: false, ai_failed: true, error: result.error }); }
 
     // 9. Inkomend bericht opslaan
@@ -200,6 +233,19 @@ export default async function handler(req, res) {
     // 9d. Auto-qualify (F14): agenda-link verstuurd of phase=call → qualified.
     const aq = await autoQualifyIfTriggered({ conv, aiResponseText: result.response, detectedPhase: result.detected_phase });
     if (aq.triggered) { conv.qualified = true; console.log('[auto-qualify] conv', conv.id, aq.reasons.join(',')); }
+
+    // 9e. Auto-disqualify (nieuw aug-2026): als de AI phase='disqualified' teruggeeft
+    // OF de user een soft-decline heeft geuit die niet door detectStopSignal is
+    // gevangen (kwam nu wél in HARDCODED_STOP_KEYWORDS te staan, maar deze extra
+    // hook vangt AI-classificatie op die soms voor het keyword-signaal komt).
+    // Pauzeert follow-ups + cancelt alle scheduled zodat de burst niet ontstaat.
+    if (result.detected_phase === 'disqualified' && !conv.followup_paused) {
+      const dq = await pauseFollowupsForDisqualified(conv.id, 'ai_detected_disqualified');
+      if (dq.ok && !dq.already) {
+        console.log('[auto-disqualify] conv', conv.id, 'paused +', dq.cancelled_count, 'cancelled');
+        conv.followup_paused = true;
+      }
+    }
 
     // 10. Versturen: binnen kantooruren → response-delay QUEUE (geen blocking sleep; cron verstuurt).
     if (isInOfficeHours) {
