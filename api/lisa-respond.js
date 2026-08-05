@@ -18,6 +18,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
 import { requirePermissionFailOpen } from './_lib/requirePermission.js';
+import { looksLikeRefusal } from './_lib/lisa-refusal-detector.js';
 
 const LISA_MODEL = 'claude-opus-4-7'; // krachtigste model voor beste test-resultaten
 // Fasen die lisa_conversations.phase accepteert (zie CHECK in migratie 003).
@@ -240,6 +241,26 @@ export async function generateLisaResponse({ config, conversation, userMessage, 
   }
   const genMs = Date.now() - t0;
   const { response, phase: detectedPhase, detectedData } = parseLisaJson(aiText, currentPhase);
+
+  // Refusal-guard: model kan weigeren om een bericht te genereren en dan een
+  // meta-reflectie teruggeven ("Ik kan dit bericht niet genereren...", "Kijkend
+  // naar dit gesprek zie ik dat Lisa...") — die tekst MAG nooit als IG-DM
+  // verstuurd worden. Fail-loud: caller (webhook/sandbox) moet dit afhandelen
+  // door NIET te versturen en de weigering wel te loggen als system-event.
+  const refusalCheck = looksLikeRefusal(response);
+  if (refusalCheck.refused) {
+    console.warn('[lisa-respond] refusal detected in main response:', refusalCheck.reason, '—', response.slice(0, 200));
+    return {
+      ok: false, status: 422,
+      error: 'refusal_detected',
+      refusal_reason: refusalCheck.reason,
+      refusal_matched: refusalCheck.matched_pattern,
+      raw_response: response.slice(0, 500),
+      config_version_id: config.id, config_version: config.version,
+      model_used: LISA_MODEL, tokens_used: tokensUsed, generation_time_ms: genMs,
+      detected_phase: detectedPhase, detected_data: detectedData,
+    };
+  }
 
   return {
     ok: true, response, detected_phase: detectedPhase, detected_data: detectedData,

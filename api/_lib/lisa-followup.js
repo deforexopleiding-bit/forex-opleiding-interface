@@ -4,14 +4,27 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import Anthropic from '@anthropic-ai/sdk';
+import { looksLikeRefusal } from './lisa-refusal-detector.js';
 
 const FOLLOWUP_MODEL = 'claude-sonnet-4-6'; // sneller/goedkoper dan Opus voor follow-ups
 
 // Hardcoded NL stop-keywords (baseline; altijd actief naast configureerbare uitbreiding).
+// Sinds aug-2026 uitgebreid met soft-decline zinnen — voorheen bleef Lisa follow-ups
+// sturen naar klanten die "is niet echt iets voor mij" hadden gezegd, omdat de
+// detected_phase=disqualified geen followup_paused triggerde en deze zinnen niet
+// in de keyword-lijst stonden. Bewuste lange lijst — false-positives zijn hier
+// veel minder schadelijk dan false-negatives (=spam).
 const HARDCODED_STOP_KEYWORDS = [
+  // Harde stops
   'stop', 'geen interesse', 'niet meer', 'ophouden', 'kapt ermee',
   'laat me met rust', 'mag je verwijderen', 'niet geinteresseerd', 'niet geïnteresseerd',
   'spam', 'leave me alone', 'unsubscribe',
+  // Soft declines (nieuw)
+  'niet echt iets voor mij', 'is niets voor mij', 'niks voor mij',
+  'niet mijn ding', 'geen zin', 'geen zin in', 'helaas geen',
+  'toch geen', 'geen behoefte', 'niet interessant voor mij',
+  'past niet bij mij', 'laat maar', 'hoeft niet',
+  'not interested', 'not for me',
 ];
 
 const VALID_PHASES = ['intro', 'doel', 'situatie', 'band', 'call', 'qualified', 'disqualified'];
@@ -166,6 +179,20 @@ Antwoord ALLEEN met het bericht zelf (geen "Lisa:" prefix, geen JSON).`;
     });
     const text = resp.content?.[0]?.text?.trim() || '';
     if (!text) return { ok: false, error: 'empty_response' };
+    // Refusal-guard: model kan "Ik kan dit bericht niet genereren..." teruggeven
+    // als weigering (kwam in juli 2026 in productie voor). Zulke output mag NOOIT
+    // als IG-DM verstuurd worden. Return als fout zodat caller cancelt i.p.v. verstuurt.
+    const refusalCheck = looksLikeRefusal(text);
+    if (refusalCheck.refused) {
+      console.warn('[lisa-followup] refusal detected in AI-followup:', refusalCheck.reason, '—', text.slice(0, 200));
+      return {
+        ok: false,
+        error: 'refusal_detected',
+        refusal_reason: refusalCheck.reason,
+        refusal_matched: refusalCheck.matched_pattern,
+        raw_response: text.slice(0, 500),
+      };
+    }
     return { ok: true, response: text, tokens_used: (resp.usage?.input_tokens || 0) + (resp.usage?.output_tokens || 0) };
   } catch (err) {
     console.error('[lisa-followup] generateFollowupResponse error:', err?.message || err);
@@ -222,10 +249,63 @@ Schrijf ALLEEN het bericht zelf — platte tekst zoals een Instagram-DM, geen be
     const client = new Anthropic({ apiKey });
     const resp = await client.messages.create({ model: FOLLOWUP_MODEL, max_tokens: 150, messages: [{ role: 'user', content: prompt }] });
     const text = resp.content?.[0]?.text?.trim() || '';
-    return text ? { ok: true, response: text } : { ok: false, error: 'empty_response' };
+    if (!text) return { ok: false, error: 'empty_response' };
+    // Refusal-guard — zie generateFollowupResponse voor rationale.
+    const refusalCheck = looksLikeRefusal(text);
+    if (refusalCheck.refused) {
+      console.warn('[post-link] refusal detected:', refusalCheck.reason, '—', text.slice(0, 200));
+      return {
+        ok: false,
+        error: 'refusal_detected',
+        refusal_reason: refusalCheck.reason,
+        refusal_matched: refusalCheck.matched_pattern,
+        raw_response: text.slice(0, 500),
+      };
+    }
+    return { ok: true, response: text };
   } catch (err) {
     console.error('[post-link] gen error:', err?.message || err);
     return { ok: false, error: err?.message || 'onbekende fout' };
+  }
+}
+
+// ── Auto-disqualify (nieuw aug-2026) ──────────────────────────────────────────
+// Als de AI in de webhook-response phase='disqualified' teruggeeft, of als de
+// user een soft-decline zin heeft geuit die als stop-signal telt, dan pauzeren
+// we de follow-ups. Zelfde behandeling als een expliciete stop-melding: alle
+// scheduled follow-ups worden gecancelled en de conversatie krijgt
+// followup_paused=true zodat scheduleNextFollowup nooit meer plant.
+//
+// Idempotent: als followup_paused al true is, doet 'ie niks. Fail-safe: gooit
+// nooit, returnt {ok:false} bij DB-fout.
+export async function pauseFollowupsForDisqualified(conversationId, reason) {
+  if (!conversationId) return { ok: false, reason: 'no_conversation_id' };
+  try {
+    const { data: conv } = await supabaseAdmin.from('lisa_conversations')
+      .select('id, followup_paused, phase')
+      .eq('id', conversationId).maybeSingle();
+    if (!conv) return { ok: false, reason: 'conversation_not_found' };
+    if (conv.followup_paused) return { ok: true, reason: 'already_paused', already: true };
+
+    const now = new Date().toISOString();
+    await supabaseAdmin.from('lisa_conversations').update({
+      followup_paused: true,
+      followup_paused_at: now,
+      followup_paused_reason: String(reason || 'disqualified').slice(0, 200),
+    }).eq('id', conversationId);
+
+    // Cancel ALLE nog-scheduled follow-ups (reguliere sequence + post-link +
+    // response-delay + delayed-response). Voorkomt dat de burst-flow uit
+    // aug-2026 zich herhaalt na een disqualify.
+    const { data: cancelled } = await supabaseAdmin.from('lisa_followups')
+      .update({ status: 'cancelled', cancelled_reason: `disqualified: ${String(reason || '').slice(0, 200)}` })
+      .eq('conversation_id', conversationId)
+      .eq('status', 'scheduled')
+      .select('id');
+    return { ok: true, cancelled_count: (cancelled || []).length };
+  } catch (err) {
+    console.error('[lisa-followup] pauseFollowupsForDisqualified error:', err?.message || err);
+    return { ok: false, error: err?.message };
   }
 }
 

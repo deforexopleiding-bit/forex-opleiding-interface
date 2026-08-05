@@ -15,6 +15,7 @@
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
 import { sendToGhl } from './_lib/lisa-ghl-send.js';
 import { scheduleNextFollowup, generateFollowupResponse, evaluateConditions, generatePostLinkMessage } from './_lib/lisa-followup.js';
+import { looksLikeRefusal } from './_lib/lisa-refusal-detector.js';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
@@ -22,6 +23,43 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const BATCH_LIMIT = 20;
+// Claim expiry: als een cron-run crasht na claim maar vóór status-transitie,
+// blijft de rij hangen op claimed_at=X, status='scheduled'. Na 5 min laten we
+// 'em weer oppikbaar zijn. Vercel function timeout is 60s, dus 5 min is ruim.
+const CLAIM_EXPIRY_MINUTES = 5;
+
+// Atomic claim: probeer één rij te reserveren voor deze worker. Race-free omdat
+// de UPDATE alleen slaagt als status='scheduled' EN claimed_at IS NULL. Twee
+// workers die tegelijk claimen: één krijgt 1 rij terug, de ander 0. Retourneert
+// true als de claim slaagde, false als een ander 'em al had (skip).
+async function claimFollowup(fuId) {
+  const now = new Date().toISOString();
+  const { data, error } = await supabaseAdmin.from('lisa_followups')
+    .update({ claimed_at: now })
+    .eq('id', fuId).eq('status', 'scheduled').is('claimed_at', null)
+    .select('id').maybeSingle();
+  if (error) {
+    console.error('[cron-lisa-delayed] claim error:', fuId, error.message);
+    return false;
+  }
+  return !!data;
+}
+
+// Recovery: reset expired claims zodat crashes niet permanent items lock'en.
+// Idempotent + fail-soft — bij DB-fout gaat de cron gewoon door.
+async function recoverExpiredClaims() {
+  try {
+    const cutoff = new Date(Date.now() - CLAIM_EXPIRY_MINUTES * 60 * 1000).toISOString();
+    const { data } = await supabaseAdmin.from('lisa_followups')
+      .update({ claimed_at: null })
+      .eq('status', 'scheduled')
+      .lt('claimed_at', cutoff)
+      .select('id');
+    if (data?.length) console.log('[cron-lisa-delayed] recovered', data.length, 'expired claims');
+  } catch (e) {
+    console.warn('[cron-lisa-delayed] recover error:', e?.message || e);
+  }
+}
 
 // Instagram-venster: Meta accepteert berichten aan een volger alleen binnen
 // 24u na hun LAATSTE INKOMENDE bericht. Lisa's uitgaande berichten resetten
@@ -75,10 +113,15 @@ export default async function handler(req, res) {
     const { data: config } = await supabaseAdmin.from('lisa_config').select('*')
       .eq('is_active', true).order('version', { ascending: false }).limit(1).maybeSingle();
 
-    // 4. Queue: delayed + regular, scheduled + verlopen
+    // 3b. Recover expired claims (rijen die door een crash tussen claim en
+    // send zijn blijven hangen). Idempotent, fail-soft.
+    await recoverExpiredClaims();
+
+    // 4. Queue: delayed + regular, scheduled + verlopen + niet-geclaimd
     const { data: followups, error: fuErr } = await supabaseAdmin.from('lisa_followups')
       .select('id, conversation_id, followup_step, scheduled_for, pre_generated_response, is_delayed_response, is_regular_followup, is_response_delay, is_post_link_followup, post_link_step, template_at_schedule, conditions_snapshot, used_ai, lisa_conversations!inner(id, ghl_contact_id, ghl_conversation_id, ghl_location_id, phase, qualified, call_booked, stop_detected_at, followup_paused, human_takeover, agenda_link_sent_at)')
       .eq('status', 'scheduled')
+      .is('claimed_at', null)
       .or('is_delayed_response.eq.true,is_regular_followup.eq.true,is_response_delay.eq.true,is_post_link_followup.eq.true')
       .lte('scheduled_for', new Date().toISOString())
       .order('scheduled_for', { ascending: true })
@@ -87,7 +130,7 @@ export default async function handler(req, res) {
     if (!followups || followups.length === 0) return res.status(200).json({ ok: true, sent: 0, message: 'Geen follow-ups klaar' });
 
     const results = [];
-    let sentCount = 0, delayedResolved = 0;
+    let sentCount = 0, delayedResolved = 0, skippedClaim = 0;
 
     for (const fu of followups) {
       const conv = fu.lisa_conversations;
@@ -98,11 +141,35 @@ export default async function handler(req, res) {
         continue;
       }
 
+      // Atomic claim vóór ELKE verwerking. Als een andere run of een dubbele
+      // webhook-trigger dit item al heeft geclaimd, skip 'em (geen dubbele
+      // send). Kern-fix voor de 7-9-berichten-burst — voorkomt dat een re-entrant
+      // cron dezelfde rij oppikt.
+      const claimed = await claimFollowup(fu.id);
+      if (!claimed) {
+        skippedClaim++;
+        results.push({ id: fu.id, status: 'skipped', reason: 'already_claimed' });
+        continue;
+      }
+
       // ── Response-delay (in-kantooruren direct antwoord, vooraf gegenereerd) ───
       if (fu.is_response_delay) {
         if (!fu.pre_generated_response) { await cancelFollowup(fu.id, 'missing_response'); results.push({ id: fu.id, status: 'cancelled', reason: 'missing_response' }); continue; }
         // Mens heeft overgenomen tijdens de delay → niet meer namens Lisa sturen.
         if (conv.human_takeover) { await cancelFollowup(fu.id, 'human_takeover'); results.push({ id: fu.id, status: 'cancelled', reason: 'human_takeover' }); continue; }
+        // Refusal-guard: als de vooraf-gegenereerde tekst een AI-weigering blijkt
+        // te zijn (ondanks check in webhook — zeldzaam maar niet onmogelijk als
+        // patterns nog niet dekken), niet versturen. System-log als bewijs.
+        const rc1 = looksLikeRefusal(fu.pre_generated_response);
+        if (rc1.refused) {
+          await cancelFollowup(fu.id, `refusal_detected:${rc1.reason}`);
+          await supabaseAdmin.from('lisa_messages').insert({
+            conversation_id: conv.id, direction: 'out', is_system: true, ai_generated: false,
+            content: `⚠ AI-weigering geblokkeerd in response-delay (${rc1.reason}). Niet verstuurd. Raw: ${fu.pre_generated_response.slice(0, 200)}`,
+          });
+          results.push({ id: fu.id, status: 'cancelled', reason: 'refusal_detected', refusal: rc1.reason });
+          continue;
+        }
         const sr = await sendToGhl(conv.ghl_contact_id, fu.pre_generated_response, { conversationId: conv.ghl_conversation_id, locationId: conv.ghl_location_id });
         if (sr.ok) {
           await supabaseAdmin.from('lisa_messages').insert({
@@ -123,6 +190,18 @@ export default async function handler(req, res) {
       // ── Delayed response ────────────────────────────────────────────────────
       if (fu.is_delayed_response) {
         if (!fu.pre_generated_response) { await cancelFollowup(fu.id, 'missing_response'); delayedResolved++; results.push({ id: fu.id, status: 'cancelled', reason: 'missing_response' }); continue; }
+        // Refusal-guard (identiek pattern als is_response_delay).
+        const rc2 = looksLikeRefusal(fu.pre_generated_response);
+        if (rc2.refused) {
+          await cancelFollowup(fu.id, `refusal_detected:${rc2.reason}`);
+          await supabaseAdmin.from('lisa_messages').insert({
+            conversation_id: conv.id, direction: 'out', is_system: true, ai_generated: false,
+            content: `⚠ AI-weigering geblokkeerd in delayed-response (${rc2.reason}). Niet verstuurd. Raw: ${fu.pre_generated_response.slice(0, 200)}`,
+          });
+          delayedResolved++;
+          results.push({ id: fu.id, status: 'cancelled', reason: 'refusal_detected', refusal: rc2.reason });
+          continue;
+        }
         // Instagram-venster: als de laatste inbound > 23u geleden is, zou Meta
         // het weigeren (CONVERSATIONS_MSG_CHAT_NO_LONGER_ACTIVE). Bewust
         // overslaan i.p.v. failen — houdt error-logs schoon.
@@ -170,7 +249,19 @@ export default async function handler(req, res) {
           continue;
         }
         const gen = await generatePostLinkMessage(fu.post_link_step || 1, conv, config);
-        if (!gen.ok || !gen.response) { await cancelFollowup(fu.id, 'ai_failed: ' + (gen.error || '')); results.push({ id: fu.id, status: 'failed', reason: 'ai' }); continue; }
+        if (!gen.ok || !gen.response) {
+          // gen returnt nu ook 'refusal_detected' met refusal_reason — cancel + log.
+          const isRefusal = gen.error === 'refusal_detected';
+          await cancelFollowup(fu.id, isRefusal ? `refusal_detected:${gen.refusal_reason}` : `ai_failed: ${gen.error || ''}`);
+          if (isRefusal) {
+            await supabaseAdmin.from('lisa_messages').insert({
+              conversation_id: conv.id, direction: 'out', is_system: true, ai_generated: false,
+              content: `⚠ AI-weigering geblokkeerd in post-link (${gen.refusal_reason}). Niet verstuurd. Raw: ${(gen.raw_response || '').slice(0, 200)}`,
+            });
+          }
+          results.push({ id: fu.id, status: isRefusal ? 'cancelled' : 'failed', reason: isRefusal ? 'refusal_detected' : 'ai' });
+          continue;
+        }
         const sr = await sendToGhl(conv.ghl_contact_id, gen.response, { conversationId: conv.ghl_conversation_id, locationId: conv.ghl_location_id });
         if (sr.ok) {
           await supabaseAdmin.from('lisa_messages').insert({
@@ -212,9 +303,39 @@ export default async function handler(req, res) {
       let content = fu.template_at_schedule || '';
       if (fu.used_ai && fu.template_at_schedule) {
         const ai = await generateFollowupResponse({ conversation: conv, template: fu.template_at_schedule, followupStep: fu.followup_step });
-        if (ai.ok) content = ai.response; // anders: fallback naar letterlijke template
+        if (ai.ok) {
+          content = ai.response;
+        } else if (ai.error === 'refusal_detected') {
+          // AI weigerde → NIET fallback naar letterlijke template (die kan óók
+          // ongepast zijn na een decline). Cancel deze en de rest van de sequence
+          // via pauseFollowupsForDisqualified — de klant zei duidelijk nee.
+          await cancelFollowup(fu.id, `refusal_detected:${ai.refusal_reason}`);
+          await supabaseAdmin.from('lisa_messages').insert({
+            conversation_id: conv.id, direction: 'out', is_system: true, ai_generated: false,
+            content: `⚠ AI-weigering geblokkeerd in regular follow-up (${ai.refusal_reason}). Sequence gestopt. Raw: ${(ai.raw_response || '').slice(0, 200)}`,
+          });
+          try {
+            const { pauseFollowupsForDisqualified } = await import('./_lib/lisa-followup.js');
+            await pauseFollowupsForDisqualified(conv.id, `refusal:${ai.refusal_reason}`);
+          } catch (e) { console.warn('[cron-lisa-delayed] pauseForDisqualified soft-fail:', e?.message); }
+          results.push({ id: fu.id, status: 'cancelled', reason: 'refusal_detected', refusal: ai.refusal_reason });
+          continue;
+        }
+        // ai.error !== refusal → fallback naar letterlijke template (bestaand gedrag)
       }
       if (!content) { await cancelFollowup(fu.id, 'empty_template'); results.push({ id: fu.id, status: 'cancelled', reason: 'empty_template' }); continue; }
+      // Laatste refusal-guard op de uiteindelijke content (defensief — template
+      // moet niet toevallig een refusal-patroon bevatten).
+      const rcFinal = looksLikeRefusal(content);
+      if (rcFinal.refused) {
+        await cancelFollowup(fu.id, `refusal_detected:${rcFinal.reason}`);
+        await supabaseAdmin.from('lisa_messages').insert({
+          conversation_id: conv.id, direction: 'out', is_system: true, ai_generated: false,
+          content: `⚠ Weigerings-patroon in content (${rcFinal.reason}). Niet verstuurd.`,
+        });
+        results.push({ id: fu.id, status: 'cancelled', reason: 'refusal_detected', refusal: rcFinal.reason });
+        continue;
+      }
 
       const sr = await sendToGhl(conv.ghl_contact_id, content, { conversationId: conv.ghl_conversation_id, locationId: conv.ghl_location_id });
       if (sr.ok) {
@@ -242,7 +363,7 @@ export default async function handler(req, res) {
       }).eq('id', 1);
     }
 
-    return res.status(200).json({ ok: true, processed: followups.length, sent: sentCount, delayed_resolved: delayedResolved, results });
+    return res.status(200).json({ ok: true, processed: followups.length, sent: sentCount, delayed_resolved: delayedResolved, skipped_claim: skippedClaim, results });
   } catch (err) {
     console.error('[cron-lisa-delayed] error:', err?.message || err);
     return res.status(500).json({ error: err?.message || 'onbekende fout' });
