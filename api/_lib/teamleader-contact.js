@@ -4,6 +4,7 @@
 
 import { tlFetch } from './teamleader-token.js';
 import { supabaseAdmin } from '../supabase.js';
+import { normalizeVat } from './vat-normalize.js';
 
 // Resolve TL address country vanuit customer.address_country. Whitelist
 // NL/BE (matcht customers_address_country_check + de UI-keuze in de
@@ -73,7 +74,34 @@ export async function getOrCreateTlCustomer(customer) {
   if (customer.tl_company_id) return { type: 'company', id: customer.tl_company_id };
 
   const body = { name: (customer.company_name || '').trim() || 'Onbekend bedrijf' };
-  if (customer.vat_number) body.vat_number = String(customer.vat_number).trim();
+  // BTW-normalisatie vóór TL-push (aug 2026): TL weigert HTTP 400 op spaties/
+  // punten/kleine letters ("BE 0729.599.851", "nl865112964B01", "0808.734.629",
+  // "BtwBE0677756222"). normalizeVat() strip, uppercase, leidt landcode af
+  // en valideert het formaat. Bij ok=true schrijven we óók terug naar
+  // customers.vat_number zodat 't overal consistent is. Bij ok=false: throw
+  // met .code=VAT_* zodat caller (offerte/factuur/subscription-flow) een 422
+  // met leesbare Nederlandse melding kan geven i.p.v. een cryptische TL-fout.
+  if (customer.vat_number) {
+    const vatRes = normalizeVat(customer.vat_number);
+    if (!vatRes.ok) {
+      const err = new Error(vatRes.error);
+      err.code = vatRes.code;
+      err.raw_vat = customer.vat_number;
+      throw err;
+    }
+    body.vat_number = vatRes.normalized;
+    // Terugschrijven bij verandering — hou de DB in sync met wat TL kreeg.
+    // Fail-soft: als de update faalt, gaat de push door (TL heeft correcte
+    // waarde, DB blijft de oude houden — hooguit cosmetisch verschil).
+    if (vatRes.changed) {
+      try {
+        await supabaseAdmin.from('customers').update({ vat_number: vatRes.normalized }).eq('id', customer.id);
+        customer.vat_number = vatRes.normalized;
+      } catch (e) {
+        console.warn('[tl-contact] vat-normalize write-back fail-soft:', customer.id, e?.message || e);
+      }
+    }
+  }
   if (customer.email) body.emails = [{ type: 'primary', email: customer.email }];
   if (customer.phone) body.telephones = [{ type: 'phone', number: customer.phone }];
   const line1 = [customer.address_street, customer.address_number].filter(Boolean).join(' ').trim();
