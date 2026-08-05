@@ -11,6 +11,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { getActiveToken } from './_lib/teamleader-token.js';
 import { pushQuotationToTl } from './_lib/teamleader-quotation.js';
 import { assertStartDateNotTooEarly, assertDateNotInPast } from './_lib/onboarding-start-date.js';
+import { applyCustomerPatchFromWizard } from './_lib/customer-patch-from-wizard.js';
 
 // Lege string / undefined → null (voorkomt 'invalid input syntax for type uuid').
 const emptyToNull = (v) => (v === '' || v === undefined ? null : v);
@@ -91,7 +92,22 @@ export default async function handler(req, res) {
     }
 
     // 1. Customer: reuse OF create.
+    // Bij REUSE (matched_customer_id): pas eerst wizard-edits toe (vat_number,
+    // company_name, adres, etc). Voorheen werden die genegeerd waardoor de
+    // push met OUDE DB-waarde draaide — bv. gebruiker verbeterde vat_number
+    // in de wizard, maar de push kreeg de oude waarde en TL 400'te.
     let customerId = matched_customer_id || null;
+    if (customerId) {
+      try {
+        const patchRes = await applyCustomerPatchFromWizard(supabaseAdmin, customerId, customer_data);
+        if (patchRes.applied) {
+          console.log('[sales-deal-create] customer wizard-patch toegepast', { customerId, fields: patchRes.fields });
+        }
+      } catch (e) {
+        console.error('[sales-deal-create] customer wizard-patch mislukt:', customerId, e?.message);
+        return res.status(500).json({ error: 'Kon klantgegevens niet bijwerken vóór push: ' + (e?.message || 'onbekend') });
+      }
+    }
     if (!customerId) {
       const isCompanyPayload = customer_data.is_company === true || customer_data.is_company === 'true';
       // Bij B2B: NOOIT een tl_imported_contact_id op tl_contact_id zetten in
