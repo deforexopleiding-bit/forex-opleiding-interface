@@ -36,6 +36,12 @@ import {
   loadOpenActionsByCustomer,
 } from './pending-actions-guard.js';
 import { shouldSkipDueToTerminalStage } from './dunning-pipeline.js';
+import {
+  isSendStep,
+  isWithinOfficeHours,
+  readOfficeHoursSetting,
+  officeHoursLabel,
+} from './dunning-office-hours.js';
 
 const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
 
@@ -862,6 +868,15 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
   ));
   const openActionsByCustomer = await loadOpenActionsByCustomer(runCustomerIds);
 
+  // ── Kantooruren-config één keer per engine-run laden ─────────────────────
+  // App-settings key 'dunning_office_hours' (jsonb). Fail-soft → default
+  // 08:00-20:00 Europe/Amsterdam elke dag (zie DEFAULT_OFFICE_HOURS in
+  // dunning-office-hours.js). Buiten venster wordt uitsluitend een SEND-stap
+  // (email/whatsapp) geblokkeerd; wait/task/stop/resume mogen doorlopen zodat
+  // de workflow-pointer niet stilstaat.
+  const officeHoursCfg   = await readOfficeHoursSetting(supabaseAdmin);
+  const officeHoursDebug = officeHoursLabel(officeHoursCfg);
+
   for (const run of runs || []) {
     if (elapsed(startedAt) > abortMs) break;
 
@@ -1009,6 +1024,38 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
         }
 
         const nextStep = (steps || []).find((s) => s.step_order > currentStep.step_order) || null;
+
+        // ── Kantooruren-guard voor SEND-stappen (email/whatsapp) ──────────
+        // Buiten venster: NIET uitvoeren, NIET pointer doorschuiven, NIET
+        // next_action_at muteren → volgende engine-tick (elk uur) pikt de
+        // run opnieuw op en probeert opnieuw. Effect: geen nacht-sends,
+        // wachttijd tot venster-open <60 min. Wait/task/stop/resume worden
+        // niet gegate (die zijn geen bericht naar de klant).
+        //
+        // Log-regel per geblokkeerde run/tick zodat je in de audit ziet dat
+        // de guard vuurde en welk venster toen gold. Bij typisch 20 actieve
+        // runs × 12 nacht-uren = ~240 log-regels/nacht — auditable maar
+        // niet exorbitant.
+        if (isSendStep(currentStep.step_type) && !isWithinOfficeHours(new Date(), officeHoursCfg)) {
+          try {
+            await supabaseAdmin.from('dunning_log').insert({
+              run_id:     run.id,
+              step_id:    currentStep.id,
+              event_type: 'send_skipped_office_hours',
+              payload: {
+                step_type:      currentStep.step_type,
+                office_hours:   officeHoursDebug,
+                will_retry_at:  'next_hourly_tick_within_office_hours',
+                checked_at:     nowIso(),
+              },
+            });
+          } catch (e) {
+            console.warn('[dunning-engine] office-hours skip-log fail-soft:', run.id, e?.message || e);
+          }
+          // Break binnenlus zonder next_action_at te muteren. Pointer + status
+          // blijven onaangeraakt zodat volgende tick het opnieuw probeert.
+          break;
+        }
 
         // Execute step.
         const execArgs = { supabaseAdmin, run, step: currentStep, customer, openInvoices };

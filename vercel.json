@@ -50,7 +50,7 @@
     },
     {
       "path": "/api/cron-dunning-engine",
-      "schedule": "0 7 * * *"
+      "schedule": "0 * * * *"
     },
     {
       "path": "/api/cron-incasso-auto",

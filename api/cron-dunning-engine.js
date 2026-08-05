@@ -9,7 +9,13 @@
 // Methodes: GET (Vercel cron) + POST (handmatige debug-trigger via dezelfde
 // CRON_SECRET — handig voor curl-tests buiten de schedule om).
 //
-// Schedule: dagelijks 09:00 (zie vercel.json crons-entry).
+// Schedule: elk uur (`0 * * * *`, zie vercel.json crons-entry).
+// De engine draait 24/7, maar SEND-stappen (email/whatsapp) worden binnen
+// dunning-engine.js zelf gegate door de kantooruren-guard (default 08:00-20:00
+// Europe/Amsterdam, elke dag — configureerbaar via app_settings.
+// dunning_office_hours). Wait/task/stop/resume mogen buiten het venster
+// gewoon doorlopen zodat de workflow-pointer niet stilstaat. Zie
+// api/_lib/dunning-office-hours.js voor de logica en officeHoursLabel.
 
 import { checkCronAuth } from './supabase.js';
 import { runEngine } from './_lib/dunning-engine.js';
