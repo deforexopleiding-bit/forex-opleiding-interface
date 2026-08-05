@@ -250,8 +250,22 @@ export default async function handler(req, res) {
           .select('tl_department_id').eq('tl_department_id', tl_department_id).eq('is_active', true).maybeSingle();
         if (!ent) return res.status(400).json({ error: 'Ongeldige bedrijfsentiteit (tl_department_id)' });
       }
-      // Klant: hergebruik OF aanmaken.
+      // Klant: hergebruik OF aanmaken. Bij REUSE eerst wizard-edits
+      // persisteren (vat_number, adres, etc) — anders werkt de push met
+      // stale DB-data. Zie api/_lib/customer-patch-from-wizard.js.
       let customerId = matched_customer_id || null;
+      if (customerId) {
+        try {
+          const { applyCustomerPatchFromWizard } = await import('./_lib/customer-patch-from-wizard.js');
+          const patchRes = await applyCustomerPatchFromWizard(supabaseAdmin, customerId, customer_data);
+          if (patchRes.applied) {
+            console.log('[sales-subscription-create] customer wizard-patch toegepast', { customerId, fields: patchRes.fields });
+          }
+        } catch (e) {
+          console.error('[sales-subscription-create] customer wizard-patch mislukt:', customerId, e?.message);
+          return res.status(500).json({ error: 'Kon klantgegevens niet bijwerken vóór push: ' + (e?.message || 'onbekend') });
+        }
+      }
       if (!customerId) {
         const custPayload = {
           first_name: customer_data.first_name || null, last_name: customer_data.last_name || null,
