@@ -93,8 +93,15 @@ export default async function handler(req, res) {
     // 1. Customer: reuse OF create.
     let customerId = matched_customer_id || null;
     if (!customerId) {
+      const isCompanyPayload = customer_data.is_company === true || customer_data.is_company === 'true';
+      // Bij B2B: NOOIT een tl_imported_contact_id op tl_contact_id zetten in
+      // deze insert. Reden: dat is een persoons-contact uit TL search-match dat
+      // niks met het bedrijf zelf te maken heeft; koppelen zou verwarrend zijn
+      // omdat onze push-flow tl_company_id + eigen contact-koppeling gebruikt.
+      // De contact wordt bij B2B pas aangemaakt en gelinkt door
+      // ensureCompanyWithContact tijdens de eerste push.
       const custPayload = {
-        is_company:      customer_data.is_company === true || customer_data.is_company === 'true',
+        is_company:      isCompanyPayload,
         company_name:    customer_data.company_name || null,
         kvk_number:      customer_data.kvk_number || null,
         vat_number:      customer_data.vat_number || null,
@@ -108,7 +115,7 @@ export default async function handler(req, res) {
         address_postal:  customer_data.address_postal || null,
         address_city:    customer_data.address_city || null,
         address_country: (customer_data.address_country === 'BE' ? 'BE' : (customer_data.address_country === 'NL' ? 'NL' : null)),
-        tl_contact_id:   tl_imported_contact_id || null,
+        tl_contact_id:   isCompanyPayload ? null : (tl_imported_contact_id || null),
         created_by_user_id: user.id,
       };
       // Email-uniciteit check (race-safe via DB error 23505 als constraint bestaat).

@@ -39,7 +39,31 @@ export default async function handler(req, res) {
     if (inv.status !== 'concept') return res.status(409).json({ error: 'Alleen conceptfacturen kunnen worden aangepast — crediteer en maak opnieuw.' });
 
     const body = { id: inv.tl_invoice_id };
-    if (patch.invoicee && patch.invoicee.customer && patch.invoicee.customer.id) body.invoicee = { customer: { type: patch.invoicee.customer.type || 'contact', id: patch.invoicee.customer.id } };
+    if (patch.invoicee && patch.invoicee.customer && patch.invoicee.customer.id) {
+      // Type moet expliciet uit caller-payload komen, of afgeleid uit onze DB
+      // (customers.is_company). Voorheen defaulden we op 'contact' bij afwezigheid
+      // — dat pushte B2B-facturen ten onrechte op de persoon in TL. Zie #TL-B2B fix.
+      let customerType = patch.invoicee.customer.type;
+      if (!customerType) {
+        // Zoek de bijbehorende customers-rij via de tl_id om is_company af te leiden.
+        // Fail-loud i.p.v. stille contact-default: we willen liever een 400 dan een
+        // B2B-factuur op de verkeerde entity zetten.
+        const tlId = String(patch.invoicee.customer.id);
+        const { data: cust } = await supabaseAdmin.from('customers')
+          .select('id, is_company, tl_contact_id, tl_company_id')
+          .or(`tl_contact_id.eq.${tlId},tl_company_id.eq.${tlId}`)
+          .maybeSingle();
+        if (cust?.is_company && cust?.tl_company_id === tlId)      customerType = 'company';
+        else if (!cust?.is_company && cust?.tl_contact_id === tlId) customerType = 'contact';
+        else {
+          return res.status(400).json({
+            error: 'invoicee.customer.type is verplicht bij factuur-update en kon niet uit DB afgeleid worden — geef expliciet type: "contact" of "company" mee.',
+            code:  'INVOICEE_CUSTOMER_TYPE_REQUIRED',
+          });
+        }
+      }
+      body.invoicee = { customer: { type: customerType, id: patch.invoicee.customer.id } };
+    }
 
     // Twee shapes voor regels: `lines` (shorthand, mapper bouwt grouped_lines + tax_rate_id —
     // zelfde mapping als create) of `grouped_lines` (rauw, voor backwards-compat).
