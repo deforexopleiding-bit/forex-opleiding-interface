@@ -31,6 +31,11 @@
     .filter-row input[type="search"]{flex:1;min-width:200px;max-width:340px}
     .filter-row .btn-refresh{background:transparent;border:1px solid var(--border-default,#e5e7eb);cursor:pointer;padding:7px 12px;border-radius:6px;font-size:13px;color:var(--text-dim)}
     .filter-row .btn-refresh:hover{background:var(--bg-elev-2,#f8fafc)}
+    /* Call gepland: groene badge + tijdstip uit leads_overzicht.afspraak_op */
+    .calltag{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;line-height:1.5;white-space:nowrap}
+    .calltag.ja{background:rgba(0,182,122,.14);color:#00875a}
+    .calltag.nee{background:transparent;color:var(--text-dim,#94a3b8);font-weight:500}
+    .callwhen{display:block;font-size:11px;color:var(--text-dim,#94a3b8);margin-top:2px;white-space:nowrap}
 
     /* Tabel — horizontaal scrollbaar zodat de ACTIES-kolom nooit afkapt.
        min-width dwingt een echte overflow af i.p.v. kolommen platdrukken. */
@@ -180,6 +185,11 @@
         <option value="gewonnen">gewonnen</option>
         <option value="verloren">verloren</option>
       </select>
+      <select id="fAfspraak">
+        <option value="">Call gepland: alle</option>
+        <option value="ja">Call gepland: ja</option>
+        <option value="nee">Call gepland: nee</option>
+      </select>
       <input type="search" id="fQ" placeholder="Zoek op naam of e-mail…" />
       <button type="button" class="btn-refresh" id="btnRefresh">Vernieuwen</button>
       <button type="button" class="btn-add" id="btnAdd">+ Lead toevoegen</button>
@@ -209,11 +219,12 @@
           <th>Tag</th>
           <th class="col-score">Score / drempel</th>
           <th>Status</th>
+          <th>Call gepland</th>
           <th>Aangemaakt</th>
           <th>Acties</th>
         </tr></thead>
         <tbody id="tblBody">
-          <tr><td colspan="12" class="empty">Laden…</td></tr>
+          <tr><td colspan="13" class="empty">Laden…</td></tr>
         </tbody>
       </table>
     </div>
@@ -340,7 +351,7 @@ async function loadList(){
   const body = document.getElementById('tblBody');
   const err  = document.getElementById('err');
   err.style.display = 'none';
-  body.innerHTML = '<tr><td colspan="12" class="empty">Laden…</td></tr>';
+  body.innerHTML = '<tr><td colspan="13" class="empty">Laden…</td></tr>';
   try{
     const p = new URLSearchParams();
     const sel = (id)=>document.getElementById(id).value.trim();
@@ -349,6 +360,7 @@ async function loadList(){
     if(sel('fKwal'))   p.set('kwalificatie', sel('fKwal'));
     if(sel('fBron'))   p.set('bron',   sel('fBron'));
     if(sel('fStatus')) p.set('status', sel('fStatus'));
+    if(sel('fAfspraak')) p.set('afspraak', sel('fAfspraak'));
     if(sel('fQ'))      p.set('q',      sel('fQ'));
     if(_state.archief) p.set('archief', '1');
     p.set('limit',  String(_page.limit));
@@ -370,7 +382,7 @@ async function loadList(){
   }catch(e){
     err.textContent = 'Laden mislukt: '+e.message;
     err.style.display = 'block';
-    body.innerHTML = '<tr><td colspan="12" class="empty">—</td></tr>';
+    body.innerHTML = '<tr><td colspan="13" class="empty">—</td></tr>';
     document.getElementById('pager').style.display = 'none';
   }
 }
@@ -621,10 +633,18 @@ const ICON_EDIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 const ICON_DEL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>';
 const ICON_HERSTEL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M3 13a9 9 0 1 0 3-7.7L3 8"/></svg>';
 
+// Afspraak-tijdstip compact: "6 aug 14:30" (nl). Leeg bij ontbrekend/ongeldig.
+function fmtAfspraak(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  if(isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('nl-NL',{day:'numeric',month:'short'})+' '
+       + d.toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit'});
+}
 function render(){
   const body = document.getElementById('tblBody');
   if(!_state.rows.length){
-    body.innerHTML = '<tr><td colspan="12" class="empty">Geen leads gevonden met deze filters.</td></tr>';
+    body.innerHTML = '<tr><td colspan="13" class="empty">Geen leads gevonden met deze filters.</td></tr>';
     return;
   }
   const canDel = _state.canDelete;
@@ -659,6 +679,9 @@ function render(){
       '<td><span class="tag '+tagClass(r.tag)+'">'+esc(tagLabel(r.tag))+'</span></td>'+
       '<td class="col-score">'+scoreCell+'</td>'+
       '<td><span class="status '+statusClass(r.status)+'">'+esc(r.status||'—')+'</span></td>'+
+      (r.afspraak_op
+        ? '<td><span class="calltag ja">✓ Gepland</span><span class="callwhen">'+esc(fmtAfspraak(r.afspraak_op))+'</span></td>'
+        : '<td><span class="calltag nee">—</span></td>')+
       '<td>'+esc(fmtDate(r.aangemaakt))+'</td>'+
       '<td>'+actie+'</td>'+
     '</tr>';
@@ -773,6 +796,7 @@ async function init(){
   document.getElementById('fKwal').addEventListener('change', reload);
   document.getElementById('fBron').addEventListener('change', reload);
   document.getElementById('fStatus').addEventListener('change', reload);
+  document.getElementById('fAfspraak').addEventListener('change', reload);
   document.getElementById('fQ').addEventListener('input', () => {
     clearTimeout(_searchTimer);
     _searchTimer = setTimeout(reload, 250);
