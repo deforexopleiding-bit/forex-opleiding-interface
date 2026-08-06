@@ -39,9 +39,9 @@ let state = null;
 
 // ── Public entry ─────────────────────────────────────────────────────────────
 
-export async function renderListView(rootEl, { ctx } = {}) {
+export async function renderListView(rootEl, { profile } = {}) {
   state = {
-    ctx,
+    profile,
     tagsCatalog: [],           // [{slug,label,color}]
     stats: null,               // {active,new_this_month,risico}
     filter: {

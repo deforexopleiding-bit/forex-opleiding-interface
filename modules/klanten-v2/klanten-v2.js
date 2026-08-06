@@ -106,7 +106,7 @@ async function initAuth() {
   const nameEl = $('#kv-user-name');   if (nameEl) nameEl.textContent = name;
   const roleEl = $('#kv-user-role');   if (roleEl) roleEl.textContent = role;
 
-  return ctx;
+  return profile;
 }
 
 // ── Router (minimaal) ────────────────────────────────────────────────────────
@@ -119,7 +119,7 @@ function parseRoute() {
   };
 }
 
-async function mountRoute(ctx) {
+async function mountRoute(profile) {
   const view = $('#kv-view');
   const route = parseRoute();
 
@@ -142,14 +142,14 @@ async function mountRoute(ctx) {
   }
 
   // Lijst-view (PR-A scope)
-  await renderListView(view, { ctx });
+  await renderListView(view, { profile });
 }
 
 // Reageer op back/forward
 window.addEventListener('popstate', () => {
   // Volledige re-mount is prima; er is nog geen zware state om te bewaren.
-  const ctx = window.__kvAuthCtx || null;
-  mountRoute(ctx).catch((e) => {
+  const profile = window.__kvAuthCtx || null;
+  mountRoute(profile).catch((e) => {
     console.error('[klanten-v2] mountRoute error:', e);
     toast('Fout bij laden view');
   });
@@ -164,8 +164,8 @@ window.KV.navigate = function navigate(params = {}) {
     else if (params[k] !== undefined) u.searchParams.set(k, params[k]);
   }
   window.history.pushState({}, '', u);
-  const ctx = window.__kvAuthCtx || null;
-  return mountRoute(ctx);
+  const profile = window.__kvAuthCtx || null;
+  return mountRoute(profile);
 };
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
