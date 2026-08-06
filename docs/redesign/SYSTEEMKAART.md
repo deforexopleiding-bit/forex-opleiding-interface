@@ -281,7 +281,9 @@ Alles wat "instellen" is in plaats van "werken", uit alle modules bij elkaar. Ca
 
 ## Deel C — Rollen en rechten
 
-Peildatum: `role_permissions`-seeds mig 014-016 + `docs/sql-migrations/2026-06-*` + `2026-07-*`. In `admin.html RBAC_ROLES` staan óók `admin`, `marketing`, `administratie`, `viewer` — in de praktijk niet uitgegeven. Voorstel Deel D: opruimen naar 4.
+Peildatum: `role_permissions`-seeds mig 014-016 + `docs/sql-migrations/2026-06-*` + `2026-07-*`.
+
+**Beslissing 2026-08-06**: rollen-lijst wordt teruggebracht naar **5**: `super_admin`, `manager`, `sales`, `mentor`, `marketing` (marketing wordt later ingericht, nu alvast bewaard). Op te ruimen: `admin` (praktisch synoniem met manager), `administratie`, `viewer`. Concreet plan staat in **Bijlage 2 — Rol-cleanup-plan** onderaan dit document.
 
 Legenda per feature-tabel: `SA`=super_admin (`*`-wildcard), `M`=manager, `S`=sales, `Mt`=mentor. `✓` = expliciete grant in productie-seed; `–` = geen grant (per-user via matrix mogelijk).
 
@@ -381,129 +383,115 @@ Deze niet-blokkerend voor Fase 3 redesign, wel op takenlijst:
 
 ---
 
-## Deel D — Voorstel nieuwe indeling
+## Deel D — Definitieve indeling
 
-Kern-principes:
-1. **Twee soorten items in de zijbalk**: **Werken** (dagelijkse operatie) en **Instellingen** (samengetrokken). Alles wat geen dagelijkse operatie is verhuist naar de Instellingen-boom.
-2. **Groepen boven-elkaar** in de zijbalk met dunne kop-labels, niet meer dan 5–6 zichtbare items per groep zonder scrollen.
-3. **Rol filtert de zijbalk**, niet de groep-structuur — alle rollen zien dezelfde groep-namen, ze zien alleen andere items eronder.
-4. **Mentor-rol krijgt een compleet eigen mini-app-shell** — geen "verkleinde manager-view".
-5. **"Binnenkort"-groep** onderaan voor niet-actieve modules die we niet weggooien: Secret Area, Kennisbank, Vergaderruimte, plus 3–4 kandidaten hieronder.
+Vastgelegd 2026-08-06. Onderstaande beslissingen zijn contractueel voor elke bouw-PR — deel E hieronder is de per-module afvinklijst die daar tegen getoetst wordt.
 
-### D1. Voorstel zijbalk voor **super_admin / manager**
+### D0. Architectuur-principes (gefixed)
+
+1. **Eén systeem, één shell, één zijbalk** — geen aparte mentor-mini-app en geen aparte sales-mini-app. Elke rol werkt in dezelfde codebase; de zijbalk vult zich op basis van rechten (rechten-check verbergt items die je niet mag zien).
+2. **Dashboard is per rol anders, werkschermen zijn gedeeld** — het `/index.html`-Dashboard rendert rolspecifieke inhoud (mentor: eigen studenten & sessies; sales: pijplijn & op te volgen; manager+super_admin: totaalbeeld). Modules zoals Sales/Finance/Events zijn hetzelfde scherm voor iedereen; rechten verbergen tabs en knoppen. Één keer bouwen, één keer onderhouden.
+3. **Geen duplicatie meer** — de mentor-cluster (`mentor-home.html`, `mentor-dashboard.html`, `mentor-students.html`, `mentor-onboarding.html`, `mentor-detail.html`) wordt vervangen door: rol-specifiek Dashboard + scope-filters ("Mijn / Alle") binnen de gedeelde modules. De losse mentor-*-files gaan naar archief zodra hun opvolger in de gedeelde module bestaat.
+4. **Zijbalk-groepen zijn identiek voor iedereen** — mentor ziet dezelfde groep-namen als manager (Overzicht / Groei / Klanten & communicatie / …). Alleen de items eronder variëren. Dat maakt onboarding van nieuwe medewerkers voorspelbaar en support-instructies rol-onafhankelijk.
+5. **Rollen (5)**: `super_admin`, `manager`, `sales`, `mentor`, `marketing`. `marketing` blijft leeg tot Fase X. `admin`/`administratie`/`viewer` worden opgeruimd — zie Bijlage 2.
+6. **Instellingen samengetrokken** — alle verspreide config-schermen verhuizen naar één Instellingen-module (10 categorieën, zie D4). Oude locaties blijven werken tot de betreffende module is herbouwd, dan wordt de oude view uit-gelinkt.
+7. **Binnenkort-pagina** — kaartenraster (zelfde opzet als Instellingen) waar niet-actieve modules onder blijven leven: Secret Area, Vergaderruimte, Kennisbank, Control Center, Simon/Leon/Aron-chat. Niks wordt verwijderd, alleen uit de hoofdnavigatie gehaald.
+
+### D1. Unified zijbalk (identiek voor iedereen; rechten verbergen items)
+
+Alle 5 rollen zien onderstaande boom. Per item is er een gate-key; heeft de rol die niet dan is het item verborgen (`display:none`). Op deze manier krijgt niemand een "kaal" scherm; wie iets niet mag, ziet het gewoon niet.
 
 ```
 ── OVERZICHT ─────────────────
-  🏠  Dashboard
-  📋  Vandaag  (⋯verzameltaak: 'Open acties' badge — was open-acties.html)
-
-── GROEI ─────────────────────
-  🎯  Leads
-  🌱  Leadsonderhoud
-  📞  Follow-up
-  📊  Meta Ads
-  ✂️  Creative Studio
+  🏠  Dashboard              iedereen — inhoud rolspecifiek (zie D2)
+  ✅  Taken                  iedereen
+  🎯  Leads                  iedereen (mentor read-only)
+  🌱  Leadsonderhoud         SA / manager / sales / marketing
 
 ── KLANTEN & COMMUNICATIE ────
-  👥  Klanten            (nieuwe klanten-v2 — vervangt klanten.html)
-  📥  E-mail
-  💬  Inbox              (WhatsApp — Finance+Events+Onboarding samen)
+  👥  Klanten                SA / manager / sales / mentor (mentor: scope Mijn)
+  📥  E-mail                 SA / manager / sales
+  💬  Inbox                  SA / manager / sales (WhatsApp — Finance+Events+Onboarding samen)
+  📞  Follow-up              SA / manager / sales
 
 ── VERKOOP & FINANCIËN ────────
-  🛒  Sales
-  💰  Finance            (incl. Wanbetalers / Bank / Uitgaven)
+  🛒  Sales                  SA / manager / sales / mentor (mentor: alleen tabs Klanten + Offertes)
+  💰  Finance                SA / manager / sales (sales: alleen tabs Facturen + Abonnementen)
+  🚀  Onboarding             SA / manager / sales / mentor (mentor: scope Mijn)
 
 ── LEREN & EVENTS ────────────
-  🎓  Events
-  🧑‍🏫  Mentoren beheer   (admin-hub voor manager+)
-  📚  Alle studenten     (manager+)
-  🚀  Onboarding
-
-── OPERATIE ──────────────────
-  ✅  Taken
-  🎫  Tickets
-  📜  Logboek
-
-── AI ────────────────────────
-  🤖  AI Agents (Joost / Simone / Mila / Simon / Lisa)
-                          (samengetrokken: agents.html + agent-center.html + lisa.html)
-
-── INSTELLINGEN ──────────────
-  ⚙️  Instellingen        (gebundelde settings-boom — zie D3)
-  🛡️  Admin              (link naar user-mgmt + RBAC-matrix)
-
-── BINNENKORT ────────────────
-  🔬  Vergaderruimte
-  📖  Kennisbank
-  🔐  Secret Area         (SA-only, hidden by default)
-```
-
-**Verschillen manager vs. super_admin**: alles wat SA extra ziet zijn:
-- Agent center (via `admin.joost_config`) — kan onder AI-groep
-- Secret Area (server-check)
-- Rechten-tab-schrijven in Instellingen > Gebruikers & rollen
-- Alle super_admin-only sub-tools (wanbetalers-diagnose/test, admin-tl-import, admin-historical-events)
-
-### D2. Voorstel zijbalk voor **sales**
-
-```
-── OVERZICHT ─────────────────
-  🏠  Dashboard           (sales-dashboard)
-  📋  Vandaag
+  🎓  Events                 SA / manager / sales / mentor (mentor: scope Mijn)
+  🧑‍🏫  Mentoren beheer      SA / manager
+  📚  Alle studenten         SA / manager
 
 ── GROEI ─────────────────────
-  🎯  Leads
-  🌱  Leadsonderhoud
-  📞  Follow-up
-  📊  Meta Ads (optioneel via matrix)
-
-── KLANTEN & COMMUNICATIE ────
-  👥  Klanten
-  📥  E-mail
-  💬  Inbox
-
-── VERKOOP ───────────────────
-  🛒  Sales
-  💰  Finance             (beperkte tabs: Facturen + Abonnementen)
-  🚀  Onboarding          (na-verkoop toewijzen — sinds mig 2026-07-06)
-
-── LEREN & EVENTS ────────────
-  🎓  Events
+  📊  Meta Ads               SA / marketing (matrix voor overige)
+  ✂️  Creative Studio        SA / marketing (matrix voor overige)
 
 ── OPERATIE ──────────────────
-  ✅  Taken
-  🎫  Tickets
+  🎫  Tickets                iedereen
+  📜  Logboek                SA (matrix voor overige)
 
-── AI ────────────────────────
-  📖  Kennisbank (read-only)  ← optioneel; anders in Binnenkort
-
-── INSTELLINGEN ──────────────
-  ⚙️  Instellingen         (alleen sales-scope: eigen aanbod, sales-bonus,
-                             follow-up-sluimer — géén finance/wanbetalers)
+── SYSTEEM ───────────────────
+  ⚙️  Instellingen           iedereen (inhoud rolspecifiek — zie D3)
+  🧭  Binnenkort             iedereen (kaartenraster met naar-de-wachtkamer-modules — zie D4)
 ```
 
-### D3. Voorstel zijbalk voor **mentor** (eigen mini-app)
+**Toelichting op de rol-verschillen** (zonder eigen shell te bouwen):
+- Elke module met een "Mijn / Alle"-scope-schakelaar bovenaan (Sales/Klanten/Onboarding/Events) toont voor mentor **default Mijn** en verbergt de "Alle"-optie via de gate-key.
+- Sales-tabs Dashboard/Abonnementen/Retentie/Aanbod/Rapporten zijn voor mentor verborgen (bestaande grants uit mig 015).
+- Finance-tabs Wanbetalers/Bank/Uitgaven zijn voor sales verborgen (bestaande grants).
+- Mentoren beheer + Alle studenten + Logboek + Rechten-matrix in Instellingen zijn manager+ only.
+- Marketing krijgt in Fase X eigen Meta Ads-gate; nu leeg totdat we die rol inrichten.
 
-```
-── OVERZICHT ─────────────────
-  🏠  Home                 (mentor-home)
-  💰  Financiën            (mentor-dashboard)
+### D2. Rolspecifiek Dashboard (`/index.html`)
 
-── STUDENTEN ─────────────────
-  👥  Mijn studenten       (mentor-students)
-  🚀  Onboarding           (mentor-onboarding)
-  🎓  Events (self)        (agenda + attendees voor eigen events)
-  🌐  LMS (extern)
+Één bestand, één shell, één set componenten. De inhoud wordt bepaald door de rol van de ingelogde user — geen redirect meer naar aparte HTML-pagina's. Bestaande componenten (KPI-card, activity-feed, taken-widget) worden hergebruikt en gevuld met rolspecifieke data.
 
-── OPERATIE ──────────────────
-  ✅  Taken
-  🎫  Tickets
-  🎯  Leads (view-only)
-```
+#### Dashboard voor **mentor**
+Doel: mentor ziet direct waar zijn dag om draait — eigen studenten, sessies, verdiensten.
 
-Geen Instellingen-groep voor mentor (behalve eventueel eigen thema + notificatie-voorkeuren onder een klein "Mijn profiel"-blok in de footer).
+**Blokken (in deze volgorde):**
+1. **Welkomst-hero** — naam + huidige uitbetalings-cyclus + link naar Financiën-detail.
+2. **KPI-strip** (4 tegels): Actieve studenten (mijn) · 1-op-1 sessies deze week · Bonus deze maand (€) · Openstaande no-shows.
+3. **Vandaag & morgen** — eigen kalender-slice (event-attendances + 1-op-1-slots) — 2-koloms tijdlijn.
+4. **Onboarding-inbox** — mijn intake-pijplijn (top 5 openstaande met filter-chips Te behandelen / Wil niet / No-show).
+5. **Mijn studenten met aandachtspunt** — top 5 uit `student-signals` (bv. inactief, missed session).
+6. **Snelle links** — LMS · Nieuwe 1-op-1 · Ticket melden.
 
-### D4. Voorstel voor de **Instellingen-module** (deep-tree)
+**Bron-endpoints**: `mentor-my-events`, `mentor-1on1-sessions`, `mentor-my-students`, `mentor-future-students-self`, `mentor-coaching-earnings`, bestaande `student-signals`.
+
+#### Dashboard voor **sales**
+Doel: sales ziet zijn call-pijplijn en direct opvolgwerk.
+
+**Blokken:**
+1. **Welkomst-hero** — naam + omzet-tegel deze maand (`super-admin-omzet` sales-scoped) + team-target-progressbar.
+2. **KPI-strip** (4 tegels): Nieuwe leads vandaag · Geplande calls · Openstaande offertes · Retentie-signalen (klanten die afhaken).
+3. **Vandaag's call-lijst** — top 10 uit follow-up.werklijst met snelknop "Open" en outcome-registratie inline.
+4. **Openstaande offertes** — top 5 uit sales.offertes (status Verzonden > 7 dagen zonder response).
+5. **Nieuwe leads** — top 10 uit leads.list met warmtescore.
+6. **Snelle links** — Nieuwe offerte · Nieuwe klant · Ticket melden.
+
+**Bron-endpoints**: bestaande `leads-list`, `sales-*`, `follow-up-appointments`, `super-admin-omzet` (rol-scoped).
+
+#### Dashboard voor **manager + super_admin**
+Doel: totaalbeeld — waar loopt het vast, wat moet ik zien.
+
+**Blokken:**
+1. **Welkomst-hero** — naam + totaal-omzet deze maand + KPI-overrides (bv. wanbetaler-alerts).
+2. **KPI-strip** (6 tegels): Omzet MTD · Nieuwe klanten MTD · Openstaand debiteur (€) · Openstaande approvals · Actieve leads · Actieve wanbetaler-cases.
+3. **Ops-alerts** — banner met bv. cron-failures (uit `sync-status`), gefaalde approvals, wanbetalers > 60 dagen.
+4. **Open acties** — pending_actions top 10 (was open-acties.html) + link naar volledige lijst.
+5. **Team-activiteit** — activity-log laatste 20 (was control-center kpi-bar).
+6. **Financiële mini-grafiek** — omzet vs. target laatste 30 dagen.
+7. **Snelle links** — Rechten-matrix · Cron-status · Historische events (SA-only).
+
+**Bron-endpoints**: `super-admin-*`, `dashboard-stats`, `pending-actions-list`, `activity-log-list`, `sync-status`.
+
+#### Dashboard voor **marketing** (placeholder tot Fase X)
+Blokken skeleton: Meta Ads-cijfers · nieuwe leads per bron · funnel-conversie. Nu leeg-state ("Marketing-dashboard komt in Fase X").
+
+### D3. Instellingen-module (deep-tree — ongewijzigd van vorige versie)
 
 ```
 Instellingen
@@ -595,48 +583,297 @@ Instellingen
     └── Secrets-status (read-only)
 ```
 
-### D5. "Binnenkort" — wat mag naar de wachtkamer
+### D4. Binnenkort-pagina (kaartenraster)
 
-Zoals user aangaf: Secret Area, Kennisbank, Vergaderruimte. Uit de A-inventaris zou ik daaraan willen toevoegen:
-- **AI Agents (Simon/Leon/Aron chat)** — Joost/Simone/Mila zijn actief; Simon/Leon/Aron zijn oude generieke chat-agents die feitelijk niet dagelijks gebruikt worden. Voorstel: chatten met Simon/Leon/Aron naar Binnenkort; Joost/Simone/Mila-config wél in "AI"-groep (Instellingen) actief.
-- **Meetings/Vergaderruimte** — zoals user zei.
-- **Control Center** — approval-inbox is deels overgenomen door de Wanbetalers-Instellingen-tab. Voorstel: naar Binnenkort tenzij je hem daadwerkelijk nog gebruikt voor agent-approvals.
-- **Meta Ads / Creative Studio** — houden in "Groei" want dagelijks door Jeffrey.
-- **Kennisbank** naar Binnenkort? Kennisbank voedt Lisa/Joost/Simone — de KB-items zelf zijn wél in gebruik. Voorstel: **niet naar Binnenkort**, maar wél opnemen onder "AI" met een simpelere UI ("Bedrijfsprofiel + agent-specifieke tags" — dat is wat je feitelijk beheert).
+Nieuwe module `/modules/binnenkort.html` (Fase 2 na klanten-v2). Zelfde look-and-feel als Instellingen: een raster met kaarten, per kaart een titel + korte beschrijving + status-badge + "Openen"-knop naar het bestaande scherm. Niks verdwijnt; alles blijft bereikbaar.
 
-### D6. Archief-batch — verwijderkandidaten (na alle deep-links opgeruimd)
+**Kaarten in Binnenkort:**
+
+| Kaart | Bestand | Status-badge | Waarom hier |
+|---|---|---|---|
+| Vergaderruimte | `modules/meetings.html` | 🚧 Beperkt gebruik | Zelden gebruikt in dagelijkse operatie |
+| Kennisbank | `modules/kennisbank.html` | 📚 Actief maar niche | Content voedt Lisa/Joost/Simone; content-beheer verhuist naar Instellingen > AI-agents > Kennisbank-tags + bedrijfsprofiel |
+| Control Center | `modules/control-center.html` | 🚧 Beperkt gebruik | Approval-inbox verhuist naar Instellingen > Wanbetalers > Engine-log; audit-log leeft in eigen Logboek-module |
+| Simon / Leon / Aron chat | `modules/agents.html` | 💤 Sluimert | Joost/Simone/Mila zijn actieve agents; deze drie generieke chat-agents zijn oud |
+| Secret Area | `modules/secret-area.html` | 🔐 Persoonlijk (SA) | Alleen voor super_admin zichtbaar; blijft server-PIN-gated |
+
+Binnenkort-kaart voor Secret Area is voor iedereen behalve super_admin verborgen (dezelfde `applySecretAreaGating`-check).
+
+### D5. Archief-batch — verwijderkandidaten (na alle deep-links opgeruimd)
+
+Zijn niet in Binnenkort; kunnen daadwerkelijk weg zodra links opgeruimd zijn.
 
 - `modules/dashboard-v1-archive.html`
 - `modules/kennisbank-v1-archive.html`
-- `modules/wanbetalers.html`
+- `modules/wanbetalers.html` (legacy standalone — Finance-module heeft alles)
 - `modules/open-acties.html` (redirector — kan weg als geen bookmarks meer)
 - `modules/mentor-grootboek.html` (redirect-stub)
-- `modules/sales-dashboard.html` (redirect-stub — als sales-landing direct naar sales.html?tab=dashboard mag)
-- `modules/onboarding-admin.html`, `onboarding-wizard-editor.html`, `onboarding-automations.html` (dormant standalones — hub is primair)
-- `modules/wanbetalers-test.html`, `wanbetalers-diagnose.html` (super_admin-only, houden of naar Instellingen > Wanbetalers > Diagnose als sub-tool)
-- `modules/klanten.html` (**pas** na klanten-v2 PR-C compleet + Sales-Klanten-tab overzet)
+- `modules/sales-dashboard.html` (redirect-stub — vervalt zodra `/index.html` het rolspecifieke sales-dashboard rendert)
+- `modules/onboarding-admin.html`, `onboarding-wizard-editor.html`, `onboarding-automations.html` (dormant standalones — hub is primair, editor+automations verhuizen naar Instellingen)
+- `modules/wanbetalers-test.html`, `wanbetalers-diagnose.html` — verhuizen naar Instellingen > Wanbetalers > Diagnose (SA-only)
+- `modules/mentor-home.html`, `mentor-dashboard.html`, `mentor-students.html`, `mentor-onboarding.html`, `mentor-detail.html`, `mentor-payouts-admin.html`, `funded-certificates-admin.html`, `student-assessments-admin.html`, `mentor-cash-trajects-admin.html`, `mentoren-beheer.html`, `students-overview.html` — vervangen door rolspecifieke Dashboard + scope-filters "Mijn / Alle" op Klanten-v2, Sales-v2, Events-v2, Onboarding-v2. Verhuizen naar archief **pas** nadat elk stuk functionaliteit in de gedeelde modules bestaat.
+- `modules/klanten.html` — **pas** na klanten-v2 PR-C compleet + Sales-Klanten-tab overzet.
 
-### D7. Bouw-volgorde (voorstel — kan bijgesteld)
+### D6. Bouwvolgorde (bevestigd 2026-08-06)
 
-Als we het redesign per module aanpakken zoals bij Klanten-v2 (PR-A/B/C):
+1. **Klanten-v2** (bezig — PR-A live). PR-B (7 detail-tabs) + PR-C (6 modals) volgen.
+2. **Instellingen-module** — skelet + de 3 hoofdgroepen die het meest verspreid zitten (Gebruikers & rollen, Integraties, AI-agents). Overige categorie-sub-schermen komen mee met hun module in stappen 3-7.
+3. **Sales-v2** (blue-accent) — grootste module, hergebruikt Klanten-v2 componenten. Instellingen > Sales > Productcatalogus komt hier mee.
+4. **Finance-v2** (amber-accent) — inclusief Wanbetalers als sub-view. Instellingen > Finance + Wanbetalers komen mee.
+5. **Events-v2** (violet-accent) — event-shell + Simone-config + automations verhuizen naar Instellingen.
+6. **Onboarding-v2 + Mentor-integratie** — Onboarding-hub-v2 + mentor-scope-filters op Sales/Klanten/Events. Losse mentor-*.html-files verhuizen naar archief.
+7. **Leads / Follow-up / Meta Ads / Communicatie / E-mail / Taken / Tickets / Logboek** — laatste ronde, kleinere modules op nieuwe design-system-baseline.
+8. **Rol-cleanup** (kan parallel met stap 2+) — zie Bijlage 2.
+9. **Binnenkort-pagina** — bouwen wanneer Instellingen-skelet staat (deelt veel componenten).
 
-1. **Klanten-v2** (bezig — PR-A live).
-2. **Instellingen-module** (skelet + gebruikers/rollen + integraties eerst; de content-tabs komen mee met de module-redesigns hieronder).
-3. **Sales-v2** (blue-accent) — grootste module, veel data-sharing met Klanten-v2.
-4. **Finance-v2** (amber-accent) — inclusief Wanbetalers als sub-view.
-5. **Events-v2** (violet-accent) — event-shell + automations verhuizen naar Instellingen.
-6. **Onboarding-v2 + Mentor-cluster** (samen — delen veel data).
-7. **Leads/Follow-up/Meta Ads/Communicatie** (laatste ronde — kleinere modules op nieuwe design-system-baseline).
-
-Elke module krijgt eigen PR-A/B/C-structuur (skelet → detail → modals) en per PR een INVENTARIS-afvinklijst.
+Elke module krijgt eigen PR-A/B/C-structuur (skelet → detail → modals) en per PR een INVENTARIS-afvinklijst plus een verwijzing naar deel E hieronder voor rol-verschillen.
 
 ---
 
-## Bijlage — Aannames & open vragen
+## Deel E — Per module: wat verandert voor welke rol
 
-- **Aanname**: mentor-rol krijgt in nieuwe indeling écht eigen mini-app-shell (blijft huidige gedrag). Als je liever één shell wilt met rol-verbergen, is dat ander pad.
-- **Aanname**: `admin`, `marketing`, `administratie`, `viewer` mogen uit `RBAC_ROLES` verwijderd. Bevestig.
-- **Aanname**: `super_admin`-only tools (wanbetalers-diagnose/test, admin-tl-import, admin-historical-events) mogen onder Instellingen > … > Diagnose / Import. Als je ze liever op eigen zij-tab houdt is dat prima.
-- **Open vraag**: Meta Ads + Creative Studio — houden in "Groei"-groep of ook naar Binnenkort? Voorstel: houden (dagelijks Jeffrey).
-- **Open vraag**: Simon/Leon/Aron chat-agents (`modules/agents.html`) — verwijderen of alleen chat-shell naar Binnenkort? Config-in-code (agents-tabel + FALLBACK_PROMPTS) blijft in AI-instellingen.
+Contractueel voor elke bouw-PR. Voor elke module: 1 tabel met per rol wat er verandert t.o.v. het huidige scherm. `→` betekent "wordt in v2". Als er niks verandert staat er "gelijk aan nu".
+
+### E1. Dashboard (`/index.html`)
+
+| Rol | Nu | v2 (deze redesign) |
+|---|---|---|
+| super_admin | Redirect naar `super-admin-dashboard.html` | Blijft op `/index.html`; ziet manager+SA-dashboard (zie D2, incl. SA-only historische events + rechten-shortcut) |
+| manager | `/index.html` bento | `/index.html` met totaalbeeld-dashboard (zie D2) |
+| sales | Redirect naar `sales-dashboard.html` → `sales.html?tab=dashboard` | Blijft op `/index.html`; ziet sales-dashboard (zie D2) |
+| mentor | Redirect naar `mentor-home.html` | Blijft op `/index.html`; ziet mentor-dashboard (zie D2) |
+| marketing | (rol ongebruikt) | Placeholder-dashboard met "komt in Fase X" |
+
+**Cross-rol wijziging**: `ROLE_LANDING` in `supabase-client.js` wordt vereenvoudigd — iedereen naar `/index.html`; `super-admin-dashboard.html`, `mentor-home.html`, `sales-dashboard.html` gaan naar archief.
+
+### E2. Klanten (v2 — bezig)
+
+| Rol | Nu | v2 |
+|---|---|---|
+| super_admin | `klanten.html` deep-link vanaf Sales | `/modules/klanten-v2/` als eigen sidebar-item; alle klanten zichtbaar |
+| manager | Idem | Idem; extra: AVG-acties (anonymize/export) knop zichtbaar |
+| sales | Idem | Idem; `customer.hard_delete` verborgen |
+| mentor | Niet zichtbaar in sidebar | Wél in sidebar; scope-filter default **Mijn** (alleen klanten van eigen studenten); "Alle"-optie verborgen |
+| marketing | (ongebruikt) | Read-only lijst; geen bewerkacties |
+
+### E3. Sales (`modules/sales.html` → `sales-v2`)
+
+| Rol | Nu | v2 |
+|---|---|---|
+| super_admin / manager | Alle 7 tabs (Dashboard/Klanten/Offertes/Abonnementen/Retentie/Aanbod/Rapporten) | Idem; Aanbod-tab verhuist naar Instellingen > Sales > Productcatalogus (deep-link blijft werken) |
+| sales | Alle 7 tabs | Alle 7 tabs; Aanbod-tab: read-only view + link naar Instellingen |
+| mentor | Alleen tabs Klanten + Offertes | Idem, plus scope-filter default **Mijn** op Klanten + Offertes |
+| marketing | (ongebruikt) | Alleen Dashboard + Retentie (read-only) |
+
+### E4. Finance (`modules/finance.html` → `finance-v2`)
+
+| Rol | Nu | v2 |
+|---|---|---|
+| super_admin / manager | Alle tabs (Dashboard/Facturen/Creditnota/Klanten/Wanbetalers/Bank/Uitgaven/Roadmap) | Alle tabs behalve Roadmap (die verdwijnt) + Instellingen-sub-tabs verhuizen naar Instellingen > Finance + Wanbetalers |
+| sales | Alleen invoice.create/update/send + subscription.push | Ziet alleen tabs Facturen + Abonnementen |
+| mentor | Niet zichtbaar | Niet zichtbaar |
+| marketing | (ongebruikt) | Niet zichtbaar |
+
+### E5. Events (`modules/events.html` + wizard + detail + automations → `events-v2`)
+
+| Rol | Nu | v2 |
+|---|---|---|
+| super_admin / manager / sales | Alle events + Instellingen-sub-tabs (Vragenlijst/Simone/Automations/Deadline/Niveau-foto's) | Alle events; Instellingen-sub-tabs verhuizen naar Instellingen > Events (deep-link blijft werken) |
+| mentor | View + attendee.mutaties op eigen events | Scope-filter default **Mijn events**; kan status wijzigen op eigen attendees; geen publish/delete/mentor.assign |
+| marketing | (ongebruikt) | Read-only overzicht |
+
+### E6. Onboarding (`modules/onboarding-hub.html` + wizard-editor + automations → `onboarding-v2`)
+
+| Rol | Nu | v2 |
+|---|---|---|
+| super_admin / manager | Hub met Overzicht/Wizard/Automations | Overzicht in Onboarding-module; Wizard-editor + Automations verhuizen naar Instellingen > Onboarding |
+| sales | Overzicht + `assign_mentor` (sinds mig 2026-07-06) | Idem; kan onboarding starten + mentor toewijzen |
+| mentor | Eigen `mentor-onboarding.html` scherm | Zelfde Onboarding-module met scope-filter **Mijn** (default); ziet eigen intake-pijplijn |
+| marketing | (ongebruikt) | Niet zichtbaar |
+
+### E7. Mentoren beheer + Alle studenten (verdwijnt als losse modules)
+
+De hele mentor-admin-hub (`mentoren-beheer.html` + `mentor-detail.html` + `mentor-payouts-admin.html` + `funded-certificates-admin.html` + `student-assessments-admin.html` + `mentor-cash-trajects-admin.html` + `students-overview.html`) wordt vervangen door:
+
+| Functie | Nieuwe plek |
+|---|---|
+| Per-mentor overzicht (`mentor-detail`) | Scope-filter "Alle mentors" op Sales-v2 Klanten-tab + eigen mentor-drill-down via klant-dossier |
+| Alle studenten (`students-overview`) | Scope-filter "Alle" op Klanten-v2 (standaard voor manager+) |
+| Payout-rapporten | Instellingen > Sales > Bonus-regels + eigen Payout-module onder Finance |
+| Funded-certificaten | Instellingen > Events > Bonus-regels (rijenlijst als sub-tab) |
+| Beoordelingen | Kaart in Klant-dossier > Beoordelingen-tab (Klanten-v2 PR-B) |
+| Handmatige trajecten | Instellingen > Sales > Bonus-regels > Handmatig |
+
+Manager+ ziet dus geen aparte "Mentoren beheer"-module meer — alles zit in de gedeelde modules met de juiste scope-filter. Mentor ziet ook geen aparte hub — die deed hij toch al niet.
+
+### E8. Instellingen (nieuwe module)
+
+| Rol | Zichtbaar |
+|---|---|
+| super_admin | Alle 12 categorieën uit D3 |
+| manager | Alle categorieën behalve Rechten-matrix-write, Secrets-status, Feature-flags-write |
+| sales | Alleen: Sales (Productcatalogus, Bonus-regels), Communicatie (E-mail-handtekening — persoonlijk), Algemeen (Uiterlijk) |
+| mentor | Alleen: Algemeen (Uiterlijk) + "Mijn profiel" |
+| marketing | Alleen: Communicatie (E-mail-handtekening), Algemeen (Uiterlijk) + later Meta Ads-config |
+
+### E9. Leads / Leadsonderhoud / Follow-up
+
+| Rol | Nu | v2 |
+|---|---|---|
+| super_admin / manager / sales | Volledig | Gelijk; kleinere UI-refresh op nieuwe design-system |
+| mentor | Read-only (leads.view alleen) | Idem — in sidebar zichtbaar maar geen bewerkacties |
+| marketing | Volledig (na Fase X) | Marketing-scope: eigen bron-metrics + lead-quality-alerts |
+
+### E10. E-mail / Inbox
+
+| Rol | Nu | v2 |
+|---|---|---|
+| super_admin / manager | Alle 8 tabs | Gelijk; handtekening-modal verhuist naar Instellingen > Communicatie |
+| sales | Alle tabs zichtbaar (matrix per tab) | Gelijk |
+| mentor | Niet zichtbaar | Niet zichtbaar |
+| marketing | (ongebruikt) | Alleen Reclame-tab standaard |
+
+### E11. Taken / Tickets
+
+| Rol | Nu | v2 |
+|---|---|---|
+| Alle rollen | Zichtbaar | Gelijk; kleinere UI-refresh. Ticket-types/prioriteiten verhuizen naar Instellingen > Tickets zodra beheerbaar |
+
+### E12. Meta Ads + Creative Studio
+
+| Rol | Nu | v2 |
+|---|---|---|
+| super_admin | Zichtbaar | Gelijk; verhuist naar "Groei"-groep in de nieuwe sidebar |
+| manager / sales / mentor | Matrix (default niet zichtbaar) | Gelijk |
+| marketing | (ongebruikt) | Default zichtbaar zodra rol wordt uitgedeeld |
+
+### E13. Logboek
+
+| Rol | Nu | v2 |
+|---|---|---|
+| super_admin | Zichtbaar | Gelijk |
+| manager / sales / mentor / marketing | Matrix (default niet zichtbaar) | Gelijk; manager krijgt default `audit.log.view` in nieuwe seed |
+
+### E14. Binnenkort-pagina (Vergaderruimte / Kennisbank / Control Center / Simon-Leon-Aron chat / Secret Area)
+
+| Rol | Nu | v2 |
+|---|---|---|
+| super_admin | Alle 5 modules in eigen sidebar-items | Alle 5 kaarten op /modules/binnenkort.html (incl. Secret Area) |
+| manager | 4 modules zichtbaar (geen Secret Area) | 4 kaarten (geen Secret Area) |
+| sales | 3 modules zichtbaar (Vergaderruimte, Kennisbank read, geen Control Center / Secret Area / AI-chat) | 2 kaarten (Vergaderruimte, Kennisbank read) |
+| mentor | 2 modules zichtbaar (Vergaderruimte, Kennisbank read) | 2 kaarten |
+| marketing | Nog leeg | 1-2 kaarten (Vergaderruimte, Kennisbank read) |
+
+---
+
+## Bijlage 1 — Aannames & open vragen
+
+- **Bevestigd**: één shell, geen mentor-mini-app; mentor krijgt rolspecifiek Dashboard + scope-filters "Mijn/Alle" op gedeelde modules.
+- **Bevestigd**: 5 rollen (super_admin, manager, sales, mentor, marketing). Cleanup van admin/administratie/viewer in Bijlage 2.
+- **Bevestigd**: Binnenkort-pagina met 5 kaarten (Vergaderruimte, Kennisbank, Control Center, Simon/Leon/Aron chat, Secret Area).
+- **Bevestigd**: Instellingen samengetrokken (10 categorieën uit D3); oude locaties werken door tot module herbouwd is.
+- **Bevestigd**: bouwvolgorde 1-9 uit D6.
+- **Aanname**: `super_admin`-only tools (wanbetalers-diagnose/test, admin-tl-import, admin-historical-events) worden sub-tools onder Instellingen > Wanbetalers > Diagnose respectievelijk Instellingen > Integraties > TeamLeader > Import. Bevestig als dat anders moet.
+- **Aanname**: Marketing-rol krijgt in Fase X de sidebar-items Meta Ads + Creative Studio + Leadsonderhoud-scope, plus placeholder-dashboard. Concrete inhoud komt zodra we die rol uitrollen.
+- **Open vraag**: Kennisbank-content-beheer (KB-items zelf) — blijft dat een eigen kaart in Binnenkort of gaat het volledig op in Instellingen > AI-agents > Kennisbank-tags? Voorstel: kaart blijft in Binnenkort voor item-beheer; tag-catalogus verhuist naar Instellingen.
+
+---
+
+## Bijlage 2 — Rol-cleanup-plan (admin / administratie / viewer)
+
+Doel: van 8 naar 5 rollen. Behouden: `super_admin`, `manager`, `sales`, `mentor`, `marketing` (leeg tot Fase X). Op te ruimen: `admin`, `administratie`, `viewer`.
+
+### B2.1 Waarom deze 3 rollen
+
+- **`admin`** — praktisch synoniem met manager (in `ADMIN_ROLES = ['super_admin','admin','manager']` en overal in `ALLOWED_ROLES`-arrays). In `admin-seed-users.js` staat biemold met rol `admin`; verifyAdmin() behandelt admin identiek aan manager. Consolideren: iedereen met `admin` → `manager`.
+- **`administratie`** — enkel gedefinieerd, geen role_permissions-grants. In `email.html` en `agent-tools.js` verwart met de administratie-**mailbox** (`administratie@deforexopleiding.nl`). Rol wordt in productie niet uitgedeeld. Veilig te verwijderen.
+- **`viewer`** — fallback in `admin-users.js` (regel 14: "als er geen rol is → viewer"). Geen actieve rechten. Kan vervangen worden door "no role" of door manager-read-only. Voorstel: verwijderen, fallback wordt "geen rol → geen toegang tot dashboard, wel login".
+
+### B2.2 Code-plekken die aanpassing vereisen
+
+Deze locaties bevatten hardcoded rol-lijsten of role-checks; elke moet aangepast worden bij de cleanup:
+
+**Backend-constanten (single-source-of-truth):**
+- `api/supabase.js` — `ADMIN_ROLES = ['super_admin','admin','manager']` → wordt `['super_admin','manager']`.
+- `api/admin-users.js:8` — `VALID_ROLES = ['super_admin','admin','manager','sales','mentor','marketing','administratie','viewer']` → wordt `['super_admin','manager','sales','mentor','marketing']`.
+- `api/admin-users.js:14` — `ROLE_PRIORITY = [...]` — trim + fallback-rol wijzigen (bv. eerste geldige rol of null).
+- `api/admin-rbac-backfill-roles.js:9` — zelfde `ROLE_PRIORITY`; alignen.
+- `api/admin-impersonate.js:42+60` — `VALID_ROLES` trim + strikte impersonate-check (nu al `super_admin` OR `manager`) blijft.
+- `api/admin-seed-users.js:17` — biemold-seed: `role: 'admin'` → `role: 'manager'`.
+
+**Backend endpoint-arrays (ALLOWED_ROLES):**
+- `api/follow-up-afgeboekt.js`, `follow-up-annuleer.js`, `follow-up-appointment-outcome.js`, `follow-up-appointments.js`, `follow-up-dashboard-metrics.js`, `follow-up-ghl-*.js` — alle bevatten `['super_admin','admin','manager', …]`. Vervang `admin` → weglaten (manager blijft).
+- Grep-check: `grep -rn "'admin'" api/` en `grep -rn "'administratie'" api/ | grep -v mailbox | grep -v backfill` voor overige refs.
+
+**Frontend:**
+- `modules/admin.html:1274` — `RBAC_ROLES = [{key:'super_admin',...},{key:'admin',...},...]` → verwijder entries voor admin/administratie/viewer/marketing (marketing tijdelijk verbergen achter feature-flag tot Fase X).
+- `modules/admin.html` — PERMISSION_CATALOG rol-defaults: filter rol-kolommen naar 5.
+- `modules/email.html:6062` — `ADMIN_ROLES = ['super_admin','admin','manager']` → `['super_admin','manager']`.
+- `modules/finance.html:8454` — `ADMIN_ROLES` — idem.
+- `modules/shared/sidebar.js` — check op `ADMIN_ROLES` bij sidebar-admin-link (regel ~414).
+- `modules/shared/supabase-client.js:48-60` — `ROLE_LANDING` — verwijder `admin`-entry (zoals in stap E1).
+- Alle andere `modules/*.html` — grep `'admin'` als string, alleen dan waar het rol is (niet mailbox).
+
+**Database:**
+- `migrations/001-auth-foundation.sql:14` — `CHECK (role IN ('admin', 'sales', 'mentor', 'administratie', 'viewer'))` — is `super_admin`/`manager`/`marketing` niet in de oorspronkelijke CHECK. Er moet een migratie zijn die dat later toevoegt. Nieuwe migratie: `ALTER TABLE profiles DROP CONSTRAINT profiles_role_check; ALTER TABLE profiles ADD CONSTRAINT profiles_role_check CHECK (role IN ('super_admin','manager','sales','mentor','marketing'));`.
+- `role_permissions`-tabel — rows waar `role IN ('admin','administratie','viewer')` → DELETE. (De grants zijn deels overlappend met manager; admin-grants worden veilig weggegooid want manager heeft alles al.)
+- `user_roles`-tabel (indien in gebruik) — idem: rows met verwijderde rollen weghalen.
+
+### B2.3 Stappenplan (safe migration)
+
+**Stap 1 — Pre-flight audit (read-only)**
+```sql
+-- Hoeveel users hebben welke rol?
+SELECT role, COUNT(*) FROM profiles GROUP BY role ORDER BY 2 DESC;
+-- Als user_roles gebruikt wordt:
+SELECT role, COUNT(*) FROM user_roles GROUP BY role ORDER BY 2 DESC;
+-- Welke email-adressen hebben de te-verwijderen rollen?
+SELECT email, role, is_active FROM profiles WHERE role IN ('admin','administratie','viewer');
+```
+Rapporteer output aan Jeffrey; per gebruiker beslissen naar welke rol.
+
+**Stap 2 — Migreer users**
+```sql
+-- Iedereen met rol 'admin' → 'manager' (functionele equivalent).
+UPDATE profiles SET role = 'manager', updated_at = now() WHERE role = 'admin';
+-- 'administratie' en 'viewer' per user besluiten (default: 'manager' voor actieve users,
+-- of deactiveren voor slapende accounts).
+-- Doe dit expliciet per user, geen bulk-UPDATE.
+```
+
+**Stap 3 — Trim role_permissions**
+```sql
+DELETE FROM role_permissions WHERE role IN ('admin','administratie','viewer');
+```
+
+**Stap 4 — DB-CHECK-constraint aanpassen**
+```sql
+ALTER TABLE profiles DROP CONSTRAINT profiles_role_check;
+ALTER TABLE profiles ADD CONSTRAINT profiles_role_check
+  CHECK (role IN ('super_admin','manager','sales','mentor','marketing'));
+-- Idem voor user_roles indien aanwezig.
+```
+
+**Stap 5 — Code refactor (grote maar mechanische PR)**
+Alle plekken uit B2.2 aanpassen, één PR. Test: login als elke rol werkt nog, sidebar filtert correct, admin-endpoints geven nog steeds 200 voor manager-users.
+
+**Stap 6 — Backend seed-file aanpassen**
+`api/admin-seed-users.js` — `role: 'manager'` voor biemold; nieuwe seed-runs geven de juiste rol.
+
+**Stap 7 — Deploy + verifieer**
+- Login als manager: mag alle admin-schermen zien.
+- Login als sales/mentor: sidebar filter correct.
+- Impersonate-flow werkt nog (super_admin → manager/sales/mentor).
+- `sync-status`-endpoint teruggeeft geen 500 (validatiescore).
+
+### B2.4 Risico's
+
+- **Users met rol=admin verliezen toegang** als de code-refactor eerder deployt dan de DB-UPDATE. **Volgorde is dus**: eerst DB-UPDATE (stap 2), dán code-PR mergen (stap 5). Beide backwards-compatible in de tussenperiode want manager heeft alles wat admin had.
+- **RLS-policies** die op `role = 'admin'` filteren moeten mee-aangepast. Grep alle `docs/sql-migrations/*.sql` en `migrations/*.sql` op `'admin'` als literal in policy-body. Vervang naar `'manager'`.
+- **CHECK-constraint** blokkeert INSERTs met oude rollen; als er 3rd-party integraties zijn die profiles aanmaken met `role='admin'` (bv. SSO-provisioning), moet dat ook meegemigreerd.
+
+### B2.5 Marketing-rol vooralsnog leeg
+
+Marketing wordt bewaard maar krijgt geen grants tot Fase X. In `RBAC_ROLES` blijft de entry staan (zodat de matrix-tab de kolom kan tonen als beheerder daar rechten aanvinkt). In DB-CHECK-constraint zit hij al vanaf de nieuwe versie. Users kunnen dus wél de rol krijgen; ze zien alleen een dashboard met "Marketing-dashboard komt in Fase X" totdat we die rol inrichten.
+
 - **Open vraag**: Klanten-v2 hoort straks bij de Klanten-groep; wanneer switchen we `modules/klanten.html`-links (sales, finance-tasks, finance-crediteer) naar `klanten-v2`? Dat is een aparte upgrade-batch nadat PR-C live is.
