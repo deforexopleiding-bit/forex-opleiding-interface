@@ -1,0 +1,87 @@
+/* modules/shared/design-system/tokens.css
+ *
+ * Design-tokens voor het redesign (fase 2). Overgenomen 1-op-1 uit het
+ * goedgekeurde prototype crm-prototype-v3.html (opdrachtgever 2026-08-06).
+ *
+ * Wordt geladen door elke redesign-module (Klanten-v2, Sales-v2, Finance-v2,
+ * Wanbetalers-v2). Verander deze tokens NIET zonder overleg — ze zijn de
+ * bron van waarheid voor alle nieuwe modules en garanderen visuele
+ * consistentie tussen modules.
+ *
+ * Per-module accent (--m, --m-soft, --m-line, --m-glow) wordt ingesteld in
+ * de module-eigen CSS. Voorbeeld voor Klanten (emerald) staat in
+ * modules/klanten-v2/klanten-v2.css.
+ */
+
+:root {
+  /* Neutrale surfaces + borders */
+  --bg:         #F7F8FA;
+  --surface:    #FFFFFF;
+  --surface-2:  #F2F4F7;
+  --surface-3:  #E9EDF2;
+  --border:        #E2E7EE;
+  --border-strong: #C9D2DE;
+
+  /* Tekst-hiërarchie */
+  --text:   #111721;
+  --text-2: #586374;
+  --text-3: #8B95A5;
+
+  /* Kleur-palet — per module wordt één hiervan als --m gekozen */
+  --blue:    #1B5FBF; --blue-soft:    #E8F0FC; --blue-line:    #B7D0F2;
+  --violet:  #6D3FD4; --violet-soft:  #F0EAFC; --violet-line:  #CDBAF3;
+  --amber:   #C2700A; --amber-soft:   #FDF3E3; --amber-line:   #F2D9AE;
+  --rose:    #C22B3E; --rose-soft:    #FDECEE; --rose-line:    #F5C2C9;
+  --emerald: #07835A; --emerald-soft: #E4F5EE; --emerald-line: #A9DFC9;
+
+  /* Semantische aliassen (los van module-accent) */
+  --accent:      var(--blue);
+  --accent-soft: var(--blue-soft);
+  --accent-line: var(--blue-line);
+  --ok:      var(--emerald);
+  --ok-soft: var(--emerald-soft);
+  --warn:      var(--amber);
+  --warn-soft: var(--amber-soft);
+  --danger:      var(--rose);
+  --danger-soft: var(--rose-soft);
+
+  /* Elevation */
+  --shadow-xs:    0 1px 2px rgba(17,23,33,.05);
+  --shadow:       0 1px 3px rgba(17,23,33,.06), 0 8px 24px -6px rgba(17,23,33,.08);
+  --shadow-lg:    0 2px 6px rgba(17,23,33,.07), 0 18px 40px -10px rgba(17,23,33,.14);
+  --shadow-panel: -14px 0 44px -12px rgba(17,23,33,.18);
+
+  /* Radii */
+  --r:    10px;
+  --r-sm: 7px;
+  --r-lg: 14px;
+
+  /* Layout */
+  --sidebar-w: 214px;
+  --panel-w:   520px;
+}
+
+/* Dark-mode overschrijft alleen de kleur-tokens; layout/radii blijven. */
+:root[data-theme="dark"] {
+  --bg:         #0B0E13;
+  --surface:    #131820;
+  --surface-2:  #1A2029;
+  --surface-3:  #232B36;
+  --border:        #242C37;
+  --border-strong: #36414F;
+
+  --text:   #EAEEF4;
+  --text-2: #9AA5B4;
+  --text-3: #6C7788;
+
+  --blue:    #5FA0EC; --blue-soft:    #132844; --blue-line:    #2B4468;
+  --violet:  #A585F0; --violet-soft:  #1F1838; --violet-line:  #3B2E63;
+  --amber:   #E4A85C; --amber-soft:   #2C2114; --amber-line:   #4A3820;
+  --rose:    #EE8B96; --rose-soft:    #2E1619; --rose-line:    #4D262C;
+  --emerald: #4FC79B; --emerald-soft: #0D2A20; --emerald-line: #1B4736;
+
+  --shadow-xs:    0 1px 2px rgba(0,0,0,.4);
+  --shadow:       0 1px 3px rgba(0,0,0,.4), 0 8px 24px -6px rgba(0,0,0,.5);
+  --shadow-lg:    0 2px 6px rgba(0,0,0,.5), 0 18px 40px -10px rgba(0,0,0,.6);
+  --shadow-panel: -14px 0 44px -12px rgba(0,0,0,.6);
+}
