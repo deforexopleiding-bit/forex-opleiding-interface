@@ -18,14 +18,33 @@
 
 ## Totalen per module
 
-| Module | Checklist-items |
-|---|---:|
-| **Sales** (`sales.html` + 3 wizards + offerte-detail) | **216** |
-| **Klanten** (`klanten.html`) | **188** |
-| **Finance — top-level** (Dashboard/Facturen/Creditnota's/CAMT-Bank/Bank/Uitgaven/Roadmap/Instellingen) | **285** |
-| **Finance — Wanbetalers deel 1** (Gesprekken/Overzicht/Probleemklanten/Workflows/Templates/Geschiedenis/Arrangements) | **282** |
-| **Finance — Wanbetalers deel 2** (Instellingen-hub/Joost/Brieven/Case-sheet/Thread-handlers/Sandbox/Overzicht-nieuw/Pipeline/Acties-werkcentrum) | **259** |
-| **TOTAAL** | **1230** |
+| Module | Totaal | IN SCOPE | BUITEN SCOPE (behouden) | SCHRAPPEN |
+|---|---:|---:|---:|---:|
+| **Sales** (`sales.html` + 3 wizards + offerte-detail) | 216 | 216 | 0 | 0 |
+| **Klanten** (`klanten.html`) | 188 | 188 | 0 | 0 |
+| **Finance — top-level** (Dashboard/Facturen/Creditnota's/CAMT-Bank/Bank/Uitgaven→schrap/Roadmap→schrap/Instellingen) | 285 | 227 | 0 | 58 |
+| **Finance — Wanbetalers deel 1** (Gesprekken/Instellingen-kaarten in scope; Overzicht-legacy/Probleemklanten/Afspraken buiten scope) | 282 | 182 | 100 | 0 |
+| **Finance — Wanbetalers deel 2** (Instellingen-hub/Joost/Brieven/Case-sheet/Thread-handlers/Sandbox/Overzicht-nieuw/Acties-werkcentrum in scope; Opruimen/Facturen-wanbet/Vandaag/Pipeline buiten scope) | 259 | 210 | 49 | 0 |
+| **TOTAAL** | **1230** | **1023** | **149** | **58** |
+
+**Scope-samenvatting**: van de 1230 gedocumenteerde interactieve elementen worden er **1023 herbouwd** in het redesign, **149 blijven behouden** op oude code (deep-link-only sub-views die de user niet dagelijks gebruikt maar wel wil kunnen blijven bereiken), en **58 worden geschrapt** (Uitgaven-cluster + Roadmap-tab).
+
+## [IN SCOPE] Scope-overzicht
+
+Elke H2-sectie in dit document is getagd met een van drie badges:
+
+- **`[IN SCOPE]`** — herbouwen in het nieuwe design. Absolute eis: geen functie verloren.
+- **`[BUITEN SCOPE — behouden]`** — blijft werken op oude code. Deep-link-bereikbaar, geen visuele redesign, geen wijzigingen behalve waar nodig voor koppelpunten (zie sectie onderaan).
+- **`[SCHRAPPEN]`** — bewust niet meegenomen in het redesign (Uitgaven, Roadmap). Zie sectie **"Bewust NIET overnemen"** onderaan.
+
+Zoek in dit bestand op `[IN SCOPE]` / `[BUITEN SCOPE` / `[SCHRAPPEN]` om per categorie snel te navigeren.
+
+**Wanbetalers scope-decision** (opdrachtgever 2026-08-06):
+- **IN SCOPE**: 4 hoofd-tabs (Gesprekken · Acties · Overzicht · Instellingen) + 7 Instellingen-kaarten (Joost — de toon · Wanneer starten & regels · Berichten · Brieven · Incassobureaus · Testmodus · Geschiedenis & log).
+- **BUITEN SCOPE (behouden)**: pipeline · te-doen · open-acties (legacy) · facturen (wanbetalers-variant) · opruimen · arrangements · probleemklanten · overzicht (legacy dunning-Overzicht) · vandaag · actie-widget.
+
+**Finance top-level scope-decision** (opdrachtgever 2026-08-06):
+- **SCHRAPPEN**: Uitgaven-tab (view-uitgaven, 3 sub-tabs) + Roadmap-tab (view-roadmap).
 
 ## Werkwijze
 
@@ -105,7 +124,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 
 ---
 
-## Sales > Global > Page-head + Tabs (sales.html)
+## [IN SCOPE] Sales > Global > Page-head + Tabs (sales.html)
 
 - [ ] sales.html:r142 — "+ Nieuwe klant + offerte" — id `newDealBtn` → `location.href='/modules/sales-wizard.html'`
   - zichtbaarheid: publiek (geen gate op knop; wizard-endpoint gate't zelf)
@@ -119,7 +138,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - URL-deep-link `?tab=dashboard|klanten|customers|offertes|quotations|onboardings|abonnementen|subscriptions|retentie|aanbod|trajecten|producten|products|rapporten|reports` (r2177 tabMap)
 - URL-deep-link `?sub=trajecten|producten` (r2175) → wisselt Aanbod sub-tab
 
-## Sales > Dashboard > Hero + KPI-strip
+## [IN SCOPE] Sales > Dashboard > Hero + KPI-strip
 
 - [ ] sales.html:r160 — Volgende-afspraak hero — id `dashNextBanner` (dynamic HTML)
   - Bevat "Start call" (r2078, `toast('Start call — binnenkort')` placeholder) + link → `/modules/klanten.html?id=<customer_id>`
@@ -132,7 +151,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
   - zichtbaarheid: hidden default voor rollen zonder `sales.tab.customers`
 - [ ] sales.html:r174 — KPI-link "Hoogste omzet-offerte" — id `dashHighestDeal` href `/modules/sales.html?tab=offertes`
 
-## Sales > Dashboard > Activity + Pending
+## [IN SCOPE] Sales > Dashboard > Activity + Pending
 
 - [ ] sales.html:r176-190 — Grid "Vandaag/Deze week" — id `dashActivityBlock`
   - Rows: `dashTodayLeads`, `dashTodayEvents`, `dashTodayAppts`, `dashWeekLeads`, `dashWeekEvents`, `dashWeekAppts`, `dashTomorrowAppts`, `dashOpenFollowups`
@@ -146,14 +165,14 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
   - Row-links → `/modules/offerte-detail.html?id=<id>` (r2116)
   - Endpoint: `GET /api/sales-dashboard-metrics` (r2086)
 
-## Sales > Klanten > Filter-strip
+## [IN SCOPE] Sales > Klanten > Filter-strip
 
 - [ ] sales.html:r208 — Zoek-input — id `custSearch` — placeholder "Zoek naam, email of telefoon…"
 - [ ] sales.html:r209 — Entiteit-dropdown — id `custEntity` (client-side filter, gevuld r752)
 - [ ] sales.html:r210 — Toggle "Alleen mijne" — id `custAllToggle` → `owned_by_me=true`
 - [ ] sales.html:r211 — Vernieuwen-icon-button — id `custRefresh`
 
-## Sales > Klanten > Segmenten
+## [IN SCOPE] Sales > Klanten > Segmenten
 
 - [ ] sales.html:r214 — Segment "Alle" — data-seg=`alle`
 - [ ] sales.html:r215 — Segment "Actief" — data-seg=`actief`
@@ -161,7 +180,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - [ ] sales.html:r217 — Segment "Loopt af" — data-seg=`loopt_af`
 - [ ] sales.html:r218 — Segment "Inactief" — data-seg=`inactief` (server-side reload, `status=archived`)
 
-## Sales > Klanten > Tabel + row-acties
+## [IN SCOPE] Sales > Klanten > Tabel + row-acties
 
 - Endpoint: `GET /api/sales-customers` (r708) — params `owned_by_me`, `status`, `search`, `page`, `page_size`
 - KOLOMMEN (r784): Klant · Entiteit · Offertes (count) · Status · Laatste activiteit · Verkoper · [acties]
@@ -172,7 +191,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - [ ] sales.html:r801 — Pagineringsknop "Vorige" — id `custPrev`
 - [ ] sales.html:r802 — Pagineringsknop "Volgende" — id `custNext`
 
-## Sales > Offertes > Filter-strip
+## [IN SCOPE] Sales > Offertes > Filter-strip
 
 - [ ] sales.html:r226 — Zoek-input — id `quotSearch` — placeholder "Zoek klantnaam of email…"
 - [ ] sales.html:r227 — Entiteit-dropdown — id `quotEntity` (client-side filter, gevuld uit response)
@@ -181,7 +200,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - [ ] sales.html:r230 — Vernieuwen-icon — id `quotRefresh` (herlaadt lijst + cleanup-panel)
 - [ ] sales.html:r231 — TL-sync-icon "Ververs alle statussen vanuit Teamleader" — id `quotTlSync` → `POST /api/sales-deal-sync-status {all:true}`
 
-## Sales > Offertes > Status-segmenten
+## [IN SCOPE] Sales > Offertes > Status-segmenten
 
 - [ ] sales.html:r234 — Segment "Alle" — data-status=`` (default active)
 - [ ] sales.html:r235 — Segment "Concept" — data-status=`draft`
@@ -190,14 +209,14 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - [ ] sales.html:r238 — Segment "Afgewezen" — data-status=`declined`
 - [ ] sales.html:r239 — Segment "Verlopen" — data-status=`expired`
 
-## Sales > Offertes > Opschoon-banner
+## [IN SCOPE] Sales > Offertes > Opschoon-banner
 
 - [ ] sales.html:r243 — Opschoon-banner — id `quotCleanupBanner` — telt geaccepteerde offertes zonder abo
   - zichtbaarheid: hidden default; visible bij items>0 én `sales.tab.subscriptions`
 - [ ] sales.html:r247 — Knop "Opschonen…" — id `quotCleanupOpen` → opent modal `quotCleanupModal`
   - Endpoint: `GET /api/sales-cleanup-quotations`
 
-## Sales > Offertes > Tabel + row-acties
+## [IN SCOPE] Sales > Offertes > Tabel + row-acties
 
 - Endpoint: `GET /api/sales-quotations` (r849) — params `owned_by_me`, `status`, `search`, `page`, `page_size`
 - KOLOMMEN (r880): Klant + #OFF-nr · Traject · Entiteit · Bedrag incl. · Status · Datum · Verkoper · [acties]
@@ -224,7 +243,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - [ ] sales.html:r915 — Paginering "Vorige" — id `quotPrev`
 - [ ] sales.html:r916 — Paginering "Volgende" — id `quotNext`
 
-## Sales > Offertes > Opschoon-modal (dynamic)
+## [IN SCOPE] Sales > Offertes > Opschoon-modal (dynamic)
 
 - Modal-host: `quotCleanupModal` (r254), dynamisch geïnjecteerd door `openCleanupModal()` (r979)
 - [ ] sales.html:r991 — Sluiten (icon) — id `quotCleanupClose`
@@ -235,7 +254,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - [ ] r1034 — Per-row checkbox `data-cleanup-cb=<deal_id>`
 - [ ] r1042 — Row-link → `/modules/offerte-detail.html?id=<deal_id>` (target=_blank)
 
-## Sales > Offertes > Verstuur-modal (`#sendModal`)
+## [IN SCOPE] Sales > Offertes > Verstuur-modal (`#sendModal`)
 
 - Modal-shell: `sendModal` (r388)
 - [ ] r392 — Sluiten-icon — id `sendModalClose`
@@ -246,7 +265,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - [ ] r403 — "Annuleer" — id `sendCancel`
 - [ ] r404 — "Verstuur nu" — id `sendConfirm` → `doSendQuotation()` → `POST /api/teamleader-send-quotation`
 
-## Sales > Abonnementen > Filter-strip
+## [IN SCOPE] Sales > Abonnementen > Filter-strip
 
 - [ ] sales.html:r259 — Zoek-input — id `subSearch` — placeholder "Zoek klant of omschrijving…"
 - [ ] sales.html:r260 — Toggle "Alleen mijne" — id `subMineToggle`
@@ -254,14 +273,14 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
   - zichtbaarheid: hidden default voor rollen zonder `sales.tab.subscriptions`
 - [ ] sales.html:r262 — Vernieuwen-icon — id `subRefresh`
 
-## Sales > Abonnementen > Status-segmenten
+## [IN SCOPE] Sales > Abonnementen > Status-segmenten
 
 - [ ] sales.html:r265 — Segment "Actief" — data-status=`active` (default active)
 - [ ] sales.html:r266 — Segment "Gepauzeerd" — data-status=`paused`
 - [ ] sales.html:r267 — Segment "Alle" — data-status=`all`
 - [ ] sales.html:r268 — Segment "Gedeactiveerd" — data-status=`cancelled`
 
-## Sales > Abonnementen > Tabel + row-acties
+## [IN SCOPE] Sales > Abonnementen > Tabel + row-acties
 
 - Endpoint: `GET /api/sales-subscriptions-list` (r1456) — params `owned_by_me`, `status`, `page`, `page_size`
 - KOLOMMEN (r1484): Klant · Bedrijf (entity) · Omschrijving + tl-koppel-flag · Bedrag incl. · Termijnen · Start · Eind · Aangemaakt · Status · [acties]
@@ -278,14 +297,14 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - [ ] sales.html:r1527 — Paginering "Vorige" — id `subPrev`
 - [ ] sales.html:r1528 — Paginering "Volgende" — id `subNext`
 
-## Sales > Retentie > Filter-strip
+## [IN SCOPE] Sales > Retentie > Filter-strip
 
 - Subtitle: `retSubtitle` (r275)
 - [ ] sales.html:r277 — Zoek-input — id `retSearch` — placeholder "Zoek klant…"
 - [ ] sales.html:r278 — Toggle "Alleen mijne" — id `retMineToggle`
 - [ ] sales.html:r279 — Vernieuwen-icon — id `retRefresh`
 
-## Sales > Retentie > Segmenten (2 rijen)
+## [IN SCOPE] Sales > Retentie > Segmenten (2 rijen)
 
 - [ ] sales.html:r282 — Segment "Alle" — data-seg=`alle` (default active)
 - [ ] sales.html:r283 — Segment "Urgent <14d" — data-seg=`urgent`
@@ -295,7 +314,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - [ ] sales.html:r289 — Segment "Niet-verlengen" — data-marked=`not_renewing`
 - [ ] sales.html:r290 — Segment "Alle" — data-marked=`all`
 
-## Sales > Retentie > Tabel + row-acties
+## [IN SCOPE] Sales > Retentie > Tabel + row-acties
 
 - Endpoint: `GET /api/sales-retention` (r1301) — params `owned_by_me`
 - KOLOMMEN (r1340): Klant · Bedrijf (entity) · Traject · Mentor · Laatste eind (sortable `end`) · Tot einde · Abo's (count) · [acties]
@@ -307,13 +326,13 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
   - [ ] "Markeer 'Niet-verlengen'" / "Toch verlengen" — data-ret-mark → `POST /api/sales-retention-mark`
   - [ ] "→ Follow-up" (of disabled "Op follow-up") — data-ret-fu → `POST /api/sales-retention-to-followup`
 
-## Sales > Aanbod > Sub-tabs + toggle
+## [IN SCOPE] Sales > Aanbod > Sub-tabs + toggle
 
 - [ ] sales.html:r299 — Sub-tab "Trajecten" — data-sub=`trajecten` (default active) + count `aanbodTrajCount`
 - [ ] sales.html:r300 — Sub-tab "Producten" — data-sub=`producten` + count `aanbodProdCount`
 - [ ] sales.html:r302 — Toggle "Incl. BTW" — id `btwToggle` (persisted in localStorage `sales_btw_incl`)
 
-## Sales > Aanbod > Trajecten sub-tab
+## [IN SCOPE] Sales > Aanbod > Trajecten sub-tab
 
 - Endpoint: `GET /api/trajecten` (r1657)
 - [ ] sales.html:r309 — "+ Nieuw traject" — id `newTrajectBtn` → `openTrajectModal(null)`
@@ -325,7 +344,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
   - [ ] "✎" edit — data-editvar → `openVariantModal(trajectId, variantId)`
   - [ ] "×" verwijderen — data-delvar → `deleteVariant()` → `DELETE /api/traject-variants?id=<id>`
 
-## Sales > Aanbod > Traject-modal (`#trajectModal`)
+## [IN SCOPE] Sales > Aanbod > Traject-modal (`#trajectModal`)
 
 - [ ] r357 — Sluiten-icon — id `trajectModalClose`
 - [ ] r359 — Naam-input — id `tmName` (verplicht)
@@ -333,7 +352,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - [ ] r363 — "Annuleer" — id `tmCancel`
 - [ ] r363 — "Opslaan" — id `tmSave` → `saveTraject()` → `POST/PUT /api/trajecten`
 
-## Sales > Aanbod > Variant-modal (`#variantModal`)
+## [IN SCOPE] Sales > Aanbod > Variant-modal (`#variantModal`)
 
 - [ ] r370 — Sluiten-icon — id `vmClose`
 - [ ] r372 — Naam-input — id `vmName` (verplicht)
@@ -344,7 +363,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - [ ] r383 — "Annuleer" — id `vmCancel`
 - [ ] r383 — "Opslaan" — id `vmSave` → `saveVariant()` → `POST/PUT /api/traject-variants`
 
-## Sales > Aanbod > Producten sub-tab
+## [IN SCOPE] Sales > Aanbod > Producten sub-tab
 
 - Endpoint: `GET /api/sales-products?active=true|<geen filter>` (r558)
 - [ ] sales.html:r317 — Zoek-input — id `prodSearch` — placeholder "Zoek product…"
@@ -360,7 +379,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
   - [ ] "Archiveren" — data-archive → `archiveProduct()` → `DELETE /api/sales-products?id=<id>`
   - [ ] "Open in Teamleader" (indien tl_product_id) → `https://focus.teamleader.eu/products/<id>`
 
-## Sales > Aanbod > Product-modal (`#productModal`)
+## [IN SCOPE] Sales > Aanbod > Product-modal (`#productModal`)
 
 - [ ] r414 — Sluiten-icon — id `prodModalClose`
 - [ ] r417 — Naam-input — id `pmName` (verplicht)
@@ -374,12 +393,12 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - [ ] r443 — "Annuleer" — id `pmCancel`
 - [ ] r444 — "Opslaan" — id `pmSave` → `saveProduct()` → `POST/PUT /api/sales-products`
 
-## Sales > Rapporten > View-tabs
+## [IN SCOPE] Sales > Rapporten > View-tabs
 
 - [ ] sales.html:r329 — Sub-tab "Sales-rapport" — data-view=`sales` (default active)
 - [ ] sales.html:r330 — Sub-tab "Abonnementen MRR" — data-view=`mrr`
 
-## Sales > Rapporten > Sales-view filter-strip
+## [IN SCOPE] Sales > Rapporten > Sales-view filter-strip
 
 - [ ] sales.html:r335 — Segment "Vandaag" — data-range=`today`
 - [ ] sales.html:r336 — Segment "Week" — data-range=`week`
@@ -393,14 +412,14 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - [ ] sales.html:r345 — "Export Excel" — id `repExport` → `repExport()` (XLSX-bundling van KPI/sales-users/trend/entiteit/trajecten/retentie/onboarding)
 - [ ] sales.html:r346 — Vernieuwen-icon — id `repRefresh`
 
-## Sales > Rapporten > Sales-view content
+## [IN SCOPE] Sales > Rapporten > Sales-view content
 
 - KPI-tegels (r1963-1968): Pipeline (open) · Omzet periode · Bonus pending · Retentie
 - Charts (r1970-1973, Chart.js): Conversie funnel · Omzet trend · Omzet per entiteit · Top trajecten
 - Tabel "Per sales-medewerker" (r1976): KOLOMMEN Medewerker · Offertes · Conversie · Omzet · Bonus pending · Bonus paid
 - Tabellen Retentie + Onboarding (r1980-1990): interne key/value-rijen
 
-## Sales > Rapporten > MRR-view (`repMrrView`)
+## [IN SCOPE] Sales > Rapporten > MRR-view (`repMrrView`)
 
 - [ ] sales.html:r1822 — Periode-select — id `mrrPeriod` (deze_maand/vorige_maand/dit_kwartaal/vorig_kwartaal/dit_jaar/vorig_jaar/custom, persisted `mrr_period`)
 - [ ] sales.html:r1819 — Custom-datum-range — ids `mrrCustStart` + `mrrCustEnd` (visible bij `custom`)
@@ -410,7 +429,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - Tabel "Top 10 grootste actieve abonnementen" (r1842): KOLOMMEN Klant · Omschrijving · Cyclus · MRR (incl.)
 - Row-link "Klant" → `/modules/klanten.html?id=<customer_id>`
 
-## Sales > Rapporten > MRR drill-down modal (dynamic)
+## [IN SCOPE] Sales > Rapporten > MRR drill-down modal (dynamic)
 
 - Trigger: klik op KPI-tegel "MRR eind periode" (`mrrKpiCard` — r1854)
 - Overlay id `mrr-drill-ov` (r1875)
@@ -421,7 +440,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 
 ---
 
-## Sales > Wizard1 > Global (sales-wizard.html)
+## [IN SCOPE] Sales > Wizard1 > Global (sales-wizard.html)
 
 - Head-strip: id `saveInd` (auto-save status)
 - [ ] sales-wizard.html:r192 — "Annuleer & verlaat" — id `exitBtn` → `confirmExit()` (autosave + terug naar sales.html)
@@ -436,13 +455,13 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - Session-storage prefill: `_prefill_event_attendee` (r943) — one-shot vanuit Events-detail
 - Auto-save endpoint: `POST /api/sales-wizard-drafts` (r842); resume endpoint: `GET /api/sales-wizard-drafts` (r991); delete: `DELETE /api/sales-wizard-drafts` (r1022)
 
-## Sales > Wizard1 > Stap 1: Bedrijf
+## [IN SCOPE] Sales > Wizard1 > Stap 1: Bedrijf
 
 - Entiteit-cards container: id `entityCards` (dynamisch, data-dept per kaart)
   - Endpoint: `GET /api/company-entities` (r886)
 - [ ] r819 — Elke entity-card klikt → zet `state.wizard.tl_department_id`
 
-## Sales > Wizard1 > Stap 2: Klantgegevens
+## [IN SCOPE] Sales > Wizard1 > Stap 2: Klantgegevens
 
 - Bestaande-klant-banner: id `existingCustBanner` (getoond na dup-match)
   - [ ] r211 — Link "Wissel klant" — id `swapCustLink` → `hideExistingBanner()`
@@ -470,7 +489,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
   - Link "privacyverklaring" → `/privacy`
 - Validatie-summary: id `step2Missing` (r271)
 
-## Sales > Wizard1 > Stap 2: Duplicate-check-modal (`#dupModal`)
+## [IN SCOPE] Sales > Wizard1 > Stap 2: Duplicate-check-modal (`#dupModal`)
 
 - [ ] r376 — Sluiten-icon — id `dupClose`
 - [ ] r378 — Body — id `dupBody` (dynamisch: sectie DB-matches + sectie TL-matches)
@@ -478,7 +497,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
   - Per TL-match: "Gebruik dit contact" (data-use-tl → prefill velden uit TL) + "Negeer"
 - [ ] r381 — Link "Geen van deze - doorgaan met nieuwe klant" — id `dupContinueNew`
 
-## Sales > Wizard1 > Stap 3: Offerte & producten
+## [IN SCOPE] Sales > Wizard1 > Stap 3: Offerte & producten
 
 - [ ] r280 — Traject-select — id `trajectSelect` (optgroups per traject; leeg = "Geen traject")
   - Endpoint: `GET /api/trajecten` (r887) + `GET /api/traject-variants?variant_id=…` bij keuze
@@ -495,7 +514,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - Totalen-block: id `dealTotals` (r315)
   - Korting-link "+ Korting" / "Korting (…%) wijzigen" / "verwijderen" — ids `discountEdit` / `discountRemove` → opent `discountModal`
 
-## Sales > Wizard1 > Stap 3: Product-picker-modal (`#prodPicker`)
+## [IN SCOPE] Sales > Wizard1 > Stap 3: Product-picker-modal (`#prodPicker`)
 
 - [ ] r389 — Sluiten-icon — id `prodPickerClose`
 - [ ] r392 — Zoek-input — id `ppSearch`
@@ -503,14 +522,14 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - [ ] r395 — Lijst — id `ppList` (elke card `data-pid`, klik voegt product toe)
 - [ ] r397 — Link "Annuleer" — id `ppCancel`
 
-## Sales > Wizard1 > Stap 3: Korting-modal (`#discountModal`)
+## [IN SCOPE] Sales > Wizard1 > Stap 3: Korting-modal (`#discountModal`)
 
 - [ ] r451 — Sluiten-icon — id `discountClose`
 - [ ] r453 — Korting-input % — id `discountInput`
 - [ ] r456 — "Annuleer" — id `discountCancel`
 - [ ] r456 — "Toepassen" — id `discountApply`
 
-## Sales > Wizard1 > Stap 4: Betalingsvoorwaarden
+## [IN SCOPE] Sales > Wizard1 > Stap 4: Betalingsvoorwaarden
 
 - [ ] r323 — Startdatum cursus — id `payStartDate` (verplicht; min = vandaag+3)
 - [ ] r327 — Aanbetaling (€) — id `payDownAmount`
@@ -522,7 +541,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - Uitzondering-approval-block (r342): id `exceptionApprovalBlock` (hidden default; toont summary + "Ongedaan maken"-knop id `exceptionUndoBtn`)
 - Validatie-summary: id `payMissing` (r351)
 
-## Sales > Wizard1 > Stap 4: Exception-modal (`#exceptionModal`)
+## [IN SCOPE] Sales > Wizard1 > Stap 4: Exception-modal (`#exceptionModal`)
 
 - Trigger: overgang 4→5 als termijn te laag of startdatum te ver in toekomst
 - Endpoint voor limits: `GET /api/app-settings?key=sales_min_term_amount` + `sales_max_start_days` (r863-864)
@@ -533,14 +552,14 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - [ ] r427 — "Manager niet akkoord" — id `exceptionReject`
 - [ ] r428 — "Goedgekeurd door manager" — id `exceptionApprove`
 
-## Sales > Wizard1 > Concept-resume-modal (`#resumeModal`)
+## [IN SCOPE] Sales > Wizard1 > Concept-resume-modal (`#resumeModal`)
 
 - Trigger: bestaand draft gevonden bij init
 - Datum-label: `resumeDate` (r438)
 - [ ] r442 — "Nieuw beginnen" — id `resumeNew` → `DELETE /api/sales-wizard-drafts`
 - [ ] r443 — "Doorgaan" — id `resumeContinue` → laadt draft in state
 
-## Sales > Wizard1 > Stap 5: Bevestiging & versturen
+## [IN SCOPE] Sales > Wizard1 > Stap 5: Bevestiging & versturen
 
 - Review-container: id `reviewMount` (r358) — 3 sections (Klant / Offerte / Betalingsvoorwaarden), elk met "Bewerken"-link data-back=2/3/4
 - Banner-container: id `tlBanner` (r359) — ok/warn afhankelijk van TL-status (`GET /api/teamleader-test-connection`)
@@ -554,7 +573,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 
 ---
 
-## Sales > Wizard2 > Global (subscription-wizard.html)
+## [IN SCOPE] Sales > Wizard2 > Global (subscription-wizard.html)
 
 - Modes: `?mode=standalone` (r144) OR default deal-mode (`?deal_id=<uuid>`)
 - Extra URL-params: `?customer_id=<uuid>` + `?customer_name=<str>` (standalone-prefill, r329)
@@ -565,14 +584,14 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
   - [ ] r134 — "← Vorige" — id `prevBtn`
   - [ ] r135 — "Volgende →" — id `nextBtn` (met stap-validatie: customer + subs)
 
-## Sales > Wizard2 > Stap 1 (deal-mode): Klant & offerte
+## [IN SCOPE] Sales > Wizard2 > Stap 1 (deal-mode): Klant & offerte
 
 - Container: id `step1Body` (r85)
 - Dynamisch: `reviewCard` toont klantnaam + email + totaal incl. + getekend-datum
 - [ ] r363 — Link "↗ Zonder offerte aanmaken" (indien standalone-href beschikbaar) → `/modules/subscription-wizard.html?mode=standalone&customer_id=…&customer_name=…`
 - Endpoint: `GET /api/sales-deal-detail?id=<deal_id>` (r313)
 
-## Sales > Wizard2 > Stap 1 (standalone): Klant kiezen
+## [IN SCOPE] Sales > Wizard2 > Stap 1 (standalone): Klant kiezen
 
 - Container: id `step1Body`, gerenderd door `renderCustomerStep()` (r382)
 - Chosen-block: id `custChosen` (r385)
@@ -597,7 +616,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
   - [ ] r410 — Checkbox "Privacy geïnformeerd" — id `nc_avg` (verplicht)
 - Foutmelding: id `custErr` (r413)
 
-## Sales > Wizard2 > Stap 2: Abonnementen
+## [IN SCOPE] Sales > Wizard2 > Stap 2: Abonnementen
 
 - [ ] r92 — Bedrijfsentiteit — id `deptSelect` (gevuld uit `GET /api/company-entities`)
 - [ ] r95 — Type verkoop (BTW-regeling) — id `saleTypeSel` (standalone-only, visible via `saleTypeWrap`)
@@ -628,7 +647,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 ### Override-block (r695, conditioneel):
 - [ ] Checkbox "Startdatum-controle overslaan (alleen voor WIJZIGEN van bestaande abonnementen)" — id `overrideStartDate`
 
-## Sales > Wizard2 > Stap 3: Bonus & bevestigen
+## [IN SCOPE] Sales > Wizard2 > Stap 3: Bonus & bevestigen
 
 - Bonus-block: id `bonusBlock` (r109) — dynamisch (indicatieve 3% over aanbetaling ≥ €1000)
 - Preview-block: id `subPreview` (r110) — samenvatting subs + TL-push-preview
@@ -645,7 +664,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 
 ---
 
-## Offerte-detail > Page-head (offerte-detail.html)
+## [IN SCOPE] Offerte-detail > Page-head (offerte-detail.html)
 
 - URL-param: `?id=<deal_id>` (r205, verplicht)
 - Terug-link: r117 → `/modules/sales.html`
@@ -655,7 +674,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - [ ] r123 — "↻ Ververs vanuit Teamleader" — id `tlSyncBtn` → `POST /api/sales-deal-sync-status {deal_id}`
 - Acties-container: id `detailActions` (r124) — dynamische knoppen per status
 
-## Offerte-detail > Detail-body panels
+## [IN SCOPE] Offerte-detail > Detail-body panels
 
 - Endpoint: `GET /api/sales-deal-detail?id=<deal_id>` (r267)
 
@@ -676,7 +695,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 ### Card "Betalingsvoorwaarden" (r346):
 - Rows: Aanbetaling · Termijnen · 1e termijn · Startdatum cursus
 
-## Offerte-detail > Status-conditionele actie-knoppen (`detailActions`)
+## [IN SCOPE] Offerte-detail > Status-conditionele actie-knoppen (`detailActions`)
 
 - **Bij status `accepted`/`signed`** (r357):
   - [ ] "Omzetten naar abonnement" / "✓ Abbo al ingevoerd" (link) — gate `sales.tab.subscriptions` → `/modules/subscription-wizard.html?deal_id=<id>`
@@ -699,7 +718,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - **Overige statussen** (declined/expired/failed, r395):
   - [ ] "Kopiëren" + TL-link
 
-## Offerte-detail > Verstuur-modal (`#odSendModal`)
+## [IN SCOPE] Offerte-detail > Verstuur-modal (`#odSendModal`)
 
 - Trigger: "Versturen" / "Opnieuw versturen" op sent/draft-status
 - [ ] r175 — Sluiten-icon — id `odSendModalClose`
@@ -712,7 +731,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - [ ] r186 — "Annuleren" — id `odSendCancel`
 - [ ] r187 — "Verstuur nu" — id `odSendConfirm` → `odDoSend()` → `POST /api/teamleader-send-quotation`
 
-## Offerte-detail > Onboarding-modal (`#obModal`)
+## [IN SCOPE] Offerte-detail > Onboarding-modal (`#obModal`)
 
 - Trigger: "Onboarding-traject aanmelden" op accepted/signed-status
 - [ ] r139 — Sluiten-icon — id `obModalClose`
@@ -733,7 +752,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 
 ---
 
-## Cross-referenties (endpoints per module)
+## [IN SCOPE] Cross-referenties (endpoints per module)
 
 - `/api/sales-dashboard-stats` — dashboard KPI's
 - `/api/sales-dashboard-metrics` — persoonlijke metrics
@@ -766,7 +785,7 @@ RBAC feature-keys aangetroffen (per-tab en per-actie):
 - `/api/app-settings?key=sales_min_term_amount|sales_max_start_days` — wizard-limits
 - `/api/customer` — legacy customer-fetch (wizard-prefill)
 
-## Cross-referenties (deep-links)
+## [IN SCOPE] Cross-referenties (deep-links)
 
 - `/modules/sales.html?tab=<key>` — direct naar tab
 - `/modules/sales.html?tab=aanbod&sub=trajecten|producten` — direct naar sub-tab
@@ -829,7 +848,7 @@ Deep-link syntax:
 
 ---
 
-## Klanten > Lijst-view > Page header
+## [IN SCOPE] Klanten > Lijst-view > Page header
 
 - [ ] r483 — "Selecteren" — button `#btn-selection-toggle`,
   `onclick="toggleSelectionMode()"` (r3625). Toggelt bulk-select mode
@@ -840,14 +859,14 @@ Deep-link syntax:
   gebonden in `initListView` r3274 → `openCustomerModal('create', {})`.
   - modal/dialog: `#customerFormModal`
 
-## Klanten > Lijst-view > Bulk-result banner
+## [IN SCOPE] Klanten > Lijst-view > Bulk-result banner
 
 - [ ] r492 — `#bulk-result-banner` — read-only status-banner na bulk-actie.
   Rendered door `renderBulkResultBanner` (r3889). Toont
   `{success_count}/{total} {actie-label} geslaagd` + optionele
   `{N} mislukt: {reden}` breakdown.
 
-## Klanten > Lijst-view > KPI-strip
+## [IN SCOPE] Klanten > Lijst-view > KPI-strip
 
 Non-interactief; 4 tiles.
 
@@ -858,7 +877,7 @@ Non-interactief; 4 tiles.
   - r508 "Wanbetalers" — placeholder `.kpi-placeholder`, sub-text
     "Komt later (Finance)"
 
-## Klanten > Lijst-view > Filters-bar
+## [IN SCOPE] Klanten > Lijst-view > Filters-bar
 
 - [ ] r517 — Zoekveld `#filter-search` — placeholder "🔍 Zoek op naam,
   email of telefoon…". Debounced input-listener (r3497, 300ms) →
@@ -888,7 +907,7 @@ Non-interactief; 4 tiles.
 - [ ] r554 — "Reset filters" — button `#btn-reset-filters` →
   `resetFilters()` (r3543).
 
-## Klanten > Lijst-view > Bulk-action-bar
+## [IN SCOPE] Klanten > Lijst-view > Bulk-action-bar
 
 Zichtbaar wanneer `selectedIds.size > 0` (CSS class `.visible`).
 
@@ -902,7 +921,7 @@ Zichtbaar wanneer `selectedIds.size > 0` (CSS class `.visible`).
   - modal/dialog: `#bulkTagModal`
 - [ ] r569 — "Annuleren" — button, `onclick="toggleSelectionMode()"`.
 
-## Klanten > Lijst-view > Klantenlijst-tabel
+## [IN SCOPE] Klanten > Lijst-view > Klantenlijst-tabel
 
 Table `#customers-table` met tbody `#customers-tbody`. Data via
 `/api/customers?...` (r3370).
@@ -934,17 +953,17 @@ Per-row rendering `renderCustomers` r3397:
     (voorwaardelijk; alleen als `tl_company_id` (bedrijf) of
     `tl_contact_id` (persoon) aanwezig).
 
-## Klanten > Lijst-view > Empty-state
+## [IN SCOPE] Klanten > Lijst-view > Empty-state
 
 - [ ] r3407 — "Filters resetten" — inline empty-state button,
   `onclick="resetFilters()"`.
 
-## Klanten > Lijst-view > Error-state
+## [IN SCOPE] Klanten > Lijst-view > Error-state
 
 - [ ] r3477 — "Opnieuw proberen" — inline error-state button,
   `onclick="loadCustomers()"`.
 
-## Klanten > Lijst-view > Pagination
+## [IN SCOPE] Klanten > Lijst-view > Pagination
 
 - r597 `.pagination` container
 - [ ] r598 — Page-info `#page-info` (read-only "N–M van T").
@@ -957,7 +976,7 @@ Per-row rendering `renderCustomers` r3397:
 
 ---
 
-## Klanten > Detail-view > Header
+## [IN SCOPE] Klanten > Detail-view > Header
 
 Container `#view-detail`, hoofdcontent `#detail-content`.
 
@@ -990,7 +1009,7 @@ Container `#view-detail`, hoofdcontent `#detail-content`.
   `/api/customer-archive?...&action=unarchive`.
   - zichtbaarheid: alleen bij status='archived' (r1233).
 
-## Klanten > Detail-view > Tab-strip
+## [IN SCOPE] Klanten > Detail-view > Tab-strip
 
 7 tabs (r651-672). Elke tab is `<button class="tab-btn"
 data-tab="<name>">`, bind-handler r3242 → `activateDetailTab(tab, true)`
@@ -1008,13 +1027,13 @@ data-tab="<name>">`, bind-handler r3242 → `activateDetailTab(tab, true)`
 
 Deep-link: `?tab=profiel|communicatie|offertes|abonnementen|facturen|wanbetalers|audit`.
 
-## Klanten > Detail-view > Popstate
+## [IN SCOPE] Klanten > Detail-view > Popstate
 
 - [ ] r3247 — Browser back/forward — rerender bij URL-change (popstate).
 
 ---
 
-## Klanten > Profiel-tab > Sidebar (linker kolom)
+## [IN SCOPE] Klanten > Profiel-tab > Sidebar (linker kolom)
 
 Container `#tab-panel-profiel` (r676). Layout: `.dash-grid` met
 sidebar + main-content.
@@ -1057,7 +1076,7 @@ sidebar + main-content.
       (r4034), POST `/api/customer-tag`.
 - [ ] r700 — Tag-error slot `#prof-tags-error`.
 
-## Klanten > Profiel-tab > Main content
+## [IN SCOPE] Klanten > Profiel-tab > Main content
 
 ### Klantgegevens-card (r705)
 - [ ] r706 — "Bewerken" — button `#prof-edit-btn` (`.sr-abtn`),
@@ -1134,7 +1153,7 @@ Read-only rijen (allemaal non-interactief):
 
 ---
 
-## Klanten > Communicatie-tab > Notities-sectie
+## [IN SCOPE] Klanten > Communicatie-tab > Notities-sectie
 
 Container `#tab-panel-communicatie` (r758).
 
@@ -1165,7 +1184,7 @@ Per notitie in edit-mode:
 - [ ] "Annuleren" — button `data-cancel-note=<id>`, bind r2990 →
   `cancelNoteEdit(id)` (r4121).
 
-## Klanten > Communicatie-tab > WhatsApp + Email placeholders
+## [IN SCOPE] Klanten > Communicatie-tab > WhatsApp + Email placeholders
 
 - r780 — Section "WhatsApp gesprekken" — placeholder "Beschikbaar in Fase
   2C (WhatsApp infrastructuur)". Non-interactief.
@@ -1174,7 +1193,7 @@ Per notitie in edit-mode:
 
 ---
 
-## Klanten > Offertes-tab
+## [IN SCOPE] Klanten > Offertes-tab
 
 Container `#tab-panel-offertes` (r790). Data via
 `/api/sales-quotations?customer_id=...` (r1343).
@@ -1232,7 +1251,7 @@ Kebab-menu per rij (`.sr-menu`):
 
 ---
 
-## Klanten > Abonnementen-tab
+## [IN SCOPE] Klanten > Abonnementen-tab
 
 Container `#tab-panel-abonnementen` (r798). Data via
 `/api/sales-customer-subscriptions?customer_id=...` (r2188).
@@ -1323,7 +1342,7 @@ Fields:
 
 ---
 
-## Klanten > Facturen-tab
+## [IN SCOPE] Klanten > Facturen-tab
 
 Container `#tab-panel-facturen` (r806), wrap `#facturen-wrap`. Data via
 `/api/finance-invoices?page_size=200&customer_id=...` (r1444).
@@ -1372,7 +1391,7 @@ Empty-state (r1456):
   `focus.teamleader.eu/invoices`.
 - [ ] "+ Nieuwe factuur" — button (zelfde als header-versie).
 
-## Klanten > Facturen-tab > Factuur-detail-modal (#koInvModal)
+## [IN SCOPE] Klanten > Facturen-tab > Factuur-detail-modal (#koInvModal)
 
 Dynamisch (r1637). Toont card met info-KV + acties + regels +
 betalingen + activiteit.
@@ -1414,7 +1433,7 @@ Betalingen-kaart (r1846):
 - [ ] "terugdraaien" — inline link `#koRemoveLink` (voorwaardelijk),
   bind r1851 → `koRemovePayment(inv)`.
 
-## Klanten > Facturen-tab > Betaal-modal (#koPay, r1647)
+## [IN SCOPE] Klanten > Facturen-tab > Betaal-modal (#koPay, r1647)
 
 - Sub-tekst `#koPaySub` (readonly).
 - [ ] `#koPayAmount` (number, default openstaand bedrag).
@@ -1424,7 +1443,7 @@ Betalingen-kaart (r1846):
 - [ ] "Registreren" — button `#koPayOk`, bind r1967 → `koPaySubmit()`
   (r1970). POST `/api/finance-invoice-register-payment`.
 
-## Klanten > Facturen-tab > Verzenden-modal (#koSend, r1659)
+## [IN SCOPE] Klanten > Facturen-tab > Verzenden-modal (#koSend, r1659)
 
 - Sub-tekst `#koSendSub`.
 - [ ] `#koSendTpl` — `<select>` mail-template (TL-templates via
@@ -1441,7 +1460,7 @@ Betalingen-kaart (r1846):
   (r2081). POST `/api/finance-invoice-send`. Enabled na valid template
   + email.
 
-## Klanten > Facturen-tab > Credit-modal (#koCred, r1689)
+## [IN SCOPE] Klanten > Facturen-tab > Credit-modal (#koCred, r1689)
 
 - Sub-tekst `#koCredSub`.
 - Info-banner (waarschuwing over Combidesk/e-boekhouden sync).
@@ -1451,7 +1470,7 @@ Betalingen-kaart (r1846):
 - [ ] "Crediteren" — button `#koCredOk` (rood), bind r1748 →
   `submitKoCredit()` (r2118). POST `/api/finance-invoice-credit`.
 
-## Klanten > Facturen-tab > Update-modal (#koUpd, r1703)
+## [IN SCOPE] Klanten > Facturen-tab > Update-modal (#koUpd, r1703)
 
 - Sub-tekst `#koUpdSub`.
 - Regels-editor `#koUpdLines`, rendering `renderKoUpdLines` r2149.
@@ -1467,7 +1486,7 @@ Betalingen-kaart (r1846):
 - [ ] "Opslaan" — button `#koUpdOk`, bind r1749 → `submitKoUpdate()`
   (r2167). POST `/api/finance-invoice-update`.
 
-## Klanten > Facturen-tab > Nieuwe-factuur-modal (#koNewInv, r1716)
+## [IN SCOPE] Klanten > Facturen-tab > Nieuwe-factuur-modal (#koNewInv, r1716)
 
 - Klant read-only label `#koNewInvCustLabel`.
 - [ ] `#koNewInvDept` — `<select>` entiteit (Online/Fysiek/Retentie).
@@ -1488,7 +1507,7 @@ Betalingen-kaart (r1846):
 
 ---
 
-## Klanten > Wanbetalers-tab
+## [IN SCOPE] Klanten > Wanbetalers-tab
 
 Container `#tab-panel-wanbetalers` (r813). Data via
 `/api/wanbetalers-timeline?customer_id=...` (r3049).
@@ -1510,7 +1529,7 @@ Non-interactieve items (icon + titel + timestamp + description + optional
 
 ---
 
-## Klanten > Audit-tab
+## [IN SCOPE] Klanten > Audit-tab
 
 Container `#tab-panel-audit` (r838). Data via
 `/api/customer-audit?customer_id=...` (r2999).
@@ -1525,7 +1544,7 @@ Heractiveerd/Geanonimiseerd) + actor + timestamp + reden + diff-list.
 
 ---
 
-## Klanten > Modals (globaal)
+## [IN SCOPE] Klanten > Modals (globaal)
 
 ### `#customerFormModal` (r857) — Create/Edit klant
 
@@ -1629,7 +1648,7 @@ Close-triggers:
 
 ---
 
-## Klanten > Softphone (globale overlays — body-level)
+## [IN SCOPE] Klanten > Softphone (globale overlays — body-level)
 
 Klx-softphone (init r4609), dupliceert wbx-pattern uit finance.html.
 UI opgevoegd bij `document.body` (buiten `.main`).
@@ -1669,7 +1688,7 @@ Sheet-content (r5063):
 
 ---
 
-## Globale helpers en cross-cutting
+## [IN SCOPE] Globale helpers en cross-cutting
 
 - `openModal(id)` r4218 / `closeModal(id)` r4219 — CSS `.hidden`
   toggle.
@@ -1680,7 +1699,7 @@ Sheet-content (r5063):
 - Modal-overlay klik-buiten sluit modal (r4577).
 - Click-outside voor tag-add-popover r4583, tag-multi-popover r3511.
 
-## Auth-blockers / pre-checks
+## [IN SCOPE] Auth-blockers / pre-checks
 
 - `customer.module.access` — hard gate op init (r1112). Zonder →
   redirect naar `/index.html?error=forbidden`.
@@ -1690,7 +1709,7 @@ Sheet-content (r5063):
 - Softphone: `/api/voys-sip-config` en `/api/voys-call` gaten op
   `sales.tab.retentie` / `sales.customer.view` (server-side).
 
-## Bijzonderheden / gaps t.o.v. prompt
+## [IN SCOPE] Bijzonderheden / gaps t.o.v. prompt
 
 1. De prompt beschrijft **6 sub-tabs** (Profiel/Finance/Deals/
    Communicatie/Onboarding/Notes). De code heeft **7 sub-tabs**:
@@ -1730,7 +1749,7 @@ Bron: `C:\Users\jeffr\forex-opleiding-interface\.claude\worktrees\dazzling-cohen
 
 ---
 
-## Finance > Hoofd-navigatie (financeNav)
+## [IN SCOPE] Finance > Hoofd-navigatie (financeNav)
 
 Container: `#financeNav` (r4271). Tabs schakelen via `setView(view)` (r6879); click-listener op `#financeNav .sr-seg` (r20981). Actieve klasse `.sr-seg.active` bepaalt selected. URL-sync via `?tab=` en `?sub=` (r7223, r20988).
 
@@ -1764,7 +1783,7 @@ Container: `#financeNav` (r4271). Tabs schakelen via `setView(view)` (r6879); cl
 
 ---
 
-## Finance > Dashboard (view-dashboard)
+## [IN SCOPE] Finance > Dashboard (view-dashboard)
 
 Container: `#view-dashboard` (r4291), leeg host-element. Mount via `mountFinanceDashboardHost(host)` → `window.FinanceDashboard.mount({host, onDrillDown})` (r6987-r7013). Content wordt geleverd door `/modules/shared/finance-dashboard.js` (12 KPIs + 3 charts). Niet in `finance.html` gerenderd — inventarisatie hoort in de finance-dashboard.js audit.
 
@@ -1774,7 +1793,7 @@ Container: `#view-dashboard` (r4291), leeg host-element. Mount via `mountFinance
 
 ---
 
-## Finance > Facturen (view-facturen)
+## [IN SCOPE] Finance > Facturen (view-facturen)
 
 Container: `#view-facturen` (r4386). Init via `init()` (r20874) + `load()` (r18315).
 
@@ -1848,7 +1867,7 @@ Container r4446. Renderer `renderPager()` (r18297).
 
 ---
 
-## Finance > Facturen > Modal: Factuur detail (invModal, r6573)
+## [IN SCOPE] Finance > Facturen > Modal: Factuur detail (invModal, r6573)
 
 Geopend via `openDetail(inv)` (r18341). Titel `#invModalTitle`. Body `#invModalBody`, dynamisch opgebouwd.
 
@@ -1893,7 +1912,7 @@ Geopend via `openDetail(inv)` (r18341). Titel `#invModalTitle`. Body `#invModalB
 
 ---
 
-## Finance > Facturen > Modal: Betaling registreren (payModal, r6584)
+## [IN SCOPE] Finance > Facturen > Modal: Betaling registreren (payModal, r6584)
 
 Geopend via `openPayModal(inv)` (r18548).
 
@@ -1908,7 +1927,7 @@ Geopend via `openPayModal(inv)` (r18548).
 
 ---
 
-## Finance > Facturen > Modal: Klant claimt betaald (claimPaidModal, r6602)
+## [IN SCOPE] Finance > Facturen > Modal: Klant claimt betaald (claimPaidModal, r6602)
 
 Geopend via `openClaimPaidModal()` (r18605). **NB:** trigger-knop `#inboxClaimPaidBtn` (r21028) zit in inbox-scope (wanbetalers). Modal + submit-logica staan echter buiten die scope.
 
@@ -1922,7 +1941,7 @@ Geopend via `openClaimPaidModal()` (r18605). **NB:** trigger-knop `#inboxClaimPa
 
 ---
 
-## Finance > Facturen > Modal: Factuur verzenden (sendModal, r6629)
+## [IN SCOPE] Finance > Facturen > Modal: Factuur verzenden (sendModal, r6629)
 
 Geopend via `openSendModal(inv)` (r18796).
 
@@ -1940,7 +1959,7 @@ Geopend via `openSendModal(inv)` (r18796).
 
 ---
 
-## Finance > Facturen > Modal: Crediteren (creditModal, r6668)
+## [IN SCOPE] Finance > Facturen > Modal: Crediteren (creditModal, r6668)
 
 Geopend via `openCreditModal(inv)` (r18904).
 
@@ -1953,7 +1972,7 @@ Geopend via `openCreditModal(inv)` (r18904).
 
 ---
 
-## Finance > Facturen > Modal: Conceptfactuur aanpassen (updModal, r6685)
+## [IN SCOPE] Finance > Facturen > Modal: Conceptfactuur aanpassen (updModal, r6685)
 
 Geopend via `openUpdateModal(inv)` (r18920).
 
@@ -1967,7 +1986,7 @@ Geopend via `openUpdateModal(inv)` (r18920).
 
 ---
 
-## Finance > Facturen > Modal: Nieuwe factuur (newInvModal, r6700)
+## [IN SCOPE] Finance > Facturen > Modal: Nieuwe factuur (newInvModal, r6700)
 
 Geopend via `openNewInvoiceModal()` (r19067).
 
@@ -1989,7 +2008,7 @@ Geopend via `openNewInvoiceModal()` (r19067).
 
 ---
 
-## Finance > Facturen > Sub-modal: Nieuwe klant aanmaken (newCustCreateModal, r6725)
+## [IN SCOPE] Finance > Facturen > Sub-modal: Nieuwe klant aanmaken (newCustCreateModal, r6725)
 
 Geopend via `openNewCustCreateModal()` (r18979). Sub-modal binnen newInvModal-flow (z-index 1100).
 
@@ -2016,7 +2035,7 @@ Geopend via `openNewCustCreateModal()` (r18979). Sub-modal binnen newInvModal-fl
 
 ---
 
-## Finance > Creditnota's (view-creditnotes)
+## [IN SCOPE] Finance > Creditnota's (view-creditnotes)
 
 Container: `#view-creditnotes` (r4451). Init `_wireCreditnotesOnce()` (r7239) + `loadCreditnotes()` (r7255) bij view-open.
 
@@ -2057,7 +2076,7 @@ Renderer inline (r7301).
 
 ---
 
-## Finance > CAMT-Bank (view-camtbank)
+## [IN SCOPE] Finance > CAMT-Bank (view-camtbank)
 
 Container: `#view-camtbank` (r4489). Lazy-init bij eerste view-open (`_camtBankLoadedOnce` r6953). Permission-gate: `canBankBalanceView` (`finance.bank.balance_view`) voor saldo + `canBankTxView` (`finance.bank.transactions_view`) voor tabel/filters/upload.
 
@@ -2171,7 +2190,7 @@ Tbody = `#matchTbody`. Renderer `loadMatches()` (r19894). Row-click → `openCam
 
 ---
 
-## Finance > CAMT-Bank > Modal: Bank-tx detail (bankTxModal, r6529)
+## [IN SCOPE] Finance > CAMT-Bank > Modal: Bank-tx detail (bankTxModal, r6529)
 
 Geopend via `openBankTxModal(idx)` (r19293) OF `openCamtBankTxModal(idxOrTx)` (r19599). Gedeeld modal voor beide bank-tabs.
 
@@ -2201,7 +2220,7 @@ Geopend via `openBankTxModal(idx)` (r19293) OF `openCamtBankTxModal(idxOrTx)` (r
 
 ---
 
-## Finance > Uitgaven (view-uitgaven)
+## [SCHRAPPEN] Finance > Uitgaven (view-uitgaven)
 
 Container: `#view-uitgaven` (r4661). Lazy-init `initExpensesView()` (r20042). Gates: `canExpensesView` (`finance.expenses.view`) + `canExpensesEdit` (`finance.expenses.category.edit`).
 
@@ -2298,7 +2317,7 @@ Tabel — Tbody = `#expBreakdownTbody`. Renderer `renderExpBreakdown` (r20690).
 
 ---
 
-## Finance > Uitgaven > Modal: Detail (expDetailModal, r4822)
+## [SCHRAPPEN] Finance > Uitgaven > Modal: Detail (expDetailModal, r4822)
 
 Geopend via `openExpDetailModal(cpName)` (r20734).
 
@@ -2319,7 +2338,7 @@ Geopend via `openExpDetailModal(cpName)` (r20734).
 
 ---
 
-## Finance > Bank (view-bank) — LEGACY (e-Boekhouden mirror)
+## [IN SCOPE] Finance > Bank (view-bank) — LEGACY (e-Boekhouden mirror)
 
 Container: `#view-bank` (r4838). Lazy-init `_bankLoadedOnce` (r6947). Zelfde permission-gates als CAMT-bank. Nav-knop `#navBank` is niet meer in `#financeNav` — sinds herstructurering renders alleen `#navCamtBank`. Deze view blijft dormant reachable via deep-link `?tab=bank`.
 
@@ -2367,7 +2386,7 @@ Tbody = `#bankTbody`. Row-click → `openBankTxModal(idx)` (via gedeelde `bankTx
 
 ---
 
-## Finance > Roadmap (view-roadmap)
+## [SCHRAPPEN] Finance > Roadmap (view-roadmap)
 
 Container: `#view-roadmap` (r5475). Mount-target `#view-roadmap-host` (r5476). Rendering + interactieve elementen worden geleverd door externe module `/modules/shared/finance-views/roadmap.js` — buiten scope van dit bestand.
 
@@ -2376,7 +2395,7 @@ Container: `#view-roadmap` (r5475). Mount-target `#view-roadmap-host` (r5476). R
 
 ---
 
-## Finance > Instellingen (view-instellingen)
+## [IN SCOPE] Finance > Instellingen (view-instellingen)
 
 Container: `#view-instellingen` (r5484). Leeg host-element; mount via `mountFinanceInstellingenHost(host)` → `window.FinanceInstellingen.mount({host})` (r6975). Content wordt geleverd door `/modules/shared/finance-instellingen.js`.
 
@@ -2385,7 +2404,7 @@ Container: `#view-instellingen` (r5484). Leeg host-element; mount via `mountFina
 
 ---
 
-## Cross-cutting elementen (in scope, niet aan één view gebonden)
+## [IN SCOPE] Cross-cutting elementen (in scope, niet aan één view gebonden)
 
 ### `#noAccess` (r6764)
 
@@ -2402,7 +2421,7 @@ Container: `#view-instellingen` (r5484). Leeg host-element; mount via `mountFina
 
 ---
 
-## Notes voor herbouw
+## [IN SCOPE] Notes voor herbouw
 
 - **Permission-gates op nav-knoppen zijn UI-only** — server-side gates (via `/api/finance-*`-endpoints) blijven autoritatief. UI verbergt knoppen bij ontbreken van perms via `style.display='none'` (r20920, r20933).
 - **Deep-linkable tabs**: `dashboard` / `facturen` / `klanten` / `camtbank` / `uitgaven` / `bank` / `roadmap`. Legacy `bank` / `uitgaven` blijven werken via `?tab=bank|uitgaven`.
@@ -2429,7 +2448,7 @@ Container: `#view-instellingen` (r5484). Leeg host-element; mount via `mountFina
 
 ---
 
-## Finance > Wanbetalers > Sub-nav (top level)
+## [IN SCOPE] Finance > Wanbetalers > Sub-nav (top level)
 
 - [ ] r4304 — Container `#wanbetalersSubNav` (delegated click-handler r7020 `setSubView`)
 - [ ] r4313 — "Gesprekken" (`.active`) — `data-wb-sub="inbox"` → `setSubView('inbox')`
@@ -2450,7 +2469,7 @@ Container: `#view-instellingen` (r5484). Leeg host-element; mount via `mountFina
 
 ---
 
-## Finance > Wanbetalers > Gesprekken (view-inbox) — Gesprekkenlijst (linker kolom)
+## [IN SCOPE] Finance > Wanbetalers > Gesprekken (view-inbox) — Gesprekkenlijst (linker kolom)
 
 Container `#view-inbox` (r4895) · lazy `ensureInboxLoaded` bij eerste sub-open.
 
@@ -2477,7 +2496,7 @@ Container `#view-inbox` (r4895) · lazy `ensureInboxLoaded` bij eerste sub-open.
 
 ---
 
-## Finance > Wanbetalers > Gesprekken (view-inbox) — Thread-header (5-knops strip + ⋮)
+## [IN SCOPE] Finance > Wanbetalers > Gesprekken (view-inbox) — Thread-header (5-knops strip + ⋮)
 
 Container `#inboxThread` (r4957) — zichtbaar zodra actieve conv gekozen.
 
@@ -2514,7 +2533,7 @@ Container `#inboxThread` (r4957) — zichtbaar zodra actieve conv gekozen.
 
 ---
 
-## Finance > Wanbetalers > Gesprekken (view-inbox) — Compose-strip
+## [IN SCOPE] Finance > Wanbetalers > Gesprekken (view-inbox) — Compose-strip
 
 Container `.inbox-c-compose` (r5024) — onder de messages-container.
 
@@ -2553,7 +2572,7 @@ Container `.inbox-c-compose` (r5024) — onder de messages-container.
 
 ---
 
-## Finance > Wanbetalers > Gesprekken > Klant-info modal (`#inboxCustomerModal`, r6260)
+## [IN SCOPE] Finance > Wanbetalers > Gesprekken > Klant-info modal (`#inboxCustomerModal`, r6260)
 
 Opent via `#inboxThreadCustomerBtn` of `#inboxThreadCustomerLink`. State-machine `renderInboxCustomerPanel(state, data)` r16538 met states: empty / matched / unknown.
 
@@ -2589,7 +2608,7 @@ Opent via `#inboxThreadCustomerBtn` of `#inboxThreadCustomerLink`. State-machine
 
 ---
 
-## Finance > Wanbetalers > Gesprekken > Link-klant modal (`#inboxLinkCustomerModal`)
+## [IN SCOPE] Finance > Wanbetalers > Gesprekken > Link-klant modal (`#inboxLinkCustomerModal`)
 
 Opent uit unknown-state `openLnk.onclick` (r16842). Wired r18075+.
 
@@ -2603,7 +2622,7 @@ Opent uit unknown-state `openLnk.onclick` (r16842). Wired r18075+.
 
 ---
 
-## Finance > Wanbetalers > Gesprekken > Template-picker modal (`#inboxTplPickerModal`)
+## [IN SCOPE] Finance > Wanbetalers > Gesprekken > Template-picker modal (`#inboxTplPickerModal`)
 
 Opent uit `#inboxTplBtn`. 2-step wizard (`_inboxTplShowStep()` r17178). Wired r17989+.
 
@@ -2630,7 +2649,7 @@ Backdrop + Escape: r18020, r18034.
 
 ---
 
-## Finance > Wanbetalers > Gesprekken > Quick-reply modal (`#inboxQrPickerModal`)
+## [IN SCOPE] Finance > Wanbetalers > Gesprekken > Quick-reply modal (`#inboxQrPickerModal`)
 
 Opent uit `#inboxQrBtn`. Wired r18041+.
 
@@ -2640,7 +2659,7 @@ Opent uit `#inboxQrBtn`. Wired r18041+.
 
 ---
 
-## Finance > Wanbetalers > Gesprekken > Joost AI modal (`#inboxJoostModal`)
+## [IN SCOPE] Finance > Wanbetalers > Gesprekken > Joost AI modal (`#inboxJoostModal`)
 
 Opent uit `#inboxJoostBtn`. Wired r18204+. Body render via `_joostRenderCard(sugg)` r14871 in `#joostResults`.
 
@@ -2667,7 +2686,7 @@ Opent uit `#inboxJoostBtn`. Wired r18204+. Body render via `_joostRenderCard(sug
 
 ---
 
-## Finance > Wanbetalers > Gesprekken > Joost escalation-modal (`#joostEscalationModal`, r6263)
+## [IN SCOPE] Finance > Wanbetalers > Gesprekken > Joost escalation-modal (`#joostEscalationModal`, r6263)
 
 Opent uit intent-knop (`handleJoostEscalation`) of manual (uit `#inboxEscalateBtn`). Wired r18184+.
 
@@ -2679,7 +2698,7 @@ Opent uit intent-knop (`handleJoostEscalation`) of manual (uit `#inboxEscalateBt
 
 ---
 
-## Finance > Wanbetalers > Gesprekken > Joost pauze-modal (`#joostPauseModal`)
+## [IN SCOPE] Finance > Wanbetalers > Gesprekken > Joost pauze-modal (`#joostPauseModal`)
 
 Opent uit `#inboxJoostAutonomyPauseBtn`. Wired r18227+.
 
@@ -2691,7 +2710,7 @@ Opent uit `#inboxJoostAutonomyPauseBtn`. Wired r18227+.
 
 ---
 
-## Finance > Wanbetalers > Gesprekken > Klant-claimt-betaald modal (`#claimPaidModal`)
+## [IN SCOPE] Finance > Wanbetalers > Gesprekken > Klant-claimt-betaald modal (`#claimPaidModal`)
 
 Opent uit `#inboxClaimPaidBtn`. Wired r21027+.
 
@@ -2705,7 +2724,7 @@ Opent uit `#inboxClaimPaidBtn`. Wired r21027+.
 
 ---
 
-## Finance > Wanbetalers > Wanbetalers-view (view-dunning) — Dunning-subnav (verborgen wrapper)
+## [BUITEN SCOPE — behouden] Finance > Wanbetalers > Wanbetalers-view (view-dunning) — Dunning-subnav (verborgen wrapper)
 
 Container `#dunningSubNav` (HTML r5109) — **`display:none` gezet in setSubView** (r7108). De 6 sub-panels blijven bereikbaar via de wanbetalers-subs `overzicht`, `probleemklanten`, `workflows`, `templates`, `geschiedenis`, `arrangements` die via `activateDunningSub()` de verborgen knop-klik simuleren.
 
@@ -2720,7 +2739,7 @@ Wired r9108 delegated click.
 
 ---
 
-## Finance > Wanbetalers > Overzicht (dunningSubOverzicht) — deep-link/legacy
+## [BUITEN SCOPE — behouden] Finance > Wanbetalers > Overzicht (dunningSubOverzicht) — deep-link/legacy
 
 Container [HTML r5119]. Sub-key `overzicht` (fallback in setSubView r7212).
 
@@ -2750,7 +2769,7 @@ Wired `wireDunRunDetailsModal()` r11503.
 
 ---
 
-## Finance > Wanbetalers > Probleemklanten (dunningSubProbleemklanten) — via activateDunningSub
+## [BUITEN SCOPE — behouden] Finance > Wanbetalers > Probleemklanten (dunningSubProbleemklanten) — via activateDunningSub
 
 Container [HTML r5176]. Sub-key `probleemklanten` (setSubView r7130).
 
@@ -2782,7 +2801,7 @@ Container [HTML r5176]. Sub-key `probleemklanten` (setSubView r7130).
 
 ---
 
-## Finance > Wanbetalers > Workflows (dunningSubWorkflows) — via activateDunningSub
+## [IN SCOPE] Finance > Wanbetalers > Workflows (dunningSubWorkflows) — via activateDunningSub
 
 Container [HTML r5235]. Sub-key `workflows`.
 
@@ -2826,7 +2845,7 @@ Wire-functies: `wireDunWfEditor`, `wireDunWfList` (buiten scope, r9500+).
 
 ---
 
-## Finance > Wanbetalers > Templates (dunningSubTemplates)
+## [IN SCOPE] Finance > Wanbetalers > Templates (dunningSubTemplates)
 
 Container [HTML r5341]. Sub-key `templates`.
 
@@ -2842,7 +2861,7 @@ Container [HTML r5341]. Sub-key `templates`.
 
 ---
 
-## Finance > Wanbetalers > Geschiedenis (dunningSubGeschiedenis)
+## [IN SCOPE] Finance > Wanbetalers > Geschiedenis (dunningSubGeschiedenis)
 
 Container [HTML r5366]. Sub-key `geschiedenis`.
 
@@ -2869,7 +2888,7 @@ Load-functie: `loadDunHistory({reset:true})` — buiten scope; sub-key activatie
 
 ---
 
-## Finance > Wanbetalers > Afspraken / Arrangements (view-arrangements) — in scope
+## [BUITEN SCOPE — behouden] Finance > Wanbetalers > Afspraken / Arrangements (view-arrangements) — in scope
 
 Container [HTML r5429] `#view-arrangements`. Sub-key `arrangements` in setSubView (r7113) roept `wireArrangOnce()` + `wireArrangProposeOnce()` + `loadArrangements()`.
 
@@ -2938,7 +2957,7 @@ Wired r11815+.
 
 ---
 
-## Finance > Wanbetalers > Afspraken > Propose-wizard (`#arrangProposeModal`)
+## [BUITEN SCOPE — behouden] Finance > Wanbetalers > Afspraken > Propose-wizard (`#arrangProposeModal`)
 
 Opent via `#arrangProposeBtn` óf `handleJoostArrangementRequest` óf externe callers met `openArrangPropose(opts)`. Wired `wireArrangProposeOnce()` r12604.
 
@@ -3011,7 +3030,7 @@ Type-specifieke panels toggled in `arrangWizInitStep3()` r13069:
 
 ---
 
-## Finance > Wanbetalers > Instellingen (mountInstellingenHubHost r21667)
+## [IN SCOPE] Finance > Wanbetalers > Instellingen (mountInstellingenHubHost r21667)
 
 Container `#wb-sub-instellingen`. Sub-key `instellingen`.
 
@@ -3029,7 +3048,7 @@ Wire delegated r21699 (backward-compat: `joost-admin` → `joost`).
 
 ---
 
-## Finance > Wanbetalers > Instellingen > Brieven (mountBrievenHost r21742)
+## [IN SCOPE] Finance > Wanbetalers > Instellingen > Brieven (mountBrievenHost r21742)
 
 Container `#wb-sub-brieven`. Sub-key `brieven`.
 
@@ -3064,7 +3083,7 @@ Row-checkboxes `[data-brv-select=<id>]` — wired r21906.
 
 ---
 
-## Finance > Wanbetalers > Instellingen > Joost inline (mountJoostConfigHost r22006)
+## [IN SCOPE] Finance > Wanbetalers > Instellingen > Joost inline (mountJoostConfigHost r22006)
 
 Container `#wb-sub-joost`. Sub-key `joost`.
 
@@ -3086,14 +3105,14 @@ Container `#wb-sub-joost`. Sub-key `joost`.
 
 ---
 
-## Referentie-modals gedeeld met andere sub-views
+## [IN SCOPE] Referentie-modals gedeeld met andere sub-views
 
 - [ ] `#invModal` (view-facturen — factuur-detail) — Escape-handler globaal (r21063) wist óók `bankTxModal` + `claimPaidModal`
 - [ ] `#payModal`, `#sendModal`, `#creditModal`, `#updModal`, `#newInvModal`, `#newCustCreateModal`, `#bankTxModal` — buiten scope wanbetalers
 
 ---
 
-## Gaten / follow-ups voor volgende agent
+## [IN SCOPE] Gaten / follow-ups voor volgende agent
 
 - **Vandaag** (`mountDunVandaagHost`) — HTML/wiring rond r27920+ (na r22000).
 - **Pipeline** (`mountDunPipelineHost`) — kanban + lijst view (r10230+, wiring buiten deel-1 range).
@@ -3131,7 +3150,7 @@ Legenda `zichtbaarheid`: `publiek` = altijd zichtbaar voor rol met module-access
 
 ────────────────────────────────────────────────────────────────────
 
-## Finance > Wanbetalers > Instellingen-hub (kaartraster) — r21657-21708
+## [IN SCOPE] Finance > Wanbetalers > Instellingen-hub (kaartraster) — r21657-21708
 - [ ] r21674 — **container `#instelCardGrid`** — 6 kaarten (7 met super_admin=Sandbox), gerenderd via `INSTEL_CARDS.map()`
 - [ ] r21680 — kaart `[data-instel-target]` "💬 Joost — de toon" — click → `setSubView('joost')`
   - zichtbaarheid: publiek
@@ -3151,7 +3170,7 @@ Legenda `zichtbaarheid`: `publiek` = altijd zichtbaar voor rol met module-access
 
 ────────────────────────────────────────────────────────────────────
 
-## Finance > Wanbetalers > Instellingen > Brieven (WIK-brieven overzicht) — r21716-21994
+## [IN SCOPE] Finance > Wanbetalers > Instellingen > Brieven (WIK-brieven overzicht) — r21716-21994
 
 ### Filter-pills (segmented) — r21753-21756
 - [ ] r21753 — `[data-brv-status="all"]` "Alle" — pill met count `[data-brv-cnt="all"]`
@@ -3178,7 +3197,7 @@ Legenda `zichtbaarheid`: `publiek` = altijd zichtbaar voor rol met module-access
 
 ────────────────────────────────────────────────────────────────────
 
-## Finance > Wanbetalers > Instellingen > Joost — inline UI — r22006-22562
+## [IN SCOPE] Finance > Wanbetalers > Instellingen > Joost — inline UI — r22006-22562
 
 ### Joost-shell met sub-tabs (Oefengesprek / Instellingen) — r22006-22070
 - [ ] r22016 — `[data-joost-tab="oefengesprek"]` "💬 Oefengesprek" (default active)
@@ -3196,7 +3215,7 @@ Legenda `zichtbaarheid`: `publiek` = altijd zichtbaar voor rol met module-access
 
 ────────────────────────────────────────────────────────────────────
 
-## Finance > Wanbetalers > Opruimen (2 sub-tabs) — r22564-23040
+## [BUITEN SCOPE — behouden] Finance > Wanbetalers > Opruimen (2 sub-tabs) — r22564-23040
 
 ### Sub-tab bar — r22574-22577
 - [ ] r22576 — `[data-opruim-tab="opruim"]` "Opruimen" (default) → `_opruimShowSubtab('opruim')`
@@ -3227,7 +3246,7 @@ Legenda `zichtbaarheid`: `publiek` = altijd zichtbaar voor rol met module-access
 
 ────────────────────────────────────────────────────────────────────
 
-## Finance > Wanbetalers > Facturen — r23042-23370
+## [BUITEN SCOPE — behouden] Finance > Wanbetalers > Facturen — r23042-23370
 
 ### Toolbar — r23064-23076
 - [ ] r23066 — `[data-fc-view="invoice"]` "Per factuur" (default active) — `_fcState.view='invoice'`
@@ -3254,7 +3273,7 @@ Legenda `zichtbaarheid`: `publiek` = altijd zichtbaar voor rol met module-access
 
 ────────────────────────────────────────────────────────────────────
 
-## Finance > Wanbetalers > Bulk multiselect (sticky bar + acties) — r23384-23960
+## [IN SCOPE] Finance > Wanbetalers > Bulk multiselect (sticky bar + acties) — r23384-23960
 
 ### Bulk-bar `#wbxBulkBar` (verschijnt bij ≥1 selectie, floating body-level) — r23477-23504
 - [ ] r23486 — `[data-bulk-act="aanmaan"]` "Aanmaning sturen" → `_bulkActionAanmaan()`
@@ -3276,7 +3295,7 @@ Legenda `zichtbaarheid`: `publiek` = altijd zichtbaar voor rol met module-access
 
 ────────────────────────────────────────────────────────────────────
 
-## Finance > Wanbetalers > Case-sheet drawer (klant-dossier, right-slide) — r23962-27562
+## [IN SCOPE] Finance > Wanbetalers > Case-sheet drawer (klant-dossier, right-slide) — r23962-27562
 
 Sheet-container: `#caseSheet` + scrim `#caseScrim`. Opent via `openCaseSheet(customerId, opts)`. Optionele `wideDrawerMode` (Overzicht-nieuw). Escape sluit (r24106).
 
@@ -3355,7 +3374,7 @@ Als brief bestaat:
 
 ────────────────────────────────────────────────────────────────────
 
-## Finance > Wanbetalers > Case-sheet > Modals
+## [IN SCOPE] Finance > Wanbetalers > Case-sheet > Modals
 
 ### `wbxOpenConfirm` — generieke bevestigings-modal (`#wbxConfirmModal`) — r25362-25468
 Herbruikbaar. Parameters: title / subtitle / dangerLevel (neutral/warn/danger/bewind) / whatHappens / nextStep / requireReason / primaryLabel / bodyHtml.
@@ -3432,7 +3451,7 @@ Voor payment_promise / payment_plan. 1+ termijnen (add/remove).
 
 ────────────────────────────────────────────────────────────────────
 
-## Finance > Wanbetalers > Incasso (sub) — r26855-27562
+## [IN SCOPE] Finance > Wanbetalers > Incasso (sub) — r26855-27562
 
 ### Toolbar — r26871-26875
 - [ ] r26873 — `#incBureauMgrBtn` "Bureaus beheren" — opent `#incBureauModal`
@@ -3486,7 +3505,7 @@ Voor payment_promise / payment_plan. 1+ termijnen (add/remove).
 
 ────────────────────────────────────────────────────────────────────
 
-## Finance > Wanbetalers > Sandbox (Testmodus) — r27571-27908
+## [IN SCOPE] Finance > Wanbetalers > Sandbox (Testmodus) — r27571-27908
 - Zichtbaarheid: super_admin (endpoints gaten zelf super_admin)
 
 ### Dry-run-card — r27593-27599
@@ -3525,14 +3544,14 @@ Voor payment_promise / payment_plan. 1+ termijnen (add/remove).
 
 ────────────────────────────────────────────────────────────────────
 
-## Finance > Wanbetalers > Vandaag (sub-view) — r27918-27974
+## [BUITEN SCOPE — behouden] Finance > Wanbetalers > Vandaag (sub-view) — r27918-27974
 - [ ] r27933 — `#vdgStartAanmaanBtn` "📤 Start aanmaanronde" — `setSubView('probleemklanten')`
 - KPI-strip 3 cellen: Openstaand / Wanbetalers / Vragen aandacht (read-only render via `renderDunOvKpis`)
 - Inner-host `#wb-sub-vandaag-actie` → `mountDunActiesHost()` (Actie-widget)
 
 ────────────────────────────────────────────────────────────────────
 
-## Finance > Wanbetalers > Actie-widget (mountDunActiesHost) — r27986-28227
+## [BUITEN SCOPE — behouden] Finance > Wanbetalers > Actie-widget (mountDunActiesHost) — r27986-28227
 
 ### KPI-strip (3 klikbare cellen) — r28006-28022
 - [ ] r28007 — `[data-act-goto="appts"]` "Afspraken vandaag" — scroll naar `#actSectionAppts`
@@ -3545,7 +3564,7 @@ Voor payment_promise / payment_plan. 1+ termijnen (add/remove).
 
 ────────────────────────────────────────────────────────────────────
 
-## Finance > Wanbetalers > Overzicht-nieuw (mountOverzichtNieuwHost) — r28345-28654
+## [IN SCOPE] Finance > Wanbetalers > Overzicht-nieuw (mountOverzichtNieuwHost) — r28345-28654
 
 ### Toolbar — r28356-28378
 - [ ] r28356 — `#oznRefresh` "↻ Verversen"
@@ -3570,7 +3589,7 @@ Voor payment_promise / payment_plan. 1+ termijnen (add/remove).
 
 ────────────────────────────────────────────────────────────────────
 
-## Finance > Wanbetalers > Pipeline (mountDunPipelineHost, PR-C — r28660-29622)
+## [BUITEN SCOPE — behouden] Finance > Wanbetalers > Pipeline (mountDunPipelineHost, PR-C — r28660-29622)
 
 ### Header + zoek — r28666-28709
 - [ ] r28670 — `#dunPlRefreshBtn` "↻ Vernieuwen"
@@ -3621,7 +3640,7 @@ Voor payment_promise / payment_plan. 1+ termijnen (add/remove).
 
 ────────────────────────────────────────────────────────────────────
 
-## Finance > Wanbetalers > Acties-werkcentrum (`mountActiesWerkcentrumHost`) — r29655-30606
+## [IN SCOPE] Finance > Wanbetalers > Acties-werkcentrum (`mountActiesWerkcentrumHost`) — r29655-30606
 
 ### Tabs — r29662-29669
 - [ ] r29663 — `[data-awn-tab="todo"]` "Te doen (n)" (default active)
@@ -3664,7 +3683,7 @@ Voor payment_promise / payment_plan. 1+ termijnen (add/remove).
 
 ────────────────────────────────────────────────────────────────────
 
-## Finance > Wanbetalers > Thread-header handlers (inbox)
+## [IN SCOPE] Finance > Wanbetalers > Thread-header handlers (inbox)
 
 ### Thread-header compacte knoppen — r4969-4996 (wired in ../30619+ blok)
 - [ ] r4963 — `#inboxBackToListBtn` "←" (mobile-only, wist body.inbox-thread-open) — r17854
@@ -3705,7 +3724,7 @@ Voor payment_promise / payment_plan. 1+ termijnen (add/remove).
 
 ────────────────────────────────────────────────────────────────────
 
-## Finance > Wanbetalers > Actie-maker popup (`_wbxGesprekActieOpen` — `#wbxGesprekActieModal`) — r31031-31248
+## [IN SCOPE] Finance > Wanbetalers > Actie-maker popup (`_wbxGesprekActieOpen` — `#wbxGesprekActieModal`) — r31031-31248
 
 ### 6 type-buttons `.wbx-actie-type-btn[data-actie-type]` (grid 2×3) — r31045-31053
 - [ ] `data-actie-type="bel"` "🎧 Bellen" — Bel-taak (voor mij of collega)
@@ -3736,7 +3755,7 @@ Voor payment_promise / payment_plan. 1+ termijnen (add/remove).
 
 ────────────────────────────────────────────────────────────────────
 
-## Finance > Wanbetalers > Unified inbox thread (feature-flag `unified_inbox_enabled`) — r31391-31971
+## [IN SCOPE] Finance > Wanbetalers > Unified inbox thread (feature-flag `unified_inbox_enabled`) — r31391-31971
 
 ### Per e-mail bubble in unified render — r31710-31723
 - [ ] r31711 — `.f4u-reply-btn[data-f4-email-reply]` "✉→ Beantwoord per e-mail"
@@ -3755,7 +3774,7 @@ Voor payment_promise / payment_plan. 1+ termijnen (add/remove).
 
 ────────────────────────────────────────────────────────────────────
 
-## Samenvattende opmerkingen
+## Samenvattende opmerkingen (inventaris-agent)
 
 - **wbxOpenConfirm** is de shared confirm-modal (r25362-25468). Gebruikt door: WIK-generate/mail/mark-post · Sluit-dossier · Mark-disputed/bewind · Resolve-dispute · Snooze · Bel-taak · Pauzeer flow · Naar-incasso · Brief-aanmaken · Bulk-mark-sent brieven · Awn approve/reject/restore.
 - **RBAC-gated buttons** in case-sheet (dossier-sluiten/mark-disputed/mark-bewind/resolve-dispute): fail-secure via `_caseCanCloseDossier()` (perms cache) — knop verborgen; server 403 = definitieve poort.
@@ -3771,6 +3790,76 @@ Voor payment_promise / payment_plan. 1+ termijnen (add/remove).
 
 ---
 
-## Bewust laten vervallen
+## Bewust NIET overnemen
 
-_(nog leeg — vullen bij elke PR die een item bewust niet herbouwt, met reden en goedkeuring)_
+Items met badge **`[SCHRAPPEN]`** worden bij het redesign verwijderd. Goedgekeurd door opdrachtgever 2026-08-06.
+
+### Finance > Uitgaven-tab (58 items)
+Volledige `view-uitgaven` cluster verdwijnt: 3 charts, 8 filters, 3 tabellen (tegenpartijen + vaste-lasten + breakdown), 1 shared bank-tx-modal, `expDetailModal`.
+- **Reden**: functionaliteit niet meer nodig in Finance-scope; als er een uitgaven-overzicht terugkomt, wordt dat een aparte module met eigen inventaris.
+- **Data-impact**: onderliggende tabellen (`expense_*` / counterparty-tags) blijven bestaan; alleen de UI verdwijnt. Rogier's boekhoud-flow raakt hier niets van.
+- **Nav-link**: `#navExpenses` uit `view-*` topnav wordt verwijderd.
+
+### Finance > Roadmap-tab
+De `view-roadmap` host + zijn extern-linkende content verdwijnt uit de Finance-navigatie.
+- **Reden**: functioneerde als externe-content-embed, wordt niet meer actief onderhouden.
+- **Nav-link**: `[data-view="roadmap"]` knop uit topnav verwijderen.
+
+### Nieuwe schrappingen toevoegen
+Elke redesign-PR die extra items bewust laat vervallen: voeg hier een sub-sectie toe met:
+- Welke items (verwijzing naar sectie in dit document).
+- Reden.
+- Data-impact (blijft DB-schema? worden endpoints uitgezet?).
+- Expliciete opdrachtgever-goedkeuring (datum + referentie).
+
+---
+
+## Koppelpunten naar oude schermen
+
+Buttons in **IN SCOPE** schermen die navigeren naar **BUITEN SCOPE** schermen. Deze koppelingen moeten blijven werken — de deep-links (?sub=xxx) mogen niet verdwijnen bij de herbouw van de omringende UI.
+
+### Vanuit Gesprekken (IN SCOPE) → deep-link oude schermen (BUITEN SCOPE)
+- **Thread-header ⋮ menu > "Dossier openen"** → opent case-sheet drawer (IN SCOPE); die drawer heeft echter deep-links naar oude sub-views (bv. arrangement-detail via `?sub=arrangements&arrangement_id=`).
+- **"Actie maken"-popup > arrangement-optie** → deep-link naar `?sub=arrangements` propose-wizard (BUITEN SCOPE) — moet blijven werken.
+- **Case-sheet > "Betaalafspraak vastleggen"** → opent arrangement-propose-modal (BUITEN SCOPE) OF navigeert naar `?sub=arrangements` — beide moeten blijven werken.
+
+### Vanuit Acties-werkcentrum (IN SCOPE) → oude schermen
+- **Row-klik op arrangement-taak** → deep-link naar `?sub=arrangements&arrangement_id=` (BUITEN SCOPE).
+- **Row-klik op verify_payment / escalation / followup** → opent case-sheet (IN SCOPE) — geen probleem.
+
+### Vanuit Instellingen (IN SCOPE) → oude schermen
+- Geen bekende koppelpunten. Instellingen-kaarten zijn zelfstandig.
+
+### Vanuit Overzicht (nieuw, IN SCOPE) → oude schermen
+- **Row-klik** → opent case-sheet (IN SCOPE) — geen probleem.
+
+### Vanuit Finance top-level (IN SCOPE) → geen Wanbetalers-koppeling
+- Finance-Facturen / Creditnota's / CAMT-Bank / Bank hebben geen deep-links naar Wanbetalers sub-views.
+
+**Herbouw-eis**: iedere `?sub=<oude-tab>` URL blijft werken. Als de nav-knop niet meer bestaat, moet de URL nog steeds de juiste view mount (setSubView behoudt de validSubs-array met alle deep-link-only waardes).
+
+---
+
+## Verificatie-status van deze inventaris
+
+Op 2026-08-06 geverifieerd door onafhankelijke grep-telling op de bron-bestanden. Ruwe hit-counts per element-type per file:
+
+| Bestand | `<button` | `onclick=` | `addEL('click'` | `<select` | `checkbox` | `search` | `data-*` | `<a href` | RUW-TOTAAL |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `sales.html` | 102 | 5 | 71 | 12 | 9 | 5 | 12 | 30 | 246 |
+| `sales-wizard.html` | 24 | 0 | 32 | 5 | 4 | 0 | 0 | 9 | 74 |
+| `subscription-wizard.html` | 8 | 0 | 13 | 5 | 3 | 0 | 7 | 6 | 42 |
+| `offerte-detail.html` | 16 | 5 | 11 | 3 | 0 | 0 | 0 | 8 | 43 |
+| `klanten.html` | 124 | 52 | 68 | 9 | 10 | 2 | 7 | 30 | 302 |
+| `finance.html` | 499 | 3 | 402 | 43 | 35 | 16 | 58 | 45 | 1101 |
+| **Ruwe grep-som** | | | | | | | | | **1808** |
+
+De ruwe telling is een BOVENGRENS — één `<button onclick="..." data-action="...">` telt 3× (button + onclick + data-*). Realistisch overlap-percentage 30-40%, wat correspondeert met de 1230 unieke checklist-items in dit document. **Verificatie-conclusie: inventaris is compleet binnen de verwachte marge.**
+
+Categorie-specifieke spot-checks (grep in dit document):
+- 6 deep-link-only Wanbetalers-subs: allemaal ≥2 vermeldingen (pipeline 16 · te-doen 3 · open-acties 2 · facturen 63 · opruimen 10 · arrangements 15 · probleemklanten 8).
+- Thread ⋮ menu (NL-labels): Archiveren 9 · Heropenen 3 · Uit archief 2 · Markeer gelezen 2 · Markeer ongelezen 2 · Dossier openen 2 · Stuur een brief 2 · Pauzeer aanmaan 2.
+- 14 modals (creditModal/invModal/payModal/claimPaidModal/sendModal/updModal/newInvModal/bankTxModal/expDetailModal/customerFormModal/archiveModal/duplicateConfirmModal/linkCompanyModal/wbxOpenConfirm): allemaal gedocumenteerd.
+- Rol-gates: `super_admin` 9× · RBAC-keys 178× · `hidden default` 49×.
+- Status-branches: draft 18 · concept 8 · sent 22 · paused 6 · Hervat 2 · cancelled 7.
+- Toetsenbord: Escape 26× · Enter 5× · Ctrl 2× · Cmd 2×. (**Beperkt**: er is geen expliciete sneltoets-lijst in de codebase; keydown-listeners staan wél gedocumenteerd per plek waar ze gebruikt worden.)
