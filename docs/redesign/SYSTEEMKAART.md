@@ -397,6 +397,67 @@ Vastgelegd 2026-08-06. Onderstaande beslissingen zijn contractueel voor elke bou
 6. **Instellingen samengetrokken** — alle verspreide config-schermen verhuizen naar één Instellingen-module (10 categorieën, zie D4). Oude locaties blijven werken tot de betreffende module is herbouwd, dan wordt de oude view uit-gelinkt.
 7. **Binnenkort-pagina** — kaartenraster (zelfde opzet als Instellingen) waar niet-actieve modules onder blijven leven: Secret Area, Vergaderruimte, Kennisbank, Control Center, Simon/Leon/Aron-chat. Niks wordt verwijderd, alleen uit de hoofdnavigatie gehaald.
 
+### D0.1 Harde regels bij herbouw (contractueel)
+
+Twee absolute regels bij elke module-herbouw. Overtreding = PR wordt gesloten, geen review, geen "we fixen het later".
+
+#### Regel 1 — Wanbetalers: alleen het uiterlijk
+
+De wanbetalers-flow (dunning-engine, reminder-cirkel, Joost-AI, workflows, verzendvenster, brieven, pipeline) heeft 5 dagen gekost om werkend te krijgen. Bij de Wanbetalers-herbouw wordt UITSLUITEND de opmaak vervangen — de logica blijft byte-voor-byte gelijk.
+
+**Wat mag wijzigen**: HTML-templates, CSS, DOM-structuur van de Wanbetalers-tabs (Gesprekken / Acties / Overzicht / Instellingen), rendering-code die de views bouwt, event-handlers die click-events omzetten naar bestaande API-calls.
+
+**Wat NIET mag wijzigen** (Protected Zone — complete lijst in **Bijlage 3**):
+- `api/cron-dunning-*.js` — engine, bulk-send, conversation-reminders
+- `api/finance-dunning-*.js` — alle wanbetalers-endpoints
+- `api/dunning-*.js` — pipeline, templates, workflows, briefs
+- `api/joost-*.js` — Joost-suggest, autonomy, autonomy-evaluate, send, outbound, config
+- `api/voys-*.js` — softphone-endpoints (worden door de bel-knop in Gesprekken-tab aangeroepen)
+- Alle `docs/sql-migrations/*joost*.sql`, `*dunning*.sql`, `*arrangement*.sql`, `*pending-actions*.sql`
+- Alle `app_settings`-keys (`dunning_cooldown_days`, `dunning_pipeline_auto`, feature_flags op joost_config)
+- `joost_config`-tabel-structuur + inhoud (persona, mandate, communication_limits, autonomy-flags)
+- `dunning_templates`, `dunning_bulk_jobs`, `dunning_pipeline_*`, `payment_arrangements`, `pending_actions` tabel-structuur
+
+**Contract per wanbetalers-PR** (verplicht in PR-body):
+1. Sectie "Protected files onveranderd" met commando-output:
+   ```
+   git diff --stat main...HEAD -- api/cron-dunning-*.js api/finance-dunning-*.js \
+     api/dunning-*.js api/joost-*.js api/voys-*.js
+   ```
+   Verwachte output: leeg (0 files changed). Als er ook maar één file in staat: PR gaat retour.
+2. Sectie "API-call inventaris": lijst van alle `fetch()`-calls in de nieuwe UI met bewijs dat het endpoint + params identiek zijn aan het huidige scherm. Format: `endpoint · method · params (unchanged)`.
+3. Sectie "Live-test-instructie": doorloop van (a) aanmaan-run triggeren, (b) reminder-cirkel opengaan, (c) Joost-suggestie krijgen, (d) brief genereren, (e) bulk-send uitvoeren — allemaal met dezelfde resultaten als op productie.
+
+Als er tijdens de UI-herbouw een bug in de bestaande logica ontdekt wordt: **apart flaggen in een aparte non-UI PR**, niet meenemen in de UI-PR. Wanbetalers-UI en wanbetalers-logica krijgen aparte lifecycles.
+
+#### Regel 2 — Klanten: bellen via bestaande softphone
+
+De klanten-v2-module moet de bel-functie hebben (a) als rij-actie in de klantenlijst en (b) als knop in het klantdossier-header. Beide roepen de **bestaande** softphone-implementatie aan — geen nieuwe SIP-integratie, geen nieuwe Voys-koppeling.
+
+**Huidige implementatie** (bron: `modules/klanten.html` r.4609+):
+- IIFE `initKlxSoftphone()` initieert `_klxSoftphone`-object (config + line-detectie NL/BE + callbar + sheet).
+- Body-level DOM-overlays: `#klxSoftphoneCallbar` (r.4681, callbar tijdens gesprek) + `#klxSoftphoneSheet` (r.4970, rich belvenster met line-select/retry/num-input/dial/hangup/mute).
+- Aanroeppunt in dossier: `#prof-klx-call-btn` in Profiel-tab (r.690) opent de sheet.
+- Endpoints: `/api/voys-sip-config` (registratie), `/api/voys-call` (initiate call), `/api/voys-config` (line-status).
+- SIP-library: `modules/shared/sip.min.js`.
+- CSS-namespace: `.klx-call-*` (callbar) + `.klx-*` (sheet).
+- Werkt over tab-wissels en soft-navigation heen (body-level, niet in view-container).
+
+**Eis voor klanten-v2 PR-B** (specificatie in **Bijlage 4**):
+1. **Extract-stap** (eerste in PR-B): verplaats de IIFE `initKlxSoftphone` naar `modules/shared/klx-softphone.js` en expose een minimale public API op `window.KlxSoftphone`:
+   ```
+   window.KlxSoftphone.open(customer)     // customer = {id, first_name, last_name, company_name, phone, is_company}
+   window.KlxSoftphone.hangup()
+   window.KlxSoftphone.isActive()         // true tijdens gesprek
+   ```
+   Voeg `<script src="../shared/klx-softphone.js"></script>` toe aan zowel `modules/klanten.html` (oud) als `modules/klanten-v2/index.html`. Bewijs in PR-body dat de oude klanten.html-flow bit-voor-bit identiek werkt (screenshot before/after + video van 1 belletje).
+2. **Rij-actie in klanten-v2 lijst-view**: telefoon-icoon in de "Contact"-kolom of in het kebab-menu; klik roept `window.KlxSoftphone.open({...row})`.
+3. **Header-knop in klanten-v2 detail-view** (PR-B): "Bellen"-knop naast de klant-naam, roept dezelfde `open()` aan.
+4. **State-check**: `isActive()` verbergt beide knoppen (of maakt ze disabled) zolang er een actief gesprek is; alleen `#klxSoftphoneCallbar` blijft dan zichtbaar.
+5. **Endpoints ongewijzigd**: `voys-*.js`-files staan in de Protected Zone. Geen wijzigingen aan de SIP-registratie, call-initiatie of config.
+
+**INVENTARIS-check**: item staat als "Klanten > Softphone (globale overlays — body-level)" op regel 1651 van INVENTARIS.md (branch `docs/redesign-inventaris-fase1`, PR #1111) met status **IN SCOPE**. Bel-knop `#prof-klx-call-btn` staat op r.1054 onder "Profiel-tab > Sidebar (linker kolom)" eveneens IN SCOPE. Beide vallen onder PR-B (dossier + tabs) en zijn daar contractueel: als PR-B geen werkende softphone-integratie levert wordt hij niet gemerged.
+
 ### D1. Unified zijbalk (identiek voor iedereen; rechten verbergen items)
 
 Alle 5 rollen zien onderstaande boom. Per item is er een gate-key; heeft de rol die niet dan is het item verborgen (`display:none`). Op deze manier krijgt niemand een "kaal" scherm; wie iets niet mag, ziet het gewoon niet.
@@ -656,6 +717,11 @@ Contractueel voor elke bouw-PR. Voor elke module: 1 tabel met per rol wat er ver
 | mentor | Niet zichtbaar in sidebar | Wél in sidebar; scope-filter default **Mijn** (alleen klanten van eigen studenten); "Alle"-optie verborgen |
 | marketing | (ongebruikt) | Read-only lijst; geen bewerkacties |
 
+**Softphone-integratie (harde eis, zie D0.1 regel 2)**:
+- **Lijst-view** — telefoon-icoon in kebab-menu of Contact-kolom; klik → `window.KlxSoftphone.open(customer)`.
+- **Detail-view PR-B** — "Bellen"-knop in dossier-header naast klant-naam; zelfde `open()`.
+- **Shared script** — `modules/shared/klx-softphone.js` (extract uit huidige klanten.html r.4609+) wordt door zowel klanten.html als klanten-v2 geladen. Endpoints `/api/voys-sip-config`, `/api/voys-call`, `/api/voys-config` staan in Protected Zone en blijven ongewijzigd.
+
 ### E3. Sales (`modules/sales.html` → `sales-v2`)
 
 | Rol | Nu | v2 |
@@ -876,4 +942,213 @@ Alle plekken uit B2.2 aanpassen, één PR. Test: login als elke rol werkt nog, s
 
 Marketing wordt bewaard maar krijgt geen grants tot Fase X. In `RBAC_ROLES` blijft de entry staan (zodat de matrix-tab de kolom kan tonen als beheerder daar rechten aanvinkt). In DB-CHECK-constraint zit hij al vanaf de nieuwe versie. Users kunnen dus wél de rol krijgen; ze zien alleen een dashboard met "Marketing-dashboard komt in Fase X" totdat we die rol inrichten.
 
-- **Open vraag**: Klanten-v2 hoort straks bij de Klanten-groep; wanneer switchen we `modules/klanten.html`-links (sales, finance-tasks, finance-crediteer) naar `klanten-v2`? Dat is een aparte upgrade-batch nadat PR-C live is.
+---
+
+## Bijlage 3 — Wanbetalers Protected Zone (harde afspraak D0.1 regel 1)
+
+Volledige lijst van bestanden en DB-objecten die NIET aangeraakt worden bij de Wanbetalers-herbouw. Elke wanbetalers-PR moet in de PR-body bewijzen dat deze bestanden 0 wijzigingen hebben (`git diff --stat main...HEAD -- <pad>` moet leeg zijn).
+
+### B3.1 Backend — API endpoints (Protected)
+
+**Cron-jobs (schedule + logica ongewijzigd)**
+- `api/cron-dunning-engine.js` — dagelijkse aanmaan-engine (schedule `0 * * * *`)
+- `api/cron-dunning-bulk-send.js` — bulk-aanmaan-verzender (`*/3 * * * *`, batches van 10)
+- `api/cron-dunning-conversation-reminders.js` — reminder-cirkel per conversatie
+- `api/cron-arrangements-breach-check.js` — dagelijkse breach-detection ACTIEVE arrangements
+
+**Wanbetalers endpoints (finance-dunning-\*)**
+- `api/finance-dunning-close-customer.js`
+- `api/finance-dunning-engine-run-now.js`
+- `api/finance-dunning-history.js`
+- `api/finance-dunning-mark-bewind.js`
+- `api/finance-dunning-mark-disputed.js`
+- `api/finance-dunning-overview.js`
+- `api/finance-dunning-pause-by-customer.js`
+- `api/finance-dunning-paused-list.js`
+- `api/finance-dunning-problem-customers.js`
+- `api/finance-dunning-resolve-dispute.js`
+- `api/finance-dunning-run-control.js`
+- `api/finance-dunning-run-skip-step.js`
+- `api/finance-dunning-templates-list.js` / `-upsert.js` / `-delete.js`
+- `api/finance-dunning-workflows-list.js` / `-detail.js` / `-upsert.js` / `-toggle.js` / `-delete.js`
+
+**Dunning-pipeline endpoints**
+- `api/dunning-pipeline-actions.js`
+- `api/dunning-pipeline-add-log.js`
+- `api/dunning-pipeline-appointment.js`
+- `api/dunning-pipeline-detail.js`
+- `api/dunning-pipeline-list.js`
+- `api/dunning-pipeline-set-stage.js`
+- `api/dunning-pipeline-settings.js`
+- `api/dunning-pipeline-stages.js`
+
+**Brieven-functie (WIK etc.)**
+- `api/dunning-brief-email-send.js`
+- `api/dunning-brief-mark-post.js`
+- `api/dunning-briefs-bulk-mark-sent.js`
+- `api/dunning-briefs-bulk-print.js`
+- `api/dunning-briefs-list.js`
+- `api/dunning-briefs-list-all.js`
+
+**Call-log + settings**
+- `api/dunning-call-log-create.js`
+- `api/dunning-call-log-list.js`
+- `api/dunning-settings-get.js`
+- `api/dunning-settings-update.js`
+- `api/dunning-template-diagnose.js`
+
+**Arrangements + pending-actions**
+- `api/arrangements-*.js` (list, propose, cancel, mark-executed, breach-check, evaluate)
+- `api/pending-actions-*.js` (list, mark-executed, guard, executor)
+- `api/tasks-create-verify-payment.js`, `tasks-create-escalation.js`, `tasks-create-followup.js`
+
+**Joost-AI (compleet — persona, autonomy, mandate, executors)**
+- `api/joost-suggest.js` / `joost-suggest-revise.js`
+- `api/joost-autonomy-evaluate.js` / `joost-autonomy-decisions-list.js`
+- `api/joost-send-autonomous.js`
+- `api/joost-outbound-scheduler.js` / `joost-outbound-send.js`
+- `api/joost-conversation-state.js`
+- `api/joost-create-task-from-suggestion.js`
+- `api/joost-mark-outcome.js`
+- `api/joost-config-get.js` / `joost-config-upsert.js`
+- `api/joost-suggestions-recent.js`
+- `api/finance-dashboard-chart-joost-intents.js`
+
+**Softphone endpoints (raakt aan Klanten-regel 2 én aan bel-taken in Wanbetalers)**
+- `api/voys-call.js`
+- `api/voys-config.js`
+- `api/voys-sip-config.js`
+
+**Shared helpers (Protected — Joost/Dunning logic)**
+- `api/_lib/dunning-step-executors.js`
+- `api/_lib/dunning-templates.js`
+- `api/_lib/joost-*.js`
+- `api/_lib/anthropic-client.js` (kernel voor Joost)
+- `api/_lib/pending-actions-guard.js`
+- `api/_lib/render-template-preview.js`
+- `api/_lib/invoice-payment-link.js`
+- `api/_lib/teamleader-invoice-link.js`
+
+### B3.2 Database — Protected schema
+
+Tabel-structuur (kolommen, indices, constraints, RLS-policies) op onderstaande tabellen wordt NIET gewijzigd tijdens de Wanbetalers-UI-herbouw. Data-inhoud (rijen) blijft ook onaangeroerd:
+
+- `joost_config`, `joost_suggestions`, `joost_conversation_state`
+- `dunning_templates`, `dunning_engine`, `dunning_bulk_jobs`, `dunning_bulk_recipients`
+- `dunning_pipeline_stages`, `dunning_pipeline_customers`, `dunning_pipeline_log`, `dunning_pipeline_appointments`
+- `payment_arrangements`, `pending_actions`
+- `whatsapp_conversations` (dunning-context) + `whatsapp_messages`
+- `app_settings` rows: `dunning_cooldown_days`, `dunning_pipeline_auto`, `dunning_office_hours_*`, alle `feature_flags.e2_*` op joost_config
+
+### B3.3 Configuratie (env-vars, cron-schedules)
+
+- `vercel.json` cron-entries voor `cron-dunning-*` en `cron-arrangements-*` — schedule blijft ongewijzigd
+- Env-vars: `ANTHROPIC_API_KEY`, `INTERNAL_API_TOKEN`, `CRON_SECRET`, `COMPANY_*` (voor template-vars)
+- WhatsApp Meta-template-mappings (`whatsapp_meta_templates.meta_param_mapping`) — Wanbetalers-templates blijven exact
+- Kantooruren-code-gate in `cron-dunning-engine.js` (08:00-20:00 Europe/Amsterdam, alle dagen)
+
+### B3.4 PR-checklist wanbetalers-UI-herbouw (verplicht in elke PR-body)
+
+```
+## Wanbetalers-UI PR-checklist
+
+- [ ] Protected files onveranderd (0 wijzigingen op alle paden uit Bijlage 3):
+      Run: git diff --stat main...HEAD -- api/cron-dunning-*.js api/finance-dunning-*.js \
+                                          api/dunning-*.js api/joost-*.js api/voys-*.js \
+                                          api/arrangements-*.js api/pending-actions-*.js \
+                                          api/_lib/dunning-*.js api/_lib/joost-*.js \
+                                          api/_lib/pending-actions-guard.js
+      Verwachte output: leeg.
+- [ ] Geen SQL-migraties in deze PR (`ls docs/sql-migrations/*.sql | grep <PR-branch-datum>` = leeg)
+- [ ] Geen wijzigingen aan vercel.json cron-schedules
+- [ ] API-call inventaris: [alle fetch()-calls in nieuwe UI met endpoint + params, bewijs dat identiek is aan huidige scherm]
+- [ ] Live-test scenario doorlopen:
+      1. Handmatige aanmaan-run: [screenshot van resultaat]
+      2. Reminder-cirkel openen op klant met openstaande facturen: [screenshot]
+      3. Joost-suggestie ontvangen na inbound WhatsApp: [screenshot]
+      4. WIK-brief genereren + downloaden: [PDF-download-bewijs]
+      5. Bulk-aanmaan-batch aanmaken + approven: [screenshot cron-run]
+- [ ] Verifieer met super_admin dat pipeline-fases correct auto-triggeren (on_bulk_sent → aangemaand)
+```
+
+Als één van deze checks faalt: PR direct sluiten, niet mergen. Nooit uitzonderingen — de logica staat vast, alleen de opmaak wijzigt.
+
+---
+
+## Bijlage 4 — Softphone-integratie klanten-v2 (harde afspraak D0.1 regel 2)
+
+Complete specificatie voor de shared-extract + integratie-punten. Contract voor klanten-v2 PR-B.
+
+### B4.1 Huidige implementatie (bron `modules/klanten.html`)
+
+- **Init**: IIFE `initKlxSoftphone()` op r.4609, wordt aangeroepen bij page-init. Bouwt intern `_klxSoftphone`-object.
+- **Line-detectie**: `_klxDetectLine(phone)` — E.164 prefix `+32`/`0032` → BE, alles anders → NL.
+- **Callbar**: `#klxSoftphoneCallbar` (dynamisch aangemaakt r.4681, body-appended) — floating tijdens gesprek met titel/timer/mute/hangup.
+- **Sheet**: `#klxSoftphoneSheet` (r.4970) — rich belvenster (line-select, num-input, retry, dial, hangup, mute).
+- **Aanroep vanuit klant-detail**: `#prof-klx-call-btn` in Profiel-tab (r.690) — click-handler r.5139 (delegated) opent de sheet.
+- **CSS-namespace**: `.klx-call-*` (callbar) en `.klx-*` (sheet). Woord-scope `.klx` op de body-elementen.
+- **SIP-library**: `modules/shared/sip.min.js` (SIPml, al shared).
+
+### B4.2 Extract-plan (klanten-v2 PR-B, eerste stap)
+
+Nieuw bestand: `modules/shared/klx-softphone.js`
+
+**Public API op `window.KlxSoftphone`:**
+
+| Methode | Argumenten | Return | Gedrag |
+|---|---|---|---|
+| `open(customer)` | `{id, first_name, last_name, company_name, phone, is_company}` | `void` | Opent de sheet met klant-context (naam + telefoon prefilled) |
+| `hangup()` | `–` | `void` | Beëindigt actief gesprek |
+| `isActive()` | `–` | `boolean` | `true` als er een gesprek loopt (connecting/connected) |
+| `getConfig()` | `–` | `{lines: {nl, be}}` | Line-availability (voor UI-gates) |
+| `onStateChange(cb)` | `(state, meta) => void` | `unsubscribe fn` | Event: state = idle/connecting/ringing/connected/hangup/failed |
+
+**Bestaande interne functies blijven intern** (`_klxDetectLine`, `_klxEnsureCallbar`, `_klxUpdateCallbarStatus`, etc.). Geen refactor van de logica; alleen extract naar shared script en public wrapper.
+
+**Loading**:
+```html
+<!-- In modules/klanten.html: vervang de inline IIFE door -->
+<script src="/modules/shared/klx-softphone.js"></script>
+
+<!-- In modules/klanten-v2/index.html: -->
+<script src="../shared/sip.min.js"></script>
+<script src="../shared/klx-softphone.js"></script>
+```
+
+### B4.3 Integratie-punten in klanten-v2
+
+**Lijst-view (PR-A al live — retrofit bij PR-B)**
+- Telefoon-icoon in het rij-kebab-menu: "Bellen"-item, click roept `window.KlxSoftphone.open(customer)`.
+- Alternatief: apart telefoon-icoon in Contact-kolom (naast e-mail-adres).
+- Verberg optie als `customer.phone` leeg is.
+
+**Detail-view (PR-B)**
+- "Bellen"-knop in header naast klant-naam (icoon `ti-phone` + label "Bellen").
+- Disabled als `!customer.phone`.
+- Tijdens actief gesprek: knop wordt "In gesprek…" en disabled; `#klxSoftphoneCallbar` blijft body-level zichtbaar.
+- `window.KlxSoftphone.onStateChange((state) => updateButton(state))` voor live-status.
+
+### B4.4 Wat blijft ongewijzigd
+
+- Endpoints `/api/voys-*.js` (staan in Protected Zone, Bijlage 3).
+- SIP-registratie-flow, ICE, media-stream-handling — allemaal ongemoeid.
+- CSS-namespace `.klx-*` — verplaats naar `modules/shared/klx-softphone.css` maar wijzig geen selector-namen (backward-compat met oude klanten.html tijdens overgang).
+- DOM-IDs (`#klxSoftphoneCallbar`, `#klxSoftphoneSheet`, `#klxSoftphoneMuteBtn`, `#klxSoftphoneHangupBtn`, `#klxSoftphoneCallbarTitle`, etc.) — blijven identiek zodat eventuele externe hooks / DevTools-macro's blijven werken.
+
+### B4.5 Verificatie in klanten-v2 PR-B
+
+Verplicht in PR-body:
+1. **Extract-diff**: `git diff modules/klanten.html` toont dat de IIFE-code weg is en vervangen is door `<script src="...">`, en dat de externe knop-handlers ongewijzigd zijn.
+2. **Public-API-test**: video/GIF van 1 belletje vanaf klanten-v2 lijst-view (rij-actie) + 1 vanaf detail-view (header-knop).
+3. **Regressie-test oude scherm**: video van 1 belletje vanaf oude `modules/klanten.html` (Profiel-tab bel-knop). Identieke werking als voor de PR.
+4. **Endpoint-check**: `git diff --stat main...HEAD -- api/voys-*.js` = leeg.
+
+### B4.6 INVENTARIS-status (bevestigd 2026-08-06)
+
+Uit `docs/redesign/INVENTARIS.md` (branch `docs/redesign-inventaris-fase1`, PR #1111):
+- r.1651 "Klanten > Softphone (globale overlays — body-level)" — **IN SCOPE**
+- r.1656 `#klxSoftphoneCallbar` — IN SCOPE (mute + hangup items)
+- r.1667 `#klxSoftphoneSheet` — IN SCOPE
+- r.1054 r.690 `#prof-klx-call-btn` (bel-knop in Profiel-tab) — IN SCOPE, hoort onder PR-B (dossier + tabs)
+
+Beide klanten-v2 PR-B checklist-items worden hiermee gedekt — de items staan al correct in INVENTARIS.md en komen bij PR-B ter afvinking. Deze bijlage vult de technische specificatie aan.
