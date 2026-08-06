@@ -8,6 +8,7 @@
 //   kwalificatie   'toegang' | 'geen toegang' | 'geen'  ('geen' → leeg-filter)
 //   bron           'website' | 'funnel' | 'meta' | 'handmatig'
 //   status         'nieuw' | 'opgevolgd' | 'gewonnen' | 'verloren'
+//   afspraak       'ja' (afspraak_op gezet) | 'nee' (leeg) — "Call gepland"-filter
 //   q              zoek op naam OR email (ilike)
 //   limit          default 50, clamp [1..500]
 //   offset         default 0
@@ -39,6 +40,8 @@ export default async function handler(req, res) {
   const kwal  = q.kwalificatie ? String(q.kwalificatie).trim() : null;
   const bron  = q.bron ? String(q.bron).trim() : null;
   const status = q.status ? String(q.status).trim() : null;
+  // Call gepland: 'ja' → afspraak_op gezet, 'nee' → leeg. Anders geen filter.
+  const afspraak = q.afspraak ? String(q.afspraak).trim() : null;
   const search = q.q ? String(q.q).trim() : null;
   const limit  = Math.max(1, Math.min(500, Number(q.limit)  || 50));
   const offset = Math.max(0, Number(q.offset) || 0);
@@ -52,7 +55,7 @@ export default async function handler(req, res) {
   try {
     let qy = supabaseAdmin
       .from('leads_overzicht')
-      .select('id, naam, email, telefoon, soort, bron, traject, kwalificatie, score, drempel, status, aangemaakt, tag', { count: 'exact' })
+      .select('id, naam, email, telefoon, soort, bron, traject, kwalificatie, score, drempel, status, aangemaakt, tag, afspraak_op', { count: 'exact' })
       .order('aangemaakt', { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -67,6 +70,8 @@ export default async function handler(req, res) {
     if (status) qy = qy.eq('status', status);
     if (kwal === 'geen') qy = qy.is('kwalificatie', null);
     else if (kwal)       qy = qy.eq('kwalificatie', kwal);
+    if (afspraak === 'ja')      qy = qy.not('afspraak_op', 'is', null);
+    else if (afspraak === 'nee') qy = qy.is('afspraak_op', null);
     if (search) {
       const like = `%${search.replace(/[%_]/g, m => '\\' + m)}%`;
       qy = qy.or(`naam.ilike.${like},email.ilike.${like}`);
