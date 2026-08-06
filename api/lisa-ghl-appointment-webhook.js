@@ -7,6 +7,15 @@
 // systeem-event in de thread (is_system) en past de conversatie-status aan.
 
 import { supabaseAdmin } from './supabase.js';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc.js';
+import timezone from 'dayjs/plugin/timezone.js';
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
+// GHL-agenda draait op Nederlandse tijd; kale (offset-loze) starttijden interpreteren
+// we hierin. DST-bewust via dayjs+timezone (zomer UTC+2, winter UTC+1).
+const APPT_TZ = 'Europe/Amsterdam';
 
 export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
@@ -33,6 +42,10 @@ export default async function handler(req, res) {
       email: customData.email || body.contact?.email || body.email || null,
       phone: customData.phone || body.contact?.phone || body.phone || null,
     };
+
+    // Leg de exacte GHL-notatie van de starttijd vast, zodat we bij de volgende
+    // afspraak hard zien welk formaat (met/zonder offset) binnenkomt.
+    console.log('[appointment-webhook] raw startTime:', payload.startTime);
 
     const status = String(payload.appointmentStatus || '').toLowerCase();
 
@@ -108,10 +121,24 @@ export default async function handler(req, res) {
 // met telefoon (laatste 9 cijfers) als terugval. Booking → afspraak_op = starttijd;
 // annulering/no-show → afspraak_op = null (Call gepland weer 'nee'); overige statussen
 // → geen wijziging. Best-effort; de aanroeper vangt fouten op.
+// Tijdzone-bewuste parsing van de GHL-starttijd → UTC-ISO ("…Z").
+// - Bevat de waarde een offset (Z of ±HH:MM) → respecteer die (juiste instant).
+// - Ontbreekt de offset (kale wandkloktijd) → interpreteer als Europe/Amsterdam.
+// DST-bewust via dayjs+timezone (Intl): géén hardcoded offset, dus 's winters UTC+1
+// en 's zomers UTC+2. Ook een Unix-timestamp (s/ms) wordt geaccepteerd.
 function parseStart(s) {
-  if (!s) return null;
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? null : d.toISOString();
+  if (s == null || s === '') return null;
+  const raw = String(s).trim();
+  if (/^\d{10,13}$/.test(raw)) {
+    const ms = raw.length >= 13 ? Number(raw) : Number(raw) * 1000;
+    const d = dayjs(ms);
+    return d.isValid() ? d.utc().toISOString() : null;
+  }
+  const heeftOffset = /(?:Z|[+-]\d{2}:?\d{2})$/.test(raw);
+  const d = heeftOffset
+    ? dayjs(raw)              // offset in de string → respecteer die
+    : dayjs.tz(raw, APPT_TZ); // kale tijd → als Amsterdam (DST-bewust)
+  return d.isValid() ? d.utc().toISOString() : null;
 }
 
 async function koppelAfspraakAanLead(payload, status) {
