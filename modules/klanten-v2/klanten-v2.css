@@ -828,6 +828,36 @@
   .kv-invupd-inp { font-size: 16px; }   /* iOS zoom-prevention */
 }
 
+/* ═══ Factuur-betaling-modal (PR-D3) — HANDMATIGE boeking ═════════════════ */
+
+.kv-invpay-notice {
+  display: flex; gap: 10px;
+  padding: 12px 14px;
+  background: var(--amber-soft, var(--surface-2));
+  border: 1px solid var(--amber-line, var(--border));
+  border-left: 3px solid var(--amber, var(--m));
+  border-radius: var(--r-sm);
+  color: var(--text);
+}
+.kv-invpay-notice svg { width: 20px; height: 20px; flex-shrink: 0; color: var(--amber, var(--m)); margin-top: 1px; }
+.kv-invpay-notice-t { font-size: 13.5px; margin-bottom: 3px; }
+.kv-invpay-notice-s { font-size: 12.5px; color: var(--text-2); line-height: 1.4; }
+.kv-invpay-open {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+.kv-invpay-open-l { font-size: 13px; color: var(--text-2); }
+.kv-invpay-open-v { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.kv-invpay-inp-num { text-align: right; font-variant-numeric: tabular-nums; font-family: 'IBM Plex Mono', monospace; }
+.kv-invpay-hint-inline { margin-top: 4px; font-size: 11.5px; }
+
+@media (max-width: 760px) {
+  .kv-invpay-open { flex-direction: column; align-items: flex-start; gap: 2px; }
+}
+
 /* ═══ Audit-tab (PR-B6, read-only) ═════════════════════════════════════════ */
 
 .kv-aud { display: flex; flex-direction: column; gap: 14px; }
