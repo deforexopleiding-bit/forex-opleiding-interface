@@ -301,4 +301,36 @@
   .kv-comm-header { flex-wrap: wrap; }
 }
 
+/* ═══ Offertes-tab (PR-B4, read-only) ══════════════════════════════════════ */
+
+.kv-off { display: flex; flex-direction: column; gap: 14px; }
+.kv-off-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+}
+.kv-off-head-title {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 15px; font-weight: 600;
+}
+.kv-off-head-title svg { width: 16px; height: 16px; color: var(--m); }
+.kv-off-kpis { padding: 0; }
+.kv-off-tbl { border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; }
+.kv-off-tbl .ds-tbl thead th { background: var(--surface-2); }
+.kv-off-tbl .ds-tbl tbody tr { cursor: pointer; }
+.kv-off-ref { font-weight: 600; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; }
+.kv-off-sub-badge { margin-left: 4px; font-size: 10.5px; padding: 1px 6px; }
+.kv-off-amount .mono { font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; font-weight: 600; }
+.kv-off-actions { white-space: nowrap; }
+.kv-off-actions .ds-icon-btn { display: inline-grid; }
+.kv-off-actions .ds-icon-btn + .ds-icon-btn { margin-left: 2px; }
+
+@media (max-width: 760px) {
+  .kv-off-head { flex-direction: column; align-items: flex-start; }
+  .kv-off-head .ds-btn { width: 100%; justify-content: center; }
+  .kv-off-tbl { border-left: 0; border-right: 0; border-radius: 0; margin: 0 -12px; }
+  .kv-off-tbl .ds-tbl thead th,
+  .kv-off-tbl .ds-tbl tbody td { padding: 8px 10px; }
+}
+
+
 
