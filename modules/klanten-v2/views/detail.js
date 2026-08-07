@@ -10,7 +10,8 @@
 // Volgende PR-B[2..6] vullen ze in met de INVENTARIS-items uit PR #1112.
 
 import { renderProfielTab }      from './tabs/profiel.js';
-import { openEditCustomerModal } from './modals/edit-customer.js';
+import { openEditCustomerModal }    from './modals/edit-customer.js';
+import { openArchiveCustomerModal } from './modals/archive-customer.js';
 import { renderCommunicatieTab } from './tabs/communicatie.js';
 import { renderOffertesTab }     from './tabs/offertes.js';
 import { renderAbonnementenTab } from './tabs/abonnementen.js';
@@ -118,10 +119,16 @@ function renderShell({ customer, tab }) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
             Bewerken
           </button>
-          <button type="button" class="ds-btn ds-btn-ghost" data-kv-action="archive" title="Archiveren (PR-C)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-            Archiveren
-          </button>
+          ${customer?.archived_at
+            ? `<button type="button" class="ds-btn ds-btn-ghost" data-kv-action="unarchive" title="Heractiveren">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/></svg>
+                Heractiveren
+              </button>`
+            : `<button type="button" class="ds-btn ds-btn-ghost" data-kv-action="archive" title="Archiveren">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+                Archiveren
+              </button>`
+          }
         </div>
       </header>
 
@@ -156,22 +163,27 @@ function wireShell(rootEl, { customer, tab }) {
     });
   });
 
-  // Edit → opent klant-bewerken-modal (PR-C1); Archive → placeholder-toast
-  // tot PR-C2. onSuccess: reset dossier-cache + re-render dezelfde tab.
+  // Header-acties: Edit (PR-C1), Archive/Unarchive (PR-C2).
+  // onSuccess in beide gevallen: cache-reset + re-render zodat het
+  // nieuwe klant-object (met bijgewerkte fields of archived_at) doorloopt.
+  // Bij archive expliciet: klant staat niet meer in de actieve lijst,
+  // maar het detail-scherm blijft open — user ziet de "Heractiveren"-knop
+  // en de status-pill switcht naar "Gearchiveerd". Terug naar de lijst
+  // is één klik.
   rootEl.querySelectorAll('[data-kv-action]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const action = btn.getAttribute('data-kv-action');
+      const refreshDetail = () => {
+        resetDetailCache();
+        const url = new URL(window.location.href);
+        const id  = url.searchParams.get('id');
+        const tab = url.searchParams.get('tab');
+        if (id) renderDetailView(rootEl, { id, tab, profile: null });
+      };
       if (action === 'edit') {
-        openEditCustomerModal({
-          customer,
-          onSuccess: () => {
-            resetDetailCache();
-            const url = new URL(window.location.href);
-            const id  = url.searchParams.get('id');
-            const tab = url.searchParams.get('tab');
-            if (id) renderDetailView(rootEl, { id, tab, profile: null });
-          },
-        });
+        openEditCustomerModal({ customer, onSuccess: refreshDetail });
+      } else if (action === 'archive' || action === 'unarchive') {
+        openArchiveCustomerModal({ customer, mode: action, onSuccess: refreshDetail });
       } else {
         K().toast('Deze actie komt in een volgende PR-C.');
       }
