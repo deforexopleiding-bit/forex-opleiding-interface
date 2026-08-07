@@ -22,13 +22,31 @@
 ## Fundament (geen module, wél voorwaarde)
 
 Fase 0 uit REDESIGN-BOUWPLAN — sinds gemerged / in-progress:
-- **PR 0-A** ✅ gemerged: bouwplan + prototype in de repo (main = 3085227)
-- **PR 0-B1** 👉 open (#1118): tokens.css prototype-pariteit
-- **PR 0-B2** wachtend: app-shell primitives + demo-harness (sidebar/topbar/tab-balk/paneel/modal + `openPanel/closePanel/stepRow`, rol-render uit `MODS` + `TAB_RESTRICT` + `MOD_LOCK`, dark-mode toggle, mobiel 100dvh/safe-area/off-canvas)
+- **PR 0-A** ✅ gemerged: bouwplan + prototype in de repo
+- **PR 0-B1** ✅ gemerged: `tokens.css` prototype-pariteit
+- **PR 0-B2** 👉 volgend: app-shell primitives + demo-harness — sidebar/topbar/tab-balk/paneel/modal + `openPanel/closePanel/stepRow`, rol-render uit `MODS` + `TAB_RESTRICT` + `MOD_LOCK`, dark-mode toggle, mobiel `100dvh`/`env(safe-area-inset-bottom)`/off-canvas sidebar, grid-stacking ≤760px
 - **PR 0-C** wachtend: klanten-v2 aanhaken op shared shell (haakt oude eigen sidebar/topbar eruit)
 - **PR 0-D** wachtend: `user_roles` many-to-many activeren + auth-helpers migreren + RLS-basis + `admin`/`administratie`/`viewer` opruimen (SYSTEEMKAART Bijlage 2)
+- **PR 0-E** 🆕 wachtend: **softphone-extract** — `modules/shared/klx-softphone.js` met publieke API (Bijlage 4 SYSTEEMKAART). Verhuisd uit Klanten en Follow-up naar fundament omdat 4 consumenten hetzelfde script laden (Klanten/Follow-up/Events/Mentoren voor bel-taken).
 
-**Sub-totaal fundament: 5 PR's** (waarvan 1 gemerged, 1 in review, 3 nog te bouwen).
+**Sub-totaal fundament: 6 PR's** (2 gemerged, 4 nog te bouwen).
+
+### Wat CENTRAAL in Fase 0 landt (voor alle latere re-skins)
+
+Deze bouwstenen komen één keer in Fase 0 en worden NIET herhaald per module. Zo blijven de module-re-skins puur markup + module-specifieke logica:
+
+| Bouwsteen | Landt in | Consequentie voor module-PR's |
+|---|---|---|
+| Design-tokens (8 accents, 3 varianten, dark) | 0-B1 ✅ | Modules gebruiken `var(--<accent>)` — geen eigen kleuren |
+| App-shell (sidebar/topbar/tab-balk/paneel/modal + JS helpers) | 0-B2 | Modules leveren alleen content in de shell-slot — geen eigen sidebar |
+| Bouwstenen (`kpi/card/pill/table/toolbar/chips/switch/segmented/progress/hbar/funnel/targetGauge/areaChart/dualChart/timeline`) | 0-B2 | Modules importeren als partials — geen eigen `<table>`-styling |
+| Rol-gestuurde nav (`MODS`/`TAB_RESTRICT`/`MOD_LOCK` interpretatie) | 0-B2 | Modules registreren zich in `MODS`, shell doet zichtbaarheid |
+| Dark-mode toggle (`data-theme` + localStorage, GEEN prefers-color-scheme) | 0-B2 | Modules gebruiken tokens die auto-switchen |
+| Mobiele fundamenten (`100dvh`, `env(safe-area-inset-bottom)`, off-canvas sidebar + scrim, grid-stacking ≤760px) | 0-B2 | Modules mogen aannemen dat de shell mobiel-safe is; alleen inline-grids ≤760px overschrijven |
+| Softphone-primitieve (`window.KlxSoftphone.open/hangup/isActive/getConfig/onStateChange`) | 0-E | Modules met bel-actie roepen `KlxSoftphone.open(customer)` aan — geen eigen SIP-integratie |
+| `user_roles` many-to-many + `verifyAdmin`/`requirePermission`-migratie | 0-D | Modules doen `RBAC.canSync(key)` — architectuur ondersteunt additieve rollen |
+
+**Contract voor elke module-PR na Fase 0**: als je eigen tokens/mobiele-media/dark-mode-CSS/shell/nav-code toevoegt in een module-PR → PR gaat retour. Alles wat gedeeld is, hoort centraal.
 
 ---
 
@@ -45,18 +63,19 @@ Fase 0 uit REDESIGN-BOUWPLAN — sinds gemerged / in-progress:
 
 **Type**: `[re-skin + nieuwe UI-feature]` — rol-specifieke inhoud consolideren in één `/index.html`; huidige rol-landings verhuizen naar archief.
 
-**Wat ontbreekt**:
-- Rol-specifieke render-tak voor **marketing** (kanaalstats/postplanner-preview) — nieuwe data.
-- Rol-specifieke render-tak voor **sales** (persoonlijk dashboard) — kan bestaande sales-widgets hergebruiken.
-- "Vereist actie"-strip + postvakken die filteren op modules-die-de-rol-mag-openen (kruis-module-fetches).
-- Reiskosten-herinnering-blok in mentor-tak (zie module 12 Verdiensten).
+**Wat ontbreekt** — per rol een render-tak:
+- **sales-tak**: pijplijn/op te volgen — linkt naar Sales/Follow-up/Klanten
+- **mentor-tak**: agenda/aandacht-leerlingen/voortgang + onboarding-sectie + reiskosten-herinnering — linkt naar Studenten/Verdiensten/Onboarding
+- **manager+SA-tak**: bedrijfsbreed dashboard, "vereist actie"-strip + postvakken — linkt naar Leads/Wanbetalers/Klanten/Finance/Follow-up/Events
+- **marketing-tak**: kanaalstats + postplanner-preview — linkt naar Meta Ads/Nieuwsbrief/Leads
 
-**PR-schatting: 3 PR's**
-1. `dashboard-v2 skelet + manager+SA-tak` — nieuwe `index.html` met kaartenraster, hergebruikt bestaande stats-endpoints.
-2. `dashboard-v2 sales + mentor-taken` — 2 rol-varianten.
-3. `dashboard-v2 marketing-placeholder + sales-proof filtering` — filter dode links per rol.
+**PR-schatting: 4 PR's** — bewust opgesplitst per rol-tak zodat **elke tak pas komt na de modules waar hij naar linkt** (voorkomt dode knoppen):
+1. `dashboard-v2 shell + sales-tak` — komt **na Fase 2** (Sales+Finance klaar).
+2. `dashboard-v2 mentor-tak` — komt **na Fase 3** (Studenten+Verdiensten+Mentoren+Onboarding klaar).
+3. `dashboard-v2 manager+SA-tak` — komt **na Fase 5** (Wanbetalers+alle werkschermen klaar).
+4. `dashboard-v2 marketing-tak (placeholder + kanaalstats)` — komt **na Fase 8** (Nieuwsbrief klaar).
 
-**Risico's**: bestaande `super-admin-dashboard.html` / `sales-dashboard.html` / `mentor-home.html` blijven live tot deze 3 PR's mergen, dan naar archief-batch. Beschermde zone niet relevant.
+**Risico's**: bestaande `super-admin-dashboard.html` / `sales-dashboard.html` / `mentor-home.html` blijven live tot alle 4 PR's mergen. Sales-tak-PR (fase 2) mag al `ROLE_LANDING` in `supabase-client.js` bijwerken voor sales-rol; overige rol-landings verhuizen wanneer hun eigen tak-PR mergedt. Beschermde zone niet relevant.
 
 ---
 
@@ -122,12 +141,11 @@ Fase 0 uit REDESIGN-BOUWPLAN — sinds gemerged / in-progress:
 **Wat ontbreekt**:
 - Klanten-v2 PR-B (dossier + 7 tabs) — 149 items uit INVENTARIS.
 - Klanten-v2 PR-C (6 modals: create/edit klant, archiveer, dupliceer, bulk-tag, bulk-archiveer, koppel-bedrijf) — 26 items uit INVENTARIS.
-- Softphone-extract naar `modules/shared/klx-softphone.js` (verplicht per SYSTEEMKAART Bijlage 4 — task_id 0a709a12 al gespawnd).
+- Softphone-integratie via `window.KlxSoftphone` (uit fundament-PR **0-E**).
 
-**PR-schatting: 3 PR's**
-1. Klanten-v2 **PR-B** (dossier-orchestrator + 7 tabs) — hergebruik alle bestaande endpoints.
-2. Klanten-v2 **PR-C** (6 modals).
-3. **Softphone-extract** (shared/klx-softphone.js) — met eigen video-bewijs (Bijlage 4 spec).
+**PR-schatting: 2 PR's**
+1. Klanten-v2 **PR-B** (dossier-orchestrator + 7 tabs) — hergebruik alle bestaande endpoints + `KlxSoftphone.open()` in dossier-header.
+2. Klanten-v2 **PR-C** (6 modals + rij-actie "Bel" via `KlxSoftphone.open()` in lijst-view).
 
 **Risico's**: `modules/klanten.html` blijft live tot alle 3 gemerged + Sales-Klanten-tab overzet. Beschermde zone niet relevant.
 
@@ -235,14 +253,13 @@ Fase 0 uit REDESIGN-BOUWPLAN — sinds gemerged / in-progress:
 
 **Wat ontbreekt**:
 - Nieuwe HTML/CSS die alle 8 tabs matcht prototype.
-- Softphone-hook naar shared `KlxSoftphone` (deel Bijlage 4).
+- Softphone-consumatie via `window.KlxSoftphone.open()` in Werklijst-belkaart (shared uit fundament **0-E**).
 
-**PR-schatting: 5 PR's** (te groot voor 1 PR — file is 12k regels)
-1. `follow-up-v2 shell + Werklijst-tab (master-detail split + belkaart + uitkomst-panel)`.
+**PR-schatting: 4 PR's** (te groot voor 1 PR — file is 12k regels)
+1. `follow-up-v2 shell + Werklijst-tab (master-detail split + belkaart + uitkomst-panel + KlxSoftphone-integratie)`.
 2. `follow-up-v2 Event-bellijst + Opvolglijst`.
 3. `follow-up-v2 Retenties + Afspraken + Sluimerpot`.
 4. `follow-up-v2 Statistieken + Afgeboekt`.
-5. `follow-up-v2 Softphone shared-hook + `KlxSoftphone`-integratie`.
 
 **Risico's**: outcome-motoren NIET consolideren (source-comments). Softphone-extract raakt Klanten-v2 (module 4) — één shared klx-softphone.js.
 
@@ -311,19 +328,20 @@ Fase 0 uit REDESIGN-BOUWPLAN — sinds gemerged / in-progress:
 - Storage-bucket `funded-certificates`.
 - Tabel `mentor_travel_days` (bestaat), `mentor_funded_certificates` (bestaat, €100/certificaat), `mentor_payouts`.
 
-**Type**: `[re-skin + nieuwe UI-feature]` — grotendeels bestaand. Nieuw: **reiskosten-dag-model** (mentor voert rijdagen in, × dagbedrag → uitbetaling). Prototype specificeert automatische vraag "hoeveel dagen gereden vorige maand" rond eerste vrijdag.
+**Type**: `[re-skin + nieuwe weergave]` — **de backend/data voor reiskosten (dagmodel) én certificaten (€100 per goedgekeurd) bestaat al**. Alleen de UI-weergave in de mentor-eigen module ontbreekt.
 
-**Wat ontbreekt**:
-- Automatische reiskosten-prompt op eerste vrijdag maand (nieuw — cron + notification).
-- Dagbedrag-veld per mentor (nieuw kolom `mentoren.dagbedrag` — er staat wel `mentor_payout_config.travel_day_rate_incl` maar moet gemapt).
-- Reiskosten-tab als losstaand (nu subtab van Verdiensten).
-- Certificaten-tab in de mentor-eigen module (upload al werkt via mentor-students; hier ook toegankelijk maken).
+**Wat ontbreekt** — puur UI, geen nieuwe tabellen:
+- Reiskosten-tab als losstaand (nu sub-tab van Verdiensten in mentor-dashboard). Backend: `mentor_travel_days`-tabel + `mentor-travel-days-save`/`-self`-endpoints bestaan. `mentor_payout_config.travel_day_rate_incl` = het dagbedrag per mentor.
+- Certificaten-tab in de mentor-eigen module. Backend: `mentor_funded_certificates`-tabel + `mentor-funded-cert-save`-endpoint + storage-bucket `funded-certificates` + `RATE_FUNDED = €100` in `computeCoachingEarnings` bestaan.
+- Automatische reiskosten-herinnering op eerste vrijdag maand (nieuw — cron + notification). **Kan later als aparte PR** — niet-blokkerend voor Fase 3.
 
-**PR-schatting: 4 PR's**
+**PR-schatting: 3 PR's**
 1. `verdiensten-v2 shell + Overzicht + Uitbetalingen (re-skin uit mentor-dashboard)`.
-2. `verdiensten-v2 Reiskosten-tab + dag-model UI` — hergebruikt bestaande `mentor-travel-days-self`.
-3. `verdiensten-v2 Certificaten-tab (mentor-eigen upload-view)` — dubbelt met mentor-students; consolideren of scheiden.
-4. `verdiensten-v2 reiskosten-cron + notification` — eerste-vrijdag-trigger, gebruikt `notify.js` fan-out.
+2. `verdiensten-v2 Reiskosten-tab + dag-model UI` — hergebruikt bestaande `mentor-travel-days-save` + `mentor_payout_config.travel_day_rate_incl`.
+3. `verdiensten-v2 Certificaten-tab (mentor-eigen upload-view)` — hergebruikt bestaande `mentor-funded-cert-save` + storage-bucket. Dubbelt met mentor-students; consolideren of scheiden — voorstel: scheiden per doel (student-context vs mentor-eigen).
+
+**Optionele latere PR** (uit fase-count):
+- `verdiensten reiskosten-cron + notification` — eerste-vrijdag-trigger, gebruikt bestaande `notify.js` fan-out. Klein, staat los, niet in de Fase 3 build-lijst.
 
 **Risico's**: mentor-payout write-endpoints staan onder mentor-admin-scope (`mentor.payout.manage`). Self-scope endpoints (`mentor-payouts-list-self`, `mentor-travel-days-save`) blijven.
 
@@ -399,11 +417,11 @@ Fase 0 uit REDESIGN-BOUWPLAN — sinds gemerged / in-progress:
 - `mentoren-beheer.html` (iframe-hub met 5 tabs), `mentor-detail.html`, `mentor-payouts-admin.html`, `funded-certificates-admin.html`, `student-assessments-admin.html`, `mentor-cash-trajects-admin.html`, `students-overview.html`.
 - 93 `api/mentor-*.js`-endpoints.
 
-**Type**: `[re-skin + nieuwe UI-feature]` — 6 tabs. Overzicht krijgt **per-mentor reiskosten-toggle + bedrag/dag** (nieuw UI-veld). Certificaten krijgt **download-knop** (bestaat al deels — bekijken/goedkeuren wel).
+**Type**: `[re-skin + nieuwe weergave]` — 6 tabs. Overzicht krijgt **per-mentor reiskosten-toggle + bedrag/dag** (bestaande `mentor_payout_config.travel_enabled` + `travel_day_rate_incl` — geen nieuwe kolommen). Certificaten krijgt **download-knop** (Storage signed-URL en admin-list-endpoint bestaan al; alleen UI-knop ontbreekt).
 
-**Wat ontbreekt**:
-- `mentoren.reiskosten` (bool) + `mentoren.dagbedrag` (int) — er is een `mentor_payout_config`-tabel die dit al doet; UI-mapping ontbreekt.
-- Certificaten-download-knop (Storage signed-URL al beschikbaar).
+**Wat ontbreekt** — puur UI, geen nieuwe tabellen:
+- UI-mapping voor `mentor_payout_config.travel_enabled` + `travel_day_rate_incl` in Overzicht-tab (schrijf via bestaande `mentor-payout-config-set`).
+- Download-knop in Certificaten-tab (bestaande signed-URL uit `funded-certs-admin-list`).
 
 **PR-schatting: 6 PR's**
 1. `mentoren-v2 shell + Overzicht-tab (reiskosten-toggle + bedrag/dag)`.
@@ -624,23 +642,23 @@ Fase 0 uit REDESIGN-BOUWPLAN — sinds gemerged / in-progress:
 
 ## Totaaltelling
 
-### PR's per module (geschat)
+### PR's per module (bijgewerkt na consolidaties)
 
 | # | Module | Type | PR's | Complexiteit |
 |---|---|---|---|---|
-| Fundament | Fase 0 (A/B1/B2/C/D) | fundament | **5** | hoog (rol-migratie) |
-| 1 | Dashboard | re-skin+ | 3 | hoog (4 rol-varianten) |
+| Fundament | Fase 0 (A/B1/B2/C/D/E) | fundament | **6** | hoog (incl. softphone-extract + rol-migratie) |
+| 1 | Dashboard | re-skin+ | 4 | hoog (4 rol-taken, verspreid over fases) |
 | 2 | Inbox | nieuw op bestaande data | 2 | midden |
 | 3 | Takenbeheer | re-skin+ | 4 | midden-hoog (nieuwe schema's) |
-| 4 | Klanten | re-skin+ | 3 | midden (klanten-v2 loopt al) |
+| 4 | Klanten | re-skin+ | 2 | midden (klanten-v2 loopt al; softphone naar 0-E) |
 | 5 | Studenten | re-skin | 2 | laag (kan wachten op LMS) |
 | 6 | Wanbetalers | re-skin (BESCHERMD) | **4** | hoog (contract per PR) |
 | 7 | E-mail | re-skin | 3 | midden (grote file) |
 | 8 | Tickets | re-skin+ | 2 | laag |
-| 9 | Follow-up | re-skin | **5** | hoog (12k regels) |
+| 9 | Follow-up | re-skin | 4 | hoog (12k regels; softphone naar 0-E) |
 | 10 | Sales | re-skin+ | 4 | hoog (INVENTARIS 216) |
 | 11 | Finance | re-skin+ | 5 | hoog (INVENTARIS 227) |
-| 12 | Mijn verdiensten | re-skin+ | 4 | midden |
+| 12 | Mijn verdiensten | re-skin+ | 3 | midden (cron optioneel losstaand) |
 | 13 | LMS | inhangen | 0 | nul (in shell PR 0-B2) |
 | 14 | Events | re-skin | 4 | hoog (5 files) |
 | 15 | Onboarding | re-skin | 3 | midden |
@@ -656,71 +674,85 @@ Fase 0 uit REDESIGN-BOUWPLAN — sinds gemerged / in-progress:
 | 25 | Binnenkort | nieuw op bestaande data | 1 | laag |
 | **Totaal** |  |  | **83 PR's** | |
 
+**Netto delta t.o.v. eerste map** (was 84, is 83):
+- +1 fundament (softphone-extract 0-E gebundeld)
+- −1 klanten (softphone weg uit module)
+- −1 follow-up (softphone weg uit module)
+- −1 verdiensten (reiskosten-cron losgekoppeld als optionele latere PR — geen nieuwe data-eis)
+- +1 dashboard (rol-tak-split over 4 fases i.p.v. 3 gebundeld)
+- Netto: **−1**
+
 ### Splitsing type
 
 | Type | PR's | % |
 |---|---|---|
-| Fundament (Fase 0) | 5 | 6% |
-| Pure re-skin | 26 | 31% |
-| Re-skin + UI-feature | 30 | 36% |
+| Fundament (Fase 0) | 6 | 7% |
+| Pure re-skin | 25 | 30% |
+| Re-skin + UI-feature | 31 | 38% |
 | Nieuw scherm op bestaande data | 15 | 18% |
-| Nieuw scherm + nieuwe data | 7 | 8% |
+| Nieuw scherm + nieuwe data | 5 | 6% |
 | Inhangen in shell | 0 | (LMS zit in shell-PR) |
 
-**Kern-inzicht**: 68% (56 PR's) zijn pure re-skin of re-skin+UI. 32% (27 PR's) is echt nieuw werk (fundament + nieuwe schermen/data). Kluft van 83 klinkt veel, maar de meerderheid is voorspelbaar HTML/CSS-werk bovenop bestaande endpoints.
+**Kern-inzicht**: 68% (56 PR's) is pure re-skin of re-skin+UI bovenop bestaande endpoints/data. 32% (26 PR's) is echt nieuw werk (fundament + Nieuwsbrief + Inbox-aggregator + Automatiseringen-aggregator + Instellingen-shell + Binnenkort). Reiskosten dagmodel + certificaten zijn nu correct als re-skin+ geclassificeerd — backend bestaat al.
 
 ---
 
 ## Voorgestelde volgorde
 
-Volgt REDESIGN-BOUWPLAN §9 met specifieke bijstelling: kleine modules eerst binnen elke fase om momentum te houden.
+Regel: **elk rol-dashboard komt NA de modules waar het naar linkt** (voorkomt dode knoppen). Fundament + kleine modules eerst binnen elke fase om momentum te houden.
 
-### Fase 0 — Fundament (5 PR's, in-progress)
-0-A ✅ · 0-B1 👉 · 0-B2 · 0-C · 0-D
+### Fase 0 — Fundament (6 PR's)
+0-A ✅ · 0-B1 ✅ · 0-B2 · 0-C · 0-D · **0-E (softphone-extract)**
 
-### Fase 1 — Veilige nieuwe modules (7 PR's)
-- Klanten-v2 PR-B + PR-C + Softphone-extract (module 4 — 3 PR's)
+### Fase 1 — Klanten-v2 + Takenbeheer (6 PR's)
+- Klanten-v2 PR-B + PR-C (module 4 — 2 PR's, softphone al in 0-E)
 - Takenbeheer schema + 3 build-PR's (module 3 — 4 PR's)
 
-### Fase 2 — Sales & Finance (9 PR's)
+### Fase 2 — Sales & Finance (10 PR's)
 - Sales-v2 (4 PR's — module 10)
 - Finance-v2 (5 PR's — module 11)
+- **Dashboard sales-tak** (1 PR — module 1, tak 1/4) ← na Sales/Finance klaar
 
 ### Fase 3 — Mentor-rol compleet (12 PR's)
 - Studenten-v2 (2 PR's — module 5)
-- Verdiensten-v2 (4 PR's — module 12)
+- Verdiensten-v2 (3 PR's — module 12, reiskosten-cron als optionele latere PR)
 - Mentoren-v2 (6 PR's — module 16)
+- **Dashboard mentor-tak** (1 PR — module 1, tak 2/4) ← na Studenten+Verdiensten+Mentoren klaar
 
 ### Fase 4 — Events & Onboarding (7 PR's)
 - Events-v2 (4 PR's — module 14)
 - Onboarding-v2 (3 PR's — module 15)
 
-### Fase 5 — Wanbetalers re-skin + Lisa + Agents + Automatiseringen (13 PR's)
-- Wanbetalers-v2 (4 PR's — module 6, elk met contract-bewijs)
+### Fase 5 — Wanbetalers re-skin + Lisa + Agents + Automatiseringen + Manager-Dashboard (14 PR's)
+- Wanbetalers-v2 (4 PR's — module 6, elk met contract-bewijs lege diff-stat)
 - Lisa-v2 (3 PR's — module 20)
 - Agents-v2 (3 PR's — module 22)
 - Automatiseringen-v2 (3 PR's — module 21)
+- **Dashboard manager+SA-tak** (1 PR — module 1, tak 3/4) ← na alle werkschermen klaar
 
 ### Fase 6 — Instellingen + Communicatie + Toegangslog (7 PR's)
 - Instellingen-v2 (5 PR's — module 24)
 - Toegangslog-v2 (2 PR's — module 23)
 
-### Fase 7 — Kleine modules + Marketing (13 PR's)
-- Dashboard-v2 (3 PR's — module 1)
+### Fase 7 — Kleine modules + Leadsonderhoud (13 PR's)
 - Inbox-v2 (2 PR's — module 2)
 - E-mail-v2 (3 PR's — module 7)
 - Tickets-v2 (2 PR's — module 8)
-- Leadsonderhoud-v2 (3 PR's — module 19)
-
-### Fase 8 — Follow-up + Leads + Nieuwsbrief + Binnenkort (11 PR's)
-- Follow-up-v2 (5 PR's — module 9, grootste file)
+- Follow-up-v2 (4 PR's — module 9, grootste file)
 - Leads-v2 (2 PR's — module 17)
+
+### Fase 8 — Groei + Marketing (8 PR's)
+- Leadsonderhoud-v2 (3 PR's — module 19)
 - Nieuwsbrief-v2 (3 PR's — module 18)
 - Binnenkort-v2 (1 PR — module 25)
+- **Dashboard marketing-tak** (1 PR — module 1, tak 4/4) ← na Nieuwsbrief klaar
 
 ### Loose ends
 - Marketing-rol grants aan Meta Ads / Creative Studio / etc. — komen mee met Binnenkort-PR (module 25).
 - Bekende bugs uit REDESIGN-BOUWPLAN §8 (25 dunning-runs, reminder-cirkel-bug, Muno-reactie, WA template-variabelen, intent-key-consolidatie) — behoren tot Fase 7+ als aparte bug-PR's (buiten module-count).
+- Optionele latere PR's die niet blokkerend zijn: reiskosten-cron + notification (module 12), Follow-up cron-fix WA-lijn (module 19 bug-tag).
+
+**Fase-totalen**: 6 + 6 + 10 + 12 + 7 + 14 + 7 + 13 + 8 = **83 PR's**. Consistent met de module-tabel (Dashboard-4-taken zijn over 4 fases verdeeld i.p.v. samen in één fase).
 
 ---
 
