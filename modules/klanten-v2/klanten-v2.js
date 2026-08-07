@@ -108,28 +108,11 @@ window.KV = {
   $, esc, toast, authedFetch, authedJson, renderAvatar, initials,
 };
 
-// ── Rol-mapping Supabase -> DFO ─────────────────────────────────────────────
-// DFO shell (modules/shared/design-system/app-shell.js) kent 6 rollen:
-//   super_admin / manager / sales / mentor / marketing / administratie
-// De Supabase profiles-tabel gebruikt daarnaast 'admin' en 'viewer' die
-// beide op leesbeperking van manager landen — 'admin' behandelen we als
-// full super_admin (huidige RBAC-praktijk), 'viewer' als administratie
-// (leest, mutatie-endpoints zijn RBAC-geleerd).
-function mapRoleForShell(supabaseRole) {
-  const map = {
-    super_admin:   'super_admin',
-    admin:         'super_admin',
-    manager:       'manager',
-    sales:         'sales',
-    mentor:        'mentor',
-    marketing:     'marketing',
-    administratie: 'administratie',
-    viewer:        'administratie',
-  };
-  return map[String(supabaseRole || '').toLowerCase()] || 'super_admin';
-}
-
 // ── Auth-gate ─────────────────────────────────────────────────────────────────
+// Rol-mapping Supabase -> DFO is sinds PR 0-D gecentraliseerd in
+// modules/shared/design-system/roles.js (window.DFORoles) en de spiegel
+// api/_lib/roles.js. Deze module gebruikt window.DFORoles.fetchEffectiveRoles()
+// + window.DFO.setRoles() — geen eigen mapping meer.
 
 async function initAuth() {
   if (!window._authSharedReady) {
@@ -285,10 +268,26 @@ function wireTopbarSearch() {
   window.__kvAuthCtx = profile;
   if (!profile) return;
 
-  // 4) Rol zetten in DFO shell (rendert dashboard-default of eerste zichtbare
-  //    module). Direct daarna forceren we klanten als actieve module.
-  const dfoRole = mapRoleForShell(profile.role);
-  window.DFO.setRole(dfoRole);
+  // 4) Rollen zetten in DFO shell (rendert dashboard-default of eerste
+  //    zichtbare module). We halen de EFFECTIEVE rollen op (union van
+  //    profiles.role + user_roles) zodat iemand met bv. mentor+marketing
+  //    beide module-sets in de nav ziet. Fallback op profile.role als het
+  //    endpoint faalt (offline / netwerkfout) — dan werkt de shell nog
+  //    steeds, alleen zonder de additieve rollen.
+  let shellRoles = null;
+  if (window.DFORoles && typeof window.DFORoles.fetchEffectiveRoles === 'function') {
+    const eff = await window.DFORoles.fetchEffectiveRoles();
+    if (eff && Array.isArray(eff.shell_roles) && eff.shell_roles.length) {
+      shellRoles = eff.shell_roles;
+    }
+  }
+  if (!shellRoles) {
+    const fallback = (window.DFORoles && window.DFORoles.pickShellRoles)
+      ? window.DFORoles.pickShellRoles([profile.role])
+      : [String(profile.role || 'super_admin').toLowerCase()];
+    shellRoles = fallback.length ? fallback : ['super_admin'];
+  }
+  window.DFO.setRoles(shellRoles);
   window.DFO.goMod('klanten');
 
   // 5) Vervang shell-sidebar user-persona met échte Supabase-user.
