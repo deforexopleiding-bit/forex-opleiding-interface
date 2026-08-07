@@ -958,6 +958,68 @@
   .kv-invsend-preview-inp { font-size: 16px; }
 }
 
+/* ═══ Factuur-crediteren-modal (PR-D5) — full-credit only, typ-gate ═══════ */
+
+.kv-invcredit-notice-warn {
+  background: var(--amber-soft, var(--surface-2));
+  border: 1px solid var(--amber-line, var(--border));
+  border-left-color: var(--amber, #f59e0b);
+}
+.kv-invcredit-notice-warn svg { color: var(--amber, #f59e0b); }
+
+.kv-invcredit-type {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 10px 14px; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+.kv-invcredit-type-l {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--text-3); min-width: 60px; padding-top: 4px;
+}
+.kv-invcredit-type-v { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.kv-invcredit-type-hint { font-size: 12px; color: var(--text-3); }
+
+.kv-invcredit-warn-partial {
+  display: flex; gap: 10px;
+  padding: 10px 12px;
+  background: var(--rose-soft, var(--surface-2));
+  border: 1px solid var(--rose-line, var(--border));
+  border-left: 3px solid var(--rose, #e11d48);
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  color: var(--text);
+}
+.kv-invcredit-warn-partial svg { width: 18px; height: 18px; color: var(--rose, #e11d48); flex-shrink: 0; margin-top: 1px; }
+
+.kv-invcredit-typegate {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px dashed var(--rose-line, var(--border));
+  border-radius: var(--r-sm);
+}
+.kv-invcredit-typegate label { font-size: 13px; color: var(--text-2); }
+.kv-invcredit-typegate label .mono {
+  background: var(--surface); padding: 1px 6px; border-radius: 3px;
+  border: 1px solid var(--border); font-weight: 600;
+}
+.kv-invcredit-typegate input {
+  padding: 10px 12px; font-size: 15px; font-family: 'IBM Plex Mono', monospace;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm);
+  color: var(--text);
+}
+.kv-invcredit-typegate input:focus {
+  outline: none; border-color: var(--rose, #e11d48);
+  box-shadow: 0 0 0 2px var(--rose-soft, var(--m-soft));
+}
+.kv-invcredit-typegate .kv-edit-field-msg { color: var(--rose, #e11d48); font-size: 12px; }
+
+@media (max-width: 760px) {
+  .kv-invcredit-type { flex-direction: column; gap: 4px; }
+  .kv-invcredit-type-l { min-width: 0; padding-top: 0; }
+  .kv-invcredit-typegate input { font-size: 16px; }
+}
+
 /* ═══ Audit-tab (PR-B6, read-only) ═════════════════════════════════════════ */
 
 .kv-aud { display: flex; flex-direction: column; gap: 14px; }

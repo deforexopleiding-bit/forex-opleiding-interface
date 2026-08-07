@@ -13,6 +13,7 @@ import { openInvoiceDetailModal } from '../modals/invoice-detail.js';
 import { openInvoiceUpdateModal } from '../modals/invoice-update.js';
 import { openInvoicePaymentModal } from '../modals/invoice-payment.js';
 import { openInvoiceSendModal } from '../modals/invoice-send.js';
+import { openInvoiceCreditModal } from '../modals/invoice-credit.js';
 
 const K = () => window.KV;
 
@@ -237,7 +238,10 @@ function wire(rootEl) {
         invoice:   i,
         onSuccess: () => actLoad(rootEl),
       }),
-      onCredit: (i) => K().toast(`Crediteren volgt in PR-D5 (${i.invoice_number || i.id.slice(0,8)})`),
+      onCredit: (i) => openInvoiceCreditModal({
+        invoice:   i,
+        onSuccess: () => actLoad(rootEl),
+      }),
     });
   };
   rootEl.querySelectorAll('[data-kv-fac-open]').forEach((row) => {
