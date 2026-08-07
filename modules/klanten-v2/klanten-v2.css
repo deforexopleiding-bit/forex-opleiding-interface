@@ -1020,6 +1020,59 @@
   .kv-invcredit-typegate input { font-size: 16px; }
 }
 
+/* ═══ Factuur-nieuw-modal (PR-D6) — draft-first, 3 acties, confirm-overlay ═ */
+
+.kv-invnew-h-err {
+  font-size: 11.5px; color: var(--rose, #e11d48); font-weight: 500;
+  margin-left: 8px;
+}
+.kv-invnew-foot { justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.kv-invnew-foot-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Middelste actie (book) = niet-primary maar toch destructive-hint */
+.kv-invnew-btn-danger-soft {
+  background: var(--surface);
+  color: var(--rose, #e11d48);
+  border-color: var(--rose, #e11d48);
+}
+.kv-invnew-btn-danger-soft:hover:not(:disabled) {
+  background: var(--rose-soft, var(--surface-2));
+}
+
+/* Confirm-overlay boven de form (in-modal, geen 2e DFO-modal) */
+.kv-invnew-overlay {
+  position: absolute; inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(2px);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 40px 20px;
+  z-index: 5;
+  overflow-y: auto;
+}
+:root[data-theme="dark"] .kv-invnew-overlay { background: rgba(0, 0, 0, 0.55); }
+.kv-invnew-overlay-inner {
+  width: 100%; max-width: 520px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg, 0 12px 40px rgba(0, 0, 0, 0.2));
+  padding: 18px 20px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+/* Zodat overlay t.o.v. modal-body positioneert */
+#dfoModalBody { position: relative; }
+
+.kv-invnew-tpl-preview {
+  margin-top: 6px; padding: 8px 10px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--r-sm); font-size: 12.5px; color: var(--text-2);
+}
+
+@media (max-width: 760px) {
+  .kv-invnew-foot-actions { width: 100%; flex-direction: column; }
+  .kv-invnew-foot-actions .ds-btn { width: 100%; justify-content: center; }
+  .kv-invnew-overlay { padding: 20px 12px; }
+}
+
 /* ═══ Audit-tab (PR-B6, read-only) ═════════════════════════════════════════ */
 
 .kv-aud { display: flex; flex-direction: column; gap: 14px; }

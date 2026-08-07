@@ -14,6 +14,7 @@ import { openInvoiceUpdateModal } from '../modals/invoice-update.js';
 import { openInvoicePaymentModal } from '../modals/invoice-payment.js';
 import { openInvoiceSendModal } from '../modals/invoice-send.js';
 import { openInvoiceCreditModal } from '../modals/invoice-credit.js';
+import { openInvoiceCreateModal } from '../modals/invoice-create.js';
 
 const K = () => window.KV;
 
@@ -35,6 +36,7 @@ let state = null;
 function initState(customer) {
   state = {
     customerId: customer?.id || null,
+    customer,                          // volledige customer-obj — nodig voor D6 "Nieuwe factuur"
     items: [], kpis: null, total: 0,
     loading: true, error: null,
   };
@@ -207,6 +209,10 @@ function render(rootEl) {
           Facturen
           <span class="kv-prof-count">${state.loading ? '…' : state.items.length}</span>
         </div>
+        <button type="button" class="ds-btn ds-btn-primary ds-btn-sm" data-kv-fac-new title="Nieuwe factuur voor deze klant">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Nieuwe factuur
+        </button>
       </div>
       ${body}
     </div>`;
@@ -215,6 +221,12 @@ function render(rootEl) {
 
 function wire(rootEl) {
   rootEl.querySelector('[data-kv-fac-retry]')?.addEventListener('click', () => actLoad(rootEl));
+  rootEl.querySelector('[data-kv-fac-new]')?.addEventListener('click', () => {
+    openInvoiceCreateModal({
+      customer:  state.customer,
+      onSuccess: () => actLoad(rootEl),
+    });
+  });
   // Rij-klik → intern factuur-detail-modal (PR-D1). Vervangt de eerdere
   // externe hop naar /modules/finance.html#invoice-X zodat de dossier-
   // context blijft staan en de sub-modals (PR-D2..D5) allemaal in
