@@ -18,6 +18,7 @@
 
 import { openEditCustomerModal }  from '../modals/edit-customer.js';
 import { openLinkCompanyModal }   from '../modals/link-company.js';
+import { openTagEditModal }       from '../modals/tag-edit.js';
 import { resetDetailCache }       from '../detail.js';
 
 const K = () => window.KV;
@@ -337,10 +338,18 @@ function wire(rootEl, customer, dossier) {
       });
     });
   });
-  // Tags-edit → nog placeholder-toast tot PR-C5 (tag-modal).
+  // Tags-edit (PR-C5) → opent tag-beheer-modal. onSuccess: cache-reset
+  // + DFO.render() zodat de tags-chips in de sidebar én de tags-filter
+  // in de list-view (bij terug-navigatie) actueel zijn.
   rootEl.querySelectorAll('[data-kv-tags-edit]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      K().toast('Tag-bewerken komt in een volgende PR-C.');
+      openTagEditModal({
+        customer,
+        onSuccess: () => {
+          resetDetailCache();
+          if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+        },
+      });
     });
   });
 
