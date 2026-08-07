@@ -99,6 +99,28 @@ export function isAanmaningSendSuccess(stepResult) {
   return evt === 'email_sent' || evt === 'whatsapp_sent';
 }
 
+/**
+ * True als deze step-exec de trigger is om de WIK-brief automatisch te
+ * genereren: een SUCCESVOL verzonden WhatsApp-bericht (log_event
+ * 'whatsapp_sent') op een stap die daarvoor expliciet is aangewezen via
+ * config.auto_generate_brief = true.
+ *
+ * Bewust op een config-vlag i.p.v. een hardcoded step_order/template_id: de
+ * stappen zijn al eens hernummerd (belmomenten-migratie), dus de vlag is de
+ * stabiele, expliciete aanwijzing (gezet via DB-doc op de dag-17-WhatsApp).
+ * Dubbel-gate op step_type='whatsapp' zodat een per ongeluk op de e-mailstap
+ * gezette vlag nooit vuurt.
+ *
+ * PURE — geen DB/HTTP, unit-testbaar.
+ */
+export function shouldAutoGenerateBrief(step, stepResult) {
+  if (!step || step.step_type !== 'whatsapp') return false;
+  if (step.config?.auto_generate_brief !== true) return false;
+  if (!stepResult || typeof stepResult !== 'object') return false;
+  if (stepResult.status !== 'ok') return false;
+  return String(stepResult.log_event || '') === 'whatsapp_sent';
+}
+
 export async function runEngine({ mode = 'cron', abortMs = 50_000, scope = 'production' } = {}) {
   const startedAt = Date.now();
   const result = {
@@ -1180,6 +1202,67 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
             }
           } catch (e) {
             console.warn('[dunning-engine] stage-hook engine_sent fail-soft:', run.customer_id, e?.message || e);
+          }
+        }
+
+        // ── Auto-genereer de WIK-brief bij de dag-17-WhatsApp ────────────────
+        // Wanneer de daarvoor aangewezen WhatsApp-stap (config.auto_generate_brief
+        // = true) succesvol is verzonden, zetten we EXACT dezelfde brief als de
+        // handmatige knop klaar in de brieven-tab (status 'aangemaakt') — via de
+        // gedeelde generator-core, met run_id als cyclus-sleutel. Dynamische
+        // import zodat pdfkit niet in de engine-hot-path laadt. Volledig
+        // FAIL-SOFT: een fout hier mag de dunning-run NOOIT breken.
+        if (shouldAutoGenerateBrief(currentStep, stepResult)) {
+          try {
+            // Dedup: bestaat er al een brief voor deze run (cyclus)? → skip.
+            const { data: bestaand } = await supabaseAdmin
+              .from('dunning_briefs')
+              .select('id')
+              .eq('run_id', run.id)
+              .limit(1)
+              .maybeSingle();
+            if (bestaand) {
+              await supabaseAdmin.from('dunning_log').insert({
+                run_id: run.id, step_id: currentStep.id,
+                event_type: 'brief_auto_skipped_exists',
+                payload: { brief_id: bestaand.id },
+              });
+            } else {
+              const { generatePreBriefForCustomer } = await import('./incasso-pre-brief-core.js');
+              const briefRes = await generatePreBriefForCustomer({
+                customerId: run.customer_id,
+                runId: run.id,
+                stepId: currentStep.id,
+                generatedByUserId: null, // systeem (cron) — geen ingelogde manager
+              });
+              if (briefRes.ok) {
+                // Core logt zelf 'incasso_pre_brief_sent' (met run_id + auto_generated:true).
+                console.log('[dunning-engine] WIK-brief auto-gegenereerd', {
+                  run_id: run.id, customer_id: run.customer_id, brief_id: briefRes.brief_id,
+                });
+              } else if (briefRes.code === 'ADDRESS_INCOMPLETE') {
+                // Adres-gap: NIET breken. Zichtbaar maken zodat het team 't adres aanvult.
+                await supabaseAdmin.from('dunning_log').insert({
+                  run_id: run.id, step_id: currentStep.id,
+                  event_type: 'brief_auto_skipped_no_address',
+                  payload: { missing_fields: briefRes.missing || [] },
+                });
+              } else if (briefRes.code === 'DUPLICATE_RUN_BRIEF') {
+                await supabaseAdmin.from('dunning_log').insert({
+                  run_id: run.id, step_id: currentStep.id,
+                  event_type: 'brief_auto_skipped_exists',
+                  payload: { reason: 'unique_race' },
+                });
+              } else {
+                await supabaseAdmin.from('dunning_log').insert({
+                  run_id: run.id, step_id: currentStep.id,
+                  event_type: 'brief_auto_generate_failed',
+                  payload: { code: briefRes.code || 'unknown', error: briefRes.error || null },
+                });
+              }
+            }
+          } catch (e) {
+            console.warn('[dunning-engine] auto-brief hook fail-soft:', run.customer_id, e?.message || e);
           }
         }
 

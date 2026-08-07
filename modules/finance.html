@@ -21718,6 +21718,7 @@
     error     : null,
     items     : [],
     counts    : { all: 0, aangemaakt: 0, gedownload: 0, verstuurd: 0 },
+    addressGap: [],
     status    : 'all',
     search    : '',
     selection : new Set(),
@@ -21747,6 +21748,8 @@
         <h1>Brieven</h1>
         <p>Alle aangemaakte WIK-brieven. Vink brieven aan om er meerdere in één keer te printen (1 printjob) of als verstuurd te markeren.</p>
       </div>
+
+      <div id="brvAddressGap"></div>
 
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
         <div class="brieven-pills" role="tablist" style="display:flex;gap:6px;flex-wrap:wrap">
@@ -21850,6 +21853,7 @@
       _brievenState.loading = false;
       _brievenState.items = Array.isArray(d.items) ? d.items : [];
       _brievenState.counts = d.counts || { all: 0, aangemaakt: 0, gedownload: 0, verstuurd: 0 };
+      _brievenState.addressGap = Array.isArray(d.address_gap_signals) ? d.address_gap_signals : [];
       // Cleanup selection — verwijder items die niet meer in de lijst staan.
       const validIds = new Set(_brievenState.items.map((i) => i.id));
       for (const id of Array.from(_brievenState.selection)) if (!validIds.has(id)) _brievenState.selection.delete(id);
@@ -21858,6 +21862,7 @@
       _brievenState.error = e?.message || 'Onbekende fout';
     }
     _brievenRenderCounts();
+    _brievenRenderAddressGap();
     _brievenRenderRows();
     _brievenUpdateBulkBar();
   }
@@ -21869,6 +21874,31 @@
       const k = el.getAttribute('data-brv-cnt');
       el.textContent = String(_brievenState.counts[k] || 0);
     });
+  }
+
+  // Waarschuwingsbanner: klanten waarvoor de engine de auto-WIK-brief oversloeg
+  // omdat het postadres onvolledig is (event brief_auto_skipped_no_address, nog
+  // onopgelost). Zichtbaar signaal zodat het team het adres aanvult.
+  function _brievenRenderAddressGap() {
+    const box = document.getElementById('brvAddressGap');
+    if (!box) return;
+    const gaps = Array.isArray(_brievenState.addressGap) ? _brievenState.addressGap : [];
+    if (!gaps.length) { box.innerHTML = ''; return; }
+    const rows = gaps.map((g) => {
+      const miss = (Array.isArray(g.missing_fields) && g.missing_fields.length)
+        ? ` <span style="color:var(--wbx-muted,#64748b)">— ontbreekt: ${esc(g.missing_fields.join(', '))}</span>` : '';
+      return `<li style="margin:2px 0">${esc(g.customer_name || '(onbekend)')}${miss}</li>`;
+    }).join('');
+    box.innerHTML = `
+      <div role="alert" style="border:1px solid var(--wbx-s-inc-bd,#fecaca);background:var(--wbx-s-inc-bg,#fef2f2);border-radius:8px;padding:12px 14px;margin-bottom:12px">
+        <div style="font-weight:700;color:var(--wbx-s-inc-tx,#dc2626);margin-bottom:6px">
+          <i class="ti ti-alert-triangle" style="margin-right:4px"></i>WIK-brief kon niet automatisch worden aangemaakt — adres ontbreekt (${gaps.length})
+        </div>
+        <div style="font-size:12.5px;color:var(--wbx-muted,#475569);margin-bottom:6px">
+          De aanmaningsflow bereikte de brief-stap, maar deze klant(en) hebben geen compleet postadres. Vul het adres aan in het klantdossier (TeamLeader-sync haalt 't binnen een uur op); de eerstvolgende cyclus maakt de brief dan automatisch aan.
+        </div>
+        <ul style="margin:0;padding-left:18px;font-size:13px">${rows}</ul>
+      </div>`;
   }
 
   function _brievenRenderRows() {

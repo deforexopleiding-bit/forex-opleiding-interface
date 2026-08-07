@@ -162,12 +162,67 @@ export default async function handler(req, res) {
       });
     }
 
+    // 7) Adres-gap-signalen: klanten waarvoor de engine de auto-WIK-brief
+    // oversloeg wegens onvolledig adres én waarvoor nog géén brief bestaat (dus
+    // nog onopgelost). Voedt de waarschuwingsbanner in het Brieven-overzicht,
+    // zodat het team het adres kan aanvullen. Volledig fail-soft.
+    let addressGapSignals = [];
+    try {
+      const { data: skipLogs } = await supabaseAdmin
+        .from('dunning_log')
+        .select('run_id, payload, created_at')
+        .eq('event_type', 'brief_auto_skipped_no_address')
+        .order('created_at', { ascending: false })
+        .limit(500);
+      const gapRunIds = Array.from(new Set((skipLogs || []).map((l) => l.run_id).filter(Boolean)));
+      // Opgelost = er bestaat inmiddels een brief voor die run.
+      const resolvedRuns = new Set();
+      if (gapRunIds.length > 0) {
+        const { data: briefsForRuns } = await supabaseAdmin
+          .from('dunning_briefs').select('run_id').in('run_id', gapRunIds);
+        for (const b of (briefsForRuns || [])) if (b.run_id) resolvedRuns.add(b.run_id);
+      }
+      // Run → customer (voor naam + dossierlink).
+      const runCustomer = new Map();
+      if (gapRunIds.length > 0) {
+        const { data: runsRows } = await supabaseAdmin
+          .from('dunning_workflow_runs').select('id, customer_id').in('id', gapRunIds);
+        for (const r of (runsRows || [])) runCustomer.set(r.id, r.customer_id);
+      }
+      // Klant-namen die nog niet in custById zitten alsnog laden.
+      const gapCustIds = Array.from(new Set(Array.from(runCustomer.values()).filter(Boolean)));
+      const missingCustIds = gapCustIds.filter((id) => !custById.has(id));
+      if (missingCustIds.length > 0) {
+        const { data: gapCusts } = await supabaseAdmin
+          .from('customers').select('id, first_name, last_name, company_name, is_company, email').in('id', missingCustIds);
+        for (const c of (gapCusts || [])) custById.set(c.id, c);
+      }
+      const seenRun = new Set();
+      for (const l of (skipLogs || [])) {
+        if (!l.run_id || seenRun.has(l.run_id)) continue; // desc-order → latest per run wint
+        seenRun.add(l.run_id);
+        if (resolvedRuns.has(l.run_id)) continue;         // brief bestaat inmiddels → opgelost
+        const custId = runCustomer.get(l.run_id) || null;
+        const c = custId ? custById.get(custId) : null;
+        addressGapSignals.push({
+          run_id        : l.run_id,
+          customer_id   : custId,
+          customer_name : c ? customerDisplayName(c, '(onbekend)') : '(onbekend)',
+          missing_fields: Array.isArray(l.payload?.missing_fields) ? l.payload.missing_fields : [],
+          at            : l.created_at,
+        });
+      }
+    } catch (e) {
+      console.warn('[dunning-briefs-list-all] address_gap_signals fail-soft:', e?.message || e);
+    }
+
     return res.status(200).json({
       items,
       count: items.length,
       total_before_search: filtered.length,
       capped: filtered.length > capped.length,
       counts,
+      address_gap_signals: addressGapSignals,
     });
   } catch (e) {
     console.error('[dunning-briefs-list-all]', e?.message || e);
