@@ -858,6 +858,106 @@
   .kv-invpay-open { flex-direction: column; align-items: flex-start; gap: 2px; }
 }
 
+/* ═══ Factuur-verzenden-modal (PR-D4) — twee-staps flow, rood in stap 2 ═══ */
+
+.kv-invsend-notice {
+  display: flex; gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--r-sm);
+  border-left-width: 3px;
+  border-left-style: solid;
+}
+.kv-invsend-notice svg { width: 20px; height: 20px; flex-shrink: 0; margin-top: 1px; }
+.kv-invsend-notice-t { font-size: 13.5px; margin-bottom: 3px; }
+.kv-invsend-notice-s { font-size: 12.5px; color: var(--text-2); line-height: 1.4; }
+.kv-invsend-notice-info {
+  background: var(--blue-soft, var(--surface-2));
+  border: 1px solid var(--blue-line, var(--border));
+  border-left-color: var(--blue, var(--m));
+}
+.kv-invsend-notice-info svg { color: var(--blue, var(--m)); }
+.kv-invsend-notice-danger {
+  background: var(--rose-soft, var(--surface-2));
+  border: 1px solid var(--rose-line, var(--border));
+  border-left-color: var(--rose, #e11d48);
+}
+.kv-invsend-notice-danger svg { color: var(--rose, #e11d48); }
+
+.kv-invsend-preview {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.kv-invsend-preview-row { display: flex; align-items: center; gap: 8px; }
+.kv-invsend-preview-l { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: .04em; min-width: 74px; }
+.kv-invsend-preview-inp {
+  flex: 1; padding: 5px 8px; font-size: 13px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm);
+  color: var(--text);
+}
+.kv-invsend-preview-body {
+  padding: 8px 10px; background: var(--surface); border: 1px solid var(--border-soft, var(--border));
+  border-radius: var(--r-sm); font-size: 12.5px; color: var(--text-2); line-height: 1.5;
+  max-height: 200px; overflow-y: auto;
+}
+.kv-invsend-preview-att {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text-3);
+}
+.kv-invsend-preview-att svg { width: 14px; height: 14px; }
+
+.kv-invsend-recap {
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  padding: 10px 14px; background: var(--surface);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.kv-invsend-recap-row {
+  display: flex; justify-content: space-between; gap: 12px;
+  font-size: 13px; padding: 3px 0;
+}
+.kv-invsend-recap-row span:first-child { color: var(--text-3); }
+
+.kv-invsend-confirm {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font-size: 13px;
+}
+.kv-invsend-confirm input { margin-top: 2px; width: 16px; height: 16px; flex-shrink: 0; cursor: pointer; }
+
+.kv-invsend-foot-danger .ds-btn-danger { background: var(--rose, #e11d48); color: #fff; border-color: var(--rose, #e11d48); }
+.kv-invsend-foot-danger .ds-btn-danger:hover:not(:disabled) { filter: brightness(0.95); }
+.kv-invsend-foot-danger .ds-btn-danger:disabled { opacity: .55; cursor: not-allowed; }
+
+.kv-invsend-banner-unknown {
+  border-left: 3px solid var(--amber, #f59e0b);
+  background: var(--amber-soft, var(--surface-2));
+}
+
+/* Spinner voor in-flight lock op destructive knop (D4/D5/D6) */
+.kv-inv-spinner {
+  display: inline-block;
+  width: 12px; height: 12px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: kv-inv-spin .7s linear infinite;
+  vertical-align: -2px;
+  margin-right: 4px;
+}
+@keyframes kv-inv-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 760px) {
+  .kv-invsend-preview-row { flex-direction: column; align-items: stretch; gap: 4px; }
+  .kv-invsend-preview-l { min-width: 0; }
+  .kv-invsend-preview-inp { font-size: 16px; }
+}
+
 /* ═══ Audit-tab (PR-B6, read-only) ═════════════════════════════════════════ */
 
 .kv-aud { display: flex; flex-direction: column; gap: 14px; }

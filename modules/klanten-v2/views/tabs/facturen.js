@@ -12,6 +12,7 @@
 import { openInvoiceDetailModal } from '../modals/invoice-detail.js';
 import { openInvoiceUpdateModal } from '../modals/invoice-update.js';
 import { openInvoicePaymentModal } from '../modals/invoice-payment.js';
+import { openInvoiceSendModal } from '../modals/invoice-send.js';
 
 const K = () => window.KV;
 
@@ -232,7 +233,10 @@ function wire(rootEl) {
         invoice:   i,
         onSuccess: () => actLoad(rootEl),
       }),
-      onSend:   (i) => K().toast(`Verzenden volgt in PR-D4 (${i.invoice_number || i.id.slice(0,8)})`),
+      onSend:   (i) => openInvoiceSendModal({
+        invoice:   i,
+        onSuccess: () => actLoad(rootEl),
+      }),
       onCredit: (i) => K().toast(`Crediteren volgt in PR-D5 (${i.invoice_number || i.id.slice(0,8)})`),
     });
   };
