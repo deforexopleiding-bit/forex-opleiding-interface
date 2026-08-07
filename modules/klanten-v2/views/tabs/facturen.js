@@ -10,6 +10,7 @@
 // permission ziet 403 → error-state met duidelijke boodschap.
 
 import { openInvoiceDetailModal } from '../modals/invoice-detail.js';
+import { openInvoiceUpdateModal } from '../modals/invoice-update.js';
 
 const K = () => window.KV;
 
@@ -220,10 +221,12 @@ function wire(rootEl) {
     if (!inv) return K().toast('Factuur niet gevonden in huidige lijst');
     openInvoiceDetailModal({
       invoice: inv,
-      // Sub-modal-callbacks (PR-D2..D5) — momenteel placeholder-toasts;
-      // worden in de volgende PR's vervangen door openXxxModal({...})-
-      // calls die na success de list refetchen + detail-modal herladen.
-      onEdit:   (i) => K().toast(`Bewerken volgt in PR-D2 (${i.invoice_number || i.id.slice(0,8)})`),
+      // PR-D2 (bewerken) is live; PR-D3..D5 volgen als placeholder-toasts
+      // en worden per PR omgezet naar openXxxModal({...}) met refresh-callback.
+      onEdit:   (i) => openInvoiceUpdateModal({
+        invoice:   i,
+        onSuccess: () => actLoad(rootEl),   // list opnieuw laden, detail sluit vanzelf
+      }),
       onPay:    (i) => K().toast(`Betaling boeken volgt in PR-D3 (${i.invoice_number || i.id.slice(0,8)})`),
       onSend:   (i) => K().toast(`Verzenden volgt in PR-D4 (${i.invoice_number || i.id.slice(0,8)})`),
       onCredit: (i) => K().toast(`Crediteren volgt in PR-D5 (${i.invoice_number || i.id.slice(0,8)})`),
