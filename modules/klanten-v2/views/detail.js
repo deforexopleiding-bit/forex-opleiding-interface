@@ -10,6 +10,7 @@
 // Volgende PR-B[2..6] vullen ze in met de INVENTARIS-items uit PR #1112.
 
 import { renderProfielTab }      from './tabs/profiel.js';
+import { openEditCustomerModal } from './modals/edit-customer.js';
 import { renderCommunicatieTab } from './tabs/communicatie.js';
 import { renderOffertesTab }     from './tabs/offertes.js';
 import { renderAbonnementenTab } from './tabs/abonnementen.js';
@@ -155,10 +156,25 @@ function wireShell(rootEl, { customer, tab }) {
     });
   });
 
-  // Edit / Archive → placeholder-toast tot PR-C
+  // Edit → opent klant-bewerken-modal (PR-C1); Archive → placeholder-toast
+  // tot PR-C2. onSuccess: reset dossier-cache + re-render dezelfde tab.
   rootEl.querySelectorAll('[data-kv-action]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      K().toast('Deze actie komt in PR-C (create/edit/archive modals).');
+      const action = btn.getAttribute('data-kv-action');
+      if (action === 'edit') {
+        openEditCustomerModal({
+          customer,
+          onSuccess: () => {
+            resetDetailCache();
+            const url = new URL(window.location.href);
+            const id  = url.searchParams.get('id');
+            const tab = url.searchParams.get('tab');
+            if (id) renderDetailView(rootEl, { id, tab, profile: null });
+          },
+        });
+      } else {
+        K().toast('Deze actie komt in een volgende PR-C.');
+      }
     });
   });
 }
