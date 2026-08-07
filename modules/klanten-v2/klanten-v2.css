@@ -332,5 +332,79 @@
   .kv-off-tbl .ds-tbl tbody td { padding: 8px 10px; }
 }
 
+/* ═══ Abonnementen-tab (PR-B5, read-only) ══════════════════════════════════ */
+
+.kv-abo { display: flex; flex-direction: column; gap: 14px; }
+.kv-abo-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.kv-abo-head-title { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
+.kv-abo-head-title svg { width: 16px; height: 16px; color: var(--m); }
+.kv-abo-kpis { padding: 0; }
+.kv-abo-banner { border-radius: var(--r-lg); }
+.kv-abo-list { display: flex; flex-direction: column; gap: 12px; }
+
+.kv-abo-card { padding: 14px 16px; }
+.kv-abo-card.is-postponed { border-color: var(--amber-line); }
+
+.kv-abo-card-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; margin-bottom: 10px;
+}
+.kv-abo-card-title { flex: 1; min-width: 0; }
+.kv-abo-card-name { font-size: 15px; font-weight: 600; line-height: 1.35; }
+.kv-abo-card-pills { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.kv-abo-card-amount { text-align: right; }
+.kv-abo-card-amount .mono {
+  font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums;
+  font-size: 17px; font-weight: 600;
+}
+.kv-abo-card-amount-sub { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+
+.kv-abo-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 4px 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.kv-abo-card-foot {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  padding-top: 12px;
+}
+
+.kv-abo-card-lines { padding-top: 12px; }
+.kv-abo-lines {
+  width: 100%; border-collapse: collapse;
+  font-size: 12.5px;
+  background: var(--surface-2); border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.kv-abo-lines thead th {
+  background: var(--surface-3); color: var(--text-3);
+  padding: 8px 10px; text-align: left;
+  font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+.kv-abo-lines th.r, .kv-abo-lines td.r { text-align: right; }
+.kv-abo-lines tbody td {
+  padding: 8px 10px; border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+}
+.kv-abo-lines tbody tr:last-child td { border-bottom: 0; }
+.kv-abo-lines .mono {
+  font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 760px) {
+  .kv-abo-head { flex-direction: column; align-items: flex-start; }
+  .kv-abo-card-head { flex-direction: column; }
+  .kv-abo-card-amount { text-align: left; }
+  .kv-abo-card-grid { grid-template-columns: 1fr; gap: 2px; }
+  .kv-abo-card-foot .ds-btn { flex: 1; justify-content: center; }
+  .kv-abo-lines thead th, .kv-abo-lines tbody td { padding: 6px 8px; }
+}
+
+
 
 
