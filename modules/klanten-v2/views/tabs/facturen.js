@@ -11,6 +11,7 @@
 
 import { openInvoiceDetailModal } from '../modals/invoice-detail.js';
 import { openInvoiceUpdateModal } from '../modals/invoice-update.js';
+import { openInvoicePaymentModal } from '../modals/invoice-payment.js';
 
 const K = () => window.KV;
 
@@ -227,7 +228,10 @@ function wire(rootEl) {
         invoice:   i,
         onSuccess: () => actLoad(rootEl),   // list opnieuw laden, detail sluit vanzelf
       }),
-      onPay:    (i) => K().toast(`Betaling boeken volgt in PR-D3 (${i.invoice_number || i.id.slice(0,8)})`),
+      onPay:    (i) => openInvoicePaymentModal({
+        invoice:   i,
+        onSuccess: () => actLoad(rootEl),
+      }),
       onSend:   (i) => K().toast(`Verzenden volgt in PR-D4 (${i.invoice_number || i.id.slice(0,8)})`),
       onCredit: (i) => K().toast(`Crediteren volgt in PR-D5 (${i.invoice_number || i.id.slice(0,8)})`),
     });
