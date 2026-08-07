@@ -1,0 +1,150 @@
+/* ============================================================================
+   modules/shared/klx-softphone.css — Styling voor de gedeelde softphone
+   (Bijlage 4 SYSTEEMKAART). 1-op-1 uit modules/klanten.html r324-464
+   (sinds PR #827 rich-sheet-versie). Aparte namespace (.klx*) zodat de
+   wanbetaler-softphone (.wbx*) in finance.html hier niet mee botst.
+   ========================================================================== */
+
+/* ── Callbar (fixed bottom-right, blijft zichtbaar als de sheet dicht is) ── */
+.klx.klx-call-callbar {
+  position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+  display: flex; align-items: center; gap: 14px;
+  background: linear-gradient(180deg, rgba(14,124,107,.95), rgba(10,90,78,.9));
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 12px; padding: 12px 16px;
+  color: #fff; box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+  min-width: 320px; max-width: calc(100vw - 40px);
+  font-family: 'Inter', system-ui, sans-serif;
+  animation: klxCallbarSlideIn .18s ease-out;
+}
+@keyframes klxCallbarSlideIn {
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.klx.klx-call-callbar[hidden] { display: none !important; }
+@media (max-width: 720px) {
+  .klx.klx-call-callbar { left: 12px; right: 12px; bottom: 12px; min-width: 0; }
+}
+.klx.klx-call-callbar .klx-call-callbar-status {
+  display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;
+}
+.klx.klx-call-callbar .klx-call-callbar-title {
+  font-size: 14px; font-weight: 600; letter-spacing: .2px;
+}
+.klx.klx-call-callbar .klx-call-callbar-sub {
+  font-size: 11.5px; color: rgba(255,255,255,.7);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.klx.klx-call-callbar .klx-call-callbar-timer {
+  font-size: 16px; font-weight: 600; letter-spacing: 1px;
+  font-variant-numeric: tabular-nums; color: #a7f3d0;
+}
+.klx.klx-call-callbar .klx-call-callbar-actions { display: flex; gap: 8px; }
+.klx.klx-call-callbar .klx-call-callbar-btn {
+  background: rgba(255,255,255,.08); color: #fff;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 999px; width: 40px; height: 40px;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 15px; transition: background .15s;
+}
+.klx.klx-call-callbar .klx-call-callbar-btn:hover { background: rgba(255,255,255,.16); }
+.klx.klx-call-callbar .klx-call-callbar-btn.mute.on { background: #eab308; color: #111; border-color: #ca8a04; }
+.klx.klx-call-callbar .klx-call-callbar-btn.hangup { background: #ef4444; border-color: #b91c1c; }
+.klx.klx-call-callbar .klx-call-callbar-btn.hangup:hover { background: #dc2626; }
+
+/* Consumer-side trigger-knop (bv. "Bel via softphone" in klant-detail).
+   Consumers geven hun eigen knop de class "klx-call-btn" — hier alleen
+   de disabled-state, rest is aan de consumer. */
+.contact-link.klx-call-btn:disabled { opacity: .55; cursor: not-allowed; }
+
+/* ── Rich floating belvenster (v1) ────────────────────────────────────────
+   Niet-blokkerend, zwevend rechts-onder, sluitbaar via × of Escape.
+   Callbar-fallback blijft actief tijdens gesprek zodat de user ook na
+   dichtklappen kan mute/ophangen. */
+.klx.klx-call-sheet {
+  position: fixed; right: 24px; bottom: 24px; z-index: 9998;
+  width: 340px; max-width: calc(100vw - 32px);
+  background: linear-gradient(180deg, rgba(14,124,107,.98), rgba(10,90,78,.95));
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 14px;
+  color: #fff;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.45);
+  font-family: 'Inter', system-ui, sans-serif;
+  animation: klxSheetSlideIn .18s ease-out;
+}
+@keyframes klxSheetSlideIn {
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.klx.klx-call-sheet[hidden] { display: none !important; }
+@media (max-width: 720px) {
+  .klx.klx-call-sheet { left: 12px; right: 12px; bottom: 12px; width: auto; }
+}
+.klx-call-sheet-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px 6px; border-bottom: 1px solid rgba(255,255,255,.10);
+}
+.klx-call-sheet-title { font-size: 13px; font-weight: 600; letter-spacing: .2px; }
+.klx-call-sheet-close {
+  background: none; border: none; color: rgba(255,255,255,.7);
+  cursor: pointer; font-size: 14px; padding: 2px 6px; border-radius: 6px;
+}
+.klx-call-sheet-close:hover { background: rgba(255,255,255,.10); color: #fff; }
+.klx-call-sheet-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+.klx-call-sheet-top { display: flex; flex-direction: column; gap: 4px; }
+.klx-call-sheet-label {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em;
+  color: rgba(255,255,255,.65); display: flex; align-items: center; gap: 6px;
+}
+.klx-call-sheet-lineselect {
+  width: 100%; padding: 6px 8px; border-radius: 6px;
+  background: rgba(0,0,0,.20); color: #fff;
+  border: 1px solid rgba(255,255,255,.14); font-size: 12.5px;
+}
+.klx-call-sheet-lineselect:disabled { opacity: .6; cursor: not-allowed; }
+.klx-call-sheet-conn {
+  display: flex; align-items: center; gap: 8px; font-size: 11.5px;
+}
+.klx-call-sheet-conn.connected   .klx-call-sheet-conn-label { color: #a7f3d0; }
+.klx-call-sheet-conn.connecting  .klx-call-sheet-conn-label { color: #fde68a; }
+.klx-call-sheet-conn.failed      .klx-call-sheet-conn-label,
+.klx-call-sheet-conn.disabled    .klx-call-sheet-conn-label { color: #fca5a5; }
+.klx-call-sheet-conn.idle        .klx-call-sheet-conn-label { color: rgba(255,255,255,.65); }
+.klx-call-sheet-conn-retry {
+  background: rgba(255,255,255,.10); color: #fff; border: 1px solid rgba(255,255,255,.14);
+  border-radius: 6px; padding: 2px 6px; cursor: pointer;
+}
+.klx-call-sheet-conn-retry:hover { background: rgba(255,255,255,.18); }
+.klx-call-sheet-conn-retry[hidden] { display: none !important; }
+.klx-call-sheet-number, .klx-call-sheet-numinput {
+  width: 100%; padding: 8px 10px; border-radius: 8px;
+  font-size: 15px; letter-spacing: .5px;
+  background: rgba(0,0,0,.20); color: #fff;
+  border: 1px solid rgba(255,255,255,.14);
+}
+.klx-call-sheet-numinput:focus { outline: none; border-color: #a7f3d0; }
+.klx-call-sheet-number { font-variant-numeric: tabular-nums; }
+.klx-mono { font-variant-numeric: tabular-nums; }
+.klx-call-sheet-state {
+  font-size: 11.5px; color: rgba(255,255,255,.75);
+  min-height: 16px; text-align: center;
+}
+.klx-call-sheet-state.connected { color: #a7f3d0; font-weight: 600; }
+.klx-call-sheet-state.error     { color: #fca5a5; }
+.klx-call-sheet-actions {
+  display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+}
+.klx-call-sheet-btn {
+  background: rgba(255,255,255,.14); color: #fff;
+  border: 1px solid rgba(255,255,255,.20);
+  border-radius: 8px; padding: 8px 14px; cursor: pointer;
+  font-size: 13px; font-weight: 600; transition: background .15s;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.klx-call-sheet-btn:hover:not(:disabled) { background: rgba(255,255,255,.22); }
+.klx-call-sheet-btn:disabled { opacity: .55; cursor: not-allowed; }
+.klx-call-sheet-btn.dial    { background: #0f766e; border-color: #0f766e; }
+.klx-call-sheet-btn.dial:hover:not(:disabled) { background: #115e59; }
+.klx-call-sheet-btn.hangup  { background: #ef4444; border-color: #b91c1c; }
+.klx-call-sheet-btn.hangup:hover { background: #dc2626; }
+.klx-call-sheet-btn.mute.on { background: #eab308; color: #111; border-color: #ca8a04; }
