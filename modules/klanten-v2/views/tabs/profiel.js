@@ -16,7 +16,9 @@
 // tabs (PR-B5 / mentor-onboarding). Data-fetches komen in die PR's; nu
 // staat er alleen een "Bekijk in …-tab" link.
 
-import { openEditCustomerModal } from '../modals/edit-customer.js';
+import { openEditCustomerModal }  from '../modals/edit-customer.js';
+import { openLinkCompanyModal }   from '../modals/link-company.js';
+import { resetDetailCache }       from '../detail.js';
 
 const K = () => window.KV;
 
@@ -187,9 +189,17 @@ function renderClientDataCard(customer, dossier) {
       ${kvRow('Email',    customer?.email)}
       ${kvRow('Telefoon', customer?.phone)}
       ${!isCompany
-        ? kvRow('Bedrijf', linkedCompany
-            ? (linkedCompany.company_name || linkedCompany.email || 'Onbekend bedrijf')
-            : 'Geen bedrijf gekoppeld')
+        ? `<div class="kv-prof-kv kv-prof-kv-with-action">
+             <span class="kv-prof-kv-l">Bedrijf</span>
+             <span class="kv-prof-kv-v">
+               ${K().esc(linkedCompany
+                 ? (linkedCompany.company_name || linkedCompany.email || 'Onbekend bedrijf')
+                 : 'Geen bedrijf gekoppeld')}
+               <button type="button" class="ds-icon-btn kv-prof-inline-btn" data-kv-link-company title="Koppel of ontkoppel bedrijf">
+                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+               </button>
+             </span>
+           </div>`
         : ''}
 
       <div class="kv-prof-divider"></div>
@@ -290,7 +300,7 @@ function renderMainCards(customer, dossier) {
 
 // ── Wiring ──────────────────────────────────────────────────────────────────
 
-function wire(rootEl, customer) {
+function wire(rootEl, customer, dossier) {
   // Softphone-knop → gedeelde KlxSoftphone.open() (PR 0-E). Optioneel: als
   // klx-softphone.js niet is geladen (v2 draait nog zonder /modules/shared/
   // klx-softphone.js op de HTML) tonen we een toast; klanten-v2 kan straks
@@ -327,10 +337,29 @@ function wire(rootEl, customer) {
       });
     });
   });
-  // Tags-edit → nog placeholder-toast tot PR-C2 (tag-modal).
+  // Tags-edit → nog placeholder-toast tot PR-C5 (tag-modal).
   rootEl.querySelectorAll('[data-kv-tags-edit]').forEach((btn) => {
     btn.addEventListener('click', () => {
       K().toast('Tag-bewerken komt in een volgende PR-C.');
+    });
+  });
+
+  // Link-company btn (PR-C4) → opent bedrijf-koppelmodal. Alleen op
+  // persoon-klanten (button wordt sowieso niet gerenderd voor bedrijven).
+  // Bij success: navigeren we door DFO.render() zodat dossier-cache
+  // opnieuw fetcht en de nieuwe koppeling zichtbaar wordt in Bedrijf-rij.
+  rootEl.querySelectorAll('[data-kv-link-company]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      openLinkCompanyModal({
+        person:        customer,
+        linkedCompany: dossier?.linked_company || null,
+        onSuccess: () => {
+          // Cache invalidate: dossier.linked_company is gemuteerd; zonder
+          // reset zou detail.js zijn oude cached object blijven gebruiken.
+          resetDetailCache();
+          if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+        },
+      });
     });
   });
 
@@ -368,5 +397,5 @@ export async function renderProfielTab(rootEl, { customer, dossier, profile } = 
       ${renderSidebarCards(customer)}
       ${renderMainCards(customer, dossier || { customer })}
     </div>`;
-  wire(rootEl, customer);
+  wire(rootEl, customer, dossier);
 }
