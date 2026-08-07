@@ -780,6 +780,54 @@
   .kv-inv-foot-actions .ds-btn { flex: 1; justify-content: center; }
 }
 
+/* ═══ Factuur-update-modal (PR-D2) ═════════════════════════════════════════ */
+
+.kv-invupd-hint {
+  padding: 8px 10px;
+  background: var(--info-soft, var(--surface-2));
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.kv-invupd-tbl-wrap {
+  overflow-x: auto;
+}
+.kv-invupd-tbl { min-width: 640px; }
+.kv-invupd-tbl th, .kv-invupd-tbl td {
+  vertical-align: middle;
+  padding: 6px 8px;
+}
+.kv-invupd-tbl tfoot td {
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.kv-invupd-inp {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 13px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+}
+.kv-invupd-inp:focus {
+  outline: none;
+  border-color: var(--m);
+  box-shadow: 0 0 0 2px var(--m-soft);
+}
+.kv-invupd-inp-num, .kv-invupd-inp-vat {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-family: 'IBM Plex Mono', monospace;
+}
+.kv-invupd-inp-vat { text-align: left; font-family: inherit; }
+.kv-invupd-add-row { margin-top: 8px; }
+
+@media (max-width: 760px) {
+  .kv-invupd-inp { font-size: 16px; }   /* iOS zoom-prevention */
+}
+
 /* ═══ Audit-tab (PR-B6, read-only) ═════════════════════════════════════════ */
 
 .kv-aud { display: flex; flex-direction: column; gap: 14px; }
