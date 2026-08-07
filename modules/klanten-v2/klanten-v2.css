@@ -712,6 +712,74 @@
   .kv-bulk-mode-opt { flex: 1 1 100%; }
 }
 
+/* ═══ Factuur-detail-modal (PR-D1, read-only) ══════════════════════════════ */
+
+.kv-inv-head-title { display: inline-flex; align-items: center; gap: 10px; }
+.kv-inv-head-title .mono { font-family: 'IBM Plex Mono', monospace; }
+
+.kv-inv-body { padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; }
+.kv-inv-meta-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+.kv-inv-meta-cell {
+  padding: 10px 12px; border-radius: var(--r-sm);
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+.kv-inv-meta-cell.is-emphasis {
+  background: var(--amber-soft); border-color: var(--amber-line);
+}
+.kv-inv-meta-l {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text-3); font-weight: 600; margin-bottom: 3px;
+}
+.kv-inv-meta-v {
+  font-size: 17px; font-weight: 600; letter-spacing: -.02em;
+}
+.kv-inv-meta-v.mono {
+  font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums;
+}
+
+.kv-inv-dates {
+  display: flex; flex-wrap: wrap; gap: 14px;
+  font-size: 12px; color: var(--text-2);
+}
+.kv-inv-dates code {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  padding: 1px 4px; background: var(--surface-2); border-radius: 3px;
+}
+
+.kv-inv-loading, .kv-inv-warn {
+  padding: 10px 12px; font-size: 12.5px;
+  border-radius: var(--r-sm); background: var(--surface-2);
+  color: var(--text-3);
+}
+.kv-inv-warn { color: var(--amber); background: var(--amber-soft); border: 1px solid var(--amber-line); }
+
+.kv-inv-cn-list { list-style: none; padding: 0; margin: 6px 0 0; display: flex; flex-direction: column; gap: 4px; }
+.kv-inv-cn-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: var(--r-sm);
+  background: var(--surface-2); font-size: 12.5px;
+}
+.kv-inv-cn-row .mono { font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+.kv-inv-cn-amt { margin-left: auto; font-weight: 600; }
+
+.kv-inv-extlinks {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding-top: 8px; border-top: 1px solid var(--border);
+}
+
+.kv-inv-foot { justify-content: space-between; flex-wrap: wrap; }
+.kv-inv-foot-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+@media (max-width: 760px) {
+  .kv-inv-body { padding: 14px 16px; }
+  .kv-inv-meta-grid { grid-template-columns: 1fr 1fr; }
+  .kv-inv-foot, .kv-inv-foot-actions { width: 100%; }
+  .kv-inv-foot-actions .ds-btn { flex: 1; justify-content: center; }
+}
+
 /* ═══ Audit-tab (PR-B6, read-only) ═════════════════════════════════════════ */
 
 .kv-aud { display: flex; flex-direction: column; gap: 14px; }

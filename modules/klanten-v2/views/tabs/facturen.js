@@ -9,6 +9,8 @@
 // gate: finance.invoice.view (super_admin + manager) — sales zonder
 // permission ziet 403 → error-state met duidelijke boodschap.
 
+import { openInvoiceDetailModal } from '../modals/invoice-detail.js';
+
 const K = () => window.KV;
 
 const STATUS = {
@@ -135,9 +137,9 @@ function renderRow(inv) {
       </td>
       <td>${statusPill(st)}</td>
       <td class="r kv-fac-actions">
-        <a class="ds-icon-btn" href="/modules/finance.html#invoice-${K().esc(encodeURIComponent(inv.id))}" target="_blank" rel="noopener" title="Open factuur-detail in Finance" onclick="event.stopPropagation()">
+        <button type="button" class="ds-icon-btn" data-kv-fac-open-btn="${K().esc(inv.id)}" title="Open factuur-detail" onclick="event.stopPropagation()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-        </a>
+        </button>
         ${tlLink}
       </td>
     </tr>`;
@@ -209,11 +211,29 @@ function render(rootEl) {
 
 function wire(rootEl) {
   rootEl.querySelector('[data-kv-fac-retry]')?.addEventListener('click', () => actLoad(rootEl));
-  rootEl.querySelectorAll('[data-kv-fac-open]').forEach((row) => {
-    row.addEventListener('click', () => {
-      const id = row.getAttribute('data-kv-fac-open');
-      if (id) window.open(`/modules/finance.html#invoice-${encodeURIComponent(id)}`, '_blank', 'noopener');
+  // Rij-klik → intern factuur-detail-modal (PR-D1). Vervangt de eerdere
+  // externe hop naar /modules/finance.html#invoice-X zodat de dossier-
+  // context blijft staan en de sub-modals (PR-D2..D5) allemaal in
+  // klanten-v2 blijven leven.
+  const openDetailForId = (id) => {
+    const inv = state.items.find((i) => i.id === id);
+    if (!inv) return K().toast('Factuur niet gevonden in huidige lijst');
+    openInvoiceDetailModal({
+      invoice: inv,
+      // Sub-modal-callbacks (PR-D2..D5) — momenteel placeholder-toasts;
+      // worden in de volgende PR's vervangen door openXxxModal({...})-
+      // calls die na success de list refetchen + detail-modal herladen.
+      onEdit:   (i) => K().toast(`Bewerken volgt in PR-D2 (${i.invoice_number || i.id.slice(0,8)})`),
+      onPay:    (i) => K().toast(`Betaling boeken volgt in PR-D3 (${i.invoice_number || i.id.slice(0,8)})`),
+      onSend:   (i) => K().toast(`Verzenden volgt in PR-D4 (${i.invoice_number || i.id.slice(0,8)})`),
+      onCredit: (i) => K().toast(`Crediteren volgt in PR-D5 (${i.invoice_number || i.id.slice(0,8)})`),
     });
+  };
+  rootEl.querySelectorAll('[data-kv-fac-open]').forEach((row) => {
+    row.addEventListener('click', () => openDetailForId(row.getAttribute('data-kv-fac-open')));
+  });
+  rootEl.querySelectorAll('[data-kv-fac-open-btn]').forEach((btn) => {
+    btn.addEventListener('click', () => openDetailForId(btn.getAttribute('data-kv-fac-open-btn')));
   });
 }
 
