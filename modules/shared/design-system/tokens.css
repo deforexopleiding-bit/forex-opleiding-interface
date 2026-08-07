@@ -1,0 +1,110 @@
+/* modules/shared/design-system/tokens.css
+ *
+ * Design-tokens voor het redesign — Fase 0-B1, 1-op-1 pariteit met
+ * docs/redesign/systeemprototype-v45.html (:root regel 11-29 +
+ * [data-theme="dark"] regel 30-46).
+ *
+ * PR 0-B1 (deze file) legt puur de tokens vast; app-shell primitives
+ * en per-module accent-mapping komen in PR 0-B2 / module-migraties.
+ *
+ * Wijzigingen t.o.v. de klanten-v2-baseline die er eerder stond:
+ * - `--teal` + `--pink` + `--slate` toegevoegd (compleet 8-kleuren-palet).
+ * - `--sidebar-w` naar 228px (was 214).
+ * - Alle waardes exact overgenomen uit het prototype `:root` inclusief
+ *   shadow-hex/opacity.
+ * - Dark-set volledig gealigneerd met prototype (o.a. `--slate` +
+ *   `--pink` in dark, alle -soft/-line-varianten identiek).
+ *
+ * Wat NIET in deze file:
+ * - Semantische aliassen (--accent, --ok, --warn, --danger) — die zaten
+ *   in de oude versie maar staan NIET in het prototype-`:root`. Om
+ *   drift te voorkomen laten we ze weg; wie ze nodig heeft mapt in de
+ *   consumerende component-CSS.
+ * - Per-module `--m / --m-soft / --m-line / --m-glow` — dat gebeurt in
+ *   de app-shell op basis van het actieve `data-module`-attribuut
+ *   (komt in PR 0-B2).
+ *
+ * Wordt geladen door elke redesign-module. Verander deze tokens NIET
+ * zonder overleg — bron-van-waarheid is het prototype.
+ */
+
+:root {
+  /* Neutrale surfaces + borders */
+  --bg:         #F7F8FA;
+  --surface:    #FFFFFF;
+  --surface-2:  #F2F4F7;
+  --surface-3:  #E9EDF2;
+  --border:        #E2E7EE;
+  --border-strong: #C9D2DE;
+
+  /* Tekst-hiërarchie */
+  --text:   #111721;
+  --text-2: #586374;
+  --text-3: #8B95A5;
+
+  /* Kleur-palet — 8 accents, elk met -soft en -line variant.
+     Per-module accent (--m/--m-soft/--m-line/--m-glow) wordt in de
+     app-shell (PR 0-B2) op basis van `data-module` gemapt naar één van
+     deze acht. Mapping-tabel:
+       dashboard/finance   → blue
+       sales/lisa/mentoren → violet
+       wanbetalers         → amber
+       klanten/onboarding  → emerald
+       tickets             → rose
+       leadsonderhoud      → teal
+       events              → pink
+       verdiensten/nb      → teal/blue (per screen)
+     Slate is een neutrale accent voor secundaire chrome. */
+  --blue:    #1B5FBF; --blue-soft:    #E8F0FC; --blue-line:    #B7D0F2;
+  --violet:  #6D3FD4; --violet-soft:  #F0EAFC; --violet-line:  #CDBAF3;
+  --amber:   #C2700A; --amber-soft:   #FDF3E3; --amber-line:   #F2D9AE;
+  --rose:    #C22B3E; --rose-soft:    #FDECEE; --rose-line:    #F5C2C9;
+  --emerald: #07835A; --emerald-soft: #E4F5EE; --emerald-line: #A9DFC9;
+  --teal:    #0A7490; --teal-soft:    #E2F3F8; --teal-line:    #A5D8E8;
+  --pink:    #B32B72; --pink-soft:    #FCEAF3; --pink-line:    #F2BDD8;
+  --slate:   #455367; --slate-soft:   #EDF0F4; --slate-line:   #C6CFDB;
+
+  /* Elevation */
+  --shadow-xs:    0 1px 2px rgba(17,23,33,.05);
+  --shadow:       0 1px 3px rgba(17,23,33,.06), 0 8px 24px -6px rgba(17,23,33,.08);
+  --shadow-lg:    0 2px 6px rgba(17,23,33,.07), 0 18px 40px -10px rgba(17,23,33,.14);
+  --shadow-panel: -14px 0 44px -12px rgba(17,23,33,.18);
+
+  /* Radii */
+  --r:    10px;
+  --r-sm: 7px;
+  --r-lg: 14px;
+
+  /* Layout */
+  --sidebar-w: 228px;
+  --panel-w:   520px;
+}
+
+/* Dark-mode overschrijft alleen kleur-tokens; layout/radii blijven.
+   Alle waardes 1-op-1 uit prototype [data-theme="dark"] regel 30-46. */
+:root[data-theme="dark"] {
+  --bg:         #0B0E13;
+  --surface:    #131820;
+  --surface-2:  #1A2029;
+  --surface-3:  #232B36;
+  --border:        #242C37;
+  --border-strong: #36414F;
+
+  --text:   #EAEEF4;
+  --text-2: #9AA5B4;
+  --text-3: #6C7788;
+
+  --blue:    #5FA0EC; --blue-soft:    #132844; --blue-line:    #2B4468;
+  --violet:  #A585F0; --violet-soft:  #1F1838; --violet-line:  #3B2E63;
+  --amber:   #E4A85C; --amber-soft:   #2C2114; --amber-line:   #4A3820;
+  --rose:    #EE8B96; --rose-soft:    #2E1619; --rose-line:    #4D262C;
+  --emerald: #4FC79B; --emerald-soft: #0D2A20; --emerald-line: #1B4736;
+  --teal:    #4FB3D0; --teal-soft:    #0C242C; --teal-line:    #1B4453;
+  --pink:    #E884B4; --pink-soft:    #2C1522; --pink-line:    #4B2439;
+  --slate:   #93A2B7; --slate-soft:   #1B222B; --slate-line:   #333F4E;
+
+  --shadow-xs:    0 1px 2px rgba(0,0,0,.4);
+  --shadow:       0 1px 3px rgba(0,0,0,.4), 0 8px 24px -6px rgba(0,0,0,.5);
+  --shadow-lg:    0 2px 6px rgba(0,0,0,.5), 0 18px 40px -10px rgba(0,0,0,.6);
+  --shadow-panel: -14px 0 44px -12px rgba(0,0,0,.6);
+}
