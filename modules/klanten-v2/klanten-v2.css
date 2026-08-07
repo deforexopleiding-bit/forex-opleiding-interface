@@ -530,6 +530,33 @@
   .kv-edit-field input { font-size: 16px; }  /* voorkomt iOS-zoom on focus */
 }
 
+/* ═══ Archive-modal (PR-C2) ════════════════════════════════════════════════ */
+
+.kv-arch-body { padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; }
+.kv-arch-explain {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 12px 14px; border-radius: var(--r-sm);
+  font-size: 13px; line-height: 1.55;
+}
+.kv-arch-explain svg { width: 20px; height: 20px; flex-shrink: 0; margin-top: 1px; }
+.kv-arch-explain.is-archive   { background: var(--rose-soft);    color: var(--text); border: 1px solid var(--rose-line); }
+.kv-arch-explain.is-archive   svg { color: var(--rose); }
+.kv-arch-explain.is-unarchive { background: var(--emerald-soft); color: var(--text); border: 1px solid var(--emerald-line); }
+.kv-arch-explain.is-unarchive svg { color: var(--emerald); }
+.kv-arch-reason textarea {
+  padding: 8px 10px; border-radius: var(--r-sm);
+  background: var(--surface); border: 1px solid var(--border);
+  color: var(--text); font-size: 13.5px; font-family: inherit; line-height: 1.5;
+  min-height: 72px; resize: vertical; outline: none;
+  transition: border-color .14s, box-shadow .14s;
+}
+.kv-arch-reason textarea:focus { border-color: var(--m); box-shadow: 0 0 0 3px var(--m-soft); }
+
+@media (max-width: 760px) {
+  .kv-arch-body { padding: 14px 16px; }
+  .kv-arch-reason textarea { font-size: 16px; }
+}
+
 /* ═══ Audit-tab (PR-B6, read-only) ═════════════════════════════════════════ */
 
 .kv-aud { display: flex; flex-direction: column; gap: 14px; }
