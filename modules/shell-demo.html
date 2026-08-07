@@ -21,8 +21,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
-<link rel="stylesheet" href="shared/design-system/tokens.css?v=0b2">
-<link rel="stylesheet" href="shared/design-system/app-shell.css?v=0b2">
+<link rel="stylesheet" href="shared/design-system/tokens.css?v=0d">
+<link rel="stylesheet" href="shared/design-system/app-shell.css?v=0d">
 </head>
 <body>
 
@@ -49,6 +49,18 @@
           <option value="sales">Sales</option>
           <option value="mentor">Mentor</option>
           <option value="marketing">Marketing</option>
+        </select>
+      </div>
+      <!-- Additief-rollen demo (0-D): kies twee rollen om te verifiëren dat
+           mentor+marketing beide module-sets in de nav laat verschijnen. -->
+      <div class="rolebox" style="margin-top:6px">
+        <div class="rolebox-l">Additief</div>
+        <select class="role-sel" onchange="DFO.setRoles(this.value.split(','))">
+          <option value="super_admin">Alleen super_admin</option>
+          <option value="mentor,marketing">mentor + marketing</option>
+          <option value="sales,mentor">sales + mentor</option>
+          <option value="manager,sales">manager + sales</option>
+          <option value="super_admin,mentor">super_admin + mentor</option>
         </select>
       </div>
       <div class="user-row">
@@ -113,8 +125,9 @@
 <div class="hint" id="hint"></div>
 
 <!-- ═══ APP-SHELL SCRIPTS ═══ -->
-<script src="shared/design-system/icons.js?v=0b2"></script>
-<script src="shared/design-system/app-shell.js?v=0b2"></script>
+<script src="shared/design-system/icons.js?v=0d"></script>
+<script src="shared/design-system/app-shell.js?v=0d"></script>
+<script src="shared/design-system/roles.js?v=0d"></script>
 
 <!-- ═══ DEMO-VIEWS (registreren onder DFO.VIEWS) ═══ -->
 <script>

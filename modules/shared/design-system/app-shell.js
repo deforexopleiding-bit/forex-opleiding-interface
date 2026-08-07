@@ -119,8 +119,15 @@
   };
 
   /* ── State ───────────────────────────────────────────────────────── */
+  // S.roles is de canonical rol-set (additief; iemand kan mentor+marketing
+  // tegelijk zijn). S.role blijft als getter voor legacy consumers: het
+  // returnt de eerste rol uit S.roles (dat is de "primary" — persona voor
+  // avatar/username in de sidebar). Zie modules/shared/design-system/roles.js
+  // + api/_lib/roles.js voor de mapping Supabase-rol → shell-rol.
   const S = {
-    role: 'super_admin',
+    roles:   ['super_admin'],
+    get role() { return this.roles[0] || 'super_admin'; },
+    set role(v) { /* legacy shim: leeg — gebruik setRoles() of setRole() */ },
     mod:  'dashboard',
     tab:  'Vandaag',
     filters: {},
@@ -133,13 +140,28 @@
   const key    = () => S.mod + '::' + S.tab;
   const F      = (k, d) => { const kk = key() + '::' + k; return S.filters[kk] !== undefined ? S.filters[kk] : d; };
   const setF   = (k, v) => { S.filters[key() + '::' + k] = v; NS.render(); };
-  const visMods    = () => MODS.filter(m => m.roles.includes(S.role));
+  // Additief: een module is zichtbaar als ANY van de user-rollen 'em ziet.
+  const visMods    = () => MODS.filter(m => m.roles.some(r => S.roles.includes(r)));
   const curMod     = () => visMods().find(m => m.id === S.mod) || visMods()[0];
-  const roleTabs   = m => m.tabs.filter(t => { const r = TAB_RESTRICT[m.id + '/' + t]; return !r || r.includes(S.role); });
+  const roleTabs   = m => m.tabs.filter(t => { const r = TAB_RESTRICT[m.id + '/' + t]; return !r || r.some(x => S.roles.includes(x)); });
   const modCanOpen = id => visMods().some(m => m.id === id);
-  const modLocked  = id => (MOD_LOCK[id] || []).includes(S.role);
+  // Additief lock-semantiek: alleen lock als ELKE rol-toegang die de user
+  // heeft in MOD_LOCK[id] zit. Voorbeeld: sales heeft inbox in MOD_LOCK
+  // (sales ziet slot); mentor+sales → mentor ziet inbox niet (geen roles-
+  // match) dus het gaat om de sales-rol die WEL matcht en wél locked is
+  // → locked. Manager+sales → manager matcht ook (via SAMS) en zit NIET
+  // in MOD_LOCK[inbox] → unlocked (manager overrides sales-lock).
+  const modLocked  = id => {
+    const lockRoles = MOD_LOCK[id];
+    if (!lockRoles || !lockRoles.length) return false;
+    const mod = MODS.find(m => m.id === id);
+    if (!mod) return false;
+    const grantingRoles = mod.roles.filter(r => S.roles.includes(r));
+    if (!grantingRoles.length) return false; // geen toegang = niet 'locked', gewoon onzichtbaar
+    return grantingRoles.every(r => lockRoles.includes(r));
+  };
   const modUsable  = id => modCanOpen(id) && !modLocked(id);
-  const me         = () => ROLES[S.role].persoon.split(' ')[0];
+  const me         = () => (ROLES[S.role]?.persoon || '').split(' ')[0] || '';
 
   /* ── Kleine bouwstenen (uit prototype r.1045-1049) ───────────────── */
   const AV  = ['#2D74D6', '#6D3FD4', '#07835A', '#C2700A', '#C22B3E', '#0E7490', '#9333EA', '#B45309', '#B32B72'];
@@ -202,8 +224,18 @@
     sc.classList.toggle('on', open);
   }
 
-  function setRole(r) {
-    S.role = r;
+  /**
+   * setRoles(roles) — canonical rol-setter. Accepteert een array shell-rollen
+   * (bv. ['mentor','marketing']). Filtert ongeldige rollen weg; fallback op
+   * ['super_admin'] als het resultaat leeg is (voorkomt lege-nav-render).
+   * Rendert nav + content opnieuw. De persona (avatar+username+role-label)
+   * volgt de primary rol (roles[0]) — dat is de hoogste rol uit ROLE_PRIORITY
+   * op de server, dus in de UI komt "de belangrijkste hoedanigheid" bovenaan.
+   */
+  function setRoles(roles) {
+    const clean = (Array.isArray(roles) ? roles : [roles])
+      .filter(r => r && ROLES[r]);
+    S.roles = clean.length ? clean : ['super_admin'];
     S.dossier = null;
     closePanel(true);
     const first = visMods()[0];
@@ -211,12 +243,23 @@
       S.mod = first.id;
       S.tab = roleTabs(first)[0] || '';
     }
-    const un = document.getElementById('userName');   if (un) un.textContent = ROLES[r].persoon;
-    const ur = document.getElementById('userRole');   if (ur) ur.textContent = ROLES[r].naam;
+    const primary = S.roles[0];
+    const un = document.getElementById('userName');   if (un && ROLES[primary]) un.textContent = ROLES[primary].persoon;
+    const ur = document.getElementById('userRole');   if (ur && ROLES[primary]) ur.textContent = ROLES[primary].naam;
     const av = document.getElementById('userAv');
-    if (av) { av.textContent = ini(ROLES[r].persoon); av.style.background = avc(ROLES[r].persoon); }
-    const rs = document.getElementById('roleSel');    if (rs) rs.value = r;
+    if (av && ROLES[primary]) { av.textContent = ini(ROLES[primary].persoon); av.style.background = avc(ROLES[primary].persoon); }
+    const rs = document.getElementById('roleSel');    if (rs) rs.value = primary;
     NS.render();
+  }
+
+  /**
+   * setRole(r) — backward-compat shim. Zelfde effect als setRoles([r]).
+   * Alle bestaande consumers (shell-demo.html rolebox, klanten-v2 pre-0D)
+   * blijven werken. Nieuwe code die additieve rollen wil moet setRoles()
+   * gebruiken.
+   */
+  function setRole(r) {
+    setRoles([r]);
   }
 
   function goMod(id) {
@@ -374,7 +417,7 @@
     S, key, F, setF,
     visMods, curMod, roleTabs, modCanOpen, modLocked, modUsable, me,
     VIEWS,
-    setRole, goMod, goTab, render, renderNav, applyColor, toggleNav,
+    setRole, setRoles, goMod, goTab, render, renderNav, applyColor, toggleNav,
     openPanel, closePanel, stepRow, showHint,
     openModal, closeModal,
     toggleTheme, applyStoredTheme,
