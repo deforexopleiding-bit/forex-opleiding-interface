@@ -15,16 +15,33 @@
 // Waar een actie hier alleen een placeholder-toast triggert is dat expliciet
 // gemarkeerd met "// TODO PR-C" of "// TODO PR-B".
 
-import { openCreateCustomerModal } from '../modals/create-customer.js';
-import { openBulkTagModal }        from '../modals/bulk-tag.js';
-import { openBulkArchiveModal }    from '../modals/bulk-archive.js';
-
+// Modals worden LAZY geladen via dynamic import — een gefaalde import
+// (404, syntax-fout, missende export) mag NOOIT meer het renderen van
+// de klantenlijst breken. Regressie 2026-08-07: statische imports met
+// verkeerd pad ('../modals/*' i.p.v. './modals/*') sloopten het hele
+// list-module → witte "Laden…". Dynamic + try/catch isoleert dat naar
+// alleen de klik-actie waar de modal thuishoort.
 const K = () => window.KV;
+
+async function loadModal(relPath, exportName) {
+  try {
+    const mod = await import(relPath);
+    const fn = mod?.[exportName];
+    if (typeof fn !== 'function') throw new Error(`Export "${exportName}" niet gevonden in ${relPath}`);
+    return fn;
+  } catch (e) {
+    console.error('[klanten-v2/list] modal-load faalde:', relPath, e?.message || e);
+    K()?.toast?.(`Kon dialoogvenster niet laden — herlaad de pagina. (${exportName})`);
+    return null;
+  }
+}
 
 // Gedeelde open-handler voor beide "Nieuwe klant"-CTA's (header + empty-
 // state). Bij succes navigeren we naar het dossier van de nieuwe klant
 // zodat de gebruiker direct de detail-view ziet en verder kan werken.
-function openNewCustomer() {
+async function openNewCustomer() {
+  const openCreateCustomerModal = await loadModal('./modals/create-customer.js', 'openCreateCustomerModal');
+  if (!openCreateCustomerModal) return;
   openCreateCustomerModal({
     onSuccess: (created) => {
       if (created?.id) K().navigate({ id: created.id, tab: 'profiel' });
@@ -617,13 +634,17 @@ function renderBulkbar() {
   el.querySelector('[data-act="bulk-clear"]').addEventListener('click', () => {
     state.selected.clear(); renderTablePart();
   });
-  el.querySelector('[data-act="bulk-tag"]').addEventListener('click', () => {
+  el.querySelector('[data-act="bulk-tag"]').addEventListener('click', async () => {
+    const openBulkTagModal = await loadModal('./modals/bulk-tag.js', 'openBulkTagModal');
+    if (!openBulkTagModal) return;
     openBulkTagModal({
       customerIds: [...state.selected],
       onSuccess:   () => { state.selected.clear(); loadList().then(() => { renderTablePart(); renderBulkbar(); }); },
     });
   });
-  el.querySelector('[data-act="bulk-archive"]').addEventListener('click', () => {
+  el.querySelector('[data-act="bulk-archive"]').addEventListener('click', async () => {
+    const openBulkArchiveModal = await loadModal('./modals/bulk-archive.js', 'openBulkArchiveModal');
+    if (!openBulkArchiveModal) return;
     openBulkArchiveModal({
       customerIds: [...state.selected],
       mode:        'archive',
