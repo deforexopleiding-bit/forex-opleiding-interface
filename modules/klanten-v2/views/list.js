@@ -16,6 +16,8 @@
 // gemarkeerd met "// TODO PR-C" of "// TODO PR-B".
 
 import { openCreateCustomerModal } from '../modals/create-customer.js';
+import { openBulkTagModal }        from '../modals/bulk-tag.js';
+import { openBulkArchiveModal }    from '../modals/bulk-archive.js';
 
 const K = () => window.KV;
 
@@ -616,10 +618,17 @@ function renderBulkbar() {
     state.selected.clear(); renderTablePart();
   });
   el.querySelector('[data-act="bulk-tag"]').addEventListener('click', () => {
-    K().toast('Bulk-tag-modal komt in PR-C');
+    openBulkTagModal({
+      customerIds: [...state.selected],
+      onSuccess:   () => { state.selected.clear(); loadList().then(() => { renderTablePart(); renderBulkbar(); }); },
+    });
   });
   el.querySelector('[data-act="bulk-archive"]').addEventListener('click', () => {
-    K().toast('Bulk-archiveer-bevestiging komt in PR-C');
+    openBulkArchiveModal({
+      customerIds: [...state.selected],
+      mode:        'archive',
+      onSuccess:   () => { state.selected.clear(); loadList().then(() => { renderTablePart(); renderBulkbar(); }); },
+    });
   });
 }
 
