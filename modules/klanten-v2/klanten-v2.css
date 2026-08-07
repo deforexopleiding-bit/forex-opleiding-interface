@@ -679,6 +679,39 @@
   .kv-tag-body { padding: 14px 16px; }
 }
 
+/* ═══ Bulk-modals (PR-C6) ══════════════════════════════════════════════════ */
+
+.kv-bulk-body { padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; }
+.kv-bulk-mode-row { display: flex; gap: 20px; flex-wrap: wrap; }
+.kv-bulk-mode-opt {
+  display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+  font-size: 13px; padding: 6px 10px; border-radius: var(--r-sm);
+  background: var(--surface-2); border: 1px solid var(--border);
+  flex: 1;
+}
+.kv-bulk-mode-opt input { margin: 0; accent-color: var(--m); }
+.kv-bulk-hint {
+  font-size: 12px; color: var(--text-3); line-height: 1.55;
+  padding: 8px 10px; border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.kv-bulk-result {
+  padding: 12px 14px; border-radius: var(--r-sm);
+  border: 1px solid transparent;
+}
+.kv-bulk-result.is-ok      { background: var(--emerald-soft); border-color: var(--emerald-line); color: var(--emerald); }
+.kv-bulk-result.is-partial { background: var(--amber-soft);   border-color: var(--amber-line);   color: var(--amber); }
+.kv-bulk-result-h { font-size: 13.5px; font-weight: 600; }
+.kv-bulk-fail-details { margin-top: 8px; font-size: 12px; }
+.kv-bulk-fail-details summary { cursor: pointer; color: var(--text-2); }
+.kv-bulk-fail-details ul { list-style: disc; padding-left: 18px; margin: 6px 0 0; color: var(--text); }
+.kv-bulk-fail-details code { font-family: 'IBM Plex Mono', monospace; font-size: 11px; opacity: .8; }
+
+@media (max-width: 760px) {
+  .kv-bulk-body { padding: 14px 16px; }
+  .kv-bulk-mode-opt { flex: 1 1 100%; }
+}
+
 /* ═══ Audit-tab (PR-B6, read-only) ═════════════════════════════════════════ */
 
 .kv-aud { display: flex; flex-direction: column; gap: 14px; }
