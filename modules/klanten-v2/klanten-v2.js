@@ -15,6 +15,7 @@
 // modals (PR-C) plakken later in dezelfde route-shell.
 
 import { renderListView } from './views/list.js';
+import { renderDetailView, resetDetailCache } from './views/detail.js';
 
 // ── Kleine utils (voorheen uit theme.js — dat bestand is niet meer nodig
 //    nu DFO de theme-toggle levert). Zelfstandig zodat deze module niet
@@ -174,21 +175,23 @@ function klantenView() {
   const profile = window.__kvAuthCtx || null;
 
   if (route.id) {
-    // Detail-placeholder (PR-B levert de volledige view).
-    return `
-      <div class="ds-pad">
-        <div class="ds-banner ds-banner-warn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
-          <span>Detail-view volgt in PR-B. Klant-ID <code>${esc(route.id)}</code>${route.tab ? ` · tab <code>${esc(route.tab)}</code>` : ''}.</span>
-        </div>
-        <div class="ds-empty" style="padding:40px 20px;">
-          <div class="ds-empty-t">Nog niet beschikbaar</div>
-          <div class="ds-empty-s">Ga <a href="?" style="color:var(--m); text-decoration:underline;">terug naar de lijst</a> of open de klant in het oude scherm via <a href="/modules/klanten.html?id=${esc(route.id)}" style="color:var(--m); text-decoration:underline;">klanten.html</a>.</div>
-        </div>
-      </div>`;
+    // Detail-view (PR-B1: orchestrator + header + tab-strip + placeholders).
+    // Async mount na innerHTML-flush zodat #kv-view aan de DOM hangt.
+    queueMicrotask(() => {
+      const rootEl = document.getElementById('kv-view');
+      if (!rootEl) return;
+      renderDetailView(rootEl, { id: route.id, tab: route.tab, profile }).catch((e) => {
+        console.error('[klanten-v2] detail mount error:', e);
+        toast('Fout bij laden dossier');
+      });
+    });
+    return `<div id="kv-view"></div>`;
   }
 
   // Lijst-view: mount async in de zojuist-ingevoegde container.
+  // Reset detail-cache zodat een verse open-klant-actie geen stale data
+  // uit een vorige sessie oppikt.
+  resetDetailCache();
   queueMicrotask(() => {
     const rootEl = document.getElementById('kv-view');
     if (!rootEl) return;
