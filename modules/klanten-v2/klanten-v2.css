@@ -1,13 +1,12 @@
 /* modules/klanten-v2/klanten-v2.css
  *
- * Module-scope voor Klanten-v2. Sinds PR 0-C is de module-accent
- * ingang niet meer op body-niveau; DFO.applyColor() zet de --m /
- * --m-soft / --m-line / --m-glow variabelen automatisch op :root
- * op basis van MODS[id='klanten'].color ('emerald'). Deze file houdt
- * dus alleen module-specifieke overrides over.
- *
- * Bedrijfsklant-icoontje (naast tabelrij).
+ * Module-scope voor Klanten-v2. Module-accent (emerald) wordt door
+ * DFO.applyColor() automatisch op :root gezet o.b.v. MODS[id='klanten']
+ * .color — dit bestand bevat alleen klanten-specifieke overrides die
+ * geen plek hebben in het gedeelde design-system.
  */
+
+/* Bedrijfsklant-icoontje (naast tabelrij in list-view). */
 .klanten-v2 .kv-biz-badge {
   display: inline-flex; align-items: center; justify-content: center;
   width: 18px; height: 18px; border-radius: 4px;
@@ -15,3 +14,61 @@
   margin-left: 6px;
 }
 .klanten-v2 .kv-biz-badge svg { width: 11px; height: 11px; }
+
+/* ═══ Dossier / Detail-view (PR-B1) ═══════════════════════════════════════ */
+
+.kv-detail-back { margin-bottom: 10px; }
+.kv-detail-back-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--text-3); text-decoration: none; font-size: 12.5px;
+  padding: 4px 6px; border-radius: var(--r-sm);
+  transition: color .14s, background .14s;
+}
+.kv-detail-back-link:hover { color: var(--text); background: var(--surface-2); }
+.kv-detail-back-link svg { width: 14px; height: 14px; }
+
+.kv-detail-head {
+  display: flex; align-items: flex-start; gap: 16px;
+  padding: 18px 0 16px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.kv-detail-head .ds-avatar-lg { flex-shrink: 0; }
+.kv-detail-head-info { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 6px; }
+.kv-detail-name { font-size: 22px; font-weight: 600; letter-spacing: -.02em; margin: 0; }
+.kv-detail-head-pills { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.kv-detail-head-meta { font-size: 12px; color: var(--text-3); }
+.kv-detail-head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.kv-detail-tabs {
+  display: flex; gap: 2px; padding: 0;
+  border-bottom: 1px solid var(--border);
+  margin: 0 -20px 16px; padding: 0 20px;
+  overflow-x: auto; scrollbar-width: none;
+}
+.kv-detail-tabs::-webkit-scrollbar { display: none; }
+.kv-detail-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 10px 14px 12px;
+  font-size: 13.5px; color: var(--text-2);
+  background: none; border: 0;
+  border-bottom: 2.5px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer; white-space: nowrap;
+  transition: color .14s, border-color .14s;
+}
+.kv-detail-tab:hover { color: var(--text); }
+.kv-detail-tab.active { color: var(--m); border-bottom-color: var(--m); font-weight: 600; }
+.kv-detail-tab-ico { display: inline-flex; }
+.kv-detail-tab-ico svg { width: 14px; height: 14px; }
+
+.kv-detail-tabbody { min-height: 240px; }
+
+@media (max-width: 760px) {
+  .kv-detail-head { padding: 14px 0 12px; gap: 12px; }
+  .kv-detail-name { font-size: 19px; }
+  .kv-detail-head-actions { width: 100%; }
+  .kv-detail-head-actions .ds-btn { flex: 1; justify-content: center; }
+  .kv-detail-tabs { margin: 0 -12px 12px; padding: 0 12px; }
+  .kv-detail-tab { padding: 9px 12px 11px; font-size: 13px; }
+}
