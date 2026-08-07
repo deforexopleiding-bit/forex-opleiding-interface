@@ -15,7 +15,20 @@
 // Waar een actie hier alleen een placeholder-toast triggert is dat expliciet
 // gemarkeerd met "// TODO PR-C" of "// TODO PR-B".
 
+import { openCreateCustomerModal } from '../modals/create-customer.js';
+
 const K = () => window.KV;
+
+// Gedeelde open-handler voor beide "Nieuwe klant"-CTA's (header + empty-
+// state). Bij succes navigeren we naar het dossier van de nieuwe klant
+// zodat de gebruiker direct de detail-view ziet en verder kan werken.
+function openNewCustomer() {
+  openCreateCustomerModal({
+    onSuccess: (created) => {
+      if (created?.id) K().navigate({ id: created.id, tab: 'profiel' });
+    },
+  });
+}
 
 const STATUS_TABS = [
   { key: 'active',     label: 'Actief',        pillClass: 'ds-pill-ok' },
@@ -210,10 +223,7 @@ function renderHero() {
     </div>
   `;
 
-  el.querySelector('[data-act="new-customer"]').addEventListener('click', () => {
-    // TODO PR-C: open create-modal
-    K().toast('Nieuwe-klant-modal komt in PR-C');
-  });
+  el.querySelector('[data-act="new-customer"]').addEventListener('click', openNewCustomer);
   el.querySelector('[data-act="export"]').addEventListener('click', () => {
     // TODO PR-C: CSV-export
     K().toast('CSV-export komt in PR-C');
@@ -395,7 +405,7 @@ function renderTablePart() {
           <button class="ds-btn ds-btn-primary" data-act="new-customer">Nieuwe klant</button>
         </div>
       </div>`;
-    el.querySelector('[data-act="new-customer"]').addEventListener('click', () => K().toast('Nieuwe-klant-modal komt in PR-C'));
+    el.querySelector('[data-act="new-customer"]').addEventListener('click', openNewCustomer);
     return;
   }
 
