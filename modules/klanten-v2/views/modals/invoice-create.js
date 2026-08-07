@@ -116,6 +116,25 @@ function goodLines() {
   return state.form.lines.filter((l) => String(l.description || '').trim() && Number(l.quantity) > 0);
 }
 
+// In-place DOM updates zodat de <input> die de user aan het bewerken is
+// niet wordt vernietigd (behoudt focus + caret). Zie wire() line-handler.
+function updateLineTotal(idx) {
+  const l = state.form.lines[idx];
+  if (!l) return;
+  const total = (Number(l.quantity) || 0) * (Number(l.unit_price_excl) || 0);
+  const cell = document.querySelector(`[data-kv-invnew-row-total="${idx}"]`);
+  if (cell) cell.textContent = fmtEur(total);
+}
+function updateFootTotals() {
+  const totals = computeTotals(state.form.lines);
+  const eEx = document.querySelector('[data-kv-invnew-total="excl"]');
+  const eTx = document.querySelector('[data-kv-invnew-total="tax"]');
+  const eIn = document.querySelector('[data-kv-invnew-total="incl"]');
+  if (eEx) eEx.innerHTML = `<strong>${K().esc(fmtEur(totals.excl))}</strong>`;
+  if (eTx) eTx.textContent = fmtEur(totals.tax);
+  if (eIn) eIn.innerHTML = `<strong>${K().esc(fmtEur(totals.incl))}</strong>`;
+}
+
 // ── Head ───────────────────────────────────────────────────────────────────
 
 function renderHead() {
@@ -159,7 +178,7 @@ function renderLineRow(l, idx) {
           ${VAT_OPTIONS.map((v) => `<option value="${v}" ${Number(l.vat_percentage) === v ? 'selected' : ''}>${v}%</option>`).join('')}
         </select>
       </td>
-      <td class="r mono">${esc(fmtEur(total))}</td>
+      <td class="r mono" data-kv-invnew-row-total="${idx}">${esc(fmtEur(total))}</td>
       <td class="r">
         <button type="button" class="ds-icon-btn" data-kv-invnew-del="${idx}" title="Regel verwijderen" ${state.form.lines.length <= 1 ? 'disabled' : ''}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
@@ -183,9 +202,9 @@ function renderLinesTable() {
         </tr></thead>
         <tbody>${state.form.lines.map((l, i) => renderLineRow(l, i)).join('')}</tbody>
         <tfoot>
-          <tr><td colspan="4" class="r"><strong>Subtotaal (excl.)</strong></td><td class="r mono"><strong>${esc(fmtEur(totals.excl))}</strong></td><td></td></tr>
-          <tr><td colspan="4" class="r">BTW</td><td class="r mono">${esc(fmtEur(totals.tax))}</td><td></td></tr>
-          <tr><td colspan="4" class="r"><strong>Totaal (incl. BTW)</strong></td><td class="r mono"><strong>${esc(fmtEur(totals.incl))}</strong></td><td></td></tr>
+          <tr><td colspan="4" class="r"><strong>Subtotaal (excl.)</strong></td><td class="r mono" data-kv-invnew-total="excl"><strong>${esc(fmtEur(totals.excl))}</strong></td><td></td></tr>
+          <tr><td colspan="4" class="r">BTW</td><td class="r mono" data-kv-invnew-total="tax">${esc(fmtEur(totals.tax))}</td><td></td></tr>
+          <tr><td colspan="4" class="r"><strong>Totaal (incl. BTW)</strong></td><td class="r mono" data-kv-invnew-total="incl"><strong>${esc(fmtEur(totals.incl))}</strong></td><td></td></tr>
         </tfoot>
       </table>
     </div>
@@ -540,18 +559,37 @@ function wire() {
     });
     inp.addEventListener('change', (e) => { state.form[e.target.name] = e.target.value; });
   });
-  // Base form inputs — line-fields
+  // Base form inputs — line-fields.
+  // KRITIEK: NIET rerenderBody() bij typen. Dat vernietigt het <input>
+  // element en de cursor verliest focus → user kan maar 1 char per keer
+  // typen (bug pre-1d8). Update state + doe alleen surgical DOM-updates
+  // op de cellen die daadwerkelijk veranderen (regel-totaal + tfoot).
   box.querySelectorAll('[data-kv-invnew-lf]').forEach((inp) => {
-    inp.addEventListener('input', (e) => {
+    const handler = (e) => {
       const idx = Number(e.target.getAttribute('data-kv-invnew-li'));
       const field = e.target.getAttribute('data-kv-invnew-lf');
       if (!state.form.lines[idx]) return;
-      if (field === 'description') state.form.lines[idx][field] = e.target.value;
-      else state.form.lines[idx][field] = e.target.value === '' ? '' : Number(e.target.value);
+      if (field === 'description') {
+        state.form.lines[idx][field] = e.target.value;
+      } else {
+        state.form.lines[idx][field] = e.target.value === '' ? '' : Number(e.target.value);
+      }
+      // Error surgical wissen (msg-div is next-sibling van de input)
       const errKey = `lines.${idx}.${field}`;
-      if (state.errors[errKey]) delete state.errors[errKey];
-      rerenderBody();
-    });
+      if (state.errors[errKey]) {
+        delete state.errors[errKey];
+        const td = e.target.closest('td');
+        td?.querySelector('.kv-edit-field-msg')?.remove();
+      }
+      // Description raakt totalen niet — alleen state-update, klaar.
+      if (field === 'description') return;
+      // Numeriek/VAT — regel-totaal + tfoot totalen bijwerken in-place.
+      updateLineTotal(idx);
+      updateFootTotals();
+    };
+    // Numerieke inputs vuren 'input' events; <select> vuurt 'change'. Beide binden.
+    inp.addEventListener('input', handler);
+    inp.addEventListener('change', handler);
   });
   box.querySelector('[data-kv-invnew-add]')?.addEventListener('click', () => {
     state.form.lines.push(newRow()); rerenderBody();

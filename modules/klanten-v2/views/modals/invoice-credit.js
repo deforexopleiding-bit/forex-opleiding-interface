@@ -18,12 +18,17 @@
 // Twee-staps flow:
 //   Stap 1 = type=FULL (vast) + reden (verplicht) + waarschuwing
 //            over eventuele bestaande deelbetaling
-//   Stap 2 = rode banner + typ-factuurnummer-bevestiging
+//   Stap 2 = rode banner + recap + directe bevestig-knop
+//
+// Ontwerp-wijziging 1d8: typ-factuurnummer-gate uit stap 2 gehaald.
+// Guard-stack is nu: amber-warning stap 1 + rode danger-banner stap 2
+// + in-flight lock + no-auto-retry. De typ-gate voegde geen extra
+// veiligheid toe boven de expliciete 2-staps klik + in-flight lock;
+// de UX-friction was groter dan de defensieve winst.
 //
 // Guards:
 //   - Enter in stap 1 -> volgende
-//   - Enter in typ-input van stap 2 -> preventDefault (blur)
-//   - Knop disabled tot typ-match exact op factuurnummer
+//   - Rode knop in stap 2 direct actief (geen typeveld meer)
 //   - In-flight lock: klik disablet + spinner, verdere klikken
 //     genegeerd. Bij timeout -> "status onbekend, check in TL"
 //     zonder auto-retry (endpoint niet idempotent).
@@ -55,7 +60,6 @@ function initState(invoice, opts) {
     form: {
       reason_key:   '',
       reason_text:  '',
-      typedNumber:  '',
     },
     errors: {},
     globalError: null,
@@ -67,16 +71,6 @@ function initState(invoice, opts) {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function invoiceNumberNormalized() {
-  return String(state.invoice?.invoice_number || '').trim().toUpperCase();
-}
-function typedNormalized() {
-  return String(state.form.typedNumber || '').trim().toUpperCase();
-}
-function typedMatches() {
-  const inv = invoiceNumberNormalized();
-  return !!inv && typedNormalized() === inv;
-}
 function hasPartialPayment() {
   return Number(state.invoice?.amount_paid || state.invoice?.paid_amount || 0) > 0;
 }
@@ -204,22 +198,11 @@ function renderStep2() {
         <div class="kv-invsend-recap-row"><span>Reden</span><span>${esc(desc || '—')}</span></div>
         ${hasPartialPayment() ? `<div class="kv-invsend-recap-row"><span>⚠ Deelbetaling</span><span class="mono">${esc(fmtEur(paidAmount()))} (blijft als vooruitbetaling)</span></div>` : ''}
       </div>
-
-      <div class="kv-invcredit-typegate">
-        <label for="kv-invcredit-type-inp">
-          Typ het factuurnummer om te bevestigen: <span class="mono">${esc(nr)}</span>
-        </label>
-        <input id="kv-invcredit-type-inp" type="text" value="${esc(state.form.typedNumber)}"
-               data-kv-invcredit-typegate autocomplete="off" spellcheck="false"
-               placeholder="${esc(nr)}"
-               ${state.saving ? 'disabled' : ''} />
-        ${typedNormalized() && !typedMatches() ? '<div class="kv-edit-field-msg">Komt niet overeen met factuurnummer</div>' : ''}
-      </div>
     </div>`;
 }
 
 function renderStep2Foot() {
-  const canSubmit = typedMatches() && !state.saving && !state.unknownStatus;
+  const canSubmit = !state.saving && !state.unknownStatus;
   return `
     <div class="kv-edit-foot kv-invsend-foot-danger">
       <button type="button" class="ds-btn ds-btn-ghost" data-kv-invcredit-back ${state.saving ? 'disabled' : ''}>← Terug</button>
@@ -250,7 +233,6 @@ function validateStep1() {
 
 async function doSubmit() {
   if (state.saving || state.unknownStatus) return;   // in-flight lock
-  if (!typedMatches()) return;
 
   state.saving = true;
   state.globalError = null;
@@ -301,25 +283,9 @@ function wire() {
   } else {
     box.querySelector('[data-kv-invcredit-back]')?.addEventListener('click', () => {
       if (state.saving) return;
-      state.step = 1; state.form.typedNumber = ''; state.unknownStatus = false;
+      state.step = 1; state.unknownStatus = false;
       rerender();
     });
-    const typeInp = box.querySelector('[data-kv-invcredit-typegate]');
-    if (typeInp) {
-      typeInp.addEventListener('input', (e) => {
-        state.form.typedNumber = e.target.value;
-        rerenderFoot();
-        // Ook body re-render voor "komt niet overeen"-hint (op elke keystroke die geen match is)
-        const wasMatch = typedMatches();
-        const hint = box.querySelector('.kv-invcredit-typegate .kv-edit-field-msg');
-        const shouldShowHint = typedNormalized() && !wasMatch;
-        if (shouldShowHint && !hint) rerenderBody();
-        else if (!shouldShowHint && hint) rerenderBody();
-      });
-      typeInp.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); typeInp.blur(); }
-      });
-    }
     box.querySelector('[data-kv-invcredit-submit]')?.addEventListener('click', doSubmit);
   }
 }
@@ -328,7 +294,6 @@ function goNext() {
   state.errors = validateStep1();
   if (Object.keys(state.errors).length) { rerender(); return; }
   state.step = 2;
-  state.form.typedNumber = '';
   rerender();
 }
 
@@ -348,11 +313,10 @@ function rerenderBody() {
 function rerenderFoot() {
   const ft = document.querySelector('#dfoModalFoot');
   if (ft) ft.innerHTML = renderFoot();
-  // Alleen submit-knop opnieuw wire — typ-input in body raakt niet aan (behoud focus).
   ft?.querySelector('[data-kv-invcredit-submit]')?.addEventListener('click', doSubmit);
   ft?.querySelector('[data-kv-invcredit-back]')?.addEventListener('click', () => {
     if (state.saving) return;
-    state.step = 1; state.form.typedNumber = ''; state.unknownStatus = false;
+    state.step = 1; state.unknownStatus = false;
     rerender();
   });
 }
@@ -367,7 +331,6 @@ export function openInvoiceCreditModal({ invoice, onSuccess } = {}) {
   const st = invoice.display_status || invoice.status;
   if (st === 'concept' || st === 'draft') { K().toast('Conceptfacturen kunnen niet worden gecrediteerd.'); return; }
   if (st === 'credited') { K().toast('Deze factuur is al volledig gecrediteerd.'); return; }
-  if (!invoice.invoice_number) { K().toast('Factuur heeft geen nummer — kan typ-bevestiging niet uitvoeren.'); return; }
   if (!D() || typeof D().openModal !== 'function') { K().toast('Modal-primitive niet beschikbaar.'); return; }
   initState(invoice, { onSuccess });
   rerender();

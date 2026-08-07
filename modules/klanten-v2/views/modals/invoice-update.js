@@ -109,6 +109,25 @@ function computeTotals(lines) {
   return { excl, tax, incl: excl + tax };
 }
 
+// In-place DOM updates zodat de <input> die de user aan het bewerken is
+// niet wordt vernietigd (behoudt focus + caret). Zie wire() line-handler.
+function updateLineTotal(idx) {
+  const l = state.form.lines[idx];
+  if (!l) return;
+  const total = (Number(l.quantity) || 0) * (Number(l.unit_price_excl) || 0);
+  const cell = document.querySelector(`[data-kv-invupd-row-total="${idx}"]`);
+  if (cell) cell.textContent = fmtEur(total);
+}
+function updateFootTotals() {
+  const totals = computeTotals(state.form.lines);
+  const eEx = document.querySelector('[data-kv-invupd-total="excl"]');
+  const eTx = document.querySelector('[data-kv-invupd-total="tax"]');
+  const eIn = document.querySelector('[data-kv-invupd-total="incl"]');
+  if (eEx) eEx.innerHTML = `<strong>${esc(fmtEur(totals.excl))}</strong>`;
+  if (eTx) eTx.textContent = fmtEur(totals.tax);
+  if (eIn) eIn.innerHTML = `<strong>${esc(fmtEur(totals.incl))}</strong>`;
+}
+
 function linesChanged() {
   const a = state.originalLines, b = state.form.lines;
   if (a.length !== b.length) return true;
@@ -167,7 +186,7 @@ function renderLineRow(l, idx) {
         </select>
         ${eVat ? `<div class="kv-edit-field-msg">${esc(eVat)}</div>` : ''}
       </td>
-      <td class="r mono">${esc(fmtEur(total))}</td>
+      <td class="r mono" data-kv-invupd-row-total="${idx}">${esc(fmtEur(total))}</td>
       <td class="r">
         <button type="button" class="ds-icon-btn" data-kv-invupd-del="${idx}" title="Regel verwijderen" ${state.form.lines.length <= 1 ? 'disabled' : ''}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
@@ -195,17 +214,17 @@ function renderLinesTable() {
         <tfoot>
           <tr>
             <td colspan="4" class="r"><strong>Subtotaal (excl.)</strong></td>
-            <td class="r mono"><strong>${esc(fmtEur(totals.excl))}</strong></td>
+            <td class="r mono" data-kv-invupd-total="excl"><strong>${esc(fmtEur(totals.excl))}</strong></td>
             <td></td>
           </tr>
           <tr>
             <td colspan="4" class="r">BTW</td>
-            <td class="r mono">${esc(fmtEur(totals.tax))}</td>
+            <td class="r mono" data-kv-invupd-total="tax">${esc(fmtEur(totals.tax))}</td>
             <td></td>
           </tr>
           <tr>
             <td colspan="4" class="r"><strong>Totaal (incl. BTW)</strong></td>
-            <td class="r mono"><strong>${esc(fmtEur(totals.incl))}</strong></td>
+            <td class="r mono" data-kv-invupd-total="incl"><strong>${esc(fmtEur(totals.incl))}</strong></td>
             <td></td>
           </tr>
         </tfoot>
@@ -347,24 +366,35 @@ function wire() {
   box.querySelector('[data-kv-invupd-submit]')?.addEventListener('click', doSave);
   box.querySelector('#kv-invupd-form')?.addEventListener('submit', (e) => { e.preventDefault(); doSave(); });
 
-  // Line-item inputs — mutate state and lazy re-render totals via row-level update.
+  // Line-item inputs — state-update + in-place cell updates.
+  // KRITIEK: NIET rerenderBody() bij typen. Dat vernietigt het <input>
+  // en de cursor verliest focus → user kan maar 1 char per keer typen
+  // (bug pre-1d8, gelijk aan die van invoice-create.js).
   box.querySelectorAll('[data-kv-invupd-field]').forEach((inp) => {
-    inp.addEventListener('input', (e) => {
+    const handler = (e) => {
       const idx = Number(e.target.getAttribute('data-kv-invupd-idx'));
       const field = e.target.getAttribute('data-kv-invupd-field');
       if (!state.form.lines[idx]) return;
       if (field === 'description') {
         state.form.lines[idx][field] = e.target.value;
       } else {
-        // Numeriek — parse maar sta lege string toe tijdens typen
         const raw = e.target.value;
         state.form.lines[idx][field] = raw === '' ? '' : Number(raw);
       }
-      // Errors op dit veld wegen; totals re-render volledige body om te syncen.
+      // Error surgical wissen (msg-div is next-sibling van de input in dezelfde <td>)
       const errKey = `lines.${idx}.${field}`;
-      if (state.errors[errKey]) delete state.errors[errKey];
-      rerenderBody();
-    });
+      if (state.errors[errKey]) {
+        delete state.errors[errKey];
+        const td = e.target.closest('td');
+        td?.querySelector('.kv-edit-field-msg')?.remove();
+      }
+      // Description raakt totalen niet
+      if (field === 'description') return;
+      updateLineTotal(idx);
+      updateFootTotals();
+    };
+    inp.addEventListener('input', handler);
+    inp.addEventListener('change', handler);
   });
 
   // Meta inputs
