@@ -26,10 +26,15 @@
   <link rel="stylesheet" href="../shared/design-system/tokens.css?v=1b1">
   <link rel="stylesheet" href="../shared/design-system/app-shell.css?v=1b1">
   <link rel="stylesheet" href="../shared/design-system/components.css?v=1b1">
-  <link rel="stylesheet" href="klanten-v2.css?v=1b1">
+  <link rel="stylesheet" href="../shared/klx-softphone.css?v=1b2">
+  <link rel="stylesheet" href="klanten-v2.css?v=1b2">
 
   <!-- Supabase auth (bestaande shared client) -->
   <script src="../shared/supabase-client.js"></script>
+
+  <!-- SIP.js dependency voor klx-softphone (PR 0-E). Lazy-init: wordt pas
+       gebruikt zodra iemand "Bel via softphone" klikt. -->
+  <script src="../shared/sip.min.js"></script>
 </head>
 <body class="klanten-v2">
 
@@ -125,8 +130,9 @@
   <script src="../shared/design-system/icons.js?v=1b1"></script>
   <script src="../shared/design-system/app-shell.js?v=1b1"></script>
   <script src="../shared/design-system/roles.js?v=1b1"></script>
+  <script src="../shared/klx-softphone.js?v=1b2"></script>
 
   <!-- ═══ MODULE JS (native ES-modules; requires modern browser) ═══ -->
-  <script type="module" src="klanten-v2.js?v=1b1"></script>
+  <script type="module" src="klanten-v2.js?v=1b2"></script>
 </body>
 </html>

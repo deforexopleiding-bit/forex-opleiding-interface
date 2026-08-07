@@ -47,13 +47,20 @@ function normalizeTab(tab) {
     : DEFAULT_TAB;
 }
 
-// Klant-cache per open-open sessie. Voorkomt refetch bij tab-wissel op
-// dezelfde klant. Wordt gereset zodra een andere id opent.
-let cache = { id: null, customer: null, loading: false, error: null };
+// Dossier-cache per open-sessie. Bevat de FULL response van /api/customer
+// (customer + linked_company + linked_persons + link_available) zodat
+// tab-renderers alles hebben zonder aparte fetches. Wordt gereset zodra
+// een andere id opent.
+let cache = { id: null, dossier: null, loading: false, error: null };
 
-async function fetchCustomer(id) {
+async function fetchDossier(id) {
   const j = await K().authedJson(`/api/customer?id=${encodeURIComponent(id)}`);
-  return j?.customer || j?.data || j;
+  return {
+    customer:       j?.customer || null,
+    linked_company: j?.linked_company || null,
+    linked_persons: Array.isArray(j?.linked_persons) ? j.linked_persons : [],
+    link_available: !!j?.link_available,
+  };
 }
 
 function customerDisplayName(c) {
@@ -156,13 +163,13 @@ function wireShell(rootEl, { customer, tab }) {
   });
 }
 
-async function mountTabBody({ customer, tab, profile }) {
+async function mountTabBody({ customer, dossier, tab, profile }) {
   const host = document.getElementById('kv-tabbody');
   if (!host) return;
   const entry = TABS.find(t => t.key === tab) || TABS[0];
   host.innerHTML = `<div class="ds-empty" style="padding:24px;"><div class="ds-empty-s">Tab laden…</div></div>`;
   try {
-    await entry.renderer(host, { customer, profile });
+    await entry.renderer(host, { customer, dossier, profile });
   } catch (e) {
     console.error('[klanten-v2 detail] tab render error:', e);
     host.innerHTML = `
@@ -183,7 +190,7 @@ export async function renderDetailView(rootEl, { id, tab, profile }) {
 
   // Fetch (or use cache) — id-wissel = clean state
   if (cache.id !== id) {
-    cache = { id, customer: null, loading: true, error: null };
+    cache = { id, dossier: null, loading: true, error: null };
     rootEl.innerHTML = `
       <div class="ds-pad kv-detail">
         <div class="ds-empty" style="padding:64px 20px;">
@@ -191,7 +198,7 @@ export async function renderDetailView(rootEl, { id, tab, profile }) {
         </div>
       </div>`;
     try {
-      cache.customer = await fetchCustomer(id);
+      cache.dossier = await fetchDossier(id);
       cache.loading = false;
     } catch (e) {
       cache.error = e?.message || 'Onbekende fout';
@@ -215,19 +222,22 @@ export async function renderDetailView(rootEl, { id, tab, profile }) {
     }
   }
 
+  const customer = cache.dossier?.customer || null;
+
   // Render shell (header + tab-strip) — telkens vers zodat active-state klopt
-  rootEl.innerHTML = renderShell({ customer: cache.customer, tab: normTab });
-  wireShell(rootEl, { customer: cache.customer, tab: normTab });
+  rootEl.innerHTML = renderShell({ customer, tab: normTab });
+  wireShell(rootEl, { customer, tab: normTab });
 
   // Mount tab-body async (fire-and-forget — geen await zodat DFO's
   // scroll-restore direct kan lopen). Elke tab render zichzelf leeg-first
-  // + async-fetches.
-  mountTabBody({ customer: cache.customer, tab: normTab, profile });
+  // + async-fetches. Tabs krijgen zowel `customer` (backward-compat) als
+  // `dossier` (voor tabs die linked_company / linked_persons nodig hebben).
+  mountTabBody({ customer, dossier: cache.dossier, tab: normTab, profile });
 }
 
 // Reset-hook voor list-view: als klantenView() naar de lijst terugvalt,
 // wil je NIET dat een oude cache aan een verse id-open klopt. Wordt
 // aangeroepen door klanten-v2.js op switch naar list.
 export function resetDetailCache() {
-  cache = { id: null, customer: null, loading: false, error: null };
+  cache = { id: null, dossier: null, loading: false, error: null };
 }
