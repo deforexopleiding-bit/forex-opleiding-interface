@@ -107,7 +107,8 @@ export function isAanmaningSendSuccess(stepResult) {
  *
  * Bewust op een config-vlag i.p.v. een hardcoded step_order/template_id: de
  * stappen zijn al eens hernummerd (belmomenten-migratie), dus de vlag is de
- * stabiele, expliciete aanwijzing (gezet via DB-doc op de dag-17-WhatsApp).
+ * stabiele, expliciete aanwijzing (gezet via DB-doc op de dag-21-WhatsApp,
+ * step_order 12 — "Aanmaning dag 21", het "…vandaag ook een brief…"-bericht).
  * Dubbel-gate op step_type='whatsapp' zodat een per ongeluk op de e-mailstap
  * gezette vlag nooit vuurt.
  *
@@ -1205,7 +1206,7 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
           }
         }
 
-        // ── Auto-genereer de WIK-brief bij de dag-17-WhatsApp ────────────────
+        // ── Auto-genereer de WIK-brief bij de dag-21-WhatsApp (step 12) ──────
         // Wanneer de daarvoor aangewezen WhatsApp-stap (config.auto_generate_brief
         // = true) succesvol is verzonden, zetten we EXACT dezelfde brief als de
         // handmatige knop klaar in de brieven-tab (status 'aangemaakt') — via de

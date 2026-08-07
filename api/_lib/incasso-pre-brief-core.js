@@ -6,8 +6,8 @@
 //
 // Geëxtraheerd uit api/incasso-pre-brief.js zodat ZOWEL de handmatige
 // "stuur pre-incassobrief"-knop ALS de dunning-engine (auto-generatie op de
-// dag-17-WhatsApp) exact dezelfde brief produceren — één bron van waarheid,
-// geen gedupliceerde briefslogica.
+// dag-21-WhatsApp, step_order 12) exact dezelfde brief produceren — één bron
+// van waarheid, geen gedupliceerde briefslogica.
 //
 // Verschil t.o.v. de HTTP-handler: deze functie raakt GEEN res aan. Ze geeft
 // een gestructureerd resultaat terug; de caller bepaalt de HTTP-respons of de
