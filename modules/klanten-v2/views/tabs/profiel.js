@@ -16,6 +16,8 @@
 // tabs (PR-B5 / mentor-onboarding). Data-fetches komen in die PR's; nu
 // staat er alleen een "Bekijk in …-tab" link.
 
+import { openEditCustomerModal } from '../modals/edit-customer.js';
+
 const K = () => window.KV;
 
 // ── Formatters ──────────────────────────────────────────────────────────────
@@ -288,7 +290,7 @@ function renderMainCards(customer, dossier) {
 
 // ── Wiring ──────────────────────────────────────────────────────────────────
 
-function wire(rootEl) {
+function wire(rootEl, customer) {
   // Softphone-knop → gedeelde KlxSoftphone.open() (PR 0-E). Optioneel: als
   // klx-softphone.js niet is geladen (v2 draait nog zonder /modules/shared/
   // klx-softphone.js op de HTML) tonen we een toast; klanten-v2 kan straks
@@ -308,10 +310,27 @@ function wire(rootEl) {
     });
   });
 
-  // Tags-edit + inline-edit-knoppen → placeholder-toast tot PR-C
-  rootEl.querySelectorAll('[data-kv-tags-edit], [data-kv-action-inline]').forEach((btn) => {
+  // Inline "Bewerken" op klantgegevens-card → opent klant-bewerken-modal
+  // (PR-C1). onSuccess: DFO re-triggert via popstate/render — hier reload
+  // we door hard via location (voor de klant-content in de tab is dat de
+  // eenvoudigste weg naar verse state zonder detail-cache override).
+  rootEl.querySelectorAll('[data-kv-action-inline="edit"]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      K().toast('Bewerken komt in PR-C (create/edit/archive modals).');
+      openEditCustomerModal({
+        customer,
+        onSuccess: () => {
+          // Simpelste refresh: opnieuw navigeren naar dezelfde ?id=&tab=,
+          // waarbij DFO.render() de detail-view opnieuw laadt (cache is
+          // gereset door detail.js).
+          if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+        },
+      });
+    });
+  });
+  // Tags-edit → nog placeholder-toast tot PR-C2 (tag-modal).
+  rootEl.querySelectorAll('[data-kv-tags-edit]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      K().toast('Tag-bewerken komt in een volgende PR-C.');
     });
   });
 
@@ -349,5 +368,5 @@ export async function renderProfielTab(rootEl, { customer, dossier, profile } = 
       ${renderSidebarCards(customer)}
       ${renderMainCards(customer, dossier || { customer })}
     </div>`;
-  wire(rootEl);
+  wire(rootEl, customer);
 }
