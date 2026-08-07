@@ -17,6 +17,8 @@
 //
 // Beschermde-zone: nul aanraking.
 
+import { checkDuplicates, openDuplicateConfirmModal } from './duplicate-confirm.js';
+
 const K = () => window.KV;
 const D = () => window.DFO;
 
@@ -167,13 +169,44 @@ function clientValidate() {
 
 // ── Submit ──────────────────────────────────────────────────────────────────
 
-async function doCreate() {
+async function doCreate({ skipDupeCheck = false } = {}) {
   state.errors = clientValidate();
   state.globalError = null;
   if (Object.keys(state.errors).length) {
     rerender();
     return;
   }
+
+  // Duplicate-check vóór POST (alleen als email of phone ingevuld). Skip
+  // wanneer user via de confirm-modal expliciet "toch doorgaan" heeft
+  // gekozen — anders belanden we in een loop.
+  const email = String(state.form.email || '').trim();
+  const phone = String(state.form.phone || '').trim();
+  if (!skipDupeCheck && (email || phone)) {
+    state.saving = true; rerender();
+    const matches = await checkDuplicates({ email, phone });
+    state.saving = false;
+    if (matches.length > 0) {
+      const previewName = state.form.is_company
+        ? (state.form.company_name || 'Nieuw bedrijf')
+        : ([state.form.first_name, state.form.last_name].filter(Boolean).join(' ') || 'Onbekend');
+      openDuplicateConfirmModal({
+        matches,
+        formData: { name: previewName, email, phone },
+        onProceed: () => {
+          // Terug naar de create-modal (state is nog intact), en submit
+          // met skip-flag zodat we niet opnieuw dupe-check doen.
+          rerender();
+          doCreate({ skipDupeCheck: true });
+        },
+        onOpenExisting: (id) => {
+          K().navigate({ id, tab: 'profiel' });
+        },
+      });
+      return;
+    }
+  }
+
   state.saving = true;
   rerender();
 
