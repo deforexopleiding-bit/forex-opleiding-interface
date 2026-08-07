@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>App-shell demo — Fase 0-B2</title>
+
+<!-- FOUC-preventie: theme meteen zetten voor tokens.css laadt -->
+<script>
+  (function () {
+    try {
+      const v = localStorage.getItem('dfo-crm-theme');
+      document.documentElement.setAttribute('data-theme', v === 'dark' ? 'dark' : 'light');
+    } catch (_) {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+  })();
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="shared/design-system/tokens.css?v=0b2">
+<link rel="stylesheet" href="shared/design-system/app-shell.css?v=0b2">
+</head>
+<body>
+
+<!-- ═══ APP-SHELL SKELET (1-op-1 uit prototype r.929-988) ═══ -->
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">F</div>
+      <div>
+        <div class="brand-name">De Forex Opleiding</div>
+        <div class="brand-sub">Systeem · demo</div>
+      </div>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="sidebar-foot">
+      <div class="rolebox">
+        <div class="rolebox-l">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 6v6c0 5 3.4 9.4 8 10 4.6-.6 8-5 8-10V6z"/></svg>
+          Bekijk als
+        </div>
+        <select class="role-sel" id="roleSel" onchange="DFO.setRole(this.value)">
+          <option value="super_admin">Super admin</option>
+          <option value="manager">Manager</option>
+          <option value="sales">Sales</option>
+          <option value="mentor">Mentor</option>
+          <option value="marketing">Marketing</option>
+        </select>
+      </div>
+      <div class="user-row">
+        <div class="avatar" id="userAv">AB</div>
+        <div style="flex:1;min-width:0">
+          <div class="user-name" id="userName">Amigo Biemold</div>
+          <div class="user-role" id="userRole">Super admin</div>
+        </div>
+        <button class="icon-btn" onclick="DFO.toggleTheme()" title="Licht / donker">
+          <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main" id="main">
+    <header class="topbar">
+      <button class="mob-btn" onclick="DFO.toggleNav()" aria-label="Menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+      </button>
+      <div class="page-title" id="crumb"></div>
+      <div class="searchbox">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input placeholder="Zoek overal…">
+        <span class="kbd">⌘K</span>
+      </div>
+    </header>
+    <div class="tabs" id="tabs"></div>
+    <div class="content" id="content"></div>
+  </div>
+</div>
+
+<!-- Scrim (mobiel off-canvas) -->
+<div class="scrim" id="scrim" onclick="DFO.toggleNav(false)"></div>
+
+<!-- Zijpaneel (right-slide) -->
+<aside class="panel" id="panel">
+  <div class="panel-head">
+    <div style="min-width:0">
+      <div class="panel-title" id="panelTitle">—</div>
+      <div class="panel-sub" id="panelSub">—</div>
+    </div>
+    <div class="panel-nav">
+      <button class="icon-btn" onclick="DFO.stepRow(-1)" title="Vorige (↑)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m18 15-6-6-6 6"/></svg>
+      </button>
+      <button class="icon-btn" onclick="DFO.stepRow(1)" title="Volgende (↓)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <button class="icon-btn" onclick="DFO.closePanel()" title="Sluiten (Esc)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="panel-body" id="panelBody"></div>
+  <div class="panel-foot" id="panelFoot"></div>
+</aside>
+
+<!-- Toast/hint -->
+<div class="hint" id="hint"></div>
+
+<!-- ═══ APP-SHELL SCRIPTS ═══ -->
+<script src="shared/design-system/icons.js?v=0b2"></script>
+<script src="shared/design-system/app-shell.js?v=0b2"></script>
+
+<!-- ═══ DEMO-VIEWS (registreren onder DFO.VIEWS) ═══ -->
+<script>
+(function () {
+  const { VIEWS, I, svg, eur, MODS, S } = window.DFO;
+
+  // Dashboard — Vandaag: KPI-strip + kaarten-grid demo
+  VIEWS['dashboard/Vandaag'] = () => `
+    <div class="hero">
+      <div class="kpi-grid">
+        ${[
+          { l: 'Omzet vandaag',  v: eur(4820), t: '+12%', d: 'up',   c: 'blue',    ic: I.euro },
+          { l: 'Nieuwe leads',   v: '18',      t: '+3',   d: 'up',   c: 'amber',   ic: I.target },
+          { l: 'Openstaand',     v: eur(12480), t: '-4%',  d: 'down', c: 'rose',    ic: I.alert },
+          { l: 'Actieve trajecten', v: '146',  t: '±0',   d: 'flat', c: 'emerald', ic: I.users },
+        ].map(k => `
+          <div class="kpi" style="--kc:var(--${k.c});--kc-soft:var(--${k.c}-soft)">
+            <div class="kpi-top">
+              <span class="kpi-ico">${svg(k.ic)}</span>
+              <span class="kpi-label">${k.l}</span>
+            </div>
+            <div class="kpi-val">${k.v}</div>
+            <div class="kpi-foot">
+              <span class="trend trend-${k.d}">
+                ${svg(k.d === 'up' ? I.up : k.d === 'down' ? I.arrDown : '<path d="M5 12h14"/>')}
+                ${k.t}
+              </span>
+              <span>vs gisteren</span>
+            </div>
+            <div class="spark">${'<i></i>'.repeat(20).replace(/<i><\/i>/g, m => `<i class="${Math.random() > 0.6 ? 'hi' : ''}"></i>`)}</div>
+          </div>`).join('')}
+      </div>
+    </div>
+    <div class="pad">
+      <div class="grid g2">
+        <div class="card">
+          <div class="card-head"><span class="card-title">Demo-kaart — kernprimitieven</span></div>
+          <div class="card-body" style="display:flex;flex-direction:column;gap:14px">
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <span class="pill pill-ok">Actief</span>
+              <span class="pill pill-warn">In behandeling</span>
+              <span class="pill pill-danger">Overdue</span>
+              <span class="pill pill-neutral">Concept</span>
+              <span class="pill pill-accent">Nieuw</span>
+              <span class="pill pill-violet">Sales</span>
+              <span class="pill pill-teal">Leadsonderhoud</span>
+              <span class="pill pill-pink">Events</span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button class="btn btn-primary">${svg(I.plus)}Primaire actie</button>
+              <button class="btn btn-ghost">${svg(I.edit)}Secundair</button>
+              <button class="btn btn-ghost btn-sm">Klein</button>
+              <div class="switch on" onclick="this.classList.toggle('on')"></div>
+              <div class="switch" onclick="this.classList.toggle('on')"></div>
+            </div>
+            <div style="font-size:12.5px;color:var(--text-3)">Voortgang</div>
+            <div class="progress"><i style="width:62%"></i></div>
+            <button class="btn btn-primary" style="align-self:flex-start" onclick="openDemoPanel()">${svg(I.eye)}Open zijpaneel</button>
+            <button class="btn btn-ghost" style="align-self:flex-start" onclick="openDemoModal()">${svg(I.doc)}Open modal</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">Rol-info</span></div>
+          <div class="card-body">
+            <div class="kv"><dt>Actieve rol</dt><dd id="dbgRole">—</dd></div>
+            <div class="kv"><dt>Zichtbare modules</dt><dd id="dbgVis">—</dd></div>
+            <div class="kv"><dt>Actieve module</dt><dd id="dbgMod">—</dd></div>
+            <div class="kv"><dt>Actieve tab</dt><dd id="dbgTab">—</dd></div>
+            <div style="margin-top:12px;font-size:12.5px;color:var(--text-3);line-height:1.55">
+              Wissel de rol linksonder om te zien hoe de zijbalk zich vult
+              op basis van <code>MODS</code> + <code>TAB_RESTRICT</code> + <code>MOD_LOCK</code>.
+              Klik op <b>Inbox</b> of <b>E-mail</b> in de rol <b>Sales</b> —
+              die tonen het "binnenkort beschikbaar"-scherm (slot-icoon in
+              de nav).
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  // Taken: gebruik hetzelfde placeholder patroon per tab
+  ['taken/Mijn taken', 'taken/Team', 'taken/Afgerond',
+   'sales/Dashboard', 'sales/Offertes', 'sales/Retentie', 'sales/Verkoopprestaties',
+   'finance/Dashboard', 'finance/Facturen', 'finance/Abonnementen', "finance/Creditnota's", 'finance/Bank', 'finance/Omzet & MRR',
+   'wanbetalers/Gesprekken', 'wanbetalers/Acties', 'wanbetalers/Overzicht', 'wanbetalers/Brieven',
+   'tickets/Open', 'tickets/Wacht op klant', 'tickets/Afgehandeld',
+   'events/Overzicht', 'events/Inbox', 'events/Inschrijvingen', 'events/Mentor-grootboek',
+   'onboarding/Actief', 'onboarding/Inbox', 'onboarding/Archief',
+   'mentoren/Overzicht', 'mentoren/Grootboek', 'mentoren/Uitbetalingen', 'mentoren/Beoordelingen', 'mentoren/Certificaten', 'mentoren/Signalen',
+   'leads/Actief', 'leads/Gearchiveerd',
+   'leadsonderhoud/Inbox', 'leadsonderhoud/Contacten', 'leadsonderhoud/Bulk versturen', 'leadsonderhoud/Statistieken',
+   'lisa/Dashboard', 'lisa/Gesprekken', 'lisa/Statistieken',
+   'automatiseringen/Overzicht', 'automatiseringen/Events', 'automatiseringen/Onboarding', 'automatiseringen/Leadsonderhoud', 'automatiseringen/Wanbetalers', 'automatiseringen/Lisa',
+   'agents/Overzicht', 'agents/Configuratie', 'agents/Kennisbank', 'agents/Prestaties',
+   'logboek/Activiteit', 'logboek/Per gebruiker',
+   'follow-up-follow', 'verdiensten/Overzicht', 'verdiensten/Uitbetalingen', 'verdiensten/Reiskosten', 'verdiensten/Certificaten',
+  ].forEach(k => { if (!VIEWS[k]) VIEWS[k] = () => `<div class="pad"><div class="card"><div class="card-body">
+    <div style="font-size:14px;font-weight:600;margin-bottom:6px">Placeholder — ${k}</div>
+    <div style="font-size:13px;color:var(--text-3);line-height:1.55">Deze view wordt in de per-module PR gerenderd met echte data.
+    In deze demo (PR 0-B2) toont de shell alleen dat rol-gating, tab-render, dark-mode en paneel/modal werken.</div>
+  </div></div>` });
+
+  // Panel + modal demo
+  window.openDemoPanel = () => {
+    DFO.S.rows = [{}, {}, {}]; // 3 dummy rijen zodat stepRow ↑↓ werkt
+    DFO.S.selIdx = 0;
+    DFO.rowOpener = (i) => {
+      DFO.S.selIdx = i;
+      DFO.openPanel(
+        `Rij ${i + 1}`,
+        `Demo-onderdeel · rij ${i + 1} van ${DFO.S.rows.length}`,
+        `<div class="hero-amount">
+           <div class="lbl">Bedrag</div>
+           <div class="big-amount">${eur(1234 + i * 100)}</div>
+           <div style="margin-top:9px"><span class="pill pill-ok">Voorbeeld</span></div>
+         </div>
+         <div class="sect">
+           <div class="sect-title">Gegevens</div>
+           <div class="kv"><dt>Naam</dt><dd>Voorbeeld ${i + 1}</dd></div>
+           <div class="kv"><dt>Datum</dt><dd class="num">2026-08-07</dd></div>
+           <div class="kv"><dt>Status</dt><dd>Actief</dd></div>
+         </div>
+         <div class="sect">
+           <div class="sect-title">Tijdlijn</div>
+           <div class="timeline">
+             <div class="tl-item hi"><div class="tl-when">Vandaag 09:12</div><div class="tl-what">Rij bijgewerkt</div></div>
+             <div class="tl-item"><div class="tl-when">Gisteren</div><div class="tl-what">Rij aangemaakt</div></div>
+           </div>
+         </div>`,
+        `<button class="btn btn-ghost" onclick="DFO.closePanel()">Sluiten</button>
+         <button class="btn btn-primary" style="margin-left:auto">Bevestigen</button>`
+      );
+    };
+    DFO.rowOpener(0);
+  };
+  window.openDemoModal = () => {
+    DFO.openModal({
+      head: `<div style="font-size:15px;font-weight:600">Demo-modal</div>
+             <button class="icon-btn" style="margin-left:auto" onclick="DFO.closeModal()">${svg(I.x)}</button>`,
+      body: `<div style="padding:20px 22px;font-size:13.5px;color:var(--text-2);line-height:1.65">
+               <p>De modal-primitieve bestaat als één shared DOM-node (<code>#dfoModal</code>) die door <code>openModal({head,body,foot})</code> gevuld wordt. Op mobiel komt de box van onderen (bottom-sheet-stijl).</p>
+               <p style="margin-top:10px">Klik op de achtergrond of druk op <span class="kbd">Esc</span> om te sluiten.</p>
+             </div>`,
+      foot: `<button class="btn btn-ghost" onclick="DFO.closeModal()">Annuleren</button>
+             <button class="btn btn-primary" style="margin-left:auto">Actie</button>`,
+    });
+  };
+
+  // Debug-widget bijwerken bij elke render
+  const origRender = DFO.render;
+  DFO.render = function () {
+    origRender.apply(this, arguments);
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    set('dbgRole', DFO.ROLES[DFO.S.role].naam);
+    set('dbgVis',  DFO.visMods().length + ' zichtbaar');
+    set('dbgMod',  DFO.curMod()?.naam || '—');
+    set('dbgTab',  DFO.S.tab || '—');
+  };
+
+  // Boot
+  DFO.applyStoredTheme();
+  DFO.setRole('super_admin');
+})();
+</script>
+</body>
+</html>
