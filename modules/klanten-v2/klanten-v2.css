@@ -1,0 +1,17 @@
+/* modules/klanten-v2/klanten-v2.css
+ *
+ * Module-scope voor Klanten-v2. Sinds PR 0-C is de module-accent
+ * ingang niet meer op body-niveau; DFO.applyColor() zet de --m /
+ * --m-soft / --m-line / --m-glow variabelen automatisch op :root
+ * op basis van MODS[id='klanten'].color ('emerald'). Deze file houdt
+ * dus alleen module-specifieke overrides over.
+ *
+ * Bedrijfsklant-icoontje (naast tabelrij).
+ */
+.klanten-v2 .kv-biz-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 4px;
+  background: var(--surface-3); color: var(--text-3);
+  margin-left: 6px;
+}
+.klanten-v2 .kv-biz-badge svg { width: 11px; height: 11px; }

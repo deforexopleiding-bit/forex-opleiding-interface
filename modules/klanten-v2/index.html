@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>Klanten · v2 preview · De Forex Opleiding</title>
+
+  <!-- FOUC-preventie: theme zetten voor tokens.css laadt (zelfde key + waardes als DFO.applyStoredTheme) -->
+  <script>
+    (function () {
+      try {
+        var v = localStorage.getItem('dfo-crm-theme');
+        document.documentElement.setAttribute('data-theme', v === 'dark' ? 'dark' : 'light');
+      } catch (_) {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+  <!-- Gedeelde design-system (fundament) — GEEN eigen sidebar/topbar CSS meer. -->
+  <link rel="stylesheet" href="../shared/design-system/tokens.css?v=0c">
+  <link rel="stylesheet" href="../shared/design-system/app-shell.css?v=0c">
+  <link rel="stylesheet" href="../shared/design-system/components.css?v=0c">
+  <link rel="stylesheet" href="klanten-v2.css?v=0c">
+
+  <!-- Supabase auth (bestaande shared client) -->
+  <script src="../shared/supabase-client.js"></script>
+</head>
+<body class="klanten-v2">
+
+  <!-- ═══ APP-SHELL SKELET (identiek aan modules/shell-demo.html, 0-B2) ═══ -->
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">F</div>
+        <div>
+          <div class="brand-name">De Forex Opleiding</div>
+          <div class="brand-sub">CRM · v2 preview</div>
+        </div>
+      </div>
+      <nav class="nav" id="nav"></nav>
+      <div class="sidebar-foot">
+        <div class="rolebox" id="kv-rolebox" style="display:none">
+          <div class="rolebox-l">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 6v6c0 5 3.4 9.4 8 10 4.6-.6 8-5 8-10V6z"/></svg>
+            Bekijk als
+          </div>
+          <select class="role-sel" id="roleSel" onchange="DFO.setRole(this.value)">
+            <option value="super_admin">Super admin</option>
+            <option value="manager">Manager</option>
+            <option value="sales">Sales</option>
+            <option value="mentor">Mentor</option>
+            <option value="marketing">Marketing</option>
+            <option value="administratie">Administratie</option>
+          </select>
+        </div>
+        <div class="user-row">
+          <div class="avatar" id="userAv">—</div>
+          <div style="flex:1;min-width:0">
+            <div class="user-name" id="userName">Laden…</div>
+            <div class="user-role" id="userRole">—</div>
+          </div>
+          <button class="icon-btn" onclick="DFO.toggleTheme()" title="Licht / donker" aria-label="Wissel thema">
+            <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main" id="main">
+      <header class="topbar">
+        <button class="mob-btn" onclick="DFO.toggleNav()" aria-label="Menu">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+        </button>
+        <div class="page-title" id="crumb"></div>
+        <div class="searchbox" role="search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input id="kv-topbar-search" placeholder="Zoek klanten…" aria-label="Zoek klanten" />
+          <span class="kbd">⌘K</span>
+        </div>
+      </header>
+      <div class="tabs" id="tabs"></div>
+      <div class="content" id="content"></div>
+    </div>
+  </div>
+
+  <!-- Scrim (mobiel off-canvas) -->
+  <div class="scrim" id="scrim" onclick="DFO.toggleNav(false)"></div>
+
+  <!-- Zijpaneel (right-slide) — nog niet in gebruik in PR-A, wel al bedraad -->
+  <aside class="panel" id="panel">
+    <div class="panel-head">
+      <div style="min-width:0">
+        <div class="panel-title" id="panelTitle">—</div>
+        <div class="panel-sub" id="panelSub">—</div>
+      </div>
+      <div class="panel-nav">
+        <button class="icon-btn" onclick="DFO.stepRow(-1)" title="Vorige (↑)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m18 15-6-6-6 6"/></svg>
+        </button>
+        <button class="icon-btn" onclick="DFO.stepRow(1)" title="Volgende (↓)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <button class="icon-btn" onclick="DFO.closePanel()" title="Sluiten (Esc)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="panel-body" id="panelBody"></div>
+    <div class="panel-foot" id="panelFoot"></div>
+  </aside>
+
+  <!-- Toast (module-scoped) + hint (DFO) — beide onafhankelijk -->
+  <div class="ds-toast" id="kv-toast" role="status" aria-live="polite"></div>
+  <div class="hint" id="hint"></div>
+
+  <!-- ═══ APP-SHELL SCRIPTS (0-B2) ═══ -->
+  <script src="../shared/design-system/icons.js?v=0c"></script>
+  <script src="../shared/design-system/app-shell.js?v=0c"></script>
+
+  <!-- ═══ MODULE JS (native ES-modules; requires modern browser) ═══ -->
+  <script type="module" src="klanten-v2.js?v=0c"></script>
+</body>
+</html>
