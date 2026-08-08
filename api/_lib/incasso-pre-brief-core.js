@@ -78,7 +78,7 @@ function _resolveLogoBuffer() {
 function renderBriefPdf({ customer, resolvedSubject, resolvedBody }) {
   return new Promise((resolve, reject) => {
     try {
-      const doc = new PDFDocument({ size: 'A4', margin: 60 });
+      const doc = new PDFDocument({ size: 'A4', margin: 50 });
       const chunks = [];
       doc.on('data', (c) => chunks.push(c));
       doc.on('end',  () => resolve(Buffer.concat(chunks)));
@@ -126,20 +126,43 @@ function renderBriefPdf({ customer, resolvedSubject, resolvedBody }) {
         addrY += lineHeight;
       }
 
-      // Body begint ruim onder het venster (20mm marge onder venster-bottom).
-      const bodyStartY = mmToPt(50 + 40 + 20);
+      // Body begint net ONDER het C5-venster (venster-bottom = 90mm) met een
+      // krappe marge. Voorheen 110mm → ~130pt loze witruimte tussen adresblok
+      // en "Datum:", waardoor de brief over 2 pagina's liep. Nu strak zodat
+      // alles op één A4 past; de body valt niet in het envelop-venster.
+      const bodyStartY = mmToPt(92);
 
-      doc.font('Helvetica').fontSize(10).fillColor('#0f172a');
+      // Body-tekst normaliseren tegen de "Ð"-glyph: \r\n en losse \r → \n.
+      // Anders tekent pdfkit een glyph op elke regelovergang én faalt de
+      // alinea-split (\n{2,}), waardoor alles op één alinea belandt. Robuust
+      // ongeacht of de DB-tekst \r bevat (de Templates-tab-textarea levert
+      // vaak \r\n). 3+ lege regels ingekort tot één.
+      const bodyText = String(resolvedBody || '')
+        .replace(/\r\n?/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+      // Resterende control-tekens PER ALINEA strippen (zouden anders als glyph
+      // renderen); losse \n binnen een alinea → spatie. € en accenten blijven
+      // staan (i.t.t. sanitizeForPdf, die cp>255 én alle whitespace sloopt).
+      const cleanPara = (t) => String(t)
+        .replace(/\n/g, ' ')
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+        .replace(/[ \t]{2,}/g, ' ')
+        .trim();
+
+      doc.font('Helvetica').fontSize(9.5).fillColor('#0f172a');
       doc.text('Datum: ' + fmtDateNl(new Date()), 60, bodyStartY);
+      doc.moveDown(0.3);
+      doc.font('Helvetica-Bold').fontSize(10.5).text('Onderwerp: ' + cleanPara(resolvedSubject || ''), 60);
       doc.moveDown(0.5);
-      doc.font('Helvetica-Bold').fontSize(11).text('Onderwerp: ' + (resolvedSubject || ''), 60);
-      doc.font('Helvetica').fontSize(10).fillColor('#0f172a');
-      doc.moveDown(1);
+      doc.font('Helvetica').fontSize(9.5).fillColor('#0f172a');
 
-      const paragraphs = String(resolvedBody || '').split(/\n{2,}/);
-      for (const p of paragraphs) {
-        doc.text(p.replace(/\n/g, ' '), 60, doc.y, { width: 475, align: 'left' });
-        doc.moveDown(0.6);
+      const paragraphs = bodyText.split(/\n{2,}/);
+      for (let i = 0; i < paragraphs.length; i++) {
+        const p = cleanPara(paragraphs[i]);
+        if (!p) continue;
+        doc.text(p, 60, doc.y, { width: 475, align: 'left' });
+        if (i < paragraphs.length - 1) doc.moveDown(0.35);
       }
 
       // Bewuste keuze: GEEN "Gegenereerd door ..."-voetnoot — WIK is een
