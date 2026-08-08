@@ -38,13 +38,20 @@
     { nr: '#2825', klant: 'Karim Alian',        ond: 'Opzegverzoek membership',         prio: 'midden', status: 'afgehandeld', wacht: '—',  toegewezen: 'Joost',   opgelost: '4 aug', duur: '1d' },
   ];
 
+  /* ── Notice-handler: lichte visual response voor dode action-knoppen
+     (Nieuw ticket etc). Data-ronde vervangt door echte modal / flow. */
+  window.__ticketsNotice = (label) => {
+    console.info('[tickets-v2] ' + label + ' (voorbeeld — modal/flow komt in data-ronde)');
+    try { alert(label + ' — komt in de data-ronde.'); } catch (_) { /* ignore */ }
+  };
+
   /* ── Prio-pill + toolbar (prototype r2752-2755) ───────────────────── */
   const prioPill = p => H.pill(p === 'hoog' ? 'danger' : p === 'midden' ? 'warn' : 'neutral', p[0].toUpperCase() + p.slice(1));
   const tktToolbar = () => H.toolbar([
     H.chips('p', [{ l: 'Alle prioriteiten', v: 'all' }, { l: 'Hoog', v: 'h' }, { l: 'Midden', v: 'm' }, { l: 'Laag', v: 'l' }], F('p', 'all')),
     `<select class="filter-sel"><option>Iedereen</option><option>Amigo</option><option>Jeffrey</option><option>Dave</option></select>`,
     H.search('Zoek ticket…'),
-    `<div class="tb-right"><button class="btn btn-primary">${svg(I.plus)}Nieuw ticket</button></div>`,
+    `<div class="tb-right"><button class="btn btn-primary" onclick="__ticketsNotice('Nieuw ticket')">${svg(I.plus)}Nieuw ticket</button></div>`,
   ]);
 
   /* ── Tab-views ────────────────────────────────────────────────────── */
