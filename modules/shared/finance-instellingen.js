@@ -1487,14 +1487,14 @@
         #waMetaVarsPanel .wa-var-group-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--text-faint); padding:2px 0 4px 0; margin:0 0 4px 0; border-bottom:1px solid var(--border); }
         #waMetaVarsPanel .wa-var-group details { margin-left:2px; }
         .wa-var-chip { padding:4px 10px; background:#f3f4f6; border:1px solid var(--border); border-radius:999px; font-size:12px; cursor:pointer; color:var(--text); font-family:inherit; line-height:1.3; }
-        .wa-var-chip:hover { background:#e5e7eb; }
+        .wa-var-chip:hover { background:var(--surface-2); }
         .wa-var-chip[disabled] { opacity:.5; cursor:not-allowed; }
         #waMetaVarsBlock.wa-vars-named { background:rgba(34,197,94,0.06); border-style:solid; border-color:rgba(34,197,94,0.4); }
         #waMetaVarsBlock .wa-var-readonly-row { display:grid; grid-template-columns:auto 1fr; gap:8px; align-items:center; padding:3px 0; font-size:12px; }
         #waMetaVarsBlock .wa-var-readonly-key { font-family:monospace; font-size:11.5px; color:var(--text); background:rgba(34,197,94,0.12); padding:2px 6px; border-radius:4px; }
         #waMetaVarsBlock .wa-var-readonly-example { color:var(--text-faint); font-size:11.5px; }
         /* Preview body */
-        #waMetaPreviewBody .wa-preview-placeholder { color:#888; font-style:italic; }
+        #waMetaPreviewBody .wa-preview-placeholder { color:var(--text-3); font-style:italic; }
         #waMetaPreviewBody .wa-preview-unknown { color:var(--rose); background:var(--rose-soft); padding:0 4px; border-radius:3px; font-family:monospace; font-size:12.5px; display:inline-flex; align-items:center; gap:4px; }
         #waMetaPreviewBody .wa-preview-unknown-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:#ef4444; box-shadow:0 0 0 2px rgba(239,68,68,0.20); }
       </style>
