@@ -99,7 +99,7 @@ function renderBriefPdf({ customer, resolvedSubject, resolvedBody }) {
       }
 
       // Afzender-blok rechtsboven.
-      const companyName    = process.env.COMPANY_NAME    || 'De Forex Opleiding NL B.V.';
+      const companyName    = process.env.COMPANY_NAME    || 'De Forex Opleiding B.V.';
       const companyAddress = process.env.COMPANY_ADDRESS || '';
       const companyPhone   = process.env.COMPANY_PHONE   || '';
       const companyEmail   = process.env.COMPANY_EMAIL   || 'info@deforexopleiding.nl';

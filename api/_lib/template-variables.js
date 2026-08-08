@@ -200,7 +200,7 @@ export const AVAILABLE_VARIABLES = [
   { key: 'afdeling.ondertekenaar', label: 'Ondertekenaar',      category: 'afdeling', example: 'De Forex Opleiding',            requires_context: null, requires_module_context: true },
 
   // ── bedrijf (env / constants) ──────────────────────────────────────────
-  { key: 'bedrijf.naam',     label: 'Bedrijfsnaam',  category: 'bedrijf', example: 'De Forex Opleiding NL B.V.', requires_context: null },
+  { key: 'bedrijf.naam',     label: 'Bedrijfsnaam',  category: 'bedrijf', example: 'De Forex Opleiding B.V.', requires_context: null },
   { key: 'bedrijf.adres',    label: 'Bedrijfsadres', category: 'bedrijf', example: 'Voorbeeldstraat 1, 1234 AB Plaats', requires_context: null },
   { key: 'bedrijf.kvk',      label: 'KvK-nummer',    category: 'bedrijf', example: '12345678',                   requires_context: null },
   { key: 'bedrijf.btw',      label: 'BTW-nummer',    category: 'bedrijf', example: 'NL123456789B01',             requires_context: null },
@@ -380,7 +380,7 @@ function getCompanyValue(key) {
   // Server-side bedrijfsgegevens uit env-vars. Fallback = lege string (caller
   // moet beslissen wat te doen — sturen mag, leeg veld in template-body is OK).
   // Documentatie van verwachte env-vars:
-  //   COMPANY_NAME      -> bedrijf.naam     (fallback: 'De Forex Opleiding NL B.V.')
+  //   COMPANY_NAME      -> bedrijf.naam     (fallback: 'De Forex Opleiding B.V.')
   //   COMPANY_ADDRESS   -> bedrijf.adres
   //   COMPANY_KVK       -> bedrijf.kvk
   //   COMPANY_BTW       -> bedrijf.btw
@@ -388,7 +388,7 @@ function getCompanyValue(key) {
   //   COMPANY_EMAIL     -> bedrijf.email
   const env = process.env || {};
   switch (key) {
-    case 'bedrijf.naam':     return env.COMPANY_NAME || 'De Forex Opleiding NL B.V.';
+    case 'bedrijf.naam':     return env.COMPANY_NAME || 'De Forex Opleiding B.V.';
     case 'bedrijf.adres':    return env.COMPANY_ADDRESS || '';
     case 'bedrijf.kvk':      return env.COMPANY_KVK || '';
     case 'bedrijf.btw':      return env.COMPANY_BTW || '';
