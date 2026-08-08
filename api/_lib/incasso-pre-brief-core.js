@@ -141,28 +141,43 @@ function renderBriefPdf({ customer, resolvedSubject, resolvedBody }) {
         .replace(/\r\n?/g, '\n')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
-      // Resterende control-tekens PER ALINEA strippen (zouden anders als glyph
-      // renderen); losse \n binnen een alinea → spatie. € en accenten blijven
-      // staan (i.t.t. sanitizeForPdf, die cp>255 én alle whitespace sloopt).
-      const cleanPara = (t) => String(t)
-        .replace(/\n/g, ' ')
-        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
-        .replace(/[ \t]{2,}/g, ' ')
-        .trim();
+      // Control-tekens strippen via codepoint-filter (escaping-proof): losse
+      // \n (0x0A) blijft behouden als ECHTE regelafbreking, tab -> spatie, en
+      // alle overige control-tekens (incl. CR 0x0D) vallen weg.
+      const stripCtrl = (t) => {
+        let out = '';
+        for (const ch of String(t)) {
+          const c = ch.codePointAt(0);
+          if (c === 10) { out += ch; continue; } // newline behouden
+          if (c === 9)  { out += ' '; continue; } // tab -> spatie
+          if (c < 32 || c === 127) continue;      // overige control-tekens weg
+          out += ch;
+        }
+        return out;
+      };
+      // Onderwerp = 1 regel: newlines -> spatie.
+      const cleanLine  = (t) => stripCtrl(t).replace(/\n/g, ' ').replace(/ {2,}/g, ' ').trim();
+      // Body-blok: horizontale spaties inklappen, maar ENKELE \n behouden als
+      // echte regelafbreking (kopjes/ondertekening op eigen regel). Alleen \n\n
+      // (via de split hieronder) geeft alinea-afstand.
+      const cleanBlock = (t) => stripCtrl(t).replace(/ {2,}/g, ' ').replace(/ *\n */g, '\n').trim();
 
-      doc.font('Helvetica').fontSize(9.5).fillColor('#0f172a');
+      const BODY_SIZE = 10.5;      // was 9,5 - meer lucht
+      const BODY_LINEGAP = 2.5;    // ruimere regelafstand
+
+      doc.font('Helvetica').fontSize(BODY_SIZE).fillColor('#0f172a');
       doc.text('Datum: ' + fmtDateNl(new Date()), 60, bodyStartY);
-      doc.moveDown(0.3);
-      doc.font('Helvetica-Bold').fontSize(10.5).text('Onderwerp: ' + cleanPara(resolvedSubject || ''), 60);
-      doc.moveDown(0.5);
-      doc.font('Helvetica').fontSize(9.5).fillColor('#0f172a');
+      doc.moveDown(0.45);
+      doc.font('Helvetica-Bold').fontSize(11).text('Onderwerp: ' + cleanLine(resolvedSubject || ''), 60);
+      doc.moveDown(0.7);
+      doc.font('Helvetica').fontSize(BODY_SIZE).fillColor('#0f172a');
 
       const paragraphs = bodyText.split(/\n{2,}/);
       for (let i = 0; i < paragraphs.length; i++) {
-        const p = cleanPara(paragraphs[i]);
-        if (!p) continue;
-        doc.text(p, 60, doc.y, { width: 475, align: 'left' });
-        if (i < paragraphs.length - 1) doc.moveDown(0.35);
+        const block = cleanBlock(paragraphs[i]);
+        if (!block) continue;
+        doc.text(block, 60, doc.y, { width: 475, align: 'left', lineGap: BODY_LINEGAP });
+        if (i < paragraphs.length - 1) doc.moveDown(0.55);
       }
 
       // Bewuste keuze: GEEN "Gegenereerd door ..."-voetnoot — WIK is een
