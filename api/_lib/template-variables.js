@@ -58,6 +58,77 @@ function openAmount(inv) {
   return Math.max(0, total - paid - credited);
 }
 
+// Buitengerechtelijke incassokosten volgens de wettelijke staffel (Besluit
+// vergoeding voor buitengerechtelijke incassokosten / WIK), berekend over het
+// openstaande hoofdbedrag:
+//   15%  over de eerste  EUR 2.500
+//   10%  over de volgende EUR 2.500   (tot 5.000)
+//    5%  over de volgende EUR 5.000   (tot 10.000)
+//    1%  over de volgende EUR 190.000 (tot 200.000)
+//    0,5% over het meerdere
+// Minimum EUR 40,00, maximum EUR 6.775,00. GÉÉN btw (wij zijn btw-plichtig).
+// Afronden op centen. bedrag <= 0 → 0 (geen schuld = geen kosten; het minimum
+// van 40 geldt alleen wanneer er daadwerkelijk kosten in rekening komen).
+// PURE — unit-testbaar.
+export function berekenIncassokosten(bedrag) {
+  const b = Number(bedrag);
+  if (!Number.isFinite(b) || b <= 0) return 0;
+  const staffel = [
+    [2500, 0.15],
+    [2500, 0.10],
+    [5000, 0.05],
+    [190000, 0.01],
+    [Infinity, 0.005],
+  ];
+  let rest = b;
+  let kosten = 0;
+  for (const [schijf, pct] of staffel) {
+    if (rest <= 0) break;
+    const deel = Math.min(rest, schijf);
+    kosten += deel * pct;
+    rest -= deel;
+  }
+  kosten = Math.round(kosten * 100) / 100; // afronden op centen
+  if (kosten < 40) kosten = 40;            // wettelijk minimum
+  if (kosten > 6775) kosten = 6775;        // wettelijk maximum
+  return kosten;
+}
+
+// Volledig nog openstaand bedrag over ALLE abonnementen/termijnen van de klant
+// samen — inclusief de nog niet-vervallen toekomstige termijnen.
+//
+// Definitie (optie A): SUM over de actieve subscriptions van
+//   amount × term_count × (1 + vat_percentage/100)          [incl. btw, per sub eigen tarief]
+// MINUS het reeds betaalde (SUM van invoices.amount_paid van de klant).
+// Nooit negatief. Afronden op centen.
+//
+// GÉÉN apart aanbetaling-veld: aanbetalingen worden bij ons ALTIJD óók als een
+// subscription ingevoerd, dus ze zitten al in de som. deals.downpayment_amount /
+// payment_downpayment_amount optellen zou dubbeltellen (te hoog bedrag op een
+// juridische brief) — daarom bewust weggelaten.
+//
+// Fallback: geen subscriptions (geen contract-data) → het reeds-vervallen totaal
+// (totaalOpen), zodat de brief nooit een leeg/0-bedrag toont waar een schuld staat.
+//
+// De caller (generatePreBriefForCustomer) laadt subscriptions + betaaldTotaal;
+// templates zonder die context (bv. WhatsApp/e-mail) krijgen de fallback.
+// PURE — unit-testbaar.
+export function berekenTotaalResterend({ subscriptions, betaaldTotaal, totaalOpen } = {}) {
+  const subs = Array.isArray(subscriptions) ? subscriptions : [];
+  if (!subs.length) {
+    return Math.max(0, Number(totaalOpen) || 0); // fallback: geen contract-data
+  }
+  const subsInclBtw = subs.reduce((sum, s) => {
+    const amount = Number(s?.amount) || 0;
+    const terms = Number(s?.term_count) || 0;
+    const vatRaw = Number(s?.vat_percentage);
+    const vat = Number.isFinite(vatRaw) ? vatRaw : 21; // default-btw als kolom leeg
+    return sum + amount * terms * (1 + vat / 100);
+  }, 0);
+  const betaald = Number(betaaldTotaal) || 0;
+  return Math.max(0, Math.round((subsInclBtw - betaald) * 100) / 100);
+}
+
 function customerDisplayName(c) {
   if (!c) return '';
   if (c.company_name && String(c.company_name).trim()) {
@@ -119,6 +190,11 @@ export const AVAILABLE_VARIABLES = [
   { key: 'klant.factuur_lijst', label: 'Lijst openstaande facturen', category: 'klant', example: '- 2026-0001 (EUR 80,00)\n- 2026-0002 (EUR 120,00)', requires_context: 'invoices' },
   { key: 'klant.totaal_open',   label: 'Totaal openstaand',          category: 'klant', example: 'EUR 200,00',  requires_context: 'invoices' },
   { key: 'klant.aantal_open',   label: 'Aantal open facturen',       category: 'klant', example: '2',           requires_context: 'invoices' },
+  { key: 'klant.incassokosten',     label: 'Incassokosten (BIK-staffel over totaal openstaand)', category: 'klant', example: 'EUR 40,00',  requires_context: 'invoices' },
+  { key: 'klant.totaal_na_termijn', label: 'Totaal openstaand + incassokosten',                  category: 'klant', example: 'EUR 240,00', requires_context: 'invoices' },
+  { key: 'klant.totaal_resterend',  label: 'Volledig resterend (alle termijnen incl. toekomstige)', category: 'klant', example: 'EUR 3.600,00', requires_context: 'subscriptions' },
+  { key: 'klant.indicatie_laag',    label: 'Indicatie laag (resterend × 1,5)',                   category: 'klant', example: 'EUR 5.400,00', requires_context: 'subscriptions' },
+  { key: 'klant.indicatie_hoog',    label: 'Indicatie hoog (resterend × 1,6)',                   category: 'klant', example: 'EUR 5.760,00', requires_context: 'subscriptions' },
 
   // ── afdeling (per-module contactgegevens uit whatsapp_module_config) ───
   { key: 'afdeling.telefoon',      label: 'Telefoon afdeling',  category: 'afdeling', example: '+31 85 130 83 62',              requires_context: null, requires_module_context: true },
@@ -127,7 +203,7 @@ export const AVAILABLE_VARIABLES = [
   { key: 'afdeling.ondertekenaar', label: 'Ondertekenaar',      category: 'afdeling', example: 'De Forex Opleiding',            requires_context: null, requires_module_context: true },
 
   // ── bedrijf (env / constants) ──────────────────────────────────────────
-  { key: 'bedrijf.naam',     label: 'Bedrijfsnaam',  category: 'bedrijf', example: 'De Forex Opleiding NL B.V.', requires_context: null },
+  { key: 'bedrijf.naam',     label: 'Bedrijfsnaam',  category: 'bedrijf', example: 'De Forex Opleiding B.V.', requires_context: null },
   { key: 'bedrijf.adres',    label: 'Bedrijfsadres', category: 'bedrijf', example: 'Voorbeeldstraat 1, 1234 AB Plaats', requires_context: null },
   { key: 'bedrijf.kvk',      label: 'KvK-nummer',    category: 'bedrijf', example: '12345678',                   requires_context: null },
   { key: 'bedrijf.btw',      label: 'BTW-nummer',    category: 'bedrijf', example: 'NL123456789B01',             requires_context: null },
@@ -307,7 +383,7 @@ function getCompanyValue(key) {
   // Server-side bedrijfsgegevens uit env-vars. Fallback = lege string (caller
   // moet beslissen wat te doen — sturen mag, leeg veld in template-body is OK).
   // Documentatie van verwachte env-vars:
-  //   COMPANY_NAME      -> bedrijf.naam     (fallback: 'De Forex Opleiding NL B.V.')
+  //   COMPANY_NAME      -> bedrijf.naam     (fallback: 'De Forex Opleiding B.V.')
   //   COMPANY_ADDRESS   -> bedrijf.adres
   //   COMPANY_KVK       -> bedrijf.kvk
   //   COMPANY_BTW       -> bedrijf.btw
@@ -315,7 +391,7 @@ function getCompanyValue(key) {
   //   COMPANY_EMAIL     -> bedrijf.email
   const env = process.env || {};
   switch (key) {
-    case 'bedrijf.naam':     return env.COMPANY_NAME || 'De Forex Opleiding NL B.V.';
+    case 'bedrijf.naam':     return env.COMPANY_NAME || 'De Forex Opleiding B.V.';
     case 'bedrijf.adres':    return env.COMPANY_ADDRESS || '';
     case 'bedrijf.kvk':      return env.COMPANY_KVK || '';
     case 'bedrijf.btw':      return env.COMPANY_BTW || '';
@@ -417,17 +493,37 @@ function getInvoiceValue(invoice, key) {
   }
 }
 
-function getKlantAggregateValue(openInvoices, key) {
-  const invs = Array.isArray(openInvoices) ? openInvoices : [];
+function getKlantAggregateValue(context, key) {
+  const ctx = context || {};
+  const invs = Array.isArray(ctx.openInvoices) ? ctx.openInvoices : [];
+  const totaalOpen = invs.reduce((sum, inv) => sum + openAmount(inv), 0);
+  // Resterend eenmalig berekenen (gedeeld door totaal_resterend + beide indicaties).
+  const resterend = berekenTotaalResterend({
+    subscriptions: ctx.subscriptions,
+    betaaldTotaal: ctx.betaaldTotaal,
+    totaalOpen,
+  });
   switch (key) {
     case 'klant.factuur_lijst':
       return invs
         .map((inv) => `- ${inv.invoice_number || inv.id || ''} (${formatEur(openAmount(inv))})`)
         .join('\n');
     case 'klant.totaal_open':
-      return formatEur(invs.reduce((sum, inv) => sum + openAmount(inv), 0));
+      return formatEur(totaalOpen);
     case 'klant.aantal_open':
       return String(invs.length);
+    case 'klant.incassokosten':
+      // Buitengerechtelijke incassokosten (BIK-staffel) over het totaal openstaand.
+      return formatEur(berekenIncassokosten(totaalOpen));
+    case 'klant.totaal_na_termijn':
+      // Totaal openstaand + incassokosten = wat na de 14-dagentermijn verschuldigd is.
+      return formatEur(totaalOpen + berekenIncassokosten(totaalOpen));
+    case 'klant.totaal_resterend':
+      return formatEur(resterend);
+    case 'klant.indicatie_laag':
+      return formatEur(Math.round(resterend * 1.5 * 100) / 100);
+    case 'klant.indicatie_hoog':
+      return formatEur(Math.round(resterend * 1.6 * 100) / 100);
     default: return '';
   }
 }
@@ -619,7 +715,7 @@ export function resolveVariableValue(key, context) {
     case 'datum':    return getDateValue(key);
     case 'customer': return getCustomerValue(context && context.customer, key);
     case 'invoice':  return getInvoiceValue(context && context.invoice, key);
-    case 'klant':    return getKlantAggregateValue(context && context.openInvoices, key);
+    case 'klant':    return getKlantAggregateValue(context, key);
     case 'afdeling': return getAfdelingValue(key, context && context.moduleContext);
     case 'event':      return getEventValue(context && context.event, key);
     case 'attendee':   return getAttendeeValue(context && context.attendee, key);
