@@ -128,16 +128,16 @@
 
     /* Status- en betalings-badges */
     .ob-badge { display:inline-block; padding:2px 9px; border-radius:10px; font-size:11.5px; font-weight:600; white-space:nowrap; }
-    .ob-badge.aangemeld    { background:rgba(20,115,214,0.14);  color:#1160bd; }
-    .ob-badge.bezig        { background:rgba(245,158,11,0.16);  color:#b45309; }
-    .ob-badge.afgerond     { background:rgba(34,197,94,0.14);   color:#15803d; }
-    .ob-badge.gearchiveerd { background:rgba(100,116,139,0.18); color:#475569; }
-    .ob-badge.paid-yes     { background:rgba(34,197,94,0.14);   color:#15803d; }
-    .ob-badge.paid-no      { background:rgba(100,116,139,0.18); color:#475569; }
+    .ob-badge.aangemeld    { background:var(--blue-soft);    color:var(--blue); }
+    .ob-badge.bezig        { background:var(--amber-soft);   color:var(--amber); }
+    .ob-badge.afgerond     { background:var(--emerald-soft); color:var(--emerald); }
+    .ob-badge.gearchiveerd { background:var(--slate-soft);   color:var(--slate); }
+    .ob-badge.paid-yes     { background:var(--emerald-soft); color:var(--emerald); }
+    .ob-badge.paid-no      { background:var(--slate-soft);   color:var(--slate); }
     /* Bubble-provisioning status (F2) */
-    .ob-badge.bubble-ok    { background:rgba(34,197,94,0.14);   color:#15803d; }
-    .ob-badge.bubble-fail  { background:rgba(220,38,38,0.14);   color:#b91c1c; cursor:help; }
-    .ob-badge.bubble-none  { background:rgba(100,116,139,0.18); color:#475569; }
+    .ob-badge.bubble-ok    { background:var(--emerald-soft); color:var(--emerald); }
+    .ob-badge.bubble-fail  { background:var(--rose-soft);    color:var(--rose); cursor:help; }
+    .ob-badge.bubble-none  { background:var(--slate-soft);   color:var(--slate); }
 
     .ob-row-actions { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
     .ob-act {
@@ -146,8 +146,8 @@
       cursor:pointer; font-family:inherit; text-decoration:none; white-space:nowrap;
     }
     .ob-act:hover { background:var(--bg-elev); }
-    .ob-act.danger { color:#b91c1c; border-color:#fecaca; }
-    .ob-act.danger:hover { background:rgba(220,38,38,0.06); }
+    .ob-act.danger { color:var(--rose); border-color:var(--rose-line); }
+    .ob-act.danger:hover { background:var(--rose-soft); }
     /* Fallback-waarden zodat de primary-knop NOOIT onzichtbaar is, zelfs als
        een ancestor de --brand-* vars per ongeluk niet zet (bv. een modal die
        buiten .app gerenderd wordt en :root nog niet bereikt). */
@@ -472,7 +472,7 @@
 
   function renderError(msg) {
     const wrap = document.getElementById('tableWrap');
-    if (wrap) wrap.innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i>${esc(msg)}</div>`;
+    if (wrap) wrap.innerHTML = `<div class="empty-state" style="border-color:var(--rose-line);color:var(--rose)"><i class="ti ti-alert-triangle"></i>${esc(msg)}</div>`;
     const c = document.getElementById('counter');
     if (c) c.textContent = '';
   }
@@ -827,9 +827,9 @@
       const r = await window.AgentShared.apiFetch('/api/onboarding-detail?id=' + encodeURIComponent(id));
       let d = null; try { d = await r.json(); } catch {}
       if (r.status === 404) { bd.innerHTML = `<div class="empty-state">Onboarding niet gevonden.</div>`; return; }
-      if (r.status === 401) { bd.innerHTML = `<div class="empty-state" style="color:#b91c1c">Niet (meer) ingelogd.</div>`; return; }
-      if (r.status === 403) { bd.innerHTML = `<div class="empty-state" style="color:#b91c1c">Geen rechten (onboarding.admin).</div>`; return; }
-      if (!r.ok) { bd.innerHTML = `<div class="empty-state" style="color:#b91c1c">Ophalen mislukt: ${esc(d?.error || ('HTTP ' + r.status))}</div>`; return; }
+      if (r.status === 401) { bd.innerHTML = `<div class="empty-state" style="color:var(--rose)">Niet (meer) ingelogd.</div>`; return; }
+      if (r.status === 403) { bd.innerHTML = `<div class="empty-state" style="color:var(--rose)">Geen rechten (onboarding.admin).</div>`; return; }
+      if (!r.ok) { bd.innerHTML = `<div class="empty-state" style="color:var(--rose)">Ophalen mislukt: ${esc(d?.error || ('HTTP ' + r.status))}</div>`; return; }
       const o = d?.onboarding || {};
       const link = (o.token) ? (location.origin + '/modules/onboarding.html?t=' + encodeURIComponent(o.token)) : null;
       const answersJson = (o.answers && typeof o.answers === 'object')
@@ -853,7 +853,7 @@
           <dt>Gearchiveerd</dt>     <dd>${esc(fmtDateTimeNL(o.archived_at))}</dd>
           <dt>Bubble-status</dt>    <dd>${bubbleBadgeHtml(o)}${o.bubble_provisioned_at ? ' <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.bubble_provisioned_at)) + '</span>' : ''}</dd>
           ${o.bubble_user_id        ? `<dt>Bubble user-id</dt><dd style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all">${esc(o.bubble_user_id)}</dd>` : ''}
-          ${o.bubble_provision_error ? `<dt>Bubble-fout</dt><dd style="color:#b91c1c;white-space:pre-wrap;font-size:12.5px">${esc(o.bubble_provision_error)}</dd>` : ''}
+          ${o.bubble_provision_error ? `<dt>Bubble-fout</dt><dd style="color:var(--rose);white-space:pre-wrap;font-size:12.5px">${esc(o.bubble_provision_error)}</dd>` : ''}
           ${(!o.bubble_provisioned)
             ? `<dt>Bubble-actie</dt><dd>
                  <button type="button" class="ob-act primary" id="bubbleRetryBtn" data-id="${esc(o.id)}">
@@ -864,8 +864,8 @@
             : ''}
           <dt>WhatsApp-uitnodiging</dt><dd>
             ${o.invite_sent_at
-              ? '<span style="background:rgba(34,197,94,0.14);color:#15803d;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">✓ Verstuurd</span> <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.invite_sent_at)) + '</span>'
-              : '<span style="background:rgba(100,116,139,0.18);color:#475569;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">— Nog niet verstuurd</span>'}
+              ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">✓ Verstuurd</span> <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.invite_sent_at)) + '</span>'
+              : '<span style="background:var(--slate-soft);color:var(--slate);padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">— Nog niet verstuurd</span>'}
             <button type="button" class="ob-act primary" id="oiInviteSendBtn" data-id="${esc(o.id)}" data-already-sent="${o.invite_sent_at ? '1' : '0'}" style="margin-left:8px;background:#d97706;border-color:#d97706">
               <i class="ti ti-send"></i> ${o.invite_sent_at ? 'Opnieuw versturen' : 'Stuur WhatsApp-uitnodiging'}
             </button>
@@ -873,8 +873,8 @@
           </dd>
           <dt>Inloggegevens</dt><dd>
             ${o.credentials_email_sent_at
-              ? '<span style="background:rgba(34,197,94,0.14);color:#15803d;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">✓ E-mail verstuurd</span> <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.credentials_email_sent_at)) + '</span>'
-              : '<span style="background:rgba(100,116,139,0.18);color:#475569;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">— E-mail nog niet verstuurd</span>'}
+              ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">✓ E-mail verstuurd</span> <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.credentials_email_sent_at)) + '</span>'
+              : '<span style="background:var(--slate-soft);color:var(--slate);padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">— E-mail nog niet verstuurd</span>'}
           </dd>
           ${link ? `<dt>Persoonlijke link</dt><dd style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all">${esc(link)}</dd>` : ''}
         </dl>
@@ -899,7 +899,7 @@
         });
       }
     } catch (e) {
-      bd.innerHTML = `<div class="empty-state" style="color:#b91c1c">Ophalen mislukt: ${esc(e?.message || e)}</div>`;
+      bd.innerHTML = `<div class="empty-state" style="color:var(--rose)">Ophalen mislukt: ${esc(e?.message || e)}</div>`;
     }
   }
 
@@ -925,21 +925,21 @@
       });
       let d = null; try { d = await r.json(); } catch {}
       if (r.status === 401) {
-        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Niet (meer) ingelogd.'; }
+        if (status) { status.style.color = 'var(--rose)'; status.textContent = '✗ Niet (meer) ingelogd.'; }
         return;
       }
       if (r.status === 403) {
-        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Geen rechten (onboarding.admin).'; }
+        if (status) { status.style.color = 'var(--rose)'; status.textContent = '✗ Geen rechten (onboarding.admin).'; }
         return;
       }
       if (!r.ok) {
-        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Mislukt: ' + (d?.error || ('HTTP ' + r.status)); }
+        if (status) { status.style.color = 'var(--rose)'; status.textContent = '✗ Mislukt: ' + (d?.error || ('HTTP ' + r.status)); }
         return;
       }
       // Endpoint geeft altijd 200; success vs partial vs hard-fail uit body.
       if (d && d.ok === true) {
         if (status) {
-          status.style.color = '#15803d';
+          status.style.color = 'var(--emerald)';
           status.textContent = d.skipped ? '✓ Al aangemaakt' : '✓ Gelukt';
         }
         toast(d.skipped ? 'Was al aangemaakt' : 'Bubble-account aangemaakt', 'success');
@@ -951,7 +951,7 @@
       // partial of harde fail.
       const errMsg = (d?.error || 'Onbekende fout');
       if (status) {
-        status.style.color = '#b91c1c';
+        status.style.color = 'var(--rose)';
         status.textContent = (d?.partial ? '⚠ Gedeeltelijk: ' : '✗ Mislukt: ') + errMsg;
       }
       toast((d?.partial ? 'Gedeeltelijk gelukt: ' : 'Bubble-aanmaak mislukt: ') + errMsg, 'error');
@@ -961,7 +961,7 @@
       if (btn) btn.disabled = false;
     } catch (e) {
       console.error('[onboarding-admin] retry:', e?.message || e);
-      if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Onverwachte fout: ' + (e?.message || e); }
+      if (status) { status.style.color = 'var(--rose)'; status.textContent = '✗ Onverwachte fout: ' + (e?.message || e); }
       if (btn) btn.disabled = false;
     }
   }
@@ -990,20 +990,20 @@
       });
       let d = null; try { d = await r.json(); } catch {}
       if (r.status === 401) {
-        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Niet (meer) ingelogd.'; }
+        if (status) { status.style.color = 'var(--rose)'; status.textContent = '✗ Niet (meer) ingelogd.'; }
         return;
       }
       if (r.status === 403) {
-        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Geen rechten (onboarding.inbox.send).'; }
+        if (status) { status.style.color = 'var(--rose)'; status.textContent = '✗ Geen rechten (onboarding.inbox.send).'; }
         return;
       }
       if (!r.ok) {
-        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Mislukt: ' + (d?.error || ('HTTP ' + r.status)); }
+        if (status) { status.style.color = 'var(--rose)'; status.textContent = '✗ Mislukt: ' + (d?.error || ('HTTP ' + r.status)); }
         return;
       }
       // 200 — sent vs reason.
       if (d && d.sent === true) {
-        if (status) { status.style.color = '#15803d'; status.textContent = '✓ Verstuurd' + (d.meta_wamid ? ' (wamid ' + String(d.meta_wamid).slice(0, 12) + '…)' : ''); }
+        if (status) { status.style.color = 'var(--emerald)'; status.textContent = '✓ Verstuurd' + (d.meta_wamid ? ' (wamid ' + String(d.meta_wamid).slice(0, 12) + '…)' : ''); }
         toast(force ? 'WhatsApp-uitnodiging opnieuw verstuurd' : 'WhatsApp-uitnodiging verstuurd', 'success');
         loadList();
         setTimeout(() => { openDetail(onboardingId); }, 350);
@@ -1024,11 +1024,11 @@
         'no-customer'            : 'Geen klant aan deze onboarding gekoppeld',
         'invite-uit-gezet'       : 'Invite-flag staat uit (joost_config.knowledge_base.invite.enabled=false)',
       })[reason] || ('reason=' + reason);
-      if (status) { status.style.color = '#b45309'; status.textContent = '⚠ Niet verstuurd: ' + label + errMsg; }
+      if (status) { status.style.color = 'var(--amber)'; status.textContent = '⚠ Niet verstuurd: ' + label + errMsg; }
       toast('Niet verstuurd: ' + label, 'info');
     } catch (e) {
       console.error('[onboarding-admin] invite:', e?.message || e);
-      if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Onverwachte fout: ' + (e?.message || e); }
+      if (status) { status.style.color = 'var(--rose)'; status.textContent = '✗ Onverwachte fout: ' + (e?.message || e); }
     } finally {
       if (btn) btn.disabled = false;
     }
@@ -1275,7 +1275,7 @@
       const r = await window.AgentShared.apiFetch('/api/inbox-conversations-list?module=onboarding&limit=100');
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
-        list.innerHTML = '<div class="empty-state" style="color:#b91c1c;font-size:13px;padding:16px">Fout: ' + esc(j.error || ('HTTP ' + r.status)) + '</div>';
+        list.innerHTML = '<div class="empty-state" style="color:var(--rose);font-size:13px;padding:16px">Fout: ' + esc(j.error || ('HTTP ' + r.status)) + '</div>';
         return;
       }
       const j = await r.json();
@@ -1339,7 +1339,7 @@
         }));
       });
     } catch (e) {
-      list.innerHTML = '<div class="empty-state" style="color:#b91c1c;font-size:13px;padding:16px">Fout: ' + esc(e?.message || e) + '</div>';
+      list.innerHTML = '<div class="empty-state" style="color:var(--rose);font-size:13px;padding:16px">Fout: ' + esc(e?.message || e) + '</div>';
     }
   }
 
@@ -1370,7 +1370,7 @@
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
         document.getElementById('oiThreadMessages').innerHTML =
-          '<div style="color:#b91c1c;font-size:12px;padding:14px">Fout: ' + esc(d.error || ('HTTP ' + r.status)) + '</div>';
+          '<div style="color:var(--rose);font-size:12px;padding:14px">Fout: ' + esc(d.error || ('HTTP ' + r.status)) + '</div>';
         return;
       }
       _oiState.conv = d.conversation || null;
@@ -1385,7 +1385,7 @@
       _loadLatestMilaSuggestion(id);
     } catch (e) {
       document.getElementById('oiThreadMessages').innerHTML =
-        '<div style="color:#b91c1c;font-size:12px;padding:14px">Fout: ' + esc(e?.message || e) + '</div>';
+        '<div style="color:var(--rose);font-size:12px;padding:14px">Fout: ' + esc(e?.message || e) + '</div>';
     }
   }
 
@@ -1419,7 +1419,7 @@
     } else {
       badge.textContent = '24h verlopen';
       badge.style.background = 'rgba(245,158,11,0.18)';
-      badge.style.color = '#b45309';
+      badge.style.color = 'var(--amber)';
       badge.title = 'Servicewindow verlopen — alleen templates';
     }
   }
@@ -1489,7 +1489,7 @@
     const wrap = document.getElementById('oiSuggestionPanel');
     if (!wrap) return;
     if (errMsg) {
-      wrap.innerHTML = '<div style="color:#b45309;font-size:12px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:8px 10px;margin:6px 14px 0 14px">Suggestie laden mislukt: ' + esc(errMsg) + '</div>';
+      wrap.innerHTML = '<div style="color:var(--amber);font-size:12px;background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:8px;padding:8px 10px;margin:6px 14px 0 14px">Suggestie laden mislukt: ' + esc(errMsg) + '</div>';
       return;
     }
     if (!sugg) { wrap.innerHTML = ''; return; }
@@ -1713,14 +1713,14 @@
       const r = await window.AgentShared.apiFetch('/api/inbox-template-list?conversation_id=' + encodeURIComponent(convId));
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
-        list.innerHTML = '<div style="color:#b91c1c;font-size:12px;padding:10px">Fout: ' + esc(d.error || ('HTTP ' + r.status)) + '</div>';
+        list.innerHTML = '<div style="color:var(--rose);font-size:12px;padding:10px">Fout: ' + esc(d.error || ('HTTP ' + r.status)) + '</div>';
         return;
       }
       _oiTplState.items = Array.isArray(d?.items) ? d.items : (Array.isArray(d?.templates) ? d.templates : []);
       _oiTplState.loaded = true;
       _renderOiTemplateList();
     } catch (e) {
-      list.innerHTML = '<div style="color:#b91c1c;font-size:12px;padding:10px">Fout: ' + esc(e?.message || e) + '</div>';
+      list.innerHTML = '<div style="color:var(--rose);font-size:12px;padding:10px">Fout: ' + esc(e?.message || e) + '</div>';
     }
   }
   function _renderOiTemplateList() {
