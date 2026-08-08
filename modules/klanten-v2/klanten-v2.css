@@ -1148,6 +1148,182 @@
    Preview-badge in brand, rol-bewuste topbar-actieknoppen, en polish
    voor de placeholder-view (genericView) van niet-Klanten-modules. */
 
+/* ═══ Prototype-utility-classes (v2-b batch) ═══
+   Deze staan nog niet in de design-system (app-shell.css). Scoped hier
+   zodat we geen shell-mutatie hoeven. Kandidaten voor DS-promotie zodra
+   >2 v2-views ze gebruiken. */
+.mono, .num, .money {
+  font-family: 'IBM Plex Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.015em;
+}
+.inp {
+  width: 100%; max-width: 380px; padding: 7px 11px;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--text);
+  font-size: 13.5px; outline: none; transition: all .14s; font-family: inherit;
+}
+.inp:focus { border-color: var(--m); box-shadow: 0 0 0 3px var(--m-soft); }
+textarea.inp { max-width: 520px; min-height: 90px; resize: vertical; line-height: 1.55; }
+.cl-row { display: flex; align-items: center; gap: 10px; }
+
+/* ═══ E-mail-module (v2-b) ═══
+   1-op-1 uit systeemprototype-v45.html r449-533. Namespaced
+   .kv-mail-modal-bg om conflict met een toekomstige DS-modal te vermijden. */
+.mail3 { display: flex; height: 100%; min-height: 0; overflow: hidden; }
+.mail-rail {
+  width: 198px; flex-shrink: 0; border-right: 1px solid var(--border); background: var(--surface);
+  overflow-y: auto; padding: 12px 9px; display: flex; flex-direction: column; min-height: 0;
+}
+.mail-compose-btn { width: 100%; margin-bottom: 14px; justify-content: center; }
+.mail-fold {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 9px; border-radius: var(--r-sm);
+  font-size: 13px; color: var(--text-2); text-align: left; transition: all .13s; margin-bottom: 1px;
+  background: none; border: 0; cursor: pointer; font-family: inherit;
+}
+.mail-fold:hover { background: var(--surface-2); color: var(--text); }
+.mail-fold.on { background: var(--m-soft); color: var(--m); font-weight: 600; }
+.mail-fold svg { width: 15px; height: 15px; flex-shrink: 0; opacity: .85; }
+.mail-fold .cnt {
+  margin-left: auto; font-size: 11px; font-family: 'IBM Plex Mono', monospace;
+  padding: 1px 6px; border-radius: 20px; background: var(--surface-3); color: var(--text-3);
+}
+.mail-fold.on .cnt { background: var(--m); color: #fff; }
+[data-theme="dark"] .mail-fold.on .cnt { color: #0B0E13; }
+.mail-fold .cnt.hot { background: var(--rose); color: #fff; }
+[data-theme="dark"] .mail-fold .cnt.hot { color: #0B0E13; }
+.mail-acc {
+  display: flex; align-items: center; gap: 8px; padding: 6px 9px; border-radius: var(--r-sm);
+  font-size: 12.5px; color: var(--text-2); width: 100%; text-align: left; transition: background .13s;
+  background: none; border: 0; cursor: pointer; font-family: inherit;
+}
+.mail-acc:hover { background: var(--surface-2); }
+.mail-acc .dotc { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+
+.mail-list {
+  width: 352px; flex-shrink: 0; border-right: 1px solid var(--border); background: var(--surface);
+  overflow-y: auto; overflow-x: hidden;
+}
+.mail-list-top {
+  padding: 11px 13px; border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 5; background: var(--surface);
+}
+.mail-list-scroll { display: block; }
+.mail-bulk { position: sticky; bottom: 0; z-index: 5; }
+.mail-row {
+  padding: 11px 14px 12px; border-bottom: 1px solid var(--border); cursor: pointer;
+  transition: background .12s; position: relative; display: flex; gap: 11px; align-items: flex-start;
+}
+.mail-row:hover { background: var(--surface-2); }
+.mail-row.on { background: var(--m-soft); }
+.mail-row.on::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--m); }
+.mail-row.mail-unread .mr-from, .mail-row.mail-unread .mr-subj { font-weight: 600; }
+.mail-row.mail-unread .mr-subj { color: var(--text); }
+.mr-body { flex: 1; min-width: 0; }
+.mr-top { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
+.mr-from { font-size: 13.5px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mr-time { font-size: 10.5px; color: var(--text-3); font-family: 'IBM Plex Mono', monospace; flex-shrink: 0; }
+.mr-subj { font-size: 13px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 2px; }
+.mr-prev { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mr-tags { display: flex; gap: 5px; margin-top: 6px; align-items: center; flex-wrap: wrap; }
+.mr-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--m); flex-shrink: 0; margin-top: 6px; }
+
+.mail-read { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); overflow: hidden; }
+.mail-read-head { padding: 16px 22px 14px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.mail-subject { font-size: 18px; font-weight: 600; letter-spacing: -.025em; margin-bottom: 12px; line-height: 1.35; }
+.mail-acts { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.mail-meta { display: flex; align-items: center; gap: 12px; padding: 14px 22px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.mail-body { flex: 1; min-height: 0; overflow-y: auto; padding: 22px; font-size: 14px; line-height: 1.65; color: var(--text-2); }
+.mail-body p { margin-bottom: 14px; }
+.mail-att { display: flex; gap: 10px; padding: 12px 22px; background: var(--surface-2); border-top: 1px solid var(--border); flex-wrap: wrap; }
+.att-chip {
+  display: flex; align-items: center; gap: 9px; padding: 8px 12px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--r); font-size: 12.5px; cursor: pointer; transition: all .14s;
+}
+.att-chip:hover { border-color: var(--border-strong); box-shadow: var(--shadow-xs); }
+.att-ico { width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center; flex-shrink: 0; }
+
+.ai-sug {
+  margin: 0 22px 18px; border: 1px solid var(--violet-line); border-radius: var(--r-lg);
+  background: linear-gradient(135deg, var(--violet-soft), transparent 70%); overflow: hidden;
+}
+.ai-sug-head { padding: 12px 15px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--violet-line); }
+.ai-sug-body { padding: 14px 15px; font-size: 13.5px; line-height: 1.6; color: var(--text-2); }
+.ai-sug-foot { padding: 11px 15px; display: flex; gap: 7px; align-items: center; border-top: 1px solid var(--violet-line); }
+.tone-chip {
+  padding: 3px 10px; border-radius: 20px; font-size: 11.5px; background: var(--surface);
+  border: 1px solid var(--border); color: var(--text-2); transition: all .13s;
+  cursor: pointer; font-family: inherit;
+}
+.tone-chip:hover { border-color: var(--violet); color: var(--violet); }
+.tone-chip.on { background: var(--violet); color: #fff; border-color: var(--violet); }
+[data-theme="dark"] .tone-chip.on { color: #0B0E13; }
+
+/* Compose-modal — kv-mail-modal-bg is bewust namespaced. */
+.kv-mail-modal-bg {
+  position: fixed; inset: 0; background: rgba(17, 23, 33, .42); backdrop-filter: blur(3px); z-index: 80;
+  display: none; align-items: flex-end; justify-content: flex-end; padding: 0;
+}
+.kv-mail-modal-bg.open { display: flex; }
+.compose {
+  width: 660px; max-width: 100%; height: 78vh; background: var(--surface); border-radius: var(--r-lg) var(--r-lg) 0 0;
+  box-shadow: var(--shadow-lg); display: flex; flex-direction: column; margin-right: 26px;
+  animation: kv-slideUp .24s cubic-bezier(.32, .72, 0, 1);
+}
+@keyframes kv-slideUp {
+  from { transform: translateY(24px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+.compose-head {
+  padding: 13px 17px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px;
+  background: var(--surface-2); border-radius: var(--r-lg) var(--r-lg) 0 0;
+}
+.compose-field { display: flex; align-items: center; gap: 10px; padding: 9px 17px; border-bottom: 1px solid var(--border); }
+.compose-lbl { font-size: 12.5px; color: var(--text-3); width: 44px; flex-shrink: 0; }
+.compose-inp { flex: 1; border: none; outline: none; background: none; font-size: 13.5px; padding: 2px 0; color: var(--text); font-family: inherit; }
+.recip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 5px 3px 3px; border-radius: 20px;
+  background: var(--surface-2); font-size: 12.5px; margin-right: 5px;
+}
+.recip button { width: 15px; height: 15px; border-radius: 50%; display: grid; place-items: center; color: var(--text-3); background: none; border: 0; cursor: pointer; }
+.recip button:hover { background: var(--surface-3); color: var(--text); }
+.compose-body { flex: 1; padding: 17px; overflow-y: auto; font-size: 14px; line-height: 1.65; outline: none; }
+.compose-sig { padding: 14px 17px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--text-3); line-height: 1.6; }
+.compose-foot { padding: 12px 17px; border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: center; background: var(--surface-2); }
+
+/* Ancillary — checkbox / tile-ico / dd-menu (voorheen prototype-only). */
+.checkbox {
+  width: 16px; height: 16px; border-radius: 5px; border: 1.5px solid var(--border-strong);
+  display: grid; place-items: center; cursor: pointer; transition: all .13s; background: var(--surface);
+  flex-shrink: 0;
+}
+.checkbox:hover { border-color: var(--m); }
+.checkbox.on { background: var(--m); border-color: var(--m); }
+.checkbox svg { width: 10px; height: 10px; color: #fff; opacity: 0; }
+.checkbox.on svg { opacity: 1; }
+
+.tile-ico { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; flex-shrink: 0; }
+.tile-ico svg { width: 17px; height: 17px; }
+
+.dd { position: relative; display: inline-block; }
+.dd-menu {
+  position: absolute; bottom: calc(100% + 6px); right: 0; min-width: 190px; z-index: 70;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
+  box-shadow: var(--shadow-lg); padding: 5px; display: none;
+}
+.dd-menu.open { display: block; }
+.dd-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border-radius: var(--r-sm);
+  font-size: 13px; color: var(--text-2); text-align: left; transition: all .13s;
+  background: none; border: 0; cursor: pointer; font-family: inherit;
+}
+.dd-item:hover { background: var(--surface-2); color: var(--text); }
+.dd-item svg { width: 15px; height: 15px; opacity: .7; }
+.dd-item.danger { color: var(--rose); }
+.dd-item.danger:hover { background: var(--rose-soft); }
+.dd-sep { height: 1px; background: var(--border); margin: 5px 0; }
+
+
 /* Sidebar-logo: vervangt de blauwe "F"-brand-mark. Wordmark PNG (1650×934)
    in /img/ met light/dark-swap. Links uitgelijnd. Geen subtekst.
    KRITIEK: display niet op de gedeelde `.kv-brand-logo img`-selector zetten —
