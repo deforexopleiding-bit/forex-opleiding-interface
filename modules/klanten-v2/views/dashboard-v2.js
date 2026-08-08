@@ -140,6 +140,11 @@
             ${['Dag', 'Week', 'Maand', 'Jaar'].map(p => `<button class="chip ${F('per', 'Maand') === p ? 'on' : ''}" style="font-size:12.5px;padding:5px 13px;border-radius:5px" onclick="DFO.setF('per','${p}')">${p}</button>`).join('')}
             <button class="chip" style="font-size:12.5px;padding:5px 13px;border-radius:5px">Custom ▾</button>
           </div>
+          <button class="btn btn-ghost" onclick="DFO.KV && DFO.KV.newAction && DFO.KV.newAction('offerte')">${svg(I.doc)}Offerte</button>
+          <button class="btn btn-ghost" onclick="DFO.KV && DFO.KV.newAction && DFO.KV.newAction('traject')">${svg(I.grad)}Traject aanmelden</button>
+          <button class="btn btn-ghost" onclick="DFO.KV && DFO.KV.newAction && DFO.KV.newAction('factuur')">${svg(I.file)}Factuur</button>
+          <button class="btn btn-ghost" onclick="DFO.KV && DFO.KV.newAction && DFO.KV.newAction('lead')">${svg(I.target)}Nieuwe lead</button>
+          <button class="btn btn-primary" onclick="DFO.KV && DFO.KV.newAction && DFO.KV.newAction('nieuw')">${svg(I.plus)}Nieuw</button>
         </div>
       </div>
 
@@ -177,9 +182,11 @@
               ${['Hoeveel wanbetalers open?', 'Omzet deze week?', 'Wie heeft geen mentor?']
                 .map(q => `<button class="chip" style="font-size:11.5px;padding:4px 10px;background:var(--surface)" onclick="alert('AI Manager: ${q}')">${q}</button>`).join('')}</div>
             <div style="position:relative">
-              <input class="inp" style="max-width:none;padding-right:44px;background:var(--surface);border-radius:22px" placeholder="Stel je vraag in gewone taal…">
-              <button style="position:absolute;right:5px;top:50%;transform:translateY(-50%);width:30px;height:30px;border-radius:50%;
-                background:var(--teal);color:#fff;display:grid;place-items:center">${svg(I.up, 'width:15px;height:15px')}</button></div>
+              <input placeholder="Stel je vraag in gewone taal…" style="width:100%;box-sizing:border-box;padding:10px 48px 10px 16px;background:var(--surface);border:1px solid var(--border);border-radius:22px;font-family:inherit;font-size:13px;color:var(--text);outline:none;transition:border-color .15s,box-shadow .15s"
+                onfocus="this.style.borderColor='var(--teal)';this.style.boxShadow='0 0 0 3px var(--teal-soft)'"
+                onblur="this.style.borderColor='var(--border)';this.style.boxShadow='none'"/>
+              <button style="position:absolute;right:5px;top:50%;transform:translateY(-50%);width:32px;height:32px;border-radius:50%;
+                background:var(--teal);color:#fff;border:0;cursor:pointer;display:grid;place-items:center;padding:0">${svg(I.up, 'width:15px;height:15px')}</button></div>
           </div>
         </div>
 

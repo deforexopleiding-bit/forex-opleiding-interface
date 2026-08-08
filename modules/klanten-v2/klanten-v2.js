@@ -321,6 +321,10 @@ function wireLegacyFallback() {
 function renderTopbarActions() {
   const host = document.getElementById('topbarActions');
   if (!host || !window.DFO || !window.DFO.S) return;
+  // Dashboard heeft eigen actiebalk in de hero-band; verberg de topbar-acties
+  // daar om dubbeling te vermijden. Andere modules hebben geen eigen hero
+  // en tonen de topbar-acties wel.
+  if (window.DFO.S.mod === 'dashboard') { host.innerHTML = ''; return; }
   const svg  = window.DFO.svg;
   const I    = window.DFO.I;
   const has  = (r) => (window.DFO.S.roles || []).includes(r);
