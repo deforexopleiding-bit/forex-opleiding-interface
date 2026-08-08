@@ -2294,7 +2294,7 @@
       actions = `
         <button class="action-btn" type="button" data-wa-meta-edit="${id}"><i class="ti ti-edit"></i> Bewerken</button>
         <button class="action-btn" type="button" data-wa-meta-del="${id}"><i class="ti ti-trash"></i> Verwijderen</button>
-        <button class="action-btn" type="button" data-wa-meta-submit="${id}" style="background:#2563eb;color:#fff;border-color:#2563eb"><i class="ti ti-send"></i> Naar Meta sturen</button>
+        <button class="action-btn" type="button" data-wa-meta-submit="${id}" style="background:var(--blue);color:#fff;border-color:var(--blue)"><i class="ti ti-send"></i> Naar Meta sturen</button>
       `;
     } else if (status === 'SUBMITTED') {
       actions = `<button class="action-btn" type="button" data-wa-meta-view="${id}"><i class="ti ti-eye"></i> Bekijken</button>`;
@@ -2302,7 +2302,7 @@
       actions = `
         <button class="action-btn" type="button" data-wa-meta-edit="${id}"><i class="ti ti-edit"></i> Bewerken</button>
         <button class="action-btn" type="button" data-wa-meta-del="${id}"><i class="ti ti-trash"></i> Verwijderen</button>
-        <button class="action-btn" type="button" data-wa-meta-resubmit="${id}" style="background:#f97316;color:#fff;border-color:#f97316"><i class="ti ti-refresh"></i> Opnieuw insturen</button>
+        <button class="action-btn" type="button" data-wa-meta-resubmit="${id}" style="background:var(--amber);color:#fff;border-color:var(--amber)"><i class="ti ti-refresh"></i> Opnieuw insturen</button>
       `;
     } else if (status === 'APPROVED') {
       actions = `
