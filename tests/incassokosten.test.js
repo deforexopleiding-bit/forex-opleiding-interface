@@ -108,45 +108,6 @@ test('meerdere subscriptions worden gesommeerd', () => {
   assert.equal(berekenTotaalResterend({ subscriptions: subs, betaaldTotaal: 0 }), 1755);
 });
 
-// ── Aanbetaling (optie B): downpaymentInclBtw telt op ────────────────────────
-
-test('aanbetaling telt op bovenop de subscriptions', () => {
-  const subs = [{ amount: 1000, term_count: 3, vat_percentage: 21 }]; // 3630
-  // + aanbetaling incl. btw 605, − betaald 0 = 4235
-  assert.equal(berekenTotaalResterend({ subscriptions: subs, downpaymentInclBtw: 605, betaaldTotaal: 0 }), 4235);
-});
-
-test('zonder aanbetaling (0/afwezig) = kale subscriptions-som (optie A blijft gelden)', () => {
-  const subs = [{ amount: 1000, term_count: 3, vat_percentage: 21 }];
-  assert.equal(berekenTotaalResterend({ subscriptions: subs, downpaymentInclBtw: 0, betaaldTotaal: 0 }), 3630);
-  assert.equal(berekenTotaalResterend({ subscriptions: subs, betaaldTotaal: 0 }), 3630); // param weg = 0
-});
-
-test('alleen aanbetaling, geen subscriptions → aanbetaling − betaald (geen fallback)', () => {
-  assert.equal(berekenTotaalResterend({ downpaymentInclBtw: 500, betaaldTotaal: 200, totaalOpen: 9999 }), 300);
-});
-
-test('geen subscriptions én geen aanbetaling → fallback naar totaalOpen', () => {
-  assert.equal(berekenTotaalResterend({ downpaymentInclBtw: 0, totaalOpen: 200 }), 200);
-});
-
-test('aanbetaling meegeteld maar betaald > totaal → nooit negatief', () => {
-  const subs = [{ amount: 1000, term_count: 3, vat_percentage: 21 }]; // 3630
-  assert.equal(berekenTotaalResterend({ subscriptions: subs, downpaymentInclBtw: 605, betaaldTotaal: 99999 }), 0);
-});
-
-test('resolver: totaal_resterend incl. aanbetaling + indicaties', () => {
-  const ctx = {
-    openInvoices: [{ amount_total: 500, amount_paid: 0 }],
-    subscriptions: [{ amount: 1000, term_count: 3, vat_percentage: 21 }], // 3630
-    downpaymentInclBtw: 605,
-    betaaldTotaal: 1235, // resterend = 3630 + 605 − 1235 = 3000
-  };
-  assert.equal(resolveVariableValue('klant.totaal_resterend', ctx), 'EUR 3.000,00');
-  assert.equal(resolveVariableValue('klant.indicatie_laag', ctx), 'EUR 4.500,00');
-  assert.equal(resolveVariableValue('klant.indicatie_hoog', ctx), 'EUR 4.800,00');
-});
-
 // ── Resolver-integratie: totaal_resterend + indicaties (×1,5 / ×1,6) ─────────
 
 test('klant.totaal_resterend + indicaties resolven als EUR-NL', () => {

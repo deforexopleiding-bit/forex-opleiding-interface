@@ -46,12 +46,6 @@ import { WIK_LOGO_BUFFER } from './wik-brief-logo.js';
 const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
 const BUCKET = 'dunning-briefs';
 
-// Bruteer-factor voor de aanbetaling in klant.totaal_resterend. deals.downpayment_amount
-// is EXCL. btw en heeft geen eigen tarief-veld; de aanbetaling dekt vrijwel altijd het
-// 21%-hoofdproduct (membership / 1-op-1). Eén plek om aan te passen als de business-
-// regel wijzigt (bv. blended tarief of een expliciet incl-btw aanbetalingsveld).
-const AANBETALING_BTW_FACTOR = 1.21;
-
 function fmtDateNl(d) {
   const dt = d instanceof Date ? d : new Date(d || Date.now());
   const mm = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'];
@@ -223,25 +217,21 @@ export async function generatePreBriefForCustomer({
   });
 
   // 5b) Contract-context voor klant.totaal_resterend (+ indicaties): actieve
-  //     subscriptions + aanbetaling (via deals) + het reeds betaalde. Fail-soft —
+  //     subscriptions van de klant (via deals) + het reeds betaalde. Fail-soft —
   //     lukt dit niet, dan valt totaal_resterend terug op het reeds-vervallen
   //     totaal (zie berekenTotaalResterend). De brief mag hier nooit op falen.
+  //     GEEN apart aanbetaling-veld: aanbetalingen worden altijd óók als
+  //     subscription ingevoerd, dus die zitten al in de som (optellen = dubbel).
   let subscriptions = [];
   let betaaldTotaal = 0;
-  let downpaymentInclBtw = 0;
   try {
     const { data: deals } = await db
       .from('deals')
-      .select('id, downpayment_amount')
+      .select('id')
       .eq('customer_id', customerId)
       .is('archived_at', null)
       .in('status', ['active', 'paused', 'delinquent', 'disputed']); // niet 'completed'/'deceased'
     const dealIds = (deals || []).map((d) => d.id);
-    // Aanbetaling: deals.downpayment_amount is EXCL. btw en heeft géén eigen
-    // tarief-veld → bruteren met AANBETALING_BTW_FACTOR (default 21%, het
-    // hoofdproduct-tarief). Fail-soft: lege/onbekende aanbetaling telt als 0.
-    const downpaymentExcl = (deals || []).reduce((s, d) => s + (Number(d.downpayment_amount) || 0), 0);
-    downpaymentInclBtw = Math.round(downpaymentExcl * AANBETALING_BTW_FACTOR * 100) / 100;
     if (dealIds.length) {
       const { data: subs } = await db
         .from('subscriptions')
@@ -261,7 +251,7 @@ export async function generatePreBriefForCustomer({
 
   // 6) Variabelen resolven — klant.naam / klant.adres_volledig / klant.totaal_open
   //    / klant.incassokosten / klant.totaal_na_termijn / klant.totaal_resterend / indicaties.
-  const briefContext = { customer, openInvoices, subscriptions, downpaymentInclBtw, betaaldTotaal };
+  const briefContext = { customer, openInvoices, subscriptions, betaaldTotaal };
   const { text: resolvedSubject } = resolveVariables(tpl.subject || '', null, briefContext);
   const { text: resolvedBody }    = resolveVariables(tpl.body    || '', null, briefContext);
 
