@@ -147,9 +147,14 @@
   let _fetchSeq = 0;
 
   // Helper: fetch met fail-soft (returnt null bij error, logt).
-  async function tryFetch(label, url) {
+  // 8s timeout per call → een hangende endpoint bevriest het dashboard niet.
+  async function tryFetch(label, url, timeoutMs = 8000) {
     try {
-      return await window.KV.authedJson(url);
+      const p = window.KV.authedJson(url);
+      return await Promise.race([
+        p,
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + timeoutMs + 'ms')), timeoutMs)),
+      ]);
     } catch (e) {
       console.warn('[dashboard-v2] ' + label + ' fetch fail:', e && e.message);
       return null;
@@ -246,9 +251,11 @@
     const voornaam = persoon.split(' ')[0];
     const curPeriod = F('per', 'Maand');
     // Trigger fetch als de gekozen periode nog niet geladen is (én backend-supported).
-    // Sequence-tracking in fetchDashboardStats regelt race — geen loading-guard hier
-    // (anders skipt initial-fetch een snelle click).
-    if (PERIOD_LABEL_TO_PARAM[curPeriod] && _live.period !== curPeriod) {
+    // KRITIEK: !_live.loading-guard voorkomt render-loop. fetchDashboardBundle roept
+    // render() aan met loading=true VOORDAT de bundle resolvet — dashManager loopt
+    // daardoor opnieuw. Zonder loading-check triggerde die render een 2e fetch die
+    // opnieuw render(), enz. → UI-thread bevroor (microtask-storm).
+    if (PERIOD_LABEL_TO_PARAM[curPeriod] && _live.period !== curPeriod && !_live.loading) {
       queueMicrotask(() => fetchDashboardBundle(curPeriod));
     }
     const d = _live.stats;   // /api/dashboard-stats
