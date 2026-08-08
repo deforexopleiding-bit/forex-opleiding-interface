@@ -27,7 +27,7 @@
   <link rel="stylesheet" href="../shared/design-system/app-shell.css?v=1b1">
   <link rel="stylesheet" href="../shared/design-system/components.css?v=1b1">
   <link rel="stylesheet" href="../shared/klx-softphone.css?v=1d9">
-  <link rel="stylesheet" href="klanten-v2.css?v=1d9">
+  <link rel="stylesheet" href="klanten-v2.css?v=1e0">
 
   <!-- Supabase auth (bestaande shared client) -->
   <script src="../shared/supabase-client.js"></script>
@@ -41,12 +41,15 @@
   <!-- ═══ APP-SHELL SKELET (identiek aan modules/shell-demo.html, 0-B2) ═══ -->
   <div class="app">
     <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-mark">F</div>
-        <div>
-          <div class="brand-name">De Forex Opleiding</div>
+      <div class="brand kv-brand-logo">
+        <!-- Wordmark uit /img/ (1650×934 PNG). Light-theme toont logo-dark;
+             dark-theme toont logo-light. "De Forex Opleiding"-tekst zit
+             al in het logo, dus geen aparte brand-name-span. -->
+        <a href="/modules/klanten-v2/" class="kv-brand-logo-link" aria-label="De Forex Opleiding — home">
+          <img src="/img/logo-dark.png"  alt="De Forex Opleiding" class="kv-logo-dark">
+          <img src="/img/logo-light.png" alt="De Forex Opleiding" class="kv-logo-light">
           <div class="brand-sub">CRM · v2 preview <span class="v2-preview-tag">PREVIEW</span></div>
-        </div>
+        </a>
       </div>
       <nav class="nav" id="nav"></nav>
       <div class="sidebar-foot">
@@ -135,7 +138,7 @@
   <script src="../shared/klx-softphone.js?v=1d9"></script>
 
   <!-- V2-module-views (klassieke scripts; registeren zichzelf in DFO.VIEWS) -->
-  <script src="views/dashboard-v2.js?v=5"></script>
+  <script src="views/dashboard-v2.js?v=6"></script>
 
   <!-- ═══ MODULE JS (native ES-modules; requires modern browser) ═══ -->
   <script type="module" src="klanten-v2.js?v=1d9"></script>

@@ -312,8 +312,6 @@
                   <div style="font-size:11px;color:var(--text-3);margin-top:5px">${isLive && d ? 'live totaal' : `${p}% van totaal`}</div></div>`).join('');
               })()}
             </div>
-            <div style="margin-top:11px;font-size:12px;color:var(--amber);display:flex;align-items:center;gap:6px;cursor:pointer" onclick="DFO.goMod('leads')">
-              ${svg(I.alert, 'width:13px;height:13px')}<span><b>76</b> leads zonder traject — klik om op te schonen</span></div>
           </div>
         </div>
 
