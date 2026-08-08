@@ -73,6 +73,11 @@ CREATE INDEX IF NOT EXISTS taken_attachments_task_idx
 -- ── 3. RLS op taken_watchers ──────────────────────────────────────────────
 ALTER TABLE public.taken_watchers ENABLE ROW LEVEL SECURITY;
 
+-- DROP-vóór-CREATE zodat re-run van dit script niet crasht op bestaande policies.
+DROP POLICY IF EXISTS "Watcher, owner, assignee or ADMIN (SELECT)" ON public.taken_watchers;
+DROP POLICY IF EXISTS "Task owner, assignee or ADMIN (INSERT)"     ON public.taken_watchers;
+DROP POLICY IF EXISTS "Watcher, owner or ADMIN (DELETE)"           ON public.taken_watchers;
+
 -- SELECT: watcher zelf, task-owner (created_by), assignee, admin-rollen
 CREATE POLICY "Watcher, owner, assignee or ADMIN (SELECT)"
   ON public.taken_watchers
@@ -128,6 +133,10 @@ CREATE POLICY "Watcher, owner or ADMIN (DELETE)"
 -- ── 4. RLS op taken_attachments (parent-access-inheritance) ───────────────
 ALTER TABLE public.taken_attachments ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Inherit parent access (SELECT)"   ON public.taken_attachments;
+DROP POLICY IF EXISTS "Creator only (INSERT)"            ON public.taken_attachments;
+DROP POLICY IF EXISTS "Creator or ADMIN_ROLES (DELETE)"  ON public.taken_attachments;
+
 CREATE POLICY "Inherit parent access (SELECT)"
   ON public.taken_attachments
   FOR SELECT TO authenticated
@@ -177,6 +186,10 @@ VALUES (
 ON CONFLICT (id) DO NOTHING;
 
 -- Storage RLS: user mag alleen uploaden onder eigen user.id-prefix
+DROP POLICY IF EXISTS "Taken attachments INSERT (own prefix)"    ON storage.objects;
+DROP POLICY IF EXISTS "Taken attachments SELECT (authenticated)" ON storage.objects;
+DROP POLICY IF EXISTS "Taken attachments DELETE (own or admin)"  ON storage.objects;
+
 CREATE POLICY "Taken attachments INSERT (own prefix)"
   ON storage.objects
   FOR INSERT TO authenticated
