@@ -161,6 +161,13 @@
       "schedule": "* * * * *"
     }
   ],
+  "redirects": [
+    {
+      "source": "/modules/klanten.html",
+      "destination": "/modules/klanten-v2/",
+      "permanent": false
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)\\.html",
