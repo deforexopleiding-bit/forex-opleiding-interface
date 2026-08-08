@@ -488,6 +488,78 @@
     @media (max-width: 480px) {
       .stats-grid { grid-template-columns: 1fr; }
     }
+
+    /* ── T3: CC/watchers + attachments (kopie tickets-detail-patroon) ────── */
+    .taken-t3-section { margin-top: 16px; }
+    .taken-t3-head { font-size: 12px; font-weight: 600; color: var(--text-dim);
+      margin-bottom: 8px; text-transform: uppercase; letter-spacing: .5px;
+      display: flex; align-items: center; gap: 6px; }
+    .taken-t3-empty { padding: 10px; text-align: center; color: var(--text-faint);
+      font-size: 12px; font-style: italic; border: 1px dashed var(--border);
+      border-radius: 8px; }
+
+    /* Watchers-lijst */
+    .taken-watchers-row { display: flex; align-items: center; gap: 8px;
+      padding: 5px 8px; border: 1px solid var(--border); border-radius: 7px;
+      background: var(--bg-elev); margin-bottom: 4px; font-size: 12.5px; }
+    .taken-watchers-row .w-name { flex: 1; color: var(--text); }
+    .taken-watchers-row .w-me { font-size: 10.5px; padding: 1px 6px;
+      border-radius: 8px; background: var(--emerald-soft); color: var(--emerald);
+      font-weight: 700; }
+    .taken-watcher-del { padding: 3px 6px; border: 1px solid var(--rose-line);
+      background: transparent; color: var(--rose); border-radius: 5px;
+      cursor: pointer; font-size: 11px; }
+    .taken-watcher-del:hover { background: var(--rose-soft); }
+    .taken-watcher-picker { display: flex; gap: 6px; margin-top: 6px; }
+    .taken-watcher-picker select { flex: 1; padding: 6px 8px; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--bg-elev); font-size: 12.5px;
+      color: var(--text); font-family: inherit; }
+    .taken-watcher-picker button { padding: 6px 12px; }
+
+    /* Attachments-grid (compact kopie van tickets-detail) */
+    .taken-attach-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 8px; margin-bottom: 8px; }
+    .taken-attach-card { position: relative; border: 1px solid var(--border);
+      border-radius: 8px; overflow: hidden; background: var(--bg-elev); cursor: pointer; }
+    .taken-attach-card img { display: block; width: 100%; height: 90px;
+      object-fit: cover; background: var(--bg-elev-2); }
+    .taken-attach-card img.is-loading { opacity: 0.5; }
+    .taken-attach-card img.is-error { opacity: 0.4; }
+    .taken-attach-meta { padding: 4px 6px; font-size: 11px; color: var(--text-dim);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .taken-attach-del { position: absolute; top: 4px; right: 4px;
+      background: rgba(0,0,0,0.55); color: #fff; border: none;
+      width: 22px; height: 22px; border-radius: 50%; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; font-size: 12px; }
+    .taken-attach-del:hover { background: var(--rose); }
+
+    .taken-embeds-list { display: flex; flex-direction: column; gap: 6px;
+      margin-bottom: 8px; }
+    .taken-embed-wrap { position: relative; }
+    .taken-embed-link { display: flex; align-items: center; gap: 8px;
+      padding: 7px 10px; border: 1px solid var(--border); border-radius: 7px;
+      background: var(--bg-elev); text-decoration: none; color: var(--text);
+      font-size: 12.5px; }
+    .taken-embed-link:hover { background: var(--bg-elev-2); }
+    .taken-embed-link .domain { color: var(--text-faint); font-size: 11px;
+      margin-left: auto; }
+    .taken-embed-card { border: 1px solid var(--border); border-radius: 7px;
+      overflow: hidden; background: #000; aspect-ratio: 16 / 9; }
+    .taken-embed-card iframe { width: 100%; height: 100%; border: 0; display: block; }
+    .taken-embed-del { position: absolute; top: 4px; right: 4px;
+      background: rgba(0,0,0,0.55); color: #fff; border: none;
+      width: 22px; height: 22px; border-radius: 50%; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; font-size: 12px;
+      z-index: 2; }
+    .taken-embed-del:hover { background: var(--rose); }
+
+    .taken-upload-controls { display: flex; flex-wrap: wrap; gap: 6px;
+      align-items: center; margin-top: 6px; }
+    .taken-upload-controls input[type="file"] { display: none; }
+    .taken-upload-controls input[type="text"] { flex: 1; min-width: 160px;
+      padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;
+      background: var(--bg-elev); font-size: 12.5px; color: var(--text);
+      font-family: inherit; }
   </style>
 </head>
 <body>
@@ -717,6 +789,42 @@
                 placeholder="Reageer…"
                 style="flex:1;padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg-elev);font-family:inherit;font-size:13px;color:var(--text);resize:vertical;min-height:38px"></textarea>
       <button type="button" class="btn" id="detailCommentSendBtn" onclick="postDetailComment()" style="padding:8px 12px">Versturen</button>
+    </div>
+
+    <!-- T3: CC / Watchers ─────────────────────────────────────────────────── -->
+    <div class="taken-t3-section">
+      <div class="taken-t3-head">
+        <i class="ti ti-users"></i> CC / Watchers
+      </div>
+      <div id="detailWatchers">
+        <div style="color:var(--text-faint);font-size:12px;padding:4px 0">Laden…</div>
+      </div>
+      <div class="taken-watcher-picker">
+        <select id="detailWatcherSelect">
+          <option value="">— Kies collega om toe te voegen —</option>
+        </select>
+        <button type="button" class="btn" id="detailWatcherAddBtn" onclick="addTaskWatcher()">Toevoegen</button>
+      </div>
+    </div>
+
+    <!-- T3: Bijlagen ─────────────────────────────────────────────────────── -->
+    <div class="taken-t3-section">
+      <div class="taken-t3-head">
+        <i class="ti ti-paperclip"></i> Bijlagen
+      </div>
+      <div id="detailAttachments">
+        <div style="color:var(--text-faint);font-size:12px;padding:4px 0">Laden…</div>
+      </div>
+      <div class="taken-upload-controls">
+        <label class="btn btn-ghost" for="detailAttachFile" style="cursor:pointer">
+          <i class="ti ti-upload"></i> Bestand
+        </label>
+        <input type="file" id="detailAttachFile" accept="image/png,image/jpeg,image/gif,image/webp"
+               onchange="onTaskFilePickerChange(this)"/>
+        <input type="text" id="detailAttachUrl" placeholder="Of plak Loom/YouTube/Drive-link…"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();submitTaskExternalUrl();}"/>
+        <button type="button" class="btn" onclick="submitTaskExternalUrl()">Link toevoegen</button>
+      </div>
     </div>
 
     <div class="detail-actions">
@@ -1485,6 +1593,13 @@ function openDetail(id) {
   const cinp = document.getElementById('detailCommentInput');
   if (cinp) cinp.value = '';
   loadDetailComments(id).catch((e) => console.warn('[taken] comments load', e?.message || e));
+  // T3: watchers + attachments (parallel; RLS beperkt zicht).
+  // Cache huidige user-id 1x op AuthShared voor renderers.
+  if (window.AuthShared && !window.AuthShared._cachedUserId) {
+    window.AuthShared.getUser().then((u) => { window.AuthShared._cachedUserId = u?.id || null; }).catch(() => {});
+  }
+  loadTaskWatchers(id).catch((e) => console.warn('[taken-t3] watchers load', e?.message || e));
+  loadTaskAttachments(id).catch((e) => console.warn('[taken-t3] attachments load', e?.message || e));
   document.getElementById('overlayDetail').classList.add('open');
 }
 
@@ -1551,9 +1666,343 @@ async function postDetailComment() {
   }
 }
 
+// ── T3: Watchers + Attachments (kopie tickets-detail-patroon) ────────────
+// Constants + state
+const TAKEN_ATTACH_BUCKET  = 'taken-attachments';
+const TAKEN_SIGNED_URL_TTL = 3600; // 1u
+const TAKEN_MAX_UPLOAD     = 10 * 1024 * 1024; // 10 MB
+const _takenSignedUrls = new Map();
+let _takenAttachments  = [];
+let _takenWatchers     = [];
+let _takenProfilesCache = null;
+let _takenUploading    = false;
+
+function isImageMimeT(m) { return typeof m === 'string' && m.startsWith('image/'); }
+
+function detectEmbedT(url) {
+  if (!url) return null;
+  let m;
+  if ((m = url.match(/loom\.com\/share\/([a-f0-9]+)/i))) {
+    return { kind:'iframe', src:`https://www.loom.com/embed/${m[1]}`, label:'Loom', domain:'loom.com' };
+  }
+  if ((m = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]+)/i))) {
+    return { kind:'iframe', src:`https://www.youtube.com/embed/${m[1]}`, label:'YouTube', domain:'youtube.com' };
+  }
+  if ((m = url.match(/drive\.google\.com\/file\/d\/([\w-]+)/i))) {
+    return { kind:'iframe', src:`https://drive.google.com/file/d/${m[1]}/preview`, label:'Drive', domain:'drive.google.com' };
+  }
+  let domain = '';
+  try { domain = new URL(url).hostname.replace(/^www\./,''); } catch {}
+  return { kind:'link', src:url, label:domain||url, domain };
+}
+
+function cleanFilenameT(name) {
+  const dot = name.lastIndexOf('.');
+  const base = dot > 0 ? name.slice(0,dot) : name;
+  const ext  = dot > 0 ? name.slice(dot) : '';
+  const cleaned = base.normalize('NFD').replace(/[̀-ͯ]/g,'')
+    .toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')
+    .slice(0,80) || 'file';
+  return cleaned + ext.toLowerCase();
+}
+
+async function getSignedUrlT(path) {
+  if (!path) return null;
+  if (_takenSignedUrls.has(path)) return _takenSignedUrls.get(path);
+  const { data, error } = await window.supabase.storage
+    .from(TAKEN_ATTACH_BUCKET).createSignedUrl(path, TAKEN_SIGNED_URL_TTL);
+  if (error || !data?.signedUrl) {
+    console.warn('[taken-t3] signed URL fail:', path, error?.message); return null;
+  }
+  _takenSignedUrls.set(path, data.signedUrl);
+  return data.signedUrl;
+}
+
+// ── Watchers ────────────────────────────────────────────────────────────
+async function loadTaskWatchers(taskId) {
+  const box = document.getElementById('detailWatchers');
+  if (!box) return;
+  try {
+    // GET direct via window.supabase — RLS geldt.
+    const { data, error } = await window.supabase
+      .from('taken_watchers')
+      .select('id, profile_id, notify_mode, added_at, profiles:profile_id ( id, full_name, email )')
+      .eq('task_id', taskId)
+      .order('added_at', { ascending: true });
+    if (error) throw error;
+    _takenWatchers = Array.isArray(data) ? data : [];
+    renderTaskWatchers();
+    await refreshWatcherPicker();
+  } catch (e) {
+    box.innerHTML = '<div style="color:var(--rose);font-size:12px">Watchers laden mislukt: ' + escHtml(e?.message || e) + '</div>';
+  }
+}
+
+function renderTaskWatchers() {
+  const box = document.getElementById('detailWatchers');
+  if (!box) return;
+  if (!_takenWatchers.length) {
+    box.innerHTML = '<div class="taken-t3-empty">Nog geen watchers.</div>';
+    return;
+  }
+  const myId = (window.AuthShared && window.AuthShared._cachedUserId) || null;
+  box.innerHTML = _takenWatchers.map((w) => {
+    const p = w.profiles || {};
+    const name = escHtml(p.full_name || p.email || w.profile_id);
+    const isMe = myId && w.profile_id === myId;
+    return '<div class="taken-watchers-row">' +
+             '<span class="w-name">' + name + '</span>' +
+             (isMe ? '<span class="w-me">JIJ</span>' : '') +
+             '<button type="button" class="taken-watcher-del" onclick="removeTaskWatcher(\'' + escHtml(w.id) + '\')">Verwijderen</button>' +
+           '</div>';
+  }).join('');
+}
+
+async function refreshWatcherPicker() {
+  const sel = document.getElementById('detailWatcherSelect');
+  if (!sel) return;
+  if (!_takenProfilesCache) {
+    try {
+      const r = await window.AgentShared.apiFetch('/api/profiles-list');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json().catch(() => ({}));
+      _takenProfilesCache = Array.isArray(d?.profiles) ? d.profiles : [];
+    } catch (e) {
+      console.warn('[taken-t3] profiles-list fetch:', e?.message || e);
+      _takenProfilesCache = [];
+    }
+  }
+  const existing = new Set(_takenWatchers.map((w) => w.profile_id));
+  const options = _takenProfilesCache
+    .filter((p) => !existing.has(p.id))
+    .map((p) => '<option value="' + escHtml(p.id) + '">' + escHtml(p.full_name || p.email || p.id) + '</option>')
+    .join('');
+  sel.innerHTML = '<option value="">— Kies collega om toe te voegen —</option>' + options;
+}
+
+async function addTaskWatcher() {
+  if (!detailId) return;
+  const sel = document.getElementById('detailWatcherSelect');
+  const profile_id = sel?.value;
+  if (!profile_id) return;
+  const btn = document.getElementById('detailWatcherAddBtn');
+  btn.disabled = true;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/taken-watchers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: detailId, profile_id }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      alert(d?.error || ('Watcher toevoegen mislukt (HTTP ' + r.status + ')'));
+      return;
+    }
+    await loadTaskWatchers(detailId);
+    sel.value = '';
+  } catch (e) {
+    alert('Netwerkfout: ' + (e?.message || e));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function removeTaskWatcher(id) {
+  if (!id) return;
+  if (!confirm('Watcher verwijderen?')) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/taken-watchers?id=' + encodeURIComponent(id), { method: 'DELETE' });
+    if (!r.ok && r.status !== 204) {
+      const d = await r.json().catch(() => ({}));
+      alert(d?.error || ('Verwijderen mislukt (HTTP ' + r.status + ')'));
+      return;
+    }
+    _takenWatchers = _takenWatchers.filter((w) => w.id !== id);
+    renderTaskWatchers();
+    await refreshWatcherPicker();
+  } catch (e) {
+    alert('Netwerkfout: ' + (e?.message || e));
+  }
+}
+
+// ── Attachments ─────────────────────────────────────────────────────────
+async function loadTaskAttachments(taskId) {
+  const box = document.getElementById('detailAttachments');
+  if (!box) return;
+  try {
+    const { data, error } = await window.supabase
+      .from('taken_attachments')
+      .select('id, task_id, storage_path, external_url, filename, mime_type, created_by, created_at')
+      .eq('task_id', taskId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    _takenAttachments = Array.isArray(data) ? data : [];
+    renderTaskAttachments();
+  } catch (e) {
+    box.innerHTML = '<div style="color:var(--rose);font-size:12px">Bijlagen laden mislukt: ' + escHtml(e?.message || e) + '</div>';
+  }
+}
+
+function renderTaskAttachments() {
+  const box = document.getElementById('detailAttachments');
+  if (!box) return;
+  if (!_takenAttachments.length) {
+    box.innerHTML = '<div class="taken-t3-empty">Nog geen bijlagen.</div>';
+    return;
+  }
+  const myId = (window.AuthShared && window.AuthShared._cachedUserId) || null;
+  const images = _takenAttachments.filter((a) => a.storage_path && isImageMimeT(a.mime_type));
+  const urls   = _takenAttachments.filter((a) => a.external_url);
+
+  const imageGrid = images.length ? '<div class="taken-attach-grid">' +
+    images.map((a) => {
+      const isOwn = myId && a.created_by === myId;
+      return '<div class="taken-attach-card" onclick="openTaskAttachment(\'' + escHtml(a.storage_path) + '\')">' +
+               '<img class="is-loading" data-storage="' + escHtml(a.storage_path) + '" alt="' + escHtml(a.filename || 'bijlage') + '"/>' +
+               '<div class="taken-attach-meta">' + escHtml(a.filename || (a.storage_path||'').split('/').pop() || '') + '</div>' +
+               (isOwn ? '<button class="taken-attach-del" type="button" onclick="event.stopPropagation();deleteTaskAttachment(\'' + escHtml(a.id) + '\')" title="Verwijderen">×</button>' : '') +
+             '</div>';
+    }).join('') + '</div>' : '';
+
+  const urlList = urls.length ? '<div class="taken-embeds-list">' +
+    urls.map((a) => {
+      const isOwn = myId && a.created_by === myId;
+      const e = detectEmbedT(a.external_url);
+      const body = e?.kind === 'iframe'
+        ? '<div class="taken-embed-card"><iframe src="' + escHtml(e.src) + '" allowfullscreen loading="lazy"></iframe></div>'
+        : '<a class="taken-embed-link" href="' + escHtml(a.external_url) + '" target="_blank" rel="noopener">' +
+            '<i class="ti ti-external-link"></i>' +
+            '<span>' + escHtml(a.filename || e?.label || a.external_url) + '</span>' +
+            '<span class="domain">' + escHtml(e?.domain || '') + '</span>' +
+          '</a>';
+      return '<div class="taken-embed-wrap">' +
+               (isOwn ? '<button class="taken-embed-del" type="button" onclick="deleteTaskAttachment(\'' + escHtml(a.id) + '\')" title="Verwijderen">×</button>' : '') +
+               body +
+             '</div>';
+    }).join('') + '</div>' : '';
+
+  box.innerHTML = imageGrid + urlList;
+
+  // Signed-URL async invullen op images.
+  box.querySelectorAll('img.is-loading[data-storage]').forEach(async (imgEl) => {
+    const path = imgEl.dataset.storage;
+    const url = await getSignedUrlT(path);
+    if (url) { imgEl.src = url; imgEl.classList.remove('is-loading'); }
+    else { imgEl.classList.remove('is-loading'); imgEl.classList.add('is-error'); imgEl.alt = 'Kan niet laden'; }
+  });
+}
+
+async function openTaskAttachment(path) {
+  const url = await getSignedUrlT(path);
+  if (url) window.open(url, '_blank', 'noopener');
+}
+
+async function uploadTaskImageFile(file) {
+  if (!file || !detailId) return false;
+  if (!file.type || !file.type.startsWith('image/')) {
+    alert('Alleen afbeeldingen worden ondersteund (PNG/JPEG/GIF/WebP)');
+    return false;
+  }
+  if (file.size > TAKEN_MAX_UPLOAD) {
+    alert('Bestand te groot (max ' + (TAKEN_MAX_UPLOAD/1024/1024) + ' MB)');
+    return false;
+  }
+  if (_takenUploading) { alert('Andere upload bezig — probeer zo opnieuw'); return false; }
+  _takenUploading = true;
+  try {
+    const { data: { user }, error: userErr } = await window.supabase.auth.getUser();
+    if (userErr || !user) { alert('Auth-fout bij upload'); return false; }
+    const path = user.id + '/' + detailId + '/' + Date.now() + '-' + cleanFilenameT(file.name || 'bijlage.png');
+    const { error: upErr } = await window.supabase.storage
+      .from(TAKEN_ATTACH_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
+    if (upErr) {
+      console.error('[taken-t3] storage upload:', upErr.message);
+      alert('Upload mislukt: ' + upErr.message);
+      return false;
+    }
+    const r = await window.AgentShared.apiFetch('/api/taken-attachments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: detailId, storage_path: path, filename: file.name || null, mime_type: file.type || null }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      alert(d?.error || 'Bijlage-record aanmaken mislukt');
+      await window.supabase.storage.from(TAKEN_ATTACH_BUCKET).remove([path]).catch(() => {});
+      return false;
+    }
+    const d = await r.json();
+    _takenAttachments.push(d.attachment);
+    renderTaskAttachments();
+    return true;
+  } catch (e) {
+    console.error('[taken-t3] upload exception:', e);
+    alert('Netwerkfout: ' + (e?.message || e));
+    return false;
+  } finally {
+    _takenUploading = false;
+  }
+}
+
+async function onTaskFilePickerChange(input) {
+  const files = Array.from(input.files || []);
+  for (const f of files) { await uploadTaskImageFile(f); }
+  input.value = '';
+}
+
+async function submitTaskExternalUrl() {
+  if (!detailId) return;
+  const inp = document.getElementById('detailAttachUrl');
+  const url = (inp?.value || '').trim();
+  if (!url) { alert('Vul een URL in'); return; }
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') { alert('Alleen http(s) URLs'); return; }
+  } catch { alert('Ongeldige URL'); return; }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/taken-attachments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: detailId, external_url: url }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      alert(d?.error || 'Link toevoegen mislukt');
+      return;
+    }
+    const d = await r.json();
+    _takenAttachments.push(d.attachment);
+    if (inp) inp.value = '';
+    renderTaskAttachments();
+  } catch (e) {
+    alert('Netwerkfout: ' + (e?.message || e));
+  }
+}
+
+async function deleteTaskAttachment(id) {
+  if (!id) return;
+  if (!confirm('Bijlage verwijderen?')) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/taken-attachments?id=' + encodeURIComponent(id), { method: 'DELETE' });
+    if (!r.ok && r.status !== 204) {
+      const d = await r.json().catch(() => ({}));
+      alert(d?.error || 'Verwijderen mislukt');
+      return;
+    }
+    _takenAttachments = _takenAttachments.filter((a) => a.id !== id);
+    renderTaskAttachments();
+  } catch (e) {
+    alert('Netwerkfout: ' + (e?.message || e));
+  }
+}
+
 function closeDetail() {
   document.getElementById('overlayDetail').classList.remove('open');
   detailId = null;
+  // T3: reset caches zodat volgende openDetail schoon start
+  _takenAttachments = [];
+  _takenWatchers = [];
+  _takenSignedUrls.clear();
 }
 
 async function setDetailStatus(st) {
