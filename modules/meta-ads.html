@@ -83,7 +83,7 @@
     .status-pill.active   { background:rgba(14,124,107,0.10); color:#0e7c6b }
     .status-pill.paused   { background:rgba(234,179,8,0.12);  color:#a16207 }
     .status-pill.archived, .status-pill.deleted { background:rgba(107,114,128,0.10); color:#6b7280 }
-    .cpl-warn { color:#b91c1c; font-weight:600 }
+    .cpl-warn { color:var(--rose); font-weight:600 }
     .drill-btn {
       background:none; border:none; color:#0e7c6b; cursor:pointer;
       font-weight:600; padding:2px 6px; font-size:12px;
@@ -172,7 +172,7 @@
     /* ROAS-kleur */
     .roas-good { color:#0e7c6b; font-weight:700 }
     .roas-mid  { color:var(--text-primary); font-weight:600 }
-    .roas-bad  { color:#b91c1c; font-weight:700 }
+    .roas-bad  { color:var(--rose); font-weight:700 }
 
     /* Sale-modus eerlijkheids-note (rustige info, geen alert-styling). */
     .sale-note {
@@ -763,7 +763,7 @@
           : 'Geen data beschikbaar. Sync draait elke 30 min zodra de token is ingesteld.';
       }
     } catch (e) {
-      $('tableContainer').innerHTML = '<div class="empty-state"><div class="es-icon"><i class="ti ti-alert-triangle" style="color:#b91c1c"></i></div><div class="es-title">Laden mislukt: ' + escHtml(e.message || 'onbekend') + '</div><div class="es-sub">Check Vercel-logs voor details.</div></div>';
+      $('tableContainer').innerHTML = '<div class="empty-state"><div class="es-icon"><i class="ti ti-alert-triangle" style="color:var(--rose)"></i></div><div class="es-title">Laden mislukt: ' + escHtml(e.message || 'onbekend') + '</div><div class="es-sub">Check Vercel-logs voor details.</div></div>';
       $('statusLine').textContent = '';
     } finally {
       state.loading = false;
