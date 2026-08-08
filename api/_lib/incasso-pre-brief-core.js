@@ -216,9 +216,42 @@ export async function generatePreBriefForCustomer({
     return Math.max(0, t - p - c) > 0;
   });
 
-  // 6) Variabelen resolven — klant.naam / klant.adres_volledig / klant.totaal_open.
-  const { text: resolvedSubject } = resolveVariables(tpl.subject || '', null, { customer, openInvoices });
-  const { text: resolvedBody }    = resolveVariables(tpl.body    || '', null, { customer, openInvoices });
+  // 5b) Contract-context voor klant.totaal_resterend (+ indicaties): actieve
+  //     subscriptions van de klant (via deals) + het reeds betaalde. Fail-soft —
+  //     lukt dit niet, dan valt totaal_resterend terug op het reeds-vervallen
+  //     totaal (zie berekenTotaalResterend). De brief mag hier nooit op falen.
+  let subscriptions = [];
+  let betaaldTotaal = 0;
+  try {
+    const { data: deals } = await db
+      .from('deals')
+      .select('id')
+      .eq('customer_id', customerId)
+      .is('archived_at', null)
+      .in('status', ['active', 'paused', 'delinquent', 'disputed']); // niet 'completed'/'deceased'
+    const dealIds = (deals || []).map((d) => d.id);
+    if (dealIds.length) {
+      const { data: subs } = await db
+        .from('subscriptions')
+        .select('amount, term_count, vat_percentage, status')
+        .in('deal_id', dealIds)
+        .neq('status', 'completed');
+      subscriptions = subs || [];
+    }
+    const { data: paidRows } = await db
+      .from('invoices')
+      .select('amount_paid')
+      .eq('customer_id', customerId);
+    betaaldTotaal = (paidRows || []).reduce((s, r) => s + (Number(r.amount_paid) || 0), 0);
+  } catch (e) {
+    console.warn('[incasso-pre-brief-core] resterend-context fail-soft:', e?.message || e);
+  }
+
+  // 6) Variabelen resolven — klant.naam / klant.adres_volledig / klant.totaal_open
+  //    / klant.incassokosten / klant.totaal_na_termijn / klant.totaal_resterend / indicaties.
+  const briefContext = { customer, openInvoices, subscriptions, betaaldTotaal };
+  const { text: resolvedSubject } = resolveVariables(tpl.subject || '', null, briefContext);
+  const { text: resolvedBody }    = resolveVariables(tpl.body    || '', null, briefContext);
 
   // 7) PDF renderen (identieke C5-layout).
   const buffer = await renderBriefPdf({ customer, resolvedSubject, resolvedBody });

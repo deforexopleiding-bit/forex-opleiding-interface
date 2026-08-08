@@ -94,6 +94,38 @@ export function berekenIncassokosten(bedrag) {
   return kosten;
 }
 
+// Volledig nog openstaand bedrag over ALLE abonnementen/termijnen van de klant
+// samen — inclusief de nog niet-vervallen toekomstige termijnen.
+//
+// Definitie (bevestigd): SUM over de actieve subscriptions van
+//   amount × term_count × (1 + vat_percentage/100)          [incl. btw]
+// MINUS het reeds betaalde (SUM van invoices.amount_paid van de klant).
+// Nooit negatief. Afronden op centen.
+//
+// Fallback: zijn er geen subscriptions bekend (geen contract-data), dan valt
+// deze terug op het reeds-vervallen totaal (totaalOpen) — zodat de brief nooit
+// een leeg/0-bedrag toont waar een schuld staat.
+//
+// De caller (generatePreBriefForCustomer) laadt subscriptions + betaaldTotaal;
+// templates zonder die context (bv. WhatsApp/e-mail) krijgen de fallback.
+// PURE — unit-testbaar.
+export function berekenTotaalResterend({ subscriptions, betaaldTotaal, totaalOpen } = {}) {
+  const subs = Array.isArray(subscriptions) ? subscriptions : [];
+  if (!subs.length) {
+    return Math.max(0, Number(totaalOpen) || 0); // fallback
+  }
+  const contractInclBtw = subs.reduce((sum, s) => {
+    const amount = Number(s?.amount) || 0;
+    const terms = Number(s?.term_count) || 0;
+    const vatRaw = Number(s?.vat_percentage);
+    const vat = Number.isFinite(vatRaw) ? vatRaw : 21; // default-btw als kolom leeg
+    return sum + amount * terms * (1 + vat / 100);
+  }, 0);
+  const betaald = Number(betaaldTotaal) || 0;
+  const resterend = contractInclBtw - betaald;
+  return Math.max(0, Math.round(resterend * 100) / 100);
+}
+
 function customerDisplayName(c) {
   if (!c) return '';
   if (c.company_name && String(c.company_name).trim()) {
@@ -157,6 +189,9 @@ export const AVAILABLE_VARIABLES = [
   { key: 'klant.aantal_open',   label: 'Aantal open facturen',       category: 'klant', example: '2',           requires_context: 'invoices' },
   { key: 'klant.incassokosten',     label: 'Incassokosten (BIK-staffel over totaal openstaand)', category: 'klant', example: 'EUR 40,00',  requires_context: 'invoices' },
   { key: 'klant.totaal_na_termijn', label: 'Totaal openstaand + incassokosten',                  category: 'klant', example: 'EUR 240,00', requires_context: 'invoices' },
+  { key: 'klant.totaal_resterend',  label: 'Volledig resterend (alle termijnen incl. toekomstige)', category: 'klant', example: 'EUR 3.600,00', requires_context: 'subscriptions' },
+  { key: 'klant.indicatie_laag',    label: 'Indicatie laag (resterend × 1,5)',                   category: 'klant', example: 'EUR 5.400,00', requires_context: 'subscriptions' },
+  { key: 'klant.indicatie_hoog',    label: 'Indicatie hoog (resterend × 1,6)',                   category: 'klant', example: 'EUR 5.760,00', requires_context: 'subscriptions' },
 
   // ── afdeling (per-module contactgegevens uit whatsapp_module_config) ───
   { key: 'afdeling.telefoon',      label: 'Telefoon afdeling',  category: 'afdeling', example: '+31 85 130 83 62',              requires_context: null, requires_module_context: true },
@@ -455,9 +490,16 @@ function getInvoiceValue(invoice, key) {
   }
 }
 
-function getKlantAggregateValue(openInvoices, key) {
-  const invs = Array.isArray(openInvoices) ? openInvoices : [];
+function getKlantAggregateValue(context, key) {
+  const ctx = context || {};
+  const invs = Array.isArray(ctx.openInvoices) ? ctx.openInvoices : [];
   const totaalOpen = invs.reduce((sum, inv) => sum + openAmount(inv), 0);
+  // Resterend eenmalig berekenen (gedeeld door totaal_resterend + beide indicaties).
+  const resterend = berekenTotaalResterend({
+    subscriptions: ctx.subscriptions,
+    betaaldTotaal: ctx.betaaldTotaal,
+    totaalOpen,
+  });
   switch (key) {
     case 'klant.factuur_lijst':
       return invs
@@ -473,6 +515,12 @@ function getKlantAggregateValue(openInvoices, key) {
     case 'klant.totaal_na_termijn':
       // Totaal openstaand + incassokosten = wat na de 14-dagentermijn verschuldigd is.
       return formatEur(totaalOpen + berekenIncassokosten(totaalOpen));
+    case 'klant.totaal_resterend':
+      return formatEur(resterend);
+    case 'klant.indicatie_laag':
+      return formatEur(Math.round(resterend * 1.5 * 100) / 100);
+    case 'klant.indicatie_hoog':
+      return formatEur(Math.round(resterend * 1.6 * 100) / 100);
     default: return '';
   }
 }
@@ -664,7 +712,7 @@ export function resolveVariableValue(key, context) {
     case 'datum':    return getDateValue(key);
     case 'customer': return getCustomerValue(context && context.customer, key);
     case 'invoice':  return getInvoiceValue(context && context.invoice, key);
-    case 'klant':    return getKlantAggregateValue(context && context.openInvoices, key);
+    case 'klant':    return getKlantAggregateValue(context, key);
     case 'afdeling': return getAfdelingValue(key, context && context.moduleContext);
     case 'event':      return getEventValue(context && context.event, key);
     case 'attendee':   return getAttendeeValue(context && context.attendee, key);
