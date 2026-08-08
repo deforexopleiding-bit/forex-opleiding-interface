@@ -130,38 +130,64 @@
      Klik op Jaar/Custom toont melding + valt terug op laatst-geladen. */
   const PERIOD_LABEL_TO_PARAM = { Dag: 'today', Week: 'week', Maand: 'month' };
   const _live = { period: null, data: null, loading: false, error: null };
+  // Sequence-nummer voorkomt race conditions als user snel klikt.
+  // Als een oudere fetch klaar is na een nieuwere: discard de oude response.
+  let _fetchSeq = 0;
 
   async function fetchDashboardStats(labelPeriod) {
     const paramPeriod = PERIOD_LABEL_TO_PARAM[labelPeriod];
     if (!paramPeriod) return; // Jaar/Custom — geen backend
-    if (_live.loading) return;
-    if (_live.period === labelPeriod && _live.data) return;
-    _live.loading = true; _live.error = null;
+    // Cache-skip: al geladen voor deze period + geen error
+    if (_live.period === labelPeriod && _live.data && !_live.error) {
+      console.debug('[dashboard-v2] skip fetch: reeds geladen voor', labelPeriod);
+      return;
+    }
+    const seq = ++_fetchSeq;
+    _live.loading = true;
+    _live.error = null;
+    console.debug('[dashboard-v2] fetch start seq=' + seq + ' period=' + labelPeriod + ' (' + paramPeriod + ')');
+    // Toon loading-state direct (spinner in header, chip highlight)
+    if (window.DFO && window.DFO.render) window.DFO.render();
     try {
       if (!window.KV || !window.KV.authedJson) throw new Error('KV.authedJson niet beschikbaar');
       const json = await window.KV.authedJson('/api/dashboard-stats?period=' + paramPeriod);
+      // Stale check — nieuwere fetch bezig? Discard.
+      if (seq !== _fetchSeq) {
+        console.debug('[dashboard-v2] discard stale seq=' + seq + ' (current=' + _fetchSeq + ')');
+        return;
+      }
       _live.period = labelPeriod;
       _live.data = json;
       _live.error = null;
+      console.debug('[dashboard-v2] fetch done seq=' + seq + ' period=' + labelPeriod, {
+        leads: json && json.kpis_groot && json.kpis_groot.nieuwe_leads && json.kpis_groot.nieuwe_leads.value,
+        mails: json && json.kpis_klein && json.kpis_klein.mails_period,
+        approvals: json && json.kpis_klein && json.kpis_klein.pending_approvals,
+      });
     } catch (e) {
-      console.error('[dashboard-v2] fetch stats fail:', e && e.message);
-      _live.error = e && e.message || 'onbekende fout';
-      _live.data = null;
+      if (seq !== _fetchSeq) return; // stale error, negeer
+      console.error('[dashboard-v2] fetch fail seq=' + seq, e && e.message);
+      _live.error = (e && e.message) || 'onbekende fout';
     } finally {
-      _live.loading = false;
-      // Re-render zodat de UI de nieuwe cijfers pakt
-      if (window.DFO && window.DFO.render) window.DFO.render();
+      if (seq === _fetchSeq) {
+        _live.loading = false;
+        // Re-render zodat de UI de nieuwe cijfers pakt
+        if (window.DFO && window.DFO.render) window.DFO.render();
+      }
     }
   }
 
-  // Public hook: klik op Jaar/Custom-chip
+  // Public hook: klik op periode-chip
   window.DFO_dashPeriodClick = function (labelPeriod) {
+    console.debug('[dashboard-v2] chip clicked:', labelPeriod);
     if (labelPeriod === 'Jaar' || labelPeriod === 'Custom') {
       alert('De endpoint /api/dashboard-stats ondersteunt momenteel alleen Dag/Week/Maand. '
         + 'Jaar en Custom komen zodra we het backend uitbreiden — dan gaat deze knop live.');
       return;
     }
+    // Set filter (triggert render + chip-highlight)
     window.DFO.setF('per', labelPeriod);
+    // Force refetch — negeer loading-state, sequence-tracking regelt race
     fetchDashboardStats(labelPeriod);
   };
 
@@ -178,8 +204,9 @@
     const voornaam = persoon.split(' ')[0];
     const curPeriod = F('per', 'Maand');
     // Trigger fetch als de gekozen periode nog niet geladen is (én backend-supported).
-    // Wordt eenmalig gefired per period-wissel; fetchDashboardStats guardt op loading.
-    if (PERIOD_LABEL_TO_PARAM[curPeriod] && _live.period !== curPeriod && !_live.loading) {
+    // Sequence-tracking in fetchDashboardStats regelt race — geen loading-guard hier
+    // (anders skipt initial-fetch een snelle click).
+    if (PERIOD_LABEL_TO_PARAM[curPeriod] && _live.period !== curPeriod) {
       queueMicrotask(() => fetchDashboardStats(curPeriod));
     }
     const d = _live.data;
@@ -213,8 +240,7 @@
         <div class="card">
           <div class="card-head" style="border-bottom:none;padding-bottom:4px">
             <span class="title-dot" style="background:var(--emerald);box-shadow:0 0 0 3px var(--emerald-soft)"></span>
-            <div class="card-title">Leads per traject${d ? liveBadge() : mockBadge()}</div>
-            <span style="font-size:11.5px;color:var(--text-3);margin-left:2px">${curPeriod === 'Dag' ? 'vandaag' : curPeriod === 'Week' ? 'deze week' : 'deze maand'}</span></div>
+            <div class="card-title">Leads per traject${d ? liveBadge() : mockBadge()}</div></div>
           <div class="card-body" style="padding:10px 17px 14px">
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
               ${(() => {
@@ -263,9 +289,9 @@
         <div class="card">
           <div class="card-head" style="border-bottom:none;padding-bottom:6px">
             <span class="title-dot" style="background:var(--emerald);box-shadow:0 0 0 3px var(--emerald-soft)"></span>
-            <div class="card-title">Omzet — getekende offertes</div>
-            <span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;color:var(--text-3)">INCL BTW</span>
-            <span style="font-size:11.5px;color:var(--text-3);margin-left:auto">deze maand</span></div>
+
+            <div class="card-title">Omzet — getekende offertes${mockBadge()}</div>
+            <span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;color:var(--text-3)">INCL BTW</span></div>
           <div class="card-body" style="padding:6px 17px 16px">
             <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px">
               ${[['Abonnementen (MRR)', 47612, '86 actief', 'teal'], ['Totaal incl. btw', 26250, '5 offertes', 'blue']]
