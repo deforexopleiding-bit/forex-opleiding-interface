@@ -1167,6 +1167,32 @@
 textarea.inp { max-width: 520px; min-height: 90px; resize: vertical; line-height: 1.55; }
 .cl-row { display: flex; align-items: center; gap: 10px; }
 
+/* ═══ Centrale Inbox (v2-a) ═══
+   1-op-1 uit systeemprototype-v45.html r614-641. */
+.ib-split { display: flex; height: 100%; min-height: 0; overflow: hidden; }
+.ib-rail { width: 216px; flex-shrink: 0; border-right: 1px solid var(--border); background: var(--surface); overflow-y: auto; padding: 12px 9px; }
+.ib-src { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 9px; border-radius: var(--r-sm); font-size: 13px; color: var(--text-2); text-align: left; transition: all .13s; margin-bottom: 2px; background: none; border: 0; cursor: pointer; font-family: inherit; }
+.ib-src:hover { background: var(--surface-2); color: var(--text); }
+.ib-src.on { background: var(--m-soft); color: var(--m); font-weight: 600; }
+.ib-src .ic { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; flex-shrink: 0; }
+.ib-src .ic svg { width: 14px; height: 14px; }
+.ib-src .n { margin-left: auto; font-size: 11px; font-weight: 700; font-family: 'IBM Plex Mono', monospace; padding: 1px 7px; border-radius: 20px; background: var(--rose); color: #fff; }
+[data-theme="dark"] .ib-src .n { color: #0B0E13; }
+.ib-src .n.zero { background: var(--surface-3); color: var(--text-3); }
+.ib-list { width: 378px; flex-shrink: 0; border-right: 1px solid var(--border); background: var(--surface); overflow-y: auto; }
+.ib-top { padding: 11px 13px; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 6; background: var(--surface); }
+.ib-row { padding: 12px 15px; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; gap: 11px; align-items: flex-start; transition: background .12s; position: relative; }
+.ib-row:hover { background: var(--surface-2); }
+.ib-row.on { background: var(--m-soft); }
+.ib-row.on::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--m); }
+.ib-row.nw .ib-t { font-weight: 600; color: var(--text); }
+.ib-b { flex: 1; min-width: 0; }
+.ib-t { font-size: 13.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-p { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+.ib-src-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; padding: 1.5px 8px; border-radius: 20px; font-weight: 600; }
+.ib-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); overflow: hidden; }
+
+
 /* ═══ Follow-up cockpit (v2-b) ═══
    1-op-1 uit systeemprototype-v45.html r535-611. Scoped in v2-CSS. */
 .fu-split { display: flex; height: 100%; min-height: 0; overflow: hidden; }
