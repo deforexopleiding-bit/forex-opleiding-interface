@@ -1624,7 +1624,7 @@
                     <div id="waMetaButtonsLimitHint" style="font-size:11px;color:var(--text-faint);margin-top:8px">
                       Meta-limieten: max 3 quick-reply, max 2 CTA (URL + telefoon), hybride combineren tot 10 totaal. Buiten deze limieten weigert Meta de template.
                     </div>
-                    <div id="waMetaButtonsLimitWarn" style="font-size:11px;color:#dc2626;margin-top:4px;display:none"></div>
+                    <div id="waMetaButtonsLimitWarn" style="font-size:11px;color:var(--rose);margin-top:4px;display:none"></div>
                   </div>
                 </details>
               </div>
@@ -2266,14 +2266,14 @@
 
   function waMetaStatusBadge(status, rejectionReason) {
     const map = {
-      LOCAL:     { bg: '#e5e7eb', fg: '#374151' },
-      SUBMITTED: { bg: '#fef3c7', fg: '#92400e' },
-      APPROVED:  { bg: '#d1fae5', fg: '#065f46' },
-      REJECTED:  { bg: '#fee2e2', fg: '#991b1b' },
-      PAUSED:    { bg: '#ede9fe', fg: '#5b21b6' },
-      DISABLED:  { bg: '#f3f4f6', fg: '#4b5563' },
+      LOCAL:     { bg: 'var(--slate-soft)',   fg: 'var(--slate)'   },
+      SUBMITTED: { bg: 'var(--amber-soft)',   fg: 'var(--amber)'   },
+      APPROVED:  { bg: 'var(--emerald-soft)', fg: 'var(--emerald)' },
+      REJECTED:  { bg: 'var(--rose-soft)',    fg: 'var(--rose)'    },
+      PAUSED:    { bg: 'var(--violet-soft)',  fg: 'var(--violet)'  },
+      DISABLED:  { bg: 'var(--slate-soft)',   fg: 'var(--slate)'   },
     };
-    const c = map[status] || { bg: '#f3f4f6', fg: '#374151' };
+    const c = map[status] || { bg: 'var(--slate-soft)', fg: 'var(--slate)' };
     let titleAttr = '';
     if (status === 'REJECTED' && rejectionReason) {
       const safe = esc(String(rejectionReason)).replace(/"/g, '&quot;');
