@@ -30027,8 +30027,8 @@
 
     // FIX punt B: groepeer per action_type met kopjes. Volgorde: primaire
     // klant-acties (Bellen / Betaling verifiëren / Betaaltoezegging) →
-    // escalatie → TL-taken → overig. Types binnen dezelfde groep behouden
-    // hun serverorder (created_at DESC).
+    // escalatie → TL-taken → overig. Binnen dezelfde groep: gesorteerd op
+    // taakdatum OPLOPEND (meest urgente eerst) — zie _awnTaskDateMs hieronder.
     const GROUP_ORDER = [
       'MANUAL_FOLLOWUP',
       'MANUAL_VERIFY_PAYMENT',
@@ -30041,8 +30041,18 @@
       'TL_SUBSCRIPTION_STOP',
       'TL_INVOICE_WRITEOFF',
     ];
+    // Sorteer op TAAKDATUM oplopend (meest urgente eerst): scheduled_for indien
+    // gepland (Later-taken), anders created_at (Te doen = due sinds aanmaak).
+    // Taken zonder bruikbare datum vallen onderaan (Infinity). Deze volgorde
+    // blijft binnen de type-groepen behouden (push-volgorde = sorteervolgorde).
+    const _awnTaskDateMs = (it) => {
+      const raw = it && (it.scheduled_for || it.created_at);
+      const t = raw ? new Date(raw).getTime() : NaN;
+      return Number.isFinite(t) ? t : Infinity;
+    };
+    const sortedItems = items.slice().sort((a, b) => _awnTaskDateMs(a) - _awnTaskDateMs(b));
     const grouped = new Map();
-    for (const it of items) {
+    for (const it of sortedItems) {
       const at = String(it.action_type || 'OTHER');
       if (!grouped.has(at)) grouped.set(at, []);
       grouped.get(at).push(it);
