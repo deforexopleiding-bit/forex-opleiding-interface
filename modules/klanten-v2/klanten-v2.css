@@ -1170,7 +1170,7 @@
 }
 .kv-brand-logo img {
   width: 100%;
-  max-width: 170px;
+  max-width: 120px;
   height: auto;
   /* NB: geen `display` hier — dat zou de class-swap overrulen. */
 }
