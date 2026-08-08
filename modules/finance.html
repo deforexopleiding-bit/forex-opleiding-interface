@@ -29725,7 +29725,7 @@
   //   snooze-modal / confirm-modals via bestaand wbxOpenConfirm-patroon.
   // ═════════════════════════════════════════════════════════════════════
   const _awnState = {
-    tab: 'todo',   // 'todo' | 'later' | 'done' | 'rej'
+    tab: 'vandaag',   // 'vandaag' | 'komend' | 'done' | 'rej'
     items: [],
     paused: [],
     loading: false,
@@ -29747,6 +29747,28 @@
     return (n / 100).toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' });
   }
 
+  // ── Vandaag/Komend-grens op EINDE-VAN-VANDAAG in Europe/Amsterdam ──────────
+  // Taakdatum = scheduled_for (gepland/Later) met terugval op created_at.
+  // We vergelijken de kale datum (YYYY-MM-DD) in Amsterdam-tijd: een taak van
+  // "vandaag" (ongeacht het tijdstip) telt als Vandaag, morgen+ als Komend.
+  // Lexicografische vergelijking van YYYY-MM-DD werkt correct.
+  const _AWN_AMS_FMT = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Amsterdam' });
+  function _awnAmsDate(d) {
+    try { return _AWN_AMS_FMT.format(new Date(d)); } catch (_) { return ''; }
+  }
+  function _awnTaskDateRaw(it) {
+    return (it && (it.scheduled_for || it.created_at)) || null;
+  }
+  // Vandaag = taakdatum ≤ einde van vandaag (Amsterdam), OF geen/onparseerbare
+  // datum (moet sowieso opgepakt worden). todayAms = _awnAmsDate(new Date()).
+  function _awnIsVandaag(it, todayAms) {
+    const raw = _awnTaskDateRaw(it);
+    if (!raw) return true;
+    const ds = _awnAmsDate(raw);
+    if (!ds) return true;
+    return ds <= todayAms;
+  }
+
   function mountActiesWerkcentrumHost() {
     const host = document.getElementById('wb-sub-openacties-nieuw');
     if (!host) return;
@@ -29755,8 +29777,8 @@
       host.innerHTML = `
         <div class="wbx" style="padding:14px 0 4px">
           <div class="wbx-nav" style="gap:6px;margin-bottom:10px;flex-wrap:wrap">
-            <button data-awn-tab="todo"  class="active" type="button" title="Openstaande taken die vandaag opgepakt kunnen worden">Te doen <span class="wbx-badge" data-awn-count="todo">0</span></button>
-            <button data-awn-tab="later"           type="button" title="Uitgestelde taken (snoozed) — komen automatisch terug op hun datum">Later <span class="wbx-badge" data-awn-count="later">0</span></button>
+            <button data-awn-tab="vandaag"  class="active" type="button" title="Taken die vandaag moeten + alles wat al te laat is (taakdatum ≤ einde van vandaag), plus taken zonder datum">Vandaag <span class="wbx-badge" data-awn-count="vandaag">0</span></button>
+            <button data-awn-tab="komend"           type="button" title="Taken met een taakdatum ná vandaag — inclusief handmatig uitgestelde (Later) taken">Komend <span class="wbx-badge" data-awn-count="komend">0</span></button>
             <button data-awn-tab="done"            type="button" title="Reeds afgehandelde taken (kan terugzetten)">Afgehandeld <span class="wbx-badge" data-awn-count="done">0</span></button>
             <button data-awn-tab="rej"             type="button" title="Afgewezen taken (kan terugzetten)">Afgewezen <span class="wbx-badge" data-awn-count="rej">0</span></button>
             <span style="flex:1"></span>
@@ -29866,7 +29888,7 @@
       // "afgehandeld" vanuit user-perspectief. Zonder deze fix verdwenen
       // APPROVED-rijen effectief uit alle tabs.
       const tab = _awnState.tab;
-      const includeScheduled = (tab === 'later') ? '1' : '0';
+      const includeScheduled = (tab === 'vandaag' || tab === 'komend') ? '1' : '0';
       const includeParam = '&include_scheduled=' + includeScheduled;
 
       // Build 1-of-2 URL(s) afhankelijk van tab.
@@ -29875,7 +29897,7 @@
       const fetchUrl = (u) => window.AgentShared.apiFetch(u)
         .then((r) => r.json()).catch(() => ({ items: [] }));
 
-      const primaryStatus = { todo: 'PENDING', later: 'PENDING', done: 'EXECUTED', rej: 'REJECTED' }[tab] || 'PENDING';
+      const primaryStatus = { vandaag: 'PENDING', komend: 'PENDING', done: 'EXECUTED', rej: 'REJECTED' }[tab] || 'PENDING';
       const actionPromises = [fetchUrl(buildUrl(primaryStatus))];
       // done-tab extra fetch voor APPROVED.
       if (tab === 'done') actionPromises.push(fetchUrl(buildUrl('APPROVED')));
@@ -29883,7 +29905,7 @@
       const [rActs1, rActs2, rPaused, rOverzicht] = await Promise.all([
         actionPromises[0],
         actionPromises[1] || Promise.resolve({ items: [] }),
-        tab === 'todo'
+        tab === 'vandaag'
           ? window.AgentShared.apiFetch('/api/finance-dunning-paused-list').then((r) => r.json()).catch(() => ({ items: [] }))
           : Promise.resolve({ items: [] }),
         // Context-enrichment (punt A): één parallelle fetch die per klant
@@ -29904,15 +29926,14 @@
       for (const c of ovItems) {
         if (c && c.customer_id) _awnState.custMap.set(c.customer_id, c);
       }
-      // Later-tab: alleen taken met scheduled_for > now client-side filteren.
-      if (tab === 'later') {
-        const nowIso = new Date().toISOString();
-        items = items.filter((it) => it.scheduled_for && String(it.scheduled_for) > nowIso);
-      } else if (tab === 'todo') {
-        // Defense-in-depth: server filtert al scheduled_for <= now, maar
-        // check nogmaals dat er geen future scheduled_for tussen glipt.
-        const nowIso = new Date().toISOString();
-        items = items.filter((it) => !it.scheduled_for || String(it.scheduled_for) <= nowIso);
+      // Vandaag/Komend-split op taakdatum vs. einde van vandaag (Amsterdam).
+      // Beide tabs halen ALLE openstaande taken op (include_scheduled=1) en
+      // splitsen client-side: Vandaag = taakdatum ≤ vandaag (incl. overdue én
+      // geen datum), Komend = taakdatum > vandaag (incl. voorheen "Later").
+      if (tab === 'vandaag' || tab === 'komend') {
+        const todayAms = _awnAmsDate(new Date());
+        items = items.filter((it) =>
+          tab === 'vandaag' ? _awnIsVandaag(it, todayAms) : !_awnIsVandaag(it, todayAms));
       }
       _awnState.items  = items;
       _awnState.paused = Array.isArray(rPaused?.items) ? rPaused.items : [];
@@ -29937,20 +29958,24 @@
     // Zelfde endpoints; count-only via limit=1 (endpoint returnt total/counts).
     try {
       // FIX punt 5: done-tel APPROVED + EXECUTED. Voegt 1 extra call toe.
-      const [todo, later, doneExec, doneApp, rej] = await Promise.all([
-        window.AgentShared.apiFetch('/api/pending-actions-list?status=PENDING&limit=1').then((r) => r.json()).catch(() => ({})),
+      // Alle openstaande taken (include_scheduled=1) ophalen en client-side
+      // splitsen op taakdatum vs. einde van vandaag (Amsterdam) → Vandaag/Komend.
+      // (Cap op 200 items, zoals de bestaande later-teller; ruim voldoende.)
+      const [pending, doneExec, doneApp, rej] = await Promise.all([
         window.AgentShared.apiFetch('/api/pending-actions-list?status=PENDING&include_scheduled=1&limit=200').then((r) => r.json()).catch(() => ({})),
         window.AgentShared.apiFetch('/api/pending-actions-list?status=EXECUTED&limit=1').then((r) => r.json()).catch(() => ({})),
         window.AgentShared.apiFetch('/api/pending-actions-list?status=APPROVED&limit=1').then((r) => r.json()).catch(() => ({})),
         window.AgentShared.apiFetch('/api/pending-actions-list?status=REJECTED&limit=1').then((r) => r.json()).catch(() => ({})),
       ]);
-      const nowIso = new Date().toISOString();
-      const laterN = (Array.isArray(later?.items) ? later.items : []).filter((it) => it.scheduled_for && String(it.scheduled_for) > nowIso).length;
+      const pendingItems = Array.isArray(pending?.items) ? pending.items : [];
+      const todayAms = _awnAmsDate(new Date());
+      const vandaagN = pendingItems.filter((it) => _awnIsVandaag(it, todayAms)).length;
+      const komendN  = pendingItems.length - vandaagN;
       const doneN = (Number(doneExec?.total) || 0) + (Number(doneApp?.total) || 0);
-      setBadge('todo',  Number(todo?.total)  || (Array.isArray(todo?.items)  ? todo.items.length  : 0));
-      setBadge('later', laterN);
-      setBadge('done',  doneN);
-      setBadge('rej',   Number(rej?.total)   || 0);
+      setBadge('vandaag', vandaagN);
+      setBadge('komend',  komendN);
+      setBadge('done',    doneN);
+      setBadge('rej',     Number(rej?.total) || 0);
     } catch (_) { /* fail-soft */ }
   }
 
@@ -30042,13 +30067,14 @@
       'TL_INVOICE_WRITEOFF',
     ];
     // Sorteer op TAAKDATUM oplopend (meest urgente eerst): scheduled_for indien
-    // gepland (Later-taken), anders created_at (Te doen = due sinds aanmaak).
-    // Taken zonder bruikbare datum vallen onderaan (Infinity). Deze volgorde
-    // blijft binnen de type-groepen behouden (push-volgorde = sorteervolgorde).
+    // gepland, anders created_at. Taken zónder datum: in Vandaag BOVENAAN (moeten
+    // sowieso opgepakt worden), in de overige tabs onderaan. Deze volgorde blijft
+    // binnen de type-groepen behouden (push-volgorde = sorteervolgorde).
+    const _awnNoDateMs = (_awnState.tab === 'vandaag') ? -Infinity : Infinity;
     const _awnTaskDateMs = (it) => {
       const raw = it && (it.scheduled_for || it.created_at);
       const t = raw ? new Date(raw).getTime() : NaN;
-      return Number.isFinite(t) ? t : Infinity;
+      return Number.isFinite(t) ? t : _awnNoDateMs;
     };
     const sortedItems = items.slice().sort((a, b) => _awnTaskDateMs(a) - _awnTaskDateMs(b));
     const grouped = new Map();
@@ -30079,7 +30105,7 @@
     }).join('');
 
     let pausedBlock = '';
-    if (_awnState.tab === 'todo' && pausedFiltered.length > 0) {
+    if (_awnState.tab === 'vandaag' && pausedFiltered.length > 0) {
       pausedBlock = `
         <div style="margin-top:26px;padding-top:16px;border-top:1px solid var(--wbx-border)">
           <h4 style="margin:0 0 10px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--wbx-faint);font-weight:600">
