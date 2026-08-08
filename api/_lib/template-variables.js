@@ -58,6 +58,42 @@ function openAmount(inv) {
   return Math.max(0, total - paid - credited);
 }
 
+// Buitengerechtelijke incassokosten volgens de wettelijke staffel (Besluit
+// vergoeding voor buitengerechtelijke incassokosten / WIK), berekend over het
+// openstaande hoofdbedrag:
+//   15%  over de eerste  EUR 2.500
+//   10%  over de volgende EUR 2.500   (tot 5.000)
+//    5%  over de volgende EUR 5.000   (tot 10.000)
+//    1%  over de volgende EUR 190.000 (tot 200.000)
+//    0,5% over het meerdere
+// Minimum EUR 40,00, maximum EUR 6.775,00. GÉÉN btw (wij zijn btw-plichtig).
+// Afronden op centen. bedrag <= 0 → 0 (geen schuld = geen kosten; het minimum
+// van 40 geldt alleen wanneer er daadwerkelijk kosten in rekening komen).
+// PURE — unit-testbaar.
+export function berekenIncassokosten(bedrag) {
+  const b = Number(bedrag);
+  if (!Number.isFinite(b) || b <= 0) return 0;
+  const staffel = [
+    [2500, 0.15],
+    [2500, 0.10],
+    [5000, 0.05],
+    [190000, 0.01],
+    [Infinity, 0.005],
+  ];
+  let rest = b;
+  let kosten = 0;
+  for (const [schijf, pct] of staffel) {
+    if (rest <= 0) break;
+    const deel = Math.min(rest, schijf);
+    kosten += deel * pct;
+    rest -= deel;
+  }
+  kosten = Math.round(kosten * 100) / 100; // afronden op centen
+  if (kosten < 40) kosten = 40;            // wettelijk minimum
+  if (kosten > 6775) kosten = 6775;        // wettelijk maximum
+  return kosten;
+}
+
 function customerDisplayName(c) {
   if (!c) return '';
   if (c.company_name && String(c.company_name).trim()) {
@@ -119,6 +155,8 @@ export const AVAILABLE_VARIABLES = [
   { key: 'klant.factuur_lijst', label: 'Lijst openstaande facturen', category: 'klant', example: '- 2026-0001 (EUR 80,00)\n- 2026-0002 (EUR 120,00)', requires_context: 'invoices' },
   { key: 'klant.totaal_open',   label: 'Totaal openstaand',          category: 'klant', example: 'EUR 200,00',  requires_context: 'invoices' },
   { key: 'klant.aantal_open',   label: 'Aantal open facturen',       category: 'klant', example: '2',           requires_context: 'invoices' },
+  { key: 'klant.incassokosten',     label: 'Incassokosten (BIK-staffel over totaal openstaand)', category: 'klant', example: 'EUR 40,00',  requires_context: 'invoices' },
+  { key: 'klant.totaal_na_termijn', label: 'Totaal openstaand + incassokosten',                  category: 'klant', example: 'EUR 240,00', requires_context: 'invoices' },
 
   // ── afdeling (per-module contactgegevens uit whatsapp_module_config) ───
   { key: 'afdeling.telefoon',      label: 'Telefoon afdeling',  category: 'afdeling', example: '+31 85 130 83 62',              requires_context: null, requires_module_context: true },
@@ -419,15 +457,22 @@ function getInvoiceValue(invoice, key) {
 
 function getKlantAggregateValue(openInvoices, key) {
   const invs = Array.isArray(openInvoices) ? openInvoices : [];
+  const totaalOpen = invs.reduce((sum, inv) => sum + openAmount(inv), 0);
   switch (key) {
     case 'klant.factuur_lijst':
       return invs
         .map((inv) => `- ${inv.invoice_number || inv.id || ''} (${formatEur(openAmount(inv))})`)
         .join('\n');
     case 'klant.totaal_open':
-      return formatEur(invs.reduce((sum, inv) => sum + openAmount(inv), 0));
+      return formatEur(totaalOpen);
     case 'klant.aantal_open':
       return String(invs.length);
+    case 'klant.incassokosten':
+      // Buitengerechtelijke incassokosten (BIK-staffel) over het totaal openstaand.
+      return formatEur(berekenIncassokosten(totaalOpen));
+    case 'klant.totaal_na_termijn':
+      // Totaal openstaand + incassokosten = wat na de 14-dagentermijn verschuldigd is.
+      return formatEur(totaalOpen + berekenIncassokosten(totaalOpen));
     default: return '';
   }
 }
