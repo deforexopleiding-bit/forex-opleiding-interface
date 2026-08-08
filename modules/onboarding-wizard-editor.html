@@ -47,12 +47,12 @@
     .dirty-pill {
       display:inline-flex; align-items:center; gap:5px; padding:4px 9px; border-radius:999px;
       font-size:11px; font-weight:700; letter-spacing:0.02em;
-      background:rgba(245,158,11,0.13); color:#b45309; border:1px solid rgba(245,158,11,0.30);
+      background:var(--amber-soft); color:var(--amber); border:1px solid var(--amber-line);
     }
     .saved-pill {
       display:inline-flex; align-items:center; gap:5px; padding:4px 9px; border-radius:999px;
       font-size:11px; font-weight:700; letter-spacing:0.02em;
-      background:rgba(34,197,94,0.13); color:#15803d; border:1px solid rgba(34,197,94,0.30);
+      background:var(--emerald-soft); color:var(--emerald); border:1px solid var(--emerald-line);
     }
 
     .btn-base {
@@ -68,8 +68,8 @@
     .btn-base.primary:hover { background:#082850; }
     .btn-base.accent  { background:var(--brand-azure); border-color:var(--brand-azure); color:#fff; }
     .btn-base.accent:hover { background:#1160bd; }
-    .btn-base.danger  { color:#b91c1c; border-color:#fecaca; }
-    .btn-base.danger:hover { background:rgba(220,38,38,0.06); }
+    .btn-base.danger  { color:var(--rose); border-color:var(--rose-line); }
+    .btn-base.danger:hover { background:var(--rose-soft); }
     .btn-base.ghost   { background:transparent; }
 
     /* Layout */
@@ -141,7 +141,7 @@
       font-size:11px; font-weight:700; letter-spacing:0.02em;
       font-family:'Space Grotesk','Inter',system-ui,sans-serif;
     }
-    .block-head .type-badge.info  { background:rgba(100,116,139,0.15); color:#475569; }
+    .block-head .type-badge.info  { background:var(--slate-soft); color:var(--slate); }
     .block-head .spacer { flex:1; }
     .block-head .key-mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; color:var(--text-faint); }
     .block-head .acts { display:flex; gap:4px; flex-wrap:wrap; }
@@ -162,8 +162,8 @@
       outline:0; border-color:var(--brand-azure); box-shadow:0 0 0 4px rgba(20,115,214,0.18);
     }
     .field-row .help { font-size:11.5px; color:var(--text-faint); margin-top:4px; }
-    .field-row .warn { font-size:11.5px; color:#b45309; margin-top:4px; font-weight:600; }
-    .field-row .err  { font-size:11.5px; color:#b91c1c; margin-top:4px; font-weight:600; }
+    .field-row .warn { font-size:11.5px; color:var(--amber); margin-top:4px; font-weight:600; }
+    .field-row .err  { font-size:11.5px; color:var(--rose); margin-top:4px; font-weight:600; }
 
     .req-toggle { display:inline-flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; }
     .req-toggle input { width:18px; height:18px; accent-color:var(--brand-azure); }
@@ -188,7 +188,7 @@
     .file-row .fpath { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; color:var(--text-faint); }
 
     .upload-progress { font-size:11.5px; color:var(--text-dim); margin-top:6px; }
-    .upload-progress.err { color:#b91c1c; font-weight:600; }
+    .upload-progress.err { color:var(--rose); font-weight:600; }
 
     /* Block-type picker */
     .add-row { margin-top:6px; }
@@ -563,7 +563,7 @@
     let d = null; try { d = await r.json(); } catch {}
     if (r.status === 403) {
       const wrap = document.getElementById('rootWrap');
-      if (wrap) wrap.innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c">Geen rechten (onboarding.wizard.edit).</div>`;
+      if (wrap) wrap.innerHTML = `<div class="empty-state" style="border-color:var(--rose-line);color:var(--rose)">Geen rechten (onboarding.wizard.edit).</div>`;
       const ha = document.getElementById('headerActions');
       if (ha) ha.innerHTML = '';
       return;
@@ -1929,7 +1929,7 @@
       function renderConfirm() {
         host.innerHTML = '';
         const banner = document.createElement('div');
-        banner.style.cssText = 'background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.30);color:#b45309;padding:14px 16px;border-radius:12px;font-size:13.5px;line-height:1.55;margin-bottom:10px';
+        banner.style.cssText = 'background:var(--amber-soft);border:1px solid var(--amber-line);color:var(--amber);padding:14px 16px;border-radius:12px;font-size:13.5px;line-height:1.55;margin-bottom:10px';
         const strong = document.createElement('strong');
         strong.textContent = '⚠️ Belangrijk — afstand van bedenktijd';
         banner.appendChild(strong);
@@ -1973,7 +1973,7 @@
         host.innerHTML = '';
         if (requires) {
           const ok = document.createElement('div');
-          ok.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-radius:10px;background:rgba(34,197,94,0.13);border:1px solid rgba(34,197,94,0.30);color:#15803d;font-size:13.5px;font-weight:600;line-height:1.45;margin-bottom:8px';
+          ok.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-radius:10px;background:var(--emerald-soft);border:1px solid var(--emerald-line);color:var(--emerald);font-size:13.5px;font-weight:600;line-height:1.45;margin-bottom:8px';
           const check = document.createElement('span'); check.style.fontSize = '16px'; check.textContent = '✓';
           ok.appendChild(check);
           const txt = document.createElement('span');
@@ -2001,7 +2001,7 @@
       if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
         await window.RBAC.ensurePermissionsLoaded();
         if (!window.RBAC.canSync || !window.RBAC.canSync('onboarding.wizard.edit')) {
-          document.getElementById('rootWrap').innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c">Geen rechten om de wizard te bewerken (onboarding.wizard.edit).</div>`;
+          document.getElementById('rootWrap').innerHTML = `<div class="empty-state" style="border-color:var(--rose-line);color:var(--rose)">Geen rechten om de wizard te bewerken (onboarding.wizard.edit).</div>`;
           document.getElementById('headerActions').innerHTML = '';
           return;
         }
@@ -2010,7 +2010,7 @@
 
     const apiFetch = window.AgentShared?.apiFetch;
     if (typeof apiFetch !== 'function') {
-      document.getElementById('rootWrap').innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c">apiFetch niet beschikbaar.</div>`;
+      document.getElementById('rootWrap').innerHTML = `<div class="empty-state" style="border-color:var(--rose-line);color:var(--rose)">apiFetch niet beschikbaar.</div>`;
       return;
     }
     // Wire de flow-switch éénmalig en zet 'm op de actuele state.
@@ -2020,7 +2020,7 @@
       await loadConfigForFlow(State.flowType);
     } catch (e) {
       console.error('[wizard-editor] init:', e?.message || e);
-      document.getElementById('rootWrap').innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i> Laden mislukt: ${esc(e?.message || e)}</div>`;
+      document.getElementById('rootWrap').innerHTML = `<div class="empty-state" style="border-color:var(--rose-line);color:var(--rose)"><i class="ti ti-alert-triangle"></i> Laden mislukt: ${esc(e?.message || e)}</div>`;
     }
   }
 
