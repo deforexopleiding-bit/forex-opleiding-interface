@@ -241,7 +241,7 @@
     <!-- Opschoon-banner: telt accepted offertes zonder abo + zonder handmatige
          afhandeling; opent een modal met bulk-select. RBAC-gated. -->
     <div id="quotCleanupBanner" style="display:none;margin-bottom:12px;padding:10px 14px;background:var(--bg-elev-2);border:1px solid var(--border);border-radius:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <i class="ti ti-alert-triangle" style="color:#f59e0b"></i>
+      <i class="ti ti-alert-triangle" style="color:var(--amber)"></i>
       <span style="font-size:13px"><strong id="quotCleanupCount">0</strong> geaccepteerde offertes zonder gekoppeld abo — mogelijk is het abo standalone ingevoerd.</span>
       <div style="flex:1"></div>
       <button class="sr-abtn" id="quotCleanupOpen" type="button"><i class="ti ti-broom"></i> Opschonen…</button>
@@ -1026,7 +1026,7 @@ function renderCleanupModalBody() {
     const subs = it.customer_subscriptions || { count: 0, total_amount: 0, list: [] };
     const subsTxt = subs.count > 0
       ? `<strong>${subs.count} abo${subs.count === 1 ? '' : "'s"}</strong> · ${fmtEur(subs.total_amount)}`
-      : '<span style="color:#f87171">geen abo</span>';
+      : '<span style="color:var(--rose)">geen abo</span>';
     const subsList = subs.list && subs.list.length
       ? subs.list.map((s) => `<div style="font-size:11px;color:var(--text-faint)">${esc(s.description)} · ${fmtDate(s.start_date)}${s.end_date ? ' → ' + fmtDate(s.end_date) : ''} · ${fmtEur(s.total_amount)}</div>`).join('')
       : '';
@@ -1365,9 +1365,9 @@ function renderRetentie() {
         <table style="width:100%;font-size:12px"><thead><tr><th style="text-align:left">Abonnement</th><th style="text-align:left">Start</th><th style="text-align:left">Eind</th></tr></thead>
         <tbody>${it.subs.map(s => `<tr><td>${esc(s.description || '—')}</td><td>${s.start_date ? fmtDateNL(s.start_date) : '—'}</td><td>${s.end_date ? fmtDateNL(s.end_date) : '—'}</td></tr>`).join('')}</tbody></table></td></tr>` : '';
       const fuBadge = onFu
-        ? `<span class="sr-tag" style="margin-left:6px;background:rgba(34,197,94,.14);color:#15803d" title="Op follow-up gezet"><i class="ti ti-check"></i> Follow-up</span>`
+        ? `<span class="sr-tag" style="margin-left:6px;background:var(--emerald-soft);color:var(--emerald)" title="Op follow-up gezet"><i class="ti ti-check"></i> Follow-up</span>`
         : '';
-      return `<tr${urgent ? ' style="background:rgba(220,38,38,.05)"' : (notRen ? ' style="opacity:.65"' : '')}>
+      return `<tr${urgent ? ' style="background:var(--rose-soft)"' : (notRen ? ' style="opacity:.65"' : '')}>
         <td><span style="display:flex;align-items:center">${caret}<a class="sr-userline" href="/modules/klanten.html?id=${esc(it.customer_id)}" style="text-decoration:none;color:inherit">${avatarHtml(it.customer_name)}<span><span class="sr-uname">${esc(it.customer_name)}${notRenBadge}${fuBadge}</span><br><span class="sr-cellsub">${esc(it.customer_email || '—')}</span></span></a></span></td>
         <td>${entityTag(it.entity)}</td>
         <td>${esc(it.traject_label || '—')}</td>
@@ -1739,7 +1739,7 @@ function renderVariantProducts() {
   if (!state.variantProducts.length) { wrap.innerHTML = '<span style="font-size:11.5px;color:var(--text-faint)">Nog geen producten</span>'; return; }
   wrap.innerHTML = state.variantProducts.map((vp, i) => {
     const p = state.products.find(x => x.id === vp.product_id);
-    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:12.5px"><span>${esc(p?.name || vp.product_id)} <input type="number" min="1" value="${vp.quantity}" data-vq="${i}" style="width:54px;margin-left:6px" /></span><button class="action-btn" data-vrm="${i}" style="color:#dc2626">×</button></div>`;
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:12.5px"><span>${esc(p?.name || vp.product_id)} <input type="number" min="1" value="${vp.quantity}" data-vq="${i}" style="width:54px;margin-left:6px" /></span><button class="action-btn" data-vrm="${i}" style="color:var(--rose)">×</button></div>`;
   }).join('');
   wrap.querySelectorAll('[data-vq]').forEach(inp => inp.addEventListener('input', e => { state.variantProducts[e.target.dataset.vq].quantity = Number(e.target.value) || 1; }));
   wrap.querySelectorAll('[data-vrm]').forEach(b => b.addEventListener('click', () => { state.variantProducts.splice(Number(b.dataset.vrm), 1); renderVariantProducts(); }));
@@ -1974,7 +1974,7 @@ function renderReports(d) {
     </div>` : '<div class="empty">Grafieken konden niet laden (CDN geblokkeerd). Cijfers + export werken wel.</div>'}
     <h3 style="font-size:14px;margin:6px 0 8px">Per sales-medewerker</h3>
     <div class="table-wrap-x" style="overflow-x:auto"><table><thead><tr><th>Medewerker</th><th>Offertes</th><th>Conversie</th><th>Omzet</th><th>Bonus pending</th><th>Bonus paid</th></tr></thead><tbody>
-      ${(d.by_sales_user || []).length ? (d.by_sales_user || []).map(u => `<tr><td><span class="sr-userline">${avatarHtml(u.user_name)}<span class="sr-uname">${esc(u.user_name)}</span></span></td><td>${u.quotations_count}</td><td>${repPct(u.conversion_rate)}</td><td class="num">${fmtEuro(u.revenue)}</td><td class="num" style="color:#b45309">${fmtEuro(u.bonus_pending)}</td><td class="num" style="color:#059669">${fmtEuro(u.bonus_paid)}</td></tr>`).join('') : '<tr><td colspan="6" class="sr-empty">Geen data in deze periode.</td></tr>'}
+      ${(d.by_sales_user || []).length ? (d.by_sales_user || []).map(u => `<tr><td><span class="sr-userline">${avatarHtml(u.user_name)}<span class="sr-uname">${esc(u.user_name)}</span></span></td><td>${u.quotations_count}</td><td>${repPct(u.conversion_rate)}</td><td class="num">${fmtEuro(u.revenue)}</td><td class="num" style="color:var(--amber)">${fmtEuro(u.bonus_pending)}</td><td class="num" style="color:var(--emerald)">${fmtEuro(u.bonus_paid)}</td></tr>`).join('') : '<tr><td colspan="6" class="sr-empty">Geen data in deze periode.</td></tr>'}
     </tbody></table></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-top:16px">
       <div><h3 style="font-size:14px;margin:0 0 8px">Retentie</h3><table><tbody>
