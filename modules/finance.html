@@ -4502,7 +4502,7 @@
       <!-- Sub-view: Transacties (default — saldo-card + upload + filter + tabel) -->
       <div id="camtSubTransactions">
       <!-- Saldo-card uit nieuwste CAMT-statement -->
-      <div style="background:linear-gradient(135deg, rgba(16,185,129,.12), rgba(16,185,129,.04));border:1px solid rgba(16,185,129,.3);border-radius:12px;padding:18px 22px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+      <div style="background:var(--emerald-soft);border:1px solid var(--emerald-line);border-radius:12px;padding:18px 22px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
         <div>
           <div style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Eindsaldo · uit laatste CAMT-bestand</div>
           <div id="camtBalanceVal" style="font-size:32px;font-weight:700;color:var(--emerald);margin-top:4px;font-variant-numeric:tabular-nums">€ —</div>
@@ -4744,13 +4744,13 @@
         <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg-elev);border-bottom:1px solid var(--border);gap:8px;flex-wrap:wrap">
           <div style="font-size:13px;font-weight:600">Tegenpartijen <span id="expCpCount" style="font-weight:400;color:var(--text-dim);font-size:12px"></span></div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <button class="sr-abtn" id="expAiSuggestBtn" type="button" title="AI classificeert alle ongecategoriseerde tegenpartijen. Suggesties tellen NIET mee — bevestig per stuk of via bulk." style="background:#a855f7;color:white;border-color:#9333ea"><i class="ti ti-sparkles"></i> AI-suggesties genereren</button>
-            <button class="sr-abtn" id="expAiConfirmSelectedBtn" type="button" title="Bevestig alle aangevinkte AI-suggesties in één actie." style="display:none;background:#059669;color:white;border-color:#047857"><i class="ti ti-check"></i> Bevestig geselecteerde (<span id="expAiSelectedCount">0</span>)</button>
+            <button class="sr-abtn" id="expAiSuggestBtn" type="button" title="AI classificeert alle ongecategoriseerde tegenpartijen. Suggesties tellen NIET mee — bevestig per stuk of via bulk." style="background:var(--violet);color:#fff;border-color:var(--violet)"><i class="ti ti-sparkles"></i> AI-suggesties genereren</button>
+            <button class="sr-abtn" id="expAiConfirmSelectedBtn" type="button" title="Bevestig alle aangevinkte AI-suggesties in één actie." style="display:none;background:var(--emerald);color:#fff;border-color:var(--emerald)"><i class="ti ti-check"></i> Bevestig geselecteerde (<span id="expAiSelectedCount">0</span>)</button>
             <button class="sr-abtn" id="expAiBulkConfirmBtn" type="button" title="Bevestig alle AI-suggesties met confidence >= drempel. Standaard uit — kies bewust." style="display:none"><i class="ti ti-check-all"></i> Bulk bevestigen (drempel)</button>
             <button class="sr-abtn" id="expRefreshBtn" type="button"><i class="ti ti-refresh"></i> Vernieuwen</button>
           </div>
         </div>
-        <div id="expAiStatus" style="display:none;padding:10px 14px;background:#faf5ff;border-bottom:1px solid var(--border);font-size:12px;color:#6b21a8"></div>
+        <div id="expAiStatus" style="display:none;padding:10px 14px;background:var(--violet-soft);border-bottom:1px solid var(--border);font-size:12px;color:var(--violet)"></div>
         <div class="data-table-wrap" data-exp-table-wrap style="overflow-x:auto;-webkit-overflow-scrolling:touch">
           <table class="exp-cp-table" style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
@@ -4779,7 +4779,7 @@
             Totaal <strong id="expRecurringMonthlyTotal" style="color:var(--text)">€ 0,00</strong> / maand
           </div>
         </div>
-        <div id="expRecurringInsights" style="padding:8px 14px;background:#faf5ff;border-bottom:1px solid var(--border);font-size:11.5px;color:#6b21a8;display:none"></div>
+        <div id="expRecurringInsights" style="padding:8px 14px;background:var(--violet-soft);border-bottom:1px solid var(--border);font-size:11.5px;color:var(--violet);display:none"></div>
         <div class="data-table-wrap" data-exp-table-wrap style="overflow-x:auto;-webkit-overflow-scrolling:touch">
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead>
