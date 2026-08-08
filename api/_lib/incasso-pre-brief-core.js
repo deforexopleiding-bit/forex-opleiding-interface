@@ -32,6 +32,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { customerDisplayName } from './customer-name.js';
 import { resolveVariables } from './template-variables.js';
 import { sanitizeForPdf } from './incasso-pdf.js';
+import { parseBoldSegments } from './brief-markdown.js';
 import {
   validateCustomerAddress,
   buildAddressBlockPosition,
@@ -127,9 +128,8 @@ function renderBriefPdf({ customer, resolvedSubject, resolvedBody }) {
       }
 
       // Body begint net ONDER het C5-venster (venster-bottom = 90mm) met een
-      // krappe marge. Voorheen 110mm → ~130pt loze witruimte tussen adresblok
-      // en "Datum:", waardoor de brief over 2 pagina's liep. Nu strak zodat
-      // alles op één A4 past; de body valt niet in het envelop-venster.
+      // krappe marge, zodat de body niet in het envelop-venster valt. De brief
+      // mag over 1 of 2 A4 lopen (geen één-pagina-eis meer).
       const bodyStartY = mmToPt(92);
 
       // Body-tekst normaliseren tegen de "Ð"-glyph: \r\n en losse \r → \n.
@@ -162,22 +162,46 @@ function renderBriefPdf({ customer, resolvedSubject, resolvedBody }) {
       // (via de split hieronder) geeft alinea-afstand.
       const cleanBlock = (t) => stripCtrl(t).replace(/ {2,}/g, ' ').replace(/ *\n */g, '\n').trim();
 
-      const BODY_SIZE = 10.5;      // was 9,5 - meer lucht
-      const BODY_LINEGAP = 2.5;    // ruimere regelafstand
+      const BODY_SIZE = 11;        // ruimer/professioneler (mag nu 2 A4)
+      const BODY_LINEGAP = 4;      // ruimere regelafstand
+      const PARA_GAP = 0.85;       // ruimte tussen alinea's
+      const KOP_GAP  = 1.25;       // extra lucht boven een kop-blok
 
       doc.font('Helvetica').fontSize(BODY_SIZE).fillColor('#0f172a');
       doc.text('Datum: ' + fmtDateNl(new Date()), 60, bodyStartY);
-      doc.moveDown(0.45);
-      doc.font('Helvetica-Bold').fontSize(11).text('Onderwerp: ' + cleanLine(resolvedSubject || ''), 60);
       doc.moveDown(0.7);
+      doc.font('Helvetica-Bold').fontSize(11.5).text('Onderwerp: ' + cleanLine(resolvedSubject || ''), 60);
+      doc.moveDown(1.0);
       doc.font('Helvetica').fontSize(BODY_SIZE).fillColor('#0f172a');
 
+      // Render een blok met inline-bold (**...**) via pdfkit "continued" text:
+      // correcte word-wrap over regels + font-wissel per segment. Newlines
+      // binnen het blok blijven regelafbrekingen.
+      const renderRichBlock = (block) => {
+        const segs = parseBoldSegments(block);
+        if (!segs.length) return;
+        for (let j = 0; j < segs.length; j++) {
+          const seg = segs[j];
+          const isLast = j === segs.length - 1;
+          doc.font(seg.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(BODY_SIZE);
+          const opts = { width: 475, align: 'left', lineGap: BODY_LINEGAP, continued: !isLast };
+          if (j === 0) doc.text(seg.text, 60, doc.y, opts);
+          else doc.text(seg.text, opts);
+        }
+      };
+
       const paragraphs = bodyText.split(/\n{2,}/);
+      let renderedAny = false;
       for (let i = 0; i < paragraphs.length; i++) {
         const block = cleanBlock(paragraphs[i]);
         if (!block) continue;
-        doc.text(block, 60, doc.y, { width: 475, align: 'left', lineGap: BODY_LINEGAP });
-        if (i < paragraphs.length - 1) doc.moveDown(0.55);
+        if (renderedAny) {
+          // Blok dat begint met een volledige vette kop-regel krijgt iets meer lucht erboven.
+          const kopLed = /^\*\*[^\n]+?\*\*(?:\n|$)/.test(block);
+          doc.moveDown(kopLed ? KOP_GAP : PARA_GAP);
+        }
+        renderRichBlock(block);
+        renderedAny = true;
       }
 
       // Bewuste keuze: GEEN "Gegenereerd door ..."-voetnoot — WIK is een
