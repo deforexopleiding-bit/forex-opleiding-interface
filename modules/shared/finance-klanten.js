@@ -187,21 +187,21 @@
       }
 
       .fk-arr-badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:500; }
-      .fk-arr-proposed { background:rgba(245,158,11,.15); color:#f59e0b; }
-      .fk-arr-active   { background:rgba(6,182,212,.15);  color:#06b6d4; }
-      .fk-arr-done     { background:rgba(16,185,129,.15); color:#10b981; }
-      .fk-arr-broken   { background:rgba(239,68,68,.15);  color:#ef4444; }
-      .fk-arr-cancel   { background:rgba(156,163,175,.15); color:#9ca3af; }
+      .fk-arr-proposed { background:var(--amber-soft);   color:var(--amber);   }
+      .fk-arr-active   { background:var(--teal-soft);    color:var(--teal);    }
+      .fk-arr-done     { background:var(--emerald-soft); color:var(--emerald); }
+      .fk-arr-broken   { background:var(--rose-soft);    color:var(--rose);    }
+      .fk-arr-cancel   { background:var(--slate-soft);   color:var(--slate);   }
       .fk-arr-none     { background:transparent; color:var(--text-faint); }
 
       .fk-dun-badge { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:500; }
-      .fk-dun-active { background:rgba(239,68,68,.15); color:#ef4444; }
+      .fk-dun-active { background:var(--rose-soft); color:var(--rose); }
       .fk-dun-idle   { background:transparent; color:var(--text-faint); }
 
       .fk-status-pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.4px; }
-      .fk-status-pill.active     { background:rgba(16,185,129,.15); color:#10b981; }
-      .fk-status-pill.archived   { background:rgba(156,163,175,.15); color:#9ca3af; }
-      .fk-status-pill.anonymized { background:rgba(239,68,68,.15); color:#ef4444; }
+      .fk-status-pill.active     { background:var(--emerald-soft); color:var(--emerald); }
+      .fk-status-pill.archived   { background:var(--slate-soft);   color:var(--slate);   }
+      .fk-status-pill.anonymized { background:var(--rose-soft);    color:var(--rose);    }
 
       .fk-state-cell { text-align:center; padding:40px 20px; color:var(--text-faint); font-size:13px; }
       .fk-skel-row td { padding:14px 12px; }
