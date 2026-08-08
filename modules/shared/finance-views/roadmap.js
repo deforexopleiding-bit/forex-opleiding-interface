@@ -80,35 +80,35 @@
       <div style="font-size:12.5px;color:var(--text-dim)">Kandidaten voor de volgende sprints, prioriteit nog te bepalen.</div>
     </div>
     <div class="phases-grid" style="margin-top:12px">
-      <div class="phase-card" style="border-color:rgba(245,158,11,0.35);background:rgba(245,158,11,0.04)">
-        <div class="phase-num" style="background:rgba(245,158,11,0.15);color:#f59e0b">+</div>
+      <div class="phase-card" style="border-color:var(--amber-line);background:var(--amber-soft)">
+        <div class="phase-num" style="background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)">+</div>
         <div class="phase-title">Bulk-acties op facturen</div>
         <div class="phase-desc">Meerdere facturen tegelijk selecteren en versturen, crediteren of als betaald markeren.</div>
-        <span class="phase-tag" style="background:rgba(245,158,11,0.15);color:#f59e0b">PRIORITEIT TBD</span>
+        <span class="phase-tag" style="background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)">PRIORITEIT TBD</span>
       </div>
-      <div class="phase-card" style="border-color:rgba(245,158,11,0.35);background:rgba(245,158,11,0.04)">
-        <div class="phase-num" style="background:rgba(245,158,11,0.15);color:#f59e0b">+</div>
+      <div class="phase-card" style="border-color:var(--amber-line);background:var(--amber-soft)">
+        <div class="phase-num" style="background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)">+</div>
         <div class="phase-title">Excel-export voor facturen + rapportage</div>
         <div class="phase-desc">Download van filterresultaten en rapportages naar .xlsx voor verdere analyse en boekhouding.</div>
-        <span class="phase-tag" style="background:rgba(245,158,11,0.15);color:#f59e0b">PRIORITEIT TBD</span>
+        <span class="phase-tag" style="background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)">PRIORITEIT TBD</span>
       </div>
-      <div class="phase-card" style="border-color:rgba(245,158,11,0.35);background:rgba(245,158,11,0.04)">
-        <div class="phase-num" style="background:rgba(245,158,11,0.15);color:#f59e0b">+</div>
+      <div class="phase-card" style="border-color:var(--amber-line);background:var(--amber-soft)">
+        <div class="phase-num" style="background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)">+</div>
         <div class="phase-title">Cashflow forecast</div>
         <div class="phase-desc">Voorspelling op basis van invoice-history en lopende abonnementen, met scenario- en what-if-knoppen.</div>
-        <span class="phase-tag" style="background:rgba(245,158,11,0.15);color:#f59e0b">PRIORITEIT TBD</span>
+        <span class="phase-tag" style="background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)">PRIORITEIT TBD</span>
       </div>
-      <div class="phase-card" style="border-color:rgba(245,158,11,0.35);background:rgba(245,158,11,0.04)">
-        <div class="phase-num" style="background:rgba(245,158,11,0.15);color:#f59e0b">+</div>
+      <div class="phase-card" style="border-color:var(--amber-line);background:var(--amber-soft)">
+        <div class="phase-num" style="background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)">+</div>
         <div class="phase-title">Finance dashboard / management rapportage</div>
         <div class="phase-desc">KPI-banner, omzet per periode, MRR en openstaand-debiteurensaldo in een overzichtelijke management-view.</div>
-        <span class="phase-tag" style="background:rgba(245,158,11,0.15);color:#f59e0b">PRIORITEIT TBD</span>
+        <span class="phase-tag" style="background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)">PRIORITEIT TBD</span>
       </div>
-      <div class="phase-card" style="border-color:rgba(245,158,11,0.35);background:rgba(245,158,11,0.04)">
-        <div class="phase-num" style="background:rgba(245,158,11,0.15);color:#f59e0b">+</div>
+      <div class="phase-card" style="border-color:var(--amber-line);background:var(--amber-soft)">
+        <div class="phase-num" style="background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)">+</div>
         <div class="phase-title">Wanbetaler-uitbreidingen</div>
         <div class="phase-desc">Conditional branching in workflows (bv. respons-afhankelijk pad) en A/B testing van templates op response-rates.</div>
-        <span class="phase-tag" style="background:rgba(245,158,11,0.15);color:#f59e0b">PRIORITEIT TBD</span>
+        <span class="phase-tag" style="background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)">PRIORITEIT TBD</span>
       </div>
     </div>
 
@@ -118,29 +118,29 @@
       <div style="font-size:12.5px;color:var(--text-dim)">Nog niet ingepland - eerst onderzoek of business-case nodig.</div>
     </div>
     <div class="phases-grid" style="margin-top:12px">
-      <div class="phase-card" style="border-color:rgba(148,163,184,0.35);background:rgba(148,163,184,0.04)">
-        <div class="phase-num" style="background:rgba(148,163,184,0.15);color:#94a3b8">?</div>
+      <div class="phase-card" style="border-color:var(--slate-line);background:var(--slate-soft)">
+        <div class="phase-num" style="background:var(--slate-soft);color:var(--slate);border:1px solid var(--slate-line)">?</div>
         <div class="phase-title">Abonnementen-module</div>
         <div class="phase-desc">Beheer van Teamleader-subscriptions met tracking van recurring invoices en MRR-overzicht.</div>
-        <span class="phase-tag" style="background:rgba(148,163,184,0.15);color:#94a3b8">TE PLANNEN</span>
+        <span class="phase-tag" style="background:var(--slate-soft);color:var(--slate);border:1px solid var(--slate-line)">TE PLANNEN</span>
       </div>
-      <div class="phase-card" style="border-color:rgba(148,163,184,0.35);background:rgba(148,163,184,0.04)">
-        <div class="phase-num" style="background:rgba(148,163,184,0.15);color:#94a3b8">?</div>
+      <div class="phase-card" style="border-color:var(--slate-line);background:var(--slate-soft)">
+        <div class="phase-num" style="background:var(--slate-soft);color:var(--slate);border:1px solid var(--slate-line)">?</div>
         <div class="phase-title">Bonus-configs + executive dashboard</div>
         <div class="phase-desc">Sales-bonus-configs beheren, all-bonus-view en KPI-banner voor management-rapportage.</div>
-        <span class="phase-tag" style="background:rgba(148,163,184,0.15);color:#94a3b8">TE PLANNEN</span>
+        <span class="phase-tag" style="background:var(--slate-soft);color:var(--slate);border:1px solid var(--slate-line)">TE PLANNEN</span>
       </div>
-      <div class="phase-card" style="border-color:rgba(148,163,184,0.35);background:rgba(148,163,184,0.04)">
-        <div class="phase-num" style="background:rgba(148,163,184,0.15);color:#94a3b8">?</div>
+      <div class="phase-card" style="border-color:var(--slate-line);background:var(--slate-soft)">
+        <div class="phase-num" style="background:var(--slate-soft);color:var(--slate);border:1px solid var(--slate-line)">?</div>
         <div class="phase-title">PostNL brieven-integratie</div>
         <div class="phase-desc">Formele brieven voor late-stadium incasso via PostNL-API met letter-templates en bezorgbevestiging.</div>
-        <span class="phase-tag" style="background:rgba(148,163,184,0.15);color:#94a3b8">TE PLANNEN</span>
+        <span class="phase-tag" style="background:var(--slate-soft);color:var(--slate);border:1px solid var(--slate-line)">TE PLANNEN</span>
       </div>
-      <div class="phase-card" style="border-color:rgba(148,163,184,0.35);background:rgba(148,163,184,0.04)">
-        <div class="phase-num" style="background:rgba(148,163,184,0.15);color:#94a3b8">?</div>
+      <div class="phase-card" style="border-color:var(--slate-line);background:var(--slate-soft)">
+        <div class="phase-num" style="background:var(--slate-soft);color:var(--slate);border:1px solid var(--slate-line)">?</div>
         <div class="phase-title">PSD2 AISP-traject</div>
         <div class="phase-desc">Automatische bank-feed via een AISP-licentiehouder, als vervanger van handmatige CAMT-uploads.</div>
-        <span class="phase-tag" style="background:rgba(148,163,184,0.15);color:#94a3b8">TE PLANNEN</span>
+        <span class="phase-tag" style="background:var(--slate-soft);color:var(--slate);border:1px solid var(--slate-line)">TE PLANNEN</span>
       </div>
     </div>
 
@@ -150,23 +150,23 @@
       <div style="font-size:12.5px;color:var(--text-dim)">Tijdelijke situaties en opruimwerk dat nog gepland moet worden.</div>
     </div>
     <div class="phases-grid" style="margin-top:12px">
-      <div class="phase-card" style="border-color:rgba(6,182,212,0.35);background:rgba(6,182,212,0.04)">
-        <div class="phase-num" style="background:rgba(6,182,212,0.15);color:#06b6d4">i</div>
+      <div class="phase-card" style="border-color:var(--teal-line);background:var(--teal-soft)">
+        <div class="phase-num" style="background:var(--teal-soft);color:var(--teal);border:1px solid var(--teal-line)">i</div>
         <div class="phase-title">"Bank (oud)" + e-Boekhouden cron blijven draaien</div>
         <div class="phase-desc">Worden pas uitgezet als CAMT-flow 100% comfortabel draait. Tot die tijd dubbele instroom als veiligheidsnet.</div>
-        <span class="phase-tag" style="background:rgba(6,182,212,0.15);color:#06b6d4">INFO</span>
+        <span class="phase-tag" style="background:var(--teal-soft);color:var(--teal);border:1px solid var(--teal-line)">INFO</span>
       </div>
-      <div class="phase-card" style="border-color:rgba(6,182,212,0.35);background:rgba(6,182,212,0.04)">
-        <div class="phase-num" style="background:rgba(6,182,212,0.15);color:#06b6d4">i</div>
+      <div class="phase-card" style="border-color:var(--teal-line);background:var(--teal-soft)">
+        <div class="phase-num" style="background:var(--teal-soft);color:var(--teal);border:1px solid var(--teal-line)">i</div>
         <div class="phase-title">WhatsApp Inbox app unpublished</div>
         <div class="phase-desc">Alleen test-recipients (max 5 destinations) tot Meta-review is afgerond. Daarna pas brede uitrol mogelijk.</div>
-        <span class="phase-tag" style="background:rgba(6,182,212,0.15);color:#06b6d4">INFO</span>
+        <span class="phase-tag" style="background:var(--teal-soft);color:var(--teal);border:1px solid var(--teal-line)">INFO</span>
       </div>
-      <div class="phase-card" style="border-color:rgba(6,182,212,0.35);background:rgba(6,182,212,0.04)">
-        <div class="phase-num" style="background:rgba(6,182,212,0.15);color:#06b6d4">i</div>
+      <div class="phase-card" style="border-color:var(--teal-line);background:var(--teal-soft)">
+        <div class="phase-num" style="background:var(--teal-soft);color:var(--teal);border:1px solid var(--teal-line)">i</div>
         <div class="phase-title">Oude paper-only tabellen kunnen opgeruimd</div>
         <div class="phase-desc">dunning_phases + dunning_trajectories zijn vervangen door de nieuwe workflow-engine en mogen weg na schema-audit.</div>
-        <span class="phase-tag" style="background:rgba(6,182,212,0.15);color:#06b6d4">INFO</span>
+        <span class="phase-tag" style="background:var(--teal-soft);color:var(--teal);border:1px solid var(--teal-line)">INFO</span>
       </div>
     </div>
     `;
