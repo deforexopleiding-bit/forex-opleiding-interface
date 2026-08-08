@@ -97,24 +97,33 @@ export function berekenIncassokosten(bedrag) {
 // Volledig nog openstaand bedrag over ALLE abonnementen/termijnen van de klant
 // samen — inclusief de nog niet-vervallen toekomstige termijnen.
 //
-// Definitie (bevestigd): SUM over de actieve subscriptions van
-//   amount × term_count × (1 + vat_percentage/100)          [incl. btw]
+// Definitie (optie B): SUM over de actieve subscriptions van
+//   amount × term_count × (1 + vat_percentage/100)          [incl. btw, per sub eigen tarief]
+// PLUS de aanbetaling (downpaymentInclBtw — reeds gebruteerd door de caller)
 // MINUS het reeds betaalde (SUM van invoices.amount_paid van de klant).
 // Nooit negatief. Afronden op centen.
 //
-// Fallback: zijn er geen subscriptions bekend (geen contract-data), dan valt
-// deze terug op het reeds-vervallen totaal (totaalOpen) — zodat de brief nooit
-// een leeg/0-bedrag toont waar een schuld staat.
+// Klanten zónder aanbetaling: downpaymentInclBtw = 0 → gelijk aan de kale
+// subscriptions-som. Klanten mét aanbetaling: die telt nu wél mee (voorheen
+// werd de betaalde aanbetaling wél afgetrokken via amount_paid maar niet
+// opgeteld → te laag).
+//
+// Fallback: geen subscriptions én geen aanbetaling (geen contract-data) → het
+// reeds-vervallen totaal (totaalOpen), zodat de brief nooit een leeg/0-bedrag
+// toont waar een schuld staat.
 //
 // De caller (generatePreBriefForCustomer) laadt subscriptions + betaaldTotaal;
 // templates zonder die context (bv. WhatsApp/e-mail) krijgen de fallback.
 // PURE — unit-testbaar.
-export function berekenTotaalResterend({ subscriptions, betaaldTotaal, totaalOpen } = {}) {
+export function berekenTotaalResterend({ subscriptions, downpaymentInclBtw = 0, betaaldTotaal, totaalOpen } = {}) {
   const subs = Array.isArray(subscriptions) ? subscriptions : [];
-  if (!subs.length) {
-    return Math.max(0, Number(totaalOpen) || 0); // fallback
+  const down = Number(downpaymentInclBtw) || 0; // fail-soft: onbekend/leeg → 0
+  // Fallback alleen als er GEEN contract-data is (geen subscriptions én geen
+  // aanbetaling): dan het reeds-vervallen totaal.
+  if (!subs.length && down <= 0) {
+    return Math.max(0, Number(totaalOpen) || 0);
   }
-  const contractInclBtw = subs.reduce((sum, s) => {
+  const subsInclBtw = subs.reduce((sum, s) => {
     const amount = Number(s?.amount) || 0;
     const terms = Number(s?.term_count) || 0;
     const vatRaw = Number(s?.vat_percentage);
@@ -122,7 +131,7 @@ export function berekenTotaalResterend({ subscriptions, betaaldTotaal, totaalOpe
     return sum + amount * terms * (1 + vat / 100);
   }, 0);
   const betaald = Number(betaaldTotaal) || 0;
-  const resterend = contractInclBtw - betaald;
+  const resterend = subsInclBtw + down - betaald;
   return Math.max(0, Math.round(resterend * 100) / 100);
 }
 
@@ -497,6 +506,7 @@ function getKlantAggregateValue(context, key) {
   // Resterend eenmalig berekenen (gedeeld door totaal_resterend + beide indicaties).
   const resterend = berekenTotaalResterend({
     subscriptions: ctx.subscriptions,
+    downpaymentInclBtw: ctx.downpaymentInclBtw,
     betaaldTotaal: ctx.betaaldTotaal,
     totaalOpen,
   });
