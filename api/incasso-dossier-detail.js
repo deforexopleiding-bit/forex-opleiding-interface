@@ -42,6 +42,7 @@ export default async function handler(req, res) {
       { data: arrangements },
       { data: conversations },
       { data: dunningLog },
+      { data: briefsSent },
     ] = await Promise.all([
       supabaseAdmin.from('customers')
         .select('id, first_name, last_name, company_name, is_company, email, phone, archived_at, anonymized_at, created_at')
@@ -59,6 +60,14 @@ export default async function handler(req, res) {
         .select('id, event_type, payload, created_at')
         .filter('payload->>customer_id', 'eq', cid)
         .order('created_at', { ascending: false }).limit(100),
+      // Brief-indicator: is er ≥1 VERSTUURDE pre-incassobrief (dunning_briefs
+      // met sent_at gevuld, template incasso_pre_nl/-be)? Nieuwste eerst.
+      supabaseAdmin.from('dunning_briefs')
+        .select('sent_at')
+        .eq('customer_id', cid)
+        .in('template_code', ['incasso_pre_nl', 'incasso_pre_be'])
+        .not('sent_at', 'is', null)
+        .order('sent_at', { ascending: false }).limit(1),
     ]);
 
     // WIK/BE-brief markering: kijk of er een dunning_log event is over brief-verstuurd.
@@ -66,6 +75,10 @@ export default async function handler(req, res) {
       const type = String(r.event_type || '');
       return type === 'wik_letter_sent' || type === 'be_letter_sent' || type === 'brief_verstuurd';
     });
+
+    // Brief-indicator (canonieke bron: dunning_briefs.sent_at). Los van het
+    // dunning_log-afgeleide wik_letter_sent hierboven.
+    const brief_sent_at = (briefsSent && briefsSent[0] && briefsSent[0].sent_at) || null;
 
     // Crediteerronde-historie (PR-3 zichtbaarheid). Fail-soft — helper geeft
     // lege agg terug bij DB-fout of ontbrekende tabel.
@@ -80,7 +93,7 @@ export default async function handler(req, res) {
       conversations: conversations || [],
       dunning_log  : dunningLog || [],
       credited_debt,
-      flags        : { wik_letter_sent },
+      flags        : { wik_letter_sent, brief_sent: !!brief_sent_at, brief_sent_at },
     });
   } catch (e) {
     console.error('[incasso-dossier-detail]', e?.message || e);
