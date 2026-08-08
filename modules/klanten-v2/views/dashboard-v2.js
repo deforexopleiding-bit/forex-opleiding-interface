@@ -129,53 +129,92 @@
      Backend ondersteunt: today | week | month. GEEN year / custom.
      Klik op Jaar/Custom toont melding + valt terug op laatst-geladen. */
   const PERIOD_LABEL_TO_PARAM = { Dag: 'today', Week: 'week', Maand: 'month' };
-  const _live = { period: null, data: null, loading: false, error: null };
+  // _live bundelt responses van meerdere endpoints. Elke tegel leest zijn
+  // eigen slice; als slice null → tile toont MOCK-fallback met MOCK-badge.
+  const _live = {
+    period:   null,
+    loading:  false,
+    error:    null,
+    // Per endpoint een eigen slot. null = niet geladen / gefaald.
+    stats:    null,  // /api/dashboard-stats?period=X
+    finance:  null,  // /api/finance-dashboard-counts?period=X
+    tickets:  null,  // /api/tickets (counts.open)
+    events:   null,  // /api/events-list?limit=6 (items[])
+    sales:    null,  // /api/sales-dashboard-stats (Zoom counts)
+    retention:null,  // /api/sales-retention (items[].length)
+  };
   // Sequence-nummer voorkomt race conditions als user snel klikt.
-  // Als een oudere fetch klaar is na een nieuwere: discard de oude response.
   let _fetchSeq = 0;
 
-  async function fetchDashboardStats(labelPeriod) {
+  // Helper: fetch met fail-soft (returnt null bij error, logt).
+  async function tryFetch(label, url) {
+    try {
+      return await window.KV.authedJson(url);
+    } catch (e) {
+      console.warn('[dashboard-v2] ' + label + ' fetch fail:', e && e.message);
+      return null;
+    }
+  }
+
+  async function fetchDashboardBundle(labelPeriod) {
     const paramPeriod = PERIOD_LABEL_TO_PARAM[labelPeriod];
     if (!paramPeriod) return; // Jaar/Custom — geen backend
-    // Cache-skip: al geladen voor deze period + geen error
-    if (_live.period === labelPeriod && _live.data && !_live.error) {
-      console.debug('[dashboard-v2] skip fetch: reeds geladen voor', labelPeriod);
+    if (_live.period === labelPeriod && _live.stats && !_live.error) {
+      console.debug('[dashboard-v2] skip: reeds geladen voor', labelPeriod);
       return;
     }
     const seq = ++_fetchSeq;
     _live.loading = true;
     _live.error = null;
-    console.debug('[dashboard-v2] fetch start seq=' + seq + ' period=' + labelPeriod + ' (' + paramPeriod + ')');
-    // Toon loading-state direct (spinner in header, chip highlight)
+    console.debug('[dashboard-v2] bundle start seq=' + seq + ' period=' + labelPeriod);
     if (window.DFO && window.DFO.render) window.DFO.render();
     try {
       if (!window.KV || !window.KV.authedJson) throw new Error('KV.authedJson niet beschikbaar');
-      const json = await window.KV.authedJson('/api/dashboard-stats?period=' + paramPeriod);
-      // Stale check — nieuwere fetch bezig? Discard.
+      // Parallel fetch — elk endpoint is fail-soft (null bij error).
+      const [stats, finance, tickets, events, sales, retention] = await Promise.all([
+        tryFetch('dashboard-stats',       '/api/dashboard-stats?period=' + paramPeriod),
+        tryFetch('finance-counts',        '/api/finance-dashboard-counts?period=' + paramPeriod),
+        tryFetch('tickets',               '/api/tickets'),
+        tryFetch('events-list',           '/api/events-list?limit=6&status=draft,published'),
+        tryFetch('sales-dashboard-stats', '/api/sales-dashboard-stats'),
+        tryFetch('sales-retention',       '/api/sales-retention'),
+      ]);
       if (seq !== _fetchSeq) {
         console.debug('[dashboard-v2] discard stale seq=' + seq + ' (current=' + _fetchSeq + ')');
         return;
       }
-      _live.period = labelPeriod;
-      _live.data = json;
-      _live.error = null;
-      console.debug('[dashboard-v2] fetch done seq=' + seq + ' period=' + labelPeriod, {
-        leads: json && json.kpis_groot && json.kpis_groot.nieuwe_leads && json.kpis_groot.nieuwe_leads.value,
-        mails: json && json.kpis_klein && json.kpis_klein.mails_period,
-        approvals: json && json.kpis_klein && json.kpis_klein.pending_approvals,
+      _live.period    = labelPeriod;
+      _live.stats     = stats;
+      _live.finance   = finance;
+      _live.tickets   = tickets;
+      _live.events    = events;
+      _live.sales     = sales;
+      _live.retention = retention;
+      _live.error     = stats ? null : 'dashboard-stats faalde';
+      console.debug('[dashboard-v2] bundle done seq=' + seq, {
+        leads:      stats?.kpis_groot?.nieuwe_leads?.value,
+        mails:      stats?.kpis_klein?.mails_period,
+        approvals:  stats?.kpis_klein?.pending_approvals,
+        mrr:        finance?.mrrSubscriptions,
+        openFact:   finance?.openFacturen,
+        openTicket: tickets?.counts?.open,
+        events:     Array.isArray(events?.items) ? events.items.length : null,
+        zoomToday:  sales?.appointments_today_count,
+        retenties:  Array.isArray(retention?.items) ? retention.items.length : null,
       });
     } catch (e) {
-      if (seq !== _fetchSeq) return; // stale error, negeer
-      console.error('[dashboard-v2] fetch fail seq=' + seq, e && e.message);
+      if (seq !== _fetchSeq) return;
+      console.error('[dashboard-v2] bundle fail seq=' + seq, e && e.message);
       _live.error = (e && e.message) || 'onbekende fout';
     } finally {
       if (seq === _fetchSeq) {
         _live.loading = false;
-        // Re-render zodat de UI de nieuwe cijfers pakt
         if (window.DFO && window.DFO.render) window.DFO.render();
       }
     }
   }
+  // Backward-compat alias (dashManager guard verwijst naar oude naam)
+  const fetchDashboardStats = fetchDashboardBundle;
 
   // Public hook: klik op periode-chip
   window.DFO_dashPeriodClick = function (labelPeriod) {
@@ -193,9 +232,12 @@
 
   // Format helpers voor live-values
   const fmtNum = (v) => (v == null || Number.isNaN(v)) ? '—' : String(v);
-  const liveOrMock = (live, mock) => (_live.data ? (live == null ? '—' : live) : mock);
-  const mockBadge = () => `<span title="Voorbeeld-data — deze tile wacht op eigen endpoint" style="font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--amber);background:var(--amber-soft);padding:1px 5px;border-radius:3px;margin-left:6px;vertical-align:2px">MOCK</span>`;
-  const liveBadge = () => _live.data ? `<span title="Live uit /api/dashboard-stats" style="font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--emerald);background:var(--emerald-soft);padding:1px 5px;border-radius:3px;margin-left:6px;vertical-align:2px">LIVE</span>` : '';
+  const liveOrMock = (live, mock) => (_live.stats ? (live == null ? '—' : live) : mock);
+  // Lokale HTML-escape (klanten-v2.js `esc()` is ES-module, niet bereikbaar hier).
+  const esc = (v) => (v == null ? '' : String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
+  const mockBadge = (title) => `<span title="${title || 'Voorbeeld-data — geen bestaand endpoint gevonden voor deze tegel'}" style="font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--amber);background:var(--amber-soft);padding:1px 5px;border-radius:3px;margin-left:6px;vertical-align:2px">MOCK</span>`;
+  const liveBadgeFor = (data, title) => data ? `<span title="${title || 'Live uit backend'}" style="font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--emerald);background:var(--emerald-soft);padding:1px 5px;border-radius:3px;margin-left:6px;vertical-align:2px">LIVE</span>` : '';
+  const liveBadge = () => liveBadgeFor(_live.stats, 'Live uit /api/dashboard-stats');
   const loadingBadge = () => _live.loading ? `<span style="font-size:10px;color:var(--text-3);margin-left:6px">laden…</span>` : '';
 
   /* ── Dashboard: manager/super_admin/sales (breed overzicht) ───────── */
@@ -207,9 +249,10 @@
     // Sequence-tracking in fetchDashboardStats regelt race — geen loading-guard hier
     // (anders skipt initial-fetch een snelle click).
     if (PERIOD_LABEL_TO_PARAM[curPeriod] && _live.period !== curPeriod) {
-      queueMicrotask(() => fetchDashboardStats(curPeriod));
+      queueMicrotask(() => fetchDashboardBundle(curPeriod));
     }
-    const d = _live.data;
+    const d = _live.stats;   // /api/dashboard-stats
+    const f = _live.finance; // /api/finance-dashboard-counts
     const g = d && d.greeting || {};
     const groet = g.tijd_groet || 'Goedemorgen';
     const inzicht = g.inzicht || 'je hele bedrijf in één oogopslag';
@@ -219,7 +262,7 @@
       <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px">
         <div style="flex:1;min-width:220px">
           <div style="font-size:23px;font-weight:600;letter-spacing:-.03em">${groet}, ${voornaam}${loadingBadge()}${liveBadge()}</div>
-          <div style="font-size:13px;color:var(--text-3);margin-top:3px">${nu} · ${_live.data ? inzicht : 'je hele bedrijf in één oogopslag'}</div>
+          <div style="font-size:13px;color:var(--text-3);margin-top:3px">${nu} · ${d ? inzicht : 'je hele bedrijf in één oogopslag'}</div>
           ${_live.error ? `<div style="font-size:12px;color:var(--rose);margin-top:6px">⚠ ${_live.error} — laatst-bekende cijfers hieronder</div>` : ''}
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -290,16 +333,24 @@
           <div class="card-head" style="border-bottom:none;padding-bottom:6px">
             <span class="title-dot" style="background:var(--emerald);box-shadow:0 0 0 3px var(--emerald-soft)"></span>
 
-            <div class="card-title">Omzet — getekende offertes${mockBadge()}</div>
+            <div class="card-title">Omzet — getekende offertes${liveBadgeFor(f, 'Live uit /api/finance-dashboard-counts')}</div>
             <span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;color:var(--text-3)">INCL BTW</span></div>
           <div class="card-body" style="padding:6px 17px 16px">
             <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px">
-              ${[['Abonnementen (MRR)', 47612, '86 actief', 'teal'], ['Totaal incl. btw', 26250, '5 offertes', 'blue']]
-                .map(([l, v, s, c]) => `<div style="border:1px solid var(--border);border-radius:var(--r);padding:13px 15px">
+              ${(() => {
+                // MRR live uit finance-dashboard-counts. Totaal-getekende-offertes-in-periode
+                // heeft geen aggregate endpoint — mock voorlopig met MOCK-badge.
+                const mrr = f && typeof f.mrrSubscriptions === 'number' ? f.mrrSubscriptions : null;
+                const tiles = [
+                  { l: 'Abonnementen (MRR)', v: mrr != null ? mrr : 47612, s: mrr != null ? 'live · som(amount/cycle)' : '86 actief', c: 'teal', live: mrr != null },
+                  { l: 'Totaal incl. btw',   v: 26250, s: '5 offertes',                                                            c: 'blue', live: false },
+                ];
+                return tiles.map(t => `<div style="border:1px solid var(--border);border-radius:var(--r);padding:13px 15px">
                   <div style="font-size:11.5px;color:var(--text-2);margin-bottom:6px;display:flex;align-items:center;gap:6px">
-                    <span class="legend-dot" style="background:var(--${c})"></span>${l}</div>
-                  <div style="font-size:25px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.04em;line-height:1">${eur0(v)}</div>
-                  <div style="font-size:11px;color:var(--text-3);margin-top:6px">${s}</div></div>`).join('')}
+                    <span class="legend-dot" style="background:var(--${t.c})"></span>${t.l}${t.live ? '' : mockBadge('Geen aggregate-endpoint voor global omzet-total in periode')}</div>
+                  <div style="font-size:25px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.04em;line-height:1">${eur0(t.v)}</div>
+                  <div style="font-size:11px;color:var(--text-3);margin-top:6px">${t.s}</div></div>`).join('');
+              })()}
             </div>
             ${(() => {
               const a = [41200, 42800, 43900, 44600, 45800, 46400, 47100, 47612];
@@ -328,15 +379,26 @@
             <div class="card-title">Vereist jouw actie</div></div>
           <div class="card-body" style="padding:4px 15px 15px;display:flex;flex-direction:column;gap:8px">
             ${(() => {
-              // Live: pending_approvals uit dashboard-stats. Rest = mock (aparte endpoints nodig).
-              const approvals = d && d.kpis_klein && d.kpis_klein.pending_approvals;
+              // Live-wire uit meerdere endpoints:
+              //   Open tickets    → /api/tickets counts.open
+              //   Retentie        → /api/sales-retention items.length
+              //   Goedkeuringen   → /api/dashboard-stats kpis_klein.pending_approvals
+              //   Vastgelopen     → /api/finance-dashboard-counts openEscalations (approximate)
+              //   Openstaande fac → /api/finance-dashboard-counts openFacturen
+              //   Bel-acties      → geen dedicated endpoint (follow-up-cockpit telt gedane calls,
+              //                     niet openstaande) — MOCK met melding
+              const approvals    = d && d.kpis_klein && d.kpis_klein.pending_approvals;
+              const openTickets  = _live.tickets && _live.tickets.counts && _live.tickets.counts.open;
+              const retentie     = _live.retention && Array.isArray(_live.retention.items) ? _live.retention.items.length : null;
+              const escalaties   = f && typeof f.openEscalations === 'number' ? f.openEscalations : null;
+              const openFacturen = f && typeof f.openFacturen === 'number' ? f.openFacturen : null;
               const items = [
-                [0,   'Open tickets',            'Support',                 'slate', 'tickets',     false],
-                [6,   'Retentie te laat',        'Leadsonderhoud',          'amber', 'sales',       false],
-                [approvals != null ? approvals : 0, 'Goedkeuringen open', 'Control Center', 'slate', 'binnenkort', approvals != null],
-                [41,  'Vastgelopen gesprekken',  'Wanbetalers-inbox',       'rose',  'wanbetalers', false],
-                [54,  'Bel-acties te doen',      'Wanbetalers',             'amber', 'wanbetalers', false],
-                [210, 'Openstaande facturen',    'Wanbetalers',             'amber', 'finance',     false],
+                [openTickets != null ? openTickets : 0, 'Open tickets',            'Support',              'slate', 'tickets',     openTickets != null],
+                [retentie != null ? retentie : 6,       'Retentie te laat',        'Sales · afloop <30d',  'amber', 'sales',       retentie != null],
+                [approvals != null ? approvals : 0,     'Goedkeuringen open',      'Control Center',       'slate', 'binnenkort',  approvals != null],
+                [escalaties != null ? escalaties : 41,  'Vastgelopen gesprekken',  'Wanbetalers-escalatie','rose',  'wanbetalers', escalaties != null],
+                [54,                                    'Bel-acties te doen',      'Wanbetalers',          'amber', 'wanbetalers', false],
+                [openFacturen != null ? openFacturen : 210, 'Openstaande facturen','Wanbetalers',          'amber', 'finance',     openFacturen != null],
               ];
               return items
               .filter(([n, t, s, c, mod]) => modUsable(mod))
@@ -358,16 +420,30 @@
         <div class="card">
           <div class="card-head" style="border-bottom:none;padding-bottom:4px">
             <span class="title-dot" style="background:var(--teal);box-shadow:0 0 0 3px var(--teal-soft)"></span>
-            <div class="card-title">Zoom-afspraken</div></div>
+            <div class="card-title">Zoom-afspraken${liveBadgeFor(_live.sales, 'Live uit /api/sales-dashboard-stats')}</div></div>
           <div class="card-body" style="text-align:center;padding-top:10px">
-            <div style="font-size:44px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.05em;color:var(--teal);line-height:1">4</div>
-            <div style="font-size:12px;color:var(--text-3);margin-top:5px;margin-bottom:16px">vandaag gepland</div>
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:9px">
-              ${[[4, 'VANDAAG'], [22, 'WEEK'], [84, 'MAAND']].map(([v, l]) => `
-                <div style="border:1px solid var(--border);border-radius:var(--r);padding:11px 6px">
-                  <div style="font-size:18px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.03em">${v}</div>
-                  <div style="font-size:9.5px;letter-spacing:.08em;color:var(--text-3);margin-top:2px">${l}</div></div>`).join('')}
-            </div>
+            ${(() => {
+              // Live: appointments_today_count + tomorrow uit sales-dashboard-stats.
+              // Week-count komt uit week.appointments (aggregate over huidige week).
+              // Maand-count heeft geen endpoint-veld → MOCK.
+              const s = _live.sales;
+              const todayCnt = s && typeof s.appointments_today_count === 'number' ? s.appointments_today_count : null;
+              const tomorrowCnt = s && typeof s.appointments_tomorrow_count === 'number' ? s.appointments_tomorrow_count : null;
+              const weekCnt = s && s.week && typeof s.week.appointments === 'number' ? s.week.appointments : null;
+              const bigVal = todayCnt != null ? todayCnt : 4;
+              return `
+                <div style="font-size:44px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.05em;color:var(--teal);line-height:1">${bigVal}</div>
+                <div style="font-size:12px;color:var(--text-3);margin-top:5px;margin-bottom:16px">vandaag gepland${todayCnt != null ? '' : mockBadge()}</div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:9px">
+                  ${[[todayCnt != null ? todayCnt : 4, 'VANDAAG', todayCnt != null],
+                     [tomorrowCnt != null ? tomorrowCnt : 3, 'MORGEN', tomorrowCnt != null],
+                     [weekCnt != null ? weekCnt : 22, 'WEEK', weekCnt != null]]
+                    .map(([v, l, isLive]) => `
+                    <div style="border:1px solid var(--border);border-radius:var(--r);padding:11px 6px">
+                      <div style="font-size:18px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.03em">${v}</div>
+                      <div style="font-size:9.5px;letter-spacing:.08em;color:var(--text-3);margin-top:2px">${l}${isLive ? '' : mockBadge()}</div></div>`).join('')}
+                </div>`;
+            })()}
           </div>
         </div>
 
@@ -377,15 +453,26 @@
             <div class="card-title">Postvakken</div></div>
           <div class="card-body" style="padding:6px 15px 15px;display:flex;flex-direction:column;gap:7px">
             ${(() => {
-              // Live: mails_period uit dashboard-stats. Rest = mock (aparte endpoints).
+              // Live-wire uit meerdere endpoints (alleen LEZEND — geen mutatie):
+              //   Wanbetalers    → finance.openVerifyPayment + finance.openEscalations
+              //                    (som van actionable inbox-items; alleen read count)
+              //   Events         → events-list items.length (draft+published)
+              //   E-mail         → dashboard-stats kpis_klein.mails_period (al live)
+              //   Leadsonderhoud → geen dedicated count-endpoint → MOCK
+              //   Onboarding     → geen dedicated count-endpoint → MOCK
+              //   Lisa AI        → geen dedicated count-endpoint → MOCK
               const mails = d && d.kpis_klein && d.kpis_klein.mails_period;
+              const wbxCount = f && (typeof f.openVerifyPayment === 'number' || typeof f.openEscalations === 'number')
+                ? (f.openVerifyPayment || 0) + (f.openEscalations || 0)
+                : null;
+              const eventsCount = _live.events && Array.isArray(_live.events.items) ? _live.events.items.length : null;
               const tiles = [
-                ['Wanbetalers',    4,   'amber',  I.alert,  'wanbetalers',    false],
-                ['Leadsonderhoud', 0,   'teal',   I.repeat, 'leadsonderhoud', false],
-                ['Onboarding',     0,   'emerald', I.route, 'onboarding',     false],
-                ['Lisa AI',        2,   'violet', I.bot,    'lisa',           false],
-                ['Events',         3,   'pink',   I.cal,    'events',         false],
-                ['E-mail',         mails != null ? mails : 989, 'blue', I.mail, 'email', mails != null],
+                ['Wanbetalers',    wbxCount != null ? wbxCount : 4,   'amber',  I.alert,  'wanbetalers',    wbxCount != null],
+                ['Leadsonderhoud', 0,                                 'teal',   I.repeat, 'leadsonderhoud', false],
+                ['Onboarding',     0,                                 'emerald', I.route, 'onboarding',     false],
+                ['Lisa AI',        2,                                 'violet', I.bot,    'lisa',           false],
+                ['Events',         eventsCount != null ? eventsCount : 3, 'pink', I.cal,  'events',         eventsCount != null],
+                ['E-mail',         mails != null ? mails : 989,       'blue',   I.mail,  'email',           mails != null],
               ];
               return tiles
                 .filter(([n, c, col, ic, mod]) => modUsable(mod))
@@ -431,30 +518,69 @@
       <div class="card" style="margin-top:14px;margin-bottom:20px">
         <div class="card-head" style="border-bottom:none;padding-bottom:4px">
           <span class="title-dot" style="background:var(--teal);box-shadow:0 0 0 3px var(--teal-soft)"></span>
-          <div class="card-title">Eerstkomende events — status aanmeldingen</div>
+          <div class="card-title">Eerstkomende events — status aanmeldingen${liveBadgeFor(_live.events, 'Live uit /api/events-list')}</div>
           <button class="btn btn-ghost btn-sm" style="margin-left:auto;background:none;color:var(--m)" onclick="DFO.goMod('events')">Events →</button></div>
         <div class="card-body" style="padding:6px 15px 15px;display:flex;flex-direction:column;gap:8px">
-          ${[['za 8 aug · 10:00', 7, 8, 8, 8, 8], ['wo 12 aug · 18:00', 6, 8, 7, 0, 7], ['za 15 aug · 10:00', 1, 8, 2, 0, 2],
-             ['wo 19 aug · 18:00', 0, 8, 0, 0, 0], ['za 22 aug · 10:00', 0, 8, 0, 0, 0]]
-            .map(([dt, vl, vlt, ing, gb, gbt]) => `<button style="display:flex;align-items:center;gap:22px;padding:13px 15px;border:1px solid var(--border);
-              border-radius:var(--r);background:var(--surface);width:100%;text-align:left;transition:all .15s"
-              onmouseover="this.style.borderColor='var(--border-strong)'" onmouseout="this.style.borderColor='var(--border)'" onclick="DFO.goMod('events')">
-              <span style="flex:1;min-width:150px"><span style="display:block;font-size:13.5px;font-weight:600">Forex Masterclass Gent</span>
-              <span style="display:block;font-size:11.5px;color:var(--text-3);margin-top:1px">${dt} · België - Deinsesteenweg 108 | 9031 Drongen (Gent)</span></span>
-              <span style="flex:1;max-width:230px;text-align:center">
-                <span style="display:block;font-size:15px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.02em">
-                  ${vl}<span style="font-size:11px;color:var(--text-3)">/${vlt}</span></span>
-                <span style="display:block;font-size:9.5px;letter-spacing:.09em;color:var(--text-3);margin:3px 0 6px">VRAGENLIJST</span>
-                <span class="progress" style="display:block;height:3px"><i style="width:${vl / vlt * 100}%;background:var(--teal)"></i></span></span>
-              <span style="width:96px;text-align:center">
-                <span style="display:block;font-size:15px;font-weight:600;font-family:'IBM Plex Mono',monospace;${ing > 0 ? '' : 'color:var(--text-3)'}">${ing}</span>
-                <span style="display:block;font-size:9.5px;letter-spacing:.09em;color:var(--text-3);margin-top:3px">INGESCHREVEN</span></span>
-              <span style="flex:1;max-width:230px;text-align:center">
-                <span style="display:block;font-size:15px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.02em;${gb > 0 ? '' : 'color:var(--text-3)'}">
-                  ${gb}<span style="font-size:11px;color:var(--text-3)">/${gbt}</span></span>
-                <span style="display:block;font-size:9.5px;letter-spacing:.09em;color:var(--text-3);margin:3px 0 6px">GEBELD</span>
-                <span class="progress" style="display:block;height:3px"><i style="width:${gbt ? gb / gbt * 100 : 0}%;background:var(--emerald)"></i></span></span>
-            </button>`).join('')}
+          ${(() => {
+            // Live: events-list items (chronologisch komende events).
+            //   title / starts_at / location / attendee_count_active / capacity → live
+            //   VRAGENLIJST / GEBELD progress → MOCK (geen aggregate endpoint per event
+            //   voor vragenlijst-status en cold-call-status)
+            const evItems = _live.events && Array.isArray(_live.events.items) ? _live.events.items : null;
+            const MOCK_ROWS = [
+              ['Forex Masterclass Gent', 'za 8 aug · 10:00', 'België - Deinsesteenweg 108 | 9031 Drongen (Gent)', 8, 8],
+              ['Forex Masterclass Gent', 'wo 12 aug · 18:00', 'België - Deinsesteenweg 108 | 9031 Drongen (Gent)', 7, 8],
+              ['Forex Masterclass Gent', 'za 15 aug · 10:00', 'België - Deinsesteenweg 108 | 9031 Drongen (Gent)', 2, 8],
+              ['Forex Masterclass Gent', 'wo 19 aug · 18:00', 'België - Deinsesteenweg 108 | 9031 Drongen (Gent)', 0, 8],
+              ['Forex Masterclass Gent', 'za 22 aug · 10:00', 'België - Deinsesteenweg 108 | 9031 Drongen (Gent)', 0, 8],
+            ];
+            const fmtDt = (iso) => {
+              try {
+                const dObj = new Date(iso);
+                const days = ['zo','ma','di','wo','do','vr','za'];
+                const months = ['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
+                const hh = String(dObj.getHours()).padStart(2,'0');
+                const mm = String(dObj.getMinutes()).padStart(2,'0');
+                return `${days[dObj.getDay()]} ${dObj.getDate()} ${months[dObj.getMonth()]} · ${hh}:${mm}`;
+              } catch (_) { return iso; }
+            };
+            const rows = evItems && evItems.length
+              ? evItems.slice(0, 5).map(ev => [
+                  ev.title || 'Event',
+                  ev.starts_at ? fmtDt(ev.starts_at) : '—',
+                  ev.location || '—',
+                  typeof ev.attendee_count_active === 'number' ? ev.attendee_count_active : 0,
+                  typeof ev.capacity === 'number' ? ev.capacity : 8,
+                  true, // live
+                ])
+              : MOCK_ROWS.map(r => [...r, false]);
+            return rows.map(([title, dt, loc, ing, cap, isLive]) => {
+              // Mock voor vragenlijst + gebeld — geen aggregate endpoint per event.
+              const vl = isLive ? 0 : Math.min(cap, ing);
+              const vlt = cap;
+              const gb = isLive ? 0 : Math.min(cap, ing);
+              const gbt = cap;
+              return `<button style="display:flex;align-items:center;gap:22px;padding:13px 15px;border:1px solid var(--border);
+                border-radius:var(--r);background:var(--surface);width:100%;text-align:left;transition:all .15s"
+                onmouseover="this.style.borderColor='var(--border-strong)'" onmouseout="this.style.borderColor='var(--border)'" onclick="DFO.goMod('events')">
+                <span style="flex:1;min-width:150px"><span style="display:block;font-size:13.5px;font-weight:600">${esc(title)}</span>
+                <span style="display:block;font-size:11.5px;color:var(--text-3);margin-top:1px">${esc(dt)} · ${esc(loc)}</span></span>
+                <span style="flex:1;max-width:230px;text-align:center">
+                  <span style="display:block;font-size:15px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.02em">
+                    ${vl}<span style="font-size:11px;color:var(--text-3)">/${vlt}</span></span>
+                  <span style="display:block;font-size:9.5px;letter-spacing:.09em;color:var(--text-3);margin:3px 0 6px">VRAGENLIJST${mockBadge('Geen aggregate endpoint per event')}</span>
+                  <span class="progress" style="display:block;height:3px"><i style="width:${vlt ? vl / vlt * 100 : 0}%;background:var(--teal)"></i></span></span>
+                <span style="width:96px;text-align:center">
+                  <span style="display:block;font-size:15px;font-weight:600;font-family:'IBM Plex Mono',monospace;${ing > 0 ? '' : 'color:var(--text-3)'}">${ing}</span>
+                  <span style="display:block;font-size:9.5px;letter-spacing:.09em;color:var(--text-3);margin-top:3px">INGESCHREVEN${isLive ? '' : mockBadge()}</span></span>
+                <span style="flex:1;max-width:230px;text-align:center">
+                  <span style="display:block;font-size:15px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.02em;${gb > 0 ? '' : 'color:var(--text-3)'}">
+                    ${gb}<span style="font-size:11px;color:var(--text-3)">/${gbt}</span></span>
+                  <span style="display:block;font-size:9.5px;letter-spacing:.09em;color:var(--text-3);margin:3px 0 6px">GEBELD${mockBadge('Geen aggregate endpoint per event')}</span>
+                  <span class="progress" style="display:block;height:3px"><i style="width:${gbt ? gb / gbt * 100 : 0}%;background:var(--emerald)"></i></span></span>
+              </button>`;
+            }).join('');
+          })()}
         </div>
       </div>
     </div>`;
