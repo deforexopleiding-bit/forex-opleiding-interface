@@ -4963,7 +4963,10 @@
               <button class="sr-ibtn inbox-c-back-btn" id="inboxBackToListBtn" type="button" title="Terug naar gesprekken-lijst"><i class="ti ti-arrow-left"></i></button>
               <div class="inbox-c-thread-avatar" id="inboxThreadAvatar" style="background:hsl(210,55%,42%)">??</div>
               <div class="inbox-c-thread-info">
-                <div id="inboxThreadName" style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</div>
+                <div style="display:flex;align-items:center;gap:8px;min-width:0">
+                  <div id="inboxThreadName" style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</div>
+                  <span id="inboxThreadBrief" style="flex:none"></span>
+                </div>
                 <div id="inboxThreadPhone" style="font-size:11.5px;color:var(--text-faint)">—</div>
               </div>
               <div class="inbox-c-thread-actions">
@@ -13718,6 +13721,36 @@
     return `<span class="brief-ind brief-ind-no" title="Nog geen pre-incassobrief verstuurd" style="display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:600;color:var(--wbx-s-inc-tx,#dc2626)"><i class="ti ti-circle-x-filled"></i>Brief</span>`;
   }
 
+  // Variant voor de GESPREKS-HEADER: het woord "Brief" in ZWARTE tekst, gevolgd
+  // door een groen vinkje (verstuurd) of rood kruisje (niet). Tooltip met datum
+  // bij groen. (De lijst-/dossier-/case-sheet-badge gebruikt _briefBadgeHtml.)
+  function _briefHeaderBadgeHtml(sent, sentAtIso) {
+    if (sent) {
+      let tip = 'Brief verstuurd';
+      if (sentAtIso) {
+        const d = new Date(sentAtIso);
+        if (!isNaN(d.getTime())) {
+          const dd = String(d.getDate()).padStart(2, '0');
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          tip = `Brief verstuurd op ${dd}-${mm}-${d.getFullYear()}`;
+        }
+      }
+      return `<span title="${esc(tip)}" style="display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;color:#0f172a">Brief <span style="color:#059669;font-weight:700">✓</span></span>`;
+    }
+    return `<span title="Nog geen pre-incassobrief verstuurd" style="display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;color:#0f172a">Brief <span style="color:#dc2626;font-weight:700">✗</span></span>`;
+  }
+
+  // Vul de brief-indicator in de gespreks-header (#inboxThreadBrief) o.b.v. de
+  // geselecteerde conversatie uit _inboxConvs (bevat brief_sent + brief_sent_at).
+  // Onbekend/ongekoppeld → leeg (voorkomt stale badge bij conv-wissel).
+  function _inboxSetBriefBadge(convId) {
+    const el = document.getElementById('inboxThreadBrief');
+    if (!el) return;
+    const conv = _inboxConvs.find((x) => x.id === convId);
+    if (!conv || !conv.customer_id) { el.innerHTML = ''; return; }
+    el.innerHTML = _briefHeaderBadgeHtml(conv.brief_sent, conv.brief_sent_at);
+  }
+
   function _inboxRenderConvList() {
     const list = document.getElementById('inboxConvList');
     if (!list) return;
@@ -13805,7 +13838,7 @@
         <div class="inbox-conv-avatar" style="background:${avColor}">${esc(initials)}</div>
         <div class="inbox-conv-body">
           <div class="inbox-conv-header">
-            <div class="inbox-conv-name">${esc(name)}${c.customer_id ? ' ' + _briefBadgeHtml(c.brief_sent, c.brief_sent_at) : ''}${closedBadge ? ' ' + closedBadge : ''}</div>
+            <div class="inbox-conv-name">${esc(name)}${closedBadge ? ' ' + closedBadge : ''}</div>
             <div class="inbox-conv-time">${esc(rel)}</div>
           </div>
           <div class="inbox-conv-footer">
@@ -14317,6 +14350,7 @@
   async function openInboxConv(convId) {
     if (!convId) return;
     _inboxActiveConvId = convId;
+    _inboxSetBriefBadge(convId);   // brief-indicator in de gespreks-header
     // Mobiel óf/óf-mode: body-klasse verbergt conv-list en toont thread.
     // Op desktop is de klasse effectloos (beide panelen blijven zichtbaar).
     document.body.classList.add('inbox-thread-open');
