@@ -19,7 +19,7 @@
     .ev-kebab-menu.show { display: block; }
     .ev-kebab-item { display: block; width: 100%; padding: 7px 10px; text-align: left; background: transparent; border: none; cursor: pointer; font-size: 12.5px; color: var(--text); border-radius: 4px; font-family: inherit; }
     .ev-kebab-item:hover { background: var(--bg-elev-2); }
-    .ev-kebab-item.danger { color: #dc2626; }
+    .ev-kebab-item.danger { color: var(--rose); }
 
     /* STAP 6a — twee-paneel inbox shell (links lijst, rechts thread+composer). */
     .evx-shell {
@@ -83,7 +83,7 @@
     .evx-conv-time { font-size: 10.5px; color: var(--text-faint); flex-shrink: 0; }
     .evx-conv-preview { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .evx-conv-meta { display: flex; align-items: center; gap: 6px; margin-top: 1px; }
-    .evx-conv-unread { background: rgba(220,38,38,0.15); color: #b91c1c; border-radius: 10px; padding: 1px 7px; font-size: 10.5px; font-weight: 700; }
+    .evx-conv-unread { background: var(--rose-soft); color: var(--rose); border-radius: 10px; padding: 1px 7px; font-size: 10.5px; font-weight: 700; }
 
     /* Empty-state als nog geen gesprek geopend is. */
     .evx-thread-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; text-align: center; color: var(--text-faint); }
@@ -111,8 +111,8 @@
       flex-shrink: 0;
       margin-left: 4px;
     }
-    .evx-24h-dot.open   { background: #059669; box-shadow: 0 0 0 2px rgba(5,150,105,0.18); }
-    .evx-24h-dot.closed { background: #dc2626; box-shadow: 0 0 0 2px rgba(220,38,38,0.18); }
+    .evx-24h-dot.open   { background: var(--emerald); box-shadow: 0 0 0 2px var(--emerald-soft); }
+    .evx-24h-dot.closed { background: var(--rose); box-shadow: 0 0 0 2px var(--rose-soft); }
 
     /* STAP 6c — template-picker modal. */
     .evx-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 9999; display: none; align-items: flex-start; justify-content: center; padding: 60px 16px; overflow-y: auto; }
@@ -137,10 +137,10 @@
     .evx-ctx-strip .evx-ctx-event-link:hover { color: var(--text-dim); }
 
     /* Simone-polish: preview-box met Gebruiken / Aanpassen buttons. */
-    .evx-sim-card { border: 1px solid #7c3aed; border-radius: 10px; background: rgba(124,58,237,0.05); padding: 12px; margin: 6px 14px 0 14px; }
+    .evx-sim-card { border: 1px solid var(--violet); border-radius: 10px; background: var(--violet-soft); padding: 12px; margin: 6px 14px 0 14px; }
     .evx-sim-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-    .evx-sim-head .ti { color: #7c3aed; }
-    .evx-sim-title { font-weight: 700; font-size: 12.5px; color: #7c3aed; }
+    .evx-sim-head .ti { color: var(--violet); }
+    .evx-sim-title { font-weight: 700; font-size: 12.5px; color: var(--violet); }
     .evx-sim-meta { font-size: 11px; color: var(--text-dim); margin-left: auto; }
     .evx-sim-quote { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; color: var(--text); white-space: pre-wrap; line-height: 1.45; }
     .evx-sim-actions { display: flex; gap: 8px; margin-top: 10px; align-items: center; flex-wrap: wrap; }
@@ -166,7 +166,7 @@
     .form-label { display:block; font-size:12px; font-weight:600; color:var(--text-dim); margin-bottom:6px; }
     .form-input { width:100%; background:var(--bg-elev-2); border:1px solid var(--border-strong, var(--border)); border-radius:8px; padding:9px 12px; font-size:13px; color:var(--text); font-family:inherit; outline:none; transition:border-color .15s; }
     .form-input:focus { border-color:var(--brand-primary, #093d54); }
-    .form-error { margin-top:10px; padding:8px 12px; background:rgba(220,38,38,.10); border:1px solid rgba(220,38,38,.30); border-radius:8px; font-size:12px; color:#b91c1c; }
+    .form-error { margin-top:10px; padding:8px 12px; background:var(--rose-soft); border:1px solid var(--rose-line); border-radius:8px; font-size:12px; color:var(--rose); }
     .form-row-2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
     .form-help { font-size:11px; color:var(--text-faint); margin-top:4px; }
 
@@ -192,7 +192,7 @@
     .qq-subtab.active { color:var(--brand-primary, #093d54); border-bottom-color:var(--brand-primary, #093d54); }
     .qq-subpane { display:none; }
     .qq-subpane.active { display:block; }
-    .qq-active-badge { font-size:10px; font-weight:700; background:rgba(16,185,129,.15); color:#059669; padding:2px 7px; border-radius:999px; text-transform:uppercase; letter-spacing:.04em; }
+    .qq-active-badge { font-size:10px; font-weight:700; background:var(--emerald-soft); color:var(--emerald); padding:2px 7px; border-radius:999px; text-transform:uppercase; letter-spacing:.04em; }
     .qq-selector-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:10px 12px; background:rgba(0,0,0,.03); border:1px solid var(--border); border-radius:8px; margin-bottom:14px; }
     .qq-selector-row select { padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); font-family:inherit; font-size:13px; min-width:240px; }
     .qq-band-row { display:grid; grid-template-columns:140px 1fr auto; gap:10px; align-items:center; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.02); font-size:12.5px; }
@@ -200,9 +200,9 @@
     .qq-band-lbl { font-weight:700; }
     .qq-band-desc { color:var(--text-dim); }
     .qq-band-tag { font-size:10px; font-weight:700; padding:2px 7px; border-radius:999px; text-transform:uppercase; letter-spacing:.04em; }
-    .qq-band-tag.low  { background:rgba(220,38,38,.12); color:#b91c1c; }
-    .qq-band-tag.mid  { background:rgba(245,158,11,.15); color:#b45309; }
-    .qq-band-tag.high { background:rgba(16,185,129,.15); color:#059669; }
+    .qq-band-tag.low  { background:var(--rose-soft); color:var(--rose); }
+    .qq-band-tag.mid  { background:var(--amber-soft); color:var(--amber); }
+    .qq-band-tag.high { background:var(--emerald-soft); color:var(--emerald); }
 
     /* PR-A — Mentor-grootboek pane (verhuisd uit modules/mentor-grootboek.html).
        Geprefixt waar de klasse generiek genoeg is dat events.html-elders 'm
@@ -212,8 +212,8 @@
     .kpi { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
     .kpi .lbl { font-size: 11px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
     .kpi .val { font-size: 18px; font-weight: 700; color: var(--text); }
-    .kpi.netto-pos .val { color: #059669; }
-    .kpi.netto-neg .val { color: #b91c1c; }
+    .kpi.netto-pos .val { color: var(--emerald); }
+    .kpi.netto-neg .val { color: var(--rose); }
 
     h3.sec { font-size: 12px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; margin: 22px 0 10px; }
 
@@ -227,14 +227,14 @@
        botsing met de overzicht-tabs status-badges (.status-published etc)
        te voorkomen. */
     .mg-status-pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
-    .mg-status-pending             { background: rgba(148,163,184,0.22); color: #475569; }
-    .mg-status-wachten_op_betaling { background: rgba(245,158,11,0.18); color: #b45309; }
-    .mg-status-vrijgegeven         { background: rgba(5,150,105,0.18); color: #047857; }
-    .mg-status-geannuleerd         { background: rgba(148,163,184,0.18); color: var(--text-faint); }
-    .mg-status-uitbetaald          { background: rgba(20,115,214,0.18); color: #1160bd; }
+    .mg-status-pending             { background: var(--slate-soft); color: var(--slate); }
+    .mg-status-wachten_op_betaling { background: var(--amber-soft); color: var(--amber); }
+    .mg-status-vrijgegeven         { background: var(--emerald-soft); color: var(--emerald); }
+    .mg-status-geannuleerd         { background: var(--slate-soft); color: var(--text-faint); }
+    .mg-status-uitbetaald          { background: var(--blue-soft); color: var(--blue); }
 
     .mg-scope-badge { display: inline-block; font-size: 11px; padding: 2px 9px; border-radius: 10px; background: var(--bg-elev-2); color: var(--text-dim); font-weight: 600; }
-    .mg-scope-badge.self { background: rgba(20,115,214,0.18); color: #1160bd; }
+    .mg-scope-badge.self { background: var(--blue-soft); color: var(--blue); }
 
     @media (max-width: 880px) {
       .kpi-strip { grid-template-columns: 1fr 1fr; }
@@ -261,26 +261,26 @@
 
     /* Capacity pill */
     .cap-pill { display:inline-flex; align-items:center; gap:4px; padding:2px 9px; border-radius:12px; font-size:11px; font-weight:600; background: var(--bg-elev-2); color: var(--text-dim); border:1px solid var(--border); }
-    .cap-pill.full { background: rgba(220,38,38,0.15); color:#b91c1c; border-color: rgba(220,38,38,0.3); }
-    .cap-pill.warn { background: rgba(245,158,11,0.15); color:#b45309; border-color: rgba(245,158,11,0.3); }
-    .cap-pill.ok { background: rgba(5,150,105,0.12); color:#059669; border-color: rgba(5,150,105,0.25); }
+    .cap-pill.full { background: var(--rose-soft); color:var(--rose); border-color: var(--rose-line); }
+    .cap-pill.warn { background: var(--amber-soft); color:var(--amber); border-color: var(--amber-line); }
+    .cap-pill.ok { background: var(--emerald-soft); color:var(--emerald); border-color: var(--emerald-line); }
 
     /* Status badges */
     .status-badge { display:inline-block; padding:2px 9px; border-radius:10px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }
     .status-draft { background: rgba(148,163,184,0.2); color: var(--text-faint); }
-    .status-published { background: rgba(5,150,105,0.15); color:#059669; }
-    .status-cancelled { background: rgba(220,38,38,0.15); color:#b91c1c; }
+    .status-published { background: var(--emerald-soft); color:var(--emerald); }
+    .status-cancelled { background: var(--rose-soft); color:var(--rose); }
     .status-archived { background: rgba(148,163,184,0.2); color: var(--text-faint); opacity:.7; }
 
     /* Signups-closed badge (Blok 1) */
-    .signups-closed-badge { display:inline-block; padding:2px 9px; border-radius:10px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; background: rgba(245,158,11,0.18); color:#b45309; border:1px solid rgba(245,158,11,0.3); margin-left: 4px; cursor: help; }
+    .signups-closed-badge { display:inline-block; padding:2px 9px; border-radius:10px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; background: var(--amber-soft); color:var(--amber); border:1px solid var(--amber-line); margin-left: 4px; cursor: help; }
 
     /* Sync badges (Webflow + GHL) */
     .sync-badges { display:inline-flex; gap:4px; flex-wrap:wrap; }
     .sync-badge { display:inline-flex; align-items:center; gap:3px; padding:2px 7px; border-radius:8px; font-size:10px; font-weight:700; letter-spacing:.03em; cursor: help; }
-    .sync-badge.sync-ok      { background: rgba(5,150,105,0.15); color:#059669; border:1px solid rgba(5,150,105,0.25); }
-    .sync-badge.sync-fail    { background: rgba(220,38,38,0.15); color:#b91c1c; border:1px solid rgba(220,38,38,0.3); }
-    .sync-badge.sync-skip    { background: rgba(245,158,11,0.15); color:#b45309; border:1px solid rgba(245,158,11,0.3); }
+    .sync-badge.sync-ok      { background: var(--emerald-soft); color:var(--emerald); border:1px solid var(--emerald-line); }
+    .sync-badge.sync-fail    { background: var(--rose-soft); color:var(--rose); border:1px solid var(--rose-line); }
+    .sync-badge.sync-skip    { background: var(--amber-soft); color:var(--amber); border:1px solid var(--amber-line); }
     .sync-badge.sync-unpub   { background: rgba(148,163,184,0.2); color: var(--text-faint); border:1px solid var(--border); }
     .sync-badge.sync-none    { background: var(--bg-elev-2); color: var(--text-faint); border:1px solid var(--border); }
 
@@ -648,12 +648,12 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
   // zichtbaar bij events.inbox.view permissie. Default tab = 'overzicht'
   // zodat bestaand gedrag onveranderd is.
   const inboxTabBtn = canViewInbox
-    ? '<button class="ev-tab" data-evtab="inbox"><i class="ti ti-inbox"></i> Inbox <span id="evInboxManualBadge" style="display:none;background:rgba(220,38,38,0.15);color:#b91c1c;border-radius:10px;padding:1px 7px;font-size:10.5px;font-weight:700;margin-left:4px">0</span></button>'
+    ? '<button class="ev-tab" data-evtab="inbox"><i class="ti ti-inbox"></i> Inbox <span id="evInboxManualBadge" style="display:none;background:var(--rose-soft);color:var(--rose);border-radius:10px;padding:1px 7px;font-size:10.5px;font-weight:700;margin-left:4px">0</span></button>'
     : '';
   // Inschrijvingen-inbox tab: alleen zichtbaar bij events.attendee.create
   // (zelfde gate als de onderliggende -list / -resolve endpoints).
   const signupInboxTabBtn = canManageSignupInbox
-    ? '<button class="ev-tab" data-evtab="signup-inbox"><i class="ti ti-clipboard-list"></i> Inschrijvingen-inbox <span id="evSignupInboxBadge" style="display:none;background:rgba(245,158,11,0.18);color:#b45309;border-radius:10px;padding:1px 7px;font-size:10.5px;font-weight:700;margin-left:4px">0</span></button>'
+    ? '<button class="ev-tab" data-evtab="signup-inbox"><i class="ti ti-clipboard-list"></i> Inschrijvingen-inbox <span id="evSignupInboxBadge" style="display:none;background:var(--amber-soft);color:var(--amber);border-radius:10px;padding:1px 7px;font-size:10.5px;font-weight:700;margin-left:4px">0</span></button>'
     : '';
   document.getElementById('page-content').innerHTML = `
     <div class="page-head">
@@ -955,7 +955,7 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
             <!-- Composer -->
             <div id="evThreadFooter" class="evx-thread-footer">
               <div style="display:flex;gap:8px;align-items:flex-start">
-                <button class="btn-primary" id="evAskSimoneBtn" type="button" style="background:#7c3aed;white-space:nowrap" title="Vraag Simone om een suggestie">
+                <button class="btn-primary" id="evAskSimoneBtn" type="button" style="background:var(--violet);white-space:nowrap" title="Vraag Simone om een suggestie">
                   <i class="ti ti-sparkles"></i> Vraag Simone
                 </button>
                 <button class="sr-iconbtn" id="evComposeTemplateBtn" type="button" title="Verstuur een goedgekeurde Meta-template" style="align-self:flex-start">
@@ -1011,7 +1011,7 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
         </select>
         <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px">Notitie (optioneel)</label>
         <textarea id="evSignupResolveNotes" placeholder="Korte notitie voor de audit-trail…" maxlength="1000" style="width:100%;min-height:62px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px;resize:vertical"></textarea>
-        <div id="evSignupResolveError" style="display:none;margin-top:10px;padding:8px 10px;background:rgba(220,38,38,0.12);color:#b91c1c;border:1px solid rgba(220,38,38,0.3);border-radius:8px;font-size:12.5px"></div>
+        <div id="evSignupResolveError" style="display:none;margin-top:10px;padding:8px 10px;background:var(--rose-soft);color:var(--rose);border:1px solid var(--rose-line);border-radius:8px;font-size:12.5px"></div>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
           <button class="sr-btn" id="evSignupResolveCancel2" type="button" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer">Annuleer</button>
           <button class="btn-primary" id="evSignupResolveSubmit" type="button"><i class="ti ti-check"></i> Koppel + maak deelnemer</button>
@@ -1075,7 +1075,7 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
           <button class="aq-modal-close" type="button" onclick="closeAssessmentQuestionEdit()">&#x2715;</button>
         </div>
         <div class="aq-modal-body" style="max-height:70vh;overflow-y:auto">
-          <div id="assessmentQuestionEditError" style="display:none;margin-bottom:10px;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#dc2626;font-size:12px;white-space:pre-wrap"></div>
+          <div id="assessmentQuestionEditError" style="display:none;margin-bottom:10px;padding:8px 12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:6px;color:var(--rose);font-size:12px;white-space:pre-wrap"></div>
 
           <div class="form-group">
             <label class="form-label" for="aqLabel">Vraag (label)</label>
@@ -1519,7 +1519,7 @@ async function _loadAutoCloseSetting() {
     console.error('[settings/signup-deadline] load', e);
     if (status) {
       status.textContent = 'Laden mislukt: ' + (e?.message || 'onbekend');
-      status.style.color = '#b91c1c';
+      status.style.color = 'var(--rose)';
     }
   }
 }
@@ -1531,7 +1531,7 @@ async function _saveAutoCloseSetting() {
   if (!input) return;
   const hoursNum = parseInt(input.value, 10);
   if (!Number.isFinite(hoursNum) || hoursNum < 0 || hoursNum > 720) {
-    if (status) { status.textContent = 'Vul een geheel getal tussen 0 en 720 in.'; status.style.color = '#b91c1c'; }
+    if (status) { status.textContent = 'Vul een geheel getal tussen 0 en 720 in.'; status.style.color = 'var(--rose)'; }
     return;
   }
   if (btn) btn.disabled = true;
@@ -1546,7 +1546,7 @@ async function _saveAutoCloseSetting() {
     if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
     if (status) {
       status.textContent = 'Opgeslagen ✓';
-      status.style.color = '#15803d';
+      status.style.color = 'var(--emerald)';
       setTimeout(() => { if (status.textContent === 'Opgeslagen ✓') status.textContent = ''; }, 2400);
     }
     if (meta && j.updated_at) {
@@ -1559,7 +1559,7 @@ async function _saveAutoCloseSetting() {
     }
   } catch (e) {
     console.error('[settings/signup-deadline] save', e);
-    if (status) { status.textContent = 'Opslaan mislukt: ' + (e?.message || 'onbekend'); status.style.color = '#b91c1c'; }
+    if (status) { status.textContent = 'Opslaan mislukt: ' + (e?.message || 'onbekend'); status.style.color = 'var(--rose)'; }
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -1635,7 +1635,7 @@ function mgRender(data) {
       <td class="num">${eur(e.omzet)}</td>
       <td class="num">${eur(e.bonuspot)}</td>
       <td class="num">${eur(e.uitgaven)}</td>
-      <td class="num" style="font-weight:600;color:${(e.netto||0) >= 0 ? '#059669' : '#b91c1c'}">${eur(e.netto)}</td>
+      <td class="num" style="font-weight:600;color:${(e.netto||0) >= 0 ? 'var(--emerald)' : 'var(--rose)'}">${eur(e.netto)}</td>
       <td>${mgStatusBreakdown(e.per_status)}</td>
     </tr>
   `).join('');
@@ -1644,7 +1644,7 @@ function mgRender(data) {
     <tr>
       <td>${esc(m.mentor_name || m.mentor_email || '(onbekend)')}</td>
       <td style="color:var(--text-faint);font-size:12px">${esc(m.mentor_email || '')}</td>
-      <td class="num" style="font-weight:600;color:${(m.saldo||0) >= 0 ? '#059669' : '#b91c1c'}">${eur(m.saldo)}</td>
+      <td class="num" style="font-weight:600;color:${(m.saldo||0) >= 0 ? 'var(--emerald)' : 'var(--rose)'}">${eur(m.saldo)}</td>
       <td class="num">${m.meegenomen_min_saldo > 0 ? eur(m.meegenomen_min_saldo) : '—'}</td>
       <td>${mgStatusBreakdown(m.per_status)}</td>
     </tr>
@@ -1710,8 +1710,8 @@ let _aqEditingId   = null;
 function aqBanner(kind, text, autoMs) {
   const el = document.getElementById('assessmentQuestionsBanner');
   if (!el) return;
-  const bg = kind === 'success' ? 'rgba(5,150,105,.10)' : 'rgba(220,38,38,.10)';
-  const fg = kind === 'success' ? '#059669' : '#b91c1c';
+  const bg = kind === 'success' ? 'var(--emerald-soft)' : 'var(--rose-soft)';
+  const fg = kind === 'success' ? 'var(--emerald)' : 'var(--rose)';
   el.style.background = bg; el.style.color = fg; el.style.border = '1px solid ' + fg + '40';
   el.textContent = text;
   el.style.display = '';
