@@ -1148,6 +1148,35 @@
    Preview-badge in brand, rol-bewuste topbar-actieknoppen, en polish
    voor de placeholder-view (genericView) van niet-Klanten-modules. */
 
+/* Sidebar-logo: vervangt de blauwe "F"-brand-mark. Wordmark PNG (1650×934)
+   in /img/ met light/dark-swap. Links uitgelijnd, subtekst eronder. */
+.kv-brand-logo {
+  padding: 14px 15px 12px;
+  align-items: flex-start;
+}
+.kv-brand-logo-link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  width: 100%;
+  border-radius: var(--r-sm, 8px);
+}
+.kv-brand-logo-link:focus-visible {
+  outline: 2px solid var(--m);
+  outline-offset: 2px;
+}
+.kv-brand-logo img {
+  display: block;
+  width: 100%;
+  max-width: 170px;
+  height: auto;
+  margin-bottom: 4px;
+}
+.kv-logo-dark  { display: block; }
+.kv-logo-light { display: none;  }
+[data-theme="dark"] .kv-logo-dark  { display: none;  }
+[data-theme="dark"] .kv-logo-light { display: block; }
+
 .v2-preview-tag {
   display: inline-block;
   margin-left: 6px;

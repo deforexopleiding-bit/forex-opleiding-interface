@@ -256,6 +256,14 @@ function wireTopbarSearch() {
 // naar de legacy-URL — zo blijft navigatie werken voor het live-team tijdens
 // de gefaseerde uitrol.
 const V2_MODULES = new Set(['klanten']);
+// Publieke API voor view-files (dashboard-v2.js etc) om zichzelf te
+// registreren als v2-native (voorkomt legacy-redirect).
+window.KV_V2_ADD = (id) => { if (id && typeof id === 'string') V2_MODULES.add(id); };
+// Consumeer eventuele pending-registraties die vóór dit script laadden.
+if (Array.isArray(window.KV_V2_PENDING)) {
+  window.KV_V2_PENDING.forEach((id) => V2_MODULES.add(id));
+  window.KV_V2_PENDING = null;
+}
 
 const LEGACY_URLS = {
   dashboard:        '/index.html',
@@ -313,6 +321,10 @@ function wireLegacyFallback() {
 function renderTopbarActions() {
   const host = document.getElementById('topbarActions');
   if (!host || !window.DFO || !window.DFO.S) return;
+  // Dashboard heeft eigen actiebalk in de hero-band; verberg de topbar-acties
+  // daar om dubbeling te vermijden. Andere modules hebben geen eigen hero
+  // en tonen de topbar-acties wel.
+  if (window.DFO.S.mod === 'dashboard') { host.innerHTML = ''; return; }
   const svg  = window.DFO.svg;
   const I    = window.DFO.I;
   const has  = (r) => (window.DFO.S.roles || []).includes(r);
