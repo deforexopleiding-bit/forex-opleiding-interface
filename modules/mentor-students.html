@@ -32,11 +32,11 @@
     .data-table th.num { text-align: right; }
 
     .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
-    .badge-green  { background: rgba(34,197,94,0.13);  color: #15803d; }
-    .badge-amber  { background: rgba(245,158,11,0.16); color: #b45309; }
-    .badge-grey   { background: rgba(100,116,139,0.18); color: #475569; }
-    .badge-blue   { background: rgba(20,115,214,0.16); color: #1160bd; }
-    .badge-red    { background: rgba(220,38,38,0.13);  color: #b91c1c; }
+    .badge-green  { background: var(--emerald-soft); color: var(--emerald); }
+    .badge-amber  { background: var(--amber-soft);   color: var(--amber);   }
+    .badge-grey   { background: var(--slate-soft);   color: var(--slate);   }
+    .badge-blue   { background: var(--blue-soft);    color: var(--blue);    }
+    .badge-red    { background: var(--rose-soft);    color: var(--rose);    }
 
     .empty-state { background: var(--bg-elev); border: 1px dashed var(--border); border-radius: 10px; padding: 24px 16px; text-align: center; font-size: 13px; color: var(--text-dim); }
     .empty-state i { font-size: 26px; display: block; margin-bottom: 6px; opacity: 0.6; }
@@ -49,14 +49,14 @@
     .tab-btn:hover { color: var(--text); }
     .tab-btn.active { color: var(--text); border-bottom-color: var(--accent, #6366f1); }
     /* Rode teller-badge naast een tab-btn (open no-shows). Verborgen als 0/leeg. */
-    .ns-badge { display: none; min-width: 18px; height: 18px; padding: 0 6px; border-radius: 9px; background: #dc2626; color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+    .ns-badge { display: none; min-width: 18px; height: 18px; padding: 0 6px; border-radius: 9px; background: var(--rose); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
     .ns-badge.on { display: inline-block; }
     /* Sub-tab strip binnen de No shows-tab. */
     .sub-tab-strip { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
     .sub-tab-btn { background: transparent; border: 0; padding: 8px 12px; font-size: 12.5px; font-weight: 600; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; display: inline-flex; align-items: center; gap: 6px; }
     .sub-tab-btn:hover { color: var(--text); }
     .sub-tab-btn.active { color: var(--text); border-bottom-color: var(--accent, #6366f1); }
-    .sub-tab-btn .sub-count { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 10.5px; background: rgba(220,38,38,.12); color: #dc2626; border-radius: 8px; padding: 1px 6px; }
+    .sub-tab-btn .sub-count { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 10.5px; background: var(--rose-soft); color: var(--rose); border-radius: 8px; padding: 1px 6px; }
     /* No-show-kaartjes. */
     .ns-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 13px 15px; margin-bottom: 10px; }
     .ns-card-h { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 8px; }
@@ -64,7 +64,7 @@
     .ns-card-h .ns-date { font-size: 11.5px; color: var(--text-dim); font-family: ui-monospace, monospace; }
     .ns-card textarea { width: 100%; min-height: 68px; padding: 8px 10px; font-size: 13px; font-family: inherit; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text); resize: vertical; }
     .ns-card .ns-actions { margin-top: 8px; display: flex; justify-content: flex-end; gap: 8px; }
-    .ns-card .ns-error { color: #dc2626; font-size: 12.5px; margin-top: 6px; min-height: 15px; }
+    .ns-card .ns-error { color: var(--rose); font-size: 12.5px; margin-top: 6px; min-height: 15px; }
     .ns-done-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); margin-bottom: 8px; }
     .ns-done-row .ns-done-reason { flex: 1; font-size: 13px; color: var(--text); white-space: pre-wrap; }
     .ns-done-row .ns-done-meta { font-size: 11.5px; color: var(--text-dim); font-family: ui-monospace, monospace; text-align: right; white-space: nowrap; }
@@ -77,16 +77,16 @@
     .student-name { font-size: 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .student-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 4px; display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap; }
     .student-meta i { font-size: 13px; opacity: 0.7; margin-right: 3px; }
-    .student-meta .meta-overdue { color: #b91c1c; font-weight: 600; }
-    .student-meta .meta-warning { color: #b45309; font-weight: 500; }
+    .student-meta .meta-overdue { color: var(--rose);  font-weight: 600; }
+    .student-meta .meta-warning { color: var(--amber); font-weight: 500; }
     .student-status-pill { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 12px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
     .student-status-pill i { font-size: 13px; }
-    .ss-pill-green { background: rgba(34,197,94,0.13); color: #15803d; }
-    .ss-pill-amber { background: rgba(245,158,11,0.16); color: #b45309; }
-    .ss-pill-red   { background: rgba(220,38,38,0.13); color: #b91c1c; }
-    .student-flag { color: #b91c1c; font-size: 14px; }
-    .assess-icon-btn { background: transparent; border: 0; cursor: pointer; padding: 4px; border-radius: 6px; color: #b45309; display: inline-flex; align-items: center; }
-    .assess-icon-btn:hover { background: rgba(245,158,11,0.12); }
+    .ss-pill-green { background: var(--emerald-soft); color: var(--emerald); }
+    .ss-pill-amber { background: var(--amber-soft);   color: var(--amber);   }
+    .ss-pill-red   { background: var(--rose-soft);    color: var(--rose);    }
+    .student-flag { color: var(--rose); font-size: 14px; }
+    .assess-icon-btn { background: transparent; border: 0; cursor: pointer; padding: 4px; border-radius: 6px; color: var(--amber); display: inline-flex; align-items: center; }
+    .assess-icon-btn:hover { background: var(--amber-soft); }
     .student-caret { color: var(--text-faint); transition: transform .15s; }
     .student-card.open .student-caret { transform: rotate(90deg); }
     .student-body { display: none; padding: 14px 16px 16px; background: var(--bg); }
@@ -129,8 +129,8 @@
     }
     .search-bar input[type="search"]:focus { outline: 2px solid rgba(99,102,241,0.35); border-color: var(--accent, #6366f1); }
     .warning-bar {
-      background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.30);
-      color: #b45309; padding: 8px 12px; border-radius: 8px;
+      background: var(--amber-soft); border: 1px solid var(--amber-line);
+      color: var(--amber); padding: 8px 12px; border-radius: 8px;
       font-size: 12.5px; margin-bottom: 12px;
     }
 
@@ -313,7 +313,7 @@
   function setError(elId, msg) {
     const el = document.getElementById(elId);
     if (el) el.innerHTML =
-      `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i>${esc(msg)}</div>`;
+      `<div class="empty-state" style="border-color:var(--rose-line);color:var(--rose)"><i class="ti ti-alert-triangle"></i>${esc(msg)}</div>`;
   }
 
   // ── Tab-wiring ────────────────────────────────────────────────────────
