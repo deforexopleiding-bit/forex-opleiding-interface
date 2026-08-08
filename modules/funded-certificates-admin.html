@@ -246,7 +246,7 @@
 
   function renderError(msg) {
     const wrap = document.getElementById('tableWrap');
-    if (wrap) wrap.innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i>${esc(msg)}</div>`;
+    if (wrap) wrap.innerHTML = `<div class="empty-state" style="border-color:var(--rose-line);color:var(--rose)"><i class="ti ti-alert-triangle"></i>${esc(msg)}</div>`;
     const c = document.getElementById('counter');
     if (c) c.textContent = '';
   }
