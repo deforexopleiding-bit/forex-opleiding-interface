@@ -43,8 +43,8 @@
     .a-meta .it { display: inline-flex; align-items: center; gap: 5px; }
     .a-meta .it i { color: var(--text-faint); }
     .a-badge { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; background: var(--bg-elev-2); color: var(--text-dim); border: 1px solid var(--border); }
-    .a-badge.enroll-new { background: rgba(5,150,105,0.12); color:#059669; border-color: rgba(5,150,105,0.25); }
-    .a-badge.enroll-incl { background: rgba(245,158,11,0.15); color:#b45309; border-color: rgba(245,158,11,0.3); }
+    .a-badge.enroll-new { background: var(--emerald-soft); color:var(--emerald); border-color: var(--emerald-line); }
+    .a-badge.enroll-incl { background: var(--amber-soft); color:var(--amber); border-color: var(--amber-line); }
     .a-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
     .a-actions .switch { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
 
@@ -69,7 +69,7 @@
     .editor-section h3 { font-size: 12px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px; }
     .form-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
     .form-field label { font-size: 12px; font-weight: 500; color: var(--text-faint); }
-    .form-field label .req { color: #ef4444; }
+    .form-field label .req { color: var(--rose); }
     .form-field input, .form-field textarea, .form-field select { padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 13px; font-family: inherit; }
     .form-field input:focus, .form-field textarea:focus, .form-field select:focus { outline: none; border-color: var(--brand-primary, #093d54); }
     .form-field textarea { resize: vertical; min-height: 80px; }
@@ -102,7 +102,7 @@
 
     .editor-footer { display: flex; justify-content: space-between; gap: 8px; padding-top: 14px; border-top: 1px solid var(--border); margin-top: 8px; }
     .editor-footer .right { display: flex; gap: 8px; }
-    .editor-banner { padding: 10px 12px; margin-bottom: 12px; background: rgba(239,68,68,0.1); border: 1px solid #ef4444; border-radius: 8px; color: #ef4444; font-size: 13px; display: none; }
+    .editor-banner { padding: 10px 12px; margin-bottom: 12px; background: var(--rose-soft); border: 1px solid var(--rose); border-radius: 8px; color: var(--rose); font-size: 13px; display: none; }
     .editor-banner.visible { display: block; }
 
     /* Modal — gedeeld door Runs-modal (Fase 3a) + Tester-modal (Fase 3b).
@@ -125,11 +125,11 @@
     .runs-table tr.clickable { cursor: pointer; }
     .runs-table tr.clickable:hover td { background: var(--bg-elev-2); }
     .runs-status { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
-    .runs-status.active     { background: rgba(245,158,11,0.15); color:#b45309; }
-    .runs-status.completed  { background: rgba(5,150,105,0.15); color:#059669; }
+    .runs-status.active     { background: var(--amber-soft); color:var(--amber); }
+    .runs-status.completed  { background: var(--emerald-soft); color:var(--emerald); }
     .runs-status.exited     { background: var(--bg-elev-2); color: var(--text-faint); border: 1px solid var(--border); }
-    .runs-status.cancelled  { background: rgba(148,163,184,0.2); color: var(--text-faint); }
-    .runs-status.failed     { background: rgba(220,38,38,0.15); color:#b91c1c; }
+    .runs-status.cancelled  { background: var(--slate-soft); color: var(--text-faint); }
+    .runs-status.failed     { background: var(--rose-soft); color:var(--rose); }
 
     .log-list { display: grid; gap: 8px; font-size: 12.5px; }
     .log-row { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; }
@@ -776,7 +776,7 @@ function renderStepCard(s, idx, total) {
         <label>WhatsApp-template <span class="req">*</span></label>
         ${renderWaTemplateSelect(idx, c.template_name || '')}
         ${state.waTemplatesError
-          ? `<div class="form-help" style="color:#dc2626">Templates konden niet geladen worden: ${esc(state.waTemplatesError)}</div>`
+          ? `<div class="form-help" style="color:var(--rose)">Templates konden niet geladen worden: ${esc(state.waTemplatesError)}</div>`
           : `<div class="form-help">Alleen goedgekeurde Meta-templates van de onboarding-WABA worden getoond.</div>`}
       </div>
       <div class="form-field">
@@ -1138,7 +1138,7 @@ async function openRunDetail(runId) {
           <tr><th>Afgerond</th><td>${esc(fmtDate(run.completed_at))}</td></tr>
           <tr><th>Onboarding</th><td><code>${esc(run.onboarding_id || '')}</code></td></tr>
           <tr><th>Automation</th><td><code>${esc(run.automation_id || '')}</code></td></tr>
-          ${run.last_error ? `<tr><th>Laatste fout</th><td style="color:#b91c1c">${esc(run.last_error)}</td></tr>` : ''}
+          ${run.last_error ? `<tr><th>Laatste fout</th><td style="color:var(--rose)">${esc(run.last_error)}</td></tr>` : ''}
         </tbody>
       </table>` : '<div class="empty-state" style="padding:20px 12px">Run niet gevonden.</div>';
 
@@ -1185,9 +1185,9 @@ function _atShowBanner(msg, kind) {
   if (!el) return;
   if (!msg) { el.style.display = 'none'; el.textContent = ''; return; }
   const palette = kind === 'error'
-    ? 'background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.3);color:#b91c1c'
+    ? 'background:var(--rose-soft);border:1px solid var(--rose-line);color:var(--rose)'
     : kind === 'success'
-      ? 'background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);color:#059669'
+      ? 'background:var(--emerald-soft);border:1px solid var(--emerald-line);color:var(--emerald)'
       : 'background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.3);color:#6366f1';
   el.style.cssText = 'display:block;margin-bottom:10px;padding:8px 12px;border-radius:6px;font-size:12px;white-space:pre-wrap;' + palette;
   el.textContent = msg;
