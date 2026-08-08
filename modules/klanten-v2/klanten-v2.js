@@ -304,13 +304,43 @@ function wireLegacyFallback() {
     // Module met ext-link (bv. lms) — laat DFO's eigen open-in-new-tab flow doen
     const mod = (window.DFO.MODS || []).find((m) => m.id === id);
     if (mod && mod.ext) return orig.call(this, id);
-    if (legacyUrl) { window.location.href = legacyUrl; return; }
+    if (legacyUrl) {
+      console.debug('[klanten-v2] legacy-nav', id, '→', legacyUrl);
+      window.location.href = legacyUrl;
+      return;
+    }
     // Geen legacy-URL bekend (nieuwsbrief/binnenkort/studenten mentor-only zonder legacy):
     // val terug op DFO.goMod → toont genericView-placeholder in shell.
     return orig.call(this, id);
   };
   wrapped.__kvLegacyWrapped = true;
   window.DFO.goMod = wrapped;
+}
+
+// Belt-and-suspenders — na elke shell-render de nav-items voor legacy-modules
+// direct binden aan window.location.href, i.p.v. via de wrap-flow. Voorkomt
+// dat een edge-case waar de wrap niet aanslaat (bv. inline-handler resolvet
+// een ander DFO-object dan de gewrapte) tot een 'dode klik' leidt.
+// Gebruikt event-delegation zodat re-renders van nav geen re-bind vereisen.
+function wireLegacyNavClickCatcher() {
+  if (window.__kvNavCatcherWired) return;
+  window.__kvNavCatcherWired = true;
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest && e.target.closest('#nav button.nav-item');
+    if (!btn) return;
+    // Extract module-id uit onclick-attr ("DFO.goMod('instellingen')").
+    const oc = btn.getAttribute('onclick') || '';
+    const m = oc.match(/DFO\.goMod\('([^']+)'\)/);
+    if (!m) return;
+    const id = m[1];
+    if (V2_MODULES.has(id)) return; // v2-native — laat shell-flow doen
+    const legacyUrl = LEGACY_URLS[id];
+    if (!legacyUrl) return;         // geen legacy-URL — laat placeholder tonen
+    // Voorkom dat de shell-flow parallel iets doet dat de navigatie kaapt.
+    e.preventDefault(); e.stopPropagation();
+    console.debug('[klanten-v2] nav-catcher legacy →', id, '→', legacyUrl);
+    window.location.href = legacyUrl;
+  }, true); // useCapture=true → vuurt vóór de inline-onclick handler
 }
 
 // ── Rol-bewuste topbar-actieknoppen ─────────────────────────────────────────
@@ -418,6 +448,7 @@ function wireTopbarActionsToShell() {
   // Wrap DFO.goMod met legacy-vangnet (redirect naar oude module-URL voor
   // nog-niet-herbouwde v2-modules) + wrap re-render van topbar-actiebalk.
   wireLegacyFallback();
+  wireLegacyNavClickCatcher();
   wireTopbarActionsToShell();
 
   window.DFO.setRoles(shellRoles);
