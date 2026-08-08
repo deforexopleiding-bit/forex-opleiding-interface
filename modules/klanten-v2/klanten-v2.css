@@ -1143,3 +1143,49 @@
 
 
 
+
+/* ═══ v2-preview shell-extensies ═══
+   Preview-badge in brand, rol-bewuste topbar-actieknoppen, en polish
+   voor de placeholder-view (genericView) van niet-Klanten-modules. */
+
+.v2-preview-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+/* Topbar rol-bewuste actiebalk (rechts van search). */
+.topbar-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.topbar-actions .btn {
+  padding: 6px 11px;
+  font-size: 12.5px;
+  gap: 5px;
+  white-space: nowrap;
+}
+.topbar-actions .btn svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+/* Op smaller schermen: verberg ghost-shortcuts, houd alleen primary "Nieuw". */
+@media (max-width: 1180px) {
+  .topbar-actions .btn.btn-ghost { display: none; }
+}
+@media (max-width: 640px) {
+  .topbar-actions .btn.btn-primary span:not(:first-child) { display: none; }
+  .topbar-actions .btn.btn-primary { padding: 6px 8px; }
+}

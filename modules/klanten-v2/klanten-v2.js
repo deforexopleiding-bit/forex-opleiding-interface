@@ -249,6 +249,63 @@ function wireTopbarSearch() {
   });
 }
 
+// ── Rol-bewuste topbar-actieknoppen ─────────────────────────────────────────
+// Rendert Nieuw + rol-shortcuts (Offerte / Traject aanmelden / Factuur) in
+// de topbar, filtert op DFO.S.roles. Klik-handlers zijn nog placeholders —
+// worden aangesloten wanneer de betreffende module gebouwd wordt.
+
+function renderTopbarActions() {
+  const host = document.getElementById('topbarActions');
+  if (!host || !window.DFO || !window.DFO.S) return;
+  const svg  = window.DFO.svg;
+  const I    = window.DFO.I;
+  const has  = (r) => (window.DFO.S.roles || []).includes(r);
+  const anyAdmin = has('super_admin') || has('manager');
+
+  const btns = [];
+  // Sales-shortcut: Offerte (sales + admin-rollen)
+  if (has('sales') || anyAdmin) {
+    btns.push(`<button class="btn btn-ghost" onclick="DFO.KV.newAction('offerte')" title="Nieuwe offerte">${svg(I.doc)}<span>Offerte</span></button>`);
+  }
+  // Traject aanmelden — sales + mentor + admin (voor onboarding-flow)
+  if (has('sales') || has('mentor') || anyAdmin) {
+    btns.push(`<button class="btn btn-ghost" onclick="DFO.KV.newAction('traject')" title="Traject aanmelden">${svg(I.grad)}<span>Traject aanmelden</span></button>`);
+  }
+  // Factuur — finance-toegang = super_admin/manager/sales
+  if (has('sales') || anyAdmin) {
+    btns.push(`<button class="btn btn-ghost" onclick="DFO.KV.newAction('factuur')" title="Nieuwe factuur">${svg(I.file)}<span>Factuur</span></button>`);
+  }
+  // Altijd "Nieuw"-primary (context-afhankelijk in productie)
+  btns.push(`<button class="btn btn-primary" onclick="DFO.KV.newAction('nieuw')" title="Nieuw">${svg(I.plus)}<span>Nieuw</span></button>`);
+
+  host.innerHTML = btns.join('');
+}
+
+// Placeholder-handler voor topbar-acties (elke module hangt eigen wiring aan
+// in latere PRs). Voor nu: toast met wat er gaat gebeuren.
+window.DFO = window.DFO || {};
+window.DFO.KV = window.DFO.KV || {};
+window.DFO.KV.newAction = function newAction(kind) {
+  toast(`Actie "${kind}" wordt aangesloten wanneer de betreffende module gebouwd is.`);
+};
+
+// Hook: DFO.setRoles / setRole / goMod triggeren re-render van actiebalk.
+// We wrappen na boot zodat elke rol-wissel (via de rolebox) meteen doorwerkt.
+function wireTopbarActionsToShell() {
+  if (!window.DFO) return;
+  ['setRoles', 'setRole', 'goMod', 'render'].forEach((fn) => {
+    const orig = window.DFO[fn];
+    if (typeof orig !== 'function' || orig.__kvWrapped) return;
+    const wrapped = function () {
+      const r = orig.apply(this, arguments);
+      try { renderTopbarActions(); } catch (_) { /* noop */ }
+      return r;
+    };
+    wrapped.__kvWrapped = true;
+    window.DFO[fn] = wrapped;
+  });
+}
+
 // ── Boot ─────────────────────────────────────────────────────────────────────
 
 (async function boot() {
@@ -290,8 +347,26 @@ function wireTopbarSearch() {
       : [String(profile.role || 'super_admin').toLowerCase()];
     shellRoles = fallback.length ? fallback : ['super_admin'];
   }
+  // Wrap DFO om topbar-acties bij elke rol-wissel te re-renderen.
+  wireTopbarActionsToShell();
+
   window.DFO.setRoles(shellRoles);
+
+  // Sync rolebox-select met huidige primary rol + toon 'em (voor preview).
+  const roleSel = document.getElementById('roleSel');
+  if (roleSel && window.DFO.S && window.DFO.S.roles && window.DFO.S.roles[0]) {
+    roleSel.value = window.DFO.S.roles[0];
+  }
+  // Rolebox is nu zichtbaar (inline style display:none uit index.html
+  // verwijderd) — geen extra JS nodig.
+
+  // Start op klanten (enige werkende module in v2-preview). Alle andere
+  // modules renderen automatisch genericView() als placeholder ("in aanbouw").
   window.DFO.goMod('klanten');
+
+  // Eerste render van topbar-actions (na goMod triggert wrap 'em ook, maar
+  // eerste render moet expliciet want boot-goMod is idempotent na wrap).
+  renderTopbarActions();
 
   // 5) Vervang shell-sidebar user-persona met échte Supabase-user.
   paintUser(profile);
