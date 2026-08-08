@@ -1489,14 +1489,14 @@
         .wa-var-chip { padding:4px 10px; background:#f3f4f6; border:1px solid var(--border); border-radius:999px; font-size:12px; cursor:pointer; color:var(--text); font-family:inherit; line-height:1.3; }
         .wa-var-chip:hover { background:var(--surface-2); }
         .wa-var-chip[disabled] { opacity:.5; cursor:not-allowed; }
-        #waMetaVarsBlock.wa-vars-named { background:rgba(34,197,94,0.06); border-style:solid; border-color:rgba(34,197,94,0.4); }
+        #waMetaVarsBlock.wa-vars-named { background:var(--emerald-soft); border-style:solid; border-color:var(--emerald-line); }
         #waMetaVarsBlock .wa-var-readonly-row { display:grid; grid-template-columns:auto 1fr; gap:8px; align-items:center; padding:3px 0; font-size:12px; }
         #waMetaVarsBlock .wa-var-readonly-key { font-family:monospace; font-size:11.5px; color:var(--text); background:rgba(34,197,94,0.12); padding:2px 6px; border-radius:4px; }
         #waMetaVarsBlock .wa-var-readonly-example { color:var(--text-faint); font-size:11.5px; }
         /* Preview body */
         #waMetaPreviewBody .wa-preview-placeholder { color:var(--text-3); font-style:italic; }
         #waMetaPreviewBody .wa-preview-unknown { color:var(--rose); background:var(--rose-soft); padding:0 4px; border-radius:3px; font-family:monospace; font-size:12.5px; display:inline-flex; align-items:center; gap:4px; }
-        #waMetaPreviewBody .wa-preview-unknown-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:#ef4444; box-shadow:0 0 0 2px rgba(239,68,68,0.20); }
+        #waMetaPreviewBody .wa-preview-unknown-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--rose); box-shadow:0 0 0 2px var(--rose-soft); }
       </style>
 
       <!-- WhatsApp Meta Template full editor modal -->
@@ -2424,8 +2424,8 @@
       const sort    = Number.isFinite(it.sort_order) ? it.sort_order : 0;
       const active  = it.is_active !== false;
       const dot     = active
-        ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:6px"></span>Actief'
-        : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#9ca3af;margin-right:6px"></span>Inactief';
+        ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--emerald);margin-right:6px"></span>Actief'
+        : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--slate);margin-right:6px"></span>Inactief';
       return `<tr>
         <td><strong>${title}</strong></td>
         <td style="color:var(--text-dim)">${esc(trunc)}</td>
@@ -2620,8 +2620,8 @@
         const v = WA_VAR_BY_KEY.get(k);
         if (!v) {
           return `<div class="wa-var-readonly-row">
-            <span class="wa-var-readonly-key" style="background:rgba(239,68,68,0.15)">{{${esc(k)}}}</span>
-            <span class="wa-var-readonly-example" style="color:#dc2626">onbekende variabele</span>
+            <span class="wa-var-readonly-key" style="background:var(--rose-soft)">{{${esc(k)}}}</span>
+            <span class="wa-var-readonly-example" style="color:var(--rose)">onbekende variabele</span>
           </div>`;
         }
         return `<div class="wa-var-readonly-row">
@@ -2928,10 +2928,10 @@
     const status = (item && item.status) || 'LOCAL';
     let bg = '', fg = '', border = '', html = '';
     if (status === 'SUBMITTED') {
-      bg = '#f3f4f6'; fg = '#374151'; border = '#d1d5db';
+      bg = 'var(--slate-soft)'; fg = 'var(--slate)'; border = 'var(--slate-line)';
       html = '<i class="ti ti-clock" style="margin-right:6px"></i>Wacht op Meta-review';
     } else if (status === 'APPROVED') {
-      bg = '#d1fae5'; fg = '#065f46'; border = '#6ee7b7';
+      bg = 'var(--emerald-soft)'; fg = 'var(--emerald)'; border = 'var(--emerald-line)';
       let dateStr = '';
       if (item && item.approved_at) {
         try {
@@ -2942,13 +2942,13 @@
       html = '<i class="ti ti-circle-check" style="margin-right:6px"></i>Goedgekeurd door Meta'
         + (dateStr ? ' op ' + esc(dateStr) : '');
     } else if (status === 'REJECTED') {
-      bg = '#fee2e2'; fg = '#991b1b'; border = '#fca5a5';
+      bg = 'var(--rose-soft)'; fg = 'var(--rose)'; border = 'var(--rose-line)';
       const reason = (item && item.rejection_reason) ? esc(String(item.rejection_reason)) : 'onbekende reden';
       html = '<i class="ti ti-alert-triangle" style="margin-right:6px"></i>Afgewezen door Meta: '
         + reason
         + '<div style="font-weight:400;font-size:11.5px;margin-top:4px;opacity:0.85">Pas de content aan en stuur opnieuw in voor review.</div>';
     } else if (status === 'PAUSED' || status === 'DISABLED') {
-      bg = '#fee2e2'; fg = '#991b1b'; border = '#fca5a5';
+      bg = 'var(--rose-soft)'; fg = 'var(--rose)'; border = 'var(--rose-line)';
       html = '<i class="ti ti-player-pause" style="margin-right:6px"></i>Pause/Disable door Meta';
     } else {
       banner.hidden = true;
