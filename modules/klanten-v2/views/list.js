@@ -243,10 +243,7 @@ function renderHero() {
   `;
 
   el.querySelector('[data-act="new-customer"]').addEventListener('click', openNewCustomer);
-  el.querySelector('[data-act="export"]').addEventListener('click', () => {
-    // TODO PR-C: CSV-export
-    K().toast('CSV-export komt in PR-C');
-  });
+  el.querySelector('[data-act="export"]').addEventListener('click', () => exportCurrentListAsCsv());
 }
 
 function kpiCard(label, value, color, softColor, iconSvg, footNote) {
@@ -450,6 +447,7 @@ function tableFrame(bodyHtml) {
             <th class="ds-optional">Tags</th>
             <th class="ds-optional">Status</th>
             <th class="ds-optional">Aangemaakt</th>
+            <th class="ds-optional">Laatste contact</th>
             <th style="width:44px;"></th>
           </tr>
         </thead>
@@ -496,6 +494,7 @@ function rowHtml(c) {
       <td class="ds-optional"><div style="display:flex; gap:4px; flex-wrap:wrap;">${tagsHtml}${extraTags || ''}${!(c.tags || []).length ? '<span style="color:var(--text-3); font-size:12px;">—</span>' : ''}</div></td>
       <td class="ds-optional">${statusPill}</td>
       <td class="ds-optional"><span class="num" style="font-size:12.5px; color:var(--text-2);">${K().esc(created)}</span></td>
+      <td class="ds-optional"><span class="num" style="font-size:12.5px; color:var(--text-2);">${K().esc(formatDate(c.last_contact_at) || '—')}</span></td>
       <td>
         <div class="ds-dd">
           <button class="ds-icon-btn" data-act="row-kebab" aria-label="Meer acties" type="button">
@@ -554,17 +553,39 @@ function wireTableRows(el) {
       e.stopPropagation(); menu.classList.remove('open');
       window.KV.navigate({ id, tab: 'profiel' });
     });
-    menu.querySelector('[data-act="row-edit"]').addEventListener('click', (e) => {
+    menu.querySelector('[data-act="row-edit"]').addEventListener('click', async (e) => {
       e.stopPropagation(); menu.classList.remove('open');
-      K().toast('Bewerk-modal komt in PR-C');
+      const customer = state.rows.find((r) => r.id === id);
+      if (!customer) return K().toast('Klant niet gevonden in huidige lijst');
+      const openEditCustomerModal = await loadModal('./modals/edit-customer.js', 'openEditCustomerModal');
+      if (!openEditCustomerModal) return;
+      openEditCustomerModal({
+        customer,
+        onSuccess: () => loadList().then(() => renderTablePart()),
+      });
     });
-    menu.querySelector('[data-act="row-tag"]').addEventListener('click', (e) => {
+    menu.querySelector('[data-act="row-tag"]').addEventListener('click', async (e) => {
       e.stopPropagation(); menu.classList.remove('open');
-      K().toast('Tag-modal komt in PR-C');
+      const customer = state.rows.find((r) => r.id === id);
+      if (!customer) return K().toast('Klant niet gevonden in huidige lijst');
+      const openTagEditModal = await loadModal('./modals/tag-edit.js', 'openTagEditModal');
+      if (!openTagEditModal) return;
+      openTagEditModal({
+        customer,
+        onSuccess: () => loadList().then(() => renderTablePart()),
+      });
     });
-    menu.querySelector('[data-act="row-archive"]').addEventListener('click', (e) => {
+    menu.querySelector('[data-act="row-archive"]').addEventListener('click', async (e) => {
       e.stopPropagation(); menu.classList.remove('open');
-      K().toast('Archiveer-bevestiging komt in PR-C');
+      const customer = state.rows.find((r) => r.id === id);
+      if (!customer) return K().toast('Klant niet gevonden in huidige lijst');
+      const openArchiveCustomerModal = await loadModal('./modals/archive-customer.js', 'openArchiveCustomerModal');
+      if (!openArchiveCustomerModal) return;
+      openArchiveCustomerModal({
+        customer,
+        mode: (customer.status === 'archived' ? 'reactivate' : 'archive'),
+        onSuccess: () => loadList().then(() => renderTablePart()),
+      });
     });
   });
 
@@ -692,9 +713,53 @@ function skeletonRows(n) {
       <td class="ds-optional"><div style="height:12px; width:40%; background:var(--surface-2); border-radius:5px;"></div></td>
       <td class="ds-optional"><div style="height:12px; width:30%; background:var(--surface-2); border-radius:5px;"></div></td>
       <td class="ds-optional"><div style="height:12px; width:35%; background:var(--surface-2); border-radius:5px;"></div></td>
+      <td class="ds-optional"><div style="height:12px; width:35%; background:var(--surface-2); border-radius:5px;"></div></td>
       <td></td>
     </tr>`;
   return Array(n).fill(row).join('');
+}
+
+// ── CSV-export van de huidige (gefilterde) lijst ──────────────────────────
+// Client-side: exporteert state.rows — dat is wat je op scherm ziet
+// (gefilterd + gesorteerd + huidige pagina-batch, tot page_size). Voor
+// "alle pagina's" zou een server-endpoint nodig zijn; die scope leggen
+// we bewust hier neer als parity-vervanger van de oude toast.
+function csvEscape(v) {
+  if (v == null) return '';
+  const s = String(v);
+  if (/[",\r\n;]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+function exportCurrentListAsCsv() {
+  const rows = state?.rows || [];
+  if (!rows.length) { K().toast('Geen klanten om te exporteren'); return; }
+  const header = ['ID', 'Naam', 'Bedrijf', 'Email', 'Telefoon', 'Status', 'Tags', 'Aangemaakt', 'Laatste contact'];
+  const lines = [header.map(csvEscape).join(',')];
+  for (const c of rows) {
+    lines.push([
+      c.id,
+      customerDisplayName(c),
+      c.is_company ? 'Ja' : 'Nee',
+      c.email || '',
+      c.phone || '',
+      c.status || 'active',
+      (c.tags || []).map((t) => t.slug || t.label).join('; '),
+      c.created_at || '',
+      c.last_contact_at || '',
+    ].map(csvEscape).join(','));
+  }
+  const csv = '﻿' + lines.join('\r\n');  // BOM zodat Excel UTF-8 herkent
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const ts = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `klanten-${ts}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  K().toast(`${rows.length} klanten geëxporteerd`);
 }
 
 // ── SVG icons ────────────────────────────────────────────────────────────────
