@@ -1674,8 +1674,10 @@ const TAKEN_MAX_UPLOAD     = 10 * 1024 * 1024; // 10 MB
 const _takenSignedUrls = new Map();
 let _takenAttachments  = [];
 let _takenWatchers     = [];
-let _takenProfilesCache = null;
 let _takenUploading    = false;
+// Profielen-bron: hergebruik ensureProfilesList() uit assignee-picker
+// (leest d.members i.p.v. d.profiles — endpoint-shape). Cache wordt
+// gedeeld tussen beide pickers.
 
 function isImageMimeT(m) { return typeof m === 'string' && m.startsWith('image/'); }
 
@@ -1761,20 +1763,14 @@ function renderTaskWatchers() {
 async function refreshWatcherPicker() {
   const sel = document.getElementById('detailWatcherSelect');
   if (!sel) return;
-  if (!_takenProfilesCache) {
-    try {
-      const r = await window.AgentShared.apiFetch('/api/profiles-list');
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      const d = await r.json().catch(() => ({}));
-      _takenProfilesCache = Array.isArray(d?.profiles) ? d.profiles : [];
-    } catch (e) {
-      console.warn('[taken-t3] profiles-list fetch:', e?.message || e);
-      _takenProfilesCache = [];
-    }
-  }
+  // Hergebruik werkende assignee-picker-bron. Geen eigen fetch/cache meer —
+  // ensureProfilesList() leest d.members uit /api/profiles-list en cachet
+  // per page-load. Bug pre-fix: eigen fetch las d.profiles → altijd [].
+  const list = await ensureProfilesList();
   const existing = new Set(_takenWatchers.map((w) => w.profile_id));
-  const options = _takenProfilesCache
-    .filter((p) => !existing.has(p.id))
+  const myId = (window.AuthShared && window.AuthShared._cachedUserId) || null;
+  const options = (Array.isArray(list) ? list : [])
+    .filter((p) => p && p.id && !existing.has(p.id) && (!myId || p.id !== myId))
     .map((p) => '<option value="' + escHtml(p.id) + '">' + escHtml(p.full_name || p.email || p.id) + '</option>')
     .join('');
   sel.innerHTML = '<option value="">— Kies collega om toe te voegen —</option>' + options;
