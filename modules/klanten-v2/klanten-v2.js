@@ -256,6 +256,14 @@ function wireTopbarSearch() {
 // naar de legacy-URL — zo blijft navigatie werken voor het live-team tijdens
 // de gefaseerde uitrol.
 const V2_MODULES = new Set(['klanten']);
+// Publieke API voor view-files (dashboard-v2.js etc) om zichzelf te
+// registreren als v2-native (voorkomt legacy-redirect).
+window.KV_V2_ADD = (id) => { if (id && typeof id === 'string') V2_MODULES.add(id); };
+// Consumeer eventuele pending-registraties die vóór dit script laadden.
+if (Array.isArray(window.KV_V2_PENDING)) {
+  window.KV_V2_PENDING.forEach((id) => V2_MODULES.add(id));
+  window.KV_V2_PENDING = null;
+}
 
 const LEGACY_URLS = {
   dashboard:        '/index.html',
