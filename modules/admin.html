@@ -37,7 +37,7 @@
     .role-badge.mentor { background:var(--color-neutral-soft); color:var(--color-neutral-text); border:1px solid var(--color-neutral); }
     .role-badge.administratie { background:var(--color-warning-soft); color:var(--color-warning-text); border:1px solid var(--color-warning); }
     .role-badge.viewer { background:var(--color-neutral-soft); color:var(--text-secondary); border:1px solid var(--border-subtle); }
-    .role-badge.super_admin { background:rgba(139,92,246,0.12); color:#6d28d9; border:1px solid rgba(139,92,246,0.35); } /* Geen violet-token; #6d28d9 geeft ≥4.5:1 contrast op wit */
+    .role-badge.super_admin { background:var(--violet-soft); color:var(--violet); border:1px solid var(--violet-line); } /* Sinds violet-tokens in design-system/tokens.css: rose/violet/blue trio-safe */
     .role-badge.manager { background:var(--color-info-soft); color:var(--color-info-text); border:1px solid var(--color-info); }
     .role-badge.editable { cursor: pointer; }
     .role-badge.editable:hover { opacity: 0.8; }
@@ -45,7 +45,7 @@
     .user-roles-cell { display:flex; flex-direction:column; gap:5px; }
     .extra-roles { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
     .role-chip { display:inline-flex; align-items:center; gap:3px; padding:2px 8px; border-radius:12px; background:var(--bg-elev-2); border:1px solid var(--border); font-size:10px; color:var(--text-dim); }
-    .role-chip[data-role="super_admin"] { background:rgba(139,92,246,0.12); color:#6d28d9; border:1px solid rgba(139,92,246,0.35); }
+    .role-chip[data-role="super_admin"] { background:var(--violet-soft); color:var(--violet); border:1px solid var(--violet-line); }
     .role-chip-remove { background:none; border:none; color:var(--text-faint); cursor:pointer; font-size:11px; line-height:1; padding:0; }
     .role-chip-remove:hover { color:var(--color-danger,#dc2626); }
     .role-add-btn { padding:1px 8px; border:1px dashed var(--border-strong); border-radius:12px; background:transparent; color:var(--text-faint); cursor:pointer; font-size:10px; font-family:inherit; }
@@ -149,11 +149,11 @@
     .approv-mini-btn.danger { background:transparent; color:var(--color-danger,#dc2626); border-color:var(--color-danger,#dc2626); }
     .approv-mini-btn.danger:hover { background:var(--color-danger-soft,rgba(220,38,38,.08)); }
     .approv-status-badge { display:inline-block; padding:2px 8px; border-radius:8px; font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.3px; }
-    .approv-status-pending  { background:rgba(56,189,248,.15); color:#0284c7; }
-    .approv-status-approved { background:rgba(34,197,94,.15); color:#15803d; }
-    .approv-status-rejected { background:rgba(239,68,68,.15); color:#b91c1c; }
-    .approv-status-executed { background:rgba(34,197,94,.15); color:#15803d; }
-    .approv-status-failed   { background:rgba(239,68,68,.15); color:#b91c1c; }
+    .approv-status-pending  { background:var(--blue-soft); color:var(--blue); }
+    .approv-status-approved { background:var(--emerald-soft); color:var(--emerald); }
+    .approv-status-rejected { background:var(--rose-soft); color:var(--rose); }
+    .approv-status-executed { background:var(--emerald-soft); color:var(--emerald); }
+    .approv-status-failed   { background:var(--rose-soft); color:var(--rose); }
     .approv-status-cancelled{ background:var(--bg-elev-2); color:var(--text-faint); }
     .approv-truncate { max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     #pendingActionDetailModal .modal-card { max-width:760px; max-height:90vh; display:flex; flex-direction:column; }
@@ -181,7 +181,7 @@
     .rbac-feat-label { font-weight:500; }
     .rbac-feat-key { font-size:10px; color:var(--text-faint); font-family:monospace; }
     .rbac-auto { font-size:10px; color:var(--brand-primary); font-weight:600; }
-    .rbac-row-match { background:rgba(234,179,8,0.12); }
+    .rbac-row-match { background:var(--amber-soft); }
     .rbac-matrix input[type=checkbox] { width:16px; height:16px; cursor:pointer; }
     .rbac-btn-sm { padding:4px 10px; font-size:11px; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; color:var(--text-dim); cursor:pointer; display:inline-flex; align-items:center; gap:4px; font-family:inherit; white-space:nowrap; }
     .rbac-btn-sm:hover { background:var(--bg-elev-2); color:var(--text); }
@@ -1977,8 +1977,8 @@ async function webflowPublishNow() {
 function showAdminBanner(kind, text, autoMs) {
   const mount = document.getElementById('adminBanner');
   if (!mount) return;
-  const bg = kind === 'success' ? 'rgba(5,150,105,0.12)' : 'rgba(220,38,38,0.12)';
-  const fg = kind === 'success' ? '#059669' : '#b91c1c';
+  const bg = kind === 'success' ? 'var(--emerald-soft)' : 'var(--rose-soft)';
+  const fg = kind === 'success' ? 'var(--emerald)' : 'var(--rose)';
   const icon = kind === 'success' ? 'ti-circle-check' : 'ti-alert-circle';
   mount.innerHTML =
     `<div style="display:flex;align-items:center;gap:10px;background:${bg};color:${fg};border:1px solid ${fg}33;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;font-weight:600">` +
@@ -2238,7 +2238,7 @@ async function _runWaRegister() {
     out.textContent = JSON.stringify(d, null, 2);
     out.style.display = '';
     if (d && d.success === true) {
-      status.style.color = '#15803d';
+      status.style.color = 'var(--emerald)';
       status.textContent = '✓ Nummer geregistreerd bij Meta. PIN ook in WhatsApp Business Manager bevestigen.';
       // Veilige UX: leeg de PIN zodat hij niet zichtbaar in de input blijft.
       pinEl.value = '';
@@ -2286,9 +2286,9 @@ function renderMentorBubbleList() {
   wrap.innerHTML = _mb.mentors.map((m) => {
     const linked = !!m.bubble_user_id;
     const status = linked
-      ? '<span style="background:rgba(34,197,94,0.13);color:#15803d;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Gekoppeld</span> ' +
+      ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Gekoppeld</span> ' +
         '<code style="font-size:11px;color:var(--text-dim)">' + _mbEsc(m.bubble_user_id) + '</code>'
-      : '<span style="background:rgba(100,116,139,0.18);color:#475569;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Niet gekoppeld</span>';
+      : '<span style="background:var(--slate-soft);color:var(--slate);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Niet gekoppeld</span>';
     const actionBtn = linked
       ? '<button class="btn btn-sm" onclick="openMentorBubblePicker(\'' + _mbEsc(m.id) + '\')">Wijzigen</button> ' +
         '<button class="btn btn-sm" style="color:var(--danger)" onclick="unlinkMentorBubble(\'' + _mbEsc(m.id) + '\')">Ontkoppelen</button>'
@@ -3582,7 +3582,7 @@ function renderConsolidateActionDetail(payload, invoices) {
 
   return `
     <div class="approv-detail-section-title">Consolidatie + nieuwe regeling</div>
-    <div style="display:flex;flex-direction:column;gap:10px;padding:10px 12px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.25);border-radius:8px">
+    <div style="display:flex;flex-direction:column;gap:10px;padding:10px 12px;background:var(--blue-soft);border:1px solid var(--blue-line);border-radius:8px">
       <div style="font-size:12.5px;color:var(--text-primary,#e5e7eb)">
         Credit <strong>${creditCount}</strong> ${creditCount === 1 ? 'factuur' : 'facturen'}
         (totaal <strong>${esc(approvFmtEur(creditTotal))}</strong>):
@@ -3795,8 +3795,8 @@ function renderExecutionResult(result, status) {
     : '<div style="font-size:12px;color:var(--text-faint)">(geen execution-details vastgelegd)</div>';
 
   const bgClass = (status === 'FAILED')
-    ? 'background:rgba(220,38,38,0.06);border:1px solid rgba(220,38,38,0.25)'
-    : 'background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.25)';
+    ? 'background:var(--rose-soft);border:1px solid var(--rose-line)'
+    : 'background:var(--emerald-soft);border:1px solid var(--emerald-line)';
 
   return `
     <div class="approv-detail-section-title">${esc(title)}</div>
@@ -4129,10 +4129,10 @@ function _menuMgrShowBanner(text, kind) {
   if (!el) return;
   if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
   const palette = kind === 'success'
-    ? { bg: 'rgba(5,150,105,0.12)',  col: '#059669', border: 'rgba(5,150,105,0.30)' }
+    ? { bg: 'var(--emerald-soft)',  col: 'var(--emerald)', border: 'var(--emerald-line)' }
     : kind === 'error'
-    ? { bg: 'rgba(220,38,38,0.12)',  col: '#b91c1c', border: 'rgba(220,38,38,0.30)' }
-    : { bg: 'rgba(59,130,246,0.12)', col: '#1d4ed8', border: 'rgba(59,130,246,0.30)' };
+    ? { bg: 'var(--rose-soft)',  col: 'var(--rose)', border: 'var(--rose-line)' }
+    : { bg: 'var(--blue-soft)', col: 'var(--blue)', border: 'var(--blue-line)' };
   el.style.background = palette.bg;
   el.style.color      = palette.col;
   el.style.border     = '1px solid ' + palette.border;
