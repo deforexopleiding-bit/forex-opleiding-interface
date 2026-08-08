@@ -28,30 +28,30 @@
 
     .status-badge { display:inline-block; padding:3px 10px; border-radius:10px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }
     .status-draft { background: rgba(148,163,184,0.2); color: var(--text-faint); }
-    .status-published { background: rgba(5,150,105,0.15); color:#059669; }
+    .status-published { background: var(--emerald-soft); color:var(--emerald); }
     .status-afgerond { background: var(--accent-tint, rgba(31,159,224,0.16)); color: var(--accent, #1f9fe0); }
-    .status-cancelled { background: rgba(220,38,38,0.15); color:#b91c1c; }
+    .status-cancelled { background: var(--rose-soft); color:var(--rose); }
     .status-archived { background: rgba(148,163,184,0.2); color: var(--text-faint); opacity:.7; }
 
     /* Signups-closed badge (Blok 1) */
-    .signups-closed-badge { display:inline-flex; align-items:center; gap:5px; padding:3px 11px; border-radius:10px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; background: rgba(245,158,11,0.18); color:#b45309; border:1px solid rgba(245,158,11,0.3); cursor: help; }
-    .signups-closed-banner { display:flex; align-items:center; gap:10px; padding: 10px 14px; margin: 8px 0 14px; background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 10px; color: #b45309; font-size: 13px; }
+    .signups-closed-badge { display:inline-flex; align-items:center; gap:5px; padding:3px 11px; border-radius:10px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; background: var(--amber-soft); color:var(--amber); border:1px solid var(--amber-line); cursor: help; }
+    .signups-closed-banner { display:flex; align-items:center; gap:10px; padding: 10px 14px; margin: 8px 0 14px; background: var(--amber-soft); border: 1px solid var(--amber-line); border-radius: 10px; color: var(--amber); font-size: 13px; }
     .signups-closed-banner .scb-icon { font-size: 18px; }
     .signups-closed-banner .scb-title { font-weight: 700; }
     .signups-closed-banner .scb-meta { color: var(--text-dim); font-size: 12px; }
 
     .cap-pill { display:inline-flex; align-items:center; gap:4px; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:600; background: var(--bg-elev-2); color: var(--text-dim); border:1px solid var(--border); }
-    .cap-pill.full { background: rgba(220,38,38,0.15); color:#b91c1c; border-color: rgba(220,38,38,0.3); }
-    .cap-pill.warn { background: rgba(245,158,11,0.15); color:#b45309; border-color: rgba(245,158,11,0.3); }
-    .cap-pill.ok { background: rgba(5,150,105,0.12); color:#059669; border-color: rgba(5,150,105,0.25); }
+    .cap-pill.full { background: var(--rose-soft); color:var(--rose); border-color: var(--rose-line); }
+    .cap-pill.warn { background: var(--amber-soft); color:var(--amber); border-color: var(--amber-line); }
+    .cap-pill.ok { background: var(--emerald-soft); color:var(--emerald); border-color: var(--emerald-line); }
 
     /* Sync badges header (Webflow + GHL) */
     .sync-strip { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding: 8px 0 4px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
     .sync-strip .sync-label { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; font-weight: 700; margin-right: 4px; }
     .sync-badge-lg { display:inline-flex; align-items:center; gap:5px; padding: 4px 11px; border-radius: 10px; font-size: 12px; font-weight: 700; letter-spacing:.03em; cursor: help; }
-    .sync-badge-lg.sync-ok      { background: rgba(5,150,105,0.15); color:#059669; border:1px solid rgba(5,150,105,0.25); }
-    .sync-badge-lg.sync-fail    { background: rgba(220,38,38,0.15); color:#b91c1c; border:1px solid rgba(220,38,38,0.3); }
-    .sync-badge-lg.sync-skip    { background: rgba(245,158,11,0.15); color:#b45309; border:1px solid rgba(245,158,11,0.3); }
+    .sync-badge-lg.sync-ok      { background: var(--emerald-soft); color:var(--emerald); border:1px solid var(--emerald-line); }
+    .sync-badge-lg.sync-fail    { background: var(--rose-soft); color:var(--rose); border:1px solid var(--rose-line); }
+    .sync-badge-lg.sync-skip    { background: var(--amber-soft); color:var(--amber); border:1px solid var(--amber-line); }
     .sync-badge-lg.sync-unpub   { background: rgba(148,163,184,0.2); color: var(--text-faint); border:1px solid var(--border); }
     .sync-badge-lg.sync-none    { background: var(--bg-elev-2); color: var(--text-faint); border:1px solid var(--border); }
     .btn-retry { background: var(--bg-elev); color: var(--text); border: 1px solid var(--border); padding: 5px 11px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 5px; }
@@ -96,8 +96,8 @@
     .ev-icon-row { display:flex; gap:6px; }
     .ev-icon-row > button { flex:1; background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--text-dim); padding: 7px 0; border-radius: 7px; font-size: 13px; cursor: pointer; display:flex; align-items:center; justify-content:center; gap:4px; font-family: inherit; }
     .ev-icon-row > button:hover { background: var(--bg); color: var(--text); border-color: var(--text-faint); }
-    .ev-icon-row > button.danger { color: #dc2626; }
-    .ev-icon-row > button.danger:hover { background: rgba(220,38,38,0.08); border-color: rgba(220,38,38,0.3); }
+    .ev-icon-row > button.danger { color: var(--rose); }
+    .ev-icon-row > button.danger:hover { background: var(--rose-soft); border-color: var(--rose-line); }
     .ev-desc-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 16px; min-height: 200px; }
     .ev-desc-card .desc-content { font-size: 14px; color: var(--text); white-space: pre-wrap; line-height: 1.5; }
     .ev-desc-card .desc-empty { color: var(--text-faint); font-style: italic; }
@@ -152,12 +152,12 @@
     .modal-close { background: transparent; border: none; color: var(--text-faint); font-size: 18px; cursor: pointer; padding: 4px; line-height: 1; }
     .modal-body { padding: 20px; overflow-y: auto; }
     .modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--border); }
-    .modal-banner { padding: 10px 12px; margin-bottom: 12px; background: rgba(239,68,68,0.1); border: 1px solid #ef4444; border-radius: 8px; color: #ef4444; font-size: 13px; display: none; }
+    .modal-banner { padding: 10px 12px; margin-bottom: 12px; background: var(--rose-soft); border: 1px solid var(--rose); border-radius: 8px; color: var(--rose); font-size: 13px; display: none; }
     .modal-banner.visible { display: block; }
 
     .form-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
     .form-field label { font-size: 12px; font-weight: 500; color: var(--text-faint); }
-    .form-field label .req { color: #ef4444; }
+    .form-field label .req { color: var(--rose); }
     .form-field input, .form-field textarea, .form-field select { padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 13px; font-family: inherit; }
     .form-field input:focus, .form-field textarea:focus, .form-field select:focus { outline: none; border-color: var(--brand-primary, #093d54); }
     .form-field textarea { resize: vertical; min-height: 80px; }
@@ -885,14 +885,14 @@ async function loadCompletedMentors() {
     const r = await window.AgentShared.apiFetch('/api/events-completed-list');
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
-      host.innerHTML = '<div style="color:#dc2626;font-size:13px;padding:14px">Fout: ' + esc(j.error || ('HTTP ' + r.status)) + '</div>';
+      host.innerHTML = '<div style="color:var(--rose);font-size:13px;padding:14px">Fout: ' + esc(j.error || ('HTTP ' + r.status)) + '</div>';
       return;
     }
     const ev = (Array.isArray(j.events) ? j.events : []).find((e) => e.event_id === state.eventId) || null;
     _completedMentorsCache = ev;
     _renderCompletedMentorsTab(host, ev);
   } catch (e) {
-    host.innerHTML = '<div style="color:#dc2626;font-size:13px;padding:14px">Fout: ' + esc(e?.message || 'onbekende fout') + '</div>';
+    host.innerHTML = '<div style="color:var(--rose);font-size:13px;padding:14px">Fout: ' + esc(e?.message || 'onbekende fout') + '</div>';
   }
 }
 
@@ -915,7 +915,7 @@ function _renderCompletedMentorsTab(host, ev) {
   const rows = present.map((m) => `
     <tr>
       <td><strong>${esc(m.name || '—')}</strong></td>
-      <td><span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;background:rgba(5,150,105,0.15);color:#059669"><i class="ti ti-check"></i> Aanwezig</span></td>
+      <td><span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;background:var(--emerald-soft);color:var(--emerald)"><i class="ti ti-check"></i> Aanwezig</span></td>
       <td style="text-align:right;font-variant-numeric:tabular-nums">${esc(eur(m.bonus))}</td>
       <td style="text-align:right;font-variant-numeric:tabular-nums">${esc(eur(m.uitgave))}</td>
       <td style="text-align:right;font-variant-numeric:tabular-nums;font-weight:700">${esc(eur(m.netto))}</td>
@@ -1085,8 +1085,8 @@ function renderAttendeesTab() {
         // gevuld → "Actief" (telt mee), leeg → "Ontbreekt" (telt niet mee).
         const hasAssessment = !!a.assessment_response_id;
         const assessmentCell = hasAssessment
-          ? '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600;background:rgba(5,150,105,0.15);color:#059669" title="Vragenlijst voltooid · telt mee voor capaciteit"><i class="ti ti-check"></i> Actief</span>'
-          : '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600;background:rgba(245,158,11,0.18);color:#b45309" title="Geen voltooide vragenlijst · telt niet mee voor capaciteit"><i class="ti ti-alert-circle"></i> Ontbreekt</span>';
+          ? '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600;background:var(--emerald-soft);color:var(--emerald)" title="Vragenlijst voltooid · telt mee voor capaciteit"><i class="ti ti-check"></i> Actief</span>'
+          : '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600;background:var(--amber-soft);color:var(--amber)" title="Geen voltooide vragenlijst · telt niet mee voor capaciteit"><i class="ti ti-alert-circle"></i> Ontbreekt</span>';
 
         const kebabItems = [];
         if (canEditAtt) kebabItems.push(`<button class="kebab-item" data-action="edit" data-id="${esc(a.id)}"><i class="ti ti-edit"></i> Bewerken</button>`);
@@ -1121,12 +1121,12 @@ function renderAttendeesTab() {
         //   - called_at gevuld → toch "Gebeld" (compat met pre-023 data)
         //   - anders            → "Nog niet gebeld"
         const CALL_STATUS_BADGES = {
-          bevestigd     : { label: 'Komt',           bg: 'rgba(34,197,94,0.16)',  fg: '#15803d', border: 'rgba(34,197,94,0.32)' },
-          komt_niet     : { label: 'Komt niet',      bg: 'rgba(220,38,38,0.15)',  fg: '#b91c1c', border: 'rgba(220,38,38,0.3)' },
-          geen_gehoor   : { label: 'Geen gehoor',    bg: 'rgba(245,158,11,0.18)', fg: '#b45309', border: 'rgba(245,158,11,0.3)' },
-          voicemail     : { label: 'Voicemail',      bg: 'rgba(245,158,11,0.18)', fg: '#b45309', border: 'rgba(245,158,11,0.3)' },
-          terugbellen   : { label: 'Terugbellen',    bg: 'rgba(20,115,214,0.16)', fg: '#1160bd', border: 'rgba(20,115,214,0.32)' },
-          foutief_nummer: { label: 'Fout nummer',    bg: 'rgba(100,116,139,0.18)', fg: '#7f1d1d', border: 'rgba(220,38,38,0.3)' },
+          bevestigd     : { label: 'Komt',           bg: 'var(--emerald-soft)', fg: 'var(--emerald)', border: 'var(--emerald-line)' },
+          komt_niet     : { label: 'Komt niet',      bg: 'var(--rose-soft)',    fg: 'var(--rose)',    border: 'var(--rose-line)' },
+          geen_gehoor   : { label: 'Geen gehoor',    bg: 'var(--amber-soft)',   fg: 'var(--amber)',   border: 'var(--amber-line)' },
+          voicemail     : { label: 'Voicemail',      bg: 'var(--amber-soft)',   fg: 'var(--amber)',   border: 'var(--amber-line)' },
+          terugbellen   : { label: 'Terugbellen',    bg: 'var(--blue-soft)',    fg: 'var(--blue)',    border: 'var(--blue-line)' },
+          foutief_nummer: { label: 'Fout nummer',    bg: 'var(--slate-soft)',   fg: 'var(--rose)',    border: 'var(--rose-line)' },
         };
         let calledCell;
         if (a.call_status && CALL_STATUS_BADGES[a.call_status]) {
@@ -1146,7 +1146,7 @@ function renderAttendeesTab() {
         // zonder de taal-vraag).
         let taalBadge = '';
         if (a.taal === 'en') {
-          taalBadge = '<span title="Deelnemer gaf aan: een beetje Nederlands" style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:10px;font-size:10.5px;font-weight:700;background:rgba(245,158,11,0.18);color:#b45309;border:1px solid rgba(245,158,11,0.3);margin-left:6px">EN (een beetje)</span>';
+          taalBadge = '<span title="Deelnemer gaf aan: een beetje Nederlands" style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:10px;font-size:10.5px;font-weight:700;background:var(--amber-soft);color:var(--amber);border:1px solid rgba(245,158,11,0.3);margin-left:6px">EN (een beetje)</span>';
         } else if (a.taal === 'anders') {
           taalBadge = '<span title="Deelnemer gaf aan: andere taal dan Nederlands" style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:10px;font-size:10.5px;font-weight:700;background:rgba(220,38,38,0.15);color:#b91c1c;border:1px solid rgba(220,38,38,0.3);margin-left:6px">Niet-NL</span>';
         }
@@ -1154,10 +1154,10 @@ function renderAttendeesTab() {
         // SOURCE-badge: kanaal waarvia attendee is binnengekomen.
         // NULL (pre-migration data) → geen badge.
         const SOURCE_STYLES = {
-          webflow         : { label: 'Webflow',   bg: 'rgba(34,197,94,0.16)',  fg: '#15803d', border: 'rgba(34,197,94,0.32)',  title: 'Aangemaakt via publieke Webflow-flow (assessment / event-keuze)' },
-          ghl             : { label: 'GHL',       bg: 'rgba(20,115,214,0.16)', fg: '#1160bd', border: 'rgba(20,115,214,0.32)', title: 'Aangemaakt via GHL inbound-webhook' },
-          manual          : { label: 'Handmatig', bg: 'rgba(100,116,139,0.18)', fg: '#475569', border: 'rgba(100,116,139,0.3)', title: 'Handmatig toegevoegd door een admin' },
-          automation_test : { label: 'Test',      bg: 'rgba(245,158,11,0.18)', fg: '#b45309', border: 'rgba(245,158,11,0.3)',  title: 'Synthetische attendee uit automation-tester' },
+          webflow         : { label: 'Webflow',   bg: 'var(--emerald-soft)', fg: 'var(--emerald)', border: 'var(--emerald-line)', title: 'Aangemaakt via publieke Webflow-flow (assessment / event-keuze)' },
+          ghl             : { label: 'GHL',       bg: 'var(--blue-soft)',    fg: 'var(--blue)',    border: 'var(--blue-line)',    title: 'Aangemaakt via GHL inbound-webhook' },
+          manual          : { label: 'Handmatig', bg: 'var(--slate-soft)',   fg: 'var(--slate)',   border: 'var(--slate-line)',   title: 'Handmatig toegevoegd door een admin' },
+          automation_test : { label: 'Test',      bg: 'var(--amber-soft)',   fg: 'var(--amber)',   border: 'var(--amber-line)',   title: 'Synthetische attendee uit automation-tester' },
         };
         let sourceBadge = '';
         const srcStyle = a.source ? SOURCE_STYLES[a.source] : null;
@@ -1739,13 +1739,13 @@ async function _renderAttAssessmentExpanded(attendeeId) {
         const msg = (r.status === 404)
           ? 'Geen ingevulde vragenlijst voor deze deelnemer.'
           : (j.error || ('HTTP ' + r.status));
-        host.innerHTML = `<div style="padding:10px 12px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.25);color:#b91c1c;border-radius:8px;font-size:12.5px">${esc(msg)}</div>`;
+        host.innerHTML = `<div style="padding:10px 12px;background:var(--rose-soft);border:1px solid var(--rose-line);color:var(--rose);border-radius:8px;font-size:12.5px">${esc(msg)}</div>`;
         return;
       }
       data = j;
       _attAssessmentCache.set(attendeeId, data);
     } catch (e) {
-      host.innerHTML = `<div style="padding:10px 12px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.25);color:#b91c1c;border-radius:8px;font-size:12.5px">Fout: ${esc(e?.message || 'onbekende fout')}</div>`;
+      host.innerHTML = `<div style="padding:10px 12px;background:var(--rose-soft);border:1px solid var(--rose-line);color:var(--rose);border-radius:8px;font-size:12.5px">Fout: ${esc(e?.message || 'onbekende fout')}</div>`;
       return;
     }
   }
@@ -1809,9 +1809,9 @@ function _renderAttComms(host, data) {
   // tooltip uit failure_reason, 'wacht' = amber (queued bij Meta), default
   // (bv. 'gepland') = neutraal-grijs.
   const STATUS_STYLE = {
-    verzonden: { bg: 'rgba(5,150,105,0.15)', fg: '#059669', border: 'rgba(5,150,105,0.25)', icon: 'ti-check',          opacity: '' },
-    mislukt:   { bg: 'rgba(220,38,38,0.15)', fg: '#b91c1c', border: 'rgba(220,38,38,0.3)',  icon: 'ti-alert-triangle', opacity: '' },
-    wacht:     { bg: 'rgba(245,158,11,0.18)',fg: '#b45309', border: 'rgba(245,158,11,0.3)', icon: 'ti-clock',          opacity: 'opacity:.85' },
+    verzonden: { bg: 'var(--emerald-soft)', fg: 'var(--emerald)', border: 'var(--emerald-line)', icon: 'ti-check',          opacity: '' },
+    mislukt:   { bg: 'var(--rose-soft)',    fg: 'var(--rose)',    border: 'var(--rose-line)',    icon: 'ti-alert-triangle', opacity: '' },
+    wacht:     { bg: 'var(--amber-soft)',   fg: 'var(--amber)',   border: 'var(--amber-line)',   icon: 'ti-clock',          opacity: 'opacity:.85' },
   };
   const DEFAULT_STYLE = { bg: 'var(--bg-elev)', fg: 'var(--text-faint)', border: 'var(--border)', icon: 'ti-clock', opacity: 'opacity:.85' };
   const rows = items.map((it) => {
