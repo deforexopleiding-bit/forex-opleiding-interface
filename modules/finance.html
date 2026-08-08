@@ -29769,6 +29769,30 @@
     return ds <= todayAms;
   }
 
+  // Haal ALLE openstaande (PENDING) taken op, GEPAGINEERD. De endpoint clampt
+  // limit hard op 200; bij >200 pending zouden anders taken uit ZOWEL Vandaag
+  // als Komend wegvallen (onzichtbaar). We pagineren op offset tot alles binnen
+  // is (gebruikt de exacte 'total' uit de respons). include_scheduled=1 zodat
+  // ook toekomstig-geplande taken meekomen. Veiligheidsplafond 5000 items /
+  // 25 pagina's tegen een runaway-loop. Retourneert { items }.
+  async function _awnFetchAllPending() {
+    const PAGE = 200, MAX = 5000;
+    let all = [], offset = 0, total = Infinity, guard = 0;
+    while (all.length < total && all.length < MAX && guard < 25) {
+      guard += 1;
+      const url = '/api/pending-actions-list?status=PENDING&include_scheduled=1'
+                + '&limit=' + PAGE + '&offset=' + offset;
+      const d = await window.AgentShared.apiFetch(url).then((r) => r.json()).catch(() => ({}));
+      const batch = Array.isArray(d?.items) ? d.items : [];
+      all = all.concat(batch);
+      const t = Number(d?.total);
+      total = Number.isFinite(t) ? t : all.length;
+      if (batch.length < PAGE) break; // laatste (deels-gevulde) pagina → klaar
+      offset += PAGE;
+    }
+    return { items: all };
+  }
+
   function mountActiesWerkcentrumHost() {
     const host = document.getElementById('wb-sub-openacties-nieuw');
     if (!host) return;
@@ -29898,7 +29922,13 @@
         .then((r) => r.json()).catch(() => ({ items: [] }));
 
       const primaryStatus = { vandaag: 'PENDING', komend: 'PENDING', done: 'EXECUTED', rej: 'REJECTED' }[tab] || 'PENDING';
-      const actionPromises = [fetchUrl(buildUrl(primaryStatus))];
+      // Vandaag/Komend (PENDING): alles gepagineerd ophalen (geen 200-cap) zodat
+      // er nooit taken wegvallen. Done/Rej: bestaande (recente-200) fetch.
+      const actionPromises = [
+        (tab === 'vandaag' || tab === 'komend')
+          ? _awnFetchAllPending()
+          : fetchUrl(buildUrl(primaryStatus)),
+      ];
       // done-tab extra fetch voor APPROVED.
       if (tab === 'done') actionPromises.push(fetchUrl(buildUrl('APPROVED')));
 
@@ -29958,11 +29988,11 @@
     // Zelfde endpoints; count-only via limit=1 (endpoint returnt total/counts).
     try {
       // FIX punt 5: done-tel APPROVED + EXECUTED. Voegt 1 extra call toe.
-      // Alle openstaande taken (include_scheduled=1) ophalen en client-side
+      // Alle openstaande taken GEPAGINEERD ophalen (geen 200-cap) en client-side
       // splitsen op taakdatum vs. einde van vandaag (Amsterdam) → Vandaag/Komend.
-      // (Cap op 200 items, zoals de bestaande later-teller; ruim voldoende.)
+      // Zo tonen de tellers het ECHTE totaal, niet een afgekapt getal.
       const [pending, doneExec, doneApp, rej] = await Promise.all([
-        window.AgentShared.apiFetch('/api/pending-actions-list?status=PENDING&include_scheduled=1&limit=200').then((r) => r.json()).catch(() => ({})),
+        _awnFetchAllPending(),
         window.AgentShared.apiFetch('/api/pending-actions-list?status=EXECUTED&limit=1').then((r) => r.json()).catch(() => ({})),
         window.AgentShared.apiFetch('/api/pending-actions-list?status=APPROVED&limit=1').then((r) => r.json()).catch(() => ({})),
         window.AgentShared.apiFetch('/api/pending-actions-list?status=REJECTED&limit=1').then((r) => r.json()).catch(() => ({})),
