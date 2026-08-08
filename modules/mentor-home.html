@@ -126,8 +126,8 @@
       font-size:10.5px; font-weight:700; letter-spacing:0.02em; white-space:nowrap;
       align-self:flex-start;
     }
-    .mh-student-badge.waiting { background:rgba(245,158,11,0.16); color:#b45309; }
-    .mh-student-badge.ok      { background:rgba(34,197,94,0.14);  color:#15803d; }
+    .mh-student-badge.waiting { background:var(--amber-soft);   color:var(--amber);   }
+    .mh-student-badge.ok      { background:var(--emerald-soft); color:var(--emerald); }
     .mh-student-badge.neutral { background:var(--bg-elev); color:var(--text-dim); border:1px solid var(--border); }
 
     /* Te-doen lijst ----------------------------------------------------- */
@@ -730,8 +730,8 @@
         if (!badge) {
           badge = document.createElement('span');
           badge.className = 'mh-student-badge mh-overdue-badge';
-          badge.style.background = 'rgba(220,38,38,0.16)';
-          badge.style.color      = '#991b1b';
+          badge.style.background = 'var(--rose-soft)';
+          badge.style.color      = 'var(--rose)';
           badge.style.marginLeft = '6px';
           card.appendChild(badge);
         }
@@ -1014,17 +1014,17 @@
     if (!s) return '';
     // Kleur-mapping; onbekende status → neutrale grijs-tint.
     const palette = {
-      draft       : { bg: '#eef2f6', fg: '#4b5563', label: 'Concept' },
-      sent        : { bg: '#dbeafe', fg: '#1d4ed8', label: 'Verzonden' },
-      accepted    : { bg: '#dcfce7', fg: '#166534', label: 'Geaccepteerd' },
-      rejected    : { bg: '#fee2e2', fg: '#991b1b', label: 'Afgewezen' },
-      expired     : { bg: '#fef3c7', fg: '#92400e', label: 'Verlopen' },
-      converted   : { bg: '#e0e7ff', fg: '#3730a3', label: 'Omgezet' },
-      open        : { bg: '#dbeafe', fg: '#1d4ed8', label: 'Open' },
-      won         : { bg: '#dcfce7', fg: '#166534', label: 'Gewonnen' },
-      lost        : { bg: '#fee2e2', fg: '#991b1b', label: 'Verloren' },
+      draft       : { bg: 'var(--slate-soft)',   fg: 'var(--slate)',   label: 'Concept' },
+      sent        : { bg: 'var(--blue-soft)',    fg: 'var(--blue)',    label: 'Verzonden' },
+      accepted    : { bg: 'var(--emerald-soft)', fg: 'var(--emerald)', label: 'Geaccepteerd' },
+      rejected    : { bg: 'var(--rose-soft)',    fg: 'var(--rose)',    label: 'Afgewezen' },
+      expired     : { bg: 'var(--amber-soft)',   fg: 'var(--amber)',   label: 'Verlopen' },
+      converted   : { bg: 'var(--violet-soft)',  fg: 'var(--violet)',  label: 'Omgezet' },
+      open        : { bg: 'var(--blue-soft)',    fg: 'var(--blue)',    label: 'Open' },
+      won         : { bg: 'var(--emerald-soft)', fg: 'var(--emerald)', label: 'Gewonnen' },
+      lost        : { bg: 'var(--rose-soft)',    fg: 'var(--rose)',    label: 'Verloren' },
     };
-    const p = palette[s] || { bg: '#eef2f6', fg: '#4b5563', label: status };
+    const p = palette[s] || { bg: 'var(--slate-soft)', fg: 'var(--slate)', label: status };
     return '<span style="display:inline-block;padding:1px 6px;border-radius:999px;font-size:10.5px;font-weight:600;background:' + p.bg + ';color:' + p.fg + '">' + esc(p.label) + '</span>';
   }
 
@@ -1068,11 +1068,11 @@
     const v = String(p || '').toLowerCase().trim();
     if (!v || v === 'normaal') return '';
     const palette = {
-      hoog    : { bg:'#fee2e2', fg:'#991b1b', label:'Hoog' },
-      urgent  : { bg:'#fee2e2', fg:'#991b1b', label:'Urgent' },
-      laag    : { bg:'#eef2f6', fg:'#4b5563', label:'Laag' },
+      hoog    : { bg:'var(--rose-soft)',  fg:'var(--rose)',  label:'Hoog' },
+      urgent  : { bg:'var(--rose-soft)',  fg:'var(--rose)',  label:'Urgent' },
+      laag    : { bg:'var(--slate-soft)', fg:'var(--slate)', label:'Laag' },
     };
-    const x = palette[v] || { bg:'#fef3c7', fg:'#92400e', label: p };
+    const x = palette[v] || { bg:'var(--amber-soft)', fg:'var(--amber)', label: p };
     return '<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:600;background:' + x.bg + ';color:' + x.fg + '">' + esc(x.label) + '</span>';
   }
 
