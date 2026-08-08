@@ -1,5 +1,57 @@
 # Takenbeheer Fase 1 — PLAN (voor review, niet gebouwd)
 
+## ⚠ PLAN-CORRECTIE (2026-08-08) — hergebruik tickets-storage exact
+
+Op review-feedback: **geen nieuwe storage-provider-keuze maken**. Onderzoek naar
+`modules/tickets*.html` + `api/ticket-attachments.js` + migratie
+`2026-05-28-tickets-module.sql` gedaan; onderstaande secties over Keuze 2
+(Supabase Storage vs Vercel Blob) + Keuze 3 (signed-upload-URL vs proxy) zijn
+**overruled** door de tickets-implementatie:
+
+### Wat tickets doet (en Takenbeheer exact kopieert)
+
+- **Storage:** Supabase Storage, private bucket, RLS met `user_id/parent_id/filename`-prefix. Nieuwe bucket voor Takenbeheer: `taken-attachments` met **identieke config**: `public=false`, `file_size_limit=10485760` (10MB, niet 25MB), `allowed_mime_types=['image/png','image/jpeg','image/gif','image/webp']`.
+- **Videos:** **NIET als file-upload** — alleen als `external_url` (Loom/YouTube/Drive/Vimeo embed). Bucket blokkeert video-mimes. Detail-view gebruikt `detectEmbed()`-helper om URL → iframe/link te renderen. Voor Takenbeheer: exact hetzelfde `<detectEmbed>`-patroon overnemen (of shared helper extraheren als 2e caller).
+- **Uploadflow:** GEEN signed-upload-URL. Client uploadt direct via `window.supabase.storage.from(BUCKET).upload(path, file, { contentType, upsert:false })`. Auth komt uit de session-JWT die de client toch al heeft; bucket-RLS-policy op path-prefix `user.id::text` doet de gate.
+- **Metadata-endpoint:** `POST /api/taken-attachments` (nieuwe endpoint, kopie van `api/ticket-attachments.js`-shape). Body: `{ task_id, storage_path? XOR external_url?, filename?, mime_type? }`. Idem `DELETE /api/taken-attachments?id=<uuid>` — verwijdert DB-row via user-client (RLS), daarna best-effort `supabaseAdmin.storage.remove([storage_path])`.
+- **Rendering:** `SIGNED_URL_TTL = 3600` (1u), cache in `Map`, `createSignedUrl(path, 3600)`. Lightbox + `<img>` async-fill + `downloadAttachment`. Copy 1-op-1.
+- **Schema:** `taken_attachments`-tabel = kopie van `ticket_attachments` met `task_id` ipv `ticket_id`. XOR op parent (`task_id` — geen `comment_id` want Takenbeheer heeft nog geen comments-model; wel FK-slot open houden voor toekomst). XOR op bron (`storage_path` XOR `external_url`). RLS "Inherit parent access" via `taken_items` + assignees/watchers.
+
+### Impact op eerder plan
+
+- **Keuze 2 (storage-provider) → OBSOLETE:** hergebruik dwingend, geen provider-vergelijk meer.
+- **Keuze 3 (uploadpad) → OBSOLETE:** direct client-upload met session-JWT is de tickets-standaard; geen aparte signed-upload-URL-endpoint nodig, geen `/api/taken-attachment-signed-upload` + `/api/taken-attachment-confirm` — alleen `POST /api/taken-attachments` (metadata na upload) + `DELETE`. Twee endpoints minder te bouwen.
+- **10MB cap ipv 25MB voorheen voorgesteld:** consistent met tickets. Voor grotere media → external URL (Loom/YouTube).
+- **Alleen images upload:** consistent met tickets. Videos via URL-embed.
+- **RLS-helpers:** copy `ticket_attachments`-policies (SELECT via parent-access join, INSERT `created_by=auth.uid()`, DELETE creator-of-admin). Geen custom `can_read_taken`/`can_mutate_taken` nodig als de policy-shape 1:1 gekopieerd wordt (met `taken_items`-join in SELECT-policy ipv `tickets`-join).
+
+### Revisie van 3-PR-split (nu concreter)
+
+- **T1 (SQL-migratie, ROOD):** `taken_watchers` + `taken_attachments` tabellen + RLS-policies + Storage-bucket `taken-attachments` (via `storage.buckets` INSERT met **identieke config** als `tickets-attachments`) + storage.objects-policies met `user_id::text`-prefix-check. Referentie: `docs/sql-migrations/2026-05-28-tickets-module.sql` regels 73–91 (schema) + 189–226 (RLS-policies) + 269–304 (bucket + storage-policies).
+- **T2 (backend, GEEL):** `POST/DELETE /api/taken-attachments` (kopie van `api/ticket-attachments.js`, `ticket_id`→`task_id`) + CC-endpoints `POST /api/taken-cc-add` + `DELETE /api/taken-cc-remove` op `taken_watchers`. **Vier endpoints** (was zeven).
+- **T3 (UI, GEEL):** kopie van `modules/tickets-detail.html`-attachment-block (regels 341, 676–716, 897–949) + CC-picker in taken.html. `detectEmbed`-helper als shared `modules/shared/attachment-embed.js` extraheren (nu heeft alleen tickets 'em; met tweede caller = terechte extract). Sidebar-swap: niets doen (Takenbeheer staat al onder Inbox).
+
+### Nieuwe risico's die de correctie oplost
+
+- ✅ Geen "wat als Vercel Blob-billing lastig valt" — Supabase Storage zit al in stack.
+- ✅ Geen "hoe manage je signed-upload-URL TTL" — direct upload met session-JWT is elegant en al bewezen in productie.
+- ✅ Geen "twee attachments-tabellen-shapes onderhouden" (tickets vs taken) — identiek schema, alleen `task_id` ipv `ticket_id`. Toekomst: extract shared migratie-template als 3e caller komt.
+
+### Effort-herzegging
+
+Was ~9-11u. Nu **~6-8u**: 2 endpoints minder (upload-signing + confirm weg), UI kan grotendeels copy-paste van tickets-detail.html.
+
+---
+
+## Onderstaande secties — waarschuwing
+
+De originele secties Keuze 2 + Keuze 3 hieronder blijven staan voor
+transparantie/audit-trail maar zijn **niet meer de aanbeveling**. Volg de
+plan-correctie hierboven.
+
+---
+
+
 **Scope:** CC/watchers + afbeelding/video-bijlagen zoals tickets-module. Verplaats "Takenbeheer" in de sidebar-nav naar de groep "Overzicht" onder "Inbox". Autonomie: **GEEL** (interne writes op bestaande endpoints + één nieuwe write-endpoint voor upload). Bewijs-scope tussen ~4-6u effectief werk verdeeld over 3 gestapelde PRs.
 
 ---
