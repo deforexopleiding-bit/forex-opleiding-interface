@@ -196,7 +196,7 @@
     .status-card strong { font-size:18px; margin-top:2px; }
     .version-row, .log-row, .error-row { display:flex; align-items:center; gap:12px; padding:8px 0; border-bottom:1px solid var(--border); font-size:13px; }
     .version-row:last-child, .log-row:last-child, .error-row:last-child { border-bottom:none; }
-    .version-row.is-active { background:rgba(16,185,129,.06); padding:8px 10px; border-radius:6px; }
+    .version-row.is-active { background:var(--emerald-soft); padding:8px 10px; border-radius:6px; }
     .version-num { font-weight:700; width:46px; flex-shrink:0; }
     .version-info { flex:1; display:flex; flex-direction:column; min-width:0; }
     .version-info .hint { font-size:11px; color:var(--text-faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -204,8 +204,8 @@
     .version-tag { font-size:10px; font-weight:700; color:#10B981; }
     .log-source, .log-type, .log-status { font-size:11px; font-weight:600; color:var(--text-dim); flex-shrink:0; }
     .log-content, .log-reason { flex:1; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
-    .log-row.log-warn { background:rgba(245,158,11,.06); border-radius:6px; padding:8px 10px; }
-    .error-row { background:rgba(239,68,68,.06); padding:8px 10px; border-radius:6px; }
+    .log-row.log-warn { background:var(--amber-soft); border-radius:6px; padding:8px 10px; }
+    .error-row { background:var(--rose-soft); padding:8px 10px; border-radius:6px; }
     .error-type { font-weight:700; color:#EF4444; min-width:84px; flex-shrink:0; }
     .error-msg { flex:1; color:var(--text-dim); word-break:break-word; }
     .logs-empty { color:var(--text-faint); font-style:italic; text-align:center; padding:16px; font-size:12px; }
@@ -247,13 +247,13 @@
     .lv-conv-time { font-size:10px; color:var(--text-faint); flex-shrink:0; }
     .lv-conv-prev { font-size:12px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .lv-badge { font-size:10px; font-weight:700; padding:1px 7px; border-radius:999px; background:var(--bg-elev-2); color:var(--text-dim); text-transform:capitalize; }
-    .lv-badge.ph-qualified { background:rgba(16,185,129,.15); color:#10B981; }
-    .lv-badge.ph-disqualified { background:rgba(239,68,68,.15); color:#EF4444; }
-    .lv-badge.ph-cold { background:rgba(107,114,128,.18); color:#6B7280; }
-    .lv-badge-success { background:rgba(16,185,129,.15)!important; color:#10B981!important; }
-    .lv-badge-warning { background:rgba(251,191,36,.15)!important; color:#d97706!important; }
-    .lv-badge-info { background:rgba(59,130,246,.15)!important; color:#3B82F6!important; }
-    .lv-badge-dim { background:rgba(168,162,158,.18)!important; color:#a8a29e!important; }
+    .lv-badge.ph-qualified { background:var(--emerald-soft); color:var(--emerald); }
+    .lv-badge.ph-disqualified { background:var(--rose-soft); color:var(--rose); }
+    .lv-badge.ph-cold { background:var(--slate-soft); color:var(--slate); }
+    .lv-badge-success { background:var(--emerald-soft)!important; color:var(--emerald)!important; }
+    .lv-badge-warning { background:var(--amber-soft)!important; color:var(--amber)!important; }
+    .lv-badge-info { background:var(--blue-soft)!important; color:var(--blue)!important; }
+    .lv-badge-dim { background:var(--slate-soft)!important; color:var(--slate)!important; }
     .lv-confirmed-details { margin-top:8px; padding:8px 10px; background:var(--bg-elev-2); border-radius:6px; font-size:12px; color:var(--text-dim); line-height:1.6; }
     .lv-chat-col { border:1px solid var(--border); border-radius:12px; background:var(--bg-elev); display:flex; flex-direction:column; min-height:60vh; }
     .lv-chat-head { padding:10px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:13px; font-weight:600; }
@@ -292,8 +292,8 @@
     .agent-tab-main.active { color:var(--text); border-bottom-color:var(--brand-primary,#093d54); }
     .agent-icon { font-size:18px; }
     .agent-status { font-size:10px; padding:2px 8px; border-radius:10px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
-    .agent-status-active { background:rgba(16,185,129,.15); color:#10B981; }
-    .agent-status-soon { background:rgba(168,162,158,.18); color:#a8a29e; }
+    .agent-status-active { background:var(--emerald-soft); color:var(--emerald); }
+    .agent-status-soon { background:var(--slate-soft); color:var(--slate); }
     .wa-coming-soon { padding:56px 30px; text-align:center; background:var(--bg-elev); border:1px dashed var(--border); border-radius:12px; margin-top:16px; }
     .wa-icon { font-size:60px; opacity:.5; margin-bottom:14px; }
     .wa-coming-soon h2 { font-size:22px; margin:0 0 10px; }
@@ -1205,7 +1205,7 @@ function lvRenderList() {
         '<span class="lv-conv-time">' + esc(lvRelTime(c.last_message_at || c.created_at)) + '</span></div>' +
       '<div class="lv-conv-top"><span class="lv-badge' + lvPhaseClass(c.phase) + '">' + esc(c.phase || 'intro') + '</span>' +
         (c.qualified && c.phase !== 'qualified' ? '<span class="lv-badge lv-badge-success">✓</span>' : '') +
-        (c.human_takeover ? '<span class="lv-badge" style="background:rgba(245,158,11,.15);color:#f59e0b">mens</span>' : '') + '</div>' +
+        (c.human_takeover ? '<span class="lv-badge" style="background:var(--amber-soft);color:var(--amber)">mens</span>' : '') + '</div>' +
       '<div class="lv-conv-prev">' + (c.last_direction === 'out' ? '↩ ' : '') + esc(c.preview || '—') + '</div>' +
     '</button>').join('');
 }
@@ -1230,7 +1230,7 @@ function lvRenderChat(scroll) {
   const c = lvDetail.conversation;
   document.getElementById('lvChatHead').innerHTML =
     '<span>' + esc(lvName(c)) + '</span><span class="lv-badge' + lvPhaseClass(c.phase) + '">' + esc(c.phase) + '</span>' +
-    (c.human_takeover ? '<span class="lv-badge" style="background:rgba(245,158,11,.15);color:#f59e0b">mens actief</span>' : '');
+    (c.human_takeover ? '<span class="lv-badge" style="background:var(--amber-soft);color:var(--amber)">mens actief</span>' : '');
   document.getElementById('lvInputBar').style.display = 'flex';
   const chat = document.getElementById('lvChat');
   const nearBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 60;
