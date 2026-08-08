@@ -1495,7 +1495,7 @@
         #waMetaVarsBlock .wa-var-readonly-example { color:var(--text-faint); font-size:11.5px; }
         /* Preview body */
         #waMetaPreviewBody .wa-preview-placeholder { color:#888; font-style:italic; }
-        #waMetaPreviewBody .wa-preview-unknown { color:#b91c1c; background:rgba(239,68,68,0.10); padding:0 4px; border-radius:3px; font-family:monospace; font-size:12.5px; display:inline-flex; align-items:center; gap:4px; }
+        #waMetaPreviewBody .wa-preview-unknown { color:var(--rose); background:var(--rose-soft); padding:0 4px; border-radius:3px; font-family:monospace; font-size:12.5px; display:inline-flex; align-items:center; gap:4px; }
         #waMetaPreviewBody .wa-preview-unknown-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:#ef4444; box-shadow:0 0 0 2px rgba(239,68,68,0.20); }
       </style>
 
@@ -1588,7 +1588,7 @@
                   </div>
                   <!-- Auto-mapping live-warning: getoond als body positional placeholders bevat
                        zonder dat er een mapping is — Meta weigert die bij submit (#132000). -->
-                  <div id="waMetaBodyMappingWarn" style="display:none;margin-top:6px;padding:8px 10px;border-radius:6px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);font-size:12px;color:#92400e">
+                  <div id="waMetaBodyMappingWarn" style="display:none;margin-top:6px;padding:8px 10px;border-radius:6px;background:var(--amber-soft);border:1px solid var(--amber-line);font-size:12px;color:var(--amber)">
                     <strong>Let op:</strong> deze template gebruikt positionele plaatshouders <code>{{1}}</code>, <code>{{2}}</code>… die geen auto-mapping krijgen. Meta weigert de template bij submit (error #132000). Vervang ze door named variabelen via de chips hieronder, of stel <code>meta_param_mapping</code> handmatig in.
                   </div>
 
@@ -3727,7 +3727,7 @@
     const file = fileEl && fileEl.files && fileEl.files[0] ? fileEl.files[0] : null;
     if (!file) return;
     if (file.size > _WA_META_UPLOAD_MAX_BYTES) {
-      if (status) { status.style.color = '#dc2626'; status.textContent = 'Bestand te groot (' + (file.size / 1024 / 1024).toFixed(1) + ' MB > 3 MB). Splits het op of gebruik Fase C (komt later).'; }
+      if (status) { status.style.color = 'var(--rose)'; status.textContent = 'Bestand te groot (' + (file.size / 1024 / 1024).toFixed(1) + ' MB > 3 MB). Splits het op of gebruik Fase C (komt later).'; }
       if (clearBtn) clearBtn.hidden = false;
       return;
     }
@@ -3747,20 +3747,20 @@
       });
       const r = await resp.json().catch(() => ({}));
       if (!resp.ok || !r || !r.ok) {
-        if (status) { status.style.color = '#dc2626'; status.textContent = 'Upload mislukt: ' + ((r && r.error) || ('HTTP ' + resp.status)); }
+        if (status) { status.style.color = 'var(--rose)'; status.textContent = 'Upload mislukt: ' + ((r && r.error) || ('HTTP ' + resp.status)); }
         if (clearBtn) clearBtn.hidden = false;
         return;
       }
       if (urlEl) urlEl.value = r.url;
       if (status) {
-        status.style.color = '#16a34a';
+        status.style.color = 'var(--emerald)';
         const sizeTxt = (typeof r.size_bytes === 'number') ? r.size_bytes.toLocaleString() : String(file.size);
         status.textContent = '✓ ' + file.name + ' (' + sizeTxt + ' bytes) — URL in veld hieronder.';
       }
       if (clearBtn) clearBtn.hidden = false;
       _waTplPreviewDebounced();
     } catch (e) {
-      if (status) { status.style.color = '#dc2626'; status.textContent = 'Upload exception: ' + (e && e.message || e); }
+      if (status) { status.style.color = 'var(--rose)'; status.textContent = 'Upload exception: ' + (e && e.message || e); }
       if (clearBtn) clearBtn.hidden = false;
     }
   }
