@@ -25,7 +25,8 @@
 //
 // Response: { items: [{ id, phone_number, display_name, customer_id, customer_name,
 //                       status, last_message_at, last_message_preview, unread_count,
-//                       last_inbound_at, can_send_text }], total, configured, module }
+//                       last_inbound_at, can_send_text, brief_sent, brief_sent_at }],
+//              total, configured, module }
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -307,6 +308,41 @@ export default async function handler(req, res) {
       emailUnreadWarning = 'email-unread fetch fail';
     }
 
+    // ── Brief-status-verrijking (gebatcht, geen N+1) ──────────────────────
+    // Per klant: is er ≥1 VERSTUURDE pre-incassobrief? = dunning_briefs met
+    // sent_at gevuld en template_code incasso_pre_nl/-be. Latest sent_at wordt
+    // bewaard voor de tooltip. Fail-soft: bij fout blijft brief_sent gewoon
+    // false en rendert de lijst normaal.
+    const briefSentByCustomer = new Map(); // customer_id → latest sent_at (iso)
+    try {
+      const custIds = Array.from(new Set(
+        (data || []).map((r) => r.customer_id).filter(Boolean)
+      ));
+      // Alleen zinvol in de finance-inbox (wanbetalers); events/onboarding-conv
+      // hebben geen pre-incassobrieven — sla de query daar over.
+      if (moduleRaw === 'finance' && custIds.length > 0) {
+        const { data: briefRows, error: bErr } = await supabaseAdmin
+          .from('dunning_briefs')
+          .select('customer_id, sent_at')
+          .in('customer_id', custIds)
+          .in('template_code', ['incasso_pre_nl', 'incasso_pre_be'])
+          .not('sent_at', 'is', null);
+        if (bErr) {
+          console.error('[inbox-conversations-list] dunning_briefs batch:', bErr.message);
+        } else {
+          for (const b of briefRows || []) {
+            if (!b.customer_id || !b.sent_at) continue;
+            const prev = briefSentByCustomer.get(b.customer_id);
+            if (!prev || Date.parse(b.sent_at) > Date.parse(prev)) {
+              briefSentByCustomer.set(b.customer_id, b.sent_at);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[inbox-conversations-list] brief-status fail:', e?.message || e);
+    }
+
     const now = Date.now();
     const items = (data || []).map(row => {
       const cust = row.customer || null;
@@ -373,6 +409,9 @@ export default async function handler(req, res) {
         open_invoice_count: agg ? agg.count : 0,
         total_open_cents  : agg ? agg.cents : 0,
         is_debtor         : !!(agg && agg.count > 0),
+        // Brief-indicator: heeft deze klant ≥1 VERSTUURDE pre-incassobrief?
+        brief_sent    : row.customer_id ? briefSentByCustomer.has(row.customer_id) : false,
+        brief_sent_at : row.customer_id ? (briefSentByCustomer.get(row.customer_id) || null) : null,
       };
     });
 

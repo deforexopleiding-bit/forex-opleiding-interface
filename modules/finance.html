@@ -13699,6 +13699,25 @@
     return arr;
   }
 
+  // Brief-indicator (gedeeld): groen vinkje = klant heeft ≥1 VERSTUURDE pre-
+  // incassobrief, rood kruisje = niet. Tooltip bij groen met de verzenddatum.
+  // Gebruikt in de gesprekken-lijst, het incasso-dossier en het case-sheet.
+  function _briefBadgeHtml(sent, sentAtIso) {
+    if (sent) {
+      let tip = 'Brief verstuurd';
+      if (sentAtIso) {
+        const d = new Date(sentAtIso);
+        if (!isNaN(d.getTime())) {
+          const dd = String(d.getDate()).padStart(2, '0');
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          tip = `Brief verstuurd op ${dd}-${mm}-${d.getFullYear()}`;
+        }
+      }
+      return `<span class="brief-ind brief-ind-ok" title="${esc(tip)}" style="display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:600;color:var(--wbx-s-paid-tx,#059669)"><i class="ti ti-circle-check-filled"></i>Brief</span>`;
+    }
+    return `<span class="brief-ind brief-ind-no" title="Nog geen pre-incassobrief verstuurd" style="display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:600;color:var(--wbx-s-inc-tx,#dc2626)"><i class="ti ti-circle-x-filled"></i>Brief</span>`;
+  }
+
   function _inboxRenderConvList() {
     const list = document.getElementById('inboxConvList');
     if (!list) return;
@@ -13786,7 +13805,7 @@
         <div class="inbox-conv-avatar" style="background:${avColor}">${esc(initials)}</div>
         <div class="inbox-conv-body">
           <div class="inbox-conv-header">
-            <div class="inbox-conv-name">${esc(name)}${closedBadge ? ' ' + closedBadge : ''}</div>
+            <div class="inbox-conv-name">${esc(name)}${c.customer_id ? ' ' + _briefBadgeHtml(c.brief_sent, c.brief_sent_at) : ''}${closedBadge ? ' ' + closedBadge : ''}</div>
             <div class="inbox-conv-time">${esc(rel)}</div>
           </div>
           <div class="inbox-conv-footer">
@@ -24359,6 +24378,16 @@
       ? `<span style="color:var(--wbx-s-back-tx)">${nOpen} — achterstand, hoort bij <a href="#" data-case-goto="crediteren" style="color:var(--wbx-accent-ink)">opruimactie</a></span>`
       : `<span>1 — enkel deze factuur</span>`;
 
+    // Brief-indicator voor de case-sheet-header (data uit _caseLoadWik). Tijdens
+    // laden geen badge tonen (voorkomt rood→groen-flikker). Nieuwste sent_at
+    // voor de tooltip.
+    let _caseBriefSentAt = null;
+    for (const _b of ((_caseState.wik && _caseState.wik.briefs) || [])) {
+      if (_b && _b.sent_at && (!_caseBriefSentAt || Date.parse(_b.sent_at) > Date.parse(_caseBriefSentAt))) _caseBriefSentAt = _b.sent_at;
+    }
+    const caseBriefBadge = (_caseState.wik && _caseState.wik.loading)
+      ? '' : _briefBadgeHtml(!!_caseBriefSentAt, _caseBriefSentAt);
+
     sheet.innerHTML = `
       <div class="wbx-sheet-top">
         <div class="wbx-row">
@@ -24369,6 +24398,7 @@
             <div class="wbx-sub">${esc(focus?.invoice_number || '—')}${daysStr ? ' · ' + esc(daysStr) : ''}</div>
           </div>
           <div style="flex:1"></div>
+          ${caseBriefBadge}
           <span class="wbx-pill ${pillCls}">${esc(pillLabel)}</span>
         </div>
       </div>
@@ -27335,6 +27365,7 @@
           <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
             <div style="font-size:18px;font-weight:700;color:var(--wbx-ink)">${esc(custName)}</div>
             ${_incStatusPillHtml(dossier.status)}
+            ${_briefBadgeHtml(flags?.brief_sent, flags?.brief_sent_at)}
           </div>
           <div style="font-size:12.5px;color:var(--wbx-muted);margin-bottom:14px">
             ${esc(customer?.email || '—')}${customer?.phone ? ' · ' + esc(customer.phone) : ''}
