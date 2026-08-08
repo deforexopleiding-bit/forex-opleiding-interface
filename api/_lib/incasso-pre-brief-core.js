@@ -174,11 +174,14 @@ function renderBriefPdf({ customer, resolvedSubject, resolvedBody }) {
       doc.moveDown(1.0);
       doc.font('Helvetica').fontSize(BODY_SIZE).fillColor('#0f172a');
 
-      // Render een blok met inline-bold (**...**) via pdfkit "continued" text:
-      // correcte word-wrap over regels + font-wissel per segment. Newlines
-      // binnen het blok blijven regelafbrekingen.
-      const renderRichBlock = (block) => {
-        const segs = parseBoldSegments(block);
+      // Render één REGEL met inline-bold (**...**) via pdfkit "continued" text.
+      // Elke regel start gegarandeerd op x=60 (zie j===0), zodat de continued-
+      // chain géén inspringing van de vorige (vette) regel meesleept. Regel-voor-
+      // regel renderen lost de kop->alinea positiebug op (lokaal met een echte
+      // PDF geverifieerd). Binnen één regel: segmenten als één continued-chain,
+      // laatste continued:false zodat pdfkit naar de volgende regel op de marge gaat.
+      const renderRichLine = (line) => {
+        const segs = parseBoldSegments(line);
         if (!segs.length) return;
         for (let j = 0; j < segs.length; j++) {
           const seg = segs[j];
@@ -200,7 +203,9 @@ function renderBriefPdf({ customer, resolvedSubject, resolvedBody }) {
           const kopLed = /^\*\*[^\n]+?\*\*(?:\n|$)/.test(block);
           doc.moveDown(kopLed ? KOP_GAP : PARA_GAP);
         }
-        renderRichBlock(block);
+        // Regel-voor-regel: elke regelafbreking binnen het blok = nieuwe regel op
+        // de marge (de alinea-afstand komt al van de split hierboven).
+        for (const line of block.split(String.fromCharCode(10))) renderRichLine(line);
         renderedAny = true;
       }
 
