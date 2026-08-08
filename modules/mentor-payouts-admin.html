@@ -62,11 +62,11 @@
     .caret.open { transform: rotate(90deg); }
 
     .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
-    .badge-grey   { background: rgba(100,116,139,0.18); color: #475569; }
-    .badge-blue   { background: rgba(20,115,214,0.16); color: #1160bd; }
-    .badge-green  { background: rgba(34,197,94,0.13);  color: #15803d; }
-    .badge-amber  { background: rgba(245,158,11,0.16); color: #b45309; }
-    .badge-deep   { background: rgba(10,47,99,0.12);   color: #0a2f63; }
+    .badge-grey   { background: var(--slate-soft);   color: var(--slate); }
+    .badge-blue   { background: var(--blue-soft);    color: var(--blue); }
+    .badge-green  { background: var(--emerald-soft); color: var(--emerald); }
+    .badge-amber  { background: var(--amber-soft);   color: var(--amber); }
+    .badge-deep   { background: rgba(10,47,99,0.12); color: #0a2f63; }
 
     .empty-state { background: var(--bg-elev); border: 1px dashed var(--border); border-radius: 10px; padding: 24px 16px; text-align: center; font-size: 13px; color: var(--text-dim); }
     .empty-state i { font-size: 26px; display: block; margin-bottom: 6px; opacity: 0.6; }
@@ -226,7 +226,7 @@
   }
 
   function renderError(msg) {
-    document.getElementById('payoutsWrap').innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i>${esc(msg)}</div>`;
+    document.getElementById('payoutsWrap').innerHTML = `<div class="empty-state" style="border-color:var(--rose-line);color:var(--rose)"><i class="ti ti-alert-triangle"></i>${esc(msg)}</div>`;
   }
 
   // Bulk-state. Beide reset bij elke loadList (zie clearBulkState).
@@ -1055,7 +1055,7 @@
       renderDetail(idx, d.payout);
     } catch (e) {
       const body = document.getElementById('detail-body-' + idx);
-      if (body) body.innerHTML = `<em style="color:#b91c1c">Detail laden mislukt: ${esc(e?.message || e)}</em>`;
+      if (body) body.innerHTML = `<em style="color:var(--rose)">Detail laden mislukt: ${esc(e?.message || e)}</em>`;
     }
   }
 
@@ -1187,7 +1187,7 @@
       renderDetail(idx, d.payout);
     } catch (e) {
       document.getElementById('detail-body-' + idx).innerHTML =
-        `<em style="color:#b91c1c">Detail laden mislukt: ${esc(e?.message || e)}</em>`;
+        `<em style="color:var(--rose)">Detail laden mislukt: ${esc(e?.message || e)}</em>`;
     }
   }
 
