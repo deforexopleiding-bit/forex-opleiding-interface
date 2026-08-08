@@ -249,6 +249,62 @@ function wireTopbarSearch() {
   });
 }
 
+// ── Legacy-URL vangnet ──────────────────────────────────────────────────────
+// Elke module die nog NIET in v2 is herbouwd, wijst hier naar zijn oude URL.
+// V2_MODULES = set van id's die WEL in v2 draaien (klik blijft binnen shell).
+// Voor alles daarbuiten: DFO.goMod wordt gewrapt zodat hij door-navigeert
+// naar de legacy-URL — zo blijft navigatie werken voor het live-team tijdens
+// de gefaseerde uitrol.
+const V2_MODULES = new Set(['klanten']);
+
+const LEGACY_URLS = {
+  dashboard:        '/index.html',
+  inbox:            '/modules/finance.html?tab=inbox',        // finance-inbox is centrale WA-inbox
+  taken:            '/modules/taken.html',
+  klanten:          null,                                     // V2 — geen redirect
+  studenten:        '/modules/mentor-students.html',
+  wanbetalers:      '/modules/finance.html?tab=wanbetalers',
+  email:            '/modules/email.html',
+  tickets:          '/modules/tickets.html',
+  followup:         '/modules/follow-up.html',
+  sales:            '/modules/sales.html',
+  finance:          '/modules/finance.html',
+  verdiensten:      '/modules/mentor-home.html',
+  lms:              null,                                     // ext-link — DFO opent al new-tab
+  events:           '/modules/events.html',
+  onboarding:       '/modules/onboarding-hub.html',
+  mentoren:         '/modules/mentoren-beheer.html',
+  leads:            '/modules/leads.html',
+  nieuwsbrief:      null,                                     // bestaat nog niet — placeholder
+  leadsonderhoud:   '/modules/leadsonderhoud.html',
+  lisa:             '/modules/lisa.html',
+  automatiseringen: '/modules/agent-center.html',             // dichtstbijzijnde legacy-equivalent
+  agents:           '/modules/agents.html',
+  logboek:          '/modules/activity-log.html',
+  instellingen:     '/modules/admin.html',
+  binnenkort:       null,                                     // placeholder
+};
+
+// Wrap DFO.goMod: als target NIET in V2_MODULES én er een legacy-URL is,
+// full-page-navigeer naar legacy. Anders normale DFO.goMod-flow.
+function wireLegacyFallback() {
+  if (!window.DFO || !window.DFO.goMod || window.DFO.goMod.__kvLegacyWrapped) return;
+  const orig = window.DFO.goMod;
+  const wrapped = function (id) {
+    if (V2_MODULES.has(id)) return orig.call(this, id);
+    const legacyUrl = LEGACY_URLS[id];
+    // Module met ext-link (bv. lms) — laat DFO's eigen open-in-new-tab flow doen
+    const mod = (window.DFO.MODS || []).find((m) => m.id === id);
+    if (mod && mod.ext) return orig.call(this, id);
+    if (legacyUrl) { window.location.href = legacyUrl; return; }
+    // Geen legacy-URL bekend (nieuwsbrief/binnenkort/studenten mentor-only zonder legacy):
+    // val terug op DFO.goMod → toont genericView-placeholder in shell.
+    return orig.call(this, id);
+  };
+  wrapped.__kvLegacyWrapped = true;
+  window.DFO.goMod = wrapped;
+}
+
 // ── Rol-bewuste topbar-actieknoppen ─────────────────────────────────────────
 // Rendert Nieuw + rol-shortcuts (Offerte / Traject aanmelden / Factuur) in
 // de topbar, filtert op DFO.S.roles. Klik-handlers zijn nog placeholders —
@@ -347,7 +403,9 @@ function wireTopbarActionsToShell() {
       : [String(profile.role || 'super_admin').toLowerCase()];
     shellRoles = fallback.length ? fallback : ['super_admin'];
   }
-  // Wrap DFO om topbar-acties bij elke rol-wissel te re-renderen.
+  // Wrap DFO.goMod met legacy-vangnet (redirect naar oude module-URL voor
+  // nog-niet-herbouwde v2-modules) + wrap re-render van topbar-actiebalk.
+  wireLegacyFallback();
   wireTopbarActionsToShell();
 
   window.DFO.setRoles(shellRoles);
