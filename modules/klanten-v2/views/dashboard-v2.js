@@ -118,27 +118,87 @@
   };
 
   /* ── Mock-data (uit prototype r1300-1440) ─────────────────────────── */
-  const TAKEN = [
+  const TAKEN_MOCK = [
     { titel: 'Bel Ebenezer Adjei — betaalafspraak', van: 'Wanbetalers', deadline: 'Vandaag', prio: 'hoog' },
     { titel: 'WIK-brief printen (4 stuks)',           van: 'Wanbetalers', deadline: 'Vandaag', prio: 'hoog' },
     { titel: 'Offerte Rachael Njoki afmaken',        van: 'Sales',        deadline: 'Morgen',  prio: 'midden' },
     { titel: 'Sessie voorbereiden — groep 4',        van: 'LMS',          deadline: 'Morgen',  prio: 'midden' },
   ];
 
+  /* ── Live data uit /api/dashboard-stats ─────────────────────────────
+     Backend ondersteunt: today | week | month. GEEN year / custom.
+     Klik op Jaar/Custom toont melding + valt terug op laatst-geladen. */
+  const PERIOD_LABEL_TO_PARAM = { Dag: 'today', Week: 'week', Maand: 'month' };
+  const _live = { period: null, data: null, loading: false, error: null };
+
+  async function fetchDashboardStats(labelPeriod) {
+    const paramPeriod = PERIOD_LABEL_TO_PARAM[labelPeriod];
+    if (!paramPeriod) return; // Jaar/Custom — geen backend
+    if (_live.loading) return;
+    if (_live.period === labelPeriod && _live.data) return;
+    _live.loading = true; _live.error = null;
+    try {
+      if (!window.KV || !window.KV.authedJson) throw new Error('KV.authedJson niet beschikbaar');
+      const json = await window.KV.authedJson('/api/dashboard-stats?period=' + paramPeriod);
+      _live.period = labelPeriod;
+      _live.data = json;
+      _live.error = null;
+    } catch (e) {
+      console.error('[dashboard-v2] fetch stats fail:', e && e.message);
+      _live.error = e && e.message || 'onbekende fout';
+      _live.data = null;
+    } finally {
+      _live.loading = false;
+      // Re-render zodat de UI de nieuwe cijfers pakt
+      if (window.DFO && window.DFO.render) window.DFO.render();
+    }
+  }
+
+  // Public hook: klik op Jaar/Custom-chip
+  window.DFO_dashPeriodClick = function (labelPeriod) {
+    if (labelPeriod === 'Jaar' || labelPeriod === 'Custom') {
+      alert('De endpoint /api/dashboard-stats ondersteunt momenteel alleen Dag/Week/Maand. '
+        + 'Jaar en Custom komen zodra we het backend uitbreiden — dan gaat deze knop live.');
+      return;
+    }
+    window.DFO.setF('per', labelPeriod);
+    fetchDashboardStats(labelPeriod);
+  };
+
+  // Format helpers voor live-values
+  const fmtNum = (v) => (v == null || Number.isNaN(v)) ? '—' : String(v);
+  const liveOrMock = (live, mock) => (_live.data ? (live == null ? '—' : live) : mock);
+  const mockBadge = () => `<span title="Voorbeeld-data — deze tile wacht op eigen endpoint" style="font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--amber);background:var(--amber-soft);padding:1px 5px;border-radius:3px;margin-left:6px;vertical-align:2px">MOCK</span>`;
+  const liveBadge = () => _live.data ? `<span title="Live uit /api/dashboard-stats" style="font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--emerald);background:var(--emerald-soft);padding:1px 5px;border-radius:3px;margin-left:6px;vertical-align:2px">LIVE</span>` : '';
+  const loadingBadge = () => _live.loading ? `<span style="font-size:10px;color:var(--text-3);margin-left:6px">laden…</span>` : '';
+
   /* ── Dashboard: manager/super_admin/sales (breed overzicht) ───────── */
   function dashManager() {
     const persoon = (ROLES[S.role] && ROLES[S.role].persoon) || 'Jeffrey Biemold';
     const voornaam = persoon.split(' ')[0];
+    const curPeriod = F('per', 'Maand');
+    // Trigger fetch als de gekozen periode nog niet geladen is (én backend-supported).
+    // Wordt eenmalig gefired per period-wissel; fetchDashboardStats guardt op loading.
+    if (PERIOD_LABEL_TO_PARAM[curPeriod] && _live.period !== curPeriod && !_live.loading) {
+      queueMicrotask(() => fetchDashboardStats(curPeriod));
+    }
+    const d = _live.data;
+    const g = d && d.greeting || {};
+    const groet = g.tijd_groet || 'Goedemorgen';
+    const inzicht = g.inzicht || 'je hele bedrijf in één oogopslag';
+    const nu = new Date().toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
     return `<div style="padding:20px 20px 0">
       <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px">
         <div style="flex:1;min-width:220px">
-          <div style="font-size:23px;font-weight:600;letter-spacing:-.03em">Goedemorgen, ${voornaam}</div>
-          <div style="font-size:13px;color:var(--text-3);margin-top:3px">donderdag 6 augustus 2026 · je hele bedrijf in één oogopslag</div>
+          <div style="font-size:23px;font-weight:600;letter-spacing:-.03em">${groet}, ${voornaam}${loadingBadge()}${liveBadge()}</div>
+          <div style="font-size:13px;color:var(--text-3);margin-top:3px">${nu} · ${_live.data ? inzicht : 'je hele bedrijf in één oogopslag'}</div>
+          ${_live.error ? `<div style="font-size:12px;color:var(--rose);margin-top:6px">⚠ ${_live.error} — laatst-bekende cijfers hieronder</div>` : ''}
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <div style="display:flex;background:var(--surface-2);border-radius:var(--r-sm);padding:3px;gap:2px">
-            ${['Dag', 'Week', 'Maand', 'Jaar'].map(p => `<button class="chip ${F('per', 'Maand') === p ? 'on' : ''}" style="font-size:12.5px;padding:5px 13px;border-radius:5px" onclick="DFO.setF('per','${p}')">${p}</button>`).join('')}
-            <button class="chip" style="font-size:12.5px;padding:5px 13px;border-radius:5px">Custom ▾</button>
+            ${['Dag', 'Week', 'Maand', 'Jaar'].map(p => `<button class="chip ${curPeriod === p ? 'on' : ''}" style="font-size:12.5px;padding:5px 13px;border-radius:5px" onclick="DFO_dashPeriodClick('${p}')">${p}</button>`).join('')}
+            <button class="chip" style="font-size:12.5px;padding:5px 13px;border-radius:5px" onclick="DFO_dashPeriodClick('Custom')">Custom ▾</button>
           </div>
           <button class="btn btn-ghost" onclick="DFO.KV && DFO.KV.newAction && DFO.KV.newAction('offerte')">${svg(I.doc)}Offerte</button>
           <button class="btn btn-ghost" onclick="DFO.KV && DFO.KV.newAction && DFO.KV.newAction('traject')">${svg(I.grad)}Traject aanmelden</button>
@@ -153,18 +213,28 @@
         <div class="card">
           <div class="card-head" style="border-bottom:none;padding-bottom:4px">
             <span class="title-dot" style="background:var(--emerald);box-shadow:0 0 0 3px var(--emerald-soft)"></span>
-            <div class="card-title">Leads per traject</div>
-            <span style="font-size:11.5px;color:var(--text-3);margin-left:2px">deze maand</span></div>
+            <div class="card-title">Leads per traject${d ? liveBadge() : mockBadge()}</div>
+            <span style="font-size:11.5px;color:var(--text-3);margin-left:2px">${curPeriod === 'Dag' ? 'vandaag' : curPeriod === 'Week' ? 'deze week' : 'deze maand'}</span></div>
           <div class="card-body" style="padding:10px 17px 14px">
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
-              ${[['7-daagse', 21, 64, 'emerald', 'leads'], ['Event-aanmeldingen', 12, 36, 'teal', 'events'],
-                 ['Webinar', 0, 0, 'blue', 'leads'], ['Mini cursus', 0, 0, 'violet', 'leads']]
-                .map(([n, c, p, col, mod]) => `<div style="border:1px solid var(--border);border-radius:var(--r);padding:12px 13px;cursor:pointer;transition:all .15s;${c > 0 ? '' : 'opacity:.6'}"
+              ${(() => {
+                // Live: nieuwe_leads.value uit dashboard-stats (totaal deze periode).
+                // Per-traject-breakdown vereist eigen endpoint (leads?groupBy=traject).
+                // Voor nu: eerste tile toont TOTAAL van nieuwe leads (live), rest = mock.
+                const totLeads = d && d.kpis_groot && d.kpis_groot.nieuwe_leads && d.kpis_groot.nieuwe_leads.value;
+                const tiles = [
+                  ['Alle bronnen', totLeads != null ? totLeads : 21, 100, 'emerald', 'leads', true],
+                  ['Event-aanmeldingen', 12, 36, 'teal', 'events', false],
+                  ['Webinar', 0, 0, 'blue', 'leads', false],
+                  ['Mini cursus', 0, 0, 'violet', 'leads', false],
+                ];
+                return tiles.map(([n, c, p, col, mod, isLive]) => `<div style="border:1px solid var(--border);border-radius:var(--r);padding:12px 13px;cursor:pointer;transition:all .15s;${c > 0 ? '' : 'opacity:.6'}"
                   onmouseover="this.style.borderColor='var(--border-strong)'" onmouseout="this.style.borderColor='var(--border)'" onclick="DFO.goMod('${mod}')">
-                  <div style="font-size:11.5px;color:var(--text-2);margin-bottom:5px">${n}</div>
+                  <div style="font-size:11.5px;color:var(--text-2);margin-bottom:5px">${n}${isLive && d ? '' : mockBadge()}</div>
                   <div style="font-size:26px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.04em;line-height:1">${c}</div>
                   <div class="progress" style="margin-top:9px;height:3px"><i style="width:${p}%;background:var(--${col})"></i></div>
-                  <div style="font-size:11px;color:var(--text-3);margin-top:5px">${p}% van totaal</div></div>`).join('')}
+                  <div style="font-size:11px;color:var(--text-3);margin-top:5px">${isLive && d ? 'live totaal' : `${p}% van totaal`}</div></div>`).join('');
+              })()}
             </div>
             <div style="margin-top:11px;font-size:12px;color:var(--amber);display:flex;align-items:center;gap:6px;cursor:pointer" onclick="DFO.goMod('leads')">
               ${svg(I.alert, 'width:13px;height:13px')}<span><b>76</b> leads zonder traject — klik om op te schonen</span></div>
@@ -231,22 +301,29 @@
             <span class="title-dot" style="background:var(--rose);box-shadow:0 0 0 3px var(--rose-soft)"></span>
             <div class="card-title">Vereist jouw actie</div></div>
           <div class="card-body" style="padding:4px 15px 15px;display:flex;flex-direction:column;gap:8px">
-            ${[[0, 'Open tickets', 'Support', 'slate', 'tickets'],
-               [6, 'Retentie te laat', 'Leadsonderhoud', 'amber', 'sales'],
-               [0, 'Goedkeuringen open', 'Control Center', 'slate', 'binnenkort'],
-               [41, 'Vastgelopen gesprekken', 'Wanbetalers-inbox', 'rose', 'wanbetalers'],
-               [54, 'Bel-acties te doen', 'Wanbetalers', 'amber', 'wanbetalers'],
-               [210, 'Openstaande facturen', 'Wanbetalers', 'amber', 'finance']]
+            ${(() => {
+              // Live: pending_approvals uit dashboard-stats. Rest = mock (aparte endpoints nodig).
+              const approvals = d && d.kpis_klein && d.kpis_klein.pending_approvals;
+              const items = [
+                [0,   'Open tickets',            'Support',                 'slate', 'tickets',     false],
+                [6,   'Retentie te laat',        'Leadsonderhoud',          'amber', 'sales',       false],
+                [approvals != null ? approvals : 0, 'Goedkeuringen open', 'Control Center', 'slate', 'binnenkort', approvals != null],
+                [41,  'Vastgelopen gesprekken',  'Wanbetalers-inbox',       'rose',  'wanbetalers', false],
+                [54,  'Bel-acties te doen',      'Wanbetalers',             'amber', 'wanbetalers', false],
+                [210, 'Openstaande facturen',    'Wanbetalers',             'amber', 'finance',     false],
+              ];
+              return items
               .filter(([n, t, s, c, mod]) => modUsable(mod))
-              .map(([n, t, s, c, mod]) => `<button style="display:flex;align-items:center;gap:14px;padding:12px 14px;border:1px solid var(--border);
+              .map(([n, t, s, c, mod, isLive]) => `<button style="display:flex;align-items:center;gap:14px;padding:12px 14px;border:1px solid var(--border);
                 border-radius:var(--r);background:var(--surface);width:100%;text-align:left;transition:all .15s"
                 onmouseover="this.style.borderColor='var(--border-strong)';this.style.transform='translateX(2px)'"
                 onmouseout="this.style.borderColor='var(--border)';this.style.transform='none'" onclick="DFO.goMod('${mod}')">
                 <span style="font-size:21px;font-weight:700;font-family:'IBM Plex Mono',monospace;letter-spacing:-.04em;min-width:38px;
                   color:${n === 0 ? 'var(--text-3)' : `var(--${c})`}">${n}</span>
-                <span style="flex:1"><span style="display:block;font-size:13.5px;font-weight:500">${t}</span>
+                <span style="flex:1"><span style="display:block;font-size:13.5px;font-weight:500">${t}${isLive ? '' : mockBadge()}</span>
                 <span style="display:block;font-size:11.5px;color:var(--text-3)">${s}</span></span>
-                ${svg('<path d="M5 12h14M13 6l6 6-6 6"/>', 'width:15px;height:15px;color:var(--text-3)')}</button>`).join('')}
+                ${svg('<path d="M5 12h14M13 6l6 6-6 6"/>', 'width:15px;height:15px;color:var(--text-3)')}</button>`).join('');
+            })()}
           </div>
         </div>
       </div>
@@ -273,31 +350,54 @@
             <span class="title-dot" style="background:var(--teal);box-shadow:0 0 0 3px var(--teal-soft)"></span>
             <div class="card-title">Postvakken</div></div>
           <div class="card-body" style="padding:6px 15px 15px;display:flex;flex-direction:column;gap:7px">
-            ${[['Wanbetalers', 4, 'amber', I.alert, 'wanbetalers'], ['Leadsonderhoud', 0, 'teal', I.repeat, 'leadsonderhoud'],
-               ['Onboarding', 0, 'emerald', I.route, 'onboarding'], ['Lisa AI', 2, 'violet', I.bot, 'lisa'],
-               ['Events', 3, 'pink', I.cal, 'events'], ['E-mail', 989, 'blue', I.mail, 'email']]
-              .filter(([n, c, col, ic, mod]) => modUsable(mod))
-              .map(([n, c, col, ic, mod]) => `<button style="display:flex;align-items:center;gap:11px;padding:10px 13px;border:1px solid var(--border);
-                border-radius:var(--r);background:var(--surface);width:100%;text-align:left;transition:all .15s"
-                onmouseover="this.style.borderColor='var(--border-strong)'" onmouseout="this.style.borderColor='var(--border)'" onclick="DFO.goMod('${mod}')">
-                <span class="tile-ico" style="width:26px;height:26px;border-radius:7px;background:var(--${col}-soft);color:var(--${col})">${svg(ic, 'width:14px;height:14px')}</span>
-                <span style="flex:1;font-size:13px;font-weight:500">${n}</span>
-                <span style="font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:20px;font-family:'IBM Plex Mono',monospace;
-                  background:${c === 0 ? 'var(--surface-2)' : 'var(--rose)'};color:${c === 0 ? 'var(--text-3)' : '#fff'}">${c}</span></button>`).join('')}
+            ${(() => {
+              // Live: mails_period uit dashboard-stats. Rest = mock (aparte endpoints).
+              const mails = d && d.kpis_klein && d.kpis_klein.mails_period;
+              const tiles = [
+                ['Wanbetalers',    4,   'amber',  I.alert,  'wanbetalers',    false],
+                ['Leadsonderhoud', 0,   'teal',   I.repeat, 'leadsonderhoud', false],
+                ['Onboarding',     0,   'emerald', I.route, 'onboarding',     false],
+                ['Lisa AI',        2,   'violet', I.bot,    'lisa',           false],
+                ['Events',         3,   'pink',   I.cal,    'events',         false],
+                ['E-mail',         mails != null ? mails : 989, 'blue', I.mail, 'email', mails != null],
+              ];
+              return tiles
+                .filter(([n, c, col, ic, mod]) => modUsable(mod))
+                .map(([n, c, col, ic, mod, isLive]) => `<button style="display:flex;align-items:center;gap:11px;padding:10px 13px;border:1px solid var(--border);
+                  border-radius:var(--r);background:var(--surface);width:100%;text-align:left;transition:all .15s"
+                  onmouseover="this.style.borderColor='var(--border-strong)'" onmouseout="this.style.borderColor='var(--border)'" onclick="DFO.goMod('${mod}')">
+                  <span class="tile-ico" style="width:26px;height:26px;border-radius:7px;background:var(--${col}-soft);color:var(--${col})">${svg(ic, 'width:14px;height:14px')}</span>
+                  <span style="flex:1;font-size:13px;font-weight:500">${n}${isLive ? '' : mockBadge()}</span>
+                  <span style="font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:20px;font-family:'IBM Plex Mono',monospace;
+                    background:${c === 0 ? 'var(--surface-2)' : 'var(--rose)'};color:${c === 0 ? 'var(--text-3)' : '#fff'}">${c}</span></button>`).join('');
+            })()}
           </div>
         </div>
 
         <div class="card">
           <div class="card-head" style="border-bottom:none;padding-bottom:4px">
             <span class="title-dot" style="background:var(--emerald);box-shadow:0 0 0 3px var(--emerald-soft)"></span>
-            <div class="card-title">Mijn taken</div>
+            <div class="card-title">Mijn taken${d && d.tasks ? liveBadge() : mockBadge()}</div>
             <button class="btn btn-ghost btn-sm" style="margin-left:auto;background:none;color:var(--m)" onclick="DFO.goMod('taken')">Takenbeheer →</button></div>
           <div class="card-body" style="padding:6px 15px 15px;display:flex;flex-direction:column;gap:7px">
-            ${TAKEN.slice(0, 4).map(t => `<div style="display:flex;align-items:center;gap:11px;padding:10px 13px;border:1px solid var(--border);border-radius:var(--r)">
-              <div class="checkbox"></div>
-              <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.titel}</div>
-              <div style="font-size:11px;color:var(--text-3)">${t.van} · ${t.deadline}</div></div>
-              ${t.prio === 'hoog' ? `<span class="legend-dot" style="background:var(--rose)"></span>` : ''}</div>`).join('')}
+            ${(() => {
+              // Live: tasks.items uit dashboard-stats (max 4 tonen).
+              const live = d && d.tasks && Array.isArray(d.tasks.items) ? d.tasks.items : null;
+              const items = live && live.length
+                ? live.slice(0, 4).map(t => ({
+                    titel: t.titel || '(geen titel)',
+                    van: '', // geen "van" in dashboard-stats task-item
+                    deadline: t.deadline ? new Date(t.deadline).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' }) : '—',
+                    prio: (t.prioriteit || '').toLowerCase() === 'urgent' || (t.prioriteit || '').toLowerCase() === 'hoog' ? 'hoog' : 'midden',
+                  }))
+                : TAKEN_MOCK.slice(0, 4);
+              if (!items.length) return `<div style="font-size:12.5px;color:var(--text-3);padding:8px 4px">Geen openstaande taken 🎉</div>`;
+              return items.map(t => `<div style="display:flex;align-items:center;gap:11px;padding:10px 13px;border:1px solid var(--border);border-radius:var(--r)">
+                <div class="checkbox"></div>
+                <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.titel}</div>
+                <div style="font-size:11px;color:var(--text-3)">${t.van ? t.van + ' · ' : ''}${t.deadline}</div></div>
+                ${t.prio === 'hoog' ? `<span class="legend-dot" style="background:var(--rose)"></span>` : ''}</div>`).join('');
+            })()}
           </div>
         </div>
       </div>
