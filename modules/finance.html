@@ -29756,17 +29756,48 @@
   function _awnAmsDate(d) {
     try { return _AWN_AMS_FMT.format(new Date(d)); } catch (_) { return ''; }
   }
-  function _awnTaskDateRaw(it) {
-    return (it && (it.scheduled_for || it.created_at)) || null;
+  // Taakdatum = exact wat op de actie-kaart staat ("📞 Taak · DD-MM, HH:MM") =
+  // de run-datum next_action_at uit custMap (per klant, uit wanbetalers-overzicht-
+  // list → dunning_workflow_runs.next_action_at). Terugval op scheduled_for
+  // (handmatig uitgesteld) en created_at wanneer er geen run-verrijking is.
+  // LET OP: NIET langer alleen scheduled_for — die is voor deze taken vaak
+  // null/verleden, waardoor alles ten onrechte in Vandaag belandde.
+  function _awnTaskDateRaw(it, custMap) {
+    const cust = (custMap && it && it.customer_id) ? custMap.get(it.customer_id) : null;
+    return (cust && cust.next_action_at) || (it && (it.scheduled_for || it.created_at)) || null;
   }
   // Vandaag = taakdatum ≤ einde van vandaag (Amsterdam), OF geen/onparseerbare
   // datum (moet sowieso opgepakt worden). todayAms = _awnAmsDate(new Date()).
-  function _awnIsVandaag(it, todayAms) {
-    const raw = _awnTaskDateRaw(it);
+  function _awnIsVandaag(it, todayAms, custMap) {
+    const raw = _awnTaskDateRaw(it, custMap);
     if (!raw) return true;
     const ds = _awnAmsDate(raw);
     if (!ds) return true;
     return ds <= todayAms;
+  }
+
+  // Haal ALLE openstaande (PENDING) taken op, GEPAGINEERD. De endpoint clampt
+  // limit hard op 200; bij >200 pending zouden anders taken uit ZOWEL Vandaag
+  // als Komend wegvallen (onzichtbaar). We pagineren op offset tot alles binnen
+  // is (gebruikt de exacte 'total' uit de respons). include_scheduled=1 zodat
+  // ook toekomstig-geplande taken meekomen. Veiligheidsplafond 5000 items /
+  // 25 pagina's tegen een runaway-loop. Retourneert { items }.
+  async function _awnFetchAllPending() {
+    const PAGE = 200, MAX = 5000;
+    let all = [], offset = 0, total = Infinity, guard = 0;
+    while (all.length < total && all.length < MAX && guard < 25) {
+      guard += 1;
+      const url = '/api/pending-actions-list?status=PENDING&include_scheduled=1'
+                + '&limit=' + PAGE + '&offset=' + offset;
+      const d = await window.AgentShared.apiFetch(url).then((r) => r.json()).catch(() => ({}));
+      const batch = Array.isArray(d?.items) ? d.items : [];
+      all = all.concat(batch);
+      const t = Number(d?.total);
+      total = Number.isFinite(t) ? t : all.length;
+      if (batch.length < PAGE) break; // laatste (deels-gevulde) pagina → klaar
+      offset += PAGE;
+    }
+    return { items: all };
   }
 
   function mountActiesWerkcentrumHost() {
@@ -29898,7 +29929,13 @@
         .then((r) => r.json()).catch(() => ({ items: [] }));
 
       const primaryStatus = { vandaag: 'PENDING', komend: 'PENDING', done: 'EXECUTED', rej: 'REJECTED' }[tab] || 'PENDING';
-      const actionPromises = [fetchUrl(buildUrl(primaryStatus))];
+      // Vandaag/Komend (PENDING): alles gepagineerd ophalen (geen 200-cap) zodat
+      // er nooit taken wegvallen. Done/Rej: bestaande (recente-200) fetch.
+      const actionPromises = [
+        (tab === 'vandaag' || tab === 'komend')
+          ? _awnFetchAllPending()
+          : fetchUrl(buildUrl(primaryStatus)),
+      ];
       // done-tab extra fetch voor APPROVED.
       if (tab === 'done') actionPromises.push(fetchUrl(buildUrl('APPROVED')));
 
@@ -29932,8 +29969,9 @@
       // geen datum), Komend = taakdatum > vandaag (incl. voorheen "Later").
       if (tab === 'vandaag' || tab === 'komend') {
         const todayAms = _awnAmsDate(new Date());
+        const cm = _awnState.custMap; // next_action_at per klant (kaart-datum)
         items = items.filter((it) =>
-          tab === 'vandaag' ? _awnIsVandaag(it, todayAms) : !_awnIsVandaag(it, todayAms));
+          tab === 'vandaag' ? _awnIsVandaag(it, todayAms, cm) : !_awnIsVandaag(it, todayAms, cm));
       }
       _awnState.items  = items;
       _awnState.paused = Array.isArray(rPaused?.items) ? rPaused.items : [];
@@ -29958,18 +29996,25 @@
     // Zelfde endpoints; count-only via limit=1 (endpoint returnt total/counts).
     try {
       // FIX punt 5: done-tel APPROVED + EXECUTED. Voegt 1 extra call toe.
-      // Alle openstaande taken (include_scheduled=1) ophalen en client-side
+      // Alle openstaande taken GEPAGINEERD ophalen (geen 200-cap) en client-side
       // splitsen op taakdatum vs. einde van vandaag (Amsterdam) → Vandaag/Komend.
-      // (Cap op 200 items, zoals de bestaande later-teller; ruim voldoende.)
-      const [pending, doneExec, doneApp, rej] = await Promise.all([
-        window.AgentShared.apiFetch('/api/pending-actions-list?status=PENDING&include_scheduled=1&limit=200').then((r) => r.json()).catch(() => ({})),
+      // Zo tonen de tellers het ECHTE totaal, niet een afgekapt getal.
+      // Overzicht-fetch erbij zodat we dezelfde next_action_at (kaart-datum) per
+      // klant hebben voor de Vandaag/Komend-split van de tellers.
+      const [pending, ov, doneExec, doneApp, rej] = await Promise.all([
+        _awnFetchAllPending(),
+        window.AgentShared.apiFetch('/api/wanbetalers-overzicht-list').then((r) => r.json()).catch(() => ({ items: [] })),
         window.AgentShared.apiFetch('/api/pending-actions-list?status=EXECUTED&limit=1').then((r) => r.json()).catch(() => ({})),
         window.AgentShared.apiFetch('/api/pending-actions-list?status=APPROVED&limit=1').then((r) => r.json()).catch(() => ({})),
         window.AgentShared.apiFetch('/api/pending-actions-list?status=REJECTED&limit=1').then((r) => r.json()).catch(() => ({})),
       ]);
       const pendingItems = Array.isArray(pending?.items) ? pending.items : [];
+      const cmBadges = new Map();
+      for (const c of (Array.isArray(ov?.items) ? ov.items : [])) {
+        if (c && c.customer_id) cmBadges.set(c.customer_id, c);
+      }
       const todayAms = _awnAmsDate(new Date());
-      const vandaagN = pendingItems.filter((it) => _awnIsVandaag(it, todayAms)).length;
+      const vandaagN = pendingItems.filter((it) => _awnIsVandaag(it, todayAms, cmBadges)).length;
       const komendN  = pendingItems.length - vandaagN;
       const doneN = (Number(doneExec?.total) || 0) + (Number(doneApp?.total) || 0);
       setBadge('vandaag', vandaagN);
@@ -30072,7 +30117,7 @@
     // binnen de type-groepen behouden (push-volgorde = sorteervolgorde).
     const _awnNoDateMs = (_awnState.tab === 'vandaag') ? -Infinity : Infinity;
     const _awnTaskDateMs = (it) => {
-      const raw = it && (it.scheduled_for || it.created_at);
+      const raw = _awnTaskDateRaw(it, _awnState.custMap);
       const t = raw ? new Date(raw).getTime() : NaN;
       return Number.isFinite(t) ? t : _awnNoDateMs;
     };
