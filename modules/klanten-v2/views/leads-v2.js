@@ -23,14 +23,19 @@
   const { I, svg, F } = window.DFO;
   const H = window.KV_V2.helpers;
 
-  const _act = { loading: false, error: null, data: null, stats: null, seq: 0, params: '' };
-  const _arc = { loading: false, error: null, data: null, seq: 0, params: '' };
+  // Ronde 4: sortBy + sortDir op _act voor sort-chips.
+  // _cre.form.productSlugs = array voor multi-select (mini-cursus + 7-daagse
+  // combineerbaar; endpoint accepteert producten: [{slug,van,tot}] array).
+  const _act = { loading: false, error: null, data: null, stats: null, seq: 0, params: '', search: '', sortBy: 'aangemaakt', sortDir: 'desc' };
+  const _arc = { loading: false, error: null, data: null, seq: 0, params: '', search: '' };
   const _det = { loading: false, error: null, data: null, seq: 0, id: null, saving: false, notitieDraft: '' };
   const _cre = {
     submitting: false,
     producten: null, prodLoading: false,
-    form: { voornaam: '', achternaam: '', email: '', telefoon: '', productSlug: '', van: '', tot: '', herkomst: 'handmatig', welkomstmail: false },
+    form: { voornaam: '', achternaam: '', email: '', telefoon: '', productSlugs: [], van: '', tot: '', herkomst: 'handmatig', welkomstmail: false },
   };
+  // Meer-acties modal state (archiveer / herstel / omzetten-klant).
+  const _act2 = { open: false, kind: null, submitting: false };
 
   async function tryFetch(label, url, timeoutMs = 8000) {
     try {
@@ -116,15 +121,20 @@
   }
 
   window.__leadCreateInput = (field, val) => { _cre.form[field] = val; };
-  window.__leadCreateProductChange = (slug) => {
-    _cre.form.productSlug = slug;
-    const p = (_cre.producten || []).find(x => x.slug === slug);
-    if (p) {
+  // Ronde 4: multi-product checkboxes (mini-cursus + 7-daagse combineerbaar).
+  window.__leadCreateProductToggle = (slug) => {
+    const arr = Array.isArray(_cre.form.productSlugs) ? _cre.form.productSlugs.slice() : [];
+    const idx = arr.indexOf(slug);
+    if (idx >= 0) arr.splice(idx, 1); else arr.push(slug);
+    _cre.form.productSlugs = arr;
+    // Auto-vul van/tot obv langste-duur product als leeg.
+    if ((!_cre.form.van || !_cre.form.tot) && arr.length) {
+      const chosen = (_cre.producten || []).filter(p => arr.includes(p.slug));
+      const maxDuur = chosen.reduce((m, p) => Math.max(m, Number(p.duur_dagen) || 0), 0) || 365;
       const now = new Date();
       const iso = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10);
-      _cre.form.van = iso(now);
-      const tot = new Date(now); tot.setDate(tot.getDate() + (Number(p.duur_dagen) || 365));
-      _cre.form.tot = iso(tot);
+      if (!_cre.form.van) _cre.form.van = iso(now);
+      if (!_cre.form.tot) { const tot = new Date(now); tot.setDate(tot.getDate() + maxDuur); _cre.form.tot = iso(tot); }
     }
     window.DFO.render();
   };
@@ -134,7 +144,8 @@
     if (_cre.submitting) return;
     const f = _cre.form;
     if (!f.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email)) { alert('Geldig e-mailadres vereist.'); return; }
-    if (!f.productSlug) { alert('Kies een product.'); return; }
+    const slugs = Array.isArray(f.productSlugs) ? f.productSlugs : [];
+    if (!slugs.length) { alert('Kies minstens één product.'); return; }
     if (!f.van || !f.tot) { alert('Begin- en einddatum vereist.'); return; }
     if (f.van > f.tot) { alert('Einddatum moet na begindatum liggen.'); return; }
     _cre.submitting = true;
@@ -146,18 +157,53 @@
         email: f.email.trim().toLowerCase(),
         telefoon: f.telefoon || null,
         herkomst: f.herkomst || 'handmatig',
-        producten: [{ slug: f.productSlug, van: f.van, tot: f.tot }],
+        producten: slugs.map(slug => ({ slug, van: f.van, tot: f.tot })),
         welkomstmail: !!f.welkomstmail,
       });
       _cre.submitting = false;
-      _cre.form = { voornaam: '', achternaam: '', email: '', telefoon: '', productSlug: '', van: '', tot: '', herkomst: 'handmatig', welkomstmail: false };
+      _cre.form = { voornaam: '', achternaam: '', email: '', telefoon: '', productSlugs: [], van: '', tot: '', herkomst: 'handmatig', welkomstmail: false };
       _act.data = null; _arc.data = null;
       setUrlParam('lead-new', null);
-      alert('Lead aangemaakt' + (f.welkomstmail ? ' (welkomstmail verstuurd)' : '') + '.');
+      alert('Lead aangemaakt met ' + slugs.length + ' product' + (slugs.length === 1 ? '' : 'en') + (f.welkomstmail ? ' (welkomstmail verstuurd)' : '') + '.');
     } catch (e) {
       _cre.submitting = false;
       window.DFO.render();
       alert('Kon lead niet aanmaken: ' + (e?.message || 'onbekende fout'));
+    }
+  };
+
+  // ── Ronde 4: Meer-acties in v2 (archiveer / herstel / omzetten-klant) ───
+  window.__leadAct2Open = (kind) => {
+    _act2.open = true; _act2.kind = kind; window.DFO.render();
+  };
+  window.__leadAct2Close = () => {
+    _act2.open = false; _act2.kind = null; _act2.submitting = false; window.DFO.render();
+  };
+  window.__leadAct2Confirm = async () => {
+    if (!_det.id || !_act2.kind || _act2.submitting) return;
+    _act2.submitting = true; window.DFO.render();
+    const endpoint = _act2.kind === 'archive'  ? '/api/leads-verwijder'
+                   : _act2.kind === 'restore'  ? '/api/leads-herstel'
+                   : _act2.kind === 'promote'  ? '/api/leads-promote'
+                   : null;
+    if (!endpoint) { _act2.submitting = false; window.DFO.render(); return; }
+    try {
+      await tryPost('lead-action-' + _act2.kind, endpoint, { id: _det.id });
+      _det.data = null; _act.data = null; _arc.data = null;
+      _act2.open = false; _act2.kind = null; _act2.submitting = false;
+      if (_act2.kind === 'archive' || _act2.kind === 'promote') {
+        // Lead is uit de actieve lijst → terug naar overzicht.
+        setUrlParam('lead', null);
+      } else {
+        window.DFO.render();
+      }
+      alert(_act2.kind === 'promote'  ? 'Lead omgezet naar klant.'
+          : _act2.kind === 'archive'  ? 'Lead gearchiveerd.'
+          : /* restore */              'Lead hersteld.');
+    } catch (e) {
+      _act2.submitting = false;
+      window.DFO.render();
+      alert('Actie mislukt: ' + (e?.message || 'onbekende fout'));
     }
   };
 
@@ -184,10 +230,15 @@
     window.__leadPatch({ notitie: val });
   };
 
+  window.__leadSort = (by) => {
+    if (_act.sortBy === by) _act.sortDir = _act.sortDir === 'asc' ? 'desc' : 'asc';
+    else { _act.sortBy = by; _act.sortDir = by === 'aangemaakt' ? 'desc' : 'desc'; }
+    window.DFO.render();
+  };
   function actiefParams() {
     const st = F('lead-st', 'all');
     const bron = F('lead-bron', 'all');
-    const q = (F('q', '') || '').trim();
+    const q = String(_act.search || '').trim();
     const p = new URLSearchParams();
     if (st && st !== 'all') p.set('status', st);
     if (bron && bron !== 'all') p.set('bron', bron);
@@ -218,11 +269,35 @@
   function actiefListView() {
     const st = F('lead-st', 'all');
     const bron = F('lead-bron', 'all');
-    const items = _act.data?.items || [];
+    let items = (_act.data?.items || []).slice();
     const total = _act.data?.total ?? null;
     const s = _act.stats || {};
+
+    // Ronde 4: shared stableSearch registreren + client-side sort.
+    H.onSearch('leads-act', (val) => {
+      _act.search = val || '';
+      fetchActief();
+    });
+    if (H.getSearchValue('leads-act') !== (_act.search || '')) H.setSearchValue('leads-act', _act.search || '');
+
+    // Client-side sort (op zichtbare 50). server-side sort niet in leads-list.
+    if (_act.sortBy === 'aangemaakt') {
+      items.sort((a, b) => {
+        const av = String(a?.aangemaakt || '');
+        const bv = String(b?.aangemaakt || '');
+        return _act.sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      });
+    } else if (_act.sortBy === 'score') {
+      items.sort((a, b) => {
+        const av = Number(a?.score) || 0;
+        const bv = Number(b?.score) || 0;
+        return _act.sortDir === 'asc' ? av - bv : bv - av;
+      });
+    }
     const scores = items.map(i => Number(i.score)).filter(n => !isNaN(n));
     const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+    const sortIcon = (col) => _act.sortBy === col ? (_act.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+
     return `${previewHeader('Actief', _act)}
       ${H.kpis([
         { c: 'teal',    icon: I.users,  label: 'Nieuw vandaag',        val: num(s.vandaag),          hi: 1 },
@@ -245,16 +320,21 @@
           { l: 'Webinar',      v: 'Webinar' },
           { l: 'Referral',     v: 'Referral' },
         ], bron),
-        H.search('Zoek naam / e-mail / telefoon…'),
-        `<div class="tb-right"><button class="btn btn-primary" onclick="__leadNew()">${svg(I.plus)}Nieuwe lead</button></div>`,
+        H.stableSearch('leads-act', 'Zoek naam / e-mail / telefoon…'),
+        `<div class="tb-right">
+          <button class="btn btn-sm" onclick="__leadSort('aangemaakt')" title="Sorteer op aanmaakdatum">Datum${sortIcon('aangemaakt')}</button>
+          <button class="btn btn-sm" onclick="__leadSort('score')" title="Sorteer op score">Score${sortIcon('score')}</button>
+          <button class="btn btn-primary" onclick="__leadNew()">${svg(I.plus)}Nieuwe lead</button>
+        </div>`,
       ])}
       <div class="sv-total">${_act.loading ? 'Laden…' : (total != null ? `${total} lead${total === 1 ? '' : 's'}` : '—')}</div>
       ${H.table(
-        [{ l: 'Naam' }, { l: 'Bron', cls: 'optional' }, { l: 'Traject', cls: 'optional' }, { l: 'Status' }, { l: 'Score', cls: 'r' }, { l: 'Aangemaakt', cls: 'r optional' }],
+        [{ l: 'Naam' }, { l: 'Herkomst' }, { l: 'Bron', cls: 'optional' }, { l: 'Traject', cls: 'optional' }, { l: 'Status' }, { l: 'Score', cls: 'r' }, { l: 'Aangemaakt', cls: 'r optional' }],
         items.map(l => {
           const [c, pl] = STATUS_TO_PILL[l.status] || ['neutral', l.status || '—'];
           return [
             `<div class="cell-main-wrap"><div class="av av-sm">${H.av(l.naam || '?')}</div><a href="javascript:__leadOpen('${l.id}')" class="ld-name">${esc(l.naam) || '—'}</a></div>`,
+            `<span class="pill pill-neutral">${esc(l.herkomst) || '—'}</span>`,
             `<span style="font-size:12.5px;color:var(--text-3)">${esc(l.bron) || '—'}</span>`,
             `<span style="font-size:12.5px;color:var(--text-3)">${esc(l.traject) || '—'}</span>`,
             H.pill(c, pl),
@@ -305,12 +385,22 @@
             </label>
           </div>
 
-          <label class="tk-field">
-            <span class="tk-field-l">Product <span class="tk-req">*</span></span>
-            <select class="ib-input" onchange="__leadCreateProductChange(this.value)"${dis}>
-              ${_cre.producten ? _cre.producten.map(p => `<option value="${esc(p.slug)}" ${f.productSlug === p.slug ? 'selected' : ''}>${esc(p.naam)} (${p.duur_dagen || '?'} dagen)</option>`).join('') : '<option>Laden…</option>'}
-            </select>
-          </label>
+          <div class="tk-field">
+            <span class="tk-field-l">Producten (minstens één) <span class="tk-req">*</span></span>
+            <div style="display:flex;flex-direction:column;gap:6px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface)">
+              ${_cre.producten
+                ? _cre.producten.map(p => {
+                    const checked = Array.isArray(f.productSlugs) && f.productSlugs.includes(p.slug);
+                    return `<label class="ld-check" style="cursor:pointer">
+                      <input type="checkbox" ${checked ? 'checked' : ''} onchange="__leadCreateProductToggle('${esc(p.slug)}')"${dis}>
+                      <span><b>${esc(p.naam)}</b> <span style="color:var(--text-3);font-size:11.5px">${p.duur_dagen || '?'} dagen · slug: ${esc(p.slug)}</span></span>
+                    </label>`;
+                  }).join('')
+                : `<div style="font-size:12px;color:var(--text-3)">Producten laden…</div>`
+              }
+            </div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:4px">Vink meerdere aan om b.v. mini-cursus + 7-daagse tegelijk toegang te geven (endpoint <code>/api/lead-handmatig-toevoegen</code> accepteert een <code>producten[]</code> array).</div>
+          </div>
 
           <div class="tk-field-row">
             <label class="tk-field">
@@ -352,7 +442,7 @@
   }
 
   function archiefParams() {
-    const q = (F('q', '') || '').trim();
+    const q = String(_arc.search || '').trim();
     const p = new URLSearchParams();
     if (q) p.set('q', q);
     p.set('archief', '1');
@@ -378,15 +468,18 @@
   function archiefListView() {
     const items = _arc.data?.items || [];
     const total = _arc.data?.total ?? null;
+    H.onSearch('leads-arc', (val) => { _arc.search = val || ''; fetchArchief(); });
+    if (H.getSearchValue('leads-arc') !== (_arc.search || '')) H.setSearchValue('leads-arc', _arc.search || '');
     return `${previewHeader('Gearchiveerd (soft-delete via verwijderd_op)', _arc)}
-      ${H.toolbar([H.search('Zoek naam / e-mail / telefoon…')])}
+      ${H.toolbar([H.stableSearch('leads-arc', 'Zoek naam / e-mail / telefoon…')])}
       <div class="sv-total">${_arc.loading ? 'Laden…' : (total != null ? `${total} gearchiveerd${total === 1 ? '' : 'e leads'}` : '—')}</div>
       ${H.table(
-        [{ l: 'Naam' }, { l: 'Bron', cls: 'optional' }, { l: 'Traject', cls: 'optional' }, { l: 'Laatste status', cls: 'optional' }, { l: 'Aangemaakt', cls: 'r optional' }],
+        [{ l: 'Naam' }, { l: 'Herkomst' }, { l: 'Bron', cls: 'optional' }, { l: 'Traject', cls: 'optional' }, { l: 'Laatste status', cls: 'optional' }, { l: 'Aangemaakt', cls: 'r optional' }],
         items.map(l => {
           const [c, pl] = STATUS_TO_PILL[l.status] || ['neutral', l.status || '—'];
           return [
             `<div class="cell-main-wrap"><div class="av av-sm">${H.av(l.naam || '?')}</div><a href="javascript:__leadOpen('${l.id}')" class="ld-name">${esc(l.naam) || '—'}</a></div>`,
+            `<span class="pill pill-neutral">${esc(l.herkomst) || '—'}</span>`,
             `<span style="font-size:12.5px;color:var(--text-3)">${esc(l.bron) || '—'}</span>`,
             `<span style="font-size:12.5px;color:var(--text-3)">${esc(l.traject) || '—'}</span>`,
             H.pill(c, pl),
@@ -525,21 +618,65 @@
           <div class="sv-card">
             <div class="sv-card-head">${svg(I.warn)}Meer acties</div>
             <div class="sv-card-body">
-              <div style="font-size:12.5px;color:var(--text-3);line-height:1.55">
-                Deze acties zitten nog in de oude detail-page:
-                <ul style="margin:8px 0 0 20px;padding:0;line-height:1.6">
-                  <li>Archiveer / herstel</li>
-                  <li>Omzetten naar klant</li>
-                  <li>Uitgebreid bewerken (velden buiten status/notitie/eigenaar)</li>
-                </ul>
-              </div>
-              <div style="margin-top:10px">
-                <a class="btn btn-sm" href="/modules/leads-detail.html?id=${encodeURIComponent(l.id || '')}" target="_blank">${svg(I.settings)}Open oude detail-page ↗</a>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                ${l.verwijderd_op
+                  ? `<button class="btn btn-sm" onclick="__leadAct2Open('restore')">${svg(I.repeat)}Herstel lead uit archief</button>`
+                  : `<button class="btn btn-sm" onclick="__leadAct2Open('archive')">${svg(I.x || I.warn)}Archiveer lead</button>`
+                }
+                ${(!l.verwijderd_op && l.status !== 'gewonnen')
+                  ? `<button class="btn btn-primary" onclick="__leadAct2Open('promote')">${svg(I.check)}Omzetten naar klant</button>`
+                  : (l.status === 'gewonnen' ? `<div style="font-size:11.5px;color:var(--text-3)">Al omgezet naar klant.</div>` : '')
+                }
+                <a class="btn btn-sm" href="/modules/leads-detail.html?id=${encodeURIComponent(l.id || '')}" target="_blank" style="margin-top:6px">${svg(I.settings)}Uitgebreid bewerken ↗</a>
+                <div style="font-size:11px;color:var(--text-3);line-height:1.45">
+                  Uitgebreid bewerken (naam / e-mail / telefoon / grants) via oude detail-page.
+                  Endpoint <code>/api/lead-bijwerken</code> — v2-full-modal komt in volgende ronde.
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>`;
+      </div>
+      ${_act2.open ? act2Modal(l) : ''}`;
+  }
+
+  // Ronde 4: bevestigings-modal voor archiveer / herstel / omzetten-klant.
+  function act2Modal(lead) {
+    const kind = _act2.kind;
+    const config = kind === 'archive' ? {
+      title: 'Lead archiveren?',
+      body: `De lead <b>${esc(lead.naam) || '—'}</b> wordt gearchiveerd (soft-delete: <code>verwijderd_op = now()</code>). LMS-grants blijven; auth-account blijft. Herstel is mogelijk via het Gearchiveerd-tabblad.`,
+      cta: 'Ja, archiveren',
+      variant: 'btn',
+    } : kind === 'restore' ? {
+      title: 'Lead herstellen?',
+      body: `De lead <b>${esc(lead.naam) || '—'}</b> wordt hersteld (<code>verwijderd_op = NULL</code>) en komt weer terug in de actieve lijst.`,
+      cta: 'Ja, herstellen',
+      variant: 'btn',
+    } : {
+      title: 'Lead omzetten naar klant?',
+      body: `De lead <b>${esc(lead.naam) || '—'}</b> wordt gepromoveerd naar <b>customers</b> (status wordt 'gewonnen', customer_id gekoppeld). Deze actie kan niet ongedaan gemaakt worden vanuit de v2-UI — alleen via de oude detail-page.`,
+      cta: 'Ja, omzetten naar klant',
+      variant: 'btn btn-primary',
+    };
+    const dis = _act2.submitting ? ' disabled' : '';
+    return `<div class="ld-modal-back" onclick="if(event.target===this)__leadAct2Close()">
+      <div class="ld-modal" style="max-width:520px">
+        <div class="ld-modal-head">
+          <div class="ld-modal-title">${config.title}</div>
+          <button class="icon-btn" onclick="__leadAct2Close()" title="Sluiten (Esc)">${svg(I.x || I.warn)}</button>
+        </div>
+        <div class="ld-modal-body">
+          <p style="font-size:13px;line-height:1.5;color:var(--text-2)">${config.body}</p>
+        </div>
+        <div class="ld-modal-foot">
+          <button class="btn" onclick="__leadAct2Close()"${dis}>Annuleren</button>
+          <button class="${config.variant}" onclick="__leadAct2Confirm()"${dis}>
+            ${_act2.submitting ? svg(I.clock || I.settings) + 'Bezig…' : svg(I.check || I.plus) + config.cta}
+          </button>
+        </div>
+      </div>
+    </div>`;
   }
 
   window.DFO.VIEWS['leads/Actief']       = actiefView;
