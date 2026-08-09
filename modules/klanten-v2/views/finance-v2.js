@@ -157,8 +157,242 @@
   }
 
   // ── FACTUREN ─────────────────────────────────────────────────────────
-  window.__finInvNew  = () => { window.location.href = '/modules/finance.html?tab=facturen&new=1'; };
+  // NEW (data-ronde 2): v2 create-invoice-modal met concept-only save.
+  // Boek/verzend routeren naar oude finance.html (te complex + destructief
+  // voor v2-ronde-2). Guard-patroon: gebruiker moet 'CONCEPT' intypen
+  // voordat opslaan-knop enabled wordt.
+  const _newInv = {
+    submitting: false,
+    entities: null, entLoading: false,
+    customers: [], custLoading: false, custQuery: '', custPickedName: '',
+    form: {
+      customer_id: '',
+      department_id: '',
+      purchase_order_number: '',
+      language: 'nl',
+      lines: [{ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }],
+    },
+    guardTyped: '',
+  };
+
+  window.__finInvNew  = () => setUrlParam('fn-invoice-new', '1');
+  window.__finInvNewClose = () => {
+    setUrlParam('fn-invoice-new', null);
+    // Reset form-state zodat volgende open schoon is.
+    _newInv.form = { customer_id: '', department_id: '', purchase_order_number: '', language: 'nl', lines: [{ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }] };
+    _newInv.custQuery = ''; _newInv.custPickedName = ''; _newInv.customers = []; _newInv.guardTyped = '';
+  };
   window.__finInvOpen = (tlId) => { if (tlId) window.location.href = '/modules/finance.html?tab=facturen&invoice=' + encodeURIComponent(tlId); };
+
+  function urlParam(k) { try { return new URLSearchParams(location.search).get(k); } catch { return null; } }
+  function setUrlParam(k, v) {
+    try {
+      const u = new URL(location.href);
+      if (v == null || v === '') u.searchParams.delete(k); else u.searchParams.set(k, v);
+      history.pushState({}, '', u.toString());
+    } catch (_) { /* noop */ }
+    if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+  }
+
+  async function tryPost(label, url, body, timeoutMs = 15000) {
+    if (!window.KV || !window.KV.authedFetch) throw new Error('KV.authedFetch niet beschikbaar');
+    const resp = await Promise.race([
+      window.KV.authedFetch(url, { method: 'POST', body: JSON.stringify(body) }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), timeoutMs)),
+    ]);
+    const text = await resp.text();
+    const json = text ? JSON.parse(text) : null;
+    if (!resp.ok) { console.warn('[finance-v2] post fail:', label, '→', json?.error || resp.status); throw new Error((json && (json.error || json.message)) || 'HTTP ' + resp.status); }
+    return json;
+  }
+
+  async function fetchEntities() {
+    if (_newInv.entities || _newInv.entLoading) return;
+    _newInv.entLoading = true;
+    const data = await tryFetch('company-entities', '/api/company-entities');
+    _newInv.entLoading = false;
+    _newInv.entities = data?.items || [];
+    if (_newInv.entities.length && !_newInv.form.department_id) {
+      _newInv.form.department_id = _newInv.entities[0].tl_department_id;
+    }
+    window.DFO.render();
+  }
+
+  let _custSearchDeb = null;
+  window.__finCustSearch = (q) => {
+    _newInv.custQuery = q;
+    _newInv.custPickedName = ''; _newInv.form.customer_id = '';
+    if (_custSearchDeb) clearTimeout(_custSearchDeb);
+    _custSearchDeb = setTimeout(async () => {
+      if (!q || q.length < 2) { _newInv.customers = []; window.DFO.render(); return; }
+      _newInv.custLoading = true;
+      window.DFO.render();
+      const data = await tryFetch('sales-customers-search', '/api/sales-customers?search=' + encodeURIComponent(q));
+      _newInv.customers = data?.items || data?.customers || [];
+      _newInv.custLoading = false;
+      window.DFO.render();
+    }, 300);
+  };
+  window.__finCustPick = (id, name) => {
+    _newInv.form.customer_id = id;
+    _newInv.custPickedName = name;
+    _newInv.customers = [];
+    _newInv.custQuery = name;
+    window.DFO.render();
+  };
+
+  window.__finInvFormInput = (field, val) => { _newInv.form[field] = val; };
+  window.__finLineInput = (idx, field, val) => {
+    if (!_newInv.form.lines[idx]) return;
+    _newInv.form.lines[idx][field] = (field === 'quantity' || field === 'unit_price_excl' || field === 'vat_percentage') ? Number(val) || 0 : val;
+  };
+  window.__finLineAdd = () => {
+    _newInv.form.lines.push({ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 });
+    window.DFO.render();
+  };
+  window.__finLineRemove = (idx) => {
+    if (_newInv.form.lines.length <= 1) return;
+    _newInv.form.lines.splice(idx, 1);
+    window.DFO.render();
+  };
+  window.__finGuardInput = (v) => { _newInv.guardTyped = v; window.DFO.render(); };
+
+  window.__finInvSubmitDraft = async () => {
+    if (_newInv.submitting) return;
+    const f = _newInv.form;
+    if (!f.customer_id) { alert('Kies een klant.'); return; }
+    if (!f.department_id) { alert('Kies een entiteit.'); return; }
+    if (!f.lines.length || !f.lines.every(l => l.description && l.unit_price_excl != null)) {
+      alert('Elke regel heeft omschrijving + bedrag nodig.');
+      return;
+    }
+    if (_newInv.guardTyped !== 'CONCEPT') {
+      alert('Typ "CONCEPT" in het bevestigingsveld om op te slaan.');
+      return;
+    }
+    _newInv.submitting = true;
+    window.DFO.render();
+    try {
+      const result = await tryPost('finance-invoice-create', '/api/finance-invoice-create', {
+        customer_id: f.customer_id,
+        department_id: f.department_id,
+        purchase_order_number: f.purchase_order_number || null,
+        language: f.language || 'nl',
+        lines: f.lines,
+        action: 'draft',
+      });
+      _newInv.submitting = false;
+      _newInv.guardTyped = '';
+      window.__finInvNewClose();
+      _inv.data = null; _dash.data = null;
+      window.DFO.render();
+      alert('Concept-factuur aangemaakt' + (result?.tl_invoice_id ? ' (TL: ' + result.tl_invoice_id + ')' : '') + '. Boeken/verzenden gebeurt in het oude scherm.');
+    } catch (e) {
+      _newInv.submitting = false;
+      window.DFO.render();
+      alert('Aanmaak mislukt: ' + (e?.message || 'onbekende fout'));
+    }
+  };
+
+  function invoiceCreateModal() {
+    // Trigger entities-fetch bij eerste render.
+    if (!_newInv.entities && !_newInv.entLoading) queueMicrotask(fetchEntities);
+    const f = _newInv.form;
+    const dis = _newInv.submitting ? ' disabled' : '';
+    const guardOk = _newInv.guardTyped === 'CONCEPT';
+    const lineTotal = (l) => (Number(l.quantity) || 0) * (Number(l.unit_price_excl) || 0);
+    const totalExcl = f.lines.reduce((a, l) => a + lineTotal(l), 0);
+    const totalIncl = f.lines.reduce((a, l) => a + lineTotal(l) * (1 + (Number(l.vat_percentage) || 0) / 100), 0);
+    return `<div class="fn-modal-back" onclick="if(event.target===this)__finInvNewClose()">
+      <div class="fn-modal">
+        <div class="fn-modal-head">
+          <div class="fn-modal-title">Nieuwe factuur (concept)</div>
+          <button class="icon-btn" onclick="__finInvNewClose()" title="Sluiten (Esc)">${svg(I.x || I.warn)}</button>
+        </div>
+        <div class="fn-modal-body">
+
+          <label class="tk-field">
+            <span class="tk-field-l">Klant <span class="tk-req">*</span></span>
+            <div class="fn-cust-picker">
+              <input class="ib-input" placeholder="Typ naam of e-mail (min. 2 tekens)…" value="${esc(_newInv.custQuery)}" oninput="__finCustSearch(this.value)"${dis}>
+              ${_newInv.customers.length ? `<div class="fn-cust-dd">
+                ${_newInv.customers.slice(0, 8).map(c => `
+                  <div class="fn-cust-dd-item" onclick="__finCustPick('${c.id}', ${JSON.stringify(esc(c.name || c.display_name || '?'))})">
+                    <div class="fn-cust-dd-item-name">${esc(c.name || c.display_name || '?')}</div>
+                    <div class="fn-cust-dd-item-email">${esc(c.email || c.company_name || '')}</div>
+                  </div>
+                `).join('')}
+              </div>` : ''}
+              ${_newInv.custLoading ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:4px">Zoeken…</div>` : ''}
+              ${_newInv.form.customer_id ? `<div style="font-size:11.5px;color:var(--brand);margin-top:4px">✓ ${esc(_newInv.custPickedName)} gekozen</div>` : ''}
+            </div>
+          </label>
+
+          <div class="tk-field-row">
+            <label class="tk-field">
+              <span class="tk-field-l">Entiteit <span class="tk-req">*</span></span>
+              <select class="ib-input" onchange="__finInvFormInput('department_id', this.value)"${dis}>
+                ${_newInv.entities ? _newInv.entities.map(e => `<option value="${e.tl_department_id}" ${f.department_id === e.tl_department_id ? 'selected' : ''}>${esc(e.label || e.name)}</option>`).join('') : '<option>Laden…</option>'}
+              </select>
+            </label>
+            <label class="tk-field">
+              <span class="tk-field-l">PO-nummer (optioneel)</span>
+              <input class="ib-input" placeholder="bv. PO-2026-0042" value="${esc(f.purchase_order_number)}" oninput="__finInvFormInput('purchase_order_number', this.value)"${dis}>
+            </label>
+            <label class="tk-field">
+              <span class="tk-field-l">Taal</span>
+              <select class="ib-input" onchange="__finInvFormInput('language', this.value)"${dis}>
+                <option value="nl" ${f.language === 'nl' ? 'selected' : ''}>Nederlands</option>
+                <option value="en" ${f.language === 'en' ? 'selected' : ''}>Engels</option>
+                <option value="fr" ${f.language === 'fr' ? 'selected' : ''}>Frans</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="tk-field">
+            <span class="tk-field-l">Regels <span class="tk-req">*</span></span>
+            <div class="fn-lines">
+              ${f.lines.map((l, i) => `
+                <div class="fn-line-row">
+                  <input placeholder="Omschrijving" value="${esc(l.description)}" oninput="__finLineInput(${i}, 'description', this.value)"${dis}>
+                  <input type="number" step="1" min="0" placeholder="Aantal" value="${l.quantity}" oninput="__finLineInput(${i}, 'quantity', this.value)"${dis}>
+                  <input type="number" step="0.01" min="0" placeholder="Prijs excl." value="${l.unit_price_excl}" oninput="__finLineInput(${i}, 'unit_price_excl', this.value)"${dis}>
+                  <input type="number" step="1" min="0" max="100" placeholder="BTW %" value="${l.vat_percentage}" oninput="__finLineInput(${i}, 'vat_percentage', this.value)"${dis}>
+                  <button class="fn-line-remove" onclick="__finLineRemove(${i})" title="Regel verwijderen" ${f.lines.length <= 1 ? 'disabled' : ''}>×</button>
+                </div>
+              `).join('')}
+              <button class="fn-line-add" onclick="__finLineAdd()"${dis}>+ Regel toevoegen</button>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:14px;font-size:12.5px;color:var(--text-2);margin-top:8px">
+              <span>Totaal excl. BTW: <b class="mono">${eur(totalExcl)}</b></span>
+              <span>Totaal incl. BTW: <b class="mono">${eur(totalIncl)}</b></span>
+            </div>
+          </div>
+
+          <div class="fn-guard">
+            ${svg(I.warn)}
+            <span style="flex:1">Deze factuur wordt aangemaakt als <b>concept</b> in Teamleader. Boeken + verzenden gebeurt in het oude scherm (na review). Typ <b>CONCEPT</b> om op te slaan:</span>
+            <input class="fn-guard-input" placeholder="typ hier CONCEPT" value="${esc(_newInv.guardTyped)}" oninput="__finGuardInput(this.value)"${dis}>
+          </div>
+        </div>
+        <div class="fn-modal-foot">
+          <button class="btn" onclick="__finInvNewClose()"${dis}>Annuleren</button>
+          <button class="btn btn-primary" onclick="__finInvSubmitDraft()" ${dis || (!guardOk ? 'disabled' : '')}>
+            ${_newInv.submitting ? svg(I.clock || I.settings) + 'Bezig…' : svg(I.check || I.plus) + 'Concept opslaan'}
+          </button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // Esc-key sluit modal.
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (urlParam('fn-invoice-new') === '1') { e.preventDefault(); window.__finInvNewClose(); }
+  });
+  window.addEventListener('popstate', () => {
+    if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+  });
 
   function invoicesParams() {
     const st = F('fin-inv-st', 'open');
@@ -222,7 +456,8 @@
           ];
         })
       )}
-      ${!items.length && !_inv.loading ? `<div class="sv-empty">${_inv.error || 'Geen facturen met deze filters.'}</div>` : ''}`;
+      ${!items.length && !_inv.loading ? `<div class="sv-empty">${_inv.error || 'Geen facturen met deze filters.'}</div>` : ''}
+      ${urlParam('fn-invoice-new') === '1' ? invoiceCreateModal() : ''}`;
   }
 
   // ── ABONNEMENTEN ─────────────────────────────────────────────────────
