@@ -256,12 +256,37 @@ function wireTopbarSearch() {
 // naar de legacy-URL — zo blijft navigatie werken voor het live-team tijdens
 // de gefaseerde uitrol.
 const V2_MODULES = new Set(['klanten']);
+// V2_ACTIVE_ALLOWLIST = welke v2-view-registraties (via KV_V2_ADD) daadwerkelijk
+// active mogen worden. Een view-file kan zichzelf aanmelden, maar zolang zijn
+// id niet in deze allowlist zit blijft de klik-in-nav via het legacy-vangnet
+// (LEGACY_URLS) naar de oude module gaan. Zo kunnen we module-code
+// meemergen zonder dat het live-team er per ongeluk in belandt.
+//
+// Elke module wordt PAS toegevoegd nadat zijn data-ronde compleet is en de
+// nieuwe v2-view alle taken kan (dus geen half-af scherm voor het team).
+// Dashboard heeft z'n data-ronde al gehad (#1210) en staat aan; klanten is
+// de originele v2-basis.
+const V2_ACTIVE_ALLOWLIST = new Set(['klanten', 'dashboard']);
 // Publieke API voor view-files (dashboard-v2.js etc) om zichzelf te
-// registreren als v2-native (voorkomt legacy-redirect).
-window.KV_V2_ADD = (id) => { if (id && typeof id === 'string') V2_MODULES.add(id); };
+// registreren als v2-native. KV_V2_ADD is nu allowlist-gated: als de id
+// niet in V2_ACTIVE_ALLOWLIST zit wordt de registratie stil overgeslagen
+// (view-code blijft geladen, VIEWS-registratie blijft actief, maar klik
+// in nav valt terug op legacy — dormant modus).
+window.KV_V2_ADD = (id) => {
+  if (!id || typeof id !== 'string') return;
+  if (!V2_ACTIVE_ALLOWLIST.has(id)) {
+    console.debug('[klanten-v2] view registered but dormant:', id, '(niet in V2_ACTIVE_ALLOWLIST)');
+    return;
+  }
+  V2_MODULES.add(id);
+};
 // Consumeer eventuele pending-registraties die vóór dit script laadden.
+// Zelfde allowlist-gate toepassen zodat pending-array niet stiekem bypasst.
 if (Array.isArray(window.KV_V2_PENDING)) {
-  window.KV_V2_PENDING.forEach((id) => V2_MODULES.add(id));
+  window.KV_V2_PENDING.forEach((id) => {
+    if (V2_ACTIVE_ALLOWLIST.has(id)) V2_MODULES.add(id);
+    else console.debug('[klanten-v2] pending-view dormant:', id);
+  });
   window.KV_V2_PENDING = null;
 }
 
@@ -304,13 +329,43 @@ function wireLegacyFallback() {
     // Module met ext-link (bv. lms) — laat DFO's eigen open-in-new-tab flow doen
     const mod = (window.DFO.MODS || []).find((m) => m.id === id);
     if (mod && mod.ext) return orig.call(this, id);
-    if (legacyUrl) { window.location.href = legacyUrl; return; }
+    if (legacyUrl) {
+      console.debug('[klanten-v2] legacy-nav', id, '→', legacyUrl);
+      window.location.href = legacyUrl;
+      return;
+    }
     // Geen legacy-URL bekend (nieuwsbrief/binnenkort/studenten mentor-only zonder legacy):
     // val terug op DFO.goMod → toont genericView-placeholder in shell.
     return orig.call(this, id);
   };
   wrapped.__kvLegacyWrapped = true;
   window.DFO.goMod = wrapped;
+}
+
+// Belt-and-suspenders — event-delegation click-catcher op document dat
+// legacy-modules direct via window.location.href navigeert, i.p.v. via de
+// wrap-flow. Voorkomt dat een edge-case waar de wrap niet aanslaat (bv.
+// inline-handler resolvet een ander DFO-object dan de gewrapte, of timing-
+// race bij render) tot een 'dode klik' leidt.
+// useCapture=true → vuurt vóór de inline-onclick handler.
+function wireLegacyNavClickCatcher() {
+  if (window.__kvNavCatcherWired) return;
+  window.__kvNavCatcherWired = true;
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest && e.target.closest('#nav button.nav-item');
+    if (!btn) return;
+    // Extract module-id uit onclick-attr ("DFO.goMod('instellingen')").
+    const oc = btn.getAttribute('onclick') || '';
+    const m = oc.match(/DFO\.goMod\('([^']+)'\)/);
+    if (!m) return;
+    const id = m[1];
+    if (V2_MODULES.has(id)) return; // v2-native active — laat shell-flow doen
+    const legacyUrl = LEGACY_URLS[id];
+    if (!legacyUrl) return;         // geen legacy-URL — laat placeholder tonen
+    e.preventDefault(); e.stopPropagation();
+    console.debug('[klanten-v2] nav-catcher legacy →', id, '→', legacyUrl);
+    window.location.href = legacyUrl;
+  }, true);
 }
 
 // ── Rol-bewuste topbar-actieknoppen ─────────────────────────────────────────
@@ -418,6 +473,7 @@ function wireTopbarActionsToShell() {
   // Wrap DFO.goMod met legacy-vangnet (redirect naar oude module-URL voor
   // nog-niet-herbouwde v2-modules) + wrap re-render van topbar-actiebalk.
   wireLegacyFallback();
+  wireLegacyNavClickCatcher();
   wireTopbarActionsToShell();
 
   window.DFO.setRoles(shellRoles);
