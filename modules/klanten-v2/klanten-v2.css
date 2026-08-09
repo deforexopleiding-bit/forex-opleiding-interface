@@ -1148,6 +1148,46 @@
    Preview-badge in brand, rol-bewuste topbar-actieknoppen, en polish
    voor de placeholder-view (genericView) van niet-Klanten-modules. */
 
+/* ═══ Prototype-utility-classes ═══
+   Deze 3 komen uit systeemprototype-v45.html maar staan nog niet in de
+   design-system (app-shell.css). Ze zijn generiek genoeg voor hergebruik
+   door meerdere v2-views (studenten/inbox/taken/etc.) dus hier scoped
+   in klanten-v2.css i.p.v. per-view geïnlined. */
+.mono, .num, .money {
+  font-family: 'IBM Plex Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.015em;
+}
+.inp {
+  width: 100%;
+  max-width: 380px;
+  padding: 7px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13.5px;
+  outline: none;
+  transition: all .14s;
+  font-family: inherit;
+}
+.inp:focus {
+  border-color: var(--m);
+  box-shadow: 0 0 0 3px var(--m-soft);
+}
+textarea.inp {
+  max-width: 520px;
+  min-height: 90px;
+  resize: vertical;
+  line-height: 1.55;
+}
+.cl-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+
 /* Sidebar-logo: vervangt de blauwe "F"-brand-mark. Wordmark PNG (1650×934)
    in /img/ met light/dark-swap. Links uitgelijnd. Geen subtekst.
    KRITIEK: display niet op de gedeelde `.kv-brand-logo img`-selector zetten —
