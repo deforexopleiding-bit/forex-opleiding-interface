@@ -34,12 +34,81 @@
   const H = window.KV_V2.helpers;
 
   // ── State per tab ─────────────────────────────────────────────────────
+  // Pager-state per tab: page (1-based) + page_size (default 50 op alle
+  // lijst-tabs; user kan wisselen 25/100/500/1000).
   const _dash = { loading: false, error: null, data: null, seq: 0, period: '' };
-  const _inv  = { loading: false, error: null, data: null, seq: 0, params: '' };
-  const _sub  = { loading: false, error: null, data: null, seq: 0, params: '' };
-  const _cn   = { loading: false, error: null, data: null, seq: 0, params: '' };
-  const _bnk  = { loading: false, error: null, bal: null, tx: null, seq: 0, params: '' };
-  const _mrr  = { loading: false, error: null, data: null, seq: 0, params: '' };
+  const _inv  = { loading: false, error: null, data: null, seq: 0, params: '', page: 1, pageSize: 50, search: '', dateFrom: '', dateTo: '' };
+  const _sub  = { loading: false, error: null, data: null, seq: 0, params: '', page: 1, pageSize: 50, search: '', sortBy: 'end_date', sortDir: 'asc', filterExpiring: false };
+  const _cn   = { loading: false, error: null, data: null, seq: 0, params: '', page: 1, pageSize: 50, search: '' };
+  const _bnk  = { loading: false, error: null, bal: null, tx: null, seq: 0, params: '', page: 1, pageSize: 100, search: '', dateFrom: '', dateTo: '' };
+  const _mrr  = { loading: false, error: null, data: null, subs: null, seq: 0, params: '' };
+
+  // ── SHARED HELPERS: uncontrolled search + pagination ─────────────────
+  // Cursor-bug fix: gebruik `defaultValue` (initial mount) i.p.v. `value`
+  // + eigen dispatcher via oninput met debounce → geen re-render tijdens
+  // tikken, cursor blijft staan. State wordt bijgehouden op _<tab>.search
+  // en pas na debounce triggert refetch.
+  const _searchDeb = {};
+  function fnSearch(tabState, placeholder, refetchFn) {
+    const stateKey = tabState === _inv ? 'inv' : tabState === _sub ? 'sub' : tabState === _cn ? 'cn' : tabState === _bnk ? 'bnk' : 'x';
+    // Global handler die per tab de state update + debounced refetch.
+    window['__fnSearch_' + stateKey] = (val) => {
+      tabState.search = val;
+      if (_searchDeb[stateKey]) clearTimeout(_searchDeb[stateKey]);
+      _searchDeb[stateKey] = setTimeout(() => {
+        tabState.page = 1;
+        refetchFn();
+      }, 350);
+    };
+    return `<div class="tb-search"><input type="search" placeholder="${placeholder}" defaultValue="${(tabState.search || '').replace(/"/g, '&quot;')}" oninput="__fnSearch_${stateKey}(this.value)"></div>`;
+  }
+
+  // Pager-component. Zelfde signatuur voor alle tabs. total = server-side
+  // aantal (null → hide pager). refetchFn wordt aangeroepen bij page-
+  // of size-wissel.
+  function fnPager(tabState, total, refetchFn) {
+    const key = tabState === _inv ? 'inv' : tabState === _sub ? 'sub' : tabState === _cn ? 'cn' : tabState === _bnk ? 'bnk' : 'x';
+    window['__fnPage_' + key] = (delta) => {
+      const totalPages = Math.max(1, Math.ceil((total || 0) / tabState.pageSize));
+      const next = Math.max(1, Math.min(totalPages, tabState.page + delta));
+      if (next === tabState.page) return;
+      tabState.page = next;
+      refetchFn();
+    };
+    window['__fnSize_' + key] = (val) => {
+      tabState.pageSize = Number(val) || 50;
+      tabState.page = 1;
+      refetchFn();
+    };
+    if (total == null) return '';
+    const totalPages = Math.max(1, Math.ceil(total / tabState.pageSize));
+    const from = (tabState.page - 1) * tabState.pageSize + 1;
+    const to = Math.min(total, tabState.page * tabState.pageSize);
+    return `<div class="kv-pager">
+      <div class="kv-pager-info">${total === 0 ? '0 resultaten' : `${from}–${to} van ${num(total)}`}</div>
+      <div class="kv-pager-ctl">
+        <select class="kv-pager-size" onchange="__fnSize_${key}(this.value)">
+          ${[25, 50, 100, 500, 1000].map(n => `<option value="${n}" ${tabState.pageSize === n ? 'selected' : ''}>${n} per pagina</option>`).join('')}
+        </select>
+        <button class="kv-pager-btn" onclick="__fnPage_${key}(-1)" ${tabState.page <= 1 ? 'disabled' : ''}>‹ Vorige</button>
+        <span class="kv-pager-page">${tabState.page} / ${totalPages}</span>
+        <button class="kv-pager-btn" onclick="__fnPage_${key}(1)" ${tabState.page >= totalPages ? 'disabled' : ''}>Volgende ›</button>
+      </div>
+    </div>`;
+  }
+
+  // Uncontrolled date-input met debounce (voor Bank + Facturen date-range).
+  const _dateDeb = {};
+  function fnDate(tabState, field, refetchFn) {
+    const key = tabState === _inv ? 'inv' : tabState === _bnk ? 'bnk' : 'x';
+    const globalKey = '__fnDate_' + key + '_' + field;
+    window[globalKey] = (val) => {
+      tabState[field] = val;
+      if (_dateDeb[globalKey]) clearTimeout(_dateDeb[globalKey]);
+      _dateDeb[globalKey] = setTimeout(() => { tabState.page = 1; refetchFn(); }, 250);
+    };
+    return `<input type="date" class="fn-date-input" defaultValue="${tabState[field] || ''}" oninput="${globalKey}(this.value)">`;
+  }
 
   async function tryFetch(label, url, timeoutMs = 8000) {
     try {
@@ -396,11 +465,13 @@
 
   function invoicesParams() {
     const st = F('fin-inv-st', 'open');
-    const q = (F('q', '') || '').trim();
     const p = new URLSearchParams();
     if (st && st !== 'all') p.set('status', st);
-    if (q) p.set('q', q);
-    p.set('page', '1'); p.set('page_size', '50');
+    if (_inv.search) p.set('q', _inv.search);
+    if (_inv.dateFrom) p.set('period_start', _inv.dateFrom);
+    if (_inv.dateTo)   p.set('period_end',   _inv.dateTo);
+    p.set('page', String(_inv.page || 1));
+    p.set('page_size', String(_inv.pageSize || 50));
     return p.toString();
   }
   async function fetchInvoices() {
@@ -433,14 +504,15 @@
         H.chips('fin-inv-st', [
           { l: 'Alle',           v: 'all' },
           { l: 'Open',           v: 'open' },
-          { l: 'Vervallen',      v: 'overdue' },
+          { l: 'Te laat',        v: 'overdue' },
           { l: 'Betaald',        v: 'paid' },
           { l: 'Gecrediteerd',   v: 'credited' },
         ], st),
-        H.search('Zoek factuur-nr / klant…'),
+        fnSearch(_inv, 'Zoek factuur-nr / klant…', fetchInvoices),
+        `<div class="fn-daterange">Van ${fnDate(_inv, 'dateFrom', fetchInvoices)} tot ${fnDate(_inv, 'dateTo', fetchInvoices)}</div>`,
         `<div class="tb-right"><button class="btn btn-primary" onclick="__finInvNew()">${svg(I.plus)}Nieuwe factuur</button></div>`,
       ])}
-      <div class="sv-total">${_inv.loading ? 'Laden…' : (total != null ? `${total} factuur${total === 1 ? '' : 'en'}` : '—')}</div>
+      ${fnPager(_inv, total, fetchInvoices)}
       ${H.table(
         [{ l: 'Factuur-nr' }, { l: 'Klant' }, { l: 'Uitgifte', cls: 'r optional' }, { l: 'Vervaldatum', cls: 'r optional' }, { l: 'Totaal', cls: 'r' }, { l: 'Open', cls: 'r' }, { l: 'Status' }],
         items.map(v => {
@@ -465,9 +537,16 @@
     const st = F('fin-sub-st', 'active');
     const p = new URLSearchParams();
     if (st && st !== 'all') p.set('status', st);
-    p.set('page', '1'); p.set('page_size', '100');
+    p.set('page', String(_sub.page || 1));
+    p.set('page_size', String(_sub.pageSize || 50));
     return p.toString();
   }
+  window.__finSubSort = (by) => {
+    if (_sub.sortBy === by) _sub.sortDir = _sub.sortDir === 'asc' ? 'desc' : 'asc';
+    else { _sub.sortBy = by; _sub.sortDir = 'asc'; }
+    window.DFO.render();
+  };
+  window.__finSubExpiring = () => { _sub.filterExpiring = !_sub.filterExpiring; window.DFO.render(); };
   async function fetchSubs() {
     const wanted = subsParams();
     if (_sub.loading && _sub.params === wanted) return;
@@ -481,17 +560,61 @@
     window.DFO.render();
   }
 
+  // Client-side MRR helper: gebruik s.mrr; fallback op per_term_incl /
+  // cycle-maanden als mrr ontbreekt. Handelt 'active' status af.
+  const CYCLE_TO_MONTHS = { per_month: 1, per_2_months: 2, per_quarter: 3, per_6_months: 6, per_year: 12 };
+  function subMonthlyIncl(s) {
+    if (s.mrr != null && !isNaN(Number(s.mrr))) return Number(s.mrr);
+    const cycleM = CYCLE_TO_MONTHS[s.billing_cycle] || 1;
+    const perTerm = Number(s.per_term_incl) || Number(s.per_term_excl) || 0;
+    return perTerm / cycleM;
+  }
+
   function subsView() {
     const st = F('fin-sub-st', 'active');
     if (!_sub.loading && (!_sub.data || _sub.params !== subsParams())) queueMicrotask(fetchSubs);
-    const items = _sub.data?.items || [];
+    let items = (_sub.data?.items || []).slice();
     const total = _sub.data?.total ?? null;
-    const mrrSum = items.filter(s => (s.status || '') === 'active').reduce((a, s) => a + (Number(s.mrr) || 0), 0);
+
+    // Client-side search (over customer-name + description + entity).
+    if (_sub.search) {
+      const q = _sub.search.toLowerCase();
+      items = items.filter(s => {
+        const name = (s.customer?.name || s.customer_name || '').toLowerCase();
+        const desc = (s.description || '').toLowerCase();
+        const ent = (s.entity || '').toLowerCase();
+        return name.includes(q) || desc.includes(q) || ent.includes(q);
+      });
+    }
+    // Filter: loopt af binnen 30 dagen (active + end_date <= today+30).
+    if (_sub.filterExpiring) {
+      const now = Date.now();
+      const thr = now + 30 * 86400000;
+      items = items.filter(s => {
+        if (s.status !== 'active') return false;
+        if (!s.end_date) return false;
+        const t = new Date(s.end_date).getTime();
+        return !isNaN(t) && t >= now && t <= thr;
+      });
+    }
+    // Client-side sort op start_date of end_date.
+    if (_sub.sortBy === 'start_date' || _sub.sortBy === 'end_date') {
+      items.sort((a, b) => {
+        const av = String(a[_sub.sortBy] || '');
+        const bv = String(b[_sub.sortBy] || '');
+        return _sub.sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      });
+    }
+
+    const activeItems = items.filter(s => (s.status || '') === 'active');
+    const mrrSum = activeItems.reduce((a, s) => a + subMonthlyIncl(s), 0);
+    const sortIcon = (col) => _sub.sortBy === col ? (_sub.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+
     return `${previewHeader('Abonnementen · via sales-subscriptions', _sub)}
       ${H.kpis([
-        { c: 'emerald', icon: I.check,  label: 'Actief in view',  val: num(items.filter(s => s.status === 'active').length), hi: 1 },
-        { c: 'violet',  icon: I.trend,  label: 'MRR (view · actieve)', val: eur0(mrrSum), hi: 1, sub: 'som van .mrr op actieve rijen' },
-        { c: 'blue',    icon: I.repeat, label: 'Totaal in view',  val: num(items.length), sub: total != null ? `van ${num(total)} totaal` : '—' },
+        { c: 'emerald', icon: I.check,  label: 'Actief (view + filters)',  val: num(activeItems.length), hi: 1 },
+        { c: 'violet',  icon: I.trend,  label: 'MRR incl. BTW (view)',     val: eur0(mrrSum), hi: 1, sub: 'som van maandelijkse waarde' },
+        { c: 'blue',    icon: I.repeat, label: 'Totaal in view',           val: num(items.length), sub: total != null ? `van ${num(total)} totaal` : '—' },
       ])}
       ${H.toolbar([
         H.chips('fin-sub-st', [
@@ -500,10 +623,16 @@
           { l: 'Gepauzeerd', v: 'paused' },
           { l: 'Beëindigd',  v: 'cancelled' },
         ], st),
+        fnSearch(_sub, 'Zoek klant / beschrijving / entiteit…', fetchSubs),
+        `<div class="tb-right">
+          <button class="btn ${_sub.filterExpiring ? 'btn-primary' : ''}" onclick="__finSubExpiring()">${svg(I.warn)}Loopt af &lt;30d</button>
+          <button class="btn btn-sm" onclick="__finSubSort('start_date')" title="Sorteer op startdatum">Start${sortIcon('start_date')}</button>
+          <button class="btn btn-sm" onclick="__finSubSort('end_date')" title="Sorteer op einddatum">Eind${sortIcon('end_date')}</button>
+        </div>`,
       ])}
-      <div class="sv-total">${_sub.loading ? 'Laden…' : (total != null ? `${total} abonnement${total === 1 ? '' : 'en'}` : '—')}</div>
+      ${fnPager(_sub, total, fetchSubs)}
       ${H.table(
-        [{ l: 'Klant' }, { l: 'Beschrijving', cls: 'optional' }, { l: 'Entiteit', cls: 'optional' }, { l: 'Per termijn', cls: 'r' }, { l: 'MRR', cls: 'r' }, { l: 'Termijn', cls: 'optional' }, { l: 'Status' }],
+        [{ l: 'Klant' }, { l: 'Beschrijving', cls: 'optional' }, { l: 'Entiteit', cls: 'optional' }, { l: 'Per termijn', cls: 'r' }, { l: 'Maand incl.', cls: 'r' }, { l: 'Start', cls: 'r optional' }, { l: 'Eind', cls: 'r optional' }, { l: 'Status' }],
         items.map(s => {
           const cName = s.customer?.name || s.customer_name || '—';
           const [c, l] = SUB_STATUS_TO_PILL[s.status] || ['neutral', s.status || '—'];
@@ -512,8 +641,9 @@
             `<span style="font-size:12.5px;color:var(--text-3)">${s.description || '—'}</span>`,
             `<span style="font-size:12.5px;color:var(--text-3)">${s.entity || '—'}</span>`,
             `<span class="mono">${eur(s.per_term_incl)}</span>`,
-            `<span class="mono">${eur0(s.mrr)}</span>`,
-            `<span style="font-size:12.5px;color:var(--text-3)">${s.billing_cycle || '—'}</span>`,
+            `<span class="mono">${eur0(subMonthlyIncl(s))}</span>`,
+            `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(s.start_date)}</span>`,
+            `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(s.end_date)}</span>`,
             H.pill(c, l),
           ];
         })
@@ -523,10 +653,10 @@
 
   // ── CREDITNOTA'S ─────────────────────────────────────────────────────
   function cnParams() {
-    const q = (F('q', '') || '').trim();
     const p = new URLSearchParams();
-    if (q) p.set('q', q);
-    p.set('page', '1'); p.set('page_size', '50');
+    if (_cn.search) p.set('q', _cn.search);
+    p.set('page', String(_cn.page || 1));
+    p.set('page_size', String(_cn.pageSize || 50));
     return p.toString();
   }
   async function fetchCn() {
@@ -553,9 +683,9 @@
         { c: 'orange',  icon: I.euro,  label: 'Som bedragen',         val: eur0(kpi.sum_amount), hi: 1 },
       ])}
       ${H.toolbar([
-        H.search('Zoek creditnota-nr / klant…'),
+        fnSearch(_cn, 'Zoek creditnota-nr / klant…', fetchCn),
       ])}
-      <div class="sv-total">${_cn.loading ? 'Laden…' : (total != null ? `${total} creditnota${total === 1 ? '' : "'s"}` : '—')}</div>
+      ${fnPager(_cn, total, fetchCn)}
       ${H.table(
         [{ l: 'Creditnota-nr' }, { l: 'Klant' }, { l: 'Bij factuur', cls: 'optional' }, { l: 'Datum', cls: 'r optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Status' }],
         items.map(cn => [
@@ -573,13 +703,27 @@
   // ── BANK ─────────────────────────────────────────────────────────────
   function bankParams() {
     const dir = F('fin-bank-dir', 'all');
-    const q = (F('q', '') || '').trim();
     const p = new URLSearchParams();
     if (dir && dir !== 'all') p.set('direction', dir);
-    if (q) p.set('q', q);
-    p.set('limit', '100'); p.set('offset', '0');
+    if (_bnk.search) p.set('q', _bnk.search);
+    if (_bnk.dateFrom) p.set('from', _bnk.dateFrom);
+    if (_bnk.dateTo)   p.set('to',   _bnk.dateTo);
+    const offset = ((_bnk.page || 1) - 1) * (_bnk.pageSize || 100);
+    p.set('limit',  String(_bnk.pageSize || 100));
+    p.set('offset', String(offset));
     return p.toString();
   }
+  // Bank date-range preset chips (Dag/Week/Maand/Jaar/Custom).
+  window.__finBankRange = (preset) => {
+    const now = new Date(); const to = todayIso();
+    if (preset === 'day')   { _bnk.dateFrom = to; _bnk.dateTo = to; }
+    else if (preset === 'week')  { const f = new Date(now); f.setDate(f.getDate() - 6); _bnk.dateFrom = isoDay(f); _bnk.dateTo = to; }
+    else if (preset === 'month') { _bnk.dateFrom = monthStart(); _bnk.dateTo = to; }
+    else if (preset === 'year')  { _bnk.dateFrom = isoDay(new Date(now.getFullYear(), 0, 1)); _bnk.dateTo = to; }
+    else if (preset === 'clear') { _bnk.dateFrom = ''; _bnk.dateTo = ''; }
+    _bnk.page = 1;
+    fetchBank();
+  };
   async function fetchBank() {
     const wanted = bankParams();
     if (_bnk.loading && _bnk.params === wanted) return;
@@ -614,8 +758,18 @@
           { l: 'Inkomend',  v: 'in' },
           { l: 'Uitgaand',  v: 'out' },
         ], dir),
-        H.search('Zoek omschrijving / tegenpartij…'),
+        fnSearch(_bnk, 'Zoek omschrijving / tegenpartij…', fetchBank),
+        `<div class="fn-daterange">
+          <button class="btn btn-sm" onclick="__finBankRange('day')">Dag</button>
+          <button class="btn btn-sm" onclick="__finBankRange('week')">Week</button>
+          <button class="btn btn-sm" onclick="__finBankRange('month')">Maand</button>
+          <button class="btn btn-sm" onclick="__finBankRange('year')">Jaar</button>
+          ${fnDate(_bnk, 'dateFrom', fetchBank)}
+          ${fnDate(_bnk, 'dateTo', fetchBank)}
+          ${(_bnk.dateFrom || _bnk.dateTo) ? `<button class="btn btn-sm" onclick="__finBankRange('clear')">✕</button>` : ''}
+        </div>`,
       ])}
+      ${fnPager(_bnk, _bnk.tx?.total ?? null, fetchBank)}
       ${H.table(
         [{ l: 'Boekdatum', cls: 'r' }, { l: 'Tegenpartij' }, { l: 'Omschrijving', cls: 'optional' }, { l: 'IBAN', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }],
         items.map(t => [
@@ -649,11 +803,45 @@
     const seq = ++_mrr.seq;
     _mrr.loading = true; _mrr.error = null; _mrr.params = wanted;
     window.DFO.render();
-    const data = await tryFetch('super-admin-omzet', '/api/super-admin-omzet?' + wanted);
+    // Parallel: super-admin-omzet (historisch, per-product breakdown) +
+    // sales-subscriptions-list (voor maandelijkse recurring incl-BTW
+    // berekening — MRR per maand = som van elke actieve sub's
+    // per_term_incl / cycle_months).
+    const [data, subs] = await Promise.all([
+      tryFetch('super-admin-omzet',        '/api/super-admin-omzet?' + wanted),
+      tryFetch('sales-subscriptions-list', '/api/sales-subscriptions-list?status=active&page=1&page_size=500'),
+    ]);
     if (seq !== _mrr.seq) return;
-    _mrr.data = data; _mrr.loading = false;
-    if (!data) _mrr.error = 'Kon omzet-rapport niet laden';
+    _mrr.data = data; _mrr.subs = subs; _mrr.loading = false;
+    if (!data && !subs) _mrr.error = 'Kon omzet-rapport niet laden';
+    if (subs && subs.total > 500) console.warn('[finance-v2] active-subs > 500 — MRR berekend op eerste 500 rijen');
     window.DFO.render();
+  }
+
+  // Bereken maandelijkse RECURRING omzet incl. BTW uit active subscriptions.
+  // Voor de komende 12 maanden: hoeveel geld komt er per maand binnen op
+  // basis van huidige actieve subs (per_term_incl / cycle_months, alleen
+  // subs waarvan start_date <= maand-eind EN (end_date null OR >= maand-begin)).
+  function recurringPerMonth() {
+    const subs = (_mrr.subs?.items || []).filter(s => s.status === 'active');
+    if (!subs.length) return { rows: [], currentMonthly: 0 };
+    const now = new Date();
+    const rows = [];
+    for (let i = 0; i < 12; i++) {
+      const mStart = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      const mEnd   = new Date(now.getFullYear(), now.getMonth() + i + 1, 0);
+      const active = subs.filter(s => {
+        const sd = s.start_date ? new Date(s.start_date) : null;
+        const ed = s.end_date   ? new Date(s.end_date)   : null;
+        if (sd && sd > mEnd) return false;
+        if (ed && ed < mStart) return false;
+        return true;
+      });
+      const monthly = active.reduce((a, s) => a + subMonthlyIncl(s), 0);
+      const label = mStart.toLocaleDateString('nl-NL', { month: 'short', year: 'numeric' });
+      rows.push({ label, month: mStart.toISOString().slice(0, 7), monthly, count: active.length });
+    }
+    return { rows, currentMonthly: rows[0]?.monthly || 0 };
   }
 
   function mrrView() {
@@ -663,12 +851,15 @@
     const trend = Array.isArray(_mrr.data?.trend) ? _mrr.data.trend : [];
     const perProduct = Array.isArray(_mrr.data?.per_product) ? _mrr.data.per_product : [];
     const trendMax = Math.max(1, ...trend.map(t => Number(t.totaal_incl_btw ?? t.total ?? t.revenue) || 0));
-    return `${previewHeader('Omzet & MRR · via super-admin-omzet', _mrr)}
+    const rec = recurringPerMonth();
+    const recMax = Math.max(1, ...rec.rows.map(r => r.monthly));
+
+    return `${previewHeader('Omzet & MRR · super-admin-omzet + subs', _mrr)}
       ${H.kpis([
-        { c: 'emerald', icon: I.euro,   label: 'Losse verkopen (incl. BTW)', val: eur0(k.los_incl_btw),      hi: 1 },
-        { c: 'violet',  icon: I.repeat, label: 'Abo MRR (incl. BTW)',        val: eur0(k.abo_mrr_incl_btw),  hi: 1 },
-        { c: 'blue',    icon: I.trend,  label: 'Totaal periode (incl. BTW)', val: eur0(k.totaal_incl_btw),   hi: 1 },
-        { c: 'orange',  icon: I.doc,    label: 'Aantal deals',               val: num(k.deal_count) },
+        { c: 'violet',  icon: I.repeat, label: 'Huidige MRR incl. BTW',   val: eur0(rec.currentMonthly),   hi: 1, sub: `${num(rec.rows[0]?.count || 0)} actieve subs` },
+        { c: 'emerald', icon: I.euro,   label: 'Losse verkopen (incl. BTW)', val: eur0(k.los_incl_btw),    hi: 1, sub: 'in gekozen periode' },
+        { c: 'blue',    icon: I.trend,  label: 'Totaal periode (incl. BTW)', val: eur0(k.totaal_incl_btw), hi: 1 },
+        { c: 'orange',  icon: I.doc,    label: 'Aantal deals in periode',    val: num(k.deal_count) },
       ])}
       ${H.toolbar([
         H.chips('fin-mrr-p', [
@@ -679,18 +870,35 @@
         ], label),
       ])}
       <div class="sv-grid">
-        <div class="sv-card">
-          <div class="sv-card-head">${svg(I.doc)}Per product</div>
+        <div class="sv-card sv-card-wide">
+          <div class="sv-card-head">${svg(I.repeat)}Maandelijkse recurring omzet · komende 12 maanden · incl. BTW</div>
           <div class="sv-card-body">
-            ${perProduct.length ? perProduct.slice(0, 8).map(p => `
-              <div class="sv-row"><span>${p.product_name || p.product || p.name || '—'} <span class="sv-row-sub">${num(p.count)}×</span></span><b>${eur0(p.totaal_incl_btw ?? p.total ?? p.revenue)}</b></div>
-            `).join('') : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen per-product data.'}</div>`}
+            ${rec.rows.length ? `
+              <div class="sv-trend" style="height:180px">${rec.rows.map(r => {
+                const h = Math.max(3, Math.round(r.monthly / recMax * 100));
+                return `<div class="sv-trend-col" title="${r.label} · ${eur0(r.monthly)} · ${num(r.count)} subs">
+                  <div class="sv-trend-bar" style="height:${h}%;background:linear-gradient(180deg, var(--violet, var(--brand)), color-mix(in srgb, var(--violet, var(--brand)) 55%, transparent))"></div>
+                  <div class="sv-trend-lbl">${r.label}</div>
+                </div>`;
+              }).join('')}</div>
+              <div class="mrr-months">
+                ${rec.rows.map(r => `<div class="mrr-month-row"><span>${r.label}</span><span class="sv-row-sub">${num(r.count)} subs</span><b>${eur0(r.monthly)}</b></div>`).join('')}
+              </div>
+            ` : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen actieve subscriptions.'}</div>`}
           </div>
         </div>
-        <div class="sv-card sv-card-wide">
-          <div class="sv-card-head">${svg(I.trend)}Omzet-trend · incl. BTW</div>
+        <div class="sv-card">
+          <div class="sv-card-head">${svg(I.doc)}Per product (uit super-admin-omzet, periode)</div>
           <div class="sv-card-body">
-            ${trend.length ? `<div class="sv-trend">${trend.map(t => {
+            ${perProduct.length ? perProduct.slice(0, 10).map(p => `
+              <div class="sv-row"><span>${p.product_name || p.product || p.name || '—'} <span class="sv-row-sub">${num(p.count)}×</span></span><b>${eur0(p.totaal_incl_btw ?? p.total ?? p.revenue)}</b></div>
+            `).join('') : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen per-product data in periode.'}</div>`}
+          </div>
+        </div>
+        <div class="sv-card">
+          <div class="sv-card-head">${svg(I.trend)}Historische omzet-trend (super-admin-omzet)</div>
+          <div class="sv-card-body">
+            ${trend.length ? `<div class="sv-trend" style="height:140px">${trend.map(t => {
               const rev = Number(t.totaal_incl_btw ?? t.total ?? t.revenue) || 0;
               const h = Math.max(3, Math.round(rev / trendMax * 100));
               return `<div class="sv-trend-col" title="${t.period || t.label || t.date || ''} · ${eur0(rev)}">
