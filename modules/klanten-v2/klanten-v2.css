@@ -2094,4 +2094,87 @@ textarea.inp { max-width: 520px; min-height: 90px; resize: vertical; line-height
 .tk-comment-body { padding-left: 0; font-size: 13px; line-height: 1.5; color: var(--text-1); }
 .tk-comment-form-foot { display: flex; justify-content: flex-end; margin-top: 8px; }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   Verfijnronde 3 — .ib-input + Leads create-modal + shared modal-styling
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Base form-input (was ontbrekend — root cause modal-styling). */
+.ib-input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.4;
+  transition: border-color .12s, box-shadow .12s;
+}
+.ib-input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 18%, transparent);
+}
+.ib-input:disabled { opacity: .55; cursor: not-allowed; background: var(--surface-2); }
+.ib-input::placeholder { color: var(--text-3); }
+textarea.ib-input { resize: vertical; min-height: 80px; line-height: 1.5; }
+select.ib-input {
+  appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+
+/* Modal-overlay (Leads gebruikt ld-*; alias voor visuele pariteit met tk-*) */
+.ld-modal-back {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,.45);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 6vh 16px 16px;
+  overflow-y: auto;
+  animation: ld-fade .12s ease-out;
+}
+@keyframes ld-fade { from { opacity: 0; } to { opacity: 1; } }
+.ld-modal {
+  width: 100%; max-width: 640px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 12px; overflow: hidden;
+  box-shadow: 0 24px 48px rgba(0,0,0,.28);
+}
+.ld-modal-head { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.ld-modal-title { font-size: 16px; font-weight: 600; flex: 1; }
+.ld-modal-body { padding: 16px 18px; max-height: 74vh; overflow-y: auto; }
+.ld-modal-foot { display: flex; gap: 10px; align-items: center; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--line); background: var(--surface-2); }
+.ld-modal-foot .btn:first-child { margin-right: auto; }
+
+/* Checkbox-inline (Welkomstmail toggle) */
+.ld-check {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface-2); cursor: pointer;
+  font-size: 13px; color: var(--text-1);
+  margin-top: 8px;
+}
+.ld-check input[type="checkbox"] {
+  width: 16px; height: 16px; margin: 0;
+  accent-color: var(--brand);
+}
+
+/* Hint-blok voor uitleg in modals */
+.ld-hint {
+  padding: 10px 12px; margin-top: 12px;
+  background: var(--surface-2); border-radius: 8px;
+  font-size: 12px; color: var(--text-3); line-height: 1.5;
+}
+.ld-hint b { color: var(--text-2); }
+.ld-hint a { color: var(--brand); text-decoration: none; }
+.ld-hint a:hover { text-decoration: underline; }
+
+/* Field-row + field (voor de v2-modal form-layout, ook door tickets gebruikt) */
+.tk-field-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+@media (max-width: 720px) { .tk-field-row { grid-template-columns: 1fr; } }
+.tk-req { color: var(--warn, var(--orange)); }
+
 

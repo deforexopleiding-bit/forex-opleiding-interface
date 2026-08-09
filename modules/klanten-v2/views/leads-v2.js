@@ -26,6 +26,11 @@
   const _act = { loading: false, error: null, data: null, stats: null, seq: 0, params: '' };
   const _arc = { loading: false, error: null, data: null, seq: 0, params: '' };
   const _det = { loading: false, error: null, data: null, seq: 0, id: null, saving: false, notitieDraft: '' };
+  const _cre = {
+    submitting: false,
+    producten: null, prodLoading: false,
+    form: { voornaam: '', achternaam: '', email: '', telefoon: '', productSlug: '', van: '', tot: '', herkomst: 'handmatig', welkomstmail: false },
+  };
 
   async function tryFetch(label, url, timeoutMs = 8000) {
     try {
@@ -82,9 +87,79 @@
     if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
   }
 
-  window.__leadNew  = () => { window.location.href = '/modules/leads.html?new=1'; };
+  window.__leadNew  = () => setUrlParam('lead-new', '1');
+  window.__leadNewClose = () => {
+    setUrlParam('lead-new', null);
+    _cre.form = { voornaam: '', achternaam: '', email: '', telefoon: '', productSlug: '', van: '', tot: '', herkomst: 'handmatig', welkomstmail: false };
+  };
   window.__leadOpen = (id) => { if (id) setUrlParam('lead', id); };
   window.__leadBack = () => setUrlParam('lead', null);
+
+  // Producten voor create-modal (lazy).
+  async function fetchProducten() {
+    if (_cre.producten || _cre.prodLoading) return;
+    _cre.prodLoading = true;
+    const data = await tryFetch('lms-producten-actief', '/api/lms-producten-actief');
+    _cre.prodLoading = false;
+    _cre.producten = data?.producten || [];
+    // Default select eerste product + auto-vul van/tot (today → today + duur_dagen).
+    if (_cre.producten.length && !_cre.form.productSlug) {
+      const p = _cre.producten[0];
+      _cre.form.productSlug = p.slug;
+      const now = new Date();
+      const iso = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10);
+      _cre.form.van = iso(now);
+      const tot = new Date(now); tot.setDate(tot.getDate() + (Number(p.duur_dagen) || 365));
+      _cre.form.tot = iso(tot);
+    }
+    window.DFO.render();
+  }
+
+  window.__leadCreateInput = (field, val) => { _cre.form[field] = val; };
+  window.__leadCreateProductChange = (slug) => {
+    _cre.form.productSlug = slug;
+    const p = (_cre.producten || []).find(x => x.slug === slug);
+    if (p) {
+      const now = new Date();
+      const iso = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10);
+      _cre.form.van = iso(now);
+      const tot = new Date(now); tot.setDate(tot.getDate() + (Number(p.duur_dagen) || 365));
+      _cre.form.tot = iso(tot);
+    }
+    window.DFO.render();
+  };
+  window.__leadCreateWelkomToggle = () => { _cre.form.welkomstmail = !_cre.form.welkomstmail; window.DFO.render(); };
+
+  window.__leadCreateSubmit = async () => {
+    if (_cre.submitting) return;
+    const f = _cre.form;
+    if (!f.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email)) { alert('Geldig e-mailadres vereist.'); return; }
+    if (!f.productSlug) { alert('Kies een product.'); return; }
+    if (!f.van || !f.tot) { alert('Begin- en einddatum vereist.'); return; }
+    if (f.van > f.tot) { alert('Einddatum moet na begindatum liggen.'); return; }
+    _cre.submitting = true;
+    window.DFO.render();
+    try {
+      await tryPost('lead-handmatig-toevoegen', '/api/lead-handmatig-toevoegen', {
+        voornaam: f.voornaam || null,
+        achternaam: f.achternaam || null,
+        email: f.email.trim().toLowerCase(),
+        telefoon: f.telefoon || null,
+        herkomst: f.herkomst || 'handmatig',
+        producten: [{ slug: f.productSlug, van: f.van, tot: f.tot }],
+        welkomstmail: !!f.welkomstmail,
+      });
+      _cre.submitting = false;
+      _cre.form = { voornaam: '', achternaam: '', email: '', telefoon: '', productSlug: '', van: '', tot: '', herkomst: 'handmatig', welkomstmail: false };
+      _act.data = null; _arc.data = null;
+      setUrlParam('lead-new', null);
+      alert('Lead aangemaakt' + (f.welkomstmail ? ' (welkomstmail verstuurd)' : '') + '.');
+    } catch (e) {
+      _cre.submitting = false;
+      window.DFO.render();
+      alert('Kon lead niet aanmaken: ' + (e?.message || 'onbekende fout'));
+    }
+  };
 
   window.__leadNotitieInput = (v) => { _det.notitieDraft = v; };
 
@@ -191,11 +266,89 @@
       ${!items.length && !_act.loading ? `<div class="sv-empty">${_act.error || 'Geen leads met deze filters.'}</div>` : ''}`;
   }
 
+  function createModal() {
+    if (!_cre.producten && !_cre.prodLoading) queueMicrotask(fetchProducten);
+    const f = _cre.form;
+    const dis = _cre.submitting ? ' disabled' : '';
+    return `<div class="ld-modal-back" onclick="if(event.target===this)__leadNewClose()">
+      <div class="ld-modal">
+        <div class="ld-modal-head">
+          <div class="ld-modal-title">Nieuwe lead</div>
+          <button class="icon-btn" onclick="__leadNewClose()" title="Sluiten (Esc)">${svg(I.x || I.warn)}</button>
+        </div>
+        <div class="ld-modal-body">
+          <div class="tk-field-row">
+            <label class="tk-field">
+              <span class="tk-field-l">Voornaam</span>
+              <input class="ib-input" placeholder="Bijv. Jan" defaultValue="${esc(f.voornaam)}" oninput="__leadCreateInput('voornaam', this.value)"${dis}>
+            </label>
+            <label class="tk-field">
+              <span class="tk-field-l">Achternaam</span>
+              <input class="ib-input" placeholder="Bijv. Jansen" defaultValue="${esc(f.achternaam)}" oninput="__leadCreateInput('achternaam', this.value)"${dis}>
+            </label>
+            <label class="tk-field">
+              <span class="tk-field-l">Herkomst</span>
+              <select class="ib-input" onchange="__leadCreateInput('herkomst', this.value)"${dis}>
+                ${['handmatig', 'meta', 'instagram', 'webinar', 'referral', 'onbekend'].map(h => `<option value="${h}" ${f.herkomst === h ? 'selected' : ''}>${h[0].toUpperCase() + h.slice(1)}</option>`).join('')}
+              </select>
+            </label>
+          </div>
+
+          <div class="tk-field-row">
+            <label class="tk-field">
+              <span class="tk-field-l">E-mail <span class="tk-req">*</span></span>
+              <input class="ib-input" type="email" placeholder="lead@voorbeeld.nl" defaultValue="${esc(f.email)}" oninput="__leadCreateInput('email', this.value)"${dis}>
+            </label>
+            <label class="tk-field">
+              <span class="tk-field-l">Telefoon (optioneel)</span>
+              <input class="ib-input" placeholder="+31 6 12 34 56 78" defaultValue="${esc(f.telefoon)}" oninput="__leadCreateInput('telefoon', this.value)"${dis}>
+            </label>
+          </div>
+
+          <label class="tk-field">
+            <span class="tk-field-l">Product <span class="tk-req">*</span></span>
+            <select class="ib-input" onchange="__leadCreateProductChange(this.value)"${dis}>
+              ${_cre.producten ? _cre.producten.map(p => `<option value="${esc(p.slug)}" ${f.productSlug === p.slug ? 'selected' : ''}>${esc(p.naam)} (${p.duur_dagen || '?'} dagen)</option>`).join('') : '<option>Laden…</option>'}
+            </select>
+          </label>
+
+          <div class="tk-field-row">
+            <label class="tk-field">
+              <span class="tk-field-l">Toegang van</span>
+              <input class="ib-input" type="date" defaultValue="${f.van}" oninput="__leadCreateInput('van', this.value)"${dis}>
+            </label>
+            <label class="tk-field">
+              <span class="tk-field-l">Toegang tot</span>
+              <input class="ib-input" type="date" defaultValue="${f.tot}" oninput="__leadCreateInput('tot', this.value)"${dis}>
+            </label>
+          </div>
+
+          <label class="ld-check">
+            <input type="checkbox" ${f.welkomstmail ? 'checked' : ''} onchange="__leadCreateWelkomToggle()"${dis}>
+            <span>Welkomstmail direct versturen (met inloglink)</span>
+          </label>
+
+          <div class="ld-hint">
+            Deze lead wordt aangemaakt met bron <b>${esc(f.herkomst)}</b>. Er wordt automatisch een account gemaakt en toegang tot het gekozen product verleend. Voor meer producten of custom grants: gebruik <a href="/modules/leads.html?new=1" target="_blank">de oude wizard</a>.
+          </div>
+        </div>
+        <div class="ld-modal-foot">
+          <button class="btn" onclick="__leadNewClose()"${dis}>Annuleren</button>
+          <button class="btn btn-primary" onclick="__leadCreateSubmit()"${dis}>
+            ${_cre.submitting ? svg(I.clock || I.settings) + 'Bezig…' : svg(I.check || I.plus) + 'Lead aanmaken'}
+          </button>
+        </div>
+      </div>
+    </div>`;
+  }
+
   function actiefView() {
     if (urlParam('lead')) return detailView();
     if (_det.id != null) { _det.id = null; _det.data = null; _det.error = null; _det.notitieDraft = ''; }
     if (!_act.loading && (!_act.data || _act.params !== actiefParams())) queueMicrotask(fetchActief);
-    return actiefListView();
+    const list = actiefListView();
+    const modal = urlParam('lead-new') === '1' ? createModal() : '';
+    return list + modal;
   }
 
   function archiefParams() {
@@ -248,7 +401,9 @@
     if (urlParam('lead')) return detailView();
     if (_det.id != null) { _det.id = null; _det.data = null; _det.error = null; _det.notitieDraft = ''; }
     if (!_arc.loading && (!_arc.data || _arc.params !== archiefParams())) queueMicrotask(fetchArchief);
-    return archiefListView();
+    const list = archiefListView();
+    const modal = urlParam('lead-new') === '1' ? createModal() : '';
+    return list + modal;
   }
 
   async function fetchDetail(id) {
@@ -395,7 +550,8 @@
   });
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (urlParam('lead')) { e.preventDefault(); window.__leadBack(); }
+    if (urlParam('lead-new') === '1') { e.preventDefault(); window.__leadNewClose(); }
+    else if (urlParam('lead'))        { e.preventDefault(); window.__leadBack(); }
   });
 
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('leads');
