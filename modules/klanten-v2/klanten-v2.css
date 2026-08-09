@@ -2052,4 +2052,46 @@ textarea.inp { max-width: 520px; min-height: 90px; resize: vertical; line-height
   font-family: inherit; font-size: 12.5px;
 }
 
+/* Leads-v2 data-ronde 2 — detail-view + subtielere naam-styling.
+   Hergebruikt de tk-det-* / tk-comment- klassen die in Tickets-ronde-2
+   worden geïntroduceerd. Voor deze branch zetten we ze allemaal apart
+   erin zodat leads onafhankelijk werkt bij review. */
+
+.ld-name {
+  color: var(--text-1);
+  font-weight: 400;
+  text-decoration: none;
+  font-size: 13.5px;
+}
+.ld-name:hover { color: var(--brand); text-decoration: underline; }
+
+.ld-antw { padding: 10px 2px; border-bottom: 1px solid var(--line-subtle, var(--line)); }
+.ld-antw:last-of-type { border-bottom: 0; }
+.ld-antw-q { font-size: 12px; color: var(--text-3); font-weight: 500; margin-bottom: 3px; }
+.ld-antw-a { font-size: 13px; color: var(--text-1); line-height: 1.5; }
+
+/* Detail-view klassen (hergebruikt in Tickets + Leads). */
+.tk-det-head {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 0 16px; border-bottom: 1px solid var(--line);
+  margin-bottom: 14px;
+}
+.tk-det-title { font-size: 18px; font-weight: 600; flex: 1; min-width: 200px; }
+.tk-det-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tk-det-grid {
+  display: grid; grid-template-columns: 1fr 320px; gap: 16px; align-items: start;
+}
+@media (max-width: 900px) { .tk-det-grid { grid-template-columns: 1fr; } }
+.tk-det-main { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.tk-det-side { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+
+.tk-textarea { min-height: 96px; resize: vertical; font-family: inherit; }
+.tk-comment { padding: 10px 2px 12px; border-bottom: 1px solid var(--line-subtle, var(--line)); }
+.tk-comment:last-of-type { border-bottom: 0; }
+.tk-comment-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.tk-comment-who { font-size: 13px; font-weight: 600; flex: 1; }
+.tk-comment-time { font-size: 11.5px; color: var(--text-3); }
+.tk-comment-body { padding-left: 0; font-size: 13px; line-height: 1.5; color: var(--text-1); }
+.tk-comment-form-foot { display: flex; justify-content: flex-end; margin-top: 8px; }
+
 
