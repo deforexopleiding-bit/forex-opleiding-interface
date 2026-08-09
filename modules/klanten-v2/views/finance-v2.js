@@ -35,32 +35,43 @@
 
   // ── State per tab ─────────────────────────────────────────────────────
   // Pager-state per tab: page (1-based) + page_size (default 50 op alle
-  // lijst-tabs; user kan wisselen 25/100/500/1000).
-  const _dash = { loading: false, error: null, data: null, seq: 0, period: '' };
+  // lijst-tabs; user kan wisselen 25/50/100/500/1000).
+  // _dash krijgt bal (camt-balance) parallel gefetcht zodat de Bank-saldo
+  // KPI op het dashboard dezelfde bron gebruikt als de Bank-tab (dashboard-
+  // counts.bankBalans is 0 wanneer aggregateActiveBankBalances geen active
+  // rekeningen vindt; camt-statements zijn de correcte bron).
+  // _sub krijgt mrrReport (sales-mrr-report) parallel zodat de MRR-KPI
+  // altijd de billing_cycle-correcte som toont, ongeacht welke page van de
+  // subs-lijst geladen is.
+  const _dash = { loading: false, error: null, data: null, bal: null, seq: 0, period: '' };
   const _inv  = { loading: false, error: null, data: null, seq: 0, params: '', page: 1, pageSize: 50, search: '', dateFrom: '', dateTo: '' };
-  const _sub  = { loading: false, error: null, data: null, seq: 0, params: '', page: 1, pageSize: 50, search: '', sortBy: 'end_date', sortDir: 'asc', filterExpiring: false };
+  const _sub  = { loading: false, error: null, data: null, mrrReport: null, seq: 0, params: '', page: 1, pageSize: 50, search: '', sortBy: 'end_date', sortDir: 'asc', filterExpiring: false };
   const _cn   = { loading: false, error: null, data: null, seq: 0, params: '', page: 1, pageSize: 50, search: '' };
   const _bnk  = { loading: false, error: null, bal: null, tx: null, seq: 0, params: '', page: 1, pageSize: 100, search: '', dateFrom: '', dateTo: '' };
-  const _mrr  = { loading: false, error: null, data: null, subs: null, seq: 0, params: '' };
+  const _mrr  = { loading: false, error: null, report: null, seq: 0, params: '' };
 
-  // ── SHARED HELPERS: uncontrolled search + pagination ─────────────────
-  // Cursor-bug fix: gebruik `defaultValue` (initial mount) i.p.v. `value`
-  // + eigen dispatcher via oninput met debounce → geen re-render tijdens
-  // tikken, cursor blijft staan. State wordt bijgehouden op _<tab>.search
-  // en pas na debounce triggert refetch.
-  const _searchDeb = {};
+  // ── SHARED HELPERS: stable-search + pagination ───────────────────────
+  // Ronde 4: search-input via H.stableSearch (DOM-node persistent tussen
+  // renders, cursor + focus behouden). H.onSearch registreert een debounced
+  // handler die tabState updatet + refetch triggert. Handler wordt bij
+  // elke view-call opnieuw geregistreerd (idempotent Map.set) zodat de
+  // closure altijd de meest recente tabState-reference vasthoudt.
+  function fnSearchKey(tabState) {
+    return 'fin-' + (tabState === _inv ? 'inv' : tabState === _sub ? 'sub' : tabState === _cn ? 'cn' : tabState === _bnk ? 'bnk' : 'x');
+  }
   function fnSearch(tabState, placeholder, refetchFn) {
-    const stateKey = tabState === _inv ? 'inv' : tabState === _sub ? 'sub' : tabState === _cn ? 'cn' : tabState === _bnk ? 'bnk' : 'x';
-    // Global handler die per tab de state update + debounced refetch.
-    window['__fnSearch_' + stateKey] = (val) => {
-      tabState.search = val;
-      if (_searchDeb[stateKey]) clearTimeout(_searchDeb[stateKey]);
-      _searchDeb[stateKey] = setTimeout(() => {
-        tabState.page = 1;
-        refetchFn();
-      }, 350);
-    };
-    return `<div class="tb-search"><input type="search" placeholder="${placeholder}" defaultValue="${(tabState.search || '').replace(/"/g, '&quot;')}" oninput="__fnSearch_${stateKey}(this.value)"></div>`;
+    const key = fnSearchKey(tabState);
+    // Sync shared registry met tabState.search zodat een vers-gemounte
+    // input de juiste initiele waarde krijgt (bv na tab-terug-switch).
+    if (H.getSearchValue(key) !== (tabState.search || '')) {
+      H.setSearchValue(key, tabState.search || '');
+    }
+    H.onSearch(key, (val) => {
+      tabState.search = val || '';
+      tabState.page = 1;
+      try { refetchFn(); } catch (e) { console.warn('[finance-v2] refetch onSearch:', e?.message); }
+    }, { debounceMs: 280 });
+    return H.stableSearch(key, placeholder);
   }
 
   // Pager-component. Zelfde signatuur voor alle tabs. total = server-side
@@ -98,6 +109,9 @@
   }
 
   // Uncontrolled date-input met debounce (voor Bank + Facturen date-range).
+  // Ronde 4: value= (echte HTML-attribuut, defaultValue was React-ism); +
+  // onchange (native date-picker vuurt geen input tot commit op sommige
+  // browsers). Cursor-issue speelt niet bij <input type=date>.
   const _dateDeb = {};
   function fnDate(tabState, field, refetchFn) {
     const key = tabState === _inv ? 'inv' : tabState === _bnk ? 'bnk' : 'x';
@@ -107,7 +121,8 @@
       if (_dateDeb[globalKey]) clearTimeout(_dateDeb[globalKey]);
       _dateDeb[globalKey] = setTimeout(() => { tabState.page = 1; refetchFn(); }, 250);
     };
-    return `<input type="date" class="fn-date-input" defaultValue="${tabState[field] || ''}" oninput="${globalKey}(this.value)">`;
+    const val = String(tabState[field] || '').replace(/"/g, '&quot;');
+    return `<input type="date" class="fn-date-input" value="${val}" onchange="${globalKey}(this.value)">`;
   }
 
   async function tryFetch(label, url, timeoutMs = 8000) {
@@ -167,9 +182,16 @@
     const seq = ++_dash.seq;
     _dash.loading = true; _dash.error = null; _dash.period = period;
     window.DFO.render();
-    const data = await tryFetch('finance-dashboard-counts', `/api/finance-dashboard-counts?period=${period}`);
+    // Parallel: dashboard-counts + camt-balance. Ronde 4: dashboard-counts.
+    // bankBalans komt uit aggregateActiveBankBalances (retourneert 0 als
+    // geen active bank_accounts). CAMT-balance is de correcte bank-truth
+    // (zelfde bron als Bank-tab).
+    const [data, bal] = await Promise.all([
+      tryFetch('finance-dashboard-counts', `/api/finance-dashboard-counts?period=${period}`),
+      tryFetch('finance-bank-camt-balance', '/api/finance-bank-camt-balance'),
+    ]);
     if (seq !== _dash.seq) return;
-    _dash.data = data; _dash.loading = false;
+    _dash.data = data; _dash.bal = bal; _dash.loading = false;
     if (!data) _dash.error = 'Kon dashboard-counts niet laden';
     window.DFO.render();
   }
@@ -179,12 +201,21 @@
     const wantedPeriod = PERIOD_LABEL_TO_PARAM[label] || 'month';
     if (!_dash.loading && (!_dash.data || _dash.period !== wantedPeriod)) queueMicrotask(fetchDashboard);
     const d = _dash.data || {};
+    // Bank-saldo bron-preferentie: camt-balance (Bank-tab bron), fallback
+    // op dashboard-counts.bankBalans (legacy). value in EUR (niet cents).
+    const bal = _dash.bal || {};
+    const bankValue = bal.balance_cents != null
+      ? bal.balance_cents / 100
+      : (d.bankBalans?.value != null ? d.bankBalans.value : null);
+    const bankSub = bal.as_of_date
+      ? `t/m ${dstr(bal.as_of_date)}`
+      : (d.bankBalans?.accountCount ? `${d.bankBalans.accountCount} rekeningen` : '—');
     // Beschermde-zone-velden NIET renderen: actieveArrangements,
     // openVerifyPayment, openEscalations, joostStats, conversieWanbetalersFlow.
     return `${previewHeader('Dashboard', _dash)}
       ${H.kpis([
         { c: 'orange',  icon: I.euro,  label: 'Totaal openstaand',    val: eur0(d.totaalOpenstaand),          hi: 1, sub: `${num(d.openFacturen)} open · ${num(d.overdueFacturen)} vervallen` },
-        { c: 'blue',    icon: I.euro,  label: 'Bank-saldo',           val: eurC(d.bankBalans?.value),         hi: 1, sub: d.bankBalans?.accountCount ? `${d.bankBalans.accountCount} rekeningen` : '—' },
+        { c: 'blue',    icon: I.euro,  label: 'Bank-saldo',           val: bankValue == null ? '—' : eur0(bankValue), hi: 1, sub: bankSub },
         { c: 'emerald', icon: I.trend, label: 'MRR (subscriptions)',  val: eur0(d.mrrSubscriptions),          hi: 1, sub: 'actieve abonnementen' },
         { c: 'violet',  icon: I.repeat,label: 'Cashflow verwacht 30d',val: eur0(d.cashflowVerwacht30d),              sub: 'op basis van looptijden' },
       ])}
@@ -208,11 +239,11 @@
           </div>
         </div>
         <div class="sv-card">
-          <div class="sv-card-head">${svg(I.euro)}Bank</div>
+          <div class="sv-card-head">${svg(I.euro)}Bank · CAMT</div>
           <div class="sv-card-body">
-            <div class="sv-row"><span>Actueel saldo</span><b>${eurC(d.bankBalans?.value)}</b></div>
-            <div class="sv-row"><span>Aantal rekeningen</span><b>${num(d.bankBalans?.accountCount)}</b></div>
-            <div class="sv-row"><span>Bijgewerkt</span><b>${d.bankBalans?.fetchedAt ? dstr(d.bankBalans.fetchedAt) : '—'}</b></div>
+            <div class="sv-row"><span>Actueel saldo</span><b>${bankValue == null ? '—' : eur0(bankValue)}</b></div>
+            <div class="sv-row"><span>Peildatum</span><b>${bal.as_of_date ? dstr(bal.as_of_date) : '—'}</b></div>
+            <div class="sv-row"><span>Bron</span><b>${bal.source ? 'CAMT · ' + num(bal.num_statements) + ' statements' : '—'}</b></div>
           </div>
         </div>
         <div class="sv-card">
@@ -244,7 +275,19 @@
     guardTyped: '',
   };
 
-  window.__finInvNew  = () => setUrlParam('fn-invoice-new', '1');
+  // Ronde 4: extra logging + fallback-render zodat click echt opent, ook
+  // als een edge-case setUrlParam faalt (history-lock, iframe, etc).
+  window.__finInvNew  = () => {
+    console.info('[finance-v2] __finInvNew clicked → open modal');
+    try {
+      setUrlParam('fn-invoice-new', '1');
+    } catch (e) {
+      console.warn('[finance-v2] setUrlParam failed, forcing render:', e?.message);
+    }
+    // Belt-and-suspenders: forceer render zodat modal-slot gerendered wordt
+    // ook als history.pushState (bv onder file://) een throw geeft.
+    if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+  };
   window.__finInvNewClose = () => {
     setUrlParam('fn-invoice-new', null);
     // Reset form-state zodat volgende open schoon is.
@@ -528,6 +571,7 @@
           ];
         })
       )}
+      ${fnPager(_inv, total, fetchInvoices)}
       ${!items.length && !_inv.loading ? `<div class="sv-empty">${_inv.error || 'Geen facturen met deze filters.'}</div>` : ''}
       ${urlParam('fn-invoice-new') === '1' ? invoiceCreateModal() : ''}`;
   }
@@ -547,27 +591,60 @@
     window.DFO.render();
   };
   window.__finSubExpiring = () => { _sub.filterExpiring = !_sub.filterExpiring; window.DFO.render(); };
+  window.__finSubNew = () => {
+    console.info('[finance-v2] __finSubNew clicked → route naar subscription-wizard');
+    // Ronde 4: v2 nieuw-abo modal zou een deal + subscription + LMS-
+    // provisioning moeten opzetten (sales-subscription-create eist deal_id
+    // OR customer_data + hele wizard-payload, 591 regels). Voor deze ronde
+    // routen we naar de bestaande subscription-wizard.html; volledige
+    // v2-flow komt in een aparte PR analoog aan de Sales-offerte-wizard
+    // (batch 2).
+    try { window.location.href = '/modules/subscription-wizard.html'; }
+    catch (e) { console.warn('[finance-v2] nav fail:', e?.message); }
+  };
   async function fetchSubs() {
     const wanted = subsParams();
     if (_sub.loading && _sub.params === wanted) return;
     const seq = ++_sub.seq;
     _sub.loading = true; _sub.error = null; _sub.params = wanted;
     window.DFO.render();
-    const data = await tryFetch('sales-subscriptions-list', '/api/sales-subscriptions-list?' + wanted);
+    // Parallel: list (voor tabel) + mrr-report (voor MRR-KPI, billing_cycle-
+    // correct). mrr-report is licht (1 tabel-scan) en geeft ons kpis.current_mrr.
+    const [data, report] = await Promise.all([
+      tryFetch('sales-subscriptions-list', '/api/sales-subscriptions-list?' + wanted),
+      tryFetch('sales-mrr-report', '/api/sales-mrr-report'),
+    ]);
     if (seq !== _sub.seq) return;
-    _sub.data = data; _sub.loading = false;
+    _sub.data = data; _sub.mrrReport = report; _sub.loading = false;
     if (!data) _sub.error = 'Kon abonnementen niet laden';
     window.DFO.render();
   }
 
-  // Client-side MRR helper: gebruik s.mrr; fallback op per_term_incl /
-  // cycle-maanden als mrr ontbreekt. Handelt 'active' status af.
-  const CYCLE_TO_MONTHS = { per_month: 1, per_2_months: 2, per_quarter: 3, per_6_months: 6, per_year: 12 };
+  // Client-side MRR helper (fallback voor per-row weergave in de lijst).
+  // Officiele MRR-KPI komt uit sales-mrr-report (kpis.current_mrr) omdat
+  // billing_cycle NIET in sales-subscriptions-list response zit — daarom
+  // gaven eerdere pogingen 0/NaN. Hier gebruiken we amount_incl (per term
+  // incl-BTW som van line_items) + heuristiek op basis van start/end voor
+  // months-per-term. Voor sub met end_date=null (open-ended) valt terug
+  // op maandelijks (per_term_months=1) wat het gewone geval is.
   function subMonthlyIncl(s) {
-    if (s.mrr != null && !isNaN(Number(s.mrr))) return Number(s.mrr);
-    const cycleM = CYCLE_TO_MONTHS[s.billing_cycle] || 1;
-    const perTerm = Number(s.per_term_incl) || Number(s.per_term_excl) || 0;
-    return perTerm / cycleM;
+    const perTerm = Number(s.amount_incl) || Number(s.per_term_incl) || Number(s.per_term_excl) || 0;
+    if (!perTerm) return 0;
+    // Heuristiek: totale-looptijd-maanden / term_count = months per termijn.
+    const tc = Number(s.term_count) || 1;
+    if (s.start_date && s.end_date && tc > 0) {
+      const sd = new Date(s.start_date);
+      const ed = new Date(s.end_date);
+      if (!isNaN(sd) && !isNaN(ed) && ed > sd) {
+        const months = (ed.getFullYear() - sd.getFullYear()) * 12 + (ed.getMonth() - sd.getMonth()) + 1;
+        const perTermMonths = Math.max(1, Math.round(months / tc));
+        return perTerm / perTermMonths;
+      }
+    }
+    // Fallback: assume monthly (per_term_months=1). Sub-per-jaar/kwartaal
+    // zonder end_date tellen te zwaar mee — daarom is de KPI uit mrr-report
+    // de source of truth. Deze helper is alleen voor per-row weergave.
+    return perTerm;
   }
 
   function subsView() {
@@ -577,12 +654,14 @@
     const total = _sub.data?.total ?? null;
 
     // Client-side search (over customer-name + description + entity).
+    // Ronde 4: defensief — String(x ?? '').toLowerCase() zodat een missende
+    // customer/entity nooit een throw geeft (crashte eerder de hele lijst).
     if (_sub.search) {
-      const q = _sub.search.toLowerCase();
+      const q = String(_sub.search).toLowerCase();
       items = items.filter(s => {
-        const name = (s.customer?.name || s.customer_name || '').toLowerCase();
-        const desc = (s.description || '').toLowerCase();
-        const ent = (s.entity || '').toLowerCase();
+        const name = String(s?.customer?.name ?? s?.customer_name ?? '').toLowerCase();
+        const desc = String(s?.description ?? '').toLowerCase();
+        const ent  = String(s?.entity ?? '').toLowerCase();
         return name.includes(q) || desc.includes(q) || ent.includes(q);
       });
     }
@@ -607,14 +686,20 @@
     }
 
     const activeItems = items.filter(s => (s.status || '') === 'active');
-    const mrrSum = activeItems.reduce((a, s) => a + subMonthlyIncl(s), 0);
+    // MRR-KPI bron-preferentie: sales-mrr-report.kpis.current_mrr (billing_
+    // cycle-correct). Fallback op client-side som (per-row heuristiek).
+    const reportKpis = _sub.mrrReport?.kpis || null;
+    const mrrOfficial = reportKpis?.current_mrr != null ? Number(reportKpis.current_mrr) : null;
+    const mrrLocal = activeItems.reduce((a, s) => a + subMonthlyIncl(s), 0);
+    const mrrShown = mrrOfficial != null ? mrrOfficial : mrrLocal;
+    const activeCountOfficial = reportKpis?.active_count != null ? reportKpis.active_count : null;
     const sortIcon = (col) => _sub.sortBy === col ? (_sub.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 
-    return `${previewHeader('Abonnementen · via sales-subscriptions', _sub)}
+    return `${previewHeader('Abonnementen · sales-subscriptions + mrr-report', _sub)}
       ${H.kpis([
-        { c: 'emerald', icon: I.check,  label: 'Actief (view + filters)',  val: num(activeItems.length), hi: 1 },
-        { c: 'violet',  icon: I.trend,  label: 'MRR incl. BTW (view)',     val: eur0(mrrSum), hi: 1, sub: 'som van maandelijkse waarde' },
-        { c: 'blue',    icon: I.repeat, label: 'Totaal in view',           val: num(items.length), sub: total != null ? `van ${num(total)} totaal` : '—' },
+        { c: 'emerald', icon: I.check,  label: 'Actief (totaal)',        val: num(activeCountOfficial != null ? activeCountOfficial : activeItems.length), hi: 1, sub: 'over alle pagina\'s' },
+        { c: 'violet',  icon: I.trend,  label: 'Huidige MRR incl. BTW',   val: eur0(mrrShown), hi: 1, sub: mrrOfficial != null ? 'sales-mrr-report' : 'lokale schatting (fallback)' },
+        { c: 'blue',    icon: I.repeat, label: 'Totaal in view',         val: num(items.length), sub: total != null ? `van ${num(total)} totaal` : '—' },
       ])}
       ${H.toolbar([
         H.chips('fin-sub-st', [
@@ -628,19 +713,22 @@
           <button class="btn ${_sub.filterExpiring ? 'btn-primary' : ''}" onclick="__finSubExpiring()">${svg(I.warn)}Loopt af &lt;30d</button>
           <button class="btn btn-sm" onclick="__finSubSort('start_date')" title="Sorteer op startdatum">Start${sortIcon('start_date')}</button>
           <button class="btn btn-sm" onclick="__finSubSort('end_date')" title="Sorteer op einddatum">Eind${sortIcon('end_date')}</button>
+          <button class="btn btn-primary" onclick="__finSubNew()">${svg(I.plus)}Nieuw abonnement</button>
         </div>`,
       ])}
       ${fnPager(_sub, total, fetchSubs)}
       ${H.table(
         [{ l: 'Klant' }, { l: 'Beschrijving', cls: 'optional' }, { l: 'Entiteit', cls: 'optional' }, { l: 'Per termijn', cls: 'r' }, { l: 'Maand incl.', cls: 'r' }, { l: 'Start', cls: 'r optional' }, { l: 'Eind', cls: 'r optional' }, { l: 'Status' }],
         items.map(s => {
-          const cName = s.customer?.name || s.customer_name || '—';
+          const cName = String(s?.customer?.name ?? s?.customer_name ?? '—');
           const [c, l] = SUB_STATUS_TO_PILL[s.status] || ['neutral', s.status || '—'];
+          // amount_incl = incl-BTW som per termijn (sales-subscriptions-list).
+          const perTerm = s?.amount_incl != null ? s.amount_incl : s?.per_term_incl;
           return [
             `<div class="cell-main-wrap"><div class="av av-sm">${H.av(cName)}</div><span class="cell-main">${cName}</span></div>`,
             `<span style="font-size:12.5px;color:var(--text-3)">${s.description || '—'}</span>`,
             `<span style="font-size:12.5px;color:var(--text-3)">${s.entity || '—'}</span>`,
-            `<span class="mono">${eur(s.per_term_incl)}</span>`,
+            `<span class="mono">${eur(perTerm)}</span>`,
             `<span class="mono">${eur0(subMonthlyIncl(s))}</span>`,
             `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(s.start_date)}</span>`,
             `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(s.end_date)}</span>`,
@@ -648,6 +736,7 @@
           ];
         })
       )}
+      ${fnPager(_sub, total, fetchSubs)}
       ${!items.length && !_sub.loading ? `<div class="sv-empty">${_sub.error || 'Geen abonnementen met deze filter.'}</div>` : ''}`;
   }
 
@@ -697,6 +786,7 @@
           H.pill('neutral', cn.status || '—'),
         ])
       )}
+      ${fnPager(_cn, total, fetchCn)}
       ${!items.length && !_cn.loading ? `<div class="sv-empty">${_cn.error || 'Geen creditnota\'s in deze view.'}</div>` : ''}`;
   }
 
@@ -780,132 +870,105 @@
           `<span class="mono ${(t.amount_cents || 0) > 0 ? 'strong' : ''}" style="color:${(t.amount_cents || 0) > 0 ? 'var(--brand)' : 'var(--warn,var(--orange))'}">${eurC(t.amount_cents)}</span>`,
         ])
       )}
+      ${fnPager(_bnk, _bnk.tx?.total ?? null, fetchBank)}
       ${!items.length && !_bnk.loading ? `<div class="sv-empty">${_bnk.error || 'Geen transacties met deze filter.'}</div>` : ''}`;
   }
 
   // ── OMZET & MRR ──────────────────────────────────────────────────────
-  // Gebruikt super-admin-omzet (bron van dashboard.html omzet-KPI's).
-  // Default periode = huidige maand (matcht dashboard.html default).
-  function mrrParams() {
-    const label = F('fin-mrr-p', 'Maand');
-    let from, to, gb;
-    const now = new Date();
-    to = todayIso();
-    if (label === 'Week')     { const f = new Date(now); f.setDate(f.getDate() - 6);  from = isoDay(f); gb = 'day'; }
-    else if (label === 'Kwartaal') { const q = Math.floor(now.getMonth() / 3) * 3; from = isoDay(new Date(now.getFullYear(), q, 1)); gb = 'week'; }
-    else if (label === 'Jaar')     { from = isoDay(new Date(now.getFullYear(), 0, 1)); gb = 'month'; }
-    else                          { from = monthStart(); gb = 'day'; }
-    return `from=${from}&to=${to}&group_by=${gb}`;
-  }
+  // Ronde 4: switch naar sales-mrr-report. Deze endpoint doet de correcte
+  // MRR-berekening (incl-BTW per termijn / billing_cycle-maanden), retourneert
+  // trend (-12..+12 maanden), per_traject breakdown, en top_subs. billing_cycle
+  // kolom is beschikbaar in DB maar NIET in sales-subscriptions-list response
+  // — daarom faalde de oude client-side MRR (subMonthlyIncl gaf 0 op alle
+  // subs, KPI werd €0 en Per-product was NaN).
   async function fetchMrr() {
-    const wanted = mrrParams();
+    const wanted = 'v1'; // Rapport-endpoint heeft geen periode-parameter voor de MRR-cijfers zelf.
     if (_mrr.loading && _mrr.params === wanted) return;
     const seq = ++_mrr.seq;
     _mrr.loading = true; _mrr.error = null; _mrr.params = wanted;
     window.DFO.render();
-    // Parallel: super-admin-omzet (historisch, per-product breakdown) +
-    // sales-subscriptions-list (voor maandelijkse recurring incl-BTW
-    // berekening — MRR per maand = som van elke actieve sub's
-    // per_term_incl / cycle_months).
-    const [data, subs] = await Promise.all([
-      tryFetch('super-admin-omzet',        '/api/super-admin-omzet?' + wanted),
-      tryFetch('sales-subscriptions-list', '/api/sales-subscriptions-list?status=active&page=1&page_size=500'),
-    ]);
+    const report = await tryFetch('sales-mrr-report', '/api/sales-mrr-report');
     if (seq !== _mrr.seq) return;
-    _mrr.data = data; _mrr.subs = subs; _mrr.loading = false;
-    if (!data && !subs) _mrr.error = 'Kon omzet-rapport niet laden';
-    if (subs && subs.total > 500) console.warn('[finance-v2] active-subs > 500 — MRR berekend op eerste 500 rijen');
+    _mrr.report = report; _mrr.loading = false;
+    if (!report) _mrr.error = 'Kon MRR-rapport niet laden';
     window.DFO.render();
   }
 
-  // Bereken maandelijkse RECURRING omzet incl. BTW uit active subscriptions.
-  // Voor de komende 12 maanden: hoeveel geld komt er per maand binnen op
-  // basis van huidige actieve subs (per_term_incl / cycle_months, alleen
-  // subs waarvan start_date <= maand-eind EN (end_date null OR >= maand-begin)).
-  function recurringPerMonth() {
-    const subs = (_mrr.subs?.items || []).filter(s => s.status === 'active');
-    if (!subs.length) return { rows: [], currentMonthly: 0 };
-    const now = new Date();
-    const rows = [];
-    for (let i = 0; i < 12; i++) {
-      const mStart = new Date(now.getFullYear(), now.getMonth() + i, 1);
-      const mEnd   = new Date(now.getFullYear(), now.getMonth() + i + 1, 0);
-      const active = subs.filter(s => {
-        const sd = s.start_date ? new Date(s.start_date) : null;
-        const ed = s.end_date   ? new Date(s.end_date)   : null;
-        if (sd && sd > mEnd) return false;
-        if (ed && ed < mStart) return false;
-        return true;
-      });
-      const monthly = active.reduce((a, s) => a + subMonthlyIncl(s), 0);
-      const label = mStart.toLocaleDateString('nl-NL', { month: 'short', year: 'numeric' });
-      rows.push({ label, month: mStart.toISOString().slice(0, 7), monthly, count: active.length });
-    }
-    return { rows, currentMonthly: rows[0]?.monthly || 0 };
-  }
-
   function mrrView() {
-    const label = F('fin-mrr-p', 'Maand');
-    if (!_mrr.loading && (!_mrr.data || _mrr.params !== mrrParams())) queueMicrotask(fetchMrr);
-    const k = _mrr.data?.kpis || {};
-    const trend = Array.isArray(_mrr.data?.trend) ? _mrr.data.trend : [];
-    const perProduct = Array.isArray(_mrr.data?.per_product) ? _mrr.data.per_product : [];
-    const trendMax = Math.max(1, ...trend.map(t => Number(t.totaal_incl_btw ?? t.total ?? t.revenue) || 0));
-    const rec = recurringPerMonth();
-    const recMax = Math.max(1, ...rec.rows.map(r => r.monthly));
+    if (!_mrr.loading && (!_mrr.report || _mrr.params !== 'v1')) queueMicrotask(fetchMrr);
+    const r = _mrr.report || {};
+    const k = r.kpis || {};
+    const trend = Array.isArray(r.trend) ? r.trend : [];
+    // by_traject = per-product breakdown (MRR + count, gesorteerd op MRR desc).
+    const byTraj = Array.isArray(r.by_traject) ? r.by_traject : [];
+    const topSubs = Array.isArray(r.top_subs) ? r.top_subs : [];
+    // Trend heeft 25 maanden (-12..+12). Splits in verleden (idx 0..11) +
+    // huidig+toekomst (idx 12..24) voor de "komende 12 maanden" grafiek.
+    const future = trend.slice(12, 25); // 13 items: huidige + 12 vooruit
+    const past   = trend.slice(0, 13);  // 13 items: -12..huidige
+    const trendMax  = Math.max(1, ...trend.map(t => Number(t.mrr) || 0));
+    const futureMax = Math.max(1, ...future.map(t => Number(t.mrr) || 0));
 
-    return `${previewHeader('Omzet & MRR · super-admin-omzet + subs', _mrr)}
+    return `${previewHeader('Omzet & MRR · sales-mrr-report', _mrr)}
       ${H.kpis([
-        { c: 'violet',  icon: I.repeat, label: 'Huidige MRR incl. BTW',   val: eur0(rec.currentMonthly),   hi: 1, sub: `${num(rec.rows[0]?.count || 0)} actieve subs` },
-        { c: 'emerald', icon: I.euro,   label: 'Losse verkopen (incl. BTW)', val: eur0(k.los_incl_btw),    hi: 1, sub: 'in gekozen periode' },
-        { c: 'blue',    icon: I.trend,  label: 'Totaal periode (incl. BTW)', val: eur0(k.totaal_incl_btw), hi: 1 },
-        { c: 'orange',  icon: I.doc,    label: 'Aantal deals in periode',    val: num(k.deal_count) },
-      ])}
-      ${H.toolbar([
-        H.chips('fin-mrr-p', [
-          { l: 'Week',     v: 'Week' },
-          { l: 'Maand',    v: 'Maand' },
-          { l: 'Kwartaal', v: 'Kwartaal' },
-          { l: 'Jaar',     v: 'Jaar' },
-        ], label),
+        { c: 'violet',  icon: I.repeat, label: 'Huidige MRR incl. BTW',   val: eur0(k.current_mrr),   hi: 1, sub: `${num(k.active_count || 0)} actieve subs` },
+        { c: 'emerald', icon: I.trend,  label: 'Gem. MRR per klant',      val: eur0(k.avg_mrr),       hi: 1 },
+        { c: 'blue',    icon: I.euro,   label: 'Totaal inflow (deze mnd)',val: eur0(k.total_inflow),  hi: 1, sub: 'som van maandelijkse recurring' },
+        { c: 'orange',  icon: I.warn,   label: 'Opzeg-percentage (mnd)',  val: k.cancellation_rate != null ? (Math.round(k.cancellation_rate * 1000) / 10) + '%' : '—', sub: 'churn / actief' },
       ])}
       <div class="sv-grid">
         <div class="sv-card sv-card-wide">
           <div class="sv-card-head">${svg(I.repeat)}Maandelijkse recurring omzet · komende 12 maanden · incl. BTW</div>
           <div class="sv-card-body">
-            ${rec.rows.length ? `
-              <div class="sv-trend" style="height:180px">${rec.rows.map(r => {
-                const h = Math.max(3, Math.round(r.monthly / recMax * 100));
-                return `<div class="sv-trend-col" title="${r.label} · ${eur0(r.monthly)} · ${num(r.count)} subs">
+            ${future.length ? `
+              <div class="sv-trend" style="height:180px">${future.map(t => {
+                const v = Number(t.mrr) || 0;
+                const h = Math.max(3, Math.round(v / futureMax * 100));
+                return `<div class="sv-trend-col" title="${t.period} · ${eur0(v)} · ${num(t.count)} subs">
                   <div class="sv-trend-bar" style="height:${h}%;background:linear-gradient(180deg, var(--violet, var(--brand)), color-mix(in srgb, var(--violet, var(--brand)) 55%, transparent))"></div>
-                  <div class="sv-trend-lbl">${r.label}</div>
+                  <div class="sv-trend-lbl">${t.period ? t.period.slice(2) : ''}</div>
                 </div>`;
               }).join('')}</div>
               <div class="mrr-months">
-                ${rec.rows.map(r => `<div class="mrr-month-row"><span>${r.label}</span><span class="sv-row-sub">${num(r.count)} subs</span><b>${eur0(r.monthly)}</b></div>`).join('')}
+                ${future.map(t => `<div class="mrr-month-row"><span>${t.period}</span><span class="sv-row-sub">${num(t.count)} subs</span><b>${eur0(t.mrr)}</b></div>`).join('')}
               </div>
-            ` : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen actieve subscriptions.'}</div>`}
+            ` : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen trend-data.'}</div>`}
           </div>
         </div>
         <div class="sv-card">
-          <div class="sv-card-head">${svg(I.doc)}Per product (uit super-admin-omzet, periode)</div>
+          <div class="sv-card-head">${svg(I.doc)}Per traject / product · huidig actief</div>
           <div class="sv-card-body">
-            ${perProduct.length ? perProduct.slice(0, 10).map(p => `
-              <div class="sv-row"><span>${p.product_name || p.product || p.name || '—'} <span class="sv-row-sub">${num(p.count)}×</span></span><b>${eur0(p.totaal_incl_btw ?? p.total ?? p.revenue)}</b></div>
-            `).join('') : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen per-product data in periode.'}</div>`}
+            ${byTraj.length ? byTraj.slice(0, 12).map(p => `
+              <div class="sv-row"><span>${String(p.traject || '—')} <span class="sv-row-sub">${num(p.count)}×</span></span><b>${eur0(p.mrr)}</b></div>
+            `).join('') : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen per-traject data.'}</div>`}
           </div>
         </div>
         <div class="sv-card">
-          <div class="sv-card-head">${svg(I.trend)}Historische omzet-trend (super-admin-omzet)</div>
+          <div class="sv-card-head">${svg(I.trend)}Historische MRR-trend · afgelopen 12 maanden</div>
           <div class="sv-card-body">
-            ${trend.length ? `<div class="sv-trend" style="height:140px">${trend.map(t => {
-              const rev = Number(t.totaal_incl_btw ?? t.total ?? t.revenue) || 0;
-              const h = Math.max(3, Math.round(rev / trendMax * 100));
-              return `<div class="sv-trend-col" title="${t.period || t.label || t.date || ''} · ${eur0(rev)}">
+            ${past.length ? `<div class="sv-trend" style="height:140px">${past.map(t => {
+              const v = Number(t.mrr) || 0;
+              const h = Math.max(3, Math.round(v / trendMax * 100));
+              return `<div class="sv-trend-col" title="${t.period} · ${eur0(v)} · new ${eur0(t.new_mrr)} · churn ${eur0(t.churned_mrr)}">
                 <div class="sv-trend-bar" style="height:${h}%"></div>
-                <div class="sv-trend-lbl">${t.period || t.label || (t.date ? String(t.date).slice(5, 10) : '')}</div>
+                <div class="sv-trend-lbl">${t.period ? t.period.slice(2) : ''}</div>
               </div>`;
             }).join('')}</div>` : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen trend-data.'}</div>`}
+          </div>
+        </div>
+        <div class="sv-card sv-card-wide">
+          <div class="sv-card-head">${svg(I.repeat)}Top 10 grootste abonnementen (MRR)</div>
+          <div class="sv-card-body">
+            ${topSubs.length ? H.table(
+              [{ l: 'Klant' }, { l: 'Beschrijving', cls: 'optional' }, { l: 'Termijn', cls: 'optional' }, { l: 'Per termijn incl.', cls: 'r' }, { l: 'MRR incl.', cls: 'r' }],
+              topSubs.map(s => [
+                `<div class="cell-main-wrap"><div class="av av-sm">${H.av(s.customer_name || '?')}</div><span class="cell-main">${s.customer_name || '—'}</span></div>`,
+                `<span style="font-size:12.5px;color:var(--text-3)">${s.description || '—'}</span>`,
+                `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${s.billing_cycle || 'per_month'}</span>`,
+                `<span class="mono">${eur(s.per_term_incl)}</span>`,
+                `<span class="mono strong">${eur0(s.mrr)}</span>`,
+              ])
+            ) : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen actieve subscriptions.'}</div>`}
           </div>
         </div>
       </div>`;
