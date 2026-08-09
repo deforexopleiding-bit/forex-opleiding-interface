@@ -7,23 +7,21 @@
 //   - kpi/kpis    r1200-1208
 //   - toolbar     r1195
 //   - chips       r1196
-//   - search      r1197
+//   - search      r1197 (LEGACY — nieuwe views gebruiken stableSearch, zie ronde-4)
 //   - pill        r1199
 //   - av          r1200 (met avc/ini uit DFO)
 //   - trend       r1201
 //   - table       r1223-1226
 //
-// Non-ES-module (klassieke <script>), geladen NA app-shell.js VÓÓR alle
-// andere views die uit `window.KV_V2` willen consumeren.
+// Ronde 4 uitbreidingen (cursor-fix):
+//   - H.stableSearch(key, placeholder) → mount-slot voor persistent input
+//   - H.mountedList(listKey, initialHTML) → partial-render slot
+//   - H.onSearch(key, cb, opts) → registreer debounced handler
+//   - H.getSearchValue / setSearchValue
+//   - H.setListHTML(listKey, html) → update lijst zonder volledige render
+//   - DFO.render monkey-patch: snapshot focus + detach wraps + hydrate + restore
 //
-// Waarom shared: dashboard-v2 + studenten-v2 gebruikten deze inline; vanaf
-// email-v2 zijn we op de 3e reuse. Extract nu voorkomt drift.
-//
-// Exposeert:
-//   window.KV_V2.helpers = { kpi, kpis, toolbar, chips, search, table,
-//                             av, pill, trend, voorbeeldBanner }
-// Bestaande dashboard-v2.js + studenten-v2.js blijven hun inline-copies
-// gebruiken (geen refactor nu — die is een aparte cleanup-PR).
+// Non-ES-module (klassieke <script>).
 
 (function () {
   if (!window.DFO) { console.error('[_shared-v2] DFO shell niet geladen.'); return; }
@@ -43,6 +41,9 @@
 
   const toolbar = p => `<div class="toolbar">${p.join('')}</div>`;
   const chips = (n, o, c) => o.map(x => `<button class="chip ${c === x.v ? 'on' : ''}" onclick="DFO.setF('${n}','${x.v}')">${x.l}${x.n !== undefined ? `<span class="cnt">${x.n}</span>` : ''}</button>`).join('');
+
+  // LEGACY search — gebruikt nog value="" wat cursor-drop veroorzaakt.
+  // Nieuwe views MOETEN stableSearch gebruiken.
   const search = ph => `<div class="tb-search">${svg('<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>')}
     <input placeholder="${ph}" oninput="DFO.setF('q',this.value)" value="${(F('q', '') || '').replace(/"/g, '&quot;')}" /></div>`;
 
@@ -52,14 +53,188 @@
         ${r.map((cell, j) => `<td class="${cols[j].cls || ''}">${cell}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   }
 
-  // Prominent module-niveau markering: layout klopt, data is voorbeeld.
   const voorbeeldBanner = () => `<div style="margin:14px 20px 0;padding:11px 14px;border:1px solid var(--amber-line);background:var(--amber-soft);border-radius:var(--r);
     display:flex;align-items:center;gap:11px;font-size:12.5px;color:var(--amber)">
     ${svg(I.alert, 'width:16px;height:16px;flex-shrink:0')}
     <span><b>VOORBEELD-DATA</b> — deze view toont layout uit systeemprototype-v45.
     Data-koppeling volgt in de volgende ronde na layout-goedkeuring.</span></div>`;
 
+  // ─── RONDE 4: stableSearch + mountedList + DFO.render patch ────────────
+  //
+  // Root-cause cursor-bug: H.search() rendert <input> als HTML-string. Elke
+  // DFO.render() doet #content.innerHTML swap → input-DOM-node wordt volledig
+  // vervangen → focus/cursor/waarde weg. defaultValue is geen HTML-attribuut
+  // (React-ism) dus deed ook niets.
+  //
+  // Fix: input leeft in module-scope cache (Map). View retourneert alleen
+  // een leeg mount-slot. Rond elke render():
+  //   - snapshotFocusedSearch (welk key had focus + selection)
+  //   - detachSearchWrapsBeforeRender (haal wraps uit oude DOM)
+  //   - orig render (innerHTML swap #content)
+  //   - hydrateSearchMounts (herplaats cached wraps in nieuwe slots)
+  //   - restoreFocusedSearch (focus + setSelectionRange)
+  //
+  // Input-DOM-node identity blijft = cursor + value bewaard.
+  const SEARCH_HANDLERS   = new Map(); // key → {onChange, debounceMs}
+  const SEARCH_VALUES     = new Map(); // key → current string value
+  const SEARCH_INPUT_CACHE = new Map(); // key → HTMLInputElement (in wrap)
+  const SEARCH_TIMERS     = new Map(); // key → setTimeout handle
+
+  const stableSearch = (key, placeholder, _opts = {}) =>
+    `<div class="kv-search-mount" data-search-key="${key}" data-search-ph="${String(placeholder || '').replace(/"/g, '&quot;')}"></div>`;
+
+  function onSearch(key, onChange, opts) {
+    opts = opts || {};
+    SEARCH_HANDLERS.set(key, { onChange, debounceMs: opts.debounceMs != null ? opts.debounceMs : 280 });
+  }
+  const getSearchValue = (key) => SEARCH_VALUES.get(key) || '';
+  function setSearchValue(key, value) {
+    SEARCH_VALUES.set(key, value || '');
+    const input = SEARCH_INPUT_CACHE.get(key);
+    if (input) input.value = value || '';
+    const clear = input && input.parentElement && input.parentElement.querySelector('.kv-search-clear');
+    if (clear) clear.style.display = (value ? '' : 'none');
+  }
+
+  const mountedList = (listKey, initialHTML) =>
+    `<div class="kv-list-mount" data-list-key="${listKey}">${initialHTML || ''}</div>`;
+
+  function setListHTML(listKey, html) {
+    const slot = document.querySelector(`.kv-list-mount[data-list-key="${listKey}"]`);
+    if (slot) slot.innerHTML = html;
+  }
+
+  function fireSearchChange(key, val) {
+    const h = SEARCH_HANDLERS.get(key);
+    if (!h) return;
+    const prev = SEARCH_TIMERS.get(key);
+    if (prev) clearTimeout(prev);
+    SEARCH_TIMERS.set(key, setTimeout(() => {
+      try { h.onChange(val); }
+      catch (e) { console.warn('[stableSearch] onChange threw for', key, e); }
+    }, h.debounceMs));
+  }
+
+  function createSearchWrap(key, placeholder) {
+    const wrap = document.createElement('div');
+    wrap.className = 'tb-search kv-search-wrap';
+    wrap.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">' +
+      '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>';
+    const input = document.createElement('input');
+    input.type = 'search';
+    input.className = 'kv-search-input';
+    input.placeholder = placeholder || '';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.value = SEARCH_VALUES.get(key) || '';
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'kv-search-clear';
+    clear.setAttribute('aria-label', 'Zoekopdracht wissen');
+    clear.textContent = '×';
+    clear.style.display = input.value ? '' : 'none';
+    input.addEventListener('input', () => {
+      const v = input.value;
+      SEARCH_VALUES.set(key, v);
+      clear.style.display = v ? '' : 'none';
+      fireSearchChange(key, v);
+    });
+    // Native <input type=search> heeft 'search' event bij X-klik (WebKit),
+    // en ESC om te wissen. Vang beide om state synced te houden.
+    input.addEventListener('search', () => {
+      const v = input.value;
+      SEARCH_VALUES.set(key, v);
+      clear.style.display = v ? '' : 'none';
+      fireSearchChange(key, v);
+    });
+    clear.addEventListener('mousedown', (e) => { e.preventDefault(); });
+    clear.addEventListener('click', (e) => {
+      e.preventDefault();
+      input.value = '';
+      SEARCH_VALUES.set(key, '');
+      clear.style.display = 'none';
+      input.focus();
+      fireSearchChange(key, '');
+    });
+    wrap.appendChild(input);
+    wrap.appendChild(clear);
+    SEARCH_INPUT_CACHE.set(key, input);
+    return wrap;
+  }
+
+  function hydrateSearchMounts() {
+    document.querySelectorAll('.kv-search-mount').forEach((mount) => {
+      const key = mount.getAttribute('data-search-key');
+      if (!key) return;
+      if (mount.firstChild) return; // al gehydreerd
+      const cached = SEARCH_INPUT_CACHE.get(key);
+      if (cached && cached.parentElement && cached.parentElement.classList.contains('kv-search-wrap')) {
+        mount.appendChild(cached.parentElement);
+      } else {
+        const fresh = createSearchWrap(key, mount.getAttribute('data-search-ph') || '');
+        mount.appendChild(fresh);
+      }
+    });
+  }
+
+  function snapshotFocusedSearch() {
+    const el = document.activeElement;
+    if (!el || el.tagName !== 'INPUT' || !el.classList.contains('kv-search-input')) return null;
+    const mount = el.closest('.kv-search-mount');
+    const key = mount && mount.getAttribute('data-search-key');
+    if (!key) return null;
+    let start = null, end = null;
+    try { start = el.selectionStart; end = el.selectionEnd; } catch (_) { /* type=search: no selection API in some browsers */ }
+    return { key, start, end };
+  }
+
+  function restoreFocusedSearch(snap) {
+    if (!snap) return;
+    const input = SEARCH_INPUT_CACHE.get(snap.key);
+    if (!input || !input.isConnected) return;
+    try {
+      input.focus({ preventScroll: true });
+      if (snap.start != null && snap.end != null && typeof input.setSelectionRange === 'function') {
+        try { input.setSelectionRange(snap.start, snap.end); } catch (_) { /* type=search may throw */ }
+      }
+    } catch (_) { /* noop */ }
+  }
+
+  function detachSearchWrapsBeforeRender() {
+    SEARCH_INPUT_CACHE.forEach((input) => {
+      const wrap = input.parentElement;
+      if (wrap && wrap.parentElement) wrap.parentElement.removeChild(wrap);
+    });
+  }
+
+  function patchDfoRender(attempt) {
+    attempt = attempt || 0;
+    if (!window.DFO || typeof window.DFO.render !== 'function') {
+      if (attempt < 40) setTimeout(() => patchDfoRender(attempt + 1), 25);
+      else console.warn('[_shared-v2] Kon DFO.render niet patchen (DFO ontbreekt na 1s).');
+      return;
+    }
+    if (window.DFO.__kvSearchPatchApplied) return;
+    window.DFO.__kvSearchPatchApplied = true;
+    const orig = window.DFO.render;
+    window.DFO.render = function () {
+      const snap = snapshotFocusedSearch();
+      detachSearchWrapsBeforeRender();
+      const result = orig.apply(this, arguments);
+      hydrateSearchMounts();
+      restoreFocusedSearch(snap);
+      return result;
+    };
+  }
+  patchDfoRender();
+
   window.KV_V2 = window.KV_V2 || {};
-  window.KV_V2.helpers = { kpi, kpis, toolbar, chips, search, table, av, pill, trend, voorbeeldBanner };
-  console.debug('[_shared-v2] helpers registered on window.KV_V2.helpers');
+  window.KV_V2.helpers = {
+    kpi, kpis, toolbar, chips, search, table, av, pill, trend, voorbeeldBanner,
+    // Ronde 4:
+    stableSearch, onSearch, getSearchValue, setSearchValue,
+    mountedList, setListHTML,
+  };
+  console.debug('[_shared-v2] helpers + stableSearch registered');
 })();
