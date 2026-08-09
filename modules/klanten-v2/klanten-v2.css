@@ -1149,7 +1149,10 @@
    voor de placeholder-view (genericView) van niet-Klanten-modules. */
 
 /* Sidebar-logo: vervangt de blauwe "F"-brand-mark. Wordmark PNG (1650×934)
-   in /img/ met light/dark-swap. Links uitgelijnd, subtekst eronder. */
+   in /img/ met light/dark-swap. Links uitgelijnd. Geen subtekst.
+   KRITIEK: display niet op de gedeelde `.kv-brand-logo img`-selector zetten —
+   die specificity (0,1,1) overrulet dan de per-thema class-swap (0,1,0) en
+   dan zijn BEIDE logos zichtbaar. Zet display op de class-selectors zelf. */
 .kv-brand-logo {
   padding: 14px 15px 12px;
   align-items: flex-start;
@@ -1166,16 +1169,15 @@
   outline-offset: 2px;
 }
 .kv-brand-logo img {
-  display: block;
   width: 100%;
-  max-width: 170px;
+  max-width: 120px;
   height: auto;
-  margin-bottom: 4px;
+  /* NB: geen `display` hier — dat zou de class-swap overrulen. */
 }
-.kv-logo-dark  { display: block; }
-.kv-logo-light { display: none;  }
-[data-theme="dark"] .kv-logo-dark  { display: none;  }
-[data-theme="dark"] .kv-logo-light { display: block; }
+.kv-brand-logo .kv-logo-dark  { display: block; }
+.kv-brand-logo .kv-logo-light { display: none;  }
+[data-theme="dark"] .kv-brand-logo .kv-logo-dark  { display: none;  }
+[data-theme="dark"] .kv-brand-logo .kv-logo-light { display: block; }
 
 .v2-preview-tag {
   display: inline-block;
