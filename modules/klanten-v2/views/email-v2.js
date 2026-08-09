@@ -37,6 +37,48 @@
   let composeOpen = false;
   let composeMode = 'new';
   let ddOpen = false;
+  let aiTone = 'friendly'; // Klikbare tone-chip in AI-suggestie: friendly/business/short/strict
+
+  /* ── AI-tone varianten (klikbaar in de tone-chip strip) ───────────────
+     Layout-ronde: klik → chip actief + tekst swap. Zonder backend-call.
+     Data-ronde vervangt dit door echte re-generate via /api/joost-suggest
+     of vergelijkbare endpoint. Varianten zijn heuristieken die het originele
+     AI-antwoord (cur.ai) transformeren; geen model-output. */
+  const TONE_LABELS = { friendly: 'Vriendelijk', business: 'Zakelijk', short: 'Kort', strict: 'Streng' };
+  function aiTextFor(cur, tone) {
+    const base = String(cur && cur.ai || '');
+    if (!base) return '';
+    if (tone === 'friendly') return base;
+    if (tone === 'business') {
+      // Formaliseer: "Hoi/Hallo" → "Geachte", "je/jij" → "u"; sluit met "Met vriendelijke groet,"
+      return base
+        .replace(/^Hoi\s+/i, 'Geachte ')
+        .replace(/^Hallo\s+/i, 'Geachte ')
+        .replace(/^Beste\s+/i, 'Geachte ')
+        .replace(/\bje\b/g, 'u')
+        .replace(/\bjij\b/g, 'u')
+        .replace(/\bjouw\b/g, 'uw')
+        .replace(/\bjullie\b/g, 'u')
+        + '\n\nMet vriendelijke groet,\nTeam De Forex Opleiding';
+    }
+    if (tone === 'short') {
+      // Neem eerste 2 zinnen, plus korte CTA.
+      const sentences = base.replace(/\s+/g, ' ').split(/(?<=[.!?])\s+/).filter(Boolean);
+      const short = sentences.slice(0, 2).join(' ');
+      return short + '\n\nLaat het weten, dan pak ik het op.';
+    }
+    if (tone === 'strict') {
+      // Zakelijk + expliciete termijn/verplichting-formulering.
+      const formal = base
+        .replace(/^Hoi\s+/i, 'Geachte ')
+        .replace(/^Hallo\s+/i, 'Geachte ')
+        .replace(/^Beste\s+/i, 'Geachte ')
+        .replace(/\bje\b/g, 'u')
+        .replace(/\bjij\b/g, 'u');
+      return formal + '\n\nWij verzoeken u vriendelijk maar dringend binnen 7 dagen te reageren, zodat verdere stappen niet nodig zijn.\n\nMet vriendelijke groet,\nTeam De Forex Opleiding';
+    }
+    return base;
+  }
 
   /* ── Voorbeeld-data (prototype r2523-2556) ────────────────────────── */
   const MAILDATA = [
@@ -201,16 +243,16 @@
             <span class="tile-ico" style="width:28px;height:28px;background:linear-gradient(140deg,var(--violet),#8B5CF6);color:#fff">
               ${svg(I.sparkle, 'width:14px;height:14px')}</span>
             <div style="flex:1"><div style="font-size:13px;font-weight:600">Voorgesteld antwoord</div>
-              <div style="font-size:11.5px;color:var(--text-3)">Op basis van dit gesprek en het klantdossier</div></div>
-            <button class="icon-btn" title="Opnieuw genereren">${svg(I.refresh)}</button>
+              <div style="font-size:11.5px;color:var(--text-3)">Op basis van dit gesprek en het klantdossier · toon: ${TONE_LABELS[aiTone]}</div></div>
+            <button class="icon-btn" title="Opnieuw genereren" onclick="console.info('[email-v2] AI opnieuw-genereren (voorbeeld — komt in data-ronde)')">${svg(I.refresh)}</button>
           </div>
-          <div class="ai-sug-body">${cur.ai}</div>
+          <div class="ai-sug-body">${aiTextFor(cur, aiTone)}</div>
           <div class="ai-sug-foot">
             <span style="font-size:11.5px;color:var(--text-3);margin-right:2px">Toon:</span>
-            <button class="tone-chip on">Vriendelijk</button>
-            <button class="tone-chip">Zakelijk</button>
-            <button class="tone-chip">Kort</button>
-            <button class="tone-chip">Streng</button>
+            <button class="tone-chip ${aiTone === 'friendly' ? 'on' : ''}" onclick="__emailSetTone('friendly')">Vriendelijk</button>
+            <button class="tone-chip ${aiTone === 'business' ? 'on' : ''}" onclick="__emailSetTone('business')">Zakelijk</button>
+            <button class="tone-chip ${aiTone === 'short'    ? 'on' : ''}" onclick="__emailSetTone('short')">Kort</button>
+            <button class="tone-chip ${aiTone === 'strict'   ? 'on' : ''}" onclick="__emailSetTone('strict')">Streng</button>
             <button class="btn btn-primary btn-sm" style="margin-left:auto;--m:var(--violet);--m-glow:rgba(109,63,212,.4)"
               onclick="openCompose('ai')">${svg(I.edit)}Gebruiken</button>
           </div>
@@ -248,7 +290,7 @@
           <span class="compose-lbl">Onderwerp</span>
           <input class="compose-inp" value="${composeMode === 'new' ? '' : (composeMode === 'fwd' ? 'Fwd: ' : 'Re: ') + (cur ? cur.ond.replace(/^(Re: |Fwd: )/, '') : '')}">
         </div>
-        <div class="compose-body" contenteditable="true">${composeMode === 'ai' && cur && cur.ai ? cur.ai : ''}</div>
+        <div class="compose-body" contenteditable="true">${composeMode === 'ai' && cur && cur.ai ? aiTextFor(cur, aiTone) : ''}</div>
         <div class="compose-sig">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
             <span style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3)">Handtekening</span>
@@ -281,6 +323,7 @@
   window.closeCompose   = () => { composeOpen = false; render(); };
   window.emailToggleSel = (k) => { S.sel = S.sel || {}; S.sel[k] = !S.sel[k]; render(); };
   window.emailToggleDD  = () => { ddOpen = !ddOpen; render(); };
+  window.__emailSetTone = (t) => { aiTone = t; render(); };
   window.emailDdDo      = (label) => { console.info('[email-v2] dd-item: ' + label + ' (voorbeeld — geen actie)'); ddOpen = false; render(); };
   window.emailOpenDossier = (klant) => { console.info('[email-v2] Open dossier voor: ' + klant + ' (voorbeeld — no-op)'); };
 

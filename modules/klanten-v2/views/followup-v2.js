@@ -67,6 +67,10 @@
     render();
   };
   window.fuDdDo = (label) => { console.info('[followup-v2] dd-item: ' + label + ' (voorbeeld — geen actie)'); };
+  window.__fuNotice = (label) => {
+    console.info('[followup-v2] ' + label + ' (voorbeeld — modal/flow komt in data-ronde)');
+    try { alert(label + ' — komt in de data-ronde.'); } catch (_) { /* ignore */ }
+  };
 
   /* ── VIEW 1: Werklijst (prototype r2844-2994) ─────────────────────── */
   function werklijstView() {
@@ -219,7 +223,7 @@
       `<select class="filter-sel" style="min-width:280px"><option>Forex Masterclass Gent — za 8 aug 10:00</option>
         <option>Forex Masterclass Gent — wo 12 aug 18:00</option><option>Forex Masterclass Gent — za 15 aug 10:00</option></select>`,
       H.chips('st', [{ l: 'Alle', v: 'all', n: 8 }, { l: 'Nog niet gebeld', v: 'nb', n: 3 }, { l: 'Bevestigd', v: 'b', n: 4 }, { l: 'Komt niet', v: 'kn', n: 1 }], F('st', 'all')),
-      `<div class="tb-right"><button class="btn btn-ghost">${svg(I.refresh)}Vernieuwen</button>
+      `<div class="tb-right"><button class="btn btn-ghost" onclick="__fuNotice('Vernieuwen')">${svg(I.refresh)}Vernieuwen</button>
         <button class="btn btn-primary" onclick="DFO.goTab('Werklijst')">${svg(I.phone)}Start belronde</button></div>`,
     ])}
     ${H.kpis([
@@ -247,7 +251,7 @@
     ${H.toolbar([
       H.chips('br', [{ l: 'Alles', v: 'all', n: 12 }, { l: 'Event no-show', v: 'en', n: 5 }, { l: 'Zoom no-show', v: 'zn', n: 3 },
         { l: 'Zoom verzet', v: 'zv', n: 3 }, { l: 'Zoom geannuleerd', v: 'zg', n: 1 }], F('br', 'all')),
-      `<div class="tb-right"><button class="btn btn-ghost">${svg(I.refresh)}Vernieuwen</button></div>`,
+      `<div class="tb-right"><button class="btn btn-ghost" onclick="__fuNotice('Vernieuwen')">${svg(I.refresh)}Vernieuwen</button></div>`,
     ])}
     ${H.table(
       [{ l: 'Naam' }, { l: 'Herkomst' }, { l: 'Event / afspraak', cls: 'optional' }, { l: 'Sinds', cls: 'optional' }, { l: 'Status' }, { l: '', cls: 'r' }],
@@ -306,7 +310,7 @@
       H.chips('t', [{ l: 'Alles', v: 'all', n: 9 }, { l: '📹 Zoom', v: 'z', n: 4 }, { l: '📞 Terugbel', v: 't', n: 3 }, { l: '💤 Wacht', v: 'w', n: 1 }, { l: '✓ Afgehandeld', v: 'a', n: 1 }], F('t', 'all')),
       `<label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text-2)">
         <div class="checkbox on">${svg(I.tick)}</div>Alleen mijn afspraken</label>`,
-      `<div class="tb-right"><button class="btn btn-primary">${svg(I.plus)}Afspraak plannen</button></div>`,
+      `<div class="tb-right"><button class="btn btn-primary" onclick="__fuNotice('Afspraak plannen')">${svg(I.plus)}Afspraak plannen</button></div>`,
     ])}
     ${H.table(
       [{ l: 'Tijd' }, { l: 'Type' }, { l: 'Met' }, { l: 'Onderwerp', cls: 'optional' }, { l: 'Eigenaar', cls: 'optional' }, { l: '', cls: 'r' }],
