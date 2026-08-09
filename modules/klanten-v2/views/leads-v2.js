@@ -1,26 +1,20 @@
 // modules/klanten-v2/views/leads-v2.js
 //
-// Data-ronde — Leads als live-module.
-// Endpoints (bestaand, uit leads.html):
-//   GET /api/leads-list?soort&traject&kwalificatie&bron&status&afspraak
-//                      &q&archief=<0|1>&limit=50&offset=0
-//   GET /api/leads-stats  → { vandaag, nieuw, week_gekwalificeerd }
+// Data-ronde 2 — Leads v2. Live-lijst + v2 detail-view + naam-styling-fix.
+// "Nieuwe lead" blijft naar oude /modules/leads.html?new=1 routeren (de
+// v1-create-flow vereist producten-picker + LMS-provisioning, te complex
+// voor deze ronde — expliciet gemeld in PR-body).
 //
-// Ground truth Actief vs Gearchiveerd (uit leads-list.js:63): actief =
-// verwijderd_op IS NULL, gearchiveerd = verwijderd_op IS NOT NULL (via
-// ?archief=1). Er is GEEN aparte status voor 'gearchiveerd'; het is een
-// soft-delete-vlag.
+// Endpoints:
+//   GET  /api/leads-list?status&bron&q&archief&limit&offset  (lijst)
+//   GET  /api/leads-stats                                     (KPI's)
+//   GET  /api/leads-detail?id=<uuid>                          (detail)
+//   POST /api/leads-update  {id, status?, notitie?, eigenaar_id?} (patch)
 //
-// Status-veld is de funnel-fase: 'nieuw' | 'opgevolgd' | 'gewonnen' |
-// 'verloren' — NIET (Nieuw/Contact/Kwalificatie/Offerte) uit het
-// prototype. We tonen de echte 4 waardes zodat de cijfers matchen met
-// wat leads.html toont.
-//
-// Write: 'Nieuwe lead' → /modules/leads.html (modal daar aanwezig).
-// Row-klik → /modules/leads-detail.html?id=<uuid>.
-//
-// Dormant. Preview ?v2preview=leads (rol super_admin/admin/manager/
-// sales/marketing).
+// URL-state:
+//   ?lead=<uuid>  → open v2-detail
+//   ?lead-new=1   → redirect naar oude leads.html?new=1 (v2-modal niet
+//                   gebouwd; complex-endpoint met producten-eis)
 
 (function () {
   if (!window.DFO) { console.error('[leads-v2] DFO shell niet geladen.'); return; }
@@ -31,6 +25,7 @@
 
   const _act = { loading: false, error: null, data: null, stats: null, seq: 0, params: '' };
   const _arc = { loading: false, error: null, data: null, seq: 0, params: '' };
+  const _det = { loading: false, error: null, data: null, seq: 0, id: null, saving: false, notitieDraft: '' };
 
   async function tryFetch(label, url, timeoutMs = 8000) {
     try {
@@ -42,11 +37,25 @@
     } catch (e) { console.warn('[leads-v2] fetch fail:', label, '→', e?.message || e); return null; }
   }
 
+  async function tryPost(label, url, body, timeoutMs = 12000) {
+    if (!window.KV || !window.KV.authedFetch) throw new Error('KV.authedFetch niet beschikbaar');
+    const resp = await Promise.race([
+      window.KV.authedFetch(url, { method: 'POST', body: JSON.stringify(body) }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), timeoutMs)),
+    ]);
+    const text = await resp.text();
+    const json = text ? JSON.parse(text) : null;
+    if (!resp.ok) { console.warn('[leads-v2] post fail:', label, '→', json?.error || resp.status); throw new Error((json && (json.error || json.message)) || 'HTTP ' + resp.status); }
+    return json;
+  }
+
   const dstr = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return '—'; } };
+  const dstrLong = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return '—'; } };
   const num  = (n) => n == null ? '—' : new Intl.NumberFormat('nl-NL').format(n);
+  const esc  = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
   function previewHeader(label, state) {
-    const err = state?.error ? `<span class="prev-badge-err">${state.error}</span>` : '';
+    const err = state?.error ? `<span class="prev-badge-err">${esc(state.error)}</span>` : '';
     const loading = state?.loading ? `<span class="prev-badge-load">${svg(I.clock || I.settings)} laden…</span>` : '';
     return `<div class="prev-badge">
       <span class="prev-badge-dot"></span>
@@ -56,7 +65,6 @@
     </div>`;
   }
 
-  // Funnel-status pill-mapping (echte v1-waarden).
   const STATUS_TO_PILL = {
     nieuw:     ['info',    'Nieuw'],
     opgevolgd: ['primary', 'Opgevolgd'],
@@ -64,10 +72,43 @@
     verloren:  ['warn',    'Verloren'],
   };
 
-  window.__leadNew  = () => { window.location.href = '/modules/leads.html?new=1'; };
-  window.__leadOpen = (id) => { if (id) window.location.href = '/modules/leads-detail.html?id=' + encodeURIComponent(id); };
+  function urlParam(k) { try { return new URLSearchParams(location.search).get(k); } catch { return null; } }
+  function setUrlParam(k, v) {
+    try {
+      const u = new URL(location.href);
+      if (v == null || v === '') u.searchParams.delete(k); else u.searchParams.set(k, v);
+      history.pushState({}, '', u.toString());
+    } catch (_) { /* noop */ }
+    if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+  }
 
-  // ── ACTIEF ────────────────────────────────────────────────────────────
+  window.__leadNew  = () => { window.location.href = '/modules/leads.html?new=1'; };
+  window.__leadOpen = (id) => { if (id) setUrlParam('lead', id); };
+  window.__leadBack = () => setUrlParam('lead', null);
+
+  window.__leadNotitieInput = (v) => { _det.notitieDraft = v; };
+
+  window.__leadPatch = async (patch) => {
+    if (_det.saving || !_det.id) return;
+    _det.saving = true;
+    window.DFO.render();
+    try {
+      await tryPost('leads-update', '/api/leads-update', { id: _det.id, ...patch });
+      _det.data = null;
+      _act.data = null; _arc.data = null;
+    } catch (e) {
+      alert('Wijziging niet opgeslagen: ' + (e?.message || 'onbekende fout'));
+    }
+    _det.saving = false;
+    window.DFO.render();
+  };
+
+  window.__leadStatusChange = (val) => window.__leadPatch({ status: val });
+  window.__leadNotitieSave = () => {
+    const val = String(_det.notitieDraft || '').trim();
+    window.__leadPatch({ notitie: val });
+  };
+
   function actiefParams() {
     const st = F('lead-st', 'all');
     const bron = F('lead-bron', 'all');
@@ -99,15 +140,12 @@
     window.DFO.render();
   }
 
-  function actiefView() {
-    if (!_act.loading && (!_act.data || _act.params !== actiefParams())) queueMicrotask(fetchActief);
+  function actiefListView() {
     const st = F('lead-st', 'all');
     const bron = F('lead-bron', 'all');
     const items = _act.data?.items || [];
     const total = _act.data?.total ?? null;
     const s = _act.stats || {};
-    // Gem. leadscore uit huidige page (client-side heuristiek — geen
-    // dedicated endpoint. Toon "—" als geen data).
     const scores = items.map(i => Number(i.score)).filter(n => !isNaN(n));
     const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
     return `${previewHeader('Actief', _act)}
@@ -141,9 +179,9 @@
         items.map(l => {
           const [c, pl] = STATUS_TO_PILL[l.status] || ['neutral', l.status || '—'];
           return [
-            `<div class="cell-main-wrap"><div class="av av-sm">${H.av(l.naam || '?')}</div><a href="javascript:__leadOpen('${l.id}')" class="cell-main">${l.naam || '—'}</a></div>`,
-            `<span style="font-size:12.5px;color:var(--text-3)">${l.bron || '—'}</span>`,
-            `<span style="font-size:12.5px;color:var(--text-3)">${l.traject || '—'}</span>`,
+            `<div class="cell-main-wrap"><div class="av av-sm">${H.av(l.naam || '?')}</div><a href="javascript:__leadOpen('${l.id}')" class="ld-name">${esc(l.naam) || '—'}</a></div>`,
+            `<span style="font-size:12.5px;color:var(--text-3)">${esc(l.bron) || '—'}</span>`,
+            `<span style="font-size:12.5px;color:var(--text-3)">${esc(l.traject) || '—'}</span>`,
             H.pill(c, pl),
             `<span class="mono ${(l.score || 0) >= 80 ? 'strong' : ''}">${l.score != null ? l.score : '—'}</span>`,
             `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(l.aangemaakt)}</span>`,
@@ -153,7 +191,13 @@
       ${!items.length && !_act.loading ? `<div class="sv-empty">${_act.error || 'Geen leads met deze filters.'}</div>` : ''}`;
   }
 
-  // ── GEARCHIVEERD ──────────────────────────────────────────────────────
+  function actiefView() {
+    if (urlParam('lead')) return detailView();
+    if (_det.id != null) { _det.id = null; _det.data = null; _det.error = null; _det.notitieDraft = ''; }
+    if (!_act.loading && (!_act.data || _act.params !== actiefParams())) queueMicrotask(fetchActief);
+    return actiefListView();
+  }
+
   function archiefParams() {
     const q = (F('q', '') || '').trim();
     const p = new URLSearchParams();
@@ -178,23 +222,20 @@
     window.DFO.render();
   }
 
-  function archiefView() {
-    if (!_arc.loading && (!_arc.data || _arc.params !== archiefParams())) queueMicrotask(fetchArchief);
+  function archiefListView() {
     const items = _arc.data?.items || [];
     const total = _arc.data?.total ?? null;
     return `${previewHeader('Gearchiveerd (soft-delete via verwijderd_op)', _arc)}
-      ${H.toolbar([
-        H.search('Zoek naam / e-mail / telefoon…'),
-      ])}
+      ${H.toolbar([H.search('Zoek naam / e-mail / telefoon…')])}
       <div class="sv-total">${_arc.loading ? 'Laden…' : (total != null ? `${total} gearchiveerd${total === 1 ? '' : 'e leads'}` : '—')}</div>
       ${H.table(
         [{ l: 'Naam' }, { l: 'Bron', cls: 'optional' }, { l: 'Traject', cls: 'optional' }, { l: 'Laatste status', cls: 'optional' }, { l: 'Aangemaakt', cls: 'r optional' }],
         items.map(l => {
           const [c, pl] = STATUS_TO_PILL[l.status] || ['neutral', l.status || '—'];
           return [
-            `<div class="cell-main-wrap"><div class="av av-sm">${H.av(l.naam || '?')}</div><a href="javascript:__leadOpen('${l.id}')" class="cell-main">${l.naam || '—'}</a></div>`,
-            `<span style="font-size:12.5px;color:var(--text-3)">${l.bron || '—'}</span>`,
-            `<span style="font-size:12.5px;color:var(--text-3)">${l.traject || '—'}</span>`,
+            `<div class="cell-main-wrap"><div class="av av-sm">${H.av(l.naam || '?')}</div><a href="javascript:__leadOpen('${l.id}')" class="ld-name">${esc(l.naam) || '—'}</a></div>`,
+            `<span style="font-size:12.5px;color:var(--text-3)">${esc(l.bron) || '—'}</span>`,
+            `<span style="font-size:12.5px;color:var(--text-3)">${esc(l.traject) || '—'}</span>`,
             H.pill(c, pl),
             `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(l.aangemaakt)}</span>`,
           ];
@@ -203,9 +244,161 @@
       ${!items.length && !_arc.loading ? `<div class="sv-empty">${_arc.error || 'Geen gearchiveerde leads.'}</div>` : ''}`;
   }
 
+  function archiefView() {
+    if (urlParam('lead')) return detailView();
+    if (_det.id != null) { _det.id = null; _det.data = null; _det.error = null; _det.notitieDraft = ''; }
+    if (!_arc.loading && (!_arc.data || _arc.params !== archiefParams())) queueMicrotask(fetchArchief);
+    return archiefListView();
+  }
+
+  async function fetchDetail(id) {
+    if (_det.loading && _det.id === id) return;
+    const seq = ++_det.seq;
+    _det.loading = true; _det.error = null; _det.id = id;
+    window.DFO.render();
+    const data = await tryFetch('leads-detail', '/api/leads-detail?id=' + encodeURIComponent(id));
+    if (seq !== _det.seq) return;
+    _det.data = data;
+    _det.notitieDraft = data?.notitie || '';
+    _det.loading = false;
+    if (!data) _det.error = 'Kon lead-detail niet laden';
+    window.DFO.render();
+  }
+
+  function detailView() {
+    const id = urlParam('lead');
+    if (!id) return '';
+    if (!_det.loading && (!_det.data || _det.id !== id)) queueMicrotask(() => fetchDetail(id));
+    const d = _det.data || {};
+    const l = d.lead || {};
+    const antw = Array.isArray(d.antwoorden) ? d.antwoorden : [];
+    const messages = Array.isArray(d.messages) ? d.messages : [];
+    const eigenaar = d.eigenaar || null;
+    const [sc, sl] = STATUS_TO_PILL[l.status] || ['neutral', l.status || '—'];
+    return `${previewHeader('Lead-detail · live', _det)}
+      <div class="tk-det-head">
+        <button class="btn" onclick="__leadBack()">← Terug naar lijst</button>
+        <div class="tk-det-title">${esc(l.naam) || (_det.loading ? 'Laden…' : '—')}</div>
+        <div class="tk-det-meta">
+          ${H.pill(sc, sl)}
+          ${l.bron ? `<span class="pill pill-neutral">${esc(l.bron)}</span>` : ''}
+          ${l.score != null ? `<span class="pill pill-neutral">Score ${l.score}${l.drempel ? ' / ' + l.drempel : ''}</span>` : ''}
+        </div>
+      </div>
+      <div class="tk-det-grid">
+        <div class="tk-det-main">
+          <div class="sv-card">
+            <div class="sv-card-head">${svg(I.doc)}Contactgegevens</div>
+            <div class="sv-card-body">
+              <div class="sv-row"><span>E-mail</span><b class="mono" style="font-size:12.5px">${esc(l.email) || '—'}</b></div>
+              <div class="sv-row"><span>Telefoon</span><b class="mono" style="font-size:12.5px">${esc(l.telefoon) || '—'}</b></div>
+              <div class="sv-row"><span>Soort</span><b>${esc(l.soort) || '—'}</b></div>
+              <div class="sv-row"><span>Traject</span><b>${esc(l.traject) || '—'}</b></div>
+              <div class="sv-row"><span>Kwalificatie</span><b>${esc(l.kwalificatie) || '—'}</b></div>
+              <div class="sv-row"><span>Aangemaakt</span><b>${dstrLong(l.aangemaakt)}</b></div>
+              ${l.afspraak_op ? `<div class="sv-row"><span>Afspraak op</span><b>${dstrLong(l.afspraak_op)}</b></div>` : ''}
+            </div>
+          </div>
+
+          <div class="sv-card">
+            <div class="sv-card-head">${svg(I.doc)}Notitie</div>
+            <div class="sv-card-body">
+              <textarea class="ib-input tk-textarea" rows="4" placeholder="Interne notitie over deze lead…" oninput="__leadNotitieInput(this.value)">${esc(_det.notitieDraft)}</textarea>
+              <div class="tk-comment-form-foot">
+                <button class="btn btn-primary" onclick="__leadNotitieSave()" ${_det.saving ? 'disabled' : ''}>
+                  ${_det.saving ? svg(I.clock || I.settings) + 'Bezig…' : svg(I.check) + 'Notitie opslaan'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          ${antw.length ? `<div class="sv-card">
+            <div class="sv-card-head">${svg(I.doc)}Antwoorden (uit intake)</div>
+            <div class="sv-card-body">
+              ${antw.map(a => `<div class="ld-antw">
+                <div class="ld-antw-q">${esc(a.vraag) || esc(a.q) || '—'}</div>
+                <div class="ld-antw-a">${esc(a.antwoord) || esc(a.a) || '—'}</div>
+              </div>`).join('')}
+            </div>
+          </div>` : ''}
+
+          ${messages.length ? `<div class="sv-card">
+            <div class="sv-card-head">${svg(I.mail)}Berichten · ${num(messages.length)}</div>
+            <div class="sv-card-body">
+              ${messages.slice(0, 10).map(m => `<div class="tk-comment">
+                <div class="tk-comment-head">
+                  <div class="tk-comment-who">${esc(m.kanaal || m.type) || 'Bericht'}</div>
+                  <div class="tk-comment-time">${dstrLong(m.aangemaakt || m.created_at)}</div>
+                </div>
+                <div class="tk-comment-body">${esc(m.body || m.tekst) || '—'}</div>
+              </div>`).join('')}
+            </div>
+          </div>` : ''}
+        </div>
+
+        <div class="tk-det-side">
+          <div class="sv-card">
+            <div class="sv-card-head">${svg(I.check)}Status wijzigen</div>
+            <div class="sv-card-body">
+              <select class="ib-input" onchange="__leadStatusChange(this.value)" ${_det.saving ? 'disabled' : ''}>
+                <option value="nieuw"     ${l.status === 'nieuw' ? 'selected' : ''}>Nieuw</option>
+                <option value="opgevolgd" ${l.status === 'opgevolgd' ? 'selected' : ''}>Opgevolgd</option>
+                <option value="gewonnen"  ${l.status === 'gewonnen' ? 'selected' : ''}>Gewonnen</option>
+                <option value="verloren"  ${l.status === 'verloren' ? 'selected' : ''}>Verloren</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="sv-card">
+            <div class="sv-card-head">${svg(I.users)}Eigenaar</div>
+            <div class="sv-card-body">
+              ${eigenaar ? `<div class="sv-row"><span>Naam</span><b>${esc(eigenaar.naam) || '—'}</b></div>
+                <div class="sv-row"><span>E-mail</span><b class="mono" style="font-size:11.5px">${esc(eigenaar.email) || '—'}</b></div>` : `<div style="font-size:12.5px;color:var(--text-3)">${_det.loading ? 'Laden…' : 'Nog geen eigenaar toegewezen.'}</div>`}
+              <div style="margin-top:8px;font-size:11.5px;color:var(--text-3)">Eigenaar-wijziging via /modules/leads-detail.html (v2-picker komt in ronde 3)</div>
+            </div>
+          </div>
+
+          <div class="sv-card">
+            <div class="sv-card-head">${svg(I.settings)}Lead-info</div>
+            <div class="sv-card-body">
+              <div class="sv-row"><span>Score</span><b>${l.score != null ? l.score : '—'}${l.drempel ? ' / ' + l.drempel : ''}</b></div>
+              <div class="sv-row"><span>Tag</span><b>${esc(l.tag) || '—'}</b></div>
+              <div class="sv-row"><span>Lead-ID</span><b class="mono" style="font-size:11px">${esc(String(l.id || '').slice(0, 8))}…</b></div>
+            </div>
+          </div>
+
+          <div class="sv-card">
+            <div class="sv-card-head">${svg(I.warn)}Meer acties</div>
+            <div class="sv-card-body">
+              <div style="font-size:12.5px;color:var(--text-3);line-height:1.55">
+                Deze acties zitten nog in de oude detail-page:
+                <ul style="margin:8px 0 0 20px;padding:0;line-height:1.6">
+                  <li>Archiveer / herstel</li>
+                  <li>Omzetten naar klant</li>
+                  <li>Uitgebreid bewerken (velden buiten status/notitie/eigenaar)</li>
+                </ul>
+              </div>
+              <div style="margin-top:10px">
+                <a class="btn btn-sm" href="/modules/leads-detail.html?id=${encodeURIComponent(l.id || '')}" target="_blank">${svg(I.settings)}Open oude detail-page ↗</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
   window.DFO.VIEWS['leads/Actief']       = actiefView;
   window.DFO.VIEWS['leads/Gearchiveerd'] = archiefView;
+
+  window.addEventListener('popstate', () => {
+    if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (urlParam('lead')) { e.preventDefault(); window.__leadBack(); }
+  });
+
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('leads');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('leads');
-  console.debug('[leads-v2] registered 2 views (data-round · live /api/leads-list + /api/leads-stats)');
+  console.debug('[leads-v2] registered 2 views + detail (data-ronde 2)');
 })();
