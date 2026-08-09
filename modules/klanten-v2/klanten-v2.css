@@ -1895,4 +1895,161 @@ textarea.inp { max-width: 520px; min-height: 90px; resize: vertical; line-height
   border-radius: 10px; box-shadow: 0 2px 12px rgba(0,0,0,.08);
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   Data-ronde #1 — Sales-module (live endpoints, safety-rules)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Preview-badge (vervangt VOORBEELD-banner nu er live data is). */
+.prev-badge {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 14px; margin: 0 0 12px;
+  background: color-mix(in srgb, var(--brand) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand) 25%, transparent);
+  border-radius: 8px;
+  font-size: 12px; color: var(--text-2);
+}
+.prev-badge-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 15%, transparent);
+  flex-shrink: 0;
+}
+.prev-badge b { color: var(--brand); font-weight: 600; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+.prev-badge-lbl { color: var(--text-3); font-size: 11.5px; }
+.prev-badge-load {
+  display: inline-flex; align-items: center; gap: 4px;
+  color: var(--text-3); font-size: 11.5px; margin-left: auto;
+}
+.prev-badge-load svg { width: 12px; height: 12px; animation: sv-spin 1.4s linear infinite; }
+.prev-badge-err {
+  color: var(--warn, var(--orange)); font-size: 11.5px; margin-left: auto;
+}
+@keyframes sv-spin { to { transform: rotate(360deg); } }
+
+/* Avatar + naam-uitlijning in tabel-cellen. Was voorheen ongesizede div →
+   avatar en tekst stonden op tekstbaseline, avatar-balletje half boven de
+   naam. Nu strikt flex-centered met text-truncation. Gebruikt door sales-v2,
+   leads-v2, leadsonderhoud-v2, lisa-v2, wanbetalers-v2. */
+.cell-main-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.cell-main-wrap .av {
+  flex-shrink: 0;
+}
+.cell-main-wrap .cell-main {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sv-grid (Dashboard + Prestaties: 3-column card-grid) */
+.sv-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+  margin-top: 12px;
+}
+@media (max-width: 1100px) { .sv-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 720px)  { .sv-grid { grid-template-columns: 1fr; } }
+.sv-card {
+  border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface); overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.sv-card-wide { grid-column: 1 / -1; }
+.sv-card-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px; border-bottom: 1px solid var(--line);
+  font-size: 13px; font-weight: 600;
+}
+.sv-card-head svg { width: 15px; height: 15px; color: var(--brand); }
+.sv-card-body { padding: 8px 14px 14px; }
+.sv-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 2px; border-bottom: 1px solid var(--line-subtle, var(--line));
+  font-size: 13px;
+}
+.sv-row:last-child { border-bottom: 0; }
+.sv-row span { color: var(--text-2); }
+.sv-row b { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-weight: 600; }
+
+.sv-recent {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 2px; border-bottom: 1px solid var(--line-subtle, var(--line));
+}
+.sv-recent:last-child { border-bottom: 0; }
+.sv-recent-l { flex: 1; min-width: 0; }
+.sv-recent-l .cell-main { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sv-recent-sub { font-size: 11.5px; color: var(--text-3); margin-top: 1px; }
+.sv-recent-r { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.sv-recent-r .mono { font-size: 12.5px; font-weight: 600; }
+
+.sv-empty {
+  padding: 18px 6px; text-align: center;
+  font-size: 12.5px; color: var(--text-3);
+}
+.sv-total {
+  padding: 8px 4px; font-size: 12px; color: var(--text-3);
+}
+
+/* Prestaties/trend — bar-chart */
+.sv-trend {
+  display: flex; align-items: flex-end; gap: 6px;
+  height: 160px; padding: 8px 4px 0;
+  border-bottom: 1px solid var(--line);
+}
+.sv-trend-col {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  gap: 4px; min-width: 0;
+}
+.sv-trend-bar {
+  width: 100%; max-width: 40px;
+  background: linear-gradient(180deg, var(--brand), color-mix(in srgb, var(--brand) 55%, transparent));
+  border-radius: 4px 4px 0 0;
+  transition: height .6s cubic-bezier(.32,.72,0,1);
+}
+.sv-trend-lbl {
+  font-size: 10px; color: var(--text-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Offerte-nr (subtieler dan cell-main): lichter gewicht, gedempte kleur,
+   monospace zodat referenties uitlijnen. Klik-underline op hover. */
+.sv-off-nr {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--text-2);
+  text-decoration: none;
+  cursor: pointer;
+}
+.sv-off-nr:hover { color: var(--brand); text-decoration: underline; }
+
+/* Sub-tekst in sv-row (bijv. "5 deals" naast verkoper-naam) */
+.sv-row-sub {
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+/* Custom-datum-range voor Verkoopprestaties (verschijnt onder chips als
+   Custom actief is). 2 date-inputs, inline naast elkaar. */
+.sv-custom-range {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 4px 4px;
+  font-size: 12.5px; color: var(--text-2);
+}
+.sv-custom-range label { display: inline-flex; align-items: center; gap: 6px; }
+.sv-custom-range input[type="date"] {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-1);
+  font-family: inherit; font-size: 12.5px;
+}
+
 

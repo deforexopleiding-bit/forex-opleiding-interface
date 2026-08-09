@@ -1,297 +1,535 @@
 // modules/klanten-v2/views/sales-v2.js
 //
-// Fase C module #1 — Sales-module layout voor v2-shell (layout-only, voorbeeld-data).
-// 1-op-1 render uit docs/redesign/systeemprototype-v45.html:
-//   - dashSalesModule                        r2421-2467  (rolspecifiek KPI's + funnel + gauge + leaderboard)
-//   - VIEWS['sales/Dashboard']               r2468       (= dashSalesModule)
-//   - VIEWS['sales/Offertes']                r2469-2490
-//   - VIEWS['sales/Retentie']                r2491-2507
-//   - VIEWS['sales/Verkoopprestaties']       r2508-2521
-//   - OFFERTES + OST                         r1321-1329
-//   - RETENTIE + RST                         r1356-1362
-//   - hbar / funnel / dashCard / targetGauge r1440-1463  (dashboard-componenten)
+// Data-ronde #1 — Sales als referentie-module.
+// Live data via bestaande endpoints (geen nieuwe backend, hergebruik wat
+// sales.html + dashboard nu al draaien):
+//   Dashboard         → /api/sales-dashboard-stats
+//                     + /api/sales-dashboard-metrics
+//                     + /api/sales-pending-subscriptions
+//   Offertes          → /api/sales-quotations?status&search&owned_by_me
+//   Retentie          → /api/sales-retention?owned_by_me
+//   Verkoopprestaties → /api/sales-reports?from&to&group_by
 //
-// Non-ES-module. Consumeert shared helpers uit window.KV_V2.helpers.
+// SAFETY (identiek aan dashboard-v2.js patroon):
+//   - Render meteen; async invullen — nooit blokkeren op fetch.
+//   - 8s timeout per call (Promise.race); faal → nette "—"/lege staat.
+//   - Sequence-tracking per tab tegen race-condities.
+//   - _live.loading als render-loop-guard (auto-fetch-hook checkt !loading).
+//   - Alleen bestaande endpoints, GEEN nieuwe backend.
+//   - Write-acties routeren naar /modules/sales-wizard.html (bestaand).
 //
-// Registreert 4 views + KV_V2_ADD('sales') — dormant onder V2_ACTIVE_ALLOWLIST
-// tot data-ronde. Preview-review via `?v2preview=sales` URL-param.
+// Dormant (niet in V2_ACTIVE_ALLOWLIST). Bereikbaar via ?v2preview=sales.
 
 (function () {
   if (!window.DFO) { console.error('[sales-v2] DFO shell niet geladen.'); return; }
   if (!window.KV_V2 || !window.KV_V2.helpers) { console.error('[sales-v2] KV_V2.helpers niet geladen.'); return; }
 
-  const { I, svg, S, F, eur, eur0, render } = window.DFO;
+  const { I, svg, F, setF } = window.DFO;
   const H = window.KV_V2.helpers;
+  const K = () => window.KV;
 
-  /* ── Voorbeeld-data (prototype r1321-1362) ────────────────────────── */
-  const OFFERTES = [
-    { nr: 'OFF-2026-214', klant: 'Cabdi Ibrahim',       totaal: 7200, status: 'geaccepteerd', datum: '01-08-2026', verkoper: 'Joost',   traject: '12 maand 1-op-1',      abo: true },
-    { nr: 'OFF-2026-219', klant: 'Stéphane Seutin',     totaal: 7200, status: 'verzonden',    datum: '03-08-2026', verkoper: 'Jeffrey', traject: '12 maand 1-op-1',      abo: true },
-    { nr: 'OFF-2026-221', klant: 'Emile Rabaut',        totaal: 3950, status: 'geaccepteerd', datum: '04-08-2026', verkoper: 'Joost',   traject: '6 maand 1-op-1',       abo: true },
-    { nr: 'OFF-2026-223', klant: 'Rachael Njoki',       totaal: 3950, status: 'concept',      datum: '05-08-2026', verkoper: 'Jeffrey', traject: '6 maand 1-op-1',       abo: false },
-    { nr: 'OFF-2026-208', klant: 'Iwan Engelbracht',    totaal: 2400, status: 'verzonden',    datum: '29-07-2026', verkoper: 'Joost',   traject: '36 maand membership',  abo: false },
-    { nr: 'OFF-2026-201', klant: 'Alfred Gregoor',      totaal: 7200, status: 'afgewezen',    datum: '22-07-2026', verkoper: 'Jeffrey', traject: '12 maand 1-op-1',      abo: false },
-  ];
-  const OST = {
-    concept:      { l: 'Concept',      c: 'neutral' },
-    verzonden:    { l: 'Verzonden',    c: 'accent'  },
-    geaccepteerd: { l: 'Geaccepteerd', c: 'ok'      },
-    afgewezen:    { l: 'Afgewezen',    c: 'danger'  },
-  };
-  const RETENTIE = [
-    { klant: 'Jan Willem Bel',      plan: '12 maand 1-op-1',     eind: '12-05-2027', resterend: 8, mrr: 600, eigenaar: 'Joost',   status: 'nog niet benaderd' },
-    { klant: 'Valentine Manisha',   plan: '12 maand membership', eind: '02-02-2027', resterend: 5, mrr:  80, eigenaar: 'Jeffrey', status: 'in gesprek' },
-    { klant: 'Emile Rabaut',        plan: '6 maand 1-op-1',      eind: '04-02-2027', resterend: 5, mrr: 658, eigenaar: 'Joost',   status: 'verlengd' },
-    { klant: 'Karim Alian',         plan: '6 maand 1-op-1',      eind: '10-01-2027', resterend: 5, mrr: 658, eigenaar: 'Jeffrey', status: 'wil stoppen' },
-  ];
-  const RST = {
-    'nog niet benaderd': { l: 'Nog niet benaderd', c: 'neutral' },
-    'in gesprek':        { l: 'In gesprek',        c: 'accent'  },
-    'verlengd':          { l: 'Verlengd',          c: 'ok'      },
-    'wil stoppen':       { l: 'Wil stoppen',       c: 'danger'  },
+  // ── State per tab (los zodat cross-tab-fetches niet elkaars data raken) ──
+  // Dashboard-state: houdt ook company-scope-slices bij (report + accepted-deals)
+  // die alleen fetch't worden voor super_admin/manager. Rol-check gebeurt bij
+  // elke fetchDashboard — bij rol-wissel triggert de shell een re-render en de
+  // fetcher merkt het via de `boot`-hook (params-verandering equivalent).
+  const _dash = { loading: false, error: null, stats: null, metrics: null, pending: null, companyReport: null, companyAccepted: null, seq: 0, boot: false, bootRole: '' };
+  const _off  = { loading: false, error: null, data: null, seq: 0, params: '' };
+  const _ret  = { loading: false, error: null, data: null, seq: 0, params: '' };
+  // Reports: naast sales-reports slaan we ook accepted-deals van dezelfde
+  // periode op. Alle omzet-KPI's (main + per-verkoper) worden client-side
+  // uit sales-quotations gesommeerd via total_amount_incl (leidende definitie
+  // van de gebruiker: OMZET = getekende offertes INCL. BTW).
+  const _rep  = { loading: false, error: null, data: null, accepted: null, seq: 0, params: '', customFrom: '', customTo: '' };
+
+  // Rol-detectie: super_admin/manager/admin → company-view. Anders (sales/
+  // mentor/marketing/administratie) → mijn-view. Prefer admin bij overlap.
+  const isAdminRole = () => {
+    const r = (window.DFO && window.DFO.S && window.DFO.S.roles) || [];
+    return r.includes('super_admin') || r.includes('manager') || r.includes('admin');
   };
 
-  /* ── Dashboard-componenten (prototype r1441-1463) ─────────────────── */
-  const hbar = (label, val, max, color, right) => `<div style="display:flex;align-items:center;gap:12px;margin-bottom:11px">
-    <div style="width:118px;font-size:12.5px;color:var(--text-2);flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}</div>
-    <div class="progress" style="flex:1;height:8px"><i style="width:${max ? Math.round(val / max * 100) : 0}%;background:var(--${color})"></i></div>
-    <div style="width:82px;text-align:right;font-size:12.5px;font-weight:600;font-family:'IBM Plex Mono',monospace">${right}</div></div>`;
+  // Date-helpers voor periode-fetches (start-of-month + range voor prestaties).
+  const isoDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10);
+  const monthStart = () => { const d = new Date(); return isoDay(new Date(d.getFullYear(), d.getMonth(), 1)); };
+  const todayIso   = () => isoDay(new Date());
 
-  const funnel = (stages) => {
-    const mx = stages[0][1];
-    return `<div style="padding:2px 0">${stages.map(([l, v], i) => {
-      const w = Math.round(v / mx * 100), conv = i > 0 ? Math.round(v / stages[i - 1][1] * 100) : 100;
-      return `<div style="margin-bottom:${i < stages.length - 1 ? '13px' : '0'}">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12.5px;margin-bottom:5px">
-          <span style="color:var(--text-2);font-weight:500">${l}</span>
-          <span style="font-family:'IBM Plex Mono',monospace;font-weight:600">${v}${i > 0 ? `<span style="color:var(--text-3);font-weight:400;font-size:11.5px"> · ${conv}%</span>` : ''}</span></div>
-        <div style="height:24px;background:var(--surface-2);border-radius:7px;overflow:hidden">
-          <div style="height:100%;width:${w}%;background:linear-gradient(90deg,var(--m),color-mix(in srgb,var(--m) 55%,var(--surface)));border-radius:7px;transition:width .6s cubic-bezier(.32,.72,0,1)"></div></div>
-      </div>`;
-    }).join('')}</div>`;
+  // ── tryFetch: race met 8s-timeout, fail-soft null-return + console.warn ──
+  async function tryFetch(label, url, timeoutMs = 8000) {
+    try {
+      if (!window.KV || !window.KV.authedJson) throw new Error('KV.authedJson niet beschikbaar');
+      return await Promise.race([
+        window.KV.authedJson(url),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), timeoutMs)),
+      ]);
+    } catch (e) {
+      console.warn('[sales-v2] fetch fail:', label, '→', e?.message || e);
+      return null;
+    }
+  }
+
+  // Format-helpers (fallback op eigen Intl als DFO.eur / eur0 niet aanwezig).
+  const eur  = window.DFO.eur  || ((n) => n == null ? '—' : new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 }).format(n));
+  const eur0 = window.DFO.eur0 || ((n) => n == null ? '—' : new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n));
+  const dstr = (iso) => { if (!iso) return '—'; try { const d = new Date(iso); return d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return '—'; } };
+  const num  = (n) => n == null ? '—' : new Intl.NumberFormat('nl-NL').format(n);
+
+  // Preview-mode badge (vervangt VOORBEELD-banner nu er live data is).
+  function previewHeader(label, extra) {
+    const err = extra?.error ? `<span class="prev-badge-err">${extra.error}</span>` : '';
+    const loading = extra?.loading ? `<span class="prev-badge-load">${svg(I.clock || I.settings)} laden…</span>` : '';
+    return `<div class="prev-badge">
+      <span class="prev-badge-dot"></span>
+      <b>PREVIEW · live data</b>
+      <span class="prev-badge-lbl">${label}</span>
+      ${loading}${err}
+    </div>`;
+  }
+
+  const OST_TO_PILL = {
+    draft:     ['neutral', 'Concept'],
+    sent:      ['info',    'Verzonden'],
+    accepted:  ['ok',      'Geaccepteerd'],
+    declined:  ['warn',    'Afgewezen'],
+    cancelled: ['neutral', 'Geannuleerd'],
   };
 
-  const dashCard = (title, dotColor, body, extra) => `<div class="card">
-    <div class="card-head" style="border-bottom:none;padding-bottom:6px">
-      <span class="title-dot" style="background:var(--${dotColor});box-shadow:0 0 0 3px var(--${dotColor}-soft)"></span>
-      <div class="card-title">${title}</div>${extra || ''}</div>
-    <div class="card-body" style="padding:8px 17px 17px">${body}</div></div>`;
-
-  const targetGauge = (behaald, target, color) => {
-    const pct = Math.min(100, Math.round(behaald / target * 100));
-    return `<div style="text-align:center;padding:6px 0 2px">
-      <div style="font-size:32px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.04em;color:var(--${color})">${pct}%</div>
-      <div style="font-size:12px;color:var(--text-3);margin:3px 0 13px">${eur0(behaald)} van ${eur0(target)} target</div>
-      <div class="progress" style="height:10px"><i style="width:${pct}%;background:var(--${color})"></i></div></div>`;
+  const RET_STATUS_TO_PILL = (item) => {
+    if (item.retention_not_renewing) return ['warn', 'Niet verlengen'];
+    if ((item.days_left || 0) < 0)   return ['warn', 'Afgelopen'];
+    if ((item.days_left || 0) <= 14) return ['info', `Nog ${item.days_left} d`];
+    return ['neutral', `Nog ${item.days_left} d`];
   };
 
-  /* ── Notice-handler voor dode action-knoppen ──────────────────────── */
-  window.__salesNotice = (label) => {
-    console.info('[sales-v2] ' + label + ' (voorbeeld — modal/flow komt in data-ronde)');
-    try { alert(label + ' — komt in de data-ronde.'); } catch (_) { /* ignore */ }
-  };
-  window.__salesOpenOfferte = (i) => { console.info('[sales-v2] openOfferte idx=' + i + ' (voorbeeld — panel komt in data-ronde)'); };
-  window.__salesOpenRetentie = (i) => { console.info('[sales-v2] openRetentie idx=' + i + ' (voorbeeld — panel komt in data-ronde)'); };
-
-  /* ── VIEW: Sales/Dashboard (prototype r2421-2468) ─────────────────── */
-  function salesDashboardView() {
-    const isSales = S.role === 'sales' || S.role === 'mentor';
-    const meName = 'Joost'; // dashboard-mock verwacht Joost als "me" voor de leaderboard-highlight
-    const kpiArr = isSales ? [
-      { c: 'violet',  icon: I.tick,   label: 'Mijn omzet',        val: eur0(10713), sub: '2 getekend deze maand', trend: H.trend('+40%', true) },
-      { c: 'blue',    icon: I.doc,    label: 'Mijn pijplijn',     val: eur0(9600),  sub: '2 offertes open' },
-      { c: 'emerald', icon: I.target, label: 'Mijn conversie',    val: '67%',        hi: 1, sub: 'laatste 30 dagen', trend: H.trend('+7%', true) },
-      { c: 'amber',   icon: I.phone,  label: 'Te bellen vandaag', val: '8',          hi: 1, sub: 'leads en follow-ups' },
-    ] : [
-      { c: 'violet',  icon: I.tick,   label: 'Omzet getekend',    val: eur0(26250), sub: 'deze maand', trend: H.trend('+18%', true) },
-      { c: 'blue',    icon: I.doc,    label: 'Open in pijplijn',  val: eur0(24800), sub: '6 offertes onderweg' },
-      { c: 'emerald', icon: I.target, label: 'Conversie',         val: '38%',        hi: 1, sub: 'verzonden → getekend', trend: H.trend('+6%', true) },
-      { c: 'amber',   icon: I.euro,   label: 'Gem. dealwaarde',   val: eur0(5250),  sub: 'laatste 30 dagen' },
+  // ── DASHBOARD ────────────────────────────────────────────────────────────
+  // Rol-bewust: super_admin/manager → company-view (bedrijfsbreed);
+  // sales/mentor/... → mijn-view (uit sales-dashboard-metrics).
+  //
+  // OMZET-definitie (per user): som van GETEKENDE (geaccepteerde) offertes
+  // INCL. BTW, met accepted_at in de periode. Voor company-view halen we
+  // dus /api/sales-quotations?status=accepted (page_size=250) en sommeren
+  // client-side total_amount_incl per accepted_at-filter (huidige maand voor
+  // dashboard, gekozen range voor prestaties). Als total > 250: console.warn.
+  //
+  // Highest deal company: max op total_amount_incl over dezelfde set.
+  //
+  // Sales-dashboard-metrics.my_revenue_month is excl-BTW — die blijft voor
+  // "mijn"-view zoals-is (matcht wat sales.html toont voor Sales-rol).
+  async function fetchDashboard() {
+    if (_dash.loading) return;
+    const admin = isAdminRole();
+    const seq = ++_dash.seq;
+    _dash.loading = true; _dash.error = null; _dash.bootRole = admin ? 'admin' : 'own';
+    window.DFO.render();
+    const calls = [
+      tryFetch('sales-dashboard-stats',       '/api/sales-dashboard-stats'),
+      tryFetch('sales-dashboard-metrics',     '/api/sales-dashboard-metrics'),
+      tryFetch('sales-pending-subscriptions', '/api/sales-pending-subscriptions'),
+      admin ? tryFetch('sales-accepted-month', '/api/sales-quotations?status=accepted&page=1&page_size=250') : Promise.resolve(null),
     ];
-    const fun = isSales
-      ? [['Mijn leads', 48], ['Gekwalificeerd', 21], ['Offerte verstuurd', 8], ['Getekend', 5]]
-      : [['Leads', 101], ['Gekwalificeerd', 42], ['Offerte verstuurd', 18], ['Getekend', 11]];
-    const bronnen = isSales
-      ? [['Meta Ads', 22, '14%', 'violet'], ['Event Gent', 14, '36%', 'pink'], ['Website', 8, '25%', 'blue'], ['Instagram', 4, '10%', 'teal']]
-      : [['Meta Ads', 52, '12%', 'violet'], ['Event Gent', 24, '31%', 'pink'], ['Website', 15, '22%', 'blue'], ['Instagram', 10, '9%', 'teal']];
-    const bmax = Math.max(...bronnen.map(x => x[1]));
-    const behaald = isSales ? 10713 : 26250;
-    const target = isSales ? 15000 : 40000;
-    const board = [['Joost', 3, 2, 67, 10713, 1071], ['Jeffrey', 4, 1, 25, 2000, 200]];
-    const offs = OFFERTES.filter(o => o.status === 'verzonden' && (!isSales || o.verkoper === meName));
-
-    const offsCard = dashCard('Openstaande offertes — op te volgen', 'slate',
-      offs.length
-        ? H.table(
-            [{ l: 'Offerte' }, { l: 'Klant' }, { l: 'Traject', cls: 'optional' }, { l: 'Verzonden', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }],
-            offs.map(o => [
-              `<span class="cell-main mono">${o.nr}</span>`,
-              `<div class="row-avatar">${H.av(o.klant, 26)}<span>${o.klant}</span></div>`,
-              o.traject,
-              `<span style="color:var(--text-3)">${o.datum}</span>`,
-              `<span class="money">${eur0(o.totaal)}</span>`,
-            ])
-          )
-        : `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:13px">Geen openstaande offertes — mooi opgeruimd 👍</div>`
-    );
-
-    const leaderboard = dashCard('Verkopers-leaderboard', 'amber',
-      H.table(
-        [{ l: 'Verkoper' }, { l: 'Off.', cls: 'r' }, { l: 'Getekend', cls: 'r' }, { l: 'Conversie', cls: 'r' }, { l: 'Omzet', cls: 'r' }, { l: 'Bonus', cls: 'r' }],
-        board.map(([n, o, g, c, om, bo]) => [
-          `<div class="row-avatar">${H.av(n, 26)}<span class="cell-main">${n}</span></div>`,
-          `<span class="mono">${o}</span>`,
-          `<span class="mono">${g}</span>`,
-          H.pill(c >= 50 ? 'ok' : 'warn', c + '%'),
-          `<span class="money">${eur0(om)}</span>`,
-          `<span class="money">${eur0(bo)}</span>`,
-        ])
-      )
-    );
-
-    return `${H.voorbeeldBanner()}
-    ${H.kpis(kpiArr)}
-    <div class="pad" style="padding-top:16px">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
-        ${dashCard('Verkooptrechter' + (isSales ? ' — mijn deals' : ''), 'violet', funnel(fun))}
-        ${dashCard('Omzet vs. target' + (isSales ? '' : ' · team'), 'emerald',
-          targetGauge(behaald, target, 'emerald')
-          + `<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:15px">
-              <div style="border:1px solid var(--border);border-radius:var(--r);padding:11px 13px"><div style="font-size:11.5px;color:var(--text-2);margin-bottom:4px">Nog te gaan</div><div class="mono" style="font-size:17px;font-weight:600">${eur0(target - behaald)}</div></div>
-              <div style="border:1px solid var(--border);border-radius:var(--r);padding:11px 13px"><div style="font-size:11.5px;color:var(--text-2);margin-bottom:4px">Dagen resterend</div><div class="mono" style="font-size:17px;font-weight:600">24</div></div></div>`)}
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;margin-top:14px">
-        ${dashCard('Conversie per bron', 'blue', bronnen.map(([l, v, r, c]) => hbar(l, v, bmax, c, r)).join(''))}
-        ${isSales ? offsCard : leaderboard}
-      </div>
-      ${isSales ? '' : `<div style="margin-top:14px">${offsCard}</div>`}
-    </div>`;
+    const [stats, metrics, pending, companyAccepted] = await Promise.all(calls);
+    if (seq !== _dash.seq) return;
+    _dash.stats = stats; _dash.metrics = metrics; _dash.pending = pending;
+    _dash.companyAccepted = companyAccepted;
+    _dash.loading = false;
+    if (stats == null && metrics == null && pending == null) _dash.error = 'Alle dashboard-calls faalden';
+    if (admin && companyAccepted && companyAccepted.total > 250) {
+      console.warn('[sales-v2] company-accepted total > 250 (' + companyAccepted.total + ') — omzet+hoogste-deal berekend op eerste 250 rijen');
+    }
+    window.DFO.render();
   }
 
-  /* ── VIEW: Sales/Offertes (prototype r2469-2490) ──────────────────── */
+  // Client-side aggregatie over accepted deals waarvan accepted_at in
+  // [fromIso, toIso] valt. Returnt { totalIncl, totalExcl, count, highestIncl }.
+  // Fallback: als total_amount_incl null is → val terug op total_amount (excl)
+  // zodat de deal in ieder geval meetelt in count/totaal (nieuwe/handmatige
+  // deals kunnen incl-veld missen als TL de sync nog niet deed).
+  function acceptedAgg(list, fromIso, toIso) {
+    let totalIncl = 0, totalExcl = 0, count = 0, highestIncl = null;
+    for (const q of (list || [])) {
+      const dt = q.accepted_at || q.sent_at || q.created_at;
+      if (!dt) continue;
+      const day = String(dt).slice(0, 10);
+      if (day < fromIso || day > toIso) continue;
+      const incl = Number(q.total_amount_incl) || Number(q.total_amount) || 0;
+      const excl = Number(q.total_amount) || 0;
+      totalIncl += incl; totalExcl += excl; count++;
+      if (highestIncl == null || incl > highestIncl) highestIncl = incl;
+    }
+    return { totalIncl, totalExcl, count, highestIncl };
+  }
+
+  function dashboardView() {
+    const admin = isAdminRole();
+    const wantedRole = admin ? 'admin' : 'own';
+    if (!_dash.loading && (!_dash.boot || _dash.bootRole !== wantedRole)) {
+      _dash.boot = true;
+      queueMicrotask(fetchDashboard);
+    }
+    const m = _dash.metrics || {};
+    const s = _dash.stats   || {};
+    const p = _dash.pending || {};
+    const openActies = s.open_acties?.total ?? null;
+    const recent = Array.isArray(m.my_recent_quotations) ? m.my_recent_quotations : [];
+
+    // Company: incl-BTW som van accepted deals met accepted_at in huidige
+    // maand. Voor Sales-rol: my_revenue_month (excl-BTW, uit metrics-endpoint).
+    let totalRev, totalCount, highestDeal, revLabel, revSub, hiLabel, hiSub;
+    if (admin) {
+      const agg = acceptedAgg(_dash.companyAccepted?.quotations, monthStart(), todayIso());
+      totalRev = agg.count ? agg.totalIncl : null;
+      totalCount = agg.count;
+      highestDeal = agg.highestIncl;
+      revLabel = 'Totale omzet deze maand';
+      revSub   = agg.count ? `${num(agg.count)} getekende offertes · incl. BTW` : 'incl. BTW · bedrijfsbreed';
+      hiLabel  = 'Hoogste deal deze maand';
+      hiSub    = 'bedrijfsbreed · incl. BTW';
+    } else {
+      totalRev = m.my_revenue_month;
+      totalCount = m.my_sales_count_month;
+      highestDeal = m.my_highest_deal;
+      revLabel = 'Mijn omzet deze maand';
+      revSub   = `${num(totalCount)} deals · excl. BTW`;
+      hiLabel  = 'Mijn hoogste deal';
+      hiSub    = 'deze maand · excl. BTW';
+    }
+
+    return `${previewHeader('Dashboard' + (admin ? ' · company-view' : ' · mijn-view'), _dash)}
+      ${H.kpis([
+        { c: 'violet',  icon: I.doc,    label: 'Mijn open offertes',    val: num(m.my_open_quotations), hi: 1, sub: 'nog niet getekend' },
+        { c: 'emerald', icon: I.euro,   label: revLabel,                val: eur0(totalRev),            hi: 1, sub: revSub },
+        { c: 'blue',    icon: I.trend,  label: hiLabel,                 val: eur0(highestDeal),                sub: hiSub },
+        { c: 'orange',  icon: I.warn,   label: 'Open follow-up-acties', val: num(openActies),                  sub: 'in mijn werklijst' },
+      ])}
+      <div class="sv-grid">
+        <div class="sv-card">
+          <div class="sv-card-head">${svg(I.mail)}Vandaag & week</div>
+          <div class="sv-card-body">
+            <div class="sv-row"><span>Afspraken vandaag</span><b>${num(s.appointments_today_count)}</b></div>
+            <div class="sv-row"><span>Afspraken morgen</span><b>${num(s.appointments_tomorrow_count)}</b></div>
+            <div class="sv-row"><span>Nieuwe leads (vandaag)</span><b>${num(s.today?.leads)}</b></div>
+            <div class="sv-row"><span>Nieuwe leads (deze week)</span><b>${num(s.week?.leads)}</b></div>
+            <div class="sv-row"><span>Events (deze week)</span><b>${num(s.week?.events)}</b></div>
+          </div>
+        </div>
+        <div class="sv-card">
+          <div class="sv-card-head">${svg(I.doc)}Bonus + onboarding</div>
+          <div class="sv-card-body">
+            <div class="sv-row"><span>Openstaande bonus deze maand</span><b>${eur0(m.my_bonus_month)}</b></div>
+            <div class="sv-row"><span>Onboardings live</span><b>${num(m.onboarding_count)}</b></div>
+            <div class="sv-row"><span>Retentie-klanten (≤30d)</span><b>${num(m.retention_count)}</b></div>
+            <div class="sv-row"><span>Pending subscription-koppelingen</span><b>${num(p.count)}</b></div>
+          </div>
+        </div>
+        <div class="sv-card">
+          <div class="sv-card-head">${svg(I.trend)}Mijn recente offertes</div>
+          <div class="sv-card-body">
+            ${recent.length ? recent.slice(0, 6).map(q => `
+              <div class="sv-recent">
+                <div class="sv-recent-l">
+                  <div class="cell-main">${(q.customer_name || '—')}</div>
+                  <div class="sv-recent-sub">${q.quote_reference || ('#' + String(q.deal_id || '').slice(0, 8))} · ${dstr(q.created_at)}</div>
+                </div>
+                <div class="sv-recent-r">
+                  <span class="mono">${eur0(q.total_amount)}</span>
+                  ${H.pill((OST_TO_PILL[q.tl_quotation_status] || ['neutral', q.tl_quotation_status || '—'])[0], (OST_TO_PILL[q.tl_quotation_status] || ['neutral', q.tl_quotation_status || '—'])[1])}
+                </div>
+              </div>`).join('') : `<div class="sv-empty">${_dash.loading ? 'Laden…' : (m.my_recent_quotations ? 'Nog geen recente offertes.' : '—')}</div>`}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  // ── OFFERTES ─────────────────────────────────────────────────────────────
+  window.__svOfferteNew  = () => { window.location.href = '/modules/sales-wizard.html'; };
+  window.__svOfferteOpen = (dealId) => { if (dealId) window.location.href = '/modules/sales-wizard.html?edit_deal_id=' + encodeURIComponent(dealId); };
+
+  function offertesParams() {
+    const status = F('sv-off-st', 'all');
+    const mine   = F('sv-off-mine', '1') === '1' ? '1' : '';
+    const q      = (F('q', '') || '').trim();
+    const p = new URLSearchParams();
+    if (status && status !== 'all') p.set('status', status);
+    if (mine) p.set('owned_by_me', '1');
+    if (q)    p.set('search', q);
+    p.set('page', '1');
+    p.set('page_size', '25');
+    return p.toString();
+  }
+
+  async function fetchOffertes() {
+    const wanted = offertesParams();
+    if (_off.loading && _off.params === wanted) return;
+    const seq = ++_off.seq;
+    _off.loading = true; _off.error = null; _off.params = wanted;
+    window.DFO.render();
+    const data = await tryFetch('sales-quotations', '/api/sales-quotations?' + wanted);
+    if (seq !== _off.seq) return;
+    _off.loading = false; _off.data = data;
+    if (!data) _off.error = 'Kon offertes niet laden';
+    window.DFO.render();
+  }
+
   function offertesView() {
-    const st = F('st', 'all');
-    const q = (F('q', '') || '').toLowerCase();
-    const rows = OFFERTES.filter(o => (st === 'all' || o.status === st) && (!q || o.klant.toLowerCase().includes(q)));
-    S.rows = rows;
-    const cnt = (s) => OFFERTES.filter(o => s === 'all' || o.status === s).length;
-
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'blue',    icon: I.doc,   label: 'Open in pijplijn', val: eur0(9600),  sub: '2 verzonden offertes' },
-      { c: 'emerald', icon: I.tick,  label: 'Geaccepteerd',     val: eur0(12713), hi: 1, sub: '3 deze maand', trend: H.trend('+40%', true) },
-      { c: 'violet',  icon: I.chart, label: 'Conversie',        val: '64%',        sub: 'laatste 30 dagen',  trend: H.trend('+7%',  true) },
-      { c: 'amber',   icon: I.clock, label: 'Doorlooptijd',     val: '4,2 d',      sub: 'verzonden → getekend', trend: H.trend('-1,1 d', true) },
-    ])}
-    ${H.toolbar([
-      H.chips('st', [
-        { l: 'Alles',        v: 'all',          n: cnt('all') },
-        { l: 'Concept',      v: 'concept',      n: cnt('concept') },
-        { l: 'Verzonden',    v: 'verzonden',    n: cnt('verzonden') },
-        { l: 'Geaccepteerd', v: 'geaccepteerd', n: cnt('geaccepteerd') },
-        { l: 'Afgewezen',    v: 'afgewezen',    n: cnt('afgewezen') },
-      ], st),
-      `<select class="filter-sel"><option>Alle verkopers</option><option>Joost</option><option>Jeffrey</option></select>`,
-      H.search('Zoek klant of nummer…'),
-      `<div class="tb-right"><button class="btn btn-primary" onclick="__salesNotice('Nieuwe offerte')">${svg(I.plus)}Nieuwe offerte</button></div>`,
-    ])}
-    ${H.table(
-      [{ l: 'Offerte' }, { l: 'Klant' }, { l: 'Traject', cls: 'optional' }, { l: 'Verkoper', cls: 'optional' }, { l: 'Datum', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Status' }, { l: 'Abo', cls: 'c' }],
-      rows.map((o) => [
-        `<span class="cell-main mono" style="font-size:12.5px">${o.nr}</span>`,
-        `<div class="row-avatar">${H.av(o.klant, 26)}<span class="cell-main">${o.klant}</span></div>`,
-        `<span style="color:var(--text-2)">${o.traject}</span>`,
-        o.verkoper,
-        `<span class="mono" style="color:var(--text-3);font-size:12.5px">${o.datum}</span>`,
-        `<span class="money">${eur(o.totaal)}</span>`,
-        H.pill(OST[o.status].c, OST[o.status].l),
-        o.abo
-          ? `<span style="color:var(--emerald)">${svg(I.tick, 'width:17px;height:17px;stroke-width:2.8')}</span>`
-          : `<span onclick="event.stopPropagation();__salesNotice('Abonnement-wizard voor ${o.klant.replace(/'/g, "\\'")}')" style="color:var(--rose);cursor:pointer">${svg(I.x, 'width:17px;height:17px;stroke-width:2.8')}</span>`,
-      ]),
-      '__salesOpenOfferte'
-    )}`;
+    const st   = F('sv-off-st', 'all');
+    const mine = F('sv-off-mine', '1');
+    // Trigger fetch bij eerste render OF wanneer filter-params veranderd zijn.
+    const wanted = offertesParams();
+    if (!_off.loading && (!_off.data || _off.params !== wanted)) queueMicrotask(fetchOffertes);
+    const items = _off.data?.quotations || [];
+    const total = _off.data?.total ?? null;
+    return `${previewHeader('Offertes', _off)}
+      ${H.toolbar([
+        H.chips('sv-off-st', [
+          { l: 'Alle',         v: 'all' },
+          { l: 'Concept',      v: 'draft' },
+          { l: 'Verzonden',    v: 'sent' },
+          { l: 'Geaccepteerd', v: 'accepted' },
+          { l: 'Afgewezen',    v: 'declined' },
+        ], st),
+        H.chips('sv-off-mine', [
+          { l: 'Mijn offertes', v: '1' },
+          { l: 'Alle',          v: '0' },
+        ], mine),
+        H.search('Zoek klant / offerte-nr…'),
+        `<div class="tb-right">
+          <button class="btn btn-primary" onclick="__svOfferteNew()">${svg(I.plus)}Nieuwe offerte</button>
+        </div>`,
+      ])}
+      <div class="sv-total">${_off.loading ? 'Laden…' : (total != null ? `${total} offerte${total === 1 ? '' : 's'}` : '—')}</div>
+      ${H.table(
+        [{ l: 'Offerte-nr' }, { l: 'Klant' }, { l: 'Traject', cls: 'optional' }, { l: 'Verkoper', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Datum', cls: 'r optional' }, { l: 'Status' }],
+        items.map(q => [
+          `<a href="javascript:__svOfferteOpen('${q.deal_id}')" class="sv-off-nr">${q.quote_reference || ('#' + String(q.deal_id || '').slice(0, 8))}</a>`,
+          `<div class="cell-main-wrap"><div class="av av-sm">${H.av(q.customer_name || '?')}</div><span class="cell-main">${q.customer_name || '—'}</span></div>`,
+          `<span style="font-size:12.5px;color:var(--text-3)">${q.traject_label || '—'}</span>`,
+          `<span style="font-size:12.5px;color:var(--text-3)">${q.sales_user || '—'}</span>`,
+          `<span class="mono">${eur0(q.total_amount)}</span>`,
+          `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(q.created_at)}</span>`,
+          H.pill((OST_TO_PILL[q.tl_quotation_status] || ['neutral', q.tl_quotation_status || '—'])[0], (OST_TO_PILL[q.tl_quotation_status] || ['neutral', q.tl_quotation_status || '—'])[1]),
+        ])
+      )}
+      ${!items.length && !_off.loading ? `<div class="sv-empty">${_off.error ? _off.error : 'Geen offertes met deze filters.'}</div>` : ''}`;
   }
 
-  /* ── VIEW: Sales/Retentie (prototype r2491-2507) ──────────────────── */
+  // ── RETENTIE ─────────────────────────────────────────────────────────────
+  function retentieParams() {
+    const mine = F('sv-ret-mine', '0') === '1' ? '1' : '';
+    return mine ? 'owned_by_me=1' : '';
+  }
+  async function fetchRetentie() {
+    const wanted = retentieParams();
+    if (_ret.loading && _ret.params === wanted) return;
+    const seq = ++_ret.seq;
+    _ret.loading = true; _ret.error = null; _ret.params = wanted;
+    window.DFO.render();
+    const url = '/api/sales-retention' + (wanted ? '?' + wanted : '');
+    const data = await tryFetch('sales-retention', url);
+    if (seq !== _ret.seq) return;
+    _ret.loading = false; _ret.data = data;
+    if (!data) _ret.error = 'Kon retentie niet laden';
+    window.DFO.render();
+  }
+
   function retentieView() {
-    const st = F('st', 'all');
-    const rows = RETENTIE.filter(r => st === 'all' || r.status === st);
-    S.rows = rows;
-    const cnt = (s) => RETENTIE.filter(r => s === 'all' || r.status === s).length;
-
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'amber',   icon: I.clock, label: 'Loopt binnen 6 maanden af', val: '4',       hi: 1, sub: 'abonnementen' },
-      { c: 'rose',    icon: I.euro,  label: 'MRR op het spel',           val: eur0(1396), hi: 1, sub: 'als niemand verlengt' },
-      { c: 'emerald', icon: I.tick,  label: 'Verlengd dit kwartaal',     val: '7',       hi: 1, sub: 'van 11 benaderd', trend: H.trend('64%', true) },
-      { c: 'violet',  icon: I.chat,  label: 'Nog niet benaderd',         val: String(cnt('nog niet benaderd')), sub: 'pak deze eerst op' },
-    ])}
-    ${H.toolbar([
-      H.chips('st', [
-        { l: 'Alles',             v: 'all',                n: cnt('all') },
-        { l: 'Nog niet benaderd', v: 'nog niet benaderd',  n: cnt('nog niet benaderd') },
-        { l: 'In gesprek',        v: 'in gesprek',         n: cnt('in gesprek') },
-        { l: 'Verlengd',          v: 'verlengd',           n: cnt('verlengd') },
-        { l: 'Wil stoppen',       v: 'wil stoppen',        n: cnt('wil stoppen') },
-      ], st),
-      `<select class="filter-sel"><option>Loopt af binnen 6 mnd</option><option>Binnen 3 maanden</option><option>Alles</option></select>`,
-      H.search('Zoek klant…'),
-    ])}
-    ${H.table(
-      [{ l: 'Klant' }, { l: 'Abonnement' }, { l: 'Einddatum', cls: 'optional' }, { l: 'Nog te gaan', cls: 'r' }, { l: 'MRR', cls: 'r' }, { l: 'Eigenaar', cls: 'optional' }, { l: 'Status' }],
-      rows.map(r => [
-        `<div class="row-avatar">${H.av(r.klant, 26)}<span class="cell-main">${r.klant}</span></div>`,
-        r.plan,
-        `<span class="mono" style="color:var(--text-3);font-size:12.5px">${r.eind}</span>`,
-        `<span class="pill ${r.resterend <= 6 ? 'pill-warn' : 'pill-neutral'} nodot">${r.resterend} termijnen</span>`,
-        `<span class="money">${eur(r.mrr)}</span>`,
-        r.eigenaar,
-        H.pill(RST[r.status].c, RST[r.status].l),
-      ]),
-      '__salesOpenRetentie'
-    )}`;
+    const mine = F('sv-ret-mine', '0');
+    const wanted = retentieParams();
+    if (!_ret.loading && (!_ret.data || _ret.params !== wanted)) queueMicrotask(fetchRetentie);
+    const items = _ret.data?.items || [];
+    return `${previewHeader('Retentie', _ret)}
+      ${H.kpis([
+        { c: 'violet',  icon: I.repeat, label: 'Retentie-klanten',       val: num(items.length), hi: 1, sub: 'sub loopt binnen 30d af' },
+        { c: 'orange',  icon: I.warn,   label: 'Al gemarkeerd',          val: num(items.filter(i => i.retention_not_renewing).length), sub: 'niet-verlengen' },
+        { c: 'emerald', icon: I.check,  label: 'Actieve subs (totaal)',  val: num(items.reduce((a, i) => a + (i.active_subs_count || 0), 0)), sub: 'over alle retentie-klanten' },
+      ])}
+      ${H.toolbar([
+        H.chips('sv-ret-mine', [
+          { l: 'Alle', v: '0' },
+          { l: 'Mijn klanten', v: '1' },
+        ], mine),
+      ])}
+      ${H.table(
+        [{ l: 'Klant' }, { l: 'Traject', cls: 'optional' }, { l: 'Mentor', cls: 'optional' }, { l: 'Einddatum', cls: 'r' }, { l: 'Nog', cls: 'r' }, { l: 'Actieve subs', cls: 'r optional' }, { l: 'Status' }],
+        items.map(i => {
+          const [c, l] = RET_STATUS_TO_PILL(i);
+          return [
+            `<div class="cell-main-wrap"><div class="av av-sm">${H.av(i.customer_name || '?')}</div><span class="cell-main">${i.customer_name || '—'}</span></div>`,
+            `<span style="font-size:12.5px;color:var(--text-3)">${i.traject_label || '—'}</span>`,
+            `<span style="font-size:12.5px;color:var(--text-3)">${i.mentor_name || 'Niet toegewezen'}</span>`,
+            `<span class="mono">${dstr(i.end_date)}</span>`,
+            `<span class="mono">${i.days_left != null ? i.days_left + ' d' : '—'}</span>`,
+            `<span class="mono">${num(i.active_subs_count)}</span>`,
+            H.pill(c, l),
+          ];
+        })
+      )}
+      ${!items.length && !_ret.loading ? `<div class="sv-empty">${_ret.error ? _ret.error : 'Geen retentie-klanten in dit venster.'}</div>` : ''}`;
   }
 
-  /* ── VIEW: Sales/Verkoopprestaties (prototype r2508-2521) ─────────── */
+  // ── VERKOOPPRESTATIES ───────────────────────────────────────────────────
+  // Period-selector: Dag / Week / Maand / Jaar / Custom. Mapt naar
+  // sales-reports from/to/group_by. Custom = 2 date-inputs (state in _rep).
+  function rangeForLabel(label) {
+    const now = new Date(); const to = todayIso();
+    if (label === 'Dag')   return { from: to, to, group_by: 'day' };
+    if (label === 'Week')  { const f = new Date(now); f.setDate(f.getDate() - 6); return { from: isoDay(f), to, group_by: 'day' }; }
+    if (label === 'Maand') return { from: monthStart(), to, group_by: 'day' };
+    if (label === 'Jaar')  return { from: isoDay(new Date(now.getFullYear(), 0, 1)), to, group_by: 'month' };
+    if (label === 'Custom') {
+      // Fallback als state nog leeg: laatste 30 dagen.
+      if (!_rep.customFrom || !_rep.customTo) {
+        const f = new Date(now); f.setDate(f.getDate() - 30);
+        _rep.customFrom = isoDay(f); _rep.customTo = to;
+      }
+      const f = _rep.customFrom, t = _rep.customTo;
+      const days = Math.max(1, Math.round((new Date(t) - new Date(f)) / 86400000));
+      return { from: f, to: t, group_by: days <= 31 ? 'day' : days <= 120 ? 'week' : 'month' };
+    }
+    return { from: monthStart(), to, group_by: 'day' };
+  }
+  function reportsParams() {
+    const label = F('sv-rep-p', 'Maand');
+    const r = rangeForLabel(label);
+    return `from=${r.from}&to=${r.to}&group_by=${r.group_by}`;
+  }
+  async function fetchReports() {
+    const wanted = reportsParams();
+    if (_rep.loading && _rep.params === wanted) return;
+    const seq = ++_rep.seq;
+    _rep.loading = true; _rep.error = null; _rep.params = wanted;
+    window.DFO.render();
+    // Parallel: sales-reports (funnel-leads/-quotations counts + retention +
+    // bonus + trend) + accepted-deals (voor omzet + per-verkoper + funnel-
+    // signed/paid — allemaal incl-BTW client-side gesommeerd).
+    const [data, accepted] = await Promise.all([
+      tryFetch('sales-reports',         '/api/sales-reports?' + wanted),
+      tryFetch('sales-accepted-period', '/api/sales-quotations?status=accepted&page=1&page_size=250'),
+    ]);
+    if (seq !== _rep.seq) return;
+    _rep.loading = false; _rep.data = data; _rep.accepted = accepted;
+    if (!data && !accepted) _rep.error = 'Kon rapport + accepted niet laden';
+    if (accepted && accepted.total > 250) {
+      console.warn('[sales-v2] accepted total > 250 (' + accepted.total + ') — omzet+per-verkoper berekend op eerste 250 rijen');
+    }
+    window.DFO.render();
+  }
+
+  // Client-side aggregatie over accepted deals in [from, to].
+  // Levert: incl-BTW-totaal, excl-BTW-totaal, aantal getekend, aantal betaald
+  // (= subs actief), en per-verkoper-map (naam → incl/excl/count).
+  // LEIDENDE DEFINITIE (gebruiker): OMZET = som total_amount_incl van deals
+  // waarvan accepted_at in periode.
+  function acceptedAggReports(fromIso, toIso) {
+    const list = _rep.accepted?.quotations || [];
+    let totalIncl = 0, totalExcl = 0, signedCount = 0, paidCount = 0;
+    const userMap = new Map();
+    for (const q of list) {
+      const dt = q.accepted_at || q.sent_at || q.created_at;
+      if (!dt) continue;
+      const day = String(dt).slice(0, 10);
+      if (day < fromIso || day > toIso) continue;
+      const incl = Number(q.total_amount_incl) || Number(q.total_amount) || 0;
+      const excl = Number(q.total_amount) || 0;
+      totalIncl += incl; totalExcl += excl; signedCount++;
+      if (q.has_subscription) paidCount++;
+      const uname = q.sales_user || 'Onbekend';
+      if (!userMap.has(uname)) userMap.set(uname, { user_name: uname, count: 0, revenue_incl: 0, revenue_excl: 0 });
+      const u = userMap.get(uname);
+      u.count++; u.revenue_incl += incl; u.revenue_excl += excl;
+    }
+    const perUser = [...userMap.values()].sort((a, b) => b.revenue_incl - a.revenue_incl);
+    return { totalIncl, totalExcl, signedCount, paidCount, perUser };
+  }
+
+  window.__svRepCustomFrom = (v) => { _rep.customFrom = v; setF('sv-rep-p', 'Custom'); };
+  window.__svRepCustomTo   = (v) => { _rep.customTo   = v; setF('sv-rep-p', 'Custom'); };
+
   function prestatiesView() {
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'violet', icon: I.tick,  label: 'Getekend deze maand', val: eur0(12713),   sub: '3 offertes',    trend: H.trend('+40%', true) },
-      { c: 'blue',   icon: I.chart, label: 'Beste maand 2026',    val: eur0(152000),  sub: 'mei' },
-      { c: 'amber',  icon: I.euro,  label: 'Bonus openstaand',    val: eur0(1271),    hi: 1, sub: '2 medewerkers' },
-    ])}
-    <div class="pad" style="padding-top:16px">
-      <div class="card">
-        <div class="card-head"><span class="tile-ico" style="background:var(--violet-soft);color:var(--violet)">${svg(I.users)}</span>
-          <div class="card-title">Per medewerker · augustus 2026</div></div>
-        ${H.table(
-          [{ l: 'Medewerker' }, { l: 'Offertes', cls: 'r' }, { l: 'Getekend', cls: 'r' }, { l: 'Conversie', cls: 'r' }, { l: 'Omzet', cls: 'r' }, { l: 'Bonus', cls: 'r' }],
-          [['Joost Berg',      3, 2, '67%', 10713, 1071, 'ok'],
-           ['Jeffrey Biemold', 4, 1, '25%',  2000,  200, 'warn']]
-            .map(([n, o, g, c, om, b, cl]) => [
-              `<div class="row-avatar">${H.av(n, 28)}<span class="cell-main">${n.split(' ')[0]}</span></div>`,
-              `<span class="mono">${o}</span>`,
-              `<span class="mono">${g}</span>`,
-              `<span class="pill pill-${cl} nodot">${c}</span>`,
-              `<span class="money">${eur0(om)}</span>`,
-              `<span class="money">${eur0(b)}</span>`,
-            ])
-        )}
-      </div>
-    </div>`;
+    const label = F('sv-rep-p', 'Maand');
+    const wanted = reportsParams();
+    if (!_rep.loading && (!_rep.data || _rep.params !== wanted)) queueMicrotask(fetchReports);
+    const k = _rep.data?.kpis || {};
+    const period = _rep.data?.period || rangeForLabel(label);
+    const agg = acceptedAggReports(period.from, period.to);
+
+    // Funnel: leads + quotations counts komen van server (created in period);
+    // signed + paid overriden we client-side uit accepted-set zodat 't 1-op-1
+    // consistent is met de omzet-berekening (accepted_at in period, niet
+    // created_at). Zonder deze override kan Getekend > 0 zijn terwijl Omzet
+    // = 0 (deal created buiten periode, accepted binnen — of andersom).
+    const fObj = _rep.data?.funnel || {};
+    const funnelRows = [
+      ['Leads (aangemaakt in periode)', fObj.leads],
+      ['Offertes verstuurd',            fObj.quotations],
+      ['Getekend (accepted in periode)', agg.signedCount],
+      ['Betaald / gestart (heeft sub)',  agg.paidCount],
+    ];
+
+    const trend = _rep.data?.trend || [];
+    const trendMax = Math.max(1, ...trend.map(t => Number(t.revenue) || 0));
+
+    // Custom-inputs: alleen renderen als Custom actief is.
+    const customRow = label === 'Custom' ? `
+      <div class="sv-custom-range">
+        <label>Van <input type="date" value="${_rep.customFrom || ''}" onchange="__svRepCustomFrom(this.value)"></label>
+        <label>Tot <input type="date" value="${_rep.customTo   || ''}" onchange="__svRepCustomTo(this.value)"></label>
+      </div>` : '';
+
+    return `${previewHeader('Verkoopprestaties', _rep)}
+      ${H.kpis([
+        { c: 'violet',  icon: I.trend,  label: 'Pipeline-waarde',    val: eur0(k.pipeline_value),          hi: 1, sub: 'open + verzonden · excl. BTW' },
+        { c: 'emerald', icon: I.euro,   label: 'Omzet in periode',   val: agg.signedCount ? eur0(agg.totalIncl) : eur0(0), hi: 1, sub: `${num(agg.signedCount)} getekend · incl. BTW · (${eur0(agg.totalExcl)} excl.)` },
+        { c: 'blue',    icon: I.doc,    label: 'Bonus openstaand',   val: eur0(k.bonus_pending) },
+        { c: 'orange',  icon: I.repeat, label: 'Retentie-ratio',     val: k.retention_rate != null ? Math.round(k.retention_rate * 100) + '%' : '—' },
+      ])}
+      ${H.toolbar([
+        H.chips('sv-rep-p', [
+          { l: 'Dag',    v: 'Dag' },
+          { l: 'Week',   v: 'Week' },
+          { l: 'Maand',  v: 'Maand' },
+          { l: 'Jaar',   v: 'Jaar' },
+          { l: 'Custom', v: 'Custom' },
+        ], label),
+      ])}
+      ${customRow}
+      <div class="sv-grid">
+        <div class="sv-card">
+          <div class="sv-card-head">${svg(I.doc)}Verkoop-funnel</div>
+          <div class="sv-card-body">
+            ${funnelRows.map(([l, v]) => `
+              <div class="sv-row"><span>${l}</span><b>${num(v)}</b></div>
+            `).join('')}
+          </div>
+        </div>
+        <div class="sv-card">
+          <div class="sv-card-head">${svg(I.users)}Per verkoper · incl. BTW</div>
+          <div class="sv-card-body">
+            ${agg.perUser.length ? agg.perUser.slice(0, 8).map(u => `
+              <div class="sv-row"><span>${u.user_name} <span class="sv-row-sub">${num(u.count)} deals</span></span><b>${eur0(u.revenue_incl)}</b></div>
+            `).join('') : `<div class="sv-empty">${_rep.loading ? 'Laden…' : 'Geen getekende offertes in deze periode.'}</div>`}
+          </div>
+        </div>
+        <div class="sv-card sv-card-wide">
+          <div class="sv-card-head">${svg(I.trend)}Omzet-trend · excl. BTW (sales-reports)</div>
+          <div class="sv-card-body">
+            ${(Array.isArray(trend) && trend.length) ? `<div class="sv-trend">${trend.map(t => {
+              const rev = Number(t.revenue) || 0;
+              const h = Math.max(3, Math.round(rev / trendMax * 100));
+              return `<div class="sv-trend-col" title="${t.period || ''} · ${eur0(rev)}">
+                <div class="sv-trend-bar" style="height:${h}%"></div>
+                <div class="sv-trend-lbl">${t.period || ''}</div>
+              </div>`;
+            }).join('')}</div>` : `<div class="sv-empty">${_rep.loading ? 'Laden…' : 'Geen trend-data.'}</div>`}
+          </div>
+        </div>
+      </div>`;
   }
 
-  /* ── Registratie ───────────────────────────────────────────────────── */
-  window.DFO.VIEWS['sales/Dashboard']        = salesDashboardView;
-  window.DFO.VIEWS['sales/Offertes']         = offertesView;
-  window.DFO.VIEWS['sales/Retentie']         = retentieView;
+  window.DFO.VIEWS['sales/Dashboard']         = dashboardView;
+  window.DFO.VIEWS['sales/Offertes']          = offertesView;
+  window.DFO.VIEWS['sales/Retentie']          = retentieView;
   window.DFO.VIEWS['sales/Verkoopprestaties'] = prestatiesView;
-  if (typeof window.KV_V2_ADD === 'function') {
-    window.KV_V2_ADD('sales');
-  } else {
-    (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('sales');
-  }
-
-  console.debug('[sales-v2] registered 4 Sales views (dormant tot allowlist of ?v2preview=sales)');
+  if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('sales');
+  else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('sales');
+  console.debug('[sales-v2] registered 4 views (data-round · live endpoints)');
 })();
