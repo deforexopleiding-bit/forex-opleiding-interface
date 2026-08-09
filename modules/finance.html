@@ -21822,6 +21822,7 @@
           <span id="brvBulkCount" style="font-weight:600">0 geselecteerd</span>
           <button type="button" id="brvBulkPrintBtn"    class="wbx-btn wbx-primary wbx-sm"><i class="ti ti-printer"></i> Print / Download selectie</button>
           <button type="button" id="brvBulkMarkSentBtn" class="wbx-btn wbx-sm"><i class="ti ti-mail-check"></i> Markeer als verstuurd</button>
+          <button type="button" id="brvBulkDeleteBtn"   class="wbx-btn wbx-sm" style="color:var(--wbx-s-inc-tx,#dc2626)" title="Verwijder de geselecteerde brieven (rij + PDF)"><i class="ti ti-trash"></i> Verwijderen</button>
           <button type="button" id="brvBulkClearBtn"    class="wbx-btn wbx-sm">Deselecteer</button>
         </div>
       </div>
@@ -21873,6 +21874,8 @@
     if (printBtn)    printBtn.addEventListener('click', _brievenBulkPrint);
     const markBtn  = host.querySelector('#brvBulkMarkSentBtn');
     if (markBtn)     markBtn.addEventListener('click', _brievenBulkMarkSent);
+    const delBtn   = host.querySelector('#brvBulkDeleteBtn');
+    if (delBtn)      delBtn.addEventListener('click', () => _brievenDelete(Array.from(_brievenState.selection)));
     const clearBtn = host.querySelector('#brvBulkClearBtn');
     if (clearBtn)    clearBtn.addEventListener('click', () => { _brievenState.selection.clear(); _brievenRenderRows(); _brievenUpdateBulkBar(); });
 
@@ -21982,7 +21985,7 @@
           <td style="padding:8px 10px;color:var(--wbx-muted)">${esc(_brievenFmtDate(it.sent_at))}${it.sent_via ? ` <span style="font-size:11px;color:var(--wbx-faint)">(${esc(it.sent_via)})</span>` : ''}</td>
           <td style="padding:8px 10px;color:var(--wbx-muted)">${esc(it.generated_by_name || '—')}</td>
           <td style="padding:8px 10px;color:var(--wbx-muted)">${esc(it.country || '—')}</td>
-          <td style="padding:8px 10px">${dlLink}</td>
+          <td style="padding:8px 10px;white-space:nowrap">${dlLink} <button type="button" class="wbx-btn wbx-sm" data-brv-delete="${esc(it.id)}" title="Brief verwijderen (rij + PDF)" style="color:var(--wbx-s-inc-tx,#dc2626)"><i class="ti ti-trash"></i></button></td>
         </tr>`;
     }).join('');
     // Wire checkboxes (delegation kan ook maar direct is simpeler bij nieuwe render).
@@ -21996,6 +21999,10 @@
         const selectAll = document.getElementById('brvSelectAll');
         if (selectAll) selectAll.checked = _brievenState.items.length > 0 && _brievenState.items.every((it) => _brievenState.selection.has(it.id));
       });
+    });
+    // Wire per-rij verwijderknoppen (prullenbak).
+    tbody.querySelectorAll('button[data-brv-delete]').forEach((btn) => {
+      btn.addEventListener('click', () => _brievenDelete([btn.getAttribute('data-brv-delete')]));
     });
     // Sync select-all na render.
     const selectAll = document.getElementById('brvSelectAll');
@@ -22046,6 +22053,44 @@
     } catch (e) {
       window.AgentShared?.showToast?.('Print/download mislukt: ' + (e?.message || 'onbekend'), 'error');
     }
+  }
+
+  // Verwijder één of meer brieven (rij + PDF) via /api/dunning-brief-delete.
+  // ALTIJD achter een bevestigingsdialoog. Na afloop: lijst + tellers verversen.
+  function _brievenDelete(ids) {
+    ids = (Array.isArray(ids) ? ids : []).map((x) => String(x || '')).filter(Boolean);
+    if (ids.length === 0) return;
+    const n = ids.length;
+    const doIt = async () => {
+      try {
+        const r = await window.AgentShared.apiFetch('/api/dunning-brief-delete', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ brief_ids: ids }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || 'HTTP ' + r.status);
+        window.AgentShared?.showToast?.(`${d.deleted || 0} brief${(d.deleted === 1) ? '' : 'en'} verwijderd`
+          + (d.storage_failed ? ` (${d.storage_failed} PDF-bestand${d.storage_failed === 1 ? '' : 'en'} niet opgeruimd)` : ''), 'success');
+        for (const id of ids) _brievenState.selection.delete(id);
+        _brievenLoad();            // ververst lijst + tellers
+      } catch (e) {
+        window.AgentShared?.showToast?.('Verwijderen mislukt: ' + (e?.message || 'onbekend'), 'error');
+      }
+    };
+    const msg = n === 1
+      ? 'Weet je zeker dat je deze brief wilt verwijderen? De brief-rij én het bewaarde PDF-bestand worden definitief verwijderd. Dit kan niet ongedaan worden gemaakt.'
+      : `Weet je zeker dat je ${n} brieven wilt verwijderen? De rijen én de bewaarde PDF-bestanden worden definitief verwijderd. Dit kan niet ongedaan worden gemaakt.`;
+    if (typeof wbxOpenConfirm !== 'function') {
+      if (window.confirm(n === 1 ? 'Weet je zeker dat je deze brief wilt verwijderen?' : `Weet je zeker dat je ${n} brieven wilt verwijderen?`)) doIt();
+      return;
+    }
+    wbxOpenConfirm({
+      title: 'Brief verwijderen',
+      body: msg,
+      confirmLabel: 'Ja, verwijderen',
+      dangerLevel: 'danger',
+      onConfirm: doIt,
+    });
   }
 
   async function _brievenBulkMarkSent() {
