@@ -1497,3 +1497,127 @@ textarea.inp { max-width: 520px; min-height: 90px; resize: vertical; line-height
   .topbar-actions .btn.btn-primary span:not(:first-child) { display: none; }
   .topbar-actions .btn.btn-primary { padding: 6px 8px; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Fase E — Leadsonderhoud + Lisa (layout-only helpers)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Bulk-versturen grid (form + sidebar) */
+.bulk-grid {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 960px) { .bulk-grid { grid-template-columns: 1fr; } }
+.bulk-main { min-width: 0; }
+.bulk-side { min-width: 0; }
+
+/* Radio-row (Leadsonderhoud/Bulk versturen) */
+.radio-row { display: flex; flex-direction: column; gap: 8px; padding: 4px 0; }
+.radio-row .radio {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: 8px; cursor: pointer; font-size: 13.5px;
+  background: var(--surface);
+}
+.radio-row .radio:hover { background: var(--surface-2); }
+.radio-row .radio input[type="radio"] { accent-color: var(--brand); }
+.radio-row .radio .mono.muted { margin-left: auto; color: var(--text-3); font-size: 12px; }
+
+/* Checkbox (Leadsonderhoud/Bulk versturen — safety-flags) */
+.ib-field .checkbox {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: 8px; cursor: pointer; font-size: 13.5px;
+  background: var(--surface); margin-bottom: 6px;
+}
+.ib-field .checkbox:hover { background: var(--surface-2); }
+.ib-field .checkbox .checkbox-mark {
+  width: 18px; height: 18px; border-radius: 4px;
+  border: 1.5px solid var(--line);
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface);
+  color: transparent; flex-shrink: 0;
+}
+.ib-field .checkbox .checkbox-mark svg { width: 12px; height: 12px; }
+.ib-field .checkbox.checked .checkbox-mark {
+  background: var(--brand); border-color: var(--brand); color: #fff;
+}
+
+/* Preview-blok (Bulk versturen) */
+.ib-preview {
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface-2); overflow: hidden;
+}
+.ib-preview-h {
+  padding: 10px 14px; border-bottom: 1px solid var(--line);
+  font-size: 12px; color: var(--text-3); background: var(--surface);
+}
+.ib-preview-b { padding: 14px; font-size: 13.5px; line-height: 1.6; color: var(--text-1); }
+
+/* Stats-grid (Leadsonderhoud/Statistieken + Lisa/Dashboard + Lisa/Statistieken) */
+.stats-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px;
+}
+@media (max-width: 900px) { .stats-grid { grid-template-columns: 1fr; } }
+
+/* Chart-placeholder (voor waar echte chart komt in data-ronde) */
+.chart-placeholder {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; min-height: 220px; padding: 20px;
+  color: var(--text-3); text-align: center;
+}
+.chart-placeholder svg { width: 48px; height: 48px; opacity: .5; }
+.chart-placeholder-txt { font-size: 12.5px; }
+
+/* Split 2-column (Lisa/Gesprekken thread-lijst + chat) */
+.split-2col {
+  display: grid; grid-template-columns: 340px 1fr; gap: 12px; min-height: 520px;
+}
+@media (max-width: 960px) { .split-2col { grid-template-columns: 1fr; } }
+.split-left, .split-right { min-width: 0; }
+
+/* Badge-dot (unread-count op mail-item) */
+.badge-dot {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: 9px; background: var(--brand); color: #fff;
+  font-size: 11px; font-weight: 600; margin-top: 4px;
+}
+
+/* Mail-dot (unread-indicator inline op from-line) */
+.mail-dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--brand); vertical-align: middle; margin-left: 4px;
+}
+.mail-item.is-active { background: var(--surface-2); border-left: 2px solid var(--brand); }
+.mail-item.is-unread .mail-item-from { font-weight: 600; }
+
+/* Chat-messages (Lisa/Gesprekken) */
+.chat-msg { display: flex; flex-direction: column; margin-bottom: 12px; max-width: 78%; }
+.chat-msg.is-them { align-items: flex-start; }
+.chat-msg.is-me   { align-items: flex-end; margin-left: auto; }
+.chat-bubble {
+  padding: 10px 14px; border-radius: 14px;
+  font-size: 13.5px; line-height: 1.5;
+  background: var(--surface-2); color: var(--text-1);
+}
+.chat-msg.is-me .chat-bubble { background: var(--brand); color: #fff; }
+.chat-meta { font-size: 11px; color: var(--text-3); margin-top: 3px; padding: 0 4px; }
+
+/* Chat-suggestion (Lisa "stelt voor"-blok) */
+.chat-suggest {
+  margin-top: 14px; padding: 12px 14px;
+  border: 1px dashed var(--brand); border-radius: 10px;
+  background: color-mix(in srgb, var(--brand) 6%, transparent);
+}
+.chat-suggest-lbl {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; font-weight: 600; color: var(--brand);
+  text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px;
+}
+.chat-suggest-lbl svg { width: 14px; height: 14px; }
+.chat-suggest-body { font-size: 13.5px; line-height: 1.5; color: var(--text-1); margin-bottom: 10px; }
+.chat-suggest-actions { display: flex; gap: 8px; }
+
