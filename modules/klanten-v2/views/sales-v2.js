@@ -29,10 +29,29 @@
   const K = () => window.KV;
 
   // ── State per tab (los zodat cross-tab-fetches niet elkaars data raken) ──
-  const _dash = { loading: false, error: null, stats: null, metrics: null, pending: null, seq: 0, boot: false };
+  // Dashboard-state: houdt ook company-scope-slices bij (report + accepted-deals)
+  // die alleen fetch't worden voor super_admin/manager. Rol-check gebeurt bij
+  // elke fetchDashboard — bij rol-wissel triggert de shell een re-render en de
+  // fetcher merkt het via de `boot`-hook (params-verandering equivalent).
+  const _dash = { loading: false, error: null, stats: null, metrics: null, pending: null, companyReport: null, companyAccepted: null, seq: 0, boot: false, bootRole: '' };
   const _off  = { loading: false, error: null, data: null, seq: 0, params: '' };
   const _ret  = { loading: false, error: null, data: null, seq: 0, params: '' };
-  const _rep  = { loading: false, error: null, data: null, seq: 0, params: '' };
+  // Reports: naast sales-reports slaan we ook accepted-deals van dezelfde
+  // periode op zodat we incl-BTW omzet kunnen sommeren (sales-reports levert
+  // alleen excl-BTW).
+  const _rep  = { loading: false, error: null, data: null, accepted: null, seq: 0, params: '' };
+
+  // Rol-detectie: super_admin/manager/admin → company-view. Anders (sales/
+  // mentor/marketing/administratie) → mijn-view. Prefer admin bij overlap.
+  const isAdminRole = () => {
+    const r = (window.DFO && window.DFO.S && window.DFO.S.roles) || [];
+    return r.includes('super_admin') || r.includes('manager') || r.includes('admin');
+  };
+
+  // Date-helpers voor periode-fetches (start-of-month + range voor prestaties).
+  const isoDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10);
+  const monthStart = () => { const d = new Date(); return isoDay(new Date(d.getFullYear(), d.getMonth(), 1)); };
+  const todayIso   = () => isoDay(new Date());
 
   // ── tryFetch: race met 8s-timeout, fail-soft null-return + console.warn ──
   async function tryFetch(label, url, timeoutMs = 8000) {
@@ -82,41 +101,85 @@
   };
 
   // ── DASHBOARD ────────────────────────────────────────────────────────────
+  // Rol-bewust: super_admin/manager fetchen 2 extra endpoints om company-
+  // scope KPI's te tonen (totale omzet + hoogste deal deze maand). Sales-rol
+  // ziet de "mijn" KPI's uit sales-dashboard-metrics.
+  //
+  // Highest deal company-view: er is GEEN dedicated endpoint. We halen
+  // accepted deals van deze maand op via sales-quotations (page_size=100)
+  // en nemen client-side max op total_amount. Als total > 100: warn in log.
   async function fetchDashboard() {
     if (_dash.loading) return;
+    const admin = isAdminRole();
     const seq = ++_dash.seq;
-    _dash.loading = true; _dash.error = null;
+    _dash.loading = true; _dash.error = null; _dash.bootRole = admin ? 'admin' : 'own';
     window.DFO.render();
-    const [stats, metrics, pending] = await Promise.all([
+    const mstart = monthStart(); const tday = todayIso();
+    const calls = [
       tryFetch('sales-dashboard-stats',    '/api/sales-dashboard-stats'),
       tryFetch('sales-dashboard-metrics',  '/api/sales-dashboard-metrics'),
       tryFetch('sales-pending-subscriptions', '/api/sales-pending-subscriptions'),
-    ]);
+      admin ? tryFetch('sales-reports-month',   `/api/sales-reports?from=${mstart}&to=${tday}&group_by=month`) : Promise.resolve(null),
+      admin ? tryFetch('sales-accepted-month',  `/api/sales-quotations?status=accepted&page=1&page_size=100`)  : Promise.resolve(null),
+    ];
+    const [stats, metrics, pending, companyReport, companyAccepted] = await Promise.all(calls);
     if (seq !== _dash.seq) return; // race-guard
     _dash.stats = stats; _dash.metrics = metrics; _dash.pending = pending;
+    _dash.companyReport = companyReport; _dash.companyAccepted = companyAccepted;
     _dash.loading = false;
-    if (stats == null && metrics == null && pending == null) _dash.error = 'Alle 3 dashboard-calls faalden';
+    if (stats == null && metrics == null && pending == null) _dash.error = 'Alle dashboard-calls faalden';
+    if (admin && companyAccepted && companyAccepted.total > 100) {
+      console.warn('[sales-v2] company-accepted total > 100 (' + companyAccepted.total + ') — highest-deal berekend op eerste 100 rijen');
+    }
     window.DFO.render();
   }
 
+  // Company hoogste deal deze maand: filter accepted deals op accepted_at >=
+  // start-of-month, dan max total_amount. Fail-soft: null → "—".
+  function companyHighestDealMonth() {
+    const list = _dash.companyAccepted?.quotations || [];
+    if (!list.length) return null;
+    const mstart = monthStart();
+    let best = null;
+    for (const q of list) {
+      const dt = q.accepted_at || q.sent_at || q.created_at;
+      if (!dt || String(dt).slice(0, 10) < mstart) continue;
+      const amt = Number(q.total_amount) || 0;
+      if (best == null || amt > best) best = amt;
+    }
+    return best;
+  }
+
   function dashboardView() {
-    // Auto-fetch bij eerste render (loop-guard: !boot + !loading).
-    if (!_dash.boot && !_dash.loading) {
+    // Auto-fetch bij eerste render + refetch als rol wisselt (bootRole-check).
+    const admin = isAdminRole();
+    const wantedRole = admin ? 'admin' : 'own';
+    if (!_dash.loading && (!_dash.boot || _dash.bootRole !== wantedRole)) {
       _dash.boot = true;
       queueMicrotask(fetchDashboard);
     }
     const m = _dash.metrics || {};
     const s = _dash.stats   || {};
     const p = _dash.pending || {};
+    const cr = _dash.companyReport || {};
     const openActies = s.open_acties?.total ?? null;
     const recent = Array.isArray(m.my_recent_quotations) ? m.my_recent_quotations : [];
 
-    return `${previewHeader('Dashboard', _dash)}
+    // Rol-bewuste KPI-strip: admin/manager → company; sales → mijn.
+    const totalRev = admin ? cr.kpis?.revenue_period : m.my_revenue_month;
+    const totalCount = admin ? null : m.my_sales_count_month;
+    const highestDeal = admin ? companyHighestDealMonth() : m.my_highest_deal;
+    const revLabel = admin ? 'Totale omzet deze maand' : 'Mijn omzet deze maand';
+    const revSub   = admin ? 'bedrijfsbreed · getekende offertes' : `${num(totalCount)} deals`;
+    const hiLabel  = admin ? 'Hoogste deal deze maand' : 'Mijn hoogste deal';
+    const hiSub    = admin ? 'bedrijfsbreed · geaccepteerd' : 'deze maand';
+
+    return `${previewHeader('Dashboard' + (admin ? ' · company-view' : ' · mijn-view'), _dash)}
       ${H.kpis([
-        { c: 'violet',  icon: I.doc,    label: 'Mijn open offertes',      val: num(m.my_open_quotations),  hi: 1, sub: 'nog niet getekend' },
-        { c: 'emerald', icon: I.euro,   label: 'Mijn omzet deze maand',   val: eur0(m.my_revenue_month),   hi: 1, sub: `${num(m.my_sales_count_month)} deals` },
-        { c: 'blue',    icon: I.trend,  label: 'Mijn hoogste deal',       val: eur0(m.my_highest_deal),           sub: 'deze maand' },
-        { c: 'orange',  icon: I.warn,   label: 'Open follow-up-acties',   val: num(openActies),                   sub: 'in mijn werklijst' },
+        { c: 'violet',  icon: I.doc,    label: 'Mijn open offertes',    val: num(m.my_open_quotations), hi: 1, sub: 'nog niet getekend' },
+        { c: 'emerald', icon: I.euro,   label: revLabel,                val: eur0(totalRev),            hi: 1, sub: revSub },
+        { c: 'blue',    icon: I.trend,  label: hiLabel,                 val: eur0(highestDeal),                sub: hiSub },
+        { c: 'orange',  icon: I.warn,   label: 'Open follow-up-acties', val: num(openActies),                  sub: 'in mijn werklijst' },
       ])}
       <div class="sv-grid">
         <div class="sv-card">
@@ -145,7 +208,7 @@
               <div class="sv-recent">
                 <div class="sv-recent-l">
                   <div class="cell-main">${(q.customer_name || '—')}</div>
-                  <div class="sv-recent-sub">${q.quote_reference || 'OFF-' + String(q.deal_id || '').slice(0, 6)} · ${dstr(q.created_at)}</div>
+                  <div class="sv-recent-sub">${q.quote_reference || ('#' + String(q.deal_id || '').slice(0, 8))} · ${dstr(q.created_at)}</div>
                 </div>
                 <div class="sv-recent-r">
                   <span class="mono">${eur0(q.total_amount)}</span>
@@ -217,7 +280,7 @@
       ${H.table(
         [{ l: 'Offerte-nr' }, { l: 'Klant' }, { l: 'Traject', cls: 'optional' }, { l: 'Verkoper', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Datum', cls: 'r optional' }, { l: 'Status' }],
         items.map(q => [
-          `<a href="javascript:__svOfferteOpen('${q.deal_id}')" class="cell-main">${q.quote_reference || 'OFF-' + String(q.deal_id || '').slice(0, 6)}</a>`,
+          `<a href="javascript:__svOfferteOpen('${q.deal_id}')" class="cell-main">${q.quote_reference || ('#' + String(q.deal_id || '').slice(0, 8))}</a>`,
           `<div class="cell-main-wrap"><div class="av av-sm">${H.av(q.customer_name || '?')}</div><span class="cell-main">${q.customer_name || '—'}</span></div>`,
           `<span style="font-size:12.5px;color:var(--text-3)">${q.traject_label || '—'}</span>`,
           `<span style="font-size:12.5px;color:var(--text-3)">${q.sales_user || '—'}</span>`,
@@ -301,11 +364,39 @@
     const seq = ++_rep.seq;
     _rep.loading = true; _rep.error = null; _rep.params = wanted;
     window.DFO.render();
-    const data = await tryFetch('sales-reports', '/api/sales-reports?' + wanted);
+    // Parallel: sales-reports (aggregates, alleen excl-BTW) + accepted deals
+    // (voor incl-BTW sommering client-side). Sales-reports levert geen
+    // total_amount_incl-veld, dus dat sommeren we uit sales-quotations.
+    const [data, accepted] = await Promise.all([
+      tryFetch('sales-reports',   '/api/sales-reports?' + wanted),
+      tryFetch('sales-accepted-period', '/api/sales-quotations?status=accepted&page=1&page_size=250'),
+    ]);
     if (seq !== _rep.seq) return;
-    _rep.loading = false; _rep.data = data;
+    _rep.loading = false; _rep.data = data; _rep.accepted = accepted;
     if (!data) _rep.error = 'Kon rapport niet laden';
+    if (accepted && accepted.total > 250) {
+      console.warn('[sales-v2] accepted-in-period total > 250 (' + accepted.total + ') — incl-BTW berekend op eerste 250 rijen');
+    }
     window.DFO.render();
+  }
+
+  // Sommeer total_amount_incl van accepted deals waarvan accepted_at binnen
+  // de gekozen periode ligt (from/to uit reports-params). Fail-soft: null
+  // → "—". Skip deals zonder incl-veld (dan return null als er 0 zijn).
+  function inclBtwPeriod(fromIso, toIso) {
+    const list = _rep.accepted?.quotations || [];
+    if (!list.length) return null;
+    let sum = 0, hits = 0, missing = 0;
+    for (const q of list) {
+      const dt = q.accepted_at || q.sent_at || q.created_at;
+      if (!dt) continue;
+      const day = String(dt).slice(0, 10);
+      if (day < fromIso || day > toIso) continue;
+      if (q.total_amount_incl == null) { missing++; continue; }
+      sum += Number(q.total_amount_incl) || 0;
+      hits++;
+    }
+    return hits ? { sum, hits, missing } : null;
   }
 
   function prestatiesView() {
@@ -313,15 +404,29 @@
     const wanted = reportsParams();
     if (!_rep.loading && (!_rep.data || _rep.params !== wanted)) queueMicrotask(fetchReports);
     const k = _rep.data?.kpis || {};
-    const funnel = _rep.data?.funnel || [];
-    const bySales = _rep.data?.by_sales_user || [];
+    // Funnel is een OBJECT { leads, quotations, signed, paid } — niet een array.
+    const fObj = _rep.data?.funnel;
+    const funnelRows = (fObj && typeof fObj === 'object') ? [
+      ['Leads (aangemaakt)', fObj.leads],
+      ['Offertes verstuurd', fObj.quotations],
+      ['Getekend',           fObj.signed],
+      ['Betaald / gestart',  fObj.paid],
+    ] : [];
+    // by_sales_user levert user_name (niet full_name) + revenue (excl-BTW,
+    // afgerond in server). signed_count / quotations_count / conversion_rate
+    // ook beschikbaar.
+    const bySales = Array.isArray(_rep.data?.by_sales_user) ? _rep.data.by_sales_user : [];
     const trend = _rep.data?.trend || [];
     const trendMax = Math.max(1, ...trend.map(t => Number(t.revenue) || 0));
+
+    // Incl-BTW berekening voor dezelfde periode als sales-reports.
+    const period = _rep.data?.period || {};
+    const incl = period.from && period.to ? inclBtwPeriod(period.from, period.to) : null;
 
     return `${previewHeader('Verkoopprestaties', _rep)}
       ${H.kpis([
         { c: 'violet',  icon: I.trend,  label: 'Pipeline-waarde',    val: eur0(k.pipeline_value), hi: 1, sub: 'open + verzonden' },
-        { c: 'emerald', icon: I.euro,   label: 'Omzet in periode',   val: eur0(k.revenue_period), hi: 1 },
+        { c: 'emerald', icon: I.euro,   label: 'Omzet in periode',   val: eur0(k.revenue_period), hi: 1, sub: `excl. BTW · ${incl ? eur0(incl.sum) + ' incl.' : 'incl.-berekening niet beschikbaar'}` },
         { c: 'blue',    icon: I.doc,    label: 'Bonus openstaand',   val: eur0(k.bonus_pending) },
         { c: 'orange',  icon: I.repeat, label: 'Retentie-ratio',     val: k.retention_rate != null ? Math.round(k.retention_rate * 100) + '%' : '—' },
       ])}
@@ -337,16 +442,16 @@
         <div class="sv-card">
           <div class="sv-card-head">${svg(I.doc)}Verkoop-funnel</div>
           <div class="sv-card-body">
-            ${(Array.isArray(funnel) && funnel.length) ? funnel.map(f => `
-              <div class="sv-row"><span>${f.label || f.stage || '—'}</span><b>${num(f.count ?? f.value ?? f.total)}</b></div>
+            ${funnelRows.length ? funnelRows.map(([l, v]) => `
+              <div class="sv-row"><span>${l}</span><b>${num(v)}</b></div>
             `).join('') : `<div class="sv-empty">${_rep.loading ? 'Laden…' : 'Geen funnel-data.'}</div>`}
           </div>
         </div>
         <div class="sv-card">
           <div class="sv-card-head">${svg(I.users)}Per verkoper</div>
           <div class="sv-card-body">
-            ${(Array.isArray(bySales) && bySales.length) ? bySales.slice(0, 8).map(u => `
-              <div class="sv-row"><span>${u.full_name || u.name || u.sales_user || '—'}</span><b>${eur0(u.revenue ?? u.total ?? u.total_amount)}</b></div>
+            ${bySales.length ? bySales.slice(0, 8).map(u => `
+              <div class="sv-row"><span>${u.user_name || '—'}</span><b>${eur0(u.revenue)}</b></div>
             `).join('') : `<div class="sv-empty">${_rep.loading ? 'Laden…' : 'Geen data per verkoper.'}</div>`}
           </div>
         </div>
@@ -356,9 +461,9 @@
             ${(Array.isArray(trend) && trend.length) ? `<div class="sv-trend">${trend.map(t => {
               const rev = Number(t.revenue) || 0;
               const h = Math.max(3, Math.round(rev / trendMax * 100));
-              return `<div class="sv-trend-col" title="${t.label || t.bucket || t.date || ''} · ${eur0(rev)}">
+              return `<div class="sv-trend-col" title="${t.period || t.label || t.date || ''} · ${eur0(rev)}">
                 <div class="sv-trend-bar" style="height:${h}%"></div>
-                <div class="sv-trend-lbl">${t.label || t.bucket || (t.date ? String(t.date).slice(5, 10) : '')}</div>
+                <div class="sv-trend-lbl">${t.period || t.label || (t.date ? String(t.date).slice(5, 10) : '')}</div>
               </div>`;
             }).join('')}</div>` : `<div class="sv-empty">${_rep.loading ? 'Laden…' : 'Geen trend-data.'}</div>`}
           </div>

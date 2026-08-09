@@ -1925,6 +1925,26 @@ textarea.inp { max-width: 520px; min-height: 90px; resize: vertical; line-height
 }
 @keyframes sv-spin { to { transform: rotate(360deg); } }
 
+/* Avatar + naam-uitlijning in tabel-cellen. Was voorheen ongesizede div →
+   avatar en tekst stonden op tekstbaseline, avatar-balletje half boven de
+   naam. Nu strikt flex-centered met text-truncation. Gebruikt door sales-v2,
+   leads-v2, leadsonderhoud-v2, lisa-v2, wanbetalers-v2. */
+.cell-main-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.cell-main-wrap .av {
+  flex-shrink: 0;
+}
+.cell-main-wrap .cell-main {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Sv-grid (Dashboard + Prestaties: 3-column card-grid) */
 .sv-grid {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
