@@ -2270,4 +2270,38 @@ select.ib-input {
   background-position: right 6px center;
 }
 
+/* Ronde 4 — stableSearch mount + clear-knop (cursor-fix architectuur). */
+.kv-search-mount { display: inline-flex; flex: 0 1 260px; min-width: 180px; vertical-align: middle; }
+.kv-search-wrap { position: relative; display: flex; align-items: center; width: 100%; }
+.kv-search-wrap > svg {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  width: 14px; height: 14px; color: var(--text-3); pointer-events: none;
+}
+.kv-search-wrap .kv-search-input {
+  width: 100%; padding: 8px 32px 8px 32px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--text-1);
+  font-family: inherit; font-size: 13px; line-height: 1.35;
+  -webkit-appearance: none; appearance: none;
+  transition: border-color .12s, box-shadow .12s;
+}
+.kv-search-wrap .kv-search-input::-webkit-search-cancel-button,
+.kv-search-wrap .kv-search-input::-webkit-search-decoration { -webkit-appearance: none; appearance: none; }
+.kv-search-wrap .kv-search-input:focus {
+  outline: none; border-color: var(--brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 18%, transparent);
+}
+.kv-search-wrap .kv-search-input::placeholder { color: var(--text-3); }
+.kv-search-clear {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 22px; height: 22px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--text-3); font-size: 18px; line-height: 1;
+  cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center;
+}
+.kv-search-clear:hover { background: var(--surface-2); color: var(--text-1); }
+
+/* Ronde 4 — mountedList container (partial re-render slot). Geen visuele
+   styling nodig; erft alles van kinderen (bv .tbl-wrap). */
+.kv-list-mount { display: block; }
+
 
