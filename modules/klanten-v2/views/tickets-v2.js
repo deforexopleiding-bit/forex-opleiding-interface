@@ -26,7 +26,11 @@
   const _wait = { loading: false, error: null, data: null, seq: 0, params: '' };
   const _done = { loading: false, error: null, data: null, seq: 0, params: '' };
   const _det  = { loading: false, error: null, data: null, seq: 0, id: null, saving: false, commentText: '', commentSubmitting: false };
-  const _cre  = { submitting: false, form: { title: '', description: '', type: 'question', priority: 'medium', module: '' } };
+  // Ronde 4: priority values matchen VALID_PRIORITIES in api/tickets.js
+  // (laag/middel/hoog, lowercase Dutch). Type values matchen VALID_TYPES
+  // (bug/feature/question). Eerder gebruikt: low/medium/high/urgent + task
+  // — dat faalde met 400 "Ongeldige priority" / "Ongeldig type" bij POST.
+  const _cre  = { submitting: false, form: { title: '', description: '', type: 'question', priority: 'middel', module: '' } };
 
   async function tryFetch(label, url, timeoutMs = 8000) {
     try {
@@ -78,8 +82,11 @@
     </div>`;
   }
 
-  const PRIO_TO_PILL = { low: ['neutral', 'Laag'], medium: ['info', 'Middel'], high: ['warn', 'Hoog'], urgent: ['warn', 'Urgent'] };
-  const TYPE_TO_PILL = { bug: ['warn', 'Bug'], feature: ['info', 'Feature'], question: ['neutral', 'Vraag'], task: ['neutral', 'Taak'], incident: ['warn', 'Incident'] };
+  // Ronde 4: keys matchen VALID_PRIORITIES / VALID_TYPES in api/tickets.js.
+  // Aliases voor legacy waarden (low/medium/high) laten we vallen — DB
+  // heeft geen legacy waarden, backend accepteert alleen deze set.
+  const PRIO_TO_PILL = { laag: ['neutral', 'Laag'], middel: ['info', 'Middel'], hoog: ['warn', 'Hoog'] };
+  const TYPE_TO_PILL = { bug: ['warn', 'Bug'], feature: ['info', 'Feature'], question: ['neutral', 'Vraag'] };
   const STATUS_TO_PILL = { open: ['warn', 'Open'], in_progress: ['info', 'In behandeling'], resolved: ['ok', 'Opgelost'], closed: ['neutral', 'Gesloten'] };
 
   function urlParam(k) { try { return new URLSearchParams(location.search).get(k); } catch { return null; } }
@@ -109,12 +116,12 @@
         title: f.title.trim(),
         description: f.description || '',
         type: f.type || 'question',
-        priority: f.priority || 'medium',
+        priority: f.priority || 'middel',
         module: f.module || null,
       });
       const newId = result?.ticket?.id;
       _cre.submitting = false;
-      _cre.form = { title: '', description: '', type: 'question', priority: 'medium', module: '' };
+      _cre.form = { title: '', description: '', type: 'question', priority: 'middel', module: '' };
       _open.data = null; _wait.data = null; _done.data = null;
       const u = new URL(location.href);
       u.searchParams.delete('ticket-new');
@@ -193,10 +200,33 @@
         { l: 'Bug',        v: 'bug' },
         { l: 'Feature',    v: 'feature' },
         { l: 'Vraag',      v: 'question' },
-        { l: 'Taak',       v: 'task' },
       ], t),
       `<div class="tb-right"><button class="btn btn-primary" onclick="__ticketNew()">${svg(I.plus)}Nieuw ticket</button></div>`,
     ]);
+  }
+
+  // MODS-lijst uit DFO voor de Module-select in create-modal. Fallback
+  // op hard-coded lijst als DFO.MODS niet exposed is (defensief).
+  function moduleOptions(current) {
+    const mods = Array.isArray(window.DFO?.MODS) ? window.DFO.MODS : [];
+    const list = mods.length
+      ? mods.map(m => ({ id: m.id, naam: m.naam }))
+      : [
+          { id: 'dashboard', naam: 'Dashboard' }, { id: 'inbox', naam: 'Inbox' },
+          { id: 'taken', naam: 'Takenbeheer' }, { id: 'klanten', naam: 'Klanten' },
+          { id: 'wanbetalers', naam: 'Wanbetalers' }, { id: 'email', naam: 'E-mail' },
+          { id: 'tickets', naam: 'Tickets' }, { id: 'followup', naam: 'Follow-up' },
+          { id: 'sales', naam: 'Sales' }, { id: 'finance', naam: 'Finance' },
+          { id: 'events', naam: 'Events' }, { id: 'onboarding', naam: 'Onboarding' },
+          { id: 'mentoren', naam: 'Mentoren' }, { id: 'leads', naam: 'Leads' },
+          { id: 'nieuwsbrief', naam: 'Nieuwsbrief' }, { id: 'lisa', naam: 'Lisa' },
+          { id: 'automatiseringen', naam: 'Automatiseringen' },
+          { id: 'agents', naam: 'AI Agents' }, { id: 'logboek', naam: 'Toegangslog' },
+          { id: 'instellingen', naam: 'Instellingen' },
+        ];
+    const opts = ['<option value="">— geen —</option>']
+      .concat(list.map(m => `<option value="${m.id}" ${current === m.id ? 'selected' : ''}>${m.naam}</option>`));
+    return opts.join('');
   }
 
   function ticketTable(items, loading, error) {
@@ -252,21 +282,21 @@
                 <option value="question" ${f.type === 'question' ? 'selected' : ''}>Vraag</option>
                 <option value="bug"      ${f.type === 'bug' ? 'selected' : ''}>Bug</option>
                 <option value="feature"  ${f.type === 'feature' ? 'selected' : ''}>Feature</option>
-                <option value="task"     ${f.type === 'task' ? 'selected' : ''}>Taak</option>
               </select>
             </label>
             <label class="tk-field">
               <span class="tk-field-l">Prioriteit</span>
               <select class="ib-input" onchange="__ticketCreateInput('priority', this.value)"${disabled}>
-                <option value="low"    ${f.priority === 'low' ? 'selected' : ''}>Laag</option>
-                <option value="medium" ${f.priority === 'medium' ? 'selected' : ''}>Middel</option>
-                <option value="high"   ${f.priority === 'high' ? 'selected' : ''}>Hoog</option>
-                <option value="urgent" ${f.priority === 'urgent' ? 'selected' : ''}>Urgent</option>
+                <option value="laag"   ${f.priority === 'laag'   ? 'selected' : ''}>Laag</option>
+                <option value="middel" ${f.priority === 'middel' ? 'selected' : ''}>Middel</option>
+                <option value="hoog"   ${f.priority === 'hoog'   ? 'selected' : ''}>Hoog</option>
               </select>
             </label>
             <label class="tk-field">
               <span class="tk-field-l">Module (optioneel)</span>
-              <input class="ib-input" placeholder="bv. finance, sales, klanten" value="${esc(f.module)}" oninput="__ticketCreateInput('module', this.value)"${disabled}>
+              <select class="ib-input" onchange="__ticketCreateInput('module', this.value)"${disabled}>
+                ${moduleOptions(f.module)}
+              </select>
             </label>
           </div>
         </div>
