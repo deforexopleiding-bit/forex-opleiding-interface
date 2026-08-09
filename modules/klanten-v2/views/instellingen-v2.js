@@ -175,7 +175,7 @@
                 <button class="btn btn-sm" onclick="__setNotice('Bewerk template')">${svg(I.edit || I.settings)}Bewerken</button>
               </div>
             </div>
-          </div>`).join('') : `<div class="empty">${svg(I.chat || I.mail)}<div class="empty-t">Geen templates in deze map</div><div class="empty-s">Maak een nieuwe template of kies een andere map.</div></div>`}
+          </div>`).join('') : `<div class="set-empty" style="grid-column:1/-1"><span class="set-empty-ico">${svg(I.chat || I.mail)}</span><div class="set-empty-t">Geen templates in deze map</div><div class="set-empty-s">Maak een nieuwe template of kies een andere map.</div></div>`}
       </div>`;
   }
   window.__waPick = (id) => { setF('waf', id); };
@@ -247,10 +247,10 @@
   }
 
   function bodyPlaceholder(cur) {
-    return `<div class="empty" style="padding:52px 20px">
-      ${svg(I.settings)}
-      <div class="empty-t">Instellingen voor "${cur.n}"</div>
-      <div class="empty-s">Deze instellingen staan nu nog verspreid in de modules. Ze verhuizen allemaal hierheen, zodat je alles vanaf één plek regelt. Detail-panel komt in de data-ronde.</div>
+    return `<div class="set-empty">
+      <span class="set-empty-ico">${svg(cur.ic || I.settings)}</span>
+      <div class="set-empty-t">Instellingen voor "${cur.n}"</div>
+      <div class="set-empty-s">Deze instellingen staan nu nog verspreid in de modules. Ze verhuizen allemaal hierheen, zodat je alles vanaf één plek regelt. Detail-panel komt in de data-ronde.</div>
     </div>`;
   }
 
