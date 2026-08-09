@@ -2015,4 +2015,41 @@ textarea.inp { max-width: 520px; min-height: 90px; resize: vertical; line-height
   max-width: 100%;
 }
 
+/* Offerte-nr (subtieler dan cell-main): lichter gewicht, gedempte kleur,
+   monospace zodat referenties uitlijnen. Klik-underline op hover. */
+.sv-off-nr {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--text-2);
+  text-decoration: none;
+  cursor: pointer;
+}
+.sv-off-nr:hover { color: var(--brand); text-decoration: underline; }
+
+/* Sub-tekst in sv-row (bijv. "5 deals" naast verkoper-naam) */
+.sv-row-sub {
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+/* Custom-datum-range voor Verkoopprestaties (verschijnt onder chips als
+   Custom actief is). 2 date-inputs, inline naast elkaar. */
+.sv-custom-range {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 4px 4px;
+  font-size: 12.5px; color: var(--text-2);
+}
+.sv-custom-range label { display: inline-flex; align-items: center; gap: 6px; }
+.sv-custom-range input[type="date"] {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-1);
+  font-family: inherit; font-size: 12.5px;
+}
+
 
