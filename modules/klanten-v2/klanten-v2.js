@@ -290,6 +290,22 @@ if (Array.isArray(window.KV_V2_PENDING)) {
   window.KV_V2_PENDING = null;
 }
 
+// ── Preview-override via URL query-param ──────────────────────────────────
+// `?v2preview=sales` (of comma-list `?v2preview=sales,finance`) forceert
+// die id's in V2_MODULES — puur voor layout-review op preview-PR's van
+// modules die nog dormant zijn. Zonder param blijft dormant → legacy-nav.
+// Live-URL zonder param → geen effect, team ziet alleen de allowlist-actieve
+// modules in-shell.
+try {
+  const previewIds = new URLSearchParams(window.location.search).get('v2preview');
+  if (previewIds) {
+    previewIds.split(',').map(s => s.trim()).filter(Boolean).forEach((id) => {
+      V2_MODULES.add(id);
+      console.debug('[klanten-v2] preview-override active — module in-shell:', id);
+    });
+  }
+} catch (_) { /* URLSearchParams-fail is silent */ }
+
 const LEGACY_URLS = {
   dashboard:        '/index.html',
   inbox:            '/modules/finance.html?tab=inbox',        // finance-inbox is centrale WA-inbox
