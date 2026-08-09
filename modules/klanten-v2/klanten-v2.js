@@ -267,44 +267,51 @@ const V2_MODULES = new Set(['klanten']);
 // Dashboard heeft z'n data-ronde al gehad (#1210) en staat aan; klanten is
 // de originele v2-basis.
 const V2_ACTIVE_ALLOWLIST = new Set(['klanten', 'dashboard']);
+
+// ── Preview-override via URL query-param ──────────────────────────────────
+// `?v2preview=sales` (of comma-list `?v2preview=sales,finance,lisa`) forceert
+// die id's in V2_MODULES + opent de KV_V2_ADD-gate — puur voor layout-review
+// van modules die nog dormant zijn. Zonder param: geen effect.
+//
+// KRITIEK: dit block STAAT VOOR de KV_V2_ADD-definitie + PENDING-drain zodat
+// de override al bekend is op moment dat view-files zichzelf aanmelden. Zo
+// werkt `?v2preview=<id>` ook voor modules die géén entry in V2_ACTIVE_ALLOWLIST
+// hebben (dormant modules) — dat was de oorspronkelijke intentie.
+const PREVIEW_OVERRIDE_IDS = new Set();
+try {
+  const raw = new URLSearchParams(window.location.search).get('v2preview');
+  if (raw) {
+    raw.split(',').map(s => s.trim()).filter(Boolean).forEach((id) => {
+      PREVIEW_OVERRIDE_IDS.add(id);
+      V2_MODULES.add(id);
+      console.info('[klanten-v2] ?v2preview override active — module in-shell:', id);
+    });
+  }
+} catch (_) { /* URLSearchParams-fail is silent */ }
+
 // Publieke API voor view-files (dashboard-v2.js etc) om zichzelf te
-// registreren als v2-native. KV_V2_ADD is nu allowlist-gated: als de id
-// niet in V2_ACTIVE_ALLOWLIST zit wordt de registratie stil overgeslagen
-// (view-code blijft geladen, VIEWS-registratie blijft actief, maar klik
-// in nav valt terug op legacy — dormant modus).
+// registreren als v2-native. KV_V2_ADD is allowlist-gated MET
+// preview-override-bypass: id is in-shell als 'ie in V2_ACTIVE_ALLOWLIST
+// OF in PREVIEW_OVERRIDE_IDS zit. VIEWS-registratie zelf (DFO.VIEWS[key]=fn)
+// gebeurt in de view-IIFE ONAFHANKELIJK van deze gate — die is altijd
+// beschikbaar zodra de shell 'em opzoekt.
 window.KV_V2_ADD = (id) => {
   if (!id || typeof id !== 'string') return;
-  if (!V2_ACTIVE_ALLOWLIST.has(id)) {
-    console.debug('[klanten-v2] view registered but dormant:', id, '(niet in V2_ACTIVE_ALLOWLIST)');
-    return;
+  if (V2_ACTIVE_ALLOWLIST.has(id) || PREVIEW_OVERRIDE_IDS.has(id)) {
+    V2_MODULES.add(id);
+  } else {
+    console.debug('[klanten-v2] view registered but dormant:', id);
   }
-  V2_MODULES.add(id);
 };
 // Consumeer eventuele pending-registraties die vóór dit script laadden.
-// Zelfde allowlist-gate toepassen zodat pending-array niet stiekem bypasst.
+// Zelfde gate (allowlist OF preview-override) toepassen.
 if (Array.isArray(window.KV_V2_PENDING)) {
   window.KV_V2_PENDING.forEach((id) => {
-    if (V2_ACTIVE_ALLOWLIST.has(id)) V2_MODULES.add(id);
+    if (V2_ACTIVE_ALLOWLIST.has(id) || PREVIEW_OVERRIDE_IDS.has(id)) V2_MODULES.add(id);
     else console.debug('[klanten-v2] pending-view dormant:', id);
   });
   window.KV_V2_PENDING = null;
 }
-
-// ── Preview-override via URL query-param ──────────────────────────────────
-// `?v2preview=sales` (of comma-list `?v2preview=sales,finance`) forceert
-// die id's in V2_MODULES — puur voor layout-review op preview-PR's van
-// modules die nog dormant zijn. Zonder param blijft dormant → legacy-nav.
-// Live-URL zonder param → geen effect, team ziet alleen de allowlist-actieve
-// modules in-shell.
-try {
-  const previewIds = new URLSearchParams(window.location.search).get('v2preview');
-  if (previewIds) {
-    previewIds.split(',').map(s => s.trim()).filter(Boolean).forEach((id) => {
-      V2_MODULES.add(id);
-      console.debug('[klanten-v2] preview-override active — module in-shell:', id);
-    });
-  }
-} catch (_) { /* URLSearchParams-fail is silent */ }
 
 const LEGACY_URLS = {
   dashboard:        '/index.html',
@@ -336,11 +343,14 @@ const LEGACY_URLS = {
 
 // Wrap DFO.goMod: als target NIET in V2_MODULES én er een legacy-URL is,
 // full-page-navigeer naar legacy. Anders normale DFO.goMod-flow.
+// Belt-and-suspenders: check ook PREVIEW_OVERRIDE_IDS expliciet (die IDs
+// zitten al in V2_MODULES, maar deze extra check maakt de intentie zichtbaar
+// en overleeft eventuele V2_MODULES-mutaties elders).
 function wireLegacyFallback() {
   if (!window.DFO || !window.DFO.goMod || window.DFO.goMod.__kvLegacyWrapped) return;
   const orig = window.DFO.goMod;
   const wrapped = function (id) {
-    if (V2_MODULES.has(id)) return orig.call(this, id);
+    if (V2_MODULES.has(id) || PREVIEW_OVERRIDE_IDS.has(id)) return orig.call(this, id);
     const legacyUrl = LEGACY_URLS[id];
     // Module met ext-link (bv. lms) — laat DFO's eigen open-in-new-tab flow doen
     const mod = (window.DFO.MODS || []).find((m) => m.id === id);
@@ -375,7 +385,8 @@ function wireLegacyNavClickCatcher() {
     const m = oc.match(/DFO\.goMod\('([^']+)'\)/);
     if (!m) return;
     const id = m[1];
-    if (V2_MODULES.has(id)) return; // v2-native active — laat shell-flow doen
+    // v2-native active OF preview-override actief — laat shell-flow doen.
+    if (V2_MODULES.has(id) || PREVIEW_OVERRIDE_IDS.has(id)) return;
     const legacyUrl = LEGACY_URLS[id];
     if (!legacyUrl) return;         // geen legacy-URL — laat placeholder tonen
     e.preventDefault(); e.stopPropagation();
