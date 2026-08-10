@@ -26,7 +26,9 @@
   // Ronde 4: sortBy + sortDir op _act voor sort-chips.
   // _cre.form.productSlugs = array voor multi-select (mini-cursus + 7-daagse
   // combineerbaar; endpoint accepteert producten: [{slug,van,tot}] array).
+  // Ronde 7b: dropdown-filterbalk (v1 parity) — 6 filters + traject-list lazy.
   const _act = { loading: false, error: null, data: null, stats: null, seq: 0, params: '', search: '', sortBy: 'aangemaakt', sortDir: 'desc' };
+  const _traj = { loading: false, list: null };
   const _arc = { loading: false, error: null, data: null, seq: 0, params: '', search: '' };
   const _det = { loading: false, error: null, data: null, seq: 0, id: null, saving: false, notitieDraft: '' };
   const _cre = {
@@ -265,17 +267,35 @@
     window.DFO.render();
   };
   function actiefParams() {
-    const st = F('lead-st', 'all');
-    const bron = F('lead-bron', 'all');
+    // Ronde 7b: 6 dropdown-filters (v1-parity). Elke filter default '' = geen.
+    const soort   = F('lead-soort', '');
+    const traject = F('lead-traject', '');
+    const kwal    = F('lead-kwal', '');
+    const bron    = F('lead-bron', '');
+    const st      = F('lead-st', '');
+    const afspr   = F('lead-afspr', '');
     const q = String(_act.search || '').trim();
     const p = new URLSearchParams();
-    if (st && st !== 'all') p.set('status', st);
-    if (bron && bron !== 'all') p.set('bron', bron);
-    if (q) p.set('q', q);
+    if (soort)   p.set('soort', soort);
+    if (traject) p.set('traject', traject);
+    if (kwal)    p.set('kwalificatie', kwal);
+    if (bron)    p.set('bron', bron);
+    if (st)      p.set('status', st);
+    if (afspr)   p.set('afspraak', afspr);
+    if (q)       p.set('q', q);
     p.set('archief', '0');
     p.set('limit', '50');
     p.set('offset', '0');
     return p.toString();
+  }
+  // Traject-list lazy-fetch (vult Traject-dropdown; 1x per module-load).
+  async function fetchTrajecten() {
+    if (_traj.list || _traj.loading) return;
+    _traj.loading = true;
+    const data = await tryFetch('leads-trajecten', '/api/leads-trajecten');
+    _traj.list = Array.isArray(data?.trajecten) ? data.trajecten : [];
+    _traj.loading = false;
+    window.DFO.render();
   }
 
   async function fetchActief() {
@@ -318,8 +338,14 @@
   };
 
   function actiefListView() {
-    const st = F('lead-st', 'all');
-    const bron = F('lead-bron', 'all');
+    // Ronde 7b: dropdown-filters vervangen chip-rijen. F-defaults zijn '' (= alle).
+    if (!_traj.list && !_traj.loading) queueMicrotask(fetchTrajecten);
+    const fSoort   = F('lead-soort', '');
+    const fTraject = F('lead-traject', '');
+    const fKwal    = F('lead-kwal', '');
+    const fBron    = F('lead-bron', '');
+    const fStatus  = F('lead-st', '');
+    const fAfspr   = F('lead-afspr', '');
     let items = (_act.data?.items || []).slice();
     const total = _act.data?.total ?? null;
     const s = _act.stats || {};
@@ -361,20 +387,52 @@
         { c: 'violet',  icon: I.trend,  label: 'Gem. score (page)',    val: avgScore != null ? String(avgScore) : '—', sub: 'op zichtbare 50' },
       ])}
       ${H.toolbar([
-        H.chips('lead-st', [
-          { l: 'Alle',       v: 'all' },
-          { l: 'Nieuw',      v: 'nieuw' },
-          { l: 'Opgevolgd',  v: 'opgevolgd' },
-          { l: 'Gewonnen',   v: 'gewonnen' },
-          { l: 'Verloren',   v: 'verloren' },
-        ], st),
-        H.chips('lead-bron', [
-          { l: 'Alle bronnen', v: 'all' },
-          { l: 'Meta',         v: 'Meta' },
-          { l: 'Instagram',    v: 'Instagram' },
-          { l: 'Webinar',      v: 'Webinar' },
-          { l: 'Referral',     v: 'Referral' },
-        ], bron),
+        // Ronde 7b — 6 dropdown-filters (v1 parity uit modules/leads.html:163-195).
+        `<select class="ld-filter-sel" onchange="DFO.setF('lead-soort', this.value)">
+          <option value="" ${fSoort === '' ? 'selected' : ''}>Herkomst: alle</option>
+          <option value="instagram" ${fSoort === 'instagram' ? 'selected' : ''}>Instagram</option>
+          <option value="facebook"  ${fSoort === 'facebook'  ? 'selected' : ''}>Facebook</option>
+          <option value="google"    ${fSoort === 'google'    ? 'selected' : ''}>Google</option>
+          <option value="via-via"   ${fSoort === 'via-via'   ? 'selected' : ''}>Via-via</option>
+          <option value="linkedin"  ${fSoort === 'linkedin'  ? 'selected' : ''}>LinkedIn</option>
+          <option value="tiktok"    ${fSoort === 'tiktok'    ? 'selected' : ''}>TikTok</option>
+          <option value="overige"   ${fSoort === 'overige'   ? 'selected' : ''}>Overige</option>
+          <option value="onbekend"  ${fSoort === 'onbekend'  ? 'selected' : ''}>Onbekend</option>
+        </select>`,
+        `<select class="ld-filter-sel" onchange="DFO.setF('lead-traject', this.value)">
+          <option value="" ${fTraject === '' ? 'selected' : ''}>Traject: alle</option>
+          ${(_traj.list || []).map(t => `<option value="${esc(t)}" ${fTraject === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}
+          ${(fTraject && !(_traj.list || []).includes(fTraject)) ? `<option value="${esc(fTraject)}" selected>${esc(fTraject)}</option>` : ''}
+        </select>`,
+        `<select class="ld-filter-sel" onchange="DFO.setF('lead-kwal', this.value)">
+          <option value="" ${fKwal === '' ? 'selected' : ''}>Kwalificatie: alle</option>
+          <option value="toegang"       ${fKwal === 'toegang'       ? 'selected' : ''}>toegang</option>
+          <option value="geen toegang"  ${fKwal === 'geen toegang'  ? 'selected' : ''}>geen toegang</option>
+          <option value="geen"          ${fKwal === 'geen'          ? 'selected' : ''}>geen vragenlijst</option>
+        </select>`,
+        `<select class="ld-filter-sel" onchange="DFO.setF('lead-bron', this.value)">
+          <option value="" ${fBron === '' ? 'selected' : ''}>Bron: alle</option>
+          <option value="website"                 ${fBron === 'website' ? 'selected' : ''}>website</option>
+          <option value="7-daagse-v1"             ${fBron === '7-daagse-v1' ? 'selected' : ''}>7-daagse-v1</option>
+          <option value="7-daagse-v2"             ${fBron === '7-daagse-v2' ? 'selected' : ''}>7-daagse-v2</option>
+          <option value="kennismakingscursus-v1"  ${fBron === 'kennismakingscursus-v1' ? 'selected' : ''}>kennismakingscursus-v1</option>
+          <option value="kennismakingscursus-v2"  ${fBron === 'kennismakingscursus-v2' ? 'selected' : ''}>kennismakingscursus-v2</option>
+          <option value="funnel"                  ${fBron === 'funnel' ? 'selected' : ''}>funnel</option>
+          <option value="meta"                    ${fBron === 'meta' ? 'selected' : ''}>meta</option>
+          <option value="handmatig"               ${fBron === 'handmatig' ? 'selected' : ''}>handmatig</option>
+        </select>`,
+        `<select class="ld-filter-sel" onchange="DFO.setF('lead-st', this.value)">
+          <option value="" ${fStatus === '' ? 'selected' : ''}>Status: alle</option>
+          <option value="nieuw"     ${fStatus === 'nieuw'     ? 'selected' : ''}>nieuw</option>
+          <option value="opgevolgd" ${fStatus === 'opgevolgd' ? 'selected' : ''}>opgevolgd</option>
+          <option value="gewonnen"  ${fStatus === 'gewonnen'  ? 'selected' : ''}>gewonnen</option>
+          <option value="verloren"  ${fStatus === 'verloren'  ? 'selected' : ''}>verloren</option>
+        </select>`,
+        `<select class="ld-filter-sel" onchange="DFO.setF('lead-afspr', this.value)">
+          <option value="" ${fAfspr === '' ? 'selected' : ''}>Call gepland: alle</option>
+          <option value="ja"  ${fAfspr === 'ja'  ? 'selected' : ''}>Call gepland: ja</option>
+          <option value="nee" ${fAfspr === 'nee' ? 'selected' : ''}>Call gepland: nee</option>
+        </select>`,
         H.stableSearch('leads-act', 'Zoek naam / e-mail / telefoon…'),
         `<div class="tb-right">
           <button class="btn btn-sm" onclick="__leadSort('aangemaakt')" title="Sorteer op aanmaakdatum">Datum${sortIcon('aangemaakt')}</button>
