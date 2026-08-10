@@ -53,9 +53,12 @@ export default async function handler(req, res) {
   const canDelete = await requirePermission(req, 'leads.delete');
 
   try {
+    // Ronde 5 fix: leads_overzicht-view is stuk (verwijst naar dropped
+    // leads.naam-kolom). Query `leads` direct met voornaam+achternaam en
+    // bouw `naam` server-side zodat downstream response-shape gelijk blijft.
     let qy = supabaseAdmin
-      .from('leads_overzicht')
-      .select('id, naam, email, telefoon, soort, bron, traject, kwalificatie, score, drempel, status, aangemaakt, tag, afspraak_op', { count: 'exact' })
+      .from('leads')
+      .select('id, voornaam, achternaam, email, telefoon, soort, bron, traject, kwalificatie, score, drempel, status, aangemaakt, tag, afspraak_op, verwijderd_op', { count: 'exact' })
       .order('aangemaakt', { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -74,12 +77,19 @@ export default async function handler(req, res) {
     else if (afspraak === 'nee') qy = qy.is('afspraak_op', null);
     if (search) {
       const like = `%${search.replace(/[%_]/g, m => '\\' + m)}%`;
-      qy = qy.or(`naam.ilike.${like},email.ilike.${like}`);
+      // Zoek nu op voornaam OR achternaam OR email (was naam OR email).
+      qy = qy.or(`voornaam.ilike.${like},achternaam.ilike.${like},email.ilike.${like}`);
     }
 
     const { data, error, count } = await qy;
-    if (error) throw new Error('leads_overzicht: ' + error.message);
-    const items = data || [];
+    if (error) throw new Error('leads: ' + error.message);
+    const rows = data || [];
+    // Bouw `naam` uit voornaam+achternaam zodat response-consumers (v1 + v2)
+    // ongewijzigd blijven werken.
+    const items = rows.map(r => ({
+      ...r,
+      naam: [r.voornaam, r.achternaam].filter(Boolean).join(' ').trim() || r.email || '—',
+    }));
     return res.status(200).json({
       items,
       total: count || items.length,
