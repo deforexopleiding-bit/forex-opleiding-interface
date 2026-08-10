@@ -2462,3 +2462,64 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
   padding: 8px 10px; background: var(--surface-2, #F2F4F7); border-radius: 6px;
 }
 
+/* ── Stap 5 — review sections ─────────────────────────────────────── */
+.rv-section {
+  margin-bottom: 14px;
+  border: 1px solid var(--border-strong, #C9D2DE);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface, #FFFFFF);
+}
+.rv-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--surface-2, #F2F4F7);
+  border-bottom: 1px solid var(--border, #E2E7EE);
+}
+.rv-title { font-size: 13px; font-weight: 700; color: var(--text, #111721); }
+.rv-edit  { font-size: 12px; color: var(--m, #6D3FD4); text-decoration: none; }
+.rv-edit:hover { text-decoration: underline; }
+.rv-body  { padding: 12px 14px; font-size: 12.5px; line-height: 1.55; color: var(--text, #111721); }
+.rv-line  { margin: 2px 0; }
+.rv-dim   { color: var(--text-2, #586374); }
+.rv-ok    { color: var(--emerald, #07835A); }
+.rv-warn  { color: var(--amber,   #C2700A); }
+.rv-small { font-size: 11.5px; }
+.rv-link  { color: var(--m, #6D3FD4); text-decoration: underline; }
+.rv-badge {
+  display: inline-block; padding: 1px 7px; border-radius: 10px;
+  font-size: 10.5px; font-weight: 600; margin-left: 4px;
+  border: 1px solid var(--border, #E2E7EE);
+}
+.rv-badge-teal { background: var(--teal-soft, #E2F3F8); color: var(--teal, #0A7490); border-color: var(--teal-line, #A5D8E8); }
+.rv-badge-slate { background: var(--slate-soft, #EDF0F4); color: var(--slate, #455367); border-color: var(--slate-line, #C6CFDB); }
+
+.rv-tbl-wrap { overflow-x: auto; margin-top: 8px; }
+.rv-tbl { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.rv-tbl td { padding: 4px 6px; vertical-align: top; }
+.rv-tbl .rv-r { text-align: right; }
+.rv-tbl .rv-total-sep td { border-top: 1px solid var(--border, #E2E7EE); padding-top: 6px; }
+.rv-tbl .rv-total-big { font-weight: 700; font-size: 13.5px; color: var(--text, #111721); border-top: 1px solid var(--border, #E2E7EE); }
+.rv-tbl .rv-total-big td { padding-top: 8px; }
+.rv-tbl .rv-disc { color: var(--rose, #C22B3E); }
+
+/* TL-banner + submit-block */
+.rv-tl-banner {
+  padding: 10px 14px; margin: 14px 0 8px;
+  border-radius: 8px; font-size: 12.5px; line-height: 1.5;
+  border: 1px solid transparent;
+}
+.rv-tl-ok      { background: var(--emerald-soft, #E4F5EE); color: var(--emerald, #07835A); border-color: var(--emerald-line, #A9DFC9); }
+.rv-tl-warn    { background: var(--amber-soft,   #FDF3E3); color: var(--amber,   #C2700A); border-color: var(--amber-line,   #F2D9AE); }
+.rv-tl-loading { background: var(--surface-2, #F2F4F7); color: var(--text-2, #586374); border-color: var(--border, #E2E7EE); }
+
+.rv-submit-block {
+  display: flex; flex-direction: column; gap: 8px; margin-top: 8px;
+}
+.rv-submit-block .btn { padding: 12px; font-size: 14px; font-weight: 600; }
+.rv-submit-alt {
+  text-align: center; font-size: 11.5px;
+  color: var(--text-3, #8B95A5); text-decoration: underline;
+}
+.rv-submit-hint { text-align: center; font-size: 11px; color: var(--text-3, #8B95A5); }
+

@@ -62,6 +62,10 @@
     exceptionLimits: { minTermAmount: 400, maxStartDays: 40, loaded: false },
     // Exception-approval modal (5e overlay, opent bij stap 4 -> 5 als grenzen overschreden)
     exceptionModal: { open: false, detect: null, note: '', feeChecked: false, resolver: null },
+    // Stap 5 — TL-status voor banner-varianten (v1 state.tlConnected r479-480)
+    tlConnected: null,                 // null=unknown, true=connected, false=not
+    tlUserInfo: null,                  // { email, ... } uit teamleader-test-connection
+    tlStatusLoading: false,
     prefillLeadId: null,
     prefillEventAttendeeId: null,
     // Stap 2 — bestaande-klant match + tags helper
@@ -296,6 +300,12 @@
       _recomputeTermAmount();
       if (!_sw.exceptionLimits.loaded) queueMicrotask(loadExceptionLimits);
     }
+    if (n === 5) {
+      // TL-status ophalen voor banner + submit-knop variant (v1 r885 init +
+      // r1531 renderReview). Lazy — eerste bezoek stap 5.
+      if (_sw.tlConnected === null && !_sw.tlStatusLoading) queueMicrotask(loadTlStatus);
+      _recomputeTermAmount();
+    }
     renderWizard();
   };
   // __swInput doet EXPLICIET geen re-render — DOM behoudt focus/cursor.
@@ -410,22 +420,100 @@
     _sw.dirty = true;
     window.__swDupCheckClose();
   };
-  window.__swSubmit = async () => {
+  // "Bewerken →" links vanuit stap-5 review (v1 [data-back] r1526).
+  // Springt terug naar target-stap zonder next-guard te draaien (die is
+  // alleen voor voorwaartse navigatie 4->5).
+  window.__swBack = (n) => window.__swGoStep(n);
+
+  // Submit-flow — 1-op-1 met v1 submitDeal(syncToTl) r1548-1641.
+  // syncToTl = true  → 'Push naar Teamleader (concept, zonder versturen)'
+  // syncToTl = false → 'Sla op (lokaal)' — geen TL-sync.
+  window.__swSubmitDeal = async (syncToTl) => {
     if (_sw.submitting) return;
     _sw.submitting = true; renderWizard();
+    const w = _sw.wizard;
     try {
-      const payload = { ...(_sw.wizard), matched_customer_id: _sw.matched_customer_id, event_attendee_id: _sw.prefillEventAttendeeId };
-      const result = await tryPost('sales-deal-create', '/api/sales-deal-create', payload);
+      const payload = {
+        customer_data: {
+          is_company: !!w.is_company,
+          company_name: w.company_name || null,
+          kvk_number: w.kvk_number || null,
+          vat_number: w.vat_number || null,
+          first_name: w.first_name, last_name: w.last_name,
+          email: w.email, phone: w.phone,
+          address_street: w.address_street || null,
+          address_number: w.address_number || null,
+          address_postal: w.address_postal || null,
+          address_city:   w.address_city   || null,
+          address_country: (w.address_country === 'BE' ? 'BE' : 'NL'),
+          date_of_birth:  w.date_of_birth || null,
+          tags: Array.isArray(w.tags) ? w.tags : [],
+          avg_ok: !!w.avg_ok,
+        },
+        deal_data: {
+          source_lead_id: w.source_lead_id || null,
+          quote_reference: w.quote_reference || null,
+          start_date: w.start_date,
+          duration_months: Number(w.duration_months) || 12,
+          total_amount: calcTotals().total,
+          tl_department_id: w.tl_department_id || null,
+          traject_variant_id: w.traject_variant_id || null,
+          discount_percentage: Number(w.discount_percentage) || 0,
+          sale_type: w.sale_type || 'domestic',
+          payment_start_date: w.payment_start_date || null,
+          payment_downpayment_amount: Number(w.payment_downpayment_amount) || null,
+          payment_downpayment_date: w.payment_downpayment_date || null,
+          payment_term_count: Number(w.payment_term_count) || null,
+          payment_term_start_date: w.payment_term_start_date || null,
+          payment_term_amount: Number(w.payment_term_amount) || null,
+          exception_flagged:     !!w.exception_flagged,
+          exception_reasons:     w.exception_flagged ? (w.exception_reasons || null) : null,
+          exception_reason_note: w.exception_flagged ? (w.exception_reason_note || null) : null,
+          exception_fee_agreed:  !!w.exception_fee_agreed,
+          reservation_fee_due:   _reservationFeeApplies(),
+        },
+        products: w.products,
+        matched_customer_id: _sw.matched_customer_id,
+        tl_imported_contact_id: _sw.tl_imported_contact_id,
+        sync_to_tl: !!syncToTl,
+        event_attendee_id: _sw.prefillEventAttendeeId || null,
+      };
+      let data;
+      if (_sw.editDealId) {
+        // Bestaande offerte updaten (edit-mode) — v1 r1608-1616.
+        data = await tryPost('sales-deal-update', '/api/sales-deal-update',
+          { deal_id: _sw.editDealId, deal_data: payload.deal_data, products: w.products }, 'PUT');
+        data.customer_id = _sw.matched_customer_id;
+        data.deal_id = _sw.editDealId;
+      } else {
+        data = await tryPost('sales-deal-create', '/api/sales-deal-create', payload);
+      }
       _sw.submitting = false;
-      alert('Offerte aangemaakt: ' + (result?.deal?.id || 'ok'));
-      _sw.open = false; _sw.step = 1; _sw.dirty = false;
+      const custBase = ((w.is_company ? w.company_name : `${w.first_name || ''} ${w.last_name || ''}`) || '—').trim();
+      try { window.KV?.toast?.(_sw.editDealId ? `Offerte bijgewerkt voor ${custBase}` : `Offerte aangemaakt voor ${custBase}`); } catch (_) {}
+      // TL-status-toasts (v1 r1625-1631).
+      if (data?.tl_quotation_status === 'sent') {
+        setTimeout(() => { try { window.KV?.toast?.(`Offerte verzonden naar ${w.email} via Teamleader`); } catch (_) {} }, 1200);
+      } else if (data?.tl_quotation_status === 'draft' && syncToTl) {
+        setTimeout(() => { try { window.KV?.toast?.('Offerte als concept aangemaakt in Teamleader — verstuur vanuit TL'); } catch (_) {} }, 1200);
+      } else if (data?.tl_quotation_status === 'failed') {
+        setTimeout(() => { try { window.KV?.toast?.(`Klant opgeslagen lokaal, offerte sturen mislukt: ${data.tl_error || ''}`); } catch (_) {} }, 1200);
+      }
+      // Draft opruimen — v1 r1632.
       try { await tryPost('drafts-del', '/api/sales-wizard-drafts', null, 'DELETE'); } catch (_) {}
+      // Redirect naar offerte-detail — v1 r1636.
+      _sw.open = false; _sw.step = 1; _sw.dirty = false;
       renderWizard();
+      if (data?.deal_id) {
+        setTimeout(() => { window.location.href = `/modules/offerte-detail.html?id=${encodeURIComponent(data.deal_id)}`; }, 700);
+      }
     } catch (e) {
       _sw.submitting = false; renderWizard();
-      alert('Verzenden mislukt: ' + (e?.message || 'onbekende fout'));
+      try { window.KV?.toast?.('Verzenden mislukt: ' + (e?.message || 'onbekende fout')); } catch (_) {}
     }
   };
+  // Backward-compat naam (in geval oude foot-knop nog __swSubmit gebruikt).
+  window.__swSubmit = () => window.__swSubmitDeal(true);
 
   async function loadEntities() {
     _sw.entitiesLoading = true;
@@ -479,6 +567,25 @@
                         : Array.isArray(data) ? data : [];
     _sw.productsLoading = false;
     renderWizard();
+  }
+  async function loadTlStatus() {
+    if (_sw.tlStatusLoading) return;
+    if (_sw.tlConnected !== null) return;
+    _sw.tlStatusLoading = true;
+    const data = await tryFetch('teamleader-test-connection', '/api/teamleader-test-connection');
+    _sw.tlConnected = !!(data && data.connected);
+    _sw.tlUserInfo  = data?.user_info || null;
+    _sw.tlStatusLoading = false;
+    renderWizard();
+  }
+  function trajectVariantLabel(variantId) {
+    if (!variantId || !_sw.trajecten) return '';
+    for (const t of _sw.trajecten) {
+      for (const v of (t.variants || [])) {
+        if (v.id === variantId) return `${t.name} > ${v.name}`;
+      }
+    }
+    return '';
   }
   async function loadLeadSources() {
     // Loop-fix: expliciete in-flight guard i.p.v. alleen post-fetch state-check.
@@ -1591,24 +1698,141 @@
       </div>
     </div>`;
   }
+  // Stap 5 review — 1-op-1 met v1 renderReview() r1446-1546. Sectie-blokken
+  // met "Bewerken →"-link per sectie. TL-banner varieert op tlConnected.
   function stepReview() {
     const w = _sw.wizard;
+    const totals = calcTotals();
+
+    // Entiteit-label
+    const entity = (_sw.entities || []).find(e => e && e.tl_department_id === w.tl_department_id);
+    const entityLabel = entity?.label || '';
+    // Lead-source label
+    const ls = (_sw.leadSources || []).find(s => s && s.id === w.source_lead_id);
+
+    // BTW-breakdown voor review-tabel
+    const btwRows = Object.keys(totals.vatByRate).sort((a, b) => Number(a) - Number(b))
+      .map(r => `<tr><td colspan="3" class="rv-dim">BTW ${r}%</td><td class="rv-r">${eurFmt(totals.vatByRate[r])}</td></tr>`).join('');
+    const discRows = totals.disc > 0
+      ? `<tr class="rv-disc"><td colspan="3">Korting (${totals.disc}%)</td><td class="rv-r">−${eurFmt(totals.discountAmount)}</td></tr>
+         <tr><td colspan="3" class="rv-dim">Subtotaal na korting</td><td class="rv-r">${eurFmt(totals.subtotalAfter)}</td></tr>`
+      : '';
+
+    const custName = w.is_company
+      ? (w.company_name || '').trim()
+      : `${w.first_name || ''} ${w.last_name || ''}`.trim();
+    const custBadge = _sw.matched_customer_id
+      ? '<span class="rv-badge rv-badge-teal">Bestaande klant</span>'
+      : (_sw.tl_imported_contact_id
+          ? '<span class="rv-badge rv-badge-teal">Geïmporteerd uit TeamLeader</span>'
+          : '');
+
+    const saleTypeLabel = w.sale_type === 'intracommunautair'
+      ? 'Zakelijk België — Intracommunautair'
+      : 'Normaal NL/BE';
+
+    // TL-banner + submit-block
+    let tlBannerHtml = '', submitHtml = '';
+    if (_sw.tlStatusLoading || _sw.tlConnected === null) {
+      tlBannerHtml = `<div class="rv-tl-banner rv-tl-loading">TeamLeader-status ophalen…</div>`;
+      submitHtml = `<button class="btn" disabled>Wachten op TL-status…</button>`;
+    } else if (_sw.tlConnected) {
+      const who = _sw.tlUserInfo?.email ? ` als <b>${esc(_sw.tlUserInfo.email)}</b>` : '';
+      tlBannerHtml = `<div class="rv-tl-banner rv-tl-ok">✓ Verbonden met TeamLeader${who} — de offerte wordt aangemaakt in TL.</div>`;
+      submitHtml = `
+        <button class="btn btn-primary" onclick="__swSubmitDeal(true)" ${_sw.submitting ? 'disabled' : ''}>
+          ${_sw.submitting ? 'Verzenden…' : 'Push naar Teamleader (concept, zonder versturen)'}
+        </button>
+        <a class="rv-submit-alt" href="#" onclick="event.preventDefault();__swSubmitDeal(false)">Alleen lokaal opslaan (geen offerte versturen)</a>`;
+    } else {
+      tlBannerHtml = `<div class="rv-tl-banner rv-tl-warn">⚠ TeamLeader niet verbonden. Klant + offerte worden alleen lokaal opgeslagen. Manager kan TL verbinden via Admin → Integraties.</div>`;
+      submitHtml = `
+        <button class="btn" onclick="__swSubmitDeal(false)" ${_sw.submitting ? 'disabled' : ''}>
+          ${_sw.submitting ? 'Verzenden…' : 'Sla op (lokaal)'}
+        </button>
+        <div class="rv-submit-hint">Offerte versturen kan later vanuit klant-detail.</div>`;
+    }
+
+    const hasPay = w.payment_start_date || Number(w.payment_downpayment_amount) > 0 || Number(w.payment_term_count) > 0;
+
     return `<div class="sw-step">
       <h2 class="sw-step-title">5. Bevestiging & versturen</h2>
-      <p class="sw-step-sub">Review alle secties + submit naar /api/sales-deal-create.</p>
-      <div class="sv-card">
-        <div class="sv-card-head">${svg(I.doc)}Samenvatting</div>
-        <div class="sv-card-body">
-          <div class="sv-row"><span>Entiteit</span><b>${esc(w.tl_department_id) || '—'}</b></div>
-          <div class="sv-row"><span>Klanttype</span><b>${w.is_company ? 'Bedrijf' : 'Consument'}</b></div>
-          <div class="sv-row"><span>Naam</span><b>${esc((w.first_name + ' ' + w.last_name).trim()) || '—'}</b></div>
-          <div class="sv-row"><span>E-mail</span><b class="mono">${esc(w.email) || '—'}</b></div>
-          ${w.source_lead_id ? `<div class="sv-row"><span>Bron-lead</span><b class="mono">${esc(w.source_lead_id.slice(0, 8))}…</b></div>` : ''}
+      <p class="sw-step-sub">Bekijk alle gegevens, klik dan op versturen. Elke sectie is bewerkbaar via de "Bewerken →"-link.</p>
+
+      <div class="rv-section">
+        <div class="rv-head">
+          <span class="rv-title">Klant ${custBadge}</span>
+          <a class="rv-edit" href="#" onclick="event.preventDefault();__swBack(2)">Bewerken →</a>
+        </div>
+        <div class="rv-body">
+          ${entityLabel ? `<div class="rv-line"><span class="rv-badge rv-badge-slate">Entiteit: ${esc(entityLabel)}</span></div>` : ''}
+          <div class="rv-line"><b>${esc(custName || '—')}</b>${w.is_company ? ' <span class="rv-badge rv-badge-slate">Bedrijf</span>' : ''}</div>
+          ${w.is_company && (w.first_name || w.last_name) ? `<div class="rv-line rv-dim">Contact: ${esc(`${w.first_name || ''} ${w.last_name || ''}`.trim())}</div>` : ''}
+          ${w.is_company && w.kvk_number ? `<div class="rv-line rv-dim">KvK: ${esc(w.kvk_number)}</div>` : ''}
+          ${w.is_company && w.vat_number ? `<div class="rv-line rv-dim">BTW: ${esc(w.vat_number)}</div>` : ''}
+          <div class="rv-line rv-dim">${esc(w.email || '—')} · ${esc(w.phone || '—')}</div>
+          <div class="rv-line rv-dim">${esc([w.address_street, w.address_number, w.address_postal, w.address_city].filter(Boolean).join(' ') || (w.address_known ? '(adres bekend, niet in offerte)' : '—'))}</div>
+          ${w.date_of_birth ? `<div class="rv-line rv-dim">Geboortedatum: ${esc(w.date_of_birth)}</div>` : ''}
+          ${w.tags?.length ? `<div class="rv-line">Tags: ${w.tags.map(t => `<span class="sw-chip is-on">${esc(t)}</span>`).join(' ')}</div>` : ''}
+          ${_sw.matched_customer_id ? `<div class="rv-line"><a href="/modules/klanten.html?id=${encodeURIComponent(_sw.matched_customer_id)}" class="rv-link" target="_blank" rel="noopener">Bekijk volledige klant-detail →</a></div>` : ''}
+          ${_sw.tl_imported_contact_id ? `<div class="rv-line rv-dim">Wordt aangemaakt in onze DB + gekoppeld aan TL contact <code>${esc(String(_sw.tl_imported_contact_id))}</code></div>` : ''}
+          <div class="rv-line rv-ok">✓ ${w.avg_ok ? 'Geïnformeerd over privacyverklaring' : 'AVG-checkbox nog niet aangevinkt (blokkerend)'}</div>
         </div>
       </div>
-      <div class="sv-empty" style="padding:22px;margin-top:10px;background:var(--amber-soft);border:1px dashed var(--amber-line);color:var(--amber);border-radius:8px">
-        <b>PLACEHOLDER</b> · Volledig review-scherm met "Bewerken →"-links per sectie komt in volgende iteratie
-        (port van sales-wizard.html renderReview() r1476-1568).
+
+      <div class="rv-section">
+        <div class="rv-head">
+          <span class="rv-title">Offerte</span>
+          <a class="rv-edit" href="#" onclick="event.preventDefault();__swBack(3)">Bewerken →</a>
+        </div>
+        <div class="rv-body">
+          <div class="rv-line rv-dim">Lead-bron: ${esc(ls?.name || ls?.label || '—')}</div>
+          <div class="rv-line rv-dim">Offerte-referentie: ${esc(w.quote_reference || '—')}</div>
+          <div class="rv-line rv-dim">Datum offerte: ${esc(w.start_date || '—')}</div>
+          <div class="rv-line rv-dim">Looptijd: ${Number(w.duration_months) || 12} mnd</div>
+          ${w.traject_variant_id ? `<div class="rv-line rv-dim">Traject: ${esc(trajectVariantLabel(w.traject_variant_id) || '—')}</div>` : ''}
+          <div class="rv-line rv-dim">Type verkoop: ${esc(saleTypeLabel)}</div>
+          <div class="rv-line"><b>Producten (${w.products.length}):</b></div>
+          <div class="rv-tbl-wrap">
+            <table class="rv-tbl">
+              ${w.products.map(p => {
+                const a = lineAmounts(p);
+                return `<tr>
+                  <td>${esc(p.product_name)}</td>
+                  <td class="rv-r">${p.quantity}×</td>
+                  <td class="rv-r rv-dim">${eurFmt(p.price_per_unit)} ${p.price_includes_vat ? 'incl' : 'excl'}</td>
+                  <td class="rv-r"><b>${eurFmt(a.incl)}</b></td>
+                </tr>`;
+              }).join('')}
+              <tr class="rv-total-sep"><td colspan="3" class="rv-dim">Subtotaal excl. BTW</td><td class="rv-r">${eurFmt(totals.subtotalExcl)}</td></tr>
+              ${discRows}
+              ${btwRows}
+              <tr class="rv-total-big"><td colspan="3">Totaal incl. BTW</td><td class="rv-r">${eurFmt(totals.total)}</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      ${hasPay ? `
+      <div class="rv-section">
+        <div class="rv-head">
+          <span class="rv-title">Betalingsvoorwaarden</span>
+          <a class="rv-edit" href="#" onclick="event.preventDefault();__swBack(4)">Bewerken →</a>
+        </div>
+        <div class="rv-body">
+          ${w.payment_start_date ? `<div class="rv-line rv-dim">Startdatum cursus: ${esc(w.payment_start_date)}</div>` : ''}
+          ${_reservationFeeApplies() ? `<div class="rv-line rv-warn"><b>Reserveringsfee (direct): ${eurFmt(RESERVATION_FEE_INCL)} incl. BTW</b></div>` : ''}
+          ${Number(w.payment_downpayment_amount) > 0 ? `<div class="rv-line rv-dim">Aanbetaling: <b>${eurFmt(w.payment_downpayment_amount)}</b>${w.payment_downpayment_date ? ' op ' + esc(w.payment_downpayment_date) : ''}</div>` : ''}
+          ${Number(w.payment_term_count) > 0 ? `<div class="rv-line rv-dim">Termijnen: <b>${w.payment_term_count} × ${eurFmt(w.payment_term_amount)}</b>${w.payment_term_start_date ? ' vanaf ' + esc(w.payment_term_start_date) : ''}</div>` : ''}
+          ${_reservationFeeApplies() ? `<div class="rv-line rv-dim rv-small">Termijnen berekend over (totaal − €${RESERVATION_FEE_INCL} reserveringsfee${Number(w.payment_downpayment_amount) > 0 ? ' − aanbetaling' : ''}). De €${RESERVATION_FEE_INCL} wordt bij het aanmaken van het abonnement direct als aparte factuur geboekt+verstuurd.</div>` : ''}
+          ${_buildQuotationTitleFE() ? `<div class="rv-line rv-dim rv-small">Op offerte komt: '${esc(_buildQuotationTitleFE())}'</div>` : ''}
+          ${w.exception_flagged ? `<div class="rv-line rv-warn"><b>Uitzondering goedgekeurd</b> · ${esc(String(w.exception_reasons || '').split(',').map(r => r === 'low_term_amount' ? 'lage termijn' : (r === 'late_start' ? 'late startdatum' : r)).join(' + '))}${w.exception_fee_agreed ? ' · €100 fee akkoord' : ''}${w.exception_reason_note ? ' · reden: ' + esc(w.exception_reason_note) : ''}</div>` : ''}
+        </div>
+      </div>` : ''}
+
+      ${tlBannerHtml}
+      <div class="rv-submit-block">
+        ${submitHtml}
       </div>
     </div>`;
   }
@@ -1643,9 +1867,7 @@
           <div style="flex:1"></div>
           ${_sw.step > 1 ? `<button class="btn" onclick="__swGoStep(${_sw.step - 1})">← Vorige</button>` : ''}
           ${!isLast ? `<button class="btn btn-primary" onclick="__swNext()">Volgende →</button>` : ''}
-          ${isLast ? `<button class="btn btn-primary" onclick="__swSubmit()" ${_sw.submitting ? 'disabled' : ''}>
-            ${_sw.submitting ? 'Verzenden…' : 'Verzenden'}
-          </button>` : ''}
+          ${/* Stap 5: submit-knop staat in de review-body zelf (met TL-banner + variant), niet in de foot. */ ''}
         </div>
       </div>`;
   }
