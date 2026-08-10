@@ -58,6 +58,10 @@
     picker: { open: false, search: '', category: '' },
     // Korting-modal (4e overlay)
     discountModal: { open: false, draft: '' },
+    // Stap 4 — exception-limits (uit /api/app-settings, fallback 400/40 zoals v1 r859)
+    exceptionLimits: { minTermAmount: 400, maxStartDays: 40, loaded: false },
+    // Exception-approval modal (5e overlay, opent bij stap 4 -> 5 als grenzen overschreden)
+    exceptionModal: { open: false, detect: null, note: '', feeChecked: false, resolver: null },
     prefillLeadId: null,
     prefillEventAttendeeId: null,
     // Stap 2 — bestaande-klant match + tags helper
@@ -99,13 +103,18 @@
       duration_months: 12,               // v1 durationMonths, chips 6/12/24/36
       products: [],                      // [{product_id, product_name, quantity, price_per_unit, vat_percentage, price_includes_vat}]
       discount_percentage: 0,            // 0..100, deal-niveau korting
-      // Stap 4 — betalingsvoorwaarden (optioneel)
-      payment_start_date: '',
-      payment_downpayment_amount: '',
-      payment_downpayment_date: '',
-      payment_term_count: '',
-      payment_term_start_date: '',
-      payment_term_amount: '',
+      // Stap 4 — betalingsvoorwaarden (1-op-1 met v1 state.wizard r521-530)
+      payment_start_date: '',            // v1 payStartDate, REQUIRED, min = today NL + 3d
+      payment_downpayment_amount: '',    // v1 payDownAmount, optioneel
+      payment_downpayment_date: '',      // v1 payDownDate — max = start - 3d, min = today
+      payment_term_count: '',            // v1 payTermCount, REQUIRED, 1..60
+      payment_term_start_date: '',       // v1 payTermStartDate — met aanbetaling max=start+30d, zonder max=start-3d
+      payment_term_amount: '',           // v1 payTermAmount, READONLY, auto-berekend
+      // Exception-goedkeuring bij low_term_amount of late_start (v1 r521-524)
+      exception_flagged:      false,
+      exception_reasons:      '',        // csv: 'low_term_amount' | 'late_start' (of beide)
+      exception_reason_note:  '',
+      exception_fee_agreed:   false,     // alleen relevant bij late_start
       // Prefill / audit
       source_lead_id: '',
     },
@@ -210,9 +219,10 @@
       // Alleen ÉÉN sub-overlay tegelijk actief (Esc-volgorde: picker → dup →
       // discount → wizard). Simpel: laatste-open wint via CSS z-index.
       let extras = '';
-      if (_sw.dupModal.open)      extras += dupModalHtml();
-      if (_sw.picker.open)        extras += pickerModalHtml();
-      if (_sw.discountModal.open) extras += discountModalHtml();
+      if (_sw.dupModal.open)       extras += dupModalHtml();
+      if (_sw.picker.open)         extras += pickerModalHtml();
+      if (_sw.discountModal.open)  extras += discountModalHtml();
+      if (_sw.exceptionModal.open) extras += excModalHtml();
       root.innerHTML = wizardModal() + extras;
       root.classList.add('is-open');
     } else {
@@ -241,6 +251,15 @@
       if (!_sw.trajecten     && !_sw.trajectenLoading) queueMicrotask(loadTrajecten);
       if (!_sw.productsCatalog && !_sw.productsLoading) queueMicrotask(loadProductsCatalog);
       if (_sw.leadSources === null) queueMicrotask(loadLeadSources);
+    }
+    if (n === 4) {
+      // Prefill start_date-clamp bij eerste bezoek — v1 renderPaymentStep r730-738.
+      const minStart = _swMinStartDateNL();
+      if (minStart && _sw.wizard.payment_start_date && _sw.wizard.payment_start_date < minStart) {
+        _sw.wizard.payment_start_date = minStart;
+      }
+      _recomputeTermAmount();
+      if (!_sw.exceptionLimits.loaded) queueMicrotask(loadExceptionLimits);
     }
     renderWizard();
   };
@@ -494,6 +513,302 @@
     const total = subtotalAfter + vatTotal;
     return { disc, discountAmount, subtotalExcl, subtotalAfter, vatByRate, vatTotal, total };
   }
+
+  // ── Stap 4 — betalingsvoorwaarden helpers (1-op-1 met v1) ──────────
+  // Constante uit v1 r578. Reserveringsfee gaat vóór aanbetaling van het
+  // totaal af; termijnen worden herberekend over het restbedrag.
+  const RESERVATION_FEE_INCL = 100;
+
+  // Vandaag NL (Europe/Amsterdam) als yyyy-mm-dd — matcht v1 _swTodayNL r614.
+  function _swTodayNL() {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Amsterdam',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
+  }
+  // UTC-veilige yyyy-mm-dd shift (v1 _shiftDaysIso r604).
+  function _shiftDaysIso(startIso, deltaDays) {
+    const s = String(startIso || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+    const [y, m, d] = s.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    dt.setUTCDate(dt.getUTCDate() + deltaDays);
+    return dt.toISOString().slice(0, 10);
+  }
+  // Kies de hoogste (later) van twee yyyy-mm-dd. Beide mogen null zijn.
+  function _maxYmd(a, b) {
+    if (!a) return b || null;
+    if (!b) return a || null;
+    return a > b ? a : b;
+  }
+  // Vroegst-toegestane cursus-startdatum: vandaag NL + 3d (v1 _swMinStartDateNL r626).
+  function _swMinStartDateNL() { return _shiftDaysIso(_swTodayNL(), 3); }
+  function _hasDownpayment() { return Number(_sw.wizard.payment_downpayment_amount) > 0; }
+  // 1e termijn-bounds (v1 _termStartBounds r645-650):
+  //   MÉT aanbetaling: max = start + 30d
+  //   ZONDER aanbetaling: max = start - 3d
+  //   min: null (aangevuld met today-floor in _applyTermStartBounds)
+  function _termStartBounds(startIso, hasDown) {
+    if (!startIso) return { min: null, max: null };
+    return hasDown
+      ? { min: null, max: _shiftDaysIso(startIso, +30) }
+      : { min: null, max: _shiftDaysIso(startIso, -3)  };
+  }
+  // Effectieve bounds voor 1e-termijndatum incl. today-floor.
+  function _termStartEffBounds() {
+    const b = _termStartBounds(_sw.wizard.payment_start_date, _hasDownpayment());
+    const effMin = _maxYmd(b.min, _swTodayNL());
+    return { min: effMin, max: b.max };
+  }
+  // Effectieve bounds voor aanbetaling-datum (v1 _applyDownDateBounds r695-722).
+  function _downDateEffBounds() {
+    const start = _sw.wizard.payment_start_date;
+    const max = _shiftDaysIso(start, -3);
+    return { min: _swTodayNL(), max };
+  }
+  // Clamp payment_term_start_date bij verandering van start_date / down_amount.
+  // v1 _applyTermStartBounds r657-689. Toont toast bij shift (explainOnClamp).
+  function _clampTermStartDate(explainOnClamp) {
+    const b = _termStartEffBounds();
+    const cur = _sw.wizard.payment_term_start_date || '';
+    if (!cur) return;
+    let clamped = cur;
+    if (b.max && cur > b.max) clamped = b.max;
+    if (b.min && cur < b.min) clamped = b.min;
+    if (clamped !== cur) {
+      _sw.wizard.payment_term_start_date = clamped;
+      if (explainOnClamp) {
+        const wasPast = b.min && cur < b.min;
+        const msg = wasPast
+          ? '1e termijndatum aangepast: datum mocht niet in het verleden liggen.'
+          : (_hasDownpayment()
+              ? '1e termijndatum aangepast: met aanbetaling mag de termijn tot 30 dagen ná de startdatum.'
+              : '1e termijndatum aangepast: zonder aanbetaling moet de termijn minstens 3 dagen vóór de startdatum liggen.');
+        try { window.KV?.toast?.(msg); } catch (_) {}
+      }
+    }
+  }
+  function _clampDownDate(explainOnClamp) {
+    const b = _downDateEffBounds();
+    const cur = _sw.wizard.payment_downpayment_date || '';
+    if (!cur) return;
+    let clamped = cur;
+    if (b.max && cur > b.max) clamped = b.max;
+    if (b.min && cur < b.min) clamped = b.min;
+    if (clamped !== cur) {
+      _sw.wizard.payment_downpayment_date = clamped;
+      if (explainOnClamp) {
+        const wasPast = b.min && cur < b.min;
+        const msg = wasPast
+          ? 'Aanbetaling-datum aangepast: datum mocht niet in het verleden liggen.'
+          : 'Aanbetaling-datum aangepast: moet minstens 3 dagen vóór de startdatum liggen.';
+        try { window.KV?.toast?.(msg); } catch (_) {}
+      }
+    }
+  }
+  // Fee-toepassing (v1 _reservationFeeApplies r579-585).
+  function _reservationFeeApplies() {
+    const w = _sw.wizard;
+    if (!w.exception_flagged) return false;
+    const reasons = String(w.exception_reasons || '').split(',').map(s => s.trim());
+    return reasons.includes('late_start') && !!w.exception_fee_agreed;
+  }
+  // Termijnbedrag = floor2((effTotal − down) / tc). effTotal = total − 100 als fee.
+  // (v1 recomputeTermAmount r586-596).
+  function _recomputeTermAmount() {
+    const w = _sw.wizard;
+    const total = calcTotals().total || 0;
+    const down = Number(w.payment_downpayment_amount) || 0;
+    const tc   = Number(w.payment_term_count) || 0;
+    const feeApplies = _reservationFeeApplies();
+    const effectiveTotal = feeApplies ? (total - RESERVATION_FEE_INCL) : total;
+    w.payment_term_amount = tc > 0
+      ? Math.floor((effectiveTotal - down) / tc * 100) / 100
+      : '';
+  }
+  // Days-between-today-and (v1 _daysBetweenTodayAnd r1728-1736).
+  function _daysBetweenTodayAndUTC(dateIso) {
+    const s = String(dateIso || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+    const [y, m, d] = s.split('-').map(Number);
+    const target = Date.UTC(y, m - 1, d);
+    const now = new Date();
+    const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    return Math.round((target - today) / 86400000);
+  }
+  // Detect exceptions (v1 _detectExceptions r1792-1801).
+  function _detectExceptions() {
+    const w = _sw.wizard;
+    const minTerm = Number(_sw.exceptionLimits.minTermAmount);
+    const maxDays = Number(_sw.exceptionLimits.maxStartDays);
+    const termAmt = Number(w.payment_term_amount);
+    const daysToStart = _daysBetweenTodayAndUTC(w.payment_start_date);
+    const lowTerm   = termAmt > 0 && termAmt < minTerm;
+    const lateStart = daysToStart !== null && daysToStart > maxDays;
+    return { lowTerm, lateStart, termAmt, daysToStart, minTerm, maxDays };
+  }
+  // Reset exception-approval als niet meer nodig (v1 _revalidateExceptions r1741-1757).
+  function _revalidateExceptions() {
+    if (!_sw.wizard.exception_flagged) return;
+    const d = _detectExceptions();
+    if (!d.lowTerm && !d.lateStart) {
+      _sw.wizard.exception_flagged     = false;
+      _sw.wizard.exception_reasons     = '';
+      _sw.wizard.exception_reason_note = '';
+      _sw.wizard.exception_fee_agreed  = false;
+      _recomputeTermAmount();
+      try { window.KV?.toast?.('Uitzondering-goedkeuring automatisch ingetrokken: offerte valt weer binnen de grenzen.'); } catch (_) {}
+    }
+  }
+  // Preview-text voor "Wat komt er op de offerte?" (v1 buildQuotationTitleFE r559-571).
+  function _buildQuotationTitleFE() {
+    const w = _sw.wizard;
+    const seg = [];
+    if (w.payment_start_date) {
+      const d = new Date(w.payment_start_date);
+      seg.push(`Start: ${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`);
+    }
+    if (Number(w.payment_downpayment_amount) > 0) {
+      seg.push(`Aanbetaling €${Number(w.payment_downpayment_amount).toLocaleString('nl-NL')}`);
+    }
+    if (Number(w.payment_term_count) > 0) {
+      const amt = Number(w.payment_term_amount) > 0 ? ` van €${Number(w.payment_term_amount).toLocaleString('nl-NL')}` : '';
+      seg.push(`${w.payment_term_count} termijnen${amt}`);
+    }
+    return seg.length ? seg.join(' | ') : null;
+  }
+  // Loader voor exception-limits (v1 _loadExceptionLimits r860-871).
+  async function loadExceptionLimits() {
+    if (_sw.exceptionLimits.loaded) return;
+    try {
+      const [rMin, rMax] = await Promise.all([
+        tryFetch('app-settings-min-term', '/api/app-settings?key=sales_min_term_amount'),
+        tryFetch('app-settings-max-days', '/api/app-settings?key=sales_max_start_days'),
+      ]);
+      const nMin = Number(rMin?.value?.amount);
+      const nMax = Number(rMax?.value?.days);
+      if (Number.isFinite(nMin) && nMin >= 0) _sw.exceptionLimits.minTermAmount = nMin;
+      if (Number.isFinite(nMax) && nMax >= 1) _sw.exceptionLimits.maxStartDays  = nMax;
+    } catch (_) { /* fallback 400/40 blijft */ }
+    _sw.exceptionLimits.loaded = true;
+  }
+
+  // Stap 4 handlers — patroon: state-mutatie + optionele bounds-clamp + revalidate + render.
+  window.__swSetPayStart = (v) => {
+    _sw.wizard.payment_start_date = String(v || '');
+    _sw.dirty = true;
+    // Default 1e termijn = start-3d als leeg (v1 nextBtn hook r758-762).
+    const startMinus3 = _shiftDaysIso(_sw.wizard.payment_start_date, -3);
+    if (startMinus3 && !_sw.wizard.payment_term_start_date) {
+      _sw.wizard.payment_term_start_date = startMinus3;
+    }
+    _clampTermStartDate(true);
+    _clampDownDate(true);
+    _recomputeTermAmount();
+    _revalidateExceptions();
+    renderWizard();
+  };
+  window.__swSetPayDownAmt = (v) => {
+    _sw.wizard.payment_downpayment_amount = String(v || '');
+    _sw.dirty = true;
+    _clampTermStartDate(true);
+    _recomputeTermAmount();
+    _revalidateExceptions();
+    renderWizard();
+  };
+  window.__swSetPayDownDate = (v) => {
+    _sw.wizard.payment_downpayment_date = String(v || '');
+    _sw.dirty = true;
+    _clampDownDate(true);
+    renderWizard();
+  };
+  window.__swSetPayTermCount = (v) => {
+    const n = Math.max(0, Math.min(60, Number(v) || 0));
+    _sw.wizard.payment_term_count = n === 0 ? '' : n;
+    _sw.dirty = true;
+    _recomputeTermAmount();
+    _revalidateExceptions();
+    renderWizard();
+  };
+  window.__swSetPayTermStart = (v) => {
+    _sw.wizard.payment_term_start_date = String(v || '');
+    _sw.dirty = true;
+    renderWizard();
+  };
+  window.__swUndoException = () => {
+    if (!_sw.wizard.exception_flagged) return;
+    _sw.wizard.exception_flagged     = false;
+    _sw.wizard.exception_reasons     = '';
+    _sw.wizard.exception_reason_note = '';
+    _sw.wizard.exception_fee_agreed  = false;
+    _sw.dirty = true;
+    _recomputeTermAmount();
+    try { window.KV?.toast?.('Uitzondering-goedkeuring ongedaan gemaakt.'); } catch (_) {}
+    renderWizard();
+  };
+
+  // Exception-modal handlers
+  window.__swExcNote = (v) => { _sw.exceptionModal.note = String(v || ''); renderWizard(); };
+  window.__swExcFee  = (v) => { _sw.exceptionModal.feeChecked = !!v; renderWizard(); };
+  window.__swExcApprove = () => {
+    const m = _sw.exceptionModal;
+    if (!m.detect) return;
+    const csv = [m.detect.lowTerm && 'low_term_amount', m.detect.lateStart && 'late_start']
+      .filter(Boolean).join(',');
+    _sw.wizard.exception_flagged     = true;
+    _sw.wizard.exception_reasons     = csv;
+    _sw.wizard.exception_reason_note = m.note.trim();
+    _sw.wizard.exception_fee_agreed  = m.detect.lateStart ? !!m.feeChecked : false;
+    _sw.dirty = true;
+    _recomputeTermAmount();
+    const resolve = m.resolver;
+    _sw.exceptionModal = { open: false, detect: null, note: '', feeChecked: false, resolver: null };
+    renderWizard();
+    if (resolve) resolve(true);
+  };
+  window.__swExcReject = () => {
+    const resolve = _sw.exceptionModal.resolver;
+    _sw.exceptionModal = { open: false, detect: null, note: '', feeChecked: false, resolver: null };
+    renderWizard();
+    if (resolve) resolve(false);
+  };
+  window.__swExcClose = () => window.__swExcReject();
+
+  // Next-guard: bij stap 4 → 5, run exception-detect + toon modal indien nodig.
+  window.__swNext = async () => {
+    if (_sw.step === 4) {
+      const d = _detectExceptions();
+      if (d.lowTerm || d.lateStart) {
+        const alreadyApproved = _sw.wizard.exception_flagged
+          && _sw.wizard.exception_reason_note
+          && (!d.lateStart || _sw.wizard.exception_fee_agreed);
+        if (!alreadyApproved) {
+          const ok = await new Promise((resolve) => {
+            _sw.exceptionModal = {
+              open: true,
+              detect: d,
+              note: _sw.wizard.exception_reason_note || '',
+              feeChecked: !!_sw.wizard.exception_fee_agreed,
+              resolver: resolve,
+            };
+            renderWizard();
+          });
+          if (!ok) return; // blijft op stap 4
+        }
+      } else {
+        // Grenzen niet meer overschreden → reset flag zodat payload niet ten
+        // onrechte flagged blijft (v1 r1863-1868).
+        if (_sw.wizard.exception_flagged) {
+          _sw.wizard.exception_flagged     = false;
+          _sw.wizard.exception_reasons     = '';
+          _sw.wizard.exception_reason_note = '';
+          _sw.wizard.exception_fee_agreed  = false;
+          _recomputeTermAmount();
+        }
+      }
+    }
+    window.__swGoStep(_sw.step + 1);
+  };
 
   // ── Stap-3 handlers ───────────────────────────────────────────────
   window.__swPickTraject = (variantId) => queueMicrotask(() => applyTrajectVariant(variantId));
@@ -998,12 +1313,131 @@
   }
   const eurFmt = (n) => (n == null || isNaN(Number(n))) ? '—' : '€' + Number(n).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   function stepBetaling() {
+    const w = _sw.wizard;
+    const totals = calcTotals();
+    const minStart = _swMinStartDateNL();
+    const dnBounds = _downDateEffBounds();
+    const tsBounds = _termStartEffBounds();
+    const hasDown = _hasDownpayment();
+    const previewText = _buildQuotationTitleFE();
+
+    const excBlock = w.exception_flagged ? (() => {
+      const reasons = String(w.exception_reasons || '').split(',').map(s => s.trim()).filter(Boolean);
+      const labels  = reasons.map(r => r === 'low_term_amount' ? 'lage termijn' : (r === 'late_start' ? 'late startdatum' : r));
+      const parts   = [];
+      if (labels.length) parts.push(labels.join(' + '));
+      if (w.exception_fee_agreed) parts.push('€100 reserveringsfee akkoord');
+      const summary = parts.join(' · ') || 'goedgekeurd';
+      return `<div class="sw-exc-approved">
+        <div>
+          <b>Uitzondering goedgekeurd</b>
+          <div class="sw-exc-approved-sub">${esc(summary)}</div>
+          ${w.exception_reason_note ? `<div class="sw-exc-approved-note">Reden: ${esc(w.exception_reason_note)}</div>` : ''}
+        </div>
+        <button class="btn btn-ghost" onclick="__swUndoException()">Ongedaan maken</button>
+      </div>`;
+    })() : '';
+
     return `<div class="sw-step">
-      <h2 class="sw-step-title">4. Betalingsvoorwaarden (optioneel)</h2>
-      <p class="sw-step-sub">Down-payment + termijnen + reserveringsfee.</p>
-      <div class="sv-empty" style="padding:32px;background:var(--amber-soft);border:1px dashed var(--amber-line);color:var(--amber);border-radius:8px">
-        <b>PLACEHOLDER</b> · Deze stap wordt geport uit sales-wizard.html:318-430 (blok "STAP 4: Betalingsvoorwaarden").
-        Includeert: payment_start_date, payment_downpayment_amount/_date, payment_term_count/_start_date/_amount, reserveringsfee-checkbox met bypass-permission.
+      <h2 class="sw-step-title">4. Betalingsvoorwaarden</h2>
+      <p class="sw-step-sub">Startdatum cursus is verplicht. Aanbetaling is optioneel; termijnen zijn verplicht (minimaal 1). Vul een aanbetaling in en de bijbehorende datum is ook verplicht.</p>
+
+      <div class="tk-field-row">
+        <label class="tk-field"><span class="tk-field-l">Startdatum cursus <span class="tk-req">*</span></span>
+          <input class="ib-input" type="date" value="${esc(w.payment_start_date)}" min="${esc(minStart || '')}"
+                 onchange="__swSetPayStart(this.value)">
+          <span class="tk-field-hint">Min. vandaag + 3 kalenderdagen (SEPA + boekhouding buffer).</span>
+        </label>
+        <div class="tk-field"></div>
+      </div>
+
+      <div class="tk-field-row">
+        <label class="tk-field"><span class="tk-field-l">Aanbetaling (€)</span>
+          <input class="ib-input" type="number" step="0.01" min="0" placeholder="bv. 1500"
+                 value="${esc(w.payment_downpayment_amount)}"
+                 oninput="__swSetPayDownAmt(this.value)">
+        </label>
+        <label class="tk-field"><span class="tk-field-l">Aanbetaling-datum</span>
+          <input class="ib-input" type="date" value="${esc(w.payment_downpayment_date)}"
+                 ${dnBounds.min ? `min="${esc(dnBounds.min)}"` : ''}
+                 ${dnBounds.max ? `max="${esc(dnBounds.max)}"` : ''}
+                 onchange="__swSetPayDownDate(this.value)">
+          <span class="tk-field-hint">Minstens 3 dagen vóór de startdatum.</span>
+        </label>
+      </div>
+
+      <div class="tk-field-row">
+        <label class="tk-field"><span class="tk-field-l">Aantal termijnen <span class="tk-req">*</span></span>
+          <input class="ib-input" type="number" min="1" max="60" placeholder="bv. 12"
+                 title="Verplicht — minimaal 1 termijn"
+                 value="${esc(w.payment_term_count)}"
+                 oninput="__swSetPayTermCount(this.value)">
+        </label>
+        <label class="tk-field"><span class="tk-field-l">Datum 1e termijn</span>
+          <input class="ib-input" type="date" value="${esc(w.payment_term_start_date)}"
+                 ${tsBounds.min ? `min="${esc(tsBounds.min)}"` : ''}
+                 ${tsBounds.max ? `max="${esc(tsBounds.max)}"` : ''}
+                 onchange="__swSetPayTermStart(this.value)">
+          <span class="tk-field-hint">${hasDown
+            ? 'Met aanbetaling: tot 30 dagen ná startdatum toegestaan.'
+            : 'Zonder aanbetaling: uiterlijk 3 dagen vóór startdatum.'}</span>
+        </label>
+      </div>
+
+      <label class="tk-field"><span class="tk-field-l">Termijnbedrag</span>
+        <input class="ib-input" readonly
+               value="${w.payment_term_amount !== '' && w.payment_term_amount != null && !isNaN(Number(w.payment_term_amount)) ? '€' + Number(w.payment_term_amount).toFixed(2) : ''}"
+               placeholder="—">
+        <span class="tk-field-hint">Auto-berekend: (totaal ${_reservationFeeApplies() ? '− €100 fee ' : ''}− aanbetaling) / aantal termijnen. Totaal offerte incl. BTW: <b>${eurFmt(totals.total)}</b>.</span>
+      </label>
+
+      <div class="sw-preview-box">
+        <div class="tk-field-l">Wat komt er op de offerte?</div>
+        <div class="sw-preview-body">${previewText ? `Op offerte komt: '${esc(previewText)}'` : 'Op offerte komt: geen extra info (alleen totaalbedrag)'}</div>
+      </div>
+
+      ${excBlock}
+    </div>`;
+  }
+  // Exception-approval modal (5e overlay, opent bij stap 4 -> 5).
+  function excModalHtml() {
+    const m = _sw.exceptionModal;
+    if (!m.detect) return '';
+    const d = m.detect;
+    const reasons = [];
+    if (d.lowTerm) reasons.push(`<li>Termijnbedrag <b>€${d.termAmt.toLocaleString('nl-NL')}</b> ligt onder het minimum van <b>€${d.minTerm.toLocaleString('nl-NL')}</b>.</li>`);
+    if (d.lateStart) reasons.push(`<li>Startdatum ligt <b>${d.daysToStart} dagen</b> in de toekomst (max. <b>${d.maxDays}</b>).</li>`);
+    const hasNote = String(m.note || '').trim().length > 0;
+    const feeOk = !d.lateStart || m.feeChecked;
+    const approveDisabled = !(hasNote && feeOk);
+    return `<div class="sw-dup-back" onclick="if(event.target===this)__swExcClose()">
+      <div class="sw-dup-modal" style="max-width:520px">
+        <div class="sw-modal-head">
+          <div class="sw-modal-title">Goedkeuring vereist</div>
+          <button class="icon-btn" onclick="__swExcClose()" title="Sluiten">${svg(I.x || I.warn, 'width:16px;height:16px')}</button>
+        </div>
+        <div class="sw-modal-body" style="padding:16px 18px">
+          <ul class="sw-exc-reasons">${reasons.join('')}</ul>
+          <div class="sw-exc-hint">Neem contact op met een van de managers (Jeffrey of Maxim) voor goedkeuring.</div>
+          <label class="tk-field" style="margin-top:12px">
+            <span class="tk-field-l">Reden van de uitzondering <span class="tk-req">*</span></span>
+            <textarea class="ib-input" rows="3" placeholder="Waarom valt deze offerte buiten de standaard? Wie heeft goedgekeurd?"
+                      oninput="__swExcNote(this.value)">${esc(m.note)}</textarea>
+          </label>
+          ${d.lateStart ? `
+            <div class="sw-check-row" style="margin-top:12px">
+              <label>
+                <input type="checkbox" ${m.feeChecked ? 'checked' : ''} onchange="__swExcFee(this.checked)">
+                <span>Klant gaat akkoord met <b>€100 reserveringsfee</b> voor de reservering. <span class="tk-req">*</span></span>
+              </label>
+            </div>
+          ` : ''}
+        </div>
+        <div class="sw-modal-foot">
+          <button class="btn btn-ghost" onclick="__swExcReject()">Manager niet akkoord</button>
+          <div style="flex:1"></div>
+          <button class="btn btn-primary" onclick="__swExcApprove()" ${approveDisabled ? 'disabled' : ''}>Goedgekeurd door manager</button>
+        </div>
       </div>
     </div>`;
   }
@@ -1058,7 +1492,7 @@
           <button class="btn" onclick="__swClose()">Annuleren</button>
           <div style="flex:1"></div>
           ${_sw.step > 1 ? `<button class="btn" onclick="__swGoStep(${_sw.step - 1})">← Vorige</button>` : ''}
-          ${!isLast ? `<button class="btn btn-primary" onclick="__swGoStep(${_sw.step + 1})">Volgende →</button>` : ''}
+          ${!isLast ? `<button class="btn btn-primary" onclick="__swNext()">Volgende →</button>` : ''}
           ${isLast ? `<button class="btn btn-primary" onclick="__swSubmit()" ${_sw.submitting ? 'disabled' : ''}>
             ${_sw.submitting ? 'Verzenden…' : 'Verzenden'}
           </button>` : ''}
@@ -1069,10 +1503,11 @@
   // Esc-volgorde: eerst top-most overlay, dan wizard-close.
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (_sw.discountModal.open) { e.preventDefault(); window.__swDiscountClose(); return; }
-    if (_sw.picker.open)        { e.preventDefault(); window.__swPickerClose(); return; }
-    if (_sw.dupModal.open)      { e.preventDefault(); window.__swDupCheckClose(); return; }
-    if (_sw.open)               { e.preventDefault(); window.__swClose(); }
+    if (_sw.exceptionModal.open) { e.preventDefault(); window.__swExcClose(); return; }
+    if (_sw.discountModal.open)  { e.preventDefault(); window.__swDiscountClose(); return; }
+    if (_sw.picker.open)         { e.preventDefault(); window.__swPickerClose(); return; }
+    if (_sw.dupModal.open)       { e.preventDefault(); window.__swDupCheckClose(); return; }
+    if (_sw.open)                { e.preventDefault(); window.__swClose(); }
   });
 
   // Eerste ensureRoot + backdrop-binding gebeurt bij eerste __swOpen. Voor

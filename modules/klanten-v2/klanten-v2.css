@@ -2421,3 +2421,44 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
   .dp-rm { grid-column: 2 / 3; justify-self: end; }
 }
 
+/* ── Stap 4 — betalingsvoorwaarden ────────────────────────────────── */
+.sw-preview-box {
+  margin: 16px 0 10px; padding: 12px 14px;
+  background: var(--surface-2, #F2F4F7);
+  border: 1px solid var(--border, #E2E7EE);
+  border-radius: 8px;
+}
+.sw-preview-body {
+  margin-top: 6px; font-size: 13px; color: var(--text, #111721);
+  font-family: 'IBM Plex Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  padding: 8px 10px;
+  background: var(--surface, #FFFFFF);
+  border-radius: 6px;
+  border: 1px dashed var(--border-strong, #C9D2DE);
+}
+
+/* Exception-approval-block op stap 4 */
+.sw-exc-approved {
+  display: flex; align-items: flex-start; gap: 12px;
+  margin-top: 14px; padding: 10px 12px;
+  background: var(--emerald-soft, #E4F5EE);
+  border: 1px solid var(--emerald-line, #A9DFC9);
+  border-radius: 8px; font-size: 12.5px;
+  color: var(--text, #111721);
+}
+.sw-exc-approved > div:first-child { flex: 1; line-height: 1.5; }
+.sw-exc-approved-sub { color: var(--emerald, #07835A); font-size: 11.5px; margin-top: 2px; }
+.sw-exc-approved-note { font-size: 11.5px; color: var(--text-2, #586374); margin-top: 4px; font-style: italic; }
+
+/* Exception-modal body */
+.sw-exc-reasons {
+  margin: 0 0 12px; padding-left: 20px;
+  font-size: 13px; line-height: 1.55; color: var(--text, #111721);
+}
+.sw-exc-reasons li { margin-bottom: 6px; }
+.sw-exc-hint {
+  font-size: 12px; color: var(--text-2, #586374); margin-bottom: 4px; line-height: 1.5;
+  padding: 8px 10px; background: var(--surface-2, #F2F4F7); border-radius: 6px;
+}
+
