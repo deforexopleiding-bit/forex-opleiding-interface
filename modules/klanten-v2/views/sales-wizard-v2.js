@@ -154,31 +154,61 @@
     } catch (_) {}
   }
 
+  // ── Mount + render ────────────────────────────────────────────────
+  // Eigen root in <body>. Los van de shell-render zodat DFO.render() de
+  // wizard NIET wist. Enige entry-point voor DOM-updates is renderWizard().
+  function ensureRoot() {
+    let root = document.getElementById('sw-v2-root');
+    if (!root) {
+      root = document.createElement('div');
+      root.id = 'sw-v2-root';
+      root.className = 'sw-modal-back';
+      document.body.appendChild(root);
+    }
+    return root;
+  }
+  function renderWizard() {
+    const root = ensureRoot();
+    // Backdrop-click sluit — idempotent gebonden bij eerste render.
+    if (!root._swBackdropBound) {
+      root._swBackdropBound = true;
+      root.addEventListener('click', (e) => { if (e.target === root && _sw.open) window.__swClose(); });
+    }
+    if (_sw.open) {
+      root.innerHTML = wizardModal();
+      root.classList.add('is-open');
+    } else {
+      root.classList.remove('is-open');
+      root.innerHTML = '';
+    }
+  }
+
   // ── Handlers ──────────────────────────────────────────────────────
   window.__swOpen = () => {
     _sw.open = true; _sw.step = 1; _sw.dirty = false;
     readPrefill();
     // Load entities (Stap 1) + trajecten (Stap 3, lazy)
     if (!_sw.entities && !_sw.entitiesLoading) queueMicrotask(loadEntities);
-    window.DFO.render();
+    renderWizard();
   };
   window.__swClose = () => {
     if (_sw.dirty && !confirm('Er zijn niet-opgeslagen wijzigingen. Wizard sluiten?')) return;
     _sw.open = false;
-    window.DFO.render();
+    renderWizard();
   };
   window.__swGoStep = (n) => {
     n = Math.max(1, Math.min(5, Number(n) || 1));
     _sw.step = n;
     if (n === 3 && !_sw.trajecten) queueMicrotask(loadTrajecten);
-    window.DFO.render();
+    renderWizard();
   };
+  // __swInput doet EXPLICIET geen re-render — DOM behoudt focus/cursor.
   window.__swInput = (field, val) => { _sw.wizard[field] = val; _sw.dirty = true; };
-  window.__swToggleCompany = () => { _sw.wizard.is_company = !_sw.wizard.is_company; _sw.dirty = true; window.DFO.render(); };
-  window.__swPickEntity = (id) => { _sw.wizard.tl_department_id = id; _sw.dirty = true; window.DFO.render(); };
+  window.__swToggleCompany = () => { _sw.wizard.is_company = !_sw.wizard.is_company; _sw.dirty = true; renderWizard(); };
+  window.__swPickEntity = (id) => { _sw.wizard.tl_department_id = id; _sw.dirty = true; renderWizard(); };
   window.__swSubmit = async () => {
     if (_sw.submitting) return;
-    _sw.submitting = true; window.DFO.render();
+    _sw.submitting = true; renderWizard();
     try {
       const payload = { ...(_sw.wizard), matched_customer_id: _sw.matched_customer_id, event_attendee_id: _sw.prefillEventAttendeeId };
       const result = await tryPost('sales-deal-create', '/api/sales-deal-create', payload);
@@ -186,9 +216,9 @@
       alert('Offerte aangemaakt: ' + (result?.deal?.id || 'ok'));
       _sw.open = false; _sw.step = 1; _sw.dirty = false;
       try { await tryPost('drafts-del', '/api/sales-wizard-drafts', null, 'DELETE'); } catch (_) {}
-      window.DFO.render();
+      renderWizard();
     } catch (e) {
-      _sw.submitting = false; window.DFO.render();
+      _sw.submitting = false; renderWizard();
       alert('Verzenden mislukt: ' + (e?.message || 'onbekende fout'));
     }
   };
@@ -201,12 +231,12 @@
     if (_sw.entities.length && !_sw.wizard.tl_department_id) {
       _sw.wizard.tl_department_id = _sw.entities[0].tl_department_id;
     }
-    window.DFO.render();
+    renderWizard();
   }
   async function loadTrajecten() {
     const data = await tryFetch('leads-trajecten', '/api/leads-trajecten');
     _sw.trajecten = Array.isArray(data?.trajecten) ? data.trajecten : [];
-    window.DFO.render();
+    renderWizard();
   }
 
   // ── Progress + shell ──────────────────────────────────────────────
@@ -340,20 +370,21 @@
     }
   }
 
+  // wizardModal wordt door renderWizard() in #sw-v2-root geplaatst (in <body>).
+  // Root heeft zelf al class .sw-modal-back — hier alleen de INNER content.
   function wizardModal() {
     const isLast = _sw.step === 5;
-    return `<div class="fn-modal-back sw-modal-back" onclick="if(event.target===this)__swClose()">
-      <div class="fn-modal sw-modal">
-        <div class="fn-modal-head">
-          <div class="fn-modal-title">Nieuwe offerte · v2</div>
+    return `<div class="sw-modal" onclick="event.stopPropagation()">
+        <div class="sw-modal-head">
+          <div class="sw-modal-title">Nieuwe offerte · v2</div>
           <span class="pill pill-warn">Batch 2 · scaffold (${_sw.step}/5)</span>
           <button class="icon-btn" onclick="__swClose()" title="Sluiten">${svg(I.x || I.warn, 'width:16px;height:16px')}</button>
         </div>
-        <div class="fn-modal-body sw-body">
+        <div class="sw-modal-body sw-body">
           ${progress()}
           ${renderStep()}
         </div>
-        <div class="fn-modal-foot">
+        <div class="sw-modal-foot">
           <button class="btn" onclick="__swClose()">Annuleren</button>
           <div style="flex:1"></div>
           ${_sw.step > 1 ? `<button class="btn" onclick="__swGoStep(${_sw.step - 1})">← Vorige</button>` : ''}
@@ -362,46 +393,17 @@
             ${_sw.submitting ? 'Verzenden…' : 'Verzenden'}
           </button>` : ''}
         </div>
-      </div>
-    </div>`;
+      </div>`;
   }
-
-  // ── Registratie: modal is een global overlay die geïnjecteerd wordt in
-  //    alle sales-tab-views via een extra wrap-functie. Zo hoef ik de bestaande
-  //    sales-v2 views niet aan te raken. Wrapping in afterview-hook.
-  //    Voor deze scaffold: injecteer als extra script dat renders. In productie
-  //    komt er straks een "Nieuwe offerte v2"-knop in sales-v2 die __swOpen()
-  //    aanroept. Voor nu: exposeer __swOpen globaal voor manual invocation.
-  window.__swMount = () => {
-    // Zoekt de content-container; als de wizard open is, hangt hij de modal
-    // aan het einde. Wrapper mag meerdere keren draaien (idempotent).
-    if (!_sw.open) return;
-    const content = document.getElementById('content');
-    if (!content) return;
-    if (content.querySelector('.sw-modal-back')) return;
-    const div = document.createElement('div');
-    div.innerHTML = wizardModal();
-    content.appendChild(div.firstElementChild);
-  };
-
-  // Hook: run __swMount na elke DFO.render zodat de modal altijd bovenop
-  // andere sales-content verschijnt.
-  (function patchRender() {
-    if (!window.DFO || typeof window.DFO.render !== 'function') { setTimeout(patchRender, 40); return; }
-    if (window.DFO.__swMountPatched) return;
-    window.DFO.__swMountPatched = true;
-    const orig = window.DFO.render;
-    window.DFO.render = function () {
-      const r = orig.apply(this, arguments);
-      queueMicrotask(() => { try { window.__swMount(); } catch (_) {} });
-      return r;
-    };
-  })();
 
   // Esc sluit modal.
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && _sw.open) { e.preventDefault(); window.__swClose(); }
   });
+
+  // Eerste ensureRoot + backdrop-binding gebeurt bij eerste __swOpen. Voor
+  // devs die dit script per ongeluk vóór DFO laden: expose ook voor console.
+  window.__swRender = renderWizard;
 
   console.debug('[sales-wizard-v2] loaded — call window.__swOpen() to launch scaffold');
 })();

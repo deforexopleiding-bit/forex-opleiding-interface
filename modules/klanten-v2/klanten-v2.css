@@ -2055,7 +2055,42 @@ textarea.inp { max-width: 520px; min-height: 90px; resize: vertical; line-height
 
 
 /* Batch 2 — v2 offerte-wizard scaffold. */
-.sw-modal-back .sw-modal { max-width: 920px; }
+/* Root staat vast in <body>. .is-open toont de overlay; anders display:none
+   (geen backdrop-flash tussen state-transities). */
+.sw-modal-back {
+  position: fixed; inset: 0;
+  background: rgba(17, 23, 33, .42);
+  backdrop-filter: blur(3px);
+  z-index: 100;
+  display: none;
+  align-items: center; justify-content: center;
+  padding: 24px;
+}
+.sw-modal-back.is-open { display: flex; }
+.sw-modal {
+  width: 100%; max-width: 920px;
+  max-height: calc(100vh - 48px);
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  animation: kv-slideUp .22s cubic-bezier(.32, .72, 0, 1);
+}
+.sw-modal-head {
+  padding: 13px 17px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface-2);
+}
+.sw-modal-title { font-size: 15px; font-weight: 600; color: var(--text); flex: 1; }
+.sw-modal-body { flex: 1 1 auto; overflow-y: auto; }
+.sw-modal-foot {
+  padding: 12px 17px;
+  border-top: 1px solid var(--border);
+  display: flex; gap: 8px; align-items: center;
+  background: var(--surface-2);
+}
 .sw-body { padding: 0; }
 .sw-progress {
   display: flex; align-items: center; gap: 4px;
