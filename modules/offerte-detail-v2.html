@@ -191,6 +191,54 @@
   </div>
 </div>
 
+<!-- Onboarding-modal (F0.2 v1 pariteit — traject-keuze + start-clamp + create). -->
+<div class="odv-modal-back" id="odvObBack">
+  <div class="odv-modal">
+    <div class="odv-modal-head">
+      <div class="odv-modal-title">Onboarding-traject aanmelden</div>
+      <button class="icon-btn" onclick="obClose()" title="Sluiten" aria-label="Sluiten">×</button>
+    </div>
+    <div class="odv-modal-body" id="odvObBody">
+      <div id="odvObForm">
+        <span class="odv-mini-label">Klant</span>
+        <div class="odv-read-only" id="odvObCust">—</div>
+        <span class="odv-mini-label">Type begeleiding</span>
+        <div class="odv-type-switch" id="odvObTypeSwitch" role="tablist" aria-label="Type begeleiding">
+          <button type="button" role="tab" data-ob-type="1op1"       aria-selected="false">1-op-1 begeleiding</button>
+          <button type="button" role="tab" data-ob-type="membership" aria-selected="false">Membership</button>
+        </div>
+        <span class="odv-mini-label" for="odvObTraject">Traject</span>
+        <select id="odvObTraject" class="ib-input" disabled><option value="">Kies eerst een type</option></select>
+        <span class="odv-mini-label" for="odvObStart">Startdatum</span>
+        <input type="date" id="odvObStart" class="ib-input">
+        <div class="odv-hint">Minimaal vandaag + 3 kalenderdagen. Vooringevuld uit de offerte (clamped naar het minimum). De looptijd in Bubble loopt vanaf deze datum — toegang start direct.</div>
+        <div class="odv-err" id="odvObErr" hidden></div>
+      </div>
+      <div id="odvObDone" hidden></div>
+    </div>
+    <div class="odv-modal-foot" id="odvObFoot">
+      <button class="btn btn-ghost" id="odvObCancelBtn" onclick="obClose()">Annuleren</button>
+      <button class="btn btn-success" id="odvObSubmitBtn" onclick="obSubmit()" disabled>Aanmelden</button>
+    </div>
+  </div>
+</div>
+
+<style>
+/* Onboarding-modal type-switch (v1-parity) + success-blok. */
+.odv-type-switch { display: flex; gap: 0; margin-bottom: 14px; border: 1px solid var(--border, #E2E7EE); border-radius: 8px; padding: 3px; background: var(--surface-2, #F2F4F7); }
+.odv-type-switch button { flex: 1; padding: 8px 12px; font-size: 12.5px; font-weight: 600; border: 0; border-radius: 6px; background: transparent; color: var(--text-2, #586374); cursor: pointer; font-family: inherit; transition: background .12s, color .12s; }
+.odv-type-switch button:hover { color: var(--text, #111721); }
+.odv-type-switch button.is-active { background: #0a2f63; color: #fff; }
+.odv-ob-success {
+  background: var(--emerald-soft, #E4F5EE);
+  border: 1px solid var(--emerald-line, #A9DFC9);
+  color: var(--emerald, #07835A);
+  padding: 11px 13px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; line-height: 1.45;
+}
+.odv-ob-link-row { display: flex; gap: 8px; align-items: center; }
+.odv-ob-link-row .ib-input { flex: 1; font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+</style>
+
 <script src="./shared/supabase-client.js"></script>
 <script>
 'use strict';
@@ -429,7 +477,7 @@ function renderActions(deal, c) {
     const convTitle = _hasSub ? 'Er bestaat al een abonnement voor deze offerte. Klik om (opnieuw) om te zetten.' : '';
     const convertBtn = `<a class="${convClass}" href="/modules/subscription-wizard.html?deal_id=${encodeURIComponent(deal.id)}"${convTitle ? ` title="${esc(convTitle)}"` : ''}>${convLabel}</a>`;
     const onboardBtn = c.id
-      ? `<a class="btn" style="background:#0a2f63;color:#fff" href="/modules/onboarding.html?deal_id=${encodeURIComponent(deal.id)}" title="Onboarding-traject aanmelden (F0.2 modal komt in aparte v2-iter)">📋 Onboarding aanmelden</a>`
+      ? `<button class="btn" style="background:#0a2f63;color:#fff" onclick="obOpen()" title="Onboarding-traject aanmelden (F0.2 modal)">📋 Onboarding aanmelden</button>`
       : '';
     const histEvBtn = `<a class="btn btn-ghost" href="/modules/admin-historical-events.html?deal_id=${encodeURIComponent(deal.id)}" title="Koppel aan historisch event">📅 Koppel aan historisch event</a>`;
     btns = `${convertBtn} ${onboardBtn} ${histEvBtn} ${copyBtn} ${custBtn} ${tlBtn}`;
@@ -538,16 +586,208 @@ async function odvSendConfirm() {
   }
 }
 
-// Esc sluit send-modal.
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    const back = document.getElementById('odvSendBack');
-    if (back.classList.contains('is-open')) odvSendClose();
+// ══ F0.2 Onboarding-modal (1-op-1 met v1 modules/offerte-detail.html) ═══
+// State (v1 r537-543).
+let _obTrajecten = [];
+let _obTrajectenLoaded = false;
+let _obSelectedType = null; // '1op1' | 'membership' | null
+const OB_TYPES = ['1op1', 'membership'];
+
+// Vroegst-toegestane onboarding-startdatum (v1 _obMinStartDateNL r681-694).
+function obMinStartNL() {
+  const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const s = fmt.format(new Date());
+  const [y, m, d] = s.split('-').map(x => parseInt(x, 10));
+  const anchor = new Date(Date.UTC(y, m - 1, d));
+  anchor.setUTCDate(anchor.getUTCDate() + 3);
+  return `${anchor.getUTCFullYear()}-${String(anchor.getUTCMonth() + 1).padStart(2, '0')}-${String(anchor.getUTCDate()).padStart(2, '0')}`;
+}
+
+function obTypeSwitchRender() {
+  const sw = document.getElementById('odvObTypeSwitch');
+  if (!sw) return;
+  sw.querySelectorAll('button[data-ob-type]').forEach(b => {
+    const active = b.dataset.obType === _obSelectedType;
+    b.classList.toggle('is-active', active);
+    b.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+}
+function obTrajectOptsRender() {
+  const sel = document.getElementById('odvObTraject');
+  const sb  = document.getElementById('odvObSubmitBtn');
+  if (!sel) return;
+  if (sb) sb.disabled = true;
+  if (!_obSelectedType) {
+    sel.disabled = true;
+    sel.innerHTML = '<option value="">Kies eerst een type</option>';
+    return;
   }
+  if (!_obTrajectenLoaded) {
+    sel.disabled = true;
+    sel.innerHTML = '<option value="">Trajecten laden…</option>';
+    return;
+  }
+  const filtered = _obTrajecten.filter(t => t && t.type === _obSelectedType);
+  if (!filtered.length) {
+    sel.disabled = true;
+    sel.innerHTML = '<option value="">Geen trajecten voor dit type</option>';
+    return;
+  }
+  sel.disabled = false;
+  sel.innerHTML = '<option value="">— kies traject —</option>' +
+    filtered.map(t => `<option value="${esc(t.id)}">${esc(t.label || t.key || t.id)}</option>`).join('');
+  sel.value = '';
+}
+function obSelectType(type) {
+  if (!OB_TYPES.includes(type)) return;
+  if (_obSelectedType === type) return;
+  _obSelectedType = type;
+  obTypeSwitchRender();
+  obTrajectOptsRender();
+}
+async function obEnsureTrajecten() {
+  if (_obTrajectenLoaded) return;
+  try {
+    const d = await apiJson('/api/onboarding-trajecten-list');
+    _obTrajecten = Array.isArray(d?.trajecten) ? d.trajecten : [];
+    _obTrajectenLoaded = true;
+    obTrajectOptsRender();
+  } catch (e) {
+    const sel = document.getElementById('odvObTraject');
+    if (sel) sel.innerHTML = '<option value="">Laden mislukt</option>';
+    const err = document.getElementById('odvObErr');
+    err.textContent = 'Trajecten ophalen mislukt: ' + (e?.message || e);
+    err.hidden = false;
+  }
+}
+function obReset() {
+  document.getElementById('odvObForm').hidden = false;
+  document.getElementById('odvObDone').hidden = true;
+  document.getElementById('odvObDone').innerHTML = '';
+  document.getElementById('odvObErr').hidden = true;
+  document.getElementById('odvObErr').textContent = '';
+  document.getElementById('odvObFoot').style.display = '';
+  const sb = document.getElementById('odvObSubmitBtn');
+  sb.disabled = true; sb.textContent = 'Aanmelden'; sb.style.display = '';
+  document.getElementById('odvObCancelBtn').textContent = 'Annuleren';
+  _obSelectedType = null;
+  obTypeSwitchRender();
+  obTrajectOptsRender();
+  const dt = document.getElementById('odvObStart');
+  if (dt) dt.value = '';
+}
+function obOpen() {
+  if (!_customer?.id) { toast('Geen klant-id beschikbaar'); return; }
+  obReset();
+  document.getElementById('odvObCust').textContent = (_customer.is_company ? (_customer.company_name || '') : `${_customer.first_name || ''} ${_customer.last_name || ''}`.trim()) || _customer.id;
+  // Startdatum-prefill uit offerte (v1 r700-711). Clamp naar minimum.
+  const dt = document.getElementById('odvObStart');
+  const min = obMinStartNL();
+  if (dt) {
+    dt.min = min;
+    const rawStart = _deal?.payment_start_date || _deal?.start_date || null;
+    const prefill = (typeof rawStart === 'string' && rawStart) ? rawStart.slice(0, 10) : null;
+    dt.value = (prefill && prefill >= min) ? prefill : min;
+  }
+  document.getElementById('odvObBack').classList.add('is-open');
+  obEnsureTrajecten();
+}
+function obClose() {
+  document.getElementById('odvObBack').classList.remove('is-open');
+}
+async function obSubmit() {
+  const sel = document.getElementById('odvObTraject');
+  const sb  = document.getElementById('odvObSubmitBtn');
+  const trajectId = (sel.value || '').trim();
+  if (!_customer?.id || !trajectId) return;
+  document.getElementById('odvObErr').hidden = true;
+  sb.disabled = true; sb.textContent = 'Bezig…';
+  // Startdatum-check (v1 r736-746).
+  const dt = document.getElementById('odvObStart');
+  const startDate = dt && dt.value ? dt.value : null;
+  if (startDate) {
+    const min = obMinStartNL();
+    if (startDate < min) {
+      const err = document.getElementById('odvObErr');
+      err.textContent = 'Startdatum moet minimaal 3 kalenderdagen in de toekomst liggen (vanaf ' + min + ').';
+      err.hidden = false;
+      sb.disabled = false; sb.textContent = 'Aanmelden';
+      return;
+    }
+  }
+  const payload = { customer_id: _customer.id, traject_id: trajectId };
+  if (startDate) payload.start_date = startDate;
+  payload.lms_provision = false; // v1 default; UI-checkbox niet in v1-HTML aanwezig.
+  try {
+    const r = await apiFetch('/api/onboarding-create', {
+      method: 'POST', body: JSON.stringify(payload),
+    });
+    let d = null; try { d = await r.json(); } catch (_) {}
+    if (r.status === 409) {
+      const err = document.getElementById('odvObErr');
+      err.textContent = 'Er bestaat al een (actieve) onboarding voor deze klant.';
+      err.hidden = false;
+      sb.disabled = false; sb.textContent = 'Aanmelden';
+      return;
+    }
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    // Succes — toon link + copy-knop (v1 r767-802).
+    const linkPath = d?.link || '';
+    const fullLink = linkPath ? (location.origin + linkPath) : '';
+    const done = document.getElementById('odvObDone');
+    done.innerHTML = `
+      <div class="odv-ob-success">
+        <strong>✓ Aangemeld.</strong> De persoonlijke onboarding-link is hieronder kopieerbaar.
+      </div>
+      <span class="odv-mini-label">Persoonlijke link</span>
+      <div class="odv-ob-link-row">
+        <input type="text" class="ib-input" id="odvObLinkInp" readonly value="${esc(fullLink)}">
+        <button type="button" class="btn" id="odvObCopyBtn">📋 Kopieer</button>
+      </div>
+      <div class="odv-hint" style="margin-top:10px">Status: <strong>${esc(d?.onboarding?.status || 'aangemeld')}</strong></div>`;
+    document.getElementById('odvObForm').hidden = true;
+    done.hidden = false;
+    sb.style.display = 'none';
+    document.getElementById('odvObCancelBtn').textContent = 'Sluiten';
+    const cp = document.getElementById('odvObCopyBtn');
+    cp.addEventListener('click', async () => {
+      const v = document.getElementById('odvObLinkInp').value;
+      try {
+        if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(v);
+        else { const inp = document.getElementById('odvObLinkInp'); inp.select(); inp.setSelectionRange(0, v.length); document.execCommand('copy'); }
+        toast('Link gekopieerd');
+      } catch (e) { toast('Kopiëren mislukt: ' + (e?.message || e)); }
+    });
+  } catch (e) {
+    const err = document.getElementById('odvObErr');
+    err.textContent = 'Aanmelden mislukt: ' + (e?.message || e);
+    err.hidden = false;
+    sb.disabled = false; sb.textContent = 'Aanmelden';
+  }
+}
+// Wire type-switch klikken 1x bij page-load (buttons zijn statisch).
+document.querySelectorAll('#odvObTypeSwitch button[data-ob-type]').forEach(b => {
+  b.addEventListener('click', () => obSelectType(b.dataset.obType));
 });
-// Backdrop-click sluit.
+// Traject-select change → submit-btn enable.
+document.getElementById('odvObTraject').addEventListener('change', (e) => {
+  document.getElementById('odvObSubmitBtn').disabled = !e.target.value;
+});
+
+// Esc sluit send-modal / onboarding-modal.
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const send = document.getElementById('odvSendBack');
+  const ob   = document.getElementById('odvObBack');
+  if (ob.classList.contains('is-open')) { obClose(); return; }
+  if (send.classList.contains('is-open')) { odvSendClose(); return; }
+});
+// Backdrop-click sluit (per modal).
 document.getElementById('odvSendBack').addEventListener('click', (e) => {
   if (e.target.id === 'odvSendBack') odvSendClose();
+});
+document.getElementById('odvObBack').addEventListener('click', (e) => {
+  if (e.target.id === 'odvObBack') obClose();
 });
 </script>
 </body>
