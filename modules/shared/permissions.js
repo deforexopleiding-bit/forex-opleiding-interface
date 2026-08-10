@@ -63,13 +63,29 @@
         // alsnog 'super_admin' bevatten zonder dat profile.role gezet was —
         // we honoreren dat ook (bestaand gedrag).
         if (roles.indexOf('super_admin') !== -1) return new Set(['*']);
-        if (roles.length === 0) return new Set();
 
         // 2) Toegestane feature_keys voor deze rollen (RLS: role_permissions leesbaar voor iedereen).
-        var permsRes = await supa.from('role_permissions')
-          .select('feature_key').in('role', roles).eq('allowed', true);
-        if (permsRes.error) { console.warn('[RBAC] role_permissions:', permsRes.error.message); return new Set(); }
-        return new Set((permsRes.data || []).map(function (p) { return p.feature_key; }));
+        var permSet = new Set();
+        if (roles.length > 0) {
+          var permsRes = await supa.from('role_permissions')
+            .select('feature_key').in('role', roles).eq('allowed', true);
+          if (permsRes.error) { console.warn('[RBAC] role_permissions:', permsRes.error.message); return new Set(); }
+          (permsRes.data || []).forEach(function (p) { permSet.add(p.feature_key); });
+        }
+
+        // 3) Per-user allowlist (uitzonderingen los van rollen) — union bovenop de
+        //    rol-permissies. Spiegelt de user_permissions-OR-tak in de backend-RPC
+        //    user_has_permission() (migratie 016) zodat frontend en backend
+        //    dezelfde set zien. RLS: eigen rijen leesbaar. Faalt zacht: bij een
+        //    leesfout houden we de rol-set (de backend blijft de definitieve
+        //    autoriteit). Draait ook als roles leeg is → een user met alleen een
+        //    allowlist-rij (geen rol) krijgt zijn keys, symmetrisch met de RPC.
+        var upRes = await supa.from('user_permissions')
+          .select('feature_key').eq('user_id', userId).eq('allowed', true);
+        if (upRes.error) { console.warn('[RBAC] user_permissions:', upRes.error.message); }
+        else (upRes.data || []).forEach(function (p) { permSet.add(p.feature_key); });
+
+        return permSet;
       } catch (err) {
         console.warn('[RBAC] load mislukt:', err && err.message);
         return new Set();
