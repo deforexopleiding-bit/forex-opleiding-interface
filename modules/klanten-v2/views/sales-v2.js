@@ -246,7 +246,15 @@
   // Klik op een offerte-rij opent de v2-detail-pagina (niet de wizard).
   // 'Bewerken' vanuit die detail-pagina redirect wél naar de wizard in
   // edit-mode.
-  window.__svOfferteOpen = (dealId) => { if (dealId) window.location.href = '/modules/offerte-detail-v2.html?id=' + encodeURIComponent(dealId); };
+  // Klik op offerte-rij opent de detail in-shell (iframe binnen klanten-v2
+  // shell — sidebar/topbar blijven). Fallback op standalone page-nav als
+  // offerte-detail-v2.js niet geladen is (defensive; script wordt normaal
+  // vanaf klanten-v2/index.html geladen).
+  window.__svOfferteOpen = (dealId) => {
+    if (!dealId) return;
+    if (typeof window.__odvOpen === 'function') { window.__odvOpen(dealId); return; }
+    window.location.href = '/modules/offerte-detail-v2.html?id=' + encodeURIComponent(dealId);
+  };
   // Row-click handler voor H.table: resolvet index → deal_id → __svOfferteOpen.
   window.__svOfferteRowClick = (i) => {
     const q = (_off.data && _off.data.quotations && _off.data.quotations[i]) || null;
@@ -291,6 +299,19 @@
   }
 
   function offertesView() {
+    // In-shell offerte-detail: als URL ?deal_id=X, delegeer naar de shell-
+    // view module (iframe-embed van /modules/offerte-detail-v2.html). Sidebar
+    // + topbar blijven staan; detail vult content-area.
+    try {
+      const _dealId = new URLSearchParams(location.search).get('deal_id');
+      if (_dealId && typeof window.__odvRender === 'function') {
+        return `${previewHeader('Offerte-detail', {})}
+          <div class="tb-row" style="padding:0 20px 8px">
+            <button class="btn btn-ghost btn-sm" onclick="__odvBack()">← Terug naar Offertes</button>
+          </div>
+          ${window.__odvRender(_dealId)}`;
+      }
+    } catch (_) { /* fall through to normal offertes-lijst */ }
     const st   = F('sv-off-st', 'all');
     const mine = F('sv-off-mine', '1');
     // Registreer debounced onSearch één keer per view-mount (idempotent — H.onSearch
