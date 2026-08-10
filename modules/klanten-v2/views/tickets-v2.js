@@ -30,7 +30,13 @@
   // (laag/middel/hoog, lowercase Dutch). Type values matchen VALID_TYPES
   // (bug/feature/question). Eerder gebruikt: low/medium/high/urgent + task
   // — dat faalde met 400 "Ongeldige priority" / "Ongeldig type" bij POST.
-  const _cre  = { submitting: false, form: { title: '', description: '', type: 'question', priority: 'middel', module: '' } };
+  // Ronde 5: pendingFiles = File[] die pas na ticket-create worden geüpload.
+  const _cre  = { submitting: false, uploading: false, form: { title: '', description: '', type: 'question', priority: 'middel', module: '' }, pendingFiles: [] };
+  // Ronde 5: attachment-state voor detail-view (uploading + signed-url cache).
+  const _att = { uploading: false, signedUrls: new Map() };
+  const ATTACH_BUCKET = 'tickets-attachments';
+  const ATTACH_MAX_MB = 20;
+  const ATTACH_SIGNED_TTL = 3600;
 
   async function tryFetch(label, url, timeoutMs = 8000) {
     try {
@@ -102,8 +108,140 @@
   window.__ticketNew   = () => setUrlParam('ticket-new', '1');
   window.__ticketOpen  = (id) => { if (id) setUrlParam('ticket', id); };
   window.__ticketBack  = () => { setUrlParam('ticket', null); };
-  window.__ticketCloseCreate = () => { setUrlParam('ticket-new', null); };
+  window.__ticketCloseCreate = () => { setUrlParam('ticket-new', null); _cre.pendingFiles = []; };
   window.__ticketCreateInput = (field, val) => { _cre.form[field] = val; };
+
+  // ── Ronde 5: attachment-helpers ─────────────────────────────────────
+  // 1) uploadAttachment(file, ticketId): upload naar tickets-attachments
+  //    bucket (per-user prefix) + POST /api/ticket-attachments met
+  //    storage_path + filename + mime_type. Returnt attachment-row of null.
+  // 2) getSignedUrl(path): 1u signed URL uit bucket, gecached in module-map.
+  // 3) Bucket-RLS: path MOET beginnen met <user.id>/<ticket_id>/ zodat
+  //    andere gebruikers niet uploaden onder jouw naam.
+  function cleanFilename(name) {
+    const dot = name.lastIndexOf('.');
+    const base = (dot >= 0 ? name.slice(0, dot) : name).toLowerCase()
+      .normalize('NFKD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'bijlage';
+    const ext = dot >= 0 ? name.slice(dot).toLowerCase().replace(/[^a-z0-9.]/g, '') : '';
+    return base.slice(0, 80) + ext.slice(0, 10);
+  }
+  async function uploadAttachment(file, ticketId) {
+    if (!file || !ticketId) return null;
+    if (!window.supabase || !window.supabase.storage) {
+      console.warn('[tickets-v2] window.supabase.storage niet beschikbaar');
+      return null;
+    }
+    if (file.size > ATTACH_MAX_MB * 1024 * 1024) {
+      alert(`Bestand "${file.name}" te groot (max ${ATTACH_MAX_MB} MB).`);
+      return null;
+    }
+    try {
+      const { data: { user }, error: uErr } = await window.supabase.auth.getUser();
+      if (uErr || !user) throw new Error('Auth-fout bij upload');
+      const path = `${user.id}/${ticketId}/${Date.now()}-${cleanFilename(file.name || 'bijlage')}`;
+      const { error: upErr } = await window.supabase.storage
+        .from(ATTACH_BUCKET)
+        .upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+      if (upErr) throw new Error('Storage: ' + upErr.message);
+      const json = await tryPost('ticket-attachment-create', '/api/ticket-attachments', {
+        ticket_id: ticketId,
+        storage_path: path,
+        filename: file.name || null,
+        mime_type: file.type || null,
+      });
+      return json?.attachment || null;
+    } catch (e) {
+      console.warn('[tickets-v2] uploadAttachment fail:', e?.message);
+      // Best-effort cleanup als DB-insert faalde na storage-upload — geen
+      // rollback als storage-upload zelf faalde (dan bestaat 'path' niet).
+      alert('Bijlage-upload mislukt: ' + (e?.message || 'onbekende fout'));
+      return null;
+    }
+  }
+  async function getSignedUrl(path) {
+    if (!path) return null;
+    if (_att.signedUrls.has(path)) return _att.signedUrls.get(path);
+    if (!window.supabase?.storage) return null;
+    try {
+      const { data, error } = await window.supabase.storage
+        .from(ATTACH_BUCKET)
+        .createSignedUrl(path, ATTACH_SIGNED_TTL);
+      if (error || !data?.signedUrl) return null;
+      _att.signedUrls.set(path, data.signedUrl);
+      return data.signedUrl;
+    } catch (_) { return null; }
+  }
+  const isImage = (mime) => typeof mime === 'string' && mime.startsWith('image/');
+
+  window.__ticketCreatePickFiles = (input) => {
+    const files = Array.from(input.files || []);
+    _cre.pendingFiles = _cre.pendingFiles.concat(files);
+    input.value = '';
+    window.DFO.render();
+  };
+  window.__ticketCreateRemovePending = (idx) => {
+    _cre.pendingFiles.splice(idx, 1);
+    window.DFO.render();
+  };
+  window.__ticketDetailPickFiles = async (input) => {
+    if (!_det.id) return;
+    const files = Array.from(input.files || []);
+    input.value = '';
+    if (!files.length) return;
+    _att.uploading = true; window.DFO.render();
+    for (const f of files) {
+      const att = await uploadAttachment(f, _det.id);
+      if (att) {
+        _det.data = _det.data || { ticket: {}, attachments: [] };
+        _det.data.attachments = (_det.data.attachments || []).concat(att);
+      }
+    }
+    _att.uploading = false;
+    window.DFO.render();
+  };
+  window.__ticketAttDelete = async (attId) => {
+    if (!attId) return;
+    if (!confirm('Bijlage verwijderen?')) return;
+    try {
+      if (!window.KV || !window.KV.authedFetch) throw new Error('KV.authedFetch niet beschikbaar');
+      const resp = await window.KV.authedFetch('/api/ticket-attachments?id=' + encodeURIComponent(attId), { method: 'DELETE' });
+      if (!resp.ok && resp.status !== 204) {
+        const t = await resp.text();
+        const j = t ? (function(){ try { return JSON.parse(t); } catch { return null; } })() : null;
+        throw new Error(j?.error || 'HTTP ' + resp.status);
+      }
+      if (_det.data) _det.data.attachments = (_det.data.attachments || []).filter(a => a.id !== attId);
+      window.DFO.render();
+    } catch (e) {
+      alert('Verwijderen mislukt: ' + (e?.message || 'onbekende fout'));
+    }
+  };
+  window.__ticketAttOpen = async (path) => {
+    const url = await getSignedUrl(path);
+    if (url) window.open(url, '_blank', 'noopener');
+    else alert('Kon bijlage-URL niet ophalen.');
+  };
+  // Post-render: laad signed-URLs voor <img data-att-path=...>-nodes lazy.
+  function hydrateAttachmentImages() {
+    document.querySelectorAll('img[data-att-path]:not([src])').forEach(async (img) => {
+      const p = img.getAttribute('data-att-path');
+      const url = await getSignedUrl(p);
+      if (url) img.src = url;
+    });
+  }
+  // Hook aan DFO.render — één keer patchen zodat 'ie na elke render draait.
+  (function patchRenderForAttImages() {
+    if (!window.DFO || typeof window.DFO.render !== 'function') { setTimeout(patchRenderForAttImages, 40); return; }
+    if (window.DFO.__ticketsAttImagesPatched) return;
+    window.DFO.__ticketsAttImagesPatched = true;
+    const orig = window.DFO.render;
+    window.DFO.render = function () {
+      const r = orig.apply(this, arguments);
+      queueMicrotask(hydrateAttachmentImages);
+      return r;
+    };
+  })();
 
   window.__ticketCreateSubmit = async () => {
     if (_cre.submitting) return;
@@ -120,8 +258,19 @@
         module: f.module || null,
       });
       const newId = result?.ticket?.id;
+      // Ronde 5: batch-upload van pending attachments NA ticket-create.
+      // Faalt best-effort per file zodat één corrupte upload de andere
+      // niet blokkeert. Rapporteert alleen via alert bij failures.
+      if (newId && _cre.pendingFiles.length) {
+        _cre.uploading = true; window.DFO.render();
+        for (const f of _cre.pendingFiles) {
+          await uploadAttachment(f, newId);
+        }
+        _cre.uploading = false;
+      }
       _cre.submitting = false;
       _cre.form = { title: '', description: '', type: 'question', priority: 'middel', module: '' };
+      _cre.pendingFiles = [];
       _open.data = null; _wait.data = null; _done.data = null;
       const u = new URL(location.href);
       u.searchParams.delete('ticket-new');
@@ -299,13 +448,77 @@
               </select>
             </label>
           </div>
+
+          <div class="tk-field">
+            <span class="tk-field-l">Bijlagen (optioneel)</span>
+            <div class="tk-att-pending">
+              ${_cre.pendingFiles.length ? `<div class="tk-att-pending-list">
+                ${_cre.pendingFiles.map((f, i) => `
+                  <div class="tk-att-pending-item">
+                    ${svg(I.doc)}
+                    <span class="tk-att-pending-name">${esc(f.name || 'bestand')}</span>
+                    <span class="tk-att-pending-size">${(f.size / 1024 < 1024) ? (Math.round(f.size / 1024) + ' KB') : ((f.size / 1024 / 1024).toFixed(1) + ' MB')}</span>
+                    <button class="icon-btn" onclick="__ticketCreateRemovePending(${i})" title="Verwijder">${svg(I.x || I.warn)}</button>
+                  </div>
+                `).join('')}
+              </div>` : ''}
+              <label class="tk-att-picker">
+                <input type="file" multiple accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx" onchange="__ticketCreatePickFiles(this)"${disabled} style="display:none">
+                <span class="btn btn-sm">${svg(I.plus)}Bestand/foto/video toevoegen</span>
+              </label>
+              <div class="tk-att-hint">Afbeeldingen, video's, PDF's, Office-bestanden. Max ${ATTACH_MAX_MB} MB per bestand. Upload gebeurt na aanmaken.</div>
+            </div>
+          </div>
         </div>
         <div class="tk-modal-foot">
           <button class="btn" onclick="__ticketCloseCreate()"${disabled}>Annuleren</button>
           <button class="btn btn-primary" onclick="__ticketCreateSubmit()"${disabled}>
-            ${_cre.submitting ? svg(I.clock || I.settings) + 'Bezig…' : svg(I.check || I.plus) + 'Ticket aanmaken'}
+            ${_cre.uploading ? svg(I.clock || I.settings) + `Uploaden (${_cre.pendingFiles.length})…`
+              : _cre.submitting ? svg(I.clock || I.settings) + 'Bezig…'
+              : svg(I.check || I.plus) + 'Ticket aanmaken' + (_cre.pendingFiles.length ? ` (+${_cre.pendingFiles.length})` : '')}
           </button>
         </div>
+      </div>
+    </div>`;
+  }
+
+  // Ronde 5: attachments-card voor detail-view. Images tonen als thumbnail
+  // (lazy signed-URL fetch via hydrateAttachmentImages post-render), niet-
+  // images als file-link met open-in-tab (ook signed-URL).
+  function renderAttachmentsCard(attachments) {
+    const images = attachments.filter(a => a.storage_path && isImage(a.mime_type));
+    const files  = attachments.filter(a => a.storage_path && !isImage(a.mime_type));
+    const links  = attachments.filter(a => a.external_url);
+    return `<div class="sv-card">
+      <div class="sv-card-head">${svg(I.doc)}Bijlagen · ${num(attachments.length)}</div>
+      <div class="sv-card-body">
+        ${images.length ? `<div class="tk-att-grid">
+          ${images.map(a => `<div class="tk-att-img-card" onclick="__ticketAttOpen('${esc(a.storage_path)}')">
+            <img data-att-path="${esc(a.storage_path)}" alt="${esc(a.filename || 'bijlage')}" class="tk-att-img"/>
+            <div class="tk-att-meta">${esc(a.filename || 'bijlage')}</div>
+            <button class="tk-att-del" onclick="event.stopPropagation();__ticketAttDelete('${a.id}')" title="Verwijder">×</button>
+          </div>`).join('')}
+        </div>` : ''}
+        ${files.length ? `<div class="tk-att-files">
+          ${files.map(a => `<div class="tk-att-file-row">
+            ${svg(I.doc)}
+            <a href="#" onclick="event.preventDefault();__ticketAttOpen('${esc(a.storage_path)}')" class="tk-att-file-name">${esc(a.filename || (a.storage_path || '').split('/').pop() || 'bestand')}</a>
+            <span class="tk-att-file-mime">${esc(a.mime_type || '')}</span>
+            <button class="icon-btn" onclick="__ticketAttDelete('${a.id}')" title="Verwijder">${svg(I.x || I.warn)}</button>
+          </div>`).join('')}
+        </div>` : ''}
+        ${links.length ? `<div class="tk-att-files">
+          ${links.map(a => `<div class="tk-att-file-row">
+            ${svg(I.mail)}
+            <a href="${esc(a.external_url)}" target="_blank" rel="noopener" class="tk-att-file-name">${esc(a.filename || a.external_url)}</a>
+            <button class="icon-btn" onclick="__ticketAttDelete('${a.id}')" title="Verwijder">${svg(I.x || I.warn)}</button>
+          </div>`).join('')}
+        </div>` : ''}
+        ${!attachments.length ? `<div class="sv-empty" style="padding:14px 6px">Nog geen bijlagen.</div>` : ''}
+        <label class="tk-att-picker" style="margin-top:12px">
+          <input type="file" multiple accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx" onchange="__ticketDetailPickFiles(this)" ${_att.uploading ? 'disabled' : ''} style="display:none">
+          <span class="btn btn-sm">${_att.uploading ? svg(I.clock || I.settings) + 'Uploaden…' : svg(I.plus) + 'Bestand/foto/video toevoegen'}</span>
+        </label>
       </div>
     </div>`;
   }
@@ -351,6 +564,7 @@
               <div class="tk-det-desc">${t.description ? esc(t.description).replace(/\n/g, '<br>') : '<em style="color:var(--text-3)">Geen omschrijving.</em>'}</div>
             </div>
           </div>
+          ${renderAttachmentsCard(Array.isArray(d.attachments) ? d.attachments : [])}
           <div class="sv-card">
             <div class="sv-card-head">${svg(I.mail)}Reacties · ${num(comments.length)}</div>
             <div class="sv-card-body">
