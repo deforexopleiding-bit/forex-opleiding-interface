@@ -81,8 +81,29 @@ export default async function handler(req, res) {
       qy = qy.or(`voornaam.ilike.${like},achternaam.ilike.${like},email.ilike.${like}`);
     }
 
-    const { data, error, count } = await qy;
-    if (error) throw new Error('leads: ' + error.message);
+    let { data, error, count } = await qy;
+    // Ronde 6 defensief: als vol select faalt (bv gedropte kolom), fallback
+    // op minimale-guaranteed-safe select. Zo blijft de UI werken ook als
+    // een migratie een niet-kritieke kolom wegneemt.
+    if (error && /column .+ does not exist/i.test(error.message || '')) {
+      console.warn('[leads-list] full select failed, retry minimal:', error.message);
+      let fb = supabaseAdmin
+        .from('leads')
+        .select('id, voornaam, achternaam, email, telefoon, status, aangemaakt, verwijderd_op', { count: 'exact' })
+        .order('aangemaakt', { ascending: false })
+        .range(offset, offset + limit - 1);
+      fb = archief ? fb.not('verwijderd_op', 'is', null) : fb.is('verwijderd_op', null);
+      if (status) fb = fb.eq('status', status);
+      if (search) {
+        const like = `%${search.replace(/[%_]/g, m => '\\' + m)}%`;
+        fb = fb.or(`voornaam.ilike.${like},achternaam.ilike.${like},email.ilike.${like}`);
+      }
+      const r2 = await fb;
+      if (r2.error) throw new Error('leads (minimal fallback): ' + r2.error.message);
+      data = r2.data; count = r2.count;
+    } else if (error) {
+      throw new Error('leads: ' + error.message);
+    }
     const rows = data || [];
     // Bouw `naam` uit voornaam+achternaam zodat response-consumers (v1 + v2)
     // ongewijzigd blijven werken.

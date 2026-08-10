@@ -284,16 +284,38 @@
     const seq = ++_act.seq;
     _act.loading = true; _act.error = null; _act.params = wanted;
     window.DFO.render();
-    const [list, stats] = await Promise.all([
-      tryFetch('leads-list',  '/api/leads-list?' + wanted),
-      tryFetch('leads-stats', '/api/leads-stats'),
-    ]);
-    if (seq !== _act.seq) return;
-    _act.data = list; _act.stats = stats;
-    _act.loading = false;
-    if (!list && !stats) _act.error = 'Kon leads niet laden';
-    window.DFO.render();
+    try {
+      const [list, stats] = await Promise.all([
+        tryFetch('leads-list',  '/api/leads-list?' + wanted),
+        tryFetch('leads-stats', '/api/leads-stats'),
+      ]);
+      if (seq !== _act.seq) return;
+      // FAIL-SOFT: bij null-response nog steeds _act.data zetten op een geldig
+      // shape (items:[]) om retry-storm te breken — anders zou !_act.data
+      // waar-blijven en elke render triggert opnieuw queueMicrotask(fetchActief).
+      // Ronde 5-fix: retry gebeurt alleen op user-klik van de retry-knop.
+      _act.data = list || { items: [], total: 0 };
+      _act.stats = stats || {};
+      if (!list) _act.error = 'Kon leads-list niet laden (netwerk of 500).';
+      else if (!stats) _act.error = 'Kon leads-stats niet laden.';
+    } catch (e) {
+      if (seq !== _act.seq) return;
+      _act.data = { items: [], total: 0 };
+      _act.stats = {};
+      _act.error = 'Fetch-fout: ' + (e?.message || 'onbekend');
+      console.error('[leads-v2] fetchActief exception:', e?.message);
+    } finally {
+      if (seq === _act.seq) {
+        _act.loading = false;
+        window.DFO.render();
+      }
+    }
   }
+  // Ronde 5: manual retry vanuit error-state knop.
+  window.__leadRetry = () => {
+    _act.data = null; _act.error = null; _act.params = '';
+    fetchActief();
+  };
 
   function actiefListView() {
     const st = F('lead-st', 'all');
@@ -302,12 +324,16 @@
     const total = _act.data?.total ?? null;
     const s = _act.stats || {};
 
-    // Ronde 4: shared stableSearch registreren + client-side sort.
+    // Ronde 4/5: shared stableSearch registreren. GEEN setSearchValue-per-render
+    // meer — dat overschrijft de user's getypte waarde vóórdat de 280ms debounce
+    // fireet ("zoekveld wist zichzelf"). SEARCH_VALUES + input.value zijn nu
+    // source-of-truth vanaf mount; _act.search wordt alleen via de debounced
+    // onChange bijgewerkt.
     H.onSearch('leads-act', (val) => {
       _act.search = val || '';
+      _act.data = null;   // dwing re-fetch met nieuwe q
       fetchActief();
     });
-    if (H.getSearchValue('leads-act') !== (_act.search || '')) H.setSearchValue('leads-act', _act.search || '');
 
     // Client-side sort (op zichtbare 50). server-side sort niet in leads-list.
     if (_act.sortBy === 'aangemaakt') {
@@ -357,14 +383,16 @@
         </div>`,
       ])}
       <div class="sv-total">${_act.loading ? 'Laden…' : (total != null ? `${total} lead${total === 1 ? '' : 's'}` : '—')}</div>
+      ${_act.error ? `<div class="sv-empty" style="border:1px solid var(--warn-line, var(--rose-line, var(--line)));background:var(--warn-soft, var(--rose-soft, var(--surface-2)));color:var(--warn, var(--rose));display:flex;align-items:center;gap:12px;padding:14px 18px;margin:12px 20px;border-radius:8px">
+        ${svg(I.alert || I.warn)}
+        <span style="flex:1"><b>Kon leads niet laden:</b> ${esc(_act.error)}</span>
+        <button class="btn btn-sm" onclick="__leadRetry()">${svg(I.repeat || I.settings)} Opnieuw proberen</button>
+      </div>` : ''}
       ${H.table(
-        [{ l: 'Naam' }, { l: 'Herkomst' }, { l: 'Traject', cls: 'optional' }, { l: 'Call gepland', cls: 'optional' }, { l: 'Status' }, { l: 'Score', cls: 'r' }, { l: 'Aangemaakt', cls: 'r optional' }, { l: '', cls: 'r' }],
+        [{ l: 'Naam' }, { l: 'E-mail', cls: 'optional' }, { l: 'Telefoon', cls: 'optional' }, { l: 'Herkomst' }, { l: 'Traject', cls: 'optional' }, { l: 'Call gepland', cls: 'optional' }, { l: 'Status' }, { l: 'Score', cls: 'r' }, { l: 'Aangemaakt', cls: 'r optional' }, { l: '', cls: 'r' }],
         items.map(l => {
           const [c, pl] = STATUS_TO_PILL[l.status] || ['neutral', l.status || '—'];
-          // Herkomst = l.soort (backend-veld heet 'soort', gebruikers-label = Herkomst).
           const herkomst = l.soort || l.herkomst || '';
-          // Score-kleuring: groen = toegelaten (score >= drempel), rood = niet.
-          // Bij ontbrekende drempel: neutraal.
           const sc = Number(l.score);
           const dr = Number(l.drempel);
           const scColor = (!isNaN(sc) && !isNaN(dr) && dr > 0)
@@ -373,11 +401,12 @@
           const scLabel = l.score != null
             ? `${l.score}${l.drempel ? ' / ' + l.drempel : ''}`
             : '—';
-          // Call gepland = afspraak_op gezet? Toon datum, anders '—'.
           const call = l.afspraak_op ? dstr(l.afspraak_op) : '—';
           const nameEsc = String(l.naam || '').replace(/"/g, '&quot;').replace(/'/g, "\\'");
           return [
             `<div class="cell-main-wrap"><div class="av av-sm">${H.av(l.naam || '?')}</div><a href="javascript:__leadOpen('${l.id}')" class="ld-name">${esc(l.naam) || '—'}</a></div>`,
+            `<span class="mono" style="font-size:11.5px;color:var(--text-2)">${esc(l.email) || '—'}</span>`,
+            `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(l.telefoon) || '—'}</span>`,
             `<span class="pill pill-neutral">${esc(herkomst) || '—'}</span>`,
             `<span style="font-size:12.5px;color:var(--text-3)">${esc(l.traject) || '—'}</span>`,
             `<span class="mono" style="font-size:12px;color:var(--text-3)">${esc(call)}</span>`,
@@ -391,7 +420,7 @@
           ];
         })
       )}
-      ${!items.length && !_act.loading ? `<div class="sv-empty">${_act.error || 'Geen leads met deze filters.'}</div>` : ''}`;
+      ${!items.length && !_act.loading && !_act.error ? `<div class="sv-empty">Geen leads met deze filters.</div>` : ''}`;
   }
 
   function createModal() {
