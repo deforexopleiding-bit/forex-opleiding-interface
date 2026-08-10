@@ -34,6 +34,11 @@ function defaultLoginUrl() {
     || 'https://dashboard.deforexopleiding.nl';
 }
 
+function defaultLmsLoginUrl() {
+  return (process.env.LMS_LOGIN_URL && process.env.LMS_LOGIN_URL.trim())
+    || 'https://dfo-lms-prototype.vercel.app';
+}
+
 function escHtml(s) {
   if (s == null) return '';
   return String(s)
@@ -55,9 +60,13 @@ function escHtml(s) {
  * @param {object} opts.customer     - customer-row (first_name, email, ...)
  * @param {string} opts.tempPassword - tijdelijk wachtwoord uit Bubble-workflow
  * @param {string} [opts.loginUrl]   - default uit env BUBBLE_LOGIN_URL
+ * @param {string} [opts.lmsLoginUrl] - inloglink nieuw LMS; alleen renderen samen
+ *                                       met lmsPassword. Default uit env LMS_LOGIN_URL.
+ * @param {string} [opts.lmsPassword] - LMS-wachtwoord; als (samen met een account)
+ *                                       aanwezig → tweede login-kaartje. Nooit gelogd.
  * @returns {Promise<{sent:boolean, reason?:string, message_id?:string}>}
  */
-export async function sendCredentialsEmail({ onboarding, customer, tempPassword, loginUrl }) {
+export async function sendCredentialsEmail({ onboarding, customer, tempPassword, loginUrl, lmsLoginUrl, lmsPassword }) {
   try {
     if (!customer || !customer.email) return { sent: false, reason: 'geen-email' };
     if (!tempPassword) return { sent: false, reason: 'geen-temp-password' };
@@ -65,6 +74,32 @@ export async function sendCredentialsEmail({ onboarding, customer, tempPassword,
     const url = (typeof loginUrl === 'string' && loginUrl.trim()) ? loginUrl.trim() : defaultLoginUrl();
     const naam = (customer.first_name || '').trim() || 'jij';
     const subject = 'Je inloggegevens voor De Forex Opleiding';
+
+    // Optioneel tweede login-blok voor het nieuwe LMS. Alleen renderen wanneer
+    // er daadwerkelijk een LMS-wachtwoord is meegegeven (= account is provisioned).
+    // De inloglink valt terug op env LMS_LOGIN_URL wanneer niet expliciet gezet.
+    const showLms = typeof lmsPassword === 'string' && lmsPassword.trim().length > 0;
+    const lmsUrl = (typeof lmsLoginUrl === 'string' && lmsLoginUrl.trim())
+      ? lmsLoginUrl.trim() : defaultLmsLoginUrl();
+    const lmsBlockHtml = showLms ? `
+      <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;margin:18px 0">
+        <tr><td style="padding:14px 18px">
+          <div style="font-size:13px;color:#0369a1;font-weight:700;margin-bottom:8px">Nieuw leerplatform (staat al voor je klaar)</div>
+          <p style="margin:0 0 12px;font-size:13px;color:#374151;line-height:1.55">
+            We zijn bezig met een nieuw leerplatform. Je account staat er al klaar met de gegevens hieronder.
+            <strong>Op dit moment is de omgeving hierboven nog de hoofd-leeromgeving</strong>; binnenkort zetten we alles volledig over naar het nieuwe LMS.
+          </p>
+          <div style="font-size:12px;color:#6b7280;letter-spacing:.04em;text-transform:uppercase;font-weight:700">Inloglink LMS</div>
+          <div style="font-size:14px;margin-top:4px"><a href="${escHtml(lmsUrl)}" style="color:#093d54;text-decoration:underline;word-break:break-all">${escHtml(lmsUrl)}</a></div>
+          <div style="font-size:12px;color:#6b7280;letter-spacing:.04em;text-transform:uppercase;font-weight:700;margin-top:14px">Gebruikersnaam</div>
+          <div style="font-size:14px;margin-top:4px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#111827">${escHtml(customer.email)}</div>
+          <div style="font-size:12px;color:#6b7280;letter-spacing:.04em;text-transform:uppercase;font-weight:700;margin-top:14px">Wachtwoord LMS</div>
+          <div style="font-size:14px;margin-top:4px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#111827;background:#fff;border:1px dashed #d1d5db;border-radius:6px;padding:7px 10px;display:inline-block">${escHtml(lmsPassword)}</div>
+        </td></tr>
+      </table>` : '';
+    const lmsBlockText = showLms
+      ? `\n\nNieuw leerplatform (staat al voor je klaar):\nInloglink LMS: ${lmsUrl}\nGebruikersnaam: ${customer.email}\nWachtwoord LMS: ${lmsPassword}\nDe omgeving hierboven is op dit moment nog de hoofd-leeromgeving; binnenkort zetten we alles over naar het nieuwe LMS.`
+      : '';
 
     const bodyHtml = `
       <p style="margin:0 0 14px;font-size:15px;color:#111827">Hoi ${escHtml(naam)},</p>
@@ -80,7 +115,7 @@ export async function sendCredentialsEmail({ onboarding, customer, tempPassword,
           <div style="font-size:12px;color:#6b7280;letter-spacing:.04em;text-transform:uppercase;font-weight:700;margin-top:14px">Tijdelijk wachtwoord</div>
           <div style="font-size:14px;margin-top:4px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#111827;background:#fff;border:1px dashed #d1d5db;border-radius:6px;padding:7px 10px;display:inline-block">${escHtml(tempPassword)}</div>
         </td></tr>
-      </table>
+      </table>${lmsBlockHtml}
       <p style="margin:0 0 14px;font-size:14px;color:#374151;line-height:1.55">
         <strong>Belangrijk:</strong> log direct in en stel je eigen wachtwoord in via je profiel-instellingen. Het tijdelijke wachtwoord blijft beperkt geldig.
       </p>
@@ -98,7 +133,7 @@ export async function sendCredentialsEmail({ onboarding, customer, tempPassword,
       to:      customer.email,
       subject,
       html,
-      text:    `Hoi ${naam}, je inloggegevens voor De Forex Opleiding:\n\nInloglink: ${url}\nGebruikersnaam: ${customer.email}\nTijdelijk wachtwoord: ${tempPassword}\n\nLog direct in en stel je eigen wachtwoord in.\n— De Forex Opleiding`,
+      text:    `Hoi ${naam}, je inloggegevens voor De Forex Opleiding:\n\nInloglink: ${url}\nGebruikersnaam: ${customer.email}\nTijdelijk wachtwoord: ${tempPassword}\n\nLog direct in en stel je eigen wachtwoord in.${lmsBlockText}\n— De Forex Opleiding`,
     });
     if (!result || result.success !== true) {
       return { sent: false, reason: 'mail-fail', message_id: null };

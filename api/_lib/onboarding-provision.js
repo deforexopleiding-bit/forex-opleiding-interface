@@ -21,6 +21,7 @@
 // vastgelegd; bubble_provisioned blijft false zodat een retry alleen de
 // PATCH overdoet.
 
+import crypto from 'node:crypto';
 import { supabaseAdmin } from '../supabase.js';
 import {
   bubbleWorkflow,
@@ -28,6 +29,7 @@ import {
   bubbleFindUserByEmail,
 } from './bubble.js';
 import { sendCredentialsEmail } from './onboarding-credentials.js';
+import { vindOfMaakAccount, zetGrant, zetWachtwoord } from './lms-provisioning.js';
 
 // Maand-arithmetiek met clamp op laatste dag van de maand (15 → +1 = 15;
 // 31 jan + 1 maand = 28/29 feb). Bubble-side wordt dit als datum opgeslagen
@@ -344,10 +346,87 @@ export async function provisionOnboardingStudent(onboardingId) {
     return { ok: false, partial: true, bubble_user_id: bubbleUserId, error: msg };
   }
 
+  // ── LMS-PROVISIONING (optioneel, additief, fail-soft) ──────────────────
+  // Parallel aan Bubble: maak — ALLEEN wanneer LMS_PROVISION_ENABLED === 'true'
+  // — ook een account aan in het nieuwe LMS (Supabase) en koppel toegang.
+  // Default/afwezig = uit: dan verandert er niets aan de bestaande flow.
+  // ALLES hier is fail-soft: een fout in het LMS-deel mag NOOIT de Bubble-flow
+  // of de HTTP-respons breken. Bij succes leveren we een LMS-wachtwoord dat
+  // (samen met de LMS-inloglink) wordt meegestuurd in de credentials-mail.
+  // Het LMS-wachtwoord blijft alleen in memory: NOOIT loggen, NOOIT persisten.
+  let lmsPassword = null;
+  let lmsLoginUrl = null;
+  if (process.env.LMS_PROVISION_ENABLED === 'true') {
+    try {
+      const productSlug = (process.env.LMS_PROVISION_PRODUCT_SLUG || '1-op-1-coaching').trim();
+
+      // Voorlopig 1 vast niet-trial LMS-product op slug. Ontbreekt het product
+      // of is het inactief → warning + LMS-deel overslaan (geen crash).
+      const { data: product, error: prodErr } = await supabaseAdmin
+        .from('lms_producten')
+        .select('id, slug, actief')
+        .eq('slug', productSlug)
+        .maybeSingle();
+      if (prodErr) throw new Error('lms_producten lookup: ' + prodErr.message);
+
+      if (!product || product.actief !== true) {
+        console.warn('[onboarding-provision] LMS-product ontbreekt of inactief:',
+          productSlug, '— LMS-deel overgeslagen');
+      } else {
+        // Traject-type: bij 'membership' geen mentor/calls-verwachting, bij 1op1
+        // wel. Het aantal calls (traject.alpha_calls_total 24/48/96) valt BUITEN
+        // scope van deze PR — het LMS-schema heeft daar nog geen kolom voor.
+        // TODO(LMS): calls-quota koppelen zodra het LMS een kolom heeft.
+        const isMembership = String(traject.type || '').toLowerCase() === 'membership';
+        if (isMembership) {
+          console.log('[onboarding-provision] LMS: membership-traject — geen mentor/calls-koppeling');
+        }
+
+        // Toegangsvenster identiek aan Bubble: begin = start_date-logica (basis),
+        // einde = addMonths(basis, duur_maanden) = endIso.
+        const lmsVan = basis.toISOString();
+        const lmsTot = endIso;
+
+        // Account (her)gebruiken/aanmaken via de gedeelde helper. Geen leadId
+        // in de onboarding-context. Match op customer.email (lowercase, trimmed).
+        const account = await vindOfMaakAccount({
+          email,
+          voornaam:   firstName || null,
+          achternaam: lastName  || null,
+          van: lmsVan,
+          tot: lmsTot,
+        });
+
+        if (!account || !account.authId) {
+          console.warn('[onboarding-provision] LMS-account zonder auth_id — wachtwoord/mail overgeslagen');
+        } else {
+          // Sterk willekeurig wachtwoord (18 bytes → 24 base64url-tekens, >=16).
+          // NOOIT loggen, NOOIT in de DB opslaan — alleen doorgeven aan de mail.
+          const pw = crypto.randomBytes(18).toString('base64url');
+          await zetWachtwoord({ authId: account.authId, wachtwoord: pw });
+          await zetGrant({ gebruikerId: account.id, productId: product.id, van: lmsVan, tot: lmsTot });
+
+          // Pas nu — na een volledig geslaagd account + wachtwoord + grant —
+          // markeren we het LMS-blok als verzendbaar in de credentials-mail.
+          lmsPassword = pw;
+          lmsLoginUrl = (process.env.LMS_LOGIN_URL || '').trim() || null;
+        }
+      }
+    } catch (e) {
+      // Fail-soft: alles vangen, doorgaan. Borg dat er geen half-af LMS-blok
+      // in de mail belandt door lmsPassword terug op null te zetten.
+      console.error('[onboarding-provision] LMS-provisioning fail (soft):', e?.message || e);
+      lmsPassword = null;
+      lmsLoginUrl = null;
+    }
+  }
+
   // CREDENTIALS-MAIL — fail-soft, niet-blokkerend voor het ok:true-pad.
   // Alleen versturen wanneer Bubble's workflow een temp_password meegaf.
   // We persisten het wachtwoord NIET; alleen credentials_email_sent_at bij
   // succes als idempotentie-marker / zichtbaarheid in de admin-UI.
+  // Het LMS-blok wordt ALLEEN meegestuurd als de LMS-provisioning hierboven
+  // daadwerkelijk een account + wachtwoord opleverde (lmsPassword gezet).
   if (tempPassword) {
     try {
       const credEmailRes = await sendCredentialsEmail({
@@ -355,6 +434,7 @@ export async function provisionOnboardingStudent(onboardingId) {
         customer,
         tempPassword,
         // loginUrl: default uit env BUBBLE_LOGIN_URL
+        ...(lmsPassword ? { lmsPassword, lmsLoginUrl } : {}),
       });
       if (credEmailRes && credEmailRes.sent === true) {
         try {
