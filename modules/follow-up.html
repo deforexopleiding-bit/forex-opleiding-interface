@@ -11080,7 +11080,20 @@
 
     async function init() {
       await window._authSharedReady;
-      const profile = await window.AuthShared.requireAuth(ALLOWED_ROLES);
+      // Toegang: rol in ALLOWED_ROLES (bestaand gedrag) OF de RBAC-key
+      // followup.module.access. Die key dekt óók per-user-grants
+      // (user_permissions), zodat een uitzondering op 1 persoon — bv. een mentor
+      // met expliciete follow-up-toegang — niet door de harde rollenlijst wordt
+      // geweigerd. Additief: bestaande rollen behouden exact hun toegang (admin
+      // heeft géén expliciete role_permissions-grant, dus puur op key overstappen
+      // zou admin buitensluiten). requireAuth() zonder rollen = enkel auth/redirect.
+      const profile = await window.AuthShared.requireAuth();
+      if (!profile) return; // requireAuth heeft al doorgestuurd (geen sessie/inactief)
+      let _fuAllowed = ALLOWED_ROLES.includes(profile.role);
+      if (!_fuAllowed && window.RBAC && typeof window.RBAC.can === 'function') {
+        try { _fuAllowed = await window.RBAC.can('followup.module.access'); } catch (e) {}
+      }
+      if (!_fuAllowed) { window.location.href = '/login.html?error=no_access'; return; }
       currentProfile = profile;
       window.AgentShared?.renderUserSection(profile);
 
@@ -12270,7 +12283,14 @@
     }
 
     async function initKalenderOwnerFilter() {
-      if (!currentProfile || !['manager', 'admin', 'super_admin'].includes(currentProfile.role)) return;
+      if (!currentProfile) return;
+      // "Alle owners zien"-scope: rol (bestaand gedrag) OF de RBAC-key
+      // followup.scope.all_vs_own (dekt per-user-grants). Additief.
+      let _seeAll = ['manager', 'admin', 'super_admin'].includes(currentProfile.role);
+      if (!_seeAll && window.RBAC && typeof window.RBAC.can === 'function') {
+        try { _seeAll = await window.RBAC.can('followup.scope.all_vs_own'); } catch (e) {}
+      }
+      if (!_seeAll) return;
       document.getElementById('fu-kal-owner-filter').style.display = 'block';
 
       const token = await window.AuthShared.getAccessToken();
