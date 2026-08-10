@@ -243,7 +243,15 @@
 
   // ── OFFERTES ─────────────────────────────────────────────────────────────
   window.__svOfferteNew  = () => { window.location.href = '/modules/sales-wizard.html'; };
-  window.__svOfferteOpen = (dealId) => { if (dealId) window.location.href = '/modules/sales-wizard.html?edit_deal_id=' + encodeURIComponent(dealId); };
+  // Klik op een offerte-rij opent de v2-detail-pagina (niet de wizard).
+  // 'Bewerken' vanuit die detail-pagina redirect wél naar de wizard in
+  // edit-mode.
+  window.__svOfferteOpen = (dealId) => { if (dealId) window.location.href = '/modules/offerte-detail-v2.html?id=' + encodeURIComponent(dealId); };
+  // Row-click handler voor H.table: resolvet index → deal_id → __svOfferteOpen.
+  window.__svOfferteRowClick = (i) => {
+    const q = (_off.data && _off.data.quotations && _off.data.quotations[i]) || null;
+    if (q && q.deal_id) window.__svOfferteOpen(q.deal_id);
+  };
 
   function offertesParams() {
     const status = F('sv-off-st', 'all');
@@ -327,14 +335,15 @@
       ${H.table(
         [{ l: 'Offerte-nr' }, { l: 'Klant' }, { l: 'Traject', cls: 'optional' }, { l: 'Verkoper', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Datum', cls: 'r optional' }, { l: 'Status' }],
         items.map(q => [
-          `<a href="javascript:__svOfferteOpen('${q.deal_id}')" class="sv-off-nr">${q.quote_reference || ('#' + String(q.deal_id || '').slice(0, 8))}</a>`,
+          `<span class="sv-off-nr">${q.quote_reference || ('#' + String(q.deal_id || '').slice(0, 8))}</span>`,
           `<div class="cell-main-wrap"><div class="av av-sm">${H.av(q.customer_name || '?')}</div><span class="cell-main">${q.customer_name || '—'}</span></div>`,
           `<span style="font-size:12.5px;color:var(--text-3)">${q.traject_label || '—'}</span>`,
           `<span style="font-size:12.5px;color:var(--text-3)">${q.sales_user || '—'}</span>`,
           `<span class="mono">${eur0(q.total_amount)}</span>`,
           `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(q.created_at)}</span>`,
           H.pill((OST_TO_PILL[q.tl_quotation_status] || ['neutral', q.tl_quotation_status || '—'])[0], (OST_TO_PILL[q.tl_quotation_status] || ['neutral', q.tl_quotation_status || '—'])[1]),
-        ])
+        ]),
+        '__svOfferteRowClick'
       )}
       ${!items.length && !_off.loading ? `<div class="sv-empty">${_off.error ? _off.error : 'Geen offertes met deze filters.'}</div>` : ''}`;
   }
