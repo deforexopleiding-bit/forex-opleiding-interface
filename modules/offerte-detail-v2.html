@@ -33,7 +33,11 @@
     /* Detail-pagina scoped styling. Alle klasses onder .odv- namespace,
        geen leakage naar klanten-v2. */
     body.odv { background: var(--bg, #F7F8FA); color: var(--text, #111721); font-family: 'IBM Plex Sans', system-ui, sans-serif; margin: 0; }
-    .odv-app { max-width: 1160px; margin: 0 auto; padding: 24px 20px 60px; }
+    /* Embed-mode: iframe inside klanten-v2 shell — transparante bg, back-link
+       verborgen (shell heeft eigen crumb-nav), compactere padding. */
+    body.odv.is-embed { background: transparent; }
+    body.odv.is-embed .odv-app { padding: 16px 20px 40px; max-width: none; }
+    body.odv.is-embed .odv-back-link { display: none; }
 
     .odv-back-link { font-size: 12.5px; color: var(--text-2, #586374); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
     .odv-back-link:hover { color: var(--m, #6D3FD4); }
@@ -278,6 +282,19 @@ async function apiJson(url, init = {}) {
 
 // ── State ──────────────────────────────────────────────────────────────
 const dealId = new URLSearchParams(location.search).get('id');
+// Embed-mode: gemount in een iframe binnen de klanten-v2 shell. Bij ?embed=1
+// wordt de body-class 'is-embed' gezet (verbergt back-link, transparante bg),
+// en navigate-side-effects gaan via parent.__odv* i.p.v. location.href zodat
+// de shell in-place blijft.
+const _odvEmbed = new URLSearchParams(location.search).get('embed') === '1';
+if (_odvEmbed) document.body.classList.add('is-embed');
+function _odvNav(url) {
+  if (_odvEmbed && window.parent && typeof window.parent.__odvHandleNav === 'function') {
+    window.parent.__odvHandleNav(url);
+  } else {
+    window.location.href = url;
+  }
+}
 let _deal = null, _customer = null, _lineItems = [], _totals = null, _entity = '', _hasSub = false;
 let _dealTitle = 'Offerte';
 
@@ -523,7 +540,7 @@ async function doCopy() {
   try {
     const d = await apiJson('/api/sales-deal-copy', { method: 'POST', body: JSON.stringify({ source_deal_id: dealId }) });
     toast('Gekopieerd — nieuwe concept-offerte aangemaakt');
-    if (d?.deal_id) setTimeout(() => { window.location.href = '/modules/offerte-detail-v2.html?id=' + encodeURIComponent(d.deal_id); }, 800);
+    if (d?.deal_id) setTimeout(() => { _odvNav('/modules/offerte-detail-v2.html?id=' + encodeURIComponent(d.deal_id)); }, 800);
   } catch (e) { toast('Kopiëren mislukt: ' + e.message); }
 }
 async function doDelete() {
@@ -531,7 +548,7 @@ async function doDelete() {
   try {
     await apiJson('/api/teamleader-delete-quotation', { method: 'POST', body: JSON.stringify({ deal_id: dealId }) });
     toast('Offerte verwijderd');
-    setTimeout(() => { window.location.href = '/modules/klanten-v2/?v2preview=sales'; }, 700);
+    setTimeout(() => { _odvNav('/modules/klanten-v2/?v2preview=sales'); }, 700);
   } catch (e) { toast('Verwijderen mislukt: ' + e.message); }
 }
 
