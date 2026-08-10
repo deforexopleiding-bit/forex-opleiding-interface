@@ -48,6 +48,7 @@
     duplicate_check_status: 'idle',   // idle | pending | completed
     entities: null,                    // /api/company-entities
     entitiesLoading: false,
+    entitiesError: null,               // 'unauth' | 'server' | 'empty' | null
     trajecten: null,                   // /api/leads-trajecten
     prefillLeadId: null,
     prefillEventAttendeeId: null,
@@ -225,14 +226,35 @@
 
   async function loadEntities() {
     _sw.entitiesLoading = true;
+    _sw.entitiesError = null;
+    // Endpoint returns { entities: [...] } (bron: api/company-entities.js).
+    // Accepteer óók legacy shapes (items[] / kale array) voor toekomstige refactors.
     const data = await tryFetch('company-entities', '/api/company-entities');
-    _sw.entities = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
     _sw.entitiesLoading = false;
-    if (_sw.entities.length && !_sw.wizard.tl_department_id) {
-      _sw.wizard.tl_department_id = _sw.entities[0].tl_department_id;
+    if (data == null) {
+      // tryFetch heeft null gereturnd — netwerk-fout, 401, 403, of 500.
+      // We weten hier niet welk; classificeer als 'server' voor generieke retry-UI.
+      _sw.entities = [];
+      _sw.entitiesError = 'server';
+    } else {
+      const list = Array.isArray(data?.entities) ? data.entities
+                  : Array.isArray(data?.items)   ? data.items
+                  : Array.isArray(data)          ? data
+                  : [];
+      _sw.entities = list;
+      _sw.entitiesError = list.length === 0 ? 'empty' : null;
+      if (list.length && !_sw.wizard.tl_department_id) {
+        _sw.wizard.tl_department_id = list[0].tl_department_id;
+      }
     }
     renderWizard();
   }
+  window.__swRetryEntities = () => {
+    _sw.entities = null;
+    _sw.entitiesError = null;
+    if (!_sw.entitiesLoading) queueMicrotask(loadEntities);
+    renderWizard();
+  };
   async function loadTrajecten() {
     const data = await tryFetch('leads-trajecten', '/api/leads-trajecten');
     _sw.trajecten = Array.isArray(data?.trajecten) ? data.trajecten : [];
@@ -257,16 +279,35 @@
   // ── Stap-panelen ────────────────────────────────────────────────
   function stepBedrijf() {
     const w = _sw.wizard;
-    if (_sw.entitiesLoading) return `<div class="sv-empty" style="padding:32px">Entiteiten laden…</div>`;
-    if (!_sw.entities || !_sw.entities.length) return `<div class="sv-empty" style="padding:32px">Geen entiteiten gevonden. Manager kan ze toevoegen via Admin > Entiteiten.</div>`;
+    if (_sw.entitiesLoading) {
+      return `<div class="sw-step"><div class="sv-empty" style="padding:32px">Entiteiten laden…</div></div>`;
+    }
+    if (_sw.entitiesError === 'server') {
+      return `<div class="sw-step">
+        <h2 class="sw-step-title">1. Kies de entiteit</h2>
+        <div class="sv-empty" style="padding:24px;background:var(--red-soft,#fdecec);border:1px dashed var(--red-line,#f5b7b7);color:var(--red,#c1272d);border-radius:8px;display:flex;flex-direction:column;gap:10px;align-items:flex-start">
+          <div>Entiteiten konden niet worden geladen (server-fout of geen rechten). Check de browser-console (label <b>[sw-v2] fetch fail: company-entities</b>) voor de exacte oorzaak.</div>
+          <button class="btn" onclick="__swRetryEntities()">Opnieuw proberen</button>
+        </div>
+      </div>`;
+    }
+    if (!_sw.entities || !_sw.entities.length) {
+      return `<div class="sw-step">
+        <h2 class="sw-step-title">1. Kies de entiteit</h2>
+        <div class="sv-empty" style="padding:24px;background:var(--amber-soft);border:1px dashed var(--amber-line);color:var(--amber);border-radius:8px;display:flex;flex-direction:column;gap:10px;align-items:flex-start">
+          <div>Geen entiteiten gevonden. Een manager kan ze toevoegen via <b>Admin → Entiteiten</b> (tabel <code>company_entities</code>, <code>is_active=true</code>).</div>
+          <button class="btn" onclick="__swRetryEntities()">Opnieuw laden</button>
+        </div>
+      </div>`;
+    }
     return `<div class="sw-step">
       <h2 class="sw-step-title">1. Kies de entiteit</h2>
-      <p class="sw-step-sub">Op welke van je bedrijfsentiteiten komt deze offerte?</p>
+      <p class="sw-step-sub">Vanuit welke van jullie bedrijfsentiteiten wordt deze offerte uitgegeven?</p>
       <div class="sw-entity-grid">
         ${_sw.entities.map(e => `
           <button class="sw-entity-card ${w.tl_department_id === e.tl_department_id ? 'is-selected' : ''}" onclick="__swPickEntity('${esc(e.tl_department_id)}')">
-            <div class="sw-entity-name">${esc(e.label || e.name)}</div>
-            ${e.address_country ? `<div class="sw-entity-country">${esc(e.address_country)}</div>` : ''}
+            <div class="sw-entity-name">${esc(e.label || e.name || '—')}</div>
+            ${e.description ? `<div class="sw-entity-country">${esc(e.description)}</div>` : ''}
           </button>
         `).join('')}
       </div>
