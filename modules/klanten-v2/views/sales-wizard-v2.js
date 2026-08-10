@@ -52,17 +52,32 @@
     trajecten: null,                   // /api/leads-trajecten
     prefillLeadId: null,
     prefillEventAttendeeId: null,
-    dupCandidates: null,               // /api/sales-customers?search
-    dupLoading: false,
+    // Stap 2 — bestaande-klant match + tags helper
+    existingCustName: null,            // 'Piet Jansen' — voor banner na dup-match
+    tl_imported_contact_id: null,      // TL contact-id na "Gebruik dit contact"
+    // Dup-check modal (2e overlay)
+    dupModal: {
+      open: false,
+      loading: false,
+      error: null,                     // string | null
+      dbMatches: null,                 // [{id,name,email,phone,deals_count,last_deal_at}]
+      tlMatches: null,                 // [{tl_id,name,email,phone,address,first_name,...}]
+    },
+    // Tag-input value (persistent tussen renders zodat typen niet 'wiped')
+    tagDraft: '',
     wizard: {
       // Stap 1
       tl_department_id: '',
-      // Stap 2 — klant-NAW
+      // Stap 2 — klant-NAW (1-op-1 met v1 state.wizard, r491-509)
       is_company: false,
       company_name: '', kvk_number: '', vat_number: '',
       first_name: '', last_name: '', email: '', phone: '',
       address_street: '', address_number: '', address_postal: '', address_city: '',
-      address_country: 'NL',
+      address_country: 'NL',            // NL | BE
+      address_known: false,             // adres al bekend → skip verplichte adresvelden
+      date_of_birth: '',                // YYYY-MM-DD
+      tags: [],                         // ['vip','custom-tag'] — mix van PRE_TAGS + eigen
+      avg_ok: false,                    // privacyverklaring bevestigd (verplicht)
       // Stap 3 — offerte-inhoud
       traject_variant_id: '',
       discount_percentage: 0,
@@ -82,6 +97,8 @@
       source_lead_id: '',
     },
   };
+  // 1-op-1 met v1 r471. Wordt gemerged met wizard.tags[] in de chip-row.
+  const PRE_TAGS = ['vip', 'risico', 'ambassadeur', 'pilot', 'oud-lead'];
 
   // ── Fetch-helpers met 8s timeout + fail-soft (patroon uit finance/leads) ──
   async function tryFetch(label, url, timeoutMs = 8000) {
@@ -176,7 +193,8 @@
       root.addEventListener('click', (e) => { if (e.target === root && _sw.open) window.__swClose(); });
     }
     if (_sw.open) {
-      root.innerHTML = wizardModal();
+      // Wizard-body + optionele dup-check-overlay (2e modal bovenop).
+      root.innerHTML = wizardModal() + (_sw.dupModal.open ? dupModalHtml() : '');
       root.classList.add('is-open');
     } else {
       root.classList.remove('is-open');
@@ -207,6 +225,114 @@
   window.__swInput = (field, val) => { _sw.wizard[field] = val; _sw.dirty = true; };
   window.__swToggleCompany = () => { _sw.wizard.is_company = !_sw.wizard.is_company; _sw.dirty = true; renderWizard(); };
   window.__swPickEntity = (id) => { _sw.wizard.tl_department_id = id; _sw.dirty = true; renderWizard(); };
+  // Stap-2 handlers
+  window.__swAvg        = (v) => { _sw.wizard.avg_ok = !!v; _sw.dirty = true; };
+  window.__swAddrKnown  = (v) => { _sw.wizard.address_known = !!v; _sw.dirty = true; renderWizard(); };
+  window.__swSetCountry = (v) => { _sw.wizard.address_country = (v === 'BE' ? 'BE' : 'NL'); _sw.dirty = true; };
+  window.__swToggleTag  = (t) => {
+    const i = _sw.wizard.tags.indexOf(t);
+    if (i >= 0) _sw.wizard.tags.splice(i, 1);
+    else _sw.wizard.tags.push(t);
+    _sw.dirty = true; renderWizard();
+  };
+  window.__swTagDraft   = (v) => { _sw.tagDraft = String(v || ''); };
+  window.__swAddCustomTag = () => {
+    const v = String(_sw.tagDraft || '').trim().toLowerCase();
+    if (!v) return;
+    if (!_sw.wizard.tags.includes(v)) _sw.wizard.tags.push(v);
+    _sw.tagDraft = '';
+    _sw.dirty = true; renderWizard();
+  };
+  window.__swSwapCustomer = () => {
+    // Ontkoppel bestaande-klant match — velden blijven zoals ze zijn zodat
+    // sales onmiddellijk kan aanpassen of opnieuw kan zoeken.
+    _sw.matched_customer_id = null;
+    _sw.existingCustName = null;
+    _sw.duplicate_check_status = 'idle';
+    _sw.dirty = true; renderWizard();
+  };
+  // ── Duplicate-check modal (bestaande klant zoeken) ─────────────────
+  window.__swDupCheckOpen = async () => {
+    const email = String(_sw.wizard.email || '').trim();
+    const phone = String(_sw.wizard.phone || '').trim();
+    if (!email && !phone) {
+      alert('Vul email of telefoon in voordat je zoekt.');
+      return;
+    }
+    _sw.dupModal.open = true;
+    _sw.dupModal.loading = true;
+    _sw.dupModal.error = null;
+    _sw.dupModal.dbMatches = null;
+    _sw.dupModal.tlMatches = null;
+    renderWizard();
+    try {
+      const [dbData, tlData] = await Promise.all([
+        tryPost('sales-customer-duplicate-check', '/api/sales-customer-duplicate-check', { email, phone }).catch(e => ({ __err: e?.message || 'onbekende fout', matches: [] })),
+        tryPost('teamleader-search-contacts',     '/api/teamleader-search-contacts',     { email, phone }).catch(e => ({ __err: e?.message || 'onbekende fout', tl_matches: [] })),
+      ]);
+      _sw.dupModal.loading = false;
+      _sw.dupModal.dbMatches = Array.isArray(dbData?.matches) ? dbData.matches : [];
+      _sw.dupModal.tlMatches = Array.isArray(tlData?.tl_matches) ? tlData.tl_matches : [];
+      // Alleen error tonen als beide bronnen faalden.
+      if (dbData?.__err && tlData?.__err) {
+        _sw.dupModal.error = `Zoek-fouten: DB: ${dbData.__err} · TL: ${tlData.__err}`;
+      }
+      // Geen duplicates: markeer status='completed' (ok om door te gaan)
+      if (!_sw.dupModal.dbMatches.length && !_sw.dupModal.tlMatches.length && !_sw.dupModal.error) {
+        _sw.duplicate_check_status = 'completed';
+      }
+      renderWizard();
+    } catch (e) {
+      _sw.dupModal.loading = false;
+      _sw.dupModal.error = 'Onverwachte fout: ' + (e?.message || 'onbekend');
+      renderWizard();
+    }
+  };
+  window.__swDupCheckClose = () => {
+    _sw.dupModal.open = false;
+    _sw.dupModal.dbMatches = null;
+    _sw.dupModal.tlMatches = null;
+    _sw.dupModal.error = null;
+    renderWizard();
+  };
+  window.__swDupContinueNew = () => {
+    // Sales bevestigt: geen match — ga verder als nieuwe klant.
+    _sw.duplicate_check_status = 'completed';
+    window.__swDupCheckClose();
+  };
+  window.__swUseDbCustomer = (id, name) => {
+    if (!id) return;
+    _sw.matched_customer_id = String(id);
+    _sw.existingCustName = String(name || '—');
+    _sw.duplicate_check_status = 'completed';
+    _sw.dirty = true;
+    window.__swDupCheckClose();
+  };
+  window.__swUseTlContact = (payloadJson) => {
+    let m = null;
+    try { m = typeof payloadJson === 'string' ? JSON.parse(payloadJson) : payloadJson; } catch (_) {}
+    if (!m || typeof m !== 'object') return;
+    _sw.tl_imported_contact_id = m.tl_id || null;
+    if (m.first_name || m.last_name) {
+      _sw.wizard.first_name = m.first_name || '';
+      _sw.wizard.last_name  = m.last_name  || '';
+    } else if (m.name) {
+      const parts = String(m.name).split(' ');
+      _sw.wizard.first_name = parts[0] || '';
+      _sw.wizard.last_name  = parts.slice(1).join(' ');
+    }
+    if (m.email) _sw.wizard.email = m.email;
+    if (m.phone) _sw.wizard.phone = m.phone;
+    if (m.address_street) _sw.wizard.address_street = m.address_street;
+    if (m.address_number) _sw.wizard.address_number = m.address_number;
+    if (m.address_postal) _sw.wizard.address_postal = m.address_postal;
+    if (m.address_city)   _sw.wizard.address_city   = m.address_city;
+    if (m.address_country === 'BE' || m.address_country === 'NL') _sw.wizard.address_country = m.address_country;
+    if (m.date_of_birth)  _sw.wizard.date_of_birth  = String(m.date_of_birth).slice(0, 10);
+    _sw.duplicate_check_status = 'completed';
+    _sw.dirty = true;
+    window.__swDupCheckClose();
+  };
   window.__swSubmit = async () => {
     if (_sw.submitting) return;
     _sw.submitting = true; renderWizard();
@@ -262,7 +388,7 @@
   }
 
   // ── Progress + shell ──────────────────────────────────────────────
-  const STEP_LABELS = ['Bedrijf', 'Klantgegevens', 'Offerte & producten', 'Betalingsvoorwaarden', 'Bevestiging'];
+  const STEP_LABELS = ['Entiteit', 'Klantgegevens', 'Offerte & producten', 'Betalingsvoorwaarden', 'Bevestiging'];
   function progress() {
     return `<div class="sw-progress">
       ${STEP_LABELS.map((l, i) => {
@@ -315,16 +441,33 @@
   }
   function stepKlant() {
     const w = _sw.wizard;
+    const isCo = !!w.is_company;
+    const addrKnown = !!w.address_known;
+    // Merge PRE_TAGS + custom tags, dedup, behoud volgorde (PRE eerst).
+    const allTags = [...new Set([...PRE_TAGS, ...w.tags])];
     return `<div class="sw-step">
       <h2 class="sw-step-title">2. Klantgegevens</h2>
-      <p class="sw-step-sub">Bedrijf of consument? Vul basis-NAW.
-        ${_sw.wizard.source_lead_id ? `<span class="pill pill-info">Prefill vanuit lead ${esc(_sw.wizard.source_lead_id.slice(0, 8))}…</span>` : ''}
+      <p class="sw-step-sub">Zoek een bestaande klant of vul basis-NAW.
+        ${w.source_lead_id ? `<span class="pill pill-accent">Prefill vanuit lead ${esc(w.source_lead_id.slice(0, 8))}…</span>` : ''}
+        ${_sw.tl_imported_contact_id ? `<span class="pill pill-accent">Uit TeamLeader geïmporteerd</span>` : ''}
       </p>
+
+      ${_sw.matched_customer_id ? `
+        <div class="sw-cust-banner">
+          <div>
+            <b>Bestaande klant geselecteerd:</b> ${esc(_sw.existingCustName || '—')}
+            <div class="sw-cust-banner-sub">Adres-check wordt overgeslagen (data komt uit klant-record).</div>
+          </div>
+          <button class="btn btn-ghost" onclick="__swSwapCustomer()">Wissel klant</button>
+        </div>
+      ` : ''}
+
       <div class="sw-toggle-row">
-        <label><input type="radio" name="sw-btype" ${!w.is_company ? 'checked' : ''} onchange="__swToggleCompany()"> Consument</label>
-        <label><input type="radio" name="sw-btype" ${w.is_company ? 'checked' : ''} onchange="__swToggleCompany()"> Bedrijf</label>
+        <label><input type="radio" name="sw-btype" ${!isCo ? 'checked' : ''} onchange="__swToggleCompany()"> Consument</label>
+        <label><input type="radio" name="sw-btype" ${isCo ? 'checked' : ''} onchange="__swToggleCompany()"> Bedrijf (B2B)</label>
       </div>
-      ${w.is_company ? `
+
+      ${isCo ? `
         <div class="tk-field-row">
           <label class="tk-field"><span class="tk-field-l">Bedrijfsnaam <span class="tk-req">*</span></span>
             <input class="ib-input" value="${esc(w.company_name)}" oninput="__swInput('company_name', this.value)"></label>
@@ -334,27 +477,147 @@
             <input class="ib-input" value="${esc(w.vat_number)}" oninput="__swInput('vat_number', this.value)"></label>
         </div>
       ` : ''}
+
       <div class="tk-field-row">
-        <label class="tk-field"><span class="tk-field-l">Voornaam <span class="tk-req">*</span></span>
+        <label class="tk-field"><span class="tk-field-l">Voornaam ${isCo ? '' : '<span class="tk-req">*</span>'}</span>
           <input class="ib-input" value="${esc(w.first_name)}" oninput="__swInput('first_name', this.value)"></label>
-        <label class="tk-field"><span class="tk-field-l">Achternaam <span class="tk-req">*</span></span>
+        <label class="tk-field"><span class="tk-field-l">Achternaam ${isCo ? '' : '<span class="tk-req">*</span>'}</span>
           <input class="ib-input" value="${esc(w.last_name)}" oninput="__swInput('last_name', this.value)"></label>
       </div>
       <div class="tk-field-row">
         <label class="tk-field"><span class="tk-field-l">E-mail <span class="tk-req">*</span></span>
-          <input class="ib-input" type="email" value="${esc(w.email)}" oninput="__swInput('email', this.value)"></label>
+          <input class="ib-input" type="email" value="${esc(w.email)}" oninput="__swInput('email', this.value)" onblur="if(this.value.trim() && ${_sw.duplicate_check_status !== 'completed' ? 'true' : 'false'}) window.__swDupCheckOpen()"></label>
         <label class="tk-field"><span class="tk-field-l">Telefoon <span class="tk-req">*</span></span>
           <input class="ib-input" value="${esc(w.phone)}" oninput="__swInput('phone', this.value)"></label>
       </div>
-      <div class="tk-field-row">
-        <label class="tk-field"><span class="tk-field-l">Adres — straat</span>
+
+      <div class="sw-dup-strip">
+        <button class="btn btn-warn" onclick="__swDupCheckOpen()" title="Vul minimaal email of telefoon in">
+          ${svg(I.search || I.plus, 'width:14px;height:14px')} Zoek in onze DB + Teamleader
+        </button>
+        <div class="sw-dup-strip-hint">
+          ${_sw.duplicate_check_status === 'completed'
+            ? '<span class="pill pill-ok">Duplicate-check gedaan</span>'
+            : 'Controleert of deze klant al bestaat. Bij het verlaten van het emailveld start deze zoek automatisch.'}
+        </div>
+      </div>
+
+      <div class="sw-check-row">
+        <label>
+          <input type="checkbox" ${addrKnown ? 'checked' : ''} onchange="__swAddrKnown(this.checked)">
+          <span>Ik heb de adresgegevens al (adres niet nodig in offerte)</span>
+        </label>
+      </div>
+
+      <div class="tk-field-row" style="opacity:${addrKnown ? '.55' : '1'}">
+        <label class="tk-field"><span class="tk-field-l">Straat ${addrKnown ? '(optioneel)' : '<span class="tk-req">*</span>'}</span>
           <input class="ib-input" value="${esc(w.address_street)}" oninput="__swInput('address_street', this.value)"></label>
-        <label class="tk-field"><span class="tk-field-l">Huisnr</span>
+        <label class="tk-field"><span class="tk-field-l">Huisnr ${addrKnown ? '(optioneel)' : '<span class="tk-req">*</span>'}</span>
           <input class="ib-input" value="${esc(w.address_number)}" oninput="__swInput('address_number', this.value)"></label>
-        <label class="tk-field"><span class="tk-field-l">Postcode</span>
-          <input class="ib-input" value="${esc(w.address_postal)}" oninput="__swInput('address_postal', this.value)"></label>
-        <label class="tk-field"><span class="tk-field-l">Plaats</span>
+        <label class="tk-field"><span class="tk-field-l">Postcode ${addrKnown ? '(optioneel)' : '<span class="tk-req">*</span>'}</span>
+          <input class="ib-input" placeholder="1234 AB" value="${esc(w.address_postal)}" oninput="__swInput('address_postal', this.value)"></label>
+      </div>
+      <div class="tk-field-row" style="opacity:${addrKnown ? '.55' : '1'}">
+        <label class="tk-field"><span class="tk-field-l">Plaats ${addrKnown ? '(optioneel)' : '<span class="tk-req">*</span>'}</span>
           <input class="ib-input" value="${esc(w.address_city)}" oninput="__swInput('address_city', this.value)"></label>
+        <label class="tk-field"><span class="tk-field-l">Land</span>
+          <select class="ib-input" onchange="__swSetCountry(this.value)">
+            <option value="NL" ${w.address_country === 'NL' ? 'selected' : ''}>Nederland</option>
+            <option value="BE" ${w.address_country === 'BE' ? 'selected' : ''}>België</option>
+          </select></label>
+        <label class="tk-field"><span class="tk-field-l">Geboortedatum</span>
+          <input class="ib-input" type="date" value="${esc(w.date_of_birth)}" oninput="__swInput('date_of_birth', this.value)"></label>
+      </div>
+
+      <div class="sw-tags-block">
+        <div class="tk-field-l" style="margin-bottom:6px">Tags</div>
+        <div class="sw-chip-row">
+          ${allTags.map(t => `
+            <span class="sw-chip ${w.tags.includes(t) ? 'is-on' : ''}" onclick="__swToggleTag('${esc(t)}')">
+              ${esc(t)}${w.tags.includes(t) ? '<span class="sw-chip-x">×</span>' : ''}
+            </span>
+          `).join('')}
+        </div>
+        <div class="sw-tag-add">
+          <input class="ib-input" placeholder="+ Tag toevoegen" value="${esc(_sw.tagDraft)}"
+                 oninput="__swTagDraft(this.value)"
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();__swAddCustomTag()}">
+          <button class="btn" onclick="__swAddCustomTag()">Voeg toe</button>
+        </div>
+      </div>
+
+      <div class="sw-check-row sw-check-row-avg">
+        <label>
+          <input type="checkbox" ${w.avg_ok ? 'checked' : ''} onchange="__swAvg(this.checked)">
+          <span>Klant is geïnformeerd over <a href="/privacy" target="_blank" rel="noopener">privacyverklaring</a> <span class="tk-req">*</span></span>
+        </label>
+      </div>
+    </div>`;
+  }
+
+  // ── Duplicate-check modal (2e overlay bovenop wizard) ───────────────
+  function dupModalHtml() {
+    const d = _sw.dupModal;
+    let body = '';
+    if (d.loading) {
+      body = `<div class="sv-empty" style="padding:32px">Zoeken in DB + TeamLeader…</div>`;
+    } else if (d.error) {
+      body = `<div class="sv-empty" style="padding:24px;background:var(--red-soft,#fdecec);border:1px dashed var(--red-line,#f5b7b7);color:var(--red,#c1272d);border-radius:8px">${esc(d.error)}</div>`;
+    } else if (!d.dbMatches?.length && !d.tlMatches?.length) {
+      body = `
+        <div style="padding:26px;text-align:center;color:var(--emerald,#059669)">
+          <div style="font-size:34px;line-height:1">✓</div>
+          <div style="margin-top:10px;font-size:14px">Geen duplicates gevonden</div>
+          <div style="margin-top:6px;font-size:12px;color:var(--text-3)">Geen matches in onze database of TeamLeader.</div>
+        </div>`;
+    } else {
+      const dbSect = d.dbMatches?.length ? `
+        <div class="sw-dup-sect">
+          <h3 class="sw-dup-sect-h">Onze database — ${d.dbMatches.length} match${d.dbMatches.length === 1 ? '' : 'es'}</h3>
+          ${d.dbMatches.map(m => `
+            <div class="sw-dup-card">
+              <div class="sw-dup-card-name">${esc(m.name || '—')}</div>
+              <div class="sw-dup-card-meta">${esc(m.email || '')}${m.phone ? ' · ' + esc(m.phone) : ''}</div>
+              <div class="sw-dup-card-badges">
+                <span class="pill pill-neutral">${m.deals_count || 0} deals</span>
+                ${m.last_deal_at ? `<span class="pill pill-neutral">Laatste: ${new Date(m.last_deal_at).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short' })}</span>` : ''}
+              </div>
+              <div class="sw-dup-card-acts">
+                <button class="btn btn-primary" onclick="__swUseDbCustomer('${esc(m.id)}', ${JSON.stringify(String(m.name || '')).replace(/"/g, '&quot;')})">Gebruik deze klant</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>` : '';
+      const tlSect = d.tlMatches?.length ? `
+        <div class="sw-dup-sect">
+          <h3 class="sw-dup-sect-h">TeamLeader — ${d.tlMatches.length} match${d.tlMatches.length === 1 ? '' : 'es'}</h3>
+          ${d.tlMatches.map((m, i) => `
+            <div class="sw-dup-card">
+              <div class="sw-dup-card-name">${esc(m.name || '—')}</div>
+              <div class="sw-dup-card-meta">${esc(m.email || 'Email niet in TL')}${m.phone ? ' · ' + esc(m.phone) : ' · —'}</div>
+              ${m.address ? `<div class="sw-dup-card-meta" style="color:var(--text-3)">${esc(m.address)}</div>` : ''}
+              <div class="sw-dup-card-acts">
+                <button class="btn" onclick="__swUseTlContact(${JSON.stringify(JSON.stringify(m)).replace(/"/g, '&quot;')})">Gebruik dit contact</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>` : '';
+      body = `${dbSect}${tlSect}`;
+    }
+    return `<div class="sw-dup-back" onclick="if(event.target===this)__swDupCheckClose()">
+      <div class="sw-dup-modal">
+        <div class="sw-modal-head">
+          <div class="sw-modal-title">Klant zoeken</div>
+          <button class="icon-btn" onclick="__swDupCheckClose()" title="Sluiten">${svg(I.x || I.warn, 'width:16px;height:16px')}</button>
+        </div>
+        <div class="sw-modal-body" style="padding:16px 18px;max-height:60vh;overflow-y:auto">
+          ${body}
+        </div>
+        <div class="sw-modal-foot">
+          <button class="btn btn-ghost" onclick="__swDupCheckClose()">Annuleren</button>
+          <div style="flex:1"></div>
+          ${!d.loading && !d.error ? `<button class="btn btn-primary" onclick="__swDupContinueNew()">Ga verder als nieuwe klant</button>` : ''}
+        </div>
       </div>
     </div>`;
   }
@@ -437,9 +700,11 @@
       </div>`;
   }
 
-  // Esc sluit modal.
+  // Esc: sluit eerst dup-modal (2e overlay), dan pas wizard.
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && _sw.open) { e.preventDefault(); window.__swClose(); }
+    if (e.key !== 'Escape') return;
+    if (_sw.dupModal.open) { e.preventDefault(); window.__swDupCheckClose(); return; }
+    if (_sw.open)          { e.preventDefault(); window.__swClose(); }
   });
 
   // Eerste ensureRoot + backdrop-binding gebeurt bij eerste __swOpen. Voor
