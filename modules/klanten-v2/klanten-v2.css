@@ -2304,3 +2304,120 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
 .sw-dup-card-acts { display: flex; gap: 6px; margin-top: 8px; }
 .sw-modal { position: relative; }  /* zodat de dup-back-overlay netjes over wizard-modal ligt */
 
+/* ── Stap 3 — offerte-inhoud (traject/sale_type/producten/korting) ─── */
+.sw-panel-box {
+  padding: 12px 14px; margin-bottom: 14px;
+  background: var(--surface-2, #F2F4F7);
+  border: 1px solid var(--border, #E2E7EE);
+  border-radius: 8px;
+}
+.sw-inline-row { display: flex; gap: 8px; align-items: center; }
+.sw-inline-row .ib-input { flex: 1; }
+.sw-hint { font-size: 11.5px; color: var(--text-2, #586374); margin-top: 6px; line-height: 1.5; min-height: 16px; }
+.tk-field-hint { font-size: 11px; color: var(--text-3, #8B95A5); margin-top: 3px; }
+
+.sw-dur-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sw-dur-num { max-width: 90px; }
+.sw-dur-lbl { font-size: 12px; color: var(--text-2, #586374); margin-right: 4px; }
+.sw-dur-row .sw-chip { min-width: 30px; text-align: center; padding: 4px 8px; }
+
+.sw-prod-head {
+  display: flex; justify-content: space-between; align-items: center;
+  margin: 18px 0 10px;
+}
+.sw-prod-head h3 { font-size: 14px; font-weight: 700; margin: 0; color: var(--text, #111721); }
+.sw-prod-head small { color: var(--text-3, #8B95A5); font-weight: 400; font-size: 11.5px; }
+
+.dp-list { display: flex; flex-direction: column; gap: 6px; }
+.dp-empty {
+  padding: 22px; text-align: center;
+  border: 1px dashed var(--border-strong, #C9D2DE); border-radius: 8px;
+  background: var(--surface-2, #F2F4F7);
+  color: var(--text-2, #586374); font-size: 12.5px;
+}
+.dp-row {
+  display: grid;
+  grid-template-columns: 1fr 80px 110px 100px 32px;
+  gap: 10px; align-items: center;
+  padding: 10px 12px;
+  background: var(--surface-2, #F2F4F7);
+  border: 1px solid var(--border-strong, #C9D2DE);
+  border-radius: 8px;
+}
+.dp-name b { display: block; color: var(--text, #111721); font-size: 13px; }
+.dp-sub { font-size: 11px; color: var(--text-3, #8B95A5); margin-top: 2px; }
+.dp-vat-toggle { color: var(--m, #6D3FD4); cursor: pointer; text-decoration: underline; }
+.dp-qty, .dp-price { text-align: right; }
+.dp-sub-line { text-align: right; font-weight: 700; color: var(--text, #111721); font-variant-numeric: tabular-nums; }
+.dp-rm {
+  background: transparent; border: 0; cursor: pointer;
+  color: var(--rose, #C22B3E); font-size: 18px; line-height: 1;
+  padding: 4px; border-radius: 4px;
+}
+.dp-rm:hover { background: color-mix(in srgb, var(--rose, #C22B3E) 12%, transparent); }
+
+.dp-totals {
+  margin-top: 14px; padding: 12px 14px;
+  background: var(--surface, #FFFFFF);
+  border: 1px solid var(--border-strong, #C9D2DE);
+  border-radius: 8px;
+}
+.dp-total-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 4px 0; font-size: 12.5px; color: var(--text-2, #586374);
+  font-variant-numeric: tabular-nums;
+}
+.dp-total-row.dp-total-disc { color: var(--rose, #C22B3E); }
+.dp-total-row.dp-total-big {
+  font-size: 15px; font-weight: 700; color: var(--text, #111721);
+  border-top: 1px solid var(--border, #E2E7EE); margin-top: 6px; padding-top: 8px;
+}
+.dp-total-row.dp-total-ctrl {
+  border-top: 1px solid var(--border, #E2E7EE); margin-top: 6px; padding-top: 8px;
+  font-size: 11.5px; justify-content: flex-start; gap: 6px;
+}
+.dp-disc-add   { color: var(--emerald, #07835A); cursor: pointer; text-decoration: underline; }
+.dp-disc-edit  { color: var(--m, #6D3FD4); cursor: pointer; text-decoration: underline; }
+.dp-disc-rm    { color: var(--rose, #C22B3E); cursor: pointer; text-decoration: underline; }
+
+/* ── Product-picker (3e overlay) — hergebruikt .sw-dup-back structuur ─ */
+.pp-filters { display: flex; gap: 8px; margin-bottom: 12px; }
+.pp-list { display: flex; flex-direction: column; gap: 6px; }
+.pp-card {
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong, #C9D2DE);
+  border-radius: 8px;
+  background: var(--surface-2, #F2F4F7);
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+.pp-card:hover {
+  border-color: var(--m, #6D3FD4);
+  background: color-mix(in srgb, var(--m, #6D3FD4) 6%, var(--surface-2, #F2F4F7));
+}
+.pp-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.pp-card-name b { color: var(--text, #111721); font-size: 13px; margin-right: 6px; }
+.pp-badge {
+  display: inline-block; padding: 1px 7px; border-radius: 12px;
+  font-size: 10.5px; font-weight: 600;
+  background: var(--surface-3, #E9EDF2); color: var(--text-2, #586374);
+  border: 1px solid var(--border, #E2E7EE);
+  margin-right: 4px;
+}
+.pp-badge-vat {
+  background: color-mix(in srgb, var(--m, #6D3FD4) 12%, var(--surface, #FFFFFF));
+  color: var(--m, #6D3FD4);
+  border-color: color-mix(in srgb, var(--m, #6D3FD4) 32%, var(--border, #E2E7EE));
+}
+.pp-card-price { color: var(--text, #111721); font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.pp-card-desc { font-size: 11.5px; color: var(--text-3, #8B95A5); margin-top: 4px; line-height: 1.4; }
+
+/* Kleine schermen: dp-row-grid inklappen naar 2 rijen */
+@media (max-width: 640px) {
+  .dp-row { grid-template-columns: 1fr 40px; gap: 8px; row-gap: 10px; }
+  .dp-name { grid-column: 1 / -1; }
+  .dp-qty, .dp-price { grid-column: 1 / -1; text-align: left; }
+  .dp-sub-line { grid-column: 1 / 2; text-align: left; }
+  .dp-rm { grid-column: 2 / 3; justify-self: end; }
+}
+
