@@ -2052,4 +2052,12 @@ textarea.inp { max-width: 520px; min-height: 90px; resize: vertical; line-height
   font-family: inherit; font-size: 12.5px;
 }
 
+/* Tickets-v2: klikbare ticket-titel */
+.tk-title {
+  color: var(--text-1);
+  font-weight: 500;
+  text-decoration: none;
+}
+.tk-title:hover { color: var(--brand); text-decoration: underline; }
+
 

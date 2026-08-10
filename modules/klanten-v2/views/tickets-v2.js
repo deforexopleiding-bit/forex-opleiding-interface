@@ -1,142 +1,179 @@
 // modules/klanten-v2/views/tickets-v2.js
 //
-// Fase B — Tickets-module layout voor v2-shell (layout-only, voorbeeld-data).
-// 1-op-1 render uit docs/redesign/systeemprototype-v45.html:
-//   - prioPill / tktToolbar          r2752-2755
-//   - VIEWS['tickets/Open']          r2756-2767
-//   - VIEWS['tickets/Wacht op klant'] r2769-2783
-//   - VIEWS['tickets/Afgehandeld']   r2785-2801
-//   - TICKETS                        r1378-1390  (11 voorbeeld-tickets)
+// Data-ronde — Tickets als live-module.
+// Endpoint (bestaand, uit tickets.html): GET /api/tickets?status=<open|
+// in_progress|resolved|closed>&type=&module= → { tickets:[], counts:{open,
+// in_progress, resolved, closed} }.
 //
-// Non-ES-module. Consumeert helpers uit window.KV_V2.helpers.
+// Backend-statussen: 4 vaste waardes. GEEN 'waiting_for_customer'. v2-tab-
+// mapping:
+//   'Open'            → status='open'
+//   'Wacht op klant'  → status='in_progress' (semantisch dichtstbijzijnde;
+//                       er is geen aparte wacht-op-klant-status)
+//   'Afgehandeld'     → status='resolved' + 'closed' (2 requests parallel
+//                       en client-side concat — endpoint accepteert alleen
+//                       één status per call).
 //
-// Registreert:
-//   DFO.VIEWS['tickets/Open']
-//   DFO.VIEWS['tickets/Wacht op klant']
-//   DFO.VIEWS['tickets/Afgehandeld']
-//   window.KV_V2_ADD?.('tickets')
+// Write: 'Nieuwe ticket' + rij-klik → /modules/tickets-detail.html?id=<id>
+// (via query-string, matcht bestaande route). Nieuw ticket wordt daar
+// aangemaakt via POST /api/tickets.
+//
+// Dormant. Preview ?v2preview=tickets (rol super_admin/admin/manager/
+// sales/mentor — SAMSM in MODS).
 
 (function () {
   if (!window.DFO) { console.error('[tickets-v2] DFO shell niet geladen.'); return; }
-  if (!window.KV_V2 || !window.KV_V2.helpers) { console.error('[tickets-v2] KV_V2.helpers niet geladen (laad _shared-v2.js eerst).'); return; }
+  if (!window.KV_V2 || !window.KV_V2.helpers) { console.error('[tickets-v2] KV_V2.helpers niet geladen.'); return; }
 
-  const { I, svg, F } = window.DFO;
+  const { I, svg, F, setF } = window.DFO;
   const H = window.KV_V2.helpers;
 
-  /* ── Voorbeeld-data (prototype r1378-1390) ────────────────────────── */
-  const TICKETS = [
-    { nr: '#2841', klant: 'Ebenezer Adjei',     ond: 'Inloggen lukt niet in de LMS',   prio: 'hoog',   status: 'open',        wacht: '2u', toegewezen: 'Jeffrey' },
-    { nr: '#2840', klant: 'Jan Willem Bel',     ond: 'Factuur klopt niet',              prio: 'midden', status: 'open',        wacht: '5u', toegewezen: 'Amigo' },
-    { nr: '#2835', klant: 'Christa Noltus',     ond: 'Vraag over betaalregeling',       prio: 'midden', status: 'open',        wacht: '3u', toegewezen: 'Jeffrey' },
-    { nr: '#2838', klant: 'Nikita Bykov',       ond: 'Sessie verzetten',                prio: 'laag',   status: 'wacht',       wacht: '1d', toegewezen: 'Dave',    herinnerd: true },
-    { nr: '#2837', klant: 'Sander Pieters',     ond: 'Toegangslink niet ontvangen',     prio: 'midden', status: 'wacht',       wacht: '6u', toegewezen: 'Jeffrey', herinnerd: false },
-    { nr: '#2834', klant: 'Aysar Al Dujaili',   ond: 'Wil factuuradres wijzigen',       prio: 'laag',   status: 'wacht',       wacht: '2d', toegewezen: 'Amigo',   herinnerd: true },
-    { nr: '#2832', klant: 'Emile Rabaut',       ond: 'Betaalregeling aanvragen',        prio: 'midden', status: 'afgehandeld', wacht: '—',  toegewezen: 'Jeffrey', opgelost: '6 aug', duur: '4u' },
-    { nr: '#2830', klant: 'Miriam Osei',        ond: 'Vraag over startdatum event',     prio: 'laag',   status: 'afgehandeld', wacht: '—',  toegewezen: 'Dave',    opgelost: '6 aug', duur: '1u' },
-    { nr: '#2829', klant: 'Kevin Braams',       ond: 'Wachtwoord reset LMS',            prio: 'laag',   status: 'afgehandeld', wacht: '—',  toegewezen: 'Jeffrey', opgelost: '5 aug', duur: '20m' },
-    { nr: '#2827', klant: 'Valentine Manisha',  ond: 'Dubbele afschrijving gemeld',     prio: 'hoog',   status: 'afgehandeld', wacht: '—',  toegewezen: 'Amigo',   opgelost: '5 aug', duur: '2u' },
-    { nr: '#2825', klant: 'Karim Alian',        ond: 'Opzegverzoek membership',         prio: 'midden', status: 'afgehandeld', wacht: '—',  toegewezen: 'Joost',   opgelost: '4 aug', duur: '1d' },
-  ];
+  // ── State per tab ─────────────────────────────────────────────────────
+  const _open = { loading: false, error: null, data: null, seq: 0, params: '' };
+  const _wait = { loading: false, error: null, data: null, seq: 0, params: '' };
+  const _done = { loading: false, error: null, data: null, seq: 0, params: '' };
 
-  /* ── Notice-handler: lichte visual response voor dode action-knoppen
-     (Nieuw ticket etc). Data-ronde vervangt door echte modal / flow. */
-  window.__ticketsNotice = (label) => {
-    console.info('[tickets-v2] ' + label + ' (voorbeeld — modal/flow komt in data-ronde)');
-    try { alert(label + ' — komt in de data-ronde.'); } catch (_) { /* ignore */ }
+  async function tryFetch(label, url, timeoutMs = 8000) {
+    try {
+      if (!window.KV || !window.KV.authedJson) throw new Error('KV.authedJson niet beschikbaar');
+      return await Promise.race([
+        window.KV.authedJson(url),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), timeoutMs)),
+      ]);
+    } catch (e) { console.warn('[tickets-v2] fetch fail:', label, '→', e?.message || e); return null; }
+  }
+
+  const dstr = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return '—'; } };
+  const num = (n) => n == null ? '—' : new Intl.NumberFormat('nl-NL').format(n);
+
+  function previewHeader(label, state) {
+    const err = state?.error ? `<span class="prev-badge-err">${state.error}</span>` : '';
+    const loading = state?.loading ? `<span class="prev-badge-load">${svg(I.clock || I.settings)} laden…</span>` : '';
+    return `<div class="prev-badge">
+      <span class="prev-badge-dot"></span>
+      <b>PREVIEW · live data</b>
+      <span class="prev-badge-lbl">${label}</span>
+      ${loading}${err}
+    </div>`;
+  }
+
+  const PRIO_TO_PILL = {
+    low:    ['neutral', 'Laag'],
+    medium: ['info',    'Middel'],
+    high:   ['warn',    'Hoog'],
+    urgent: ['warn',    'Urgent'],
+  };
+  const TYPE_TO_PILL = {
+    bug:      ['warn',    'Bug'],
+    feature:  ['info',    'Feature'],
+    question: ['neutral', 'Vraag'],
+    task:     ['neutral', 'Taak'],
+    incident: ['warn',    'Incident'],
   };
 
-  /* ── Prio-pill + toolbar (prototype r2752-2755) ───────────────────── */
-  const prioPill = p => H.pill(p === 'hoog' ? 'danger' : p === 'midden' ? 'warn' : 'neutral', p[0].toUpperCase() + p.slice(1));
-  const tktToolbar = () => H.toolbar([
-    H.chips('p', [{ l: 'Alle prioriteiten', v: 'all' }, { l: 'Hoog', v: 'h' }, { l: 'Midden', v: 'm' }, { l: 'Laag', v: 'l' }], F('p', 'all')),
-    `<select class="filter-sel"><option>Iedereen</option><option>Amigo</option><option>Jeffrey</option><option>Dave</option></select>`,
-    H.search('Zoek ticket…'),
-    `<div class="tb-right"><button class="btn btn-primary" onclick="__ticketsNotice('Nieuw ticket')">${svg(I.plus)}Nieuw ticket</button></div>`,
-  ]);
+  window.__ticketNew  = () => { window.location.href = '/modules/tickets-detail.html?new=1'; };
+  window.__ticketOpen = (id) => { if (id) window.location.href = '/modules/tickets-detail.html?id=' + encodeURIComponent(id); };
 
-  /* ── Tab-views ────────────────────────────────────────────────────── */
+  // Type-filter is optioneel voor alle 3 tabs — shared state via F('tk-type').
+  function typeParam() { const t = F('tk-type', 'all'); return t === 'all' ? '' : '&type=' + encodeURIComponent(t); }
 
-  // Tickets/Open (prototype r2756-2767)
-  function ticketsOpenView() {
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'rose',    icon: I.ticket, label: 'Open tickets',          val: '3',   hi: 1, sub: '1 met hoge prioriteit' },
-      { c: 'amber',   icon: I.clock,  label: 'Gem. wachttijd',        val: '3,2u', hi: 1, sub: 'deze week', trend: H.trend('-40m', true) },
-      { c: 'emerald', icon: I.tick,   label: 'Opgelost deze week',    val: '18',   hi: 1, sub: 'gemiddeld in 5u' },
-    ])}
-    ${tktToolbar()}
-    ${H.table(
-      [{ l: 'Ticket' }, { l: 'Klant' }, { l: 'Onderwerp' }, { l: 'Toegewezen', cls: 'optional' }, { l: 'Wacht', cls: 'optional' }, { l: 'Prioriteit' }],
-      TICKETS.filter(t => t.status === 'open').map(t => [
-        `<span class="cell-main mono">${t.nr}</span>`,
-        `<div class="row-avatar">${H.av(t.klant, 26)}<span>${t.klant}</span></div>`,
-        `<span class="cell-main">${t.ond}</span>`,
-        t.toegewezen,
-        `<span class="mono" style="color:var(--text-3);font-size:12.5px">${t.wacht}</span>`,
-        prioPill(t.prio),
-      ])
-    )}`;
+  // ── Fetchers per tab ──────────────────────────────────────────────────
+  async function fetchTab(state, statusList) {
+    const wanted = statusList.join(',') + '|' + F('tk-type', 'all');
+    if (state.loading && state.params === wanted) return;
+    const seq = ++state.seq;
+    state.loading = true; state.error = null; state.params = wanted;
+    window.DFO.render();
+    // 'Afgehandeld' = resolved + closed → 2 parallelle calls, samenvoegen.
+    const calls = statusList.map(s => tryFetch('tickets:' + s, `/api/tickets?status=${s}${typeParam()}`));
+    const results = await Promise.all(calls);
+    if (seq !== state.seq) return;
+    // Merge tickets + counts (counts is global — pak eerste non-null).
+    const firstCounts = results.find(r => r && r.counts)?.counts || null;
+    const allTickets = results.flatMap(r => (r && Array.isArray(r.tickets)) ? r.tickets : []);
+    state.data = { tickets: allTickets, counts: firstCounts };
+    state.loading = false;
+    if (results.every(r => r == null)) state.error = 'Kon tickets niet laden';
+    window.DFO.render();
   }
 
-  // Tickets/Wacht op klant (prototype r2769-2783)
-  function ticketsWachtView() {
-    const rows = TICKETS.filter(t => t.status === 'wacht');
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'amber', icon: I.clock, label: 'Wacht op klant',          val: String(rows.length),                        hi: 1, sub: 'reactie afwachten' },
-      { c: 'blue',  icon: I.mail,  label: 'Herinnering verstuurd',    val: String(rows.filter(t => t.herinnerd).length),     sub: 'automatisch na 3 dagen' },
-      { c: 'slate', icon: I.x,     label: 'Sluit automatisch',        val: '1',                                              sub: 'bij 48u geen reactie' },
-    ])}
-    ${tktToolbar()}
-    ${H.table(
-      [{ l: 'Ticket' }, { l: 'Klant' }, { l: 'Onderwerp' }, { l: 'Toegewezen', cls: 'optional' }, { l: 'Wacht al', cls: 'optional' }, { l: 'Status' }],
-      rows.map(t => [
-        `<span class="cell-main mono">${t.nr}</span>`,
-        `<div class="row-avatar">${H.av(t.klant, 26)}<span>${t.klant}</span></div>`,
-        `<span class="cell-main">${t.ond}</span>`,
-        t.toegewezen,
-        `<span class="mono" style="color:var(--text-3);font-size:12.5px">${t.wacht}</span>`,
-        t.herinnerd ? H.pill('accent', 'Herinnerd') : H.pill('warn', 'Wacht op klant'),
-      ])
-    )}`;
+  // ── Gedeelde toolbar (type-filter chips + counts) ─────────────────────
+  function toolbar(activeCounts) {
+    const t = F('tk-type', 'all');
+    return H.toolbar([
+      H.chips('tk-type', [
+        { l: 'Alle types', v: 'all' },
+        { l: 'Bug',        v: 'bug' },
+        { l: 'Feature',    v: 'feature' },
+        { l: 'Vraag',      v: 'question' },
+        { l: 'Taak',       v: 'task' },
+      ], t),
+      `<div class="tb-right">
+        <button class="btn btn-primary" onclick="__ticketNew()">${svg(I.plus)}Nieuw ticket</button>
+      </div>`,
+    ]);
   }
 
-  // Tickets/Afgehandeld (prototype r2785-2801)
-  function ticketsAfgehandeldView() {
-    const rows = TICKETS.filter(t => t.status === 'afgehandeld');
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'emerald', icon: I.tick,   label: 'Opgelost deze week', val: '18',    hi: 1, sub: '5 vandaag' },
-      { c: 'blue',    icon: I.clock,  label: 'Gem. oplostijd',     val: '4,8u',        sub: 'binnen SLA' },
-      { c: 'amber',   icon: I.repeat, label: 'Heropend',           val: '1',           sub: 'deze week' },
-    ])}
-    ${H.toolbar([
-      H.chips('fd', [{ l: 'Vandaag', v: 'd' }, { l: 'Deze week', v: 'w' }, { l: 'Deze maand', v: 'm' }], F('fd', 'w')),
-      `<select class="filter-sel"><option>Iedereen</option><option>Amigo</option><option>Jeffrey</option><option>Joost</option><option>Dave</option></select>`,
-      H.search('Zoek ticket…'),
-    ])}
-    ${H.table(
-      [{ l: 'Ticket' }, { l: 'Klant' }, { l: 'Onderwerp' }, { l: 'Opgelost door', cls: 'optional' }, { l: 'Duur', cls: 'optional' }, { l: 'Opgelost' }],
-      rows.map(t => [
-        `<span class="cell-main mono">${t.nr}</span>`,
-        `<div class="row-avatar">${H.av(t.klant, 26)}<span>${t.klant}</span></div>`,
-        `<span class="cell-main">${t.ond}</span>`,
-        t.toegewezen,
-        `<span class="mono" style="color:var(--text-3);font-size:12.5px">${t.duur}</span>`,
-        `<span style="display:inline-flex;align-items:center;gap:8px">${H.pill('ok', 'Opgelost')}<span class="mono" style="color:var(--text-3);font-size:12px">${t.opgelost}</span></span>`,
-      ])
-    )}`;
+  // ── Gedeelde tabel-renderer ───────────────────────────────────────────
+  function ticketTable(items, loading, error) {
+    if (!items.length && !loading) return `<div class="sv-empty">${error || 'Geen tickets in deze categorie.'}</div>`;
+    return H.table(
+      [{ l: 'Titel' }, { l: 'Type', cls: 'optional' }, { l: 'Module', cls: 'optional' }, { l: 'Prioriteit' }, { l: 'Aangemaakt door', cls: 'optional' }, { l: 'Toegewezen aan', cls: 'optional' }, { l: 'Datum', cls: 'r' }],
+      items.map(t => {
+        const [pc, pl] = PRIO_TO_PILL[t.priority] || ['neutral', t.priority || '—'];
+        const [tc, tl] = TYPE_TO_PILL[t.type] || ['neutral', t.type || '—'];
+        return [
+          `<a href="javascript:__ticketOpen('${t.id}')" class="cell-main tk-title">${t.title || '—'}</a>`,
+          H.pill(tc, tl),
+          `<span style="font-size:12.5px;color:var(--text-3)">${t.module || '—'}</span>`,
+          H.pill(pc, pl),
+          `<span style="font-size:12.5px;color:var(--text-3)">${t.created_by_name || '—'}</span>`,
+          `<span style="font-size:12.5px;color:var(--text-3)">${t.assigned_to_name || 'Niet toegewezen'}</span>`,
+          `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(t.created_at)}</span>`,
+        ];
+      })
+    );
   }
 
-  /* ── Registratie ───────────────────────────────────────────────────── */
-  window.DFO.VIEWS['tickets/Open']            = ticketsOpenView;
-  window.DFO.VIEWS['tickets/Wacht op klant']  = ticketsWachtView;
-  window.DFO.VIEWS['tickets/Afgehandeld']     = ticketsAfgehandeldView;
-  if (typeof window.KV_V2_ADD === 'function') {
-    window.KV_V2_ADD('tickets');
-  } else {
-    (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('tickets');
+  // ── KPI-strip (global counts uit endpoint) ────────────────────────────
+  function kpiStrip(counts) {
+    return H.kpis([
+      { c: 'orange',  icon: I.warn,   label: 'Open',            val: num(counts?.open),          hi: 1 },
+      { c: 'blue',    icon: I.repeat, label: 'Wacht op klant',  val: num(counts?.in_progress),          sub: 'in_progress in DB' },
+      { c: 'emerald', icon: I.check,  label: 'Afgehandeld',     val: num((counts?.resolved || 0) + (counts?.closed || 0)), sub: 'resolved + closed' },
+    ]);
   }
 
-  console.debug('[tickets-v2] registered VIEWS[tickets/Open|Wacht op klant|Afgehandeld]');
+  // ── Views ─────────────────────────────────────────────────────────────
+  function openView() {
+    if (!_open.loading && (!_open.data || _open.params !== ('open|' + F('tk-type', 'all')))) queueMicrotask(() => fetchTab(_open, ['open']));
+    const items = _open.data?.tickets || [];
+    return `${previewHeader('Open', _open)}
+      ${kpiStrip(_open.data?.counts)}
+      ${toolbar(_open.data?.counts)}
+      ${ticketTable(items, _open.loading, _open.error)}`;
+  }
+  function waitView() {
+    if (!_wait.loading && (!_wait.data || _wait.params !== ('in_progress|' + F('tk-type', 'all')))) queueMicrotask(() => fetchTab(_wait, ['in_progress']));
+    const items = _wait.data?.tickets || [];
+    return `${previewHeader('Wacht op klant · maps naar status=in_progress', _wait)}
+      ${kpiStrip(_wait.data?.counts)}
+      ${toolbar(_wait.data?.counts)}
+      ${ticketTable(items, _wait.loading, _wait.error)}`;
+  }
+  function doneView() {
+    if (!_done.loading && (!_done.data || _done.params !== ('resolved,closed|' + F('tk-type', 'all')))) queueMicrotask(() => fetchTab(_done, ['resolved', 'closed']));
+    const items = _done.data?.tickets || [];
+    return `${previewHeader('Afgehandeld · resolved + closed samengevoegd', _done)}
+      ${kpiStrip(_done.data?.counts)}
+      ${toolbar(_done.data?.counts)}
+      ${ticketTable(items, _done.loading, _done.error)}`;
+  }
+
+  window.DFO.VIEWS['tickets/Open']           = openView;
+  window.DFO.VIEWS['tickets/Wacht op klant'] = waitView;
+  window.DFO.VIEWS['tickets/Afgehandeld']    = doneView;
+  if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('tickets');
+  else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('tickets');
+  console.debug('[tickets-v2] registered 3 views (data-round · live /api/tickets)');
 })();
