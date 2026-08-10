@@ -261,7 +261,11 @@
   // Boek/verzend routeren naar oude finance.html (te complex + destructief
   // voor v2-ronde-2). Guard-patroon: gebruiker moet 'CONCEPT' intypen
   // voordat opslaan-knop enabled wordt.
+  // Ronde 5: modal-open leeft in module-state (was URL-param). URL-param
+  // pad had een timing/edge-case waardoor modal niet opende in preview —
+  // module-state is robuuster (geen history-race, geen URL-persistence).
   const _newInv = {
+    open: false,
     submitting: false,
     entities: null, entLoading: false,
     customers: [], custLoading: false, custQuery: '', custPickedName: '',
@@ -275,24 +279,17 @@
     guardTyped: '',
   };
 
-  // Ronde 4: extra logging + fallback-render zodat click echt opent, ook
-  // als een edge-case setUrlParam faalt (history-lock, iframe, etc).
   window.__finInvNew  = () => {
     console.info('[finance-v2] __finInvNew clicked → open modal');
-    try {
-      setUrlParam('fn-invoice-new', '1');
-    } catch (e) {
-      console.warn('[finance-v2] setUrlParam failed, forcing render:', e?.message);
-    }
-    // Belt-and-suspenders: forceer render zodat modal-slot gerendered wordt
-    // ook als history.pushState (bv onder file://) een throw geeft.
+    _newInv.open = true;
     if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
   };
   window.__finInvNewClose = () => {
-    setUrlParam('fn-invoice-new', null);
+    _newInv.open = false;
     // Reset form-state zodat volgende open schoon is.
     _newInv.form = { customer_id: '', department_id: '', purchase_order_number: '', language: 'nl', lines: [{ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }] };
     _newInv.custQuery = ''; _newInv.custPickedName = ''; _newInv.customers = []; _newInv.guardTyped = '';
+    if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
   };
   window.__finInvOpen = (tlId) => { if (tlId) window.location.href = '/modules/finance.html?tab=facturen&invoice=' + encodeURIComponent(tlId); };
 
@@ -500,14 +497,14 @@
   // Esc-key sluit modal.
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (urlParam('fn-invoice-new') === '1') { e.preventDefault(); window.__finInvNewClose(); }
+    if (_newInv.open) { e.preventDefault(); window.__finInvNewClose(); }
   });
   window.addEventListener('popstate', () => {
     if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
   });
 
   function invoicesParams() {
-    const st = F('fin-inv-st', 'open');
+    const st = F('fin-inv-st', 'all');
     const p = new URLSearchParams();
     if (st && st !== 'all') p.set('status', st);
     if (_inv.search) p.set('q', _inv.search);
@@ -531,7 +528,7 @@
   }
 
   function invoicesView() {
-    const st = F('fin-inv-st', 'open');
+    const st = F('fin-inv-st', 'all');
     if (!_inv.loading && (!_inv.data || _inv.params !== invoicesParams())) queueMicrotask(fetchInvoices);
     const items = _inv.data?.items || [];
     const k = _inv.data?.kpis || {};
@@ -573,7 +570,7 @@
       )}
       ${fnPager(_inv, total, fetchInvoices)}
       ${!items.length && !_inv.loading ? `<div class="sv-empty">${_inv.error || 'Geen facturen met deze filters.'}</div>` : ''}
-      ${urlParam('fn-invoice-new') === '1' ? invoiceCreateModal() : ''}`;
+      ${_newInv.open ? invoiceCreateModal() : ''}`;
   }
 
   // ── ABONNEMENTEN ─────────────────────────────────────────────────────
@@ -894,20 +891,124 @@
     window.DFO.render();
   }
 
+  // ── SVG chart helpers (ronde 5) ──────────────────────────────────────
+  // Bar-chart: bars per maand met value-labels bovenop, gridlines, x-labels.
+  // Line/area-chart: path met area-gradient, dot per punt, hover-title.
+  // Beide gebruiken viewBox voor responsive schaling, GEEN externe lib.
+  function fmtEurCompact(v) {
+    const n = Number(v) || 0;
+    if (Math.abs(n) >= 1000) return '€' + (Math.round(n / 100) / 10).toLocaleString('nl-NL') + 'k';
+    return '€' + Math.round(n).toLocaleString('nl-NL');
+  }
+  function svgBarChart(items, opts) {
+    opts = opts || {};
+    const color = opts.color || 'violet';
+    const height = opts.height || 240;
+    if (!items.length) return `<div class="sv-empty">Geen data.</div>`;
+    const w = Math.max(600, items.length * 60);
+    const padL = 52, padR = 12, padT = 24, padB = 40;
+    const chartW = w - padL - padR;
+    const chartH = height - padT - padB;
+    const max = Math.max(1, ...items.map(t => Number(t.mrr) || 0));
+    // Ronde niveau naar mooie waarden. 4 y-axis ticks.
+    const step = niceStep(max / 4);
+    const yMax = Math.max(step, Math.ceil(max / step) * step);
+    const bw = chartW / items.length * 0.72;
+    const yTicks = [0, 0.25, 0.5, 0.75, 1].map(f => yMax * f);
+    return `<div class="mrr-chart-wrap"><svg class="mrr-chart" viewBox="0 0 ${w} ${height}" preserveAspectRatio="none" role="img">
+      <defs>
+        <linearGradient id="mrr-bar-${color}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--${color}, var(--brand))" stop-opacity=".95"/>
+          <stop offset="100%" stop-color="var(--${color}, var(--brand))" stop-opacity=".55"/>
+        </linearGradient>
+      </defs>
+      ${yTicks.map(y => {
+        const yPx = padT + chartH - (y / yMax) * chartH;
+        return `<line x1="${padL}" y1="${yPx}" x2="${w - padR}" y2="${yPx}" stroke="var(--line)" stroke-dasharray="2,4" stroke-width="1"/>
+          <text x="${padL - 8}" y="${yPx + 4}" text-anchor="end" font-size="11" fill="var(--text-3)" font-family="'IBM Plex Mono',ui-monospace,monospace">${fmtEurCompact(y)}</text>`;
+      }).join('')}
+      ${items.map((t, i) => {
+        const v = Number(t.mrr) || 0;
+        const xC = padL + (i + 0.5) * (chartW / items.length);
+        const bh = yMax > 0 ? (v / yMax) * chartH : 0;
+        const yTop = padT + chartH - bh;
+        const label = t.period ? t.period.slice(2) : '';
+        return `<g>
+          <title>${t.period || ''} · ${eur0(v)} · ${num(t.count)} subs</title>
+          <rect x="${xC - bw/2}" y="${yTop}" width="${bw}" height="${Math.max(0, bh)}" rx="4" fill="url(#mrr-bar-${color})"/>
+          ${bh > 22 ? `<text x="${xC}" y="${yTop - 6}" text-anchor="middle" font-size="10.5" fill="var(--text-2)" font-family="'IBM Plex Mono',ui-monospace,monospace" font-weight="600">${fmtEurCompact(v)}</text>` : ''}
+          <text x="${xC}" y="${padT + chartH + 16}" text-anchor="middle" font-size="10.5" fill="var(--text-3)">${label}</text>
+        </g>`;
+      }).join('')}
+      <line x1="${padL}" y1="${padT + chartH}" x2="${w - padR}" y2="${padT + chartH}" stroke="var(--line)" stroke-width="1"/>
+    </svg></div>`;
+  }
+  function svgLineChart(items, opts) {
+    opts = opts || {};
+    const color = opts.color || 'blue';
+    const height = opts.height || 220;
+    if (!items.length) return `<div class="sv-empty">Geen data.</div>`;
+    const w = Math.max(600, items.length * 55);
+    const padL = 52, padR = 12, padT = 20, padB = 36;
+    const chartW = w - padL - padR;
+    const chartH = height - padT - padB;
+    const max = Math.max(1, ...items.map(t => Number(t.mrr) || 0));
+    const step = niceStep(max / 4);
+    const yMax = Math.max(step, Math.ceil(max / step) * step);
+    const yTicks = [0, 0.25, 0.5, 0.75, 1].map(f => yMax * f);
+    const pts = items.map((t, i) => {
+      const v = Number(t.mrr) || 0;
+      const x = padL + (chartW / Math.max(1, items.length - 1)) * i;
+      const y = padT + chartH - (v / yMax) * chartH;
+      return { x, y, v, period: t.period, newMrr: t.new_mrr, churnMrr: t.churned_mrr, count: t.count };
+    });
+    const linePath = pts.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+    const areaPath = `${linePath} L${pts[pts.length-1].x.toFixed(1)},${(padT + chartH).toFixed(1)} L${pts[0].x.toFixed(1)},${(padT + chartH).toFixed(1)} Z`;
+    return `<div class="mrr-chart-wrap"><svg class="mrr-chart" viewBox="0 0 ${w} ${height}" preserveAspectRatio="none" role="img">
+      <defs>
+        <linearGradient id="mrr-area-${color}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--${color}, var(--brand))" stop-opacity=".28"/>
+          <stop offset="100%" stop-color="var(--${color}, var(--brand))" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      ${yTicks.map(y => {
+        const yPx = padT + chartH - (y / yMax) * chartH;
+        return `<line x1="${padL}" y1="${yPx}" x2="${w - padR}" y2="${yPx}" stroke="var(--line)" stroke-dasharray="2,4" stroke-width="1"/>
+          <text x="${padL - 8}" y="${yPx + 4}" text-anchor="end" font-size="11" fill="var(--text-3)" font-family="'IBM Plex Mono',ui-monospace,monospace">${fmtEurCompact(y)}</text>`;
+      }).join('')}
+      <path d="${areaPath}" fill="url(#mrr-area-${color})"/>
+      <path d="${linePath}" fill="none" stroke="var(--${color}, var(--brand))" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      ${pts.map((p, i) => `<g>
+        <title>${p.period || ''} · ${eur0(p.v)} · +${eur0(p.newMrr)} nieuw · −${eur0(p.churnMrr)} churn · ${num(p.count)} subs</title>
+        <circle cx="${p.x}" cy="${p.y}" r="4" fill="var(--surface)" stroke="var(--${color}, var(--brand))" stroke-width="2"/>
+      </g>`).join('')}
+      ${items.map((t, i) => {
+        const x = padL + (chartW / Math.max(1, items.length - 1)) * i;
+        return `<text x="${x}" y="${padT + chartH + 18}" text-anchor="middle" font-size="10.5" fill="var(--text-3)">${t.period ? t.period.slice(2) : ''}</text>`;
+      }).join('')}
+      <line x1="${padL}" y1="${padT + chartH}" x2="${w - padR}" y2="${padT + chartH}" stroke="var(--line)" stroke-width="1"/>
+    </svg></div>`;
+  }
+  function niceStep(v) {
+    if (!v || v <= 0) return 100;
+    const pow = Math.pow(10, Math.floor(Math.log10(v)));
+    const norm = v / pow;
+    const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+    return nice * pow;
+  }
+
   function mrrView() {
     if (!_mrr.loading && (!_mrr.report || _mrr.params !== 'v1')) queueMicrotask(fetchMrr);
     const r = _mrr.report || {};
     const k = r.kpis || {};
     const trend = Array.isArray(r.trend) ? r.trend : [];
-    // by_traject = per-product breakdown (MRR + count, gesorteerd op MRR desc).
     const byTraj = Array.isArray(r.by_traject) ? r.by_traject : [];
     const topSubs = Array.isArray(r.top_subs) ? r.top_subs : [];
-    // Trend heeft 25 maanden (-12..+12). Splits in verleden (idx 0..11) +
-    // huidig+toekomst (idx 12..24) voor de "komende 12 maanden" grafiek.
+    // Trend heeft 25 maanden (-12..+12).
     const future = trend.slice(12, 25); // 13 items: huidige + 12 vooruit
     const past   = trend.slice(0, 13);  // 13 items: -12..huidige
-    const trendMax  = Math.max(1, ...trend.map(t => Number(t.mrr) || 0));
-    const futureMax = Math.max(1, ...future.map(t => Number(t.mrr) || 0));
+    // Max MRR uit by_traject voor per-product bar rendering.
+    const trajMax = Math.max(1, ...byTraj.map(t => Number(t.mrr) || 0));
 
     return `${previewHeader('Omzet & MRR · sales-mrr-report', _mrr)}
       ${H.kpis([
@@ -920,40 +1021,27 @@
         <div class="sv-card sv-card-wide">
           <div class="sv-card-head">${svg(I.repeat)}Maandelijkse recurring omzet · komende 12 maanden · incl. BTW</div>
           <div class="sv-card-body">
-            ${future.length ? `
-              <div class="sv-trend" style="height:180px">${future.map(t => {
-                const v = Number(t.mrr) || 0;
-                const h = Math.max(3, Math.round(v / futureMax * 100));
-                return `<div class="sv-trend-col" title="${t.period} · ${eur0(v)} · ${num(t.count)} subs">
-                  <div class="sv-trend-bar" style="height:${h}%;background:linear-gradient(180deg, var(--violet, var(--brand)), color-mix(in srgb, var(--violet, var(--brand)) 55%, transparent))"></div>
-                  <div class="sv-trend-lbl">${t.period ? t.period.slice(2) : ''}</div>
-                </div>`;
-              }).join('')}</div>
-              <div class="mrr-months">
-                ${future.map(t => `<div class="mrr-month-row"><span>${t.period}</span><span class="sv-row-sub">${num(t.count)} subs</span><b>${eur0(t.mrr)}</b></div>`).join('')}
-              </div>
-            ` : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen trend-data.'}</div>`}
+            ${future.length ? svgBarChart(future, { color: 'violet', height: 260 }) : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen trend-data.'}</div>`}
           </div>
         </div>
-        <div class="sv-card">
-          <div class="sv-card-head">${svg(I.doc)}Per traject / product · huidig actief</div>
-          <div class="sv-card-body">
-            ${byTraj.length ? byTraj.slice(0, 12).map(p => `
-              <div class="sv-row"><span>${String(p.traject || '—')} <span class="sv-row-sub">${num(p.count)}×</span></span><b>${eur0(p.mrr)}</b></div>
-            `).join('') : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen per-traject data.'}</div>`}
-          </div>
-        </div>
-        <div class="sv-card">
+        <div class="sv-card sv-card-wide">
           <div class="sv-card-head">${svg(I.trend)}Historische MRR-trend · afgelopen 12 maanden</div>
           <div class="sv-card-body">
-            ${past.length ? `<div class="sv-trend" style="height:140px">${past.map(t => {
-              const v = Number(t.mrr) || 0;
-              const h = Math.max(3, Math.round(v / trendMax * 100));
-              return `<div class="sv-trend-col" title="${t.period} · ${eur0(v)} · new ${eur0(t.new_mrr)} · churn ${eur0(t.churned_mrr)}">
-                <div class="sv-trend-bar" style="height:${h}%"></div>
-                <div class="sv-trend-lbl">${t.period ? t.period.slice(2) : ''}</div>
+            ${past.length ? svgLineChart(past, { color: 'blue', height: 240 }) : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen trend-data.'}</div>`}
+          </div>
+        </div>
+        <div class="sv-card sv-card-wide">
+          <div class="sv-card-head">${svg(I.doc)}Per traject / product · huidig actief</div>
+          <div class="sv-card-body">
+            ${byTraj.length ? `<div class="mrr-traj">${byTraj.slice(0, 12).map(p => {
+              const v = Number(p.mrr) || 0;
+              const pct = Math.max(2, Math.round(v / trajMax * 100));
+              return `<div class="mrr-traj-row" title="${String(p.traject || '—')} · ${eur0(v)} · ${num(p.count)} actief">
+                <div class="mrr-traj-lbl"><span>${String(p.traject || '—')}</span><span class="sv-row-sub">${num(p.count)}×</span></div>
+                <div class="mrr-traj-bar-wrap"><div class="mrr-traj-bar" style="width:${pct}%"></div></div>
+                <b class="mrr-traj-val">${eur0(v)}</b>
               </div>`;
-            }).join('')}</div>` : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen trend-data.'}</div>`}
+            }).join('')}</div>` : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen per-traject data.'}</div>`}
           </div>
         </div>
         <div class="sv-card sv-card-wide">

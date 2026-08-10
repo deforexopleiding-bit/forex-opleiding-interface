@@ -28,41 +28,67 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Meest recente statement op basis van statement_to date (= einde periode).
-    // Bij gelijke datum: meest recent geüpload eerst.
+    // Ronde 5 fix: -€114 kwam uit één enkele CAMT-statement (globally most-
+    // recent). Bij meerdere IBANs (bv hoofdrekening + PayPal-account) miste
+    // dat de andere rekeningen én toonde het een tussentijds saldo. Correct:
+    // per IBAN de laatste statement, som van closing_balance_cents. Voor
+    // response-shape blijft `account_iban` = IBAN met grootste absolute
+    // bijdrage (backwards-compat); nieuw `per_account[]` toont detail.
     const { data, error } = await supabaseAdmin
       .from('camt_statements')
       .select('id, file_name, account_iban, closing_balance_cents, statement_to, uploaded_at')
       .order('statement_to', { ascending: false, nullsFirst: false })
       .order('uploaded_at', { ascending: false })
-      .limit(1);
+      .limit(500);
     if (error) throw new Error(error.message);
 
-    if (!data || !data.length) {
+    const rows = data || [];
+    if (!rows.length) {
       return res.status(200).json({
         balance_cents:   null,
         as_of_date:      null,
         source:          'camt',
         message:         'Nog geen CAMT-bestand geüpload. Upload één om te beginnen.',
         num_statements:  0,
+        per_account:     [],
       });
     }
 
-    const stmt = data[0];
+    // Per unieke IBAN: eerste rij (hoogste statement_to, tiebreak uploaded_at).
+    const byIban = new Map();
+    for (const r of rows) {
+      const key = r.account_iban || '(onbekend)';
+      if (!byIban.has(key)) byIban.set(key, r);
+    }
+    const perAccount = Array.from(byIban.values()).map(r => ({
+      account_iban:         r.account_iban || null,
+      balance_cents:        r.closing_balance_cents,
+      as_of_date:           r.statement_to,
+      statement_id:         r.id,
+      file_name:            r.file_name,
+    }));
 
-    // Totaal aantal statements (voor UI-info).
+    // Totale slotsaldo = som over alle unieke IBANs.
+    const totalCents = perAccount.reduce((a, x) => a + (Number(x.balance_cents) || 0), 0);
+    // Meest recente peildatum = max(as_of_date) over alle IBANs.
+    const asOfDate = perAccount.reduce((max, x) => (!max || (x.as_of_date && x.as_of_date > max)) ? x.as_of_date : max, null);
+    // Backwards-compat: pick IBAN met grootste absolute bijdrage voor `account_iban`.
+    const dominant = perAccount.slice().sort((a, b) => Math.abs(Number(b.balance_cents) || 0) - Math.abs(Number(a.balance_cents) || 0))[0] || {};
+
     const { count: total } = await supabaseAdmin
       .from('camt_statements')
       .select('id', { count: 'exact', head: true });
 
     return res.status(200).json({
-      balance_cents:   stmt.closing_balance_cents,
-      as_of_date:      stmt.statement_to,
+      balance_cents:   totalCents,
+      as_of_date:      asOfDate,
       source:          'camt',
-      statement_id:    stmt.id,
-      file_name:       stmt.file_name,
-      account_iban:    stmt.account_iban,
+      statement_id:    dominant.statement_id || null,
+      file_name:       dominant.file_name || null,
+      account_iban:    dominant.account_iban || null,
       num_statements:  total || 0,
+      num_accounts:    perAccount.length,
+      per_account:     perAccount,
     });
   } catch (e) {
     console.error('[finance-bank-camt-balance]', e.message);

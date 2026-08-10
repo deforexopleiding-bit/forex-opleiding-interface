@@ -2193,6 +2193,31 @@ select.ib-input {
   font-family: inherit; font-size: 12.5px;
 }
 
+/* MRR ronde-5 — SVG chart-container (responsive + scrollable horizontal). */
+.mrr-chart-wrap { overflow-x: auto; overflow-y: hidden; padding: 4px 0 2px; margin: 0 -6px; }
+.mrr-chart { display: block; min-width: 100%; height: auto; }
+.mrr-chart title { pointer-events: auto; }
+
+/* MRR ronde-5 — per-traject horizontale bar-lijst. */
+.mrr-traj { display: flex; flex-direction: column; gap: 8px; }
+.mrr-traj-row {
+  display: grid; grid-template-columns: minmax(180px, 1.4fr) minmax(120px, 3fr) minmax(88px, auto);
+  align-items: center; gap: 12px; padding: 4px 2px;
+}
+.mrr-traj-lbl { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.mrr-traj-lbl > span:first-child { font-size: 13px; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mrr-traj-lbl .sv-row-sub { font-size: 11.5px; color: var(--text-3); }
+.mrr-traj-bar-wrap {
+  height: 12px; background: var(--surface-2); border-radius: 6px; overflow: hidden; position: relative;
+}
+.mrr-traj-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--violet, var(--brand)), color-mix(in srgb, var(--violet, var(--brand)) 55%, transparent));
+  border-radius: 6px;
+  transition: width .5s cubic-bezier(.32,.72,0,1);
+}
+.mrr-traj-val { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12.5px; font-weight: 600; text-align: right; }
+
 /* MRR-months lijst onder de bars */
 .mrr-months { margin-top: 12px; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px; }
 .mrr-month-row {
