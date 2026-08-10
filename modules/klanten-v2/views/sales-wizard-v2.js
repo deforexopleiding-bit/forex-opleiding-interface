@@ -207,6 +207,36 @@
     }
     return root;
   }
+  // Focus-restore snapshot: identify active-element vóór innerHTML-replace
+  // zodat we 'em daarna kunnen terugvinden + cursor kunnen zetten. Gebruikt
+  // data-fkey attribute op inputs; fallback op id.
+  function _snapshotFocus(root) {
+    const a = document.activeElement;
+    if (!a || !root.contains(a)) return null;
+    const snap = {
+      key:      a.getAttribute('data-fkey') || a.id || null,
+      selStart: null,
+      selEnd:   null,
+    };
+    try {
+      if (a.selectionStart != null) {
+        snap.selStart = a.selectionStart;
+        snap.selEnd   = a.selectionEnd;
+      }
+    } catch (_) { /* number/date inputs kunnen throwen op selectionStart */ }
+    return snap.key ? snap : null;
+  }
+  function _restoreFocus(root, snap) {
+    if (!snap || !snap.key) return;
+    let el = root.querySelector(`[data-fkey="${snap.key}"]`);
+    if (!el) el = document.getElementById(snap.key);
+    if (!el) return;
+    try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
+    if (snap.selStart != null) {
+      try { el.setSelectionRange(snap.selStart, snap.selEnd); } catch (_) {}
+    }
+  }
+
   function renderWizard() {
     const root = ensureRoot();
     // Backdrop-click sluit — idempotent gebonden bij eerste render.
@@ -214,6 +244,10 @@
       root._swBackdropBound = true;
       root.addEventListener('click', (e) => { if (e.target === root && _sw.open) window.__swClose(); });
     }
+    // Snapshot focus BEFORE innerHTML swap (structural renders zoals stap-
+    // wissel of chip-toggle wissen de input-node — cursor gaat weg zonder
+    // deze restore).
+    const snap = _snapshotFocus(root);
     if (_sw.open) {
       // Wizard-body + optionele sub-overlays (dup / picker / discount).
       // Alleen ÉÉN sub-overlay tegelijk actief (Esc-volgorde: picker → dup →
@@ -229,6 +263,7 @@
       root.classList.remove('is-open');
       root.innerHTML = '';
     }
+    _restoreFocus(root, snap);
   }
 
   // ── Handlers ──────────────────────────────────────────────────────
@@ -446,10 +481,16 @@
     renderWizard();
   }
   async function loadLeadSources() {
-    if (_sw.leadSources !== null) return; // eenmalig
+    // Loop-fix: expliciete in-flight guard i.p.v. alleen post-fetch state-check.
+    // Zonder deze flag konden snelle __swGoStep(3) her-navigaties parallelle
+    // fetches starten — elke completion triggerde renderWizard = flicker.
+    if (_sw.leadSourcesLoading) return;
+    if (_sw.leadSources !== null) return;
+    _sw.leadSourcesLoading = true;
     const data = await tryFetch('lead-sources', '/api/lead-sources');
     _sw.leadSources = Array.isArray(data?.sources) ? data.sources
                     : Array.isArray(data) ? data : [];
+    _sw.leadSourcesLoading = false;
     renderWizard();
   }
   async function applyTrajectVariant(variantId) {
@@ -680,6 +721,8 @@
   // Loader voor exception-limits (v1 _loadExceptionLimits r860-871).
   async function loadExceptionLimits() {
     if (_sw.exceptionLimits.loaded) return;
+    if (_sw.exceptionLimits._loading) return; // in-flight guard
+    _sw.exceptionLimits._loading = true;
     try {
       const [rMin, rMax] = await Promise.all([
         tryFetch('app-settings-min-term', '/api/app-settings?key=sales_min_term_amount'),
@@ -691,9 +734,98 @@
       if (Number.isFinite(nMax) && nMax >= 1) _sw.exceptionLimits.maxStartDays  = nMax;
     } catch (_) { /* fallback 400/40 blijft */ }
     _sw.exceptionLimits.loaded = true;
+    _sw.exceptionLimits._loading = false;
   }
 
-  // Stap 4 handlers — patroon: state-mutatie + optionele bounds-clamp + revalidate + render.
+  // ── Surgical DOM-updates (BLOCKER-fix: geen full renderWizard() op typen) ─
+  // Elk keystroke-handler op reken-velden (qty/prijs/pay-inputs) update ALLEEN
+  // de betreffende computed DOM-nodes via querySelector. Vermijdt innerHTML-
+  // swap → input-node blijft = cursor blijft staan. Structural changes (add
+  // product, toggle vat-incl, open modal, stap-wissel, exception-flag flip
+  // enz.) roepen wél renderWizard() aan, met focus-restore als safety net.
+  function _root() { return document.getElementById('sw-v2-root'); }
+
+  function _updateProductLine(i) {
+    const root = _root(); if (!root) return;
+    const rows = root.querySelectorAll('.dp-row');
+    const p = _sw.wizard.products[i];
+    if (rows[i] && p) {
+      const sub = rows[i].querySelector('.dp-sub-line');
+      if (sub) sub.textContent = eurFmt(lineAmounts(p).incl);
+    }
+    _updateTotalsBlock();
+  }
+  function _updateTotalsBlock() {
+    const root = _root(); if (!root) return;
+    const totalsEl = root.querySelector('.dp-totals');
+    // Head-summary (aantal + totaal) altijd bijwerken als aanwezig.
+    const head = root.querySelector('.sw-prod-head h3 small');
+    const totals = calcTotals();
+    if (head) head.textContent = _sw.wizard.products.length
+      ? '· ' + _sw.wizard.products.length + ' × ' + eurFmt(totals.total) : '';
+    if (!totalsEl) return; // stap-3 niet actief
+    const discRow = totals.disc > 0
+      ? `<div class="dp-total-row dp-total-disc"><span>Korting (${totals.disc}%)</span><span>−${eurFmt(totals.discountAmount)}</span></div>
+         <div class="dp-total-row"><span>Subtotaal na korting</span><span>${eurFmt(totals.subtotalAfter)}</span></div>`
+      : '';
+    const vatRows = Object.keys(totals.vatByRate).sort((a, b) => Number(a) - Number(b))
+      .map(r => `<div class="dp-total-row"><span>BTW ${r}%</span><span>${eurFmt(totals.vatByRate[r])}</span></div>`).join('');
+    const discCtrl = totals.disc > 0
+      ? `<a class="dp-disc-edit" onclick="__swDiscountOpen()">Korting (${totals.disc}%) wijzigen</a>
+         · <a class="dp-disc-rm" onclick="__swDiscountRemove()">verwijderen</a>`
+      : `<a class="dp-disc-add" onclick="__swDiscountOpen()">+ Korting</a>`;
+    totalsEl.innerHTML = `
+      <div class="dp-total-row"><span>Subtotaal excl. BTW</span><span>${eurFmt(totals.subtotalExcl)}</span></div>
+      ${discRow}${vatRows}
+      <div class="dp-total-row dp-total-big"><span>Totaal incl. BTW</span><span>${eurFmt(totals.total)}</span></div>
+      <div class="dp-total-row dp-total-ctrl">${discCtrl}</div>`;
+  }
+  function _updatePayComputed() {
+    const root = _root(); if (!root) return;
+    _recomputeTermAmount();
+    const w = _sw.wizard;
+    const ta = root.querySelector('[data-fkey="sw4-pay-term-amount"]');
+    if (ta) {
+      ta.value = (w.payment_term_amount !== '' && w.payment_term_amount != null && !isNaN(Number(w.payment_term_amount)))
+        ? '€' + Number(w.payment_term_amount).toFixed(2) : '';
+    }
+    const prev = root.querySelector('[data-fkey-body="sw4-preview"]');
+    if (prev) {
+      const t = _buildQuotationTitleFE();
+      prev.textContent = t ? `Op offerte komt: '${t}'` : 'Op offerte komt: geen extra info (alleen totaalbedrag)';
+    }
+    // Term-start-date bounds + hint (afhankelijk van hasDownpayment + start).
+    const ts = root.querySelector('[data-fkey="sw4-pay-term-start"]');
+    if (ts) {
+      const b = _termStartEffBounds();
+      if (b.min) ts.setAttribute('min', b.min); else ts.removeAttribute('min');
+      if (b.max) ts.setAttribute('max', b.max); else ts.removeAttribute('max');
+      if (ts.value !== (w.payment_term_start_date || '')) ts.value = w.payment_term_start_date || '';
+    }
+    const tsHint = root.querySelector('[data-fkey-hint="sw4-pay-term-start"]');
+    if (tsHint) tsHint.textContent = _hasDownpayment()
+      ? 'Met aanbetaling: tot 30 dagen ná startdatum toegestaan.'
+      : 'Zonder aanbetaling: uiterlijk 3 dagen vóór startdatum.';
+    const dd = root.querySelector('[data-fkey="sw4-pay-down-date"]');
+    if (dd) {
+      const b = _downDateEffBounds();
+      if (b.min) dd.setAttribute('min', b.min); else dd.removeAttribute('min');
+      if (b.max) dd.setAttribute('max', b.max); else dd.removeAttribute('max');
+      if (dd.value !== (w.payment_downpayment_date || '')) dd.value = w.payment_downpayment_date || '';
+    }
+  }
+  // Als _revalidateExceptions de flag heeft geflipped, moet het banner-blok
+  // verschijnen/verdwijnen — dat vereist een structural render. Deze wrapper
+  // detecteert de flip en beslist zelf.
+  function _revalidateAndMaybeRender() {
+    const wasFlagged = _sw.wizard.exception_flagged;
+    _revalidateExceptions();
+    if (wasFlagged !== _sw.wizard.exception_flagged) renderWizard();
+  }
+
+  // Stap 4 handlers — nu surgical: state-mutatie + gerichte DOM-update i.p.v.
+  // renderWizard() bij elke keystroke. Alleen bij structural flip (exception-
+  // flag reset) valt back op renderWizard via _revalidateAndMaybeRender.
   window.__swSetPayStart = (v) => {
     _sw.wizard.payment_start_date = String(v || '');
     _sw.dirty = true;
@@ -704,36 +836,37 @@
     }
     _clampTermStartDate(true);
     _clampDownDate(true);
-    _recomputeTermAmount();
-    _revalidateExceptions();
-    renderWizard();
+    _updatePayComputed();
+    _revalidateAndMaybeRender();
   };
   window.__swSetPayDownAmt = (v) => {
     _sw.wizard.payment_downpayment_amount = String(v || '');
     _sw.dirty = true;
     _clampTermStartDate(true);
-    _recomputeTermAmount();
-    _revalidateExceptions();
-    renderWizard();
+    _updatePayComputed();
+    _revalidateAndMaybeRender();
   };
   window.__swSetPayDownDate = (v) => {
     _sw.wizard.payment_downpayment_date = String(v || '');
     _sw.dirty = true;
     _clampDownDate(true);
-    renderWizard();
+    // Down-date value kan door clamp gewijzigd zijn — sync input surgical.
+    const dd = _root()?.querySelector('[data-fkey="sw4-pay-down-date"]');
+    if (dd && dd.value !== (_sw.wizard.payment_downpayment_date || '')) {
+      dd.value = _sw.wizard.payment_downpayment_date || '';
+    }
   };
   window.__swSetPayTermCount = (v) => {
     const n = Math.max(0, Math.min(60, Number(v) || 0));
     _sw.wizard.payment_term_count = n === 0 ? '' : n;
     _sw.dirty = true;
-    _recomputeTermAmount();
-    _revalidateExceptions();
-    renderWizard();
+    _updatePayComputed();
+    _revalidateAndMaybeRender();
   };
   window.__swSetPayTermStart = (v) => {
     _sw.wizard.payment_term_start_date = String(v || '');
     _sw.dirty = true;
-    renderWizard();
+    // Geen computed downstream — puur state.
   };
   window.__swUndoException = () => {
     if (!_sw.wizard.exception_flagged) return;
@@ -819,15 +952,19 @@
     _sw.wizard.duration_months = v;
     _sw.dirty = true; renderWizard();
   };
+  // Qty/prijs: surgical — update alleen line-subtotaal + totals-block +
+  // head-summary. GEEN renderWizard() → input-node blijft = cursor blijft.
   window.__swInputQty = (i, val) => {
     const arr = _sw.wizard.products; if (!arr[i]) return;
     arr[i].quantity = Math.max(1, Number(val) || 1);
-    _sw.dirty = true; renderWizard();
+    _sw.dirty = true;
+    _updateProductLine(i);
   };
   window.__swInputPrice = (i, val) => {
     const arr = _sw.wizard.products; if (!arr[i]) return;
     arr[i].price_per_unit = Math.max(0, Number(val) || 0);
-    _sw.dirty = true; renderWizard();
+    _sw.dirty = true;
+    _updateProductLine(i);
   };
   window.__swToggleVatIncl = (i) => {
     const arr = _sw.wizard.products; if (!arr[i]) return;
@@ -1035,6 +1172,7 @@
         </div>
         <div class="sw-tag-add">
           <input class="ib-input" placeholder="+ Tag toevoegen" value="${esc(_sw.tagDraft)}"
+                 data-fkey="sw-tag-draft"
                  oninput="__swTagDraft(this.value)"
                  onkeydown="if(event.key==='Enter'){event.preventDefault();__swAddCustomTag()}">
           <button class="btn" onclick="__swAddCustomTag()">Voeg toe</button>
@@ -1133,8 +1271,10 @@
               </div>
             </div>
             <input class="ib-input dp-qty" type="number" min="1" value="${Number(p.quantity) || 1}"
+                   data-fkey="sw3-qty-${i}"
                    oninput="__swInputQty(${i}, this.value)" aria-label="Aantal">
             <input class="ib-input dp-price" type="number" step="0.01" min="0" value="${Number(p.price_per_unit) || 0}"
+                   data-fkey="sw3-price-${i}"
                    oninput="__swInputPrice(${i}, this.value)" aria-label="Prijs per stuk">
             <div class="dp-sub-line">${eurFmt(a.incl)}</div>
             <button class="dp-rm" onclick="__swRemoveProduct(${i})" title="Regel verwijderen" aria-label="Regel verwijderen">×</button>
@@ -1207,6 +1347,7 @@
         <label class="tk-field"><span class="tk-field-l">Looptijd <span class="tk-req">*</span></span>
           <div class="sw-dur-row">
             <input class="ib-input sw-dur-num" type="number" min="1" max="120" value="${Number(w.duration_months) || 12}"
+                   data-fkey="sw3-duration"
                    oninput="__swSetDuration(this.value)">
             <span class="sw-dur-lbl">mnd</span>
             ${[6, 12, 24, 36].map(n => `<span class="sw-chip ${Number(w.duration_months) === n ? 'is-on' : ''}" onclick="__swSetDuration(${n})">${n}</span>`).join('')}
@@ -1273,6 +1414,7 @@
         <div class="sw-modal-body" style="padding:14px 16px;max-height:65vh;overflow-y:auto">
           <div class="pp-filters">
             <input class="ib-input" placeholder="Zoek product…" value="${esc(_sw.picker.search)}"
+                   data-fkey="sw-picker-search"
                    oninput="__swPickerSearch(this.value)">
             <select class="ib-input" style="max-width:200px" onchange="__swPickerCat(this.value)">
               <option value="">Alle categorieën</option>
@@ -1299,6 +1441,7 @@
           <label class="tk-field"><span class="tk-field-l">Korting (%)</span>
             <input class="ib-input" type="number" min="0" max="100" step="0.01"
                    placeholder="bv. 10" value="${esc(_sw.discountModal.draft)}"
+                   data-fkey="sw-discount-draft"
                    oninput="__swDiscountDraft(this.value)"
                    onkeydown="if(event.key==='Enter'){event.preventDefault();__swDiscountApply()}">
           </label>
@@ -1345,6 +1488,7 @@
       <div class="tk-field-row">
         <label class="tk-field"><span class="tk-field-l">Startdatum cursus <span class="tk-req">*</span></span>
           <input class="ib-input" type="date" value="${esc(w.payment_start_date)}" min="${esc(minStart || '')}"
+                 data-fkey="sw4-pay-start"
                  onchange="__swSetPayStart(this.value)">
           <span class="tk-field-hint">Min. vandaag + 3 kalenderdagen (SEPA + boekhouding buffer).</span>
         </label>
@@ -1355,12 +1499,14 @@
         <label class="tk-field"><span class="tk-field-l">Aanbetaling (€)</span>
           <input class="ib-input" type="number" step="0.01" min="0" placeholder="bv. 1500"
                  value="${esc(w.payment_downpayment_amount)}"
+                 data-fkey="sw4-pay-down-amt"
                  oninput="__swSetPayDownAmt(this.value)">
         </label>
         <label class="tk-field"><span class="tk-field-l">Aanbetaling-datum</span>
           <input class="ib-input" type="date" value="${esc(w.payment_downpayment_date)}"
                  ${dnBounds.min ? `min="${esc(dnBounds.min)}"` : ''}
                  ${dnBounds.max ? `max="${esc(dnBounds.max)}"` : ''}
+                 data-fkey="sw4-pay-down-date"
                  onchange="__swSetPayDownDate(this.value)">
           <span class="tk-field-hint">Minstens 3 dagen vóór de startdatum.</span>
         </label>
@@ -1371,14 +1517,16 @@
           <input class="ib-input" type="number" min="1" max="60" placeholder="bv. 12"
                  title="Verplicht — minimaal 1 termijn"
                  value="${esc(w.payment_term_count)}"
+                 data-fkey="sw4-pay-term-count"
                  oninput="__swSetPayTermCount(this.value)">
         </label>
         <label class="tk-field"><span class="tk-field-l">Datum 1e termijn</span>
           <input class="ib-input" type="date" value="${esc(w.payment_term_start_date)}"
                  ${tsBounds.min ? `min="${esc(tsBounds.min)}"` : ''}
                  ${tsBounds.max ? `max="${esc(tsBounds.max)}"` : ''}
+                 data-fkey="sw4-pay-term-start"
                  onchange="__swSetPayTermStart(this.value)">
-          <span class="tk-field-hint">${hasDown
+          <span class="tk-field-hint" data-fkey-hint="sw4-pay-term-start">${hasDown
             ? 'Met aanbetaling: tot 30 dagen ná startdatum toegestaan.'
             : 'Zonder aanbetaling: uiterlijk 3 dagen vóór startdatum.'}</span>
         </label>
@@ -1386,6 +1534,7 @@
 
       <label class="tk-field"><span class="tk-field-l">Termijnbedrag</span>
         <input class="ib-input" readonly
+               data-fkey="sw4-pay-term-amount"
                value="${w.payment_term_amount !== '' && w.payment_term_amount != null && !isNaN(Number(w.payment_term_amount)) ? '€' + Number(w.payment_term_amount).toFixed(2) : ''}"
                placeholder="—">
         <span class="tk-field-hint">Auto-berekend: (totaal ${_reservationFeeApplies() ? '− €100 fee ' : ''}− aanbetaling) / aantal termijnen. Totaal offerte incl. BTW: <b>${eurFmt(totals.total)}</b>.</span>
@@ -1393,7 +1542,7 @@
 
       <div class="sw-preview-box">
         <div class="tk-field-l">Wat komt er op de offerte?</div>
-        <div class="sw-preview-body">${previewText ? `Op offerte komt: '${esc(previewText)}'` : 'Op offerte komt: geen extra info (alleen totaalbedrag)'}</div>
+        <div class="sw-preview-body" data-fkey-body="sw4-preview">${previewText ? `Op offerte komt: '${esc(previewText)}'` : 'Op offerte komt: geen extra info (alleen totaalbedrag)'}</div>
       </div>
 
       ${excBlock}
@@ -1422,6 +1571,7 @@
           <label class="tk-field" style="margin-top:12px">
             <span class="tk-field-l">Reden van de uitzondering <span class="tk-req">*</span></span>
             <textarea class="ib-input" rows="3" placeholder="Waarom valt deze offerte buiten de standaard? Wie heeft goedgekeurd?"
+                      data-fkey="sw-exc-note"
                       oninput="__swExcNote(this.value)">${esc(m.note)}</textarea>
           </label>
           ${d.lateStart ? `
