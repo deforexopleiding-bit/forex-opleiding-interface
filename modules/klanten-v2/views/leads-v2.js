@@ -818,7 +818,7 @@
           </div>
 
           <div class="tk-field">
-            <span class="tk-field-l">Huidige toegang <span class="ld-hint" style="font-weight:400">(van/tot bewerkbaar; intrekken = op verlopen zetten)</span></span>
+            <span class="tk-field-l">Huidige toegang</span>
             <div class="ld-edit-list">
               ${_edit.grants.length ? _edit.grants.map(g => `
                 <div class="ld-edit-grant ${g._intrekken ? 'is-ingetrokken' : ''}">
