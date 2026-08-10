@@ -37,6 +37,7 @@ import {
   validateCustomerAddress,
   buildAddressBlockPosition,
   buildAddressBlockLines,
+  bepaalLand,
   mmToPt,
 } from './wik-brief-layout.js';
 // Base64-embedded logo — WERKT op Vercel serverless. Zie kop-comment in
@@ -76,7 +77,7 @@ function _resolveLogoBuffer() {
  * Render de brief-PDF (identieke C5-envelop-layout als de handmatige knop).
  * Puur in-memory; geen storage/DB. Returnt een Buffer.
  */
-function renderBriefPdf({ customer, resolvedSubject, resolvedBody }) {
+function renderBriefPdf({ customer, resolvedSubject, resolvedBody, land = null }) {
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({ size: 'A4', margin: 50 });
@@ -115,7 +116,7 @@ function renderBriefPdf({ customer, resolvedSubject, resolvedBody }) {
       const geadresseerdeRaw = customer.is_company
         ? (customer.company_name || customerDisplayName(customer, ''))
         : customerDisplayName(customer, '');
-      const addrLines = buildAddressBlockLines(customer, geadresseerdeRaw);
+      const addrLines = buildAddressBlockLines(customer, geadresseerdeRaw, land);
       doc.font('Helvetica').fontSize(10).fillColor('#0f172a');
       let addrY = adrPos.y;
       const lineHeight = 12; // pt
@@ -249,9 +250,10 @@ export async function generatePreBriefForCustomer({
 
   // 2) Land + template-code. Expliciet meegegeven land wint (handmatige knop);
   //    anders afleiden uit het klant-adresland (engine: NL default, BE indien 'BE').
-  const resolvedCountry = country === 'BE' ? 'BE'
-    : country === 'NL' ? 'NL'
-    : (customer.address_country === 'BE' ? 'BE' : 'NL');
+  // Expliciet meegegeven land (handmatige knop) wint; anders robuuste afleiding
+  // uit address_country + postcodeformaat (NL: 4 cijfers + 2 letters, BE: 4
+  // cijfers). Zo krijgt een Belgische wanbetaler automatisch de BE-brief.
+  const resolvedCountry = (country === 'BE' || country === 'NL') ? country : bepaalLand(customer);
   const templateCode = resolvedCountry === 'BE' ? 'incasso_pre_be' : 'incasso_pre_nl';
 
   // 3) Template ophalen (bewerkbaar in de Templates-tab).
@@ -323,7 +325,7 @@ export async function generatePreBriefForCustomer({
   const { text: resolvedBody }    = resolveVariables(tpl.body    || '', null, briefContext);
 
   // 7) PDF renderen (identieke C5-layout).
-  const buffer = await renderBriefPdf({ customer, resolvedSubject, resolvedBody });
+  const buffer = await renderBriefPdf({ customer, resolvedSubject, resolvedBody, land: resolvedCountry });
 
   // 8) PERSISTENT BEWAREN (juridisch bewijs) — upload + rij. Fail-loud (codes).
   const generatedAtIso = new Date().toISOString();

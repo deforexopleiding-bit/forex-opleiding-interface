@@ -121,13 +121,30 @@ export function buildAddressBlockPosition() {
  * @param {string} displayName  al gerenderde naam (via customerDisplayName)
  * @returns {string[]} array van regels in weergavevolgorde
  */
-export function buildAddressBlockLines(cust, displayName) {
+// Robuuste landbepaling voor de WIK-brief → 'NL' of 'BE'.
+// - address_country als die expliciet 'NL'/'BE' is (betrouwbaar).
+// - Anders afleiden uit het postcodeformaat:
+//     NL = 4 cijfers + 2 letters (bijv. "7812 HZ") → 'NL'
+//     BE = 4 cijfers, géén letters (bijv. "2100")   → 'BE'
+// - Laatste terugval: 'NL'.
+export function bepaalLand(cust) {
+  const cc = String(cust?.address_country || '').trim().toUpperCase();
+  if (cc === 'NL' || cc === 'BE') return cc;
+  const pc = String(cust?.address_postal || '').trim();
+  if (/^\d{4}\s*[a-zA-Z]{2}$/.test(pc)) return 'NL'; // 4 cijfers + 2 letters
+  if (/^\d{4}$/.test(pc)) return 'BE';               // 4 cijfers, géén letters
+  return 'NL';
+}
+
+// landOverride: expliciet 'NL'/'BE' (bijv. het gekozen template-land) wint —
+// zo past de landregel altijd bij de gekozen brief. Anders robuuste afleiding.
+export function buildAddressBlockLines(cust, displayName, landOverride = null) {
   const c = cust || {};
   const s = (c.address_street || '').trim();
   const n = (c.address_number || '').trim();
   const p = (c.address_postal || '').trim();
   const city = (c.address_city   || '').trim();
-  const cc = String(c.address_country || 'NL').toUpperCase();
+  const cc = (landOverride === 'NL' || landOverride === 'BE') ? landOverride : bepaalLand(c);
   const landregel = cc === 'BE' ? 'België' : 'Nederland';
 
   const lines = [];
