@@ -29,19 +29,26 @@ export default async function handler(req, res) {
   if (!id) return res.status(400).json({ error: 'id vereist' });
 
   try {
+    // Ronde 5 fix: leads_overzicht-view is stuk (verwijst naar dropped
+    // leads.naam-kolom). Query `leads` direct met voornaam+achternaam en
+    // bouw `naam` server-side.
     const [viewRes, rawRes] = await Promise.all([
-      supabaseAdmin.from('leads_overzicht')
-        .select('id, naam, email, telefoon, soort, bron, traject, kwalificatie, score, drempel, status, aangemaakt, tag')
+      supabaseAdmin.from('leads')
+        .select('id, voornaam, achternaam, email, telefoon, soort, bron, traject, kwalificatie, score, drempel, status, aangemaakt, tag, afspraak_op, verwijderd_op')
         .eq('id', id).maybeSingle(),
       supabaseAdmin.from('leads')
         .select('id, antwoorden, afwijzer, notitie, eigenaar_id')
         .eq('id', id).maybeSingle(),
     ]);
-    if (viewRes.error) throw new Error('leads_overzicht: ' + viewRes.error.message);
-    if (rawRes.error)  throw new Error('leads: ' + rawRes.error.message);
-    const lead = viewRes.data;
+    if (viewRes.error) throw new Error('leads: ' + viewRes.error.message);
+    if (rawRes.error)  throw new Error('leads-extra: ' + rawRes.error.message);
+    const leadRow = viewRes.data;
     const raw  = rawRes.data;
-    if (!lead || !raw) return res.status(404).json({ error: 'Lead niet gevonden' });
+    if (!leadRow || !raw) return res.status(404).json({ error: 'Lead niet gevonden' });
+    const lead = {
+      ...leadRow,
+      naam: [leadRow.voornaam, leadRow.achternaam].filter(Boolean).join(' ').trim() || leadRow.email || '—',
+    };
 
     let eigenaar = null;
     if (raw.eigenaar_id) {

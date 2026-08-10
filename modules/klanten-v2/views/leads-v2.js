@@ -181,29 +181,58 @@
   };
   window.__leadAct2Confirm = async () => {
     if (!_det.id || !_act2.kind || _act2.submitting) return;
+    const kind = _act2.kind;
+    // Ronde 5: "Omzetten naar klant" opent nu de offerte-aanmaak-flow met
+    // lead-data als prefill (voorlopig oude sales-wizard.html). De v1-endpoint
+    // /api/leads-promote maakt alleen customer aan zonder offerte — dat is een
+    // fase 1 van 2. Voor Jeffrey is het pas "af" zodra de offerte staat, dus
+    // routen we door naar de wizard. Zodra v2-offerte-wizard live is (Batch 2)
+    // wordt dit een in-app modal.
+    if (kind === 'promote') {
+      const lead = _det.data?.lead || {};
+      try {
+        sessionStorage.setItem('_prefill_lead', JSON.stringify({
+          lead_id: lead.id,
+          first_name: lead.voornaam || '',
+          last_name: lead.achternaam || '',
+          email: lead.email || '',
+          phone: lead.telefoon || '',
+        }));
+      } catch (_) { /* ignore quota */ }
+      const url = '/modules/sales-wizard.html?source_lead_id=' + encodeURIComponent(lead.id || '');
+      window.location.href = url;
+      return;
+    }
     _act2.submitting = true; window.DFO.render();
-    const endpoint = _act2.kind === 'archive'  ? '/api/leads-verwijder'
-                   : _act2.kind === 'restore'  ? '/api/leads-herstel'
-                   : _act2.kind === 'promote'  ? '/api/leads-promote'
+    const endpoint = kind === 'archive'  ? '/api/leads-verwijder'
+                   : kind === 'restore'  ? '/api/leads-herstel'
                    : null;
     if (!endpoint) { _act2.submitting = false; window.DFO.render(); return; }
     try {
-      await tryPost('lead-action-' + _act2.kind, endpoint, { id: _det.id });
+      await tryPost('lead-action-' + kind, endpoint, { id: _det.id });
       _det.data = null; _act.data = null; _arc.data = null;
       _act2.open = false; _act2.kind = null; _act2.submitting = false;
-      if (_act2.kind === 'archive' || _act2.kind === 'promote') {
-        // Lead is uit de actieve lijst → terug naar overzicht.
-        setUrlParam('lead', null);
-      } else {
-        window.DFO.render();
-      }
-      alert(_act2.kind === 'promote'  ? 'Lead omgezet naar klant.'
-          : _act2.kind === 'archive'  ? 'Lead gearchiveerd.'
-          : /* restore */              'Lead hersteld.');
+      if (kind === 'archive') setUrlParam('lead', null);
+      else window.DFO.render();
+      alert(kind === 'archive' ? 'Lead gearchiveerd.' : 'Lead hersteld.');
     } catch (e) {
       _act2.submitting = false;
       window.DFO.render();
       alert('Actie mislukt: ' + (e?.message || 'onbekende fout'));
+    }
+  };
+
+  // Ronde 5: inline rij-acties (Wijzig / Verwijder) vanuit overzicht-tabel.
+  window.__leadRowEdit = (id) => { if (id) setUrlParam('lead', id); };
+  window.__leadRowDelete = async (id, naam) => {
+    if (!id) return;
+    if (!confirm(`Lead "${naam || id}" archiveren?\n\nSoft-delete via verwijderd_op. Herstellen kan later in het Gearchiveerd-tabblad.`)) return;
+    try {
+      await tryPost('lead-row-verwijder', '/api/leads-verwijder', { id });
+      _act.data = null; _arc.data = null;
+      window.DFO.render();
+    } catch (e) {
+      alert('Kon niet archiveren: ' + (e?.message || 'onbekende fout'));
     }
   };
 
@@ -329,17 +358,36 @@
       ])}
       <div class="sv-total">${_act.loading ? 'Laden…' : (total != null ? `${total} lead${total === 1 ? '' : 's'}` : '—')}</div>
       ${H.table(
-        [{ l: 'Naam' }, { l: 'Herkomst' }, { l: 'Bron', cls: 'optional' }, { l: 'Traject', cls: 'optional' }, { l: 'Status' }, { l: 'Score', cls: 'r' }, { l: 'Aangemaakt', cls: 'r optional' }],
+        [{ l: 'Naam' }, { l: 'Herkomst' }, { l: 'Traject', cls: 'optional' }, { l: 'Call gepland', cls: 'optional' }, { l: 'Status' }, { l: 'Score', cls: 'r' }, { l: 'Aangemaakt', cls: 'r optional' }, { l: '', cls: 'r' }],
         items.map(l => {
           const [c, pl] = STATUS_TO_PILL[l.status] || ['neutral', l.status || '—'];
+          // Herkomst = l.soort (backend-veld heet 'soort', gebruikers-label = Herkomst).
+          const herkomst = l.soort || l.herkomst || '';
+          // Score-kleuring: groen = toegelaten (score >= drempel), rood = niet.
+          // Bij ontbrekende drempel: neutraal.
+          const sc = Number(l.score);
+          const dr = Number(l.drempel);
+          const scColor = (!isNaN(sc) && !isNaN(dr) && dr > 0)
+            ? (sc >= dr ? 'var(--emerald, #10b981)' : 'var(--danger, var(--warn, #ef4444))')
+            : 'var(--text-2)';
+          const scLabel = l.score != null
+            ? `${l.score}${l.drempel ? ' / ' + l.drempel : ''}`
+            : '—';
+          // Call gepland = afspraak_op gezet? Toon datum, anders '—'.
+          const call = l.afspraak_op ? dstr(l.afspraak_op) : '—';
+          const nameEsc = String(l.naam || '').replace(/"/g, '&quot;').replace(/'/g, "\\'");
           return [
             `<div class="cell-main-wrap"><div class="av av-sm">${H.av(l.naam || '?')}</div><a href="javascript:__leadOpen('${l.id}')" class="ld-name">${esc(l.naam) || '—'}</a></div>`,
-            `<span class="pill pill-neutral">${esc(l.herkomst) || '—'}</span>`,
-            `<span style="font-size:12.5px;color:var(--text-3)">${esc(l.bron) || '—'}</span>`,
+            `<span class="pill pill-neutral">${esc(herkomst) || '—'}</span>`,
             `<span style="font-size:12.5px;color:var(--text-3)">${esc(l.traject) || '—'}</span>`,
+            `<span class="mono" style="font-size:12px;color:var(--text-3)">${esc(call)}</span>`,
             H.pill(c, pl),
-            `<span class="mono ${(l.score || 0) >= 80 ? 'strong' : ''}">${l.score != null ? l.score : '—'}</span>`,
+            `<span class="mono strong" style="color:${scColor}">${scLabel}</span>`,
             `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(l.aangemaakt)}</span>`,
+            `<div style="display:inline-flex;gap:4px;justify-content:flex-end">
+              <button class="icon-btn" title="Wijzig lead" onclick="event.stopPropagation();__leadRowEdit('${l.id}')">${svg(I.settings)}</button>
+              <button class="icon-btn" title="Verwijder (archiveer)" onclick="event.stopPropagation();__leadRowDelete('${l.id}', '${nameEsc}')" style="color:var(--danger, var(--warn))">${svg(I.x || I.warn)}</button>
+            </div>`,
           ];
         })
       )}
@@ -474,13 +522,13 @@
       ${H.toolbar([H.stableSearch('leads-arc', 'Zoek naam / e-mail / telefoon…')])}
       <div class="sv-total">${_arc.loading ? 'Laden…' : (total != null ? `${total} gearchiveerd${total === 1 ? '' : 'e leads'}` : '—')}</div>
       ${H.table(
-        [{ l: 'Naam' }, { l: 'Herkomst' }, { l: 'Bron', cls: 'optional' }, { l: 'Traject', cls: 'optional' }, { l: 'Laatste status', cls: 'optional' }, { l: 'Aangemaakt', cls: 'r optional' }],
+        [{ l: 'Naam' }, { l: 'Herkomst' }, { l: 'Traject', cls: 'optional' }, { l: 'Laatste status', cls: 'optional' }, { l: 'Aangemaakt', cls: 'r optional' }],
         items.map(l => {
           const [c, pl] = STATUS_TO_PILL[l.status] || ['neutral', l.status || '—'];
+          const herkomst = l.soort || l.herkomst || '';
           return [
             `<div class="cell-main-wrap"><div class="av av-sm">${H.av(l.naam || '?')}</div><a href="javascript:__leadOpen('${l.id}')" class="ld-name">${esc(l.naam) || '—'}</a></div>`,
-            `<span class="pill pill-neutral">${esc(l.herkomst) || '—'}</span>`,
-            `<span style="font-size:12.5px;color:var(--text-3)">${esc(l.bron) || '—'}</span>`,
+            `<span class="pill pill-neutral">${esc(herkomst) || '—'}</span>`,
             `<span style="font-size:12.5px;color:var(--text-3)">${esc(l.traject) || '—'}</span>`,
             H.pill(c, pl),
             `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(l.aangemaakt)}</span>`,
@@ -540,7 +588,7 @@
             <div class="sv-card-body">
               <div class="sv-row"><span>E-mail</span><b class="mono" style="font-size:12.5px">${esc(l.email) || '—'}</b></div>
               <div class="sv-row"><span>Telefoon</span><b class="mono" style="font-size:12.5px">${esc(l.telefoon) || '—'}</b></div>
-              <div class="sv-row"><span>Soort</span><b>${esc(l.soort) || '—'}</b></div>
+              <div class="sv-row"><span>Herkomst</span><b>${esc(l.soort) || '—'}</b></div>
               <div class="sv-row"><span>Traject</span><b>${esc(l.traject) || '—'}</b></div>
               <div class="sv-row"><span>Kwalificatie</span><b>${esc(l.kwalificatie) || '—'}</b></div>
               <div class="sv-row"><span>Aangemaakt</span><b>${dstrLong(l.aangemaakt)}</b></div>
@@ -654,9 +702,9 @@
       cta: 'Ja, herstellen',
       variant: 'btn',
     } : {
-      title: 'Lead omzetten naar klant?',
-      body: `De lead <b>${esc(lead.naam) || '—'}</b> wordt gepromoveerd naar <b>customers</b> (status wordt 'gewonnen', customer_id gekoppeld). Deze actie kan niet ongedaan gemaakt worden vanuit de v2-UI — alleen via de oude detail-page.`,
-      cta: 'Ja, omzetten naar klant',
+      title: 'Offerte aanmaken uit deze lead?',
+      body: `Je wordt doorgestuurd naar de <b>offerte-aanmaak-flow</b> voor <b>${esc(lead.naam) || '—'}</b> met alle lead-gegevens (naam / e-mail / telefoon) al vooringevuld. Zodra de offerte wordt afgerond wordt de lead-klant-koppeling automatisch gelegd (source_lead_id).<br><br><span style="font-size:11.5px;color:var(--text-3)">Tijdelijk routeert dit naar de oude wizard. Zodra de v2-offerte-wizard live is (Batch 2) wordt dit een in-app modal.</span>`,
+      cta: 'Ja, open offerte-flow',
       variant: 'btn btn-primary',
     };
     const dis = _act2.submitting ? ' disabled' : '';
