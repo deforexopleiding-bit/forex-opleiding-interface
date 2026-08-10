@@ -35,17 +35,11 @@ export default async function handler(req, res) {
   if (!id) return res.status(400).json({ error: 'id vereist' });
 
   try {
-    // 1) Lead ophalen. Ronde 5: `leads.naam` bestaat niet meer — query
-    // voornaam+achternaam en bouw `naam` in-memory zodat validateLeadForPromote
-    // + splitName ongewijzigd blijven.
-    const { data: leadRow, error: lErr } = await supabaseAdmin.from('leads')
-      .select('id, voornaam, achternaam, email, telefoon, status, customer_id')
+    // 1) Lead ophalen.
+    const { data: lead, error: lErr } = await supabaseAdmin.from('leads')
+      .select('id, naam, email, telefoon, status, customer_id')
       .eq('id', id).maybeSingle();
     if (lErr) throw new Error('leads fetch: ' + lErr.message);
-    const lead = leadRow ? {
-      ...leadRow,
-      naam: [leadRow.voornaam, leadRow.achternaam].filter(Boolean).join(' ').trim() || leadRow.email || '',
-    } : null;
 
     // 2/3) Valideer via pure helper (dekt: not-found, already-promoted, email-required).
     const v = validateLeadForPromote(lead);

@@ -446,9 +446,9 @@
         </span>` : ''}
       </div>
       ${_act.error ? `<div class="sv-empty" style="border:1px solid var(--warn-line, var(--rose-line, var(--line)));background:var(--warn-soft, var(--rose-soft, var(--surface-2)));color:var(--warn, var(--rose));display:flex;align-items:center;gap:12px;padding:14px 18px;margin:12px 20px;border-radius:8px">
-        ${svg(I.alert || I.warn)}
+        ${svg(I.alert || I.warn, 'width:20px;height:20px;flex-shrink:0')}
         <span style="flex:1"><b>Kon leads niet laden:</b> ${esc(_act.error)}</span>
-        <button class="btn btn-sm" onclick="__leadRetry()">${svg(I.repeat || I.settings)} Opnieuw proberen</button>
+        <button class="btn btn-sm" onclick="__leadRetry()">${svg(I.repeat || I.settings, 'width:14px;height:14px')} Opnieuw proberen</button>
       </div>` : ''}
       ${H.table(
         [{ l: 'Naam' }, { l: 'E-mail', cls: 'optional' }, { l: 'Telefoon', cls: 'optional' }, { l: 'Herkomst' }, { l: 'Traject', cls: 'optional' }, { l: 'Call gepland', cls: 'optional' }, { l: 'Status' }, { l: 'Score', cls: 'r' }, { l: 'Aangemaakt', cls: 'r optional' }, { l: '', cls: 'r' }],
@@ -708,9 +708,9 @@
         </div>
       </div>
       ${_det.error ? `<div class="sv-empty" style="border:1px solid var(--warn-line, var(--rose-line, var(--line)));background:var(--warn-soft, var(--rose-soft, var(--surface-2)));color:var(--warn, var(--rose));display:flex;align-items:center;gap:12px;padding:14px 18px;margin:12px 20px;border-radius:8px">
-        ${svg(I.alert || I.warn)}
+        ${svg(I.alert || I.warn, 'width:20px;height:20px;flex-shrink:0')}
         <span style="flex:1"><b>Kon lead-detail niet laden:</b> ${esc(_det.error)}</span>
-        <button class="btn btn-sm" onclick="__leadDetailRetry()">${svg(I.repeat || I.settings)} Opnieuw proberen</button>
+        <button class="btn btn-sm" onclick="__leadDetailRetry()">${svg(I.repeat || I.settings, 'width:14px;height:14px')} Opnieuw proberen</button>
       </div>` : ''}
       ${_det.debug ? `<div style="margin:0 20px 8px;padding:8px 12px;border:1px dashed var(--line);border-radius:6px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;color:var(--text-3);background:var(--surface-2)">
         <b>DEBUG</b> · ${esc(_det.debug.at)} · <code>${esc(_det.debug.url)}</code> → status=<b>${esc(String(_det.debug.status))}</b>

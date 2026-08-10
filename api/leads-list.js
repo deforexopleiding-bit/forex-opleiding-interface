@@ -53,12 +53,9 @@ export default async function handler(req, res) {
   const canDelete = await requirePermission(req, 'leads.delete');
 
   try {
-    // Ronde 5 fix: leads_overzicht-view is stuk (verwijst naar dropped
-    // leads.naam-kolom). Query `leads` direct met voornaam+achternaam en
-    // bouw `naam` server-side zodat downstream response-shape gelijk blijft.
     let qy = supabaseAdmin
-      .from('leads')
-      .select('id, voornaam, achternaam, email, telefoon, soort, bron, traject, kwalificatie, score, drempel, status, aangemaakt, tag, afspraak_op, verwijderd_op', { count: 'exact' })
+      .from('leads_overzicht')
+      .select('id, naam, email, telefoon, soort, bron, traject, kwalificatie, score, drempel, status, aangemaakt, tag, afspraak_op', { count: 'exact' })
       .order('aangemaakt', { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -77,40 +74,12 @@ export default async function handler(req, res) {
     else if (afspraak === 'nee') qy = qy.is('afspraak_op', null);
     if (search) {
       const like = `%${search.replace(/[%_]/g, m => '\\' + m)}%`;
-      // Zoek nu op voornaam OR achternaam OR email (was naam OR email).
-      qy = qy.or(`voornaam.ilike.${like},achternaam.ilike.${like},email.ilike.${like}`);
+      qy = qy.or(`naam.ilike.${like},email.ilike.${like}`);
     }
 
-    let { data, error, count } = await qy;
-    // Ronde 6 defensief: als vol select faalt (bv gedropte kolom), fallback
-    // op minimale-guaranteed-safe select. Zo blijft de UI werken ook als
-    // een migratie een niet-kritieke kolom wegneemt.
-    if (error && /column .+ does not exist/i.test(error.message || '')) {
-      console.warn('[leads-list] full select failed, retry minimal:', error.message);
-      let fb = supabaseAdmin
-        .from('leads')
-        .select('id, voornaam, achternaam, email, telefoon, status, aangemaakt, verwijderd_op', { count: 'exact' })
-        .order('aangemaakt', { ascending: false })
-        .range(offset, offset + limit - 1);
-      fb = archief ? fb.not('verwijderd_op', 'is', null) : fb.is('verwijderd_op', null);
-      if (status) fb = fb.eq('status', status);
-      if (search) {
-        const like = `%${search.replace(/[%_]/g, m => '\\' + m)}%`;
-        fb = fb.or(`voornaam.ilike.${like},achternaam.ilike.${like},email.ilike.${like}`);
-      }
-      const r2 = await fb;
-      if (r2.error) throw new Error('leads (minimal fallback): ' + r2.error.message);
-      data = r2.data; count = r2.count;
-    } else if (error) {
-      throw new Error('leads: ' + error.message);
-    }
-    const rows = data || [];
-    // Bouw `naam` uit voornaam+achternaam zodat response-consumers (v1 + v2)
-    // ongewijzigd blijven werken.
-    const items = rows.map(r => ({
-      ...r,
-      naam: [r.voornaam, r.achternaam].filter(Boolean).join(' ').trim() || r.email || '—',
-    }));
+    const { data, error, count } = await qy;
+    if (error) throw new Error('leads_overzicht: ' + error.message);
+    const items = data || [];
     return res.status(200).json({
       items,
       total: count || items.length,
