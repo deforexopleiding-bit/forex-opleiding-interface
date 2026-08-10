@@ -21,18 +21,19 @@ export function telefoonE164(raw) {
  * - Bestaat het al (op email): hergebruiken; koppel lead_id als die nog leeg is.
  * - Anders: auth-user aanmaken (email_confirm=true → OTP-login werkt meteen;
  *   bestaand auth-adres wordt opgepakt) + lms_gebruikers-rij met venster.
- * Retourneert { id, nieuw }.
+ * Retourneert { id, nieuw, authId }. authId is het auth.users-id achter het
+ * account (nodig om er server-side een wachtwoord op te zetten via zetWachtwoord).
  */
 export async function vindOfMaakAccount({ email, voornaam = null, achternaam = null, leadId = null, van, tot }) {
   const mail = String(email).trim().toLowerCase();
 
   const { data: bestaand } = await supabaseAdmin
-    .from('lms_gebruikers').select('id, lead_id').eq('email', mail).maybeSingle();
+    .from('lms_gebruikers').select('id, lead_id, auth_id').eq('email', mail).maybeSingle();
   if (bestaand) {
     if (leadId && !bestaand.lead_id) {
       await supabaseAdmin.from('lms_gebruikers').update({ lead_id: leadId }).eq('id', bestaand.id);
     }
-    return { id: bestaand.id, nieuw: false };
+    return { id: bestaand.id, nieuw: false, authId: bestaand.auth_id || null };
   }
 
   let authId = null;
@@ -53,7 +54,21 @@ export async function vindOfMaakAccount({ email, voornaam = null, achternaam = n
     toegang_van: van, toegang_tot: tot,
   }).select('id').single();
   if (error) throw new Error('lms_gebruikers insert: ' + error.message);
-  return { id: nieuw.id, nieuw: true };
+  return { id: nieuw.id, nieuw: true, authId };
+}
+
+/**
+ * Zet een wachtwoord op een bestaand auth-account (service role).
+ * Het wachtwoord wordt NOOIT gelogd en niet gepersist buiten auth.users
+ * (gehasht door Supabase). Gooit bij een fout; caller vangt fail-soft af.
+ */
+export async function zetWachtwoord({ authId, wachtwoord }) {
+  if (!authId) throw new Error('zetWachtwoord: authId ontbreekt');
+  if (!wachtwoord || String(wachtwoord).length < 8) {
+    throw new Error('zetWachtwoord: wachtwoord te kort');
+  }
+  const { error } = await supabaseAdmin.auth.admin.updateUserById(authId, { password: wachtwoord });
+  if (error) throw new Error('auth updateUserById (password): ' + error.message);
 }
 
 /** Zet (upsert) een grant; dedup op de unique (gebruiker_id, product_id). */
