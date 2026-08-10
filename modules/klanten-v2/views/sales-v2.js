@@ -120,7 +120,8 @@
     const admin = isAdminRole();
     const seq = ++_dash.seq;
     _dash.loading = true; _dash.error = null; _dash.bootRole = admin ? 'admin' : 'own';
-    window.DFO.render();
+    // FLICKER-FIX: geen loading-render meer (zie fetchOffertes). Stale data
+    // blijft staan tot de fetch klaar is.
     const calls = [
       tryFetch('sales-dashboard-stats',       '/api/sales-dashboard-stats'),
       tryFetch('sales-dashboard-metrics',     '/api/sales-dashboard-metrics'),
@@ -269,7 +270,11 @@
     if (_off.loading && _off.params === wanted) return;
     const seq = ++_off.seq;
     _off.loading = true; _off.error = null; _off.params = wanted;
-    window.DFO.render();
+    // FLICKER-FIX: geen loading-render meer. DFO.render() regenereert de
+    // hele #content (sidebar, tabs, toolbar, tabel). 2× volle repaint per
+    // fetch (loading-start + data-completion) gaf 100-400ms flikker bij
+    // elke filter-klik of debounced-search. Nu tonen we stale data tot
+    // de fetch klaar is — 1 render aan het eind volstaat.
     const data = await tryFetch('sales-quotations', '/api/sales-quotations?' + wanted);
     if (seq !== _off.seq) return;
     _off.loading = false; _off.data = data;
@@ -285,7 +290,11 @@
     // input-DOM-node tussen renders, dus focus/cursor blijven staan tijdens typen.
     if (H.onSearch) {
       H.onSearch('sv-off-q', () => {
-        _off.data = null;   // dwing re-fetch met nieuwe q
+        // FLICKER-FIX: NIET _off.data = null zetten — dat combineert met de
+        // auto-fetch-check in offertesView (!_off.data) en kan een
+        // dubbel-fetch triggeren via de wachtende queueMicrotask. Enkel
+        // _off.params reset zodat de wanted-vs-params-check triggert.
+        _off.params = '';
         fetchOffertes();
       }, { debounceMs: 260 });
     }
@@ -340,7 +349,7 @@
     if (_ret.loading && _ret.params === wanted) return;
     const seq = ++_ret.seq;
     _ret.loading = true; _ret.error = null; _ret.params = wanted;
-    window.DFO.render();
+    // FLICKER-FIX: geen loading-render meer (zie fetchOffertes).
     const url = '/api/sales-retention' + (wanted ? '?' + wanted : '');
     const data = await tryFetch('sales-retention', url);
     if (seq !== _ret.seq) return;
@@ -415,7 +424,7 @@
     if (_rep.loading && _rep.params === wanted) return;
     const seq = ++_rep.seq;
     _rep.loading = true; _rep.error = null; _rep.params = wanted;
-    window.DFO.render();
+    // FLICKER-FIX: geen loading-render meer (zie fetchOffertes).
     // Parallel: sales-reports (funnel-leads/-quotations counts + retention +
     // bonus + trend) + accepted-deals (voor omzet + per-verkoper + funnel-
     // signed/paid — allemaal incl-BTW client-side gesommeerd).
