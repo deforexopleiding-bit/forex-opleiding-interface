@@ -99,17 +99,37 @@ export async function provisionOnboardingStudent(onboardingId) {
     return { ok: false, error: 'onboardingId ontbreekt' };
   }
 
-  // 1) Onboarding laden.
+  // 1) Onboarding laden. lms_provision is het per-klant vinkje dat het
+  // LMS-blok verderop gate't. Defensief: als de migratie die de kolom
+  // toevoegt nog niet gedraaid is, faalt een select die de kolom bij naam
+  // noemt met een column-error. In dat geval doen we een fallback-select
+  // zonder de kolom en behandelen we lms_provision als false (LMS-deel
+  // wordt dan simpelweg overgeslagen — fail-soft).
   let onboarding;
   try {
     const { data, error } = await supabaseAdmin
       .from('onboardings')
-      .select('id, customer_id, traject_id, status, bubble_provisioned, bubble_user_id, start_date')
+      .select('id, customer_id, traject_id, status, bubble_provisioned, bubble_user_id, start_date, lms_provision')
       .eq('id', onboardingId)
       .maybeSingle();
-    if (error) throw error;
-    if (!data) return { ok: false, error: 'Onboarding niet gevonden' };
-    onboarding = data;
+    if (error) {
+      if (/lms_provision/i.test(error.message || '')) {
+        console.warn('[onboarding-provision] lms_provision-kolom ontbreekt nog — fallback-select zonder kolom (draai de migratie):', error.message);
+        const fb = await supabaseAdmin
+          .from('onboardings')
+          .select('id, customer_id, traject_id, status, bubble_provisioned, bubble_user_id, start_date')
+          .eq('id', onboardingId)
+          .maybeSingle();
+        if (fb.error) throw fb.error;
+        if (!fb.data) return { ok: false, error: 'Onboarding niet gevonden' };
+        onboarding = { ...fb.data, lms_provision: false };
+      } else {
+        throw error;
+      }
+    } else {
+      if (!data) return { ok: false, error: 'Onboarding niet gevonden' };
+      onboarding = data;
+    }
   } catch (e) {
     const msg = 'onboarding lookup: ' + (e?.message || e);
     console.error('[onboarding-provision]', msg);
@@ -347,16 +367,20 @@ export async function provisionOnboardingStudent(onboardingId) {
   }
 
   // ── LMS-PROVISIONING (optioneel, additief, fail-soft) ──────────────────
-  // Parallel aan Bubble: maak — ALLEEN wanneer LMS_PROVISION_ENABLED === 'true'
-  // — ook een account aan in het nieuwe LMS (Supabase) en koppel toegang.
-  // Default/afwezig = uit: dan verandert er niets aan de bestaande flow.
-  // ALLES hier is fail-soft: een fout in het LMS-deel mag NOOIT de Bubble-flow
-  // of de HTTP-respons breken. Bij succes leveren we een LMS-wachtwoord dat
-  // (samen met de LMS-inloglink) wordt meegestuurd in de credentials-mail.
-  // Het LMS-wachtwoord blijft alleen in memory: NOOIT loggen, NOOIT persisten.
+  // Parallel aan Bubble: maak — ALLEEN wanneer de operator het per-klant
+  // vinkje aanzette (onboarding.lms_provision === true) — ook een account
+  // aan in het nieuwe LMS (Supabase) en koppel toegang. Default/afwezig
+  // (of kolom nog niet gemigreerd) = false: dan verandert er niets aan de
+  // bestaande flow. ALLES hier is fail-soft: een fout in het LMS-deel mag
+  // NOOIT de Bubble-flow of de HTTP-respons breken. Bij succes leveren we
+  // een LMS-wachtwoord dat (samen met de LMS-inloglink) wordt meegestuurd in
+  // de credentials-mail. Het LMS-wachtwoord blijft alleen in memory: NOOIT
+  // loggen, NOOIT persisten. WELK product + inloglink blijft env-gestuurd
+  // (LMS_PROVISION_PRODUCT_SLUG / LMS_LOGIN_URL); OF het draait is nu de
+  // per-klant vlag.
   let lmsPassword = null;
   let lmsLoginUrl = null;
-  if (process.env.LMS_PROVISION_ENABLED === 'true') {
+  if (onboarding.lms_provision === true) {
     try {
       const productSlug = (process.env.LMS_PROVISION_PRODUCT_SLUG || '1-op-1-coaching').trim();
 
