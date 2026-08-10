@@ -179,7 +179,7 @@ function renderRow(q) {
         ${dateLabel ? `<span>${K().esc(dateLabel)}</span><div style="opacity:.7;font-size:11px;margin-top:1px">${K().esc(dateHint)}</div>` : '—'}
       </td>
       <td class="r kv-off-actions">
-        <a class="ds-icon-btn" href="/modules/offerte-detail.html?id=${K().esc(encodeURIComponent(q.deal_id))}" target="_blank" rel="noopener" title="Offerte-detail" onclick="event.stopPropagation()">
+        <a class="ds-icon-btn" href="/modules/offerte-detail-v2.html?id=${K().esc(encodeURIComponent(q.deal_id))}" target="_blank" rel="noopener" title="Offerte-detail" onclick="event.stopPropagation()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
         </a>
         ${tlLink}
@@ -277,7 +277,7 @@ function wire(rootEl) {
     row.addEventListener('click', () => {
       const dealId = row.getAttribute('data-kv-off-open');
       if (!dealId) return;
-      window.open(`/modules/offerte-detail.html?id=${encodeURIComponent(dealId)}`, '_blank', 'noopener');
+      window.open(`/modules/offerte-detail-v2.html?id=${encodeURIComponent(dealId)}`, '_blank', 'noopener');
     });
   });
 }
