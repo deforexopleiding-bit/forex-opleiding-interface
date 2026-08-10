@@ -87,6 +87,10 @@ export default async function handler(req, res) {
   // start_date is optioneel: lege/ongeldige input → null (provisioning valt
   // dan terug op now, identiek aan het oude gedrag).
   const startDate  = normalizeStartDate(body.start_date);
+  // Per-klant LMS-provisioning: operator-vinkje uit de aanmeld-modal. Afwezig
+  // of niet-true → false (feature standaard UIT). Bepaalt of onboarding-
+  // provision.js het LMS-blok naast Bubble draait.
+  const lmsProvision = body.lms_provision === true;
   if (!UUID_RE.test(customerId)) return res.status(400).json({ error: 'customer_id (uuid) vereist' });
   if (!UUID_RE.test(trajectId))  return res.status(400).json({ error: 'traject_id (uuid) vereist' });
 
@@ -144,19 +148,43 @@ export default async function handler(req, res) {
     // 4) Insert.
     const token = crypto.randomUUID();
     const customerName = customerDisplayName(cust) || '';
-    const { data: inserted, error: insErr } = await supabaseAdmin
-      .from('onboardings')
-      .insert({
-        customer_id  : customerId,
-        customer_name: customerName,
-        traject_id   : trajectId,
-        token,
-        status       : 'aangemeld',
-        start_date   : startDate,
-        created_by   : user.id,
-      })
-      .select('id, token, status')
-      .single();
+    const baseRow = {
+      customer_id  : customerId,
+      customer_name: customerName,
+      traject_id   : trajectId,
+      token,
+      status       : 'aangemeld',
+      start_date   : startDate,
+      created_by   : user.id,
+    };
+    // Defensief tegen een nog-niet-gedraaide migratie: als de kolom
+    // lms_provision nog niet bestaat, faalt de HELE insert met een
+    // column-error (zie CLAUDE.md lesson #789/#801). Dit is een live
+    // betaalsysteem, dus we mogen onboarding-create daar niet op laten
+    // breken. Eerste poging mét de kolom; bij een unknown-column-fout
+    // opnieuw zonder (fail-soft: LMS-vinkje wordt dan simpelweg niet
+    // opgeslagen totdat de migratie is gedraaid).
+    let inserted = null;
+    let insErr = null;
+    {
+      const attempt = await supabaseAdmin
+        .from('onboardings')
+        .insert({ ...baseRow, lms_provision: lmsProvision })
+        .select('id, token, status')
+        .single();
+      inserted = attempt.data;
+      insErr   = attempt.error;
+      if (insErr && /lms_provision/i.test(insErr.message || '')) {
+        console.warn('[onboarding-create] lms_provision-kolom ontbreekt nog — insert zonder LMS-vinkje (draai de migratie):', insErr.message);
+        const retry = await supabaseAdmin
+          .from('onboardings')
+          .insert(baseRow)
+          .select('id, token, status')
+          .single();
+        inserted = retry.data;
+        insErr   = retry.error;
+      }
+    }
     if (insErr) throw new Error('onboarding insert: ' + insErr.message);
 
     // Fase 2 — Bubble-provisioning. Fail-soft: een Bubble-fout mag de
