@@ -247,7 +247,14 @@
   function offertesParams() {
     const status = F('sv-off-st', 'all');
     const mine   = F('sv-off-mine', '1') === '1' ? '1' : '';
-    const q      = (F('q', '') || '').trim();
+    // Bron: H.stableSearch cache (persistent, overleeft DFO.render).
+    // Fallback op F('q') behouden voor backwards-compat als iemand nog via
+    // topbar-search of legacy-pad de q-parameter zet.
+    const q = String(
+      (H.getSearchValue && H.getSearchValue('sv-off-q'))
+      || F('q', '')
+      || ''
+    ).trim();
     const p = new URLSearchParams();
     if (status && status !== 'all') p.set('status', status);
     if (mine) p.set('owned_by_me', '1');
@@ -273,6 +280,15 @@
   function offertesView() {
     const st   = F('sv-off-st', 'all');
     const mine = F('sv-off-mine', '1');
+    // Registreer debounced onSearch één keer per view-mount (idempotent — H.onSearch
+    // overschrijft handler op zelfde key). Cursor-bug fix: stableSearch behoudt de
+    // input-DOM-node tussen renders, dus focus/cursor blijven staan tijdens typen.
+    if (H.onSearch) {
+      H.onSearch('sv-off-q', () => {
+        _off.data = null;   // dwing re-fetch met nieuwe q
+        fetchOffertes();
+      }, { debounceMs: 260 });
+    }
     // Trigger fetch bij eerste render OF wanneer filter-params veranderd zijn.
     const wanted = offertesParams();
     if (!_off.loading && (!_off.data || _off.params !== wanted)) queueMicrotask(fetchOffertes);
@@ -291,7 +307,9 @@
           { l: 'Mijn offertes', v: '1' },
           { l: 'Alle',          v: '0' },
         ], mine),
-        H.search('Zoek klant / offerte-nr…'),
+        H.stableSearch
+          ? H.stableSearch('sv-off-q', 'Zoek klant / offerte-nr…')
+          : H.search('Zoek klant / offerte-nr…'),
         `<div class="tb-right">
           <button class="btn btn-primary" onclick="__svOfferteNew()">${svg(I.plus)}Nieuwe offerte</button>
         </div>`,
