@@ -2118,6 +2118,14 @@ textarea.inp { max-width: 520px; min-height: 90px; resize: vertical; line-height
 .tk-comment-body { padding-left: 0; font-size: 13px; line-height: 1.5; color: var(--text-1); }
 .tk-comment-form-foot { display: flex; justify-content: flex-end; margin-top: 8px; }
 
+/* H.table row-click UX — cursor + subtiele hover-highlight bij tbody-rows
+   met onclick. Puur additief; geldt voor alle v2-views die de 3e arg van
+   H.table gebruiken (sales-v2 offertes-lijst, toekomstige lijsten). */
+.tbl-wrap table tbody tr[onclick] { cursor: pointer; transition: background .1s; }
+.tbl-wrap table tbody tr[onclick]:hover {
+  background: color-mix(in srgb, var(--m, #6D3FD4) 5%, transparent);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
    .ib-input — v2 form-input standaard. NOOIT var(--brand)/var(--line)/
    var(--text-1) gebruiken — die tokens BESTAAN NIET in tokens.css. Gebruik
