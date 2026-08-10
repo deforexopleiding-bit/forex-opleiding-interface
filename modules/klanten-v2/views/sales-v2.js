@@ -242,6 +242,12 @@
 
   // ── OFFERTES ─────────────────────────────────────────────────────────────
   window.__svOfferteNew  = () => { window.location.href = '/modules/sales-wizard.html'; };
+  // Batch 2 — v2-wizard (scaffold). Opent in-app modal via __swOpen als
+  // sales-wizard-v2.js is geladen. Fallback naar oude wizard als niet.
+  window.__svOfferteNewV2 = () => {
+    if (typeof window.__swOpen === 'function') window.__swOpen();
+    else window.location.href = '/modules/sales-wizard.html';
+  };
   window.__svOfferteOpen = (dealId) => { if (dealId) window.location.href = '/modules/sales-wizard.html?edit_deal_id=' + encodeURIComponent(dealId); };
 
   function offertesParams() {
@@ -293,6 +299,7 @@
         ], mine),
         H.search('Zoek klant / offerte-nr…'),
         `<div class="tb-right">
+          <button class="btn" onclick="__svOfferteNewV2()" title="v2-scaffold (Batch 2 — in ontwikkeling)">${svg(I.plus)}Nieuwe offerte (v2)</button>
           <button class="btn btn-primary" onclick="__svOfferteNew()">${svg(I.plus)}Nieuwe offerte</button>
         </div>`,
       ])}
