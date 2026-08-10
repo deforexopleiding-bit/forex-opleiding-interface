@@ -440,7 +440,11 @@
           <button class="btn btn-primary" onclick="__leadNew()">${svg(I.plus)}Nieuwe lead</button>
         </div>`,
       ])}
-      <div class="sv-total">${_act.loading ? 'Laden…' : (total != null ? `${total} lead${total === 1 ? '' : 's'}` : '—')}</div>
+      <div class="sv-total">${_act.loading ? 'Laden…' : (total != null ? `${total} lead${total === 1 ? '' : 's'}` : '—')}
+        ${(!_act.loading && items.length) ? `<span style="margin-left:14px;font-size:11px;color:var(--text-3);font-family:'IBM Plex Mono',ui-monospace,monospace">
+          herkomst (l.soort) gevuld: ${items.filter(l => l.soort).length}/${items.length}
+        </span>` : ''}
+      </div>
       ${_act.error ? `<div class="sv-empty" style="border:1px solid var(--warn-line, var(--rose-line, var(--line)));background:var(--warn-soft, var(--rose-soft, var(--surface-2)));color:var(--warn, var(--rose));display:flex;align-items:center;gap:12px;padding:14px 18px;margin:12px 20px;border-radius:8px">
         ${svg(I.alert || I.warn)}
         <span style="flex:1"><b>Kon leads niet laden:</b> ${esc(_act.error)}</span>
@@ -634,19 +638,50 @@
     return list + modal;
   }
 
+  // Ronde 8: dezelfde fail-soft-patroon als fetchActief (ronde 6). 8s timeout
+  // via tryFetch/Promise.race; try/catch/finally; loading ALTIJD op false in
+  // finally (voorheen bleef 'loading=true' hangen bij seq-mismatch of throw,
+  // waardoor detail-view eeuwig "Laden…" toonde). Op fail: _det.data krijgt
+  // safe shape { lead:{} } zodat de check !_det.data false wordt en render
+  // niet opnieuw queueMicrotask(fetchDetail) triggert (retry-storm break).
+  // _det.debug bevat laatste-call status voor het tijdelijke debug-blok.
   async function fetchDetail(id) {
     if (_det.loading && _det.id === id) return;
     const seq = ++_det.seq;
     _det.loading = true; _det.error = null; _det.id = id;
+    _det.debug = { url: '/api/leads-detail?id=' + encodeURIComponent(id), status: 'pending', keys: null, error: null, at: new Date().toISOString() };
     window.DFO.render();
-    const data = await tryFetch('leads-detail', '/api/leads-detail?id=' + encodeURIComponent(id));
-    if (seq !== _det.seq) return;
-    _det.data = data;
-    _det.notitieDraft = data?.notitie || '';
-    _det.loading = false;
-    if (!data) _det.error = 'Kon lead-detail niet laden';
-    window.DFO.render();
+    try {
+      const data = await tryFetch('leads-detail', _det.debug.url);
+      if (seq !== _det.seq) return;
+      if (!data) {
+        _det.data = { lead: {}, antwoorden: [], messages: [], eigenaar: null };
+        _det.error = 'Kon lead-detail niet laden (endpoint returnde null; check RBAC/500).';
+        _det.debug.status = 'null'; _det.debug.keys = null;
+      } else {
+        _det.data = data;
+        _det.notitieDraft = data.notitie || '';
+        _det.debug.status = '200'; _det.debug.keys = Object.keys(data).join(', ');
+      }
+    } catch (e) {
+      if (seq !== _det.seq) return;
+      _det.data = { lead: {}, antwoorden: [], messages: [], eigenaar: null };
+      _det.error = 'Fetch-fout: ' + (e?.message || 'onbekend');
+      _det.debug.status = 'throw'; _det.debug.error = e?.message || String(e);
+      console.error('[leads-v2] fetchDetail exception:', e?.message);
+    } finally {
+      if (seq === _det.seq) {
+        _det.loading = false;
+        window.DFO.render();
+      }
+    }
   }
+  window.__leadDetailRetry = () => {
+    if (!_det.id) return;
+    const id = _det.id;
+    _det.data = null; _det.error = null;
+    fetchDetail(id);
+  };
 
   function detailView() {
     const id = urlParam('lead');
@@ -658,16 +693,30 @@
     const messages = Array.isArray(d.messages) ? d.messages : [];
     const eigenaar = d.eigenaar || null;
     const [sc, sl] = STATUS_TO_PILL[l.status] || ['neutral', l.status || '—'];
+    // Ronde 8: Terug-knop STAAT bewust bovenaan en heeft geen data-guard —
+    // hij werkt tijdens laden en bij fout. Error-block toont fetch-status +
+    // retry-knop zodat de user nooit vastzit. Debug-block (tijdelijk) toont
+    // endpoint-URL + response-keys zodat één screenshot de oorzaak toont.
     return `${previewHeader('Lead-detail · live', _det)}
       <div class="tk-det-head">
         <button class="btn" onclick="__leadBack()">← Terug naar lijst</button>
         <div class="tk-det-title">${esc(l.naam) || (_det.loading ? 'Laden…' : '—')}</div>
         <div class="tk-det-meta">
-          ${H.pill(sc, sl)}
+          ${l.status ? H.pill(sc, sl) : ''}
           ${l.bron ? `<span class="pill pill-neutral">${esc(l.bron)}</span>` : ''}
           ${l.score != null ? `<span class="pill pill-neutral">Score ${l.score}${l.drempel ? ' / ' + l.drempel : ''}</span>` : ''}
         </div>
       </div>
+      ${_det.error ? `<div class="sv-empty" style="border:1px solid var(--warn-line, var(--rose-line, var(--line)));background:var(--warn-soft, var(--rose-soft, var(--surface-2)));color:var(--warn, var(--rose));display:flex;align-items:center;gap:12px;padding:14px 18px;margin:12px 20px;border-radius:8px">
+        ${svg(I.alert || I.warn)}
+        <span style="flex:1"><b>Kon lead-detail niet laden:</b> ${esc(_det.error)}</span>
+        <button class="btn btn-sm" onclick="__leadDetailRetry()">${svg(I.repeat || I.settings)} Opnieuw proberen</button>
+      </div>` : ''}
+      ${_det.debug ? `<div style="margin:0 20px 8px;padding:8px 12px;border:1px dashed var(--line);border-radius:6px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;color:var(--text-3);background:var(--surface-2)">
+        <b>DEBUG</b> · ${esc(_det.debug.at)} · <code>${esc(_det.debug.url)}</code> → status=<b>${esc(String(_det.debug.status))}</b>
+        ${_det.debug.keys ? ` · keys=[${esc(_det.debug.keys)}]` : ''}
+        ${_det.debug.error ? ` · error=${esc(_det.debug.error)}` : ''}
+      </div>` : ''}
       <div class="tk-det-grid">
         <div class="tk-det-main">
           <div class="sv-card">
