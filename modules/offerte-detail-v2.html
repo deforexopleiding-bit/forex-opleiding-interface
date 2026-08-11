@@ -161,7 +161,12 @@
       <div class="odv-meta" id="odvMeta"></div>
     </div>
     <div class="odv-actions" id="odvActions">
-      <button class="btn btn-ghost" id="odvRefreshBtn" title="Ververs status">↻ Vernieuwen</button>
+      <!-- 4-knoppen-cleanup (2026-08-11, sync met in-shell view):
+           - '↻ Vernieuwen' verwijderd (statische generieke refresh, redundant).
+           - '↗ Open in TL' verwijderd uit dynamische acties.
+           - '📅 Koppel aan historisch event' verwijderd.
+           - '👤 Klant-detail' verwijderd uit actiebalk (link onderin blijft).
+           Behouden: 'Ververs vanuit Teamleader' (echte TL-sync). -->
       <button class="btn btn-ghost" id="odvTlSyncBtn" title="Haal live status uit Teamleader (checkt of klant getekend heeft)">↻ Ververs vanuit Teamleader</button>
       <span id="odvDynamicActions"></span>
     </div>
@@ -362,7 +367,7 @@ let _dealTitle = 'Offerte';
     document.getElementById('odvBody').innerHTML = '<div class="odv-card"><div class="odv-card-b" style="color:var(--rose)">Geen offerte-id in URL. Gebruik /modules/offerte-detail-v2.html?id=&lt;uuid&gt;.</div></div>';
     return;
   }
-  document.getElementById('odvRefreshBtn').addEventListener('click', () => { toast('Verversen…'); load(); });
+  // odvRefreshBtn verwijderd (4-knoppen-cleanup) — dus geen listener nodig.
   document.getElementById('odvTlSyncBtn').addEventListener('click', async () => {
     const btn = document.getElementById('odvTlSyncBtn');
     btn.disabled = true; toast('TL-status ophalen…');
@@ -533,11 +538,10 @@ function render(d) {
 
 function renderActions(deal, c) {
   const st = deal.tl_quotation_status || 'draft';
-  const tlBtn = deal.tl_quotation_id
-    ? `<a class="btn btn-ghost" href="https://focus.teamleader.eu/quotations/${esc(deal.tl_quotation_id)}" target="_blank" rel="noopener">↗ Open in TL</a>`
-    : '';
+  // 4-knoppen-cleanup: 'Open in TL', 'Koppel aan historisch event', 'Klant-
+  // detail' (bovenaan) verwijderd. Klant-detail-link ONDERIN het Klant-blok
+  // blijft (regel ~470).
   const copyBtn = `<button class="btn btn-ghost" onclick="doCopy()" title="Maak een verse concept-offerte met dezelfde gegevens">📋 Kopiëren</button>`;
-  const custBtn = c.id ? `<a class="btn btn-ghost" href="/modules/klanten.html?id=${encodeURIComponent(c.id)}" target="_blank" rel="noopener">👤 Klant-detail</a>` : '';
 
   let btns = '';
   if (st === 'accepted' || st === 'signed') {
@@ -549,8 +553,7 @@ function renderActions(deal, c) {
     const onboardBtn = c.id
       ? `<button class="btn" style="background:#0a2f63;color:#fff" onclick="obOpen()" title="Onboarding-traject aanmelden (F0.2 modal)">📋 Onboarding aanmelden</button>`
       : '';
-    const histEvBtn = `<a class="btn btn-ghost" href="/modules/admin-historical-events.html?deal_id=${encodeURIComponent(deal.id)}" title="Koppel aan historisch event">📅 Koppel aan historisch event</a>`;
-    btns = `${convertBtn} ${onboardBtn} ${histEvBtn} ${copyBtn} ${custBtn} ${tlBtn}`;
+    btns = `${convertBtn} ${onboardBtn} ${copyBtn}`;
   } else if (st === 'sent') {
     btns = `<button class="btn" onclick="odvSendOpen()">Opnieuw versturen</button>
       <button class="btn" style="background:var(--amber, #C2700A);color:#fff" onclick="doMarkAccepted()">Markeer als getekend</button>

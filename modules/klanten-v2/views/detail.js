@@ -14,7 +14,7 @@ import { openEditCustomerModal }    from './modals/edit-customer.js';
 import { openArchiveCustomerModal } from './modals/archive-customer.js';
 import { renderCommunicatieTab } from './tabs/communicatie.js';
 import { renderOffertesTab }     from './tabs/offertes.js';
-import { renderAbonnementenTab } from './tabs/abonnementen.js';
+import { renderAbonnementenTab } from './tabs/abonnementen.js?v=2';
 import { renderFacturenTab }     from './tabs/facturen.js';
 import { renderWanbetalersTab }  from './tabs/wanbetalers.js';
 import { renderAuditTab }        from './tabs/audit.js';
