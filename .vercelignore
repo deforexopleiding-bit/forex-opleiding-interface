@@ -1,0 +1,28 @@
+# .vercelignore — exclude niet-runtime bestanden van de Vercel deploy-upload.
+# Alle patterns hieronder worden NIET naar Vercel geüpload, wat de deploy-
+# init-fase verkleint en de function-bundle-scan sneller maakt (Vercel hoeft
+# niet door deze folders te lopen om imports te resolven).
+#
+# WAT NIET UITSLUITEN:
+#   - api/           (serverless functions — runtime)
+#   - modules/       (statische HTML/JS/CSS — served)
+#   - shared/, img/  (statische assets)
+#   - vercel.json, package.json — build-config
+#   - node_modules   (Vercel installeert zelf via package.json — automatic)
+
+# Documentatie (~n MB, geen runtime-impact)
+docs/
+*.md
+README*
+
+# Scratchpad (Claude Code sessie-tijdelijk werk, nooit runtime)
+scratchpad/
+.claude/
+
+# Tests (draaien lokaal + CI, niet productie)
+tests/
+
+# SQL-migraties (draaien handmatig in Supabase, geen runtime-import)
+migrations/
+supabase-migrations/
+docs/sql-migrations/
