@@ -1,9 +1,11 @@
 // modules/klanten-v2/views/tabs/abonnementen.js
 //
-// Abonnementen-tab van klanten-v2 (PR-B5). 25 items uit de INVENTARIS,
-// STRIKT READ-ONLY. Pauze/stop-flow blijft in /modules/sales.html;
-// hier alleen visuele preview + externe deep-links (nieuw tabblad,
-// dossier blijft open). Geen create/edit/mutation vanuit deze tab.
+// Abonnementen-tab van klanten-v2. Sinds finance-mutaties ronde: OOK write-
+// acties per abo (Aanpassen / Uitstellen / Deactiveren) + bulk-postpone
+// header-knop. Mutaties gaan via views/modals/subscription-actions.js;
+// endpoints POST /api/sales-subscription-{postpone|update|delete} +
+// POST /api/sales-customer-postpone-all. Server-side RBAC (403 opgevangen
+// als toast in modal). Na success: actLoad(rootEl) opnieuw voor verse lijst.
 //
 // Data-bron: /api/sales-customer-subscriptions?customer_id=X (bestaand).
 // Response:
@@ -13,6 +15,13 @@
 //     has_any_invoice }]
 //   pending_deal_id: uuid | null   (accepted offerte zonder abo → wizard-CTA)
 //   bypass_events:   array          (reservation-fee bypass-audit — banner)
+
+import {
+  openSubscriptionPostponeModal,
+  openSubscriptionPostponeAllModal,
+  openSubscriptionUpdateModal,
+  openSubscriptionDeleteModal,
+} from '../modals/subscription-actions.js';
 
 const K = () => window.KV;
 
@@ -278,6 +287,19 @@ function renderSubCard(sub) {
         </button>
         ${dealLink}
         ${tlLink}
+        <div style="flex:1"></div>
+        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-abo-update="${K().esc(sub.id)}" ${hasInv ? 'disabled title="Al gefactureerd — bewerken niet toegestaan"' : 'title="Abonnement aanpassen"'}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          Aanpassen
+        </button>
+        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-abo-postpone="${K().esc(sub.id)}" title="Uitstellen of verlengen (1-12 mnd)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          Uitstellen
+        </button>
+        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm kv-abo-btn-danger" data-kv-abo-delete="${K().esc(sub.id)}" title="Deactiveren">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"/></svg>
+          Deactiveren
+        </button>
       </div>
 
       ${isExpanded ? `<div class="kv-abo-card-lines">${renderLineItems(sub)}</div>` : ''}
@@ -361,6 +383,18 @@ function render(rootEl) {
       </div>`;
   }
 
+  // Bulk-postpone header-knop: alleen als er >=2 actieve abo's zijn.
+  const activeCount = state.subs.filter((s) => {
+    const k = String(s.status || '').toLowerCase();
+    return k === 'active' || k === 'running';
+  }).length;
+  const bulkBtn = activeCount >= 2
+    ? `<button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-abo-postpone-all title="Alle ${activeCount} actieve abo's tegelijk uitstellen">
+         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+         Alle uitstellen (${activeCount})
+       </button>`
+    : '';
+
   rootEl.innerHTML = `
     <div class="kv-abo">
       <div class="kv-abo-head">
@@ -369,6 +403,7 @@ function render(rootEl) {
           Abonnementen
           <span class="kv-prof-count">${state.loading ? '…' : state.subs.length}</span>
         </div>
+        <div class="kv-abo-head-actions" style="margin-left:auto; display:flex; gap:8px;">${bulkBtn}</div>
       </div>
       ${body}
     </div>`;
@@ -391,6 +426,36 @@ function wire(rootEl) {
       const tab = a.getAttribute('data-kv-goto-tab');
       if (tab) K().navigate({ tab });
     });
+  });
+
+  // Mutatie-buttons per card (finance-mutaties ronde).
+  const findSub = (id) => state.subs.find((s) => s.id === id);
+  const refresh = () => actLoad(rootEl);
+  rootEl.querySelectorAll('[data-kv-abo-update]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (btn.disabled) return;
+      const sub = findSub(btn.getAttribute('data-kv-abo-update'));
+      if (sub) openSubscriptionUpdateModal({ sub, onSuccess: refresh });
+    });
+  });
+  rootEl.querySelectorAll('[data-kv-abo-postpone]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const sub = findSub(btn.getAttribute('data-kv-abo-postpone'));
+      if (sub) openSubscriptionPostponeModal({ sub, onSuccess: refresh });
+    });
+  });
+  rootEl.querySelectorAll('[data-kv-abo-delete]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const sub = findSub(btn.getAttribute('data-kv-abo-delete'));
+      if (sub) openSubscriptionDeleteModal({ sub, onSuccess: refresh });
+    });
+  });
+  rootEl.querySelector('[data-kv-abo-postpone-all]')?.addEventListener('click', () => {
+    const activeCount = state.subs.filter((s) => {
+      const k = String(s.status || '').toLowerCase();
+      return k === 'active' || k === 'running';
+    }).length;
+    openSubscriptionPostponeAllModal({ customerId: state.customerId, count: activeCount, onSuccess: refresh });
   });
 }
 
