@@ -436,8 +436,19 @@
       return `${convertBtn} ${onboardBtn} ${copyBtn}`;
     }
     if (st === 'sent') {
+      // Bewerken bij 'sent' — DIVERGENTIE van v1 op expliciet verzoek van
+      // Jeffrey (2026-08-11). v1 offerte-detail.html:401-403 toont Bewerken
+      // alleen in de 'draft'-branch. Rationale: Jeffrey wil ook een
+      // reeds-verzonden (maar nog-niet-getekende) offerte kunnen aanpassen.
+      // Server-side is dat veilig: api/sales-deal-update.js blokkeert alleen
+      // 'accepted'/'signed' (SALES_DEAL_SIGNED, r38-48). Wijzigingen aan
+      // een deal met tl_quotation_id blijven LOKAAL (tl_sync_skipped:true,
+      // r145-149) — TL-quotation wordt NIET auto-geüpdatet; volgende
+      // 'Opnieuw versturen' triggert de update naar de klant. Zelfde
+      // gedrag als v1 sales-deal-update.
       return `<button class="btn" onclick="odvSendOpen()">Opnieuw versturen</button>
         <button class="btn" style="background:var(--amber, #C2700A);color:#fff" onclick="__odvDoMarkAccepted()">Markeer als getekend</button>
+        <button class="btn btn-ghost" onclick="__odvEditDeal('${esc(deal.id)}')" title="Bewerken in v2-wizard (wijzigingen lokaal — TL-quotation niet auto-geüpdatet)">Bewerken</button>
         ${copyBtn}
         <button class="btn btn-danger" onclick="__odvDoDelete()">Verwijderen</button>`;
     }
