@@ -2858,3 +2858,97 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
 }
 .fin-debug-tbl .mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
 
+/* ── Finance-modals (.fn-modal-* — ronde-5d).
+   Recidive-fix van bekende ONZICHTBARE modal bug: de finance-v2 create-flow
+   (Nieuwe factuur + toekomstige edit-facturen) gebruikt .fn-modal-*-classes
+   die nooit in klanten-v2.css bestonden. Modal wordt wél in DOM gerender'd
+   maar zonder position:fixed/backdrop/z-index → visueel niet zichtbaar.
+   Pattern gekopieerd van .sw-modal-back (die WEL werkt in de wizard). ──── */
+.fn-modal-back {
+  position: fixed; inset: 0;
+  background: rgba(17, 23, 33, .42);
+  backdrop-filter: blur(3px);
+  z-index: 9500;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.fn-modal {
+  width: 100%; max-width: 720px; max-height: calc(100vh - 48px);
+  background: var(--surface, #FFFFFF); border-radius: var(--r-lg, 14px);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, .32);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.fn-modal-head {
+  padding: 13px 17px; border-bottom: 1px solid var(--border, #E2E7EE);
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface-2, #F2F4F7);
+}
+.fn-modal-title { font-size: 15px; font-weight: 600; color: var(--text, #111721); flex: 1; }
+.fn-modal-body { flex: 1 1 auto; overflow-y: auto; padding: 16px 18px; }
+.fn-modal-foot {
+  padding: 12px 17px; border-top: 1px solid var(--border, #E2E7EE);
+  display: flex; gap: 8px; align-items: center;
+  background: var(--surface-2, #F2F4F7); justify-content: flex-end;
+}
+
+/* Customer-picker dropdown (search-results-list binnen modal-body) */
+.fn-cust-picker { position: relative; }
+.fn-cust-dd {
+  position: absolute; top: calc(100% + 2px); left: 0; right: 0;
+  max-height: 240px; overflow-y: auto;
+  background: var(--surface, #FFFFFF);
+  border: 1px solid var(--border-strong, #C9D2DE);
+  border-radius: 6px; box-shadow: 0 6px 16px rgba(0, 0, 0, .12);
+  z-index: 10;
+}
+.fn-cust-dd-item { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid var(--border, #E2E7EE); }
+.fn-cust-dd-item:last-child { border-bottom: 0; }
+.fn-cust-dd-item:hover { background: var(--surface-2, #F2F4F7); }
+.fn-cust-dd-item-name { font-size: 13px; color: var(--text, #111721); font-weight: 500; }
+.fn-cust-dd-item-email { font-size: 11.5px; color: var(--text-3, #8B95A5); }
+
+/* Line-items (regels invoice) */
+.fn-lines { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.fn-line-row {
+  display: grid; grid-template-columns: 2fr 60px 100px 70px 32px;
+  gap: 6px; align-items: center;
+}
+.fn-line-row input {
+  height: 32px; padding: 0 8px; font-size: 12.5px; font-family: inherit;
+  background: var(--surface, #FFFFFF);
+  border: 1px solid var(--border-strong, #C9D2DE); border-radius: 6px;
+  color: var(--text, #111721);
+}
+.fn-line-row input:focus { outline: none; border-color: var(--m, #6D3FD4); box-shadow: 0 0 0 3px color-mix(in srgb, var(--m, #6D3FD4) 18%, transparent); }
+.fn-line-add {
+  align-self: flex-start; margin-top: 4px;
+  height: 30px; padding: 0 12px;
+  background: transparent; border: 1px dashed var(--border-strong, #C9D2DE);
+  border-radius: 6px; color: var(--text-2, #586374);
+  font-size: 12px; font-family: inherit; cursor: pointer;
+  transition: border-color .12s, color .12s;
+}
+.fn-line-add:hover { border-color: var(--m, #6D3FD4); color: var(--m, #6D3FD4); }
+.fn-line-add[disabled] { opacity: .45; cursor: not-allowed; }
+.fn-line-remove {
+  width: 28px; height: 28px;
+  background: transparent; border: 1px solid var(--border, #E2E7EE);
+  border-radius: 6px; color: var(--text-3, #8B95A5);
+  cursor: pointer; font-size: 16px; line-height: 1;
+}
+.fn-line-remove:hover:not([disabled]) { border-color: var(--rose, #C22B3E); color: var(--rose, #C22B3E); }
+.fn-line-remove[disabled] { opacity: .35; cursor: not-allowed; }
+
+/* Guard-input (bevestigings-veld "typ CONCEPT") */
+.fn-guard { margin: 12px 0 4px; padding: 12px; background: var(--surface-2, #F2F4F7); border-radius: 8px; }
+.fn-guard-input {
+  width: 100%; height: 32px; padding: 0 10px;
+  background: var(--surface, #FFFFFF);
+  border: 1px solid var(--amber, #C2700A); border-radius: 6px;
+  color: var(--text, #111721); font-size: 12.5px; font-family: inherit;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .08em;
+}
+.fn-guard-input:focus { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber, #C2700A) 22%, transparent); }
+
+/* Date-range toolbar wrap (Bank / Facturen) */
+.fn-daterange { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
