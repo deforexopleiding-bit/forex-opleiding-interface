@@ -356,6 +356,11 @@
 
   window.__finInvNew  = () => {
     _newInv.open = true;
+    // Tijdelijke debug-log (ronde-5d): bevestigen dat handler triggert +
+    // state klopt. Root-cause vorige onzichtbaarheid: .fn-modal-* CSS
+    // ontbrak; modal renderde wél in DOM maar zonder position:fixed etc.
+    // Verwijderen zodra Jeffrey bevestigt dat modal nu zichtbaar opent.
+    console.info('[finance-v2] __finInvNew clicked; _newInv.open =', _newInv.open, '; modal-CSS moet nu resolven naar visible overlay.');
     if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
   };
   window.__finInvNewClose = () => {
