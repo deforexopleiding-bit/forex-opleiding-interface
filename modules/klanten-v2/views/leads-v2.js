@@ -180,23 +180,34 @@
   window.__leadAct2Confirm = async () => {
     if (!_det.id || !_act2.kind || _act2.submitting) return;
     const kind = _act2.kind;
-    // Ronde 5: "Omzetten naar klant" opent nu de offerte-aanmaak-flow met
-    // lead-data als prefill (voorlopig oude sales-wizard.html). De v1-endpoint
-    // /api/leads-promote maakt alleen customer aan zonder offerte — dat is een
-    // fase 1 van 2. Voor Jeffrey is het pas "af" zodra de offerte staat, dus
-    // routen we door naar de wizard. Zodra v2-offerte-wizard live is (Batch 2)
-    // wordt dit een in-app modal.
+    // "Omzetten naar klant" opent nu de v2-wizard IN-SHELL met lead-data
+    // als prefill (batch2b Feature C). sessionStorage-payload + URL-param
+    // blijven behouden voor URL-share/refresh-scenario's; wizard leest via
+    // readPrefill() beide bronnen. De detail-slide-over sluit zodat de
+    // wizard-modal bovenop schone shell verschijnt. Fallback naar oude
+    // wizard-html als sales-wizard-v2.js niet geladen is (defensive).
     if (kind === 'promote') {
       const lead = _det.data?.lead || {};
-      try {
-        sessionStorage.setItem('_prefill_lead', JSON.stringify({
-          lead_id: lead.id,
-          first_name: lead.voornaam || '',
-          last_name: lead.achternaam || '',
-          email: lead.email || '',
-          phone: lead.telefoon || '',
-        }));
-      } catch (_) { /* ignore quota */ }
+      const prefill = {
+        lead_id:    lead.id,
+        first_name: lead.voornaam   || '',
+        last_name:  lead.achternaam || '',
+        email:      lead.email      || '',
+        phone:      lead.telefoon   || '',
+      };
+      try { sessionStorage.setItem('_prefill_lead', JSON.stringify(prefill)); } catch (_) { /* ignore quota */ }
+      _act2.open = false; _act2.kind = null; _act2.submitting = false;
+      window.DFO.render();
+      if (typeof window.__swOpen === 'function') {
+        // Wizard leest sessionStorage in readPrefill; we geven ook opts
+        // mee zodat er geen twijfel is over de bron. state.wizard.
+        // source_lead_id + prefillLeadId worden door readPrefill gezet.
+        // Wizard opent bovenop de shell + lead-detail-panel (die blijft
+        // links zichtbaar tot gebruiker klaar is met wizard).
+        window.__swOpen({ prefillLead: prefill });
+        return;
+      }
+      // Fallback naar oude wizard-html.
       const url = '/modules/sales-wizard.html?source_lead_id=' + encodeURIComponent(lead.id || '');
       window.location.href = url;
       return;
