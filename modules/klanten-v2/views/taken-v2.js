@@ -31,6 +31,10 @@
   const { I, svg, F } = window.DFO;
   const H = window.KV_V2.helpers;
 
+  // Defensieve array-guard: gebruikt overal waar we .filter/.sort/.slice
+  // aanroepen. Onverwachte response-shape → lege lijst i.p.v. TypeError.
+  const asArr = (x) => Array.isArray(x) ? x : [];
+
   // ── State per tab-scope ────────────────────────────────────────────────
   // 'mine' = scope=mine (mijn taken); 'byMe' = scope=assigned_by_me.
   // "Afgerond"-tab herbruikt 'mine'-fetch (filter client-side status=done).
@@ -38,6 +42,23 @@
     mine: { loading: false, error: null, taken: null, seq: 0, params: '' },
     byMe: { loading: false, error: null, taken: null, seq: 0, params: '' },
   };
+
+  // stableSearch onSearch-handlers idempotent registreren (H.onSearch
+  // overschrijft handler op zelfde key). Doen we bij eerste view-mount
+  // per tab zodat cursor + input-value overleven DFO.render()-swaps.
+  const _searchWired = new Set();
+  function wireSearch(key) {
+    if (_searchWired.has(key)) return;
+    if (H.onSearch) {
+      H.onSearch(key, () => {
+        if (window.DFO && window.DFO.render) window.DFO.render();
+      });
+      _searchWired.add(key);
+    }
+  }
+  function currentSearch(key) {
+    return H.getSearchValue ? String(H.getSearchValue(key) || '').trim().toLowerCase() : '';
+  }
 
   // ── tryFetch met 8s timeout ────────────────────────────────────────────
   async function tryFetch(label, url, timeoutMs = 8000) {
@@ -54,6 +75,9 @@
   }
 
   // ── Fetch met sequence-guard ──────────────────────────────────────────
+  // Response-shape (bron: api/taken.js:192): { taken: [...] } — array zit
+  // ALTIJD in `taken`-veld. Guard met Array.isArray voor onverwachte
+  // shapes (bv. 500-error die HTML terugkaatst of proxy die shape wijzigt).
   async function fetchScope(scope) {
     const st = _live[scope];
     if (st.loading) return;
@@ -62,7 +86,7 @@
     const url = '/api/taken?scope=' + (scope === 'byMe' ? 'assigned_by_me' : 'mine');
     const data = await tryFetch('taken:' + scope, url);
     if (seq !== st.seq) return;
-    st.taken = data && Array.isArray(data.taken) ? data.taken : [];
+    st.taken = asArr(data && data.taken);
     st.error = data ? null : 'Kon taken niet laden';
     st.loading = false;
     if (window.DFO && window.DFO.render) window.DFO.render();
@@ -122,9 +146,12 @@
   const emptyBlock = (t, s) => `<div class="empty"><div class="empty-ico">${svg(I.check2)}</div><div class="empty-t">${t}</div><div class="empty-s">${s}</div></div>`;
 
   // ── Sort helpers ──────────────────────────────────────────────────────
+  // asArr()-guard voorkomt TypeError als caller per ongeluk non-array
+  // doorgeeft (bv. de vorige bug: applySearch retourneerde per ongeluk
+  // een stableSearch mount-HTML string i.p.v. gefilterde array).
   const PRIO_ORDER = { Urgent: 4, Hoog: 3, Normaal: 2, Laag: 1 };
   function sortRows(rows, key) {
-    const arr = rows.slice();
+    const arr = asArr(rows).slice();
     if (key === 'deadline') {
       arr.sort((a, b) => {
         const da = a.deadline ? new Date(a.deadline).getTime() : Infinity;
@@ -140,17 +167,27 @@
     return arr;
   }
 
-  // ── Client-side search (stableSearch) ─────────────────────────────────
-  function applySearch(rows, tabKey) {
-    if (typeof H.stableSearch === 'function') {
-      return H.stableSearch(rows, tabKey, (t) => `${t.titel || ''} ${t.omschrijving || ''} ${t.assigned_to_name || ''} ${t.categorie || ''}`);
-    }
-    return rows;
+  // ── Client-side search-filter ─────────────────────────────────────────
+  // stableSearch registreert alleen input-DOM + returnt mount-HTML. Filter-
+  // logica is per view zelf — we lezen de current value via getSearchValue
+  // en doen een lowercase substring-match op titel/omschrijving/assignee/
+  // categorie. Vorige bug: applySearch(rows, key) riep stableSearch(rows,...)
+  // aan met de array als key → retour = string → .slice() crashte.
+  function filterBySearch(rows, key) {
+    const q = currentSearch(key);
+    if (!q) return asArr(rows);
+    return asArr(rows).filter((t) => {
+      const hay = [
+        t.titel, t.omschrijving, t.assigned_to_name, t.categorie,
+      ].map((v) => String(v == null ? '' : v).toLowerCase()).join(' ');
+      return hay.includes(q);
+    });
   }
 
   // ── Table renderer ────────────────────────────────────────────────────
   function takenTable(rows) {
-    if (!rows.length) return emptyBlock('Geen taken', 'Er zijn geen taken die aan de huidige filters voldoen.');
+    const list = asArr(rows);
+    if (!list.length) return emptyBlock('Geen taken', 'Er zijn geen taken die aan de huidige filters voldoen.');
     return H.table(
       [
         { l: 'Titel' },
@@ -160,7 +197,7 @@
         { l: 'Prio' },
         { l: 'Status', cls: 'optional' },
       ],
-      rows.map((t) => [
+      list.map((t) => [
         `<span class="cell-main">${H.esc ? H.esc(t.titel) : (t.titel || '—')}</span>`,
         `<span style="color:var(--text-2);font-size:12.5px">${t.categorie || '—'}</span>`,
         `<span style="font-size:12.5px">${t.assigned_to_name || (t.assigned_to_id ? '#' + String(t.assigned_to_id).slice(0, 6) : '—')}</span>`,
@@ -173,43 +210,54 @@
   }
 
   // ── Toolbar ────────────────────────────────────────────────────────────
-  function toolbar(tabKey) {
+  // stableSearch(key, placeholder) — RONDE 4 pattern (2 args): returnt
+  // mount-slot HTML; input-DOM overleeft DFO.render() zodat cursor + value
+  // bewaard blijven. Filter-logica leest H.getSearchValue(key) in view.
+  function toolbar(searchKey) {
     const sortKey = F('tk-sort', 'created');
+    const searchHtml = H.stableSearch
+      ? H.stableSearch(searchKey, 'Zoek taak / assignee / categorie…')
+      : H.search('Zoek taak / assignee / categorie…');
     return H.toolbar([
       H.chips('tk-sort', [
         { l: 'Nieuwste', v: 'created' },
         { l: 'Deadline', v: 'deadline' },
         { l: 'Prioriteit', v: 'prio' },
       ], sortKey),
-      H.search('Zoek taak / assignee / categorie…'),
+      searchHtml,
       `<div class="tb-right"><button class="btn btn-primary" onclick="__takenNew()">${svg(I.plus)}Nieuwe taak</button></div>`,
     ]);
   }
 
   // ── KPI-strip ──────────────────────────────────────────────────────────
+  // Alle .filter() calls door asArr() geguard zodat onverwachte data-shape
+  // nooit meer een TypeError kan opleveren.
   function kpisMijn(all) {
-    const open = all.filter((t) => t.status !== 'done');
+    const list = asArr(all);
+    const open = list.filter((t) => t.status !== 'done');
     const vandaag = open.filter((t) => t.deadline && new Date(t.deadline).toDateString() === new Date().toDateString()).length;
     const teLaat = open.filter((t) => t.deadline && new Date(t.deadline).getTime() < Date.now()).length;
     return H.kpis([
       { c: 'blue',    icon: I.check2, label: 'Open taken',          val: String(open.length), hi: 1, sub: vandaag + ' vandaag' },
       { c: 'rose',    icon: I.alert,  label: 'Te laat',             val: String(teLaat),                                    sub: 'deadline verstreken' },
-      { c: 'emerald', icon: I.tick,   label: 'Afgerond (in scope)', val: String(all.filter((t) => t.status === 'done').length),        sub: 'lifetime' },
+      { c: 'emerald', icon: I.tick,   label: 'Afgerond (in scope)', val: String(list.filter((t) => t.status === 'done').length),        sub: 'lifetime' },
     ]);
   }
   function kpisByMe(all) {
-    const open = all.filter((t) => t.status !== 'done');
+    const list = asArr(all);
+    const open = list.filter((t) => t.status !== 'done');
     const teLaat = open.filter((t) => t.deadline && new Date(t.deadline).getTime() < Date.now()).length;
     return H.kpis([
       { c: 'blue',    icon: I.check2, label: 'Uitgezet & open',     val: String(open.length), hi: 1 },
       { c: 'rose',    icon: I.alert,  label: 'Te laat',             val: String(teLaat),                                    sub: 'deadline verstreken' },
-      { c: 'emerald', icon: I.tick,   label: 'Afgerond',            val: String(all.filter((t) => t.status === 'done').length),        sub: 'lifetime' },
+      { c: 'emerald', icon: I.tick,   label: 'Afgerond',            val: String(list.filter((t) => t.status === 'done').length),        sub: 'lifetime' },
     ]);
   }
   function kpisAfgerond(rows) {
-    const week = rows.filter((t) => t.afgerond_op && (Date.now() - new Date(t.afgerond_op).getTime()) < 7 * 86400e3).length;
+    const list = asArr(rows);
+    const week = list.filter((t) => t.afgerond_op && (Date.now() - new Date(t.afgerond_op).getTime()) < 7 * 86400e3).length;
     return H.kpis([
-      { c: 'emerald', icon: I.tick, label: 'Afgerond totaal', val: String(rows.length), hi: 1, sub: 'in mijn scope' },
+      { c: 'emerald', icon: I.tick, label: 'Afgerond totaal', val: String(list.length), hi: 1, sub: 'in mijn scope' },
       { c: 'blue',    icon: I.check2, label: 'Deze week',     val: String(week) },
     ]);
   }
@@ -239,7 +287,7 @@
     // Voor kanban tonen we alle taken uit de actieve tab. Voor "Afgerond"
     // filteren we niet — de kanban toont alle 3 kolommen ongeacht tab-filter.
     const scope = currentScope();
-    return _live[scope]?.taken || [];
+    return asArr(_live[scope] && _live[scope].taken);
   }
   if (window.KV_V2 && window.KV_V2.kanban) {
     window.KV_V2.kanban.register('taken', {
@@ -266,10 +314,10 @@
       // Klik op kaart opent detail-modal.
       onCardClick: (t) => window.__takenOpen && window.__takenOpen(t.id),
       onMove: async (id, newStatus) => {
-        // Optimistic mutatie in alle scope-caches.
+        // Optimistic mutatie in alle scope-caches (met asArr-guard).
         for (const key of Object.keys(_live)) {
-          const arr = _live[key]?.taken;
-          if (!arr) continue;
+          const arr = asArr(_live[key] && _live[key].taken);
+          if (!arr.length) continue;
           const t = arr.find((x) => x.id === id);
           if (t) t.status = newStatus;
         }
@@ -308,46 +356,54 @@
   }
 
   // ── Per-tab views ─────────────────────────────────────────────────────
+  // Elke view:
+  //   1) wireSearch(key) — registreer onSearch → DFO.render bij typen.
+  //   2) filterBySearch(rows, key) — leest getSearchValue, doet lowercase match.
+  //   3) sortRows(rows, sortKey) — asArr-geguard.
   function mijnView() {
+    wireSearch('taken:mine');
     const st = _live.mine;
     if (!st.taken && !st.loading) queueMicrotask(() => fetchScope('mine'));
-    const all = st.taken || [];
-    const searched = applySearch(all, 'taken:mine');
-    const rows = sortRows(searched, F('tk-sort', 'created'));
+    const all = asArr(st.taken);
+    const rows = sortRows(filterBySearch(all, 'taken:mine'), F('tk-sort', 'created'));
     return `
       ${kpisMijn(all)}
-      ${toolbar('mine')}
+      ${toolbar('taken:mine')}
       ${st.error ? errorBlock(st.error)
         : (st.loading && !st.taken) ? skeletonTable(6)
         : takenTable(rows)}`;
   }
 
   function byMeView() {
+    wireSearch('taken:byMe');
     const st = _live.byMe;
     if (!st.taken && !st.loading) queueMicrotask(() => fetchScope('byMe'));
-    const all = st.taken || [];
-    const searched = applySearch(all, 'taken:byMe');
-    const rows = sortRows(searched, F('tk-sort', 'created'));
+    const all = asArr(st.taken);
+    const rows = sortRows(filterBySearch(all, 'taken:byMe'), F('tk-sort', 'created'));
     return `
       ${kpisByMe(all)}
-      ${toolbar('byMe')}
+      ${toolbar('taken:byMe')}
       ${st.error ? errorBlock(st.error)
         : (st.loading && !st.taken) ? skeletonTable(6)
         : takenTable(rows)}`;
   }
 
   function afgerondView() {
+    wireSearch('taken:afgerond');
     const st = _live.mine;
     if (!st.taken && !st.loading) queueMicrotask(() => fetchScope('mine'));
-    const all = st.taken || [];
+    const all = asArr(st.taken);
     // FIX: filter op canonieke 'done' i.p.v. legacy 'klaar'.
     const done = all.filter((t) => t.status === 'done');
-    const searched = applySearch(done, 'taken:afgerond');
+    const searched = filterBySearch(done, 'taken:afgerond');
     // Sort: nieuwste afgerond eerst.
     const rows = searched.slice().sort((a, b) => new Date(b.afgerond_op || 0).getTime() - new Date(a.afgerond_op || 0).getTime());
+    const searchHtml = H.stableSearch
+      ? H.stableSearch('taken:afgerond', 'Zoek afgeronde taak…')
+      : H.search('Zoek afgeronde taak…');
     return `
       ${kpisAfgerond(done)}
-      ${H.toolbar([H.search('Zoek afgeronde taak…')])}
+      ${H.toolbar([searchHtml])}
       ${st.error ? errorBlock(st.error)
         : (st.loading && !st.taken) ? skeletonTable(4)
         : rows.length ? H.table(
