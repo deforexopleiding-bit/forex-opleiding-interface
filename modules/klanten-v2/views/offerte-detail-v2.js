@@ -27,42 +27,50 @@
     catch (_) { return null; }
   }
 
-  // Iframe-HTML voor content-area. Height start bij een min (voorkomt 0-px
-  // flits vóór het eerste odv-resize-bericht), en groeit dan mee met de
-  // content-hoogte die het iframe post via postMessage {type:'odv-resize'}.
-  // Shell-scrollcontainer (klanten-v2 #content) scrollt zelf → geen dubbele
-  // scrollbar, geen afgekapte content.
+  // Iframe-HTML voor content-area. BULLETPROOF fallback (na auto-resize
+  // race-conditions): vaste viewport-hoogte via calc(100dvh - shell-offset),
+  // iframe scrollt intern (scrolling="auto"). Sidebar + topbar + tabs +
+  // terug-knop-strip blijven staan; content-area IS de iframe die tot de
+  // laatste regel scrollt. Geen dubbele main-scrollbar want body heeft
+  // overflow:hidden (shell) én .content past exact rond de iframe.
+  //
+  // Offset-breakdown (klanten-v2 shell layout, gemeten):
+  //   topbar        ~64px
+  //   tabs-strip    ~40px
+  //   preview-header + terug-knop-strip in sales-v2 offertesView ~56px
+  //   totaal        ~160px — extra 20px marge = 180px voor safety.
+  //
+  // Op mobiel 100dvh compenseert voor address-bar dynamische hoogte.
   window.__odvRender = function (dealId) {
     const id = String(dealId || '').trim();
     if (!id) return `<div style="padding:24px;color:var(--rose,#C22B3E)">Geen offerte-id in URL.</div>`;
     const src = '/modules/offerte-detail-v2.html?id=' + encodeURIComponent(id) + '&embed=1';
-    return `<iframe class="odv-shell-frame"
-      src="${src}"
-      title="Offerte-detail"
-      loading="eager"
-      scrolling="no"
-      style="width:100%;min-height:400px;border:0;background:transparent;display:block"
-      allow="clipboard-write"
-    ></iframe>`;
+    return `<div class="odv-shell-frame-wrap"
+      style="position:relative;height:calc(100dvh - 180px);min-height:400px;overflow:hidden">
+      <iframe class="odv-shell-frame"
+        src="${src}"
+        title="Offerte-detail"
+        loading="eager"
+        scrolling="auto"
+        style="width:100%;height:100%;border:0;background:transparent;display:block"
+        allow="clipboard-write"
+      ></iframe>
+    </div>`;
   };
 
-  // Message-listener: iframe post {type:'odv-resize', h:<px>} bij load + elke
-  // DOM/layout-verandering (ResizeObserver + MutationObserver op body). Wij
-  // zetten iframe.style.height = h zodat de shell zelf scrollt. Registreer 1x
-  // (idempotent via _odvMsgBound flag) — iframe DOM-node kan bij re-render
-  // vervangen worden; we selecteren telkens de huidige .odv-shell-frame.
+  // Message-listener (postMessage auto-resize) uitgeschakeld — de vaste-hoogte
+  // fallback maakt 'em overbodig, en de dynamische-height had race-conditions
+  // met DFO.render die #content leeg swapte. Child post nog wel (harmless
+  // no-op) zodat we later terug kunnen naar auto-resize zonder re-code.
+  // Voor debug behouden we alleen een console-log als er berichten binnen-
+  // komen, zodat we kunnen zien dat de child-side werkt.
   if (!window._odvMsgBound) {
     window._odvMsgBound = true;
     window.addEventListener('message', (e) => {
       const d = e && e.data;
       if (!d || d.type !== 'odv-resize') return;
-      // Bescherming: alleen accept vanaf same-origin (parent en iframe zijn
-      // beide op dezelfde host — anders kan een iframe uit een andere origin
-      // ons layout messen).
-      if (e.origin && e.origin !== location.origin) return;
-      const h = Math.max(200, Math.min(20000, Number(d.h) || 0));
-      const frame = document.querySelector('.odv-shell-frame');
-      if (frame) frame.style.height = h + 'px';
+      // No-op — hoogte staat vast. Alleen debug-log.
+      // console.debug('[odv-shell] iframe wilde resize naar', d.h, 'px (genegeerd — vaste-hoogte modus)');
     });
   }
 
