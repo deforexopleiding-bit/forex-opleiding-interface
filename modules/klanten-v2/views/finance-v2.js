@@ -276,9 +276,22 @@
   };
 
   window.__finInvNew  = () => {
-    console.info('[finance-v2] __finInvNew clicked → open modal');
+    // Debug-trace (tijdelijk, ronde-5b): laat expliciet zien dat handler
+    // triggert. Verwijderen zodra bevestigd werkend door Jeffrey.
+    console.info('[finance-v2] __finInvNew clicked → open modal', { was: _newInv.open });
     _newInv.open = true;
-    if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+    try {
+      if (window.DFO && typeof window.DFO.render === 'function') {
+        window.DFO.render();
+        console.info('[finance-v2] __finInvNew: DFO.render() called, _newInv.open =', _newInv.open);
+      } else {
+        console.warn('[finance-v2] __finInvNew: DFO.render NIET beschikbaar!');
+        alert('DEBUG: DFO.render niet beschikbaar — de wizard-modal kan niet renderen. Report dit aan Claude Code.');
+      }
+    } catch (e) {
+      console.error('[finance-v2] __finInvNew render fail:', e);
+      alert('DEBUG: __finInvNew crash tijdens render: ' + (e?.message || e));
+    }
   };
   window.__finInvNewClose = () => {
     _newInv.open = false;
@@ -585,6 +598,8 @@
   };
   window.__finSubExpiring = () => { _sub.filterExpiring = !_sub.filterExpiring; window.DFO.render(); };
   window.__finSubNew = () => {
+    // Debug-trace (tijdelijk, ronde-5b): expliciet loggen bij klik +
+    // zichtbaar-alert als navigate faalt.
     console.info('[finance-v2] __finSubNew clicked → route naar subscription-wizard');
     // Ronde 4: v2 nieuw-abo modal zou een deal + subscription + LMS-
     // provisioning moeten opzetten (sales-subscription-create eist deal_id
@@ -592,8 +607,12 @@
     // routen we naar de bestaande subscription-wizard.html; volledige
     // v2-flow komt in een aparte PR analoog aan de Sales-offerte-wizard
     // (batch 2).
-    try { window.location.href = '/modules/subscription-wizard.html'; }
-    catch (e) { console.warn('[finance-v2] nav fail:', e?.message); }
+    try {
+      window.location.href = '/modules/subscription-wizard.html';
+    } catch (e) {
+      console.error('[finance-v2] __finSubNew nav fail:', e);
+      alert('DEBUG: __finSubNew redirect faalde: ' + (e?.message || e));
+    }
   };
   async function fetchSubs() {
     const wanted = subsParams();
