@@ -207,12 +207,18 @@
     }
 
     // Line-items — v1 hangt line_total_excl in aparte field. Fallback zelf berekenen.
+    // Aggregate voor totalen-blok (subtotaal excl + BTW per tarief + totaal incl).
+    let totalExcl = 0;
+    const btwByRate = {};
     const linesHtml = _inv.lines.length ? _inv.lines.map(l => {
       const q = Number(l.quantity) || 0;
       const p = Number(l.unit_price_excl) || 0;
       const rate = Number(l.tax_rate) || 0;
       const subExcl = Number(l.line_total_excl) || (q * p);
-      const incl = subExcl * (1 + rate / 100);
+      const btwAmt = subExcl * rate / 100;
+      const incl = subExcl + btwAmt;
+      totalExcl += subExcl;
+      if (rate > 0) btwByRate[rate] = (btwByRate[rate] || 0) + btwAmt;
       return `<tr>
         <td>${esc(l.description || '—')}</td>
         <td class="center">${q}×</td>
@@ -222,6 +228,18 @@
         <td class="num"><b>${eur(incl)}</b></td>
       </tr>`;
     }).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--text-3);padding:20px">Geen regels</td></tr>';
+    const totalBtw = Object.values(btwByRate).reduce((a, b) => a + b, 0);
+    const totalIncl = totalExcl + totalBtw;
+    // Totalen-blok (1-op-1 met offerte-detail-v2 patroon: subtotaal excl + BTW
+    // per tarief in oplopende volgorde + totaal incl).
+    const totalsHtml = _inv.lines.length ? `
+      <div style="padding: 8px 12px 12px;">
+        <div class="fnd-row"><span class="lbl">Subtotaal excl. BTW</span><span class="num mono">${eur(totalExcl)}</span></div>
+        ${Object.keys(btwByRate).sort((a, b) => Number(a) - Number(b)).map(r =>
+          `<div class="fnd-row"><span class="lbl">BTW ${r}%</span><span class="num mono">${eur(btwByRate[r])}</span></div>`
+        ).join('')}
+        <div class="fnd-total-big"><span>Totaal incl. BTW</span><span>${eur(totalIncl)}</span></div>
+      </div>` : '';
 
     return `<div class="fnd-app">
       <div class="fnd-back-row"><button class="btn btn-ghost btn-sm" onclick="__fnBack('invoices')">← Terug naar Facturen</button></div>
@@ -236,7 +254,9 @@
           </div>
         </div>
         <div class="fnd-actions">
-          <button class="btn btn-ghost" onclick="__fnInvPdf('${esc(inv.id)}')" title="PDF downloaden">📄 PDF</button>
+          ${inv.tl_invoice_id
+            ? `<button class="btn btn-ghost" onclick="__fnInvPdf('${esc(inv.tl_invoice_id)}')" title="PDF downloaden">📄 PDF</button>`
+            : `<button class="btn btn-ghost" disabled title="Factuur is nog niet naar TeamLeader gepusht — geen PDF beschikbaar" style="opacity:.5;cursor:not-allowed">📄 PDF (n.v.t.)</button>`}
           ${tlHref ? `<a class="btn btn-ghost" href="${tlHref}" target="_blank" rel="noopener">↗ Open in TL</a>` : ''}
           <a class="btn" href="${finV1Href}" title="Openen in v1 finance-module voor mutaties (Verzenden/Aanpassen/Crediteren/Betaling registreren)">⚙ Mutaties (v1)</a>
         </div>
@@ -275,6 +295,7 @@
             </tr></thead>
             <tbody>${linesHtml}</tbody>
           </table>
+          ${totalsHtml}
         </div>
       </div>
 
@@ -376,39 +397,56 @@
       ? `/modules/klanten.html?id=${encodeURIComponent(sub.customer_id)}&tab=abonnementen`
       : null;
 
+    // Line-items veld-namen (bron: api/sales-subscriptions-list.js:143 +
+    // api/sales-customer-subscriptions.js:99). Per-regel:
+    //   description (label)
+    //   amount           (bedrag EXCL. BTW, 1 stuks/termijn)
+    //   vat_percentage   (BTW-tarief)
+    // Er is GEEN quantity / unit_price_excl in line_items — elke regel telt
+    // 1x per termijn.
     const lines = Array.isArray(sub.line_items) ? sub.line_items : [];
+    let totalExcl = 0;
+    const btwByRate = {};
     const linesHtml = lines.length ? lines.map(l => {
-      const q = Number(l.quantity) || 1;
-      const excl = Number(l.unit_price_excl) || 0;
-      const rate = Number(l.vat_percentage) || 21;
-      const subExcl = q * excl;
-      const incl = subExcl * (1 + rate / 100);
+      const excl = Number(l.amount) || 0;
+      const rate = Number(l.vat_percentage) || 0;
+      const btwAmt = excl * rate / 100;
+      const incl = excl + btwAmt;
+      totalExcl += excl;
+      if (rate > 0) btwByRate[rate] = (btwByRate[rate] || 0) + btwAmt;
       return `<tr>
         <td>${esc(l.description || l.product_name || '—')}</td>
-        <td class="center">${q}×</td>
         <td class="num">${eur(excl)}</td>
         <td class="center">${rate}%</td>
-        <td class="num">${eur(subExcl)}</td>
         <td class="num"><b>${eur(incl)}</b></td>
       </tr>`;
-    }).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--text-3);padding:20px">Geen regels</td></tr>';
+    }).join('') : '<tr><td colspan="4" style="text-align:center;color:var(--text-3);padding:20px">Geen regels</td></tr>';
+    const totalBtw = Object.values(btwByRate).reduce((a, b) => a + b, 0);
+    const totalInclCalc = totalExcl + totalBtw;
 
-    const totalIncl = lines.reduce((a, l) => {
-      const q = Number(l.quantity) || 1;
-      const excl = Number(l.unit_price_excl) || 0;
-      const rate = Number(l.vat_percentage) || 21;
-      return a + q * excl * (1 + rate / 100);
-    }, 0);
+    // Termijnbedrag: prefereer sub.amount_incl (aggregate uit endpoint,
+    // regel 144 sales-subscriptions-list). Fallback op eigen berekening.
+    const perTermIncl = sub.amount_incl != null ? Number(sub.amount_incl) : totalInclCalc;
+    // Termijn-count: term_count (bron-veld op subscriptions-tabel).
+    const termCount = sub.term_count || '—';
+
+    // MRR-bijdrage berekening: v1 heeft geen billing_cycle op deze endpoint.
+    // sales-mrr-report is de canonical source, maar hier hebben we alleen
+    // 1 sub. Simpelste aanname: per_month = amount_incl (MRR = termijnbedrag
+    // als billing_cycle='per_month'). Voor jaar/kwartaal wijkt af — daar
+    // is de list-KPI accurater.
+    const mrrIncl = perTermIncl;
 
     return `<div class="fnd-app">
       <div class="fnd-back-row"><button class="btn btn-ghost btn-sm" onclick="__fnBack('subscriptions')">← Terug naar Abonnementen</button></div>
       <div class="fnd-head">
         <div class="fnd-head-l">
-          <h1 class="fnd-title">${esc(sub.description || sub.title || 'Abonnement')}</h1>
+          <h1 class="fnd-title">${esc(sub.description || 'Abonnement')}</h1>
           <div class="fnd-meta">
-            ${pill(SUB_STATUS, st)}
+            ${pill(SUB_STATUS, st === 'active' ? 'actief' : (st === 'cancelled' ? 'beeindigd' : (st === 'paused' ? 'gepauzeerd' : st)))}
             <span>${esc(sub.customer_name || '—')}</span>
             <span>· ${esc(fmtDate(sub.start_date))} → ${esc(fmtDate(sub.end_date))}</span>
+            ${sub.entity ? `<span>· ${esc(sub.entity)}</span>` : ''}
             ${sub.teamleader_subscription_id ? `<span class="fnd-pill fnd-pill-info">TL-gekoppeld</span>` : ''}
           </div>
         </div>
@@ -423,43 +461,54 @@
           <div class="fnd-card-h">Overzicht</div>
           <div class="fnd-card-b">
             <div class="fnd-row"><span class="lbl">Klant</span><span>${esc(sub.customer_name || '—')}</span></div>
+            <div class="fnd-row"><span class="lbl">Entiteit</span><span>${esc(sub.entity || '—')}</span></div>
             <div class="fnd-row"><span class="lbl">Startdatum</span><span>${esc(fmtDate(sub.start_date))}</span></div>
             <div class="fnd-row"><span class="lbl">Einddatum</span><span>${esc(fmtDate(sub.end_date))}</span></div>
-            <div class="fnd-row"><span class="lbl">Termijnen</span><span>${sub.total_terms || sub.termijnen || '—'}</span></div>
-            <div class="fnd-row"><span class="lbl">Termijn nu</span><span>${sub.current_term || '—'}</span></div>
+            <div class="fnd-row"><span class="lbl">Aantal termijnen</span><span>${termCount}</span></div>
           </div>
         </div>
         <div class="fnd-card">
           <div class="fnd-card-h">Bedragen</div>
           <div class="fnd-card-b">
-            <div class="fnd-row"><span class="lbl">Bedrag per termijn (incl.)</span><span><b>${eur(sub.amount_per_termijn || totalIncl)}</b></span></div>
-            <div class="fnd-row"><span class="lbl">Billing cycle</span><span>${esc(sub.billing_cycle || 'per_month')}</span></div>
-            <div class="fnd-row"><span class="lbl">MRR-bijdrage</span><span>${eur(sub.mrr || 0)}</span></div>
-            <div class="fnd-row"><span class="lbl">Al gefactureerd</span><span>${sub.has_any_invoice ? '✓ ja' : '— nee'}</span></div>
+            <div class="fnd-row"><span class="lbl">Per termijn (incl. BTW)</span><span><b>${eur(perTermIncl)}</b></span></div>
+            <div class="fnd-row"><span class="lbl">Per termijn (excl. BTW)</span><span>${eur(totalExcl)}</span></div>
+            <div class="fnd-row"><span class="lbl">BTW-som</span><span>${eur(totalBtw)}</span></div>
+            <div class="fnd-row"><span class="lbl">Totaal contract (${termCount}× incl.)</span><span>${eur(typeof termCount === 'number' ? termCount * perTermIncl : perTermIncl * (Number(sub.term_count) || 1))}</span></div>
+            <div class="fnd-row"><span class="lbl">MRR (indicatief)</span><span>${eur(mrrIncl)}</span></div>
           </div>
         </div>
       </div>
 
       <div class="fnd-card fnd-card-wide">
-        <div class="fnd-card-h">Line-items (${lines.length})</div>
+        <div class="fnd-card-h">Line-items (${lines.length}) — per termijn</div>
         <div class="fnd-tbl-wrap">
           <table class="fnd-tbl">
             <thead><tr>
-              <th>Regel</th><th class="center">Aantal</th><th class="num">Excl.</th>
-              <th class="center">BTW</th><th class="num">Subtotaal excl.</th><th class="num">Incl. BTW</th>
+              <th>Regel</th><th class="num">Excl. BTW</th><th class="center">BTW</th><th class="num">Incl. BTW</th>
             </tr></thead>
             <tbody>${linesHtml}</tbody>
           </table>
-          ${lines.length ? `<div style="padding:8px 12px"><div class="fnd-total-big"><span>Totaal incl. BTW / termijn</span><span>${eur(totalIncl)}</span></div></div>` : ''}
+          ${lines.length ? `
+          <div style="padding: 8px 12px 12px;">
+            <div class="fnd-row"><span class="lbl">Subtotaal excl. BTW</span><span class="num mono">${eur(totalExcl)}</span></div>
+            ${Object.keys(btwByRate).sort((a, b) => Number(a) - Number(b)).map(r =>
+              `<div class="fnd-row"><span class="lbl">BTW ${r}%</span><span class="num mono">${eur(btwByRate[r])}</span></div>`
+            ).join('')}
+            <div class="fnd-total-big"><span>Totaal incl. BTW / termijn</span><span>${eur(perTermIncl)}</span></div>
+          </div>` : ''}
         </div>
       </div>
     </div>`;
   }
 
   // ── Actions ─────────────────────────────────────────────────────────────
-  window.__fnInvPdf = async function (id) {
+  // PDF-download: endpoint verwacht tl_invoice_id (TeamLeader factuur-id),
+  // niet de lokale factuur-id. De caller (Header-actie) geeft nu al de
+  // tl_invoice_id mee (button-render checkt inv.tl_invoice_id vóór weergave).
+  window.__fnInvPdf = async function (tlInvoiceId) {
+    if (!tlInvoiceId) { alert('Geen TL-factuur-id beschikbaar'); return; }
     try {
-      const j = await window.KV.authedJson('/api/finance-invoice-pdf?invoice_id=' + encodeURIComponent(id));
+      const j = await window.KV.authedJson('/api/finance-invoice-pdf?tl_invoice_id=' + encodeURIComponent(tlInvoiceId));
       if (j?.url) window.open(j.url, '_blank', 'noopener');
       else alert('Geen PDF-URL beschikbaar');
     } catch (e) {
