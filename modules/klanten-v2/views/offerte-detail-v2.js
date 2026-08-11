@@ -27,23 +27,44 @@
     catch (_) { return null; }
   }
 
-  // Iframe-HTML voor content-area. Gebruikt calc voor volle hoogte binnen
-  // het shell-content-frame. seamless-look via transparant iframe (de detail
-  // gebruikt zelf ?embed=1 → transparent bg + hidden back-link).
+  // Iframe-HTML voor content-area. Height start bij een min (voorkomt 0-px
+  // flits vóór het eerste odv-resize-bericht), en groeit dan mee met de
+  // content-hoogte die het iframe post via postMessage {type:'odv-resize'}.
+  // Shell-scrollcontainer (klanten-v2 #content) scrollt zelf → geen dubbele
+  // scrollbar, geen afgekapte content.
   window.__odvRender = function (dealId) {
     const id = String(dealId || '').trim();
     if (!id) return `<div style="padding:24px;color:var(--rose,#C22B3E)">Geen offerte-id in URL.</div>`;
     const src = '/modules/offerte-detail-v2.html?id=' + encodeURIComponent(id) + '&embed=1';
-    // Height: calc(100vh - topbar-h ~ 64px - tabs-h ~ 40px - marge) — content-
-    // area is scroll-container, iframe vult het.
     return `<iframe class="odv-shell-frame"
       src="${src}"
       title="Offerte-detail"
       loading="eager"
-      style="width:100%;height:calc(100vh - 108px);border:0;background:transparent;display:block"
+      scrolling="no"
+      style="width:100%;min-height:400px;border:0;background:transparent;display:block"
       allow="clipboard-write"
     ></iframe>`;
   };
+
+  // Message-listener: iframe post {type:'odv-resize', h:<px>} bij load + elke
+  // DOM/layout-verandering (ResizeObserver + MutationObserver op body). Wij
+  // zetten iframe.style.height = h zodat de shell zelf scrollt. Registreer 1x
+  // (idempotent via _odvMsgBound flag) — iframe DOM-node kan bij re-render
+  // vervangen worden; we selecteren telkens de huidige .odv-shell-frame.
+  if (!window._odvMsgBound) {
+    window._odvMsgBound = true;
+    window.addEventListener('message', (e) => {
+      const d = e && e.data;
+      if (!d || d.type !== 'odv-resize') return;
+      // Bescherming: alleen accept vanaf same-origin (parent en iframe zijn
+      // beide op dezelfde host — anders kan een iframe uit een andere origin
+      // ons layout messen).
+      if (e.origin && e.origin !== location.origin) return;
+      const h = Math.max(200, Math.min(20000, Number(d.h) || 0));
+      const frame = document.querySelector('.odv-shell-frame');
+      if (frame) frame.style.height = h + 'px';
+    });
+  }
 
   // Open detail in-shell: URL pushen + DFO re-renderen. De sales-v2 offertes-
   // view leest de nieuwe URL en delegeert naar __odvRender.

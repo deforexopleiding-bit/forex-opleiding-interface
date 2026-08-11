@@ -295,6 +295,59 @@ function _odvNav(url) {
     window.location.href = url;
   }
 }
+// Auto-resize: post document-hoogte naar parent zodat de iframe zich
+// aanpast en de shell zelf scrollt (geen dubbele scrollbar, geen
+// afgekapte content). Getriggerd bij load + elke DOM/layout-verandering
+// via ResizeObserver op body.
+if (_odvEmbed && window.parent && window.parent !== window) {
+  const _odvPostHeight = () => {
+    // Neem de max van scrollHeight/offsetHeight zodat modals + expanded
+    // content correct meetellen; +2px buffer om sub-pixel-clipping te
+    // voorkomen.
+    const h = Math.max(
+      document.documentElement.scrollHeight,
+      document.body ? document.body.scrollHeight : 0,
+      document.documentElement.offsetHeight,
+      document.body ? document.body.offsetHeight : 0
+    );
+    try {
+      window.parent.postMessage({ type: 'odv-resize', h: h + 2 }, location.origin);
+    } catch (_) { /* cross-origin post fails silently; same-origin here */ }
+  };
+  // Direct + na alle async setup (fetch → render).
+  window.addEventListener('load', _odvPostHeight);
+  // ResizeObserver: vangt modal-open/close, status-refresh, onboarding-
+  // success (extra blok), viewport-resize. Debounce via microtask om
+  // rapid-fire mutaties (attributetoggle) samen te voegen.
+  let _odvRoPending = false;
+  const _odvSchedulePost = () => {
+    if (_odvRoPending) return;
+    _odvRoPending = true;
+    queueMicrotask(() => { _odvRoPending = false; _odvPostHeight(); });
+  };
+  if (typeof ResizeObserver !== 'undefined') {
+    try {
+      const ro = new ResizeObserver(() => _odvSchedulePost());
+      // Observe body ná DOMContentLoaded zodat body bestaat.
+      const _startRo = () => { if (document.body) ro.observe(document.body); };
+      if (document.readyState !== 'loading') _startRo();
+      else document.addEventListener('DOMContentLoaded', _startRo);
+    } catch (_) { /* graceful degrade */ }
+  }
+  // MutationObserver als aanvulling voor DOM-tree mutaties die ResizeObserver
+  // niet direct oppikt (bv. innerHTML swap zonder height-change eerst).
+  try {
+    const mo = new MutationObserver(() => _odvSchedulePost());
+    const _startMo = () => {
+      if (!document.body) return;
+      mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'style', 'class'] });
+    };
+    if (document.readyState !== 'loading') _startMo();
+    else document.addEventListener('DOMContentLoaded', _startMo);
+  } catch (_) {}
+  // Extra safety-net: viewport-resize.
+  window.addEventListener('resize', _odvSchedulePost);
+}
 let _deal = null, _customer = null, _lineItems = [], _totals = null, _entity = '', _hasSub = false;
 let _dealTitle = 'Offerte';
 
