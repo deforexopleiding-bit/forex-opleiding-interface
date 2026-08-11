@@ -2296,3 +2296,426 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
 .kv-list-mount { display: block; }
 
 
+
+/* Batch 2 — v2 offerte-wizard scaffold. */
+/* Root staat vast in <body>. .is-open toont de overlay; anders display:none
+   (geen backdrop-flash tussen state-transities). */
+.sw-modal-back {
+  position: fixed; inset: 0;
+  background: rgba(17, 23, 33, .42);
+  backdrop-filter: blur(3px);
+  z-index: 100;
+  display: none;
+  align-items: center; justify-content: center;
+  padding: 24px;
+}
+.sw-modal-back.is-open { display: flex; }
+.sw-modal {
+  width: 100%; max-width: 920px;
+  max-height: calc(100vh - 48px);
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  animation: kv-slideUp .22s cubic-bezier(.32, .72, 0, 1);
+}
+.sw-modal-head {
+  padding: 13px 17px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface-2);
+}
+.sw-modal-title { font-size: 15px; font-weight: 600; color: var(--text); flex: 1; }
+.sw-modal-body { flex: 1 1 auto; overflow-y: auto; }
+.sw-modal-foot {
+  padding: 12px 17px;
+  border-top: 1px solid var(--border);
+  display: flex; gap: 8px; align-items: center;
+  background: var(--surface-2);
+}
+.sw-body { padding: 0; }
+.sw-progress {
+  display: flex; align-items: center; gap: 4px;
+  padding: 16px 22px; border-bottom: 1px solid var(--line);
+  background: var(--surface-2); overflow-x: auto;
+}
+.sw-progress-step {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border: 0; border-radius: 8px;
+  background: transparent; cursor: pointer;
+  font-size: 12.5px; color: var(--text-3); font-family: inherit;
+  white-space: nowrap;
+}
+.sw-progress-step:hover { background: var(--surface); color: var(--text-2); }
+.sw-progress-step.is-active { color: var(--brand); background: var(--surface); font-weight: 600; }
+.sw-progress-step.is-done { color: var(--emerald, #10b981); }
+.sw-progress-dot {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--surface-2); color: currentColor;
+  border: 1.5px solid currentColor;
+  font-size: 11px; font-weight: 700;
+}
+.sw-progress-step.is-active .sw-progress-dot { background: var(--brand); color: white; border-color: var(--brand); }
+.sw-progress-step.is-done .sw-progress-dot { background: var(--emerald, #10b981); color: white; border-color: var(--emerald, #10b981); }
+.sw-progress-sep { flex: 0 0 20px; height: 1px; background: var(--line); }
+
+.sw-step { padding: 22px 26px; }
+.sw-step-title { font-size: 18px; font-weight: 600; margin: 0 0 4px; color: var(--text-1); }
+.sw-step-sub { font-size: 12.5px; color: var(--text-3); margin: 0 0 18px; line-height: 1.5; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.sw-entity-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.sw-entity-card {
+  position: relative;
+  padding: 16px 18px; text-align: left;
+  border: 1.5px solid var(--border-strong, #C9D2DE);
+  border-radius: 10px;
+  background: var(--surface-2, #F2F4F7);
+  cursor: pointer; font-family: inherit;
+  transition: border-color .12s, transform .1s, box-shadow .12s, background .12s;
+  min-height: 68px;
+}
+.sw-entity-card:hover {
+  border-color: color-mix(in srgb, var(--m, #6D3FD4) 55%, var(--border-strong, #C9D2DE));
+  background: color-mix(in srgb, var(--m, #6D3FD4) 6%, var(--surface-2, #F2F4F7));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .06);
+}
+.sw-entity-card.is-selected {
+  border-color: var(--m, #6D3FD4);
+  background: color-mix(in srgb, var(--m, #6D3FD4) 12%, var(--surface, #FFFFFF));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--m, #6D3FD4) 22%, transparent);
+}
+.sw-entity-card.is-selected::after {
+  content: '✓';
+  position: absolute; top: 8px; right: 10px;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--m, #6D3FD4); color: white;
+  display: grid; place-items: center;
+  font-size: 13px; font-weight: 700; line-height: 1;
+}
+.sw-entity-name { font-size: 14.5px; font-weight: 600; color: var(--text, #111721); margin-bottom: 4px; padding-right: 28px; }
+.sw-entity-country { font-size: 11.5px; color: var(--text-3, #8B95A5); text-transform: uppercase; letter-spacing: .04em; }
+
+.sw-toggle-row { display: flex; gap: 20px; margin-bottom: 14px; padding: 10px 12px; background: var(--surface-2); border-radius: 8px; }
+.sw-toggle-row label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); cursor: pointer; }
+
+/* ── Stap 2 — bestaande-klant banner (teal accent) ───────────────── */
+.sw-cust-banner {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; margin-bottom: 14px;
+  background: var(--teal-soft, #E2F3F8);
+  border: 1px solid var(--teal-line, #A5D8E8);
+  border-radius: 8px; font-size: 12.5px;
+  color: var(--text, #111721);
+}
+.sw-cust-banner > div:first-child { flex: 1; }
+.sw-cust-banner-sub { font-size: 11.5px; color: var(--text-2, #586374); margin-top: 2px; }
+
+/* ── Stap 2 — duplicate-check knop-strip ────────────────────────── */
+.sw-dup-strip {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 2px 0 14px; padding: 10px 12px;
+  background: var(--surface-2, #F2F4F7); border-radius: 8px;
+  border: 1px solid var(--border, #E2E7EE);
+}
+.sw-dup-strip .btn { flex-shrink: 0; }
+.sw-dup-strip-hint { font-size: 11.5px; color: var(--text-2, #586374); flex: 1; min-width: 200px; }
+
+/* ── Stap 2 — checkbox-rows (address_known + AVG) ───────────────── */
+.sw-check-row {
+  margin: 4px 0 12px; padding: 10px 12px;
+  background: var(--surface-2, #F2F4F7); border-radius: 6px;
+  border: 1px solid var(--border, #E2E7EE);
+}
+.sw-check-row label {
+  display: flex; align-items: flex-start; gap: 10px;
+  font-size: 12.5px; color: var(--text, #111721); cursor: pointer; line-height: 1.45;
+}
+.sw-check-row input[type="checkbox"] { flex: 0 0 auto; width: 15px; height: 15px; margin-top: 1px; accent-color: var(--m, #6D3FD4); }
+.sw-check-row-avg {
+  margin-top: 18px;
+  background: color-mix(in srgb, var(--m, #6D3FD4) 6%, var(--surface-2, #F2F4F7));
+  border: 1px solid color-mix(in srgb, var(--m, #6D3FD4) 24%, var(--border-strong, #C9D2DE));
+}
+.sw-check-row-avg a { color: var(--m, #6D3FD4); text-decoration: underline; }
+
+/* ── Stap 2 — Tags block ─────────────────────────────────────────── */
+.sw-tags-block { margin: 14px 0 6px; }
+.sw-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.sw-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 14px;
+  background: var(--surface-2, #F2F4F7);
+  border: 1px solid var(--border-strong, #C9D2DE);
+  font-size: 12px; color: var(--text-2, #586374); cursor: pointer;
+  transition: background .12s, border-color .12s, color .12s;
+  user-select: none;
+}
+.sw-chip:hover { border-color: color-mix(in srgb, var(--m, #6D3FD4) 45%, var(--border-strong, #C9D2DE)); }
+.sw-chip.is-on {
+  background: color-mix(in srgb, var(--m, #6D3FD4) 14%, var(--surface, #FFFFFF));
+  border-color: var(--m, #6D3FD4);
+  color: var(--m, #6D3FD4);
+  font-weight: 600;
+}
+.sw-chip-x { font-size: 14px; line-height: 1; color: currentColor; opacity: .7; }
+.sw-tag-add { display: flex; gap: 6px; }
+.sw-tag-add .ib-input { flex: 1; }
+
+/* ── Stap 2 — Duplicate-check modal (2e overlay bovenop wizard) ─── */
+/* Fixed t.o.v. viewport; ligt bovenop de wizard doordat root al z-index 100
+   heeft en dit kind out-of-flow is. z-index binnen root houdt DOM-volgorde
+   consistent. */
+.sw-dup-back {
+  position: fixed; inset: 0;
+  background: rgba(17, 23, 33, .55); backdrop-filter: blur(3px);
+  z-index: 10;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.sw-dup-modal {
+  width: 100%; max-width: 720px;
+  max-height: calc(100vh - 96px);
+  background: var(--surface, #FFFFFF); border-radius: var(--r-lg, 14px);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, .32);
+  display: flex; flex-direction: column; overflow: hidden;
+  animation: kv-slideUp .22s cubic-bezier(.32, .72, 0, 1);
+}
+.sw-dup-sect { margin-bottom: 16px; }
+.sw-dup-sect-h {
+  font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--text-2, #586374); margin: 0 0 8px; padding-bottom: 4px;
+  border-bottom: 1px solid var(--border, #E2E7EE);
+}
+.sw-dup-card {
+  padding: 10px 12px; margin-bottom: 8px;
+  border: 1px solid var(--border-strong, #C9D2DE); border-radius: 8px;
+  background: var(--surface-2, #F2F4F7);
+}
+.sw-dup-card-name { font-size: 13.5px; font-weight: 600; color: var(--text, #111721); }
+.sw-dup-card-meta { font-size: 12px; color: var(--text-2, #586374); margin-top: 2px; }
+.sw-dup-card-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.sw-dup-card-acts { display: flex; gap: 6px; margin-top: 8px; }
+.sw-modal { position: relative; }  /* zodat de dup-back-overlay netjes over wizard-modal ligt */
+
+/* ── Stap 3 — offerte-inhoud (traject/sale_type/producten/korting) ─── */
+.sw-panel-box {
+  padding: 12px 14px; margin-bottom: 14px;
+  background: var(--surface-2, #F2F4F7);
+  border: 1px solid var(--border, #E2E7EE);
+  border-radius: 8px;
+}
+.sw-inline-row { display: flex; gap: 8px; align-items: center; }
+.sw-inline-row .ib-input { flex: 1; }
+.sw-hint { font-size: 11.5px; color: var(--text-2, #586374); margin-top: 6px; line-height: 1.5; min-height: 16px; }
+.tk-field-hint { font-size: 11px; color: var(--text-3, #8B95A5); margin-top: 3px; }
+
+.sw-dur-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sw-dur-num { max-width: 90px; }
+.sw-dur-lbl { font-size: 12px; color: var(--text-2, #586374); margin-right: 4px; }
+.sw-dur-row .sw-chip { min-width: 30px; text-align: center; padding: 4px 8px; }
+
+.sw-prod-head {
+  display: flex; justify-content: space-between; align-items: center;
+  margin: 18px 0 10px;
+}
+.sw-prod-head h3 { font-size: 14px; font-weight: 700; margin: 0; color: var(--text, #111721); }
+.sw-prod-head small { color: var(--text-3, #8B95A5); font-weight: 400; font-size: 11.5px; }
+
+.dp-list { display: flex; flex-direction: column; gap: 6px; }
+.dp-empty {
+  padding: 22px; text-align: center;
+  border: 1px dashed var(--border-strong, #C9D2DE); border-radius: 8px;
+  background: var(--surface-2, #F2F4F7);
+  color: var(--text-2, #586374); font-size: 12.5px;
+}
+.dp-row {
+  display: grid;
+  grid-template-columns: 1fr 80px 110px 100px 32px;
+  gap: 10px; align-items: center;
+  padding: 10px 12px;
+  background: var(--surface-2, #F2F4F7);
+  border: 1px solid var(--border-strong, #C9D2DE);
+  border-radius: 8px;
+}
+.dp-name b { display: block; color: var(--text, #111721); font-size: 13px; }
+.dp-sub { font-size: 11px; color: var(--text-3, #8B95A5); margin-top: 2px; }
+.dp-vat-toggle { color: var(--m, #6D3FD4); cursor: pointer; text-decoration: underline; }
+.dp-qty, .dp-price { text-align: right; }
+.dp-sub-line { text-align: right; font-weight: 700; color: var(--text, #111721); font-variant-numeric: tabular-nums; }
+.dp-rm {
+  background: transparent; border: 0; cursor: pointer;
+  color: var(--rose, #C22B3E); font-size: 18px; line-height: 1;
+  padding: 4px; border-radius: 4px;
+}
+.dp-rm:hover { background: color-mix(in srgb, var(--rose, #C22B3E) 12%, transparent); }
+
+.dp-totals {
+  margin-top: 14px; padding: 12px 14px;
+  background: var(--surface, #FFFFFF);
+  border: 1px solid var(--border-strong, #C9D2DE);
+  border-radius: 8px;
+}
+.dp-total-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 4px 0; font-size: 12.5px; color: var(--text-2, #586374);
+  font-variant-numeric: tabular-nums;
+}
+.dp-total-row.dp-total-disc { color: var(--rose, #C22B3E); }
+.dp-total-row.dp-total-big {
+  font-size: 15px; font-weight: 700; color: var(--text, #111721);
+  border-top: 1px solid var(--border, #E2E7EE); margin-top: 6px; padding-top: 8px;
+}
+.dp-total-row.dp-total-ctrl {
+  border-top: 1px solid var(--border, #E2E7EE); margin-top: 6px; padding-top: 8px;
+  font-size: 11.5px; justify-content: flex-start; gap: 6px;
+}
+.dp-disc-add   { color: var(--emerald, #07835A); cursor: pointer; text-decoration: underline; }
+.dp-disc-edit  { color: var(--m, #6D3FD4); cursor: pointer; text-decoration: underline; }
+.dp-disc-rm    { color: var(--rose, #C22B3E); cursor: pointer; text-decoration: underline; }
+
+/* ── Product-picker (3e overlay) — hergebruikt .sw-dup-back structuur ─ */
+.pp-filters { display: flex; gap: 8px; margin-bottom: 12px; }
+.pp-list { display: flex; flex-direction: column; gap: 6px; }
+.pp-card {
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong, #C9D2DE);
+  border-radius: 8px;
+  background: var(--surface-2, #F2F4F7);
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+.pp-card:hover {
+  border-color: var(--m, #6D3FD4);
+  background: color-mix(in srgb, var(--m, #6D3FD4) 6%, var(--surface-2, #F2F4F7));
+}
+.pp-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.pp-card-name b { color: var(--text, #111721); font-size: 13px; margin-right: 6px; }
+.pp-badge {
+  display: inline-block; padding: 1px 7px; border-radius: 12px;
+  font-size: 10.5px; font-weight: 600;
+  background: var(--surface-3, #E9EDF2); color: var(--text-2, #586374);
+  border: 1px solid var(--border, #E2E7EE);
+  margin-right: 4px;
+}
+.pp-badge-vat {
+  background: color-mix(in srgb, var(--m, #6D3FD4) 12%, var(--surface, #FFFFFF));
+  color: var(--m, #6D3FD4);
+  border-color: color-mix(in srgb, var(--m, #6D3FD4) 32%, var(--border, #E2E7EE));
+}
+.pp-card-price { color: var(--text, #111721); font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.pp-card-desc { font-size: 11.5px; color: var(--text-3, #8B95A5); margin-top: 4px; line-height: 1.4; }
+
+/* Kleine schermen: dp-row-grid inklappen naar 2 rijen */
+@media (max-width: 640px) {
+  .dp-row { grid-template-columns: 1fr 40px; gap: 8px; row-gap: 10px; }
+  .dp-name { grid-column: 1 / -1; }
+  .dp-qty, .dp-price { grid-column: 1 / -1; text-align: left; }
+  .dp-sub-line { grid-column: 1 / 2; text-align: left; }
+  .dp-rm { grid-column: 2 / 3; justify-self: end; }
+}
+
+/* ── Stap 4 — betalingsvoorwaarden ────────────────────────────────── */
+.sw-preview-box {
+  margin: 16px 0 10px; padding: 12px 14px;
+  background: var(--surface-2, #F2F4F7);
+  border: 1px solid var(--border, #E2E7EE);
+  border-radius: 8px;
+}
+.sw-preview-body {
+  margin-top: 6px; font-size: 13px; color: var(--text, #111721);
+  font-family: 'IBM Plex Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  padding: 8px 10px;
+  background: var(--surface, #FFFFFF);
+  border-radius: 6px;
+  border: 1px dashed var(--border-strong, #C9D2DE);
+}
+
+/* Exception-approval-block op stap 4 */
+.sw-exc-approved {
+  display: flex; align-items: flex-start; gap: 12px;
+  margin-top: 14px; padding: 10px 12px;
+  background: var(--emerald-soft, #E4F5EE);
+  border: 1px solid var(--emerald-line, #A9DFC9);
+  border-radius: 8px; font-size: 12.5px;
+  color: var(--text, #111721);
+}
+.sw-exc-approved > div:first-child { flex: 1; line-height: 1.5; }
+.sw-exc-approved-sub { color: var(--emerald, #07835A); font-size: 11.5px; margin-top: 2px; }
+.sw-exc-approved-note { font-size: 11.5px; color: var(--text-2, #586374); margin-top: 4px; font-style: italic; }
+
+/* Exception-modal body */
+.sw-exc-reasons {
+  margin: 0 0 12px; padding-left: 20px;
+  font-size: 13px; line-height: 1.55; color: var(--text, #111721);
+}
+.sw-exc-reasons li { margin-bottom: 6px; }
+.sw-exc-hint {
+  font-size: 12px; color: var(--text-2, #586374); margin-bottom: 4px; line-height: 1.5;
+  padding: 8px 10px; background: var(--surface-2, #F2F4F7); border-radius: 6px;
+}
+
+/* ── Stap 5 — review sections ─────────────────────────────────────── */
+.rv-section {
+  margin-bottom: 14px;
+  border: 1px solid var(--border-strong, #C9D2DE);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface, #FFFFFF);
+}
+.rv-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--surface-2, #F2F4F7);
+  border-bottom: 1px solid var(--border, #E2E7EE);
+}
+.rv-title { font-size: 13px; font-weight: 700; color: var(--text, #111721); }
+.rv-edit  { font-size: 12px; color: var(--m, #6D3FD4); text-decoration: none; }
+.rv-edit:hover { text-decoration: underline; }
+.rv-body  { padding: 12px 14px; font-size: 12.5px; line-height: 1.55; color: var(--text, #111721); }
+.rv-line  { margin: 2px 0; }
+.rv-dim   { color: var(--text-2, #586374); }
+.rv-ok    { color: var(--emerald, #07835A); }
+.rv-warn  { color: var(--amber,   #C2700A); }
+.rv-small { font-size: 11.5px; }
+.rv-link  { color: var(--m, #6D3FD4); text-decoration: underline; }
+.rv-badge {
+  display: inline-block; padding: 1px 7px; border-radius: 10px;
+  font-size: 10.5px; font-weight: 600; margin-left: 4px;
+  border: 1px solid var(--border, #E2E7EE);
+}
+.rv-badge-teal { background: var(--teal-soft, #E2F3F8); color: var(--teal, #0A7490); border-color: var(--teal-line, #A5D8E8); }
+.rv-badge-slate { background: var(--slate-soft, #EDF0F4); color: var(--slate, #455367); border-color: var(--slate-line, #C6CFDB); }
+
+.rv-tbl-wrap { overflow-x: auto; margin-top: 8px; }
+.rv-tbl { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.rv-tbl td { padding: 4px 6px; vertical-align: top; }
+.rv-tbl .rv-r { text-align: right; }
+.rv-tbl .rv-total-sep td { border-top: 1px solid var(--border, #E2E7EE); padding-top: 6px; }
+.rv-tbl .rv-total-big { font-weight: 700; font-size: 13.5px; color: var(--text, #111721); border-top: 1px solid var(--border, #E2E7EE); }
+.rv-tbl .rv-total-big td { padding-top: 8px; }
+.rv-tbl .rv-disc { color: var(--rose, #C22B3E); }
+
+/* TL-banner + submit-block */
+.rv-tl-banner {
+  padding: 10px 14px; margin: 14px 0 8px;
+  border-radius: 8px; font-size: 12.5px; line-height: 1.5;
+  border: 1px solid transparent;
+}
+.rv-tl-ok      { background: var(--emerald-soft, #E4F5EE); color: var(--emerald, #07835A); border-color: var(--emerald-line, #A9DFC9); }
+.rv-tl-warn    { background: var(--amber-soft,   #FDF3E3); color: var(--amber,   #C2700A); border-color: var(--amber-line,   #F2D9AE); }
+.rv-tl-loading { background: var(--surface-2, #F2F4F7); color: var(--text-2, #586374); border-color: var(--border, #E2E7EE); }
+
+.rv-submit-block {
+  display: flex; flex-direction: column; gap: 8px; margin-top: 8px;
+}
+.rv-submit-block .btn { padding: 12px; font-size: 14px; font-weight: 600; }
+.rv-submit-alt {
+  text-align: center; font-size: 11.5px;
+  color: var(--text-3, #8B95A5); text-decoration: underline;
+}
+.rv-submit-hint { text-align: center; font-size: 11px; color: var(--text-3, #8B95A5); }
+
