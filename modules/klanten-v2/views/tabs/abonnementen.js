@@ -101,11 +101,13 @@ function calcKpis(subs) {
     if (key === 'active' || key === 'running') active++;
     else if (key === 'overdue') overdue++;
     else if (key === 'paused')  paused++;
-    // MRR heel simpel: alleen actieve subs, elke term als één maand
-    // (voldoende voor deze read-only preview; ware MRR-berekening zit
-    // in sales-mrr-report.js — daar geen refactor van, alleen tonen).
+    // Termijnbedrag (actief) — INCL. BTW, som over actieve subs.
+    // Gebruikt dezelfde inclPerTerm-helper als de kaart-header en de
+    // expand-tfoot zodat KPI == kaart == expand-totaal. Was eerder
+    // Number(s.amount) (EXCL) — dat gaf een lager KPI-bedrag dan de
+    // kaart erboven en verwarrend rondom BTW.
     if (key === 'active' || key === 'running') {
-      mrr += Number(s.amount) || 0;
+      mrr += inclPerTerm(s);
     }
   }
   return { active, overdue, paused, mrr };
