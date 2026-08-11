@@ -262,6 +262,92 @@
     if (_sw.savedRefresher) { clearInterval(_sw.savedRefresher); _sw.savedRefresher = null; }
   }
 
+  // ── Edit-mode PREFILL (batch2b Feature B) ─────────────────────────
+  // Fetch bestaande deal + customer + line_items en map naar wizard-state.
+  // 1-op-1 met v1 sales-wizard.html r906-934 (init edit-branch).
+  // Response: /api/sales-deal-detail?id=X →
+  //   { deal, customer, line_items, traject, entity, has_subscription, ... }
+  // Belangrijkste transformaties (bevestigd uit v1 recon):
+  //   - address_country = 'BE' als 'BE', anders 'NL' (default)
+  //   - line_items.unit_price → wizard.products[].price_per_unit (rename)
+  //   - fallback start_date = today als deal.start_date leeg
+  //   - duration_months || 12, discount || 0, sale_type || 'domestic'
+  //   - payment_* velden || '' (geen date-transform)
+  //   - state.matched_customer_id = customer.id (skipt dup-check)
+  //   - state.duplicate_check_status = 'completed'
+  //   - state.existingCustName = displayNaam (voor banner)
+  // Velden NIET geprefilled (v1-limiet uit customer-select): date_of_birth,
+  // tags, avg_ok, address_known — die staan op default. Als je die alsnog
+  // wilt: aparte /api/customer-fetch call na deze.
+  async function loadDealForEdit(dealId) {
+    if (!dealId) return;
+    _sw.entitiesLoading = true; // hergebruik als spinner-signaal
+    try {
+      const d = await tryFetch('sales-deal-detail-edit', '/api/sales-deal-detail?id=' + encodeURIComponent(String(dealId)));
+      _sw.entitiesLoading = false;
+      if (!d || !d.deal) {
+        console.warn('[sw-v2] edit-prefill: geen deal-data');
+        return;
+      }
+      const deal = d.deal, c = d.customer || {};
+      const w = _sw.wizard;
+      // Stap 1
+      if (deal.tl_department_id)    w.tl_department_id    = String(deal.tl_department_id);
+      if (deal.traject_variant_id)  w.traject_variant_id  = String(deal.traject_variant_id);
+      // Stap 2 — klant
+      w.is_company      = !!c.is_company;
+      w.company_name    = c.company_name || '';
+      w.kvk_number      = c.kvk_number || '';
+      w.vat_number      = c.vat_number || '';
+      w.first_name      = c.first_name || '';
+      w.last_name       = c.last_name || '';
+      w.email           = c.email || '';
+      w.phone           = c.phone || '';
+      w.address_street  = c.address_street || '';
+      w.address_number  = c.address_number || '';
+      w.address_postal  = c.address_postal || '';
+      w.address_city    = c.address_city || '';
+      w.address_country = (c.address_country === 'BE' ? 'BE' : 'NL');
+      // Stap 3 — offerte
+      const today = new Date().toISOString().slice(0, 10);
+      w.start_date          = (deal.start_date || today).slice(0, 10);
+      w.duration_months     = Number(deal.duration_months) || 12;
+      w.discount_percentage = Number(deal.discount_percentage) || 0;
+      w.sale_type           = deal.sale_type || 'domestic';
+      w.quote_reference     = deal.quote_reference || '';
+      w.source_lead_id      = deal.source_lead_id || '';
+      // Producten (unit_price → price_per_unit rename)
+      w.products = (d.line_items || []).map(l => ({
+        product_id:         l.product_id,
+        product_name:       l.product_name,
+        quantity:           Number(l.quantity),
+        price_per_unit:     Number(l.unit_price),
+        vat_percentage:     l.vat_percentage,
+        price_includes_vat: !!l.price_includes_vat,
+      }));
+      // Stap 4 — betalingsvoorwaarden (fallback '' → hint-line UI vult 'em)
+      w.payment_start_date         = (deal.payment_start_date || '').slice(0, 10);
+      w.payment_downpayment_amount = deal.payment_downpayment_amount || '';
+      w.payment_downpayment_date   = (deal.payment_downpayment_date || '').slice(0, 10);
+      w.payment_term_count         = deal.payment_term_count || '';
+      w.payment_term_start_date    = (deal.payment_term_start_date || '').slice(0, 10);
+      w.payment_term_amount        = deal.payment_term_amount || '';
+      // Bestaande klant → skipt dup-check + toont banner (v1 r910-917)
+      _sw.matched_customer_id    = c.id || null;
+      _sw.duplicate_check_status = 'completed';
+      _sw.existingCustName = c.is_company
+        ? (c.company_name || '')
+        : (`${c.first_name || ''} ${c.last_name || ''}`.trim());
+      // Force lazy loads voor step 3 (producten-catalog nodig voor picker)
+      if (!_sw.trajecten     && !_sw.trajectenLoading) queueMicrotask(loadTrajecten);
+      if (!_sw.productsCatalog && !_sw.productsLoading) queueMicrotask(loadProductsCatalog);
+      renderWizard();
+    } catch (e) {
+      _sw.entitiesLoading = false;
+      console.warn('[sw-v2] edit-prefill fail:', e?.message);
+    }
+  }
+
   // ── Prefill-lezers (leads → wizard, events → wizard) ────────────────
   function readPrefill() {
     // Prefill vanuit klanten-v2 leads-module (sessionStorage _prefill_lead)
@@ -405,6 +491,12 @@
       try { sessionStorage.setItem('_prefill_lead', JSON.stringify(opts.prefillLead)); } catch (_) {}
     }
     readPrefill();
+    // Edit-mode PREFILL — als editDealId gezet (via opts of URL), fetch
+    // de bestaande deal en prefill wizard-state. Skipt draft-resume
+    // want editDealId is truthy.
+    if (_sw.editDealId) {
+      queueMicrotask(() => loadDealForEdit(_sw.editDealId));
+    }
     // Draft-resume check — skip in edit-mode (v1-bug fix). Async: als er
     // een draft is EN we zijn geen prefill/edit-flow, tonen we de resume-
     // modal en wacht op user-keuze voordat de wizard-body verschijnt.
@@ -425,6 +517,16 @@
     if (_sw.dirty && !confirm('Er zijn niet-opgeslagen wijzigingen. Wizard sluiten?')) return;
     _sw.open = false;
     _sw.resumeModal = { open: false, draft: null };
+    // Edit-mode reset: als user cancelt tijdens edit → wis edit-context
+    // zodat volgende __swOpen() weer een nieuwe offerte start (niet
+    // opnieuw de deal-detail fetch triggert). Prefill-flags idem.
+    _sw.editDealId = null;
+    _sw.matched_customer_id = null;
+    _sw.tl_imported_contact_id = null;
+    _sw.duplicate_check_status = 'idle';
+    _sw.existingCustName = null;
+    _sw.prefillLeadId = null;
+    _sw.prefillEventAttendeeId = null;
     if (_sw.saveTimer) { clearTimeout(_sw.saveTimer); _sw.saveTimer = null; }
     _swStopSavedRefresher();
     renderWizard();
@@ -670,6 +772,18 @@
       // v2-detail-page als __odvOpen niet beschikbaar (defensive; script is
       // normaal geladen vanaf klanten-v2/index.html).
       _sw.open = false; _sw.step = 1; _sw.dirty = false;
+      // Reset edit + prefill context na succes zodat volgende __swOpen
+      // schoon start. Draft is server-side al verwijderd (r503).
+      _sw.editDealId = null;
+      _sw.matched_customer_id = null;
+      _sw.tl_imported_contact_id = null;
+      _sw.duplicate_check_status = 'idle';
+      _sw.existingCustName = null;
+      _sw.prefillLeadId = null;
+      _sw.prefillEventAttendeeId = null;
+      _sw.saveStatus = 'idle';
+      _sw.savedAt = null;
+      _swStopSavedRefresher();
       renderWizard();
       if (data?.deal_id) {
         setTimeout(() => {

@@ -446,7 +446,7 @@
         ? `<button class="btn btn-success" onclick="odvSendOpen()">Versturen</button>`
         : `<button class="btn" onclick="__odvDoPush()">Push naar TL</button>`;
       return `${sendOrPush}
-        <a class="btn btn-ghost" href="/modules/sales-wizard.html?edit_deal_id=${encodeURIComponent(deal.id)}">Bewerken</a>
+        <button class="btn btn-ghost" onclick="__odvEditDeal('${esc(deal.id)}')" title="Bewerken in v2-wizard (in-shell)">Bewerken</button>
         ${copyBtn}
         <button class="btn btn-danger" onclick="__odvDoDelete()">Verwijderen</button>`;
     }
@@ -617,6 +617,19 @@
       toast('Gekopieerd — nieuwe concept-offerte aangemaakt');
       if (d?.deal_id) setTimeout(() => window.__odvOpen(d.deal_id), 800);
     } catch (e) { toast('Kopiëren mislukt: ' + e.message); }
+  };
+
+  // Bewerken (batch2b Feature B): open v2-wizard in-shell in edit-mode.
+  // Fallback naar oude wizard-html als sales-wizard-v2.js niet geladen is
+  // (defensive; script normaal via klanten-v2/index.html geladen).
+  window.__odvEditDeal = function (dealId) {
+    const id = String(dealId || _odv.dealId || '').trim();
+    if (!id) return;
+    if (typeof window.__swOpen === 'function') {
+      window.__swOpen({ editDealId: id });
+      return;
+    }
+    window.location.href = '/modules/sales-wizard.html?edit_deal_id=' + encodeURIComponent(id);
   };
 
   window.__odvDoDelete = async function () {
