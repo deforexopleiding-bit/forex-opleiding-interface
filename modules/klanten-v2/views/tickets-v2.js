@@ -1,7 +1,9 @@
 // modules/klanten-v2/views/tickets-v2.js
 //
-// Data-ronde 2 — Tickets v2. Live /api/tickets + volledige v2-detail-view +
-// v2 create-modal. Blijft dormant (?v2preview=tickets).
+// Data-ronde 2 + Ronde 3-fixes — Tickets v2. Live /api/tickets + volledige
+// v2-detail-view + v2 create-modal. Blijft dormant (?v2preview=tickets).
+// Ronde 3-fixes: modal-CSS (recidive .fn-modal-back-bug), titel-styling
+// rustiger, en video/link-embed voor YouTube / Vimeo / Loom / Drive.
 //
 // Endpoints (allemaal bestaand, uit tickets.html):
 //   GET   /api/tickets?status&type&module           (lijst per tab)
@@ -31,9 +33,12 @@
   // (bug/feature/question). Eerder gebruikt: low/medium/high/urgent + task
   // — dat faalde met 400 "Ongeldige priority" / "Ongeldig type" bij POST.
   // Ronde 5: pendingFiles = File[] die pas na ticket-create worden geüpload.
-  const _cre  = { submitting: false, uploading: false, form: { title: '', description: '', type: 'question', priority: 'middel', module: '' }, pendingFiles: [] };
+  // Ronde 3-fixes: pendingUrls = string[] van video/link-URLs die als
+  //   external_url attachment worden opgeslagen na ticket-create.
+  const _cre  = { submitting: false, uploading: false, form: { title: '', description: '', type: 'question', priority: 'middel', module: '' }, pendingFiles: [], pendingUrls: [], newUrl: '' };
   // Ronde 5: attachment-state voor detail-view (uploading + signed-url cache).
-  const _att = { uploading: false, signedUrls: new Map() };
+  // Ronde 3-fixes: newUrl = input voor detail-view video/link-URL toevoegen.
+  const _att = { uploading: false, signedUrls: new Map(), newUrl: '', urlSubmitting: false };
   const ATTACH_BUCKET = 'tickets-attachments';
   const ATTACH_MAX_MB = 20;
   const ATTACH_SIGNED_TTL = 3600;
@@ -101,7 +106,7 @@
   window.__ticketNew   = () => setUrlParam('ticket-new', '1');
   window.__ticketOpen  = (id) => { if (id) setUrlParam('ticket', id); };
   window.__ticketBack  = () => { setUrlParam('ticket', null); };
-  window.__ticketCloseCreate = () => { setUrlParam('ticket-new', null); _cre.pendingFiles = []; };
+  window.__ticketCloseCreate = () => { setUrlParam('ticket-new', null); _cre.pendingFiles = []; _cre.pendingUrls = []; _cre.newUrl = ''; };
   window.__ticketCreateInput = (field, val) => { _cre.form[field] = val; };
 
   // ── Ronde 5: attachment-helpers ─────────────────────────────────────
@@ -167,6 +172,39 @@
   }
   const isImage = (mime) => typeof mime === 'string' && mime.startsWith('image/');
 
+  // ── Ronde 3-fixes: video/link-URL detectie (1-op-1 uit v1 tickets-detail).
+  // Returnt { kind: 'iframe'|'link', src, label?, domain } of null als leeg.
+  // Detecteert Loom / YouTube (watch/youtu.be/embed) / Vimeo / Google Drive.
+  // Fallback: gewone link met alleen domain-label.
+  function detectEmbed(url) {
+    if (!url) return null;
+    const u = String(url).trim();
+    if (!u) return null;
+    let m;
+    if ((m = u.match(/loom\.com\/share\/([a-f0-9]+)/i))) {
+      return { kind: 'iframe', src: `https://www.loom.com/embed/${m[1]}`, label: 'Loom video', domain: 'loom.com' };
+    }
+    if ((m = u.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]+)/i))) {
+      return { kind: 'iframe', src: `https://www.youtube.com/embed/${m[1]}`, label: 'YouTube video', domain: 'youtube.com' };
+    }
+    if ((m = u.match(/vimeo\.com\/(?:video\/)?(\d+)/i))) {
+      return { kind: 'iframe', src: `https://player.vimeo.com/video/${m[1]}`, label: 'Vimeo video', domain: 'vimeo.com' };
+    }
+    if ((m = u.match(/drive\.google\.com\/file\/d\/([\w-]+)/i))) {
+      return { kind: 'iframe', src: `https://drive.google.com/file/d/${m[1]}/preview`, label: 'Drive bestand', domain: 'drive.google.com' };
+    }
+    let domain = '';
+    try { domain = new URL(u).hostname.replace(/^www\./, ''); } catch (_) { /* geen valid URL */ }
+    return { kind: 'link', src: u, label: domain || u, domain };
+  }
+  function isValidHttpUrl(u) {
+    if (!u || typeof u !== 'string') return false;
+    try {
+      const parsed = new URL(u.trim());
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch (_) { return false; }
+  }
+
   window.__ticketCreatePickFiles = (input) => {
     const files = Array.from(input.files || []);
     _cre.pendingFiles = _cre.pendingFiles.concat(files);
@@ -175,6 +213,44 @@
   };
   window.__ticketCreateRemovePending = (idx) => {
     _cre.pendingFiles.splice(idx, 1);
+    window.DFO.render();
+  };
+  // Ronde 3-fixes: URL-lijst voor video/link-bijlagen in create-modal.
+  window.__ticketCreateUrlInput = (val) => { _cre.newUrl = val; };
+  window.__ticketCreateAddUrl = () => {
+    const raw = (_cre.newUrl || '').trim();
+    if (!raw) return;
+    if (!isValidHttpUrl(raw)) { alert('Ongeldige URL (moet beginnen met http:// of https://).'); return; }
+    _cre.pendingUrls.push(raw);
+    _cre.newUrl = '';
+    window.DFO.render();
+  };
+  window.__ticketCreateRemoveUrl = (idx) => {
+    _cre.pendingUrls.splice(idx, 1);
+    window.DFO.render();
+  };
+  // Detail-view: paste-and-save URL flow (POST /api/ticket-attachments met external_url).
+  window.__ticketDetailUrlInput = (val) => { _att.newUrl = val; };
+  window.__ticketDetailAddUrl = async () => {
+    if (_att.urlSubmitting || !_det.id) return;
+    const raw = (_att.newUrl || '').trim();
+    if (!raw) return;
+    if (!isValidHttpUrl(raw)) { alert('Ongeldige URL (moet beginnen met http:// of https://).'); return; }
+    _att.urlSubmitting = true; window.DFO.render();
+    try {
+      const j = await tryPost('ticket-attachment-url', '/api/ticket-attachments', {
+        ticket_id: _det.id,
+        external_url: raw,
+      });
+      if (j?.attachment) {
+        _det.data = _det.data || { ticket: {}, attachments: [] };
+        _det.data.attachments = (_det.data.attachments || []).concat(j.attachment);
+      }
+      _att.newUrl = '';
+    } catch (e) {
+      alert('URL niet opgeslagen: ' + (e?.message || 'onbekende fout'));
+    }
+    _att.urlSubmitting = false;
     window.DFO.render();
   };
   window.__ticketDetailPickFiles = async (input) => {
@@ -261,9 +337,21 @@
         }
         _cre.uploading = false;
       }
+      // Ronde 3-fixes: pending video/link-URLs als external_url attachments.
+      if (newId && _cre.pendingUrls.length) {
+        for (const raw of _cre.pendingUrls) {
+          try {
+            await tryPost('ticket-attachment-url', '/api/ticket-attachments', {
+              ticket_id: newId, external_url: raw,
+            });
+          } catch (e) { console.warn('[tickets-v2] url-attach fail:', e?.message); }
+        }
+      }
       _cre.submitting = false;
       _cre.form = { title: '', description: '', type: 'question', priority: 'middel', module: '' };
       _cre.pendingFiles = [];
+      _cre.pendingUrls = [];
+      _cre.newUrl = '';
       _open.data = null; _wait.data = null; _done.data = null;
       const u = new URL(location.href);
       u.searchParams.delete('ticket-new');
@@ -462,6 +550,30 @@
               <div class="tk-att-hint">Afbeeldingen, video's, PDF's, Office-bestanden. Max ${ATTACH_MAX_MB} MB per bestand. Upload gebeurt na aanmaken.</div>
             </div>
           </div>
+
+          <div class="tk-field">
+            <span class="tk-field-l">Video / link (YouTube · Vimeo · Loom · Drive · andere URL)</span>
+            ${_cre.pendingUrls.length ? `<div class="tk-att-links">
+              ${_cre.pendingUrls.map((u, i) => {
+                const e = detectEmbed(u);
+                const domain = e?.domain || '';
+                return `<div class="tk-att-link-item">
+                  ${svg(I.mail || I.doc)}
+                  <span class="tk-att-link-url" title="${esc(u)}">${esc(u)}</span>
+                  ${domain ? `<span class="tk-att-file-mime">${esc(domain)}</span>` : ''}
+                  <button class="icon-btn" onclick="__ticketCreateRemoveUrl(${i})" title="Verwijder">${svg(I.x || I.warn)}</button>
+                </div>`;
+              }).join('')}
+            </div>` : ''}
+            <div class="tk-att-link-add">
+              <input class="ib-input" type="url" placeholder="https://youtu.be/… of https://www.loom.com/share/…"
+                value="${esc(_cre.newUrl)}"
+                oninput="__ticketCreateUrlInput(this.value)"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();__ticketCreateAddUrl()}"${disabled}>
+              <button class="btn btn-sm" onclick="__ticketCreateAddUrl()"${disabled}>${svg(I.plus)}Toevoegen</button>
+            </div>
+            <div class="tk-att-hint">Video's uit YouTube / Vimeo / Loom / Google Drive worden als embed getoond. Andere URLs krijgen een klikbare kaart.</div>
+          </div>
         </div>
         <div class="tk-modal-foot">
           <button class="btn" onclick="__ticketCloseCreate()"${disabled}>Annuleren</button>
@@ -475,9 +587,11 @@
     </div>`;
   }
 
-  // Ronde 5: attachments-card voor detail-view. Images tonen als thumbnail
-  // (lazy signed-URL fetch via hydrateAttachmentImages post-render), niet-
-  // images als file-link met open-in-tab (ook signed-URL).
+  // Ronde 5 + Ronde 3-fixes: attachments-card voor detail-view.
+  // Images tonen als thumbnail (lazy signed-URL fetch via hydrateAttachmentImages
+  // post-render), niet-images als file-link met open-in-tab (ook signed-URL).
+  // external_url attachments met bekende video-host (YouTube/Vimeo/Loom/Drive)
+  // renderen als iframe-embed (16:9 responsive), andere URLs als link-kaart.
   function renderAttachmentsCard(attachments) {
     const images = attachments.filter(a => a.storage_path && isImage(a.mime_type));
     const files  = attachments.filter(a => a.storage_path && !isImage(a.mime_type));
@@ -500,18 +614,37 @@
             <button class="icon-btn" onclick="__ticketAttDelete('${a.id}')" title="Verwijder">${svg(I.x || I.warn)}</button>
           </div>`).join('')}
         </div>` : ''}
-        ${links.length ? `<div class="tk-att-files">
-          ${links.map(a => `<div class="tk-att-file-row">
-            ${svg(I.mail)}
-            <a href="${esc(a.external_url)}" target="_blank" rel="noopener" class="tk-att-file-name">${esc(a.filename || a.external_url)}</a>
-            <button class="icon-btn" onclick="__ticketAttDelete('${a.id}')" title="Verwijder">${svg(I.x || I.warn)}</button>
-          </div>`).join('')}
+        ${links.length ? `<div class="tk-embed-wrap">
+          ${links.map(a => {
+            const e = detectEmbed(a.external_url);
+            const body = (e && e.kind === 'iframe')
+              ? `<div class="tk-embed-card"><iframe src="${esc(e.src)}" allowfullscreen loading="lazy" referrerpolicy="no-referrer"></iframe></div>`
+              : `<a class="tk-embed-link" href="${esc(a.external_url)}" target="_blank" rel="noopener">
+                   ${svg(I.mail || I.doc)}
+                   <span class="tk-embed-link-name">${esc(a.filename || (e && e.label) || a.external_url)}</span>
+                   <span class="tk-embed-link-domain">${esc((e && e.domain) || '')}</span>
+                 </a>`;
+            return `<div class="tk-embed-row">
+              <div class="tk-embed-body">${body}</div>
+              <button class="icon-btn" onclick="__ticketAttDelete('${a.id}')" title="Verwijder">${svg(I.x || I.warn)}</button>
+            </div>`;
+          }).join('')}
         </div>` : ''}
         ${!attachments.length ? `<div class="sv-empty" style="padding:14px 6px">Nog geen bijlagen.</div>` : ''}
         <label class="tk-att-picker" style="margin-top:12px">
           <input type="file" multiple accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx" onchange="__ticketDetailPickFiles(this)" ${_att.uploading ? 'disabled' : ''} style="display:none">
           <span class="btn btn-sm">${_att.uploading ? svg(I.clock || I.settings) + 'Uploaden…' : svg(I.plus) + 'Bestand/foto/video toevoegen'}</span>
         </label>
+        <div class="tk-att-link-add">
+          <input class="ib-input" type="url" placeholder="Plak YouTube / Vimeo / Loom / Drive-link…"
+            value="${esc(_att.newUrl)}"
+            oninput="__ticketDetailUrlInput(this.value)"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();__ticketDetailAddUrl()}"
+            ${_att.urlSubmitting ? 'disabled' : ''}>
+          <button class="btn btn-sm" onclick="__ticketDetailAddUrl()" ${_att.urlSubmitting ? 'disabled' : ''}>
+            ${_att.urlSubmitting ? svg(I.clock || I.settings) + 'Bezig…' : svg(I.plus) + 'Toevoegen'}
+          </button>
+        </div>
       </div>
     </div>`;
   }
@@ -612,14 +745,6 @@
                   ${assignees.map(a => `<option value="${a.id}" ${t.assigned_to === a.id ? 'selected' : ''}>${esc(a.name)}${a.role ? ' · ' + esc(a.role) : ''}</option>`).join('')}
                 </select>
               ` : `<div style="font-size:12.5px;color:var(--text-3)">${_det.loading ? 'Laden…' : 'Geen assignees beschikbaar.'}</div>`}
-            </div>
-          </div>
-          <div class="sv-card">
-            <div class="sv-card-head">${svg(I.doc)}Bijlagen</div>
-            <div class="sv-card-body">
-              ${(d.attachments || []).length ? d.attachments.map(a => `
-                <div class="sv-row"><span>${esc(a.name || a.file_name || '—')}</span><b style="font-size:11px;color:var(--text-3)">${a.size ? Math.round(a.size / 1024) + ' kB' : ''}</b></div>
-              `).join('') : `<div style="font-size:12.5px;color:var(--text-3)">${_det.loading ? 'Laden…' : 'Geen bijlagen. Upload nog niet in v2 — gebruik oude tickets-detail.html voor uploads.'}</div>`}
             </div>
           </div>
         </div>

@@ -2901,6 +2901,123 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
 .fn-daterange { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 
 
+/* ── Tickets-modals + link-styling (.tk-modal-*, .tk-title, .tk-att-*).
+   Recidive-fix van bekende ONZICHTBARE modal-bug: tickets-v2 create-modal
+   gebruikt .tk-modal-*-classes die nooit in klanten-v2.css bestonden. Modal
+   werd wél gerender'd (in tk-view HTML) maar zonder position:fixed/backdrop/
+   z-index → viel in-flow onder de lijst en/of viewport. Pattern 1-op-1 met
+   .fn-modal-* (die eerder om dezelfde reden ontbrak in Finance). ──────── */
+.tk-modal-back {
+  position: fixed; inset: 0;
+  background: rgba(17, 23, 33, .42);
+  backdrop-filter: blur(3px);
+  z-index: 9500;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.tk-modal {
+  width: 100%; max-width: 780px; max-height: calc(100vh - 48px);
+  background: var(--surface, #FFFFFF); border-radius: var(--r-lg, 14px);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, .32);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.tk-modal-head {
+  padding: 13px 17px; border-bottom: 1px solid var(--border, #E2E7EE);
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface-2, #F2F4F7);
+}
+.tk-modal-title { font-size: 15px; font-weight: 600; color: var(--text, #111721); flex: 1; }
+.tk-modal-body { flex: 1 1 auto; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.tk-modal-foot {
+  padding: 12px 17px; border-top: 1px solid var(--border, #E2E7EE);
+  display: flex; gap: 8px; align-items: center;
+  background: var(--surface-2, #F2F4F7); justify-content: flex-end;
+}
+.tk-field { display: flex; flex-direction: column; gap: 5px; }
+.tk-field-l { font-size: 12px; color: var(--text-2, #586374); font-weight: 500; }
+
+/* Ticket-titels in de lijst — subtiele tekst-link met milde hover.
+   Zonder deze regel viel het terug op browser-default (blauw/rood +
+   onderstreept), wat te heftig was in de v2-lijst. */
+.tk-title { color: var(--text-1, var(--text, #111721)); text-decoration: none; font-weight: 500; }
+.tk-title:visited { color: var(--text-1, var(--text, #111721)); }
+.tk-title:hover { color: var(--m, #6D3FD4); text-decoration: underline; }
+.tk-title:focus-visible { outline: 2px solid var(--m, #6D3FD4); outline-offset: 2px; border-radius: 3px; }
+
+/* Pending bijlagen-lijst (create-modal). */
+.tk-att-pending { display: flex; flex-direction: column; gap: 8px; }
+.tk-att-pending-list { display: flex; flex-direction: column; gap: 6px; }
+.tk-att-pending-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; background: var(--surface-2, #F2F4F7);
+  border: 1px solid var(--border, #E2E7EE); border-radius: 6px;
+  font-size: 12.5px; color: var(--text-2, #586374);
+}
+.tk-att-pending-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-att-pending-size { font-size: 11.5px; color: var(--text-3, #8B95A5); font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+.tk-att-picker { display: inline-block; }
+.tk-att-hint { font-size: 11.5px; color: var(--text-3, #8B95A5); line-height: 1.5; }
+
+/* Video/link-URL invoer + pending-lijst (create-modal + detail-view). */
+.tk-att-link-add { display: flex; gap: 6px; margin-top: 6px; }
+.tk-att-link-add .ib-input { flex: 1; }
+.tk-att-links { display: flex; flex-direction: column; gap: 6px; }
+.tk-att-link-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; background: var(--surface-2, #F2F4F7);
+  border: 1px solid var(--border, #E2E7EE); border-radius: 6px;
+  font-size: 12.5px; color: var(--text-2, #586374);
+}
+.tk-att-link-url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11.5px; }
+
+/* Bijlagen-grid (detail-view) — images + files + embeds. */
+.tk-att-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.tk-att-img-card {
+  position: relative; border-radius: 8px; overflow: hidden;
+  background: var(--surface-2, #F2F4F7);
+  border: 1px solid var(--border, #E2E7EE);
+  cursor: pointer;
+}
+.tk-att-img { display: block; width: 100%; height: 110px; object-fit: cover; background: var(--surface-2, #F2F4F7); }
+.tk-att-meta { padding: 6px 8px; font-size: 11.5px; color: var(--text-2, #586374); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-att-del {
+  position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(0, 0, 0, .55); color: #fff; border: 0; cursor: pointer;
+  font-size: 14px; line-height: 1; display: grid; place-items: center;
+}
+.tk-att-files { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.tk-att-file-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; background: var(--surface-2, #F2F4F7);
+  border: 1px solid var(--border, #E2E7EE); border-radius: 6px;
+  font-size: 12.5px;
+}
+.tk-att-file-name { flex: 1; min-width: 0; color: var(--text-1, #111721); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-att-file-name:hover { color: var(--m, #6D3FD4); text-decoration: underline; }
+.tk-att-file-mime { font-size: 11px; color: var(--text-3, #8B95A5); font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+
+/* Video-embed cards (YouTube / Vimeo / Loom / Drive) — 16:9 responsive. */
+.tk-embed-wrap { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.tk-embed-row { display: flex; align-items: flex-start; gap: 6px; }
+.tk-embed-row > .tk-embed-body { flex: 1; min-width: 0; }
+.tk-embed-card {
+  position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden;
+  background: #000; border-radius: 8px;
+  border: 1px solid var(--border, #E2E7EE);
+}
+.tk-embed-card iframe {
+  position: absolute; inset: 0; width: 100%; height: 100%; border: 0;
+}
+.tk-embed-link {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; background: var(--surface-2, #F2F4F7);
+  border: 1px solid var(--border, #E2E7EE); border-radius: 8px;
+  text-decoration: none; color: var(--text-1, #111721); font-size: 12.5px;
+}
+.tk-embed-link:hover { border-color: var(--m, #6D3FD4); }
+.tk-embed-link-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-embed-link-domain { font-size: 11.5px; color: var(--text-3, #8B95A5); }
+
+
 /* Kanban ronde 5 — pipeline-view voor Tickets + Takenbeheer.
    HTML5 drag-and-drop, geen externe lib. Kolommen = statussen, kaarten =
    items met .kv-kanban-card[draggable=true]. */
