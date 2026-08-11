@@ -2719,3 +2719,17 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
 }
 .rv-submit-hint { text-align: center; font-size: 11px; color: var(--text-3, #8B95A5); }
 
+/* Save-indicator in wizard-foot (batch2b — Feature A draft-persistentie). */
+.sw-save-indicator {
+  font-size: 11.5px; font-weight: 500;
+  padding: 0 8px;
+  color: var(--text-3, #8B95A5);
+  white-space: nowrap;
+  min-width: 12px;
+  display: inline-flex; align-items: center;
+}
+.sw-save-idle   { color: var(--text-3, #8B95A5); }
+.sw-save-saving { color: var(--blue,   #1B5FBF); }
+.sw-save-saved  { color: var(--emerald,#07835A); }
+.sw-save-failed { color: var(--rose,   #C22B3E); font-weight: 600; }
+
