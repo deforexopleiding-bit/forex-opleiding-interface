@@ -1,396 +1,1070 @@
 // modules/klanten-v2/views/finance-v2.js
 //
-// Fase C module #2 — Finance-module layout voor v2-shell (layout-only, voorbeeld-data).
-// 1-op-1 render uit docs/redesign/systeemprototype-v45.html:
-//   - dashFinanceModule                      r2269-2334  (rolspecifiek: sales-scope vs full finance)
-//   - VIEWS['finance/Dashboard']             r2335       (= dashFinanceModule)
-//   - VIEWS['finance/Facturen']              r2336-2365
-//   - VIEWS['finance/Abonnementen']          r2366-2381
-//   - VIEWS['finance/Omzet & MRR']           r2382-2394
-//   - VIEWS['finance/Bank']                  r2395-2408
-//   - VIEWS["finance/Creditnota's"]          r2409-2418
-//   - FACTUREN + ST + ABOS                   r1301-1320
-//   - TRAJECTEN                              r1363-1369
-//   - OFFERTES + OST (voor sales-scope)      r1321-1329
-//   - hbar / funnel / dashCard / areaChart   r1441-1463 (inline; finance-specifiek)
+// Data-ronde — Finance als live-module. 6 tabs (uit MODS): Dashboard /
+// Facturen / Abonnementen / Creditnota's / Bank / Omzet & MRR.
 //
-// NIET wanbetalers — dat is een aparte gevoelige module, later.
+// KRITIEK — beschermde-zone-scheiding:
+// - Wanbetalers is een APARTE module (Fase H). Finance-tab-set bevat
+//   die NIET. Deze view rendert GEEN dunning/joost/voys/arrangements/
+//   pending-actions data. Uit /api/finance-dashboard-counts negeren we
+//   expliciet de velden: actieveArrangements, openVerifyPayment,
+//   openEscalations, joostStats, conversieWanbetalersFlow.
+// - Alleen bestaande endpoints, GEEN nieuwe backend.
 //
-// Registreert 6 views + KV_V2_ADD('finance') — dormant. Preview via
-// ?v2preview=finance.
+// Endpoints per tab:
+//   Dashboard      → /api/finance-dashboard-counts?period=<>
+//   Facturen       → /api/finance-invoices?status&entity&from&to&q&page&page_size
+//   Abonnementen   → /api/sales-subscriptions-list?status&page&page_size
+//                    (Finance-html heeft geen abo-tab; sales-subscriptions
+//                     is de gedeelde bron)
+//   Creditnota's   → /api/finance-creditnotes-list?q&from&to&page&page_size
+//   Bank           → /api/finance-bank-camt-balance
+//                    + /api/finance-bank-camt-transactions?direction&from&to&q&limit&offset
+//   Omzet & MRR    → /api/super-admin-omzet?from&to&group_by
+//                    (Finance-html heeft geen Omzet-tab; super-admin-omzet
+//                     is de gedeelde bron van dashboard.html)
+//
+// Dormant. Preview ?v2preview=finance (rol super_admin/admin/manager/sales).
 
 (function () {
   if (!window.DFO) { console.error('[finance-v2] DFO shell niet geladen.'); return; }
   if (!window.KV_V2 || !window.KV_V2.helpers) { console.error('[finance-v2] KV_V2.helpers niet geladen.'); return; }
 
-  const { I, svg, S, F, eur, eur0 } = window.DFO;
+  const { I, svg, F, setF } = window.DFO;
   const H = window.KV_V2.helpers;
 
-  /* ── Voorbeeld-data (prototype r1301-1369) ────────────────────────── */
-  const FACTUREN = [
-    { nr: '2026/1447', klant: 'Ebenezer Adjei',       bedrag: 7199.99, open: 7199.99, datum: '12-06-2026', verval: '26-06-2026', dagen:  40, status: 'overdue',     entity: 'DFO'    },
-    { nr: '2026/1502', klant: 'Dyami Van Praag',      bedrag: 3675,    open: 3675,    datum: '01-04-2026', verval: '15-04-2026', dagen: 129, status: 'overdue',     entity: 'DFO'    },
-    { nr: '2026/1388', klant: 'NazNaz Transport',     bedrag: 3000,    open: 2500,    datum: '10-03-2026', verval: '24-03-2026', dagen: 149, status: 'overdue',     entity: 'DFO'    },
-    { nr: '2026/1610', klant: 'Chamano BV',           bedrag: 7200,    open: 0,       datum: '01-08-2026', verval: '15-08-2026', dagen:   0, status: 'paid',        entity: 'DFO BE' },
-    { nr: '2026/1591', klant: 'Jennifer Botaka',      bedrag: 2000,    open: 2000,    datum: '09-03-2026', verval: '23-03-2026', dagen: 148, status: 'overdue',     entity: 'DFO'    },
-    { nr: '2026/1622', klant: 'Michiel Van Brenk',    bedrag: 1200,    open:  800,    datum: '12-06-2026', verval: '26-06-2026', dagen:  54, status: 'partial',     entity: 'DFO'    },
-    { nr: '2026/1633', klant: 'ER Schilderwerken',    bedrag: 3950,    open: 3950,    datum: '04-08-2026', verval: '18-08-2026', dagen:   0, status: 'open',        entity: 'DFO BE' },
-    { nr: '2026/1520', klant: 'Ingrid Van Den Eede',  bedrag: 1400,    open:  750,    datum: '13-03-2026', verval: '27-03-2026', dagen: 145, status: 'arrangement', entity: 'DFO BE' },
-  ];
-  const ST = {
-    overdue:     { l: 'Te laat',  c: 'danger'  },
-    open:        { l: 'Open',     c: 'neutral' },
-    paid:        { l: 'Betaald',  c: 'ok'      },
-    partial:     { l: 'Deels',    c: 'warn'    },
-    arrangement: { l: 'Regeling', c: 'accent'  },
-  };
-  const ABOS = [
-    { klant: 'Cabdi Ibrahim',     plan: '12 maand 1-op-1',     mrr: 600, start: '01-08-2026', termijn: '1/12', status: 'actief' },
-    { klant: 'Stéphane Seutin',   plan: '12 maand 1-op-1',     mrr: 600, start: '03-08-2026', termijn: '1/12', status: 'actief' },
-    { klant: 'Emile Rabaut',      plan: '6 maand 1-op-1',      mrr: 658, start: '04-08-2026', termijn: '1/6',  status: 'actief' },
-    { klant: 'Nikita Bykov',      plan: '36 maand membership', mrr:  65, start: '24-07-2026', termijn: '1/36', status: 'actief' },
-    { klant: 'Jan Willem Bel',    plan: '12 maand 1-op-1',     mrr: 600, start: '12-05-2026', termijn: '4/12', status: 'actief' },
-    { klant: 'Valentine Manisha', plan: '12 maand membership', mrr:  80, start: '02-02-2026', termijn: '7/12', status: 'achterstand' },
-    { klant: 'Karim Alian',       plan: '6 maand 1-op-1',      mrr: 658, start: '10-07-2026', termijn: '1/6',  status: 'gepauzeerd' },
-  ];
-  const TRAJECTEN = [
-    { naam: '1-op-1 begeleiding', duur: '6 maanden',  prijs: 3950, termijnen:  6, actief: 156 },
-    { naam: '1-op-1 begeleiding', duur: '12 maanden', prijs: 7200, termijnen: 12, actief: 216 },
-    { naam: '1-op-1 begeleiding', duur: '24 maanden', prijs: 12000, termijnen: 24, actief:   8 },
-    { naam: 'Membership',         duur: '12 maanden', prijs:  960, termijnen: 12, actief: 150 },
-    { naam: 'Membership',         duur: '36 maanden', prijs: 2340, termijnen: 36, actief:  89 },
-  ];
-  // Klein subset OFFERTES voor sales-scope dashboard-render.
-  const OFFERTES = [
-    { nr: 'OFF-2026-214', klant: 'Cabdi Ibrahim',   totaal: 7200, status: 'geaccepteerd', datum: '01-08-2026', verkoper: 'Joost',   traject: '12 maand 1-op-1' },
-    { nr: 'OFF-2026-221', klant: 'Emile Rabaut',    totaal: 3950, status: 'geaccepteerd', datum: '04-08-2026', verkoper: 'Joost',   traject: '6 maand 1-op-1'  },
-    { nr: 'OFF-2026-208', klant: 'Iwan Engelbracht', totaal: 2400, status: 'verzonden',    datum: '29-07-2026', verkoper: 'Joost',   traject: '36 maand membership' },
-    { nr: 'OFF-2026-219', klant: 'Stéphane Seutin', totaal: 7200, status: 'verzonden',    datum: '03-08-2026', verkoper: 'Jeffrey', traject: '12 maand 1-op-1' },
-  ];
-  const OST = {
-    concept:      { l: 'Concept',      c: 'neutral' },
-    verzonden:    { l: 'Verzonden',    c: 'accent'  },
-    geaccepteerd: { l: 'Geaccepteerd', c: 'ok'      },
-    afgewezen:    { l: 'Afgewezen',    c: 'danger'  },
-  };
+  // ── State per tab ─────────────────────────────────────────────────────
+  // Pager-state per tab: page (1-based) + page_size (default 50 op alle
+  // lijst-tabs; user kan wisselen 25/50/100/500/1000).
+  // _dash krijgt bal (camt-balance) parallel gefetcht zodat de Bank-saldo
+  // KPI op het dashboard dezelfde bron gebruikt als de Bank-tab (dashboard-
+  // counts.bankBalans is 0 wanneer aggregateActiveBankBalances geen active
+  // rekeningen vindt; camt-statements zijn de correcte bron).
+  // _sub krijgt mrrReport (sales-mrr-report) parallel zodat de MRR-KPI
+  // altijd de billing_cycle-correcte som toont, ongeacht welke page van de
+  // subs-lijst geladen is.
+  const _dash = { loading: false, error: null, data: null, bal: null, seq: 0, period: '' };
+  const _inv  = { loading: false, error: null, data: null, seq: 0, params: '', page: 1, pageSize: 50, search: '', dateFrom: '', dateTo: '' };
+  const _sub  = { loading: false, error: null, data: null, mrrReport: null, seq: 0, params: '', page: 1, pageSize: 50, search: '', sortBy: 'end_date', sortDir: 'asc', filterExpiring: false };
+  const _cn   = { loading: false, error: null, data: null, seq: 0, params: '', page: 1, pageSize: 50, search: '' };
+  const _bnk  = { loading: false, error: null, bal: null, tx: null, seq: 0, params: '', page: 1, pageSize: 100, search: '', dateFrom: '', dateTo: '' };
+  const _mrr  = { loading: false, error: null, report: null, seq: 0, params: '' };
 
-  /* ── Dashboard-componenten (prototype r1441-1463) ─────────────────── */
-  const hbar = (label, val, max, color, right) => `<div style="display:flex;align-items:center;gap:12px;margin-bottom:11px">
-    <div style="width:118px;font-size:12.5px;color:var(--text-2);flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}</div>
-    <div class="progress" style="flex:1;height:8px"><i style="width:${max ? Math.round(val / max * 100) : 0}%;background:var(--${color})"></i></div>
-    <div style="width:82px;text-align:right;font-size:12.5px;font-weight:600;font-family:'IBM Plex Mono',monospace">${right}</div></div>`;
-
-  const dashCard = (title, dotColor, body, extra) => `<div class="card">
-    <div class="card-head" style="border-bottom:none;padding-bottom:6px">
-      <span class="title-dot" style="background:var(--${dotColor});box-shadow:0 0 0 3px var(--${dotColor}-soft)"></span>
-      <div class="card-title">${title}</div>${extra || ''}</div>
-    <div class="card-body" style="padding:8px 17px 17px">${body}</div></div>`;
-
-  // Simpele area-chart (statisch, matches dashboard-v2 style visueel voldoende).
-  function areaChart(data, labels) {
-    const w = 100, h = 42, mx = Math.max(...data, 1);
-    const pts = data.map((v, i) => [i / (data.length - 1) * w, h - (v / mx) * h * .88 - 2]);
-    const line = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:100%;height:64px;display:block">
-      <defs><linearGradient id="fin-grad" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="var(--m)" stop-opacity=".22"/><stop offset="100%" stop-color="var(--m)" stop-opacity="0"/>
-      </linearGradient></defs>
-      <path fill="url(#fin-grad)" d="${line} L${w},${h} L0,${h} Z"/>
-      <path fill="none" stroke="var(--m)" stroke-width="1.5" vector-effect="non-scaling-stroke" d="${line}"/>
-    </svg><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-3);margin-top:4px">${labels.map(l => `<span>${l}</span>`).join('')}</div>`;
+  // ── SHARED HELPERS: stable-search + pagination ───────────────────────
+  // Ronde 4: search-input via H.stableSearch (DOM-node persistent tussen
+  // renders, cursor + focus behouden). H.onSearch registreert een debounced
+  // handler die tabState updatet + refetch triggert. Handler wordt bij
+  // elke view-call opnieuw geregistreerd (idempotent Map.set) zodat de
+  // closure altijd de meest recente tabState-reference vasthoudt.
+  function fnSearchKey(tabState) {
+    return 'fin-' + (tabState === _inv ? 'inv' : tabState === _sub ? 'sub' : tabState === _cn ? 'cn' : tabState === _bnk ? 'bnk' : 'x');
+  }
+  function fnSearch(tabState, placeholder, refetchFn) {
+    const key = fnSearchKey(tabState);
+    // Sync shared registry met tabState.search zodat een vers-gemounte
+    // input de juiste initiele waarde krijgt (bv na tab-terug-switch).
+    if (H.getSearchValue(key) !== (tabState.search || '')) {
+      H.setSearchValue(key, tabState.search || '');
+    }
+    H.onSearch(key, (val) => {
+      tabState.search = val || '';
+      tabState.page = 1;
+      try { refetchFn(); } catch (e) { console.warn('[finance-v2] refetch onSearch:', e?.message); }
+    }, { debounceMs: 280 });
+    return H.stableSearch(key, placeholder);
   }
 
-  /* ── Notice-handlers voor dode action-knoppen ─────────────────────── */
-  window.__finNotice = (label) => {
-    console.info('[finance-v2] ' + label + ' (voorbeeld — modal/flow komt in data-ronde)');
-    try { alert(label + ' — komt in de data-ronde.'); } catch (_) { /* ignore */ }
-  };
-  window.__finOpenFactuur = (i) => { console.info('[finance-v2] openFactuur idx=' + i + ' (voorbeeld — panel komt in data-ronde)'); };
-  window.__finOpenAbo = (i) => { console.info('[finance-v2] openAbo idx=' + i + ' (voorbeeld — panel komt in data-ronde)'); };
-  window.__finToggleSel = (nr) => { S.sel = S.sel || {}; S.sel[nr] = !S.sel[nr]; window.DFO.render(); };
-
-  /* ── Helper: me() proxy voor sales-scope render ───────────────────── */
-  function meName() {
-    // Sales-scope dashboard filtert OFFERTES op verkoper===me(). Voor mock
-    // gebruiken we simpel de eerste rol-persona. Klopt niet altijd 1-op-1
-    // met echte user maar voldoet voor layout-review.
-    try { return (window.DFO.ROLES?.[S.role]?.persoon || '').split(' ')[0] || 'Jeffrey'; }
-    catch (_) { return 'Jeffrey'; }
+  // Pager-component. Zelfde signatuur voor alle tabs. total = server-side
+  // aantal (null → hide pager). refetchFn wordt aangeroepen bij page-
+  // of size-wissel.
+  function fnPager(tabState, total, refetchFn) {
+    const key = tabState === _inv ? 'inv' : tabState === _sub ? 'sub' : tabState === _cn ? 'cn' : tabState === _bnk ? 'bnk' : 'x';
+    window['__fnPage_' + key] = (delta) => {
+      const totalPages = Math.max(1, Math.ceil((total || 0) / tabState.pageSize));
+      const next = Math.max(1, Math.min(totalPages, tabState.page + delta));
+      if (next === tabState.page) return;
+      tabState.page = next;
+      refetchFn();
+    };
+    window['__fnSize_' + key] = (val) => {
+      tabState.pageSize = Number(val) || 50;
+      tabState.page = 1;
+      refetchFn();
+    };
+    if (total == null) return '';
+    const totalPages = Math.max(1, Math.ceil(total / tabState.pageSize));
+    const from = (tabState.page - 1) * tabState.pageSize + 1;
+    const to = Math.min(total, tabState.page * tabState.pageSize);
+    return `<div class="kv-pager">
+      <div class="kv-pager-info">${total === 0 ? '0 resultaten' : `${from}–${to} van ${num(total)}`}</div>
+      <div class="kv-pager-ctl">
+        <select class="kv-pager-size" onchange="__fnSize_${key}(this.value)">
+          ${[25, 50, 100, 500, 1000].map(n => `<option value="${n}" ${tabState.pageSize === n ? 'selected' : ''}>${n} per pagina</option>`).join('')}
+        </select>
+        <button class="kv-pager-btn" onclick="__fnPage_${key}(-1)" ${tabState.page <= 1 ? 'disabled' : ''}>‹ Vorige</button>
+        <span class="kv-pager-page">${tabState.page} / ${totalPages}</span>
+        <button class="kv-pager-btn" onclick="__fnPage_${key}(1)" ${tabState.page >= totalPages ? 'disabled' : ''}>Volgende ›</button>
+      </div>
+    </div>`;
   }
 
-  /* ── VIEW 1: Finance/Dashboard (prototype r2269-2335) ─────────────── */
-  function financeDashboardView() {
-    const isSales = S.role === 'sales';
+  // Uncontrolled date-input met debounce (voor Bank + Facturen date-range).
+  // Ronde 4: value= (echte HTML-attribuut, defaultValue was React-ism); +
+  // onchange (native date-picker vuurt geen input tot commit op sommige
+  // browsers). Cursor-issue speelt niet bij <input type=date>.
+  const _dateDeb = {};
+  function fnDate(tabState, field, refetchFn) {
+    const key = tabState === _inv ? 'inv' : tabState === _bnk ? 'bnk' : 'x';
+    const globalKey = '__fnDate_' + key + '_' + field;
+    window[globalKey] = (val) => {
+      tabState[field] = val;
+      if (_dateDeb[globalKey]) clearTimeout(_dateDeb[globalKey]);
+      _dateDeb[globalKey] = setTimeout(() => { tabState.page = 1; refetchFn(); }, 250);
+    };
+    const val = String(tabState[field] || '').replace(/"/g, '&quot;');
+    return `<input type="date" class="fn-date-input" value="${val}" onchange="${globalKey}(this.value)">`;
+  }
 
-    if (isSales) {
-      const myOffs = OFFERTES.filter(o => o.verkoper === meName());
-      const getekend = myOffs.filter(o => o.status === 'geaccepteerd');
-      const omzet = getekend.reduce((a, o) => a + o.totaal, 0);
-      const perTraject = {};
-      getekend.forEach(o => { perTraject[o.traject] = (perTraject[o.traject] || 0) + o.totaal; });
-      const tmax = Math.max(1, ...Object.values(perTraject));
-      const tcol = ['violet', 'blue', 'teal', 'amber'];
-      const mijnKlanten = [
-        ['Cabdi Ibrahim',        '12 maand 1-op-1',       0,    'paid'],
-        ['ER Schilderwerken',    '6 maand 1-op-1',        3950, 'open'],
-        ['Iwan Engelbracht',     '36 maand membership',   2400, 'offerte'],
-      ];
-      return `${H.voorbeeldBanner()}
+  async function tryFetch(label, url, timeoutMs = 8000) {
+    try {
+      if (!window.KV || !window.KV.authedJson) throw new Error('KV.authedJson niet beschikbaar');
+      return await Promise.race([
+        window.KV.authedJson(url),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), timeoutMs)),
+      ]);
+    } catch (e) { console.warn('[finance-v2] fetch fail:', label, '→', e?.message || e); return null; }
+  }
+
+  const eur  = window.DFO.eur  || ((n) => n == null ? '—' : new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 }).format(n));
+  const eur0 = window.DFO.eur0 || ((n) => n == null ? '—' : new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n));
+  const eurC = (cents) => cents == null ? '—' : eur0(cents / 100);
+  const dstr = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return '—'; } };
+  const num  = (n) => n == null ? '—' : new Intl.NumberFormat('nl-NL').format(n);
+  const isoDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10);
+  const monthStart = () => { const d = new Date(); return isoDay(new Date(d.getFullYear(), d.getMonth(), 1)); };
+  const todayIso = () => isoDay(new Date());
+
+  // Preview-mode badge — VERWIJDERD (2026-08-11, consistent met sales-v2 +
+  // leads-v2). Signature behouden zodat alle call-sites (Dashboard/Facturen/
+  // Abonnementen/Creditnota's/Bank/Omzet-MRR) blijven werken zonder aanpassing.
+  // Error-/loading-state is elders zichtbaar (per-tab "Laden…" placeholders
+  // + toasts).
+  function previewHeader(_label, _state) { return ''; }
+
+  const INV_STATUS_TO_PILL = {
+    open:                 ['info',    'Open'],
+    partially_paid:       ['info',    'Deels betaald'],
+    paid:                 ['ok',      'Betaald'],
+    overdue:              ['warn',    'Vervallen'],
+    credited:             ['neutral', 'Gecrediteerd'],
+    partially_credited:   ['neutral', 'Deels gecrediteerd'],
+    booked:               ['info',    'Geboekt'],
+    draft:                ['neutral', 'Concept'],
+  };
+  const SUB_STATUS_TO_PILL = {
+    active:    ['ok',      'Actief'],
+    cancelled: ['neutral', 'Beëindigd'],
+    paused:    ['warn',    'Gepauzeerd'],
+  };
+
+  // ── DASHBOARD ────────────────────────────────────────────────────────
+  // Period-selector: Dag/Week/Maand/Kwartaal/Jaar (matcht endpoint waardes
+  // today/week/month/quarter/year). Default = month (matcht finance.html).
+  const PERIOD_LABEL_TO_PARAM = { Dag: 'today', Week: 'week', Maand: 'month', Kwartaal: 'quarter', Jaar: 'year' };
+  async function fetchDashboard() {
+    const label = F('fin-p', 'Maand');
+    const period = PERIOD_LABEL_TO_PARAM[label] || 'month';
+    if (_dash.loading && _dash.period === period) return;
+    const seq = ++_dash.seq;
+    _dash.loading = true; _dash.error = null; _dash.period = period;
+    // FLICKER-FIX: geen loading-render (consistent met sales-v2 #1263).
+    // Parallel: dashboard-counts + camt-balance. Ronde 4: dashboard-counts.
+    // bankBalans komt uit aggregateActiveBankBalances (retourneert 0 als
+    // geen active bank_accounts). CAMT-balance is de correcte bank-truth
+    // (zelfde bron als Bank-tab).
+    const [data, bal] = await Promise.all([
+      tryFetch('finance-dashboard-counts', `/api/finance-dashboard-counts?period=${period}`),
+      tryFetch('finance-bank-camt-balance', '/api/finance-bank-camt-balance'),
+    ]);
+    if (seq !== _dash.seq) return;
+    _dash.data = data; _dash.bal = bal; _dash.loading = false;
+    if (!data) _dash.error = 'Kon dashboard-counts niet laden';
+    window.DFO.render();
+  }
+
+  function dashboardView() {
+    const label = F('fin-p', 'Maand');
+    const wantedPeriod = PERIOD_LABEL_TO_PARAM[label] || 'month';
+    if (!_dash.loading && (!_dash.data || _dash.period !== wantedPeriod)) queueMicrotask(fetchDashboard);
+    const d = _dash.data || {};
+    // Bank-saldo bron-preferentie: camt-balance (Bank-tab bron), fallback
+    // op dashboard-counts.bankBalans (legacy). value in EUR (niet cents).
+    const bal = _dash.bal || {};
+    const bankValue = bal.balance_cents != null
+      ? bal.balance_cents / 100
+      : (d.bankBalans?.value != null ? d.bankBalans.value : null);
+    const bankSub = bal.as_of_date
+      ? `t/m ${dstr(bal.as_of_date)}`
+      : (d.bankBalans?.accountCount ? `${d.bankBalans.accountCount} rekeningen` : '—');
+    // Beschermde-zone-velden NIET renderen: actieveArrangements,
+    // openVerifyPayment, openEscalations, joostStats, conversieWanbetalersFlow.
+    return `${previewHeader('Dashboard', _dash)}
       ${H.kpis([
-        { c: 'violet',  icon: I.tick,  label: 'Omzet uit mijn deals',   val: eur0(omzet), sub: getekend.length + ' getekend', trend: H.trend('+40%', true) },
-        { c: 'rose',    icon: I.euro,  label: 'Openstaand mijn klanten', val: eur0(3950),  sub: '1 factuur open' },
-        { c: 'emerald', icon: I.users, label: 'Mijn actieve klanten',   val: '2',          sub: 'lopende abonnementen' },
-        { c: 'amber',   icon: I.euro,  label: 'Mijn provisie',          val: eur0(1071),  sub: 'openstaand deze maand' },
+        { c: 'orange',  icon: I.euro,  label: 'Totaal openstaand',    val: eur0(d.totaalOpenstaand),          hi: 1, sub: `${num(d.openFacturen)} open · ${num(d.overdueFacturen)} vervallen` },
+        { c: 'blue',    icon: I.euro,  label: 'Bank-saldo',           val: bankValue == null ? '—' : eur0(bankValue), hi: 1, sub: bankSub },
+        { c: 'emerald', icon: I.trend, label: 'MRR (subscriptions)',  val: eur0(d.mrrSubscriptions),          hi: 1, sub: 'actieve abonnementen' },
+        { c: 'violet',  icon: I.repeat,label: 'Cashflow verwacht 30d',val: eur0(d.cashflowVerwacht30d),              sub: 'op basis van looptijden' },
       ])}
-      <div class="pad" style="padding-top:16px">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
-          ${dashCard('Mijn getekende deals', 'emerald',
-            H.table([{ l: 'Klant' }, { l: 'Traject', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Status' }],
-              myOffs.map(o => [
-                `<div class="row-avatar">${H.av(o.klant, 26)}<span>${o.klant}</span></div>`,
-                o.traject,
-                `<span class="money">${eur0(o.totaal)}</span>`,
-                H.pill(OST[o.status].c, OST[o.status].l),
-              ])
-            ))}
-          ${dashCard('Betaalstatus bij mijn klanten', 'blue',
-            mijnKlanten.map(([n, tr, open, st]) => `<div style="display:flex;align-items:center;gap:11px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r);margin-bottom:8px">
-              ${H.av(n, 28)}<div style="flex:1;min-width:0"><div class="cell-main">${n}</div><div class="cell-sub">${tr}</div></div>
-              ${open > 0 ? `<span class="money" style="color:var(--rose)">${eur0(open)}</span>` : ''}
-              ${H.pill(st === 'paid' ? 'ok' : st === 'open' ? 'warn' : 'neutral', st === 'paid' ? 'Betaald' : st === 'open' ? 'Openstaand' : 'Offerte')}</div>`).join(''))}
+      ${H.toolbar([
+        H.chips('fin-p', [
+          { l: 'Dag',      v: 'Dag' },
+          { l: 'Week',     v: 'Week' },
+          { l: 'Maand',    v: 'Maand' },
+          { l: 'Kwartaal', v: 'Kwartaal' },
+          { l: 'Jaar',     v: 'Jaar' },
+        ], label),
+      ])}
+      <div class="sv-grid">
+        <div class="sv-card">
+          <div class="sv-card-head">${svg(I.doc)}Kern-getallen</div>
+          <div class="sv-card-body">
+            <div class="sv-row"><span>Totaal openstaand</span><b>${eur0(d.totaalOpenstaand)}</b></div>
+            <div class="sv-row"><span>Open facturen</span><b>${num(d.openFacturen)}</b></div>
+            <div class="sv-row"><span>Vervallen facturen</span><b>${num(d.overdueFacturen)}</b></div>
+            <div class="sv-row"><span>Cashflow verwacht 30d</span><b>${eur0(d.cashflowVerwacht30d)}</b></div>
+          </div>
         </div>
-        <div style="margin-top:14px">${dashCard('Mijn omzet per traject', 'violet',
-          Object.entries(perTraject).map(([t, v], i) => hbar(t, v, tmax, tcol[i % 4], eur0(v))).join('')
-          || `<div style="padding:16px;color:var(--text-3);font-size:13px">Nog geen getekende deals deze periode.</div>`)}</div>
+        <div class="sv-card">
+          <div class="sv-card-head">${svg(I.euro)}Bank · CAMT</div>
+          <div class="sv-card-body">
+            <div class="sv-row"><span>Actueel saldo</span><b>${bankValue == null ? '—' : eur0(bankValue)}</b></div>
+            <div class="sv-row"><span>Peildatum</span><b>${bal.as_of_date ? dstr(bal.as_of_date) : '—'}</b></div>
+            <div class="sv-row"><span>Bron</span><b>${bal.source ? 'CAMT · ' + num(bal.num_statements) + ' statements' : '—'}</b></div>
+          </div>
+        </div>
+        <div class="sv-card">
+          <div class="sv-card-head">${svg(I.repeat)}Recurring</div>
+          <div class="sv-card-body">
+            <div class="sv-row"><span>MRR (abonnementen)</span><b>${eur0(d.mrrSubscriptions)}</b></div>
+            <div class="sv-row"><span>Mentor-bonus openstaand</span><b>${eur0(d.mentorBonusPending)}</b></div>
+          </div>
+        </div>
       </div>`;
+  }
+
+  // ── FACTUREN ─────────────────────────────────────────────────────────
+  // NEW (data-ronde 2): v2 create-invoice-modal met concept-only save.
+  // Boek/verzend routeren naar oude finance.html (te complex + destructief
+  // voor v2-ronde-2). Guard-patroon: gebruiker moet 'CONCEPT' intypen
+  // voordat opslaan-knop enabled wordt.
+  // Ronde 5: modal-open leeft in module-state (was URL-param). URL-param
+  // pad had een timing/edge-case waardoor modal niet opende in preview —
+  // module-state is robuuster (geen history-race, geen URL-persistence).
+  const _newInv = {
+    open: false,
+    submitting: false,
+    entities: null, entLoading: false,
+    customers: [], custLoading: false, custQuery: '', custPickedName: '',
+    form: {
+      customer_id: '',
+      department_id: '',
+      purchase_order_number: '',
+      language: 'nl',
+      lines: [{ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }],
+    },
+    guardTyped: '',
+  };
+
+  window.__finInvNew  = () => {
+    console.info('[finance-v2] __finInvNew clicked → open modal');
+    _newInv.open = true;
+    if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+  };
+  window.__finInvNewClose = () => {
+    _newInv.open = false;
+    // Reset form-state zodat volgende open schoon is.
+    _newInv.form = { customer_id: '', department_id: '', purchase_order_number: '', language: 'nl', lines: [{ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }] };
+    _newInv.custQuery = ''; _newInv.custPickedName = ''; _newInv.customers = []; _newInv.guardTyped = '';
+    if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+  };
+  window.__finInvOpen = (tlId) => { if (tlId) window.location.href = '/modules/finance.html?tab=facturen&invoice=' + encodeURIComponent(tlId); };
+
+  function urlParam(k) { try { return new URLSearchParams(location.search).get(k); } catch { return null; } }
+  function setUrlParam(k, v) {
+    try {
+      const u = new URL(location.href);
+      if (v == null || v === '') u.searchParams.delete(k); else u.searchParams.set(k, v);
+      history.pushState({}, '', u.toString());
+    } catch (_) { /* noop */ }
+    if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+  }
+
+  async function tryPost(label, url, body, timeoutMs = 15000) {
+    if (!window.KV || !window.KV.authedFetch) throw new Error('KV.authedFetch niet beschikbaar');
+    const resp = await Promise.race([
+      window.KV.authedFetch(url, { method: 'POST', body: JSON.stringify(body) }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), timeoutMs)),
+    ]);
+    const text = await resp.text();
+    const json = text ? JSON.parse(text) : null;
+    if (!resp.ok) { console.warn('[finance-v2] post fail:', label, '→', json?.error || resp.status); throw new Error((json && (json.error || json.message)) || 'HTTP ' + resp.status); }
+    return json;
+  }
+
+  async function fetchEntities() {
+    if (_newInv.entities || _newInv.entLoading) return;
+    _newInv.entLoading = true;
+    const data = await tryFetch('company-entities', '/api/company-entities');
+    _newInv.entLoading = false;
+    _newInv.entities = data?.items || [];
+    if (_newInv.entities.length && !_newInv.form.department_id) {
+      _newInv.form.department_id = _newInv.entities[0].tl_department_id;
+    }
+    window.DFO.render();
+  }
+
+  let _custSearchDeb = null;
+  window.__finCustSearch = (q) => {
+    _newInv.custQuery = q;
+    _newInv.custPickedName = ''; _newInv.form.customer_id = '';
+    if (_custSearchDeb) clearTimeout(_custSearchDeb);
+    _custSearchDeb = setTimeout(async () => {
+      if (!q || q.length < 2) { _newInv.customers = []; window.DFO.render(); return; }
+      _newInv.custLoading = true;
+      window.DFO.render();
+      const data = await tryFetch('sales-customers-search', '/api/sales-customers?search=' + encodeURIComponent(q));
+      _newInv.customers = data?.items || data?.customers || [];
+      _newInv.custLoading = false;
+      window.DFO.render();
+    }, 300);
+  };
+  window.__finCustPick = (id, name) => {
+    _newInv.form.customer_id = id;
+    _newInv.custPickedName = name;
+    _newInv.customers = [];
+    _newInv.custQuery = name;
+    window.DFO.render();
+  };
+
+  window.__finInvFormInput = (field, val) => { _newInv.form[field] = val; };
+  window.__finLineInput = (idx, field, val) => {
+    if (!_newInv.form.lines[idx]) return;
+    _newInv.form.lines[idx][field] = (field === 'quantity' || field === 'unit_price_excl' || field === 'vat_percentage') ? Number(val) || 0 : val;
+  };
+  window.__finLineAdd = () => {
+    _newInv.form.lines.push({ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 });
+    window.DFO.render();
+  };
+  window.__finLineRemove = (idx) => {
+    if (_newInv.form.lines.length <= 1) return;
+    _newInv.form.lines.splice(idx, 1);
+    window.DFO.render();
+  };
+  window.__finGuardInput = (v) => { _newInv.guardTyped = v; window.DFO.render(); };
+
+  window.__finInvSubmitDraft = async () => {
+    if (_newInv.submitting) return;
+    const f = _newInv.form;
+    if (!f.customer_id) { alert('Kies een klant.'); return; }
+    if (!f.department_id) { alert('Kies een entiteit.'); return; }
+    if (!f.lines.length || !f.lines.every(l => l.description && l.unit_price_excl != null)) {
+      alert('Elke regel heeft omschrijving + bedrag nodig.');
+      return;
+    }
+    if (_newInv.guardTyped !== 'CONCEPT') {
+      alert('Typ "CONCEPT" in het bevestigingsveld om op te slaan.');
+      return;
+    }
+    _newInv.submitting = true;
+    window.DFO.render();
+    try {
+      const result = await tryPost('finance-invoice-create', '/api/finance-invoice-create', {
+        customer_id: f.customer_id,
+        department_id: f.department_id,
+        purchase_order_number: f.purchase_order_number || null,
+        language: f.language || 'nl',
+        lines: f.lines,
+        action: 'draft',
+      });
+      _newInv.submitting = false;
+      _newInv.guardTyped = '';
+      window.__finInvNewClose();
+      _inv.data = null; _dash.data = null;
+      window.DFO.render();
+      alert('Concept-factuur aangemaakt' + (result?.tl_invoice_id ? ' (TL: ' + result.tl_invoice_id + ')' : '') + '. Boeken/verzenden gebeurt in het oude scherm.');
+    } catch (e) {
+      _newInv.submitting = false;
+      window.DFO.render();
+      alert('Aanmaak mislukt: ' + (e?.message || 'onbekende fout'));
+    }
+  };
+
+  function invoiceCreateModal() {
+    // Trigger entities-fetch bij eerste render.
+    if (!_newInv.entities && !_newInv.entLoading) queueMicrotask(fetchEntities);
+    const f = _newInv.form;
+    const dis = _newInv.submitting ? ' disabled' : '';
+    const guardOk = _newInv.guardTyped === 'CONCEPT';
+    const lineTotal = (l) => (Number(l.quantity) || 0) * (Number(l.unit_price_excl) || 0);
+    const totalExcl = f.lines.reduce((a, l) => a + lineTotal(l), 0);
+    const totalIncl = f.lines.reduce((a, l) => a + lineTotal(l) * (1 + (Number(l.vat_percentage) || 0) / 100), 0);
+    return `<div class="fn-modal-back" onclick="if(event.target===this)__finInvNewClose()">
+      <div class="fn-modal">
+        <div class="fn-modal-head">
+          <div class="fn-modal-title">Nieuwe factuur (concept)</div>
+          <button class="icon-btn" onclick="__finInvNewClose()" title="Sluiten (Esc)">${svg(I.x || I.warn)}</button>
+        </div>
+        <div class="fn-modal-body">
+
+          <label class="tk-field">
+            <span class="tk-field-l">Klant <span class="tk-req">*</span></span>
+            <div class="fn-cust-picker">
+              <input class="ib-input" placeholder="Typ naam of e-mail (min. 2 tekens)…" value="${esc(_newInv.custQuery)}" oninput="__finCustSearch(this.value)"${dis}>
+              ${_newInv.customers.length ? `<div class="fn-cust-dd">
+                ${_newInv.customers.slice(0, 8).map(c => `
+                  <div class="fn-cust-dd-item" onclick="__finCustPick('${c.id}', ${JSON.stringify(esc(c.name || c.display_name || '?'))})">
+                    <div class="fn-cust-dd-item-name">${esc(c.name || c.display_name || '?')}</div>
+                    <div class="fn-cust-dd-item-email">${esc(c.email || c.company_name || '')}</div>
+                  </div>
+                `).join('')}
+              </div>` : ''}
+              ${_newInv.custLoading ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:4px">Zoeken…</div>` : ''}
+              ${_newInv.form.customer_id ? `<div style="font-size:11.5px;color:var(--brand);margin-top:4px">✓ ${esc(_newInv.custPickedName)} gekozen</div>` : ''}
+            </div>
+          </label>
+
+          <div class="tk-field-row">
+            <label class="tk-field">
+              <span class="tk-field-l">Entiteit <span class="tk-req">*</span></span>
+              <select class="ib-input" onchange="__finInvFormInput('department_id', this.value)"${dis}>
+                ${_newInv.entities ? _newInv.entities.map(e => `<option value="${e.tl_department_id}" ${f.department_id === e.tl_department_id ? 'selected' : ''}>${esc(e.label || e.name)}</option>`).join('') : '<option>Laden…</option>'}
+              </select>
+            </label>
+            <label class="tk-field">
+              <span class="tk-field-l">PO-nummer (optioneel)</span>
+              <input class="ib-input" placeholder="bv. PO-2026-0042" value="${esc(f.purchase_order_number)}" oninput="__finInvFormInput('purchase_order_number', this.value)"${dis}>
+            </label>
+            <label class="tk-field">
+              <span class="tk-field-l">Taal</span>
+              <select class="ib-input" onchange="__finInvFormInput('language', this.value)"${dis}>
+                <option value="nl" ${f.language === 'nl' ? 'selected' : ''}>Nederlands</option>
+                <option value="en" ${f.language === 'en' ? 'selected' : ''}>Engels</option>
+                <option value="fr" ${f.language === 'fr' ? 'selected' : ''}>Frans</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="tk-field">
+            <span class="tk-field-l">Regels <span class="tk-req">*</span></span>
+            <div class="fn-lines">
+              ${f.lines.map((l, i) => `
+                <div class="fn-line-row">
+                  <input placeholder="Omschrijving" value="${esc(l.description)}" oninput="__finLineInput(${i}, 'description', this.value)"${dis}>
+                  <input type="number" step="1" min="0" placeholder="Aantal" value="${l.quantity}" oninput="__finLineInput(${i}, 'quantity', this.value)"${dis}>
+                  <input type="number" step="0.01" min="0" placeholder="Prijs excl." value="${l.unit_price_excl}" oninput="__finLineInput(${i}, 'unit_price_excl', this.value)"${dis}>
+                  <input type="number" step="1" min="0" max="100" placeholder="BTW %" value="${l.vat_percentage}" oninput="__finLineInput(${i}, 'vat_percentage', this.value)"${dis}>
+                  <button class="fn-line-remove" onclick="__finLineRemove(${i})" title="Regel verwijderen" ${f.lines.length <= 1 ? 'disabled' : ''}>×</button>
+                </div>
+              `).join('')}
+              <button class="fn-line-add" onclick="__finLineAdd()"${dis}>+ Regel toevoegen</button>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:14px;font-size:12.5px;color:var(--text-2);margin-top:8px">
+              <span>Totaal excl. BTW: <b class="mono">${eur(totalExcl)}</b></span>
+              <span>Totaal incl. BTW: <b class="mono">${eur(totalIncl)}</b></span>
+            </div>
+          </div>
+
+          <div class="fn-guard">
+            ${svg(I.warn)}
+            <span style="flex:1">Deze factuur wordt aangemaakt als <b>concept</b> in Teamleader. Boeken + verzenden gebeurt in het oude scherm (na review). Typ <b>CONCEPT</b> om op te slaan:</span>
+            <input class="fn-guard-input" placeholder="typ hier CONCEPT" value="${esc(_newInv.guardTyped)}" oninput="__finGuardInput(this.value)"${dis}>
+          </div>
+        </div>
+        <div class="fn-modal-foot">
+          <button class="btn" onclick="__finInvNewClose()"${dis}>Annuleren</button>
+          <button class="btn btn-primary" onclick="__finInvSubmitDraft()" ${dis || (!guardOk ? 'disabled' : '')}>
+            ${_newInv.submitting ? svg(I.clock || I.settings) + 'Bezig…' : svg(I.check || I.plus) + 'Concept opslaan'}
+          </button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // Esc-key sluit modal.
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (_newInv.open) { e.preventDefault(); window.__finInvNewClose(); }
+  });
+  window.addEventListener('popstate', () => {
+    if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+  });
+
+  function invoicesParams() {
+    const st = F('fin-inv-st', 'all');
+    const p = new URLSearchParams();
+    if (st && st !== 'all') p.set('status', st);
+    if (_inv.search) p.set('q', _inv.search);
+    if (_inv.dateFrom) p.set('period_start', _inv.dateFrom);
+    if (_inv.dateTo)   p.set('period_end',   _inv.dateTo);
+    p.set('page', String(_inv.page || 1));
+    p.set('page_size', String(_inv.pageSize || 50));
+    return p.toString();
+  }
+  async function fetchInvoices() {
+    const wanted = invoicesParams();
+    if (_inv.loading && _inv.params === wanted) return;
+    const seq = ++_inv.seq;
+    _inv.loading = true; _inv.error = null; _inv.params = wanted;
+    // FLICKER-FIX: geen loading-render (consistent met sales-v2 #1263).
+    const data = await tryFetch('finance-invoices', '/api/finance-invoices?' + wanted);
+    if (seq !== _inv.seq) return;
+    _inv.data = data; _inv.loading = false;
+    if (!data) _inv.error = 'Kon facturen niet laden';
+    window.DFO.render();
+  }
+
+  function invoicesView() {
+    const st = F('fin-inv-st', 'all');
+    if (!_inv.loading && (!_inv.data || _inv.params !== invoicesParams())) queueMicrotask(fetchInvoices);
+    const items = _inv.data?.items || [];
+    const k = _inv.data?.kpis || {};
+    const total = _inv.data?.total ?? null;
+    return `${previewHeader('Facturen', _inv)}
+      ${H.kpis([
+        { c: 'orange',  icon: I.euro,  label: 'Openstaand (excl. gecrediteerd)', val: eur0(k.open_total),       hi: 1, sub: `${num(k.open_count)} facturen` },
+        { c: 'warn',    icon: I.warn,  label: 'Vervallen',                       val: eur0(k.overdue_total),           sub: `${num(k.overdue_count)} facturen` },
+        { c: 'emerald', icon: I.check, label: 'Betaald deze maand',              val: eur0(k.month_in_total),          sub: `${num(k.month_in_count)} betalingen` },
+        { c: 'blue',    icon: I.clock, label: 'Gem. betaaltijd',                 val: k.avg_pay_days != null ? Math.round(k.avg_pay_days) + ' d' : '—', sub: 'laatste 90d' },
+      ])}
+      ${H.toolbar([
+        H.chips('fin-inv-st', [
+          { l: 'Alle',           v: 'all' },
+          { l: 'Open',           v: 'open' },
+          { l: 'Te laat',        v: 'overdue' },
+          { l: 'Betaald',        v: 'paid' },
+          { l: 'Gecrediteerd',   v: 'credited' },
+        ], st),
+        fnSearch(_inv, 'Zoek factuur-nr / klant…', fetchInvoices),
+        `<div class="fn-daterange">Van ${fnDate(_inv, 'dateFrom', fetchInvoices)} tot ${fnDate(_inv, 'dateTo', fetchInvoices)}</div>`,
+        `<div class="tb-right"><button class="btn btn-primary" onclick="__finInvNew()">${svg(I.plus)}Nieuwe factuur</button></div>`,
+      ])}
+      ${fnPager(_inv, total, fetchInvoices)}
+      ${H.table(
+        [{ l: 'Factuur-nr' }, { l: 'Klant' }, { l: 'Uitgifte', cls: 'r optional' }, { l: 'Vervaldatum', cls: 'r optional' }, { l: 'Totaal', cls: 'r' }, { l: 'Open', cls: 'r' }, { l: 'Status' }],
+        items.map(v => {
+          const [c, l] = INV_STATUS_TO_PILL[v.display_status] || INV_STATUS_TO_PILL[v.status] || ['neutral', v.display_status || v.status || '—'];
+          return [
+            `<a href="javascript:__finInvOpen('${v.tl_invoice_id || v.id}')" class="sv-off-nr">${v.invoice_number || ('#' + String(v.id || '').slice(0, 8))}</a>`,
+            `<div class="cell-main-wrap"><div class="av av-sm">${H.av(v.customer_name || '?')}</div><span class="cell-main">${v.customer_name || '—'}</span></div>`,
+            `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(v.issue_date)}</span>`,
+            `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(v.due_date)}</span>`,
+            `<span class="mono">${eur(v.amount_total)}</span>`,
+            `<span class="mono ${(v.amount_open || 0) > 0 ? 'strong' : ''}">${eur(v.amount_open)}</span>`,
+            H.pill(c, l),
+          ];
+        })
+      )}
+      ${fnPager(_inv, total, fetchInvoices)}
+      ${!items.length && !_inv.loading ? `<div class="sv-empty">${_inv.error || 'Geen facturen met deze filters.'}</div>` : ''}
+      ${_newInv.open ? invoiceCreateModal() : ''}`;
+  }
+
+  // ── ABONNEMENTEN ─────────────────────────────────────────────────────
+  function subsParams() {
+    const st = F('fin-sub-st', 'active');
+    const p = new URLSearchParams();
+    if (st && st !== 'all') p.set('status', st);
+    p.set('page', String(_sub.page || 1));
+    p.set('page_size', String(_sub.pageSize || 50));
+    return p.toString();
+  }
+  window.__finSubSort = (by) => {
+    if (_sub.sortBy === by) _sub.sortDir = _sub.sortDir === 'asc' ? 'desc' : 'asc';
+    else { _sub.sortBy = by; _sub.sortDir = 'asc'; }
+    window.DFO.render();
+  };
+  window.__finSubExpiring = () => { _sub.filterExpiring = !_sub.filterExpiring; window.DFO.render(); };
+  window.__finSubNew = () => {
+    console.info('[finance-v2] __finSubNew clicked → route naar subscription-wizard');
+    // Ronde 4: v2 nieuw-abo modal zou een deal + subscription + LMS-
+    // provisioning moeten opzetten (sales-subscription-create eist deal_id
+    // OR customer_data + hele wizard-payload, 591 regels). Voor deze ronde
+    // routen we naar de bestaande subscription-wizard.html; volledige
+    // v2-flow komt in een aparte PR analoog aan de Sales-offerte-wizard
+    // (batch 2).
+    try { window.location.href = '/modules/subscription-wizard.html'; }
+    catch (e) { console.warn('[finance-v2] nav fail:', e?.message); }
+  };
+  async function fetchSubs() {
+    const wanted = subsParams();
+    if (_sub.loading && _sub.params === wanted) return;
+    const seq = ++_sub.seq;
+    _sub.loading = true; _sub.error = null; _sub.params = wanted;
+    // FLICKER-FIX: geen loading-render (consistent met sales-v2 #1263).
+    // Parallel: list (voor tabel) + mrr-report (voor MRR-KPI, billing_cycle-
+    // correct). mrr-report is licht (1 tabel-scan) en geeft ons kpis.current_mrr.
+    const [data, report] = await Promise.all([
+      tryFetch('sales-subscriptions-list', '/api/sales-subscriptions-list?' + wanted),
+      tryFetch('sales-mrr-report', '/api/sales-mrr-report'),
+    ]);
+    if (seq !== _sub.seq) return;
+    _sub.data = data; _sub.mrrReport = report; _sub.loading = false;
+    if (!data) _sub.error = 'Kon abonnementen niet laden';
+    window.DFO.render();
+  }
+
+  // Client-side MRR helper (fallback voor per-row weergave in de lijst).
+  // Officiele MRR-KPI komt uit sales-mrr-report (kpis.current_mrr) omdat
+  // billing_cycle NIET in sales-subscriptions-list response zit — daarom
+  // gaven eerdere pogingen 0/NaN. Hier gebruiken we amount_incl (per term
+  // incl-BTW som van line_items) + heuristiek op basis van start/end voor
+  // months-per-term. Voor sub met end_date=null (open-ended) valt terug
+  // op maandelijks (per_term_months=1) wat het gewone geval is.
+  function subMonthlyIncl(s) {
+    const perTerm = Number(s.amount_incl) || Number(s.per_term_incl) || Number(s.per_term_excl) || 0;
+    if (!perTerm) return 0;
+    // Heuristiek: totale-looptijd-maanden / term_count = months per termijn.
+    const tc = Number(s.term_count) || 1;
+    if (s.start_date && s.end_date && tc > 0) {
+      const sd = new Date(s.start_date);
+      const ed = new Date(s.end_date);
+      if (!isNaN(sd) && !isNaN(ed) && ed > sd) {
+        const months = (ed.getFullYear() - sd.getFullYear()) * 12 + (ed.getMonth() - sd.getMonth()) + 1;
+        const perTermMonths = Math.max(1, Math.round(months / tc));
+        return perTerm / perTermMonths;
+      }
+    }
+    // Fallback: assume monthly (per_term_months=1). Sub-per-jaar/kwartaal
+    // zonder end_date tellen te zwaar mee — daarom is de KPI uit mrr-report
+    // de source of truth. Deze helper is alleen voor per-row weergave.
+    return perTerm;
+  }
+
+  function subsView() {
+    const st = F('fin-sub-st', 'active');
+    if (!_sub.loading && (!_sub.data || _sub.params !== subsParams())) queueMicrotask(fetchSubs);
+    let items = (_sub.data?.items || []).slice();
+    const total = _sub.data?.total ?? null;
+
+    // Client-side search (over customer-name + description + entity).
+    // Ronde 4: defensief — String(x ?? '').toLowerCase() zodat een missende
+    // customer/entity nooit een throw geeft (crashte eerder de hele lijst).
+    if (_sub.search) {
+      const q = String(_sub.search).toLowerCase();
+      items = items.filter(s => {
+        const name = String(s?.customer?.name ?? s?.customer_name ?? '').toLowerCase();
+        const desc = String(s?.description ?? '').toLowerCase();
+        const ent  = String(s?.entity ?? '').toLowerCase();
+        return name.includes(q) || desc.includes(q) || ent.includes(q);
+      });
+    }
+    // Filter: loopt af binnen 30 dagen (active + end_date <= today+30).
+    if (_sub.filterExpiring) {
+      const now = Date.now();
+      const thr = now + 30 * 86400000;
+      items = items.filter(s => {
+        if (s.status !== 'active') return false;
+        if (!s.end_date) return false;
+        const t = new Date(s.end_date).getTime();
+        return !isNaN(t) && t >= now && t <= thr;
+      });
+    }
+    // Client-side sort op start_date of end_date.
+    if (_sub.sortBy === 'start_date' || _sub.sortBy === 'end_date') {
+      items.sort((a, b) => {
+        const av = String(a[_sub.sortBy] || '');
+        const bv = String(b[_sub.sortBy] || '');
+        return _sub.sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      });
     }
 
-    /* Volledige finance (super_admin/manager) */
-    const openF = FACTUREN.filter(f => f.open > 0);
-    const buckets = [['0–30 dagen', 0, 'emerald'], ['30–60 dagen', 0, 'amber'], ['60–90 dagen', 0, 'blue'], ['90+ dagen', 0, 'rose']];
-    openF.forEach(f => { const i = f.dagen <= 30 ? 0 : f.dagen <= 60 ? 1 : f.dagen <= 90 ? 2 : 3; buckets[i][1] += f.open; });
-    const amax = Math.max(1, ...buckets.map(b => b[1]));
-    const openTot = buckets.reduce((a, b) => a + b[1], 0);
-    const statusAgg = {};
-    FACTUREN.forEach(f => { const v = f.status === 'paid' ? f.bedrag : f.open; statusAgg[f.status] = (statusAgg[f.status] || 0) + v; });
-    const smax = Math.max(1, ...Object.values(statusAgg));
-    const tmax = Math.max(...TRAJECTEN.map(t => t.actief));
-    const tcol = ['violet', 'blue', 'teal', 'pink', 'amber'];
+    const activeItems = items.filter(s => (s.status || '') === 'active');
+    // MRR-KPI bron-preferentie: sales-mrr-report.kpis.current_mrr (billing_
+    // cycle-correct). Fallback op client-side som (per-row heuristiek).
+    const reportKpis = _sub.mrrReport?.kpis || null;
+    const mrrOfficial = reportKpis?.current_mrr != null ? Number(reportKpis.current_mrr) : null;
+    const mrrLocal = activeItems.reduce((a, s) => a + subMonthlyIncl(s), 0);
+    const mrrShown = mrrOfficial != null ? mrrOfficial : mrrLocal;
+    const activeCountOfficial = reportKpis?.active_count != null ? reportKpis.active_count : null;
+    const sortIcon = (col) => _sub.sortBy === col ? (_sub.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'blue',    icon: I.euro,  label: 'MRR',                val: eur0(47612),  sub: '86 actieve abonnementen', trend: H.trend('+4,2%', true) },
-      { c: 'rose',    icon: I.euro,  label: 'Openstaand',         val: eur0(openTot), sub: openF.length + ' facturen' },
-      { c: 'emerald', icon: I.tick,  label: 'Omzet deze maand',   val: eur0(26250),  sub: 'incl. btw',              trend: H.trend('+18%', true) },
-      { c: 'amber',   icon: I.clock, label: 'Gem. betaaltermijn', val: '34 d',        sub: 'DSO — target 30 d' },
-    ])}
-    <div class="pad" style="padding-top:16px">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
-        ${dashCard('MRR-ontwikkeling', 'blue',
-          areaChart([41200, 42800, 43900, 44600, 45800, 46400, 47100, 47612], ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug'])
-          + `<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px">
-              <div style="border:1px solid var(--border);border-radius:var(--r);padding:11px 13px"><div style="font-size:11.5px;color:var(--text-2);margin-bottom:4px">Nieuwe MRR</div><div class="mono" style="font-size:16px;font-weight:600;color:var(--emerald)">+ ${eur0(1858)}</div></div>
-              <div style="border:1px solid var(--border);border-radius:var(--r);padding:11px 13px"><div style="font-size:11.5px;color:var(--text-2);margin-bottom:4px">Churn</div><div class="mono" style="font-size:16px;font-weight:600;color:var(--rose)">− ${eur0(738)}</div></div></div>`)}
-        ${dashCard('Cashflow deze maand', 'emerald',
-          `<div style="display:flex;flex-direction:column;gap:10px">
-            ${[['Inkomsten', 38400, 'emerald', '+'], ['Uitgaven', 19900, 'rose', '−'], ['Netto', 18500, 'blue', '']].map(([l, v, c, pre]) => `
-              <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 15px;border:1px solid var(--border);border-radius:var(--r);${l === 'Netto' ? 'background:var(--surface-2)' : ''}">
-                <span style="font-size:13px;font-weight:${l === 'Netto' ? '600' : '500'}">${l}</span>
-                <span class="mono" style="font-size:18px;font-weight:600;color:var(--${c})">${pre} ${eur0(v)}</span></div>`).join('')}</div>`)}
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;margin-top:14px">
-        ${dashCard('Openstaand — ouderdomsanalyse', 'rose',
-          buckets.map(([l, v, c]) => hbar(l, v, amax, c, eur0(v))).join('')
-          + `<div style="margin-top:6px;padding-top:11px;border-top:1px solid var(--border);display:flex;justify-content:space-between;font-size:12.5px"><span style="color:var(--text-2)">Totaal openstaand</span><b class="mono">${eur0(openTot)}</b></div>`)}
-        ${dashCard('Betaalstatus (naar bedrag)', 'blue',
-          Object.entries(statusAgg).sort((a, b) => b[1] - a[1]).map(([s, v]) => {
-            const c = ST[s].c === 'ok' ? 'emerald' : ST[s].c === 'danger' ? 'rose' : ST[s].c === 'warn' ? 'amber' : ST[s].c === 'accent' ? 'blue' : 'slate';
-            return hbar(ST[s].l, v, smax, c, eur0(v));
-          }).join(''))}
-      </div>
-      <div style="margin-top:14px">${dashCard('Actieve trajecten', 'violet',
-        TRAJECTEN.map((t, i) => hbar(t.naam + ' · ' + t.duur, t.actief, tmax, tcol[i % 5], t.actief + ' actief')).join(''))}</div>
-    </div>`;
+    return `${previewHeader('Abonnementen · sales-subscriptions + mrr-report', _sub)}
+      ${H.kpis([
+        { c: 'emerald', icon: I.check,  label: 'Actief (totaal)',        val: num(activeCountOfficial != null ? activeCountOfficial : activeItems.length), hi: 1, sub: 'over alle pagina\'s' },
+        { c: 'violet',  icon: I.trend,  label: 'Huidige MRR incl. BTW',   val: eur0(mrrShown), hi: 1, sub: mrrOfficial != null ? 'sales-mrr-report' : 'lokale schatting (fallback)' },
+        { c: 'blue',    icon: I.repeat, label: 'Totaal in view',         val: num(items.length), sub: total != null ? `van ${num(total)} totaal` : '—' },
+      ])}
+      ${H.toolbar([
+        H.chips('fin-sub-st', [
+          { l: 'Alle',       v: 'all' },
+          { l: 'Actief',     v: 'active' },
+          { l: 'Gepauzeerd', v: 'paused' },
+          { l: 'Beëindigd',  v: 'cancelled' },
+        ], st),
+        fnSearch(_sub, 'Zoek klant / beschrijving / entiteit…', fetchSubs),
+        `<div class="tb-right">
+          <button class="btn ${_sub.filterExpiring ? 'btn-primary' : ''}" onclick="__finSubExpiring()">${svg(I.warn)}Loopt af &lt;30d</button>
+          <button class="btn btn-sm" onclick="__finSubSort('start_date')" title="Sorteer op startdatum">Start${sortIcon('start_date')}</button>
+          <button class="btn btn-sm" onclick="__finSubSort('end_date')" title="Sorteer op einddatum">Eind${sortIcon('end_date')}</button>
+          <button class="btn btn-primary" onclick="__finSubNew()">${svg(I.plus)}Nieuw abonnement</button>
+        </div>`,
+      ])}
+      ${fnPager(_sub, total, fetchSubs)}
+      ${H.table(
+        [{ l: 'Klant' }, { l: 'Beschrijving', cls: 'optional' }, { l: 'Entiteit', cls: 'optional' }, { l: 'Per termijn', cls: 'r' }, { l: 'Maand incl.', cls: 'r' }, { l: 'Start', cls: 'r optional' }, { l: 'Eind', cls: 'r optional' }, { l: 'Status' }],
+        items.map(s => {
+          const cName = String(s?.customer?.name ?? s?.customer_name ?? '—');
+          const [c, l] = SUB_STATUS_TO_PILL[s.status] || ['neutral', s.status || '—'];
+          // amount_incl = incl-BTW som per termijn (sales-subscriptions-list).
+          const perTerm = s?.amount_incl != null ? s.amount_incl : s?.per_term_incl;
+          return [
+            `<div class="cell-main-wrap"><div class="av av-sm">${H.av(cName)}</div><span class="cell-main">${cName}</span></div>`,
+            `<span style="font-size:12.5px;color:var(--text-3)">${s.description || '—'}</span>`,
+            `<span style="font-size:12.5px;color:var(--text-3)">${s.entity || '—'}</span>`,
+            `<span class="mono">${eur(perTerm)}</span>`,
+            `<span class="mono">${eur0(subMonthlyIncl(s))}</span>`,
+            `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(s.start_date)}</span>`,
+            `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(s.end_date)}</span>`,
+            H.pill(c, l),
+          ];
+        })
+      )}
+      ${fnPager(_sub, total, fetchSubs)}
+      ${!items.length && !_sub.loading ? `<div class="sv-empty">${_sub.error || 'Geen abonnementen met deze filter.'}</div>` : ''}`;
   }
 
-  /* ── VIEW 2: Finance/Facturen (prototype r2336-2365) ──────────────── */
-  function facturenView() {
-    const st = F('st', 'all');
-    const q = (F('q', '') || '').toLowerCase();
-    const rows = FACTUREN.filter(f => (st === 'all' || f.status === st) && (!q || f.klant.toLowerCase().includes(q) || f.nr.includes(q)));
-    S.rows = rows;
-    const cnt = (s) => FACTUREN.filter(f => s === 'all' || f.status === s).length;
-    S.sel = S.sel || {};
-    const n = Object.keys(S.sel).filter(k => S.sel[k]).length;
-
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'blue',    icon: I.euro,  label: 'Totaal openstaand', val: eur0(21938), sub: '13 facturen',       trend: H.trend('+12%', false) },
-      { c: 'rose',    icon: I.alert, label: 'Te laat',           val: eur0(15374), hi: 1, sub: 'oudste 149 dagen' },
-      { c: 'amber',   icon: I.clock, label: 'Deels betaald',     val: eur0(1550),  hi: 1, sub: '2 facturen' },
-      { c: 'emerald', icon: I.tick,  label: 'Binnen deze maand', val: eur0(8200),  hi: 1, sub: '3 betalingen', trend: H.trend('+34%', true) },
-    ])}
-    ${H.toolbar([
-      H.chips('st', [
-        { l: 'Alles',    v: 'all',         n: cnt('all') },
-        { l: 'Te laat',  v: 'overdue',     n: cnt('overdue') },
-        { l: 'Open',     v: 'open',        n: cnt('open') },
-        { l: 'Deels',    v: 'partial',     n: cnt('partial') },
-        { l: 'Regeling', v: 'arrangement', n: cnt('arrangement') },
-        { l: 'Betaald',  v: 'paid',        n: cnt('paid') },
-      ], st),
-      `<select class="filter-sel"><option>Alle entiteiten</option><option>DFO</option><option>DFO BE</option></select>`,
-      H.search('Zoek klant of nummer…'),
-      `<div class="tb-right"><button class="btn btn-ghost" onclick="__finNotice('Export')">${svg(I.down)}Export</button><button class="btn btn-primary" onclick="__finNotice('Nieuwe factuur')">${svg(I.plus)}Nieuwe factuur</button></div>`,
-    ])}
-    ${H.table(
-      [{ l: '' }, { l: 'Factuur' }, { l: 'Klant' }, { l: 'Datum', cls: 'optional' }, { l: 'Verval', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Open', cls: 'r' }, { l: 'Status' }, { l: 'Dagen', cls: 'r optional' }],
-      rows.map((f) => [
-        `<div class="checkbox ${S.sel[f.nr] ? 'on' : ''}" onclick="event.stopPropagation();__finToggleSel('${f.nr}')">${svg(I.tick)}</div>`,
-        `<div><div class="cell-main mono">${f.nr}</div><div class="cell-sub">${f.entity}</div></div>`,
-        `<div class="row-avatar">${H.av(f.klant, 26)}<span class="cell-main">${f.klant}</span></div>`,
-        `<span class="mono" style="color:var(--text-3);font-size:12.5px">${f.datum}</span>`,
-        `<span class="mono" style="color:var(--text-3);font-size:12.5px">${f.verval}</span>`,
-        `<span class="money">${eur(f.bedrag)}</span>`,
-        `<span class="money" style="${f.open > 0 ? '' : 'color:var(--text-3)'}">${f.open > 0 ? eur(f.open) : '—'}</span>`,
-        H.pill(ST[f.status].c, ST[f.status].l),
-        `<span class="mono" style="font-size:12.5px;color:${f.dagen > 60 ? 'var(--rose)' : 'var(--text-3)'}">${f.dagen > 0 ? f.dagen + ' d' : '—'}</span>`,
-      ]),
-      '__finOpenFactuur'
-    )}
-    ${n ? `<div class="bulkbar"><b>${n} geselecteerd</b>
-      <button class="btn btn-ghost btn-sm" onclick="__finNotice('Herinnering sturen (bulk)')">Herinnering sturen</button>
-      <button class="btn btn-ghost btn-sm" onclick="__finNotice('Markeer betaald (bulk)')">Markeer betaald</button>
-      <button class="btn btn-ghost btn-sm" onclick="__finNotice('Export (bulk)')">Export</button>
-      <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="S.sel={};DFO.render()">Wissen</button></div>` : ''}`;
+  // ── CREDITNOTA'S ─────────────────────────────────────────────────────
+  function cnParams() {
+    const p = new URLSearchParams();
+    if (_cn.search) p.set('q', _cn.search);
+    p.set('page', String(_cn.page || 1));
+    p.set('page_size', String(_cn.pageSize || 50));
+    return p.toString();
+  }
+  async function fetchCn() {
+    const wanted = cnParams();
+    if (_cn.loading && _cn.params === wanted) return;
+    const seq = ++_cn.seq;
+    _cn.loading = true; _cn.error = null; _cn.params = wanted;
+    // FLICKER-FIX: geen loading-render (consistent met sales-v2 #1263).
+    const data = await tryFetch('finance-creditnotes-list', '/api/finance-creditnotes-list?' + wanted);
+    if (seq !== _cn.seq) return;
+    _cn.data = data; _cn.loading = false;
+    if (!data) _cn.error = 'Kon creditnota\'s niet laden';
+    window.DFO.render();
   }
 
-  /* ── VIEW 3: Finance/Abonnementen (prototype r2366-2381) ──────────── */
-  function abonnementenView() {
-    const st = F('st', 'all');
-    const rows = ABOS.filter(a => st === 'all' || a.status === st);
-    S.rows = rows;
-
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'violet',  icon: I.repeat, label: 'MRR',              val: eur0(3306),         sub: '6 actief', trend: H.trend('+128%', true) },
-      { c: 'emerald', icon: I.plus,   label: 'Nieuw deze maand', val: '+ ' + eur0(1858), hi: 1, sub: '3 abonnementen' },
-      { c: 'amber',   icon: I.alert,  label: 'Achterstand',      val: '1',                hi: 1, sub: 'Valentine Manisha' },
-      { c: 'blue',    icon: I.clock,  label: 'Gepauzeerd',       val: '1',                sub: 'Karim Alian' },
-    ])}
-    ${H.toolbar([
-      H.chips('st', [
-        { l: 'Alles',       v: 'all' },
-        { l: 'Actief',      v: 'actief' },
-        { l: 'Achterstand', v: 'achterstand' },
-        { l: 'Gepauzeerd',  v: 'gepauzeerd' },
-      ], st),
-      H.search('Zoek klant…'),
-      `<div class="tb-right"><button class="btn btn-primary" onclick="__finNotice('Nieuw abonnement')">${svg(I.plus)}Nieuw abonnement</button></div>`,
-    ])}
-    ${H.table(
-      [{ l: 'Klant' }, { l: 'Plan' }, { l: 'Start', cls: 'optional' }, { l: 'Termijn' }, { l: 'Per maand', cls: 'r' }, { l: 'Status' }],
-      rows.map(a => [
-        `<div class="row-avatar">${H.av(a.klant, 26)}<span class="cell-main">${a.klant}</span></div>`,
-        a.plan,
-        `<span class="mono" style="color:var(--text-3);font-size:12.5px">${a.start}</span>`,
-        `<span class="mono" style="font-size:12.5px">${a.termijn}</span>`,
-        `<span class="money">${eur(a.mrr)}</span>`,
-        H.pill(a.status === 'actief' ? 'ok' : a.status === 'achterstand' ? 'warn' : 'neutral', a.status[0].toUpperCase() + a.status.slice(1)),
-      ]),
-      '__finOpenAbo'
-    )}`;
+  function cnView() {
+    if (!_cn.loading && (!_cn.data || _cn.params !== cnParams())) queueMicrotask(fetchCn);
+    const items = _cn.data?.items || [];
+    const kpi = _cn.data?.kpi || {};
+    const total = _cn.data?.total ?? null;
+    return `${previewHeader("Creditnota's", _cn)}
+      ${H.kpis([
+        { c: 'violet',  icon: I.doc,   label: 'Aantal creditnota\'s', val: num(kpi.count),      hi: 1 },
+        { c: 'orange',  icon: I.euro,  label: 'Som bedragen',         val: eur0(kpi.sum_amount), hi: 1 },
+      ])}
+      ${H.toolbar([
+        fnSearch(_cn, 'Zoek creditnota-nr / klant…', fetchCn),
+      ])}
+      ${fnPager(_cn, total, fetchCn)}
+      ${H.table(
+        [{ l: 'Creditnota-nr' }, { l: 'Klant' }, { l: 'Bij factuur', cls: 'optional' }, { l: 'Datum', cls: 'r optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Status' }],
+        items.map(cn => [
+          `<span class="sv-off-nr">${cn.credit_note_number || ('#' + String(cn.id || '').slice(0, 8))}</span>`,
+          `<div class="cell-main-wrap"><div class="av av-sm">${H.av(cn.customer_name || '?')}</div><span class="cell-main">${cn.customer_name || '—'}</span></div>`,
+          `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${cn.invoice_number || '—'}</span>`,
+          `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(cn.credit_note_date)}</span>`,
+          `<span class="mono">${eur(cn.amount_total)}</span>`,
+          H.pill('neutral', cn.status || '—'),
+        ])
+      )}
+      ${fnPager(_cn, total, fetchCn)}
+      ${!items.length && !_cn.loading ? `<div class="sv-empty">${_cn.error || 'Geen creditnota\'s in deze view.'}</div>` : ''}`;
   }
 
-  /* ── VIEW 4: Finance/Omzet & MRR (prototype r2382-2394) ───────────── */
-  function omzetView() {
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'violet',  icon: I.repeat, label: 'MRR nu',          val: eur0(3306),   sub: 'terugkerend per maand',   trend: H.trend('+€1.858', true) },
-      { c: 'blue',    icon: I.euro,   label: 'Omzet dit jaar',  val: eur0(879456), sub: '181 getekende offertes',  trend: H.trend('+22%', true) },
-      { c: 'emerald', icon: I.chart,  label: 'Gemiddelde deal', val: eur0(4857),   sub: 'over 2026',               trend: H.trend('+8%', true) },
-    ])}
-    <div class="pad" style="padding-top:16px">
-      <div class="card">
-        <div class="card-head"><span class="tile-ico" style="background:var(--blue-soft);color:var(--blue)">${svg(I.tag)}</span>
-          <div class="card-title">Verkocht dit jaar</div><span class="pill pill-neutral nodot" style="margin-left:auto">619 trajecten</span></div>
-        <div class="card-list">
-          ${[
-            ['12 maand 1-op-1',      216, 1096375, 'violet'],
-            ['6 maand 1-op-1',       156,  458124, 'violet'],
-            ['12 maand membership',  150,  206755, 'blue'],
-            ['36 maand membership',   89,  211930, 'blue'],
-            ['24 maand 1-op-1',        8,   78080, 'violet'],
-          ].map(([n, c, b, col]) => `<div class="cl-row"><span class="legend-dot" style="background:var(--${col});width:10px;height:10px"></span>
-            <div style="flex:1"><div class="cell-main">${n}</div><div class="cell-sub">${c} verkocht</div></div>
-            <span class="money">${eur0(b)}</span></div>`).join('')}
-        </div>
-      </div>
-    </div>`;
+  // ── BANK ─────────────────────────────────────────────────────────────
+  function bankParams() {
+    const dir = F('fin-bank-dir', 'all');
+    const p = new URLSearchParams();
+    if (dir && dir !== 'all') p.set('direction', dir);
+    if (_bnk.search) p.set('q', _bnk.search);
+    if (_bnk.dateFrom) p.set('from', _bnk.dateFrom);
+    if (_bnk.dateTo)   p.set('to',   _bnk.dateTo);
+    const offset = ((_bnk.page || 1) - 1) * (_bnk.pageSize || 100);
+    p.set('limit',  String(_bnk.pageSize || 100));
+    p.set('offset', String(offset));
+    return p.toString();
+  }
+  // Bank date-range preset chips (Dag/Week/Maand/Jaar/Custom).
+  window.__finBankRange = (preset) => {
+    const now = new Date(); const to = todayIso();
+    if (preset === 'day')   { _bnk.dateFrom = to; _bnk.dateTo = to; }
+    else if (preset === 'week')  { const f = new Date(now); f.setDate(f.getDate() - 6); _bnk.dateFrom = isoDay(f); _bnk.dateTo = to; }
+    else if (preset === 'month') { _bnk.dateFrom = monthStart(); _bnk.dateTo = to; }
+    else if (preset === 'year')  { _bnk.dateFrom = isoDay(new Date(now.getFullYear(), 0, 1)); _bnk.dateTo = to; }
+    else if (preset === 'clear') { _bnk.dateFrom = ''; _bnk.dateTo = ''; }
+    _bnk.page = 1;
+    fetchBank();
+  };
+  async function fetchBank() {
+    const wanted = bankParams();
+    if (_bnk.loading && _bnk.params === wanted) return;
+    const seq = ++_bnk.seq;
+    _bnk.loading = true; _bnk.error = null; _bnk.params = wanted;
+    // FLICKER-FIX: geen loading-render (consistent met sales-v2 #1263).
+    const [bal, tx] = await Promise.all([
+      tryFetch('finance-bank-camt-balance',      '/api/finance-bank-camt-balance'),
+      tryFetch('finance-bank-camt-transactions', '/api/finance-bank-camt-transactions?' + wanted),
+    ]);
+    if (seq !== _bnk.seq) return;
+    _bnk.bal = bal; _bnk.tx = tx; _bnk.loading = false;
+    if (!bal && !tx) _bnk.error = 'Kon bank-data niet laden';
+    window.DFO.render();
   }
 
-  /* ── VIEW 5: Finance/Bank (prototype r2395-2408) ──────────────────── */
   function bankView() {
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'blue',    icon: I.bank || I.euro, label: 'Saldo',                 val: eur0(48210), sub: 'bijgewerkt 09:12' },
-      { c: 'amber',   icon: I.alert,           label: 'Niet gematcht',         val: '7',          hi: 1, sub: 'transacties' },
-      { c: 'emerald', icon: I.tick,            label: 'Automatisch gematcht',  val: '92%',        hi: 1, sub: 'deze maand', trend: H.trend('+5%', true) },
-    ])}
-    ${H.toolbar([
-      H.chips('v', [{ l: 'Transacties', v: 't' }, { l: 'Matches', v: 'm' }], F('v', 't')),
-      H.search('Zoek transactie…'),
-    ])}
-    ${H.table(
-      [{ l: 'Datum' }, { l: 'Tegenpartij' }, { l: 'Omschrijving', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Gematcht' }],
-      [
-        ['05-08', 'Chamano BV',        'Factuur 2026/1610', 7200, 'ja'],
-        ['04-08', 'Michiel Van Brenk', 'Deelbetaling',       400, 'ja'],
-        ['04-08', 'Mollie',            'Uitbetaling week 31', 2840, 'nee'],
-        ['03-08', 'Vodafone Zakelijk', 'Maandnota',         -189, 'ja'],
-        ['02-08', 'Christa Noltus',    '2026/0921',          600, 'ja'],
-      ].map(([d, p, o, b, m]) => [
-        `<span class="mono" style="color:var(--text-3)">${d}</span>`,
-        `<span class="cell-main">${p}</span>`,
-        `<span style="color:var(--text-3);font-size:12.5px">${o}</span>`,
-        `<span class="money" style="color:${b > 0 ? 'var(--emerald)' : 'var(--text-2)'}">${b > 0 ? '+ ' : ''}${eur(Math.abs(b))}</span>`,
-        H.pill(m === 'ja' ? 'ok' : 'warn', m === 'ja' ? 'Gematcht' : 'Open'),
-      ])
-    )}`;
+    const dir = F('fin-bank-dir', 'all');
+    if (!_bnk.loading && (!_bnk.tx || _bnk.params !== bankParams())) queueMicrotask(fetchBank);
+    const items = _bnk.tx?.items || [];
+    const bal = _bnk.bal || {};
+    const kpis = _bnk.tx?.kpis || {};
+    return `${previewHeader('Bank · CAMT-import', _bnk)}
+      ${H.kpis([
+        { c: 'blue',    icon: I.euro,  label: 'Actueel saldo',       val: eurC(bal.balance_cents),         hi: 1, sub: bal.as_of_date ? `t/m ${dstr(bal.as_of_date)}` : '—' },
+        { c: 'emerald', icon: I.trend, label: 'Inkomend (view)',     val: eurC(kpis.sum_in_cents),                sub: `${num(kpis.count_in)} transacties` },
+        { c: 'orange',  icon: I.warn,  label: 'Uitgaand (view)',     val: eurC(kpis.sum_out_cents),               sub: `${num(kpis.count_out)} transacties` },
+      ])}
+      ${H.toolbar([
+        H.chips('fin-bank-dir', [
+          { l: 'Alle',      v: 'all' },
+          { l: 'Inkomend',  v: 'in' },
+          { l: 'Uitgaand',  v: 'out' },
+        ], dir),
+        fnSearch(_bnk, 'Zoek omschrijving / tegenpartij…', fetchBank),
+        `<div class="fn-daterange">
+          <button class="btn btn-sm" onclick="__finBankRange('day')">Dag</button>
+          <button class="btn btn-sm" onclick="__finBankRange('week')">Week</button>
+          <button class="btn btn-sm" onclick="__finBankRange('month')">Maand</button>
+          <button class="btn btn-sm" onclick="__finBankRange('year')">Jaar</button>
+          ${fnDate(_bnk, 'dateFrom', fetchBank)}
+          ${fnDate(_bnk, 'dateTo', fetchBank)}
+          ${(_bnk.dateFrom || _bnk.dateTo) ? `<button class="btn btn-sm" onclick="__finBankRange('clear')">✕</button>` : ''}
+        </div>`,
+      ])}
+      ${fnPager(_bnk, _bnk.tx?.total ?? null, fetchBank)}
+      ${H.table(
+        [{ l: 'Boekdatum', cls: 'r' }, { l: 'Tegenpartij' }, { l: 'Omschrijving', cls: 'optional' }, { l: 'IBAN', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }],
+        items.map(t => [
+          `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(t.booking_date)}</span>`,
+          `<span class="cell-main">${t.counterparty_name || '—'}</span>`,
+          `<span style="font-size:12.5px;color:var(--text-3)">${t.description || '—'}</span>`,
+          `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${t.counterparty_iban || '—'}</span>`,
+          `<span class="mono ${(t.amount_cents || 0) > 0 ? 'strong' : ''}" style="color:${(t.amount_cents || 0) > 0 ? 'var(--brand)' : 'var(--warn,var(--orange))'}">${eurC(t.amount_cents)}</span>`,
+        ])
+      )}
+      ${fnPager(_bnk, _bnk.tx?.total ?? null, fetchBank)}
+      ${!items.length && !_bnk.loading ? `<div class="sv-empty">${_bnk.error || 'Geen transacties met deze filter.'}</div>` : ''}`;
   }
 
-  /* ── VIEW 6: Finance/Creditnota's (prototype r2409-2418) ──────────── */
-  function creditnotasView() {
-    return `${H.voorbeeldBanner()}
-    ${H.toolbar([H.search('Zoek creditnota…')])}
-    ${H.table(
-      [{ l: 'Nummer' }, { l: 'Klant' }, { l: 'Verrekend met', cls: 'optional' }, { l: 'Datum', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }],
-      [
-        ['CN-2026-018', 'Ingrid Van Den Eede', '2026/1520', '13-07-2026',  650],
-        ['CN-2026-017', 'Michiel Van Brenk',   '2026/1622', '28-06-2026',  400],
-        ['CN-2026-016', 'Mari Israiljan',      '2026/1490', '12-06-2026', 1200],
-      ].map(([n, k, v, d, b]) => [
-        `<span class="cell-main mono">${n}</span>`,
-        `<div class="row-avatar">${H.av(k, 26)}<span>${k}</span></div>`,
-        `<span class="mono" style="color:var(--text-3);font-size:12.5px">${v}</span>`,
-        `<span class="mono" style="color:var(--text-3);font-size:12.5px">${d}</span>`,
-        `<span class="money">${eur(b)}</span>`,
-      ])
-    )}`;
+  // ── OMZET & MRR ──────────────────────────────────────────────────────
+  // Ronde 4: switch naar sales-mrr-report. Deze endpoint doet de correcte
+  // MRR-berekening (incl-BTW per termijn / billing_cycle-maanden), retourneert
+  // trend (-12..+12 maanden), per_traject breakdown, en top_subs. billing_cycle
+  // kolom is beschikbaar in DB maar NIET in sales-subscriptions-list response
+  // — daarom faalde de oude client-side MRR (subMonthlyIncl gaf 0 op alle
+  // subs, KPI werd €0 en Per-product was NaN).
+  async function fetchMrr() {
+    const wanted = 'v1'; // Rapport-endpoint heeft geen periode-parameter voor de MRR-cijfers zelf.
+    if (_mrr.loading && _mrr.params === wanted) return;
+    const seq = ++_mrr.seq;
+    _mrr.loading = true; _mrr.error = null; _mrr.params = wanted;
+    // FLICKER-FIX: geen loading-render (consistent met sales-v2 #1263).
+    const report = await tryFetch('sales-mrr-report', '/api/sales-mrr-report');
+    if (seq !== _mrr.seq) return;
+    _mrr.report = report; _mrr.loading = false;
+    if (!report) _mrr.error = 'Kon MRR-rapport niet laden';
+    window.DFO.render();
   }
 
-  /* ── Registratie ───────────────────────────────────────────────────── */
-  window.DFO.VIEWS['finance/Dashboard']     = financeDashboardView;
-  window.DFO.VIEWS['finance/Facturen']      = facturenView;
-  window.DFO.VIEWS['finance/Abonnementen']  = abonnementenView;
-  window.DFO.VIEWS['finance/Omzet & MRR']   = omzetView;
-  window.DFO.VIEWS['finance/Bank']          = bankView;
-  window.DFO.VIEWS["finance/Creditnota's"]  = creditnotasView;
-  if (typeof window.KV_V2_ADD === 'function') {
-    window.KV_V2_ADD('finance');
-  } else {
-    (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('finance');
+  // ── SVG chart helpers (ronde 5) ──────────────────────────────────────
+  // Bar-chart: bars per maand met value-labels bovenop, gridlines, x-labels.
+  // Line/area-chart: path met area-gradient, dot per punt, hover-title.
+  // Beide gebruiken viewBox voor responsive schaling, GEEN externe lib.
+  function fmtEurCompact(v) {
+    const n = Number(v) || 0;
+    if (Math.abs(n) >= 1000) return '€' + (Math.round(n / 100) / 10).toLocaleString('nl-NL') + 'k';
+    return '€' + Math.round(n).toLocaleString('nl-NL');
+  }
+  function svgBarChart(items, opts) {
+    opts = opts || {};
+    const color = opts.color || 'violet';
+    const height = opts.height || 240;
+    if (!items.length) return `<div class="sv-empty">Geen data.</div>`;
+    const w = Math.max(600, items.length * 60);
+    const padL = 52, padR = 12, padT = 24, padB = 40;
+    const chartW = w - padL - padR;
+    const chartH = height - padT - padB;
+    const max = Math.max(1, ...items.map(t => Number(t.mrr) || 0));
+    // Ronde niveau naar mooie waarden. 4 y-axis ticks.
+    const step = niceStep(max / 4);
+    const yMax = Math.max(step, Math.ceil(max / step) * step);
+    const bw = chartW / items.length * 0.72;
+    const yTicks = [0, 0.25, 0.5, 0.75, 1].map(f => yMax * f);
+    return `<div class="mrr-chart-wrap"><svg class="mrr-chart" viewBox="0 0 ${w} ${height}" preserveAspectRatio="none" role="img">
+      <defs>
+        <linearGradient id="mrr-bar-${color}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--${color}, var(--brand))" stop-opacity=".95"/>
+          <stop offset="100%" stop-color="var(--${color}, var(--brand))" stop-opacity=".55"/>
+        </linearGradient>
+      </defs>
+      ${yTicks.map(y => {
+        const yPx = padT + chartH - (y / yMax) * chartH;
+        return `<line x1="${padL}" y1="${yPx}" x2="${w - padR}" y2="${yPx}" stroke="var(--line)" stroke-dasharray="2,4" stroke-width="1"/>
+          <text x="${padL - 8}" y="${yPx + 4}" text-anchor="end" font-size="11" fill="var(--text-3)" font-family="'IBM Plex Mono',ui-monospace,monospace">${fmtEurCompact(y)}</text>`;
+      }).join('')}
+      ${items.map((t, i) => {
+        const v = Number(t.mrr) || 0;
+        const xC = padL + (i + 0.5) * (chartW / items.length);
+        const bh = yMax > 0 ? (v / yMax) * chartH : 0;
+        const yTop = padT + chartH - bh;
+        const label = t.period ? t.period.slice(2) : '';
+        return `<g>
+          <title>${t.period || ''} · ${eur0(v)} · ${num(t.count)} subs</title>
+          <rect x="${xC - bw/2}" y="${yTop}" width="${bw}" height="${Math.max(0, bh)}" rx="4" fill="url(#mrr-bar-${color})"/>
+          ${bh > 22 ? `<text x="${xC}" y="${yTop - 6}" text-anchor="middle" font-size="10.5" fill="var(--text-2)" font-family="'IBM Plex Mono',ui-monospace,monospace" font-weight="600">${fmtEurCompact(v)}</text>` : ''}
+          <text x="${xC}" y="${padT + chartH + 16}" text-anchor="middle" font-size="10.5" fill="var(--text-3)">${label}</text>
+        </g>`;
+      }).join('')}
+      <line x1="${padL}" y1="${padT + chartH}" x2="${w - padR}" y2="${padT + chartH}" stroke="var(--line)" stroke-width="1"/>
+    </svg></div>`;
+  }
+  function svgLineChart(items, opts) {
+    opts = opts || {};
+    const color = opts.color || 'blue';
+    const height = opts.height || 220;
+    if (!items.length) return `<div class="sv-empty">Geen data.</div>`;
+    const w = Math.max(600, items.length * 55);
+    const padL = 52, padR = 12, padT = 20, padB = 36;
+    const chartW = w - padL - padR;
+    const chartH = height - padT - padB;
+    const max = Math.max(1, ...items.map(t => Number(t.mrr) || 0));
+    const step = niceStep(max / 4);
+    const yMax = Math.max(step, Math.ceil(max / step) * step);
+    const yTicks = [0, 0.25, 0.5, 0.75, 1].map(f => yMax * f);
+    const pts = items.map((t, i) => {
+      const v = Number(t.mrr) || 0;
+      const x = padL + (chartW / Math.max(1, items.length - 1)) * i;
+      const y = padT + chartH - (v / yMax) * chartH;
+      return { x, y, v, period: t.period, newMrr: t.new_mrr, churnMrr: t.churned_mrr, count: t.count };
+    });
+    const linePath = pts.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+    const areaPath = `${linePath} L${pts[pts.length-1].x.toFixed(1)},${(padT + chartH).toFixed(1)} L${pts[0].x.toFixed(1)},${(padT + chartH).toFixed(1)} Z`;
+    return `<div class="mrr-chart-wrap"><svg class="mrr-chart" viewBox="0 0 ${w} ${height}" preserveAspectRatio="none" role="img">
+      <defs>
+        <linearGradient id="mrr-area-${color}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--${color}, var(--brand))" stop-opacity=".28"/>
+          <stop offset="100%" stop-color="var(--${color}, var(--brand))" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      ${yTicks.map(y => {
+        const yPx = padT + chartH - (y / yMax) * chartH;
+        return `<line x1="${padL}" y1="${yPx}" x2="${w - padR}" y2="${yPx}" stroke="var(--line)" stroke-dasharray="2,4" stroke-width="1"/>
+          <text x="${padL - 8}" y="${yPx + 4}" text-anchor="end" font-size="11" fill="var(--text-3)" font-family="'IBM Plex Mono',ui-monospace,monospace">${fmtEurCompact(y)}</text>`;
+      }).join('')}
+      <path d="${areaPath}" fill="url(#mrr-area-${color})"/>
+      <path d="${linePath}" fill="none" stroke="var(--${color}, var(--brand))" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      ${pts.map((p, i) => `<g>
+        <title>${p.period || ''} · ${eur0(p.v)} · +${eur0(p.newMrr)} nieuw · −${eur0(p.churnMrr)} churn · ${num(p.count)} subs</title>
+        <circle cx="${p.x}" cy="${p.y}" r="4" fill="var(--surface)" stroke="var(--${color}, var(--brand))" stroke-width="2"/>
+      </g>`).join('')}
+      ${items.map((t, i) => {
+        const x = padL + (chartW / Math.max(1, items.length - 1)) * i;
+        return `<text x="${x}" y="${padT + chartH + 18}" text-anchor="middle" font-size="10.5" fill="var(--text-3)">${t.period ? t.period.slice(2) : ''}</text>`;
+      }).join('')}
+      <line x1="${padL}" y1="${padT + chartH}" x2="${w - padR}" y2="${padT + chartH}" stroke="var(--line)" stroke-width="1"/>
+    </svg></div>`;
+  }
+  function niceStep(v) {
+    if (!v || v <= 0) return 100;
+    const pow = Math.pow(10, Math.floor(Math.log10(v)));
+    const norm = v / pow;
+    const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+    return nice * pow;
   }
 
-  console.debug('[finance-v2] registered 6 Finance views (dormant tot allowlist of ?v2preview=finance)');
+  function mrrView() {
+    if (!_mrr.loading && (!_mrr.report || _mrr.params !== 'v1')) queueMicrotask(fetchMrr);
+    const r = _mrr.report || {};
+    const k = r.kpis || {};
+    const trend = Array.isArray(r.trend) ? r.trend : [];
+    const byTraj = Array.isArray(r.by_traject) ? r.by_traject : [];
+    const topSubs = Array.isArray(r.top_subs) ? r.top_subs : [];
+    // Trend heeft 25 maanden (-12..+12).
+    const future = trend.slice(12, 25); // 13 items: huidige + 12 vooruit
+    const past   = trend.slice(0, 13);  // 13 items: -12..huidige
+    // Max MRR uit by_traject voor per-product bar rendering.
+    const trajMax = Math.max(1, ...byTraj.map(t => Number(t.mrr) || 0));
+
+    return `${previewHeader('Omzet & MRR · sales-mrr-report', _mrr)}
+      ${H.kpis([
+        { c: 'violet',  icon: I.repeat, label: 'Huidige MRR incl. BTW',   val: eur0(k.current_mrr),   hi: 1, sub: `${num(k.active_count || 0)} actieve subs` },
+        { c: 'emerald', icon: I.trend,  label: 'Gem. MRR per klant',      val: eur0(k.avg_mrr),       hi: 1 },
+        { c: 'blue',    icon: I.euro,   label: 'Totaal inflow (deze mnd)',val: eur0(k.total_inflow),  hi: 1, sub: 'som van maandelijkse recurring' },
+        { c: 'orange',  icon: I.warn,   label: 'Opzeg-percentage (mnd)',  val: k.cancellation_rate != null ? (Math.round(k.cancellation_rate * 1000) / 10) + '%' : '—', sub: 'churn / actief' },
+      ])}
+      <div class="sv-grid">
+        <div class="sv-card sv-card-wide">
+          <div class="sv-card-head">${svg(I.repeat)}Maandelijkse recurring omzet · komende 12 maanden · incl. BTW</div>
+          <div class="sv-card-body">
+            ${future.length ? svgBarChart(future, { color: 'violet', height: 260 }) : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen trend-data.'}</div>`}
+          </div>
+        </div>
+        <div class="sv-card sv-card-wide">
+          <div class="sv-card-head">${svg(I.trend)}Historische MRR-trend · afgelopen 12 maanden</div>
+          <div class="sv-card-body">
+            ${past.length ? svgLineChart(past, { color: 'blue', height: 240 }) : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen trend-data.'}</div>`}
+          </div>
+        </div>
+        <div class="sv-card sv-card-wide">
+          <div class="sv-card-head">${svg(I.doc)}Per traject / product · huidig actief</div>
+          <div class="sv-card-body">
+            ${byTraj.length ? `<div class="mrr-traj">${byTraj.slice(0, 12).map(p => {
+              const v = Number(p.mrr) || 0;
+              const pct = Math.max(2, Math.round(v / trajMax * 100));
+              return `<div class="mrr-traj-row" title="${String(p.traject || '—')} · ${eur0(v)} · ${num(p.count)} actief">
+                <div class="mrr-traj-lbl"><span>${String(p.traject || '—')}</span><span class="sv-row-sub">${num(p.count)}×</span></div>
+                <div class="mrr-traj-bar-wrap"><div class="mrr-traj-bar" style="width:${pct}%"></div></div>
+                <b class="mrr-traj-val">${eur0(v)}</b>
+              </div>`;
+            }).join('')}</div>` : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen per-traject data.'}</div>`}
+          </div>
+        </div>
+        <div class="sv-card sv-card-wide">
+          <div class="sv-card-head">${svg(I.repeat)}Top 10 grootste abonnementen (MRR)</div>
+          <div class="sv-card-body">
+            ${topSubs.length ? H.table(
+              [{ l: 'Klant' }, { l: 'Beschrijving', cls: 'optional' }, { l: 'Termijn', cls: 'optional' }, { l: 'Per termijn incl.', cls: 'r' }, { l: 'MRR incl.', cls: 'r' }],
+              topSubs.map(s => [
+                `<div class="cell-main-wrap"><div class="av av-sm">${H.av(s.customer_name || '?')}</div><span class="cell-main">${s.customer_name || '—'}</span></div>`,
+                `<span style="font-size:12.5px;color:var(--text-3)">${s.description || '—'}</span>`,
+                `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${s.billing_cycle || 'per_month'}</span>`,
+                `<span class="mono">${eur(s.per_term_incl)}</span>`,
+                `<span class="mono strong">${eur0(s.mrr)}</span>`,
+              ])
+            ) : `<div class="sv-empty">${_mrr.loading ? 'Laden…' : 'Geen actieve subscriptions.'}</div>`}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  window.DFO.VIEWS['finance/Dashboard']    = dashboardView;
+  window.DFO.VIEWS['finance/Facturen']     = invoicesView;
+  window.DFO.VIEWS['finance/Abonnementen'] = subsView;
+  window.DFO.VIEWS["finance/Creditnota's"] = cnView;
+  window.DFO.VIEWS['finance/Bank']         = bankView;
+  window.DFO.VIEWS['finance/Omzet & MRR']  = mrrView;
+  if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('finance');
+  else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('finance');
+  console.debug('[finance-v2] registered 6 views (data-round · live endpoints)');
 })();
