@@ -13,6 +13,7 @@
 // Auth: Authorization Bearer <supabase-jwt> via createUserClient
 
 import { createUserClient } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -393,8 +394,13 @@ async function handlePatch(req, res, supabase, user) {
       return res.status(403).json({ error: 'Profiel niet gevonden.' });
     }
 
+    // Additief (zie #1265): rol ∈ STATUS_ALLOWED_ROLES ÓF per-user RBAC-grant
+    // followup.module.access (honoreert user_permissions via de RPC). Zo werkt
+    // een per-persoon-uitzondering (bv. mentor met expliciete follow-up-toegang).
     const STATUS_ALLOWED_ROLES = ['sales', 'manager', 'admin', 'super_admin'];
-    if (!STATUS_ALLOWED_ROLES.includes(profile.role)) {
+    const canFollowupManage = STATUS_ALLOWED_ROLES.includes(profile.role)
+      ? true : await requirePermission(req, 'followup.module.access');
+    if (!canFollowupManage) {
       return res.status(403).json({ error: 'Onvoldoende rechten om status te wijzigen.' });
     }
 

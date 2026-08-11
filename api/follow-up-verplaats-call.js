@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { requirePermission } from './_lib/requirePermission.js';
 import { updateZoomMeetingTime } from './_lib/zoom-meeting.js';
 import { updateGhlAppointmentTime } from './_lib/ghl-appointment.js';
 import dayjs from 'dayjs';
@@ -36,7 +37,13 @@ export default async function handler(req, res) {
     .eq('id', user.id)
     .maybeSingle();
 
-  if (!profile || !ALLOWED_ROLES.includes(profile.role)) {
+  // Additief (zie #1265): rol ∈ ALLOWED_ROLES ÓF per-user RBAC-grant
+  // followup.module.access (honoreert user_permissions via de RPC). Zo werkt
+  // een per-persoon-uitzondering (bv. mentor met expliciete follow-up-toegang)
+  // zonder de rol te wijzigen.
+  const canFollowupManage = (profile && !ALLOWED_ROLES.includes(profile.role))
+    ? await requirePermission(req, 'followup.module.access') : false;
+  if (!profile || (!ALLOWED_ROLES.includes(profile.role) && !canFollowupManage)) {
     return res.status(403).json({ error: 'Onvoldoende rechten' });
   }
 

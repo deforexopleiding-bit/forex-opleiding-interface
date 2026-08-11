@@ -6,6 +6,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { computeMetrics } from './follow-up-metrics.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 const ALLOWED_ROLES = ['super_admin', 'admin', 'manager', 'sales'];
 const ALLOWED_PERIODS = ['today', 'week', 'month'];
@@ -30,7 +31,13 @@ export default async function handler(req, res) {
     .eq('id', user.id)
     .single();
 
-  if (!profile || !ALLOWED_ROLES.includes(profile.role)) {
+  // Additief (zie #1265): rol ∈ ALLOWED_ROLES ÓF per-user RBAC-grant
+  // followup.module.access (honoreert user_permissions via de RPC). Zo werkt
+  // een per-persoon-uitzondering (bv. mentor met expliciete follow-up-toegang)
+  // zonder de rol te wijzigen.
+  const canFollowupManage = (profile && !ALLOWED_ROLES.includes(profile.role))
+    ? await requirePermission(req, 'followup.module.access') : false;
+  if (!profile || (!ALLOWED_ROLES.includes(profile.role) && !canFollowupManage)) {
     return res.status(403).json({ error: 'Geen toegang tot metrics.' });
   }
 
