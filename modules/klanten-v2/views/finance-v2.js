@@ -33,6 +33,11 @@
   const { I, svg, F, setF } = window.DFO;
   const H = window.KV_V2.helpers;
 
+  // HTML-escape helper — 1-op-1 met sales-v2 / leads-v2 / offerte-detail-v2
+  // pattern. Fix ronde-5b: invoiceCreateModal riep esc() aan zonder dat het
+  // in scope was → ReferenceError bij klik op 'Nieuwe factuur'. Nu lokaal.
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+
   // ── State per tab ─────────────────────────────────────────────────────
   // Pager-state per tab: page (1-based) + page_size (default 50 op alle
   // lijst-tabs; user kan wisselen 25/50/100/500/1000).
@@ -211,7 +216,11 @@
     return `${previewHeader('Dashboard', _dash)}
       ${H.kpis([
         { c: 'orange',  icon: I.euro,  label: 'Totaal openstaand',    val: eur0(d.totaalOpenstaand),          hi: 1, sub: `${num(d.openFacturen)} open · ${num(d.overdueFacturen)} vervallen` },
-        { c: 'blue',    icon: I.euro,  label: 'Bank-saldo',           val: bankValue == null ? '—' : eur0(bankValue), hi: 1, sub: bankSub },
+        // Bank-saldo: kleur-conditie op sign. Positief = groen (tegoed),
+        // negatief = rose (overdraft), onbekend = blue. Ronde-5c wens
+        // Jeffrey — visueel onmiddellijk zichtbaar of het klopt.
+        { c: bankValue == null ? 'blue' : (bankValue > 0 ? 'emerald' : (bankValue < 0 ? 'rose' : 'blue')),
+          icon: I.euro,  label: 'Bank-saldo',           val: bankValue == null ? '—' : eur0(bankValue), hi: 1, sub: bankSub },
         { c: 'emerald', icon: I.trend, label: 'MRR (subscriptions)',  val: eur0(d.mrrSubscriptions),          hi: 1, sub: 'actieve abonnementen' },
         { c: 'violet',  icon: I.repeat,label: 'Cashflow verwacht 30d',val: eur0(d.cashflowVerwacht30d),              sub: 'op basis van looptijden' },
       ])}
@@ -276,22 +285,8 @@
   };
 
   window.__finInvNew  = () => {
-    // Debug-trace (tijdelijk, ronde-5b): laat expliciet zien dat handler
-    // triggert. Verwijderen zodra bevestigd werkend door Jeffrey.
-    console.info('[finance-v2] __finInvNew clicked → open modal', { was: _newInv.open });
     _newInv.open = true;
-    try {
-      if (window.DFO && typeof window.DFO.render === 'function') {
-        window.DFO.render();
-        console.info('[finance-v2] __finInvNew: DFO.render() called, _newInv.open =', _newInv.open);
-      } else {
-        console.warn('[finance-v2] __finInvNew: DFO.render NIET beschikbaar!');
-        alert('DEBUG: DFO.render niet beschikbaar — de wizard-modal kan niet renderen. Report dit aan Claude Code.');
-      }
-    } catch (e) {
-      console.error('[finance-v2] __finInvNew render fail:', e);
-      alert('DEBUG: __finInvNew crash tijdens render: ' + (e?.message || e));
-    }
+    if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
   };
   window.__finInvNewClose = () => {
     _newInv.open = false;
@@ -598,21 +593,13 @@
   };
   window.__finSubExpiring = () => { _sub.filterExpiring = !_sub.filterExpiring; window.DFO.render(); };
   window.__finSubNew = () => {
-    // Debug-trace (tijdelijk, ronde-5b): expliciet loggen bij klik +
-    // zichtbaar-alert als navigate faalt.
-    console.info('[finance-v2] __finSubNew clicked → route naar subscription-wizard');
     // Ronde 4: v2 nieuw-abo modal zou een deal + subscription + LMS-
     // provisioning moeten opzetten (sales-subscription-create eist deal_id
     // OR customer_data + hele wizard-payload, 591 regels). Voor deze ronde
     // routen we naar de bestaande subscription-wizard.html; volledige
     // v2-flow komt in een aparte PR analoog aan de Sales-offerte-wizard
     // (batch 2).
-    try {
-      window.location.href = '/modules/subscription-wizard.html';
-    } catch (e) {
-      console.error('[finance-v2] __finSubNew nav fail:', e);
-      alert('DEBUG: __finSubNew redirect faalde: ' + (e?.message || e));
-    }
+    window.location.href = '/modules/subscription-wizard.html';
   };
   async function fetchSubs() {
     const wanted = subsParams();
@@ -849,11 +836,12 @@
     const bal = _bnk.bal || {};
     const kpis = _bnk.tx?.kpis || {};
     return `${previewHeader('Bank · CAMT-import', _bnk)}
-      ${H.kpis([
-        { c: 'blue',    icon: I.euro,  label: 'Actueel saldo',       val: eurC(bal.balance_cents),         hi: 1, sub: bal.as_of_date ? `t/m ${dstr(bal.as_of_date)}` : '—' },
+      ${(() => { const _bc = bal.balance_cents; const _kc = _bc == null ? 'blue' : (_bc > 0 ? 'emerald' : (_bc < 0 ? 'rose' : 'blue'));
+        return H.kpis([
+        { c: _kc,    icon: I.euro,  label: 'Actueel saldo',       val: eurC(bal.balance_cents),         hi: 1, sub: bal.as_of_date ? `t/m ${dstr(bal.as_of_date)}` : '—' },
         { c: 'emerald', icon: I.trend, label: 'Inkomend (view)',     val: eurC(kpis.sum_in_cents),                sub: `${num(kpis.count_in)} transacties` },
         { c: 'orange',  icon: I.warn,  label: 'Uitgaand (view)',     val: eurC(kpis.sum_out_cents),               sub: `${num(kpis.count_out)} transacties` },
-      ])}
+      ]); })()}
       ${H.toolbar([
         H.chips('fin-bank-dir', [
           { l: 'Alle',      v: 'all' },
