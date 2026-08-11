@@ -2733,3 +2733,70 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
 .sw-save-saved  { color: var(--emerald,#07835A); }
 .sw-save-failed { color: var(--rose,   #C22B3E); font-weight: 600; }
 
+/* ── Finance pager (ronde-5b) — .kv-pager voor Facturen / Abonnementen /
+   Creditnota's / Bank. Boven + onder de tabel. Consistente look met andere
+   v2-controls (.btn / .ib-input / .filter-sel). ─────────────────────────── */
+.kv-pager {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 10px 20px; margin: 0;
+  background: var(--surface-2, #F2F4F7);
+  border-top: 1px solid var(--border, #E2E7EE);
+  border-bottom: 1px solid var(--border, #E2E7EE);
+  font-size: 12.5px;
+}
+.kv-pager + .kv-pager,
+.tbl-wrap + .kv-pager { border-top: 0; }
+.kv-pager-info {
+  color: var(--text-2, #586374); font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.kv-pager-ctl {
+  display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.kv-pager-size {
+  height: 30px; padding: 0 26px 0 10px;
+  background: var(--surface, #FFFFFF) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%23586374' stroke-width='1.5'><path d='m3 5 3 3 3-3'/></svg>") no-repeat right 8px center / 12px;
+  border: 1px solid var(--border-strong, #C9D2DE); border-radius: 6px;
+  color: var(--text, #111721); font-size: 12.5px; font-family: inherit;
+  appearance: none; -webkit-appearance: none;
+  cursor: pointer;
+}
+.kv-pager-size:hover { border-color: var(--m, #6D3FD4); }
+.kv-pager-size:focus { outline: none; border-color: var(--m, #6D3FD4); box-shadow: 0 0 0 3px color-mix(in srgb, var(--m, #6D3FD4) 18%, transparent); }
+.kv-pager-btn {
+  height: 30px; padding: 0 12px;
+  background: var(--surface, #FFFFFF);
+  border: 1px solid var(--border-strong, #C9D2DE); border-radius: 6px;
+  color: var(--text, #111721); font-size: 12.5px; font-family: inherit; font-weight: 500;
+  cursor: pointer; transition: background .12s, border-color .12s, color .12s;
+}
+.kv-pager-btn:hover:not([disabled]) { background: var(--surface-2, #F2F4F7); border-color: var(--m, #6D3FD4); color: var(--m, #6D3FD4); }
+.kv-pager-btn:active:not([disabled]) { background: color-mix(in srgb, var(--m, #6D3FD4) 12%, transparent); }
+.kv-pager-btn[disabled] { opacity: .45; cursor: not-allowed; }
+.kv-pager-page {
+  padding: 0 6px; color: var(--text-2, #586374);
+  font-variant-numeric: tabular-nums; font-weight: 500;
+  min-width: 60px; text-align: center;
+}
+
+/* ── Finance date-range inputs (Facturen / Bank) — .fn-date-input consistent
+   met .ib-input styling maar compacter (naast toolbar-controls). */
+.fn-date-input {
+  height: 32px; padding: 0 10px;
+  background: var(--surface, #FFFFFF);
+  border: 1px solid var(--border-strong, #C9D2DE); border-radius: 6px;
+  color: var(--text, #111721);
+  font-size: 12.5px; font-family: inherit;
+  min-width: 130px;
+  transition: border-color .12s, box-shadow .12s;
+}
+.fn-date-input:hover  { border-color: var(--m, #6D3FD4); }
+.fn-date-input:focus  { outline: none; border-color: var(--m, #6D3FD4); box-shadow: 0 0 0 3px color-mix(in srgb, var(--m, #6D3FD4) 18%, transparent); }
+.fn-date-input::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .6; }
+.fn-date-input::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+/* Optionele label die soms vóór de date-input hangt. */
+.fn-date-label {
+  font-size: 11.5px; color: var(--text-2, #586374);
+  margin-right: 6px; font-weight: 500;
+}
+
