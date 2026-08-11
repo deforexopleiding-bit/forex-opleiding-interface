@@ -58,7 +58,7 @@
   const MODS = [
     { g: 'Overzicht',              id: 'dashboard',        naam: 'Dashboard',         icon: I.grid,     color: 'blue',    roles: A,                    tabs: ['Vandaag'] },
     { g: 'Overzicht',              id: 'inbox',            naam: 'Inbox',             icon: I.inbox,    color: 'teal',    roles: SAMS,      badge: 44, tabs: [] },
-    { g: 'Overzicht',              id: 'taken',            naam: 'Takenbeheer',       icon: I.check2,   color: 'emerald', roles: A,         badge: 5,  tabs: ['Mijn taken', 'Team', 'Afgerond'] },
+    { g: 'Overzicht',              id: 'taken',            naam: 'Takenbeheer',       icon: I.check2,   color: 'emerald', roles: A,         badge: 5,  tabs: ['Mijn taken', 'Toegewezen door mij', 'Afgerond'] },
 
     { g: 'Klanten & communicatie', id: 'klanten',          naam: 'Klanten',           icon: I.users,    color: 'emerald', roles: SAMS,                 tabs: ['Overzicht'] },
     { g: 'Klanten & communicatie', id: 'studenten',        naam: 'Studenten',         icon: I.grad,     color: 'teal',    roles: ['mentor'],           tabs: [] },

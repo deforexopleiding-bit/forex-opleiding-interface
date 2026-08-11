@@ -3068,3 +3068,74 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
 .kv-viewtoggle button:hover { color: var(--text-1); }
 .kv-viewtoggle button.on { background: var(--surface); color: var(--text-1); box-shadow: 0 1px 3px rgba(0,0,0,.06); font-weight: 600; }
 
+
+
+/* ── Takenbeheer detail-modal (.kv-td-*) — v2 finance-mutaties-ronde
+   Namespace voor de detail-modal in views/modals/taken-detail.js. Modal-
+   overlay komt via DFO.openModal (.mdl-* uit app-shell.css); alleen de
+   modal-content-elementen krijgen hier styling. ───────────────────── */
+.kv-td-status-strip {
+  display: flex; gap: 6px; margin: 4px 0 14px;
+}
+.kv-td-status-btn {
+  flex: 1; padding: 8px 12px; font-size: 12.5px; font-weight: 600;
+  background: var(--surface-2, #F2F4F7);
+  border: 1px solid var(--border, #E2E7EE); border-radius: 8px;
+  color: var(--text-2, #586374); cursor: pointer; font-family: inherit;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.kv-td-status-btn:hover:not([disabled]) { background: var(--surface, #FFFFFF); color: var(--text-1, #111721); }
+.kv-td-status-btn[disabled] { opacity: .55; cursor: not-allowed; }
+.kv-td-status-btn.is-active { box-shadow: 0 0 0 2px currentColor inset; }
+
+.kv-td-meta-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px;
+  padding: 12px 14px; margin: 0 0 14px;
+  background: var(--surface-2, #F2F4F7); border-radius: 8px;
+  border: 1px solid var(--border, #E2E7EE);
+}
+@media (max-width: 640px) { .kv-td-meta-grid { grid-template-columns: 1fr; } }
+.kv-td-meta-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: 12.5px; }
+.kv-td-meta-l { color: var(--text-2, #586374); }
+.kv-td-meta-v { color: var(--text-1, #111721); font-weight: 500; text-align: right; }
+.kv-td-prio-pill {
+  display: inline-flex; align-items: center;
+  padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
+  border: 1px solid;
+}
+
+.kv-td-section { margin: 14px 0; }
+.kv-td-section-title {
+  font-size: 12px; font-weight: 700; color: var(--text-1, #111721);
+  text-transform: uppercase; letter-spacing: .04em;
+  margin: 0 0 8px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--border, #E2E7EE);
+}
+.kv-td-desc {
+  font-size: 13px; line-height: 1.55; color: var(--text-1, #111721);
+  white-space: pre-wrap; padding: 4px 0;
+}
+
+.kv-td-comments { display: flex; flex-direction: column; gap: 10px; margin: 0 0 12px; }
+.kv-td-comment {
+  padding: 10px 12px;
+  background: var(--surface-2, #F2F4F7);
+  border: 1px solid var(--border, #E2E7EE); border-radius: 8px;
+}
+.kv-td-comment-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 12.5px; }
+.kv-td-comment-time { color: var(--text-3, #8B95A5); font-size: 11px; margin-left: auto; }
+.kv-td-comment-body { font-size: 13px; color: var(--text-1, #111721); line-height: 1.45; }
+.kv-td-comment-form { margin-top: 8px; }
+
+.kv-td-watchers { display: flex; flex-direction: column; gap: 4px; margin: 0 0 10px; }
+.kv-td-watcher-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; background: var(--surface-2, #F2F4F7);
+  border: 1px solid var(--border, #E2E7EE); border-radius: 6px;
+  font-size: 12.5px; color: var(--text-1, #111721);
+}
+.kv-td-watcher-row > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kv-td-watcher-del { color: var(--text-3, #8B95A5); }
+.kv-td-watcher-del:hover:not([disabled]) { color: var(--rose, #C22B3E); }
+.kv-td-watcher-add { display: flex; gap: 6px; margin-top: 4px; }
+.kv-td-watcher-add .ib-input { flex: 1; }

@@ -5,6 +5,11 @@
 // ticket_attachments   -> taken_attachments
 // ticket_id            -> task_id
 //
+// GET    ?task_id=<uuid> → 200 { attachments: [{ id, task_id, comment_id,
+//        storage_path, external_url, filename, mime_type, created_by,
+//        created_at }] }
+//        Read-only lijst per taak — RLS bepaalt zichtbaarheid.
+//
 // POST   { task_id?, comment_id?, storage_path?, external_url?, filename?, mime_type? }
 //        XOR: exact één van (task_id, comment_id) én exact één van
 //        (storage_path, external_url). created_by = auth.uid().
@@ -26,8 +31,8 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
 
-  if (req.method !== 'POST' && req.method !== 'DELETE') {
-    res.setHeader('Allow', 'POST, DELETE');
+  if (req.method !== 'GET' && req.method !== 'POST' && req.method !== 'DELETE') {
+    res.setHeader('Allow', 'GET, POST, DELETE');
     return res.status(405).json({ error: `Method ${req.method} not allowed` });
   }
 
@@ -35,8 +40,31 @@ export default async function handler(req, res) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser();
   if (authErr || !user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
 
+  if (req.method === 'GET')    return handleList(req, res, supabase);
   if (req.method === 'POST')   return handleCreate(req, res, supabase, user);
   if (req.method === 'DELETE') return handleDelete(req, res, supabase);
+}
+
+async function handleList(req, res, supabase) {
+  const task_id = req.query?.task_id;
+  if (!task_id || typeof task_id !== 'string') {
+    return res.status(400).json({ error: 'Query-param task_id (uuid) vereist' });
+  }
+  const { data, error } = await supabase
+    .from('taken_attachments')
+    .select(`
+      id, task_id, comment_id, storage_path, external_url,
+      filename, mime_type, created_by, created_at
+    `)
+    .eq('task_id', task_id)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error('[taken-attachments] list error:', error.code, error.message);
+    if (error.code === '42501') return res.status(403).json({ error: 'Geen rechten om bijlagen te bekijken' });
+    return res.status(500).json({ error: error.message });
+  }
+  return res.status(200).json({ attachments: data || [] });
 }
 
 async function handleCreate(req, res, supabase, user) {
