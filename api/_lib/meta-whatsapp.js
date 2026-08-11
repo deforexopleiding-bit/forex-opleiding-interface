@@ -101,20 +101,28 @@ async function metaPostMessage(requestBody, opts = {}) {
     const subcode  = err?.error_subcode ?? '';
     const msg      = err?.message ?? text.slice(0, 200);
     const fbtrace  = err?.fbtrace_id ?? '';
+    // error_data bevat bij parameter-fouten (131008 verplichte param ontbreekt,
+    // 132000 aantal params) vaak een `details`-string die het ontbrekende/foute
+    // onderdeel benoemt. Vastleggen zodat callers niet hoeven te raden.
+    const errData  = err?.error_data ?? null;
+    const details  = errData && typeof errData.details === 'string' ? errData.details : null;
     console.error('[meta-whatsapp] POST messages failed', {
       http_status: res.status,
       meta_error:  err,
+      error_data:  errData,
       raw_body:    parsed ? undefined : text.slice(0, 500),
     });
     // Attach de gestructureerde Meta-velden aan de Error zodat callers
     // ze kunnen inspecteren (bv. re-engagement 131047 als 24h_window_expired
     // vertalen) i.p.v. te moeten regex'en over de message-string.
-    const throwErr = new Error(`Meta API ${code}: ${msg} (subcode=${subcode}, fbtrace=${fbtrace})`);
-    throwErr.metaCode    = code;
-    throwErr.metaSubcode = subcode;
-    throwErr.metaMessage = msg;
-    throwErr.metaFbtrace = fbtrace;
-    throwErr.httpStatus  = res.status;
+    const throwErr = new Error(`Meta API ${code}: ${msg}${details ? ' — ' + details : ''} (subcode=${subcode}, fbtrace=${fbtrace})`);
+    throwErr.metaCode      = code;
+    throwErr.metaSubcode   = subcode;
+    throwErr.metaMessage   = msg;
+    throwErr.metaFbtrace   = fbtrace;
+    throwErr.metaErrorData = errData;
+    throwErr.metaDetails   = details;
+    throwErr.httpStatus    = res.status;
     throw throwErr;
   }
   return parsed || {};

@@ -580,8 +580,26 @@ export default async function handler(req, res) {
           missing: metaErr.missing,
         });
       }
-      console.error('[inbox-send-template] Meta API fout:', metaErr.message);
-      return res.status(502).json({ error: 'Meta API fout', meta_error: metaErr.message });
+      // Gestructureerd loggen: bij 131008 (verplichte param ontbreekt) / 132000
+      // (aantal params) zien we zo DIRECT welk onderdeel mist én wat we stuurden,
+      // i.p.v. te raden. `sent_components` toont of we (te weinig) parameters
+      // meestuurden; `details` is Meta's eigen omschrijving van het ontbrekende deel.
+      console.error('[inbox-send-template] Meta API fout:', {
+        template_name:   templateName,
+        language,
+        meta_code:       metaErr.metaCode ?? null,
+        meta_subcode:    metaErr.metaSubcode ?? null,
+        meta_message:    metaErr.metaMessage || metaErr.message,
+        meta_details:    metaErr.metaDetails || null,
+        meta_error_data: metaErr.metaErrorData || null,
+        sent_components: components && components.length ? components : null,
+      });
+      return res.status(502).json({
+        error:        'Meta API fout',
+        meta_error:   metaErr.message,
+        meta_code:    metaErr.metaCode ?? null,
+        meta_details: metaErr.metaDetails || null,
+      });
     }
 
     const wamid = metaResult && metaResult.wamid ? String(metaResult.wamid) : null;
