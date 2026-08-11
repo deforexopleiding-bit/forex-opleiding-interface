@@ -513,9 +513,23 @@ function wireTopbarActionsToShell() {
   // Rolebox is nu zichtbaar (inline style display:none uit index.html
   // verwijderd) — geen extra JS nodig.
 
-  // Start op klanten (enige werkende module in v2-preview). Alle andere
-  // modules renderen automatisch genericView() als placeholder ("in aanbouw").
-  window.DFO.goMod('klanten');
+  // Boot-module: default 'klanten', maar bij `?v2preview=<id>` start op die
+  // module zodat de preview-URL direct de juiste view rendert (voorheen
+  // landde `?v2preview=taken` op klanten-content omdat goMod('klanten')
+  // hier hardcoded was — bug ontdekt bij taken-dataronde).
+  // Bij comma-list (`?v2preview=a,b,c`) pakt hij het eerste id dat een
+  // shell-tab heeft; anders eerste van de lijst.
+  let bootMod = 'klanten';
+  try {
+    const raw = new URLSearchParams(window.location.search).get('v2preview');
+    if (raw) {
+      const ids = raw.split(',').map((s) => s.trim()).filter(Boolean);
+      const modsList = window.DFO.MODS || [];
+      const viable = ids.find((id) => modsList.find((m) => m.id === id));
+      if (viable) bootMod = viable;
+    }
+  } catch (_) { /* URLSearchParams-fail: houd 'klanten' als default */ }
+  window.DFO.goMod(bootMod);
 
   // Eerste render van topbar-actions (na goMod triggert wrap 'em ook, maar
   // eerste render moet expliciet want boot-goMod is idempotent na wrap).
