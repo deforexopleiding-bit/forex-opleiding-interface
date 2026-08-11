@@ -237,7 +237,13 @@
   }
 
   // ── OFFERTES ─────────────────────────────────────────────────────────────
-  window.__svOfferteNew  = () => { window.location.href = '/modules/sales-wizard.html'; };
+  // Nieuwe offerte: opent v2-wizard in-shell (body-mounted modal via #sw-v2-root).
+  // Fallback naar oude wizard-html als sales-wizard-v2.js niet geladen is
+  // (defensive; script wordt vanaf klanten-v2/index.html geladen).
+  window.__svOfferteNew  = () => {
+    if (typeof window.__swOpen === 'function') { window.__swOpen(); return; }
+    window.location.href = '/modules/sales-wizard.html';
+  };
   // Klik op een offerte-rij opent de v2-detail-pagina (niet de wizard).
   // 'Bewerken' vanuit die detail-pagina redirect wél naar de wizard in
   // edit-mode.
