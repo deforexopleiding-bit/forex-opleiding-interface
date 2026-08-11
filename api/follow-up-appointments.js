@@ -13,6 +13,7 @@
 // Auth: Authorization Bearer <supabase-jwt> via createUserClient
 
 import { createUserClient } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -393,10 +394,20 @@ async function handlePatch(req, res, supabase, user) {
       return res.status(403).json({ error: 'Profiel niet gevonden.' });
     }
 
+    // Additief (zie #1265): rol ∈ STATUS_ALLOWED_ROLES ÓF per-user RBAC-grant
+    // followup.module.access (honoreert user_permissions via de RPC). Zo werkt
+    // een per-persoon-uitzondering (bv. mentor met expliciete follow-up-toegang).
     const STATUS_ALLOWED_ROLES = ['sales', 'manager', 'admin', 'super_admin'];
-    if (!STATUS_ALLOWED_ROLES.includes(profile.role)) {
+    const isFollowupRole = STATUS_ALLOWED_ROLES.includes(profile.role);
+    const canFollowupManage = isFollowupRole
+      ? true : await requirePermission(req, 'followup.module.access');
+    if (!canFollowupManage) {
       return res.status(403).json({ error: 'Onvoldoende rechten om status te wijzigen.' });
     }
+    // Scope volgt followup.scope.all_vs_own: een per-user grantee zonder die key
+    // mag alleen eigen appointments wijzigen (als sales), mét = alle.
+    const canFollowupAll = (!isFollowupRole && canFollowupManage)
+      ? await requirePermission(req, 'followup.scope.all_vs_own') : false;
 
     // Haal huidige status + eigenaar op voor audit en salescheck
     const { data: currentAppt, error: fetchErr } = await supabase
@@ -409,9 +420,10 @@ async function handlePatch(req, res, supabase, user) {
       return res.status(404).json({ error: 'Appointment niet gevonden of geen toegang.' });
     }
 
-    // Sales mag uitsluitend eigen appointments wijzigen (extra check bovenop RLS)
-    if (profile.role === 'sales' && currentAppt.owner_id !== user.id) {
-      return res.status(403).json({ error: 'Sales mag alleen eigen appointments wijzigen.' });
+    // Sales (en een per-user grantee zonder all_vs_own) mag uitsluitend eigen
+    // appointments wijzigen (extra check bovenop RLS)
+    if ((profile.role === 'sales' || (!isFollowupRole && !canFollowupAll)) && currentAppt.owner_id !== user.id) {
+      return res.status(403).json({ error: 'Alleen eigen appointments mogen worden gewijzigd.' });
     }
 
     if (currentAppt.status === newStatus) {

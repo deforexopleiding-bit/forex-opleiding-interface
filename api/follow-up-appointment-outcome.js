@@ -304,6 +304,14 @@ export default async function handler(req, res) {
   if (!allowed) allowed = await requirePermission(req, 'sales.customer.view');
   if (!allowed) return res.status(403).json({ error: 'Geen rechten' });
 
+  // Per-user RBAC-uitzondering: wie followup.module.access heeft mag de
+  // outcome-acties óók zonder sales/manager/admin-rol. Additief — rol-gedrag
+  // ongewijzigd. De SCOPE volgt followup.scope.all_vs_own: mét die key brede
+  // toegang (als admin/manager), zonder = alleen eigen rijen (als sales).
+  const canFollowupManage = await requirePermission(req, 'followup.module.access');
+  const canFollowupAll    = canFollowupManage
+    ? await requirePermission(req, 'followup.scope.all_vs_own') : false;
+
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const appointmentId = typeof body.appointment_id === 'string' ? body.appointment_id.trim() : '';
   if (!appointmentId || !UUID_RE.test(appointmentId)) return res.status(400).json({ error: 'appointment_id vereist' });
@@ -317,8 +325,8 @@ export default async function handler(req, res) {
   const { data: myProfile } = await supabaseAdmin
     .from('profiles').select('role').eq('id', user.id).maybeSingle();
   const myRole  = String(myProfile?.role || '').toLowerCase();
-  const isAdmin = ADMIN_ROLES.has(myRole);
-  const isSales = myRole === 'sales';
+  const isAdmin = ADMIN_ROLES.has(myRole) || (canFollowupManage && canFollowupAll);
+  const isSales = myRole === 'sales' || (canFollowupManage && !canFollowupAll);
 
   // prev_state meelezen; als de kolom niet bestaat vangen we dat op
   // met een fallback-select (fail-soft — undo werkt dan niet, outcome
