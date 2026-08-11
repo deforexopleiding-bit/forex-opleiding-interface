@@ -137,36 +137,63 @@ function renderKpiStrip() {
 
 // ── Sub-cards ──────────────────────────────────────────────────────────────
 
+// Correcte veld-mapping voor line_items op subscriptions (bron:
+// api/sales-subscriptions-list.js:16-22 inclPerTerm + api/sales-customer-
+// subscriptions.js:99):
+//   - li.amount           = bedrag EXCL. BTW (1x per termijn — geen quantity)
+//   - li.vat_percentage   = BTW-tarief
+//   - li.description      = label
+// Er is GEEN li.quantity of li.unit_price — die aanname gaf €0 op alle regels.
 function renderLineItems(sub) {
   const items = Array.isArray(sub.line_items) ? sub.line_items : [];
   if (!items.length) return '<div class="kv-prof-empty">Geen line-items op deze subscriptie.</div>';
+  let totExcl = 0;
+  const btwByRate = {};
+  const rowsHtml = items.map((li) => {
+    const excl = Number(li.amount) || 0;
+    const vat  = Number(li.vat_percentage != null ? li.vat_percentage : 0);
+    const btwAmt = excl * vat / 100;
+    const incl = excl + btwAmt;
+    totExcl += excl;
+    if (vat > 0) btwByRate[vat] = (btwByRate[vat] || 0) + btwAmt;
+    const desc = li.description || li.name || '—';
+    return `
+      <tr>
+        <td>${K().esc(desc)}</td>
+        <td class="r mono">${K().esc(fmtEur(excl))}</td>
+        <td class="r mono">${vat}%</td>
+        <td class="r mono"><b>${K().esc(fmtEur(incl))}</b></td>
+      </tr>`;
+  }).join('');
+  const totBtw = Object.values(btwByRate).reduce((a, b) => a + b, 0);
+  const totIncl = totExcl + totBtw;
   return `
     <table class="kv-abo-lines">
       <thead><tr>
         <th>Omschrijving</th>
-        <th class="r">Aantal</th>
-        <th class="r">Prijs</th>
+        <th class="r">Excl. BTW</th>
         <th class="r">BTW</th>
-        <th class="r">Subtotaal</th>
+        <th class="r">Incl. BTW</th>
       </tr></thead>
-      <tbody>
-        ${items.map((li) => {
-          const qty  = Number(li.quantity || 1);
-          const unit = Number(li.unit_price || 0);
-          const vat  = Number(li.vat_percentage != null ? li.vat_percentage : 21);
-          const sub  = qty * unit;
-          const desc = li.description || li.name || '—';
-          return `
-            <tr>
-              <td>${K().esc(desc)}</td>
-              <td class="r mono">${qty}</td>
-              <td class="r mono">${K().esc(fmtEur(unit))}</td>
-              <td class="r mono">${vat}%</td>
-              <td class="r mono">${K().esc(fmtEur(sub))}</td>
-            </tr>`;
-        }).join('')}
-      </tbody>
+      <tbody>${rowsHtml}</tbody>
+      <tfoot>
+        <tr><td colspan="3" class="r" style="color:var(--text-2);font-size:12px">Subtotaal excl. BTW</td><td class="r mono">${K().esc(fmtEur(totExcl))}</td></tr>
+        ${Object.keys(btwByRate).sort((a, b) => Number(a) - Number(b)).map(r => `
+          <tr><td colspan="3" class="r" style="color:var(--text-2);font-size:12px">BTW ${r}%</td><td class="r mono">${K().esc(fmtEur(btwByRate[r]))}</td></tr>`).join('')}
+        <tr><td colspan="3" class="r" style="font-weight:700">Totaal incl. BTW / termijn</td><td class="r mono" style="font-weight:700">${K().esc(fmtEur(totIncl))}</td></tr>
+      </tfoot>
     </table>`;
+}
+
+// Bedrag incl. BTW per termijn — hergebruikt api/sales-subscriptions-list.js
+// inclPerTerm helper-logic. Prefereert line_items sum, valt terug op
+// sub.amount + sub.vat_percentage.
+function inclPerTerm(sub) {
+  const lines = Array.isArray(sub.line_items) ? sub.line_items : [];
+  if (lines.length) {
+    return lines.reduce((s, li) => s + (Number(li.amount) || 0) * (1 + (Number(li.vat_percentage) || 0) / 100), 0);
+  }
+  return (Number(sub.amount) || 0) * (1 + (Number(sub.vat_percentage) || 0) / 100);
 }
 
 function renderSubCard(sub) {
@@ -178,14 +205,16 @@ function renderSubCard(sub) {
   const isExpanded  = state.expandedLineItems.has(sub.id);
   const lineItemsCount = Array.isArray(sub.line_items) ? sub.line_items.length : 0;
 
-  const tlLink = tlId
-    ? `<a class="ds-btn ds-btn-ghost ds-btn-sm" href="https://focus.teamleader.eu/subscriptions/${K().esc(encodeURIComponent(tlId))}" target="_blank" rel="noopener" title="Open subscriptie in TeamLeader">
-         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-         TeamLeader
-       </a>`
-    : '';
+  // TeamLeader-knop verwijderd (2026-08-11, per Jeffrey's verzoek). tlId
+  // wordt nog wel gebruikt bij pill/status-detectie; alleen de per-abo
+  // TL-deep-link-knop is weg.
+  const tlLink = '';
+  // Bronofferte-link: opent v2 offerte-detail IN-SHELL via __odvOpen(dealId).
+  // Fallback naar standalone v2-detail-pagina als __odvOpen niet bestaat
+  // (dat zou alleen op oude klanten.html gebeuren; klanten-v2 laadt 'em
+  // vanaf de shell).
   const dealLink = sub.deal_id
-    ? `<a class="ds-btn ds-btn-ghost ds-btn-sm" href="/modules/offerte-detail-v2.html?id=${K().esc(encodeURIComponent(sub.deal_id))}" target="_blank" rel="noopener" title="Naar bronoffertte">
+    ? `<a class="ds-btn ds-btn-ghost ds-btn-sm" href="javascript:void(0)" onclick="if(window.__odvOpen){window.__odvOpen('${K().esc(sub.deal_id)}')}else{window.location.href='/modules/offerte-detail-v2.html?id=${K().esc(encodeURIComponent(sub.deal_id))}'}" title="Naar bronofferte (in-shell)">
          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
          Bronofferte
        </a>`
@@ -203,8 +232,8 @@ function renderSubCard(sub) {
           </div>
         </div>
         <div class="kv-abo-card-amount">
-          <div class="mono">${K().esc(fmtEur(sub.amount))}</div>
-          <div class="kv-abo-card-amount-sub">per termijn · ${K().esc(String(sub.vat_percentage != null ? sub.vat_percentage : 21))}% BTW</div>
+          <div class="mono">${K().esc(fmtEur(inclPerTerm(sub)))}</div>
+          <div class="kv-abo-card-amount-sub">per termijn incl. BTW</div>
         </div>
       </header>
 
