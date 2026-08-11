@@ -369,8 +369,14 @@
 }
 
 .kv-abo-card-foot {
-  display: flex; gap: 8px; flex-wrap: wrap;
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
   padding-top: 12px;
+}
+/* Rood accent op de deactiveer-knop in de abo-card-foot. */
+.kv-abo-btn-danger { color: var(--rose, #C22B3E) !important; }
+.kv-abo-btn-danger:hover:not([disabled]) {
+  background: var(--rose-soft, #FDECEE) !important;
+  border-color: var(--rose-line, #F5C2C9) !important;
 }
 
 .kv-abo-card-lines { padding-top: 12px; }

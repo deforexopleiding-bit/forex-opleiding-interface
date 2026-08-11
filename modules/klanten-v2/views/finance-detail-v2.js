@@ -18,11 +18,24 @@
 //     (voor abo: customer_id komt uit finance-v2 state _sub.data waar
 //      subscription al gefetch't is; fallback GET met customer_id)
 //
-// Acties in deze ronde: READ-ONLY view met deep-link naar v1 finance.html
-// voor destructive/mutation-flows (Verzenden/Aanpassen/Crediteren/Betaling
-// registreren voor factuur; Aanpassen/Uitstellen/Deactiveren voor abo).
-// Volledige v2-actie-modals in aparte vervolg-PR (v2-modals bestaan al in
-// klanten-v2/views/modals/ maar require diff bootstrap).
+// Acties (finance-mutaties ronde):
+//   FACTUUR — status-conditional buttons:
+//     · concept              → Verzenden + Aanpassen + Crediteren
+//     · sent/open/overdue    → Betaling registreren + Verzenden + Crediteren
+//     · partially_paid       → Betaling registreren + Betalingen terugdraaien + Crediteren
+//     · paid                 → Betalingen terugdraaien + Crediteren
+//     · credited             → (geen mutaties)
+//     Endpoints: POST /api/finance-invoice-register-payment | -remove-payment |
+//                -send | -update | -credit
+//     RBAC (server-side): finance.invoice.{payment.register|payment.remove|
+//                          send|update|credit}
+//   ABONNEMENT — 3 buttons:
+//     · Aanpassen  (verborgen als has_any_invoice) → /api/sales-subscription-update
+//     · Uitstellen                                  → /api/sales-subscription-postpone
+//     · Deactiveren                                 → /api/sales-subscription-delete
+//   Modals: dynamic import uit views/modals/{invoice-*,subscription-actions,
+//           invoice-remove-payment}.js. Na success: _invLoad(id) of _subLoad(id).
+//   Fail-soft: server-403 → toast met server-message (geen client-crash).
 //
 // Dormant (deel van finance-v2, bereikbaar via ?v2preview=finance).
 
@@ -194,7 +207,17 @@
     const st = inv.status || 'concept';
     const tlHref = inv.tl_invoice_id ? `https://focus.teamleader.eu/invoice_detail.php?id=${encodeURIComponent(inv.tl_invoice_id)}` : null;
     const custHref = inv.customer_id ? `/modules/klanten.html?id=${encodeURIComponent(inv.customer_id)}` : null;
-    const finV1Href = `/modules/finance.html?tab=facturen&invoice=${encodeURIComponent(inv.id)}`;
+    // Status-driven action-buttons: waar mag welke mutatie draaien?
+    const paidNum = Number(inv.paid || inv.amount_paid || 0);
+    const totNum  = Number(inv.amount_total || inv.total || 0);
+    const isConcept   = st === 'concept' || st === 'draft';
+    const isCredited  = st === 'credited' || st === 'partially_credited';
+    const isPaid      = st === 'paid';
+    const canRegister = !isConcept && !isCredited && paidNum + 0.005 < totNum;  // open bedrag
+    const canRemove   = !isConcept && paidNum > 0;                              // heeft payments
+    const canCredit   = !isConcept;                                             // conceptless
+    const canSend     = true;                                                   // ook resend na send
+    const canUpdate   = isConcept;                                              // enkel concept
 
     // Timeline (v1-parity: aangemaakt / vervalt / (deels)betaald / creditnota's)
     const events = [];
@@ -258,7 +281,11 @@
             ? `<button class="btn btn-ghost" onclick="__fnInvPdf('${esc(inv.tl_invoice_id)}')" title="PDF downloaden">📄 PDF</button>`
             : `<button class="btn btn-ghost" disabled title="Factuur is nog niet naar TeamLeader gepusht — geen PDF beschikbaar" style="opacity:.5;cursor:not-allowed">📄 PDF (n.v.t.)</button>`}
           ${tlHref ? `<a class="btn btn-ghost" href="${tlHref}" target="_blank" rel="noopener">↗ Open in TL</a>` : ''}
-          <a class="btn" href="${finV1Href}" title="Openen in v1 finance-module voor mutaties (Verzenden/Aanpassen/Crediteren/Betaling registreren)">⚙ Mutaties (v1)</a>
+          ${canRegister ? `<button class="btn btn-primary" onclick="__fnInvPay()" title="Handmatige betaling registreren + naar TL synchroniseren">💶 Betaling registreren</button>` : ''}
+          ${canRemove ? `<button class="btn" onclick="__fnInvRemovePay()" title="ALLE geregistreerde betalingen terugdraaien in TeamLeader (destructief)" style="background:var(--rose-soft, #FDECEE); border-color:var(--rose-line, #F5C2C9); color:var(--rose, #C22B3E)">↩ Betaling(en) terugdraaien</button>` : ''}
+          ${canSend ? `<button class="btn" onclick="__fnInvSend()" title="Factuur per e-mail versturen (mail-template kiezen in modal)">✉ ${isPaid || isCredited ? 'Opnieuw versturen' : 'Verzenden'}</button>` : ''}
+          ${canUpdate ? `<button class="btn" onclick="__fnInvUpdate()" title="Concept-factuur aanpassen (regels, PO-nummer, taal)">✎ Aanpassen</button>` : ''}
+          ${canCredit ? `<button class="btn" onclick="__fnInvCredit()" title="Creditnota aanmaken op deze factuur (destructief in TL-audit)" style="background:var(--amber-soft, #FFF4E5); border-color:var(--amber-line, #F4D8A1); color:var(--amber, #C2700A)">↺ Crediteren</button>` : ''}
         </div>
       </div>
 
@@ -452,7 +479,11 @@
         </div>
         <div class="fnd-actions">
           ${tlHref ? `<a class="btn btn-ghost" href="${tlHref}" target="_blank" rel="noopener">↗ Open in TL</a>` : ''}
-          ${custHref ? `<a class="btn" href="${custHref}" title="Aanpassen / Uitstellen / Deactiveren gaat via klant-detail Abonnementen-tab in v1 (v2-modals volgen)">⚙ Mutaties (v1 klant-detail)</a>` : ''}
+          ${sub.has_any_invoice
+            ? `<button class="btn" disabled title="Abonnement is al gefactureerd — aanpassen niet toegestaan. Gebruik crediteren + nieuw abo." style="opacity:.5;cursor:not-allowed">✎ Aanpassen (niet mogelijk)</button>`
+            : `<button class="btn" onclick="__fnSubUpdate()" title="Abonnement aanpassen (omschrijving/bedrag/termijnen/data)">✎ Aanpassen</button>`}
+          <button class="btn" onclick="__fnSubPostpone()" title="Uitstellen of verlengen (1-12 maanden). Push naar TeamLeader.">⏱ Uitstellen / verlengen</button>
+          <button class="btn" onclick="__fnSubDelete()" title="Abonnement deactiveren (lokaal + TL). Blijft in historie staan." style="background:var(--rose-soft, #FDECEE); border-color:var(--rose-line, #F5C2C9); color:var(--rose, #C22B3E)">⊘ Deactiveren</button>
         </div>
       </div>
 
@@ -514,6 +545,79 @@
     } catch (e) {
       alert('PDF ophalen mislukt: ' + (e?.message || e));
     }
+  };
+
+  // ── Factuur-mutaties: dynamic imports naar v2-modals ────────────────────
+  // De v2-modals (views/modals/invoice-*.js) zijn ES-modules; finance-
+  // detail-v2 is een IIFE. Dynamic import() werkt cross-boundary. Na een
+  // geslaagde mutatie: _invLoad(id) opnieuw voor verse detail-data.
+  async function _refreshInv() { if (_inv.id) _invLoad(_inv.id); }
+  function _invOrToast() {
+    if (!_inv.data) { window.KV.toast('Factuur nog niet geladen'); return null; }
+    return _inv.data;
+  }
+  window.__fnInvPay = async function () {
+    const inv = _invOrToast(); if (!inv) return;
+    try {
+      const mod = await import('./modals/invoice-payment.js');
+      mod.openInvoicePaymentModal({ invoice: inv, onSuccess: _refreshInv });
+    } catch (e) { console.error('[fnd] invoice-payment import fail:', e); window.KV.toast('Kon betaling-modal niet laden'); }
+  };
+  window.__fnInvRemovePay = async function () {
+    const inv = _invOrToast(); if (!inv) return;
+    try {
+      const mod = await import('./modals/invoice-remove-payment.js');
+      mod.openInvoiceRemovePaymentModal({ invoice: inv, onSuccess: _refreshInv });
+    } catch (e) { console.error('[fnd] invoice-remove-payment import fail:', e); window.KV.toast('Kon terugdraai-modal niet laden'); }
+  };
+  window.__fnInvSend = async function () {
+    const inv = _invOrToast(); if (!inv) return;
+    try {
+      const mod = await import('./modals/invoice-send.js');
+      mod.openInvoiceSendModal({ invoice: inv, onSuccess: _refreshInv });
+    } catch (e) { console.error('[fnd] invoice-send import fail:', e); window.KV.toast('Kon verzend-modal niet laden'); }
+  };
+  window.__fnInvUpdate = async function () {
+    const inv = _invOrToast(); if (!inv) return;
+    try {
+      const mod = await import('./modals/invoice-update.js');
+      mod.openInvoiceUpdateModal({ invoice: inv, onSuccess: _refreshInv });
+    } catch (e) { console.error('[fnd] invoice-update import fail:', e); window.KV.toast('Kon aanpas-modal niet laden'); }
+  };
+  window.__fnInvCredit = async function () {
+    const inv = _invOrToast(); if (!inv) return;
+    try {
+      const mod = await import('./modals/invoice-credit.js');
+      mod.openInvoiceCreditModal({ invoice: inv, onSuccess: _refreshInv });
+    } catch (e) { console.error('[fnd] invoice-credit import fail:', e); window.KV.toast('Kon credit-modal niet laden'); }
+  };
+
+  // ── Abonnement-mutaties: dynamic imports naar subscription-actions ──────
+  async function _refreshSub() { if (_sub.id) _subLoad(_sub.id); }
+  function _subOrToast() {
+    if (!_sub.data) { window.KV.toast('Abonnement nog niet geladen'); return null; }
+    return _sub.data;
+  }
+  window.__fnSubUpdate = async function () {
+    const sub = _subOrToast(); if (!sub) return;
+    try {
+      const mod = await import('./modals/subscription-actions.js');
+      mod.openSubscriptionUpdateModal({ sub, onSuccess: _refreshSub });
+    } catch (e) { console.error('[fnd] sub-update import fail:', e); window.KV.toast('Kon aanpas-modal niet laden'); }
+  };
+  window.__fnSubPostpone = async function () {
+    const sub = _subOrToast(); if (!sub) return;
+    try {
+      const mod = await import('./modals/subscription-actions.js');
+      mod.openSubscriptionPostponeModal({ sub, onSuccess: _refreshSub });
+    } catch (e) { console.error('[fnd] sub-postpone import fail:', e); window.KV.toast('Kon uitstel-modal niet laden'); }
+  };
+  window.__fnSubDelete = async function () {
+    const sub = _subOrToast(); if (!sub) return;
+    try {
+      const mod = await import('./modals/subscription-actions.js');
+      mod.openSubscriptionDeleteModal({ sub, onSuccess: _refreshSub });
+    } catch (e) { console.error('[fnd] sub-delete import fail:', e); window.KV.toast('Kon deactiveer-modal niet laden'); }
   };
 
   // ── Navigatie ───────────────────────────────────────────────────────────
