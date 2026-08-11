@@ -81,6 +81,17 @@
     },
     // Tag-input value (persistent tussen renders zodat typen niet 'wiped')
     tagDraft: '',
+    // Draft-persistentie (v1 sales-wizard.html r828-854 + r1018-1055).
+    // saveTimer = setTimeout handle voor 1500ms debounce vanaf laatste
+    // markDirty. saveStatus stuurt de foot-indicator; savedAt is de
+    // basis voor de "Ns geleden"-refresh (elke 5s).
+    saveTimer: null,
+    saveStatus: 'idle',            // 'idle' | 'saving' | 'saved' | 'failed'
+    savedAt: null,                  // Date | null
+    savedRefresher: null,           // setInterval handle (5s tick voor "Ns geleden")
+    draftLoading: false,
+    // Resume-modal (bij wizard-open als er een concept-draft is)
+    resumeModal: { open: false, draft: null },
     wizard: {
       // Stap 1
       tl_department_id: '',
@@ -149,6 +160,107 @@
   }
   const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const eur = window.DFO.eur || ((n) => n == null ? '—' : new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(n));
+
+  // ── Draft-persistentie (v1-parity r828-854 + r1018-1055) ──────────
+  // Server-endpoint: GET/POST/DELETE /api/sales-wizard-drafts.
+  // Body-shape: { draft_json: {wizard, matched_customer_id,
+  //   tl_imported_contact_id, duplicate_check_status}, last_step: 1..4 }.
+  // Server clampt last_step 1-4 (stap 5 = review, geen persist waard).
+  // In edit-mode (state.editDealId gezet): geen save én geen load —
+  // voorkomt dat edits van een bestaande deal een lopende
+  // nieuwe-offerte-draft van dezelfde user overschrijven (v1-bug fix).
+  function _swBuildDraftJson() {
+    return {
+      wizard:                 _sw.wizard,
+      matched_customer_id:    _sw.matched_customer_id || null,
+      tl_imported_contact_id: _sw.tl_imported_contact_id || null,
+      duplicate_check_status: _sw.duplicate_check_status || 'idle',
+    };
+  }
+  async function _swAutoSave() {
+    if (_sw.editDealId) return; // skip in edit-mode
+    _sw.saveStatus = 'saving';
+    _updateFootIndicator();
+    try {
+      const draft_json = _swBuildDraftJson();
+      const last_step = Math.max(1, Math.min(4, Number(_sw.step) || 1));
+      await tryPost('drafts-save', '/api/sales-wizard-drafts', { draft_json, last_step });
+      _sw.saveStatus = 'saved';
+      _sw.savedAt = new Date();
+      _swStartSavedRefresher();
+    } catch (e) {
+      _sw.saveStatus = 'failed';
+      console.warn('[sw-v2] draft save fail:', e?.message);
+    }
+    _updateFootIndicator();
+  }
+  function _swMarkDirty() {
+    _swMarkDirty();
+    if (_sw.editDealId) return; // no auto-save in edit-mode
+    _sw.saveStatus = 'saving';
+    _updateFootIndicator();
+    if (_sw.saveTimer) clearTimeout(_sw.saveTimer);
+    _sw.saveTimer = setTimeout(_swAutoSave, 1500);
+  }
+  async function _swLoadDraft() {
+    if (_sw.editDealId) return null;
+    _sw.draftLoading = true;
+    try {
+      const data = await tryFetch('drafts-get', '/api/sales-wizard-drafts');
+      _sw.draftLoading = false;
+      if (!data || !data.draft) return null;
+      const dj = data.draft.draft_json || {};
+      if (!dj || typeof dj !== 'object' || !Object.keys(dj).length) return null;
+      return data.draft; // { id, user_id, draft_json, last_step, created_at, updated_at }
+    } catch (e) {
+      _sw.draftLoading = false;
+      console.warn('[sw-v2] draft load fail:', e?.message);
+      return null;
+    }
+  }
+  async function _swDeleteDraft() {
+    try { await tryPost('drafts-del', '/api/sales-wizard-drafts', null, 'DELETE'); } catch (_) {}
+    _sw.saveStatus = 'idle';
+    _sw.savedAt = null;
+    _swStopSavedRefresher();
+    _updateFootIndicator();
+  }
+  function _swApplyDraft(draft) {
+    const dj = draft?.draft_json || {};
+    if (dj.wizard && typeof dj.wizard === 'object') Object.assign(_sw.wizard, dj.wizard);
+    if (dj.matched_customer_id)    _sw.matched_customer_id    = dj.matched_customer_id;
+    if (dj.tl_imported_contact_id) _sw.tl_imported_contact_id = dj.tl_imported_contact_id;
+    if (dj.duplicate_check_status) _sw.duplicate_check_status = dj.duplicate_check_status;
+    _sw.step = Math.max(1, Math.min(4, Number(draft?.last_step) || 1));
+    _sw.savedAt = draft?.updated_at ? new Date(draft.updated_at) : new Date();
+    _sw.saveStatus = 'saved';
+    _swStartSavedRefresher();
+  }
+  // Foot-indicator: refresht "Ns geleden" elke 5s. Alleen DOM-swap van
+  // #sw-save-indicator zodat we geen renderWizard-storm veroorzaken.
+  function _updateFootIndicator() {
+    const el = document.getElementById('sw-save-indicator');
+    if (!el) return;
+    el.className = 'sw-save-indicator sw-save-' + (_sw.saveStatus || 'idle');
+    let txt = '';
+    if (_sw.saveStatus === 'saving') txt = '⋯ Opslaan…';
+    else if (_sw.saveStatus === 'failed') txt = '⚠ Opslaan mislukt';
+    else if (_sw.saveStatus === 'saved' && _sw.savedAt) {
+      const secs = Math.max(0, Math.round((Date.now() - _sw.savedAt.getTime()) / 1000));
+      const rel = secs < 5 ? 'zojuist'
+                : secs < 60 ? (secs + 's geleden')
+                : (Math.round(secs / 60) + 'm geleden');
+      txt = '✓ Concept opgeslagen (' + rel + ')';
+    }
+    el.textContent = txt;
+  }
+  function _swStartSavedRefresher() {
+    _swStopSavedRefresher();
+    _sw.savedRefresher = setInterval(_updateFootIndicator, 5000);
+  }
+  function _swStopSavedRefresher() {
+    if (_sw.savedRefresher) { clearInterval(_sw.savedRefresher); _sw.savedRefresher = null; }
+  }
 
   // ── Prefill-lezers (leads → wizard, events → wizard) ────────────────
   function readPrefill() {
@@ -261,8 +373,12 @@
       if (_sw.picker.open)         extras += pickerModalHtml();
       if (_sw.discountModal.open)  extras += discountModalHtml();
       if (_sw.exceptionModal.open) extras += excModalHtml();
+      if (_sw.resumeModal.open)    extras += resumeModalHtml();
       root.innerHTML = wizardModal() + extras;
       root.classList.add('is-open');
+      // Foot-indicator vult van state (setInterval is al gestart bij
+      // saved-status). Direct 1x updaten na render.
+      _updateFootIndicator();
     } else {
       root.classList.remove('is-open');
       root.innerHTML = '';
@@ -271,9 +387,36 @@
   }
 
   // ── Handlers ──────────────────────────────────────────────────────
-  window.__swOpen = () => {
+  // __swOpen accepteert opts (batch2b):
+  //   { editDealId }   — opens edit-mode (fetch + prefill via Feature B)
+  //   { prefillLead }  — expliciete lead-prefill (fallback op sessionStorage)
+  // Zonder opts: nieuwe offerte + optionele draft-resume (Feature A).
+  window.__swOpen = (opts) => {
+    opts = opts || {};
     _sw.open = true; _sw.step = 1; _sw.dirty = false;
+    _sw.saveStatus = 'idle';
+    _sw.savedAt = null;
+    if (_sw.saveTimer) { clearTimeout(_sw.saveTimer); _sw.saveTimer = null; }
+    // Optionele expliciete edit-mode via opts (Feature B — nog te bouwen).
+    if (opts.editDealId) _sw.editDealId = String(opts.editDealId);
+    // Optionele expliciete leads-prefill via opts (Feature C-alternate path).
+    // Vult sessionStorage zodat readPrefill 'em oppikt.
+    if (opts.prefillLead && typeof opts.prefillLead === 'object') {
+      try { sessionStorage.setItem('_prefill_lead', JSON.stringify(opts.prefillLead)); } catch (_) {}
+    }
     readPrefill();
+    // Draft-resume check — skip in edit-mode (v1-bug fix). Async: als er
+    // een draft is EN we zijn geen prefill/edit-flow, tonen we de resume-
+    // modal en wacht op user-keuze voordat de wizard-body verschijnt.
+    if (!_sw.editDealId && !_sw.prefillLeadId && !_sw.prefillEventAttendeeId) {
+      queueMicrotask(async () => {
+        const draft = await _swLoadDraft();
+        if (draft && _sw.open) {
+          _sw.resumeModal = { open: true, draft };
+          renderWizard();
+        }
+      });
+    }
     // Load entities (Stap 1) + trajecten (Stap 3, lazy)
     if (!_sw.entities && !_sw.entitiesLoading) queueMicrotask(loadEntities);
     renderWizard();
@@ -281,6 +424,26 @@
   window.__swClose = () => {
     if (_sw.dirty && !confirm('Er zijn niet-opgeslagen wijzigingen. Wizard sluiten?')) return;
     _sw.open = false;
+    _sw.resumeModal = { open: false, draft: null };
+    if (_sw.saveTimer) { clearTimeout(_sw.saveTimer); _sw.saveTimer = null; }
+    _swStopSavedRefresher();
+    renderWizard();
+  };
+  // Resume-modal handlers (batch2b — Feature A draft-persistentie).
+  window.__swResumeContinue = () => {
+    if (!_sw.resumeModal.draft) return;
+    _swApplyDraft(_sw.resumeModal.draft);
+    _sw.resumeModal = { open: false, draft: null };
+    _sw.dirty = false;
+    // Als last_step >= 3 → trigger lazy loads voor die stap
+    if (_sw.step === 3) { if (!_sw.trajecten     && !_sw.trajectenLoading) queueMicrotask(loadTrajecten);
+                         if (!_sw.productsCatalog && !_sw.productsLoading) queueMicrotask(loadProductsCatalog); }
+    if (_sw.step === 4 && !_sw.exceptionLimits.loaded) queueMicrotask(loadExceptionLimits);
+    renderWizard();
+  };
+  window.__swResumeNew = async () => {
+    _sw.resumeModal = { open: false, draft: null };
+    await _swDeleteDraft();
     renderWizard();
   };
   window.__swGoStep = (n) => {
@@ -309,18 +472,18 @@
     renderWizard();
   };
   // __swInput doet EXPLICIET geen re-render — DOM behoudt focus/cursor.
-  window.__swInput = (field, val) => { _sw.wizard[field] = val; _sw.dirty = true; };
-  window.__swToggleCompany = () => { _sw.wizard.is_company = !_sw.wizard.is_company; _sw.dirty = true; renderWizard(); };
-  window.__swPickEntity = (id) => { _sw.wizard.tl_department_id = id; _sw.dirty = true; renderWizard(); };
+  window.__swInput = (field, val) => { _sw.wizard[field] = val; _swMarkDirty(); };
+  window.__swToggleCompany = () => { _sw.wizard.is_company = !_sw.wizard.is_company; _swMarkDirty(); renderWizard(); };
+  window.__swPickEntity = (id) => { _sw.wizard.tl_department_id = id; _swMarkDirty(); renderWizard(); };
   // Stap-2 handlers
-  window.__swAvg        = (v) => { _sw.wizard.avg_ok = !!v; _sw.dirty = true; };
-  window.__swAddrKnown  = (v) => { _sw.wizard.address_known = !!v; _sw.dirty = true; renderWizard(); };
-  window.__swSetCountry = (v) => { _sw.wizard.address_country = (v === 'BE' ? 'BE' : 'NL'); _sw.dirty = true; };
+  window.__swAvg        = (v) => { _sw.wizard.avg_ok = !!v; _swMarkDirty(); };
+  window.__swAddrKnown  = (v) => { _sw.wizard.address_known = !!v; _swMarkDirty(); renderWizard(); };
+  window.__swSetCountry = (v) => { _sw.wizard.address_country = (v === 'BE' ? 'BE' : 'NL'); _swMarkDirty(); };
   window.__swToggleTag  = (t) => {
     const i = _sw.wizard.tags.indexOf(t);
     if (i >= 0) _sw.wizard.tags.splice(i, 1);
     else _sw.wizard.tags.push(t);
-    _sw.dirty = true; renderWizard();
+    _swMarkDirty(); renderWizard();
   };
   window.__swTagDraft   = (v) => { _sw.tagDraft = String(v || ''); };
   window.__swAddCustomTag = () => {
@@ -328,7 +491,7 @@
     if (!v) return;
     if (!_sw.wizard.tags.includes(v)) _sw.wizard.tags.push(v);
     _sw.tagDraft = '';
-    _sw.dirty = true; renderWizard();
+    _swMarkDirty(); renderWizard();
   };
   window.__swSwapCustomer = () => {
     // Ontkoppel bestaande-klant match — velden blijven zoals ze zijn zodat
@@ -336,7 +499,7 @@
     _sw.matched_customer_id = null;
     _sw.existingCustName = null;
     _sw.duplicate_check_status = 'idle';
-    _sw.dirty = true; renderWizard();
+    _swMarkDirty(); renderWizard();
   };
   // ── Duplicate-check modal (bestaande klant zoeken) ─────────────────
   window.__swDupCheckOpen = async () => {
@@ -392,7 +555,7 @@
     _sw.matched_customer_id = String(id);
     _sw.existingCustName = String(name || '—');
     _sw.duplicate_check_status = 'completed';
-    _sw.dirty = true;
+    _swMarkDirty();
     window.__swDupCheckClose();
   };
   window.__swUseTlContact = (payloadJson) => {
@@ -417,7 +580,7 @@
     if (m.address_country === 'BE' || m.address_country === 'NL') _sw.wizard.address_country = m.address_country;
     if (m.date_of_birth)  _sw.wizard.date_of_birth  = String(m.date_of_birth).slice(0, 10);
     _sw.duplicate_check_status = 'completed';
-    _sw.dirty = true;
+    _swMarkDirty();
     window.__swDupCheckClose();
   };
   // "Bewerken →" links vanuit stap-5 review (v1 [data-back] r1526).
@@ -610,7 +773,7 @@
   }
   async function applyTrajectVariant(variantId) {
     _sw.wizard.traject_variant_id = variantId || '';
-    _sw.dirty = true;
+    _swMarkDirty();
     if (!variantId) { renderWizard(); return; }
     // v1 doet /api/traject-variants?variant_id=X → { variant, products }.
     // We vullen wizard.products opnieuw op basis van de variant-samenstelling.
@@ -943,7 +1106,7 @@
   // flag reset) valt back op renderWizard via _revalidateAndMaybeRender.
   window.__swSetPayStart = (v) => {
     _sw.wizard.payment_start_date = String(v || '');
-    _sw.dirty = true;
+    _swMarkDirty();
     // Default 1e termijn = start-3d als leeg (v1 nextBtn hook r758-762).
     const startMinus3 = _shiftDaysIso(_sw.wizard.payment_start_date, -3);
     if (startMinus3 && !_sw.wizard.payment_term_start_date) {
@@ -956,14 +1119,14 @@
   };
   window.__swSetPayDownAmt = (v) => {
     _sw.wizard.payment_downpayment_amount = String(v || '');
-    _sw.dirty = true;
+    _swMarkDirty();
     _clampTermStartDate(true);
     _updatePayComputed();
     _revalidateAndMaybeRender();
   };
   window.__swSetPayDownDate = (v) => {
     _sw.wizard.payment_downpayment_date = String(v || '');
-    _sw.dirty = true;
+    _swMarkDirty();
     _clampDownDate(true);
     // Down-date value kan door clamp gewijzigd zijn — sync input surgical.
     const dd = _root()?.querySelector('[data-fkey="sw4-pay-down-date"]');
@@ -974,13 +1137,13 @@
   window.__swSetPayTermCount = (v) => {
     const n = Math.max(0, Math.min(60, Number(v) || 0));
     _sw.wizard.payment_term_count = n === 0 ? '' : n;
-    _sw.dirty = true;
+    _swMarkDirty();
     _updatePayComputed();
     _revalidateAndMaybeRender();
   };
   window.__swSetPayTermStart = (v) => {
     _sw.wizard.payment_term_start_date = String(v || '');
-    _sw.dirty = true;
+    _swMarkDirty();
     // Geen computed downstream — puur state.
   };
   window.__swUndoException = () => {
@@ -989,7 +1152,7 @@
     _sw.wizard.exception_reasons     = '';
     _sw.wizard.exception_reason_note = '';
     _sw.wizard.exception_fee_agreed  = false;
-    _sw.dirty = true;
+    _swMarkDirty();
     _recomputeTermAmount();
     try { window.KV?.toast?.('Uitzondering-goedkeuring ongedaan gemaakt.'); } catch (_) {}
     renderWizard();
@@ -1007,7 +1170,7 @@
     _sw.wizard.exception_reasons     = csv;
     _sw.wizard.exception_reason_note = m.note.trim();
     _sw.wizard.exception_fee_agreed  = m.detect.lateStart ? !!m.feeChecked : false;
-    _sw.dirty = true;
+    _swMarkDirty();
     _recomputeTermAmount();
     const resolve = m.resolver;
     _sw.exceptionModal = { open: false, detect: null, note: '', feeChecked: false, resolver: null };
@@ -1060,35 +1223,35 @@
 
   // ── Stap-3 handlers ───────────────────────────────────────────────
   window.__swPickTraject = (variantId) => queueMicrotask(() => applyTrajectVariant(variantId));
-  window.__swResetTraject = () => { _sw.wizard.traject_variant_id = ''; _sw.dirty = true; renderWizard(); };
-  window.__swSetSaleType = (v) => { _sw.wizard.sale_type = v === 'intracommunautair' ? 'intracommunautair' : 'domestic'; _sw.dirty = true; renderWizard(); };
+  window.__swResetTraject = () => { _sw.wizard.traject_variant_id = ''; _swMarkDirty(); renderWizard(); };
+  window.__swSetSaleType = (v) => { _sw.wizard.sale_type = v === 'intracommunautair' ? 'intracommunautair' : 'domestic'; _swMarkDirty(); renderWizard(); };
   window.__swSetDuration = (n) => {
     const v = Math.max(1, Math.min(120, Number(n) || 12));
     _sw.wizard.duration_months = v;
-    _sw.dirty = true; renderWizard();
+    _swMarkDirty(); renderWizard();
   };
   // Qty/prijs: surgical — update alleen line-subtotaal + totals-block +
   // head-summary. GEEN renderWizard() → input-node blijft = cursor blijft.
   window.__swInputQty = (i, val) => {
     const arr = _sw.wizard.products; if (!arr[i]) return;
     arr[i].quantity = Math.max(1, Number(val) || 1);
-    _sw.dirty = true;
+    _swMarkDirty();
     _updateProductLine(i);
   };
   window.__swInputPrice = (i, val) => {
     const arr = _sw.wizard.products; if (!arr[i]) return;
     arr[i].price_per_unit = Math.max(0, Number(val) || 0);
-    _sw.dirty = true;
+    _swMarkDirty();
     _updateProductLine(i);
   };
   window.__swToggleVatIncl = (i) => {
     const arr = _sw.wizard.products; if (!arr[i]) return;
     arr[i].price_includes_vat = !arr[i].price_includes_vat;
-    _sw.dirty = true; renderWizard();
+    _swMarkDirty(); renderWizard();
   };
   window.__swRemoveProduct = (i) => {
     _sw.wizard.products.splice(Number(i), 1);
-    _sw.dirty = true; renderWizard();
+    _swMarkDirty(); renderWizard();
   };
   // Product-picker modal
   window.__swPickerOpen = () => {
@@ -1112,7 +1275,7 @@
       price_includes_vat: !!p.price_includes_vat,
     });
     _sw.picker.open = false;
-    _sw.dirty = true; renderWizard();
+    _swMarkDirty(); renderWizard();
   };
   // Korting-modal
   window.__swDiscountOpen = () => {
@@ -1127,11 +1290,11 @@
     v = Math.max(0, Math.min(100, v));
     _sw.wizard.discount_percentage = v;
     _sw.discountModal.open = false;
-    _sw.dirty = true; renderWizard();
+    _swMarkDirty(); renderWizard();
   };
   window.__swDiscountRemove = () => {
     _sw.wizard.discount_percentage = 0;
-    _sw.dirty = true; renderWizard();
+    _swMarkDirty(); renderWizard();
   };
 
   // ── Progress + shell ──────────────────────────────────────────────
@@ -1301,6 +1464,45 @@
         </label>
       </div>
     </div>`;
+  }
+
+  // ── Resume-modal (batch2b Feature A — draft-persistentie) ─────────
+  // 1-op-1 met v1 sales-wizard.html #resumeModal r433-446. Toont een
+  // datum-geformatteerde subtitel + 2 keuze-knoppen ("Doorgaan" wint,
+  // "Nieuw beginnen" wist en start blank). z-index via .sw-modal-back
+  // stack; opent bovenop de wizard-body (die is al gerender'd maar
+  // wordt visueel gedimd door de backdrop van deze overlay).
+  function resumeModalHtml() {
+    const d = _sw.resumeModal.draft;
+    let dateLbl = '';
+    if (d && d.updated_at) {
+      try {
+        dateLbl = new Date(d.updated_at).toLocaleString('nl-NL', {
+          day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+        });
+      } catch (_) { dateLbl = ''; }
+    }
+    return `
+      <div class="sw-modal-back is-open" id="sw-resume-back" style="z-index:120">
+        <div class="sw-modal" style="max-width:460px">
+          <div class="sw-modal-head">
+            <div class="sw-modal-title">Concept gevonden</div>
+          </div>
+          <div class="sw-modal-body" style="padding:20px 22px">
+            <div style="font-size:14px;line-height:1.55;color:var(--text-1,#111721)">
+              Je hebt een concept-offerte van
+              <strong>${esc(dateLbl || '—')}</strong> die niet is afgerond.
+            </div>
+            <div style="font-size:12.5px;color:var(--text-3,#8B95A5);margin-top:8px">
+              Wil je hiermee doorgaan of opnieuw beginnen?
+            </div>
+          </div>
+          <div class="sw-modal-foot">
+            <button class="btn btn-ghost" onclick="__swResumeNew()">Nieuw beginnen</button>
+            <button class="btn btn-primary" onclick="__swResumeContinue()">Doorgaan</button>
+          </div>
+        </div>
+      </div>`;
   }
 
   // ── Duplicate-check modal (2e overlay bovenop wizard) ───────────────
@@ -1872,6 +2074,7 @@
         </div>
         <div class="sw-modal-foot">
           <button class="btn" onclick="__swClose()">Annuleren</button>
+          <span id="sw-save-indicator" class="sw-save-indicator sw-save-idle" title="Concept-opslag status"></span>
           <div style="flex:1"></div>
           ${_sw.step > 1 ? `<button class="btn" onclick="__swGoStep(${_sw.step - 1})">← Vorige</button>` : ''}
           ${!isLast ? `<button class="btn btn-primary" onclick="__swNext()">Volgende →</button>` : ''}
