@@ -208,15 +208,114 @@
   const errorBlock = (msg) => `<div style="margin:20px;padding:14px 18px;border:1px solid var(--rose-line);background:var(--rose-soft);border-radius:var(--r);color:var(--rose);font-size:13px">⚠ Kon taken niet ophalen: ${msg}</div>`;
   const emptyBlock = (t, s) => `<div class="empty"><div class="empty-ico">${svg(I.check2)}</div><div class="empty-t">${t}</div><div class="empty-s">${s}</div></div>`;
 
+  /* ── Ronde 5 (Pipeline PR): view-toggle Lijst ↔ Pipeline ─────────────
+     Kanban met kolommen open/bezig/klaar. onMove doet een PATCH via het
+     bestaande /api/taken?id=X met {status: X} — dat endpoint bestaat al
+     (taken.html gebruikt 'em) dus geen nieuwe backend. Bij failures rollt
+     de UI terug via re-fetch. */
+  // api/taken.js VALID_TASK_STATUSES = ['todo','progress','done'].
+  // Client-code hier bovenaan filtert eerder op 'klaar' — dat is een
+  // legacy label; canonieke DB-values zijn todo/progress/done. Kanban
+  // gebruikt de canonieke set + toont Nederlandse labels.
+  const TAKEN_KANBAN_STATUSES = [
+    { key: 'todo',     label: 'Open',   color: 'rose'    },
+    { key: 'progress', label: 'Bezig',  color: 'blue'    },
+    { key: 'done',     label: 'Klaar',  color: 'emerald' },
+  ];
+  function currentTakenTab() {
+    // Kanban leest de taken uit de active tab-fetch (mijn/team/klaar) zodat
+    // scope respectvol blijft. Val terug op 'mijn' als niet bekend.
+    const t = window.DFO?.S?.tab;
+    if (t === 'Team') return 'team';
+    if (t === 'Afgerond') return 'klaar';
+    return 'mijn';
+  }
+  if (window.KV_V2 && window.KV_V2.kanban) {
+    window.KV_V2.kanban.register('taken', {
+      statuses: TAKEN_KANBAN_STATUSES,
+      getItems: () => {
+        const tab = currentTakenTab();
+        return (_live[tab]?.taken || []).map(t => ({
+          ...t,
+          // Normaliseer status naar de 3 kanban-buckets (fallback = 'open').
+          status: (t.status === 'klaar' || t.status === 'bezig' || t.status === 'open') ? t.status : 'open',
+        }));
+      },
+      statusOf: (t) => t.status,
+      itemId: (t) => t.id,
+      renderCard: (t) => `
+        <div class="kv-kanban-card-title">${(t.titel || '(zonder titel)').replace(/</g,'&lt;')}</div>
+        <div class="kv-kanban-card-sub">
+          ${t.prioriteit ? `<span class="pill pill-${t.prioriteit === 'hoog' ? 'danger' : t.prioriteit === 'middel' ? 'warn' : 'neutral'}">${t.prioriteit}</span>` : ''}
+          ${t.categorie ? `<span>${String(t.categorie).replace(/</g,'&lt;')}</span>` : ''}
+        </div>
+        ${t.deadline ? `<div class="kv-kanban-card-foot">deadline: ${new Date(t.deadline).toLocaleDateString('nl-NL', {day:'2-digit', month:'2-digit'})}</div>` : ''}`,
+      onMove: async (id, newStatus) => {
+        // Optimistic mutatie in-memory (over alle 3 tab-caches), dan POST.
+        for (const tab of ['mijn', 'team', 'klaar']) {
+          const arr = _live[tab]?.taken;
+          if (!arr) continue;
+          const t = arr.find(x => x.id === id);
+          if (t) t.status = newStatus;
+        }
+        if (!window.KV || !window.KV.authedFetch) {
+          console.warn('[taken-v2 kanban] KV.authedFetch niet beschikbaar — status niet gepersisteerd.');
+          return;
+        }
+        try {
+          // api/taken.js expected transport = POST { action:'status_change', id, status }
+          const resp = await window.KV.authedFetch('/api/taken', {
+            method: 'POST',
+            body: JSON.stringify({ action: 'status_change', id, status: newStatus }),
+          });
+          if (!resp.ok && resp.status !== 204) {
+            const t = await resp.text();
+            const j = t ? (function(){ try { return JSON.parse(t); } catch { return null; } })() : null;
+            throw new Error(j?.error || 'HTTP ' + resp.status);
+          }
+        } catch (e) {
+          console.warn('[taken-v2 kanban] status_change fail:', e?.message);
+          // Rollback via refetch.
+          const tab = currentTakenTab();
+          _live[tab].taken = null;
+          fetchTakenFor(tab);
+          throw e;
+        }
+      },
+    });
+  }
+  function takenViewToggle() {
+    const cur = F('tk-view', 'list');
+    return `<div style="padding:0 20px;margin-top:14px"><div class="kv-viewtoggle">
+      <button class="${cur === 'list' ? 'on' : ''}" onclick="DFO.setF('tk-view','list')">${svg(I.list || I.doc)} Lijst</button>
+      <button class="${cur === 'kanban' ? 'on' : ''}" onclick="DFO.setF('tk-view','kanban')">${svg(I.grid || I.settings)} Pipeline</button>
+    </div></div>`;
+  }
+  function takenKanbanView() {
+    const tab = currentTakenTab();
+    const st = _live[tab];
+    if (!st.taken && !st.loading) (window.queueMicrotask || ((cb) => Promise.resolve().then(cb)))(() => fetchTakenFor(tab));
+    return `${takenViewToggle()}
+      ${window.KV_V2.kanban ? window.KV_V2.kanban.html('taken') : '<div class="sv-empty">Kanban laden…</div>'}
+      ${st.loading ? '<div class="sv-empty" style="padding:6px 20px">Laden…</div>' : ''}
+      ${st.error ? errorBlock(st.error) : ''}`;
+  }
+  function wrapTakenView(orig) {
+    return function () {
+      if (F('tk-view', 'list') === 'kanban') return takenKanbanView();
+      return takenViewToggle() + orig();
+    };
+  }
+
   /* ── Registratie ───────────────────────────────────────────────────── */
-  window.DFO.VIEWS['taken/Mijn taken'] = mijnView;
-  window.DFO.VIEWS['taken/Team']       = teamView;
-  window.DFO.VIEWS['taken/Afgerond']   = afgerondView;
+  window.DFO.VIEWS['taken/Mijn taken'] = wrapTakenView(mijnView);
+  window.DFO.VIEWS['taken/Team']       = wrapTakenView(teamView);
+  window.DFO.VIEWS['taken/Afgerond']   = wrapTakenView(afgerondView);
   if (typeof window.KV_V2_ADD === 'function') {
     window.KV_V2_ADD('taken');
   } else {
     (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('taken');
   }
 
-  console.debug('[taken-v2] registered VIEWS[taken/Mijn taken|Team|Afgerond]');
+  console.debug('[taken-v2] registered VIEWS[taken/Mijn taken|Team|Afgerond] + kanban');
 })();
