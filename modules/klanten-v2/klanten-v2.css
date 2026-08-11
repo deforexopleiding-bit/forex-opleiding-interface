@@ -2800,64 +2800,6 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
   margin-right: 6px; font-weight: 500;
 }
 
-/* ── CAMT-balance debug panel (ronde-5c) — tijdelijk, verwijder na fix.
-   Zichtbaar wanneer URL findebug=1. Warme kleur zodat 't opvalt. ────── */
-.fin-debug-panel {
-  margin: 12px 20px 0;
-  padding: 14px 16px;
-  background: color-mix(in srgb, var(--amber, #C2700A) 8%, transparent);
-  border: 1px dashed var(--amber, #C2700A);
-  border-radius: 10px;
-  font-size: 12.5px; color: var(--text-1, #111721);
-}
-.fin-debug-title {
-  font-weight: 700; font-size: 13px; margin-bottom: 10px;
-  color: var(--amber, #C2700A);
-}
-.fin-debug-empty { color: var(--text-3, #8B95A5); font-style: italic; padding: 6px 0; }
-.fin-debug-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
-}
-@media (max-width: 900px) { .fin-debug-grid { grid-template-columns: 1fr; } }
-.fin-debug-card {
-  background: var(--surface, #FFFFFF);
-  border: 1px solid var(--border, #E2E7EE); border-radius: 8px;
-  padding: 10px 12px;
-  overflow: hidden;
-}
-.fin-debug-card-wide { grid-column: 1 / -1; }
-.fin-debug-h {
-  font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
-  color: var(--text-2, #586374); margin-bottom: 8px;
-  padding-bottom: 6px; border-bottom: 1px solid var(--border, #E2E7EE);
-}
-.fin-debug-body { font-size: 12px; }
-.fin-debug-row {
-  padding: 6px 0; border-bottom: 1px dashed var(--border, #E2E7EE);
-  display: flex; flex-direction: column; gap: 2px;
-}
-.fin-debug-row:last-child { border-bottom: 0; }
-.fin-debug-sub { color: var(--text-3, #8B95A5); font-size: 11px; }
-.fin-debug-meta { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border, #E2E7EE); font-size: 11.5px; color: var(--text-2, #586374); }
-.fin-debug-total {
-  margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border, #E2E7EE);
-  font-size: 13px; font-weight: 600;
-}
-.fin-debug-pos { color: var(--emerald, #07835A); }
-.fin-debug-neg { color: var(--rose,    #C22B3E); }
-.fin-debug-tbl {
-  width: 100%; border-collapse: collapse; font-size: 11.5px;
-  font-variant-numeric: tabular-nums;
-}
-.fin-debug-tbl th, .fin-debug-tbl td {
-  padding: 4px 8px; text-align: left; border-bottom: 1px dashed var(--border, #E2E7EE);
-}
-.fin-debug-tbl th {
-  background: var(--surface-2, #F2F4F7); font-weight: 600; font-size: 11px;
-  color: var(--text-2, #586374); text-transform: uppercase; letter-spacing: .03em;
-}
-.fin-debug-tbl .mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
-
 /* ── Finance-modals (.fn-modal-* — ronde-5d).
    Recidive-fix van bekende ONZICHTBARE modal bug: de finance-v2 create-flow
    (Nieuwe factuur + toekomstige edit-facturen) gebruikt .fn-modal-*-classes

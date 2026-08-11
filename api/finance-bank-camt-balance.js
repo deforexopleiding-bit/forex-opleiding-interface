@@ -41,6 +41,16 @@ function normalizeIban(s) {
   return String(s).replace(/\s+/g, '').toUpperCase();
 }
 
+// IBAN-validatie (structuur, geen checksum-check). Format: 2 letters
+// country + 2 digits checksum + 10-30 alphanumeric. Sluit pseudo-accounts
+// uit die geen echte IBAN zijn — bv. "PAYPAL" (PayPal CSV-import pakt de
+// header-label als account_iban). Ronde-5e fix na Jeffrey's debug:
+// grand-total was -€258 omdat een PAYPAL-pseudo-account met onzin-saldo
+// werd meegeteld naast de echte NL53INGB* rekening.
+function isValidIban(s) {
+  return /^[A-Z]{2}[0-9]{2}[A-Z0-9]{10,30}$/.test(String(s || ''));
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -99,7 +109,8 @@ export default async function handler(req, res) {
     let ignoredCount = 0;
     for (const s of stmts) {
       const key = normalizeIban(s.account_iban);
-      if (!key) { ignoredCount++; continue; } // camt zonder IBAN — skip
+      if (!key) { ignoredCount++; continue; } // rij zonder IBAN — skip
+      if (!isValidIban(key)) { ignoredCount++; continue; } // pseudo-account (PAYPAL etc) — skip
       if (filterOnActive && !activeIbansSet.has(key)) { ignoredCount++; continue; }
       if (!byIban.has(key)) byIban.set(key, s);
     }

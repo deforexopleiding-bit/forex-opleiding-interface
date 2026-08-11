@@ -189,82 +189,12 @@
     // (zelfde bron als Bank-tab).
     const [data, bal] = await Promise.all([
       tryFetch('finance-dashboard-counts', `/api/finance-dashboard-counts?period=${period}`),
-      tryFetch('finance-bank-camt-balance', ('/api/finance-bank-camt-balance' + (String(new URLSearchParams(location.search).get('findebug') || '') === '1' ? '?debug=1' : ''))),
+      tryFetch('finance-bank-camt-balance', '/api/finance-bank-camt-balance'),
     ]);
     if (seq !== _dash.seq) return;
     _dash.data = data; _dash.bal = bal; _dash.loading = false;
     if (!data) _dash.error = 'Kon dashboard-counts niet laden';
     window.DFO.render();
-  }
-
-  // Debug-paneel voor banksaldo (ronde-5c): tijdelijk zichtbaar in de
-  // authenticated app-UI via ?findebug=1. Toont per IBAN welk slotsaldo
-  // is gepakt, of het in de active-set zit, en het grand-total. Zo kan
-  // Jeffrey met één screenshot laten zien welke IBAN het verkeerde teken
-  // veroorzaakt zonder rauwe API te openen (die geeft 401 zonder JWT).
-  // Verwijderen zodra de saldo-bug gefixt is.
-  function renderCamtDebugPanel(bal) {
-    if (String(new URLSearchParams(location.search).get('findebug') || '') !== '1') return '';
-    if (!bal || !bal._debug) return `<div class="fin-debug-panel">
-      <div class="fin-debug-title">🔍 CAMT-balance debug (findebug=1)</div>
-      <div class="fin-debug-empty">Geen _debug-data beschikbaar. Wacht tot fetch klaar is, refresh de pagina, of controleer console voor errors.</div>
-    </div>`;
-    const d = bal._debug;
-    const fmtEur = v => (Number(v) || 0).toLocaleString('nl-NL', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 });
-    const escD = (s) => esc(String(s == null ? '—' : s));
-    return `<div class="fin-debug-panel">
-      <div class="fin-debug-title">🔍 CAMT-balance debug (findebug=1) — verwijder deze paneel na sign-fix</div>
-      <div class="fin-debug-grid">
-        <div class="fin-debug-card">
-          <div class="fin-debug-h">bank_accounts (${d.bank_accounts?.length || 0} actief)</div>
-          <div class="fin-debug-body">
-            ${(d.bank_accounts && d.bank_accounts.length)
-              ? d.bank_accounts.map(a => `<div class="fin-debug-row"><span class="mono">${escD(a.iban_normalized)}</span> <span class="fin-debug-sub">raw: ${escD(a.iban)}</span></div>`).join('')
-              : '<div class="fin-debug-empty">geen actieve bank_accounts — filter is OFF (fallback op alle CAMT-IBANs)</div>'}
-            <div class="fin-debug-meta">filter_on_active: <b>${d.filter_on_active}</b></div>
-          </div>
-        </div>
-        <div class="fin-debug-card">
-          <div class="fin-debug-h">chosen_per_iban (${d.chosen_per_iban?.length || 0})</div>
-          <div class="fin-debug-body">
-            ${(d.chosen_per_iban && d.chosen_per_iban.length)
-              ? d.chosen_per_iban.map(c => `
-                <div class="fin-debug-row">
-                  <div><span class="mono">${escD(c.iban)}</span> · ${escD(c.statement_to || '?')}</div>
-                  <div class="mono ${(Number(c.closing_balance_cents) || 0) < 0 ? 'fin-debug-neg' : 'fin-debug-pos'}">
-                    ${fmtEur(c.closing_balance_eur)} <span class="fin-debug-sub">(${c.closing_balance_cents} cents)</span>
-                  </div>
-                  <div class="fin-debug-sub">file: ${escD(c.file_name)}</div>
-                </div>`).join('')
-              : '<div class="fin-debug-empty">geen per-IBAN gekozen</div>'}
-            <div class="fin-debug-total">Grand-total: <b class="${d.total_cents < 0 ? 'fin-debug-neg' : 'fin-debug-pos'}">${fmtEur(d.total_eur)}</b> (${d.total_cents} cents)</div>
-          </div>
-        </div>
-        <div class="fin-debug-card fin-debug-card-wide">
-          <div class="fin-debug-h">camt_statements_raw (eerste 50, alle IBANs)</div>
-          <div class="fin-debug-body">
-            <table class="fin-debug-tbl">
-              <thead><tr>
-                <th>IBAN (norm)</th><th>closing €</th><th>closing cents</th><th>stmt_to</th><th>uploaded_at</th><th>in_active</th><th>file</th>
-              </tr></thead>
-              <tbody>
-                ${(d.camt_statements_raw && d.camt_statements_raw.length)
-                  ? d.camt_statements_raw.map(r => `<tr>
-                      <td class="mono">${escD(r.account_iban_normalized || r.account_iban)}</td>
-                      <td class="mono ${(Number(r.closing_balance_cents) || 0) < 0 ? 'fin-debug-neg' : 'fin-debug-pos'}">${fmtEur(r.closing_balance_eur)}</td>
-                      <td class="mono fin-debug-sub">${escD(r.closing_balance_cents)}</td>
-                      <td>${escD(r.statement_to)}</td>
-                      <td class="fin-debug-sub">${escD(r.uploaded_at)}</td>
-                      <td>${escD(r.in_active_set)}</td>
-                      <td class="fin-debug-sub">${escD(r.file_name)}</td>
-                    </tr>`).join('')
-                  : '<tr><td colspan="7" class="fin-debug-empty">geen camt_statements</td></tr>'}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>`;
   }
 
   function dashboardView() {
@@ -356,11 +286,6 @@
 
   window.__finInvNew  = () => {
     _newInv.open = true;
-    // Tijdelijke debug-log (ronde-5d): bevestigen dat handler triggert +
-    // state klopt. Root-cause vorige onzichtbaarheid: .fn-modal-* CSS
-    // ontbrak; modal renderde wél in DOM maar zonder position:fixed etc.
-    // Verwijderen zodra Jeffrey bevestigt dat modal nu zichtbaar opent.
-    console.info('[finance-v2] __finInvNew clicked; _newInv.open =', _newInv.open, '; modal-CSS moet nu resolven naar visible overlay.');
     if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
   };
   window.__finInvNewClose = () => {
@@ -895,7 +820,7 @@
     _bnk.loading = true; _bnk.error = null; _bnk.params = wanted;
     // FLICKER-FIX: geen loading-render (consistent met sales-v2 #1263).
     const [bal, tx] = await Promise.all([
-      tryFetch('finance-bank-camt-balance',      ('/api/finance-bank-camt-balance' + (String(new URLSearchParams(location.search).get('findebug') || '') === '1' ? '?debug=1' : ''))),
+      tryFetch('finance-bank-camt-balance',      '/api/finance-bank-camt-balance'),
       tryFetch('finance-bank-camt-transactions', '/api/finance-bank-camt-transactions?' + wanted),
     ]);
     if (seq !== _bnk.seq) return;
@@ -911,7 +836,6 @@
     const bal = _bnk.bal || {};
     const kpis = _bnk.tx?.kpis || {};
     return `${previewHeader('Bank · CAMT-import', _bnk)}
-      ${renderCamtDebugPanel(bal)}
       ${(() => { const _bc = bal.balance_cents; const _kc = _bc == null ? 'blue' : (_bc > 0 ? 'emerald' : (_bc < 0 ? 'rose' : 'blue'));
         return H.kpis([
         { c: _kc,    icon: I.euro,  label: 'Actueel saldo',       val: eurC(bal.balance_cents),         hi: 1, sub: bal.as_of_date ? `t/m ${dstr(bal.as_of_date)}` : '—' },
