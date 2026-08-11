@@ -37,8 +37,16 @@ export async function vindOfMaakAccount({ email, voornaam = null, achternaam = n
   }
 
   let authId = null;
+  // role:'student' expliciet meegeven, anders valt de handle_new_user-trigger
+  // terug op v_role := COALESCE(...->>'role','viewer') → de nieuwe student
+  // krijgt CRM-rol 'viewer' en wordt door de LMS-rol-guard geweigerd.
+  // full_name idem voor een nette profielnaam (trigger valt anders terug op e-mail).
+  // Geldt alleen voor dit LMS-provisioning-pad; andere account-aanmaakpaden
+  // (mentoren/CRM/backoffice) lopen hier niet langs.
+  const fullName = [voornaam, achternaam].filter(Boolean).join(' ').trim() || null;
   const { data: gemaakt, error: maakFout } = await supabaseAdmin.auth.admin.createUser({
-    email: mail, email_confirm: true, user_metadata: { voornaam, achternaam },
+    email: mail, email_confirm: true,
+    user_metadata: { voornaam, achternaam, full_name: fullName, role: 'student' },
   });
   if (gemaakt?.user) {
     authId = gemaakt.user.id;
