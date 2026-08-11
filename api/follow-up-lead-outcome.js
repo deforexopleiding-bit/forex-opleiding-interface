@@ -176,11 +176,15 @@ export default async function handler(req, res) {
   if (!allowed) return res.status(403).json({ error: 'Geen rechten' });
 
   // Per-user RBAC-uitzondering (bv. mentor met expliciete follow-up-toegang):
-  // wie followup.module.access heeft, mag de outcome-acties net als
-  // admin/manager — óók zonder sales/manager/admin-rol. user_has_permission
-  // (via requirePermission) honoreert user_permissions. Additief: rol-gedrag
-  // ongewijzigd. Wordt hieronder in elke uAdmin/rAdmin/isAdmin-check ge-OR'd.
+  // wie followup.module.access heeft, mag de outcome-acties óók zonder
+  // sales/manager/admin-rol. user_has_permission (via requirePermission)
+  // honoreert user_permissions. Additief: rol-gedrag ongewijzigd.
+  // De SCOPE volgt followup.scope.all_vs_own: mét die key = brede toegang
+  // (als admin/manager); zonder = alleen eigen rijen (als sales). Zo krijgt een
+  // grantee niet automatisch admin-brede toegang enkel door module.access.
   const canFollowupManage = await requirePermission(req, 'followup.module.access');
+  const canFollowupAll    = canFollowupManage
+    ? await requirePermission(req, 'followup.scope.all_vs_own') : false;
 
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const leadId = typeof body.lead_id === 'string' ? body.lead_id.trim() : '';
@@ -196,8 +200,8 @@ export default async function handler(req, res) {
     const { data: myp } = await supabaseAdmin
       .from('profiles').select('role').eq('id', user.id).maybeSingle();
     const uRole = String(myp?.role || '').toLowerCase();
-    const uAdmin = ADMIN_ROLES.has(uRole) || canFollowupManage;
-    const uSales = uRole === 'sales';
+    const uAdmin = ADMIN_ROLES.has(uRole) || (canFollowupManage && canFollowupAll);
+    const uSales = uRole === 'sales' || (canFollowupManage && !canFollowupAll);
     // Fetch met prev_state; 42703 → kolom ontbreekt (migratie nodig).
     let leadRow;
     {
@@ -316,8 +320,8 @@ export default async function handler(req, res) {
     const { data: myp } = await supabaseAdmin
       .from('profiles').select('role').eq('id', user.id).maybeSingle();
     const rRole = String(myp?.role || '').toLowerCase();
-    const rAdmin = ADMIN_ROLES.has(rRole) || canFollowupManage;
-    const rSales = rRole === 'sales';
+    const rAdmin = ADMIN_ROLES.has(rRole) || (canFollowupManage && canFollowupAll);
+    const rSales = rRole === 'sales' || (canFollowupManage && !canFollowupAll);
     const { data: lRow, error: lErr } = await supabaseAdmin
       .from('follow_up_leads').select('id, owner_id').eq('id', leadId).maybeSingle();
     if (lErr) {
@@ -344,8 +348,8 @@ export default async function handler(req, res) {
     .from('profiles').select('role, is_active').eq('id', user.id).maybeSingle();
   if (mpErr) return res.status(500).json({ error: 'profile lookup: ' + mpErr.message });
   const myRole      = String(myProfile?.role || '').toLowerCase();
-  const isAdmin     = ADMIN_ROLES.has(myRole) || canFollowupManage;
-  const isSales     = myRole === 'sales';
+  const isAdmin     = ADMIN_ROLES.has(myRole) || (canFollowupManage && canFollowupAll);
+  const isSales     = myRole === 'sales' || (canFollowupManage && !canFollowupAll);
 
   // Huidige lead ophalen — nodig voor attempts, lead_kind én owner-check.
   const CORE_COLS = 'id, customer_id, source, lead_name, lead_email, lead_phone, lead_status, terugbel_datum, owner_id, last_contact_at, source_ref, created_at, updated_at';

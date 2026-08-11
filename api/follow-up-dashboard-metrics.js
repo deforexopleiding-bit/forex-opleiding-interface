@@ -37,6 +37,10 @@ export default async function handler(req, res) {
   // zonder de rol te wijzigen.
   const canFollowupManage = (profile && !ALLOWED_ROLES.includes(profile.role))
     ? await requirePermission(req, 'followup.module.access') : false;
+  // Scope volgt followup.scope.all_vs_own: grantee zonder die key ziet alleen
+  // eigen metrics (als sales), mét = alle (als admin/manager).
+  const canFollowupAll = canFollowupManage
+    ? await requirePermission(req, 'followup.scope.all_vs_own') : false;
   if (!profile || (!ALLOWED_ROLES.includes(profile.role) && !canFollowupManage)) {
     return res.status(403).json({ error: 'Geen toegang tot metrics.' });
   }
@@ -47,7 +51,7 @@ export default async function handler(req, res) {
   }
 
   // Sales ziet alleen eigen data; andere rollen zien alles
-  const ownerScope = profile.role === 'sales' ? user.id : null;
+  const ownerScope = (profile.role === 'sales' || (canFollowupManage && !canFollowupAll)) ? user.id : null;
 
   try {
     const metrics = await computeMetrics(supabaseAdmin, { period, ownerScope });

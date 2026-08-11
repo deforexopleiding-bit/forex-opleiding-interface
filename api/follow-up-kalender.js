@@ -32,6 +32,10 @@ export default async function handler(req, res) {
   // zonder de rol te wijzigen.
   const canFollowupManage = (profile && !ALLOWED_ROLES.includes(profile.role))
     ? await requirePermission(req, 'followup.module.access') : false;
+  // Scope volgt followup.scope.all_vs_own: grantee zonder die key ziet alleen
+  // eigen rijen (als sales), mét = alle rijen (als admin/manager).
+  const canFollowupAll = canFollowupManage
+    ? await requirePermission(req, 'followup.scope.all_vs_own') : false;
   if (!profile || (!ALLOWED_ROLES.includes(profile.role) && !canFollowupManage)) {
     return res.status(403).json({ error: 'Onvoldoende rechten' });
   }
@@ -50,7 +54,7 @@ export default async function handler(req, res) {
     .order('scheduled_at');
 
   // Sales: alleen eigen appointments
-  if (profile.role === 'sales') {
+  if (profile.role === 'sales' || (canFollowupManage && !canFollowupAll)) {
     query = query.eq('owner_id', user.id);
   } else if (owner) {
     // Manager+: optionele filter per medewerker
