@@ -5,7 +5,7 @@
 // een échte no-reply-situatie (klant stil, wij ook stil) wel een reminder
 // blijft opleveren. Pure unit-tests op determineStage — geen DB, geen HTTP.
 //
-// Achtergrond: de reminder-tekst zegt "nog geen reactie van mij gekregen".
+// Achtergrond: de reminder-tekst zegt "nog geen reactie van jou gekregen".
 // Als wij intussen wél hebben geantwoord (via inbox-send) is dat onwaar en
 // verwarrend voor de klant. Fix A ontpauzeert de run direct bij een send;
 // deze test dekt fix B als vangnet in de cron zelf.

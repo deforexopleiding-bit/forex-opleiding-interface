@@ -93,7 +93,7 @@ export function buildReminder1Text({ naam, factuur_nr, totaal_bedrag, dagen_over
   const lines = [
     `Hoi ${naam || 'daar'},`,
     ``,
-    `Ik heb je bericht ontvangen maar nog geen reactie van mij gekregen. Kun je me nog laten weten hoe je het wilt oplossen met factuur ${factuur_nr || ''} (${totaal_bedrag || ''}, ${dagen_overdue || 0} dagen te laat)?`,
+    `Ik heb je eerder een bericht gestuurd, maar nog geen reactie van jou gekregen. Kun je me nog laten weten hoe je het wilt oplossen met factuur ${factuur_nr || ''} (${totaal_bedrag || ''}, ${dagen_overdue || 0} dagen te laat)?`,
     ``,
     `Groet,`,
     `Joost — De Forex Opleiding`,
@@ -127,7 +127,7 @@ export async function isWithin24hWindow(supabase, convId) {
  * `convLastOutboundAt` (optioneel — FIX B no-reply-bug): tijdstip van laatste
  * outbound-bericht van ons in deze conv. Op count=0: als lastOutboundMs >
  * lastInboundMs → wij hebben al geantwoord op de klant → geen r1-reminder
- * (die zou onterecht zijn — de reminder-tekst zegt "nog geen reactie van mij"
+ * (die zou onterecht zijn — de reminder-tekst zegt "nog geen reactie van jou"
  * terwijl er WEL gereageerd is). Fix A ontpauzeert de run bij een succesvolle
  * outbound-send al, deze check is het vangnet voor:
  *   - runs die vóór fix A gepauzeerd waren (backlog)
