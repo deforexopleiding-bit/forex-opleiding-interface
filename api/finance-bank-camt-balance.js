@@ -143,6 +143,39 @@ export default async function handler(req, res) {
       .from('camt_statements')
       .select('id', { count: 'exact', head: true });
 
+    // Debug-mode: ?debug=1 → dump raw DB-data + processing-detail voor
+    // diagnose (ronde-5c). Alleen toegankelijk voor rol met
+    // finance.bank.balance_view; niet gevoelig want alleen slotsaldos.
+    const debugMode = String(req.query?.debug || '') === '1';
+    const debugPayload = debugMode ? {
+      _debug: {
+        bank_accounts: (accts || []).map(a => ({ iban: a.iban, iban_normalized: normalizeIban(a.iban) })),
+        filter_on_active: filterOnActive,
+        active_ibans_set: Array.from(activeIbansSet),
+        camt_statements_raw: stmts.slice(0, 50).map(s => ({
+          id: s.id,
+          file_name: s.file_name,
+          account_iban: s.account_iban,
+          account_iban_normalized: normalizeIban(s.account_iban),
+          closing_balance_cents: s.closing_balance_cents,
+          closing_balance_eur: (Number(s.closing_balance_cents) || 0) / 100,
+          statement_to: s.statement_to,
+          uploaded_at: s.uploaded_at,
+          in_active_set: !s.account_iban ? '(no IBAN)' : (filterOnActive ? activeIbansSet.has(normalizeIban(s.account_iban)) : '(no filter)'),
+        })),
+        chosen_per_iban: Array.from(byIban.entries()).map(([iban, r]) => ({
+          iban,
+          statement_id: r.id,
+          file_name: r.file_name,
+          statement_to: r.statement_to,
+          closing_balance_cents: r.closing_balance_cents,
+          closing_balance_eur: (Number(r.closing_balance_cents) || 0) / 100,
+        })),
+        total_cents: totalCents,
+        total_eur: totalCents / 100,
+      },
+    } : {};
+
     return res.status(200).json({
       balance_cents:         totalCents,
       as_of_date:            asOfDate,
@@ -154,6 +187,7 @@ export default async function handler(req, res) {
       num_accounts:          perAccount.length,
       num_accounts_ignored:  ignoredCount,
       per_account:           perAccount,
+      ...debugPayload,
     });
   } catch (e) {
     console.error('[finance-bank-camt-balance]', e.message);
