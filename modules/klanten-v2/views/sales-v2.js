@@ -74,17 +74,12 @@
   const dstr = (iso) => { if (!iso) return '—'; try { const d = new Date(iso); return d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return '—'; } };
   const num  = (n) => n == null ? '—' : new Intl.NumberFormat('nl-NL').format(n);
 
-  // Preview-mode badge (vervangt VOORBEELD-banner nu er live data is).
-  function previewHeader(label, extra) {
-    const err = extra?.error ? `<span class="prev-badge-err">${extra.error}</span>` : '';
-    const loading = extra?.loading ? `<span class="prev-badge-load">${svg(I.clock || I.settings)} laden…</span>` : '';
-    return `<div class="prev-badge">
-      <span class="prev-badge-dot"></span>
-      <b>PREVIEW · live data</b>
-      <span class="prev-badge-lbl">${label}</span>
-      ${loading}${err}
-    </div>`;
-  }
+  // Preview-mode badge — VERWIJDERD (per user-verzoek 2026-08-11).
+  // Signature/return-shape behouden als lege string zodat alle 5 call-sites
+  // in dit bestand (Dashboard/Offertes/Offerte-detail/Retentie/
+  // Verkoopprestaties) blijven werken zonder aanpassing. Error-/loading-
+  // state is elders zichtbaar (per-tab "Laden…" placeholders + toast).
+  function previewHeader(_label, _extra) { return ''; }
 
   const OST_TO_PILL = {
     draft:     ['neutral', 'Concept'],

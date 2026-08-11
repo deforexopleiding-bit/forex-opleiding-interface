@@ -66,16 +66,12 @@
   const num  = (n) => n == null ? '—' : new Intl.NumberFormat('nl-NL').format(n);
   const esc  = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-  function previewHeader(label, state) {
-    const err = state?.error ? `<span class="prev-badge-err">${esc(state.error)}</span>` : '';
-    const loading = state?.loading ? `<span class="prev-badge-load">${svg(I.clock || I.settings)} laden…</span>` : '';
-    return `<div class="prev-badge">
-      <span class="prev-badge-dot"></span>
-      <b>PREVIEW · live data</b>
-      <span class="prev-badge-lbl">${label}</span>
-      ${loading}${err}
-    </div>`;
-  }
+  // Preview-mode badge — VERWIJDERD (per user-verzoek 2026-08-11).
+  // Signature behouden als lege string zodat alle call-sites in dit
+  // bestand (Actief/Gearchiveerd/Lead-detail) blijven werken zonder
+  // aanpassing. Error-/loading-state elders zichtbaar (per-tab
+  // "Laden…" + toast).
+  function previewHeader(_label, _state) { return ''; }
 
   const STATUS_TO_PILL = {
     nieuw:     ['info',    'Nieuw'],
