@@ -531,7 +531,20 @@
     window.DFO.render();
   }
 
+  // Row-click: hele rij klikbaar → v2 factuur-detail in-shell.
+  window.__finInvRowClick = (i) => {
+    const v = (_inv.data && _inv.data.items && _inv.data.items[i]) || null;
+    if (v && v.id && typeof window.__fnInvOpen === 'function') window.__fnInvOpen(v.id);
+  };
+  // Expose voor finance-detail-v2 (lookup zonder extra fetch bij factuur-detail).
+  window.__finGetInvById = (id) => (_inv.data?.items || []).find(x => String(x.id) === String(id)) || null;
+
   function invoicesView() {
+    // In-shell factuur-detail: als URL invoice_id, delegeer aan finance-detail-v2.
+    try {
+      const iid = new URLSearchParams(location.search).get('invoice_id');
+      if (iid && typeof window.__fnRenderInv === 'function') return window.__fnRenderInv(iid);
+    } catch (_) { /* fall through */ }
     const st = F('fin-inv-st', 'all');
     if (!_inv.loading && (!_inv.data || _inv.params !== invoicesParams())) queueMicrotask(fetchInvoices);
     const items = _inv.data?.items || [];
@@ -562,7 +575,7 @@
         items.map(v => {
           const [c, l] = INV_STATUS_TO_PILL[v.display_status] || INV_STATUS_TO_PILL[v.status] || ['neutral', v.display_status || v.status || '—'];
           return [
-            `<a href="javascript:__finInvOpen('${v.tl_invoice_id || v.id}')" class="sv-off-nr">${v.invoice_number || ('#' + String(v.id || '').slice(0, 8))}</a>`,
+            `<span class="sv-off-nr">${v.invoice_number || ('#' + String(v.id || '').slice(0, 8))}</span>`,
             `<div class="cell-main-wrap"><div class="av av-sm">${H.av(v.customer_name || '?')}</div><span class="cell-main">${v.customer_name || '—'}</span></div>`,
             `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(v.issue_date)}</span>`,
             `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(v.due_date)}</span>`,
@@ -570,7 +583,8 @@
             `<span class="mono ${(v.amount_open || 0) > 0 ? 'strong' : ''}">${eur(v.amount_open)}</span>`,
             H.pill(c, l),
           ];
-        })
+        }),
+        '__finInvRowClick'
       )}
       ${fnPager(_inv, total, fetchInvoices)}
       ${!items.length && !_inv.loading ? `<div class="sv-empty">${_inv.error || 'Geen facturen met deze filters.'}</div>` : ''}
@@ -646,7 +660,29 @@
     return perTerm;
   }
 
+  // Row-click: hele rij klikbaar → v2 abonnement-detail in-shell.
+  window.__finSubRowClick = (i) => {
+    // 'items' hier is post-filter/sort; we passeren de index van de gefilterde
+    // lijst, dus lookup gebeurt via de index-in-view. subsView re-berekent
+    // items uit _sub.data + filter/search; simpelste: gebruik id-string
+    // via een sidechannel-cache. Fallback: eerste hit met id-match.
+    const shownItems = window.__finSubShown || [];
+    const s = shownItems[i] || null;
+    if (s && s.id && typeof window.__fnSubOpen === 'function') window.__fnSubOpen(s.id);
+  };
+  // Expose per-id lookup voor finance-detail-v2 (skipt de fetch als lijst
+  // al geladen is).
+  window.__finGetSubById = (id) => {
+    const all = _sub.data?.items || [];
+    return all.find(x => String(x.id) === String(id)) || null;
+  };
+
   function subsView() {
+    // In-shell abonnement-detail: als URL subscription_id, delegeer aan finance-detail-v2.
+    try {
+      const sid = new URLSearchParams(location.search).get('subscription_id');
+      if (sid && typeof window.__fnRenderSub === 'function') return window.__fnRenderSub(sid);
+    } catch (_) { /* fall through */ }
     const st = F('fin-sub-st', 'active');
     if (!_sub.loading && (!_sub.data || _sub.params !== subsParams())) queueMicrotask(fetchSubs);
     let items = (_sub.data?.items || []).slice();
@@ -716,6 +752,7 @@
         </div>`,
       ])}
       ${fnPager(_sub, total, fetchSubs)}
+      ${(() => { window.__finSubShown = items; return ''; })()}
       ${H.table(
         [{ l: 'Klant' }, { l: 'Beschrijving', cls: 'optional' }, { l: 'Entiteit', cls: 'optional' }, { l: 'Per termijn', cls: 'r' }, { l: 'Maand incl.', cls: 'r' }, { l: 'Start', cls: 'r optional' }, { l: 'Eind', cls: 'r optional' }, { l: 'Status' }],
         items.map(s => {
@@ -733,7 +770,8 @@
             `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(s.end_date)}</span>`,
             H.pill(c, l),
           ];
-        })
+        }),
+        '__finSubRowClick'
       )}
       ${fnPager(_sub, total, fetchSubs)}
       ${!items.length && !_sub.loading ? `<div class="sv-empty">${_sub.error || 'Geen abonnementen met deze filter.'}</div>` : ''}`;
