@@ -128,15 +128,73 @@
     )}`;
   }
 
+  /* ── Ronde 5 (Pipeline PR): view-toggle Lijst ↔ Pipeline (Kanban) ────
+     Genereert een chip-toggle bovenaan elke tab. In pipeline-mode wordt
+     één kanban gerendered ipv de status-tab-filtered lijst. Statussen
+     matchen VALID_STATUSES uit api/tickets.js (open/in_progress/resolved/
+     closed) + de layout-only 'wacht'/'afgehandeld'-buckets uit deze
+     voorbeeld-data. Drag&drop-onMove muteert de lokale TICKETS-array +
+     re-rendert. Bij live-data (na tickets-ronde-4 merge) wordt onMove een
+     PATCH /api/ticket-detail?id=X call. */
+  const TICKET_KANBAN_STATUSES = [
+    { key: 'open',        label: 'Open',            color: 'rose'    },
+    { key: 'wacht',       label: 'Wacht op klant',  color: 'amber'   },
+    { key: 'afgehandeld', label: 'Afgehandeld',     color: 'emerald' },
+  ];
+  if (window.KV_V2 && window.KV_V2.kanban) {
+    window.KV_V2.kanban.register('tickets', {
+      statuses: TICKET_KANBAN_STATUSES,
+      getItems: () => TICKETS,
+      statusOf: (t) => t.status,
+      itemId: (t) => t.nr,
+      renderCard: (t) => `
+        <div class="kv-kanban-card-title">${t.ond}</div>
+        <div class="kv-kanban-card-sub">
+          <span class="mono">${t.nr}</span> · ${t.klant}
+        </div>
+        <div class="kv-kanban-card-foot">
+          ${prioPill(t.prio)}
+          <span style="margin-left:auto">${t.toegewezen || '—'}</span>
+        </div>`,
+      onMove: async (id, newStatus) => {
+        const t = TICKETS.find(x => x.nr === id);
+        if (t) t.status = newStatus;
+        // Layout-only branch: geen echte PATCH. Zodra tickets-live gemerged is
+        // wordt hier: await KV.authedFetch('/api/ticket-detail?id='+id, {
+        //   method:'PATCH', body: JSON.stringify({status: newStatus}) })
+      },
+    });
+  }
+  function ticketsViewToggle() {
+    const cur = F('tk-view', 'list');
+    return `<div style="padding:0 20px;margin-top:14px"><div class="kv-viewtoggle">
+      <button class="${cur === 'list' ? 'on' : ''}" onclick="DFO.setF('tk-view','list')">${svg(I.list || I.doc)} Lijst</button>
+      <button class="${cur === 'kanban' ? 'on' : ''}" onclick="DFO.setF('tk-view','kanban')">${svg(I.grid || I.settings)} Pipeline</button>
+    </div></div>`;
+  }
+  function ticketsKanbanView() {
+    return `${H.voorbeeldBanner()}
+      ${ticketsViewToggle()}
+      ${window.KV_V2.kanban ? window.KV_V2.kanban.html('tickets') : '<div class="sv-empty">Kanban laden…</div>'}`;
+  }
+  // Wrap views: als toggle op 'kanban' staat → render kanban, anders origineel.
+  const _origOpen = ticketsOpenView, _origWait = ticketsWachtView, _origDone = ticketsAfgehandeldView;
+  function wrapView(orig) {
+    return function () {
+      if (F('tk-view', 'list') === 'kanban') return ticketsKanbanView();
+      return ticketsViewToggle() + orig();
+    };
+  }
+
   /* ── Registratie ───────────────────────────────────────────────────── */
-  window.DFO.VIEWS['tickets/Open']            = ticketsOpenView;
-  window.DFO.VIEWS['tickets/Wacht op klant']  = ticketsWachtView;
-  window.DFO.VIEWS['tickets/Afgehandeld']     = ticketsAfgehandeldView;
+  window.DFO.VIEWS['tickets/Open']            = wrapView(_origOpen);
+  window.DFO.VIEWS['tickets/Wacht op klant']  = wrapView(_origWait);
+  window.DFO.VIEWS['tickets/Afgehandeld']     = wrapView(_origDone);
   if (typeof window.KV_V2_ADD === 'function') {
     window.KV_V2_ADD('tickets');
   } else {
     (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('tickets');
   }
 
-  console.debug('[tickets-v2] registered VIEWS[tickets/Open|Wacht op klant|Afgehandeld]');
+  console.debug('[tickets-v2] registered VIEWS[tickets/Open|Wacht op klant|Afgehandeld] + kanban');
 })();

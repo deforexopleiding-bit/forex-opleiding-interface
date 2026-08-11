@@ -2733,3 +2733,54 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
 .sw-save-saved  { color: var(--emerald,#07835A); }
 .sw-save-failed { color: var(--rose,   #C22B3E); font-weight: 600; }
 
+
+/* Kanban ronde 5 — pipeline-view voor Tickets + Takenbeheer.
+   HTML5 drag-and-drop, geen externe lib. Kolommen = statussen, kaarten =
+   items met .kv-kanban-card[draggable=true]. */
+.kv-kanban {
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(240px, 1fr);
+  gap: 12px; padding: 12px 20px 20px;
+  overflow-x: auto; align-items: flex-start;
+  min-height: 60vh;
+}
+.kv-kanban-col {
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px;
+  display: flex; flex-direction: column;
+  min-height: 200px; transition: background .12s, border-color .12s;
+}
+.kv-kanban-col.is-drop-target {
+  background: color-mix(in srgb, var(--kc, var(--brand)) 12%, var(--surface-2));
+  border-color: var(--kc, var(--brand));
+}
+.kv-kanban-col-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px; border-bottom: 1px solid var(--line);
+  font-size: 12.5px; font-weight: 600;
+}
+.kv-kanban-col-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--kc, var(--slate)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--kc, var(--slate)) 18%, transparent); }
+.kv-kanban-col-lbl { flex: 1; color: var(--text-1); }
+.kv-kanban-col-cnt { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11.5px; color: var(--text-3); padding: 2px 8px; background: var(--surface); border-radius: 999px; }
+.kv-kanban-col-body { padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 120px; }
+.kv-kanban-col-empty { font-size: 11.5px; color: var(--text-3); text-align: center; padding: 22px 8px; border: 1px dashed var(--line); border-radius: 8px; }
+.kv-kanban-card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 12px; cursor: grab; user-select: none;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  transition: transform .1s, box-shadow .1s, border-color .1s;
+}
+.kv-kanban-card:hover { border-color: var(--brand); box-shadow: 0 3px 8px rgba(0,0,0,.08); }
+.kv-kanban-card.is-dragging { opacity: .5; cursor: grabbing; }
+.kv-kanban-card:active { cursor: grabbing; }
+.kv-kanban-card-title { font-size: 13.5px; font-weight: 600; color: var(--text-1); margin-bottom: 4px; line-height: 1.35; }
+.kv-kanban-card-sub { font-size: 11.5px; color: var(--text-3); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.kv-kanban-card-foot { display: flex; gap: 6px; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 11px; color: var(--text-3); }
+
+.kv-viewtoggle { display: inline-flex; gap: 4px; padding: 3px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; }
+.kv-viewtoggle button {
+  background: transparent; border: 0; color: var(--text-2);
+  padding: 5px 10px; font-size: 12.5px; border-radius: 6px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.kv-viewtoggle button:hover { color: var(--text-1); }
+.kv-viewtoggle button.on { background: var(--surface); color: var(--text-1); box-shadow: 0 1px 3px rgba(0,0,0,.06); font-weight: 600; }
+
