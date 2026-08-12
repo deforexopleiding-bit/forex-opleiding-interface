@@ -592,20 +592,41 @@
       return;
     }
 
-    // Standaard "Nieuwe offerte"-flow: fetch draft in microtask +
-    // FAIL-SAFE beslisboom. Uitkomsten:
-    //   - draft gevonden          → resume-modal (wizard-body verborgen)
-    //   - geen draft              → blanco wizard
-    //   - fetch-fout / exception  → blanco wizard (draft genegeerd)
-    //   - fetch-timeout (>4s)     → blanco wizard (draft genegeerd)
-    // Elk pad zet checking=false + rendert. finally-blok garandeert dat
-    // de checking-shell NOOIT permanent blijft hangen, ongeacht wat er
-    // in _swLoadDraft gebeurt.
+    // Standaard "Nieuwe offerte"-flow: DRIE-LAAGSE FAIL-SAFE.
+    //
+    // Laag 1 — schedule draft-check MICROTASK VÓÓR sync renderWizard().
+    //   Vorige bug: als sync renderWizard() throwde (bv. wizardModal →
+    //   renderStep1 crash op default state), werd de queueMicrotask
+    //   hieronder nooit bereikt → checking-shell hangde permanent.
+    //   Fix: schedule FIRST — dan is 'ie hoe dan ook gepland.
+    //
+    // Laag 2 — WATCHDOG setTimeout(5s). Los van de 4s Promise.race, een
+    //   absolute noodrem: na 5s HOE DAN OOK checking uit + wizard-body
+    //   forceren, ongeacht welke vlag/pad nog hangt. Cleared bij normale
+    //   finally-completion.
+    //
+    // Laag 3 — try/catch rond ELKE renderWizard() (in finally + watchdog)
+    //   plus rond de sync render hieronder. Als render throwt, wordt de
+    //   error gelogd maar blijft de rest van de flow werken.
     if (!_sw.entities && !_sw.entitiesLoading) queueMicrotask(loadEntities);
     _sw.resumeModal = { open: false, draft: null, checking: true };
     _swLog && _swLog('draft-checking:start');
-    ensureRoot().classList.add('is-open');
-    renderWizard();
+
+    // ── Laag 2 — watchdog. Cleared door de finally als die eerder klaar is.
+    const watchdogId = setTimeout(() => {
+      const stuckOn = {
+        'resumeModal.checking': !!_sw.resumeModal.checking,
+        'resumeModal.open':     !!_sw.resumeModal.open,
+        '_sw.open':             !!_sw.open,
+      };
+      _sw.resumeModal = { open: false, draft: null, checking: false };
+      _swLog && _swLog('draft-checking:watchdog-fired', { stuckOn });
+      console.warn('[sw-v2] draft-check watchdog fired na 5s — stuckOn:', stuckOn);
+      try { if (_sw.open) renderWizard(); } catch (e) { console.warn('[sw-v2] watchdog render fail:', e?.message); }
+    }, 5000);
+    _sw._draftCheckWatchdog = watchdogId;
+
+    // ── Laag 1 — schedule microtask VÓÓR sync render.
     queueMicrotask(async () => {
       let outcome = 'unknown';
       try {
@@ -627,13 +648,39 @@
         outcome = isTimeout ? 'draft-timeout' : 'draft-error';
         console.warn('[sw-v2] draft-check', outcome, e?.message || e);
       } finally {
-        // ALTIJD checking uit + render — anders blijft hideBody op true
-        // en zit user vast in "Concept controleren…"-shell.
-        if (_sw.resumeModal.checking) _sw.resumeModal.checking = false;
+        // Clear watchdog — de finally is als eerste klaar.
+        if (_sw._draftCheckWatchdog) { clearTimeout(_sw._draftCheckWatchdog); _sw._draftCheckWatchdog = null; }
+        // Vlaggen op safe-state (redundant maar expliciet — vangt eventuele
+        // andere mutaties in de try-body op).
+        if (_sw.resumeModal && _sw.resumeModal.checking) _sw.resumeModal.checking = false;
         _swLog && _swLog('draft-checking:end', { outcome });
-        if (_sw.open) renderWizard();
+        // Laag 3 — render is best-effort; als 'ie throwt, blijft de user
+        // niet permanent in checking-shell hangen (watchdog is al gecleared
+        // hier, maar we vangen throw af zodat andere fallback-paden nog
+        // kunnen). We herstellen de checking-vlag óók terug op false zodat
+        // de eerstvolgende externe render (bv. door user-actie) de body toont.
+        if (_sw.open) {
+          try { renderWizard(); }
+          catch (e) {
+            console.warn('[sw-v2] draft-check finally render throw:', e?.message);
+            // Force check-uit desnoods via een 2e queueMicrotask.
+            queueMicrotask(() => { try { renderWizard(); } catch (_) {} });
+          }
+        }
       }
     });
+
+    // Sync render van checking-shell. Wrapped omdat als deze throwt, we
+    // toch nog een wizard-body willen tonen (watchdog + microtask draaien
+    // al onafhankelijk).
+    try {
+      ensureRoot().classList.add('is-open');
+      renderWizard();
+    } catch (e) {
+      console.warn('[sw-v2] initial checking-render throw:', e?.message);
+      // Force checking uit — watchdog + microtask hebben nog een kans om te renderen.
+      _sw.resumeModal = { open: false, draft: null, checking: false };
+    }
   };
   window.__swClose = () => {
     if (_sw.dirty && !confirm('Er zijn niet-opgeslagen wijzigingen. Wizard sluiten?')) return;
