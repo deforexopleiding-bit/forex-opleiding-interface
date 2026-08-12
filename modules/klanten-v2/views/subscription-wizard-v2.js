@@ -61,6 +61,17 @@
 
   const RESERVATION_FEE_INCL = 100;
 
+  // Vaste "Omschrijving abonnement"-presets (parity-verzoek 2026-08-12).
+  // "— Kies omschrijving —" (waarde = '') is de neutrale default.
+  // "Andere omschrijving…" is een sentinel → toont freetext-input.
+  const DESC_PRESETS = [
+    { v: '',                                    l: '— Kies omschrijving —' },
+    { v: 'Aanbetaling',                         l: 'Aanbetaling' },
+    { v: 'Maandelijkse termijnen',              l: 'Maandelijkse termijnen' },
+    { v: '1-op-1 Begeleiding (6/12/24 maanden)', l: '1-op-1 Begeleiding (6/12/24 maanden)' },
+    { v: 'Membership (12/36 Maanden)',          l: 'Membership (12/36 Maanden)' },
+  ];
+
   // ── Wizard state ────────────────────────────────────────────────────────
   const _sub = {
     open: false,
@@ -320,53 +331,58 @@
   // 2. Split over aanbetaling + termijnen proportioneel per BTW-groep (op basis
   //    van excl-gewicht), zodat de mix bewaard blijft.
   // 3. Fallback naar 1 lege sub als er niets bruikbaar is.
+  // Bewaar RUWE prefill-signalen voor het ?debug=1 panel — Jeffrey ziet
+  // zo exact welke velden uit de offerte-payload gebruikt zijn.
+  const _prefillDebug = { lines: [], choice: null, aanbetaling: null, termijnen: null };
+
   function _linesFromOfferDefault() {
     const lis = asArr(_sub.lineItemsDeal);
     if (!lis.length) return [_newLine()];
+    const factor = 1 - (Number(_sub.deal?.discount_percentage) || 0) / 100;
+    const zeroVat = _sub.deal?.sale_type && _sub.deal.sale_type !== 'domestic';
     return lis.map((l) => {
-      const qty = Number(l.quantity) || 1;
+      const qty  = Number(l.quantity) || 1;
       const unit = Number(l.unit_price) || 0;
-      const excl = round2(unit * qty);
-      const vat = Number(l.vat_percentage);
+      const vatN = Number(l.vat_percentage);
+      const vat  = zeroVat ? 0 : ((vatN != null && !Number.isNaN(vatN)) ? vatN : 21);
+      const rate = vat / 100;
+      const gross = qty * unit;
+      // price_includes_vat → unit is INCL-BTW; server-side rekent dan
+      // excl = gross/(1+rate). Zonder deze flag was unit al excl.
+      const exclBefore = l.price_includes_vat ? gross / (1 + rate) : gross;
+      const excl = round2(exclBefore * factor);
       return _newLine({
         product_id: l.product_id || '',
         description: String(l.description || l.product_name || '').trim() || 'Regel',
         amount: excl,
-        vat_percentage: (vat != null && !Number.isNaN(vat)) ? vat : 21,
+        vat_percentage: vat,
         _lead: 'excl',
       });
     });
   }
-  // Split total-incl proportioneel over vat-groepen; behoudt de mix.
-  function _linesFromOfferSplit(targetIncl) {
-    const lis = asArr(_sub.lineItemsDeal);
-    if (!lis.length || !targetIncl || targetIncl <= 0) return null;
-    // Groepeer excl-som per vat.
-    const groups = new Map(); // vat → excl-sum
-    for (const l of lis) {
-      const qty = Number(l.quantity) || 1;
-      const unit = Number(l.unit_price) || 0;
-      const excl = unit * qty;
-      const vat = Number(l.vat_percentage);
-      const key = (vat != null && !Number.isNaN(vat)) ? vat : 21;
-      groups.set(key, (groups.get(key) || 0) + excl);
-    }
-    const totalInclFromLines = Array.from(groups.entries()).reduce((sum, [vat, excl]) => sum + excl * (1 + vat / 100), 0);
-    if (!totalInclFromLines) return null;
-    // Ratio: hoeveel van de offerte-totaal-incl belandt in dit onderdeel.
-    const ratio = targetIncl / totalInclFromLines;
-    const lines = [];
-    for (const [vat, excl] of groups.entries()) {
-      const inclShare = round2(excl * (1 + vat / 100) * ratio);
-      if (inclShare <= 0) continue;
-      lines.push(_newLine({
-        description: 'Regel (' + vat + '%)',
-        vat_percentage: vat,
+  // ── Vaste 2/3 @ 21% (1-op-1 Begeleiding) + 1/3 @ 9% (E-book) split.
+  // Vervangt de proportionele split die eerder ratio-invariant leek maar
+  // in praktijk €0 gaf zodra offerte-line_items ontbraken of unit_price
+  // niet consistent was. Aanbetaling én termijnen delen deze vaste
+  // regels; alleen omschrijvingen verschillen (kind='aanbetaling' vs '').
+  function _fixedSplitLines(targetIncl, kind) {
+    const incl21 = round2((Number(targetIncl) || 0) * 2 / 3);
+    const incl9  = round2((Number(targetIncl) || 0) * 1 / 3);
+    const suf = kind ? ' (' + kind + ')' : '';
+    return [
+      _newLine({
+        description: '1-op-1 Begeleiding' + suf,
+        vat_percentage: 21,
         _lead: 'incl',
-        amount_incl: inclShare,
-      }));
-    }
-    return lines.length ? lines : null;
+        amount_incl: incl21,
+      }),
+      _newLine({
+        description: 'E-book' + suf,
+        vat_percentage: 9,
+        _lead: 'incl',
+        amount_incl: incl9,
+      }),
+    ];
   }
 
   function _prefillFromDeal() {
@@ -377,45 +393,68 @@
     const tAmt = Number(d.payment_term_amount) || 0;
     const totalIncl = Number(_sub.dealTotals?.incl) || 0;
 
+    // Debug-snapshot van ruwe payload-velden (zichtbaar in ?debug=1 panel).
+    _prefillDebug.lines = asArr(_sub.lineItemsDeal).map((l) => ({
+      description: l.description || l.product_name || null,
+      quantity: l.quantity, unit_price: l.unit_price,
+      vat_percentage: l.vat_percentage,
+      price_includes_vat: !!l.price_includes_vat,
+      product_id: l.product_id || null,
+    }));
+    _prefillDebug.aanbetaling = dp;
+    _prefillDebug.termijnen   = { count: tc, amount_per_termijn: tAmt };
+    _prefillDebug.totalIncl   = totalIncl;
+    _prefillDebug.discount    = Number(d.discount_percentage) || 0;
+    _prefillDebug.sale_type   = d.sale_type || 'domestic';
+
     if (dp > 0) {
-      const dpLines = _linesFromOfferSplit(dp) || [_newLine({ description: 'Aanbetaling', vat_percentage: 21, _lead: 'incl', amount_incl: dp })];
+      // VASTE split 2/3 @21% + 1/3 @9%. NIET afgeleid uit offerte-lines
+      // (die kunnen ongelijkelijk zijn); regel-naam = "Aanbetaling",
+      // twee line-items (1-op-1 Begeleiding + E-book) met eigen BTW.
       _sub.subscriptions.push({
         description: 'Aanbetaling',
         term_count: 1,
         start_date: (d.payment_downpayment_date || d.start_date || today).slice(0, 10),
         end_date: '',
-        line_items: dpLines,
+        line_items: _fixedSplitLines(dp, 'aanbetaling'),
       });
+      _prefillDebug.choice = _prefillDebug.choice || 'aanbetaling+termijnen(fixed)';
     }
     if (tc > 0 && tAmt > 0) {
-      const termLines = _linesFromOfferSplit(tAmt) || [_newLine({ description: 'Cursus-termijn', vat_percentage: 21, _lead: 'incl', amount_incl: tAmt })];
+      // Zelfde vaste split per termijn: 2/3 @21% + 1/3 @9%.
       _sub.subscriptions.push({
-        description: 'Termijnen',
+        description: 'Maandelijkse termijnen',
         term_count: tc,
         start_date: (d.payment_term_start_date || d.payment_start_date || d.start_date || today).slice(0, 10),
         end_date: '',
-        line_items: termLines,
+        line_items: _fixedSplitLines(tAmt, ''),
       });
+      _prefillDebug.choice = _prefillDebug.choice || 'termijnen-only(fixed)';
     }
-    // Geen aanbetaling/termijnen-data, maar wel line-items en totaal:
-    // gebruik line-items 1-op-1 als één abonnement.
+    // Geen aanbetaling/termijnen-data, maar wel line-items:
+    // 1-op-1 mapping vanuit offerte (per regel eigen BTW).
     if (_sub.subscriptions.length === 0 && asArr(_sub.lineItemsDeal).length) {
       _sub.subscriptions.push({
-        description: 'Abonnement',
+        description: '',
         term_count: 1,
         start_date: (d.start_date || today).slice(0, 10),
         end_date: '',
         line_items: _linesFromOfferDefault(),
       });
+      _prefillDebug.choice = 'default(1-op-1 vanuit offerte-lines)';
     }
     if (_sub.subscriptions.length === 0) {
       _addBlankSub();
+      _prefillDebug.choice = 'leeg (geen offerte-data bruikbaar)';
     }
     // Zorg dat elke line-actuele amount_incl heeft (bij lead=excl).
     for (const s of _sub.subscriptions) for (const l of asArr(s.line_items)) _recalcLine(l);
     _recomputeEnds();
-    // Onbenutte totalIncl voor eventuele UI-hint; niet blocking.
-    if (!totalIncl) console.debug('[subw-v2] geen totals.incl in deal-detail — prefill wisselend precies');
+
+    console.debug('[subw-v2] prefill-choice:', _prefillDebug.choice, {
+      dp, tc, tAmt, totalIncl, discount: _prefillDebug.discount,
+      lineCount: _prefillDebug.lines.length,
+    });
   }
 
   // ── Validation ─────────────────────────────────────────────────────────
@@ -488,6 +527,27 @@
       l[field] = val;
     }
   };
+  // Omschrijving-preset dropdown-handler: __custom__ → freetext-input tonen;
+  // andere waarde → description direct zetten en text-input verbergen.
+  window.__subwSetDesc = (subI, val) => {
+    const s = _sub.subscriptions[subI]; if (!s) return;
+    if (val === '__custom__') {
+      s._customDesc = true;
+      // Leeg maken; user typt zelf. Structurele re-render nodig om input te tonen.
+      s.description = '';
+      _rerender();
+      // Focus freetext-input na volgende paint.
+      queueMicrotask(() => {
+        const el = document.querySelector(`[data-subw-sub-desc="${subI}"]`);
+        if (el) el.focus();
+      });
+    } else {
+      s._customDesc = false;
+      s.description = val || '';
+      _rerender(); // structureel: freetext-input verbergen als 'ie zichtbaar was
+    }
+  };
+
   // TRAJECT-preset: prefill sub-description vanuit traject + variant.
   window.__subwPickTraject = (subI, comboValue) => {
     const s = _sub.subscriptions[subI]; if (!s) return;
@@ -646,7 +706,8 @@
           <div class="kv-onb-meta-row"><span>Aanbetaling</span><span>${d.payment_downpayment_amount ? eur(d.payment_downpayment_amount) : '—'}</span></div>
           <div class="kv-onb-meta-row"><span>Termijnen</span><span>${d.payment_term_count ? (d.payment_term_count + '× ' + eur(d.payment_term_amount)) : '—'}</span></div>
         </div>
-        <p class="kv-onb-hint">Prefill neemt BTW-mix (21% / 9%) 1-op-1 over uit de offerte-regels. Aanpassen kan in stap 2.</p>
+        <p class="kv-onb-hint">Prefill: aanbetaling én termijnen krijgen een vaste 2/3 @ 21% + 1/3 @ 9% split (1-op-1 Begeleiding + E-book). Geen aanbetaling/termijnen? Dan 1-op-1 vanuit offerte-regels met eigen BTW per product. Aanpassen kan in stap 2.</p>
+        ${_renderDebugPanel()}
       </div>`;
     }
     // ── Standalone ──
@@ -679,6 +740,35 @@
       `}
     </div>`;
   }
+  // Debug-panel — alleen zichtbaar met ?debug=1 in de URL. Toont de RUWE
+  // waarden uit de offerte-payload zodat Jeffrey kan zien wat er is
+  // gelezen (payment_downpayment_amount, payment_term_*, discount %, line-
+  // items met quantity/unit_price/vat/price_includes_vat) en welke prefill-
+  // route is gekozen (aanbetaling+termijnen(fixed) / termijnen-only /
+  // default 1-op-1 / leeg).
+  function _renderDebugPanel() {
+    let on = false;
+    try { on = new URLSearchParams(location.search).get('debug') === '1'; } catch (_) {}
+    if (!on) return '';
+    const dbg = _prefillDebug;
+    const rows = (dbg.lines || []).map((l, i) =>
+      `<tr><td>${i}</td><td>${esc(l.description || '—')}</td><td class="mono">${l.quantity ?? '—'}</td><td class="mono">${l.unit_price ?? '—'}</td><td class="mono">${l.vat_percentage ?? '—'}%</td><td>${l.price_includes_vat ? 'incl' : 'excl'}</td></tr>`
+    ).join('');
+    return `
+      <div style="margin-top:14px;padding:12px 14px;background:var(--surface-2,#F5F8FB);border:1px dashed var(--line,#E5EAEF);border-radius:8px;font-size:12px;">
+        <div style="font-weight:600;color:var(--text-1,#111721);margin-bottom:8px">🔧 Debug — ruwe prefill-signalen (?debug=1)</div>
+        <div class="mono" style="line-height:1.6;color:var(--text-2)">
+          prefill-route: <b>${esc(dbg.choice || '—')}</b><br>
+          aanbetaling: <b>€${(dbg.aanbetaling ?? 0).toFixed(2)}</b> · termijnen: <b>${dbg.termijnen?.count ?? 0}× €${(dbg.termijnen?.amount_per_termijn ?? 0).toFixed(2)}</b><br>
+          totals.incl (server): <b>€${(dbg.totalIncl ?? 0).toFixed(2)}</b> · discount: <b>${(dbg.discount ?? 0)}%</b> · sale_type: <b>${esc(dbg.sale_type || '—')}</b>
+        </div>
+        ${rows ? `<table style="width:100%;margin-top:8px;font-size:11.5px;border-collapse:collapse">
+          <thead><tr style="border-bottom:1px solid var(--line)"><th style="text-align:left">#</th><th style="text-align:left">description</th><th>qty</th><th>unit_price</th><th>vat%</th><th>lead</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>` : '<div style="margin-top:8px;color:var(--text-3)">Geen line-items in offerte-payload.</div>'}
+      </div>`;
+  }
+
   // Offerte-picker (standalone): 0/1/N open offertes van deze klant.
   function _renderOfferPicker() {
     if (_sub.offerPickerLoading) return `<div class="kv-onb-hint" style="margin-top:14px">Openstaande offertes van deze klant laden…</div>`;
@@ -731,10 +821,19 @@
 
   function _renderSubCard(s, i) {
     const canRemove = _sub.subscriptions.length > 1;
-    // TRAJECT-preset: kies traject+variant om description te prefillen.
-    // Wordt genegeerd als leeg — omschrijving blijft handmatig-editbaar.
+    // ── Vaste "Omschrijving abonnement"-dropdown (parity-verzoek 2026-08-12).
+    // Prefill vanuit offerte zet _al_ "Aanbetaling" / "Maandelijkse termijnen";
+    // deze select laat de gebruiker per abonnement een preset kiezen of
+    // "Andere omschrijving…" openen voor freetext.
+    const presetVals = DESC_PRESETS.map((p) => p.v);
+    const isCustom = !!s._customDesc || (!!s.description && !presetVals.includes(s.description));
+    const selectValue = isCustom ? '__custom__' : (presetVals.includes(s.description) ? s.description : '');
+    const presetOpts = DESC_PRESETS.map((p) =>
+      `<option value="${esc(p.v)}" ${selectValue === p.v ? 'selected' : ''}>${esc(p.l)}</option>`
+    ).join('') + `<option value="__custom__" ${selectValue === '__custom__' ? 'selected' : ''}>Andere omschrijving…</option>`;
+    // TRAJECT-preset: kies traject+variant om description te prefillen (optioneel).
     const trajOpts = _sub.trajecten.length
-      ? ['<option value="">— Geen preset (custom) —</option>']
+      ? ['<option value="">— Geen traject-preset —</option>']
         .concat(_sub.trajecten.flatMap((t, ti) => {
           if (!t) return [];
           const vs = asArr(t.variants).filter((v) => v && v.is_active !== false);
@@ -743,8 +842,13 @@
         })).join('')
       : '';
     return `<div class="subw-sub-card">
-      <div class="subw-sub-head">
-        <input class="ib-input" style="flex:1" placeholder="Omschrijving (bv. Aanbetaling, Termijnen)" value="${esc(s.description)}" oninput="__subwSubField(${i}, 'description', this.value)" data-subw-sub-desc="${i}">
+      <div class="subw-sub-head" style="align-items:flex-start;gap:8px">
+        <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+          <select class="ib-input" onchange="__subwSetDesc(${i}, this.value)" data-subw-sub-desc-select="${i}">
+            ${presetOpts}
+          </select>
+          <input class="ib-input" style="display:${isCustom ? 'block' : 'none'}" placeholder="Typ eigen omschrijving…" value="${esc(isCustom ? s.description : '')}" oninput="__subwSubField(${i}, 'description', this.value)" data-subw-sub-desc="${i}">
+        </div>
         ${canRemove ? `<button class="ds-icon-btn" onclick="__subwRemoveSub(${i})" title="Verwijder abonnement">×</button>` : ''}
       </div>
       ${trajOpts ? `<div class="sw-field" style="margin-bottom:8px;">
