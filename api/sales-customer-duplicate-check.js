@@ -32,7 +32,7 @@ export default async function handler(req, res) {
   try {
     const { data, error } = await supabaseAdmin
       .from('customers')
-      .select('id, is_company, company_name, first_name, last_name, email, phone, created_at, archived_at')
+      .select('id, is_company, company_name, kvk_number, vat_number, first_name, last_name, email, phone, date_of_birth, address_street, address_number, address_postal, address_city, address_country, created_at, archived_at')
       .or(filters.join(','))
       .is('archived_at', null)
       .limit(20);
@@ -58,6 +58,21 @@ export default async function handler(req, res) {
         name: customerDisplayName(c),
         email: c.email,
         phone: c.phone,
+        // NAW-velden voor "Gebruik deze klant" prefill in de v2-wizard.
+        // Klein aantal extra velden; blijven onder de <20 rows-limiet zonder
+        // performance-impact.
+        is_company:      !!c.is_company,
+        company_name:    c.company_name || null,
+        kvk_number:      c.kvk_number || null,
+        vat_number:      c.vat_number || null,
+        first_name:      c.first_name || null,
+        last_name:       c.last_name || null,
+        date_of_birth:   c.date_of_birth || null,
+        address_street:  c.address_street || null,
+        address_number:  c.address_number || null,
+        address_postal:  c.address_postal || null,
+        address_city:    c.address_city || null,
+        address_country: c.address_country || null,
         deals_count: deals.length,
         last_deal_at: deals[0]?.created_at || null,
         last_deal_status: deals[0]?.status || null,

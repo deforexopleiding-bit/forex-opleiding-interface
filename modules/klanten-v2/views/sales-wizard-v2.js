@@ -147,7 +147,41 @@
     if (!resp.ok) { console.warn('[sw-v2] post fail:', label, '→', json?.error || resp.status); throw new Error((json && (json.error || json.message)) || 'HTTP ' + resp.status); }
     return json;
   }
-  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+  // ── Debug-log (?debug=1) ─────────────────────────────────────────────
+  // Jeffrey heeft geen devtools — daarom on-page log-panel dat de laatste
+  // events toont. Zichtbaar als de URL ?debug=1 bevat. Elk log-entry heeft
+  // timestamp + korte label + payload. Renderd onderaan de wizard-modal.
+  const _sw_dbg = { on: false, entries: [] };
+  try { _sw_dbg.on = new URLSearchParams(location.search).get('debug') === '1'; } catch (_) {}
+  function _swLog(label, payload) {
+    if (!_sw_dbg.on) return;
+    const t = new Date().toISOString().slice(11, 23);
+    _sw_dbg.entries.push({ t, label, payload: payload === undefined ? null : payload });
+    if (_sw_dbg.entries.length > 40) _sw_dbg.entries.splice(0, _sw_dbg.entries.length - 40);
+    // Real-time update van het debug-blok zonder full re-render.
+    const box = document.getElementById('sw-dbg-body');
+    if (box) box.innerHTML = _renderDbgBodyHtml();
+  }
+  function _renderDbgBodyHtml() {
+    return _sw_dbg.entries.slice().reverse().map((e) => {
+      const pl = e.payload == null ? '' : (typeof e.payload === 'string' ? e.payload : (() => { try { return JSON.stringify(e.payload); } catch (_) { return String(e.payload); } })());
+      return `<div style="font-family:'IBM Plex Mono',monospace;font-size:11px;line-height:1.45;border-bottom:1px dashed rgba(255,255,255,.08);padding:3px 0"><span style="color:#7aa5cc">${e.t}</span> <b>${esc(e.label)}</b>${pl ? ' <span style="color:#c8d1dd">' + esc(pl.length > 200 ? pl.slice(0, 200) + '…' : pl) + '</span>' : ''}</div>`;
+    }).join('');
+  }
+  function _renderDbgPanel() {
+    if (!_sw_dbg.on) return '';
+    return `<div id="sw-dbg" style="position:fixed;left:12px;bottom:12px;width:520px;max-height:36vh;overflow:auto;background:rgba(11,17,24,.95);color:#e6ecf3;border:1px solid #2a3746;border-radius:8px;padding:8px 10px;z-index:9999;box-shadow:0 12px 32px rgba(0,0,0,.5)">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <b style="color:#8ac6ff;font-size:12px">🔧 sales-wizard debug</b>
+        <span style="color:#8a95a3;font-size:11px;flex:1">${_sw_dbg.entries.length} events</span>
+        <a href="#" onclick="event.preventDefault();__swDbgClear()" style="color:#8ac6ff;font-size:11px">wissen</a>
+      </div>
+      <div id="sw-dbg-body">${_renderDbgBodyHtml()}</div>
+    </div>`;
+  }
+  window.__swDbgClear = () => { _sw_dbg.entries = []; const b = document.getElementById('sw-dbg-body'); if (b) b.innerHTML = ''; };
   const eur = window.DFO.eur || ((n) => n == null ? '—' : new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(n));
 
   // ── Prefill-lezers (leads → wizard, events → wizard) ────────────────
@@ -247,6 +281,26 @@
     if (!root._swBackdropBound) {
       root._swBackdropBound = true;
       root.addEventListener('click', (e) => { if (e.target === root && _sw.open) window.__swClose(); });
+      // Delegated action-handler voor data-swact-buttons (kwote-veilig,
+      // vervangt de brittle inline onclick="fn('${esc(id)}', ${JSON.stringify(name)…})"
+      // patronen die bij zeldzame quote-combinaties silent stukgingen).
+      root.addEventListener('click', (e) => {
+        const btn = e.target && (e.target.closest ? e.target.closest('[data-swact]') : null);
+        if (!btn) return;
+        const act = btn.getAttribute('data-swact');
+        _swLog('click:' + act, { id: btn.getAttribute('data-swdb-id') || btn.getAttribute('data-swtl-idx') || null });
+        if (act === 'use-db') {
+          const id = btn.getAttribute('data-swdb-id');
+          const m  = (id && _sw.dupModal.dbById && _sw.dupModal.dbById.get(id)) || null;
+          if (!m) { _swLog('use-db: geen match in dbById', id); return; }
+          window.__swUseDbCustomer(m);
+        } else if (act === 'use-tl') {
+          const i = Number(btn.getAttribute('data-swtl-idx'));
+          const m = (Array.isArray(_sw.dupModal.tlMatches) && _sw.dupModal.tlMatches[i]) || null;
+          if (!m) { _swLog('use-tl: geen match op idx', i); return; }
+          window.__swUseTlContact(m);
+        }
+      });
     }
     // Snapshot focus BEFORE innerHTML swap (structural renders zoals stap-
     // wissel of chip-toggle wissen de input-node — cursor gaat weg zonder
@@ -261,7 +315,7 @@
       if (_sw.picker.open)         extras += pickerModalHtml();
       if (_sw.discountModal.open)  extras += discountModalHtml();
       if (_sw.exceptionModal.open) extras += excModalHtml();
-      root.innerHTML = wizardModal() + extras;
+      root.innerHTML = wizardModal() + extras + _renderDbgPanel();
       root.classList.add('is-open');
     } else {
       root.classList.remove('is-open');
@@ -331,12 +385,20 @@
     _sw.dirty = true; renderWizard();
   };
   window.__swSwapCustomer = () => {
-    // Ontkoppel bestaande-klant match — velden blijven zoals ze zijn zodat
-    // sales onmiddellijk kan aanpassen of opnieuw kan zoeken.
+    // Ontkoppel bestaande-klant match + open dup-modal opnieuw. Voorheen
+    // alleen reset — user verwacht dat de zoek-modal weer opent zodat 'ie
+    // direct een andere klant kan pikken. Fallback als email/phone leeg
+    // zijn: dup-modal opent niet automatisch (alert vanuit __swDupCheckOpen).
+    _swLog('swap-customer', { hadId: _sw.matched_customer_id });
     _sw.matched_customer_id = null;
     _sw.existingCustName = null;
     _sw.duplicate_check_status = 'idle';
-    _sw.dirty = true; renderWizard();
+    _sw.dirty = true;
+    renderWizard();
+    // Kick off search-modal wanneer email OF phone al gevuld is.
+    const em = String(_sw.wizard.email || '').trim();
+    const ph = String(_sw.wizard.phone || '').trim();
+    if (em || ph) queueMicrotask(() => window.__swDupCheckOpen());
   };
   // ── Duplicate-check modal (bestaande klant zoeken) ─────────────────
   window.__swDupCheckOpen = async () => {
@@ -360,6 +422,11 @@
       _sw.dupModal.loading = false;
       _sw.dupModal.dbMatches = Array.isArray(dbData?.matches) ? dbData.matches : [];
       _sw.dupModal.tlMatches = Array.isArray(tlData?.tl_matches) ? tlData.tl_matches : [];
+      // Bouw id→match lookup zodat de delegated data-swact click-handler
+      // het volledige object terug kan vinden (inclusief NAW voor prefill).
+      _sw.dupModal.dbById = new Map();
+      for (const m of _sw.dupModal.dbMatches) { if (m && m.id) _sw.dupModal.dbById.set(String(m.id), m); }
+      _swLog('dup-loaded', { db: _sw.dupModal.dbMatches.length, tl: _sw.dupModal.tlMatches.length });
       // Alleen error tonen als beide bronnen faalden.
       if (dbData?.__err && tlData?.__err) {
         _sw.dupModal.error = `Zoek-fouten: DB: ${dbData.__err} · TL: ${tlData.__err}`;
@@ -387,10 +454,34 @@
     _sw.duplicate_check_status = 'completed';
     window.__swDupCheckClose();
   };
-  window.__swUseDbCustomer = (id, name) => {
-    if (!id) return;
-    _sw.matched_customer_id = String(id);
-    _sw.existingCustName = String(name || '—');
+  // Accepteert nu een volledig MATCH-object (id + NAW). Wordt aangeroepen
+  // via de delegated data-swact="use-db" click-handler (id-lookup in
+  // _sw.dupModal.dbById). Ook backwards-compatible met de oude
+  // (id, name) signature — dan wordt alleen id + name gezet zonder NAW.
+  window.__swUseDbCustomer = (mOrId, maybeName) => {
+    const m = (mOrId && typeof mOrId === 'object') ? mOrId : { id: mOrId, name: maybeName };
+    if (!m || !m.id) { _swLog('use-db: geen id', m); return; }
+    _swLog('use-db: prefill', { id: m.id, name: m.name, has_addr: !!m.address_street });
+    _sw.matched_customer_id = String(m.id);
+    _sw.existingCustName = String(m.name || '—');
+    // NAW-prefill uit de dup-check response (extended fields).
+    const w = _sw.wizard;
+    if (m.is_company != null)     w.is_company = !!m.is_company;
+    if (m.company_name)           w.company_name = m.company_name;
+    if (m.kvk_number)             w.kvk_number = m.kvk_number;
+    if (m.vat_number)             w.vat_number = m.vat_number;
+    if (m.first_name)             w.first_name = m.first_name;
+    if (m.last_name)              w.last_name  = m.last_name;
+    if (m.email)                  w.email      = m.email;
+    if (m.phone)                  w.phone      = m.phone;
+    if (m.date_of_birth)          w.date_of_birth = String(m.date_of_birth).slice(0, 10);
+    if (m.address_street)         w.address_street = m.address_street;
+    if (m.address_number)         w.address_number = m.address_number;
+    if (m.address_postal)         w.address_postal = m.address_postal;
+    if (m.address_city)           w.address_city   = m.address_city;
+    if (m.address_country === 'BE' || m.address_country === 'NL') w.address_country = m.address_country;
+    // Adres was al bekend → toon in de UI.
+    if (m.address_street || m.address_city) w.address_known = true;
     _sw.duplicate_check_status = 'completed';
     _sw.dirty = true;
     window.__swDupCheckClose();
@@ -601,20 +692,45 @@
     renderWizard();
   }
   async function applyTrajectVariant(variantId) {
+    _swLog('applyTraject: start', { variantId });
     _sw.wizard.traject_variant_id = variantId || '';
     _sw.dirty = true;
     if (!variantId) { renderWizard(); return; }
-    // v1 doet /api/traject-variants?variant_id=X → { variant, products }.
-    // We vullen wizard.products opnieuw op basis van de variant-samenstelling.
     try {
+      // Zorg dat productsCatalog geladen is VÓÓR we mappen — anders krijgen
+      // alle regels prijs 0 (catalog.find retourneert undefined). Wacht in-
+      // flight fetch af of trigger 'em.
+      if (!_sw.productsCatalog && !_sw.productsLoading) {
+        _swLog('applyTraject: catalog nog niet geladen, trigger loadProductsCatalog');
+        await loadProductsCatalog();
+      } else if (_sw.productsLoading) {
+        _swLog('applyTraject: catalog in-flight, wachten');
+        // Poll tot fetch klaar is (max 5s, tick 100ms).
+        const t0 = Date.now();
+        while (_sw.productsLoading && Date.now() - t0 < 5000) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
+      }
       const catalog = _sw.productsCatalog || [];
+      _swLog('applyTraject: catalog-size', catalog.length);
+      // v1 doet /api/traject-variants?variant_id=X → { variant, products }.
       const data = await tryFetch('traject-variants', '/api/traject-variants?variant_id=' + encodeURIComponent(variantId));
-      const vps = Array.isArray(data?.products) ? data.products : [];
-      _sw.wizard.products = vps.map(vp => {
-        const p = catalog.find(x => x && x.id === vp.product_id) || {};
+      _swLog('applyTraject: fetch-return', {
+        got: !!data,
+        variant: data?.variant ? { id: data.variant.id, dur: data.variant.default_duration_months } : null,
+        productsCount: Array.isArray(data?.products) ? data.products.length : null,
+      });
+      if (!data) { alert('Traject-variant laden mislukte (geen respons).'); return; }
+      const vps = Array.isArray(data.products) ? data.products : [];
+      if (!vps.length) {
+        _swLog('applyTraject: LEEG — geen traject_variant_products voor deze variant', { variantId });
+        alert('Deze traject-variant heeft (nog) geen gekoppelde producten in de database. Voeg ze toe via de admin/traject-editor.');
+      }
+      _sw.wizard.products = vps.map((vp) => {
+        const p = catalog.find((x) => x && x.id === vp.product_id) || {};
         return {
           product_id: vp.product_id,
-          product_name: p.name || 'Product',
+          product_name: p.name || ('Product ' + String(vp.product_id).slice(0, 6)),
           quantity: Number(vp.quantity) || 1,
           price_per_unit: Number(p.default_price) || 0,
           vat_percentage: p.vat_percentage ?? 21,
@@ -624,7 +740,12 @@
       if (data?.variant?.default_duration_months) {
         _sw.wizard.duration_months = Number(data.variant.default_duration_months);
       }
+      _swLog('applyTraject: prefill klaar', {
+        products: _sw.wizard.products.length,
+        duration: _sw.wizard.duration_months,
+      });
     } catch (e) {
+      _swLog('applyTraject: EXCEPTION', e?.message || String(e));
       alert('Traject laden mislukt: ' + (e?.message || 'onbekende fout'));
     }
     renderWizard();
@@ -1323,7 +1444,7 @@
                 ${m.last_deal_at ? `<span class="pill pill-neutral">Laatste: ${new Date(m.last_deal_at).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short' })}</span>` : ''}
               </div>
               <div class="sw-dup-card-acts">
-                <button class="btn btn-primary" onclick="__swUseDbCustomer('${esc(m.id)}', ${JSON.stringify(String(m.name || '')).replace(/"/g, '&quot;')})">Gebruik deze klant</button>
+                <button type="button" class="btn btn-primary" data-swact="use-db" data-swdb-id="${esc(m.id)}">Gebruik deze klant</button>
               </div>
             </div>
           `).join('')}
@@ -1337,7 +1458,7 @@
               <div class="sw-dup-card-meta">${esc(m.email || 'Email niet in TL')}${m.phone ? ' · ' + esc(m.phone) : ' · —'}</div>
               ${m.address ? `<div class="sw-dup-card-meta" style="color:var(--text-3)">${esc(m.address)}</div>` : ''}
               <div class="sw-dup-card-acts">
-                <button class="btn" onclick="__swUseTlContact(${JSON.stringify(JSON.stringify(m)).replace(/"/g, '&quot;')})">Gebruik dit contact</button>
+                <button type="button" class="btn" data-swact="use-tl" data-swtl-idx="${i}">Gebruik dit contact</button>
               </div>
             </div>
           `).join('')}
