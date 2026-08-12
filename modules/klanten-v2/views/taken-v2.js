@@ -303,10 +303,18 @@
     return 'mine';
   }
   function _allTakenItems() {
-    // Voor kanban tonen we alle taken uit de actieve tab. Voor "Afgerond"
-    // filteren we niet — de kanban toont alle 3 kolommen ongeacht tab-filter.
+    // Tab-aware filter:
+    //   - "Mijn taken" / "Toegewezen door mij" → toon alleen niet-afgeronde
+    //     taken. Afgeronde items horen in het Afgerond-archief, niet in het
+    //     actieve bord. Bij drag naar "Klaar"-kolom → onMove zet status →
+    //     refetch → item verdwijnt uit de actieve kanban en verschijnt in
+    //     Afgerond.
+    //   - "Afgerond" → toon alleen done-items.
     const scope = currentScope();
-    return asArr(_live[scope] && _live[scope].taken);
+    const list = asArr(_live[scope] && _live[scope].taken);
+    const tab = window.DFO && window.DFO.S && window.DFO.S.tab;
+    if (tab === 'Afgerond') return list.filter((t) => t.status === 'done');
+    return list.filter((t) => t.status !== 'done');
   }
   if (window.KV_V2 && window.KV_V2.kanban) {
     window.KV_V2.kanban.register('taken', {
@@ -383,8 +391,12 @@
     wireSearch('taken:mine');
     const st = _live.mine;
     if (!st.taken && !st.loading) queueMicrotask(() => fetchScope('mine'));
+    // `all` blijft raw (nodig voor KPI-strip die zelf open+afgerond telt).
+    // `open` = alleen niet-afgeronde taken → dat is wat de lijst toont.
+    // Afgeronde taken verhuizen naar de "Afgerond"-tab (archief).
     const all = asArr(st.taken);
-    const rows = sortRows(filterBySearch(all, 'taken:mine'), F('tk-sort', 'created'));
+    const open = all.filter((t) => t.status !== 'done');
+    const rows = sortRows(filterBySearch(open, 'taken:mine'), F('tk-sort', 'created'));
     _rowsForClick.mine = rows;
     return `
       ${kpisMijn(all)}
@@ -398,8 +410,10 @@
     wireSearch('taken:byMe');
     const st = _live.byMe;
     if (!st.taken && !st.loading) queueMicrotask(() => fetchScope('byMe'));
+    // Zie mijnView: raw voor KPI, gefilterd voor lijst.
     const all = asArr(st.taken);
-    const rows = sortRows(filterBySearch(all, 'taken:byMe'), F('tk-sort', 'created'));
+    const open = all.filter((t) => t.status !== 'done');
+    const rows = sortRows(filterBySearch(open, 'taken:byMe'), F('tk-sort', 'created'));
     _rowsForClick.byMe = rows;
     return `
       ${kpisByMe(all)}
