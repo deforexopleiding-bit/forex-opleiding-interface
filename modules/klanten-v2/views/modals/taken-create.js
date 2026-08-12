@@ -17,6 +17,14 @@
 //   waardes 1-op-1).
 // Categorie: Sales/Onboarding/Mentoring/Finance/Klant/Marketing/Intern/Overige.
 //
+// Create-mode extensie (2026-08-12): CC + bijlagen als pending-lists.
+// Na succesvolle task-create wordt task.id gebruikt voor:
+//   - POST /api/taken-watchers per CC-item (best-effort, fail-soft)
+//   - Storage-upload + POST /api/taken-attachments per file
+//   - POST /api/taken-attachments per URL (external_url)
+// Edit-mode toont deze secties NIET — CC/bijlagen beheer je in detail-modal
+// (geen dubbele beheer-UI).
+//
 // Beschermde-zone: nul aanraking.
 
 const K = () => window.KV;
@@ -34,6 +42,27 @@ const PRIORITEITEN = ['Urgent', 'Hoog', 'Normaal', 'Laag'];
 const STAFF_ROLES = new Set(['super_admin', 'manager', 'sales', 'mentor', 'marketing']);
 function isStaff(member) {
   return STAFF_ROLES.has(String(member?.role || '').toLowerCase());
+}
+
+// Attachments (post-create pending → upload/link)
+const ATTACH_BUCKET  = 'taken-attachments';
+const ATTACH_MAX_MB  = 10;
+function cleanFilename(name) {
+  const dot = name.lastIndexOf('.');
+  const base = (dot >= 0 ? name.slice(0, dot) : name).toLowerCase()
+    .normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'bijlage';
+  const ext = dot >= 0 ? name.slice(dot).toLowerCase().replace(/[^a-z0-9.]/g, '') : '';
+  return base.slice(0, 80) + ext.slice(0, 10);
+}
+function isValidHttpUrl(u) {
+  if (!u || typeof u !== 'string') return false;
+  try { const p = new URL(u.trim()); return p.protocol === 'http:' || p.protocol === 'https:'; }
+  catch { return false; }
+}
+function detectEmbedDomain(url) {
+  try { return new URL(String(url).trim()).hostname.replace(/^www\./, ''); }
+  catch { return ''; }
 }
 
 let state = null;
@@ -78,6 +107,14 @@ function initState({ task, mode, onSuccess } = {}) {
     globalError: null,
     saving: false,
     onSuccess: onSuccess || null,
+    // Pending CC/bijlagen (alleen relevant in create-mode; edit-mode toont
+    // deze secties niet — beheer daarvan gebeurt in de detail-modal).
+    pendingCC:    [],   // [{id, name, email}]
+    pendingFiles: [],   // File[]
+    pendingUrls:  [],   // [{url, domain}]
+    urlDraft: '',
+    ccSelect: '',       // huidige select-value (voor render-consistency)
+    postSavePhase: null, // 'watchers' | 'uploads' | 'urls' | null (voor UX-hint)
   };
 }
 
@@ -148,16 +185,113 @@ function renderBody() {
         <label>Gekoppeld aan e-mail</label>
         <div style="font-size:12.5px; color: var(--text-2, #586374); padding: 6px 10px; background: var(--surface-2, #F2F4F7); border-radius: 6px;">${esc(f.emailSubject)}</div>
       </div>` : ''}
+
+      ${state.mode === 'create' ? renderCCSection() + renderAttachSection() : `
+        <div class="kv-edit-hint" style="margin-top:8px">
+          CC en bijlagen beheer je in de detail-modal (open de taak na opslaan).
+        </div>
+      `}
     </form>`;
 }
 
+// ── CC-picker (create-mode alleen) ────────────────────────────────────────
+function renderCCSection() {
+  const cc = state.pendingCC;
+  const opts = state.membersLoading
+    ? '<option value="">Laden…</option>'
+    : ['<option value="">— Kies persoon —</option>']
+        .concat(
+          state.members
+            .filter((m) => !cc.some((c) => c.id === m.id) && m.id !== state.form.assignedToId)
+            .map((m) => `<option value="${esc(m.id)}">${esc(m.full_name || m.email || m.id.slice(0, 8))}</option>`)
+        )
+        .join('');
+  return `
+    <div class="kv-td-section" style="margin-top:14px">
+      <div class="kv-td-section-title">CC <span style="color:var(--text-3); font-weight:400;">· kijkt mee (${cc.length})</span></div>
+      ${cc.length ? `<div class="kv-td-watchers">
+        ${cc.map((c, i) => `
+          <div class="kv-td-watcher-row">
+            <span>${esc(c.name || c.email || '#' + String(c.id).slice(0, 6))}</span>
+            <button type="button" class="ds-icon-btn kv-td-watcher-del" data-kv-tc-cc-del="${i}" title="Verwijderen">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+        `).join('')}
+      </div>` : ''}
+      <div class="kv-td-watcher-add">
+        <select class="ib-input" data-kv-tc-cc-select>${opts}</select>
+        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-tc-cc-add>Toevoegen</button>
+      </div>
+    </div>`;
+}
+
+// ── Bijlagen: files + URLs (create-mode alleen) ───────────────────────────
+function renderAttachSection() {
+  const files = state.pendingFiles;
+  const urls  = state.pendingUrls;
+  return `
+    <div class="kv-td-section" style="margin-top:14px">
+      <div class="kv-td-section-title">Bijlagen <span style="color:var(--text-3); font-weight:400;">(${files.length + urls.length})</span></div>
+
+      ${files.length ? `<div class="tk-att-pending-list" style="margin-bottom:8px">
+        ${files.map((f, i) => `
+          <div class="tk-att-pending-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span class="tk-att-pending-name" title="${esc(f.name)}">${esc(f.name)}</span>
+            <span class="tk-att-pending-size">${(f.size / 1024 < 1024) ? (Math.round(f.size / 1024) + ' KB') : ((f.size / 1024 / 1024).toFixed(1) + ' MB')}</span>
+            <button type="button" class="ds-icon-btn" data-kv-tc-file-del="${i}" title="Verwijder">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+        `).join('')}
+      </div>` : ''}
+
+      ${urls.length ? `<div class="tk-att-links" style="margin-bottom:8px">
+        ${urls.map((u, i) => `
+          <div class="tk-att-link-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            <span class="tk-att-link-url" title="${esc(u.url)}">${esc(u.url)}</span>
+            ${u.domain ? `<span class="tk-att-file-mime">${esc(u.domain)}</span>` : ''}
+            <button type="button" class="ds-icon-btn" data-kv-tc-url-del="${i}" title="Verwijder">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+        `).join('')}
+      </div>` : ''}
+
+      <label class="tk-att-picker" style="display:inline-block; margin-right:8px;">
+        <input type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp" data-kv-tc-file-input style="display:none">
+        <span class="ds-btn ds-btn-ghost ds-btn-sm">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Bestand toevoegen
+        </span>
+      </label>
+      <div class="tk-att-link-add">
+        <input class="ib-input" type="url" placeholder="Plak YouTube / Vimeo / Loom / Drive-link…" value="${esc(state.urlDraft)}" data-kv-tc-url-input>
+        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-tc-url-add>URL toevoegen</button>
+      </div>
+      <div class="tk-att-hint">
+        Alleen afbeeldingen (PNG/JPG/GIF/WEBP) direct uploaden, max ${ATTACH_MAX_MB} MB.
+        Video's / documenten via URL. Bijlagen + CC worden na aanmaken automatisch aan de taak gekoppeld.
+      </div>
+    </div>`;
+}
+
 function renderFoot() {
+  let label;
+  if (state.saving) {
+    if      (state.postSavePhase === 'watchers') label = 'CC koppelen…';
+    else if (state.postSavePhase === 'uploads')  label = 'Bijlagen uploaden…';
+    else if (state.postSavePhase === 'urls')     label = 'Links koppelen…';
+    else                                          label = 'Opslaan…';
+  } else {
+    label = state.mode === 'edit' ? 'Wijzigingen opslaan' : 'Taak aanmaken';
+  }
   return `
     <div class="kv-edit-foot">
       <button type="button" class="ds-btn ds-btn-ghost" data-kv-tc-close ${state.saving ? 'disabled' : ''}>Annuleren</button>
-      <button type="button" class="ds-btn ds-btn-primary" data-kv-tc-submit ${state.saving ? 'disabled' : ''}>
-        ${state.saving ? 'Opslaan…' : (state.mode === 'edit' ? 'Wijzigingen opslaan' : 'Taak aanmaken')}
-      </button>
+      <button type="button" class="ds-btn ds-btn-primary" data-kv-tc-submit ${state.saving ? 'disabled' : ''}>${esc(label)}</button>
     </div>`;
 }
 
@@ -216,12 +350,85 @@ async function doSave() {
       method: 'POST',
       body: JSON.stringify({ task }),
     });
-    K().toast(state.mode === 'edit' ? 'Taak bijgewerkt' : 'Taak aangemaakt');
+
+    // Post-create: pending CC + bijlagen koppelen aan de nieuwe taak.
+    // Alleen in create-mode; edit gaat niet door deze tak (CC/bijlagen
+    // beheer je in de detail-modal). Best-effort: één falend item mag
+    // de rest niet blokkeren; failure-count in de eind-toast.
+    let failCount = 0;
+    if (state.mode === 'create') {
+      const taskId = task.id;
+
+      // 1) Watchers (CC)
+      if (state.pendingCC.length) {
+        state.postSavePhase = 'watchers';
+        rerender();
+        for (const cc of state.pendingCC) {
+          try {
+            await K().authedJson('/api/taken-watchers', {
+              method: 'POST',
+              body: JSON.stringify({ task_id: taskId, profile_id: cc.id }),
+            });
+          } catch (e) { failCount++; console.warn('[taken-create] watcher fail:', e?.message); }
+        }
+      }
+
+      // 2) File uploads → Storage bucket 'taken-attachments' + attachment-row
+      if (state.pendingFiles.length && window.supabase?.storage) {
+        state.postSavePhase = 'uploads';
+        rerender();
+        let userId = null;
+        try {
+          const { data } = await window.supabase.auth.getUser();
+          userId = data?.user?.id || null;
+        } catch (_) { /* fail-soft */ }
+
+        for (const file of state.pendingFiles) {
+          try {
+            if (!userId) throw new Error('Auth-fout bij upload');
+            const path = `${userId}/${taskId}/${Date.now()}-${cleanFilename(file.name || 'bijlage')}`;
+            const { error: upErr } = await window.supabase.storage
+              .from(ATTACH_BUCKET)
+              .upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+            if (upErr) throw new Error('Storage: ' + upErr.message);
+            await K().authedJson('/api/taken-attachments', {
+              method: 'POST',
+              body: JSON.stringify({
+                task_id: taskId,
+                storage_path: path,
+                filename: file.name || null,
+                mime_type: file.type || null,
+              }),
+            });
+          } catch (e) { failCount++; console.warn('[taken-create] upload fail:', e?.message); }
+        }
+      }
+
+      // 3) URL-attachments (external_url)
+      if (state.pendingUrls.length) {
+        state.postSavePhase = 'urls';
+        rerender();
+        for (const u of state.pendingUrls) {
+          try {
+            await K().authedJson('/api/taken-attachments', {
+              method: 'POST',
+              body: JSON.stringify({ task_id: taskId, external_url: u.url }),
+            });
+          } catch (e) { failCount++; console.warn('[taken-create] url fail:', e?.message); }
+        }
+      }
+
+      state.postSavePhase = null;
+    }
+
+    const baseToast = state.mode === 'edit' ? 'Taak bijgewerkt' : 'Taak aangemaakt';
+    K().toast(failCount ? `${baseToast} (${failCount} bijlage/CC-koppeling mislukt)` : baseToast);
     if (typeof state.onSuccess === 'function') state.onSuccess();
     D().closeModal();
   } catch (e) {
     state.globalError = e?.message || 'Opslaan mislukt';
     state.saving = false;
+    state.postSavePhase = null;
     rerender();
   }
 }
@@ -242,6 +449,61 @@ function wire() {
       const k = e.target.getAttribute('data-key');
       if (!k) return;
       state.form[k] = e.target.value;
+    });
+  });
+
+  // CC-picker
+  box.querySelector('[data-kv-tc-cc-add]')?.addEventListener('click', () => {
+    const sel = box.querySelector('[data-kv-tc-cc-select]');
+    const pid = sel && sel.value;
+    if (!pid) return;
+    const m = (state.members || []).find((x) => x.id === pid);
+    if (!m) return;
+    if (state.pendingCC.some((c) => c.id === pid)) return;
+    state.pendingCC.push({ id: m.id, name: m.full_name || m.email || m.id, email: m.email || null });
+    rerender();
+  });
+  box.querySelectorAll('[data-kv-tc-cc-del]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const i = Number(b.getAttribute('data-kv-tc-cc-del'));
+      if (Number.isInteger(i)) { state.pendingCC.splice(i, 1); rerender(); }
+    });
+  });
+
+  // Files
+  box.querySelector('[data-kv-tc-file-input]')?.addEventListener('change', (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    for (const f of files) {
+      if (f.size > ATTACH_MAX_MB * 1024 * 1024) {
+        alert(`Bestand "${f.name}" te groot (max ${ATTACH_MAX_MB} MB) — overgeslagen.`);
+        continue;
+      }
+      state.pendingFiles.push(f);
+    }
+    rerender();
+  });
+  box.querySelectorAll('[data-kv-tc-file-del]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const i = Number(b.getAttribute('data-kv-tc-file-del'));
+      if (Number.isInteger(i)) { state.pendingFiles.splice(i, 1); rerender(); }
+    });
+  });
+
+  // URLs
+  box.querySelector('[data-kv-tc-url-input]')?.addEventListener('input', (e) => { state.urlDraft = e.target.value; });
+  box.querySelector('[data-kv-tc-url-add]')?.addEventListener('click', () => {
+    const raw = String(state.urlDraft || '').trim();
+    if (!raw) return;
+    if (!isValidHttpUrl(raw)) { alert('Ongeldige URL (http:// of https:// vereist).'); return; }
+    state.pendingUrls.push({ url: raw, domain: detectEmbedDomain(raw) });
+    state.urlDraft = '';
+    rerender();
+  });
+  box.querySelectorAll('[data-kv-tc-url-del]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const i = Number(b.getAttribute('data-kv-tc-url-del'));
+      if (Number.isInteger(i)) { state.pendingUrls.splice(i, 1); rerender(); }
     });
   });
 }
