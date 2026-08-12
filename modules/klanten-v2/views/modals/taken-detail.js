@@ -630,16 +630,22 @@ async function deleteTask() {
 }
 
 async function openEdit() {
+  // Bewaar callback naar taken-v2 refetch — state wordt weggegooid zodra
+  // de create-modal DFO.openModal() aanroept (die vervangt de detail-modal
+  // in dezelfde #dfoModal-node, dus init van create-state overschrijft
+  // onze detail-state variabele). We moeten dus vasthouden VOOR de import.
+  const refetch = state.onSuccess;
   try {
     const mod = await import('./taken-create.js');
     mod.openTakenCreateModal({
       task: state.task,
       mode: 'edit',
       onSuccess: () => {
-        // Sluit edit-modal, herlaad detail.
-        if (typeof state.onSuccess === 'function') state.onSuccess();
-        // Herlaad detail met verse data.
-        if (state.task?.id) openTakenDetailModal({ taskId: state.task.id, onSuccess: state.onSuccess });
+        // Bugfix 2026-08-12: eerder werd detail hier opnieuw geopend →
+        // gebruiker klikt Opslaan, edit-modal sluit, en meteen popt de
+        // detail-modal weer op. Ongewenst. Nu: alleen lijst-refetch;
+        // beide modals blijven dicht.
+        if (typeof refetch === 'function') refetch();
       },
     });
   } catch (e) {
