@@ -235,6 +235,10 @@
     // Ronde 4:
     stableSearch, onSearch, getSearchValue, setSearchValue,
     mountedList, setListHTML,
+    // Blootgesteld voor modules met eigen lokale re-render (bv. subw-v2
+    // overlay-root swap) — na innerHTML-swap moeten cached search-inputs
+    // opnieuw geplaatst worden zodat cursor + waarde overleven.
+    hydrateSearchMounts,
   };
   console.debug('[_shared-v2] helpers + stableSearch registered');
 })();
