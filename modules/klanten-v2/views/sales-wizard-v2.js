@@ -328,9 +328,16 @@
   }
 
   // ── Handlers ──────────────────────────────────────────────────────
-  window.__swOpen = () => {
+  window.__swOpen = (opts) => {
     _sw.open = true; _sw.step = 1; _sw.dirty = false;
     readPrefill();
+    // Opts overriden URL-prefill (bv. wanneer sales-v2 preview-aware
+    // opent met een dealId ipv page-reload met ?edit_deal_id=...).
+    if (opts && typeof opts === 'object') {
+      if (opts.editDealId) _sw.editDealId = String(opts.editDealId);
+      if (opts.customerId) _sw.matched_customer_id = String(opts.customerId);
+    }
+    _swLog('open', { editDealId: _sw.editDealId || null, customerId: _sw.matched_customer_id || null });
     // Load entities (Stap 1) + trajecten (Stap 3, lazy)
     if (!_sw.entities && !_sw.entitiesLoading) queueMicrotask(loadEntities);
     renderWizard();
@@ -595,11 +602,31 @@
       }
       // Draft opruimen — v1 r1632.
       try { await tryPost('drafts-del', '/api/sales-wizard-drafts', null, 'DELETE'); } catch (_) {}
-      // Redirect naar offerte-detail — v1 r1636.
+      // Sluiten + preview-aware nav. Zie sales-v2._navSalesPreviewAware
+      // voor het patroon. In preview: geen full-page-navigate — we blijven
+      // in de shell, refetchen de offertes-lijst zodat de nieuwe offerte
+      // zichtbaar wordt, en tonen een toast met de deal-id (v2 offerte-
+      // detail bestaat nog niet in-shell, dus geen automatische open).
+      // Live/dormant: onveranderd redirect naar /modules/offerte-detail.html.
       _sw.open = false; _sw.step = 1; _sw.dirty = false;
       renderWizard();
       if (data?.deal_id) {
-        setTimeout(() => { window.location.href = `/modules/offerte-detail.html?id=${encodeURIComponent(data.deal_id)}`; }, 700);
+        const preview = (typeof window.__svIsSalesPreview === 'function') && window.__svIsSalesPreview();
+        const oldUrl  = '/modules/offerte-detail.html?id=' + encodeURIComponent(data.deal_id);
+        _swLog('nav:after-submit', { preview, deal_id: data.deal_id });
+        if (preview) {
+          // In-shell: refetch offertes-lijst + toast met deal-id.
+          try { if (typeof window.__svRefetchOffertes === 'function') window.__svRefetchOffertes(); } catch (_) {}
+          setTimeout(() => {
+            try {
+              window.KV?.toast?.(
+                `Offerte aangemaakt (id: ${String(data.deal_id).slice(0, 8)}…) — v2 offerte-detail nog niet in shell, zie lijst.`
+              );
+            } catch (_) {}
+          }, 500);
+        } else {
+          setTimeout(() => { window.location.href = oldUrl; }, 700);
+        }
       }
     } catch (e) {
       _sw.submitting = false; renderWizard();

@@ -241,35 +241,68 @@
   }
 
   // ── OFFERTES ─────────────────────────────────────────────────────────────
-  // Preview-detect: als de URL `?v2preview=sales` bevat, is de gebruiker
-  // bezig met QA op de v2-wizard. De primary "Nieuwe offerte"-knop opent
-  // dan de in-shell v2-modal (via __swOpen). Zonder preview-flag valt 'ie
-  // terug op de bestaande live redirect naar modules/sales-wizard.html
-  // zodat productie-flow ongewijzigd blijft (dormant, V2_ACTIVE_ALLOWLIST
-  // niet aangeraakt).
-  function _isSalesPreview() {
+  // Preview-aware navigatie: één helper voor ALLE cross-page redirects
+  // vanuit de v2-sales-flow. In ?v2preview=sales-modus vraagt 'ie eerst
+  // de in-shell v2-variant (tryInShell()) — als die het overneemt (returnt
+  // true), skippen we de oude redirect. Anders val terug op de bestaande
+  // legacy URL zodat live/dormant productie-gedrag ONGEWIJZIGD blijft
+  // (V2_ACTIVE_ALLOWLIST niet aangeraakt).
+  //
+  // Beslissing wordt gelogd in het ?debug=1 panel (via window.__swLog)
+  // zodat Jeffrey zonder devtools kan zien welk pad genomen is.
+  window.__svIsSalesPreview = () => {
     try {
       const raw = new URLSearchParams(location.search).get('v2preview') || '';
       return raw.split(',').map((s) => s.trim()).includes('sales');
     } catch (_) { return false; }
+  };
+  function _navSalesPreviewAware(label, oldUrl, tryInShell) {
+    const preview = window.__svIsSalesPreview();
+    let handled = false;
+    if (preview && typeof tryInShell === 'function') {
+      try { handled = !!tryInShell(); }
+      catch (e) { console.warn('[sales-v2] in-shell handler threw:', e?.message); handled = false; }
+    }
+    try {
+      if (typeof window.__swLog === 'function') {
+        window.__swLog('nav:' + label, { preview, handled, oldUrl });
+      }
+    } catch (_) {}
+    if (handled) return;
+    window.location.href = oldUrl;
   }
   window.__svOfferteNew = () => {
-    const preview = _isSalesPreview();
-    const canOpen = typeof window.__swOpen === 'function';
-    // Log de gekozen route in het ?debug=1 panel (als sales-wizard-v2's
-    // logger geladen is) zodat Jeffrey de beslissing kan zien.
-    try { if (typeof window.__swLog === 'function') window.__swLog('route:new-offerte', { preview, canOpen }); } catch (_) {}
-    if (preview && canOpen) { window.__swOpen(); return; }
-    window.location.href = '/modules/sales-wizard.html';
+    _navSalesPreviewAware('new-offerte', '/modules/sales-wizard.html', () => {
+      if (typeof window.__swOpen !== 'function') return false;
+      window.__swOpen();
+      return true;
+    });
   };
   // Batch 2 — expliciete v2-wizard entry (naast de primary knop). Blijft
   // bestaan zodat Jeffrey óók zonder preview-flag de v2-modal kan openen.
   window.__svOfferteNewV2 = () => {
-    try { if (typeof window.__swLog === 'function') window.__swLog('route:new-offerte-v2', { canOpen: typeof window.__swOpen === 'function' }); } catch (_) {}
+    try { if (typeof window.__swLog === 'function') window.__swLog('nav:new-offerte-v2', { canOpen: typeof window.__swOpen === 'function' }); } catch (_) {}
     if (typeof window.__swOpen === 'function') window.__swOpen();
     else window.location.href = '/modules/sales-wizard.html';
   };
-  window.__svOfferteOpen = (dealId) => { if (dealId) window.location.href = '/modules/sales-wizard.html?edit_deal_id=' + encodeURIComponent(dealId); };
+  window.__svOfferteOpen = (dealId) => {
+    if (!dealId) return;
+    _navSalesPreviewAware('open-offerte', '/modules/sales-wizard.html?edit_deal_id=' + encodeURIComponent(dealId), () => {
+      // Preview-modus: open v2-wizard in edit-modus door dezelfde deal-id
+      // door te geven. __swOpen({editDealId}) accepteert nu opts.
+      if (typeof window.__swOpen !== 'function') return false;
+      window.__swOpen({ editDealId: String(dealId) });
+      return true;
+    });
+  };
+  // Refetch-hook voor de wizard: na submit in preview-modus roept de
+  // wizard deze aan om de nieuwe offerte in de lijst zichtbaar te krijgen
+  // zonder full-page-navigate.
+  window.__svRefetchOffertes = () => {
+    _off.data = null;
+    _off.params = '';
+    queueMicrotask(fetchOffertes);
+  };
 
   function offertesParams() {
     const status = F('sv-off-st', 'all');
