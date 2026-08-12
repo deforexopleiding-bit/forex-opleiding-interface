@@ -57,6 +57,10 @@ function initState({ task, mode, onSuccess } = {}) {
   state = {
     mode: isEdit ? 'edit' : 'create',
     taskId: isEdit ? task.id : null,
+    // Bewaar de originele task voor edit — status/aangemaakt/notities moeten
+    // 1-op-1 mee in de EDIT-payload om te voorkomen dat server-toRow-defaults
+    // ('todo' / now() / '') de bestaande waarden overschrijven.
+    original: isEdit ? task : null,
     form: {
       titel:         task?.titel || '',
       omschrijving:  task?.omschrijving || '',
@@ -188,9 +192,15 @@ async function doSave() {
   // Server /api/taken (POST { task }) verwacht ALTIJD task.id — er is geen
   // create-zonder-id-pad (zie api/taken.js:366 "task.id vereist"). Nieuwe
   // taken krijgen dus een client-side uuid v4. Bij edit hergebruikt hij de
-  // bestaande id (state.taskId).
+  // bestaande id + we sturen status/aangemaakt/notities mee zodat
+  // server-toRow-defaults die niet destructief overschrijven.
   if (state.mode === 'edit') {
     task.id = state.taskId;
+    const orig = state.original || {};
+    task.status       = orig.status || 'todo';
+    task.aangemaakt   = orig.aangemaakt || null;
+    task.notities     = orig.notities != null ? orig.notities : '';
+    task.afgerondOp   = orig.afgerond_op || null;
   } else {
     task.id = (window.crypto && crypto.randomUUID)
       ? crypto.randomUUID()

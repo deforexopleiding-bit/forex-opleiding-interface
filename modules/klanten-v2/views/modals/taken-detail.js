@@ -427,9 +427,29 @@ async function saveNotities() {
   state.savingNotities = true;
   rerender();
   try {
+    // KRITIEK: server toRow zet defaults ('todo', now(), '') voor niet-
+    // meegestuurde velden. Alleen {id, notities} sturen zou titel/status/
+    // aangemaakt/etc destructief overschrijven bij UPSERT. Stuur alle
+    // bestaande task-velden mee zodat server geen defaults toepast.
+    const t = state.task;
     await K().authedJson('/api/taken', {
       method: 'POST',
-      body: JSON.stringify({ task: { id: state.task.id, notities: patch || null } }),
+      body: JSON.stringify({ task: {
+        id: t.id,
+        titel: t.titel || '',
+        omschrijving: t.omschrijving || '',
+        prioriteit: t.prioriteit || 'Normaal',
+        categorie: t.categorie || 'Overige',
+        assignedToId: t.assigned_to_id || null,
+        customerId: t.customer_id || null,
+        deadline: t.deadline || null,
+        emailId: t.email_id || null,
+        emailSubject: t.email_subject || null,
+        status: t.status || 'todo',
+        aangemaakt: t.aangemaakt || null,
+        afgerondOp: t.afgerond_op || null,
+        notities: patch || null,
+      }}),
     });
     state.task.notities = patch;
     K().toast('Notities opgeslagen');
