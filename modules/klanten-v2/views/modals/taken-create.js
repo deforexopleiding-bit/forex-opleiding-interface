@@ -174,7 +174,21 @@ async function doSave() {
     emailId: f.emailId || null,
     emailSubject: f.emailSubject || null,
   };
-  if (state.mode === 'edit') task.id = state.taskId;
+  // Server /api/taken (POST { task }) verwacht ALTIJD task.id — er is geen
+  // create-zonder-id-pad (zie api/taken.js:366 "task.id vereist"). Nieuwe
+  // taken krijgen dus een client-side uuid v4. Bij edit hergebruikt hij de
+  // bestaande id (state.taskId).
+  if (state.mode === 'edit') {
+    task.id = state.taskId;
+  } else {
+    task.id = (window.crypto && crypto.randomUUID)
+      ? crypto.randomUUID()
+      // Fallback voor oudere browsers: 8-4-4-4-12 met Math.random.
+      : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+          const r = Math.random() * 16 | 0;
+          return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+        });
+  }
 
   try {
     await K().authedJson('/api/taken', {

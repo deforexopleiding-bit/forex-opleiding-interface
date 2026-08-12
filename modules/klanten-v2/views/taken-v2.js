@@ -35,6 +35,12 @@
   // aanroepen. Onverwachte response-shape → lege lijst i.p.v. TypeError.
   const asArr = (x) => Array.isArray(x) ? x : [];
 
+  // HTML-escape voor tekst-cellen. H.esc bestaat niet als export; lokale
+  // helper met dezelfde 5-char replace als in de andere v2-views.
+  const esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
   // ── State per tab-scope ────────────────────────────────────────────────
   // 'mine' = scope=mine (mijn taken); 'byMe' = scope=assigned_by_me.
   // "Afgerond"-tab herbruikt 'mine'-fetch (filter client-side status=done).
@@ -185,6 +191,11 @@
   }
 
   // ── Table renderer ────────────────────────────────────────────────────
+  // KRITIEK: H.table's 3e arg = onclick(rowIndex) — geeft de INDEX door, niet
+  // de id. Vorige impl. deed `H.table(..., '__takenOpen')` → __takenOpen(0),
+  // __takenOpen(1), … → server "geen taak-id". Fix (mirror van tickets-v2 +
+  // sales-v2): titel-cel is een `<a>` met inline onclick die de echte id
+  // doorgeeft. Geen 3e arg meer.
   function takenTable(rows) {
     const list = asArr(rows);
     if (!list.length) return emptyBlock('Geen taken', 'Er zijn geen taken die aan de huidige filters voldoen.');
@@ -198,14 +209,13 @@
         { l: 'Status', cls: 'optional' },
       ],
       list.map((t) => [
-        `<span class="cell-main">${H.esc ? H.esc(t.titel) : (t.titel || '—')}</span>`,
-        `<span style="color:var(--text-2);font-size:12.5px">${t.categorie || '—'}</span>`,
-        `<span style="font-size:12.5px">${t.assigned_to_name || (t.assigned_to_id ? '#' + String(t.assigned_to_id).slice(0, 6) : '—')}</span>`,
+        `<a href="javascript:void(0)" onclick="__takenOpen('${esc(t.id)}')" class="kv-tk-title">${esc(t.titel) || '—'}</a>`,
+        `<span style="color:var(--text-2);font-size:12.5px">${esc(t.categorie) || '—'}</span>`,
+        `<span style="font-size:12.5px">${esc(t.assigned_to_name) || (t.assigned_to_id ? '#' + String(t.assigned_to_id).slice(0, 6) : '—')}</span>`,
         `<span class="mono" style="color:var(--text-3);font-size:12.5px">${t.deadline ? new Date(t.deadline).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' }) : '—'}</span>`,
         prioPill(t.prioriteit),
         statusPill(t.status),
-      ]),
-      '__takenOpen'
+      ])
     );
   }
 
@@ -409,12 +419,11 @@
         : rows.length ? H.table(
             [{ l: 'Titel' }, { l: 'Categorie', cls: 'optional' }, { l: 'Toegewezen', cls: 'optional' }, { l: 'Afgerond op', cls: 'r' }],
             rows.map((t) => [
-              `<span class="cell-main">${t.titel || '—'}</span>`,
-              `<span style="color:var(--text-2);font-size:12.5px">${t.categorie || '—'}</span>`,
-              `<span style="font-size:12.5px">${t.assigned_to_name || '—'}</span>`,
+              `<a href="javascript:void(0)" onclick="__takenOpen('${esc(t.id)}')" class="kv-tk-title">${esc(t.titel) || '—'}</a>`,
+              `<span style="color:var(--text-2);font-size:12.5px">${esc(t.categorie) || '—'}</span>`,
+              `<span style="font-size:12.5px">${esc(t.assigned_to_name) || '—'}</span>`,
               `<span class="mono" style="color:var(--text-3);font-size:12px">${t.afgerond_op ? new Date(t.afgerond_op).toLocaleString('nl-NL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</span>`,
-            ]),
-            '__takenOpen'
+            ])
           )
         : emptyBlock('Nog niets afgerond', 'Zodra taken op "Klaar" worden gezet verschijnen ze hier.')}`;
   }

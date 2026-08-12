@@ -269,7 +269,8 @@ function renderWatchers() {
         .join('');
   return `
     <div class="kv-td-section">
-      <div class="kv-td-section-title">Watchers / CC <span style="color:var(--text-3); font-weight:400;">(${ws.length})</span></div>
+      <div class="kv-td-section-title">CC · kijkt mee <span style="color:var(--text-3); font-weight:400;">(${ws.length})</span></div>
+      <div style="font-size:11.5px; color:var(--text-3); margin: -4px 0 8px;">Personen die notificaties krijgen bij updates. In v1 heette dit "Watchers".</div>
       ${ws.length ? `<div class="kv-td-watchers">
         ${ws.map((w) => `
           <div class="kv-td-watcher-row">
