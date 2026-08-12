@@ -140,6 +140,40 @@ export function taxRateIdFor(vatPercentage, departmentId, saleType) {
   return id;
 }
 
+// ── Self-heal helpers (Optie B, 2026-08-12) ────────────────────────────
+// TL geeft bij een verwezen-maar-verwijderd contact/company een 400 terug
+// met body "Customer <UUID> not found." (soms met/zonder punt). We
+// detecteren die fout ONgeacht welk TL-endpoint hem gooit (deals.create,
+// quotations.create) zodat we de gecachte tl_contact_id/tl_company_id
+// kunnen wissen + re-resolven.
+function _isTlCustomerNotFound(err) {
+  const msg = String(err?.message || '');
+  // Match "Customer <uuid> not found" of "Customer with id X not found".
+  return /customer[^"]{0,80}not\s+found/i.test(msg);
+}
+// Wis de gecachte TL-id op de klant + optionele stale tl_deal_id op de
+// deal. Muteert ook het in-memory customer/deal-object zodat de caller
+// direct met verse state werkt.
+async function _healStaleTlCache(customer, deal) {
+  const wipeField = customer.is_company ? 'tl_company_id' : 'tl_contact_id';
+  try {
+    await supabaseAdmin.from('customers').update({ [wipeField]: null }).eq('id', customer.id);
+  } catch (e) {
+    console.warn('[tl-quotation] heal: cache-wipe DB-write faalde (fail-soft):', e?.message);
+  }
+  customer[wipeField] = null;
+  // Als er een tl_deal_id op de deal staat, hangt die aan het niet-bestaande
+  // TL-object → ook wissen zodat de retry een verse deal aanmaakt.
+  if (deal && deal.tl_deal_id) {
+    try {
+      await supabaseAdmin.from('deals').update({ tl_deal_id: null }).eq('id', deal.id);
+    } catch (e) {
+      console.warn('[tl-quotation] heal: deal tl_deal_id-wipe faalde (fail-soft):', e?.message);
+    }
+    deal.tl_deal_id = null;
+  }
+}
+
 export async function pushQuotationToTl(dealId) {
   try {
     const tok = await getActiveToken();
@@ -192,11 +226,42 @@ export async function pushQuotationToTl(dealId) {
       || `Offerte ${String(dealId).slice(0, 8)}`;
 
     // 1. Customer (B2C contact of B2B company) + 2. Deal (quotation vereist deal_id).
-    const tlCustomerRef = await getOrCreateTlCustomer(customer);
-    const tlContactId = tlCustomerRef.type === 'contact' ? tlCustomerRef.id : null;
+    //
+    // SELF-HEAL 2026-08-12 (Optie B — geen extra happy-path call):
+    // Als /deals.create een "Customer <UUID> not found"-fout geeft, is de
+    // gecachte tl_contact_id / tl_company_id op de klant-rij verwezen naar
+    // een niet-bestaand TL-object (contact/company in TL verwijderd, oud
+    // sandbox-id, TL-import zonder verify). We wissen dan de cache op
+    // customers.tl_{contact,company}_id + optionele stale tl_deal_id op
+    // deals, re-resolven getOrCreateTlCustomer (maakt vers TL-object), en
+    // retryen createDeal precies één keer. Happy-path met geldige cache
+    // blijft ONGEWIJZIGD (0 extra TL-calls).
+    let tlCustomerRef = await getOrCreateTlCustomer(customer);
+    let tlContactId = tlCustomerRef.type === 'contact' ? tlCustomerRef.id : null;
     let tlDealId = deal.tl_deal_id;
+    let healedTlCache = false;
     if (!tlDealId) {
-      tlDealId = await createDeal(deal, tlCustomerRef, departmentId, title);
+      try {
+        tlDealId = await createDeal(deal, tlCustomerRef, departmentId, title);
+      } catch (e) {
+        if (!_isTlCustomerNotFound(e)) throw e;
+        console.warn('[tl-quotation] auto-heal: TL customer not found in /deals.create — wis cache + retry', {
+          customer_id: customer.id,
+          is_company: !!customer.is_company,
+          stale_tl_contact_id: customer.tl_contact_id || null,
+          stale_tl_company_id: customer.tl_company_id || null,
+          tl_msg: (e?.message || '').slice(0, 200),
+        });
+        await _healStaleTlCache(customer, deal);
+        healedTlCache = true;
+        // Re-resolve na cache-wipe → getOrCreateTlCustomer maakt nu een
+        // vers TL-contact/-company aan (want cached id is null geworden).
+        tlCustomerRef = await getOrCreateTlCustomer(customer);
+        tlContactId = tlCustomerRef.type === 'contact' ? tlCustomerRef.id : null;
+        // Retry — als deze óók faalt met dezelfde error, bubbelt de throw
+        // omhoog (geen infinite loop; healed-flag voorkomt tweede heal).
+        tlDealId = await createDeal(deal, tlCustomerRef, departmentId, title);
+      }
       // KRITIEK: tl_deal_id direct persisteren. Als quotations.create hierna
       // faalt, pakt een retry deze deal op i.p.v. een duplicate aan te maken.
       await supabaseAdmin.from('deals').update({ tl_deal_id: tlDealId }).eq('id', dealId);
