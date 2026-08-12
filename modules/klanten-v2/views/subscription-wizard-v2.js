@@ -130,26 +130,26 @@
     _sub.bypassFee = false;
     _sub.bypassReason = '';
 
-    if (window.DFO?.render) window.DFO.render();
+    _rerender();
     _loadRefData();      // entities + products + trajecten (parallel)
     _loadRbac();
     if (_sub.mode === 'deal') await _loadDealAndPrefill(_sub.dealId);
     else if (opts?.customerId) await _loadCustomerById(opts.customerId);
     else _addBlankSub();
-    if (window.DFO?.render) window.DFO.render();
+    _rerender();
   };
   window.__subwClose = () => {
     if (_sub.submitting) return;
     _sub.open = false;
     _clearUrlSignal();
-    if (window.DFO?.render) window.DFO.render();
+    _rerender();
   };
   window.__subwGoStep = (n) => {
     if (n < 1 || n > 3) return;
     if (n > 1 && !_validateStep(1)) return;
     if (n > 2 && !_validateStep(2)) return;
     _sub.step = n; _sub.globalError = null;
-    if (window.DFO?.render) window.DFO.render();
+    _rerender();
   };
 
   // URL-check bij page-load: ?subw=1 → auto-open
@@ -184,7 +184,7 @@
     _sub.trajecten = asArr(traj?.trajects);
     // Default entity = eerste
     if (!_sub.tl_department_id && _sub.entities.length) _sub.tl_department_id = _sub.entities[0].tl_department_id || '';
-    if (window.DFO?.render) window.DFO.render();
+    _rerender();
   }
   async function _loadRbac() {
     try {
@@ -205,7 +205,7 @@
       _sub.rbacBypass = false;
     }
     _sub.rbacChecked = true;
-    if (window.DFO?.render) window.DFO.render();
+    _rerender();
   }
   async function _loadDealAndPrefill(dealId) {
     const j = await tryFetch('deal-detail', '/api/sales-deal-detail?id=' + encodeURIComponent(dealId));
@@ -230,7 +230,7 @@
     if (_sub.offerPickerCustomerId === customerId && _sub.offerPickerList) return;
     _sub.offerPickerLoading = true;
     _sub.offerPickerCustomerId = customerId;
-    if (window.DFO?.render) window.DFO.render();
+    _rerender();
     const j = await tryFetch('quotations', '/api/sales-quotations?customer_id=' + encodeURIComponent(customerId) + '&page_size=100');
     _sub.offerPickerLoading = false;
     // Alleen relevante offertes: getekend/accepted, geen abonnement gekoppeld, niet-markeerd
@@ -241,7 +241,7 @@
       const busy   = !!q?.has_linked_subscription || !!q?.subscription_marked_done;
       return usable && !busy;
     });
-    if (window.DFO?.render) window.DFO.render();
+    _rerender();
   }
   // Pick offerte in standalone-mode → prefill regels + totalen.
   window.__subwPickOffer = async (dealId) => {
@@ -250,7 +250,7 @@
     _sub.dealId = dealId;
     // Blijf in 'standalone' mode; alleen line-items komen uit deze offerte.
     await _loadDealAndPrefill(dealId);
-    if (window.DFO?.render) window.DFO.render();
+    _rerender();
   };
 
   // ── Prefill helpers ────────────────────────────────────────────────────
@@ -417,21 +417,21 @@
     if (step === 1) {
       if (_sub.mode === 'standalone' && !_sub.customer) {
         _sub.globalError = 'Kies een klant voordat je verdergaat.';
-        if (window.DFO?.render) window.DFO.render();
+        _rerender();
         return false;
       }
     }
     if (step === 2) {
-      if (!_sub.tl_department_id) { _sub.globalError = 'Kies een entiteit.'; if (window.DFO?.render) window.DFO.render(); return false; }
-      if (!_sub.subscriptions.length) { _sub.globalError = 'Voeg minstens één abonnement toe.'; if (window.DFO?.render) window.DFO.render(); return false; }
+      if (!_sub.tl_department_id) { _sub.globalError = 'Kies een entiteit.'; _rerender(); return false; }
+      if (!_sub.subscriptions.length) { _sub.globalError = 'Voeg minstens één abonnement toe.'; _rerender(); return false; }
       for (const s of _sub.subscriptions) {
-        if (!s.description || !s.description.trim()) { _sub.globalError = 'Elk abonnement heeft een omschrijving nodig.'; if (window.DFO?.render) window.DFO.render(); return false; }
-        if (!s.start_date) { _sub.globalError = 'Elk abonnement heeft een startdatum nodig.'; if (window.DFO?.render) window.DFO.render(); return false; }
-        if (new Date(s.start_date) < new Date(new Date().toISOString().slice(0, 10))) { _sub.globalError = 'Startdatum mag niet in het verleden liggen.'; if (window.DFO?.render) window.DFO.render(); return false; }
-        if (!(Number(s.term_count) >= 1)) { _sub.globalError = 'Aantal termijnen moet ≥ 1 zijn.'; if (window.DFO?.render) window.DFO.render(); return false; }
-        if (!s.line_items.length) { _sub.globalError = 'Elke abonnement heeft minstens één regel nodig.'; if (window.DFO?.render) window.DFO.render(); return false; }
+        if (!s.description || !s.description.trim()) { _sub.globalError = 'Elk abonnement heeft een omschrijving nodig.'; _rerender(); return false; }
+        if (!s.start_date) { _sub.globalError = 'Elk abonnement heeft een startdatum nodig.'; _rerender(); return false; }
+        if (new Date(s.start_date) < new Date(new Date().toISOString().slice(0, 10))) { _sub.globalError = 'Startdatum mag niet in het verleden liggen.'; _rerender(); return false; }
+        if (!(Number(s.term_count) >= 1)) { _sub.globalError = 'Aantal termijnen moet ≥ 1 zijn.'; _rerender(); return false; }
+        if (!s.line_items.length) { _sub.globalError = 'Elke abonnement heeft minstens één regel nodig.'; _rerender(); return false; }
         for (const l of s.line_items) {
-          if ((Number(l.amount) || 0) <= 0) { _sub.globalError = 'Regel-bedrag (excl.) moet > 0 zijn.'; if (window.DFO?.render) window.DFO.render(); return false; }
+          if ((Number(l.amount) || 0) <= 0) { _sub.globalError = 'Regel-bedrag (excl.) moet > 0 zijn.'; _rerender(); return false; }
         }
       }
     }
@@ -444,7 +444,7 @@
     if (path === 'sync_to_tl') _sub.sync_to_tl = !!val;
     else _sub[path] = val;
   };
-  window.__subwToggleBypass = (on) => { _sub.bypassFee = !!on; if (window.DFO?.render) window.DFO.render(); };
+  window.__subwToggleBypass = (on) => { _sub.bypassFee = !!on; _rerender(); };
   window.__subwSetBypassReason = (v) => { _sub.bypassReason = String(v || ''); _refreshBypassHint(); };
   window.__subwSubField = (i, field, val) => {
     const s = _sub.subscriptions[i]; if (!s) return;
@@ -495,10 +495,10 @@
     const box = document.querySelector(`[data-subw-sub-desc="${subI}"]`);
     if (box && document.activeElement !== box) box.value = label;
   };
-  window.__subwAddSub = () => { _addBlankSub(); if (window.DFO?.render) window.DFO.render(); };
-  window.__subwRemoveSub = (i) => { if (_sub.subscriptions.length <= 1) return; _sub.subscriptions.splice(i, 1); if (window.DFO?.render) window.DFO.render(); };
-  window.__subwAddLine = (subI) => { const s = _sub.subscriptions[subI]; if (!s) return; s.line_items.push(_newLine()); if (window.DFO?.render) window.DFO.render(); };
-  window.__subwRemoveLine = (subI, lineI) => { const s = _sub.subscriptions[subI]; if (!s) return; if (s.line_items.length <= 1) return; s.line_items.splice(lineI, 1); if (window.DFO?.render) window.DFO.render(); };
+  window.__subwAddSub = () => { _addBlankSub(); _rerender(); };
+  window.__subwRemoveSub = (i) => { if (_sub.subscriptions.length <= 1) return; _sub.subscriptions.splice(i, 1); _rerender(); };
+  window.__subwAddLine = (subI) => { const s = _sub.subscriptions[subI]; if (!s) return; s.line_items.push(_newLine()); _rerender(); };
+  window.__subwRemoveLine = (subI, lineI) => { const s = _sub.subscriptions[subI]; if (!s) return; if (s.line_items.length <= 1) return; s.line_items.splice(lineI, 1); _rerender(); };
 
   // Surgical DOM-updates (behoud cursor)
   function _updateEndInDom(subI, end) {
@@ -528,50 +528,35 @@
   }
 
   // ── Klant-zoeker (standalone) ──────────────────────────────────────────
-  // Cursor-preservering: uncontrolled input. Bij re-render (voor loading/
-  // resultaten) bewaart _mountOverlay de caret-positie via
-  // document.activeElement + selectionStart/End restore.
-  let _searchTimer = null;
-  window.__subwCustSearch = (v) => {
-    // Sla waarde op zonder onmiddellijke re-render (voorkomt caret-jump).
-    _sub.custSearch = String(v || '');
-    if (_searchTimer) clearTimeout(_searchTimer);
-    _searchTimer = setTimeout(async () => {
-      const q = _sub.custSearch.trim();
-      if (q.length < 2) {
-        _sub.custResults = [];
-        // Alleen re-render als er iets zichtbaar te wissen valt.
-        if (window.DFO?.render) window.DFO.render();
-        return;
-      }
-      _sub.custSearching = true; if (window.DFO?.render) window.DFO.render();
-      const j = await tryFetch('cust-search', '/api/sales-customers?search=' + encodeURIComponent(q));
-      _sub.custSearching = false;
-      _sub.custResults = asArr(j?.customers).slice(0, 15);
-      if (window.DFO?.render) window.DFO.render();
-    }, 250);
-  };
+  // De input zelf gebruikt H.stableSearch + H.onSearch (registratie bij
+  // module-init onderaan). De input-DOM-node overleeft renders → geen
+  // cursor-verlies, geen hang. Zoek-callback update alleen de results-slot
+  // (H.setListHTML) — nooit een full re-render.
   window.__subwCustPick = (id) => {
     const c = _sub.custResults.find((x) => x.id === id);
     if (!c) return;
     _sub.customer = c;
     _sub.custResults = [];
-    _sub.custSearch = '';
+    if (H.setSearchValue) H.setSearchValue('subw:cust', '');
+    if (H.setListHTML)    H.setListHTML('subw:cust-results', '');
     if (_sub.subscriptions.length === 0) _addBlankSub();
-    if (window.DFO?.render) window.DFO.render();
+    _rerender(); // structureel: customer-block vervangt zoekveld
   };
-  window.__subwCustClear = () => { _sub.customer = null; if (window.DFO?.render) window.DFO.render(); };
+  window.__subwCustClear = () => {
+    _sub.customer = null;
+    _rerender(); // structureel: zoekveld vervangt customer-block
+  };
 
   // ── Submit ─────────────────────────────────────────────────────────────
   window.__subwSubmit = async (withTL) => {
     if (_sub.submitting) return;
-    if (!_validateStep(2)) { _sub.step = 2; if (window.DFO?.render) window.DFO.render(); return; }
+    if (!_validateStep(2)) { _sub.step = 2; _rerender(); return; }
     if (_sub.bypassFee) {
       const r = (_sub.bypassReason || '').trim();
-      if (r.length < 10) { _sub.globalError = 'Reden voor bypass moet minimaal 10 tekens zijn.'; if (window.DFO?.render) window.DFO.render(); return; }
+      if (r.length < 10) { _sub.globalError = 'Reden voor bypass moet minimaal 10 tekens zijn.'; _rerender(); return; }
     }
     _sub.submitting = true; _sub.globalError = null;
-    if (window.DFO?.render) window.DFO.render();
+    _rerender();
 
     const payload = {
       tl_department_id: _sub.tl_department_id,
@@ -613,7 +598,7 @@
     } catch (e) {
       _sub.submitting = false;
       _sub.globalError = e?.message || 'Aanmaken mislukt';
-      if (window.DFO?.render) window.DFO.render();
+      _rerender();
     }
   };
 
@@ -658,7 +643,6 @@
       </div>`;
     }
     // ── Standalone ──
-    const results = _sub.custResults;
     // Trigger offerte-picker load zodra klant gekozen is.
     if (_sub.customer?.id) queueMicrotask(() => _loadOfferPickerForCustomer(_sub.customer.id));
     return `<div class="sw-step">
@@ -674,15 +658,9 @@
       ` : `
         <div class="sw-field">
           <label>Zoek klant op naam of e-mail</label>
-          <input class="ib-input" type="text" placeholder="Typ minstens 2 tekens…" value="${esc(_sub.custSearch)}" oninput="__subwCustSearch(this.value)" data-subw-cust-search autofocus>
+          ${H.stableSearch('subw:cust', 'Typ minstens 2 tekens…')}
         </div>
-        ${_sub.custSearching ? '<div style="padding:12px; color:var(--text-3); font-style:italic">Zoeken…</div>' : ''}
-        ${results.length ? `<div class="subw-cust-results">
-          ${results.map((c) => `<button type="button" class="subw-cust-hit" onclick="__subwCustPick('${esc(c.id)}')">
-            <div><b>${esc(c.name || (c.first_name + ' ' + (c.last_name || '')))}</b></div>
-            <div style="font-size:11.5px; color:var(--text-3)">${esc(c.email || '—')}${c.phone ? ' · ' + esc(c.phone) : ''}</div>
-          </button>`).join('')}
-        </div>` : (_sub.custSearch.length >= 2 && !_sub.custSearching ? '<div class="kv-onb-empty">Geen klanten gevonden.</div>' : '')}
+        ${H.mountedList('subw:cust-results', '')}
       `}
     </div>`;
   }
@@ -875,61 +853,104 @@
     </div>`;
   }
 
-  // ── Klanten-view wrap (renders wizard-overlay als open) ────────────────
-  // Hook: wrap DFO.render zodat wizard-HTML op #content wordt toegevoegd
-  // wanneer _sub.open is. Analoog aan sales-wizard-v2.
-  const origContent = window.DFO.render;
-  // Er is geen goede plek om te injecteren zonder de host-view te breken.
-  // In plaats daarvan: klanten-v2.js host-view rendert '<div id="kv-view">…</div>'
-  // gevolgd door onze wizard-overlay indien open. We doen dat door de wizard-
-  // HTML aan document.body toe te voegen bij render, en te verwijderen bij close.
-  // Cursor-preservering across re-renders: onthoud het gefocusde element
-  // (via data-subw-cust-search / data-subw-sub-desc / etc.) + caret-positie,
-  // en herstel na innerHTML-swap. Voorkomt de "cursor verspringt bij typen"-
-  // bug die Jeffrey in de v1-wizard had — v2 doet nooit een full state-render
-  // per keystroke, en zelfs bij bewuste re-renders (bv. debounced search)
-  // blijft de focus + caret staan.
-  function _rememberFocus(root) {
-    const a = document.activeElement;
-    if (!a || !root.contains(a)) return null;
-    const info = { start: 0, end: 0, sel: null };
-    if (a.hasAttribute('data-subw-cust-search')) info.sel = '[data-subw-cust-search]';
-    else if (a.hasAttribute('data-subw-sub-desc')) info.sel = `[data-subw-sub-desc="${a.getAttribute('data-subw-sub-desc')}"]`;
-    else if (a.hasAttribute('data-subw-amt')) info.sel = '[data-subw-amt]';
-    else if (a.hasAttribute('data-subw-amtincl')) info.sel = '[data-subw-amtincl]';
-    if (!info.sel) return null;
-    try { info.start = a.selectionStart ?? 0; info.end = a.selectionEnd ?? 0; } catch (_) { /* number inputs throw */ }
-    return info;
-  }
-  function _restoreFocus(root, info) {
-    if (!info || !info.sel) return;
-    const el = root.querySelector(info.sel);
-    if (!el) return;
-    el.focus();
-    try { el.setSelectionRange(info.start, info.end); } catch (_) { /* number input: no-op */ }
-  }
-  function _mountOverlay() {
+  // ── Overlay-mount + LOKALE re-render ───────────────────────────────────
+  //
+  // OFFERTE-WIZARD-PATROON (bewezen, offerte-detail-v2):
+  // De wizard staat op body-niveau in eigen overlay-root div. Interne state-
+  // wijzigingen mogen NOOIT window.DFO.render() triggeren — dat re-rendert
+  // de HOSTED klanten-shell (5000+ regels HTML) en veroorzaakt zichtbare
+  // flikker + cursor-verlies + input-hang.
+  //
+  // In plaats daarvan: alle interne updates roepen _rerender() aan, dat
+  // ALLEEN de overlay-root innerHTML swapt. De _shared-v2 stableSearch-
+  // cache overleeft de swap: cust-search-input blijft dezelfde DOM-node
+  // (via H.hydrateSearchMounts na swap). Element-identiteit = cursor + waarde
+  // bewaard.
+  //
+  // Voor derived velden (regel-totalen, sub-totals, contract-totaal) doen
+  // handlers surgical DOM-updates via data-subw-* attributes zonder swap.
+  function _ensureOverlayRoot() {
     let el = document.getElementById('subw-overlay-root');
     if (!el) {
       el = document.createElement('div');
       el.id = 'subw-overlay-root';
       document.body.appendChild(el);
     }
-    const focusInfo = _rememberFocus(el);
-    el.innerHTML = _sub.open ? renderWizard() : '';
-    if (_sub.open && focusInfo) queueMicrotask(() => _restoreFocus(el, focusInfo));
+    return el;
   }
-  // Hook DFO.render → run overlay mount after original render
-  if (!window.DFO.__subwOverlayHooked) {
-    window.DFO.__subwOverlayHooked = true;
-    const _origRender = window.DFO.render;
-    window.DFO.render = function () {
-      const r = _origRender.apply(this, arguments);
-      queueMicrotask(_mountOverlay);
-      return r;
-    };
-    // Initial mount
-    queueMicrotask(_mountOverlay);
+  // Focus-bewaring voor sub-desc + numerieke bedrag-inputs (data-subw-*).
+  // De cust-search-input wordt door H.hydrateSearchMounts zelf hersteld
+  // (input-node identity via SEARCH_INPUT_CACHE).
+  function _rememberDataFocus(root) {
+    const a = document.activeElement;
+    if (!a || !root.contains(a)) return null;
+    let sel = null;
+    if (a.hasAttribute('data-subw-sub-desc')) sel = `[data-subw-sub-desc="${a.getAttribute('data-subw-sub-desc')}"]`;
+    else if (a.hasAttribute('data-subw-amt')) {
+      const line = a.closest('[data-subw-line]');
+      if (line) sel = `[data-subw-line="${line.getAttribute('data-subw-line')}"] [data-subw-amt]`;
+    } else if (a.hasAttribute('data-subw-amtincl')) {
+      const line = a.closest('[data-subw-line]');
+      if (line) sel = `[data-subw-line="${line.getAttribute('data-subw-line')}"] [data-subw-amtincl]`;
+    }
+    if (!sel) return null;
+    let start = 0, end = 0;
+    try { start = a.selectionStart ?? 0; end = a.selectionEnd ?? 0; } catch (_) { /* number: throws */ }
+    return { sel, start, end };
+  }
+  function _restoreDataFocus(root, info) {
+    if (!info) return;
+    const el = root.querySelector(info.sel);
+    if (!el) return;
+    el.focus();
+    try { el.setSelectionRange(info.start, info.end); } catch (_) { /* noop */ }
+  }
+  // Publiek: interne wizard-rerender (GEEN shell touch).
+  function _rerender() {
+    const el = _ensureOverlayRoot();
+    if (!_sub.open) { el.innerHTML = ''; return; }
+    const dataFocus = _rememberDataFocus(el);
+    el.innerHTML = renderWizard();
+    // Herplaats cached stableSearch-inputs (cust-search) — hun DOM-node
+    // stays alive tussen renders zodat cursor + waarde bewaard blijven.
+    if (typeof H.hydrateSearchMounts === 'function') H.hydrateSearchMounts();
+    if (dataFocus) queueMicrotask(() => _restoreDataFocus(el, dataFocus));
+  }
+  // Registreer stableSearch-handler ÉÉN keer voor cust-picker.
+  if (H.onSearch && !window.__subwOnSearchRegistered) {
+    window.__subwOnSearchRegistered = true;
+    H.onSearch('subw:cust', async (v) => {
+      const q = String(v || '').trim();
+      if (q.length < 2) { _renderCustResults([]); return; }
+      _renderCustResultsLoading();
+      try {
+        const j = await Promise.race([
+          window.KV.authedJson('/api/sales-customers?search=' + encodeURIComponent(q)),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout 8s')), 8000)),
+        ]);
+        _sub.custResults = asArr(j?.customers).slice(0, 15);
+        _renderCustResults(_sub.custResults);
+      } catch (e) {
+        _renderCustResultsError(e?.message || 'onbekende fout');
+      }
+    }, { debounceMs: 300 });
+  }
+  // Surgical result-list updates (via mountedList slot 'subw:cust-results')
+  function _renderCustResultsLoading() {
+    if (H.setListHTML) H.setListHTML('subw:cust-results', '<div style="padding:12px;color:var(--text-3);font-style:italic">Zoeken…</div>');
+  }
+  function _renderCustResultsError(msg) {
+    if (H.setListHTML) H.setListHTML('subw:cust-results', `<div class="kv-onb-empty">Zoeken faalde: ${esc(msg)}</div>`);
+  }
+  function _renderCustResults(list) {
+    if (!H.setListHTML) return;
+    const arr = asArr(list);
+    if (!arr.length) { H.setListHTML('subw:cust-results', H.getSearchValue('subw:cust').trim().length >= 2 ? '<div class="kv-onb-empty">Geen klanten gevonden.</div>' : ''); return; }
+    H.setListHTML('subw:cust-results', '<div class="subw-cust-results">' + arr.map((c) =>
+      `<button type="button" class="subw-cust-hit" onclick="__subwCustPick('${esc(c.id)}')">
+        <div><b>${esc(c.name || (c.first_name + ' ' + (c.last_name || '')))}</b></div>
+        <div style="font-size:11.5px;color:var(--text-3)">${esc(c.email || '—')}${c.phone ? ' · ' + esc(c.phone) : ''}</div>
+      </button>`).join('') + '</div>');
   }
 
   console.debug('[subw-v2] loaded — window.__subwOpen({dealId?, customerId?}) beschikbaar');
