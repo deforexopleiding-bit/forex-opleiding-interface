@@ -245,19 +245,32 @@ export async function pushQuotationToTl(dealId) {
     if (paymentText) quotationBody.text = paymentText;
 
     let qr = await tlFetch('/quotations.create', { method: 'POST', body: JSON.stringify(quotationBody) });
+    // BUGFIX 2026-08-12 (Push mislukt: Body has already been read):
+    // Cache de body van de eerste failure-response ZODAT de volgende
+    // `if (!qr.ok)` op regel 258 'em niet nogmaals probeert te lezen.
+    // Fetch Response body kan maar 1x uitgelezen worden — bij een niet-
+    // text-veld-error (retry skipt) faalde de fallback-throw met een
+    // "Body is unusable"-TypeError die de user als push-fout zag.
+    let firstErrorText = null;
     if (!qr.ok && paymentText && quotationBody.text) {
-      const failText = await qr.text().catch(() => '');
-      const looksLikeTextFieldError = /"?text"?/i.test(failText);
+      firstErrorText = await qr.text().catch(() => '');
+      const looksLikeTextFieldError = /"?text"?/i.test(firstErrorText);
       console.warn('[tl-quotation] quotations.create met text-veld faalde',
-        { status: qr.status, body: failText.slice(0, 300), retryingWithoutText: looksLikeTextFieldError });
+        { status: qr.status, body: firstErrorText.slice(0, 300), retryingWithoutText: looksLikeTextFieldError });
       if (looksLikeTextFieldError) {
         delete quotationBody.text;
         qr = await tlFetch('/quotations.create', { method: 'POST', body: JSON.stringify(quotationBody) });
+        firstErrorText = null; // nieuwe `qr`, cache resetten.
       }
     }
     if (!qr.ok) {
-      const txt = await qr.text();
-      throw new Error(`TL quotations.create HTTP ${qr.status}: ${txt.slice(0, 200)}`);
+      // Hergebruik gecachte body wanneer die er is (retry-skip pad); anders
+      // lezen. Zonder deze cache probeerde de code de al-gelezen body van
+      // de originele `qr` nog een keer via .text() te lezen → TypeError.
+      const txt = firstErrorText != null
+        ? firstErrorText
+        : await qr.text().catch(() => '');
+      throw new Error(`TL quotations.create HTTP ${qr.status}: ${(txt || '').slice(0, 200)}`);
     }
     const qData = await qr.json();
     const tlQuotationId = qData.data?.id;

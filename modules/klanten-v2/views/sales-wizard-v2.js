@@ -861,6 +861,7 @@
         event_attendee_id: _sw.prefillEventAttendeeId || null,
       };
       let data;
+      _swLog && _swLog('push:start', { syncToTl, editDealId: _sw.editDealId || null });
       if (_sw.editDealId) {
         // Bestaande offerte updaten (edit-mode) — v1 r1608-1616.
         data = await tryPost('sales-deal-update', '/api/sales-deal-update',
@@ -870,6 +871,7 @@
       } else {
         data = await tryPost('sales-deal-create', '/api/sales-deal-create', payload);
       }
+      _swLog && _swLog('push:parsed-ok', { deal_id: data?.deal_id, tl_status: data?.tl_quotation_status || null, tl_err: data?.tl_error || null });
       _sw.submitting = false;
       const custBase = ((w.is_company ? w.company_name : `${w.first_name || ''} ${w.last_name || ''}`) || '—').trim();
       try { window.KV?.toast?.(_sw.editDealId ? `Offerte bijgewerkt voor ${custBase}` : `Offerte aangemaakt voor ${custBase}`); } catch (_) {}
@@ -911,6 +913,7 @@
       }
     } catch (e) {
       _sw.submitting = false; renderWizard();
+      _swLog && _swLog('push:error', { msg: e?.message || String(e) });
       try { window.KV?.toast?.('Verzenden mislukt: ' + (e?.message || 'onbekende fout')); } catch (_) {}
     }
   };
