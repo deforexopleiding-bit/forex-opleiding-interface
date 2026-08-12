@@ -525,12 +525,11 @@
       if (_sw.discountModal.open)  extras += discountModalHtml();
       if (_sw.exceptionModal.open) extras += excModalHtml();
       if (_sw.resumeModal.open)    extras += resumeModalHtml();
-      // BUGFIX 2026-08-12 (1a): wizard-body ONDERDRUKKEN wanneer resume-
-      // modal open is of we nog in de draft-check-fase zitten. Voorkomt
-      // dat oude wizard-state door de resume-keuze heen flikkert.
-      const hideBody = _sw.resumeModal.open || _sw.resumeModal.checking;
-      const bodyHtml = hideBody ? _checkingShellHtml() : wizardModal();
-      root.innerHTML = bodyHtml + extras;
+      // 2026-08-12 (herzien): wizard-body ALTIJD zichtbaar. De resume-
+      // modal is een overlay BOVENOP de body (net als picker/dup/
+      // discount/exception). Geen checking-shell meer — voorheen
+      // blokkeerde die de body bij lege draft, waardoor de UI hing.
+      root.innerHTML = wizardModal() + extras;
       root.classList.add('is-open');
       // Foot-indicator vult van state (setInterval is al gestart bij
       // saved-status). Direct 1x updaten na render.
@@ -540,18 +539,6 @@
       root.innerHTML = '';
     }
     _restoreFocus(root, snap);
-  }
-  // Neutraal skeleton — geen wizard-body, alleen een lege modal-shell
-  // met "Concept controleren…"-indicator. Wordt gebruikt zolang de draft-
-  // check loopt of de resume-modal open is (voorkomt state-lekkage door
-  // de overlay heen). Zonder rand of onclick — de resume-modal-overlay
-  // (in `extras`) heeft z'n eigen backdrop.
-  function _checkingShellHtml() {
-    return `<div class="sw-modal" style="max-width:520px;min-height:180px;display:flex;align-items:center;justify-content:center">
-      <div style="text-align:center;padding:32px 24px;color:var(--text-3,#8a95a3);font-size:13px">
-        ${_sw.resumeModal.checking ? 'Concept controleren…' : ''}
-      </div>
-    </div>`;
   }
 
   // ── Handlers ──────────────────────────────────────────────────────
@@ -592,41 +579,17 @@
       return;
     }
 
-    // Standaard "Nieuwe offerte"-flow: DRIE-LAAGSE FAIL-SAFE.
-    //
-    // Laag 1 — schedule draft-check MICROTASK VÓÓR sync renderWizard().
-    //   Vorige bug: als sync renderWizard() throwde (bv. wizardModal →
-    //   renderStep1 crash op default state), werd de queueMicrotask
-    //   hieronder nooit bereikt → checking-shell hangde permanent.
-    //   Fix: schedule FIRST — dan is 'ie hoe dan ook gepland.
-    //
-    // Laag 2 — WATCHDOG setTimeout(5s). Los van de 4s Promise.race, een
-    //   absolute noodrem: na 5s HOE DAN OOK checking uit + wizard-body
-    //   forceren, ongeacht welke vlag/pad nog hangt. Cleared bij normale
-    //   finally-completion.
-    //
-    // Laag 3 — try/catch rond ELKE renderWizard() (in finally + watchdog)
-    //   plus rond de sync render hieronder. Als render throwt, wordt de
-    //   error gelogd maar blijft de rest van de flow werken.
+    // Standaard "Nieuwe offerte"-flow (herzien 2026-08-12):
+    // — Body ALTIJD direct renderen met blanco state (via _swDefaultWizard
+    //   + _swResetCrossSession bovenaan). Geen blokkerende checking-shell.
+    // — Draft-check draait NON-BLOCKING op de achtergrond. Bij hit tonen
+    //   we de resume-modal ALS OVERLAY bovenop de reeds-zichtbare body
+    //   (net als picker/dup/discount/exception). Bij miss/error/timeout
+    //   gebeurt er niets — wizard blijft gewoon blanco open.
     if (!_sw.entities && !_sw.entitiesLoading) queueMicrotask(loadEntities);
-    _sw.resumeModal = { open: false, draft: null, checking: true };
-    _swLog && _swLog('draft-checking:start');
-
-    // ── Laag 2 — watchdog. Cleared door de finally als die eerder klaar is.
-    const watchdogId = setTimeout(() => {
-      const stuckOn = {
-        'resumeModal.checking': !!_sw.resumeModal.checking,
-        'resumeModal.open':     !!_sw.resumeModal.open,
-        '_sw.open':             !!_sw.open,
-      };
-      _sw.resumeModal = { open: false, draft: null, checking: false };
-      _swLog && _swLog('draft-checking:watchdog-fired', { stuckOn });
-      console.warn('[sw-v2] draft-check watchdog fired na 5s — stuckOn:', stuckOn);
-      try { if (_sw.open) renderWizard(); } catch (e) { console.warn('[sw-v2] watchdog render fail:', e?.message); }
-    }, 5000);
-    _sw._draftCheckWatchdog = watchdogId;
-
-    // ── Laag 1 — schedule microtask VÓÓR sync render.
+    _sw.resumeModal = { open: false, draft: null };
+    _swLog && _swLog('draft-check:start');
+    // Non-blocking draft-check op de achtergrond.
     queueMicrotask(async () => {
       let outcome = 'unknown';
       try {
@@ -636,50 +599,29 @@
         ]);
         if (!_sw.open) { outcome = 'closed-before-return'; return; }
         if (draft) {
-          _sw.resumeModal = { open: true, draft, checking: false };
+          _sw.resumeModal = { open: true, draft };
           outcome = 'draft-found';
+          try { renderWizard(); } catch (e) { console.warn('[sw-v2] draft-hit render fail:', e?.message); }
         } else {
-          _sw.resumeModal = { open: false, draft: null, checking: false };
           outcome = 'draft-none';
+          // Geen render nodig — wizard-body staat al blanco.
         }
       } catch (e) {
-        const isTimeout = /timeout/i.test(e && e.message || '');
-        _sw.resumeModal = { open: false, draft: null, checking: false };
-        outcome = isTimeout ? 'draft-timeout' : 'draft-error';
-        console.warn('[sw-v2] draft-check', outcome, e?.message || e);
+        outcome = /timeout/i.test(e?.message || '') ? 'draft-timeout' : 'draft-error';
+        console.warn('[sw-v2] draft-check', outcome, e?.message);
+        // Geen render — wizard-body blijft blanco open, user niet gehinderd.
       } finally {
-        // Clear watchdog — de finally is als eerste klaar.
-        if (_sw._draftCheckWatchdog) { clearTimeout(_sw._draftCheckWatchdog); _sw._draftCheckWatchdog = null; }
-        // Vlaggen op safe-state (redundant maar expliciet — vangt eventuele
-        // andere mutaties in de try-body op).
-        if (_sw.resumeModal && _sw.resumeModal.checking) _sw.resumeModal.checking = false;
-        _swLog && _swLog('draft-checking:end', { outcome });
-        // Laag 3 — render is best-effort; als 'ie throwt, blijft de user
-        // niet permanent in checking-shell hangen (watchdog is al gecleared
-        // hier, maar we vangen throw af zodat andere fallback-paden nog
-        // kunnen). We herstellen de checking-vlag óók terug op false zodat
-        // de eerstvolgende externe render (bv. door user-actie) de body toont.
-        if (_sw.open) {
-          try { renderWizard(); }
-          catch (e) {
-            console.warn('[sw-v2] draft-check finally render throw:', e?.message);
-            // Force check-uit desnoods via een 2e queueMicrotask.
-            queueMicrotask(() => { try { renderWizard(); } catch (_) {} });
-          }
-        }
+        _swLog && _swLog('draft-check:end', { outcome });
       }
     });
-
-    // Sync render van checking-shell. Wrapped omdat als deze throwt, we
-    // toch nog een wizard-body willen tonen (watchdog + microtask draaien
-    // al onafhankelijk).
+    // Sync body-render — MET try/catch zodat een render-throw geen white
+    // page geeft (root krijgt in dat geval wel is-open maar geen content;
+    // volgende user-actie triggert opnieuw render).
     try {
       ensureRoot().classList.add('is-open');
       renderWizard();
     } catch (e) {
-      console.warn('[sw-v2] initial checking-render throw:', e?.message);
-      // Force checking uit — watchdog + microtask hebben nog een kans om te renderen.
-      _sw.resumeModal = { open: false, draft: null, checking: false };
+      console.warn('[sw-v2] initial body-render throw:', e?.message);
     }
   };
   window.__swClose = () => {
