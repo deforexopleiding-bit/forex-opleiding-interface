@@ -271,30 +271,83 @@
     if (handled) return;
     window.location.href = oldUrl;
   }
+  // "Nieuwe offerte" — regressie-fix: prefer altijd de in-shell wizard als
+  // 'ie geladen is (sales-wizard-v2.js is via index.html altijd geladen op
+  // /modules/klanten-v2/, dus __swOpen bestaat hier). Zonder preview-gate:
+  // op v1-pagina's bestaat __swOpen niet → val terug op oude redirect.
+  // Defensieve try/catch + debug-log zodat throw in __swOpen niet stil
+  // faalt maar zichtbaar wordt in ?debug=1.
   window.__svOfferteNew = () => {
-    _navSalesPreviewAware('new-offerte', '/modules/sales-wizard.html', () => {
-      if (typeof window.__swOpen !== 'function') return false;
-      window.__swOpen();
-      return true;
-    });
+    const hasV2 = typeof window.__swOpen === 'function';
+    try { if (typeof window.__swLog === 'function') window.__swLog('nav:new-offerte', { hasV2, preview: window.__svIsSalesPreview() }); } catch (_) {}
+    if (hasV2) {
+      try { window.__swOpen(); return; }
+      catch (e) { console.warn('[sales-v2] __swOpen threw — fallback naar oude URL:', e?.message); }
+    }
+    window.location.href = '/modules/sales-wizard.html';
   };
-  // Batch 2 — expliciete v2-wizard entry (naast de primary knop). Blijft
-  // bestaan zodat Jeffrey óók zonder preview-flag de v2-modal kan openen.
+  // Backup-entry (blijft naast primary voor consistentie met eerdere UI).
   window.__svOfferteNewV2 = () => {
     try { if (typeof window.__swLog === 'function') window.__swLog('nav:new-offerte-v2', { canOpen: typeof window.__swOpen === 'function' }); } catch (_) {}
-    if (typeof window.__swOpen === 'function') window.__swOpen();
-    else window.location.href = '/modules/sales-wizard.html';
+    if (typeof window.__swOpen === 'function') { try { window.__swOpen(); return; } catch (_) {} }
+    window.location.href = '/modules/sales-wizard.html';
   };
-  window.__svOfferteOpen = (dealId) => {
+
+  // Row-click op offerte-rij: opent offerte-detail-v2 IN-SHELL (READ-view).
+  // NIET meer de edit-wizard — die zit nu achter de "Bewerken"-knop op detail.
+  window.__svOfferteRowClick = (i) => {
+    const q = (_off.shownItems || [])[i];
+    if (!q || !q.deal_id) return;
+    window.__svOfferteDetailOpen(q.deal_id);
+  };
+  // Detail-open: push ?deal_id=X in URL zodat de shell-render de detail-
+  // view mount (offertesView checkt de param). Fallback naar oude standalone
+  // /modules/offerte-detail.html als offerte-detail-v2.js niet geladen is.
+  window.__svOfferteDetailOpen = (dealId) => {
     if (!dealId) return;
-    _navSalesPreviewAware('open-offerte', '/modules/sales-wizard.html?edit_deal_id=' + encodeURIComponent(dealId), () => {
-      // Preview-modus: open v2-wizard in edit-modus door dezelfde deal-id
-      // door te geven. __swOpen({editDealId}) accepteert nu opts.
-      if (typeof window.__swOpen !== 'function') return false;
-      window.__swOpen({ editDealId: String(dealId) });
-      return true;
-    });
+    const hasV2 = typeof window.__odvRenderView === 'function';
+    try { if (typeof window.__swLog === 'function') window.__swLog('nav:open-offerte-detail', { dealId, hasV2 }); } catch (_) {}
+    if (!hasV2) {
+      window.location.href = '/modules/offerte-detail.html?id=' + encodeURIComponent(dealId);
+      return;
+    }
+    try {
+      const u = new URL(location.href);
+      u.searchParams.set('deal_id', String(dealId));
+      history.pushState({}, '', u.toString());
+    } catch (_) {}
+    if (typeof window.__odvReset === 'function') window.__odvReset();
+    window.DFO.render();
   };
+  // Detail-close: verwijder ?deal_id, refetch offertes-lijst, re-render.
+  window.__svOfferteDetailClose = () => {
+    try { if (typeof window.__swLog === 'function') window.__swLog('nav:close-offerte-detail'); } catch (_) {}
+    try {
+      const u = new URL(location.href);
+      u.searchParams.delete('deal_id');
+      history.pushState({}, '', u.toString());
+    } catch (_) {}
+    if (typeof window.__odvReset === 'function') window.__odvReset();
+    window.__svRefetchOffertes();
+    window.DFO.render();
+  };
+  // Bewerken (vanuit detail-view): opent v2-wizard in edit-modus, of val
+  // terug op /modules/sales-wizard.html?edit_deal_id=X als __swOpen mist.
+  window.__svOfferteEdit = (dealId) => {
+    if (!dealId) return;
+    const hasV2 = typeof window.__swOpen === 'function';
+    try { if (typeof window.__swLog === 'function') window.__swLog('nav:edit-offerte', { dealId, hasV2 }); } catch (_) {}
+    if (hasV2) {
+      try { window.__swOpen({ editDealId: String(dealId) }); return; }
+      catch (e) { console.warn('[sales-v2] __swOpen(editDealId) threw:', e?.message); }
+    }
+    window.location.href = '/modules/sales-wizard.html?edit_deal_id=' + encodeURIComponent(dealId);
+  };
+  // Legacy naam (voor consistentie met eerdere onclick-handlers uit ff4dc44):
+  // gedraagt zich nu als DETAIL-open, niet edit. Wie edit wil, klikt op
+  // "Bewerken" in de detail-view.
+  window.__svOfferteOpen = (dealId) => window.__svOfferteDetailOpen(dealId);
+
   // Refetch-hook voor de wizard: na submit in preview-modus roept de
   // wizard deze aan om de nieuwe offerte in de lijst zichtbaar te krijgen
   // zonder full-page-navigate.
@@ -331,6 +384,15 @@
   }
 
   function offertesView() {
+    // Sub-view routing: ?deal_id=X → mount offerte-detail-v2 IN-SHELL.
+    // Fallback naar de lijst als de detail-module niet geladen is.
+    try {
+      const dealId = new URLSearchParams(location.search).get('deal_id');
+      if (dealId && typeof window.__odvRenderView === 'function') {
+        return window.__odvRenderView(dealId);
+      }
+    } catch (_) { /* val terug op lijst */ }
+
     const st   = F('sv-off-st', 'all');
     const mine = F('sv-off-mine', '1');
     // Trigger fetch bij eerste render OF wanneer filter-params veranderd zijn.
@@ -338,6 +400,9 @@
     if (!_off.loading && (!_off.data || _off.params !== wanted)) queueMicrotask(fetchOffertes);
     const items = _off.data?.quotations || [];
     const total = _off.data?.total ?? null;
+    // Cache voor row-click handler — H.table geeft alleen row-INDEX door;
+    // handler resolvet index → deal_id via deze cache.
+    _off.shownItems = items;
     return `${previewHeader('Offertes', _off)}
       ${H.toolbar([
         H.chips('sv-off-st', [
@@ -353,7 +418,6 @@
         ], mine),
         H.search('Zoek klant / offerte-nr…'),
         `<div class="tb-right">
-          <button class="btn" onclick="__svOfferteNewV2()" title="v2-scaffold (Batch 2 — in ontwikkeling)">${svg(I.plus)}Nieuwe offerte (v2)</button>
           <button class="btn btn-primary" onclick="__svOfferteNew()">${svg(I.plus)}Nieuwe offerte</button>
         </div>`,
       ])}
@@ -361,14 +425,15 @@
       ${H.table(
         [{ l: 'Offerte-nr' }, { l: 'Klant' }, { l: 'Traject', cls: 'optional' }, { l: 'Verkoper', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Datum', cls: 'r optional' }, { l: 'Status' }],
         items.map(q => [
-          `<a href="javascript:__svOfferteOpen('${q.deal_id}')" class="sv-off-nr">${q.quote_reference || ('#' + String(q.deal_id || '').slice(0, 8))}</a>`,
+          `<span class="sv-off-nr mono">${q.quote_reference || ('#' + String(q.deal_id || '').slice(0, 8))}</span>`,
           `<div class="cell-main-wrap"><div class="av av-sm">${H.av(q.customer_name || '?')}</div><span class="cell-main">${q.customer_name || '—'}</span></div>`,
           `<span style="font-size:12.5px;color:var(--text-3)">${q.traject_label || '—'}</span>`,
           `<span style="font-size:12.5px;color:var(--text-3)">${q.sales_user || '—'}</span>`,
           `<span class="mono">${eur0(q.total_amount)}</span>`,
           `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(q.created_at)}</span>`,
           H.pill((OST_TO_PILL[q.tl_quotation_status] || ['neutral', q.tl_quotation_status || '—'])[0], (OST_TO_PILL[q.tl_quotation_status] || ['neutral', q.tl_quotation_status || '—'])[1]),
-        ])
+        ]),
+        '__svOfferteRowClick'
       )}
       ${!items.length && !_off.loading ? `<div class="sv-empty">${_off.error ? _off.error : 'Geen offertes met deze filters.'}</div>` : ''}`;
   }

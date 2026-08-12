@@ -611,19 +611,21 @@
       _sw.open = false; _sw.step = 1; _sw.dirty = false;
       renderWizard();
       if (data?.deal_id) {
-        const preview = (typeof window.__svIsSalesPreview === 'function') && window.__svIsSalesPreview();
-        const oldUrl  = '/modules/offerte-detail.html?id=' + encodeURIComponent(data.deal_id);
-        _swLog('nav:after-submit', { preview, deal_id: data.deal_id });
-        if (preview) {
-          // In-shell: refetch offertes-lijst + toast met deal-id.
+        // Prefer altijd de in-shell offerte-detail-v2 als 'ie geladen is
+        // (via /modules/klanten-v2/). Fallback naar v1 standalone
+        // /modules/offerte-detail.html op v1-pagina's waar geen v2 script
+        // draait — v1-productie-flow onveranderd.
+        const canOpenDetail = typeof window.__svOfferteDetailOpen === 'function' && typeof window.__odvRenderView === 'function';
+        const oldUrl        = '/modules/offerte-detail.html?id=' + encodeURIComponent(data.deal_id);
+        _swLog('nav:after-submit', { canOpenDetail, deal_id: data.deal_id });
+        if (canOpenDetail) {
+          // In-shell: open detail-v2 (URL-param + re-render). Refetch de
+          // achterliggende offertes-lijst zodat 'ie fresh is bij Terug.
           try { if (typeof window.__svRefetchOffertes === 'function') window.__svRefetchOffertes(); } catch (_) {}
           setTimeout(() => {
-            try {
-              window.KV?.toast?.(
-                `Offerte aangemaakt (id: ${String(data.deal_id).slice(0, 8)}…) — v2 offerte-detail nog niet in shell, zie lijst.`
-              );
-            } catch (_) {}
-          }, 500);
+            try { window.__svOfferteDetailOpen(data.deal_id); } catch (e) { console.warn('[sw-v2] detail-open threw:', e?.message); }
+            try { window.KV?.toast?.(`Offerte aangemaakt (${String(data.deal_id).slice(0, 8)}…)`); } catch (_) {}
+          }, 400);
         } else {
           setTimeout(() => { window.location.href = oldUrl; }, 700);
         }

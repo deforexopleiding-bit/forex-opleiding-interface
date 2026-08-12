@@ -2523,3 +2523,60 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
 }
 .rv-submit-hint { text-align: center; font-size: 11px; color: var(--text-3, #8B95A5); }
 
+
+/* ── Offerte-detail-v2 (odv-*) — in-shell READ-view voor 1 offerte.
+   Ge-injected in sales/Offertes-slot bij ?deal_id=X (sales-v2 delegate).
+   Layout: top-bar (terug + titel + acties) + 2-koloms body (klant/offerte
+   meta links, producten+totalen rechts). Min-width tokens uit de core. */
+.odv-wrap { padding: 0 0 24px; }
+.odv-top {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 20px; border-bottom: 1px solid var(--border);
+  background: var(--surface-2, #F5F8FB);
+  position: sticky; top: 0; z-index: 5;
+}
+.odv-title { font-size: 14px; font-weight: 600; color: var(--text-1); }
+.odv-title-skel { font-size: 13px; color: var(--text-3); font-style: italic; }
+.odv-pill { display: inline-flex; }
+.odv-body {
+  display: grid; grid-template-columns: 320px 1fr; gap: 16px;
+  padding: 16px 20px;
+}
+@media (max-width: 900px) {
+  .odv-body { grid-template-columns: 1fr; }
+}
+.odv-col { display: flex; flex-direction: column; gap: 12px; }
+.odv-col-wide { min-width: 0; }
+.odv-card {
+  background: var(--surface, #fff); border: 1px solid var(--line, #E5EAEF);
+  border-radius: 8px; overflow: hidden;
+}
+.odv-card-head {
+  padding: 10px 14px; font-size: 12px; font-weight: 600;
+  color: var(--text-2, #586374); text-transform: uppercase; letter-spacing: .04em;
+  background: var(--surface-2, #F5F8FB); border-bottom: 1px solid var(--line);
+}
+.odv-card-body { padding: 12px 14px; font-size: 13px; line-height: 1.5; }
+.odv-kv {
+  display: flex; justify-content: space-between; gap: 12px;
+  padding: 4px 0; border-bottom: 1px dashed var(--line);
+}
+.odv-kv:last-child { border-bottom: 0; }
+.odv-kv > span:first-child { color: var(--text-3); flex-shrink: 0; }
+.odv-kv > *:last-child { text-align: right; }
+.odv-lines { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.odv-lines th, .odv-lines td { padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.odv-lines th { background: var(--surface-2, #F5F8FB); color: var(--text-2); font-weight: 600; }
+.odv-lines td.r, .odv-lines th.r { text-align: right; }
+.odv-totals {
+  padding: 12px 14px; background: var(--surface-2, #F5F8FB);
+  border-top: 1px solid var(--line);
+}
+.odv-total-row {
+  display: flex; justify-content: space-between; gap: 12px;
+  padding: 3px 0; font-size: 13px;
+}
+.odv-total-grand {
+  margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--line);
+  font-size: 15px; font-weight: 700;
+}
