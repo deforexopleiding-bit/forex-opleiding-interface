@@ -26,6 +26,16 @@ function esc(v) { return K().esc(v); }
 const CATEGORIEEN = ['Sales', 'Onboarding', 'Mentoring', 'Finance', 'Klant', 'Marketing', 'Intern', 'Overige'];
 const PRIORITEITEN = ['Urgent', 'Hoog', 'Normaal', 'Laag'];
 
+// STAFF_ROLES filter: /api/profiles-list retourneert alle actieve profiles
+// (ook klant/student-accounts). Voor assignee-picker willen we alleen
+// interne staf. Filter matcht profiles.role tegen deze set.
+// Bron: user-verzoek 2026-08-12. CLAUDE.md-rollen: super_admin/admin/
+// manager/sales/mentor/administratie/viewer + 'marketing' (buiten canon).
+const STAFF_ROLES = new Set(['super_admin', 'manager', 'sales', 'mentor', 'marketing']);
+function isStaff(member) {
+  return STAFF_ROLES.has(String(member?.role || '').toLowerCase());
+}
+
 let state = null;
 let _membersCache = null;
 
@@ -33,7 +43,8 @@ async function loadMembers() {
   if (_membersCache) return _membersCache;
   try {
     const j = await K().authedJson('/api/profiles-list');
-    _membersCache = Array.isArray(j?.members) ? j.members : [];
+    const all = Array.isArray(j?.members) ? j.members : [];
+    _membersCache = all.filter(isStaff);
   } catch (e) {
     console.warn('[taken-create] profiles-list fail:', e?.message);
     _membersCache = [];

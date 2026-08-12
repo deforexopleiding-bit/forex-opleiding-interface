@@ -76,6 +76,12 @@ function cleanFilename(name) {
   return base.slice(0, 80) + ext.slice(0, 10);
 }
 
+// STAFF_ROLES filter (zelfde als taken-create.js). /api/profiles-list
+// levert alle actieve accounts (incl. klant/student); wij pikken alleen
+// interne staf voor de watcher-picker.
+const STAFF_ROLES = new Set(['super_admin', 'manager', 'sales', 'mentor', 'marketing']);
+const isStaff = (m) => STAFF_ROLES.has(String(m?.role || '').toLowerCase());
+
 // ── State ──────────────────────────────────────────────────────────────────
 let state = null;
 let _membersCache = null;
@@ -86,7 +92,8 @@ async function loadMembers() {
   if (_membersCache) return _membersCache;
   try {
     const j = await K().authedJson('/api/profiles-list');
-    _membersCache = Array.isArray(j?.members) ? j.members : [];
+    const all = Array.isArray(j?.members) ? j.members : [];
+    _membersCache = all.filter(isStaff);
   } catch (_) { _membersCache = []; }
   return _membersCache;
 }
@@ -269,8 +276,7 @@ function renderWatchers() {
         .join('');
   return `
     <div class="kv-td-section">
-      <div class="kv-td-section-title">CC · kijkt mee <span style="color:var(--text-3); font-weight:400;">(${ws.length})</span></div>
-      <div style="font-size:11.5px; color:var(--text-3); margin: -4px 0 8px;">Personen die notificaties krijgen bij updates. In v1 heette dit "Watchers".</div>
+      <div class="kv-td-section-title">CC <span style="color:var(--text-3); font-weight:400;">· kijkt mee (${ws.length})</span></div>
       ${ws.length ? `<div class="kv-td-watchers">
         ${ws.map((w) => `
           <div class="kv-td-watcher-row">

@@ -669,7 +669,13 @@
     const d = _det.data || {};
     const t = d.ticket || {};
     const comments = Array.isArray(d.comments) ? d.comments : [];
-    const assignees = Array.isArray(d.assignees) ? d.assignees : [];
+    // STAFF_ROLES-filter: /api/ticket-detail's `assignees`-lijst komt direct
+    // uit `profiles WHERE is_active=true` (ticket-detail.js:57-60) → bevat
+    // ook klant/student-accounts. Assignee-picker toont alleen interne staf.
+    // Zelfde set als taken-modals (super_admin/manager/sales/mentor/marketing).
+    const STAFF_ROLES_TK = new Set(['super_admin', 'manager', 'sales', 'mentor', 'marketing']);
+    const assignees = (Array.isArray(d.assignees) ? d.assignees : [])
+      .filter((a) => STAFF_ROLES_TK.has(String(a?.role || '').toLowerCase()));
     const [pc, pl] = PRIO_TO_PILL[t.priority] || ['neutral', t.priority || '—'];
     const [tc, tl] = TYPE_TO_PILL[t.type] || ['neutral', t.type || '—'];
     const [sc, sl] = STATUS_TO_PILL[t.status] || ['neutral', t.status || '—'];
