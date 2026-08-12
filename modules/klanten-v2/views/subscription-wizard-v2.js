@@ -284,11 +284,15 @@
     _recomputeEnds();
   }
   function _newLine(preset) {
+    // BUGFIX 2026-08-12: preset.amount_incl werd genegeerd — altijd 0 gezet.
+    // Bij _lead='incl' rekende _recalcLine dan amount = 0/(1+rate) = 0. Alle
+    // fixed-split regels (aanbetaling/termijnen) stonden hierdoor op €0
+    // ondanks correcte target. Fix: preset.amount_incl doorgeven.
     const line = {
       product_id: preset?.product_id || '',
       description: preset?.description || '',
-      amount: preset?.amount != null ? round2(preset.amount) : 0,
-      amount_incl: 0,
+      amount:       preset?.amount      != null ? round2(preset.amount)      : 0,
+      amount_incl:  preset?.amount_incl != null ? round2(preset.amount_incl) : 0,
       vat_percentage: preset?.vat_percentage != null ? Number(preset.vat_percentage) : 21,
       _lead: preset?._lead || 'excl',
     };
@@ -333,7 +337,7 @@
   // 3. Fallback naar 1 lege sub als er niets bruikbaar is.
   // Bewaar RUWE prefill-signalen voor het ?debug=1 panel — Jeffrey ziet
   // zo exact welke velden uit de offerte-payload gebruikt zijn.
-  const _prefillDebug = { lines: [], choice: null, aanbetaling: null, termijnen: null };
+  const _prefillDebug = { lines: [], choice: null, aanbetaling: null, termijnen: null, splits: [] };
 
   function _linesFromOfferDefault() {
     const lis = asArr(_sub.lineItemsDeal);
@@ -366,9 +370,12 @@
   // niet consistent was. Aanbetaling én termijnen delen deze vaste
   // regels; alleen omschrijvingen verschillen (kind='aanbetaling' vs '').
   function _fixedSplitLines(targetIncl, kind) {
-    const incl21 = round2((Number(targetIncl) || 0) * 2 / 3);
-    const incl9  = round2((Number(targetIncl) || 0) * 1 / 3);
+    const tgt = Number(targetIncl) || 0;
+    const incl21 = round2(tgt * 2 / 3);
+    const incl9  = round2(tgt * 1 / 3);
     const suf = kind ? ' (' + kind + ')' : '';
+    // Log split-berekening voor het ?debug=1 panel.
+    try { _prefillDebug.splits.push({ kind: kind || 'termijn', target: tgt, incl21, incl9 }); } catch (_) {}
     return [
       _newLine({
         description: '1-op-1 Begeleiding' + suf,
@@ -403,6 +410,7 @@
     }));
     _prefillDebug.aanbetaling = dp;
     _prefillDebug.termijnen   = { count: tc, amount_per_termijn: tAmt };
+    _prefillDebug.splits      = []; // reset per prefill-run
     _prefillDebug.totalIncl   = totalIncl;
     _prefillDebug.discount    = Number(d.discount_percentage) || 0;
     _prefillDebug.sale_type   = d.sale_type || 'domestic';
@@ -754,6 +762,10 @@
     const rows = (dbg.lines || []).map((l, i) =>
       `<tr><td>${i}</td><td>${esc(l.description || '—')}</td><td class="mono">${l.quantity ?? '—'}</td><td class="mono">${l.unit_price ?? '—'}</td><td class="mono">${l.vat_percentage ?? '—'}%</td><td>${l.price_includes_vat ? 'incl' : 'excl'}</td></tr>`
     ).join('');
+    const splitsHtml = (dbg.splits || []).length
+      ? '<div style="margin-top:8px;color:var(--text-2)">Splits (2/3 @21% + 1/3 @9%):<ul style="margin:4px 0 0 18px;padding:0">' +
+        dbg.splits.map((s) => `<li class="mono">${esc(s.kind)}: target €${(s.target || 0).toFixed(2)} → 21%-deel €${(s.incl21 || 0).toFixed(2)} incl · 9%-deel €${(s.incl9 || 0).toFixed(2)} incl</li>`).join('') +
+        '</ul></div>' : '';
     return `
       <div style="margin-top:14px;padding:12px 14px;background:var(--surface-2,#F5F8FB);border:1px dashed var(--line,#E5EAEF);border-radius:8px;font-size:12px;">
         <div style="font-weight:600;color:var(--text-1,#111721);margin-bottom:8px">🔧 Debug — ruwe prefill-signalen (?debug=1)</div>
@@ -766,6 +778,7 @@
           <thead><tr style="border-bottom:1px solid var(--line)"><th style="text-align:left">#</th><th style="text-align:left">description</th><th>qty</th><th>unit_price</th><th>vat%</th><th>lead</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>` : '<div style="margin-top:8px;color:var(--text-3)">Geen line-items in offerte-payload.</div>'}
+        ${splitsHtml}
       </div>`;
   }
 
