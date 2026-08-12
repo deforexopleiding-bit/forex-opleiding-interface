@@ -38,6 +38,10 @@
       renderCard: config.renderCard || ((it) => JSON.stringify(it).slice(0, 80)),
       onMove: config.onMove || (async (_id, _st) => { console.info('[kanban-v2] no onMove for', moduleKey); }),
       itemId: config.itemId || ((it) => it.id),
+      // BUGFIX 2026-08-12: onCardClick werd niet opgeslagen → cfg.onCardClick
+      // in html() was undefined → clickAttr bleef leeg → geen click-handler op
+      // kaarten. Nu doorgegeven; html() genereert onclick=_cardClick(...).
+      onCardClick: typeof config.onCardClick === 'function' ? config.onCardClick : null,
     });
   }
 
@@ -100,11 +104,15 @@
   }
 
   // Global drag-state (single-drag context per user gesture).
-  const _drag = { moduleKey: null, itemId: null };
+  // startedAt: timestamp om click direct-na-drag te onderdrukken (fail-safe;
+  // native HTML5 drag suppresst click al, maar bij bepaalde muis-hardware
+  // (bv trackpad-drift van 1px vóór klik) kan browser drag én click vuren).
+  const _drag = { moduleKey: null, itemId: null, startedAt: 0 };
 
   function _dragStart(ev, moduleKey, itemId) {
     _drag.moduleKey = moduleKey;
     _drag.itemId = itemId;
+    _drag.startedAt = Date.now();
     try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', itemId); } catch (_) {}
     ev.currentTarget.classList.add('is-dragging');
   }
@@ -136,6 +144,9 @@
   function _cardClick(moduleKey, itemId) {
     const cfg = REGISTRY.get(moduleKey);
     if (!cfg || typeof cfg.onCardClick !== 'function') return;
+    // Fail-safe: als er kort geleden een dragstart was → geen open (drag
+    // moved, browser suppresste click meestal al maar niet altijd).
+    if (_drag.startedAt && Date.now() - _drag.startedAt < 250) return;
     try {
       const items = (typeof cfg.getItems === 'function' ? cfg.getItems() : []) || [];
       const it = items.find((x) => String(cfg.itemId(x)) === String(itemId));
