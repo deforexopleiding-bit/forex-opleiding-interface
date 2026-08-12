@@ -137,6 +137,65 @@
   // 1-op-1 met v1 r471. Wordt gemerged met wizard.tags[] in de chip-row.
   const PRE_TAGS = ['vip', 'risico', 'ambassadeur', 'pilot', 'oud-lead'];
 
+  // Default-wizard-state factory. Gebruikt door __swOpen (bij "Nieuwe
+  // offerte beginnen") + __swResumeNew om _sw.wizard schoon te herstellen
+  // zodat een oude concept-draft of edit-sessie geen state laat kleven.
+  // Bewust NIET destructieve keys buiten `wizard` reseten (zoals
+  // productsCatalog, entities) — die zijn cache-data en mogen blijven.
+  function _swDefaultWizard() {
+    return {
+      tl_department_id: '',
+      is_company: false,
+      company_name: '', kvk_number: '', vat_number: '',
+      first_name: '', last_name: '', email: '', phone: '',
+      address_street: '', address_number: '', address_postal: '', address_city: '',
+      address_country: 'NL',
+      address_known: false,
+      date_of_birth: '',
+      tags: [],
+      avg_ok: false,
+      traject_variant_id: '',
+      sale_type: 'domestic',
+      quote_reference: '',
+      start_date: '',
+      duration_months: 12,
+      products: [],
+      discount_percentage: 0,
+      payment_start_date: '',
+      payment_downpayment_amount: '',
+      payment_downpayment_date: '',
+      payment_term_count: '',
+      payment_term_start_date: '',
+      payment_term_amount: '',
+      exception_flagged:      false,
+      exception_reasons:      '',
+      exception_reason_note:  '',
+      exception_fee_agreed:   false,
+      source_lead_id: '',
+    };
+  }
+  // Reset ALLE cross-session state die de vorige wizard-openen kan hebben
+  // achtergelaten (matched customer, TL-imported contact, dup-check status,
+  // banner-naam, prefill-flags, tag-draft, sub-overlay-states).
+  function _swResetCrossSession() {
+    _sw.matched_customer_id    = null;
+    _sw.tl_imported_contact_id = null;
+    _sw.duplicate_check_status = 'idle';
+    _sw.existingCustName       = null;
+    _sw.prefillLeadId          = null;
+    _sw.prefillEventAttendeeId = null;
+    _sw.editDealId             = null;
+    _sw.tagDraft               = '';
+    _sw.picker         = { open: false, search: '', category: '' };
+    _sw.discountModal  = { open: false, draft: '' };
+    _sw.exceptionModal = { open: false, detect: null, note: '', feeChecked: false, resolver: null };
+    _sw.dupModal       = { open: false, loading: false, error: null, dbMatches: null, tlMatches: null };
+    _sw.saveStatus     = 'idle';
+    _sw.savedAt        = null;
+    if (_sw.saveTimer) { clearTimeout(_sw.saveTimer); _sw.saveTimer = null; }
+    _swStopSavedRefresher && _swStopSavedRefresher();
+  }
+
   // ── Fetch-helpers met 8s timeout + fail-soft (patroon uit finance/leads) ──
   async function tryFetch(label, url, timeoutMs = 8000) {
     try {
@@ -195,7 +254,13 @@
     _updateFootIndicator();
   }
   function _swMarkDirty() {
-    _swMarkDirty();
+    // BUGFIX 2026-08-12: hier stond `_swMarkDirty();` als eerste regel —
+    // infinite recursion → RangeError bij ELKE handler die _swMarkDirty()
+    // aanriep VOOR renderWizard(). Dat crashde stil (throw = uncaught
+    // in sync-context) waardoor entiteit-pick / traject-pick / add- en
+    // remove-product wél state muteerden maar de UI niet herrenderde.
+    // Verwijderd — de rest van de body doet het werk (debounced auto-save).
+    _sw.dirty = true;
     if (_sw.editDealId) return; // no auto-save in edit-mode
     _sw.saveStatus = 'saving';
     _updateFootIndicator();
@@ -460,7 +525,12 @@
       if (_sw.discountModal.open)  extras += discountModalHtml();
       if (_sw.exceptionModal.open) extras += excModalHtml();
       if (_sw.resumeModal.open)    extras += resumeModalHtml();
-      root.innerHTML = wizardModal() + extras;
+      // BUGFIX 2026-08-12 (1a): wizard-body ONDERDRUKKEN wanneer resume-
+      // modal open is of we nog in de draft-check-fase zitten. Voorkomt
+      // dat oude wizard-state door de resume-keuze heen flikkert.
+      const hideBody = _sw.resumeModal.open || _sw.resumeModal.checking;
+      const bodyHtml = hideBody ? _checkingShellHtml() : wizardModal();
+      root.innerHTML = bodyHtml + extras;
       root.classList.add('is-open');
       // Foot-indicator vult van state (setInterval is al gestart bij
       // saved-status). Direct 1x updaten na render.
@@ -471,6 +541,18 @@
     }
     _restoreFocus(root, snap);
   }
+  // Neutraal skeleton — geen wizard-body, alleen een lege modal-shell
+  // met "Concept controleren…"-indicator. Wordt gebruikt zolang de draft-
+  // check loopt of de resume-modal open is (voorkomt state-lekkage door
+  // de overlay heen). Zonder rand of onclick — de resume-modal-overlay
+  // (in `extras`) heeft z'n eigen backdrop.
+  function _checkingShellHtml() {
+    return `<div class="sw-modal" style="max-width:520px;min-height:180px;display:flex;align-items:center;justify-content:center">
+      <div style="text-align:center;padding:32px 24px;color:var(--text-3,#8a95a3);font-size:13px">
+        ${_sw.resumeModal.checking ? 'Concept controleren…' : ''}
+      </div>
+    </div>`;
+  }
 
   // ── Handlers ──────────────────────────────────────────────────────
   // __swOpen accepteert opts (batch2b):
@@ -479,38 +561,62 @@
   // Zonder opts: nieuwe offerte + optionele draft-resume (Feature A).
   window.__swOpen = (opts) => {
     opts = opts || {};
+    // BUGFIX 2026-08-12 (1a): FULL state-reset bij elke open. Voorheen
+    // bleef _sw.wizard state kleven tussen sessies — na een edit of vorige
+    // draft-resume startte "Nieuwe offerte" met oude entiteit/klant/
+    // producten. Nu: reset _sw.wizard naar defaults + reset cross-session
+    // state (matched customer, prefill-flags, sub-overlay-states).
+    _sw.wizard = _swDefaultWizard();
+    _swResetCrossSession();
     _sw.open = true; _sw.step = 1; _sw.dirty = false;
-    _sw.saveStatus = 'idle';
-    _sw.savedAt = null;
-    if (_sw.saveTimer) { clearTimeout(_sw.saveTimer); _sw.saveTimer = null; }
-    // Optionele expliciete edit-mode via opts (Feature B — nog te bouwen).
+
+    // Opts eerst verwerken zodat readPrefill/loadDealForEdit ze zien.
     if (opts.editDealId) _sw.editDealId = String(opts.editDealId);
-    // Optionele expliciete leads-prefill via opts (Feature C-alternate path).
-    // Vult sessionStorage zodat readPrefill 'em oppikt.
     if (opts.prefillLead && typeof opts.prefillLead === 'object') {
       try { sessionStorage.setItem('_prefill_lead', JSON.stringify(opts.prefillLead)); } catch (_) {}
     }
     readPrefill();
-    // Edit-mode PREFILL — als editDealId gezet (via opts of URL), fetch
-    // de bestaande deal en prefill wizard-state. Skipt draft-resume
-    // want editDealId is truthy.
+
+    // Edit-mode: fetch bestaande deal + prefill. Skipt draft-resume.
     if (_sw.editDealId) {
       queueMicrotask(() => loadDealForEdit(_sw.editDealId));
+      // Skip draft-check helemaal in edit-mode.
+      if (!_sw.entities && !_sw.entitiesLoading) queueMicrotask(loadEntities);
+      renderWizard();
+      return;
     }
-    // Draft-resume check — skip in edit-mode (v1-bug fix). Async: als er
-    // een draft is EN we zijn geen prefill/edit-flow, tonen we de resume-
-    // modal en wacht op user-keuze voordat de wizard-body verschijnt.
-    if (!_sw.editDealId && !_sw.prefillLeadId && !_sw.prefillEventAttendeeId) {
-      queueMicrotask(async () => {
-        const draft = await _swLoadDraft();
-        if (draft && _sw.open) {
-          _sw.resumeModal = { open: true, draft };
-          renderWizard();
-        }
-      });
+    if (_sw.prefillLeadId || _sw.prefillEventAttendeeId) {
+      // Prefill-flow: geen draft-check nodig, prefill vult wizard.
+      if (!_sw.entities && !_sw.entitiesLoading) queueMicrotask(loadEntities);
+      renderWizard();
+      return;
     }
-    // Load entities (Stap 1) + trajecten (Stap 3, lazy)
+
+    // Standaard "Nieuwe offerte"-flow: RENDER LEEG NIET DIRECT — anders
+    // ziet Jeffrey de wizard-body flitsen voordat de resume-modal komt.
+    // Fetch draft synchroon-in-microtask + kies pad:
+    //   - draft aanwezig → toon resume-modal (wizard-body verborgen door
+    //     resumeModal.open-guard in renderWizard/wizardModal-branch).
+    //   - geen draft → render lege wizard.
     if (!_sw.entities && !_sw.entitiesLoading) queueMicrotask(loadEntities);
+    queueMicrotask(async () => {
+      const draft = await _swLoadDraft();
+      if (!_sw.open) return; // user heeft ondertussen gesloten
+      if (draft) {
+        _sw.resumeModal = { open: true, draft };
+      }
+      // Ongeacht draft — render nu. Als resumeModal.open=true toont
+      // wizardModal alleen de keuze-modal (via renderWizard-hook).
+      renderWizard();
+    });
+    // Toon een lichte loading-shell terwijl draft-check loopt zodat de
+    // overlay wél zichtbaar is (backdrop) maar de wizard-body nog niet.
+    // Als er GEEN draft is voelt dit als ~100ms extra bij open.
+    ensureRoot().classList.add('is-open');
+    // Render één keer met resumeModal in "checking"-state — placeholder
+    // die aangeeft dat we een concept-check uitvoeren. Als er geen draft
+    // is overschrijft de queueMicrotask hierboven dit met de echte wizard.
+    _sw.resumeModal = { open: false, draft: null, checking: true };
     renderWizard();
   };
   window.__swClose = () => {
@@ -544,7 +650,13 @@
     renderWizard();
   };
   window.__swResumeNew = async () => {
+    // BUGFIX 2026-08-12 (1a): FULL state-reset zodat de nieuwe offerte
+    // écht blanco start (voorheen bleef _sw.wizard state kleven van de
+    // vorige sessie ondanks draft-DELETE).
+    _sw.wizard = _swDefaultWizard();
+    _swResetCrossSession();
     _sw.resumeModal = { open: false, draft: null };
+    _sw.step = 1; _sw.dirty = false;
     await _swDeleteDraft();
     renderWizard();
   };
