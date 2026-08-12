@@ -709,12 +709,31 @@
         return !isNaN(t) && t >= now && t <= thr;
       });
     }
-    // Client-side sort op start_date of end_date.
-    if (_sub.sortBy === 'start_date' || _sub.sortBy === 'end_date') {
+    // Client-side sort — nu voor ALLE kolommen. Numerieke (per_termijn /
+    // maand_incl) doen number-compare; datum-kolommen (start_date /
+    // end_date / created_at) doen ISO-string-compare (equivalent aan
+    // date-compare); tekst-kolommen (customer_name / description / entity /
+    // status) doen lowercase localeCompare.
+    if (_sub.sortBy) {
+      const dir = _sub.sortDir === 'asc' ? 1 : -1;
+      const getter = (row) => {
+        switch (_sub.sortBy) {
+          case 'customer_name': return String(row?.customer?.name ?? row?.customer_name ?? '').toLowerCase();
+          case 'description':   return String(row?.description ?? '').toLowerCase();
+          case 'entity':        return String(row?.entity ?? '').toLowerCase();
+          case 'per_termijn':   return Number(row?.amount_incl ?? row?.per_term_incl ?? row?.per_term_excl ?? 0);
+          case 'maand_incl':    return subMonthlyIncl(row);
+          case 'start_date':    return String(row?.start_date ?? '');
+          case 'end_date':      return String(row?.end_date ?? '');
+          case 'status':        return String(row?.status ?? '');
+          case 'created_at':    return String(row?.created_at ?? '');
+          default:              return '';
+        }
+      };
       items.sort((a, b) => {
-        const av = String(a[_sub.sortBy] || '');
-        const bv = String(b[_sub.sortBy] || '');
-        return _sub.sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+        const va = getter(a), vb = getter(b);
+        if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+        return String(va).localeCompare(String(vb)) * dir;
       });
     }
 
@@ -744,33 +763,47 @@
         fnSearch(_sub, 'Zoek klant / beschrijving / entiteit…', fetchSubs),
         `<div class="tb-right">
           <button class="btn ${_sub.filterExpiring ? 'btn-primary' : ''}" onclick="__finSubExpiring()">${svg(I.warn)}Loopt af &lt;30d</button>
-          <button class="btn btn-sm" onclick="__finSubSort('start_date')" title="Sorteer op startdatum">Start${sortIcon('start_date')}</button>
-          <button class="btn btn-sm" onclick="__finSubSort('end_date')" title="Sorteer op einddatum">Eind${sortIcon('end_date')}</button>
           <button class="btn btn-primary" onclick="__finSubNew()">${svg(I.plus)}Nieuw abonnement</button>
         </div>`,
       ])}
       ${fnPager(_sub, total, fetchSubs)}
       ${(() => { window.__finSubShown = items; return ''; })()}
-      ${H.table(
-        [{ l: 'Klant' }, { l: 'Beschrijving', cls: 'optional' }, { l: 'Entiteit', cls: 'optional' }, { l: 'Per termijn', cls: 'r' }, { l: 'Maand incl.', cls: 'r' }, { l: 'Start', cls: 'r optional' }, { l: 'Eind', cls: 'r optional' }, { l: 'Status' }],
-        items.map(s => {
-          const cName = String(s?.customer?.name ?? s?.customer_name ?? '—');
-          const [c, l] = SUB_STATUS_TO_PILL[s.status] || ['neutral', s.status || '—'];
-          // amount_incl = incl-BTW som per termijn (sales-subscriptions-list).
-          const perTerm = s?.amount_incl != null ? s.amount_incl : s?.per_term_incl;
-          return [
-            `<div class="cell-main-wrap"><div class="av av-sm">${H.av(cName)}</div><span class="cell-main">${cName}</span></div>`,
-            `<span style="font-size:12.5px;color:var(--text-3)">${s.description || '—'}</span>`,
-            `<span style="font-size:12.5px;color:var(--text-3)">${s.entity || '—'}</span>`,
-            `<span class="mono">${eur(perTerm)}</span>`,
-            `<span class="mono">${eur0(subMonthlyIncl(s))}</span>`,
-            `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(s.start_date)}</span>`,
-            `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(s.end_date)}</span>`,
-            H.pill(c, l),
-          ];
-        }),
-        '__finSubRowClick'
-      )}
+      ${(() => {
+        // Sortable header helper — label + arrow + click-handler naar
+        // __finSubSort. Cursor:pointer + subtiele hover-hint via title.
+        const sh = (col, label) => `<span onclick="event.stopPropagation();__finSubSort('${col}')" style="cursor:pointer;user-select:none" title="Sorteer op ${label}">${label}${sortIcon(col)}</span>`;
+        return H.table(
+          [
+            { l: sh('customer_name', 'Klant') },
+            { l: sh('description', 'Beschrijving'), cls: 'optional' },
+            { l: sh('entity',      'Entiteit'),     cls: 'optional' },
+            { l: sh('per_termijn', 'Per termijn'),  cls: 'r' },
+            { l: sh('maand_incl',  'Maand incl.'),  cls: 'r' },
+            { l: sh('start_date',  'Start'),        cls: 'r optional' },
+            { l: sh('end_date',    'Eind'),         cls: 'r optional' },
+            { l: sh('created_at',  'Toegevoegd'),   cls: 'r optional' },
+            { l: sh('status',      'Status') },
+          ],
+          items.map(s => {
+            const cName = String(s?.customer?.name ?? s?.customer_name ?? '—');
+            const [c, l] = SUB_STATUS_TO_PILL[s.status] || ['neutral', s.status || '—'];
+            // amount_incl = incl-BTW som per termijn (sales-subscriptions-list).
+            const perTerm = s?.amount_incl != null ? s.amount_incl : s?.per_term_incl;
+            return [
+              `<div class="cell-main-wrap"><div class="av av-sm">${H.av(cName)}</div><span class="cell-main">${cName}</span></div>`,
+              `<span style="font-size:12.5px;color:var(--text-3)">${s.description || '—'}</span>`,
+              `<span style="font-size:12.5px;color:var(--text-3)">${s.entity || '—'}</span>`,
+              `<span class="mono">${eur(perTerm)}</span>`,
+              `<span class="mono">${eur0(subMonthlyIncl(s))}</span>`,
+              `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(s.start_date)}</span>`,
+              `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(s.end_date)}</span>`,
+              `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(s.created_at)}</span>`,
+              H.pill(c, l),
+            ];
+          }),
+          '__finSubRowClick'
+        );
+      })()}
       ${fnPager(_sub, total, fetchSubs)}
       ${!items.length && !_sub.loading ? `<div class="sv-empty">${_sub.error || 'Geen abonnementen met deze filter.'}</div>` : ''}`;
   }

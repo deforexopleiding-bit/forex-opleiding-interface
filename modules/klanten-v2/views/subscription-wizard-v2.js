@@ -179,7 +179,9 @@
     ]);
     _sub.entities  = asArr(ents?.entities);
     _sub.products  = asArr(prods?.products);
-    _sub.trajecten = asArr(traj?.trajecten);
+    // API-response: { trajects: [{name, variants:[{name}], is_active}] } —
+    // NIET 'trajecten' (dat gaf altijd []). Zie recon 2026-08-12.
+    _sub.trajecten = asArr(traj?.trajects);
     // Default entity = eerste
     if (!_sub.tl_department_id && _sub.entities.length) _sub.tl_department_id = _sub.entities[0].tl_department_id || '';
     if (window.DFO?.render) window.DFO.render();
@@ -211,6 +213,9 @@
     _sub.deal = j.deal || null;
     _sub.customer = j.customer || null;
     _sub.lineItemsDeal = asArr(j.line_items);
+    // Server-berekend excl/incl totaal (mix-safe over BTW-tarieven).
+    // NIET van deal.amount_total (bestaat niet); van j.totals.{excl,incl}.
+    _sub.dealTotals = j.totals || null;
     _prefillFromDeal();
   }
   async function _loadCustomerById(customerId) {
@@ -218,6 +223,35 @@
     if (j?.customer) _sub.customer = j.customer;
     _addBlankSub();
   }
+  // Offerte-picker (standalone-mode, na klant-keuze): open offertes van deze
+  // klant. Fetch éénmalig per customer_id-wissel.
+  async function _loadOfferPickerForCustomer(customerId) {
+    if (!customerId) { _sub.offerPickerList = []; return; }
+    if (_sub.offerPickerCustomerId === customerId && _sub.offerPickerList) return;
+    _sub.offerPickerLoading = true;
+    _sub.offerPickerCustomerId = customerId;
+    if (window.DFO?.render) window.DFO.render();
+    const j = await tryFetch('quotations', '/api/sales-quotations?customer_id=' + encodeURIComponent(customerId) + '&page_size=100');
+    _sub.offerPickerLoading = false;
+    // Alleen relevante offertes: getekend/accepted, geen abonnement gekoppeld, niet-markeerd
+    const raw = asArr(j?.quotations);
+    _sub.offerPickerList = raw.filter((q) => {
+      const st = String(q?.tl_quotation_status || '').toLowerCase();
+      const usable = st === 'accepted' || st === 'signed';
+      const busy   = !!q?.has_linked_subscription || !!q?.subscription_marked_done;
+      return usable && !busy;
+    });
+    if (window.DFO?.render) window.DFO.render();
+  }
+  // Pick offerte in standalone-mode → prefill regels + totalen.
+  window.__subwPickOffer = async (dealId) => {
+    if (!dealId) return;
+    _sub.subscriptions = []; // reset — prefill vult opnieuw
+    _sub.dealId = dealId;
+    // Blijf in 'standalone' mode; alleen line-items komen uit deze offerte.
+    await _loadDealAndPrefill(dealId);
+    if (window.DFO?.render) window.DFO.render();
+  };
 
   // ── Prefill helpers ────────────────────────────────────────────────────
   function _addBlankSub() {
@@ -269,37 +303,112 @@
       s.end_date = _calcEnd(s.start_date, s.term_count);
     }
   }
+  // BTW-mix parity: bewaart per-line vat_percentage (21% / 9% / 0%) uit
+  // offerte i.p.v. alles op 21% te forceren. Overgenomen uit v1
+  // subscription-wizard.html linesFromOffer() (regel 574-590) +
+  // splitFromOffer (regel 542-566).
+  //
+  // Strategie:
+  // 1. Als offerte-line_items beschikbaar: gebruik die 1-op-1 (met eigen BTW).
+  // 2. Split over aanbetaling + termijnen proportioneel per BTW-groep (op basis
+  //    van excl-gewicht), zodat de mix bewaard blijft.
+  // 3. Fallback naar 1 lege sub als er niets bruikbaar is.
+  function _linesFromOfferDefault() {
+    const lis = asArr(_sub.lineItemsDeal);
+    if (!lis.length) return [_newLine()];
+    return lis.map((l) => {
+      const qty = Number(l.quantity) || 1;
+      const unit = Number(l.unit_price) || 0;
+      const excl = round2(unit * qty);
+      const vat = Number(l.vat_percentage);
+      return _newLine({
+        product_id: l.product_id || '',
+        description: String(l.description || l.product_name || '').trim() || 'Regel',
+        amount: excl,
+        vat_percentage: (vat != null && !Number.isNaN(vat)) ? vat : 21,
+        _lead: 'excl',
+      });
+    });
+  }
+  // Split total-incl proportioneel over vat-groepen; behoudt de mix.
+  function _linesFromOfferSplit(targetIncl) {
+    const lis = asArr(_sub.lineItemsDeal);
+    if (!lis.length || !targetIncl || targetIncl <= 0) return null;
+    // Groepeer excl-som per vat.
+    const groups = new Map(); // vat → excl-sum
+    for (const l of lis) {
+      const qty = Number(l.quantity) || 1;
+      const unit = Number(l.unit_price) || 0;
+      const excl = unit * qty;
+      const vat = Number(l.vat_percentage);
+      const key = (vat != null && !Number.isNaN(vat)) ? vat : 21;
+      groups.set(key, (groups.get(key) || 0) + excl);
+    }
+    const totalInclFromLines = Array.from(groups.entries()).reduce((sum, [vat, excl]) => sum + excl * (1 + vat / 100), 0);
+    if (!totalInclFromLines) return null;
+    // Ratio: hoeveel van de offerte-totaal-incl belandt in dit onderdeel.
+    const ratio = targetIncl / totalInclFromLines;
+    const lines = [];
+    for (const [vat, excl] of groups.entries()) {
+      const inclShare = round2(excl * (1 + vat / 100) * ratio);
+      if (inclShare <= 0) continue;
+      lines.push(_newLine({
+        description: 'Regel (' + vat + '%)',
+        vat_percentage: vat,
+        _lead: 'incl',
+        amount_incl: inclShare,
+      }));
+    }
+    return lines.length ? lines : null;
+  }
+
   function _prefillFromDeal() {
     const d = _sub.deal || {};
     const today = new Date().toISOString().slice(0, 10);
-    // Aanbetaling-sub (indien payment_downpayment_amount > 0)
     const dp = Number(d.payment_downpayment_amount) || 0;
     const tc = Number(d.payment_term_count) || 0;
     const tAmt = Number(d.payment_term_amount) || 0;
+    const totalIncl = Number(_sub.dealTotals?.incl) || 0;
 
     if (dp > 0) {
+      const dpLines = _linesFromOfferSplit(dp) || [_newLine({ description: 'Aanbetaling', vat_percentage: 21, _lead: 'incl', amount_incl: dp })];
       _sub.subscriptions.push({
         description: 'Aanbetaling',
         term_count: 1,
         start_date: (d.payment_downpayment_date || d.start_date || today).slice(0, 10),
         end_date: '',
-        line_items: [_newLine({ description: 'Aanbetaling', amount: dp / 1.21, vat_percentage: 21, _lead: 'incl', amount_incl: dp })],
+        line_items: dpLines,
       });
     }
     if (tc > 0 && tAmt > 0) {
+      const termLines = _linesFromOfferSplit(tAmt) || [_newLine({ description: 'Cursus-termijn', vat_percentage: 21, _lead: 'incl', amount_incl: tAmt })];
       _sub.subscriptions.push({
         description: 'Termijnen',
         term_count: tc,
         start_date: (d.payment_term_start_date || d.payment_start_date || d.start_date || today).slice(0, 10),
         end_date: '',
-        line_items: [_newLine({ description: 'Cursus-termijn', amount: tAmt / 1.21, vat_percentage: 21, _lead: 'incl', amount_incl: tAmt })],
+        line_items: termLines,
+      });
+    }
+    // Geen aanbetaling/termijnen-data, maar wel line-items en totaal:
+    // gebruik line-items 1-op-1 als één abonnement.
+    if (_sub.subscriptions.length === 0 && asArr(_sub.lineItemsDeal).length) {
+      _sub.subscriptions.push({
+        description: 'Abonnement',
+        term_count: 1,
+        start_date: (d.start_date || today).slice(0, 10),
+        end_date: '',
+        line_items: _linesFromOfferDefault(),
       });
     }
     if (_sub.subscriptions.length === 0) {
-      // Fallback: 1 lege sub
       _addBlankSub();
     }
+    // Zorg dat elke line-actuele amount_incl heeft (bij lead=excl).
+    for (const s of _sub.subscriptions) for (const l of asArr(s.line_items)) _recalcLine(l);
     _recomputeEnds();
+    // Onbenutte totalIncl voor eventuele UI-hint; niet blocking.
+    if (!totalIncl) console.debug('[subw-v2] geen totals.incl in deal-detail — prefill wisselend precies');
   }
 
   // ── Validation ─────────────────────────────────────────────────────────
@@ -358,10 +467,33 @@
     } else if (field === 'vat_percentage') {
       l.vat_percentage = Number(val) || 0;
       _recalcLine(l);
-      if (window.DFO?.render) window.DFO.render();
+      // Surgical: BEIDE inputs updaten (excl én incl), zonder full re-render.
+      // Vermijdt cursor-verlies en dropdown-close bij snelle wissel.
+      const box = document.querySelector(`[data-subw-line="${subI}-${lineI}"]`);
+      if (box) {
+        const inpExcl = box.querySelector('[data-subw-amt]');
+        const inpIncl = box.querySelector('[data-subw-amtincl]');
+        if (inpExcl && document.activeElement !== inpExcl) inpExcl.value = (l.amount || 0).toFixed(2);
+        if (inpIncl && document.activeElement !== inpIncl) inpIncl.value = (l.amount_incl || 0).toFixed(2);
+      }
+      _updateTotals();
     } else {
       l[field] = val;
     }
+  };
+  // TRAJECT-preset: prefill sub-description vanuit traject + variant.
+  window.__subwPickTraject = (subI, comboValue) => {
+    const s = _sub.subscriptions[subI]; if (!s) return;
+    // comboValue = "trajectIdx:variantIdx" of "" (custom)
+    if (!comboValue) return;
+    const [ti, vi] = comboValue.split(':').map((n) => Number(n));
+    const t = _sub.trajecten[ti]; if (!t) return;
+    const v = asArr(t.variants)[vi];
+    const label = v ? `${t.name} > ${v.name}` : t.name;
+    s.description = label;
+    // Surgical DOM update: alleen omschrijving-input
+    const box = document.querySelector(`[data-subw-sub-desc="${subI}"]`);
+    if (box && document.activeElement !== box) box.value = label;
   };
   window.__subwAddSub = () => { _addBlankSub(); if (window.DFO?.render) window.DFO.render(); };
   window.__subwRemoveSub = (i) => { if (_sub.subscriptions.length <= 1) return; _sub.subscriptions.splice(i, 1); if (window.DFO?.render) window.DFO.render(); };
@@ -396,13 +528,22 @@
   }
 
   // ── Klant-zoeker (standalone) ──────────────────────────────────────────
+  // Cursor-preservering: uncontrolled input. Bij re-render (voor loading/
+  // resultaten) bewaart _mountOverlay de caret-positie via
+  // document.activeElement + selectionStart/End restore.
   let _searchTimer = null;
   window.__subwCustSearch = (v) => {
+    // Sla waarde op zonder onmiddellijke re-render (voorkomt caret-jump).
     _sub.custSearch = String(v || '');
     if (_searchTimer) clearTimeout(_searchTimer);
     _searchTimer = setTimeout(async () => {
       const q = _sub.custSearch.trim();
-      if (q.length < 2) { _sub.custResults = []; if (window.DFO?.render) window.DFO.render(); return; }
+      if (q.length < 2) {
+        _sub.custResults = [];
+        // Alleen re-render als er iets zichtbaar te wissen valt.
+        if (window.DFO?.render) window.DFO.render();
+        return;
+      }
       _sub.custSearching = true; if (window.DFO?.render) window.DFO.render();
       const j = await tryFetch('cust-search', '/api/sales-customers?search=' + encodeURIComponent(q));
       _sub.custSearching = false;
@@ -498,23 +639,28 @@
       const d = _sub.deal;
       const c = _sub.customer;
       if (!d) return `<div class="sw-step"><div style="padding:24px; color:var(--text-2);">Offerte laden…</div></div>`;
-      const total = Number(d.amount_total) || 0;
+      // Offerte-totaal komt uit server-berekende j.totals.incl (mix-safe over
+      // 21%/9%-regels). NIET van d.amount_total (bestaat niet op deal).
+      const total = Number(_sub.dealTotals?.incl) || 0;
       return `<div class="sw-step">
         <h2 class="sw-step-title">Klant & offerte</h2>
         <p class="sw-step-sub">Controleer of dit de juiste offerte is voor het abonnement.</p>
         <div class="kv-onb-meta">
           <div class="kv-onb-meta-row"><span>Klant</span><b>${esc(c?.name || d.customer_name || '—')}</b></div>
           <div class="kv-onb-meta-row"><span>E-mail</span><span>${c?.email ? `<a href="mailto:${esc(c.email)}">${esc(c.email)}</a>` : '—'}</span></div>
-          <div class="kv-onb-meta-row"><span>Offerte-totaal</span><b>${eur(total)}</b></div>
+          <div class="kv-onb-meta-row"><span>Offerte-totaal (incl.)</span><b>${eur(total)}</b></div>
+          <div class="kv-onb-meta-row"><span>Regels op offerte</span><span>${asArr(_sub.lineItemsDeal).length} regel(s)</span></div>
           <div class="kv-onb-meta-row"><span>Getekend op</span><span>${d.tl_quotation_signed_at ? new Date(d.tl_quotation_signed_at).toLocaleDateString('nl-NL') : '—'}</span></div>
           <div class="kv-onb-meta-row"><span>Aanbetaling</span><span>${d.payment_downpayment_amount ? eur(d.payment_downpayment_amount) : '—'}</span></div>
           <div class="kv-onb-meta-row"><span>Termijnen</span><span>${d.payment_term_count ? (d.payment_term_count + '× ' + eur(d.payment_term_amount)) : '—'}</span></div>
         </div>
-        <p class="kv-onb-hint">Als deze prefill niet klopt, kun je in stap 2 alles aanpassen.</p>
+        <p class="kv-onb-hint">Prefill neemt BTW-mix (21% / 9%) 1-op-1 over uit de offerte-regels. Aanpassen kan in stap 2.</p>
       </div>`;
     }
-    // Standalone
+    // ── Standalone ──
     const results = _sub.custResults;
+    // Trigger offerte-picker load zodra klant gekozen is.
+    if (_sub.customer?.id) queueMicrotask(() => _loadOfferPickerForCustomer(_sub.customer.id));
     return `<div class="sw-step">
       <h2 class="sw-step-title">Kies klant</h2>
       <p class="sw-step-sub">Zoek een bestaande klant. Voor een nieuwe klant: <a href="/modules/subscription-wizard.html" style="color:var(--m);text-decoration:underline">gebruik de v1-wizard</a> (voegt nieuwe klant + TL-lookup toe).</p>
@@ -523,10 +669,12 @@
           <div class="kv-onb-meta-row"><span>Gekozen klant</span><b>${esc(_sub.customer.name || (_sub.customer.first_name + ' ' + (_sub.customer.last_name || '')))}</b></div>
           <div class="kv-onb-meta-row"><span>E-mail</span><span>${esc(_sub.customer.email || '—')}</span></div>
           <div class="kv-onb-meta-row"><span>&nbsp;</span><span><button class="ds-btn ds-btn-ghost ds-btn-sm" onclick="__subwCustClear()">Wijzigen</button></span></div>
-        </div>` : `
+        </div>
+        ${_renderOfferPicker()}
+      ` : `
         <div class="sw-field">
           <label>Zoek klant op naam of e-mail</label>
-          <input class="ib-input" type="text" placeholder="Typ minstens 2 tekens…" value="${esc(_sub.custSearch)}" oninput="__subwCustSearch(this.value)" autofocus>
+          <input class="ib-input" type="text" placeholder="Typ minstens 2 tekens…" value="${esc(_sub.custSearch)}" oninput="__subwCustSearch(this.value)" data-subw-cust-search autofocus>
         </div>
         ${_sub.custSearching ? '<div style="padding:12px; color:var(--text-3); font-style:italic">Zoeken…</div>' : ''}
         ${results.length ? `<div class="subw-cust-results">
@@ -537,6 +685,27 @@
         </div>` : (_sub.custSearch.length >= 2 && !_sub.custSearching ? '<div class="kv-onb-empty">Geen klanten gevonden.</div>' : '')}
       `}
     </div>`;
+  }
+  // Offerte-picker (standalone): 0/1/N open offertes van deze klant.
+  function _renderOfferPicker() {
+    if (_sub.offerPickerLoading) return `<div class="kv-onb-hint" style="margin-top:14px">Openstaande offertes van deze klant laden…</div>`;
+    const list = asArr(_sub.offerPickerList);
+    if (!list.length) return `<div class="kv-onb-hint" style="margin-top:14px">Geen openstaande offertes voor deze klant. Ga direct door naar stap 2 om handmatig regels toe te voegen.</div>`;
+    const currentDealId = _sub.dealId || '';
+    return `
+      <div class="kv-onb-section" style="margin-top:14px">
+        <div class="kv-onb-section-title">Prefill vanuit een bestaande offerte (optioneel)</div>
+        <div style="font-size:12px; color:var(--text-3); margin-bottom:8px;">
+          Deze klant heeft ${list.length} openstaande offerte${list.length === 1 ? '' : 's'} zonder gekoppeld abonnement. Kies er één om regels + BTW-mix over te nemen.
+        </div>
+        <div class="subw-cust-results">
+          ${list.map((q) => `<button type="button" class="subw-cust-hit ${currentDealId === q.deal_id ? 'is-active' : ''}" onclick="__subwPickOffer('${esc(q.deal_id)}')">
+            <div><b>${esc(q.quote_reference || q.deal_id.slice(0, 8))}</b> · ${esc(q.traject_label || 'Traject onbekend')}</div>
+            <div style="font-size:11.5px; color:var(--text-3)">${eur(Number(q.total_amount_incl) || 0)} incl · status <span class="mono">${esc(q.tl_quotation_status || '—')}</span></div>
+          </button>`).join('')}
+        </div>
+        ${currentDealId ? `<div class="kv-onb-hint" style="margin-top:8px;color:var(--emerald)">✓ Prefill actief vanuit offerte ${esc(list.find(q => q.deal_id === currentDealId)?.quote_reference || currentDealId.slice(0, 8))}</div>` : ''}
+      </div>`;
   }
 
   function _renderStep2() {
@@ -569,11 +738,26 @@
 
   function _renderSubCard(s, i) {
     const canRemove = _sub.subscriptions.length > 1;
+    // TRAJECT-preset: kies traject+variant om description te prefillen.
+    // Wordt genegeerd als leeg — omschrijving blijft handmatig-editbaar.
+    const trajOpts = _sub.trajecten.length
+      ? ['<option value="">— Geen preset (custom) —</option>']
+        .concat(_sub.trajecten.flatMap((t, ti) => {
+          if (!t) return [];
+          const vs = asArr(t.variants).filter((v) => v && v.is_active !== false);
+          if (!vs.length) return [`<option value="${ti}:0">${esc(t.name || 'Traject ' + ti)}</option>`];
+          return vs.map((v, vi) => `<option value="${ti}:${vi}">${esc(t.name || '')} &gt; ${esc(v.name || '')}</option>`);
+        })).join('')
+      : '';
     return `<div class="subw-sub-card">
       <div class="subw-sub-head">
-        <input class="ib-input" style="flex:1" placeholder="Omschrijving (bv. Aanbetaling, Termijnen)" value="${esc(s.description)}" oninput="__subwSubField(${i}, 'description', this.value)">
+        <input class="ib-input" style="flex:1" placeholder="Omschrijving (bv. Aanbetaling, Termijnen)" value="${esc(s.description)}" oninput="__subwSubField(${i}, 'description', this.value)" data-subw-sub-desc="${i}">
         ${canRemove ? `<button class="ds-icon-btn" onclick="__subwRemoveSub(${i})" title="Verwijder abonnement">×</button>` : ''}
       </div>
+      ${trajOpts ? `<div class="sw-field" style="margin-bottom:8px;">
+        <span style="font-size:11px;color:var(--text-3)">Traject-preset (prefill omschrijving)</span>
+        <select class="ib-input" onchange="__subwPickTraject(${i}, this.value)">${trajOpts}</select>
+      </div>` : ''}
       <div class="subw-sub-meta">
         <label class="sw-field"><span>Startdatum</span>
           <input class="ib-input" type="date" min="${new Date().toISOString().slice(0, 10)}" value="${esc((s.start_date || '').slice(0, 10))}" onchange="__subwSubField(${i}, 'start_date', this.value)">
@@ -699,6 +883,31 @@
   // In plaats daarvan: klanten-v2.js host-view rendert '<div id="kv-view">…</div>'
   // gevolgd door onze wizard-overlay indien open. We doen dat door de wizard-
   // HTML aan document.body toe te voegen bij render, en te verwijderen bij close.
+  // Cursor-preservering across re-renders: onthoud het gefocusde element
+  // (via data-subw-cust-search / data-subw-sub-desc / etc.) + caret-positie,
+  // en herstel na innerHTML-swap. Voorkomt de "cursor verspringt bij typen"-
+  // bug die Jeffrey in de v1-wizard had — v2 doet nooit een full state-render
+  // per keystroke, en zelfs bij bewuste re-renders (bv. debounced search)
+  // blijft de focus + caret staan.
+  function _rememberFocus(root) {
+    const a = document.activeElement;
+    if (!a || !root.contains(a)) return null;
+    const info = { start: 0, end: 0, sel: null };
+    if (a.hasAttribute('data-subw-cust-search')) info.sel = '[data-subw-cust-search]';
+    else if (a.hasAttribute('data-subw-sub-desc')) info.sel = `[data-subw-sub-desc="${a.getAttribute('data-subw-sub-desc')}"]`;
+    else if (a.hasAttribute('data-subw-amt')) info.sel = '[data-subw-amt]';
+    else if (a.hasAttribute('data-subw-amtincl')) info.sel = '[data-subw-amtincl]';
+    if (!info.sel) return null;
+    try { info.start = a.selectionStart ?? 0; info.end = a.selectionEnd ?? 0; } catch (_) { /* number inputs throw */ }
+    return info;
+  }
+  function _restoreFocus(root, info) {
+    if (!info || !info.sel) return;
+    const el = root.querySelector(info.sel);
+    if (!el) return;
+    el.focus();
+    try { el.setSelectionRange(info.start, info.end); } catch (_) { /* number input: no-op */ }
+  }
   function _mountOverlay() {
     let el = document.getElementById('subw-overlay-root');
     if (!el) {
@@ -706,7 +915,9 @@
       el.id = 'subw-overlay-root';
       document.body.appendChild(el);
     }
+    const focusInfo = _rememberFocus(el);
     el.innerHTML = _sub.open ? renderWizard() : '';
+    if (_sub.open && focusInfo) queueMicrotask(() => _restoreFocus(el, focusInfo));
   }
   // Hook DFO.render → run overlay mount after original render
   if (!window.DFO.__subwOverlayHooked) {
