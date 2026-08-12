@@ -182,6 +182,9 @@
     </div>`;
   }
   window.__swDbgClear = () => { _sw_dbg.entries = []; const b = document.getElementById('sw-dbg-body'); if (b) b.innerHTML = ''; };
+  // Expose voor cross-module routing-logs (bv. sales-v2 __svOfferteNew).
+  window.__swLog = _swLog;
+  window.__swDbgOn = () => _sw_dbg.on;
   const eur = window.DFO.eur || ((n) => n == null ? '—' : new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(n));
 
   // ── Prefill-lezers (leads → wizard, events → wizard) ────────────────

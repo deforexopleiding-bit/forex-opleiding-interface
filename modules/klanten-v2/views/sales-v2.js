@@ -241,10 +241,31 @@
   }
 
   // ── OFFERTES ─────────────────────────────────────────────────────────────
-  window.__svOfferteNew  = () => { window.location.href = '/modules/sales-wizard.html'; };
-  // Batch 2 — v2-wizard (scaffold). Opent in-app modal via __swOpen als
-  // sales-wizard-v2.js is geladen. Fallback naar oude wizard als niet.
+  // Preview-detect: als de URL `?v2preview=sales` bevat, is de gebruiker
+  // bezig met QA op de v2-wizard. De primary "Nieuwe offerte"-knop opent
+  // dan de in-shell v2-modal (via __swOpen). Zonder preview-flag valt 'ie
+  // terug op de bestaande live redirect naar modules/sales-wizard.html
+  // zodat productie-flow ongewijzigd blijft (dormant, V2_ACTIVE_ALLOWLIST
+  // niet aangeraakt).
+  function _isSalesPreview() {
+    try {
+      const raw = new URLSearchParams(location.search).get('v2preview') || '';
+      return raw.split(',').map((s) => s.trim()).includes('sales');
+    } catch (_) { return false; }
+  }
+  window.__svOfferteNew = () => {
+    const preview = _isSalesPreview();
+    const canOpen = typeof window.__swOpen === 'function';
+    // Log de gekozen route in het ?debug=1 panel (als sales-wizard-v2's
+    // logger geladen is) zodat Jeffrey de beslissing kan zien.
+    try { if (typeof window.__swLog === 'function') window.__swLog('route:new-offerte', { preview, canOpen }); } catch (_) {}
+    if (preview && canOpen) { window.__swOpen(); return; }
+    window.location.href = '/modules/sales-wizard.html';
+  };
+  // Batch 2 — expliciete v2-wizard entry (naast de primary knop). Blijft
+  // bestaan zodat Jeffrey óók zonder preview-flag de v2-modal kan openen.
   window.__svOfferteNewV2 = () => {
+    try { if (typeof window.__swLog === 'function') window.__swLog('route:new-offerte-v2', { canOpen: typeof window.__swOpen === 'function' }); } catch (_) {}
     if (typeof window.__swOpen === 'function') window.__swOpen();
     else window.location.href = '/modules/sales-wizard.html';
   };
