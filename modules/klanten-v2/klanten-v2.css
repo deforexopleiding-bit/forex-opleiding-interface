@@ -3309,3 +3309,28 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
   border-radius: 8px; font-size: 12.5px; color: var(--text-1, #111721);
 }
 .kv-onb-cancel-row { padding: 2px 0; }
+
+/* ── Onboarding-lijst kebab-menu — v2 parity-ronde 2026-08-12.
+   Kebab (⋮) knop met dropdown; position:absolute t.o.v. kv-onb-kebab wrapper.
+   Sluit door herhaal-klik op ⋮ of klik buiten (dropdown-menu is toch klein). */
+.kv-onb-kebab { position: relative; display: inline-block; }
+.kv-onb-kebab-menu {
+  display: none;
+  position: absolute; right: 0; top: 100%; margin-top: 4px;
+  min-width: 180px; z-index: 40;
+  background: var(--surface-1, #fff); color: var(--text-1, #111721);
+  border: 1px solid var(--line, #E5EAEF); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, .12);
+  padding: 4px 0;
+}
+.kv-onb-kebab-menu.is-open { display: block; }
+.kv-onb-kebab-menu button {
+  display: block; width: 100%; text-align: left;
+  padding: 8px 14px; font-size: 13px; line-height: 1.3;
+  background: transparent; border: 0; color: inherit;
+  cursor: pointer;
+}
+.kv-onb-kebab-menu button:hover { background: var(--surface-2, #F5F8FB); }
+
+/* chip-warn — subtiele oranje-tint bij te-behandelen-filter met N>0. */
+.chip.chip-warn:not(.on) { border-color: var(--amber-line, #F3D19A); color: var(--amber, #B8770F); }

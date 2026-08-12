@@ -128,12 +128,28 @@ function renderOverzichtTab() {
       <div class="kv-onb-meta-row"><span>Mentor</span><b>${esc(o.mentor_name || '— nog geen mentor —')}</b></div>
       <div class="kv-onb-meta-row"><span>Aangemeld</span><span>${fmtDT(o.created_at)}</span></div>
       <div class="kv-onb-meta-row"><span>Startdatum</span><span>${fmtDate(o.start_date)}</span></div>
+      <div class="kv-onb-meta-row"><span>Eerste call gepland</span><span>${fmtDT(o.planned_call_at)}</span></div>
+      <div class="kv-onb-meta-row"><span>Laatste call voltooid</span><span>${fmtDT(o.last_completed_at)}</span></div>
+      <div class="kv-onb-meta-row"><span>Laatste no-show</span><span>${o.last_noshow_at ? `<span style="color:var(--rose)">${fmtDT(o.last_noshow_at)}</span>` : '—'}</span></div>
       <div class="kv-onb-meta-row"><span>Toegewezen</span><span>${fmtDT(o.assigned_at)}</span></div>
       <div class="kv-onb-meta-row"><span>Gestart</span><span>${fmtDT(o.started_at)}</span></div>
       <div class="kv-onb-meta-row"><span>Afgerond</span><span>${fmtDT(o.completed_at)}</span></div>
       ${o.archived_at ? `<div class="kv-onb-meta-row"><span>Gearchiveerd</span><span>${fmtDT(o.archived_at)}</span></div>` : ''}
       <div class="kv-onb-meta-row"><span>Betaling</span><span>${o.paid ? '<span class="kv-onb-pill kv-onb-pill-ok">Betaald</span>' : '<span class="kv-onb-pill kv-onb-pill-warn">Niet betaald</span>'}</span></div>
     </div>
+
+    ${o.cancelled && o.cancellation ? `
+      <div class="kv-onb-section" style="border:1px solid var(--rose-line,#F1B4BE); background:var(--rose-soft,#FBEAED); border-radius:var(--r,8px); padding:12px 14px; margin-top:14px;">
+        <div class="kv-onb-section-title" style="color:var(--rose,#C22B3E)">⚠ Onboarding geannuleerd</div>
+        <div class="kv-onb-meta">
+          <div class="kv-onb-meta-row"><span>Geannuleerd op</span><span>${fmtDT(o.cancellation.cancelled_at)}</span></div>
+          ${o.cancellation.cancelled_by ? `<div class="kv-onb-meta-row"><span>Door</span><span class="mono">${esc(o.cancellation.cancelled_by)}</span></div>` : ''}
+          ${o.cancellation.reason ? `<div class="kv-onb-meta-row"><span>Reden</span><span>${esc(o.cancellation.reason)}</span></div>` : ''}
+          ${o.cancellation.subscription_value != null ? `<div class="kv-onb-meta-row"><span>Abo-waarde</span><span>${esc(o.cancellation.subscription_value)}</span></div>` : ''}
+          ${o.cancellation.steps ? `<div class="kv-onb-meta-row"><span>Uitgevoerde stappen</span><span style="font-size:11px;color:var(--text-2)">${esc(JSON.stringify(o.cancellation.steps))}</span></div>` : ''}
+        </div>
+      </div>
+    ` : ''}
 
     <div class="kv-onb-section">
       <div class="kv-onb-section-title">Notitie naar mentor</div>
@@ -179,7 +195,7 @@ function renderOverzichtTab() {
       </div>
       <div class="kv-onb-action-row" style="margin-top:14px">
         <button type="button" class="ds-btn ds-btn-primary ds-btn-sm kv-onb-danger" data-kv-onb-cancel-preview ${state.savingAction || o.status === 'geannuleerd' ? 'disabled' : ''} title="${o.status === 'geannuleerd' ? 'Al geannuleerd' : 'Preview de cascade (crediteert facturen, deactiveert abo, Bubble-membership)'}">
-          ${state.savingAction === 'cancel-preview' ? 'Preview laden…' : 'Annuleren (preview…)'}
+          ${state.savingAction === 'cancel-preview' ? 'Preview laden…' : 'Student annuleren'}
         </button>
       </div>
     </div>`;
@@ -208,11 +224,11 @@ function renderAccountTab() {
         <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-provision ${state.savingAction ? 'disabled' : ''}>
           ${state.savingAction === 'provision' ? 'Bezig…' : (provOk ? 'Provision opnieuw proberen' : 'Bubble provisionen')}
         </button>
-        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-invite ${state.savingAction ? 'disabled' : ''}>
-          ${state.savingAction === 'invite' ? 'Bezig…' : 'WhatsApp-invite versturen'}
+        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-resend ${state.savingAction || !o.customer_id ? 'disabled' : ''} title="Verstuurt de welkomstmail met onboarding-link opnieuw">
+          ${state.savingAction === 'resend' ? 'Versturen…' : 'Onboardingsuitnodiging opnieuw sturen'}
         </button>
       </div>
-      <div class="kv-onb-hint">WhatsApp-invite kan alleen gepushed worden als de klant een gekoppeld telefoonnummer heeft en de template beschikbaar is.</div>
+      <div class="kv-onb-hint">De uitnodiging wordt via e-mail verzonden naar het klant-adres. Het onboarding-token blijft geldig; een bestaande link blijft dus werken.</div>
     </div>`;
 }
 
@@ -241,11 +257,17 @@ function renderTijdlijnTab() {
   const o = state.data;
   const updates = Array.isArray(o.mentor_updates) ? o.mentor_updates : [];
   const rows = [];
-  if (o.created_at)   rows.push({ at: o.created_at,   label: 'Aangemeld' });
-  if (o.assigned_at)  rows.push({ at: o.assigned_at,  label: `Toegewezen aan ${o.mentor_name || 'mentor'}` });
-  if (o.started_at)   rows.push({ at: o.started_at,   label: 'Onboarding gestart' });
-  if (o.completed_at) rows.push({ at: o.completed_at, label: 'Onboarding afgerond' });
-  if (o.archived_at)  rows.push({ at: o.archived_at,  label: 'Gearchiveerd' });
+  if (o.created_at)          rows.push({ at: o.created_at,          label: '📝 Aangemeld' });
+  if (o.assigned_at)         rows.push({ at: o.assigned_at,         label: `👤 Toegewezen aan ${esc(o.mentor_name || 'mentor')}` });
+  if (o.invite_sent_at)      rows.push({ at: o.invite_sent_at,      label: '✉️ Onboarding-uitnodiging verstuurd' });
+  if (o.planned_call_at)     rows.push({ at: o.planned_call_at,     label: '📅 Eerste call gepland' });
+  if (o.started_at)          rows.push({ at: o.started_at,          label: '▶ Wizard gestart' });
+  if (o.last_completed_at)   rows.push({ at: o.last_completed_at,   label: '✓ Call voltooid' });
+  if (o.last_noshow_at)      rows.push({ at: o.last_noshow_at,      label: '⚠ No-show' });
+  if (o.intake_handled_at)   rows.push({ at: o.intake_handled_at,   label: '✓ Intake afgehandeld' });
+  if (o.completed_at)        rows.push({ at: o.completed_at,        label: '🎉 Onboarding afgerond' });
+  if (o.archived_at)         rows.push({ at: o.archived_at,         label: '📁 Gearchiveerd' });
+  if (o.cancelled && o.cancellation?.cancelled_at) rows.push({ at: o.cancellation.cancelled_at, label: `❌ Onboarding geannuleerd${o.cancellation.reason ? ' — ' + esc(o.cancellation.reason) : ''}` });
   for (const u of updates) {
     if (!u) continue;
     rows.push({
@@ -253,7 +275,8 @@ function renderTijdlijnTab() {
       label: `${esc(u.kind || 'update')}${u.status ? ' · ' + esc(u.status) : ''}${u.note ? ' — ' + esc(u.note) : ''}`,
     });
   }
-  rows.sort((a, b) => new Date(b.at || 0).getTime() - new Date(a.at || 0).getTime());
+  // ASC (oud→nieuw) — historie leest natuurlijk van boven naar beneden.
+  rows.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
   return rows.length
     ? `<ul class="kv-onb-timeline">${rows.map((r) => `<li><b>${fmtDT(r.at)}</b> — ${r.label}</li>`).join('')}</ul>`
     : '<div class="kv-onb-empty">Nog geen tijdlijn-events.</div>';
@@ -329,27 +352,44 @@ async function actCancelPreview() {
 async function actProvision() {
   await callAction('provision', '/api/onboarding-provision-retry', { onboarding_id: state.id });
 }
-async function actInvite() {
-  await callAction('invite', '/api/onboarding-invite-send', { onboarding_id: state.id });
+async function actResend() {
+  const cid = state.data?.customer_id;
+  if (!cid) { K().toast('Geen klant-koppeling — kan uitnodiging niet versturen'); return; }
+  state.savingAction = 'resend'; state.globalError = null; state.saveOk = null;
+  rerender();
+  try {
+    const j = await K().authedJson('/api/sales-onboarding-send', {
+      method: 'POST', body: JSON.stringify({ customer_id: cid }),
+    });
+    state.savingAction = null;
+    state.saveOk = j?.mail_sent ? 'Uitnodiging verstuurd naar ' + esc(state.data?.email || 'klant') : 'Token vernieuwd (mail niet verzonden)';
+    // Herlaad — invite_sent_at / onboarding_sent_at moet updaten
+    state.data = await loadDetail(state.id);
+    if (typeof state.onSuccess === 'function') state.onSuccess();
+  } catch (e) {
+    state.savingAction = null;
+    state.globalError = 'Uitnodiging mislukt: ' + (e?.message || 'onbekende fout');
+  } finally { rerender(); }
 }
 
 // ── Cancel-confirm sub-modal ───────────────────────────────────────────────
-// Toont preview-cascade + reason-input + Bevestig-knop met CANCEL-guard.
+// 2-step preview→confirm. Reden verplicht (min 10 chars), geen typ-CANCEL
+// meer — expliciete waarschuwing + destructieve knop-label is voldoende.
+const CANCEL_WARNING_TEXT = 'Dit is een onomkeerbare cascade: alle openstaande facturen worden gecrediteerd, actieve abonnementen worden gedeactiveerd, gekoppelde offertes worden op geannuleerd gezet en de Bubble-membership wordt beëindigd. De klant behoudt toegang tot voltooide onderdelen tot Bubble-sync.';
+
 let _cancelPreview = null;
 let _cancelReason  = '';
-let _cancelGuard   = '';
 let _cancelSaving  = false;
 
 function openCancelConfirmModal(preview) {
   _cancelPreview = preview || {};
   _cancelReason  = '';
-  _cancelGuard   = '';
   _cancelSaving  = false;
   cancelRerender();
 }
 function cancelRerender() {
   D().openModal({
-    head: `<div class="kv-edit-head"><div><div class="kv-edit-head-eyebrow" style="color:var(--rose,#C22B3E)">Annuleren · destructief</div><div class="kv-edit-head-name">${esc(_cancelPreview.customer_name || 'Onboarding')}</div></div><button type="button" class="ds-icon-btn" data-kv-onbc-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>`,
+    head: `<div class="kv-edit-head"><div><div class="kv-edit-head-eyebrow" style="color:var(--rose,#C22B3E)">Student annuleren · destructief</div><div class="kv-edit-head-name">${esc(_cancelPreview.customer_name || 'Onboarding')}</div></div><button type="button" class="ds-icon-btn" data-kv-onbc-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>`,
     body: cancelBody(),
     foot: cancelFoot(),
   });
@@ -363,6 +403,9 @@ function cancelBody() {
   return `
     <form class="kv-edit-form" novalidate>
       ${p.already_cancelled ? `<div class="kv-edit-banner">Deze onboarding is al geannuleerd op ${fmtDT(p.already_cancelled)}.</div>` : ''}
+      <div class="kv-edit-banner" style="background:var(--rose-soft,#FBEAED); color:var(--rose,#C22B3E); border-color:var(--rose-line,#F1B4BE); line-height:1.5;">
+        <b>⚠ Waarschuwing</b><br>${esc(CANCEL_WARNING_TEXT)}
+      </div>
       <div class="kv-onb-cancel-summary">
         <div class="kv-onb-cancel-row"><b>${invoices.length}</b> facturen worden gecrediteerd</div>
         <div class="kv-onb-cancel-row"><b>${subs.length}</b> abonnementen worden gedeactiveerd${p.subscription_value != null ? ` <span style="color:var(--text-3)">(waarde ${p.subscription_value})</span>` : ''}</div>
@@ -370,21 +413,17 @@ function cancelBody() {
         <div class="kv-onb-cancel-row">Bubble-membership ${p.bubble_user_id ? '<b>wordt beëindigd</b>' : '— (geen Bubble-user)'}</div>
       </div>
       <div class="kv-edit-field">
-        <label>Reden <span class="kv-edit-req">*</span></label>
-        <textarea class="ib-input" rows="3" data-kv-onbc-reason placeholder="Waarom wordt deze onboarding geannuleerd?">${esc(_cancelReason)}</textarea>
-      </div>
-      <div class="kv-edit-field">
-        <label>Typ <span class="mono">CANCEL</span> ter bevestiging <span class="kv-edit-req">*</span></label>
-        <input class="ib-input mono" data-kv-onbc-guard value="${esc(_cancelGuard)}" placeholder="CANCEL">
+        <label>Reden voor annulering <span class="kv-edit-req">*</span> <span style="color:var(--text-3);font-weight:400">(min. 10 tekens)</span></label>
+        <textarea class="ib-input" rows="3" data-kv-onbc-reason placeholder="Bv. Klant heeft bedenktijd ingeroepen op 2026-08-12 — refund via TL">${esc(_cancelReason)}</textarea>
       </div>
     </form>`;
 }
 function cancelFoot() {
-  const canConfirm = _cancelGuard === 'CANCEL' && (_cancelReason || '').trim().length > 3;
+  const canConfirm = (_cancelReason || '').trim().length >= 10;
   return `<div class="kv-edit-foot" style="justify-content:space-between">
-    <button type="button" class="ds-btn ds-btn-ghost" data-kv-onbc-close ${_cancelSaving ? 'disabled' : ''}>Annuleren</button>
+    <button type="button" class="ds-btn ds-btn-ghost" data-kv-onbc-close ${_cancelSaving ? 'disabled' : ''}>Terug</button>
     <button type="button" class="ds-btn ds-btn-primary kv-onb-danger" data-kv-onbc-execute ${(_cancelSaving || !canConfirm) ? 'disabled' : ''}>
-      ${_cancelSaving ? 'Uitvoeren…' : 'Uitvoer bevestigen'}
+      ${_cancelSaving ? 'Uitvoeren…' : 'Student definitief annuleren'}
     </button>
   </div>`;
 }
@@ -395,8 +434,10 @@ function cancelWire() {
     // Terug naar detail-modal
     if (state) rerender(); else D().closeModal();
   }));
-  box.querySelector('[data-kv-onbc-reason]')?.addEventListener('input', (e) => { _cancelReason = e.target.value; cancelRerender(); });
-  box.querySelector('[data-kv-onbc-guard]') ?.addEventListener('input', (e) => { _cancelGuard  = e.target.value; cancelRerender(); });
+  // Uncontrolled input: geen re-render bij typen (voorkomt cursor-jump).
+  // Alleen re-render bij een debounce-tick vanuit blur/click op execute.
+  box.querySelector('[data-kv-onbc-reason]')?.addEventListener('input', (e) => { _cancelReason = e.target.value; });
+  box.querySelector('[data-kv-onbc-reason]')?.addEventListener('blur',  () => cancelRerender());
   box.querySelector('[data-kv-onbc-execute]')?.addEventListener('click', async () => {
     if (_cancelSaving) return;
     _cancelSaving = true; cancelRerender();
@@ -433,7 +474,7 @@ function wire() {
   box.querySelector('[data-kv-onb-archive]')?.addEventListener('click', actArchive);
   box.querySelector('[data-kv-onb-cancel-preview]')?.addEventListener('click', actCancelPreview);
   box.querySelector('[data-kv-onb-provision]')?.addEventListener('click', actProvision);
-  box.querySelector('[data-kv-onb-invite]')?.addEventListener('click', actInvite);
+  box.querySelector('[data-kv-onb-resend]')?.addEventListener('click', actResend);
 }
 function rerender() {
   D().openModal({ head: renderHead(), body: renderBody(), foot: renderFoot() });
