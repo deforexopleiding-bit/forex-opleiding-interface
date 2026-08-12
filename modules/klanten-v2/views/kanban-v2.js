@@ -78,10 +78,18 @@
           <div class="kv-kanban-col-body">
             ${list.length ? list.map(it => {
               const id = cfg.itemId(it);
+              // onCardClick (optioneel per module) → klik-op-kaart handler.
+              // Browsers vuren `click` NIET na een geslaagde drag-drop, dus
+              // dit conflict niet met de HTML5 drag-flow. Cursor:pointer
+              // hint dat de kaart klikbaar is.
+              const clickAttr = cfg.onCardClick
+                ? `onclick="window.KV_V2.kanban._cardClick('${escAttr(moduleKey)}','${escAttr(String(id))}')" style="cursor:pointer"`
+                : '';
               return `<div class="kv-kanban-card" draggable="true"
                           data-item-id="${escAttr(String(id))}"
                           ondragstart="window.KV_V2.kanban._dragStart(event,'${escAttr(moduleKey)}','${escAttr(String(id))}')"
-                          ondragend="this.classList.remove('is-dragging')">
+                          ondragend="this.classList.remove('is-dragging')"
+                          ${clickAttr}>
                 ${cfg.renderCard(it)}
               </div>`;
             }).join('') : `<div class="kv-kanban-col-empty">Sleep hier</div>`}
@@ -121,6 +129,19 @@
   function escHtml(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
   window.KV_V2 = window.KV_V2 || {};
-  window.KV_V2.kanban = { register, html, _drop, _dragStart, _registry: REGISTRY };
+  // Card-click dispatcher (optioneel per module via cfg.onCardClick).
+  // Wordt aangeroepen vanuit inline onclick op de kaart-div. Ophaalt het
+  // item via cfg.getItems + itemId-match zodat de callback de HELE row
+  // krijgt (net als bij drag+drop de id).
+  function _cardClick(moduleKey, itemId) {
+    const cfg = REGISTRY.get(moduleKey);
+    if (!cfg || typeof cfg.onCardClick !== 'function') return;
+    try {
+      const items = (typeof cfg.getItems === 'function' ? cfg.getItems() : []) || [];
+      const it = items.find((x) => String(cfg.itemId(x)) === String(itemId));
+      cfg.onCardClick(it || { id: itemId });
+    } catch (e) { console.warn('[kanban-v2] onCardClick failed:', e?.message); }
+  }
+  window.KV_V2.kanban = { register, html, _drop, _dragStart, _cardClick, _registry: REGISTRY };
   console.debug('[kanban-v2] registered');
 })();
