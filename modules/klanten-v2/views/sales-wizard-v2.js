@@ -592,32 +592,48 @@
       return;
     }
 
-    // Standaard "Nieuwe offerte"-flow: RENDER LEEG NIET DIRECT — anders
-    // ziet Jeffrey de wizard-body flitsen voordat de resume-modal komt.
-    // Fetch draft synchroon-in-microtask + kies pad:
-    //   - draft aanwezig → toon resume-modal (wizard-body verborgen door
-    //     resumeModal.open-guard in renderWizard/wizardModal-branch).
-    //   - geen draft → render lege wizard.
+    // Standaard "Nieuwe offerte"-flow: fetch draft in microtask +
+    // FAIL-SAFE beslisboom. Uitkomsten:
+    //   - draft gevonden          → resume-modal (wizard-body verborgen)
+    //   - geen draft              → blanco wizard
+    //   - fetch-fout / exception  → blanco wizard (draft genegeerd)
+    //   - fetch-timeout (>4s)     → blanco wizard (draft genegeerd)
+    // Elk pad zet checking=false + rendert. finally-blok garandeert dat
+    // de checking-shell NOOIT permanent blijft hangen, ongeacht wat er
+    // in _swLoadDraft gebeurt.
     if (!_sw.entities && !_sw.entitiesLoading) queueMicrotask(loadEntities);
-    queueMicrotask(async () => {
-      const draft = await _swLoadDraft();
-      if (!_sw.open) return; // user heeft ondertussen gesloten
-      if (draft) {
-        _sw.resumeModal = { open: true, draft };
-      }
-      // Ongeacht draft — render nu. Als resumeModal.open=true toont
-      // wizardModal alleen de keuze-modal (via renderWizard-hook).
-      renderWizard();
-    });
-    // Toon een lichte loading-shell terwijl draft-check loopt zodat de
-    // overlay wél zichtbaar is (backdrop) maar de wizard-body nog niet.
-    // Als er GEEN draft is voelt dit als ~100ms extra bij open.
-    ensureRoot().classList.add('is-open');
-    // Render één keer met resumeModal in "checking"-state — placeholder
-    // die aangeeft dat we een concept-check uitvoeren. Als er geen draft
-    // is overschrijft de queueMicrotask hierboven dit met de echte wizard.
     _sw.resumeModal = { open: false, draft: null, checking: true };
+    _swLog && _swLog('draft-checking:start');
+    ensureRoot().classList.add('is-open');
     renderWizard();
+    queueMicrotask(async () => {
+      let outcome = 'unknown';
+      try {
+        const draft = await Promise.race([
+          _swLoadDraft(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout 4s')), 4000)),
+        ]);
+        if (!_sw.open) { outcome = 'closed-before-return'; return; }
+        if (draft) {
+          _sw.resumeModal = { open: true, draft, checking: false };
+          outcome = 'draft-found';
+        } else {
+          _sw.resumeModal = { open: false, draft: null, checking: false };
+          outcome = 'draft-none';
+        }
+      } catch (e) {
+        const isTimeout = /timeout/i.test(e && e.message || '');
+        _sw.resumeModal = { open: false, draft: null, checking: false };
+        outcome = isTimeout ? 'draft-timeout' : 'draft-error';
+        console.warn('[sw-v2] draft-check', outcome, e?.message || e);
+      } finally {
+        // ALTIJD checking uit + render — anders blijft hideBody op true
+        // en zit user vast in "Concept controleren…"-shell.
+        if (_sw.resumeModal.checking) _sw.resumeModal.checking = false;
+        _swLog && _swLog('draft-checking:end', { outcome });
+        if (_sw.open) renderWizard();
+      }
+    });
   };
   window.__swClose = () => {
     if (_sw.dirty && !confirm('Er zijn niet-opgeslagen wijzigingen. Wizard sluiten?')) return;
