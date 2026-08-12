@@ -225,58 +225,10 @@ export async function pushQuotationToTl(dealId) {
       || `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim()
       || `Offerte ${String(dealId).slice(0, 8)}`;
 
-    // 1. Customer (B2C contact of B2B company) + 2. Deal (quotation vereist deal_id).
-    //
-    // SELF-HEAL 2026-08-12 (Optie B — geen extra happy-path call):
-    // Als /deals.create een "Customer <UUID> not found"-fout geeft, is de
-    // gecachte tl_contact_id / tl_company_id op de klant-rij verwezen naar
-    // een niet-bestaand TL-object (contact/company in TL verwijderd, oud
-    // sandbox-id, TL-import zonder verify). We wissen dan de cache op
-    // customers.tl_{contact,company}_id + optionele stale tl_deal_id op
-    // deals, re-resolven getOrCreateTlCustomer (maakt vers TL-object), en
-    // retryen createDeal precies één keer. Happy-path met geldige cache
-    // blijft ONGEWIJZIGD (0 extra TL-calls).
-    let tlCustomerRef = await getOrCreateTlCustomer(customer);
-    let tlContactId = tlCustomerRef.type === 'contact' ? tlCustomerRef.id : null;
-    let tlDealId = deal.tl_deal_id;
-    let healedTlCache = false;
-    if (!tlDealId) {
-      try {
-        tlDealId = await createDeal(deal, tlCustomerRef, departmentId, title);
-      } catch (e) {
-        if (!_isTlCustomerNotFound(e)) throw e;
-        console.warn('[tl-quotation] auto-heal: TL customer not found in /deals.create — wis cache + retry', {
-          customer_id: customer.id,
-          is_company: !!customer.is_company,
-          stale_tl_contact_id: customer.tl_contact_id || null,
-          stale_tl_company_id: customer.tl_company_id || null,
-          tl_msg: (e?.message || '').slice(0, 200),
-        });
-        await _healStaleTlCache(customer, deal);
-        healedTlCache = true;
-        // Re-resolve na cache-wipe → getOrCreateTlCustomer maakt nu een
-        // vers TL-contact/-company aan (want cached id is null geworden).
-        tlCustomerRef = await getOrCreateTlCustomer(customer);
-        tlContactId = tlCustomerRef.type === 'contact' ? tlCustomerRef.id : null;
-        // Retry — als deze óók faalt met dezelfde error, bubbelt de throw
-        // omhoog (geen infinite loop; healed-flag voorkomt tweede heal).
-        tlDealId = await createDeal(deal, tlCustomerRef, departmentId, title);
-      }
-      // KRITIEK: tl_deal_id direct persisteren. Als quotations.create hierna
-      // faalt, pakt een retry deze deal op i.p.v. een duplicate aan te maken.
-      await supabaseAdmin.from('deals').update({ tl_deal_id: tlDealId }).eq('id', dealId);
-    }
-
-    // 3. Quotation samenstellen.
-    // Deal-niveau korting: TL quotations.create kent geen deal-level discount.
-    // We verlagen per-regel de unit_price met het kortingspercentage. Dit houdt
-    // de BTW-uitsplitsing correct bij gemengde tarieven (een enkele negatieve
-    // korting-regel kan dat niet). De klant ziet dus lagere stukprijzen.
+    // Reken-invarianten voor line-items (departmentId-afhankelijk maar
+    // niet customer/deal-afhankelijk — dus ÉÉN keer berekend, buiten de
+    // heal-retry-loop).
     const discFactor = 1 - (Number(deal.discount_percentage) || 0) / 100;
-    // TL accepteert ALLEEN unit_price.tax = 'excluding'. Incl-BTW regels worden
-    // omgerekend naar excl (incl / (1 + vat%)). Bij intra/buiten-EU is het tarief
-    // 0% → excl = incl (geen omrekening). TL berekent de BTW zelf uit excl +
-    // tax_rate_id, dus de eindbedragen blijven identiek.
     const zeroVat = deal.sale_type && deal.sale_type !== 'domestic';
     const lineItems = lines.map(l => {
       const rate = zeroVat ? 0 : (Number(l.vat_percentage) || 0) / 100;
@@ -290,55 +242,101 @@ export async function pushQuotationToTl(dealId) {
         tax_rate_id: taxRateIdFor(l.vat_percentage, departmentId, deal.sale_type),
       };
     });
-    // Betaalregeling gaat via Route B (begeleidende tekst → $QUOTATION_TEXT$)
-    // hieronder. Route A (extra €0-line_item) is bewust verwijderd zodat de
-    // betaalregeling niet dubbel op de PDF staat.
     const paymentText = buildPaymentSummaryText(deal);
 
-    const quotationBody = {
-      deal_id:       tlDealId,
-      department_id: departmentId,
-      grouped_lines: [{ line_items: lineItems }],
-    };
-    // Route B: begeleidende tekst → $QUOTATION_TEXT$ in de mail-template.
-    // Veldnaam best-effort geraden op basis van doc-conventie (klant-
-    // template heeft $QUOTATION_TEXT$ shortcode → text-veld). Als TL 'text'
-    // niet accepteert (HTTP 400), doen we ÉÉN retry zonder text zodat de
-    // push niet stukloopt op deze diagnostische toevoeging — Route A staat
-    // dan alsnog. De fout wordt duidelijk gelogd zodat we bij de handmatige
-    // test kunnen zien of we een ander veldnaam moeten proberen.
-    if (paymentText) quotationBody.text = paymentText;
+    // ─── SELF-HEAL retry-loop (Optie B — 2026-08-12, uitgebreid) ────────
+    // Wrap HELE TL-push-keten (customer-resolve → deals.create →
+    // quotations.create) in max 2 attempts. Bij een "Customer not found"
+    // op WELKE TL-sub-call dan ook: wis de gecachte tl_contact_id /
+    // tl_company_id + stale tl_deal_id, re-resolve getOrCreateTlCustomer
+    // (die maakt vers TL-object aan), en re-attempt de hele keten.
+    //
+    // Happy-path met geldige cache: 1e attempt slaagt, break-uit-loop,
+    // 0 extra TL-calls, geen DB-writes voor heal.
+    //
+    // De text-veld-retry op quotations.create blijft binnen 1 attempt
+    // (kan NAAST de customer-heal draaien; ze zijn orthogonaal).
+    let tlCustomerRef, tlContactId, tlDealId, tlQuotationId, qData;
+    let quotationBody;
+    let healedTlCache = false;
+    let lastError = null;
 
-    let qr = await tlFetch('/quotations.create', { method: 'POST', body: JSON.stringify(quotationBody) });
-    // BUGFIX 2026-08-12 (Push mislukt: Body has already been read):
-    // Cache de body van de eerste failure-response ZODAT de volgende
-    // `if (!qr.ok)` op regel 258 'em niet nogmaals probeert te lezen.
-    // Fetch Response body kan maar 1x uitgelezen worden — bij een niet-
-    // text-veld-error (retry skipt) faalde de fallback-throw met een
-    // "Body is unusable"-TypeError die de user als push-fout zag.
-    let firstErrorText = null;
-    if (!qr.ok && paymentText && quotationBody.text) {
-      firstErrorText = await qr.text().catch(() => '');
-      const looksLikeTextFieldError = /"?text"?/i.test(firstErrorText);
-      console.warn('[tl-quotation] quotations.create met text-veld faalde',
-        { status: qr.status, body: firstErrorText.slice(0, 300), retryingWithoutText: looksLikeTextFieldError });
-      if (looksLikeTextFieldError) {
-        delete quotationBody.text;
-        qr = await tlFetch('/quotations.create', { method: 'POST', body: JSON.stringify(quotationBody) });
-        firstErrorText = null; // nieuwe `qr`, cache resetten.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        // 1. Customer resolven (contact of company).
+        tlCustomerRef = await getOrCreateTlCustomer(customer);
+        tlContactId = tlCustomerRef.type === 'contact' ? tlCustomerRef.id : null;
+
+        // 2. Deal aanmaken indien nodig (tl_deal_id wordt bij heal gewist
+        //    → 2e attempt maakt verse deal aan bij verse contact).
+        tlDealId = deal.tl_deal_id;
+        if (!tlDealId) {
+          tlDealId = await createDeal(deal, tlCustomerRef, departmentId, title);
+          // KRITIEK: tl_deal_id persisteren zodat een quotations.create-
+          // retry (bv. bij text-veld-fout) niet een duplicate deal maakt.
+          await supabaseAdmin.from('deals').update({ tl_deal_id: tlDealId }).eq('id', dealId);
+        }
+
+        // 3. Quotation-body samenstellen (deal_id ligt nu vast).
+        quotationBody = {
+          deal_id:       tlDealId,
+          department_id: departmentId,
+          grouped_lines: [{ line_items: lineItems }],
+        };
+        if (paymentText) quotationBody.text = paymentText;
+
+        // 4. quotations.create + text-veld-fallback (behouden zoals eerder).
+        let qr = await tlFetch('/quotations.create', { method: 'POST', body: JSON.stringify(quotationBody) });
+        let firstErrorText = null;
+        if (!qr.ok && paymentText && quotationBody.text) {
+          firstErrorText = await qr.text().catch(() => '');
+          const looksLikeTextFieldError = /"?text"?/i.test(firstErrorText);
+          console.warn('[tl-quotation] quotations.create met text-veld faalde',
+            { status: qr.status, body: firstErrorText.slice(0, 300), retryingWithoutText: looksLikeTextFieldError });
+          if (looksLikeTextFieldError) {
+            delete quotationBody.text;
+            qr = await tlFetch('/quotations.create', { method: 'POST', body: JSON.stringify(quotationBody) });
+            firstErrorText = null;
+          }
+        }
+        if (!qr.ok) {
+          const txt = firstErrorText != null ? firstErrorText : await qr.text().catch(() => '');
+          throw new Error(`TL quotations.create HTTP ${qr.status}: ${(txt || '').slice(0, 200)}`);
+        }
+        qData = await qr.json();
+        tlQuotationId = qData.data?.id;
+
+        // Alles gelukt → uit de loop.
+        lastError = null;
+        break;
+      } catch (e) {
+        lastError = e;
+        // Heal + retry ALLEEN bij customer-not-found + max 1× (healed-flag).
+        if (!_isTlCustomerNotFound(e) || healedTlCache) throw e;
+        // Bepaal welke stap faalde (voor log-diagnose).
+        const failedIn = /quotations\.create/i.test(e?.message || '') ? 'quotations.create'
+                       : /deals\.create/i.test(e?.message || '')      ? 'deals.create'
+                       : 'unknown-tl-call';
+        console.warn('[tl-quotation] auto-heal: TL customer not found — wis cache + retry hele push-keten', {
+          failed_in:            failedIn,
+          customer_id:          customer.id,
+          is_company:           !!customer.is_company,
+          stale_tl_contact_id:  customer.tl_contact_id || null,
+          stale_tl_company_id:  customer.tl_company_id || null,
+          stale_tl_deal_id:     deal.tl_deal_id || null,
+          tl_msg:               (e?.message || '').slice(0, 200),
+        });
+        await _healStaleTlCache(customer, deal);
+        healedTlCache = true;
+        // Loop draait door naar attempt=1. Alle state (tlCustomerRef,
+        // tlDealId, quotationBody) wordt aan het begin van de volgende
+        // iteratie vers berekend met de zojuist-vernieuwde customer.
       }
     }
-    if (!qr.ok) {
-      // Hergebruik gecachte body wanneer die er is (retry-skip pad); anders
-      // lezen. Zonder deze cache probeerde de code de al-gelezen body van
-      // de originele `qr` nog een keer via .text() te lezen → TypeError.
-      const txt = firstErrorText != null
-        ? firstErrorText
-        : await qr.text().catch(() => '');
-      throw new Error(`TL quotations.create HTTP ${qr.status}: ${(txt || '').slice(0, 200)}`);
-    }
-    const qData = await qr.json();
-    const tlQuotationId = qData.data?.id;
+    // Als loop eindigde zonder success (throw is al gebeurd in de laatste
+    // catch), maar defensieve check: als break werd overgeslagen door een
+    // onvoorziene bug, gooi lastError.
+    if (!tlQuotationId && lastError) throw lastError;
 
     // 4. Optioneel versturen (alleen als expliciet aangezet; voorkomt per ongeluk
     //    mailen van echte klanten met nog-niet-geverifieerde output).
