@@ -371,7 +371,7 @@ export default async function handler(req, res) {
 
         const { data: existing } = await supabaseAdmin
           .from('taken_items')
-          .select('id, created_by')
+          .select('id, created_by, created_by_agent, aangemaakt')
           .eq('id', row.id)
           .maybeSingle();
 
@@ -384,8 +384,18 @@ export default async function handler(req, res) {
           if (!(superAdmin || existing.created_by === userId)) {
             return res.status(403).json({ error: 'Alleen de maker of super_admin mag deze taak bewerken' });
           }
-          // toRow() bevat geen created_by-veld → created_by wordt nooit overschreven.
-          const { error } = await supabaseAdmin.from('taken_items').upsert(row, { onConflict: 'id' });
+          // KRITIEK: constraint `taken_items_exactly_one_creator` eist dat
+          // exact één van (created_by, created_by_agent) NIET NULL is.
+          // supabase-js upsert genereert INSERT ... ON CONFLICT DO UPDATE,
+          // waarbij PostgreSQL de check evalueert op de hypothetische row.
+          // Zonder deze velden zou de INSERT-branch beide op NULL zetten
+          // → constraint faalt vóór de UPDATE-branch wint. Behoud
+          // originele creator uit `existing`. Ook `aangemaakt` behouden
+          // (toRow zet die anders op now() = destructief bij edit).
+          const rowKeep = { ...row, aangemaakt: existing.aangemaakt || row.aangemaakt };
+          if (existing.created_by)       rowKeep.created_by       = existing.created_by;
+          if (existing.created_by_agent) rowKeep.created_by_agent = existing.created_by_agent;
+          const { error } = await supabaseAdmin.from('taken_items').upsert(rowKeep, { onConflict: 'id' });
           if (error) throw error;
         } else {
           // NIEUW — taken.task.create vereist; created_by = userId.
