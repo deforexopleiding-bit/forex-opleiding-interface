@@ -102,6 +102,15 @@
     fetchScope('mine'); fetchScope('byMe');
   }
 
+  // ── Row-click cache (sales-v2 pattern) ─────────────────────────────────
+  // H.table's 3e arg triggert onclick(rowIndex), niet id. Om de hele rij
+  // klikbaar te maken bewaren we de zichtbare (post-filter/sort) rows per
+  // tab, en resolvet de row-click-handler index → row.id → __takenOpen.
+  const _rowsForClick = { mine: [], byMe: [], afgerond: [] };
+  window.__takenRowClickMine     = (i) => { const r = _rowsForClick.mine[i];     if (r && r.id) window.__takenOpen(r.id); };
+  window.__takenRowClickByMe     = (i) => { const r = _rowsForClick.byMe[i];     if (r && r.id) window.__takenOpen(r.id); };
+  window.__takenRowClickAfgerond = (i) => { const r = _rowsForClick.afgerond[i]; if (r && r.id) window.__takenOpen(r.id); };
+
   // ── Handlers (dynamic import naar modals) ───────────────────────────────
   window.__takenOpen = async (id) => {
     try {
@@ -191,12 +200,11 @@
   }
 
   // ── Table renderer ────────────────────────────────────────────────────
-  // KRITIEK: H.table's 3e arg = onclick(rowIndex) — geeft de INDEX door, niet
-  // de id. Vorige impl. deed `H.table(..., '__takenOpen')` → __takenOpen(0),
-  // __takenOpen(1), … → server "geen taak-id". Fix (mirror van tickets-v2 +
-  // sales-v2): titel-cel is een `<a>` met inline onclick die de echte id
-  // doorgeeft. Geen 3e arg meer.
-  function takenTable(rows) {
+  // handlerName = window-functie die (rowIndex) → row.id resolvet via
+  // _rowsForClick-cache. Zie sales-v2 __svOfferteRowClick-patroon. Titel-cel
+  // krijgt .kv-tk-title styling maar GEEN eigen onclick (rij-onclick werkt
+  // globaal); dat voorkomt dubbele triggers.
+  function takenTable(rows, handlerName) {
     const list = asArr(rows);
     if (!list.length) return emptyBlock('Geen taken', 'Er zijn geen taken die aan de huidige filters voldoen.');
     return H.table(
@@ -209,13 +217,14 @@
         { l: 'Status', cls: 'optional' },
       ],
       list.map((t) => [
-        `<a href="javascript:void(0)" onclick="__takenOpen('${esc(t.id)}')" class="kv-tk-title">${esc(t.titel) || '—'}</a>`,
+        `<span class="kv-tk-title">${esc(t.titel) || '—'}</span>`,
         `<span style="color:var(--text-2);font-size:12.5px">${esc(t.categorie) || '—'}</span>`,
         `<span style="font-size:12.5px">${esc(t.assigned_to_name) || (t.assigned_to_id ? '#' + String(t.assigned_to_id).slice(0, 6) : '—')}</span>`,
         `<span class="mono" style="color:var(--text-3);font-size:12.5px">${t.deadline ? new Date(t.deadline).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' }) : '—'}</span>`,
         prioPill(t.prioriteit),
         statusPill(t.status),
-      ])
+      ]),
+      handlerName
     );
   }
 
@@ -376,12 +385,13 @@
     if (!st.taken && !st.loading) queueMicrotask(() => fetchScope('mine'));
     const all = asArr(st.taken);
     const rows = sortRows(filterBySearch(all, 'taken:mine'), F('tk-sort', 'created'));
+    _rowsForClick.mine = rows;
     return `
       ${kpisMijn(all)}
       ${toolbar('taken:mine')}
       ${st.error ? errorBlock(st.error)
         : (st.loading && !st.taken) ? skeletonTable(6)
-        : takenTable(rows)}`;
+        : takenTable(rows, '__takenRowClickMine')}`;
   }
 
   function byMeView() {
@@ -390,12 +400,13 @@
     if (!st.taken && !st.loading) queueMicrotask(() => fetchScope('byMe'));
     const all = asArr(st.taken);
     const rows = sortRows(filterBySearch(all, 'taken:byMe'), F('tk-sort', 'created'));
+    _rowsForClick.byMe = rows;
     return `
       ${kpisByMe(all)}
       ${toolbar('taken:byMe')}
       ${st.error ? errorBlock(st.error)
         : (st.loading && !st.taken) ? skeletonTable(6)
-        : takenTable(rows)}`;
+        : takenTable(rows, '__takenRowClickByMe')}`;
   }
 
   function afgerondView() {
@@ -408,6 +419,7 @@
     const searched = filterBySearch(done, 'taken:afgerond');
     // Sort: nieuwste afgerond eerst.
     const rows = searched.slice().sort((a, b) => new Date(b.afgerond_op || 0).getTime() - new Date(a.afgerond_op || 0).getTime());
+    _rowsForClick.afgerond = rows;
     const searchHtml = H.stableSearch
       ? H.stableSearch('taken:afgerond', 'Zoek afgeronde taak…')
       : H.search('Zoek afgeronde taak…');
@@ -419,11 +431,12 @@
         : rows.length ? H.table(
             [{ l: 'Titel' }, { l: 'Categorie', cls: 'optional' }, { l: 'Toegewezen', cls: 'optional' }, { l: 'Afgerond op', cls: 'r' }],
             rows.map((t) => [
-              `<a href="javascript:void(0)" onclick="__takenOpen('${esc(t.id)}')" class="kv-tk-title">${esc(t.titel) || '—'}</a>`,
+              `<span class="kv-tk-title">${esc(t.titel) || '—'}</span>`,
               `<span style="color:var(--text-2);font-size:12.5px">${esc(t.categorie) || '—'}</span>`,
               `<span style="font-size:12.5px">${esc(t.assigned_to_name) || '—'}</span>`,
               `<span class="mono" style="color:var(--text-3);font-size:12px">${t.afgerond_op ? new Date(t.afgerond_op).toLocaleString('nl-NL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</span>`,
-            ])
+            ]),
+            '__takenRowClickAfgerond'
           )
         : emptyBlock('Nog niets afgerond', 'Zodra taken op "Klaar" worden gezet verschijnen ze hier.')}`;
   }
