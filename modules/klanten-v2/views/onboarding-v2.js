@@ -99,7 +99,9 @@
       for (const r of rows) {
         const s = map.get(r.id);
         if (!s) continue;
-        if (s.intake_status && r.mentor_intake_status !== s.intake_status) { r.mentor_intake_status = s.intake_status; changed = true; }
+        // Patch de DERIVED intake_status (die is de bron voor de pill),
+        // NIET de raw mentor_intake_status — die blijft de manual override.
+        if (s.intake_status && r.intake_status !== s.intake_status) { r.intake_status = s.intake_status; changed = true; }
         if (s.planned_call_at != null && r.planned_call_at !== s.planned_call_at) { r.planned_call_at = s.planned_call_at; changed = true; }
       }
       if (changed && window.DFO?.render) window.DFO.render();
@@ -203,7 +205,10 @@
     const arr = asArr(rows);
     if (f === 'all') return arr;
     if (f === 'nog_geen_mentor') return arr.filter((r) => !r.mentor_user_id);
-    if (f === 'te_behandelen')   return arr.filter((r) => ['wil_niet','no_show','geen_gehoor','wil_later'].includes(r.mentor_intake_status) && !r.intake_handled_at && !r.cancelled);
+    if (f === 'te_behandelen')   return arr.filter((r) => {
+      const key = r?.intake_status || r?.mentor_intake_status;
+      return ['wil_niet','no_show','geen_gehoor','wil_later'].includes(key) && !r.intake_handled_at && !r.cancelled;
+    });
     if (f === 'afgehandeld')     return arr.filter((r) => !!r.intake_handled_at && !r.cancelled);
     if (f === 'geannuleerd')     return arr.filter((r) => !!r.cancelled);
     return arr;
@@ -213,7 +218,10 @@
     return {
       all: arr.length,
       nog_geen_mentor: arr.filter((r) => !r.mentor_user_id).length,
-      te_behandelen: arr.filter((r) => ['wil_niet','no_show','geen_gehoor','wil_later'].includes(r.mentor_intake_status) && !r.intake_handled_at && !r.cancelled).length,
+      te_behandelen: arr.filter((r) => {
+        const key = r?.intake_status || r?.mentor_intake_status;
+        return ['wil_niet','no_show','geen_gehoor','wil_later'].includes(key) && !r.intake_handled_at && !r.cancelled;
+      }).length,
       afgehandeld: arr.filter((r) => !!r.intake_handled_at && !r.cancelled).length,
       geannuleerd: arr.filter((r) => !!r.cancelled).length,
     };
@@ -275,18 +283,28 @@
     gearchiveerd: ['neutral', 'Gearchiveerd'],
     geannuleerd:  ['danger',  'Geannuleerd'],
   };
+  // Intake-status pill — 1-op-1 met v1 modules/shared/onboarding-overzicht.js
+  // _INTAKE_META_RO (regel 761-768). Kleuren via H.pill-palet:
+  //   paid-yes (groen) → 'ok', paid-no (rood) → 'danger', neutraal → 'neutral'.
+  // Key-set vast in api/_lib/intake-status.js (deriveIntakeStatus).
   const INTAKE_PILL = {
-    nog_geen_mentor:  ['warn',    'Nog geen mentor'],
+    nog_geen_mentor:  ['danger',  'Nog geen mentor'],
     gestart:          ['ok',      'Gestart'],
-    wil_niet:         ['danger',  'Wil niet'],
+    wil_niet:         ['danger',  'Wil niet starten'],
     no_show:          ['danger',  'No-show'],
     geen_gehoor:      ['danger',  'Geen gehoor'],
-    wil_later:        ['accent',  'Wil later'],
+    wil_later:        ['danger',  'Wil later starten'],
     call_ingepland:   ['ok',      'Call ingepland'],
-    nog_te_benaderen: ['warn',    'Nog te benaderen'],
+    nog_te_benaderen: ['neutral', 'Nog te benaderen'],
   };
   const statusPill = (s) => { const [c, l] = STATUS_PILL[s] || ['neutral', s || '—']; return H.pill(c, l); };
-  const intakePill = (s) => { const [c, l] = INTAKE_PILL[s] || ['neutral', s || '—']; return H.pill(c, l); };
+  // Prioriteit: derived intake_status (server) → raw mentor_intake_status →
+  // default 'nog_te_benaderen' (nooit bare "—"). Zie v1 regel 1432 patroon.
+  function intakePillOf(row) {
+    const key = row?.intake_status || row?.mentor_intake_status || 'nog_te_benaderen';
+    const [c, l] = INTAKE_PILL[key] || INTAKE_PILL.nog_te_benaderen;
+    return H.pill(c, l);
+  }
 
   function bubbleBadge(r) {
     if (r.bubble_provisioned) return `<span class="kv-onb-pill kv-onb-pill-ok" title="Bubble user ${esc(r.bubble_user_id || '')}">✓</span>`;
@@ -345,7 +363,7 @@
     </tr>`;
     const rowsHtml = list.map((r, i) => `<tr onclick="${handlerName}(${i})" style="cursor:pointer">
       <td><span class="kv-onb-title">${esc(r.customer_name) || '—'}</span></td>
-      <td>${intakePill(r.mentor_intake_status)}</td>
+      <td>${intakePillOf(r)}</td>
       <td><span style="color:var(--text-2);font-size:12.5px">${esc(r.traject_label) || '—'}</span></td>
       <td>${statusPill(r.status)}</td>
       <td>${mentorCell(r)}</td>
