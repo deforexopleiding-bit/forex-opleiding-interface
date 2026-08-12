@@ -607,12 +607,10 @@
   };
   window.__finSubExpiring = () => { _sub.filterExpiring = !_sub.filterExpiring; window.DFO.render(); };
   window.__finSubNew = () => {
-    // Ronde 4: v2 nieuw-abo modal zou een deal + subscription + LMS-
-    // provisioning moeten opzetten (sales-subscription-create eist deal_id
-    // OR customer_data + hele wizard-payload, 591 regels). Voor deze ronde
-    // routen we naar de bestaande subscription-wizard.html; volledige
-    // v2-flow komt in een aparte PR analoog aan de Sales-offerte-wizard
-    // (batch 2).
+    // V2 in-shell subscription-wizard (2026-08-12) — sales-wizard-v2-pattern.
+    // Fallback naar v1 als de v2-handler nog niet geladen is (bv. bij
+    // eerste page-load in oude cache).
+    if (typeof window.__subwOpen === 'function') { window.__subwOpen({}); return; }
     window.location.href = '/modules/subscription-wizard.html';
   };
   async function fetchSubs() {

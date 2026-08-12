@@ -3147,3 +3147,61 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
 .kv-tk-title:visited { color: var(--text-1, #111721); }
 .kv-tk-title:hover { color: var(--m, #6D3FD4); text-decoration: underline; }
 .kv-tk-title:focus-visible { outline: 2px solid var(--m, #6D3FD4); outline-offset: 2px; border-radius: 3px; }
+
+
+/* ── Subscription-wizard v2 (.subw-*) — data-ronde 2026-08-12.
+   Overlay via .sw-modal-back/.sw-modal (hergebruik uit sales-wizard).
+   Body-scoped .subw-* voor wizard-specifieke elementen. ────────────── */
+.subw-cust-results {
+  display: flex; flex-direction: column; gap: 4px; margin-top: 8px;
+  max-height: 280px; overflow-y: auto;
+  border: 1px solid var(--border, #E2E7EE); border-radius: 8px;
+  background: var(--surface, #FFFFFF);
+}
+.subw-cust-hit {
+  text-align: left; padding: 8px 12px; background: transparent; border: 0;
+  border-bottom: 1px solid var(--border, #E2E7EE); cursor: pointer;
+  font-family: inherit; color: var(--text-1, #111721);
+}
+.subw-cust-hit:last-child { border-bottom: 0; }
+.subw-cust-hit:hover { background: var(--surface-2, #F2F4F7); }
+
+.sw-header-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; padding: 0 22px; }
+.sw-header-row .sw-field { flex: 1; min-width: 200px; }
+
+.subw-sub-card {
+  margin: 12px 22px; padding: 14px;
+  background: var(--surface, #FFFFFF);
+  border: 1px solid var(--border-strong, #C9D2DE); border-radius: 10px;
+}
+.subw-sub-head { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.subw-sub-meta { display: grid; grid-template-columns: 1fr 100px 1fr; gap: 10px; margin-bottom: 10px; align-items: end; }
+@media (max-width: 700px) { .subw-sub-meta { grid-template-columns: 1fr; } }
+.subw-end {
+  padding: 8px 10px; font-size: 12.5px; color: var(--text-2, #586374);
+  background: var(--surface-2, #F2F4F7); border-radius: 6px;
+  border: 1px dashed var(--border, #E2E7EE); font-family: 'IBM Plex Mono', ui-monospace, monospace;
+}
+.subw-lines-head, .subw-line {
+  display: grid; grid-template-columns: 2fr 100px 80px 100px 30px; gap: 6px;
+  margin-bottom: 4px; align-items: center;
+}
+.subw-lines-head { font-size: 11px; color: var(--text-3, #8B95A5); text-transform: uppercase; letter-spacing: .04em; padding: 4px 0; border-bottom: 1px solid var(--border, #E2E7EE); }
+.subw-line input, .subw-line select { font-size: 12.5px; }
+.subw-sub-foot { display: flex; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border, #E2E7EE); gap: 8px; }
+.sw-action-row { display: flex; align-items: center; gap: 8px; padding: 12px 22px; }
+
+.sw-preview-box {
+  background: var(--surface-2, #F2F4F7); border: 1px solid var(--border, #E2E7EE);
+  border-radius: 8px; padding: 12px; margin: 12px 22px; font-size: 12.5px;
+  max-height: 300px; overflow-y: auto;
+}
+.sw-preview-sub { padding: 8px 0; border-bottom: 1px dashed var(--border, #E2E7EE); }
+.sw-preview-sub:last-child { border-bottom: 0; }
+
+.subw-bypass-card {
+  margin: 14px 22px; padding: 12px 14px;
+  background: var(--amber-soft, #FFF4E5); border: 1px solid var(--amber-line, #F4D8A1);
+  border-radius: 8px; color: var(--text-1, #111721);
+}
+.subw-bypass-card label { cursor: pointer; }

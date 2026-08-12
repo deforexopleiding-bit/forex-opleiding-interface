@@ -429,7 +429,8 @@
       const convLabel = hasSub ? '✓ Abbo al ingevoerd' : 'Omzetten naar abonnement';
       const convClass = hasSub ? 'btn' : 'btn btn-success';
       const convTitle = hasSub ? 'Er bestaat al een abonnement voor deze offerte. Klik om (opnieuw) om te zetten.' : '';
-      const convertBtn = `<a class="${convClass}" href="/modules/subscription-wizard.html?deal_id=${encodeURIComponent(deal.id)}"${convTitle ? ` title="${esc(convTitle)}"` : ''}>${convLabel}</a>`;
+      // V2 in-shell wizard (2026-08-12); fallback naar v1 als handler niet geladen.
+      const convertBtn = `<a class="${convClass}" href="javascript:void(0)" onclick="if(window.__subwOpen){window.__subwOpen({dealId:'${esc(deal.id)}'})}else{window.location.href='/modules/subscription-wizard.html?deal_id=${encodeURIComponent(deal.id)}'}"${convTitle ? ` title="${esc(convTitle)}"` : ''}>${convLabel}</a>`;
       const onboardBtn = c.id
         ? `<button class="btn" style="background:#0a2f63;color:#fff" onclick="obOpen()" title="Onboarding-traject aanmelden (F0.2 modal)">📋 Onboarding aanmelden</button>`
         : '';
