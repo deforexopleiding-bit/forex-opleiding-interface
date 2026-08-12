@@ -227,9 +227,16 @@
   // klant. Fetch éénmalig per customer_id-wissel.
   async function _loadOfferPickerForCustomer(customerId) {
     if (!customerId) { _sub.offerPickerList = []; return; }
-    if (_sub.offerPickerCustomerId === customerId && _sub.offerPickerList) return;
+    // In-flight guard — voorkomt oneindige loop wanneer _renderStep1 op elke
+    // render een queueMicrotask spawnt terwijl deze fetch nog loopt.
+    if (_sub.offerPickerLoading) return;
+    // Cache-guard — Array.isArray check ipv truthy (lege lijst is óók geldig).
+    if (_sub.offerPickerCustomerId === customerId && Array.isArray(_sub.offerPickerList)) return;
     _sub.offerPickerLoading = true;
     _sub.offerPickerCustomerId = customerId;
+    // Zet list op [] zodat een parallelle guard-check in een render-tick
+    // Array.isArray === true ziet en niet nogmaals proberen te fetchen.
+    _sub.offerPickerList = [];
     _rerender();
     const j = await tryFetch('quotations', '/api/sales-quotations?customer_id=' + encodeURIComponent(customerId) + '&page_size=100');
     _sub.offerPickerLoading = false;
@@ -643,8 +650,16 @@
       </div>`;
     }
     // ── Standalone ──
-    // Trigger offerte-picker load zodra klant gekozen is.
-    if (_sub.customer?.id) queueMicrotask(() => _loadOfferPickerForCustomer(_sub.customer.id));
+    // Trigger offerte-picker load zodra klant gekozen is — CONDITIONEEL,
+    // maar ook loading en cached-check zodat elke render niet nog een
+    // micro-tick spawnt (voorheen root-cause van de klant-pick freeze:
+    // render → queueMicrotask → load → _rerender → render → queueMicrotask
+    // → oneindige micro-task chain).
+    if (_sub.customer?.id
+        && !_sub.offerPickerLoading
+        && _sub.offerPickerCustomerId !== _sub.customer.id) {
+      queueMicrotask(() => _loadOfferPickerForCustomer(_sub.customer.id));
+    }
     return `<div class="sw-step">
       <h2 class="sw-step-title">Kies klant</h2>
       <p class="sw-step-sub">Zoek een bestaande klant. Voor een nieuwe klant: <a href="/modules/subscription-wizard.html" style="color:var(--m);text-decoration:underline">gebruik de v1-wizard</a> (voegt nieuwe klant + TL-lookup toe).</p>
@@ -906,15 +921,27 @@
     try { el.setSelectionRange(info.start, info.end); } catch (_) { /* noop */ }
   }
   // Publiek: interne wizard-rerender (GEEN shell touch).
+  // Re-entrancy guard: als render-code (onbedoeld) tijdens de swap opnieuw
+  // _rerender() aanroept, wordt de nested call gecoalesceerd tot één swap.
+  // Voorkomt stack-overflow / freeze bij onbedoelde render-cascades.
+  let _rerendering = false;
+  let _rerenderPending = false;
   function _rerender() {
-    const el = _ensureOverlayRoot();
-    if (!_sub.open) { el.innerHTML = ''; return; }
-    const dataFocus = _rememberDataFocus(el);
-    el.innerHTML = renderWizard();
-    // Herplaats cached stableSearch-inputs (cust-search) — hun DOM-node
-    // stays alive tussen renders zodat cursor + waarde bewaard blijven.
-    if (typeof H.hydrateSearchMounts === 'function') H.hydrateSearchMounts();
-    if (dataFocus) queueMicrotask(() => _restoreDataFocus(el, dataFocus));
+    if (_rerendering) { _rerenderPending = true; return; }
+    _rerendering = true;
+    try {
+      const el = _ensureOverlayRoot();
+      if (!_sub.open) { el.innerHTML = ''; return; }
+      const dataFocus = _rememberDataFocus(el);
+      el.innerHTML = renderWizard();
+      // Herplaats cached stableSearch-inputs (cust-search) — hun DOM-node
+      // stays alive tussen renders zodat cursor + waarde bewaard blijven.
+      if (typeof H.hydrateSearchMounts === 'function') H.hydrateSearchMounts();
+      if (dataFocus) queueMicrotask(() => _restoreDataFocus(el, dataFocus));
+    } finally {
+      _rerendering = false;
+      if (_rerenderPending) { _rerenderPending = false; queueMicrotask(_rerender); }
+    }
   }
   // Registreer stableSearch-handler ÉÉN keer voor cust-picker.
   if (H.onSearch && !window.__subwOnSearchRegistered) {
