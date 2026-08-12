@@ -615,11 +615,16 @@
 
   window.__odvDoPush = async function () {
     if (!_odv.dealId) return;
+    try { window.__swLog && window.__swLog('odv-push:start', { deal_id: _odv.dealId }); } catch (_) {}
     try {
-      await apiJson('/api/sales-deal-retry-push', { method: 'POST', body: JSON.stringify({ deal_id: _odv.dealId }) });
+      const resp = await apiJson('/api/sales-deal-retry-push', { method: 'POST', body: JSON.stringify({ deal_id: _odv.dealId }) });
+      try { window.__swLog && window.__swLog('odv-push:parsed-ok', { success: resp?.success, tl_status: resp?.tl_quotation_status || null }); } catch (_) {}
       toast('Naar TeamLeader gepusht');
       _odv.data = null; _odv.error = null; _odvLoad(_odv.dealId);
-    } catch (e) { toast('Push mislukt: ' + e.message); }
+    } catch (e) {
+      try { window.__swLog && window.__swLog('odv-push:error', { msg: e?.message || String(e) }); } catch (_) {}
+      toast('Push mislukt: ' + e.message);
+    }
   };
 
   window.__odvDoCopy = async function () {
