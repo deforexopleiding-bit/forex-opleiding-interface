@@ -178,14 +178,28 @@ async function syncResource(cfg) {
       const filter = { updated_since: updatedSinceIso };
       if (dept) filter.department_id = dept;
 
-      const r = await tlCall(listEndpoint, {
-        filter,
-        page: { size: PAGE_SIZE, number: page },
-        // Oudste eerst → cursor monotoon. sortField default 'updated_at' (werkt op
-        // creditNotes/contacts/companies); voor invoices override naar 'invoice_date'
-        // (TL invoices.list accepteert 'updated_at' niet).
-        sort: [{ field: sortField, order: 'asc' }],
-      });
+      // De list-call MOET opgevangen worden: throwt tlFetch (netwerk/token/DNS)
+      // op een latere pagina — ná dat eerdere records al verwerkt/geskipt zijn —
+      // dan zou die throw uit syncResource propageren, de phase-catch raken en de
+      // sync_state-write overslaan → de hele cursor-vooruitgang van deze run
+      // (incl. skip-and-advance) gaat verloren en de cursor blijft klem. Vang 'm
+      // dus af als een dept-fout (net als een !r.ok): tel + break → de run rondt
+      // af met de progress-tot-nu en schrijft sync_state.
+      let r;
+      try {
+        r = await tlCall(listEndpoint, {
+          filter,
+          page: { size: PAGE_SIZE, number: page },
+          // Oudste eerst → cursor monotoon. sortField default 'updated_at' (werkt op
+          // creditNotes/contacts/companies); voor invoices override naar 'invoice_date'
+          // (TL invoices.list accepteert 'updated_at' niet).
+          sort: [{ field: sortField, order: 'asc' }],
+        });
+      } catch (e) {
+        console.error(`[cron-finance-sync] ${resource} ${listEndpoint} THROW dept=${dept ?? 'flat'} page=${page}`, e.message);
+        errors++;
+        break;
+      }
       if (!r.ok) {
         const txt = await r.text().catch(() => '');
         console.error(`[cron-finance-sync] ${resource} ${listEndpoint} HTTP ${r.status} dept=${dept ?? 'flat'} page=${page}`, txt.slice(0, 300));
