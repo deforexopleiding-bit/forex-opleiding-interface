@@ -6,7 +6,9 @@
 //     (bevat intake_handled_at / cancelled / paid / bedenktijd / availability /
 //      bubble_* / mentor_intake_status — allemaal nodig voor v1-kolommen).
 //   - Lazy intake-status-patch via /api/onboarding-intake-status.
-//   - Uitgebreide kolommen: Start status (pijplijn) · Voortgang · Bubble · Kebab.
+//   - Uitgebreide kolommen: Start status (pijplijn) · Voortgang · Bedenktijd · Kebab.
+//     (Bubble-kolom verwijderd 2026-08-13 — Bubble-status leeft nu alleen in
+//      de detail-modal tab "Account & Bubble".)
 //   - Sorteerbare headers (klik = sort): Klant · Traject · Status · Mentor ·
 //     Startdatum · Betaling · Aangemeld.
 //   - Inline mentor-select per rij (RBAC onboarding.assign_mentor;
@@ -302,29 +304,71 @@
   // default 'nog_te_benaderen' (nooit bare "—"). Zie v1 regel 1432 patroon.
   function intakePillOf(row) {
     const key = row?.intake_status || row?.mentor_intake_status || 'nog_te_benaderen';
-    const [c, l] = INTAKE_PILL[key] || INTAKE_PILL.nog_te_benaderen;
-    return H.pill(c, l);
+    const meta = INTAKE_PILL[key];
+    if (!meta) {
+      // Onbekende key uit server → future-diagnose. Log 1x per unieke key
+      // zodat een nieuwe status in api/_lib/intake-status.js meteen opvalt.
+      _warnUnknownIntake(key);
+      return H.pill('neutral', key || 'onbekend');
+    }
+    return H.pill(meta[0], meta[1]);
+  }
+  const _seenUnknownIntake = new Set();
+  function _warnUnknownIntake(key) {
+    if (!key || _seenUnknownIntake.has(key)) return;
+    _seenUnknownIntake.add(key);
+    console.warn('[onb-v2] unknown intake_status key:', key, '— add to INTAKE_PILL');
   }
 
-  function bubbleBadge(r) {
-    if (r.bubble_provisioned) return `<span class="kv-onb-pill kv-onb-pill-ok" title="Bubble user ${esc(r.bubble_user_id || '')}">✓</span>`;
-    if (r.bubble_provision_error) return `<span class="kv-onb-pill kv-onb-pill-danger" title="${esc(r.bubble_provision_error)}">⚠</span>`;
-    return `<span style="color:var(--text-3);font-size:11px">—</span>`;
-  }
+  // NB: bubbleBadge is bewust verwijderd op 2026-08-13 samen met de Bubble-kolom.
+  // Bubble-status blijft zichtbaar in de detail-modal (tab "Account & Bubble" →
+  // `modules/klanten-v2/views/modals/onboarding-detail.js` `bubbleBadgeHtml`).
   function voortgangCell(r) {
     if (r.status === 'afgerond') return '<span style="color:var(--emerald);font-size:12px">✓ Afgerond</span>';
     if (r.status === 'geannuleerd') return '<span style="color:var(--rose);font-size:12px">Geannuleerd</span>';
     const step = r.current_step != null ? String(r.current_step) : '0';
     return `<span style="font-size:12px;color:var(--text-2)">Stap ${esc(step)}</span>`;
   }
+  // Bedenktijd — 1-op-1 met v1 shared/onboarding-overzicht.js `bedenktijdBadge`
+  // (r444-472). Server-shape (api/admin-future-students-list.js
+  // `computeBedenktijd` r72-85): { status: 'lopend' | 'vervallen' | 'onbekend',
+  // reason: 'afstand' | 'verstreken' | null, waived_at, offerte_op, vervalt_op }.
+  // BUGFIX 2026-08-13: eerdere versie testte op 'loopt' / 'afstand' /
+  // 'verstreken' als top-level status — server stuurt 'lopend' en
+  // 'vervallen'+reason, dus de cel bleef altijd op "—" hangen.
+  function _ddMmNL(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const pad = (n) => String(n).padStart(2, '0');
+    return pad(d.getDate()) + '-' + pad(d.getMonth() + 1);
+  }
   function bedenktijdCell(r) {
     const b = r.bedenktijd;
-    if (!b || !b.status) return '<span style="color:var(--text-3);font-size:11px">—</span>';
-    const dd = b.vervalt_op ? new Date(b.vervalt_op).toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' }) : '';
-    if (b.status === 'loopt')       return `<span style="color:var(--amber);font-size:11.5px">Vervalt ${esc(dd)}</span>`;
-    if (b.status === 'afstand')     return `<span style="color:var(--emerald);font-size:11.5px">Afstand ${esc(dd)}</span>`;
-    if (b.status === 'verstreken')  return `<span style="color:var(--text-3);font-size:11.5px">Verstreken ${esc(dd)}</span>`;
-    return '—';
+    if (!b || !b.status || b.status === 'onbekend') {
+      return '<span style="color:var(--text-3);font-size:11px">—</span>';
+    }
+    if (b.status === 'lopend') {
+      const vervalt = _ddMmNL(b.vervalt_op);
+      const offerte = _ddMmNL(b.offerte_op);
+      const title = offerte ? ('Offerte getekend ' + offerte) : '';
+      return `<span class="kv-onb-pill kv-onb-pill-warn" title="${esc(title)}">Loopt — vervalt ${esc(vervalt)}</span>`;
+    }
+    if (b.status === 'vervallen') {
+      if (b.reason === 'afstand') {
+        const waived = _ddMmNL(b.waived_at);
+        const label = waived ? ('Afstand gedaan ' + waived) : 'Afstand gedaan';
+        return `<span class="kv-onb-pill kv-onb-pill-ok" title="${esc(b.waived_at || '')}">${esc(label)}</span>`;
+      }
+      if (b.reason === 'verstreken') {
+        const vervalt = _ddMmNL(b.vervalt_op);
+        const offerte = _ddMmNL(b.offerte_op);
+        const title = offerte ? ('14 dagen na offerte (' + offerte + ')') : '';
+        const label = vervalt ? ('Verstreken ' + vervalt) : 'Verstreken';
+        return `<span class="kv-onb-pill kv-onb-pill-ok" title="${esc(title)}">${esc(label)}</span>`;
+      }
+    }
+    return '<span style="color:var(--text-3);font-size:11px">—</span>';
   }
   function mentorCell(r) {
     if (!asArr(_mentors).length) return `<span style="font-size:12px">${esc(r.mentor_name) || (r.mentor_user_id ? '#' + String(r.mentor_user_id).slice(0, 6) : '—')}</span>`;
@@ -357,7 +401,6 @@
       ${sortHeader(scope, 'startdatum', 'Startdatum')}
       ${sortHeader(scope, 'betaling', 'Betaling')}
       <th>Bedenktijd</th>
-      <th>Bubble</th>
       ${sortHeader(scope, 'aangemeld', 'Aangemeld')}
       <th style="width:32px"></th>
     </tr>`;
@@ -371,7 +414,6 @@
       <td><span class="mono" style="color:var(--text-3);font-size:12.5px">${r.start_date ? new Date(r.start_date).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' }) : '—'}</span></td>
       <td>${r.paid ? H.pill('ok', 'Betaald') : H.pill('warn', 'Open')}</td>
       <td>${bedenktijdCell(r)}</td>
-      <td>${bubbleBadge(r)}</td>
       <td><span class="mono" style="color:var(--text-3);font-size:12px">${r.created_at ? new Date(r.created_at).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' }) : '—'}</span></td>
       <td>${kebabCell(r)}</td>
     </tr>`).join('');
@@ -392,8 +434,8 @@
     </div>`;
   }
 
-  const skel = (n = 5) => `<div class="tbl-wrap"><table><thead><tr>${'<th></th>'.repeat(12)}</tr></thead>
-    <tbody>${Array.from({ length: n }).map(() => `<tr style="opacity:.55">${Array.from({ length: 12 }).map(() => `<td><div style="height:12px;background:var(--surface-2);border-radius:4px;width:70%"></div></td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  const skel = (n = 5) => `<div class="tbl-wrap"><table><thead><tr>${'<th></th>'.repeat(11)}</tr></thead>
+    <tbody>${Array.from({ length: n }).map(() => `<tr style="opacity:.55">${Array.from({ length: 11 }).map(() => `<td><div style="height:12px;background:var(--surface-2);border-radius:4px;width:70%"></div></td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   const errBlk = (m) => `<div style="margin:20px;padding:14px 18px;border:1px solid var(--rose-line);background:var(--rose-soft);border-radius:var(--r);color:var(--rose);font-size:13px">⚠ Kon onboardings niet ophalen: ${esc(m)}</div>`;
 
   function actiefView() {
