@@ -276,12 +276,25 @@ export default async function handler(req, res) {
           address_country: (customer_data.address_country === 'BE' ? 'BE' : (customer_data.address_country === 'NL' ? 'NL' : null)),
           tl_contact_id: tl_imported_contact_id || null, created_by_user_id: user.id,
         };
-        const { data: cust, error: cErr } = await supabaseAdmin.from('customers').insert(custPayload).select('id').single();
-        if (cErr) {
-          if (cErr.code === '23505') return res.status(409).json({ error: 'Email reeds in gebruik' });
-          throw cErr;
+        // Idempotent op tl_contact_id: hergebruik een bestaande (actieve) customer
+        // voor dit TL-contact i.p.v. een duplicaat te maken (root-cause dubbele-
+        // klant-bug wanneer de wizard geen matched_customer_id meestuurde).
+        if (tl_imported_contact_id) {
+          const { data: existRows } = await supabaseAdmin.from('customers')
+            .select('id')
+            .eq('tl_contact_id', tl_imported_contact_id)
+            .is('archived_at', null).is('anonymized_at', null)
+            .order('created_at', { ascending: true }).limit(1);
+          if (existRows && existRows.length) customerId = existRows[0].id;
         }
-        customerId = cust.id;
+        if (!customerId) {
+          const { data: cust, error: cErr } = await supabaseAdmin.from('customers').insert(custPayload).select('id').single();
+          if (cErr) {
+            if (cErr.code === '23505') return res.status(409).json({ error: 'Email reeds in gebruik' });
+            throw cErr;
+          }
+          customerId = cust.id;
+        }
       }
       // Ghost-deal (geen offerte): subs hangen altijd onder een deal.
       const totalExcl = subsNorm.reduce((sum, s) => sum + s._lines.reduce((a, li) => a + (Number(li.amount) || 0) * (Number(s.term_count) || 1), 0), 0);
