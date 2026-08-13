@@ -266,7 +266,7 @@ const V2_MODULES = new Set(['klanten']);
 // nieuwe v2-view alle taken kan (dus geen half-af scherm voor het team).
 // Dashboard heeft z'n data-ronde al gehad (#1210) en staat aan; klanten is
 // de originele v2-basis.
-const V2_ACTIVE_ALLOWLIST = new Set(['klanten', 'dashboard', 'sales', 'leads', 'finance', 'tickets', 'taken', 'onboarding']);
+const V2_ACTIVE_ALLOWLIST = new Set(['klanten', 'dashboard', 'sales', 'leads', 'finance', 'tickets', 'taken', 'onboarding', 'logboek']);
 
 // ── Preview-override via URL query-param ──────────────────────────────────
 // `?v2preview=sales` (of comma-list `?v2preview=sales,finance,lisa`) forceert
@@ -336,7 +336,7 @@ const LEGACY_URLS = {
   lisa:             '/modules/lisa.html',
   automatiseringen: '/modules/agent-center.html',             // dichtstbijzijnde legacy-equivalent
   agents:           '/modules/agents.html',
-  logboek:          '/modules/activity-log.html',
+  logboek:          null,                                     // V2 GO-LIVE — geen redirect meer
   instellingen:     '/modules/admin.html',
   binnenkort:       null,                                     // placeholder
 };
