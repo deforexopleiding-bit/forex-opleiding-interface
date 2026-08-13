@@ -466,14 +466,15 @@
         });
         if (j?.error) throw new Error(j.error);
       } else {
-        // BUG 1 FIX — als de joost_config-rij nog niet bestaat (bv. Aisha/Manager
-        // direct na migratie, of onboarding/events voor de eerste keer aangezet),
-        // stuur volledige defaults mee zodat NOT NULL text-kolommen niet als
-        // NULL bij PostgREST binnenkomen. Bij bestaande rij: minimale toggle.
-        const body = await _buildSafeUpsertBody(a.backend, { is_enabled: next });
-        // Guard: persona_name mag niet leeg zijn (backend valideert)
-        if (body.persona_name === '' || body.persona_name == null) body.persona_name = a.n || 'Agent';
-        if (body.persona_tone === '' || body.persona_tone == null) body.persona_tone = 'vriendelijk-professioneel';
+        // BUG 1 FIX (2e ronde) — toggle vanuit Overzicht heeft geen form-context.
+        // Fetch ALTIJD eerst /api/joost-config-get?module=X (retourneert bestaande
+        // rij OF spec-defaults met is_default:true) en bouw daaruit een VOLLEDIGE
+        // upsert-body met ALLE NOT NULL kolommen defensief gecoercet. Zo landt
+        // er nooit een null in system_prompt_template / persona_name / etc,
+        // ongeacht of PostgREST INSERT of UPDATE-pad kiest.
+        const body = await _buildFullBodyFromDb(a.backend, { is_enabled: next });
+        // Extra fallback: gebruik agent-display-naam als persona_name leeg is.
+        if (body.persona_name === 'Agent' && a.n) body.persona_name = a.n;
         const j = await window.KV.authedJson('/api/joost-config-upsert', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -823,12 +824,50 @@
   }
   window.__agReset = (agId) => { _ui.dirty[agId] = {}; if (window.DFO?.render) window.DFO.render(); };
 
-  // BUG 1 FIX — Bepaal of de joost_config-rij voor deze module al bestaat.
-  // Als NEE: haal spec-defaults op via joost-config-get zodat we bij INSERT
-  // alle NOT NULL text-kolommen expliciet meesturen (persona_name /
-  // persona_tone / system_prompt_template / knowledge_base / model). Dit
-  // voorkomt "null value violates not-null constraint"-fouten wanneer
-  // supabase-js .upsert() DEFAULT-fallback niet toepast.
+  // ═══════════════════════════════════════════════════════════════════════
+  // TOGGLE-BODY BUILDER — haalt ALTIJD eerst de volledige config op en
+  // stuurt ALLE NOT NULL kolommen mee. Voorkomt scenario waar upsert een
+  // bestaande rij "UPDATEt" maar alsnog NULL doorstuurt voor niet-
+  // meegegeven kolommen, of INSERT waar DB-defaults niet toegepast worden.
+  // Gebruikt door __agToggleLive.
+  // ═══════════════════════════════════════════════════════════════════════
+  async function _buildFullBodyFromDb(moduleKey, overrides) {
+    const cfg = await _fetchDefaultsForModule(moduleKey) || {};
+    // Coerce elke NOT NULL kolom defensief.
+    const persona_name = (cfg.persona_name && String(cfg.persona_name).trim()) ? String(cfg.persona_name) : 'Agent';
+    const persona_tone = (cfg.persona_tone && String(cfg.persona_tone).trim()) ? String(cfg.persona_tone) : 'vriendelijk-professioneel';
+    const system_prompt_template = cfg.system_prompt_template == null ? '' : String(cfg.system_prompt_template);
+    const knowledge_base = (cfg.knowledge_base && typeof cfg.knowledge_base === 'object' && !Array.isArray(cfg.knowledge_base))
+      ? cfg.knowledge_base : {};
+    const modelVal = (cfg.model && ['claude-sonnet-4-6','claude-opus-4-7','claude-haiku-4-5'].includes(cfg.model))
+      ? cfg.model : 'claude-sonnet-4-6';
+    const temperature = (cfg.temperature != null && Number.isFinite(Number(cfg.temperature)))
+      ? Math.max(0, Math.min(1, Number(cfg.temperature))) : 0.3;
+    const context_message_count = (cfg.context_message_count != null && Number.isInteger(Number(cfg.context_message_count)))
+      ? Math.max(5, Math.min(50, Number(cfg.context_message_count))) : 10;
+    const is_enabled = (cfg.is_enabled === true);
+    const body = {
+      module: moduleKey,
+      persona_name,
+      persona_tone,
+      system_prompt_template,
+      knowledge_base,
+      model: modelVal,
+      temperature,
+      context_message_count,
+      is_enabled,
+      ...(overrides || {}),
+    };
+    // Protected-zone dubbele guard: nooit autonomy_config/feature_flags voor finance meesturen.
+    if (moduleKey === 'finance') {
+      delete body.autonomy_config;
+      delete body.feature_flags;
+    }
+    return body;
+  }
+
+  // (Behouden voor _agSave — bouwt safe body op basis van partial dirty updates
+  //  én bestaandheid van rij; wordt niet meer gebruikt door __agToggleLive.)
   async function _rowExistsForModule(moduleKey) {
     const cfgList = asArr(_live.configList.data);
     return cfgList.some((r) => r.type === 'joost_config' && r.module === moduleKey);
