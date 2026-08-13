@@ -1,8 +1,18 @@
 // modules/klanten-v2/views/nieuwsbrief-v2.js
 //
-// Fase E — Nieuwsbrief (layout-only). 1 view, compact.
-// 1-op-1 uit prototype r1818-1832 (marketing-only in MODS: roles:['marketing']).
-// Dormant. Preview ?v2preview=nieuwsbrief (rol Marketing).
+// Fase E — Nieuwsbrief. GEEN DATA-KOPPELING MOGELIJK 2026-08-13.
+//
+// STATUS: greenfield. Er zijn GEEN v1-endpoints (/api/newsletter*,
+// /api/mail-campaign*, /api/nieuwsbrief* — allen 0 hits) en GEEN v1-file
+// (modules/newsletter.html bestaat niet). Er is wel een build-spec:
+//   docs/redesign/marketing-nieuwsbrief-buildspec.md
+// die opent met "deze features bestaan niet in de repo" en 3 opties
+// beschrijft: (A) extern platform sync, (B) in-house tabellen bouwen,
+// (C) iframe-embed van extern dashboard (~1-2u).
+//
+// Deze data-ronde: NEEDS JEFFREY. Behoud scaffold + banner die dit
+// expliciet meldt. Zodra Jeffrey een build-optie kiest kan we koppelen.
+// Preview ?v2preview=nieuwsbrief (rol Marketing).
 
 (function () {
   if (!window.DFO) { console.error('[nieuwsbrief-v2] DFO shell niet geladen.'); return; }
@@ -19,9 +29,21 @@
 
   window.__nbNotice = (l) => { console.info('[nieuwsbrief-v2] ' + l); try { alert(l + ' — komt in de data-ronde.'); } catch (_) {} };
 
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const nj = () => `<div style="margin:14px 20px 0;padding:14px 18px;border:1px solid var(--amber-line);background:var(--amber-soft);border-radius:var(--r);color:var(--amber);font-size:12.5px;line-height:1.6">
+    <div style="display:flex;align-items:flex-start;gap:12px">
+      <span>${svg(I.alert, 'width:16px;height:16px;flex-shrink:0;margin-top:1px')}</span>
+      <div>
+        <b>Needs Jeffrey — build-spec nodig</b><br>
+        Deze module is <b>greenfield</b>: er zijn geen v1-endpoints en geen v1-pagina. Onderstaande KPI's + tabel zijn puur voorbeeld-layout uit het prototype.<br>
+        Build-spec ligt klaar in <code>docs/redesign/marketing-nieuwsbrief-buildspec.md</code> met 3 opties (extern sync / in-house / iframe-embed). Kies er één, dan koppelen we.
+      </div>
+    </div>
+  </div>`;
+
   function nbView() {
     const f = F('nf', 'all');
-    return `${H.voorbeeldBanner()}
+    return `${nj()}
     ${H.kpis([
       { c: 'teal',    icon: I.users,  label: 'Abonnees',              val: '3.142', hi: 1, sub: 'e-maillijst', trend: H.trend('+4,1%', true) },
       { c: 'emerald', icon: I.mail,   label: 'Gem. open rate',        val: '42%',         sub: 'laatste 3 nieuwsbrieven', trend: H.trend('+2%', true) },
