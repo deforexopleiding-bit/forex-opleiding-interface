@@ -89,6 +89,8 @@
     lisaSet:    { loading: false, error: null, data: null },  // lisa_settings singleton
     bg:         { loading: false, error: null, data: null },  // achtergrond-tellers
     prest:      { loading: false, error: null, data: null },  // prestaties-extended (weekly + response + fb)
+    kbArt:      { loading: false, error: null, data: null },  // kennisbank_artikelen
+    kbUnm:      { loading: false, error: null, data: null },  // kennisbank_unmatched
   };
 
   const _ui = {
@@ -101,6 +103,10 @@
     toggling: {},     // toggling[agentId] = true (voor live-toggle spinner)
     confirmed: {},    // confirmed[agentId] = { model:true, temperature:true, ... }
     lisaHistOpen: false,
+    // Sandbox chat-state per agent-id
+    sandbox: {},      // sandbox[agentId] = { history:[{role,content}], sending:bool, input:'' }
+    // Kennisbank-artikel modal state
+    artModal: null,   // null | { mode:'create'|'edit', item:{...} }
   };
 
   async function tryFetch(label, url, init, timeoutMs) {
@@ -187,6 +193,22 @@
     if (j && j.__error) st.error = j.__error; else st.data = j || null;
     if (window.DFO?.render) window.DFO.render();
   }
+  async function fetchKbArt() {
+    const st = _live.kbArt; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('kbArt', '/api/kennisbank-artikelen?limit=500');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.items);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchKbUnm() {
+    const st = _live.kbUnm; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('kbUnm', '/api/kennisbank-unmatched?limit=50');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.items);
+    if (window.DFO?.render) window.DFO.render();
+  }
 
   window.__agRetry = (b, mod) => {
     if (b === 'perConfig' && mod) { _live.perConfig.data[mod] = null; _live.perConfig.error[mod] = null; fetchPerConfig(mod); return; }
@@ -198,6 +220,8 @@
     if (b === 'lisaSet')    fetchLisaSettings();
     if (b === 'bg')         fetchBg();
     if (b === 'prest')      fetchPrest();
+    if (b === 'kbArt')      fetchKbArt();
+    if (b === 'kbUnm')      fetchKbUnm();
   };
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -779,14 +803,25 @@
       }
     }
 
-    const ALLOWED = ['persona_name','persona_tone','system_prompt_template','knowledge_base','model','temperature','context_message_count','is_enabled'];
+    // Whitelist per module. autonomy_config alleen voor niet-Joost (events/onboarding).
+    // Voor Joost (module=finance) blijft autonomy_config + feature_flags altijd read-only
+    // en worden ze hier NOOIT meegestuurd — dubbele guard bovenop de UI-lock.
+    const BASE_ALLOWED = ['persona_name','persona_tone','system_prompt_template','knowledge_base','model','temperature','context_message_count','is_enabled'];
+    const ALLOWED = (a.backend === 'finance')
+      ? BASE_ALLOWED
+      : [...BASE_ALLOWED, 'autonomy_config'];
     const body = { module: a.backend };
     let n = 0;
     for (const k of ALLOWED) if (dirty[k] !== undefined) {
-      // Guard: knowledge_base moet plain object zijn
-      if (k === 'knowledge_base' && (dirty[k] === null || typeof dirty[k] !== 'object' || Array.isArray(dirty[k]))) continue;
+      // Guard: knowledge_base + autonomy_config moeten plain object zijn
+      if ((k === 'knowledge_base' || k === 'autonomy_config') && (dirty[k] === null || typeof dirty[k] !== 'object' || Array.isArray(dirty[k]))) continue;
       body[k] = dirty[k];
       n++;
+    }
+    // Extra defensieve strip: als 'finance' toch iets probeert door te sturen dat protected is, blokkeer.
+    if (a.backend === 'finance') {
+      delete body.autonomy_config;
+      delete body.feature_flags;
     }
     if (!n) { alert('Geen bekende velden om op te slaan.'); return; }
 
@@ -813,23 +848,138 @@
   };
 
   // ═══════════════════════════════════════════════════════════════════════
-  // AUTONOMIE (Joost read-only echt / Simone-Mila read-only best-effort)
+  // AUTONOMIE — Simone/Mila BEWERKBAAR (intents + limits) via joost-config-
+  // upsert. Joost + Lisa READ-ONLY.
   // ═══════════════════════════════════════════════════════════════════════
+  const INTENT_ACTIONS = [
+    { v: 'off',        l: 'Uit',           d: 'Doet niets bij dit soort bericht' },
+    { v: 'draft',      l: 'Meedenken',     d: 'Stelt antwoord voor, jij verstuurt' },
+    { v: 'autonomous', l: 'Zelfstandig',   d: 'Antwoordt zelf zonder tussenkomst' },
+    { v: 'escalate',   l: 'Altijd mens',   d: 'Zet direct door naar een mens' },
+  ];
+
   function _cfgAutonomie(a, cfg) {
     const cfgLoaded = a.backend === 'lisa' ? _live.lisa.data : cfg;
     const auto = cfgLoaded?.autonomy_config;
     const flags = cfgLoaded?.feature_flags;
 
-    return `<div class="pad" style="padding-top:14px"><div style="max-width:820px">
-      ${a.lock ? `<div style="margin-bottom:12px;padding:11px 15px;border:1px solid var(--amber-line);background:var(--amber-soft);border-radius:var(--r);font-size:12.5px;color:var(--amber);display:flex;gap:11px;align-items:flex-start">
-        ${svg(I.shield, 'width:15px;height:15px;flex-shrink:0;margin-top:1px')}
-        <div style="flex:1"><b>Read-only voor Joost.</b> Wijzigen via <b>${esc(a.mod)} → Instellingen</b>.
-        <a href="/modules/finance.html#view-wanbetalers" style="color:var(--amber);text-decoration:underline;margin-left:6px">Open Wanbetalers →</a></div>
-      </div>` : ''}
+    // Joost + Lisa → read-only
+    if (a.lock || a.backend === 'lisa' || !a.backend) {
+      return `<div class="pad" style="padding-top:14px"><div style="max-width:820px">
+        ${a.lock ? `<div style="margin-bottom:12px;padding:11px 15px;border:1px solid var(--amber-line);background:var(--amber-soft);border-radius:var(--r);font-size:12.5px;color:var(--amber);display:flex;gap:11px;align-items:flex-start">
+          ${svg(I.shield, 'width:15px;height:15px;flex-shrink:0;margin-top:1px')}
+          <div style="flex:1"><b>Read-only voor Joost.</b> Autonomie en feature-flags wijzig je via <b>${esc(a.mod)} → Instellingen</b>.
+          <a href="/modules/finance.html#view-wanbetalers" style="color:var(--amber);text-decoration:underline;margin-left:6px">Open Wanbetalers →</a></div>
+        </div>` : ''}
+        ${_autonomySummary(auto, a)}
+        ${_featureFlagsSummary(flags)}
+      </div></div>`;
+    }
 
-      ${_autonomySummary(auto, a)}
+    // Simone/Mila → editor
+    return _cfgAutonomieEditor(a, cfgLoaded);
+  }
+
+  function _autonomyDraft(agId, cfg) {
+    const dirty = _ui.dirty[agId] || {};
+    if (dirty.autonomy_config !== undefined) return dirty.autonomy_config;
+    const base = cfg?.autonomy_config;
+    return (base && typeof base === 'object' && !Array.isArray(base)) ? JSON.parse(JSON.stringify(base)) : {};
+  }
+  function _setAutonomyDraft(agId, next) {
+    _ui.dirty[agId] = _ui.dirty[agId] || {};
+    _ui.dirty[agId].autonomy_config = next;
+  }
+  window.__agAutIntentAction = (agId, intentKey, action) => {
+    const a = AGENTS_STATIC.find((x) => x.id === agId); if (!a) return;
+    const cfg = _live.perConfig.data[a.backend];
+    const draft = _autonomyDraft(agId, cfg);
+    draft.intents = draft.intents || {};
+    draft.intents[intentKey] = draft.intents[intentKey] || {};
+    draft.intents[intentKey].action = action;
+    // Sync enabled met action !== 'off' (defensief, backend-conventie).
+    draft.intents[intentKey].enabled = (action !== 'off');
+    _setAutonomyDraft(agId, draft);
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__agAutLimit = (agId, field, v) => {
+    const a = AGENTS_STATIC.find((x) => x.id === agId); if (!a) return;
+    const cfg = _live.perConfig.data[a.backend];
+    const draft = _autonomyDraft(agId, cfg);
+    draft.communication_limits = draft.communication_limits || {};
+    if (v === '' || v == null) delete draft.communication_limits[field];
+    else if (['max_per_dag','cooldown_minutes'].includes(field)) draft.communication_limits[field] = Math.max(0, Number(v) || 0);
+    else draft.communication_limits[field] = String(v);
+    _setAutonomyDraft(agId, draft);
+  };
+
+  function _cfgAutonomieEditor(a, cfg) {
+    const draft   = _autonomyDraft(a.id, cfg);
+    const intents = (draft.intents && typeof draft.intents === 'object') ? draft.intents : {};
+    const intentKeys = Object.keys(intents);
+    const limits  = (draft.communication_limits && typeof draft.communication_limits === 'object') ? draft.communication_limits : {};
+
+    const flags = cfg?.feature_flags;
+
+    return `<div class="pad" style="padding-top:14px"><div style="max-width:820px">
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-head">
+          <span class="tile-ico" style="background:var(--${a.c}-soft);color:var(--${a.c})">${svg(I.sliders)}</span>
+          <div class="card-title">Intenten — wat mag ${esc(a.n)} zelf beslissen?</div>
+        </div>
+        ${intentKeys.length === 0
+          ? `<div class="card-body" style="padding:16px 17px;color:var(--text-3);font-size:12.5px">Geen intents gedefinieerd in <span class="mono">autonomy_config.intents</span> — vul eerst het schema in via de admin-flow.</div>`
+          : `<div class="card-body" style="padding:0">
+            ${intentKeys.map((k) => {
+              const cur = String(intents[k]?.action || 'draft');
+              const known = INTENT_ACTIONS.some((o) => o.v === cur);
+              return `<div style="display:grid;grid-template-columns:170px 1fr;gap:14px;align-items:center;padding:11px 17px;border-bottom:1px solid var(--border)">
+                <div>
+                  <div style="font-size:13px;font-weight:500">${esc(k)}</div>
+                  ${intents[k]?.min_confidence != null ? `<div style="font-size:11px;color:var(--text-3);margin-top:1px">min. vertrouwen ${Math.round(100*Number(intents[k].min_confidence))}%</div>` : ''}
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+                  ${INTENT_ACTIONS.map((o) => `<button class="chip ${cur === o.v ? 'on' : ''}" onclick="window.__agAutIntentAction('${a.id}','${esc(k)}','${o.v}')" title="${esc(o.d)}">${esc(o.l)}</button>`).join('')}
+                  ${!known ? `<span class="pill pill-warn nodot" style="font-size:10px;padding:1.5px 6px" title="Onbekende waarde in DB: ${esc(cur)}">custom: ${esc(cur)}</span>` : ''}
+                </div>
+              </div>`;
+            }).join('')}
+          </div>`}
+      </div>
+
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-head">
+          <span class="tile-ico" style="background:var(--slate-soft);color:var(--slate)">${svg(I.clock)}</span>
+          <div class="card-title">Communicatie-limieten</div>
+        </div>
+        <div class="card-body" style="display:flex;flex-direction:column;gap:12px;padding-top:14px;padding-bottom:14px">
+          ${_limitField(a.id, 'Max. berichten per dag',  'max_per_dag',      limits.max_per_dag,      'number', { min:0, max:20, step:1 })}
+          ${_limitField(a.id, 'Cooldown tussen berichten (min)', 'cooldown_minutes', limits.cooldown_minutes, 'number', { min:0, max:1440, step:5 })}
+          ${_limitField(a.id, 'Verzendvenster start (HH:MM)', 'office_hours_start', limits.office_hours_start || '', 'text')}
+          ${_limitField(a.id, 'Verzendvenster einde (HH:MM)', 'office_hours_end',   limits.office_hours_end || '',   'text')}
+        </div>
+      </div>
+
       ${_featureFlagsSummary(flags)}
+
+      ${_saveBar(a, ['model','temperature','context_message_count'])}
     </div></div>`;
+  }
+
+  function _limitField(agId, label, field, v, kind, opts) {
+    const id = 'ag_' + agId + '_lim_' + field;
+    const inputStyle = 'width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-1);font-size:13px';
+    let input;
+    if (kind === 'number') {
+      const o = opts || {};
+      input = `<input id="${id}" type="number" ${o.min!=null?`min="${o.min}"`:''} ${o.max!=null?`max="${o.max}"`:''} ${o.step!=null?`step="${o.step}"`:''} value="${esc(String(v ?? ''))}" oninput="window.__agAutLimit('${agId}','${field}',this.value)" style="${inputStyle}" />`;
+    } else {
+      input = `<input id="${id}" type="text" value="${esc(String(v ?? ''))}" oninput="window.__agAutLimit('${agId}','${field}',this.value)" style="${inputStyle}" placeholder="bv. 09:00" />`;
+    }
+    return `<div style="display:grid;grid-template-columns:220px 1fr;gap:14px;align-items:center;padding:0 17px">
+      <label for="${id}" style="font-size:12.5px;color:var(--text-2)">${esc(label)}</label>
+      <div>${input}</div>
+    </div>`;
   }
 
   function _autonomySummary(auto, a) {
@@ -903,10 +1053,88 @@
     </div></div>`;
   }
   function _cfgOefengesprek(a) {
+    if (!a.backend || a.backend.startsWith('bg-')) {
+      return `<div class="pad" style="padding-top:14px"><div style="max-width:820px">
+        <div class="card">${soon('Oefengesprek — binnenkort', 'Deze agent heeft nog geen backend om mee te chatten.')}</div>
+      </div></div>`;
+    }
+    const st = _ui.sandbox[a.id] = _ui.sandbox[a.id] || { history: [], sending: false, input: '', error: null };
+
     return `<div class="pad" style="padding-top:14px"><div style="max-width:820px">
-      <div class="card">${soon('Oefengesprek — binnenkort', 'Test ' + a.n + ' in een veilige sandbox zonder dat er iets naar klanten gaat.')}</div>
+      <div style="margin-bottom:12px;padding:11px 15px;border:1px solid var(--emerald-line);background:var(--emerald-soft);border-radius:var(--r);font-size:12.5px;color:var(--emerald);display:flex;gap:11px;align-items:flex-start">
+        ${svg(I.tick, 'width:15px;height:15px;flex-shrink:0;margin-top:1px')}
+        <div style="flex:1"><b>Sandbox-modus.</b> Berichten worden NIET verstuurd naar klanten en NIET gelogd. Elke reactie komt vers uit de LLM met de live agent-config als systeem-prompt.</div>
+      </div>
+
+      <div class="card" style="margin-bottom:12px">
+        <div class="card-head">
+          <span class="tile-ico" style="background:var(--${a.c}-soft);color:var(--${a.c})">${svg(I.chat)}</span>
+          <div class="card-title">Testgesprek met ${esc(a.n)}</div>
+          ${st.history.length > 0 ? `<button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window.__agSandboxClear('${a.id}')">${svg(I.trash || I.x)}Leegmaken</button>` : ''}
+        </div>
+        <div class="card-body" style="padding:14px 17px;display:flex;flex-direction:column;gap:10px;min-height:220px">
+          ${st.history.length === 0
+            ? `<div style="color:var(--text-3);font-size:12.5px;text-align:center;padding:22px 12px">Nog geen berichten. Typ hieronder een testbericht.</div>`
+            : st.history.map((m) => _sandboxBubble(m, a)).join('')}
+          ${st.sending ? `<div style="display:flex;gap:8px;align-items:center;padding:8px 12px;background:var(--surface-2);border-radius:12px;max-width:75%;align-self:flex-start">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--${a.c});opacity:.4;animation:pulse 1.4s infinite"></span>
+            <span style="font-size:12px;color:var(--text-3)">${esc(a.n)} typt…</span>
+          </div>` : ''}
+          ${st.error ? `<div style="color:var(--rose);font-size:12px;padding:8px 12px;background:var(--rose-soft);border-radius:8px">${esc(st.error)}</div>` : ''}
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px">
+        <textarea id="ag_sandbox_input_${a.id}" placeholder="Typ een testbericht en druk Enter…" ${st.sending ? 'disabled' : ''} style="flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:13px;font-family:inherit;min-height:44px;resize:vertical;${st.sending ? 'opacity:.6' : ''}" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();window.__agSandboxSend('${a.id}')}"></textarea>
+        <button class="btn btn-primary" ${st.sending ? 'disabled' : ''} onclick="window.__agSandboxSend('${a.id}')" style="align-self:stretch">${svg(I.send)}Verstuur</button>
+      </div>
+      <style>@keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }</style>
     </div></div>`;
   }
+
+  function _sandboxBubble(m, a) {
+    const isUser = m.role === 'user';
+    const bg = isUser ? 'var(--surface-2)' : `color-mix(in srgb, var(--${a.c}) 10%, var(--surface))`;
+    return `<div style="max-width:75%;padding:9px 12px;border-radius:12px;background:${bg};${isUser ? 'align-self:flex-end' : 'align-self:flex-start;border-left:2px solid var(--' + a.c + ')'}">
+      <div style="font-size:10.5px;color:var(--text-3);margin-bottom:3px;text-transform:uppercase;letter-spacing:.05em">${isUser ? 'Jij' : esc(a.n)}</div>
+      <div style="font-size:13px;line-height:1.5;white-space:pre-wrap">${esc(m.content)}</div>
+    </div>`;
+  }
+
+  window.__agSandboxClear = (agId) => {
+    _ui.sandbox[agId] = { history: [], sending: false, input: '', error: null };
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__agSandboxSend = async (agId) => {
+    const a = AGENTS_STATIC.find((x) => x.id === agId); if (!a || !a.backend) return;
+    const st = _ui.sandbox[agId] = _ui.sandbox[agId] || { history: [], sending: false, input: '', error: null };
+    if (st.sending) return;
+    const input = document.getElementById('ag_sandbox_input_' + agId);
+    const msg = (input?.value || '').trim();
+    if (!msg) return;
+    st.history.push({ role: 'user', content: msg });
+    st.sending = true; st.error = null;
+    if (input) input.value = '';
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      const body = {
+        module: a.backend,
+        message: msg,
+        history: st.history.slice(0, -1).slice(-10),   // exclusief zojuist-toegevoegd bericht
+      };
+      const j = await window.KV.authedJson('/api/agent-sandbox-chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (j?.error) throw new Error(j.error);
+      st.history.push({ role: 'assistant', content: j?.reply || '(geen antwoord)' });
+    } catch (e) {
+      st.error = 'Sandbox-fout: ' + (e?.message || 'onbekende fout');
+    } finally {
+      st.sending = false;
+      if (window.DFO?.render) window.DFO.render();
+    }
+  };
 
   // ═══════════════════════════════════════════════════════════════════════
   // LISA BRIDGE — Persona / Fases / Kennisbank / Follow-ups + versies
@@ -1167,7 +1395,7 @@
   };
 
   // ═══════════════════════════════════════════════════════════════════════
-  // VIEW 3 — KENNISBANK (aggregate)
+  // VIEW 3 — KENNISBANK (aggregate agent-KB + centrale artikelen + unmatched)
   // ═══════════════════════════════════════════════════════════════════════
   function kennisbankView() {
     ['finance','events','onboarding'].forEach((m) => {
@@ -1175,7 +1403,9 @@
         queueMicrotask(() => fetchPerConfig(m));
       }
     });
-    if (!_live.lisa.data && !_live.lisa.loading && !_live.lisa.error) queueMicrotask(fetchLisaConfig);
+    if (!_live.lisa.data  && !_live.lisa.loading  && !_live.lisa.error)  queueMicrotask(fetchLisaConfig);
+    if (!_live.kbArt.data && !_live.kbArt.loading && !_live.kbArt.error) queueMicrotask(fetchKbArt);
+    if (!_live.kbUnm.data && !_live.kbUnm.loading && !_live.kbUnm.error) queueMicrotask(fetchKbUnm);
 
     const anyLoading = ['finance','events','onboarding'].some((m) => _live.perConfig.loading[m]) || _live.lisa.loading;
     if (anyLoading && !_live.perConfig.data.finance && !_live.perConfig.data.events && !_live.perConfig.data.onboarding) return skel();
@@ -1218,13 +1448,43 @@
     for (const r of all) catCount[r.categorie in catCount ? r.categorie : 'Overig']++;
     const errors = ['finance','events','onboarding'].filter((m) => _live.perConfig.error[m]);
 
+    // Centrale artikelen erbij mergen — die krijgen edit/delete-acties in de rij.
+    const centralArts = asArr(_live.kbArt.data);
+    const artErr = _live.kbArt.error;
+
     return `${_kbToolbar(catCount, all.length)}
     ${errors.map((m) => errBlk('perConfig', 'kennisbank van ' + m + ' — ' + _live.perConfig.error[m], m)).join('')}
     ${_live.lisa.error ? errBlk('lisa', 'Lisa-kennisbank — ' + _live.lisa.error) : ''}
-    ${all.length === 0
+    ${artErr && !/MIGRATION_MISSING/i.test(artErr) ? errBlk('kbArt', 'Centrale kennisbank — ' + artErr) : ''}
+
+    ${all.length === 0 && centralArts.length === 0
       ? `<div class="empty" style="padding:44px 20px"><div class="empty-t">Geen kennisbank-items</div>
-         <div class="empty-s">Bewerk per agent via de <b>Kennisbank</b>-tab in Configuratie.</div></div>`
-      : H.table(
+         <div class="empty-s">Bewerk agent-KB per agent via <b>Configuratie → Kennisbank</b>, of maak centrale artikelen aan met <b>+ Artikel</b>.</div></div>`
+      : `
+      ${centralArts.length > 0 ? `<div style="padding:14px 20px 0"><div style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);margin-bottom:8px">Centrale artikelen (${centralArts.length})</div>
+        ${H.table(
+          [{l:'Onderwerp'}, {l:'Categorie'}, {l:'Wie gebruikt dit', cls:'optional'}, {l:'Bijgewerkt', cls:'r optional'}, {l:'Acties', cls:'r'}],
+          centralArts.map((r) => [
+            `<div><div class="cell-main">${esc(r.onderwerp)}</div>
+              ${r.content ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:340px">${esc(r.content)}</div>` : ''}</div>`,
+            r.categorie ? H.pill('neutral', r.categorie) : `<span style="color:var(--text-3);font-size:11.5px">—</span>`,
+            `<div style="display:flex;gap:4px;flex-wrap:wrap">${(Array.isArray(r.agents) ? r.agents : []).map((w) => {
+              const ag = AGENTS_STATIC.find((x) => x.id === w);
+              return `<span class="pill pill-neutral nodot" style="font-size:10.5px;padding:1.5px 7px">
+                <span style="width:6px;height:6px;border-radius:50%;background:var(--${ag ? ag.c : 'slate'});display:inline-block;margin-right:4px"></span>${esc(ag ? ag.n : w)}</span>`;
+            }).join('') || '<span style="color:var(--text-3);font-size:11.5px">nog niet gekoppeld</span>'}</div>`,
+            `<span class="mono" style="color:var(--text-3);font-size:12.5px">${fmtDate(r.updated_at)}</span>`,
+            `<div style="display:flex;gap:4px;justify-content:flex-end">
+              <button class="icon-btn" title="Promoveren naar agent" style="width:26px;height:26px" onclick="window.__agKbArtPromote('${r.id}')">${svg(I.send, 'width:13px;height:13px')}</button>
+              <button class="icon-btn" title="Bewerken" style="width:26px;height:26px" onclick="window.__agKbArtEdit('${r.id}')">${svg(I.edit || I.settings, 'width:13px;height:13px')}</button>
+              <button class="icon-btn" title="Verwijderen" style="width:26px;height:26px" onclick="window.__agKbArtDelete('${r.id}')">${svg(I.trash || I.x, 'width:13px;height:13px')}</button>
+            </div>`,
+          ])
+        )}
+      </div>` : ''}
+
+      ${all.length > 0 ? `<div style="padding:14px 20px 0"><div style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);margin-bottom:8px">Agent-kennisbank (${all.length})</div>
+        ${H.table(
           [{l:'Onderwerp'}, {l:'Categorie'}, {l:'Wie gebruikt dit', cls:'optional'}, {l:'Bijgewerkt', cls:'r optional'}],
           all.map((r) => [
             `<div><div class="cell-main">${esc(r.onderwerp)}</div>
@@ -1237,8 +1497,192 @@
             }).join('')}</div>`,
             `<span class="mono" style="color:var(--text-3);font-size:12.5px">${fmtDate(r.updated)}</span>`,
           ])
-        )}`;
+        )}
+      </div>` : ''}
+    `}
+
+    ${_kbUnmatchedPanel()}
+    ${_ui.artModal ? _artikelModal() : ''}`;
   }
+
+  // ─── Onbeantwoord-paneel ────────────────────────────────────────────────
+  function _kbUnmatchedPanel() {
+    const items = asArr(_live.kbUnm.data);
+    const err = _live.kbUnm.error;
+    const migrationMissing = /MIGRATION_MISSING/i.test(err || '');
+    if (!items.length && !err) return '';
+    return `<div style="padding:20px">
+      <div style="padding:14px 16px;border:1px solid var(--amber-line);background:var(--amber-soft);border-radius:var(--r)">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          ${svg(I.alert, 'width:16px;height:16px;color:var(--amber);flex-shrink:0')}
+          <div style="flex:1"><b style="color:var(--amber)">Vragen zonder antwoord</b>
+            <span style="color:var(--text-3);font-size:12px;margin-left:8px">${migrationMissing ? '(migratie ontbreekt)' : items.length + ' open'}</span>
+          </div>
+        </div>
+        ${migrationMissing
+          ? `<div style="font-size:12.5px;color:var(--amber)">Draai migratie <span class="mono">2026-08-13-kennisbank-artikelen.sql</span> om dit paneel te activeren.</div>`
+          : items.length === 0
+            ? `<div style="font-size:12.5px;color:var(--text-3)">Geen open onbeantwoorde vragen.</div>`
+            : `<div style="display:flex;flex-direction:column;gap:6px">${items.slice(0, 12).map((q) => {
+                const ag = AGENTS_STATIC.find((a) => a.id === q.agent_key);
+                return `<div style="display:flex;gap:10px;align-items:center;padding:8px 10px;background:var(--surface);border-radius:8px">
+                  <span class="pill pill-neutral nodot" style="font-size:10.5px;padding:1.5px 7px">
+                    <span style="width:6px;height:6px;border-radius:50%;background:var(--${ag ? ag.c : 'slate'});display:inline-block;margin-right:4px"></span>${esc(ag ? ag.n : q.agent_key)}</span>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:13px">${esc(q.question)}</div>
+                    <div style="font-size:11px;color:var(--text-3)">${q.count}× gesteld · laatst ${fmtDate(q.last_seen)}</div>
+                  </div>
+                  <button class="btn btn-ghost btn-sm" onclick="window.__agKbUnmPromote('${q.id}', ${JSON.stringify(q.question).replace(/"/g,'&quot;')}, '${q.agent_key}')">${svg(I.plus)}Toevoegen</button>
+                  <button class="icon-btn" title="Verbergen" onclick="window.__agKbUnmDismiss('${q.id}')">${svg(I.x, 'width:13px;height:13px')}</button>
+                </div>`;
+              }).join('')}</div>`}
+      </div>
+    </div>`;
+  }
+
+  // ─── Artikel-modal ──────────────────────────────────────────────────────
+  function _artikelModal() {
+    const m = _ui.artModal; if (!m) return '';
+    const isEdit = m.mode === 'edit';
+    const it = m.item || {};
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px" onclick="window.__agArtClose()">
+      <div style="background:var(--surface);border-radius:var(--r-lg);max-width:640px;width:100%;max-height:88vh;overflow:auto;padding:22px" onclick="event.stopPropagation()">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+          <span class="tile-ico" style="background:var(--blue-soft);color:var(--blue)">${svg(I.book || I.doc)}</span>
+          <div class="card-title">${isEdit ? 'Artikel bewerken' : 'Nieuw artikel'}</div>
+          <button class="icon-btn" style="margin-left:auto" onclick="window.__agArtClose()">${svg(I.x)}</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <label style="display:flex;flex-direction:column;gap:5px">
+            <span style="font-size:12px;color:var(--text-2)">Onderwerp</span>
+            <input type="text" id="art_onderwerp" value="${esc(it.onderwerp || '')}" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:13px" />
+          </label>
+          <label style="display:flex;flex-direction:column;gap:5px">
+            <span style="font-size:12px;color:var(--text-2)">Categorie</span>
+            <select id="art_categorie" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:13px">
+              ${['','Aanbod','Prijzen','Praktisch','Over ons','FAQ','Overig'].map((c) => `<option value="${esc(c)}" ${c === (it.categorie || '') ? 'selected' : ''}>${c || '—'}</option>`).join('')}
+            </select>
+          </label>
+          <label style="display:flex;flex-direction:column;gap:5px">
+            <span style="font-size:12px;color:var(--text-2)">Content</span>
+            <textarea id="art_content" style="min-height:120px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:13px;font-family:inherit;resize:vertical">${esc(it.content || '')}</textarea>
+          </label>
+          <div>
+            <div style="font-size:12px;color:var(--text-2);margin-bottom:5px">Voor welke agents?</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              ${['joost','simone','mila','lisa'].map((k) => {
+                const ag = AGENTS_STATIC.find((x) => x.id === k);
+                const on = Array.isArray(it.agents) && it.agents.includes(k);
+                return `<label style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:${on ? 'var(--surface-2)' : 'var(--surface)'}">
+                  <input type="checkbox" data-art-agent="${k}" ${on ? 'checked' : ''} style="margin:0" />
+                  <span style="width:8px;height:8px;border-radius:50%;background:var(--${ag.c});display:inline-block"></span>
+                  <span style="font-size:12.5px">${esc(ag.n)}</span>
+                </label>`;
+              }).join('')}
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:20px;justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm" onclick="window.__agArtClose()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" onclick="window.__agArtSave()">${svg(I.tick)}${isEdit ? 'Opslaan' : 'Aanmaken'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  window.__agArtOpenNew = () => {
+    _ui.artModal = { mode: 'create', item: { onderwerp: '', categorie: 'FAQ', content: '', agents: [] } };
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__agKbArtEdit = (id) => {
+    const it = asArr(_live.kbArt.data).find((x) => x.id === id);
+    if (!it) return;
+    _ui.artModal = { mode: 'edit', item: { ...it } };
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__agArtClose = () => { _ui.artModal = null; if (window.DFO?.render) window.DFO.render(); };
+  window.__agArtSave = async () => {
+    const m = _ui.artModal; if (!m) return;
+    const onderwerp = (document.getElementById('art_onderwerp')?.value || '').trim();
+    if (!onderwerp) { alert('Onderwerp vereist.'); return; }
+    const categorie = (document.getElementById('art_categorie')?.value || '').trim() || null;
+    const content   = (document.getElementById('art_content')?.value || '');
+    const agents = Array.from(document.querySelectorAll('input[data-art-agent]:checked')).map((el) => el.getAttribute('data-art-agent'));
+    const body = { onderwerp, categorie, content, agents };
+    try {
+      let j;
+      if (m.mode === 'create') {
+        j = await window.KV.authedJson('/api/kennisbank-artikelen', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      } else {
+        j = await window.KV.authedJson('/api/kennisbank-artikelen?id=' + encodeURIComponent(m.item.id), {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      }
+      if (j?.error) throw new Error(j.error);
+      _ui.artModal = null;
+      _live.kbArt.data = null; queueMicrotask(fetchKbArt);
+      _showToast(m.mode === 'create' ? 'Artikel aangemaakt' : 'Artikel bijgewerkt');
+    } catch (e) {
+      alert('Opslaan mislukt: ' + (e?.message || 'onbekende fout'));
+    }
+  };
+  window.__agKbArtDelete = async (id) => {
+    if (!window.confirm('Artikel verwijderen? Dit kan niet ongedaan gemaakt worden.')) return;
+    try {
+      const j = await window.KV.authedJson('/api/kennisbank-artikelen?id=' + encodeURIComponent(id), { method: 'DELETE' });
+      if (j?.error) throw new Error(j.error);
+      _live.kbArt.data = null; queueMicrotask(fetchKbArt);
+      _showToast('Artikel verwijderd');
+    } catch (e) {
+      alert('Verwijderen mislukt: ' + (e?.message || 'onbekende fout'));
+    }
+  };
+  window.__agKbArtPromote = async (id) => {
+    const target = window.prompt('Naar welke agent promoveren?\n\nTyp: joost / simone / mila / lisa');
+    if (!target) return;
+    const t = target.trim().toLowerCase();
+    if (!['joost','simone','mila','lisa'].includes(t)) { alert('Onbekende agent.'); return; }
+    try {
+      const j = await window.KV.authedJson('/api/kennisbank-promote-to-agent', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artikel_id: id, target_agent: t }),
+      });
+      if (j?.error) throw new Error(j.error);
+      _live.kbArt.data = null; queueMicrotask(fetchKbArt);
+      // Refresh perConfig/lisa zodat de aggregate-tabel de nieuwe key ziet
+      if (t === 'lisa') { _live.lisa.data = null; queueMicrotask(fetchLisaConfig); }
+      else {
+        const mod = { joost:'finance', simone:'events', mila:'onboarding' }[t];
+        _live.perConfig.data[mod] = null; queueMicrotask(() => fetchPerConfig(mod));
+      }
+      _showToast('Gepromoveerd naar ' + t);
+    } catch (e) {
+      alert('Promoveren mislukt: ' + (e?.message || 'onbekende fout'));
+    }
+  };
+  window.__agKbUnmPromote = (id, question, agentKey) => {
+    _ui.artModal = { mode: 'create', item: {
+      onderwerp: question, categorie: 'FAQ', content: '', agents: [agentKey],
+      __from_unmatched_id: id,
+    }};
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__agKbUnmDismiss = async (id) => {
+    if (!window.confirm('Verbergen uit de lijst? De vraag wordt gemarkeerd als afgehandeld.')) return;
+    try {
+      const j = await window.KV.authedJson('/api/kennisbank-unmatched?action=dismiss', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      if (j?.error) throw new Error(j.error);
+      _live.kbUnm.data = null; queueMicrotask(fetchKbUnm);
+    } catch (e) {
+      alert('Verbergen mislukt: ' + (e?.message || 'onbekende fout'));
+    }
+  };
 
   function _kbCat(key) {
     const k = String(key || '').toLowerCase();
@@ -1265,6 +1709,7 @@
       </select>
       ${cats.map((c) => `<button class="chip ${_ui.kbFilter.cat === c.v ? 'on' : ''}" onclick="window.__agKbCat('${c.v}')">${esc(c.l)}${c.n !== undefined ? `<span class="cnt">${c.n}</span>` : ''}</button>`).join('')}
       <div class="tb-search"><input placeholder="Zoek artikel…" value="${esc(_ui.kbFilter.q)}" oninput="window.__agKbQ(this.value)" style="border:1px solid var(--border);padding:6px 10px;border-radius:8px;background:var(--surface);color:var(--text-1);font-size:12.5px" /></div>
+      <div class="tb-right"><button class="btn btn-primary btn-sm" onclick="window.__agArtOpenNew()">${svg(I.plus)}Artikel</button></div>
     </div>`;
   }
   window.__agKbAgent = (v) => { _ui.kbFilter.agent = v; if (window.DFO?.render) window.DFO.render(); };
