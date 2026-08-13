@@ -102,6 +102,75 @@
   ];
 
   window.__setNotice = (l) => { console.info('[instellingen-v2] ' + l); try { alert(l + ' — komt in de data-ronde.'); } catch (_) {} };
+
+  // ── DATA-KOPPELING 2026-08-13 (light-touch) ───────────────────────────
+  // Read-only op de 2 meest-vragende tabs:
+  //   com-wa      → /api/admin-whatsapp-wabas-list + /api/admin-meta-templates-list
+  //   team-gebruikers → /api/admin-users (nieuwe body-render)
+  // Alle write-flows (submit-to-Meta, template CRUD, user invite, role
+  // add/remove, folder-CRUD, app_settings PUT) blijven __setNotice-stubs.
+  // Endpoints zijn super_admin-gated → view valt terug op needs-Jeffrey
+  // banner als user geen super_admin is (401/403 in response).
+  const asArr = (x) => Array.isArray(x) ? x : [];
+  const esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const _live = {
+    wabas:     { loading: false, error: null, data: null },
+    templates: { loading: false, error: null, data: null, wabaId: '' },
+    users:     { loading: false, error: null, data: null },
+  };
+  async function _try(label, url, timeoutMs = 8000) {
+    try {
+      if (!window.KV || !window.KV.authedJson) throw new Error('KV.authedJson niet beschikbaar');
+      return await Promise.race([
+        window.KV.authedJson(url),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + timeoutMs + 'ms')), timeoutMs)),
+      ]);
+    } catch (e) { console.warn('[inst-v2] ' + label + ' fail:', e?.message); return { __error: e?.message || 'onbekende fout' }; }
+  }
+  async function fetchWabas() {
+    const st = _live.wabas; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await _try('wabas', '/api/admin-whatsapp-wabas-list');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = asArr(j?.items);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchTemplates(wabaId) {
+    wabaId = wabaId || _live.templates.wabaId;
+    const st = _live.templates;
+    if (!wabaId) return;
+    if (st.loading || (st.data && st.wabaId === wabaId)) return;
+    st.loading = true; st.error = null; st.wabaId = wabaId; st.data = null;
+    const j = await _try('templates:' + wabaId, '/api/admin-meta-templates-list?business_account_id=' + encodeURIComponent(wabaId));
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = asArr(j?.items);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchUsers() {
+    const st = _live.users; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await _try('users', '/api/admin-users');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = asArr(j?.users);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  window.__instRetry = (b) => {
+    if (b === 'wabas')     { _live.wabas.data = null; _live.wabas.error = null; fetchWabas(); }
+    if (b === 'templates') { _live.templates.data = null; _live.templates.error = null; fetchTemplates(); }
+    if (b === 'users')     { _live.users.data = null; _live.users.error = null; fetchUsers(); }
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__instPickWaba = (id) => { _live.templates.data = null; fetchTemplates(id); };
+  const _instErr = (block, msg) => `<div style="margin:12px 0;padding:14px 18px;border:1px solid var(--rose-line);background:var(--rose-soft);border-radius:var(--r);color:var(--rose);font-size:13px;display:flex;align-items:center;gap:12px">
+    <span>${svg(I.alert || I.warn, 'width:16px;height:16px')}</span>
+    <span style="flex:1">Kon gegevens niet ophalen: ${esc(msg)}${/401|403/.test(msg || '') ? ' (super_admin vereist)' : ''}</span>
+    <button class="btn btn-ghost btn-sm" onclick="__instRetry('${block}')">Opnieuw</button></div>`;
+  const _instSkel = () => `<div style="padding:22px;opacity:.55"><div style="height:12px;background:var(--surface-2);border-radius:4px;width:60%;margin-bottom:12px"></div><div style="height:8px;background:var(--surface-2);border-radius:4px;width:80%"></div></div>`;
   window.__setPick = (id) => {
     if (!S) return;
     S.setPage = id;
@@ -117,6 +186,89 @@
 
   // ── Set-body per id ────────────────────────────────────────────────────
   function bodyWhatsApp() {
+    // Lazy-load WABAs op eerste render; templates volgen na WABA-pick.
+    if (!_live.wabas.data && !_live.wabas.loading && !_live.wabas.error) queueMicrotask(fetchWabas);
+    const wabas = asArr(_live.wabas.data);
+    if (_live.wabas.error && !wabas.length) return _instErr('wabas', _live.wabas.error);
+    if (_live.wabas.loading && !wabas.length) return _instSkel();
+    if (wabas.length === 0) return `<div class="set-empty" style="padding:44px 20px"><div class="set-empty-t">Geen WhatsApp Business-accounts geconfigureerd</div><div class="set-empty-s">Ga naar de v1 Finance-instellingen voor WABA-koppeling.</div></div>`;
+
+    // Auto-pick eerste waba als geen keuze
+    if (!_live.templates.wabaId) { _live.templates.wabaId = wabas[0].business_account_id; }
+    const wabaId = _live.templates.wabaId;
+    const waba = wabas.find((w) => w.business_account_id === wabaId) || wabas[0];
+
+    // Trigger templates-fetch
+    if (!_live.templates.data && !_live.templates.loading && !_live.templates.error) queueMicrotask(() => fetchTemplates(wabaId));
+
+    const templates = asArr(_live.templates.data);
+    const templatesError = _live.templates.error;
+    const templatesLoading = _live.templates.loading;
+
+    // Filter templates op status-chip
+    const statusFilter = F('wst', 'all');
+    const filtered = templates.filter((t) => statusFilter === 'all' || String(t.status || '').toUpperCase() === statusFilter.toUpperCase());
+    const goedCount = templates.filter((t) => String(t.status || '').toUpperCase() === 'APPROVED').length;
+
+    return `
+      <div class="wa-conn">
+        <span class="wa-conn-ico">${svg(I.chat || I.mail)}</span>
+        <div class="wa-conn-body">
+          <div class="wa-conn-t">WhatsApp Business — ${wabas.length} WABA${wabas.length === 1 ? '' : "'s"}</div>
+          <div class="wa-conn-s">${esc(waba.display_label || waba.business_account_id)} · ${templates.length} templates · ${goedCount} goedgekeurd</div>
+        </div>
+        ${H.pill('ok', 'Actief')}
+        <button class="btn btn-sm" onclick="__setNotice('Meta-koppeling — writes zijn super_admin only')">${svg(I.settings)}Meta-koppeling</button>
+      </div>
+
+      ${wabas.length > 1 ? `<div style="padding:10px 0"><select class="filter-sel" onchange="__instPickWaba(this.value)">
+        ${wabas.map((w) => `<option value="${esc(w.business_account_id)}" ${w.business_account_id === wabaId ? 'selected' : ''}>${esc(w.display_label || w.business_account_id)}</option>`).join('')}
+      </select></div>` : ''}
+
+      ${H.toolbar([
+        H.search('Zoek in templates…'),
+        H.chips('wst', [
+          { l: 'Alle statussen', v: 'all', n: templates.length },
+          { l: 'Goedgekeurd', v: 'APPROVED', n: goedCount },
+          { l: 'In review', v: 'SUBMITTED', n: templates.filter((t) => String(t.status || '').toUpperCase() === 'SUBMITTED').length },
+          { l: 'Concept', v: 'LOCAL', n: templates.filter((t) => String(t.status || '').toUpperCase() === 'LOCAL').length },
+          { l: 'Afgewezen', v: 'REJECTED', n: templates.filter((t) => String(t.status || '').toUpperCase() === 'REJECTED').length },
+        ], statusFilter),
+        `<div class="tb-right"><button class="btn btn-primary" onclick="__setNotice('Nieuwe template — write is super_admin only')">${svg(I.plus)}Nieuwe template</button></div>`,
+      ])}
+
+      ${templatesError ? _instErr('templates', templatesError) : ''}
+      ${templatesLoading && !templates.length ? _instSkel() : ''}
+
+      <div class="wa-cards">
+        ${filtered.length ? filtered.map((t) => {
+          const statusUp = String(t.status || '').toUpperCase();
+          const statusMap = { APPROVED: ['ok', 'Goedgekeurd'], SUBMITTED: ['warn', 'In review'], LOCAL: ['neutral', 'Concept'], REJECTED: ['danger', 'Afgewezen'], PAUSED: ['warn', 'Gepauzeerd'], DISABLED: ['neutral', 'Uitgeschakeld'] };
+          const [sc, sl] = statusMap[statusUp] || ['neutral', t.status || '—'];
+          return `
+          <div class="wa-card">
+            <div class="wa-card-head">
+              <div class="wa-card-title">
+                <div class="cell-main">${esc(t.name || '—')}</div>
+                <div class="wa-card-meta">${esc(t.category || '—')} · ${esc(t.language || '—')}${t.header_type && t.header_type !== 'NONE' ? ' · header ' + esc(t.header_type) : ''}</div>
+              </div>
+              ${H.pill(sc, sl)}
+            </div>
+            <div class="wa-card-body">
+              <div class="wa-bubble">${highlightVars(t.body_text || '')}</div>
+              ${t.rejection_reason ? `<div style="margin-top:8px;padding:8px 10px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:6px;font-size:12px;color:var(--rose)"><b>Afwijzing:</b> ${esc(t.rejection_reason)}</div>` : ''}
+            </div>
+            <div class="wa-card-foot">
+              <span class="wa-card-count" style="font-size:11px;color:var(--text-3)">${t.approved_at ? 'Goedgekeurd ' + new Date(t.approved_at).toLocaleDateString('nl-NL') : t.submitted_at ? 'Ingediend ' + new Date(t.submitted_at).toLocaleDateString('nl-NL') : 'Concept'}</span>
+              <div class="wa-card-acts">
+                <button class="btn btn-sm" onclick="__setNotice('Dupliceer template — super_admin only')" title="Dupliceren">${svg(I.copy || I.plus)}</button>
+                <button class="btn btn-sm" onclick="__setNotice('Bewerk template — super_admin only')">${svg(I.edit || I.settings)}Bewerken</button>
+              </div>
+            </div>
+          </div>`; }).join('') : `<div class="set-empty" style="grid-column:1/-1"><span class="set-empty-ico">${svg(I.chat || I.mail)}</span><div class="set-empty-t">Geen templates in deze filter</div><div class="set-empty-s">Kies "Alle statussen" of maak een nieuwe template.</div></div>`}
+      </div>`;
+  }
+  function _oldWhatsAppFallback() {
     const f = F('waf', 'all');
     const rows = WA_TPL.filter(t => f === 'all' || t.cat === f);
     const cnt = c => WA_TPL.filter(t => c === 'all' || t.cat === c).length;
@@ -254,11 +406,34 @@
     </div>`;
   }
 
+  function bodyUsers() {
+    if (!_live.users.data && !_live.users.loading && !_live.users.error) queueMicrotask(fetchUsers);
+    if (_live.users.error && !_live.users.data) return _instErr('users', _live.users.error);
+    if (_live.users.loading && !_live.users.data) return _instSkel();
+    const users = asArr(_live.users.data);
+    const q = (F('q', '') || '').toLowerCase();
+    const rows = users.filter((u) => !q || String(u.email || '').toLowerCase().includes(q) || String(u.full_name || '').toLowerCase().includes(q));
+    return `${H.toolbar([H.search('Zoek gebruiker…'), `<div class="tb-right"><button class="btn btn-primary" onclick="__setNotice('Nieuwe gebruiker — super_admin only')">${svg(I.plus)}Nieuwe gebruiker</button></div>`])}
+      ${rows.length === 0
+        ? `<div class="set-empty"><div class="set-empty-t">Geen gebruikers</div></div>`
+        : H.table(
+            [{ l: 'Gebruiker' }, { l: 'E-mail', cls: 'optional' }, { l: 'Rollen', cls: 'optional' }, { l: 'Team-lid', cls: 'optional' }, { l: 'Actief' }, { l: 'Laatst ingelogd', cls: 'r optional' }],
+            rows.map((u) => [
+              `<div class="row-avatar">${H.av(u.full_name || u.email || '—', 28)}<span class="cell-main">${esc(u.full_name || u.email || '—')}</span></div>`,
+              `<span style="color:var(--text-3);font-size:12.5px">${esc(u.email || '—')}</span>`,
+              `<span style="font-size:11.5px">${asArr(u.all_roles).map((r) => H.pill('accent', r, 1)).join(' ') || '—'}</span>`,
+              `<span class="mono" style="color:var(--text-3);font-size:11px">${u.team_member_id ? esc(String(u.team_member_id).slice(0, 8)) : '—'}</span>`,
+              u.is_active !== false ? H.pill('ok', 'Actief') : H.pill('neutral', 'Uit'),
+              `<span class="mono" style="color:var(--text-3);font-size:12px">${u.last_login_at ? new Date(u.last_login_at).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' }) : '—'}</span>`,
+            ])
+          )}`;
+  }
   function setBody(cur) {
-    if (cur.id === 'com-wa')       return bodyWhatsApp();
-    if (cur.id === 'team-rechten') return bodyRechten();
-    if (cur.id === 'alg-bedrijf')  return bodyBedrijf();
-    if (cur.id === 'wb-venster')   return bodyVenster();
+    if (cur.id === 'com-wa')          return bodyWhatsApp();
+    if (cur.id === 'team-gebruikers') return bodyUsers();
+    if (cur.id === 'team-rechten')    return bodyRechten();
+    if (cur.id === 'alg-bedrijf')     return bodyBedrijf();
+    if (cur.id === 'wb-venster')      return bodyVenster();
     return bodyPlaceholder(cur);
   }
 
