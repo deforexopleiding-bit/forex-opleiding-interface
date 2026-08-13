@@ -1,178 +1,221 @@
 // modules/klanten-v2/views/agents-v2.js
 //
-// Fase F — AI Agents (layout-only, voorbeeld-data).
-// 1-op-1 uit prototype:
-//   - VIEWS['agents/Overzicht']    r6324-6368 (agent-cards + stats)
-//   - VIEWS['agents/Configuratie'] r6369-6470 (rijke config-per-agent; VEREENVOUDIGD)
-//   - VIEWS['agents/Kennisbank']   r6472-6500
-//   - VIEWS['agents/Prestaties']   r6502-6540 (KPI + tabel)
+// Fase F — AI Agents. DATA-KOPPELING 2026-08-13. Dormant.
+// QA via ?v2preview=agents.
 //
-// Bewuste vereenvoudiging: Configuratie is in het prototype een complex
-// per-agent config-scherm (Persona/Fases/Kennisbank/Follow-ups/Stopwoorden/
-// Oefengesprek voor Lisa, plus Gedrag/Autonomie/Beslissingen/Oefengesprek
-// generic). Voor layout-preview toont deze tab een compacte agent-picker
-// + 4 config-tabs met placeholder-secties. Volledige config-editor komt
-// in data-ronde.
+// Endpoints (read-only):
+//   GET /api/agents                (agents.view.overview)
+//   GET /api/agents-activity       (admin.joost_config)
+//   GET /api/agents-config-list    (admin.joost_config)
+//   GET /api/agent-approval?action=list
 //
-// Dormant. Preview ?v2preview=agents (rol Super admin/Manager).
+// Needs Jeffrey:
+// - Chat/meeting write-flows (/api/agent-chat, /api/agent-meeting).
+// - Config writes voor Joost (protected zone — /api/joost-* verboden).
+// - Config writes voor Simone/Mila (bestaan via /api/joost-config-upsert
+//   maar semantiek onduidelijk: zelfde module of aparte agents-tabel?).
+// - Kennisbank upload/beheer.
+// - Naming-drift Simon/Leon/Aron (CLAUDE.md) vs Joost/Simone/Mila/Lisa
+//   (live database).
 
 (function () {
   if (!window.DFO) { console.error('[agents-v2] DFO shell niet geladen.'); return; }
   if (!window.KV_V2 || !window.KV_V2.helpers) { console.error('[agents-v2] KV_V2.helpers niet geladen.'); return; }
 
-  const { I, svg, F, render } = window.DFO;
+  const { I, svg, S } = window.DFO;
   const H = window.KV_V2.helpers;
 
-  const AGENTS = [
-    { id: 'joost',  n: 'Joost',    rol: 'Wanbetalers-assistent', c: 'amber',    ic: I.alert,   ver: 'v3.1', live: true,  lock: true,  kan: ['Antwoorden', 'Regelingen', 'Escalaties'], venster: '08–20u',        stats: [['147', '24u'], ['84%', 'akkoord'], ['3', 'wacht']] },
-    { id: 'simone', n: 'Simone',   rol: 'Events-assistent',      c: 'pink',     ic: I.cal,     ver: 'v1.4', live: true,  lock: false, kan: ['Antwoorden', 'Vragenlijst herinneren'], venster: '08–20u',    stats: [['62', '24u'], ['78%', 'akkoord'], ['2', 'wacht']] },
-    { id: 'mila',   n: 'Mila',     rol: 'Onboarding-assistent',  c: 'emerald',  ic: I.route,   ver: 'v0.9', live: true,  lock: false, kan: ['Antwoorden', 'Uploadlink sturen'],       venster: '09–18u',    stats: [['38', '24u'], ['82%', 'akkoord'], ['1', 'wacht']] },
-    { id: 'lisa',   n: 'Lisa',     rol: 'Instagram-agent',       c: 'violet',   ic: I.bot,     ver: 'v16',  live: true,  lock: false, kan: ['DM beantwoorden'],                        venster: '24/7',      stats: [['24', '24u'], ['91%', 'akkoord'], ['0', 'wacht']] },
-    { id: 'amigo',  n: 'Amigo',    rol: 'Achtergrond',           c: 'blue',     ic: I.sparkle, ver: 'v0.7', live: false, lock: false, kan: [],                                          venster: '',           stats: [['—', 'inactief']] },
-    { id: 'ricardo', n: 'Ricardo', rol: 'Achtergrond',           c: 'slate',    ic: I.chart,   ver: 'v0.3', live: false, lock: false, kan: [],                                          venster: '',           stats: [['—', 'inactief']] },
-  ];
+  const asArr = (x) => Array.isArray(x) ? x : [];
+  const esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-  window.__agNotice = (l) => { console.info('[agents-v2] ' + l); try { alert(l + ' — komt in de data-ronde.'); } catch (_) {} };
-  window.__agSetSel = (id) => { agSel = id; render(); };
-  window.__agSetCfgTab = (t) => { agCfgTab = t; render(); };
-  let agSel = 'joost', agCfgTab = 'Gedrag';
+  const _live = {
+    agents:   { loading: false, error: null, data: null },
+    activity: { loading: false, error: null, data: null },
+    config:   { loading: false, error: null, data: null },
+    approval: { loading: false, error: null, data: null },
+  };
 
+  async function tryFetch(label, url, timeoutMs = 8000) {
+    try {
+      if (!window.KV || !window.KV.authedJson) throw new Error('KV.authedJson niet beschikbaar');
+      return await Promise.race([
+        window.KV.authedJson(url),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + timeoutMs + 'ms')), timeoutMs)),
+      ]);
+    } catch (e) { console.warn('[ag-v2] ' + label + ' fail:', e?.message); return { __error: e?.message || 'onbekende fout' }; }
+  }
+  async function fetchAgents() {
+    const st = _live.agents; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('agents', '/api/agents');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = asArr(j?.agents);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchActivity() {
+    const st = _live.activity; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('activity', '/api/agents-activity');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = j || null;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchConfig() {
+    const st = _live.config; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('config', '/api/agents-config-list');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = asArr(j?.agents);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchApproval() {
+    const st = _live.approval; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('approval', '/api/agent-approval?action=list');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = asArr(j?.approvals || j?.rows);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  window.__agRetry = (b) => { if (_live[b]) { _live[b].data = null; _live[b].error = null; } if (b==='agents') fetchAgents(); if (b==='activity') fetchActivity(); if (b==='config') fetchConfig(); if (b==='approval') fetchApproval(); };
+  window.__agNotice = (l) => { console.info('[ag-v2] ' + l); try { alert(l + ' — write-flow needs Jeffrey. Joost = protected zone.'); } catch (_) {} };
+
+  const errBlk = (block, msg) => `<div style="margin:20px;padding:14px 18px;border:1px solid var(--rose-line);background:var(--rose-soft);border-radius:var(--r);color:var(--rose);font-size:13px;display:flex;align-items:center;gap:12px">
+    <span>${svg(I.alert || I.warn, 'width:16px;height:16px')}</span>
+    <span style="flex:1">Kon ophalen: ${esc(msg)}${/401|403/.test(msg || '') ? ' (admin/super_admin vereist)' : ''}</span>
+    <button class="btn btn-ghost btn-sm" onclick="__agRetry('${block}')">Opnieuw</button></div>`;
+  const skel = () => `<div class="pad"><div class="card"><div class="card-body" style="padding:22px;opacity:.55"><div style="height:12px;background:var(--surface-2);border-radius:4px;width:60%;margin-bottom:12px"></div></div></div></div>`;
+  const nj = (r) => `<div style="margin:20px;padding:14px 18px;border:1px solid var(--amber-line);background:var(--amber-soft);border-radius:var(--r);color:var(--amber);font-size:12.5px"><b>Needs Jeffrey</b> — ${esc(r)}</div>`;
+
+  function _agentColor(name) {
+    const n = String(name || '').toLowerCase();
+    if (n === 'joost') return 'amber';
+    if (n === 'simone') return 'pink';
+    if (n === 'mila') return 'emerald';
+    if (n === 'lisa') return 'violet';
+    if (n === 'amigo') return 'blue';
+    if (n === 'ricardo') return 'slate';
+    return 'blue';
+  }
+  function _agentLock(name) { return String(name || '').toLowerCase() === 'joost'; }
+
+  // ── VIEW: Overzicht ──────────────────────────────────────────────────
   function overzichtView() {
-    const gesprek = AGENTS.filter(a => a.rol !== 'Achtergrond');
-    const achter = AGENTS.filter(a => a.rol === 'Achtergrond');
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'violet',  icon: I.bot,   label: 'Actieve agents',           val: '8',  sub: 'van 9 ingericht' },
-      { c: 'emerald', icon: I.chat,  label: 'Gesprekken vandaag',       val: '86', hi: 1, sub: 'over alle agents', trend: H.trend('+14', true) },
-      { c: 'amber',   icon: I.users, label: 'Overgenomen door mens',    val: '11', hi: 1, sub: '13% van gesprekken' },
-      { c: 'rose',    icon: I.alert, label: 'Wacht op jou',             val: '4',  hi: 1, sub: 'buiten hun mandaat' },
+    if (!_live.agents.data && !_live.agents.loading && !_live.agents.error) queueMicrotask(fetchAgents);
+    if (!_live.activity.data && !_live.activity.loading && !_live.activity.error) queueMicrotask(fetchActivity);
+    if (!_live.approval.data && !_live.approval.loading && !_live.approval.error) queueMicrotask(fetchApproval);
+    if (_live.agents.error && !_live.agents.data) return errBlk('agents', _live.agents.error);
+    if (_live.agents.loading && !_live.agents.data) return skel();
+    const agents = asArr(_live.agents.data);
+    const activity = _live.activity.data || {};
+    const modStats = activity.module_stats || {};
+    const teamTotals = activity.team_totals || {};
+    const approvals = asArr(_live.approval.data);
+    const waitCount = approvals.filter((a) => a?.status === 'pending' || a?.status === 'awaiting_approval').length;
+    return `${H.kpis([
+      { c: 'violet',  icon: I.bot,   label: 'Agents totaal',   val: String(agents.length), sub: 'in beheer' },
+      { c: 'emerald', icon: I.chat,  label: 'Berichten vandaag', val: String(Number(teamTotals.messages_today || 0)), hi: 1 },
+      { c: 'amber',   icon: I.alert, label: 'Overgenomen',      val: String(Number(teamTotals.handoffs || 0)), hi: 1 },
+      { c: 'rose',    icon: I.clock, label: 'Wacht op jou',    val: String(waitCount), hi: 1, sub: approvals.length + ' totaal' },
     ])}
+    ${_live.activity.error ? errBlk('activity', _live.activity.error) : ''}
+    ${_live.approval.error ? errBlk('approval', _live.approval.error) : ''}
     <div class="pad" style="padding-top:16px">
-      <div style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);margin-bottom:11px">Gespreksagents</div>
-      <div class="grid g3" style="margin-bottom:20px">
-        ${gesprek.map(a => `<div class="card card-hover" style="cursor:pointer" onclick="__agSetSel('${a.id}');DFO.goTab('Configuratie')">
-          <div style="padding:15px 17px;display:flex;align-items:flex-start;gap:12px">
-            <span style="width:38px;height:38px;border-radius:50%;flex-shrink:0;background:radial-gradient(circle at 32% 30%,color-mix(in srgb,var(--${a.c}) 45%,white),var(--${a.c}) 72%);box-shadow:0 2px 10px -2px var(--${a.c})"></span>
-            <div style="flex:1;min-width:0">
-              <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
-                <span class="card-title">${a.n}</span>
-                ${a.lock ? `<span class="pill pill-warn nodot" style="font-size:10.5px">Beschermd</span>` : ''}
-                <span class="mono" style="font-size:10.5px;color:var(--text-3);margin-left:auto">${a.ver}</span></div>
-              <div style="font-size:11.5px;color:var(--${a.c});font-weight:500;margin-top:2px">${a.rol}</div>
-            </div>
-          </div>
-          <div style="padding:0 17px 13px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-            ${a.live ? H.pill('ok', 'Live') : H.pill('neutral', 'Uit')}
-            ${a.kan.map(k => H.pill('neutral', k, 1)).join('')}
-            <span style="font-size:11px;color:var(--text-3);margin-left:auto">${a.venster}</span></div>
-          <div style="display:grid;grid-template-columns:repeat(${a.stats.length},1fr);gap:1px;background:var(--border);border-top:1px solid var(--border)">
-            ${a.stats.map(([v, l]) => `<div style="background:var(--surface);padding:10px 12px;text-align:center">
-              <div style="font-size:17px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.03em">${v}</div>
-              <div style="font-size:10px;letter-spacing:.05em;color:var(--text-3);margin-top:2px">${l}</div></div>`).join('')}
-          </div></div>`).join('')}
-      </div>
-      <div style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);margin-bottom:11px">Op de achtergrond</div>
-      <div class="grid g3">
-        ${achter.map(a => `<div class="card" style="opacity:.6">
-          <div class="card-body" style="padding:15px 17px">
-            <div style="display:flex;align-items:flex-start;gap:11px">
-              <span class="tile-ico" style="background:var(--${a.c}-soft);color:var(--${a.c})">${svg(a.ic)}</span>
-              <div style="flex:1"><div class="card-title">${a.n}</div>
-                <div style="font-size:12px;color:var(--text-3);margin-top:3px">${a.rol}</div></div>
-              <button class="chip" style="font-size:11px;padding:2px 8px" onclick="__agNotice('Activeer ${a.n}')">Uit</button>
-            </div>
-          </div></div>`).join('')}
-      </div>
+      <div style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);margin-bottom:11px">Agents (${agents.length})</div>
+      ${agents.length === 0
+        ? `<div class="empty" style="padding:44px 20px"><div class="empty-t">Geen agents</div><div class="empty-s">Kantoor voegt agents toe via de admin-flow.</div></div>`
+        : `<div class="grid g3">
+          ${agents.map((a) => {
+            const c = a.avatar_color || _agentColor(a.name);
+            const locked = _agentLock(a.name);
+            const stats = modStats[String(a.name || '').toLowerCase()] || {};
+            return `<div class="card">
+              <div style="padding:15px 17px;display:flex;align-items:flex-start;gap:12px">
+                <span class="tile-ico" style="background:var(--${c}-soft);color:var(--${c})">${esc(a.avatar_emoji || svg(I.bot))}</span>
+                <div style="flex:1;min-width:0">
+                  <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+                    <span class="card-title">${esc(a.name || '—')}</span>
+                    ${locked ? `<span class="pill pill-warn nodot" style="font-size:10.5px;padding:1.5px 7px">Protected</span>` : ''}
+                  </div>
+                  <div style="font-size:12px;color:var(--text-3);margin-top:3px">${esc(a.role || '')}${a.department ? ' · ' + esc(a.department) : ''}</div>
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);border-top:1px solid var(--border)">
+                ${[[stats.messages_today || 0, 'MSG 24U'], [stats.open_suggestions || 0, 'OPEN'], [stats.handoffs || 0, 'HAND']].map(([v, l]) => `<div style="background:var(--surface);padding:10px 12px;text-align:center">
+                  <div style="font-size:16px;font-weight:600;font-family:'IBM Plex Mono',monospace">${v}</div>
+                  <div style="font-size:10px;letter-spacing:.05em;color:var(--text-3);margin-top:2px">${l}</div></div>`).join('')}
+              </div>
+            </div>`;
+          }).join('')}
+        </div>`}
     </div>`;
   }
 
+  // ── VIEW: Configuratie ───────────────────────────────────────────────
   function configuratieView() {
-    const a = AGENTS.find(x => x.id === agSel) || AGENTS[0];
-    const isLisa = a.id === 'lisa';
-    const subs = isLisa
-      ? ['Persona', 'Fases', "Do's en don'ts", 'Kennisbank', 'Follow-ups', 'Stopwoorden', 'Instellingen', 'Oefengesprek']
-      : ['Gedrag', 'Autonomie', 'Beslissingen', 'Oefengesprek'];
-    if (!subs.includes(agCfgTab)) agCfgTab = subs[0];
-
-    return `${H.voorbeeldBanner()}
-    <div style="padding:13px 20px;background:var(--${a.c}-soft);border-bottom:1px solid var(--${a.c}-line);display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-      <span style="width:32px;height:32px;border-radius:50%;flex-shrink:0;background:radial-gradient(circle at 32% 30%,color-mix(in srgb,var(--${a.c}) 45%,white),var(--${a.c}) 72%)"></span>
-      <div style="flex:1;min-width:150px">
-        <div style="font-size:14px;font-weight:600">${a.n} <span style="font-weight:400;color:var(--text-3)">· ${a.rol}</span></div>
-        <div style="font-size:12px;color:var(--text-3)">${a.venster || 'niet actief'} · configuratie ${a.ver}</div></div>
-      ${a.lock ? `<span class="pill pill-warn nodot" style="font-size:10.5px">Beschermd — wijzigen in ${a.rol.split('-')[0]}</span>` : ''}
-      <select class="filter-sel" onchange="__agSetSel(this.value)">
-        ${AGENTS.filter(x => x.rol !== 'Achtergrond').map(x => `<option value="${x.id}" ${x.id === agSel ? 'selected' : ''}>${x.n}</option>`).join('')}</select>
-    </div>
-    ${a.lock ? `<div style="padding:13px 20px;background:var(--amber-soft);border-bottom:1px solid var(--amber-line);display:flex;gap:11px;align-items:flex-start;font-size:12.5px;color:var(--amber)">
-      ${svg(I.alert, 'width:16px;height:16px;flex-shrink:0;margin-top:1px')}
-      <span><b>Beschermde agent.</b> ${a.n} is met zorg ingericht en werkt. Je kunt hier alles bekijken, maar wijzigen gebeurt in de bron-module. Zo blijft er niets per ongeluk stuk.</span></div>` : ''}
-    <div class="toolbar" style="padding-bottom:0;border-bottom:none">
-      ${subs.map(t => `<button class="chip ${agCfgTab === t ? 'on' : ''}" onclick="__agSetCfgTab('${t.replace(/'/g, "\\'")}')">${t}</button>`).join('')}
-    </div>
-    <div style="padding:24px;max-width:820px;color:var(--text-3);font-size:13.5px;line-height:1.6">
-      <p>Config-sectie <b>${agCfgTab}</b> voor <b>${a.n}</b> — volledige editor met velden, previews en publiceer-flow komt in de data-ronde. Prototype-refs:
-      ${isLisa ? '<code>lisaConfigView2()</code> + <code>cfgSectie()</code> r6386-6440' : '<code>agConfigGeneriek()</code> + <code>agGedrag/agAutonomie/agBeslissingen</code> r6455-6470'}.</p>
-      <div style="margin-top:16px;display:flex;gap:8px">
-        <button class="btn btn-primary" onclick="__agNotice('Publiceren ${a.n}')">${svg(I.tick)}Publiceren</button>
-        <button class="btn btn-ghost" onclick="__agNotice('Alle versies')">${svg(I.clock)}Alle versies</button>
-      </div>
-    </div>`;
+    if (!_live.config.data && !_live.config.loading && !_live.config.error) queueMicrotask(fetchConfig);
+    if (_live.config.error && !_live.config.data) return errBlk('config', _live.config.error);
+    if (_live.config.loading && !_live.config.data) return skel();
+    const cfg = asArr(_live.config.data);
+    return `${nj('Alle config-writes (persona/tone/model/is_enabled/channel/knowledge) zijn super_admin only en Joost-config zit in protected zone. Read-only overzicht hieronder.')}
+    ${cfg.length === 0
+      ? `<div class="empty" style="padding:44px 20px"><div class="empty-t">Geen agent-config</div></div>`
+      : H.table(
+          [{ l: 'Agent' }, { l: 'Module', cls: 'optional' }, { l: 'Persona' }, { l: 'Tone', cls: 'optional' }, { l: 'Model', cls: 'optional' }, { l: 'Actief' }, { l: 'Kanaal', cls: 'optional' }],
+          cfg.map((a) => [
+            `<div class="row-avatar">${H.av(a.persona_name || a.type || '—', 26)}<span class="cell-main">${esc(a.persona_name || a.type || '—')}</span></div>`,
+            `<span style="font-size:11.5px;color:var(--text-2)">${esc(a.module || '—')}</span>`,
+            `<span style="font-size:11.5px">${esc(a.persona_name || '—')}</span>`,
+            `<span style="font-size:11.5px;color:var(--text-3)">${esc(a.persona_tone || a.tone || '—')}</span>`,
+            `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(a.model || '—')}</span>`,
+            a.is_enabled || a.is_active ? H.pill('ok', 'Aan') : H.pill('neutral', 'Uit'),
+            `<span style="font-size:11px;color:var(--text-3)">${esc(a.channel?.phone_number_id || (a.channel?.is_active ? 'actief' : '—'))}</span>`,
+          ])
+        )}`;
   }
 
+  // ── VIEW: Kennisbank ─────────────────────────────────────────────────
   function kennisbankView() {
-    return `${H.voorbeeldBanner()}
-    ${H.toolbar([
-      H.chips('src', [{ l: 'Alle bronnen', v: 'all', n: 24 }, { l: 'PDF', v: 'pdf' }, { l: 'Notities', v: 'note' }, { l: 'FAQ', v: 'faq' }], F('src', 'all')),
-      H.search('Zoek in kennisbank…'),
-      `<div class="tb-right"><button class="btn btn-primary" onclick="__agNotice('Bron toevoegen')">${svg(I.plus)}Bron toevoegen</button></div>`,
-    ])}
-    ${H.table(
-      [{ l: 'Bron' }, { l: 'Type', cls: 'optional' }, { l: 'Gebruikt door' }, { l: 'Laatst bijgewerkt', cls: 'r optional' }],
-      [
-        ['Aanmaanproces & mandaat',           'pdf',  ['Joost'],           '3 aug'],
-        ['Product-lijst met prijzen',         'faq',  ['Joost', 'Simone', 'Mila', 'Lisa'], '1 aug'],
-        ['Bezwaren en beantwoording',         'note', ['Joost', 'Simone', 'Lisa'], '28 jul'],
-        ['Onboarding-stappen + tijdlijnen',   'faq',  ['Mila'],            '15 jul'],
-        ['Instagram-tone-of-voice',           'note', ['Lisa'],            '10 jul'],
-      ].map(([n, t, ag, d]) => [
-        `<span class="cell-main">${n}</span>`,
-        H.pill(t === 'pdf' ? 'accent' : t === 'faq' ? 'ok' : 'neutral', t.toUpperCase(), 1),
-        `<div style="display:flex;gap:4px;flex-wrap:wrap">${ag.map(a => H.pill('neutral', a, 1)).join('')}</div>`,
-        `<span class="mono" style="color:var(--text-3);font-size:12.5px">${d}</span>`,
-      ])
-    )}
-    <div style="padding:14px 20px;font-size:12.5px;color:var(--text-3);line-height:1.6;max-width:760px">
-      De kennisbank voedt alle agents. Elke bron is per agent aan of uit te zetten in de <b>Configuratie</b>-tab. Volledige upload-flow + per-agent-filters komen in de data-ronde.</div>`;
+    return `${nj('Kennisbank is per-agent in joost_config.knowledge_base (jsonb). Aggregatie over alle agents + upload-flow bestaat niet als endpoint. Open individueel agent-config in v1 admin.')}
+    <div style="padding:24px;color:var(--text-3);font-size:13px;line-height:1.6">Read-only aggregatie komt in de volgende ronde; upload endpoints ontbreken.</div>`;
   }
 
+  // ── VIEW: Prestaties ─────────────────────────────────────────────────
   function prestatiesView() {
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'emerald', icon: I.tick,  label: 'Akkoord-ratio',        val: '84%', hi: 1, sub: 'gemiddeld',           trend: H.trend('+6%', true) },
-      { c: 'blue',    icon: I.chat,  label: 'Gesprekken totaal',    val: '271', sub: 'laatste 7 dagen' },
-      { c: 'amber',   icon: I.users, label: 'Overgenomen',          val: '38',  hi: 1, sub: '14% van totaal' },
-      { c: 'rose',    icon: I.alert, label: 'Escalaties',           val: '9',   hi: 1, sub: 'buiten mandaat' },
+    if (!_live.activity.data && !_live.activity.loading && !_live.activity.error) queueMicrotask(fetchActivity);
+    if (_live.activity.error && !_live.activity.data) return errBlk('activity', _live.activity.error);
+    if (_live.activity.loading && !_live.activity.data) return skel();
+    const activity = _live.activity.data || {};
+    const modStats = activity.module_stats || {};
+    const lisaStats = activity.lisa_stats || {};
+    const modules = Object.keys(modStats);
+    return `${H.kpis([
+      { c: 'violet',  icon: I.bot,   label: 'Modules met agent',    val: String(modules.length) },
+      { c: 'emerald', icon: I.chat,  label: 'Berichten 24u',        val: String(Number(activity.team_totals?.messages_today || 0)), hi: 1 },
+      { c: 'amber',   icon: I.alert, label: 'Overgenomen',          val: String(Number(activity.team_totals?.handoffs || 0)), hi: 1 },
+      { c: 'blue',    icon: I.cal,   label: 'Lisa geboekt',         val: String(Number(lisaStats.call_booked || 0)) },
     ])}
-    ${H.toolbar([
-      H.chips('p', [{ l: 'Deze week', v: 'w' }, { l: 'Deze maand', v: 'm' }, { l: 'Kwartaal', v: 'q' }], F('p', 'w')),
-    ])}
-    ${H.table(
-      [{ l: 'Agent' }, { l: 'Gesprekken', cls: 'r' }, { l: 'Akkoord', cls: 'r' }, { l: 'Overgenomen', cls: 'r optional' }, { l: 'Gem. antwoord', cls: 'r optional' }, { l: 'Escalaties', cls: 'r' }],
-      [
-        ['Joost',  '147', '84%', '11', '18s', '3'],
-        ['Simone', '62',  '78%', '14', '22s', '2'],
-        ['Mila',   '38',  '82%', '9',  '25s', '1'],
-        ['Lisa',   '24',  '91%', '4',  '31s', '3'],
-      ].map(([n, g, ak, ov, ga, es]) => [
-        `<span class="cell-main">${n}</span>`,
-        `<span class="mono">${g}</span>`,
-        `<span class="pill pill-${parseInt(ak) >= 85 ? 'ok' : parseInt(ak) >= 75 ? 'warn' : 'danger'} nodot">${ak}</span>`,
-        `<span class="mono">${ov}</span>`,
-        `<span class="mono">${ga}</span>`,
-        `<span class="mono" style="${parseInt(es) > 2 ? 'color:var(--rose)' : ''}">${es}</span>`,
-      ])
-    )}`;
+    ${modules.length === 0
+      ? `<div class="empty" style="padding:44px 20px"><div class="empty-t">Geen activity-data</div></div>`
+      : H.table(
+          [{ l: 'Module' }, { l: 'Berichten 24u', cls: 'r' }, { l: 'Open', cls: 'r optional' }, { l: 'Overgenomen', cls: 'r optional' }, { l: 'Actieve conv', cls: 'r optional' }, { l: 'Laatste activiteit', cls: 'r optional' }],
+          modules.map((m) => {
+            const s = modStats[m] || {};
+            return [
+              `<span class="cell-main">${esc(m)}</span>`,
+              `<span class="mono">${Number(s.messages_today || 0)}</span>`,
+              `<span class="mono">${Number(s.open_suggestions || 0)}</span>`,
+              `<span class="mono">${Number(s.handoffs || 0)}</span>`,
+              `<span class="mono">${Number(s.active_conversations || 0)}</span>`,
+              `<span class="mono" style="color:var(--text-3);font-size:12px">${s.last_activity_at ? new Date(s.last_activity_at).toLocaleString('nl-NL', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : '—'}</span>`,
+            ];
+          })
+        )}`;
   }
 
   window.DFO.VIEWS['agents/Overzicht']    = overzichtView;
@@ -181,5 +224,5 @@
   window.DFO.VIEWS['agents/Prestaties']   = prestatiesView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('agents');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('agents');
-  console.debug('[agents-v2] registered 4 views (dormant)');
+  console.debug('[agents-v2] data-ronde geregistreerd (dormant)');
 })();
