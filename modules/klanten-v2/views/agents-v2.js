@@ -168,8 +168,13 @@
     <span style="flex:1">Kon ophalen: ${esc(msg)}${/401|403/.test(msg || '') ? ' — admin/super_admin vereist' : ''}</span>
     <button class="btn btn-ghost btn-sm" onclick="__agRetry('${block}'${arg ? `,'${arg}'` : ''})">Opnieuw</button></div>`;
   const skel = () => `<div class="pad"><div class="card"><div class="card-body" style="padding:22px;opacity:.55"><div style="height:12px;background:var(--surface-2);border-radius:4px;width:60%;margin-bottom:12px"></div><div style="height:12px;background:var(--surface-2);border-radius:4px;width:40%"></div></div></div></div>`;
-  const nj  = (r) => `<div style="margin:14px 20px;padding:12px 16px;border:1px solid var(--amber-line);background:var(--amber-soft);border-radius:var(--r);color:var(--amber);font-size:12.5px;display:flex;gap:11px;align-items:flex-start">${svg(I.alert, 'width:15px;height:15px;flex-shrink:0;margin-top:1px')}<span><b>Needs Jeffrey</b> — ${esc(r)}</span></div>`;
-  const gapBadge = (r) => `<span class="pill pill-warn nodot" style="font-size:10px;padding:1.5px 6px" title="${esc(r)}">Backend ontbreekt</span>`;
+  // Nette "Binnenkort — nog in ontwikkeling"-staat (subtiel, empty-state style).
+  const soon = (title, sub) => `<div style="padding:36px 20px;text-align:center;color:var(--text-3)">
+    <span style="display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:50%;background:var(--surface-2);margin-bottom:12px">${svg(I.clock, 'width:20px;height:20px;opacity:.7')}</span>
+    <div style="font-size:13.5px;font-weight:600;color:var(--text-2);margin-bottom:4px">${esc(title)}</div>
+    ${sub ? `<div style="font-size:12px;line-height:1.5;max-width:360px;margin:0 auto">${esc(sub)}</div>` : ''}
+  </div>`;
+  const softPill = () => `<span class="pill pill-neutral nodot" style="font-size:10.5px;padding:1.5px 8px;opacity:.75">Nog niet gekoppeld</span>`;
 
   // Kanaal-pill (WhatsApp/Instagram/E-mail/Dashboard/Achtergrond).
   function _channelPill(k) {
@@ -256,7 +261,6 @@
       <div class="grid g3">
         ${bg.map((a) => _overzichtBgCard(a)).join('')}
       </div>
-      ${nj('Achtergrond-agents (Gespreksanalyse / E-mail categorisatie / Lead-scoring) hebben geen backend-endpoint. Toggles zijn visueel; stats zijn placeholder tot Jeffrey aanlevert welke tabel/counter ze moeten lezen.')}
     </div>`;
   }
 
@@ -292,10 +296,10 @@
       stats = [['—',''],['—',''],['—','']];
     }
 
-    const showBackendGap = !a.backend;
+    const noBackend = !a.backend;
     const persona = live?.persona_name || a.n;
 
-    return `<div class="card" onclick="window.__agGoConfig('${a.id}')" style="cursor:pointer;transition:transform .15s,box-shadow .15s" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 20px -8px rgba(0,0,0,.15)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+    return `<div class="card" ${noBackend ? '' : `onclick="window.__agGoConfig('${a.id}')"`} style="${noBackend ? 'opacity:.68' : 'cursor:pointer;transition:transform .15s,box-shadow .15s'}" ${noBackend ? '' : `onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 20px -8px rgba(0,0,0,.15)'" onmouseout="this.style.transform='';this.style.boxShadow=''"`}>
       <div style="padding:15px 17px;display:flex;align-items:flex-start;gap:12px">
         ${_radial(a.c, 38)}
         <div style="flex:1;min-width:0">
@@ -309,10 +313,9 @@
         </div>
       </div>
       <div style="padding:0 17px 12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-        ${showBackendGap ? gapBadge('Geen backend gekoppeld — Aisha/AI Manager needs Jeffrey')
-                         : (isLive ? H.pill('ok','Live') : H.pill('neutral','Uit'))}
+        ${noBackend ? softPill() : (isLive ? H.pill('ok','Live') : H.pill('neutral','Uit'))}
         ${a.kan.map(_channelPill).join('')}
-        <span style="font-size:11px;color:var(--text-3);margin-left:auto">${esc(a.venster)}</span>
+        <span style="font-size:11px;color:var(--text-3);margin-left:auto">${noBackend ? '' : esc(a.venster)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);border-top:1px solid var(--border)">
         ${stats.map(([v, l]) => `<div style="background:var(--surface);padding:10px 12px;text-align:center">
@@ -323,7 +326,7 @@
   }
 
   function _overzichtBgCard(a) {
-    return `<div class="card" style="opacity:${a.live ? '1' : '.6'}">
+    return `<div class="card" style="opacity:.68">
       <div class="card-body" style="padding:15px 17px">
         <div style="display:flex;align-items:flex-start;gap:11px;margin-bottom:11px">
           <span class="tile-ico" style="background:var(--${a.c}-soft);color:var(--${a.c})">${svg(I[a.ic] || I.bot)}</span>
@@ -331,11 +334,9 @@
             <div class="card-title">${esc(a.n)}</div>
             <div style="font-size:12px;color:var(--text-3);margin-top:3px;line-height:1.45">${esc(a.d)}</div>
           </div>
-          <div class="switch ${a.live ? 'on' : ''}" style="width:34px;height:20px" title="Backend ontbreekt — toggle is visueel"></div>
         </div>
-        <div style="display:flex;gap:16px;font-size:11.5px;color:var(--text-3);align-items:center;flex-wrap:wrap">
-          <span style="color:var(--text-3)">${esc(a.aut)}</span>
-          ${gapBadge('Geen backend-teller')}
+        <div style="display:flex;gap:8px;font-size:11.5px;color:var(--text-3);align-items:center;flex-wrap:wrap">
+          ${softPill()}
         </div>
       </div>
     </div>`;
@@ -373,7 +374,8 @@
   }
 
   function _cfgHeader(a) {
-    const others = AGENTS_STATIC.filter((x) => x.config).map((x) =>
+    // Alleen agents mét backend in de picker; overige worden apart getoond onder "Binnenkort".
+    const others = AGENTS_STATIC.filter((x) => x.config && x.backend).map((x) =>
       `<option value="${x.id}" ${x.id === _ui.agSel ? 'selected' : ''}>${esc(x.n)} — ${esc(x.rol)}</option>`).join('');
     return `<div style="padding:13px 20px;background:var(--${a.c}-soft);border-bottom:1px solid var(--${a.c}-line);display:flex;gap:12px;align-items:center;flex-wrap:wrap">
       ${_radial(a.c, 32)}
@@ -382,7 +384,7 @@
         <div style="font-size:12px;color:var(--text-3)">${esc(a.aut)} · ${esc(a.venster)} · configuratie ${esc(a.ver)}</div>
       </div>
       ${a.lock ? `<span class="pill pill-warn nodot" style="display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 9px">${svg(I.shield, 'width:11px;height:11px')}Beschermd — wijzigen in ${esc(a.mod)}</span>` : ''}
-      ${!a.backend ? gapBadge('Geen backend-endpoint voor deze agent') : ''}
+      ${!a.backend ? softPill() : ''}
       <select class="filter-sel" onchange="window.__agSelChange(this.value)">${others}</select>
     </div>`;
   }
@@ -434,10 +436,14 @@
     if (a.backend && !currentCfg && loadingCfg) return skel();
     if (a.backend && errorCfg) return errBlk(a.backend === 'lisa' ? 'lisa' : 'perConfig', errorCfg, a.backend === 'lisa' ? undefined : a.backend);
 
+    if (!a.backend) {
+      return `<div class="pad" style="padding-top:14px"><div style="max-width:820px">
+        <div class="card">${soon(a.n + ' — binnenkort te configureren', 'Deze agent staat op de roadmap. Zodra de koppeling live is verschijnen hier persona, mandaat en stopregels.')}</div>
+      </div></div>`;
+    }
+
     return `<div class="pad" style="padding-top:14px">
       <div style="max-width:820px">
-
-        ${!a.backend ? nj('Deze agent heeft geen backend-endpoint. Config-formulier is verborgen. Needs Jeffrey: nieuwe tabel of route voor ' + a.n + ' (' + a.rol + ').') : ''}
 
         <div class="grid g2" style="margin-bottom:14px">
           <div class="card">
@@ -462,13 +468,11 @@
             </div>
           </div>
         </div>
-        ${nj('Toggles Gedrag/Timing zijn UI-only — de backend heeft geen per-permissie-veld (autonomy_config.mandate wel voor Joost-mandaat; overige toggles vragen schema-uitbreiding).')}
 
         <div class="card" style="margin-bottom:14px">
           <div class="card-head">
             <span class="tile-ico" style="background:var(--${a.c}-soft);color:var(--${a.c})">${svg(I.bot)}</span>
             <div class="card-title">Persona en toon</div>
-            ${readonly ? '' : `<span style="margin-left:auto;font-size:11px;color:var(--text-3)">${a.backend ? 'live · /api/' + (a.backend === 'lisa' ? 'lisa-config' : 'joost-config-get?module=' + a.backend) : ''}</span>`}
           </div>
           <div class="card-body" style="display:flex;flex-direction:column;gap:12px">
             ${_field('Naam',        'persona_name', value('persona_name', a.n), readonly, a)}
@@ -481,9 +485,12 @@
           </div>
           ${(!readonly && a.backend && a.backend !== 'lisa') ? _saveBar(a) : ''}
           ${(readonly) ? `<div style="padding:11px 17px;background:var(--surface-2);border-top:1px solid var(--border);font-size:11.5px;color:var(--text-3)">
-            <b>Read-only.</b> Wijzigen via <b>${esc(a.mod)} → Instellingen</b> (protected zone).
+            <b>Read-only.</b> Wijzigen via <b>${esc(a.mod)} → Instellingen</b>.
           </div>` : ''}
-          ${(a.backend === 'lisa') ? nj('Lisa-config edit-endpoint is <b>/api/lisa-config?action=save_draft</b> (versioned schema, aparte editor). Deze compacte editor toont read-only samenvatting — volledige editor is in v1 /modules/lisa.html.') : ''}
+          ${(a.backend === 'lisa') ? `<div style="padding:11px 17px;background:var(--surface-2);border-top:1px solid var(--border);font-size:11.5px;color:var(--text-3);display:flex;align-items:center;gap:10px">
+            <span style="flex:1">Volledige persona, fases en kennisbank van Lisa bewerk je in de <b>Lisa-module</b>.</span>
+            <a href="/modules/lisa.html" class="btn btn-ghost btn-sm" style="text-decoration:none">Open Lisa</a>
+          </div>` : ''}
         </div>
 
         ${a.id === 'joost' ? _cfgJoostMandate() : ''}
@@ -559,7 +566,6 @@
       </button>
       <button class="btn btn-ghost btn-sm" ${(!hasDirty || saving) ? 'disabled style="opacity:.55"' : ''} onclick="window.__agReset('${a.id}')">Annuleren</button>
       ${saved ? `<span style="font-size:11.5px;color:var(--emerald)">✓ Opgeslagen ${new Date(saved).toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit'})}</span>` : ''}
-      <span style="font-size:11px;color:var(--text-3);margin-left:auto">POST /api/joost-config-upsert · module=${esc(a.backend)}</span>
     </div>`;
   }
   window.__agReset = (agId) => { _ui.dirty[agId] = {}; if (window.DFO?.render) window.DFO.render(); };
@@ -610,43 +616,32 @@
         <div class="kv"><dt>Boven het mandaat</dt><dd>Vraagt jouw goedkeuring</dd></div>
         <div class="kv"><dt>Mag zelf aanmaningen sturen</dt><dd>${H.pill('neutral','Nee')}</dd></div>
       </div>
-      <div style="padding:11px 17px;background:var(--surface-2);border-top:1px solid var(--border);font-size:11.5px;color:var(--text-3)">
-        Bron: <span class="mono">joost_config.autonomy_config.mandate</span> (Wanbetalers → Instellingen).
-      </div>
     </div>`;
   }
 
   function _cfgAutonomie(a) {
-    return `<div class="pad" style="padding-top:14px">
-      <div style="max-width:820px">
-        ${nj('Autonomie-tab (intenten × modus: uit/meedenken/zelfstandig/altijd mens) leeft in <span class="mono">joost_config.autonomy_config</span> — visualisatie vraagt aparte intenten-matrix-component + write-endpoint per intent. Prototype heeft dit voor Joost (payment_promise / verify_payment / arrangement_request / general_question / escalation_needed / other) en zelfde shape voor Simone/Mila/Aisha. Vereist backend-uitbreiding zodat writes per intent atomair kunnen. Voor nu placeholder-lijst hieronder.')}
-        <div class="card">
-          <div class="card-head">
-            <span class="tile-ico" style="background:var(--${a.c}-soft);color:var(--${a.c})">${svg(I.sliders)}</span>
-            <div class="card-title">Autonomie · ${esc(a.n)}</div>
-          </div>
-          <div class="card-body">
-            <div class="kv"><dt>Modus</dt><dd>${esc(a.aut)}</dd></div>
-            <div class="kv"><dt>Verzendvenster</dt><dd>${esc(a.venster)}</dd></div>
-            <div class="kv"><dt>Intenten</dt><dd>—</dd></div>
-          </div>
-        </div>
+    return `<div class="pad" style="padding-top:14px"><div style="max-width:820px">
+      <div class="card"><div class="card-head">
+        <span class="tile-ico" style="background:var(--${a.c}-soft);color:var(--${a.c})">${svg(I.sliders)}</span>
+        <div class="card-title">Autonomie</div>
       </div>
-    </div>`;
+      <div class="card-body">
+        <div class="kv"><dt>Modus</dt><dd>${esc(a.aut)}</dd></div>
+        <div class="kv"><dt>Verzendvenster</dt><dd>${esc(a.venster)}</dd></div>
+      </div>
+      ${soon('Per-intent modus-matrix — binnenkort', 'Uit / Meedenken / Zelfstandig / Altijd mens per soort bericht (betaal-toezegging, escalatie, prijsvraag, …).')}
+      </div>
+    </div></div>`;
   }
   function _cfgBeslissingen(a) {
-    return `<div class="pad" style="padding-top:14px">
-      <div style="max-width:820px">
-        ${nj('Beslissingen-log toont recente autonome beslissingen per agent uit <span class="mono">joost_autonomy_decisions</span> (endpoint <span class="mono">/api/joost-autonomy-decisions-list</span> bestaat, maar filter per <b>agent</b> ontbreekt — module=finance is Joost, andere modules missen keys). Vereist per-agent filter of aparte column.')}
-      </div>
-    </div>`;
+    return `<div class="pad" style="padding-top:14px"><div style="max-width:820px">
+      <div class="card">${soon('Beslissingen-log — binnenkort', 'Live overzicht van wat ' + a.n + ' zelf heeft besloten: intent, vertrouwen, wat er is verstuurd en waarom.')}</div>
+    </div></div>`;
   }
   function _cfgOefengesprek(a) {
-    return `<div class="pad" style="padding-top:14px">
-      <div style="max-width:820px">
-        ${nj('Oefengesprek (sandbox-chat met deze agent-config, geen productie-effect) heeft geen endpoint. Voor Lisa bestaat een sandbox-chat in v1 <span class="mono">/modules/lisa.html</span> · voor Joost/Simone/Mila is er niets. Vereist nieuwe route zoals <span class="mono">/api/agent-chat-sandbox?module=' + esc(a.backend || a.id) + '</span> met dry-run vlag.')}
-      </div>
-    </div>`;
+    return `<div class="pad" style="padding-top:14px"><div style="max-width:820px">
+      <div class="card">${soon('Oefengesprek — binnenkort', 'Test ' + a.n + ' in een veilige sandbox zonder dat er iets naar klanten gaat.')}</div>
+    </div></div>`;
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -749,7 +744,7 @@
       ? `<div class="empty" style="padding:44px 20px"><div class="empty-t">Geen kennisbank-items</div>
          <div class="empty-s">Kennisbank-items bewerken doe je per agent: Joost/Simone/Mila in Wanbetalers/Events/Onboarding → Instellingen; Lisa in Lisa-module (Kennisbank-tab).</div></div>`
       : H.table(
-          [{l:'Onderwerp'}, {l:'Categorie'}, {l:'Wie gebruikt dit', cls:'optional'}, {l:'Bijgewerkt', cls:'r optional'}, {l:'Bron', cls:'optional'}],
+          [{l:'Onderwerp'}, {l:'Categorie'}, {l:'Wie gebruikt dit', cls:'optional'}, {l:'Bijgewerkt', cls:'r optional'}],
           all.map((r) => [
             `<div><div class="cell-main">${esc(r.onderwerp)}</div>
               ${r.content ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:340px">${esc(r.content)}</div>` : ''}</div>`,
@@ -760,11 +755,8 @@
                 <span style="width:6px;height:6px;border-radius:50%;background:var(--${ag ? ag.c : 'slate'});display:inline-block;margin-right:4px"></span>${esc(w)}</span>`;
             }).join('')}</div>`,
             `<span class="mono" style="color:var(--text-3);font-size:12.5px">${fmtDate(r.updated)}</span>`,
-            `<span class="mono" style="color:var(--text-3);font-size:11px">${esc(r.bron)}</span>`,
           ])
-        )}
-    ${nj('Kennisbank-upload/add-artikel-flow heeft geen endpoint. Prototype toont "+ Artikel"-knop en "X vragen die geen antwoord hadden"-paneel — beide vereisen (1) een centrale kennisbank-tabel of KB-schrijf per agent, en (2) een unmatched-questions log. Voor nu: bewerken via agent-Config-tab.')}
-    ${_kbUnansweredPlaceholder()}`;
+        )}`;
   }
 
   function _kbCat(key) {
@@ -792,23 +784,11 @@
       </select>
       ${cats.map((c) => `<button class="chip ${_ui.kbFilter.cat === c.v ? 'on' : ''}" onclick="window.__agKbCat('${c.v}')">${esc(c.l)}${c.n !== undefined ? `<span class="cnt">${c.n}</span>` : ''}</button>`).join('')}
       <div class="tb-search"><input placeholder="Zoek artikel…" value="${esc(_ui.kbFilter.q)}" oninput="window.__agKbQ(this.value)" style="border:1px solid var(--border);padding:6px 10px;border-radius:8px;background:var(--surface);color:var(--text-1);font-size:12.5px" /></div>
-      <div class="tb-right"><button class="btn btn-primary btn-sm" onclick="alert('Kennisbank + Artikel-endpoint ontbreekt (backend-gap). Bewerk per agent via Wanbetalers/Events/Onboarding → Instellingen of Lisa-module.')">${svg(I.plus)}Artikel</button></div>
     </div>`;
   }
   window.__agKbAgent = (v) => { _ui.kbFilter.agent = v; if (window.DFO?.render) window.DFO.render(); };
   window.__agKbCat   = (v) => { _ui.kbFilter.cat = v; if (window.DFO?.render) window.DFO.render(); };
   window.__agKbQ     = (v) => { _ui.kbFilter.q = v; if (window.DFO?.render) window.DFO.render(); };
-
-  function _kbUnansweredPlaceholder() {
-    return `<div style="padding:16px 20px">
-      <div style="padding:13px 15px;background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:var(--r);font-size:12.5px;color:var(--amber);line-height:1.55;display:flex;gap:10px;max-width:720px">
-        ${svg(I.alert, 'width:15px;height:15px;flex-shrink:0;margin-top:1px')}
-        <div>
-          <b>"Vragen die geen antwoord hadden"-paneel</b> — prototype toont een top-5 uit unmatched Joost-suggestions (intent=general_question + confidence &lt; 0.5) + Lisa-messages zonder KB-match. Endpoint ontbreekt (needs Jeffrey: aggregate query op joost_suggestions/lisa_messages met filter op unmatched-signaal + "Toevoegen aan kennisbank"-write).
-        </div>
-      </div>
-    </div>`;
-  }
 
   // ═══════════════════════════════════════════════════════════════════════
   // VIEW 4 — PRESTATIES
@@ -856,33 +836,26 @@
 
     return `${H.kpis([
       { c:'violet',  icon:I.chat,  label:'Gesprekken vandaag',   val:fmtNum(totalMsgs),   hi:1, sub:'trio + Lisa' },
-      { c:'emerald', icon:I.tick,  label:'Zelf afgehandeld',     val:zelfPct,              hi:1, sub:'geschat uit handoff-ratio' },
-      { c:'amber',   icon:I.users, label:'Overgenomen',          val:fmtNum(totalHandoffs),hi:1, sub:'human takeover' },
-      { c:'blue',    icon:I.clock, label:'Reactietijd',          val:'—',                  sub:'endpoint ontbreekt' },
+      { c:'emerald', icon:I.tick,  label:'Zelf afgehandeld',     val:zelfPct,              hi:1, sub:'schatting' },
+      { c:'amber',   icon:I.users, label:'Overgenomen',          val:fmtNum(totalHandoffs),hi:1, sub:'door mens' },
+      { c:'blue',    icon:I.alert, label:'Wacht op jou',         val:fmtNum(totalOpen),    hi:1, sub:'open suggesties' },
     ])}
-    ${nj('KPI "Reactietijd" heeft geen endpoint (vereist avg(gap tussen inbound → agent-reply) uit whatsapp_messages/lisa_messages). "Zelf afgehandeld %" hier is geschat uit 1 − (handoffs / messages_today) — proxy, geen echte outcome-telling.')}
 
     <div class="pad"><div class="card" style="margin-bottom:14px">
       <div class="card-head">
         <span class="tile-ico" style="background:var(--violet-soft);color:var(--violet)">${svg(I.chart)}</span>
         <div class="card-title">Per agent — vandaag</div>
-        <span style="margin-left:auto;font-size:11px;color:var(--text-3)">bron: /api/agents-activity</span>
       </div>
       ${perAgentRows.length === 0
         ? `<div class="empty" style="padding:44px 20px"><div class="empty-t">Geen activity-data</div><div class="empty-s">Trio + Lisa hebben vandaag nog geen berichten of open suggesties.</div></div>`
         : H.table(
-            [{l:'Agent'}, {l:'Berichten', cls:'r'}, {l:'Zelf afgehandeld', cls:'r'}, {l:'Overgenomen', cls:'r optional'}, {l:'Reactietijd', cls:'r optional'}, {l:'Resultaat', cls:'r'}, {l:'Beoordeling'}],
+            [{l:'Agent'}, {l:'Berichten', cls:'r'}, {l:'Zelf afgehandeld', cls:'r'}, {l:'Overgenomen', cls:'r optional'}, {l:'Resultaat', cls:'r optional'}],
             perAgentRows.map(([ag, g, z, o, r, res, cls]) => [
               `<div style="display:flex;align-items:center;gap:9px">${_radial(ag.c, 24)}<span class="cell-main">${esc(ag.n)}</span></div>`,
               `<span class="mono">${g}</span>`,
               `<span class="pill pill-${cls} nodot">${esc(z)}</span>`,
               `<span class="mono">${o}</span>`,
-              `<span class="mono" style="color:var(--text-3)">${esc(r)}</span>`,
               `<span style="font-size:12.5px;color:var(--text-2)">${esc(res)}</span>`,
-              `<div style="display:flex;gap:3px;justify-content:flex-end">
-                <button class="icon-btn" style="width:24px;height:24px" title="Goed (beoordeling-endpoint ontbreekt)" onclick="alert('Beoordeling-endpoint ontbreekt (needs Jeffrey).')">${svg('<path d="M7 10v12M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88z"/>','width:13px;height:13px')}</button>
-                <button class="icon-btn" style="width:24px;height:24px" title="Kon beter" onclick="alert('Beoordeling-endpoint ontbreekt (needs Jeffrey).')">${svg('<path d="M17 14V2M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88z"/>','width:13px;height:13px')}</button>
-              </div>`,
             ])
           )}
     </div>
@@ -891,15 +864,13 @@
       <div class="card"><div class="card-head">
         <span class="tile-ico" style="background:var(--blue-soft);color:var(--blue)">${svg(I.chart)}</span>
         <div class="card-title">Gesprekken per week</div></div>
-        <div class="card-body" style="padding:24px;text-align:center;color:var(--text-3);font-size:13px">
-          Weekly bucketing-endpoint ontbreekt. ${gapBadge('Geen tijdreeks-agg')}
-        </div></div>
+        ${soon('Weekgrafiek — binnenkort', 'Trend van gesprekken over de laatste 8 weken per agent.')}
+      </div>
       <div class="card"><div class="card-head">
         <span class="tile-ico" style="background:var(--amber-soft);color:var(--amber)">${svg(I.users)}</span>
         <div class="card-title">Waarom er wordt overgenomen</div></div>
-        <div class="card-body" style="padding:24px;text-align:center;color:var(--text-3);font-size:13px">
-          Reden-classificatie op handoffs ontbreekt. ${gapBadge('Geen reason-breakdown')}
-        </div></div>
+        ${soon('Reden-breakdown — binnenkort', 'Meest voorkomende redenen dat een mens het overneemt: prijsvraag, klacht, buiten mandaat, …')}
+      </div>
     </div>
     </div>`;
   }
