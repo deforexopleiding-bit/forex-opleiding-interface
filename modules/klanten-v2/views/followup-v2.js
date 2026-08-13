@@ -25,6 +25,111 @@
   const { I, svg, S, F, avc, ini, eur, eur0, render, goTab } = window.DFO;
   const H = window.KV_V2.helpers;
 
+  const asArr = (x) => Array.isArray(x) ? x : [];
+  const esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+  // ── DATA-KOPPELING 2026-08-13 (light-touch) ───────────────────────────
+  // 3 kern-tabs kloppen aan live-endpoints (read-only): Werklijst,
+  // Opvolglijst, Retenties. De andere 5 tabs (Event-bellijst, Afspraken,
+  // Sluimerpot, Statistieken, Afgeboekt) tonen "needs-Jeffrey"-banner + de
+  // scaffold-preview. Reden: die tabs vragen aparte endpoints of vereisen
+  // write-flows (call-modal, no-show-detect, verplaats-call) die bewust
+  // buiten deze data-ronde blijven.
+  //
+  // Endpoints:
+  //   GET /api/follow-up-leads-list?worklist=1&view=open      (Werklijst)
+  //   GET /api/follow-up-opvolglijst                          (Opvolglijst)
+  //   GET /api/follow-up-oude-retenties?reden=all             (Retenties)
+  const _live = {
+    werklijst:   { loading: false, error: null, data: null },
+    opvolglijst: { loading: false, error: null, data: null },
+    retenties:   { loading: false, error: null, data: null },
+  };
+  async function _tryFetch(label, url, timeoutMs = 10000) {
+    try {
+      if (!window.KV || !window.KV.authedJson) throw new Error('KV.authedJson niet beschikbaar');
+      return await Promise.race([
+        window.KV.authedJson(url),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + timeoutMs + 'ms')), timeoutMs)),
+      ]);
+    } catch (e) { console.warn('[followup-v2] ' + label + ' fail:', e?.message); return { __error: e?.message || 'onbekende fout' }; }
+  }
+  async function _fetchWerklijst() {
+    const st = _live.werklijst;
+    if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await _tryFetch('werklijst', '/api/follow-up-leads-list?worklist=1&view=open');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { leads: asArr(j?.leads), appointments: asArr(j?.appointments), reschedule: asArr(j?.reschedule), counts: j?.counts || {} };
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function _fetchOpvolglijst() {
+    const st = _live.opvolglijst;
+    if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await _tryFetch('opvolglijst', '/api/follow-up-opvolglijst');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { items: asArr(j?.items), counts: j?.counts || {}, count: Number(j?.count || 0) };
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function _fetchRetenties() {
+    const st = _live.retenties;
+    if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await _tryFetch('retenties', '/api/follow-up-oude-retenties?reden=all');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { items: asArr(j?.items), counts: j?.counts || {} };
+    if (window.DFO?.render) window.DFO.render();
+  }
+  window.__fuRetry = (block) => {
+    if (_live[block]) { _live[block].data = null; _live[block].error = null; }
+    if (block === 'werklijst')   _fetchWerklijst();
+    if (block === 'opvolglijst') _fetchOpvolglijst();
+    if (block === 'retenties')   _fetchRetenties();
+    if (window.DFO?.render) window.DFO.render();
+  };
+  // Banner-varianten per view-status.
+  function _bannerLive(scope, count) {
+    return `<div style="margin:14px 20px 0;padding:11px 14px;border:1px solid var(--emerald-line, #A9DFC9);background:var(--emerald-soft, #E4F5EE);border-radius:var(--r);display:flex;align-items:center;gap:11px;font-size:12.5px;color:var(--emerald, #07835A)">
+      ${svg(I.tick || I.check2, 'width:16px;height:16px;flex-shrink:0')}
+      <span><b>LIVE-DATA</b> — ${esc(count != null ? count + ' rijen uit ' : '')}<code>/api/follow-up-${esc(scope)}</code>. Write-flows (call-modal, no-show-detect, verplaats-call) blijven in v1 tot volgende ronde.</span>
+    </div>`;
+  }
+  function _bannerLoading(scope) {
+    return `<div style="margin:14px 20px 0;padding:11px 14px;border:1px solid var(--border);background:var(--surface-2);border-radius:var(--r);font-size:12.5px;color:var(--text-2)">
+      ${scope} laden…</div>`;
+  }
+  function _bannerError(scope, msg) {
+    return `<div style="margin:14px 20px 0;padding:11px 14px;border:1px solid var(--rose-line);background:var(--rose-soft);border-radius:var(--r);display:flex;align-items:center;gap:11px;font-size:12.5px;color:var(--rose)">
+      ${svg(I.alert || I.warn, 'width:16px;height:16px;flex-shrink:0')}
+      <span style="flex:1">Kon ${scope} niet ophalen: ${esc(msg)}</span>
+      <button class="btn btn-ghost btn-sm" onclick="__fuRetry('${esc(scope)}')">Opnieuw</button>
+    </div>`;
+  }
+  function _bannerNeedsJeffrey(reason) {
+    return `<div style="margin:14px 20px 0;padding:11px 14px;border:1px solid var(--amber-line);background:var(--amber-soft);border-radius:var(--r);display:flex;align-items:center;gap:11px;font-size:12.5px;color:var(--amber)">
+      ${svg(I.alert, 'width:16px;height:16px;flex-shrink:0')}
+      <span><b>VOORBEELD-DATA</b> — deze tab is in de huidige data-ronde bewust nog niet gekoppeld. ${esc(reason)}</span>
+    </div>`;
+  }
+  function _fmtDateNL(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return '';
+    return d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' });
+  }
+  function _daysSince(iso) {
+    if (!iso) return null;
+    const t = new Date(iso).getTime();
+    if (!Number.isFinite(t)) return null;
+    return Math.floor((Date.now() - t) / (24 * 60 * 60 * 1000));
+  }
+
   /* ── Voorbeeld-data (prototype r2804-2839) ────────────────────────── */
   const FU = [
     { id: 1, naam: 'Kevin Braams',        tel: '+31 6 55667788',  mail: 'k.braams@gmail.com',  bron: 'event',    hot: true,  bucket: 'telaat',  when: '2 d te laat',  pogingen: 2, status: 'terugbellen', traject: 'Masterclass 8 aug',       laatste: 'Voicemail ingesproken',   eigenaar: 'Joost',   warmte: 7, event: 'Forex Masterclass Gent · 8 aug' },
@@ -80,7 +185,7 @@
       && (!q || l.naam.toLowerCase().includes(q)));
     const c = fuLead();
 
-    return `${H.voorbeeldBanner()}
+    return `${_bannerNeedsJeffrey('Deze tab vraagt een aparte endpoint (of write-flow) die niet in deze read-only data-ronde meegaat. Zie PR-body.')}
     <div class="fu-split">
       <div class="fu-list">
         <div class="fu-list-top">
@@ -218,7 +323,7 @@
   /* ── VIEW 2: Event-bellijst (prototype r3005-3027) ────────────────── */
   function eventBellijstView() {
     const rows = FU.filter(l => l.bron === 'event');
-    return `${H.voorbeeldBanner()}
+    return `${_bannerNeedsJeffrey('Deze tab vraagt een aparte endpoint (of write-flow) die niet in deze read-only data-ronde meegaat. Zie PR-body.')}
     ${H.toolbar([
       `<select class="filter-sel" style="min-width:280px"><option>Forex Masterclass Gent — za 8 aug 10:00</option>
         <option>Forex Masterclass Gent — wo 12 aug 18:00</option><option>Forex Masterclass Gent — za 15 aug 10:00</option></select>`,
@@ -245,67 +350,101 @@
     )}`;
   }
 
-  /* ── VIEW 3: Opvolglijst (prototype r3029-3046) ───────────────────── */
+  /* ── VIEW 3: Opvolglijst (LIVE via /api/follow-up-opvolglijst) ────── */
   function opvolglijstView() {
-    return `${H.voorbeeldBanner()}
+    if (!_live.opvolglijst.data && !_live.opvolglijst.loading && !_live.opvolglijst.error) queueMicrotask(_fetchOpvolglijst);
+    if (_live.opvolglijst.error && !_live.opvolglijst.data) return _bannerError('opvolglijst', _live.opvolglijst.error);
+    if (_live.opvolglijst.loading && !_live.opvolglijst.data) return _bannerLoading('Opvolglijst');
+    const d = _live.opvolglijst.data || { items: [], counts: {} };
+    const items = asArr(d.items);
+    const counts = d.counts || {};
+    const filter = F('br', 'all');
+    const HERKOMST = { event_noshow: ['pink', 'Event no-show'], zoom_noshow: ['teal', 'Zoom no-show'], zoom_reschedule: ['amber', 'Zoom verzet'], zoom_cancelled: ['rose', 'Zoom geannuleerd'] };
+    const rows = items.filter((it) => filter === 'all' || filter === it.herkomst);
+    return `${_bannerLive('opvolglijst', items.length)}
     ${H.toolbar([
-      H.chips('br', [{ l: 'Alles', v: 'all', n: 12 }, { l: 'Event no-show', v: 'en', n: 5 }, { l: 'Zoom no-show', v: 'zn', n: 3 },
-        { l: 'Zoom verzet', v: 'zv', n: 3 }, { l: 'Zoom geannuleerd', v: 'zg', n: 1 }], F('br', 'all')),
-      `<div class="tb-right"><button class="btn btn-ghost" onclick="__fuNotice('Vernieuwen')">${svg(I.refresh)}Vernieuwen</button></div>`,
+      H.chips('br', [
+        { l: 'Alles', v: 'all', n: items.length },
+        { l: 'Event no-show', v: 'event_noshow', n: Number(counts.event_noshow || 0) },
+        { l: 'Zoom no-show', v: 'zoom_noshow', n: Number(counts.zoom_noshow || 0) },
+        { l: 'Zoom verzet', v: 'zoom_reschedule', n: Number(counts.zoom_reschedule || 0) },
+        { l: 'Zoom geannuleerd', v: 'zoom_cancelled', n: Number(counts.zoom_cancelled || 0) },
+      ], filter),
+      `<div class="tb-right"><button class="btn btn-ghost" onclick="__fuRetry('opvolglijst')">${svg(I.refresh)}Vernieuwen</button></div>`,
     ])}
-    ${H.table(
-      [{ l: 'Naam' }, { l: 'Herkomst' }, { l: 'Event / afspraak', cls: 'optional' }, { l: 'Sinds', cls: 'optional' }, { l: 'Status' }, { l: '', cls: 'r' }],
-      [['Jeroen Wilders', 'Event no-show', 'Masterclass Gent · 1 aug', '5 d', 'open', 'pink'],
-       ['Sanne de Boer',  'Zoom no-show',  'Kennismaking · 3 aug',   '3 d', 'open', 'teal'],
-       ['Bilal Ait',      'Zoom verzet',   'Kennismaking · 4 aug',   '2 d', 'wacht', 'amber'],
-       ['Ruben Maes',     'Event no-show', 'Masterclass Gent · 1 aug', '5 d', 'niet bereikt', 'pink'],
-       ['Lisa Vermeer',   'Zoom geannuleerd', 'Kennismaking · 2 aug', '4 d', 'open', 'rose']]
-        .map(([n, h, e, s, st, c]) => [
-          `<div class="row-avatar">${H.av(n, 28)}<span class="cell-main">${n}</span></div>`,
-          H.pill(c, h),
-          `<span style="color:var(--text-2);font-size:12.5px">${e}</span>`,
-          `<span class="mono" style="color:var(--text-3);font-size:12.5px">${s}</span>`,
-          H.pill(st === 'open' ? 'accent' : st === 'wacht' ? 'warn' : 'neutral', st),
-          `<div style="display:flex;gap:6px;justify-content:flex-end">
-            <button class="btn btn-primary btn-sm">${svg(I.phone)}Bel</button>
-            <button class="icon-btn" title="Afschrijven" onclick="event.stopPropagation();fuDdDo('Afschrijven')">${svg(I.trash)}</button></div>`,
-        ])
-    )}`;
+    ${rows.length === 0
+      ? `<div class="empty" style="padding:44px 20px"><div class="empty-t">Geen items</div><div class="empty-s">Er zijn geen opvolgingen in deze categorie.</div></div>`
+      : H.table(
+          [{ l: 'Naam' }, { l: 'Herkomst' }, { l: 'Event / afspraak', cls: 'optional' }, { l: 'Sinds', cls: 'optional' }, { l: 'Status' }, { l: '', cls: 'r' }],
+          rows.map((it) => {
+            const [col, herkLbl] = HERKOMST[it.herkomst] || ['neutral', it.herkomst_label || it.herkomst || '—'];
+            const ds = _daysSince(it.scheduled_at);
+            const evLbl = (it.event_title ? esc(it.event_title) : (it.type || '—')) + (it.scheduled_at ? ' · ' + esc(_fmtDateNL(it.scheduled_at)) : '');
+            const status = (it.lead_status || it.appointment_status || 'open').toLowerCase();
+            return [
+              `<div class="row-avatar">${H.av(it.name || '—', 28)}<span class="cell-main">${esc(it.name || '—')}</span></div>`,
+              H.pill(col, herkLbl),
+              `<span style="color:var(--text-2);font-size:12.5px">${evLbl}</span>`,
+              `<span class="mono" style="color:var(--text-3);font-size:12.5px">${ds != null ? ds + ' d' : '—'}</span>`,
+              H.pill(status === 'open' ? 'accent' : status === 'wacht' || status === 'wacht_op_reschedule' ? 'warn' : 'neutral', status),
+              `<div style="display:flex;gap:6px;justify-content:flex-end">
+                <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();DFO.goTab('Werklijst')">${svg(I.phone)}Bel</button>
+                <button class="icon-btn" title="Openen in v1" onclick="event.stopPropagation();window.open('/modules/follow-up.html#noshow', '_blank')">${svg(I.eye || I.doc)}</button></div>`,
+            ];
+          })
+        )}`;
   }
 
-  /* ── VIEW 4: Retenties (prototype r3048-3067) ─────────────────────── */
+  /* ── VIEW 4: Retenties (LIVE via /api/follow-up-oude-retenties) ───── */
   function retentiesView() {
-    return `${H.voorbeeldBanner()}
+    if (!_live.retenties.data && !_live.retenties.loading && !_live.retenties.error) queueMicrotask(_fetchRetenties);
+    if (_live.retenties.error && !_live.retenties.data) return _bannerError('retenties', _live.retenties.error);
+    if (_live.retenties.loading && !_live.retenties.data) return _bannerLoading('Retenties');
+    const d = _live.retenties.data || { items: [], counts: {} };
+    const items = asArr(d.items);
+    const counts = d.counts || {};
+    const q = (F('q', '') || '').toLowerCase();
+    const filter = F('st', 'nieuw');
+    const rows = items
+      .filter((it) => (filter === 'all' || filter === it.pickup_status || (filter === 'nieuw' && !it.pickup_status)))
+      .filter((it) => !q || String(it.name || '').toLowerCase().includes(q));
+    return `${_bannerLive('retenties', items.length)}
     ${H.kpis([
-      { c: 'violet',  icon: I.repeat, label: 'Verlopen abonnementen', val: '23',        hi: 1, sub: 'sinds januari 2026' },
-      { c: 'amber',   icon: I.phone,  label: 'Nog niet opgepakt',     val: '11',        hi: 1, sub: 'pak deze eerst' },
-      { c: 'emerald', icon: I.tick,   label: 'Heraangesloten',        val: '7',         hi: 1, sub: 'dit kwartaal', trend: H.trend('30%', true) },
-      { c: 'rose',    icon: I.euro,   label: 'MRR verloren',          val: eur0(4820),  hi: 1, sub: 'niet heraangesloten' },
+      { c: 'violet',  icon: I.repeat, label: 'Verlopen abonnementen', val: String(Number(counts.totaal || items.length)), hi: 1, sub: 'geladen totaal' },
+      { c: 'amber',   icon: I.phone,  label: 'Nog niet opgepakt',     val: String(Number(counts.nieuw || 0)), hi: 1, sub: 'pak deze eerst' },
+      { c: 'emerald', icon: I.tick,   label: 'Opgepakt',              val: String(Number(counts.opgepakt || 0)), hi: 1 },
+      { c: 'rose',    icon: I.euro,   label: 'Afgehandeld',           val: String(Number(counts.afgehandeld || 0)), hi: 1, sub: 'heraangesloten of dicht' },
     ])}
-    ${H.toolbar([H.chips('st', [{ l: 'Alle', v: 'all', n: 23 }, { l: 'Nieuw', v: 'n', n: 11 }, { l: 'Opgepakt', v: 'o', n: 5 }, { l: 'Afgehandeld', v: 'a', n: 7 }], F('st', 'n')),
-      H.search('Zoek klant…')])}
-    ${H.table(
-      [{ l: 'Klant' }, { l: 'Laatste abonnement' }, { l: 'Afgelopen op', cls: 'optional' }, { l: 'Was MRR', cls: 'r' }, { l: 'Status' }, { l: '', cls: 'r' }],
-      [['Mari Israiljan',   '12 maand 1-op-1',      '12-04-2026', 600, 'nieuw'],
-       ['Dennis Kroon',     '12 maand membership',  '28-03-2026',  80, 'nieuw'],
-       ['Wesley Bruin',     '6 maand 1-op-1',       '15-02-2026', 658, 'opgepakt'],
-       ['Anouk Timmer',     '36 maand membership',  '03-01-2026',  65, 'afgehandeld']]
-        .map(([n, p, d, m, st]) => [
-          `<div class="row-avatar">${H.av(n, 28)}<span class="cell-main">${n}</span></div>`,
-          p,
-          `<span class="mono" style="color:var(--text-3);font-size:12.5px">${d}</span>`,
-          `<span class="money">${eur(m)}</span>`,
-          H.pill(st === 'nieuw' ? 'accent' : st === 'opgepakt' ? 'warn' : 'ok', st[0].toUpperCase() + st.slice(1)),
-          st === 'nieuw'
-            ? `<button class="btn btn-primary btn-sm">${svg(I.plus)}Oppakken</button>`
-            : `<button class="btn btn-ghost btn-sm">Openen</button>`,
-        ])
-    )}`;
+    ${H.toolbar([
+      H.chips('st', [
+        { l: 'Alle', v: 'all', n: items.length },
+        { l: 'Nieuw', v: 'nieuw', n: Number(counts.nieuw || 0) },
+        { l: 'Opgepakt', v: 'opgepakt', n: Number(counts.opgepakt || 0) },
+        { l: 'Afgehandeld', v: 'afgehandeld', n: Number(counts.afgehandeld || 0) },
+      ], filter),
+      H.search('Zoek klant…'),
+    ])}
+    ${rows.length === 0
+      ? `<div class="empty" style="padding:44px 20px"><div class="empty-t">Geen retenties</div><div class="empty-s">Er zijn geen verlopen abonnementen in deze categorie.</div></div>`
+      : H.table(
+          [{ l: 'Klant' }, { l: 'Afgelopen op', cls: 'optional' }, { l: 'Entiteit', cls: 'optional' }, { l: 'Mentor', cls: 'optional' }, { l: 'Status' }, { l: '', cls: 'r' }],
+          rows.map((it) => {
+            const st = it.pickup_status || 'nieuw';
+            return [
+              `<div class="row-avatar">${H.av(it.name || '—', 28)}<span class="cell-main">${esc(it.name || '—')}</span></div>`,
+              `<span class="mono" style="color:var(--text-3);font-size:12.5px">${esc(_fmtDateNL(it.end_date))}</span>`,
+              `<span style="color:var(--text-2);font-size:12.5px">${esc(it.entity || '—')}</span>`,
+              `<span style="color:var(--text-2);font-size:12.5px">${esc(it.mentor_name || '—')}</span>`,
+              H.pill(st === 'nieuw' ? 'accent' : st === 'opgepakt' ? 'warn' : 'ok', st[0].toUpperCase() + st.slice(1)),
+              `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();window.open('/modules/follow-up.html#oude-retenties', '_blank')">Openen in v1</button>`,
+            ];
+          })
+        )}`;
   }
 
   /* ── VIEW 5: Afspraken (prototype r3069-3095) ─────────────────────── */
   function afsprakenView() {
-    return `${H.voorbeeldBanner()}
+    return `${_bannerNeedsJeffrey('Deze tab vraagt een aparte endpoint (of write-flow) die niet in deze read-only data-ronde meegaat. Zie PR-body.')}
     ${H.toolbar([
       H.chips('t', [{ l: 'Alles', v: 'all', n: 9 }, { l: '📹 Zoom', v: 'z', n: 4 }, { l: '📞 Terugbel', v: 't', n: 3 }, { l: '💤 Wacht', v: 'w', n: 1 }, { l: '✓ Afgehandeld', v: 'a', n: 1 }], F('t', 'all')),
       `<label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text-2)">
@@ -333,7 +472,7 @@
 
   /* ── VIEW 6: Sluimerpot (prototype r3097-3112) ────────────────────── */
   function sluimerpotView() {
-    return `${H.voorbeeldBanner()}
+    return `${_bannerNeedsJeffrey('Deze tab vraagt een aparte endpoint (of write-flow) die niet in deze read-only data-ronde meegaat. Zie PR-body.')}
     ${H.toolbar([H.chips('b', [{ l: 'Alles', v: 'all', n: 18 }, { l: 'Retentie', v: 'r', n: 11 }, { l: 'Event', v: 'e', n: 7 }], F('b', 'all')), H.search('Zoek…')])}
     <div class="pad">
       ${[['Binnenkort terug — binnen 30 dagen', 3, 'amber'], ['Over ongeveer 6 maanden', 9, 'blue'], ['Over ongeveer 12 maanden', 6, 'slate']]
@@ -352,7 +491,7 @@
 
   /* ── VIEW 7: Statistieken (prototype r3114-3151) ──────────────────── */
   function statistiekenView() {
-    return `${H.voorbeeldBanner()}
+    return `${_bannerNeedsJeffrey('Deze tab vraagt een aparte endpoint (of write-flow) die niet in deze read-only data-ronde meegaat. Zie PR-body.')}
     ${H.toolbar([H.chips('p', [{ l: 'Vandaag', v: 'd' }, { l: 'Deze week', v: 'w' }, { l: 'Deze maand', v: 'm' }], F('p', 'w'))])}
     ${H.kpis([
       { c: 'blue',    icon: I.phone, label: 'Gebeld',           val: '147', sub: 'deze week', trend: H.trend('+22', true) },
@@ -394,7 +533,7 @@
 
   /* ── VIEW 8: Afgeboekt (prototype r3153-3166) ─────────────────────── */
   function afgeboektView() {
-    return `${H.voorbeeldBanner()}
+    return `${_bannerNeedsJeffrey('Deze tab vraagt een aparte endpoint (of write-flow) die niet in deze read-only data-ronde meegaat. Zie PR-body.')}
     ${H.toolbar([
       H.chips('r', [{ l: 'Alles', v: 'all', n: 31 }, { l: 'No-show', v: 'ns', n: 9 }, { l: 'Geannuleerd', v: 'ga', n: 6 },
         { l: 'Geen interesse', v: 'gi', n: 12 }, { l: 'Onbereikbaar', v: 'ob', n: 4 }], F('r', 'all')),
