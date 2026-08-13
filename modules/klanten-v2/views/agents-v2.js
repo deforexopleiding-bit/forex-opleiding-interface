@@ -466,10 +466,18 @@
         });
         if (j?.error) throw new Error(j.error);
       } else {
+        // BUG 1 FIX — als de joost_config-rij nog niet bestaat (bv. Aisha/Manager
+        // direct na migratie, of onboarding/events voor de eerste keer aangezet),
+        // stuur volledige defaults mee zodat NOT NULL text-kolommen niet als
+        // NULL bij PostgREST binnenkomen. Bij bestaande rij: minimale toggle.
+        const body = await _buildSafeUpsertBody(a.backend, { is_enabled: next });
+        // Guard: persona_name mag niet leeg zijn (backend valideert)
+        if (body.persona_name === '' || body.persona_name == null) body.persona_name = a.n || 'Agent';
+        if (body.persona_tone === '' || body.persona_tone == null) body.persona_tone = 'vriendelijk-professioneel';
         const j = await window.KV.authedJson('/api/joost-config-upsert', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ module: a.backend, is_enabled: next }),
+          body: JSON.stringify(body),
         });
         if (j?.error) throw new Error(j.error);
       }
@@ -787,11 +795,16 @@
   }
   window.__agFieldSet = (agId, field, v, kind) => {
     _ui.dirty[agId] = _ui.dirty[agId] || {};
+    // Save-bar overgang detecteren: render pas als we van 0 → 1+ dirty-keys gaan
+    // (of andersom). Tijdens continu typen géén render → textarea-cursor blijft
+    // stabiel. Bij transitie 1x flikker voor knop-enable, daarna rustig.
+    const before = Object.keys(_ui.dirty[agId]).length;
     let coerced = v;
     if (kind === 'number') coerced = v === '' ? null : Number(v);
     else if (v === 'true')  coerced = true;
     else if (v === 'false') coerced = false;
     _ui.dirty[agId][field] = coerced;
+    if (before === 0 && window.DFO?.render) window.DFO.render();
   };
 
   function _saveBar(a, sensitiveFields) {
@@ -809,6 +822,52 @@
     </div>`;
   }
   window.__agReset = (agId) => { _ui.dirty[agId] = {}; if (window.DFO?.render) window.DFO.render(); };
+
+  // BUG 1 FIX — Bepaal of de joost_config-rij voor deze module al bestaat.
+  // Als NEE: haal spec-defaults op via joost-config-get zodat we bij INSERT
+  // alle NOT NULL text-kolommen expliciet meesturen (persona_name /
+  // persona_tone / system_prompt_template / knowledge_base / model). Dit
+  // voorkomt "null value violates not-null constraint"-fouten wanneer
+  // supabase-js .upsert() DEFAULT-fallback niet toepast.
+  async function _rowExistsForModule(moduleKey) {
+    const cfgList = asArr(_live.configList.data);
+    return cfgList.some((r) => r.type === 'joost_config' && r.module === moduleKey);
+  }
+  async function _fetchDefaultsForModule(moduleKey) {
+    try {
+      const j = await window.KV.authedJson('/api/joost-config-get?module=' + encodeURIComponent(moduleKey));
+      if (j?.error) return null;
+      return j?.config || null;
+    } catch (_) { return null; }
+  }
+  // Bouw een save-body die veilig is voor zowel INSERT-pad (nieuwe rij) als
+  // UPDATE-pad (bestaande rij). partialUpdates bevat alleen de user-wijzigingen.
+  async function _buildSafeUpsertBody(moduleKey, partialUpdates) {
+    const exists = await _rowExistsForModule(moduleKey);
+    const body = { module: moduleKey, ...partialUpdates };
+    if (exists) return body;
+    // Nieuwe rij → haal defaults en vul NOT NULL text-kolommen expliciet in
+    // voor zover niet al door de user gewijzigd.
+    const defaults = await _fetchDefaultsForModule(moduleKey) || {};
+    const NOT_NULL_TEXT_COLS = ['persona_name','persona_tone','system_prompt_template'];
+    for (const k of NOT_NULL_TEXT_COLS) {
+      if (body[k] === undefined) {
+        body[k] = (defaults[k] != null ? String(defaults[k]) : '');
+      } else if (body[k] == null) {
+        body[k] = '';   // defensief: null → ''
+      }
+    }
+    // knowledge_base + model hebben DB-defaults maar zijn ook NOT NULL — dek af
+    // als backend upsert niet doorlaat.
+    if (body.knowledge_base === undefined) {
+      body.knowledge_base = (defaults.knowledge_base && typeof defaults.knowledge_base === 'object' && !Array.isArray(defaults.knowledge_base))
+        ? defaults.knowledge_base : {};
+    }
+    if (body.model === undefined) {
+      body.model = defaults.model || 'claude-sonnet-4-6';
+    }
+    return body;
+  }
 
   window.__agSave = async (agId, sensitiveFieldsJson) => {
     const a = AGENTS_STATIC.find((x) => x.id === agId);
@@ -836,23 +895,35 @@
     const ALLOWED = (a.backend === 'finance')
       ? BASE_ALLOWED
       : [...BASE_ALLOWED, 'autonomy_config'];
-    const body = { module: a.backend };
+    const partial = {};
     let n = 0;
     for (const k of ALLOWED) if (dirty[k] !== undefined) {
       // Guard: knowledge_base + autonomy_config moeten plain object zijn
       if ((k === 'knowledge_base' || k === 'autonomy_config') && (dirty[k] === null || typeof dirty[k] !== 'object' || Array.isArray(dirty[k]))) continue;
-      body[k] = dirty[k];
+      // BUG 1 FIX — defensieve coerce: NOT NULL text-kolommen mogen nooit null zijn.
+      let v = dirty[k];
+      if (['persona_name','persona_tone','system_prompt_template','model'].includes(k)) {
+        if (v == null) v = '';
+        else v = String(v);
+      }
+      partial[k] = v;
       n++;
-    }
-    // Extra defensieve strip: als 'finance' toch iets probeert door te sturen dat protected is, blokkeer.
-    if (a.backend === 'finance') {
-      delete body.autonomy_config;
-      delete body.feature_flags;
     }
     if (!n) { alert('Geen bekende velden om op te slaan.'); return; }
 
     _ui.saving[agId] = true; if (window.DFO?.render) window.DFO.render();
     try {
+      // BUG 1 FIX — bij INSERT-pad expliciet defaults meesturen voor NOT NULL kolommen.
+      const body = await _buildSafeUpsertBody(a.backend, partial);
+      // Extra defensieve strip: als 'finance' toch iets probeert door te sturen dat protected is, blokkeer.
+      if (a.backend === 'finance') {
+        delete body.autonomy_config;
+        delete body.feature_flags;
+      }
+      // persona_name mag niet leeg zijn per backend-validatie — coerce naar 'Agent' als toch leeg.
+      if (body.persona_name === '' || body.persona_name == null) body.persona_name = a.n || 'Agent';
+      if (body.persona_tone === '' || body.persona_tone == null) body.persona_tone = 'vriendelijk-professioneel';
+
       const j = await window.KV.authedJson('/api/joost-config-upsert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
