@@ -88,6 +88,7 @@
     lisaHist:   { loading: false, error: null, data: null },  // versie-history
     lisaSet:    { loading: false, error: null, data: null },  // lisa_settings singleton
     bg:         { loading: false, error: null, data: null },  // achtergrond-tellers
+    prest:      { loading: false, error: null, data: null },  // prestaties-extended (weekly + response + fb)
   };
 
   const _ui = {
@@ -178,6 +179,14 @@
     if (j && j.__error) st.error = j.__error; else st.data = j || null;
     if (window.DFO?.render) window.DFO.render();
   }
+  async function fetchPrest() {
+    const st = _live.prest; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('prest', '/api/agents-prestaties-extended', undefined, 15000);
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = j || null;
+    if (window.DFO?.render) window.DFO.render();
+  }
 
   window.__agRetry = (b, mod) => {
     if (b === 'perConfig' && mod) { _live.perConfig.data[mod] = null; _live.perConfig.error[mod] = null; fetchPerConfig(mod); return; }
@@ -188,6 +197,7 @@
     if (b === 'lisa')       fetchLisaConfig();
     if (b === 'lisaSet')    fetchLisaSettings();
     if (b === 'bg')         fetchBg();
+    if (b === 'prest')      fetchPrest();
   };
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -1266,18 +1276,24 @@
   // ═══════════════════════════════════════════════════════════════════════
   function prestatiesView() {
     if (!_live.activity.data && !_live.activity.loading && !_live.activity.error) queueMicrotask(fetchActivity);
+    if (!_live.prest.data    && !_live.prest.loading    && !_live.prest.error)    queueMicrotask(fetchPrest);
     if (_live.activity.error && !_live.activity.data) return errBlk('activity', _live.activity.error);
     if (_live.activity.loading && !_live.activity.data) return skel();
 
     const activity = _live.activity.data || {};
     const trio = asArr(activity.trio); const lisa = activity.lisa || {};
+    const prest = _live.prest.data || {};
+    const rt = prest.response_times || {};
+    const fbCounts = prest.feedback_counts || {};
 
     let totalMsgs = 0; for (const t of trio) totalMsgs += Number(t.messages_today || 0);
     totalMsgs += Number(lisa.messages_today || 0);
     let totalHandoffs = 0; for (const t of trio) totalHandoffs += Number(t.handoffs || 0);
     totalHandoffs += Number(lisa.human_takeover || 0);
-    let totalOpen = 0; for (const t of trio) totalOpen += Number(t.open_suggestions || 0);
     const zelfPct = totalMsgs ? Math.max(0, Math.round(100 * (1 - totalHandoffs / totalMsgs))) + '%' : '—';
+
+    // Gemiddelde reactietijd over agents met data (gewogen op count).
+    const overallRT = _weightedAvgRT(rt);
 
     const perAgentRows = [];
     for (const t of trio) {
@@ -1285,38 +1301,46 @@
       const msg = Number(t.messages_today || 0); const hnd = Number(t.handoffs || 0);
       const zelf = msg ? Math.max(0, Math.round(100 * (1 - hnd / msg))) + '%' : '—';
       const cls = msg && hnd / Math.max(1, msg) < 0.15 ? 'ok' : (hnd / Math.max(1, msg) < 0.35 ? 'warn' : 'danger');
-      perAgentRows.push([ag, msg, zelf, hnd, fmtNum(t.open_suggestions) + ' open', cls]);
+      perAgentRows.push({ ag, msg, zelf, hnd, res: fmtNum(t.open_suggestions) + ' open', cls, rt: rt[ag.id] || null });
     }
     const lisaAg = AGENTS_STATIC.find((a) => a.id === 'lisa');
     if (lisaAg) {
       const msg = Number(lisa.messages_today || 0); const hnd = Number(lisa.human_takeover || 0);
       const zelf = msg ? Math.max(0, Math.round(100 * (1 - hnd / msg))) + '%' : '—';
       const cls = msg && hnd / Math.max(1, msg) < 0.15 ? 'ok' : (hnd / Math.max(1, msg) < 0.35 ? 'warn' : 'danger');
-      perAgentRows.push([lisaAg, msg, zelf, hnd, fmtNum(lisa.call_booked) + ' calls', cls]);
+      perAgentRows.push({ ag: lisaAg, msg, zelf, hnd, res: fmtNum(lisa.call_booked) + ' calls', cls, rt: rt.lisa || null });
     }
 
     return `${H.kpis([
       { c:'violet',  icon:I.chat,  label:'Gesprekken vandaag', val:fmtNum(totalMsgs),   hi:1, sub:'trio + Lisa' },
       { c:'emerald', icon:I.tick,  label:'Zelf afgehandeld',   val:zelfPct,             hi:1, sub:'schatting' },
       { c:'amber',   icon:I.users, label:'Overgenomen',        val:fmtNum(totalHandoffs), hi:1, sub:'door mens' },
-      { c:'blue',    icon:I.alert, label:'Wacht op jou',       val:fmtNum(totalOpen),   hi:1, sub:'open suggesties' },
+      { c:'blue',    icon:I.clock, label:'Reactietijd',        val:overallRT.label,     hi:overallRT.hi ? 1 : 0, sub:overallRT.sub },
     ])}
+    ${_live.prest.error ? errBlk('prest', _live.prest.error) : ''}
+    ${prest.feedback_unavailable ? `<div style="margin:14px 20px;padding:11px 15px;border:1px solid var(--amber-line);background:var(--amber-soft);border-radius:var(--r);font-size:12.5px;color:var(--amber);display:flex;gap:11px;align-items:flex-start">
+      ${svg(I.alert, 'width:15px;height:15px;flex-shrink:0;margin-top:1px')}
+      <span>Feedback-tabel bestaat nog niet in de DB. Draai migratie <span class="mono">2026-08-13-agent-suggestion-feedback.sql</span> om duim-op/duim-neer te activeren.</span>
+    </div>` : ''}
 
     <div class="pad"><div class="card" style="margin-bottom:14px">
       <div class="card-head">
         <span class="tile-ico" style="background:var(--violet-soft);color:var(--violet)">${svg(I.chart)}</span>
         <div class="card-title">Per agent — vandaag</div>
+        <span style="margin-left:auto;font-size:11px;color:var(--text-3)">reactietijd = gemiddelde over laatste 7 dagen</span>
       </div>
       ${perAgentRows.length === 0
         ? `<div class="empty" style="padding:44px 20px"><div class="empty-t">Geen activity-data</div></div>`
         : H.table(
-            [{l:'Agent'}, {l:'Berichten', cls:'r'}, {l:'Zelf afgehandeld', cls:'r'}, {l:'Overgenomen', cls:'r optional'}, {l:'Resultaat', cls:'r optional'}],
-            perAgentRows.map(([ag, g, z, o, res, cls]) => [
-              `<div style="display:flex;align-items:center;gap:9px">${_radial(ag.c, 24)}<span class="cell-main">${esc(ag.n)}</span></div>`,
-              `<span class="mono">${g}</span>`,
-              `<span class="pill pill-${cls} nodot">${esc(z)}</span>`,
-              `<span class="mono">${o}</span>`,
-              `<span style="font-size:12.5px;color:var(--text-2)">${esc(res)}</span>`,
+            [{l:'Agent'}, {l:'Berichten', cls:'r'}, {l:'Zelf afgehandeld', cls:'r'}, {l:'Overgenomen', cls:'r optional'}, {l:'Reactietijd', cls:'r'}, {l:'Resultaat', cls:'r optional'}, {l:'Beoordeling'}],
+            perAgentRows.map((r) => [
+              `<div style="display:flex;align-items:center;gap:9px">${_radial(r.ag.c, 24)}<span class="cell-main">${esc(r.ag.n)}</span></div>`,
+              `<span class="mono">${r.msg}</span>`,
+              `<span class="pill pill-${r.cls} nodot">${esc(r.zelf)}</span>`,
+              `<span class="mono">${r.hnd}</span>`,
+              _rtCell(r.rt),
+              `<span style="font-size:12.5px;color:var(--text-2)">${esc(r.res)}</span>`,
+              _feedbackCell(r.ag.id, fbCounts[r.ag.id] || { up:0, down:0 }, !!prest.feedback_unavailable),
             ])
           )}
     </div>
@@ -1324,15 +1348,136 @@
     <div class="grid g2">
       <div class="card"><div class="card-head">
         <span class="tile-ico" style="background:var(--blue-soft);color:var(--blue)">${svg(I.chart)}</span>
-        <div class="card-title">Gesprekken per week</div></div>
-        ${soon('Weekgrafiek — binnenkort', 'Trend van gesprekken over de laatste 8 weken per agent.')}
+        <div class="card-title">Gesprekken per week</div>
+        <span style="margin-left:auto;font-size:11px;color:var(--text-3)">laatste 8 weken</span>
+      </div>
+      ${_live.prest.loading && !_live.prest.data ? skel() : _weeklyChart(prest.weekly || {})}
       </div>
       <div class="card"><div class="card-head">
         <span class="tile-ico" style="background:var(--amber-soft);color:var(--amber)">${svg(I.users)}</span>
         <div class="card-title">Waarom er wordt overgenomen</div></div>
-        ${soon('Reden-breakdown — binnenkort', 'Meest voorkomende redenen dat een mens het overneemt.')}
+        ${soon('Reden-breakdown — binnenkort', 'Vereist wijziging aan de beschermde handoff-detectie; komt in een latere fase.')}
       </div>
     </div>
+    </div>`;
+  }
+
+  function _weightedAvgRT(rt) {
+    let sum = 0, cnt = 0;
+    for (const k of Object.keys(rt || {})) {
+      const r = rt[k]; if (!r || r.avg_seconds == null || !r.count) continue;
+      sum += r.avg_seconds * r.count; cnt += r.count;
+    }
+    if (!cnt) return { label: '—', sub: 'te weinig data', hi: false };
+    const avg = Math.round(sum / cnt);
+    return { label: _fmtRT(avg), sub: 'gemiddeld · ' + fmtNum(cnt) + ' paren (7d)', hi: true };
+  }
+  function _fmtRT(sec) {
+    if (sec == null) return '—';
+    if (sec < 60)   return sec + 's';
+    if (sec < 3600) return Math.round(sec / 60) + 'm';
+    return (sec / 3600).toFixed(1) + 'u';
+  }
+  function _rtCell(rt) {
+    if (!rt || rt.avg_seconds == null) return `<span style="color:var(--text-3)">—</span>`;
+    return `<span class="mono" title="${rt.count} paren gemeten (laatste 7d)">${_fmtRT(rt.avg_seconds)}</span>`;
+  }
+  function _feedbackCell(agentId, counts, unavailable) {
+    const disabledStyle = unavailable ? 'opacity:.5;cursor:not-allowed' : '';
+    const busy = _ui.saving['fb_' + agentId];
+    return `<div style="display:flex;gap:4px;justify-content:flex-end;align-items:center">
+      <button class="icon-btn" ${unavailable || busy ? 'disabled' : ''} style="width:26px;height:26px;${disabledStyle}${busy ? 'opacity:.5' : ''}" title="Goed${unavailable ? ' — migratie ontbreekt' : ''}" onclick="window.__agFeedback('${agentId}','up')">${svg('<path d="M7 10v12M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88z"/>', 'width:13px;height:13px')}</button>
+      <span class="mono" style="font-size:11px;color:var(--text-3);min-width:14px;text-align:center">${counts.up || 0}</span>
+      <button class="icon-btn" ${unavailable || busy ? 'disabled' : ''} style="width:26px;height:26px;${disabledStyle}${busy ? 'opacity:.5' : ''}" title="Kon beter${unavailable ? ' — migratie ontbreekt' : ''}" onclick="window.__agFeedback('${agentId}','down')">${svg('<path d="M17 14V2M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88z"/>', 'width:13px;height:13px')}</button>
+      <span class="mono" style="font-size:11px;color:var(--text-3);min-width:14px;text-align:center">${counts.down || 0}</span>
+    </div>`;
+  }
+  window.__agFeedback = async (agentId, rating) => {
+    const a = AGENTS_STATIC.find((x) => x.id === agentId);
+    if (!a) return;
+    const key = 'fb_' + agentId;
+    if (_ui.saving[key]) return;
+    _ui.saving[key] = true;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      const body = { agent_key: a.id, rating };
+      if (a.backend && a.backend !== 'lisa' && !a.backend.startsWith('bg-')) body.module = a.backend;
+      const j = await window.KV.authedJson('/api/agent-feedback-create', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (j?.error) throw new Error(j.error);
+      // Optimistisch: bump lokaal + refetch prestaties
+      if (_live.prest.data?.feedback_counts?.[a.id]) {
+        _live.prest.data.feedback_counts[a.id][rating] = (_live.prest.data.feedback_counts[a.id][rating] || 0) + 1;
+      }
+      _showToast('Feedback ' + (rating === 'up' ? 'positief' : 'negatief') + ' opgeslagen voor ' + a.n);
+    } catch (e) {
+      alert('Feedback opslaan mislukt: ' + (e?.message || 'onbekende fout'));
+    } finally {
+      _ui.saving[key] = false;
+      if (window.DFO?.render) window.DFO.render();
+    }
+  };
+  function _showToast(msg) {
+    const el = document.getElementById('kv-toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(_showToast._t);
+    _showToast._t = setTimeout(() => el.classList.remove('show'), 3000);
+  }
+
+  // Multi-agent weekly stacked-line SVG. weekly = { joost:[{week_start,count}], simone:[...], ... }
+  function _weeklyChart(weekly) {
+    const agents = ['joost','simone','mila','lisa'];
+    const series = agents.map((k) => ({
+      key: k,
+      ag: AGENTS_STATIC.find((a) => a.id === k),
+      data: Array.isArray(weekly[k]) ? weekly[k] : [],
+    })).filter((s) => s.ag && s.data.length);
+    if (series.length === 0) return `<div class="card-body" style="padding:24px;text-align:center;color:var(--text-3);font-size:13px">Nog geen data om te tonen.</div>`;
+
+    // Alle series delen dezelfde week-set (endpoint garandeert 8 weeks).
+    const weeks = series[0].data.map((d) => d.week_start);
+    const maxCount = Math.max(1, ...series.flatMap((s) => s.data.map((d) => d.count)));
+    const W = 640, H_ = 180, pad = { t: 12, r: 12, b: 24, l: 32 };
+    const cw = W - pad.l - pad.r;
+    const ch = H_ - pad.t - pad.b;
+    const xStep = weeks.length > 1 ? cw / (weeks.length - 1) : 0;
+    const y = (c) => pad.t + ch - (c / maxCount) * ch;
+
+    const gridLines = [];
+    for (let i = 0; i <= 4; i++) {
+      const yy = pad.t + (ch / 4) * i;
+      const val = Math.round(maxCount - (maxCount / 4) * i);
+      gridLines.push(`<line x1="${pad.l}" y1="${yy}" x2="${W - pad.r}" y2="${yy}" stroke="var(--border)" stroke-width="1" stroke-dasharray="2,3" opacity=".5" />
+        <text x="${pad.l - 4}" y="${yy + 3}" text-anchor="end" font-size="9" fill="var(--text-3)" font-family="'IBM Plex Mono',monospace">${val}</text>`);
+    }
+    const xLabels = weeks.map((w, i) => {
+      const d = new Date(w);
+      const label = String(d.getUTCDate()).padStart(2,'0') + '/' + String(d.getUTCMonth()+1).padStart(2,'0');
+      return `<text x="${pad.l + i * xStep}" y="${H_ - 6}" text-anchor="middle" font-size="9" fill="var(--text-3)" font-family="'IBM Plex Mono',monospace">${label}</text>`;
+    }).join('');
+
+    const paths = series.map((s) => {
+      const pts = s.data.map((d, i) => `${pad.l + i * xStep},${y(d.count)}`);
+      const path = 'M ' + pts.join(' L ');
+      const color = 'var(--' + s.ag.c + ')';
+      const dots = pts.map((p) => `<circle cx="${p.split(',')[0]}" cy="${p.split(',')[1]}" r="2.5" fill="${color}" />`).join('');
+      return `<path d="${path}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />${dots}`;
+    }).join('');
+
+    const legend = series.map((s) => `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-2)">
+      <span style="width:9px;height:9px;border-radius:50%;background:var(--${s.ag.c})"></span>${esc(s.ag.n)}</span>`).join('');
+
+    return `<div class="card-body" style="padding:14px 12px 8px">
+      <svg viewBox="0 0 ${W} ${H_}" style="width:100%;height:auto;display:block" preserveAspectRatio="xMidYMid meet">
+        ${gridLines.join('')}
+        ${paths}
+        ${xLabels}
+      </svg>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;padding:8px 20px 0;justify-content:center">${legend}</div>
     </div>`;
   }
 
