@@ -36,8 +36,14 @@ function mapStatus(inv, payable, due) {
 /**
  * Haalt invoices.info op voor tlInvoiceId, mapt naar onze schema en upsert in `invoices`.
  * Customer-match: invoicee.customer.id → tl_company_id (type=company) of tl_contact_id (anders).
- * Geen match → throw (factuur kan niet zonder klant in onze NOT NULL FK).
- * @returns {Promise<{ id: string, invoice_number: string, status: string, action: 'inserted'|'updated' }>}
+ * Geen match → default: throw (factuur kan niet zonder klant in onze NOT NULL FK).
+ *
+ * opts.skipIfNoCustomer=true → géén throw bij ontbrekende klant, maar return
+ *   { action:'skipped_no_customer', ...skip-details }. Gebruikt door de cron
+ *   (cron-finance-sync.js) zodat een onmatchbare factuur de cursor niet
+ *   blokkeert maar wordt overgeslagen + geregistreerd. Write-endpoints laten de
+ *   optie weg → gedrag ongewijzigd (throw).
+ * @returns {Promise<{ id: string, invoice_number: string, status: string, action: 'inserted'|'updated' } | { action: 'skipped_no_customer', tl_invoice_id: string, reason: string, invoicee_id: string|null, invoicee_type: string|null, match_column: string|null, invoice_number: string|null, tl_department_id: string|null, invoice_date: string|null, amount_total: number|null, tl_updated_at: string|null }>}
  */
 export async function upsertInvoiceFromTl(tlInvoiceId, opts = {}) {
   if (!tlInvoiceId) throw new Error('tl_invoice_id vereist');
@@ -50,10 +56,30 @@ export async function upsertInvoiceFromTl(tlInvoiceId, opts = {}) {
   // Customer-match.
   const invoiceeId = inv.invoicee?.customer?.id || null;
   const invoiceeType = inv.invoicee?.customer?.type || 'contact';
-  if (!invoiceeId) throw new Error('Factuur heeft geen invoicee-customer in TL');
-  const matchCol = invoiceeType === 'company' ? 'tl_company_id' : 'tl_contact_id';
+  const matchCol = invoiceeId ? (invoiceeType === 'company' ? 'tl_company_id' : 'tl_contact_id') : null;
+  // Bouw een skip-record uit de TL-factuur (voor skip-and-advance in de cron).
+  const skipResult = (reason) => ({
+    action: 'skipped_no_customer',
+    tl_invoice_id: inv.id,
+    reason,
+    invoicee_id: invoiceeId,
+    invoicee_type: invoiceeId ? invoiceeType : null,
+    match_column: matchCol,
+    invoice_number: (inv.invoice_number && String(inv.invoice_number).trim()) || null,
+    tl_department_id: inv.department?.id || null,
+    invoice_date: isoDate(inv.invoice_date) || isoDate(inv.booked_on) || null,
+    amount_total: amt(inv.total?.tax_inclusive) ?? amt(inv.total?.payable) ?? null,
+    tl_updated_at: inv.updated_at || null,
+  });
+  if (!invoiceeId) {
+    if (opts.skipIfNoCustomer) return skipResult('no_invoicee');
+    throw new Error('Factuur heeft geen invoicee-customer in TL');
+  }
   const { data: cust } = await supabaseAdmin.from('customers').select('id').eq(matchCol, invoiceeId).maybeSingle();
-  if (!cust) throw new Error(`Geen lokale klant met ${matchCol}=${invoiceeId}`);
+  if (!cust) {
+    if (opts.skipIfNoCustomer) return skipResult('no_customer');
+    throw new Error(`Geen lokale klant met ${matchCol}=${invoiceeId}`);
+  }
 
   // Bedragen.
   const t = inv.total || {};

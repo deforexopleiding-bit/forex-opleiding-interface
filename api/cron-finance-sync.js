@@ -66,6 +66,57 @@ function maxIso(a, b) {
   return a > b ? a : b;
 }
 
+// Registreer een overgeslagen (onmatchbare) factuur in finance_sync_skipped_invoices.
+// Idempotent op tl_invoice_id: bestaat de rij al → seen_count+1 + last_seen_at ver-
+// versen; anders insert. Fail-soft (gooit door naar onSkip's try/catch): een
+// mislukte write (bv. tabel ontbreekt nog) mag de cursor-unjam niet blokkeren.
+async function recordSkippedInvoice(skip) {
+  const nowIso = new Date().toISOString();
+  const { data: existing } = await supabaseAdmin
+    .from('finance_sync_skipped_invoices')
+    .select('seen_count')
+    .eq('tl_invoice_id', skip.tl_invoice_id)
+    .maybeSingle();
+  if (existing) {
+    const { error } = await supabaseAdmin
+      .from('finance_sync_skipped_invoices')
+      .update({
+        seen_count: (Number(existing.seen_count) || 0) + 1,
+        last_seen_at: nowIso,
+        resolved_at: null,               // opnieuw overgeslagen → weer open
+        reason: skip.reason,
+        invoice_number: skip.invoice_number,
+        invoicee_id: skip.invoicee_id,
+        invoicee_type: skip.invoicee_type,
+        match_column: skip.match_column,
+        tl_department_id: skip.tl_department_id,
+        invoice_date: skip.invoice_date,
+        amount_total: skip.amount_total,
+        tl_updated_at: skip.tl_updated_at,
+      })
+      .eq('tl_invoice_id', skip.tl_invoice_id);
+    if (error) throw new Error(error.message);
+  } else {
+    const { error } = await supabaseAdmin
+      .from('finance_sync_skipped_invoices')
+      .insert({
+        tl_invoice_id: skip.tl_invoice_id,
+        reason: skip.reason,
+        invoice_number: skip.invoice_number,
+        invoicee_id: skip.invoicee_id,
+        invoicee_type: skip.invoicee_type,
+        match_column: skip.match_column,
+        tl_department_id: skip.tl_department_id,
+        invoice_date: skip.invoice_date,
+        amount_total: skip.amount_total,
+        tl_updated_at: skip.tl_updated_at,
+        first_seen_at: nowIso,
+        last_seen_at: nowIso,
+      });
+    if (error) throw new Error(error.message);
+  }
+}
+
 /**
  * Synchroniseer één resource (invoices of creditnotes). Polls TL list-endpoint
  * met `updated_since` over alle 3 departments en delegeert per record naar de
@@ -160,6 +211,14 @@ async function syncResource(cfg) {
           if (resource === 'creditnotes' && out?.invoice_id) affected_invoice_ids.add(out.invoice_id);
           // Action tellen (inserted/updated/skipped) voor diag op contacts/companies.
           if (out?.action) sampled_actions[out.action] = (sampled_actions[out.action] || 0) + 1;
+          // Skip-and-advance: een onmatchbare factuur (upsertInvoiceFromTl met
+          // skipIfNoCustomer) landt hier i.p.v. in de catch → geen failed_updated_at,
+          // dus de cursor schuift gewoon door. Best-effort wegschrijven via onSkip;
+          // een mislukte skip-write (bv. tabel bestaat nog niet) mag de unjam niet blokkeren.
+          if (out?.action === 'skipped_no_customer' && typeof cfg.onSkip === 'function') {
+            try { await cfg.onSkip(out); }
+            catch (e) { console.warn(`[cron-finance-sync] ${resource} onSkip faalde id=${lite.id}`, e.message); }
+          }
           const ts = recordUpdatedAt(lite);
           if (ts) sampled_max_updated = maxIso(sampled_max_updated, ts);
         } catch (e) {
@@ -257,9 +316,12 @@ export default async function handler(req, res) {
     contacts: null, companies: null,
   };
 
-  // 2. Invoices syncen (per-department).
+  // 2. Invoices syncen (per-department). skipIfNoCustomer=true → een factuur
+  //    zonder gekoppelde klant blokkeert de cursor niet meer (skip-and-advance),
+  //    maar wordt overgeslagen én in finance_sync_skipped_invoices gezet.
   try {
     const invStart = Date.now();
+    let skippedNoCustomer = 0;
     const invRes = await syncResource({
       resource: 'invoices',
       listEndpoint: '/invoices.list',
@@ -267,9 +329,19 @@ export default async function handler(req, res) {
       startedAt,
       departments: DEPARTMENTS,
       sortField: 'invoice_date',  // TL invoices.list accepteert 'updated_at' niet.
-      upsertOne: (id) => upsertInvoiceFromTl(id),
+      upsertOne: (id) => upsertInvoiceFromTl(id, { skipIfNoCustomer: true }),
+      onSkip: async (skip) => { skippedNoCustomer++; await recordSkippedInvoice(skip); },
     });
     const invDuration = Date.now() - invStart;
+
+    // Eerder overgeslagen facturen die nu (na klant-koppeling) alsnog binnen zijn:
+    // markeer resolved via één DB-side UPDATE...WHERE EXISTS (RPC). Best-effort —
+    // markeren is cosmetisch; de unjam werkt ook zonder (en als de migratie nog
+    // niet gedraaid is).
+    try {
+      const { error: resErr } = await supabaseAdmin.rpc('mark_resolved_skipped_invoices');
+      if (resErr) console.warn('[cron-finance-sync] mark_resolved_skipped_invoices', resErr.message);
+    } catch (e) { console.warn('[cron-finance-sync] mark_resolved_skipped_invoices exception', e.message); }
 
     // sync_state.invoices terugschrijven.
     const { error: upErr } = await supabaseAdmin.from('sync_state').update({
@@ -284,6 +356,7 @@ export default async function handler(req, res) {
     summary.invoices = {
       processed:               invRes.processed,
       errors:                  invRes.errors,
+      skipped_no_customer:     skippedNoCustomer,
       duration_ms:             invDuration,
       last_updated_since:      invRes.next_cursor,
       aborted_by_timeout:      invRes.aborted,
