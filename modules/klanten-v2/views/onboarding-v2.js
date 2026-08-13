@@ -95,8 +95,15 @@
         method: 'POST',
         body: JSON.stringify({ onboarding_ids: ids }),
       });
+      // BUGFIX 2026-08-13 (call_ingepland-ontbreekt):
+      //   - Endpoint returnt `items[]` met key `onboarding_id`, NIET
+      //     `statuses[]` met key `id`. Oude code las de verkeerde velden
+      //     → map bleef leeg → geen enkele rij werd gepatcht → alle rijen
+      //     bleven op de basisderive uit admin-future-students-list met
+      //     hardcoded `hasFutureCall=false` (perf-refactor r298-310) →
+      //     `call_ingepland` kwam nooit door.
       const map = new Map();
-      for (const s of asArr(j?.statuses)) if (s?.id) map.set(s.id, s);
+      for (const s of asArr(j?.items)) if (s?.onboarding_id) map.set(s.onboarding_id, s);
       let changed = false;
       for (const r of rows) {
         const s = map.get(r.id);
@@ -170,7 +177,131 @@
     const cur = F('onb-sort-' + scope, 'created:desc');
     const [ck, cd] = cur.split(':');
     const newDir = (ck === key && cd === 'asc') ? 'desc' : 'asc';
+    _page[scope] = 1; // sort resets page
     window.DFO.setF('onb-sort-' + scope, key + ':' + newDir);
+  };
+
+  // ── Paginering (2026-08-13) ───────────────────────────────────────────
+  // 50 rijen per pagina. Filter+sort eerst, dan slicen. Per-scope state
+  // zodat wisselen tussen Actief/Archief niet resetten.
+  const PAGE_SIZE = 50;
+  const _page = { active: 1, archived: 1 };
+  window.__onbPage = (scope, p) => {
+    p = Math.max(1, Number(p) || 1);
+    _page[scope] = p;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  function paginate(rows, scope) {
+    const total = rows.length;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    let page = Math.max(1, Math.min(totalPages, _page[scope] || 1));
+    if (page !== _page[scope]) _page[scope] = page; // clamp na filter-verlies
+    const from = (page - 1) * PAGE_SIZE;
+    const slice = rows.slice(from, from + PAGE_SIZE);
+    return { slice, page, totalPages, total };
+  }
+  function paginator(scope, meta) {
+    if (meta.total <= PAGE_SIZE) {
+      // Onder de drempel — alleen totaal-tekst tonen, geen knoppen.
+      return `<div class="kv-onb-pager"><span class="kv-onb-pager-info">${meta.total} onboarding${meta.total === 1 ? '' : 's'}</span></div>`;
+    }
+    const p = meta.page, tp = meta.totalPages;
+    const btn = (n, label, disabled, active) => {
+      if (disabled) return `<button class="kv-onb-pager-btn is-disabled" disabled>${esc(label)}</button>`;
+      return `<button class="kv-onb-pager-btn ${active ? 'is-active' : ''}" onclick="__onbPage('${scope}', ${n})">${esc(label)}</button>`;
+    };
+    // Pagina-nummers: max 7 zichtbaar met ellipsis.
+    const nums = [];
+    const push = (n) => { if (!nums.includes(n) && n >= 1 && n <= tp) nums.push(n); };
+    push(1); push(2);
+    push(p - 1); push(p); push(p + 1);
+    push(tp - 1); push(tp);
+    nums.sort((a, b) => a - b);
+    const numsHtml = [];
+    let prev = 0;
+    for (const n of nums) {
+      if (n - prev > 1) numsHtml.push('<span class="kv-onb-pager-ellipsis">…</span>');
+      numsHtml.push(btn(n, String(n), false, n === p));
+      prev = n;
+    }
+    const rangeFrom = (p - 1) * PAGE_SIZE + 1;
+    const rangeTo = Math.min(p * PAGE_SIZE, meta.total);
+    return `<div class="kv-onb-pager">
+      <span class="kv-onb-pager-info">${rangeFrom}–${rangeTo} van ${meta.total}</span>
+      <div class="kv-onb-pager-nav">
+        ${btn(p - 1, '← Vorige', p <= 1, false)}
+        ${numsHtml.join('')}
+        ${btn(p + 1, 'Volgende →', p >= tp, false)}
+      </div>
+    </div>`;
+  }
+
+  // ── Startgroep-filter (2026-08-13, Jeffrey-view) ──────────────────────
+  // Nieuwe primary tab-laag NAAST de bestaande intake-chips. Werkt alleen
+  // in de Actief-scope (in Archief niet zinvol — alles daar is terminal).
+  //
+  // Definitie (opnieuw afstembaar in overleg):
+  //   binnenkort (STANDAARD): niet cancelled/afgerond/gearchiveerd EN
+  //     (start_date is null OF start_date >= vandaag). Nieuwe onboardings
+  //     zonder start_date vallen bewust HIER — die zijn nog niet gepland
+  //     maar moeten wel starten.
+  //   probleem:  status === 'aangemeld' EN start_date != null EN
+  //     start_date < vandaag EN !cancelled. Enkel expliciet aangemelde
+  //     rijen waarvan de startdatum verstreken is. Rijen op status='bezig'
+  //     zijn dus per definitie GEEN probleem (die zijn al gestart).
+  //   alle:      geen datum-filter (huidige gedrag; intake-chips blijven).
+  function _startOfToday() {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+  function startFilter(rows) {
+    const f = F('onb-start', 'binnenkort');
+    const arr = asArr(rows);
+    if (f === 'alle') return arr;
+    const today = _startOfToday();
+    if (f === 'binnenkort') return arr.filter((r) => {
+      if (r.cancelled) return false;
+      const st = String(r.status || '').toLowerCase();
+      if (st === 'afgerond' || st === 'gearchiveerd') return false;
+      if (!r.start_date) return true; // geen startdatum → nog te plannen, dus in "binnenkort"
+      return new Date(r.start_date).getTime() >= today;
+    });
+    if (f === 'probleem') return arr.filter((r) => {
+      if (r.cancelled) return false;
+      if (String(r.status || '').toLowerCase() !== 'aangemeld') return false;
+      if (!r.start_date) return false;
+      return new Date(r.start_date).getTime() < today;
+    });
+    return arr;
+  }
+  function startCounts(rows) {
+    const arr = asArr(rows);
+    const today = _startOfToday();
+    let binnenkort = 0, probleem = 0;
+    for (const r of arr) {
+      const st = String(r.status || '').toLowerCase();
+      if (!r.cancelled && st !== 'afgerond' && st !== 'gearchiveerd') {
+        if (!r.start_date || new Date(r.start_date).getTime() >= today) binnenkort++;
+      }
+      if (!r.cancelled && st === 'aangemeld' && r.start_date && new Date(r.start_date).getTime() < today) probleem++;
+    }
+    return { binnenkort, probleem, alle: arr.length };
+  }
+  function startTabs(counts) {
+    const cur = F('onb-start', 'binnenkort');
+    const items = [
+      { k: 'binnenkort', l: 'Moeten nog starten', n: counts.binnenkort },
+      { k: 'probleem',   l: 'Op te lossen',       n: counts.probleem, warn: true },
+      { k: 'alle',       l: 'Alle',               n: counts.alle },
+    ];
+    return `<div class="kv-onb-tabline">
+      ${items.map((it) => `<button class="kv-onb-tab ${cur === it.k ? 'is-on' : ''} ${it.warn && it.n > 0 ? 'has-warn' : ''}" onclick="__onbStartTab('${it.k}')">${esc(it.l)} <span class="kv-onb-tab-c">${it.n}</span></button>`).join('')}
+    </div>`;
+  }
+  window.__onbStartTab = (k) => {
+    _page.active = 1;
+    window.DFO.setF('onb-start', k);
   };
   function sortRows(rows, scope) {
     const cur = F('onb-sort-' + scope, 'created:desc');
@@ -234,7 +365,7 @@
     const key = 'onb:' + scope;
     if (_wired.has(key)) return;
     if (H.onSearch) {
-      H.onSearch(key, () => { _live[scope].params = ''; fetchScope(scope); });
+      H.onSearch(key, () => { _page[scope] = 1; _live[scope].params = ''; fetchScope(scope); });
       _wired.add(key);
     }
   }
@@ -253,7 +384,7 @@
       searchHtml,
     ]);
   }
-  window.__onbRefetch = () => { refetchAll(); };
+  window.__onbRefetch = () => { _page.active = 1; _page.archived = 1; refetchAll(); };
 
   function kpisActive(rows) {
     const list = asArr(rows);
@@ -430,9 +561,13 @@
       { k: 'geannuleerd',      l: 'Geannuleerd',        n: counts.geannuleerd },
     ];
     return `<div style="padding:8px 20px; display:flex; gap:6px; flex-wrap:wrap;">
-      ${items.map((it) => `<button class="chip ${cur === it.k ? 'on' : ''} ${it.warn && it.n > 0 ? 'chip-warn' : ''}" onclick="DFO.setF('onb-intake', '${it.k}')">${esc(it.l)} <span style="opacity:.7">(${it.n})</span></button>`).join('')}
+      ${items.map((it) => `<button class="chip ${cur === it.k ? 'on' : ''} ${it.warn && it.n > 0 ? 'chip-warn' : ''}" onclick="__onbIntakeChip('${it.k}')">${esc(it.l)} <span style="opacity:.7">(${it.n})</span></button>`).join('')}
     </div>`;
   }
+  window.__onbIntakeChip = (k) => {
+    _page.active = 1; _page.archived = 1;
+    window.DFO.setF('onb-intake', k);
+  };
 
   const skel = (n = 5) => `<div class="tbl-wrap"><table><thead><tr>${'<th></th>'.repeat(11)}</tr></thead>
     <tbody>${Array.from({ length: n }).map(() => `<tr style="opacity:.55">${Array.from({ length: 11 }).map(() => `<td><div style="height:12px;background:var(--surface-2);border-radius:4px;width:70%"></div></td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
@@ -445,16 +580,21 @@
     const st = _live.active;
     if (!st.rows && !st.loading) queueMicrotask(() => fetchScope('active'));
     const raw = asArr(st.rows);
-    const filtered = intakeFilter(raw);
-    const rows = sortRows(filtered, 'active');
-    _rowsForClick.active = rows;
+    // Filter-pipeline: start-groep (nieuw) → intake-chip → sort → pagineren.
+    const afterStart  = startFilter(raw);
+    const afterIntake = intakeFilter(afterStart);
+    const sorted      = sortRows(afterIntake, 'active');
+    const pageMeta    = paginate(sorted, 'active');
+    _rowsForClick.active = pageMeta.slice;
     return `
       ${kpisActive(raw)}
       ${toolbar('active')}
-      ${intakeFilterChips(intakeCounts(raw))}
+      ${startTabs(startCounts(raw))}
+      ${intakeFilterChips(intakeCounts(afterStart))}
       ${st.error ? errBlk(st.error)
         : (st.loading && !st.rows) ? skel(6)
-        : onbTable(rows, 'active', '__onbRowClickActive')}`;
+        : onbTable(pageMeta.slice, 'active', '__onbRowClickActive')}
+      ${(!st.error && (!st.loading || st.rows)) ? paginator('active', pageMeta) : ''}`;
   }
   function archiefView() {
     wireSearch('archived');
@@ -462,14 +602,21 @@
     if (!_mentors)   queueMicrotask(loadMentors);
     const st = _live.archived;
     if (!st.rows && !st.loading) queueMicrotask(() => fetchScope('archived'));
-    const rows = sortRows(asArr(st.rows), 'archived');
-    _rowsForClick.archived = rows;
+    const raw = asArr(st.rows);
+    // Archief: geen startgroep-filter (alles daar is terminal). Wel intake-
+    // chips voor consistentie + sortering + paginering.
+    const afterIntake = intakeFilter(raw);
+    const sorted      = sortRows(afterIntake, 'archived');
+    const pageMeta    = paginate(sorted, 'archived');
+    _rowsForClick.archived = pageMeta.slice;
     return `
-      ${kpisArchive(rows)}
+      ${kpisArchive(raw)}
       ${toolbar('archived')}
+      ${intakeFilterChips(intakeCounts(raw))}
       ${st.error ? errBlk(st.error)
         : (st.loading && !st.rows) ? skel(4)
-        : onbTable(rows, 'archived', '__onbRowClickArchived')}`;
+        : onbTable(pageMeta.slice, 'archived', '__onbRowClickArchived')}
+      ${(!st.error && (!st.loading || st.rows)) ? paginator('archived', pageMeta) : ''}`;
   }
   function inboxPlaceholder() {
     return `<div class="empty" style="padding:60px 20px;">

@@ -3334,3 +3334,50 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
 
 /* chip-warn — subtiele oranje-tint bij te-behandelen-filter met N>0. */
 .chip.chip-warn:not(.on) { border-color: var(--amber-line, #F3D19A); color: var(--amber, #B8770F); }
+
+/* ── Onboarding-lijst: startgroep-tabs + paginator (2026-08-13) ──────── */
+.kv-onb-tabline {
+  display: flex; gap: 4px; padding: 8px 20px 0; flex-wrap: wrap;
+}
+.kv-onb-tabline .kv-onb-tab { flex: 0 0 auto; padding: 8px 14px; font-size: 13px; }
+.kv-onb-tab.has-warn:not(.is-on) {
+  color: var(--amber, #B8770F);
+  background: var(--amber-soft, #FFF4E5);
+}
+.kv-onb-tab-c {
+  display: inline-block; margin-left: 6px; padding: 0 6px;
+  font-size: 11px; font-weight: 700;
+  background: var(--surface, #fff); color: var(--text-2, #586374);
+  border: 1px solid var(--border, #E2E7EE); border-radius: 999px;
+  min-width: 18px; text-align: center; line-height: 15px;
+}
+.kv-onb-tab.is-on .kv-onb-tab-c {
+  background: transparent; color: inherit; border-color: currentColor;
+}
+
+.kv-onb-pager {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 12px 20px 16px;
+  flex-wrap: wrap;
+}
+.kv-onb-pager-info { font-size: 12px; color: var(--text-2, #586374); }
+.kv-onb-pager-nav { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.kv-onb-pager-btn {
+  padding: 6px 12px; font-size: 12.5px; font-family: inherit;
+  background: var(--surface, #FFFFFF); color: var(--text-1, #111721);
+  border: 1px solid var(--border, #E2E7EE); border-radius: 6px;
+  cursor: pointer; min-width: 34px;
+}
+.kv-onb-pager-btn:hover:not(.is-disabled):not(.is-active) {
+  background: var(--surface-2, #F2F4F7);
+}
+.kv-onb-pager-btn.is-active {
+  background: var(--m, #6D3FD4); color: #fff; border-color: var(--m, #6D3FD4);
+  font-weight: 600; cursor: default;
+}
+.kv-onb-pager-btn.is-disabled {
+  opacity: .45; cursor: not-allowed;
+}
+.kv-onb-pager-ellipsis {
+  padding: 0 6px; color: var(--text-3, #8B95A5); font-size: 12.5px;
+}
