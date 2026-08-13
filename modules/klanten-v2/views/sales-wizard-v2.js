@@ -190,10 +190,69 @@
     _sw.discountModal  = { open: false, draft: '' };
     _sw.exceptionModal = { open: false, detect: null, note: '', feeChecked: false, resolver: null };
     _sw.dupModal       = { open: false, loading: false, error: null, dbMatches: null, tlMatches: null };
+    _sw.resumeModal    = { open: false, draft: null };
     _sw.saveStatus     = 'idle';
     _sw.savedAt        = null;
     if (_sw.saveTimer) { clearTimeout(_sw.saveTimer); _sw.saveTimer = null; }
     _swStopSavedRefresher && _swStopSavedRefresher();
+  }
+
+  // ── Debug-log (?debug=1) — ook consumeerbaar via window.__swDebug ────
+  // BUGFIX 2026-08-13 (reopen): calls naar _swLog(...) stonden overal
+  // maar helper was niet gedefinieerd (implicit undefined + `&&` guard).
+  // Nu een echte implementatie zodat we open/close/reset events zien.
+  window.__swDebug = window.__swDebug || [];
+  function _swLog(label, payload) {
+    try {
+      const isDebug = (typeof location !== 'undefined')
+        && /(?:\?|&)debug=1(?:&|$)/.test(location.search || '');
+      if (!isDebug) return;
+      const entry = { t: Date.now(), label, payload: payload == null ? null : payload };
+      window.__swDebug.push(entry);
+      // Cap array zodat we geen memleak bouwen bij lange sessies.
+      if (window.__swDebug.length > 200) window.__swDebug.splice(0, window.__swDebug.length - 200);
+      console.debug('[sw-v2]', label, payload || '');
+    } catch (_) { /* nooit throwen uit een log-helper */ }
+  }
+
+  // ── Full-reset helper (2026-08-13, reopen-bug). ────────────────────
+  // Idempotent hard cleanup: state + DOM. Gebruikt door __swClose en door
+  // __swOpen's defensive branch (als _sw.open al true is). Voorheen konden
+  // sub-modal-state (dupModal/picker/discount/exception), in-flight flags
+  // (submitting/entitiesLoading/etc.) of een half-gerenderd root-DOM na
+  // een throw achterblijven — waardoor de tweede klik op "Nieuwe offerte"
+  // ofwel bailde (renderWizard throw), ofwel niks visueels leverde omdat
+  // is-open al aan stond en innerHTML corrupt was. Deze helper wist state,
+  // stopt alle timers, en veegt de root hard schoon.
+  function _swFullReset(reason) {
+    _swLog('close:reset', { reason: reason || 'close' });
+    // 1) Sync-flags terug naar default. NIET destructief voor cache-data
+    //    (entities / trajecten / productsCatalog / leadSources / tlUserInfo
+    //    mogen blijven — die zijn cross-open cacheable).
+    _sw.open        = false;
+    _sw.step        = 1;
+    _sw.dirty       = false;
+    _sw.submitting  = false;
+    _sw.entitiesLoading   = false;
+    _sw.trajectenLoading  = false;
+    _sw.productsLoading   = false;
+    _sw.tlStatusLoading   = false;
+    _sw.draftLoading      = false;
+    // 2) Cross-session state (matched customer, prefill-flags, sub-overlays,
+    //    resumeModal, tagDraft, saveStatus). Wizard-form-values worden bij
+    //    de VOLGENDE open door _swDefaultWizard() gereset — dit dekt state
+    //    buiten `_sw.wizard`.
+    _swResetCrossSession();
+    // 3) DOM hard opruimen — onafhankelijk van renderWizard-succes. Als
+    //    innerHTML/classList throwt op een node laten we het gaan; nieuwe
+    //    open maakt via ensureRoot() sowieso een nieuwe root aan.
+    try {
+      const root = document.getElementById('sw-v2-root');
+      if (root) {
+        root.classList.remove('is-open');
+        root.innerHTML = '';
+      }
+    } catch (e) { console.warn('[sw-v2] full-reset DOM-clean fail:', e?.message); }
   }
 
   // ── Fetch-helpers met 8s timeout + fail-soft (patroon uit finance/leads) ──
@@ -548,6 +607,18 @@
   // Zonder opts: nieuwe offerte + optionele draft-resume (Feature A).
   window.__swOpen = (opts) => {
     opts = opts || {};
+    // BUGFIX 2026-08-13 (reopen): idempotent guard. Als state van een
+    // vorige sessie is blijven staan (throw ergens in de close-flow, in-
+    // flight microtask die niet uitpakte, DOM-restant), veeg dan eerst
+    // volledig schoon voordat we opnieuw openen. Voorheen bleef bijv.
+    // een sub-modal-flag of `is-open` op de root staan, waardoor de
+    // tweede klik niets zichtbaars deed — pas hard-refresh herstelde.
+    if (_sw.open) {
+      _swLog('open:already-open-forcing-reset');
+      _swFullReset('reopen-while-open');
+    } else {
+      _swLog('open:start');
+    }
     // BUGFIX 2026-08-12 (1a): FULL state-reset bij elke open. Voorheen
     // bleef _sw.wizard state kleven tussen sessies — na een edit of vorige
     // draft-resume startte "Nieuwe offerte" met oude entiteit/klant/
@@ -624,23 +695,20 @@
       console.warn('[sw-v2] initial body-render throw:', e?.message);
     }
   };
-  window.__swClose = () => {
+  window.__swClose = (reason) => {
+    // Dirty-guard: alleen prompten als er ONopgeslagen wijzigingen zijn.
+    // Bij confirm-cancel bailen we — user wil niet sluiten.
     if (_sw.dirty && !confirm('Er zijn niet-opgeslagen wijzigingen. Wizard sluiten?')) return;
-    _sw.open = false;
-    _sw.resumeModal = { open: false, draft: null };
-    // Edit-mode reset: als user cancelt tijdens edit → wis edit-context
-    // zodat volgende __swOpen() weer een nieuwe offerte start (niet
-    // opnieuw de deal-detail fetch triggert). Prefill-flags idem.
-    _sw.editDealId = null;
-    _sw.matched_customer_id = null;
-    _sw.tl_imported_contact_id = null;
-    _sw.duplicate_check_status = 'idle';
-    _sw.existingCustName = null;
-    _sw.prefillLeadId = null;
-    _sw.prefillEventAttendeeId = null;
-    if (_sw.saveTimer) { clearTimeout(_sw.saveTimer); _sw.saveTimer = null; }
-    _swStopSavedRefresher();
-    renderWizard();
+    // BUGFIX 2026-08-13 (reopen): één helper voor state + DOM cleanup.
+    // Alle sluitpaden (× · Annuleren · backdrop · Esc · post-submit)
+    // gaan hierdoorheen zodat state en DOM ALTIJD consistent leeg zijn
+    // vóór de volgende __swOpen. Voorheen liet close een half-gerenderde
+    // root of sub-modal-flag achter waardoor reopen niets meer deed.
+    _swFullReset(reason || 'close');
+    // Extra veiligheid: run renderWizard() ook — als root inmiddels
+    // opnieuw is aangemaakt door iets buiten (bijv. sales-v2 tab-swap
+    // die wizard-root wist), synchroniseert dit DOM met state (=leeg).
+    try { renderWizard(); } catch (e) { console.warn('[sw-v2] close-render throw (ignored):', e?.message); }
   };
   // Resume-modal handlers (batch2b — Feature A draft-persistentie).
   window.__swResumeContinue = () => {
@@ -2323,7 +2391,7 @@
     if (_sw.discountModal.open)  { e.preventDefault(); window.__swDiscountClose(); return; }
     if (_sw.picker.open)         { e.preventDefault(); window.__swPickerClose(); return; }
     if (_sw.dupModal.open)       { e.preventDefault(); window.__swDupCheckClose(); return; }
-    if (_sw.open)                { e.preventDefault(); window.__swClose(); }
+    if (_sw.open)                { e.preventDefault(); window.__swClose('esc'); }
   });
 
   // Eerste ensureRoot + backdrop-binding gebeurt bij eerste __swOpen. Voor
