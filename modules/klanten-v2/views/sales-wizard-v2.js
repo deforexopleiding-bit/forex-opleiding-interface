@@ -2298,8 +2298,7 @@
     const isLast = _sw.step === 5;
     return `<div class="sw-modal" onclick="event.stopPropagation()">
         <div class="sw-modal-head">
-          <div class="sw-modal-title">Nieuwe offerte · v2</div>
-          <span class="pill pill-warn">Batch 2 · scaffold (${_sw.step}/5)</span>
+          <div class="sw-modal-title">Nieuwe offerte</div>
           <button class="icon-btn" onclick="__swClose()" title="Sluiten">${svg(I.x || I.warn, 'width:16px;height:16px')}</button>
         </div>
         <div class="sw-modal-body sw-body">
