@@ -6,7 +6,7 @@
 // echte berichten verstuurd naar klanten. Pure LLM-call.
 //
 // Body:
-//   { module: 'finance'|'events'|'onboarding'|'lisa',
+//   { module: 'finance'|'events'|'onboarding'|'lisa'|'leadsonderhoud'|'manager',
 //     message: string,
 //     history?: [{ role:'user'|'assistant', content:string }],
 //     customer_context?: { name?, open_amount?, open_invoice_count?, ... } }
@@ -26,7 +26,15 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { anthropicMessages, AnthropicClientError } from './_lib/anthropic-client.js';
 
-const MODULE_TO_AGENT = { finance: 'Joost', events: 'Simone', onboarding: 'Mila', lisa: 'Lisa' };
+const MODULE_TO_AGENT = {
+  finance:         'Joost',
+  events:          'Simone',
+  onboarding:      'Mila',
+  lisa:            'Lisa',
+  leadsonderhoud:  'Aisha',        // Fase 4
+  manager:         'AI Manager',   // Fase 4
+};
+const ALLOWED_MODULES = new Set(Object.keys(MODULE_TO_AGENT));
 const MAX_MESSAGE_CHARS  = 2000;
 const MAX_HISTORY_ITEMS  = 12;
 
@@ -112,7 +120,7 @@ export default async function handler(req, res) {
   const history   = Array.isArray(body.history) ? body.history.slice(-MAX_HISTORY_ITEMS) : [];
   const custCtx   = (body.customer_context && typeof body.customer_context === 'object') ? body.customer_context : {};
 
-  if (!['finance','events','onboarding','lisa'].includes(moduleKey)) {
+  if (!ALLOWED_MODULES.has(moduleKey)) {
     return res.status(400).json({ error: 'module ongeldig' });
   }
   if (!message || message.length > MAX_MESSAGE_CHARS) {
