@@ -103,6 +103,209 @@
   const skel = () => `<div class="pad"><div class="card"><div class="card-body" style="padding:22px;opacity:.55"><div style="height:12px;background:var(--surface-2);border-radius:4px;width:60%;margin-bottom:12px"></div><div style="height:8px;background:var(--surface-2);border-radius:4px;width:80%"></div></div></div></div>`;
   const rollePill = (r) => H.pill(r === 'super_admin' ? 'violet' : r === 'admin' || r === 'manager' ? 'accent' : r === 'sales' ? 'emerald' : 'teal', r || '—', 1);
 
+  // ── Action-key vertaler (2026-08-13) ──────────────────────────────────
+  // Vertaalt technische action-keys uit activity_log naar leesbare NL-zin.
+  //
+  // Bronnen: de logger schrijft twee soorten action-strings:
+  //   1) permission-keys van requirePermission — meestal patroon
+  //      <module>.<subject>.<verb>: 'finance.tasks.view', 'auth.login',
+  //      'dashboard.module.access', 'finance.dunning.view'.
+  //   2) expliciete logActivity-calls met snake_case of dot-notation:
+  //      'create_user', 'update_user_email', 'mentor_profile_create',
+  //      'moved_in', 'joost.autonomy_decision', 'finance_dunning.run_step_manual_move',
+  //      'pending_action.approved', 'event_attendee.deleted'.
+  //
+  // Aanpak: 1) exact-match override eerst, 2) fallback pattern-match op
+  // laatste segment (verb) + module-prefix, 3) laatst een generieke
+  // "Onbekende actie" met de rauwe key. Ruwe key blijft in title-tooltip
+  // + kleine grijze sub-tekst.
+
+  const VERB_NL = {
+    view: 'bekeken', access: 'geopend', list: 'bekeken', get: 'bekeken', detail: 'bekeken',
+    create: 'aangemaakt', created: 'aangemaakt', add: 'toegevoegd', new: 'aangemaakt',
+    update: 'gewijzigd', updated: 'gewijzigd', edit: 'gewijzigd', patch: 'gewijzigd', save: 'opgeslagen',
+    delete: 'verwijderd', deleted: 'verwijderd', remove: 'verwijderd', archive: 'gearchiveerd',
+    restore: 'hersteld', reactivate: 'gereactiveerd', deactivate: 'gedeactiveerd',
+    login: 'ingelogd', logout: 'uitgelogd', signup: 'geregistreerd',
+    export: 'geëxporteerd', import: 'geïmporteerd', download: 'gedownload', upload: 'geüpload',
+    send: 'verstuurd', sent: 'verstuurd', resend: 'opnieuw verstuurd',
+    approve: 'goedgekeurd', approved: 'goedgekeurd',
+    reject: 'afgewezen', rejected: 'afgewezen',
+    cancel: 'geannuleerd', cancelled: 'geannuleerd',
+    run: 'uitgevoerd', executed: 'uitgevoerd', trigger: 'gestart', start: 'gestart',
+    retry: 'opnieuw geprobeerd', refresh: 'ververst', sync: 'gesynchroniseerd',
+    publish: 'gepubliceerd', unpublish: 'depubliceerd', close: 'gesloten', open: 'geopend',
+    pause: 'gepauzeerd', resume: 'hervat', toggle: 'omgeschakeld',
+    move: 'verplaatst', moved: 'verplaatst', assign: 'toegewezen', unassign: 'losgekoppeld',
+    mark: 'gemarkeerd', marked: 'gemarkeerd', register: 'geregistreerd', bypass: 'omzeild',
+    subscribe: 'geabonneerd', unsubscribe: 'uitgeschreven',
+    query: 'bevraagd',
+  };
+  // Subject-vertalingen. Underscore-tussenwoord komt hier ook in voor.
+  const SUBJECT_NL = {
+    module: 'module', dashboard: 'dashboard', tasks: 'taken', task: 'taak',
+    invoice: 'factuur', invoices: 'facturen', dunning: 'aanmaningen',
+    customer: 'klant', customers: 'klanten',
+    arrangement: 'betalingsregeling', arrangements: 'betalingsregelingen',
+    pending_action: 'actiepunt', pending_actions: 'actiepunten',
+    template: 'template', templates: 'templates',
+    workflow: 'workflow', workflows: 'workflows',
+    payout: 'uitbetaling', payouts: 'uitbetalingen',
+    settings: 'instellingen', config: 'configuratie',
+    user: 'gebruiker', users: 'gebruikers',
+    role: 'rol', roles: 'rollen', permission: 'recht',
+    event: 'event', events: 'events', event_attendee: 'deelnemer', attendee: 'deelnemer', attendees: 'deelnemers',
+    mentor: 'mentor', mentors: 'mentoren', mentor_profile: 'mentor-profiel',
+    onboarding: 'onboarding', invite: 'uitnodiging',
+    email: 'e-mail', emails: 'e-mails',
+    inbox: 'inbox', conversation: 'gesprek',
+    ticket: 'ticket', tickets: 'tickets',
+    lead: 'lead', leads: 'leads',
+    quote: 'offerte', quotation: 'offerte', deal: 'deal',
+    signups_auto_close_hours: 'auto-sluit-venster',
+    reservation_fee: 'reserverings-vergoeding',
+    autonomy_decision: 'autonomie-beslissing',
+    outbound_scheduler: 'planning uitgaand',
+    outbound_send: 'uitgaand bericht',
+    message_sent_autonomously: 'autonoom bericht verstuurd',
+    outcome_marked: 'uitkomst gemarkeerd',
+    config_updated: 'configuratie gewijzigd',
+    breach_check: 'breach-check',
+    breach_check_state_change: 'breach-status gewijzigd',
+    dispute_resolved: 'dispuut opgelost',
+    customer_closed_manually: 'klant handmatig gesloten',
+    customer_marked_bewind: 'klant onder bewind gemeld',
+    customer_marked_disputed: 'klant als dispuut gemarkeerd',
+    run_step_manual_move: 'stap handmatig verplaatst',
+    skip_step: 'stap overgeslagen',
+    register_payment: 'betaling geregistreerd',
+    impersonate: 'impersonatie',
+    app_settings: 'app-instelling',
+    webhook_subscribe: 'webhook-abonnement',
+  };
+  // Module-prefix in leesbare naam (om "Finance — aanmaningen bekeken" te bouwen).
+  const MOD_NL = {
+    finance: 'Finance', finance_dunning: 'Wanbetalers', finance_invoice: 'Facturen',
+    sales: 'Sales', klanten: 'Klanten', klant: 'Klanten',
+    events: 'Events', event: 'Events', event_attendee: 'Event-deelnemers',
+    onboarding: 'Onboarding', mentor: 'Mentoren', mentor_profile: 'Mentoren',
+    dashboard: 'Dashboard', auth: '',  // auth.login → gewoon "Ingelogd"
+    admin: 'Admin', users: 'Admin', user: 'Admin', role: 'Admin',
+    app_settings: 'Instellingen', app: 'Instellingen',
+    joost: 'Joost (Wanbetalers)', simone: 'Simone (Events)', mila: 'Mila (Onboarding)', lisa: 'Lisa',
+    ai_manager: 'AI Manager',
+    tickets: 'Tickets', ticket: 'Tickets',
+    followup: 'Follow-up', 'follow-up': 'Follow-up',
+    taken: 'Taken', task: 'Taken',
+    email: 'E-mail', inbox: 'Inbox',
+    pending_action: 'Actiepunten', pending_actions: 'Actiepunten',
+    cron: 'Achtergrondtaak',
+    whatsapp: 'WhatsApp', wa: 'WhatsApp',
+  };
+  // Exact-match overrides voor keys die niet netjes patroon-match zijn.
+  const ACTION_OVERRIDE = {
+    'auth.login': 'Ingelogd',
+    'auth.logout': 'Uitgelogd',
+    'dashboard.module.access': 'Dashboard geopend',
+    'create_user': 'Gebruiker aangemaakt',
+    'update_user': 'Gebruiker gewijzigd',
+    'update_user_email': 'E-mailadres van gebruiker gewijzigd',
+    'update_user_password': 'Wachtwoord van gebruiker gewijzigd',
+    'deactivate_user': 'Gebruiker gedeactiveerd',
+    'resend_invite': 'Uitnodiging opnieuw verstuurd',
+    'mentor_profile_create': 'Mentor-profiel aangemaakt',
+    'mentor_profile_reactivate': 'Mentor-profiel gereactiveerd',
+    'archive': 'Gearchiveerd',
+    'created': 'Aangemaakt',
+    'deleted': 'Verwijderd',
+    'moved_in': 'Verplaatst naar (in)',
+    'moved_out': 'Verplaatst uit',
+    'status_changed': 'Status gewijzigd',
+    'tag_added': 'Tag toegevoegd',
+    'tag_removed': 'Tag verwijderd',
+    'retry': 'Opnieuw geprobeerd',
+    'sales.reservation_fee.bypass': 'Sales — reserverings-vergoeding omzeild',
+    'admin.impersonate.start': 'Admin — impersonatie gestart',
+    'ai_manager.query': 'AI Manager bevraagd',
+    'whatsapp.webhook_subscribe': 'WhatsApp — webhook-abonnement',
+    'cron.arrangements_breach_check_run': 'Achtergrondtaak — breach-check uitgevoerd',
+    'app_settings.update': 'App-instelling gewijzigd',
+    'events.signups_auto_close_hours.update': 'Events — auto-sluit-venster gewijzigd',
+    'finance.arrangement.proposed': 'Betalingsregeling voorgesteld',
+    'finance.arrangement.cancelled': 'Betalingsregeling geannuleerd',
+    'finance.arrangement.breach_check_state_change': 'Betalingsregeling — breach-status gewijzigd',
+    'finance_invoice.register_payment': 'Betaling geregistreerd',
+    'invoice.create': 'Factuur aangemaakt',
+    'finance_dunning.customer_closed_manually': 'Wanbetalers — klant handmatig gesloten',
+    'finance_dunning.customer_marked_bewind': 'Wanbetalers — klant onder bewind gemeld',
+    'finance_dunning.customer_marked_disputed': 'Wanbetalers — klant als dispuut gemarkeerd',
+    'finance_dunning.dispute_resolved': 'Wanbetalers — dispuut opgelost',
+    'finance_dunning.run_step_manual_move': 'Wanbetalers — stap handmatig verplaatst',
+    'finance_dunning_run.skip_step': 'Wanbetalers — stap overgeslagen',
+    'finance_dunning_template.delete': 'Wanbetalers-template verwijderd',
+    'finance_dunning_workflow.delete': 'Wanbetalers-workflow verwijderd',
+    'finance_dunning_workflow.toggle': 'Wanbetalers-workflow aan/uit',
+    'pending_action.approved': 'Actiepunt goedgekeurd',
+    'pending_action.rejected': 'Actiepunt afgewezen',
+    'pending_action.restored': 'Actiepunt hersteld',
+    'pending_action.manually_not_executed': 'Actiepunt handmatig als niet-uitgevoerd gemarkeerd',
+    'joost.autonomy_decision': 'Joost — autonomie-beslissing gelogd',
+    'joost.config_updated': 'Joost — configuratie gewijzigd',
+    'joost.message_sent_autonomously': 'Joost — bericht autonoom verstuurd',
+    'joost.outbound_scheduler_refused': 'Joost — geplande zending geweigerd',
+    'joost.outbound_scheduler_run': 'Joost — uitgaand-scheduler uitgevoerd',
+    'joost.outbound_send_blocked': 'Joost — uitgaand bericht geblokkeerd',
+    'joost.outbound_send_executed': 'Joost — uitgaand bericht verstuurd',
+    'joost.outcome_marked': 'Joost — uitkomst gemarkeerd',
+    'simone.autonomy_decision': 'Simone — autonomie-beslissing gelogd',
+    'onboarding.invite.sent': 'Onboarding — uitnodiging verstuurd',
+    'event_attendee.deleted': 'Event-deelnemer verwijderd',
+  };
+
+  function _humanizeAction(key) {
+    if (!key) return { label: '—', raw: '' };
+    const raw = String(key);
+    // 1) Exact-match
+    if (ACTION_OVERRIDE[raw]) return { label: ACTION_OVERRIDE[raw], raw };
+    // 2) Pattern-match: <module>.<subject>.<verb> of <module>.<verb>
+    const parts = raw.split('.');
+    let modLabel = '';
+    let subjLabel = '';
+    let verbLabel = '';
+    if (parts.length >= 2) {
+      // Eerste segment = module-hint. Kan snake_case zijn (finance_dunning).
+      const modKey = parts[0].toLowerCase();
+      modLabel = MOD_NL[modKey] || '';
+      // Laatste segment = verb. Kan snake_case zijn (register_payment).
+      const lastKey = parts[parts.length - 1].toLowerCase();
+      verbLabel = VERB_NL[lastKey] || '';
+      // Middensegment(en) = subject.
+      if (parts.length >= 3) {
+        const subjKey = parts.slice(1, -1).join('.').toLowerCase();
+        subjLabel = SUBJECT_NL[subjKey] || subjKey.replace(/_/g, ' ');
+      } else if (!verbLabel) {
+        // 2-parts: pattern is <module>.<subject> (bv. 'app_settings.update')
+        subjLabel = SUBJECT_NL[lastKey] || lastKey.replace(/_/g, ' ');
+      }
+      if (modLabel && subjLabel && verbLabel) {
+        return { label: modLabel + ' — ' + _capFirst(subjLabel) + ' ' + verbLabel, raw };
+      }
+      if (modLabel && verbLabel && !subjLabel) {
+        return { label: modLabel + ' — ' + _capFirst(verbLabel), raw };
+      }
+      if (modLabel && subjLabel && !verbLabel) {
+        return { label: modLabel + ' — ' + _capFirst(subjLabel), raw };
+      }
+    }
+    // 3) Snake_case single-word (bv. 'archive', 'retry'): probeer verb-map
+    const singleVerb = VERB_NL[raw.toLowerCase()];
+    if (singleVerb) return { label: _capFirst(singleVerb), raw };
+    // 4) Fallback: humanize snake/dot naar spaties + capitalize
+    const soft = raw.replace(/[._]/g, ' ').replace(/\s+/g, ' ').trim();
+    return { label: _capFirst(soft), raw };
+  }
+  function _capFirst(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+
   function _fmtTime(iso) {
     if (!iso) return '—';
     const d = new Date(iso);
@@ -159,16 +362,19 @@
       ? `<div class="empty" style="padding:44px 20px"><div class="empty-t">Geen activiteit</div><div class="empty-s">Geen rijen voldoen aan de filter.</div></div>`
       : H.table(
           [{ l: 'Tijd' }, { l: 'Gebruiker' }, { l: 'Rol', cls: 'optional' }, { l: 'Module', cls: 'optional' }, { l: 'Actie' }, { l: 'Methode', cls: 'optional' }, { l: 'Resultaat' }, { l: 'IP', cls: 'optional' }],
-          rows.map((r) => [
-            `<span class="mono" style="color:var(--text-3);font-size:12px" title="${esc(r.created_at)}">${esc(_fmtTime(r.created_at))}</span>`,
-            `<span class="cell-main">${esc(r.user_email || '—')}</span>`,
-            rollePill(r.user_role),
-            `<span style="font-size:12.5px;color:var(--text-2)">${esc(r.module || '—')}</span>`,
-            `<span class="mono" style="font-size:12.5px">${esc(r.action || '—')}</span>`,
-            `<span class="mono" style="color:var(--text-3);font-size:12px">${esc(r.method || '')}</span>`,
-            H.pill(r.success ? 'ok' : 'danger', (r.success ? 'ok ' : 'fout ') + (r.status_code || '?')),
-            `<span class="mono" style="color:var(--text-3);font-size:12px">${esc(r.ip || '—')}</span>`,
-          ])
+          rows.map((r) => {
+            const act = _humanizeAction(r.action);
+            return [
+              `<span class="mono" style="color:var(--text-3);font-size:12px" title="${esc(r.created_at)}">${esc(_fmtTime(r.created_at))}</span>`,
+              `<span class="cell-main">${esc(r.user_email || '—')}</span>`,
+              rollePill(r.user_role),
+              `<span style="font-size:12.5px;color:var(--text-2)">${esc(r.module || '—')}</span>`,
+              `<div title="${esc(act.raw)}"><div style="font-size:12.5px;line-height:1.35">${esc(act.label)}</div><div class="mono" style="font-size:10.5px;color:var(--text-3);margin-top:1px">${esc(act.raw)}</div></div>`,
+              `<span class="mono" style="color:var(--text-3);font-size:12px">${esc(r.method || '')}</span>`,
+              H.pill(r.success ? 'ok' : 'danger', (r.success ? 'ok ' : 'fout ') + (r.status_code || '?')),
+              `<span class="mono" style="color:var(--text-3);font-size:12px">${esc(r.ip || '—')}</span>`,
+            ];
+          })
         )}
     <div style="padding:12px 20px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:var(--text-2);flex-wrap:wrap">
       <span>${total > 0 ? ((page - 1) * PAGE_SIZE + 1) + '–' + Math.min(page * PAGE_SIZE, total) + ' van ' + total : '0 rijen'}</span>
