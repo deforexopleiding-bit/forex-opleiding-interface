@@ -133,8 +133,9 @@
         ? (c.customer.is_company ? c.customer.company_name : [c.customer.first_name, c.customer.last_name].filter(Boolean).join(' '))
         : (c.attendee ? [c.attendee.first_name, c.attendee.last_name].filter(Boolean).join(' ') : null);
       const van = custName || c.display_name || c.phone_number || 'Onbekend';
-      // Tijd-hint uit last_message_at (fallback: last_activity_at)
-      const isoTijd = c.last_message_at || c.last_activity_at || null;
+      // Tijd-hint uit last_activity_at (server-sort-key, meest recente
+      // activiteit incl. e-mail); fallback op last_message_at.
+      const isoTijd = c.last_activity_at || c.last_message_at || null;
       let tijd = '—';
       if (isoTijd) {
         try {
@@ -152,7 +153,9 @@
         t: c.last_message_preview || '—',
         p: c.attendee?.event?.title || c.customer?.email || '—',
         tijd,
-        nw: (c.unread_count || 0) > 0,
+        // Dot-indicator op TOTAL unread (WA + email samen). Fallback op
+        // unread_count als total_unread nog niet in response zit.
+        nw: (c.total_unread != null ? c.total_unread : (c.unread_count || 0)) > 0,
         ai: false, // AI-suggestie hint is source-specifiek, buiten scope
         src: ibSrc,
         kan: 'WhatsApp',
