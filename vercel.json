@@ -1,5 +1,9 @@
 {
   "functions": {
+    "api/cron-finance-sync.js": {
+      "maxDuration": 300,
+      "memory": 1024
+    },
     "api/**/*.js": {
       "maxDuration": 30,
       "memory": 1024

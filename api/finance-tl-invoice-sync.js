@@ -174,7 +174,18 @@ export default async function handler(req, res) {
           const invoiceeType = inv.invoicee?.customer?.type || 'contact';
           if (!invoiceeId) { totals.skipped_no_customer++; pushSkip(inv, incl); continue; }
           const matchCol = invoiceeType === 'company' ? 'tl_company_id' : 'tl_contact_id';
-          const { data: cust } = await supabaseAdmin.from('customers').select('id').eq(matchCol, invoiceeId).maybeSingle();
+          // Bestand tegen >1 customer met dezelfde tl_*-id (maybeSingle errort op
+          // >1 → skip). Deterministisch: actief eerst, dan oudste.
+          const { data: custRows } = await supabaseAdmin.from('customers')
+            .select('id, archived_at, anonymized_at')
+            .eq(matchCol, invoiceeId)
+            .order('archived_at', { ascending: true, nullsFirst: true })
+            .order('anonymized_at', { ascending: true, nullsFirst: true })
+            .order('created_at', { ascending: true });
+          const cust = (custRows && custRows.length) ? custRows[0] : null;
+          if (custRows && custRows.length > 1) {
+            console.warn(`[finance-invoice-sync] >1 customer met ${matchCol}=${invoiceeId} (${custRows.length}) — dedupe nodig; koos ${cust.id}`);
+          }
           if (!cust) { totals.skipped_no_customer++; pushSkip(inv, incl); continue; }
 
           const rawNumber = (inv.invoice_number && String(inv.invoice_number).trim()) || null;
