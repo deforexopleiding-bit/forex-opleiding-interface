@@ -333,33 +333,10 @@
     return `<th style="cursor:pointer" onclick="__onbSort('${scope}','${key}')" title="Sorteer op ${esc(label)}">${esc(label)}${arrow}</th>`;
   }
 
-  function intakeFilter(rows) {
-    const f = F('onb-intake', 'all');
-    const arr = asArr(rows);
-    if (f === 'all') return arr;
-    if (f === 'nog_geen_mentor') return arr.filter((r) => !r.mentor_user_id);
-    if (f === 'te_behandelen')   return arr.filter((r) => {
-      const key = r?.intake_status || r?.mentor_intake_status;
-      return ['wil_niet','no_show','geen_gehoor','wil_later'].includes(key) && !r.intake_handled_at && !r.cancelled;
-    });
-    if (f === 'afgehandeld')     return arr.filter((r) => !!r.intake_handled_at && !r.cancelled);
-    if (f === 'geannuleerd')     return arr.filter((r) => !!r.cancelled);
-    return arr;
-  }
-  function intakeCounts(rows) {
-    const arr = asArr(rows);
-    return {
-      all: arr.length,
-      nog_geen_mentor: arr.filter((r) => !r.mentor_user_id).length,
-      te_behandelen: arr.filter((r) => {
-        const key = r?.intake_status || r?.mentor_intake_status;
-        return ['wil_niet','no_show','geen_gehoor','wil_later'].includes(key) && !r.intake_handled_at && !r.cancelled;
-      }).length,
-      afgehandeld: arr.filter((r) => !!r.intake_handled_at && !r.cancelled).length,
-      geannuleerd: arr.filter((r) => !!r.cancelled).length,
-    };
-  }
-
+  // NB: intakeFilter/intakeCounts/intakeFilterChips (+ __onbIntakeChip) zijn
+  // op 2026-08-13 verwijderd — Jeffrey wilde één filterrij. De startgroep-
+  // tabs (Moeten nog starten / Op te lossen / Alle) zijn nu enige primaire
+  // filter. Intake-status blijft zichtbaar per rij in kolom "Start status".
   const _wired = new Set();
   function wireSearch(scope) {
     const key = 'onb:' + scope;
@@ -551,24 +528,6 @@
     return `<div class="tbl-wrap"><table><thead>${headers}</thead><tbody>${rowsHtml}</tbody></table></div>`;
   }
 
-  function intakeFilterChips(counts) {
-    const cur = F('onb-intake', 'all');
-    const items = [
-      { k: 'all',              l: 'Alles',              n: counts.all },
-      { k: 'nog_geen_mentor',  l: 'Nog geen mentor',    n: counts.nog_geen_mentor },
-      { k: 'te_behandelen',    l: 'Te behandelen',      n: counts.te_behandelen, warn: true },
-      { k: 'afgehandeld',      l: 'Afgehandeld',        n: counts.afgehandeld },
-      { k: 'geannuleerd',      l: 'Geannuleerd',        n: counts.geannuleerd },
-    ];
-    return `<div style="padding:8px 20px; display:flex; gap:6px; flex-wrap:wrap;">
-      ${items.map((it) => `<button class="chip ${cur === it.k ? 'on' : ''} ${it.warn && it.n > 0 ? 'chip-warn' : ''}" onclick="__onbIntakeChip('${it.k}')">${esc(it.l)} <span style="opacity:.7">(${it.n})</span></button>`).join('')}
-    </div>`;
-  }
-  window.__onbIntakeChip = (k) => {
-    _page.active = 1; _page.archived = 1;
-    window.DFO.setF('onb-intake', k);
-  };
-
   const skel = (n = 5) => `<div class="tbl-wrap"><table><thead><tr>${'<th></th>'.repeat(11)}</tr></thead>
     <tbody>${Array.from({ length: n }).map(() => `<tr style="opacity:.55">${Array.from({ length: 11 }).map(() => `<td><div style="height:12px;background:var(--surface-2);border-radius:4px;width:70%"></div></td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   const errBlk = (m) => `<div style="margin:20px;padding:14px 18px;border:1px solid var(--rose-line);background:var(--rose-soft);border-radius:var(--r);color:var(--rose);font-size:13px">⚠ Kon onboardings niet ophalen: ${esc(m)}</div>`;
@@ -580,17 +539,15 @@
     const st = _live.active;
     if (!st.rows && !st.loading) queueMicrotask(() => fetchScope('active'));
     const raw = asArr(st.rows);
-    // Filter-pipeline: start-groep (nieuw) → intake-chip → sort → pagineren.
+    // Filter-pipeline: startgroep-tabs (enige primaire filter) → sort → pagineren.
     const afterStart  = startFilter(raw);
-    const afterIntake = intakeFilter(afterStart);
-    const sorted      = sortRows(afterIntake, 'active');
+    const sorted      = sortRows(afterStart, 'active');
     const pageMeta    = paginate(sorted, 'active');
     _rowsForClick.active = pageMeta.slice;
     return `
       ${kpisActive(raw)}
       ${toolbar('active')}
       ${startTabs(startCounts(raw))}
-      ${intakeFilterChips(intakeCounts(afterStart))}
       ${st.error ? errBlk(st.error)
         : (st.loading && !st.rows) ? skel(6)
         : onbTable(pageMeta.slice, 'active', '__onbRowClickActive')}
@@ -603,16 +560,14 @@
     const st = _live.archived;
     if (!st.rows && !st.loading) queueMicrotask(() => fetchScope('archived'));
     const raw = asArr(st.rows);
-    // Archief: geen startgroep-filter (alles daar is terminal). Wel intake-
-    // chips voor consistentie + sortering + paginering.
-    const afterIntake = intakeFilter(raw);
-    const sorted      = sortRows(afterIntake, 'archived');
-    const pageMeta    = paginate(sorted, 'archived');
+    // Archief: geen filter-rij (alles daar is terminal), alleen sortering +
+    // paginering. Startgroep-tabs zijn niet zinvol op gearchiveerde rijen.
+    const sorted   = sortRows(raw, 'archived');
+    const pageMeta = paginate(sorted, 'archived');
     _rowsForClick.archived = pageMeta.slice;
     return `
       ${kpisArchive(raw)}
       ${toolbar('archived')}
-      ${intakeFilterChips(intakeCounts(raw))}
       ${st.error ? errBlk(st.error)
         : (st.loading && !st.rows) ? skel(4)
         : onbTable(pageMeta.slice, 'archived', '__onbRowClickArchived')}
