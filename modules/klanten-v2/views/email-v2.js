@@ -30,6 +30,137 @@
   const { I, svg, S, F, key, render } = window.DFO;
   const H = window.KV_V2.helpers;
 
+  const asArr = (x) => Array.isArray(x) ? x : [];
+  const esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+  // ── Live-state (data-koppeling 2026-08-13) ────────────────────────────
+  // Endpoints:
+  //   GET  /api/emails                 → inbox (live IMAP, ~1-2s)
+  //   POST /api/email-body             → body + attachments per uid
+  //   POST /api/mark-read              → seen-flag zetten
+  //   POST /api/send-email             → reply/forward/new
+  const _live = {
+    emails: { loading: false, error: null, data: null, fetchedAt: 0 },
+    bodies: new Map(), // composite uid → {loading, error, data:{text, hasHtml, attachments}}
+    sending: false,
+    markSeenInFlight: new Set(),
+  };
+  async function tryFetch(label, url, timeoutMs = 15000) {
+    try {
+      if (!window.KV || !window.KV.authedJson) throw new Error('KV.authedJson niet beschikbaar');
+      return await Promise.race([
+        window.KV.authedJson(url),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + timeoutMs + 'ms')), timeoutMs)),
+      ]);
+    } catch (e) { console.warn('[email-v2] ' + label + ' fail:', e?.message); return { __error: e?.message || 'onbekende fout' }; }
+  }
+  async function tryPost(label, url, body, timeoutMs = 20000) {
+    try {
+      if (!window.KV || !window.KV.authedJson) throw new Error('KV.authedJson niet beschikbaar');
+      return await Promise.race([
+        window.KV.authedJson(url, { method: 'POST', body: JSON.stringify(body) }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + timeoutMs + 'ms')), timeoutMs)),
+      ]);
+    } catch (e) { console.warn('[email-v2] ' + label + ' fail:', e?.message); return { __error: e?.message || 'onbekende fout' }; }
+  }
+  async function fetchInbox() {
+    const st = _live.emails;
+    if (st.loading) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('inbox', '/api/emails');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else { st.data = asArr(j?.emails).map(_normalizeEmail); st.fetchedAt = Date.now(); }
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchBody(compositeUid) {
+    if (!compositeUid || _live.bodies.get(compositeUid)?.loading) return;
+    const [mailbox, imapUid] = String(compositeUid).split(':');
+    if (!mailbox || !imapUid) return;
+    _live.bodies.set(compositeUid, { loading: true, error: null, data: null });
+    if (window.DFO?.render) window.DFO.render();
+    const j = await tryPost('body:' + compositeUid, '/api/email-body', { mailbox, uid: Number(imapUid) });
+    const entry = { loading: false, error: null, data: null };
+    if (j && j.__error) entry.error = j.__error; else entry.data = j || null;
+    _live.bodies.set(compositeUid, entry);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function markSeen(compositeUid) {
+    if (!compositeUid || _live.markSeenInFlight.has(compositeUid)) return;
+    const [mailbox, imapUid] = String(compositeUid).split(':');
+    if (!mailbox || !imapUid) return;
+    _live.markSeenInFlight.add(compositeUid);
+    const j = await tryPost('mark:' + compositeUid, '/api/mark-read', { mailbox, uid: Number(imapUid), seen: true });
+    _live.markSeenInFlight.delete(compositeUid);
+    if (j && !j.__error) {
+      // Update local list-state
+      const data = _live.emails.data;
+      if (Array.isArray(data)) {
+        const m = data.find((x) => x.id === compositeUid);
+        if (m) { m.ongelezen = false; if (window.DFO?.render) window.DFO.render(); }
+      }
+    }
+  }
+  // Normalize /api/emails response-shape → scaffold MAILDATA-shape.
+  // Endpoint-velden: uid ("mailbox:imap_uid"), mailbox, subject, from, fromName,
+  //   fromAddress, toAddress, date (ISO), category, aiReply, unread,
+  //   requires_action, classification.
+  function _normalizeEmail(e) {
+    if (!e || typeof e !== 'object') return null;
+    return {
+      id:        String(e.uid || ''),
+      van:       e.fromName || e.fromAddress || 'Onbekend',
+      mail:      e.fromAddress || '',
+      ond:       e.subject || '(geen onderwerp)',
+      tijd:      _relTime(e.date),
+      datum:     _fmtDate(e.date),
+      ongelezen: !!e.unread,
+      vlag:      false, // needs Jeffrey — geen flag-veld in /api/emails
+      att:       [],   // pas gevuld na body-fetch
+      map:       'in', // needs Jeffrey — endpoint returnt geen folder-info
+      klant:     null, // needs Jeffrey — geen customer-join in /api/emails
+      acc:       String(e.mailbox || '').replace(/@.*$/, ''),
+      prev:      '',   // needs Jeffrey — snippet-veld niet in endpoint
+      body:      '',   // wordt lazy geladen via fetchBody
+      ai:        e.aiReply || null,
+      _raw:      e,
+    };
+  }
+  function _relTime(iso) {
+    if (!iso) return '—';
+    const t = new Date(iso).getTime();
+    if (!Number.isFinite(t)) return '—';
+    const now = Date.now();
+    const diff = now - t;
+    const min = Math.floor(diff / 60000);
+    const hr = Math.floor(diff / 3600000);
+    const day = Math.floor(diff / 86400000);
+    if (diff < 60000) return 'zojuist';
+    if (min < 60) return min + 'm';
+    if (hr < 24) {
+      const d = new Date(iso);
+      return d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+    }
+    if (day === 1) return 'gisteren';
+    if (day < 7) return day + ' d';
+    const d = new Date(iso);
+    return d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' });
+  }
+  function _fmtDate(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return '';
+    return d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+  // Effective mail-lijst: live (indien geladen) OF voorbeeld-fallback.
+  function _effectiveData() {
+    if (_live.emails.data && _live.emails.data.length) return { rows: _live.emails.data, live: true };
+    return { rows: MAILDATA, live: false };
+  }
+  window.__emailRetry = () => { _live.emails.data = null; _live.emails.error = null; fetchInbox(); };
+
   /* ── Module-state (prototype r2557) ───────────────────────────────── */
   let mailSel = 1;
   let mailFold = 'in';
@@ -122,7 +253,12 @@
 
   /* ── E-mail-view (prototype r2559-2747) ───────────────────────────── */
   function emailView() {
-    let list = MAILDATA.filter(m => {
+    // Data-koppeling: trigger inbox-fetch bij eerste render.
+    if (!_live.emails.data && !_live.emails.loading && !_live.emails.error) queueMicrotask(fetchInbox);
+
+    const eff = _effectiveData();
+    const dataset = eff.rows;
+    let list = dataset.filter(m => {
       if (mailFold === 'unread') return m.ongelezen;
       if (mailFold === 'flag') return m.vlag;
       if (mailFold === 'in') return m.map === 'in';
@@ -131,11 +267,32 @@
     if (mailAcc !== 'all') list = list.filter(m => m.acc === mailAcc);
     const q = (F('q', '') || '').toLowerCase();
     if (q) list = list.filter(m => m.van.toLowerCase().includes(q) || m.ond.toLowerCase().includes(q));
-    const cur = MAILDATA.find(m => m.id === mailSel) || list[0];
+    const cur = dataset.find(m => m.id === mailSel) || list[0];
+    // Als cur uit live-data komt: lazy body-fetch bij open.
+    if (cur && eff.live && cur.id && !_live.bodies.get(cur.id)?.data && !_live.bodies.get(cur.id)?.loading) {
+      queueMicrotask(() => fetchBody(cur.id));
+      if (cur.ongelezen) queueMicrotask(() => markSeen(cur.id));
+    }
+    // Hydrate body/attachments naar cur zodat het scaffold-template werkt zonder aparte code-pad.
+    if (cur && eff.live) {
+      const be = _live.bodies.get(cur.id);
+      if (be?.data) {
+        cur.body = be.data.text ? _textToHtml(be.data.text) : (cur.body || '');
+        cur.att = asArr(be.data.attachments).map((a, i) => ({ n: a.filename || 'bijlage', s: _fmtBytes(a.size || 0), t: a.contentType || '', _idx: i }));
+        if (!cur.prev && be.data.text) cur.prev = String(be.data.text).slice(0, 120).replace(/\s+/g, ' ');
+      } else if (be?.loading && !cur.body) {
+        cur.body = '<p style="color:var(--text-3);font-style:italic">Bericht laden…</p>';
+      } else if (be?.error && !cur.body) {
+        cur.body = '<p style="color:var(--rose)">Kon body niet ophalen: ' + esc(be.error) + '</p>';
+      }
+    }
     S.sel = S.sel || {};
     const nsel = Object.keys(S.sel).filter(k => S.sel[k] && k[0] === 'm').length;
 
-    return `${H.voorbeeldBanner()}
+    const bannerHtml = eff.live
+      ? (_live.emails.error ? `<div style="margin:14px 20px 0;padding:11px 14px;border:1px solid var(--rose-line);background:var(--rose-soft);border-radius:var(--r);display:flex;align-items:center;gap:11px;font-size:12.5px;color:var(--rose)"><span>${svg(I.alert || I.warn, 'width:16px;height:16px')}</span><span style="flex:1">Kon inbox niet ophalen: ${esc(_live.emails.error)}</span><button class="btn btn-ghost btn-sm" onclick="__emailRetry()">Opnieuw</button></div>` : '')
+      : (_live.emails.loading ? `<div style="margin:14px 20px 0;padding:11px 14px;border:1px solid var(--border);background:var(--surface-2);border-radius:var(--r);font-size:12.5px;color:var(--text-2)">Inbox laden…</div>` : H.voorbeeldBanner());
+    return `${bannerHtml}
     <div class="mail3">
       <div class="mail-rail">
         <button class="btn btn-primary mail-compose-btn" onclick="openCompose('new')">${svg(I.plus)}Nieuwe e-mail</button>
@@ -302,7 +459,7 @@
           +31 85 580 36 26 · deforexopleiding.nl
         </div>
         <div class="compose-foot">
-          <button class="btn btn-primary">${svg(I.send)}Versturen</button>
+          <button class="btn btn-primary" onclick="__emailSend()" ${_live.sending ? 'disabled' : ''}>${svg(I.send)}${_live.sending ? 'Verzenden…' : 'Versturen'}</button>
           <button class="icon-btn" title="Bijlage toevoegen">${svg('<path d="M21.4 11l-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/>')}</button>
           <button class="icon-btn" title="Sjabloon invoegen">${svg(I.doc)}</button>
           <button class="icon-btn" title="Later versturen">${svg(I.clock)}</button>
@@ -318,7 +475,77 @@
      via onclick-attrs aanroept. ─────────────────────────────────────── */
   window.__emailSetFold = (id) => { mailFold = id; ddOpen = false; render(); };
   window.__emailSetAcc  = (id) => { mailAcc = id; ddOpen = false; render(); };
-  window.__emailSelect  = (id) => { mailSel = id; ddOpen = false; render(); };
+  window.__emailSelect  = (id) => {
+    mailSel = id; ddOpen = false;
+    // Lazy body + mark-read op click als live-data actief is.
+    const eff = _effectiveData();
+    if (eff.live) {
+      const m = eff.rows.find((x) => x.id === id);
+      if (m) {
+        queueMicrotask(() => fetchBody(id));
+        if (m.ongelezen) queueMicrotask(() => markSeen(id));
+      }
+    }
+    render();
+  };
+  // Send-knop uit compose-modal. Werkt alleen als een compose-modal open is.
+  // Selectors: input.compose-inp[0]=Aan, [1]=CC (indien open), [2]=BCC, [3]=Onderwerp;
+  // div.compose-body[contenteditable]. Handtekening apart. Voor MVP nemen we
+  // From = huidige mailAcc (of 'administratie' bij 'all'), Body = plain-text uit
+  // compose-body.innerText. Bijlagen: needs Jeffrey (endpoint accepteert
+  // attachments[] maar shape niet gedocumenteerd).
+  window.__emailSend = async () => {
+    if (_live.sending) return;
+    const modal = document.querySelector('.compose');
+    if (!modal) return;
+    const inputs = modal.querySelectorAll('.compose-inp');
+    const to = (inputs[0]?.value || '').trim();
+    // CC/BCC-velden zijn optioneel (starten display:none, worden zichtbaar via knop).
+    // Vind ze via id om positioneel volgorde-risico te vermijden.
+    const cc = (modal.querySelector('#ccRow .compose-inp')?.value || '').trim();
+    const bcc = (modal.querySelector('#bccRow .compose-inp')?.value || '').trim();
+    // Onderwerp = laatste compose-inp buiten cc/bcc-rows.
+    const subjInp = inputs[inputs.length - 1];
+    const subject = (subjInp?.value || '').trim();
+    const bodyEl = modal.querySelector('.compose-body');
+    const text = (bodyEl?.innerText || '').trim();
+    if (!to) { alert('Vul een ontvanger in.'); return; }
+    if (!subject) { alert('Vul een onderwerp in.'); return; }
+    if (!text) { alert('Bericht is leeg.'); return; }
+    const eff = _effectiveData();
+    const cur = eff.rows.find((m) => m.id === mailSel);
+    const from_mailbox = mailAcc !== 'all' ? mailAcc : (cur?.acc || 'administratie');
+    const body = {
+      from_mailbox, to, subject, text,
+      ...(cc ? { cc } : {}),
+      ...(bcc ? { bcc } : {}),
+      ...(composeMode === 'reply' || composeMode === 'replyall' ? { email_id: cur?.id } : {}),
+    };
+    _live.sending = true; render();
+    const j = await tryPost('send', '/api/send-email', body);
+    _live.sending = false;
+    if (j && j.__error) {
+      alert('Verzenden mislukt: ' + j.__error);
+      render();
+      return;
+    }
+    try { window.KV?.toast?.('E-mail verzonden'); } catch (_) {}
+    composeOpen = false;
+    // Refresh inbox na een korte pauze zodat 'sent' zichtbaar wordt (endpoint
+    // schrijft naar tabel; live-fetch pikt 'em op).
+    setTimeout(() => { _live.emails.data = null; fetchInbox(); }, 400);
+    render();
+  };
+  function _textToHtml(t) {
+    if (!t) return '';
+    return '<p>' + esc(t).replace(/\r?\n\r?\n/g, '</p><p>').replace(/\r?\n/g, '<br>') + '</p>';
+  }
+  function _fmtBytes(n) {
+    n = Number(n) || 0;
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return Math.round(n / 1024) + ' kB';
+    return (n / (1024 * 1024)).toFixed(1) + ' MB';
+  }
   window.openCompose    = (mode) => { composeMode = mode; composeOpen = true; ddOpen = false; render(); };
   window.closeCompose   = () => { composeOpen = false; render(); };
   window.emailToggleSel = (k) => { S.sel = S.sel || {}; S.sel[k] = !S.sel[k]; render(); };
