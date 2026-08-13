@@ -3205,3 +3205,176 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
   border-radius: 8px; color: var(--text-1, #111721);
 }
 .subw-bypass-card label { cursor: pointer; }
+
+/* ── Onboarding detail-modal (.kv-onb-*) — data-ronde 2026-08-12.
+   Namespace voor lijst-titel + detail-modal (4 sub-tabs). Modal-overlay
+   komt via DFO.openModal (.mdl-* uit app-shell.css). ───────────────── */
+.kv-onb-title { color: var(--text-1, #111721); font-weight: 500; }
+
+.kv-onb-tabs {
+  display: flex; gap: 4px; padding: 3px; margin: 0 0 14px;
+  background: var(--surface-2, #F2F4F7);
+  border: 1px solid var(--border, #E2E7EE); border-radius: 8px;
+}
+.kv-onb-tab {
+  flex: 1; background: transparent; border: 0;
+  padding: 6px 12px; font-size: 12.5px; font-family: inherit;
+  color: var(--text-2, #586374); border-radius: 6px; cursor: pointer;
+}
+.kv-onb-tab:hover { color: var(--text-1, #111721); }
+.kv-onb-tab.is-on {
+  background: var(--surface, #FFFFFF); color: var(--text-1, #111721);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .06); font-weight: 600;
+}
+.kv-onb-tabbody { display: block; }
+
+.kv-onb-pill {
+  display: inline-flex; align-items: center;
+  padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
+  border: 1px solid;
+}
+.kv-onb-pill-info    { background: var(--blue-soft, #E8F0FC);    color: var(--blue, #1B5FBF);    border-color: var(--blue-line, #B7D0F2); }
+.kv-onb-pill-ok      { background: var(--emerald-soft, #E4F5EE); color: var(--emerald, #07835A); border-color: var(--emerald-line, #A9DFC9); }
+.kv-onb-pill-warn    { background: var(--amber-soft, #FFF4E5);   color: var(--amber, #C2700A);   border-color: var(--amber-line, #F4D8A1); }
+.kv-onb-pill-danger  { background: var(--rose-soft, #FDECEE);    color: var(--rose, #C22B3E);    border-color: var(--rose-line, #F5C2C9); }
+.kv-onb-pill-violet  { background: color-mix(in srgb, var(--violet, #7C4FE0) 12%, white); color: var(--violet, #7C4FE0); border-color: color-mix(in srgb, var(--violet, #7C4FE0) 30%, white); }
+.kv-onb-pill-accent  { background: color-mix(in srgb, var(--teal, #1F8FA6) 14%, white); color: var(--teal, #1F8FA6); border-color: color-mix(in srgb, var(--teal, #1F8FA6) 32%, white); }
+.kv-onb-pill-neutral { background: var(--surface-2, #F2F4F7);    color: var(--text-2, #586374);  border-color: var(--border, #E2E7EE); }
+
+.kv-onb-meta {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px;
+  padding: 12px 14px; margin: 0 0 14px;
+  background: var(--surface-2, #F2F4F7); border-radius: 8px;
+  border: 1px solid var(--border, #E2E7EE);
+}
+@media (max-width: 640px) { .kv-onb-meta { grid-template-columns: 1fr; } }
+.kv-onb-meta-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: 12.5px; }
+.kv-onb-meta-row > span:first-child { color: var(--text-2, #586374); }
+.kv-onb-meta-row > b, .kv-onb-meta-row > span:last-child { color: var(--text-1, #111721); text-align: right; }
+
+.kv-onb-section { margin: 14px 0; }
+.kv-onb-section-title {
+  font-size: 12px; font-weight: 700; color: var(--text-1, #111721);
+  text-transform: uppercase; letter-spacing: .04em;
+  margin: 0 0 8px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--border, #E2E7EE);
+}
+.kv-onb-hint { font-size: 11.5px; color: var(--text-3, #8B95A5); margin-top: 6px; line-height: 1.5; }
+.kv-onb-empty { font-size: 12.5px; color: var(--text-3, #8B95A5); font-style: italic; padding: 8px 0; }
+
+.kv-onb-action-grid {
+  display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: end;
+  margin-bottom: 10px;
+}
+.kv-onb-action-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.kv-onb-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-2, #586374); }
+.kv-onb-field .ib-input { width: 100%; }
+
+.kv-onb-danger { color: var(--rose, #C22B3E) !important; }
+.kv-onb-danger.ds-btn-primary {
+  background: var(--rose, #C22B3E) !important;
+  border-color: var(--rose, #C22B3E) !important;
+  color: white !important;
+}
+.kv-onb-danger.ds-btn-ghost:hover:not([disabled]) {
+  background: var(--rose-soft, #FDECEE) !important;
+  border-color: var(--rose-line, #F5C2C9) !important;
+}
+
+.kv-onb-timeline { list-style: none; padding: 0; margin: 0; }
+.kv-onb-timeline li {
+  padding: 6px 0 6px 16px; margin-left: 6px;
+  border-left: 2px solid var(--border, #E2E7EE);
+  font-size: 12.5px; color: var(--text-2, #586374); position: relative;
+}
+.kv-onb-timeline li::before {
+  content: ''; position: absolute; left: -5px; top: 12px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--m, #6D3FD4);
+}
+.kv-onb-timeline li b { color: var(--text-1, #111721); font-weight: 500; }
+
+.kv-onb-av-list { list-style: none; padding: 0; margin: 0; font-size: 12.5px; color: var(--text-1, #111721); }
+.kv-onb-av-list li { padding: 4px 0; }
+.kv-onb-json {
+  background: var(--surface-2, #F2F4F7); border: 1px solid var(--border, #E2E7EE);
+  border-radius: 6px; padding: 10px 12px; font-size: 11.5px; line-height: 1.4;
+  max-height: 400px; overflow: auto; font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  color: var(--text-1, #111721);
+}
+
+.kv-onb-cancel-summary {
+  padding: 12px 14px; margin: 0 0 12px;
+  background: var(--rose-soft, #FDECEE); border: 1px solid var(--rose-line, #F5C2C9);
+  border-radius: 8px; font-size: 12.5px; color: var(--text-1, #111721);
+}
+.kv-onb-cancel-row { padding: 2px 0; }
+
+/* ── Onboarding-lijst kebab-menu — v2 parity-ronde 2026-08-12.
+   Kebab (⋮) knop met dropdown; position:absolute t.o.v. kv-onb-kebab wrapper.
+   Sluit door herhaal-klik op ⋮ of klik buiten (dropdown-menu is toch klein). */
+.kv-onb-kebab { position: relative; display: inline-block; }
+.kv-onb-kebab-menu {
+  display: none;
+  position: absolute; right: 0; top: 100%; margin-top: 4px;
+  min-width: 180px; z-index: 40;
+  background: var(--surface-1, #fff); color: var(--text-1, #111721);
+  border: 1px solid var(--line, #E5EAEF); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, .12);
+  padding: 4px 0;
+}
+.kv-onb-kebab-menu.is-open { display: block; }
+.kv-onb-kebab-menu button {
+  display: block; width: 100%; text-align: left;
+  padding: 8px 14px; font-size: 13px; line-height: 1.3;
+  background: transparent; border: 0; color: inherit;
+  cursor: pointer;
+}
+.kv-onb-kebab-menu button:hover { background: var(--surface-2, #F5F8FB); }
+
+/* ── Onboarding-lijst: startgroep-tabs + paginator (2026-08-13) ──────── */
+.kv-onb-tabline {
+  display: flex; gap: 4px; padding: 8px 20px 0; flex-wrap: wrap;
+}
+.kv-onb-tabline .kv-onb-tab { flex: 0 0 auto; padding: 8px 14px; font-size: 13px; }
+.kv-onb-tab.has-warn:not(.is-on) {
+  color: var(--amber, #B8770F);
+  background: var(--amber-soft, #FFF4E5);
+}
+.kv-onb-tab-c {
+  display: inline-block; margin-left: 6px; padding: 0 6px;
+  font-size: 11px; font-weight: 700;
+  background: var(--surface, #fff); color: var(--text-2, #586374);
+  border: 1px solid var(--border, #E2E7EE); border-radius: 999px;
+  min-width: 18px; text-align: center; line-height: 15px;
+}
+.kv-onb-tab.is-on .kv-onb-tab-c {
+  background: transparent; color: inherit; border-color: currentColor;
+}
+
+.kv-onb-pager {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 12px 20px 16px;
+  flex-wrap: wrap;
+}
+.kv-onb-pager-info { font-size: 12px; color: var(--text-2, #586374); }
+.kv-onb-pager-nav { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.kv-onb-pager-btn {
+  padding: 6px 12px; font-size: 12.5px; font-family: inherit;
+  background: var(--surface, #FFFFFF); color: var(--text-1, #111721);
+  border: 1px solid var(--border, #E2E7EE); border-radius: 6px;
+  cursor: pointer; min-width: 34px;
+}
+.kv-onb-pager-btn:hover:not(.is-disabled):not(.is-active) {
+  background: var(--surface-2, #F2F4F7);
+}
+.kv-onb-pager-btn.is-active {
+  background: var(--m, #6D3FD4); color: #fff; border-color: var(--m, #6D3FD4);
+  font-weight: 600; cursor: default;
+}
+.kv-onb-pager-btn.is-disabled {
+  opacity: .45; cursor: not-allowed;
+}
+.kv-onb-pager-ellipsis {
+  padding: 0 6px; color: var(--text-3, #8B95A5); font-size: 12.5px;
+}
