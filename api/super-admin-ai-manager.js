@@ -162,9 +162,31 @@ async function generateSqlWithRetry(question, schemaRows, previousRejection = nu
   });
 }
 
+// Optionele persona-preamble uit joost_config (module='manager'). Fail-soft:
+// bij fout / geen rij / uitgeschakeld → returnt lege string, waarna de
+// hardcoded summary-prompt hieronder ongewijzigd wordt gebruikt (huidige gedrag).
+async function _loadManagerPersonaPreamble() {
+  try {
+    const { data: cfg } = await supabaseAdmin
+      .from('joost_config')
+      .select('persona_name, persona_tone, is_enabled')
+      .eq('module', 'manager')
+      .maybeSingle();
+    if (!cfg || cfg.is_enabled !== true) return '';
+    const parts = [];
+    if (cfg.persona_name) parts.push(`Je bent ${cfg.persona_name}.`);
+    if (cfg.persona_tone) parts.push(`Toon: ${cfg.persona_tone}.`);
+    return parts.length ? parts.join(' ') + '\n\n' : '';
+  } catch (e) {
+    console.warn('[ai-manager] persona-preamble fetch faalde (fallback naar hardcoded):', e?.message || e);
+    return '';
+  }
+}
+
 async function generateSummary(question, sql, uitleg, queryResult) {
   const rowsSample = JSON.stringify(queryResult.rows, null, 2);
-  const system = [
+  const personaPreamble = await _loadManagerPersonaPreamble();
+  const system = personaPreamble + [
     'Je vat het resultaat van een SQL-query samen voor de super_admin.',
     'Doe NIETS anders dan wat er letterlijk in de data staat. Geen aannames, geen extrapolatie.',
     'Als de data leeg is: zeg dat er 0 resultaten zijn.',

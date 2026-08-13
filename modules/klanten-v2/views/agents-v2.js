@@ -64,9 +64,9 @@
     { id:'mila',    n:'Mila',    rol:'Onboarding',     d:'Begeleidt nieuwe klanten door de onboardingflow',
       c:'emerald', mod:'Onboarding',        modId:'onboarding',      kan:['WhatsApp','E-mail'],config:true, backend:'onboarding' },
     { id:'aisha',   n:'Aisha',   rol:'Leadsonderhoud', d:'Houdt contact met leads die nog niet klaar zijn',
-      c:'teal',    mod:'Leadsonderhoud',    modId:'leadsonderhoud',  kan:['WhatsApp','E-mail'],config:true, backend:null },
+      c:'teal',    mod:'Leadsonderhoud',    modId:'leadsonderhoud',  kan:['WhatsApp','E-mail'],config:true, backend:'leadsonderhoud' },
     { id:'manager', n:'AI Manager', rol:'Bedrijfsvragen', d:'Beantwoordt vragen over je bedrijf op basis van je eigen data',
-      c:'blue',    mod:'Dashboard',         modId:'dashboard',       kan:['Dashboard'],        config:true, backend:null },
+      c:'blue',    mod:'Dashboard',         modId:'dashboard',       kan:['Dashboard'],        config:true, backend:'manager' },
     // Achtergrond
     { id:'analyse',   n:'Gespreksanalyse',       rol:'Achtergrond', d:'Leest gesprekken en herkent betaalafspraken en signalen',
       c:'slate', mod:'Wanbetalers', modId:'wanbetalers', kan:['Achtergrond'], config:false, backend:'bg-analyse', ic:'eye' },
@@ -437,11 +437,23 @@
     const cur  = a.backend === 'lisa' ? live?.channel?.active === true : live?.is_enabled === true;
     const next = !cur;
     const label = next ? 'aanzetten' : 'uitzetten';
-    if (!window.confirm(`${a.n} ${label}?\n\n${a.backend === 'lisa'
-      ? 'Dit past lisa_settings.live_mode_enabled aan — Lisa gaat direct wél/geen berichten sturen naar Instagram-klanten.'
-      : (a.lock
-          ? 'Joost aanmaan-flow wordt hiermee ' + (next ? 'geactiveerd' : 'gepauzeerd') + '. Autonomie-config blijft ongewijzigd.'
-          : `De ${a.n}-flow wordt hiermee ${next ? 'geactiveerd' : 'gepauzeerd'}.`)}`)) return;
+    let msg;
+    if (a.backend === 'lisa') {
+      msg = 'Dit past lisa_settings.live_mode_enabled aan — Lisa gaat direct wél/geen berichten sturen naar Instagram-klanten.';
+    } else if (a.lock) {
+      msg = 'Joost aanmaan-flow wordt hiermee ' + (next ? 'geactiveerd' : 'gepauzeerd') + '. Autonomie-config blijft ongewijzigd.';
+    } else if (a.id === 'aisha') {
+      msg = next
+        ? 'Aisha wordt aangezet in de config. LET OP: de bestaande leadsonderhoud-sjabloon-motor (cron-leadsonderhoud.js) is NIET aangepast in deze fase. Aisha stuurt daarom nog géén AI-berichten naar leads — de sjabloon-flow blijft ongewijzigd draaien. Voor productie-gebruik is een aparte cron-integratie-stap nodig. Nu al testbaar via Oefengesprek.'
+        : 'Aisha wordt uitgezet. Dit heeft geen effect op de bestaande sjabloon-flow.';
+    } else if (a.id === 'manager') {
+      msg = next
+        ? 'AI Manager wordt aangezet — super-admin-ai-manager gebruikt vanaf nu je persona-toon in zijn samenvattingen. De SQL-guard + read-only-views blijven ongewijzigd.'
+        : 'AI Manager persona wordt uitgezet. super-admin-ai-manager valt terug op de hardcoded system-prompt (huidige gedrag).';
+    } else {
+      msg = 'De ' + a.n + '-flow wordt hiermee ' + (next ? 'geactiveerd' : 'gepauzeerd') + '.';
+    }
+    if (!window.confirm(a.n + ' ' + label + '?\n\n' + msg)) return;
 
     _ui.toggling[agId] = true;
     if (window.DFO?.render) window.DFO.render();
@@ -521,11 +533,25 @@
   window.__agSelChange = (v) => { _ui.agSel = v; _ui.agCfgTab = 'Persona'; if (window.DFO?.render) window.DFO.render(); };
 
   function _cfgLockBanner(a) {
-    if (!a.lock) return '';
-    return `<div style="padding:13px 20px;background:var(--amber-soft);border-bottom:1px solid var(--amber-line);display:flex;gap:11px;align-items:flex-start;font-size:12.5px;color:var(--amber)">
-      ${svg(I.shield, 'width:16px;height:16px;flex-shrink:0;margin-top:1px')}
-      <span><b>Beschermde agent.</b> Persona, toon, systeem-prompt en kennisbank van Joost mag je hier bewerken. Model / temperatuur / context-vensters vragen een extra bevestiging omdat ze de incasso-flow kunnen beïnvloeden. <b>Autonomie en feature-flags</b> blijven read-only — wijzig je via <b>${esc(a.mod)} → Instellingen</b>.</span>
-    </div>`;
+    if (a.lock) {
+      return `<div style="padding:13px 20px;background:var(--amber-soft);border-bottom:1px solid var(--amber-line);display:flex;gap:11px;align-items:flex-start;font-size:12.5px;color:var(--amber)">
+        ${svg(I.shield, 'width:16px;height:16px;flex-shrink:0;margin-top:1px')}
+        <span><b>Beschermde agent.</b> Persona, toon, systeem-prompt en kennisbank van Joost mag je hier bewerken. Model / temperatuur / context-vensters vragen een extra bevestiging omdat ze de incasso-flow kunnen beïnvloeden. <b>Autonomie en feature-flags</b> blijven read-only — wijzig je via <b>${esc(a.mod)} → Instellingen</b>.</span>
+      </div>`;
+    }
+    if (a.id === 'aisha') {
+      return `<div style="padding:13px 20px;background:var(--blue-soft);border-bottom:1px solid var(--blue-line);display:flex;gap:11px;align-items:flex-start;font-size:12.5px;color:var(--blue)">
+        ${svg(I.alert, 'width:16px;height:16px;flex-shrink:0;margin-top:1px')}
+        <span><b>Aisha AI-content staat standaard uit.</b> De bestaande leadsonderhoud-sjabloon-motor (<span class="mono">cron-leadsonderhoud.js</span>) is NIET aangepast in Fase 4. Aisha's AI-generatie is testbaar via <b>Oefengesprek</b>; voor productie-gebruik is een aparte cron-integratie-stap nodig waarin de is_enabled-vlag + feature_flags.aisha_ai_content_enabled worden gerespecteerd.</span>
+      </div>`;
+    }
+    if (a.id === 'manager') {
+      return `<div style="padding:13px 20px;background:var(--blue-soft);border-bottom:1px solid var(--blue-line);display:flex;gap:11px;align-items:flex-start;font-size:12.5px;color:var(--blue)">
+        ${svg(I.alert, 'width:16px;height:16px;flex-shrink:0;margin-top:1px')}
+        <span><b>AI Manager persona.</b> Persona-toon + is_enabled worden gebruikt door <span class="mono">super-admin-ai-manager.js</span> als preamble op zijn samenvattingen. Bij ontbrekende rij of uitgeschakelde vlag valt hij terug op de bestaande hardcoded system-prompt — huidige gedrag blijft dan intact.</span>
+      </div>`;
+    }
+    return '';
   }
 
   function _cfgTabs(a) {
