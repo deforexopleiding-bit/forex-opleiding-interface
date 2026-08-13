@@ -173,8 +173,18 @@
     } catch (e) { alert('Actie mislukt: ' + (e?.message || 'onbekende fout')); }
   };
 
+  // Default sort per scope + startgroep-tab (2026-08-13).
+  // - active + 'binnenkort'-tab: startdatum oplopend (NULL onderaan via
+  //   Infinity-fallback in sortRows.get()). Eerstkomende start bovenaan.
+  // - alle andere combinaties: 'created:desc' (behoud van huidige gedrag).
+  // Als user handmatig gesorteerd heeft, respecteren we die keuze — de
+  // default geldt alleen wanneer F('onb-sort-<scope>') niet gezet is.
+  function _defaultSortFor(scope) {
+    if (scope === 'active' && F('onb-start', 'binnenkort') === 'binnenkort') return 'startdatum:asc';
+    return 'created:desc';
+  }
   window.__onbSort = (scope, key) => {
-    const cur = F('onb-sort-' + scope, 'created:desc');
+    const cur = F('onb-sort-' + scope, _defaultSortFor(scope));
     const [ck, cd] = cur.split(':');
     const newDir = (ck === key && cd === 'asc') ? 'desc' : 'asc';
     _page[scope] = 1; // sort resets page
@@ -304,7 +314,7 @@
     window.DFO.setF('onb-start', k);
   };
   function sortRows(rows, scope) {
-    const cur = F('onb-sort-' + scope, 'created:desc');
+    const cur = F('onb-sort-' + scope, _defaultSortFor(scope));
     const [key, dir] = cur.split(':');
     const mul = dir === 'asc' ? 1 : -1;
     const get = (r) => {
@@ -327,7 +337,7 @@
     });
   }
   function sortHeader(scope, key, label) {
-    const cur = F('onb-sort-' + scope, 'created:desc');
+    const cur = F('onb-sort-' + scope, _defaultSortFor(scope));
     const [ck, cd] = cur.split(':');
     const arrow = ck === key ? (cd === 'asc' ? ' ↑' : ' ↓') : '';
     return `<th style="cursor:pointer" onclick="__onbSort('${scope}','${key}')" title="Sorteer op ${esc(label)}">${esc(label)}${arrow}</th>`;
