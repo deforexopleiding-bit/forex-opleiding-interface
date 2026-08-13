@@ -35,9 +35,13 @@ const DEPARTMENTS = [
   '9adca043-0ebc-09da-a45e-f21798841cb2', // Retentie
 ];
 
-// 60s Vercel-limit. Stop nieuwe records oppakken zodra we 50s onderweg zijn.
-// Eerstvolgende cron-run pakt de rest op (cursor blijft op max(verwerkte updated_at)).
-const ABORT_MS = 50_000;
+// maxDuration van dit endpoint staat op 300s (vercel.json). Stop met nieuwe
+// records ~30s vóór die harde limit, zodat de run ALTIJD gracieus aftbort en de
+// sync_state-write (cursor) nog binnen het budget valt. Vroeger stond dit op 50s
+// terwijl de globale maxDuration 30s was → Vercel killde de functie (504) vóór de
+// abort/cursor-write, waardoor de cursor nooit doorschoof en het venster groeide.
+// Eerstvolgende run pakt de rest op.
+const ABORT_MS = 270_000;
 const PAGE_SIZE = 100;
 const TL_THROTTLE_MS = 200;
 
@@ -357,9 +361,21 @@ export default async function handler(req, res) {
       if (resErr) console.warn('[cron-finance-sync] mark_resolved_skipped_invoices', resErr.message);
     } catch (e) { console.warn('[cron-finance-sync] mark_resolved_skipped_invoices exception', e.message); }
 
+    // Veilige-abort-guard (invoices): TL /invoices.list sorteert op invoice_date
+    // (updated_at-sort geeft HTTP 400), terwijl de cursor max(updated_at) is. Bij
+    // een PARTIËLE run (aborted) is de verwerkte set dus NIET monotoon in
+    // updated_at → de cursor doorschuiven zou onverwerkte records met een lagere
+    // updated_at permanent overslaan (data-loss). Daarom: bij abort de cursor
+    // NIET doorschuiven (venster past ruim in 300s; volgende run doet 'm opnieuw,
+    // idempotent). Alleen bij een VOLLEDIG afgeronde run schuift de cursor door.
+    const invCursor = invRes.aborted ? byResource.invoices.last_updated_since : invRes.next_cursor;
+    if (invRes.aborted) {
+      console.warn(`[cron-finance-sync] invoices ABORTED — cursor NIET doorgeschoven (blijft ${invCursor}); volgende run herverwerkt het venster.`);
+    }
+
     // sync_state.invoices terugschrijven.
     const { error: upErr } = await supabaseAdmin.from('sync_state').update({
-      last_updated_since:   invRes.next_cursor,
+      last_updated_since:   invCursor,
       last_run_at:          startedIso,
       last_run_processed:   invRes.processed,
       last_run_errors:      invRes.errors,
@@ -372,7 +388,7 @@ export default async function handler(req, res) {
       errors:                  invRes.errors,
       skipped_no_customer:     skippedNoCustomer,
       duration_ms:             invDuration,
-      last_updated_since:      invRes.next_cursor,
+      last_updated_since:      invCursor,
       aborted_by_timeout:      invRes.aborted,
       failed_count:            invRes.failed_count,
       oldest_failed_updated_at: invRes.oldest_failed_updated_at,
