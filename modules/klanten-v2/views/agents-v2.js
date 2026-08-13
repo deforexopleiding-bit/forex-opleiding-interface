@@ -36,40 +36,31 @@
   const fmtDate = (iso) => iso ? new Date(iso).toLocaleString('nl-NL', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : '—';
 
   // ═══════════════════════════════════════════════════════════════════════
-  // CANONICAL AGENT LIST (prototype r6275-6321)
-  // Elke agent heeft: id, n(aam), rol, d(escriptie), c(olor), venster, ver(sie),
-  // mod(ule-label), modId(sidebar-target), kan(alen[]), config(bewerkbaar), lock(Joost).
-  // "backendModule" = joost_config.module key waar de live data zit (of null).
+  // CANONICAL AGENT LIST — alleen niet-databronvelden (naam / rol / beschrijving /
+  // kleur / kanalen / lock-flag / backend-module). Velden als versie / venster /
+  // autonomie-modus zijn bewust weggelaten omdat er geen live bron voor is;
+  // eerder waren die hardcoded en werden ze getoond als echte config-data.
   // ═══════════════════════════════════════════════════════════════════════
   const AGENTS_STATIC = [
     { id:'lisa',    n:'Lisa',    rol:'Instagram',      d:'Voert Instagram-gesprekken en boekt kennismakingscalls',
-      c:'violet',  live:true,  aut:'Zelfstandig versturen',        venster:'07:00 – 23:30', ver:'v16',
-      mod:'Lisa — Instagram', modId:'lisa',           kan:['Instagram'],       config:true,  backend:'lisa' },
+      c:'violet',  mod:'Lisa — Instagram',  modId:'lisa',            kan:['Instagram'],        config:true,  backend:'lisa' },
     { id:'joost',   n:'Joost',   rol:'Aanmaningen',    d:'Voert gesprekken met wanbetalers en stelt betaalregelingen voor',
-      c:'amber',   live:true,  aut:'Voorstellen — jij keurt goed', venster:'08:00 – 20:00', ver:'v9',
-      mod:'Wanbetalers', modId:'wanbetalers',         kan:['WhatsApp','E-mail'],config:true, lock:true, backend:'finance' },
+      c:'amber',   mod:'Wanbetalers',       modId:'wanbetalers',     kan:['WhatsApp','E-mail'],config:true, lock:true, backend:'finance' },
     { id:'simone',  n:'Simone',  rol:'Events',         d:'Beantwoordt vragen over events, aanmeldingen en de vragenlijst',
-      c:'pink',    live:true,  aut:'Zelfstandig antwoorden',       venster:'08:00 – 22:00', ver:'v4',
-      mod:'Events', modId:'events',                   kan:['WhatsApp','E-mail'],config:true, backend:'events' },
+      c:'pink',    mod:'Events',            modId:'events',          kan:['WhatsApp','E-mail'],config:true, backend:'events' },
     { id:'mila',    n:'Mila',    rol:'Onboarding',     d:'Begeleidt nieuwe klanten door de onboardingflow',
-      c:'emerald', live:true,  aut:'Zelfstandig antwoorden',       venster:'08:00 – 20:00', ver:'v3',
-      mod:'Onboarding', modId:'onboarding',           kan:['WhatsApp','E-mail'],config:true, backend:'onboarding' },
+      c:'emerald', mod:'Onboarding',        modId:'onboarding',      kan:['WhatsApp','E-mail'],config:true, backend:'onboarding' },
     { id:'aisha',   n:'Aisha',   rol:'Leadsonderhoud', d:'Houdt contact met leads die nog niet klaar zijn',
-      c:'teal',    live:false, aut:'Zelfstandig antwoorden',       venster:'09:00 – 21:00', ver:'v5',
-      mod:'Leadsonderhoud', modId:'leadsonderhoud',   kan:['WhatsApp','E-mail'],config:true, backend:null },
+      c:'teal',    mod:'Leadsonderhoud',    modId:'leadsonderhoud',  kan:['WhatsApp','E-mail'],config:true, backend:null },
     { id:'manager', n:'AI Manager', rol:'Bedrijfsvragen', d:'Beantwoordt vragen over je bedrijf op basis van je eigen data',
-      c:'blue',    live:false, aut:'Alleen lezen',                 venster:'altijd',        ver:'v2',
-      mod:'Dashboard', modId:'dashboard',             kan:['Dashboard'],       config:true,  backend:null },
-    // Achtergrond
-    { id:'analyse',   n:'Gespreksanalyse',   rol:'Achtergrond', d:'Leest gesprekken en herkent betaalafspraken en signalen',
-      c:'slate', live:true,  aut:'Signaleert alleen',    venster:'continu', ver:'v6',
-      mod:'Wanbetalers', modId:'wanbetalers', kan:['Achtergrond'], config:false, backend:null, ic:'eye' },
-    { id:'mailsort',  n:'E-mail categorisatie', rol:'Achtergrond', d:'Sorteert binnenkomende mail en koppelt aan klanten',
-      c:'blue',  live:true,  aut:'Sorteert automatisch', venster:'continu', ver:'v3',
-      mod:'E-mail', modId:'email', kan:['Achtergrond'], config:false, backend:null, ic:'mail' },
-    { id:'scoring',   n:'Lead-scoring',    rol:'Achtergrond', d:'Geeft leads een kwalificatiescore op basis van hun antwoorden',
-      c:'slate', live:false, aut:'—',                     venster:'—',       ver:'—',
-      mod:'Leads', modId:'leads', kan:['Achtergrond'], config:false, backend:null, ic:'target' },
+      c:'blue',    mod:'Dashboard',         modId:'dashboard',       kan:['Dashboard'],        config:true, backend:null },
+    // Achtergrond — geen backend-koppeling; tonen als gedimd + "Nog niet gekoppeld".
+    { id:'analyse',   n:'Gespreksanalyse',       rol:'Achtergrond', d:'Leest gesprekken en herkent betaalafspraken en signalen',
+      c:'slate', mod:'Wanbetalers', modId:'wanbetalers', kan:['Achtergrond'], config:false, backend:null, ic:'eye' },
+    { id:'mailsort',  n:'E-mail categorisatie',  rol:'Achtergrond', d:'Sorteert binnenkomende mail en koppelt aan klanten',
+      c:'blue',  mod:'E-mail',      modId:'email',       kan:['Achtergrond'], config:false, backend:null, ic:'mail' },
+    { id:'scoring',   n:'Lead-scoring',          rol:'Achtergrond', d:'Geeft leads een kwalificatiescore op basis van hun antwoorden',
+      c:'slate', mod:'Leads',       modId:'leads',       kan:['Achtergrond'], config:false, backend:null, ic:'target' },
   ];
 
   // Wanneer een agent geen backend heeft → toon "Nog geen backend"-badge ipv Live/Uit
@@ -222,14 +213,18 @@
     const approvals = asArr(_live.approval.data);
     const waitCount = approvals.filter((a) => (a?.status === 'pending' || a?.status === 'awaiting_approval')).length;
 
-    // KPI-berekening
-    const activeCount = AGENTS_STATIC.filter((a) => {
+    // KPI-berekening — teller alleen over agents met echte backend-koppeling
+    // (Lisa/Joost/Simone/Mila). Aisha/AI Manager/achtergrond hebben geen bron.
+    // Lisa "live" = lisa_settings.live_mode_enabled (channel.active), NIET
+    // is_active (dat is de versie-active-flag, geen productie-schakelaar).
+    const backedAgents = AGENTS_STATIC.filter((a) => !!a.backend);
+    const activeCount = backedAgents.filter((a) => {
       const l = _liveFor(a, cfgList);
-      if (a.backend === 'lisa') return l?.is_active === true;
-      if (l) return l.is_enabled === true;
-      return a.live && !_hasBackend(a) ? false : false;    // no-backend agents tellen niet als "live"
+      if (!l) return false;
+      if (a.backend === 'lisa') return l?.channel?.active === true;
+      return l.is_enabled === true;
     }).length;
-    const totalConfigured = AGENTS_STATIC.length;
+    const totalConfigured = backedAgents.length;
 
     let messagesToday = 0;
     if (activity.trio) for (const t of activity.trio) messagesToday += Number(t.messages_today || 0);
@@ -266,7 +261,9 @@
 
   function _overzichtConvCard(a, cfgList, activity) {
     const live = _liveFor(a, cfgList);
-    const isLive = a.backend === 'lisa' ? live?.is_active === true : live?.is_enabled === true;
+    // Lisa productie-live-status = lisa_settings.live_mode_enabled (via channel.active).
+    // is_active op de lisa_config-rij is versie-metadata en zegt niks over productie.
+    const isLive = a.backend === 'lisa' ? live?.channel?.active === true : live?.is_enabled === true;
     const stat   = a.backend === 'lisa' ? _lisaStat(activity) : _trioStat(a, activity);
 
     // Stats — live indien backend, anders "—"
@@ -306,7 +303,6 @@
           <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
             <span class="card-title">${esc(persona)}</span>
             ${a.lock ? `<span class="pill pill-warn nodot" style="font-size:10px;padding:1.5px 7px;display:inline-flex;align-items:center;gap:4px">${svg(I.shield, 'width:9px;height:9px')}Beschermd</span>` : ''}
-            <span class="mono" style="font-size:10.5px;color:var(--text-3);margin-left:auto">${esc(a.ver)}</span>
           </div>
           <div style="font-size:11.5px;color:var(--${a.c});font-weight:500;margin-top:2px">${esc(a.rol)}</div>
           <div style="font-size:12px;color:var(--text-3);margin-top:4px;line-height:1.45">${esc(a.d)}</div>
@@ -315,7 +311,6 @@
       <div style="padding:0 17px 12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         ${noBackend ? softPill() : (isLive ? H.pill('ok','Live') : H.pill('neutral','Uit'))}
         ${a.kan.map(_channelPill).join('')}
-        <span style="font-size:11px;color:var(--text-3);margin-left:auto">${noBackend ? '' : esc(a.venster)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);border-top:1px solid var(--border)">
         ${stats.map(([v, l]) => `<div style="background:var(--surface);padding:10px 12px;text-align:center">
@@ -381,7 +376,7 @@
       ${_radial(a.c, 32)}
       <div style="flex:1;min-width:150px">
         <div style="font-size:14px;font-weight:600">${esc(a.n)} <span style="font-weight:400;color:var(--text-3)">· ${esc(a.rol)}</span></div>
-        <div style="font-size:12px;color:var(--text-3)">${esc(a.aut)} · ${esc(a.venster)} · configuratie ${esc(a.ver)}</div>
+        <div style="font-size:12px;color:var(--text-3)">${esc(a.d)}</div>
       </div>
       ${a.lock ? `<span class="pill pill-warn nodot" style="display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 9px">${svg(I.shield, 'width:11px;height:11px')}Beschermd — wijzigen in ${esc(a.mod)}</span>` : ''}
       ${!a.backend ? softPill() : ''}
@@ -442,32 +437,13 @@
       </div></div>`;
     }
 
+    // Live-live vlag alleen echt bij Lisa (channel.active); voor trio = is_enabled uit joost_config.
+    const isLiveLisa = a.backend === 'lisa'
+      ? (cfgList.find((r) => r.type === 'lisa')?.channel?.active === true)
+      : null;
+
     return `<div class="pad" style="padding-top:14px">
       <div style="max-width:820px">
-
-        <div class="grid g2" style="margin-bottom:14px">
-          <div class="card">
-            <div class="card-head"><div class="card-title">Wat ${esc(a.n)} mag</div></div>
-            <div class="card-body" style="padding:6px 0">
-              ${_gedragToggle(a.aut, 'Autonomie', true, readonly)}
-              ${_gedragToggle('Zelf gesprekken beginnen', null, a.id !== 'simone', readonly)}
-              ${_gedragToggle('Bijlagen versturen', null, true, readonly)}
-              ${_gedragToggle('Afspraken inplannen', null, a.id === 'simone' || a.id === 'mila', readonly)}
-              ${_gedragToggle('Prijzen noemen', null, false, readonly)}
-              ${_gedragToggle('Doorzetten naar een mens', null, true, readonly)}
-            </div>
-          </div>
-          <div class="card">
-            <div class="card-head"><div class="card-title">Timing</div></div>
-            <div class="card-body">
-              <div class="kv"><dt>Verzendvenster</dt><dd>${esc(a.venster)}</dd></div>
-              <div class="kv"><dt>Reactievertraging</dt><dd>30 – 90 seconden</dd></div>
-              <div class="kv"><dt>Typ-indicator</dt><dd>${H.pill('ok','Aan')}</dd></div>
-              <div class="kv"><dt>Max. berichten per dag</dt><dd class="num">3 per contact</dd></div>
-              <div class="kv"><dt>Kanalen</dt><dd>${a.kan.map(esc).join(', ')}</dd></div>
-            </div>
-          </div>
-        </div>
 
         <div class="card" style="margin-bottom:14px">
           <div class="card-head">
@@ -476,54 +452,24 @@
           </div>
           <div class="card-body" style="display:flex;flex-direction:column;gap:12px">
             ${_field('Naam',        'persona_name', value('persona_name', a.n), readonly, a)}
-            ${_field('Rol',         '__ro_role',    a.rol,                       true,      a)}
             ${_field('Toon',        'persona_tone', value('persona_tone', ''),  readonly, a, 'textarea')}
             ${_field('Model',       'model',        value('model', 'claude-sonnet-4-6'), readonly || a.backend === 'lisa', a, 'select', ['claude-sonnet-4-6','claude-opus-4-7','claude-haiku-4-5'])}
-            ${_field('Actief',      'is_' + (a.backend === 'lisa' ? 'active' : 'enabled'),
-                     value(a.backend === 'lisa' ? 'is_active' : 'is_enabled', true) ? 'true' : 'false',
-                     readonly || a.backend === 'lisa', a, 'toggle')}
+            ${a.backend === 'lisa'
+              ? _field('Actief', '__ro_live', isLiveLisa ? 'true' : 'false', true, a, 'toggle')
+              : _field('Actief', 'is_enabled', value('is_enabled', true) ? 'true' : 'false', readonly, a, 'toggle')}
           </div>
           ${(!readonly && a.backend && a.backend !== 'lisa') ? _saveBar(a) : ''}
           ${(readonly) ? `<div style="padding:11px 17px;background:var(--surface-2);border-top:1px solid var(--border);font-size:11.5px;color:var(--text-3)">
             <b>Read-only.</b> Wijzigen via <b>${esc(a.mod)} → Instellingen</b>.
           </div>` : ''}
           ${(a.backend === 'lisa') ? `<div style="padding:11px 17px;background:var(--surface-2);border-top:1px solid var(--border);font-size:11.5px;color:var(--text-3);display:flex;align-items:center;gap:10px">
-            <span style="flex:1">Volledige persona, fases en kennisbank van Lisa bewerk je in de <b>Lisa-module</b>.</span>
+            <span style="flex:1">Volledige persona, fases en kennisbank van Lisa bewerk je in de <b>Lisa-module</b>. "Actief" = live-schakelaar (lisa_settings).</span>
             <a href="/modules/lisa.html" class="btn btn-ghost btn-sm" style="text-decoration:none">Open Lisa</a>
           </div>` : ''}
         </div>
 
-        ${a.id === 'joost' ? _cfgJoostMandate() : ''}
-
-        <div class="card">
-          <div class="card-head">
-            <span class="tile-ico" style="background:var(--rose-soft);color:var(--rose)">${svg(I.x)}</span>
-            <div class="card-title">Wanneer ${esc(a.n)} stopt en jou vraagt</div>
-          </div>
-          <div class="card-body" style="padding:6px 0">
-            ${_stopRegel('Vraag over prijzen', 'valt buiten het mandaat')}
-            ${_stopRegel('Klacht of boze toon', 'een mens kan dit beter')}
-            ${_stopRegel('Vraag die niet in de kennisbank staat', 'geen antwoord beschikbaar')}
-            ${_stopRegel('Stopwoord ontvangen', 'stopt definitief')}
-            ${_stopRegel('Drie berichten zonder reactie', 'stopt met opvolgen')}
-          </div>
-        </div>
+        ${a.id === 'joost' ? _cfgJoostMandate(currentCfg) : ''}
       </div>
-    </div>`;
-  }
-
-  function _gedragToggle(n, l, on, ro) {
-    return `<div style="display:flex;align-items:center;gap:12px;padding:11px 17px;border-bottom:1px solid var(--border)">
-      <div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(n)}</div>
-        ${l ? `<div style="font-size:11.5px;color:var(--text-3)">${esc(l)}</div>` : ''}</div>
-      <div class="switch ${on ? 'on' : ''}" style="${ro ? 'opacity:.5;cursor:not-allowed' : ''}"></div>
-    </div>`;
-  }
-  function _stopRegel(n, d) {
-    return `<div style="display:flex;align-items:center;gap:11px;padding:10px 17px;border-bottom:1px solid var(--border)">
-      <span style="color:var(--rose);display:inline-flex">${svg(I.x, 'width:14px;height:14px')}</span>
-      <div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(n)}</div>
-        <div style="font-size:11.5px;color:var(--text-3)">${esc(d)}</div></div>
     </div>`;
   }
 
@@ -604,33 +550,58 @@
     }
   };
 
-  function _cfgJoostMandate() {
+  function _cfgJoostMandate(cfg) {
+    const m = cfg?.autonomy_config?.mandate;
+    // Als er geen mandate-object in autonomy_config staat: eerlijk "Binnenkort" tonen.
+    if (!m || typeof m !== 'object') {
+      return `<div class="card" style="margin-bottom:14px">
+        <div class="card-head">
+          <span class="tile-ico" style="background:var(--amber-soft);color:var(--amber)">${svg(I.euro)}</span>
+          <div class="card-title">Mandaat</div>
+        </div>
+        ${soon('Mandaat — binnenkort zichtbaar', 'Bedragen en termijnen die Joost zelf mag voorstellen worden hier getoond zodra ze uit de instellingen gelezen kunnen worden.')}
+      </div>`;
+    }
+    const rows = [];
+    // Bekende keys uit E2 autonomy-config; alleen tonen als aanwezig.
+    if (m.max_total_amount_to_auto_propose_eur != null) {
+      rows.push(['Mag regelingen voorstellen tot', '€ ' + fmtNum(m.max_total_amount_to_auto_propose_eur), true]);
+    }
+    if (m.min_total_amount_to_negotiate_eur != null) {
+      rows.push(['Onder dit bedrag niet onderhandelen', '€ ' + fmtNum(m.min_total_amount_to_negotiate_eur), true]);
+    }
+    if (m.splitsing?.max_termijnen_zonder_approval != null) {
+      rows.push(['Maximaal aantal termijnen', String(m.splitsing.max_termijnen_zonder_approval), true]);
+    }
+    if (m.uitstel?.max_dagen_zonder_approval != null) {
+      rows.push(['Maximaal aantal dagen uitstel', String(m.uitstel.max_dagen_zonder_approval), true]);
+    }
+    if (Array.isArray(m.allowed_types) && m.allowed_types.length) {
+      rows.push(['Toegestane regelingen', m.allowed_types.map(esc).join(', '), false]);
+    }
+    if (rows.length === 0) {
+      return `<div class="card" style="margin-bottom:14px">
+        <div class="card-head">
+          <span class="tile-ico" style="background:var(--amber-soft);color:var(--amber)">${svg(I.euro)}</span>
+          <div class="card-title">Mandaat</div>
+        </div>
+        ${soon('Mandaat — nog niet ingesteld', 'Er staan nog geen mandaat-regels in de configuratie van Joost.')}
+      </div>`;
+    }
     return `<div class="card" style="margin-bottom:14px">
       <div class="card-head">
         <span class="tile-ico" style="background:var(--amber-soft);color:var(--amber)">${svg(I.euro)}</span>
         <div class="card-title">Mandaat</div>
       </div>
       <div class="card-body">
-        <div class="kv"><dt>Mag regelingen voorstellen tot</dt><dd class="num">€ 1.500</dd></div>
-        <div class="kv"><dt>Maximaal aantal termijnen</dt><dd class="num">6</dd></div>
-        <div class="kv"><dt>Boven het mandaat</dt><dd>Vraagt jouw goedkeuring</dd></div>
-        <div class="kv"><dt>Mag zelf aanmaningen sturen</dt><dd>${H.pill('neutral','Nee')}</dd></div>
+        ${rows.map(([k, v, num]) => `<div class="kv"><dt>${esc(k)}</dt><dd${num ? ' class="num"' : ''}>${v}</dd></div>`).join('')}
       </div>
     </div>`;
   }
 
   function _cfgAutonomie(a) {
     return `<div class="pad" style="padding-top:14px"><div style="max-width:820px">
-      <div class="card"><div class="card-head">
-        <span class="tile-ico" style="background:var(--${a.c}-soft);color:var(--${a.c})">${svg(I.sliders)}</span>
-        <div class="card-title">Autonomie</div>
-      </div>
-      <div class="card-body">
-        <div class="kv"><dt>Modus</dt><dd>${esc(a.aut)}</dd></div>
-        <div class="kv"><dt>Verzendvenster</dt><dd>${esc(a.venster)}</dd></div>
-      </div>
-      ${soon('Per-intent modus-matrix — binnenkort', 'Uit / Meedenken / Zelfstandig / Altijd mens per soort bericht (betaal-toezegging, escalatie, prijsvraag, …).')}
-      </div>
+      <div class="card">${soon('Autonomie — binnenkort', 'Per-intent modus (Uit / Meedenken / Zelfstandig / Altijd mens) voor ' + a.n + '.')}</div>
     </div></div>`;
   }
   function _cfgBeslissingen(a) {
