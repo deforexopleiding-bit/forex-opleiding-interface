@@ -75,7 +75,20 @@ export async function upsertInvoiceFromTl(tlInvoiceId, opts = {}) {
     if (opts.skipIfNoCustomer) return skipResult('no_invoicee');
     throw new Error('Factuur heeft geen invoicee-customer in TL');
   }
-  const { data: cust } = await supabaseAdmin.from('customers').select('id').eq(matchCol, invoiceeId).maybeSingle();
+  // Bestand tegen >1 customer met dezelfde tl_*-id (kan tijdelijk vóór de dedupe
+  // + unique-index bestaan). maybeSingle() zou op >1 een error geven → null →
+  // onterecht als "geen klant" behandeld. Kies daarom DETERMINISTISCH: actieve
+  // rijen eerst (archived_at/anonymized_at NULL), dan oudste (created_at asc).
+  const { data: custRows } = await supabaseAdmin.from('customers')
+    .select('id, archived_at, anonymized_at')
+    .eq(matchCol, invoiceeId)
+    .order('archived_at', { ascending: true, nullsFirst: true })
+    .order('anonymized_at', { ascending: true, nullsFirst: true })
+    .order('created_at', { ascending: true });
+  const cust = (custRows && custRows.length) ? custRows[0] : null;
+  if (custRows && custRows.length > 1) {
+    console.warn(`[invoice-upsert] >1 customer met ${matchCol}=${invoiceeId} (${custRows.length}) — dedupe nodig; koos ${cust.id}`);
+  }
   if (!cust) {
     if (opts.skipIfNoCustomer) return skipResult('no_customer');
     throw new Error(`Geen lokale klant met ${matchCol}=${invoiceeId}`);

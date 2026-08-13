@@ -134,13 +134,29 @@ export default async function handler(req, res) {
         tl_contact_id:   isCompanyPayload ? null : (tl_imported_contact_id || null),
         created_by_user_id: user.id,
       };
-      // Email-uniciteit check (race-safe via DB error 23505 als constraint bestaat).
-      const { data: cust, error: cErr } = await supabaseAdmin.from('customers').insert(custPayload).select('id').single();
-      if (cErr) {
-        if (cErr.code === '23505') return res.status(409).json({ error: 'Email reeds in gebruik (race-conditie)' });
-        throw cErr;
+      // Idempotent op tl_contact_id: bestaat er al een (actieve) customer voor
+      // dit TL-contact, hergebruik die i.p.v. een tweede rij te maken. Dit is de
+      // root-cause-fix van de dubbele-klant-bug: die ontstond als de wizard géén
+      // matched_customer_id meestuurde terwijl er al een customer met dit
+      // tl_contact_id bestond. B2C only — bij B2B zetten we tl_contact_id bewust
+      // niet op de klant (zie comment hierboven).
+      if (!isCompanyPayload && tl_imported_contact_id) {
+        const { data: existRows } = await supabaseAdmin.from('customers')
+          .select('id')
+          .eq('tl_contact_id', tl_imported_contact_id)
+          .is('archived_at', null).is('anonymized_at', null)
+          .order('created_at', { ascending: true }).limit(1);
+        if (existRows && existRows.length) customerId = existRows[0].id;
       }
-      customerId = cust.id;
+      if (!customerId) {
+        // Email-uniciteit check (race-safe via DB error 23505 als constraint bestaat).
+        const { data: cust, error: cErr } = await supabaseAdmin.from('customers').insert(custPayload).select('id').single();
+        if (cErr) {
+          if (cErr.code === '23505') return res.status(409).json({ error: 'Email reeds in gebruik (race-conditie)' });
+          throw cErr;
+        }
+        customerId = cust.id;
+      }
     }
 
     // 1b. Best-effort: koppel de aanwezige aan deze klant zodat de
