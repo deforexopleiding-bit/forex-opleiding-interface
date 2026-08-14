@@ -45,6 +45,98 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  // ON-OPEN NORMALIZE — legacy-shapes → canonieke keys op editor-state.
+  // Pure in-memory. GEEN DB-writes. Bij Opslaan gaat de deep-copy 1-op-1
+  // terug via save-endpoint; alle keys die save-validator verlangt zijn
+  // dan al gevuld en legacy-keys zijn verwijderd. Semantisch identiek
+  // (2 'days' blijft 2 dagen; conversie naar canonieke bewaringsvorm).
+  // Canonieke flows blijven no-op: de canoniek-check komt éérst en slaat
+  // de conversie over, de legacy-cleanup is idempotent (delete op key
+  // die niet bestaat is safe).
+  // ═══════════════════════════════════════════════════════════════════════
+  function _normalizeStepConfig(step) {
+    if (!step || typeof step !== 'object') return step;
+    const cfg = step.config = step.config || {};
+    if (step.type === 'wait') {
+      // {value, unit} → {amount, unit} (canoniek = amount)
+      if (cfg.amount == null && cfg.value != null) {
+        const n = Number(cfg.value);
+        if (Number.isFinite(n) && n > 0) cfg.amount = n;
+      }
+      delete cfg.value;
+      if (!['minutes','hours','days'].includes(cfg.unit)) cfg.unit = 'days';
+    }
+    if (step.type === 'condition') {
+      // stop_if_false (bool) → on_fail (enum)
+      if (cfg.on_fail == null && Object.prototype.hasOwnProperty.call(cfg, 'stop_if_false')) {
+        cfg.on_fail = cfg.stop_if_false ? 'exit' : 'skip_to_end';
+      }
+      delete cfg.stop_if_false;
+      if (!['exit','skip_to_end'].includes(cfg.on_fail)) cfg.on_fail = 'exit';
+      // Verwijder legacy 'value' extra-param uit oude UI (was cosmetisch,
+      // save-validator kent 'em niet — geen betekenis-verlies).
+      if (typeof cfg.value === 'string') delete cfg.value;
+    }
+    return step;
+  }
+
+  // Events trigger_config: canoniek = hours_before OF hours_after_signup
+  // (afhankelijk van trigger_type). Legacy {value, unit} → conversie naar
+  // uren. 'days'→*24, 'hours'→as-is, 'minutes'→/60 (round-up, min 1),
+  // ontbrekende unit → as-is als uren.
+  function _normalizeEvTrigger(auto) {
+    const cfg = auto.trigger_config = auto.trigger_config || {};
+    const t = auto.trigger_type;
+    if (t === 'time_before_event' || t === 'on_assessment_not_completed_after') {
+      const targetKey = (t === 'time_before_event') ? 'hours_before' : 'hours_after_signup';
+      const canonical = Number(cfg[targetKey]);
+      if (!(Number.isFinite(canonical) && canonical > 0)) {
+        const legacyVal = Number(cfg.value);
+        if (Number.isFinite(legacyVal) && legacyVal > 0) {
+          let hours;
+          if (cfg.unit === 'days')         hours = legacyVal * 24;
+          else if (cfg.unit === 'minutes') hours = Math.max(1, Math.round(legacyVal / 60));
+          else                              hours = legacyVal; // 'hours' of missing
+          cfg[targetKey] = hours;
+        }
+      }
+      delete cfg.value; delete cfg.unit;
+    }
+  }
+
+  // Onboarding trigger_config: canoniek = hours_after_signup OF
+  // days_after_signup. Legacy {value, unit} → dagen behouden als 'days',
+  // anders naar uren. Semantisch identiek voor days+hours; 'minutes' wordt
+  // afgerond naar hele uren (edge-case; live flows gebruiken minutes niet).
+  function _normalizeObTrigger(auto) {
+    const cfg = auto.trigger_config = auto.trigger_config || {};
+    const t = auto.trigger_type;
+    if (t === 'time_after_signup' || t === 'on_wizard_not_started_after') {
+      const hasHours = Number(cfg.hours_after_signup) > 0;
+      const hasDays  = Number(cfg.days_after_signup)  > 0;
+      if (!hasHours && !hasDays) {
+        const legacyVal = Number(cfg.value);
+        if (Number.isFinite(legacyVal) && legacyVal > 0) {
+          if (cfg.unit === 'days')         cfg.days_after_signup  = legacyVal;
+          else if (cfg.unit === 'minutes') cfg.hours_after_signup = Math.max(1, Math.round(legacyVal / 60));
+          else                              cfg.hours_after_signup = legacyVal;
+        }
+      }
+      delete cfg.value; delete cfg.unit;
+    }
+  }
+
+  function _normalizeAutoOnOpen(auto, mod) {
+    if (!auto || typeof auto !== 'object') return auto;
+    auto.trigger_config = auto.trigger_config || {};
+    auto.steps = Array.isArray(auto.steps) ? auto.steps : [];
+    if (mod === 'ev') _normalizeEvTrigger(auto);
+    else               _normalizeObTrigger(auto);
+    auto.steps.forEach(_normalizeStepConfig);
+    return auto;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   // LIVE STATE
   // ═══════════════════════════════════════════════════════════════════════
   const _live = {
@@ -598,10 +690,10 @@
   window.__autEvEdit = (id) => {
     const a = asArr(_live.evAutos.data).find((x) => x.id === id);
     if (!a) return alert('Automation niet gevonden.');
-    _ui.ev.editing = JSON.parse(JSON.stringify(a));   // deep copy voor edit
-    _ui.ev.editing.trigger_config = _ui.ev.editing.trigger_config || {};
+    // Deep-copy + on-open normalize (in-memory, geen DB-write) — dekt eventuele
+    // legacy velden af zodat een re-save altijd de canonieke shape stuurt.
+    _ui.ev.editing = _normalizeAutoOnOpen(JSON.parse(JSON.stringify(a)), 'ev');
     _ui.ev.editing.scope_config = _ui.ev.editing.scope_config || {};
-    _ui.ev.editing.steps = asArr(_ui.ev.editing.steps);
     if (window.DFO?.render) window.DFO.render();
   };
   window.__autEvBack = () => { _ui.ev.editing = null; if (window.DFO?.render) window.DFO.render(); };
@@ -1079,9 +1171,9 @@
   window.__autObEdit = (id) => {
     const a = asArr(_live.obAutos.data).find((x) => x.id === id);
     if (!a) return;
-    _ui.ob.editing = JSON.parse(JSON.stringify(a));
-    _ui.ob.editing.trigger_config = _ui.ob.editing.trigger_config || {};
-    _ui.ob.editing.steps = asArr(_ui.ob.editing.steps);
+    // Deep-copy + on-open normalize (in-memory, geen DB-write) — dekt eventuele
+    // legacy velden af zodat een re-save altijd de canonieke shape stuurt.
+    _ui.ob.editing = _normalizeAutoOnOpen(JSON.parse(JSON.stringify(a)), 'ob');
     if (window.DFO?.render) window.DFO.render();
   };
   window.__autObBack = () => { _ui.ob.editing = null; if (window.DFO?.render) window.DFO.render(); };
