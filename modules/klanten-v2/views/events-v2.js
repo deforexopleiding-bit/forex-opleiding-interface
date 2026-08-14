@@ -81,8 +81,11 @@
     attDetail: null,        // { attId, eventId } → open modal
     noteDraft: {},          // [attId] = string (bewerkbare notitie-tekst)
     noteBusy:  {},          // [attId] = true tijdens save
-    // Punt 4 — In-shell inbox conversation viewer
-    inboxConvId: null,      // wanneer set: viewer i.p.v. lijst
+    // Punt 4 — In-shell inbox conversation viewer (split-pane)
+    inboxConvId: null,      // actieve conversation in split-pane
+    inboxScrollTop: 0,      // laatst-bekende scroll van linkerlijst; restore na re-render
+    inboxNarrowMode: 'list',// 'list'|'detail' — alleen relevant op <900px
+    inboxAutoSelected: false,// eerste conv auto-geselecteerd bij initial load
   };
 
   async function tryFetch(label, url, init, timeoutMs) {
@@ -284,14 +287,17 @@
   }
 
   // Punt 4 — In-shell inbox viewer fetcher
-  async function fetchInboxMsgs(convId) {
+  // Optional `onDone` callback: if provided, we skip DFO.render() and let the
+  // caller do a surgical DOM-update on only the right pane (split-pane inbox).
+  async function fetchInboxMsgs(convId, onDone) {
     const st = _live.inboxMsgs; if (st.loading[convId] || st.data[convId]) return;
     st.loading[convId] = true; st.error[convId] = null;
     const j = await tryFetch('msgs:' + convId, '/api/inbox-messages-list?conversation_id=' + encodeURIComponent(convId) + '&limit=100&mark_as_read=1');
     st.loading[convId] = false;
     if (j && j.__error) st.error[convId] = j.__error;
     else st.data[convId] = { conversation: j?.conversation || null, items: asArr(j?.items) };
-    if (window.DFO?.render) window.DFO.render();
+    if (typeof onDone === 'function') { try { onDone(); } catch (_) {} }
+    else if (window.DFO?.render) window.DFO.render();
   }
 
   async function fetchMentors(id) {
@@ -1717,52 +1723,326 @@
   // ═══════════════════════════════════════════════════════════════════════
   // INBOX-tab (behouden — needs-Jeffrey)
   // ═══════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════
+  // INBOX-TAB — SPLIT-PANE (master-detail, WhatsApp Web-stijl)
+  //   LEFT (340px): gesprekken-lijst, actief gesprek gehighlight.
+  //   RIGHT (flex-1): chat-venster (bubbels, tail, datum-sep, status-vinkjes).
+  //   <900px: single-pane met data-mode toggle (list ↔ detail).
+  //   Klik op rij → surgical DOM-update van alleen #ev-inbox-right + toggle
+  //     .active class op rijen; DFO.render() wordt NIET aangeroepen zodat
+  //     scroll-positie behouden blijft.
+  //   Default: bovenste conv auto-geselecteerd bij initial load (auto-fetch
+  //     messages), tenzij 0 gesprekken.
+  // ═══════════════════════════════════════════════════════════════════════
   function inboxView() {
-    // Punt 4 — als een conversation-id in state staat, toon in-shell viewer.
-    if (_ui.inboxConvId) return _inboxViewer(_ui.inboxConvId);
-
     if (!_live.inbox.data && !_live.inbox.loading && !_live.inbox.error) queueMicrotask(fetchInbox);
-    if (_live.inbox.error && !_live.inbox.data) return errBlk('inbox', _live.inbox.error);
-    if (_live.inbox.loading && !_live.inbox.data) return skel();
+    if (_live.inbox.error && !_live.inbox.data) return _inboxKpiSkel() + errBlk('inbox', _live.inbox.error);
+    if (_live.inbox.loading && !_live.inbox.data) return _inboxKpiSkel() + skel();
+
     const items = asArr(_live.inbox.data);
     const totalUnread = items.reduce((a, c) => a + Number(c.unread_count || 0), 0);
-    return `${H.kpis([
-      { c:'pink',    icon:I.chat,  label:'Gesprekken',         val:String(items.length), sub:'gekoppeld aan events-nummer' },
-      { c:'amber',   icon:I.alert, label:'Ongelezen berichten', val:String(totalUnread), hi:1 },
-      { c:'emerald', icon:I.users, label:'Met klant-koppeling', val:String(items.filter((c) => c.customer_id).length) },
-      { c:'blue',    icon:I.tick,  label:'Kunnen versturen',    val:String(items.filter((c) => c.can_send_text).length) },
-    ])}
-    ${items.length === 0
-      ? emptyBlk('Nog geen gesprekken', 'Zodra een klant de events-lijn appt of mailt verschijnt de conversatie hier.')
-      : `<div style="padding:0 20px 20px">${H.table(
-          [{l:'Klant'},{l:'Kanaal'},{l:'Nummer',cls:'optional'},{l:'Laatste bericht'},{l:'Wanneer',cls:'r optional'},{l:'Ongelezen',cls:'r'}],
-          items.map((c) => {
-            const naam = c.customer_name || c.display_name || c.phone_number || '—';
-            return [
-              `<a href="#" onclick="event.preventDefault();window.__evInboxOpen('${esc(c.id)}')" style="color:inherit;text-decoration:none"><div class="row-avatar">${H.av(naam, 28)}<span class="cell-main" style="text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:2px">${esc(naam)}</span></div></a>`,
-              `<span style="font-size:12px">${_channelIndicator(c)}</span>`,
-              `<span class="mono" style="font-size:12px;color:var(--text-3)">${esc(c.phone_number || '—')}</span>`,
-              `<span style="font-size:12.5px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:340px;display:inline-block">${esc(c.last_message_preview || '—')}</span>`,
-              `<span class="mono" style="font-size:12px;color:var(--text-3)">${esc(_fmtDateTime(c.last_message_at))}</span>`,
-              Number(c.unread_count || 0) > 0 ? H.pill('warn', String(c.unread_count)) : `<span style="color:var(--text-3);font-size:12px">0</span>`,
-            ];
-          })
-        )}</div>`}`;
+
+    const kpiBlock = H.kpis([
+      { c:'pink',    icon:I.chat,  label:'Gesprekken',           val:String(items.length), sub:'gekoppeld aan events-nummer' },
+      { c:'amber',   icon:I.alert, label:'Ongelezen berichten',  val:String(totalUnread), hi:1 },
+      { c:'emerald', icon:I.users, label:'Met klant-koppeling',  val:String(items.filter((c) => c.customer_id).length) },
+      { c:'blue',    icon:I.tick,  label:'Kunnen versturen',     val:String(items.filter((c) => c.can_send_text).length) },
+    ]);
+
+    if (items.length === 0) {
+      return kpiBlock + emptyBlk('Nog geen gesprekken', 'Zodra een klant de events-lijn appt of mailt verschijnt de conversatie hier.');
+    }
+
+    // Auto-select bovenste conv bij eerste render als er nog geen actieve is.
+    // Ook wanneer de huidige actieve conv niet (meer) in de lijst voorkomt (bv.
+    // conv verwijderd of gefilterd): val terug op de top.
+    const activeExists = _ui.inboxConvId && items.some((c) => c.id === _ui.inboxConvId);
+    if (!activeExists) {
+      _ui.inboxConvId = items[0].id;
+      _ui.inboxAutoSelected = true;
+    }
+    // Prefetch messages voor actieve conv als nog niet gecached.
+    if (_ui.inboxConvId && !_live.inboxMsgs.data[_ui.inboxConvId] && !_live.inboxMsgs.loading[_ui.inboxConvId]) {
+      queueMicrotask(() => fetchInboxMsgs(_ui.inboxConvId));
+    }
+
+    const narrowMode = _ui.inboxConvId ? _ui.inboxNarrowMode : 'list';
+
+    // Restore linkerlijst-scrollpositie na re-render (fires after DOM parse).
+    queueMicrotask(() => {
+      const leftEl = document.querySelector('#ev-inbox-left');
+      if (leftEl && typeof _ui.inboxScrollTop === 'number') leftEl.scrollTop = _ui.inboxScrollTop;
+    });
+
+    return kpiBlock + `
+      ${_inboxStyles()}
+      <div class="ev-inbox-split" data-mode="${esc(narrowMode)}">
+        <div class="ev-inbox-left" id="ev-inbox-left">
+          ${_inboxLeftList(items, _ui.inboxConvId)}
+        </div>
+        <div class="ev-inbox-right" id="ev-inbox-right">
+          ${_inboxRightPane(_ui.inboxConvId)}
+        </div>
+      </div>`;
   }
-  window.__evInboxOpen = (convId) => {
-    // Punt 4 — in-shell viewer (was: deep-link naar v1-shell).
+
+  function _inboxKpiSkel() {
+    // Placeholder-blok zodat de KPIs-rij niet opeens hoogte-wisselt tijdens loading.
+    return `<div style="padding:12px 20px"><div style="height:76px;background:var(--surface-2);border-radius:12px;opacity:.5"></div></div>`;
+  }
+
+  function _inboxStyles() {
+    // Scoped, idempotent via id. DFO.render() rebuild is prima; browser dedupes.
+    return `<style id="ev-inbox-styles">
+      .ev-inbox-split { display:grid; grid-template-columns:340px 1fr; height:calc(100vh - 260px); min-height:480px; border-top:1px solid var(--border); background:var(--surface); }
+      .ev-inbox-left  { overflow-y:auto; border-right:1px solid var(--border); background:var(--surface); }
+      .ev-inbox-right { overflow-y:auto; display:flex; flex-direction:column; min-width:0; }
+      .ev-inbox-row   { display:flex; gap:10px; padding:10px 12px; border-bottom:1px solid var(--border); cursor:pointer; align-items:flex-start; transition:background .12s ease; }
+      .ev-inbox-row:hover  { background:var(--surface-2); }
+      .ev-inbox-row.active { background:var(--pink-soft); border-left:3px solid var(--pink); padding-left:9px; }
+      .ev-inbox-row .r-body { flex:1; min-width:0; }
+      .ev-inbox-row .r-top  { display:flex; align-items:baseline; gap:6px; }
+      .ev-inbox-row .r-name { font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; color:var(--text); }
+      .ev-inbox-row .r-time { font-size:10.5px; color:var(--text-3); flex-shrink:0; font-family:'IBM Plex Mono',monospace; }
+      .ev-inbox-row .r-preview { font-size:12px; color:var(--text-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px; }
+      .ev-inbox-row .r-badges { display:flex; gap:5px; align-items:center; margin-top:3px; }
+      .ev-inbox-mobile-back { display:none; }
+      @media (max-width: 900px) {
+        .ev-inbox-split { grid-template-columns:1fr; }
+        .ev-inbox-split[data-mode="detail"] .ev-inbox-left  { display:none; }
+        .ev-inbox-split[data-mode="list"]   .ev-inbox-right { display:none; }
+        .ev-inbox-split[data-mode="detail"] .ev-inbox-mobile-back { display:inline-flex; }
+      }
+    </style>`;
+  }
+
+  function _inboxLeftList(items, activeId) {
+    return items.map((c) => {
+      const naam = c.customer_name || c.display_name || c.phone_number || '—';
+      const unread = Number(c.unread_count || 0);
+      const preview = c.last_message_preview || '—';
+      const timeShort = _fmtShortTimeOrDate(c.last_message_at);
+      return `<div class="ev-inbox-row${c.id === activeId ? ' active' : ''}" data-conv-id="${esc(c.id)}" onclick="window.__evInboxSelect('${esc(c.id)}')">
+        ${H.av(naam, 36)}
+        <div class="r-body">
+          <div class="r-top">
+            <div class="r-name">${esc(naam)}</div>
+            <div class="r-time">${esc(timeShort)}</div>
+          </div>
+          <div class="r-preview">${esc(preview)}</div>
+          <div class="r-badges">
+            <span style="font-size:11px">${_channelIndicator(c)}</span>
+            ${unread > 0 ? `<span style="background:var(--pink);color:white;font-size:10px;font-weight:600;padding:1px 6px;border-radius:10px;min-width:16px;text-align:center">${unread}</span>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // Compact tijdstempel: HH:MM voor vandaag, weekdag voor deze week, anders dd/mm.
+  function _fmtShortTimeOrDate(iso) {
+    const d = new Date(iso || 0);
+    if (!Number.isFinite(d.getTime())) return '';
+    const now = new Date();
+    if (d.toDateString() === now.toDateString()) {
+      return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+    }
+    const diffDays = Math.floor((now - d) / (1000*60*60*24));
+    if (diffDays < 7 && diffDays >= 0) return ['zo','ma','di','wo','do','vr','za'][d.getDay()];
+    return String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0');
+  }
+
+  function _inboxRightPane(convId) {
+    if (!convId) return `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-3);font-size:13px;padding:40px">Selecteer een gesprek links.</div>`;
+    const st = _live.inboxMsgs;
+    if (st.error[convId] && !st.data[convId]) return _inboxRightHeader(null, convId) + errBlk('inboxMsgs', st.error[convId]);
+    if (st.loading[convId] && !st.data[convId]) return _inboxRightHeader(null, convId) + _inboxRightSkel();
+    if (!st.data[convId]) return _inboxRightHeader(null, convId) + _inboxRightSkel();
+    const d = st.data[convId];
+    return _inboxRightHeader(d.conversation, convId) + _inboxChatBody(d, convId) + _inboxRightFooter(convId);
+  }
+
+  function _inboxRightSkel() {
+    return `<div style="padding:40px 20px;color:var(--text-3);font-size:12.5px;text-align:center">Berichten laden…</div>`;
+  }
+
+  function _inboxRightHeader(conv, convId) {
+    const naam = conv?.customer_name || conv?.display_name || conv?.phone_number || '—';
+    return `<div style="padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;background:var(--surface);flex-shrink:0">
+      <button class="btn btn-ghost btn-sm ev-inbox-mobile-back" onclick="window.__evInboxBackList()" title="Terug naar lijst" style="align-items:center;justify-content:center">${svg(I.arrDown || I.x, 'width:13px;height:13px;transform:rotate(90deg)')}</button>
+      ${H.av(naam, 40)}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(naam)}</div>
+        <div style="font-size:12px;color:var(--text-3);margin-top:2px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          ${_channelIndicator(conv)}
+          ${conv?.phone_number ? `<span class="mono">${esc(conv.phone_number)}</span>` : ''}
+          ${conv?.status ? H.pill('neutral', conv.status) : ''}
+        </div>
+      </div>
+      <span style="font-size:10.5px;color:var(--text-3);flex-shrink:0" class="mono" title="Conv-ID">${esc(convId).slice(0,8)}…</span>
+    </div>`;
+  }
+
+  function _inboxChatBody(d, convId) {
+    const conv = d?.conversation || null;
+    const msgs = asArr(d?.items);
+    const isWA = !!(conv?.phone_number || conv?.can_send_text);
+
+    // Datum-scheiders + status-icoon + tijdstempels (WhatsApp-stijl).
+    const _dayKey = (m) => {
+      const dt = new Date(m.sent_at || m.created_at || 0);
+      if (!Number.isFinite(dt.getTime())) return 'unknown';
+      return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+    };
+    const _dayLabel = (m) => {
+      const dt = new Date(m.sent_at || m.created_at || 0);
+      if (!Number.isFinite(dt.getTime())) return '—';
+      const now = new Date();
+      if (dt.toDateString() === now.toDateString()) return 'Vandaag';
+      const y = new Date(now); y.setDate(now.getDate()-1);
+      if (dt.toDateString() === y.toDateString()) return 'Gisteren';
+      return dt.toLocaleDateString('nl-NL', { weekday:'long', day:'numeric', month:'long', year: dt.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
+    };
+    const _timeShort = (m) => {
+      const dt = new Date(m.sent_at || m.created_at || 0);
+      if (!Number.isFinite(dt.getTime())) return '';
+      return String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0');
+    };
+    const _statusIcon = (m) => {
+      const s = String(m.status || '').toLowerCase();
+      if (m.read_at || s === 'read')      return '<span title="Gelezen" style="color:#53bdeb;font-weight:600;letter-spacing:-3px">✓✓</span>';
+      if (m.delivered_at || s === 'delivered') return '<span title="Bezorgd" style="color:var(--text-3);font-weight:600;letter-spacing:-3px">✓✓</span>';
+      if (s === 'failed')                 return '<span title="Mislukt" style="color:var(--rose)">⚠</span>';
+      if (m.sent_at || s === 'sent' || s === 'accepted') return '<span title="Verzonden" style="color:var(--text-3)">✓</span>';
+      return '';
+    };
+
+    let lastDay = null;
+    const bubbles = msgs.map((m) => {
+      const out = m.direction === 'outbound';
+      const body = m.body || (m.template_name ? '📄 Template: ' + m.template_name : (m.media_url ? '📎 Bijlage (' + (m.media_type || 'media') + ')' : '—'));
+      const dk = _dayKey(m);
+      const sep = (dk !== lastDay)
+        ? `<div style="display:flex;justify-content:center;margin:14px 0 8px"><span style="padding:4px 12px;background:rgba(0,0,0,.06);border-radius:10px;font-size:11px;font-weight:500;color:var(--text-3)">${esc(_dayLabel(m))}</span></div>`
+        : '';
+      lastDay = dk;
+      const bubbleBg = out ? (isWA ? '#d9fdd3' : 'var(--pink-soft)') : 'var(--surface)';
+      const bubbleColor = out && isWA ? '#111' : 'var(--text)';
+      const tail = out
+        ? `<span style="position:absolute;right:-6px;top:0;width:8px;height:13px;background:${bubbleBg};clip-path:polygon(0 0, 100% 0, 0 100%)"></span>`
+        : `<span style="position:absolute;left:-6px;top:0;width:8px;height:13px;background:${bubbleBg};clip-path:polygon(0 0, 100% 0, 100% 100%);border-left:1px solid var(--border)"></span>`;
+      return `${sep}<div style="display:flex;justify-content:${out ? 'flex-end' : 'flex-start'};padding:0 4px">
+        <div style="max-width:65%;position:relative">
+          <div style="position:relative;padding:6px 10px 5px;border-radius:8px;background:${bubbleBg};color:${bubbleColor};font-size:13.5px;line-height:1.42;white-space:pre-wrap;word-wrap:break-word;box-shadow:0 1px 1px rgba(0,0,0,.08);${out ? '' : 'border:1px solid var(--border)'}">
+            ${tail}
+            ${m.template_name ? `<div style="font-size:10.5px;color:${out && isWA ? '#4a7c3a' : 'var(--text-3)'};font-weight:600;margin-bottom:2px">📄 ${esc(m.template_name)}</div>` : ''}
+            <span>${esc(body)}</span>
+            <div style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;float:right;padding-top:4px">
+              <span class="mono" style="font-size:10.5px;color:${out && isWA ? '#667781' : 'var(--text-3)'}">${esc(_timeShort(m))}</span>
+              ${out ? _statusIcon(m) : ''}
+            </div>
+            <div style="clear:both"></div>
+            ${m.failed_reason ? `<div style="font-size:10.5px;color:var(--rose);margin-top:2px;font-style:italic">Fout: ${esc(m.failed_reason.slice(0,60))}</div>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
+    const chatBg = `background:var(--surface-2);background-image:radial-gradient(rgba(0,0,0,.03) 1px, transparent 1px);background-size:16px 16px`;
+    return `<div style="${chatBg};padding:16px 20px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
+      ${msgs.length === 0
+        ? `<div style="text-align:center;color:var(--text-3);font-size:12.5px;padding:60px 0">Geen berichten in deze conversatie.</div>`
+        : bubbles}
+    </div>`;
+  }
+
+  function _inboxRightFooter(convId) {
+    return `<div style="padding:10px 20px;border-top:1px solid var(--border);background:var(--surface-2);font-size:12px;color:var(--text-3);text-align:center;flex-shrink:0">
+      Sturen vanuit deze viewer nog niet ondersteund — gebruik <a href="/modules/events.html?conv=${encodeURIComponent(convId)}#inbox" target="_blank" style="color:var(--pink);text-decoration:underline">v1-inbox</a> voor reply.
+    </div>`;
+  }
+
+  // ── HANDLERS: SPLIT-PANE SELECTIE + NAVIGATIE ──────────────────────────
+  //
+  // Surgical DOM-update: bewust géén DFO.render() bij het klikken op een
+  // gesprek. In plaats daarvan:
+  //  1) linker-lijst-scrollpositie bewaren
+  //  2) .active class op nieuwe rij zetten, oude weghalen
+  //  3) narrow-mode wrapper naar 'detail' zetten
+  //  4) messages fetchen indien niet cached; onDone-callback updatet
+  //     alleen #ev-inbox-right innerHTML
+  window.__evInboxSelect = async (convId) => {
+    if (!convId) return;
+    // Scroll-positie linkerlijst opslaan (voor eventuele latere DFO.render)
+    const leftEl = document.querySelector('#ev-inbox-left');
+    if (leftEl) _ui.inboxScrollTop = leftEl.scrollTop;
+
     _ui.inboxConvId = convId;
-    if (window.DFO?.render) window.DFO.render();
+    _ui.inboxNarrowMode = 'detail';
+
+    // Toggle .active class op rijen (surgical)
+    try {
+      const rows = document.querySelectorAll('.ev-inbox-row');
+      rows.forEach((el) => { el.classList.toggle('active', el.dataset.convId === convId); });
+    } catch (_) {}
+    // Narrow-mode data-attr
+    try {
+      const wrap = document.querySelector('.ev-inbox-split');
+      if (wrap) wrap.dataset.mode = 'detail';
+    } catch (_) {}
+
+    // Right pane content
+    const rightEl = document.querySelector('#ev-inbox-right');
+    const paint = () => { const r = document.querySelector('#ev-inbox-right'); if (r) r.innerHTML = _inboxRightPane(convId); };
+    if (_live.inboxMsgs.data[convId]) {
+      paint();  // cached
+      return;
+    }
+    // Show loading skeleton immediately
+    if (rightEl) rightEl.innerHTML = _inboxRightHeader(null, convId) + _inboxRightSkel();
+    if (!_live.inboxMsgs.loading[convId]) {
+      await fetchInboxMsgs(convId, paint);   // callback → paint zonder DFO.render
+    } else {
+      // Al fetching (bv. door prefetch); wacht kort en re-paint
+      const wait = () => { if (!_live.inboxMsgs.loading[convId]) paint(); else setTimeout(wait, 100); };
+      wait();
+    }
   };
+
+  window.__evInboxBackList = () => {
+    // Alleen relevant op <900px: toon lijst full-width, verberg right pane.
+    _ui.inboxNarrowMode = 'list';
+    try {
+      const wrap = document.querySelector('.ev-inbox-split');
+      if (wrap) wrap.dataset.mode = 'list';
+    } catch (_) {}
+  };
+
+  // Legacy aliassen (gebruikt door attendee-detail modal + eerdere calls):
+  window.__evInboxOpen = (convId) => { window.__evInboxSelect(convId); };
   window.__evInboxBack = () => {
-    _ui.inboxConvId = null;
-    // Force refresh unread-counts na read-mark
+    // Refresh de inbox-lijst (unread-counts kunnen zijn veranderd).
     _live.inbox.data = null; _live.inbox.error = null;
+    _ui.inboxConvId = null;
+    _ui.inboxNarrowMode = 'list';
     queueMicrotask(fetchInbox);
     if (window.DFO?.render) window.DFO.render();
   };
 
   function _inboxViewer(convId) {
+    // Deprecated: vervangen door split-pane rendering in inboxView(). Behouden
+    // als thin wrapper zodat eventuele externe callers (attendee-modal fallback)
+    // niet stukgaan.
+    return _inboxRightHeader(_live.inboxMsgs.data[convId]?.conversation || null, convId)
+      + _inboxRightPane_dummy(convId);
+  }
+  function _inboxRightPane_dummy(convId) {
+    const d = _live.inboxMsgs.data[convId];
+    if (!d) return _inboxRightSkel();
+    return _inboxChatBody(d, convId) + _inboxRightFooter(convId);
+  }
+  // Stub — vervangen door split-pane inbox
+  function _inboxViewer_OLD(convId) {
     const st = _live.inboxMsgs;
     if (!st.data[convId] && !st.loading[convId] && !st.error[convId]) queueMicrotask(() => fetchInboxMsgs(convId));
     const backBar = `<div style="padding:12px 20px;background:var(--surface-2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
