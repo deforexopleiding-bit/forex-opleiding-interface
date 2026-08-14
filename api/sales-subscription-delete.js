@@ -57,10 +57,26 @@ export default async function handler(req, res) {
       }
     }
 
-    // Lokaal soft-delete: status='cancelled' (historie blijft).
-    const { error: upErr } = await supabaseAdmin.from('subscriptions')
-      .update({ status: 'cancelled' }).eq('id', subscriptionId);
-    if (upErr) throw upErr;
+    // Lokaal soft-delete: status='cancelled' (historie blijft). NIET slikken:
+    // de TL-push is hierboven al geslaagd, dus als deze write faalt of 0 rijen
+    // raakt zou het endpoint anders "success" teruggeven terwijl lokaal nog
+    // 'active' staat (TL uit / lokaal aan = inconsistent). Surface dat expliciet.
+    const { data: upRows, error: upErr } = await supabaseAdmin.from('subscriptions')
+      .update({ status: 'cancelled' }).eq('id', subscriptionId).select('id');
+    if (upErr) {
+      console.error('[sub-delete] lokale status-update mislukt (TL al gedeactiveerd):', upErr.message);
+      return res.status(500).json({
+        error: 'Abonnement is in TeamLeader gedeactiveerd, maar de lokale status-update mislukte: ' + upErr.message,
+        code: 'LOCAL_UPDATE_FAIL', tl, local_updated: false,
+      });
+    }
+    if (!upRows || upRows.length === 0) {
+      console.error('[sub-delete] lokale status-update raakte 0 rijen, id=', subscriptionId);
+      return res.status(500).json({
+        error: 'Abonnement is in TeamLeader gedeactiveerd, maar de lokale status-update raakte geen enkele rij (id niet gevonden).',
+        code: 'LOCAL_UPDATE_NOMATCH', tl, local_updated: false,
+      });
+    }
 
     // Audit (fail-soft).
     try {
@@ -71,7 +87,7 @@ export default async function handler(req, res) {
       });
     } catch (e) { console.error('[sub-delete] audit:', e.message); }
 
-    return res.status(200).json({ success: true, tl });
+    return res.status(200).json({ success: true, tl, local_updated: true });
   } catch (e) {
     console.error('[sales-subscription-delete]', e.message);
     return res.status(500).json({ error: e.message });

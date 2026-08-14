@@ -483,7 +483,9 @@
             ? `<button class="btn" disabled title="Abonnement is al gefactureerd — aanpassen niet toegestaan. Gebruik crediteren + nieuw abo." style="opacity:.5;cursor:not-allowed">✎ Aanpassen (niet mogelijk)</button>`
             : `<button class="btn" onclick="__fnSubUpdate()" title="Abonnement aanpassen (omschrijving/bedrag/termijnen/data)">✎ Aanpassen</button>`}
           <button class="btn" onclick="__fnSubPostpone()" title="Uitstellen of verlengen (1-12 maanden). Push naar TeamLeader.">⏱ Uitstellen / verlengen</button>
-          <button class="btn" onclick="__fnSubDelete()" title="Abonnement deactiveren (lokaal + TL). Blijft in historie staan." style="background:var(--rose-soft, #FDECEE); border-color:var(--rose-line, #F5C2C9); color:var(--rose, #C22B3E)">⊘ Deactiveren</button>
+          ${['cancelled', 'deactivated', 'completed'].includes(String(st || '').toLowerCase())
+            ? ''
+            : `<button class="btn" onclick="__fnSubDelete()" title="Abonnement deactiveren (lokaal + TL). Blijft in historie staan." style="background:var(--rose-soft, #FDECEE); border-color:var(--rose-line, #F5C2C9); color:var(--rose, #C22B3E)">⊘ Deactiveren</button>`}
         </div>
       </div>
 

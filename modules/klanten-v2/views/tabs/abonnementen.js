@@ -220,6 +220,9 @@ function inclPerTerm(sub) {
 
 function renderSubCard(sub) {
   const st          = sub.status;
+  // Beëindigd abonnement (cancelled/deactivated/completed) → geen "Deactiveren"
+  // meer tonen; anders blijft de knop staan ná een geslaagde cancel.
+  const ended       = ['cancelled', 'deactivated', 'completed'].includes(String(st || '').toLowerCase());
   const isPostponed = Number(sub.postponed_months) > 0;
   const hasInv      = !!sub.has_any_invoice;
   const desc        = sub.description || 'Abonnement';
@@ -296,10 +299,10 @@ function renderSubCard(sub) {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
           Uitstellen
         </button>
-        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm kv-abo-btn-danger" data-kv-abo-delete="${K().esc(sub.id)}" title="Deactiveren">
+        ${ended ? '' : `<button type="button" class="ds-btn ds-btn-ghost ds-btn-sm kv-abo-btn-danger" data-kv-abo-delete="${K().esc(sub.id)}" title="Deactiveren">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"/></svg>
           Deactiveren
-        </button>
+        </button>`}
       </div>
 
       ${isExpanded ? `<div class="kv-abo-card-lines">${renderLineItems(sub)}</div>` : ''}
