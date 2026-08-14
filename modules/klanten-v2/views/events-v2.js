@@ -356,12 +356,9 @@
     queueMicrotask(() => fetchSuggestion(convId));
     if (typeof onDone === 'function') { try { onDone(); } catch (_) {} }
     else if (window.DFO?.render) window.DFO.render();
-    // Force-scroll naar bottom bij initial thread-load (nieuwe conv geopend).
-    // Kleine timeout zodat de DOM eerst is bijgewerkt.
-    queueMicrotask(() => {
-      const el = document.querySelector('#ev-inbox-chat-scroll');
-      if (el) el.scrollTop = el.scrollHeight;
-    });
+    // Force-scroll naar bottom bij initial thread-load — dubbele rAF wacht
+    // op layout van de zojuist ingevoegde bubbels.
+    _scrollChatToBottom(true);
   }
 
   // Template-lijst voor huidige conv. Response items[] met body_text, name,
@@ -2854,10 +2851,13 @@
         const oldScroll = document.querySelector('#ev-inbox-chat-scroll');
         const scrollTop = oldScroll ? oldScroll.scrollTop : 0;
         r.innerHTML = _inboxRightPane(convId);
-        const newScroll = document.querySelector('#ev-inbox-chat-scroll');
-        if (newScroll) {
-          if (wasAtBottom) newScroll.scrollTop = newScroll.scrollHeight;
-          else newScroll.scrollTop = scrollTop;
+        if (wasAtBottom) {
+          // Sticky-bottom: nieuw bericht + user near-bottom → auto-scroll via rAF
+          _scrollChatToBottom(true);
+        } else {
+          // User leest terug — bewaar scrollTop
+          const newScroll = document.querySelector('#ev-inbox-chat-scroll');
+          if (newScroll) newScroll.scrollTop = scrollTop;
         }
         // Re-focus composer input (browser reset focus na innerHTML)
         const inputId = active.id;
@@ -2867,8 +2867,8 @@
         }
       } else {
         r.innerHTML = _inboxRightPane(convId);
-        const scroll = document.querySelector('#ev-inbox-chat-scroll');
-        if (scroll && wasAtBottom) scroll.scrollTop = scroll.scrollHeight;
+        // Alleen scrollen als user near-bottom stond (sticky), anders positie behouden
+        if (wasAtBottom) _scrollChatToBottom(true);
       }
     } catch (_) {}
   }
@@ -2885,6 +2885,28 @@
     const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
     _ui._lastScrollAtBottom = dist < 80;
   };
+  // Scroll-to-bottom helper — zelfde patroon als Wanbetalers _inboxScrollToBottom
+  // (finance.html regel 14102-14114): requestAnimationFrame zodat de layout klaar
+  // is voordat we scrollHeight lezen. Dubbele rAF voor zekerheid bij een net
+  // vervangen innerHTML — 1e rAF wacht op paint, 2e rAF garandeert dat
+  // scrollHeight de nieuwe content bevat. force=true skipt de sticky-bottom
+  // check (bij openen van een gesprek altijd onderaan starten, ongeacht vorige
+  // scroll-positie).
+  function _scrollChatToBottom(force) {
+    // Try meteen (geen wacht) — vaak al klaar bij surgical repaint
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el = document.querySelector('#ev-inbox-chat-scroll');
+        if (!el) return;
+        if (!force) {
+          const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+          if (dist > 80) return;   // user leest terug, niet wegspringen
+        }
+        el.scrollTop = el.scrollHeight;
+        _ui._lastScrollAtBottom = true;
+      });
+    });
+  }
 
   // ── 24-uurs WhatsApp-venster ──────────────────────────────────────────
   // Meta staat vrije-tekst-berichten alleen toe binnen 24u na het LAATSTE
@@ -3044,7 +3066,13 @@
 
     // Right pane content
     const rightEl = document.querySelector('#ev-inbox-right');
-    const paint = () => { const r = document.querySelector('#ev-inbox-right'); if (r) r.innerHTML = _inboxRightPane(convId); };
+    const paint = () => {
+      const r = document.querySelector('#ev-inbox-right');
+      if (r) r.innerHTML = _inboxRightPane(convId);
+      // Bij openen van een gesprek: ALTIJD onderaan starten (ook bij cached
+      // data). Sticky-bottom check overslaan → force=true.
+      _scrollChatToBottom(true);
+    };
     if (_live.inboxMsgs.data[convId]) {
       paint();  // cached
       return;
