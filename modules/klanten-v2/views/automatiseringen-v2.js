@@ -1,135 +1,1333 @@
 // modules/klanten-v2/views/automatiseringen-v2.js
 //
-// Fase F — Automatiseringen (layout-only, voorbeeld-data).
-// 1-op-1 uit prototype:
-//   - MOTOREN + CRONS mock  r5025-5072
-//   - VIEWS['automatiseringen/Overzicht']  r5074-5172 (motor-cards + crons + schakelaars)
+// Automatiseringen v2 — VOLLEDIGE BOUW (PR #1298).
 //
-// Bewuste vereenvoudiging: de 5 sub-tabs Events/Onboarding/Leadsonderhoud/
-// Wanbetalers/Lisa uit MODS zijn NIET expliciet gedefinieerd in het prototype
-// — daar rendert automatiseringen/<motor> per-motor rules-lijstjes. Voor
-// deze layout-preview tonen de 5 sub-tabs een explanatory placeholder die
-// verwijst naar de motor-cards op Overzicht + de vervolg-data-ronde.
+// 5 tabs:
+//   Overzicht      — live status via /api/automations-status (motoren +
+//                    crons + schakelaars); toggles voor leadsonderhoud;
+//                    Wanbetalers = beschermd (read-only + deep-link).
+//   Events         — volledige editor-parity: lijst / create / edit /
+//                    delete / toggle / test-run / runs-log. Alle step-types
+//                    en trigger-configs.
+//   Onboarding     — idem (respecteer schema-verschillen: geen scope).
+//   Leadsonderhoud — global aan/uit + sjablonen-lijst + trajecten met
+//                    stap-editor.
+//   Agents         — read-only mirror van joost_config feature_flags per
+//                    module, met deep-link naar AI Agents-module.
 //
-// Dormant. Preview ?v2preview=automatiseringen (rol Manager).
+// KRITIEK — Test-endpoints zijn GEEN dry-run: events/onboarding-automation-
+// test.js INSERT'en een echte is_test=true attendee/onboarding en de engine
+// stuurt écht naar het opgegeven email/phone (wait wordt versneld naar 15s).
+// UI dwingt af: default test-target = ingelogde user email/phone, grote
+// waarschuwing "TEST STUURT ECHT".
+//
+// Dormant. Preview ?v2preview=automatiseringen.
 
 (function () {
   if (!window.DFO) { console.error('[automatiseringen-v2] DFO shell niet geladen.'); return; }
   if (!window.KV_V2 || !window.KV_V2.helpers) { console.error('[automatiseringen-v2] KV_V2.helpers niet geladen.'); return; }
 
-  const { I, svg, goTab } = window.DFO;
+  const { I, svg } = window.DFO;
   const H = window.KV_V2.helpers;
 
-  const MOTOREN = [
-    { id: 'events',          n: 'Events',          d: 'Aanmelding, vragenlijst, herinneringen en opvolging', ic: I.cal,     c: 'pink',    actief: 6, runs: 142, fouten: 0, lock: false },
-    { id: 'onboarding',      n: 'Onboarding',      d: 'Welkom, wizard-herinneringen en startdatum',            ic: I.route,   c: 'emerald', actief: 4, runs:  38, fouten: 0, lock: false },
-    { id: 'leadsonderhoud',  n: 'Leadsonderhoud',  d: 'Opvolgtrajecten voor leads die nog niet klaar zijn',   ic: I.repeat,  c: 'teal',    actief: 4, runs:  87, fouten: 1, lock: false },
-    { id: 'wanbetalers',     n: 'Wanbetalers',     d: 'Aanmaanstappen, wachttijden en beltaken',              ic: I.alert,   c: 'amber',   actief: 3, runs: 216, fouten: 0, lock: true  },
-    { id: 'lisa',            n: 'Lisa — opvolging', d: 'Berichten aan volgers die niet reageren',              ic: I.bot,     c: 'violet',  actief: 3, runs:  24, fouten: 0, lock: false },
-    { id: 'joost',           n: 'Joost & Simone',  d: 'Wanneer de assistenten zelf mogen handelen',            ic: I.sparkle, c: 'blue',    actief: 2, runs:  61, fouten: 0, lock: false },
-  ];
-  const CRONS = [
-    ['Aanmaan-motor',              'Elk uur',           'ok',    '09:00',   'Wanbetalers'],
-    ['Aanmaan-herinneringen',      'Elke 15 min',       'ok',    '13:15',   'Wanbetalers'],
-    ['Bulk versturen',             'Elke 3 min',        'ok',    '13:24',   'Wanbetalers'],
-    ['Event-automatiseringen',     'Elke minuut',       'ok',    '13:26',   'Events'],
-    ['Onboarding-automatiseringen', 'Elke minuut',       'ok',    '13:26',   'Onboarding'],
-    ['Leadsonderhoud',             'Elke minuut',       'warn',  '13:26',   'Leadsonderhoud'],
-    ['Lisa-berichten',             'Elke minuut',       'ok',    '13:26',   'Lisa'],
-    ['E-mail ophalen',             'Elke 5 min',        'ok',    '13:25',   'E-mail'],
-    ['Teamleader synchroniseren',  'Elk uur',           'ok',    '13:00',   'Finance'],
-    ['Bank ophalen',               'Elke 15 min',       'ok',    '13:15',   'Finance'],
-    ['Meta Ads synchroniseren',    'Elke 30 min',       'ok',    '13:00',   'Meta Ads'],
-    ['Belronde events',            'Dagelijks 07:00',   'ok',    '07:00',   'Events'],
-    ['No-show detectie',           'Dagelijks 06:00',   'ok',    '06:00',   'Mentoren'],
-    ['Uitbetalingen genereren',    '1e vrijdag 06:00',  'ok',    '1 aug',   'Mentoren'],
-  ];
-  const SCHAKELAARS = [
-    ['Joost mag zelf antwoorden',          'Wanbetalers · reactief',      true,  'amber'],
-    ['Joost mag regelingen voorstellen',    'tot € 1.500',                 true,  'amber'],
-    ['Joost stuurt zelf aanmaningen',       'uitgezet na incident',        false, 'amber'],
-    ['Simone mag zelf antwoorden',          'Events · reactief',           true,  'pink'],
-    ['Lisa is live',                        'Instagram-gesprekken',        true,  'violet'],
-    ['Leadsonderhoud actief',               'opvolgtrajecten',              true,  'teal'],
-    ['Onboarding-herinneringen',            'dagelijks 09:00',              false, 'emerald'],
-    ['Incasso automatisch',                  'dagelijks 09:15',              false, 'rose'],
-  ];
+  const asArr = (x) => Array.isArray(x) ? x : [];
+  const esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-  window.__autNotice = (l) => { console.info('[automatiseringen-v2] ' + l); try { alert(l + ' — komt in de data-ronde.'); } catch (_) {} };
-  window.__autGoTab = (t) => { try { goTab(t); } catch (_) {} };
+  // ═══════════════════════════════════════════════════════════════════════
+  // LIVE STATE
+  // ═══════════════════════════════════════════════════════════════════════
+  const _live = {
+    status:      { loading: false, error: null, data: null },   // /api/automations-status
+    evAutos:     { loading: false, error: null, data: null },   // events-automations-list
+    evRuns:      { loading: {}, error: {}, data: {} },          // per automation_id
+    obAutos:     { loading: false, error: null, data: null },   // onboarding-automations-list
+    obRuns:      { loading: {}, error: {}, data: {} },
+    lsInst:      { loading: false, error: null, data: null },   // leadsonderhoud-instellingen
+    lsSjab:      { loading: false, error: null, data: null },   // leadsonderhoud-sjablonen
+    lsTraj:      { loading: false, error: null, data: null },   // leadsonderhoud-trajecten
+    inboxTpls:   { loading: false, error: null, data: null },   // WA-templates voor send_whatsapp step
+    agentsCfg:   { loading: {}, error: {}, data: {} },          // per module: joost_config
+  };
 
-  function overzichtView() {
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'blue',    icon: I.repeat, label: 'Actieve automatiseringen', val: '22',  sub: 'over 6 motoren' },
-      { c: 'emerald', icon: I.send,   label: 'Verstuurd vandaag',        val: '568', hi: 1, sub: 'berichten en taken', trend: H.trend('+12%', true) },
-      { c: 'amber',   icon: I.alert,  label: 'Fouten',                   val: '1',   hi: 1, sub: 'Leadsonderhoud' },
-      { c: 'violet',  icon: I.clock,  label: 'Lopende reeksen',          val: '147', sub: 'wachten op volgende stap' },
-    ])}
-    <div class="pad" style="padding-top:16px">
-      <div style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);margin-bottom:11px">Motoren</div>
-      <div class="grid g3">
-        ${MOTOREN.map(m => `<div class="card card-hover" style="cursor:pointer" onclick="__autGoTab('${m.n.split(' ')[0]}')">
-          <div style="padding:15px 17px;display:flex;align-items:flex-start;gap:12px">
-            <span class="tile-ico" style="background:var(--${m.c}-soft);color:var(--${m.c})">${svg(m.ic)}</span>
-            <div style="flex:1;min-width:0">
-              <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
-                <span class="card-title">${m.n}</span>
-                ${m.lock ? `<span class="pill pill-warn nodot" style="font-size:10.5px;padding:1.5px 7px">${svg(I.shield || I.alert, 'width:10px;height:10px')}Beschermd</span>` : ''}</div>
-              <div style="font-size:12px;color:var(--text-3);margin-top:3px;line-height:1.45">${m.d}</div>
-            </div>
-          </div>
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);border-top:1px solid var(--border)">
-            ${[[m.actief, 'ACTIEF'], [m.runs, 'RUNS 24U'], [m.fouten, 'FOUTEN']].map(([v, l], i) => `<div style="background:var(--surface);padding:10px 12px;text-align:center">
-              <div style="font-size:17px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.03em;${l === 'FOUTEN' && v ? 'color:var(--rose)' : ''}">${v}</div>
-              <div style="font-size:10px;letter-spacing:.05em;color:var(--text-3);margin-top:2px">${l}</div></div>`).join('')}
-          </div></div>`).join('')}
-      </div>
+  const _ui = {
+    // Editor state per module — voorkomt dat we tussen sub-tabs interferereren
+    ev: { editing: null, wizardStep: 1, testModal: null, runsModal: null, filter: 'all' },
+    ob: { editing: null, wizardStep: 1, testModal: null, runsModal: null, filter: 'all' },
+    ls: { editingTraject: null, editingStap: null, expandedTrajectId: null },
+    // Busy-flags tegen dubbelklik
+    busy: {},   // key → true
+    // Toggle-confirm modal
+    confirmModal: null,   // { title, body, onConfirm, danger }
+  };
 
-      <div class="grid g2" style="margin-top:18px">
-        <div class="card">
-          <div class="card-head"><span class="tile-ico" style="background:var(--blue-soft);color:var(--blue)">${svg(I.clock)}</span>
-            <div class="card-title">Achtergrondtaken</div>
-            <span class="pill pill-ok nodot" style="margin-left:auto">13 van 14 gezond</span></div>
-          <div style="max-height:330px;overflow-y:auto">
-            ${CRONS.map(([n, f, st, l, mod]) => `<div style="display:flex;align-items:center;gap:12px;padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px">
-              <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--${st === 'ok' ? 'emerald' : 'amber'})"></span>
-              <div style="flex:1;min-width:0"><div style="font-weight:500">${n}</div>
-                <div style="font-size:11.5px;color:var(--text-3)">${f} · ${mod}</div></div>
-              <span class="mono" style="font-size:11.5px;color:var(--text-3)">${l}</span></div>`).join('')}
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-head"><span class="tile-ico" style="background:var(--violet-soft);color:var(--violet)">${svg(I.sliders)}</span>
-            <div class="card-title">Schakelaars</div>
-            <span style="font-size:11.5px;color:var(--text-3);margin-left:auto">Alles op één plek</span></div>
-          <div class="card-body" style="padding:4px 0">
-            ${SCHAKELAARS.map(([n, s, on, c]) => `<div style="display:flex;align-items:center;gap:12px;padding:11px 17px;border-bottom:1px solid var(--border)">
-              <span class="legend-dot" style="background:var(--${c})"></span>
-              <div style="flex:1"><div style="font-size:13px;font-weight:500">${n}</div>
-                <div style="font-size:11.5px;color:var(--text-3)">${s}</div></div>
-              <button class="chip ${on ? 'on' : ''}" style="font-size:11px;padding:2px 8px" onclick="__autNotice('Toggle: ' + '${n.replace(/'/g, "\\'")}')">${on ? 'Aan' : 'Uit'}</button></div>`).join('')}
-          </div>
+  async function tryFetch(label, url, init, timeoutMs) {
+    timeoutMs = timeoutMs || 8000;
+    try {
+      if (!window.KV || !window.KV.authedJson) throw new Error('KV.authedJson niet beschikbaar');
+      return await Promise.race([
+        window.KV.authedJson(url, init),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + timeoutMs + 'ms')), timeoutMs)),
+      ]);
+    } catch (e) { console.warn('[auto-v2] ' + label + ' fail:', e?.message); return { __error: e?.message || 'onbekende fout' }; }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // FETCHERS
+  // ═══════════════════════════════════════════════════════════════════════
+  async function fetchStatus() {
+    const st = _live.status; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('status', '/api/automations-status');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = j || null;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchEvAutos() {
+    const st = _live.evAutos; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('evAutos', '/api/events-automations-list');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.automations || j?.items);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchEvRuns(automationId) {
+    const st = _live.evRuns; if (st.loading[automationId] || st.data[automationId]) return;
+    st.loading[automationId] = true; st.error[automationId] = null;
+    const j = await tryFetch('evRuns:' + automationId, '/api/events-automation-runs?automation_id=' + encodeURIComponent(automationId));
+    st.loading[automationId] = false;
+    if (j && j.__error) st.error[automationId] = j.__error; else st.data[automationId] = asArr(j?.runs || j?.items);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchObAutos() {
+    const st = _live.obAutos; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('obAutos', '/api/onboarding-automations-list');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.automations || j?.items);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchObRuns(automationId) {
+    const st = _live.obRuns; if (st.loading[automationId] || st.data[automationId]) return;
+    st.loading[automationId] = true; st.error[automationId] = null;
+    const j = await tryFetch('obRuns:' + automationId, '/api/onboarding-automation-runs?automation_id=' + encodeURIComponent(automationId));
+    st.loading[automationId] = false;
+    if (j && j.__error) st.error[automationId] = j.__error; else st.data[automationId] = asArr(j?.runs || j?.items);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchLsInst() {
+    const st = _live.lsInst; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('lsInst', '/api/leadsonderhoud-instellingen');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = j || null;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchLsSjab() {
+    const st = _live.lsSjab; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('lsSjab', '/api/leadsonderhoud-sjablonen');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = { items: asArr(j?.items), logo_url: j?.logo_url || null };
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchLsTraj() {
+    const st = _live.lsTraj; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('lsTraj', '/api/leadsonderhoud-trajecten');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.trajecten);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  // Template-picker voor send_whatsapp step — hergebruikt inbox-template-list
+  // (WA-only). Cached module-wide (templates zijn niet conv-specifiek na
+  // load; alleen voor filtering per WABA maar events+onboarding delen scope).
+  async function fetchInboxTpls() {
+    const st = _live.inboxTpls; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('tpls', '/api/inbox-template-list');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.items);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchAgentCfg(moduleKey) {
+    const st = _live.agentsCfg; if (st.loading[moduleKey] || st.data[moduleKey]) return;
+    st.loading[moduleKey] = true; st.error[moduleKey] = null;
+    const j = await tryFetch('agentCfg:' + moduleKey, '/api/joost-config-get?module=' + encodeURIComponent(moduleKey));
+    st.loading[moduleKey] = false;
+    if (j && j.__error) st.error[moduleKey] = j.__error;
+    else st.data[moduleKey] = j?.config || j || null;
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // SHARED HELPERS
+  // ═══════════════════════════════════════════════════════════════════════
+  const errBlk = (block, msg, retryFn) => `<div style="margin:14px 20px;padding:12px 16px;border:1px solid var(--rose-line);background:var(--rose-soft);border-radius:var(--r);color:var(--rose);font-size:13px;display:flex;align-items:center;gap:12px">
+    <span style="flex:1">${svg(I.alert)} ${esc(msg)}</span>
+    ${retryFn ? `<button class="btn btn-ghost btn-sm" onclick="${retryFn}">Opnieuw</button>` : ''}
+  </div>`;
+  const skel = () => `<div style="padding:24px 20px"><div style="height:120px;background:var(--surface-2);border-radius:12px;opacity:.5"></div></div>`;
+  const emptyBlk = (title, sub) => `<div style="padding:40px 20px;text-align:center;color:var(--text-3)">
+    <div style="font-size:15px;font-weight:600;color:var(--text-2);margin-bottom:6px">${esc(title)}</div>
+    <div style="font-size:12.5px">${esc(sub)}</div>
+  </div>`;
+
+  function _fmtDateTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return '—';
+    return d.toLocaleString('nl-NL', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+  }
+  function _fmtDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return '—';
+    return d.toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' });
+  }
+  function _fmtRel(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return '—';
+    const s = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (s < 60) return s + 's geleden';
+    if (s < 3600) return Math.floor(s/60) + 'm geleden';
+    if (s < 86400) return Math.floor(s/3600) + 'u geleden';
+    return Math.floor(s/86400) + 'd geleden';
+  }
+  function _statusPill(status) {
+    const s = String(status || '').toLowerCase();
+    if (s === 'active')  return H.pill('ok', 'Actief');
+    if (s === 'idle')    return H.pill('neutral', 'Idle (24u)');
+    if (s === 'unknown') return H.pill('warn', 'Onbekend');
+    if (s === 'failed' || s === 'error') return H.pill('danger', 'Fout');
+    return H.pill('neutral', status || '—');
+  }
+  function _busy(key) { return !!_ui.busy[key]; }
+  function _setBusy(key, val) {
+    _ui.busy[key] = !!val;
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  // Confirm-modal helper
+  window.__autConfirm = null;
+  function askConfirm(title, body, onConfirm, opts) {
+    _ui.confirmModal = { title, body, onConfirm, danger: opts?.danger || false, confirmLabel: opts?.confirmLabel || 'Bevestigen' };
+    if (window.DFO?.render) window.DFO.render();
+  }
+  window.__autConfirmYes = async () => {
+    const m = _ui.confirmModal;
+    if (!m) return;
+    _ui.confirmModal = null;
+    if (window.DFO?.render) window.DFO.render();
+    try { await m.onConfirm(); } catch (e) { alert('Actie mislukt: ' + (e?.message || 'onbekende fout')); }
+  };
+  window.__autConfirmNo = () => { _ui.confirmModal = null; if (window.DFO?.render) window.DFO.render(); };
+
+  function _confirmModalHtml() {
+    const m = _ui.confirmModal; if (!m) return '';
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)window.__autConfirmNo()">
+      <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);font-size:14px;font-weight:600">${esc(m.title)}</div>
+        <div style="padding:16px 18px;font-size:13px;line-height:1.55;color:var(--text-2)">${m.body}</div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm" onclick="window.__autConfirmNo()">Annuleren</button>
+          <button class="btn ${m.danger ? 'btn-danger' : 'btn-primary'} btn-sm" onclick="window.__autConfirmYes()">${esc(m.confirmLabel)}</button>
         </div>
       </div>
     </div>`;
   }
 
-  // Per-motor sub-tab: placeholder met verwijzing naar Overzicht + prototype-refs.
-  const perMotorView = (motorNaam) => () => `${H.voorbeeldBanner()}
-    <div style="padding:32px 24px;max-width:640px">
-      <h2 style="font-size:18px;margin-bottom:12px">${motorNaam} — automatiseringen</h2>
-      <p style="color:var(--text-3);font-size:13.5px;line-height:1.6">Deze tab toont in de data-ronde de reeksen (triggers/stappen/wachten/berichten) voor de <b>${motorNaam}</b>-motor. Voor de layout-review: zie de motor-card op <a href="#" onclick="event.preventDefault();__autGoTab('Overzicht')" style="color:var(--m)">Overzicht</a> voor de stats en beschermde-status. Motor-rules + editable-wizard komen in de data-ronde uit het prototype (r5074+).</p>
-      <button class="btn btn-primary" style="margin-top:14px" onclick="__autNotice('${motorNaam} regels bekijken')">${svg(I.eye)}Regels bekijken</button>
-    </div>`;
+  // ═══════════════════════════════════════════════════════════════════════
+  // TAB: OVERZICHT (live status)
+  // ═══════════════════════════════════════════════════════════════════════
+  function overzichtView() {
+    if (!_live.status.data && !_live.status.loading && !_live.status.error) queueMicrotask(fetchStatus);
+    if (_live.status.error && !_live.status.data) return errBlk('status', _live.status.error, "window.__autRetry('status')") + _confirmModalHtml();
+    if (_live.status.loading && !_live.status.data) return skel() + _confirmModalHtml();
 
-  window.DFO.VIEWS['automatiseringen/Overzicht']       = overzichtView;
-  window.DFO.VIEWS['automatiseringen/Events']          = perMotorView('Events');
-  window.DFO.VIEWS['automatiseringen/Onboarding']      = perMotorView('Onboarding');
-  window.DFO.VIEWS['automatiseringen/Leadsonderhoud']  = perMotorView('Leadsonderhoud');
-  window.DFO.VIEWS['automatiseringen/Wanbetalers']     = perMotorView('Wanbetalers');
-  window.DFO.VIEWS['automatiseringen/Lisa']            = perMotorView('Lisa');
-  if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('automatiseringen');
-  else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('automatiseringen');
-  console.debug('[automatiseringen-v2] registered 6 views (dormant)');
+    const d = _live.status.data || {};
+    const motoren = asArr(d.motoren);
+    const crons = asArr(d.crons);
+    const schakelaars = asArr(d.schakelaars);
+
+    const activeCnt = motoren.filter((m) => m.status === 'active').length;
+    const unknownCnt = motoren.filter((m) => m.status === 'unknown').length;
+    const failedCnt = motoren.reduce((a, m) => a + Number(m.last_24h_failed || 0), 0);
+
+    return `${H.kpis([
+      { c:'pink',    icon:I.zap    || I.tick, label:'Motoren actief (24u)', val:String(activeCnt), sub:motoren.length + ' totaal' },
+      { c:'amber',   icon:I.alert, label:'Fouten (24u)',              val:String(failedCnt), hi: failedCnt > 0 ? 1 : 0 },
+      { c:'slate',   icon:I.clock, label:'Status onbekend',           val:String(unknownCnt), sub:'Beheer via Vercel-dashboard' },
+      { c:'blue',    icon:I.cog   || I.settings, label:'Crons geregistreerd', val:String(crons.length), sub:'in vercel.json' },
+    ])}
+
+    <div class="pad" style="padding-top:14px">
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-head">
+          <span class="tile-ico" style="background:var(--pink-soft);color:var(--pink)">${svg(I.zap || I.tick)}</span>
+          <div class="card-title">Motoren</div>
+          <span style="margin-left:auto;font-size:11px;color:var(--text-3)">env: ${esc(d.env || '—')}</span>
+        </div>
+        <div class="card-body" style="padding:0">
+          ${motoren.length === 0 ? emptyBlk('Geen motoren', 'Kon geen motor-status ophalen.') : `<div>
+            ${motoren.map((m) => _motorCard(m)).join('')}
+          </div>`}
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-head">
+          <span class="tile-ico" style="background:var(--amber-soft);color:var(--amber)">${svg(I.slider || I.cog || I.settings)}</span>
+          <div class="card-title">Schakelaars</div>
+        </div>
+        <div class="card-body" style="padding:12px 17px">
+          ${schakelaars.length === 0 ? emptyBlk('Geen schakelaars', 'Geen toggle-flags gevonden.') : schakelaars.map((s) => _schakelaarRow(s)).join('')}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="tile-ico" style="background:var(--slate-soft);color:var(--slate)">${svg(I.clock)}</span>
+          <div class="card-title">Crons (vercel.json)</div>
+          <span style="margin-left:auto;font-size:11px;color:var(--text-3)">${crons.length} geregistreerd</span>
+        </div>
+        <div class="card-body" style="padding:0">
+          ${crons.length === 0 ? emptyBlk('Geen crons', 'vercel.json bevat geen crons-array.') : H.table(
+            [{l:'Cron'},{l:'Schedule',cls:'mono'},{l:'Endpoint',cls:'mono'}],
+            crons.map((c) => [
+              `<span style="font-size:12.5px">${esc(c.label)}</span>`,
+              `<span class="mono" style="font-size:12px;color:var(--text-3)">${esc(c.schedule)}</span>`,
+              `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(c.endpoint)}</span>`,
+            ])
+          )}
+        </div>
+      </div>
+    </div>
+    ${_confirmModalHtml()}`;
+  }
+
+  function _motorCard(m) {
+    const isProt = !!m.protected;
+    const statusChip = _statusPill(m.status);
+    const failed = Number(m.last_24h_failed || 0);
+    return `<div style="padding:14px 17px;border-bottom:1px solid var(--border);display:flex;gap:12px;align-items:flex-start">
+      <span class="tile-ico" style="background:${isProt ? 'var(--rose-soft)' : 'var(--emerald-soft)'};color:${isProt ? 'var(--rose)' : 'var(--emerald)'};width:36px;height:36px;flex-shrink:0">${svg(isProt ? (I.lock || I.alert) : (I.zap || I.tick), 'width:16px;height:16px')}</span>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+          <div style="font-size:13.5px;font-weight:600">${esc(m.label)}</div>
+          ${statusChip}
+          ${isProt ? H.pill('warn', '🔒 Beschermd') : ''}
+        </div>
+        <div style="font-size:11.5px;color:var(--text-3);margin-top:3px;display:flex;gap:14px;flex-wrap:wrap">
+          ${m.schedule ? `<span class="mono">Schedule: ${esc(m.schedule)}</span>` : ''}
+          ${m.last_24h_runs != null ? `<span>Runs (24u): <b style="color:var(--text-2)">${m.last_24h_runs}</b></span>` : `<span style="color:var(--text-3)">Runs onbekend</span>`}
+          ${failed > 0 ? `<span style="color:var(--rose)">Fouten: <b>${failed}</b></span>` : ''}
+          ${m.last_run_at ? `<span>Laatste run: ${esc(_fmtRel(m.last_run_at))}</span>` : ''}
+        </div>
+      </div>
+      <div style="flex-shrink:0">
+        ${isProt
+          ? `<a href="/modules/finance.html#wanbetalers" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none">${svg(I.arrRight || I.tick)}Open Wanbetalers</a>`
+          : (m.key === 'events-automations' ? `<button class="btn btn-ghost btn-sm" onclick="window.__autGoTab('events')">Beheren →</button>`
+            : m.key === 'onboarding-automations' ? `<button class="btn btn-ghost btn-sm" onclick="window.__autGoTab('onboarding')">Beheren →</button>`
+            : m.key === 'leadsonderhoud' ? `<button class="btn btn-ghost btn-sm" onclick="window.__autGoTab('leadsonderhoud')">Beheren →</button>`
+            : m.key === 'lisa' ? `<a href="/modules/lisa.html" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none">Open Lisa</a>`
+            : '')}
+      </div>
+    </div>`;
+  }
+
+  function _schakelaarRow(s) {
+    const val = s.value;
+    let valDisplay = '—';
+    if (val === null || val === undefined) valDisplay = 'niet gezet';
+    else if (typeof val === 'boolean') valDisplay = val ? 'aan' : 'uit';
+    else if (typeof val === 'object' && val.enabled !== undefined) valDisplay = val.enabled ? 'aan' : 'uit';
+    else if (typeof val === 'object' && val.hours !== undefined) valDisplay = val.hours + ' uur';
+    else valDisplay = JSON.stringify(val).slice(0, 50);
+    const editableLs = s.key === 'leadsonderhoud_live' && s.editable;
+    return `<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:500">${esc(s.label)}${s.protectedZone ? ' <span class="pill pill-warn nodot" style="font-size:9px;padding:1px 5px">🔒 protected</span>' : ''}</div>
+        <div class="mono" style="font-size:10.5px;color:var(--text-3);margin-top:2px">${esc(s.source)}</div>
+      </div>
+      <div style="font-size:12px;color:var(--text-2)">${esc(valDisplay)}</div>
+      ${editableLs
+        ? `<button class="btn btn-ghost btn-sm" onclick="window.__autLsToggle()" ${_busy('lsToggle') ? 'disabled' : ''}>${(val === true || val?.enabled === true) ? 'Uit zetten' : 'Aan zetten'}</button>`
+        : s.protectedZone
+          ? `<a href="/modules/finance.html#wanbetalers" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none;font-size:11px">Open bron ↗</a>`
+          : `<span style="font-size:10.5px;color:var(--text-3)">read-only</span>`}
+    </div>`;
+  }
+
+  window.__autRetry = (block) => {
+    if (block === 'status')   { _live.status.data = null; _live.status.error = null; fetchStatus(); }
+    if (block === 'evAutos')  { _live.evAutos.data = null; _live.evAutos.error = null; fetchEvAutos(); }
+    if (block === 'obAutos')  { _live.obAutos.data = null; _live.obAutos.error = null; fetchObAutos(); }
+    if (block === 'lsInst')   { _live.lsInst.data = null; _live.lsInst.error = null; fetchLsInst(); }
+    if (block === 'lsSjab')   { _live.lsSjab.data = null; _live.lsSjab.error = null; fetchLsSjab(); }
+    if (block === 'lsTraj')   { _live.lsTraj.data = null; _live.lsTraj.error = null; fetchLsTraj(); }
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autGoTab = (subtab) => {
+    try { window.DFO?.setTab && window.DFO.setTab(subtab.charAt(0).toUpperCase() + subtab.slice(1)); } catch (_) {}
+  };
+
+  // Leadsonderhoud toggle (met confirm)
+  window.__autLsToggle = async () => {
+    const cur = _live.status.data?.schakelaars?.find((s) => s.key === 'leadsonderhoud_live');
+    const isOn = cur?.value === true || cur?.value?.enabled === true;
+    askConfirm(
+      isOn ? 'Leadsonderhoud UIT zetten?' : 'Leadsonderhoud AAN zetten?',
+      `<p>Zet <b>leadsonderhoud_live_${esc(_live.status.data?.env || '?')}</b> ${isOn ? 'op <b style="color:var(--rose)">uit</b>' : 'op <b style="color:var(--emerald)">aan</b>'}.</p>
+       <p>${isOn ? 'De drip-motor stopt met versturen tot je hem weer aan zet.' : 'De drip-motor start binnen 15 min met versturen volgens de trajecten.'}</p>`,
+      async () => {
+        _setBusy('lsToggle', true);
+        try {
+          const j = await window.KV.authedJson('/api/leadsonderhoud-instellingen', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ live: !isOn }),
+          });
+          if (j?.error) throw new Error(j.error);
+          // Invalidate + refetch status
+          _live.status.data = null; _live.status.error = null;
+          _live.lsInst.data = null; _live.lsInst.error = null;
+          queueMicrotask(fetchStatus);
+        } finally { _setBusy('lsToggle', false); }
+      },
+      { confirmLabel: isOn ? 'Ja, uit zetten' : 'Ja, aan zetten', danger: isOn }
+    );
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // TAB: EVENTS — volledige editor-parity
+  // ═══════════════════════════════════════════════════════════════════════
+  const EV_TRIGGERS = [
+    { v: 'on_signup',                       l: 'Bij aanmelding' },
+    { v: 'on_assessment_completed',         l: 'Bij ingevulde vragenlijst' },
+    { v: 'time_before_event',               l: 'X tijd vóór event' },
+    { v: 'on_assessment_not_completed_after', l: 'X tijd na aanmelding, vragenlijst nog niet in' },
+  ];
+  const EV_SCOPES  = ['all', 'niveau', 'events'];
+  const EV_ENROLL  = ['new_only', 'include_existing'];
+  const EV_STEP_TYPES = [
+    { v: 'wait',                      l: 'Wachten (X tijd)' },
+    { v: 'condition',                 l: 'Voorwaarde (check + stop-of-doorgaan)' },
+    { v: 'send_email',                l: 'E-mail versturen' },
+    { v: 'send_whatsapp',             l: 'WhatsApp-template versturen' },
+    { v: 'set_tag',                   l: 'Tag toevoegen aan deelnemer' },
+    { v: 'update_attendee_status',    l: 'Deelnemer-status bijwerken' },
+    { v: 'send_internal_notification',l: 'Interne notificatie' },
+  ];
+
+  function eventsView() {
+    if (!_live.evAutos.data && !_live.evAutos.loading && !_live.evAutos.error) queueMicrotask(fetchEvAutos);
+    if (_ui.ev.editing) return _evEditor(_ui.ev.editing) + _confirmModalHtml();
+    if (_ui.ev.testModal) return _evTestModal() + _confirmModalHtml();
+    if (_ui.ev.runsModal) return _evRunsModal() + _confirmModalHtml();
+    if (_live.evAutos.error && !_live.evAutos.data) return errBlk('evAutos', _live.evAutos.error, "window.__autRetry('evAutos')") + _confirmModalHtml();
+    if (_live.evAutos.loading && !_live.evAutos.data) return skel() + _confirmModalHtml();
+    return _evList() + _confirmModalHtml();
+  }
+  function _evList() {
+    const all = asArr(_live.evAutos.data);
+    const filter = _ui.ev.filter;
+    const rows = filter === 'enabled' ? all.filter((a) => a.enabled)
+              : filter === 'disabled' ? all.filter((a) => !a.enabled)
+              : all;
+    return `<div class="toolbar" style="padding:12px 20px;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--border)">
+      ${[['all','Alles'],['enabled','Actief'],['disabled','Uit']].map(([v, l]) => `<button class="chip ${filter === v ? 'on' : ''}" onclick="window.__autEvFilter('${v}')">${esc(l)}<span class="cnt">${v === 'all' ? all.length : (v === 'enabled' ? all.filter((a) => a.enabled).length : all.filter((a) => !a.enabled).length)}</span></button>`).join('')}
+      <div class="tb-right" style="margin-left:auto">
+        <button class="btn btn-primary btn-sm" onclick="window.__autEvNew()">${svg(I.plus)}Nieuwe automation</button>
+      </div>
+    </div>
+    ${rows.length === 0
+      ? emptyBlk('Geen automations', 'Klik "Nieuwe automation" om er een te maken.')
+      : `<div style="padding:0 20px 20px">${H.table(
+          [{l:'Naam'},{l:'Trigger',cls:'optional'},{l:'Scope',cls:'optional'},{l:'Stappen',cls:'r optional'},{l:'Status'},{l:'',cls:'r'}],
+          rows.map((a) => [
+            `<div><div class="cell-main">${esc(a.name || '—')}</div>${a.description ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:2px">${esc(a.description)}</div>` : ''}</div>`,
+            `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(a.trigger_type || '—')}</span>`,
+            `<span style="font-size:11.5px;color:var(--text-3)">${esc(a.scope_type || 'all')}</span>`,
+            `<span class="mono">${asArr(a.steps).length}</span>`,
+            a.enabled ? H.pill('ok','Actief') : H.pill('neutral','Uit'),
+            `<div style="display:flex;gap:4px;justify-content:flex-end">
+              <button class="icon-btn" title="Toggle" onclick="window.__autEvToggle('${esc(a.id)}')" ${_busy('evTog:' + a.id) ? 'disabled' : ''} style="width:28px;height:28px">${svg(a.enabled ? (I.pause || I.x) : (I.play || I.tick), 'width:13px;height:13px')}</button>
+              <button class="icon-btn" title="Test" onclick="window.__autEvTest('${esc(a.id)}')" style="width:28px;height:28px">${svg(I.flask || I.tick, 'width:13px;height:13px')}</button>
+              <button class="icon-btn" title="Runs" onclick="window.__autEvRuns('${esc(a.id)}')" style="width:28px;height:28px">${svg(I.clock, 'width:13px;height:13px')}</button>
+              <button class="icon-btn" title="Bewerken" onclick="window.__autEvEdit('${esc(a.id)}')" style="width:28px;height:28px">${svg(I.edit || I.settings, 'width:13px;height:13px')}</button>
+              <button class="icon-btn" title="Verwijderen" onclick="window.__autEvDelete('${esc(a.id)}','${esc(a.name || '')}')" style="width:28px;height:28px">${svg(I.trash || I.x, 'width:13px;height:13px')}</button>
+            </div>`,
+          ])
+        )}</div>`}`;
+  }
+
+  window.__autEvFilter = (v) => { _ui.ev.filter = v; if (window.DFO?.render) window.DFO.render(); };
+  window.__autEvNew = () => {
+    _ui.ev.editing = {
+      id: null,
+      name: '', description: '', enabled: false,
+      trigger_type: 'on_signup', trigger_config: {},
+      scope_type: 'all', scope_config: {},
+      enroll_mode: 'new_only',
+      steps: [],
+    };
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autEvEdit = (id) => {
+    const a = asArr(_live.evAutos.data).find((x) => x.id === id);
+    if (!a) return alert('Automation niet gevonden.');
+    _ui.ev.editing = JSON.parse(JSON.stringify(a));   // deep copy voor edit
+    _ui.ev.editing.trigger_config = _ui.ev.editing.trigger_config || {};
+    _ui.ev.editing.scope_config = _ui.ev.editing.scope_config || {};
+    _ui.ev.editing.steps = asArr(_ui.ev.editing.steps);
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autEvBack = () => { _ui.ev.editing = null; if (window.DFO?.render) window.DFO.render(); };
+  window.__autEvToggle = async (id) => {
+    const a = asArr(_live.evAutos.data).find((x) => x.id === id);
+    if (!a) return;
+    _setBusy('evTog:' + id, true);
+    try {
+      const j = await window.KV.authedJson('/api/events-automation-save', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ ...a, enabled: !a.enabled }),
+      });
+      if (j?.error) throw new Error(j.error);
+      _live.evAutos.data = null; queueMicrotask(fetchEvAutos);
+    } catch (e) { alert('Toggle mislukt: ' + (e?.message || 'onbekende fout')); }
+    finally { _setBusy('evTog:' + id, false); }
+  };
+  window.__autEvDelete = (id, name) => {
+    askConfirm(
+      'Automation verwijderen?',
+      `<p>Weet je zeker dat je <b>${esc(name)}</b> permanent wilt verwijderen?</p>
+       <p style="color:var(--rose);font-size:12px">Deze actie kan niet ongedaan gemaakt worden. Bestaande runs blijven wel bewaard.</p>`,
+      async () => {
+        const j = await window.KV.authedJson('/api/events-automation-delete', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ id }),
+        });
+        if (j?.error) throw new Error(j.error);
+        _live.evAutos.data = null; queueMicrotask(fetchEvAutos);
+      },
+      { confirmLabel: 'Ja, verwijderen', danger: true }
+    );
+  };
+  window.__autEvTest = (id) => {
+    const a = asArr(_live.evAutos.data).find((x) => x.id === id);
+    if (!a) return;
+    if (!a.enabled) return alert('Zet de automation eerst aan voordat je een test-run doet.');
+    _ui.ev.testModal = {
+      automation_id: id,
+      automation_name: a.name || '—',
+      event_id: '',
+      first_name: 'TEST',
+      last_name: 'Jeffrey',
+      email: 'biemoldjeffrey@gmail.com',
+      phone: '+31600000000',
+    };
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autEvRuns = (id) => {
+    _ui.ev.runsModal = { automation_id: id };
+    if (!_live.evRuns.data[id]) queueMicrotask(() => fetchEvRuns(id));
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autEvRunsClose = () => { _ui.ev.runsModal = null; if (window.DFO?.render) window.DFO.render(); };
+  window.__autEvTestClose = () => { _ui.ev.testModal = null; if (window.DFO?.render) window.DFO.render(); };
+  window.__autEvTestField = (k, v) => { if (_ui.ev.testModal) _ui.ev.testModal[k] = v; };
+  window.__autEvTestSubmit = async () => {
+    const t = _ui.ev.testModal; if (!t) return;
+    if (!t.event_id || !t.first_name || !t.last_name || !t.email || !t.phone) return alert('Alle velden zijn verplicht.');
+    _setBusy('evTestSubmit', true);
+    try {
+      const j = await window.KV.authedJson('/api/events-automation-test', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          automation_id: t.automation_id, event_id: t.event_id,
+          first_name: t.first_name, last_name: t.last_name, email: t.email, phone: t.phone,
+        }),
+      });
+      if (j?.error) throw new Error(j.error);
+      alert('Test gestart. Attendee-ID: ' + (j?.attendee_id || '—') + '\nRun-ID: ' + (j?.run_id || '—') + '\n\nDe automation loopt nu ECHT met versnelde wait-stappen. Berichten worden verstuurd naar het opgegeven email/nummer.');
+      _ui.ev.testModal = null;
+      if (window.DFO?.render) window.DFO.render();
+    } catch (e) { alert('Test mislukt: ' + (e?.message || 'onbekende fout')); }
+    finally { _setBusy('evTestSubmit', false); }
+  };
+
+  function _evTestModal() {
+    const t = _ui.ev.testModal; if (!t) return '';
+    const busy = _busy('evTestSubmit');
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)window.__autEvTestClose()">
+      <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);max-width:560px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+          <div style="font-size:14px;font-weight:600;flex:1">Test-run: ${esc(t.automation_name)}</div>
+          <button class="icon-btn" onclick="window.__autEvTestClose()" title="Sluiten" style="width:28px;height:28px">${svg(I.x || I.close, 'width:13px;height:13px')}</button>
+        </div>
+        <div style="padding:16px 18px">
+          <div style="padding:10px 12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:8px;color:var(--rose);font-size:12.5px;line-height:1.5;margin-bottom:14px">
+            <b>⚠ TEST STUURT ECHT.</b> Dit is <b>geen dry-run</b> — de automation-engine INSERT'et een test-attendee (is_test=true) en verstuurt daadwerkelijk berichten (met verkorte wait van 15s). Gebruik je eigen email/nummer om te voorkomen dat klanten test-berichten krijgen.
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            ${_field('Event-ID (uuid)', 'event_id', t.event_id, 'text', 'Zoek in Events > Overzicht > kopieer event-ID')}
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              ${_field('Voornaam', 'first_name', t.first_name, 'text')}
+              ${_field('Achternaam', 'last_name', t.last_name, 'text')}
+            </div>
+            ${_field('E-mail (jouw eigen adres)', 'email', t.email, 'email')}
+            ${_field('Telefoon (+316…)', 'phone', t.phone, 'tel', 'E.164 format, bv. +31612345678')}
+          </div>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm" onclick="window.__autEvTestClose()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" onclick="window.__autEvTestSubmit()" ${busy ? 'disabled' : ''}>${busy ? '…' : 'Start test-run'}</button>
+        </div>
+      </div>
+    </div>`;
+    function _field(label, key, val, kind, hint) {
+      return `<div>
+        <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">${esc(label)}</label>
+        <input type="${kind}" value="${esc(val)}" oninput="window.__autEvTestField('${key}', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box" />
+        ${hint ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:3px">${esc(hint)}</div>` : ''}
+      </div>`;
+    }
+  }
+
+  function _evRunsModal() {
+    const m = _ui.ev.runsModal; if (!m) return '';
+    const runs = asArr(_live.evRuns.data[m.automation_id]);
+    const loading = _live.evRuns.loading[m.automation_id];
+    const err = _live.evRuns.error[m.automation_id];
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)window.__autEvRunsClose()">
+      <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);max-width:720px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+          <div style="font-size:14px;font-weight:600;flex:1">Runs-log</div>
+          <button class="icon-btn" onclick="window.__autEvRunsClose()" title="Sluiten" style="width:28px;height:28px">${svg(I.x || I.close, 'width:13px;height:13px')}</button>
+        </div>
+        <div style="padding:16px 18px">
+          ${err ? errBlk('evRuns', err)
+            : loading ? '<div style="padding:20px;text-align:center;color:var(--text-3)">Runs laden…</div>'
+            : runs.length === 0 ? emptyBlk('Geen runs', 'Deze automation heeft nog niet gedraaid.')
+            : `<div style="display:flex;flex-direction:column;gap:6px">${runs.slice(0, 50).map((r) => `<div style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface)">
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                  ${_statusPill(r.status)}
+                  ${r.is_test ? H.pill('warn','TEST') : ''}
+                  <span class="mono" style="font-size:11px;color:var(--text-3)">${esc(_fmtDateTime(r.started_at))}</span>
+                  ${r.next_run_at ? `<span style="font-size:10.5px;color:var(--text-3)">volgende: ${esc(_fmtDateTime(r.next_run_at))}</span>` : ''}
+                </div>
+                <div class="mono" style="font-size:10.5px;color:var(--text-3);margin-top:3px">step_index: ${esc(String(r.current_step_index ?? '—'))} · attendee: ${esc(String(r.attendee_id || '').slice(0, 8))}…</div>
+              </div>`).join('')}</div>`}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // ── EVENTS EDITOR ──────────────────────────────────────────────────────
+  function _evEditor(a) {
+    const isNew = !a.id;
+    const busy = _busy('evSave');
+    return `<div style="padding:12px 20px;background:var(--surface-2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+      <button class="btn btn-ghost btn-sm" onclick="window.__autEvBack()">${svg(I.arrDown || I.x, 'width:13px;height:13px;transform:rotate(90deg)')}Terug naar lijst</button>
+      <span style="font-size:14px;font-weight:600">${isNew ? 'Nieuwe automation' : 'Bewerken: ' + esc(a.name || '—')}</span>
+      <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="window.__autEvSave()" ${busy ? 'disabled' : ''}>${busy ? 'Opslaan…' : (svg(I.tick) + 'Opslaan')}</button>
+    </div>
+    <div class="pad" style="padding-top:14px"><div style="max-width:900px;margin:0 auto;display:flex;flex-direction:column;gap:14px">
+      ${_evCardBasis(a)}
+      ${_evCardTrigger(a)}
+      ${_evCardScope(a)}
+      ${_evCardSteps(a)}
+    </div></div>`;
+  }
+  function _evCardBasis(a) {
+    return `<div class="card">
+      <div class="card-head"><div class="card-title">Basis</div></div>
+      <div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+        <div>
+          <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Naam</label>
+          <input type="text" value="${esc(a.name)}" oninput="window.__autEvField('name', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box" />
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Beschrijving</label>
+          <textarea oninput="window.__autEvField('description', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box;min-height:60px;resize:vertical;font-family:inherit">${esc(a.description || '')}</textarea>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" ${a.enabled ? 'checked' : ''} onchange="window.__autEvField('enabled', this.checked)" />
+          <span>Actief (draaien vanaf nu)</span>
+        </label>
+      </div>
+    </div>`;
+  }
+  function _evCardTrigger(a) {
+    return `<div class="card">
+      <div class="card-head"><div class="card-title">Trigger</div></div>
+      <div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+        <div>
+          <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Trigger-type</label>
+          <select onchange="window.__autEvField('trigger_type', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box">
+            ${EV_TRIGGERS.map((t) => `<option value="${t.v}" ${a.trigger_type === t.v ? 'selected' : ''}>${esc(t.l)}</option>`).join('')}
+          </select>
+        </div>
+        ${(a.trigger_type === 'time_before_event' || a.trigger_type === 'on_assessment_not_completed_after') ? `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Waarde</label>
+              <input type="number" value="${esc(String(a.trigger_config?.value ?? 24))}" oninput="window.__autEvTrigConfig('value', Number(this.value))" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box" />
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Eenheid</label>
+              <select onchange="window.__autEvTrigConfig('unit', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box">
+                ${['minutes','hours','days'].map((u) => `<option value="${u}" ${a.trigger_config?.unit === u ? 'selected' : ''}>${esc(u)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+        ` : ''}
+        <div>
+          <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Enroll-mode</label>
+          <select onchange="window.__autEvField('enroll_mode', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box">
+            ${EV_ENROLL.map((m) => `<option value="${m}" ${a.enroll_mode === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+    </div>`;
+  }
+  function _evCardScope(a) {
+    return `<div class="card">
+      <div class="card-head"><div class="card-title">Scope (welke events?)</div></div>
+      <div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+        <div>
+          <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Scope-type</label>
+          <select onchange="window.__autEvField('scope_type', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box">
+            ${EV_SCOPES.map((s) => `<option value="${s}" ${a.scope_type === s ? 'selected' : ''}>${esc(s === 'all' ? 'Alle events' : s === 'niveau' ? 'Per niveau' : 'Specifieke events')}</option>`).join('')}
+          </select>
+        </div>
+        ${a.scope_type === 'niveau' ? `
+          <div>
+            <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Niveau-slug (comma-separated)</label>
+            <input type="text" value="${esc((a.scope_config?.niveaus || []).join(','))}" oninput="window.__autEvScopeConfig('niveaus', this.value.split(',').map((s) => s.trim()).filter(Boolean))" placeholder="bv. beginner,gevorderd" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box" />
+          </div>
+        ` : ''}
+        ${a.scope_type === 'events' ? `
+          <div>
+            <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Event-IDs (comma-separated uuids)</label>
+            <textarea oninput="window.__autEvScopeConfig('event_ids', this.value.split(',').map((s) => s.trim()).filter(Boolean))" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px;box-sizing:border-box;min-height:60px;font-family:'IBM Plex Mono',monospace;resize:vertical">${esc((a.scope_config?.event_ids || []).join(','))}</textarea>
+          </div>
+        ` : ''}
+      </div>
+    </div>`;
+  }
+  function _evCardSteps(a) {
+    return `<div class="card">
+      <div class="card-head"><div class="card-title">Stappen (${asArr(a.steps).length})</div>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window.__autEvStepAdd()">${svg(I.plus)}Stap toevoegen</button>
+      </div>
+      <div class="card-body" style="padding:12px 16px;display:flex;flex-direction:column;gap:10px">
+        ${asArr(a.steps).length === 0
+          ? `<div style="padding:16px;text-align:center;color:var(--text-3);font-size:12.5px;font-style:italic">Geen stappen — klik "Stap toevoegen" om te beginnen.</div>`
+          : asArr(a.steps).map((step, idx) => _evStepCard(step, idx)).join('')}
+      </div>
+    </div>`;
+  }
+  function _evStepCard(step, idx) {
+    return `<div style="padding:10px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:10.5px;color:var(--text-3);font-weight:600">${idx + 1}.</span>
+        <select onchange="window.__autEvStepType(${idx}, this.value)" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:12.5px">
+          ${EV_STEP_TYPES.map((t) => `<option value="${t.v}" ${step.type === t.v ? 'selected' : ''}>${esc(t.l)}</option>`).join('')}
+        </select>
+        <button class="icon-btn" title="Omhoog" onclick="window.__autEvStepMove(${idx}, -1)" style="width:24px;height:24px" ${idx === 0 ? 'disabled' : ''}>↑</button>
+        <button class="icon-btn" title="Omlaag" onclick="window.__autEvStepMove(${idx}, 1)" style="width:24px;height:24px">↓</button>
+        <button class="icon-btn" title="Verwijderen" onclick="window.__autEvStepDelete(${idx})" style="width:24px;height:24px">${svg(I.trash || I.x, 'width:11px;height:11px')}</button>
+      </div>
+      ${_evStepConfig(step, idx)}
+    </div>`;
+  }
+  function _evStepConfig(step, idx) {
+    const cfg = step.config || {};
+    const upd = (k) => `window.__autEvStepConfig(${idx}, '${k}', this.value)`;
+    if (step.type === 'wait') return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div><label style="font-size:11px;color:var(--text-3)">Wachttijd</label><input type="number" value="${esc(String(cfg.value || 1))}" oninput="${upd('value')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box" /></div>
+      <div><label style="font-size:11px;color:var(--text-3)">Eenheid</label><select oninput="${upd('unit')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">${['minutes','hours','days'].map((u) => `<option value="${u}" ${cfg.unit === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
+    </div>`;
+    if (step.type === 'condition') return `<div>
+      <label style="font-size:11px;color:var(--text-3)">Check</label>
+      <select oninput="${upd('check')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">
+        ${['assessment_completed','tag_present','status_is','no_inbound_since'].map((c) => `<option value="${c}" ${cfg.check === c ? 'selected' : ''}>${c}</option>`).join('')}
+      </select>
+      <label style="font-size:11px;color:var(--text-3);margin-top:6px;display:block">Extra param (bv. tag-naam of status-waarde)</label>
+      <input type="text" value="${esc(cfg.value || '')}" oninput="${upd('value')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box" />
+      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;margin-top:6px"><input type="checkbox" ${cfg.stop_if_false ? 'checked' : ''} onchange="window.__autEvStepConfigBool(${idx}, 'stop_if_false', this.checked)" />Stop de reeks als check FALSE</label>
+    </div>`;
+    if (step.type === 'send_email') return `<div style="display:flex;flex-direction:column;gap:6px">
+      <div><label style="font-size:11px;color:var(--text-3)">Onderwerp</label><input type="text" value="${esc(cfg.subject || '')}" oninput="${upd('subject')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box" /></div>
+      <div><label style="font-size:11px;color:var(--text-3)">Body (text)</label><textarea oninput="${upd('body_text')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box;min-height:80px;font-family:inherit;resize:vertical">${esc(cfg.body_text || '')}</textarea></div>
+      <div class="mono" style="font-size:10.5px;color:var(--text-3)">Placeholders: {{attendee.voornaam}}, {{event.titel}}, {{event.datum}}</div>
+    </div>`;
+    if (step.type === 'send_whatsapp') {
+      if (!_live.inboxTpls.data && !_live.inboxTpls.loading) queueMicrotask(fetchInboxTpls);
+      const tpls = asArr(_live.inboxTpls.data);
+      return `<div>
+        <label style="font-size:11px;color:var(--text-3)">Meta-template</label>
+        <select oninput="${upd('template_name')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">
+          <option value="">— kies template —</option>
+          ${tpls.map((t) => `<option value="${esc(t.name)}" ${cfg.template_name === t.name ? 'selected' : ''}>${esc(t.name)} (${esc(t.language || 'nl')})</option>`).join('')}
+        </select>
+        <div class="mono" style="font-size:10.5px;color:var(--text-3);margin-top:4px">${tpls.length} approved templates. Named placeholders (bv. {{attendee.voornaam}}) worden server-side geresolved.</div>
+      </div>`;
+    }
+    if (step.type === 'set_tag') return `<div>
+      <label style="font-size:11px;color:var(--text-3)">Tag</label>
+      <input type="text" value="${esc(cfg.tag || '')}" oninput="${upd('tag')}" placeholder="bv. warm-lead" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box" />
+    </div>`;
+    if (step.type === 'update_attendee_status') return `<div>
+      <label style="font-size:11px;color:var(--text-3)">Nieuwe status</label>
+      <select oninput="${upd('status')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">
+        ${['aangemeld','aanwezig','no_show','sale','switched_to_other_event','geannuleerd'].map((s) => `<option value="${s}" ${cfg.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+      </select>
+    </div>`;
+    if (step.type === 'send_internal_notification') return `<div style="display:flex;flex-direction:column;gap:6px">
+      <div><label style="font-size:11px;color:var(--text-3)">Interne bericht (Slack/mail intern)</label><textarea oninput="${upd('message')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box;min-height:60px;font-family:inherit;resize:vertical">${esc(cfg.message || '')}</textarea></div>
+    </div>`;
+    return `<div style="font-size:11px;color:var(--text-3);font-style:italic">Nog geen editor voor "${esc(step.type)}"</div>`;
+  }
+
+  // Events editor handlers
+  window.__autEvField = (k, v) => { if (_ui.ev.editing) _ui.ev.editing[k] = v; if (window.DFO?.render && (k === 'trigger_type' || k === 'scope_type')) window.DFO.render(); };
+  window.__autEvTrigConfig = (k, v) => { if (_ui.ev.editing) { _ui.ev.editing.trigger_config = _ui.ev.editing.trigger_config || {}; _ui.ev.editing.trigger_config[k] = v; } };
+  window.__autEvScopeConfig = (k, v) => { if (_ui.ev.editing) { _ui.ev.editing.scope_config = _ui.ev.editing.scope_config || {}; _ui.ev.editing.scope_config[k] = v; } };
+  window.__autEvStepAdd = () => { if (_ui.ev.editing) { _ui.ev.editing.steps = asArr(_ui.ev.editing.steps); _ui.ev.editing.steps.push({ type:'wait', config:{ value:1, unit:'days' } }); if (window.DFO?.render) window.DFO.render(); } };
+  window.__autEvStepDelete = (idx) => { if (_ui.ev.editing) { _ui.ev.editing.steps.splice(idx, 1); if (window.DFO?.render) window.DFO.render(); } };
+  window.__autEvStepMove = (idx, dir) => {
+    if (!_ui.ev.editing) return;
+    const steps = _ui.ev.editing.steps;
+    const target = idx + dir;
+    if (target < 0 || target >= steps.length) return;
+    const tmp = steps[idx]; steps[idx] = steps[target]; steps[target] = tmp;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autEvStepType = (idx, type) => { if (_ui.ev.editing) { _ui.ev.editing.steps[idx] = { type, config: {} }; if (window.DFO?.render) window.DFO.render(); } };
+  window.__autEvStepConfig = (idx, k, v) => { if (_ui.ev.editing) { _ui.ev.editing.steps[idx].config = _ui.ev.editing.steps[idx].config || {}; _ui.ev.editing.steps[idx].config[k] = v; } };
+  window.__autEvStepConfigBool = (idx, k, v) => { if (_ui.ev.editing) { _ui.ev.editing.steps[idx].config = _ui.ev.editing.steps[idx].config || {}; _ui.ev.editing.steps[idx].config[k] = !!v; } };
+  window.__autEvSave = async () => {
+    const a = _ui.ev.editing; if (!a) return;
+    if (!a.name || !a.name.trim()) return alert('Naam is verplicht.');
+    _setBusy('evSave', true);
+    try {
+      const j = await window.KV.authedJson('/api/events-automation-save', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(a),
+      });
+      if (j?.error) throw new Error(j.error);
+      _ui.ev.editing = null;
+      _live.evAutos.data = null; queueMicrotask(fetchEvAutos);
+    } catch (e) { alert('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
+    finally { _setBusy('evSave', false); }
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // TAB: ONBOARDING — vergelijkbaar met Events, MAAR geen scope
+  // ═══════════════════════════════════════════════════════════════════════
+  const OB_TRIGGERS = [
+    { v: 'on_onboarding_created',     l: 'Bij nieuwe onboarding' },
+    { v: 'on_wizard_completed',       l: 'Bij afgeronde wizard' },
+    { v: 'time_after_signup',         l: 'X tijd na aanmelding' },
+    { v: 'on_wizard_not_started_after', l: 'X tijd na aanmelding, wizard niet gestart' },
+  ];
+  const OB_STEP_TYPES = [
+    { v: 'wait',                      l: 'Wachten' },
+    { v: 'condition',                 l: 'Voorwaarde' },
+    { v: 'send_email',                l: 'E-mail versturen' },
+    { v: 'send_whatsapp',             l: 'WhatsApp-template versturen' },
+    { v: 'update_onboarding_status',  l: 'Onboarding-status bijwerken' },
+    { v: 'send_internal_notification',l: 'Interne notificatie' },
+  ];
+  const OB_CONDITION_CHECKS = ['wizard_not_started','wizard_completed','no_inbound','traject_is_1op1','traject_is_membership'];
+
+  function onboardingView() {
+    if (!_live.obAutos.data && !_live.obAutos.loading && !_live.obAutos.error) queueMicrotask(fetchObAutos);
+    if (_ui.ob.editing) return _obEditor(_ui.ob.editing) + _confirmModalHtml();
+    if (_ui.ob.testModal) return _obTestModal() + _confirmModalHtml();
+    if (_ui.ob.runsModal) return _obRunsModal() + _confirmModalHtml();
+    if (_live.obAutos.error && !_live.obAutos.data) return errBlk('obAutos', _live.obAutos.error, "window.__autRetry('obAutos')") + _confirmModalHtml();
+    if (_live.obAutos.loading && !_live.obAutos.data) return skel() + _confirmModalHtml();
+    return _obList() + _confirmModalHtml();
+  }
+  function _obList() {
+    const all = asArr(_live.obAutos.data);
+    const filter = _ui.ob.filter;
+    const rows = filter === 'enabled' ? all.filter((a) => a.enabled)
+              : filter === 'disabled' ? all.filter((a) => !a.enabled)
+              : all;
+    return `<div class="toolbar" style="padding:12px 20px;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--border)">
+      ${[['all','Alles'],['enabled','Actief'],['disabled','Uit']].map(([v, l]) => `<button class="chip ${filter === v ? 'on' : ''}" onclick="window.__autObFilter('${v}')">${esc(l)}<span class="cnt">${v === 'all' ? all.length : (v === 'enabled' ? all.filter((a) => a.enabled).length : all.filter((a) => !a.enabled).length)}</span></button>`).join('')}
+      <div class="tb-right" style="margin-left:auto">
+        <button class="btn btn-primary btn-sm" onclick="window.__autObNew()">${svg(I.plus)}Nieuwe automation</button>
+      </div>
+    </div>
+    ${rows.length === 0
+      ? emptyBlk('Geen automations', 'Klik "Nieuwe automation" om er een te maken.')
+      : `<div style="padding:0 20px 20px">${H.table(
+          [{l:'Naam'},{l:'Trigger',cls:'optional'},{l:'Stappen',cls:'r optional'},{l:'Status'},{l:'',cls:'r'}],
+          rows.map((a) => [
+            `<div><div class="cell-main">${esc(a.name || '—')}</div>${a.description ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:2px">${esc(a.description)}</div>` : ''}</div>`,
+            `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(a.trigger_type || '—')}</span>`,
+            `<span class="mono">${asArr(a.steps).length}</span>`,
+            a.enabled ? H.pill('ok','Actief') : H.pill('neutral','Uit'),
+            `<div style="display:flex;gap:4px;justify-content:flex-end">
+              <button class="icon-btn" title="Toggle" onclick="window.__autObToggle('${esc(a.id)}')" ${_busy('obTog:' + a.id) ? 'disabled' : ''} style="width:28px;height:28px">${svg(a.enabled ? (I.pause || I.x) : (I.play || I.tick), 'width:13px;height:13px')}</button>
+              <button class="icon-btn" title="Test" onclick="window.__autObTest('${esc(a.id)}')" style="width:28px;height:28px">${svg(I.flask || I.tick, 'width:13px;height:13px')}</button>
+              <button class="icon-btn" title="Runs" onclick="window.__autObRuns('${esc(a.id)}')" style="width:28px;height:28px">${svg(I.clock, 'width:13px;height:13px')}</button>
+              <button class="icon-btn" title="Bewerken" onclick="window.__autObEdit('${esc(a.id)}')" style="width:28px;height:28px">${svg(I.edit || I.settings, 'width:13px;height:13px')}</button>
+              <button class="icon-btn" title="Verwijderen" onclick="window.__autObDelete('${esc(a.id)}','${esc(a.name || '')}')" style="width:28px;height:28px">${svg(I.trash || I.x, 'width:13px;height:13px')}</button>
+            </div>`,
+          ])
+        )}</div>`}`;
+  }
+  window.__autObFilter = (v) => { _ui.ob.filter = v; if (window.DFO?.render) window.DFO.render(); };
+  window.__autObNew = () => {
+    _ui.ob.editing = {
+      id: null, name: '', description: '', enabled: false,
+      trigger_type: 'on_onboarding_created', trigger_config: {},
+      enroll_mode: 'new_only',
+      steps: [],
+    };
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autObEdit = (id) => {
+    const a = asArr(_live.obAutos.data).find((x) => x.id === id);
+    if (!a) return;
+    _ui.ob.editing = JSON.parse(JSON.stringify(a));
+    _ui.ob.editing.trigger_config = _ui.ob.editing.trigger_config || {};
+    _ui.ob.editing.steps = asArr(_ui.ob.editing.steps);
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autObBack = () => { _ui.ob.editing = null; if (window.DFO?.render) window.DFO.render(); };
+  window.__autObToggle = async (id) => {
+    const a = asArr(_live.obAutos.data).find((x) => x.id === id);
+    if (!a) return;
+    _setBusy('obTog:' + id, true);
+    try {
+      const j = await window.KV.authedJson('/api/onboarding-automation-save', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ ...a, enabled: !a.enabled }),
+      });
+      if (j?.error) throw new Error(j.error);
+      _live.obAutos.data = null; queueMicrotask(fetchObAutos);
+    } catch (e) { alert('Toggle mislukt: ' + (e?.message || 'onbekende fout')); }
+    finally { _setBusy('obTog:' + id, false); }
+  };
+  window.__autObDelete = (id, name) => {
+    askConfirm(
+      'Automation verwijderen?',
+      `<p>Weet je zeker dat je <b>${esc(name)}</b> permanent wilt verwijderen?</p>`,
+      async () => {
+        const j = await window.KV.authedJson('/api/onboarding-automation-delete', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ id }),
+        });
+        if (j?.error) throw new Error(j.error);
+        _live.obAutos.data = null; queueMicrotask(fetchObAutos);
+      },
+      { confirmLabel: 'Ja, verwijderen', danger: true }
+    );
+  };
+  window.__autObTest = (id) => {
+    const a = asArr(_live.obAutos.data).find((x) => x.id === id);
+    if (!a) return;
+    if (!a.enabled) return alert('Zet de automation eerst aan voordat je een test-run doet.');
+    _ui.ob.testModal = {
+      automation_id: id,
+      automation_name: a.name || '—',
+      traject_id: '',
+      name: 'Test Jeffrey',
+      email: 'biemoldjeffrey@gmail.com',
+      phone: '+31600000000',
+    };
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autObRuns = (id) => {
+    _ui.ob.runsModal = { automation_id: id };
+    if (!_live.obRuns.data[id]) queueMicrotask(() => fetchObRuns(id));
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autObRunsClose = () => { _ui.ob.runsModal = null; if (window.DFO?.render) window.DFO.render(); };
+  window.__autObTestClose = () => { _ui.ob.testModal = null; if (window.DFO?.render) window.DFO.render(); };
+  window.__autObTestField = (k, v) => { if (_ui.ob.testModal) _ui.ob.testModal[k] = v; };
+  window.__autObTestSubmit = async () => {
+    const t = _ui.ob.testModal; if (!t) return;
+    if (!t.traject_id || !t.name || !t.email || !t.phone) return alert('Alle velden zijn verplicht.');
+    _setBusy('obTestSubmit', true);
+    try {
+      const j = await window.KV.authedJson('/api/onboarding-automation-test', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          automation_id: t.automation_id, traject_id: t.traject_id,
+          name: t.name, email: t.email, phone: t.phone,
+        }),
+      });
+      if (j?.error) throw new Error(j.error);
+      alert('Test gestart. Run-ID: ' + (j?.run_id || '—') + '\nOnboarding-ID: ' + (j?.onboarding_id || '—') + '\n\nDe automation loopt nu ECHT met versnelde wait-stappen. Berichten worden verstuurd naar het opgegeven email/nummer.');
+      _ui.ob.testModal = null;
+      if (window.DFO?.render) window.DFO.render();
+    } catch (e) { alert('Test mislukt: ' + (e?.message || 'onbekende fout')); }
+    finally { _setBusy('obTestSubmit', false); }
+  };
+
+  function _obTestModal() {
+    const t = _ui.ob.testModal; if (!t) return '';
+    const busy = _busy('obTestSubmit');
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)window.__autObTestClose()">
+      <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);max-width:560px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+          <div style="font-size:14px;font-weight:600;flex:1">Test-run: ${esc(t.automation_name)}</div>
+          <button class="icon-btn" onclick="window.__autObTestClose()" title="Sluiten" style="width:28px;height:28px">${svg(I.x || I.close, 'width:13px;height:13px')}</button>
+        </div>
+        <div style="padding:16px 18px">
+          <div style="padding:10px 12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:8px;color:var(--rose);font-size:12.5px;line-height:1.5;margin-bottom:14px">
+            <b>⚠ TEST STUURT ECHT.</b> Dit is <b>geen dry-run</b> — er wordt een test-customer + test-onboarding aangemaakt (is_test=true) en de engine verstuurt daadwerkelijk berichten (wait wordt versneld naar 15s). Gebruik je eigen email/nummer.
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            ${_obField('Traject-ID (uuid)', 'traject_id', t.traject_id, 'text', 'Zoek in Onboarding-module > Trajecten')}
+            ${_obField('Naam', 'name', t.name, 'text')}
+            ${_obField('E-mail (jouw eigen adres)', 'email', t.email, 'email')}
+            ${_obField('Telefoon (+316…)', 'phone', t.phone, 'tel', 'E.164 format')}
+          </div>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm" onclick="window.__autObTestClose()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" onclick="window.__autObTestSubmit()" ${busy ? 'disabled' : ''}>${busy ? '…' : 'Start test-run'}</button>
+        </div>
+      </div>
+    </div>`;
+    function _obField(label, key, val, kind, hint) {
+      return `<div>
+        <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">${esc(label)}</label>
+        <input type="${kind}" value="${esc(val)}" oninput="window.__autObTestField('${key}', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box" />
+        ${hint ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:3px">${esc(hint)}</div>` : ''}
+      </div>`;
+    }
+  }
+  function _obRunsModal() {
+    const m = _ui.ob.runsModal; if (!m) return '';
+    const runs = asArr(_live.obRuns.data[m.automation_id]);
+    const loading = _live.obRuns.loading[m.automation_id];
+    const err = _live.obRuns.error[m.automation_id];
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)window.__autObRunsClose()">
+      <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);max-width:720px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+          <div style="font-size:14px;font-weight:600;flex:1">Runs-log</div>
+          <button class="icon-btn" onclick="window.__autObRunsClose()" title="Sluiten" style="width:28px;height:28px">${svg(I.x || I.close, 'width:13px;height:13px')}</button>
+        </div>
+        <div style="padding:16px 18px">
+          ${err ? errBlk('obRuns', err)
+            : loading ? '<div style="padding:20px;text-align:center;color:var(--text-3)">Runs laden…</div>'
+            : runs.length === 0 ? emptyBlk('Geen runs', 'Deze automation heeft nog niet gedraaid.')
+            : `<div style="display:flex;flex-direction:column;gap:6px">${runs.slice(0, 50).map((r) => `<div style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface)">
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                  ${_statusPill(r.status)}
+                  ${r.is_test ? H.pill('warn','TEST') : ''}
+                  <span class="mono" style="font-size:11px;color:var(--text-3)">${esc(_fmtDateTime(r.started_at))}</span>
+                </div>
+                <div class="mono" style="font-size:10.5px;color:var(--text-3);margin-top:3px">step_index: ${esc(String(r.current_step_index ?? '—'))} · onboarding: ${esc(String(r.onboarding_id || '').slice(0, 8))}…</div>
+              </div>`).join('')}</div>`}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // Onboarding editor
+  function _obEditor(a) {
+    const isNew = !a.id;
+    const busy = _busy('obSave');
+    return `<div style="padding:12px 20px;background:var(--surface-2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+      <button class="btn btn-ghost btn-sm" onclick="window.__autObBack()">${svg(I.arrDown || I.x, 'width:13px;height:13px;transform:rotate(90deg)')}Terug naar lijst</button>
+      <span style="font-size:14px;font-weight:600">${isNew ? 'Nieuwe automation' : 'Bewerken: ' + esc(a.name || '—')}</span>
+      <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="window.__autObSave()" ${busy ? 'disabled' : ''}>${busy ? 'Opslaan…' : (svg(I.tick) + 'Opslaan')}</button>
+    </div>
+    <div class="pad" style="padding-top:14px"><div style="max-width:900px;margin:0 auto;display:flex;flex-direction:column;gap:14px">
+      <div class="card"><div class="card-head"><div class="card-title">Basis</div></div><div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+        <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Naam</label><input type="text" value="${esc(a.name)}" oninput="window.__autObField('name', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box" /></div>
+        <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Beschrijving</label><textarea oninput="window.__autObField('description', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box;min-height:60px;resize:vertical;font-family:inherit">${esc(a.description || '')}</textarea></div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><input type="checkbox" ${a.enabled ? 'checked' : ''} onchange="window.__autObField('enabled', this.checked)" /><span>Actief</span></label>
+      </div></div>
+      <div class="card"><div class="card-head"><div class="card-title">Trigger</div></div><div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+        <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Trigger-type</label>
+          <select onchange="window.__autObField('trigger_type', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box">
+            ${OB_TRIGGERS.map((t) => `<option value="${t.v}" ${a.trigger_type === t.v ? 'selected' : ''}>${esc(t.l)}</option>`).join('')}
+          </select>
+        </div>
+        ${(a.trigger_type === 'time_after_signup' || a.trigger_type === 'on_wizard_not_started_after') ? `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Waarde</label><input type="number" value="${esc(String(a.trigger_config?.value ?? 24))}" oninput="window.__autObTrigConfig('value', Number(this.value))" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box" /></div>
+            <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Eenheid</label><select onchange="window.__autObTrigConfig('unit', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box">${['minutes','hours','days'].map((u) => `<option value="${u}" ${a.trigger_config?.unit === u ? 'selected' : ''}>${esc(u)}</option>`).join('')}</select></div>
+          </div>
+        ` : ''}
+      </div></div>
+      <div class="card"><div class="card-head"><div class="card-title">Stappen (${asArr(a.steps).length})</div>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window.__autObStepAdd()">${svg(I.plus)}Stap toevoegen</button>
+      </div><div class="card-body" style="padding:12px 16px;display:flex;flex-direction:column;gap:10px">
+        ${asArr(a.steps).length === 0 ? `<div style="padding:16px;text-align:center;color:var(--text-3);font-size:12.5px;font-style:italic">Geen stappen — klik "Stap toevoegen".</div>` : asArr(a.steps).map((step, idx) => _obStepCard(step, idx)).join('')}
+      </div></div>
+    </div></div>`;
+  }
+  function _obStepCard(step, idx) {
+    return `<div style="padding:10px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:10.5px;color:var(--text-3);font-weight:600">${idx + 1}.</span>
+        <select onchange="window.__autObStepType(${idx}, this.value)" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:12.5px">
+          ${OB_STEP_TYPES.map((t) => `<option value="${t.v}" ${step.type === t.v ? 'selected' : ''}>${esc(t.l)}</option>`).join('')}
+        </select>
+        <button class="icon-btn" title="Omhoog" onclick="window.__autObStepMove(${idx}, -1)" style="width:24px;height:24px" ${idx === 0 ? 'disabled' : ''}>↑</button>
+        <button class="icon-btn" title="Omlaag" onclick="window.__autObStepMove(${idx}, 1)" style="width:24px;height:24px">↓</button>
+        <button class="icon-btn" title="Verwijderen" onclick="window.__autObStepDelete(${idx})" style="width:24px;height:24px">${svg(I.trash || I.x, 'width:11px;height:11px')}</button>
+      </div>
+      ${_obStepConfig(step, idx)}
+    </div>`;
+  }
+  function _obStepConfig(step, idx) {
+    const cfg = step.config || {};
+    const upd = (k) => `window.__autObStepConfig(${idx}, '${k}', this.value)`;
+    if (step.type === 'wait') return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div><label style="font-size:11px;color:var(--text-3)">Wachttijd</label><input type="number" value="${esc(String(cfg.value || 1))}" oninput="${upd('value')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box" /></div>
+      <div><label style="font-size:11px;color:var(--text-3)">Eenheid</label><select oninput="${upd('unit')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">${['minutes','hours','days'].map((u) => `<option value="${u}" ${cfg.unit === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
+    </div>`;
+    if (step.type === 'condition') return `<div>
+      <label style="font-size:11px;color:var(--text-3)">Check</label>
+      <select oninput="${upd('check')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">
+        ${OB_CONDITION_CHECKS.map((c) => `<option value="${c}" ${cfg.check === c ? 'selected' : ''}>${c}</option>`).join('')}
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;margin-top:6px"><input type="checkbox" ${cfg.stop_if_false ? 'checked' : ''} onchange="window.__autObStepConfigBool(${idx}, 'stop_if_false', this.checked)" />Stop de reeks als check FALSE</label>
+    </div>`;
+    if (step.type === 'send_email') return `<div style="display:flex;flex-direction:column;gap:6px">
+      <div><label style="font-size:11px;color:var(--text-3)">Onderwerp</label><input type="text" value="${esc(cfg.subject || '')}" oninput="${upd('subject')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box" /></div>
+      <div><label style="font-size:11px;color:var(--text-3)">Body (text)</label><textarea oninput="${upd('body_text')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box;min-height:80px;font-family:inherit;resize:vertical">${esc(cfg.body_text || '')}</textarea></div>
+    </div>`;
+    if (step.type === 'send_whatsapp') {
+      if (!_live.inboxTpls.data && !_live.inboxTpls.loading) queueMicrotask(fetchInboxTpls);
+      const tpls = asArr(_live.inboxTpls.data);
+      return `<div>
+        <label style="font-size:11px;color:var(--text-3)">Meta-template</label>
+        <select oninput="${upd('template_name')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">
+          <option value="">— kies template —</option>
+          ${tpls.map((t) => `<option value="${esc(t.name)}" ${cfg.template_name === t.name ? 'selected' : ''}>${esc(t.name)} (${esc(t.language || 'nl')})</option>`).join('')}
+        </select>
+      </div>`;
+    }
+    if (step.type === 'update_onboarding_status') return `<div>
+      <label style="font-size:11px;color:var(--text-3)">Nieuwe status</label>
+      <input type="text" value="${esc(cfg.status || '')}" oninput="${upd('status')}" placeholder="bv. wizard_gestart" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box" />
+    </div>`;
+    if (step.type === 'send_internal_notification') return `<div>
+      <label style="font-size:11px;color:var(--text-3)">Interne bericht</label>
+      <textarea oninput="${upd('message')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box;min-height:60px;font-family:inherit;resize:vertical">${esc(cfg.message || '')}</textarea>
+    </div>`;
+    return `<div style="font-size:11px;color:var(--text-3);font-style:italic">Nog geen editor voor "${esc(step.type)}"</div>`;
+  }
+  window.__autObField = (k, v) => { if (_ui.ob.editing) _ui.ob.editing[k] = v; if (window.DFO?.render && k === 'trigger_type') window.DFO.render(); };
+  window.__autObTrigConfig = (k, v) => { if (_ui.ob.editing) { _ui.ob.editing.trigger_config = _ui.ob.editing.trigger_config || {}; _ui.ob.editing.trigger_config[k] = v; } };
+  window.__autObStepAdd = () => { if (_ui.ob.editing) { _ui.ob.editing.steps = asArr(_ui.ob.editing.steps); _ui.ob.editing.steps.push({ type:'wait', config:{ value:1, unit:'days' } }); if (window.DFO?.render) window.DFO.render(); } };
+  window.__autObStepDelete = (idx) => { if (_ui.ob.editing) { _ui.ob.editing.steps.splice(idx, 1); if (window.DFO?.render) window.DFO.render(); } };
+  window.__autObStepMove = (idx, dir) => {
+    if (!_ui.ob.editing) return;
+    const steps = _ui.ob.editing.steps;
+    const target = idx + dir;
+    if (target < 0 || target >= steps.length) return;
+    const tmp = steps[idx]; steps[idx] = steps[target]; steps[target] = tmp;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autObStepType = (idx, type) => { if (_ui.ob.editing) { _ui.ob.editing.steps[idx] = { type, config: {} }; if (window.DFO?.render) window.DFO.render(); } };
+  window.__autObStepConfig = (idx, k, v) => { if (_ui.ob.editing) { _ui.ob.editing.steps[idx].config = _ui.ob.editing.steps[idx].config || {}; _ui.ob.editing.steps[idx].config[k] = v; } };
+  window.__autObStepConfigBool = (idx, k, v) => { if (_ui.ob.editing) { _ui.ob.editing.steps[idx].config = _ui.ob.editing.steps[idx].config || {}; _ui.ob.editing.steps[idx].config[k] = !!v; } };
+  window.__autObSave = async () => {
+    const a = _ui.ob.editing; if (!a) return;
+    if (!a.name || !a.name.trim()) return alert('Naam is verplicht.');
+    _setBusy('obSave', true);
+    try {
+      const j = await window.KV.authedJson('/api/onboarding-automation-save', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(a),
+      });
+      if (j?.error) throw new Error(j.error);
+      _ui.ob.editing = null;
+      _live.obAutos.data = null; queueMicrotask(fetchObAutos);
+    } catch (e) { alert('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
+    finally { _setBusy('obSave', false); }
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // TAB: LEADSONDERHOUD (aan/uit + sjablonen + trajecten)
+  // ═══════════════════════════════════════════════════════════════════════
+  function leadsonderhoudView() {
+    if (!_live.lsInst.data && !_live.lsInst.loading && !_live.lsInst.error) queueMicrotask(fetchLsInst);
+    if (!_live.lsSjab.data && !_live.lsSjab.loading && !_live.lsSjab.error) queueMicrotask(fetchLsSjab);
+    if (!_live.lsTraj.data && !_live.lsTraj.loading && !_live.lsTraj.error) queueMicrotask(fetchLsTraj);
+    const inst = _live.lsInst.data;
+    const isLive = inst?.live === true;
+    const noodstop = inst?.noodstop === true;
+    return `<div class="pad" style="padding-top:14px"><div style="max-width:1000px;margin:0 auto;display:flex;flex-direction:column;gap:14px">
+      <div class="card">
+        <div class="card-head">
+          <span class="tile-ico" style="background:${isLive ? 'var(--emerald-soft)' : 'var(--slate-soft)'};color:${isLive ? 'var(--emerald)' : 'var(--text-3)'}">${svg(isLive ? (I.play || I.tick) : (I.pause || I.x))}</span>
+          <div class="card-title">Global aan/uit</div>
+        </div>
+        <div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="flex:1">
+              <div style="font-size:13.5px;font-weight:500">Drip-motor</div>
+              <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Env: <span class="mono">${esc(inst?.omgeving || '—')}</span> · Status: ${isLive ? '<span style="color:var(--emerald)">LIVE</span>' : '<span style="color:var(--text-3)">uit</span>'}${noodstop ? ' · <span style="color:var(--rose);font-weight:600">⚠ NOODSTOP env-var actief</span>' : ''}</div>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="window.__autLsToggle()" ${_busy('lsToggle') ? 'disabled' : ''}>${isLive ? 'Uit zetten' : 'Aan zetten'}</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="tile-ico" style="background:var(--blue-soft);color:var(--blue)">${svg(I.doc || I.file)}</span>
+          <div class="card-title">Trajecten</div>
+          <span style="margin-left:auto;font-size:11px;color:var(--text-3)">${asArr(_live.lsTraj.data).length} trajecten</span>
+        </div>
+        <div class="card-body" style="padding:0">
+          ${_live.lsTraj.error ? errBlk('lsTraj', _live.lsTraj.error, "window.__autRetry('lsTraj')")
+            : _live.lsTraj.loading && !_live.lsTraj.data ? '<div style="padding:20px;text-align:center;color:var(--text-3)">Laden…</div>'
+            : asArr(_live.lsTraj.data).length === 0 ? emptyBlk('Geen trajecten', 'Maak trajecten aan via de Leadsonderhoud-module.')
+            : `<div>${asArr(_live.lsTraj.data).map((t) => _lsTrajRow(t)).join('')}</div>`}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="tile-ico" style="background:var(--pink-soft);color:var(--pink)">${svg(I.file || I.doc)}</span>
+          <div class="card-title">Sjablonen</div>
+          <span style="margin-left:auto;font-size:11px;color:var(--text-3)">${asArr(_live.lsSjab.data?.items).length} sjablonen</span>
+        </div>
+        <div class="card-body" style="padding:0">
+          ${_live.lsSjab.error ? errBlk('lsSjab', _live.lsSjab.error, "window.__autRetry('lsSjab')")
+            : _live.lsSjab.loading && !_live.lsSjab.data ? '<div style="padding:20px;text-align:center;color:var(--text-3)">Laden…</div>'
+            : asArr(_live.lsSjab.data?.items).length === 0 ? emptyBlk('Geen sjablonen', 'Beheer sjablonen via de Leadsonderhoud-module.')
+            : `<div style="padding:12px 16px">${H.table(
+                [{l:'Traject'},{l:'Kanaal',cls:'optional'},{l:'Soort',cls:'optional'},{l:'Onderwerp'},{l:'Score-range',cls:'r optional'},{l:'Actief',cls:'r'}],
+                asArr(_live.lsSjab.data?.items).map((s) => [
+                  `<span style="font-size:12.5px">${esc(s.traject_slug || '—')}</span>`,
+                  `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(s.kanaal || '—')}</span>`,
+                  `<span style="font-size:11.5px;color:var(--text-3)">${esc(s.soort || '—')}</span>`,
+                  `<span style="font-size:12.5px">${esc(s.onderwerp || '—')}</span>`,
+                  `<span class="mono" style="font-size:11.5px">${s.score_min ?? '—'} – ${s.score_max ?? '—'}</span>`,
+                  s.actief ? H.pill('ok','Actief') : H.pill('neutral','Uit'),
+                ])
+              )}</div>`}
+        </div>
+        <div style="padding:11px 17px;background:var(--surface-2);border-top:1px solid var(--border);font-size:11px;color:var(--text-3)">
+          Sjablonen-editor + quiz-editor + drip-log: <a href="/modules/leadsonderhoud.html" target="_blank" style="color:var(--pink);text-decoration:underline">open Leadsonderhoud-module ↗</a>
+        </div>
+      </div>
+    </div></div>
+    ${_confirmModalHtml()}`;
+  }
+  function _lsTrajRow(t) {
+    const stappen = asArr(t.stappen);
+    const isExp = _ui.ls.expandedTrajectId === t.id;
+    return `<div style="border-bottom:1px solid var(--border)">
+      <div style="padding:12px 17px;display:flex;gap:12px;align-items:center;cursor:pointer" onclick="window.__autLsToggleTraject('${esc(t.id)}')">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+            <div style="font-size:13.5px;font-weight:600">${esc(t.naam || t.slug || '—')}</div>
+            <span class="mono" style="font-size:10.5px;color:var(--text-3)">${esc(t.slug || '')}</span>
+            ${t.actief ? H.pill('ok','Actief') : H.pill('neutral','Uit')}
+          </div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-top:3px">${stappen.length} stappen · agent: ${esc(t.agent || '—')} · archief na ${esc(String(t.archief_na || '?'))}d</div>
+        </div>
+        <span style="font-size:16px;color:var(--text-3)">${isExp ? '▾' : '▸'}</span>
+      </div>
+      ${isExp ? `<div style="padding:0 17px 16px;background:var(--surface-2)">
+        ${stappen.length === 0 ? `<div style="padding:14px;text-align:center;color:var(--text-3);font-size:12px;font-style:italic">Geen stappen.</div>`
+          : H.table(
+            [{l:'Stap'},{l:'Kanaal',cls:'optional'},{l:'Aanleiding',cls:'optional'},{l:'Wanneer',cls:'optional'},{l:'Score-range',cls:'r optional'},{l:'Actief',cls:'r'}],
+            stappen.map((s) => [
+              `<span style="font-size:12.5px">${esc(s.naam || s.soort || '—')}</span>`,
+              `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(s.kanaal || '—')}</span>`,
+              `<span style="font-size:11.5px;color:var(--text-3)">${esc(s.aanleiding || '—')}</span>`,
+              `<span class="mono" style="font-size:11px;color:var(--text-3)">${esc(String(s.waarde || '—'))}${s.weekdag ? ' · ' + esc(s.weekdag) : ''}${s.tijdstip ? ' · ' + esc(s.tijdstip) : ''}</span>`,
+              `<span class="mono" style="font-size:11px">${s.score_min ?? '—'} – ${s.score_max ?? '—'}</span>`,
+              s.actief ? H.pill('ok','Actief') : H.pill('neutral','Uit'),
+            ])
+          )}
+        <div style="padding:8px 0;font-size:11px;color:var(--text-3);text-align:center">Stap-editor via <a href="/modules/leadsonderhoud.html" target="_blank" style="color:var(--pink);text-decoration:underline">Leadsonderhoud-module ↗</a></div>
+      </div>` : ''}
+    </div>`;
+  }
+  window.__autLsToggleTraject = (id) => {
+    _ui.ls.expandedTrajectId = _ui.ls.expandedTrajectId === id ? null : id;
+    if (window.DFO?.render) window.DFO.render();
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // TAB: AGENTS (read-only mirror van joost_config feature_flags)
+  // ═══════════════════════════════════════════════════════════════════════
+  const AGENT_MODULES = [
+    { key: 'finance',        label: 'Joost',   scope: 'Finance / Wanbetalers-inbox' },
+    { key: 'events',         label: 'Simone',  scope: 'Events-inbox' },
+    { key: 'onboarding',     label: 'Mila',    scope: 'Onboarding-inbox' },
+    { key: 'leadsonderhoud', label: 'Aisha',   scope: 'Leadsonderhoud (drip-content)' },
+    { key: 'manager',        label: 'AI Manager', scope: 'Super-admin Q&A' },
+  ];
+  function agentsView() {
+    for (const m of AGENT_MODULES) {
+      if (!_live.agentsCfg.data[m.key] && !_live.agentsCfg.loading[m.key]) queueMicrotask(() => fetchAgentCfg(m.key));
+    }
+    return `<div class="pad" style="padding-top:14px"><div style="max-width:900px;margin:0 auto;display:flex;flex-direction:column;gap:14px">
+      <div class="card">
+        <div class="card-head">
+          <span class="tile-ico" style="background:var(--violet-soft);color:var(--violet)">${svg(I.robot || I.zap || I.tick)}</span>
+          <div class="card-title">AI-agent status (read-only)</div>
+        </div>
+        <div class="card-body" style="padding:16px">
+          <div style="padding:10px 12px;background:var(--surface-2);border-radius:8px;font-size:12.5px;color:var(--text-2);line-height:1.5;margin-bottom:14px">
+            Configuratie beheer je in de <a href="/modules/klanten-v2/?v2preview=agents" style="color:var(--violet);text-decoration:underline">AI Agents-module</a>.
+            Hier zie je alleen de huidige status.
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            ${AGENT_MODULES.map((m) => _agentRow(m)).join('')}
+          </div>
+        </div>
+      </div>
+    </div></div>
+    ${_confirmModalHtml()}`;
+  }
+  function _agentRow(m) {
+    const cfg = _live.agentsCfg.data[m.key];
+    const loading = _live.agentsCfg.loading[m.key];
+    const err = _live.agentsCfg.error[m.key];
+    const on = cfg?.is_enabled === true;
+    const ff = cfg?.feature_flags || {};
+    const activeFlags = Object.keys(ff).filter((k) => ff[k] === true);
+    return `<div style="padding:12px 14px;border:1px solid var(--border);border-radius:8px;display:flex;gap:12px;align-items:center">
+      <div style="width:32px;height:32px;background:${on ? 'var(--emerald-soft)' : 'var(--surface-2)'};color:${on ? 'var(--emerald)' : 'var(--text-3)'};border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${on ? '✓' : '○'}</div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+          <div style="font-size:13.5px;font-weight:600">${esc(m.label)}</div>
+          <span style="font-size:11px;color:var(--text-3)">${esc(m.scope)}</span>
+          ${err ? H.pill('danger','Fout') : (loading && !cfg) ? H.pill('neutral','laden…') : on ? H.pill('ok','Actief') : H.pill('neutral','Uit')}
+        </div>
+        <div style="font-size:11px;color:var(--text-3);margin-top:3px">module=<span class="mono">${esc(m.key)}</span>${activeFlags.length > 0 ? ' · flags: ' + activeFlags.map(esc).join(', ') : ''}</div>
+      </div>
+      <a href="/modules/klanten-v2/?v2preview=agents" class="btn btn-ghost btn-sm" style="text-decoration:none;flex-shrink:0">Beheer ↗</a>
+    </div>`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // VIEW REGISTRATIE
+  // ═══════════════════════════════════════════════════════════════════════
+  window.DFO.VIEWS = window.DFO.VIEWS || {};
+  window.DFO.VIEWS['automatiseringen/Overzicht']      = overzichtView;
+  window.DFO.VIEWS['automatiseringen/Events']         = eventsView;
+  window.DFO.VIEWS['automatiseringen/Onboarding']     = onboardingView;
+  window.DFO.VIEWS['automatiseringen/Leadsonderhoud'] = leadsonderhoudView;
+  window.DFO.VIEWS['automatiseringen/Wanbetalers']    = overzichtView;   // toont beschermde tegel via Overzicht
+  window.DFO.VIEWS['automatiseringen/Lisa']           = agentsView;      // hernoemd naar Agents (mirror)
+
+  console.debug('[automatiseringen-v2] views geregistreerd (Overzicht/Events/Onboarding/Leadsonderhoud/Agents)');
 })();

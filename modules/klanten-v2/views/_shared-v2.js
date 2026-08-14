@@ -229,6 +229,55 @@
   }
   patchDfoRender();
 
+  // ── joost_config safe-upsert helpers (extracted from agents-v2.js) ──
+  //
+  // joost_config heeft NOT-NULL kolommen (system_prompt_template etc.).
+  // Als je een losse toggle schrijft zonder de volle rij mee te sturen faalt
+  // de INSERT bij een module zonder bestaande rij. Deze helpers laden altijd
+  // eerst de volle config en mergen dan de overrides erin.
+  //
+  // Voor module='finance' worden autonomy_config + feature_flags GESTRIPT
+  // (protected zone — dunning-config mag alleen via finance-endpoints).
+  async function joostFetchDefaults(moduleKey) {
+    try {
+      if (!window.KV || !window.KV.authedJson) return null;
+      const j = await window.KV.authedJson('/api/joost-config-get?module=' + encodeURIComponent(moduleKey));
+      return j && (j.config || j) || null;
+    } catch (_) { return null; }
+  }
+  async function joostBuildFullBody(moduleKey, overrides) {
+    const cur = await joostFetchDefaults(moduleKey) || {};
+    const safe = {
+      module: moduleKey,
+      persona_name:           overrides?.persona_name           ?? cur.persona_name           ?? '—',
+      persona_tone:           overrides?.persona_tone           ?? cur.persona_tone           ?? 'professional',
+      system_prompt_template: overrides?.system_prompt_template ?? cur.system_prompt_template ?? '(nog niet ingesteld)',
+      knowledge_base:         overrides?.knowledge_base         ?? cur.knowledge_base         ?? '',
+      model:                  overrides?.model                  ?? cur.model                  ?? 'claude-sonnet-4-20250514',
+      temperature:            overrides?.temperature            ?? cur.temperature            ?? 0.4,
+      context_message_count:  overrides?.context_message_count  ?? cur.context_message_count  ?? 10,
+      is_enabled:             overrides?.is_enabled             ?? cur.is_enabled             ?? false,
+      feature_flags:          overrides?.feature_flags          ?? cur.feature_flags          ?? {},
+      autonomy_config:        overrides?.autonomy_config        ?? cur.autonomy_config        ?? {},
+    };
+    // Protected-zone strip: finance-config mag NOOIT autonomy_config of
+    // feature_flags overschrijven via v2 (dunning-config leeft in Finance).
+    if (moduleKey === 'finance') {
+      delete safe.autonomy_config;
+      delete safe.feature_flags;
+    }
+    return safe;
+  }
+  async function joostSafeUpsert(moduleKey, overrides) {
+    if (!window.KV || !window.KV.authedJson) throw new Error('KV.authedJson niet beschikbaar');
+    const body = await joostBuildFullBody(moduleKey, overrides || {});
+    return await window.KV.authedJson('/api/joost-config-upsert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
   window.KV_V2 = window.KV_V2 || {};
   window.KV_V2.helpers = {
     kpi, kpis, toolbar, chips, search, table, av, pill, trend, voorbeeldBanner,
@@ -239,6 +288,8 @@
     // overlay-root swap) — na innerHTML-swap moeten cached search-inputs
     // opnieuw geplaatst worden zodat cursor + waarde overleven.
     hydrateSearchMounts,
+    // joost_config safe-upsert helpers (Automatiseringen v2 + Agents v2)
+    joostFetchDefaults, joostBuildFullBody, joostSafeUpsert,
   };
-  console.debug('[_shared-v2] helpers + stableSearch registered');
+  console.debug('[_shared-v2] helpers + stableSearch + joost helpers registered');
 })();
