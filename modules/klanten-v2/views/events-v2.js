@@ -374,6 +374,8 @@
   }
 
   // Simone-config (module=events). Read via bestaande joost-config-get.
+  // GEEN DFO.render — die zou een full-view rebuild triggeren die de chat-
+  // scrollpositie reset. Alleen status-bar bijwerken via _paintSimoneStatusBar.
   async function fetchSimoneCfg() {
     const st = _live.simoneCfg; if (st.loading || st.data) return;
     st.loading = true; st.error = null;
@@ -381,12 +383,13 @@
     st.loading = false;
     if (j && j.__error) st.error = j.__error;
     else st.data = j?.config || j || null;
-    if (window.DFO?.render) window.DFO.render();
+    _paintSimoneStatusBar();
   }
 
-  // Openstaande Simone-suggestie voor deze conv (status=PROPOSED). Endpoint
-  // retourneert single {suggestion: null | {...}}. Handmatig invalideren na
-  // send/ignore/refetch-thread.
+  // Openstaande Simone-suggestie voor deze conv. GEEN DFO.render — caller
+  // roept _paintFooterOnly aan (zit in _startSimonePolling.then()). Bij
+  // initial load-flow gebruikt fetchInboxMsgs zijn eigen callback voor de
+  // volledige right-pane paint (fetchSuggestion is dan al klaar).
   async function fetchSuggestion(convId) {
     const st = _live.suggestion; if (st.loading[convId]) return;
     st.loading[convId] = true; st.error[convId] = null;
@@ -395,10 +398,21 @@
     if (j && j.__error) { st.error[convId] = j.__error; }
     else {
       const s = j?.suggestion || null;
-      // Alleen PROPOSED = actionable
       st.data[convId] = (s && s.status === 'PROPOSED') ? s : null;
     }
-    if (window.DFO?.render) window.DFO.render();
+  }
+
+  // Surgical status-bar update — alleen die kleine bovenste bar, niet
+  // #ev-inbox-chat-scroll en niet #ev-inbox-footer.
+  function _paintSimoneStatusBar() {
+    try {
+      const wrap = document.createElement('div');
+      wrap.innerHTML = _inboxSimoneStatusBar();
+      const newBar = wrap.firstElementChild;
+      if (!newBar) return;
+      const old = document.querySelector('.ev-inbox-simone-bar');
+      if (old) old.replaceWith(newBar);
+    } catch (_) {}
   }
 
   // Simone-verstuurde messages per conv: joost_suggestions waar
@@ -1975,7 +1989,7 @@
     const label = !on ? 'Uit' : (auto ? 'Autonoom actief' : (sugg ? 'Suggesties actief' : 'Config actief, gates uit'));
     const color = !on ? 'var(--text-3)' : (auto ? 'var(--emerald)' : (sugg ? 'var(--amber)' : 'var(--text-3)'));
     const dot   = !on ? 'var(--text-3)' : (auto ? '#22c55e' : (sugg ? '#f59e0b' : 'var(--text-3)'));
-    return `<div style="padding:8px 20px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-size:12px">
+    return `<div class="ev-inbox-simone-bar" style="padding:8px 20px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-size:12px">
       <span style="display:inline-flex;align-items:center;gap:6px;color:${color};font-weight:500" title="Simone (AI) — module: events">
         <span style="width:7px;height:7px;background:${dot};border-radius:50%"></span>🤖 Simone · ${esc(label)}
       </span>
@@ -2176,6 +2190,92 @@
     </div>`;
   }
 
+  // Genereer HTML voor één bubbel + eventuele datum-separator. Gebruikt door
+  // _inboxChatBody (initial render) én _appendNewThreadItems (append-only
+  // refresh). Ontvangt de simoneIds-set + isWA vlag zodat het pure is.
+  function _renderBubbleHtml(m, ctx) {
+    const { isWA, simoneIds, prevDayKey, prevDir } = ctx;
+    const _dayKey = (mm) => {
+      const dt = new Date(mm.at || mm.sent_at || mm.created_at || NaN);
+      if (!Number.isFinite(dt.getTime())) return 'unknown';
+      return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+    };
+    const _dayLabel = (mm) => {
+      const dt = new Date(mm.at || mm.sent_at || mm.created_at || NaN);
+      if (!Number.isFinite(dt.getTime())) return '—';
+      const now = new Date();
+      if (dt.toDateString() === now.toDateString()) return 'Vandaag';
+      const y = new Date(now); y.setDate(now.getDate()-1);
+      if (dt.toDateString() === y.toDateString()) return 'Gisteren';
+      return dt.toLocaleDateString('nl-NL', { weekday:'long', day:'numeric', month:'long', year: dt.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
+    };
+    const _timeShort = (mm) => {
+      const dt = new Date(mm.at || mm.sent_at || mm.created_at || NaN);
+      if (!Number.isFinite(dt.getTime())) return '';
+      return String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0');
+    };
+    const _statusIcon = (mm) => {
+      const s = String(mm.status || '').toLowerCase();
+      if (mm.read_at || s === 'read')      return '<span title="Gelezen" style="color:#53bdeb;font-weight:600;letter-spacing:-3px">✓✓</span>';
+      if (mm.delivered_at || s === 'delivered') return '<span title="Bezorgd" style="color:var(--text-3);font-weight:600;letter-spacing:-3px">✓✓</span>';
+      if (s === 'failed')                 return '<span title="Mislukt" style="color:var(--rose)">⚠</span>';
+      if (mm.sent_at || s === 'sent' || s === 'accepted') return '<span title="Verzonden" style="color:var(--text-3)">✓</span>';
+      return '';
+    };
+    const ch = String(m.channel || 'whatsapp').toLowerCase();
+    const isEmail = ch === 'email';
+    const out = m.direction === 'outbound' || m.direction === 'out';
+    const dk = _dayKey(m);
+    const sep = (dk !== prevDayKey && dk !== 'unknown')
+      ? `<div class="inbox-c-date-separator"><span>${esc(_dayLabel(m))}</span></div>`
+      : '';
+    const sameSender = (prevDir === (out ? 'out' : 'in')) && !sep;
+    const failed = m.status === 'failed' || m.failed_reason;
+    const rowClasses = [
+      'inbox-c-msg',
+      out ? 'outbound' : 'inbound',
+      sameSender ? 'same-sender' : '',
+      failed ? 'failed' : '',
+    ].filter(Boolean).join(' ');
+    const timeShort = _timeShort(m);
+    const receipt = out ? (m._pending ? '<span class="receipt" title="Bezig met versturen…">⏳</span>' : `<span class="receipt">${_statusIcon(m)}</span>`) : '';
+    const bySimone = out && m.id && simoneIds.has(String(m.id));
+    const simoneSparkle = bySimone ? '<span class="simone-sparkle" title="Verstuurd door Simone (AI)">✦</span>' : '';
+    const metaVisible = `<span class="bubble-meta">${simoneSparkle}${esc(timeShort)}${receipt}</span>`;
+    const metaPhantom = `<span class="meta-phantom" aria-hidden="true">${esc(timeShort)} ${out ? '✓✓' : ''}</span>`;
+    const msgId = m.id != null ? String(m.id) : '';
+
+    if (isEmail) {
+      const subj = m.meta?.subject || '(geen onderwerp)';
+      const fromName = m.meta?.from_name || m.meta?.from_address || '—';
+      const bodyHtml = m.meta?.has_html ? '(HTML-inhoud — bekijk in v1 voor volledige opmaak)' : '';
+      const bodyText = m.body || bodyHtml || '—';
+      return { html: `${sep}<div class="${rowClasses}" data-msg-id="${esc(msgId)}">
+        <div class="inbox-c-msg-bubble is-email">
+          <div class="inbox-c-email-chip">✉ E-mail · ${esc(timeShort)}</div>
+          <div class="inbox-c-email-subj">${esc(subj)}</div>
+          <div class="inbox-c-email-from">${out ? 'aan' : 'van'}: ${esc(fromName)}</div>
+          <div class="inbox-c-email-body">${esc(String(bodyText).slice(0, 800))}${String(bodyText).length > 800 ? '…' : ''}</div>
+          ${(asArr(m.meta?.attachments).length > 0) ? `<div class="inbox-c-email-att">📎 ${asArr(m.meta?.attachments).length} bijlage(n)</div>` : ''}
+        </div>
+      </div>`, dk, dir: out ? 'out' : 'in' };
+    }
+    const tplName = m.template_name || m.meta?.template_name || null;
+    const mediaUrl = m.media_url || m.meta?.media_url || null;
+    const mediaType = m.media_type || m.meta?.media_type || null;
+    const body = m.body || (tplName ? '' : (mediaUrl ? '📎 Bijlage (' + (mediaType || 'media') + ')' : '—'));
+    const opacity = m._pending ? ';opacity:.65;font-style:italic' : '';
+    return { html: `${sep}<div class="${rowClasses}" data-msg-id="${esc(msgId)}">
+      <div class="inbox-c-msg-bubble" style="${opacity}">
+        ${bySimone ? '<span class="inbox-c-simone-badge">🤖 Simone · AI</span><br>' : ''}
+        ${tplName ? `<div class="inbox-c-msg-tplbadge" title="${esc(tplName)}">📄 via template</div>` : ''}
+        <span class="bubble-text">${esc(body)}${metaPhantom}</span>
+        ${m.failed_reason ? `<div class="inbox-c-msg-failed-reason">${esc(m.failed_reason.slice(0,80))}</div>` : ''}
+        ${metaVisible}
+      </div>
+    </div>`, dk, dir: out ? 'out' : 'in' };
+  }
+
   function _inboxChatBody(d, convId) {
     const conv = d?.conversation || null;
     const msgs = asArr(d?.items);
@@ -2259,13 +2359,14 @@
       const metaVisible = `<span class="bubble-meta">${simoneSparkle}${esc(timeShort)}${receipt}</span>`;
       const metaPhantom = `<span class="meta-phantom" aria-hidden="true">${esc(timeShort)} ${out ? '✓✓' : ''}</span>`;
 
+      const msgId = m.id != null ? String(m.id) : '';
       if (isEmail) {
         // ── E-MAIL BUBBEL — .is-email overlay op zelfde bubble-shell ──
         const subj = m.meta?.subject || '(geen onderwerp)';
         const fromName = m.meta?.from_name || m.meta?.from_address || '—';
         const bodyHtml = m.meta?.has_html ? '(HTML-inhoud — bekijk in v1 voor volledige opmaak)' : '';
         const bodyText = m.body || bodyHtml || '—';
-        return `${sep}<div class="${rowClasses}">
+        return `${sep}<div class="${rowClasses}" data-msg-id="${esc(msgId)}">
           <div class="inbox-c-msg-bubble is-email">
             <div class="inbox-c-email-chip">✉ E-mail · ${esc(timeShort)}</div>
             <div class="inbox-c-email-subj">${esc(subj)}</div>
@@ -2282,7 +2383,7 @@
       const mediaType = m.media_type || m.meta?.media_type || null;
       const body = m.body || (tplName ? '' : (mediaUrl ? '📎 Bijlage (' + (mediaType || 'media') + ')' : '—'));
       const opacity = m._pending ? ';opacity:.65;font-style:italic' : '';
-      return `${sep}<div class="${rowClasses}">
+      return `${sep}<div class="${rowClasses}" data-msg-id="${esc(msgId)}">
         <div class="inbox-c-msg-bubble" style="${opacity}">
           ${bySimone ? '<span class="inbox-c-simone-badge">🤖 Simone · AI</span><br>' : ''}
           ${tplName ? `<div class="inbox-c-msg-tplbadge" title="${esc(tplName)}">📄 via template</div>` : ''}
@@ -2301,10 +2402,12 @@
     // #ev-inbox-bottom-anchor als laatste child → scrollIntoView({block:'end'})
     // is immuun voor scrollHeight-timing (rendert on-screen positie, niet
     // gemeten scrollTop).
+    // #ev-inbox-thread-inner is de append-target voor nieuwe bubbels.
+    // #ev-inbox-bottom-anchor blijft altijd de laatste child (voor scrollIntoView).
     return `<div id="ev-inbox-chat-scroll" style="background:var(--surface-2);padding:14px 16px;flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;scroll-behavior:auto" onscroll="window.__evChatScroll(this)">
-      <div style="width:100%;max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:0">
+      <div id="ev-inbox-thread-inner" style="width:100%;max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:0">
       ${msgs.length === 0
-        ? `<div style="text-align:center;color:var(--text-3);font-size:12.5px;padding:60px 0">Geen berichten in deze conversatie.</div>`
+        ? `<div id="ev-inbox-thread-empty" style="text-align:center;color:var(--text-3);font-size:12.5px;padding:60px 0">Geen berichten in deze conversatie.</div>`
         : bubbles}
       <div id="ev-inbox-bottom-anchor" style="height:1px;flex-shrink:0" aria-hidden="true"></div>
       </div>
@@ -2416,7 +2519,7 @@
     const outsideWindow = isWA && !wa24.open;
     const freeTextBlocked = outsideWindow && !tplState;
 
-    return `<div style="padding:10px 16px;border-top:1px solid var(--border);background:var(--surface);flex-shrink:0;display:flex;flex-direction:column;gap:6px">
+    return `<div id="ev-inbox-footer" style="padding:10px 16px;border-top:1px solid var(--border);background:var(--surface);flex-shrink:0;display:flex;flex-direction:column;gap:6px">
       ${showSugg ? `<div style="padding:8px 10px;background:var(--violet-soft);border:1px solid var(--violet-line, var(--violet));border-radius:8px;color:var(--text);font-size:12.5px;line-height:1.45;display:flex;flex-direction:column;gap:6px">
         <div style="display:flex;align-items:center;gap:6px">
           <span style="display:inline-flex;align-items:center;justify-content:center;padding:1px 7px;background:var(--violet);color:white;border-radius:3px;font-size:10.5px;font-weight:600">🤖 Simone stelt voor</span>
@@ -2491,7 +2594,7 @@
   window.__evCompDraft = (convId, val) => { _ui.composeText[convId] = String(val || ''); };
   window.__evCompErrDismiss = (convId) => {
     delete _ui.composeError[convId];
-    _paintRightSurgical(convId);
+    _paintFooterOnly(convId);
   };
   window.__evCompAutoGrow = (el) => {
     if (!el) return;
@@ -2542,7 +2645,12 @@
     };
     const cur = _live.inboxMsgs.data[convId];
     if (cur) { cur.items = asArr(cur.items).concat([optimistic]); }
-    _paintRightSurgical(convId);
+    // Append-only: alleen nieuwe optimistic-bubble toevoegen, thread niet
+    // herbouwen. Force-scroll naar bottom (eigen send = altijd zichtbaar).
+    _ui._lastScrollAtBottom = true;
+    _appendNewThreadItems(convId);
+    // Composer resetten (draft/busy state) → footer-only paint
+    _paintFooterOnly(convId);
 
     try {
       let j;
@@ -2601,7 +2709,17 @@
       _live.inboxMsgs.error[convId] = null;
       _live.inbox.data = null; _live.inbox.error = null;
       queueMicrotask(fetchInbox);
-      await fetchInboxMsgs(convId, () => _paintRightSurgical(convId));
+      // Post-send refetch: haalt REAL msg-id op (i.p.v. optimistic 'opt-…')
+      // en update simoneMsgs. _appendNewThreadItems dedupt op data-msg-id
+      // dus de optimistic bubble wordt niet dubbel — wel de echte msg.
+      // Verwijder de optimistic bubble eerst uit DOM (id is opt-… en zit
+      // niet in de refetch-response) zodat de echte bubble op zijn plek
+      // komt zonder duplicaat.
+      const optEl = document.querySelector('.inbox-c-msg[data-msg-id="' + optimisticId + '"]');
+      if (optEl) optEl.remove();
+      await fetchInboxMsgs(convId, () => _appendNewThreadItems(convId));
+      // Composer/suggestion state opnieuw renderen
+      _paintFooterOnly(convId);
       _showToast(ch === 'email' ? 'E-mail verstuurd' : 'Bericht verstuurd');
     } catch (e) {
       // Server-side 24u-venster: /api/inbox-send retourneert 422
@@ -2618,7 +2736,7 @@
       }
     } finally {
       _ui.composeBusy[convId] = false;
-      _paintRightSurgical(convId);
+      _paintFooterOnly(convId);
     }
   };
 
@@ -2637,7 +2755,7 @@
     _ui.composeText[convId] = String(s.suggested_reply || '');
     // Als er een template geselecteerd was: loskoppelen (Simone-tekst is vrije tekst)
     delete _ui.composeTpl[convId];
-    _paintRightSurgical(convId);
+    _paintFooterOnly(convId);
     queueMicrotask(() => {
       const el = document.getElementById('ev-comp-input-' + convId);
       if (el) { try { el.focus({ preventScroll: true }); } catch (_) { el.focus(); } window.__evCompAutoGrow(el); }
@@ -2647,7 +2765,7 @@
     const s = _live.suggestion.data[convId];
     if (!s || s.id !== suggId) return;
     _ui.suggestionHidden[convId] = true;
-    _paintRightSurgical(convId);
+    _paintFooterOnly(convId);
     // Best-effort mark als DISMISSED — als endpoint faalt (bv. al final status),
     // is de UI-hide voldoende voor deze sessie.
     try {
@@ -2831,54 +2949,124 @@
       _live.suggestion.data[convId] = null;
       _live.suggestion.loading[convId] = false;
       fetchSuggestion(convId).then(() => {
-        // Als suggestion binnen is: repaint alleen right pane surgical
-        if (_live.suggestion.data[convId]) _paintRightSurgical(convId);
+        // Als suggestion binnen is: alleen footer-blok updaten (composer +
+        // suggestion-card zitten daarin). Thread-scrollpositie blijft.
+        if (_live.suggestion.data[convId]) _paintFooterOnly(convId);
       });
     }, 15000);
   }
 
-  // ── Surgical repaint van alleen #ev-inbox-right ────────────────────────
-  // Behoudt sticky-bottom scroll (80px threshold zoals Wanbetalers-inbox
-  // regel 14102-14114) en composer-focus/text (dispatch niet als focus in
-  // composer textarea/input zit).
+  // ── Full right-pane paint (alleen bij conv-switch of initial load) ───
+  // Vervangt HELE #ev-inbox-right innerHTML. Gebruik alleen bij:
+  //   - conv-switch (__evInboxSelect)
+  //   - initial thread-load (fetchInboxMsgs callback)
+  //   - error/loading state van thread
+  // NIET aanroepen tijdens polling/realtime refresh — die gebruiken
+  // _appendNewThreadItems (append-only) + _paintFooterOnly (composer-update).
+  // Caller regelt scroll (typisch _scrollChatToBottom(true) na paint).
   function _paintRightSurgical(convId) {
     try {
-      // Skip als focus in composer input/textarea zit — anders verliezen we
-      // draft/cursor tijdens polling-repaint. Alleen berichten-lijst update.
-      const active = document.activeElement;
-      const isComposerFocus = active && (
-        active.id?.startsWith('ev-comp-input-') ||
-        active.matches?.('.ev-inbox-right input, .ev-inbox-right textarea, .ev-inbox-right select')
-      );
       const r = document.querySelector('#ev-inbox-right');
       if (!r) return;
-      const wasAtBottom = _isScrolledNearBottom();
-      // BUG A FIX — Bewaar ALTIJD oldScrollTop VÓÓR de innerHTML-swap, en
-      // restore die na de swap wanneer wasAtBottom=false. In de vorige code
-      // deed alleen de composer-focus-branch dat; de else-branch liet
-      // scrollTop op 0 vallen (default van een nieuw element), waardoor
-      // elke poll/realtime-refresh de chat naar boven schoot.
-      const oldScrollEl = document.querySelector('#ev-inbox-chat-scroll');
-      const oldScrollTop = oldScrollEl ? oldScrollEl.scrollTop : 0;
       r.innerHTML = _inboxRightPane(convId);
-      // Scroll-behoud/restore is nu identiek in beide branches
-      if (wasAtBottom) {
-        _scrollChatToBottom(true);
-      } else {
-        // Restore exact naar oude positie (dubbele rAF want nieuw element)
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            const newScroll = document.querySelector('#ev-inbox-chat-scroll');
-            if (newScroll) newScroll.scrollTop = oldScrollTop;
-          });
-        });
+    } catch (_) {}
+  }
+
+  // ── Append-only refresh: voeg alleen NIEUWE bubbels toe ──────────────
+  // Vergelijk data-msg-id in DOM met items in cache. Bestaande DOM-nodes
+  // NIET aanraken → browser houdt scrollTop automatisch vast. Bij _stick
+  // (near-bottom) → auto-scroll na append; anders positie blijft staan.
+  function _appendNewThreadItems(convId) {
+    const inner = document.querySelector('#ev-inbox-thread-inner');
+    const anchor = document.querySelector('#ev-inbox-bottom-anchor');
+    if (!inner) return;
+    const d = _live.inboxMsgs.data[convId];
+    if (!d) return;
+    const msgs = asArr(d.items);
+    if (msgs.length === 0) return;
+
+    // Bestaande msg-ids uit DOM
+    const existingIds = new Set();
+    inner.querySelectorAll('.inbox-c-msg[data-msg-id]').forEach((el) => {
+      const id = el.getAttribute('data-msg-id');
+      if (id) existingIds.add(id);
+    });
+
+    const conv = d.conversation || null;
+    const isWA = !!(conv?.phone_number || conv?.can_send_text);
+    const simoneIds = _live.simoneMsgs.data[convId] || new Set();
+
+    // Continuïteit: prevDayKey + prevDir uit LAATSTE bubble in DOM
+    const rows = inner.querySelectorAll('.inbox-c-msg');
+    const lastRow = rows.length ? rows[rows.length - 1] : null;
+    let prevDayKey = null, prevDir = null;
+    if (lastRow) {
+      const lastId = lastRow.getAttribute('data-msg-id');
+      const lastMsg = msgs.find((m) => String(m.id) === lastId);
+      if (lastMsg) {
+        const dt = new Date(lastMsg.at || lastMsg.sent_at || lastMsg.created_at || NaN);
+        if (Number.isFinite(dt.getTime())) {
+          prevDayKey = dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+        }
+        prevDir = (lastMsg.direction === 'outbound' || lastMsg.direction === 'out') ? 'out' : 'in';
       }
-      // Re-focus composer input (browser reset focus na innerHTML)
-      if (isComposerFocus) {
-        const inputId = active.id;
-        if (inputId) {
-          const newEl = document.getElementById(inputId);
-          if (newEl) { try { newEl.focus({ preventScroll: true }); } catch (_) { newEl.focus(); } if (newEl.setSelectionRange && active.value !== undefined) { try { newEl.setSelectionRange(active.value.length, active.value.length); } catch (_) {} } }
+    }
+
+    const htmlChunks = [];
+    let appendedCount = 0;
+    for (const m of msgs) {
+      const id = m.id != null ? String(m.id) : '';
+      if (id && existingIds.has(id)) continue;
+      const { html, dk, dir } = _renderBubbleHtml(m, { isWA, simoneIds, prevDayKey, prevDir });
+      htmlChunks.push(html);
+      prevDayKey = dk;
+      prevDir = dir;
+      appendedCount++;
+    }
+    if (appendedCount === 0) return;
+    const empty = document.querySelector('#ev-inbox-thread-empty');
+    if (empty) empty.remove();
+    const fragment = document.createElement('div');
+    fragment.innerHTML = htmlChunks.join('');
+    const children = Array.from(fragment.children);
+    for (const child of children) {
+      if (anchor) inner.insertBefore(child, anchor);
+      else inner.appendChild(child);
+    }
+    // Sticky-bottom: als _stick=true, mee-scrollen. Anders: browser houdt
+    // scrollTop vast omdat we bestaande nodes niet aanraakten (append-only).
+    if (_ui._lastScrollAtBottom) {
+      requestAnimationFrame(() => {
+        const scrollEl = document.querySelector('#ev-inbox-chat-scroll');
+        if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+      });
+    }
+  }
+
+  // ── Footer-only paint: alleen composer + suggestie-blok updaten ──────
+  // #ev-inbox-footer wordt vervangen; #ev-inbox-chat-scroll blijft intact
+  // → scrollTop blijft. Composer-focus + cursor-positie hersteld.
+  function _paintFooterOnly(convId) {
+    try {
+      const oldFooter = document.querySelector('#ev-inbox-footer');
+      if (!oldFooter) return;
+      const active = document.activeElement;
+      const focusId = (active && active.id && active.id.startsWith('ev-comp-input-')) ? active.id : null;
+      const cursorPos = (focusId && active.setSelectionRange && active.value !== undefined) ? active.selectionStart : null;
+      const d = _live.inboxMsgs.data[convId];
+      const conv = d?.conversation || null;
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = _inboxRightFooter(convId, conv);
+      const newFooter = wrapper.firstElementChild;
+      if (!newFooter) return;
+      oldFooter.replaceWith(newFooter);
+      if (focusId) {
+        const el = document.getElementById(focusId);
+        if (el) {
+          try { el.focus({ preventScroll: true }); } catch (_) { el.focus(); }
+          if (cursorPos != null && el.setSelectionRange) {
+            try { el.setSelectionRange(cursorPos, cursorPos); } catch (_) {}
+          }
         }
       }
     } catch (_) {}
@@ -3057,11 +3245,11 @@
       const j = await window.KV.authedJson('/api/inbox-thread-unified?conversation_id=' + encodeURIComponent(convId) + '&include_email=1&limit=200');
       if (!j || j.error) return;
       const st = _live.inboxMsgs;
-      const prevCount = asArr(st.data[convId]?.items).length;
       st.data[convId] = { conversation: j?.conversation || null, items: asArr(j?.items) };
-      const newCount = st.data[convId].items.length;
-      // Alleen repaint als er echt iets veranderd is (voorkomt onnodige DOM-churn)
-      if (newCount !== prevCount) _paintRightSurgical(convId);
+      // APPEND-ONLY: nooit innerHTML-swap tijdens refresh. _appendNewThreadItems
+      // vergelijkt data-msg-id met DOM en voegt alleen nieuwe toe. Bestaande
+      // bubbels blijven ongewijzigd → scrollTop blijft vanzelf staan.
+      _appendNewThreadItems(convId);
     } catch (_) {} finally { _refreshingThread = null; }
   }
   async function _liveRefreshList() {
