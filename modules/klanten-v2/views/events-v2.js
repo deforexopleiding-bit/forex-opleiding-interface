@@ -35,7 +35,9 @@
     attendees:   { loading: {}, error: {}, data: {} },
     completedOne:{ loading: {}, error: {}, data: {} },
     audit:       { loading: {}, error: {}, data: {} },
-    revenue:     { loading: false, error: null, data: null }, // event_id → {revenue_eur, deal_count}
+    revenue:     { loading: false, error: null, data: null },
+    mentors:     { loading: {}, error: {}, data: {} },       // per event_id — voor complete-flow
+    auditAgg:    { loading: {}, error: {}, data: {} },       // per event_id — aggregated attendee-audit
   };
 
   const _ui = {
@@ -56,6 +58,11 @@
     attModal: null,        // { mode, item }
     // Wizard file preview
     _photoDataUrl: null,
+    // Complete-modal state
+    completeModal: null,   // { event_id, step }
+    completeForm: null,    // { attendees:{[id]:{attendance_status, outcome, reason}}, present_mentors:{[team_member_id]:true}, expenses:[{team_member_id, amount, description}] }
+    // Inline belstatus-dropdown busy-flag per attendee
+    belBusy: {},
   };
 
   async function tryFetch(label, url, init, timeoutMs) {
@@ -161,11 +168,48 @@
     if (window.DFO?.render) window.DFO.render();
   }
   async function fetchAudit(id) {
-    const st = _live.audit; if (st.loading[id] || st.data[id]) return;
+    // BUG 4 FIX — events-attendee-audit-log is per-attendee (verplichte
+    // query-param attendee_id). Er is GEEN event-brede audit-endpoint.
+    // Aggregeer client-side: fetch alle audits parallel voor alle attendees
+    // in de list, merge, sort DESC. Cap max 25 attendees om Vercel-timeouts
+    // te vermijden.
+    const st = _live.auditAgg; if (st.loading[id] || st.data[id]) return;
     st.loading[id] = true; st.error[id] = null;
-    const j = await tryFetch('audit:' + id, '/api/events-attendee-audit-log?event_id=' + encodeURIComponent(id));
+    // Zorg dat attendees er zijn
+    if (!_live.attendees.data[id] && !_live.attendees.loading[id]) {
+      await fetchAttendees(id);
+    }
+    const attList = asArr(_live.attendees.data[id]).slice(0, 25);
+    if (attList.length === 0) {
+      st.loading[id] = false;
+      st.data[id] = [];
+      if (window.DFO?.render) window.DFO.render();
+      return;
+    }
+    try {
+      const results = await Promise.all(attList.map(async (a) => {
+        const j = await tryFetch('audit:' + a.id, '/api/events-attendee-audit-log?attendee_id=' + encodeURIComponent(a.id) + '&limit=20');
+        if (j && j.__error) return { attendee: a, entries: [], error: j.__error };
+        const entries = asArr(j?.items).map((e) => ({ ...e, _attendee: a }));
+        return { attendee: a, entries, error: null };
+      }));
+      const merged = [];
+      for (const r of results) for (const e of r.entries) merged.push(e);
+      merged.sort((a, b) => new Date(b.at || b.created_at || 0) - new Date(a.at || a.created_at || 0));
+      st.data[id] = merged;
+    } catch (e) {
+      st.error[id] = e?.message || 'aggregate faalde';
+    } finally {
+      st.loading[id] = false;
+      if (window.DFO?.render) window.DFO.render();
+    }
+  }
+  async function fetchMentors(id) {
+    const st = _live.mentors; if (st.loading[id] || st.data[id]) return;
+    st.loading[id] = true; st.error[id] = null;
+    const j = await tryFetch('mentors:' + id, '/api/events-mentors-list?event_id=' + encodeURIComponent(id));
     st.loading[id] = false;
-    if (j && j.__error) st.error[id] = j.__error; else st.data[id] = asArr(j?.entries || j?.rows || j);
+    if (j && j.__error) st.error[id] = j.__error; else st.data[id] = asArr(j?.mentors || j?.items);
     if (window.DFO?.render) window.DFO.render();
   }
 
@@ -236,9 +280,11 @@
   // OVERZICHT-TAB DISPATCHER (list / detail / wizard)
   // ═══════════════════════════════════════════════════════════════════════
   function overzichtView() {
-    if (_ui.mode === 'wizard') return _wizardView();
-    if (_ui.mode === 'detail' && _ui.detailId) return _detailView(_ui.detailId);
-    return _lijstView();
+    const base = _ui.mode === 'wizard' ? _wizardView()
+      : (_ui.mode === 'detail' && _ui.detailId) ? _detailView(_ui.detailId)
+      : _lijstView();
+    // Complete-modal renderen boven de content als open
+    return base + (_ui.completeModal ? _completeModal() : '');
   }
 
   // ── LIJST ────────────────────────────────────────────────────────────────
@@ -540,31 +586,32 @@
   };
 
   // Detail-acties
+  // Alle 3 endpoints (publish/close-signups/reopen-signups) lezen id uit
+  // query-param (bevestigd in api-source). POST-method, geen body-id.
   window.__evPublish = async (id) => {
     if (!window.confirm('Event publiceren? Zichtbaar voor alle klanten die het kanaal volgen.')) return;
     _ui.busy[id] = 'publish'; if (window.DFO?.render) window.DFO.render();
     try {
-      const j = await window.KV.authedJson('/api/events-publish', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id }) });
+      const j = await window.KV.authedJson('/api/events-publish?id=' + encodeURIComponent(id), { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
       if (j?.error) throw new Error(j.error);
       _showToast('Event gepubliceerd');
       _live.detail.data[id] = null; queueMicrotask(() => fetchDetail(id));
     } catch (e) { alert('Publiceren mislukt: ' + (e?.message || 'onbekende fout')); }
     finally { _ui.busy[id] = null; if (window.DFO?.render) window.DFO.render(); }
   };
-  window.__evComplete = async (id) => {
-    if (!window.confirm('Event afronden? Aanwezigheid en bonussen worden vastgesteld.')) return;
-    _ui.busy[id] = 'complete'; if (window.DFO?.render) window.DFO.render();
-    try {
-      const j = await window.KV.authedJson('/api/events-complete', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id }) });
-      if (j?.error) throw new Error(j.error);
-      _showToast('Event afgerond');
-      _live.detail.data[id] = null; _live.completedOne.data[id] = null; queueMicrotask(() => fetchDetail(id));
-    } catch (e) { alert('Afronden mislukt: ' + (e?.message || 'onbekende fout')); }
-    finally { _ui.busy[id] = null; if (window.DFO?.render) window.DFO.render(); }
+  window.__evComplete = (id) => {
+    // events-complete verwacht een volledige body {event_id, attendees[],
+    // present_team_member_ids[], expenses[]}. Open de v2 afrond-modal
+    // i.p.v. een simpele confirm-POST.
+    _ui.completeModal = { event_id: id, step: 1 };
+    if (!_live.attendees.data[id])   queueMicrotask(() => fetchAttendees(id));
+    if (!_live.mentors.data[id])     queueMicrotask(() => fetchMentors(id));
+    _ui.completeForm = { attendees: {}, present_mentors: {}, expenses: [] };
+    if (window.DFO?.render) window.DFO.render();
   };
   window.__evCloseSignups = async (id) => {
     try {
-      const j = await window.KV.authedJson('/api/events-close-signups', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id }) });
+      const j = await window.KV.authedJson('/api/events-close-signups?id=' + encodeURIComponent(id), { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
       if (j?.error) throw new Error(j.error);
       _showToast('Aanmelding gesloten');
       _live.detail.data[id] = null; queueMicrotask(() => fetchDetail(id));
@@ -572,11 +619,208 @@
   };
   window.__evReopen = async (id) => {
     try {
-      const j = await window.KV.authedJson('/api/events-reopen-signups', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id }) });
+      const j = await window.KV.authedJson('/api/events-reopen-signups?id=' + encodeURIComponent(id), { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
       if (j?.error) throw new Error(j.error);
       _showToast('Aanmelding heropend');
       _live.detail.data[id] = null; queueMicrotask(() => fetchDetail(id));
     } catch (e) { alert('Heropenen mislukt: ' + (e?.message || 'onbekende fout')); }
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // BUG 2 — EVENT AFRONDEN MODAL (v1-parity via events-complete)
+  // ═══════════════════════════════════════════════════════════════════════
+  // Body-shape events-complete (bevestigd tegen api/_lib/events-complete-core.js):
+  //   { event_id, attendees:[{id, attendance_status, outcome?, reason?}],
+  //     present_team_member_ids:[uuid], expenses:[{team_member_id, amount, description?}] }
+  //   attendance_status ∈ {'aanwezig','no_show','afgemeld'}
+  //   outcome ∈ {'opvolgen','geen_interesse','nog_onbekend','klant_geworden','twijfelt_nog'}
+  //   Bonus = 3% van sale (BONUS_PCT) — server-side.
+  const COMPLETE_ATT_STATUS = [
+    { v: 'aanwezig', l: 'Aanwezig' },
+    { v: 'no_show',  l: 'No-show' },
+    { v: 'afgemeld', l: 'Afgemeld' },
+  ];
+  const COMPLETE_OUTCOMES = [
+    { v: '',                l: '—' },
+    { v: 'opvolgen',        l: 'Opvolgen (vereist notitie)' },
+    { v: 'geen_interesse',  l: 'Geen interesse' },
+    { v: 'nog_onbekend',    l: 'Nog onbekend' },
+    { v: 'twijfelt_nog',    l: 'Twijfelt nog (vereist notitie)' },
+    { v: 'klant_geworden',  l: 'Klant geworden' },
+  ];
+
+  window.__evCompleteClose = () => { _ui.completeModal = null; _ui.completeForm = null; if (window.DFO?.render) window.DFO.render(); };
+  window.__evCompleteStep = (n) => { if (_ui.completeModal) { _ui.completeModal.step = n; if (window.DFO?.render) window.DFO.render(); } };
+  window.__evCompleteAttSet = (attId, field, val) => {
+    if (!_ui.completeForm) return;
+    _ui.completeForm.attendees[attId] = _ui.completeForm.attendees[attId] || {};
+    _ui.completeForm.attendees[attId][field] = val;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__evCompleteMentorToggle = (tmId) => {
+    if (!_ui.completeForm) return;
+    _ui.completeForm.present_mentors[tmId] = !_ui.completeForm.present_mentors[tmId];
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__evCompleteExpenseAdd = () => {
+    if (!_ui.completeForm) return;
+    _ui.completeForm.expenses.push({ team_member_id: '', amount: '', description: '' });
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__evCompleteExpenseSet = (idx, field, val) => {
+    if (!_ui.completeForm || !_ui.completeForm.expenses[idx]) return;
+    _ui.completeForm.expenses[idx][field] = val;
+  };
+  window.__evCompleteExpenseRemove = (idx) => {
+    if (!_ui.completeForm) return;
+    _ui.completeForm.expenses.splice(idx, 1);
+    if (window.DFO?.render) window.DFO.render();
+  };
+
+  function _completeModal() {
+    const m = _ui.completeModal;
+    const form = _ui.completeForm || { attendees: {}, present_mentors: {}, expenses: [] };
+    const eventId = m.event_id;
+    const step = m.step || 1;
+    const attList = asArr(_live.attendees.data[eventId]);
+    const mentorList = asArr(_live.mentors.data[eventId]);
+    const attLoad = _live.attendees.loading[eventId];
+    const menLoad = _live.mentors.loading[eventId];
+    const dot = (n, l) => `<span style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:20px;font-size:11.5px;font-weight:500;background:${step === n ? 'var(--pink-soft)' : 'var(--surface-2)'};color:${step === n ? 'var(--pink)' : 'var(--text-3)'}">
+      <span style="width:18px;height:18px;border-radius:50%;background:${step > n ? 'var(--emerald)' : step === n ? 'var(--pink)' : 'var(--border)'};color:white;display:inline-flex;align-items:center;justify-content:center;font-size:10px">${step > n ? '✓' : n}</span>${esc(l)}</span>`;
+
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px" onclick="window.__evCompleteClose()">
+      <div style="background:var(--surface);border-radius:var(--r-lg);max-width:760px;width:100%;max-height:88vh;overflow:auto;padding:0" onclick="event.stopPropagation()">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <span class="tile-ico" style="background:var(--pink-soft);color:var(--pink)">${svg(I.tick)}</span>
+          <div><div class="card-title">Event afronden</div>
+            <div style="font-size:11.5px;color:var(--text-3)">Leg aanwezigheid, aanwezige mentoren en uitgaven vast. Bonus = 3% van sales (automatisch).</div></div>
+          <div style="margin-left:auto;display:flex;gap:6px">${dot(1,'Aanwezigheid')}${dot(2,'Mentoren')}${dot(3,'Uitgaven')}${dot(4,'Bevestigen')}</div>
+          <button class="icon-btn" onclick="window.__evCompleteClose()">${svg(I.x)}</button>
+        </div>
+        <div style="padding:18px 22px">
+          ${step === 1 ? _completeStepAttendees(attList, form, attLoad)
+           : step === 2 ? _completeStepMentors(mentorList, form, menLoad)
+           : step === 3 ? _completeStepExpenses(mentorList, form)
+           : _completeStepReview(attList, mentorList, form)}
+        </div>
+        <div style="padding:14px 22px;border-top:1px solid var(--border);background:var(--surface-2);display:flex;gap:8px;justify-content:space-between">
+          <button class="btn btn-ghost btn-sm" ${step === 1 ? 'disabled style="opacity:.5"' : ''} onclick="window.__evCompleteStep(${step - 1})">← Vorige</button>
+          ${step < 4
+            ? `<button class="btn btn-primary btn-sm" onclick="window.__evCompleteStep(${step + 1})">Volgende →</button>`
+            : `<button class="btn btn-primary btn-sm" onclick="window.__evCompleteSubmit()">${svg(I.tick)}Event afronden</button>`}
+        </div>
+      </div>
+    </div>`;
+  }
+  function _completeStepAttendees(attList, form, loading) {
+    if (loading && attList.length === 0) return skel();
+    if (attList.length === 0) return `<div style="font-size:13px;color:var(--text-3);padding:20px;text-align:center">Geen deelnemers gevonden.</div>`;
+    return `<div style="font-size:12.5px;color:var(--text-3);margin-bottom:12px">Stel per deelnemer de aanwezigheid + uitkomst vast. "Opvolgen" en "Twijfelt nog" vereisen een notitie.</div>
+    <div style="max-height:52vh;overflow:auto;border:1px solid var(--border);border-radius:8px">
+      ${attList.map((a) => {
+        const naam = [a.first_name, a.last_name].filter(Boolean).join(' ') || a.email || '—';
+        const cur = form.attendees[a.id] || {};
+        const st = cur.attendance_status || (a.attendance_status || (a.status === 'aanwezig' ? 'aanwezig' : a.status === 'no_show' ? 'no_show' : ''));
+        const oc = cur.outcome || a.outcome || '';
+        const rs = cur.reason || '';
+        const needsReason = oc === 'opvolgen' || oc === 'twijfelt_nog';
+        return `<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;align-items:center;gap:10px">
+            ${H.av(naam, 24)}
+            <span style="flex:1;font-size:13px;font-weight:500">${esc(naam)}</span>
+            <select onchange="window.__evCompleteAttSet('${esc(a.id)}','attendance_status',this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12px">
+              <option value="">—</option>
+              ${COMPLETE_ATT_STATUS.map((o) => `<option value="${o.v}" ${st === o.v ? 'selected' : ''}>${o.l}</option>`).join('')}
+            </select>
+            <select onchange="window.__evCompleteAttSet('${esc(a.id)}','outcome',this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12px">
+              ${COMPLETE_OUTCOMES.map((o) => `<option value="${o.v}" ${oc === o.v ? 'selected' : ''}>${o.l}</option>`).join('')}
+            </select>
+          </div>
+          ${needsReason ? `<input type="text" placeholder="Notitie (verplicht bij ${oc})" value="${esc(rs)}" oninput="window.__evCompleteAttSet('${esc(a.id)}','reason',this.value)" style="padding:6px 10px;border:1px solid var(--amber-line);background:var(--amber-soft);border-radius:6px;font-size:12.5px" />` : ''}
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+  function _completeStepMentors(mentorList, form, loading) {
+    if (loading && mentorList.length === 0) return skel();
+    if (mentorList.length === 0) return `<div style="font-size:13px;color:var(--text-3);padding:20px;text-align:center">Geen mentoren gekoppeld aan dit event.</div>`;
+    return `<div style="font-size:12.5px;color:var(--text-3);margin-bottom:12px">Vink aan welke mentoren aanwezig waren. Alleen aanwezige mentoren krijgen bonus over hun sales.</div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      ${mentorList.map((m) => {
+        const tmId = m.team_member_id || m.id;
+        const naam = m.name || m.full_name || m.team_member?.name || '—';
+        const on = !!form.present_mentors[tmId];
+        return `<label style="display:flex;gap:10px;align-items:center;padding:10px 12px;border:1px solid ${on ? 'var(--pink-line)' : 'var(--border)'};border-radius:8px;cursor:pointer;background:${on ? 'var(--pink-soft)' : 'var(--surface)'}">
+          <input type="checkbox" ${on ? 'checked' : ''} onchange="window.__evCompleteMentorToggle('${esc(tmId)}')" style="margin:0" />
+          <span style="font-size:13px;font-weight:500">${esc(naam)}</span>
+          ${m.role ? `<span style="font-size:11px;color:var(--text-3)">· ${esc(m.role)}</span>` : ''}
+        </label>`;
+      }).join('')}
+    </div>`;
+  }
+  function _completeStepExpenses(mentorList, form) {
+    const exp = form.expenses;
+    return `<div style="font-size:12.5px;color:var(--text-3);margin-bottom:12px">Uitgaven per mentor (bv. reiskosten, materiaal). Optioneel — laat leeg als er geen zijn.</div>
+    ${exp.length === 0 ? `<div style="font-size:12.5px;color:var(--text-3);padding:12px;text-align:center;background:var(--surface-2);border-radius:8px;margin-bottom:10px">Nog geen uitgaven toegevoegd.</div>` : ''}
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+      ${exp.map((e, i) => `<div style="display:grid;grid-template-columns:1.5fr 1fr 2fr auto;gap:8px;padding:10px;background:var(--surface-2);border-radius:8px">
+        <select onchange="window.__evCompleteExpenseSet(${i},'team_member_id',this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12px">
+          <option value="">— kies mentor —</option>
+          ${mentorList.map((m) => { const tmId = m.team_member_id || m.id; const naam = m.name || m.full_name || '—'; return `<option value="${esc(tmId)}" ${e.team_member_id === tmId ? 'selected' : ''}>${esc(naam)}</option>`; }).join('')}
+        </select>
+        <input type="number" step="0.01" min="0" placeholder="€0.00" value="${esc(e.amount)}" oninput="window.__evCompleteExpenseSet(${i},'amount',this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12px" />
+        <input type="text" placeholder="Omschrijving" value="${esc(e.description || '')}" oninput="window.__evCompleteExpenseSet(${i},'description',this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12px" />
+        <button class="icon-btn" title="Verwijderen" onclick="window.__evCompleteExpenseRemove(${i})">${svg(I.trash || I.x, 'width:13px;height:13px')}</button>
+      </div>`).join('')}
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="window.__evCompleteExpenseAdd()">${svg(I.plus)}Uitgave toevoegen</button>`;
+  }
+  function _completeStepReview(attList, mentorList, form) {
+    const attSet = Object.keys(form.attendees).filter((k) => form.attendees[k]?.attendance_status);
+    const menSet = Object.keys(form.present_mentors).filter((k) => form.present_mentors[k]);
+    const expSet = form.expenses.filter((e) => e.team_member_id && Number(e.amount) > 0);
+    const totalExp = expSet.reduce((a, e) => a + Number(e.amount || 0), 0);
+    return `<div style="font-size:13px;line-height:1.6">
+      <div class="kv"><dt>Deelnemers ingesteld</dt><dd class="num">${attSet.length} / ${attList.length}</dd></div>
+      <div class="kv"><dt>Aanwezige mentoren</dt><dd class="num">${menSet.length} / ${mentorList.length}</dd></div>
+      <div class="kv"><dt>Uitgaven</dt><dd>${expSet.length} regels · totaal ${eur0(totalExp)}</dd></div>
+      <div style="margin-top:14px;padding:12px;background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:8px;font-size:12.5px;color:var(--amber)">
+        <b>Let op:</b> na afronden worden aanwezigheid, follow-ups, bonusberekeningen (3% van sales van aanwezige mentoren) en uitgaven definitief geboekt. Dit kan worden overschreven met "Her-afronden".
+      </div>
+    </div>`;
+  }
+  window.__evCompleteSubmit = async () => {
+    const m = _ui.completeModal; const form = _ui.completeForm;
+    if (!m || !form) return;
+    // Bouw body voor events-complete
+    const attendees = Object.entries(form.attendees)
+      .filter(([, v]) => v.attendance_status)
+      .map(([id, v]) => {
+        const row = { id, attendance_status: v.attendance_status };
+        if (v.outcome) row.outcome = v.outcome;
+        if (v.reason)  row.reason = v.reason;
+        return row;
+      });
+    const present_team_member_ids = Object.keys(form.present_mentors).filter((k) => form.present_mentors[k]);
+    const expenses = form.expenses
+      .filter((e) => e.team_member_id && Number(e.amount) > 0)
+      .map((e) => ({ team_member_id: e.team_member_id, amount: Number(e.amount), description: e.description || undefined }));
+
+    if (attendees.length === 0 && !window.confirm('Geen enkele aanwezigheid gezet — wil je toch afronden?')) return;
+
+    try {
+      const body = { event_id: m.event_id, attendees, present_team_member_ids, expenses };
+      const j = await window.KV.authedJson('/api/events-complete', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+      if (j?.error) throw new Error(j.error);
+      _showToast('Event afgerond ✓');
+      const id = m.event_id;
+      _ui.completeModal = null; _ui.completeForm = null;
+      _live.detail.data[id] = null; _live.completed.data = null; _live.completedOne.data[id] = null;
+      queueMicrotask(() => fetchDetail(id));
+      queueMicrotask(fetchCompleted);
+      if (window.DFO?.render) window.DFO.render();
+    } catch (e) { alert('Afronden mislukt: ' + (e?.message || 'onbekende fout')); }
   };
 
   // ── DETAIL — AANWEZIGEN ─────────────────────────────────────────────────
@@ -608,23 +852,12 @@
     ${rows.length === 0
       ? emptyBlk('Geen deelnemers', 'Er zijn geen deelnemers in deze categorie.')
       : `<div style="padding:0 20px 20px">${H.table(
-          [{l:'Naam'},{l:'E-mail',cls:'optional'},{l:'Telefoon',cls:'optional'},{l:'Status'},{l:'Aanmelddatum',cls:'optional'},{l:'Vragenlijst',cls:'optional'},{l:'Belstatus',cls:'optional'},{l:'Bevestigd',cls:'optional'},{l:'Tags',cls:'optional'},{l:'',cls:'r'}],
+          [{l:'Naam'},{l:'E-mail',cls:'optional'},{l:'Telefoon',cls:'optional'},{l:'Status'},{l:'Aanmelddatum',cls:'optional'},{l:'Vragenlijst',cls:'optional'},{l:'Belstatus'},{l:'',cls:'r'}],
           rows.map((a) => {
             const naam = [a.first_name || a.voornaam, a.last_name || a.achternaam].filter(Boolean).join(' ') || a.name || a.email || '—';
             const [sc, sl] = ATT_STATUS_META[a.status] || ['neutral', a.status || '—'];
             const hasQuest = !!(a.assessment_response_id || a.questionnaire_completed_at);
-            // Belstatus — call_status kan 'called'/'no_answer'/'confirmed'/etc zijn.
-            // called_at = wanneer voor het laatst gebeld (indicator "wel/niet gebeld").
-            const bel = _belStatusPill(a);
-            // Bevestigd — attendance_status='confirmed' of attended_at IS NOT NULL
-            // of call_status='confirmed'; overige = "niet bevestigd" (kruis).
-            const isBevestigd = a.attendance_status === 'confirmed'
-              || !!a.attended_at
-              || a.call_status === 'confirmed'
-              || a.status === 'aanwezig';
-            const bevestigd = isBevestigd
-              ? `<span title="Bevestigd" style="color:var(--emerald);font-size:14px">✓</span>`
-              : `<span title="Niet bevestigd" style="color:var(--text-3);font-size:14px">✗</span>`;
+            // BUG 6 — belstatus als dropdown ipv pill
             return [
               `<div class="row-avatar">${H.av(naam, 26)}<span class="cell-main">${esc(naam)}</span></div>`,
               `<span style="color:var(--text-3);font-size:12.5px">${esc(a.email || '—')}</span>`,
@@ -634,27 +867,60 @@
               hasQuest
                 ? `<span title="Vragenlijst ingevuld" style="color:var(--emerald);font-size:14px">✓</span>`
                 : `<span title="Vragenlijst nog niet ingevuld" style="color:var(--rose);font-size:14px">✗</span>`,
-              bel,
-              bevestigd,
-              _tagChips(a.tags),
+              _belStatusDropdown(a, id),
               `<button class="icon-btn" title="Meer" onclick="window.__evAttKebab('${esc(a.id)}','${esc(id)}')" style="width:26px;height:26px">${svg(I.dots || I.settings,'width:13px;height:13px')}</button>`,
             ];
           })
         )}</div>`}`;
   }
 
-  function _belStatusPill(a) {
-    // Prioriteit: call_status enum (called/no_answer/confirmed/left_message/etc)
-    // > called_at (fallback als call_status leeg is).
-    const cs = String(a.call_status || '').toLowerCase();
-    if (cs === 'confirmed') return H.pill('ok', 'Bevestigd');
-    if (cs === 'called' || cs === 'reached') return H.pill('ok', 'Gebeld');
-    if (cs === 'no_answer' || cs === 'voicemail' || cs === 'left_message') return H.pill('warn', 'Geen gehoor');
-    if (cs === 'declined' || cs === 'wrong_number') return H.pill('danger', esc(cs));
-    if (cs) return H.pill('neutral', esc(cs));
-    if (a.called_at) return H.pill('ok', 'Gebeld');
-    return `<span title="Nog niet gebeld" style="color:var(--text-3);font-size:14px">—</span>`;
+  // BUG 6 + 7 — Belstatus als inline-dropdown die schrijft naar
+  // events-attendee-update (PATCH ?id=<uuid> body {call_status}). Bevestigd →
+  // groene pill-achtige styling; overige = neutral/warn/danger.
+  const CALL_STATUS_OPTIONS = [
+    { v: '',              l: '— nog niet gebeld —' },
+    { v: 'bevestigd',     l: 'Bevestigd' },
+    { v: 'gebeld',        l: 'Gebeld' },
+    { v: 'geen_gehoor',   l: 'Geen gehoor' },
+    { v: 'voicemail',     l: 'Voicemail' },
+    { v: 'komt_niet',     l: 'Komt niet' },
+    { v: 'terugbellen',   l: 'Terugbellen' },
+  ];
+  function _belStatusColor(cs) {
+    const s = String(cs || '').toLowerCase();
+    if (s === 'bevestigd' || s === 'confirmed' || s === 'gebeld' || s === 'called' || s === 'reached') return { bg:'var(--emerald-soft)', fg:'var(--emerald)', bd:'var(--emerald-line)' };
+    if (s === 'geen_gehoor' || s === 'no_answer' || s === 'voicemail' || s === 'left_message' || s === 'terugbellen') return { bg:'var(--amber-soft)', fg:'var(--amber)', bd:'var(--amber-line)' };
+    if (s === 'komt_niet' || s === 'declined' || s === 'wrong_number' || s === 'cancelled') return { bg:'var(--slate-soft, var(--surface-2))', fg:'var(--text-2)', bd:'var(--border)' };
+    return { bg:'var(--surface)', fg:'var(--text-3)', bd:'var(--border)' };
   }
+  function _belStatusDropdown(a, eventId) {
+    const cur = String(a.call_status || '').toLowerCase();
+    const col = _belStatusColor(cur);
+    const busy = _ui.belBusy[a.id];
+    // Als backend enum-waarde onbekend is in onze lijst, prepend die zodat 't
+    // niet magisch verandert bij render.
+    const opts = CALL_STATUS_OPTIONS.slice();
+    if (cur && !opts.some((o) => o.v === cur)) opts.unshift({ v: cur, l: cur + ' (huidig)' });
+    return `<select ${busy ? 'disabled' : ''} onchange="window.__evAttSetCallStatus('${esc(a.id)}','${esc(eventId)}',this.value)" style="padding:5px 8px;border:1px solid ${col.bd};background:${col.bg};color:${col.fg};border-radius:6px;font-size:12px;font-weight:500;${busy ? 'opacity:.5;cursor:wait' : 'cursor:pointer'}">
+      ${opts.map((o) => `<option value="${esc(o.v)}" ${o.v === cur ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}
+    </select>`;
+  }
+  window.__evAttSetCallStatus = async (attId, eventId, newStatus) => {
+    _ui.belBusy[attId] = true; if (window.DFO?.render) window.DFO.render();
+    try {
+      const body = { call_status: newStatus || null };
+      const j = await window.KV.authedJson('/api/events-attendee-update?id=' + encodeURIComponent(attId), { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+      if (j?.error) throw new Error(j.error);
+      _showToast('Belstatus bijgewerkt');
+      // Update local state defensief zodat re-render meteen klopt
+      const list = _live.attendees.data[eventId];
+      if (Array.isArray(list)) {
+        const idx = list.findIndex((x) => x.id === attId);
+        if (idx >= 0) list[idx] = { ...list[idx], call_status: newStatus || null, call_status_at: new Date().toISOString() };
+      }
+    } catch (e) { alert('Belstatus bijwerken mislukt: ' + (e?.message || 'onbekende fout')); }
+    finally { _ui.belBusy[attId] = false; if (window.DFO?.render) window.DFO.render(); }
+  };
   function _tagChips(tags) {
     if (!Array.isArray(tags) || tags.length === 0) return '<span style="color:var(--text-3);font-size:11px">—</span>';
     return tags.slice(0, 3).map((t) => `<span class="pill pill-neutral nodot" style="font-size:10px;padding:1px 6px;margin-right:3px">${esc(t.label || t.name || t)}</span>`).join('')
@@ -771,19 +1037,26 @@
   // ── DETAIL — AUDIT ───────────────────────────────────────────────────────
   function _detailAudit(ev) {
     const id = ev.id;
-    if (!_live.audit.data[id] && !_live.audit.loading[id] && !_live.audit.error[id]) queueMicrotask(() => fetchAudit(id));
-    if (_live.audit.error[id] && !_live.audit.data[id]) return errBlk('audit', _live.audit.error[id], id);
-    if (_live.audit.loading[id] && !_live.audit.data[id]) return skel();
-    const rows = asArr(_live.audit.data[id]);
-    if (rows.length === 0) return emptyBlk('Geen audit-entries', 'Er is nog niets gelogd voor dit event.');
-    return `<div style="padding:0 20px 20px">${H.table(
-      [{l:'Wanneer'},{l:'Wie',cls:'optional'},{l:'Actie'},{l:'Details',cls:'optional'}],
-      rows.map((r) => [
-        `<span class="mono" style="font-size:12px;color:var(--text-3)">${esc(_fmtDateTime(r.created_at || r.timestamp))}</span>`,
-        `<span style="font-size:12.5px">${esc(r.actor || r.user_name || r.user_email || '—')}</span>`,
-        `<span class="mono" style="font-size:12px">${esc(r.action || r.event_type || '—')}</span>`,
-        `<span style="font-size:12px;color:var(--text-3)">${esc(r.details || r.description || (r.payload ? JSON.stringify(r.payload).slice(0, 80) : '—'))}</span>`,
-      ])
+    if (!_live.auditAgg.data[id] && !_live.auditAgg.loading[id] && !_live.auditAgg.error[id]) queueMicrotask(() => fetchAudit(id));
+    if (_live.auditAgg.error[id] && !_live.auditAgg.data[id]) return errBlk('audit', _live.auditAgg.error[id], id);
+    if (_live.auditAgg.loading[id] && !_live.auditAgg.data[id]) return `<div style="padding:20px"><div style="font-size:12.5px;color:var(--text-3);margin-bottom:10px">Aggregeert audit van alle deelnemers…</div>${skel()}</div>`;
+    const rows = asArr(_live.auditAgg.data[id]);
+    if (rows.length === 0) return emptyBlk('Geen audit-entries', 'Er is nog niets gelogd voor de deelnemers van dit event.');
+    return `<div style="padding:12px 20px 6px;font-size:11.5px;color:var(--text-3)">Aggregeerd uit event_attendee_audit_log (per deelnemer). Toont laatste 20 entries per deelnemer, max 25 deelnemers.</div>
+    <div style="padding:0 20px 20px">${H.table(
+      [{l:'Wanneer'},{l:'Deelnemer',cls:'optional'},{l:'Wie',cls:'optional'},{l:'Actie'},{l:'Details',cls:'optional'}],
+      rows.slice(0, 200).map((r) => {
+        const attName = r._attendee ? ([r._attendee.first_name, r._attendee.last_name].filter(Boolean).join(' ') || r._attendee.email || '—') : '—';
+        const who = r.by_user?.full_name || r.by_user?.email || r.actor || r.user_name || r.user_email || '—';
+        const details = r.after_state ? JSON.stringify(r.after_state).slice(0, 100) : (r.details || r.description || '—');
+        return [
+          `<span class="mono" style="font-size:12px;color:var(--text-3)">${esc(_fmtDateTime(r.at || r.created_at || r.timestamp))}</span>`,
+          `<span style="font-size:12.5px">${esc(attName)}</span>`,
+          `<span style="font-size:12.5px;color:var(--text-2)">${esc(who)}</span>`,
+          `<span class="mono" style="font-size:12px">${esc(r.action || r.event_type || '—')}</span>`,
+          `<span style="font-size:11.5px;color:var(--text-3);max-width:280px;overflow:hidden;text-overflow:ellipsis;display:inline-block;vertical-align:middle">${esc(details)}</span>`,
+        ];
+      })
     )}</div>`;
   }
 
@@ -982,7 +1255,7 @@
     ${rows.length === 0
       ? emptyBlk('Geen inschrijvingen', 'Er zijn geen inbound-inschrijvingen in deze categorie.')
       : H.table(
-          [{l:'Deelnemer'},{l:'E-mail',cls:'optional'},{l:'Opgegeven event',cls:'optional'},{l:'Match'},{l:'Vragenlijst',cls:'optional'},{l:'Ingeschreven',cls:'r'},{l:'',cls:'r'}],
+          [{l:'Deelnemer'},{l:'E-mail',cls:'optional'},{l:'Opgegeven event',cls:'optional'},{l:'Match'},{l:'Vragenlijst',cls:'optional'},{l:'Ingeschreven',cls:'r'}],
           rows.map((r) => {
             const naam = [r.first_name, r.last_name].filter(Boolean).join(' ') || r.email || '—';
             // BUG 4b FIX — event-titel + datum tonen. matched_event heeft .title
@@ -1011,7 +1284,6 @@
               H.pill(mc, ml),
               questCell,
               `<div style="text-align:right"><div class="mono" style="font-size:12.5px;color:var(--text-2)">${esc(insDate)}</div><div class="mono" style="font-size:11px;color:var(--text-3)">${esc(insTime)}</div></div>`,
-              `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();window.open('/modules/events.html#signup-inbox', '_blank')">v1</button>`,
             ];
           })
         )}`;
