@@ -11,10 +11,10 @@
 //   { items: [
 //     { automation_id, automation_name, automation_enabled, step_index,
 //       kanaal: 'email'|'whatsapp',
-//       onderwerp?: string,      // send_email
-//       body_text?: string,      // send_email
-//       template_name?: string,  // send_whatsapp
-//       template_language?: string
+//       onderwerp?: string,      // send_email  (== cfg.subject)
+//       body?: string,           // send_email  (== cfg.body — canoniek veld dat cron leest)
+//       template_name?: string,  // send_whatsapp (== cfg.template_name)
+//       language?: string        // send_whatsapp (== cfg.language, default 'nl')
 //     }, ...
 //   ]}
 //
@@ -58,7 +58,7 @@ export default async function handler(req, res) {
             step_index: idx,
             kanaal: 'email',
             onderwerp: cfg.subject || '',
-            body_text: cfg.body_text || '',
+            body: cfg.body || '',
           });
         } else if (step.type === 'send_whatsapp') {
           items.push({
@@ -67,8 +67,8 @@ export default async function handler(req, res) {
             automation_enabled: !!a.enabled,
             step_index: idx,
             kanaal: 'whatsapp',
-            template_name:     cfg.template_name || '',
-            template_language: cfg.template_language || 'nl',
+            template_name: cfg.template_name || '',
+            language:      cfg.language || 'nl',
           });
         }
       });

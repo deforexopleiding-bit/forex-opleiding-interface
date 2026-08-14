@@ -850,7 +850,7 @@
     </div>`;
     if (step.type === 'send_email') return `<div style="display:flex;flex-direction:column;gap:6px">
       <div><label style="font-size:11px;color:var(--text-3)">Onderwerp</label><input type="text" value="${esc(cfg.subject || '')}" oninput="${upd('subject')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box" /></div>
-      <div><label style="font-size:11px;color:var(--text-3)">Body (text)</label><textarea oninput="${upd('body_text')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box;min-height:80px;font-family:inherit;resize:vertical">${esc(cfg.body_text || '')}</textarea></div>
+      <div><label style="font-size:11px;color:var(--text-3)">Body (text)</label><textarea oninput="${upd('body')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box;min-height:80px;font-family:inherit;resize:vertical">${esc(cfg.body || '')}</textarea></div>
       <div class="mono" style="font-size:10.5px;color:var(--text-3)">Placeholders: {{attendee.voornaam}}, {{event.titel}}, {{event.datum}}</div>
     </div>`;
     if (step.type === 'send_whatsapp') {
@@ -1197,7 +1197,7 @@
     </div>`;
     if (step.type === 'send_email') return `<div style="display:flex;flex-direction:column;gap:6px">
       <div><label style="font-size:11px;color:var(--text-3)">Onderwerp</label><input type="text" value="${esc(cfg.subject || '')}" oninput="${upd('subject')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box" /></div>
-      <div><label style="font-size:11px;color:var(--text-3)">Body (text)</label><textarea oninput="${upd('body_text')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box;min-height:80px;font-family:inherit;resize:vertical">${esc(cfg.body_text || '')}</textarea></div>
+      <div><label style="font-size:11px;color:var(--text-3)">Body (text)</label><textarea oninput="${upd('body')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box;min-height:80px;font-family:inherit;resize:vertical">${esc(cfg.body || '')}</textarea></div>
     </div>`;
     if (step.type === 'send_whatsapp') {
       if (!_live.inboxTpls.data && !_live.inboxTpls.loading) queueMicrotask(fetchInboxTpls);
@@ -1919,7 +1919,7 @@
           `<span style="font-size:11.5px">${b.kanaal === 'whatsapp' ? '<span style="color:#25d366">📱 WA</span>' : '<span style="color:var(--blue)">✉ Mail</span>'}</span>`,
           b.kanaal === 'whatsapp'
             ? `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(b.template_name || '(geen template)')}</span>`
-            : `<div style="max-width:340px"><div style="font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.onderwerp || '(geen onderwerp)')}</div>${b.body_text ? `<div style="font-size:10.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px">${esc(b.body_text.slice(0, 80))}${b.body_text.length > 80 ? '…' : ''}</div>` : ''}</div>`,
+            : `<div style="max-width:340px"><div style="font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.onderwerp || '(geen onderwerp)')}</div>${b.body ? `<div style="font-size:10.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px">${esc(b.body.slice(0, 80))}${b.body.length > 80 ? '…' : ''}</div>` : ''}</div>`,
           b.automation_enabled ? H.pill('ok','Actief') : H.pill('neutral','Uit'),
           `<div style="display:flex;gap:3px;justify-content:flex-end">
             <button class="btn btn-ghost btn-sm" onclick="window.__autBerichtEdit('${esc(moduleKey)}','${esc(b.automation_id)}',${b.step_index})">Bewerken →</button>
@@ -2017,7 +2017,7 @@
         </div>
         <div>
           <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Body (tekst)</label>
-          <textarea oninput="window.__autBerichtField('${esc(moduleKey)}','body_text', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box;min-height:180px;font-family:inherit;resize:vertical">${esc(cfg.body_text || '')}</textarea>
+          <textarea oninput="window.__autBerichtField('${esc(moduleKey)}','body', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box;min-height:180px;font-family:inherit;resize:vertical">${esc(cfg.body || '')}</textarea>
           <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Placeholders: <code style="background:var(--surface-2);padding:1px 4px;border-radius:3px">{{attendee.voornaam}}</code>, <code style="background:var(--surface-2);padding:1px 4px;border-radius:3px">{{event.titel}}</code>, <code style="background:var(--surface-2);padding:1px 4px;border-radius:3px">{{event.datum}}</code></div>
         </div>
       </div></div>` : ''}
@@ -2032,7 +2032,7 @@
         </div>
         <div>
           <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Taal</label>
-          <input type="text" value="${esc(cfg.template_language || 'nl')}" oninput="window.__autBerichtField('${esc(moduleKey)}','template_language', this.value)" style="width:120px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;font-family:'IBM Plex Mono',monospace;box-sizing:border-box" />
+          <input type="text" value="${esc(cfg.language || 'nl')}" oninput="window.__autBerichtField('${esc(moduleKey)}','language', this.value)" style="width:120px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;font-family:'IBM Plex Mono',monospace;box-sizing:border-box" />
         </div>
       </div></div>` : ''}
     </div></div>`;

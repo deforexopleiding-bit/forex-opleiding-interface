@@ -46,7 +46,7 @@ export default async function handler(req, res) {
             step_index: idx,
             kanaal: 'email',
             onderwerp: cfg.subject || '',
-            body_text: cfg.body_text || '',
+            body: cfg.body || '',
           });
         } else if (step.type === 'send_whatsapp') {
           items.push({
@@ -55,8 +55,8 @@ export default async function handler(req, res) {
             automation_enabled: !!a.enabled,
             step_index: idx,
             kanaal: 'whatsapp',
-            template_name:     cfg.template_name || '',
-            template_language: cfg.template_language || 'nl',
+            template_name: cfg.template_name || '',
+            language:      cfg.language || 'nl',
           });
         }
       });
