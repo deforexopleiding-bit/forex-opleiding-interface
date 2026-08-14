@@ -42,6 +42,11 @@
     inbox:       { loading: false, error: null, data: null },  // events-conversations
     autos:       { loading: false, error: null, data: null },  // event_automations
     autoClose:   { loading: false, error: null, data: null },  // signup-deadline setting
+    // Punt 3 — Aanwezige-detail
+    assessments: { loading: {}, error: {}, data: {} },         // per attendee_id
+    attConv:     { loading: {}, error: {}, data: {} },         // per attendee_id → conversation_id|null
+    // Punt 4 — In-shell inbox viewer
+    inboxMsgs:   { loading: {}, error: {}, data: {} },         // per conversation_id
   };
 
   const _ui = {
@@ -71,6 +76,10 @@
     settingsTab: 'automations',
     autoCloseDraft: null,   // {hours} tijdens edit
     autoCloseBusy: false,
+    // Punt 3 — Aanwezige-detail modal state
+    attDetail: null,        // { attId, eventId } → open modal
+    // Punt 4 — In-shell inbox conversation viewer
+    inboxConvId: null,      // wanneer set: viewer i.p.v. lijst
   };
 
   async function tryFetch(label, url, init, timeoutMs) {
@@ -236,6 +245,41 @@
     if (j && j.__error) st.error = j.__error; else st.data = j || null;
     if (window.DFO?.render) window.DFO.render();
   }
+  // Punt 3 — Aanwezige-detail modal fetchers
+  async function fetchAssessment(attId) {
+    const st = _live.assessments; if (st.loading[attId] || st.data[attId]) return;
+    st.loading[attId] = true; st.error[attId] = null;
+    const j = await tryFetch('assess:' + attId, '/api/events-attendee-assessment-get', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ attendee_id: attId }),
+    });
+    st.loading[attId] = false;
+    if (j && j.__error) st.error[attId] = j.__error;
+    else st.data[attId] = j || { items: [] };
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchAttConv(attId, customerId) {
+    // Resolve attendee → conversation via /api/inbox-conversation-by-customer.
+    // Werkt alleen als attendee.customer_id gezet is; anders return null.
+    const st = _live.attConv; if (st.loading[attId] || attId in st.data) return;
+    if (!customerId) { st.data[attId] = null; if (window.DFO?.render) window.DFO.render(); return; }
+    st.loading[attId] = true; st.error[attId] = null;
+    const j = await tryFetch('attConv:' + attId, '/api/inbox-conversation-by-customer?customer_id=' + encodeURIComponent(customerId));
+    st.loading[attId] = false;
+    if (j && j.__error) st.error[attId] = j.__error;
+    else st.data[attId] = j?.found ? j.conversation_id : null;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  // Punt 4 — In-shell inbox viewer fetcher
+  async function fetchInboxMsgs(convId) {
+    const st = _live.inboxMsgs; if (st.loading[convId] || st.data[convId]) return;
+    st.loading[convId] = true; st.error[convId] = null;
+    const j = await tryFetch('msgs:' + convId, '/api/inbox-messages-list?conversation_id=' + encodeURIComponent(convId) + '&limit=100&mark_as_read=1');
+    st.loading[convId] = false;
+    if (j && j.__error) st.error[convId] = j.__error;
+    else st.data[convId] = { conversation: j?.conversation || null, items: asArr(j?.items) };
+    if (window.DFO?.render) window.DFO.render();
+  }
+
   async function fetchMentors(id) {
     // V1-parity: /api/events-mentors-available zonder event_id → alle rol-mentoren
     // (team_members met user_id + rol 'mentor'). Zo kun je in de afrond-modal
@@ -271,6 +315,7 @@
     else if (block === 'events')    { _live.events.data = null; _live.events.error = null; fetchEvents(); }
     else if (block === 'completed') { _live.completed.data = null; _live.completed.error = null; fetchCompleted(); }
     else if (block === 'signups')   { _live.signups.data = null; _live.signups.error = null; fetchSignups(); }
+    else if (block === 'inboxMsgs' && id) { _live.inboxMsgs.data[id] = null; _live.inboxMsgs.error[id] = null; fetchInboxMsgs(id); }
     if (window.DFO?.render) window.DFO.render();
   };
 
@@ -320,8 +365,8 @@
       : _ui.mode === 'settings' ? _settingsView()
       : (_ui.mode === 'detail' && _ui.detailId) ? _detailView(_ui.detailId)
       : _lijstView();
-    // Complete-modal renderen boven de content als open
-    return base + (_ui.completeModal ? _completeModal() : '');
+    // Complete-modal + attendee-detail-modal renderen boven de content als open
+    return base + (_ui.completeModal ? _completeModal() : '') + (_ui.attDetail ? _attDetailModal() : '');
   }
 
   // ── LIJST ────────────────────────────────────────────────────────────────
@@ -359,10 +404,10 @@
         ${niveauOpts.map((n) => `<option value="${esc(n.slug || n.id || n.value || n)}" ${_ui.niveauFilter === (n.slug || n.id || n.value || n) ? 'selected' : ''}>${esc(n.label || n.name || n.slug || n)}</option>`).join('')}
       </select>
       <div class="tb-search" style="flex:1;max-width:300px"><input type="search" placeholder="Zoek titel of locatie…" value="${esc(_ui.searchQ)}" oninput="window.__evSearch(this.value)" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:12.5px" /></div>
-      <div class="tb-right" style="display:flex;gap:6px">
+      <div class="tb-right" style="display:flex;gap:6px;align-items:center">
         <button class="btn btn-ghost btn-sm" onclick="__evRetry('events')" title="Vernieuwen">${svg(I.refresh || I.tick, 'width:14px;height:14px')}</button>
         <button class="btn btn-primary btn-sm" onclick="window.__evWizardOpen('create')">${svg(I.plus)}Nieuw event</button>
-        <button class="btn btn-ghost btn-sm" title="Instellingen" onclick="window.__evGoSettings()">${svg(I.settings, 'width:14px;height:14px')}</button>
+        <button class="btn btn-ghost btn-sm" title="Events-instellingen (automations, deadline, foto's, Simone, vragenlijst)" onclick="window.__evGoSettings()" style="display:inline-flex;align-items:center;gap:6px">${svg(I.settings, 'width:14px;height:14px')}<span>Instellingen</span></button>
       </div>
     </div>
     ${rows.length === 0
@@ -526,7 +571,8 @@
     if (ev.status === 'draft') btns.push(`<button class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''} onclick="window.__evPublish('${esc(ev.id)}')">${svg(I.rocket || I.tick)}${busy === 'publish' ? '…' : 'Publiceren'}</button>`);
     if (ev.status === 'published' && ev.signups_closed) btns.push(`<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__evReopen('${esc(ev.id)}')">Heropenen</button>`);
     else if (ev.status === 'published') btns.push(`<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__evCloseSignups('${esc(ev.id)}')">Sluiten voor aanmelding</button>`);
-    if (ev.status === 'published' || ev.status === 'completed') btns.push(`<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__evComplete('${esc(ev.id)}')">${busy === 'complete' ? '…' : (ev.status === 'completed' ? 'Her-afronden' : 'Event afronden')}</button>`);
+    // Punt 1 — afrond-knop alleen bij published; bij completed/afgerond niet meer tonen.
+    if (ev.status === 'published') btns.push(`<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__evComplete('${esc(ev.id)}')">${busy === 'complete' ? '…' : 'Event afronden'}</button>`);
     btns.push(`<button class="btn btn-ghost btn-sm" onclick="window.__evWizardOpen('edit','${esc(ev.id)}')">${svg(I.edit || I.settings, 'width:12px;height:12px')}Bewerken</button>`);
     if (ev.status !== 'archived') btns.push(`<button class="icon-btn" title="Archiveren" ${busy ? 'disabled' : ''} onclick="window.__evArchive('${esc(ev.id)}')" style="width:28px;height:28px">${svg(I.trash || I.x, 'width:13px;height:13px')}</button>`);
     return btns.join('');
@@ -1034,7 +1080,7 @@
             const hasQuest = !!(a.assessment_response_id || a.questionnaire_completed_at);
             // BUG 6 — belstatus als dropdown ipv pill
             return [
-              `<div class="row-avatar">${H.av(naam, 26)}<span class="cell-main">${esc(naam)}</span></div>`,
+              `<a href="#" onclick="event.preventDefault();window.__evAttOpen('${esc(a.id)}','${esc(id)}')" title="Bekijk deelnemer-detail" style="color:inherit;text-decoration:none;display:inline-block"><div class="row-avatar">${H.av(naam, 26)}<span class="cell-main" style="text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:2px">${esc(naam)}</span></div></a>`,
               `<span style="color:var(--text-3);font-size:12.5px">${esc(a.email || '—')}</span>`,
               `<span class="mono" style="color:var(--text-3);font-size:12px">${esc(a.phone || a.telefoon || '—')}</span>`,
               H.pill(sc, sl),
@@ -1174,6 +1220,147 @@
     if (!window.confirm('Deelnemer verwijderen? Dit is permanent en verwijdert ook eventuele vragenlijst-antwoorden.')) return;
     _post('/api/events-attendee-delete', { id: attId }, 'Verwijderd', eventId);
   };
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // PUNT 3 — AANWEZIGE-DETAIL MODAL
+  //   Openen op klik naam in Aanwezigen-tab. Toont NAW + status,
+  //   vragenlijst-antwoorden (events-attendee-assessment-get) en
+  //   contacthistorie (inbox-conversation-by-customer → inbox-messages-list).
+  // ═══════════════════════════════════════════════════════════════════════
+  window.__evAttOpen = (attId, eventId) => {
+    _ui.attDetail = { attId, eventId };
+    // Assessment altijd fetchen
+    if (!_live.assessments.data[attId] && !_live.assessments.loading[attId]) queueMicrotask(() => fetchAssessment(attId));
+    // Conversation-resolve: heeft customer_id nodig → uit attendees-list
+    const list = asArr(_live.attendees.data[eventId]);
+    const att  = list.find((x) => x.id === attId);
+    if (att && !(attId in _live.attConv.data) && !_live.attConv.loading[attId]) {
+      queueMicrotask(() => fetchAttConv(attId, att.customer_id || null));
+    }
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__evAttClose = () => { _ui.attDetail = null; if (window.DFO?.render) window.DFO.render(); };
+  window.__evAttOpenConv = (convId) => {
+    // In-shell viewer via Inbox-tab-mode
+    _ui.attDetail = null;
+    _ui.inboxConvId = convId;
+    if (window.DFO?.render) {
+      // Switch naar Inbox-tab via DFO als beschikbaar
+      try { window.DFO.setTab && window.DFO.setTab('Inbox'); } catch (_) {}
+      window.DFO.render();
+    }
+  };
+
+  function _attDetailModal() {
+    if (!_ui.attDetail) return '';
+    const { attId, eventId } = _ui.attDetail;
+    const list = asArr(_live.attendees.data[eventId]);
+    const att  = list.find((x) => x.id === attId);
+    if (!att) return _modalShell('Deelnemer', `<div style="padding:16px;color:var(--text-3);font-size:13px">Deelnemer niet gevonden in de huidige lijst. Sluit en probeer opnieuw.</div>`);
+    const naam = [att.first_name || att.voornaam, att.last_name || att.achternaam].filter(Boolean).join(' ') || att.name || att.email || '—';
+    const [sc, sl] = ATT_STATUS_META[att.status] || ['neutral', att.status || '—'];
+
+    // Vragenlijst
+    const asSt = _live.assessments;
+    let questBlock;
+    if (asSt.loading[attId]) questBlock = `<div style="font-size:12.5px;color:var(--text-3)">Vragenlijst laden…</div>`;
+    else if (asSt.error[attId]) questBlock = `<div style="font-size:12.5px;color:var(--rose)">Vragenlijst-fout: ${esc(asSt.error[attId])}</div>`;
+    else {
+      const j = asSt.data[attId];
+      const items = asArr(j?.items);
+      if (items.length === 0) questBlock = `<div style="font-size:12.5px;color:var(--text-3);font-style:italic">Nog geen vragenlijst ingevuld.</div>`;
+      else {
+        questBlock = `${j?.routing_result ? `<div style="margin-bottom:10px;padding:8px 10px;background:var(--surface-2);border-radius:6px;font-size:12px"><b>Routing:</b> ${esc(j.routing_result)}${j?.skill_score != null ? ` · <b>Skill-score:</b> ${esc(String(j.skill_score))}` : ''}</div>` : ''}
+        <div style="display:flex;flex-direction:column;gap:8px">
+          ${items.map((q) => `<div style="border-bottom:1px solid var(--border);padding-bottom:6px">
+            <div style="font-size:11.5px;color:var(--text-3)">${esc(q.question_label || q.question_key || '—')}</div>
+            <div style="font-size:13px;color:var(--text)">${esc(q.answer_label || q.answer_value || '—')}</div>
+          </div>`).join('')}
+        </div>`;
+      }
+    }
+
+    // Contacthistorie via conversation-resolve → messages
+    const convSt = _live.attConv;
+    let contactBlock;
+    if (convSt.loading[attId]) contactBlock = `<div style="font-size:12.5px;color:var(--text-3)">Conversatie zoeken…</div>`;
+    else if (convSt.error[attId]) contactBlock = `<div style="font-size:12.5px;color:var(--rose)">Fout: ${esc(convSt.error[attId])}</div>`;
+    else {
+      const convId = convSt.data[attId];
+      if (!convId) contactBlock = `<div style="font-size:12.5px;color:var(--text-3);font-style:italic">Geen inbox-conversatie gekoppeld${att.customer_id ? ' voor deze klant' : ' — geen klant-koppeling'}.</div>`;
+      else {
+        // Fetch messages lazy als nog niet gefetched
+        const msgSt = _live.inboxMsgs;
+        if (!msgSt.data[convId] && !msgSt.loading[convId]) queueMicrotask(() => fetchInboxMsgs(convId));
+        if (msgSt.loading[convId]) contactBlock = `<div style="font-size:12.5px;color:var(--text-3)">Berichten laden…</div>`;
+        else if (msgSt.error[convId]) contactBlock = `<div style="font-size:12.5px;color:var(--rose)">Berichten-fout: ${esc(msgSt.error[convId])}</div>`;
+        else {
+          const d = msgSt.data[convId];
+          const msgs = asArr(d?.items).slice(-15);
+          contactBlock = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-size:11.5px;color:var(--text-3)">Laatste ${msgs.length} berichten · ${_channelIndicator(d?.conversation)}</div>
+            <button class="btn btn-ghost btn-sm" onclick="window.__evAttOpenConv('${esc(convId)}')">Open in Inbox →</button>
+          </div>
+          ${msgs.length === 0
+            ? `<div style="font-size:12.5px;color:var(--text-3);font-style:italic">Geen berichten in deze conversatie.</div>`
+            : `<div style="display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto">${msgs.map((m) => {
+                const out = m.direction === 'outbound';
+                return `<div style="display:flex;flex-direction:column;align-items:${out ? 'flex-end' : 'flex-start'}">
+                  <div style="max-width:80%;padding:6px 10px;border-radius:10px;background:${out ? 'var(--pink-soft)' : 'var(--surface-2)'};color:var(--text);font-size:12.5px;line-height:1.4;white-space:pre-wrap">${esc(m.body || (m.template_name ? '[template: ' + m.template_name + ']' : (m.media_url ? '[bijlage]' : '—')))}</div>
+                  <div class="mono" style="font-size:10.5px;color:var(--text-3);margin-top:1px">${esc(_fmtDateTime(m.sent_at || m.created_at))}${m.status ? ' · ' + esc(m.status) : ''}</div>
+                </div>`;
+              }).join('')}</div>`}`;
+        }
+      }
+    }
+
+    const body = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px">
+      <div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          ${H.av(naam, 40)}
+          <div>
+            <div style="font-size:15px;font-weight:600">${esc(naam)}</div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:1px">${H.pill(sc, sl)}</div>
+          </div>
+        </div>
+        <div class="kv"><dt>E-mail</dt><dd>${esc(att.email || '—')}</dd></div>
+        <div class="kv"><dt>Telefoon</dt><dd class="mono">${esc(att.phone || att.telefoon || '—')}</dd></div>
+        <div class="kv"><dt>Aangemeld</dt><dd class="mono">${esc(_fmtDateTime(att.registered_at || att.created_at))}</dd></div>
+        <div class="kv"><dt>Belstatus</dt><dd>${esc(att.call_status || '—')}</dd></div>
+        ${att.customer_id ? `<div class="kv"><dt>Klant-ID</dt><dd class="mono" style="font-size:11px">${esc(String(att.customer_id).slice(0,8))}…</dd></div>` : `<div class="kv"><dt>Klant</dt><dd style="color:var(--text-3);font-size:12px">Niet gekoppeld</dd></div>`}
+        <div style="margin-top:16px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Contacthistorie</div>
+          ${contactBlock}
+        </div>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Vragenlijst-antwoorden</div>
+        ${questBlock}
+      </div>
+    </div>`;
+    return _modalShell('Deelnemer: ' + naam, body);
+  }
+
+  function _modalShell(title, body) {
+    return `<div class="ev-modal-backdrop" onclick="if(event.target===this)window.__evAttClose()" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px">
+      <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);max-width:920px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+          <div style="font-size:14px;font-weight:600;flex:1">${esc(title)}</div>
+          <button class="icon-btn" onclick="window.__evAttClose()" title="Sluiten (Esc)" style="width:30px;height:30px">${svg(I.x || I.close, 'width:14px;height:14px')}</button>
+        </div>
+        ${body}
+      </div>
+    </div>`;
+  }
+
+  function _channelIndicator(conv) {
+    // WhatsApp als phone_number bestaat; anders E-mail (heuristiek — inbox
+    // gebruikt geen expliciet channel-veld, maar events-lijn is WA-only in v2).
+    if (!conv) return '';
+    const isWA = !!(conv.phone_number || conv.can_send_text);
+    if (isWA) return `<span style="display:inline-flex;align-items:center;gap:4px;color:var(--emerald)"><span style="width:8px;height:8px;background:#25d366;border-radius:50%"></span>WhatsApp</span>`;
+    return `<span style="display:inline-flex;align-items:center;gap:4px;color:var(--blue)">${svg(I.mail || I.chat, 'width:11px;height:11px')}E-mail</span>`;
+  }
 
   // ── DETAIL — MENTOREN ────────────────────────────────────────────────────
   function _detailMentoren(ev) {
@@ -1404,6 +1591,9 @@
   // INBOX-tab (behouden — needs-Jeffrey)
   // ═══════════════════════════════════════════════════════════════════════
   function inboxView() {
+    // Punt 4 — als een conversation-id in state staat, toon in-shell viewer.
+    if (_ui.inboxConvId) return _inboxViewer(_ui.inboxConvId);
+
     if (!_live.inbox.data && !_live.inbox.loading && !_live.inbox.error) queueMicrotask(fetchInbox);
     if (_live.inbox.error && !_live.inbox.data) return errBlk('inbox', _live.inbox.error);
     if (_live.inbox.loading && !_live.inbox.data) return skel();
@@ -1418,11 +1608,12 @@
     ${items.length === 0
       ? emptyBlk('Nog geen gesprekken', 'Zodra een klant de events-lijn appt of mailt verschijnt de conversatie hier.')
       : `<div style="padding:0 20px 20px">${H.table(
-          [{l:'Klant'},{l:'Nummer',cls:'optional'},{l:'Laatste bericht'},{l:'Wanneer',cls:'r optional'},{l:'Ongelezen',cls:'r'}],
+          [{l:'Klant'},{l:'Kanaal'},{l:'Nummer',cls:'optional'},{l:'Laatste bericht'},{l:'Wanneer',cls:'r optional'},{l:'Ongelezen',cls:'r'}],
           items.map((c) => {
             const naam = c.customer_name || c.display_name || c.phone_number || '—';
             return [
-              `<a href="#" onclick="event.preventDefault();window.__evInboxOpen('${esc(c.id)}')" style="color:inherit;text-decoration:none"><div class="row-avatar">${H.av(naam, 28)}<span class="cell-main">${esc(naam)}</span></div></a>`,
+              `<a href="#" onclick="event.preventDefault();window.__evInboxOpen('${esc(c.id)}')" style="color:inherit;text-decoration:none"><div class="row-avatar">${H.av(naam, 28)}<span class="cell-main" style="text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:2px">${esc(naam)}</span></div></a>`,
+              `<span style="font-size:12px">${_channelIndicator(c)}</span>`,
               `<span class="mono" style="font-size:12px;color:var(--text-3)">${esc(c.phone_number || '—')}</span>`,
               `<span style="font-size:12.5px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:340px;display:inline-block">${esc(c.last_message_preview || '—')}</span>`,
               `<span class="mono" style="font-size:12px;color:var(--text-3)">${esc(_fmtDateTime(c.last_message_at))}</span>`,
@@ -1432,11 +1623,59 @@
         )}</div>`}`;
   }
   window.__evInboxOpen = (convId) => {
-    // De v1-inbox-viewer opent in v1-shell; hier openen we die pagina met deep-link.
-    // (Aparte in-shell viewer is buiten scope voor deze fase; hergebruik werkende v1-viewer.)
-    try { window.open('/modules/events.html?conv=' + encodeURIComponent(convId) + '#inbox', '_blank'); }
-    catch (_) { console.info('[events-v2] open conversation', convId); }
+    // Punt 4 — in-shell viewer (was: deep-link naar v1-shell).
+    _ui.inboxConvId = convId;
+    if (window.DFO?.render) window.DFO.render();
   };
+  window.__evInboxBack = () => {
+    _ui.inboxConvId = null;
+    // Force refresh unread-counts na read-mark
+    _live.inbox.data = null; _live.inbox.error = null;
+    queueMicrotask(fetchInbox);
+    if (window.DFO?.render) window.DFO.render();
+  };
+
+  function _inboxViewer(convId) {
+    const st = _live.inboxMsgs;
+    if (!st.data[convId] && !st.loading[convId] && !st.error[convId]) queueMicrotask(() => fetchInboxMsgs(convId));
+    const backBar = `<div style="padding:12px 20px;background:var(--surface-2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+      <button class="btn btn-ghost btn-sm" onclick="window.__evInboxBack()">${svg(I.arrDown || I.x, 'width:13px;height:13px;transform:rotate(90deg)')}Terug naar inbox</button>
+      <span style="font-size:11px;color:var(--text-3);margin-left:auto">Conv-ID: <span class="mono">${esc(convId).slice(0,8)}…</span></span>
+    </div>`;
+    if (st.error[convId] && !st.data[convId]) return backBar + errBlk('inboxMsgs', st.error[convId]);
+    if (st.loading[convId] && !st.data[convId]) return backBar + skel();
+    const d = st.data[convId];
+    const conv = d?.conversation || null;
+    const msgs = asArr(d?.items);
+    const naam = conv?.customer_name || conv?.display_name || conv?.phone_number || '—';
+    return `${backBar}
+    <div style="padding:16px 20px 8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">
+      ${H.av(naam, 38)}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:15px;font-weight:600">${esc(naam)}</div>
+        <div style="font-size:12px;color:var(--text-3);margin-top:2px;display:flex;gap:10px;flex-wrap:wrap">
+          ${_channelIndicator(conv)}
+          ${conv?.phone_number ? `<span class="mono">${esc(conv.phone_number)}</span>` : ''}
+          ${conv?.status ? H.pill('neutral', conv.status) : ''}
+        </div>
+      </div>
+    </div>
+    <div style="padding:16px 20px;max-height:calc(100vh - 280px);overflow-y:auto;display:flex;flex-direction:column;gap:8px">
+      ${msgs.length === 0
+        ? `<div style="text-align:center;color:var(--text-3);font-size:12.5px;padding:40px 0">Geen berichten in deze conversatie.</div>`
+        : msgs.map((m) => {
+            const out = m.direction === 'outbound';
+            const body = m.body || (m.template_name ? '[template: ' + m.template_name + ']' : (m.media_url ? '[bijlage: ' + (m.media_type || 'media') + ']' : '—'));
+            return `<div style="display:flex;flex-direction:column;align-items:${out ? 'flex-end' : 'flex-start'};max-width:100%">
+              <div style="max-width:70%;padding:8px 12px;border-radius:12px;background:${out ? 'var(--pink-soft)' : 'var(--surface-2)'};border:1px solid ${out ? 'var(--pink-line, var(--border))' : 'var(--border)'};color:var(--text);font-size:13px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word">${esc(body)}</div>
+              <div class="mono" style="font-size:10.5px;color:var(--text-3);margin-top:2px;padding:0 4px">${esc(_fmtDateTime(m.sent_at || m.created_at))}${m.status ? ' · ' + esc(m.status) : ''}${m.failed_reason ? ' · fout: ' + esc(m.failed_reason.slice(0,40)) : ''}</div>
+            </div>`;
+          }).join('')}
+    </div>
+    <div style="padding:12px 20px;border-top:1px solid var(--border);background:var(--surface-2);font-size:12px;color:var(--text-3);text-align:center">
+      Sturen vanuit deze viewer nog niet ondersteund — gebruik <a href="/modules/events.html?conv=${encodeURIComponent(convId)}#inbox" target="_blank" style="color:var(--pink);text-decoration:underline">v1-inbox</a> voor reply.
+    </div>`;
+  }
 
   // ═══════════════════════════════════════════════════════════════════════
   // INSCHRIJVINGEN-tab (behouden)
