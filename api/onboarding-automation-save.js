@@ -42,29 +42,29 @@ export function validateSteps(steps) {
   if (!Array.isArray(steps)) return 'steps moet een array zijn';
   for (let i = 0; i < steps.length; i++) {
     const s = steps[i];
-    if (!s || typeof s !== 'object') return `stap ${i}: ongeldig`;
-    if (!STEP_TYPES.includes(s.type)) return `stap ${i}: onbekend type '${s.type}'`;
+    if (!s || typeof s !== 'object') return `stap ${i + 1}: ongeldig`;
+    if (!STEP_TYPES.includes(s.type)) return `stap ${i + 1}: onbekend type '${s.type}'`;
     const c = s.config || {};
     if (s.type === 'wait') {
-      if (!(Number(c.amount) > 0)) return `stap ${i}: wait.amount > 0 vereist`;
-      if (!WAIT_UNITS.includes(c.unit)) return `stap ${i}: wait.unit ongeldig`;
+      if (!(Number(c.amount) > 0)) return `stap ${i + 1}: wait.amount > 0 vereist`;
+      if (!WAIT_UNITS.includes(c.unit)) return `stap ${i + 1}: wait.unit ongeldig`;
     } else if (s.type === 'condition') {
-      if (!COND_CHECKS.includes(c.check)) return `stap ${i}: condition.check ongeldig`;
-      if (c.on_fail && !COND_FAIL.includes(c.on_fail)) return `stap ${i}: condition.on_fail ongeldig`;
+      if (!COND_CHECKS.includes(c.check)) return `stap ${i + 1}: condition.check ongeldig`;
+      if (c.on_fail && !COND_FAIL.includes(c.on_fail)) return `stap ${i + 1}: condition.on_fail ongeldig`;
     } else if (s.type === 'send_email') {
-      if (!c.subject || typeof c.subject !== 'string') return `stap ${i}: send_email.subject vereist`;
-      if (!c.body    || typeof c.body    !== 'string') return `stap ${i}: send_email.body vereist`;
+      if (!c.subject || typeof c.subject !== 'string') return `stap ${i + 1}: send_email.subject vereist`;
+      if (!c.body    || typeof c.body    !== 'string') return `stap ${i + 1}: send_email.body vereist`;
     } else if (s.type === 'send_whatsapp') {
-      if (!c.template_name || typeof c.template_name !== 'string') return `stap ${i}: send_whatsapp.template_name vereist`;
+      if (!c.template_name || typeof c.template_name !== 'string') return `stap ${i + 1}: send_whatsapp.template_name vereist`;
     } else if (s.type === 'update_onboarding_status') {
       if (!c.new_status || !ONBOARDING_STATUSES.includes(c.new_status)) {
-        return `stap ${i}: update_onboarding_status.new_status moet ${ONBOARDING_STATUSES.join('|')} zijn`;
+        return `stap ${i + 1}: update_onboarding_status.new_status moet ${ONBOARDING_STATUSES.join('|')} zijn`;
       }
     } else if (s.type === 'send_internal_notification') {
-      if (!c.subject || typeof c.subject !== 'string') return `stap ${i}: send_internal_notification.subject vereist`;
-      if (!c.body    || typeof c.body    !== 'string') return `stap ${i}: send_internal_notification.body vereist`;
+      if (!c.subject || typeof c.subject !== 'string') return `stap ${i + 1}: send_internal_notification.subject vereist`;
+      if (!c.body    || typeof c.body    !== 'string') return `stap ${i + 1}: send_internal_notification.body vereist`;
       if (c.to_email && (typeof c.to_email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.to_email))) {
-        return `stap ${i}: send_internal_notification.to_email ongeldig`;
+        return `stap ${i + 1}: send_internal_notification.to_email ongeldig`;
       }
     }
   }

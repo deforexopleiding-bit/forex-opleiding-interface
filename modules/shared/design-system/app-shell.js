@@ -81,7 +81,7 @@
     { g: 'Groei',                  id: 'leadsonderhoud',   naam: 'Leadsonderhoud',    icon: I.repeat,   color: 'teal',    roles: SAMS,      badge: 2,  tabs: ['Inbox', 'Contacten', 'Bulk versturen', 'Statistieken'] },
     { g: 'Groei',                  id: 'lisa',             naam: 'Lisa — Instagram',  icon: I.bot,      color: 'violet',  roles: SAM,       badge: 2,  tabs: ['Dashboard', 'Gesprekken', 'Statistieken'] },
 
-    { g: 'Operatie',               id: 'automatiseringen', naam: 'Automatiseringen',  icon: I.repeat,   color: 'blue',    roles: SAM,                  tabs: ['Overzicht', 'Events', 'Onboarding', 'Leadsonderhoud', 'Wanbetalers', 'Lisa'] },
+    { g: 'Operatie',               id: 'automatiseringen', naam: 'Automatiseringen',  icon: I.repeat,   color: 'blue',    roles: SAM,                  tabs: ['Overzicht', 'Events', 'Onboarding', 'Leadsonderhoud'] },
     { g: 'Operatie',               id: 'agents',           naam: 'AI Agents',         icon: I.bot,      color: 'violet',  roles: SAM,                  tabs: ['Overzicht', 'Configuratie', 'Kennisbank', 'Prestaties'] },
     { g: 'Operatie',               id: 'logboek',          naam: 'Toegangslog',       icon: I.shield,   color: 'slate',   roles: SAM,                  tabs: ['Activiteit', 'Per gebruiker'] },
 
