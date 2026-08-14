@@ -109,6 +109,11 @@
     composeChannel:  {},     // [convId] = 'whatsapp' | 'email' (voor unified convs; anders auto)
     // Simone suggestion dismissed voor sessie (client-side hide zolang niet gerefetched)
     suggestionHidden:{},     // [convId] = true
+    // Client-side zoek op gesprekkenlijst
+    inboxSearchQ:  '',
+    // Simone-poll timer voor open conv (module-scope, herstart per conv-select)
+    _simonePollTimer: null,
+    _simonePollConvId: null,
   };
 
   async function tryFetch(label, url, init, timeoutMs) {
@@ -1846,16 +1851,29 @@
     const items = asArr(_live.inbox.data);
 
     if (items.length === 0) {
-      return emptyBlk('Nog geen gesprekken', 'Zodra een klant de events-lijn appt of mailt verschijnt de conversatie hier.');
+      return _inboxSimoneStatusBar() + emptyBlk('Nog geen gesprekken', 'Zodra een klant de events-lijn appt of mailt verschijnt de conversatie hier.');
     }
 
-    // Auto-select bovenste conv bij eerste render als er nog geen actieve is.
-    // Ook wanneer de huidige actieve conv niet (meer) in de lijst voorkomt (bv.
-    // conv verwijderd of gefilterd): val terug op de top.
-    const activeExists = _ui.inboxConvId && items.some((c) => c.id === _ui.inboxConvId);
-    if (!activeExists) {
-      _ui.inboxConvId = items[0].id;
+    // Client-side filter op naam / telefoon / e-mail (case-insensitive).
+    const q = String(_ui.inboxSearchQ || '').trim().toLowerCase();
+    const filtered = q ? items.filter((c) => {
+      const naam  = (c.customer_name || c.display_name || '').toLowerCase();
+      const phone = String(c.phone_number || '').toLowerCase();
+      const email = String(c.customer_email || '').toLowerCase();
+      return naam.includes(q) || phone.includes(q) || email.includes(q);
+    }) : items;
+
+    // Auto-select bovenste (gefilterde) conv als huidige actieve niet zichtbaar is.
+    const activeVisible = _ui.inboxConvId && filtered.some((c) => c.id === _ui.inboxConvId);
+    if (!activeVisible && filtered.length > 0) {
+      _ui.inboxConvId = filtered[0].id;
       _ui.inboxAutoSelected = true;
+    } else if (filtered.length === 0) {
+      _ui.inboxConvId = null;
+    }
+    // Start Simone-polling voor de actieve conv (idempotent — restart is safe)
+    if (_ui.inboxConvId && _ui._simonePollConvId !== _ui.inboxConvId) {
+      queueMicrotask(() => _startSimonePolling(_ui.inboxConvId));
     }
     // Prefetch messages voor actieve conv als nog niet gecached.
     if (_ui.inboxConvId && !_live.inboxMsgs.data[_ui.inboxConvId] && !_live.inboxMsgs.loading[_ui.inboxConvId]) {
@@ -1874,7 +1892,20 @@
       ${_inboxStyles()}
       <div class="ev-inbox-split" data-mode="${esc(narrowMode)}">
         <div class="ev-inbox-left" id="ev-inbox-left">
-          ${_inboxLeftList(items, _ui.inboxConvId)}
+          <div class="ev-inbox-search">
+            <input
+              type="search"
+              placeholder="Zoek op naam of nummer…"
+              value="${esc(_ui.inboxSearchQ)}"
+              oninput="window.__evInboxSearch(this.value)"
+            />
+            ${q ? `<div class="ev-inbox-search-count">${filtered.length} van ${items.length}</div>` : ''}
+          </div>
+          <div class="ev-inbox-rows" id="ev-inbox-rows">
+            ${filtered.length === 0
+              ? `<div style="padding:16px;text-align:center;color:var(--text-3);font-size:12px">Geen gesprekken gevonden${q ? ' voor "' + esc(q) + '"' : ''}.</div>`
+              : _inboxLeftList(filtered, _ui.inboxConvId)}
+          </div>
         </div>
         <div class="ev-inbox-right" id="ev-inbox-right">
           ${_inboxRightPane(_ui.inboxConvId)}
@@ -1882,6 +1913,44 @@
       </div>
       ${_tplPickerModal()}`;
   }
+
+  // Zoek-handler: surgical re-render van alleen de left list (rows-container).
+  // Full DFO.render zou de textarea onder focus verliezen op elke keystroke.
+  window.__evInboxSearch = (val) => {
+    _ui.inboxSearchQ = String(val || '');
+    // Herbereken filtered lijst
+    const items = asArr(_live.inbox.data);
+    const q = _ui.inboxSearchQ.trim().toLowerCase();
+    const filtered = q ? items.filter((c) => {
+      const naam  = (c.customer_name || c.display_name || '').toLowerCase();
+      const phone = String(c.phone_number || '').toLowerCase();
+      const email = String(c.customer_email || '').toLowerCase();
+      return naam.includes(q) || phone.includes(q) || email.includes(q);
+    }) : items;
+    const rowsEl = document.querySelector('#ev-inbox-rows');
+    if (rowsEl) {
+      rowsEl.innerHTML = filtered.length === 0
+        ? `<div style="padding:16px;text-align:center;color:var(--text-3);font-size:12px">Geen gesprekken gevonden${q ? ' voor "' + esc(q) + '"' : ''}.</div>`
+        : _inboxLeftList(filtered, _ui.inboxConvId);
+    }
+    // Update count-badge
+    const searchEl = document.querySelector('.ev-inbox-search');
+    if (searchEl) {
+      let countEl = searchEl.querySelector('.ev-inbox-search-count');
+      if (q) {
+        if (!countEl) {
+          countEl = document.createElement('div');
+          countEl.className = 'ev-inbox-search-count';
+          searchEl.appendChild(countEl);
+        }
+        countEl.textContent = filtered.length + ' van ' + items.length;
+      } else if (countEl) countEl.remove();
+    }
+    // Als actieve conv niet meer zichtbaar is, auto-select top van gefiltered
+    if (filtered.length > 0 && !filtered.some((c) => c.id === _ui.inboxConvId)) {
+      window.__evInboxSelect(filtered[0].id);
+    }
+  };
 
   // Simone status-bar: leest joost_config (module=events). Toont enabled/gates
   // + link naar Agents-module (canonieke editor). Beheer alleen daar — NIET
@@ -1913,8 +1982,13 @@
     // Scoped, idempotent via id. DFO.render() rebuild is prima; browser dedupes.
     return `<style id="ev-inbox-styles">
       .ev-inbox-split { display:grid; grid-template-columns:340px 1fr; height:calc(100vh - 180px); min-height:560px; border-top:1px solid var(--border); background:var(--surface); }
-      .ev-inbox-left  { overflow-y:auto; border-right:1px solid var(--border); background:var(--surface); }
-      .ev-inbox-right { overflow-y:auto; display:flex; flex-direction:column; min-width:0; }
+      .ev-inbox-left  { display:flex; flex-direction:column; border-right:1px solid var(--border); background:var(--surface); overflow:hidden; }
+      .ev-inbox-search { padding:10px 12px; border-bottom:1px solid var(--border); background:var(--surface); position:sticky; top:0; z-index:1; flex-shrink:0; }
+      .ev-inbox-search input { width:100%; padding:7px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text); font-size:12.5px; font-family:inherit; box-sizing:border-box; }
+      .ev-inbox-search input:focus { outline:none; border-color:var(--pink); }
+      .ev-inbox-search-count { font-size:10.5px; color:var(--text-3); margin-top:4px; padding-left:2px; }
+      .ev-inbox-rows { overflow-y:auto; flex:1; }
+      .ev-inbox-right { overflow:hidden; display:flex; flex-direction:column; min-width:0; }
       .ev-inbox-row   { display:flex; gap:10px; padding:10px 12px; border-bottom:1px solid var(--border); cursor:pointer; align-items:flex-start; transition:background .12s ease; }
       .ev-inbox-row:hover  { background:var(--surface-2); }
       .ev-inbox-row.active { background:var(--pink-soft); border-left:3px solid var(--pink); padding-left:9px; }
@@ -1924,12 +1998,52 @@
       .ev-inbox-row .r-time { font-size:10.5px; color:var(--text-3); flex-shrink:0; font-family:'IBM Plex Mono',monospace; }
       .ev-inbox-row .r-preview { font-size:12px; color:var(--text-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px; }
       .ev-inbox-row .r-badges { display:flex; gap:5px; align-items:center; margin-top:3px; }
+
+      /* Kanaal-badges (klein rechthoekje met W/✉) */
+      .ev-chan-badge { display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; border-radius:3px; font-size:10px; font-weight:700; color:white; flex-shrink:0; }
+      .ev-chan-badge.wa    { background:#25d366; }
+      .ev-chan-badge.email { background:#0369a1; }
+
+      /* Chat-bubbels (WhatsApp-stijl, compact) */
+      .ev-msg-row       { display:flex; padding:0 4px; }
+      .ev-msg-row.out   { justify-content:flex-end; }
+      .ev-msg-row.in    { justify-content:flex-start; }
+      .ev-bubble-wrap   { max-width:65%; width:fit-content; min-width:72px; position:relative; }
+      .ev-bubble        { position:relative; padding:5px 9px 3px; border-radius:8px; font-size:13px; line-height:1.35; white-space:pre-wrap; word-wrap:break-word; box-shadow:0 1px 1px rgba(0,0,0,.08); }
+      .ev-bubble.wa-out { background:#d9fdd3; color:#111; }
+      .ev-bubble.wa-in  { background:var(--surface); border:1px solid var(--border); color:var(--text); }
+      .ev-bubble-text   { display:inline; }
+      .ev-bubble-meta   { display:inline-flex; align-items:center; gap:3px; margin-left:6px; float:right; padding-top:3px; font-size:10.5px; color:#667781; font-family:'IBM Plex Mono',monospace; }
+      .ev-bubble.wa-in .ev-bubble-meta { color:var(--text-3); }
+      .ev-bubble-tail-out { position:absolute; right:-5px; top:0; width:7px; height:11px; background:#d9fdd3; clip-path:polygon(0 0, 100% 0, 0 100%); }
+      .ev-bubble-tail-in  { position:absolute; left:-5px; top:0; width:7px; height:11px; background:var(--surface); border-left:1px solid var(--border); clip-path:polygon(0 0, 100% 0, 100% 100%); }
+      .ev-bubble-tpl      { font-size:10px; color:#4a7c3a; font-weight:600; margin-bottom:2px; display:inline-flex; align-items:center; gap:3px; }
+      .ev-bubble-fail     { font-size:10.5px; color:var(--rose); margin-top:2px; font-style:italic; }
+      .ev-bubble-pending  { opacity:.65; }
+      .ev-simone-badge    { display:inline-flex; align-items:center; gap:3px; padding:0 5px; background:var(--violet); color:white; border-radius:3px; font-size:9.5px; font-weight:600; margin-bottom:3px; }
+
+      /* E-mail bubble (blauwe kaart) */
+      .ev-email         { max-width:80%; width:fit-content; min-width:200px; background:var(--surface); border:1px solid #93c5fd; border-radius:8px; padding:8px 12px; box-shadow:0 1px 2px rgba(0,0,0,.06); color:var(--text); }
+      .ev-email-hd      { display:flex; align-items:center; gap:6px; margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid var(--border); }
+      .ev-email-chip    { font-size:10.5px; color:#0369a1; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+      .ev-email-time    { font-size:11px; color:var(--text-3); margin-left:auto; font-family:'IBM Plex Mono',monospace; }
+      .ev-email-subj    { font-size:12.5px; font-weight:600; color:var(--text); margin-bottom:2px; }
+      .ev-email-from    { font-size:11px; color:var(--text-3); margin-bottom:6px; }
+      .ev-email-body    { font-size:12.5px; line-height:1.5; color:var(--text-2); white-space:pre-wrap; word-wrap:break-word; max-height:200px; overflow-y:auto; }
+      .ev-email-att     { margin-top:6px; font-size:10.5px; color:var(--text-3); }
+
+      /* Datum-separator */
+      .ev-day-sep { display:flex; justify-content:center; margin:12px 0 6px; }
+      .ev-day-sep span { padding:3px 10px; background:rgba(0,0,0,.06); border-radius:10px; font-size:10.5px; font-weight:500; color:var(--text-3); }
+
       .ev-inbox-mobile-back { display:none; }
       @media (max-width: 900px) {
         .ev-inbox-split { grid-template-columns:1fr; }
         .ev-inbox-split[data-mode="detail"] .ev-inbox-left  { display:none; }
         .ev-inbox-split[data-mode="list"]   .ev-inbox-right { display:none; }
         .ev-inbox-split[data-mode="detail"] .ev-inbox-mobile-back { display:inline-flex; }
+        .ev-bubble-wrap { max-width:82%; }
+        .ev-email { max-width:92%; }
       }
     </style>`;
   }
@@ -1940,18 +2054,22 @@
       const unread = Number(c.unread_count || 0);
       const preview = c.last_message_preview || '—';
       const timeShort = _fmtShortTimeOrDate(c.last_message_at);
+      // Kanaal van laatste bericht: unified endpoint zet last_message_channel;
+      // fallback op phone_number-heuristic (WA als phone bestaat).
+      const lastCh = String(c.last_message_channel || (c.phone_number ? 'whatsapp' : 'email')).toLowerCase();
+      const chanBadge = lastCh === 'email'
+        ? `<span class="ev-chan-badge email" title="Laatste bericht: E-mail">✉</span>`
+        : `<span class="ev-chan-badge wa" title="Laatste bericht: WhatsApp">W</span>`;
       return `<div class="ev-inbox-row${c.id === activeId ? ' active' : ''}" data-conv-id="${esc(c.id)}" onclick="window.__evInboxSelect('${esc(c.id)}')">
         ${H.av(naam, 36)}
         <div class="r-body">
           <div class="r-top">
+            ${chanBadge}
             <div class="r-name">${esc(naam)}</div>
             <div class="r-time">${esc(timeShort)}</div>
           </div>
           <div class="r-preview">${esc(preview)}</div>
-          <div class="r-badges">
-            <span style="font-size:11px">${_channelIndicator(c)}</span>
-            ${unread > 0 ? `<span style="background:var(--pink);color:white;font-size:10px;font-weight:600;padding:1px 6px;border-radius:10px;min-width:16px;text-align:center">${unread}</span>` : ''}
-          </div>
+          ${unread > 0 ? `<div class="r-badges"><span style="background:var(--pink);color:white;font-size:10px;font-weight:600;padding:1px 6px;border-radius:10px;min-width:16px;text-align:center">${unread}</span></div>` : ''}
         </div>
       </div>`;
     }).join('');
@@ -2050,65 +2168,51 @@
       const out = m.direction === 'outbound' || m.direction === 'out';
       const dk = _dayKey(m);
       const sep = (dk !== lastDay)
-        ? `<div style="display:flex;justify-content:center;margin:14px 0 8px"><span style="padding:4px 12px;background:rgba(0,0,0,.06);border-radius:10px;font-size:11px;font-weight:500;color:var(--text-3)">${esc(_dayLabel(m))}</span></div>`
+        ? `<div class="ev-day-sep"><span>${esc(_dayLabel(m))}</span></div>`
         : '';
       lastDay = dk;
 
       if (isEmail) {
-        // ── E-MAIL BUBBEL ─────────────────────────────────────────────────
+        // ── E-MAIL BUBBEL (blauwe kaart met envelop-icoon + subject-regel) ──
         const subj = m.meta?.subject || '(geen onderwerp)';
         const fromName = m.meta?.from_name || m.meta?.from_address || '—';
         const bodyHtml = m.meta?.has_html ? '(HTML-inhoud — bekijk in v1 voor volledige opmaak)' : '';
         const bodyText = m.body || bodyHtml || '—';
-        const bubbleBg  = 'var(--surface)';
-        const borderCol = 'var(--blue-line, var(--border))';
-        return `${sep}<div style="display:flex;justify-content:${out ? 'flex-end' : 'flex-start'};padding:0 4px">
-          <div style="max-width:80%;position:relative">
-            <div style="padding:8px 12px;border-radius:8px;background:${bubbleBg};border:1px solid ${borderCol};box-shadow:0 1px 2px rgba(0,0,0,.06);color:var(--text)">
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--border)">
-                <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;background:var(--blue);border-radius:3px;color:white;font-size:11px">✉</span>
-                <span style="font-size:10.5px;color:var(--blue);font-weight:600;text-transform:uppercase;letter-spacing:.04em">E-mail</span>
-                <span style="font-size:11px;color:var(--text-3);margin-left:auto" class="mono">${esc(_timeShort(m))}</span>
-              </div>
-              <div style="font-size:12.5px;font-weight:600;color:var(--text);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis">${esc(subj)}</div>
-              <div style="font-size:11px;color:var(--text-3);margin-bottom:6px">${out ? 'aan' : 'van'}: ${esc(fromName)}</div>
-              <div style="font-size:12.5px;line-height:1.5;color:var(--text-2);white-space:pre-wrap;word-wrap:break-word;max-height:200px;overflow-y:auto">${esc(String(bodyText).slice(0, 800))}${String(bodyText).length > 800 ? '…' : ''}</div>
-              ${(asArr(m.meta?.attachments).length > 0) ? `<div style="margin-top:6px;font-size:10.5px;color:var(--text-3)">📎 ${asArr(m.meta?.attachments).length} bijlage(n)</div>` : ''}
+        return `${sep}<div class="ev-msg-row ${out ? 'out' : 'in'}">
+          <div class="ev-email">
+            <div class="ev-email-hd">
+              <span class="ev-chan-badge email" title="E-mail">✉</span>
+              <span class="ev-email-chip">E-mail</span>
+              <span class="ev-email-time">${esc(_timeShort(m))}</span>
             </div>
+            <div class="ev-email-subj">${esc(subj)}</div>
+            <div class="ev-email-from">${out ? 'aan' : 'van'}: ${esc(fromName)}</div>
+            <div class="ev-email-body">${esc(String(bodyText).slice(0, 800))}${String(bodyText).length > 800 ? '…' : ''}</div>
+            ${(asArr(m.meta?.attachments).length > 0) ? `<div class="ev-email-att">📎 ${asArr(m.meta?.attachments).length} bijlage(n)</div>` : ''}
           </div>
         </div>`;
       }
 
-      // ── WHATSAPP BUBBEL ─────────────────────────────────────────────────
+      // ── WHATSAPP BUBBEL (compact, WA-groen out / surface in, hug-content) ──
       const tplName = m.template_name || m.meta?.template_name || null;
       const mediaUrl = m.media_url || m.meta?.media_url || null;
       const mediaType = m.media_type || m.meta?.media_type || null;
       const body = m.body || (tplName ? '📄 Template: ' + tplName : (mediaUrl ? '📎 Bijlage (' + (mediaType || 'media') + ')' : '—'));
-      const bubbleBg = out ? (isWA ? '#d9fdd3' : 'var(--pink-soft)') : 'var(--surface)';
-      const bubbleColor = out && isWA ? '#111' : 'var(--text)';
-      const tail = out
-        ? `<span style="position:absolute;right:-6px;top:0;width:8px;height:13px;background:${bubbleBg};clip-path:polygon(0 0, 100% 0, 0 100%)"></span>`
-        : `<span style="position:absolute;left:-6px;top:0;width:8px;height:13px;background:${bubbleBg};clip-path:polygon(0 0, 100% 0, 100% 100%);border-left:1px solid var(--border)"></span>`;
-      // Simone-badge: outbound + msg_id in simoneIds → mark as AI-sent
       const bySimone = out && m.id && simoneIds.has(String(m.id));
-      const simoneBadge = bySimone
-        ? `<div style="display:inline-flex;align-items:center;gap:4px;padding:1px 6px;background:var(--violet);color:white;border-radius:3px;font-size:9.5px;font-weight:600;margin-bottom:3px">🤖 Simone · AI</div><br>`
-        : '';
-      // Optimistisch pending bubble: m._pending true → grijs + spinner-icon
-      const pendingClass = m._pending ? 'opacity:.65;font-style:italic' : '';
-      return `${sep}<div style="display:flex;justify-content:${out ? 'flex-end' : 'flex-start'};padding:0 4px">
-        <div style="max-width:65%;position:relative">
-          <div style="position:relative;padding:6px 10px 5px;border-radius:8px;background:${bubbleBg};color:${bubbleColor};font-size:13.5px;line-height:1.42;white-space:pre-wrap;word-wrap:break-word;box-shadow:0 1px 1px rgba(0,0,0,.08);${out ? '' : 'border:1px solid var(--border)'};${pendingClass}">
-            ${tail}
-            ${simoneBadge}
-            ${tplName ? `<div style="font-size:10.5px;color:${out && isWA ? '#4a7c3a' : 'var(--text-3)'};font-weight:600;margin-bottom:2px">📄 ${esc(tplName)}</div>` : ''}
-            <span>${esc(body)}</span>
-            <div style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;float:right;padding-top:4px">
-              <span class="mono" style="font-size:10.5px;color:${out && isWA ? '#667781' : 'var(--text-3)'}">${esc(_timeShort(m))}</span>
-              ${out ? (m._pending ? '<span title="Bezig met versturen…" style="color:var(--text-3)">⏳</span>' : _statusIcon(m)) : ''}
-            </div>
+      return `${sep}<div class="ev-msg-row ${out ? 'out' : 'in'}">
+        <div class="ev-bubble-wrap">
+          <div class="ev-bubble ${out ? 'wa-out' : 'wa-in'} ${m._pending ? 'ev-bubble-pending' : ''}">
+            ${out ? '<span class="ev-bubble-tail-out"></span>' : '<span class="ev-bubble-tail-in"></span>'}
+            ${bySimone ? '<span class="ev-simone-badge">🤖 Simone · AI</span><br>' : ''}
+            ${tplName ? `<div class="ev-bubble-tpl">📄 ${esc(tplName)}</div>` : ''}
+            <span class="ev-bubble-text">${esc(body)}</span>
+            <span class="ev-bubble-meta">
+              <span class="ev-chan-badge wa" title="WhatsApp" style="width:11px;height:11px;font-size:8px">W</span>
+              ${esc(_timeShort(m))}
+              ${out ? (m._pending ? '<span title="Bezig met versturen…">⏳</span>' : _statusIcon(m)) : ''}
+            </span>
             <div style="clear:both"></div>
-            ${m.failed_reason ? `<div style="font-size:10.5px;color:var(--rose);margin-top:2px;font-style:italic">Fout: ${esc(m.failed_reason.slice(0,60))}</div>` : ''}
+            ${m.failed_reason ? `<div class="ev-bubble-fail">Fout: ${esc(m.failed_reason.slice(0,60))}</div>` : ''}
           </div>
         </div>
       </div>`;
@@ -2213,6 +2317,11 @@
     // Suggestion-blok (Simone stelt voor …) — alleen WA-conv en niet verborgen
     const sugg = _live.suggestion.data[convId];
     const showSugg = isWA && sugg && sugg.status === 'PROPOSED' && !_ui.suggestionHidden[convId];
+    // "Simone bekijkt dit gesprek…" placeholder als:
+    //  - WA-conv + Simone suggest-mode aan + géén suggestion (nog) + polling loopt
+    //  - én niet actief loading (dan is er sowieso al feedback)
+    const showSuggThinking = isWA && simEnabled && simSuggest && !sugg && !showSugg
+      && _ui._simonePollConvId === convId && !_ui.suggestionHidden[convId];
 
     return `<div style="padding:10px 16px;border-top:1px solid var(--border);background:var(--surface);flex-shrink:0;display:flex;flex-direction:column;gap:6px">
       ${showSugg ? `<div style="padding:8px 10px;background:var(--violet-soft);border:1px solid var(--violet-line, var(--violet));border-radius:8px;color:var(--text);font-size:12.5px;line-height:1.45;display:flex;flex-direction:column;gap:6px">
@@ -2226,7 +2335,12 @@
           <button class="btn btn-primary btn-sm" onclick="window.__evSuggestAccept('${esc(convId)}','${esc(sugg.id)}')" style="padding:4px 10px;font-size:11.5px">Overnemen</button>
           <button class="btn btn-ghost btn-sm" onclick="window.__evSuggestIgnore('${esc(convId)}','${esc(sugg.id)}')" style="padding:4px 10px;font-size:11.5px">Negeren</button>
         </div>
-      </div>` : ''}
+      </div>` : (showSuggThinking ? `<div style="padding:6px 10px;background:var(--surface-2);border:1px dashed var(--violet-line, var(--border));border-radius:6px;color:var(--text-3);font-size:11.5px;display:flex;align-items:center;gap:6px">
+        <span style="display:inline-block;width:8px;height:8px;background:var(--violet);border-radius:50%;animation:evPulse 1.4s ease-in-out infinite"></span>
+        🤖 Simone bekijkt dit gesprek…
+        <span style="margin-left:auto;font-size:10.5px;color:var(--text-3)" title="Suggesties verschijnen alleen bij inbound berichten ≥ 5 tekens die niet in de 'trivial replies'-set staan. Cooldown 60s na jouw laatste antwoord.">ⓘ</span>
+        <style>@keyframes evPulse { 0%,100% { opacity:.35; } 50% { opacity:1; } }</style>
+      </div>` : '')}
 
       <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-3);flex-wrap:wrap">
         <span style="display:inline-flex;align-items:center;gap:4px">
@@ -2583,6 +2697,41 @@
     </div>`;
   }
 
+  // ── Simone polling voor open conv ──────────────────────────────────────
+  // Simone-suggest is async (Anthropic-call kan enkele seconden duren) en
+  // wordt getriggerd door de webhook, niet door onze frontend. Om een
+  // net-gegenereerde suggestie te tonen zonder page-refresh: poll de
+  // suggestie-endpoint elke 15s zolang het gesprek open is EN er nog geen
+  // PROPOSED-suggestie aanwezig is. Stop bij conv-switch of zodra we een
+  // suggestion binnen krijgen.
+  function _startSimonePolling(convId) {
+    // Clear vorige timer
+    if (_ui._simonePollTimer) { try { clearInterval(_ui._simonePollTimer); } catch (_) {} _ui._simonePollTimer = null; }
+    _ui._simonePollConvId = convId;
+    let tries = 0;
+    const MAX_TRIES = 6;   // 6 × 15s = 90s window
+    _ui._simonePollTimer = setInterval(() => {
+      tries++;
+      // Stop-condities
+      if (_ui._simonePollConvId !== convId || _ui.inboxConvId !== convId) {
+        clearInterval(_ui._simonePollTimer); _ui._simonePollTimer = null; return;
+      }
+      if (_live.suggestion.data[convId] && _live.suggestion.data[convId].status === 'PROPOSED') {
+        clearInterval(_ui._simonePollTimer); _ui._simonePollTimer = null; return;
+      }
+      if (tries >= MAX_TRIES) {
+        clearInterval(_ui._simonePollTimer); _ui._simonePollTimer = null; return;
+      }
+      // Force refetch (invalidate) + repaint na binnenkomst
+      _live.suggestion.data[convId] = null;
+      _live.suggestion.loading[convId] = false;
+      fetchSuggestion(convId).then(() => {
+        // Als suggestion binnen is: repaint alleen right pane surgical
+        if (_live.suggestion.data[convId]) _paintRightSurgical(convId);
+      });
+    }, 15000);
+  }
+
   // ── Surgical repaint van alleen #ev-inbox-right ────────────────────────
   function _paintRightSurgical(convId) {
     try {
@@ -2603,11 +2752,13 @@
   window.__evInboxSelect = async (convId) => {
     if (!convId) return;
     // Scroll-positie linkerlijst opslaan (voor eventuele latere DFO.render)
-    const leftEl = document.querySelector('#ev-inbox-left');
+    const leftEl = document.querySelector('#ev-inbox-rows') || document.querySelector('#ev-inbox-left');
     if (leftEl) _ui.inboxScrollTop = leftEl.scrollTop;
 
     _ui.inboxConvId = convId;
     _ui.inboxNarrowMode = 'detail';
+    _ui.suggestionHidden[convId] = false;
+    _startSimonePolling(convId);
 
     // Toggle .active class op rijen (surgical)
     try {
