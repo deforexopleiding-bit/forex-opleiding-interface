@@ -205,9 +205,13 @@
     }
   }
   async function fetchMentors(id) {
+    // V1-parity: /api/events-mentors-available zonder event_id → alle rol-mentoren
+    // (team_members met user_id + rol 'mentor'). Zo kun je in de afrond-modal
+    // aanvinken wie er aanwezig was, óók mentoren die niet al aan dit event
+    // waren gekoppeld (fallback voor last-minute invalers).
     const st = _live.mentors; if (st.loading[id] || st.data[id]) return;
     st.loading[id] = true; st.error[id] = null;
-    const j = await tryFetch('mentors:' + id, '/api/events-mentors-list?event_id=' + encodeURIComponent(id));
+    const j = await tryFetch('mentors:' + id, '/api/events-mentors-available');
     st.loading[id] = false;
     if (j && j.__error) st.error[id] = j.__error; else st.data[id] = asArr(j?.mentors || j?.items);
     if (window.DFO?.render) window.DFO.render();
@@ -600,13 +604,23 @@
     finally { _ui.busy[id] = null; if (window.DFO?.render) window.DFO.render(); }
   };
   window.__evComplete = (id) => {
-    // events-complete verwacht een volledige body {event_id, attendees[],
-    // present_team_member_ids[], expenses[]}. Open de v2 afrond-modal
-    // i.p.v. een simpele confirm-POST.
-    _ui.completeModal = { event_id: id, step: 1 };
-    if (!_live.attendees.data[id])   queueMicrotask(() => fetchAttendees(id));
-    if (!_live.mentors.data[id])     queueMicrotask(() => fetchMentors(id));
-    _ui.completeForm = { attendees: {}, present_mentors: {}, expenses: [] };
+    // V1-parity — één-pagina modal met alle secties. Body-shape naar
+    // events-complete-core:
+    //   { event_id, basis_incl_btw, completion_summary,
+    //     attendees:[{attendee_id, attendance_status, outcome?,
+    //                 followup:{reason?, follow_up_date?, owner_id?}? }],
+    //     present_team_member_ids:[uuid],
+    //     expenses:[{amount, vendor, spent_at, note, mentor_team_member_ids:[uuid]}] }
+    _ui.completeModal = { event_id: id };
+    if (!_live.attendees.data[id]) queueMicrotask(() => fetchAttendees(id));
+    if (!_live.mentors.data[id])   queueMicrotask(() => fetchMentors(id));
+    _ui.completeForm = {
+      basis_incl_btw: true,
+      completion_summary: '',
+      attendees: {},           // [attId] = { attendance_status, outcome, followup:{reason,follow_up_date,owner_id} }
+      present_mentors: {},     // [team_member_id] = true
+      expenses: [],            // [{ amount, vendor, spent_at, note, mentor_team_member_ids:[] }]
+    };
     if (window.DFO?.render) window.DFO.render();
   };
   window.__evCloseSignups = async (id) => {
@@ -635,26 +649,60 @@
   //   attendance_status ∈ {'aanwezig','no_show','afgemeld'}
   //   outcome ∈ {'opvolgen','geen_interesse','nog_onbekend','klant_geworden','twijfelt_nog'}
   //   Bonus = 3% van sale (BONUS_PCT) — server-side.
+  // Alle enum-waarden 1-op-1 uit events-complete-core.js (regel 22-33)
   const COMPLETE_ATT_STATUS = [
-    { v: 'aanwezig', l: 'Aanwezig' },
-    { v: 'no_show',  l: 'No-show' },
-    { v: 'afgemeld', l: 'Afgemeld' },
+    { v: 'aanwezig', l: 'Aanwezig', c: 'ok'       },
+    { v: 'no_show',  l: 'No-show',  c: 'danger'   },
+    { v: 'afgemeld', l: 'Afgemeld', c: 'neutral'  },
   ];
   const COMPLETE_OUTCOMES = [
-    { v: '',                l: '—' },
-    { v: 'opvolgen',        l: 'Opvolgen (vereist notitie)' },
+    { v: '',                l: '— kies uitkomst —' },
+    { v: 'opvolgen',        l: 'Opvolgen (follow-up)' },
+    { v: 'twijfelt_nog',    l: 'Twijfelt nog (follow-up)' },
+    { v: 'klant_geworden',  l: 'Klant geworden' },
     { v: 'geen_interesse',  l: 'Geen interesse' },
     { v: 'nog_onbekend',    l: 'Nog onbekend' },
-    { v: 'twijfelt_nog',    l: 'Twijfelt nog (vereist notitie)' },
-    { v: 'klant_geworden',  l: 'Klant geworden' },
+  ];
+  // V1-parity: snelle reden-presets voor follow-up
+  const FU_REASON_PRESETS = [
+    'Overweegt aankoop',
+    'Meer informatie sturen',
+    'Timing/budget nu niet',
+    'Wil eerst met partner overleggen',
+    'Zeker interesse — bel volgende week',
   ];
 
   window.__evCompleteClose = () => { _ui.completeModal = null; _ui.completeForm = null; if (window.DFO?.render) window.DFO.render(); };
-  window.__evCompleteStep = (n) => { if (_ui.completeModal) { _ui.completeModal.step = n; if (window.DFO?.render) window.DFO.render(); } };
+  window.__evCompleteTop = (field, val) => { if (_ui.completeForm) { _ui.completeForm[field] = val; if (field === 'basis_incl_btw' && window.DFO?.render) window.DFO.render(); } };
   window.__evCompleteAttSet = (attId, field, val) => {
     if (!_ui.completeForm) return;
     _ui.completeForm.attendees[attId] = _ui.completeForm.attendees[attId] || {};
     _ui.completeForm.attendees[attId][field] = val;
+    if (field === 'attendance_status' || field === 'outcome') {
+      // Reset gerelateerde velden bij status-wissel
+      if (field === 'attendance_status' && val !== 'aanwezig') {
+        _ui.completeForm.attendees[attId].outcome = '';
+        _ui.completeForm.attendees[attId].followup = null;
+      }
+      if (field === 'outcome' && val !== 'opvolgen' && val !== 'twijfelt_nog') {
+        _ui.completeForm.attendees[attId].followup = null;
+      }
+      if (field === 'outcome' && (val === 'opvolgen' || val === 'twijfelt_nog')) {
+        _ui.completeForm.attendees[attId].followup = _ui.completeForm.attendees[attId].followup || { reason:'', follow_up_date:'' };
+      }
+      if (window.DFO?.render) window.DFO.render();
+    }
+  };
+  window.__evCompleteFuSet = (attId, field, val) => {
+    if (!_ui.completeForm) return;
+    const a = _ui.completeForm.attendees[attId] = _ui.completeForm.attendees[attId] || {};
+    a.followup = a.followup || {};
+    a.followup[field] = val;
+  };
+  window.__evCompleteFuPreset = (attId, days) => {
+    const d = new Date(); d.setDate(d.getDate() + days);
+    const p = (n) => String(n).padStart(2, '0');
+    window.__evCompleteFuSet(attId, 'follow_up_date', d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate()));
     if (window.DFO?.render) window.DFO.render();
   };
   window.__evCompleteMentorToggle = (tmId) => {
@@ -664,12 +712,20 @@
   };
   window.__evCompleteExpenseAdd = () => {
     if (!_ui.completeForm) return;
-    _ui.completeForm.expenses.push({ team_member_id: '', amount: '', description: '' });
+    _ui.completeForm.expenses.push({ amount:'', vendor:'', spent_at:'', note:'', mentor_team_member_ids:[] });
     if (window.DFO?.render) window.DFO.render();
   };
   window.__evCompleteExpenseSet = (idx, field, val) => {
     if (!_ui.completeForm || !_ui.completeForm.expenses[idx]) return;
     _ui.completeForm.expenses[idx][field] = val;
+  };
+  window.__evCompleteExpenseMentorToggle = (idx, tmId) => {
+    if (!_ui.completeForm || !_ui.completeForm.expenses[idx]) return;
+    const arr = _ui.completeForm.expenses[idx].mentor_team_member_ids || [];
+    const at = arr.indexOf(tmId);
+    if (at >= 0) arr.splice(at, 1); else arr.push(tmId);
+    _ui.completeForm.expenses[idx].mentor_team_member_ids = arr;
+    if (window.DFO?.render) window.DFO.render();
   };
   window.__evCompleteExpenseRemove = (idx) => {
     if (!_ui.completeForm) return;
@@ -679,145 +735,230 @@
 
   function _completeModal() {
     const m = _ui.completeModal;
-    const form = _ui.completeForm || { attendees: {}, present_mentors: {}, expenses: [] };
+    const form = _ui.completeForm || { attendees:{}, present_mentors:{}, expenses:[], basis_incl_btw:true, completion_summary:'' };
     const eventId = m.event_id;
-    const step = m.step || 1;
-    const attList = asArr(_live.attendees.data[eventId]);
+    const attListAll = asArr(_live.attendees.data[eventId]);
+    // V1 filter (bron: events-detail.html:2577): alleen 'aangemeld' + 'aanwezig'
+    // status in de afronding-lijst (no-shows/geannuleerden zitten niet in de flow).
+    const attList = attListAll.filter((a) => a.status === 'aangemeld' || a.status === 'aanwezig');
     const mentorList = asArr(_live.mentors.data[eventId]);
     const attLoad = _live.attendees.loading[eventId];
     const menLoad = _live.mentors.loading[eventId];
-    const dot = (n, l) => `<span style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:20px;font-size:11.5px;font-weight:500;background:${step === n ? 'var(--pink-soft)' : 'var(--surface-2)'};color:${step === n ? 'var(--pink)' : 'var(--text-3)'}">
-      <span style="width:18px;height:18px;border-radius:50%;background:${step > n ? 'var(--emerald)' : step === n ? 'var(--pink)' : 'var(--border)'};color:white;display:inline-flex;align-items:center;justify-content:center;font-size:10px">${step > n ? '✓' : n}</span>${esc(l)}</span>`;
+    const presentMentorIds = Object.keys(form.present_mentors).filter((k) => form.present_mentors[k]);
 
-    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px" onclick="window.__evCompleteClose()">
-      <div style="background:var(--surface);border-radius:var(--r-lg);max-width:760px;width:100%;max-height:88vh;overflow:auto;padding:0" onclick="event.stopPropagation()">
-        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto" onclick="window.__evCompleteClose()">
+      <div style="background:var(--surface);border-radius:var(--r-lg);max-width:920px;width:100%;max-height:calc(100vh - 40px);overflow:auto;padding:0" onclick="event.stopPropagation()">
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;position:sticky;top:0;background:var(--surface);z-index:2">
           <span class="tile-ico" style="background:var(--pink-soft);color:var(--pink)">${svg(I.tick)}</span>
-          <div><div class="card-title">Event afronden</div>
-            <div style="font-size:11.5px;color:var(--text-3)">Leg aanwezigheid, aanwezige mentoren en uitgaven vast. Bonus = 3% van sales (automatisch).</div></div>
-          <div style="margin-left:auto;display:flex;gap:6px">${dot(1,'Aanwezigheid')}${dot(2,'Mentoren')}${dot(3,'Uitgaven')}${dot(4,'Bevestigen')}</div>
+          <div style="flex:1"><div class="card-title">Event afronden</div>
+            <div style="font-size:11.5px;color:var(--text-3)">Aanwezigheid + outcome per deelnemer · aanwezige mentoren · uitgaven per mentor · samenvatting. Bonus 3% van sales wordt automatisch berekend en gelijk verdeeld over aanwezige mentoren.</div></div>
           <button class="icon-btn" onclick="window.__evCompleteClose()">${svg(I.x)}</button>
         </div>
-        <div style="padding:18px 22px">
-          ${step === 1 ? _completeStepAttendees(attList, form, attLoad)
-           : step === 2 ? _completeStepMentors(mentorList, form, menLoad)
-           : step === 3 ? _completeStepExpenses(mentorList, form)
-           : _completeStepReview(attList, mentorList, form)}
-        </div>
-        <div style="padding:14px 22px;border-top:1px solid var(--border);background:var(--surface-2);display:flex;gap:8px;justify-content:space-between">
-          <button class="btn btn-ghost btn-sm" ${step === 1 ? 'disabled style="opacity:.5"' : ''} onclick="window.__evCompleteStep(${step - 1})">← Vorige</button>
-          ${step < 4
-            ? `<button class="btn btn-primary btn-sm" onclick="window.__evCompleteStep(${step + 1})">Volgende →</button>`
-            : `<button class="btn btn-primary btn-sm" onclick="window.__evCompleteSubmit()">${svg(I.tick)}Event afronden</button>`}
-        </div>
-      </div>
-    </div>`;
-  }
-  function _completeStepAttendees(attList, form, loading) {
-    if (loading && attList.length === 0) return skel();
-    if (attList.length === 0) return `<div style="font-size:13px;color:var(--text-3);padding:20px;text-align:center">Geen deelnemers gevonden.</div>`;
-    return `<div style="font-size:12.5px;color:var(--text-3);margin-bottom:12px">Stel per deelnemer de aanwezigheid + uitkomst vast. "Opvolgen" en "Twijfelt nog" vereisen een notitie.</div>
-    <div style="max-height:52vh;overflow:auto;border:1px solid var(--border);border-radius:8px">
-      ${attList.map((a) => {
-        const naam = [a.first_name, a.last_name].filter(Boolean).join(' ') || a.email || '—';
-        const cur = form.attendees[a.id] || {};
-        const st = cur.attendance_status || (a.attendance_status || (a.status === 'aanwezig' ? 'aanwezig' : a.status === 'no_show' ? 'no_show' : ''));
-        const oc = cur.outcome || a.outcome || '';
-        const rs = cur.reason || '';
-        const needsReason = oc === 'opvolgen' || oc === 'twijfelt_nog';
-        return `<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:6px">
-          <div style="display:flex;align-items:center;gap:10px">
-            ${H.av(naam, 24)}
-            <span style="flex:1;font-size:13px;font-weight:500">${esc(naam)}</span>
-            <select onchange="window.__evCompleteAttSet('${esc(a.id)}','attendance_status',this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12px">
-              <option value="">—</option>
-              ${COMPLETE_ATT_STATUS.map((o) => `<option value="${o.v}" ${st === o.v ? 'selected' : ''}>${o.l}</option>`).join('')}
-            </select>
-            <select onchange="window.__evCompleteAttSet('${esc(a.id)}','outcome',this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12px">
-              ${COMPLETE_OUTCOMES.map((o) => `<option value="${o.v}" ${oc === o.v ? 'selected' : ''}>${o.l}</option>`).join('')}
-            </select>
+
+        <div style="padding:18px 22px;display:flex;flex-direction:column;gap:20px">
+
+          <!-- Basis-toggle -->
+          <div style="display:flex;gap:10px;align-items:center;padding:10px 14px;background:var(--surface-2);border-radius:8px">
+            <input type="checkbox" id="ev_basis_btw" ${form.basis_incl_btw ? 'checked' : ''} onchange="window.__evCompleteTop('basis_incl_btw', this.checked)" />
+            <label for="ev_basis_btw" style="font-size:12.5px;cursor:pointer">Bonus berekenen <b>inclusief BTW</b> (uit deal.total_amount incl.) — uitzetten voor bonus excl. BTW.</label>
           </div>
-          ${needsReason ? `<input type="text" placeholder="Notitie (verplicht bij ${oc})" value="${esc(rs)}" oninput="window.__evCompleteAttSet('${esc(a.id)}','reason',this.value)" style="padding:6px 10px;border:1px solid var(--amber-line);background:var(--amber-soft);border-radius:6px;font-size:12.5px" />` : ''}
-        </div>`;
-      }).join('')}
-    </div>`;
-  }
-  function _completeStepMentors(mentorList, form, loading) {
-    if (loading && mentorList.length === 0) return skel();
-    if (mentorList.length === 0) return `<div style="font-size:13px;color:var(--text-3);padding:20px;text-align:center">Geen mentoren gekoppeld aan dit event.</div>`;
-    return `<div style="font-size:12.5px;color:var(--text-3);margin-bottom:12px">Vink aan welke mentoren aanwezig waren. Alleen aanwezige mentoren krijgen bonus over hun sales.</div>
-    <div style="display:flex;flex-direction:column;gap:6px">
-      ${mentorList.map((m) => {
-        const tmId = m.team_member_id || m.id;
-        const naam = m.name || m.full_name || m.team_member?.name || '—';
-        const on = !!form.present_mentors[tmId];
-        return `<label style="display:flex;gap:10px;align-items:center;padding:10px 12px;border:1px solid ${on ? 'var(--pink-line)' : 'var(--border)'};border-radius:8px;cursor:pointer;background:${on ? 'var(--pink-soft)' : 'var(--surface)'}">
-          <input type="checkbox" ${on ? 'checked' : ''} onchange="window.__evCompleteMentorToggle('${esc(tmId)}')" style="margin:0" />
-          <span style="font-size:13px;font-weight:500">${esc(naam)}</span>
-          ${m.role ? `<span style="font-size:11px;color:var(--text-3)">· ${esc(m.role)}</span>` : ''}
-        </label>`;
-      }).join('')}
-    </div>`;
-  }
-  function _completeStepExpenses(mentorList, form) {
-    const exp = form.expenses;
-    return `<div style="font-size:12.5px;color:var(--text-3);margin-bottom:12px">Uitgaven per mentor (bv. reiskosten, materiaal). Optioneel — laat leeg als er geen zijn.</div>
-    ${exp.length === 0 ? `<div style="font-size:12.5px;color:var(--text-3);padding:12px;text-align:center;background:var(--surface-2);border-radius:8px;margin-bottom:10px">Nog geen uitgaven toegevoegd.</div>` : ''}
-    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
-      ${exp.map((e, i) => `<div style="display:grid;grid-template-columns:1.5fr 1fr 2fr auto;gap:8px;padding:10px;background:var(--surface-2);border-radius:8px">
-        <select onchange="window.__evCompleteExpenseSet(${i},'team_member_id',this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12px">
-          <option value="">— kies mentor —</option>
-          ${mentorList.map((m) => { const tmId = m.team_member_id || m.id; const naam = m.name || m.full_name || '—'; return `<option value="${esc(tmId)}" ${e.team_member_id === tmId ? 'selected' : ''}>${esc(naam)}</option>`; }).join('')}
-        </select>
-        <input type="number" step="0.01" min="0" placeholder="€0.00" value="${esc(e.amount)}" oninput="window.__evCompleteExpenseSet(${i},'amount',this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12px" />
-        <input type="text" placeholder="Omschrijving" value="${esc(e.description || '')}" oninput="window.__evCompleteExpenseSet(${i},'description',this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12px" />
-        <button class="icon-btn" title="Verwijderen" onclick="window.__evCompleteExpenseRemove(${i})">${svg(I.trash || I.x, 'width:13px;height:13px')}</button>
-      </div>`).join('')}
-    </div>
-    <button class="btn btn-ghost btn-sm" onclick="window.__evCompleteExpenseAdd()">${svg(I.plus)}Uitgave toevoegen</button>`;
-  }
-  function _completeStepReview(attList, mentorList, form) {
-    const attSet = Object.keys(form.attendees).filter((k) => form.attendees[k]?.attendance_status);
-    const menSet = Object.keys(form.present_mentors).filter((k) => form.present_mentors[k]);
-    const expSet = form.expenses.filter((e) => e.team_member_id && Number(e.amount) > 0);
-    const totalExp = expSet.reduce((a, e) => a + Number(e.amount || 0), 0);
-    return `<div style="font-size:13px;line-height:1.6">
-      <div class="kv"><dt>Deelnemers ingesteld</dt><dd class="num">${attSet.length} / ${attList.length}</dd></div>
-      <div class="kv"><dt>Aanwezige mentoren</dt><dd class="num">${menSet.length} / ${mentorList.length}</dd></div>
-      <div class="kv"><dt>Uitgaven</dt><dd>${expSet.length} regels · totaal ${eur0(totalExp)}</dd></div>
-      <div style="margin-top:14px;padding:12px;background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:8px;font-size:12.5px;color:var(--amber)">
-        <b>Let op:</b> na afronden worden aanwezigheid, follow-ups, bonusberekeningen (3% van sales van aanwezige mentoren) en uitgaven definitief geboekt. Dit kan worden overschreven met "Her-afronden".
+
+          <!-- Sectie 1: Aanwezigheid + outcome + follow-up per attendee -->
+          <div>
+            <div style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);margin-bottom:8px">1. Aanwezigheid per deelnemer (${attList.length})</div>
+            ${attLoad && attList.length === 0 ? skel() : attList.length === 0
+              ? `<div style="font-size:13px;color:var(--text-3);padding:16px;text-align:center;background:var(--surface-2);border-radius:8px">Geen deelnemers met status 'aangemeld' of 'aanwezig'.</div>`
+              : `<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
+                  ${attList.map((a) => _completeAttendeeRow(a, form)).join('')}
+                </div>`}
+            <div style="font-size:11px;color:var(--text-3);margin-top:6px">Sales worden vóór afronding via ⋯-menu (Aanwezigen-tab → "Offerte aanmaken") aan een deelnemer gekoppeld. Bonus rekent daarna automatisch mee.</div>
+          </div>
+
+          <!-- Sectie 2: Mentoren -->
+          <div>
+            <div style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);margin-bottom:8px">2. Welke mentoren waren aanwezig? (${presentMentorIds.length} gekozen)</div>
+            ${menLoad && mentorList.length === 0 ? skel() : mentorList.length === 0
+              ? `<div style="font-size:13px;color:var(--text-3);padding:16px;text-align:center;background:var(--surface-2);border-radius:8px">Geen mentoren gevonden.</div>`
+              : `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px">
+                  ${mentorList.map((m) => {
+                    const tmId = m.team_member_id || m.id;
+                    const naam = m.name || m.full_name || '—';
+                    const on = !!form.present_mentors[tmId];
+                    return `<label style="display:flex;gap:8px;align-items:center;padding:9px 11px;border:1px solid ${on ? 'var(--pink-line)' : 'var(--border)'};border-radius:8px;cursor:pointer;background:${on ? 'var(--pink-soft)' : 'var(--surface)'}">
+                      <input type="checkbox" ${on ? 'checked' : ''} onchange="window.__evCompleteMentorToggle('${esc(tmId)}')" style="margin:0" />
+                      <span style="font-size:12.5px;font-weight:500">${esc(naam)}</span>
+                      ${m.role ? `<span style="font-size:10.5px;color:var(--text-3);margin-left:auto">${esc(m.role)}</span>` : ''}
+                    </label>`;
+                  }).join('')}
+                </div>`}
+          </div>
+
+          <!-- Sectie 3: Uitgaven per mentor -->
+          <div>
+            <div style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);margin-bottom:8px">3. Uitgaven ${form.expenses.length ? `(${form.expenses.length})` : ''}</div>
+            ${form.expenses.length === 0
+              ? `<div style="font-size:12.5px;color:var(--text-3);padding:12px;text-align:center;background:var(--surface-2);border-radius:8px;margin-bottom:8px">Nog geen uitgaven toegevoegd. Klik hieronder om te starten.</div>`
+              : `<div style="display:flex;flex-direction:column;gap:10px;margin-bottom:8px">
+                  ${form.expenses.map((e, i) => _completeExpenseRow(e, i, mentorList, presentMentorIds)).join('')}
+                </div>`}
+            <button class="btn btn-ghost btn-sm" onclick="window.__evCompleteExpenseAdd()">${svg(I.plus)}Uitgave toevoegen</button>
+          </div>
+
+          <!-- Sectie 4: Samenvatting -->
+          <div>
+            <div style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);margin-bottom:8px">4. Korte samenvatting (optioneel)</div>
+            <textarea placeholder="Wat viel op? Wat is de vervolgstrategie? Etc." oninput="window.__evCompleteTop('completion_summary', this.value)" style="width:100%;min-height:80px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:13px;font-family:inherit;resize:vertical">${esc(form.completion_summary || '')}</textarea>
+          </div>
+
+        </div>
+
+        <div style="padding:14px 22px;border-top:1px solid var(--border);background:var(--surface-2);display:flex;gap:8px;justify-content:space-between;align-items:center;position:sticky;bottom:0">
+          <div style="font-size:11.5px;color:var(--text-3)">Bonus wordt automatisch berekend: <b>3% van sale-bedrag</b> (${form.basis_incl_btw ? 'incl.' : 'excl.'} BTW), gelijk verdeeld over de <b>${presentMentorIds.length}</b> aanwezige mentor${presentMentorIds.length === 1 ? '' : 'en'}.</div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="window.__evCompleteClose()">Annuleren</button>
+            <button class="btn btn-primary btn-sm" onclick="window.__evCompleteSubmit()">${svg(I.tick)}Event afronden</button>
+          </div>
+        </div>
       </div>
     </div>`;
   }
+
+  function _completeAttendeeRow(a, form) {
+    const naam = [a.first_name, a.last_name].filter(Boolean).join(' ') || a.email || '—';
+    const cur = form.attendees[a.id] || {};
+    const st = cur.attendance_status || '';
+    const oc = cur.outcome || '';
+    const fu = cur.followup || {};
+    const showFu = oc === 'opvolgen' || oc === 'twijfelt_nog';
+    const hasDeal = !!a.deal_id;
+    const stColor = COMPLETE_ATT_STATUS.find((x) => x.v === st)?.c || 'neutral';
+    return `<div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        ${H.av(naam, 26)}
+        <div style="flex:1;min-width:150px">
+          <div style="font-size:13px;font-weight:500">${esc(naam)}</div>
+          <div style="font-size:11px;color:var(--text-3)">${esc(a.email || '')}${hasDeal ? ' · ' + H.pill('accent', 'Sale gekoppeld', true) : ''}</div>
+        </div>
+        <!-- Status-pills -->
+        <div style="display:flex;gap:4px">
+          ${COMPLETE_ATT_STATUS.map((o) => `<button class="chip ${st === o.v ? 'on' : ''}" style="padding:5px 10px;font-size:11.5px${st === o.v ? ';background:var(--' + o.c + '-soft);color:var(--' + o.c + ');border-color:var(--' + o.c + '-line)' : ''}" onclick="window.__evCompleteAttSet('${esc(a.id)}','attendance_status','${o.v}')">${esc(o.l)}</button>`).join('')}
+        </div>
+        ${st === 'aanwezig' ? `<select onchange="window.__evCompleteAttSet('${esc(a.id)}','outcome',this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12px;min-width:180px">
+          ${COMPLETE_OUTCOMES.map((o) => `<option value="${o.v}" ${oc === o.v ? 'selected' : ''}>${o.l}</option>`).join('')}
+        </select>` : ''}
+      </div>
+      ${showFu ? _completeFollowupBlock(a.id, fu) : ''}
+    </div>`;
+  }
+  function _completeFollowupBlock(attId, fu) {
+    return `<div style="padding:10px 12px;background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:8px;display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:11.5px;color:var(--amber);font-weight:500">Follow-up plannen (verplicht bij opvolgen / twijfelt nog):</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:11.5px;color:var(--text-3)">Termijn:</span>
+        <button class="chip" style="padding:4px 9px;font-size:11.5px" onclick="window.__evCompleteFuPreset('${esc(attId)}',7)">+1 week</button>
+        <button class="chip" style="padding:4px 9px;font-size:11.5px" onclick="window.__evCompleteFuPreset('${esc(attId)}',14)">+2 weken</button>
+        <button class="chip" style="padding:4px 9px;font-size:11.5px" onclick="window.__evCompleteFuPreset('${esc(attId)}',21)">+3 weken</button>
+        <input type="date" value="${esc(fu.follow_up_date || '')}" oninput="window.__evCompleteFuSet('${esc(attId)}','follow_up_date',this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12px" />
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <select onchange="window.__evCompleteFuSet('${esc(attId)}','reason',this.value);window.DFO && window.DFO.render && window.DFO.render()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12px;flex:1">
+          <option value="">— reden-preset —</option>
+          ${FU_REASON_PRESETS.map((p) => `<option value="${esc(p)}" ${fu.reason === p ? 'selected' : ''}>${esc(p)}</option>`).join('')}
+        </select>
+      </div>
+      <input type="text" placeholder="Notitie (verplicht) — bv. specifieke afspraak/situatie" value="${esc(fu.reason || '')}" oninput="window.__evCompleteFuSet('${esc(attId)}','reason',this.value)" style="padding:6px 10px;border:1px solid var(--amber-line);background:var(--surface);border-radius:6px;font-size:12.5px" />
+    </div>`;
+  }
+  function _completeExpenseRow(e, i, mentorList, presentMentorIds) {
+    // Alleen aanwezige mentoren tonen als toewijs-optie (v1-parity — de expense
+    // wordt server-side verdeeld over deze mentoren; leeg = alle aanwezigen).
+    const presentMentors = mentorList.filter((m) => presentMentorIds.includes(m.team_member_id || m.id));
+    const targetIds = Array.isArray(e.mentor_team_member_ids) ? e.mentor_team_member_ids : [];
+    return `<div style="padding:12px;background:var(--surface-2);border-radius:8px;display:flex;flex-direction:column;gap:8px">
+      <div style="display:grid;grid-template-columns:120px 1.5fr 130px auto;gap:8px;align-items:center">
+        <input type="number" step="0.01" min="0" placeholder="€ bedrag" value="${esc(e.amount)}" oninput="window.__evCompleteExpenseSet(${i},'amount',this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12.5px" />
+        <input type="text" placeholder="Leverancier / vendor" value="${esc(e.vendor || '')}" oninput="window.__evCompleteExpenseSet(${i},'vendor',this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12.5px" />
+        <input type="date" value="${esc(e.spent_at || '')}" oninput="window.__evCompleteExpenseSet(${i},'spent_at',this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12.5px" />
+        <button class="icon-btn" title="Uitgave verwijderen" onclick="window.__evCompleteExpenseRemove(${i})">${svg(I.trash || I.x, 'width:13px;height:13px')}</button>
+      </div>
+      <input type="text" placeholder="Omschrijving / notitie" value="${esc(e.note || '')}" oninput="window.__evCompleteExpenseSet(${i},'note',this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12.5px" />
+      <div>
+        <div style="font-size:11px;color:var(--text-3);margin-bottom:4px">Toewijzen aan mentor(en) — leeg = verdelen over alle aanwezigen:</div>
+        ${presentMentors.length === 0
+          ? `<div style="font-size:11.5px;color:var(--text-3);padding:6px 0">⚠ Selecteer eerst aanwezige mentoren (sectie 2) om deze uitgave gericht toe te wijzen.</div>`
+          : `<div style="display:flex;gap:5px;flex-wrap:wrap">
+              ${presentMentors.map((m) => {
+                const tmId = m.team_member_id || m.id;
+                const on = targetIds.includes(tmId);
+                return `<label style="display:inline-flex;gap:5px;align-items:center;padding:3px 8px;border:1px solid ${on ? 'var(--pink-line)' : 'var(--border)'};border-radius:14px;font-size:11.5px;cursor:pointer;background:${on ? 'var(--pink-soft)' : 'var(--surface)'}">
+                  <input type="checkbox" ${on ? 'checked' : ''} onchange="window.__evCompleteExpenseMentorToggle(${i},'${esc(tmId)}')" style="margin:0" />
+                  ${esc(m.name || m.full_name || '—')}
+                </label>`;
+              }).join('')}
+            </div>`}
+      </div>
+    </div>`;
+  }
+
   window.__evCompleteSubmit = async () => {
     const m = _ui.completeModal; const form = _ui.completeForm;
     if (!m || !form) return;
-    // Bouw body voor events-complete
+    // Bouw body 1-op-1 volgens events-complete-core.js body-shape.
     const attendees = Object.entries(form.attendees)
       .filter(([, v]) => v.attendance_status)
-      .map(([id, v]) => {
-        const row = { id, attendance_status: v.attendance_status };
-        if (v.outcome) row.outcome = v.outcome;
-        if (v.reason)  row.reason = v.reason;
+      .map(([attId, v]) => {
+        const row = { attendee_id: attId, attendance_status: v.attendance_status };
+        if (v.attendance_status === 'aanwezig' && v.outcome) row.outcome = v.outcome;
+        if ((v.outcome === 'opvolgen' || v.outcome === 'twijfelt_nog') && v.followup) {
+          const fu = {};
+          if (v.followup.reason)         fu.reason = v.followup.reason;
+          if (v.followup.follow_up_date) fu.follow_up_date = v.followup.follow_up_date;
+          if (v.followup.owner_id)       fu.owner_id = v.followup.owner_id;
+          if (Object.keys(fu).length) row.followup = fu;
+        }
         return row;
       });
+    // Validate: opvolgen/twijfelt_nog vereist reason (server valideert ook)
+    for (const a of attendees) {
+      if ((a.outcome === 'opvolgen' || a.outcome === 'twijfelt_nog') && !a.followup?.reason) {
+        alert('Follow-up-notitie ontbreekt voor minstens één deelnemer met outcome "' + a.outcome + '".');
+        return;
+      }
+    }
     const present_team_member_ids = Object.keys(form.present_mentors).filter((k) => form.present_mentors[k]);
     const expenses = form.expenses
-      .filter((e) => e.team_member_id && Number(e.amount) > 0)
-      .map((e) => ({ team_member_id: e.team_member_id, amount: Number(e.amount), description: e.description || undefined }));
+      .filter((e) => Number(e.amount) > 0)
+      .map((e) => {
+        const row = { amount: Number(e.amount) };
+        if (e.vendor)  row.vendor  = e.vendor;
+        if (e.spent_at) row.spent_at = e.spent_at;
+        if (e.note)    row.note    = e.note;
+        if (Array.isArray(e.mentor_team_member_ids) && e.mentor_team_member_ids.length) {
+          row.mentor_team_member_ids = e.mentor_team_member_ids;
+        }
+        return row;
+      });
 
     if (attendees.length === 0 && !window.confirm('Geen enkele aanwezigheid gezet — wil je toch afronden?')) return;
 
     try {
-      const body = { event_id: m.event_id, attendees, present_team_member_ids, expenses };
+      const body = {
+        event_id: m.event_id,
+        basis_incl_btw: form.basis_incl_btw !== false,
+        completion_summary: form.completion_summary || '',
+        attendees,
+        present_team_member_ids,
+        expenses,
+      };
       const j = await window.KV.authedJson('/api/events-complete', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
       if (j?.error) throw new Error(j.error);
-      _showToast('Event afgerond ✓');
+      _showToast('Event afgerond ✓ — follow-ups en bonussen geboekt');
       const id = m.event_id;
       _ui.completeModal = null; _ui.completeForm = null;
       _live.detail.data[id] = null; _live.completed.data = null; _live.completedOne.data[id] = null;
+      _live.attendees.data[id] = null;
       queueMicrotask(() => fetchDetail(id));
+      queueMicrotask(() => fetchAttendees(id));
       queueMicrotask(fetchCompleted);
       if (window.DFO?.render) window.DFO.render();
     } catch (e) { alert('Afronden mislukt: ' + (e?.message || 'onbekende fout')); }
@@ -1270,9 +1411,17 @@
             // als 'ie ontbreekt (achterwaartse compat).
             const hasQuest = r.questionnaire_filled === true
               || (!('questionnaire_filled' in r) && !!(r.matched_attendee?.assessment_response_id || r.assessment_response_id));
+            // Punt 3 — toon tijdstip vragenlijst-invulling naast vinkje.
+            // Bron: r.questionnaire_filled_at (bevestigd in api/events-signup-
+            // inbox-list.js regel 133).
+            const qDate = hasQuest && r.questionnaire_filled_at ? _fmtDate(r.questionnaire_filled_at) : '';
+            const qTime = hasQuest && r.questionnaire_filled_at ? _fmtTime(r.questionnaire_filled_at) : '';
             const questCell = ms === 'matched'
               ? (hasQuest
-                  ? `<span title="Vragenlijst ingevuld" style="color:var(--emerald);font-size:14px">✓</span>`
+                  ? `<div style="display:flex;flex-direction:column;align-items:center;gap:1px">
+                      <span title="Vragenlijst ingevuld" style="color:var(--emerald);font-size:14px;line-height:1">✓</span>
+                      ${qDate ? `<div class="mono" style="font-size:10px;color:var(--text-3);line-height:1.15">${esc(qDate)}${qTime ? ' ' + esc(qTime) : ''}</div>` : ''}
+                    </div>`
                   : `<span title="Vragenlijst nog niet ingevuld" style="color:var(--rose);font-size:14px">✗</span>`)
               : `<span title="Nog geen match — vragenlijst onbekend" style="color:var(--text-3);font-size:12px">—</span>`;
             const insDate = _fmtDate(r.received_at);
