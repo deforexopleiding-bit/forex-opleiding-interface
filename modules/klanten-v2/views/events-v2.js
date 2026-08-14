@@ -296,7 +296,12 @@
     if (!wf && !gh) return '<span style="color:var(--text-3);font-size:11px">—</span>';
     const badge = (s, label) => {
       if (!s) return '';
-      const cls = s === 'synced' || s === 'ok' ? 'ok' : s === 'pending' || s === 'queued' ? 'warn' : 'danger';
+      // BUG 2 FIX — 'success' is de canonieke waarde in webflow/ghl-sync-kolommen;
+      // 'synced'/'ok' als alias behouden. Alleen 'pending'/'queued' warn; 'error'
+      // en de rest danger.
+      const cls = ['success','synced','ok'].includes(s) ? 'ok'
+                : ['pending','queued','in_progress'].includes(s) ? 'warn'
+                : 'danger';
       return `<span class="pill pill-${cls} nodot" style="font-size:10px;padding:1px 5px" title="${esc(label + ': ' + s)}">${label}</span>`;
     };
     return `<div style="display:flex;gap:3px;justify-content:flex-end">${badge(wf, 'WF')}${badge(gh, 'GHL')}</div>`;
@@ -316,7 +321,8 @@
     if (!window.confirm('Dit event dupliceren? Er wordt een nieuw concept aangemaakt met dezelfde inhoud.')) return;
     _ui.busy[id] = 'duplicate'; if (window.DFO?.render) window.DFO.render();
     try {
-      const j = await window.KV.authedJson('/api/events-duplicate', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id }) });
+      // BUG 1 FIX — endpoint verwacht 'source_event_id', niet 'id'.
+      const j = await window.KV.authedJson('/api/events-duplicate', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ source_event_id: id }) });
       if (j?.error) throw new Error(j.error);
       _showToast('Event gedupliceerd');
       _live.events.data = null; queueMicrotask(() => fetchEvents());
@@ -423,6 +429,17 @@
   }
 
   function _detailInfo(ev) {
+    // BUG 3 FIX — events-detail retourneert `byStatus:{aangemeld,aanwezig,...}`
+    // + `attendee_count_active` (confirmed = aangemeld+aanwezig met assessment).
+    // Voor "Aangemeld" tellen we aangemeld+aanwezig (breder dan alleen assessment-
+    // gecompleteerd), zodat de teller overeenkomt met wat je ziet in Aanwezigen-tab.
+    const bs = ev.byStatus || {};
+    const aangemeldTotaal = (Number(bs.aangemeld || 0) + Number(bs.aanwezig || 0));
+    const confirmedTotaal = Number(ev.attendee_count_active ?? ev.attendee_count ?? 0);
+    const showTot = aangemeldTotaal > 0 ? aangemeldTotaal : confirmedTotaal;
+    const showSub = (aangemeldTotaal > confirmedTotaal && confirmedTotaal > 0)
+      ? ` <span style="font-size:11px;color:var(--text-3)">(${confirmedTotaal} met vragenlijst)</span>`
+      : '';
     return `<div class="pad" style="padding-top:14px"><div class="grid g2">
       <div class="card">
         <div class="card-head"><span class="tile-ico" style="background:var(--pink-soft);color:var(--pink)">${svg(I.cal)}</span><div class="card-title">Details</div></div>
@@ -433,7 +450,7 @@
           <div class="kv"><dt>Locatie</dt><dd>${esc(ev.location || '—')}</dd></div>
           <div class="kv"><dt>Niveau</dt><dd>${esc(ev.niveau || '—')}</dd></div>
           <div class="kv"><dt>Capaciteit</dt><dd class="num">${esc(String(ev.capacity ?? '—'))}</dd></div>
-          <div class="kv"><dt>Aangemeld</dt><dd class="num">${esc(String(ev.attendee_count_active ?? ev.attendee_count ?? 0))}</dd></div>
+          <div class="kv"><dt>Aangemeld</dt><dd class="num">${showTot}${showSub}</dd></div>
           <div class="kv"><dt>Signups</dt><dd>${ev.signups_closed ? H.pill('neutral','Gesloten') : H.pill('ok','Open')}</dd></div>
         </div>
       </div>
@@ -455,8 +472,11 @@
   }
   function _syncBadge(status, ts) {
     if (!status && !ts) return `<span style="color:var(--text-3)">niet gesynct</span>`;
-    const s = status || (ts ? 'synced' : 'onbekend');
-    const cls = s === 'synced' || s === 'ok' ? 'ok' : s === 'pending' || s === 'queued' ? 'warn' : 'danger';
+    const s = status || (ts ? 'success' : 'onbekend');
+    // BUG 2 FIX — 'success' + aliases → groen
+    const cls = ['success','synced','ok'].includes(s) ? 'ok'
+              : ['pending','queued','in_progress'].includes(s) ? 'warn'
+              : 'danger';
     return `${H.pill(cls, s)} <span style="font-size:11px;color:var(--text-3);margin-left:6px">${ts ? _fmtDateTime(ts) : ''}</span>`;
   }
   window.__evSyncRetry = async (id) => {
@@ -901,25 +921,38 @@
       const d = new Date(e.completed_at || e.starts_at);
       return Number.isFinite(d.getTime()) && d >= startQuarter;
     });
-    const omzetYTD = eventsYTD.reduce((a, e) => a + Number(e.sales || 0), 0);
-    const omzetQTD = eventsQTD.reduce((a, e) => a + Number(e.sales || 0), 0);
-    const gemOmzet = eventsYTD.length > 0 ? omzetYTD / eventsYTD.length : 0;
+    // BUG 4 — 'sales' in events-completed-list is COUNT (aantal deals met
+    // sale-status via event_attendees.deal_id), GEEN €-bedrag. We tonen dus
+    // "Aantal verkopen" i.p.v. "Omzet". De echte €-omzet vergt een aparte
+    // aggregate over deals.amount JOIN event_attendees → needs Jeffrey.
+    const salesYTD = eventsYTD.reduce((a, e) => a + Number(e.sales || 0), 0);
+    const salesQTD = eventsQTD.reduce((a, e) => a + Number(e.sales || 0), 0);
+    const gemSales = eventsYTD.length > 0 ? salesYTD / eventsYTD.length : 0;
     const totAanwezig = eventsYTD.reduce((a, e) => a + Number(e.aanwezig || 0), 0);
 
-    return `${H.kpis([
-      { c:'blue',    icon:I.euro,  label:'Omzet YTD',           val:eur0(omzetYTD), hi:1, sub:eventsYTD.length + ' afgeronde events' },
-      { c:'violet',  icon:I.chart, label:'Omzet dit kwartaal',  val:eur0(omzetQTD), hi:1, sub:eventsQTD.length + ' events' },
-      { c:'emerald', icon:I.grad,  label:'Gem. omzet/event',    val:eur0(Math.round(gemOmzet)), sub:'YTD' },
-      { c:'teal',    icon:I.users, label:'Totaal aanwezigen',   val:fmtNum(totAanwezig), sub:'YTD' },
+    return `<div style="margin:14px 20px;padding:12px 16px;border:1px solid var(--amber-line);background:var(--amber-soft);border-radius:var(--r);color:var(--amber);font-size:12.5px;display:flex;gap:11px;align-items:flex-start">
+      ${svg(I.alert, 'width:15px;height:15px;flex-shrink:0;margin-top:1px')}
+      <div style="flex:1"><b>Needs Jeffrey — €-omzet ontbreekt</b><br>
+      De <span class="mono">sales</span>-kolom uit <span class="mono">events-completed-list</span> is een <b>teller van verkoop-deals</b> per event
+      (aantal <span class="mono">event_attendees</span> met een <span class="mono">deal_id</span> waar de deal <span class="mono">accepted/signed</span> is) — géén €-bedrag.
+      Voor "hoeveel omzet uit dit event" is een nieuwe aggregate nodig over <span class="mono">deals.amount</span> (of <span class="mono">invoices.total</span>) gejoind op <span class="mono">event_attendees.deal_id</span>.
+      Hieronder tonen we daarom <b>aantal verkopen</b> (echte data) i.p.v. €.</div>
+    </div>
+
+    ${H.kpis([
+      { c:'blue',    icon:I.grad,  label:'Verkopen YTD',            val:fmtNum(salesYTD),  hi:1, sub:eventsYTD.length + ' afgeronde events' },
+      { c:'violet',  icon:I.chart, label:'Verkopen dit kwartaal',   val:fmtNum(salesQTD),  hi:1, sub:eventsQTD.length + ' events' },
+      { c:'emerald', icon:I.tick,  label:'Gem. verkopen/event',     val:gemSales > 0 ? gemSales.toFixed(1) : '—', sub:'YTD' },
+      { c:'teal',    icon:I.users, label:'Totaal aanwezigen',       val:fmtNum(totAanwezig), sub:'YTD' },
     ])}
 
     <div class="pad"><div class="grid g2" style="margin-bottom:14px">
       <div class="card">
-        <div class="card-head"><span class="tile-ico" style="background:var(--blue-soft);color:var(--blue)">${svg(I.chart)}</span><div class="card-title">Omzet per maand</div><span style="margin-left:auto;font-size:11px;color:var(--text-3)">laatste 12 mnd</span></div>
-        ${_omzetMaandChart(events)}
+        <div class="card-head"><span class="tile-ico" style="background:var(--blue-soft);color:var(--blue)">${svg(I.chart)}</span><div class="card-title">Verkopen per maand</div><span style="margin-left:auto;font-size:11px;color:var(--text-3)">laatste 12 mnd · aantal, niet €</span></div>
+        ${_salesMaandChart(events)}
       </div>
       <div class="card">
-        <div class="card-head"><span class="tile-ico" style="background:var(--emerald-soft);color:var(--emerald)">${svg(I.grad)}</span><div class="card-title">Top-events (omzet)</div><span style="margin-left:auto;font-size:11px;color:var(--text-3)">YTD</span></div>
+        <div class="card-head"><span class="tile-ico" style="background:var(--emerald-soft);color:var(--emerald)">${svg(I.grad)}</span><div class="card-title">Top-events (aantal verkopen)</div><span style="margin-left:auto;font-size:11px;color:var(--text-3)">YTD</span></div>
         <div class="card-body" style="padding:12px 17px">
           ${_topEvents(eventsYTD)}
         </div>
@@ -927,44 +960,40 @@
     </div>
 
     <div class="card">
-      <div class="card-head"><span class="tile-ico" style="background:var(--pink-soft);color:var(--pink)">${svg(I.cal)}</span><div class="card-title">Per afgerond event (${events.length})</div></div>
+      <div class="card-head"><span class="tile-ico" style="background:var(--pink-soft);color:var(--pink)">${svg(I.cal)}</span><div class="card-title">Per afgerond event (${events.length})</div><span style="margin-left:auto;font-size:11px;color:var(--text-3)">Bonus/uitgaven zijn wél €; verkopen = aantal</span></div>
       ${events.length === 0
-        ? emptyBlk('Geen afgeronde events', 'Zodra events worden afgerond verschijnt hier de financiële data.')
+        ? emptyBlk('Geen afgeronde events', 'Zodra events worden afgerond verschijnt hier de data.')
         : H.table(
-            [{l:'Event'},{l:'Voltooid op',cls:'optional'},{l:'Aanwezig',cls:'r optional'},{l:'Sales',cls:'r'},{l:'Bonus',cls:'r'},{l:'Uitgaven',cls:'r'},{l:'Netto',cls:'r'}],
-            events.map((e) => {
-              const netto = Number(e.sales || 0) - Number(e.bonus_total || 0) - Number(e.expenses_total || 0);
-              return [
-                `<a href="#" onclick="event.preventDefault();window.__evGoDetail('${esc(e.event_id)}')" style="color:inherit;text-decoration:none"><span class="cell-main">${esc(e.title || '—')}</span></a>`,
-                `<span class="mono" style="color:var(--text-3);font-size:12.5px">${esc(_fmtDate(e.completed_at || e.starts_at))}</span>`,
-                `<span class="mono">${Number(e.aanwezig || 0)}</span>`,
-                `<span class="money">${eur0(Number(e.sales || 0))}</span>`,
-                `<span class="money">${eur0(Number(e.bonus_total || 0))}</span>`,
-                `<span class="money" style="color:var(--amber)">${Number(e.expenses_total || 0) ? '− ' + eur0(Number(e.expenses_total)) : '—'}</span>`,
-                `<span class="money" style="color:var(--emerald)">${eur0(netto)}</span>`,
-              ];
-            })
+            [{l:'Event'},{l:'Voltooid op',cls:'optional'},{l:'Aanwezig',cls:'r optional'},{l:'Verkopen',cls:'r'},{l:'Bonus mentor',cls:'r'},{l:'Uitgaven',cls:'r'}],
+            events.map((e) => [
+              `<a href="#" onclick="event.preventDefault();window.__evGoDetail('${esc(e.event_id)}')" style="color:inherit;text-decoration:none"><span class="cell-main">${esc(e.title || '—')}</span></a>`,
+              `<span class="mono" style="color:var(--text-3);font-size:12.5px">${esc(_fmtDate(e.completed_at || e.starts_at))}</span>`,
+              `<span class="mono">${Number(e.aanwezig || 0)}</span>`,
+              `<span class="mono" style="color:var(--emerald);font-weight:500">${Number(e.sales || 0)}</span>`,
+              `<span class="money">${eur0(Number(e.bonus_total || 0))}</span>`,
+              `<span class="money" style="color:var(--amber)">${Number(e.expenses_total || 0) ? '− ' + eur0(Number(e.expenses_total)) : '—'}</span>`,
+            ])
           )}
     </div>
     </div>`;
   }
 
-  function _omzetMaandChart(events) {
-    // Bucket per maand — 12 maanden terug
+  function _salesMaandChart(events) {
+    // Bucket aantal verkopen per maand — 12 maanden terug (BUG 4 fix: count, geen €)
     const now = new Date();
     const buckets = [];
     for (let i = 11; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      buckets.push({ label: d.toLocaleDateString('nl-NL', { month:'short' }), key: d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'), omzet: 0 });
+      buckets.push({ label: d.toLocaleDateString('nl-NL', { month:'short' }), key: d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'), sales: 0 });
     }
     const byKey = new Map(buckets.map((b) => [b.key, b]));
     for (const e of events) {
       const d = new Date(e.completed_at || e.starts_at);
       if (!Number.isFinite(d.getTime())) continue;
       const k = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-      const b = byKey.get(k); if (b) b.omzet += Number(e.sales || 0);
+      const b = byKey.get(k); if (b) b.sales += Number(e.sales || 0);
     }
-    const maxV = Math.max(1, ...buckets.map((b) => b.omzet));
+    const maxV = Math.max(1, ...buckets.map((b) => b.sales));
     const W = 480, H_ = 160, pad = { t: 12, r: 12, b: 24, l: 42 };
     const cw = W - pad.l - pad.r, ch = H_ - pad.t - pad.b;
     const bw = cw / buckets.length * 0.68;
@@ -974,13 +1003,13 @@
         ${[0, 0.25, 0.5, 0.75, 1].map((f) => {
           const y = pad.t + ch - ch * f;
           return `<line x1="${pad.l}" y1="${y}" x2="${W - pad.r}" y2="${y}" stroke="var(--border)" stroke-width="1" stroke-dasharray="2,3" opacity=".5" />
-            <text x="${pad.l - 4}" y="${y + 3}" text-anchor="end" font-size="9" fill="var(--text-3)" font-family="'IBM Plex Mono',monospace">€${Math.round(maxV * f / 1000)}k</text>`;
+            <text x="${pad.l - 4}" y="${y + 3}" text-anchor="end" font-size="9" fill="var(--text-3)" font-family="'IBM Plex Mono',monospace">${Math.round(maxV * f)}</text>`;
         }).join('')}
         ${buckets.map((b, i) => {
           const x = pad.l + i * (bw + gap) + gap / 2;
-          const h = ch * (b.omzet / maxV);
+          const h = ch * (b.sales / maxV);
           const y = pad.t + ch - h;
-          return `<rect x="${x}" y="${y}" width="${bw}" height="${h}" fill="var(--blue)" opacity=".8" rx="2"><title>${esc(b.label)}: ${eur0(b.omzet)}</title></rect>
+          return `<rect x="${x}" y="${y}" width="${bw}" height="${h}" fill="var(--emerald)" opacity=".8" rx="2"><title>${esc(b.label)}: ${b.sales} verkopen</title></rect>
             <text x="${x + bw / 2}" y="${H_ - 6}" text-anchor="middle" font-size="9" fill="var(--text-3)" font-family="'IBM Plex Mono',monospace">${esc(b.label)}</text>`;
         }).join('')}
       </svg>
@@ -993,7 +1022,7 @@
       <span style="width:22px;height:22px;border-radius:50%;background:var(--surface-2);color:var(--text-2);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">${i + 1}</span>
       <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.title || '—')}</div>
         <div style="font-size:11px;color:var(--text-3)">${esc(_fmtDate(e.completed_at || e.starts_at))} · ${Number(e.aanwezig || 0)} aanwezig</div></div>
-      <span class="money" style="font-size:14px;font-weight:600">${eur0(Number(e.sales || 0))}</span>
+      <span class="mono" style="font-size:14px;font-weight:600;color:var(--emerald)">${Number(e.sales || 0)} <span style="font-size:10px;color:var(--text-3);font-weight:400">verkopen</span></span>
     </div>`).join('');
   }
 
