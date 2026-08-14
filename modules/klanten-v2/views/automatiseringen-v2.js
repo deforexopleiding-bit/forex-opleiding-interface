@@ -61,6 +61,7 @@
       view: 'trajecten',           // 'trajecten' | 'sjablonen' | 'drooglog'
       editingTraject: null,        // {} tijdens create/edit
       editingStap: null,           // { traject_id, stap? } tijdens create/edit
+      editingSjabloon: null,       // {} tijdens create/edit
       expandedTrajectId: null,     // welke traject-row is uitgeklapt
     },
     // Busy-flags tegen dubbelklik
@@ -1209,6 +1210,7 @@
     // Editor-modals hebben voorrang (full-screen)
     if (_ui.ls.editingTraject !== null) return _lsTrajEditor() + _confirmModalHtml();
     if (_ui.ls.editingStap !== null) return _lsStapEditor() + _confirmModalHtml();
+    if (_ui.ls.editingSjabloon !== null) return _lsSjabloonEditor() + _confirmModalHtml();
 
     const inst = _live.lsInst.data;
     const isLive = inst?.live === true;
@@ -1266,28 +1268,240 @@
       <div class="card-head">
         <span class="tile-ico" style="background:var(--pink-soft);color:var(--pink)">${svg(I.file || I.doc)}</span>
         <div class="card-title">Sjablonen</div>
-        <span style="margin-left:auto;font-size:11px;color:var(--text-3)">${items.length} sjablonen · read-only</span>
+        <span style="margin-left:auto;font-size:11px;color:var(--text-3);margin-right:8px">${items.length} sjablonen</span>
+        <button class="btn btn-primary btn-sm" onclick="window.__autLsSjabNew()">${svg(I.plus)}Nieuw sjabloon</button>
       </div>
       <div class="card-body" style="padding:0">
-        <div style="padding:12px 16px;background:var(--amber-soft);border-bottom:1px solid var(--border);font-size:12px;color:var(--text-2);line-height:1.5">
-          <b>Sjablonen zijn read-only in v2.</b> De sjablonen-editor komt in de Instellingen-module (bibliotheek voor alle modules). Voor nu: bekijk hier de actieve sjablonen.
-        </div>
         ${_live.lsSjab.error ? errBlk('lsSjab', _live.lsSjab.error, "window.__autRetry('lsSjab')")
           : _live.lsSjab.loading && !_live.lsSjab.data ? '<div style="padding:20px;text-align:center;color:var(--text-3)">Laden…</div>'
-          : items.length === 0 ? emptyBlk('Geen sjablonen', 'Nog geen sjablonen aangemaakt.')
+          : items.length === 0 ? emptyBlk('Geen sjablonen', 'Klik "Nieuw sjabloon" om er een te maken.')
           : `<div style="padding:12px 16px">${H.table(
-              [{l:'Traject'},{l:'Kanaal',cls:'optional'},{l:'Soort',cls:'optional'},{l:'Onderwerp'},{l:'Score-range',cls:'r optional'},{l:'Actief',cls:'r'}],
+              [{l:'Traject'},{l:'Soort',cls:'optional'},{l:'Kanaal',cls:'optional'},{l:'Onderwerp / Meta-tpl'},{l:'Score-range',cls:'r optional'},{l:'Actief',cls:'r'},{l:'',cls:'r'}],
               items.map((s) => [
-                `<span style="font-size:12.5px">${esc(s.traject_slug || '—')}</span>`,
-                `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(s.kanaal || '—')}</span>`,
-                `<span style="font-size:11.5px;color:var(--text-3)">${esc(s.soort || '—')}</span>`,
-                `<span style="font-size:12.5px">${esc(s.onderwerp || '—')}</span>`,
+                `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(s.traject_slug || '—')}</span>`,
+                `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(s.soort || '—')}</span>`,
+                `<span style="font-size:11.5px">${s.kanaal === 'whatsapp' ? '<span style="color:#25d366">📱 WA</span>' : '<span style="color:var(--blue)">✉ Mail</span>'}</span>`,
+                s.kanaal === 'whatsapp'
+                  ? `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(s.meta_template || '(geen meta-template)')}</span>`
+                  : `<span style="font-size:12.5px">${esc(s.onderwerp || '—')}</span>`,
                 `<span class="mono" style="font-size:11.5px">${s.score_min ?? '—'} – ${s.score_max ?? '—'}</span>`,
                 s.actief ? H.pill('ok','Actief') : H.pill('neutral','Uit'),
+                `<div style="display:flex;gap:3px;justify-content:flex-end">
+                  <button class="icon-btn" title="Bewerken" onclick="window.__autLsSjabEdit('${esc(s.id)}')" style="width:26px;height:26px">${svg(I.edit || I.settings, 'width:11px;height:11px')}</button>
+                  <button class="icon-btn" title="Verwijderen" onclick="window.__autLsSjabDelete('${esc(s.id)}','${esc((s.traject_slug || '') + ' · ' + (s.soort || ''))}')" style="width:26px;height:26px">${svg(I.trash || I.x, 'width:11px;height:11px')}</button>
+                </div>`,
               ])
             )}</div>`}
       </div>
     </div>`;
+  }
+
+  // ── SJABLOON-EDITOR ────────────────────────────────────────────────────
+  // Beschikbare placeholders voor mail-body (uit api/_lib/leadsonderhoud-sjabloon.js).
+  // Deze worden als hint onder het body-veld getoond.
+  const LS_SJAB_PLACEHOLDERS = [
+    '{voornaam}', '{dagen_over}', '{dag}', '{lessen}', '{trades}',
+    '{score}', '{agendalink}', '{inloglink}', '{datum}', '{tijd}', '{logo}',
+  ];
+
+  window.__autLsSjabNew = () => {
+    // Trajectenlijst is nodig voor slug-picker; borg dat 'ie geladen is
+    if (!_live.lsTraj.data && !_live.lsTraj.loading) queueMicrotask(fetchLsTraj);
+    _ui.ls.editingSjabloon = {
+      id: null,
+      traject_slug: '',
+      soort: '',
+      kanaal: 'mail',
+      onderwerp: '',
+      html: '',
+      tekst: '',
+      meta_template: '',
+      variabele_volgorde: '',   // komma-gescheiden string in de UI, array in payload
+      score_min: null,
+      score_max: null,
+      actief: true,
+    };
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autLsSjabEdit = (id) => {
+    const s = asArr(_live.lsSjab.data?.items).find((x) => x.id === id);
+    if (!s) return;
+    if (!_live.lsTraj.data && !_live.lsTraj.loading) queueMicrotask(fetchLsTraj);
+    _ui.ls.editingSjabloon = {
+      ...s,
+      variabele_volgorde: Array.isArray(s.variabele_volgorde) ? s.variabele_volgorde.join(', ') : (s.variabele_volgorde || ''),
+    };
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autLsSjabClose = () => { _ui.ls.editingSjabloon = null; if (window.DFO?.render) window.DFO.render(); };
+  window.__autLsSjabField = (k, v) => {
+    if (_ui.ls.editingSjabloon) _ui.ls.editingSjabloon[k] = v;
+    if (window.DFO?.render && k === 'kanaal') window.DFO.render();
+  };
+  window.__autLsSjabFieldBool = (k, v) => { if (_ui.ls.editingSjabloon) _ui.ls.editingSjabloon[k] = !!v; };
+  window.__autLsSjabFieldNum = (k, v) => {
+    if (!_ui.ls.editingSjabloon) return;
+    const s = String(v || '').trim();
+    _ui.ls.editingSjabloon[k] = s === '' ? null : Number(s);
+  };
+  window.__autLsSjabSave = async () => {
+    const s = _ui.ls.editingSjabloon; if (!s) return;
+    if (!s.traject_slug || !s.traject_slug.trim()) return alert('Traject is verplicht.');
+    if (!s.soort || !s.soort.trim()) return alert('Soort is verplicht.');
+    if (!s.kanaal || !['mail','whatsapp'].includes(s.kanaal)) return alert("Kanaal moet 'mail' of 'whatsapp' zijn.");
+    if (!s.tekst || !s.tekst.trim()) return alert('Tekst is verplicht (mail-body of WA-preview).');
+    _setBusy('lsSjabSave', true);
+    try {
+      // Normaliseer variabele_volgorde naar array
+      const payload = { ...s };
+      if (typeof payload.variabele_volgorde === 'string') {
+        payload.variabele_volgorde = payload.variabele_volgorde.split(',').map((x) => x.trim()).filter(Boolean);
+        if (payload.variabele_volgorde.length === 0) payload.variabele_volgorde = null;
+      }
+      const j = await window.KV.authedJson('/api/leadsonderhoud-sjabloon-opslaan', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(payload),
+      });
+      if (j?.error) throw new Error(j.error);
+      _ui.ls.editingSjabloon = null;
+      _live.lsSjab.data = null; queueMicrotask(fetchLsSjab);
+    } catch (e) { alert('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
+    finally { _setBusy('lsSjabSave', false); }
+  };
+  window.__autLsSjabDelete = (id, label) => {
+    askConfirm(
+      'Sjabloon verwijderen?',
+      `<p>Weet je zeker dat je sjabloon <b>${esc(label)}</b> wilt verwijderen?</p>
+       <p style="font-size:12px;color:var(--text-3)">Als er stappen aan gekoppeld zijn krijg je eerst een overzicht.</p>`,
+      async () => {
+        try {
+          const j = await window.KV.authedJson('/api/leadsonderhoud-sjabloon-verwijderen', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ id }),
+          });
+          if (j?.error) {
+            // 409 — gekoppelde stappen bestaan; toon lijst + vraag force
+            if (j?.gekoppelde_stappen && Array.isArray(j.gekoppelde_stappen)) {
+              const lijst = j.gekoppelde_stappen.map((g) => `• ${esc(g.naam || g.soort)} (${esc(g.traject_slug)}${g.actief ? '' : ' — inactief'})`).join('<br>');
+              askConfirm(
+                'Sjabloon toch verwijderen?',
+                `<p><b>${j.gekoppelde_stappen.length} stap(pen) verwijzen nog naar dit sjabloon</b> (via traject_slug + soort match). Als je verwijdert, blijven die stappen bestaan maar zullen ze silent skippen bij de cron.</p>
+                 <div style="max-height:200px;overflow-y:auto;padding:8px 10px;background:var(--surface-2);border-radius:6px;font-size:11.5px;line-height:1.6;margin-top:8px">${lijst}</div>
+                 <p style="margin-top:10px;font-size:12px;color:var(--rose)">Aanbevolen: verwijder eerst de stappen, of maak een nieuw sjabloon met dezelfde soort/slug.</p>`,
+                async () => {
+                  const j2 = await window.KV.authedJson('/api/leadsonderhoud-sjabloon-verwijderen', {
+                    method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({ id, force: true }),
+                  });
+                  if (j2?.error) throw new Error(j2.error);
+                  _live.lsSjab.data = null; queueMicrotask(fetchLsSjab);
+                },
+                { confirmLabel: 'Ja, verwijder alsnog', danger: true }
+              );
+              return;
+            }
+            throw new Error(j.error);
+          }
+          _live.lsSjab.data = null; queueMicrotask(fetchLsSjab);
+        } catch (e) { throw e; }
+      },
+      { confirmLabel: 'Ja, verwijderen', danger: true }
+    );
+  };
+
+  function _lsSjabloonEditor() {
+    const s = _ui.ls.editingSjabloon; if (!s) return '';
+    const isNew = !s.id;
+    const busy = _busy('lsSjabSave');
+    const trajecten = asArr(_live.lsTraj.data);
+    const isMail = s.kanaal === 'mail';
+    const isWA   = s.kanaal === 'whatsapp';
+    return `<div style="padding:12px 20px;background:var(--surface-2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+      <button class="btn btn-ghost btn-sm" onclick="window.__autLsSjabClose()">${svg(I.arrDown || I.x, 'width:13px;height:13px;transform:rotate(90deg)')}Terug</button>
+      <span style="font-size:14px;font-weight:600">${isNew ? 'Nieuw sjabloon' : 'Bewerken: ' + esc(s.traject_slug + ' · ' + s.soort)}</span>
+      <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="window.__autLsSjabSave()" ${busy ? 'disabled' : ''}>${busy ? 'Opslaan…' : (svg(I.tick) + 'Opslaan')}</button>
+    </div>
+    <div class="pad" style="padding-top:14px"><div style="max-width:820px;margin:0 auto;display:flex;flex-direction:column;gap:14px">
+      <div class="card"><div class="card-head"><div class="card-title">Koppeling & kanaal</div></div><div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <div>
+            <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Traject (slug)</label>
+            <select oninput="window.__autLsSjabField('traject_slug', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box">
+              <option value="">— kies traject —</option>
+              ${trajecten.map((t) => `<option value="${esc(t.slug)}" ${s.traject_slug === t.slug ? 'selected' : ''}>${esc(t.naam || t.slug)}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Soort (matcht stap.soort)</label>
+            <input type="text" value="${esc(s.soort)}" oninput="window.__autLsSjabField('soort', this.value)" placeholder="bv. herinnering_dag3" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;font-family:'IBM Plex Mono',monospace;box-sizing:border-box" />
+          </div>
+          <div>
+            <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Kanaal</label>
+            <select oninput="window.__autLsSjabField('kanaal', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box">
+              <option value="mail" ${isMail ? 'selected' : ''}>Mail</option>
+              <option value="whatsapp" ${isWA ? 'selected' : ''}>WhatsApp</option>
+            </select>
+          </div>
+        </div>
+        <div style="padding:8px 10px;background:var(--surface-2);border-radius:6px;font-size:11.5px;color:var(--text-3);line-height:1.5">
+          De drip-motor matcht sjablonen op <b>(traject_slug + soort + actief=true)</b> en kiest een variant binnen de score-range van de lead. Meerdere sjablonen mogen dezelfde soort hebben mits andere score-ranges.
+        </div>
+      </div></div>
+
+      ${isMail ? `<div class="card"><div class="card-head"><div class="card-title">Mail-inhoud</div></div><div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+        <div>
+          <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Onderwerp</label>
+          <input type="text" value="${esc(s.onderwerp || '')}" oninput="window.__autLsSjabField('onderwerp', this.value)" placeholder="bv. Nog {dagen_over} dagen om je scores op te bouwen" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box" />
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">HTML-body (optioneel — voor rich e-mail)</label>
+          <textarea oninput="window.__autLsSjabField('html', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px;box-sizing:border-box;min-height:120px;font-family:'IBM Plex Mono',monospace;resize:vertical">${esc(s.html || '')}</textarea>
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Platte tekst (fallback, verplicht)</label>
+          <textarea oninput="window.__autLsSjabField('tekst', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box;min-height:140px;font-family:inherit;resize:vertical">${esc(s.tekst || '')}</textarea>
+          <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Beschikbare variabelen: ${LS_SJAB_PLACEHOLDERS.map((p) => `<code style="background:var(--surface-2);padding:1px 4px;border-radius:3px">${esc(p)}</code>`).join(' ')}</div>
+        </div>
+      </div></div>` : ''}
+
+      ${isWA ? `<div class="card"><div class="card-head"><div class="card-title">WhatsApp-template</div></div><div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+        <div>
+          <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Meta-template naam (approved)</label>
+          <input type="text" value="${esc(s.meta_template || '')}" oninput="window.__autLsSjabField('meta_template', this.value)" placeholder="bv. leadsonderhoud_dag3" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;font-family:'IBM Plex Mono',monospace;box-sizing:border-box" />
+          <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Naam moet overeenkomen met een APPROVED template in <code style="background:var(--surface-2);padding:1px 4px;border-radius:3px">whatsapp_meta_templates</code>. Underscore-conventie (bv. <code style="background:var(--surface-2);padding:1px 4px;border-radius:3px">niet_ingelogd</code>).</div>
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Variabele volgorde (fallback, komma-gescheiden)</label>
+          <input type="text" value="${esc(s.variabele_volgorde || '')}" oninput="window.__autLsSjabField('variabele_volgorde', this.value)" placeholder="bv. voornaam, dagen_over, agendalink" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;font-family:'IBM Plex Mono',monospace;box-sizing:border-box" />
+          <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Bij WhatsApp-send worden {{1}}, {{2}}, … in de meta-template gevuld in deze volgorde. Als leeg: fallback op <code style="background:var(--surface-2);padding:1px 4px;border-radius:3px">meta_param_mapping.body</code> uit whatsapp_meta_templates.</div>
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Preview-tekst (UI, verplicht — wat je in de log ziet)</label>
+          <textarea oninput="window.__autLsSjabField('tekst', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box;min-height:80px;font-family:inherit;resize:vertical">${esc(s.tekst || '')}</textarea>
+          <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Deze tekst wordt <b>niet</b> naar WhatsApp verzonden (Meta-template wordt gebruikt). Alleen voor UI-preview in log/gesprek.</div>
+        </div>
+      </div></div>` : ''}
+
+      <div class="card"><div class="card-head"><div class="card-title">Filter & status</div></div><div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div>
+            <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Score min (leeg = geen ondergrens)</label>
+            <input type="number" value="${s.score_min == null ? '' : esc(String(s.score_min))}" oninput="window.__autLsSjabFieldNum('score_min', this.value)" placeholder="—" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box" />
+          </div>
+          <div>
+            <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Score max (leeg = geen bovengrens)</label>
+            <input type="number" value="${s.score_max == null ? '' : esc(String(s.score_max))}" oninput="window.__autLsSjabFieldNum('score_max', this.value)" placeholder="—" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box" />
+          </div>
+        </div>
+        <div style="padding:6px 10px;background:var(--surface-2);border-radius:6px;font-size:11px;color:var(--text-3);line-height:1.5">
+          De motor kiest de sjabloon-variant waarvan de lead-score binnen (score_min, score_max) valt. Bij overlap wint de <b>engste range</b>. Unieke index dwingt af dat je geen twee sjablonen met dezelfde (traject_slug + soort + score-range) hebt.
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" ${s.actief ? 'checked' : ''} onchange="window.__autLsSjabFieldBool('actief', this.checked)" />
+          <span>Actief (motor gebruikt dit sjabloon voor matching)</span>
+        </label>
+      </div></div>
+    </div></div>`;
   }
 
   function _lsDrooglogBlock() {
