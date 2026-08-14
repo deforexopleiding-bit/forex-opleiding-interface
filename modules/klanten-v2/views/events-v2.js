@@ -2291,15 +2291,20 @@
       </div>`;
     }).join('');
 
-    // Chat-body wrapper — id="ev-inbox-chat-scroll" voor surgical scroll-track
-    // (sticky-bottom check via _isScrolledNearBottom + auto-scroll bij nieuwe
-    // berichten). Achtergrond = var(--surface-2) zonder dot-pattern zoals
-    // Wanbetalers-inbox (schoner, minder ruis).
-    return `<div id="ev-inbox-chat-scroll" style="background:var(--surface-2);padding:14px 16px;flex:1;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;scroll-behavior:smooth" onscroll="window.__evChatScroll(this)">
+    // Chat-body wrapper — id="ev-inbox-chat-scroll" voor scroll-track.
+    // KRITIEK: min-height:0 op flex-child (Wanbetalers-patroon). Zonder deze
+    // regel is default min-height:auto — element zet uit naar content-hoogte
+    // i.p.v. te scrollen, en scrollHeight == clientHeight (dus scrollTop=
+    // scrollHeight doet niks).
+    // #ev-inbox-bottom-anchor als laatste child → scrollIntoView({block:'end'})
+    // is immuun voor scrollHeight-timing (rendert on-screen positie, niet
+    // gemeten scrollTop).
+    return `<div id="ev-inbox-chat-scroll" style="background:var(--surface-2);padding:14px 16px;flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;scroll-behavior:auto" onscroll="window.__evChatScroll(this)">
       <div style="width:100%;max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:0">
       ${msgs.length === 0
         ? `<div style="text-align:center;color:var(--text-3);font-size:12.5px;padding:60px 0">Geen berichten in deze conversatie.</div>`
         : bubbles}
+      <div id="ev-inbox-bottom-anchor" style="height:1px;flex-shrink:0" aria-hidden="true"></div>
       </div>
     </div>`;
   }
@@ -2633,7 +2638,7 @@
     _paintRightSurgical(convId);
     queueMicrotask(() => {
       const el = document.getElementById('ev-comp-input-' + convId);
-      if (el) { el.focus(); window.__evCompAutoGrow(el); }
+      if (el) { try { el.focus({ preventScroll: true }); } catch (_) { el.focus(); } window.__evCompAutoGrow(el); }
     });
   };
   window.__evSuggestIgnore = async (convId, suggId) => {
@@ -2697,7 +2702,7 @@
     // Focus + autogrow na render
     queueMicrotask(() => {
       const el = document.getElementById('ev-comp-input-' + convId);
-      if (el) { el.focus(); window.__evCompAutoGrow(el); }
+      if (el) { try { el.focus({ preventScroll: true }); } catch (_) { el.focus(); } window.__evCompAutoGrow(el); }
     });
   };
   // Bouw client-side placeholder-context uit conv + eventuele attendee/event
@@ -2863,7 +2868,7 @@
         const inputId = active.id;
         if (inputId) {
           const newEl = document.getElementById(inputId);
-          if (newEl) { newEl.focus(); if (newEl.setSelectionRange && active.value !== undefined) { try { newEl.setSelectionRange(active.value.length, active.value.length); } catch (_) {} } }
+          if (newEl) { try { newEl.focus({ preventScroll: true }); } catch (_) { newEl.focus(); } if (newEl.setSelectionRange && active.value !== undefined) { try { newEl.setSelectionRange(active.value.length, active.value.length); } catch (_) {} } }
         }
       } else {
         r.innerHTML = _inboxRightPane(convId);
@@ -2885,27 +2890,78 @@
     const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
     _ui._lastScrollAtBottom = dist < 80;
   };
-  // Scroll-to-bottom helper — zelfde patroon als Wanbetalers _inboxScrollToBottom
-  // (finance.html regel 14102-14114): requestAnimationFrame zodat de layout klaar
-  // is voordat we scrollHeight lezen. Dubbele rAF voor zekerheid bij een net
-  // vervangen innerHTML — 1e rAF wacht op paint, 2e rAF garandeert dat
-  // scrollHeight de nieuwe content bevat. force=true skipt de sticky-bottom
-  // check (bij openen van een gesprek altijd onderaan starten, ongeacht vorige
-  // scroll-positie).
+  // Scroll-to-bottom via anchor-element (#ev-inbox-bottom-anchor).
+  //
+  // Root-cause van de eerdere bug: #ev-inbox-chat-scroll miste min-height:0
+  // in de flex-column layout → element zette uit naar content-hoogte i.p.v.
+  // te scrollen, scrollHeight == clientHeight, dus scrollTop-set deed niks.
+  // Fix: min-height:0 op scroll-container (Wanbetalers-patroon) + anchor-div
+  // als laatste child + scrollIntoView({block:'end'}). Anchor-pattern is
+  // immuun voor scrollHeight-timing want browser rendert op-positie.
+  //
+  // Extra retry na 100ms voor gevallen waar innerHTML nog niet klaar is
+  // (bv. subsequent repaint na fetch + realtime). force=true skipt de
+  // sticky-bottom check.
+  //
+  // Debug: bij ?debug=1 loggen we alle scroll-metrics vóór en na de set,
+  // plus 200ms later om re-render-side-effects te tracen.
   function _scrollChatToBottom(force) {
-    // Try meteen (geen wacht) — vaak al klaar bij surgical repaint
+    const isDebug = String(window.location?.search || '').includes('debug=1');
+    const doScroll = (tag) => {
+      const scrollEl = document.querySelector('#ev-inbox-chat-scroll');
+      const anchor   = document.querySelector('#ev-inbox-bottom-anchor');
+      if (!scrollEl && !anchor) {
+        if (isDebug) console.log('[ev-scroll ' + tag + '] no scroll-el and no anchor — skip');
+        return;
+      }
+      // Sticky-bottom check — alleen als niet-forced
+      if (!force && scrollEl) {
+        const dist = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+        if (dist > 80) {
+          if (isDebug) console.log('[ev-scroll ' + tag + '] user reading up (dist=' + dist + '), skip');
+          return;
+        }
+      }
+      const before = scrollEl ? {
+        scrollTop: scrollEl.scrollTop,
+        scrollHeight: scrollEl.scrollHeight,
+        clientHeight: scrollEl.clientHeight,
+        overflowScroll: scrollEl.scrollHeight > scrollEl.clientHeight,
+      } : null;
+      // Primary: anchor.scrollIntoView (browser regelt de scroll)
+      if (anchor && anchor.scrollIntoView) {
+        try { anchor.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' }); } catch (_) {}
+      }
+      // Fallback: directe scrollTop-set (voor het geval anchor er niet is)
+      if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+      const after = scrollEl ? {
+        scrollTop: scrollEl.scrollTop,
+        scrollHeight: scrollEl.scrollHeight,
+        clientHeight: scrollEl.clientHeight,
+      } : null;
+      if (isDebug) console.log('[ev-scroll ' + tag + ']', { before, after, anchorFound: !!anchor });
+      _ui._lastScrollAtBottom = true;
+    };
+    // 3 pogingen: direct via dubbele rAF (layout klaar), en na 100ms als
+    // vangnet voor subsequent innerHTML-swaps (surgical repaint na fetch).
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        const el = document.querySelector('#ev-inbox-chat-scroll');
-        if (!el) return;
-        if (!force) {
-          const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-          if (dist > 80) return;   // user leest terug, niet wegspringen
-        }
-        el.scrollTop = el.scrollHeight;
-        _ui._lastScrollAtBottom = true;
+        doScroll('rAF');
       });
     });
+    setTimeout(() => doScroll('t100'), 100);
+    if (isDebug) {
+      setTimeout(() => {
+        const el = document.querySelector('#ev-inbox-chat-scroll');
+        if (!el) return;
+        console.log('[ev-scroll t200-verify]', {
+          scrollTop: el.scrollTop,
+          scrollHeight: el.scrollHeight,
+          clientHeight: el.clientHeight,
+          atBottom: (el.scrollHeight - el.scrollTop - el.clientHeight) < 4,
+        });
+      }, 200);
+    }
   }
 
   // ── 24-uurs WhatsApp-venster ──────────────────────────────────────────
