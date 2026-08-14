@@ -311,19 +311,6 @@ function renderSubCard(sub) {
 
 // ── Overige blokken ─────────────────────────────────────────────────────────
 
-function renderPendingCta() {
-  if (!state.pendingDealId) return '';
-  return `
-    <div class="ds-banner ds-banner-warn kv-abo-banner">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
-      <span>Er is een <strong>bevestigde offerte</strong> die nog niet is omgezet naar een abonnement.</span>
-      <a class="ds-btn ds-btn-primary ds-btn-sm" href="/modules/subscription-wizard.html?deal_id=${K().esc(encodeURIComponent(state.pendingDealId))}" target="_blank" rel="noopener" style="margin-left:auto;">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/></svg>
-        Omzetten in Wizard
-      </a>
-    </div>`;
-}
-
 function renderBypassBanner() {
   if (!state.bypassEvents.length) return '';
   return `
@@ -375,11 +362,10 @@ function render(rootEl) {
   } else if (state.error) {
     body = renderError();
   } else if (!state.subs.length) {
-    body = `${renderPendingCta()}${renderBypassBanner()}${renderEmpty()}`;
+    body = `${renderBypassBanner()}${renderEmpty()}`;
   } else {
     body = `
       ${renderKpiStrip()}
-      ${renderPendingCta()}
       ${renderBypassBanner()}
       <div class="kv-abo-list">
         ${state.subs.map(renderSubCard).join('')}
