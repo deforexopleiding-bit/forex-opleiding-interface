@@ -2183,12 +2183,12 @@
 
     // Datum-scheiders + status-icoon + tijdstempels (WhatsApp-stijl).
     const _dayKey = (m) => {
-      const dt = new Date(m.sent_at || m.created_at || 0);
+      const dt = new Date(m.at || m.sent_at || m.created_at || NaN);
       if (!Number.isFinite(dt.getTime())) return 'unknown';
       return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
     };
     const _dayLabel = (m) => {
-      const dt = new Date(m.sent_at || m.created_at || 0);
+      const dt = new Date(m.at || m.sent_at || m.created_at || NaN);
       if (!Number.isFinite(dt.getTime())) return '—';
       const now = new Date();
       if (dt.toDateString() === now.toDateString()) return 'Vandaag';
@@ -2197,7 +2197,7 @@
       return dt.toLocaleDateString('nl-NL', { weekday:'long', day:'numeric', month:'long', year: dt.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
     };
     const _timeShort = (m) => {
-      const dt = new Date(m.sent_at || m.created_at || 0);
+      const dt = new Date(m.at || m.sent_at || m.created_at || NaN);
       if (!Number.isFinite(dt.getTime())) return '';
       return String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0');
     };
@@ -2234,7 +2234,9 @@
       const isEmail = ch === 'email';
       const out = m.direction === 'outbound' || m.direction === 'out';
       const dk = _dayKey(m);
-      const sep = (dk !== lastDay)
+      // BUG B FIX — skip separator bij ongeldige datum (was: toonde "—" bar
+      // met epoch 1-1-1970 achterliggend). Nu: geen bar, geen 1970.
+      const sep = (dk !== lastDay && dk !== 'unknown')
         ? `<div class="inbox-c-date-separator"><span>${esc(_dayLabel(m))}</span></div>`
         : '';
       const sameSender = (lastDir === (out ? 'out' : 'in')) && !sep;
@@ -2851,29 +2853,33 @@
       const r = document.querySelector('#ev-inbox-right');
       if (!r) return;
       const wasAtBottom = _isScrolledNearBottom();
+      // BUG A FIX — Bewaar ALTIJD oldScrollTop VÓÓR de innerHTML-swap, en
+      // restore die na de swap wanneer wasAtBottom=false. In de vorige code
+      // deed alleen de composer-focus-branch dat; de else-branch liet
+      // scrollTop op 0 vallen (default van een nieuw element), waardoor
+      // elke poll/realtime-refresh de chat naar boven schoot.
+      const oldScrollEl = document.querySelector('#ev-inbox-chat-scroll');
+      const oldScrollTop = oldScrollEl ? oldScrollEl.scrollTop : 0;
+      r.innerHTML = _inboxRightPane(convId);
+      // Scroll-behoud/restore is nu identiek in beide branches
+      if (wasAtBottom) {
+        _scrollChatToBottom(true);
+      } else {
+        // Restore exact naar oude positie (dubbele rAF want nieuw element)
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            const newScroll = document.querySelector('#ev-inbox-chat-scroll');
+            if (newScroll) newScroll.scrollTop = oldScrollTop;
+          });
+        });
+      }
+      // Re-focus composer input (browser reset focus na innerHTML)
       if (isComposerFocus) {
-        // Herrender alleen scroll-body (behoud composer DOM + focus)
-        const oldScroll = document.querySelector('#ev-inbox-chat-scroll');
-        const scrollTop = oldScroll ? oldScroll.scrollTop : 0;
-        r.innerHTML = _inboxRightPane(convId);
-        if (wasAtBottom) {
-          // Sticky-bottom: nieuw bericht + user near-bottom → auto-scroll via rAF
-          _scrollChatToBottom(true);
-        } else {
-          // User leest terug — bewaar scrollTop
-          const newScroll = document.querySelector('#ev-inbox-chat-scroll');
-          if (newScroll) newScroll.scrollTop = scrollTop;
-        }
-        // Re-focus composer input (browser reset focus na innerHTML)
         const inputId = active.id;
         if (inputId) {
           const newEl = document.getElementById(inputId);
           if (newEl) { try { newEl.focus({ preventScroll: true }); } catch (_) { newEl.focus(); } if (newEl.setSelectionRange && active.value !== undefined) { try { newEl.setSelectionRange(active.value.length, active.value.length); } catch (_) {} } }
         }
-      } else {
-        r.innerHTML = _inboxRightPane(convId);
-        // Alleen scrollen als user near-bottom stond (sticky), anders positie behouden
-        if (wasAtBottom) _scrollChatToBottom(true);
       }
     } catch (_) {}
   }
@@ -2889,6 +2895,13 @@
     if (!el) return;
     const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
     _ui._lastScrollAtBottom = dist < 80;
+    // Debug-trace: als scrollTop naar 0 valt terwijl scrollHeight > clientHeight,
+    // is er ergens een unintended reset. Loggen (alleen ?debug=1) zodat we
+    // toekomstige regressie snel zien.
+    if (String(window.location?.search || '').includes('debug=1')
+      && el.scrollTop === 0 && el.scrollHeight > el.clientHeight + 20) {
+      console.trace('[ev-scroll RESET] scrollTop=0 gedetecteerd', { scrollHeight: el.scrollHeight, clientHeight: el.clientHeight });
+    }
   };
   // Scroll-to-bottom via anchor-element (#ev-inbox-bottom-anchor).
   //
@@ -3194,12 +3207,12 @@
 
     // Datum-scheiders: groepeer berichten per lokale dag.
     const _dayKey = (m) => {
-      const d = new Date(m.sent_at || m.created_at || 0);
+      const d = new Date(m.at || m.sent_at || m.created_at || NaN);
       if (!Number.isFinite(d.getTime())) return 'unknown';
       return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
     };
     const _dayLabel = (m) => {
-      const d = new Date(m.sent_at || m.created_at || 0);
+      const d = new Date(m.at || m.sent_at || m.created_at || NaN);
       if (!Number.isFinite(d.getTime())) return '—';
       const now = new Date();
       const isToday = d.toDateString() === now.toDateString();
@@ -3210,7 +3223,7 @@
       return d.toLocaleDateString('nl-NL', { weekday:'long', day:'numeric', month:'long', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
     };
     const _timeShort = (m) => {
-      const d = new Date(m.sent_at || m.created_at || 0);
+      const d = new Date(m.at || m.sent_at || m.created_at || NaN);
       if (!Number.isFinite(d.getTime())) return '';
       return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
     };
