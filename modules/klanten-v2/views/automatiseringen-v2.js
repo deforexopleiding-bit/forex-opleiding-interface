@@ -47,6 +47,8 @@
     lsInst:      { loading: false, error: null, data: null },   // leadsonderhoud-instellingen
     lsSjab:      { loading: false, error: null, data: null },   // leadsonderhoud-sjablonen
     lsTraj:      { loading: false, error: null, data: null },   // leadsonderhoud-trajecten
+    lsDrog:      { loading: false, error: null, data: null },   // leadsonderhoud-droogloop-log
+    lsQuiz:      { loading: false, error: null, data: null },   // leadsonderhoud-quiz-lijst (voor picker)
     inboxTpls:   { loading: false, error: null, data: null },   // WA-templates voor send_whatsapp step
     agentsCfg:   { loading: {}, error: {}, data: {} },          // per module: joost_config
   };
@@ -55,7 +57,12 @@
     // Editor state per module — voorkomt dat we tussen sub-tabs interferereren
     ev: { editing: null, wizardStep: 1, testModal: null, runsModal: null, filter: 'all' },
     ob: { editing: null, wizardStep: 1, testModal: null, runsModal: null, filter: 'all' },
-    ls: { editingTraject: null, editingStap: null, expandedTrajectId: null },
+    ls: {
+      view: 'trajecten',           // 'trajecten' | 'sjablonen' | 'drooglog'
+      editingTraject: null,        // {} tijdens create/edit
+      editingStap: null,           // { traject_id, stap? } tijdens create/edit
+      expandedTrajectId: null,     // welke traject-row is uitgeklapt
+    },
     // Busy-flags tegen dubbelklik
     busy: {},   // key → true
     // Toggle-confirm modal
@@ -138,6 +145,22 @@
     const j = await tryFetch('lsTraj', '/api/leadsonderhoud-trajecten');
     st.loading = false;
     if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.trajecten);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchLsDrog() {
+    const st = _live.lsDrog; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('lsDrog', '/api/leadsonderhoud-droogloop-log');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.items);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchLsQuiz() {
+    const st = _live.lsQuiz; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('lsQuiz', '/api/leadsonderhoud-quiz-lijst');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.items);
     if (window.DFO?.render) window.DFO.render();
   }
   // Template-picker voor send_whatsapp step — hergebruikt inbox-template-list
@@ -369,6 +392,7 @@
     if (block === 'lsInst')   { _live.lsInst.data = null; _live.lsInst.error = null; fetchLsInst(); }
     if (block === 'lsSjab')   { _live.lsSjab.data = null; _live.lsSjab.error = null; fetchLsSjab(); }
     if (block === 'lsTraj')   { _live.lsTraj.data = null; _live.lsTraj.error = null; fetchLsTraj(); }
+    if (block === 'lsDrog')   { _live.lsDrog.data = null; _live.lsDrog.error = null; fetchLsDrog(); }
     if (window.DFO?.render) window.DFO.render();
   };
   window.__autGoTab = (subtab) => {
@@ -1158,16 +1182,40 @@
   };
 
   // ═══════════════════════════════════════════════════════════════════════
-  // TAB: LEADSONDERHOUD (aan/uit + sjablonen + trajecten)
+  // TAB: LEADSONDERHOUD — volledig in-place, geen deep-links
+  //   Sub-views (chip-toolbar): trajecten / sjablonen / drooglog
+  //   Trajecten: full CRUD (list/create/edit/delete) + stappen (add/edit/delete)
+  //   Sjablonen: read-only lijst (backend heeft geen save/delete endpoint)
+  //   Drooglog: laatste 7 dagen "wat zou verstuurd zijn" uit berichten_log
+  //   Modals: trajecten-editor + stap-editor (inline, geen deep-links)
   // ═══════════════════════════════════════════════════════════════════════
+  const LS_AANLEIDINGEN = [
+    { v: 'na_start',           l: 'X dagen na start' },
+    { v: 'dag_van_periode',    l: 'Vaste dag in periode' },
+    { v: 'dagen_voor_einde',   l: 'X dagen voor einde' },
+    { v: 'na_einde',           l: 'X dagen na einde' },
+    { v: 'geen_activiteit',    l: 'Bij geen activiteit' },
+    { v: 'vast_moment',        l: 'Vast moment' },
+  ];
+  const LS_KANALEN = ['mail', 'whatsapp'];
+
   function leadsonderhoudView() {
     if (!_live.lsInst.data && !_live.lsInst.loading && !_live.lsInst.error) queueMicrotask(fetchLsInst);
     if (!_live.lsSjab.data && !_live.lsSjab.loading && !_live.lsSjab.error) queueMicrotask(fetchLsSjab);
     if (!_live.lsTraj.data && !_live.lsTraj.loading && !_live.lsTraj.error) queueMicrotask(fetchLsTraj);
+    // Drooglog on-demand pas bij view switch
+    if (_ui.ls.view === 'drooglog' && !_live.lsDrog.data && !_live.lsDrog.loading && !_live.lsDrog.error) queueMicrotask(fetchLsDrog);
+
+    // Editor-modals hebben voorrang (full-screen)
+    if (_ui.ls.editingTraject !== null) return _lsTrajEditor() + _confirmModalHtml();
+    if (_ui.ls.editingStap !== null) return _lsStapEditor() + _confirmModalHtml();
+
     const inst = _live.lsInst.data;
     const isLive = inst?.live === true;
     const noodstop = inst?.noodstop === true;
-    return `<div class="pad" style="padding-top:14px"><div style="max-width:1000px;margin:0 auto;display:flex;flex-direction:column;gap:14px">
+    const view = _ui.ls.view;
+
+    return `<div class="pad" style="padding-top:14px"><div style="max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:14px">
       <div class="card">
         <div class="card-head">
           <span class="tile-ico" style="background:${isLive ? 'var(--emerald-soft)' : 'var(--slate-soft)'};color:${isLive ? 'var(--emerald)' : 'var(--text-3)'}">${svg(isLive ? (I.play || I.tick) : (I.pause || I.x))}</span>
@@ -1184,55 +1232,100 @@
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-head">
-          <span class="tile-ico" style="background:var(--blue-soft);color:var(--blue)">${svg(I.doc || I.file)}</span>
-          <div class="card-title">Trajecten</div>
-          <span style="margin-left:auto;font-size:11px;color:var(--text-3)">${asArr(_live.lsTraj.data).length} trajecten</span>
-        </div>
-        <div class="card-body" style="padding:0">
-          ${_live.lsTraj.error ? errBlk('lsTraj', _live.lsTraj.error, "window.__autRetry('lsTraj')")
-            : _live.lsTraj.loading && !_live.lsTraj.data ? '<div style="padding:20px;text-align:center;color:var(--text-3)">Laden…</div>'
-            : asArr(_live.lsTraj.data).length === 0 ? emptyBlk('Geen trajecten', 'Maak trajecten aan via de Leadsonderhoud-module.')
-            : `<div>${asArr(_live.lsTraj.data).map((t) => _lsTrajRow(t)).join('')}</div>`}
-        </div>
+      <div class="toolbar" style="padding:0;gap:6px;flex-wrap:wrap">
+        ${[['trajecten','Trajecten & stappen'],['sjablonen','Sjablonen'],['drooglog','Drooglog (7d)']].map(([v, l]) => `<button class="chip ${view === v ? 'on' : ''}" onclick="window.__autLsView('${v}')">${esc(l)}</button>`).join('')}
       </div>
 
-      <div class="card">
-        <div class="card-head">
-          <span class="tile-ico" style="background:var(--pink-soft);color:var(--pink)">${svg(I.file || I.doc)}</span>
-          <div class="card-title">Sjablonen</div>
-          <span style="margin-left:auto;font-size:11px;color:var(--text-3)">${asArr(_live.lsSjab.data?.items).length} sjablonen</span>
-        </div>
-        <div class="card-body" style="padding:0">
-          ${_live.lsSjab.error ? errBlk('lsSjab', _live.lsSjab.error, "window.__autRetry('lsSjab')")
-            : _live.lsSjab.loading && !_live.lsSjab.data ? '<div style="padding:20px;text-align:center;color:var(--text-3)">Laden…</div>'
-            : asArr(_live.lsSjab.data?.items).length === 0 ? emptyBlk('Geen sjablonen', 'Beheer sjablonen via de Leadsonderhoud-module.')
-            : `<div style="padding:12px 16px">${H.table(
-                [{l:'Traject'},{l:'Kanaal',cls:'optional'},{l:'Soort',cls:'optional'},{l:'Onderwerp'},{l:'Score-range',cls:'r optional'},{l:'Actief',cls:'r'}],
-                asArr(_live.lsSjab.data?.items).map((s) => [
-                  `<span style="font-size:12.5px">${esc(s.traject_slug || '—')}</span>`,
-                  `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(s.kanaal || '—')}</span>`,
-                  `<span style="font-size:11.5px;color:var(--text-3)">${esc(s.soort || '—')}</span>`,
-                  `<span style="font-size:12.5px">${esc(s.onderwerp || '—')}</span>`,
-                  `<span class="mono" style="font-size:11.5px">${s.score_min ?? '—'} – ${s.score_max ?? '—'}</span>`,
-                  s.actief ? H.pill('ok','Actief') : H.pill('neutral','Uit'),
-                ])
-              )}</div>`}
-        </div>
-        <div style="padding:11px 17px;background:var(--surface-2);border-top:1px solid var(--border);font-size:11px;color:var(--text-3)">
-          Sjablonen-editor + quiz-editor + drip-log: <a href="/modules/leadsonderhoud.html" target="_blank" style="color:var(--pink);text-decoration:underline">open Leadsonderhoud-module ↗</a>
-        </div>
-      </div>
+      ${view === 'trajecten' ? _lsTrajectenBlock()
+       : view === 'sjablonen' ? _lsSjablonenBlock()
+       : _lsDrooglogBlock()}
     </div></div>
     ${_confirmModalHtml()}`;
   }
+
+  function _lsTrajectenBlock() {
+    const trajecten = asArr(_live.lsTraj.data);
+    return `<div class="card">
+      <div class="card-head">
+        <span class="tile-ico" style="background:var(--blue-soft);color:var(--blue)">${svg(I.doc || I.file)}</span>
+        <div class="card-title">Trajecten & stappen</div>
+        <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="window.__autLsTrajNew()">${svg(I.plus)}Nieuw traject</button>
+      </div>
+      <div class="card-body" style="padding:0">
+        ${_live.lsTraj.error ? errBlk('lsTraj', _live.lsTraj.error, "window.__autRetry('lsTraj')")
+          : _live.lsTraj.loading && !_live.lsTraj.data ? '<div style="padding:20px;text-align:center;color:var(--text-3)">Laden…</div>'
+          : trajecten.length === 0 ? emptyBlk('Geen trajecten', 'Klik "Nieuw traject" om te beginnen.')
+          : `<div>${trajecten.map((t) => _lsTrajRow(t)).join('')}</div>`}
+      </div>
+    </div>`;
+  }
+
+  function _lsSjablonenBlock() {
+    const items = asArr(_live.lsSjab.data?.items);
+    return `<div class="card">
+      <div class="card-head">
+        <span class="tile-ico" style="background:var(--pink-soft);color:var(--pink)">${svg(I.file || I.doc)}</span>
+        <div class="card-title">Sjablonen</div>
+        <span style="margin-left:auto;font-size:11px;color:var(--text-3)">${items.length} sjablonen · read-only</span>
+      </div>
+      <div class="card-body" style="padding:0">
+        <div style="padding:12px 16px;background:var(--amber-soft);border-bottom:1px solid var(--border);font-size:12px;color:var(--text-2);line-height:1.5">
+          <b>Sjablonen zijn read-only in v2.</b> De sjablonen-editor komt in de Instellingen-module (bibliotheek voor alle modules). Voor nu: bekijk hier de actieve sjablonen.
+        </div>
+        ${_live.lsSjab.error ? errBlk('lsSjab', _live.lsSjab.error, "window.__autRetry('lsSjab')")
+          : _live.lsSjab.loading && !_live.lsSjab.data ? '<div style="padding:20px;text-align:center;color:var(--text-3)">Laden…</div>'
+          : items.length === 0 ? emptyBlk('Geen sjablonen', 'Nog geen sjablonen aangemaakt.')
+          : `<div style="padding:12px 16px">${H.table(
+              [{l:'Traject'},{l:'Kanaal',cls:'optional'},{l:'Soort',cls:'optional'},{l:'Onderwerp'},{l:'Score-range',cls:'r optional'},{l:'Actief',cls:'r'}],
+              items.map((s) => [
+                `<span style="font-size:12.5px">${esc(s.traject_slug || '—')}</span>`,
+                `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(s.kanaal || '—')}</span>`,
+                `<span style="font-size:11.5px;color:var(--text-3)">${esc(s.soort || '—')}</span>`,
+                `<span style="font-size:12.5px">${esc(s.onderwerp || '—')}</span>`,
+                `<span class="mono" style="font-size:11.5px">${s.score_min ?? '—'} – ${s.score_max ?? '—'}</span>`,
+                s.actief ? H.pill('ok','Actief') : H.pill('neutral','Uit'),
+              ])
+            )}</div>`}
+      </div>
+    </div>`;
+  }
+
+  function _lsDrooglogBlock() {
+    const items = asArr(_live.lsDrog.data);
+    return `<div class="card">
+      <div class="card-head">
+        <span class="tile-ico" style="background:var(--amber-soft);color:var(--amber)">${svg(I.clock)}</span>
+        <div class="card-title">Drooglog</div>
+        <span style="margin-left:auto;font-size:11px;color:var(--text-3)">Laatste 7d · status='droog'</span>
+      </div>
+      <div class="card-body" style="padding:0">
+        <div style="padding:12px 16px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:12px;color:var(--text-2);line-height:1.5">
+          Wat de motor de <b>afgelopen 7 dagen</b> in droogloop-modus <b>zou hebben verstuurd</b>. Zo zie je of de juiste leads het juiste bericht zouden krijgen zonder dat het echt is uitgegaan.
+        </div>
+        ${_live.lsDrog.error ? errBlk('lsDrog', _live.lsDrog.error, "window.__autRetry('lsDrog')")
+          : _live.lsDrog.loading && !_live.lsDrog.data ? '<div style="padding:20px;text-align:center;color:var(--text-3)">Laden…</div>'
+          : items.length === 0 ? emptyBlk('Geen droogloop-items', 'Er waren geen berichten in droogloop de afgelopen 7 dagen.')
+          : `<div style="padding:12px 16px">${H.table(
+              [{l:'Wanneer'},{l:'Traject'},{l:'Kanaal',cls:'optional'},{l:'Soort',cls:'optional'},{l:'Naar'},{l:'Agent',cls:'optional'}],
+              items.slice(0, 200).map((d) => [
+                `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(_fmtDateTime(d.verstuurd_op))}</span>`,
+                `<span style="font-size:12.5px">${esc(d.traject || '—')}</span>`,
+                `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(d.kanaal || '—')}</span>`,
+                `<span style="font-size:11.5px;color:var(--text-3)">${esc(d.soort || '—')}</span>`,
+                `<span class="mono" style="font-size:11.5px">${esc(d.naar || '—')}</span>`,
+                `<span style="font-size:11.5px;color:var(--text-3)">${esc(d.agent || '—')}</span>`,
+              ])
+            )}</div>`}
+      </div>
+    </div>`;
+  }
+
   function _lsTrajRow(t) {
     const stappen = asArr(t.stappen);
     const isExp = _ui.ls.expandedTrajectId === t.id;
     return `<div style="border-bottom:1px solid var(--border)">
-      <div style="padding:12px 17px;display:flex;gap:12px;align-items:center;cursor:pointer" onclick="window.__autLsToggleTraject('${esc(t.id)}')">
-        <div style="flex:1;min-width:0">
+      <div style="padding:12px 17px;display:flex;gap:12px;align-items:center">
+        <div style="flex:1;min-width:0;cursor:pointer" onclick="window.__autLsToggleTraject('${esc(t.id)}')">
           <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
             <div style="font-size:13.5px;font-weight:600">${esc(t.naam || t.slug || '—')}</div>
             <span class="mono" style="font-size:10.5px;color:var(--text-3)">${esc(t.slug || '')}</span>
@@ -1240,12 +1333,18 @@
           </div>
           <div style="font-size:11.5px;color:var(--text-3);margin-top:3px">${stappen.length} stappen · agent: ${esc(t.agent || '—')} · archief na ${esc(String(t.archief_na || '?'))}d</div>
         </div>
-        <span style="font-size:16px;color:var(--text-3)">${isExp ? '▾' : '▸'}</span>
+        <button class="icon-btn" title="Bewerken" onclick="window.__autLsTrajEdit('${esc(t.id)}')" style="width:28px;height:28px">${svg(I.edit || I.settings, 'width:13px;height:13px')}</button>
+        <button class="icon-btn" title="Verwijderen" onclick="window.__autLsTrajDelete('${esc(t.id)}','${esc(t.naam || t.slug || '')}')" style="width:28px;height:28px">${svg(I.trash || I.x, 'width:13px;height:13px')}</button>
+        <span style="font-size:16px;color:var(--text-3);cursor:pointer" onclick="window.__autLsToggleTraject('${esc(t.id)}')">${isExp ? '▾' : '▸'}</span>
       </div>
       ${isExp ? `<div style="padding:0 17px 16px;background:var(--surface-2)">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0">
+          <div style="font-size:11.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.05em">Stappen (${stappen.length})</div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__autLsStapNew('${esc(t.id)}')">${svg(I.plus)}Stap toevoegen</button>
+        </div>
         ${stappen.length === 0 ? `<div style="padding:14px;text-align:center;color:var(--text-3);font-size:12px;font-style:italic">Geen stappen.</div>`
           : H.table(
-            [{l:'Stap'},{l:'Kanaal',cls:'optional'},{l:'Aanleiding',cls:'optional'},{l:'Wanneer',cls:'optional'},{l:'Score-range',cls:'r optional'},{l:'Actief',cls:'r'}],
+            [{l:'Stap'},{l:'Kanaal',cls:'optional'},{l:'Aanleiding',cls:'optional'},{l:'Wanneer',cls:'optional'},{l:'Score-range',cls:'r optional'},{l:'Actief',cls:'r'},{l:'',cls:'r'}],
             stappen.map((s) => [
               `<span style="font-size:12.5px">${esc(s.naam || s.soort || '—')}</span>`,
               `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(s.kanaal || '—')}</span>`,
@@ -1253,16 +1352,253 @@
               `<span class="mono" style="font-size:11px;color:var(--text-3)">${esc(String(s.waarde || '—'))}${s.weekdag ? ' · ' + esc(s.weekdag) : ''}${s.tijdstip ? ' · ' + esc(s.tijdstip) : ''}</span>`,
               `<span class="mono" style="font-size:11px">${s.score_min ?? '—'} – ${s.score_max ?? '—'}</span>`,
               s.actief ? H.pill('ok','Actief') : H.pill('neutral','Uit'),
+              `<div style="display:flex;gap:3px;justify-content:flex-end">
+                <button class="icon-btn" title="Bewerken" onclick="window.__autLsStapEdit('${esc(t.id)}','${esc(s.id)}')" style="width:26px;height:26px">${svg(I.edit || I.settings, 'width:11px;height:11px')}</button>
+                <button class="icon-btn" title="Verwijderen" onclick="window.__autLsStapDelete('${esc(s.id)}','${esc(s.naam || s.soort || '')}')" style="width:26px;height:26px">${svg(I.trash || I.x, 'width:11px;height:11px')}</button>
+              </div>`,
             ])
           )}
-        <div style="padding:8px 0;font-size:11px;color:var(--text-3);text-align:center">Stap-editor via <a href="/modules/leadsonderhoud.html" target="_blank" style="color:var(--pink);text-decoration:underline">Leadsonderhoud-module ↗</a></div>
       </div>` : ''}
     </div>`;
   }
+  window.__autLsView = (v) => { _ui.ls.view = v; if (window.DFO?.render) window.DFO.render(); };
   window.__autLsToggleTraject = (id) => {
     _ui.ls.expandedTrajectId = _ui.ls.expandedTrajectId === id ? null : id;
     if (window.DFO?.render) window.DFO.render();
   };
+  window.__autLsTrajNew = () => {
+    _ui.ls.editingTraject = { id: null, slug: '', naam: '', omschrijving: '', agent: '', agenda_link: '', archief_na: 30, volgorde: 1, actief: true };
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autLsTrajEdit = (id) => {
+    const t = asArr(_live.lsTraj.data).find((x) => x.id === id);
+    if (!t) return;
+    _ui.ls.editingTraject = { ...t };
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autLsTrajClose = () => { _ui.ls.editingTraject = null; if (window.DFO?.render) window.DFO.render(); };
+  window.__autLsTrajField = (k, v) => { if (_ui.ls.editingTraject) _ui.ls.editingTraject[k] = v; };
+  window.__autLsTrajFieldBool = (k, v) => { if (_ui.ls.editingTraject) _ui.ls.editingTraject[k] = !!v; };
+  window.__autLsTrajSave = async () => {
+    const t = _ui.ls.editingTraject; if (!t) return;
+    if (!t.naam || !t.naam.trim()) return alert('Naam is verplicht.');
+    if (!t.slug || !t.slug.trim()) return alert('Slug is verplicht.');
+    _setBusy('lsTrajSave', true);
+    try {
+      const j = await window.KV.authedJson('/api/leadsonderhoud-traject-opslaan', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(t),
+      });
+      if (j?.error) throw new Error(j.error);
+      _ui.ls.editingTraject = null;
+      _live.lsTraj.data = null; queueMicrotask(fetchLsTraj);
+    } catch (e) { alert('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
+    finally { _setBusy('lsTrajSave', false); }
+  };
+  window.__autLsTrajDelete = (id, naam) => {
+    askConfirm(
+      'Traject verwijderen?',
+      `<p>Weet je zeker dat je <b>${esc(naam)}</b> permanent wilt verwijderen? <b style="color:var(--rose)">Alle stappen van dit traject worden ook verwijderd.</b></p>`,
+      async () => {
+        const j = await window.KV.authedJson('/api/leadsonderhoud-traject-verwijderen', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ id }),
+        });
+        if (j?.error) throw new Error(j.error);
+        _live.lsTraj.data = null; queueMicrotask(fetchLsTraj);
+      },
+      { confirmLabel: 'Ja, verwijderen', danger: true }
+    );
+  };
+  window.__autLsStapNew = (traject_id) => {
+    _ui.ls.editingStap = {
+      id: null, traject_id,
+      naam: '', soort: '', kanaal: 'whatsapp',
+      aanleiding: 'na_start', waarde: '', weekdag: '', tijdstip: '',
+      score_min: 0, score_max: 100,
+      alleen_zonder_gesprek: false, alleen_ingelogd: null, alleen_verlengd: null,
+      herhaalbaar: false, urgentie: 3, volgorde: 1, actief: true,
+      // Quiz-koppeling voor vragenlijst-stappen (optioneel)
+      quiz_slug: '',
+    };
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autLsStapEdit = (traject_id, stap_id) => {
+    const t = asArr(_live.lsTraj.data).find((x) => x.id === traject_id);
+    if (!t) return;
+    const s = asArr(t.stappen).find((x) => x.id === stap_id);
+    if (!s) return;
+    _ui.ls.editingStap = { ...s, traject_id, quiz_slug: s.quiz_slug || '' };
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autLsStapClose = () => { _ui.ls.editingStap = null; if (window.DFO?.render) window.DFO.render(); };
+  window.__autLsStapField = (k, v) => { if (_ui.ls.editingStap) _ui.ls.editingStap[k] = v; if (window.DFO?.render && (k === 'aanleiding' || k === 'kanaal')) window.DFO.render(); };
+  window.__autLsStapFieldBool = (k, v) => { if (_ui.ls.editingStap) _ui.ls.editingStap[k] = !!v; };
+  window.__autLsStapFieldTri = (k, v) => { if (_ui.ls.editingStap) _ui.ls.editingStap[k] = v === '' ? null : (v === 'true'); };
+  window.__autLsStapSave = async () => {
+    const s = _ui.ls.editingStap; if (!s) return;
+    if (!s.naam || !s.naam.trim()) return alert('Naam is verplicht.');
+    if (!s.traject_id) return alert('Traject-ID ontbreekt.');
+    _setBusy('lsStapSave', true);
+    try {
+      const j = await window.KV.authedJson('/api/leadsonderhoud-stap-opslaan', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(s),
+      });
+      if (j?.error) throw new Error(j.error);
+      _ui.ls.editingStap = null;
+      _live.lsTraj.data = null; queueMicrotask(fetchLsTraj);
+    } catch (e) { alert('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
+    finally { _setBusy('lsStapSave', false); }
+  };
+  window.__autLsStapDelete = (id, naam) => {
+    askConfirm(
+      'Stap verwijderen?',
+      `<p>Weet je zeker dat je <b>${esc(naam || 'deze stap')}</b> wilt verwijderen?</p>`,
+      async () => {
+        const j = await window.KV.authedJson('/api/leadsonderhoud-stap-verwijderen', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ id }),
+        });
+        if (j?.error) throw new Error(j.error);
+        _live.lsTraj.data = null; queueMicrotask(fetchLsTraj);
+      },
+      { confirmLabel: 'Ja, verwijderen', danger: true }
+    );
+  };
+
+  function _lsTrajEditor() {
+    const t = _ui.ls.editingTraject; if (!t) return '';
+    const isNew = !t.id;
+    const busy = _busy('lsTrajSave');
+    return `<div style="padding:12px 20px;background:var(--surface-2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+      <button class="btn btn-ghost btn-sm" onclick="window.__autLsTrajClose()">${svg(I.arrDown || I.x, 'width:13px;height:13px;transform:rotate(90deg)')}Terug</button>
+      <span style="font-size:14px;font-weight:600">${isNew ? 'Nieuw traject' : 'Bewerken: ' + esc(t.naam || t.slug)}</span>
+      <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="window.__autLsTrajSave()" ${busy ? 'disabled' : ''}>${busy ? 'Opslaan…' : (svg(I.tick) + 'Opslaan')}</button>
+    </div>
+    <div class="pad" style="padding-top:14px"><div style="max-width:720px;margin:0 auto"><div class="card"><div class="card-body" style="padding:18px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Naam</label><input type="text" value="${esc(t.naam)}" oninput="window.__autLsTrajField('naam', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box" /></div>
+        <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Slug (uniek)</label><input type="text" value="${esc(t.slug)}" oninput="window.__autLsTrajField('slug', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;font-family:'IBM Plex Mono',monospace;box-sizing:border-box" /></div>
+      </div>
+      <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Omschrijving</label><textarea oninput="window.__autLsTrajField('omschrijving', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box;min-height:60px;resize:vertical;font-family:inherit">${esc(t.omschrijving || '')}</textarea></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Agent</label><input type="text" value="${esc(t.agent || '')}" oninput="window.__autLsTrajField('agent', this.value)" placeholder="bv. Aisha" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box" /></div>
+        <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Volgorde</label><input type="number" value="${esc(String(t.volgorde || 1))}" oninput="window.__autLsTrajField('volgorde', Number(this.value))" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box" /></div>
+        <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Archief na (dagen)</label><input type="number" value="${esc(String(t.archief_na || 30))}" oninput="window.__autLsTrajField('archief_na', Number(this.value))" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box" /></div>
+      </div>
+      <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Agenda-link (optioneel)</label><input type="text" value="${esc(t.agenda_link || '')}" oninput="window.__autLsTrajField('agenda_link', this.value)" placeholder="https://…" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box" /></div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+        <input type="checkbox" ${t.actief ? 'checked' : ''} onchange="window.__autLsTrajFieldBool('actief', this.checked)" />
+        <span>Actief (traject draait mee in drip-motor)</span>
+      </label>
+    </div></div></div></div>`;
+  }
+
+  function _lsStapEditor() {
+    const s = _ui.ls.editingStap; if (!s) return '';
+    const isNew = !s.id;
+    const busy = _busy('lsStapSave');
+    // Quiz-picker preload
+    if (s.kanaal === 'quiz' || s.soort === 'quiz' || s.quiz_slug !== undefined) {
+      if (!_live.lsQuiz.data && !_live.lsQuiz.loading) queueMicrotask(fetchLsQuiz);
+    }
+    const quizzes = asArr(_live.lsQuiz.data);
+    return `<div style="padding:12px 20px;background:var(--surface-2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+      <button class="btn btn-ghost btn-sm" onclick="window.__autLsStapClose()">${svg(I.arrDown || I.x, 'width:13px;height:13px;transform:rotate(90deg)')}Terug</button>
+      <span style="font-size:14px;font-weight:600">${isNew ? 'Nieuwe stap' : 'Bewerken: ' + esc(s.naam || s.soort || '—')}</span>
+      <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="window.__autLsStapSave()" ${busy ? 'disabled' : ''}>${busy ? 'Opslaan…' : (svg(I.tick) + 'Opslaan')}</button>
+    </div>
+    <div class="pad" style="padding-top:14px"><div style="max-width:780px;margin:0 auto;display:flex;flex-direction:column;gap:14px">
+      <div class="card"><div class="card-head"><div class="card-title">Basis</div></div><div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px">
+          <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Naam</label><input type="text" value="${esc(s.naam)}" oninput="window.__autLsStapField('naam', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box" /></div>
+          <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Soort (slug, auto)</label><input type="text" value="${esc(s.soort || '')}" oninput="window.__autLsStapField('soort', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;font-family:'IBM Plex Mono',monospace;box-sizing:border-box" /></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Kanaal</label>
+            <select oninput="window.__autLsStapField('kanaal', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box">
+              ${LS_KANALEN.map((k) => `<option value="${k}" ${s.kanaal === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}
+            </select>
+          </div>
+          <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Urgentie (1-5)</label><input type="number" min="1" max="5" value="${esc(String(s.urgentie || 3))}" oninput="window.__autLsStapField('urgentie', Number(this.value))" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box" /></div>
+        </div>
+      </div></div>
+
+      <div class="card"><div class="card-head"><div class="card-title">Timing</div></div><div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+        <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Aanleiding</label>
+          <select oninput="window.__autLsStapField('aanleiding', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box">
+            ${LS_AANLEIDINGEN.map((a) => `<option value="${a.v}" ${s.aanleiding === a.v ? 'selected' : ''}>${esc(a.l)}</option>`).join('')}
+          </select>
+        </div>
+        ${(s.aanleiding === 'na_start' || s.aanleiding === 'dagen_voor_einde' || s.aanleiding === 'na_einde' || s.aanleiding === 'geen_activiteit' || s.aanleiding === 'dag_van_periode') ? `
+          <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Waarde (aantal dagen)</label><input type="text" value="${esc(String(s.waarde || ''))}" oninput="window.__autLsStapField('waarde', this.value)" placeholder="bv. 7" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box" /></div>
+        ` : ''}
+        ${s.aanleiding === 'vast_moment' ? `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Weekdag</label>
+              <select oninput="window.__autLsStapField('weekdag', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box">
+                ${['','ma','di','wo','do','vr','za','zo'].map((w) => `<option value="${w}" ${s.weekdag === w ? 'selected' : ''}>${w || '—'}</option>`).join('')}
+              </select>
+            </div>
+            <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Tijdstip</label><input type="text" value="${esc(s.tijdstip || '')}" oninput="window.__autLsStapField('tijdstip', this.value)" placeholder="HH:MM" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box" /></div>
+          </div>
+        ` : ''}
+      </div></div>
+
+      <div class="card"><div class="card-head"><div class="card-title">Filters</div></div><div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Score min</label><input type="number" value="${esc(String(s.score_min ?? 0))}" oninput="window.__autLsStapField('score_min', Number(this.value))" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box" /></div>
+          <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Score max</label><input type="number" value="${esc(String(s.score_max ?? 100))}" oninput="window.__autLsStapField('score_max', Number(this.value))" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box" /></div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" ${s.alleen_zonder_gesprek ? 'checked' : ''} onchange="window.__autLsStapFieldBool('alleen_zonder_gesprek', this.checked)" />
+          <span>Alleen als er geen actief gesprek is</span>
+        </label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Alleen ingelogd</label>
+            <select oninput="window.__autLsStapFieldTri('alleen_ingelogd', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box">
+              <option value="" ${s.alleen_ingelogd === null || s.alleen_ingelogd === undefined ? 'selected' : ''}>— beide —</option>
+              <option value="true" ${s.alleen_ingelogd === true ? 'selected' : ''}>Ja (ingelogd)</option>
+              <option value="false" ${s.alleen_ingelogd === false ? 'selected' : ''}>Nee (niet ingelogd)</option>
+            </select>
+          </div>
+          <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Alleen verlengd</label>
+            <select oninput="window.__autLsStapFieldTri('alleen_verlengd', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box">
+              <option value="" ${s.alleen_verlengd === null || s.alleen_verlengd === undefined ? 'selected' : ''}>— beide —</option>
+              <option value="true" ${s.alleen_verlengd === true ? 'selected' : ''}>Ja (verlengd)</option>
+              <option value="false" ${s.alleen_verlengd === false ? 'selected' : ''}>Nee (niet verlengd)</option>
+            </select>
+          </div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" ${s.herhaalbaar ? 'checked' : ''} onchange="window.__autLsStapFieldBool('herhaalbaar', this.checked)" />
+          <span>Herhaalbaar (mag meerdere keren draaien voor dezelfde lead)</span>
+        </label>
+      </div></div>
+
+      <div class="card"><div class="card-head"><div class="card-title">Vragenlijst-koppeling (optioneel)</div></div><div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+        <div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:11.5px;color:var(--text-3);line-height:1.5">
+          <b>Vragenlijsten worden centraal beheerd in Instellingen (komt eraan).</b> Voor nu kies je een bestaande quiz uit de dropdown; de editor verhuist zonder herbouw van de backend.
+        </div>
+        <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Gekoppelde quiz</label>
+          <select oninput="window.__autLsStapField('quiz_slug', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box">
+            <option value="">— geen quiz —</option>
+            ${quizzes.map((q) => `<option value="${esc(q.slug)}" ${s.quiz_slug === q.slug ? 'selected' : ''}>${esc(q.naam || q.slug)} (${q.vragen_actief || 0} vragen actief)</option>`).join('')}
+          </select>
+          ${_live.lsQuiz.loading && !_live.lsQuiz.data ? '<div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Quizzes laden…</div>' : ''}
+        </div>
+      </div></div>
+
+      <div class="card"><div class="card-head"><div class="card-title">Volgorde & status</div></div><div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+        <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Volgorde binnen traject</label><input type="number" value="${esc(String(s.volgorde || 1))}" oninput="window.__autLsStapField('volgorde', Number(this.value))" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:13px;box-sizing:border-box" /></div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" ${s.actief ? 'checked' : ''} onchange="window.__autLsStapFieldBool('actief', this.checked)" />
+          <span>Actief</span>
+        </label>
+      </div></div>
+    </div></div>`;
+  }
 
   // ═══════════════════════════════════════════════════════════════════════
   // TAB: AGENTS (read-only mirror van joost_config feature_flags)
