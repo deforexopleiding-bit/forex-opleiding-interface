@@ -50,14 +50,23 @@
     lsDrog:      { loading: false, error: null, data: null },   // leadsonderhoud-droogloop-log
     lsQuiz:      { loading: false, error: null, data: null },   // leadsonderhoud-quiz-lijst (voor picker)
     inboxTpls:   { loading: false, error: null, data: null },   // WA-templates voor send_whatsapp step
+    // Berichten-tab data (Events + Onboarding read-view over steps[])
+    evBerichten: { loading: false, error: null, data: null },   // events-berichten-list
+    obBerichten: { loading: false, error: null, data: null },   // onboarding-berichten-list
+    // Leadsonderhoud berichten-log (voor Log-tab)
+    lsLog:       { loading: false, error: null, data: null },
+    // Automation-lookup voor bericht-editor surgical write (per id)
+    evAutoById:  { loading: {}, error: {}, data: {} },
+    obAutoById:  { loading: {}, error: {}, data: {} },
   };
 
   const _ui = {
     // Editor state per module — voorkomt dat we tussen sub-tabs interferereren
-    ev: { editing: null, wizardStep: 1, testModal: null, runsModal: null, filter: 'all' },
-    ob: { editing: null, wizardStep: 1, testModal: null, runsModal: null, filter: 'all' },
+    ev: { subtab: 'flows', editing: null, wizardStep: 1, testModal: null, runsModal: null, filter: 'all', berichtEdit: null },
+    ob: { subtab: 'flows', editing: null, wizardStep: 1, testModal: null, runsModal: null, filter: 'all', berichtEdit: null },
     ls: {
-      view: 'trajecten',           // 'trajecten' | 'sjablonen' | 'drooglog'
+      subtab: 'flows',             // 'flows' | 'berichten' | 'instellingen' | 'log'
+      view: 'trajecten',           // deprecated (voor backwards-compat, chip-toolbar hergebruikt subtab)
       editingTraject: null,        // {} tijdens create/edit
       editingStap: null,           // { traject_id, stap? } tijdens create/edit
       editingSjabloon: null,       // {} tijdens create/edit
@@ -161,6 +170,55 @@
     const j = await tryFetch('lsQuiz', '/api/leadsonderhoud-quiz-lijst');
     st.loading = false;
     if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.items);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  // ── HARMONISATIE — Berichten + Log fetchers ─────────────────────────────
+  async function fetchEvBerichten() {
+    const st = _live.evBerichten; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('evBerichten', '/api/events-berichten-list');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.items);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchObBerichten() {
+    const st = _live.obBerichten; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('obBerichten', '/api/onboarding-berichten-list');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.items);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchLsLog(traject) {
+    const st = _live.lsLog; if (st.loading) return;
+    st.loading = true; st.error = null;
+    const url = '/api/leadsonderhoud-berichten-log' + (traject ? '?traject=' + encodeURIComponent(traject) : '');
+    const j = await tryFetch('lsLog', url);
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { items: asArr(j?.items), totaal: j?.totaal || 0, statussen: j?.statussen || { verstuurd: 0, droog: 0, fout: 0 } };
+    if (window.DFO?.render) window.DFO.render();
+  }
+  // Enkele automation ophalen (voor bericht-editor surgical write)
+  async function fetchEvAutoById(id) {
+    const st = _live.evAutoById; if (st.loading[id] || st.data[id]) return;
+    st.loading[id] = true; st.error[id] = null;
+    // Hergebruik events-automations-list en filter client-side (geen /api/events-automation-get endpoint)
+    if (!_live.evAutos.data) await fetchEvAutos();
+    const a = asArr(_live.evAutos.data).find((x) => x.id === id);
+    st.loading[id] = false;
+    if (!a) st.error[id] = 'Automation niet gevonden';
+    else st.data[id] = JSON.parse(JSON.stringify(a));
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchObAutoById(id) {
+    const st = _live.obAutoById; if (st.loading[id] || st.data[id]) return;
+    st.loading[id] = true; st.error[id] = null;
+    if (!_live.obAutos.data) await fetchObAutos();
+    const a = asArr(_live.obAutos.data).find((x) => x.id === id);
+    st.loading[id] = false;
+    if (!a) st.error[id] = 'Automation niet gevonden';
+    else st.data[id] = JSON.parse(JSON.stringify(a));
     if (window.DFO?.render) window.DFO.render();
   }
   // Template-picker voor send_whatsapp step — hergebruikt inbox-template-list
@@ -379,10 +437,19 @@
     if (block === 'lsSjab')   { _live.lsSjab.data = null; _live.lsSjab.error = null; fetchLsSjab(); }
     if (block === 'lsTraj')   { _live.lsTraj.data = null; _live.lsTraj.error = null; fetchLsTraj(); }
     if (block === 'lsDrog')   { _live.lsDrog.data = null; _live.lsDrog.error = null; fetchLsDrog(); }
+    if (block === 'evBerichten') { _live.evBerichten.data = null; _live.evBerichten.error = null; fetchEvBerichten(); }
+    if (block === 'obBerichten') { _live.obBerichten.data = null; _live.obBerichten.error = null; fetchObBerichten(); }
+    if (block === 'lsLog')       { _live.lsLog.data = null; _live.lsLog.error = null; fetchLsLog(); }
     if (window.DFO?.render) window.DFO.render();
   };
+  // Bug-fix: bestaande handler gebruikte DFO.setTab (bestaat niet). Correct is
+  // DFO.goTab. Tab-namen in app-shell zijn Kapitalized ('Events','Onboarding',
+  // 'Leadsonderhoud') — mapping via title-case op de subtab-key.
   window.__autGoTab = (subtab) => {
-    try { window.DFO?.setTab && window.DFO.setTab(subtab.charAt(0).toUpperCase() + subtab.slice(1)); } catch (_) {}
+    try {
+      const label = String(subtab || '').charAt(0).toUpperCase() + String(subtab || '').slice(1);
+      if (window.DFO?.goTab) window.DFO.goTab(label);
+    } catch (e) { console.warn('[aut] goTab fail:', e?.message); }
   };
 
   // Leadsonderhoud toggle (met confirm)
@@ -434,12 +501,22 @@
 
   function eventsView() {
     if (!_live.evAutos.data && !_live.evAutos.loading && !_live.evAutos.error) queueMicrotask(fetchEvAutos);
+    // Full-screen editor/modal-modes hebben voorrang boven subtab-toolbar
     if (_ui.ev.editing) return _evEditor(_ui.ev.editing) + _confirmModalHtml();
     if (_ui.ev.testModal) return _evTestModal() + _confirmModalHtml();
-    if (_ui.ev.runsModal) return _evRunsModal() + _confirmModalHtml();
-    if (_live.evAutos.error && !_live.evAutos.data) return errBlk('evAutos', _live.evAutos.error, "window.__autRetry('evAutos')") + _confirmModalHtml();
-    if (_live.evAutos.loading && !_live.evAutos.data) return skel() + _confirmModalHtml();
-    return _evList() + _confirmModalHtml();
+    // Subtab-router
+    const sub = _ui.ev.subtab || 'flows';
+    let content;
+    if (sub === 'berichten')          content = _evBerichtenView();
+    else if (sub === 'instellingen')  content = _evInstellingenView();
+    else if (sub === 'log')           content = _evLogView();
+    else {
+      // 'flows' — bestaande lijst-editor
+      if (_live.evAutos.error && !_live.evAutos.data) content = errBlk('evAutos', _live.evAutos.error, "window.__autRetry('evAutos')");
+      else if (_live.evAutos.loading && !_live.evAutos.data) content = skel();
+      else content = _evList();
+    }
+    return _subtabToolbar('ev', sub) + content + _confirmModalHtml();
   }
   function _evList() {
     const all = asArr(_live.evAutos.data);
@@ -860,10 +937,17 @@
     if (!_live.obAutos.data && !_live.obAutos.loading && !_live.obAutos.error) queueMicrotask(fetchObAutos);
     if (_ui.ob.editing) return _obEditor(_ui.ob.editing) + _confirmModalHtml();
     if (_ui.ob.testModal) return _obTestModal() + _confirmModalHtml();
-    if (_ui.ob.runsModal) return _obRunsModal() + _confirmModalHtml();
-    if (_live.obAutos.error && !_live.obAutos.data) return errBlk('obAutos', _live.obAutos.error, "window.__autRetry('obAutos')") + _confirmModalHtml();
-    if (_live.obAutos.loading && !_live.obAutos.data) return skel() + _confirmModalHtml();
-    return _obList() + _confirmModalHtml();
+    const sub = _ui.ob.subtab || 'flows';
+    let content;
+    if (sub === 'berichten')          content = _obBerichtenView();
+    else if (sub === 'instellingen')  content = _obInstellingenView();
+    else if (sub === 'log')           content = _obLogView();
+    else {
+      if (_live.obAutos.error && !_live.obAutos.data) content = errBlk('obAutos', _live.obAutos.error, "window.__autRetry('obAutos')");
+      else if (_live.obAutos.loading && !_live.obAutos.data) content = skel();
+      else content = _obList();
+    }
+    return _subtabToolbar('ob', sub) + content + _confirmModalHtml();
   }
   function _obList() {
     const all = asArr(_live.obAutos.data);
@@ -1189,45 +1273,22 @@
     if (!_live.lsInst.data && !_live.lsInst.loading && !_live.lsInst.error) queueMicrotask(fetchLsInst);
     if (!_live.lsSjab.data && !_live.lsSjab.loading && !_live.lsSjab.error) queueMicrotask(fetchLsSjab);
     if (!_live.lsTraj.data && !_live.lsTraj.loading && !_live.lsTraj.error) queueMicrotask(fetchLsTraj);
-    // Drooglog on-demand pas bij view switch
-    if (_ui.ls.view === 'drooglog' && !_live.lsDrog.data && !_live.lsDrog.loading && !_live.lsDrog.error) queueMicrotask(fetchLsDrog);
 
     // Editor-modals hebben voorrang (full-screen)
     if (_ui.ls.editingTraject !== null) return _lsTrajEditor() + _confirmModalHtml();
     if (_ui.ls.editingStap !== null) return _lsStapEditor() + _confirmModalHtml();
     if (_ui.ls.editingSjabloon !== null) return _lsSjabloonEditor() + _confirmModalHtml();
 
-    const inst = _live.lsInst.data;
-    const isLive = inst?.live === true;
-    const noodstop = inst?.noodstop === true;
-    const view = _ui.ls.view;
-
-    return `<div class="pad" style="padding-top:14px"><div style="max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:14px">
-      <div class="card">
-        <div class="card-head">
-          <span class="tile-ico" style="background:${isLive ? 'var(--emerald-soft)' : 'var(--slate-soft)'};color:${isLive ? 'var(--emerald)' : 'var(--text-3)'}">${svg(isLive ? (I.play || I.tick) : (I.pause || I.x))}</span>
-          <div class="card-title">Global aan/uit</div>
-        </div>
-        <div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:8px">
-          <div style="display:flex;align-items:center;gap:12px">
-            <div style="flex:1">
-              <div style="font-size:13.5px;font-weight:500">Drip-motor</div>
-              <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Env: <span class="mono">${esc(inst?.omgeving || '—')}</span> · Status: ${isLive ? '<span style="color:var(--emerald)">LIVE</span>' : '<span style="color:var(--text-3)">uit</span>'}${noodstop ? ' · <span style="color:var(--rose);font-weight:600">⚠ NOODSTOP env-var actief</span>' : ''}</div>
-            </div>
-            <button class="btn btn-ghost btn-sm" onclick="window.__autLsToggle()" ${_busy('lsToggle') ? 'disabled' : ''}>${isLive ? 'Uit zetten' : 'Aan zetten'}</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="toolbar" style="padding:0;gap:6px;flex-wrap:wrap">
-        ${[['trajecten','Trajecten & stappen'],['sjablonen','Sjablonen'],['drooglog','Drooglog (7d)']].map(([v, l]) => `<button class="chip ${view === v ? 'on' : ''}" onclick="window.__autLsView('${v}')">${esc(l)}</button>`).join('')}
-      </div>
-
-      ${view === 'trajecten' ? _lsTrajectenBlock()
-       : view === 'sjablonen' ? _lsSjablonenBlock()
-       : _lsDrooglogBlock()}
-    </div></div>
-    ${_confirmModalHtml()}`;
+    const sub = _ui.ls.subtab || 'flows';
+    let content;
+    if (sub === 'berichten')          content = `<div class="pad" style="padding-top:14px"><div style="max-width:1100px;margin:0 auto">${_lsSjablonenBlock()}</div></div>`;
+    else if (sub === 'instellingen')  content = _lsInstellingenView();
+    else if (sub === 'log')           content = _lsLogView();
+    else {
+      // 'flows' = trajecten & stappen
+      content = `<div class="pad" style="padding-top:14px"><div style="max-width:1100px;margin:0 auto">${_lsTrajectenBlock()}</div></div>`;
+    }
+    return _subtabToolbar('ls', sub) + content + _confirmModalHtml();
   }
 
   function _lsTrajectenBlock() {
@@ -1802,6 +1863,291 @@
   // NOTE: Lisa / Agent-autonomie-tab is verwijderd — die functionaliteit
   // hoort in de AI Agents-module, niet hier. Wanbetalers-tegel is ook weg
   // (dunning-backend blijft in Finance).
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // HARMONISATIE — gedeelde 4-tab chip-toolbar (Flows/Berichten/Instellingen/Log)
+  // ═══════════════════════════════════════════════════════════════════════
+  const SUBTABS = [
+    { v: 'flows',         l: 'Flows' },
+    { v: 'berichten',     l: 'Berichten' },
+    { v: 'instellingen',  l: 'Instellingen' },
+    { v: 'log',           l: 'Log' },
+  ];
+  function _subtabToolbar(moduleKey, current) {
+    return `<div class="toolbar" style="padding:12px 20px;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--border);background:var(--surface-2)">
+      ${SUBTABS.map((s) => `<button class="chip ${current === s.v ? 'on' : ''}" onclick="window.__autSetSubtab('${esc(moduleKey)}','${s.v}')">${esc(s.l)}</button>`).join('')}
+    </div>`;
+  }
+  window.__autSetSubtab = (moduleKey, subtab) => {
+    if (moduleKey === 'ev') _ui.ev.subtab = subtab;
+    else if (moduleKey === 'ob') _ui.ob.subtab = subtab;
+    else if (moduleKey === 'ls') _ui.ls.subtab = subtab;
+    if (window.DFO?.render) window.DFO.render();
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // HARMONISATIE — Berichten-tab views (Events + Onboarding)
+  //   Read: virtuele berichten uit steps[]. Bewerken: opent editor die de
+  //   volledige automation ophaalt, alleen step.config muteert, en via
+  //   bestaande save-endpoint terugschrijft. Rest van flow blijft 1-op-1.
+  // ═══════════════════════════════════════════════════════════════════════
+  function _evBerichtenView() {
+    if (!_live.evBerichten.data && !_live.evBerichten.loading && !_live.evBerichten.error) queueMicrotask(fetchEvBerichten);
+    if (_ui.ev.berichtEdit) return _berichtEditor('ev', _ui.ev.berichtEdit) + _confirmModalHtml();
+    if (_live.evBerichten.error && !_live.evBerichten.data) return errBlk('evBerichten', _live.evBerichten.error, "window.__autRetry('evBerichten')");
+    if (_live.evBerichten.loading && !_live.evBerichten.data) return skel();
+    return _berichtenList('ev', asArr(_live.evBerichten.data));
+  }
+  function _obBerichtenView() {
+    if (!_live.obBerichten.data && !_live.obBerichten.loading && !_live.obBerichten.error) queueMicrotask(fetchObBerichten);
+    if (_ui.ob.berichtEdit) return _berichtEditor('ob', _ui.ob.berichtEdit) + _confirmModalHtml();
+    if (_live.obBerichten.error && !_live.obBerichten.data) return errBlk('obBerichten', _live.obBerichten.error, "window.__autRetry('obBerichten')");
+    if (_live.obBerichten.loading && !_live.obBerichten.data) return skel();
+    return _berichtenList('ob', asArr(_live.obBerichten.data));
+  }
+  function _berichtenList(moduleKey, items) {
+    if (items.length === 0) return emptyBlk('Geen berichten', 'Bericht-stappen (e-mail + WhatsApp) verschijnen hier zodra ze in een flow bestaan.');
+    return `<div style="padding:12px 20px 20px">
+      <div style="padding:10px 12px;background:var(--surface-2);border-radius:8px;font-size:12px;color:var(--text-2);line-height:1.5;margin-bottom:12px">
+        Berichten worden bewerkt in de flow-stap zelf (bron-van-waarheid). Klik op een bericht om de editor te openen — je wijziging schrijft terug naar die specifieke stap, de rest van de flow blijft ongewijzigd.
+      </div>
+      ${H.table(
+        [{l:'Automation'},{l:'Stap',cls:'r optional'},{l:'Kanaal'},{l:'Inhoud / Template'},{l:'Actief',cls:'r'},{l:'',cls:'r'}],
+        items.map((b) => [
+          `<div><div class="cell-main">${esc(b.automation_name || '—')}</div><div class="mono" style="font-size:10.5px;color:var(--text-3);margin-top:2px">${esc(String(b.automation_id || '').slice(0,8))}…</div></div>`,
+          `<span class="mono" style="font-size:11.5px;color:var(--text-3)">step_${b.step_index}</span>`,
+          `<span style="font-size:11.5px">${b.kanaal === 'whatsapp' ? '<span style="color:#25d366">📱 WA</span>' : '<span style="color:var(--blue)">✉ Mail</span>'}</span>`,
+          b.kanaal === 'whatsapp'
+            ? `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(b.template_name || '(geen template)')}</span>`
+            : `<div style="max-width:340px"><div style="font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.onderwerp || '(geen onderwerp)')}</div>${b.body_text ? `<div style="font-size:10.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px">${esc(b.body_text.slice(0, 80))}${b.body_text.length > 80 ? '…' : ''}</div>` : ''}</div>`,
+          b.automation_enabled ? H.pill('ok','Actief') : H.pill('neutral','Uit'),
+          `<div style="display:flex;gap:3px;justify-content:flex-end">
+            <button class="btn btn-ghost btn-sm" onclick="window.__autBerichtEdit('${esc(moduleKey)}','${esc(b.automation_id)}',${b.step_index})">Bewerken →</button>
+          </div>`,
+        ])
+      )}
+    </div>`;
+  }
+  window.__autBerichtEdit = async (moduleKey, automationId, stepIndex) => {
+    // Laad volledige automation (surgical-safe: we sturen 'em straks 1-op-1
+    // terug met alleen step.config gewijzigd)
+    const cacheKey = moduleKey === 'ev' ? 'evAutoById' : 'obAutoById';
+    if (!_live[cacheKey].data[automationId]) {
+      if (moduleKey === 'ev') await fetchEvAutoById(automationId);
+      else await fetchObAutoById(automationId);
+    }
+    const auto = _live[cacheKey].data[automationId];
+    if (!auto) return alert('Automation niet gevonden.');
+    const step = asArr(auto.steps)[stepIndex];
+    if (!step) return alert('Stap niet gevonden.');
+    if (step.type !== 'send_email' && step.type !== 'send_whatsapp') {
+      return alert('Deze stap is geen bericht-stap.');
+    }
+    const target = moduleKey === 'ev' ? _ui.ev : _ui.ob;
+    target.berichtEdit = {
+      automation_id: automationId,
+      automation_name: auto.name || '(geen naam)',
+      step_index: stepIndex,
+      step_type: step.type,
+      // Editable snapshot van step.config
+      cfg: { ...(step.config || {}) },
+    };
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autBerichtClose = (moduleKey) => {
+    (moduleKey === 'ev' ? _ui.ev : _ui.ob).berichtEdit = null;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__autBerichtField = (moduleKey, k, v) => {
+    const target = moduleKey === 'ev' ? _ui.ev : _ui.ob;
+    if (target.berichtEdit) target.berichtEdit.cfg[k] = v;
+  };
+  window.__autBerichtSave = async (moduleKey) => {
+    const target = moduleKey === 'ev' ? _ui.ev : _ui.ob;
+    const be = target.berichtEdit; if (!be) return;
+    const cacheKey = moduleKey === 'ev' ? 'evAutoById' : 'obAutoById';
+    const auto = _live[cacheKey].data[be.automation_id];
+    if (!auto) return alert('Automation niet meer in cache.');
+    // SURGICAL: kopieer de VOLLEDIGE automation, wijzig alleen die ene
+    // step.config, en stuur alles 1-op-1 terug via bestaande save-endpoint.
+    // Dit voorkomt dat andere velden (trigger/scope/andere steps) muteren.
+    const payload = JSON.parse(JSON.stringify(auto));
+    const step = asArr(payload.steps)[be.step_index];
+    if (!step) return alert('Stap niet meer aanwezig.');
+    step.config = { ...(step.config || {}), ...be.cfg };
+    _setBusy('berichtSave', true);
+    try {
+      const endpoint = moduleKey === 'ev' ? '/api/events-automation-save' : '/api/onboarding-automation-save';
+      const j = await window.KV.authedJson(endpoint, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(payload),
+      });
+      if (j?.error) throw new Error(j.error);
+      target.berichtEdit = null;
+      // Invalidate caches — herfetch bericht-lijst + automation-cache
+      _live[cacheKey].data[be.automation_id] = null;
+      if (moduleKey === 'ev') { _live.evBerichten.data = null; _live.evAutos.data = null; queueMicrotask(fetchEvBerichten); queueMicrotask(fetchEvAutos); }
+      else { _live.obBerichten.data = null; _live.obAutos.data = null; queueMicrotask(fetchObBerichten); queueMicrotask(fetchObAutos); }
+      _showToast('Bericht opgeslagen');
+    } catch (e) { alert('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
+    finally { _setBusy('berichtSave', false); }
+  };
+
+  function _berichtEditor(moduleKey, be) {
+    const isMail = be.step_type === 'send_email';
+    const isWA   = be.step_type === 'send_whatsapp';
+    const busy = _busy('berichtSave');
+    const cfg = be.cfg || {};
+    // Template-picker preload voor WA
+    if (isWA && !_live.inboxTpls.data && !_live.inboxTpls.loading) queueMicrotask(fetchInboxTpls);
+    const tpls = asArr(_live.inboxTpls.data);
+    return `<div style="padding:12px 20px;background:var(--surface-2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+      <button class="btn btn-ghost btn-sm" onclick="window.__autBerichtClose('${esc(moduleKey)}')">${svg(I.arrDown || I.x, 'width:13px;height:13px;transform:rotate(90deg)')}Terug naar berichten</button>
+      <span style="font-size:14px;font-weight:600">Bericht bewerken — ${esc(be.automation_name)} · step_${be.step_index}</span>
+      <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="window.__autBerichtSave('${esc(moduleKey)}')" ${busy ? 'disabled' : ''}>${busy ? 'Opslaan…' : (svg(I.tick) + 'Opslaan')}</button>
+    </div>
+    <div class="pad" style="padding-top:14px"><div style="max-width:820px;margin:0 auto;display:flex;flex-direction:column;gap:14px">
+      <div style="padding:10px 12px;background:var(--amber-soft);border:1px solid var(--amber-line, var(--amber));border-radius:8px;font-size:12px;color:var(--text-2);line-height:1.5">
+        <b>Surgical write:</b> alleen deze specifieke bericht-stap wordt gewijzigd. De rest van de flow (trigger, scope, andere stappen) blijft 1-op-1 zoals hij is.
+      </div>
+      ${isMail ? `<div class="card"><div class="card-head"><div class="card-title">E-mail</div></div><div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+        <div>
+          <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Onderwerp</label>
+          <input type="text" value="${esc(cfg.subject || '')}" oninput="window.__autBerichtField('${esc(moduleKey)}','subject', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box" />
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Body (tekst)</label>
+          <textarea oninput="window.__autBerichtField('${esc(moduleKey)}','body_text', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box;min-height:180px;font-family:inherit;resize:vertical">${esc(cfg.body_text || '')}</textarea>
+          <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Placeholders: <code style="background:var(--surface-2);padding:1px 4px;border-radius:3px">{{attendee.voornaam}}</code>, <code style="background:var(--surface-2);padding:1px 4px;border-radius:3px">{{event.titel}}</code>, <code style="background:var(--surface-2);padding:1px 4px;border-radius:3px">{{event.datum}}</code></div>
+        </div>
+      </div></div>` : ''}
+      ${isWA ? `<div class="card"><div class="card-head"><div class="card-title">WhatsApp-template</div></div><div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px">
+        <div>
+          <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Meta-template</label>
+          <select oninput="window.__autBerichtField('${esc(moduleKey)}','template_name', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box">
+            <option value="">— kies template —</option>
+            ${tpls.map((t) => `<option value="${esc(t.name)}" ${cfg.template_name === t.name ? 'selected' : ''}>${esc(t.name)} (${esc(t.language || 'nl')})</option>`).join('')}
+          </select>
+          <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">${tpls.length} approved templates. Named placeholders worden server-side geresolved.</div>
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Taal</label>
+          <input type="text" value="${esc(cfg.template_language || 'nl')}" oninput="window.__autBerichtField('${esc(moduleKey)}','template_language', this.value)" style="width:120px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;font-family:'IBM Plex Mono',monospace;box-sizing:border-box" />
+        </div>
+      </div></div>` : ''}
+    </div></div>`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // HARMONISATIE — Log-tab views
+  // ═══════════════════════════════════════════════════════════════════════
+  function _evLogView() {
+    // Toon lijst van automations met per-automation "Runs bekijken"-knop
+    if (!_live.evAutos.data && !_live.evAutos.loading && !_live.evAutos.error) queueMicrotask(fetchEvAutos);
+    if (_ui.ev.runsModal) return _evRunsModal() + _confirmModalHtml();
+    if (_live.evAutos.loading && !_live.evAutos.data) return skel();
+    const items = asArr(_live.evAutos.data);
+    if (items.length === 0) return emptyBlk('Geen runs', 'Nog geen automations om logs voor te tonen.');
+    return _autoLogList('ev', items);
+  }
+  function _obLogView() {
+    if (!_live.obAutos.data && !_live.obAutos.loading && !_live.obAutos.error) queueMicrotask(fetchObAutos);
+    if (_ui.ob.runsModal) return _obRunsModal() + _confirmModalHtml();
+    if (_live.obAutos.loading && !_live.obAutos.data) return skel();
+    const items = asArr(_live.obAutos.data);
+    if (items.length === 0) return emptyBlk('Geen runs', 'Nog geen automations om logs voor te tonen.');
+    return _autoLogList('ob', items);
+  }
+  function _autoLogList(moduleKey, items) {
+    return `<div style="padding:12px 20px 20px">
+      ${H.table(
+        [{l:'Automation'},{l:'Trigger',cls:'optional'},{l:'Stappen',cls:'r optional'},{l:'Status'},{l:'',cls:'r'}],
+        items.map((a) => [
+          `<span class="cell-main">${esc(a.name || '—')}</span>`,
+          `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(a.trigger_type || '—')}</span>`,
+          `<span class="mono">${asArr(a.steps).length}</span>`,
+          a.enabled ? H.pill('ok','Actief') : H.pill('neutral','Uit'),
+          `<button class="btn btn-ghost btn-sm" onclick="window.__aut${moduleKey === 'ev' ? 'Ev' : 'Ob'}Runs('${esc(a.id)}')">Runs bekijken →</button>`,
+        ])
+      )}
+    </div>`;
+  }
+  function _lsLogView() {
+    if (!_live.lsLog.data && !_live.lsLog.loading && !_live.lsLog.error) queueMicrotask(() => fetchLsLog());
+    if (_live.lsLog.error && !_live.lsLog.data) return errBlk('lsLog', _live.lsLog.error, "window.__autLsLogRetry()");
+    if (_live.lsLog.loading && !_live.lsLog.data) return skel();
+    const d = _live.lsLog.data || {};
+    const items = asArr(d.items);
+    const s = d.statussen || { verstuurd: 0, droog: 0, fout: 0 };
+    return `<div style="padding:12px 20px 20px">
+      ${H.kpis([
+        { c:'emerald', icon:I.tick,  label:'Verstuurd (14d)', val:String(s.verstuurd || 0) },
+        { c:'amber',   icon:I.clock, label:'Droog (simulatie)', val:String(s.droog || 0) },
+        { c:'rose',    icon:I.alert, label:'Fout',             val:String(s.fout || 0), hi: s.fout > 0 ? 1 : 0 },
+      ])}
+      ${items.length === 0 ? emptyBlk('Geen log-items', 'Geen berichten in de afgelopen 14 dagen.')
+        : `<div style="padding:0">${H.table(
+            [{l:'Wanneer'},{l:'Traject'},{l:'Soort',cls:'optional'},{l:'Kanaal',cls:'optional'},{l:'Naar'},{l:'Agent',cls:'optional'},{l:'Status'}],
+            items.slice(0, 200).map((r) => [
+              `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(_fmtDateTime(r.verstuurd_op))}</span>`,
+              `<span style="font-size:12.5px">${esc(r.traject || '—')}</span>`,
+              `<span style="font-size:11.5px;color:var(--text-3)">${esc(r.soort || '—')}</span>`,
+              `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(r.kanaal || '—')}</span>`,
+              `<span class="mono" style="font-size:11.5px">${esc(r.naar || '—')}</span>`,
+              `<span style="font-size:11.5px;color:var(--text-3)">${esc(r.agent || '—')}</span>`,
+              r.status === 'verstuurd' ? H.pill('ok','Verstuurd') : r.status === 'droog' ? H.pill('warn','Droog') : H.pill('danger', r.status || '—'),
+            ])
+          )}</div>`}
+    </div>`;
+  }
+  window.__autLsLogRetry = () => { _live.lsLog.data = null; _live.lsLog.error = null; fetchLsLog(); };
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // HARMONISATIE — Instellingen-tab views
+  // ═══════════════════════════════════════════════════════════════════════
+  function _evInstellingenView() {
+    return `<div class="pad" style="padding-top:14px"><div style="max-width:720px;margin:0 auto">
+      <div class="card"><div class="card-head"><div class="card-title">Instellingen — Events-automatiseringen</div></div><div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px;font-size:12.5px;color:var(--text-2);line-height:1.6">
+        <div><b>Trigger-defaults</b> worden per flow gezet in de Flows-tab (open een flow → Trigger-sectie).</div>
+        <div><b>Enroll-mode</b> (new_only vs include_existing) staat per flow.</div>
+        <div><b>Scope</b> (all/niveau/events) staat per flow.</div>
+        <div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:11.5px;color:var(--text-3)">Er zijn geen module-brede events-automation-instellingen. De Overzicht-tab toont de cron-status (elke minuut).</div>
+      </div></div>
+    </div></div>`;
+  }
+  function _obInstellingenView() {
+    return `<div class="pad" style="padding-top:14px"><div style="max-width:720px;margin:0 auto">
+      <div class="card"><div class="card-head"><div class="card-title">Instellingen — Onboarding-automatiseringen</div></div><div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px;font-size:12.5px;color:var(--text-2);line-height:1.6">
+        <div><b>Trigger-defaults</b> worden per flow gezet in de Flows-tab.</div>
+        <div><b>Enroll-mode</b> staat per flow.</div>
+        <div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:11.5px;color:var(--text-3)">Onboarding-automations hebben geen scope-veld (verschilt van Events, bewust: onboarding is 1-op-1 per klant).</div>
+      </div></div>
+    </div></div>`;
+  }
+  function _lsInstellingenView() {
+    if (!_live.lsInst.data && !_live.lsInst.loading && !_live.lsInst.error) queueMicrotask(fetchLsInst);
+    const inst = _live.lsInst.data;
+    const isLive = inst?.live === true;
+    const noodstop = inst?.noodstop === true;
+    return `<div class="pad" style="padding-top:14px"><div style="max-width:720px;margin:0 auto"><div class="card">
+      <div class="card-head"><div class="card-title">Instellingen — Leadsonderhoud</div></div>
+      <div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;gap:12px;padding:10px;border:1px solid var(--border);border-radius:8px">
+          <div style="flex:1">
+            <div style="font-size:13.5px;font-weight:500">Drip-motor live</div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Env: <span class="mono">${esc(inst?.omgeving || '—')}</span> · Status: ${isLive ? '<span style="color:var(--emerald)">LIVE</span>' : '<span style="color:var(--text-3)">uit</span>'}${noodstop ? ' · <span style="color:var(--rose);font-weight:600">⚠ NOODSTOP env-var actief</span>' : ''}</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__autLsToggle()" ${_busy('lsToggle') ? 'disabled' : ''}>${isLive ? 'Uit zetten' : 'Aan zetten'}</button>
+        </div>
+        <div style="font-size:12px;color:var(--text-2);line-height:1.6">
+          <b>Stille uren:</b> 21:00–08:00 (motor stuurt niets in dit venster).<br>
+          <b>Max berichten/dag/persoon:</b> 1 (motor skipt herhalingen binnen 24u).<br>
+          <b>Cron:</b> elk kwartier (via Vercel cron).
+        </div>
+      </div>
+    </div></div></div>
+    ${_confirmModalHtml()}`;
+  }
 
   // ═══════════════════════════════════════════════════════════════════════
   // VIEW REGISTRATIE
