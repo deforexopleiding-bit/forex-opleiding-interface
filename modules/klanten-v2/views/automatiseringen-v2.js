@@ -35,6 +35,15 @@
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
+  // Toast helper — kopie van events-v2.js pattern. Deelt DOM-element #kv-toast
+  // uit modules/klanten-v2/index.html (r129).
+  function _showToast(msg) {
+    const el = document.getElementById('kv-toast');
+    if (!el) return;
+    el.textContent = msg; el.classList.add('show');
+    clearTimeout(_showToast._t); _showToast._t = setTimeout(() => el.classList.remove('show'), 3000);
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   // LIVE STATE
   // ═══════════════════════════════════════════════════════════════════════
@@ -49,7 +58,11 @@
     lsTraj:      { loading: false, error: null, data: null },   // leadsonderhoud-trajecten
     lsDrog:      { loading: false, error: null, data: null },   // leadsonderhoud-droogloop-log
     lsQuiz:      { loading: false, error: null, data: null },   // leadsonderhoud-quiz-lijst (voor picker)
-    inboxTpls:   { loading: false, error: null, data: null },   // WA-templates voor send_whatsapp step
+    // WA-templates voor send_whatsapp step, PER MODULE (events-whatsapp-templates-list
+    // en onboarding-whatsapp-templates-list — inbox-template-list eist conversation_id
+    // en werkt niet in de automation-builder context, gaf oneindige 400-loop).
+    evTpls:      { loading: false, error: null, data: null },
+    obTpls:      { loading: false, error: null, data: null },
     // Berichten-tab data (Events + Onboarding read-view over steps[])
     evBerichten: { loading: false, error: null, data: null },   // events-berichten-list
     obBerichten: { loading: false, error: null, data: null },   // onboarding-berichten-list
@@ -189,10 +202,15 @@
     if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.items);
     if (window.DFO?.render) window.DFO.render();
   }
-  async function fetchLsLog(traject) {
+  async function fetchLsLog(filters) {
     const st = _live.lsLog; if (st.loading) return;
     st.loading = true; st.error = null;
-    const url = '/api/leadsonderhoud-berichten-log' + (traject ? '?traject=' + encodeURIComponent(traject) : '');
+    const f = filters || {};
+    const params = [];
+    if (f.traject) params.push('traject=' + encodeURIComponent(f.traject));
+    if (f.status)  params.push('status='  + encodeURIComponent(f.status));
+    if (f.soort)   params.push('soort='   + encodeURIComponent(f.soort));
+    const url = '/api/leadsonderhoud-berichten-log' + (params.length ? '?' + params.join('&') : '');
     const j = await tryFetch('lsLog', url);
     st.loading = false;
     if (j && j.__error) st.error = j.__error;
@@ -221,17 +239,31 @@
     else st.data[id] = JSON.parse(JSON.stringify(a));
     if (window.DFO?.render) window.DFO.render();
   }
-  // Template-picker voor send_whatsapp step — hergebruikt inbox-template-list
-  // (WA-only). Cached module-wide (templates zijn niet conv-specifiek na
-  // load; alleen voor filtering per WABA maar events+onboarding delen scope).
-  async function fetchInboxTpls() {
-    const st = _live.inboxTpls; if (st.loading || st.data) return;
+  // Template-picker voor send_whatsapp step — PER MODULE.
+  // Guard bevat st.error om oneindige refetch-loop te voorkomen (queueMicrotask
+  // uit render zou anders elke tick opnieuw fetchen bij persistent error).
+  // Retry: window.__autTplsRetry(moduleKey) reset error + fetcht opnieuw.
+  async function fetchEvTpls() {
+    const st = _live.evTpls; if (st.loading || st.data || st.error) return;
     st.loading = true; st.error = null;
-    const j = await tryFetch('tpls', '/api/inbox-template-list');
+    const j = await tryFetch('evTpls', '/api/events-whatsapp-templates-list');
     st.loading = false;
     if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.items);
     if (window.DFO?.render) window.DFO.render();
   }
+  async function fetchObTpls() {
+    const st = _live.obTpls; if (st.loading || st.data || st.error) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('obTpls', '/api/onboarding-whatsapp-templates-list');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.items);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  window.__autTplsRetry = (moduleKey) => {
+    const st = moduleKey === 'ev' ? _live.evTpls : _live.obTpls;
+    st.data = null; st.error = null;
+    if (moduleKey === 'ev') fetchEvTpls(); else fetchObTpls();
+  };
 
   // ═══════════════════════════════════════════════════════════════════════
   // SHARED HELPERS
@@ -758,20 +790,20 @@
             ${EV_TRIGGERS.map((t) => `<option value="${t.v}" ${a.trigger_type === t.v ? 'selected' : ''}>${esc(t.l)}</option>`).join('')}
           </select>
         </div>
-        ${(a.trigger_type === 'time_before_event' || a.trigger_type === 'on_assessment_not_completed_after') ? `
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-            <div>
-              <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Waarde</label>
-              <input type="number" value="${esc(String(a.trigger_config?.value ?? 24))}" oninput="window.__autEvTrigConfig('value', Number(this.value))" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box" />
-            </div>
-            <div>
-              <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Eenheid</label>
-              <select onchange="window.__autEvTrigConfig('unit', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box">
-                ${['minutes','hours','days'].map((u) => `<option value="${u}" ${a.trigger_config?.unit === u ? 'selected' : ''}>${esc(u)}</option>`).join('')}
-              </select>
-            </div>
-          </div>
-        ` : ''}
+        ${(a.trigger_type === 'time_before_event' || a.trigger_type === 'on_assessment_not_completed_after') ? (() => {
+          // Canonieke keys (events-automation-save + engine):
+          //   time_before_event               → trigger_config.hours_before
+          //   on_assessment_not_completed_after → trigger_config.hours_after_signup
+          // Legacy fallback op oude trigger_config.value voor migratie-safe read.
+          const key = a.trigger_type === 'time_before_event' ? 'hours_before' : 'hours_after_signup';
+          const label = a.trigger_type === 'time_before_event' ? 'Uren vóór event' : 'Uren na aanmelding';
+          const currentHours = a.trigger_config?.[key] ?? a.trigger_config?.value ?? 24;
+          return `<div>
+            <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">${esc(label)}</label>
+            <input type="number" min="1" value="${esc(String(currentHours))}" oninput="window.__autEvTrigHours(Number(this.value))" style="width:180px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box" />
+            <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Alleen uren — event-cron rekent in hele uren.</div>
+          </div>`;
+        })() : ''}
         <div>
           <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Enroll-mode</label>
           <select onchange="window.__autEvField('enroll_mode', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box">
@@ -835,18 +867,24 @@
   function _evStepConfig(step, idx) {
     const cfg = step.config || {};
     const upd = (k) => `window.__autEvStepConfig(${idx}, '${k}', this.value)`;
-    if (step.type === 'wait') return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-      <div><label style="font-size:11px;color:var(--text-3)">Wachttijd</label><input type="number" value="${esc(String(cfg.value || 1))}" oninput="${upd('value')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box" /></div>
-      <div><label style="font-size:11px;color:var(--text-3)">Eenheid</label><select oninput="${upd('unit')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">${['minutes','hours','days'].map((u) => `<option value="${u}" ${cfg.unit === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
-    </div>`;
+    if (step.type === 'wait') {
+      // Canoniek veld = cfg.amount (save-validator + engine). Legacy fallback op cfg.value
+      // voor pre-fix rijen; bij eerste re-save wordt cfg.amount geschreven.
+      const waitVal = (cfg.amount != null ? cfg.amount : (cfg.value != null ? cfg.value : 1));
+      return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div><label style="font-size:11px;color:var(--text-3)">Wachttijd</label><input type="number" value="${esc(String(waitVal))}" oninput="${upd('amount')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box" /></div>
+        <div><label style="font-size:11px;color:var(--text-3)">Eenheid</label><select onchange="${upd('unit')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">${['minutes','hours','days'].map((u) => `<option value="${u}" ${cfg.unit === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
+      </div>`;
+    }
     if (step.type === 'condition') return `<div>
       <label style="font-size:11px;color:var(--text-3)">Check</label>
-      <select oninput="${upd('check')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">
-        ${['assessment_completed','tag_present','status_is','no_inbound_since'].map((c) => `<option value="${c}" ${cfg.check === c ? 'selected' : ''}>${c}</option>`).join('')}
+      <select onchange="${upd('check')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">
+        ${['assessment_completed','assessment_not_completed','still_registered','niveau_is_basis','niveau_is_gevorderd'].map((c) => `<option value="${c}" ${cfg.check === c ? 'selected' : ''}>${c}</option>`).join('')}
       </select>
-      <label style="font-size:11px;color:var(--text-3);margin-top:6px;display:block">Extra param (bv. tag-naam of status-waarde)</label>
-      <input type="text" value="${esc(cfg.value || '')}" oninput="${upd('value')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box" />
-      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;margin-top:6px"><input type="checkbox" ${cfg.stop_if_false ? 'checked' : ''} onchange="window.__autEvStepConfigBool(${idx}, 'stop_if_false', this.checked)" />Stop de reeks als check FALSE</label>
+      <label style="font-size:11px;color:var(--text-3);margin-top:6px;display:block">Bij FALSE</label>
+      <select onchange="${upd('on_fail')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">
+        ${['exit','skip_to_end'].map((v) => `<option value="${v}" ${cfg.on_fail === v ? 'selected' : ''}>${v}</option>`).join('')}
+      </select>
     </div>`;
     if (step.type === 'send_email') return `<div style="display:flex;flex-direction:column;gap:6px">
       <div><label style="font-size:11px;color:var(--text-3)">Onderwerp</label><input type="text" value="${esc(cfg.subject || '')}" oninput="${upd('subject')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box" /></div>
@@ -854,15 +892,32 @@
       <div class="mono" style="font-size:10.5px;color:var(--text-3)">Placeholders: {{attendee.voornaam}}, {{event.titel}}, {{event.datum}}</div>
     </div>`;
     if (step.type === 'send_whatsapp') {
-      if (!_live.inboxTpls.data && !_live.inboxTpls.loading) queueMicrotask(fetchInboxTpls);
-      const tpls = asArr(_live.inboxTpls.data);
+      const stTpls = _live.evTpls;
+      if (!stTpls.data && !stTpls.loading && !stTpls.error) queueMicrotask(fetchEvTpls);
+      const tpls = asArr(stTpls.data);
+      const savedName = cfg.template_name || '';
+      const savedInList = tpls.some((t) => t.name === savedName);
+      // Fallback-option: opgeslagen template staat niet in de geladen lijst
+      // (of lijst kon niet laden). Renderen om te voorkomen dat de dropdown
+      // "— kies template —" toont voor een LIVE opgeslagen template en de
+      // gebruiker per ongeluk de waarde wist.
+      const fallbackOpt = (savedName && !savedInList)
+        ? `<option value="${esc(savedName)}" selected>${esc(savedName)} — opgeslagen (niet in huidige lijst)</option>` : '';
+      const errNote = stTpls.error
+        ? `<div style="font-size:10.5px;color:var(--rose);margin-top:4px">Templates niet geladen: ${esc(stTpls.error)}. <button class="btn btn-ghost btn-sm" onclick="window.__autTplsRetry('ev')" style="padding:2px 6px;font-size:10.5px">Opnieuw</button></div>`
+        : `<div class="mono" style="font-size:10.5px;color:var(--text-3);margin-top:4px">${tpls.length} approved templates. Named placeholders (bv. {{attendee.voornaam}}) worden server-side geresolved.</div>`;
+      // Placeholder is hidden zodra er een opgeslagen waarde is (zonder disabled
+      // want dan kan user niet opnieuw kiezen). Op initieel-leeg wordt de
+      // placeholder wel getoond als default.
+      const placeholderSelected = !savedName ? 'selected' : '';
       return `<div>
         <label style="font-size:11px;color:var(--text-3)">Meta-template</label>
-        <select oninput="${upd('template_name')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">
-          <option value="">— kies template —</option>
-          ${tpls.map((t) => `<option value="${esc(t.name)}" ${cfg.template_name === t.name ? 'selected' : ''}>${esc(t.name)} (${esc(t.language || 'nl')})</option>`).join('')}
+        <select onchange="window.__autEvStepConfigTpl(${idx}, this.value)" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">
+          <option value="" ${placeholderSelected}>— kies template —</option>
+          ${fallbackOpt}
+          ${tpls.map((t) => `<option value="${esc(t.name)}" ${savedName === t.name ? 'selected' : ''}>${esc(t.name)} (${esc(t.language || 'nl')})</option>`).join('')}
         </select>
-        <div class="mono" style="font-size:10.5px;color:var(--text-3);margin-top:4px">${tpls.length} approved templates. Named placeholders (bv. {{attendee.voornaam}}) worden server-side geresolved.</div>
+        ${errNote}
       </div>`;
     }
     if (step.type === 'set_tag') return `<div>
@@ -884,8 +939,18 @@
   // Events editor handlers
   window.__autEvField = (k, v) => { if (_ui.ev.editing) _ui.ev.editing[k] = v; if (window.DFO?.render && (k === 'trigger_type' || k === 'scope_type')) window.DFO.render(); };
   window.__autEvTrigConfig = (k, v) => { if (_ui.ev.editing) { _ui.ev.editing.trigger_config = _ui.ev.editing.trigger_config || {}; _ui.ev.editing.trigger_config[k] = v; } };
+  // Trigger-config canoniek: schrijft hours_before OF hours_after_signup afhankelijk
+  // van trigger_type; ruimt legacy value/unit keys op zodat re-save schoon is.
+  window.__autEvTrigHours = (h) => {
+    if (!_ui.ev.editing) return;
+    const cfg = _ui.ev.editing.trigger_config = _ui.ev.editing.trigger_config || {};
+    const t = _ui.ev.editing.trigger_type;
+    if (t === 'time_before_event') cfg.hours_before = h;
+    else if (t === 'on_assessment_not_completed_after') cfg.hours_after_signup = h;
+    delete cfg.value; delete cfg.unit;
+  };
   window.__autEvScopeConfig = (k, v) => { if (_ui.ev.editing) { _ui.ev.editing.scope_config = _ui.ev.editing.scope_config || {}; _ui.ev.editing.scope_config[k] = v; } };
-  window.__autEvStepAdd = () => { if (_ui.ev.editing) { _ui.ev.editing.steps = asArr(_ui.ev.editing.steps); _ui.ev.editing.steps.push({ type:'wait', config:{ value:1, unit:'days' } }); if (window.DFO?.render) window.DFO.render(); } };
+  window.__autEvStepAdd = () => { if (_ui.ev.editing) { _ui.ev.editing.steps = asArr(_ui.ev.editing.steps); _ui.ev.editing.steps.push({ type:'wait', config:{ amount:1, unit:'days' } }); if (window.DFO?.render) window.DFO.render(); } };
   window.__autEvStepDelete = (idx) => { if (_ui.ev.editing) { _ui.ev.editing.steps.splice(idx, 1); if (window.DFO?.render) window.DFO.render(); } };
   window.__autEvStepMove = (idx, dir) => {
     if (!_ui.ev.editing) return;
@@ -898,6 +963,14 @@
   window.__autEvStepType = (idx, type) => { if (_ui.ev.editing) { _ui.ev.editing.steps[idx] = { type, config: {} }; if (window.DFO?.render) window.DFO.render(); } };
   window.__autEvStepConfig = (idx, k, v) => { if (_ui.ev.editing) { _ui.ev.editing.steps[idx].config = _ui.ev.editing.steps[idx].config || {}; _ui.ev.editing.steps[idx].config[k] = v; } };
   window.__autEvStepConfigBool = (idx, k, v) => { if (_ui.ev.editing) { _ui.ev.editing.steps[idx].config = _ui.ev.editing.steps[idx].config || {}; _ui.ev.editing.steps[idx].config[k] = !!v; } };
+  // Guarded WA-template writer voor flow-editor: skip als new leeg is EN saved bestaat.
+  window.__autEvStepConfigTpl = (idx, v) => {
+    if (!_ui.ev.editing) return;
+    const step = _ui.ev.editing.steps[idx]; if (!step) return;
+    step.config = step.config || {};
+    if (v === '' && step.config.template_name) return;
+    step.config.template_name = v;
+  };
   window.__autEvSave = async () => {
     const a = _ui.ev.editing; if (!a) return;
     if (!a.name || !a.name.trim()) return alert('Naam is verplicht.');
@@ -1153,12 +1226,26 @@
             ${OB_TRIGGERS.map((t) => `<option value="${t.v}" ${a.trigger_type === t.v ? 'selected' : ''}>${esc(t.l)}</option>`).join('')}
           </select>
         </div>
-        ${(a.trigger_type === 'time_after_signup' || a.trigger_type === 'on_wizard_not_started_after') ? `
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-            <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Waarde</label><input type="number" value="${esc(String(a.trigger_config?.value ?? 24))}" oninput="window.__autObTrigConfig('value', Number(this.value))" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box" /></div>
-            <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Eenheid</label><select onchange="window.__autObTrigConfig('unit', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box">${['minutes','hours','days'].map((u) => `<option value="${u}" ${a.trigger_config?.unit === u ? 'selected' : ''}>${esc(u)}</option>`).join('')}</select></div>
-          </div>
-        ` : ''}
+        ${(a.trigger_type === 'time_after_signup' || a.trigger_type === 'on_wizard_not_started_after') ? (() => {
+          // Canonieke keys (onboarding-automation-save r103-104):
+          //   trigger_config.hours_after_signup  OF  trigger_config.days_after_signup
+          // Read: prefer days (als >0), dan hours, dan legacy value.
+          // Unit picker biedt alleen hours+days (minutes is niet canoniek voor deze triggers).
+          const days  = Number(a.trigger_config?.days_after_signup);
+          const hours = Number(a.trigger_config?.hours_after_signup);
+          const legacy = Number(a.trigger_config?.value);
+          let dispVal, dispUnit;
+          if (Number.isFinite(days) && days > 0)       { dispVal = days;   dispUnit = 'days';  }
+          else if (Number.isFinite(hours) && hours > 0){ dispVal = hours;  dispUnit = 'hours'; }
+          else if (Number.isFinite(legacy) && legacy > 0) {
+            dispVal = legacy;
+            dispUnit = (a.trigger_config?.unit === 'days') ? 'days' : 'hours';
+          } else { dispVal = 24; dispUnit = 'hours'; }
+          return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Waarde</label><input id="ob-trig-value" type="number" min="1" value="${esc(String(dispVal))}" oninput="window.__autObTrigDur(Number(this.value), (document.getElementById('ob-trig-unit')||{}).value || '${esc(dispUnit)}')" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box" /></div>
+            <div><label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Eenheid</label><select id="ob-trig-unit" onchange="window.__autObTrigDur(Number((document.getElementById('ob-trig-value')||{}).value)||${esc(String(dispVal))}, this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box">${['hours','days'].map((u) => `<option value="${u}" ${dispUnit === u ? 'selected' : ''}>${esc(u)}</option>`).join('')}</select></div>
+          </div>`;
+        })() : ''}
       </div></div>
       <div class="card"><div class="card-head"><div class="card-title">Stappen (${asArr(a.steps).length})</div>
         <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window.__autObStepAdd()">${svg(I.plus)}Stap toevoegen</button>
@@ -1184,30 +1271,47 @@
   function _obStepConfig(step, idx) {
     const cfg = step.config || {};
     const upd = (k) => `window.__autObStepConfig(${idx}, '${k}', this.value)`;
-    if (step.type === 'wait') return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-      <div><label style="font-size:11px;color:var(--text-3)">Wachttijd</label><input type="number" value="${esc(String(cfg.value || 1))}" oninput="${upd('value')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box" /></div>
-      <div><label style="font-size:11px;color:var(--text-3)">Eenheid</label><select oninput="${upd('unit')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">${['minutes','hours','days'].map((u) => `<option value="${u}" ${cfg.unit === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
-    </div>`;
+    if (step.type === 'wait') {
+      const waitVal = (cfg.amount != null ? cfg.amount : (cfg.value != null ? cfg.value : 1));
+      return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div><label style="font-size:11px;color:var(--text-3)">Wachttijd</label><input type="number" value="${esc(String(waitVal))}" oninput="${upd('amount')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box" /></div>
+        <div><label style="font-size:11px;color:var(--text-3)">Eenheid</label><select onchange="${upd('unit')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">${['minutes','hours','days'].map((u) => `<option value="${u}" ${cfg.unit === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
+      </div>`;
+    }
     if (step.type === 'condition') return `<div>
       <label style="font-size:11px;color:var(--text-3)">Check</label>
-      <select oninput="${upd('check')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">
+      <select onchange="${upd('check')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">
         ${OB_CONDITION_CHECKS.map((c) => `<option value="${c}" ${cfg.check === c ? 'selected' : ''}>${c}</option>`).join('')}
       </select>
-      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;margin-top:6px"><input type="checkbox" ${cfg.stop_if_false ? 'checked' : ''} onchange="window.__autObStepConfigBool(${idx}, 'stop_if_false', this.checked)" />Stop de reeks als check FALSE</label>
+      <label style="font-size:11px;color:var(--text-3);margin-top:6px;display:block">Bij FALSE</label>
+      <select onchange="${upd('on_fail')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">
+        ${['exit','skip_to_end'].map((v) => `<option value="${v}" ${cfg.on_fail === v ? 'selected' : ''}>${v}</option>`).join('')}
+      </select>
     </div>`;
     if (step.type === 'send_email') return `<div style="display:flex;flex-direction:column;gap:6px">
       <div><label style="font-size:11px;color:var(--text-3)">Onderwerp</label><input type="text" value="${esc(cfg.subject || '')}" oninput="${upd('subject')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box" /></div>
       <div><label style="font-size:11px;color:var(--text-3)">Body (text)</label><textarea oninput="${upd('body')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px;box-sizing:border-box;min-height:80px;font-family:inherit;resize:vertical">${esc(cfg.body || '')}</textarea></div>
     </div>`;
     if (step.type === 'send_whatsapp') {
-      if (!_live.inboxTpls.data && !_live.inboxTpls.loading) queueMicrotask(fetchInboxTpls);
-      const tpls = asArr(_live.inboxTpls.data);
+      const stTpls = _live.obTpls;
+      if (!stTpls.data && !stTpls.loading && !stTpls.error) queueMicrotask(fetchObTpls);
+      const tpls = asArr(stTpls.data);
+      const savedName = cfg.template_name || '';
+      const savedInList = tpls.some((t) => t.name === savedName);
+      const fallbackOpt = (savedName && !savedInList)
+        ? `<option value="${esc(savedName)}" selected>${esc(savedName)} — opgeslagen (niet in huidige lijst)</option>` : '';
+      const errNote = stTpls.error
+        ? `<div style="font-size:10.5px;color:var(--rose);margin-top:4px">Templates niet geladen: ${esc(stTpls.error)}. <button class="btn btn-ghost btn-sm" onclick="window.__autTplsRetry('ob')" style="padding:2px 6px;font-size:10.5px">Opnieuw</button></div>`
+        : '';
+      const placeholderSelected = !savedName ? 'selected' : '';
       return `<div>
         <label style="font-size:11px;color:var(--text-3)">Meta-template</label>
-        <select oninput="${upd('template_name')}" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">
-          <option value="">— kies template —</option>
-          ${tpls.map((t) => `<option value="${esc(t.name)}" ${cfg.template_name === t.name ? 'selected' : ''}>${esc(t.name)} (${esc(t.language || 'nl')})</option>`).join('')}
+        <select onchange="window.__autObStepConfigTpl(${idx}, this.value)" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);font-size:12.5px">
+          <option value="" ${placeholderSelected}>— kies template —</option>
+          ${fallbackOpt}
+          ${tpls.map((t) => `<option value="${esc(t.name)}" ${savedName === t.name ? 'selected' : ''}>${esc(t.name)} (${esc(t.language || 'nl')})</option>`).join('')}
         </select>
+        ${errNote}
       </div>`;
     }
     if (step.type === 'update_onboarding_status') return `<div>
@@ -1222,7 +1326,25 @@
   }
   window.__autObField = (k, v) => { if (_ui.ob.editing) _ui.ob.editing[k] = v; if (window.DFO?.render && k === 'trigger_type') window.DFO.render(); };
   window.__autObTrigConfig = (k, v) => { if (_ui.ob.editing) { _ui.ob.editing.trigger_config = _ui.ob.editing.trigger_config || {}; _ui.ob.editing.trigger_config[k] = v; } };
-  window.__autObStepAdd = () => { if (_ui.ob.editing) { _ui.ob.editing.steps = asArr(_ui.ob.editing.steps); _ui.ob.editing.steps.push({ type:'wait', config:{ value:1, unit:'days' } }); if (window.DFO?.render) window.DFO.render(); } };
+  // Trigger-duur canoniek voor onboarding time_after_signup / on_wizard_not_started_after:
+  // schrijft days_after_signup als unit='days', anders hours_after_signup. Ruimt de andere
+  // key + legacy value/unit op, zodat re-save schoon is en de save-validator ('OF hours OF
+  // days > 0') altijd 1 geldig veld ziet.
+  window.__autObTrigDur = (value, unit) => {
+    if (!_ui.ob.editing) return;
+    const cfg = _ui.ob.editing.trigger_config = _ui.ob.editing.trigger_config || {};
+    const v = Number(value);
+    if (!Number.isFinite(v) || v <= 0) return;
+    if (unit === 'days') {
+      cfg.days_after_signup = v;
+      delete cfg.hours_after_signup;
+    } else {
+      cfg.hours_after_signup = v;
+      delete cfg.days_after_signup;
+    }
+    delete cfg.value; delete cfg.unit;
+  };
+  window.__autObStepAdd = () => { if (_ui.ob.editing) { _ui.ob.editing.steps = asArr(_ui.ob.editing.steps); _ui.ob.editing.steps.push({ type:'wait', config:{ amount:1, unit:'days' } }); if (window.DFO?.render) window.DFO.render(); } };
   window.__autObStepDelete = (idx) => { if (_ui.ob.editing) { _ui.ob.editing.steps.splice(idx, 1); if (window.DFO?.render) window.DFO.render(); } };
   window.__autObStepMove = (idx, dir) => {
     if (!_ui.ob.editing) return;
@@ -1235,6 +1357,13 @@
   window.__autObStepType = (idx, type) => { if (_ui.ob.editing) { _ui.ob.editing.steps[idx] = { type, config: {} }; if (window.DFO?.render) window.DFO.render(); } };
   window.__autObStepConfig = (idx, k, v) => { if (_ui.ob.editing) { _ui.ob.editing.steps[idx].config = _ui.ob.editing.steps[idx].config || {}; _ui.ob.editing.steps[idx].config[k] = v; } };
   window.__autObStepConfigBool = (idx, k, v) => { if (_ui.ob.editing) { _ui.ob.editing.steps[idx].config = _ui.ob.editing.steps[idx].config || {}; _ui.ob.editing.steps[idx].config[k] = !!v; } };
+  window.__autObStepConfigTpl = (idx, v) => {
+    if (!_ui.ob.editing) return;
+    const step = _ui.ob.editing.steps[idx]; if (!step) return;
+    step.config = step.config || {};
+    if (v === '' && step.config.template_name) return;
+    step.config.template_name = v;
+  };
   window.__autObSave = async () => {
     const a = _ui.ob.editing; if (!a) return;
     if (!a.name || !a.name.trim()) return alert('Naam is verplicht.');
@@ -1962,6 +2091,14 @@
     const target = moduleKey === 'ev' ? _ui.ev : _ui.ob;
     if (target.berichtEdit) target.berichtEdit.cfg[k] = v;
   };
+  // Guarded WA-template write: skip als newVal leeg is EN er al een saved template
+  // is. Voorkomt dat een misklik op "— kies template —" een LIVE template wist.
+  window.__autBerichtFieldTpl = (moduleKey, v) => {
+    const target = moduleKey === 'ev' ? _ui.ev : _ui.ob;
+    if (!target.berichtEdit) return;
+    if (v === '' && target.berichtEdit.cfg.template_name) return;
+    target.berichtEdit.cfg.template_name = v;
+  };
   window.__autBerichtSave = async (moduleKey) => {
     const target = moduleKey === 'ev' ? _ui.ev : _ui.ob;
     const be = target.berichtEdit; if (!be) return;
@@ -1999,8 +2136,19 @@
     const busy = _busy('berichtSave');
     const cfg = be.cfg || {};
     // Template-picker preload voor WA
-    if (isWA && !_live.inboxTpls.data && !_live.inboxTpls.loading) queueMicrotask(fetchInboxTpls);
-    const tpls = asArr(_live.inboxTpls.data);
+    const stTpls = moduleKey === 'ev' ? _live.evTpls : _live.obTpls;
+    if (isWA && !stTpls.data && !stTpls.loading && !stTpls.error) {
+      queueMicrotask(moduleKey === 'ev' ? fetchEvTpls : fetchObTpls);
+    }
+    const tpls = asArr(stTpls.data);
+    const savedTplName = cfg.template_name || '';
+    const savedTplInList = tpls.some((t) => t.name === savedTplName);
+    const tplFallbackOpt = (savedTplName && !savedTplInList)
+      ? `<option value="${esc(savedTplName)}" selected>${esc(savedTplName)} — opgeslagen (niet in huidige lijst)</option>` : '';
+    const tplErrNote = stTpls.error
+      ? `<div style="font-size:10.5px;color:var(--rose);margin-top:4px">Templates niet geladen: ${esc(stTpls.error)}. <button class="btn btn-ghost btn-sm" onclick="window.__autTplsRetry('${esc(moduleKey)}')" style="padding:2px 6px;font-size:10.5px">Opnieuw</button></div>`
+      : `<div style="font-size:10.5px;color:var(--text-3);margin-top:4px">${tpls.length} approved templates. Named placeholders worden server-side geresolved.</div>`;
+    const tplPlaceholderSelected = !savedTplName ? 'selected' : '';
     return `<div style="padding:12px 20px;background:var(--surface-2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
       <button class="btn btn-ghost btn-sm" onclick="window.__autBerichtClose('${esc(moduleKey)}')">${svg(I.arrDown || I.x, 'width:13px;height:13px;transform:rotate(90deg)')}Terug naar berichten</button>
       <span style="font-size:14px;font-weight:600">Bericht bewerken — ${esc(be.automation_name)} · step_${be.step_index}</span>
@@ -2024,11 +2172,12 @@
       ${isWA ? `<div class="card"><div class="card-head"><div class="card-title">WhatsApp-template</div></div><div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:10px">
         <div>
           <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Meta-template</label>
-          <select oninput="window.__autBerichtField('${esc(moduleKey)}','template_name', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box">
-            <option value="">— kies template —</option>
-            ${tpls.map((t) => `<option value="${esc(t.name)}" ${cfg.template_name === t.name ? 'selected' : ''}>${esc(t.name)} (${esc(t.language || 'nl')})</option>`).join('')}
+          <select onchange="window.__autBerichtFieldTpl('${esc(moduleKey)}', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box">
+            <option value="" ${tplPlaceholderSelected}>— kies template —</option>
+            ${tplFallbackOpt}
+            ${tpls.map((t) => `<option value="${esc(t.name)}" ${savedTplName === t.name ? 'selected' : ''}>${esc(t.name)} (${esc(t.language || 'nl')})</option>`).join('')}
           </select>
-          <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">${tpls.length} approved templates. Named placeholders worden server-side geresolved.</div>
+          ${tplErrNote}
         </div>
         <div>
           <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Taal</label>
@@ -2073,19 +2222,43 @@
     </div>`;
   }
   function _lsLogView() {
-    if (!_live.lsLog.data && !_live.lsLog.loading && !_live.lsLog.error) queueMicrotask(() => fetchLsLog());
-    if (_live.lsLog.error && !_live.lsLog.data) return errBlk('lsLog', _live.lsLog.error, "window.__autLsLogRetry()");
-    if (_live.lsLog.loading && !_live.lsLog.data) return skel();
+    const f = _ui.ls.logFilters = _ui.ls.logFilters || {};
+    if (!_live.lsLog.data && !_live.lsLog.loading && !_live.lsLog.error) queueMicrotask(() => fetchLsLog(f));
+    // Filter-controls (traject/status/soort) — leeg = alles.
+    const trajectOpts = ['','fase1','fase2','fase3','fase4','fase5','fase6','fase7'];
+    const statusOpts  = ['','verstuurd','droog','fout'];
+    const soortOpts   = ['','tip','herinnering','uitnodiging','anders'];
+    const filterBar = `<div class="toolbar" style="padding:0 20px 12px;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--border);margin-bottom:12px">
+      <label style="font-size:11.5px;color:var(--text-3);display:flex;align-items:center;gap:6px">Traject
+        <select onchange="window.__autLsLogFilter('traject', this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:12.5px">
+          ${trajectOpts.map((v) => `<option value="${esc(v)}" ${f.traject === v ? 'selected' : ''}>${esc(v || 'Alle')}</option>`).join('')}
+        </select>
+      </label>
+      <label style="font-size:11.5px;color:var(--text-3);display:flex;align-items:center;gap:6px">Status
+        <select onchange="window.__autLsLogFilter('status', this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:12.5px">
+          ${statusOpts.map((v) => `<option value="${esc(v)}" ${f.status === v ? 'selected' : ''}>${esc(v || 'Alle')}</option>`).join('')}
+        </select>
+      </label>
+      <label style="font-size:11.5px;color:var(--text-3);display:flex;align-items:center;gap:6px">Soort
+        <select onchange="window.__autLsLogFilter('soort', this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:12.5px">
+          ${soortOpts.map((v) => `<option value="${esc(v)}" ${f.soort === v ? 'selected' : ''}>${esc(v || 'Alle')}</option>`).join('')}
+        </select>
+      </label>
+      ${(f.traject || f.status || f.soort) ? `<button class="btn btn-ghost btn-sm" onclick="window.__autLsLogFilterReset()">Reset filters</button>` : ''}
+    </div>`;
+    if (_live.lsLog.error && !_live.lsLog.data) return filterBar + errBlk('lsLog', _live.lsLog.error, "window.__autLsLogRetry()");
+    if (_live.lsLog.loading && !_live.lsLog.data) return filterBar + skel();
     const d = _live.lsLog.data || {};
     const items = asArr(d.items);
     const s = d.statussen || { verstuurd: 0, droog: 0, fout: 0 };
     return `<div style="padding:12px 20px 20px">
+      ${filterBar}
       ${H.kpis([
         { c:'emerald', icon:I.tick,  label:'Verstuurd (14d)', val:String(s.verstuurd || 0) },
         { c:'amber',   icon:I.clock, label:'Droog (simulatie)', val:String(s.droog || 0) },
         { c:'rose',    icon:I.alert, label:'Fout',             val:String(s.fout || 0), hi: s.fout > 0 ? 1 : 0 },
       ])}
-      ${items.length === 0 ? emptyBlk('Geen log-items', 'Geen berichten in de afgelopen 14 dagen.')
+      ${items.length === 0 ? emptyBlk('Geen log-items', 'Geen berichten die aan de filters voldoen (14d venster).')
         : `<div style="padding:0">${H.table(
             [{l:'Wanneer'},{l:'Traject'},{l:'Soort',cls:'optional'},{l:'Kanaal',cls:'optional'},{l:'Naar'},{l:'Agent',cls:'optional'},{l:'Status'}],
             items.slice(0, 200).map((r) => [
@@ -2100,7 +2273,18 @@
           )}</div>`}
     </div>`;
   }
-  window.__autLsLogRetry = () => { _live.lsLog.data = null; _live.lsLog.error = null; fetchLsLog(); };
+  window.__autLsLogRetry = () => { _live.lsLog.data = null; _live.lsLog.error = null; fetchLsLog(_ui.ls.logFilters || {}); };
+  window.__autLsLogFilter = (k, v) => {
+    _ui.ls.logFilters = _ui.ls.logFilters || {};
+    _ui.ls.logFilters[k] = v || '';
+    _live.lsLog.data = null; _live.lsLog.error = null;
+    fetchLsLog(_ui.ls.logFilters);
+  };
+  window.__autLsLogFilterReset = () => {
+    _ui.ls.logFilters = {};
+    _live.lsLog.data = null; _live.lsLog.error = null;
+    fetchLsLog({});
+  };
 
   // ═══════════════════════════════════════════════════════════════════════
   // HARMONISATIE — Instellingen-tab views
