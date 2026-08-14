@@ -35,6 +35,7 @@
     attendees:   { loading: {}, error: {}, data: {} },
     completedOne:{ loading: {}, error: {}, data: {} },
     audit:       { loading: {}, error: {}, data: {} },
+    revenue:     { loading: false, error: null, data: null }, // event_id → {revenue_eur, deal_count}
   };
 
   const _ui = {
@@ -144,6 +145,19 @@
     st.loading[id] = false;
     if (j && j.__error) st.error[id] = j.__error;
     else st.data[id] = asArr(j?.events).find((e) => String(e.event_id) === String(id)) || null;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchRevenue() {
+    const st = _live.revenue; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('revenue', '/api/events-revenue-list', undefined, 15000);
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else {
+      const map = {};
+      for (const r of asArr(j?.events)) map[r.event_id] = { revenue_eur: Number(r.revenue_eur || 0), deal_count: Number(r.deal_count || 0) };
+      st.data = map;
+    }
     if (window.DFO?.render) window.DFO.render();
   }
   async function fetchAudit(id) {
@@ -318,14 +332,22 @@
   window.__evBackToList = () => { _ui.mode = 'list'; _ui.detailId = null; _ui.wizard = null; if (window.DFO?.render) window.DFO.render(); };
 
   window.__evDuplicate = async (id) => {
-    if (!window.confirm('Dit event dupliceren? Er wordt een nieuw concept aangemaakt met dezelfde inhoud.')) return;
+    if (!window.confirm('Dit event dupliceren? Er wordt een nieuw concept aangemaakt (+7 dagen).\nJe komt direct in de bewerk-wizard om de juiste datum/tijd in te stellen.')) return;
     _ui.busy[id] = 'duplicate'; if (window.DFO?.render) window.DFO.render();
     try {
-      // BUG 1 FIX — endpoint verwacht 'source_event_id', niet 'id'.
       const j = await window.KV.authedJson('/api/events-duplicate', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ source_event_id: id }) });
       if (j?.error) throw new Error(j.error);
-      _showToast('Event gedupliceerd');
-      _live.events.data = null; queueMicrotask(() => fetchEvents());
+      _showToast('Event gedupliceerd — pas nu de datum aan');
+      // FIX punt 1 — open de gedupliceerde kopie direct in de bewerk-wizard
+      const newId = j?.event_id || j?.event?.id;
+      _live.events.data = null;
+      queueMicrotask(() => fetchEvents());
+      if (newId) {
+        // Cache de nieuwe event-detail alvast met de response-data zodat de
+        // wizard-edit prefill niet op een tweede fetch hoeft te wachten.
+        if (j?.event) _live.detail.data[newId] = j.event;
+        window.__evWizardOpen('edit', newId);
+      }
     } catch (e) { alert('Dupliceren mislukt: ' + (e?.message || 'onbekende fout')); }
     finally { _ui.busy[id] = null; if (window.DFO?.render) window.DFO.render(); }
   };
@@ -340,7 +362,7 @@
     if (!window.confirm('Event archiveren? Het verdwijnt uit de actieve lijst maar blijft bewaard.')) return;
     _ui.busy[id] = 'archive'; if (window.DFO?.render) window.DFO.render();
     try {
-      const j = await window.KV.authedJson('/api/events-update', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id, status:'archived' }) });
+      const j = await window.KV.authedJson('/api/events-update', { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id, status:'archived' }) });
       if (j?.error) throw new Error(j.error);
       _showToast('Event gearchiveerd');
       _live.events.data = null; queueMicrotask(() => fetchEvents());
@@ -351,7 +373,7 @@
     if (!window.confirm('Event annuleren? Deelnemers worden NIET automatisch geïnformeerd (doe dat apart).')) return;
     _ui.busy[id] = 'cancel'; if (window.DFO?.render) window.DFO.render();
     try {
-      const j = await window.KV.authedJson('/api/events-update', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id, status:'cancelled' }) });
+      const j = await window.KV.authedJson('/api/events-update', { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id, status:'cancelled' }) });
       if (j?.error) throw new Error(j.error);
       _showToast('Event geannuleerd');
       _live.events.data = null; if (_ui.detailId === id) _live.detail.data[id] = null;
@@ -429,16 +451,25 @@
   }
 
   function _detailInfo(ev) {
-    // BUG 3 FIX — events-detail retourneert `byStatus:{aangemeld,aanwezig,...}`
-    // + `attendee_count_active` (confirmed = aangemeld+aanwezig met assessment).
-    // Voor "Aangemeld" tellen we aangemeld+aanwezig (breder dan alleen assessment-
-    // gecompleteerd), zodat de teller overeenkomt met wat je ziet in Aanwezigen-tab.
-    const bs = ev.byStatus || {};
-    const aangemeldTotaal = (Number(bs.aangemeld || 0) + Number(bs.aanwezig || 0));
-    const confirmedTotaal = Number(ev.attendee_count_active ?? ev.attendee_count ?? 0);
-    const showTot = aangemeldTotaal > 0 ? aangemeldTotaal : confirmedTotaal;
-    const showSub = (aangemeldTotaal > confirmedTotaal && confirmedTotaal > 0)
-      ? ` <span style="font-size:11px;color:var(--text-3)">(${confirmedTotaal} met vragenlijst)</span>`
+    // BUG 3 FIX (2e ronde) — events-detail response-shape is:
+    //   { event:{...}, counts:{ byStatus, active, attendees_total, aangemeld_no_assessment, ... } }
+    // Ik las vorige ronde ev.byStatus terwijl het onder ev.counts.byStatus zit.
+    // Nu ook de attendees uit de Aanwezigen-tab-cache als ultieme fallback pakken
+    // zodat we altijd het aantal tonen dat de Aanwezigen-tab óók toont.
+    const counts = ev.counts || {};
+    const bs = counts.byStatus || {};
+    // Aanwezigen-tab-teller = som van dezelfde 5 statussen zoals de tabel toont.
+    const attList = asArr(_live.attendees.data[ev.id]);
+    const listCount = attList.length;
+    const bsSum = ['aangemeld','aanwezig','no_show','sale','switched_to_other_event']
+      .reduce((a, k) => a + Number(bs[k] || 0), 0);
+    const activeTot = Number(counts.active || counts.attendees_total || 0);
+    // Prioriteit: bsSum (autoritatief per status-breakdown), anders attendees_total,
+    // anders active, anders listCount.
+    const showTot = bsSum > 0 ? bsSum : (Number(counts.attendees_total || 0) || activeTot || listCount);
+    const confirmed = Number(counts.active || 0);
+    const showSub = (showTot > confirmed && confirmed > 0)
+      ? ` <span style="font-size:11px;color:var(--text-3)">(${confirmed} met vragenlijst)</span>`
       : '';
     return `<div class="pad" style="padding-top:14px"><div class="grid g2">
       <div class="card">
@@ -557,23 +588,52 @@
     ${rows.length === 0
       ? emptyBlk('Geen deelnemers', 'Er zijn geen deelnemers in deze categorie.')
       : `<div style="padding:0 20px 20px">${H.table(
-          [{l:'Naam'},{l:'E-mail',cls:'optional'},{l:'Telefoon',cls:'optional'},{l:'Status'},{l:'Aanmelddatum',cls:'optional'},{l:'Vragenlijst',cls:'optional'},{l:'Tags',cls:'optional'},{l:'',cls:'r'}],
+          [{l:'Naam'},{l:'E-mail',cls:'optional'},{l:'Telefoon',cls:'optional'},{l:'Status'},{l:'Aanmelddatum',cls:'optional'},{l:'Vragenlijst',cls:'optional'},{l:'Belstatus',cls:'optional'},{l:'Bevestigd',cls:'optional'},{l:'Tags',cls:'optional'},{l:'',cls:'r'}],
           rows.map((a) => {
             const naam = [a.first_name || a.voornaam, a.last_name || a.achternaam].filter(Boolean).join(' ') || a.name || a.email || '—';
             const [sc, sl] = ATT_STATUS_META[a.status] || ['neutral', a.status || '—'];
             const hasQuest = !!(a.assessment_response_id || a.questionnaire_completed_at);
+            // Belstatus — call_status kan 'called'/'no_answer'/'confirmed'/etc zijn.
+            // called_at = wanneer voor het laatst gebeld (indicator "wel/niet gebeld").
+            const bel = _belStatusPill(a);
+            // Bevestigd — attendance_status='confirmed' of attended_at IS NOT NULL
+            // of call_status='confirmed'; overige = "niet bevestigd" (kruis).
+            const isBevestigd = a.attendance_status === 'confirmed'
+              || !!a.attended_at
+              || a.call_status === 'confirmed'
+              || a.status === 'aanwezig';
+            const bevestigd = isBevestigd
+              ? `<span title="Bevestigd" style="color:var(--emerald);font-size:14px">✓</span>`
+              : `<span title="Niet bevestigd" style="color:var(--text-3);font-size:14px">✗</span>`;
             return [
               `<div class="row-avatar">${H.av(naam, 26)}<span class="cell-main">${esc(naam)}</span></div>`,
               `<span style="color:var(--text-3);font-size:12.5px">${esc(a.email || '—')}</span>`,
               `<span class="mono" style="color:var(--text-3);font-size:12px">${esc(a.phone || a.telefoon || '—')}</span>`,
               H.pill(sc, sl),
               `<span class="mono" style="color:var(--text-3);font-size:12px">${esc(_fmtDate(a.registered_at || a.created_at))}</span>`,
-              hasQuest ? H.pill('ok','Ingevuld') : H.pill('neutral','Nog niet'),
+              hasQuest
+                ? `<span title="Vragenlijst ingevuld" style="color:var(--emerald);font-size:14px">✓</span>`
+                : `<span title="Vragenlijst nog niet ingevuld" style="color:var(--rose);font-size:14px">✗</span>`,
+              bel,
+              bevestigd,
               _tagChips(a.tags),
               `<button class="icon-btn" title="Meer" onclick="window.__evAttKebab('${esc(a.id)}','${esc(id)}')" style="width:26px;height:26px">${svg(I.dots || I.settings,'width:13px;height:13px')}</button>`,
             ];
           })
         )}</div>`}`;
+  }
+
+  function _belStatusPill(a) {
+    // Prioriteit: call_status enum (called/no_answer/confirmed/left_message/etc)
+    // > called_at (fallback als call_status leeg is).
+    const cs = String(a.call_status || '').toLowerCase();
+    if (cs === 'confirmed') return H.pill('ok', 'Bevestigd');
+    if (cs === 'called' || cs === 'reached') return H.pill('ok', 'Gebeld');
+    if (cs === 'no_answer' || cs === 'voicemail' || cs === 'left_message') return H.pill('warn', 'Geen gehoor');
+    if (cs === 'declined' || cs === 'wrong_number') return H.pill('danger', esc(cs));
+    if (cs) return H.pill('neutral', esc(cs));
+    if (a.called_at) return H.pill('ok', 'Gebeld');
+    return `<span title="Nog niet gebeld" style="color:var(--text-3);font-size:14px">—</span>`;
   }
   function _tagChips(tags) {
     if (!Array.isArray(tags) || tags.length === 0) return '<span style="color:var(--text-3);font-size:11px">—</span>';
@@ -826,10 +886,11 @@
     try {
       const isEdit = w.mode === 'edit';
       const url = isEdit ? '/api/events-update' : '/api/events-create';
+      const httpMethod = isEdit ? 'PATCH' : 'POST';   // BUG 2 FIX — events-update wil PATCH
       const body = { ...form };
       if (isEdit) body.id = w.id;
       if (form.capacity != null && form.capacity !== '') body.capacity = Number(form.capacity);
-      const j = await window.KV.authedJson(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+      const j = await window.KV.authedJson(url, { method:httpMethod, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
       if (j?.error) throw new Error(j.error);
       const newId = j?.event?.id || j?.id || w.id;
       // Foto uploaden als geselecteerd
@@ -883,18 +944,33 @@
     ${rows.length === 0
       ? emptyBlk('Geen inschrijvingen', 'Er zijn geen inbound-inschrijvingen in deze categorie.')
       : H.table(
-          [{l:'Deelnemer'},{l:'E-mail',cls:'optional'},{l:'Opgegeven event',cls:'optional'},{l:'Match'},{l:'Ontvangen',cls:'r optional'},{l:'',cls:'r'}],
+          [{l:'Deelnemer'},{l:'E-mail',cls:'optional'},{l:'Opgegeven event',cls:'optional'},{l:'Match'},{l:'Vragenlijst',cls:'optional'},{l:'Ingeschreven',cls:'r'},{l:'',cls:'r'}],
           rows.map((r) => {
             const naam = [r.first_name, r.last_name].filter(Boolean).join(' ') || r.email || '—';
             const ev = r.matched_event?.title || r.event_date_label || r.opgegeven_event || '—';
             const ms = r.match_status || 'onbekend';
             const [mc, ml] = ms === 'matched' ? ['ok','Matched'] : ms === 'ambiguous' ? ['warn','Ambigu'] : ms === 'no_match' ? ['danger','Geen match'] : ['neutral','Ongeldig'];
+            // Vragenlijst-vinkje: check meerdere mogelijke bron-velden (best-effort
+            // omdat signup-inbox-rijen niet altijd al deelnemer-info hebben).
+            const hasQuest = !!(r.assessment_response_id
+              || r.matched_attendee?.assessment_response_id
+              || r.questionnaire_completed_at
+              || r.assessment_completed_at);
+            const questCell = ms === 'matched'
+              ? (hasQuest
+                  ? `<span title="Vragenlijst ingevuld" style="color:var(--emerald);font-size:14px">✓</span>`
+                  : `<span title="Vragenlijst nog niet ingevuld" style="color:var(--rose);font-size:14px">✗</span>`)
+              : `<span title="Nog geen match — vragenlijst onbekend" style="color:var(--text-3);font-size:12px">—</span>`;
+            // Ingeschreven op — signup-received_at (dat is wanneer ze zich inschreven).
+            const insDate = _fmtDate(r.received_at);
+            const insTime = _fmtTime(r.received_at);
             return [
               `<div class="row-avatar">${H.av(naam, 28)}<span class="cell-main">${esc(naam)}</span></div>`,
               `<span style="color:var(--text-3);font-size:12.5px">${esc(r.email || '—')}</span>`,
               `<span style="color:var(--text-2);font-size:12.5px">${esc(ev)}</span>`,
               H.pill(mc, ml),
-              `<span class="mono" style="color:var(--text-3);font-size:12px">${esc(_fmtDate(r.received_at))}</span>`,
+              questCell,
+              `<div style="text-align:right"><div class="mono" style="font-size:12.5px;color:var(--text-2)">${esc(insDate)}</div><div class="mono" style="font-size:11px;color:var(--text-3)">${esc(insTime)}</div></div>`,
               `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();window.open('/modules/events.html#signup-inbox', '_blank')">v1</button>`,
             ];
           })
@@ -907,122 +983,132 @@
   // ═══════════════════════════════════════════════════════════════════════
   function statistiekenView() {
     if (!_live.completed.data && !_live.completed.loading && !_live.completed.error) queueMicrotask(fetchCompleted);
+    if (!_live.revenue.data   && !_live.revenue.loading   && !_live.revenue.error)   queueMicrotask(fetchRevenue);
     if (_live.completed.error && !_live.completed.data) return errBlk('completed', _live.completed.error);
     if (_live.completed.loading && !_live.completed.data) return skel();
     const events = asArr(_live.completed.data);
+    // Verrijk elk event met revenue_eur uit /api/events-revenue-list
+    // (map event_id → {revenue_eur, deal_count}). Fail-soft: als endpoint nog
+    // laadt of fout gaf, tonen we 0/'—' en een subtiele banner.
+    const revenueMap = _live.revenue.data || {};
+    const revenueLoading = _live.revenue.loading && !_live.revenue.data;
+    const revenueError   = _live.revenue.error;
+    const eventWithRev = (e) => ({
+      ...e,
+      revenue_eur: Number(revenueMap[e.event_id]?.revenue_eur || 0),
+      deal_count:  Number(revenueMap[e.event_id]?.deal_count  || 0),
+    });
+    const eventsAll = events.map(eventWithRev);
+
     const now = new Date();
     const startYear = new Date(now.getFullYear(), 0, 1);
     const startQuarter = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
-    const eventsYTD = events.filter((e) => {
-      const d = new Date(e.completed_at || e.starts_at);
-      return Number.isFinite(d.getTime()) && d >= startYear;
-    });
-    const eventsQTD = events.filter((e) => {
-      const d = new Date(e.completed_at || e.starts_at);
-      return Number.isFinite(d.getTime()) && d >= startQuarter;
-    });
-    // BUG 4 — 'sales' in events-completed-list is COUNT (aantal deals met
-    // sale-status via event_attendees.deal_id), GEEN €-bedrag. We tonen dus
-    // "Aantal verkopen" i.p.v. "Omzet". De echte €-omzet vergt een aparte
-    // aggregate over deals.amount JOIN event_attendees → needs Jeffrey.
-    const salesYTD = eventsYTD.reduce((a, e) => a + Number(e.sales || 0), 0);
-    const salesQTD = eventsQTD.reduce((a, e) => a + Number(e.sales || 0), 0);
-    const gemSales = eventsYTD.length > 0 ? salesYTD / eventsYTD.length : 0;
+    const eventsYTD = eventsAll.filter((e) => { const d = new Date(e.completed_at || e.starts_at); return Number.isFinite(d.getTime()) && d >= startYear; });
+    const eventsQTD = eventsAll.filter((e) => { const d = new Date(e.completed_at || e.starts_at); return Number.isFinite(d.getTime()) && d >= startQuarter; });
+
+    // ECHTE €-omzet uit revenue-endpoint (SUM deals.total_amount waar
+    // tl_quotation_status IN ('accepted','signed'), per event_id).
+    const omzetYTD = eventsYTD.reduce((a, e) => a + e.revenue_eur, 0);
+    const omzetQTD = eventsQTD.reduce((a, e) => a + e.revenue_eur, 0);
+    const gemOmzet = eventsYTD.length > 0 ? omzetYTD / eventsYTD.length : 0;
     const totAanwezig = eventsYTD.reduce((a, e) => a + Number(e.aanwezig || 0), 0);
 
-    return `<div style="margin:14px 20px;padding:12px 16px;border:1px solid var(--amber-line);background:var(--amber-soft);border-radius:var(--r);color:var(--amber);font-size:12.5px;display:flex;gap:11px;align-items:flex-start">
-      ${svg(I.alert, 'width:15px;height:15px;flex-shrink:0;margin-top:1px')}
-      <div style="flex:1"><b>Needs Jeffrey — €-omzet ontbreekt</b><br>
-      De <span class="mono">sales</span>-kolom uit <span class="mono">events-completed-list</span> is een <b>teller van verkoop-deals</b> per event
-      (aantal <span class="mono">event_attendees</span> met een <span class="mono">deal_id</span> waar de deal <span class="mono">accepted/signed</span> is) — géén €-bedrag.
-      Voor "hoeveel omzet uit dit event" is een nieuwe aggregate nodig over <span class="mono">deals.amount</span> (of <span class="mono">invoices.total</span>) gejoind op <span class="mono">event_attendees.deal_id</span>.
-      Hieronder tonen we daarom <b>aantal verkopen</b> (echte data) i.p.v. €.</div>
-    </div>
+    return `${revenueLoading ? `<div style="margin:14px 20px;padding:10px 14px;background:var(--surface-2);border-radius:var(--r);font-size:12px;color:var(--text-3);display:flex;align-items:center;gap:10px">${svg(I.clock, 'width:14px;height:14px')}Omzet-data laadt…</div>` : ''}
+    ${revenueError ? errBlk('revenue', 'Omzet-endpoint — ' + revenueError) : ''}
 
     ${H.kpis([
-      { c:'blue',    icon:I.grad,  label:'Verkopen YTD',            val:fmtNum(salesYTD),  hi:1, sub:eventsYTD.length + ' afgeronde events' },
-      { c:'violet',  icon:I.chart, label:'Verkopen dit kwartaal',   val:fmtNum(salesQTD),  hi:1, sub:eventsQTD.length + ' events' },
-      { c:'emerald', icon:I.tick,  label:'Gem. verkopen/event',     val:gemSales > 0 ? gemSales.toFixed(1) : '—', sub:'YTD' },
-      { c:'teal',    icon:I.users, label:'Totaal aanwezigen',       val:fmtNum(totAanwezig), sub:'YTD' },
+      { c:'blue',    icon:I.euro,  label:'Omzet YTD',            val:eur0(omzetYTD), hi:1, sub:eventsYTD.length + ' afgeronde events' },
+      { c:'violet',  icon:I.chart, label:'Omzet dit kwartaal',   val:eur0(omzetQTD), hi:1, sub:eventsQTD.length + ' events' },
+      { c:'emerald', icon:I.grad,  label:'Gem. omzet/event',     val:eur0(Math.round(gemOmzet)), sub:'YTD' },
+      { c:'teal',    icon:I.users, label:'Totaal aanwezigen',    val:fmtNum(totAanwezig), sub:'YTD' },
     ])}
 
     <div class="pad"><div class="grid g2" style="margin-bottom:14px">
       <div class="card">
-        <div class="card-head"><span class="tile-ico" style="background:var(--blue-soft);color:var(--blue)">${svg(I.chart)}</span><div class="card-title">Verkopen per maand</div><span style="margin-left:auto;font-size:11px;color:var(--text-3)">laatste 12 mnd · aantal, niet €</span></div>
-        ${_salesMaandChart(events)}
+        <div class="card-head"><span class="tile-ico" style="background:var(--blue-soft);color:var(--blue)">${svg(I.chart)}</span><div class="card-title">Omzet per maand</div><span style="margin-left:auto;font-size:11px;color:var(--text-3)">laatste 12 mnd · € (accepted/signed)</span></div>
+        ${_omzetMaandChart(eventsAll)}
       </div>
       <div class="card">
-        <div class="card-head"><span class="tile-ico" style="background:var(--emerald-soft);color:var(--emerald)">${svg(I.grad)}</span><div class="card-title">Top-events (aantal verkopen)</div><span style="margin-left:auto;font-size:11px;color:var(--text-3)">YTD</span></div>
+        <div class="card-head"><span class="tile-ico" style="background:var(--emerald-soft);color:var(--emerald)">${svg(I.grad)}</span><div class="card-title">Top-events (omzet)</div><span style="margin-left:auto;font-size:11px;color:var(--text-3)">YTD</span></div>
         <div class="card-body" style="padding:12px 17px">
-          ${_topEvents(eventsYTD)}
+          ${_topEventsByRevenue(eventsYTD)}
         </div>
       </div>
     </div>
 
     <div class="card">
-      <div class="card-head"><span class="tile-ico" style="background:var(--pink-soft);color:var(--pink)">${svg(I.cal)}</span><div class="card-title">Per afgerond event (${events.length})</div><span style="margin-left:auto;font-size:11px;color:var(--text-3)">Bonus/uitgaven zijn wél €; verkopen = aantal</span></div>
-      ${events.length === 0
+      <div class="card-head"><span class="tile-ico" style="background:var(--pink-soft);color:var(--pink)">${svg(I.cal)}</span><div class="card-title">Per afgerond event (${eventsAll.length})</div><span style="margin-left:auto;font-size:11px;color:var(--text-3)">Omzet = SUM deal.total_amount (accepted/signed)</span></div>
+      ${eventsAll.length === 0
         ? emptyBlk('Geen afgeronde events', 'Zodra events worden afgerond verschijnt hier de data.')
         : H.table(
-            [{l:'Event'},{l:'Voltooid op',cls:'optional'},{l:'Aanwezig',cls:'r optional'},{l:'Verkopen',cls:'r'},{l:'Bonus mentor',cls:'r'},{l:'Uitgaven',cls:'r'}],
-            events.map((e) => [
-              `<a href="#" onclick="event.preventDefault();window.__evGoDetail('${esc(e.event_id)}')" style="color:inherit;text-decoration:none"><span class="cell-main">${esc(e.title || '—')}</span></a>`,
-              `<span class="mono" style="color:var(--text-3);font-size:12.5px">${esc(_fmtDate(e.completed_at || e.starts_at))}</span>`,
-              `<span class="mono">${Number(e.aanwezig || 0)}</span>`,
-              `<span class="mono" style="color:var(--emerald);font-weight:500">${Number(e.sales || 0)}</span>`,
-              `<span class="money">${eur0(Number(e.bonus_total || 0))}</span>`,
-              `<span class="money" style="color:var(--amber)">${Number(e.expenses_total || 0) ? '− ' + eur0(Number(e.expenses_total)) : '—'}</span>`,
-            ])
+            [{l:'Event'},{l:'Voltooid op',cls:'optional'},{l:'Aanwezig',cls:'r optional'},{l:'Omzet',cls:'r'},{l:'#Verkopen',cls:'r optional'},{l:'Bonus mentor',cls:'r optional'},{l:'Uitgaven',cls:'r optional'},{l:'Netto',cls:'r'}],
+            eventsAll.map((e) => {
+              const netto = e.revenue_eur - Number(e.bonus_total || 0) - Number(e.expenses_total || 0);
+              return [
+                `<a href="#" onclick="event.preventDefault();window.__evGoDetail('${esc(e.event_id)}')" style="color:inherit;text-decoration:none"><span class="cell-main">${esc(e.title || '—')}</span></a>`,
+                `<span class="mono" style="color:var(--text-3);font-size:12.5px">${esc(_fmtDate(e.completed_at || e.starts_at))}</span>`,
+                `<span class="mono">${Number(e.aanwezig || 0)}</span>`,
+                `<span class="money" style="font-weight:600">${e.revenue_eur > 0 ? eur0(e.revenue_eur) : '—'}</span>`,
+                `<span class="mono" style="color:var(--text-3)">${Number(e.sales || 0)}</span>`,
+                `<span class="money">${eur0(Number(e.bonus_total || 0))}</span>`,
+                `<span class="money" style="color:var(--amber)">${Number(e.expenses_total || 0) ? '− ' + eur0(Number(e.expenses_total)) : '—'}</span>`,
+                `<span class="money" style="color:${netto >= 0 ? 'var(--emerald)' : 'var(--rose)'};font-weight:500">${e.revenue_eur > 0 ? eur0(netto) : '—'}</span>`,
+              ];
+            })
           )}
     </div>
     </div>`;
   }
 
-  function _salesMaandChart(events) {
-    // Bucket aantal verkopen per maand — 12 maanden terug (BUG 4 fix: count, geen €)
+  function _omzetMaandChart(events) {
+    // Bucket € omzet per maand — 12 maanden terug. events elk verrijkt met revenue_eur.
     const now = new Date();
     const buckets = [];
     for (let i = 11; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      buckets.push({ label: d.toLocaleDateString('nl-NL', { month:'short' }), key: d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'), sales: 0 });
+      buckets.push({ label: d.toLocaleDateString('nl-NL', { month:'short' }), key: d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'), omzet: 0 });
     }
     const byKey = new Map(buckets.map((b) => [b.key, b]));
     for (const e of events) {
       const d = new Date(e.completed_at || e.starts_at);
       if (!Number.isFinite(d.getTime())) continue;
       const k = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-      const b = byKey.get(k); if (b) b.sales += Number(e.sales || 0);
+      const b = byKey.get(k); if (b) b.omzet += Number(e.revenue_eur || 0);
     }
-    const maxV = Math.max(1, ...buckets.map((b) => b.sales));
-    const W = 480, H_ = 160, pad = { t: 12, r: 12, b: 24, l: 42 };
+    const maxV = Math.max(1, ...buckets.map((b) => b.omzet));
+    const W = 480, H_ = 160, pad = { t: 12, r: 12, b: 24, l: 52 };
     const cw = W - pad.l - pad.r, ch = H_ - pad.t - pad.b;
     const bw = cw / buckets.length * 0.68;
     const gap = cw / buckets.length * 0.32;
+    // Labels als €k voor leesbaarheid
+    const fmtY = (v) => v >= 1000 ? '€' + Math.round(v / 1000) + 'k' : v > 0 ? '€' + Math.round(v) : '€0';
     return `<div class="card-body" style="padding:14px 12px 8px">
       <svg viewBox="0 0 ${W} ${H_}" style="width:100%;height:auto;display:block" preserveAspectRatio="xMidYMid meet">
         ${[0, 0.25, 0.5, 0.75, 1].map((f) => {
           const y = pad.t + ch - ch * f;
           return `<line x1="${pad.l}" y1="${y}" x2="${W - pad.r}" y2="${y}" stroke="var(--border)" stroke-width="1" stroke-dasharray="2,3" opacity=".5" />
-            <text x="${pad.l - 4}" y="${y + 3}" text-anchor="end" font-size="9" fill="var(--text-3)" font-family="'IBM Plex Mono',monospace">${Math.round(maxV * f)}</text>`;
+            <text x="${pad.l - 4}" y="${y + 3}" text-anchor="end" font-size="9" fill="var(--text-3)" font-family="'IBM Plex Mono',monospace">${fmtY(maxV * f)}</text>`;
         }).join('')}
         ${buckets.map((b, i) => {
           const x = pad.l + i * (bw + gap) + gap / 2;
-          const h = ch * (b.sales / maxV);
+          const h = ch * (b.omzet / maxV);
           const y = pad.t + ch - h;
-          return `<rect x="${x}" y="${y}" width="${bw}" height="${h}" fill="var(--emerald)" opacity=".8" rx="2"><title>${esc(b.label)}: ${b.sales} verkopen</title></rect>
+          return `<rect x="${x}" y="${y}" width="${bw}" height="${h}" fill="var(--blue)" opacity=".85" rx="2"><title>${esc(b.label)}: ${eur0(b.omzet)}</title></rect>
             <text x="${x + bw / 2}" y="${H_ - 6}" text-anchor="middle" font-size="9" fill="var(--text-3)" font-family="'IBM Plex Mono',monospace">${esc(b.label)}</text>`;
         }).join('')}
       </svg>
     </div>`;
   }
-  function _topEvents(events) {
-    const sorted = [...events].sort((a, b) => Number(b.sales || 0) - Number(a.sales || 0)).slice(0, 5);
-    if (sorted.length === 0) return `<div style="font-size:12.5px;color:var(--text-3);padding:8px 0">Nog geen events dit jaar.</div>`;
+  function _topEventsByRevenue(events) {
+    const sorted = [...events].sort((a, b) => Number(b.revenue_eur || 0) - Number(a.revenue_eur || 0)).slice(0, 5);
+    if (sorted.length === 0 || sorted.every((e) => (e.revenue_eur || 0) === 0)) {
+      return `<div style="font-size:12.5px;color:var(--text-3);padding:8px 0">Nog geen omzet dit jaar (of endpoint laadt nog).</div>`;
+    }
     return sorted.map((e, i) => `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:${i < sorted.length - 1 ? '1px solid var(--border)' : 'none'}">
       <span style="width:22px;height:22px;border-radius:50%;background:var(--surface-2);color:var(--text-2);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">${i + 1}</span>
       <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.title || '—')}</div>
-        <div style="font-size:11px;color:var(--text-3)">${esc(_fmtDate(e.completed_at || e.starts_at))} · ${Number(e.aanwezig || 0)} aanwezig</div></div>
-      <span class="mono" style="font-size:14px;font-weight:600;color:var(--emerald)">${Number(e.sales || 0)} <span style="font-size:10px;color:var(--text-3);font-weight:400">verkopen</span></span>
+        <div style="font-size:11px;color:var(--text-3)">${esc(_fmtDate(e.completed_at || e.starts_at))} · ${Number(e.aanwezig || 0)} aanwezig · ${e.deal_count || 0} deals</div></div>
+      <span class="money" style="font-size:14px;font-weight:600;color:var(--blue)">${eur0(Number(e.revenue_eur || 0))}</span>
     </div>`).join('');
   }
 
