@@ -102,10 +102,12 @@ export default async function handler(req, res) {
     ]);
 
     // 3) App-settings toggles
+    // Dunning-toggles (wanbetalers) horen in Finance, niet hier — sinds
+    // v2 automatiseringen scope-decision om Lisa/Wanbetalers uit deze
+    // module te halen.
     const env = process.env.VERCEL_ENV || 'development';
-    const [lsLive, dunAuto, autoClose] = await Promise.all([
+    const [lsLive, autoClose] = await Promise.all([
       _readAppSetting('leadsonderhoud_live_' + env),
-      _readAppSetting('dunning_pipeline_auto'),
       _readAppSetting('events_signup_auto_close_hours'),
     ]);
 
@@ -150,33 +152,9 @@ export default async function handler(req, res) {
         status: 'unknown',
         protected: false,
       },
-      {
-        key: 'lisa',
-        label: 'Lisa (AI marketing agent)',
-        kind: 'cron',
-        schedule: null,
-        endpoint: '/api/cron-lisa-delayed',
-        enabled: null,
-        last_24h_runs: null,
-        last_24h_failed: null,
-        last_run_at: null,
-        status: 'unknown',
-        protected: false,
-      },
-      {
-        key: 'wanbetalers',
-        label: 'Wanbetalers / Dunning',
-        kind: 'engine',
-        schedule: '0 9 * * *',
-        endpoint: '/api/cron-dunning-engine',
-        enabled: null,
-        last_24h_runs: null,
-        last_24h_failed: null,
-        last_run_at: null,
-        status: 'unknown',
-        protected: true,
-      },
     ];
+    // NOTE: Lisa + Wanbetalers-motoren zijn bewust uit deze lijst gehaald.
+    // Lisa hoort in AI Agents-module; Wanbetalers/Dunning blijft in Finance.
 
     // 5) Crons (raw uit vercel.json — filter uit protected/dubbel niet, we laten alles zien)
     const crons = vercelCrons.map((c) => ({
@@ -197,16 +175,6 @@ export default async function handler(req, res) {
         editable: true,
         editEndpoint: '/api/leadsonderhoud-instellingen',
         permission: 'leads.view',
-      },
-      {
-        key: 'dunning_pipeline_auto',
-        label: 'Wanbetalers pipeline auto-fases',
-        value: dunAuto?.value ?? null,
-        source: 'app_settings.dunning_pipeline_auto',
-        editable: false,
-        editEndpoint: '/api/dunning-pipeline-settings',
-        permission: 'finance.dunning.execute',
-        protectedZone: true,
       },
       {
         key: 'events_signup_auto_close',

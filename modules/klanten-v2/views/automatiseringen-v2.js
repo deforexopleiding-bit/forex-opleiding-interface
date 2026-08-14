@@ -50,7 +50,6 @@
     lsDrog:      { loading: false, error: null, data: null },   // leadsonderhoud-droogloop-log
     lsQuiz:      { loading: false, error: null, data: null },   // leadsonderhoud-quiz-lijst (voor picker)
     inboxTpls:   { loading: false, error: null, data: null },   // WA-templates voor send_whatsapp step
-    agentsCfg:   { loading: {}, error: {}, data: {} },          // per module: joost_config
   };
 
   const _ui = {
@@ -173,15 +172,6 @@
     const j = await tryFetch('tpls', '/api/inbox-template-list');
     st.loading = false;
     if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.items);
-    if (window.DFO?.render) window.DFO.render();
-  }
-  async function fetchAgentCfg(moduleKey) {
-    const st = _live.agentsCfg; if (st.loading[moduleKey] || st.data[moduleKey]) return;
-    st.loading[moduleKey] = true; st.error[moduleKey] = null;
-    const j = await tryFetch('agentCfg:' + moduleKey, '/api/joost-config-get?module=' + encodeURIComponent(moduleKey));
-    st.loading[moduleKey] = false;
-    if (j && j.__error) st.error[moduleKey] = j.__error;
-    else st.data[moduleKey] = j?.config || j || null;
     if (window.DFO?.render) window.DFO.render();
   }
 
@@ -333,16 +323,14 @@
   }
 
   function _motorCard(m) {
-    const isProt = !!m.protected;
     const statusChip = _statusPill(m.status);
     const failed = Number(m.last_24h_failed || 0);
     return `<div style="padding:14px 17px;border-bottom:1px solid var(--border);display:flex;gap:12px;align-items:flex-start">
-      <span class="tile-ico" style="background:${isProt ? 'var(--rose-soft)' : 'var(--emerald-soft)'};color:${isProt ? 'var(--rose)' : 'var(--emerald)'};width:36px;height:36px;flex-shrink:0">${svg(isProt ? (I.lock || I.alert) : (I.zap || I.tick), 'width:16px;height:16px')}</span>
+      <span class="tile-ico" style="background:var(--emerald-soft);color:var(--emerald);width:36px;height:36px;flex-shrink:0">${svg(I.zap || I.tick, 'width:16px;height:16px')}</span>
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
           <div style="font-size:13.5px;font-weight:600">${esc(m.label)}</div>
           ${statusChip}
-          ${isProt ? H.pill('warn', '🔒 Beschermd') : ''}
         </div>
         <div style="font-size:11.5px;color:var(--text-3);margin-top:3px;display:flex;gap:14px;flex-wrap:wrap">
           ${m.schedule ? `<span class="mono">Schedule: ${esc(m.schedule)}</span>` : ''}
@@ -352,13 +340,10 @@
         </div>
       </div>
       <div style="flex-shrink:0">
-        ${isProt
-          ? `<a href="/modules/finance.html#wanbetalers" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none">${svg(I.arrRight || I.tick)}Open Wanbetalers</a>`
-          : (m.key === 'events-automations' ? `<button class="btn btn-ghost btn-sm" onclick="window.__autGoTab('events')">Beheren →</button>`
-            : m.key === 'onboarding-automations' ? `<button class="btn btn-ghost btn-sm" onclick="window.__autGoTab('onboarding')">Beheren →</button>`
-            : m.key === 'leadsonderhoud' ? `<button class="btn btn-ghost btn-sm" onclick="window.__autGoTab('leadsonderhoud')">Beheren →</button>`
-            : m.key === 'lisa' ? `<a href="/modules/lisa.html" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none">Open Lisa</a>`
-            : '')}
+        ${m.key === 'events-automations' ? `<button class="btn btn-ghost btn-sm" onclick="window.__autGoTab('events')">Beheren →</button>`
+          : m.key === 'onboarding-automations' ? `<button class="btn btn-ghost btn-sm" onclick="window.__autGoTab('onboarding')">Beheren →</button>`
+          : m.key === 'leadsonderhoud' ? `<button class="btn btn-ghost btn-sm" onclick="window.__autGoTab('leadsonderhoud')">Beheren →</button>`
+          : ''}
       </div>
     </div>`;
   }
@@ -1814,59 +1799,9 @@
     </div></div>`;
   }
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // TAB: AGENTS (read-only mirror van joost_config feature_flags)
-  // ═══════════════════════════════════════════════════════════════════════
-  const AGENT_MODULES = [
-    { key: 'finance',        label: 'Joost',   scope: 'Finance / Wanbetalers-inbox' },
-    { key: 'events',         label: 'Simone',  scope: 'Events-inbox' },
-    { key: 'onboarding',     label: 'Mila',    scope: 'Onboarding-inbox' },
-    { key: 'leadsonderhoud', label: 'Aisha',   scope: 'Leadsonderhoud (drip-content)' },
-    { key: 'manager',        label: 'AI Manager', scope: 'Super-admin Q&A' },
-  ];
-  function agentsView() {
-    for (const m of AGENT_MODULES) {
-      if (!_live.agentsCfg.data[m.key] && !_live.agentsCfg.loading[m.key]) queueMicrotask(() => fetchAgentCfg(m.key));
-    }
-    return `<div class="pad" style="padding-top:14px"><div style="max-width:900px;margin:0 auto;display:flex;flex-direction:column;gap:14px">
-      <div class="card">
-        <div class="card-head">
-          <span class="tile-ico" style="background:var(--violet-soft);color:var(--violet)">${svg(I.robot || I.zap || I.tick)}</span>
-          <div class="card-title">AI-agent status (read-only)</div>
-        </div>
-        <div class="card-body" style="padding:16px">
-          <div style="padding:10px 12px;background:var(--surface-2);border-radius:8px;font-size:12.5px;color:var(--text-2);line-height:1.5;margin-bottom:14px">
-            Configuratie beheer je in de <a href="/modules/klanten-v2/?v2preview=agents" style="color:var(--violet);text-decoration:underline">AI Agents-module</a>.
-            Hier zie je alleen de huidige status.
-          </div>
-          <div style="display:flex;flex-direction:column;gap:8px">
-            ${AGENT_MODULES.map((m) => _agentRow(m)).join('')}
-          </div>
-        </div>
-      </div>
-    </div></div>
-    ${_confirmModalHtml()}`;
-  }
-  function _agentRow(m) {
-    const cfg = _live.agentsCfg.data[m.key];
-    const loading = _live.agentsCfg.loading[m.key];
-    const err = _live.agentsCfg.error[m.key];
-    const on = cfg?.is_enabled === true;
-    const ff = cfg?.feature_flags || {};
-    const activeFlags = Object.keys(ff).filter((k) => ff[k] === true);
-    return `<div style="padding:12px 14px;border:1px solid var(--border);border-radius:8px;display:flex;gap:12px;align-items:center">
-      <div style="width:32px;height:32px;background:${on ? 'var(--emerald-soft)' : 'var(--surface-2)'};color:${on ? 'var(--emerald)' : 'var(--text-3)'};border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${on ? '✓' : '○'}</div>
-      <div style="flex:1;min-width:0">
-        <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
-          <div style="font-size:13.5px;font-weight:600">${esc(m.label)}</div>
-          <span style="font-size:11px;color:var(--text-3)">${esc(m.scope)}</span>
-          ${err ? H.pill('danger','Fout') : (loading && !cfg) ? H.pill('neutral','laden…') : on ? H.pill('ok','Actief') : H.pill('neutral','Uit')}
-        </div>
-        <div style="font-size:11px;color:var(--text-3);margin-top:3px">module=<span class="mono">${esc(m.key)}</span>${activeFlags.length > 0 ? ' · flags: ' + activeFlags.map(esc).join(', ') : ''}</div>
-      </div>
-      <a href="/modules/klanten-v2/?v2preview=agents" class="btn btn-ghost btn-sm" style="text-decoration:none;flex-shrink:0">Beheer ↗</a>
-    </div>`;
-  }
+  // NOTE: Lisa / Agent-autonomie-tab is verwijderd — die functionaliteit
+  // hoort in de AI Agents-module, niet hier. Wanbetalers-tegel is ook weg
+  // (dunning-backend blijft in Finance).
 
   // ═══════════════════════════════════════════════════════════════════════
   // VIEW REGISTRATIE
@@ -1876,8 +1811,6 @@
   window.DFO.VIEWS['automatiseringen/Events']         = eventsView;
   window.DFO.VIEWS['automatiseringen/Onboarding']     = onboardingView;
   window.DFO.VIEWS['automatiseringen/Leadsonderhoud'] = leadsonderhoudView;
-  window.DFO.VIEWS['automatiseringen/Wanbetalers']    = overzichtView;   // toont beschermde tegel via Overzicht
-  window.DFO.VIEWS['automatiseringen/Lisa']           = agentsView;      // hernoemd naar Agents (mirror)
 
-  console.debug('[automatiseringen-v2] views geregistreerd (Overzicht/Events/Onboarding/Leadsonderhoud/Agents)');
+  console.debug('[automatiseringen-v2] views geregistreerd (Overzicht/Events/Onboarding/Leadsonderhoud)');
 })();
