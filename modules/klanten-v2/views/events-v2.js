@@ -45,6 +45,7 @@
     // Punt 3 — Aanwezige-detail
     assessments: { loading: {}, error: {}, data: {} },         // per attendee_id
     attConv:     { loading: {}, error: {}, data: {} },         // per attendee_id → conversation_id|null
+    attComms:    { loading: {}, error: {}, data: {} },         // per attendee_id → {items, note}
     // Punt 4 — In-shell inbox viewer
     inboxMsgs:   { loading: {}, error: {}, data: {} },         // per conversation_id
   };
@@ -78,6 +79,8 @@
     autoCloseBusy: false,
     // Punt 3 — Aanwezige-detail modal state
     attDetail: null,        // { attId, eventId } → open modal
+    noteDraft: {},          // [attId] = string (bewerkbare notitie-tekst)
+    noteBusy:  {},          // [attId] = true tijdens save
     // Punt 4 — In-shell inbox conversation viewer
     inboxConvId: null,      // wanneer set: viewer i.p.v. lijst
   };
@@ -269,6 +272,17 @@
     else st.data[attId] = j?.found ? j.conversation_id : null;
     if (window.DFO?.render) window.DFO.render();
   }
+  // Punt 3 — Comms-historie per attendee (WhatsApp/email — verzonden + gepland)
+  async function fetchAttComms(attId) {
+    const st = _live.attComms; if (st.loading[attId] || st.data[attId]) return;
+    st.loading[attId] = true; st.error[attId] = null;
+    const j = await tryFetch('comms:' + attId, '/api/events-attendee-comms?attendee_id=' + encodeURIComponent(attId));
+    st.loading[attId] = false;
+    if (j && j.__error) st.error[attId] = j.__error;
+    else st.data[attId] = { items: asArr(j?.items), note: j?.note || null };
+    if (window.DFO?.render) window.DFO.render();
+  }
+
   // Punt 4 — In-shell inbox viewer fetcher
   async function fetchInboxMsgs(convId) {
     const st = _live.inboxMsgs; if (st.loading[convId] || st.data[convId]) return;
@@ -568,11 +582,22 @@
 
   function _detailActions(ev, busy) {
     const btns = [];
+    // Punt 1 — CANONIEKE afgerond-check: events-complete-core zet ALLEEN
+    // completed_at/completed_by/completion_summary, NIET events.status. Een
+    // afgerond event blijft dus status='published'. Enige betrouwbare marker:
+    // ev.completed_at != null. Ook 'completed'/'afgerond' als extra safety-net
+    // voor eventuele andere paden.
+    const isAfgerond = !!ev.completed_at || ev.status === 'completed' || ev.status === 'afgerond';
+    // ?debug=1 log: laat de echte status + completed_at zien zodat Jeffrey
+    // kan verifiëren welke marker het event heeft.
+    if (typeof window !== 'undefined' && String(window.location?.search || '').includes('debug=1')) {
+      console.log('[events-v2 afrond-check]', { id: ev.id, status: ev.status, completed_at: ev.completed_at, isAfgerond, signups_closed: ev.signups_closed });
+    }
     if (ev.status === 'draft') btns.push(`<button class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''} onclick="window.__evPublish('${esc(ev.id)}')">${svg(I.rocket || I.tick)}${busy === 'publish' ? '…' : 'Publiceren'}</button>`);
-    if (ev.status === 'published' && ev.signups_closed) btns.push(`<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__evReopen('${esc(ev.id)}')">Heropenen</button>`);
-    else if (ev.status === 'published') btns.push(`<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__evCloseSignups('${esc(ev.id)}')">Sluiten voor aanmelding</button>`);
-    // Punt 1 — afrond-knop alleen bij published; bij completed/afgerond niet meer tonen.
-    if (ev.status === 'published') btns.push(`<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__evComplete('${esc(ev.id)}')">${busy === 'complete' ? '…' : 'Event afronden'}</button>`);
+    if (!isAfgerond && ev.status === 'published' && ev.signups_closed) btns.push(`<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__evReopen('${esc(ev.id)}')">Heropenen</button>`);
+    else if (!isAfgerond && ev.status === 'published') btns.push(`<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__evCloseSignups('${esc(ev.id)}')">Sluiten voor aanmelding</button>`);
+    // Punt 1 — Afrond-knop alleen zichtbaar bij published EN nog niet afgerond.
+    if (!isAfgerond && ev.status === 'published') btns.push(`<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__evComplete('${esc(ev.id)}')">${busy === 'complete' ? '…' : 'Event afronden'}</button>`);
     btns.push(`<button class="btn btn-ghost btn-sm" onclick="window.__evWizardOpen('edit','${esc(ev.id)}')">${svg(I.edit || I.settings, 'width:12px;height:12px')}Bewerken</button>`);
     if (ev.status !== 'archived') btns.push(`<button class="icon-btn" title="Archiveren" ${busy ? 'disabled' : ''} onclick="window.__evArchive('${esc(ev.id)}')" style="width:28px;height:28px">${svg(I.trash || I.x, 'width:13px;height:13px')}</button>`);
     return btns.join('');
@@ -1231,6 +1256,8 @@
     _ui.attDetail = { attId, eventId };
     // Assessment altijd fetchen
     if (!_live.assessments.data[attId] && !_live.assessments.loading[attId]) queueMicrotask(() => fetchAssessment(attId));
+    // Comms-historie altijd fetchen
+    if (!_live.attComms.data[attId] && !_live.attComms.loading[attId]) queueMicrotask(() => fetchAttComms(attId));
     // Conversation-resolve: heeft customer_id nodig → uit attendees-list
     const list = asArr(_live.attendees.data[eventId]);
     const att  = list.find((x) => x.id === attId);
@@ -1239,7 +1266,43 @@
     }
     if (window.DFO?.render) window.DFO.render();
   };
-  window.__evAttClose = () => { _ui.attDetail = null; if (window.DFO?.render) window.DFO.render(); };
+  window.__evAttClose = () => {
+    // Cleanup draft-notes bij sluiten zodat opnieuw openen verse state pakt
+    if (_ui.attDetail) delete _ui.noteDraft[_ui.attDetail.attId];
+    _ui.attDetail = null;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__evAttNoteDraft = (attId, val) => {
+    _ui.noteDraft[attId] = val;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__evAttNoteReset = (attId) => {
+    delete _ui.noteDraft[attId];
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__evAttNoteSave = async (attId) => {
+    const val = (attId in _ui.noteDraft) ? String(_ui.noteDraft[attId] || '') : null;
+    if (val == null) return;
+    _ui.noteBusy[attId] = true; if (window.DFO?.render) window.DFO.render();
+    try {
+      const j = await window.KV.authedJson('/api/events-attendee-update?id=' + encodeURIComponent(attId), {
+        method:'PATCH', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ notes: val || null }),
+      });
+      if (j?.error) throw new Error(j.error);
+      // Update local state: attendees-list-rij
+      if (_ui.attDetail) {
+        const list = _live.attendees.data[_ui.attDetail.eventId];
+        if (Array.isArray(list)) {
+          const idx = list.findIndex((x) => x.id === attId);
+          if (idx >= 0) list[idx] = { ...list[idx], notes: val || null };
+        }
+      }
+      delete _ui.noteDraft[attId];
+      _showToast('Notitie opgeslagen');
+    } catch (e) { alert('Notitie opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
+    finally { _ui.noteBusy[attId] = false; if (window.DFO?.render) window.DFO.render(); }
+  };
   window.__evAttOpenConv = (convId) => {
     // In-shell viewer via Inbox-tab-mode
     _ui.attDetail = null;
@@ -1314,6 +1377,59 @@
       }
     }
 
+    // Punt 3 — Notitie-blok (bewerkbaar; bron: event_attendees.notes,
+    // schrijft via PATCH /api/events-attendee-update?id=<uuid> {notes}).
+    const noteCur = att.notes || '';
+    const noteDraft = (attId in _ui.noteDraft) ? _ui.noteDraft[attId] : noteCur;
+    const noteDirty = (attId in _ui.noteDraft) && String(noteDraft) !== String(noteCur);
+    const noteBusy = !!_ui.noteBusy[attId];
+    const noteBlock = `<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
+      <textarea
+        placeholder="Voeg een notitie toe over deze deelnemer (bv. 'Opgebeld door Chesney om 13u41 — is er zeker bij')…"
+        oninput="window.__evAttNoteDraft('${esc(attId)}', this.value)"
+        style="width:100%;min-height:80px;padding:10px 12px;border:none;background:var(--surface);font-size:13px;font-family:inherit;line-height:1.5;resize:vertical;color:var(--text);box-sizing:border-box"
+      >${esc(noteDraft)}</textarea>
+      <div style="padding:8px 10px;background:var(--surface-2);border-top:1px solid var(--border);display:flex;gap:6px;align-items:center">
+        <button class="btn btn-primary btn-sm" ${(!noteDirty || noteBusy) ? 'disabled style="opacity:.55"' : ''} onclick="window.__evAttNoteSave('${esc(attId)}')">${noteBusy ? 'Opslaan…' : 'Notitie opslaan'}</button>
+        <button class="btn btn-ghost btn-sm" ${!noteDirty ? 'disabled style="opacity:.55"' : ''} onclick="window.__evAttNoteReset('${esc(attId)}')">Reset</button>
+        <span style="margin-left:auto;font-size:11px;color:var(--text-3)">${noteDirty ? 'niet-opgeslagen wijziging' : ''}</span>
+      </div>
+    </div>`;
+
+    // Punt 3 — Contact/automation-historie via /api/events-attendee-comms.
+    // Retourneert items = [{channel, status, at, label}], gecombineerd uit
+    // event_attendee_comms_log + event_automation_run_log (zie endpoint-doc).
+    const commsSt = _live.attComms;
+    let commsBlock;
+    if (commsSt.loading[attId]) commsBlock = `<div style="font-size:12.5px;color:var(--text-3)">Historie laden…</div>`;
+    else if (commsSt.error[attId]) commsBlock = `<div style="font-size:12.5px;color:var(--rose)">Historie-fout: ${esc(commsSt.error[attId])}</div>`;
+    else {
+      const cItems = asArr(commsSt.data[attId]?.items);
+      const cNote  = commsSt.data[attId]?.note || null;
+      if (cItems.length === 0) commsBlock = `<div style="font-size:12.5px;color:var(--text-3);font-style:italic">Nog geen automation / e-mail / WhatsApp verstuurd.</div>`;
+      else {
+        commsBlock = `<div style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;padding-right:4px">
+          ${cItems.map((it) => {
+            const isWA = String(it.channel || '').toLowerCase() === 'whatsapp';
+            const chanBadge = isWA
+              ? `<span title="WhatsApp" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;background:#25d366;border-radius:4px;color:white;font-size:11px;font-weight:600">W</span>`
+              : `<span title="E-mail" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;background:var(--blue);border-radius:4px;color:white">${svg(I.mail || I.chat, 'width:11px;height:11px')}</span>`;
+            const st = String(it.status || '').toLowerCase();
+            const stColor = st === 'gepland' ? 'warn' : (st === 'verzonden' ? 'ok' : 'neutral');
+            return `<div style="display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface)">
+              ${chanBadge}
+              <div style="flex:1;min-width:0">
+                <div style="font-size:12.5px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.label || '—')}</div>
+                <div class="mono" style="font-size:10.5px;color:var(--text-3);margin-top:1px">${esc(_fmtDateTime(it.at))}</div>
+              </div>
+              ${H.pill(stColor, it.status || '—')}
+            </div>`;
+          }).join('')}
+        </div>
+        ${cNote ? `<div style="margin-top:8px;padding:8px 10px;background:var(--surface-2);border-radius:6px;font-size:11.5px;color:var(--text-3);line-height:1.5">${esc(cNote)}</div>` : ''}`;
+      }
+    }
+
     const body = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px">
       <div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
@@ -1328,8 +1444,19 @@
         <div class="kv"><dt>Aangemeld</dt><dd class="mono">${esc(_fmtDateTime(att.registered_at || att.created_at))}</dd></div>
         <div class="kv"><dt>Belstatus</dt><dd>${esc(att.call_status || '—')}</dd></div>
         ${att.customer_id ? `<div class="kv"><dt>Klant-ID</dt><dd class="mono" style="font-size:11px">${esc(String(att.customer_id).slice(0,8))}…</dd></div>` : `<div class="kv"><dt>Klant</dt><dd style="color:var(--text-3);font-size:12px">Niet gekoppeld</dd></div>`}
+
         <div style="margin-top:16px">
-          <div style="font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Contacthistorie</div>
+          <div style="font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Notitie</div>
+          ${noteBlock}
+        </div>
+
+        <div style="margin-top:16px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Automations / berichten</div>
+          ${commsBlock}
+        </div>
+
+        <div style="margin-top:16px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Contacthistorie (chat)</div>
           ${contactBlock}
         </div>
       </div>
@@ -1648,31 +1775,95 @@
     const conv = d?.conversation || null;
     const msgs = asArr(d?.items);
     const naam = conv?.customer_name || conv?.display_name || conv?.phone_number || '—';
+    const isWA = !!(conv?.phone_number || conv?.can_send_text);
+
+    // Datum-scheiders: groepeer berichten per lokale dag.
+    const _dayKey = (m) => {
+      const d = new Date(m.sent_at || m.created_at || 0);
+      if (!Number.isFinite(d.getTime())) return 'unknown';
+      return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    };
+    const _dayLabel = (m) => {
+      const d = new Date(m.sent_at || m.created_at || 0);
+      if (!Number.isFinite(d.getTime())) return '—';
+      const now = new Date();
+      const isToday = d.toDateString() === now.toDateString();
+      const y = new Date(now); y.setDate(now.getDate()-1);
+      const isYest = d.toDateString() === y.toDateString();
+      if (isToday) return 'Vandaag';
+      if (isYest)  return 'Gisteren';
+      return d.toLocaleDateString('nl-NL', { weekday:'long', day:'numeric', month:'long', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
+    };
+    const _timeShort = (m) => {
+      const d = new Date(m.sent_at || m.created_at || 0);
+      if (!Number.isFinite(d.getTime())) return '';
+      return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+    };
+    // Status-icoon (WhatsApp-stijl 2 vinkjes)
+    const _statusIcon = (m) => {
+      const s = String(m.status || '').toLowerCase();
+      if (m.read_at || s === 'read')      return '<span title="Gelezen" style="color:#53bdeb;font-weight:600;letter-spacing:-3px">✓✓</span>';
+      if (m.delivered_at || s === 'delivered') return '<span title="Bezorgd" style="color:var(--text-3);font-weight:600;letter-spacing:-3px">✓✓</span>';
+      if (s === 'failed')                 return '<span title="Mislukt" style="color:var(--rose)">⚠</span>';
+      if (m.sent_at || s === 'sent' || s === 'accepted') return '<span title="Verzonden" style="color:var(--text-3)">✓</span>';
+      return '';
+    };
+
+    let lastDay = null;
+    const bubbles = msgs.map((m) => {
+      const out = m.direction === 'outbound';
+      const body = m.body || (m.template_name ? '📄 Template: ' + m.template_name : (m.media_url ? '📎 Bijlage (' + (m.media_type || 'media') + ')' : '—'));
+      const dk = _dayKey(m);
+      const sep = (dk !== lastDay)
+        ? `<div style="display:flex;justify-content:center;margin:14px 0 8px"><span style="padding:4px 12px;background:rgba(0,0,0,.06);border-radius:10px;font-size:11px;font-weight:500;color:var(--text-3)">${esc(_dayLabel(m))}</span></div>`
+        : '';
+      lastDay = dk;
+      const bubbleBg = out
+        ? (isWA ? '#d9fdd3' : 'var(--pink-soft)')
+        : 'var(--surface)';
+      const bubbleColor = out && isWA ? '#111' : 'var(--text)';
+      // Tail-triangle (chat-look)
+      const tail = out
+        ? `<span style="position:absolute;right:-6px;top:0;width:8px;height:13px;background:${bubbleBg};clip-path:polygon(0 0, 100% 0, 0 100%)"></span>`
+        : `<span style="position:absolute;left:-6px;top:0;width:8px;height:13px;background:${bubbleBg};clip-path:polygon(0 0, 100% 0, 100% 100%);border-left:1px solid var(--border)"></span>`;
+      return `${sep}<div style="display:flex;justify-content:${out ? 'flex-end' : 'flex-start'};padding:0 4px">
+        <div style="max-width:65%;position:relative">
+          <div style="position:relative;padding:6px 10px 5px;border-radius:8px;background:${bubbleBg};color:${bubbleColor};font-size:13.5px;line-height:1.42;white-space:pre-wrap;word-wrap:break-word;box-shadow:0 1px 1px rgba(0,0,0,.08);${out ? '' : 'border:1px solid var(--border)'}">
+            ${tail}
+            ${m.template_name ? `<div style="font-size:10.5px;color:${out && isWA ? '#4a7c3a' : 'var(--text-3)'};font-weight:600;margin-bottom:2px">📄 ${esc(m.template_name)}</div>` : ''}
+            <span>${esc(body)}</span>
+            <div style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;float:right;padding-top:4px">
+              <span class="mono" style="font-size:10.5px;color:${out && isWA ? '#667781' : 'var(--text-3)'}">${esc(_timeShort(m))}</span>
+              ${out ? _statusIcon(m) : ''}
+            </div>
+            <div style="clear:both"></div>
+            ${m.failed_reason ? `<div style="font-size:10.5px;color:var(--rose);margin-top:2px;font-style:italic">Fout: ${esc(m.failed_reason.slice(0,60))}</div>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
+    // Chat-achtergrond (subtiel patroon, licht/donker-safe via tokens)
+    const chatBg = `background:var(--surface-2);background-image:radial-gradient(rgba(0,0,0,.03) 1px, transparent 1px);background-size:16px 16px`;
+
     return `${backBar}
-    <div style="padding:16px 20px 8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">
-      ${H.av(naam, 38)}
+    <div style="padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;background:var(--surface)">
+      ${H.av(naam, 40)}
       <div style="flex:1;min-width:0">
         <div style="font-size:15px;font-weight:600">${esc(naam)}</div>
-        <div style="font-size:12px;color:var(--text-3);margin-top:2px;display:flex;gap:10px;flex-wrap:wrap">
+        <div style="font-size:12px;color:var(--text-3);margin-top:2px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
           ${_channelIndicator(conv)}
           ${conv?.phone_number ? `<span class="mono">${esc(conv.phone_number)}</span>` : ''}
           ${conv?.status ? H.pill('neutral', conv.status) : ''}
         </div>
       </div>
     </div>
-    <div style="padding:16px 20px;max-height:calc(100vh - 280px);overflow-y:auto;display:flex;flex-direction:column;gap:8px">
+    <div style="${chatBg};padding:16px 20px;max-height:calc(100vh - 300px);min-height:400px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
       ${msgs.length === 0
-        ? `<div style="text-align:center;color:var(--text-3);font-size:12.5px;padding:40px 0">Geen berichten in deze conversatie.</div>`
-        : msgs.map((m) => {
-            const out = m.direction === 'outbound';
-            const body = m.body || (m.template_name ? '[template: ' + m.template_name + ']' : (m.media_url ? '[bijlage: ' + (m.media_type || 'media') + ']' : '—'));
-            return `<div style="display:flex;flex-direction:column;align-items:${out ? 'flex-end' : 'flex-start'};max-width:100%">
-              <div style="max-width:70%;padding:8px 12px;border-radius:12px;background:${out ? 'var(--pink-soft)' : 'var(--surface-2)'};border:1px solid ${out ? 'var(--pink-line, var(--border))' : 'var(--border)'};color:var(--text);font-size:13px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word">${esc(body)}</div>
-              <div class="mono" style="font-size:10.5px;color:var(--text-3);margin-top:2px;padding:0 4px">${esc(_fmtDateTime(m.sent_at || m.created_at))}${m.status ? ' · ' + esc(m.status) : ''}${m.failed_reason ? ' · fout: ' + esc(m.failed_reason.slice(0,40)) : ''}</div>
-            </div>`;
-          }).join('')}
+        ? `<div style="text-align:center;color:var(--text-3);font-size:12.5px;padding:60px 0">Geen berichten in deze conversatie.</div>`
+        : bubbles}
     </div>
-    <div style="padding:12px 20px;border-top:1px solid var(--border);background:var(--surface-2);font-size:12px;color:var(--text-3);text-align:center">
+    <div style="padding:10px 20px;border-top:1px solid var(--border);background:var(--surface-2);font-size:12px;color:var(--text-3);text-align:center">
       Sturen vanuit deze viewer nog niet ondersteund — gebruik <a href="/modules/events.html?conv=${encodeURIComponent(convId)}#inbox" target="_blank" style="color:var(--pink);text-decoration:underline">v1-inbox</a> voor reply.
     </div>`;
   }
@@ -1904,34 +2095,29 @@
   }
 
   function _settingsAutomations() {
-    if (!_live.autos.data && !_live.autos.loading && !_live.autos.error) queueMicrotask(fetchAutos);
-    if (_live.autos.error && !_live.autos.data) return errBlk('autos', _live.autos.error);
-    if (_live.autos.loading && !_live.autos.data) return skel();
-    const rows = asArr(_live.autos.data);
-    const active = rows.filter((r) => r.enabled).length;
-    return `<div class="pad" style="padding-top:14px">
-      ${H.kpis([
-        { c:'pink',    icon:I.cal,   label:'Automations',  val:String(rows.length), sub:'ingericht' },
-        { c:'emerald', icon:I.tick,  label:'Actief',       val:String(active), hi:1 },
-        { c:'slate',   icon:I.clock, label:'Inactief',     val:String(rows.length - active) },
-      ])}
-      ${rows.length === 0
-        ? emptyBlk('Nog geen automations', 'Maak een automation aan in de v1-editor (linkt hieronder).')
-        : H.table(
-            [{l:'Naam'},{l:'Trigger',cls:'optional'},{l:'Scope',cls:'optional'},{l:'Status'},{l:'Aangepast',cls:'r optional'},{l:'',cls:'r'}],
-            rows.map((a) => [
-              `<div><div class="cell-main">${esc(a.name || '—')}</div>${a.description ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:2px">${esc(a.description)}</div>` : ''}</div>`,
-              `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(a.trigger_type || '—')}</span>`,
-              `<span style="font-size:11.5px;color:var(--text-3)">${esc(a.scope_type || '—')}</span>`,
-              a.enabled ? H.pill('ok','Actief') : H.pill('neutral','Uit'),
-              `<span class="mono" style="font-size:12px;color:var(--text-3)">${esc(_fmtDate(a.updated_at || a.created_at))}</span>`,
-              `<a href="/modules/events-automations.html" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none">Bewerken →</a>`,
-            ])
-          )}
-      <div style="margin-top:14px;padding:12px 14px;background:var(--surface-2);border-radius:8px;font-size:12.5px;color:var(--text-3)">
-        Automations aanmaken/bewerken/toggelen gaat via de v1-editor. Read-only overzicht + status hier tonen was Fase 2-scope; volledige in-shell editor komt in een latere iteratie.
+    // Punt 2 — Automations worden centraal beheerd in de Automatiseringen-module.
+    // Deze sub-tab is bewust read-only een verwijzing; de echte editor (create /
+    // edit / toggle / test) bouwen we later in modules/klanten-v2/views/automatiseringen-v2.js.
+    return `<div class="pad" style="padding-top:20px"><div style="max-width:640px">
+      <div class="card">
+        <div class="card-head">
+          <span class="tile-ico" style="background:var(--violet-soft);color:var(--violet)">${svg(I.robot || I.settings)}</span>
+          <div class="card-title">Automatiseringen</div>
+        </div>
+        <div class="card-body" style="padding:20px;display:flex;flex-direction:column;gap:14px">
+          <div style="font-size:13.5px;color:var(--text-2);line-height:1.6">
+            <b>Beheer automatiseringen centraal in Automatiseringen.</b> Alle triggers, condities en stappen (WhatsApp / e-mail / taken) voor events wonen in de <a href="/modules/klanten-v2/?v2preview=automatiseringen" style="color:var(--violet);text-decoration:underline">Automatiseringen-module</a>. Zo blijft de editor consistent voor alle modules (events, finance, onboarding, …).
+          </div>
+          <div style="padding:10px 14px;background:var(--surface-2);border-radius:8px;font-size:12px;color:var(--text-3);line-height:1.5">
+            Deze sub-tab is bewust een read-only verwijzing. Volledige in-shell editor bouwen we later in de Automatiseringen-module.
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <a href="/modules/klanten-v2/?v2preview=automatiseringen" class="btn btn-primary btn-sm" style="text-decoration:none">${svg(I.arrRight || I.tick)}Open Automatiseringen (v2)</a>
+            <a href="/modules/events-automations.html" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none">v1-editor openen ↗</a>
+          </div>
+        </div>
       </div>
-    </div>`;
+    </div></div>`;
   }
 
   function _settingsDeadline() {
