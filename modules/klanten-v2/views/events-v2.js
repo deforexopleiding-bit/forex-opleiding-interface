@@ -54,6 +54,8 @@
     simoneCfg:   { loading: false, error: null, data: null },  // {is_enabled, feature_flags, ...}
     // Simone-verstuurde messages (via joost_suggestions.sent_autonomously)
     simoneMsgs:  { loading: {}, error: {}, data: {} },         // per conversation_id → Set(message_id)
+    // Openstaande Simone-suggestie per conv (status=PROPOSED) — single, endpoint returnt {suggestion: null|{}}
+    suggestion:  { loading: {}, error: {}, data: {} },         // per convId → {id, suggested_reply, ...} | null
   };
 
   const _ui = {
@@ -99,6 +101,14 @@
     // Template-picker modal
     tplPickerOpen: null,     // convId waarvoor picker open is
     tplPickerQ:    '',       // client-side search
+    // Template-send state — als gezet, send via /api/inbox-send-template
+    composeTpl:      {},     // [convId] = { name, language, originalBody, attendeeId? }
+    // E-mail composer state
+    composeSubject:  {},     // [convId] = string (default "Re: <last subject>")
+    composeMailbox:  {},     // [convId] = string (default = mailbox uit laatste inbound email)
+    composeChannel:  {},     // [convId] = 'whatsapp' | 'email' (voor unified convs; anders auto)
+    // Simone suggestion dismissed voor sessie (client-side hide zolang niet gerefetched)
+    suggestionHidden:{},     // [convId] = true
   };
 
   async function tryFetch(label, url, init, timeoutMs) {
@@ -327,6 +337,10 @@
     } catch (_) {}
     // Ook Simone-signature fetchen (klein, best-effort)
     queueMicrotask(() => fetchSimoneMsgs(convId));
+    // Openstaande Simone-suggestie voor deze conv (best-effort)
+    _live.suggestion.data[convId] = null;   // invalidate zodat we vers laden
+    _ui.suggestionHidden[convId] = false;
+    queueMicrotask(() => fetchSuggestion(convId));
     if (typeof onDone === 'function') { try { onDone(); } catch (_) {} }
     else if (window.DFO?.render) window.DFO.render();
   }
@@ -351,6 +365,23 @@
     st.loading = false;
     if (j && j.__error) st.error = j.__error;
     else st.data = j?.config || j || null;
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  // Openstaande Simone-suggestie voor deze conv (status=PROPOSED). Endpoint
+  // retourneert single {suggestion: null | {...}}. Handmatig invalideren na
+  // send/ignore/refetch-thread.
+  async function fetchSuggestion(convId) {
+    const st = _live.suggestion; if (st.loading[convId]) return;
+    st.loading[convId] = true; st.error[convId] = null;
+    const j = await tryFetch('sugg:' + convId, '/api/joost-suggestions-recent?module=events&conversation_id=' + encodeURIComponent(convId) + '&max_age_minutes=1440');
+    st.loading[convId] = false;
+    if (j && j.__error) { st.error[convId] = j.__error; }
+    else {
+      const s = j?.suggestion || null;
+      // Alleen PROPOSED = actionable
+      st.data[convId] = (s && s.status === 'PROPOSED') ? s : null;
+    }
     if (window.DFO?.render) window.DFO.render();
   }
 
@@ -1809,21 +1840,13 @@
   // ═══════════════════════════════════════════════════════════════════════
   function inboxView() {
     if (!_live.inbox.data && !_live.inbox.loading && !_live.inbox.error) queueMicrotask(fetchInbox);
-    if (_live.inbox.error && !_live.inbox.data) return _inboxKpiSkel() + errBlk('inbox', _live.inbox.error);
-    if (_live.inbox.loading && !_live.inbox.data) return _inboxKpiSkel() + skel();
+    if (_live.inbox.error && !_live.inbox.data) return errBlk('inbox', _live.inbox.error);
+    if (_live.inbox.loading && !_live.inbox.data) return skel();
 
     const items = asArr(_live.inbox.data);
-    const totalUnread = items.reduce((a, c) => a + Number(c.unread_count || 0), 0);
-
-    const kpiBlock = H.kpis([
-      { c:'pink',    icon:I.chat,  label:'Gesprekken',           val:String(items.length), sub:'gekoppeld aan events-nummer' },
-      { c:'amber',   icon:I.alert, label:'Ongelezen berichten',  val:String(totalUnread), hi:1 },
-      { c:'emerald', icon:I.users, label:'Met klant-koppeling',  val:String(items.filter((c) => c.customer_id).length) },
-      { c:'blue',    icon:I.tick,  label:'Kunnen versturen',     val:String(items.filter((c) => c.can_send_text).length) },
-    ]);
 
     if (items.length === 0) {
-      return kpiBlock + emptyBlk('Nog geen gesprekken', 'Zodra een klant de events-lijn appt of mailt verschijnt de conversatie hier.');
+      return emptyBlk('Nog geen gesprekken', 'Zodra een klant de events-lijn appt of mailt verschijnt de conversatie hier.');
     }
 
     // Auto-select bovenste conv bij eerste render als er nog geen actieve is.
@@ -1847,7 +1870,7 @@
       if (leftEl && typeof _ui.inboxScrollTop === 'number') leftEl.scrollTop = _ui.inboxScrollTop;
     });
 
-    return kpiBlock + _inboxSimoneStatusBar() + `
+    return _inboxSimoneStatusBar() + `
       ${_inboxStyles()}
       <div class="ev-inbox-split" data-mode="${esc(narrowMode)}">
         <div class="ev-inbox-left" id="ev-inbox-left">
@@ -1889,7 +1912,7 @@
   function _inboxStyles() {
     // Scoped, idempotent via id. DFO.render() rebuild is prima; browser dedupes.
     return `<style id="ev-inbox-styles">
-      .ev-inbox-split { display:grid; grid-template-columns:340px 1fr; height:calc(100vh - 260px); min-height:480px; border-top:1px solid var(--border); background:var(--surface); }
+      .ev-inbox-split { display:grid; grid-template-columns:340px 1fr; height:calc(100vh - 180px); min-height:560px; border-top:1px solid var(--border); background:var(--surface); }
       .ev-inbox-left  { overflow-y:auto; border-right:1px solid var(--border); background:var(--surface); }
       .ev-inbox-right { overflow-y:auto; display:flex; flex-direction:column; min-width:0; }
       .ev-inbox-row   { display:flex; gap:10px; padding:10px 12px; border-bottom:1px solid var(--border); cursor:pointer; align-items:flex-start; transition:background .12s ease; }
@@ -2111,52 +2134,141 @@
   // Optimistische bubbel: zet 'sending' bubble in msgs, PATCH DOM #ev-inbox-
   // right onmiddellijk, dan POST. Bij succes: refetch thread (invalidate
   // cache) + surgical repaint. Bij fout: rode banner + bubble.status='failed'.
+  // Bepaal effectief kanaal: 'whatsapp' of 'email'. Prioriteit:
+  //  - user-override via composeChannel[convId] (unified convs met beide kanalen)
+  //  - conv.phone_number aanwezig → whatsapp
+  //  - laatste msg is email → email
+  //  - default whatsapp
+  function _detectChannel(convId, conv) {
+    const override = _ui.composeChannel[convId];
+    if (override === 'email' || override === 'whatsapp') return override;
+    if (conv?.phone_number || conv?.can_send_text) return 'whatsapp';
+    // Check laatste bericht in thread
+    const msgs = asArr(_live.inboxMsgs.data[convId]?.items);
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const ch = String(msgs[i].channel || '').toLowerCase();
+      if (ch === 'email' || ch === 'whatsapp') return ch;
+    }
+    return 'whatsapp';
+  }
+
+  // Pak defaults voor e-mail-reply uit laatste inbound e-mail-bericht in thread.
+  function _emailDefaults(convId, conv) {
+    const msgs = asArr(_live.inboxMsgs.data[convId]?.items);
+    // Zoek laatste inbound e-mail (voor Re:-subject + mailbox + email_id + to)
+    let lastInboundEmail = null;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (String(m.channel || '').toLowerCase() === 'email' && (m.direction === 'inbound' || m.direction === 'in')) {
+        lastInboundEmail = m; break;
+      }
+    }
+    // Fallback: laatste e-mail (welke richting dan ook)
+    if (!lastInboundEmail) {
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        if (String(m.channel || '').toLowerCase() === 'email') { lastInboundEmail = m; break; }
+      }
+    }
+    const subj = lastInboundEmail?.meta?.subject || '';
+    const reSubj = subj ? (subj.match(/^re:\s/i) ? subj : 'Re: ' + subj) : '';
+    // email_id: unified endpoint prefixt outbound met 'reply:' — voor reply
+    // moeten we terug naar de raw email_messages.id. Bij inbound is m.id de
+    // originele email_messages.id (geen prefix).
+    const emailId = lastInboundEmail && !String(lastInboundEmail.id || '').startsWith('reply:')
+      ? String(lastInboundEmail.id) : null;
+    const mailbox = lastInboundEmail?.meta?.mailbox || '';
+    // to: klant-email. Bij inbound = from_address; anders conv.customer_email
+    const toAddr = lastInboundEmail?.direction === 'inbound' || lastInboundEmail?.direction === 'in'
+      ? (lastInboundEmail?.meta?.from_address || conv?.customer_email || '')
+      : (conv?.customer_email || '');
+    return { subject: reSubj, mailbox, email_id: emailId, to: toAddr };
+  }
+
   function _inboxRightFooter(convId, conv) {
-    const isWA = !!(conv?.phone_number || conv?.can_send_text);
+    const ch = _detectChannel(convId, conv);
+    const isWA    = ch === 'whatsapp';
+    const isEmail = ch === 'email';
     const draft = _ui.composeText[convId] || '';
     const busy  = !!_ui.composeBusy[convId];
     const err   = _ui.composeError[convId] || null;
+    const tplState = _ui.composeTpl[convId] || null;
+    // Waarschuw bij aanpassing van een geselecteerde template
+    const tplEdited = tplState && draft.trim() !== String(tplState.originalBody || '').trim();
     // Simone-status per conv (voor waarschuwing bij overlap)
     const simEnabled = !!(_live.simoneCfg.data?.is_enabled);
     const simSuggest = !!(_live.simoneCfg.data?.feature_flags?.reactive_suggest_enabled);
     const simAuto    = !!(_live.simoneCfg.data?.feature_flags?.events_reactive_autonomy);
     const simActive  = simEnabled && (simSuggest || simAuto);
 
-    if (!isWA) {
-      // E-mail-conv: geen native send-support in v2 (send-email endpoint
-      // vereist email_id + subject + mailbox routing). Voor MVP: instructie.
-      return `<div style="padding:12px 20px;border-top:1px solid var(--border);background:var(--surface-2);flex-shrink:0">
-        <div style="font-size:12px;color:var(--text-3);text-align:center;line-height:1.5">
-          E-mail-antwoorden vanuit v2 nog niet ondersteund — gebruik <a href="/modules/events.html?conv=${encodeURIComponent(convId)}#inbox" target="_blank" style="color:var(--pink);text-decoration:underline">v1-inbox</a> voor reply.
-        </div>
-      </div>`;
+    // E-mail-defaults (subject + mailbox + to + email_id) alleen berekenen als e-mail
+    let emailBits = null;
+    if (isEmail) {
+      const d = _emailDefaults(convId, conv);
+      const curSubj    = (convId in _ui.composeSubject) ? _ui.composeSubject[convId] : d.subject;
+      const curMailbox = (convId in _ui.composeMailbox) ? _ui.composeMailbox[convId] : d.mailbox;
+      emailBits = { ...d, subject: curSubj, mailbox: curMailbox };
     }
 
+    // Suggestion-blok (Simone stelt voor …) — alleen WA-conv en niet verborgen
+    const sugg = _live.suggestion.data[convId];
+    const showSugg = isWA && sugg && sugg.status === 'PROPOSED' && !_ui.suggestionHidden[convId];
+
     return `<div style="padding:10px 16px;border-top:1px solid var(--border);background:var(--surface);flex-shrink:0;display:flex;flex-direction:column;gap:6px">
-      <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-3)">
-        <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:6px;height:6px;background:#25d366;border-radius:50%"></span>Antwoord via WhatsApp</span>
+      ${showSugg ? `<div style="padding:8px 10px;background:var(--violet-soft);border:1px solid var(--violet-line, var(--violet));border-radius:8px;color:var(--text);font-size:12.5px;line-height:1.45;display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="display:inline-flex;align-items:center;justify-content:center;padding:1px 7px;background:var(--violet);color:white;border-radius:3px;font-size:10.5px;font-weight:600">🤖 Simone stelt voor</span>
+          ${sugg.confidence != null ? `<span style="font-size:10.5px;color:var(--text-3)">confidence ${Math.round(Number(sugg.confidence) * 100)}%</span>` : ''}
+          <button class="icon-btn" onclick="window.__evSuggestIgnore('${esc(convId)}','${esc(sugg.id)}')" style="margin-left:auto;width:22px;height:22px" title="Negeer / verberg">${svg(I.x || I.close, 'width:11px;height:11px')}</button>
+        </div>
+        <div style="white-space:pre-wrap;color:var(--text);font-size:12.5px;padding:2px 0">${esc(String(sugg.suggested_reply || '').slice(0, 500))}${String(sugg.suggested_reply || '').length > 500 ? '…' : ''}</div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-primary btn-sm" onclick="window.__evSuggestAccept('${esc(convId)}','${esc(sugg.id)}')" style="padding:4px 10px;font-size:11.5px">Overnemen</button>
+          <button class="btn btn-ghost btn-sm" onclick="window.__evSuggestIgnore('${esc(convId)}','${esc(sugg.id)}')" style="padding:4px 10px;font-size:11.5px">Negeren</button>
+        </div>
+      </div>` : ''}
+
+      <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-3);flex-wrap:wrap">
+        <span style="display:inline-flex;align-items:center;gap:4px">
+          <span style="width:6px;height:6px;background:${isEmail ? 'var(--blue)' : '#25d366'};border-radius:50%"></span>
+          Antwoord via ${isEmail ? 'e-mail' : 'WhatsApp'}
+        </span>
+        ${tplState ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:1px 6px;background:var(--pink-soft);color:var(--pink);border-radius:3px;font-size:10.5px;font-weight:600" title="Wordt als Meta-approved template verstuurd (werkt ook buiten 24u-venster)">📄 Meta-template: ${esc(tplState.name)}</span>` : ''}
+        ${tplState ? `<button class="icon-btn" onclick="window.__evCompTplClear('${esc(convId)}')" style="width:18px;height:18px" title="Template loskoppelen (verstuur als vrije tekst)">${svg(I.x || I.close, 'width:10px;height:10px')}</button>` : ''}
+        ${tplEdited ? `<span style="color:var(--amber);font-size:10.5px" title="Meta-templates verzenden alleen de gedefinieerde placeholder-params. Handmatige tekstwijzigingen worden genegeerd. Klik het ×-icoontje om als vrije tekst te verzenden (mits binnen 24u-venster).">⚠ Tekst aangepast — als template genegeerd</span>` : ''}
         ${simActive ? `<span style="margin-left:auto;color:var(--amber);font-weight:500" title="Simone kan alsnog autonoom antwoorden op nieuwe inbound berichten (60s cooldown na jouw send). Beheer Simone in de Agents-module.">⚠ Simone actief</span>` : ''}
       </div>
+
       ${err ? `<div style="padding:6px 10px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:6px;color:var(--rose);font-size:12px;display:flex;align-items:center;gap:8px">
         <span style="flex:1">⚠ ${esc(err)}</span>
         <button class="btn btn-ghost btn-sm" onclick="window.__evCompSend('${esc(convId)}')" style="padding:2px 8px;font-size:11px">Opnieuw</button>
         <button class="icon-btn" onclick="window.__evCompErrDismiss('${esc(convId)}')" style="width:22px;height:22px" title="Sluiten">${svg(I.x || I.close, 'width:11px;height:11px')}</button>
       </div>` : ''}
+
+      ${isEmail ? `<div style="display:flex;gap:6px;flex-wrap:wrap">
+        <select onchange="window.__evCompMailboxSet('${esc(convId)}', this.value)" ${busy ? 'disabled' : ''} style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px;font-family:inherit">
+          ${['info@deforexopleiding.nl','leads@deforexopleiding.nl','partners@deforexopleiding.nl','administratie@deforexopleiding.nl'].map((mb) => `<option value="${esc(mb)}" ${emailBits.mailbox === mb ? 'selected' : ''}>${esc(mb)}</option>`).join('')}
+        </select>
+        <input type="text" value="${esc(emailBits.subject)}" placeholder="Onderwerp" oninput="window.__evCompSubjectSet('${esc(convId)}', this.value)" ${busy ? 'disabled' : ''} style="flex:1;min-width:220px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:inherit" />
+      </div>
+      <div style="font-size:10.5px;color:var(--text-3)">Aan: <span class="mono">${esc(emailBits.to || '(geen adres — niet verzendbaar)')}</span>${!emailBits.email_id ? ' · <span style="color:var(--amber)">⚠ geen inbound e-mail om op te antwoorden — reply-in-thread niet mogelijk</span>' : ''}</div>
+      ` : ''}
+
       <div style="display:flex;gap:6px;align-items:flex-end">
-        <button class="btn btn-ghost btn-sm" onclick="window.__evCompTplOpen('${esc(convId)}')" title="Kies een template" style="flex-shrink:0;padding:6px 10px;font-size:12px" ${busy ? 'disabled' : ''}>${svg(I.doc || I.file, 'width:13px;height:13px')} Template</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.__evCompTplOpen('${esc(convId)}')" title="${isEmail ? 'Templates zijn WhatsApp-only' : 'Kies een template'}" style="flex-shrink:0;padding:6px 10px;font-size:12px" ${busy || isEmail ? 'disabled' : ''}>${svg(I.doc || I.file, 'width:13px;height:13px')} Template</button>
         <textarea
           id="ev-comp-input-${esc(convId)}"
-          placeholder="Typ een antwoord… (Enter = versturen, Shift+Enter = nieuwe regel)"
+          placeholder="${isEmail ? 'Typ je e-mail-antwoord…' : 'Typ een antwoord… (Enter = versturen, Shift+Enter = nieuwe regel)'}"
           oninput="window.__evCompDraft('${esc(convId)}', this.value); window.__evCompAutoGrow(this)"
           onkeydown="window.__evCompKeydown(event, '${esc(convId)}')"
           ${busy ? 'disabled' : ''}
-          style="flex:1;min-height:38px;max-height:160px;padding:8px 12px;border:1px solid var(--border);border-radius:20px;background:var(--surface);color:var(--text);font-size:13.5px;font-family:inherit;line-height:1.4;resize:none;box-sizing:border-box;overflow-y:auto"
+          style="flex:1;min-height:${isEmail ? '80px' : '38px'};max-height:${isEmail ? '260px' : '160px'};padding:8px 12px;border:1px solid var(--border);border-radius:${isEmail ? '8px' : '20px'};background:var(--surface);color:var(--text);font-size:13.5px;font-family:inherit;line-height:1.4;resize:none;box-sizing:border-box;overflow-y:auto"
         >${esc(draft)}</textarea>
         <button
           class="btn btn-primary btn-sm"
           onclick="window.__evCompSend('${esc(convId)}')"
-          ${(!draft.trim() || busy) ? 'disabled style="opacity:.55"' : ''}
-          title="Versturen (Enter)"
+          ${(!draft.trim() || busy || (isEmail && (!emailBits.email_id || !emailBits.to || !emailBits.mailbox || !emailBits.subject.trim()))) ? 'disabled style="opacity:.55"' : ''}
+          title="Versturen${isEmail ? '' : ' (Enter)'}"
           style="flex-shrink:0;padding:8px 14px;font-size:12px"
         >${busy ? '…' : (svg(I.send || I.arrRight || I.tick, 'width:13px;height:13px') + ' Versturen')}</button>
       </div>
@@ -2181,41 +2293,105 @@
       window.__evCompSend(convId);
     }
   };
+  window.__evCompSubjectSet = (convId, val) => { _ui.composeSubject[convId] = String(val || ''); };
+  window.__evCompMailboxSet = (convId, val) => { _ui.composeMailbox[convId] = String(val || ''); };
+  window.__evCompTplClear = (convId) => {
+    delete _ui.composeTpl[convId];
+    if (window.DFO?.render) window.DFO.render();
+  };
+
+  // Send-router: kiest tussen 3 endpoints op basis van kanaal + template-state.
+  //   1) e-mail-conv → POST /api/send-email
+  //   2) WA-conv + composeTpl gezet + tekst ongewijzigd t.o.v. originalBody
+  //      → POST /api/inbox-send-template (echte Meta-template met resolved
+  //         params via meta_param_mapping + context_event_attendee_id)
+  //   3) WA-conv + vrije tekst (of template met handmatige edit) →
+  //      POST /api/inbox-send (mode:'text')
   window.__evCompSend = async (convId) => {
     const text = String(_ui.composeText[convId] || '').trim();
     if (!text || _ui.composeBusy[convId]) return;
+    const conv = _live.inboxMsgs.data[convId]?.conversation || null;
+    const ch = _detectChannel(convId, conv);
     _ui.composeBusy[convId] = true;
     delete _ui.composeError[convId];
 
-    // Optimistisch bubbel toevoegen aan huidige thread-data
+    // Optimistisch bubbel
     const optimisticId = 'opt-' + Date.now();
-    const optimistic = {
+    const optimistic = ch === 'email' ? {
+      id: optimisticId, channel: 'email', direction: 'outbound',
+      body: text, at: new Date().toISOString(),
+      meta: { subject: _ui.composeSubject[convId] || '', from_address: _ui.composeMailbox[convId] || '' },
+      _pending: true,
+    } : {
       id: optimisticId, channel: 'whatsapp', direction: 'outbound',
       body: text, at: new Date().toISOString(),
       status: 'sending', _pending: true,
+      template_name: (_ui.composeTpl[convId] && !_isTplEdited(convId)) ? _ui.composeTpl[convId].name : null,
     };
     const cur = _live.inboxMsgs.data[convId];
     if (cur) { cur.items = asArr(cur.items).concat([optimistic]); }
     _paintRightSurgical(convId);
-    // Focus/blur is niet nodig — textarea disabled via busy-flag
 
     try {
-      const j = await window.KV.authedJson('/api/inbox-send', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ conversation_id: convId, mode: 'text', body: text }),
-      });
-      if (j?.error) throw new Error(j.error || j.message || 'inbox-send fail');
-      // Succes: leeg draft, invalidate cache, refetch
+      let j;
+      if (ch === 'email') {
+        // E-mail: send-email endpoint
+        const d = _emailDefaults(convId, conv);
+        const emailId  = d.email_id;
+        const mailbox  = _ui.composeMailbox[convId] || d.mailbox;
+        const subject  = _ui.composeSubject[convId] || d.subject;
+        const to       = d.to;
+        if (!emailId)  throw new Error('Geen inbound e-mail in de thread om op te antwoorden.');
+        if (!mailbox)  throw new Error('Kies eerst een from_mailbox.');
+        if (!subject)  throw new Error('Onderwerp is verplicht.');
+        if (!to)       throw new Error('Ontvanger-adres onbekend.');
+        j = await window.KV.authedJson('/api/send-email', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ from_mailbox: mailbox, to, subject, text, email_id: emailId }),
+        });
+      } else if (_ui.composeTpl[convId] && !_isTplEdited(convId)) {
+        // Meta-template send (ongewijzigd t.o.v. resolved body → echte template)
+        const tpl = _ui.composeTpl[convId];
+        const bodyPayload = { conversation_id: convId, template_name: tpl.name, language: tpl.language || 'nl' };
+        if (tpl.attendeeId) bodyPayload.context_event_attendee_id = tpl.attendeeId;
+        j = await window.KV.authedJson('/api/inbox-send-template', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(bodyPayload),
+        });
+      } else {
+        // Vrije tekst (WA)
+        j = await window.KV.authedJson('/api/inbox-send', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ conversation_id: convId, mode: 'text', body: text }),
+        });
+      }
+      if (j?.error) throw new Error(j.error || j.message || 'send failed');
+
+      // Als er een Simone-suggestie open stond: markeer USED_AS_IS/USED_EDITED.
+      const sugg = _live.suggestion.data[convId];
+      if (sugg && sugg.status === 'PROPOSED') {
+        const isEdited = String(text).trim() !== String(sugg.suggested_reply || '').trim();
+        try {
+          await window.KV.authedJson('/api/joost-mark-outcome', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ suggestion_id: sugg.id, status: isEdited ? 'USED_EDITED' : 'USED_AS_IS', final_sent_text: text }),
+          });
+        } catch (_) {}   // best-effort, verstuurd is de belangrijkste actie
+        _live.suggestion.data[convId] = null;
+      }
+
+      // Succes: cleanup + refetch
       _ui.composeText[convId] = '';
+      delete _ui.composeTpl[convId];
+      delete _ui.composeSubject[convId];
+      // composeMailbox behouden: is een user-voorkeur voor de sessie
       _live.inboxMsgs.data[convId] = null; _live.inboxMsgs.loading[convId] = false;
       _live.inboxMsgs.error[convId] = null;
-      // Ook conv-list-preview verversen (unread + last-message)
       _live.inbox.data = null; _live.inbox.error = null;
       queueMicrotask(fetchInbox);
       await fetchInboxMsgs(convId, () => _paintRightSurgical(convId));
-      _showToast('Bericht verstuurd');
+      _showToast(ch === 'email' ? 'E-mail verstuurd' : 'Bericht verstuurd');
     } catch (e) {
-      // Fail-soft: markeer optimistic bubble als failed + toon banner
       _ui.composeError[convId] = e?.message || 'Versturen mislukt';
       if (cur) {
         const idx = cur.items.findIndex((x) => x.id === optimisticId);
@@ -2225,6 +2401,43 @@
       _ui.composeBusy[convId] = false;
       _paintRightSurgical(convId);
     }
+  };
+
+  function _isTplEdited(convId) {
+    const tpl = _ui.composeTpl[convId];
+    if (!tpl) return false;
+    return String(_ui.composeText[convId] || '').trim() !== String(tpl.originalBody || '').trim();
+  }
+
+  // Simone-suggestie handlers
+  window.__evSuggestAccept = (convId, suggId) => {
+    const s = _live.suggestion.data[convId];
+    if (!s || s.id !== suggId) return;
+    // Prefill textarea + focus. Markeren gebeurt pas bij verzenden (USED_AS_IS
+    // of USED_EDITED afhankelijk van of Jeffrey nog wijzigingen maakt).
+    _ui.composeText[convId] = String(s.suggested_reply || '');
+    // Als er een template geselecteerd was: loskoppelen (Simone-tekst is vrije tekst)
+    delete _ui.composeTpl[convId];
+    _paintRightSurgical(convId);
+    queueMicrotask(() => {
+      const el = document.getElementById('ev-comp-input-' + convId);
+      if (el) { el.focus(); window.__evCompAutoGrow(el); }
+    });
+  };
+  window.__evSuggestIgnore = async (convId, suggId) => {
+    const s = _live.suggestion.data[convId];
+    if (!s || s.id !== suggId) return;
+    _ui.suggestionHidden[convId] = true;
+    _paintRightSurgical(convId);
+    // Best-effort mark als DISMISSED — als endpoint faalt (bv. al final status),
+    // is de UI-hide voldoende voor deze sessie.
+    try {
+      await window.KV.authedJson('/api/joost-mark-outcome', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ suggestion_id: suggId, status: 'DISMISSED' }),
+      });
+      _live.suggestion.data[convId] = null;
+    } catch (_) {}
   };
 
   // ── TEMPLATE PICKER MODAL ─────────────────────────────────────────────
@@ -2258,6 +2471,15 @@
       return v != null && v !== '' ? String(v) : m;   // laat {{...}} staan als geen match
     });
     _ui.composeText[convId] = text;
+    // Bewaar template-state zodat send-router weet: verstuur als Meta-template
+    // (mits tekst niet handmatig aangepast). originalBody = resolved preview,
+    // vergelijkbaar met _ui.composeText tot Jeffrey typt.
+    _ui.composeTpl[convId] = {
+      name: tpl.name,
+      language: tpl.language || 'nl',
+      originalBody: text,
+      attendeeId: ctx._attendeeId || null,
+    };
     _ui.tplPickerOpen = null;
     if (window.DFO?.render) window.DFO.render();
     // Focus + autogrow na render
@@ -2290,6 +2512,7 @@
       const list = asArr(_live.attendees.data[eid]);
       const att = list.find((a) => a.customer_id && conv?.customer_id && a.customer_id === conv.customer_id);
       if (att) {
+        ctx._attendeeId           = att.id;
         ctx['attendee.voornaam']  = att.first_name || att.voornaam || '';
         ctx['attendee.achternaam']= att.last_name  || att.achternaam || '';
         ctx['attendee.email']     = att.email || '';
