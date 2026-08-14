@@ -46,8 +46,14 @@
     assessments: { loading: {}, error: {}, data: {} },         // per attendee_id
     attConv:     { loading: {}, error: {}, data: {} },         // per attendee_id → conversation_id|null
     attComms:    { loading: {}, error: {}, data: {} },         // per attendee_id → {items, note}
-    // Punt 4 — In-shell inbox viewer
-    inboxMsgs:   { loading: {}, error: {}, data: {} },         // per conversation_id
+    // Punt 4 — In-shell inbox viewer (nu unified WA + email via inbox-thread-unified)
+    inboxMsgs:   { loading: {}, error: {}, data: {} },         // per conversation_id → {conversation, items:[{channel,direction,body,at,meta}]}
+    // Reply-composer + template-picker
+    inboxTpls:   { loading: {}, error: {}, data: {} },         // per conversation_id → items[]
+    // Simone-config (module=events) — voor autonomie/status-badge in header
+    simoneCfg:   { loading: false, error: null, data: null },  // {is_enabled, feature_flags, ...}
+    // Simone-verstuurde messages (via joost_suggestions.sent_autonomously)
+    simoneMsgs:  { loading: {}, error: {}, data: {} },         // per conversation_id → Set(message_id)
   };
 
   const _ui = {
@@ -86,6 +92,13 @@
     inboxScrollTop: 0,      // laatst-bekende scroll van linkerlijst; restore na re-render
     inboxNarrowMode: 'list',// 'list'|'detail' — alleen relevant op <900px
     inboxAutoSelected: false,// eerste conv auto-geselecteerd bij initial load
+    // Reply-composer state
+    composeText:   {},       // [convId] = string (draft)
+    composeBusy:   {},       // [convId] = true tijdens send
+    composeError:  {},       // [convId] = string bij send-fail
+    // Template-picker modal
+    tplPickerOpen: null,     // convId waarvoor picker open is
+    tplPickerQ:    '',       // client-side search
   };
 
   async function tryFetch(label, url, init, timeoutMs) {
@@ -286,18 +299,78 @@
     if (window.DFO?.render) window.DFO.render();
   }
 
-  // Punt 4 — In-shell inbox viewer fetcher
-  // Optional `onDone` callback: if provided, we skip DFO.render() and let the
-  // caller do a surgical DOM-update on only the right pane (split-pane inbox).
+  // Punt 4 — Unified thread (WhatsApp + e-mail door elkaar).
+  //
+  // Sinds ronde 3: gebruiken /api/inbox-thread-unified (server-side merge van
+  // whatsapp_messages + email_messages + email_replies). Zelfde endpoint dat
+  // Wanbetalers/Finance-inbox gebruikt onder de `unified_inbox_enabled`-flag.
+  // Response items[] shape: { id, channel:'whatsapp'|'email', direction:
+  // 'inbound'|'outbound', body, at, meta:{...} }.
+  //
+  // Voor unread-reset (mark_as_read=1) fallen we terug op inbox-messages-list
+  // in een tweede best-effort call — unified endpoint kent geen mark_as_read.
+  //
+  // Optional `onDone` callback: als aanwezig, skippen we DFO.render() en
+  // laten we caller een surgical DOM-update doen op alleen #ev-inbox-right.
   async function fetchInboxMsgs(convId, onDone) {
     const st = _live.inboxMsgs; if (st.loading[convId] || st.data[convId]) return;
     st.loading[convId] = true; st.error[convId] = null;
-    const j = await tryFetch('msgs:' + convId, '/api/inbox-messages-list?conversation_id=' + encodeURIComponent(convId) + '&limit=100&mark_as_read=1');
+    const j = await tryFetch('msgs:' + convId, '/api/inbox-thread-unified?conversation_id=' + encodeURIComponent(convId) + '&include_email=1&limit=200');
     st.loading[convId] = false;
     if (j && j.__error) st.error[convId] = j.__error;
     else st.data[convId] = { conversation: j?.conversation || null, items: asArr(j?.items) };
+    // Mark-as-read (WA-only, fire-and-forget; niet blocking op de render)
+    try {
+      window.KV && window.KV.authedJson &&
+        window.KV.authedJson('/api/inbox-messages-list?conversation_id=' + encodeURIComponent(convId) + '&limit=1&mark_as_read=1')
+          .catch(() => {});
+    } catch (_) {}
+    // Ook Simone-signature fetchen (klein, best-effort)
+    queueMicrotask(() => fetchSimoneMsgs(convId));
     if (typeof onDone === 'function') { try { onDone(); } catch (_) {} }
     else if (window.DFO?.render) window.DFO.render();
+  }
+
+  // Template-lijst voor huidige conv. Response items[] met body_text, name,
+  // language, meta_param_mapping (voor named placeholders).
+  async function fetchInboxTpls(convId) {
+    const st = _live.inboxTpls; if (st.loading[convId] || st.data[convId]) return;
+    st.loading[convId] = true; st.error[convId] = null;
+    const j = await tryFetch('tpls:' + convId, '/api/inbox-template-list?conversation_id=' + encodeURIComponent(convId));
+    st.loading[convId] = false;
+    if (j && j.__error) st.error[convId] = j.__error;
+    else st.data[convId] = asArr(j?.items);
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  // Simone-config (module=events). Read via bestaande joost-config-get.
+  async function fetchSimoneCfg() {
+    const st = _live.simoneCfg; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('simoneCfg', '/api/joost-config-get?module=events');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = j?.config || j || null;
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  // Simone-verstuurde messages per conv: joost_suggestions waar
+  // sent_autonomously=true + status='SENT_AUTONOMOUSLY' + sent_message_id
+  // matcht met whatsapp_messages.id in deze conv. Endpoint: joost-suggestions-
+  // recent (bestaand, geeft recent status per conv/module).
+  async function fetchSimoneMsgs(convId) {
+    const st = _live.simoneMsgs; if (st.loading[convId] || st.data[convId]) return;
+    st.loading[convId] = true; st.error[convId] = null;
+    const j = await tryFetch('simoneMsgs:' + convId, '/api/joost-suggestions-recent?module=events&conversation_id=' + encodeURIComponent(convId) + '&limit=50');
+    st.loading[convId] = false;
+    if (j && j.__error) { st.error[convId] = j.__error; return; }
+    const items = asArr(j?.items || j?.suggestions);
+    const ids = new Set();
+    for (const it of items) {
+      if (it?.sent_autonomously === true && it?.sent_message_id) ids.add(String(it.sent_message_id));
+    }
+    st.data[convId] = ids;
+    // Geen render — surgical, want gebruikt in surgical-paint na render
   }
 
   async function fetchMentors(id) {
@@ -1774,7 +1847,7 @@
       if (leftEl && typeof _ui.inboxScrollTop === 'number') leftEl.scrollTop = _ui.inboxScrollTop;
     });
 
-    return kpiBlock + `
+    return kpiBlock + _inboxSimoneStatusBar() + `
       ${_inboxStyles()}
       <div class="ev-inbox-split" data-mode="${esc(narrowMode)}">
         <div class="ev-inbox-left" id="ev-inbox-left">
@@ -1783,7 +1856,29 @@
         <div class="ev-inbox-right" id="ev-inbox-right">
           ${_inboxRightPane(_ui.inboxConvId)}
         </div>
-      </div>`;
+      </div>
+      ${_tplPickerModal()}`;
+  }
+
+  // Simone status-bar: leest joost_config (module=events). Toont enabled/gates
+  // + link naar Agents-module (canonieke editor). Beheer alleen daar — NIET
+  // hier — om samenspel met bestaande v1-editor en autonome flow te bewaren.
+  function _inboxSimoneStatusBar() {
+    if (!_live.simoneCfg.data && !_live.simoneCfg.loading && !_live.simoneCfg.error) queueMicrotask(fetchSimoneCfg);
+    const cfg = _live.simoneCfg.data || {};
+    const on   = !!cfg.is_enabled;
+    const sugg = !!cfg.feature_flags?.reactive_suggest_enabled;
+    const auto = !!cfg.feature_flags?.events_reactive_autonomy;
+    const label = !on ? 'Uit' : (auto ? 'Autonoom actief' : (sugg ? 'Suggesties actief' : 'Config actief, gates uit'));
+    const color = !on ? 'var(--text-3)' : (auto ? 'var(--emerald)' : (sugg ? 'var(--amber)' : 'var(--text-3)'));
+    const dot   = !on ? 'var(--text-3)' : (auto ? '#22c55e' : (sugg ? '#f59e0b' : 'var(--text-3)'));
+    return `<div style="padding:8px 20px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-size:12px">
+      <span style="display:inline-flex;align-items:center;gap:6px;color:${color};font-weight:500" title="Simone (AI) — module: events">
+        <span style="width:7px;height:7px;background:${dot};border-radius:50%"></span>🤖 Simone · ${esc(label)}
+      </span>
+      <span style="color:var(--text-3);font-size:11px">Config beheer je in de Agents-module.</span>
+      <a href="/modules/klanten-v2/?v2preview=agents" style="margin-left:auto;color:var(--violet);text-decoration:underline;font-size:11px">Open Simone in Agents ↗</a>
+    </div>`;
   }
 
   function _inboxKpiSkel() {
@@ -1854,12 +1949,14 @@
 
   function _inboxRightPane(convId) {
     if (!convId) return `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-3);font-size:13px;padding:40px">Selecteer een gesprek links.</div>`;
+    // Simone-cfg lazy-fetch (module-scoped, één keer)
+    if (!_live.simoneCfg.data && !_live.simoneCfg.loading && !_live.simoneCfg.error) queueMicrotask(fetchSimoneCfg);
     const st = _live.inboxMsgs;
-    if (st.error[convId] && !st.data[convId]) return _inboxRightHeader(null, convId) + errBlk('inboxMsgs', st.error[convId]);
-    if (st.loading[convId] && !st.data[convId]) return _inboxRightHeader(null, convId) + _inboxRightSkel();
-    if (!st.data[convId]) return _inboxRightHeader(null, convId) + _inboxRightSkel();
+    if (st.error[convId] && !st.data[convId]) return _inboxRightHeader(null, convId) + errBlk('inboxMsgs', st.error[convId]) + _inboxRightFooter(convId, null);
+    if (st.loading[convId] && !st.data[convId]) return _inboxRightHeader(null, convId) + _inboxRightSkel() + _inboxRightFooter(convId, null);
+    if (!st.data[convId]) return _inboxRightHeader(null, convId) + _inboxRightSkel() + _inboxRightFooter(convId, null);
     const d = st.data[convId];
-    return _inboxRightHeader(d.conversation, convId) + _inboxChatBody(d, convId) + _inboxRightFooter(convId);
+    return _inboxRightHeader(d.conversation, convId) + _inboxChatBody(d, convId) + _inboxRightFooter(convId, d.conversation);
   }
 
   function _inboxRightSkel() {
@@ -1917,29 +2014,75 @@
       return '';
     };
 
+    // Simone-verstuurde msg-ids (Set); als niet gefetched → lege set, wordt lazy geladen
+    const simoneIds = _live.simoneMsgs.data[convId] || new Set();
+
+    // Normaliseer: unified endpoint geeft channel/direction/at/body/meta.
+    // Legacy inbox-messages-list geeft direction/body/sent_at zonder channel;
+    // fall back op 'whatsapp' als channel ontbreekt.
     let lastDay = null;
     const bubbles = msgs.map((m) => {
-      const out = m.direction === 'outbound';
-      const body = m.body || (m.template_name ? '📄 Template: ' + m.template_name : (m.media_url ? '📎 Bijlage (' + (m.media_type || 'media') + ')' : '—'));
+      const ch = String(m.channel || 'whatsapp').toLowerCase();
+      const isEmail = ch === 'email';
+      const out = m.direction === 'outbound' || m.direction === 'out';
       const dk = _dayKey(m);
       const sep = (dk !== lastDay)
         ? `<div style="display:flex;justify-content:center;margin:14px 0 8px"><span style="padding:4px 12px;background:rgba(0,0,0,.06);border-radius:10px;font-size:11px;font-weight:500;color:var(--text-3)">${esc(_dayLabel(m))}</span></div>`
         : '';
       lastDay = dk;
+
+      if (isEmail) {
+        // ── E-MAIL BUBBEL ─────────────────────────────────────────────────
+        const subj = m.meta?.subject || '(geen onderwerp)';
+        const fromName = m.meta?.from_name || m.meta?.from_address || '—';
+        const bodyHtml = m.meta?.has_html ? '(HTML-inhoud — bekijk in v1 voor volledige opmaak)' : '';
+        const bodyText = m.body || bodyHtml || '—';
+        const bubbleBg  = 'var(--surface)';
+        const borderCol = 'var(--blue-line, var(--border))';
+        return `${sep}<div style="display:flex;justify-content:${out ? 'flex-end' : 'flex-start'};padding:0 4px">
+          <div style="max-width:80%;position:relative">
+            <div style="padding:8px 12px;border-radius:8px;background:${bubbleBg};border:1px solid ${borderCol};box-shadow:0 1px 2px rgba(0,0,0,.06);color:var(--text)">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--border)">
+                <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;background:var(--blue);border-radius:3px;color:white;font-size:11px">✉</span>
+                <span style="font-size:10.5px;color:var(--blue);font-weight:600;text-transform:uppercase;letter-spacing:.04em">E-mail</span>
+                <span style="font-size:11px;color:var(--text-3);margin-left:auto" class="mono">${esc(_timeShort(m))}</span>
+              </div>
+              <div style="font-size:12.5px;font-weight:600;color:var(--text);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis">${esc(subj)}</div>
+              <div style="font-size:11px;color:var(--text-3);margin-bottom:6px">${out ? 'aan' : 'van'}: ${esc(fromName)}</div>
+              <div style="font-size:12.5px;line-height:1.5;color:var(--text-2);white-space:pre-wrap;word-wrap:break-word;max-height:200px;overflow-y:auto">${esc(String(bodyText).slice(0, 800))}${String(bodyText).length > 800 ? '…' : ''}</div>
+              ${(asArr(m.meta?.attachments).length > 0) ? `<div style="margin-top:6px;font-size:10.5px;color:var(--text-3)">📎 ${asArr(m.meta?.attachments).length} bijlage(n)</div>` : ''}
+            </div>
+          </div>
+        </div>`;
+      }
+
+      // ── WHATSAPP BUBBEL ─────────────────────────────────────────────────
+      const tplName = m.template_name || m.meta?.template_name || null;
+      const mediaUrl = m.media_url || m.meta?.media_url || null;
+      const mediaType = m.media_type || m.meta?.media_type || null;
+      const body = m.body || (tplName ? '📄 Template: ' + tplName : (mediaUrl ? '📎 Bijlage (' + (mediaType || 'media') + ')' : '—'));
       const bubbleBg = out ? (isWA ? '#d9fdd3' : 'var(--pink-soft)') : 'var(--surface)';
       const bubbleColor = out && isWA ? '#111' : 'var(--text)';
       const tail = out
         ? `<span style="position:absolute;right:-6px;top:0;width:8px;height:13px;background:${bubbleBg};clip-path:polygon(0 0, 100% 0, 0 100%)"></span>`
         : `<span style="position:absolute;left:-6px;top:0;width:8px;height:13px;background:${bubbleBg};clip-path:polygon(0 0, 100% 0, 100% 100%);border-left:1px solid var(--border)"></span>`;
+      // Simone-badge: outbound + msg_id in simoneIds → mark as AI-sent
+      const bySimone = out && m.id && simoneIds.has(String(m.id));
+      const simoneBadge = bySimone
+        ? `<div style="display:inline-flex;align-items:center;gap:4px;padding:1px 6px;background:var(--violet);color:white;border-radius:3px;font-size:9.5px;font-weight:600;margin-bottom:3px">🤖 Simone · AI</div><br>`
+        : '';
+      // Optimistisch pending bubble: m._pending true → grijs + spinner-icon
+      const pendingClass = m._pending ? 'opacity:.65;font-style:italic' : '';
       return `${sep}<div style="display:flex;justify-content:${out ? 'flex-end' : 'flex-start'};padding:0 4px">
         <div style="max-width:65%;position:relative">
-          <div style="position:relative;padding:6px 10px 5px;border-radius:8px;background:${bubbleBg};color:${bubbleColor};font-size:13.5px;line-height:1.42;white-space:pre-wrap;word-wrap:break-word;box-shadow:0 1px 1px rgba(0,0,0,.08);${out ? '' : 'border:1px solid var(--border)'}">
+          <div style="position:relative;padding:6px 10px 5px;border-radius:8px;background:${bubbleBg};color:${bubbleColor};font-size:13.5px;line-height:1.42;white-space:pre-wrap;word-wrap:break-word;box-shadow:0 1px 1px rgba(0,0,0,.08);${out ? '' : 'border:1px solid var(--border)'};${pendingClass}">
             ${tail}
-            ${m.template_name ? `<div style="font-size:10.5px;color:${out && isWA ? '#4a7c3a' : 'var(--text-3)'};font-weight:600;margin-bottom:2px">📄 ${esc(m.template_name)}</div>` : ''}
+            ${simoneBadge}
+            ${tplName ? `<div style="font-size:10.5px;color:${out && isWA ? '#4a7c3a' : 'var(--text-3)'};font-weight:600;margin-bottom:2px">📄 ${esc(tplName)}</div>` : ''}
             <span>${esc(body)}</span>
             <div style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;float:right;padding-top:4px">
               <span class="mono" style="font-size:10.5px;color:${out && isWA ? '#667781' : 'var(--text-3)'}">${esc(_timeShort(m))}</span>
-              ${out ? _statusIcon(m) : ''}
+              ${out ? (m._pending ? '<span title="Bezig met versturen…" style="color:var(--text-3)">⏳</span>' : _statusIcon(m)) : ''}
             </div>
             <div style="clear:both"></div>
             ${m.failed_reason ? `<div style="font-size:10.5px;color:var(--rose);margin-top:2px;font-style:italic">Fout: ${esc(m.failed_reason.slice(0,60))}</div>` : ''}
@@ -1956,10 +2099,273 @@
     </div>`;
   }
 
-  function _inboxRightFooter(convId) {
-    return `<div style="padding:10px 20px;border-top:1px solid var(--border);background:var(--surface-2);font-size:12px;color:var(--text-3);text-align:center;flex-shrink:0">
-      Sturen vanuit deze viewer nog niet ondersteund — gebruik <a href="/modules/events.html?conv=${encodeURIComponent(convId)}#inbox" target="_blank" style="color:var(--pink);text-decoration:underline">v1-inbox</a> voor reply.
+  // ── COMPOSER (reply) ────────────────────────────────────────────────────
+  //
+  // Endpoint hergebruik: POST /api/inbox-send met body
+  // {conversation_id, mode:'text', body}. Permission-check: events.simone.use
+  // (per module-scope). WhatsApp-ONLY endpoint; e-mail-replies zouden via
+  // /api/send-email moeten (email_id + from_mailbox + to + subject vereist).
+  // Voor deze iteratie: e-mail-conv (geen phone_number) → composer disabled
+  // met uitleg + link naar v1.
+  //
+  // Optimistische bubbel: zet 'sending' bubble in msgs, PATCH DOM #ev-inbox-
+  // right onmiddellijk, dan POST. Bij succes: refetch thread (invalidate
+  // cache) + surgical repaint. Bij fout: rode banner + bubble.status='failed'.
+  function _inboxRightFooter(convId, conv) {
+    const isWA = !!(conv?.phone_number || conv?.can_send_text);
+    const draft = _ui.composeText[convId] || '';
+    const busy  = !!_ui.composeBusy[convId];
+    const err   = _ui.composeError[convId] || null;
+    // Simone-status per conv (voor waarschuwing bij overlap)
+    const simEnabled = !!(_live.simoneCfg.data?.is_enabled);
+    const simSuggest = !!(_live.simoneCfg.data?.feature_flags?.reactive_suggest_enabled);
+    const simAuto    = !!(_live.simoneCfg.data?.feature_flags?.events_reactive_autonomy);
+    const simActive  = simEnabled && (simSuggest || simAuto);
+
+    if (!isWA) {
+      // E-mail-conv: geen native send-support in v2 (send-email endpoint
+      // vereist email_id + subject + mailbox routing). Voor MVP: instructie.
+      return `<div style="padding:12px 20px;border-top:1px solid var(--border);background:var(--surface-2);flex-shrink:0">
+        <div style="font-size:12px;color:var(--text-3);text-align:center;line-height:1.5">
+          E-mail-antwoorden vanuit v2 nog niet ondersteund — gebruik <a href="/modules/events.html?conv=${encodeURIComponent(convId)}#inbox" target="_blank" style="color:var(--pink);text-decoration:underline">v1-inbox</a> voor reply.
+        </div>
+      </div>`;
+    }
+
+    return `<div style="padding:10px 16px;border-top:1px solid var(--border);background:var(--surface);flex-shrink:0;display:flex;flex-direction:column;gap:6px">
+      <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-3)">
+        <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:6px;height:6px;background:#25d366;border-radius:50%"></span>Antwoord via WhatsApp</span>
+        ${simActive ? `<span style="margin-left:auto;color:var(--amber);font-weight:500" title="Simone kan alsnog autonoom antwoorden op nieuwe inbound berichten (60s cooldown na jouw send). Beheer Simone in de Agents-module.">⚠ Simone actief</span>` : ''}
+      </div>
+      ${err ? `<div style="padding:6px 10px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:6px;color:var(--rose);font-size:12px;display:flex;align-items:center;gap:8px">
+        <span style="flex:1">⚠ ${esc(err)}</span>
+        <button class="btn btn-ghost btn-sm" onclick="window.__evCompSend('${esc(convId)}')" style="padding:2px 8px;font-size:11px">Opnieuw</button>
+        <button class="icon-btn" onclick="window.__evCompErrDismiss('${esc(convId)}')" style="width:22px;height:22px" title="Sluiten">${svg(I.x || I.close, 'width:11px;height:11px')}</button>
+      </div>` : ''}
+      <div style="display:flex;gap:6px;align-items:flex-end">
+        <button class="btn btn-ghost btn-sm" onclick="window.__evCompTplOpen('${esc(convId)}')" title="Kies een template" style="flex-shrink:0;padding:6px 10px;font-size:12px" ${busy ? 'disabled' : ''}>${svg(I.doc || I.file, 'width:13px;height:13px')} Template</button>
+        <textarea
+          id="ev-comp-input-${esc(convId)}"
+          placeholder="Typ een antwoord… (Enter = versturen, Shift+Enter = nieuwe regel)"
+          oninput="window.__evCompDraft('${esc(convId)}', this.value); window.__evCompAutoGrow(this)"
+          onkeydown="window.__evCompKeydown(event, '${esc(convId)}')"
+          ${busy ? 'disabled' : ''}
+          style="flex:1;min-height:38px;max-height:160px;padding:8px 12px;border:1px solid var(--border);border-radius:20px;background:var(--surface);color:var(--text);font-size:13.5px;font-family:inherit;line-height:1.4;resize:none;box-sizing:border-box;overflow-y:auto"
+        >${esc(draft)}</textarea>
+        <button
+          class="btn btn-primary btn-sm"
+          onclick="window.__evCompSend('${esc(convId)}')"
+          ${(!draft.trim() || busy) ? 'disabled style="opacity:.55"' : ''}
+          title="Versturen (Enter)"
+          style="flex-shrink:0;padding:8px 14px;font-size:12px"
+        >${busy ? '…' : (svg(I.send || I.arrRight || I.tick, 'width:13px;height:13px') + ' Versturen')}</button>
+      </div>
     </div>`;
+  }
+
+  // ── COMPOSER HANDLERS ──────────────────────────────────────────────────
+  window.__evCompDraft = (convId, val) => { _ui.composeText[convId] = String(val || ''); };
+  window.__evCompErrDismiss = (convId) => {
+    delete _ui.composeError[convId];
+    _paintRightSurgical(convId);
+  };
+  window.__evCompAutoGrow = (el) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(160, Math.max(38, el.scrollHeight)) + 'px';
+  };
+  window.__evCompKeydown = (ev, convId) => {
+    // Enter = versturen; Shift+Enter = nieuwe regel
+    if (ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      window.__evCompSend(convId);
+    }
+  };
+  window.__evCompSend = async (convId) => {
+    const text = String(_ui.composeText[convId] || '').trim();
+    if (!text || _ui.composeBusy[convId]) return;
+    _ui.composeBusy[convId] = true;
+    delete _ui.composeError[convId];
+
+    // Optimistisch bubbel toevoegen aan huidige thread-data
+    const optimisticId = 'opt-' + Date.now();
+    const optimistic = {
+      id: optimisticId, channel: 'whatsapp', direction: 'outbound',
+      body: text, at: new Date().toISOString(),
+      status: 'sending', _pending: true,
+    };
+    const cur = _live.inboxMsgs.data[convId];
+    if (cur) { cur.items = asArr(cur.items).concat([optimistic]); }
+    _paintRightSurgical(convId);
+    // Focus/blur is niet nodig — textarea disabled via busy-flag
+
+    try {
+      const j = await window.KV.authedJson('/api/inbox-send', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ conversation_id: convId, mode: 'text', body: text }),
+      });
+      if (j?.error) throw new Error(j.error || j.message || 'inbox-send fail');
+      // Succes: leeg draft, invalidate cache, refetch
+      _ui.composeText[convId] = '';
+      _live.inboxMsgs.data[convId] = null; _live.inboxMsgs.loading[convId] = false;
+      _live.inboxMsgs.error[convId] = null;
+      // Ook conv-list-preview verversen (unread + last-message)
+      _live.inbox.data = null; _live.inbox.error = null;
+      queueMicrotask(fetchInbox);
+      await fetchInboxMsgs(convId, () => _paintRightSurgical(convId));
+      _showToast('Bericht verstuurd');
+    } catch (e) {
+      // Fail-soft: markeer optimistic bubble als failed + toon banner
+      _ui.composeError[convId] = e?.message || 'Versturen mislukt';
+      if (cur) {
+        const idx = cur.items.findIndex((x) => x.id === optimisticId);
+        if (idx >= 0) cur.items[idx] = { ...cur.items[idx], _pending: false, status: 'failed', failed_reason: _ui.composeError[convId] };
+      }
+    } finally {
+      _ui.composeBusy[convId] = false;
+      _paintRightSurgical(convId);
+    }
+  };
+
+  // ── TEMPLATE PICKER MODAL ─────────────────────────────────────────────
+  window.__evCompTplOpen = (convId) => {
+    _ui.tplPickerOpen = convId;
+    _ui.tplPickerQ = '';
+    if (!_live.inboxTpls.data[convId] && !_live.inboxTpls.loading[convId]) queueMicrotask(() => fetchInboxTpls(convId));
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__evCompTplClose = () => {
+    _ui.tplPickerOpen = null;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__evCompTplSearch = (q) => {
+    _ui.tplPickerQ = String(q || '');
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__evCompTplPick = (convId, tplName) => {
+    const items = asArr(_live.inboxTpls.data[convId]);
+    const tpl = items.find((t) => t.name === tplName);
+    if (!tpl) return;
+    // Substitueer named placeholders best-effort met beschikbare context.
+    // Meta-templates gebruiken positioneel {{N}} + meta_param_mapping; wij
+    // resolven op named-syntax {{categorie.veld}} in de body_text zelf (voor
+    // preview). Placeholders zonder match blijven zichtbaar zodat Jeffrey ze
+    // handmatig kan invullen.
+    let text = String(tpl.body_text || '');
+    const ctx = _buildTplContext(convId);
+    text = text.replace(/\{\{\s*([a-z_]+\.[a-z_]+)\s*\}\}/gi, (m, key) => {
+      const v = ctx[key];
+      return v != null && v !== '' ? String(v) : m;   // laat {{...}} staan als geen match
+    });
+    _ui.composeText[convId] = text;
+    _ui.tplPickerOpen = null;
+    if (window.DFO?.render) window.DFO.render();
+    // Focus + autogrow na render
+    queueMicrotask(() => {
+      const el = document.getElementById('ev-comp-input-' + convId);
+      if (el) { el.focus(); window.__evCompAutoGrow(el); }
+    });
+  };
+  // Bouw client-side placeholder-context uit conv + eventuele attendee/event
+  // die al in _live cache staan (via detail-view of attendee-detail-modal).
+  function _buildTplContext(convId) {
+    const conv = _live.inboxMsgs.data[convId]?.conversation || null;
+    const ctx = {};
+    // klant.*
+    if (conv?.customer_name) {
+      const parts = String(conv.customer_name).trim().split(/\s+/);
+      ctx['klant.voornaam']  = parts[0] || '';
+      ctx['klant.achternaam']= parts.slice(1).join(' ') || '';
+      ctx['klant.naam']      = conv.customer_name;
+    }
+    if (conv?.phone_number) ctx['klant.telefoon'] = conv.phone_number;
+    // bedrijf.* — env-driven placeholders zijn server-side; niet client-resolvable
+    // datum.* — client-side simpele resolve
+    const now = new Date();
+    ctx['datum.vandaag'] = now.toLocaleDateString('nl-NL', { day:'numeric', month:'long', year:'numeric' });
+    // attendee.* + event.* — probeer vanuit eerste event-detail cache waarbij
+    // deze conv/klant matcht (best-effort). Sla over als geen match; blijft
+    // {{attendee.voornaam}} staan zodat Jeffrey het ziet.
+    for (const eid of Object.keys(_live.attendees.data || {})) {
+      const list = asArr(_live.attendees.data[eid]);
+      const att = list.find((a) => a.customer_id && conv?.customer_id && a.customer_id === conv.customer_id);
+      if (att) {
+        ctx['attendee.voornaam']  = att.first_name || att.voornaam || '';
+        ctx['attendee.achternaam']= att.last_name  || att.achternaam || '';
+        ctx['attendee.email']     = att.email || '';
+        ctx['attendee.telefoon']  = att.phone || att.telefoon || '';
+        const ev = _live.detail.data[eid];
+        if (ev) {
+          ctx['event.titel']    = ev.title || '';
+          ctx['event.datum']    = ev.starts_at ? new Date(ev.starts_at).toLocaleDateString('nl-NL', { day:'numeric', month:'long' }) : '';
+          ctx['event.tijd']     = ev.starts_at ? new Date(ev.starts_at).toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' }) : '';
+          ctx['event.locatie']  = ev.location || '';
+        }
+        break;
+      }
+    }
+    return ctx;
+  }
+
+  function _tplPickerModal() {
+    if (!_ui.tplPickerOpen) return '';
+    const convId = _ui.tplPickerOpen;
+    const st = _live.inboxTpls;
+    let body;
+    if (st.loading[convId] && !st.data[convId]) body = `<div style="padding:20px;text-align:center;color:var(--text-3);font-size:13px">Templates laden…</div>`;
+    else if (st.error[convId] && !st.data[convId]) body = `<div style="padding:16px">${errBlk('tpls', st.error[convId])}</div>`;
+    else {
+      const items = asArr(st.data[convId]);
+      const q = String(_ui.tplPickerQ || '').toLowerCase();
+      const filtered = q
+        ? items.filter((t) => String(t.name || '').toLowerCase().includes(q) || String(t.body_text || '').toLowerCase().includes(q))
+        : items;
+      // Groepeer per folder
+      const byFolder = new Map();
+      for (const t of filtered) {
+        const key = t.folder?.name || t.folder_name || '— zonder map —';
+        if (!byFolder.has(key)) byFolder.set(key, []);
+        byFolder.get(key).push(t);
+      }
+      body = `<div style="padding:12px 16px 8px;position:sticky;top:0;background:var(--surface);border-bottom:1px solid var(--border);z-index:2">
+        <input type="search" placeholder="Zoek template (naam of tekst)…" value="${esc(_ui.tplPickerQ)}" oninput="window.__evCompTplSearch(this.value)" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px" autofocus />
+        <div style="font-size:11px;color:var(--text-3);margin-top:5px">${filtered.length} van ${items.length} templates${q ? ' (gefilterd)' : ''}</div>
+      </div>
+      ${filtered.length === 0
+        ? `<div style="padding:20px;text-align:center;color:var(--text-3);font-size:13px">Geen templates gevonden${q ? ' voor "' + esc(q) + '"' : ''}.</div>`
+        : `<div style="padding:8px 12px 12px;max-height:60vh;overflow-y:auto">
+          ${Array.from(byFolder.entries()).map(([folder, tpls]) => `
+            <div style="margin-top:10px">
+              <div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;font-weight:600;padding:4px 4px">${esc(folder)}</div>
+              ${tpls.map((t) => `<button
+                onclick="window.__evCompTplPick('${esc(convId)}','${esc(t.name)}')"
+                style="display:block;width:100%;text-align:left;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);margin-bottom:4px;cursor:pointer;font-family:inherit"
+                onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='var(--surface)'"
+              >
+                <div style="font-size:12.5px;font-weight:600;color:var(--text);margin-bottom:2px">${esc(t.name)} <span style="font-size:10px;font-weight:400;color:var(--text-3)">· ${esc(t.language || '—')}${t.category ? ' · ' + esc(t.category) : ''}</span></div>
+                <div style="font-size:11.5px;color:var(--text-3);line-height:1.4;white-space:pre-wrap;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical">${esc(String(t.body_text || '').slice(0, 240))}${String(t.body_text || '').length > 240 ? '…' : ''}</div>
+              </button>`).join('')}
+            </div>
+          `).join('')}
+        </div>`}`;
+    }
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)window.__evCompTplClose()">
+      <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);max-width:620px;width:100%;max-height:80vh;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3);display:flex;flex-direction:column">
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+          <div style="font-size:14px;font-weight:600;flex:1">Kies een template</div>
+          <button class="icon-btn" onclick="window.__evCompTplClose()" title="Sluiten" style="width:28px;height:28px">${svg(I.x || I.close, 'width:13px;height:13px')}</button>
+        </div>
+        <div style="flex:1;overflow-y:auto">${body}</div>
+      </div>
+    </div>`;
+  }
+
+  // ── Surgical repaint van alleen #ev-inbox-right ────────────────────────
+  function _paintRightSurgical(convId) {
+    try {
+      const r = document.querySelector('#ev-inbox-right');
+      if (r) r.innerHTML = _inboxRightPane(convId);
+    } catch (_) {}
   }
 
   // ── HANDLERS: SPLIT-PANE SELECTIE + NAVIGATIE ──────────────────────────
@@ -2039,7 +2445,7 @@
   function _inboxRightPane_dummy(convId) {
     const d = _live.inboxMsgs.data[convId];
     if (!d) return _inboxRightSkel();
-    return _inboxChatBody(d, convId) + _inboxRightFooter(convId);
+    return _inboxChatBody(d, convId) + _inboxRightFooter(convId, d?.conversation || null);
   }
   // Stub — vervangen door split-pane inbox
   function _inboxViewer_OLD(convId) {
