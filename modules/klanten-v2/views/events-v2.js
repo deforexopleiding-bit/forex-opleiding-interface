@@ -38,6 +38,10 @@
     revenue:     { loading: false, error: null, data: null },
     mentors:     { loading: {}, error: {}, data: {} },       // per event_id — voor complete-flow
     auditAgg:    { loading: {}, error: {}, data: {} },       // per event_id — aggregated attendee-audit
+    // Fase 2 — Inbox + Instellingen
+    inbox:       { loading: false, error: null, data: null },  // events-conversations
+    autos:       { loading: false, error: null, data: null },  // event_automations
+    autoClose:   { loading: false, error: null, data: null },  // signup-deadline setting
   };
 
   const _ui = {
@@ -63,6 +67,10 @@
     completeForm: null,    // { attendees:{[id]:{attendance_status, outcome, reason}}, present_mentors:{[team_member_id]:true}, expenses:[{team_member_id, amount, description}] }
     // Inline belstatus-dropdown busy-flag per attendee
     belBusy: {},
+    // Fase 2 — Instellingen-pane sub-tab
+    settingsTab: 'automations',
+    autoCloseDraft: null,   // {hours} tijdens edit
+    autoCloseBusy: false,
   };
 
   async function tryFetch(label, url, init, timeoutMs) {
@@ -204,6 +212,30 @@
       if (window.DFO?.render) window.DFO.render();
     }
   }
+  async function fetchInbox() {
+    const st = _live.inbox; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('inbox', '/api/inbox-conversations-list?module=events&limit=100');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.items);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchAutos() {
+    const st = _live.autos; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('autos', '/api/events-automations-list');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.automations);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchAutoClose() {
+    const st = _live.autoClose; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('autoClose', '/api/events-settings-auto-close-get');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = j || null;
+    if (window.DFO?.render) window.DFO.render();
+  }
   async function fetchMentors(id) {
     // V1-parity: /api/events-mentors-available zonder event_id → alle rol-mentoren
     // (team_members met user_id + rol 'mentor'). Zo kun je in de afrond-modal
@@ -285,6 +317,7 @@
   // ═══════════════════════════════════════════════════════════════════════
   function overzichtView() {
     const base = _ui.mode === 'wizard' ? _wizardView()
+      : _ui.mode === 'settings' ? _settingsView()
       : (_ui.mode === 'detail' && _ui.detailId) ? _detailView(_ui.detailId)
       : _lijstView();
     // Complete-modal renderen boven de content als open
@@ -329,6 +362,7 @@
       <div class="tb-right" style="display:flex;gap:6px">
         <button class="btn btn-ghost btn-sm" onclick="__evRetry('events')" title="Vernieuwen">${svg(I.refresh || I.tick, 'width:14px;height:14px')}</button>
         <button class="btn btn-primary btn-sm" onclick="window.__evWizardOpen('create')">${svg(I.plus)}Nieuw event</button>
+        <button class="btn btn-ghost btn-sm" title="Instellingen" onclick="window.__evGoSettings()">${svg(I.settings, 'width:14px;height:14px')}</button>
       </div>
     </div>
     ${rows.length === 0
@@ -1370,12 +1404,39 @@
   // INBOX-tab (behouden — needs-Jeffrey)
   // ═══════════════════════════════════════════════════════════════════════
   function inboxView() {
-    return `<div style="margin:20px;padding:14px 18px;border:1px solid var(--amber-line);background:var(--amber-soft);border-radius:var(--r);color:var(--amber);font-size:12.5px;display:flex;align-items:center;gap:12px">
-      <span>${svg(I.alert, 'width:16px;height:16px;flex-shrink:0')}</span>
-      <span><b>Binnenkort</b> — de per-event Inbox komt in een volgende ronde. Gebruik zolang de v1-events-inbox.</span>
-    </div>
-    <div class="pad"><div class="empty" style="padding:44px 20px"><div class="empty-t">Inbox — binnenkort</div><a class="btn btn-ghost btn-sm" style="margin-top:10px" href="/modules/events.html#inbox" target="_blank">Openen in v1</a></div></div>`;
+    if (!_live.inbox.data && !_live.inbox.loading && !_live.inbox.error) queueMicrotask(fetchInbox);
+    if (_live.inbox.error && !_live.inbox.data) return errBlk('inbox', _live.inbox.error);
+    if (_live.inbox.loading && !_live.inbox.data) return skel();
+    const items = asArr(_live.inbox.data);
+    const totalUnread = items.reduce((a, c) => a + Number(c.unread_count || 0), 0);
+    return `${H.kpis([
+      { c:'pink',    icon:I.chat,  label:'Gesprekken',         val:String(items.length), sub:'gekoppeld aan events-nummer' },
+      { c:'amber',   icon:I.alert, label:'Ongelezen berichten', val:String(totalUnread), hi:1 },
+      { c:'emerald', icon:I.users, label:'Met klant-koppeling', val:String(items.filter((c) => c.customer_id).length) },
+      { c:'blue',    icon:I.tick,  label:'Kunnen versturen',    val:String(items.filter((c) => c.can_send_text).length) },
+    ])}
+    ${items.length === 0
+      ? emptyBlk('Nog geen gesprekken', 'Zodra een klant de events-lijn appt of mailt verschijnt de conversatie hier.')
+      : `<div style="padding:0 20px 20px">${H.table(
+          [{l:'Klant'},{l:'Nummer',cls:'optional'},{l:'Laatste bericht'},{l:'Wanneer',cls:'r optional'},{l:'Ongelezen',cls:'r'}],
+          items.map((c) => {
+            const naam = c.customer_name || c.display_name || c.phone_number || '—';
+            return [
+              `<a href="#" onclick="event.preventDefault();window.__evInboxOpen('${esc(c.id)}')" style="color:inherit;text-decoration:none"><div class="row-avatar">${H.av(naam, 28)}<span class="cell-main">${esc(naam)}</span></div></a>`,
+              `<span class="mono" style="font-size:12px;color:var(--text-3)">${esc(c.phone_number || '—')}</span>`,
+              `<span style="font-size:12.5px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:340px;display:inline-block">${esc(c.last_message_preview || '—')}</span>`,
+              `<span class="mono" style="font-size:12px;color:var(--text-3)">${esc(_fmtDateTime(c.last_message_at))}</span>`,
+              Number(c.unread_count || 0) > 0 ? H.pill('warn', String(c.unread_count)) : `<span style="color:var(--text-3);font-size:12px">0</span>`,
+            ];
+          })
+        )}</div>`}`;
   }
+  window.__evInboxOpen = (convId) => {
+    // De v1-inbox-viewer opent in v1-shell; hier openen we die pagina met deep-link.
+    // (Aparte in-shell viewer is buiten scope voor deze fase; hergebruik werkende v1-viewer.)
+    try { window.open('/modules/events.html?conv=' + encodeURIComponent(convId) + '#inbox', '_blank'); }
+    catch (_) { console.info('[events-v2] open conversation', convId); }
+  };
 
   // ═══════════════════════════════════════════════════════════════════════
   // INSCHRIJVINGEN-tab (behouden)
@@ -1571,6 +1632,201 @@
         <div style="font-size:11px;color:var(--text-3)">${esc(_fmtDate(e.completed_at || e.starts_at))} · ${Number(e.aanwezig || 0)} aanwezig · ${e.deal_count || 0} deals</div></div>
       <span class="money" style="font-size:14px;font-weight:600;color:var(--blue)">${eur0(Number(e.revenue_eur || 0))}</span>
     </div>`).join('');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // INSTELLINGEN-PANE (v1-parity — tandwiel-rechtsboven Overzicht)
+  // 5 sub-tabs: Automations / Signup-deadline / Niveau-foto's / Simone / Vragenlijst
+  // ═══════════════════════════════════════════════════════════════════════
+  window.__evGoSettings = () => { _ui.mode = 'settings'; if (window.DFO?.render) window.DFO.render(); };
+  window.__evSettingsTab = (t) => { _ui.settingsTab = t; if (window.DFO?.render) window.DFO.render(); };
+
+  function _settingsView() {
+    const tab = _ui.settingsTab || 'automations';
+    const tabs = [
+      { v: 'automations', l: 'Automations' },
+      { v: 'deadline',    l: 'Signup-deadline' },
+      { v: 'niveaus',     l: "Niveau-foto's" },
+      { v: 'simone',      l: 'Simone (AI)' },
+      { v: 'vragenlijst', l: 'Vragenlijst' },
+    ];
+    return `<div style="padding:12px 20px;background:var(--surface-2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+      <button class="btn btn-ghost btn-sm" onclick="window.__evBackToList()">${svg(I.arrDown || I.x, 'width:13px;height:13px;transform:rotate(90deg)')}Terug naar overzicht</button>
+      <span style="font-size:14px;font-weight:600;margin-left:6px">Events-instellingen</span>
+    </div>
+    <div class="toolbar" style="padding:10px 20px 0;border-bottom:none;gap:6px;flex-wrap:wrap">
+      ${tabs.map((t) => `<button class="chip ${tab === t.v ? 'on' : ''}" onclick="window.__evSettingsTab('${t.v}')">${esc(t.l)}</button>`).join('')}
+    </div>
+    ${tab === 'automations' ? _settingsAutomations()
+     : tab === 'deadline'    ? _settingsDeadline()
+     : tab === 'niveaus'     ? _settingsNiveaus()
+     : tab === 'simone'      ? _settingsSimone()
+     : _settingsVragenlijst()}`;
+  }
+
+  function _settingsAutomations() {
+    if (!_live.autos.data && !_live.autos.loading && !_live.autos.error) queueMicrotask(fetchAutos);
+    if (_live.autos.error && !_live.autos.data) return errBlk('autos', _live.autos.error);
+    if (_live.autos.loading && !_live.autos.data) return skel();
+    const rows = asArr(_live.autos.data);
+    const active = rows.filter((r) => r.enabled).length;
+    return `<div class="pad" style="padding-top:14px">
+      ${H.kpis([
+        { c:'pink',    icon:I.cal,   label:'Automations',  val:String(rows.length), sub:'ingericht' },
+        { c:'emerald', icon:I.tick,  label:'Actief',       val:String(active), hi:1 },
+        { c:'slate',   icon:I.clock, label:'Inactief',     val:String(rows.length - active) },
+      ])}
+      ${rows.length === 0
+        ? emptyBlk('Nog geen automations', 'Maak een automation aan in de v1-editor (linkt hieronder).')
+        : H.table(
+            [{l:'Naam'},{l:'Trigger',cls:'optional'},{l:'Scope',cls:'optional'},{l:'Status'},{l:'Aangepast',cls:'r optional'},{l:'',cls:'r'}],
+            rows.map((a) => [
+              `<div><div class="cell-main">${esc(a.name || '—')}</div>${a.description ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:2px">${esc(a.description)}</div>` : ''}</div>`,
+              `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(a.trigger_type || '—')}</span>`,
+              `<span style="font-size:11.5px;color:var(--text-3)">${esc(a.scope_type || '—')}</span>`,
+              a.enabled ? H.pill('ok','Actief') : H.pill('neutral','Uit'),
+              `<span class="mono" style="font-size:12px;color:var(--text-3)">${esc(_fmtDate(a.updated_at || a.created_at))}</span>`,
+              `<a href="/modules/events-automations.html" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none">Bewerken →</a>`,
+            ])
+          )}
+      <div style="margin-top:14px;padding:12px 14px;background:var(--surface-2);border-radius:8px;font-size:12.5px;color:var(--text-3)">
+        Automations aanmaken/bewerken/toggelen gaat via de v1-editor. Read-only overzicht + status hier tonen was Fase 2-scope; volledige in-shell editor komt in een latere iteratie.
+      </div>
+    </div>`;
+  }
+
+  function _settingsDeadline() {
+    if (!_live.autoClose.data && !_live.autoClose.loading && !_live.autoClose.error) queueMicrotask(fetchAutoClose);
+    if (_live.autoClose.error && !_live.autoClose.data) return errBlk('autoClose', _live.autoClose.error);
+    if (_live.autoClose.loading && !_live.autoClose.data) return skel();
+    const cur = _live.autoClose.data || { hours: 24 };
+    const draft = _ui.autoCloseDraft;
+    const val = draft != null ? draft : cur.hours;
+    const dirty = draft != null && Number(draft) !== Number(cur.hours);
+    return `<div class="pad" style="padding-top:14px"><div style="max-width:640px">
+      <div class="card">
+        <div class="card-head"><span class="tile-ico" style="background:var(--amber-soft);color:var(--amber)">${svg(I.clock)}</span><div class="card-title">Signup automatisch sluiten</div></div>
+        <div class="card-body" style="padding:18px">
+          <div style="font-size:12.5px;color:var(--text-2);line-height:1.6;margin-bottom:14px">
+            Hoeveel uur vóór de start van een event moet de aanmelding automatisch dichtgaan? Een cron controleert elke 5 min en sluit events waarvan de start minder dan X uur weg is.
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">
+            <label for="ev_ac_h" style="font-size:12.5px;color:var(--text-2);min-width:130px">Uren vooraf sluiten</label>
+            <input id="ev_ac_h" type="number" min="0" max="720" value="${esc(String(val))}" oninput="window.__evAutoCloseDraft(this.value)" style="width:100px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:13px" />
+            <span style="font-size:12px;color:var(--text-3)">uur (0 = alleen op start-moment sluiten; 24 = één dag vooraf)</span>
+          </div>
+          <div style="font-size:11.5px;color:var(--text-3)">Laatst gewijzigd: ${cur.updated_at ? _fmtDateTime(cur.updated_at) : '—'}</div>
+        </div>
+        <div style="padding:11px 17px;background:var(--surface-2);border-top:1px solid var(--border);display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" ${(!dirty || _ui.autoCloseBusy) ? 'disabled style="opacity:.55"' : ''} onclick="window.__evAutoCloseSave()">${svg(I.tick)}${_ui.autoCloseBusy ? 'Opslaan…' : 'Opslaan'}</button>
+          <button class="btn btn-ghost btn-sm" ${!dirty ? 'disabled style="opacity:.55"' : ''} onclick="window.__evAutoCloseReset()">Annuleren</button>
+        </div>
+      </div>
+    </div></div>`;
+  }
+  window.__evAutoCloseDraft = (v) => { _ui.autoCloseDraft = v; if (window.DFO?.render) window.DFO.render(); };
+  window.__evAutoCloseReset = () => { _ui.autoCloseDraft = null; if (window.DFO?.render) window.DFO.render(); };
+  window.__evAutoCloseSave = async () => {
+    const hours = Number(_ui.autoCloseDraft);
+    if (!Number.isInteger(hours) || hours < 0 || hours > 720) { alert('Uren moet 0-720 zijn.'); return; }
+    _ui.autoCloseBusy = true; if (window.DFO?.render) window.DFO.render();
+    try {
+      const j = await window.KV.authedJson('/api/events-settings-auto-close-update', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ hours }) });
+      if (j?.error) throw new Error(j.error);
+      _showToast('Signup-deadline opgeslagen');
+      _live.autoClose.data = null; _ui.autoCloseDraft = null;
+      queueMicrotask(fetchAutoClose);
+    } catch (e) { alert('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
+    finally { _ui.autoCloseBusy = false; if (window.DFO?.render) window.DFO.render(); }
+  };
+
+  function _settingsNiveaus() {
+    if (!_live.niveaus.data && !_live.niveaus.loading && !_live.niveaus.error) queueMicrotask(fetchNiveaus);
+    if (_live.niveaus.error && !_live.niveaus.data) return errBlk('events', _live.niveaus.error);
+    if (_live.niveaus.loading && !_live.niveaus.data) return skel();
+    const niveaus = asArr(_live.niveaus.data);
+    return `<div class="pad" style="padding-top:14px"><div style="max-width:760px">
+      <div style="font-size:12.5px;color:var(--text-3);margin-bottom:14px">
+        Per niveau kun je een default-foto instellen. Die wordt gebruikt als een event geen eigen foto heeft (bv. bij dupliceren of API-import).
+      </div>
+      ${niveaus.length === 0
+        ? emptyBlk('Geen niveau-opties', 'Er zijn geen niveau-opties gedefinieerd in de DB.')
+        : `<div class="grid g2" style="gap:12px">
+          ${niveaus.map((n) => {
+            const slug = n.slug || n.id || n.value || n;
+            const label = n.label || n.name || slug;
+            const img = n.default_image_url;
+            return `<div class="card">
+              <div class="card-head"><div class="card-title">${esc(label)}</div><span style="margin-left:auto;font-size:11px;color:var(--text-3)" class="mono">${esc(slug)}</span></div>
+              <div class="card-body" style="padding:14px">
+                ${img ? `<img src="${esc(img)}" style="width:100%;max-height:140px;object-fit:cover;border-radius:6px;border:1px solid var(--border)" />` : `<div style="width:100%;height:100px;background:var(--surface-2);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:12px">Geen foto</div>`}
+                <div style="margin-top:10px;font-size:11.5px;color:var(--text-3);word-break:break-all">${img ? esc(img) : ''}</div>
+              </div>
+              <div style="padding:10px 14px;background:var(--surface-2);border-top:1px solid var(--border);display:flex;gap:6px">
+                <input type="file" accept="image/*" id="niv_file_${esc(slug)}" style="font-size:11.5px;flex:1" />
+                <button class="btn btn-ghost btn-sm" onclick="window.__evNiveauUpload('${esc(slug)}')">${svg(I.plus)}Uploaden</button>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>`}
+    </div></div>`;
+  }
+  window.__evNiveauUpload = async (slug) => {
+    const inp = document.getElementById('niv_file_' + slug);
+    const file = inp?.files?.[0];
+    if (!file) { alert('Kies eerst een afbeelding.'); return; }
+    try {
+      // Stap 1: event-image-upload verwacht event_id. Voor niveau-default hebben
+      // we geen event_id. events-niveau-default-image-save accepteert een URL
+      // (bestaande bestanden) OF neemt de upload zelf mee — we uploaden via
+      // een tijdelijke event-image-upload en zetten dan de URL.
+      // Simpelste route: multipart POST direct naar niveau-save.
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('niveau_slug', slug);
+      const resp = await fetch('/api/events-niveau-default-image-save', {
+        method: 'POST',
+        headers: window.KV.getAuthHeaders ? window.KV.getAuthHeaders() : {},
+        body: fd,
+      });
+      const j = await resp.json().catch(() => ({}));
+      if (!resp.ok || j?.error) throw new Error(j?.error || ('HTTP ' + resp.status));
+      _showToast('Niveau-foto opgeslagen');
+      _live.niveaus.data = null;
+      queueMicrotask(fetchNiveaus);
+    } catch (e) { alert('Upload mislukt: ' + (e?.message || 'onbekende fout')); }
+  };
+
+  function _settingsSimone() {
+    return `<div class="pad" style="padding-top:14px"><div style="max-width:640px">
+      <div class="card">
+        <div class="card-head"><span class="tile-ico" style="background:var(--pink-soft);color:var(--pink)">${svg(I.bot)}</span><div class="card-title">Simone (AI voor events)</div></div>
+        <div class="card-body" style="padding:18px;font-size:13px;line-height:1.6">
+          Simone's persona, kennisbank, autonomie en oefengesprek beheer je centraal in de <b>AI Agents</b>-module.
+          Ze gebruikt de <span class="mono">joost_config</span>-rij met module='events' — dezelfde plek waar Joost/Mila zitten.
+          <div style="margin-top:14px">
+            <a href="/modules/klanten-v2/#agents" class="btn btn-primary btn-sm" style="text-decoration:none">${svg(I.bot)}Open Simone in AI Agents</a>
+          </div>
+        </div>
+      </div>
+    </div></div>`;
+  }
+
+  function _settingsVragenlijst() {
+    return `<div class="pad" style="padding-top:14px"><div style="max-width:640px">
+      <div class="card">
+        <div class="card-head"><span class="tile-ico" style="background:var(--emerald-soft);color:var(--emerald)">${svg(I.list || I.doc)}</span><div class="card-title">Vragenlijst (assessment)</div></div>
+        <div class="card-body" style="padding:18px;font-size:13px;line-height:1.6">
+          De vragenlijst-tabellen (<span class="mono">assessment_questionnaires</span> + questions + responses) zijn <b>globaal</b> — er is één actieve versie die zowel Events als Follow-up gebruiken.
+          <div style="margin-top:10px;padding:10px 14px;background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:8px;font-size:12.5px;color:var(--amber)">
+            <b>Verhuist naar de Instellingen-module.</b> De editor zelf wordt centraal beheerd zodat andere modules dezelfde bron gebruiken; hier tonen we alleen de verwijzing.
+          </div>
+          <div style="margin-top:14px;display:flex;gap:8px">
+            <a href="/modules/events.html#settings-vragenlijst" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none">Bewerken in v1 (tijdelijk)</a>
+          </div>
+        </div>
+      </div>
+    </div></div>`;
   }
 
   // ═══════════════════════════════════════════════════════════════════════
