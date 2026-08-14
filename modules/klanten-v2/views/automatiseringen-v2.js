@@ -960,7 +960,20 @@
     const tmp = steps[idx]; steps[idx] = steps[target]; steps[target] = tmp;
     if (window.DFO?.render) window.DFO.render();
   };
-  window.__autEvStepType = (idx, type) => { if (_ui.ev.editing) { _ui.ev.editing.steps[idx] = { type, config: {} }; if (window.DFO?.render) window.DFO.render(); } };
+  // Per-type canonieke defaults: matcht wat de save-validator eist en wat
+  // __autEvStepAdd initieel zet, zodat een terugschakeling naar 'wait' NIET
+  // stille minutes toont maar direct de canonieke {amount:1, unit:'days'}.
+  function _evStepDefaults(type) {
+    if (type === 'wait')      return { amount: 1, unit: 'days' };
+    if (type === 'condition') return { check: 'assessment_completed', on_fail: 'exit' };
+    if (type === 'update_attendee_status') return { new_status: 'aangemeld' };
+    return {};
+  }
+  window.__autEvStepType = (idx, type) => {
+    if (!_ui.ev.editing) return;
+    _ui.ev.editing.steps[idx] = { type, config: _evStepDefaults(type) };
+    if (window.DFO?.render) window.DFO.render();
+  };
   window.__autEvStepConfig = (idx, k, v) => { if (_ui.ev.editing) { _ui.ev.editing.steps[idx].config = _ui.ev.editing.steps[idx].config || {}; _ui.ev.editing.steps[idx].config[k] = v; } };
   window.__autEvStepConfigBool = (idx, k, v) => { if (_ui.ev.editing) { _ui.ev.editing.steps[idx].config = _ui.ev.editing.steps[idx].config || {}; _ui.ev.editing.steps[idx].config[k] = !!v; } };
   // Guarded WA-template writer voor flow-editor: skip als new leeg is EN saved bestaat.
@@ -1354,7 +1367,17 @@
     const tmp = steps[idx]; steps[idx] = steps[target]; steps[target] = tmp;
     if (window.DFO?.render) window.DFO.render();
   };
-  window.__autObStepType = (idx, type) => { if (_ui.ob.editing) { _ui.ob.editing.steps[idx] = { type, config: {} }; if (window.DFO?.render) window.DFO.render(); } };
+  function _obStepDefaults(type) {
+    if (type === 'wait')      return { amount: 1, unit: 'days' };
+    if (type === 'condition') return { check: 'wizard_not_started', on_fail: 'exit' };
+    if (type === 'update_onboarding_status') return { new_status: 'aangemeld' };
+    return {};
+  }
+  window.__autObStepType = (idx, type) => {
+    if (!_ui.ob.editing) return;
+    _ui.ob.editing.steps[idx] = { type, config: _obStepDefaults(type) };
+    if (window.DFO?.render) window.DFO.render();
+  };
   window.__autObStepConfig = (idx, k, v) => { if (_ui.ob.editing) { _ui.ob.editing.steps[idx].config = _ui.ob.editing.steps[idx].config || {}; _ui.ob.editing.steps[idx].config[k] = v; } };
   window.__autObStepConfigBool = (idx, k, v) => { if (_ui.ob.editing) { _ui.ob.editing.steps[idx].config = _ui.ob.editing.steps[idx].config || {}; _ui.ob.editing.steps[idx].config[k] = !!v; } };
   window.__autObStepConfigTpl = (idx, v) => {
