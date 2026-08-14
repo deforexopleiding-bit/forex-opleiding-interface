@@ -114,6 +114,14 @@
     // Simone-poll timer voor open conv (module-scope, herstart per conv-select)
     _simonePollTimer: null,
     _simonePollConvId: null,
+    // Instant-berichten: Supabase realtime channels + polling fallback
+    _rtMsgChannel:    null,       // WA-messages INSERT (filter per conv)
+    _rtConvChannel:   null,       // conversations INSERT/UPDATE (list refresh)
+    _rtMsgConvId:     null,       // conv-id waarop msg-channel is
+    _pollThreadTimer: null,       // 8s fallback thread-refresh
+    _pollListTimer:   null,       // 15s fallback list-refresh
+    // Sticky-bottom scroll-track voor auto-scroll bij nieuwe berichten
+    _lastScrollAtBottom: true,
   };
 
   async function tryFetch(label, url, init, timeoutMs) {
@@ -348,6 +356,12 @@
     queueMicrotask(() => fetchSuggestion(convId));
     if (typeof onDone === 'function') { try { onDone(); } catch (_) {} }
     else if (window.DFO?.render) window.DFO.render();
+    // Force-scroll naar bottom bij initial thread-load (nieuwe conv geopend).
+    // Kleine timeout zodat de DOM eerst is bijgewerkt.
+    queueMicrotask(() => {
+      const el = document.querySelector('#ev-inbox-chat-scroll');
+      if (el) el.scrollTop = el.scrollHeight;
+    });
   }
 
   // Template-lijst voor huidige conv. Response items[] met body_text, name,
@@ -2004,37 +2018,81 @@
       .ev-chan-badge.wa    { background:#25d366; }
       .ev-chan-badge.email { background:#0369a1; }
 
-      /* Chat-bubbels (WhatsApp-stijl, compact) */
-      .ev-msg-row       { display:flex; padding:0 4px; }
-      .ev-msg-row.out   { justify-content:flex-end; }
-      .ev-msg-row.in    { justify-content:flex-start; }
-      .ev-bubble-wrap   { max-width:65%; width:fit-content; min-width:72px; position:relative; }
-      .ev-bubble        { position:relative; padding:5px 9px 3px; border-radius:8px; font-size:13px; line-height:1.35; white-space:pre-wrap; word-wrap:break-word; box-shadow:0 1px 1px rgba(0,0,0,.08); }
-      .ev-bubble.wa-out { background:#d9fdd3; color:#111; }
-      .ev-bubble.wa-in  { background:var(--surface); border:1px solid var(--border); color:var(--text); }
-      .ev-bubble-text   { display:inline; }
-      .ev-bubble-meta   { display:inline-flex; align-items:center; gap:3px; margin-left:6px; float:right; padding-top:3px; font-size:10.5px; color:#667781; font-family:'IBM Plex Mono',monospace; }
-      .ev-bubble.wa-in .ev-bubble-meta { color:var(--text-3); }
-      .ev-bubble-tail-out { position:absolute; right:-5px; top:0; width:7px; height:11px; background:#d9fdd3; clip-path:polygon(0 0, 100% 0, 0 100%); }
-      .ev-bubble-tail-in  { position:absolute; left:-5px; top:0; width:7px; height:11px; background:var(--surface); border-left:1px solid var(--border); clip-path:polygon(0 0, 100% 0, 100% 100%); }
-      .ev-bubble-tpl      { font-size:10px; color:#4a7c3a; font-weight:600; margin-bottom:2px; display:inline-flex; align-items:center; gap:3px; }
-      .ev-bubble-fail     { font-size:10.5px; color:var(--rose); margin-top:2px; font-style:italic; }
-      .ev-bubble-pending  { opacity:.65; }
-      .ev-simone-badge    { display:inline-flex; align-items:center; gap:3px; padding:0 5px; background:var(--violet); color:white; border-radius:3px; font-size:9.5px; font-weight:600; margin-bottom:3px; }
+      /* Chat-bubbels — 1-op-1 gekopieerd van Wanbetalers Pad A
+         (modules/finance.html regels 441-535, _inboxRenderMessages).
+         Ingangsklassen: .inbox-c-msg + .inbox-c-msg-bubble. Alle
+         maatvoering (max-width, padding, radius, font-size) letterlijk
+         overgenomen zodat een kort bericht een kleine bubbel is. */
+      .inbox-c-msg              { display:flex; width:100%; margin-bottom:8px; }
+      .inbox-c-msg.same-sender  { margin-bottom:2px; }
+      .inbox-c-msg.outbound     { justify-content:flex-end; }
+      .inbox-c-msg.inbound      { justify-content:flex-start; }
+      .inbox-c-msg-bubble       {
+        position:relative; display:inline-block;
+        padding:6px 10px 8px 12px; border-radius:7.5px;
+        max-width:65%; min-width:60px;
+        font-size:13.5px; line-height:1.35;
+        word-wrap:break-word; box-sizing:border-box; box-shadow:none;
+      }
+      .inbox-c-msg.outbound:not(.same-sender) .inbox-c-msg-bubble { border-bottom-right-radius:2.5px; }
+      .inbox-c-msg.inbound:not(.same-sender)  .inbox-c-msg-bubble { border-top-left-radius:2.5px; }
 
-      /* E-mail bubble (blauwe kaart) */
-      .ev-email         { max-width:80%; width:fit-content; min-width:200px; background:var(--surface); border:1px solid #93c5fd; border-radius:8px; padding:8px 12px; box-shadow:0 1px 2px rgba(0,0,0,.06); color:var(--text); }
-      .ev-email-hd      { display:flex; align-items:center; gap:6px; margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid var(--border); }
-      .ev-email-chip    { font-size:10.5px; color:#0369a1; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
-      .ev-email-time    { font-size:11px; color:var(--text-3); margin-left:auto; font-family:'IBM Plex Mono',monospace; }
-      .ev-email-subj    { font-size:12.5px; font-weight:600; color:var(--text); margin-bottom:2px; }
-      .ev-email-from    { font-size:11px; color:var(--text-3); margin-bottom:6px; }
-      .ev-email-body    { font-size:12.5px; line-height:1.5; color:var(--text-2); white-space:pre-wrap; word-wrap:break-word; max-height:200px; overflow-y:auto; }
-      .ev-email-att     { margin-top:6px; font-size:10.5px; color:var(--text-3); }
+      /* Kleuren — WhatsApp-groen out, licht-grijs in */
+      .inbox-c-msg.outbound .inbox-c-msg-bubble { background:#b6e8b0; color:#0b3d2e; border:.5px solid rgba(11,61,46,.14); }
+      .inbox-c-msg.inbound  .inbox-c-msg-bubble { background:#eef1f4; color:#1f2937; border:.5px solid rgba(0,0,0,.06); }
+      .inbox-c-msg.outbound.failed .inbox-c-msg-bubble { background:rgba(239,68,68,.12); border:1px solid rgba(239,68,68,.3); color:#7f1d1d; }
 
-      /* Datum-separator */
-      .ev-day-sep { display:flex; justify-content:center; margin:12px 0 6px; }
-      .ev-day-sep span { padding:3px 10px; background:rgba(0,0,0,.06); border-radius:10px; font-size:10.5px; font-weight:500; color:var(--text-3); }
+      /* Sender-label bovenaan eerste bubble in stream */
+      .inbox-c-msg:not(.same-sender) .inbox-c-msg-bubble::before {
+        display:block; font-size:10.5px; font-weight:600; letter-spacing:.02em; margin-bottom:3px; opacity:.7;
+      }
+      .inbox-c-msg.outbound:not(.same-sender) .inbox-c-msg-bubble::before { content:'Jij';    color:#0b3d2e; }
+      .inbox-c-msg.inbound:not(.same-sender)  .inbox-c-msg-bubble::before { content:'Klant';  color:#1f2937; }
+
+      /* Text-body + phantom-spacer + absolute meta (WhatsApp Web-truc) */
+      .bubble-text     { display:inline; white-space:pre-line; word-break:break-word; overflow-wrap:anywhere; }
+      .meta-phantom    { display:inline-block; width:56px; height:0; visibility:hidden; pointer-events:none; }
+      .bubble-meta     { position:absolute; bottom:4px; right:8px; font-size:10.5px; opacity:.55; white-space:nowrap; line-height:1; pointer-events:none; display:inline-flex; align-items:center; gap:3px; }
+      .bubble-meta .receipt          { margin-left:3px; display:inline-flex; align-items:center; }
+      .bubble-meta .simone-sparkle   { color:#a855f7; font-size:11px; margin-right:2px; }
+
+      /* Template-badge boven bubble-text */
+      .inbox-c-msg-tplbadge {
+        display:inline-flex; align-items:center; gap:3px; margin-bottom:3px;
+        padding:1px 6px; border-radius:8px;
+        background:rgba(11,61,46,.1); color:#0b3d2e; font-size:10.5px; font-weight:600;
+      }
+
+      /* Failure-reason regel */
+      .inbox-c-msg-failed-reason { font-size:10.5px; color:#7f1d1d; margin-top:3px; font-style:italic; }
+
+      /* Datum-separator chip */
+      .inbox-c-date-separator      { text-align:center; margin:16px 0 8px; }
+      .inbox-c-date-separator span { display:inline-block; background:rgba(0,0,0,.05); padding:4px 12px; border-radius:12px; font-size:10.5px; color:#5e6368; font-weight:500; }
+
+      /* Simone-badge boven bubble-text (voor autonoom-verstuurde) */
+      .inbox-c-simone-badge {
+        display:inline-flex; align-items:center; gap:3px; margin-bottom:3px;
+        padding:0 5px; background:var(--violet); color:white; border-radius:3px;
+        font-size:9.5px; font-weight:600;
+      }
+
+      /* E-mail-bubble — Pad A shell (inbox-c-msg-bubble), maar body via
+         <details>-toggle uit Pad B (subject + collapse). Onderscheid via
+         .inbox-c-msg-bubble.is-email (blauwe tint + envelop-chip). */
+      .inbox-c-msg-bubble.is-email {
+        background:#eff6ff; border:.5px solid #93c5fd; color:#1e3a8a;
+        min-width:200px; max-width:78%;
+        padding:8px 12px;
+      }
+      .inbox-c-msg.outbound .inbox-c-msg-bubble.is-email { background:#dbeafe; }
+      .inbox-c-msg-bubble.is-email::before { display:none; }   /* geen 'Jij'/'Klant'; email heeft eigen from-regel */
+      .inbox-c-email-chip { display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:700; color:#0369a1; text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px; }
+      .inbox-c-email-subj { font-size:12.5px; font-weight:600; color:#1e3a8a; margin-bottom:2px; }
+      .inbox-c-email-from { font-size:11px; color:#475569; margin-bottom:6px; }
+      .inbox-c-email-body { font-size:12.5px; line-height:1.5; color:#1e3a8a; white-space:pre-wrap; word-wrap:break-word; max-height:200px; overflow-y:auto; }
+      .inbox-c-email-att  { margin-top:6px; font-size:10.5px; color:#475569; }
+      .inbox-c-msg-bubble.is-email .bubble-meta { color:#0369a1; opacity:.7; }
 
       .ev-inbox-mobile-back { display:none; }
       @media (max-width: 900px) {
@@ -2161,68 +2219,91 @@
     // Normaliseer: unified endpoint geeft channel/direction/at/body/meta.
     // Legacy inbox-messages-list geeft direction/body/sent_at zonder channel;
     // fall back op 'whatsapp' als channel ontbreekt.
+    // Rendering 1-op-1 uit Wanbetalers `_inboxRenderMessages`
+    // (modules/finance.html regels 14170-14296). DOM-skelet:
+    //   <div class="inbox-c-msg outbound|inbound[.same-sender][.failed]">
+    //     <div class="inbox-c-msg-bubble[.is-email]">
+    //       [template-badge] [simone-badge]
+    //       <span class="bubble-text">…<span class="meta-phantom">HH:MM ✓✓</span></span>
+    //       <span class="bubble-meta">✦ HH:MM <span class="receipt">✓✓</span></span>
+    //     </div>
+    //   </div>
+    // Kern-truc: .meta-phantom reserveert breedte in de laatste regel
+    // tekst zodat de absolute .bubble-meta niet overlapt.
     let lastDay = null;
+    let lastDir = null;
     const bubbles = msgs.map((m) => {
       const ch = String(m.channel || 'whatsapp').toLowerCase();
       const isEmail = ch === 'email';
       const out = m.direction === 'outbound' || m.direction === 'out';
       const dk = _dayKey(m);
       const sep = (dk !== lastDay)
-        ? `<div class="ev-day-sep"><span>${esc(_dayLabel(m))}</span></div>`
+        ? `<div class="inbox-c-date-separator"><span>${esc(_dayLabel(m))}</span></div>`
         : '';
+      const sameSender = (lastDir === (out ? 'out' : 'in')) && !sep;
       lastDay = dk;
+      lastDir = out ? 'out' : 'in';
+
+      const failed = m.status === 'failed' || m.failed_reason;
+      const rowClasses = [
+        'inbox-c-msg',
+        out ? 'outbound' : 'inbound',
+        sameSender ? 'same-sender' : '',
+        failed ? 'failed' : '',
+      ].filter(Boolean).join(' ');
+
+      // Meta-content (tijd + status-vinkjes) — hetzelfde voor phantom en visible
+      const timeShort = _timeShort(m);
+      const receipt = out ? (m._pending ? '<span class="receipt" title="Bezig met versturen…">⏳</span>' : `<span class="receipt">${_statusIcon(m)}</span>`) : '';
+      const bySimone = out && m.id && simoneIds.has(String(m.id));
+      const simoneSparkle = bySimone ? '<span class="simone-sparkle" title="Verstuurd door Simone (AI)">✦</span>' : '';
+      const metaVisible = `<span class="bubble-meta">${simoneSparkle}${esc(timeShort)}${receipt}</span>`;
+      const metaPhantom = `<span class="meta-phantom" aria-hidden="true">${esc(timeShort)} ${out ? '✓✓' : ''}</span>`;
 
       if (isEmail) {
-        // ── E-MAIL BUBBEL (blauwe kaart met envelop-icoon + subject-regel) ──
+        // ── E-MAIL BUBBEL — .is-email overlay op zelfde bubble-shell ──
         const subj = m.meta?.subject || '(geen onderwerp)';
         const fromName = m.meta?.from_name || m.meta?.from_address || '—';
         const bodyHtml = m.meta?.has_html ? '(HTML-inhoud — bekijk in v1 voor volledige opmaak)' : '';
         const bodyText = m.body || bodyHtml || '—';
-        return `${sep}<div class="ev-msg-row ${out ? 'out' : 'in'}">
-          <div class="ev-email">
-            <div class="ev-email-hd">
-              <span class="ev-chan-badge email" title="E-mail">✉</span>
-              <span class="ev-email-chip">E-mail</span>
-              <span class="ev-email-time">${esc(_timeShort(m))}</span>
-            </div>
-            <div class="ev-email-subj">${esc(subj)}</div>
-            <div class="ev-email-from">${out ? 'aan' : 'van'}: ${esc(fromName)}</div>
-            <div class="ev-email-body">${esc(String(bodyText).slice(0, 800))}${String(bodyText).length > 800 ? '…' : ''}</div>
-            ${(asArr(m.meta?.attachments).length > 0) ? `<div class="ev-email-att">📎 ${asArr(m.meta?.attachments).length} bijlage(n)</div>` : ''}
+        return `${sep}<div class="${rowClasses}">
+          <div class="inbox-c-msg-bubble is-email">
+            <div class="inbox-c-email-chip">✉ E-mail · ${esc(timeShort)}</div>
+            <div class="inbox-c-email-subj">${esc(subj)}</div>
+            <div class="inbox-c-email-from">${out ? 'aan' : 'van'}: ${esc(fromName)}</div>
+            <div class="inbox-c-email-body">${esc(String(bodyText).slice(0, 800))}${String(bodyText).length > 800 ? '…' : ''}</div>
+            ${(asArr(m.meta?.attachments).length > 0) ? `<div class="inbox-c-email-att">📎 ${asArr(m.meta?.attachments).length} bijlage(n)</div>` : ''}
           </div>
         </div>`;
       }
 
-      // ── WHATSAPP BUBBEL (compact, WA-groen out / surface in, hug-content) ──
+      // ── WHATSAPP BUBBEL — Wanbetalers Pad A ──
       const tplName = m.template_name || m.meta?.template_name || null;
       const mediaUrl = m.media_url || m.meta?.media_url || null;
       const mediaType = m.media_type || m.meta?.media_type || null;
-      const body = m.body || (tplName ? '📄 Template: ' + tplName : (mediaUrl ? '📎 Bijlage (' + (mediaType || 'media') + ')' : '—'));
-      const bySimone = out && m.id && simoneIds.has(String(m.id));
-      return `${sep}<div class="ev-msg-row ${out ? 'out' : 'in'}">
-        <div class="ev-bubble-wrap">
-          <div class="ev-bubble ${out ? 'wa-out' : 'wa-in'} ${m._pending ? 'ev-bubble-pending' : ''}">
-            ${out ? '<span class="ev-bubble-tail-out"></span>' : '<span class="ev-bubble-tail-in"></span>'}
-            ${bySimone ? '<span class="ev-simone-badge">🤖 Simone · AI</span><br>' : ''}
-            ${tplName ? `<div class="ev-bubble-tpl">📄 ${esc(tplName)}</div>` : ''}
-            <span class="ev-bubble-text">${esc(body)}</span>
-            <span class="ev-bubble-meta">
-              <span class="ev-chan-badge wa" title="WhatsApp" style="width:11px;height:11px;font-size:8px">W</span>
-              ${esc(_timeShort(m))}
-              ${out ? (m._pending ? '<span title="Bezig met versturen…">⏳</span>' : _statusIcon(m)) : ''}
-            </span>
-            <div style="clear:both"></div>
-            ${m.failed_reason ? `<div class="ev-bubble-fail">Fout: ${esc(m.failed_reason.slice(0,60))}</div>` : ''}
-          </div>
+      const body = m.body || (tplName ? '' : (mediaUrl ? '📎 Bijlage (' + (mediaType || 'media') + ')' : '—'));
+      const opacity = m._pending ? ';opacity:.65;font-style:italic' : '';
+      return `${sep}<div class="${rowClasses}">
+        <div class="inbox-c-msg-bubble" style="${opacity}">
+          ${bySimone ? '<span class="inbox-c-simone-badge">🤖 Simone · AI</span><br>' : ''}
+          ${tplName ? `<div class="inbox-c-msg-tplbadge" title="${esc(tplName)}">📄 via template</div>` : ''}
+          <span class="bubble-text">${esc(body)}${metaPhantom}</span>
+          ${m.failed_reason ? `<div class="inbox-c-msg-failed-reason">${esc(m.failed_reason.slice(0,80))}</div>` : ''}
+          ${metaVisible}
         </div>
       </div>`;
     }).join('');
 
-    const chatBg = `background:var(--surface-2);background-image:radial-gradient(rgba(0,0,0,.03) 1px, transparent 1px);background-size:16px 16px`;
-    return `<div style="${chatBg};padding:16px 20px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
+    // Chat-body wrapper — id="ev-inbox-chat-scroll" voor surgical scroll-track
+    // (sticky-bottom check via _isScrolledNearBottom + auto-scroll bij nieuwe
+    // berichten). Achtergrond = var(--surface-2) zonder dot-pattern zoals
+    // Wanbetalers-inbox (schoner, minder ruis).
+    return `<div id="ev-inbox-chat-scroll" style="background:var(--surface-2);padding:14px 16px;flex:1;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;scroll-behavior:smooth" onscroll="window.__evChatScroll(this)">
+      <div style="width:100%;max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:0">
       ${msgs.length === 0
         ? `<div style="text-align:center;color:var(--text-3);font-size:12.5px;padding:60px 0">Geen berichten in deze conversatie.</div>`
         : bubbles}
+      </div>
     </div>`;
   }
 
@@ -2323,6 +2404,14 @@
     const showSuggThinking = isWA && simEnabled && simSuggest && !sugg && !showSugg
       && _ui._simonePollConvId === convId && !_ui.suggestionHidden[convId];
 
+    // 24-uurs WhatsApp-venster (Meta rule). Client-side bepaald uit laatste
+    // inbound; server 422 fangt fallback op. Alleen relevant voor WA-conv.
+    const wa24 = isWA ? _getWhatsAppWindow(convId, conv) : { open: true, hoursLeft: null };
+    // Buiten venster: vrije-tekst textarea disabled, tenzij template
+    // geselecteerd (die gaat via inbox-send-template en werkt buiten venster).
+    const outsideWindow = isWA && !wa24.open;
+    const freeTextBlocked = outsideWindow && !tplState;
+
     return `<div style="padding:10px 16px;border-top:1px solid var(--border);background:var(--surface);flex-shrink:0;display:flex;flex-direction:column;gap:6px">
       ${showSugg ? `<div style="padding:8px 10px;background:var(--violet-soft);border:1px solid var(--violet-line, var(--violet));border-radius:8px;color:var(--text);font-size:12.5px;line-height:1.45;display:flex;flex-direction:column;gap:6px">
         <div style="display:flex;align-items:center;gap:6px">
@@ -2347,11 +2436,16 @@
           <span style="width:6px;height:6px;background:${isEmail ? 'var(--blue)' : '#25d366'};border-radius:50%"></span>
           Antwoord via ${isEmail ? 'e-mail' : 'WhatsApp'}
         </span>
+        ${isWA && wa24.open && wa24.hoursLeft != null ? `<span style="color:${wa24.hoursLeft <= 2 ? 'var(--amber)' : 'var(--text-3)'};font-size:10.5px" title="Meta staat vrije tekst alleen toe binnen 24u na het laatste inbound klant-bericht. Daarbuiten kan alleen een template.">⏱ Nog ${wa24.hoursLeft}u binnen venster</span>` : ''}
+        ${isWA && !wa24.open ? `<span style="color:var(--rose);font-weight:600;font-size:10.5px" title="Meta 24u-venster verstreken sinds het laatste inbound bericht. Vrije tekst is geblokkeerd — verstuur een goedgekeurde template.">🔒 Buiten 24u-venster</span>` : ''}
         ${tplState ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:1px 6px;background:var(--pink-soft);color:var(--pink);border-radius:3px;font-size:10.5px;font-weight:600" title="Wordt als Meta-approved template verstuurd (werkt ook buiten 24u-venster)">📄 Meta-template: ${esc(tplState.name)}</span>` : ''}
         ${tplState ? `<button class="icon-btn" onclick="window.__evCompTplClear('${esc(convId)}')" style="width:18px;height:18px" title="Template loskoppelen (verstuur als vrije tekst)">${svg(I.x || I.close, 'width:10px;height:10px')}</button>` : ''}
         ${tplEdited ? `<span style="color:var(--amber);font-size:10.5px" title="Meta-templates verzenden alleen de gedefinieerde placeholder-params. Handmatige tekstwijzigingen worden genegeerd. Klik het ×-icoontje om als vrije tekst te verzenden (mits binnen 24u-venster).">⚠ Tekst aangepast — als template genegeerd</span>` : ''}
         ${simActive ? `<span style="margin-left:auto;color:var(--amber);font-weight:500" title="Simone kan alsnog autonoom antwoorden op nieuwe inbound berichten (60s cooldown na jouw send). Beheer Simone in de Agents-module.">⚠ Simone actief</span>` : ''}
       </div>
+      ${freeTextBlocked ? `<div style="padding:8px 10px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:6px;color:var(--rose);font-size:12px;line-height:1.4">
+        <b>Buiten het 24-uurs WhatsApp-venster.</b> Je kunt alleen een goedgekeurde template versturen (📄 Template-knop). Meta staat vrije tekst alleen toe binnen 24u na het laatste klant-bericht.
+      </div>` : ''}
 
       ${err ? `<div style="padding:6px 10px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:6px;color:var(--rose);font-size:12px;display:flex;align-items:center;gap:8px">
         <span style="flex:1">⚠ ${esc(err)}</span>
@@ -2372,16 +2466,16 @@
         <button class="btn btn-ghost btn-sm" onclick="window.__evCompTplOpen('${esc(convId)}')" title="${isEmail ? 'Templates zijn WhatsApp-only' : 'Kies een template'}" style="flex-shrink:0;padding:6px 10px;font-size:12px" ${busy || isEmail ? 'disabled' : ''}>${svg(I.doc || I.file, 'width:13px;height:13px')} Template</button>
         <textarea
           id="ev-comp-input-${esc(convId)}"
-          placeholder="${isEmail ? 'Typ je e-mail-antwoord…' : 'Typ een antwoord… (Enter = versturen, Shift+Enter = nieuwe regel)'}"
+          placeholder="${freeTextBlocked ? 'Buiten 24u-venster — kies een template' : (isEmail ? 'Typ je e-mail-antwoord…' : 'Typ een antwoord… (Enter = versturen, Shift+Enter = nieuwe regel)')}"
           oninput="window.__evCompDraft('${esc(convId)}', this.value); window.__evCompAutoGrow(this)"
           onkeydown="window.__evCompKeydown(event, '${esc(convId)}')"
-          ${busy ? 'disabled' : ''}
-          style="flex:1;min-height:${isEmail ? '80px' : '38px'};max-height:${isEmail ? '260px' : '160px'};padding:8px 12px;border:1px solid var(--border);border-radius:${isEmail ? '8px' : '20px'};background:var(--surface);color:var(--text);font-size:13.5px;font-family:inherit;line-height:1.4;resize:none;box-sizing:border-box;overflow-y:auto"
+          ${busy || freeTextBlocked ? 'disabled' : ''}
+          style="flex:1;min-height:${isEmail ? '80px' : '38px'};max-height:${isEmail ? '260px' : '160px'};padding:8px 12px;border:1px solid var(--border);border-radius:${isEmail ? '8px' : '20px'};background:${freeTextBlocked ? 'var(--surface-2)' : 'var(--surface)'};color:var(--text);font-size:13.5px;font-family:inherit;line-height:1.4;resize:none;box-sizing:border-box;overflow-y:auto"
         >${esc(draft)}</textarea>
         <button
           class="btn btn-primary btn-sm"
           onclick="window.__evCompSend('${esc(convId)}')"
-          ${(!draft.trim() || busy || (isEmail && (!emailBits.email_id || !emailBits.to || !emailBits.mailbox || !emailBits.subject.trim()))) ? 'disabled style="opacity:.55"' : ''}
+          ${(!draft.trim() || busy || freeTextBlocked || (isEmail && (!emailBits.email_id || !emailBits.to || !emailBits.mailbox || !emailBits.subject.trim()))) ? 'disabled style="opacity:.55"' : ''}
           title="Versturen${isEmail ? '' : ' (Enter)'}"
           style="flex-shrink:0;padding:8px 14px;font-size:12px"
         >${busy ? '…' : (svg(I.send || I.arrRight || I.tick, 'width:13px;height:13px') + ' Versturen')}</button>
@@ -2506,7 +2600,14 @@
       await fetchInboxMsgs(convId, () => _paintRightSurgical(convId));
       _showToast(ch === 'email' ? 'E-mail verstuurd' : 'Bericht verstuurd');
     } catch (e) {
-      _ui.composeError[convId] = e?.message || 'Versturen mislukt';
+      // Server-side 24u-venster: /api/inbox-send retourneert 422
+      // { error:'24h_window_expired', message, ... } bij vrije tekst buiten
+      // venster. Herken en toon zelfde uitleg als client-side check.
+      const msg = String(e?.message || '');
+      const isWindowExpired = /24h_window_expired|24-?uurs|24-?hour/i.test(msg);
+      _ui.composeError[convId] = isWindowExpired
+        ? 'Buiten het 24-uurs WhatsApp-venster — kies een template om alsnog te versturen.'
+        : (msg || 'Versturen mislukt');
       if (cur) {
         const idx = cur.items.findIndex((x) => x.id === optimisticId);
         if (idx >= 0) cur.items[idx] = { ...cur.items[idx], _pending: false, status: 'failed', failed_reason: _ui.composeError[convId] };
@@ -2733,12 +2834,180 @@
   }
 
   // ── Surgical repaint van alleen #ev-inbox-right ────────────────────────
+  // Behoudt sticky-bottom scroll (80px threshold zoals Wanbetalers-inbox
+  // regel 14102-14114) en composer-focus/text (dispatch niet als focus in
+  // composer textarea/input zit).
   function _paintRightSurgical(convId) {
     try {
+      // Skip als focus in composer input/textarea zit — anders verliezen we
+      // draft/cursor tijdens polling-repaint. Alleen berichten-lijst update.
+      const active = document.activeElement;
+      const isComposerFocus = active && (
+        active.id?.startsWith('ev-comp-input-') ||
+        active.matches?.('.ev-inbox-right input, .ev-inbox-right textarea, .ev-inbox-right select')
+      );
       const r = document.querySelector('#ev-inbox-right');
-      if (r) r.innerHTML = _inboxRightPane(convId);
+      if (!r) return;
+      const wasAtBottom = _isScrolledNearBottom();
+      if (isComposerFocus) {
+        // Herrender alleen scroll-body (behoud composer DOM + focus)
+        const oldScroll = document.querySelector('#ev-inbox-chat-scroll');
+        const scrollTop = oldScroll ? oldScroll.scrollTop : 0;
+        r.innerHTML = _inboxRightPane(convId);
+        const newScroll = document.querySelector('#ev-inbox-chat-scroll');
+        if (newScroll) {
+          if (wasAtBottom) newScroll.scrollTop = newScroll.scrollHeight;
+          else newScroll.scrollTop = scrollTop;
+        }
+        // Re-focus composer input (browser reset focus na innerHTML)
+        const inputId = active.id;
+        if (inputId) {
+          const newEl = document.getElementById(inputId);
+          if (newEl) { newEl.focus(); if (newEl.setSelectionRange && active.value !== undefined) { try { newEl.setSelectionRange(active.value.length, active.value.length); } catch (_) {} } }
+        }
+      } else {
+        r.innerHTML = _inboxRightPane(convId);
+        const scroll = document.querySelector('#ev-inbox-chat-scroll');
+        if (scroll && wasAtBottom) scroll.scrollTop = scroll.scrollHeight;
+      }
     } catch (_) {}
   }
+
+  // ── Chat-scroll tracking (sticky-bottom check zoals Wanbetalers) ──────
+  function _isScrolledNearBottom() {
+    const el = document.querySelector('#ev-inbox-chat-scroll');
+    if (!el) return true;   // default: assume bottom
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+    return dist < 80;   // 80px threshold — zelfde als Wanbetalers regel 14103
+  }
+  window.__evChatScroll = (el) => {
+    if (!el) return;
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+    _ui._lastScrollAtBottom = dist < 80;
+  };
+
+  // ── 24-uurs WhatsApp-venster ──────────────────────────────────────────
+  // Meta staat vrije-tekst-berichten alleen toe binnen 24u na het LAATSTE
+  // INBOUND klant-bericht. Bepaling client-side uit de unified thread:
+  // scan items[] laatste inbound (channel='whatsapp', direction='inbound'/
+  // 'in'). Server-side validatie is authoritative: /api/inbox-send retourneert
+  // 422 { error:'24h_window_expired', ... } — we vangen die op als fail-soft
+  // en tonen dezelfde uitleg als de client-side check.
+  //
+  // Return: { open: bool, hoursLeft: number|null, lastInboundAt: iso|null }
+  function _getWhatsAppWindow(convId, conv) {
+    // Alleen relevant voor WA-convs
+    const isWA = !!(conv?.phone_number || conv?.can_send_text);
+    if (!isWA) return { open: true, hoursLeft: null, lastInboundAt: null };
+    const msgs = asArr(_live.inboxMsgs.data[convId]?.items);
+    // Zoek laatste WA-inbound (skip email + outbound)
+    let lastInbound = null;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      const ch = String(m.channel || 'whatsapp').toLowerCase();
+      if (ch !== 'whatsapp') continue;
+      if (m.direction === 'inbound' || m.direction === 'in') { lastInbound = m; break; }
+    }
+    if (!lastInbound) return { open: false, hoursLeft: 0, lastInboundAt: null };
+    const at = new Date(lastInbound.at || lastInbound.sent_at || lastInbound.created_at || 0);
+    if (!Number.isFinite(at.getTime())) return { open: true, hoursLeft: null, lastInboundAt: null };
+    const now = Date.now();
+    const elapsedMs = now - at.getTime();
+    const WINDOW_MS = 24 * 60 * 60 * 1000;
+    const hoursLeft = Math.max(0, Math.round((WINDOW_MS - elapsedMs) / (60 * 60 * 1000)));
+    return { open: elapsedMs < WINDOW_MS, hoursLeft, lastInboundAt: at.toISOString() };
+  }
+
+  // ── Realtime + polling voor instant-berichten ─────────────────────────
+  // Zelfde patroon als Wanbetalers (finance.html regels 16018-16074):
+  // Supabase channel op whatsapp_messages INSERT + 8s poll-fallback op de
+  // open thread + 15s poll-fallback op de conv-list. Alles wordt gestopt
+  // als de Inbox-tab verlaten wordt (via __evInboxDismount, aangeroepen
+  // door tab-switch handler).
+  function _startInboxRealtime(convId) {
+    _stopInboxRealtime();   // idempotent
+    if (!convId) return;
+    _ui._rtMsgConvId = convId;
+    // Supabase channel op WA-messages INSERT (filter per conv-id)
+    try {
+      if (window.supabase?.channel) {
+        _ui._rtMsgChannel = window.supabase
+          .channel('ev-inbox-msg-' + convId)
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'whatsapp_messages', filter: 'conversation_id=eq.' + convId }, () => {
+            // Nieuw bericht → refetch thread + list surgical
+            _liveRefreshThread(convId);
+          })
+          .subscribe();
+        _ui._rtConvChannel = window.supabase
+          .channel('ev-inbox-convs')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_conversations' }, () => {
+            _liveRefreshList();
+          })
+          .subscribe();
+      }
+    } catch (e) { console.warn('[ev-inbox rt] channel-setup fail:', e?.message); }
+    // Polling-fallback (voor het geval realtime dood is, én voor unread/preview-updates)
+    _ui._pollThreadTimer = setInterval(() => { if (_ui.inboxConvId === convId) _liveRefreshThread(convId); }, 8000);
+    _ui._pollListTimer   = setInterval(() => { _liveRefreshList(); }, 15000);
+  }
+  function _stopInboxRealtime() {
+    try { if (_ui._rtMsgChannel  && window.supabase?.removeChannel) window.supabase.removeChannel(_ui._rtMsgChannel); } catch (_) {}
+    try { if (_ui._rtConvChannel && window.supabase?.removeChannel) window.supabase.removeChannel(_ui._rtConvChannel); } catch (_) {}
+    _ui._rtMsgChannel = null; _ui._rtConvChannel = null; _ui._rtMsgConvId = null;
+    if (_ui._pollThreadTimer) { clearInterval(_ui._pollThreadTimer); _ui._pollThreadTimer = null; }
+    if (_ui._pollListTimer)   { clearInterval(_ui._pollListTimer);   _ui._pollListTimer   = null; }
+  }
+  // Re-entrancy guard flags voor de refresh-callbacks (voorkomen stapeling)
+  let _refreshingThread = null, _refreshingList = false;
+  async function _liveRefreshThread(convId) {
+    if (_refreshingThread === convId) return;
+    _refreshingThread = convId;
+    try {
+      const j = await window.KV.authedJson('/api/inbox-thread-unified?conversation_id=' + encodeURIComponent(convId) + '&include_email=1&limit=200');
+      if (!j || j.error) return;
+      const st = _live.inboxMsgs;
+      const prevCount = asArr(st.data[convId]?.items).length;
+      st.data[convId] = { conversation: j?.conversation || null, items: asArr(j?.items) };
+      const newCount = st.data[convId].items.length;
+      // Alleen repaint als er echt iets veranderd is (voorkomt onnodige DOM-churn)
+      if (newCount !== prevCount) _paintRightSurgical(convId);
+    } catch (_) {} finally { _refreshingThread = null; }
+  }
+  async function _liveRefreshList() {
+    if (_refreshingList) return;
+    _refreshingList = true;
+    try {
+      const j = await window.KV.authedJson('/api/inbox-conversations-list?module=events&limit=100');
+      if (!j || j.__error || j.error) return;
+      const newItems = asArr(j?.items);
+      const prevSig = JSON.stringify(asArr(_live.inbox.data).map((c) => [c.id, c.last_message_at, c.unread_count]));
+      const newSig  = JSON.stringify(newItems.map((c) => [c.id, c.last_message_at, c.unread_count]));
+      if (prevSig === newSig) return;
+      _live.inbox.data = newItems;
+      // Surgical: alleen rows-container updaten (behoud zoekveld + focus)
+      const rowsEl = document.querySelector('#ev-inbox-rows');
+      if (rowsEl) {
+        const q = String(_ui.inboxSearchQ || '').trim().toLowerCase();
+        const filtered = q ? newItems.filter((c) => {
+          const naam  = (c.customer_name || c.display_name || '').toLowerCase();
+          const phone = String(c.phone_number || '').toLowerCase();
+          const email = String(c.customer_email || '').toLowerCase();
+          return naam.includes(q) || phone.includes(q) || email.includes(q);
+        }) : newItems;
+        rowsEl.innerHTML = filtered.length === 0
+          ? `<div style="padding:16px;text-align:center;color:var(--text-3);font-size:12px">Geen gesprekken gevonden${q ? ' voor "' + esc(q) + '"' : ''}.</div>`
+          : _inboxLeftList(filtered, _ui.inboxConvId);
+      }
+    } catch (_) {} finally { _refreshingList = false; }
+  }
+
+  // Cleanup-hook — aangeroepen als de Inbox-tab de-mount (via DFO.VIEWS
+  // hook + main-view lifecycle). Voor nu: expose als window-func, roep aan
+  // vanuit __evInboxBack / bij tab-switch (via DFO.on-tab-change hook).
+  window.__evInboxDismount = () => {
+    _stopInboxRealtime();
+    if (_ui._simonePollTimer) { clearInterval(_ui._simonePollTimer); _ui._simonePollTimer = null; _ui._simonePollConvId = null; }
+  };
 
   // ── HANDLERS: SPLIT-PANE SELECTIE + NAVIGATIE ──────────────────────────
   //
@@ -2759,6 +3028,8 @@
     _ui.inboxNarrowMode = 'detail';
     _ui.suggestionHidden[convId] = false;
     _startSimonePolling(convId);
+    // Start Supabase realtime + polling voor deze conv (was ander conv → stop eerst)
+    _startInboxRealtime(convId);
 
     // Toggle .active class op rijen (surgical)
     try {
