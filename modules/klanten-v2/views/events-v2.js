@@ -206,6 +206,16 @@
   function _fmtDate(iso) { if (!iso) return ''; const d = new Date(iso); return Number.isFinite(d.getTime()) ? d.toLocaleDateString('nl-NL', { day:'2-digit', month:'2-digit', year:'numeric' }) : ''; }
   function _fmtTime(iso) { if (!iso) return ''; const d = new Date(iso); return Number.isFinite(d.getTime()) ? d.toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' }) : ''; }
   function _fmtDateTime(iso) { const d = _fmtDate(iso), t = _fmtTime(iso); return d + (t ? ' ' + t : ''); }
+  // BUG 2 FIX — datetime-local input wil "YYYY-MM-DDTHH:mm" in LOKALE tijd,
+  // zonder timezone-suffix. .slice(0,16) op ISO faalt bij Z-suffix (UTC)
+  // omdat Nederland +1/+2 uur voor loopt → tijd wordt fout getoond.
+  function _isoToLocalInput(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return '';
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
   function _showToast(msg) {
     const el = document.getElementById('kv-toast');
     if (!el) return;
@@ -362,7 +372,7 @@
     if (!window.confirm('Event archiveren? Het verdwijnt uit de actieve lijst maar blijft bewaard.')) return;
     _ui.busy[id] = 'archive'; if (window.DFO?.render) window.DFO.render();
     try {
-      const j = await window.KV.authedJson('/api/events-update', { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id, status:'archived' }) });
+      const j = await window.KV.authedJson('/api/events-update?id=' + encodeURIComponent(id), { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ status:'archived' }) });
       if (j?.error) throw new Error(j.error);
       _showToast('Event gearchiveerd');
       _live.events.data = null; queueMicrotask(() => fetchEvents());
@@ -373,7 +383,7 @@
     if (!window.confirm('Event annuleren? Deelnemers worden NIET automatisch geïnformeerd (doe dat apart).')) return;
     _ui.busy[id] = 'cancel'; if (window.DFO?.render) window.DFO.render();
     try {
-      const j = await window.KV.authedJson('/api/events-update', { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id, status:'cancelled' }) });
+      const j = await window.KV.authedJson('/api/events-update?id=' + encodeURIComponent(id), { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ status:'cancelled' }) });
       if (j?.error) throw new Error(j.error);
       _showToast('Event geannuleerd');
       _live.events.data = null; if (_ui.detailId === id) _live.detail.data[id] = null;
@@ -388,10 +398,14 @@
   // ═══════════════════════════════════════════════════════════════════════
   function _detailView(id) {
     if (!_live.detail.data[id] && !_live.detail.loading[id] && !_live.detail.error[id]) queueMicrotask(() => fetchDetail(id));
+    // BUG 5 FIX — prefetch attendees ZODRA detail-view opent, ongeacht welke sub-tab
+    // je bent. Info-card "Aangemeld" leest dezelfde list.length als de Aanwezigen-tab.
+    if (!_live.attendees.data[id] && !_live.attendees.loading[id] && !_live.attendees.error[id]) queueMicrotask(() => fetchAttendees(id));
     if (_live.detail.error[id] && !_live.detail.data[id]) return _backBar(id) + errBlk('detail', _live.detail.error[id], id);
     if (_live.detail.loading[id] && !_live.detail.data[id]) return _backBar(id) + skel();
     const ev = _live.detail.data[id] || {};
-
+    // Injecteer id + attendees-list zodat _detailInfo één canonieke bron heeft.
+    ev.id = ev.id || id;
     return _backBar(id) + _detailHeader(ev) + _detailTabs(ev) + _detailBody(ev);
   }
 
@@ -451,26 +465,32 @@
   }
 
   function _detailInfo(ev) {
-    // BUG 3 FIX (2e ronde) — events-detail response-shape is:
-    //   { event:{...}, counts:{ byStatus, active, attendees_total, aangemeld_no_assessment, ... } }
-    // Ik las vorige ronde ev.byStatus terwijl het onder ev.counts.byStatus zit.
-    // Nu ook de attendees uit de Aanwezigen-tab-cache als ultieme fallback pakken
-    // zodat we altijd het aantal tonen dat de Aanwezigen-tab óók toont.
-    const counts = ev.counts || {};
-    const bs = counts.byStatus || {};
-    // Aanwezigen-tab-teller = som van dezelfde 5 statussen zoals de tabel toont.
+    // BUG 5 FIX (3e ronde) — Aanwezigen-tab-teller is autoritatief.
+    // Aanwezigen-tab telt attendees-list.length (na server-side filter op
+    // event_id + niet-verwijderd). Info-card MOET exact hetzelfde tonen.
+    // Bron: /api/events-attendees-list?event_id=<id> → j.attendees|j.items.
     const attList = asArr(_live.attendees.data[ev.id]);
-    const listCount = attList.length;
-    const bsSum = ['aangemeld','aanwezig','no_show','sale','switched_to_other_event']
-      .reduce((a, k) => a + Number(bs[k] || 0), 0);
-    const activeTot = Number(counts.active || counts.attendees_total || 0);
-    // Prioriteit: bsSum (autoritatief per status-breakdown), anders attendees_total,
-    // anders active, anders listCount.
-    const showTot = bsSum > 0 ? bsSum : (Number(counts.attendees_total || 0) || activeTot || listCount);
-    const confirmed = Number(counts.active || 0);
-    const showSub = (showTot > confirmed && confirmed > 0)
+    const attLoading = _live.attendees.loading[ev.id];
+    const attErr = _live.attendees.error[ev.id];
+    // Confirmed (met vragenlijst): tel attendees met assessment_response_id.
+    const confirmed = attList.filter((a) => !!a.assessment_response_id).length;
+    const showTot = attErr ? '—' : attLoading && attList.length === 0 ? '…' : String(attList.length);
+    const showSub = (attList.length > 0 && confirmed !== attList.length)
       ? ` <span style="font-size:11px;color:var(--text-3)">(${confirmed} met vragenlijst)</span>`
       : '';
+    // ?debug=1 log: response-shape + getelde waarde, zodat Jeffrey in console
+    // kan verifiëren dat we exact dezelfde list.length nemen als de tab.
+    if (typeof window !== 'undefined' && String(window.location?.search || '').includes('debug=1')) {
+      console.log('[events-v2 aangemeld-debug]', {
+        event_id: ev.id,
+        attendees_list_length: attList.length,
+        attendees_loading: attLoading,
+        attendees_error: attErr,
+        confirmed_with_assessment: confirmed,
+        events_detail_counts: ev.counts,
+        first_attendee: attList[0] ? { id: attList[0].id, status: attList[0].status, assessment_response_id: attList[0].assessment_response_id } : null,
+      });
+    }
     return `<div class="pad" style="padding-top:14px"><div class="grid g2">
       <div class="card">
         <div class="card-head"><span class="tile-ico" style="background:var(--pink-soft);color:var(--pink)">${svg(I.cal)}</span><div class="card-title">Details</div></div>
@@ -775,10 +795,16 @@
     _ui.wizard = { step: 1, mode, id: id || null, form: {}, photoFile: null };
     _ui._photoDataUrl = null;
     if (mode === 'edit' && id) {
-      // Laad huidige data
       if (!_live.detail.data[id]) queueMicrotask(() => fetchDetail(id));
       const cur = _live.detail.data[id];
-      if (cur) _ui.wizard.form = { title: cur.title, starts_at: cur.starts_at, ends_at: cur.ends_at, location: cur.location, capacity: cur.capacity, description_md: cur.description_md || cur.description, niveau: cur.niveau };
+      if (cur) _ui.wizard.form = {
+        title: cur.title,
+        starts_at: _isoToLocalInput(cur.starts_at),   // BUG 2 FIX
+        ends_at:   _isoToLocalInput(cur.ends_at),
+        location: cur.location, capacity: cur.capacity,
+        description_md: cur.description_md || cur.description,
+        niveau: cur.niveau,
+      };
     }
     if (!_live.niveaus.data) queueMicrotask(fetchNiveaus);
     if (window.DFO?.render) window.DFO.render();
@@ -795,10 +821,17 @@
 
   function _wizardView() {
     const w = _ui.wizard || {}; const step = w.step || 1; const form = w.form || {};
-    // Bij edit-flow: haal detail op zodra beschikbaar → prefill
+    // Bij edit-flow: haal detail op zodra beschikbaar → prefill (BUG 2 FIX incl.)
     if (w.mode === 'edit' && w.id && !form.title) {
       const cur = _live.detail.data[w.id];
-      if (cur) w.form = { title: cur.title, starts_at: cur.starts_at, ends_at: cur.ends_at, location: cur.location, capacity: cur.capacity, description_md: cur.description_md || cur.description, niveau: cur.niveau };
+      if (cur) w.form = {
+        title: cur.title,
+        starts_at: _isoToLocalInput(cur.starts_at),
+        ends_at:   _isoToLocalInput(cur.ends_at),
+        location: cur.location, capacity: cur.capacity,
+        description_md: cur.description_md || cur.description,
+        niveau: cur.niveau,
+      };
     }
     const niveaus = asArr(_live.niveaus.data);
 
@@ -885,10 +918,15 @@
     if (!form.title || !form.starts_at) { alert('Titel en startdatum zijn verplicht.'); return; }
     try {
       const isEdit = w.mode === 'edit';
-      const url = isEdit ? '/api/events-update' : '/api/events-create';
-      const httpMethod = isEdit ? 'PATCH' : 'POST';   // BUG 2 FIX — events-update wil PATCH
+      // events-update leest id uit query-param, NIET uit body. events-create
+      // heeft geen id. Beide flows: id verwijderen uit body, alleen bij edit
+      // meesturen als ?id=<uuid> in URL.
+      const url = isEdit
+        ? '/api/events-update?id=' + encodeURIComponent(w.id)
+        : '/api/events-create';
+      const httpMethod = isEdit ? 'PATCH' : 'POST';
       const body = { ...form };
-      if (isEdit) body.id = w.id;
+      delete body.id;   // veiligheidshalve strippen mocht 'ie in form zitten
       if (form.capacity != null && form.capacity !== '') body.capacity = Number(form.capacity);
       const j = await window.KV.authedJson(url, { method:httpMethod, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
       if (j?.error) throw new Error(j.error);
@@ -947,27 +985,29 @@
           [{l:'Deelnemer'},{l:'E-mail',cls:'optional'},{l:'Opgegeven event',cls:'optional'},{l:'Match'},{l:'Vragenlijst',cls:'optional'},{l:'Ingeschreven',cls:'r'},{l:'',cls:'r'}],
           rows.map((r) => {
             const naam = [r.first_name, r.last_name].filter(Boolean).join(' ') || r.email || '—';
-            const ev = r.matched_event?.title || r.event_date_label || r.opgegeven_event || '—';
+            // BUG 4b FIX — event-titel + datum tonen. matched_event heeft .title
+            // en .starts_at. Fallback event_date_label (opgegeven ruwe datum-tekst).
+            const evTitle = r.matched_event?.title || r.opgegeven_event || '—';
+            const evDate  = r.matched_event?.starts_at ? _fmtDate(r.matched_event.starts_at) : (r.event_date_label || '');
             const ms = r.match_status || 'onbekend';
             const [mc, ml] = ms === 'matched' ? ['ok','Matched'] : ms === 'ambiguous' ? ['warn','Ambigu'] : ms === 'no_match' ? ['danger','Geen match'] : ['neutral','Ongeldig'];
-            // Vragenlijst-vinkje: check meerdere mogelijke bron-velden (best-effort
-            // omdat signup-inbox-rijen niet altijd al deelnemer-info hebben).
-            const hasQuest = !!(r.assessment_response_id
-              || r.matched_attendee?.assessment_response_id
-              || r.questionnaire_completed_at
-              || r.assessment_completed_at);
+            // BUG 4a FIX — signup-inbox-list retourneert `questionnaire_filled`
+            // (boolean) direct in de response, uit gejoinde event_attendees.
+            // Autoritatief: r.questionnaire_filled. Fallback op oude velden alleen
+            // als 'ie ontbreekt (achterwaartse compat).
+            const hasQuest = r.questionnaire_filled === true
+              || (!('questionnaire_filled' in r) && !!(r.matched_attendee?.assessment_response_id || r.assessment_response_id));
             const questCell = ms === 'matched'
               ? (hasQuest
                   ? `<span title="Vragenlijst ingevuld" style="color:var(--emerald);font-size:14px">✓</span>`
                   : `<span title="Vragenlijst nog niet ingevuld" style="color:var(--rose);font-size:14px">✗</span>`)
               : `<span title="Nog geen match — vragenlijst onbekend" style="color:var(--text-3);font-size:12px">—</span>`;
-            // Ingeschreven op — signup-received_at (dat is wanneer ze zich inschreven).
             const insDate = _fmtDate(r.received_at);
             const insTime = _fmtTime(r.received_at);
             return [
               `<div class="row-avatar">${H.av(naam, 28)}<span class="cell-main">${esc(naam)}</span></div>`,
               `<span style="color:var(--text-3);font-size:12.5px">${esc(r.email || '—')}</span>`,
-              `<span style="color:var(--text-2);font-size:12.5px">${esc(ev)}</span>`,
+              `<div style="min-width:0"><div style="color:var(--text-2);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(evTitle)}</div>${evDate ? `<div class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(evDate)}</div>` : ''}</div>`,
               H.pill(mc, ml),
               questCell,
               `<div style="text-align:right"><div class="mono" style="font-size:12.5px;color:var(--text-2)">${esc(insDate)}</div><div class="mono" style="font-size:11px;color:var(--text-3)">${esc(insTime)}</div></div>`,
