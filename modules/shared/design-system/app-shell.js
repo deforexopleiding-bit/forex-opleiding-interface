@@ -72,7 +72,7 @@
     { g: 'Verkoop & Financiën',    id: 'verdiensten',      naam: 'Mijn verdiensten',  icon: I.euro,     color: 'blue',    roles: ['mentor'],           tabs: ['Overzicht', 'Uitbetalingen', 'Reiskosten', 'Certificaten'] },
 
     { g: 'Leren & Events',         id: 'lms',              naam: 'LMS',               icon: I.book,     color: 'teal',    roles: ['super_admin', 'manager', 'mentor'], ext: 'https://dfo-lms-prototype.vercel.app/mentor', tabs: [] },
-    { g: 'Leren & Events',         id: 'events',           naam: 'Events',            icon: I.cal,      color: 'pink',    roles: SAMSM,     badge: 8,  tabs: ['Overzicht', 'Inbox', 'Inschrijvingen', 'Mentor-grootboek'] },
+    { g: 'Leren & Events',         id: 'events',           naam: 'Events',            icon: I.cal,      color: 'pink',    roles: SAMSM,     badge: 8,  tabs: ['Overzicht', 'Inbox', 'Inschrijvingen', 'Statistieken'] },
     { g: 'Leren & Events',         id: 'onboarding',       naam: 'Onboarding',        icon: I.route,    color: 'emerald', roles: SAMSM,     badge: 2,  tabs: ['Actief', 'Inbox', 'Archief'] },
     { g: 'Leren & Events',         id: 'mentoren',         naam: 'Mentoren',          icon: I.grad,     color: 'violet',  roles: SAM,       badge: 4,  tabs: ['Overzicht', 'Grootboek', 'Uitbetalingen', 'Beoordelingen', 'Certificaten', 'Signalen'] },
 
@@ -93,7 +93,7 @@
      de module wél mogen openen; MOD_LOCK toont de module in het menu
      met een slot-icoon en render't `comingSoonView` i.p.v. de content. */
   const TAB_RESTRICT = {
-    'events/Mentor-grootboek': ['super_admin', 'manager'],
+    'events/Statistieken': ['super_admin', 'manager'],
     'finance/Bank':            ['super_admin', 'manager'],
     'finance/Omzet & MRR':     ['super_admin', 'manager'],
     'sales/Retentie':          SAMS,
