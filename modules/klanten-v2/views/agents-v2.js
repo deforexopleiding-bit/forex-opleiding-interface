@@ -409,7 +409,13 @@
             <div class="card-title">${esc(a.n)}</div>
             <div style="font-size:12px;color:var(--text-3);margin-top:3px;line-height:1.45">${esc(a.d)}</div>
           </div>
-          ${stats ? H.pill('ok', 'Actief') : softPill()}
+          ${(() => {
+            // Bug 4: 3-status pill — Actief (activiteit>0), Wacht op werk
+            // (bron aangesloten maar 0), Nog niet gekoppeld (geen bron).
+            if (!stats) return softPill();
+            const anyActivity = Array.isArray(stats) && stats.some((row) => Number(String(row[0]).replace(/[^0-9.]/g, '')) > 0);
+            return anyActivity ? H.pill('ok', 'Actief') : H.pill('neutral', 'Wacht op werk');
+          })()}
         </div>
         ${stats ? `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--border);border-top:1px solid var(--border);margin:0 -17px -15px">
           ${stats.map(([v, l]) => `<div style="background:var(--surface);padding:8px 10px;text-align:center">
@@ -1228,12 +1234,101 @@
     </div></div>`;
   }
 
+  // Bug 2b — Mini-markdown renderer voor assistant-bubbels.
+  // Werkt op ge-esc()-de string zodat XSS uitgesloten is: HTML-tags in de
+  // originele content zijn al ge-escaped, alleen MD-patronen worden vervangen.
+  function _mdInline(escapedText) {
+    let s = String(escapedText || '');
+    // Bold **x** en __x__ → <strong>
+    s = s.replace(/\*\*([^\*\n]+?)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/__([^_\n]+?)__/g, '<strong>$1</strong>');
+    // Italic *x* en _x_ (niet als ** al gehandeld) → <em>
+    s = s.replace(/(^|[\s(])\*([^\*\n]+?)\*(?=[\s.,;:!?)\-]|$)/g, '$1<em>$2</em>');
+    s = s.replace(/(^|[\s(])_([^_\n]+?)_(?=[\s.,;:!?)\-]|$)/g, '$1<em>$2</em>');
+    // Inline code `x` → <code>
+    s = s.replace(/`([^`\n]+?)`/g, '<code style="background:var(--surface-2);padding:1px 5px;border-radius:3px;font-family:\'IBM Plex Mono\',monospace;font-size:.92em">$1</code>');
+    // Links [text](url) → <a> — safe: input is al esc'd, url wordt via encodeURI opgeschoond.
+    s = s.replace(/\[([^\]\n]+?)\]\(([^)\s]+?)\)/g, (m, txt, url) => {
+      const safeUrl = /^(https?:|mailto:|\/)/i.test(url) ? url : '#';
+      return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--m, #3B82F6);text-decoration:underline">${txt}</a>`;
+    });
+    // Bare-URL auto-linkify — alleen http(s)://. Split om reeds bestaande <a>-tags
+    // zodat href-attributen niet dubbel gelinkt worden. Input is al esc'd -> geen XSS.
+    // Trailing punctuation (.,;:!?)) blijft buiten de link zodat "…zie https://x.com." OK is.
+    const parts = s.split(/(<a\s[^>]*>[\s\S]*?<\/a>)/gi);
+    for (let i = 0; i < parts.length; i++) {
+      if (i % 2 === 1) continue; // dit is een reeds gemaakte <a>...</a> — laat staan
+      parts[i] = parts[i].replace(/(^|[\s(])(https?:\/\/[^\s<)]+?)([.,;:!?)\]]*)(?=\s|$|<)/g,
+        (m, pre, url, tail) => `${pre}<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:var(--m, #3B82F6);text-decoration:underline">${url}</a>${tail}`);
+    }
+    s = parts.join('');
+    return s;
+  }
+  function _mdBlock(rawText) {
+    // Eerst esc, dan block-level (headings/hr/lists/paragraphs), dan inline.
+    const escd = esc(String(rawText || ''));
+    const lines = escd.split('\n');
+    let html = '';
+    let listType = null; // 'ul' | 'ol'
+    let paraBuf = [];
+    const flushPara = () => {
+      if (paraBuf.length) { html += `<p style="margin:0 0 8px 0">${_mdInline(paraBuf.join('<br>'))}</p>`; paraBuf = []; }
+    };
+    const flushList = () => { if (listType) { html += `</${listType}>`; listType = null; } };
+    for (const raw of lines) {
+      const line = raw.replace(/\s+$/, '');
+      // Headings ## ... → h2 (of h1/h3/…) — match op begin-hashes.
+      const hMatch = /^(#{1,6})\s+(.+)$/.exec(line);
+      // Horizontal rule --- of *** of ___ (min 3 chars, alleen die tekens).
+      const hrMatch = /^\s*([-*_])\1{2,}\s*$/.exec(line);
+      const ulMatch = /^\s*[-*]\s+(.+)$/.exec(line);
+      const olMatch = /^\s*\d+\.\s+(.+)$/.exec(line);
+      if (hrMatch) {
+        flushPara(); flushList();
+        html += `<hr style="border:none;border-top:1px solid var(--border);margin:12px 0" />`;
+        continue;
+      }
+      if (hMatch) {
+        flushPara(); flushList();
+        const level = Math.min(6, hMatch[1].length);
+        const sizes = { 1: 18, 2: 16, 3: 14.5, 4: 13.5, 5: 13, 6: 12.5 };
+        html += `<h${level} style="font-size:${sizes[level]}px;font-weight:600;margin:12px 0 6px 0;line-height:1.3">${_mdInline(hMatch[2])}</h${level}>`;
+        continue;
+      }
+      if (ulMatch) {
+        flushPara();
+        if (listType !== 'ul') { flushList(); listType = 'ul'; html += `<ul style="margin:0 0 8px 20px;padding:0">`; }
+        html += `<li style="margin:2px 0">${_mdInline(ulMatch[1])}</li>`;
+      } else if (olMatch) {
+        flushPara();
+        if (listType !== 'ol') { flushList(); listType = 'ol'; html += `<ol style="margin:0 0 8px 22px;padding:0">`; }
+        html += `<li style="margin:2px 0">${_mdInline(olMatch[1])}</li>`;
+      } else if (line.trim() === '') {
+        // Lege regel: flush paragraph, MAAR laat list open zodat consecutive
+        // "1. item" / "2. item" met blank tussen niet in aparte <ol>'s vallen.
+        // FlushList gebeurt pas als de eerstvolgende non-blank regel geen
+        // list-match is (else-branch hieronder).
+        flushPara();
+      } else {
+        if (listType) flushList();
+        paraBuf.push(line);
+      }
+    }
+    flushPara(); flushList();
+    return html || `<p style="margin:0">${_mdInline(escd)}</p>`;
+  }
+
   function _sandboxBubble(m, a) {
     const isUser = m.role === 'user';
     const bg = isUser ? 'var(--surface-2)' : `color-mix(in srgb, var(--${a.c}) 10%, var(--surface))`;
+    // Bug 2b: assistant-bubbels renderen met mini-markdown (**vet**, lijstjes).
+    // User-bubbels blijven pure esc + whitespace-pre-wrap.
+    const bodyHtml = isUser
+      ? `<div style="font-size:13px;line-height:1.5;white-space:pre-wrap">${esc(m.content)}</div>`
+      : `<div style="font-size:13px;line-height:1.55">${_mdBlock(m.content)}</div>`;
     return `<div style="max-width:75%;padding:9px 12px;border-radius:12px;background:${bg};${isUser ? 'align-self:flex-end' : 'align-self:flex-start;border-left:2px solid var(--' + a.c + ')'}">
       <div style="font-size:10.5px;color:var(--text-3);margin-bottom:3px;text-transform:uppercase;letter-spacing:.05em">${isUser ? 'Jij' : esc(a.n)}</div>
-      <div style="font-size:13px;line-height:1.5;white-space:pre-wrap">${esc(m.content)}</div>
+      ${bodyHtml}
     </div>`;
   }
 
@@ -1598,7 +1693,7 @@
          <div class="empty-s">Bewerk agent-KB per agent via <b>Configuratie → Kennisbank</b>, of maak centrale artikelen aan met <b>+ Artikel</b>.</div></div>`
       : `
       ${centralArts.length > 0 ? `<div style="padding:14px 20px 0"><div style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);margin-bottom:8px">Centrale artikelen (${centralArts.length})</div>
-        ${H.table(
+        ${(() => { window.__agKbCentralArts = centralArts; return H.table(
           [{l:'Onderwerp'}, {l:'Categorie'}, {l:'Wie gebruikt dit', cls:'optional'}, {l:'Bijgewerkt', cls:'r optional'}, {l:'Acties', cls:'r'}],
           centralArts.map((r) => [
             `<div><div class="cell-main">${esc(r.onderwerp)}</div>
@@ -1611,16 +1706,17 @@
             }).join('') || '<span style="color:var(--text-3);font-size:11.5px">nog niet gekoppeld</span>'}</div>`,
             `<span class="mono" style="color:var(--text-3);font-size:12.5px">${fmtDate(r.updated_at)}</span>`,
             `<div style="display:flex;gap:4px;justify-content:flex-end">
-              <button class="icon-btn" title="Promoveren naar agent" style="width:26px;height:26px" onclick="window.__agKbArtPromote('${r.id}')">${svg(I.send, 'width:13px;height:13px')}</button>
-              <button class="icon-btn" title="Bewerken" style="width:26px;height:26px" onclick="window.__agKbArtEdit('${r.id}')">${svg(I.edit || I.settings, 'width:13px;height:13px')}</button>
-              <button class="icon-btn" title="Verwijderen" style="width:26px;height:26px" onclick="window.__agKbArtDelete('${r.id}')">${svg(I.trash || I.x, 'width:13px;height:13px')}</button>
+              <button class="icon-btn" title="Promoveren naar agent" style="width:26px;height:26px" onclick="event.stopPropagation();window.__agKbArtPromote('${r.id}')">${svg(I.send, 'width:13px;height:13px')}</button>
+              <button class="icon-btn" title="Bewerken" style="width:26px;height:26px" onclick="event.stopPropagation();window.__agKbArtEdit('${r.id}')">${svg(I.edit || I.settings, 'width:13px;height:13px')}</button>
+              <button class="icon-btn" title="Verwijderen" style="width:26px;height:26px" onclick="event.stopPropagation();window.__agKbArtDelete('${r.id}')">${svg(I.trash || I.x, 'width:13px;height:13px')}</button>
             </div>`,
-          ])
-        )}
+          ]),
+          'window.__agKbCentralRowClick'
+        ); })()}
       </div>` : ''}
 
       ${all.length > 0 ? `<div style="padding:14px 20px 0"><div style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);margin-bottom:8px">Agent-kennisbank (${all.length})</div>
-        ${H.table(
+        ${(() => { window.__agKbAllArts = all; return H.table(
           [{l:'Onderwerp'}, {l:'Categorie'}, {l:'Wie gebruikt dit', cls:'optional'}, {l:'Bijgewerkt', cls:'r optional'}],
           all.map((r) => [
             `<div><div class="cell-main">${esc(r.onderwerp)}</div>
@@ -1632,8 +1728,9 @@
                 <span style="width:6px;height:6px;border-radius:50%;background:var(--${ag ? ag.c : 'slate'});display:inline-block;margin-right:4px"></span>${esc(w)}</span>`;
             }).join('')}</div>`,
             `<span class="mono" style="color:var(--text-3);font-size:12.5px">${fmtDate(r.updated)}</span>`,
-          ])
-        )}
+          ]),
+          'window.__agKbAllRowClick'
+        ); })()}
       </div>` : ''}
     `}
 
@@ -1681,7 +1778,10 @@
     const m = _ui.artModal; if (!m) return '';
     const isEdit = m.mode === 'edit';
     const it = m.item || {};
-    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px" onclick="window.__agArtClose()">
+    // Portal-anchor: unique id + class. Wordt door _agEnsurePortal() naar
+    // document.body verplaatst zodat een 'overflow:hidden' of 'transform' op
+    // een ancestor van #content geen containing-block breekt op position:fixed.
+    return `<div data-portal-id="agv-artmodal" class="agv-portal" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="window.__agArtClose()">
       <div style="background:var(--surface);border-radius:var(--r-lg);max-width:640px;width:100%;max-height:88vh;overflow:auto;padding:22px" onclick="event.stopPropagation()">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
           <span class="tile-ico" style="background:var(--blue-soft);color:var(--blue)">${svg(I.book || I.doc)}</span>
@@ -1725,17 +1825,89 @@
       </div>
     </div>`;
   }
+  // Portal-helper: verplaatst modal-node uit #content naar document.body zodat
+  // het niet geclipd wordt door een overflow/transform-parent. Idempotent.
+  // Runs na DFO.render() via requestAnimationFrame (DOM is dan al geswapped).
+  function _agEnsurePortal(portalId) {
+    if (typeof requestAnimationFrame === 'undefined') return;
+    requestAnimationFrame(() => {
+      // Verwijder eerst eventuele orphan-instances van deze portalId uit body
+      // (stale bij snelle re-open na close zonder tussentijdse render).
+      const orphans = document.body.querySelectorAll('body > [data-portal-id="' + portalId + '"]');
+      orphans.forEach((n) => {
+        // Als er nu géén nieuwe instance in #content zit (modal is dicht) → drop 'em.
+        const inContent = document.querySelector('#content [data-portal-id="' + portalId + '"]');
+        if (!inContent) n.remove();
+      });
+      const el = document.querySelector('#content [data-portal-id="' + portalId + '"]');
+      if (!el) return;
+      // Verplaats naar body zodat position:fixed viewport-relatief blijft.
+      document.body.appendChild(el);
+    });
+  }
+  function _agRemovePortal(portalId) {
+    // SYNCHROON verwijderen — was via rAF, waardoor de backdrop nog ~16ms bleef
+    // hangen na close. De "eerstvolgende klik" landde dan op die stale backdrop
+    // ipv de UI eronder -> klik geslikt. Zelfde fix als Events commit 5c6970e3.
+    try {
+      document.body.querySelectorAll('body > [data-portal-id="' + portalId + '"]').forEach((n) => n.remove());
+    } catch (_) { /* geen DOM (SSR/tests) */ }
+  }
   window.__agArtOpenNew = () => {
     _ui.artModal = { mode: 'create', item: { onderwerp: '', categorie: 'FAQ', content: '', agents: [] } };
     if (window.DFO?.render) window.DFO.render();
+    _agEnsurePortal('agv-artmodal');
   };
   window.__agKbArtEdit = (id) => {
     const it = asArr(_live.kbArt.data).find((x) => x.id === id);
     if (!it) return;
     _ui.artModal = { mode: 'edit', item: { ...it } };
     if (window.DFO?.render) window.DFO.render();
+    _agEnsurePortal('agv-artmodal');
   };
-  window.__agArtClose = () => { _ui.artModal = null; if (window.DFO?.render) window.DFO.render(); };
+  // Bug 1: rij-klik-handlers voor kennisbank-tabellen (H.table verwacht een
+  // function-naam die met (rowIdx) wordt aangeroepen). Central rijen openen
+  // de bewerk-modal. Agent-KB rijen navigeren naar de eerste bijbehorende
+  // agent's Configuratie → Kennisbank (geen aparte bewerk-modal voor
+  // agent-KB items — dat gebeurt inline op agent-config).
+  window.__agKbCentralRowClick = (i) => {
+    const arr = window.__agKbCentralArts || [];
+    const it = arr[i]; if (!it) return;
+    window.__agKbArtEdit(it.id);
+  };
+  // Bug: agent-KB rij-klik → opende alleen tab-nav via DFO.setTab (die bestaat
+  // NIET; alleen DFO.goTab is echt). Nu: open direct de bewerk-modal met de
+  // rij als item. Portal-route _agEnsurePortal zorgt dat de modal ook echt
+  // zichtbaar wordt (net als bij centrale artikelen). Agents-veld normaliseren:
+  // rij levert 'agents' als namen-array; modal-checkbox-render matcht op ids.
+  window.__agKbAllRowClick = (i) => {
+    const arr = window.__agKbAllArts || [];
+    const it = arr[i]; if (!it) return;
+    // Zet in de bewerk-modal. `agents`-veld normaliseren naar ids zodat de
+    // checkbox-render matcht (${on ? checked : ''} op x.id === k).
+    const agentIds = (Array.isArray(it.agents) ? it.agents : []).map((n) => {
+      const ag = AGENTS_STATIC.find((x) => x.n === n || x.id === n);
+      return ag ? ag.id : n;
+    });
+    _ui.artModal = {
+      mode: 'edit',
+      item: {
+        onderwerp: it.onderwerp || '',
+        categorie: it.categorie || '',
+        content:   it.content   || '',
+        agents:    agentIds,
+        // Agent-KB items zitten niet in kennisbank_artikelen tabel — geen id.
+        // De save-flow gaat via een andere route (agent-config). Voor nu:
+        // mode='edit-agent-kb' zodat _artikelModal read-only kan tonen als
+        // toekomstige uitbreiding; save-endpoint faalt netjes voor items
+        // zonder id (agent-KB is inline-editable op agent-config-pagina).
+      },
+      agentKbSource: true,
+    };
+    if (window.DFO?.render) window.DFO.render();
+    _agEnsurePortal('agv-artmodal');
+  };
+  window.__agArtClose = () => { _ui.artModal = null; _agRemovePortal('agv-artmodal'); if (window.DFO?.render) window.DFO.render(); };
   window.__agArtSave = async () => {
     const m = _ui.artModal; if (!m) return;
     const onderwerp = (document.getElementById('art_onderwerp')?.value || '').trim();
@@ -1890,6 +2062,20 @@
       const zelf = msg ? Math.max(0, Math.round(100 * (1 - hnd / msg))) + '%' : '—';
       const cls = msg && hnd / Math.max(1, msg) < 0.15 ? 'ok' : (hnd / Math.max(1, msg) < 0.35 ? 'warn' : 'danger');
       perAgentRows.push({ ag: lisaAg, msg, zelf, hnd, res: fmtNum(lisa.call_booked) + ' calls', cls, rt: rt.lisa || null });
+    }
+    // Bug 3: Aisha (leadsonderhoud, uit berichten_log) + AI Manager (geen metriek → toon —).
+    const aishaAg = AGENTS_STATIC.find((a) => a.id === 'aisha');
+    if (aishaAg) {
+      const aisha = prest.aisha || {};
+      const msg = Number(aisha.messages_today || 0);
+      const errs = Number(aisha.errors_week || 0);
+      const zelf = msg ? Math.max(0, Math.round(100 * (1 - errs / Math.max(1, msg)))) + '%' : '—';
+      const cls = msg && errs / Math.max(1, msg) < 0.05 ? 'ok' : (errs / Math.max(1, msg) < 0.15 ? 'warn' : 'danger');
+      perAgentRows.push({ ag: aishaAg, msg, zelf, hnd: errs, res: errs ? fmtNum(errs) + ' fouten (7d)' : 'geen fouten', cls, rt: rt.aisha || null });
+    }
+    const managerAg = AGENTS_STATIC.find((a) => a.id === 'manager' || a.n === 'AI Manager' || /manager/i.test(a.n || ''));
+    if (managerAg) {
+      perAgentRows.push({ ag: managerAg, msg: '—', zelf: '—', hnd: '—', res: 'geen metriek', cls: 'neutral', rt: null, _placeholder: true });
     }
 
     return `${H.kpis([
