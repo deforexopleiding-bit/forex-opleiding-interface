@@ -112,6 +112,12 @@
     notes:       { loading: {}, error: {}, data: {} },        // per lead_id
     retention:   { loading: {}, error: {}, data: {} },        // per customer_id
     badge:       { loading: false, data: null, ts: 0 },
+    // BROK 2
+    appts:       { loading: false, error: null, data: null, key: null },  // afspraken-list (per period)
+    apptDetail:  { loading: {}, error: {}, data: {} },        // per appointment_id — {appointment, outcome, lead_history, customer_context}
+    kalender:    { loading: false, error: null, data: null },  // 30-day forward window
+    retenties:   { loading: false, error: null, data: null, key: null, migrationRequired: false },
+    sluimerpot:  { loading: false, error: null, data: null },  // gebruikt leads-list?view=snoozed
   };
   const _ui = {
     view:            'open',            // buckets-slug (open/vandaag/te_laat/komende_7/snoozed/alle)
@@ -130,6 +136,13 @@
     outcomeBusy:     {},
     updateBusy:      {},
     toast:           null,               // { msg, tone, ts }
+    // BROK 2
+    apptPeriod:      'today',            // Afspraken period-filter
+    apptDetailId:    null,               // open appointment-detail-modal
+    apptOutcomeModal: null,              // { appointmentId, outcome, terugbelDatum, leadKind, snoozeMonths, newDatetime, duration, reden, saving, error }
+    retentieReden:   'all',              // Retenties filter
+    retentiePickBusy: {},                // per customer_id
+    sluimerBusy:     {},                 // per lead_id (wake-up)
   };
 
   // ── Helpers ─────────────────────────────────────────────────────────
@@ -243,6 +256,140 @@
     st.loading[customerId] = false;
     if (j && j.__error) st.error[customerId] = j.__error;
     else st.data[customerId] = j || {};
+    if (render) render();
+  }
+  // ── BROK 2 fetchers ─────────────────────────────────────────────────
+  async function fetchAppointments() {
+    const st = _live.appts;
+    const key = _ui.apptPeriod;
+    if (st.loading) return;
+    if (st.data && st.key === key) return;
+    st.loading = true; st.error = null; st.key = key;
+    const j = await tryFetch('appts:' + key, '/api/follow-up-appointments?period=' + encodeURIComponent(key));
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { appointments: asArr(j?.appointments), count: Number(j?.count || 0), period: j?.period };
+    if (render) render();
+  }
+  async function fetchAppointmentDetail(id) {
+    if (!id) return;
+    const st = _live.apptDetail;
+    if (st.loading[id] || st.data[id]) return;
+    st.loading[id] = true; st.error[id] = null;
+    const j = await tryFetch('appt-detail:' + id, '/api/follow-up-appointment-detail?id=' + encodeURIComponent(id));
+    st.loading[id] = false;
+    if (j && j.__error) st.error[id] = j.__error;
+    else st.data[id] = j || null;
+    if (render) render();
+  }
+  async function fetchKalender() {
+    const st = _live.kalender;
+    if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('alle-komende', '/api/follow-up-alle-komende');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { appointments: asArr(j?.appointments), count: Number(j?.count || 0) };
+    if (render) render();
+  }
+  async function fetchRetenties() {
+    const st = _live.retenties;
+    const key = _ui.retentieReden;
+    if (st.loading) return;
+    if (st.data && st.key === key) return;
+    st.loading = true; st.error = null; st.key = key; st.migrationRequired = false;
+    const params = [];
+    if (_ui.retentieReden && _ui.retentieReden !== 'all') params.push('reden=' + encodeURIComponent(_ui.retentieReden));
+    const url = '/api/follow-up-oude-retenties' + (params.length ? '?' + params.join('&') : '');
+    const j = await tryFetch('retenties', url);
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else if (j?.code === 'MIGRATION_REQUIRED') st.migrationRequired = true;
+    else st.data = { items: asArr(j?.items), counts: j?.counts || {} };
+    if (render) render();
+  }
+  async function fetchSluimerpot() {
+    const st = _live.sluimerpot;
+    if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    // Hergebruik leads-list met view=snoozed. Aparte state zodat we niet met
+    // de Werklijst-cache botsen.
+    const j = await tryFetch('sluimerpot', '/api/follow-up-leads-list?worklist=1&view=snoozed&limit=1000');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { leads: asArr(j?.leads), counts: j?.counts || {} };
+    if (render) render();
+  }
+  // ── BROK 2 write-handlers ───────────────────────────────────────────
+  async function submitApptOutcome() {
+    const m = _ui.apptOutcomeModal;
+    if (!m || m.saving) return;
+    if (!m.outcome) { m.error = 'Kies uitkomst'; if (render) render(); return; }
+    const body = { appointment_id: m.appointmentId, outcome: m.outcome };
+    if (m.outcome === 'terugbel') {
+      if (!m.terugbelDatum) { m.error = 'Terugbel-datum verplicht'; if (render) render(); return; }
+      body.terugbel_datum = new Date(m.terugbelDatum).toISOString();
+      body.lead_kind = m.leadKind || 'bel';
+    }
+    if (m.outcome === 'later_opnieuw') body.snooze_months = Number(m.snoozeMonths || 3);
+    if (m.outcome === 'verzetten') {
+      if (!m.newDatetime) { m.error = 'Nieuwe datum verplicht'; if (render) render(); return; }
+      body.new_datetime = m.newDatetime;
+      body.duration_minutes = Number(m.duration || 30);
+    }
+    if (m.outcome === 'annuleren') body.reden = m.reden || null;
+    m.saving = true; m.error = null; if (render) render();
+    const j = await tryFetch('appt-outcome', '/api/follow-up-appointment-outcome', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }, 15000);
+    m.saving = false;
+    if (j && (j.__error || j.error || !j.ok)) {
+      m.error = j.__error || j.error || 'Opslaan mislukt';
+      if (j?.code === 'IRREVERSIBLE') m.error += ' (onomkeerbaar — geen undo)';
+      if (render) render();
+      return;
+    }
+    _ui.apptOutcomeModal = null;
+    _live.appts.data = null; _live.appts.key = null;
+    _live.leadsList.data = null; _live.leadsList.key = null;
+    if (j?.delegated) showToast('Gedelegeerd naar ' + j.delegated + '-endpoint · afspraak bijgewerkt', 'success');
+    else showToast('Uitkomst opgeslagen', 'success');
+    if (Array.isArray(j?.warnings) && j.warnings.length) console.warn('[followup-v2] appt-outcome warnings:', j.warnings);
+    if (render) render();
+  }
+  async function submitRetentiePickup(customerId, endDate, subStatus) {
+    if (!customerId || _ui.retentiePickBusy[customerId]) return;
+    _ui.retentiePickBusy[customerId] = true; if (render) render();
+    const j = await tryFetch('retentie-pickup', '/api/follow-up-oude-retenties', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'pickup', customer_id: customerId, end_date: endDate || null, last_sub_status: subStatus || null }),
+    }, 10000);
+    _ui.retentiePickBusy[customerId] = false;
+    if (j && (j.__error || j.error || !j.ok)) {
+      showToast('Pickup mislukt: ' + (j.__error || j.error || 'onbekend'), 'warn');
+      if (render) render(); return;
+    }
+    _live.retenties.data = null; _live.retenties.key = null;
+    _live.leadsList.data = null; _live.leadsList.key = null;
+    showToast(j.already ? 'Al opgepakt — terugbel-datum ververst' : 'Retentie opgepakt · lead aangemaakt', 'success');
+    if (render) render();
+  }
+  async function submitSluimerWakeUp(leadId) {
+    if (!leadId || _ui.sluimerBusy[leadId]) return;
+    _ui.sluimerBusy[leadId] = true; if (render) render();
+    // Wake-up: zet lead-status naar 'terugbellen' + terugbel_datum=nu. Backend
+    // clear'et snoozed_until niet automatisch — dat gebeurt bij eerste outcome.
+    // Voor nu is dit voldoende om 'em uit sluimerpot te halen bij volgende fetch.
+    const j = await tryFetch('sluimer-wake', '/api/follow-up-lead-update', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lead_id: leadId, lead_status: 'terugbellen', terugbel_datum: new Date().toISOString() }),
+    }, 8000);
+    _ui.sluimerBusy[leadId] = false;
+    if (j && (j.__error || j.error)) { showToast('Wake-up mislukt: ' + (j.__error || j.error), 'warn'); if (render) render(); return; }
+    _live.sluimerpot.data = null;
+    _live.leadsList.data = null; _live.leadsList.key = null;
+    showToast('Lead is wakker · terugbel-datum = nu', 'success');
     if (render) render();
   }
 
@@ -496,6 +643,52 @@
   };
   window.__fuConfirmOk = () => { const c = _ui.confirmModal; _ui.confirmModal = null; if (render) render(); try { if (c && typeof c.onOk === 'function') c.onOk(); } catch (e) { console.warn('[followup-v2] confirm onOk fail', e); } };
   window.__fuConfirmCancel = () => { _ui.confirmModal = null; if (render) render(); };
+  // ── BROK 2 handlers ─────────────────────────────────────────────────
+  window.__fuApptPeriod = (p) => { _ui.apptPeriod = p; _live.appts.data = null; _live.appts.key = null; if (render) render(); };
+  window.__fuApptOpen = (id) => { _ui.apptDetailId = id; if (render) render(); };
+  window.__fuApptClose = () => { _ui.apptDetailId = null; if (render) render(); };
+  window.__fuApptOutcomeOpen = (id) => {
+    _ui.apptOutcomeModal = { appointmentId: id, outcome: null, terugbelDatum: '', leadKind: 'bel', snoozeMonths: 3, newDatetime: '', duration: 30, reden: '', saving: false, error: null };
+    if (render) render();
+  };
+  window.__fuApptOutcomeClose = () => { _ui.apptOutcomeModal = null; if (render) render(); };
+  window.__fuApptOutcomeSet = (v) => {
+    if (!_ui.apptOutcomeModal) return;
+    _ui.apptOutcomeModal.outcome = v; _ui.apptOutcomeModal.error = null;
+    if (v === 'terugbel' && !_ui.apptOutcomeModal.terugbelDatum) {
+      const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(10, 0, 0, 0);
+      _ui.apptOutcomeModal.terugbelDatum = inputForDatetimeLocal(d.toISOString());
+    }
+    if (render) render();
+  };
+  window.__fuApptOutcomeField = (k, v) => { if (_ui.apptOutcomeModal) { _ui.apptOutcomeModal[k] = v; if (render) render(); } };
+  const APPT_RISK_OUTCOMES = new Set(['sale','no_show','gesprek_gehad','wilt_niet_meer','niet_geschikt','later_opnieuw','terugbel','verzetten','annuleren']);
+  window.__fuApptOutcomeSave = () => {
+    const m = _ui.apptOutcomeModal; if (!m || !m.outcome) return;
+    if (APPT_RISK_OUTCOMES.has(m.outcome)) {
+      const risk = {
+        sale: 'Afspraak → completed, GHL → showed, Zoom-link wordt verwijderd.',
+        gesprek_gehad: 'Afspraak → completed, GHL → showed, Zoom-link wordt verwijderd.',
+        wilt_niet_meer: 'Afspraak → cancelled, GHL → showed, Zoom-link wordt verwijderd.',
+        niet_geschikt: 'Afspraak → cancelled, GHL → showed, Zoom-link wordt verwijderd.',
+        no_show: 'Afspraak → no_show, GHL → noshow, nieuwe follow-up-lead met terugbel +2u.',
+        later_opnieuw: 'Afspraak → completed, GHL → showed, nieuwe snoozed lead.',
+        terugbel: 'Afspraak → completed, GHL → showed, nieuwe lead met terugbel-datum.',
+        verzetten: 'Gedelegeerd naar verplaats-call. GHL wordt bijgewerkt (blocking).',
+        annuleren: 'Gedelegeerd naar annuleer. GHL wordt bijgewerkt (blocking); Zoom NIET verwijderd.',
+      }[m.outcome];
+      openConfirm((risk || 'Klant-zichtbaar effect') + ' Weet je zeker dat je "' + m.outcome + '" wilt registreren?', submitApptOutcome, 'warn');
+    } else {
+      submitApptOutcome();
+    }
+  };
+  window.__fuKalenderRefresh = () => { _live.kalender.data = null; if (render) render(); };
+  window.__fuRetentieReden = (v) => { _ui.retentieReden = v; _live.retenties.data = null; _live.retenties.key = null; if (render) render(); };
+  window.__fuRetentiePickup = (customerId, endDate, subStatus) => submitRetentiePickup(customerId, endDate, subStatus);
+  window.__fuSluimerWake = (leadId) => {
+    openConfirm('Deze lead uit sluimerpot halen? Terugbel-datum wordt gezet op nu, status → terugbellen.', () => submitSluimerWakeUp(leadId), 'warn');
+  };
+  window.__fuSluimerRefresh = () => { _live.sluimerpot.data = null; if (render) render(); };
 
   // ═══════════════════════════════════════════════════════════════════════
   // RENDER HELPERS
@@ -953,25 +1146,351 @@
     </div>`;
   }
   const eventBellijstView = () => stubView('Event-bellijst', '4', ['follow-up-event-bellijst', 'follow-up-attendee-info']);
-  const retentiesView     = () => stubView('Retenties (oude-retenties)', '2', ['follow-up-oude-retenties', 'follow-up-lead-retention-context']);
-  const afsprakenView     = () => stubView('Afspraken + Kalender', '2', ['follow-up-appointments', 'follow-up-appointment-detail', 'follow-up-appointment-outcome', 'follow-up-kalender', 'follow-up-alle-komende']);
-  const sluimerpotView    = () => stubView('Sluimerpot', '2', ['follow-up-opvolging-status']);
   const statistiekenView  = () => stubView('Statistieken / Dashboard', '4', ['follow-up-cockpit-dashboard', 'follow-up-cockpit-agenda', 'follow-up-dashboard-metrics', 'follow-up-metrics']);
   const afgeboektView     = () => stubView('Afgeboekt + Archief', '3', ['follow-up-afgeboekt', 'follow-up-archief']);
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // BROK 2 — AFSPRAKEN (list + detail-modal + outcome-modal)
+  // ═══════════════════════════════════════════════════════════════════════
+  const APPT_PERIODS = [
+    { v: 'today',              l: 'Vandaag' },
+    { v: 'morgen',             l: 'Morgen' },
+    { v: 'week',               l: 'Deze week' },
+    { v: 'past_week',          l: 'Voorbije week' },
+    { v: 'wacht_op_reschedule',l: 'Wacht op reschedule' },
+    { v: 'recent_completed',   l: 'Recent afgerond' },
+    { v: 'open_acties',        l: 'Open acties' },
+  ];
+  const APPT_STATUS_META = {
+    scheduled:              { c: 'blue',    l: 'Ingepland' },
+    in_progress:            { c: 'violet',  l: 'Bezig' },
+    completed:              { c: 'emerald', l: 'Afgerond' },
+    no_show:                { c: 'rose',    l: 'No-show' },
+    cancelled:              { c: 'slate',   l: 'Geannuleerd' },
+    verplaatst:             { c: 'amber',   l: 'Verplaatst' },
+    wacht_op_reschedule:    { c: 'amber',   l: 'Wacht reschedule' },
+    verwijderd:             { c: 'slate',   l: 'Verwijderd' },
+  };
+  function _apptStatusPill(s) {
+    const m = APPT_STATUS_META[s] || { c: 'neutral', l: s || '—' };
+    return H.pill(m.c, m.l);
+  }
+  function afsprakenView() {
+    const st = _live.appts;
+    if (!st.loading && (!st.data || st.key !== _ui.apptPeriod)) queueMicrotask(fetchAppointments);
+    return `<div style="padding:14px 20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+        <h2 style="font-size:16px;font-weight:600;margin:0">Afspraken</h2>
+        <button class="icon-btn" onclick="window.__fuRefresh()" title="Vernieuw" style="width:28px;height:28px">↻</button>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">
+        ${APPT_PERIODS.map((p) => {
+          const on = _ui.apptPeriod === p.v;
+          return `<button class="chip ${on ? 'on' : ''}" style="padding:5px 12px;border:1px solid ${on ? 'var(--m)' : 'var(--border)'};background:${on ? 'var(--m-soft)' : 'transparent'};color:${on ? 'var(--m)' : 'var(--text-2)'};border-radius:20px;font-size:12px;font-weight:${on ? '600' : '400'};cursor:pointer" onclick="window.__fuApptPeriod('${p.v}')">${esc(p.l)}</button>`;
+        }).join('')}
+      </div>
+      ${st.error && !st.data ? errBlk(st.error, 'window.__fuRefresh()') :
+        st.loading && !st.data ? skel() :
+        !st.data ? skel() :
+        _renderAppointmentList(st.data.appointments)}
+      ${_apptDetailModal()}
+      ${_apptOutcomeModalRender()}
+      ${_renderModals()}
+      ${_renderToast()}
+    </div>`;
+  }
+  function _renderAppointmentList(appts) {
+    if (!appts || appts.length === 0) return `<div style="padding:40px 20px;text-align:center;color:var(--text-3)">Geen afspraken in deze weergave.</div>`;
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      ${appts.map((a, i) => `
+        <div style="padding:12px 16px;display:grid;grid-template-columns:auto 1fr auto auto auto;gap:12px;align-items:center;${i < appts.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--text-3);white-space:nowrap">${fmtDate(a.scheduled_at)}</span>
+          <div style="min-width:0">
+            <div style="font-size:13.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(a.lead_name) || '—')}</div>
+            <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(a.lead_email) || safeStr(a.lead_phone) || '—')}${a.duration_minutes ? ` · ${a.duration_minutes} min` : ''}</div>
+          </div>
+          ${_apptStatusPill(a.status)}
+          ${a.zoom_join_url ? `<a href="${esc(a.zoom_join_url)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Zoom →</a>` : `<span></span>`}
+          <div style="display:flex;gap:4px">
+            <button class="btn btn-ghost btn-sm" onclick="window.__fuApptOpen('${esc(a.id)}')">Detail</button>
+            <button class="btn btn-primary btn-sm" onclick="window.__fuApptOutcomeOpen('${esc(a.id)}')">Uitkomst</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>`;
+  }
+  function _apptDetailModal() {
+    const id = _ui.apptDetailId;
+    if (!id) return '';
+    if (!_live.apptDetail.data[id] && !_live.apptDetail.loading[id]) queueMicrotask(() => fetchAppointmentDetail(id));
+    const d = _live.apptDetail.data[id];
+    const err = _live.apptDetail.error[id];
+    const body = err ? errBlk(err) : !d ? skel() : `
+      <div style="display:flex;flex-direction:column;gap:14px">
+        ${d.appointment ? `<div style="padding:12px 14px;background:var(--surface-2);border-radius:8px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:6px">${esc(safeStr(d.appointment.lead_name) || '—')}</div>
+          <div style="font-size:12px;color:var(--text-3);display:grid;grid-template-columns:1fr 1fr;gap:4px 16px">
+            <div><b>Wanneer:</b> ${fmtDate(d.appointment.scheduled_at)}</div>
+            <div><b>Status:</b> ${_apptStatusPill(d.appointment.status)}</div>
+            <div><b>E-mail:</b> ${esc(safeStr(d.appointment.lead_email) || '—')}</div>
+            <div><b>Telefoon:</b> ${esc(safeStr(d.appointment.lead_phone) || '—')}</div>
+            <div><b>Duur:</b> ${d.appointment.duration_minutes || 30} min</div>
+            <div><b>Voicememo:</b> ${esc(d.appointment.voicememo_status || '—')}</div>
+          </div>
+        </div>` : ''}
+        ${d.appointment?.snelle_notitie ? `<div style="padding:10px 12px;background:var(--amber-soft);border-radius:6px;font-size:12.5px;line-height:1.5"><b>Snelle notitie:</b> ${esc(d.appointment.snelle_notitie)}</div>` : ''}
+        ${d.customer_context ? `<div style="padding:12px 14px;background:var(--surface-2);border-radius:8px">
+          <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Klant-context</div>
+          <div style="font-size:12px;display:grid;grid-template-columns:1fr 1fr;gap:4px 16px">
+            <div><b>Naam:</b> ${esc(safeStr(d.customer_context.name) || '—')}</div>
+            <div><b>Mentor:</b> ${esc(safeStr(d.customer_context.mentor_name) || '—')}</div>
+            <div><b>E-mail:</b> ${esc(safeStr(d.customer_context.email) || '—')}</div>
+            <div><b>Bedrijf:</b> ${esc(safeStr(d.customer_context.company_name) || '—')}</div>
+            <div><b>Verlengt niet:</b> ${d.customer_context.retention_not_renewing ? 'ja' : 'nee'}</div>
+          </div>
+        </div>` : ''}
+        ${d.outcome ? `<div style="padding:12px 14px;background:var(--emerald-soft);border-radius:8px;font-size:12.5px">
+          <b>Uitkomst geregistreerd:</b> ${esc(safeStr(d.outcome.outcome) || '—')} · ${fmtDate(d.outcome.created_at)}
+        </div>` : ''}
+        ${Array.isArray(d.lead_history) && d.lead_history.length > 0 ? `<div>
+          <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Historie (${d.lead_history.length})</div>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            ${d.lead_history.map((h) => `<div style="padding:6px 10px;background:var(--surface-2);border-radius:4px;font-size:12px;display:flex;justify-content:space-between;gap:8px"><span>${fmtDate(h.scheduled_at)}</span>${_apptStatusPill(h.status)}<span style="color:var(--text-3)">${esc(safeStr(h.voicememo_status) || '')}</span></div>`).join('')}
+          </div>
+        </div>` : ''}
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn btn-ghost" onclick="window.__fuApptClose()">Sluiten</button>
+          <button class="btn btn-primary" onclick="window.__fuApptClose();window.__fuApptOutcomeOpen('${esc(id)}')">Uitkomst registreren →</button>
+        </div>
+      </div>`;
+    return _modalShell('Afspraak-detail', body, 'window.__fuApptClose()');
+  }
+  const APPT_OUTCOMES = [
+    { v: 'gesprek_gehad',  l: 'Gesprek gehad',  c: 'emerald' },
+    { v: 'sale',           l: '✅ Verkocht',    c: 'emerald' },
+    { v: 'wilt_niet_meer', l: 'Wil niet meer',  c: 'rose' },
+    { v: 'niet_geschikt',  l: 'Niet geschikt',  c: 'rose' },
+    { v: 'no_show',        l: 'No-show',        c: 'rose' },
+    { v: 'later_opnieuw',  l: '💤 Later opnieuw', c: 'blue' },
+    { v: 'terugbel',       l: 'Terugbellen',    c: 'amber' },
+    { v: 'verzetten',      l: '↔ Verplaatsen',  c: 'amber' },
+    { v: 'annuleren',      l: '✕ Annuleren',    c: 'rose' },
+  ];
+  function _apptOutcomeModalRender() {
+    const m = _ui.apptOutcomeModal;
+    if (!m) return '';
+    const meta = APPT_OUTCOMES.find((o) => o.v === m.outcome);
+    const body = `
+      <div style="padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:14px">
+        ⚠ <b>Test-data eerst!</b> Deze acties raken GHL-agenda, Zoom, en kunnen follow-up-leads aanmaken. Verifieer preview-guard voor je op productie test.
+      </div>
+      <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Uitkomst</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin-bottom:14px">
+        ${APPT_OUTCOMES.map((o) => {
+          const on = m.outcome === o.v;
+          return `<button style="padding:8px 10px;border:1px solid ${on ? `var(--${o.c})` : 'var(--border)'};background:${on ? `var(--${o.c}-soft)` : 'transparent'};color:${on ? `var(--${o.c})` : 'var(--text-2)'};border-radius:6px;font-size:12px;font-weight:${on ? '600' : '400'};cursor:pointer;text-align:left" onclick="window.__fuApptOutcomeSet('${o.v}')">${esc(o.l)}</button>`;
+        }).join('')}
+      </div>
+      ${m.outcome === 'terugbel' ? `
+        <label style="display:block;margin-bottom:14px"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Terugbel datum & tijd</span>
+          <input type="datetime-local" value="${esc(m.terugbelDatum)}" oninput="window.__fuApptOutcomeField('terugbelDatum', this.value)" style="display:block;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
+        </label>
+        <label style="display:block;margin-bottom:14px"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Kind</span>
+          <select onchange="window.__fuApptOutcomeField('leadKind', this.value)" style="display:block;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px">
+            <option value="bel" ${m.leadKind === 'bel' ? 'selected' : ''}>Call</option>
+            <option value="zoom" ${m.leadKind === 'zoom' ? 'selected' : ''}>Zoom</option>
+          </select>
+        </label>` : ''}
+      ${m.outcome === 'later_opnieuw' ? `
+        <label style="display:block;margin-bottom:14px"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Snooze duur (maanden)</span>
+          <input type="number" min="1" max="24" step="1" value="${esc(m.snoozeMonths)}" oninput="window.__fuApptOutcomeField('snoozeMonths', Number(this.value))" style="display:block;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
+        </label>` : ''}
+      ${m.outcome === 'verzetten' ? `
+        <label style="display:block;margin-bottom:8px"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Nieuwe datum & tijd</span>
+          <input type="datetime-local" value="${esc(m.newDatetime)}" oninput="window.__fuApptOutcomeField('newDatetime', this.value)" style="display:block;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
+        </label>
+        <label style="display:block;margin-bottom:14px"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Duur (min)</span>
+          <input type="number" min="10" max="180" step="15" value="${esc(m.duration)}" oninput="window.__fuApptOutcomeField('duration', Number(this.value))" style="display:block;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
+        </label>` : ''}
+      ${m.outcome === 'annuleren' ? `
+        <label style="display:block;margin-bottom:14px"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Reden</span>
+          <textarea oninput="window.__fuApptOutcomeField('reden', this.value)" style="display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:inherit;min-height:60px;resize:vertical">${esc(m.reden)}</textarea>
+        </label>` : ''}
+      ${m.error ? `<div style="padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:12px">${esc(m.error)}</div>` : ''}
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-ghost" onclick="window.__fuApptOutcomeClose()">Annuleren</button>
+        <button class="btn btn-primary" ${(!m.outcome || m.saving) ? 'disabled' : ''} onclick="window.__fuApptOutcomeSave()">${m.saving ? 'Opslaan…' : 'Opslaan'}</button>
+      </div>`;
+    return _modalShell('Afspraak-uitkomst registreren', body, 'window.__fuApptOutcomeClose()');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // BROK 2 — KALENDER (chronologische day-grouped agenda voor komende afspraken)
+  // ═══════════════════════════════════════════════════════════════════════
+  function kalenderView() {
+    const st = _live.kalender;
+    if (!st.loading && !st.data) queueMicrotask(fetchKalender);
+    const body = st.error && !st.data ? errBlk(st.error, 'window.__fuKalenderRefresh()')
+      : (st.loading && !st.data) ? skel()
+      : !st.data ? skel()
+      : _renderKalenderAgenda(st.data.appointments);
+    return `<div style="padding:14px 20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="font-size:16px;font-weight:600;margin:0">Kalender — komende afspraken</h2>
+        <button class="icon-btn" onclick="window.__fuKalenderRefresh()" title="Vernieuw" style="width:28px;height:28px">↻</button>
+      </div>
+      ${body}
+      ${_apptDetailModal()}
+      ${_apptOutcomeModalRender()}
+      ${_renderModals()}
+      ${_renderToast()}
+    </div>`;
+  }
+  function _renderKalenderAgenda(appts) {
+    if (!appts || appts.length === 0) return `<div style="padding:40px 20px;text-align:center;color:var(--text-3)">Geen afspraken gepland.</div>`;
+    // Group by day (YYYY-MM-DD)
+    const groups = {};
+    for (const a of appts) {
+      const d = a.scheduled_at ? new Date(a.scheduled_at) : null;
+      if (!d || !Number.isFinite(d.getTime())) continue;
+      const key = d.toISOString().slice(0, 10);
+      (groups[key] = groups[key] || []).push(a);
+    }
+    const dayKeys = Object.keys(groups).sort();
+    return dayKeys.map((k) => {
+      const day = new Date(k);
+      const dayLabel = day.toLocaleDateString('nl-NL', { weekday: 'long', day: '2-digit', month: 'long' });
+      return `<div style="margin-bottom:18px">
+        <div style="font-size:12px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">${esc(dayLabel)}</div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+          ${groups[k].map((a, i) => `
+            <div style="padding:10px 14px;display:grid;grid-template-columns:auto 1fr auto auto;gap:12px;align-items:center;${i < groups[k].length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;color:var(--m);white-space:nowrap">${fmtDate(a.scheduled_at, { hour:'2-digit', minute:'2-digit' })}</span>
+              <div style="min-width:0">
+                <div style="font-size:13px;font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(a.lead_name) || '—')}</div>
+                <div style="font-size:11px;color:var(--text-3)">${esc(safeStr(a.lead_email) || safeStr(a.lead_phone) || '—')}</div>
+              </div>
+              ${_apptStatusPill(a.status)}
+              <button class="btn btn-ghost btn-sm" onclick="window.__fuApptOpen('${esc(a.id)}')">Detail</button>
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // BROK 2 — RETENTIES (oude-retenties met pickup-flow)
+  // ═══════════════════════════════════════════════════════════════════════
+  const RETENTIE_FILTERS = [
+    { v: 'all',         l: 'Alles' },
+    { v: 'nieuw',       l: 'Nieuw' },
+    { v: 'opgepakt',    l: 'Opgepakt' },
+    { v: 'afgehandeld', l: 'Afgehandeld' },
+  ];
+  function retentiesView() {
+    const st = _live.retenties;
+    if (!st.loading && (!st.data || st.key !== _ui.retentieReden) && !st.migrationRequired) queueMicrotask(fetchRetenties);
+    const body = st.migrationRequired ? migrationBanner('follow_up_leads-tabel')
+      : (st.error && !st.data) ? errBlk(st.error, 'window.__fuRefresh()')
+      : (st.loading && !st.data) ? skel()
+      : !st.data ? skel()
+      : _renderRetenties(st.data);
+    return `<div style="padding:14px 20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="font-size:16px;font-weight:600;margin:0">Retenties — oude klanten die opgepakt kunnen worden</h2>
+        <button class="icon-btn" onclick="window.__fuRefresh()" title="Vernieuw" style="width:28px;height:28px">↻</button>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">
+        ${RETENTIE_FILTERS.map((f) => {
+          const on = _ui.retentieReden === f.v;
+          const cnt = f.v === 'all' ? (st.data?.counts?.totaal || 0) : (st.data?.counts?.[f.v] || 0);
+          return `<button class="chip ${on ? 'on' : ''}" style="padding:5px 12px;border:1px solid ${on ? 'var(--m)' : 'var(--border)'};background:${on ? 'var(--m-soft)' : 'transparent'};color:${on ? 'var(--m)' : 'var(--text-2)'};border-radius:20px;font-size:12px;font-weight:${on ? '600' : '400'};cursor:pointer" onclick="window.__fuRetentieReden('${f.v}')">${esc(f.l)}${cnt ? ` <span class="mono" style="font-size:10.5px;opacity:.7">${cnt}</span>` : ''}</button>`;
+        }).join('')}
+      </div>
+      ${body}
+      ${_renderModals()}
+      ${_renderToast()}
+    </div>`;
+  }
+  function _renderRetenties(data) {
+    const items = asArr(data.items);
+    if (items.length === 0) return `<div style="padding:40px 20px;text-align:center;color:var(--text-3)">Geen retentie-kandidaten in deze filter.</div>`;
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      ${items.map((it, i) => {
+        const busy = _ui.retentiePickBusy[it.customer_id];
+        const pickup = String(it.pickup_status || 'nieuw');
+        const pickupColor = pickup === 'nieuw' ? 'blue' : pickup === 'opgepakt' ? 'amber' : 'emerald';
+        return `<div style="padding:12px 16px;display:grid;grid-template-columns:1fr auto auto auto;gap:12px;align-items:center;${i < items.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
+          <div style="min-width:0">
+            <div style="font-size:13.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(it.name) || '—')}</div>
+            <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(it.email) || safeStr(it.phone) || '—')}${it.mentor_name ? ` · mentor: ${esc(safeStr(it.mentor_name))}` : ''}${it.last_sub_status ? ` · abo: ${esc(safeStr(it.last_sub_status))}` : ''}</div>
+          </div>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-3);white-space:nowrap">${it.end_date ? `Eind ${fmtDateShort(it.end_date)}` : '—'}</span>
+          ${H.pill(pickupColor, pickup)}
+          ${pickup === 'nieuw'
+            ? `<button class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''} onclick="window.__fuRetentiePickup('${esc(it.customer_id)}','${esc(it.end_date || '')}','${esc(safeStr(it.last_sub_status))}')">${busy ? 'Bezig…' : 'Oppakken'}</button>`
+            : it.lead_id
+              ? `<button class="btn btn-ghost btn-sm" onclick="window.__fuJumpToLead('${esc(it.lead_id)}')">Open lead →</button>`
+              : `<span style="font-size:11px;color:var(--text-3);font-style:italic">geen lead</span>`}
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // BROK 2 — SLUIMERPOT (gesluimerde leads + wake-up)
+  // ═══════════════════════════════════════════════════════════════════════
+  function sluimerpotView() {
+    const st = _live.sluimerpot;
+    if (!st.loading && !st.data) queueMicrotask(fetchSluimerpot);
+    const body = st.error && !st.data ? errBlk(st.error, 'window.__fuSluimerRefresh()')
+      : (st.loading && !st.data) ? skel()
+      : !st.data ? skel()
+      : _renderSluimerpot(st.data);
+    return `<div style="padding:14px 20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="font-size:16px;font-weight:600;margin:0">Sluimerpot — gesnoozde leads</h2>
+        <button class="icon-btn" onclick="window.__fuSluimerRefresh()" title="Vernieuw" style="width:28px;height:28px">↻</button>
+      </div>
+      ${body}
+      ${_renderModals()}
+      ${_renderToast()}
+    </div>`;
+  }
+  function _renderSluimerpot(data) {
+    const leads = asArr(data.leads);
+    if (leads.length === 0) return `<div style="padding:40px 20px;text-align:center;color:var(--text-3)">🎉 Sluimerpot is leeg — geen gesnoozde leads.</div>`;
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      ${leads.map((l, i) => {
+        const busy = _ui.sluimerBusy[l.id];
+        return `<div style="padding:12px 16px;display:grid;grid-template-columns:1fr auto auto auto;gap:12px;align-items:center;${i < leads.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
+          <div style="min-width:0">
+            <div style="font-size:13.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(l.lead_name) || l.lead_email || l.lead_phone || '—')}</div>
+            <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(l.lead_email) || safeStr(l.lead_phone) || '—')}${l.last_outcome ? ` · laatste: ${esc(OUTCOME_LABEL[l.last_outcome] || l.last_outcome)}` : ''}</div>
+          </div>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-3);white-space:nowrap">${l.snoozed_until ? `Tot ${fmtDateShort(l.snoozed_until)}` : '—'}</span>
+          <button class="btn btn-ghost btn-sm" onclick="window.__fuJumpToLead('${esc(l.id)}')">Open →</button>
+          <button class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''} onclick="window.__fuSluimerWake('${esc(l.id)}')">${busy ? 'Wakker…' : '☀ Wake-up'}</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
 
   // ═══════════════════════════════════════════════════════════════════════
   // REGISTRATIE
   // ═══════════════════════════════════════════════════════════════════════
   window.DFO.VIEWS['followup/Werklijst']       = werklijstView;
   window.DFO.VIEWS['followup/Opvolglijst']     = opvolglijstView;
-  window.DFO.VIEWS['followup/Event-bellijst']  = eventBellijstView;
-  window.DFO.VIEWS['followup/Retenties']       = retentiesView;
-  window.DFO.VIEWS['followup/Afspraken']       = afsprakenView;
-  window.DFO.VIEWS['followup/Sluimerpot']      = sluimerpotView;
-  window.DFO.VIEWS['followup/Statistieken']    = statistiekenView;
-  window.DFO.VIEWS['followup/Afgeboekt']       = afgeboektView;
+  window.DFO.VIEWS['followup/Afspraken']       = afsprakenView;      // BROK 2
+  window.DFO.VIEWS['followup/Kalender']        = kalenderView;       // BROK 2 (nieuw)
+  window.DFO.VIEWS['followup/Retenties']       = retentiesView;      // BROK 2
+  window.DFO.VIEWS['followup/Sluimerpot']      = sluimerpotView;     // BROK 2
+  window.DFO.VIEWS['followup/Event-bellijst']  = eventBellijstView;  // BROK 4
+  window.DFO.VIEWS['followup/Statistieken']    = statistiekenView;   // BROK 4
+  window.DFO.VIEWS['followup/Afgeboekt']       = afgeboektView;      // BROK 3
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('followup');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('followup');
 
-  console.debug('[followup-v2] BROK 1 registered — Werklijst + Opvolglijst live; overige tabs = stub tot BROK 2-4.');
+  console.debug('[followup-v2] BROK 2 registered — Werklijst + Opvolglijst + Afspraken + Kalender + Retenties + Sluimerpot live; Event-bellijst/Statistieken/Afgeboekt = stub tot BROK 3-4.');
 })();
