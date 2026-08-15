@@ -65,6 +65,8 @@
       c:'emerald', mod:'Onboarding',        modId:'onboarding',      kan:['WhatsApp','E-mail'],config:true, backend:'onboarding' },
     { id:'aisha',   n:'Aisha',   rol:'Leadsonderhoud', d:'Houdt contact met leads die nog niet klaar zijn',
       c:'teal',    mod:'Leadsonderhoud',    modId:'leadsonderhoud',  kan:['WhatsApp','E-mail'],config:true, backend:'leadsonderhoud' },
+    { id:'sanne',   n:'Sanne',   rol:'E-mail',         d:'Beantwoordt e-mails per mailbox — shadow-mode tot alles handmatig aangezet is',
+      c:'blue',    mod:'E-mail',            modId:'email',           kan:['E-mail'],           config:true, backend:'email' },
     { id:'manager', n:'AI Manager', rol:'Bedrijfsvragen', d:'Beantwoordt vragen over je bedrijf op basis van je eigen data',
       c:'blue',    mod:'Dashboard',         modId:'dashboard',       kan:['Dashboard'],        config:true, backend:'manager' },
     // Achtergrond
@@ -1018,8 +1020,176 @@
       </div></div>`;
     }
 
+    // Sanne (E-mail) → eigen editor met per-mailbox toggles + master-status.
+    // Andere agents (Simone/Mila) gebruiken de generieke intents+limits editor.
+    if (a.id === 'sanne') return _cfgAutonomieSanne(a, cfgLoaded);
     // Simone/Mila → editor
     return _cfgAutonomieEditor(a, cfgLoaded);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // SANNE AUTONOMIE — per-mailbox toggle + master-status (Fase 2.0)
+  // ═══════════════════════════════════════════════════════════════════════
+  const SANNE_MAILBOXES = [
+    { slug:'leads',         label:'Leads',         dot:'#3B82F6' },
+    { slug:'info',          label:'Info',          dot:'#07835A' },
+    { slug:'partners',      label:'Partners',      dot:'#B7791F' },
+    { slug:'administratie', label:'Administratie', dot:'#7C3AED' },
+    { slug:'onboarding',    label:'Onboarding',    dot:'#0EA5E9' },
+    { slug:'events',        label:'Events',        dot:'#EC4899' },
+    { slug:'welkom',        label:'Welkom',        dot:'#94A3B8' },
+  ];
+  function _sanneFlagsDraft(cfg) {
+    const dirty = _ui.dirty['sanne'] || {};
+    if (dirty.feature_flags !== undefined) return dirty.feature_flags;
+    const base = cfg?.feature_flags;
+    return (base && typeof base === 'object') ? JSON.parse(JSON.stringify(base)) : {};
+  }
+  function _sanneAutonomyDraft(cfg) {
+    const dirty = _ui.dirty['sanne'] || {};
+    if (dirty.autonomy_config !== undefined) return dirty.autonomy_config;
+    const base = cfg?.autonomy_config;
+    return (base && typeof base === 'object' && !Array.isArray(base)) ? JSON.parse(JSON.stringify(base)) : {};
+  }
+  function _sanneMasterMode(flags) {
+    if (flags.sanne_autonomous_send)  return 'autonomous';
+    if (flags.sanne_auto_draft_save)  return 'auto_draft';
+    if (flags.sanne_reactive_suggest) return 'suggest';
+    return 'shadow';
+  }
+  window.__sanneSetMode = (mode) => {
+    const cfg = _live.perConfig.data['email'];
+    const flags = _sanneFlagsDraft(cfg);
+    flags.sanne_decision_logs    = true; // altijd aan (log altijd)
+    flags.sanne_reactive_suggest = (mode === 'suggest' || mode === 'auto_draft' || mode === 'autonomous');
+    flags.sanne_auto_draft_save  = (mode === 'auto_draft' || mode === 'autonomous');
+    flags.sanne_autonomous_send  = (mode === 'autonomous');
+    _ui.dirty['sanne'] = _ui.dirty['sanne'] || {};
+    _ui.dirty['sanne'].feature_flags = flags;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__sanneToggleMailbox = (slug) => {
+    const cfg = _live.perConfig.data['email'];
+    const auto = _sanneAutonomyDraft(cfg);
+    const scope = new Set(Array.isArray(auto.mailbox_scope) ? auto.mailbox_scope : []);
+    if (scope.has(slug)) scope.delete(slug); else scope.add(slug);
+    auto.mailbox_scope = Array.from(scope);
+    _ui.dirty['sanne'] = _ui.dirty['sanne'] || {};
+    _ui.dirty['sanne'].autonomy_config = auto;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__sanneSave = async () => {
+    if (_ui.saving['sanne']) return;
+    const dirty = _ui.dirty['sanne'] || {};
+    if (Object.keys(dirty).length === 0) return;
+    _ui.saving['sanne'] = true; if (window.DFO?.render) window.DFO.render();
+    // Volledige config-load-first-then-merge om not-null valkuil te vermijden.
+    const j = await tryFetch('sanne-save', '/api/sanne-config-upsert', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(dirty),
+    }, 12000);
+    _ui.saving['sanne'] = false;
+    if (j && !j.__error && !j.error) {
+      _ui.dirty['sanne'] = {};
+      _ui.saved['sanne'] = Date.now();
+      // Vernieuw cache
+      _live.perConfig.data['email'] = j.config;
+    } else {
+      alert('Sanne-config opslaan mislukt: ' + (j?.__error || j?.error || 'onbekende fout'));
+    }
+    if (window.DFO?.render) window.DFO.render();
+  };
+
+  function _cfgAutonomieSanne(a, cfg) {
+    const flags = _sanneFlagsDraft(cfg);
+    const auto  = _sanneAutonomyDraft(cfg);
+    const mode  = _sanneMasterMode(flags);
+    const scope = new Set(Array.isArray(auto.mailbox_scope) ? auto.mailbox_scope : []);
+    const mandate = (auto.mandate && typeof auto.mandate === 'object') ? auto.mandate : {};
+    const dirty = _ui.dirty['sanne'] && Object.keys(_ui.dirty['sanne']).length > 0;
+    const saving = !!_ui.saving['sanne'];
+    const savedRecent = _ui.saved['sanne'] && (Date.now() - _ui.saved['sanne']) < 3000;
+
+    const modeBtns = [
+      { v:'shadow',     l:'Shadow',              d:'Sanne logt beslissingen, doet niets naar buiten. Aanbevolen voor eerste 48u.', c:'slate' },
+      { v:'suggest',    l:'Suggesties',          d:'Toont voorgestelde antwoorden in de mail-reader (Fase 2.1). Jij verstuurt.', c:'blue'  },
+      { v:'auto_draft', l:'Concepten opslaan',   d:'Slaat suggesties auto op in Concepten-map (Fase 2.2). Jij bewerkt + verstuurt.', c:'amber' },
+      { v:'autonomous', l:'Autonoom',            d:'Sanne verstuurt zelfstandig binnen mandaat (Fase 2.3). ⚠ Alleen aan na testfase.', c:'rose'  },
+    ];
+
+    return `<div class="pad" style="padding-top:14px"><div style="max-width:820px">
+      <div style="margin-bottom:12px;padding:11px 15px;border:1px solid var(--blue-line, #93c5fd);background:var(--blue-soft, #eff6ff);border-radius:var(--r);font-size:12.5px;color:var(--blue, #1d4ed8);display:flex;gap:11px;align-items:flex-start">
+        ${svg(I.info || I.shield, 'width:15px;height:15px;flex-shrink:0;margin-top:1px')}
+        <div style="flex:1"><b>Sanne draait in ${esc(mode.toUpperCase())}.</b> Feature-flags zijn per fase in te schakelen. Foundation-fase (2.0) heeft alle flags standaard uit; Sanne rekent + logt naar <span class="mono">sanne_suggestions</span> voor 24-48u audit.</div>
+      </div>
+
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-head">
+          <span class="tile-ico" style="background:var(--${a.c}-soft);color:var(--${a.c})">${svg(I.zap || I.sliders)}</span>
+          <div class="card-title">Master-status</div>
+        </div>
+        <div class="card-body" style="padding:14px 17px;display:flex;flex-direction:column;gap:8px">
+          ${modeBtns.map((m) => {
+            const on = mode === m.v;
+            return `<label style="display:flex;gap:11px;align-items:flex-start;padding:9px 11px;border:1px solid ${on ? 'var('+`--${m.c}`+', #94a3b8)' : 'var(--border)'};background:${on ? 'var('+`--${m.c}-soft`+', #f1f5f9)' : 'transparent'};border-radius:8px;cursor:pointer">
+              <input type="radio" name="sanne_mode" value="${m.v}" ${on ? 'checked' : ''} onchange="window.__sanneSetMode('${m.v}')" style="margin-top:3px" />
+              <div style="flex:1">
+                <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(m.l)}</div>
+                <div style="font-size:12px;color:var(--text-3);margin-top:2px;line-height:1.45">${esc(m.d)}</div>
+              </div>
+            </label>`;
+          }).join('')}
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-head">
+          <span class="tile-ico" style="background:var(--${a.c}-soft);color:var(--${a.c})">${svg(I.inbox || I.mail)}</span>
+          <div class="card-title">Mailboxen — waar Sanne mag werken</div>
+        </div>
+        <div class="card-body" style="padding:14px 17px">
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">Vink aan welke mailboxen Sanne mag verwerken. Elke aan-vink laat de sync-hook een suggest triggeren voor nieuwe mail in die mailbox.</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));gap:8px">
+            ${SANNE_MAILBOXES.map((m) => {
+              const on = scope.has(m.slug);
+              return `<label style="display:flex;gap:8px;align-items:center;padding:8px 11px;border:1px solid ${on ? 'var(--m, #3B82F6)' : 'var(--border)'};background:${on ? 'var(--m-soft, rgba(59,130,246,.10))' : 'transparent'};border-radius:6px;cursor:pointer;font-size:12.5px">
+                <input type="checkbox" ${on ? 'checked' : ''} onchange="window.__sanneToggleMailbox('${m.slug}')" />
+                <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${m.dot};flex-shrink:0"></span>
+                <span style="flex:1;font-weight:${on ? '600' : '400'};color:var(--text)">${esc(m.label)}</span>
+              </label>`;
+            }).join('')}
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-head">
+          <span class="tile-ico" style="background:var(--${a.c}-soft);color:var(--${a.c})">${svg(I.shield || I.lock || I.sliders)}</span>
+          <div class="card-title">Mandaat — hard-gates (schrijf-baar via SQL of admin-tool)</div>
+        </div>
+        <div class="card-body" style="padding:14px 17px;font-size:12.5px;color:var(--text-2);line-height:1.55">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 22px">
+            <div><b>Max bedrag genoemd:</b> €${esc(String(mandate.max_amount_mentioned_eur ?? '—'))}</div>
+            <div><b>Kantooruren:</b> ${mandate.office_hours_only ? `${esc(String(mandate.office_hours_start ?? 9))}:00-${esc(String(mandate.office_hours_end ?? 17))}:00` : 'geen limiet'}</div>
+            <div><b>Max sends/dag:</b> ${esc(String(mandate.max_sends_per_day ?? '—'))}</div>
+            <div><b>Klant-koppeling vereist:</b> ${mandate.require_customer_link ? 'ja' : 'nee'}</div>
+            <div><b>Confidence suggest:</b> ≥ ${esc(String(mandate.min_confidence_reactive ?? '0.60'))}</div>
+            <div><b>Confidence auto-draft:</b> ≥ ${esc(String(mandate.min_confidence_auto_draft ?? '0.70'))}</div>
+            <div><b>Confidence autonoom:</b> ≥ ${esc(String(mandate.min_confidence_autonomous ?? '0.85'))}</div>
+            <div><b>Anti-loop cooldown:</b> ${esc(String(mandate.anti_loop_cooldown_seconds ?? '60'))}s</div>
+          </div>
+          <div style="margin-top:11px;padding:8px 10px;background:var(--surface-2);border-radius:6px;font-size:11.5px;color:var(--text-3)">
+            Mandaat-limieten wijzigen: pas <span class="mono">joost_config.autonomy_config.mandate</span> aan via de admin/SQL. In Fase 2.1 komt een editor hier.
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:center;padding:10px 0">
+        <button class="btn btn-primary" ${(!dirty || saving) ? 'disabled' : ''} onclick="window.__sanneSave()">${saving ? 'Opslaan…' : 'Opslaan'}</button>
+        ${dirty ? `<span style="color:var(--amber);font-size:12px">● Wijzigingen niet opgeslagen</span>` : ''}
+        ${savedRecent ? `<span style="color:var(--emerald);font-size:12px">✓ Opgeslagen</span>` : ''}
+      </div>
+    </div></div>`;
   }
 
   function _autonomyDraft(agId, cfg) {
