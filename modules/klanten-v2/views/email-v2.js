@@ -82,6 +82,8 @@
     file:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
     sparkle:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8L4 10.7l6.1 1.9L12 18l1.9-5.4 6.1-1.9-6.1-1.9z"/></svg>`,
     img:`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>`,
+    attach:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`,
+    template:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>`,
   };
 
   const _live = {
@@ -122,7 +124,30 @@
     statusBusy: {},       // action-key → true
     draftDirty: false,
     draftSaveT: null,
+    draftMigrationRequired: false,
+    // In-UI dialogs — vervangen native alert()/confirm() die de compose-modal bevroren.
+    confirmDialog: null,  // { msg, onOk, onCancel } → gerenderd als portal
+    infoDialog:    null,  // { title, msg, tone } tone: 'info'|'warn'
   };
+  function _showToastLocal(msg, tone) {
+    try {
+      if (H && typeof H.showToast === 'function') { H.showToast(msg, tone || 'info'); return; }
+    } catch (_) {}
+    // Fallback: minimal DOM-toast op body zodat we NOOIT native alert doen.
+    const el = document.createElement('div');
+    el.textContent = String(msg || '');
+    el.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:20000;background:#1F2937;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:80vw;text-align:center';
+    document.body.appendChild(el);
+    setTimeout(() => { try { el.remove(); } catch (_) {} }, 3500);
+  }
+  function _openConfirm(msg, onOk, onCancel) {
+    _ui.confirmDialog = { msg: String(msg || ''), onOk: onOk || null, onCancel: onCancel || null };
+    if (render) render();
+  }
+  function _openInfo(title, msg, tone) {
+    _ui.infoDialog = { title: String(title || 'Info'), msg: String(msg || ''), tone: tone || 'info' };
+    if (render) render();
+  }
 
   async function tryFetch(label, url, init, timeoutMs) {
     timeoutMs = timeoutMs || 8000;
@@ -220,10 +245,10 @@
       body: JSON.stringify({ ids, action }),
     }, 15000);
     _ui.statusBusy[key] = false;
-    if (j && j.__error) { alert('Actie mislukt: ' + j.__error); return; }
+    if (j && j.__error) { _showToastLocal('Actie mislukt: ' + j.__error, 'warn'); return; }
     if (j?.error) {
-      if (j.migration_required) alert('SQL-migratie ' + j.migration_required + ' moet eerst gedraaid worden.');
-      else alert('Actie mislukt: ' + j.error);
+      if (j.migration_required) _openInfo('Migratie vereist', 'SQL-migratie ' + j.migration_required + ' moet eerst gedraaid worden op productie voordat vlaggen/archief/prullenbak werken.', 'warn');
+      else _showToastLocal('Actie mislukt: ' + j.error, 'warn');
       return;
     }
     // Optimistic: verwijder uit huidige lijst als action het buiten deze folder plaatst
@@ -312,6 +337,7 @@
   async function saveDraft() {
     const c = _ui.compose;
     if (!c.to && !c.subject && !c.body_html) return; // niks om op te slaan
+    if (_ui.draftMigrationRequired) return; // silenced na eerste 503
     const body = {
       id: c.draft_id || undefined,
       from_mailbox: c.from_mailbox, to_address: c.to, cc_address: c.cc,
@@ -322,6 +348,21 @@
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }, 10000);
+    // Nette fout: tabel email_drafts bestaat niet (503 migration_required).
+    if (j && (j.migration_required || /email_drafts.*ontbreekt|does not exist/i.test(String(j?.error || j?.__error || '')))) {
+      _ui.draftMigrationRequired = true;
+      _ui.draftDirty = false;
+      _showToastLocal('Concepten uit — SQL-migratie 2026-08-15-email-v2-fase-2b.sql draait nog niet op productie.', 'warn');
+      if (render) render();
+      return;
+    }
+    if (j && (j.__error || j.error)) {
+      // Andere fout — laat één keer een toast zien, geen browser-crash.
+      _ui.draftDirty = false;
+      _showToastLocal('Concept opslaan mislukt: ' + (j.__error || j.error), 'warn');
+      if (render) render();
+      return;
+    }
     if (j?.item?.id) {
       c.draft_id = j.item.id;
       _ui.draftDirty = false;
@@ -412,7 +453,39 @@
       </div>
     </div>`;
     const compose = _ui.composeOpen ? _composeModal() : '';
-    return html + compose;
+    const dialogs = _dialogsLayer();
+    return html + compose + dialogs;
+  }
+  function _dialogsLayer() {
+    const c = _ui.confirmDialog;
+    const i = _ui.infoDialog;
+    if (!c && !i) return '';
+    let html = '';
+    if (c) {
+      // z-index 2000 → boven compose (1000), boven overlay-modals. Native dialogs zijn hiermee vervangen.
+      html += `<div style="position:fixed;inset:0;background:rgba(17,23,33,.48);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="window.__emailConfirmCancel()">
+        <div style="background:var(--surface);border-radius:${TOK.rLg};box-shadow:0 20px 60px rgba(0,0,0,.32);max-width:420px;width:100%;padding:22px 24px" onclick="event.stopPropagation()">
+          <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:8px">Bevestigen</div>
+          <div style="font-size:13px;color:var(--text-2);line-height:1.55;margin-bottom:18px">${esc(c.msg)}</div>
+          <div style="display:flex;justify-content:flex-end;gap:8px">
+            <button class="btn btn-ghost" onclick="window.__emailConfirmCancel()">Annuleren</button>
+            <button class="btn btn-primary" onclick="window.__emailConfirmOk()">OK</button>
+          </div>
+        </div>
+      </div>`;
+    }
+    if (i) {
+      const accentBg = i.tone === 'warn' ? TOK.amberSoft : TOK.mSoft;
+      const accentFg = i.tone === 'warn' ? TOK.amber    : TOK.m;
+      html += `<div style="position:fixed;inset:0;background:rgba(17,23,33,.48);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="window.__emailInfoClose()">
+        <div style="background:var(--surface);border-radius:${TOK.rLg};box-shadow:0 20px 60px rgba(0,0,0,.32);max-width:460px;width:100%;padding:0;overflow:hidden" onclick="event.stopPropagation()">
+          <div style="padding:14px 22px;background:${accentBg};color:${accentFg};font-size:14px;font-weight:600;border-bottom:1px solid var(--border)">${esc(i.title)}</div>
+          <div style="padding:18px 22px;font-size:13px;color:var(--text-2);line-height:1.6">${esc(i.msg)}</div>
+          <div style="padding:0 18px 16px;display:flex;justify-content:flex-end"><button class="btn btn-primary" onclick="window.__emailInfoClose()">Sluiten</button></div>
+        </div>
+      </div>`;
+    }
+    return html;
   }
 
   function _leftRail() {
@@ -494,6 +567,7 @@
     return `<div style="padding:8px 12px;background:${TOK.mSoft};border-top:1px solid var(--border);display:flex;align-items:center;gap:8px;font-size:12px">
       <span style="color:${TOK.m};font-weight:600">${count} geselecteerd</span>
       <div style="display:flex;gap:4px;margin-left:auto">
+        <button class="btn btn-ghost btn-sm" onclick="window.__emailBulkAction('read')" ${b['bulk:read'] ? 'disabled' : ''} title="Markeer als gelezen">Gelezen</button>
         <button class="btn btn-ghost btn-sm" onclick="window.__emailBulkAction('flag')" ${b['status:flag'] ? 'disabled' : ''}>Vlag</button>
         <button class="btn btn-ghost btn-sm" onclick="window.__emailBulkAction('archive')" ${b['status:archive'] ? 'disabled' : ''}>Archief</button>
         <button class="btn btn-ghost btn-sm" onclick="window.__emailBulkAction('trash')" ${b['status:trash'] ? 'disabled' : ''}>Trash</button>
@@ -751,7 +825,10 @@
         </div>
         <div style="padding:10px 18px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px">
           <button class="btn btn-primary" ${_ui.sendBusy ? 'disabled' : ''} onclick="window.__emailSend()" style="gap:6px">${ICO.send}${_ui.sendBusy ? 'Versturen…' : 'Versturen'}</button>
-          <div style="margin-left:auto;font-size:11px;color:var(--text-3);font-family:${TOK.mono}">${c.draft_id ? '● Concept auto-saved' : (_ui.draftDirty ? '● Wijzigingen…' : '')}</div>
+          <button class="icon-btn" title="Bijlage toevoegen" onclick="window.__emailComposeAttach()" style="width:28px;height:28px">${ICO.attach}</button>
+          <button class="icon-btn" title="Sjabloon invoegen" onclick="window.__emailComposeTemplate()" style="width:28px;height:28px">${ICO.template}</button>
+          <button class="icon-btn" title="AI-suggestie" onclick="window.__emailComposeAi()" style="width:28px;height:28px;color:${TOK.violet}">${ICO.sparkle}</button>
+          <div style="margin-left:auto;font-size:11px;color:var(--text-3);font-family:${TOK.mono}">${_ui.draftMigrationRequired ? '⚠ Concepten uit — migratie vereist' : (c.draft_id ? '● Concept auto-saved' : (_ui.draftDirty ? '● Wijzigingen…' : ''))}</div>
           <button class="icon-btn" title="Verwerpen" onclick="window.__emailDiscardCompose()" style="width:28px;height:28px">${ICO.trash}</button>
         </div>
       </div>
@@ -841,17 +918,55 @@
   window.__emailBulkAction = (a) => {
     const ids = Object.keys(_ui.selectedRows).filter((k) => _ui.selectedRows[k]);
     if (ids.length === 0) return;
+    if (a === 'read' || a === 'unread') { bulkMarkRead(ids, a === 'read'); return; }
     statusUpdate(ids, a);
   };
+  async function bulkMarkRead(ids, seen) {
+    const key = 'bulk:read';
+    if (_ui.statusBusy[key]) return;
+    _ui.statusBusy[key] = true; if (render) render();
+    // Groepeer per mailbox — één mark-read-call per mailbox met alle uids.
+    const items = asArr(_live.inbox.data?.items);
+    const rowsById = new Map(items.map((r) => [r.id, r]));
+    const perMailbox = {};
+    ids.forEach((id) => {
+      const r = rowsById.get(id);
+      if (!r || !r.mailbox || r.imap_uid == null) return;
+      const mb = r.mailbox + '@deforexopleiding.nl';
+      (perMailbox[mb] = perMailbox[mb] || []).push(r.imap_uid);
+    });
+    let okCount = 0, failCount = 0;
+    for (const mb of Object.keys(perMailbox)) {
+      const j = await tryFetch('bulk-mark-read:' + mb, '/api/mark-read', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mailbox: mb, uids: perMailbox[mb], seen: !!seen }),
+      }, 15000);
+      if (j && !j.__error && !j.error) { okCount += Number(j.count || perMailbox[mb].length); }
+      else { failCount += perMailbox[mb].length; }
+    }
+    // Optimistic UI-update.
+    ids.forEach((id) => {
+      const r = rowsById.get(id);
+      if (r) r.is_read = !!seen;
+    });
+    _ui.selectedRows = {};
+    _live.counts.data = null;
+    _ui.statusBusy[key] = false;
+    if (failCount > 0) _showToastLocal(okCount + ' gemarkeerd, ' + failCount + ' mislukt.', 'warn');
+    else if (okCount > 0) _showToastLocal(okCount + ' gemarkeerd als gelezen.', 'info');
+    if (render) render();
+  }
   window.__emailToggleMore = () => { _ui.moreMenuOpen = !_ui.moreMenuOpen; if (render) render(); };
   window.__emailMoreDo = (k) => {
     _ui.moreMenuOpen = false;
     if (k === 'print') { window.print(); if (render) render(); return; }
     if (k === 'link') { window.__emailKoppelKlant(); return; }
-    alert('Actie "' + k + '" nog niet beschikbaar.');
+    _showToastLocal('Actie "' + k + '" is nog niet beschikbaar.', 'info');
     if (render) render();
   };
-  window.__emailSettings = () => { alert('Instellingen (handtekening/regels/notificaties) komen later. Handtekening kan al gekozen worden in compose.'); };
+  window.__emailSettings = () => {
+    _openInfo('Instellingen', 'Handtekening kan al gekozen worden in het compose-venster. Regels/notificaties/handtekening-beheer komen in Fase 3.', 'info');
+  };
   window.__emailOpenKlant = (customerId) => {
     if (!customerId) return;
     // v2-route: navigate binnen klanten-v2-shell naar klant-detail.
@@ -861,23 +976,29 @@
       try { window.location.hash = '#detail/customer/' + encodeURIComponent(customerId); }
       catch (e) { console.warn('[email-v2] navigate fail', e); }
     }
-    if (H.showToast) H.showToast('Openen klant-dossier…');
+    _showToastLocal('Openen klant-dossier…', 'info');
   };
   window.__emailKoppelKlant = () => {
-    // Voor Fase 2B: opent detail-view als er al customer_id is; anders vraag om te koppelen.
+    // Voor Fase 2B: opent detail-view als er al customer_id is; anders in-UI melding
+    // (NIET blocking alert — die bevriest de compose-modal in Chrome).
     const row = currentRow();
     if (row && row.customer_id) { window.__emailOpenKlant(row.customer_id); return; }
-    alert('Handmatige klant-koppeling komt via klanten-module (link email-thread → klant is in Fase 3). Voor nu: koppel via de klanten-detail-view.');
+    _openInfo(
+      'Klant-koppeling — komt in Fase 3',
+      'Handmatig koppelen van deze e-mail-thread aan een klant zit in Fase 3 van de v2-email-module. Voor nu: open de klanten-module, zoek de klant en de sync-cron matcht ze automatisch op e-mailadres.',
+      'info'
+    );
   };
   window.__emailNewCompose = () => {
     _ui.composeMode = 'new'; _ui.composeMinimized = false;
     _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null };
     _ui.composeOpen = true; _ui.lastSend = null; _ui.ccBccOpen = false;
+    _ui.draftMigrationRequired = false;
     if (render) render();
   };
   function _replyState(mode) {
     const row = currentRow();
-    if (!row) { alert('Selecteer eerst een bericht.'); return; }
+    if (!row) { _showToastLocal('Selecteer eerst een bericht.', 'info'); return; }
     const from = MAILBOXES.find((m) => m.slug === row.mailbox);
     _ui.composeMode = mode; _ui.composeMinimized = false;
     _ui.compose = {
@@ -896,13 +1017,22 @@
   window.__emailFwd      = () => { _replyState('fwd'); _ui.compose.to = ''; if (render) render(); };
   window.__emailCloseCompose = () => { _ui.composeOpen = false; _ui.composeMinimized = false; _ui.lastSend = null; _ui.ccBccOpen = false; if (render) render(); };
   window.__emailDiscardCompose = () => {
-    if (!confirm('Concept verwijderen?')) return;
-    if (_ui.compose.draft_id) deleteDraft(_ui.compose.draft_id).catch(() => {});
-    _ui.composeOpen = false;
-    _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null };
-    _live.counts.data = null;
-    if (render) render();
+    // In-UI confirm — geen native confirm() die de compose-modal bevriest.
+    _openConfirm('Concept verwijderen? Dit kan niet ongedaan gemaakt worden.', () => {
+      if (_ui.compose.draft_id) deleteDraft(_ui.compose.draft_id).catch(() => {});
+      _ui.composeOpen = false;
+      _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null };
+      _ui.draftMigrationRequired = false;
+      _live.counts.data = null;
+      if (render) render();
+    });
   };
+  window.__emailComposeAttach   = () => { _showToastLocal('Bijlage toevoegen komt in Fase 3 (multipart-upload via IMAP).', 'info'); };
+  window.__emailComposeTemplate = () => { _showToastLocal('Sjablonen invoegen komt in Fase 3 — dan koppelen we email_templates.', 'info'); };
+  window.__emailComposeAi       = () => { _showToastLocal('AI in compose: open eerst een bericht en gebruik "Voorgesteld antwoord" in de reader.', 'info'); };
+  window.__emailConfirmOk     = () => { const d = _ui.confirmDialog; _ui.confirmDialog = null; if (render) render(); try { if (d?.onOk) d.onOk(); } catch (e) { console.warn('[email-v2] confirm onOk fail', e); } };
+  window.__emailConfirmCancel = () => { const d = _ui.confirmDialog; _ui.confirmDialog = null; if (render) render(); try { if (d?.onCancel) d.onCancel(); } catch (_) {} };
+  window.__emailInfoClose     = () => { _ui.infoDialog = null; if (render) render(); };
   window.__emailComposeMin = () => { _ui.composeMinimized = true; if (render) render(); };
   window.__emailComposeRestore = () => { _ui.composeMinimized = false; if (render) render(); };
   window.__emailComposeField = (k, v) => { _ui.compose[k] = v; _ui.draftDirty = true; saveDraftDebounced(); };

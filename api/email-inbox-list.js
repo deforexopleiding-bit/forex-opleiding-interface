@@ -199,8 +199,15 @@ export default async function handler(req, res) {
     let { data, error, count } = await qb;
     if (error) {
       // Fail-safe: pre-migratie fallback (select zonder flagged/status).
+      // BELANGRIJK: folders die op flagged/status leunen mogen NIET zomaar
+      // de volledige inbox teruggeven — dan lijkt filteren stuk. In plaats
+      // daarvan: lege response + __migration_required flag zodat de UI een
+      // duidelijke "voer migratie uit"-melding kan tonen.
       if (/column.*(flagged|status).*does not exist/i.test(error.message || '')) {
         migrationReady = false;
+        if (folder === 'flag' || folder === 'archive' || folder === 'trash') {
+          return res.status(200).json({ items: [], total: 0, limit, offset, hasMore: false, folder, __migration_required: true, __migration_ready: false });
+        }
         let qb2 = supabaseAdmin
           .from('email_messages')
           .select('id, mailbox, imap_uid, message_id, from_address, from_name, subject, date_received, snippet, is_read, requires_action, category, attachments, customer_id', { count: 'exact' })
