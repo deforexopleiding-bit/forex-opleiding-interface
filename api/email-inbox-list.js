@@ -135,7 +135,7 @@ export default async function handler(req, res) {
       //           attachments (jsonb).
       let qb = supabaseAdmin
         .from('email_replies')
-        .select('id, email_id, email_subject, from_address, to_address, cc_address, sent_at, attachments', { count: 'exact' })
+        .select('id, email_id, email_subject, final_reply, from_address, to_address, cc_address, sent_at, attachments', { count: 'exact' })
         .order('sent_at', { ascending: false })
         .range(offset, offset + limit - 1);
       if (mailbox) {
@@ -148,23 +148,32 @@ export default async function handler(req, res) {
       }
       const { data, error, count } = await qb;
       if (error) throw error;
-      const items = (data || []).map((r) => ({
-        id:              String(r.id),
-        mailbox:         (r.from_address || '').split('@')[0] || null,
-        imap_uid:        null,
-        message_id:      null,
-        subject:         r.email_subject || '(geen onderwerp)',
-        from_address:    r.from_address,
-        from_name:       null,
-        to_address:      r.to_address,
-        date_received:   r.sent_at,
-        snippet:         null,
-        is_read:         true,
-        has_attachments: Array.isArray(r.attachments) && r.attachments.length > 0,
-        customer_id:     null,
-        requires_action: false,
-        _source:         'sent',
-      }));
+      const items = (data || []).map((r) => {
+        const bodyText = String(r.final_reply || '');
+        // Snippet uit body (eerste 140 tekens, gestript).
+        const snip = bodyText.replace(/\s+/g, ' ').trim().slice(0, 140);
+        return {
+          id:              String(r.id),
+          mailbox:         (r.from_address || '').split('@')[0] || null,
+          imap_uid:        null,
+          message_id:      null,
+          subject:         r.email_subject || '(geen onderwerp)',
+          from_address:    r.from_address,
+          from_name:       null,
+          to_address:      r.to_address,
+          date_received:   r.sent_at,
+          snippet:         snip || null,
+          is_read:         true,
+          has_attachments: Array.isArray(r.attachments) && r.attachments.length > 0,
+          customer_id:     null,
+          requires_action: false,
+          _source:         'sent',
+          // Sent-mails hebben geen IMAP-uid; body zit inline in email_replies.final_reply.
+          // Frontend rendert direct uit _body_text (geen extra roundtrip naar /api/email-body).
+          _body_text:      bodyText,
+          _attachments:    Array.isArray(r.attachments) ? r.attachments : [],
+        };
+      });
       const total   = typeof count === 'number' ? count : items.length;
       const hasMore = offset + items.length < total;
       return res.status(200).json({ items, total, limit, offset, hasMore, folder: 'sent' });

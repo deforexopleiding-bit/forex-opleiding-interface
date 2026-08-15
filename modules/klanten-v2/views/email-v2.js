@@ -364,8 +364,18 @@
       return;
     }
     if (j?.item?.id) {
+      const wasNew = !c.draft_id;
       c.draft_id = j.item.id;
       _ui.draftDirty = false;
+      // Surgical badge/list refresh: invalideer alleen counts + de drafts-lijst
+      // (als de gebruiker die open heeft) — geen inbox-reload, geen mailbox-switch.
+      _live.counts.data = null;
+      _live.counts.ts   = 0;
+      if (_ui.folder === 'draft') {
+        _live.inbox.data = null;
+        _live.inbox.key  = null;
+      }
+      if (wasNew) queueMicrotask(fetchCounts);
       if (render) render();
     }
   }
@@ -649,8 +659,16 @@
     // Draft-open: open direct compose (Concepten-folder klik).
     if (row._source === 'draft') { setTimeout(() => window.__emailOpenDraftFromRow(row), 0); return _readerEmpty(); }
     const bst = _live.body;
-    const body = bst.data[row.id], bErr = bst.error[row.id], bLoad = bst.loading[row.id];
-    if (!body && !bErr && !bLoad && row.mailbox && row.imap_uid != null) queueMicrotask(() => fetchBody(row));
+    let body = bst.data[row.id]; const bErr = bst.error[row.id], bLoad = bst.loading[row.id];
+    // Sent-mails: body is al inline uit email_replies.final_reply (imap_uid=null).
+    // Direct hydrateren zonder /api/email-body-call zodat de reader NIET hangt op
+    // "Body wordt geladen…" — dat was de root-cause van de leeg-blijvende Verzonden-reader.
+    if (!body && row._source === 'sent') {
+      body = { text: String(row._body_text || ''), body_html_safe: '', hasHtml: false, attachments: asArr(row._attachments), external_images_blocked: 0 };
+      bst.data[row.id] = body;
+    }
+    // Alleen IMAP-fetch voor inbox/archief/prullenbak — die hebben een echte imap_uid.
+    if (!body && !bErr && !bLoad && row._source !== 'sent' && row.mailbox && row.imap_uid != null) queueMicrotask(() => fetchBody(row));
     if (row._source === 'inbox' && !row.is_read && !_ui.statusBusy['read:' + row.id]) queueMicrotask(() => markRead(row, true));
     return `<section style="overflow:hidden;display:flex;flex-direction:column;background:var(--bg,var(--surface));min-height:0">
       ${_readHead(row)}
@@ -660,7 +678,7 @@
           bLoad ? skel() :
           body ? _bodyBlock(body, row) :
           `<div style="padding:20px;color:var(--text-3);font-size:13px">Body wordt geladen…</div>`}
-        ${body ? _aiSuggestCard(row) : ''}
+        ${body && row._source !== 'sent' ? _aiSuggestCard(row) : ''}
       </div>
     </section>`;
   }
