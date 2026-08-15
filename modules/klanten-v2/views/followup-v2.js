@@ -41,6 +41,16 @@
   const esc = (s) => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  // Defensieve coerce: sommige lead-velden (source, source_ref) kunnen een
+  // object zijn (join-shape uit backend). Voorkom "[object Object]" renderen.
+  const safeStr = (v) => {
+    if (v == null) return '';
+    if (typeof v === 'string' || typeof v === 'number') return String(v);
+    if (typeof v === 'object') {
+      return String(v.type || v.label || v.name || v.slug || v.id || JSON.stringify(v).slice(0, 80));
+    }
+    return String(v);
+  };
   const fmtDate = (iso, opts) => {
     if (!iso) return '—';
     const d = new Date(iso); if (!Number.isFinite(d.getTime())) return '—';
@@ -91,6 +101,9 @@
     'Wil eerst resultaten zien', 'Twijfelt over online', 'Geen vertrouwen',
     'Wil eerst zelf proberen', 'Slecht moment', 'Geen budget nu', 'Anders',
   ];
+  // Lookup voor humanisering van last_outcome enum in detail-panel/lijst.
+  const OUTCOME_LABEL = {};
+  OUTCOMES.forEach((o) => { OUTCOME_LABEL[o.v] = o.l; });
 
   // ── State ───────────────────────────────────────────────────────────
   const _live = {
@@ -163,10 +176,17 @@
     st.loading = true; st.error = null; st.key = key; st.migrationRequired = false;
     const params = [];
     params.push('worklist=1');
-    if (_ui.view && _ui.view !== 'alle') params.push('view=' + encodeURIComponent(_ui.view));
+    // BUG-FIX BROK 1: stuur view ALTIJD mee (ook 'alle' en 'snoozed'). Backend
+    // gebruikt 'open' als default → "Alles" (139) laadde eerder de open-set (33)
+    // omdat de UI géén view meegaf. 'komende_7' bestaat wel als bucket in de UI
+    // maar backend accepteert 'komende_7' niet als view — die zit al in de
+    // worklist-response als aparte array; voor die selectie sturen we view=open
+    // (want komende_7 is een subset van open).
+    const viewParam = (_ui.view === 'komende_7') ? 'open' : (_ui.view || 'open');
+    params.push('view=' + encodeURIComponent(viewParam));
     if (_ui.sourceFilter && _ui.sourceFilter !== 'all') params.push('source=' + encodeURIComponent(_ui.sourceFilter));
     if (_ui.kindFilter && _ui.kindFilter !== 'all') params.push('kind=' + encodeURIComponent(_ui.kindFilter));
-    params.push('limit=500');
+    params.push('limit=1000');
     const url = '/api/follow-up-leads-list?' + params.join('&');
     const j = await tryFetch('leads-list', url);
     st.loading = false;
@@ -174,6 +194,9 @@
     else if (j?.error && j?.code === 'MIGRATION_REQUIRED') { st.migrationRequired = true; st.data = null; }
     else {
       let leads = asArr(j?.leads);
+      // Client-side bucket-filter voor 'komende_7' (backend heeft geen view-alias
+      // hiervoor; leads.bucket bevat wél 'komende_7' zodra worklist=1).
+      if (_ui.view === 'komende_7') leads = leads.filter((l) => l.bucket === 'komende_7');
       if (_ui.search) {
         const q = _ui.search.toLowerCase();
         leads = leads.filter((l) => [l.lead_name, l.lead_email, l.lead_phone].some((v) => String(v || '').toLowerCase().includes(q)));
@@ -390,6 +413,24 @@
     _searchDebounce = setTimeout(() => { _ui.search = String(v || '').trim(); _live.leadsList.data = null; _live.leadsList.key = null; if (render) render(); }, 400);
   };
   window.__fuSelectLead = (id) => { _ui.selectedLeadId = id; _ui.detailTab = 'overzicht'; if (render) render(); };
+  // Jump vanuit Opvolglijst → Werklijst: reset filters naar 'alle' zodat de lead
+  // gegarandeerd in de lijst zit; select 'em; switch tab. Fallback: als na fetch
+  // de lead alsnog niet in de lijst zit, forceer een gerichte single-lead-fetch
+  // (voor nu: laat de detail-panel een nette "wisselt van filter"-melding tonen).
+  window.__fuJumpToLead = (leadId) => {
+    if (!leadId) return;
+    _ui.view = 'alle';
+    _ui.sourceFilter = 'all';
+    _ui.kindFilter = 'all';
+    _ui.search = '';
+    _ui.selectedLeadId = leadId;
+    _ui.detailTab = 'overzicht';
+    _live.leadsList.data = null; _live.leadsList.key = null;
+    if (window.DFO && typeof window.DFO.goTab === 'function') {
+      try { window.DFO.goTab('Werklijst'); } catch (_) {}
+    }
+    if (render) render();
+  };
   window.__fuDetailTab = (t) => { _ui.detailTab = t; if (render) render(); };
   window.__fuOpenCall = (leadId) => {
     _ui.callModal = { leadId, outcome: null, terugbel: '', snoozeMonths: 6, warmte: 5, bezwaren: new Set(), note: '', saving: false, error: null };
@@ -567,7 +608,17 @@
       <div style="font-size:12.5px;max-width:320px;line-height:1.5">Kies links een lead om te bellen, notities toe te voegen of de opvolgstatus bij te werken.</div>
     </div>`;
     const lead = asArr(_live.leadsList.data?.leads).find((x) => x.id === id);
-    if (!lead) return `<div style="padding:24px;color:var(--text-3);font-size:13px">Lead niet in huidige lijst. Wissel filter of vernieuw.</div>`;
+    if (!lead) {
+      // Fallback: als de lead niet in de huidige (mogelijk gefilterde) lijst zit,
+      // bied direct een reset-knop aan die alle filters naar 'alle' zet.
+      const resetActive = _ui.view === 'alle' && _ui.sourceFilter === 'all' && _ui.kindFilter === 'all' && !_ui.search;
+      return `<div style="padding:24px;color:var(--text-3);font-size:13px;text-align:center">
+        <div style="margin-bottom:12px">Lead niet in huidige lijst.</div>
+        ${resetActive
+          ? `<div style="font-size:12px;opacity:.85">Filters staan al op "Alles". De lead is mogelijk gearchiveerd of buiten je scope.</div>`
+          : `<button class="btn btn-primary btn-sm" onclick="window.__fuJumpToLead('${esc(id)}')">Reset filters naar Alles</button>`}
+      </div>`;
+    }
     return `${_detailHeader(lead)}${_detailTabs()}${_detailBody(lead)}`;
   }
   function _detailHeader(l) {
@@ -586,8 +637,8 @@
             ${_statusPill(l.lead_status)}
             ${_bucketPill(l.bucket)}
             ${l.is_hot ? '<span style="font-size:10.5px;padding:1px 7px;background:var(--rose-soft);color:var(--rose);border-radius:20px;font-weight:600">🔥 HOT</span>' : ''}
-            <span style="font-size:10.5px;color:var(--text-3)">Bron: ${esc(l.source || '—')}</span>
-            ${l.owner_name ? `<span style="font-size:10.5px;color:var(--text-3)">Eigenaar: ${esc(l.owner_name)}</span>` : ''}
+            <span style="font-size:10.5px;color:var(--text-3)">Bron: ${esc(safeStr(l.source) || '—')}</span>
+            ${l.owner_name ? `<span style="font-size:10.5px;color:var(--text-3)">Eigenaar: ${esc(safeStr(l.owner_name))}</span>` : ''}
           </div>
         </div>
         <button class="btn btn-primary" onclick="window.__fuOpenCall('${esc(l.id)}')">${svg(I.phone || I.call || '')} Bel-uitkomst</button>
@@ -627,13 +678,13 @@
           <div><b>Eigenaar:</b> ${esc(l.owner_name || '(niet toegewezen)')}</div>
           <div><b>E-mail:</b> ${esc(l.lead_email || '—')}</div>
           <div><b>Telefoon:</b> ${esc(l.lead_phone || '—')}</div>
-          <div><b>Bron:</b> ${esc(l.source || '—')}${l.source_ref ? ` · <span class="mono" style="font-size:11.5px">${esc(l.source_ref)}</span>` : ''}</div>
+          <div><b>Bron:</b> ${esc(safeStr(l.source) || '—')}${l.source_ref ? ` · <span class="mono" style="font-size:11.5px">${esc(safeStr(l.source_ref))}</span>` : ''}</div>
           <div><b>Type:</b> ${l.lead_kind === 'zoom' ? 'Zoom' : 'Call'}</div>
           <div><b>Pogingen:</b> <span class="mono">${l.attempts || 0}×</span></div>
           <div><b>Laatste contact:</b> ${fmtDate(l.last_contact_at)}</div>
           <div><b>Terugbel-datum:</b> ${fmtDate(l.terugbel_datum)}</div>
           <div><b>Snoozed tot:</b> ${fmtDate(l.snoozed_until)}</div>
-          <div><b>Laatste uitkomst:</b> ${esc(l.last_outcome || '—')}</div>
+          <div><b>Laatste uitkomst:</b> ${esc(OUTCOME_LABEL[l.last_outcome] || safeStr(l.last_outcome) || '—')}</div>
           <div><b>Aangemaakt:</b> ${fmtDate(l.created_at)}</div>
         </div>
       </div>
@@ -863,7 +914,16 @@
     </div>`;
   }
   function _renderOpvolglijst(data) {
-    const items = asArr(data.items);
+    // BUG-FIX null-guard: data kan null zijn op eerste render vóór fetch.
+    if (!data) return skel();
+    // BUG-FIX dedup: dedupe op uid (of ref_id+type als fallback) — bron-tabellen
+    // kunnen dezelfde attendee/appointment 2× teruggeven bij overlap-flags.
+    const seen = new Set();
+    const items = asArr(data.items).filter((it) => {
+      const key = it.uid || `${it.type || 'x'}:${it.ref_id || ''}`;
+      if (seen.has(key)) return false;
+      seen.add(key); return true;
+    });
     if (items.length === 0) return `<div style="padding:40px 20px;text-align:center;color:var(--text-3)">🎉 Opvolglijst is leeg.</div>`;
     return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
       ${items.map((it, i) => `
@@ -874,7 +934,7 @@
             <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.email || it.phone || '—')}${it.event_title ? ` · ${esc(it.event_title)}` : ''}${it.scheduled_at ? ` · ${fmtDate(it.scheduled_at)}` : ''}</div>
             ${it.actie_hint ? `<div style="font-size:11px;color:var(--text-2);margin-top:2px;font-style:italic">${esc(it.actie_hint)}</div>` : ''}
           </div>
-          ${it.lead_id ? `<button class="btn btn-ghost btn-sm" onclick="window.__fuSelectLead('${esc(it.lead_id)}');window.DFO&&window.DFO.goTab&&window.DFO.goTab('Werklijst')" title="Open lead in Werklijst">Open lead →</button>` : `<span style="font-size:11px;color:var(--text-3);font-style:italic">geen lead</span>`}
+          ${it.lead_id ? `<button class="btn btn-ghost btn-sm" onclick="window.__fuJumpToLead('${esc(it.lead_id)}')" title="Open lead in Werklijst (reset filters naar Alles)">Open lead →</button>` : `<span style="font-size:11px;color:var(--text-3);font-style:italic">geen lead</span>`}
           <button class="btn btn-ghost btn-sm" style="color:var(--rose)" onclick="window.__fuOpenAfschrijf('${esc(it.type)}','${esc(it.ref_id)}')">Afschrijven</button>
         </div>
       `).join('')}
