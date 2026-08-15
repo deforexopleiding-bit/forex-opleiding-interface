@@ -1247,6 +1247,11 @@
     s = s.replace(/(^|[\s(])_([^_\n]+?)_(?=[\s.,;:!?)\-]|$)/g, '$1<em>$2</em>');
     // Inline code `x` → <code>
     s = s.replace(/`([^`\n]+?)`/g, '<code style="background:var(--surface-2);padding:1px 5px;border-radius:3px;font-family:\'IBM Plex Mono\',monospace;font-size:.92em">$1</code>');
+    // Links [text](url) → <a> — safe: input is al esc'd, url wordt via encodeURI opgeschoond.
+    s = s.replace(/\[([^\]\n]+?)\]\(([^)\s]+?)\)/g, (m, txt, url) => {
+      const safeUrl = /^(https?:|mailto:|\/)/i.test(url) ? url : '#';
+      return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--m, #3B82F6);text-decoration:underline">${txt}</a>`;
+    });
     return s;
   }
   function _mdBlock(rawText) {
@@ -1273,7 +1278,11 @@
         if (listType !== 'ol') { flushList(); listType = 'ol'; html += `<ol style="margin:0 0 8px 22px;padding:0">`; }
         html += `<li style="margin:2px 0">${_mdInline(olMatch[1])}</li>`;
       } else if (line.trim() === '') {
-        flushPara(); flushList();
+        // Lege regel: flush paragraph, MAAR laat list open zodat consecutive
+        // "1. item" / "2. item" met blank tussen niet in aparte <ol>'s vallen.
+        // FlushList gebeurt pas als de eerstvolgende non-blank regel geen
+        // list-match is (else-branch hieronder).
+        flushPara();
       } else {
         if (listType) flushList();
         paraBuf.push(line);
@@ -1743,7 +1752,10 @@
     const m = _ui.artModal; if (!m) return '';
     const isEdit = m.mode === 'edit';
     const it = m.item || {};
-    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px" onclick="window.__agArtClose()">
+    // Portal-anchor: unique id + class. Wordt door _agEnsurePortal() naar
+    // document.body verplaatst zodat een 'overflow:hidden' of 'transform' op
+    // een ancestor van #content geen containing-block breekt op position:fixed.
+    return `<div data-portal-id="agv-artmodal" class="agv-portal" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="window.__agArtClose()">
       <div style="background:var(--surface);border-radius:var(--r-lg);max-width:640px;width:100%;max-height:88vh;overflow:auto;padding:22px" onclick="event.stopPropagation()">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
           <span class="tile-ico" style="background:var(--blue-soft);color:var(--blue)">${svg(I.book || I.doc)}</span>
@@ -1787,15 +1799,44 @@
       </div>
     </div>`;
   }
+  // Portal-helper: verplaatst modal-node uit #content naar document.body zodat
+  // het niet geclipd wordt door een overflow/transform-parent. Idempotent.
+  // Runs na DFO.render() via requestAnimationFrame (DOM is dan al geswapped).
+  function _agEnsurePortal(portalId) {
+    if (typeof requestAnimationFrame === 'undefined') return;
+    requestAnimationFrame(() => {
+      // Verwijder eerst eventuele orphan-instances van deze portalId uit body
+      // (stale bij snelle re-open na close zonder tussentijdse render).
+      const orphans = document.body.querySelectorAll('body > [data-portal-id="' + portalId + '"]');
+      orphans.forEach((n) => {
+        // Als er nu géén nieuwe instance in #content zit (modal is dicht) → drop 'em.
+        const inContent = document.querySelector('#content [data-portal-id="' + portalId + '"]');
+        if (!inContent) n.remove();
+      });
+      const el = document.querySelector('#content [data-portal-id="' + portalId + '"]');
+      if (!el) return;
+      // Verplaats naar body zodat position:fixed viewport-relatief blijft.
+      document.body.appendChild(el);
+    });
+  }
+  function _agRemovePortal(portalId) {
+    if (typeof requestAnimationFrame === 'undefined') return;
+    requestAnimationFrame(() => {
+      const orphans = document.body.querySelectorAll('body > [data-portal-id="' + portalId + '"]');
+      orphans.forEach((n) => n.remove());
+    });
+  }
   window.__agArtOpenNew = () => {
     _ui.artModal = { mode: 'create', item: { onderwerp: '', categorie: 'FAQ', content: '', agents: [] } };
     if (window.DFO?.render) window.DFO.render();
+    _agEnsurePortal('agv-artmodal');
   };
   window.__agKbArtEdit = (id) => {
     const it = asArr(_live.kbArt.data).find((x) => x.id === id);
     if (!it) return;
     _ui.artModal = { mode: 'edit', item: { ...it } };
     if (window.DFO?.render) window.DFO.render();
+    _agEnsurePortal('agv-artmodal');
   };
   // Bug 1: rij-klik-handlers voor kennisbank-tabellen (H.table verwacht een
   // function-naam die met (rowIdx) wordt aangeroepen). Central rijen openen
@@ -1820,7 +1861,7 @@
     if (window.DFO?.setTab) window.DFO.setTab('Configuratie');
     else if (window.DFO?.render) window.DFO.render();
   };
-  window.__agArtClose = () => { _ui.artModal = null; if (window.DFO?.render) window.DFO.render(); };
+  window.__agArtClose = () => { _ui.artModal = null; _agRemovePortal('agv-artmodal'); if (window.DFO?.render) window.DFO.render(); };
   window.__agArtSave = async () => {
     const m = _ui.artModal; if (!m) return;
     const onderwerp = (document.getElementById('art_onderwerp')?.value || '').trim();
