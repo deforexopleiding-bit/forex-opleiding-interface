@@ -138,6 +138,12 @@
     archief:     { loading: false, error: null, data: null, key: null },
     openActies:  { loading: false, error: null, data: null },  // appointments?period=open_acties
     opvolging:   { loading: false, error: null, data: null, key: null },  // appointments?period=opvolging_*
+    // BROK 4
+    eventPicker: { loading: false, error: null, data: null },              // events list voor picker
+    eventBellijst: { loading: false, error: null, data: null, key: null },  // per event_id
+    stats:       { loading: false, error: null, data: null, key: null },    // cockpit-dashboard (period)
+    metrics:     { loading: false, error: null, data: null, key: null },    // dashboard-metrics (period)
+    search:      { loading: false, error: null, data: null, key: null },    // /api/follow-up-search
   };
   const _ui = {
     view:            'open',            // buckets-slug (open/vandaag/te_laat/komende_7/snoozed/alle)
@@ -171,6 +177,11 @@
     archiefQ:          '',
     archiefPage:       1,
     opvolgingSub:      'opvolging_today',  // opvolging_overdue|today|week|30d|verder
+    // BROK 4
+    eventSelectedId:   null,               // null = "next upcoming"
+    eventFollowupOnly: false,              // toggle in Event-bellijst
+    statsPeriod:       'today',            // today|week|month
+    searchQ:           '',
   };
 
   // ── Helpers ─────────────────────────────────────────────────────────
@@ -498,6 +509,69 @@
     _ui.noshowOutcomeModal = null;
     _live.noshow.data = null;
     showToast('No-show uitkomst opgeslagen · ' + m.outcome, 'success');
+    if (render) render();
+  }
+  // ── BROK 4 fetchers ─────────────────────────────────────────────────
+  async function fetchEventPicker() {
+    const st = _live.eventPicker;
+    if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('event-picker', '/api/follow-up-event-bellijst?list=upcoming');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { events: asArr(j?.events) };
+    if (render) render();
+  }
+  async function fetchEventBellijst() {
+    const st = _live.eventBellijst;
+    const key = _ui.eventSelectedId || '_next';
+    if (st.loading) return;
+    if (st.data && st.key === key) return;
+    st.loading = true; st.error = null; st.key = key;
+    const url = _ui.eventSelectedId
+      ? '/api/follow-up-event-bellijst?event_id=' + encodeURIComponent(_ui.eventSelectedId)
+      : '/api/follow-up-event-bellijst';
+    const j = await tryFetch('event-bellijst', url);
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { event: j?.event || null, attendees: asArr(j?.attendees) };
+    if (render) render();
+  }
+  async function fetchStats() {
+    const st = _live.stats;
+    const key = _ui.statsPeriod;
+    if (st.loading) return;
+    if (st.data && st.key === key) return;
+    st.loading = true; st.error = null; st.key = key;
+    const j = await tryFetch('stats:' + key, '/api/follow-up-cockpit-dashboard?period=' + encodeURIComponent(key));
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { totals: j?.totals || {}, per_user: asArr(j?.per_user), period: j?.period };
+    if (render) render();
+  }
+  async function fetchMetrics() {
+    const st = _live.metrics;
+    const key = _ui.statsPeriod;
+    if (st.loading) return;
+    if (st.data && st.key === key) return;
+    st.loading = true; st.error = null; st.key = key;
+    const j = await tryFetch('metrics:' + key, '/api/follow-up-dashboard-metrics?period=' + encodeURIComponent(key));
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = j?.metrics || {};
+    if (render) render();
+  }
+  async function fetchSearch() {
+    const st = _live.search;
+    const q = String(_ui.searchQ || '').trim();
+    if (st.loading) return;
+    if (st.data && st.key === q) return;
+    if (q.length < 2) { st.data = { q, results: [] }; st.key = q; if (render) render(); return; }
+    st.loading = true; st.error = null; st.key = q;
+    const j = await tryFetch('search:' + q, '/api/follow-up-search?q=' + encodeURIComponent(q) + '&limit=30');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { q, results: asArr(j?.results) };
     if (render) render();
   }
   async function submitReactivate(type, id) {
@@ -872,6 +946,40 @@
   window.__fuOpenActiesRefresh = () => { _live.openActies.data = null; if (render) render(); };
   window.__fuOpvolgingSub = (v) => { _ui.opvolgingSub = v; _live.opvolging.data = null; _live.opvolging.key = null; if (render) render(); };
   window.__fuOpvolgingRefresh = () => { _live.opvolging.data = null; _live.opvolging.key = null; if (render) render(); };
+  // ── BROK 4 handlers ─────────────────────────────────────────────────
+  window.__fuEventSelect = (id) => { _ui.eventSelectedId = id || null; _live.eventBellijst.data = null; _live.eventBellijst.key = null; if (render) render(); };
+  window.__fuEventFollowupOnly = (on) => { _ui.eventFollowupOnly = !!on; if (render) render(); };
+  window.__fuEventRefresh = () => { _live.eventPicker.data = null; _live.eventBellijst.data = null; _live.eventBellijst.key = null; if (render) render(); };
+  window.__fuStatsPeriod = (p) => {
+    _ui.statsPeriod = p;
+    _live.stats.data = null; _live.stats.key = null;
+    _live.metrics.data = null; _live.metrics.key = null;
+    if (render) render();
+  };
+  window.__fuStatsRefresh = () => {
+    _live.stats.data = null; _live.stats.key = null;
+    _live.metrics.data = null; _live.metrics.key = null;
+    if (render) render();
+  };
+  let _fuSearchT = null;
+  window.__fuSearchInput = (v) => {
+    if (_fuSearchT) clearTimeout(_fuSearchT);
+    _fuSearchT = setTimeout(() => {
+      _ui.searchQ = String(v || '').trim();
+      _live.search.data = null; _live.search.key = null;
+      if (render) render();
+    }, 400);
+  };
+  window.__fuSearchOpenResult = (source, targetJson) => {
+    let target;
+    try { target = JSON.parse(atob(targetJson)); } catch (_) { return; }
+    if (source === 'lead' && target?.lead_id) window.__fuJumpToLead(target.lead_id);
+    else if (source === 'appointment' && target?.appointment_id) {
+      window.__fuApptOpen(target.appointment_id);
+      if (window.DFO?.goTab) try { window.DFO.goTab('Afspraken'); } catch (_) {}
+    }
+    else showToast('Open-target voor ' + source + ' nog niet gewired', 'info');
+  };
 
   // ═══════════════════════════════════════════════════════════════════════
   // RENDER HELPERS
@@ -1347,8 +1455,193 @@
       ${endpoints ? `<div style="font-size:11.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace;background:var(--surface-2);padding:10px 14px;border-radius:8px;text-align:left;line-height:1.7">${endpoints.map((e) => esc('• /api/' + e)).join('<br>')}</div>` : ''}
     </div>`;
   }
-  const eventBellijstView = () => stubView('Event-bellijst', '4', ['follow-up-event-bellijst', 'follow-up-attendee-info']);
-  const statistiekenView  = () => stubView('Statistieken / Dashboard', '4', ['follow-up-cockpit-dashboard', 'follow-up-cockpit-agenda', 'follow-up-dashboard-metrics', 'follow-up-metrics']);
+  // ═══════════════════════════════════════════════════════════════════════
+  // BROK 4 — EVENT-BELLIJST (event-picker + attendees + followup-only toggle)
+  // ═══════════════════════════════════════════════════════════════════════
+  function eventBellijstView() {
+    const stP = _live.eventPicker;
+    if (!stP.loading && !stP.data) queueMicrotask(fetchEventPicker);
+    const stB = _live.eventBellijst;
+    const key = _ui.eventSelectedId || '_next';
+    if (!stB.loading && (!stB.data || stB.key !== key)) queueMicrotask(fetchEventBellijst);
+    return `<div style="padding:14px 20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+        <h2 style="font-size:16px;font-weight:600;margin:0">Event-bellijst</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select onchange="window.__fuEventSelect(this.value)" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;max-width:320px">
+            <option value="">(volgende geplande event)</option>
+            ${asArr(stP.data?.events).map((e) => `<option value="${esc(e.id)}" ${_ui.eventSelectedId === e.id ? 'selected' : ''}>${esc(safeStr(e.title) || '—')} · ${fmtDateShort(e.starts_at)}</option>`).join('')}
+          </select>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-2)"><input type="checkbox" ${_ui.eventFollowupOnly ? 'checked' : ''} onchange="window.__fuEventFollowupOnly(this.checked)" /> Alleen met follow-up-status</label>
+          <button class="icon-btn" onclick="window.__fuEventRefresh()" title="Vernieuw" style="width:28px;height:28px">↻</button>
+        </div>
+      </div>
+      ${stB.error && !stB.data ? errBlk(stB.error, 'window.__fuEventRefresh()') :
+        (stB.loading && !stB.data) ? skel() :
+        !stB.data ? skel() :
+        _renderEventBellijst(stB.data)}
+      ${_renderModals()}
+      ${_renderToast()}
+    </div>`;
+  }
+  function _renderEventBellijst(data) {
+    const ev = data.event;
+    let attendees = asArr(data.attendees);
+    if (_ui.eventFollowupOnly) attendees = attendees.filter((a) => a.call_status || a.lead_status || a.lead_id);
+    if (!ev) return `<div style="padding:40px 20px;text-align:center;color:var(--text-3)">Geen event gevonden.</div>`;
+    return `<div style="margin-bottom:14px;padding:12px 16px;background:var(--m-soft);border:1px solid var(--m);border-radius:8px">
+        <div style="font-size:14px;font-weight:600;color:var(--m)">${esc(safeStr(ev.title) || '—')}</div>
+        <div style="font-size:12px;color:var(--text-3);margin-top:2px">${fmtDate(ev.starts_at)} · ${ev.attendee_count || attendees.length} deelnemers</div>
+      </div>
+      ${attendees.length === 0 ? `<div style="padding:40px 20px;text-align:center;color:var(--text-3)">Geen deelnemers${_ui.eventFollowupOnly ? ' met follow-up-status' : ''}.</div>` :
+      `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        ${attendees.map((a, i) => {
+          const naam = safeStr(a.name) || '—';
+          const callStatus = a.call_status || a.lead_status || '—';
+          const callColor = callStatus === 'geen_gehoor' ? 'slate' : callStatus === 'terugbellen' ? 'amber' : callStatus === 'sale' ? 'emerald' : callStatus === 'geen_interesse' ? 'rose' : 'neutral';
+          return `<div style="padding:12px 16px;display:grid;grid-template-columns:1fr auto auto auto;gap:12px;align-items:center;${i < attendees.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
+            <div style="min-width:0">
+              <div style="font-size:13.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(naam)}</div>
+              <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(a.email) || safeStr(a.phone) || '—')}${a.questionnaire_filled ? ' · ✓ vragenlijst' : ''}</div>
+            </div>
+            ${callStatus !== '—' ? H.pill(callColor, callStatus) : '<span style="font-size:11px;color:var(--text-3)">—</span>'}
+            ${a.call_status_at ? `<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-3);white-space:nowrap">${fmtDateShort(a.call_status_at)}</span>` : '<span></span>'}
+            ${a.lead_id ? `<button class="btn btn-primary btn-sm" onclick="window.__fuJumpToLead('${esc(a.lead_id)}')">Open lead →</button>` : `<span style="font-size:11px;color:var(--text-3);font-style:italic">geen lead</span>`}
+          </div>`;
+        }).join('')}
+      </div>`}`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // BROK 4 — STATISTIEKEN (dashboard-metrics + cockpit-dashboard combined)
+  // ═══════════════════════════════════════════════════════════════════════
+  const STATS_PERIODS = [
+    { v: 'today', l: 'Vandaag' },
+    { v: 'week',  l: 'Deze week' },
+    { v: 'month', l: 'Deze maand' },
+  ];
+  function statistiekenView() {
+    const stS = _live.stats;
+    const stM = _live.metrics;
+    const key = _ui.statsPeriod;
+    if (!stS.loading && (!stS.data || stS.key !== key)) queueMicrotask(fetchStats);
+    if (!stM.loading && (!stM.data || stM.key !== key)) queueMicrotask(fetchMetrics);
+    return `<div style="padding:14px 20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+        <h2 style="font-size:16px;font-weight:600;margin:0">Statistieken</h2>
+        <div style="display:flex;gap:6px">
+          ${STATS_PERIODS.map((p) => {
+            const on = _ui.statsPeriod === p.v;
+            return `<button class="chip ${on ? 'on' : ''}" style="padding:5px 12px;border:1px solid ${on ? 'var(--m)' : 'var(--border)'};background:${on ? 'var(--m-soft)' : 'transparent'};color:${on ? 'var(--m)' : 'var(--text-2)'};border-radius:20px;font-size:12px;font-weight:${on ? '600' : '400'};cursor:pointer" onclick="window.__fuStatsPeriod('${p.v}')">${esc(p.l)}</button>`;
+          }).join('')}
+          <button class="icon-btn" onclick="window.__fuStatsRefresh()" title="Vernieuw" style="width:28px;height:28px">↻</button>
+        </div>
+      </div>
+      ${stS.error && stM.error ? errBlk('Beide stats-endpoints faalden — ' + (stS.error || stM.error), 'window.__fuStatsRefresh()') :
+        (stS.loading && !stS.data) || (stM.loading && !stM.data) ? skel() :
+        _renderStats(stS.data, stM.data)}
+      ${_renderModals()}
+      ${_renderToast()}
+    </div>`;
+  }
+  function _renderStats(stats, metrics) {
+    const totals = stats?.totals || {};
+    const perUser = asArr(stats?.per_user);
+    const kpis = [
+      { l: 'Gebeld',    v: totals.gebeld || 0,    c: 'blue'    },
+      { l: 'Bereikt',   v: totals.bereikt || 0,   c: 'violet'  },
+      { l: 'Zoom',      v: totals.zoom || 0,      c: 'amber'   },
+      { l: 'Offerte',   v: totals.offerte || 0,   c: 'amber'   },
+      { l: 'Gewonnen',  v: totals.gewonnen || 0,  c: 'emerald' },
+    ];
+    const mKpis = metrics ? [
+      { l: 'Afspraken',           v: metrics.appointments_total || 0,    c: 'blue'    },
+      { l: '  waarvan completed', v: metrics.appointments_completed || 0, c: 'emerald' },
+      { l: '  waarvan no-show',   v: metrics.appointments_no_show || 0,  c: 'rose'    },
+      { l: 'Voicememos',          v: metrics.voicememos_sent || 0,        c: 'violet'  },
+      { l: 'Conversie',           v: (metrics.conversion_rate || 0) + '%', c: 'emerald' },
+      { l: 'No-show rate',        v: (metrics.no_show_rate || 0) + '%',   c: 'rose'    },
+      { l: 'Achterstallig',       v: metrics.achterstallig_totaal || 0,   c: 'amber'   },
+    ] : [];
+    const bezwaren = asArr(metrics?.top_bezwaren);
+    return `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));gap:10px;margin-bottom:20px">
+        ${kpis.concat(mKpis).map((k) => `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+          <div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">${esc(k.l)}</div>
+          <div style="font-size:22px;font-weight:600;color:var(--${k.c});font-family:'IBM Plex Mono',monospace;margin-top:4px">${esc(String(k.v))}</div>
+        </div>`).join('')}
+      </div>
+      ${perUser.length > 0 ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:20px">
+        <div style="padding:10px 16px;background:var(--surface-2);font-size:12px;font-weight:600;color:var(--text-2);border-bottom:1px solid var(--border)">Per medewerker</div>
+        <div style="display:grid;grid-template-columns:1fr repeat(6, auto);gap:8px 16px;padding:10px 16px;font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border)">
+          <span>Naam</span><span>Gebeld</span><span>Bereikt</span><span>Zoom</span><span>Offerte</span><span>Gewonnen</span><span>Conv%</span>
+        </div>
+        ${perUser.map((u, i) => `<div style="display:grid;grid-template-columns:1fr repeat(6, auto);gap:8px 16px;padding:8px 16px;font-size:12.5px;align-items:center;${i < perUser.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
+          <span style="font-weight:500;color:var(--text)">${esc(safeStr(u.name) || '—')}</span>
+          <span class="mono">${u.gebeld || 0}</span>
+          <span class="mono">${u.bereikt || 0}</span>
+          <span class="mono">${u.zoom || 0}</span>
+          <span class="mono">${u.offerte || 0}</span>
+          <span class="mono" style="color:var(--emerald)">${u.gewonnen || 0}</span>
+          <span class="mono" style="color:var(--m)">${u.conversie || 0}%</span>
+        </div>`).join('')}
+      </div>` : ''}
+      ${bezwaren.length > 0 ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <div style="padding:10px 16px;background:var(--surface-2);font-size:12px;font-weight:600;color:var(--text-2);border-bottom:1px solid var(--border)">Top bezwaren</div>
+        ${bezwaren.slice(0, 10).map((b, i) => `<div style="padding:8px 16px;display:flex;justify-content:space-between;font-size:12.5px;${i < 9 && i < bezwaren.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
+          <span>${esc(safeStr(b.naam) || '—')}</span><span class="mono" style="font-weight:600">${b.count || 0}×</span>
+        </div>`).join('')}
+      </div>` : ''}`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // BROK 4 — ZOEKEN (globale search over leads/appts/events/customers)
+  // ═══════════════════════════════════════════════════════════════════════
+  function zoekenView() {
+    const st = _live.search;
+    if (_ui.searchQ && _ui.searchQ.length >= 2 && !st.loading && (!st.data || st.key !== _ui.searchQ)) queueMicrotask(fetchSearch);
+    return `<div style="padding:14px 20px;max-width:900px;margin:0 auto">
+      <div style="margin-bottom:14px">
+        <h2 style="font-size:16px;font-weight:600;margin:0 0 10px 0">Zoeken — leads · afspraken · event-deelnemers · klanten</h2>
+        <input type="search" placeholder="Zoek op naam, e-mail of telefoon (min 2 tekens)…" value="${esc(_ui.searchQ)}" oninput="window.__fuSearchInput(this.value)" autofocus style="width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:14px" />
+      </div>
+      ${!_ui.searchQ || _ui.searchQ.length < 2 ? `<div style="padding:40px 20px;text-align:center;color:var(--text-3);font-size:13px">Typ minimaal 2 tekens om te zoeken.</div>` :
+        st.error ? errBlk(st.error) :
+        st.loading ? skel() :
+        !st.data ? skel() :
+        _renderSearchResults(st.data)}
+      ${_renderModals()}
+      ${_renderToast()}
+    </div>`;
+  }
+  function _renderSearchResults(data) {
+    const results = asArr(data.results);
+    if (results.length === 0) return `<div style="padding:40px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen resultaten voor "${esc(data.q)}".</div>`;
+    const sourceMeta = {
+      lead:        { c: 'blue',    l: 'Lead' },
+      appointment: { c: 'violet',  l: 'Afspraak' },
+      event:       { c: 'amber',   l: 'Event' },
+      retention:   { c: 'emerald', l: 'Retentie' },
+    };
+    return `<div style="font-size:12px;color:var(--text-3);margin-bottom:10px">${results.length} resultaten</div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        ${results.map((r, i) => {
+          const m = sourceMeta[r.source] || { c: 'neutral', l: r.source };
+          const b64 = (typeof btoa !== 'undefined') ? btoa(JSON.stringify(r.open_target || {})) : '';
+          const wanneer = r.scheduled_at || r.updated_at;
+          return `<div style="padding:12px 16px;display:grid;grid-template-columns:auto 1fr auto auto;gap:12px;align-items:center;cursor:pointer;${i < results.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}" onclick="window.__fuSearchOpenResult('${esc(r.source)}','${esc(b64)}')" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'">
+            ${H.pill(m.c, m.l)}
+            <div style="min-width:0">
+              <div style="font-size:13.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(r.lead_name) || '—')}</div>
+              <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(r.lead_email) || safeStr(r.lead_phone) || '—')}${r.lead_source ? ` · bron: ${esc(safeStr(r.lead_source))}` : ''}${r.lead_status ? ` · ${esc(safeStr(r.lead_status))}` : ''}${r.status ? ` · ${esc(safeStr(r.status))}` : ''}</div>
+            </div>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-3);white-space:nowrap">${wanneer ? fmtDateShort(wanneer) : ''}</span>
+            <span style="color:var(--m);font-size:16px">→</span>
+          </div>`;
+        }).join('')}
+      </div>`;
+  }
+
 
   // ═══════════════════════════════════════════════════════════════════════
   // BROK 3 — NO-SHOW (event-attendees no_show + outcome-modal)
@@ -1940,10 +2233,11 @@
   window.DFO.VIEWS['followup/Opvolging']       = opvolgingView;      // BROK 3 (nieuw)
   window.DFO.VIEWS['followup/Afgeboekt']       = afgeboektView;      // BROK 3
   window.DFO.VIEWS['followup/Archief']         = archiefView;        // BROK 3 (nieuw)
-  window.DFO.VIEWS['followup/Event-bellijst']  = eventBellijstView;  // BROK 4
-  window.DFO.VIEWS['followup/Statistieken']    = statistiekenView;   // BROK 4
+  window.DFO.VIEWS['followup/Event-bellijst']  = eventBellijstView;  // BROK 4 (live)
+  window.DFO.VIEWS['followup/Statistieken']    = statistiekenView;   // BROK 4 (live)
+  window.DFO.VIEWS['followup/Zoeken']          = zoekenView;         // BROK 4 (nieuw)
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('followup');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('followup');
 
-  console.debug('[followup-v2] BROK 3 registered — 11 tabs live (Werklijst/Opvolglijst/Afspraken/Kalender/Retenties/Sluimerpot/No-show/Open-acties/Opvolging/Afgeboekt/Archief); Event-bellijst + Statistieken = stub tot BROK 4.');
+  console.debug('[followup-v2] BROK 4 registered — 14 tabs live, alleen BROK 5 (voicememo/screenshot/GHL/admin) blijft over.');
 })();
