@@ -1456,24 +1456,44 @@
   //   vragenlijst-antwoorden (events-attendee-assessment-get) en
   //   contacthistorie (inbox-conversation-by-customer → inbox-messages-list).
   // ═══════════════════════════════════════════════════════════════════════
+  // Portal-helpers voor modals — verplaatsen ev-modal uit #content naar
+  // document.body zodat position:fixed viewport-relatief blijft (fix voor
+  // "modal opent niet" bij containing-block/transform op ancestor van #content).
+  function _evEnsurePortal(portalId) {
+    if (typeof requestAnimationFrame === 'undefined') return;
+    requestAnimationFrame(() => {
+      const orphans = document.body.querySelectorAll('body > [data-portal-id="' + portalId + '"]');
+      orphans.forEach((n) => {
+        const inContent = document.querySelector('#content [data-portal-id="' + portalId + '"]');
+        if (!inContent) n.remove();
+      });
+      const el = document.querySelector('#content [data-portal-id="' + portalId + '"]');
+      if (!el) return;
+      document.body.appendChild(el);
+    });
+  }
+  function _evRemovePortal(portalId) {
+    if (typeof requestAnimationFrame === 'undefined') return;
+    requestAnimationFrame(() => {
+      document.body.querySelectorAll('body > [data-portal-id="' + portalId + '"]').forEach((n) => n.remove());
+    });
+  }
   window.__evAttOpen = (attId, eventId) => {
     _ui.attDetail = { attId, eventId };
-    // Assessment altijd fetchen
     if (!_live.assessments.data[attId] && !_live.assessments.loading[attId]) queueMicrotask(() => fetchAssessment(attId));
-    // Comms-historie altijd fetchen
     if (!_live.attComms.data[attId] && !_live.attComms.loading[attId]) queueMicrotask(() => fetchAttComms(attId));
-    // Conversation-resolve: heeft customer_id nodig → uit attendees-list
     const list = asArr(_live.attendees.data[eventId]);
     const att  = list.find((x) => x.id === attId);
     if (att && !(attId in _live.attConv.data) && !_live.attConv.loading[attId]) {
       queueMicrotask(() => fetchAttConv(attId, att.customer_id || null));
     }
     if (window.DFO?.render) window.DFO.render();
+    _evEnsurePortal('ev-modal');
   };
   window.__evAttClose = () => {
-    // Cleanup draft-notes bij sluiten zodat opnieuw openen verse state pakt
     if (_ui.attDetail) delete _ui.noteDraft[_ui.attDetail.attId];
     _ui.attDetail = null;
+    _evRemovePortal('ev-modal');
     if (window.DFO?.render) window.DFO.render();
   };
   window.__evAttNoteDraft = (attId, val) => {
@@ -1673,7 +1693,12 @@
   }
 
   function _modalShell(title, body) {
-    return `<div class="ev-modal-backdrop" onclick="if(event.target===this)window.__evAttClose()" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px">
+    // Portal-anchor: data-portal-id + class. _evEnsurePortal() verplaatst deze
+    // node uit #content naar document.body zodat 'overflow:hidden'/'transform'
+    // op een #content-ancestor het position:fixed niet meer clipt.
+    // Root-cause: identiek aan agents-v2 kennisbank-modal (containing-block
+    // issue, geen stacking-context — z-index verhoging bleek ontoereikend).
+    return `<div data-portal-id="ev-modal" class="ev-portal ev-modal-backdrop" onclick="if(event.target===this)window.__evAttClose()" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px">
       <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);max-width:920px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
         <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
           <div style="font-size:14px;font-weight:600;flex:1">${esc(title)}</div>
