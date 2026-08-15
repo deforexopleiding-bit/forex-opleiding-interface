@@ -132,6 +132,12 @@
     kalender:    { loading: false, error: null, data: null },  // 30-day forward window
     retenties:   { loading: false, error: null, data: null, key: null, migrationRequired: false },
     sluimerpot:  { loading: false, error: null, data: null },  // gebruikt leads-list?view=snoozed
+    // BROK 3
+    noshow:      { loading: false, error: null, data: null },
+    afgeboekt:   { loading: false, error: null, data: null, key: null, migrationRequired: false },
+    archief:     { loading: false, error: null, data: null, key: null },
+    openActies:  { loading: false, error: null, data: null },  // appointments?period=open_acties
+    opvolging:   { loading: false, error: null, data: null, key: null },  // appointments?period=opvolging_*
   };
   const _ui = {
     view:            'open',            // buckets-slug (open/vandaag/te_laat/komende_7/snoozed/alle)
@@ -157,6 +163,14 @@
     retentieReden:   'all',              // Retenties filter
     retentiePickBusy: {},                // per customer_id
     sluimerBusy:     {},                 // per lead_id (wake-up)
+    // BROK 3
+    noshowOutcomeModal: null,             // { attendeeId, outcome, note, saving, error }
+    noshowBusy:        {},                // per attendee_id
+    afgeboektReden:    'all',
+    afgeboektReactBusy:{},                // per id
+    archiefQ:          '',
+    archiefPage:       1,
+    opvolgingSub:      'opvolging_today',  // opvolging_overdue|today|week|30d|verder
   };
 
   // ── Helpers ─────────────────────────────────────────────────────────
@@ -399,6 +413,111 @@
     _live.retenties.data = null; _live.retenties.key = null;
     _live.leadsList.data = null; _live.leadsList.key = null;
     showToast(j.already ? 'Al opgepakt — terugbel-datum ververst' : 'Retentie opgepakt · lead aangemaakt', 'success');
+    if (render) render();
+  }
+  // ── BROK 3 fetchers ─────────────────────────────────────────────────
+  async function fetchNoshow() {
+    const st = _live.noshow;
+    if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('noshow-list', '/api/follow-up-no-show-list');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { attendees: asArr(j?.attendees), count: Number(j?.count || 0) };
+    if (render) render();
+  }
+  async function fetchAfgeboekt() {
+    const st = _live.afgeboekt;
+    const key = _ui.afgeboektReden;
+    if (st.loading) return;
+    if (st.data && st.key === key) return;
+    st.loading = true; st.error = null; st.key = key; st.migrationRequired = false;
+    const params = _ui.afgeboektReden && _ui.afgeboektReden !== 'all' ? '?reden=' + encodeURIComponent(_ui.afgeboektReden) : '';
+    const j = await tryFetch('afgeboekt', '/api/follow-up-afgeboekt' + params);
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else if (j?.code === 'MIGRATION_REQUIRED') st.migrationRequired = true;
+    else st.data = { items: asArr(j?.items), counts: j?.counts || {} };
+    if (render) render();
+  }
+  async function fetchArchief() {
+    const st = _live.archief;
+    const key = `${_ui.archiefQ}|${_ui.archiefPage}`;
+    if (st.loading) return;
+    if (st.data && st.key === key) return;
+    st.loading = true; st.error = null; st.key = key;
+    const params = [];
+    if (_ui.archiefQ) params.push('q=' + encodeURIComponent(_ui.archiefQ));
+    if (_ui.archiefPage > 1) params.push('page=' + _ui.archiefPage);
+    params.push('pageSize=25');
+    const j = await tryFetch('archief', '/api/follow-up-archief?' + params.join('&'));
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { appointments: asArr(j?.appointments), total: Number(j?.total || 0), page: Number(j?.page || 1), totalPages: Number(j?.totalPages || 1) };
+    if (render) render();
+  }
+  async function fetchOpenActies() {
+    const st = _live.openActies;
+    if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('open-acties', '/api/follow-up-appointments?period=open_acties');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { appointments: asArr(j?.appointments), count: Number(j?.count || 0) };
+    if (render) render();
+  }
+  async function fetchOpvolging() {
+    const st = _live.opvolging;
+    const key = _ui.opvolgingSub;
+    if (st.loading) return;
+    if (st.data && st.key === key) return;
+    st.loading = true; st.error = null; st.key = key;
+    const j = await tryFetch('opvolging:' + key, '/api/follow-up-appointments?period=' + encodeURIComponent(key));
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { appointments: asArr(j?.appointments), count: Number(j?.count || 0) };
+    if (render) render();
+  }
+  // ── BROK 3 write-handlers ───────────────────────────────────────────
+  async function submitNoshowOutcome() {
+    const m = _ui.noshowOutcomeModal;
+    if (!m || m.saving) return;
+    if (!m.outcome) { m.error = 'Kies uitkomst'; if (render) render(); return; }
+    m.saving = true; m.error = null; if (render) render();
+    const j = await tryFetch('noshow-outcome', '/api/follow-up-no-show-outcome', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attendee_id: m.attendeeId, outcome: m.outcome, note: m.note || null }),
+    }, 10000);
+    m.saving = false;
+    if (j && (j.__error || j.error || !j.ok)) {
+      if (j?.code === 'MIGRATION_REQUIRED') { m.error = 'Migratie 024 (event_attendees.no_show_followup_*) moet gedraaid worden.'; }
+      else m.error = j.__error || j.error || 'Opslaan mislukt';
+      if (render) render();
+      return;
+    }
+    _ui.noshowOutcomeModal = null;
+    _live.noshow.data = null;
+    showToast('No-show uitkomst opgeslagen · ' + m.outcome, 'success');
+    if (render) render();
+  }
+  async function submitReactivate(type, id) {
+    if (!id || _ui.afgeboektReactBusy[id]) return;
+    _ui.afgeboektReactBusy[id] = true; if (render) render();
+    const j = await tryFetch('reactivate', '/api/follow-up-afgeboekt', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, id, action: 'reactivate' }),
+    }, 10000);
+    _ui.afgeboektReactBusy[id] = false;
+    if (j && (j.__error || j.error || !j.ok)) {
+      showToast('Reactiveren mislukt: ' + (j.__error || j.error || 'onbekend'), 'warn');
+      if (render) render(); return;
+    }
+    _live.afgeboekt.data = null; _live.afgeboekt.key = null;
+    _live.leadsList.data = null; _live.leadsList.key = null;
+    const msg = j.type === 'lead_created' ? 'Nieuwe lead aangemaakt uit afspraak'
+              : j.type === 'lead_reused' ? 'Bestaande lead hergebruikt · notitie toegevoegd'
+              : 'Lead gereactiveerd · terugbel = nu';
+    showToast(msg, 'success');
     if (render) render();
   }
   async function submitSluimerWakeUp(leadId) {
@@ -707,6 +826,52 @@
     openConfirm('Deze lead uit sluimerpot halen? Terugbel-datum wordt gezet op nu, status → terugbellen.', () => submitSluimerWakeUp(leadId), 'warn');
   };
   window.__fuSluimerRefresh = () => { _live.sluimerpot.data = null; if (render) render(); };
+  // ── BROK 3 handlers ─────────────────────────────────────────────────
+  window.__fuNoshowRefresh = () => { _live.noshow.data = null; if (render) render(); };
+  window.__fuNoshowOutcomeOpen = (attendeeId) => {
+    _ui.noshowOutcomeModal = { attendeeId, outcome: null, note: '', saving: false, error: null };
+    if (render) render();
+  };
+  window.__fuNoshowOutcomeClose = () => { _ui.noshowOutcomeModal = null; if (render) render(); };
+  window.__fuNoshowOutcomeSet = (v) => { if (_ui.noshowOutcomeModal) { _ui.noshowOutcomeModal.outcome = v; _ui.noshowOutcomeModal.error = null; if (render) render(); } };
+  window.__fuNoshowOutcomeField = (k, v) => { if (_ui.noshowOutcomeModal) { _ui.noshowOutcomeModal[k] = v; if (render) render(); } };
+  window.__fuNoshowOutcomeSave = () => {
+    const m = _ui.noshowOutcomeModal; if (!m || !m.outcome) return;
+    const risk = {
+      ander_event: 'Attendee wordt uit no-show-lijst gehaald · geen lead-mutatie.',
+      geen_interesse: 'Attendee wordt uit no-show-lijst gehaald · gekoppelde lead → verloren (indien aanwezig).',
+      niet_bereikt: 'Blijft in no-show-lijst · status = niet_bereikt.',
+      terugbellen: 'Blijft in no-show-lijst · status = terugbellen.',
+    }[m.outcome];
+    if (m.outcome === 'ander_event' || m.outcome === 'geen_interesse') {
+      openConfirm(risk + ' Weet je zeker?', submitNoshowOutcome, 'warn');
+    } else {
+      submitNoshowOutcome();
+    }
+  };
+  window.__fuAfgeboektReden = (v) => { _ui.afgeboektReden = v; _live.afgeboekt.data = null; _live.afgeboekt.key = null; if (render) render(); };
+  window.__fuAfgeboektReactivate = (type, id) => {
+    openConfirm('Deze ' + (type === 'lead' ? 'lead' : 'afspraak') + ' reactiveren? Er wordt (indien nodig) een nieuwe follow-up-lead aangemaakt met terugbel = nu.', () => submitReactivate(type, id), 'warn');
+  };
+  window.__fuAfgeboektRefresh = () => { _live.afgeboekt.data = null; _live.afgeboekt.key = null; if (render) render(); };
+  let _archiefSearchT = null;
+  window.__fuArchiefSearch = (v) => {
+    if (_archiefSearchT) clearTimeout(_archiefSearchT);
+    _archiefSearchT = setTimeout(() => {
+      _ui.archiefQ = String(v || '').trim(); _ui.archiefPage = 1;
+      _live.archief.data = null; _live.archief.key = null;
+      if (render) render();
+    }, 400);
+  };
+  window.__fuArchiefPage = (dir) => {
+    _ui.archiefPage = Math.max(1, _ui.archiefPage + dir);
+    _live.archief.data = null; _live.archief.key = null;
+    if (render) render();
+  };
+  window.__fuArchiefRefresh = () => { _live.archief.data = null; _live.archief.key = null; if (render) render(); };
+  window.__fuOpenActiesRefresh = () => { _live.openActies.data = null; if (render) render(); };
+  window.__fuOpvolgingSub = (v) => { _ui.opvolgingSub = v; _live.opvolging.data = null; _live.opvolging.key = null; if (render) render(); };
+  window.__fuOpvolgingRefresh = () => { _live.opvolging.data = null; _live.opvolging.key = null; if (render) render(); };
 
   // ═══════════════════════════════════════════════════════════════════════
   // RENDER HELPERS
@@ -1184,7 +1349,240 @@
   }
   const eventBellijstView = () => stubView('Event-bellijst', '4', ['follow-up-event-bellijst', 'follow-up-attendee-info']);
   const statistiekenView  = () => stubView('Statistieken / Dashboard', '4', ['follow-up-cockpit-dashboard', 'follow-up-cockpit-agenda', 'follow-up-dashboard-metrics', 'follow-up-metrics']);
-  const afgeboektView     = () => stubView('Afgeboekt + Archief', '3', ['follow-up-afgeboekt', 'follow-up-archief']);
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // BROK 3 — NO-SHOW (event-attendees no_show + outcome-modal)
+  // ═══════════════════════════════════════════════════════════════════════
+  const NOSHOW_OUTCOMES = [
+    { v: 'terugbellen',    l: 'Terugbellen',       c: 'amber',   note: 'blijft in lijst' },
+    { v: 'niet_bereikt',   l: 'Niet bereikt',      c: 'slate',   note: 'blijft in lijst' },
+    { v: 'ander_event',    l: 'Naar ander event',  c: 'blue',    note: 'uit lijst' },
+    { v: 'geen_interesse', l: 'Geen interesse',    c: 'rose',    note: 'uit lijst · lead → verloren' },
+  ];
+  function noshowView() {
+    const st = _live.noshow;
+    if (!st.loading && !st.data) queueMicrotask(fetchNoshow);
+    const body = st.error && !st.data ? errBlk(st.error, 'window.__fuNoshowRefresh()')
+      : (st.loading && !st.data) ? skel()
+      : !st.data ? skel()
+      : _renderNoshow(st.data);
+    return `<div style="padding:14px 20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="font-size:16px;font-weight:600;margin:0">No-shows — event-deelnemers die niet kwamen</h2>
+        <button class="icon-btn" onclick="window.__fuNoshowRefresh()" title="Vernieuw" style="width:28px;height:28px">↻</button>
+      </div>
+      ${st.data ? `<div style="font-size:12px;color:var(--text-3);margin-bottom:12px">${st.data.attendees.length} open no-shows${st.data.count !== st.data.attendees.length ? ` (backend telt ${st.data.count})` : ''}</div>` : ''}
+      ${body}
+      ${_noshowOutcomeModal()}
+      ${_renderModals()}
+      ${_renderToast()}
+    </div>`;
+  }
+  function _renderNoshow(data) {
+    const attendees = asArr(data.attendees);
+    if (attendees.length === 0) return `<div style="padding:40px 20px;text-align:center;color:var(--text-3)">🎉 Geen open no-shows.</div>`;
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      ${attendees.map((a, i) => {
+        const naam = a.name || [a.first_name, a.last_name].filter(Boolean).join(' ') || a.email || '—';
+        const status = a.no_show_followup_status || 'open';
+        const statusColor = status === 'terugbellen' ? 'amber' : status === 'niet_bereikt' ? 'slate' : 'blue';
+        return `<div style="padding:12px 16px;display:grid;grid-template-columns:1fr auto auto auto;gap:12px;align-items:center;${i < attendees.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
+          <div style="min-width:0">
+            <div style="font-size:13.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(naam))}</div>
+            <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(a.email) || safeStr(a.phone) || '—')}${a.event_title ? ` · ${esc(safeStr(a.event_title))}` : ''}${a.event_completed_at ? ` · ${fmtDateShort(a.event_completed_at)}` : ''}</div>
+            ${a.questionnaire_filled ? '<div style="font-size:10.5px;color:var(--emerald);margin-top:2px">✓ Vragenlijst ingevuld</div>' : ''}
+          </div>
+          ${H.pill(statusColor, status)}
+          ${a.lead_id ? `<button class="btn btn-ghost btn-sm" onclick="window.__fuJumpToLead('${esc(a.lead_id)}')">Open lead →</button>` : `<span style="font-size:11px;color:var(--text-3);font-style:italic">geen lead</span>`}
+          <button class="btn btn-primary btn-sm" onclick="window.__fuNoshowOutcomeOpen('${esc(a.attendee_id)}')">Uitkomst</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+  function _noshowOutcomeModal() {
+    const m = _ui.noshowOutcomeModal; if (!m) return '';
+    const meta = NOSHOW_OUTCOMES.find((o) => o.v === m.outcome);
+    const body = `
+      <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Kies uitkomst</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px;margin-bottom:14px">
+        ${NOSHOW_OUTCOMES.map((o) => {
+          const on = m.outcome === o.v;
+          return `<button style="padding:8px 10px;border:1px solid ${on ? `var(--${o.c})` : 'var(--border)'};background:${on ? `var(--${o.c}-soft)` : 'transparent'};color:${on ? `var(--${o.c})` : 'var(--text-2)'};border-radius:6px;font-size:12px;font-weight:${on ? '600' : '400'};cursor:pointer;text-align:left" onclick="window.__fuNoshowOutcomeSet('${o.v}')">${esc(o.l)}<div style="font-size:9.5px;color:var(--text-3);margin-top:2px">${esc(o.note)}</div></button>`;
+        }).join('')}
+      </div>
+      ${meta ? `<div style="padding:8px 12px;background:var(--amber-soft);color:var(--amber);border-radius:6px;font-size:12px;margin-bottom:14px"><b>Gevolg:</b> ${esc(meta.note)}</div>` : ''}
+      <label style="display:block;margin-bottom:14px"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Notitie (optioneel)</span>
+        <textarea oninput="window.__fuNoshowOutcomeField('note', this.value)" style="display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:inherit;min-height:60px;resize:vertical">${esc(m.note)}</textarea>
+      </label>
+      ${m.error ? `<div style="padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:12px">${esc(m.error)}</div>` : ''}
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-ghost" onclick="window.__fuNoshowOutcomeClose()">Annuleren</button>
+        <button class="btn btn-primary" ${(!m.outcome || m.saving) ? 'disabled' : ''} onclick="window.__fuNoshowOutcomeSave()">${m.saving ? 'Opslaan…' : 'Opslaan'}</button>
+      </div>`;
+    return _modalShell('No-show uitkomst', body, 'window.__fuNoshowOutcomeClose()');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // BROK 3 — OPEN-ACTIES (afspraken met period=open_acties)
+  // ═══════════════════════════════════════════════════════════════════════
+  function openActiesView() {
+    const st = _live.openActies;
+    if (!st.loading && !st.data) queueMicrotask(fetchOpenActies);
+    const body = st.error && !st.data ? errBlk(st.error, 'window.__fuOpenActiesRefresh()')
+      : (st.loading && !st.data) ? skel()
+      : !st.data ? skel()
+      : _renderAppointmentList(st.data.appointments);
+    return `<div style="padding:14px 20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="font-size:16px;font-weight:600;margin:0">Open acties — afspraken die actie vereisen</h2>
+        <button class="icon-btn" onclick="window.__fuOpenActiesRefresh()" title="Vernieuw" style="width:28px;height:28px">↻</button>
+      </div>
+      ${body}
+      ${_apptDetailModal()}
+      ${_apptOutcomeModalRender()}
+      ${_renderModals()}
+      ${_renderToast()}
+    </div>`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // BROK 3 — OPVOLGING (opvolging-per-period + wake-up buttons)
+  // ═══════════════════════════════════════════════════════════════════════
+  const OPVOLGING_SUBS = [
+    { v: 'opvolging_overdue', l: '⏰ Achterstallig' },
+    { v: 'opvolging_today',   l: 'Vandaag' },
+    { v: 'opvolging_week',    l: 'Deze week' },
+    { v: 'opvolging_30d',     l: 'Komende 30d' },
+    { v: 'opvolging_verder',  l: 'Verder' },
+  ];
+  function opvolgingView() {
+    const st = _live.opvolging;
+    if (!st.loading && (!st.data || st.key !== _ui.opvolgingSub)) queueMicrotask(fetchOpvolging);
+    return `<div style="padding:14px 20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="font-size:16px;font-weight:600;margin:0">Opvolging — geplande terugkom-momenten per afspraak</h2>
+        <button class="icon-btn" onclick="window.__fuOpvolgingRefresh()" title="Vernieuw" style="width:28px;height:28px">↻</button>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">
+        ${OPVOLGING_SUBS.map((s) => {
+          const on = _ui.opvolgingSub === s.v;
+          return `<button class="chip ${on ? 'on' : ''}" style="padding:5px 12px;border:1px solid ${on ? 'var(--m)' : 'var(--border)'};background:${on ? 'var(--m-soft)' : 'transparent'};color:${on ? 'var(--m)' : 'var(--text-2)'};border-radius:20px;font-size:12px;font-weight:${on ? '600' : '400'};cursor:pointer" onclick="window.__fuOpvolgingSub('${s.v}')">${esc(s.l)}</button>`;
+        }).join('')}
+      </div>
+      ${st.error && !st.data ? errBlk(st.error, 'window.__fuOpvolgingRefresh()') :
+        (st.loading && !st.data) ? skel() :
+        !st.data ? skel() :
+        _renderAppointmentList(st.data.appointments)}
+      ${_apptDetailModal()}
+      ${_apptOutcomeModalRender()}
+      ${_renderModals()}
+      ${_renderToast()}
+    </div>`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // BROK 3 — AFGEBOEKT (verloren/no-show/cancelled/niet-bereikbaar + reactivate)
+  // ═══════════════════════════════════════════════════════════════════════
+  const AFGEBOEKT_REDENEN = [
+    { v: 'all',              l: 'Alles' },
+    { v: 'no_show',          l: 'No-show' },
+    { v: 'cancelled',        l: 'Cancelled' },
+    { v: 'verloren',         l: 'Verloren' },
+    { v: 'niet_bereikbaar',  l: 'Niet bereikbaar' },
+  ];
+  function afgeboektView() {
+    const st = _live.afgeboekt;
+    if (!st.loading && (!st.data || st.key !== _ui.afgeboektReden) && !st.migrationRequired) queueMicrotask(fetchAfgeboekt);
+    const body = st.migrationRequired ? migrationBanner('follow-up afgeboekt-tabel')
+      : (st.error && !st.data) ? errBlk(st.error, 'window.__fuAfgeboektRefresh()')
+      : (st.loading && !st.data) ? skel()
+      : !st.data ? skel()
+      : _renderAfgeboekt(st.data);
+    return `<div style="padding:14px 20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="font-size:16px;font-weight:600;margin:0">Afgeboekt — reden + reactivate-flow</h2>
+        <button class="icon-btn" onclick="window.__fuAfgeboektRefresh()" title="Vernieuw" style="width:28px;height:28px">↻</button>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">
+        ${AFGEBOEKT_REDENEN.map((f) => {
+          const on = _ui.afgeboektReden === f.v;
+          const cnt = f.v === 'all' ? (st.data?.counts?.all || 0) : (st.data?.counts?.[f.v] || 0);
+          return `<button class="chip ${on ? 'on' : ''}" style="padding:5px 12px;border:1px solid ${on ? 'var(--m)' : 'var(--border)'};background:${on ? 'var(--m-soft)' : 'transparent'};color:${on ? 'var(--m)' : 'var(--text-2)'};border-radius:20px;font-size:12px;font-weight:${on ? '600' : '400'};cursor:pointer" onclick="window.__fuAfgeboektReden('${f.v}')">${esc(f.l)}${cnt ? ` <span class="mono" style="font-size:10.5px;opacity:.7">${cnt}</span>` : ''}</button>`;
+        }).join('')}
+      </div>
+      ${body}
+      ${_renderModals()}
+      ${_renderToast()}
+    </div>`;
+  }
+  function _renderAfgeboekt(data) {
+    const items = asArr(data.items);
+    if (items.length === 0) return `<div style="padding:40px 20px;text-align:center;color:var(--text-3)">Geen afgeboekte items in deze filter.</div>`;
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      ${items.map((it, i) => {
+        const busy = _ui.afgeboektReactBusy[it.id];
+        return `<div style="padding:12px 16px;display:grid;grid-template-columns:auto 1fr auto auto auto;gap:12px;align-items:center;${i < items.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
+          <span style="font-size:10.5px;padding:2px 8px;background:var(--slate-soft);color:var(--slate);border-radius:20px;font-weight:600">${esc(safeStr(it.type))}</span>
+          <div style="min-width:0">
+            <div style="font-size:13.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(it.name) || '—')}</div>
+            <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(it.email) || safeStr(it.phone) || '—')}${it.owner_name ? ` · ${esc(safeStr(it.owner_name))}` : ''}${it.source ? ` · bron: ${esc(safeStr(it.source))}` : ''}</div>
+          </div>
+          ${H.pill('rose', it.reden || '—')}
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-3);white-space:nowrap">${it.afgeboekt_op ? fmtDateShort(it.afgeboekt_op) : (it.scheduled_at ? fmtDateShort(it.scheduled_at) : '—')}</span>
+          <button class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''} onclick="window.__fuAfgeboektReactivate('${esc(it.type)}','${esc(it.id)}')">${busy ? 'Bezig…' : '↻ Reactiveer'}</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // BROK 3 — ARCHIEF (paginated + zoek)
+  // ═══════════════════════════════════════════════════════════════════════
+  function archiefView() {
+    const st = _live.archief;
+    const key = `${_ui.archiefQ}|${_ui.archiefPage}`;
+    if (!st.loading && (!st.data || st.key !== key)) queueMicrotask(fetchArchief);
+    const body = st.error && !st.data ? errBlk(st.error, 'window.__fuArchiefRefresh()')
+      : (st.loading && !st.data) ? skel()
+      : !st.data ? skel()
+      : _renderArchief(st.data);
+    return `<div style="padding:14px 20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap">
+        <h2 style="font-size:16px;font-weight:600;margin:0">Archief — historische afspraken</h2>
+        <input type="search" placeholder="Zoek op naam…" value="${esc(_ui.archiefQ)}" oninput="window.__fuArchiefSearch(this.value)" style="flex:1;max-width:280px;padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px" />
+        <button class="icon-btn" onclick="window.__fuArchiefRefresh()" title="Vernieuw" style="width:28px;height:28px">↻</button>
+      </div>
+      ${body}
+      ${st.data && st.data.totalPages > 1 ? `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;font-size:11.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">
+        <span>Pagina ${st.data.page} van ${st.data.totalPages} · ${st.data.total} totaal</span>
+        <div style="display:flex;gap:4px">
+          <button class="btn btn-ghost btn-sm" ${st.data.page <= 1 ? 'disabled' : ''} onclick="window.__fuArchiefPage(-1)">Vorige</button>
+          <button class="btn btn-ghost btn-sm" ${st.data.page >= st.data.totalPages ? 'disabled' : ''} onclick="window.__fuArchiefPage(1)">Volgende</button>
+        </div>
+      </div>` : ''}
+      ${_apptDetailModal()}
+      ${_renderModals()}
+      ${_renderToast()}
+    </div>`;
+  }
+  function _renderArchief(data) {
+    const appts = asArr(data.appointments);
+    if (appts.length === 0) return `<div style="padding:40px 20px;text-align:center;color:var(--text-3)">Geen historische afspraken${_ui.archiefQ ? ` voor "${esc(_ui.archiefQ)}"` : ''}.</div>`;
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      ${appts.map((a, i) => `
+        <div style="padding:12px 16px;display:grid;grid-template-columns:auto 1fr auto auto auto;gap:12px;align-items:center;${i < appts.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--text-3);white-space:nowrap">${fmtDate(a.scheduled_at)}</span>
+          <div style="min-width:0">
+            <div style="font-size:13.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(a.lead_name) || '—')}</div>
+            <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(a.lead_email) || safeStr(a.lead_phone) || '—')}</div>
+          </div>
+          ${_apptStatusPill(a.status)}
+          ${a.has_outcome ? '<span style="font-size:10.5px;color:var(--emerald)">✓ uitkomst</span>' : '<span style="font-size:10.5px;color:var(--text-3)">—</span>'}
+          <button class="btn btn-ghost btn-sm" onclick="window.__fuApptOpen('${esc(a.id)}')">Detail</button>
+        </div>
+      `).join('')}
+    </div>`;
+  }
 
   // ═══════════════════════════════════════════════════════════════════════
   // BROK 2 — AFSPRAKEN (list + detail-modal + outcome-modal)
@@ -1534,14 +1932,18 @@
   window.DFO.VIEWS['followup/Werklijst']       = werklijstView;
   window.DFO.VIEWS['followup/Opvolglijst']     = opvolglijstView;
   window.DFO.VIEWS['followup/Afspraken']       = afsprakenView;      // BROK 2
-  window.DFO.VIEWS['followup/Kalender']        = kalenderView;       // BROK 2 (nieuw)
+  window.DFO.VIEWS['followup/Kalender']        = kalenderView;       // BROK 2
   window.DFO.VIEWS['followup/Retenties']       = retentiesView;      // BROK 2
   window.DFO.VIEWS['followup/Sluimerpot']      = sluimerpotView;     // BROK 2
+  window.DFO.VIEWS['followup/No-show']         = noshowView;         // BROK 3 (nieuw)
+  window.DFO.VIEWS['followup/Open-acties']     = openActiesView;     // BROK 3 (nieuw)
+  window.DFO.VIEWS['followup/Opvolging']       = opvolgingView;      // BROK 3 (nieuw)
+  window.DFO.VIEWS['followup/Afgeboekt']       = afgeboektView;      // BROK 3
+  window.DFO.VIEWS['followup/Archief']         = archiefView;        // BROK 3 (nieuw)
   window.DFO.VIEWS['followup/Event-bellijst']  = eventBellijstView;  // BROK 4
   window.DFO.VIEWS['followup/Statistieken']    = statistiekenView;   // BROK 4
-  window.DFO.VIEWS['followup/Afgeboekt']       = afgeboektView;      // BROK 3
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('followup');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('followup');
 
-  console.debug('[followup-v2] BROK 2 registered — Werklijst + Opvolglijst + Afspraken + Kalender + Retenties + Sluimerpot live; Event-bellijst/Statistieken/Afgeboekt = stub tot BROK 3-4.');
+  console.debug('[followup-v2] BROK 3 registered — 11 tabs live (Werklijst/Opvolglijst/Afspraken/Kalender/Retenties/Sluimerpot/No-show/Open-acties/Opvolging/Afgeboekt/Archief); Event-bellijst + Statistieken = stub tot BROK 4.');
 })();
