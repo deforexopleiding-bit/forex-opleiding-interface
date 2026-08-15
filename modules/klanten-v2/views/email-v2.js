@@ -381,10 +381,14 @@
   }
   async function deleteDraft(id) {
     if (!id) return;
-    await tryFetch('draft-del', '/api/email-drafts', {
+    const j = await tryFetch('draft-del', '/api/email-drafts', {
       method: 'DELETE', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id }),
     }, 8000);
+    // Badge ticks direct — geen wachten op de 30s counts-cache.
+    _live.counts.data = null; _live.counts.ts = 0;
+    if (j && (j.__error || j.error)) throw new Error(j.__error || j.error);
+    return j;
   }
 
   function currentRow() {
@@ -657,7 +661,17 @@
     const row = currentRow();
     if (!row) return _readerEmpty();
     // Draft-open: open direct compose (Concepten-folder klik).
-    if (row._source === 'draft') { setTimeout(() => window.__emailOpenDraftFromRow(row), 0); return _readerEmpty(); }
+    if (row._source === 'draft') {
+      // Idempotent: alleen open-schedulen als compose NIET al aanstaat op deze draft.
+      // Zonder deze guard vuurt elke render een setTimeout -> composeOpen weer true
+      // -> re-render -> nieuwe setTimeout ... -> modal wordt elk frame ge-remount ->
+      // slideUp-animatie start telkens op opacity:0 -> paneel wordt nooit zichtbaar,
+      // backdrop blijft klik-dood liggen. Root-cause van bug A in feat/v2-email hertest.
+      const draftKey = row._draft_id || row.id;
+      const alreadyOpen = _ui.composeOpen && _ui.compose && _ui.compose.draft_id === draftKey;
+      if (!alreadyOpen) setTimeout(() => window.__emailOpenDraftFromRow(row), 0);
+      return _readerEmpty();
+    }
     const bst = _live.body;
     let body = bst.data[row.id]; const bErr = bst.error[row.id], bLoad = bst.loading[row.id];
     // Sent-mails: body is al inline uit email_replies.final_reply (imap_uid=null).
@@ -819,8 +833,8 @@
     const c = _ui.compose;
     const send = _ui.lastSend;
     if (_ui.composeMinimized) return _composeMinBar();
-    return `<div style="position:fixed;inset:0;background:rgba(17,23,33,.42);backdrop-filter:blur(3px);z-index:1000;display:flex;align-items:flex-end;justify-content:flex-end;padding:0 26px 0 0" onclick="window.__emailCloseCompose()">
-      <div style="background:var(--surface);width:660px;max-width:calc(100vw - 52px);height:78vh;border-radius:${TOK.rLg} ${TOK.rLg} 0 0;box-shadow:0 -8px 32px rgba(0,0,0,.24);display:flex;flex-direction:column;overflow:hidden;animation:slideUp .28s cubic-bezier(.16,1,.3,1)" onclick="event.stopPropagation()">
+    return `<div style="position:fixed;inset:0;background:rgba(17,23,33,.42);backdrop-filter:blur(3px);z-index:1000;display:flex;align-items:flex-end;justify-content:flex-end;padding:0 26px 30px 0" onclick="window.__emailCloseCompose()">
+      <div style="background:var(--surface);width:660px;max-width:calc(100vw - 52px);height:min(78vh, calc(100dvh - 90px));border-radius:${TOK.rLg};box-shadow:0 -8px 32px rgba(0,0,0,.24);display:flex;flex-direction:column;overflow:hidden;animation:slideUp .28s cubic-bezier(.16,1,.3,1)" onclick="event.stopPropagation()">
         <div style="padding:12px 18px;background:var(--surface-2);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;border-radius:${TOK.rLg} ${TOK.rLg} 0 0">
           <div style="font-size:14px;font-weight:600">${_ui.composeMode === 'reply' ? 'Beantwoorden' : _ui.composeMode === 'replyall' ? 'Beantwoorden aan allen' : _ui.composeMode === 'fwd' ? 'Doorsturen' : 'Nieuw bericht'}${c.draft_id ? ' — concept opgeslagen' : ''}</div>
           <div style="display:flex;gap:4px">
@@ -929,14 +943,70 @@
   window.__emailShowImages = (rid) => { _ui.showImages[rid] = true; if (render) render(); };
   window.__emailMarkUnread = () => { const row = currentRow(); if (row) markRead(row, false); };
   window.__emailFlagToggle = () => { const row = currentRow(); if (row) statusUpdate([row.id], row.flagged ? 'unflag' : 'flag'); };
-  window.__emailArchive = () => { const row = currentRow(); if (row) statusUpdate([row.id], 'archive'); };
-  window.__emailTrash   = () => { const row = currentRow(); if (row) statusUpdate([row.id], 'trash'); };
+  window.__emailArchive = () => {
+    const row = currentRow(); if (!row) return;
+    if (row._source === 'draft') { _showToastLocal('Concepten kunnen niet gearchiveerd worden — gebruik Verwijderen.', 'info'); return; }
+    statusUpdate([row.id], 'archive');
+  };
+  window.__emailTrash   = () => {
+    const row = currentRow(); if (!row) return;
+    // Concepten wonen in email_drafts — daar hoort DELETE, geen email_messages-status.
+    if (row._source === 'draft') { deleteDraftIds([row._draft_id || row.id]); return; }
+    statusUpdate([row.id], 'trash');
+  };
+  async function deleteDraftIds(ids) {
+    if (!ids || ids.length === 0) return;
+    const key = 'bulk:draft-delete';
+    if (_ui.statusBusy[key]) return;
+    _ui.statusBusy[key] = true; if (render) render();
+    let okCount = 0, failCount = 0;
+    for (const id of ids) {
+      try {
+        await deleteDraft(id);
+        okCount++;
+      } catch (e) { failCount++; console.warn('[email-v2] draft-delete fail', id, e?.message); }
+    }
+    // Optimistic UI: verwijder uit lijst + clear selectie.
+    const items = asArr(_live.inbox.data?.items);
+    if (items.length) {
+      _live.inbox.data.items = items.filter((x) => !ids.includes(x._draft_id || x.id));
+    }
+    ids.forEach((id) => { delete _ui.selectedRows[id]; });
+    if (_ui.selectedId && ids.includes(_ui.selectedId)) _ui.selectedId = null;
+    // Als compose openstond op een verwijderd concept: sluit + clear.
+    if (_ui.composeOpen && _ui.compose.draft_id && ids.includes(_ui.compose.draft_id)) {
+      _ui.composeOpen = false; _ui.composeMinimized = false;
+      _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null };
+    }
+    _live.counts.data = null;
+    _ui.statusBusy[key] = false;
+    if (failCount > 0) _showToastLocal(okCount + ' verwijderd, ' + failCount + ' mislukt.', 'warn');
+    else if (okCount > 0) _showToastLocal(okCount + (okCount === 1 ? ' concept verwijderd.' : ' concepten verwijderd.'), 'info');
+    if (render) render();
+  }
   window.__emailToggleSel = (rid) => { _ui.selectedRows[rid] = !_ui.selectedRows[rid]; if (render) render(); };
   window.__emailBulkClear = () => { _ui.selectedRows = {}; if (render) render(); };
   window.__emailBulkAction = (a) => {
     const ids = Object.keys(_ui.selectedRows).filter((k) => _ui.selectedRows[k]);
     if (ids.length === 0) return;
     if (a === 'read' || a === 'unread') { bulkMarkRead(ids, a === 'read'); return; }
+    // Concepten (folder='draft') horen naar email_drafts, NIET naar email_messages-status.
+    // Bug: pre-fix stuurde de trash-actie naar email-status-update -> "Geen matches op ids"
+    // omdat email_drafts.id niet in email_messages voorkomt.
+    if (_ui.folder === 'draft') {
+      if (a === 'trash') {
+        const items = asArr(_live.inbox.data?.items);
+        const rowsById = new Map(items.map((r) => [r.id, r]));
+        const draftIds = ids.map((id) => {
+          const r = rowsById.get(id);
+          return r ? (r._draft_id || r.id) : id;
+        });
+        deleteDraftIds(draftIds);
+      } else {
+        _showToastLocal('Deze actie is niet beschikbaar op concepten.', 'info');
+      }
+      return;
+    }
     statusUpdate(ids, a);
   };
   async function bulkMarkRead(ids, seen) {
@@ -1033,14 +1103,34 @@
   window.__emailReply    = () => _replyState('reply');
   window.__emailReplyAll = () => _replyState('replyall');
   window.__emailFwd      = () => { _replyState('fwd'); _ui.compose.to = ''; if (render) render(); };
-  window.__emailCloseCompose = () => { _ui.composeOpen = false; _ui.composeMinimized = false; _ui.lastSend = null; _ui.ccBccOpen = false; if (render) render(); };
+  window.__emailCloseCompose = () => {
+    _ui.composeOpen = false; _ui.composeMinimized = false; _ui.lastSend = null; _ui.ccBccOpen = false;
+    // KRITIEK: als selectedId een draft is, ontkoppel 'm — anders zou _reader() bij de
+    // volgende render de draft opnieuw open-schedulen (backdrop blijft klik-dood).
+    if (_ui.folder === 'draft') { _ui.selectedId = null; }
+    else {
+      const cur = currentRow();
+      if (cur && cur._source === 'draft') _ui.selectedId = null;
+    }
+    if (render) render();
+  };
   window.__emailDiscardCompose = () => {
     // In-UI confirm — geen native confirm() die de compose-modal bevriest.
     _openConfirm('Concept verwijderen? Dit kan niet ongedaan gemaakt worden.', () => {
-      if (_ui.compose.draft_id) deleteDraft(_ui.compose.draft_id).catch(() => {});
+      const discardedDraftId = _ui.compose.draft_id;
+      if (discardedDraftId) deleteDraft(discardedDraftId).catch(() => {});
       _ui.composeOpen = false;
       _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null };
       _ui.draftMigrationRequired = false;
+      // Verwijder de discarded draft uit de zichtbare lijst + clear selectedId
+      // (anders zou _reader() 'm meteen opnieuw willen openen).
+      if (discardedDraftId) {
+        const items = asArr(_live.inbox.data?.items);
+        if (items.length) _live.inbox.data.items = items.filter((x) => (x._draft_id || x.id) !== discardedDraftId);
+        if (_ui.selectedId && (_ui.selectedId === discardedDraftId || _ui.selectedId === String(discardedDraftId))) _ui.selectedId = null;
+      }
+      const cur = currentRow();
+      if (cur && cur._source === 'draft') _ui.selectedId = null;
       _live.counts.data = null;
       if (render) render();
     });
