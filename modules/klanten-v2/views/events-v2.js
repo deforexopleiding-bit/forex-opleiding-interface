@@ -1473,17 +1473,30 @@
     });
   }
   function _evRemovePortal(portalId) {
-    if (typeof requestAnimationFrame === 'undefined') return;
-    requestAnimationFrame(() => {
+    // SYNCHROON verwijderen — was via rAF, waardoor de backdrop nog ~16ms bleef
+    // hangen na close. De "eerstvolgende klik" landde dan nog op die stale backdrop
+    // ipv de UI eronder -> klik geslikt. Nu is de node meteen weg zodra state=null.
+    try {
       document.body.querySelectorAll('body > [data-portal-id="' + portalId + '"]').forEach((n) => n.remove());
-    });
+    } catch (_) { /* geen DOM (SSR/tests) */ }
   }
   window.__evAttOpen = (attId, eventId) => {
+    const dbg = /(?:^|[?&])debug=1(?:$|&)/.test(location.search);
     _ui.attDetail = { attId, eventId };
     if (!_live.assessments.data[attId] && !_live.assessments.loading[attId]) queueMicrotask(() => fetchAssessment(attId));
     if (!_live.attComms.data[attId] && !_live.attComms.loading[attId]) queueMicrotask(() => fetchAttComms(attId));
+    // ROOT-CAUSE BUG-A: de modal-render leest `_live.attendees.data[eventId]` om
+    // de attendee-details te vinden. Vanuit Aanwezigen is die lijst al gefetched
+    // (tab-init), vanuit Inschrijvingen NIET -> lookup faalt -> "Deelnemer niet
+    // gevonden in de huidige lijst". Fix: hydrateer de lijst hier als 'ie ontbreekt
+    // (fetchAttendees is idempotent + cached, dus geen dubbele call vanuit Aanwezigen).
+    if (!_live.attendees.data[eventId] && !_live.attendees.loading[eventId] && !_live.attendees.error[eventId]) {
+      if (dbg) console.log('[ev-att-open] attendees-lijst niet cached -> fetchAttendees', { attId, eventId });
+      queueMicrotask(() => fetchAttendees(eventId));
+    }
     const list = asArr(_live.attendees.data[eventId]);
     const att  = list.find((x) => x.id === attId);
+    if (dbg) console.log('[ev-att-open]', { attId, eventId, hasList: list.length > 0, listLen: list.length, matched: !!att });
     if (att && !(attId in _live.attConv.data) && !_live.attConv.loading[attId]) {
       queueMicrotask(() => fetchAttConv(attId, att.customer_id || null));
     }
@@ -1541,9 +1554,25 @@
   function _attDetailModal() {
     if (!_ui.attDetail) return '';
     const { attId, eventId } = _ui.attDetail;
+    const dbg = /(?:^|[?&])debug=1(?:$|&)/.test(location.search);
     const list = asArr(_live.attendees.data[eventId]);
     const att  = list.find((x) => x.id === attId);
-    if (!att) return _modalShell('Deelnemer', `<div style="padding:16px;color:var(--text-3);font-size:13px">Deelnemer niet gevonden in de huidige lijst. Sluit en probeer opnieuw.</div>`);
+    if (dbg) console.log('[att-modal-render]', { attId, eventId, hasList: list.length > 0, listLen: list.length, matched: !!att, loading: _live.attendees.loading[eventId], hasErr: !!_live.attendees.error[eventId] });
+    if (!att) {
+      // Loading-shell zolang de attendees-lijst nog binnenkomt (bijv. eerste open
+      // vanuit Inschrijvingen — __evAttOpen heeft net fetchAttendees getriggerd).
+      const stillLoading = _live.attendees.loading[eventId] || (!_live.attendees.data[eventId] && !_live.attendees.error[eventId]);
+      if (stillLoading) {
+        return _modalShell('Deelnemer', `<div style="padding:28px 20px;color:var(--text-3);font-size:13px;text-align:center">Deelnemer wordt geladen…<div style="margin-top:10px;font-size:11px;color:var(--text-3);opacity:.7">${esc(attId)}</div></div>`);
+      }
+      const errMsg = _live.attendees.error[eventId] ? String(_live.attendees.error[eventId]) : 'Deelnemer niet gevonden.';
+      return _modalShell('Deelnemer', `<div style="padding:16px;color:var(--text-3);font-size:13px">${esc(errMsg)}<div style="margin-top:8px;font-size:11px;opacity:.7">attId: ${esc(attId)}</div></div>`);
+    }
+    // Nu att beschikbaar is: fire attConv-fetch als 'ie er nog niet is (dit pad wordt
+    // gehit als att pas na fetchAttendees binnenkomt — __evAttOpen kon 'em toen niet firen).
+    if (!(attId in _live.attConv.data) && !_live.attConv.loading[attId]) {
+      queueMicrotask(() => fetchAttConv(attId, att.customer_id || null));
+    }
     const naam = [att.first_name || att.voornaam, att.last_name || att.achternaam].filter(Boolean).join(' ') || att.name || att.email || '—';
     const [sc, sl] = ATT_STATUS_META[att.status] || ['neutral', att.status || '—'];
 
