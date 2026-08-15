@@ -961,6 +961,15 @@
   window.__fuStatus = (leadId, status) => submitLeadUpdate(leadId, { lead_status: status });
   window.__fuOpenVerplaats = (appointmentId) => {
     _ui.verplaatsModal = { appointmentId, newDatetime: '', duration: 30, saving: false, error: null };
+    // Slots pre-fetchen bij open (default = vandaag+14d). Fail-soft; als leeg
+    // of error blijft de handmatige datetime-picker functioneel.
+    _live.freeSlots.data = null; _live.freeSlots.key = null;
+    queueMicrotask(() => fetchFreeSlots(null));
+    if (render) render();
+  };
+  window.__fuPickSlot = (isoDateTime) => {
+    if (!_ui.verplaatsModal || !isoDateTime) return;
+    _ui.verplaatsModal.newDatetime = isoDateTime;
     if (render) render();
   };
   window.__fuCloseVerplaats = () => { _ui.verplaatsModal = null; if (render) render(); };
@@ -1454,10 +1463,49 @@
       </div>`;
     return _modalShell('Bel-uitkomst registreren', body, 'window.__fuCloseCall()');
   }
+  // Free-slots picker voor verplaatsen (BROK 5): fetcht GHL-beschikbaarheid en
+  // toont klikbare chips per dag. Fail-soft: bij leeg/error blijft de handmatige
+  // datetime-input functioneel. Klant-veilig: alleen invult, geen auto-submit.
+  function _renderFreeSlotsPicker() {
+    const st = _live.freeSlots;
+    if (st.loading && !st.data) {
+      return `<div style="margin-bottom:14px;padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:12px;color:var(--text-3)">GHL-beschikbaarheid laden…</div>`;
+    }
+    if (st.error && !st.data) {
+      return `<div style="margin-bottom:14px;padding:10px 12px;background:var(--amber-soft);border:1px solid var(--amber);color:var(--amber);border-radius:6px;font-size:12px">GHL-slots niet beschikbaar (${esc(st.error)}). Kies datum/tijd handmatig hieronder.</div>`;
+    }
+    const days = asArr(st.data?.slots);
+    if (!days.length) {
+      return `<div style="margin-bottom:14px;padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:12px;color:var(--text-3)">Geen GHL-slots gevonden in de komende 14 dagen. Kies datum/tijd handmatig hieronder.</div>`;
+    }
+    return `<div style="margin-bottom:14px">
+      <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Beschikbare slots (GHL, ${esc(st.data?.timezone || 'Europe/Amsterdam')})</div>
+      <div style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px">
+        ${days.map((d) => {
+          const dayLabel = d.date ? new Date(d.date + 'T00:00:00').toLocaleDateString('nl-NL', { weekday: 'short', day: '2-digit', month: 'short' }) : '—';
+          const times = asArr(d.times);
+          if (times.length === 0) return '';
+          return `<div>
+            <div style="font-size:11px;font-weight:600;color:var(--text-2);margin-bottom:4px">${esc(dayLabel)}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:4px">
+              ${times.map((t) => {
+                // Combineer d.date + t naar datetime-local waarde (YYYY-MM-DDTHH:MM)
+                const iso = `${d.date}T${t}`;
+                const isSelected = _ui.verplaatsModal?.newDatetime === iso;
+                return `<button class="chip" style="padding:4px 10px;border:1px solid ${isSelected ? 'var(--m)' : 'var(--border)'};background:${isSelected ? 'var(--m-soft)' : 'var(--surface)'};color:${isSelected ? 'var(--m)' : 'var(--text-2)'};border-radius:6px;font-size:11.5px;font-family:'IBM Plex Mono',monospace;cursor:pointer;font-weight:${isSelected ? '600' : '400'}" onclick="window.__fuPickSlot('${esc(iso)}')">${esc(t)}</button>`;
+              }).join('')}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div style="font-size:10.5px;color:var(--text-3);margin-top:4px;font-style:italic">Klik een slot om datum/tijd hieronder in te vullen. Verplaatsen gebeurt pas bij klik op de Verplaatsen-knop.</div>
+    </div>`;
+  }
   function _verplaatsModal() {
     const m = _ui.verplaatsModal;
     const body = `
-      <label style="display:block;margin-bottom:14px"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Nieuwe datum & tijd</span>
+      ${_renderFreeSlotsPicker()}
+      <label style="display:block;margin-bottom:14px"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Nieuwe datum & tijd (Europe/Amsterdam)</span>
         <input type="datetime-local" value="${esc(m.newDatetime)}" oninput="window.__fuVerplaatsField('newDatetime', this.value)" style="display:block;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
       </label>
       <label style="display:block;margin-bottom:14px"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Duur (min)</span>
@@ -2157,12 +2205,12 @@
             ${d.lead_history.map((h) => `<div style="padding:6px 10px;background:var(--surface-2);border-radius:4px;font-size:12px;display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="mono" style="color:var(--text-2)">${fmtDate(h.scheduled_at)}</span>${_apptStatusPill(h.status)}<span style="color:var(--text-3);font-size:11px">${esc(safeStr(h.voicememo_status) || '')}</span></div>`).join('')}
           </div>` : `<div style="font-size:12px;color:var(--text-3);font-style:italic;padding:6px 0">Dit is de eerste afspraak van deze lead.</div>`}
         </div>
-        ${d.appointment?.ghl_contact_id ? `<div>
+        ${d.appointment?.lead_ghl_contact_id ? `<div>
           <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
             <span>Messages (GHL contact)</span>
-            <button class="btn btn-ghost btn-sm" onclick="window.__fuLoadMessages('${esc(d.appointment.ghl_contact_id)}')">Laad</button>
+            <button class="btn btn-ghost btn-sm" onclick="window.__fuLoadMessages('${esc(d.appointment.lead_ghl_contact_id)}')">Laad</button>
           </div>
-          ${_renderMessagesBlock(d.appointment.ghl_contact_id)}
+          ${_renderMessagesBlock(d.appointment.lead_ghl_contact_id)}
         </div>` : ''}
         <div style="display:flex;justify-content:space-between;gap:8px;padding-top:12px;border-top:1px solid var(--border)">
           <button class="btn btn-ghost btn-sm" style="color:var(--rose)" onclick="window.__fuDeleteApptOpen('${esc(id)}')">🗑 Verwijderen</button>
